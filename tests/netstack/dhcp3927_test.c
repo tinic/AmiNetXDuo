@@ -425,7 +425,7 @@ ULONG   i;
 
     if (!t_ns->ns_AutoIpCreated)
     {
-        t_log("  the fallback never fired -- DHCP must have got in first");
+        t_log("  the fallback never fired, DHCP must have got in first");
         return;
     }
 
@@ -780,7 +780,7 @@ UINT            status;
      */
     if (!t_saw_state(NX_DHCP_STATE_BOUND, 0UL))
     {
-        t_log("  nothing answers on this wire -- skipped (see F and G)");
+        t_log("  nothing answers on this wire, skipped (see F and G)");
         return;
     }
 
@@ -1377,7 +1377,7 @@ UINT    status;
         }
         else
         {
-            t_log("  no lease within 90 s -- B, C and D skipped");
+            t_log("  no lease within 90 s, B, C and D skipped");
             (VOID) t_check(0, "a lease to test the lifecycle with",
                            (ULONG) t_dhcp_state_last);
             t_phase_e();
@@ -1413,7 +1413,7 @@ UBYTE   mode[32];
             t_killlink =  TRUE;
     }
 
-    t_log("AmiNetXDuo -- DHCP lifecycle and RFC 3927 link-local");
+    t_log("AmiNetXDuo, DHCP lifecycle and RFC 3927 link-local");
     t_log("  mode '%s', ticks/sec %ld", (mode[0] != '\0') ? (char *) mode
                                                           : "lease",
           (ULONG) NX_IP_PERIODIC_RATE);
@@ -1421,7 +1421,7 @@ UBYTE   mode[32];
     ami_crash_set_reference((APTR) main, "dhcp3927_test");
     if (!ami_crash_install())
     {
-        t_log("FATAL: caught a CPU exception -- see the dump above");
+        t_log("FATAL: caught a CPU exception, see the dump above");
         t_flush();
         return(20);
     }
@@ -1435,7 +1435,7 @@ UBYTE   mode[32];
 
     if (netstack_get() == NULL)
     {
-        t_log("FATAL: no stack -- see the messages above");
+        t_log("FATAL: no stack, see the messages above");
         t_flush();
         return(20);
     }
@@ -1443,7 +1443,7 @@ UBYTE   mode[32];
     t_run();
 
     t_log("");
-    t_log("%ld checks, %ld failures -- %s",
+    t_log("%ld checks, %ld failures, %s",
           t_checks, t_failures, (t_failures == 0UL) ? "PASS" : "FAIL");
     t_flush();
 
@@ -1453,7 +1453,7 @@ UBYTE   mode[32];
 
     netstack_shutdown();
 
-    t_log("%ld checks, %ld failures after teardown -- %s",
+    t_log("%ld checks, %ld failures after teardown, %s",
           t_checks, t_failures, (t_failures == 0UL) ? "PASS" : "FAIL");
     t_flush();
     ami_crash_remove();

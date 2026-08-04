@@ -150,7 +150,7 @@ DRILL="$ROOT/$BUILD/tests/tools/CycleDrill"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/netstat" "$TOOLS/ShowNetStatus" \
          "$TOOLS/NetShutdown" "$DRILL" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
 A2065="${AMINETXDUO_A2065:-}"
@@ -262,9 +262,9 @@ fi
 # ---- the guest's own checks ----------------------------------------------
 SUMMARY=$(grep -E "^CycleDrill: [0-9]+ check\(s\)" "$REPORT" | tail -1 || true)
 if [ -z "$SUMMARY" ]; then
-    fail "CycleDrill printed no summary -- it did not finish"
+    fail "CycleDrill printed no summary, it did not finish"
 else
-    echo "  -- $SUMMARY"
+    echo " , $SUMMARY"
     NCHECKS=$(printf '%s' "$SUMMARY" | sed -E 's/^CycleDrill: ([0-9]+) check.*/\1/')
     NFAILED=$(printf '%s' "$SUMMARY" | sed -E 's/.* ([0-9]+) failed$/\1/')
 
@@ -284,7 +284,7 @@ DID=$(grep -E "^did: [0-9]+ opens" "$REPORT" | tail -1 || true)
 if [ -z "$DID" ]; then
     fail "CycleDrill did not report what it did"
 else
-    echo "  -- $DID"
+    echo " , $DID"
     D_OPENS=$(printf  '%s' "$DID" | sed -E 's/^did: ([0-9]+) opens.*/\1/')
     D_BOUNCE=$(printf '%s' "$DID" | sed -E 's/.*, ([0-9]+) bounces.*/\1/')
     D_TRIPS=$(printf  '%s' "$DID" | sed -E 's/.*, ([0-9]+) round trips.*/\1/')
@@ -346,7 +346,7 @@ for phase in expunge cold; do
                | tail -1 || true)
     if [ -n "$LEAKLINE" ]; then
         LEAK=$(printf '%s' "$LEAKLINE" | sed -E 's/^[a-z]+ leak: (-?[0-9]+) .*/\1/')
-        echo "  -- $LEAKLINE (budget $LEAK_BUDGET)"
+        echo " , $LEAKLINE (budget $LEAK_BUDGET)"
         if [ "$LEAK" -le "$LEAK_BUDGET" ]; then
             pass "a $phase cycle gave its memory back"
         else
@@ -364,11 +364,11 @@ done
 # zero that means "not checked".
 ORPHANS=0
 if [ -z "${SERIAL:-}" ] || [ ! -f "$SERIAL" ]; then
-    echo "  -- orphaned SANA-II reader stacks: NOT CHECKED (no serial log; use -A)"
+    echo " , orphaned SANA-II reader stacks: NOT CHECKED (no serial log; use -A)"
     ORPHANS=-1
 else
     ORPHANS=$(grep -c "did not stop; leaking its stack" "$SERIAL" || true)
-    echo "  -- orphaned SANA-II reader stacks logged: $ORPHANS"
+    echo " , orphaned SANA-II reader stacks logged: $ORPHANS"
 fi
 if [ "$ORPHANS" -gt 0 ]; then
     echo "     (src/sana2/sana2_rx.c's last-resort path: a driver ignored AbortIO()."
@@ -383,10 +383,10 @@ if [ "$NEGATIVE" = 1 ]; then
     # Inverted: the run above asked for one cycle and no expunge, so the gates
     # had to reject it.  A PASS here would mean they are not gating anything.
     if [ "$FAILED" -ne 0 ]; then
-        echo "cycledrill: negative control PASSED -- the gates reject a run that did not cycle"
+        echo "cycledrill: negative control PASSED, the gates reject a run that did not cycle"
         exit 0
     fi
-    echo "cycledrill: NEGATIVE CONTROL FAILED -- a run with no expunge and one cycle was accepted" >&2
+    echo "cycledrill: NEGATIVE CONTROL FAILED, a run with no expunge and one cycle was accepted" >&2
     exit 1
 fi
 

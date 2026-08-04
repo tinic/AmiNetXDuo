@@ -359,21 +359,21 @@ static void fd_selftest(void)
 
     if (status != NX_SUCCESS)
     {
-        printf("fuzz_dhcp: SELFTEST FAILED -- a valid OFFER returned %u\n",
+        printf("fuzz_dhcp: SELFTEST FAILED, a valid OFFER returned %u\n",
                (unsigned)status);
         exit(2);
     }
 
     if (rec.nx_dhcp_ip_address != 0xC0A80164UL)
     {
-        printf("fuzz_dhcp: SELFTEST FAILED -- yiaddr not stored (got %08lx)\n",
+        printf("fuzz_dhcp: SELFTEST FAILED, yiaddr not stored (got %08lx)\n",
                (unsigned long)rec.nx_dhcp_ip_address);
         exit(2);
     }
 
     if (rec.nx_dhcp_network_mask != 0xFFFFFF00UL)
     {
-        printf("fuzz_dhcp: SELFTEST FAILED -- option 1 not walked (mask %08lx)\n",
+        printf("fuzz_dhcp: SELFTEST FAILED, option 1 not walked (mask %08lx)\n",
                (unsigned long)rec.nx_dhcp_network_mask);
         exit(2);
     }
@@ -407,14 +407,14 @@ static void fd_selftest(void)
 
         if (rec.nx_dhcp_lease_time != 3600UL * (ULONG)NX_IP_PERIODIC_RATE)
         {
-            printf("fuzz_dhcp: SELFTEST FAILED -- option 51 not stored in "
+            printf("fuzz_dhcp: SELFTEST FAILED, option 51 not stored in "
                    "ticks (%lu)\n", (unsigned long)rec.nx_dhcp_lease_time);
             exit(2);
         }
 
         if (rec.nx_dhcp_renewal_time > rec.nx_dhcp_lease_time)
         {
-            printf("fuzz_dhcp: SELFTEST FAILED -- a renewal time of %lu ticks "
+            printf("fuzz_dhcp: SELFTEST FAILED, a renewal time of %lu ticks "
                    "was accepted against a lease of %lu\n",
                    (unsigned long)rec.nx_dhcp_renewal_time,
                    (unsigned long)rec.nx_dhcp_lease_time);

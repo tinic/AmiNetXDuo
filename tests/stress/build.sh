@@ -50,7 +50,7 @@ echo "  CC fitzstress.c"
 # ---- Fitz and its comparator ---------------------------------------------
 
 if [ ! -d "$FITZ/src" ]; then
-    echo "==> no build/fitz -- run tests/endurance/fetch-fitz.sh"
+    echo "==> no build/fitz, run tests/endurance/fetch-fitz.sh"
     exit 0
 fi
 

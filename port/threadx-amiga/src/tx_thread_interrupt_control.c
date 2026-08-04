@@ -60,9 +60,9 @@
  */
 
 _Static_assert(__builtin_offsetof(struct ExecBase, TDNestCnt) == TX_AMIGA_OFF_TDNESTCNT,
-               "ExecBase.TDNestCnt moved -- fix TX_AMIGA_OFF_TDNESTCNT");
+               "ExecBase.TDNestCnt moved, fix TX_AMIGA_OFF_TDNESTCNT");
 _Static_assert(__builtin_offsetof(struct ExecBase, AttnResched) == TX_AMIGA_OFF_ATTNRESCHED,
-               "ExecBase.AttnResched moved -- fix TX_AMIGA_OFF_ATTNRESCHED");
+               "ExecBase.AttnResched moved, fix TX_AMIGA_OFF_ATTNRESCHED");
 _Static_assert(sizeof(SysBase -> TDNestCnt) == 1, "TDNestCnt is not a byte");
 _Static_assert(sizeof(SysBase -> AttnResched) == 2, "AttnResched is not a word");
 
@@ -93,7 +93,7 @@ VOID _tx_amiga_permit_finish(void)
 
 
 /* The out-of-line spellings.  Nothing on the data path reaches them any more
-  , TX_DISABLE/TX_RESTORE are the inline pair, but they are part of the
+, TX_DISABLE/TX_RESTORE are the inline pair, but they are part of the
    port's surface and cost nothing unreferenced.  */
 
 UINT _tx_thread_interrupt_disable(void)

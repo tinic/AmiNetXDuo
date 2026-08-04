@@ -84,7 +84,7 @@ static const char * const p_name[P_SLOTS] = {
     "  sha256_process",
     "  chacha_crypt",
     "  poly1305_process",
-    "select() -- network wait"
+    "select(), network wait"
 };
 
 /* Which rows are contained in another row above them, so the report can say

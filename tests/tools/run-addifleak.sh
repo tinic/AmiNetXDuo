@@ -84,7 +84,7 @@ ADDIF="$ROOT/$BUILD/src/tools/AddNetInterface"
 SMOKE="$ROOT/$BUILD/src/tools/ToolsSmoke"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 for f in "$ADDIF" "$SMOKE" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build $BUILD first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build $BUILD first" >&2; exit 2; }
 done
 
 # amiberry-run.sh prefers AMINETXDUO_KICKSTART_A600 over the generic one, and
@@ -169,7 +169,7 @@ set -e
 REPORT="$HD/tools.txt"
 [ -f "$REPORT" ] || {
     echo "FAIL: the guest wrote no $REPORT (run rc=$RUN_RC)" >&2
-    echo "      A 68020 build on a 68000 dies before writing anything -- check $BUILD." >&2
+    echo "      A 68020 build on a 68000 dies before writing anything, check $BUILD." >&2
     exit 1
 }
 
@@ -189,7 +189,7 @@ fail() { echo "FAIL: $*" >&2; FAILED=$((FAILED + 1)); }
 mapfile -t FREE < <(sed -n 's/.*rc -\{0,1\}[0-9]\{1,\}, free \([0-9]\{1,\}\).*/\1/p' "$REPORT")
 
 if [ "${#FREE[@]}" -lt "$RUNS" ]; then
-    fail "only ${#FREE[@]} of $RUNS runs reported free memory -- the guest stopped early"
+    fail "only ${#FREE[@]} of $RUNS runs reported free memory, the guest stopped early"
     echo "addifleak: FAILED" >&2
     exit 1
 fi
@@ -202,7 +202,7 @@ pass "all $RUNS runs reported"
 # working base for a network that never came up. That is a sharper signal than
 # the memory arithmetic and needs no subtraction, so it is checked first.
 if grep -q 'rc 0,' "$REPORT"; then
-    fail "a run returned 0 -- a failed AddNetInterface left a stack running"
+    fail "a run returned 0, a failed AddNetInterface left a stack running"
 fi
 
 FIRST="${FREE[1]}"

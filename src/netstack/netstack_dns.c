@@ -198,7 +198,7 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
     status = nx_dns_cache_initialize(&ns->ns_Dns, ns->ns_DnsCache,
                                      (UINT)sizeof(ns->ns_DnsCache));
     if (status != NX_SUCCESS)
-        AMI_WARN("netstack: DNS cache not initialised (%ld) -- every lookup "
+        AMI_WARN("netstack: DNS cache not initialised (%ld), every lookup "
                  "will go to the network", (long)status);
     else
         AMI_INFO("netstack: DNS cache %lu bytes",

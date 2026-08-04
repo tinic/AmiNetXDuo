@@ -33,7 +33,7 @@ EXE="$ROOT/$BUILD/tests/leak/refused_leak_test"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
 for f in "$EXE" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build refused_leak_test bsdsocket_library" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build refused_leak_test bsdsocket_library" >&2; exit 2; }
 done
 
 A2065="${AMINETXDUO_A2065:-}"

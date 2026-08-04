@@ -82,7 +82,7 @@ TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
 # ---- Commodore's ARexx, located and never committed ------------------------
@@ -177,7 +177,7 @@ SAY 'case abbrev:  Q HOSTNAME         rc=' RC ' result=' RESULT
 
 /* SERVICES blocks for its collection window, which is the one command here
    that can wedge the host rather than answer it. One second, because what is
-   being asserted is that it comes back and the script continues -- nothing on
+   being asserted is that it comes back and the script continues, nothing on
    SLIRP answers an mDNS query, so an empty result is the expected answer and
    a full one would mean the emulator had grown a network. */
 RESULT = 'NONE'
@@ -250,13 +250,13 @@ fails=0
 note() { echo "  $*"; }
 
 [ -f "$SCRIPTOUT" ] || {
-    echo "FAIL: the script produced no output at all -- RexxMast or RX did not run" >&2
+    echo "FAIL: the script produced no output at all, RexxMast or RX did not run" >&2
     exit 1
 }
 
 # The one that matters: the script ran to the end. Every hang stops before this.
 if grep -q "AREXX-SENTINEL-REACHED" "$SCRIPTOUT"; then
-    note "PASS: the script reached its last line -- nothing blocked"
+    note "PASS: the script reached its last line, nothing blocked"
 else
     note "FAIL: no sentinel: a command did not come back"
     fails=$((fails + 1))

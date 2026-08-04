@@ -212,26 +212,26 @@ int main(void)
     rc = p_stats(base, NETSTATUS_ip, 0, buffer, (LONG)sizeof(buffer));
     Printf((CONST_STRPTR)"version 0: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc < 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc < 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
     /* ---- a type the API never defined ------------------------------------ */
     rc = p_stats(base, 99, NETWORKSTATUS_VERSION, buffer, (LONG)sizeof(buffer));
     Printf((CONST_STRPTR)"type 99: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc < 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc < 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
     /* ---- a documented type this stack keeps nothing for ------------------- */
     rc = p_stats(base, NETSTATUS_mb, NETWORKSTATUS_VERSION, buffer,
                  (LONG)sizeof(buffer));
     Printf((CONST_STRPTR)"NETSTATUS_mb: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc < 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc < 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
     /* ---- NULL asks the size ---------------------------------------------- */
     rc = p_stats(base, NETSTATUS_ip, NETWORKSTATUS_VERSION, NULL, 0);
     Printf((CONST_STRPTR)"NETSTATUS_ip size: %ld%s\n", rc,
            (LONG)((rc == (LONG)sizeof(struct ipstat))
-                      ? " -- sizeof(struct ipstat), correctly" : " -- WRONG"));
+                      ? ", sizeof(struct ipstat), correctly" : ", WRONG"));
 
     /* ---- and the numbers themselves --------------------------------------
      *
@@ -324,7 +324,7 @@ int main(void)
     Printf((CONST_STRPTR)"tcp sockets after listen: %ld bytes (%ld more)%s\n",
            tcp_after, tcp_after - tcp_before,
            (LONG)((tcp_after == tcp_before + entry)
-                      ? " -- one more connection, correctly" : " -- WRONG"));
+                      ? ", one more connection, correctly" : ", WRONG"));
 
     p_fill_guard();
     rc = p_stats(base, NETSTATUS_tcp_sockets, NETWORKSTATUS_VERSION, buffer,
@@ -349,8 +349,8 @@ int main(void)
         if (pcd->pcd_local_port == PROBE_PORT)
             Printf((CONST_STRPTR)"listener state: %ld%s\n", pcd->pcd_tcp_state,
                    (LONG)((pcd->pcd_tcp_state == TCPS_LISTEN)
-                              ? " -- TCPS_LISTEN, correctly"
-                              : " -- NOT THE BSD NUMBER, WRONG"));
+                              ? ", TCPS_LISTEN, correctly"
+                              : ", NOT THE BSD NUMBER, WRONG"));
     }
 
     /*
@@ -365,7 +365,7 @@ int main(void)
                      buffer, entry);
         Printf((CONST_STRPTR)"tcp table into one entry: rc %ld guard %s%s\n",
                rc, (LONG)(p_guard_intact((ULONG)entry) ? "intact" : "OVERRUN"),
-               (LONG)((rc == entry) ? " -- one entry, correctly" : " -- WRONG"));
+               (LONG)((rc == entry) ? ", one entry, correctly" : ", WRONG"));
     }
 
     (VOID)p_close(base, listener);

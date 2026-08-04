@@ -125,7 +125,7 @@ case "${1:---compound}" in
                 # ctest.
                 header="${2:-}"
                 [ -n "$header" ] || die "--check needs a path to version.h"
-                [ -f "$header" ] || die "$header does not exist -- configure first"
+                [ -f "$header" ] || die "$header does not exist, configure first"
                 upstream
                 bad=0
                 expect() {

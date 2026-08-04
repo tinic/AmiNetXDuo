@@ -445,7 +445,7 @@ int main(void)
      * up front and say so if it does not arrive.
      */
     if (OpenWorkBench() == 0)
-        say("installdrive: OpenWorkBench() failed -- no screen to draw on\n",
+        say("installdrive: OpenWorkBench() failed, no screen to draw on\n",
             0);
     else
         say("installdrive: Workbench screen is open\n", 0);

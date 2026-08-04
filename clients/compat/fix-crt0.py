@@ -6,7 +6,7 @@ THE BUG
 
     m68k-amigaos/lib/crt0.o calls main() like this:
 
-        pea      ___argv          ; 4879 xxxxxxxx  , pushes &__argv
+        pea      ___argv          ; 4879 xxxxxxxx, pushes &__argv
         move.l   ___argc,-(sp)    ; 2f39 xxxxxxxx
         jsr      _main            ; 4eb9 xxxxxxxx
 
@@ -98,10 +98,10 @@ def main(argv):
     # SECOND BUG, unrelated to argv: the register save at _start and the
     # restore at ___exit do not match.
     #
-    #     _start:  movem.l d2/a2/a6,-(sp)      48e7 2022  , 3 regs, SP -= 12
+    #     _start:  movem.l d2/a2/a6,-(sp)      48e7 2022, 3 regs, SP -= 12
     #              move.l  sp,__savedSp        23cf ....
     #     ___exit: movea.l __savedSp,sp
-    #              movem.l (sp)+,d2/d7/a2/a6   4cdf 4484  , 4 regs, SP += 16
+    #              movem.l (sp)+,d2/d7/a2/a6   4cdf 4484, 4 regs, SP += 16
     #              rts
     #
     # The extra d7 on the restore shifts the whole frame by one register: a6 is
@@ -136,7 +136,7 @@ def main(argv):
         # saying so is better than silently producing a working binary for a
         # reason nobody understands.
         sys.stderr.write(
-            "fix-crt0: no 'pea/move.l/jsr' main() call found -- "
+            "fix-crt0: no 'pea/move.l/jsr' main() call found, "
             "copying crt0.o unchanged.\n"
             "          Check that argv works before trusting this build:\n"
             "          clients/dropbear/run-fsuae.sh runs dbclient, which\n"

@@ -42,7 +42,7 @@ echo "  CC fitz_soak.c"
 # Fitz, via the endurance tree's own recipe.  Absent sources are not an error
 # here: the message says which command fetches them.
 if [ ! -d "$ROOT/build/fitz/Fitz/src" ]; then
-    echo "==> no build/fitz -- run tests/endurance/fetch-fitz.sh first"
+    echo "==> no build/fitz, run tests/endurance/fetch-fitz.sh first"
     exit 0
 fi
 

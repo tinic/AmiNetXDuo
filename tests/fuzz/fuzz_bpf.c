@@ -8,9 +8,9 @@
  * unit test uses.  Two trust boundaries meet in this code and both are
  * covered:
  *
- *   the wire      , ami_bpf_tap_rx() runs the filter over untrusted frame
+ *   the wire, ami_bpf_tap_rx() runs the filter over untrusted frame
  *                     bytes on the IP thread;
- *   the library   , bpf_setf() runs a caller-chosen program, and the
+ *   the library, bpf_setf() runs a caller-chosen program, and the
  *                     interpreter is documented to be total whether or not
  *                     ami_bpf_validate() accepted it, so both the validated
  *                     and the unvalidated path are exercised here.

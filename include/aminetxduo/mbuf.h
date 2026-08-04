@@ -324,8 +324,8 @@ ULONG ami_mbuf_clusters_outstanding(VOID);
  * the NDK pragmas/bsdsocket_pragmas.h and confirmed against amitools'
  * bsdsocket_lib.fd and ndk-include/interfaces/bsdsocket.h:
  *
- *   0x28e mbuf_get      ()                      , no arguments
- *   0x294 mbuf_gethdr   ()                      , no arguments
+ *   0x28e mbuf_get      (), no arguments
+ *   0x294 mbuf_gethdr   (), no arguments
  *   0x282 mbuf_free     (m)            a0
  *   0x288 mbuf_freem    (m)            a0
  *   0x2a6 mbuf_adj      (mp,req_len)   a0/d0

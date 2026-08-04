@@ -16,7 +16,7 @@
 |       bccs    .+4
 |       addql   #1,d0
 |
-|  , five instructions and a branch where the machine has two.  Rewriting the
+|, five instructions and a branch where the machine has two.  Rewriting the
 |   C as a 64-bit accumulator does not fix it: GCC then emits a CLR.L for a
 |   fresh zero register per term instead of hoisting one, and spills to the
 |   stack besides.  Both forms were compiled and disassembled before this file

@@ -89,7 +89,7 @@ ADDIF="$ROOT/$BUILD/src/tools/AddNetInterface"
 FSERVE="$ROOT/build/endurance/fitz-serve"
 
 for f in "$SOAK" "$FSERVE" "$BSD" "$ADDIF"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree, then " \
+    [ -f "$f" ] || { echo "missing $f, build the tree, then " \
                           "tests/soak/build-fitz-soak.sh" >&2; exit 2; }
 done
 
@@ -119,7 +119,7 @@ fi
 # ---- the host server -----------------------------------------------------
 
 if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
-    echo "!! something already listens on $PORT -- pick another with -P," >&2
+    echo "!! something already listens on $PORT, pick another with -P," >&2
     echo "!! or a second server on one port will look like a dropped" >&2
     echo "!! connection for the whole run." >&2
     exit 2

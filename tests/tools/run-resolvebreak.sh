@@ -69,7 +69,7 @@ PROBE="$ROOT/$BUILD/tests/tools/ResolveBreak"
 BSD="${LIBRARY:-$ROOT/$BUILD/src/bsdsocket/bsdsocket.library}"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$PROBE" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
 A2065="${AMINETXDUO_A2065:-$ROOT/build/a2065.device}"

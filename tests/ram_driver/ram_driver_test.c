@@ -419,7 +419,7 @@ int main(void)
 UINT    status;
 
 
-    t_log("AmiNetXDuo -- ThreadX/NetX Duo RAM driver bring-up test");
+    t_log("AmiNetXDuo, ThreadX/NetX Duo RAM driver bring-up test");
     t_log("  ticks/sec %ld, pool %ld x %ld bytes",
           (ULONG) TX_TIMER_TICKS_PER_SECOND, (ULONG) T_PACKET_COUNT,
           (ULONG) T_PACKET_PAYLOAD);
@@ -449,7 +449,7 @@ UINT    status;
     (VOID) T_TX_OK(status, "main: orphaned this Exec Task");
 
     t_log("");
-    t_log("%ld checks, %ld failures -- %s",
+    t_log("%ld checks, %ld failures, %s",
           t_checks, t_failures, (t_failures == 0UL) ? "PASS" : "FAIL");
 
     t_flush();

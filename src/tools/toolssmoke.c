@@ -337,7 +337,7 @@ int main(int argc, char **argv)
         if (SetSignal(0L, 0L) & SIGBREAKF_CTRL_C)
         {
             SetSignal(0L, SIGBREAKF_CTRL_C);
-            report((const char *)"\n*** Break -- stopping\n", 0, 0);
+            report((const char *)"\n*** Break, stopping\n", 0, 0);
             break;
         }
     }

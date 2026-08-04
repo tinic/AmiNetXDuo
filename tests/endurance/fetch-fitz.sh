@@ -36,7 +36,7 @@ done
 DEST="$ROOT/build/fitz"
 
 command -v lha >/dev/null 2>&1 || {
-    echo "lha not found -- brew install lhasa (macOS) or apt install lhasa" >&2
+    echo "lha not found, brew install lhasa (macOS) or apt install lhasa" >&2
     exit 2
 }
 

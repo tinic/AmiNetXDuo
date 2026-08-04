@@ -161,7 +161,7 @@ stage_toolchain() {
     elif AMIGA_TOOLCHAIN_QUIET=1 . tools/amiga-toolchain.sh 2>/dev/null; then
         note "found $AMIGA_TOOLCHAIN_ROOT"
     else
-        note "no toolchain on this machine -- fetching the pinned one"
+        note "no toolchain on this machine, fetching the pinned one"
         eval "$(tools/fetch-toolchain.sh --export)"
     fi
     . tools/amiga-toolchain.sh
@@ -182,7 +182,7 @@ stage_toolchain() {
     have=$(cd "$AMIGA_TOOLCHAIN_ROOT" && pwd -P)
     if [ -n "$pinned" ] && [ "$have" != "$pinned" ]; then
         note "NOT the pinned toolchain CI uses ($pinned)"
-        note "  NDK header sets differ -- a green build here can still fail CI"
+        note "  NDK header sets differ, a green build here can still fail CI"
     fi
 }
 
@@ -234,7 +234,7 @@ stage_host32() {
 
     if ! (echo 'int main(void){return 0;}' > "$BUILD/m32probe.c" &&
           "${CC:-cc}" -m32 "$BUILD/m32probe.c" -o "$BUILD/m32probe") 2>/dev/null; then
-        note "no -m32 on this host (needs gcc-multilib on Debian/Ubuntu) -- skipped"
+        note "no -m32 on this host (needs gcc-multilib on Debian/Ubuntu), skipped"
         return 0
     fi
 
@@ -277,7 +277,7 @@ stage_cross() {
             fail "Developer drawer headers are stale (tools/gen-developer.sh)"
         fi
     else
-        note "no sfdc -- Developer drawer headers NOT checked against their SFD"
+        note "no sfdc, Developer drawer headers NOT checked against their SFD"
     fi
 
     for entry in "${CROSS_CONFIGS[@]}"; do
@@ -327,7 +327,7 @@ stage_conformance() {
     # It is a submodule and it compiles for m68k, so it belongs in the build
     # tier even though running it needs an emulator AND a2065.device.
     if [ ! -e third_party/bsdsocktest/.git ]; then
-        note "third_party/bsdsocktest not checked out -- skipping"
+        note "third_party/bsdsocktest not checked out, skipping"
         return 0
     fi
     tests/conformance/build.sh > "$BUILD/conformance.log" 2>&1 || {
@@ -348,7 +348,7 @@ stage_analyze() {
     #
     if [ "${AMINETXDUO_ANALYZE:-0}" != "1" ]; then
         hr "static analysis (cross)"
-        note "SKIPPED -- set AMINETXDUO_ANALYZE=1 to run it (the release does)"
+        note "SKIPPED, set AMINETXDUO_ANALYZE=1 to run it (the release does)"
         return 0
     fi
 
@@ -370,7 +370,7 @@ stage_analyze() {
     # Say so out loud rather than passing quietly: a stage that skips without
     # a word reads as coverage it is not providing.
     if ! command -v cppcheck > /dev/null; then
-        note "cppcheck NOT INSTALLED -- that half of this stage did not run"
+        note "cppcheck NOT INSTALLED, that half of this stage did not run"
         return 0
     fi
     if tools/cppcheck.sh > "$BUILD/cppcheck.log" 2>&1; then
@@ -387,14 +387,14 @@ stage_emulator() {
     hr "emulator tests (tier 2)"
 
     if ! command -v fs-uae >/dev/null 2>&1 && [ -z "${FSUAE:-}" ]; then
-        fail "fs-uae is not installed -- tier 2 cannot run"
+        fail "fs-uae is not installed, tier 2 cannot run"
         return 1
     fi
 
     if [ -n "${AMINETXDUO_KICKSTART:-}" ]; then
         note "boot ROM: $AMINETXDUO_KICKSTART (supplied)"
     else
-        fail "no AMINETXDUO_KICKSTART -- this stage needs a boot ROM"
+        fail "no AMINETXDUO_KICKSTART, this stage needs a boot ROM"
         return 1
     fi
     export AMINETXDUO_KICKSTART
@@ -411,7 +411,7 @@ stage_emulator() {
     # is never executed is not tested, and we ship a 68000 library.
     for dir in default m68000; do
         if [ ! -d "$BUILD/$dir" ]; then
-            fail "no $BUILD/$dir -- run the cross stage first"
+            fail "no $BUILD/$dir, run the cross stage first"
             return 1
         fi
     done

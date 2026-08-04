@@ -265,7 +265,7 @@ int main(int argc, char **argv)
 
     if (he != NULL)
     {
-        Printf((CONST_STRPTR)"FAIL a black-holed server answered -- pick another address\n");
+        Printf((CONST_STRPTR)"FAIL a black-holed server answered, pick another address\n");
         failures++;
     }
 
@@ -310,7 +310,7 @@ int main(int argc, char **argv)
                           NP_StackSize, 4096UL,
                           TAG_DONE) == NULL)
     {
-        Printf((CONST_STRPTR)"  cannot start the helper -- skipping\n");
+        Printf((CONST_STRPTR)"  cannot start the helper, skipping\n");
     }
     else
     {

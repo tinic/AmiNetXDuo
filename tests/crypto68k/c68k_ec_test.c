@@ -654,13 +654,13 @@ UINT    status;
     ami_crash_set_reference((APTR)main, "crypto68k_ec_test");
     if (!ami_crash_install())
     {
-        c68k_log("CRASHED -- see the serial log and DH0:crash.txt");
+        c68k_log("CRASHED, see the serial log and DH0:crash.txt");
         c68k_flush();
         ami_crash_remove();
         return(20);
     }
 
-    c68k_log("AmiNetXDuo -- crypto68k P-256 correctness");
+    c68k_log("AmiNetXDuo, crypto68k P-256 correctness");
     c68k_log("  limb primitives: %s",
              (LONG)(c68k_using_assembly() ? "68020 assembly" : "portable C"));
 

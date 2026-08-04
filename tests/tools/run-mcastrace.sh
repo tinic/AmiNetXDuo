@@ -127,7 +127,7 @@ RACE="$ROOT/$BUILD/tests/tools/McastRace"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$TOOLS/netstat" \
          "$RACE" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
 A2065="${AMINETXDUO_A2065:-}"
@@ -235,9 +235,9 @@ fi
 # ---- the guest's own checks ----------------------------------------------
 SUMMARY=$(grep -E "^McastRace: [0-9]+ check\(s\)" "$REPORT" | tail -1 || true)
 if [ -z "$SUMMARY" ]; then
-    fail "McastRace printed no summary -- it did not finish"
+    fail "McastRace printed no summary, it did not finish"
 else
-    echo "  -- $SUMMARY"
+    echo " , $SUMMARY"
     NFAILED=$(printf '%s' "$SUMMARY" | sed -E 's/.* ([0-9]+) failed$/\1/')
 
     if [ "$NFAILED" -eq 0 ]; then
@@ -255,7 +255,7 @@ DID=$(grep -E "^did: [0-9]+ hammer joins" "$REPORT" | tail -1 || true)
 if [ -z "$DID" ]; then
     fail "McastRace did not report what it did"
 else
-    echo "  -- $DID"
+    echo " , $DID"
     D_HAM=$(printf '%s' "$DID" | sed -E 's/^did: ([0-9]+) hammer joins.*/\1/')
     D_SNI=$(printf '%s' "$DID" | sed -E 's/.*, ([0-9]+) sniper joins$/\1/')
 
@@ -270,7 +270,7 @@ fi
 
 # ---- the second base really was a second base -----------------------------
 if grep -q "^FAIL: the sniper could not open a second base" "$REPORT"; then
-    fail "the child never got a base of its own -- one base cannot race itself"
+    fail "the child never got a base of its own, one base cannot race itself"
 else
     pass "the child ran on a bsdsocket.library base of its own"
 fi
@@ -280,10 +280,10 @@ if [ "$NEGATIVE" = 1 ]; then
     # Inverted: the run above raced almost nothing, so the gates had to reject
     # it.  A PASS here would mean they are not gating anything.
     if [ "$FAILED" -ne 0 ]; then
-        echo "mcastrace: negative control PASSED -- the gates reject a run that did not race"
+        echo "mcastrace: negative control PASSED, the gates reject a run that did not race"
         exit 0
     fi
-    echo "mcastrace: NEGATIVE CONTROL FAILED -- a run with one round and one shot was accepted" >&2
+    echo "mcastrace: NEGATIVE CONTROL FAILED, a run with one round and one shot was accepted" >&2
     exit 1
 fi
 

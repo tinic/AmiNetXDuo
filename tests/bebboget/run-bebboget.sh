@@ -107,7 +107,7 @@ TLS="$ROOT/$BUILD/src/tlslib/tls.library"
 ADDIF="$ROOT/$BUILD/src/tools/AddNetInterface"
 FETCH="$ROOT/$BUILD/src/tools/fetch"
 for f in "$BSD" "$ADDIF"; do
-    [ -f "$f" ] || { echo "missing $f -- build bsdsocket_library AddNetInterface" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build bsdsocket_library AddNetInterface" >&2; exit 2; }
 done
 # fetch and tls.library are the comparison arm.  Their absence is announced and
 # the bebboget arm still runs, rather than the whole run refusing over an
@@ -116,7 +116,7 @@ HAVE_FETCH=1
 for f in "$TLS" "$FETCH"; do
     [ -f "$f" ] || HAVE_FETCH=0
 done
-[ "$HAVE_FETCH" = "1" ] || echo "!! no fetch/tls.library in $BUILD -- bebboget arm only, no comparison" >&2
+[ "$HAVE_FETCH" = "1" ] || echo "!! no fetch/tls.library in $BUILD, bebboget arm only, no comparison" >&2
 
 command -v python3 >/dev/null 2>&1 || { echo "python3 is needed for the server" >&2; exit 2; }
 command -v openssl >/dev/null 2>&1 || { echo "openssl is needed for the payloads and cert" >&2; exit 2; }
@@ -126,7 +126,7 @@ command -v openssl >/dev/null 2>&1 || { echo "openssl is needed for the payloads
 # Not vendored and not downloaded: put the binaries in the local store.
 BEB="${AMINETXDUO_BEBBOGET_DIR:-$HOME/amiga-assets/bebboget}"
 [ -d "$BEB" ] || {
-    echo "no bebboget binaries in $BEB -- set AMINETXDUO_BEBBOGET_DIR" >&2
+    echo "no bebboget binaries in $BEB, set AMINETXDUO_BEBBOGET_DIR" >&2
     exit 2
 }
 BEBVER=$(cat "$BEB/VERSION" 2>/dev/null || echo unknown)

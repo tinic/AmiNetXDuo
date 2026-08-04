@@ -53,7 +53,7 @@
  *   m = 2^64 - 1 and x = m-1, mont(x,x) must be 1 and the vendored routine
  *   returns 0; at 32 limbs with m nearly all ones and x = m-1, its top limb is
  *   one less than the true value.  Random operands never come that close to m
- *  , which is why a 400-trial sweep never caught it, and why no RSA or EC
+ *, which is why a 400-trial sweep never caught it, and why no RSA or EC
  *   path can reach it, but it means the vendored routine cannot be the
  *   oracle for exactly the extreme operands Karatsuba's carry handling most
  *   needs checking on.  So that test diffs the split against this module's own

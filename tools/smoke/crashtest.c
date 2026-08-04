@@ -25,7 +25,7 @@ int main(void)
     {
         AMI_ERROR("crashtest: about to jump to 0x2 on purpose");
         boom();
-        check("unreachable -- crash was not caught", FALSE);
+        check("unreachable, crash was not caught", FALSE);
     }
     else
     {

@@ -620,7 +620,7 @@ static int r_run(VOID)
 
     static char first[96];
 
-    r_log("AmiNetXDuo -- TLS session resumption");
+    r_log("AmiNetXDuo, TLS session resumption");
 
     sbase = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
     if (!r_check((BOOL)(sbase != NULL), "OpenLibrary(bsdsocket.library)", 0))
@@ -770,7 +770,7 @@ static int r_run(VOID)
 
 done:
     r_log("");
-    r_log("%lu checks, %lu failures -- %s", r_checks, r_failures,
+    r_log("%lu checks, %lu failures, %s", r_checks, r_failures,
           (LONG)((r_failures == 0UL) ? "PASS" : "FAIL"));
 
     r_flush();

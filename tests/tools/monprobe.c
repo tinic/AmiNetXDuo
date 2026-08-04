@@ -14,7 +14,7 @@
  *      the message in the wrong register and the hook reads rubbish.
  *
  *   2. The walk stops at the first refusal.  "unless another hook denies this"
- *     , a hook that allows a call cannot overrule one that denied it.  The
+ *, a hook that allows a call cannot overrule one that denied it.  The
  *      probe installs two and counts invocations to show the second is never
  *      consulted once the first has said no.
  *
@@ -410,8 +410,8 @@ static VOID p_capability_phase(struct Library *base)
     rc = p_socketbase(base, tags);
     Printf((CONST_STRPTR)"SBTC_HAVE_MONITORING_API: rc %ld value %ld%s\n",
            rc, (LONG)have,
-           (LONG)((rc == 0 && have != 0) ? " -- TRUE, correctly"
-                                         : " -- FALSE, WRONG"));
+           (LONG)((rc == 0 && have != 0) ? ", TRUE, correctly"
+                                         : ", FALSE, WRONG"));
 
     /* Read a tunable, write it straight back, and read something after it. */
     tags[0].ti_Tag  = SBTM_GETREF(SBTC_IP_DEFAULT_TTL);
@@ -432,8 +432,8 @@ static VOID p_capability_phase(struct Library *base)
     Printf((CONST_STRPTR)"set IP_DEFAULT_TTL to its own value (%ld): rc %ld%s\n",
            (LONG)ttl, rc,
            (LONG)((rc == 0 && errno_after != 0xA5A5A5A5UL)
-                      ? " -- accepted and the next tag was serviced, correctly"
-                      : " -- REFUSED, WRONG"));
+                      ? ", accepted and the next tag was serviced, correctly"
+                      : ", REFUSED, WRONG"));
 
     /* A real change to something this stack does not do. */
     tags[0].ti_Tag  = SBTM_SETVAL(SBTC_IP_FORWARDING);
@@ -443,8 +443,8 @@ static VOID p_capability_phase(struct Library *base)
 
     rc = p_socketbase(base, tags);
     Printf((CONST_STRPTR)"turn IP forwarding on: rc %ld%s\n", rc,
-           (LONG)((rc == 1) ? " -- refused at tag 1, correctly"
-                            : " -- ACCEPTED, WRONG"));
+           (LONG)((rc == 1) ? ", refused at tag 1, correctly"
+                            : ", ACCEPTED, WRONG"));
 }
 
 /* ------------------------------------------------------------------ main -- */
@@ -490,14 +490,14 @@ int main(void)
     rc = p_add_hook(base, MHT_Bind, NULL, NULL);
     Printf((CONST_STRPTR)"add a NULL hook: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc == -1 && p_errno(base) == 14) ? " -- EFAULT, correctly"
-                                                    : " -- WRONG"));
+           (LONG)((rc == -1 && p_errno(base) == 14) ? ", EFAULT, correctly"
+                                                    : ", WRONG"));
 
     rc = p_add_hook(base, 99, &hook_a, NULL);
     Printf((CONST_STRPTR)"add type 99: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc == -1 && p_errno(base) == 22) ? " -- EINVAL, correctly"
-                                                    : " -- WRONG"));
+           (LONG)((rc == -1 && p_errno(base) == 22) ? ", EINVAL, correctly"
+                                                    : ", WRONG"));
 
     /*
      * A type the API defines but this library does not dispatch.  It must be
@@ -508,20 +508,20 @@ int main(void)
     Printf((CONST_STRPTR)"add MHT_Packet: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
            (LONG)((rc == -1 && p_errno(base) == 22)
-                      ? " -- refused rather than silently ignored, correctly"
-                      : " -- WRONG"));
+                      ? ", refused rather than silently ignored, correctly"
+                      : ", WRONG"));
 
     /* ---- a hook that allows ---------------------------------------------- */
 
     rc = p_add_hook(base, MHT_Bind, &hook_a, NULL);
     Printf((CONST_STRPTR)"add MHT_Bind hook: rc %ld%s\n", rc,
-           (LONG)((rc == 0) ? " -- installed, correctly" : " -- WRONG"));
+           (LONG)((rc == 0) ? ", installed, correctly" : ", WRONG"));
 
     /* The same hook again must be refused: RemoveNetMonitorHook takes no
        type, so it could not say which of the two to take out. */
     rc = p_add_hook(base, MHT_Connect, &hook_a, NULL);
     Printf((CONST_STRPTR)"add the same hook twice: rc %ld%s\n", rc,
-           (LONG)((rc == -1) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc == -1) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
     state_a.ps_Answer = 0;
     s = p_socket(base, P_AF_INET, P_SOCK_DGRAM, 0);
@@ -529,7 +529,7 @@ int main(void)
     Printf((CONST_STRPTR)"bind with an allowing hook: rc %ld, called %ld%s\n",
            rc, state_a.ps_Calls,
            (LONG)((rc == 0 && state_a.ps_Calls == 1)
-                      ? " -- allowed and seen, correctly" : " -- WRONG"));
+                      ? ", allowed and seen, correctly" : ", WRONG"));
 
     /* ---- and what it was handed ------------------------------------------ */
 
@@ -543,14 +543,14 @@ int main(void)
            (LONG)((state_a.ps_Size == (LONG)sizeof(struct BindMonitorMsg) &&
                    state_a.ps_Socket == s &&
                    state_a.ps_Name == (APTR)&sa)
-                      ? "yes -- correctly" : "NO"));
+                      ? "yes, correctly" : "NO"));
 
     /* A2 must be NULL, and it was poisoned before the call, so this is the
        register convention itself under test. */
     Printf((CONST_STRPTR)"reserved was %s, hook was %s\n",
-           (LONG)((state_a.ps_Reserved == NULL) ? "NULL -- correctly"
+           (LONG)((state_a.ps_Reserved == NULL) ? "NULL, correctly"
                                                 : "NOT NULL, WRONG"),
-           (LONG)((state_a.ps_Hook == &hook_a) ? "ours -- correctly"
+           (LONG)((state_a.ps_Hook == &hook_a) ? "ours, correctly"
                                                : "NOT OURS, WRONG"));
 
     (VOID)p_close(base, s);
@@ -565,8 +565,8 @@ int main(void)
     Printf((CONST_STRPTR)"bind with a denying hook: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
            (LONG)((rc == -1 && p_errno(base) == PROBE_DENY)
-                      ? " -- denied with the hook's errno, correctly"
-                      : " -- WRONG"));
+                      ? ", denied with the hook's errno, correctly"
+                      : ", WRONG"));
     (VOID)p_close(base, s);
 
     /* ---- two hooks, and the walk that stops ------------------------------- */
@@ -578,7 +578,7 @@ int main(void)
     (VOID)p_add_hook(base, MHT_Bind, &hook_a, NULL);
     rc = p_add_hook(base, MHT_Bind, &hook_b, NULL);
     Printf((CONST_STRPTR)"two hooks on one type: rc %ld%s\n", rc,
-           (LONG)((rc == 0) ? " -- both installed, correctly" : " -- WRONG"));
+           (LONG)((rc == 0) ? ", both installed, correctly" : ", WRONG"));
 
     /* First allows, second denies: the call must fail. */
     state_a.ps_Answer = 0;
@@ -591,8 +591,8 @@ int main(void)
            rc, p_errno(base), state_a.ps_Calls, state_b.ps_Calls,
            (LONG)((rc == -1 && p_errno(base) == PROBE_DENY &&
                    state_a.ps_Calls == 1 && state_b.ps_Calls == 1)
-                      ? " -- one hook cannot overrule another, correctly"
-                      : " -- WRONG"));
+                      ? ", one hook cannot overrule another, correctly"
+                      : ", WRONG"));
     (VOID)p_close(base, s);
 
     /* First denies: the second must never be consulted. */
@@ -606,7 +606,7 @@ int main(void)
     Printf((CONST_STRPTR)"first denies: rc %ld, calls %ld/%ld%s\n",
            rc, state_a.ps_Calls, state_b.ps_Calls,
            (LONG)((rc == -1 && state_a.ps_Calls == 1 && state_b.ps_Calls == 0)
-                      ? " -- the walk stopped, correctly" : " -- WRONG"));
+                      ? ", the walk stopped, correctly" : ", WRONG"));
     (VOID)p_close(base, s);
 
     p_remove_hook(base, &hook_a);
@@ -627,8 +627,8 @@ int main(void)
            rc, p_errno(base), state_a.ps_Calls,
            (LONG)((rc == -1 && p_errno(base) == PROBE_DENY &&
                    state_a.ps_Calls == 1)
-                      ? " -- denied before the connect, correctly"
-                      : " -- WRONG"));
+                      ? ", denied before the connect, correctly"
+                      : ", WRONG"));
     (VOID)p_close(base, s);
 
     /* ---- MHT_Send, and the shape each of the three calls produces --------- */
@@ -662,8 +662,8 @@ int main(void)
                rc, p_errno(base), state_a.ps_Calls,
                (LONG)((rc == -1 && p_errno(base) == PROBE_DENY &&
                        state_a.ps_Calls == 1)
-                          ? " -- denied before the send, correctly"
-                          : " -- WRONG"));
+                          ? ", denied before the send, correctly"
+                          : ", WRONG"));
 
         Printf((CONST_STRPTR)"send shape: size %ld (want %ld) buffer %s "
                              "len %ld to %s msg %s%s\n",
@@ -676,7 +676,7 @@ int main(void)
                        state_a.ps_Buffer == (APTR)payload &&
                        state_a.ps_Len == (LONG)sizeof(payload) &&
                        state_a.ps_To == NULL && state_a.ps_Msg == NULL)
-                          ? " -- correctly" : " -- WRONG"));
+                          ? ", correctly" : ", WRONG"));
         (VOID)p_close(base, s);
 
         /* ---- sendto(): smm_To is the caller's, smm_Msg NULL --------------
@@ -693,7 +693,7 @@ int main(void)
                (LONG)((state_a.ps_Msg == NULL) ? "NULL" : "SET"),
                (LONG)((rc == -1 && state_a.ps_To == (APTR)&dest &&
                        state_a.ps_Msg == NULL)
-                          ? " -- correctly" : " -- WRONG"));
+                          ? ", correctly" : ", WRONG"));
         (VOID)p_close(base, s);
 
         /* ---- sendmsg(): smm_Msg is the caller's, smm_To NULL ------------- */
@@ -720,7 +720,7 @@ int main(void)
                (LONG)((rc == -1 && state_a.ps_To == NULL &&
                        state_a.ps_Msg == (APTR)&msg &&
                        state_a.ps_Len == (LONG)sizeof(payload))
-                          ? " -- correctly" : " -- WRONG"));
+                          ? ", correctly" : ", WRONG"));
         (VOID)p_close(base, s);
 
         /*
@@ -729,7 +729,7 @@ int main(void)
          * being set and does not require exactly one, send() has neither,
          * because there is neither to report.
          */
-        Printf((CONST_STRPTR)"never both set: yes -- correctly\n");
+        Printf((CONST_STRPTR)"never both set: yes, correctly\n");
 
         /* And a send that the hook allows must go through untouched. */
         probe_state_reset(&state_a);
@@ -740,7 +740,7 @@ int main(void)
         Printf((CONST_STRPTR)"send allowed: rc %ld, called %ld%s\n",
                rc, state_a.ps_Calls,
                (LONG)((rc == (LONG)sizeof(payload) && state_a.ps_Calls == 1)
-                          ? " -- sent in full, correctly" : " -- WRONG"));
+                          ? ", sent in full, correctly" : ", WRONG"));
         (VOID)p_close(base, s);
     }
 
@@ -760,7 +760,7 @@ int main(void)
     Printf((CONST_STRPTR)"after removal: bind rc %ld, called %ld%s\n",
            rc, state_a.ps_Calls,
            (LONG)((rc == 0 && state_a.ps_Calls == 0)
-                      ? " -- no longer consulted, correctly" : " -- WRONG"));
+                      ? ", no longer consulted, correctly" : ", WRONG"));
     (VOID)p_close(base, s);
 
     /* Documented to do nothing rather than to fault, and a second removal of

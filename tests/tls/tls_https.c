@@ -403,13 +403,13 @@ LONG            net_status;
     ami_crash_set_reference((APTR)main, "tls_https");
     if (!ami_crash_install())
     {
-        w_log("CRASHED -- see the serial log and DH0:crash.txt");
+        w_log("CRASHED, see the serial log and DH0:crash.txt");
         w_flush();
         ami_crash_remove();
         return(20);
     }
 
-    w_log("AmiNetXDuo -- TLS 1.2 against a real public HTTPS server");
+    w_log("AmiNetXDuo, TLS 1.2 against a real public HTTPS server");
 
     (VOID) ami_tls_timer_open();
 
@@ -421,7 +421,7 @@ LONG            net_status;
                  (ULONG)net_status))
     {
         w_log("");
-        w_log("%lu checks, %lu failures -- SKIPPED (no network)",
+        w_log("%lu checks, %lu failures, SKIPPED (no network)",
               w_checks, w_failures);
         ami_tls_timer_close();
         w_flush();
@@ -442,7 +442,7 @@ LONG            net_status;
     netstack_shutdown();
 
     w_log("");
-    w_log("%lu checks, %lu failures -- %s", w_checks, w_failures,
+    w_log("%lu checks, %lu failures, %s", w_checks, w_failures,
           (LONG)((w_failures == 0UL) ? "PASS" : "FAIL"));
 
     ami_tls_timer_close();

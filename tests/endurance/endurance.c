@@ -17,9 +17,9 @@
  *   (a driver and a responder, each with its own bsdsocket.library base,
  *   because the library is per-opener).  Every transaction picks:
  *
- *     - a direction  , PUT (driver writes), GET (driver reads) or ECHO
+ *     - a direction, PUT (driver writes), GET (driver reads) or ECHO
  *                        (driver writes and reads the same bytes back);
- *     - a length     , log-uniform from 1 byte to `maxxfer`, so the mix is
+ *     - a length, log-uniform from 1 byte to `maxxfer`, so the mix is
  *                        mostly small with a long tail, which is what copying
  *                        a directory of files over a share looks like;
  *     - a chunk size , redrawn log-uniform for every send() and recv() on
@@ -2667,7 +2667,7 @@ int main(void)
         {
             args[0] = (LONG)end_secs();
             args[1] = (LONG)live;
-            end_emit(F_EVENTS, "%lu %lu worker(s) did not finish -- see "
+            end_emit(F_EVENTS, "%lu %lu worker(s) did not finish, see "
                                "STALLED above\n", args);
             Printf((CONST_STRPTR)"!! %ld worker(s) never returned\n",
                    (LONG)live);

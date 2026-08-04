@@ -35,7 +35,7 @@ BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 UG="$ROOT/$BUILD/src/usergroup/usergroup.library"
 
 for f in "$EXE" "$BSD" "$UG"; do
-    [ -f "$f" ] || { echo "missing $f -- build library_test bsdsocket_library usergroup_library" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build library_test bsdsocket_library usergroup_library" >&2; exit 2; }
 done
 
 A2065="${AMINETXDUO_A2065:-}"

@@ -809,7 +809,7 @@
 /*
  * Not set, and why:
  *
- *   NX_IPSEC_ENABLE             , out of scope; §9 decision 4 lists the four
+ *   NX_IPSEC_ENABLE, out of scope; §9 decision 4 lists the four
  *                                   optional subsystems and this is not one.
  */
 
@@ -890,7 +890,7 @@
 /*
  * Not set, and why:
  *
- *   NX_DISABLE_ERROR_CHECKING  , saves code, and the _nxe_ wrappers are 30%
+ *   NX_DISABLE_ERROR_CHECKING, saves code, and the _nxe_ wrappers are 30%
  *                                  of an nx_packet_allocate/release pair (90
  *                                  us against 63).  It is still not worth it:
  *                                  NetX Duo's own internals call _nx_ and
@@ -900,15 +900,15 @@
  *                                  no change outside the noise.  The bring-up
  *                                  milestones exist to catch our own misuse
  *                                  and now cost nothing measurable.
- *   NX_DISABLE_PACKET_CHAIN    , would break TCP receives larger than one
+ *   NX_DISABLE_PACKET_CHAIN, would break TCP receives larger than one
  *                                  payload.
- *   NX_DISABLE_FRAGMENTATION   , src/netstack/ calls
+ *   NX_DISABLE_FRAGMENTATION, src/netstack/ calls
  *                                  nx_ip_fragment_enable(), so inbound
  *                                  reassembly is wanted and this would
  *                                  compile it out.  What it holds is bounded
  *                                  by NX_IP_FRAGMENT_POOL_RESERVE in the
  *                                  fork rather than by the pool alone.
- *   NX_TCP_ACK_TIMER_RATE 25   , a 40 ms delayed ACK rather than 200 ms,
+ *   NX_TCP_ACK_TIMER_RATE 25, a 40 ms delayed ACK rather than 200 ms,
  *                                  which is what AmiTCP_NG 4.1.4 did.  It
  *                                  needs NX_TCP_FAST_TIMER_RATE raised with
  *                                  it, since the fast periodic is what

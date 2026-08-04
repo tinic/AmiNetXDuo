@@ -981,7 +981,7 @@ static BOOL tcp_ctrl_publish(VOID)
 
     if (taken)
     {
-        AMI_WARN("TCP: not published -- something is already assigned to it");
+        AMI_WARN("TCP: not published, something is already assigned to it");
         DeleteMsgPort(tcp_ctrl_port);
         tcp_ctrl_port = NULL;
         return FALSE;
@@ -1003,7 +1003,7 @@ static BOOL tcp_ctrl_publish(VOID)
 
     if (!AddDosEntry((struct DosList *)tcp_node))
     {
-        AMI_WARN("TCP: not published -- the name is already in the DOS list");
+        AMI_WARN("TCP: not published, the name is already in the DOS list");
         FreeDosEntry((struct DosList *)tcp_node);
         tcp_node = NULL;
         DeleteMsgPort(tcp_ctrl_port);
@@ -1203,7 +1203,7 @@ VOID bsd_tcp_handler_start(struct AmiSocketBase *master)
 
         if (cfg != NULL && !cfg->tcp_handler)
         {
-            AMI_INFO("TCP: not published -- switched off in the configuration");
+            AMI_INFO("TCP: not published, switched off in the configuration");
             return;
         }
     }

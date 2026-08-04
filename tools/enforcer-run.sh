@@ -242,7 +242,7 @@ FSUAE_RC=0
 wait "$EMU_PID" 2>/dev/null || FSUAE_RC=$?
 
 if [ "$EARLY_EXIT" = "1" ] && [ "$FSUAE_RC" -gt 128 ]; then
-    echo "!! fs-uae was KILLED BY SIGNAL $((FSUAE_RC - 128)) -- host-side, not a guru." >&2
+    echo "!! fs-uae was KILLED BY SIGNAL $((FSUAE_RC - 128)), host-side, not a guru." >&2
 fi
 
 # ------------------------------------------------------------------- output --

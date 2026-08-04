@@ -85,7 +85,7 @@ void genrandom(unsigned char *buf, unsigned int len);
 void genrandom(unsigned char *buf, unsigned int len)
 {
     (void)buf; (void)len;
-    fprintf(stderr, "genrandom() reached -- this program signs and verifies "
+    fprintf(stderr, "genrandom() reached, this program signs and verifies "
                     "with fixed test vectors and should never generate a key\n");
     exit(2);
 }
@@ -149,7 +149,7 @@ int main(void)
            "", "", tn_count_M);
 
     if (failures) {
-        printf("\n%d vector(s) FAILED -- the counts above are of code that is "
+        printf("\n%d vector(s) FAILED, the counts above are of code that is "
                "not doing the right thing.\n", failures);
         return 1;
     }

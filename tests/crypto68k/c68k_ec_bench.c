@@ -203,7 +203,7 @@ ULONG       mul_only;
     mul_only = b_time_n(b_ref_mul_only, 400UL);
     c68k_log("    of which the vendored multiply alone is %lu us, so the",
              mul_only);
-    c68k_log("    vendored REDUCTION is %lu us -- %lu%% of a field multiply",
+    c68k_log("    vendored REDUCTION is %lu us, %lu%% of a field multiply",
              (ref > mul_only) ? (ref - mul_only) : 0UL,
              (ref != 0) ? (((ref - mul_only) * 100UL) / ref) : 0UL);
 
@@ -487,13 +487,13 @@ UINT    i;
     ami_crash_set_reference((APTR)main, "crypto68k_ec_bench");
     if (!ami_crash_install())
     {
-        c68k_log("CRASHED -- see the serial log and DH0:crash.txt");
+        c68k_log("CRASHED, see the serial log and DH0:crash.txt");
         c68k_flush();
         ami_crash_remove();
         return(20);
     }
 
-    c68k_log("AmiNetXDuo -- crypto68k P-256 before/after benchmark");
+    c68k_log("AmiNetXDuo, crypto68k P-256 before/after benchmark");
     c68k_log("  limb primitives: %s",
              (LONG)(c68k_using_assembly() ? "68020 assembly" : "portable C"));
 
@@ -578,11 +578,11 @@ UINT    i;
 
     if (b_failures == 0)
     {
-        c68k_log("0 correctness failures -- every timed path was checked");
+        c68k_log("0 correctness failures, every timed path was checked");
     }
     else
     {
-        c68k_log("%lu CORRECTNESS FAILURES -- timings are meaningless",
+        c68k_log("%lu CORRECTNESS FAILURES, timings are meaningless",
                  b_failures);
     }
 

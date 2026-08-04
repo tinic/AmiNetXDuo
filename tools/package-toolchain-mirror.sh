@@ -137,7 +137,7 @@ SYMS=$(find "$VTMP/$PREFIX" -type l | wc -l | tr -d ' ')
 SHA=$(sha256_of "$OUT")
 SIZE=$(wc -c < "$OUT" | tr -d ' ')
 
-echo "    $OUT_N entries, $LINKS hard links, $SYMS symlinks -- identical to the source"
+echo "    $OUT_N entries, $LINKS hard links, $SYMS symlinks, identical to the source"
 echo
 echo "==> $ASSET"
 echo "    size    $SIZE"
@@ -155,5 +155,5 @@ echo "       --prerelease \\"
 echo "       '$OUT'"
 echo
 echo "     (that body carries the provenance and the GPLv3 6(d) corresponding"
-echo "      source directions -- publishing GCC binaries without them is not"
+echo "      source directions, publishing GCC binaries without them is not"
 echo "      an option.  Check its digests still match before you upload.)"

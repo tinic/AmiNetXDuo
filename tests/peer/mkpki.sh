@@ -16,7 +16,7 @@
 #
 # WHAT IS GENERATED
 #
-#   root-rsa          RSA-2048 CA, self-signed            , in the trust store
+#   root-rsa          RSA-2048 CA, self-signed, in the trust store
 #     int-rsa-1       RSA-2048 CA, signed by root-rsa
 #       leaf rsa2.test                                     chain: leaf,int1
 #       leaf expired.test        notAfter in 2020          chain: leaf,int1
@@ -24,12 +24,12 @@
 #         leaf rsa3.test                                   chain: leaf,int2,int1
 #         int-rsa-3   signed by int-rsa-2
 #           leaf rsa4.test                                 chain: leaf,int3,int2,int1
-#   root-ec           P-256 CA, self-signed               , in the trust store
+#   root-ec           P-256 CA, self-signed, in the trust store
 #     int-ec-1
 #       leaf ec2.test                                      chain: leaf,int1
 #       int-ec-2
 #         leaf ec3.test                                    chain: leaf,int2,int1
-#   root-other        RSA-2048 CA, self-signed            , NOT in the store,
+#   root-other        RSA-2048 CA, self-signed, NOT in the store,
 #                                                             for --cacert tests
 #   selfsigned.test   its own issuer, in nobody's store
 #

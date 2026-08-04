@@ -1483,7 +1483,7 @@ int main(void)
 UINT    status;
 ULONG   actual;
 
-    p_log("AmiNetXDuo -- TCP data path cost census");
+    p_log("AmiNetXDuo, TCP data path cost census");
 
     status = tx_amiga_kernel_start();
     if (status != TX_SUCCESS)
@@ -1573,7 +1573,7 @@ ULONG   actual;
     p_window_sweep("wire",     &p_ip0, &p_ip1, P_IP1_ADDRESS, P_PORT_WIRE);
 
     p_log("");
-    p_log("%ld checks, %ld failures -- %s",
+    p_log("%ld checks, %ld failures, %s",
           p_checks, p_failures, (p_failures == 0UL) ? "PASS" : "FAIL");
 
     (VOID)tx_amiga_orphan_thread(&p_main_thread);

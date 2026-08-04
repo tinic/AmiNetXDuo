@@ -62,7 +62,7 @@ def main():
 
     rows = [r for r in rows if "alloc" in r]
     if not rows:
-        print("  (health log has no readable blocks -- did netstat run?)")
+        print("  (health log has no readable blocks, did netstat run?)")
         return 0
 
     print("     t   alloc  peak  refused   sock  peak    pool  low  empty  "

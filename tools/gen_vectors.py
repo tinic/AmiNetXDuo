@@ -68,11 +68,11 @@ TRAILING_RESERVED = 6
 # ---------------------------------------------------------------------------
 PRIVATE_VECTORS = [
     (0x360, "bsd_ObtainNetXDuoContext", "AMINETXDUO_TLS_CONTEXT",
-     "hands tls.library the NetX Duo singleton -- nxcontext.h"),
+     "hands tls.library the NetX Duo singleton, nxcontext.h"),
     (0x366, "bsd_NetStackQuery", None,
-     "a snapshot of the running stack -- netstatus.h"),
+     "a snapshot of the running stack, netstatus.h"),
     (0x36c, "bsd_NetStackControl", None,
-     "interfaces, routes and the ARP cache -- netstatus.h"),
+     "interfaces, routes and the ARP cache, netstatus.h"),
 ]
 
 # Hand-written because these have no NDK pragma to read a register assignment
@@ -412,10 +412,10 @@ def emit(by_offset, outdir, check=False):
     for offset, symbol, guard, what in PRIVATE_VECTORS:
         decl = PRIVATE_DECLARATIONS[symbol]
         if guard:
-            h.append("/* LVO -0x%03x -- PRIVATE: %s */\n#ifdef %s\n%s\n#endif\n\n"
+            h.append("/* LVO -0x%03x, PRIVATE: %s */\n#ifdef %s\n%s\n#endif\n\n"
                      % (offset, what, guard, decl))
         else:
-            h.append("/* LVO -0x%03x -- PRIVATE: %s */\n%s\n\n"
+            h.append("/* LVO -0x%03x, PRIVATE: %s */\n%s\n\n"
                      % (offset, what, decl))
     h.append(HEADER_EPILOGUE)
     header = "".join(h)
@@ -460,7 +460,7 @@ def emit(by_offset, outdir, check=False):
 
     for offset, symbol, guard, what in PRIVATE_VECTORS:
         index = offset // VECTOR_STRIDE - 1
-        s.append("\n    /* -0x%03x [%3d] %s -- PRIVATE: %s */\n"
+        s.append("\n    /* -0x%03x [%3d] %s, PRIVATE: %s */\n"
                  % (offset, index, symbol, what))
         if guard:
             # The SLOT is unconditional; only the body behind it is optional.

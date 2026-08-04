@@ -107,7 +107,7 @@ TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
 for f in "$TOOLS/httpd" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
 A2065="${AMINETXDUO_A2065:-}"

@@ -13,7 +13,7 @@
 #   The Debian fs-uae 3.1.66 imports SLIRP from the qemu-uae plugin and, with
 #   the plugin absent, logs
 #
-#      , stub, uae_slirp_start
+#, stub, uae_slirp_start
 #
 #   and carries on.  The A2065 initialises, the link comes up, DHCP is
 #   answered inside the stub, and there is no NAT behind any of it, so every

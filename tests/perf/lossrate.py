@@ -538,7 +538,7 @@ def ss_report(path, eph, idle_frac):
             slopes.append(db / dt if dt > 0 else 0.0)
         peak = max(slopes) if slopes else 0.0
         if peak <= 0:
-            lines.append("  port %d: %d samples, bytes_sent never moved -- this "
+            lines.append("  port %d: %d samples, bytes_sent never moved, this "
                          "is the previous arm's closed socket" % (portno, len(samples)))
             continue
         keep = [samples[i + 1][1] for i, s in enumerate(slopes)
@@ -635,7 +635,7 @@ def main():
     reads = Windows([s for s in spans if s[2]])
     writes = Windows([s for s in spans if not s[2]])
     if not reads.spans:
-        raise SystemExit("%s: no read phase found -- the peer sent no bulk "
+        raise SystemExit("%s: no read phase found, the peer sent no bulk "
                          "run of %d bytes" % (args.pcap, args.min_phase))
 
     a = analyse(segs, port, reads, args.rtt_floor, args.dupacks)
@@ -755,7 +755,7 @@ def main():
             for i, (n, r, by) in enumerate(per_phase):
                 print("  phase %d   %5d segments  %4d retransmitted  %6.3f %%"
                       "  %d B" % (i, n, r, pct(r, n), by))
-            print("loss by megabyte into a phase -- flat means a shorter "
+            print("loss by megabyte into a phase, flat means a shorter "
                   "transfer would")
             print("have shown the same rate, climbing means it would not")
             for m in sorted(per_step):

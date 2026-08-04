@@ -6,7 +6,7 @@
  * IN6ADDR_*_INIT, no PF_INET6, no sockaddr_storage.  An application written
  * against it has therefore spelled the numbers out itself, which is why every
  * definition below is #ifndef-guarded and why each one has to be the value
- * everyone else uses -- a caller who already has them keeps their own and must
+ * everyone else uses, a caller who already has them keeps their own and must
  * still be right.  Verified absent from the NDK include tree on 2026-07-31.
  *
  * There are no vectors here.  Everything is a macro or a type; the calls these
@@ -20,7 +20,7 @@
  *
  * The NDK's `struct sockaddr_in` is 4.4BSD's: sin_len at offset 0, sin_family
  * at offset 1.  The `struct sockaddr_in6` immediately below it in the same
- * header is the LINUX one, pasted in verbatim -- sin6_family at offset 0, and
+ * header is the LINUX one, pasted in verbatim, sin6_family at offset 0, and
  * no sin6_len at all.  The two are not interchangeable through a
  * `struct sockaddr *`:
  *
@@ -83,7 +83,7 @@ extern "C" {
  *
  * Each of these has two numbers in the wild and the NDK picks neither.  This
  * header set is 4.4BSD everywhere except the pasted-in sockaddr_in6, so the
- * BSD number is what is published -- but the library accepts BOTH on
+ * BSD number is what is published, but the library accepts BOTH on
  * setsockopt() and getsockopt(), because a caller who spelled the numbers out
  * may have taken them from either lineage and neither is wrong here.
  *
@@ -113,14 +113,14 @@ extern "C" {
 #endif
 
 /*
- * RFC 3542's ancillary-data options -- IPV6_PKTINFO, IPV6_RECVPKTINFO,
- * IPV6_HOPLIMIT, IPV6_RECVHOPLIMIT, ICMP6_FILTER -- and struct in6_pktinfo,
+ * RFC 3542's ancillary-data options, IPV6_PKTINFO, IPV6_RECVPKTINFO,
+ * IPV6_HOPLIMIT, IPV6_RECVHOPLIMIT, ICMP6_FILTER, and struct in6_pktinfo,
  * struct icmp6_filter and the CMSG_ macros the NDK is missing are NOT here.
  * They are in aminetxduo/cmsg.h, which includes this header for IPPROTO_IPV6.
  * The NDK does define struct cmsghdr, CMSG_DATA, CMSG_FIRSTHDR and
  * CMSG_NXTHDR in <sys/socket.h>; what it is missing is CMSG_LEN, CMSG_SPACE,
  * CMSG_ALIGN, and the ALIGN() its own CMSG_NXTHDR expands to and nothing
- * defines -- so cmsg.h replaces the last two rather than adding to them.
+ * defines, so cmsg.h replaces the last two rather than adding to them.
  *
  * IPv4 multicast is not here either, and does not need to be: IP_MULTICAST_IF,
  * IP_MULTICAST_TTL, IP_MULTICAST_LOOP, IP_ADD_MEMBERSHIP, IP_DROP_MEMBERSHIP
@@ -148,8 +148,8 @@ extern "C" {
  * group here.  Link-local scope is what to rely on.
  */
 
-/* BSD 9, Linux 17.  Both accepted.  Takes an interface index -- the
-   if_nametoindex() kind -- and 0 gives the choice back to the route. */
+/* BSD 9, Linux 17.  Both accepted.  Takes an interface index, the
+   if_nametoindex() kind, and 0 gives the choice back to the route. */
 #ifndef IPV6_MULTICAST_IF
 #define IPV6_MULTICAST_IF        9
 #endif
@@ -227,7 +227,7 @@ struct ipv6_mreq
  *
  *     static const struct in6_addr any = IN6ADDR_ANY_INIT;
  *
- * -- which is what the initialisers are for.
+ * which is what the initialisers are for.
  */
 
 #ifndef IN6_IS_ADDR_UNSPECIFIED
@@ -324,7 +324,7 @@ struct ipv6_mreq
  * member, and on this NDK there is nowhere honest to put one: the family byte
  * is at offset 1 for AF_INET and at offset 0 for AF_INET6, so a member at
  * either offset would be right for one family and silently wrong for the
- * other -- the trap at the top of this file, wearing a struct member's name.
+ * other, the trap at the top of this file, wearing a struct member's name.
  * Read the family the way the library does: from the length the call returned
  * and then from that offset.
  */
@@ -342,7 +342,7 @@ struct sockaddr_storage
  *
  * The NDK's netdb.h has AI_PASSIVE, AI_CANONNAME, AI_NUMERICHOST,
  * AI_NUMERICSERV and AI_EXT, and its AI_MASK is the set getaddrinfo() will
- * accept -- a bit outside it is EAI_BADFLAGS, not a flag quietly ignored.
+ * accept, a bit outside it is EAI_BADFLAGS, not a flag quietly ignored.
  *
  * AI_ADDRCONFIG is 0 because the behaviour it asks for is unconditional here:
  * an AAAA lookup only happens when the stack has IPv6 running and an A lookup

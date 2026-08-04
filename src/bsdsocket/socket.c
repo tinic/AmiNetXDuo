@@ -243,11 +243,11 @@ ULONG ami_bsd_tcp_window(VOID)
  * step is the problem: `|` is a bitwise OR of two independent draws, and
  * rand() is specified to return 0..0x7FFFFFFF, so:
  *
- *   bits  0..15   come from the second draw alone          , uniform
- *   bits 16..30   are (first draw) OR (second draw)        , 1 with
+ *   bits  0..15   come from the second draw alone, uniform
+ *   bits 16..30   are (first draw) OR (second draw), 1 with
  *                                                              probability 3/4
  *   bit     31    is the first draw's bit 15 alone (the second draw's bit 31
- *                 is always zero)                          , uniform
+ *                 is always zero), uniform
  *
  * Fifteen of the thirty-two bits are therefore three-quarters ones: 29.2 bits
  * of Shannon entropy, but only 23.2 bits of min-entropy, which is the number

@@ -90,7 +90,7 @@ ULONG                    total_ms = 0UL, total_samples = 0UL;
 ULONG                    lo[PV_PHASES], hi[PV_PHASES];
 ULONG                    t0, expect;
 
-    prof_log("AmiNetXDuo -- PC sampler self-test");
+    prof_log("AmiNetXDuo, PC sampler self-test");
     prof_log("AttnFlags $%08lx, Exec %ld",
              (unsigned long)eb->AttnFlags, (long)eb->LibNode.lib_Version);
 
@@ -273,7 +273,7 @@ ULONG                    t0, expect;
     prof_free();
 
     prof_log("");
-    prof_log("%ld failures -- %s", (long)pv_failures,
+    prof_log("%ld failures, %s", (long)pv_failures,
              pv_failures == 0UL ? "PASS" : "FAIL");
 
     return(pv_failures == 0UL ? 0 : 20);

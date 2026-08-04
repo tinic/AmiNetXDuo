@@ -251,7 +251,7 @@ def audit(path, top=6):
                 side.ack_delays.append(ts - newest)
 
     print("=" * 70)
-    print("%s -- %d packets (%d not IPv4/TCP), snaplen %d"
+    print("%s, %d packets (%d not IPv4/TCP), snaplen %d"
           % (path, len(packets), nontcp, snap))
     if synthetic:
         print("NO CLOCK IN THIS FILE: order is real, every interval is not.")

@@ -38,7 +38,7 @@ EXE="$ROOT/$BUILD/tests/udpdrill/UdpDrill"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
 for f in "$EXE" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build it first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build it first" >&2; exit 2; }
 done
 
 STAGE="$ROOT/build/udpdrill-stage-$TAG"
@@ -66,7 +66,7 @@ echo "================ udpdrill ================"
 if [ -f "$HD/stdout.txt" ]; then
     cat "$HD/stdout.txt"
 else
-    echo "(no stdout.txt -- the run did not get that far)"
+    echo "(no stdout.txt, the run did not get that far)"
 fi
 echo
 echo "emulator log: build/udpdrill-$TAG.log"

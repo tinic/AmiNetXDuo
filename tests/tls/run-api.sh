@@ -43,7 +43,7 @@ TLS="$ROOT/$BUILD/src/tlslib/tls.library"
 
 for f in "$EXE" "$BSD" "$TLS"; do
     [ -f "$f" ] || {
-        echo "missing $f -- build tls_api bsdsocket_library tls_library first" >&2
+        echo "missing $f, build tls_api bsdsocket_library tls_library first" >&2
         exit 2
     }
 done

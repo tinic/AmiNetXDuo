@@ -354,7 +354,7 @@ int main(VOID)
     BOOL                   eol;
     char                   line[96];
 
-    a_log("AmiNetXDuo -- HTTPS through tls.library, over the published ABI");
+    a_log("AmiNetXDuo, HTTPS through tls.library, over the published ABI");
 
     /* ---- the two libraries ---------------------------------------------- */
 
@@ -653,7 +653,7 @@ close_libs:
 
 done:
     a_log("");
-    a_log("%lu checks, %lu failures -- %s", a_checks, a_failures,
+    a_log("%lu checks, %lu failures, %s", a_checks, a_failures,
           (LONG)((a_failures == 0UL) ? "PASS" : "FAIL"));
 
     a_flush();

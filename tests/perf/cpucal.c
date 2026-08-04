@@ -360,7 +360,7 @@ static VOID c_mem_suite(const char *label, APTR a, APTR b)
 ULONG   big_read, small_read;
 
     c_log("");
-    c_log("  -- %s --", (LONG)label);
+    c_log(" , %s --", (LONG)label);
 
     c_buf_a  = a;
     c_buf_b  = b;
@@ -403,11 +403,11 @@ ULONG   reps;
 
     t_start = c_now();
 
-    c_log("AmiNetXDuo -- CPU/memory calibration probe");
+    c_log("AmiNetXDuo, CPU/memory calibration probe");
     c_log("");
 
     flags = (ULONG)sys -> AttnFlags;
-    c_log("AttnFlags 0x%04lx -- 68010:%ld 68020:%ld 68030:%ld 68040:%ld "
+    c_log("AttnFlags 0x%04lx, 68010:%ld 68020:%ld 68030:%ld 68040:%ld "
           "FPU:%ld",
           flags,
           (LONG)((flags & AFF_68010) ? 1 : 0),
@@ -417,7 +417,7 @@ ULONG   reps;
           (LONG)((flags & (AFF_68881 | AFF_68882)) ? 1 : 0));
 
     cache = CacheControl(0UL, 0UL);
-    c_log("CacheControl 0x%08lx -- I-cache:%ld D-cache:%ld copyback:%ld",
+    c_log("CacheControl 0x%08lx, I-cache:%ld D-cache:%ld copyback:%ld",
           cache,
           (LONG)((cache & CACRF_EnableI) ? 1 : 0),
           (LONG)((cache & CACRF_EnableD) ? 1 : 0),

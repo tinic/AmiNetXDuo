@@ -109,7 +109,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_ipv6_ra PRIVATE
         "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
         "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
-        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
         "${AMINETXDUO_NETXDUO}/common/inc"
         "${AMINETXDUO_THREADX}/common/inc")
 
@@ -135,7 +135,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_ipv6_ptb PRIVATE
         "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
         "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
-        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
         "${AMINETXDUO_NETXDUO}/common/inc"
         "${AMINETXDUO_THREADX}/common/inc")
 
@@ -160,7 +160,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_ipv6_frag PRIVATE
         "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
         "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
-        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
         "${AMINETXDUO_NETXDUO}/common/inc"
         "${AMINETXDUO_THREADX}/common/inc")
 

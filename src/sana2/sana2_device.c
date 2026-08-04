@@ -690,7 +690,7 @@ VOID ami_sana2_close(AmiSana2If *iface)
          */
         if (iface->rx_orphaned || iface->tx_orphaned)
         {
-            AMI_ERROR("sana2: leaking the interface -- the device still holds "
+            AMI_ERROR("sana2: leaking the interface, the device still holds "
                       "requests inside it");
             return;
         }
@@ -702,7 +702,7 @@ VOID ami_sana2_close(AmiSana2If *iface)
 
     if (iface->rx_orphaned || iface->tx_orphaned)
     {
-        AMI_ERROR("sana2: leaking the interface -- requests unreclaimed");
+        AMI_ERROR("sana2: leaking the interface, requests unreclaimed");
         return;
     }
 

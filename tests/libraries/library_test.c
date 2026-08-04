@@ -717,7 +717,7 @@ ULONG            waited;
 ULONG            closed_after;
 
 
-    t_log("AmiNetXDuo -- shared library load test");
+    t_log("AmiNetXDuo, shared library load test");
 
     /* ---- usergroup.library ---------------------------------------------- */
 
@@ -749,7 +749,7 @@ ULONG            closed_after;
     if (!t_check((BOOL) (child != NULL), "CreateNewProc(bsdsocket phase)", 0UL))
     {
         t_log("");
-        t_log("%ld checks, %ld failures -- FAIL", t_checks, t_failures);
+        t_log("%ld checks, %ld failures, FAIL", t_checks, t_failures);
         return(20);
     }
 
@@ -784,13 +784,13 @@ ULONG            closed_after;
                        closed_after / 5UL);
         if (t_child_done == 0UL)
         {
-            t_log("  the last close did not return in %ld s -- the teardown is "
+            t_log("  the last close did not return in %ld s, the teardown is "
                   "stuck", T_CLOSE_LIMIT / 5UL);
         }
     }
 
     t_log("");
-    t_log("%ld checks, %ld failures -- %s",
+    t_log("%ld checks, %ld failures, %s",
           t_checks, t_failures, (t_failures == 0UL) ? "PASS" : "FAIL");
 
     return((t_failures == 0UL) ? 0 : 20);

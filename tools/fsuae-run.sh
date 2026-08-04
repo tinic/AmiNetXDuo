@@ -339,7 +339,7 @@ held_dir() {
     return 0
 }
 
-slots_busy() { set -- "$SLOTDIR"/*/; [ -d "$1" ] && ls -d "$SLOTDIR"/*/ 2>/dev/null | wc -l || echo 0; }
+slots_busy() { set, "$SLOTDIR"/*/; [ -d "$1" ] && ls -d "$SLOTDIR"/*/ 2>/dev/null | wc -l || echo 0; }
 
 if [ "${AMINETXDUO_NO_LOCK:-0}" != "1" ]; then
     mkdir -p "$ROOT/build" "$SLOTDIR"
@@ -631,7 +631,7 @@ wait "$EMU_PID" 2>/dev/null || FSUAE_RC=$?
 # "exited early" is what sent one investigation after an Amiga bug that was
 # not there.
 if [ "$EARLY_EXIT" = "1" ] && [ "$FSUAE_RC" -gt 128 ]; then
-    echo "!! fs-uae was KILLED BY SIGNAL $((FSUAE_RC - 128)) -- a host-side" >&2
+    echo "!! fs-uae was KILLED BY SIGNAL $((FSUAE_RC - 128)), a host-side" >&2
     echo "!! death, not a guru.  Nothing about the emulated machine follows" >&2
     echo "!! from it." >&2
 fi
@@ -642,7 +642,7 @@ echo "---- serial ($SERIAL) ----"
 if [ -s "$SERIAL" ]; then
     cat "$SERIAL"
 else
-    echo "(empty -- no ami_log output reached the serial port)"
+    echo "(empty, no ami_log output reached the serial port)"
 fi
 
 for produced in "$HD"/*.txt "$HD"/*.log; do

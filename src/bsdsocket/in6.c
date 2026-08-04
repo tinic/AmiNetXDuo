@@ -59,7 +59,7 @@ _Static_assert(sizeof(struct in6_addr) == 16, "in6_addr is not 16 bytes");
 _Static_assert(sizeof(struct sockaddr_in6) == 28,
                "sockaddr_in6 is not the 28-byte no-sin6_len shape");
 _Static_assert(offsetof(struct sockaddr_in6, sin6_family)   ==  0,
-               "sin6_family moved -- is this NDK's sockaddr_in6 4.4BSD after "
+               "sin6_family moved, is this NDK's sockaddr_in6 4.4BSD after "
                "all, with a sin6_len at offset 0?");
 _Static_assert(offsetof(struct sockaddr_in6, sin6_port)     ==  2,
                "sin6_port moved");
@@ -196,12 +196,12 @@ BOOL bsd_addr_normalise(const AmiSocket *sock, NXD_ADDRESS *addr)
  * Refused, and why:
  *   IPV6_RTHDR, HOPOPTS, DSTOPTS, RTHDRDSTOPTS, PATHMTU, RECVPATHMTU,
  *   USE_MIN_MTU, DONTFRAG, NEXTHOP
- *      , the rest of RFC 3542.  The subset that is implemented, PKTINFO,
+ *, the rest of RFC 3542.  The subset that is implemented, PKTINFO,
  *          HOPLIMIT and ICMP6_FILTER, lives in cmsg.c and is dispatched
  *          from here; these name IPv6 extension headers and path-MTU state
  *          NetX Duo does not expose.
  *   IPV6_CHECKSUM
- *      , names the offset of a checksum field the stack should fill in for
+ *, names the offset of a checksum field the stack should fill in for
  *          an arbitrary raw protocol.  ICMPv6's is filled in unconditionally
  *          (raw.c) because RFC 4443 makes it mandatory and the sender cannot
  *          compute it; nothing else raw.c carries has one to place.

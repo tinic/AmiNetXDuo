@@ -182,7 +182,7 @@ ULONG   opt;
 
     if (!c68k_using_assembly())
     {
-        c68k_log("    (built without assembly -- both halves are the same code)");
+        c68k_log("    (built without assembly, both halves are the same code)");
     }
 }
 
@@ -444,13 +444,13 @@ ULONG   start;
     ami_crash_set_reference((APTR)main, "crypto68k_bench");
     if (!ami_crash_install())
     {
-        c68k_log("CRASHED -- see the serial log and DH0:crash.txt");
+        c68k_log("CRASHED, see the serial log and DH0:crash.txt");
         c68k_flush();
         ami_crash_remove();
         return(20);
     }
 
-    c68k_log("AmiNetXDuo -- crypto68k before/after benchmark");
+    c68k_log("AmiNetXDuo, crypto68k before/after benchmark");
     c68k_log("  limb primitives: %s",
              (LONG)(c68k_using_assembly() ? "68020 assembly" : "portable C"));
 
@@ -482,11 +482,11 @@ ULONG   start;
 
     if (b_failures == 0)
     {
-        c68k_log("0 correctness failures -- every timed result was checked");
+        c68k_log("0 correctness failures, every timed result was checked");
     }
     else
     {
-        c68k_log("%lu CORRECTNESS FAILURES -- timings are meaningless",
+        c68k_log("%lu CORRECTNESS FAILURES, timings are meaningless",
                  b_failures);
     }
 

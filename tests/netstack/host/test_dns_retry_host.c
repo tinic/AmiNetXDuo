@@ -12,12 +12,12 @@
  * with the DNS client replaced by a table of scripted answers, because the
  * three cases that matter cannot be produced on demand against a real server:
  *
- *   1. a black hole     , every attempt uses its whole wait and nothing comes
+ *   1. a black hole, every attempt uses its whole wait and nothing comes
  *                           back.  The lookup must end inside its budget rather
  *                           than at a multiple of it.
- *   2. Ctrl-C           , the break signal arrives mid-lookup.  It must be
+ *   2. Ctrl-C, the break signal arrives mid-lookup.  It must be
  *                           acted on within one rung, not at the end.
- *   3. a fast refusal   , a server answers immediately without an address.
+ *   3. a fast refusal, a server answers immediately without an address.
  *                           Re-asking cannot change that, so the ladder must
  *                           stop rather than spend the rest of the budget.
  *

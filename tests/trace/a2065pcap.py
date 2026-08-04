@@ -198,7 +198,7 @@ def main():
 
     print("a2065pcap: %d frames -> %s" % (len(frames), args.out))
     print("           guest MAC %s: %d out, %d in" % (guest, tx, rx))
-    print("           TIMESTAMPS ARE SYNTHETIC -- order only, never intervals")
+    print("           TIMESTAMPS ARE SYNTHETIC, order only, never intervals")
     return 0
 
 

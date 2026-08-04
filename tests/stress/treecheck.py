@@ -77,7 +77,7 @@ def main():
             print("%s: %d files, %d bytes, all content matches"
                   % (name, sum(got.values()), total))
             return 0
-        print("%s: %d files, %d bytes -- %d missing, %d not in the source"
+        print("%s: %d files, %d bytes, %d missing, %d not in the source"
               % (name, sum(got.values()), total, missing, extra))
         return 1
 

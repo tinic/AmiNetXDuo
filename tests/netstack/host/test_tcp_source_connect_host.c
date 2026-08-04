@@ -302,7 +302,7 @@ int main(void)
     h_check(h_syn.interface_ptr == &h_ip.nx_ip_interface[1],
             "it left by the SECOND interface, against the route's own answer");
     h_check(h_syn.source_ip == H_IF1_ADDR,
-            "its source is 10.0.0.2 -- the address that was asked for");
+            "its source is 10.0.0.2, the address that was asked for");
     h_check(h_socket.nx_tcp_socket_next_hop_address == H_PEER,
             "the next hop is the peer, on that interface");
 

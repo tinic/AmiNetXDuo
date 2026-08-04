@@ -368,7 +368,7 @@ int main(void)
     rc = p_control(base, NETCTRL_ROUTE_ADD, &ctl);
     Printf((CONST_STRPTR)"add 172.16.0.0/16 via 8.8.8.8: %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
     /*
      * Deleting a route that is not there, while the table is not empty.  The
@@ -383,7 +383,7 @@ int main(void)
     rc = p_control(base, NETCTRL_ROUTE_DELETE, &ctl);
     Printf((CONST_STRPTR)"delete 192.168.88.0/24 (never added): %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
     send_one(base);
 

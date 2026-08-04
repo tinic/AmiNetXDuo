@@ -184,7 +184,7 @@ int main(void)
     if (file == 0)
     {
         say("bootcheck: there is no " USER_STARTUP
-            " -- the installer wrote no startup line\n", 0);
+            ", the installer wrote no startup line\n", 0);
         Close(out);
         return 10;
     }

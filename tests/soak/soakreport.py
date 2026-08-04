@@ -114,7 +114,7 @@ def main(path):
         print("  TCP retransmissions: %d" % retx)
         if retx:
             first = next(int(r["t_s"]) for r in rows if int(r["tcp_retrans"]))
-            print("    first at %s -- over SLIRP, which drops nothing, so this"
+            print("    first at %s, over SLIRP, which drops nothing, so this"
                   % hms(first))
             print("    is the stack retransmitting against itself")
 

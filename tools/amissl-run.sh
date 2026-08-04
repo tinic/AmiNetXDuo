@@ -137,7 +137,7 @@ for lib in mathieeedoubbas mathieeedoubtrans; do
         printf '    %-28s %8d bytes (from %s)\n' \
             "$lib.library" "$(wc -c < "$src")" "$src"
     else
-        echo "    WARNING: no $lib.library found -- AmiSSL's clib2 startup"
+        echo "    WARNING: no $lib.library found, AmiSSL's clib2 startup"
         echo "             will not complete.  Set AMINETXDUO_MATHLIBS."
         MATH_MISSING=1
     fi

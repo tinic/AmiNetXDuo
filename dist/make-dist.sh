@@ -236,7 +236,7 @@ if [ -f "$BUILD/src/tlslib/tls.library" ]; then
     # to be a warning; it is a hard failure now.
     [ -f "$BUILD/certificates" ] || {
         echo "!! tls.library is packed and there is no $BUILD/certificates." >&2
-        echo "!! The build should have made one -- see src/tlslib/CMakeLists.txt" >&2
+        echo "!! The build should have made one, see src/tlslib/CMakeLists.txt" >&2
         echo "!! and third_party/cacert/README.md." >&2
         exit 2
     }
@@ -252,7 +252,7 @@ if [ -f "$BUILD/src/tlslib/tls.library" ]; then
         echo "!! $BUILD/certificates is not the pinned trust store." >&2
         echo "!!   expected $PIN" >&2
         echo "!!   got      $GOT" >&2
-        echo "!! Rebuild, or -- if this build used -DAMINETXDUO_CA_BUNDLE --" >&2
+        echo "!! Rebuild, or, if this build used -DAMINETXDUO_CA_BUNDLE --" >&2
         echo "!! pack it from a build that did not." >&2
         exit 2
     fi

@@ -9,7 +9,7 @@
  *   that operation.
  *
  *   The vendored divider is a correct implementation of the right algorithm
- *  , traditional long division with a two-digit quotient estimate, done in
+ *, traditional long division with a two-digit quotient estimate, done in
  *   16-bit half-limbs.  Its own declarations say so ("In number of USHORT
  *   words") and it takes its estimate from `>> (HN_SHIFT >> 1)`.  Halving the
  *   digit size doubles the number of quotient digits and doubles the length of

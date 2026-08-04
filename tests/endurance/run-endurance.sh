@@ -66,7 +66,7 @@ BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 UG="$ROOT/$BUILD/src/usergroup/usergroup.library"
 
 for f in "$OUT/Endurance" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree and run " \
+    [ -f "$f" ] || { echo "missing $f, build the tree and run " \
                           "tests/endurance/build.sh" >&2; exit 2; }
 done
 

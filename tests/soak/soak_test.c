@@ -1998,7 +1998,7 @@ ULONG   spawned;
 struct EClockVal ev;
 
 
-    S_LOG("AmiNetXDuo -- ThreadX Exec port soak (milestone 1 exit criterion)");
+    S_LOG("AmiNetXDuo, ThreadX Exec port soak (milestone 1 exit criterion)");
     S_LOG("  %ld s, %ld Hz tick, %ld workers (%ld adopted), %ld churners",
           S_SOAK_SECONDS, S_TPS, (ULONG) S_WORKERS, 4UL, (ULONG) S_CHURNERS);
 
@@ -2422,10 +2422,10 @@ struct EClockVal ev;
      */
     S_LOG("note: %ld ThreadX threads still exist; the ThreadX scheduler and tick",
           _tx_thread_created_count);
-    S_LOG("note: Tasks outlive this program -- the port has no kernel-stop path");
+    S_LOG("note: Tasks outlive this program, the port has no kernel-stop path");
 
     S_LOG("");
-    S_LOG("%ld checks, %ld failures -- %s", s_checks, s_failures,
+    S_LOG("%ld checks, %ld failures, %s", s_checks, s_failures,
           (s_failures == 0UL) ? "PASS" : "FAIL");
 
     s_write_result("soak+teardown");

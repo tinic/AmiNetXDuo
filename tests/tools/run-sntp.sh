@@ -82,10 +82,10 @@ BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 TLSLIB="$ROOT/$BUILD/src/tlslib/tls.library"
 
 for f in "$SMOKE" "$ADDIF" "$SNTP" "$FETCH" "$NETSTAT" "$CLOCKSET" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 [ -f "$TLSLIB" ] || {
-    echo "missing $TLSLIB -- this test needs an AMINETXDUO_TLS=ON build" >&2
+    echo "missing $TLSLIB, this test needs an AMINETXDUO_TLS=ON build" >&2
     exit 2
 }
 
@@ -113,7 +113,7 @@ print("    %s (%s) stratum %d, NTP seconds %d" % (host, ip, d[1], secs))
 EOF
 
 if ! python3 "$ROOT/build/sntp-probe.py" "$TIMESERVER"; then
-    echo "!! no SNTP answer from that server.  This test needs one -- see the" >&2
+    echo "!! no SNTP answer from that server.  This test needs one, see the" >&2
     echo "   comment at the top of the script for why it cannot be local." >&2
     exit 2
 fi
@@ -279,7 +279,7 @@ check_has  e-ctl-after.txt  "validity dates checked" \
 
 echo
 if [ "$fail" -ne 0 ]; then
-    echo "!! the before/after did not hold -- read the files above"
+    echo "!! the before/after did not hold, read the files above"
     exit 1
 fi
 

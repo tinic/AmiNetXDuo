@@ -138,7 +138,7 @@ static VOID ami_ns_mdns_probing(NX_MDNS *mdns_ptr, UCHAR *name, UINT state)
                                                 ns->ns_MdnsLabel))
         {
             AMI_WARN("netstack: the name '%s' is already taken on this "
-                     "network, so this machine claimed '%s' instead -- set "
+                     "network, so this machine claimed '%s' instead, set "
                      "HOSTNAME to give it a name of its own",
                      ns->ns_MdnsLabel, (const char *)name);
         }
@@ -146,7 +146,7 @@ static VOID ami_ns_mdns_probing(NX_MDNS *mdns_ptr, UCHAR *name, UINT state)
 
     case NX_MDNS_LOCAL_SERVICE_REGISTERED_FAILURE:
         ns->ns_MdnsClaimed = FALSE;
-        AMI_ERROR("netstack: '%s.%s' is taken and every alternative was too -- "
+        AMI_ERROR("netstack: '%s.%s' is taken and every alternative was too, "
                   "this machine has NO mDNS name. Set HOSTNAME to something "
                   "nothing else on this network is using",
                   ns->ns_MdnsLabel,
@@ -249,7 +249,7 @@ LONG ami_netstack_mdns_start(AmiNetStack *ns)
                             ami_ns_mdns_probing);
     if (status != NX_SUCCESS)
     {
-        AMI_WARN("netstack: nx_mdns_create failed (%ld) -- this machine will "
+        AMI_WARN("netstack: nx_mdns_create failed (%ld), this machine will "
                  "have no .local name", (long)status);
         ami_free(ns->ns_MdnsStack);
         ns->ns_MdnsStack = NULL;

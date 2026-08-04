@@ -181,13 +181,13 @@ BENCH="$BUILD/tests/perf/FitzBench"
 SMOKE="$BUILD/src/tools/ToolsSmoke"
 PROF="$BUILD/tools/profiler/Profile"
 for f in "$FITZ" "$BENCH" "$SMOKE"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 [ "$PROFILE" = 0 ] || [ -f "$PROF" ] || {
     echo "missing $PROF -- cmake --build $BUILD --target Profile" >&2; exit 2; }
 
 A2065="${AMINETXDUO_A2065:-$ROOT/build/a2065.device}"
-[ -f "$A2065" ] || { echo "no a2065.device -- set AMINETXDUO_A2065" >&2; exit 2; }
+[ -f "$A2065" ] || { echo "no a2065.device, set AMINETXDUO_A2065" >&2; exit 2; }
 
 # ------------------------------------------------------------- the server ---
 

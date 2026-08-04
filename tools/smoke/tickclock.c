@@ -234,7 +234,7 @@ int main(int argc, char **argv)
     if (status != TX_SUCCESS)
         Printf((CONST_STRPTR)"tx_amiga_kernel_stop() returned %lu\n", (ULONG)status);
 
-    Printf((CONST_STRPTR)"\n%ld checks, %ld failure(s) -- %s\n", checks, failures,
+    Printf((CONST_STRPTR)"\n%ld checks, %ld failure(s), %s\n", checks, failures,
            (LONG)(failures == 0 ? "PASS" : "FAIL"));
 
     return (failures == 0) ? RETURN_OK : RETURN_ERROR;

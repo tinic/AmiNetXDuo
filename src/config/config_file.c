@@ -252,7 +252,7 @@ static VOID load_interfaces(AmiConfig *cfg)
                         "the DEVS:NetInterfaces drawer holds no usable "
                         "interface file",
                         "One file per network card goes in there, named "
-                        "however you want to refer to the card -- eth0 is the "
+                        "however you want to refer to the card, eth0 is the "
                         "usual choice.  NetSetup writes one for you.");
         ami_cfg_problem_file(NULL);
     }

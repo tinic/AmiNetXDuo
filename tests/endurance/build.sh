@@ -61,7 +61,7 @@ echo "  CC endurance.c"
 # ---- Fitz ----------------------------------------------------------------
 
 if [ ! -d "$FITZ/src" ]; then
-    echo "==> no build/fitz -- run tests/endurance/fetch-fitz.sh for the Fitz arm"
+    echo "==> no build/fitz, run tests/endurance/fetch-fitz.sh for the Fitz arm"
     exit 0
 fi
 

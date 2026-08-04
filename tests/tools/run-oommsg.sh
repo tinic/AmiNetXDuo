@@ -81,7 +81,7 @@ done
 ADDIF="$ROOT/$BUILD/src/tools/AddNetInterface"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 for f in "$ADDIF" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
 KICK="${AMINETXDUO_KICKSTART_A2000:-}"
@@ -153,18 +153,18 @@ pass() { echo "  ok: $*"; }
 
 expect() {
     local what="$1"; shift
-    if grep -qiF -- "$*" "$REPORT"; then
+    if grep -qiF, "$*" "$REPORT"; then
         pass "$what"
     else
-        fail "$what -- nothing printed \"$*\""
+        fail "$what, nothing printed \"$*\""
     fi
 }
 
 reject() {
     local what="$1"; shift
-    if grep -qiF -- "$*" "$REPORT"; then
-        fail "$what -- \"$*\" was printed and should not have been"
-        grep -niF -- "$*" "$REPORT" | sed 's/^/       /' >&2
+    if grep -qiF, "$*" "$REPORT"; then
+        fail "$what, \"$*\" was printed and should not have been"
+        grep -niF, "$*" "$REPORT" | sed 's/^/       /' >&2
     else
         pass "$what"
     fi
@@ -197,7 +197,7 @@ RC=$(cat "$HD/.done" 2>/dev/null || echo "")
 if [ "$RC" = "20" ]; then
     pass "AddNetInterface exited 20"
 else
-    fail "AddNetInterface exited '$RC', not 20 -- a failure reported as success"
+    fail "AddNetInterface exited '$RC', not 20, a failure reported as success"
 fi
 
 # The stack's own refusal, on the serial port, is what the text is explaining.
@@ -205,7 +205,7 @@ SERIAL="$ROOT/build/amiberry-serial-$AMINETXDUO_RUN_TAG.log"
 if grep -qi "netstack_startup failed" "$SERIAL" 2>/dev/null; then
     pass "the stack refused for the reason the text describes"
 else
-    fail "the serial log has no netstack_startup failure -- the run failed elsewhere"
+    fail "the serial log has no netstack_startup failure, the run failed elsewhere"
     [ -f "$SERIAL" ] && tail -20 "$SERIAL" | sed 's/^/       /' >&2
 fi
 

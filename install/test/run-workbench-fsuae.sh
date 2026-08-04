@@ -166,7 +166,7 @@ if [ -z "$XDFTOOL" ]; then
 fi
 
 command -v lha >/dev/null 2>&1 || {
-    echo "lha not found -- needed to unpack the release archive on the host." >&2
+    echo "lha not found, needed to unpack the release archive on the host." >&2
     exit 2
 }
 
@@ -225,7 +225,7 @@ unpack_adf() {
 
 if [ "$wb_stale" = "1" ]; then
     [ -n "$XDFTOOL" ] && [ -x "$XDFTOOL" ] || {
-        echo "amitools' xdftool not found -- needed to unpack the Workbench ADFs." >&2
+        echo "amitools' xdftool not found, needed to unpack the Workbench ADFs." >&2
         echo "  pip install amitools, or set AMINETXDUO_XDFTOOL=<path>" >&2
         exit 2
     }
@@ -271,7 +271,7 @@ if [ -z "$ARCHIVE" ]; then
     echo "==> building the distribution archive"
     AMINETXDUO_DIST_CPUS="68020-40" \
         "$ROOT/dist/make-dist.sh" -b "$BUILD" >"$ROOT/build/wb31-make-dist.log" 2>&1 || {
-        echo "dist/make-dist.sh failed -- see build/wb31-make-dist.log" >&2
+        echo "dist/make-dist.sh failed, see build/wb31-make-dist.log" >&2
         tail -20 "$ROOT/build/wb31-make-dist.log" >&2
         exit 2
     }
@@ -566,7 +566,7 @@ echo "  2/2  rebooting, and using the machine as its owner would"
 echo "============================================================"
 
 if [ "$(shasum "$HD/S/Startup-Sequence" | cut -d' ' -f1)" != "$STARTUP_SUM" ]; then
-    echo "note: the installer also changed S:Startup-Sequence -- diff against"
+    echo "note: the installer also changed S:Startup-Sequence, diff against"
     echo "      the stock 3.1 one is worth reading before the reboot"
 fi
 
@@ -595,7 +595,7 @@ Echo >>DH0:usercheck.txt "*N=== 3. fetch https://tls-v1-2.badssl.com/"
 C:fetch https://tls-v1-2.badssl.com/ TO DH0:https-body.txt >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT fetch-https rc=\$RC"
 
-Echo >>DH0:usercheck.txt "*N=== 4. arp -- what answered on this network"
+Echo >>DH0:usercheck.txt "*N=== 4. arp, what answered on this network"
 C:arp >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT arp rc=\$RC"
 
@@ -662,5 +662,5 @@ if [ "$bad" = "0" ] && [ "$BOOT_STATUS" != "124" ]; then
     exit 0
 fi
 echo "==> FAIL: see the table above; the drive is left at $HD"
-echo "    Nothing here is adjusted to make it pass -- the failure IS the result."
+echo "    Nothing here is adjusted to make it pass, the failure IS the result."
 exit 1

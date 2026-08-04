@@ -156,7 +156,7 @@ static void expect_empty(const char *where)
     if (ami_mbuf_outstanding() != 0 || ami_mbuf_clusters_outstanding() != 0)
     {
         failures++;
-        printf("  FAIL %s: leak -- %lu mbufs, %lu clusters outstanding\n",
+        printf("  FAIL %s: leak, %lu mbufs, %lu clusters outstanding\n",
                where, (unsigned long)ami_mbuf_outstanding(),
                (unsigned long)ami_mbuf_clusters_outstanding());
     }

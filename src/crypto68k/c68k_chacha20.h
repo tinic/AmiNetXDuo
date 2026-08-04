@@ -120,8 +120,8 @@ UINT c68k_chacha20_core_is_asm(VOID);
  * some number of UPDATEs over a packet chain, one CALCULATE.
  *
  *   c68k_chacha20_poly1305_initialize(ctx, key, nonce)
- *   c68k_chacha20_poly1305_associate(ctx, aad, aad_length)  , zero or more
- *   c68k_chacha20_poly1305_encrypt(ctx, in, out, n)         , or _decrypt
+ *   c68k_chacha20_poly1305_associate(ctx, aad, aad_length), zero or more
+ *   c68k_chacha20_poly1305_encrypt(ctx, in, out, n), or _decrypt
  *   c68k_chacha20_poly1305_tag(ctx, tag)
  *
  * No associated data may be added once the first payload byte has gone

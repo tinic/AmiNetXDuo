@@ -62,7 +62,7 @@ if [ "$CHECK" = 1 ]; then
     if diff -ru "$DEST" "$tmp"; then
         echo "gen-developer: generated headers match $SFD"
     else
-        echo "gen-developer: developer/include is stale -- run tools/gen-developer.sh" >&2
+        echo "gen-developer: developer/include is stale, run tools/gen-developer.sh" >&2
         exit 1
     fi
 else

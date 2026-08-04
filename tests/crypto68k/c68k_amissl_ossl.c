@@ -24,7 +24,7 @@
  *   and padding is a memcpy and a memcmp on this scale.  RSA_public_encrypt()
  *   and RSA_private_decrypt() with RSA_NO_PADDING are the shortest route to
  *   "raise this 2048-bit number to this power" through OpenSSL's real RSA path
- *  , the same rsa_ossl_mod_exp() a TLS handshake reaches, including its CRT,
+ *, the same rsa_ossl_mod_exp() a TLS handshake reaches, including its CRT,
  *   its constant-time exponentiation and (unless turned off) its blinding.
  *
  * SPDX-License-Identifier: MIT
@@ -114,7 +114,7 @@ struct TagItem  tags[5];
 
     if (OpenAmiSSLTagList(AMISSL_CURRENT_VERSION, tags) != 0)
     {
-        strncpy(err, "OpenAmiSSLTagList failed -- is LIBS:AmiSSL/ populated?",
+        strncpy(err, "OpenAmiSSLTagList failed, is LIBS:AmiSSL/ populated?",
                 err_len - 1);
         err[err_len - 1] = '\0';
         CloseLibrary(AmiSSLMasterBase);

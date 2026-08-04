@@ -392,7 +392,7 @@ LONG value;
                   "setsockopt SO_OOBINLINE=0", bsd_Errno());
     (VOID)t_get_int(fd, SOL_SOCKET, SO_OOBINLINE, &value);
     (VOID)t_check((BOOL)(value == 1),
-                  "SO_OOBINLINE reads back 1 -- always in force", value);
+                  "SO_OOBINLINE reads back 1, always in force", value);
 
     (VOID)bsd_CloseSocket(fd);
 }
@@ -659,7 +659,7 @@ LONG value;
     (VOID)t_set_int(fd, IPPROTO_TCP, TCP_NODELAY, 0);
     (VOID)t_get_int(fd, IPPROTO_TCP, TCP_NODELAY, &value);
     (VOID)t_check((BOOL)(value == 1),
-                  "and still 1 after asking for Nagle -- there is none",
+                  "and still 1 after asking for Nagle, there is none",
                   value);
 
     (VOID)t_check((BOOL)(bsd_setsockopt(fd, IPPROTO_TCP, TCP_NODELAY,
@@ -843,7 +843,7 @@ socklen_t   len;
     len     = 4;
     (VOID)bsd_getsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL, &value32, &len);
     (VOID)t_check((BOOL)(value32 == 5),
-                  "a WORD of 5 is 5, not 0 -- the high byte is not the value",
+                  "a WORD of 5 is 5, not 0, the high byte is not the value",
                   value32);
 
     /* Two bytes out: the one that wrote one byte and answered 1280. */
@@ -975,7 +975,7 @@ UBYTE           buf[512];
 
 int main(void)
 {
-    t_log("AmiNetXDuo -- socket options through bsdsocket.library");
+    t_log("AmiNetXDuo, socket options through bsdsocket.library");
 
     /*
      * The stack needs an interface to come up on, and this one is made at run
@@ -1018,7 +1018,7 @@ int main(void)
     SocketBase = NULL;
 
     t_log("");
-    t_log("%ld checks, %ld failures -- %s", t_checks, t_failures,
+    t_log("%ld checks, %ld failures, %s", t_checks, t_failures,
           (t_failures == 0UL) ? "PASS" : "FAIL");
 
     t_flush();

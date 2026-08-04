@@ -71,8 +71,8 @@ static void check(const char *what, BOOL ok)
 
 static void report(const char *what, LONG value)
 {
-    Printf((CONST_STRPTR)"  --   %s: %ld\n", (LONG)what, value);
-    AMI_ERROR("  --   %s: %ld", (LONG)what, value);
+    Printf((CONST_STRPTR)" ,   %s: %ld\n", (LONG)what, value);
+    AMI_ERROR(" ,   %s: %ld", (LONG)what, value);
 }
 
 static void hex32(char *out, const UBYTE *in, int n)
@@ -242,9 +242,9 @@ int main(void)
     }
 
     report("credited entropy (bits)", (LONG)ami_random_entropy_bits());
-    Printf((CONST_STRPTR)"  --   ami_random_is_seeded(): %s\n",
+    Printf((CONST_STRPTR)" ,   ami_random_is_seeded(): %s\n",
            (LONG)(ami_random_is_seeded() ? "TRUE" : "FALSE"));
-    AMI_ERROR("  --   ami_random_is_seeded(): %s",
+    AMI_ERROR(" ,   ami_random_is_seeded(): %s",
               (LONG)(ami_random_is_seeded() ? "TRUE" : "FALSE"));
 
     probe_jitter();
@@ -330,8 +330,8 @@ int main(void)
     /* ---- the cold-boot artefact ------------------------------------------ */
 
     hex32(line, buf, 32);
-    Printf((CONST_STRPTR)"  --   first 32 bytes: %s\n", (LONG)line);
-    AMI_ERROR("  --   first 32 bytes: %s", (LONG)line);
+    Printf((CONST_STRPTR)" ,   first 32 bytes: %s\n", (LONG)line);
+    AMI_ERROR(" ,   first 32 bytes: %s", (LONG)line);
 
     fh = Open((CONST_STRPTR)"DH0:randtest.txt", MODE_NEWFILE);
     if (fh != 0)
@@ -339,12 +339,12 @@ int main(void)
         FPuts(fh, (CONST_STRPTR)line);
         FPuts(fh, (CONST_STRPTR)"\n");
         Close(fh);
-        Printf((CONST_STRPTR)"  --   wrote DH0:randtest.txt -- "
+        Printf((CONST_STRPTR)" ,   wrote DH0:randtest.txt, "
                              "diff two cold-boot runs\n");
     }
     else
     {
-        Printf((CONST_STRPTR)"  --   could not write DH0:randtest.txt\n");
+        Printf((CONST_STRPTR)" ,   could not write DH0:randtest.txt\n");
     }
 
     FreeVec(buf);

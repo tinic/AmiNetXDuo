@@ -348,7 +348,7 @@ ULONG ms;
 
     if (prof_odd_formats() != 0UL)
     {
-        prof_log("  FATAL: %ld frames were not format $0 -- the PCs in this"
+        prof_log("  FATAL: %ld frames were not format $0, the PCs in this"
                  " profile are not trustworthy", (long)prof_odd_formats());
         t_failures++;
     }
@@ -404,7 +404,7 @@ int main(void)
 {
 UINT status;
 
-    prof_log("AmiNetXDuo -- TCP transfer under the PC sampler");
+    prof_log("AmiNetXDuo, TCP transfer under the PC sampler");
 
     memset(t_src_buf, 0x5A, sizeof(t_src_buf));
 
@@ -429,7 +429,7 @@ UINT status;
 
     (VOID)tx_amiga_orphan_thread(&t_main_thread);
 
-    prof_log("%ld failures -- %s", (long)t_failures,
+    prof_log("%ld failures, %s", (long)t_failures,
              t_failures == 0UL ? "PASS" : "FAIL");
 
     return(t_failures == 0UL ? 0 : 20);

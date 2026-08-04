@@ -92,12 +92,12 @@ start)
     mkdir -p "$DIR/xfer"
 
     if [ ! -f "$DIR/hostkey_ed25519" ]; then
-        echo "==> host key (ed25519 -- the only kind BebboSSH verifies)"
+        echo "==> host key (ed25519, the only kind BebboSSH verifies)"
         ssh-keygen -t ed25519 -f "$DIR/hostkey_ed25519" -N "" -q -C bebbossh-test
     fi
 
     if [ ! -f "$DIR/id_ed25519" ]; then
-        echo "==> client key (OpenSSH format, made on the HOST -- see above)"
+        echo "==> client key (OpenSSH format, made on the HOST, see above)"
         ssh-keygen -t ed25519 -f "$DIR/id_ed25519" -N "" -q -C amiga
         cp "$DIR/id_ed25519.pub" "$DIR/authorized_keys"
         chmod 600 "$DIR/authorized_keys" "$DIR/id_ed25519"

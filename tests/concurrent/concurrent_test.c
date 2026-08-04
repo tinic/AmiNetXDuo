@@ -680,7 +680,7 @@ static VOID ct_app_entry(VOID)
            this means the signal was already pending at creation and the Wait()
            fell straight through. Say so rather than exiting silently, which
            reads from outside as a child that never started. */
-        ct_trace("child woke with no CtApp -- SIGF_SINGLE was already set");
+        ct_trace("child woke with no CtApp, SIGF_SINGLE was already set");
         return;
     }
 
@@ -785,7 +785,7 @@ static VOID ct_main_body(VOID)
     ct_check(base != NULL, "parent opens bsdsocket.library", 0);
     if (base == NULL)
     {
-        ct_log("%ld checks, %ld failures -- FAIL\n",
+        ct_log("%ld checks, %ld failures, FAIL\n",
                (LONG)ct_checks, (LONG)ct_failures);
         return;
     }
@@ -918,10 +918,10 @@ static VOID ct_main_body(VOID)
      * nobody ever reads, which is how the first version of this managed to
      * hang and report nothing.
      */
-    ct_log("%ld checks, %ld failures -- %s\n",
+    ct_log("%ld checks, %ld failures, %s\n",
            (LONG)ct_checks, (LONG)ct_failures,
            (LONG)((ct_failures == 0UL) ? "PASS" : "FAIL"));
-    ct_trace("%ld checks, %ld failures -- %s",
+    ct_trace("%ld checks, %ld failures, %s",
              (LONG)ct_checks, (LONG)ct_failures,
              (LONG)((ct_failures == 0UL) ? "PASS" : "FAIL"));
 
@@ -963,7 +963,7 @@ static VOID ct_main_body(VOID)
      * whole function runs on a spawned Process rather than on main()'s, which
      * a Kickstart 3.1 Shell gives 4,096 bytes.
      */
-    ct_trace("parent: CloseLibrary (last base -- this stops the stack)");
+    ct_trace("parent: CloseLibrary (last base, this stops the stack)");
     CloseLibrary(base);
     ct_trace("parent: stack stopped");
 }
@@ -1013,7 +1013,7 @@ int main(int argc, char **argv)
 
     if (p == NULL)
     {
-        ct_log("concurrent: cannot spawn the main Process -- FAIL\n");
+        ct_log("concurrent: cannot spawn the main Process, FAIL\n");
         ct_trace("cannot spawn the main Process");
         return 20;
     }

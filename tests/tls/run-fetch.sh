@@ -53,7 +53,7 @@ TLS="$ROOT/$BUILD/src/tlslib/tls.library"
 STORE="$ROOT/$BUILD/certificates"
 
 for f in "$SMOKE" "$FETCH" "$ADDIF" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
 # tls.library and the trust store are optional here on purpose: without them
@@ -96,7 +96,7 @@ if [ "$HAVE_TLS" = "1" ]; then
     cp "$STORE" "$STAGE/devs/Internet/certificates"
     echo "==> tls.library staged, trust store $(wc -c < "$STORE" | tr -d ' ') bytes"
 else
-    echo "==> NO tls.library in $BUILD -- the https: lines must fail legibly"
+    echo "==> NO tls.library in $BUILD, the https: lines must fail legibly"
 fi
 
 # One interface up front, so the stack comes up once and stays up: every

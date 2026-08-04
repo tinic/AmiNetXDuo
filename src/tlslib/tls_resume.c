@@ -423,7 +423,7 @@ static ULONG tls_resume_trust_key(const TLSConnection *conn)
     hash ^= store;                          hash *= TLS_R_FNV_PRIME;
 
     /* Zero means "not set" in a decoded record, so it must not be a real key
-      , a stale or truncated file would otherwise match a live one. */
+, a stale or truncated file would otherwise match a live one. */
     return (hash == 0) ? TLS_R_FNV_PRIME : hash;
 }
 

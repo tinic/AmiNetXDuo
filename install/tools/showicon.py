@@ -3,7 +3,7 @@
 
 Written against <workbench/workbench.h> independently of makeicon.py so that
 the two disagreeing is a signal.  It walks every field in order and finishes
-by checking that the file was consumed exactly -- an icon with bytes left
+by checking that the file was consumed exactly, an icon with bytes left
 over, or one that runs short, is an icon icon.library will mis-read.
 
 Usage: showicon.py <file.info> [...]

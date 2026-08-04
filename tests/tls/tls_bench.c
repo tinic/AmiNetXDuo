@@ -7,7 +7,7 @@
  * takes on the floor target.
  *
  *   Public key, per handshake, once:
- *     RSA-2048 public op  , every certificate signature the client checks,
+ *     RSA-2048 public op, every certificate signature the client checks,
  *                             plus the ServerKeyExchange signature under
  *                             ECDHE_RSA, plus the premaster encryption under
  *                             plain RSA key exchange.  e = 65537, so this is
@@ -17,10 +17,10 @@
  *                             measured both plain and CRT, because CRT is ~3x
  *                             and nx_crypto only uses it when the primes are
  *                             supplied.
- *     ECDHE P-256 keygen  , one fixed-point scalar multiply.
- *     ECDHE P-256 shared  , one variable-point scalar multiply.  These two
+ *     ECDHE P-256 keygen, one fixed-point scalar multiply.
+ *     ECDHE P-256 shared, one variable-point scalar multiply.  These two
  *                             are what an ECDHE_* suite costs the client.
- *     ECDSA P-256 verify  , for hosts that serve ECDSA certificates, which
+ *     ECDSA P-256 verify, for hosts that serve ECDSA certificates, which
  *                             is most of the modern web.
  *
  *   Bulk, per byte, forever after:
@@ -36,7 +36,7 @@
  *   measurements, and are labelled as such.
  *
  *   nx_port.h does not define NX_RAND, so nx_api.h falls back to newlib rand()
- *  , a 32-bit LCG.  ECDHE private keys come out of it.  That is fine for a
+ *, a 32-bit LCG.  ECDHE private keys come out of it.  That is fine for a
  *   benchmark (the arithmetic is identical whatever the bits are) and is a
  *   hard blocker for shipping.  Flagged in src/tls/tls.h.
  *
@@ -1186,13 +1186,13 @@ ULONG   hz;
          * A caught exception resumes here.  crashguard.h is explicit that the
          * unwind is not trustworthy, so get the report out and fail.
          */
-        b_log("CRASHED -- see the serial log and DH0:crash.txt");
+        b_log("CRASHED, see the serial log and DH0:crash.txt");
         b_flush();
         ami_crash_remove();
         return(20);
     }
 
-    b_log("AmiNetXDuo -- nx_secure crypto benchmark (docs/RESEARCH.md 9 gate)");
+    b_log("AmiNetXDuo, nx_secure crypto benchmark (docs/RESEARCH.md 9 gate)");
 
     if (!ami_tls_timer_open())
     {
@@ -1207,7 +1207,7 @@ ULONG   hz;
           (hz != 0) ? (1000000000UL / hz) : 0UL);
 
     seed = ami_tls_seed_rng();
-    b_log("  entropy pool credits itself %lu bits -- see "
+    b_log("  entropy pool credits itself %lu bits, see "
           "include/aminetxduo/random.h", seed);
     b_log("  ami_random_is_seeded() = %s; a real handshake must refuse or be "
           "given a seed",
@@ -1249,11 +1249,11 @@ ULONG   hz;
 
     if (b_failures == 0)
     {
-        b_log("%lu measurements, 0 failures -- PASS", b_result_count);
+        b_log("%lu measurements, 0 failures, PASS", b_result_count);
     }
     else
     {
-        b_log("%lu measurements, %lu failures -- FAIL", b_result_count,
+        b_log("%lu measurements, %lu failures, FAIL", b_result_count,
               b_failures);
     }
 

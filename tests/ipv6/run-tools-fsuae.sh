@@ -92,7 +92,7 @@ STAGED_TOOLS="AddNetInterface ShowNetStatus netstat ping nc telnet whois \
               host fetch sntp"
 
 for t in $STAGED_TOOLS ToolsSmoke; do
-    [ -f "$TOOLS/$t" ] || { echo "missing $TOOLS/$t -- build $BUILD first" >&2
+    [ -f "$TOOLS/$t" ] || { echo "missing $TOOLS/$t, build $BUILD first" >&2
                             exit 2; }
 done
 [ -f "$BSD" ] || { echo "missing $BSD" >&2; exit 2; }
@@ -298,8 +298,8 @@ code() {
     ' "$REPORT"
 }
 
-have()    { block "$1" | grep -qiF -- "$2"; }
-have_re() { block "$1" | grep -qE  -- "$2"; }
+have()    { block "$1" | grep -qiF, "$2"; }
+have_re() { block "$1" | grep -qE , "$2"; }
 
 # want CASE PHRASE WHY / deny CASE PHRASE WHY, and the _soon pair for the
 # work that is not in yet.
@@ -324,12 +324,12 @@ else
     BOOT_SRC="the transcript (no serial output on this host)"
 fi
 if [ "$BOOTS" -gt 1 ]; then
-    bad "THE MACHINE REBOOTED: $BOOT_SRC shows $BOOTS starts -- a command
+    bad "THE MACHINE REBOOTED: $BOOT_SRC shows $BOOTS starts, a command
            crashed hard enough to reset the Amiga, which is not a hang"
 elif [ "$BOOTS" -eq 1 ]; then
     ok "the machine booted exactly once, per $BOOT_SRC"
 else
-    bad "no start found in $BOOT_SRC -- the run did not get far enough to judge"
+    bad "no start found in $BOOT_SRC, the run did not get far enough to judge"
 fi
 
 # ---- control: IPv4 still works, in both modes ----------------------------
@@ -339,7 +339,7 @@ if [ -f "$HD/nc-v4srv.txt" ] &&
    tr -d '\r' < "$HD/nc-v4srv.txt" | grep -qF "hello from the amiga"; then
     ok "nc over 127.0.0.1 delivered the greeting"
 else
-    bad "nc over 127.0.0.1 did not deliver the greeting -- IPv4 loopback broke"
+    bad "nc over 127.0.0.1 did not deliver the greeting, IPv4 loopback broke"
 fi
 
 # ---- control: a real name failure must still name the resolver -----------
@@ -420,7 +420,7 @@ want "SYS:tftp ::1 GET nosuchfile PORT 7095 TIMEOUT 5" "from ::1" \
 # ---- v6: ping and traceroute answer -------------------------------------
 want "SYS:ping ::1 -c 2 -t 20"        "2 received" "ping ::1 got both replies"
 want "SYS:ping fd00::10 -c 2 -t 20"   "2 received" \
-     "ping fd00::10 answered -- the configured ADDRESS6 is live"
+     "ping fd00::10 answered, the configured ADDRESS6 is live"
 want "SYS:ping fe80::2 -c 2 -t 20"    "2 received" \
      "ping fe80::2 crossed the wire to SLIRP's router"
 

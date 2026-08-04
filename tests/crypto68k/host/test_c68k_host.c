@@ -1189,7 +1189,7 @@ static VOID t_bulk(VOID)
 {
     unsigned v;
 
-    printf("\nthe bulk path -- AES and SHA-256 against the published "
+    printf("\nthe bulk path, AES and SHA-256 against the published "
            "vectors\n");
 
     for (v = 0; v < C68K_AES_V_COUNT; v++)
@@ -1217,7 +1217,7 @@ static VOID t_bulk(VOID)
 
 int main(void)
 {
-    printf("AmiNetXDuo -- crypto68k correctness gate (host tier)\n");
+    printf("AmiNetXDuo, crypto68k correctness gate (host tier)\n");
     printf("  limb primitives: %s\n",
            c68k_using_assembly() ? "68020 assembly" : "portable C");
 
@@ -1232,10 +1232,10 @@ int main(void)
 
     if (t_failures == 0)
     {
-        printf("\n%lu checks, 0 failures -- PASS\n", t_checks);
+        printf("\n%lu checks, 0 failures, PASS\n", t_checks);
         return(0);
     }
 
-    printf("\n%lu checks, %lu failures -- FAIL\n", t_checks, t_failures);
+    printf("\n%lu checks, %lu failures, FAIL\n", t_checks, t_failures);
     return(1);
 }

@@ -7,9 +7,9 @@
 #
 # WHAT THIS RUNS
 #
-#   host   fitz-serve <scratch> PORT 17711       , no FUSE needed
-#   guest  fitz mount 10.0.2.2:17711 FITZ:       , Fitz's AmigaDOS handler
-#   guest  Endurance (mode fitz)                 , files in and out, for hours
+#   host   fitz-serve <scratch> PORT 17711, no FUSE needed
+#   guest  fitz mount 10.0.2.2:17711 FITZ:, Fitz's AmigaDOS handler
+#   guest  Endurance (mode fitz), files in and out, for hours
 #
 # The Amiga is the CLIENT and the host is the SERVER, and that is not
 # arbitrary: mounting on the host would need FUSE, which neither this Mac nor
@@ -88,7 +88,7 @@ SMOKE="$ROOT/$BUILD/src/tools/ToolsSmoke"
 ADDIF="$ROOT/$BUILD/src/tools/AddNetInterface"
 
 for f in "$OUT/Endurance" "$OUT/fitz-serve" "$BSD" "$SMOKE" "$ADDIF"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree and run " \
+    [ -f "$f" ] || { echo "missing $f, build the tree and run " \
                           "tests/endurance/build.sh" >&2; exit 2; }
 done
 

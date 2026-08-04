@@ -129,7 +129,7 @@ static void test_ordinary(void)
 
 static void test_device_escape(void)
 {
-    printf("the colon -- an AmigaOS device reference\n");
+    printf("the colon, an AmigaOS device reference\n");
 
     /*
      * Every one of these resolves to a real place on a real Amiga, and not

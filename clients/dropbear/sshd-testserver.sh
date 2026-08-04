@@ -86,7 +86,7 @@ start)
     db_host_tools || exit 1
 
     if [ ! -f "$DIR/id_amiga" ]; then
-        echo "==> client key (Dropbear format, made on the HOST -- see above)"
+        echo "==> client key (Dropbear format, made on the HOST, see above)"
         "$ROOT/build/dropbear-host/dropbearkey" -t ed25519 -f "$DIR/id_amiga" \
             | sed -n 's/^Fingerprint/  fingerprint/p'
         "$ROOT/build/dropbear-host/dropbearkey" -y -f "$DIR/id_amiga" \

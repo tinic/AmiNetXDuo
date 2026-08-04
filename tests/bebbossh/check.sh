@@ -51,7 +51,7 @@ check_pair() {
     # transfer is not a failure, but something it WAS asked for and did not
     # produce is, which is why this keys on the command list and not on whether
     # the file happens to exist.
-    grep -q -- "$(basename "$got")" "$REPORT" || return 0
+    grep -q, "$(basename "$got")" "$REPORT" || return 0
     NCHECK=$((NCHECK + 1))
     if [ ! -f "$got" ]; then
         printf '  %-28s MISSING\n' "$what"
@@ -85,7 +85,7 @@ fi
 # discovered rather than assumed: a -C list may have run only one.
 ARMS=()
 for suf in gcm cha; do
-    if grep -q -- "-$suf-" "$REPORT" 2>/dev/null; then ARMS+=("$suf"); fi
+    if grep -q, "-$suf-" "$REPORT" 2>/dev/null; then ARMS+=("$suf"); fi
 done
 [ "${#ARMS[@]}" -gt 0 ] || ARMS=("")
 
@@ -176,7 +176,7 @@ for row in "${ROWS[@]}"; do
         if (s1 == "n/a" || s2 == "n/a") { printf "  %-32s slopes not comparable\n", l; exit }
         d = (s1 > s2 ? s1 - s2 : s2 - s1) / ((s1 + s2) / 2) * 100;
         printf "  %-32s slopes agree to %.1f%%%s\n", l, d,
-               (d < 5 ? "" : "  , ABOVE 5%, these are totals, not per-byte rates");
+               (d < 5 ? "" : ", ABOVE 5%, these are totals, not per-byte rates");
     }'
 done
 

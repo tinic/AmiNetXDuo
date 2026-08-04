@@ -63,7 +63,7 @@ TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$TOOLS/host" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
 A2065="${AMINETXDUO_A2065:-}"
@@ -137,7 +137,7 @@ STARTS=$(grep -c "SYS:AddNetInterface eth0 =====" "$REPORT" || true)
 if [ "$STARTS" -eq 1 ]; then
     pass "the machine booted exactly once (no reset)"
 else
-    fail "the command list ran $STARTS times -- the machine reset"
+    fail "the command list ran $STARTS times, the machine reset"
 fi
 
 # ---- every lookup answered, and answered the same ------------------------
@@ -149,7 +149,7 @@ for name in "$NAME_A" "$NAME_B"; do
         pass "$name resolved on all three lookups"
     else
         fail "$name produced $ANSWERS answers, expected 3"
-        echo "       (SLIRP forwards to the host's resolver -- can this host" >&2
+        echo "       (SLIRP forwards to the host's resolver, can this host" >&2
         echo "        resolve $name?)" >&2
     fi
 
@@ -184,7 +184,7 @@ if [ -s "$HD/host.pcap" ]; then
         fi
     done
 else
-    fail "no host-side capture at $HD/host.pcap -- the wire was not observed"
+    fail "no host-side capture at $HD/host.pcap, the wire was not observed"
 fi
 
 echo

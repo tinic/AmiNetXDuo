@@ -503,13 +503,13 @@ ULONG   start;
     ami_crash_set_reference((APTR)main, "crypto68k_test");
     if (!ami_crash_install())
     {
-        c68k_log("CRASHED -- see the serial log and DH0:crash.txt");
+        c68k_log("CRASHED, see the serial log and DH0:crash.txt");
         c68k_flush();
         ami_crash_remove();
         return(20);
     }
 
-    c68k_log("AmiNetXDuo -- crypto68k correctness gate");
+    c68k_log("AmiNetXDuo, crypto68k correctness gate");
     c68k_log("  limb primitives: %s",
              (LONG)(c68k_using_assembly() ? "68020 assembly" : "portable C"));
 
@@ -529,11 +529,11 @@ ULONG   start;
 
     if (t_failures == 0)
     {
-        c68k_log("%lu checks, 0 failures -- PASS", t_checks);
+        c68k_log("%lu checks, 0 failures, PASS", t_checks);
     }
     else
     {
-        c68k_log("%lu checks, %lu failures -- FAIL", t_checks, t_failures);
+        c68k_log("%lu checks, %lu failures, FAIL", t_checks, t_failures);
     }
 
     c68k_timer_close();

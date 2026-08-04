@@ -80,7 +80,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_tcp_retries PRIVATE
         "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
         "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
-        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
         "${AMINETXDUO_NETXDUO}/common/inc"
         "${AMINETXDUO_THREADX}/common/inc")
 
@@ -149,7 +149,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_bcast_loopback PRIVATE
         "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
         "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
-        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
         "${AMINETXDUO_NETXDUO}/common/inc"
         "${AMINETXDUO_THREADX}/common/inc")
 
@@ -185,7 +185,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_tcp_source_connect PRIVATE
         "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
         "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
-        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
         "${AMINETXDUO_NETXDUO}/common/inc"
         "${AMINETXDUO_THREADX}/common/inc")
 
@@ -215,7 +215,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_tcp_rtt PRIVATE
         "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
         "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
-        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
         "${AMINETXDUO_NETXDUO}/common/inc"
         "${AMINETXDUO_THREADX}/common/inc")
 
@@ -243,7 +243,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${CMAKE_SOURCE_DIR}/src/netstack"
         "${CMAKE_SOURCE_DIR}/include"
         "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
-        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
         "${AMINETXDUO_NETXDUO}/common/inc"
         "${AMINETXDUO_THREADX}/common/inc")
 
@@ -268,7 +268,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${CMAKE_SOURCE_DIR}/src/netstack"
         "${CMAKE_SOURCE_DIR}/include"
         "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
-        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
         "${AMINETXDUO_NETXDUO}/common/inc"
         "${AMINETXDUO_NETXDUO}/addons/dns"
         "${AMINETXDUO_THREADX}/common/inc")

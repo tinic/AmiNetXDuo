@@ -31,9 +31,9 @@ REPORT="$HD/client.txt"
 FAIL=0
 
 if [ ! -f "$REPORT" ]; then
-    echo "no DH0:client.txt -- the guest never ran the command list."
+    echo "no DH0:client.txt, the guest never ran the command list."
     echo "-------------------------------------------------------------"
-    echo "VERDICT: FAIL -- no run"
+    echo "VERDICT: FAIL, no run"
     exit 1
 fi
 
@@ -86,7 +86,7 @@ fi
 if [ "$n" -ge 2 ]; then
     if [ "${CONSIZES[0]:-x}" = "${CONSIZES[1]:-y}" ]; then
         echo ""
-        echo "  !! both windows reported the same size -- this run cannot tell a"
+        echo "  !! both windows reported the same size, this run cannot tell a"
         echo "     correct implementation from a hardcoded one."
         FAIL=1
     fi
@@ -125,7 +125,7 @@ if [ -f "$RES/a.stty_a" ]; then
     if grep -q 'erase = \^H' "$RES/a.stty_a"; then
         echo "  erase is ^H, which is BebboSSH's value and not the host default ^?"
     else
-        echo "  !! erase is not ^H -- the pty-req termios block did not take effect"
+        echo "  !! erase is not ^H, the pty-req termios block did not take effect"
     fi
 fi
 
@@ -151,7 +151,7 @@ if [ -f "$RES/r1.stty" ] || [ -f "$RES/r2.stty" ]; then
         echo "  !! the resize arm did not produce both samples"
         FAIL=1
     elif [ "$before" = "$after" ]; then
-        echo "  !! the remote size did not change -- window-change was not sent,"
+        echo "  !! the remote size did not change, window-change was not sent,"
         echo "     or was sent and ignored.  A resized window is a resized pty."
         FAIL=1
     else
@@ -185,8 +185,8 @@ echo "  return codes: $(grep -o '^--- rc [0-9-]*' "$REPORT" | awk '{printf "%s "
 
 echo "-------------------------------------------------------------"
 if [ "$FAIL" = "0" ]; then
-    echo "VERDICT: PASS -- the remote end sees the console's real size"
+    echo "VERDICT: PASS, the remote end sees the console's real size"
     exit 0
 fi
-echo "VERDICT: FAIL -- see above"
+echo "VERDICT: FAIL, see above"
 exit 1

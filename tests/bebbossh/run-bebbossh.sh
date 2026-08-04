@@ -102,7 +102,7 @@ done
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 ADDIF="$ROOT/$BUILD/src/tools/AddNetInterface"
 for f in "$BSD" "$ADDIF"; do
-    [ -f "$f" ] || { echo "missing $f -- build bsdsocket_library AddNetInterface" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build bsdsocket_library AddNetInterface" >&2; exit 2; }
 done
 
 # ------------------------------------------------------------- BebboSSH ----
@@ -110,7 +110,7 @@ done
 # Not vendored and not downloaded: put the binaries in the local store.
 BEB="${AMINETXDUO_BEBBOSSH_DIR:-$HOME/amiga-assets/bebbossh}"
 [ -d "$BEB" ] || {
-    echo "no BebboSSH binaries in $BEB -- set AMINETXDUO_BEBBOSSH_DIR" >&2
+    echo "no BebboSSH binaries in $BEB, set AMINETXDUO_BEBBOSSH_DIR" >&2
     exit 2
 }
 BEBVER=$(cat "$BEB/VERSION" 2>/dev/null || echo unknown)

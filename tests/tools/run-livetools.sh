@@ -87,7 +87,7 @@ for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$TOOLS/ShowNetStatus" \
          "$TOOLS/CheckNetConfig" "$TOOLS/GetNetStatus" "$TOOLS/AddNetRoute" \
          "$TOOLS/DeleteNetRoute" "$TOOLS/NetShutdown" \
          "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
 A2065="${AMINETXDUO_A2065:-}"
@@ -231,12 +231,12 @@ fi
 if [ "$BOOTS" -gt 1 ]; then
     fail "THE MACHINE REBOOTED: $BOOT_SRC shows $BOOTS starts in one run"
     echo "       A command crashed hard enough to reset the Amiga. This is" >&2
-    echo "       not a hang, whatever the transcript looks like -- see" >&2
+    echo "       not a hang, whatever the transcript looks like, see" >&2
     echo "       docs/RESEARCH.md 25." >&2
 elif [ "$BOOTS" -eq 1 ]; then
     pass "the machine booted exactly once (no reset), per $BOOT_SRC"
 else
-    fail "no start found in $BOOT_SRC -- the run did not get far enough to judge"
+    fail "no start found in $BOOT_SRC, the run did not get far enough to judge"
 fi
 
 # ---- the negative half: the sentences that mean "I cannot see the stack" ----
@@ -251,9 +251,9 @@ fi
 # nothing.
 while IFS= read -r phrase; do
     [ -n "$phrase" ] || continue
-    if grep -qiF -- "$phrase" "$REPORT"; then
+    if grep -qiF, "$phrase" "$REPORT"; then
         fail "a command printed \"$phrase\" while the network was up"
-        grep -niF -- "$phrase" "$REPORT" | sed 's/^/       /' >&2
+        grep -niF, "$phrase" "$REPORT" | sed 's/^/       /' >&2
     else
         pass "nothing printed \"$phrase\""
     fi
@@ -293,7 +293,7 @@ fi
 if grep -Eqi '(packets received|received)[^0-9]*[1-9][0-9]*' "$REPORT"; then
     pass "a non-zero receive counter was reported"
 else
-    fail "every counter reported was zero -- the stats path is not live"
+    fail "every counter reported was zero, the stats path is not live"
 fi
 
 # At least one ICMP echo reply.  10.0.2.2 is answered by SLIRP itself with the
@@ -334,7 +334,7 @@ check_rc() {
     if [ "$got" = "$want" ]; then
         pass "$why (rc $got)"
     else
-        fail "$why -- '$cmd' returned '$got', not $want"
+        fail "$why, '$cmd' returned '$got', not $want"
     fi
 }
 
@@ -364,7 +364,7 @@ if awk '$0 == "===== SYS:netstat -r =====" { on = 1; next }
         END { exit !found }' "$REPORT"; then
     pass "netstat -r shows the route that was added"
 else
-    fail "netstat -r does not show 192.168.77.0 -- AddNetRoute added nothing"
+    fail "netstat -r does not show 192.168.77.0, AddNetRoute added nothing"
 fi
 
 check_rc 0 "SYS:DeleteNetRoute DESTINATION=192.168.77.0" \

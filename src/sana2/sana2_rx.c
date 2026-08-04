@@ -283,7 +283,7 @@ VOID ami_sana2_rxprobe_report(const AmiSana2If *iface)
      * is incremented in ami_sana2_rx_deliver(); the device's is what a2065.device
      * saw on the wire, so the difference is what never reached a CMD_READ.
      */
-    AMI_ERROR("rxprobe dev: rx %ld tx %ld -- shim rx %ld tx %ld, "
+    AMI_ERROR("rxprobe dev: rx %ld tx %ld, shim rx %ld tx %ld, "
               "bad %ld ovr %ld unk %ld alloc %ld err %ld",
               (long)iface->probe_dev_rx, (long)iface->probe_dev_tx,
               (long)iface->stats.packets_received,
@@ -993,7 +993,7 @@ static const ULONG ami_sana2_rx_types[AMI_SANA2_RX_READERS] =
     AMI_ETHERTYPE_IPV4,
     AMI_ETHERTYPE_ARP
 #ifdef AMINETXDUO_IPV6
-    , AMI_ETHERTYPE_IPV6
+, AMI_ETHERTYPE_IPV6
 #endif
 };
 
@@ -1002,7 +1002,7 @@ static const UWORD ami_sana2_rx_depths[AMI_SANA2_RX_READERS] =
     AMI_SANA2_RX_DEPTH_IPV4,
     AMI_SANA2_RX_DEPTH_ARP
 #ifdef AMINETXDUO_IPV6
-    , AMI_SANA2_RX_DEPTH_IPV6
+, AMI_SANA2_RX_DEPTH_IPV6
 #endif
 };
 
@@ -1011,7 +1011,7 @@ static const CHAR *const ami_sana2_rx_names[AMI_SANA2_RX_READERS] =
     "sana2 rx ip",
     "sana2 rx arp"
 #ifdef AMINETXDUO_IPV6
-    , "sana2 rx ip6"
+, "sana2 rx ip6"
 #endif
 };
 
@@ -1192,8 +1192,8 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
      *
      * Three phases, each needing the one before it:
      *   1. stop posting , `stop` seen at the top of the reader's loop
-     *   2. offline      , S2_OFFLINE returns every read still queued
-     *   3. join         , every reader is then guaranteed to reach its exit
+     *   2. offline, S2_OFFLINE returns every read still queued
+     *   3. join, every reader is then guaranteed to reach its exit
      */
     for (i = 0; i < AMI_SANA2_RX_READERS; i++)
     {
@@ -1247,7 +1247,7 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
             if (rx->orphans != 0)
             {
                 AMI_ERROR("sana2: reader %ld left %ld read(s) with the device; "
-                          "leaking its thread and stack -- the reply port they "
+                          "leaking its thread and stack, the reply port they "
                           "will complete through signals that Task",
                           (long)i, (long)rx->orphans);
                 iface->rx_orphaned = TRUE;

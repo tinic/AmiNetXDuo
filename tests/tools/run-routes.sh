@@ -17,7 +17,7 @@
 #   Duo will accept it, and answered by nothing, because SLIRP is 10.0.2.2 and
 #   10.0.2.3.  Sending to 192.168.77.5:
 #
-#     * with the route    , _nx_ip_route_find() matches the table entry,
+#     * with the route, _nx_ip_route_find() matches the table entry,
 #                             the next hop becomes 10.0.2.99, and the stack
 #                             emits  ARP who-has 10.0.2.99  and nothing else;
 #     * without the route , the default gateway 10.0.2.2 is used, whose ARP
@@ -85,7 +85,7 @@ RTPROBE="$ROOT/$BUILD/tests/tools/RtProbe"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$TOOLS/netstat" \
          "$PROBE" "$RTPROBE" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
 A2065="${AMINETXDUO_A2065:-}"
@@ -216,13 +216,13 @@ else
 fi
 
 # ---- the negative cases --------------------------------------------------
-if grep -q "8.8.8.8: .* -- refused, correctly" "$REPORT"; then
+if grep -q "8.8.8.8: .*, refused, correctly" "$REPORT"; then
     pass "a next hop on no local subnet was refused"
 else
     fail "8.8.8.8 was accepted as a next hop, or the call did not run"
 fi
 
-if grep -q "never added): .* -- refused, correctly" "$REPORT"; then
+if grep -q "never added): .*, refused, correctly" "$REPORT"; then
     pass "deleting a route that is not in a non-empty table failed"
 else
     fail "deleting an absent route reported success"
@@ -255,7 +255,7 @@ if [ -s "$HD/host.pcap" ]; then
     ARP=$(tcpdump -r "$HD/host.pcap" -n 2>/dev/null |
           grep -c "who-has 10.0.2.99" || true)
     if [ "${ARP:-0}" -gt 0 ]; then
-        pass "the wire shows $ARP ARP request(s) for 10.0.2.99 -- the route was used"
+        pass "the wire shows $ARP ARP request(s) for 10.0.2.99, the route was used"
     else
         fail "no ARP for 10.0.2.99 on the wire: the route was not consulted"
         tcpdump -r "$HD/host.pcap" -n 2>/dev/null | grep -i arp | head -20 >&2 || true
@@ -277,7 +277,7 @@ elif [ "$RUNNER" = "amiberry" ]; then
     # no equivalent, so under -A the two wire assertions above have nothing to
     # read. Skipped rather than passed: they are the only checks here that see
     # what actually left the machine, and a silent pass would hide that.
-    skip "no wire capture under Amiberry -- run without -A to check the wire"
+    skip "no wire capture under Amiberry, run without -A to check the wire"
 fi
 
 # ---- THE PUBLISHED ROUTING API -------------------------------------------
@@ -331,20 +331,20 @@ fi
 
 for case in "dest+default together" "dest with no gateway" \
             "via an unreachable next hop"; do
-    if grep -q "^add $case: .* -- refused, correctly" "$REPORT"; then
+    if grep -q "^add $case: .*, refused, correctly" "$REPORT"; then
         pass "AddRouteTagList refused: $case"
     else
         fail "AddRouteTagList accepted: $case"
     fi
 done
 
-if grep -q "^GetRouteInfo(AF_INET6): NULL .* -- refused, correctly" "$REPORT"; then
+if grep -q "^GetRouteInfo(AF_INET6): NULL .*, refused, correctly" "$REPORT"; then
     pass "GetRouteInfo refuses an address family it has no table for"
 else
     fail "GetRouteInfo(AF_INET6) returned a table"
 fi
 
-if grep -q "^delete a route never added: .* -- refused, correctly" "$REPORT"; then
+if grep -q "^delete a route never added: .*, refused, correctly" "$REPORT"; then
     pass "deleting an absent route fails while the table is not empty"
 else
     fail "deleting an absent route reported success"
@@ -353,13 +353,13 @@ fi
 # RTA_DefaultGateway names the gateway the route was installed with, so a
 # delete that names a different one has named no entry.  Clearing regardless
 # would take the machine's real default gateway away and report success.
-if grep -q "^delete the default gateway by the wrong address: .* -- refused, correctly" "$REPORT"; then
+if grep -q "^delete the default gateway by the wrong address: .*, refused, correctly" "$REPORT"; then
     pass "deleting the default gateway by the wrong address is refused"
 else
     fail "the default gateway was deleted by an address that is not the one installed"
 fi
 
-if grep -q "^default gateway after that: .* -- still there, correctly" "$REPORT"; then
+if grep -q "^default gateway after that: .*, still there, correctly" "$REPORT"; then
     pass "and the real default gateway survived it"
 else
     fail "the default gateway went away"
@@ -367,7 +367,7 @@ fi
 
 # The whole of it: delete has to derive the same prefix length add did, from
 # the same string and no mask, or the entries could never be found again.
-if grep -q "^counts: .* -- two added and two removed, correctly" "$REPORT"; then
+if grep -q "^counts: .*, two added and two removed, correctly" "$REPORT"; then
     pass "the table came back to exactly what it was"
 else
     fail "the routes added through the published API were not all removed"

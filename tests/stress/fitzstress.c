@@ -41,7 +41,7 @@
  *
  *       byte(o) = pat[o & 8191] ^ (UBYTE)(o >> 13)
  *
- *  , which catches a single altered byte, and, because the period is 2 MB,
+ *, which catches a single altered byte, and, because the period is 2 MB,
  *   a repeated or dropped block as well.  The host side knows the same
  *   pattern and checks everything the guest wrote to the share.  The tree
  *   worker is checked by Fitz's own `comparetree ... crc`, run from the

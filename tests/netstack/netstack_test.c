@@ -398,7 +398,7 @@ UWORD            i;
     }
     else
     {
-        t_log("  (no gateway configured -- skipping the wire test)");
+        t_log("  (no gateway configured, skipping the wire test)");
     }
 
     /* Resolver. */
@@ -417,7 +417,7 @@ UWORD            i;
     }
     else
     {
-        t_log("  DNS lookup of example.com failed (%ld) -- not fatal",
+        t_log("  DNS lookup of example.com failed (%ld), not fatal",
               (ULONG) status);
     }
 
@@ -464,7 +464,7 @@ int main(void)
 LONG    status;
 
 
-    t_log("AmiNetXDuo -- netstack bring-up test");
+    t_log("AmiNetXDuo, netstack bring-up test");
     t_log("  ticks/sec %ld, pool payload %ld, pool %ld..%ld packets",
           (ULONG) TX_TIMER_TICKS_PER_SECOND, (ULONG) AMI_POOL_PAYLOAD,
           (ULONG) AMI_POOL_MIN_PACKETS, (ULONG) AMI_POOL_MAX_PACKETS);
@@ -475,7 +475,7 @@ LONG    status;
 
         /* Resuming after a caught crash is documented as unreliable, so this
            is a report-and-die path, not a recovery path. */
-        t_log("FATAL: caught a CPU exception -- see the dump above");
+        t_log("FATAL: caught a CPU exception, see the dump above");
         t_flush();
         return(20);
     }
@@ -487,9 +487,9 @@ LONG    status;
 
     if (netstack_get() == NULL)
     {
-        t_log("FATAL: no stack -- see the messages above");
+        t_log("FATAL: no stack, see the messages above");
         t_log("");
-        t_log("%ld checks, %ld failures -- FAIL", t_checks, t_failures + 1UL);
+        t_log("%ld checks, %ld failures, FAIL", t_checks, t_failures + 1UL);
         t_flush();
         return(20);
     }
@@ -499,7 +499,7 @@ LONG    status;
     t_tick_stats();
 
     t_log("");
-    t_log("%ld checks, %ld failures -- %s",
+    t_log("%ld checks, %ld failures, %s",
           t_checks, t_failures, (t_failures == 0UL) ? "PASS" : "FAIL");
     t_flush();
 
@@ -517,7 +517,7 @@ LONG    status;
     netstack_shutdown();
     (VOID) t_check((UINT) (netstack_get() == NULL), "netstack_shutdown()", 0UL);
 
-    t_log("%ld checks, %ld failures after teardown -- %s",
+    t_log("%ld checks, %ld failures after teardown, %s",
           t_checks, t_failures, (t_failures == 0UL) ? "PASS" : "FAIL");
 
     t_flush();

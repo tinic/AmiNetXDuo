@@ -1462,7 +1462,7 @@ BOOL             claimed = FALSE;
      */
     if (prof_conf[0] != '\0')
     {
-        prof_log("Profile: %s -- sampling on %s instead", prof_conf, prof_srcname);
+        prof_log("Profile: %s, sampling on %s instead", prof_conf, prof_srcname);
         prof_conf[0] = '\0';
     }
     prof_err = "";

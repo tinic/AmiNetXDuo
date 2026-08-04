@@ -114,7 +114,7 @@ PROBE="$ROOT/$BUILD/tests/tools/IfProbe"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$TOOLS/netstat" \
          "$TOOLS/NetShutdown" "$PROBE" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
 A2065="${AMINETXDUO_A2065:-}"
@@ -235,14 +235,14 @@ BEFORE=$(routes 1)
 if printf '%s\n' "$BEFORE" | grep -Eq '^10\.0\.2\.0 +\* +255\.255\.255\.0 '; then
     pass "eth0 started on 10.0.2.0/24"
 else
-    fail "eth0 did not start with the /24 -- nothing to lose, so nothing proved"
+    fail "eth0 did not start with the /24, nothing to lose, so nothing proved"
     printf '%s\n' "$BEFORE" | sed 's/^/       /' >&2
 fi
 
 if printf '%s\n' "$BEFORE" | grep -Eq '^default +10\.0\.2\.2 '; then
     pass "and with the default route through 10.0.2.2"
 else
-    fail "eth0 started with no default route -- nothing to lose, so nothing proved"
+    fail "eth0 started with no default route, nothing to lose, so nothing proved"
     printf '%s\n' "$BEFORE" | sed 's/^/       /' >&2
 fi
 
@@ -253,7 +253,7 @@ fi
 # read as still addressed here, and would also stop BeginInterfaceConfig()
 # from ever running a DHCP allocation on a re-added interface, which is how it
 # was found.
-if grep -q "^bare after add: address 0\.0\.0\.0 netmask 0\.0\.0\.0 -- bare, correctly" "$REPORT"; then
+if grep -q "^bare after add: address 0\.0\.0\.0 netmask 0\.0\.0\.0, bare, correctly" "$REPORT"; then
     pass "the re-added interface came back with no address and no mask"
 else
     fail "the re-added interface came back already addressed"
@@ -265,10 +265,10 @@ fi
 # IfProbe passes IFC_Address AND IFC_NetMask.  The mask that comes back has to
 # be the one it asked for: the classful fallback is for a caller that supplied
 # an address alone, and using it here is the /8 this file exists for.
-if grep -q "^netmask after the round trip: .* -- the mask it had, correctly" "$REPORT"; then
+if grep -q "^netmask after the round trip: .*, the mask it had, correctly" "$REPORT"; then
     pass "IFQ_NetMask is the mask ConfigureInterfaceTagList() was given"
 else
-    fail "the configure did not honour IFC_NetMask -- the classful guess again"
+    fail "the configure did not honour IFC_NetMask, the classful guess again"
     grep -n "^netmask after the round trip:" "$REPORT" | sed 's/^/       /' >&2
 fi
 
@@ -276,7 +276,7 @@ AFTER=$(routes 2)
 if printf '%s\n' "$AFTER" | grep -Eq '^10\.0\.2\.0 +\* +255\.255\.255\.0 '; then
     pass "and the attached route is the /24 the configure asked for"
 else
-    fail "the attached route came back as something else -- the classful mask"
+    fail "the attached route came back as something else, the classful mask"
     printf '%s\n' "$AFTER" | sed 's/^/       /' >&2
 fi
 
@@ -284,10 +284,10 @@ fi
 # for one, so it stays gone until a caller runs AddRouteTagList().  Asserted
 # rather than ignored: putting it back inside the add is what was wrong before.
 if printf '%s\n' "$AFTER" | grep -Eq '^default +'; then
-    fail "a default route reappeared on its own -- neither vector may install one"
+    fail "a default route reappeared on its own, neither vector may install one"
     printf '%s\n' "$AFTER" | sed 's/^/       /' >&2
 else
-    pass "the default route is gone, as it must be -- AddRouteTagList() puts it back"
+    pass "the default route is gone, as it must be, AddRouteTagList() puts it back"
 fi
 
 echo

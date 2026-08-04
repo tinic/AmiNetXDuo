@@ -36,7 +36,7 @@ check_c_source_compiles("int main(void){return 0;}" AMINETXDUO_HAVE_SANITIZERS)
 unset(CMAKE_REQUIRED_FLAGS)
 
 if(NOT AMINETXDUO_HAVE_SANITIZERS)
-    message(STATUS "fuzz: no ASan/UBSan in this host compiler -- drivers skipped")
+    message(STATUS "fuzz: no ASan/UBSan in this host compiler, drivers skipped")
     return()
 endif()
 
@@ -181,7 +181,7 @@ set(_fuzz_nx_src
 set(_fuzz_nx_inc
     "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"          # tx_port.h, first
     "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"         # nx_port.h
-    "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"        # nx_user.h -- ours
+    "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"        # nx_user.h, ours
     "${AMINETXDUO_NETXDUO}/common/inc"
     "${AMINETXDUO_THREADX}/common/inc")
 

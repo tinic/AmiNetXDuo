@@ -359,7 +359,7 @@ int main(void)
         }
     }
 
-    printf("%lu checks, %lu failures -- %s\n",
+    printf("%lu checks, %lu failures, %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");
 
     return (h_failures == 0UL) ? 0 : 1;

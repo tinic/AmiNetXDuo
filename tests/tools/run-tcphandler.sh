@@ -65,7 +65,7 @@ BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" \
          "$TESTTOOLS/TcpHandoff" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
 # ---- the two Commodore commands, located and never committed -------------
@@ -223,7 +223,7 @@ STARTS=$(grep -c "SYS:AddNetInterface eth0 =====" "$REPORT" || true)
 if [ "$STARTS" -eq 1 ]; then
     pass "the machine booted exactly once (no reset)"
 else
-    fail "the command list ran $STARTS times -- the machine reset"
+    fail "the command list ran $STARTS times, the machine reset"
 fi
 
 # ---- 6: not a drive, so not in Info and not on the Workbench --------------

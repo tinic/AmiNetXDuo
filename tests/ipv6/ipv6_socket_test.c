@@ -1346,7 +1346,7 @@ ULONG                   arrived_on = 0;
 
     (VOID)t_check(t_streq(buffer, datagram), "datagram survived", 0);
     (VOID)t_check((BOOL)((msg.msg_flags & MSG_CTRUNC) == 0),
-                  "MSG_CTRUNC is clear -- the buffer was big enough",
+                  "MSG_CTRUNC is clear, the buffer was big enough",
                   msg.msg_flags);
     (VOID)t_check((BOOL)(msg.msg_controllen > 0),
                   "msg_controllen is no longer always zero",
@@ -1870,7 +1870,7 @@ APTR                p;
     (VOID)t_check((BOOL)(p != NULL &&
                          t_streq((const char *)p,
                                  "name or service is not known")),
-                  "gai_strerror(EAI_NONAME) -- argument really is in a0", 0);
+                  "gai_strerror(EAI_NONAME), argument really is in a0", 0);
 
     /* getnameinfo on a sockaddr_in6, numeric. */
     {
@@ -1892,7 +1892,7 @@ APTR                p;
 
 int main(void)
 {
-    t_log("AmiNetXDuo -- AF_INET6 through bsdsocket.library");
+    t_log("AmiNetXDuo, AF_INET6 through bsdsocket.library");
 
     /*
      * An interface, without needing anyone's driver.
@@ -1946,7 +1946,7 @@ int main(void)
     SocketBase = NULL;
 
     t_log("");
-    t_log("%ld checks, %ld failures -- %s", t_checks, t_failures,
+    t_log("%ld checks, %ld failures, %s", t_checks, t_failures,
           (t_failures == 0UL) ? "PASS" : "FAIL");
 
     t_flush();

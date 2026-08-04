@@ -1140,7 +1140,7 @@ UINT        status;
 TX_THREAD   main_thread;
 
 
-    t_log("AmiNetXDuo -- milestone 7: mbuf_* and bpf_* on real 68k");
+    t_log("AmiNetXDuo, milestone 7: mbuf_* and bpf_* on real 68k");
 
     ami_crash_set_reference((APTR) main, "mbuf_bpf_test");
 
@@ -1165,7 +1165,7 @@ TX_THREAD   main_thread;
     {
         t_log("FATAL: tx_amiga_kernel_start() = %ld", (ULONG) status);
         t_log("");
-        t_log("%ld checks, %ld failures -- FAIL", t_checks, t_failures + 1);
+        t_log("%ld checks, %ld failures, FAIL", t_checks, t_failures + 1);
         return (20);
     }
 
@@ -1174,7 +1174,7 @@ TX_THREAD   main_thread;
     {
         t_log("FATAL: tx_amiga_adopt_thread() = %ld", (ULONG) status);
         t_log("");
-        t_log("%ld checks, %ld failures -- FAIL", t_checks, t_failures + 1);
+        t_log("%ld checks, %ld failures, FAIL", t_checks, t_failures + 1);
         return (20);
     }
 
@@ -1190,7 +1190,7 @@ TX_THREAD   main_thread;
     CHECK(ami_alloc_count() == 0, "no allocations leaked");
 
     t_log("");
-    t_log("%ld checks, %ld failures -- %s", t_checks, t_failures,
+    t_log("%ld checks, %ld failures, %s", t_checks, t_failures,
           (t_failures == 0UL) ? "PASS" : "FAIL");
 
     return ((t_failures == 0UL) ? 0 : 20);

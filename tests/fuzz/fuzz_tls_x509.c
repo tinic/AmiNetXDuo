@@ -561,21 +561,21 @@ static void fx_selftest(void)
 
     if (status != NX_SECURE_X509_SUCCESS)
     {
-        printf("fuzz_tls_x509: SELFTEST FAILED -- the sample leaf returned %u\n",
+        printf("fuzz_tls_x509: SELFTEST FAILED, the sample leaf returned %u\n",
                (unsigned)status);
         exit(2);
     }
 
     if (bytes_processed != c.len)
     {
-        printf("fuzz_tls_x509: SELFTEST FAILED -- consumed %u of %u bytes\n",
+        printf("fuzz_tls_x509: SELFTEST FAILED, consumed %u of %u bytes\n",
                (unsigned)bytes_processed, c.len);
         exit(2);
     }
 
     if (cert.nx_secure_x509_public_algorithm != NX_SECURE_TLS_X509_TYPE_RSA)
     {
-        printf("fuzz_tls_x509: SELFTEST FAILED -- public key not RSA (got %u)\n",
+        printf("fuzz_tls_x509: SELFTEST FAILED, public key not RSA (got %u)\n",
                (unsigned)cert.nx_secure_x509_public_algorithm);
         exit(2);
     }
@@ -585,14 +585,14 @@ static void fx_selftest(void)
         cert.nx_secure_x509_distinguished_name.nx_secure_x509_common_name_length
             == 0)
     {
-        printf("fuzz_tls_x509: SELFTEST FAILED -- no subject common name\n");
+        printf("fuzz_tls_x509: SELFTEST FAILED, no subject common name\n");
         exit(2);
     }
 
     if (cert.nx_secure_x509_issuer.nx_secure_x509_common_name == NX_NULL ||
         cert.nx_secure_x509_issuer.nx_secure_x509_common_name_length == 0)
     {
-        printf("fuzz_tls_x509: SELFTEST FAILED -- no issuer common name\n");
+        printf("fuzz_tls_x509: SELFTEST FAILED, no issuer common name\n");
         exit(2);
     }
 

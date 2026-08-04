@@ -228,7 +228,7 @@ verify_sha256() {
     got=$(sha256_of "$file")
     if [ "$got" != "$want" ]; then
         echo "" >&2
-        echo "!! $what does not match its pin -- refusing to install it." >&2
+        echo "!! $what does not match its pin, refusing to install it." >&2
         echo "   want $want" >&2
         echo "   got  $got" >&2
         echo "   Nothing was written to $CACHE." >&2
@@ -352,7 +352,7 @@ esac
 # future image that has been fixed upstream needs no change here.
 say "==> repairing the newlib crt0 frame skew"
 if ! python3 "$(dirname "$0")/fix-toolchain-crt0.py" "$TMP/x/$TC_PREFIX_IN_TAR"; then
-    echo "!! crt0 repair failed -- refusing to install a toolchain that" >&2
+    echo "!! crt0 repair failed, refusing to install a toolchain that" >&2
     echo "!! builds commands which crash on return to the Shell." >&2
     exit 1
 fi

@@ -123,7 +123,7 @@ if(AMINETXDUO_AMISSL_SDK AND TARGET nx_crypto)
     if(NOT EXISTS "${AMINETXDUO_AMISSL_SDK}/include/proto/amissl.h")
         message(FATAL_ERROR
             "AMINETXDUO_AMISSL_SDK=${AMINETXDUO_AMISSL_SDK} has no "
-            "include/proto/amissl.h -- point it at AmiSSL/Developer.")
+            "include/proto/amissl.h, point it at AmiSSL/Developer.")
     endif()
 
     add_executable(crypto68k_amissl c68k_amissl_bench.c c68k_amissl_ossl.c)

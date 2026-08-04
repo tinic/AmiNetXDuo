@@ -1,5 +1,5 @@
 /*
- * RFC 3542 -- ancillary data, and the options that ride it.
+ * RFC 3542, ancillary data, and the options that ride it.
  *
  * sendmsg()/recvmsg() already carry msg_control, and this is what goes in it.
  * No new LVOs: everything here is a socket option number, a struct shape or a
@@ -17,7 +17,7 @@
  *     translation unit that uses it fails to compile ("implicit declaration of
  *     function 'ALIGN'");
  *   - CMSG_FIRSTHDR returns msg_control without testing msg_controllen, which
- *     RFC 3542 section 20.3.1 calls out by name -- recvmsg() reports "no
+ *     RFC 3542 section 20.3.1 calls out by name, recvmsg() reports "no
  *     ancillary data" by setting msg_controllen to 0, and the unguarded macro
  *     turns that into a pointer at an uninitialised buffer.
  *
@@ -42,7 +42,7 @@
  *
  * CMSG_ALIGN IS 4 BYTES, and that is ABI.  Every 32-bit BSD used 4, it keeps
  * struct cmsghdr at 12 bytes with no padding before the data, and nothing
- * about m68k argues for more -- wider alignment would only waste buffer.  A
+ * about m68k argues for more, wider alignment would only waste buffer.  A
  * caller that sizes its buffer with CMSG_SPACE() never has to know.
  *
  * SPDX-License-Identifier: MIT
@@ -120,8 +120,8 @@ extern "C" {
  *     msg.msg_controllen = CMSG_BUFFER_LEN(cbuf);
  *
  * THE ALIGNED ATTRIBUTE IS NOT DECORATION.  m68k gives every scalar an
- * alignment of 2, not its width -- `__alignof__(long)` is 2 and so is
- * `__alignof__(struct cmsghdr)` -- so a union over a cmsghdr lands on an even
+ * alignment of 2, not its width, `__alignof__(long)` is 2 and so is
+ * `__alignof__(struct cmsghdr)`, so a union over a cmsghdr lands on an even
  * address and no better.  Half of them are 2 mod 4, which is what the library
  * used to refuse.  Nothing in the language gets this union to 4; the attribute
  * is the only mechanism, and cmsg.c asserts the result.
@@ -147,7 +147,7 @@ extern "C" {
 /* ------------------------------------------------------------ the levels -- */
 
 /* IPPROTO_IPV6 comes from in6.h above.  The NDK's list stops at IPPROTO_RAW,
-   so this one is ours too -- the IANA number. */
+   so this one is ours too, the IANA number. */
 #ifndef IPPROTO_ICMPV6
 #define IPPROTO_ICMPV6              58
 #endif
@@ -155,7 +155,7 @@ extern "C" {
 /* ----------------------------------------------------------- the options --
  *
  * Two numberings exist for the IPv6 options and this NDK picks neither, so
- * both are accepted -- the same decision IPV6_V6ONLY needed, for the same
+ * both are accepted, the same decision IPV6_V6ONLY needed, for the same
  * reason.  The unsuffixed name is the 4.4BSD/KAME number, which is the
  * lineage the rest of this header set belongs to; the _LINUX alternates are
  * here because the library answers to them, not because a caller should
@@ -174,7 +174,7 @@ extern "C" {
 
 /*
  * IPV6_HOPLIMIT is ancillary only, in both directions: a LONG in a cmsg, never
- * a setsockopt -- IPV6_UNICAST_HOPS is the sticky spelling and answers that.
+ * a setsockopt, IPV6_UNICAST_HOPS is the sticky spelling and answers that.
  * On sendmsg it is 0..255, or -1 for "whatever IPV6_UNICAST_HOPS says"; any
  * other value is EINVAL.
  */
@@ -190,7 +190,7 @@ extern "C" {
  * The IPv4 half.  IP_RECVDSTADDR is the NDK's own 7 and carries a bare
  * struct in_addr; IP_PKTINFO is Linux's 8 and carries a struct in_pktinfo.
  * They are separate options, not spellings of one, because the payloads
- * differ -- a socket may have either, both or neither.
+ * differ, a socket may have either, both or neither.
  *
  * 8 is IP_RETOPTS in this NDK.  That is a 4.3BSD get/set of the IP options a
  * datagram arrived with; it is refused here and always has been, and no
@@ -207,8 +207,8 @@ extern "C" {
 
 /*
  * RFC 3542 section 6.6.  On receive, ipi6_addr is the destination address out
- * of the arriving header -- which may be a multicast address, not one of this
- * machine's -- and ipi6_ifindex is the arrival interface, numbered as
+ * of the arriving header, which may be a multicast address, not one of this
+ * machine's, and ipi6_ifindex is the arrival interface, numbered as
  * if_nametoindex() numbers it, loopback ("lo0") included.  On send, ipi6_addr
  * picks the source address and ipi6_ifindex the outgoing interface; either may
  * be zero to leave that half to the stack.

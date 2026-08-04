@@ -62,7 +62,7 @@ TOOLS="$ROOT/$BUILD/src/tools"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/CheckNetConfig" "$TOOLS/GetNetStatus" \
          "$TOOLS/NetShutdown" "$TOOLS/AddNetRoute" "$TOOLS/DeleteNetRoute"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
 A2065="${AMINETXDUO_A2065:-}"
@@ -154,18 +154,18 @@ rc_of() {
 
 expect() {
     local what="$1"; shift
-    if grep -qiF -- "$*" "$REPORT"; then
+    if grep -qiF, "$*" "$REPORT"; then
         pass "$what"
     else
-        fail "$what -- nothing printed \"$*\""
+        fail "$what, nothing printed \"$*\""
     fi
 }
 
 reject() {
     local what="$1"; shift
-    if grep -qiF -- "$*" "$REPORT"; then
-        fail "$what -- \"$*\" was printed and should not have been"
-        grep -niF -- "$*" "$REPORT" | sed 's/^/       /' >&2
+    if grep -qiF, "$*" "$REPORT"; then
+        fail "$what, \"$*\" was printed and should not have been"
+        grep -niF, "$*" "$REPORT" | sed 's/^/       /' >&2
     else
         pass "$what"
     fi
@@ -175,7 +175,7 @@ reject() {
 if grep -q "===== done" "$REPORT"; then
     pass "every command ran to completion"
 else
-    fail "the run stopped early -- a command hung or took the machine down"
+    fail "the run stopped early, a command hung or took the machine down"
 fi
 
 # ---- CheckNetConfig names the file and what is wrong with it --------------
@@ -225,7 +225,7 @@ RC=$(rc_of "SYS:CheckNetConfig QUIET")
 if [ "$RC" = "5" ]; then
     pass "CheckNetConfig QUIET still returned 5"
 else
-    fail "CheckNetConfig QUIET returned '$RC', not 5 -- QUIET changed the answer"
+    fail "CheckNetConfig QUIET returned '$RC', not 5, QUIET changed the answer"
 fi
 
 # ---- the other four, with no stack running -------------------------------

@@ -1049,7 +1049,7 @@ int main(void)
 
     out_file = Open((STRPTR)"DH0:tickprobe.txt", MODE_NEWFILE);
 
-    say("# tickprobe -- periodic-timer rate and packet turnaround, from outside");
+    say("# tickprobe, periodic-timer rate and packet turnaround, from outside");
 
     if (tap_install(local_mac) != 0)
     {
@@ -1062,7 +1062,7 @@ int main(void)
     rng_state ^= tap_eclock_now() | 1UL;
 
     if (!fine_timer_open())
-        say("!! no UNIT_MICROHZ timer -- phases will alias, results are void");
+        say("!! no UNIT_MICROHZ timer, phases will alias, results are void");
 
     /* Before the stack is even open, so nothing it does is in the figure. */
     measure_timebases(100);

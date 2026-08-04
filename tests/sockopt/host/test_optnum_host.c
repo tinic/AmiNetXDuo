@@ -165,7 +165,7 @@ static void check(int ok, const char *what, const char *detail)
     else
     {
         failures++;
-        printf("  FAIL %s -- %s\n", what, detail);
+        printf("  FAIL %s, %s\n", what, detail);
     }
 }
 
@@ -262,7 +262,7 @@ int main(void)
     const char *root = AMINETXDUO_SOURCE_DIR;
     size_t      i;
 
-    printf("bsdsocket -- IPv6 option numbers against the BSD numbering\n");
+    printf("bsdsocket, IPv6 option numbers against the BSD numbering\n");
 
     for (i = 0; i < sizeof(claims) / sizeof(claims[0]); i++)
     {
@@ -277,7 +277,7 @@ int main(void)
         if (number < 0)
         {
             snprintf(detail, sizeof(detail),
-                     "no numeric #define in %s -- renamed, or now an alias",
+                     "no numeric #define in %s, renamed, or now an alias",
                      c->file);
             check(0, what, detail);
             continue;
@@ -310,7 +310,7 @@ int main(void)
 
             if (e != NULL)
             {
-                printf("  ok   %s -- allowed: %s\n", what, e->why);
+                printf("  ok   %s, allowed: %s\n", what, e->why);
                 checks++;
                 continue;
             }
@@ -351,7 +351,7 @@ int main(void)
         }
     }
 
-    printf("\n%d checks, %d failures -- %s\n", checks, failures,
+    printf("\n%d checks, %d failures, %s\n", checks, failures,
            (failures == 0) ? "PASS" : "FAIL");
 
     return (failures == 0) ? 0 : 1;

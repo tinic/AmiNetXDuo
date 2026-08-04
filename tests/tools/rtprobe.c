@@ -342,7 +342,7 @@ int main(void)
     rc = p_add_route(base, tags);
     Printf((CONST_STRPTR)"add dest+default together: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
     tags[0].ti_Tag  = RTA_Destination;
     tags[0].ti_Data = (ULONG)"192.168.68.0";
@@ -352,7 +352,7 @@ int main(void)
     rc = p_add_route(base, tags);
     Printf((CONST_STRPTR)"add dest with no gateway: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
     /* A next hop on no local subnet: NetX Duo derives the outgoing interface
        from it, and there is none. */
@@ -366,7 +366,7 @@ int main(void)
     rc = p_add_route(base, tags);
     Printf((CONST_STRPTR)"add via an unreachable next hop: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
     /* ---- the default gateway, set to what it already is ------------------ */
     gateway = p_default_gateway(base);
@@ -398,14 +398,14 @@ int main(void)
         Printf((CONST_STRPTR)"delete the default gateway by the wrong address: "
                              "rc %ld (errno %ld)%s\n",
                rc, p_errno(base),
-               (LONG)((rc != 0) ? " -- refused, correctly"
-                                : " -- ACCEPTED, WRONG"));
+               (LONG)((rc != 0) ? ", refused, correctly"
+                                : ", ACCEPTED, WRONG"));
 
         Printf((CONST_STRPTR)"default gateway after that: %s%s\n",
                (LONG)gw_text,
                (LONG)((p_default_gateway(base) == gateway)
-                          ? " -- still there, correctly"
-                          : " -- GONE, WRONG"));
+                          ? ", still there, correctly"
+                          : ", GONE, WRONG"));
     }
     else
     {
@@ -416,8 +416,8 @@ int main(void)
     table = p_get_route_info(base, 23, 0);      /* AF_INET6 in this NDK */
     Printf((CONST_STRPTR)"GetRouteInfo(AF_INET6): %s (errno %ld)%s\n",
            (LONG)((table == NULL) ? "NULL" : "a table"), p_errno(base),
-           (LONG)((table == NULL) ? " -- refused, correctly"
-                                  : " -- RETURNED ONE, WRONG"));
+           (LONG)((table == NULL) ? ", refused, correctly"
+                                  : ", RETURNED ONE, WRONG"));
     p_free_route_info(base, table);
 
     /*
@@ -438,7 +438,7 @@ int main(void)
     rc = p_delete_route(base, tags);
     Printf((CONST_STRPTR)"delete a route never added: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
     /* ---- and undo ---------------------------------------------------------
      *
@@ -469,8 +469,8 @@ int main(void)
     Printf((CONST_STRPTR)"counts: before %ld, with %ld, after %ld%s\n",
            before, with, after,
            (LONG)((before >= 0 && with == before + 2 && after == before)
-                      ? " -- two added and two removed, correctly"
-                      : " -- WRONG"));
+                      ? ", two added and two removed, correctly"
+                      : ", WRONG"));
 
     /* Documented to do nothing rather than to fault. */
     p_free_route_info(base, NULL);

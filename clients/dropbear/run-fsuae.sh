@@ -115,7 +115,7 @@ BSD="$ROOT/$STACK_BUILD/src/bsdsocket/bsdsocket.library"
 ADDIF="$ROOT/$STACK_BUILD/src/tools/AddNetInterface"
 
 for f in "$DBCLIENT" "$BSD" "$ADDIF"; do
-    [ -f "$f" ] || { echo "missing $f -- build it first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build it first" >&2; exit 2; }
 done
 
 # ------------------------------------------------------------ the driver ---
@@ -176,7 +176,7 @@ cp "$BSD"      "$STAGE/libs/bsdsocket.library"
 cp "$DBCLIENT" "$STAGE/dbclient"
 if [ -n "$DB_BUILD2" ]; then
     DBCLIENT2="$ROOT/$DB_BUILD2/dbclient"
-    [ -f "$DBCLIENT2" ] || { echo "missing $DBCLIENT2 -- build it first" >&2; exit 2; }
+    [ -f "$DBCLIENT2" ] || { echo "missing $DBCLIENT2, build it first" >&2; exit 2; }
     cp "$DBCLIENT2" "$STAGE/dbclient2"
     echo "==> second client staged as SYS:dbclient2: $DB_BUILD2"
 fi
@@ -196,7 +196,7 @@ if [ -f "$KEYFILE" ]; then
     cp "$KEYFILE" "$STAGE/.ssh/id_dropbear"
     echo "==> and as SYS:.ssh/id_dropbear, for the no -i default"
 else
-    echo "!! no client key at $KEYFILE -- public-key auth will fail." >&2
+    echo "!! no client key at $KEYFILE, public-key auth will fail." >&2
     echo "   clients/dropbear/sshd-testserver.sh start makes one." >&2
 fi
 
@@ -248,7 +248,7 @@ fi
 if [ -n "$DB_SERVER" ]; then
     DBSRV="$ROOT/$DB_SERVER/dropbear"
     [ -f "$DBSRV" ] || {
-        echo "missing $DBSRV -- build it with:" >&2
+        echo "missing $DBSRV, build it with:" >&2
         echo "  clients/dropbear/build.sh -b $DB_SERVER -P \"dbclient dropbear\"" >&2
         exit 2
     }
@@ -256,7 +256,7 @@ if [ -n "$DB_SERVER" ]; then
 
     DBKEYGEN="$ROOT/build/dropbear-host/dropbearkey"
     [ -x "$DBKEYGEN" ] || {
-        echo "missing $DBKEYGEN -- build the host tools first" >&2
+        echo "missing $DBKEYGEN, build the host tools first" >&2
         exit 2
     }
 
@@ -383,7 +383,7 @@ for marker in AMIGA-SSH-OK "second connection" aes128-ctr chacha20; do
 done
 
 if [ "$fails" != 0 ]; then
-    echo "dropbear: FAILED ($fails of 4) -- $TRANSCRIPT"
+    echo "dropbear: FAILED ($fails of 4), $TRANSCRIPT"
     exit 1
 fi
 echo "dropbear: PASSED"

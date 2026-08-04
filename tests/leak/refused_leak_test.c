@@ -10,13 +10,13 @@
  * This program is a matrix of socket lifecycles, each measured the same way,
  * so the arms that leak can be told from the arms that do not, in one run:
  *
- *   A  dial a port with nothing on it                 , 37.5's control
- *   B  dial a port whose listener never accept()s     , the named suspect
+ *   A  dial a port with nothing on it, 37.5's control
+ *   B  dial a port whose listener never accept()s, the named suspect
  *   C  the same, with a non-blocking connect()
- *   D  full lifecycle, the client closes first        , 37.5's other control
+ *   D  full lifecycle, the client closes first, 37.5's other control
  *   E  full lifecycle, the server closes first
- *   F  full lifecycle, only the client closes at all  , a half-open peer
- *   G  three dials, then three accept()s, eight times  , 37.4's defect
+ *   F  full lifecycle, only the client closes at all, a half-open peer
+ *   G  three dials, then three accept()s, eight times, 37.4's defect
  *
  * The measurement is AvailMem(MEMF_PUBLIC), the library's own live socket
  * count, and a histogram of what state those sockets are in, all three from

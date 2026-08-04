@@ -429,7 +429,7 @@ int main(void)
     test_from_buff_restart();
     test_from_buff_short_chain();
 
-    printf("%lu checks, %lu failures -- %s\n", h_checks, h_failures,
+    printf("%lu checks, %lu failures, %s\n", h_checks, h_failures,
            (h_failures == 0) ? "PASS" : "FAIL");
 
     return (h_failures == 0) ? 0 : 1;

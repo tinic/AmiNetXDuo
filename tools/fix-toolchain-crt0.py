@@ -387,7 +387,7 @@ def argv_sites(objdump, path):
     express it however it likes. Which one appears is a property of the
     toolchain BUILD, not of the multilib:
 
-      A. pea __argv                  , a direct push of the address
+      A. pea __argv, a direct push of the address
       B. lea __argv,an ... move.l an,-(sp)
 
     Shape B is what the pinned toolchain emits: it needs the address in a
@@ -511,7 +511,7 @@ def repair_argv(objdump, path, check_only):
                 bytes(data[at + 2:at + 8]) != PEA_A4_32_TAIL:
             return ("refused",
                     f"file offset 0x{at:x} is a 32-bit baserel pea whose "
-                    f"displacement is not (bd=0,a4) -- not __argv")
+                    f"displacement is not (bd=0,a4), not __argv")
         data[at] = (new >> 8) & 0xFF
         data[at + 1] = new & 0xFF
     path.write_bytes(bytes(data))
@@ -527,7 +527,7 @@ def repair(objdump, path, check_only):
     start = next((v for k, v in fns.items() if k.endswith("____start")), None)
     exit_ = next((v for k, v in fns.items() if k.endswith("__exit")), None)
     if start is None or exit_ is None:
-        return ("skipped", "no ____start/exit pair -- not this crt0 shape")
+        return ("skipped", "no ____start/exit pair, not this crt0 shape")
 
     saves = [e for e in exit_ if e[1] == MOVEM_SAVE]
 
@@ -633,7 +633,7 @@ def main():
                 printed_immune = True
                 print(f"  {state:8s} {p.relative_to(root)}: {note}")
 
-        print(f"fix-toolchain-crt0: {len(found)} crt0.o examined -- "
+        print(f"fix-toolchain-crt0: {len(found)} crt0.o examined, "
               + ", ".join(f"{n} {s}" for s, n in sorted(counts.items())))
         if counts.get("refused"):
             rc = 1
@@ -645,7 +645,7 @@ def main():
         # buggy and none ok, which is a real verdict, not a parse failure.
         if not any(counts.get(s) for s in ("ok", "patched", "immune", "buggy")):
             sys.stderr.write(f"fix-toolchain-crt0: {label}: nothing was "
-                             f"verified on any crt0.o -- the disassembly was "
+                             f"verified on any crt0.o, the disassembly was "
                              f"not understood\n")
             rc = 1
     return rc

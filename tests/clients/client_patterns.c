@@ -387,7 +387,7 @@ static VOID group_d(VOID)
     char               rnd[9]  = "curlwake";
     char               check[9];
 
-    t_group("D  curl: wakeup_inet() -- its own loopback socketpair");
+    t_group("D  curl: wakeup_inet(), its own loopback socketpair");
 
     /*
      * wakeup_inet() step for step.  curl builds a socketpair this way on every
@@ -443,7 +443,7 @@ static VOID group_d(VOID)
 
         rc = recv(s1, (UBYTE *)check, sizeof(check), 0);
         t_ok(rc == (LONG)sizeof(rnd) && memcmp(rnd, check, sizeof(rnd)) == 0,
-             "the nonce came back intact -- curl accepts the pair", rc);
+             "the nonce came back intact, curl accepts the pair", rc);
 
         /* Both ends non-blocking, as curl leaves them. */
         set_nonblock(s0, 1);
@@ -691,7 +691,7 @@ static VOID group_n(VOID)
     UBYTE buf[1024];
     BOOL  intact = TRUE;
 
-    t_group("N  server writes a response and closes -- does it arrive whole?");
+    t_group("N  server writes a response and closes, does it arrive whole?");
 
     for (i = 0; i < (LONG)sizeof(payload); i++)
         payload[i] = (UBYTE)(i * 7 + 3);
@@ -831,7 +831,7 @@ static VOID group_g(VOID)
      * Descriptors must be recycled, not consumed.  64 rounds through a
      * 64-entry table would run out on the first pass if close() leaked one.
      */
-    t_ok(maxfd < 16, "descriptor numbers stayed low -- fds are recycled", maxfd);
+    t_ok(maxfd < 16, "descriptor numbers stayed low, fds are recycled", maxfd);
 
     CloseSocket(lst);
 }
@@ -1265,7 +1265,7 @@ static VOID group_p(VOID)
             t_ok(rc == 0, "bind() to the AI_PASSIVE address", rc);
 
             rc = listen(fd, 1);
-            t_ok(rc == 0, "listen() on it -- the nc -l path", rc);
+            t_ok(rc == 0, "listen() on it, the nc -l path", rc);
 
             CloseSocket(fd);
         }
@@ -1365,7 +1365,7 @@ int main(void)
         return RETURN_FAIL;
     }
 
-    Printf((STRPTR)"AmiNetXDuo -- client access patterns\n");
+    Printf((STRPTR)"AmiNetXDuo, client access patterns\n");
 
     group_a();
     group_b();

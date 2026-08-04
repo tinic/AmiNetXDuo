@@ -93,7 +93,7 @@ def summarise(data):
     The answer section is walked as well as the question section: an
     announcement carries no questions at all, so a summary that stopped at the
     questions would print "response an=8" and nothing about WHAT was announced
-   , which is the whole thing a service test wants to read.
+, which is the whole thing a service test wants to read.
     """
     if len(data) < 12:
         return "short packet (%d bytes)" % len(data)
@@ -188,7 +188,7 @@ def main():
         sock.bind(("", MCAST_PORT))
     except OSError as exc:
         log.write("CANNOT BIND UDP %d: %s\n" % (MCAST_PORT, exc))
-        log.write("INSTRUMENT UNAVAILABLE -- no conclusion can be drawn\n")
+        log.write("INSTRUMENT UNAVAILABLE, no conclusion can be drawn\n")
         log.flush()
         return 2
 

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Write an LHA archive without needing an LHA that can write one.
 
-macOS ships, and Homebrew installs, Lhasa -- which extracts LHA archives and
+macOS ships, and Homebrew installs, Lhasa, which extracts LHA archives and
 cannot create them.  This produces a valid archive so that `make-dist.sh`
 works on a machine with no archiver at all.
 
 What it writes: header level 1, method "-lh0-" (stored, no compression),
 CRC-16/ARC over the file data, and the directory in an extended header of
-type 0x02 with 0xFF between components -- which is where every LHA since the
+type 0x02 with 0xFF between components, which is where every LHA since the
 early nineties expects to find it.  Level 0 was tried first and rejected:
 its convention of packing the whole path into the name field with 0xFF
 separators is not universally decoded (Lhasa does not), so the paths come

@@ -112,7 +112,7 @@ class Profile:
         self.nlibsegs = f[23]
 
         if self.magic != PROF_MAGIC:
-            die("%s: bad magic $%08x -- tests/perf/prof writes a different, "
+            die("%s: bad magic $%08x, tests/perf/prof writes a different, "
                 "older format ('APRF'); use tools/prof-report.py for those"
                 % (path, self.magic))
 
@@ -148,7 +148,7 @@ class Profile:
         # disagree about a struct, and every field after the disagreement is
         # garbage that would still resolve to plausible addresses.
         if off != len(blob):
-            die("%s: %d bytes of sections but the file is %d -- the writer and "
+            die("%s: %d bytes of sections but the file is %d, the writer and "
                 "this reader disagree about a record size" % (path, off, len(blob)))
 
     def phase(self, name):
@@ -295,7 +295,7 @@ def build_symbol_table(nm, mapfile, objdir):
     """
     contributions = parse_map(mapfile)
     if not contributions:
-        die("%s: no section placements found -- is this a linker map?" % mapfile)
+        die("%s: no section placements found, is this a linker map?" % mapfile)
 
     cache = {}
     table = defaultdict(list)          # section -> [(addr, name, module)]
@@ -384,7 +384,7 @@ class LibSymbols:
                          % (spec["exe"], len(sizes), len(run_sizes)))
             return
         if any(a != b for a, b in zip(sizes, run_sizes)):
-            self.note = ("%s: hunk sizes differ -- file %s, run %s"
+            self.note = ("%s: hunk sizes differ, file %s, run %s"
                          % (spec["exe"], sizes, list(run_sizes)))
             return
 
@@ -399,7 +399,7 @@ class LibSymbols:
         self.ok = True
         self.note = ("%d hunks, sizes %s, %d symbols from %s"
                      % (len(sizes), sizes, self.nsyms,
-                        spec.get("map") or "(no map -- globals only)"))
+                        spec.get("map") or "(no map, globals only)"))
 
     def lookup(self, hunk, off):
         """(function, object) for an offset into one hunk, or None."""
@@ -848,7 +848,7 @@ def check_contain(prof, res, samples, path):
         print("%-10s %10d %8d %10d %7.1f%% %7.1f%%"
               % (name, hi - lo, ms.get(name, 0), counts[name], ts, ss))
         if counts[name] < 100:
-            print("   FAIL  only %d samples landed in %s -- expected the bulk "
+            print("   FAIL  only %d samples landed in %s, expected the bulk "
                   "of its phase" % (counts[name], name))
             failures += 1
         if abs(ts - ss) > 4.0:
@@ -869,12 +869,12 @@ def check_contain(prof, res, samples, path):
     # A wrong frame offset scores ~0 here.  Ten percent is far below anything a
     # correct sampler produces and far above anything a broken one can reach.
     if got < 10.0:
-        print("   FAIL  almost nothing landed in the kernels at all -- this is "
+        print("   FAIL  almost nothing landed in the kernels at all, this is "
               "what a wrong exception-frame offset looks like")
         failures += 1
 
     print()
-    print("%d failures -- %s" % (failures, "PASS" if failures == 0 else "FAIL"))
+    print("%d failures, %s" % (failures, "PASS" if failures == 0 else "FAIL"))
     return failures
 
 
@@ -943,7 +943,7 @@ def main():
              "NTSC" if prof.flags & NTSC else "PAL"))
 
     if prof.flags & ODDFORMAT:
-        print("!! a frame was not format $0 -- these PCs are NOT trustworthy")
+        print("!! a frame was not format $0, these PCs are NOT trustworthy")
     elif prof.flags & FMTVALID:
         print("frames       all format $0 (checked on the Amiga)")
     else:
@@ -951,13 +951,13 @@ def main():
     if prof.flags & OVERFLOW:
         print("!! the sample buffer filled; the tail of the run is missing")
     if prof.flags & LOSTAUDIO:
-        print("!! the sampling source was interfered with -- see the Amiga's "
+        print("!! the sampling source was interfered with, see the Amiga's "
               "own output for which channel")
     if prof.flags & RATEDIP:
         print("!! at least one half-second window ran well under the "
               "programmed rate")
 
-    print("relocation   %s -- %s"
+    print("relocation   %s, %s"
           % ("ok" if res.reloc_ok else "MISMATCH", res.reloc_note))
     if not res.reloc_ok:
         print("!! refusing to rank: the segment table does not describe this "
@@ -1004,7 +1004,7 @@ def main():
     gaps = gap_report(prof, times, res)
     if gaps and gaps["total"]:
         pct = 100.0 * gaps["missing"] / gaps["total"]
-        print("unsampled    %.1f%% of %.2f s -- time with interrupts masked "
+        print("unsampled    %.1f%% of %.2f s, time with interrupts masked "
               "(Disable(), or a level 5/6 handler)"
               % (pct, prof.us(gaps["total"]) / 1e6))
         for step, i in gaps["gaps"][:3]:
@@ -1016,7 +1016,7 @@ def main():
               "blank" % (gaps["seen_frames"], prof.frames))
         if gaps["lost_frames"] > 0:
             print("!! the vertical blank counted %d frames the samples did "
-                  "not go through -- at least one gap was longer than a whole "
+                  "not go through, at least one gap was longer than a whole "
                   "frame and the figure above is a floor, not a total"
                   % gaps["lost_frames"])
         if gaps["extra_frames"] > 0:
@@ -1029,7 +1029,7 @@ def main():
                   "duration above is inflated"
                   % (gaps["seen_frames"], prof.frames))
         if pct > 25.0:
-            print("!! more than a quarter of the run was never sampled -- "
+            print("!! more than a quarter of the run was never sampled, "
                   "every share below is a share of the part that was visible")
     print()
 
@@ -1057,7 +1057,7 @@ def main():
     unattr = by_mod.get("unattributed", 0)
     if unattr:
         print()
-        print("unattributed %d samples (%.1f%%) -- in no hunk, no library range "
+        print("unattributed %d samples (%.1f%%), in no hunk, no library range "
               "and no jump-table entry within %d KB"
               % (unattr, 100.0 * unattr / total, LVO_WINDOW // 1024))
 
@@ -1065,14 +1065,14 @@ def main():
         folded = folded_stacks(prof, res, samples)
         write_folded(args.folded, folded)
         print()
-        print("wrote %s -- %d unique stacks.  Drop it on speedscope.app, or"
+        print("wrote %s, %d unique stacks.  Drop it on speedscope.app, or"
               % (args.folded, len(folded)))
         print("  flamegraph.pl %s > %s.svg" % (args.folded, args.folded))
 
     if args.trace:
         n = write_trace(args.trace, prof, res, samples, times)
         print()
-        print("wrote %s -- %d events.  Drop it on ui.perfetto.dev or "
+        print("wrote %s, %d events.  Drop it on ui.perfetto.dev or "
               "speedscope.app." % (args.trace, n))
 
     if args.contain:

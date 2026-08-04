@@ -159,7 +159,7 @@ static LONG ami_rx_kill(void)
     if (ns == NULL)
         return RETURN_ERROR;
 
-    AMI_INFO("AMITCP: KILL -- taking every interface down");
+    AMI_INFO("AMITCP: KILL, taking every interface down");
 
     for (i = 0; i < ns->ns_IfaceCount; i++)
     {

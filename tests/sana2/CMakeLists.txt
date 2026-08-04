@@ -39,7 +39,7 @@ target_include_directories(test_sana2_copy PRIVATE
     "${CMAKE_SOURCE_DIR}/src/net68k"
     "${CMAKE_SOURCE_DIR}/include"
     "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
-    "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+    "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
     "${AMINETXDUO_NETXDUO}/common/inc"
     "${AMINETXDUO_THREADX}/common/inc")
 

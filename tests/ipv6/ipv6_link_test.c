@@ -346,7 +346,7 @@ UWORD            slot;
         t_log_addr6("  addr", addr);
         t_log("        prefix /%ld state %ld%s", prefix, state,
               (state == NX_IPV6_ADDR_STATE_TENTATIVE)
-                  ? (CHAR *)" (TENTATIVE -- duplicate address detection is "
+                  ? (CHAR *)" (TENTATIVE, duplicate address detection is "
                             "still running)"
                   : (CHAR *)"");
 
@@ -458,7 +458,7 @@ LONG    status;
     ami_crash_install();
     ami_crash_install_alert_hook();
 
-    t_log("AmiNetXDuo -- IPv6 over a real SANA-II device");
+    t_log("AmiNetXDuo, IPv6 over a real SANA-II device");
     t_flush();
 
     status =  netstack_startup();
@@ -473,7 +473,7 @@ LONG    status;
     {
         t_log("the stack did not come up; nothing to test");
         t_log("");
-        t_log("%ld checks, %ld failures -- FAIL", t_checks, t_failures + 1UL);
+        t_log("%ld checks, %ld failures, FAIL", t_checks, t_failures + 1UL);
         t_flush();
         return(20);
     }
@@ -481,7 +481,7 @@ LONG    status;
     t_run();
 
     t_log("");
-    t_log("%ld checks, %ld failures -- %s",
+    t_log("%ld checks, %ld failures, %s",
           t_checks, t_failures, (t_failures == 0UL) ? "PASS" : "FAIL");
     t_flush();
 

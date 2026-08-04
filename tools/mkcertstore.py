@@ -234,7 +234,7 @@ def main():
     # A partial store is the failure mode worth refusing: it produces a machine
     # that reaches most sites and mysteriously refuses the rest.
     if skipped_big or skipped_bad:
-        print("%s: REFUSING to write a partial store -- %d oversized, "
+        print("%s: REFUSING to write a partial store, %d oversized, "
               "%d unparseable" % (args.output, skipped_big, skipped_bad),
               file=sys.stderr)
         return 2
@@ -266,7 +266,7 @@ def main():
         print("%s: the store is not the pinned one.\n"
               "  expected %s\n  got      %s\n"
               "The input bundle, or mkcertstore.py, is not what the pin was\n"
-              "recorded from -- see third_party/cacert/README.md."
+              "recorded from, see third_party/cacert/README.md."
               % (args.output, args.expect_sha256.lower(), digest),
               file=sys.stderr)
         return 2

@@ -59,7 +59,7 @@
 |
 |   MULU.L <ea>,Dh:Dl is 41 best / 43 cached / 44 worst on 68020, and 44 max on
 |   68030.  It is 20 on a 68040.  On a 68060 the 64-bit form is unimplemented
-|  , it traps to vector 61 and is emulated in software, so this file is a
+|, it traps to vector 61 and is emulated in software, so this file is a
 |   pessimisation there and must not be enabled for a 68060 build.  Confirmed
 |   elsewhere: AmiSSL shipped the same finding in 4.4 ("disabled m68k asm
 |   replacement as it's slower"), and Roberto Ragusa's 1998 PGP 68060 patch got
@@ -120,8 +120,8 @@ Lam_odd:
         bra.s   Lam_half                | one limb, then n/2 full passes
 
 Lam_loop:
-        move.l  (a1)+,d3                | b[j]       , MOVE leaves X alone
-        mulu.l  d2,d1:d3                | d1:d3 = a * b[j]  , as does MULU
+        move.l  (a1)+,d3                | b[j], MOVE leaves X alone
+        mulu.l  d2,d1:d3                | d1:d3 = a * b[j], as does MULU
         addx.l  d0,d3                   | + carry + X
         addx.l  d5,d1
         add.l   d3,(a0)+                | r[j] += ; X = carry out

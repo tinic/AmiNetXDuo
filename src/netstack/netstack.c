@@ -3,20 +3,20 @@
  *
  * Startup order:
  *
- *   1. config         , AmigaDOS file I/O, so it must happen on a Process
+ *   1. config, AmigaDOS file I/O, so it must happen on a Process
  *                         and before this task becomes a ThreadX thread.
- *   2. SANA-II opens  , OpenDevice()/DoIO(), same reason.
- *   3. sizing         , AvailMem() decides the packet pool; the 1 MB floor
+ *   2. SANA-II opens, OpenDevice()/DoIO(), same reason.
+ *   3. sizing, AvailMem() decides the packet pool; the 1 MB floor
  *                         (docs/RESEARCH.md 81) means NetX Duo's own defaults
  *                         are not usable.
- *   4. ThreadX        , tx_amiga_kernel_start() returns once the scheduler
+ *   4. ThreadX, tx_amiga_kernel_start() returns once the scheduler
  *                         is live, unlike tx_kernel_enter().
- *   5. adoption       , everything below suspends the calling thread inside
+ *   5. adoption, everything below suspends the calling thread inside
  *                         NetX Duo, and nx_dns_create() is threads-only.
- *   6. NetX Duo       , pool, NX_IP, ARP/TCP/UDP/ICMP, extra interfaces.
- *   7. addresses      , DHCP, or AutoIP, or the static config; block until
+ *   6. NetX Duo, pool, NX_IP, ARP/TCP/UDP/ICMP, extra interfaces.
+ *   7. addresses, DHCP, or AutoIP, or the static config; block until
  *                         the first interface has one or DHCP gives up.
- *   8. DNS            , needs the resolver config and a running IP.
+ *   8. DNS, needs the resolver config and a running IP.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -559,7 +559,7 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
             else
             {
                 AMI_ERROR("netstack: interface '%s' would not open: %s unit "
-                          "%lu did not answer -- is the driver in "
+                          "%lu did not answer, is the driver in "
                           "DEVS:Networks/ and is the card installed on that "
                           "unit?",
                           cfg->name, cfg->device, (unsigned long)cfg->unit);
@@ -963,7 +963,7 @@ static VOID ami_ns_ip_conflict(NX_IP *ip_ptr, UINT interface_index,
     ns->ns_AddrConflicts++;
     ns->ns_LastConflictAddr = probe_address;
 
-    AMI_ERROR("netstack: %lu.%lu.%lu.%lu is in use by %lx:%lx -- two machines "
+    AMI_ERROR("netstack: %lu.%lu.%lu.%lu is in use by %lx:%lx, two machines "
               "on one address",
               (unsigned long)((probe_address >> 24) & 0xFFUL),
               (unsigned long)((probe_address >> 16) & 0xFFUL),
@@ -1042,7 +1042,7 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
         {
             (VOID)nx_auto_ip_stop(&ns->ns_AutoIp);
             ns->ns_AutoIpRunning = FALSE;
-            AMI_INFO("netstack: link-local configuration stopped -- interface "
+            AMI_INFO("netstack: link-local configuration stopped, interface "
                      "%ld has a routable address now", (long)i);
         }
     }
@@ -1092,7 +1092,7 @@ static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
         break;
 
     case NX_DHCP_STATE_REBINDING:
-        AMI_WARN("netstack: interface %ld -- the DHCP server that issued the "
+        AMI_WARN("netstack: interface %ld, the DHCP server that issued the "
                  "lease is not answering; asking any server on this network",
                  (long)iface_index);
         break;
@@ -1107,7 +1107,7 @@ static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
             previous == (UBYTE)NX_DHCP_STATE_RENEWING ||
             previous == (UBYTE)NX_DHCP_STATE_REBINDING)
         {
-            AMI_WARN("netstack: interface %ld has LOST its DHCP lease -- the "
+            AMI_WARN("netstack: interface %ld has LOST its DHCP lease, the "
                      "address and the gateway have been taken off it, and "
                      "every open connection through it is dead",
                      (long)iface_index);
@@ -1422,7 +1422,7 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
 
             if (!resolved)
                 AMI_WARN("netstack: link-local configuration did not settle "
-                         "either -- is the cable in?");
+                         "either, is the cable in?");
         }
     }
 
@@ -1492,7 +1492,7 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
         if (!wanted_up)
         {
             AMI_INFO("netstack: no interface was configured up, so no address "
-                     "is expected -- the stack is running");
+                     "is expected, the stack is running");
             resolved = TRUE;
         }
     }
@@ -1527,7 +1527,7 @@ static LONG ami_ns_bring_up(VOID)
 
     if (ns->ns_Config.interface_count == 0)
     {
-        AMI_ERROR("netstack: nothing to bring up -- DEVS:NetInterfaces holds "
+        AMI_ERROR("netstack: nothing to bring up, DEVS:NetInterfaces holds "
                   "no usable interface file. Run NetSetup to write one, or "
                   "ShowNetStatus to see what is wrong with the one there");
         ami_free(ns);
@@ -1666,7 +1666,7 @@ static LONG ami_ns_bring_up(VOID)
          * may still want loopback, and Online/AddNetInterface can fix the
          * interface later. Report the failure so bsdsocket does not pretend.
          */
-        AMI_WARN("netstack: up, but no interface has an address -- check the "
+        AMI_WARN("netstack: up, but no interface has an address, check the "
                  "cable, or that something on this network hands out addresses");
         return status;
     }
@@ -1777,7 +1777,7 @@ VOID netstack_shutdown(VOID)
 
         if (txstatus != TX_SUCCESS)
         {
-            AMI_ERROR("netstack: tx_amiga_kernel_stop failed (%ld) -- ThreadX "
+            AMI_ERROR("netstack: tx_amiga_kernel_stop failed (%ld), ThreadX "
                       "Tasks are still running; do not unload", (LONG)txstatus);
         }
         else
@@ -2030,7 +2030,7 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
          * removable until NetShutdown. The published API warns about this
          * state under `force`.
          */
-        AMI_ERROR("netstack: '%s' cannot be removed -- the device still holds "
+        AMI_ERROR("netstack: '%s' cannot be removed, the device still holds "
                   "read requests inside it",
                   ns->ns_Config.interfaces[index].name);
         return AMI_NET_ERR_STATE;

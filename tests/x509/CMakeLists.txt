@@ -53,7 +53,7 @@ foreach(lib test_x509_nx_secure test_x509_nx_crypto)
         "${CMAKE_SOURCE_DIR}/tests/tls"
         "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
         "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
-        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
         "${AMINETXDUO_NETXDUO}/common/inc"
         "${AMINETXDUO_THREADX}/common/inc"
         "${AMINETXDUO_NETXDUO}/nx_secure/inc"

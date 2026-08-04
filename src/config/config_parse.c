@@ -815,7 +815,7 @@ VOID ami_cfg_parse_resolver(char *buf, AmiResolverConfig *out,
                 report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "NAMESERVER",
                                  value,
                                  "A name server is given by address, not by "
-                                 "name -- on a home network it is usually the "
+                                 "name, on a home network it is usually the "
                                  "router, for example 192.168.1.1.");
             }
             else if (out->nameserver_count >= AMI_CFG_MAX_NAMESERVERS)

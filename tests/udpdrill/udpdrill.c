@@ -413,7 +413,7 @@ UBYTE       tag = 0;
     t_settle();
 
     (VOID)t_check((BOOL)(t_drain(fd, &tag) == 8),
-                  "recvfrom() returned it -- no peer was named", bsd_Errno());
+                  "recvfrom() returned it, no peer was named", bsd_Errno());
     (VOID)t_check((BOOL)(tag == 0xA0), "and it is the datagram that was sent",
                   (LONG)tag);
 
@@ -507,7 +507,7 @@ LONG        n;
 
 int main(void)
 {
-    t_log("AmiNetXDuo -- which datagrams a UDP socket may receive");
+    t_log("AmiNetXDuo, which datagrams a UDP socket may receive");
 
     if (tap_install(local_mac) != 0)
     {
@@ -533,7 +533,7 @@ int main(void)
     tap_remove();
 
     t_log("");
-    t_log("%ld checks, %ld failures -- %s", t_checks, t_failures,
+    t_log("%ld checks, %ld failures, %s", t_checks, t_failures,
           (t_failures == 0UL) ? "PASS" : "FAIL");
 
     t_flush();

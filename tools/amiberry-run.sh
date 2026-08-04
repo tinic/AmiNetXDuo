@@ -380,7 +380,7 @@ echo "---- serial ($SERIAL) ----"
 if [ -s "$SERIAL" ]; then
     cat "$SERIAL"
 else
-    echo "(empty -- no ami_log output reached the serial port)"
+    echo "(empty, no ami_log output reached the serial port)"
 fi
 
 for produced in "$HD"/*.txt "$HD"/*.log; do

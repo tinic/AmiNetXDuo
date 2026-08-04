@@ -14,8 +14,8 @@
  *
  *   tests/perf/cpucal on the A1200 profile, -k 56:
  *
- *     32 KB / 64 B read ratio  0.88x       , no data cache
- *     Fast RAM longword read   117.7 ns    , 6.6 cycles, against ADD.L's 2
+ *     32 KB / 64 B read ratio  0.88x, no data cache
+ *     Fast RAM longword read   117.7 ns, 6.6 cycles, against ADD.L's 2
  *     Fast RAM byte read        29.4 ns/B
  *     instruction cache        256 bytes
  *

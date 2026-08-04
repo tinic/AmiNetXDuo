@@ -136,10 +136,10 @@
  * What the roadshow NDK already defines, verified against
  * amigaos/tools/m68k-amigaos-gcc/m68k-amigaos/ndk-include:
  *
- *   sys/socket.h:196   AF_INET6 23         , and note it collides with
+ *   sys/socket.h:196   AF_INET6 23, and note it collides with
  *                                              AF_IPX 23 three lines above.
  *                                              Nothing here uses AF_IPX.
- *   netinet/in.h:178   struct in6_addr     , unsigned char s6_addr[16]
+ *   netinet/in.h:178   struct in6_addr, unsigned char s6_addr[16]
  *   netinet/in.h:182   struct sockaddr_in6 , sin6_family, sin6_port,
  *                                              sin6_flowinfo, sin6_addr,
  *                                              sin6_scope_id

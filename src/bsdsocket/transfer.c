@@ -1507,7 +1507,7 @@ static LONG bsd_recv_oob(struct AmiSocketBase *base, AmiSocket *sock,
  * the 'smm_To' or the 'smm_Msg' field will be NULL." That is an exclusion, not
  * a requirement that exactly one be set. The three calls give:
  *
- *   send()      smm_To NULL, smm_Msg NULL  , no destination and no msghdr;
+ *   send()      smm_To NULL, smm_Msg NULL, no destination and no msghdr;
  *                                              the peer is implied
  *   sendto()    smm_To the caller's, smm_Msg NULL   (smm_To is NULL too when
  *                                              the caller passed none, which

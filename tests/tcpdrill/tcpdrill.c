@@ -844,7 +844,7 @@ static VOID pump(VOID)
         {
             /* Dropping here would leave every later assertion one frame out
                of step. */
-            say("  !! frame queue overflow -- a case sent more than %u frames "
+            say("  !! frame queue overflow, a case sent more than %u frames "
                 "between directives", (ULONG)PEND_MAX);
             pend_tail = (UWORD)((pend_tail + 1) % PEND_MAX);
             pend_count--;
@@ -1013,7 +1013,7 @@ static VOID build_and_inject(const Inject *in)
 
     if (tap_rx_put(f, ETH_HDR + iplen) != 0)
     {
-        say("  !! injection dropped -- no CMD_READ outstanding for 0x0800");
+        say("  !! injection dropped, no CMD_READ outstanding for 0x0800");
         cs.fails++;
     }
 }
@@ -2029,7 +2029,7 @@ static VOID do_wirebytes(const char *raw)
         fmt_num(&w, wire, 10, 0, FALSE);
         t = ", send() accepted "; while (*t) *w++ = *t++;
         fmt_num(&w, cs.accepted, 10, 0, FALSE);
-        t = " -- difference "; while (*t) *w++ = *t++;
+        t = ", difference "; while (*t) *w++ = *t++;
         fmt_num(&w, (ULONG)((LONG)wire - (LONG)cs.accepted), 10, 0, TRUE);
         *w = '\0';
         fail(raw, why);
@@ -2266,7 +2266,7 @@ int main(void)
 
     out_file = Open((STRPTR)"DH0:tcpdrill.txt", MODE_NEWFILE);
 
-    say("tcpdrill -- packet-level TCP conformance");
+    say("tcpdrill, packet-level TCP conformance");
 
     if (tap_install(local_mac) != 0)
     {
@@ -2298,7 +2298,7 @@ int main(void)
 
     if (!tap_is_online())
     {
-        say("!! the interface never came online -- DEVS:NetInterfaces/tap0?");
+        say("!! the interface never came online, DEVS:NetInterfaces/tap0?");
         CloseLibrary(SockBase);
         tap_remove();
         if (out_file != (BPTR)0) Close(out_file);

@@ -87,10 +87,10 @@ BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 UG="$ROOT/$BUILD/src/usergroup/usergroup.library"
 
 for f in "$SUITE" "$LAUNCHER"; do
-    [ -f "$f" ] || { echo "missing $f -- run tests/conformance/build.sh" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, run tests/conformance/build.sh" >&2; exit 2; }
 done
 for f in "$BSD" "$UG"; do
-    [ -f "$f" ] || { echo "missing $f -- build bsdsocket_library usergroup_library" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build bsdsocket_library usergroup_library" >&2; exit 2; }
 done
 
 A2065="${AMINETXDUO_A2065:-}"

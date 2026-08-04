@@ -718,14 +718,14 @@ static void fr_selftest(void)
     status = fr_record_header(&s, w.b, w.len, 0, &type, &length);
     if (status != NX_SUCCESS)
     {
-        printf("fuzz_tls_record: SELFTEST FAILED -- record header returned %u\n",
+        printf("fuzz_tls_record: SELFTEST FAILED, record header returned %u\n",
                (unsigned)status);
         exit(2);
     }
 
     if (type != NX_SECURE_TLS_HANDSHAKE || length != w.len - FR_HDR)
     {
-        printf("fuzz_tls_record: SELFTEST FAILED -- header gave type %u len %u,"
+        printf("fuzz_tls_record: SELFTEST FAILED, header gave type %u len %u,"
                " expected %u/%u\n",
                (unsigned)type, (unsigned)length,
                (unsigned)NX_SECURE_TLS_HANDSHAKE, w.len - FR_HDR);
@@ -735,7 +735,7 @@ static void fr_selftest(void)
     payload = (UCHAR *)malloc(length + FR_KNOWN_SLOP);
     if (payload == NX_NULL)
     {
-        printf("fuzz_tls_record: SELFTEST FAILED -- out of memory\n");
+        printf("fuzz_tls_record: SELFTEST FAILED, out of memory\n");
         exit(2);
     }
     memcpy(payload, w.b + FR_HDR, length);
@@ -746,14 +746,14 @@ static void fr_selftest(void)
 
     if (s.nx_secure_tls_protocol_version != NX_SECURE_TLS_VERSION_TLS_1_2)
     {
-        printf("fuzz_tls_record: SELFTEST FAILED -- version not negotiated"
+        printf("fuzz_tls_record: SELFTEST FAILED, version not negotiated"
                " (got %04x)\n", (unsigned)s.nx_secure_tls_protocol_version);
         exit(2);
     }
 
     if (s.nx_secure_tls_session_id_length != 32)
     {
-        printf("fuzz_tls_record: SELFTEST FAILED -- session id not stored"
+        printf("fuzz_tls_record: SELFTEST FAILED, session id not stored"
                " (len %u)\n", (unsigned)s.nx_secure_tls_session_id_length);
         exit(2);
     }
@@ -762,7 +762,7 @@ static void fr_selftest(void)
         s.nx_secure_tls_session_ciphersuite->nx_secure_tls_ciphersuite !=
             FR_SUITE_DEFAULT)
     {
-        printf("fuzz_tls_record: SELFTEST FAILED -- ciphersuite not chosen\n");
+        printf("fuzz_tls_record: SELFTEST FAILED, ciphersuite not chosen\n");
         exit(2);
     }
 }

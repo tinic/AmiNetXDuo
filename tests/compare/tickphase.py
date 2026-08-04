@@ -168,7 +168,7 @@ def teeth(curve, floor=0.80):
 def grid_report(name, times_s, lo_ms=1.0, hi_ms=260.0):
     """The whole periodogram argument for one population of event times."""
     if len(times_s) < 8:
-        print(f"  {name}: only {len(times_s)} events -- not enough to say anything")
+        print(f"  {name}: only {len(times_s)} events, not enough to say anything")
         return None
 
     gaps = [b - a for a, b in zip(times_s, times_s[1:])]
@@ -193,7 +193,7 @@ def grid_report(name, times_s, lo_ms=1.0, hi_ms=260.0):
           f"(spread {spread * 1000:.0f} ms)")
     if not refined:
         print("    no grid: R(T) < 0.75 everywhere in "
-              f"{lo_ms:g}..{hi_ms:g} ms -- these events are not quantised")
+              f"{lo_ms:g}..{hi_ms:g} ms, these events are not quantised")
         return None
 
     # Ranked by R, not by T.  A comb has a tooth at the grid AND at every
@@ -263,7 +263,7 @@ def report(run):
         by_len.setdefault(ln, []).append((t1 - t0) / hz * 1e6)
 
     if by_len:
-        print("\n  ICMP echo turnaround -- arrival-driven, no timer involved")
+        print("\n  ICMP echo turnaround, arrival-driven, no timer involved")
         for ln in sorted(by_len):
             s = stats(by_len[ln])
             print(f"    payload {ln:5d} B, n={s['n']:3d}   "
@@ -304,7 +304,7 @@ def report(run):
             prompt = [i for i in range(len(delays)) if delays[i] < thresh]
             held = [i for i in range(len(delays)) if delays[i] >= thresh]
             p = stats([delays[i] for i in prompt])
-            print("\n  ACKs answered at once -- arrival-driven, one TCP data "
+            print("\n  ACKs answered at once, arrival-driven, one TCP data "
                   "segment in and one ACK out")
             print(f"    n={p['n']}  min {p['min']:.2f}  p50 {p['p50']:.2f}  "
                   f"p90 {p['p90']:.2f}  max {p['max']:.2f} ms")
@@ -314,7 +314,7 @@ def report(run):
             print("\n  Every ACK was held: no segment was answered promptly")
 
         h = stats([delays[i] for i in held])
-        print("\n  ACKs held for a timer -- timer-driven")
+        print("\n  ACKs held for a timer, timer-driven")
         print(f"    n={h['n']}  min {h['min']:.2f}  p50 {h['p50']:.2f}  "
               f"p90 {h['p90']:.2f}  max {h['max']:.2f} ms")
         # A delay counted down in whole ticks from an arrival that lands at a
@@ -378,7 +378,7 @@ def main(argv):
     # thing, and if it is not, they are not.
     if len(grids) >= 2:
         print("=" * 72)
-        print("Grids against each other -- a protocol period is a whole "
+        print("Grids against each other, a protocol period is a whole "
               "number of ticks")
         for i, (pa, ga) in enumerate(grids):
             for pb, gb in grids[i + 1:]:

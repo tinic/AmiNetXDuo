@@ -552,7 +552,7 @@ int main(int argc, char **argv)
     t_check(status == TX_SUCCESS, "ThreadX kernel started", (LONG)status);
     if (status != TX_SUCCESS)
     {
-        t_log("%ld checks, %ld failures -- FAIL\n", (LONG)t_checks,
+        t_log("%ld checks, %ld failures, FAIL\n", (LONG)t_checks,
               (LONG)t_failures);
         return 20;
     }
@@ -774,7 +774,7 @@ int main(int argc, char **argv)
 
     bt_reap(&bt_probe);
 
-    t_log("%ld checks, %ld failures -- ", (LONG)t_checks, (LONG)t_failures);
+    t_log("%ld checks, %ld failures, ", (LONG)t_checks, (LONG)t_failures);
     t_log("%s\n", (LONG)((t_failures == 0UL) ? "PASS" : "FAIL"), 0);
 
     return (t_failures == 0UL) ? 0 : 20;

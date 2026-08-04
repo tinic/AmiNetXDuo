@@ -59,7 +59,7 @@ static const char version_tag[] __attribute__((used)) =
  *   -s SOURCE     the address to send from. bind() on a raw socket records an
  *                 address and nothing more, NetX Duo binds sockets to ports,
  *                 and the route chooses the source address of a raw datagram
- *                , so the option would change nothing.
+ *, so the option would change nothing.
  *
  * Each would parse and then do nothing, so accepting them would misreport
  * which interface the probe left by.

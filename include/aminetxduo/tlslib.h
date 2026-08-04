@@ -31,7 +31,7 @@
  *       while ((n = TLSRead(TLSBase, tls, buf, sizeof(buf))) > 0)
  *           FWrite(Output(), buf, 1, n);
  *
- *       TLSClose(TLSBase, tls);      , the descriptor is yours again
+ *       TLSClose(TLSBase, tls);, the descriptor is yours again
  *       CloseLibrary(TLSBase);
  *       CloseLibrary(SocketBase);
  *

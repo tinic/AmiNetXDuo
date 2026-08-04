@@ -98,7 +98,7 @@ VOID bsd_tcp_disconnect_callback(NX_TCP_SOCKET *socket_ptr)
  * nx_tcp_socket_establish_notify() returns NX_NOT_SUPPORTED and completion has
  * to be polled out of nx_tcp_socket_state. It fires from two places:
  *
- *   nx_tcp_socket_state_syn_sent.c     , our connect() got its SYN+ACK
+ *   nx_tcp_socket_state_syn_sent.c, our connect() got its SYN+ACK
  *   nx_tcp_socket_state_syn_received.c , a client's handshake with a socket
  *                                          we parked on a listen port
  *

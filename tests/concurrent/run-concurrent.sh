@@ -55,7 +55,7 @@ EXE="$ROOT/$BUILD/tests/concurrent/concurrent_test"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
 for f in "$EXE" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build concurrent_test bsdsocket_library" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build concurrent_test bsdsocket_library" >&2; exit 2; }
 done
 
 A2065="${AMINETXDUO_A2065:-}"
@@ -119,7 +119,7 @@ VERDICT=$(printf '%s\n' "$OUT" | grep -E '^[0-9]+ checks, [0-9]+ failures' | tai
 
 echo
 if [ -z "$VERDICT" ]; then
-    echo "==> NO VERDICT -- the harness did not reach its summary."
+    echo "==> NO VERDICT, the harness did not reach its summary."
     echo "==> Read the serial trace above: the last [ct] line is how far it got."
     exit "${rc:-1}"
 fi

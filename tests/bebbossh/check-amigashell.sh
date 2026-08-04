@@ -20,9 +20,9 @@ SERVER="$HD/server.txt"
 FAIL=0
 
 if [ ! -f "$REPORT" ]; then
-    echo "no DH0:client.txt -- the guest never ran the command list."
+    echo "no DH0:client.txt, the guest never ran the command list."
     echo "-------------------------------------------------------------"
-    echo "VERDICT: FAIL -- no run"
+    echo "VERDICT: FAIL, no run"
     exit 1
 fi
 
@@ -49,7 +49,7 @@ echo ""
 if grep -q $'\033\[3[0-9]m' "$REPORT" 2>/dev/null; then
     echo "  the prompt carries ANSI colour, so the Shell is writing to a terminal"
 else
-    echo "  no ANSI in the prompt -- the Shell may not think it has a terminal"
+    echo "  no ANSI in the prompt, the Shell may not think it has a terminal"
 fi
 
 echo ""
@@ -62,8 +62,8 @@ echo "  return codes: $(grep -o '^--- rc [0-9-]*' "$REPORT" | awk '{printf "%s "
 
 echo "-------------------------------------------------------------"
 if [ "$FAIL" = "0" ]; then
-    echo "VERDICT: PASS -- login, remote command and Shell all work"
+    echo "VERDICT: PASS, login, remote command and Shell all work"
     exit 0
 fi
-echo "VERDICT: FAIL -- see above"
+echo "VERDICT: FAIL, see above"
 exit 1

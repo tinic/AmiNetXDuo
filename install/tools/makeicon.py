@@ -33,7 +33,7 @@ end of the file.  Icons that claim to be 2.x and omit them make icon.library
 read past the end.
 
 Bitmaps are written as planar data, plane 0 first, each row padded to a
-whole number of 16-bit words -- the Amiga's native bitmap layout.
+whole number of 16-bit words, the Amiga's native bitmap layout.
 
 Usage:  makeicon.py <outdir>
 

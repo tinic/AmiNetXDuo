@@ -66,7 +66,7 @@ TRACE="$ROOT/$BUILD/src/tools/NetTrace"
 ADDIF="$ROOT/$BUILD/src/tools/AddNetInterface"
 
 for f in "$BSD" "$SMOKE" "$TRACE" "$ADDIF"; do
-    [ -f "$f" ] || { echo "missing $f -- build it first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build it first" >&2; exit 2; }
 done
 
 A2065="${AMINETXDUO_A2065:-}"

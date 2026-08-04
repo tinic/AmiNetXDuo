@@ -24,7 +24,7 @@
 
 set -eu
 
-ROOT=${1:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}
+ROOT=${1:-$(CDPATH= cd, "$(dirname, "$0")/.." && pwd)}
 
 # vendored path : sha256 it was reconciled at : what shadows it
 MANIFEST='
@@ -57,7 +57,7 @@ for entry in $MANIFEST; do
         continue
     fi
     if [ ! -f "$ROOT/$shadow" ]; then
-        echo "MISSING  $shadow -- the shadow named in the manifest is gone" >&2
+        echo "MISSING  $shadow, the shadow named in the manifest is gone" >&2
         rc=1
         continue
     fi

@@ -307,7 +307,7 @@ fi
 # which is a client that cannot resolve anything.  It is also the exact symptom
 # --disable-harden fixes, so it is checked rather than assumed.
 if ! grep -q '^#define HAVE_NETINET_IN_H 1' "$OUT/config.h"; then
-    echo "!! dropbear did not find <netinet/in.h> -- see $LOG" >&2
+    echo "!! dropbear did not find <netinet/in.h>, see $LOG" >&2
     echo "   (a configure test failed for an unrelated reason and took the" >&2
     echo "    header probes with it; check the hardening flags)" >&2
     exit 1

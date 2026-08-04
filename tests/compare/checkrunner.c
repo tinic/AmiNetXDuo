@@ -23,7 +23,7 @@
  *                          nettools harness grew one and it costs four lines)
  *   NAME<TAB>COMMAND       run COMMAND, calling the result NAME
  *
- *   DH0:results.txt        NAME rc ticks availmem  , one line per case
+ *   DH0:results.txt        NAME rc ticks availmem, one line per case
  *   DH0:w/NAME.txt         that command's own stdout and stderr
  *   DH0:checkrunner.txt    the same thing for a human
  *

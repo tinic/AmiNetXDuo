@@ -224,7 +224,7 @@ static VOID p_begin_and_collect(struct Library *base, struct MsgPort *port,
                 : (got == NULL)              ? "NOT REPLIED"
                                              : "replied SOMETHING ELSE"),
            (LONG)((got == &aam->aam_Message && aam->aam_Result == expect)
-                      ? " -- correctly" : " -- WRONG"));
+                      ? ", correctly" : ", WRONG"));
 }
 
 /* ------------------------------------------------------- the second caller */
@@ -392,7 +392,7 @@ static VOID p_ask_again_from_another_process(const char *ifname)
     sig = AllocSignal(-1);
     if (sig == -1)
     {
-        Printf((CONST_STRPTR)"busy: no signal for the handshake -- NOT TESTED\n");
+        Printf((CONST_STRPTR)"busy: no signal for the handshake, NOT TESTED\n");
         return;
     }
 
@@ -416,7 +416,7 @@ static VOID p_ask_again_from_another_process(const char *ifname)
     proc = CreateNewProc(tags);
     if (proc == NULL)
     {
-        Printf((CONST_STRPTR)"busy: CreateNewProc failed -- NOT TESTED\n");
+        Printf((CONST_STRPTR)"busy: CreateNewProc failed, NOT TESTED\n");
         FreeSignal(sig);
         return;
     }
@@ -426,18 +426,18 @@ static VOID p_ask_again_from_another_process(const char *ifname)
 
     if (second.sc_OpenFailed != 0)
     {
-        Printf((CONST_STRPTR)"busy: the second process got no base -- NOT TESTED\n");
+        Printf((CONST_STRPTR)"busy: the second process got no base, NOT TESTED\n");
         return;
     }
     if (second.sc_PortFailed != 0)
     {
-        Printf((CONST_STRPTR)"busy: the second process got no port -- NOT TESTED\n");
+        Printf((CONST_STRPTR)"busy: the second process got no port, NOT TESTED\n");
         return;
     }
     if (second.sc_CreateRc != CAAME_Success)
     {
         Printf((CONST_STRPTR)"busy: the second process could not build a "
-                             "message (%ld) -- NOT TESTED\n",
+                             "message (%ld), NOT TESTED\n",
                second.sc_CreateRc);
         return;
     }
@@ -449,8 +449,8 @@ static VOID p_ask_again_from_another_process(const char *ifname)
                 : second.sc_Replied ? "REPLIED LATE, so a worker was started"
                                     : "NOT REPLIED"),
            (LONG)((second.sc_AtOnce && second.sc_Result == AAMR_Busy)
-                      ? " -- refused at the door with AAMR_Busy, correctly"
-                      : " -- WRONG, the second request was not refused where "
+                      ? ", refused at the door with AAMR_Busy, correctly"
+                      : ", WRONG, the second request was not refused where "
                         "it had to be"));
 }
 
@@ -530,28 +530,28 @@ int main(void)
 
     rc = p_create_aam(base, AAM_VERSION, AAMP_DHCP, ifname, NULL, tags);
     Printf((CONST_STRPTR)"create with no result ptr: %ld%s\n", rc,
-           (LONG)((rc == CAAME_Invalid_result_ptr) ? " -- correctly" : " -- WRONG"));
+           (LONG)((rc == CAAME_Invalid_result_ptr) ? ", correctly" : ", WRONG"));
 
     aam = (struct AddressAllocationMessage *)0x12345678UL;
     rc = p_create_aam(base, 99, AAMP_DHCP, ifname, &aam, tags);
     Printf((CONST_STRPTR)"create with version 99: %ld, ptr %s%s\n", rc,
            (LONG)((aam == NULL) ? "cleared" : "LEFT DIRTY"),
            (LONG)((rc == CAAME_Invalid_version && aam == NULL)
-                      ? " -- correctly" : " -- WRONG"));
+                      ? ", correctly" : ", WRONG"));
 
     rc = p_create_aam(base, AAM_VERSION, 77, ifname, &aam, tags);
     Printf((CONST_STRPTR)"create with protocol 77: %ld%s\n", rc,
-           (LONG)((rc == CAAME_Invalid_protocol) ? " -- correctly" : " -- WRONG"));
+           (LONG)((rc == CAAME_Invalid_protocol) ? ", correctly" : ", WRONG"));
 
     rc = p_create_aam(base, AAM_VERSION, AAMP_DHCP, "", &aam, tags);
     Printf((CONST_STRPTR)"create with an empty name: %ld%s\n", rc,
-           (LONG)((rc == CAAME_Invalid_interface_name) ? " -- correctly"
-                                                       : " -- WRONG"));
+           (LONG)((rc == CAAME_Invalid_interface_name) ? ", correctly"
+                                                       : ", WRONG"));
 
     rc = p_create_aam(base, AAM_VERSION, AAMP_DHCP, "nosuchif", &aam, tags);
     Printf((CONST_STRPTR)"create for an unknown interface: %ld%s\n", rc,
-           (LONG)((rc == CAAME_Interface_not_found) ? " -- correctly"
-                                                    : " -- WRONG"));
+           (LONG)((rc == CAAME_Interface_not_found) ? ", correctly"
+                                                    : ", WRONG"));
 
     tags[0].ti_Tag  = CAAMTA_ClientIdentifier;
     tags[0].ti_Data = (ULONG)"x";
@@ -559,8 +559,8 @@ int main(void)
     tags[1].ti_Data = 0;
     rc = p_create_aam(base, AAM_VERSION, AAMP_DHCP, ifname, &aam, tags);
     Printf((CONST_STRPTR)"create with a 1-character client id: %ld%s\n", rc,
-           (LONG)((rc == CAAME_Client_identifier_too_short) ? " -- correctly"
-                                                           : " -- WRONG"));
+           (LONG)((rc == CAAME_Client_identifier_too_short) ? ", correctly"
+                                                           : ", WRONG"));
 
     for (i = 0; i < sizeof(too_long) - 1; i++)
         too_long[i] = 'a';
@@ -569,8 +569,8 @@ int main(void)
     tags[0].ti_Data = (ULONG)too_long;
     rc = p_create_aam(base, AAM_VERSION, AAMP_DHCP, ifname, &aam, tags);
     Printf((CONST_STRPTR)"create with a 299-character client id: %ld%s\n", rc,
-           (LONG)((rc == CAAME_Client_identifier_too_long) ? " -- correctly"
-                                                          : " -- WRONG"));
+           (LONG)((rc == CAAME_Client_identifier_too_long) ? ", correctly"
+                                                          : ", WRONG"));
 
     /* ---- and one that works, with every buffer asked for ------------------ */
 
@@ -617,22 +617,22 @@ int main(void)
     /* "the timeout must be at least 10 seconds long. If it is shorter, it is
        automatically extended to 10 seconds", extended, not refused. */
     Printf((CONST_STRPTR)"timeout asked 3, got %ld%s\n", aam->aam_Timeout,
-           (LONG)((aam->aam_Timeout == AAM_TIMEOUT_MIN) ? " -- extended, correctly"
-                                                        : " -- WRONG"));
+           (LONG)((aam->aam_Timeout == AAM_TIMEOUT_MIN) ? ", extended, correctly"
+                                                        : ", WRONG"));
 
     Printf((CONST_STRPTR)"reply port %s, mn_Length %ld%s\n",
            (LONG)((aam->aam_Message.mn_ReplyPort == port) ? "set" : "WRONG"),
            (LONG)aam->aam_Message.mn_Length,
            (LONG)((aam->aam_Message.mn_ReplyPort == port &&
                    aam->aam_Message.mn_Length == (UWORD)sizeof(*aam))
-                      ? " -- correctly" : " -- WRONG"));
+                      ? ", correctly" : ", WRONG"));
 
     Printf((CONST_STRPTR)"client id '%s'%s\n",
            (LONG)((aam->aam_ClientIdentifier != NULL)
                       ? (const char *)aam->aam_ClientIdentifier : "(none)"),
            (LONG)((aam->aam_ClientIdentifier != NULL &&
                    aam->aam_ClientIdentifier[0] == 'a')
-                      ? " -- duplicated, correctly" : " -- WRONG"));
+                      ? ", duplicated, correctly" : ", WRONG"));
 
     Printf((CONST_STRPTR)"sizes: nak %ld routers %ld dns %ld static %ld "
                          "host %ld domain %ld bootp %ld\n",
@@ -675,7 +675,7 @@ int main(void)
         }
 
         Printf((CONST_STRPTR)"buffers: %s\n",
-               (LONG)(ok ? "all present, aligned and distinct -- correctly"
+               (LONG)(ok ? "all present, aligned and distinct, correctly"
                          : "MISSING, MISALIGNED OR SHARED"));
     }
 
@@ -695,12 +695,12 @@ int main(void)
         }
 
         Printf((CONST_STRPTR)"buffers zeroed: %s\n",
-               (LONG)(zeroed ? "yes -- correctly" : "NO"));
+               (LONG)(zeroed ? "yes, correctly" : "NO"));
     }
 
     Printf((CONST_STRPTR)"unicast %ld%s\n", (LONG)aam->aam_Unicast,
-           (LONG)((aam->aam_Unicast != 0) ? " -- honoured at version 2, correctly"
-                                          : " -- WRONG"));
+           (LONG)((aam->aam_Unicast != 0) ? ", honoured at version 2, correctly"
+                                          : ", WRONG"));
 
     /* ---- BeginInterfaceConfig, and the reply that has to come back -------- */
 
@@ -786,8 +786,8 @@ int main(void)
             got = GetMsg(port);
             Printf((CONST_STRPTR)"live: begin returned with the message %s%s\n",
                    (LONG)((got == NULL) ? "still out" : "ALREADY BACK"),
-                   (LONG)((got == NULL) ? " -- asynchronous, correctly"
-                                        : " -- SYNCHRONOUS, WRONG"));
+                   (LONG)((got == NULL) ? ", asynchronous, correctly"
+                                        : ", SYNCHRONOUS, WRONG"));
 
             /* Wait for it, with a bound of our own well past the timeout. */
             for (waited = 0; got == NULL && waited < 30UL * 50UL; waited += 10)
@@ -802,7 +802,7 @@ int main(void)
                                      "result %ld%s\n",
                        (LONG)waited, live->aam_Result,
                        (LONG)((live->aam_Result == AAMR_Success)
-                                  ? " -- AAMR_Success, correctly" : " -- WRONG"));
+                                  ? ", AAMR_Success, correctly" : ", WRONG"));
 
                 Printf((CONST_STRPTR)"live: address %ld.%ld.%ld.%ld "
                                      "mask %ld.%ld.%ld.%ld server %ld.%ld.%ld.%ld\n",
@@ -821,7 +821,7 @@ int main(void)
 
                 Printf((CONST_STRPTR)"live: address is %s\n",
                        (LONG)((live->aam_Address != 0)
-                                  ? "not zero -- a server really answered"
+                                  ? "not zero, a server really answered"
                                   : "ZERO, WRONG"));
 
                 if (live->aam_RouterTable != NULL)
@@ -831,8 +831,8 @@ int main(void)
                            (LONG)((live->aam_RouterTable[0] >> 8) & 0xFF),
                            (LONG)(live->aam_RouterTable[0] & 0xFF),
                            (LONG)((live->aam_RouterTable[0] != 0)
-                                      ? " -- the server offered one"
-                                      : " -- none offered"));
+                                      ? ", the server offered one"
+                                      : ", none offered"));
 
                 if (live->aam_LeaseExpires != NULL)
                     Printf((CONST_STRPTR)"live: lease expires day %ld "
@@ -915,7 +915,7 @@ int main(void)
             got = GetMsg(port);
             Printf((CONST_STRPTR)"slow: still running after a second: %s%s\n",
                    (LONG)((got == NULL) ? "yes" : "NO, already replied"),
-                   (LONG)((got == NULL) ? " -- correctly" : " -- WRONG"));
+                   (LONG)((got == NULL) ? ", correctly" : ", WRONG"));
 
             /*
              * The only window in this file in which a worker is certainly
@@ -940,7 +940,7 @@ int main(void)
                    (LONG)waited, slow->aam_Result,
                    (LONG)((got == &slow->aam_Message &&
                            slow->aam_Result == AAMR_Aborted)
-                              ? " -- AAMR_Aborted, correctly" : " -- WRONG"));
+                              ? ", AAMR_Aborted, correctly" : ", WRONG"));
 
             /* ---- and timed out -------------------------------------------- */
 
@@ -961,7 +961,7 @@ int main(void)
                    (LONG)waited, slow->aam_Result,
                    (LONG)((got == &slow->aam_Message &&
                            slow->aam_Result == AAMR_Timeout)
-                              ? " -- AAMR_Timeout, correctly" : " -- WRONG"));
+                              ? ", AAMR_Timeout, correctly" : ", WRONG"));
 
             /*
              * It waited at least the floor.  A worker that gave up early would
@@ -969,7 +969,7 @@ int main(void)
              * shows the deadline is the one the caller asked for.
              */
             Printf((CONST_STRPTR)"slow: waited %s the 10-second floor\n",
-                   (LONG)((waited >= 10UL * 50UL) ? "at least -- correctly"
+                   (LONG)((waited >= 10UL * 50UL) ? "at least, correctly"
                                                   : "LESS THAN, WRONG"));
 
             p_delete_aam(base, slow);
@@ -1011,7 +1011,7 @@ int main(void)
                          "returned, version still %ld%s\n",
            by_hand.aam_Version,
            (LONG)((by_hand.aam_Version == AAM_VERSION)
-                      ? " -- refused, correctly" : " -- WRONG"));
+                      ? ", refused, correctly" : ", WRONG"));
 
     DeleteMsgPort(port);
     CloseLibrary(base);

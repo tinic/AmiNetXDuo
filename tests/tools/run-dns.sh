@@ -110,7 +110,7 @@ BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 PROBE="$ROOT/$BUILD/tests/tools/DnsProbe"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$PROBE" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
 A2065="${AMINETXDUO_A2065:-}"
@@ -200,7 +200,7 @@ STARTS=$(grep -c "SYS:DnsProbe" "$REPORT" || true)
 if [ "$STARTS" -eq 1 ]; then
     pass "the machine booted once and ran the probe (no reset)"
 else
-    fail "the probe line appears $STARTS times -- the machine reset"
+    fail "the probe line appears $STARTS times, the machine reset"
 fi
 
 # ---- inet_pton is strict, inet_addr is not -------------------------------
@@ -228,12 +228,12 @@ for bad in "0177.0.0.1" "0x1.2.3.4" "0x7f000001" "010.1.1.1" "127.1"; do
     if [ "$RC" = "0" ]; then
         pass "inet_pton refuses $bad"
     else
-        fail "inet_pton accepted $bad (rc $RC) -- octal/hex/short form"
+        fail "inet_pton accepted $bad (rc $RC), octal/hex/short form"
     fi
     if [ -n "$LAX" ] && [ "$LAX" != "INADDR_NONE" ]; then
         pass "inet_addr still reads $bad as $LAX"
     else
-        fail "inet_addr no longer accepts $bad -- its 4.3BSD behaviour regressed"
+        fail "inet_addr no longer accepts $bad, its 4.3BSD behaviour regressed"
     fi
 done
 
@@ -286,7 +286,7 @@ done
 
 NLEN=${#SELF_NAME}
 if grep -Eq "^hostname $NLEN: rc 0 errno [-0-9]+ \"$SELF_NAME\" term no\$" "$REPORT"; then
-    pass "the whole name in exactly its own length -- and no terminator"
+    pass "the whole name in exactly its own length, and no terminator"
 else
     fail "gethostname into $NLEN bytes did not give the bare name"
     grep "^hostname $NLEN:" "$REPORT" >&2 || true
@@ -341,7 +341,7 @@ fi
 
 # THE REGRESSION. Before the fix this dropped the entry outright.
 if [ "$(use_after remove "$STATIC_DNS")" = "-1" ]; then
-    pass "one Remove undoes one Add -- $STATIC_DNS is STILL in the list"
+    pass "one Remove undoes one Add, $STATIC_DNS is STILL in the list"
 else
     fail "Remove dropped $STATIC_DNS after a single Add (use '$(use_after remove "$STATIC_DNS")')"
     echo "       this is the bug: two programs sharing a name server, the" >&2
@@ -353,7 +353,7 @@ ADDS=$(sed -n "s/^add $EXTRA rc [-0-9]* use \([-0-9]*\)$/\1/p" "$REPORT")
 REMOVES=$(sed -n "s/^remove $EXTRA rc [-0-9]* use \([-0-9]*\)$/\1/p" "$REPORT")
 
 if [ "$(echo "$ADDS" | tr '\n' ' ')" = "1 2 " ]; then
-    pass "$EXTRA was added by the API: use counts up 1, 2 -- and POSITIVE"
+    pass "$EXTRA was added by the API: use counts up 1, 2, and POSITIVE"
 else
     fail "adding $EXTRA twice gave use [$(echo "$ADDS" | tr '\n' ' ')], expected 1 2"
 fi
@@ -386,14 +386,14 @@ CONTROL=$(sed -n "s/^control \"$HOST\": \(.*\)$/\1/p" "$REPORT" | head -1)
 
 if [ "$QUALIFIED" = "FAILED" ] || [ -z "$QUALIFIED" ]; then
     fail "$HOST.$DOMAIN did not resolve at all"
-    echo "       (SLIRP forwards to the host's resolver -- can this host" >&2
+    echo "       (SLIRP forwards to the host's resolver, can this host" >&2
     echo "        resolve $HOST.$DOMAIN?)" >&2
 elif [ "$CONTROL" != "FAILED" ]; then
     fail "the bare name resolved with NO default domain set ($CONTROL)"
     echo "       the control arm is what makes the next assertion mean" >&2
     echo "       anything; something else on this network answered." >&2
 elif [ "$BARE" = "$QUALIFIED" ]; then
-    pass "with the domain set, \"$HOST\" resolves -- to $HOST.$DOMAIN's own address"
+    pass "with the domain set, \"$HOST\" resolves, to $HOST.$DOMAIN's own address"
 else
     fail "\"$HOST\" gave '$BARE', $HOST.$DOMAIN gave '$QUALIFIED'"
 fi

@@ -815,7 +815,7 @@ UINT    i;
     h_log("");
     h_log("  Both halves ran on this one CPU, so the wall figures contain each");
     h_log("  other's arithmetic.  The CLIENT-ONLY line is what a machine");
-    h_log("  fetching a page actually pays -- a client never performs the");
+    h_log("  fetching a page actually pays, a client never performs the");
     h_log("  private-key operation.  Rounds where either side used the stock");
     h_log("  nx_secure tables report zero for that side: the counters live in");
     h_log("  our crypto methods, and the stock ones are not instrumented.");
@@ -833,13 +833,13 @@ UINT    status;
     ami_crash_set_reference((APTR)main, "tls_handshake");
     if (!ami_crash_install())
     {
-        h_log("CRASHED -- see the serial log and DH0:crash.txt");
+        h_log("CRASHED, see the serial log and DH0:crash.txt");
         h_flush();
         ami_crash_remove();
         return(20);
     }
 
-    h_log("AmiNetXDuo -- TLS 1.2 loopback handshake (docs/RESEARCH.md 9 gate)");
+    h_log("AmiNetXDuo, TLS 1.2 loopback handshake (docs/RESEARCH.md 9 gate)");
 
     if (!ami_tls_timer_open())
     {
@@ -891,7 +891,7 @@ UINT    status;
     h_report();
 
     h_log("");
-    h_log("%lu checks, %lu failures -- %s", h_checks, h_failures,
+    h_log("%lu checks, %lu failures, %s", h_checks, h_failures,
           (LONG)((h_failures == 0UL) ? "PASS" : "FAIL"));
 
     ami_tls_timer_close();

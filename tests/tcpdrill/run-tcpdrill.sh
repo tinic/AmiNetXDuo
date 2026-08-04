@@ -52,7 +52,7 @@ BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 DRILL="$ROOT/$BUILD/tests/tcpdrill/TcpDrill"
 
 for f in "$BSD" "$DRILL" "$SCRIPT"; do
-    [ -f "$f" ] || { echo "missing $f -- build it first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build it first" >&2; exit 2; }
 done
 
 STAGE="$ROOT/build/tcpdrill-stage-$TAG"
@@ -88,7 +88,7 @@ echo "================ tcpdrill ================"
 if [ -f "$HD/tcpdrill.txt" ]; then
     cat "$HD/tcpdrill.txt"
 else
-    echo "(no tcpdrill.txt -- the run did not get that far)"
+    echo "(no tcpdrill.txt, the run did not get that far)"
     [ -f "$HD/stdout.txt" ] && { echo "--- stdout ---"; cat "$HD/stdout.txt"; }
 fi
 

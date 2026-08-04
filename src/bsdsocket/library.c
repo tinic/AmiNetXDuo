@@ -317,7 +317,7 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     child->sb_CanShareBases        = FALSE;
 
     /* The autodoc's defaults: LOG_USER and 0xFF, not zero. LOG_USER is 1<<3
-      , the NDK's <sys/syslog.h> ships the priorities and not the facility
+, the NDK's <sys/syslog.h> ships the priorities and not the facility
        codes, and a mask of 0 would suppress every message rather than pass
        them all. */
     child->sb_LogTag      = NULL;

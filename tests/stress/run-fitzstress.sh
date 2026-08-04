@@ -127,7 +127,7 @@ UG="$ROOT/$BUILD/src/usergroup/usergroup.library"
 
 for f in "$OUT/FitzStress" "$OUT/comparetree" "$BSD" \
          "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$TOOLS/netstat"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree and run" \
+    [ -f "$f" ] || { echo "missing $f, build the tree and run" \
                           "tests/stress/build.sh" >&2; exit 2; }
 done
 
@@ -253,7 +253,7 @@ MATHLIB=$(find "$TREE" -iname 'mathieeedoubbas.library' -print -quit)
 if [ -n "$MATHLIB" ]; then
     cp "$MATHLIB" "$STAGE/libs/mathieeedoubbas.library"
 else
-    echo "!! no mathieeedoubbas.library -- comparetree will not run" >&2
+    echo "!! no mathieeedoubbas.library, comparetree will not run" >&2
 fi
 
 cat > "$STAGE/fitzstress.cfg" <<EOF
@@ -352,14 +352,14 @@ SER="$ROOT/build/amiberry-serial-$TAG.log"
 echo
 echo "==== did it stay up? ===================================================="
 if [ "$RUN_RC" = "124" ]; then
-    echo "  NO .done -- the guest never finished.  Emulator deadline hit."
+    echo "  NO .done, the guest never finished.  Emulator deadline hit."
 else
     echo "  guest exit status $RUN_RC"
 fi
 if [ -f "$HD/stress-summary.txt" ]; then
     sed 's/^/  /' "$HD/stress-summary.txt"
 else
-    echo "  (no summary -- the supervisor never got that far)"
+    echo "  (no summary, the supervisor never got that far)"
 fi
 
 
@@ -387,11 +387,11 @@ echo
 if [ "${STUCK:-}" = "0" ] && [ "$RUN_RC" != "124" ]; then
     echo "  VERDICT: no freeze in ${GUEST:-?} s of guest time."
 elif [ -n "${STUCK:-}" ] && [ "${STUCK:-0}" != "0" ]; then
-    echo "  VERDICT: FROZE -- $STUCK worker(s) never came back.  The phase and"
+    echo "  VERDICT: FROZE, $STUCK worker(s) never came back.  The phase and"
     echo "  stamp above name the DOS call each was in; health.log's last block"
     echo "  is netstat -h at the time."
 else
-    echo "  VERDICT: inconclusive -- the supervisor did not write a summary."
+    echo "  VERDICT: inconclusive, the supervisor did not write a summary."
     echo "  Check whether the heartbeat above stopped (a freeze) or merely ran"
     echo "  out of host deadline with the counters still moving (-D)."
 fi

@@ -418,7 +418,7 @@ def dialer(target, message, deadline):
             conn.close()
         return
 
-    log("dial", "never reached %s:%d in %d attempts -- nothing is listening "
+    log("dial", "never reached %s:%d in %d attempts, nothing is listening "
                 "inside the guest, or the SLIRP forward is not there"
         % (host, port, attempts))
 
@@ -442,10 +442,10 @@ def main():
     ap.add_argument("--whois-port", type=int, default=0,
                     help="TCP port for the whois server; 0 leaves it off")
     ap.add_argument("--daytime-port", type=int, default=0,
-                    help="TCP port for the daytime server -- a finite stream "
+                    help="TCP port for the daytime server, a finite stream "
                          "that closes; 0 leaves it off")
     ap.add_argument("--advertise", default="10.0.2.2",
-                    help="address substituted into whois records -- what the "
+                    help="address substituted into whois records, what the "
                          "guest must dial, not what we are bound to")
     ap.add_argument("--log")
     ap.add_argument("--seconds", type=int, default=600)

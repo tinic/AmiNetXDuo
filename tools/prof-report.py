@@ -234,7 +234,7 @@ def build_symbol_table(nm, mapfile, objdir):
     """
     contributions = parse_map(mapfile)
     if not contributions:
-        die("%s: no section placements found -- is this a linker map?" % mapfile)
+        die("%s: no section placements found, is this a linker map?" % mapfile)
 
     cache = {}
     table = defaultdict(list)          # section -> [(addr, name, module)]
@@ -456,7 +456,7 @@ def main():
           % (prof.attnflags, prof.vbr, prof.execver))
 
     if prof.flags & ODDFORMAT:
-        print("!! a frame was not format $0 -- these PCs are NOT trustworthy")
+        print("!! a frame was not format $0, these PCs are NOT trustworthy")
     elif prof.flags & FMTVALID:
         print("frames       all format $0 (checked on the Amiga)")
     else:
@@ -464,7 +464,7 @@ def main():
     if prof.flags & OVERFLOW:
         print("!! the sample buffer filled; the tail of the run is missing")
 
-    print("relocation   %s -- %s"
+    print("relocation   %s, %s"
           % ("ok" if res.reloc_ok else "MISMATCH", res.reloc_note))
     if not res.reloc_ok:
         print("!! refusing to rank: the segment table does not describe this "
@@ -524,7 +524,7 @@ def main():
     unattr = by_mod.get("unattributed", 0)
     if unattr:
         print()
-        print("unattributed %d samples (%.1f%%) -- no hunk and no jump-table "
+        print("unattributed %d samples (%.1f%%), no hunk and no jump-table "
               "entry within %d KB" % (unattr, 100.0 * unattr / total,
                                       LVO_WINDOW // 1024))
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Static checks for a Commodore Installer script.
 
-Not a compiler.  It tokenises the script the way lparse.c does -- ';' starts a
+Not a compiler.  It tokenises the script the way lparse.c does, ';' starts a
 comment that runs to end of line, '"' and '\\'' quote strings which may not
-span a line, '\\' escapes inside them -- and then checks the things that are
+span a line, '\\' escapes inside them, and then checks the things that are
 easy to get wrong and expensive to find out about on an Amiga:
 
   * unbalanced parentheses, and where the imbalance starts;
@@ -24,7 +24,7 @@ easy to get wrong and expensive to find out about on an Amiga:
     creates fewer gadgets than there are choices.  default_radio() then
     marks a gadget that does not exist, final_radio() finds nothing
     selected, and the installation dies on "askchoice: No choices
-    selected" -- with no hint that the labels were the problem.
+    selected", with no hint that the labels were the problem.
 
 Usage: checkscript.py <script> [...]
 Exit status 0 if every file passes.
@@ -236,7 +236,7 @@ def check(path):
             elif opens:
                 opens.pop()
     if depth:
-        errors.append(f"{path}: {depth} unclosed '(' -- outermost opened at "
+        errors.append(f"{path}: {depth} unclosed '(', outermost opened at "
                       f"line {opens[0] if opens else '?'}")
 
     # walk the tree, tracking which statement each parameter sits in
@@ -327,7 +327,7 @@ def check(path):
             if nargs and specs != nargs:
                 errors.append(
                     f"{path}:{line}: format {fmt[:40]!r} has {specs} "
-                    f"specifier(s) but {nargs} argument(s) -- adjacent "
+                    f"specifier(s) but {nargs} argument(s), adjacent "
                     f"string literals are not concatenated here, so build "
                     f"the format with (cat ...) and pass it as a variable")
         i += 1

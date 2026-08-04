@@ -892,7 +892,7 @@ UINT    status;
 ULONG   actual;
 ULONG   i;
 
-    b_log("AmiNetXDuo -- the ThreadX adoption bracket, priced");
+    b_log("AmiNetXDuo, the ThreadX adoption bracket, priced");
 
     status = tx_amiga_kernel_start();
     if (status != TX_SUCCESS)
@@ -971,7 +971,7 @@ ULONG   i;
     b_bench_bracket();
 
     b_log("");
-    b_log("%ld checks, %ld failures -- %s",
+    b_log("%ld checks, %ld failures, %s",
           (LONG)b_checks, (LONG)b_failures,
           (LONG)((b_failures == 0UL) ? "PASS" : "FAIL"));
 

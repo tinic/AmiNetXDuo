@@ -822,7 +822,7 @@ UINT                 armed;
         {
 
             ami_log(AMI_LOG_WARN,
-                    "tick: timer.device unit %ld woke at %ld.%02ld Hz, outside %ld..%ld Hz -- "
+                    "tick: timer.device unit %ld woke at %ld.%02ld Hz, outside %ld..%ld Hz, "
                     "falling back to UNIT_MICROHZ",
                     (LONG) unit, (LONG) (rate_chz / 100UL), (LONG) (rate_chz % 100UL),
                     (LONG) TX_AMIGA_TIMER_PROBE_MIN_HZ, (LONG) TX_AMIGA_TIMER_PROBE_MAX_HZ);
@@ -1574,7 +1574,7 @@ UINT         status;
         else
         {
             ami_log(AMI_LOG_ERROR,
-                    "kernel stop: cannot proceed -- a stop is already running, or "
+                    "kernel stop: cannot proceed, a stop is already running, or "
                     "the scheduler Task cannot be reached");
         }
         return(status);
@@ -1682,7 +1682,7 @@ UINT         status;
          * of it.
          */
         ami_log(AMI_LOG_ERROR,
-                "kernel stop: FAILED -- it is NOT safe to unload this program");
+                "kernel stop: FAILED, it is NOT safe to unload this program");
         return(status);
     }
 

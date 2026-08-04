@@ -98,7 +98,7 @@
 #include "tls.h"
 
 /* tls_test_certs.h carries the leaf's private key, which this driver does use
-  , see the signing note above, and the CA's, which it does not. */
+, see the signing note above, and the CA's, which it does not. */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #include "tls_test_certs.h"
@@ -359,7 +359,7 @@ static UINT fc_params_hash(const unsigned char *params, unsigned params_len,
     NX_CRYPTO_METHOD *m = (NX_CRYPTO_METHOD *)
                           fc_x509_hash(NX_SECURE_TLS_X509_TYPE_RSA_SHA_256);
     /* Whichever SHA-256 the table holds, ami_tls_crypto.c's or nx_crypto's
-      , states its own metadata size, so the buffer is checked against it
+, states its own metadata size, so the buffer is checked against it
        rather than sized from one of the two structures. */
     static ULONG      metadata[256];
     VOID             *handler = NX_NULL;
@@ -819,7 +819,7 @@ static void fc_run(int message, const unsigned char *msg, unsigned len)
 
 static void fc_fail(const char *what)
 {
-    printf("fuzz_tls_crypto: SELFTEST FAILED -- %s\n", what);
+    printf("fuzz_tls_crypto: SELFTEST FAILED, %s\n", what);
     exit(2);
 }
 
@@ -868,7 +868,7 @@ static void fc_selftest(void)
 
     if (status != NX_SUCCESS)
     {
-        printf("fuzz_tls_crypto: SELFTEST FAILED -- signed ServerKeyExchange"
+        printf("fuzz_tls_crypto: SELFTEST FAILED, signed ServerKeyExchange"
                " returned %u\n", (unsigned)status);
         exit(2);
     }
@@ -922,7 +922,7 @@ static void fc_selftest(void)
 
     if (status != NX_SECURE_TLS_FINISHED_HASH_FAILURE)
     {
-        printf("fuzz_tls_crypto: SELFTEST FAILED -- 12-byte Finished returned"
+        printf("fuzz_tls_crypto: SELFTEST FAILED, 12-byte Finished returned"
                " %u, expected the hash comparison to fail\n", (unsigned)status);
         exit(2);
     }

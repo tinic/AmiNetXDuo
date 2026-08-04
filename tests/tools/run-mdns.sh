@@ -78,7 +78,7 @@ BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$TOOLS/host" \
          "$TOOLS/ping" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
 A2065="${AMINETXDUO_A2065:-}"
@@ -139,7 +139,7 @@ echo "hostname $CFG_HOSTNAME" >> "$STAGE/devs/Internet/name_resolution"
 cat > "$STAGE/devs/Internet/service_discovery" <<EOF
 # written by tests/tools/run-mdns.sh
 _ftp._tcp     21
-_nope 21                                    # no transport -- must be skipped
+_nope 21                                    # no transport, must be skipped
 _http._tcp    80    $SD_HTTP_NAME    txt=$SD_HTTP_TXT
 _telnet._udp  23
 EOF
@@ -224,7 +224,7 @@ STARTS=$(grep -c "SYS:AddNetInterface eth0 =====" "$REPORT" || true)
 if [ "$STARTS" -eq 1 ]; then
     pass "the machine booted exactly once (no reset)"
 else
-    fail "the command list ran $STARTS times -- the machine reset"
+    fail "the command list ran $STARTS times, the machine reset"
 fi
 
 # ---- 1 + 2: the name, and the resolver branch ---------------------------
@@ -254,7 +254,7 @@ fi
 
 # The fully-qualified HOSTNAME must NOT have been used verbatim.
 if grep -qi "$CFG_HOSTNAME.local" "$REPORT"; then
-    fail "the responder claimed '$CFG_HOSTNAME.local' -- the label was not derived"
+    fail "the responder claimed '$CFG_HOSTNAME.local', the label was not derived"
 else
     pass "the FQDN in HOSTNAME was reduced to one label"
 fi
@@ -263,7 +263,7 @@ if grep -q "bytes from" "$REPORT" && \
    grep -qi "PING $MDNS_LABEL.local" "$REPORT"; then
     pass "ping reached the machine by its .local name, unmodified"
 else
-    note "ping did not report replies -- see the transcript above"
+    note "ping did not report replies, see the transcript above"
 fi
 
 if grep -qi "nosuchbox.local" "$REPORT" && \
@@ -276,7 +276,7 @@ fi
 if grep -q "^example.com has address " "$REPORT"; then
     pass "unicast DNS still works with the .local branch in front of it"
 else
-    fail "example.com did not resolve -- the .local branch broke ordinary DNS"
+    fail "example.com did not resolve, the .local branch broke ordinary DNS"
 fi
 
 # ---- 3 + 4: the services, and the wire they went out on ------------------
@@ -321,7 +321,7 @@ if [ -s "$HD/host.pcap" ]; then
     if grep -q "ANY (QM)? $MDNS_LABEL.local" "$HD/mdns.txt"; then
         pass "it probed for the name before claiming it (RFC 6762 8.1)"
     else
-        fail "no probe was sent -- the name was claimed without asking"
+        fail "no probe was sent, the name was claimed without asking"
     fi
     if grep -q "(Cache flush) A " "$HD/mdns.txt"; then
         pass "and announced an A record with the cache-flush bit (10.2)"
@@ -333,7 +333,7 @@ if [ -s "$HD/host.pcap" ]; then
     # timeout; netstack_mdns.c passes NULL for ipv6_address so it does not.
     AAAA=$(grep -ci "AAAA (QM)?" "$HD/mdns.txt" || true)
     if [ "$AAAA" -eq 0 ]; then
-        pass "no AAAA query was sent -- an IPv4 lookup costs one query"
+        pass "no AAAA query was sent, an IPv4 lookup costs one query"
     else
         fail "$AAAA AAAA queries went out; ipv6_address is not NULL"
     fi
@@ -393,7 +393,7 @@ if [ -s "$HD/host.pcap" ]; then
     if grep -q "_services._dns-sd._udp.local" "$HD/mdns.txt"; then
         note "the _services._dns-sd._udp PTR was announced as well"
     else
-        note "no _services._dns-sd._udp PTR in the announcement -- expected;"
+        note "no _services._dns-sd._udp PTR in the announcement, expected;"
         note "    it is answered on query, not announced (RFC 6763 9)"
     fi
 
@@ -424,7 +424,7 @@ if [ -s "$HD/host.pcap" ]; then
         pass "the malformed line was skipped and the good ones still went out"
     fi
 else
-    fail "no host-side capture at $HD/host.pcap -- the wire was not observed"
+    fail "no host-side capture at $HD/host.pcap, the wire was not observed"
 fi
 
 # ---- the SLIRP question, reported and not asserted ----------------------
@@ -448,7 +448,7 @@ echo "====================================================================="
 if [ ! -f "$WATCHLOG" ] || grep -q "INSTRUMENT UNAVAILABLE" "$WATCHLOG"; then
     note "the host watcher could not bind UDP 5353; nothing can be concluded"
 elif ! grep -q "mdnswatch.local" "$WATCHLOG"; then
-    note "the watcher never saw its own calibration query -- inconclusive"
+    note "the watcher never saw its own calibration query, inconclusive"
 else
     HEARD=$(grep -c "^\[" "$WATCHLOG" || true)
     note "instrument calibrated: it saw its own multicast, and $HEARD message(s)"
@@ -457,13 +457,13 @@ else
     # only have got there through the emulator's NAT.
     if grep -qi "$MDNS_LABEL" "$WATCHLOG"; then
         note "OUTBOUND: SLIRP DOES relay the guest's mDNS onto the host LAN"
-        note "          (with the source port rewritten -- :5353 became :NNNNN)"
+        note "          (with the source port rewritten, :5353 became :NNNNN)"
     else
         note "OUTBOUND: nothing carrying '$MDNS_LABEL' reached the host LAN"
     fi
 
     if grep -q "_ftp._tcp" "$WATCHLOG"; then
-        note "          and the service records came with it -- the host's own"
+        note "          and the service records came with it, the host's own"
         note "          network saw _ftp._tcp.local, not just the A record"
     fi
 
@@ -478,7 +478,7 @@ else
     fi
 
     if grep -qi "^$PEER_LABEL.local has address" "$REPORT"; then
-        note "INBOUND:  works -- the guest resolved a name only the host answers"
+        note "INBOUND:  works, the guest resolved a name only the host answers"
     elif [ "$IN" -gt 0 ] && [ "$OFFLINK" -gt 0 ]; then
         #
         # This is the interesting outcome, and it is NOT a defect.  The reply
@@ -490,7 +490,7 @@ else
         # link and the check passes.
         #
         note "INBOUND:  $IN frame(s) reached the card, $OFFLINK of them from an"
-        note "          OFF-LINK source -- RFC 6762 11 requires those to be"
+        note "          OFF-LINK source, RFC 6762 11 requires those to be"
         note "          dropped, and the module drops them.  Conformance, not"
         note "          a defect: SLIRP forges the source address."
     elif [ "$IN" -gt 0 ]; then

@@ -190,7 +190,7 @@ int main(void)
     ULONG round;
     int   i;
 
-    Printf((STRPTR)"AmiNetXDuo -- ThreadX task lifecycle probe\n");
+    Printf((STRPTR)"AmiNetXDuo, ThreadX task lifecycle probe\n");
 
     ami_crash_set_reference((APTR)main, "main");
     (VOID)ami_crash_install();

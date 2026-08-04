@@ -12,10 +12,10 @@
 # configure never disagree about which compiler they are using.
 #
 # Order, first hit wins:
-#   1. $AMIGA_TOOLCHAIN_ROOT             , explicit, always wins
-#   2. the fetch cache                   , what tools/fetch-toolchain.sh made
-#   3. m68k-amigaos-gcc on $PATH         , a container or a module load
-#   4. /opt/m68k-amigaos                 , the amigadev/crosstools layout
+#   1. $AMIGA_TOOLCHAIN_ROOT, explicit, always wins
+#   2. the fetch cache, what tools/fetch-toolchain.sh made
+#   3. m68k-amigaos-gcc on $PATH, a container or a module load
+#   4. /opt/m68k-amigaos, the amigadev/crosstools layout
 #   5. $HOME/amigaos/tools/m68k-amigaos-gcc, the historical local default
 #
 # 2 through 5 have to RUN on this host to be chosen, not merely exist: the
@@ -100,7 +100,7 @@ export AMIGA_NDK="${AMIGA_NDK:-$AMIGA_TOOLCHAIN_ROOT/m68k-amigaos/ndk-include}"
 export AMIGA_SIZE="${AMIGA_SIZE:-$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-size}"
 
 if [ ! -d "$AMIGA_NDK" ]; then
-    echo "!! $AMIGA_NDK does not exist -- the NDK headers ship WITH the" >&2
+    echo "!! $AMIGA_NDK does not exist, the NDK headers ship WITH the" >&2
     echo "   toolchain; a root without them cannot build this project." >&2
     return 2 2>/dev/null || exit 2
 fi

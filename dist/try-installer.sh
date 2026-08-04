@@ -71,7 +71,7 @@ done
     exit 2
 }
 [ -f "$ARCHIVE/Install-AmiNetXDuo" ] || {
-    echo "$ARCHIVE has no Install-AmiNetXDuo -- is it the unpacked tree?" >&2
+    echo "$ARCHIVE has no Install-AmiNetXDuo, is it the unpacked tree?" >&2
     exit 2
 }
 
@@ -129,7 +129,7 @@ done
 echo "==> archive:   $ARCHIVE"
 echo "==> Kickstart: $(basename "$ROM")"
 echo "==> Workbench: $(basename "$WB")"
-echo "==> drive:     $HD  (a copy -- the archive is not written to)"
+echo "==> drive:     $HD  (a copy, the archive is not written to)"
 echo
 if [ "$DEVS_FOUND" -gt 0 ]; then
     echo "==> drivers:   $DEVS_FOUND in DH0:Devs/Networks"
@@ -137,7 +137,7 @@ if [ "$DEVS_FOUND" -gt 0 ]; then
     echo "    For the installer to FIND a card, open a Shell first and type:"
     echo "        assign DEVS: DH0:Devs ADD"
     echo "    Without it there is no driver anywhere and the card question has"
-    echo "    nothing to detect -- which is worth seeing too, but only on purpose."
+    echo "    nothing to detect, which is worth seeing too, but only on purpose."
 else
     echo "==> drivers:   none found, so the installer will detect no card."
     echo "    Put .device files in ~/anxd-try or name them in"

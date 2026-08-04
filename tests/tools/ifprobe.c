@@ -457,14 +457,14 @@ static VOID p_config_phase(struct Library *base, const char *name)
     rc = p_configure_interface(base, name, tags);
     Printf((CONST_STRPTR)"config: mask+metric: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
     seen = p_read_address(base, name, IFQ_NetMask);
     p_dotted(seen, mask_text);
     Printf((CONST_STRPTR)"config: mask after the refusal: %s%s\n",
            (LONG)mask_text,
-           (LONG)((seen == 0xFFFFFF00UL) ? " -- unchanged, correctly"
-                                         : " -- CHANGED, WRONG"));
+           (LONG)((seen == 0xFFFFFF00UL) ? ", unchanged, correctly"
+                                         : ", CHANGED, WRONG"));
 
     /* IFQ_Metric answers 0 for every interface here, so an IFC_Metric of 0
        names what the stack already does and is not a change to refuse. */
@@ -476,7 +476,7 @@ static VOID p_config_phase(struct Library *base, const char *name)
     rc = p_configure_interface(base, name, tags);
     Printf((CONST_STRPTR)"config: metric 0: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc == 0) ? " -- accepted, correctly" : " -- REFUSED, WRONG"));
+           (LONG)((rc == 0) ? ", accepted, correctly" : ", REFUSED, WRONG"));
 
     /* ---- an address string that is neither dotted-quad nor a host --------- */
     tags[0].ti_Tag  = IFC_Address;
@@ -487,7 +487,7 @@ static VOID p_config_phase(struct Library *base, const char *name)
     rc = p_configure_interface(base, name, tags);
     Printf((CONST_STRPTR)"config: bad address: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
     /* ---- the BOOL tags at FALSE, which ask for nothing --------------------
      *
@@ -506,7 +506,7 @@ static VOID p_config_phase(struct Library *base, const char *name)
     rc = p_configure_interface(base, name, tags);
     Printf((CONST_STRPTR)"config: BOOL tags at FALSE: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc == 0) ? " -- accepted, correctly" : " -- REFUSED, WRONG"));
+           (LONG)((rc == 0) ? ", accepted, correctly" : ", REFUSED, WRONG"));
 
     tags[0].ti_Tag  = IFC_AssociatedRoute;
     tags[0].ti_Data = TRUE;
@@ -516,7 +516,7 @@ static VOID p_config_phase(struct Library *base, const char *name)
     rc = p_configure_interface(base, name, tags);
     Printf((CONST_STRPTR)"config: IFC_AssociatedRoute TRUE: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
     /* ---- the MTU, down and back ------------------------------------------ */
     tags[0].ti_Tag  = IFC_LimitMTU;
@@ -579,7 +579,7 @@ static VOID p_config_phase(struct Library *base, const char *name)
     state = p_read_long(base, name, IFQ_State);
     Printf((CONST_STRPTR)"config: SM_Down: rc %ld, IFQ_State now %ld%s\n",
            rc, state,
-           (LONG)((state == SM_Down) ? " -- down, correctly" : " -- STILL UP, WRONG"));
+           (LONG)((state == SM_Down) ? ", down, correctly" : ", STILL UP, WRONG"));
 
     tags[0].ti_Tag  = IFC_State;
     tags[0].ti_Data = SM_Online;
@@ -590,7 +590,7 @@ static VOID p_config_phase(struct Library *base, const char *name)
     state = p_read_long(base, name, IFQ_State);
     Printf((CONST_STRPTR)"config: SM_Online: rc %ld, IFQ_State now %ld%s\n",
            rc, state,
-           (LONG)((state == SM_Up) ? " -- up, correctly" : " -- STILL DOWN, WRONG"));
+           (LONG)((state == SM_Up) ? ", up, correctly" : ", STILL DOWN, WRONG"));
 
     /* ---- a state value the API never defined ----------------------------- */
     tags[0].ti_Tag  = IFC_State;
@@ -601,7 +601,7 @@ static VOID p_config_phase(struct Library *base, const char *name)
     rc = p_configure_interface(base, name, tags);
     Printf((CONST_STRPTR)"config: IFC_State 99: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
     /* ---- and an interface that does not exist ---------------------------- */
     tags[0].ti_Tag  = IFC_State;
@@ -612,7 +612,7 @@ static VOID p_config_phase(struct Library *base, const char *name)
     rc = p_configure_interface(base, "nosuchif", tags);
     Printf((CONST_STRPTR)"config: nosuchif: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 }
 
 /* --------------------------------------------- add and remove at run time -- */
@@ -724,25 +724,25 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
     rc = p_remove_interface(base, "nosuchif", 0);
     Printf((CONST_STRPTR)"remove nosuchif: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc == 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc == 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
     /* ---- and the real one ------------------------------------------------ */
     rc = p_remove_interface(base, name, 0);
     Printf((CONST_STRPTR)"remove %s: rc %ld (errno %ld)%s\n",
            (LONG)name, rc, p_errno(base),
-           (LONG)((rc != 0) ? " -- removed, correctly" : " -- REFUSED, WRONG"));
+           (LONG)((rc != 0) ? ", removed, correctly" : ", REFUSED, WRONG"));
 
     after = p_count_interfaces(base, name, &present);
     Printf((CONST_STRPTR)"after remove: %ld interface(s), %s is %s%s\n",
            after, (LONG)name, (LONG)(present ? "STILL THERE" : "gone"),
-           (LONG)((after == before - 1 && !present) ? " -- correctly"
-                                                    : " -- WRONG"));
+           (LONG)((after == before - 1 && !present) ? ", correctly"
+                                                    : ", WRONG"));
 
     /* Everything about it must now be unanswerable. */
     rc = p_query_interface(base, name, NULL);
     Printf((CONST_STRPTR)"query the removed %s: rc %ld (errno %ld)%s\n",
            (LONG)name, rc, p_errno(base),
-           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
     /* ---- put it back ------------------------------------------------------
      *
@@ -762,7 +762,7 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
     rc = p_add_interface(base, name, device, unit, tags);
     Printf((CONST_STRPTR)"add with an unsupported tag: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
     /*
      * And with the tuning tags a Roadshow caller passes as a matter of course.
@@ -786,19 +786,19 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
     rc = p_add_interface(base, name, device, unit, tags);
     Printf((CONST_STRPTR)"add %s (%s unit %ld): rc %ld (errno %ld)%s\n",
            (LONG)name, (LONG)device, unit, rc, p_errno(base),
-           (LONG)((rc == 0) ? " -- added, correctly" : " -- REFUSED, WRONG"));
+           (LONG)((rc == 0) ? ", added, correctly" : ", REFUSED, WRONG"));
 
     after = p_count_interfaces(base, name, &present);
     Printf((CONST_STRPTR)"after add: %ld interface(s), %s is %s%s\n",
            after, (LONG)name, (LONG)(present ? "there" : "MISSING"),
-           (LONG)((after == before && present) ? " -- correctly" : " -- WRONG"));
+           (LONG)((after == before && present) ? ", correctly" : ", WRONG"));
 
     /* A second add of the same name must be refused: "Each such device must
        be assigned a unique interface name." */
     rc = p_add_interface(base, name, device, unit, NULL);
     Printf((CONST_STRPTR)"add %s twice: rc %ld (errno %ld)%s\n",
            (LONG)name, rc, p_errno(base),
-           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
     /* ---- the evidence ----------------------------------------------------- */
     tags[0].ti_Tag  = IFQ_HardwareAddress;
@@ -818,8 +818,8 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
            (LONG)mac_after[0], (LONG)mac_after[1], (LONG)mac_after[2],
            (LONG)mac_after[3], (LONG)mac_after[4], (LONG)mac_after[5],
            (LONG)((i == 6 && mac_after[0] != POISON_BYTE)
-                      ? " -- the device was reopened, correctly"
-                      : " -- WRONG"));
+                      ? ", the device was reopened, correctly"
+                      : ", WRONG"));
 
     /* ---- bare, as the published API says ---------------------------------- */
     {
@@ -834,8 +834,8 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
         Printf((CONST_STRPTR)"bare after add: address %s netmask %s%s\n",
                (LONG)addr_now_text, (LONG)mask_now_text,
                (LONG)((addr_now == 0 && mask_now == 0)
-                          ? " -- bare, correctly"
-                          : " -- STILL ADDRESSED, WRONG"));
+                          ? ", bare, correctly"
+                          : ", STILL ADDRESSED, WRONG"));
     }
 
     /* ---- and it works again ----------------------------------------------- */
@@ -862,7 +862,7 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
                p_read_long(base, name, IFQ_State),
                (LONG)p_read_address(base, name, IFQ_Address),
                (LONG)((p_read_long(base, name, IFQ_State) == SM_Up)
-                          ? " -- up again, correctly" : " -- STILL DOWN, WRONG"));
+                          ? ", up again, correctly" : ", STILL DOWN, WRONG"));
     }
 
     /*
@@ -876,8 +876,8 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
     Printf((CONST_STRPTR)"netmask after the round trip: %s%s\n",
            (LONG)mask_text,
            (LONG)((mask_after == mask_before)
-                      ? " -- the mask it had, correctly"
-                      : " -- NOT THE MASK IT HAD, WRONG"));
+                      ? ", the mask it had, correctly"
+                      : ", NOT THE MASK IT HAD, WRONG"));
 }
 
 /* ------------------------------------------------------------------ main -- */
@@ -1026,7 +1026,7 @@ static VOID p_ifindex_phase(struct Library *base)
 
     if (base->lib_Revision < 3)
     {
-        Printf((CONST_STRPTR)"ifindex: library revision %ld, need 3 -- skipped\n",
+        Printf((CONST_STRPTR)"ifindex: library revision %ld, need 3, skipped\n",
                (LONG)base->lib_Revision);
         return;
     }
@@ -1175,7 +1175,7 @@ int main(int argc, char **argv)
     rc = p_query_interface(base, "nosuchif", NULL);
     Printf((CONST_STRPTR)"query nosuchif: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
-           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+           (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
     /* An empty tag list on a real interface is "does this exist?", and is a
        success. */
@@ -1184,7 +1184,7 @@ int main(int argc, char **argv)
         rc = p_query_interface(base, first, NULL);
         Printf((CONST_STRPTR)"query %s with no tags: rc %ld%s\n",
                (LONG)first, rc,
-               (LONG)((rc == 0) ? " -- accepted, correctly" : " -- REFUSED, WRONG"));
+               (LONG)((rc == 0) ? ", accepted, correctly" : ", REFUSED, WRONG"));
     }
 
     /*

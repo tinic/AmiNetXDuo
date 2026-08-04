@@ -524,7 +524,7 @@ ULONG   ns;
     if (busy <= idle)
     {
         a_mulu_ps = 0UL;
-        c68k_log("  MULU.L calibration failed -- corrected times unavailable");
+        c68k_log("  MULU.L calibration failed, corrected times unavailable");
         return;
     }
 
@@ -741,7 +741,7 @@ ULONG               slow, fast, ratio;
 
 
     c68k_log("");
-    c68k_log("0c. R^2 mod m -- the vendored 16-bit divider against ours");
+    c68k_log("0c. R^2 mod m, the vendored 16-bit divider against ours");
 
     for (w = 0; w < 2u; w++)
     {
@@ -1459,7 +1459,7 @@ ULONG           theirs;
               rsapub, 3UL, kg, ecdh);
     a_compose("ECDHE_ECDSA (3 x P-256 verify  + keygen + ECDH)",
               ecdsa, 3UL, kg, ecdh);
-    c68k_log("    (arithmetic only -- no network, no parsing, no framing)");
+    c68k_log("    (arithmetic only, no network, no parsing, no framing)");
 
     /*
      * And the half a large transfer pays.  RESEARCH.md 11 measured https at
@@ -1495,7 +1495,7 @@ ULONG   len;
 ULONG   start;
 
 
-    c68k_log("AmiNetXDuo -- crypto68k against AmiSSL, one process");
+    c68k_log("AmiNetXDuo, crypto68k against AmiSSL, one process");
     c68k_log("  our limb primitives: %s",
              (LONG)(c68k_using_assembly() ? "68020 assembly" : "portable C"));
 
@@ -1603,7 +1603,7 @@ ULONG   start;
     c68k_log("");
     c68k_log("  Every operation is checked against the other side's answer");
     c68k_log("  before it is timed.  Timings are the emulator's 68020, whose");
-    c68k_log("  MULU.L is 32.14 cycles against a real part's 45 -- the");
+    c68k_log("  MULU.L is 32.14 cycles against a real part's 45, the");
     c68k_log("  corrected line beside each result is what a 68020 would do.");
 
     a_bench_karatsuba();
@@ -1784,7 +1784,7 @@ char            var[16];
     ami_crash_set_reference((APTR)main, "crypto68k_amissl");
     if (!ami_crash_install())
     {
-        c68k_log("CRASHED -- see the serial log and DH0:crash.txt");
+        c68k_log("CRASHED, see the serial log and DH0:crash.txt");
         c68k_flush();
         ami_crash_remove();
         return(20);

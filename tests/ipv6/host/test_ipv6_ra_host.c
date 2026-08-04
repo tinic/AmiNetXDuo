@@ -639,7 +639,7 @@ UINT  i;
 ULONG mtu;
 char  what[128];
 
-    printf("AmiNetXDuo -- IPv6 router advertisement and solicitation\n");
+    printf("AmiNetXDuo, IPv6 router advertisement and solicitation\n");
 
     /* rand() is NX_RAND on this host and the backoff randomisation uses it.
        Seeded so a failure can be reproduced. */

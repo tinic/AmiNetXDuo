@@ -76,7 +76,7 @@ STORE="$ROOT/$BUILD/certificates"
 
 for f in "$RESUME" "$SMOKE" "$FETCH" "$ADDIF" "$BSD" "$TLS" "$STORE"; do
     [ -f "$f" ] || {
-        echo "missing $f -- build tls_resume ToolsSmoke fetch AddNetInterface bsdsocket_library tls_library first" >&2
+        echo "missing $f, build tls_resume ToolsSmoke fetch AddNetInterface bsdsocket_library tls_library first" >&2
         exit 2
     }
 done

@@ -51,7 +51,7 @@ const APTR TlsVectorTable[] =
  */
 _Static_assert(sizeof(TlsVectorTable) / sizeof(TlsVectorTable[0]) ==
                    (4u + TLS_LIB_VECTORS + 1u),
-               "TLS_LIB_VERSION must be bumped when a vector is added -- see "
+               "TLS_LIB_VERSION must be bumped when a vector is added, see "
                "the version rule in include/aminetxduo/tlslib.h");
 
 /* And the last LVO the header publishes has to be the last one here, or a

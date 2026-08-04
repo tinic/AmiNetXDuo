@@ -78,7 +78,7 @@ WHOIS="$ROOT/$BUILD/src/tools/whois"
 
 for f in "$SMOKE" "$ADDIF" "$BSD" "$NC" "$TELNET" "$TRACEROUTE" \
          "$TFTP" "$WHOIS"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
 # ------------------------------------------------------------- a2065 -----

@@ -279,7 +279,7 @@ LONG  shown;
 
     if (stored == 0UL)
     {
-        say("no samples -- the program did not run long enough to be sampled");
+        say("no samples, the program did not run long enough to be sampled");
         return;
     }
 
@@ -356,12 +356,12 @@ LONG  shown;
 
     if (prof_drop_count() != 0UL)
     {
-        say("!! %ld samples dropped -- the buffer filled, the tail is missing",
+        say("!! %ld samples dropped, the buffer filled, the tail is missing",
             (long)prof_drop_count());
     }
     if (prof_odd_formats() != 0UL)
     {
-        say("!! %ld exception frames were not format $0 -- do not trust these PCs",
+        say("!! %ld exception frames were not format $0, do not trust these PCs",
             (long)prof_odd_formats());
     }
     if (prof_worst_window() < 70UL)

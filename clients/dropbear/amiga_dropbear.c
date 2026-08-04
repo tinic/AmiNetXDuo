@@ -1225,8 +1225,8 @@ static int con_write(int fd, const void *buf, size_t len)
  *   not interactive (a file, or NIL:) , always readable.  read() returns
  *                                         data or 0 for end of file, and
  *                                         either is progress.
- *   interactive (a console)           , WaitForChar(handle, 0).
- *   any handle, for writing           , always writable.  A DOS Write() to
+ *   interactive (a console), WaitForChar(handle, 0).
+ *   any handle, for writing, always writable.  A DOS Write() to
  *                                         a console or a file completes.
  *
  * If anything off-socket is already ready, WaitSelect() is called with a zero
@@ -1811,7 +1811,7 @@ int __wrap_spawn_command(void (*exec_fn)(const void *user_data),
     if (!exec_have_cmd)
     {
         dropbear_log(DB_LOG_WARNING,
-                     "amiga: no interactive shell on this machine -- "
+                     "amiga: no interactive shell on this machine, "
                      "give ssh a command to run");
         return DB_FAILURE;
     }

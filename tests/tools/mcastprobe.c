@@ -350,7 +350,7 @@ static VOID p_probe_v4(struct Library *sb)
     ULONG           i;
     LONG            rounds;
 
-    Printf((CONST_STRPTR)"IPv4 -- 239.255.255.250:1900\n");
+    Printf((CONST_STRPTR)"IPv4, 239.255.255.250:1900\n");
 
     s = p_socket(sb, P_AF_INET, P_SOCK_DGRAM, 0);
     if (s < 0)
@@ -482,7 +482,7 @@ static VOID p_probe_v6(struct Library *sb)
     ULONG           i;
     LONG            rounds;
 
-    Printf((CONST_STRPTR)"\nIPv6 -- ff02::c:1900\n");
+    Printf((CONST_STRPTR)"\nIPv6, ff02::c:1900\n");
 
     s = p_socket(sb, P_AF_INET6, P_SOCK_DGRAM, 0);
     if (s < 0)
@@ -516,7 +516,7 @@ static VOID p_probe_v6(struct Library *sb)
     p_step("getsockopt(IPV6_MULTICAST_LOOP)",
            p_getsockopt(sb, s, P_IPPROTO_IPV6, P_IPV6_MULTICAST_LOOP, &back,
                         &backlen), sb, 0);
-    Printf((CONST_STRPTR)"      reads back %ld, wanted 0 -- no IPv6 "
+    Printf((CONST_STRPTR)"      reads back %ld, wanted 0, no IPv6 "
                          "multicast loopback in this stack\n", back);
 
     /* 0: the route chooses, which is what a portable client sends. */

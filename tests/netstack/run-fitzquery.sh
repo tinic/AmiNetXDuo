@@ -63,11 +63,11 @@ UG="$ROOT/$BUILD/src/usergroup/usergroup.library"
 FITZ="$ROOT/build/fitz/Fitz/fitz"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
 [ -f "$FITZ" ] || {
-    echo "missing $FITZ -- run tests/endurance/fetch-fitz.sh" >&2; exit 2; }
+    echo "missing $FITZ, run tests/endurance/fetch-fitz.sh" >&2; exit 2; }
 
 A2065="${AMINETXDUO_A2065:-}"
 if [ -z "$A2065" ]; then
@@ -147,11 +147,11 @@ if [ "$BOOTS" -gt 1 ]; then
 elif [ "$BOOTS" -eq 1 ]; then
     pass "the machine booted exactly once"
 else
-    fail "no start in the transcript -- the run did not get far enough to judge"
+    fail "no start in the transcript, the run did not get far enough to judge"
 fi
 
 if grep -q "no named services found on LAN" "$REPORT"; then
-    fail "'fitz query' found nothing -- the broadcast did not come back"
+    fail "'fitz query' found nothing, the broadcast did not come back"
 fi
 
 # The share, in the shape `fitz query` prints it: two spaces, the name, the
@@ -173,7 +173,7 @@ else
 fi
 
 if grep -q "Roadshow detected" "$REPORT"; then
-    fail "Fitz took its Roadshow path -- the result says nothing about ours"
+    fail "Fitz took its Roadshow path, the result says nothing about ours"
 fi
 
 echo

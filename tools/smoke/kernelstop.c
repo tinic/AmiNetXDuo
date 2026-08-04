@@ -511,7 +511,7 @@ static int parent_main(void)
     LONG            rc;
     ULONG           mem_before, mem_out;
 
-    Printf((CONST_STRPTR)"AmiNetXDuo -- tx_amiga_kernel_stop() lifecycle\n");
+    Printf((CONST_STRPTR)"AmiNetXDuo, tx_amiga_kernel_stop() lifecycle\n");
     AMI_ERROR("=== KernelStop PARENT, hunk at %08lx", (LONG)parent_main);
 
     ami_crash_set_reference((APTR)parent_main, "parent_main");
@@ -533,7 +533,7 @@ static int parent_main(void)
     if (fh != (BPTR)0)
     {
         Close(fh);
-        PutStr((CONST_STRPTR)"KernelStop: ran as parent twice -- the child did "
+        PutStr((CONST_STRPTR)"KernelStop: ran as parent twice, the child did "
                              "not recognise itself\n");
         AMI_ERROR("KernelStop: recursion guard tripped");
         return RETURN_FAIL;
@@ -587,9 +587,9 @@ static int parent_main(void)
 
     check("the machine is still alive well after the child unloaded", TRUE);
 
-    Printf((CONST_STRPTR)"\n%ld checks, %ld failure(s) -- %s\n", checks, failures,
+    Printf((CONST_STRPTR)"\n%ld checks, %ld failure(s), %s\n", checks, failures,
            (LONG)(failures == 0 ? "PASS" : "FAIL"));
-    AMI_ERROR("=== KernelStop: %ld checks, %ld failures -- %s",
+    AMI_ERROR("=== KernelStop: %ld checks, %ld failures, %s",
               checks, failures, (LONG)(failures == 0 ? "PASS" : "FAIL"));
 
     ami_crash_remove_alert_hook();

@@ -172,7 +172,7 @@ else()
             "third_party/cacert/cacert.pem is not the pinned snapshot.\n"
             "  expected ${CERTSTORE_BUNDLE_SUM}\n"
             "  got      ${CERTSTORE_BUNDLE_ACTUAL}\n"
-            "Restore it, or record a new pin -- third_party/cacert/README.md.")
+            "Restore it, or record a new pin, third_party/cacert/README.md.")
     endif()
 
     file(READ "${AMINETXDUO_CA_DIR}/certificates.sha256" CERTSTORE_PIN)

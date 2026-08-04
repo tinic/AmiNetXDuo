@@ -76,7 +76,7 @@ TOOLS="$BDIR/src/tools"
 
 STAGED_TOOLS="AddNetInterface ShowNetStatus netstat ping traceroute"
 for t in $STAGED_TOOLS ToolsSmoke; do
-    [ -f "$TOOLS/$t" ] || { echo "missing $TOOLS/$t -- build $BUILD first" >&2
+    [ -f "$TOOLS/$t" ] || { echo "missing $TOOLS/$t, build $BUILD first" >&2
                             exit 2; }
 done
 
@@ -174,7 +174,7 @@ block() {
         inb                   { print }
     ' "$REPORT"
 }
-have() { block "$1" | grep -qiF -- "$2"; }
+have() { block "$1" | grep -qiF, "$2"; }
 want() { if have "$1" "$2"; then ok "$3"; else bad "$3"; fi; }
 
 # Hops that answered, one address per line, from a traceroute block.  A hop
@@ -194,7 +194,7 @@ GLOBAL=$(block "SYS:ShowNetStatus INTERFACES" |
 if [ -z "$GLOBAL" ]; then
     echo "SKIP: the guest has no global IPv6 address."
     echo "      Either this LAN sends no router advertisement, or the"
-    echo "      emulator is not carrying multicast -- see"
+    echo "      emulator is not carrying multicast, see"
     echo "      tools/winuae/a2065-multicast-loopback.patch."
     echo "      Nothing off-link can be tested from here; IPv4 was:"
     block "SYS:ping $V4TARGET -c 2 -t 10" | tail -3
@@ -229,7 +229,7 @@ V6LAST=$(hops "SYS:traceroute $V6TARGET -m 20 -q 1 -w 3 -n" | tail -1)
 # means three or more routers each decremented the hop limit to zero and
 # returned ICMPv6 time exceeded, which is the ramp proved end to end.
 if [ "$V6HOPS" -ge 3 ]; then
-    ok "IPv6 traceroute crossed $V6HOPS distinct routers -- the hop-limit
+    ok "IPv6 traceroute crossed $V6HOPS distinct routers, the hop-limit
            ramp works against real routers, not just on the wire"
 else
     bad "IPv6 traceroute saw $V6HOPS distinct routers, wanted 3 or more"

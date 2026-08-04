@@ -116,7 +116,7 @@ if [ -f "$COMMON" ]; then
           -o "$ROOT/build/bsdsocktest/conf_launcher" \
           "$HERE/conf_launcher.c" "$COMMON"
 else
-    echo "  -- skipping conf_launcher: build build/cm first" >&2
+    echo " , skipping conf_launcher: build build/cm first" >&2
 fi
 
 echo "  CC conf_probe.c"

@@ -474,7 +474,7 @@ int main(void)
     if (hammer.rs_Stolen != 0)
     {
         Printf((CONST_STRPTR)"FAIL: the hammer held %ld memberships it could "
-                             "not drop -- its row was taken by the other "
+                             "not drop, its row was taken by the other "
                              "base\n", (LONG)hammer.rs_Stolen);
         failed++;
     }
@@ -482,7 +482,7 @@ int main(void)
     if (sniper.rc_Stats.rs_Stolen != 0)
     {
         Printf((CONST_STRPTR)"FAIL: the sniper held %ld memberships it could "
-                             "not drop -- its row was taken by the other "
+                             "not drop, its row was taken by the other "
                              "base\n", (LONG)sniper.rc_Stats.rs_Stolen);
         failed++;
     }

@@ -93,7 +93,7 @@ cp -R "$ROOT/tests/tcpdrill/devs/Internet" "$STAGE/devs/Internet"
 case "$STACK" in
     ours)
         LIBBSD="$BUILD/src/bsdsocket/bsdsocket.library"
-        [ -f "$LIBBSD" ] || { echo "missing $LIBBSD -- build it first" >&2; exit 2; }
+        [ -f "$LIBBSD" ] || { echo "missing $LIBBSD, build it first" >&2; exit 2; }
         cp "$LIBBSD" "$STAGE/libs/bsdsocket.library"
         [ -f "$BUILD/src/usergroup/usergroup.library" ] &&
             cp "$BUILD/src/usergroup/usergroup.library" "$STAGE/libs/"
@@ -149,7 +149,7 @@ if [ -f "$HD/tickprobe.txt" ]; then
     echo "==> samples: $OUT"
     grep '^#\|^!!' "$OUT" | head -40
 else
-    echo "!! no tickprobe.txt -- the run did not get that far"
+    echo "!! no tickprobe.txt, the run did not get that far"
     [ -f "$HD/stdout.txt" ] && { echo "--- stdout ---"; cat "$HD/stdout.txt"; }
 fi
 

@@ -531,7 +531,7 @@ if [ "$NETWORK" = "1" ]; then
                         echo "    MAC ${AMINETXDUO_WINUAE_MAC:-02:41:4d:49:00:01}; the address comes from the real network" ;;
     esac
 fi
-[ "$ACCURATE" = "1" ] && echo "==> cycle accounting on, warp off (fidelity UNVERIFIED -- see the header)"
+[ "$ACCURATE" = "1" ] && echo "==> cycle accounting on, warp off (fidelity UNVERIFIED, see the header)"
 echo "==> boot ROM $(basename "$KICK")"
 
 # AMINETXDUO_WINUAE_ARGS is WinUAE's own command line, space separated.
@@ -569,7 +569,7 @@ winuae_log_tail() {
 }
 
 echo "---- serial ($SERIAL) ----"
-if [ -s "$SERIAL" ]; then cat "$SERIAL"; else echo "(empty -- no ami_log output reached the serial port)"; fi
+if [ -s "$SERIAL" ]; then cat "$SERIAL"; else echo "(empty, no ami_log output reached the serial port)"; fi
 
 for produced in "$HD"/*.txt "$HD"/*.log; do
     [ -f "$produced" ] || continue
@@ -604,7 +604,7 @@ case "$REASON" in
         # exception. docs/RESEARCH.md 63.4 has the one that bites here, a
         # frame larger than 4000 bytes arriving on a bridged A2065.
         echo "!! WinUAE died with $EXITCODE; the guest did not reset [$RESULT]" >&2
-        echo "!! see docs/RESEARCH.md 63.4 -- on a bridged run this is usually an oversized" >&2
+        echo "!! see docs/RESEARCH.md 63.4, on a bridged run this is usually an oversized" >&2
         echo "!! receive frame, and the Windows Application event log names winuae64.exe" >&2
         winuae_log_tail
         status=125

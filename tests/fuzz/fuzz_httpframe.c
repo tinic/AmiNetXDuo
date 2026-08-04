@@ -19,18 +19,18 @@
  *
  * WHAT IS ASSERTED, beyond "it did not crash"
  *
- *   the count     , http_chunk_feed() may never claim more of the buffer
+ *   the count, http_chunk_feed() may never claim more of the buffer
  *                     than it was given, and never less than zero. The count
  *                     is where the server starts parsing the next request, so
  *                     one byte of slack there IS the smuggle.
- *   the sink      , no more bytes are handed out than the chunk sizes asked
+ *   the sink, no more bytes are handed out than the chunk sizes asked
  *                     for, and `total` agrees with what the sink counted.
- *   the dribble   , the same bytes fed one at a time must reach the same
+ *   the dribble, the same bytes fed one at a time must reach the same
  *                     state and produce the same output. Everything the
  *                     decoder is in the middle of is supposed to live in the
  *                     HttpChunk, and this is the only cheap way to find out
  *                     whether any of it is really living on the stack.
- *   the stop      , once DONE or ERROR, nothing more is consumed. A decoder
+ *   the stop, once DONE or ERROR, nothing more is consumed. A decoder
  *                     that keeps reading after a framing failure is reading
  *                     the next request as body.
  *   the reference , and the one that matters. fz_reference() below is a

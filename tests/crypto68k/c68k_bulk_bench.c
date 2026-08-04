@@ -270,7 +270,7 @@ static VOID b_bench_kernels(VOID)
     if (b_table == NULL)
     {
         b_table = AllocMem(4096uL, MEMF_ANY | MEMF_CLEAR);
-        c68k_log("  (no Fast RAM for the table -- the memory rows below are "
+        c68k_log("  (no Fast RAM for the table, the memory rows below are "
                  "whatever AllocMem gave us)");
     }
 
@@ -789,7 +789,7 @@ UINT    saved;
 
 
     c68k_log("");
-    c68k_log("4. HMAC-SHA256 over %lu bytes -- nx_crypto's framing, both "
+    c68k_log("4. HMAC-SHA256 over %lu bytes, nx_crypto's framing, both "
              "hashes", B_BULK_BYTES);
 
     _nx_crypto_hmac_metadata_set(&b_nx_hmac, &b_nx_hmac_ctx,
@@ -1265,7 +1265,7 @@ ULONG   odd_us;
 
 
     c68k_log("");
-    c68k_log("5. ChaCha20-Poly1305 over %lu bytes -- the AEAD record path",
+    c68k_log("5. ChaCha20-Poly1305 over %lu bytes, the AEAD record path",
              B_BULK_BYTES);
     c68k_log("   ChaCha20 block function: %s",
              (LONG)(c68k_chacha20_core_is_asm() == (UINT)NX_CRYPTO_TRUE ?
@@ -1292,7 +1292,7 @@ ULONG   odd_us;
     mac_us = c68k_eclock_micros(c68k_eclock() - start);
 
     /* And the portable C block function over the same bytes, in the same run
-      , the only comparison an emulator does not distort, and the one that
+, the only comparison an emulator does not distort, and the one that
        says what the assembly is worth on this machine. */
     c68k_poly1305_initialize(&b_poly, b_poly_key);
     start = c68k_eclock();
@@ -1425,7 +1425,7 @@ static int b_body(VOID)
 UINT    i;
 
 
-    c68k_log("AmiNetXDuo -- the TLS record path on a 68020");
+    c68k_log("AmiNetXDuo, the TLS record path on a 68020");
     c68k_log("  AES default variant: %s",
              (LONG)c68k_aes_variant_name(c68k_aes_variant));
     c68k_log("  SHA-256 default:     %s",
@@ -1461,12 +1461,12 @@ UINT    i;
     c68k_log("");
     if (b_failures == 0uL)
     {
-        c68k_log("PASS -- every variant agreed with the published vectors and "
+        c68k_log("PASS, every variant agreed with the published vectors and "
                  "with nx_crypto");
     }
     else
     {
-        c68k_log("FAIL -- %lu check(s) failed", b_failures);
+        c68k_log("FAIL, %lu check(s) failed", b_failures);
     }
 
     c68k_timer_close();
@@ -1483,7 +1483,7 @@ int rc;
     ami_crash_set_reference((APTR)main, "crypto68k_bulk");
     if (!ami_crash_install())
     {
-        c68k_log("CRASHED -- see the serial log and DH0:crash.txt");
+        c68k_log("CRASHED, see the serial log and DH0:crash.txt");
         c68k_flush();
         ami_crash_remove();
         return(20);

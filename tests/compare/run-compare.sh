@@ -330,7 +330,7 @@ case "$WORKLOAD" in
         ;;
     conf)
         [ -f "$SUITE" ] || {
-            echo "missing $SUITE -- run tests/conformance/build.sh" >&2; exit 2; }
+            echo "missing $SUITE, run tests/conformance/build.sh" >&2; exit 2; }
         cp "$SUITE" "$STAGE/bsdsocktest"
         STAGED+=("$STAGE/bsdsocktest")
         case "$CONF_ARGS" in *HOST*) PEER_KIND="helper" ;; esac

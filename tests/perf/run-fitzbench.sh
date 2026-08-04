@@ -94,11 +94,11 @@ case "$PEER" in
     *playhouse2*)
         echo "playhouse2 cannot serve this: VMs on one Proxmox host never cross" >&2
         echo "a NIC, so its TX checksums are never computed and our stack rejects" >&2
-        echo "them -- it reads as 6 bad packets and no transfer.  Use another." >&2
+        echo "them, it reads as 6 bad packets and no transfer.  Use another." >&2
         exit 2 ;;
 esac
 [ -n "$PEER" ] || {
-    echo "set AMINETXDUO_FITZ_PEER=<user@host> -- a third machine on real" >&2
+    echo "set AMINETXDUO_FITZ_PEER=<user@host>, a third machine on real" >&2
     echo "hardware, not this emulator's host and not an LXC container" >&2
     exit 2
 }
@@ -164,10 +164,10 @@ BENCH="$ROOT/$BUILD/tests/perf/FitzBench"
 FITZ="$ROOT/build/fitz/Fitz/fitz"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$BSD" "$BENCH"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 [ -f "$FITZ" ] || {
-    echo "missing $FITZ -- run tests/endurance/fetch-fitz.sh" >&2; exit 2; }
+    echo "missing $FITZ, run tests/endurance/fetch-fitz.sh" >&2; exit 2; }
 
 A2065="${AMINETXDUO_A2065:-}"
 if [ -z "$A2065" ]; then
@@ -195,7 +195,7 @@ elif [ "$SLIRP" = "1" ]; then
     SERVER_ADDR=10.0.2.2
     LOCAL_SERVE="$ROOT/build/endurance/fitz-serve"
     [ -x "$LOCAL_SERVE" ] || {
-        echo "missing $LOCAL_SERVE -- run tests/endurance/build.sh" >&2; exit 2; }
+        echo "missing $LOCAL_SERVE, run tests/endurance/build.sh" >&2; exit 2; }
     SHARE="$ROOT/build/fitzbench-share-$TAG"
     rm -rf "$SHARE"; mkdir -p "$SHARE"
     PEERLOG="$ROOT/build/fitzbench-$TAG-peer.log"
@@ -327,7 +327,7 @@ echo "====================================================================="
 echo
 
 if ! grep -q "fitzbench: RESULT" "$REPORT"; then
-    echo "FAIL: no RESULT line -- the benchmark did not finish" >&2
+    echo "FAIL: no RESULT line, the benchmark did not finish" >&2
     exit 1
 fi
 

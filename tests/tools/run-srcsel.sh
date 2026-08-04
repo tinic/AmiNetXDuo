@@ -67,7 +67,7 @@ BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 PROBE="$ROOT/$BUILD/tests/tools/SrcProbe"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$PROBE" "$BSD"; do
-    [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
 A2065="${AMINETXDUO_A2065:-}"
@@ -145,7 +145,7 @@ STARTS=$(grep -c "SYS:SrcProbe" "$REPORT" || true)
 if [ "$STARTS" -eq 1 ]; then
     pass "the machine booted once and ran the probe (no reset)"
 else
-    fail "the probe line appears $STARTS times -- the machine reset"
+    fail "the probe line appears $STARTS times, the machine reset"
 fi
 
 SUMMARY=$(grep "^SrcProbe: .* checks, " "$REPORT" | head -1 || true)

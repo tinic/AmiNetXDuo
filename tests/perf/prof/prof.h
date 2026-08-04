@@ -21,7 +21,7 @@
  *
  *      0(SP)   SR      word
  *      2(SP)   PC      long
- *      6(SP)   format/vector word  , 68010 and up only
+ *      6(SP)   format/vector word, 68010 and up only
  *
  * That layout is identical on every 68k.  The 68010+ frame is EIGHT bytes
  * rather than six, but the extra word is APPENDED; SR and PC do not move, so
