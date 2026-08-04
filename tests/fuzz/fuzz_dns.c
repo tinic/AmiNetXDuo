@@ -238,6 +238,12 @@ UINT _nxd_udp_socket_send(NX_UDP_SOCKET *socket_ptr, NX_PACKET *packet_ptr,
  * sees when a single hostile answer arrives and the real server never
  * replies.
  */
+/* The IP header the stub hands up with each datagram; see the receive stub. */
+static NX_IPV4_HEADER fz_ip_header;
+
+/* Whether that header names the configured server.  Default yes. */
+static int fz_from_server = 1;
+
 UINT _nx_udp_socket_receive(NX_UDP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,
                             ULONG wait_option)
 {
@@ -274,6 +280,33 @@ UINT _nx_udp_socket_receive(NX_UDP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,
     p -> nx_packet_length        = (ULONG)fz_case.len;
     p -> nx_packet_ip_version    = NX_IP_VERSION_V4;
     p -> nx_packet_ip_interface  = &fz_ip.nx_ip_interface[0];
+
+    /*
+     * The client checks that an answer came from the server it asked, so the
+     * stub has to say who sent this one -- the real receive path fills
+     * nx_packet_ip_header in as it hands a packet up, and without it every
+     * case was rejected before it reached the parser this fuzzer is aiming at.
+     *
+     * FZ_SERVER, in host order, which is the order the receive path leaves the
+     * header in.  fz_from_server = 0 makes the datagram come from somebody
+     * else, which is how the check itself gets exercised.
+     */
+    fz_ip_header.nx_ip_header_source_ip =
+        fz_from_server ? FZ_SERVER : IP_ADDRESS(10, 0, 0, 99);
+    p -> nx_packet_ip_header = (UCHAR *)&fz_ip_header;
+
+    /*
+     * And the UDP header the port is read out of.  nxd_udp_source_extract()
+     * takes it from the longword eight bytes before the payload, in host
+     * order, which is where the receive path leaves it: source port in the
+     * high half, destination in the low.  A datagram from a name server comes
+     * from port 53.
+     */
+    {
+        ULONG *udp = (ULONG *)(p -> nx_packet_prepend_ptr);
+
+        *(udp - 2) = ((ULONG)NX_DNS_PORT << 16) | 0x0035UL;
+    }
     p -> nx_packet_next          = NX_NULL;
     p -> nx_packet_last          = NX_NULL;
 
