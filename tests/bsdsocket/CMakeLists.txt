@@ -13,7 +13,13 @@
 #
 # SPDX-License-Identifier: MIT
 
-if(NOT CMAKE_CROSSCOMPILING)
+# x86_64 only, and the reason is in ThreadX's own port header: tx_port.h for
+# linux types LONG as `int` on __x86_64__ and as `long` everywhere else.  On
+# arm64 that is eight bytes where the Amiga's is four, so every structure this
+# links against would have a different shape than the one that ships, and the
+# shim's own exec/types.h collides with it outright.  A test that cannot agree
+# with the target about the width of a LONG is not measuring the target.
+if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     add_executable(test_inet host/test_inet_host.c
                              "${CMAKE_SOURCE_DIR}/src/bsdsocket/inet.c")
 
