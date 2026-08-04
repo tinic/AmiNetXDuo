@@ -39,9 +39,47 @@
 #undef ntohl
 #undef ntohs
 
+/*
+ * The socket options aminetxduo/cmsg.h publishes because the NDK does not.
+ * glibc has all of them, with the same names and, for some, different values:
+ * IPV6_PKTINFO is 46 on the Amiga and 50 on Linux.  The Amiga's numbers are
+ * what the library under test answers to, so ours must win, and a macro
+ * redefined without being undefined first is an error under the -Werror the
+ * CI build uses.
+ */
+#undef IPV6_RECVPKTINFO
+#undef IPV6_PKTINFO
+#undef IPV6_RECVHOPLIMIT
+#undef IPV6_HOPLIMIT
+#undef IPV6_HOPOPTS
+#undef IPV6_DSTOPTS
+#undef IPV6_RTHDR
+#undef IPV6_TCLASS
+#undef IPV6_RECVTCLASS
+#undef IPV6_UNICAST_HOPS
+#undef IPV6_MULTICAST_HOPS
+#undef IPV6_MULTICAST_IF
+#undef IPV6_MULTICAST_LOOP
+#undef IPV6_JOIN_GROUP
+#undef IPV6_LEAVE_GROUP
+#undef IPV6_V6ONLY
+#undef IPV6_CHECKSUM
+#undef ICMP6_FILTER
+#undef IP_PKTINFO
+#undef IP_RECVDSTADDR
+
 #define AMINETXDUO_HAVE_IPV6_MREQ        1
 #define AMINETXDUO_HAVE_SOCKADDR_STORAGE 1
 #define AMINETXDUO_HAVE_IN_PKTINFO       1
+
+/*
+ * Two structures bsdsocket_vectors.h names in prototypes without defining:
+ * the Roadshow routing message and the address-allocation message.  Declared
+ * here so the prototype does not introduce a type scoped to itself, which
+ * -Werror treats as the mistake it usually is.
+ */
+struct rt_msghdr;
+struct AddressAllocationMessage;
 
 #define __asm(x)
 
