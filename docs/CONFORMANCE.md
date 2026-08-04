@@ -99,7 +99,23 @@ Karn. Landed 2026-08-03: **2883 D-SACK receive side** — read 794 -> 985 KB/s
 at 4 MB, wire retransmissions 234 -> 42, peer `TCPDSACKUndo` 0 -> 7. RFC 3708
 (sender side, consuming D-SACK to undo a spurious retransmission) is absent and
 applies to the write direction only. Landed 2026-08-04: 9293 §3.10.7.4
-TIME-WAIT 2MSL restart, and 1337 §4 (a RST does not end TIME-WAIT).
+TIME-WAIT 2MSL restart, 1337 §4 (a RST does not end TIME-WAIT), and 1122
+§4.2.2.17 persist (see below).
+
+"Zero-window probe with backoff" on this line was **half false** until
+2026-08-04, and read as conformant for as long as it was here. The probe byte
+was armed by both paths that refuse a send and no timer was ever started to
+carry it: `_nx_tcp_fast_periodic_processing()` only examines a socket whose
+`nx_tcp_socket_timeout` is running, and `nx_tcp_socket_state_ack_check.c:651`
+clears that timeout when the transmit queue drains under a non-zero window. A
+receiver acknowledging everything before advertising zero therefore left no
+timer, and the ACK carrying the zero window releases no packet, so it returned
+at `:581` without starting one. The connection then waited on a window update
+that one lost segment means never arrives — the exact failure §4.2.2.17 exists
+to prevent. It looked conformant because the case usually exercised is the one
+where the ACK that drains the queue is also the one advertising zero, which
+leaves the timer running. Fixed in `nx_tcp_socket_send_internal.c` by starting
+the timer where the probe is armed; `zerowindow.drill` is 7/7, 87 checks.
 
 Corrected 2026-08-04 by a derived packetimpact case: the *acknowledgment* half
 of §3.10.7.4 was never missing. A retransmitted FIN is out of window by then,

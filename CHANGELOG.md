@@ -17,6 +17,7 @@ version at the top when it merges.
 - A program can ask to be signalled when the machine's address changes -- a lease arriving, changing or being lost -- rather than polling for it
 - Closing a connection is quicker when the last acknowledgement is lost: the far end's repeated goodbye is now answered instead of ignored, where before it retransmitted until its own timer ran out
 - A machine that is sent a stream of packets it must refuse no longer answers every one of them, which was a way to make it flood a third party, and answers none at all to a packet sent to a group address
+- A transfer no longer stops for good when the far end runs out of room and the message saying it has room again is lost. The stack is meant to keep asking until an answer comes, and in the common case it was not asking at all
 
 ## 0.16.9
 
