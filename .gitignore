@@ -87,3 +87,6 @@ __pycache__/
 *.lha
 *.lzh
 *.dms
+
+# macOS
+.DS_Store
