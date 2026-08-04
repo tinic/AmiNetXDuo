@@ -166,6 +166,7 @@ enum
 #define HTTPD_LOCK_MAX         8
 #define HTTPD_LOCK_DEF      180UL   /* seconds granted when none was asked  */
 #define HTTPD_LOCK_CAP     3600UL   /* the longest this server will hold one */
+#define HTTPD_HOST_MAX        80    /* Host:, which decides a Destination   */
 #define HTTPD_TOKEN_MAX       64    /* "opaquelocktoken:...", as text       */
 
 /* An entity tag is four decimal numbers and three separators inside quotes. */
@@ -340,6 +341,9 @@ struct HttpConn
     ULONG   body_start;             /* seconds, when the body began         */
     ULONG   body_got;               /* bytes of it that have arrived        */
     ULONG   lock_secs;              /* Timeout: seconds asked for, 0 if none */
+    char    host[HTTPD_HOST_MAX];   /* Host:, to tell a local Destination  */
+    char    ifmatch[HTTPD_ETAG_MAX];        /* If-Match:                   */
+    char    ifnone[HTTPD_ETAG_MAX];         /* If-None-Match:              */
     char    dest_url[HTTP_URL_MAX]; /* Destination:, still as it arrived   */
     HttpPath dest;                  /* and what it resolved to             */
     char    iftoken[2][HTTPD_TOKEN_MAX];    /* the tokens inside If:       */
@@ -363,6 +367,7 @@ struct HttpConn
     UBYTE   in_prop;                /* inside <prop>: children are names   */
     UBYTE   in_owner;               /* inside <owner>: text is the owner   */
     UBYTE   props;
+    UBYTE   props_cut;              /* more named than there was room for  */
     UBYTE   prop_ok[HTTPD_PROPS_MAX];
     char    prop_name[HTTPD_PROPS_MAX][HTTPD_QNAME_MAX];
     UBYTE   nsdecls;
@@ -468,6 +473,7 @@ typedef struct HttpLock
 
 static HttpLock httpd_locks[HTTPD_LOCK_MAX];
 static ULONG    httpd_token_seed;
+static ULONG    httpd_token_start;      /* the clock when the server started   */
 
 static char        httpd_root_buf[HTTP_PATH_MAX];
 static const char *httpd_root = "";
@@ -1139,6 +1145,9 @@ static VOID httpd_reset(HttpConn *c)
     c->body_start  = 0;
     c->body_got    = 0;
     c->lock_secs   = 0;
+    c->host[0]     = '\0';
+    c->ifmatch[0]  = '\0';
+    c->ifnone[0]   = '\0';
     c->dest_url[0] = '\0';
     c->dest.path[0] = '\0';
     c->iftoken[0][0] = '\0';
@@ -1162,6 +1171,7 @@ static VOID httpd_reset(HttpConn *c)
     c->in_prop    = 0;
     c->in_owner   = 0;
     c->props      = 0;
+    c->props_cut  = 0;
     c->nsdecls    = 0;
     c->have_date  = 0;
     c->owner[0]   = '\0';
@@ -2375,6 +2385,25 @@ static VOID httpd_locks_drop(const char *path)
     }
 }
 
+/*
+ * Does `l` cover `path`?  Its own resource, or -- when it was taken with
+ * Depth: infinity -- anything below it.
+ *
+ * Both UNLOCK and a LOCK refresh have to ask this.  Holding a token is not
+ * enough on its own: the table is global, so a token alone lets any client
+ * operate on any lock in it through any address.
+ */
+static BOOL httpd_lock_covers(const HttpLock *l, const char *path)
+{
+    if (l == NULL)
+        return FALSE;
+
+    if (hs_equal(l->path, path))
+        return TRUE;
+
+    return (l->depth != 0 && http_path_within(l->path, path)) ? TRUE : FALSE;
+}
+
 static HttpLock *httpd_lock_by_token(const char *token)
 {
     ULONG i;
@@ -2460,30 +2489,65 @@ static BOOL httpd_lock_allows_tree(HttpConn *c, const char *path)
 }
 
 /*
- * "opaquelocktoken:" and eight hex digits.  The seed is the clock at startup,
- * so a token from a previous run of the server does not unlock a file in this
- * one -- which is the only thing an easily-guessed token could do here.
+ * "opaquelocktoken:" and 32 hex digits.
+ *
+ * WHAT A TOKEN IS AND IS NOT HERE
+ *
+ *   There is no authentication in this server, so anybody who can reach it can
+ *   already write to anything that is not locked.  A lock is coordination
+ *   between clients that are cooperating, not a boundary, and a guessed token
+ *   buys an attacker nothing they did not already have.  RFC 4918 6.5 asks for
+ *   unguessable anyway, and on a machine with no RTC, no entropy pool and no
+ *   randomness in its timings there is nothing here to make one out of.
+ *
+ *   So the two properties that CAN be had are the two that are aimed at: a
+ *   token is never issued twice in a run -- the counter guarantees it, where
+ *   eight hex digits out of one LCG word did not -- and a token from a
+ *   previous run does not name a lock in this one.
+ *
+ *   Eight digits was also short enough to collide by accident at 2^-32 per
+ *   pair, which on a table of 16 is not a risk worth carrying for 24 bytes.
  */
 static VOID httpd_make_token(char *out, ULONG outlen)
 {
     static const char hex[] = "0123456789abcdef";
+    static ULONG      count;
+
     ULONG used = 0;
-    ULONG value;
+    ULONG word[4];
+    ULONG w;
     LONG  shift;
 
-    httpd_token_seed = (httpd_token_seed * 1103515245UL) + 12345UL;
-    value = httpd_token_seed ^ (httpd_now() << 8);
+    count++;
+
+    /* Four words, each stepped from the last, so the whole 128 bits move
+       rather than the low ones repeating a pattern the high ones set. */
+    word[0] = httpd_token_start ^ count;
+    word[1] = httpd_now();
+    word[2] = httpd_token_seed;
+    word[3] = count;
+
+    for (w = 0; w < 4UL; w++)
+    {
+        httpd_token_seed = (httpd_token_seed * 1103515245UL) + 12345UL;
+        word[w] ^= httpd_token_seed;
+        word[w] ^= word[w] >> 13;
+        word[w]  = (word[w] * 2654435761UL) + w;
+    }
 
     out[0] = '\0';
     (VOID)hs_append(out, outlen, &used, "opaquelocktoken:");
 
-    for (shift = 28; shift >= 0; shift -= 4)
+    for (w = 0; w < 4UL; w++)
     {
-        char one[2];
+        for (shift = 28; shift >= 0; shift -= 4)
+        {
+            char one[2];
 
-        one[0] = hex[(value >> (ULONG)shift) & 0xfUL];
-        one[1] = '\0';
-        (VOID)hs_append(out, outlen, &used, one);
+            one[0] = hex[(word[w] >> (ULONG)shift) & 0xfUL];
+            one[1] = '\0';
+            (VOID)hs_append(out, outlen, &used, one);
+        }
     }
 }
 
@@ -2556,7 +2620,12 @@ static const char *httpd_local(const char *qname)
 static VOID httpd_note_property(HttpConn *c)
 {
     if (c->props >= (UBYTE)HTTPD_PROPS_MAX)
+    {
+        /* Dropped silently, the answer reported on the ones that fitted, and
+           the client read that as an answer about all of them. */
+        c->props_cut = 1;
         return;
+    }
 
     hs_copy(c->prop_name[c->props], (ULONG)HTTPD_QNAME_MAX, c->xml_name);
     c->prop_ok[c->props] = 0;
@@ -3784,6 +3853,89 @@ static VOID httpd_do_mkcol(HttpConn *c)
  * did -- same decode, same colon check, same root.  A destination trusted any
  * less than the target is a way out of the document root that only writes.
  */
+/*
+ * The authority of an absolute-form URL -- the "host:port" between "//" and
+ * the path -- or NULL when there is none, which is the ordinary case of a
+ * Destination written as a bare path.
+ */
+static const char *httpd_authority(const char *url, ULONG *len)
+{
+    ULONG i;
+
+    *len = 0;
+
+    for (i = 0; i < 8UL && url[i] != '\0'; i++)
+    {
+        if (url[i] == ':')
+            break;
+
+        if (!((url[i] >= 'a' && url[i] <= 'z') ||
+              (url[i] >= 'A' && url[i] <= 'Z')))
+            return NULL;
+    }
+
+    if (i == 0UL || url[i] != ':' || url[i + 1] != '/' || url[i + 2] != '/')
+        return NULL;
+
+    url += i + 3;
+
+    while (url[*len] != '\0' && url[*len] != '/')
+        (*len)++;
+
+    return url;
+}
+
+/*
+ * Does the Destination name this server?
+ *
+ * The host is compared and the port is not.  A client reaching a machine on a
+ * LAN writes the Host: and the Destination: with whatever name it resolved --
+ * an mDNS name, a NetBIOS name, a dotted address -- and the two agreeing is
+ * the whole of what can be checked; whether they agree about ":80" says
+ * nothing about whether they mean this machine.
+ *
+ * TRUE when there is no authority to compare, and TRUE when the client sent no
+ * Host: -- an HTTP/1.0 client need not, and refusing it would be refusing on
+ * no evidence.
+ */
+static ULONG httpd_hostlen(const char *s, ULONG len)
+{
+    ULONG i = 0;
+
+    /* An IPv6 literal is bracketed and full of colons; the one that ends the
+       host is the one after the ']'. */
+    if (len > 0UL && s[0] == '[')
+    {
+        while (i < len && s[i] != ']')
+            i++;
+
+        return (i < len) ? i + 1UL : len;
+    }
+
+    while (i < len && s[i] != ':')
+        i++;
+
+    return i;
+}
+
+static BOOL httpd_dest_is_local(const HttpConn *c)
+{
+    ULONG       dlen;
+    ULONG       hlen;
+    const char *dest = httpd_authority(c->dest_url, &dlen);
+
+    if (dest == NULL || c->host[0] == '\0')
+        return TRUE;
+
+    dlen = httpd_hostlen(dest, dlen);
+    hlen = httpd_hostlen(c->host, hs_len(c->host));
+
+    if (dlen != hlen || dlen == 0UL)
+        return FALSE;
+
+    return (hs_nicmp(dest, c->host, dlen) == 0) ? TRUE : FALSE;
+}
+
 static BOOL httpd_resolve_dest(HttpConn *c)
 {
     HttpPathResult why;
@@ -3791,6 +3943,21 @@ static BOOL httpd_resolve_dest(HttpConn *c)
     if (c->dest_url[0] == '\0')
     {
         httpd_error(c, 400, "that method needs a Destination");
+        return FALSE;
+    }
+
+    /*
+     * A Destination naming another machine.  http_path_resolve() throws the
+     * authority away -- which is right for the request target, where the only
+     * host it can name is this one -- so a COPY to
+     * "http://elsewhere/x" used to be answered 201 for a file written HERE,
+     * and the client was told a copy it never asked for had succeeded.
+     *
+     * RFC 4918 9.8.4: this server does not copy between hosts, so it says so.
+     */
+    if (!httpd_dest_is_local(c))
+    {
+        httpd_error(c, 502, "that destination is on another server");
         return FALSE;
     }
 
@@ -3958,6 +4125,34 @@ static VOID httpd_do_proppatch(HttpConn *c)
         return;
     }
 
+    /*
+     * No property named at all.  The answer used to be a 207 holding a
+     * <D:response> with an href and nothing else, which RFC 4918 14.24 does
+     * not allow -- a response carries either a status or at least one
+     * propstat, and a client that validates the multistatus rejects it.
+     *
+     * There is nothing to report on, so this is a request that did not say
+     * what to do: an empty body, a <propertyupdate> with no <prop>, or a body
+     * the skimmer could not follow.  All three are 400.
+     */
+    if (c->props == 0)
+    {
+        httpd_error(c, 400, "that PROPPATCH names no property");
+        return;
+    }
+
+    /*
+     * More names than there is room to report on.  RFC 4918 9.2 wants all of
+     * them executed or none, and a partial answer that does not mention the
+     * ones it dropped reads as a complete one.
+     */
+    if (c->props_cut)
+    {
+        httpd_error(c, 400, "that PROPPATCH names more properties than this "
+                            "server answers about");
+        return;
+    }
+
     for (i = 0; i < c->props; i++)
     {
         if (c->prop_ok[i] == 0)
@@ -4101,6 +4296,20 @@ static VOID httpd_do_lock(HttpConn *c)
             return;
         }
 
+        /*
+         * And it has to be a lock on the resource this request is about.  The
+         * token was the whole of the check, so any client holding any token
+         * could keep any lock in the table alive by refreshing it through a
+         * URL it had nothing to do with -- including one whose owner had
+         * stopped and left it to expire.  UNLOCK has asked this since it was
+         * written; LOCK did not.
+         */
+        if (!httpd_lock_covers(l, c->path.path))
+        {
+            httpd_error(c, 412, "that lock is not on that resource");
+            return;
+        }
+
         l->timeout = secs;
         l->expires = httpd_now() + secs;
     }
@@ -4110,7 +4319,14 @@ static VOID httpd_do_lock(HttpConn *c)
 
         if (held != NULL && !httpd_holds(c, held))
         {
-            httpd_error(c, 423, "somebody else is holding that");
+            /* RFC 4918 9.10.6 names the precondition: a lock is already there
+               and this one would conflict with it.  It used to be an HTML
+               page, which a WebDAV client parses as nothing. */
+            httpd_begin(c, 423);
+            httpd_body_text(c, "text/xml; charset=utf-8",
+                            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                            "<D:error xmlns:D=\"DAV:\">"
+                            "<D:no-conflicting-lock/></D:error>\n");
             return;
         }
 
@@ -4189,7 +4405,19 @@ static VOID httpd_do_lock(HttpConn *c)
 
 static VOID httpd_do_unlock(HttpConn *c)
 {
-    HttpLock *l = httpd_lock_by_token(c->unlock_token);
+    HttpLock *l;
+
+    /* No header at all is a malformed request, RFC 4918 9.11: the Lock-Token
+       is what an UNLOCK consists of.  It used to be indistinguishable from a
+       token this server has never heard of, and both were 409 -- so a client
+       whose header this server failed to parse was told the lock was gone. */
+    if (c->unlock_token[0] == '\0')
+    {
+        httpd_error(c, 400, "UNLOCK needs a Lock-Token");
+        return;
+    }
+
+    l = httpd_lock_by_token(c->unlock_token);
 
     if (l == NULL)
     {
@@ -4199,8 +4427,7 @@ static VOID httpd_do_unlock(HttpConn *c)
 
     /* RFC 4918 9.11.1: the token has to name a lock that covers the address
        the request was made against, or one client can unlock another's. */
-    if (!hs_equal(l->path, c->path.path) &&
-        !(l->depth != 0 && http_path_within(l->path, c->path.path)))
+    if (!httpd_lock_covers(l, c->path.path))
     {
         httpd_error(c, 409, "that lock is not on that address");
         return;
@@ -4635,6 +4862,21 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
             if (hs_nicmp(httpd_value, "100-continue", 12) == 0)
                 c->expect = 1;
         }
+        else if (hs_equal(name, "If-None-Match"))
+        {
+            hs_copy(c->ifnone, sizeof(c->ifnone), httpd_value);
+        }
+        else if (hs_equal(name, "If-Match"))
+        {
+            hs_copy(c->ifmatch, sizeof(c->ifmatch), httpd_value);
+        }
+        else if (hs_equal(name, "Host"))
+        {
+            /* Read for one thing only: telling a Destination that names this
+               server from one that names another.  Nothing here is
+               virtual-hosted -- there is one document root. */
+            hs_copy(c->host, sizeof(c->host), httpd_value);
+        }
         else if (hs_equal(name, "Destination"))
         {
             /*
@@ -4830,6 +5072,108 @@ static VOID httpd_if_lookup(void *ctx, const char *tag, HttpIfState *out)
     httpd_etag_of(path, out->etag, sizeof(out->etag));
 }
 
+/*
+ * If-Match and If-None-Match, RFC 7232 3.1 and 3.2.
+ *
+ * WRITES ONLY, deliberately.  "If-None-Match: *" is how a client asks for a
+ * PUT that creates and does not replace -- an atomic create, and the reason
+ * the header is on the list at all -- and on a server with no authentication
+ * it is the only way two clients can avoid overwriting each other without
+ * taking a lock first.
+ *
+ * On a GET the same header means something else: it asks for a 304 and a
+ * saved transfer, which this server does not do and which no client is harmed
+ * by not getting.  Answering a read request 412 because a cache validator
+ * matched would break every browser, so a read is left alone.
+ *
+ * FALSE when it has answered.
+ */
+static BOOL httpd_etag_listed(const char *list, const char *etag)
+{
+    ULONG n = hs_len(etag);
+
+    if (n == 0UL)
+        return FALSE;
+
+    while (*list != '\0')
+    {
+        while (*list == ' ' || *list == '\t' || *list == ',')
+            list++;
+
+        /* A weak validator compares equal to a strong one for everything
+           except a byte-range request, which this never is. */
+        if (list[0] == 'W' && list[1] == '/')
+            list += 2;
+
+        if (*list == '\0')
+            break;
+
+        if (hs_nicmp(list, etag, n) == 0)
+            return TRUE;
+
+        while (*list != '\0' && *list != ',')
+            list++;
+    }
+
+    return FALSE;
+}
+
+static BOOL httpd_preconditions(HttpConn *c)
+{
+    char  etag[HTTPD_ETAG_MAX];
+    BOOL  exists;
+
+    if (c->ifmatch[0] == '\0' && c->ifnone[0] == '\0')
+        return TRUE;
+
+    if ((c->method->flags & HTTPD_F_WRITE) == 0)
+        return TRUE;
+
+    exists = (httpd_kind(c->path.path) >= 0) ? TRUE : FALSE;
+
+    if (c->ifnone[0] != '\0')
+    {
+        if (c->ifnone[0] == '*' && exists)
+        {
+            httpd_error(c, 412, "something of that name is there already");
+            return FALSE;
+        }
+
+        if (c->ifnone[0] != '*' && exists)
+        {
+            httpd_etag_of(c->path.path, etag, sizeof(etag));
+
+            if (httpd_etag_listed(c->ifnone, etag))
+            {
+                httpd_error(c, 412, "that is the version already there");
+                return FALSE;
+            }
+        }
+    }
+
+    if (c->ifmatch[0] != '\0')
+    {
+        if (!exists)
+        {
+            httpd_error(c, 412, "there is nothing of that name here");
+            return FALSE;
+        }
+
+        if (c->ifmatch[0] != '*')
+        {
+            httpd_etag_of(c->path.path, etag, sizeof(etag));
+
+            if (!httpd_etag_listed(c->ifmatch, etag))
+            {
+                httpd_error(c, 412, "that is not the version that is there");
+                return FALSE;
+            }
+        }
+    }
+
+    return TRUE;
+}
+
 static VOID httpd_dispatch(HttpConn *c)
 {
     if (httpd_verbose && !httpd_trace)
@@ -4844,6 +5188,12 @@ static VOID httpd_dispatch(HttpConn *c)
     if (c->ifhdr[0] != '\0' && !http_if_eval(c->ifhdr, httpd_if_lookup, c))
     {
         httpd_error(c, 412, "the If header's condition did not hold");
+        httpd_log_status(c);
+        return;
+    }
+
+    if (!httpd_preconditions(c))
+    {
         httpd_log_status(c);
         return;
     }
@@ -5877,7 +6227,8 @@ int main(int argc, char **argv)
 
     /* The lock tokens have to differ between runs of the server, or a token a
        client kept from the last one unlocks a file in this one. */
-    httpd_token_seed = httpd_now();
+    httpd_token_seed  = httpd_now();
+    httpd_token_start = httpd_token_seed;
 
     lsock = httpd_listen(&address, port);
     if (lsock < 0)
