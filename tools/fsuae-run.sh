@@ -5,14 +5,14 @@
 #   tools/fsuae-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-k MHZ] [-a ARGS]
 #                      [-n] [-x] <executable> [extra files...]
 #
-# -a passes arguments to the executable under test -- `-a 'eth0 QUIET'` -- which
+# -a passes arguments to the executable under test, `-a 'eth0 QUIET'`, which
 # is the only way to reach a command that takes a parameter.  It is the same
 # string as AMINETXDUO_GUEST_ARGS, which tools/winuae-run.sh already read; the
 # flag wins when both are set.
 #
 # -m selects the machine profile. A1200 (the default) is the project floor:
 # 68EC020 at 14 MHz with a 16-bit path to memory, and it is the ONLY profile
-# whose timings mean anything -- FS-UAE turns cycle accounting off for every
+# whose timings mean anything, FS-UAE turns cycle accounting off for every
 # CPU above a 68020. A3000 gives a 68030 with 32-bit motherboard RAM, for
 # exercising the code on that processor; it is not a timing profile and says
 # so when it starts. Anything else is passed straight to FS-UAE.
@@ -32,7 +32,7 @@
 # How it works:
 #   * The executable and any extra files are staged into build/testhd/, which is
 #     attached as a *directory* hard drive. Because it is a host directory,
-#     anything the Amiga writes to DH0: lands straight back on the host -- so a
+#     anything the Amiga writes to DH0: lands straight back on the host, so a
 #     test can report results simply by writing a file.
 #   * s/Startup-Sequence runs the executable, then writes DH0:.done so the host
 #     knows the run finished rather than guessing from a timer.
@@ -72,13 +72,13 @@ done
 # 8 MB of expansion RAM on Zorro II, and a 32-bit path to memory is the whole
 # reason an A3000 is interesting.  See the config block below.
 #
-# IT IS NOT A TIMING PROFILE.  Measured, not assumed -- tests/perf/cpucal on
+# IT IS NOT A TIMING PROFILE.  Measured, not assumed, tests/perf/cpucal on
 # this profile reports MULU.L at 3.2 cycles against a real 68030's 44, Chip RAM
 # and 32-bit Fast RAM at the same speed, and an implied 323 MHz clock.  FS-UAE
 # switches cycle accounting OFF for every CPU above a 68020 (its own log says
 # `cpu_speed = max`, `cpu_cycle_exact = false`), and none of accuracy,
 # cpu_speed, cpu_frequency or cpu_multiplier turns it back on.  Use this
-# profile to exercise the code on a 68030 -- MMU, caches, 32-bit addressing --
+# profile to exercise the code on a 68030, MMU, caches, 32-bit addressing --
 # and take timings from -m A1200, with -k if you want a different clock.
 A3000_PROFILE=0
 if [ "$MODEL" = "A3000" ]; then
@@ -100,7 +100,7 @@ KICKSTART="${AMINETXDUO_KICKSTART:-}"
 KICKSTART_EXT="${AMINETXDUO_KICKSTART_EXT:-}"
 
 # The A3000 wants its own 3.1 image.  Not because the machine cannot run the
-# A1200 one -- both are 40.68 and the difference is machine-specific -- but
+# A1200 one, both are 40.68 and the difference is machine-specific, but
 # because a profile that silently boots the wrong ROM is the kind of detail
 # that invalidates a measurement three weeks later.  The A1200 image is still
 # the fallback, announced, so the profile keeps working where only one ROM is
@@ -171,16 +171,16 @@ for extra in "$@"; do
 done
 
 # We boot a bare directory hard drive, so none of the assigns a normal Workbench
-# boot makes exist -- ENV:, T:, ENVARC:, CLIPS:. Anything calling GetVar()/
+# boot makes exist, ENV:, T:, ENVARC:, CLIPS:. Anything calling GetVar()/
 # SetVar() fails without them. envsetup makes them via dos.library, which keeps
 # the harness self-contained (no Workbench binaries to extract or stage).
 # ENV: and T: are backed by host directories, so variables a test sets survive
-# the run and can be inspected afterwards -- and pre-seeded by staging env/.
+# the run and can be inspected afterwards, and pre-seeded by staging env/.
 #
 # The ARCH here has to follow the machine, not the host's default.  envsetup
 # runs on the guest before anything under test does, so a -m68020 build of it
 # stops a 68000 run with `Illegal instruction: 49c1` before a single line of
-# ours executes -- and the failure looks like the thing being tested, because
+# ours executes, and the failure looks like the thing being tested, because
 # nothing of ours has run yet to say otherwise.
 #
 # AMINETXDUO_ENVSETUP_ARCH overrides it; the default follows -c/-m, since an
@@ -208,14 +208,14 @@ mkdir -p "$HD/env" "$HD/envarc" "$HD/t" "$HD/clips"
 # what we put in c/. Echo is internal to the 3.1 shell.
 #
 # stdout is redirected to a file on the host so Printf() output from a test is
-# visible after the run -- otherwise it only ever reaches the emulator's console
+# visible after the run, otherwise it only ever reaches the emulator's console
 # window and is lost.
 # failat is essential: AmigaDOS aborts a script as soon as a command returns a
 # code at or above the fail level (10 by default), so without it any test that
-# exits nonzero never reaches the line that records its status -- the run just
+# exits nonzero never reaches the line that records its status, the run just
 # times out and the failure looks like a hang.
 #
-# GUEST_ARGS goes in verbatim, so the AmigaDOS shell does the quoting -- which
+# GUEST_ARGS goes in verbatim, so the AmigaDOS shell does the quoting, which
 # is what a command with a ReadArgs template wants.  Empty by default, and then
 # the line is the one this script always wrote.
 cat > "$HD/s/Startup-Sequence" <<EOF
@@ -229,7 +229,7 @@ EOF
 
 # Every fs-uae instance otherwise shares ~/FS-UAE for its cache, logs, save
 # states and floppy overlays, so two concurrent runs fight over those files and
-# one of them quits early -- which looks exactly like a crash in the code under
+# one of them quits early, which looks exactly like a crash in the code under
 # test. Give each run a private base directory.
 # ------------------------------------------------------------ two queues --
 #
@@ -237,7 +237,7 @@ EOF
 # three separate workstreams independently reported runs dying with a premature
 # uae_quit, and in every case the run that died shared the machine with another.
 # The symptom is indistinguishable from a crash in the code under test, which
-# makes it expensive -- an agent chases a phantom bug instead of its own work.
+# makes it expensive, an agent chases a phantom bug instead of its own work.
 #
 # But one exclusive lock across every run does not scale: with several
 # workstreams active, a correctness check waits behind somebody else's
@@ -252,8 +252,8 @@ EOF
 #                               themselves, block new sharers, wait for the
 #                               current ones to drain, then hold it exclusively
 #
-# A timing taken while anything else runs is fiction -- a contended host has
-# already corrupted one set of figures in this project -- so anything whose
+# A timing taken while anything else runs is fiction, a contended host has
+# already corrupted one set of figures in this project, so anything whose
 # output is a number must pass -x or set AMINETXDUO_PERF=1.
 #
 # The residual risk is that sharing reintroduces the premature-exit failure.
@@ -286,7 +286,7 @@ release_lock() {
 
 # A shared run that dies early or never writes DH0:.done is the one failure
 # mode concurrency is known to cause, and it is indistinguishable from a bug in
-# the code under test -- which is exactly what cost three earlier workstreams
+# the code under test, which is exactly what cost three earlier workstreams
 # their time. Say so, loudly, before anyone starts bisecting.
 shared_run_warning() {
     [ -n "$SLOT_HELD" ] || return 0
@@ -305,7 +305,7 @@ shared_run_warning() {
 # below covers TERM, INT, HUP and a normal exit, but SIGKILL cannot be trapped:
 # `kill -9` on this script leaves fs-uae reparented to init, holding a CPU
 # forever. Deleting the lock without reaping the emulator let the next run start
-# alongside the orphan -- the "SHARED the machine" state that reads as a crash
+# alongside the orphan, the "SHARED the machine" state that reads as a crash
 # in the code under test. Seven of them once accumulated for an hour and a half.
 reap_stale() {
     local d owner emu
@@ -433,8 +433,8 @@ EOF
 # because the model supplies 68030 itself.  Four lines that look like they pin
 # the machine down and do nothing are worse than none, so they are gone.
 #
-# uae_cpu_cycle_exact = true DOES get through -- the uae_ passthrough is
-# applied last -- and it does re-enable cycle accounting.  It is still not
+# uae_cpu_cycle_exact = true DOES get through, the uae_ passthrough is
+# applied last, and it does re-enable cycle accounting.  It is still not
 # here, because what it buys is not fidelity: the clock lands at an implied
 # 3.3 MHz that no multiplier moves, MULU.L is charged 4 cycles against a real
 # 68030's 44, and Chip RAM and 32-bit Fast RAM come out identical.  It is
@@ -457,7 +457,7 @@ fi
 # in this emulator to ask "what would this code do on a faster Amiga?" and get
 # an answer worth having: the A1200 model is cycle-exact (verified against
 # published 68020 timings, docs/RESEARCH.md), and uae_cpu_multiplier scales its
-# clock without disturbing that -- ADD.L stays at its published two cycles and
+# clock without disturbing that, ADD.L stays at its published two cycles and
 # MULU.L at the same 32 the model charges at 14 MHz, so nothing about the
 # instruction accounting changes, only the rate.
 #
@@ -465,7 +465,7 @@ fi
 # measured, because the emulator documents it nowhere: 4 -> 13.95 MHz,
 # 7 -> 24.5, 8 -> 28.01.
 #
-# Chip RAM deliberately does NOT scale with it -- it is chipset-bound, and the
+# Chip RAM deliberately does NOT scale with it, it is chipset-bound, and the
 # model has that right (a 2x clock buys 2.03x on Fast RAM and 1.49x on Chip).
 # That is what makes the option useful rather than merely fast: the difference
 # between the two is the part of the workload the bus owns.
@@ -502,7 +502,7 @@ EOF
 fi
 
 # -c 68030 etc. The project floor is a 68020 (A1200), but a full 68030 has an
-# MMU -- which is what Enforcer needs -- and different cache behaviour, so the
+# MMU, which is what Enforcer needs, and different cache behaviour, so the
 # same binaries must be exercised on both.
 if [ -n "$CPU" ]; then
     cat >> "$CFG" <<EOF
@@ -515,7 +515,7 @@ if [ "$NETWORK" = "1" ]; then
     # AMINETXDUO_FSUAE_A2065 picks the card's backend.  `slirp` is the user-mode
     # NAT everything else in the tree runs on; `none` fits the card and leaves
     # it wired to nothing, which is the only way to give the guest an Ethernet
-    # interface that opens, links up and never hears an answer -- what a DHCP
+    # interface that opens, links up and never hears an answer, what a DHCP
     # timeout and the RFC 3927 fallback need (tests/netstack/run-dhcp3927.sh).
     A2065_BACKEND="${AMINETXDUO_FSUAE_A2065:-slirp}"
     cat >> "$CFG" <<EOF
@@ -531,7 +531,7 @@ fi
 
 echo "==> $EXE_NAME under $MODEL (timeout ${TIMEOUT}s)"
 
-# FS-UAE needs a real OpenGL context -- SDL_VIDEODRIVER=dummy makes it die with
+# FS-UAE needs a real OpenGL context, SDL_VIDEODRIVER=dummy makes it die with
 # "[GLAD] Failed to initialize OpenGL context", so a window is opened by default.
 # AMINETXDUO_HEADLESS=1 tries the dummy driver anyway, for hosts where it works.
 if [ "${AMINETXDUO_HEADLESS:-0}" = "1" ]; then
@@ -546,7 +546,7 @@ fi
 #
 # Without this, two things leak emulator processes:
 #   * fs-uae ignoring SIGTERM (it can wedge in SDL/GL teardown), and
-#   * this script being killed -- an interrupted run orphans its child, which
+#   * this script being killed, an interrupted run orphans its child, which
 #     then sits forever holding a window and a CPU.
 # Escalate TERM -> KILL, and run it from a trap so it happens even when the
 # script does not reach its own exit path.
@@ -577,7 +577,7 @@ WALL_START=$(date +%s)
 #
 #   fs-uae's SLIRP writes the guest's TCP payload to a real host socket with
 #   plain send()/write().  When the far end has hung up, that returns EPIPE
-#   AND raises SIGPIPE, whose default disposition kills the process -- so any
+#   AND raises SIGPIPE, whose default disposition kills the process, so any
 #   guest that keeps talking to a peer which closed first takes the EMULATOR
 #   down, mid-instruction, with no guru, no DH0:.done and a log file truncated
 #   on a 4 KB boundary because stdio never flushed.  It reads exactly like the
@@ -586,15 +586,15 @@ WALL_START=$(date +%s)
 #   MSG_NOSIGNAL, and the fs-uae measured here (3.2.35 on macOS) demonstrably
 #   does neither: without this line it exits 141 every time.
 #
-#   Ignoring it here is inherited across execve() -- SIG_IGN is, a handler is
-#   not -- so fs-uae starts with SIGPIPE ignored and send() merely returns
+#   Ignoring it here is inherited across execve(), SIG_IGN is, a handler is
+#   not, so fs-uae starts with SIGPIPE ignored and send() merely returns
 #   EPIPE, which its own error path already handles.  The subshell keeps the
 #   disposition off this script, whose own pipelines want the default.
 ( trap '' PIPE; exec "$FSUAE" "$CFG" ) >"$ROOT/build/fsuae$TAG.log" 2>&1 &
 FSUAE_PID=$!
 
-# Recorded so that if this script is SIGKILLed -- the one signal the trap
-# cannot see -- the next run's reap_stale() kills the emulator instead of
+# Recorded so that if this script is SIGKILLed, the one signal the trap
+# cannot see, the next run's reap_stale() kills the emulator instead of
 # quietly sharing the machine with it.
 _held=$(held_dir)
 [ -n "$_held" ] && echo "$FSUAE_PID" > "$_held/emupid" 2>/dev/null || true
@@ -658,7 +658,7 @@ if [ -f "$HD/crash.txt" ]; then
 fi
 
 # When the emulator dies rather than the program exiting, the emulator log is
-# the only evidence left -- show it rather than making the caller go find it.
+# the only evidence left, show it rather than making the caller go find it.
 if [ "$EARLY_EXIT" = "1" ]; then
     echo "---- fs-uae log (tail) ----"
     tail -15 "$ROOT/build/fsuae$TAG.log" 2>/dev/null

@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- crash guard implementation.
+ * AmiNetXDuo, crash guard implementation.
  *
  * How a CPU exception reaches us:
  *   1. The 68k takes the exception and enters supervisor mode.
@@ -177,7 +177,7 @@ VOID ami_crash_bailout(VOID)
               (LONG)ami_crash.a[4], (LONG)ami_crash.a[5], (LONG)ami_crash.a[6]);
 
     /*
-     * Leave a breadcrumb the host can read even if the unwind below fails --
+     * Leave a breadcrumb the host can read even if the unwind below fails,
      * the harness stages DH0: from a host directory, so this file appears
      * outside the emulator immediately.
      */
@@ -200,7 +200,7 @@ VOID ami_crash_bailout(VOID)
      * KNOWN LIMITATION: this does not reliably return control. Recovery from a
      * patched exception frame lands here in user mode with the crashing task's
      * stack pointer, and the setjmp context is not always honoured from that
-     * state -- observed under FS-UAE resuming after the call site rather than
+     * state, observed under FS-UAE resuming after the call site rather than
      * at it. The *report* above is dependable; the resume is not, so callers
      * must treat a caught crash as fatal and never rely on continuing.
      */
@@ -235,11 +235,11 @@ const AmiCrashInfo *ami_crash_info(VOID)
     return ami_crash.valid ? &ami_crash : NULL;
 }
 
-/* ------------------------------------------------------- exec Alert hook -- */
+/* ------------------------------------------------------- exec Alert hook, */
 
 /*
  * A Guru is not a CPU exception. When Exec detects corruption it calls its own
- * Alert() -- LVO -108, with the alert number in d7 -- which never goes near
+ * Alert(), LVO -108, with the alert number in d7, which never goes near
  * tc_TrapCode, so the trap handler above cannot see a double free, a corrupt
  * memory list or a reused IORequest.
  *

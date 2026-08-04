@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- a TCP transfer with the PC sampler running over it.
+ * AmiNetXDuo, a TCP transfer with the PC sampler running over it.
  *
  * WHY THIS WORKLOAD.  tests/perf/perf_test.c prices the primitives and finds
  * about 22% of a transfer in the copy and the checksum, leaving 78% inside
@@ -7,7 +7,7 @@
  * census runs, cut down to the transfer itself:
  *
  *   loopback   client and server on one NX_IP through 127.0.0.1.  No driver,
- *              no Ethernet header, no emulated NIC -- protocol processing and
+ *              no Ethernet header, no emulated NIC, protocol processing and
  *              nothing else.  This is the cleanest possible read on the 78%,
  *              because every sample that is not application code is NetX Duo
  *              or the OS underneath it.

@@ -5,18 +5,18 @@ from the NDK 3.2 autodoc audit (four passes over all 122 documented entries)
 and from the memory-floor and stress work.
 
 The autodoc is at `NDK3.2/SANA+RoadshowTCP-IP/doc/bsdsocket.doc`. **`grep`
-silently fails on it** — `file` misidentifies it as "GTA in-game text". Read it
+silently fails on it**, `file` misidentifies it as "GTA in-game text". Read it
 with python.
 
 **The NDK headers have the same trap.** `m68k-amigaos/ndk-include` is Latin-1
 and carries a `©`, so a plain `grep -r` reads those files as binary and finds
-nothing — an empty result there means "not read", not "not present". Use
+nothing, an empty result there means "not read", not "not present". Use
 `LC_ALL=C grep -a`. A whole RFC 3542 assessment was once written on one of those
 empty results.
 
 ---
 
-## Open — no decision taken
+## Open, no decision taken
 
 Everything below survived the 2026-08-04 sweep. What that sweep fixed is in the
 git log; what it declined is under *Decided against*; what it disproved is under
@@ -27,9 +27,9 @@ git log; what it declined is under *Decided against*; what it disproved is under
 | Item | Blocked on | Cite |
 |---|---|---|
 | RFC 2308 §5 negative cache. Needs the SOA MINIMUM held against a name with no record to attach it to | `NX_DNS_NAME_ERROR` does not exist until the pin moves past fork branch `amiga-dns-name-error`; `ami_ns_dns_error()` cannot gain the case before then. Sequence immediately after it lands | `nxd_dns.c:3587` |
-| Bailiwick check on cached records | Must land with CNAME chain following. `NX_DNS_ENABLE_EXTENDED_RR_TYPES` is undefined, so the A record after a CNAME — owner = CNAME target — is accepted only because no owner-name check exists; adding the check alone fails every CNAME-hosted name | `nxd_dns.c` |
+| Bailiwick check on cached records | Must land with CNAME chain following. `NX_DNS_ENABLE_EXTENDED_RR_TYPES` is undefined, so the A record after a CNAME, owner = CNAME target, is accepted only because no owner-name check exists; adding the check alone fails every CNAME-hosted name | `nxd_dns.c` |
 
-### Deferred — needs a machine that can build and run `httpd`
+### Deferred, needs a machine that can build and run `httpd`
 
 Both are RFC 4918 violations, both are affordable, and both land in the server's
 highest-traffic paths, where an error refuses writes or breaks every listing.
@@ -38,18 +38,18 @@ Nothing else in the 2026-08-04 httpd batch was shipped without a host compile.
 | Item | §  | Cite |
 |---|---|---|
 | Depth-0 collection lock does not protect members | 9.10.4 | `httpd.c:2253` |
-| PROPFIND ignores the request body — no `propname`, no named `prop`, no 404 propstat | 9.1 | `httpd.c:4136` |
+| PROPFIND ignores the request body, no `propname`, no named `prop`, no 404 propstat | 9.1 | `httpd.c:4136` |
 
 ### Recommended, not scheduled
 
 | Item | Why it is here rather than under *Decided against* | Cite |
 |---|---|---|
-| **Entropy: ~18 credited bits on a machine with no RTC.** No reseeding, no persisted seed, no health tests | An attacker who knows roughly when the machine booted can enumerate the DRBG state and recover session keys. Two designs, both outside `src/tlslib/`: mix the E-clock low bits of packet arrival into the pool at one credited bit per packet, capped — DNS and the TCP handshake spend enough packets to cross 64 bits before a TLS handshake starts; and persist a seed in `DEVS:Internet/`, written at close and mixed at open, so only a machine's first boot is weak | `ami_random.c:590`, `random.h:39-44` |
-| **Encrypt-then-MAC, RFC 7366** | The answer to the CBC padding-timing row, which is declined on its own terms below. EtM fails the MAC before padding is examined, at no per-record cost; constant-time padding costs ~10 ms per record at 7 MHz | — |
-| **Extended master secret, RFC 7627** | Without it, resumption is exposed to the triple-handshake attack. A change to nx_secure's key schedule, not a table entry; every cached session becomes non-resumable | — |
+| **Entropy: ~18 credited bits on a machine with no RTC.** No reseeding, no persisted seed, no health tests | An attacker who knows roughly when the machine booted can enumerate the DRBG state and recover session keys. Two designs, both outside `src/tlslib/`: mix the E-clock low bits of packet arrival into the pool at one credited bit per packet, capped, DNS and the TCP handshake spend enough packets to cross 64 bits before a TLS handshake starts; and persist a seed in `DEVS:Internet/`, written at close and mixed at open, so only a machine's first boot is weak | `ami_random.c:590`, `random.h:39-44` |
+| **Encrypt-then-MAC, RFC 7366** | The answer to the CBC padding-timing row, which is declined on its own terms below. EtM fails the MAC before padding is examined, at no per-record cost; constant-time padding costs ~10 ms per record at 7 MHz |, |
+| **Extended master secret, RFC 7627** | Without it, resumption is exposed to the triple-handshake attack. A change to nx_secure's key schedule, not a table entry; every cached session becomes non-resumable |, |
 | **SACK send side** | Already written and verified on fork branch `amiga-tcp-sack-transmit` (`d8af79c5`), never landed. Adds `nx_tcp_sack_option_get.c` and the retransmit skip | `nx_tcp.h:93` |
 | **An RA with A=1 and L=0 forms an address nothing can remove.** The address is formed at `:344`, `:396-422`, but a prefix-list entry is added only when L is set (`:317`), so nothing ages it out | Found 2026-08-04 while adjudicating the IPv6 address-lifetime rows. A legitimate and not-rare router configuration, and a worse defect than the row that led to it | `nx_icmpv6_process_ra.c` |
-| **EKU, nameConstraints and critical-extension rejection — together** | Accepting a certificate that marks nameConstraints critical while not enforcing it is exactly the failure the critical bit exists to prevent, so doing one without the others is worse than doing none. The known-critical set must be `{basicConstraints, keyUsage, subjectAltName, extendedKeyUsage}` — Let's Encrypt intermediates mark EKU critical. Untestable without hardware | `nx_secure_x509_extension_find.c:191` |
+| **EKU, nameConstraints and critical-extension rejection, together** | Accepting a certificate that marks nameConstraints critical while not enforcing it is exactly the failure the critical bit exists to prevent, so doing one without the others is worse than doing none. The known-critical set must be `{basicConstraints, keyUsage, subjectAltName, extendedKeyUsage}`, Let's Encrypt intermediates mark EKU critical. Untestable without hardware | `nx_secure_x509_extension_find.c:191` |
 
 ### Carried caveats
 
@@ -61,7 +61,7 @@ recorded so they can be re-checked rather than re-derived.
 | Unlocked `ami_ns` reads are safe because internal threads are drained before the free | The comment at `netstack.c:1722-1725`, not observation, that `nx_ip_delete()` waits for the IP thread | The row is live; the fix is a reference count taken by every `netstack_ip()` and `netstack_pool()` caller |
 | The baton slot wipe is safe where it is placed, after `tx_amiga_kernel_stop()` returns `TX_SUCCESS` | The comment at `netstack.c:1740-1751` that no bracket can be open at that point | The wipe moves; the conservative arm (leave the table alone on any other status) already holds |
 
-### Performance — measured positions
+### Performance, measured positions
 
 **Where transfer time goes.** Sampling profiler, `tools/profiler/`, 1 MB TCP,
 A1200/68020, 1000 Hz, 4411 samples, 0.2% unattributed:
@@ -100,19 +100,19 @@ silently: `AddICRVector()` arbitrates the vector, not the hardware. CIA-B timer 
 ran correctly at 1000 Hz until the first `ami_millis()` took it back via
 timer.device MICROHZ; CIA-B timer A stopped with `ciaicr=$85`, an interrupt
 raised and never acknowledged (Exec EXTER race). Source is now audio channel 3 at
-level 4 — no latching chip in the acknowledge path, and level 4 sees inside the
+level 4, no latching chip in the acknowledge path, and level 4 sees inside the
 level 2/3 handlers where a SANA-II receive runs. `prof_start()` measures each
 candidate over eight windows and rejects any that does not hold rate.
 Attribution: Exec keeps INLINE code in some jump-table slots rather than a `JMP`
-(`Forbid`/`Permit` among them) — 7.2% was lost until a PC inside
+(`Forbid`/`Permit` among them), 7.2% was lost until a PC inside
 `[base-negsize, base)` was attributed to the slot. `Disable()` masks INTENA so
 those sections are unsampled; `Forbid()` is sampled normally, which is where the
 bracket lives. Containment verified 97/98/96% on 68020, 100% on 68030. Not yet
-run on 68000 — fs-uae aborts host-side on the A500 profiles before boot.
+run on 68000, fs-uae aborts host-side on the A500 profiles before boot.
 
 **Stack comparison, fixed rig.** `tests/perf/run-stackprof.sh`, bridged Amiberry
 A3000, KS 3.1 40.68, one `a2065.device`, released `fitz`,
-`FitzBench KB=4096 CHUNK=32768 REPS=3`. Both stacks took the same DHCP lease —
+`FitzBench KB=4096 CHUNK=32768 REPS=3`. Both stacks took the same DHCP lease,
 an earlier comparison ran its arms at different addresses.
 
 | | AmiNetXDuo read | Roadshow read | AmiNetXDuo write | Roadshow write |
@@ -124,7 +124,7 @@ an earlier comparison ran its arms at different addresses.
 We read at half the rate while spending less CPU per byte, so the read gap was
 never CPU work. Cause identified 2026-08-02: duplicate-ACK suppression disabled
 fast retransmit (fixed, `4b41379a`), and the lab rig's own 0.35% reordering was
-rewarding that defect. The remaining ~15% is wake latency — 9.2 ms from response
+rewarding that defect. The remaining ~15% is wake latency, 9.2 ms from response
 header on the wire to first ACK against Roadshow's 7.0, machine idle throughout.
 
 **bifat's four-stack benchmark**, real hardware, `timecmd copy` each way. We are
@@ -140,7 +140,7 @@ on CNet16 where the card dominates), which indicates a per-packet cost.
 byte-loop fallback costs **6.1x, not the 4x the source claims**: 5.4 µs/B against
 0.89 for the `movem.l` path. `n68k_copy.S` takes it whenever `to` and `from`
 disagree in bit 0, because a misaligned word access on a 68000 is an address
-error rather than a slow path. It should never fire on receive — the alignment
+error rather than a slow path. It should never fire on receive, the alignment
 census gives 0 mod 4 (application buffers, packet prepend pointers) and 2 mod 4
 (eight of nine real drivers), both matching the destination's parity. Open
 question: does any real driver hand over an odd buffer.
@@ -149,17 +149,17 @@ question: does any real driver hand over an odd buffer.
 `tests/tapprobe/`. Roadshow reads the source exactly once (scribbling `0xEE` over
 it the instant the hook returned left every reply intact at all four alignments)
 and its hook costs 133 ns/B at best alignment against 158 for a plain `movem.l`
-copy of the same data — no budget for per-longword arithmetic. AmiTCP_NG settled
+copy of the same data, no budget for per-longword arithmetic. AmiTCP_NG settled
 from its GPL source.
 
 **PARKED: melded copy-and-checksum.** Branches `meld` and `wiring` (`bfa9937`);
 nothing on `main`, default build unaffected. `n68k_copy_sum_longwords()` measured
-256.00 ns/B against 378.56 for the separate pair — 32.4% on a 68020. Both halves
+256.00 ns/B against 378.56 for the separate pair, 32.4% on a 68020. Both halves
 have since improved and the melded routine has not (copy 159, checksum 149.8), so
 the margin is now 17%. Wired into receive behind `AMINETXDUO_RX_COPY_SUM`
 (default OFF) the receive pair went 389.33 → 312.92, about 20%; the stamp write,
 prefix subtraction and acceptance checks eat a third of the primitive's gain.
-**Parked because the device buffer is misaligned on 8 of 9 real drivers** —
+**Parked because the device buffer is misaligned on 8 of 9 real drivers**,
 ariadne, ariadne_ii, x-surf, x-surf-100 (Z2 and Z3), hydra, a2065 and cnet all
 hand `S2_CopyToBuff` a pointer at 2 mod 4 and the fast path declines. Under a
 400 pkt/s flood the a2065 gave 1266 consecutive misses and zero stamps. Only
@@ -174,7 +174,7 @@ means rewriting the melded loop around `movem.l` and the chained `addx` first.
 | `run-tcpdrill.sh` does not pass `-x` to `fsuae-run.sh` although the drills carry timing assertions. `AMINETXDUO_PERF=1` forces it | Open |
 | The fs-uae lock is per-checkout (`$ROOT/build/.fsuae.lock`), so `-x` does not serialise against another checkout on the same host | Open |
 | `tcpdrill` queued IPv6 ND frames as results | Fixed 2026-08-02 |
-| `tcpdrill`'s `idle` counted 20 ms per `Delay(1)`; `pump()` between them made `idle 700` take ~1520 ms | Fixed 2026-08-02. `wait_frame()` has the same under-count, which makes `within=` looser than it reads — left alone, tightening it moves every timing case at once |
+| `tcpdrill`'s `idle` counted 20 ms per `Delay(1)`; `pump()` between them made `idle 700` take ~1520 ms | Fixed 2026-08-02. `wait_frame()` has the same under-count, which makes `within=` looser than it reads, left alone, tightening it moves every timing case at once |
 
 ### AmiTCP_NG
 
@@ -184,7 +184,7 @@ math libraries are in `LIBS:`. The earlier `errno 43` `EPROTONOSUPPORT` from
 requirement. Measured 2026-08-02 as the third arm: read 1108 KB/s against our
 983 and Roadshow's 1824.
 
-## Decided against — do not "fix"
+## Decided against, do not "fix"
 
 ### From the 2026-08-04 sweep
 
@@ -204,10 +204,10 @@ requirement. Measured 2026-08-02 as the third arm: read 1108 KB/s against our
 | Item | Cost of doing it |
 |---|---|
 | Revocation, any kind | OCSP needs an HTTP client inside `tls.library` and a second TCP connection per handshake, on a machine where the handshake already takes 7–23 s. CRL fetch needs an unbounded download and DER walk in 1 MB. Stapling is the only affordable shape and needs `status_request` plus a CRL-signature path in nx_secure, for a web where most servers still do not staple |
-| Constant-time CBC padding | ~290 extra bytes of HMAC-SHA256 per received record, ~10 ms per record at 7 MHz — a permanent ~20% record-layer tax. ChaCha20-Poly1305 is first in the preference list and is AEAD with no padding, and Lucky13 needs ~2²³ connections against a machine taking seconds per handshake. Encrypt-then-MAC is the better answer and is listed under *Recommended* |
+| Constant-time CBC padding | ~290 extra bytes of HMAC-SHA256 per received record, ~10 ms per record at 7 MHz, a permanent ~20% record-layer tax. ChaCha20-Poly1305 is first in the preference list and is AEAD with no padding, and Lucky13 needs ~2²³ connections against a machine taking seconds per handshake. Encrypt-then-MAC is the better answer and is listed under *Recommended* |
 | Static-RSA suites | Last in the preference list, so reached only when the server offers nothing better; on this hardware the alternative for those servers is plaintext HTTP rather than ECDHE. Cost of keeping: no forward secrecy for exactly those connections |
-| keyUsage failing open when the extension is absent | RFC 5280 §4.2.1.3 makes an absent keyUsage unrestricted, and OpenSSL's `ku_reject()` behaves the same way. Requiring keyCertSign would break legacy CAs to enforce something the RFC does not say. The check that matters — basicConstraints `cA TRUE` — is enforced |
-| X25519 and Ed25519 wiring | Not a table row: nx_secure's ECDHE is built on `NX_CRYPTO_EC` point encoding and X25519 is 32 opaque bytes with no point format, so it is a new key-exchange path (~300 lines plus an `NX_CRYPTO_METHOD`). Measure first — our P-256 has a precomputed base table, so the win may only be on the shared secret. Ed25519 certificates are effectively nonexistent on the public web; that half is declined outright |
+| keyUsage failing open when the extension is absent | RFC 5280 §4.2.1.3 makes an absent keyUsage unrestricted, and OpenSSL's `ku_reject()` behaves the same way. Requiring keyCertSign would break legacy CAs to enforce something the RFC does not say. The check that matters, basicConstraints `cA TRUE`, is enforced |
+| X25519 and Ed25519 wiring | Not a table row: nx_secure's ECDHE is built on `NX_CRYPTO_EC` point encoding and X25519 is 32 opaque bytes with no point format, so it is a new key-exchange path (~300 lines plus an `NX_CRYPTO_METHOD`). Measure first, our P-256 has a precomputed base table, so the win may only be on the shared secret. Ed25519 certificates are effectively nonexistent on the public web; that half is declined outright |
 | Resumption secrets at rest | There is no key on an Amiga to protect them with; a machine-derived key is obfuscation. The trade-off is disclosed at `tlslib.h:57-64` with two opt-outs, `TLSA_NoResume` and `TLSA_SessionFile ""` |
 
 **Resolver and DHCP**
@@ -216,47 +216,47 @@ requirement. Measured 2026-08-02 as the third arm: read 1108 KB/s against our
 |---|---|
 | Ctrl-C sampled per retry rung rather than per 200 ms | Deliberate, documented at `netstack_retry.h:52-58`. Doing better means slicing the wait inside `_nx_dns_response_receive()` and threading an abort callback through every return path in the DNS client, for 2–4 s of latency with the one or two servers a lease hands out. Dropping `AMI_NET_ASK_CEILING` to 1 s is the cheap alternative and the wrong trade: it doubles query traffic on exactly the slow links where the ceiling matters |
 | TC handling, TCP fallback, EDNS0 | Smaller than it reads: an A, AAAA or PTR answer always fits in 512 bytes, and the retry ladder already stops on a truncated response (`netstack_retry.c:51` treats an attempt returning before its wait as answered), so the cost today is an error message rather than a failed lookup. EDNS0 without a fallback ladder risks names not resolving behind middleboxes that drop EDNS0 queries; with one it is substantial. TCP fallback needs a socket, two-byte length framing and a second parse path |
-| DHCP option 121, classless static routes | A feature, not a fix. Requesting it without parsing and installing it adds bytes to every DISCOVER for no behaviour. Doing it properly requires RFC 3442's precedence rule — when 121 is present the client **must** ignore options 3 and 33 — and getting that wrong removes the default gateway. There is also no route-installation path to extend: option 33 is retrieved and reported (`netstack.c:2350`) and never passed to `nx_ip_static_route_add()`. Build and test the option-33 install path first |
-| RFC 3396 long-option concatenation, and option 52 overload | Both claims are true and both are near-unreachable here: we request six options (1, 3, 6, 12, 15, 33) whose combined payload is far below the 312-byte options area, so a server has no reason to split an option or overload `file`/`sname`. Concatenation also changes `_nx_dhcp_search_buffer()`'s contract from "pointer into the packet" to "assembled into a scratch buffer", touching both callers. Revisit if option 121 is ever adopted — that is the option that makes servers do both |
+| DHCP option 121, classless static routes | A feature, not a fix. Requesting it without parsing and installing it adds bytes to every DISCOVER for no behaviour. Doing it properly requires RFC 3442's precedence rule, when 121 is present the client **must** ignore options 3 and 33, and getting that wrong removes the default gateway. There is also no route-installation path to extend: option 33 is retrieved and reported (`netstack.c:2350`) and never passed to `nx_ip_static_route_add()`. Build and test the option-33 install path first |
+| RFC 3396 long-option concatenation, and option 52 overload | Both claims are true and both are near-unreachable here: we request six options (1, 3, 6, 12, 15, 33) whose combined payload is far below the 312-byte options area, so a server has no reason to split an option or overload `file`/`sname`. Concatenation also changes `_nx_dhcp_search_buffer()`'s contract from "pointer into the packet" to "assembled into a scratch buffer", touching both callers. Revisit if option 121 is ever adopted, that is the option that makes servers do both |
 
 **IPv6**
 
 | Item | Cost of doing it |
 |---|---|
 | Preferred lifetime and `NX_IPV6_ADDR_STATE_DEPRECATED` | `NXD_IPV6_ADDRESS` carries no lifetime field at all (`nx_api.h:2329-2359`); the lifetime lives on the prefix (`:1119`) and is aged at `nxd_ipv6_prefix_router_timer_tick.c:165`. The RA's preferred lifetime is read and discarded at `nx_icmpv6_process_ra.c:291-306`. Adding this means per-address lifetimes and an ager in the fork, plus RFC 6724 rule 3 in source selection, which `_nxd_ipv6_interface_find` has no hook for |
-| Privacy addresses (RFC 8981) and opaque IIDs (RFC 7217) | 8981 needs the lifetime infrastructure above plus regeneration timers and DAD-collision retry, and `NX_MAX_IPV6_ADDRESSES` is 6 across two interfaces — no spare slots for rotating temporaries. 7217 is the cheap alternative (a hash replacing the EUI-64 at `nx_icmpv6_process_ra.c:388-394` and `nxd_ipv6_address_set.c:152-162`) and gets most of the tracking benefit, but needs a per-installation secret surviving reboot and would change every existing machine's address on upgrade — which matters for anyone with firewall rules or AAAA records keyed on the current one |
+| Privacy addresses (RFC 8981) and opaque IIDs (RFC 7217) | 8981 needs the lifetime infrastructure above plus regeneration timers and DAD-collision retry, and `NX_MAX_IPV6_ADDRESSES` is 6 across two interfaces, no spare slots for rotating temporaries. 7217 is the cheap alternative (a hash replacing the EUI-64 at `nx_icmpv6_process_ra.c:388-394` and `nxd_ipv6_address_set.c:152-162`) and gets most of the tracking benefit, but needs a per-installation secret surviving reboot and would change every existing machine's address on upgrade, which matters for anyone with firewall rules or AAAA records keyed on the current one |
 | MLD | The recorded rationale was wrong and is corrected in place; the feature remains unimplemented. A snooping switch filters multicast rather than forwarding it, so "the switch forwards anyway" was never a reason. What makes it declinable is narrower: every group this stack joins is either link-local scope, which snooping does not filter, or joined through IGMP on the IPv4 side |
 
 **httpd and WebDAV**
 
 | Item | Cost of doing it |
 |---|---|
-| Free-space precheck on a chunked PUT | A chunked body cannot be size-checked before it arrives — that is why a client chunks. `httpd_sink_put` already turns a short write into 507 |
+| Free-space precheck on a chunked PUT | A chunked body cannot be size-checked before it arrives, that is why a client chunks. `httpd_sink_put` already turns a short write into 507 |
 | 412 bodies carrying HTML rather than `<D:error>` | RFC 4918 defines no precondition element for the cases that produce a 412 here; §16 covers `no-conflicting-lock`, which is the 423 and is fixed. Clients key off the status |
 | LOCK on an unmapped URL creating a locked empty resource, §7.3 | Conflicts with a design choice already recorded in the code: creating the resource means an abandoned lock leaves an empty file behind |
-| A real XML parser — nesting, entities, CDATA, comments — and UTF-16 request bodies | Days of work for a machine with 1 MB. UTF-16 bodies have never been observed from Finder or the Windows redirector |
+| A real XML parser, nesting, entities, CDATA, comments, and UTF-16 request bodies | Days of work for a machine with 1 MB. UTF-16 bodies have never been observed from Finder or the Windows redirector |
 | Dead properties, RFC 4918 §9.2 SHOULD | AmigaOS offers a 79-byte filenote or a sidecar; a sidecar costs `Lock`+`Examine`+`Open`+`Read` per entry per PROPFIND, doubling listing cost on a 68000 and the file count of every drawer, and a `.props-<name>` scheme collides on OFS's 30-character truncation. Measured client cost of having none: Explorer's creation/access times and attribute bits, nothing else |
 | Unbounded multistatus, §9.8.3 | The 8-entry / 768-byte / 8-property bound is deliberate. Honouring it needs a spill file or a streamed 207, and a streamed 207 cannot be retracted once the head is out |
-| Top-level DELETE aimed straight at a hard link | `Lock()` follows the link and `Examine()` reports the target's type, so catching this needs a parent-directory scan. The entry has to be placed by the machine's owner — `httpd` creates no links — which makes it a footgun rather than a remote attack. The `ExNext()` recursion, which was the reachable half, is fixed |
+| Top-level DELETE aimed straight at a hard link | `Lock()` follows the link and `Examine()` reports the target's type, so catching this needs a parent-directory scan. The entry has to be placed by the machine's owner, `httpd` creates no links, which makes it a footgun rather than a remote attack. The `ExNext()` recursion, which was the reachable half, is fixed |
 
 **Infrastructure**
 
 | Item | Cost of doing it |
 |---|---|
-| Profiler source-file and line attribution | **Declined on measurement, 2026-08-04.** The writer side is all present — the gcc driver's link spec carries `%{g:-amiga-debug-hunk}`, `ld`'s amiga script references `.debug_line`, and `m68k-amigaos-addr2line` ships with `-j --section=`. The reader side does not work: `profspin` built at `-Os` with `-g` on both compile and link, and again with `-Wl,--amiga-debug-hunk` forced, yields `.text`, `.data`, `.bss` and no debug section under `objdump -h`. Implementing it would mean hand-parsing the debug hunk or patching BFD, not the ~200 lines of Python the existing `(hunk, offset)` machinery would otherwise need |
+| Profiler source-file and line attribution | **Declined on measurement, 2026-08-04.** The writer side is all present, the gcc driver's link spec carries `%{g:-amiga-debug-hunk}`, `ld`'s amiga script references `.debug_line`, and `m68k-amigaos-addr2line` ships with `-j --section=`. The reader side does not work: `profspin` built at `-Os` with `-g` on both compile and link, and again with `-Wl,--amiga-debug-hunk` forced, yields `.text`, `.data`, `.bss` and no debug section under `objdump -h`. Implementing it would mean hand-parsing the debug hunk or patching BFD, not the ~200 lines of Python the existing `(hunk, offset)` machinery would otherwise need |
 | Profiler call counts, inclusive/exclusive split | Sampling cannot produce counts. An instrumenting mode sharing the report format is a second tool, not an extension. No use case yet |
 | `src/mbuf` slab cleanup | Cannot leak today: no `mbuf_*` LVO is wired (`src/bsdsocket/CMakeLists.txt:126-129`, `bsdsocket_vectors.c:132-141`), so `ami_mbuf_cleanup()` having no production caller costs nothing until one is. A note now sits at the call-less definition |
 | A real baton-slot sweep | Needs a `struct Task *` liveness test; the obvious one is wrong in exactly the window that matters. The wipe at stack shutdown is landed and is the half that can be done correctly |
 
 **`SO_BROADCAST` is accepted and not enforced**, recorded at `options.c:185-190`.
-BSD makes it a permission -- `sendto()` to a broadcast address is `EACCES`
-without it -- and this stack has never asked for it, so enforcing it now would
+BSD makes it a permission, `sendto()` to a broadcast address is `EACCES`
+without it, and this stack has never asked for it, so enforcing it now would
 start failing sends that work today, on a library that has users.
 
 **`SO_OOBINLINE` is accepted and its value deliberately not stored**,
 `options.c:266`. The urgent byte is delivered in the stream whatever the caller
 sets, so reporting back a 0 would be the one answer that is certainly wrong.
-Withholding the byte -- the option OFF -- means rewriting a queued segment the
+Withholding the byte, the option OFF, means rewriting a queued segment the
 TCP state machine still owns and counts in its sequence space, to hide a byte
 the caller is about to see again (`oob.c:52-62`, RESEARCH 17).
 
@@ -265,7 +265,7 @@ branch `agent/moira-eval`.
 
 - Moira's 68000 timing is exact only in a configuration it does not ship.
   `MOIRA_PRECISE_TIMING` defaults false, making `SYNC(x)` a no-op, so
-  data-dependent costs are discarded — `MULS.W` is charged its worst case 54
+  data-dependent costs are discarded, `MULS.W` is charged its worst case 54
   whatever the operand. `MOIRA_MIMIC_MUSASHI` defaults true and its own comment
   says to turn it off. Both are unconditional `#define`s. Patched it matches
   M68000PRM 30/30 including `MOVEM.L (An)+` at 12+8n; unpatched 29/30.
@@ -275,7 +275,7 @@ branch `agent/moira-eval`.
   depth.**
 - Errors against real measurement do not share a sign: 68020 copy +23%, 68000
   checksum at 20 B −41%, alignment penalty +1.2% where the machine gives +31%.
-  Structural — Moira is a CPU, not a machine: flat always-ready RAM, no chip-RAM
+  Structural, Moira is a CPU, not a machine: flat always-ready RAM, no chip-RAM
   contention, no prefetch overlap, no cache, no unaligned-access penalty, which
   is the effect `n68k_copy.S` aligns its destination to avoid.
 - Musashi is worse: its 68020, 68030 and 68040 share one cycle table (verified
@@ -305,7 +305,7 @@ Two traps for anyone who tries. `-D` cannot set the knob:
 `port/netxduo-amiga/inc/nx_user.h:34` hard-defines `NX_IP_PERIODIC_RATE 50`
 unconditionally and is included before `nx_port.h`'s `#ifndef` fallback, so
 overriding `TX_TIMER_TICKS_PER_SECOND` alone silently rescales every TCP timer
-by the ratio — a sweep that looks plausible and measures nothing. Both headers
+by the ratio, a sweep that looks plausible and measures nothing. Both headers
 must move together. And there is no delayed-ACK confound to isolate:
 `nx_tcp_enable.c:111` computes `_nx_tcp_ack_timer_rate` as
 `ceil(NX_IP_PERIODIC_RATE / NX_TCP_ACK_TIMER_RATE)`, so the ACK interval
@@ -320,7 +320,7 @@ self-scales to a constant 200 ms at every rate.
 - **A browse reports the whole peer cache, not the browse window**, and stays
   that way, 2026-07-31. `netstack_mdns_browse_collect()` walks
   `nx_mdns_service_lookup()` by index, which is the whole cache, and nothing
-  ages entries from our side -- the module expires them by TTL, and an unplugged
+  ages entries from our side, the module expires them by TTL, and an unplugged
   machine sends none of RFC 6762 §10.1's goodbyes. Filtering to entries actually
   refreshed inside the window means walking the RR cache instead of the public
   lookup: `nx_mdns_rr_elapsed_time` and `nx_mdns_rr_remaining_ticks` carry the
@@ -329,7 +329,7 @@ self-scales to a constant 200 ms at every rate.
 
 - **RFC 3678 source filtering stays out**, 2026-07-31.
   `IP_ADD_SOURCE_MEMBERSHIP`, `IP_BLOCK_SOURCE` and the `MCAST_*` family need
-  IGMPv3, which the vendored NetX Duo does not implement -- it speaks IGMPv2
+  IGMPv3, which the vendored NetX Duo does not implement, it speaks IGMPv2
   and the source lists have nowhere to go. RFC 1112 membership is what shipped
   (`src/bsdsocket/mcast.c`) and is what SSDP, UPnP and a ported mDNS actually
   call.
@@ -337,7 +337,7 @@ self-scales to a constant 200 ms at every rate.
 - **RFC 6724 default address selection**, 2026-07-31: does not apply here. It
   sorts a list of candidate destinations, and `getaddrinfo()` returns at most
   one address per family (the resolver under it answers with a single address,
-  not a set -- see `src/bsdsocket/addrinfo.c`). With two entries at most its
+  not a set, see `src/bsdsocket/addrinfo.c`). With two entries at most its
   rules collapse to "which family first", which is answered deliberately: IPv6
   then IPv4. It would start to matter only if the resolver ever returned
   address sets.
@@ -351,7 +351,7 @@ self-scales to a constant 200 ms at every rate.
 
 - **`AAMR_AddressInUse` / `AAMR_MaskChangeFailed` are never produced**,
   2026-07-31. Answering the first truthfully means duplicate address detection
-  -- probing for the address before committing to it -- which is the real
+, probing for the address before committing to it, which is the real
   feature and a change in what the stack puts on the wire, needing a second
   machine holding the address to test against. The result code is downstream of
   that, and inventing one without the probe would be a worse answer than
@@ -359,14 +359,14 @@ self-scales to a constant 200 ms at every rate.
 
 - **`SBTC_IP_FILTER_HOOK` and the `mbuf_*` family**, 2026-07-31. The hook hands
   a filter an mbuf chain, so servicing it means synthesising BSD mbufs around
-  NX_PACKETs for every IP packet in and out -- a packet-buffer abstraction the
+  NX_PACKETs for every IP packet in and out, a packet-buffer abstraction the
   stack does not otherwise have, on the hot path, for a facility whose only
   real caller is a firewall nobody has asked for. Both stay stubbed together.
 
 - **`IFQ_MaxReadRequests` / `IFQ_MaxWriteRequests` stay unanswered**,
   2026-07-31. The autodoc types them `(LONG)` where all 40 neighbours are
   `(LONG *)`, and on a query a bare `LONG` has nowhere to put the answer, so it
-  is almost certainly a typo -- but writing through a `ti_Data` that a caller
+  is almost certainly a typo, but writing through a `ti_Data` that a caller
   passed as a scalar would corrupt its memory, and there is no way to tell the
   two apart at the call. They fall to the `default:` branch, which ignores
   unknown tags rather than refusing them, so nothing else in the list is lost.
@@ -392,7 +392,7 @@ self-scales to a constant 200 ms at every rate.
 
 - **`listen()` backlog is 8**, where the doc's BUGS claims a silent limit of 5.
 
-- **`Dup2Socket` allows any in-range slot** — the doc's `EBADF` wording would
+- **`Dup2Socket` allows any in-range slot**, the doc's `EBADF` wording would
   make `dup2` onto a free slot illegal, defeating the call.
 
 - **Request-count defaults** (ours sized from the packet pool, not 32/32/4).
@@ -402,7 +402,7 @@ self-scales to a constant 200 ms at every rate.
 - **`gai_strerror()` takes its argument in A0.** The autodoc says D0; the SFD
   and pragmas say A0, and callers link against the pragma. The doc is wrong.
 
-- **`bpf_open()` returns 0 for channel 0**, against the doc's *"handle > 0"* —
+- **`bpf_open()` returns 0 for channel 0**, against the doc's *"handle > 0"*,
   RESEARCH §60 decoded Roadshow's own libpcap using it as a 0-based channel.
 
 - **`OpenLibrary` allows Tasks and non-opener Processes**, which the doc
@@ -410,11 +410,11 @@ self-scales to a constant 200 ms at every rate.
 
 - **`GetDefaultDomainName()` refuses rather than truncates.**
 
-- **Packet pool sizing left alone**, 2026-07-31 — the heuristic reaches the
+- **Packet pool sizing left alone**, 2026-07-31, the heuristic reaches the
   floor on small machines (1 free of 17 observed on 1 MB), so the minimum must
   stay.
 
-- **No stripped drawer beyond `68000-minimal`**, 2026-07-31 — the full build is
+- **No stripped drawer beyond `68000-minimal`**, 2026-07-31, the full build is
   what generates useful bug reports.
 
 - **Two physical NICs**, dropped 2026-07-31: `romtype_restricted()` keeps only
@@ -422,16 +422,16 @@ self-scales to a constant 200 ms at every rate.
   case. Recovery SHA `d22a33e`.
 
 - **A Kickstart 1.3 build**, dropped 2026-07-31: TheWire13 already covers that
-  platform. Our side was closer than expected -- tag walking is hand-rolled so
+  platform. Our side was closer than expected, tag walking is hand-rolled so
   `utility.library` is never needed, the library's DOS surface is all V33, and
-  the 68000 build ships -- but `ReadEClock` is V36 and everything 0.14.0 did
+  the 68000 build ships, but `ReadEClock` is V36 and everything 0.14.0 did
   for clock correctness rests on it; a 1.3 fallback is the 50 Hz CIA/VBlank
   source, exactly one tick of resolution, which retires the timer budget. The
   tools are the volume (`ReadArgs` 27 sites, `FreeArgs` 191, `VPrintf` 12).
   Never established whether any SANA-II driver runs under V34 at all, which was
   the gating question.
 
-## Withdrawn — do not re-raise
+## Withdrawn, do not re-raise
 
 Rows that did not survive re-checking. Kept because each was raised from a
 plausible reading of a real symptom, and the same reading will recur.
@@ -441,23 +441,23 @@ plausible reading of a real symptom, and the same reading will recur.
 | The CI analyze stage silently skips cppcheck | It does not. `stage_analyze` is only ever invoked as `stage_analyze \|\| true`, and bash suppresses `set -e` inside a function called as part of an `\|\|` list. Reproduced both directions |
 | `ugl_crypt()` returning `"*"` is a live lockout bypass | A hazard for third-party callers, not a live bypass: it also sets `UG_ENOSYS`, and nothing in the tree calls it |
 | `clients/dropbear/build.sh` and `dist/make-dist.sh` are release-only steps CI never runs | Both are invoked by `.github/workflows/release.yml:155` and `:162`. They run on a release tag rather than on every push, which is a narrower statement than the row made and not by itself a defect |
-| Stale root-level duplicates — `src/tools.h`, `stage-developer.sh`, `aminetxduo_lib.sfd`, `tmp_x/` | All gone. None is in the tree |
+| Stale root-level duplicates, `src/tools.h`, `stage-developer.sh`, `aminetxduo_lib.sfd`, `tmp_x/` | All gone. None is in the tree |
 | **Keepalive is untested and needs `TCP_KEEPIDLE`** | Neither. `CMakeLists.txt:265-270` exposes `-DAMINETXDUO_TCP_KEEPALIVE_INITIAL=` and `keepalive.drill`'s own header names the arm it needs. Built with `=5` on hardware: 4 cases, 0 failed, 34 checks. The row came from running the script against a default build, where every case fails correctly because two hours have not passed |
 | UDP demux ignores the 4-tuple | The filter exists: `bsd_udp_from_peer()` (`transfer.c:516-542`) applied at `:1123` with a local-address filter, and the recv loop drops and re-waits rather than failing. `_nx_udp_socket_bind` refuses a second socket on a bound port (`nx_udp_socket_bind.c:281-283`), so the `:240` port compare has one candidate. Residual, not the row: a wrong-peer datagram is still enqueued and counts against queue depth |
 | Socket-option surface entirely untested | Stale. `tests/sockopt/sockopt_test.c:405-967` covers it; commit `e9274c7` records that it was run and found 24 defects |
-| `tests/perf/prof/` is a dead fork of `tools/profiler/` | Wrong in three ways. Not dead — `tests/perf/CMakeLists.txt:190` adds it behind `AMINETXDUO_PROFILER`. The incompatible sample record is deliberate: `tools/profiler/prof.h:103-107` split the magics so an old reader cannot misread a new file. And the lineage is inverted — `profreport.py:114-117` calls the `tests/perf/prof` format "a different, older format", so `tools/profiler/` is the descendant |
+| `tests/perf/prof/` is a dead fork of `tools/profiler/` | Wrong in three ways. Not dead, `tests/perf/CMakeLists.txt:190` adds it behind `AMINETXDUO_PROFILER`. The incompatible sample record is deliberate: `tools/profiler/prof.h:103-107` split the magics so an old reader cannot misread a new file. And the lineage is inverted, `profreport.py:114-117` calls the `tests/perf/prof` format "a different, older format", so `tools/profiler/` is the descendant |
 | Broadcast SYN answered, destination unchecked | Fixed as `1e0e80f0` (`nx_tcp_packet_process.c:151-177`). The half-open slot half is also bounded: `bsd_listen_rearm()` tops the parked list up to `as_Backlog` (`socket.c:1889-1900`) from `listen()` and `accept()`. `tests/tcpdrill/scripts/bcast.drill` asserts both |
 | `REQUIRE_RENEGOTIATION_EXT` undefined lets a handshake complete with an un-upgraded server | Impact is nil. `nx_secure_tls_client_handshake.c:248` renegotiates only when `renegotation_enabled && secure_renegotiation`, and the latter is set only by a valid RFC 5746 extension; otherwise a HelloRequest returns `NX_SECURE_TLS_NO_RENEGOTIATION_ERROR`. Defining the macro would refuse *initial* handshakes with unpatched servers, breaking connections without closing an attack |
 | Resumption needs `SetProtection` | Nothing behind it. AmigaOS `FIBF_GRP_*`/`FIBF_OTR_*` are active-high and default to 0 on a new file, so group and other already have no access. The call would be a no-op |
 | `is_seeded` is not on the private context vector, so `tls.library` cannot check it | `nxc_random_entropy_bits()` is on the vector at `nxcontext.h:203` and `tls_netx.c:285` already forwards to it. `tls.library` can answer today with no new slot and no ABI break. The entropy *quantity* problem in the same row is real and is under *Recommended* |
-| `o02_duplicate_segment` fails | Fixed 2026-08-04 (`nx_tcp_socket_packet_process.c`, `packet_data_length > 0` on the RFC 793 §3.9 reply). Its counterpart `d06_no_dsack_without_permission` asserted the opposite — `notx 400` where a plain ACK belongs — and was the one that was wrong |
+| `o02_duplicate_segment` fails | Fixed 2026-08-04 (`nx_tcp_socket_packet_process.c`, `packet_data_length > 0` on the RFC 793 §3.9 reply). Its counterpart `d06_no_dsack_without_permission` asserted the opposite, `notx 400` where a plain ACK belongs, and was the one that was wrong |
 | MUST-23: `NX_TCP_MAXIMUM_RETRIES 7` → 255 s | The numbers were stale: the tree had 6 retries → 127 s. R2 for SYN now has its own budget and is 191 s, verified on the host |
-| The IPv4 ID row's three particulars | The retransmitted header's length, TTL and checksum are **not** stale — a retransmission rewrites every one to the same value. `NX_ENABLE_IP_ID_RANDOMIZATION` **is** defined, at `port/netxduo-amiga/inc/nx_user.h:458-460`, gated off by default. There are three TCP socket-create sites, not four; the fourth is UDP. The real defect the row missed: `nx_packet_identical_copy` was never cleared, only set, so a packet that went out identical once reused the original ID on every later retransmission, where the ACK and window had moved. Fixed |
+| The IPv4 ID row's three particulars | The retransmitted header's length, TTL and checksum are **not** stale, a retransmission rewrites every one to the same value. `NX_ENABLE_IP_ID_RANDOMIZATION` **is** defined, at `port/netxduo-amiga/inc/nx_user.h:458-460`, gated off by default. There are three TCP socket-create sites, not four; the fourth is UDP. The real defect the row missed: `nx_packet_identical_copy` was never cleared, only set, so a packet that went out identical once reused the original ID on every later retransmission, where the ACK and window had moved. Fixed |
 | Question comparison being case-sensitive breaks DNS-0x20 | Backwards. 0x20 *requires* an exact comparison, and nothing here randomises the case it sends, so the exact compare bought no entropy and cost real resolutions: a caller spelling a name with any capital got `NX_DNS_MISMATCHED_RESPONSE` from every server that normalises. The cache half already folded case, so the two halves of the client disagreed about what a name is. Fixed |
-| `nxd_dhcp_client.c:6974` compares seconds against ticks | Only `:6939` does. The rebind arm at `:6974` converts to ticks at `:6971` and then compares ticks to ticks — correct code thirty lines below the broken code |
+| `nxd_dhcp_client.c:6974` compares seconds against ticks | Only `:6939` does. The rebind arm at `:6974` converts to ticks at `:6971` and then compares ticks to ticks, correct code thirty lines below the broken code |
 | Document root with a trailing slash may resolve to its parent | Not true as written: `http_path_resolve` already guards the join (`httppath.c:223`) so `root + "/"` never doubles a slash. The only unguarded case was the root used by itself, which is now normalised unconditionally so the question does not arise |
 | Hard-linked directories walked through because `ST_LINKDIR` tests as a directory | The mechanism is wrong: `Lock()` follows the link and `Examine()` reports the *target's* type, so the top-level check can never see a link. The only place `ST_LINKDIR` is visible is the `ExNext()` scan, which is where the recursion was, and where it is fixed. The top-level case remains and is under *Decided against* |
-| PROPPATCH naming no settable property emits an invalid `<D:response>` | Partly wrong: properties named but none settable already emitted a valid 403 propstat (`httpd.c:3952`). Only `props == 0` produced the invalid response. An unlisted bug next to it was worse — the 9th and later properties were dropped silently, so a large PROPPATCH reported on eight and the client read that as an answer about all of them. Both are 400 now |
+| PROPPATCH naming no settable property emits an invalid `<D:response>` | Partly wrong: properties named but none settable already emitted a valid 403 propstat (`httpd.c:3952`). Only `props == 0` produced the invalid response. An unlisted bug next to it was worse, the 9th and later properties were dropped silently, so a large PROPPATCH reported on eight and the client read that as an answer about all of them. Both are 400 now |
 | `AMI_MDNS_PRIORITY` is defined at `netstack_mdns.c:48` | `:45`. The row's line was wrong; the finding was not |
 | PKCS#1 "OID discarded" is exploitable | Not once the padding is exact. The hash algorithm comes from the certificate's own `signatureAlgorithm`, which is inside the signed body and is now pinned to the inner copy, and the digest length and bytes are both compared. A digest-OID table would need new OID constants for no gain |
 
@@ -467,22 +467,22 @@ plausible reading of a real symptom, and the same reading will recur.
 |---|---|
 | A task can hold about five library bases that use a `WaitSelect()` timeout | Each base takes an event signal from the calling task (`library.c:244`) and the first timeout takes another for the timer (`select.c:475`), out of a Task's 32 bits. `OpenLibrary()` refuses once they run out, which is correct. Found 2026-07-31 when eight opens got five; `run-cycledrill.sh` now asks for four |
 | `run-fitzbench.sh`'s write figure is not a rate | Stops timing when the write call returns, not when data drains. Guest-timed 1718 KB/s against a measured wire rate of 364. Reads agree between clocks; writes diverge ~4.7× |
-| `run-fitzbench.sh` refuses a same-host virtual peer | Over the uncomputed TX checksums that `ethtool -K <iface> tx off` fixes. Can be relaxed. Query by full path — `/usr/sbin` is not on a non-login ssh PATH |
+| `run-fitzbench.sh` refuses a same-host virtual peer | Over the uncomputed TX checksums that `ethtool -K <iface> tx off` fixes. Can be relaxed. Query by full path, `/usr/sbin` is not on a non-login ssh PATH |
 | cppcheck stage skips itself | Baseline from 2.20.0, gate hosts have 2.17.1. Install 2.20.0 or regenerate |
 | FS-UAE cannot boot headless | `FATAL: [GLAD] …`. Harnesses take `-A` for Amiberry and `-a ARGS` to pass arguments |
-| A pinned toolchain install can carry the argv bug in all eleven `crt0.o` | GCC 16.1.1b locally built reports `11 buggy` — has the compiler fix for the frame skew, not newlib's `120371e` for the argv declaration. Anything built there against `-lc` without `fix-toolchain-crt0.py` hands ported clients `&__argv` |
+| A pinned toolchain install can carry the argv bug in all eleven `crt0.o` | GCC 16.1.1b locally built reports `11 buggy`, has the compiler fix for the frame skew, not newlib's `120371e` for the argv declaration. Anything built there against `-lc` without `fix-toolchain-crt0.py` hands ported clients `&__argv` |
 
 **Amiberry's A600 PCMCIA emulation does not work, for any stack.** On an A1200
 with `-N ne2000_pcmcia` the emulated RTL8019 and `cnet.device` drive a full DHCP
-lease — ours reports `eth0: online, address 10.0.2.15` and the Roadshow 1.15
+lease, ours reports `eth0: online, address 10.0.2.15` and the Roadshow 1.15
 demo reports the same address from the same card. Move identical staging to
 `-m A600` and both fail: ours cannot open the device, Roadshow says
 `Could not add interface "eth0" (Input/output error)`. **An A600 failure says
 nothing about the code**; PCMCIA tests must run on the A1200 profile.
 
 Not a memory limit, which was the confound: the failing A600 run had 4.6 MB
-free, and an A1200 at `chipmem_size=2;bogomem_size=0;fastmem_size=0` — 1 MB of
-chip and nothing else, the supported floor — brings the same card up and leases
+free, and an A1200 at `chipmem_size=2;bogomem_size=0;fastmem_size=0`, 1 MB of
+chip and nothing else, the supported floor, brings the same card up and leases
 an address with 374,760 bytes still free. That is also the first demonstration
 of the README's 1 MB floor with a live interface rather than by inference;
 `run-oommsg.sh` only proves the other end, that 512 KB cannot start the stack.
@@ -495,8 +495,8 @@ lookup and SYN build.
 
 **Correction to an earlier note here**: `AddNetInterface eth0` does *not* hang
 with a second card present. With `a2065` on Zorro and the NE2000 PC Card on
-PCMCIA — different buses, Fast RAM held to 4 MB to stay clear of the credit-card
-window at $600000 — `AddNetInterface eth0 eth1` returns 0, `eth0` leases, and
+PCMCIA, different buses, Fast RAM held to 4 MB to stay clear of the credit-card
+window at $600000, `AddNetInterface eth0 eth1` returns 0, `eth0` leases, and
 `ShowNetStatus` lists both with `eth1` offline. The hang belonged to two Zorro
 cards. The real limit is that `cnet.device` will not open while the A2065 is
 present although it opens alone, and Amiberry offers exactly two network boards,
@@ -507,19 +507,19 @@ destination for a machine that can host one.
 `ami_sana2_rx_stop()`'s last-resort path logs `reader N did not stop; leaking
 its stack` and leaks 32 KB when a driver ignores `AbortIO`, which a2065.device
 2.16 is documented to do. Thirteen full teardowns under Amiberry logged it zero
-times. Nothing is outstanding in the code — the free sits outside the started
+times. Nothing is outstanding in the code, the free sits outside the started
 gate where the teardown owns it, and `run-cycledrill.sh` greps every run and
 fails on `AMINETXDUO_CYCLE_ORPHAN_FATAL=1`. What is missing is a sighting, and
 only real hardware can provide one.
 
 **`tests/clients/run-argvexit.sh` removed 2026-07-31; it never completed a run.**
 Under Amiberry the guest boots, `ToolsSmoke` starts, `DH0:tools.txt` reaches the
-`===== SYS:ArgvExit =====` header and stops — `ArgvExit` never returns from
+`===== SYS:ArgvExit =====` header and stops, `ArgvExit` never returns from
 `SystemTagList()`. The toolchain was ruled out separately:
 `fix-toolchain-crt0.py --check` reports `11 ok, 1 skipped` for the frame skew and
 `2 call site(s) already push __argv by value`, the immune case. The 256 KB
 per-invocation stack leak it was written for is covered by
 `clients/dropbear/run-fsuae.sh -A`, which runs `dbclient` six times in one boot
-with `AvailMem()` printed after each — that found the leak (266,368 bytes a run)
+with `AvailMem()` printed after each, that found the leak (266,368 bytes a run)
 and proved the fix (0). **A harness that has never run looks like coverage and
 is not.**

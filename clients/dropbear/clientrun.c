@@ -1,5 +1,5 @@
 /*
- * ClientRun -- run a ported Unix client under tools/fsuae-run.sh.
+ * ClientRun, run a ported Unix client under tools/fsuae-run.sh.
  *
  * tools/fsuae-run.sh starts one executable with no arguments, so anything that
  * takes a command line needs a driver in the middle.  src/tools/toolssmoke.c
@@ -7,7 +7,7 @@
  * stack.
  *
  * A Kickstart 3.1 Shell gives a command 4,096 bytes of stack.  Our own
- * commands are written to that budget -- src/tools/fetch.c allocates its own
+ * commands are written to that budget, src/tools/fetch.c allocates its own
  * 64 KB stack and StackSwap()s onto it before opening tls.library.  curl was
  * written for a machine where the stack is 8 MB and grows on demand, and its
  * crt0 here has no __stack hook to ask for more with (this toolchain's crt0.o
@@ -59,8 +59,8 @@
  * on the host.  The window spec comes from DH0:console.txt, one per '>'
  * command in order, so the harness picks the size without rebuilding this.
  *
- * Before handing the console over it asks the console its own size -- CSI '0 q'
- * is the AmigaDOS Window Bounds Report -- and writes the answer to the report.
+ * Before handing the console over it asks the console its own size, CSI '0 q'
+ * is the AmigaDOS Window Bounds Report, and writes the answer to the report.
  * That is the number the remote end's `stty size` has to agree with, and
  * without it a comparison has only one side.
  *
@@ -68,7 +68,7 @@
  *
  * An SSH client is supposed to notice its window changing and send
  * window-change.  Nobody can drag a window in a headless emulator, so the
- * resize has to be programmatic -- and the process that opened CON: is the one
+ * resize has to be programmatic, and the process that opened CON: is the one
  * holding the handle whose fh_Arg1 is the Intuition Window, so it is the one
  * that can do it without guessing.  'R' starts the command asynchronously,
  * waits RESIZE_DELAY seconds, calls ChangeWindowBox(), reports the console's
@@ -140,8 +140,8 @@ static const char version_tag[] __attribute__((used)) =
 
 #define MAX_COMMANDS    24
 
-/* 512, not 320.  A command carrying an absolute host path -- which anything
-   running something on the other end of an SSH session does -- goes past 320
+/* 512, not 320.  A command carrying an absolute host path, which anything
+   running something on the other end of an SSH session does, goes past 320
    easily, and copy_bounded() then drops the line and the NEXT one starts a
    command in the middle of a quoted string.  That does not fail loudly: it
    runs, returns 10, and looks like the program under test refusing an
@@ -318,7 +318,7 @@ static VOID read_consoles(VOID)
 /*
  * The Intuition Window behind a CON: filehandle.
  *
- * fh_Arg1 is NOT it -- tried, and it yields a pointer whose Width and Height
+ * fh_Arg1 is NOT it, tried, and it yields a pointer whose Width and Height
  * read 35 and 9572, which is somebody else's memory.  On a machine with no
  * protection, calling ChangeWindowBox() through that is a wild write.
  *
@@ -399,7 +399,7 @@ static VOID report_console_size(BPTR con)
         return;
     }
 
-    /* CSI 1 ; 1 ; rows ; cols SPACE r -- five bytes of preamble, exactly as
+    /* CSI 1 ; 1 ; rows ; cols SPACE r, five bytes of preamble, exactly as
        BebboSSH's own console.cpp skips them. */
     i = 5;
     for (; i < used && buf[i] != ';'; i++)
@@ -441,7 +441,7 @@ int main(int argc, char **argv)
                  -1, LV_VAR);
 
     /* Only the 'R' form needs it, and a machine without it simply cannot be
-       asked to resize a window -- which is reported rather than fatal. */
+       asked to resize a window, which is reported rather than fatal. */
     IntuitionBase = (struct IntuitionBase *)
         OpenLibrary((CONST_STRPTR)"intuition.library", 37);
 
@@ -460,7 +460,7 @@ int main(int argc, char **argv)
         LONG  t0;
         LONG  elapsed;
 
-        /* wait <n> -- seconds, so an async server has time to bind and listen
+        /* wait <n>, seconds, so an async server has time to bind and listen
            before the client that is going to connect to it starts. */
         if (lines[i][0] == 'w' && lines[i][1] == 'a' && lines[i][2] == 'i'
             && lines[i][3] == 't' && lines[i][4] == ' ')
@@ -477,7 +477,7 @@ int main(int argc, char **argv)
             continue;
         }
 
-        /* &<command> -- start it and carry on.  Nothing waits for it, so
+        /* &<command>, start it and carry on.  Nothing waits for it, so
            there is no return code to report. */
         if (lines[i][0] == '&')
         {
@@ -506,7 +506,7 @@ int main(int argc, char **argv)
         }
 
         /*
-         * Rcommand -- console input, and the window changes size under the
+         * Rcommand, console input, and the window changes size under the
          * command while it runs.
          *
          * The child is started asynchronously so this process is still awake
@@ -551,7 +551,7 @@ int main(int argc, char **argv)
              * this arm exists in this shape.
              *
              * An SSH client turns console resize reporting ON by WRITING an
-             * escape sequence -- BebboSSH writes "\x1b[2;11;12{" to its
+             * escape sequence, BebboSSH writes "\x1b[2;11;12{" to its
              * stdout.  Point stdout at a file and that sequence lands in the
              * file, the console is never told to report anything, and the
              * window can then be resized all day with nothing to notice it.
@@ -559,7 +559,7 @@ int main(int argc, char **argv)
              * "resize is not propagated" which was this harness's fault.
              *
              * A second handle on the SAME window comes from Open("*") with
-             * pr_ConsoleTask pointing at that console -- two handles the child
+             * pr_ConsoleTask pointing at that console, two handles the child
              * can close independently, one window.  Opening the CON: spec
              * twice would give two windows.
              *
@@ -629,7 +629,7 @@ int main(int argc, char **argv)
             continue;
         }
 
-        /* >command -- a real console as its input, so IsInteractive() is
+        /* >command, a real console as its input, so IsInteractive() is
            true and the terminal path in the program under test runs. */
         if (lines[i][0] == '>' || lines[i][0] == '<')
         {
@@ -662,8 +662,8 @@ int main(int argc, char **argv)
                 report_console_size(in);
 
             /* SYS_Input only.  SYS_Output stays unset so the child's output
-               goes where every other command's does -- the report file on the
-               host -- and the terminal under test is still a terminal. */
+               goes where every other command's does, the report file on the
+               host, and the terminal under test is still a terminal. */
             console_tags[0].ti_Data = (ULONG)in;
 
             used = 0;
@@ -704,7 +704,7 @@ int main(int argc, char **argv)
 
         /*
          * AmigaOS reclaims nothing when a process exits, so anything a client
-         * allocated and did not free is gone until the next reboot -- and a
+         * allocated and did not free is gone until the next reboot, and a
          * ported client leaves through exit(), which is a longjmp() away from
          * the frame that owns its 256 KB stack.  Printing the free total after
          * every command turns this list into the measurement: a leak shows as

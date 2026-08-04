@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- parsed configuration.
+ * AmiNetXDuo, parsed configuration.
  *
  * The on-disk format is Roadshow's (see docs/RESEARCH.md §6.6):
  *   DEVS:NetInterfaces/<name>      one file per interface
@@ -44,8 +44,8 @@ extern "C" {
  * not the machine this stack runs on, and because everything the mDNS module
  * is handed has to fit a fixed local record cache.
  *
- * The type is bounded at RFC 6763 7's grammar -- "_" + at most 15 characters
- * + "._tcp" -- which is 21, so a type the parser accepts always fits the
+ * The type is bounded at RFC 6763 7's grammar, "_" + at most 15 characters
+ * + "._tcp", which is 21, so a type the parser accepts always fits the
  * module's NX_MDNS_TYPE_MAX. The TXT field is bounded at the module's
  * NX_MDNS_NAME_MAX of 255.
  */
@@ -108,7 +108,7 @@ typedef struct AmiIfConfig {
     /*
      * IPv6. These fields exist in both build configurations so that one config
      * file, and one AmiConfig, work whether or not the stack was built with
-     * AMINETXDUO_IPV6 -- only the parser and the netstack act on them. In the
+     * AMINETXDUO_IPV6, only the parser and the netstack act on them. In the
      * floor build ip6type is always AMI_IP6TYPE_OFF.
      */
     AmiIp6Type  ip6type;
@@ -123,7 +123,7 @@ typedef struct AmiIfConfig {
  * dnsn_UseCount, in that call's own convention: negative means the server was
  * configured statically in DEVS:Internet/name_resolution, positive means it
  * was added at run time by DHCP or AddDomainNameServer(). The magnitude is the
- * number of references either way, because AddDomainNameServer() nests -- see
+ * number of references either way, because AddDomainNameServer() nests, see
  * netstack_dns_server_add().
  *
  * A slot in use is never 0, so a zeroed AmiResolverConfig with a non-zero
@@ -141,8 +141,8 @@ typedef struct AmiResolverConfig {
 
 /*
  * One service the user says is listening on this machine. AmiNetXDuo ships no
- * servers, so this is always somebody else's -- an AmiFTPd, a web server, a
- * Samba-alike -- and the file is the user's claim that it is running. Nothing
+ * servers, so this is always somebody else's, an AmiFTPd, a web server, a
+ * Samba-alike, and the file is the user's claim that it is running. Nothing
  * here connects to the port to check.
  */
 typedef struct AmiSdService {
@@ -164,7 +164,7 @@ typedef struct AmiSdService {
  * free text and is often descriptive; RFC 1123 2.1 refuses "Ariadne in the
  * study" but not "Ethernet", so ranking it higher would silently rename any
  * machine whose owner used the field as documented. The reported fault was
- * never that ENV:HOSTNAME wins -- it was that it won without saying so, and
+ * never that ENV:HOSTNAME wins, it was that it won without saying so, and
  * that is answered by reporting the source rather than by reordering.
  */
 typedef enum {
@@ -219,7 +219,7 @@ LONG ami_config_load_interface(const char *name, AmiIfConfig *out);
 /*
  * Offer `name` as this machine's host name on behalf of `source`. It is taken,
  * and TRUE returned, when `source` ranks at or above whatever set the current
- * name -- so a fresh arrival from the same source (a DHCP renewal) replaces it
+ * name, so a fresh arrival from the same source (a DHCP renewal) replaces it
  * and a weaker one never does.
  *
  * A source whose text is not a host name by construction is checked against

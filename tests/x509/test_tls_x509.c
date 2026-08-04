@@ -1,10 +1,10 @@
 /*
- * AmiNetXDuo -- host unit tests for the certificate and signature checks.
+ * AmiNetXDuo, host unit tests for the certificate and signature checks.
  *
  * tests/fuzz/fuzz_tls_x509 answers "does this parser stay inside its buffer".
  * This answers the other question: does it reject what it is supposed to
  * reject, and still accept what it is supposed to accept. Both matter, and a
- * sanitizer cannot see the second one -- a verifier that returns success on
+ * sanitizer cannot see the second one, a verifier that returns success on
  * everything is perfectly memory-safe.
  *
  * Each section is one thing a peer controls:
@@ -342,7 +342,7 @@ unsigned              found = 0;
 
     /*
      * The leaf names sha256WithRSAEncryption twice, and the second one is the
-     * copy outside the signed body. Rewrite that one to sha1WithRSA -- the
+     * copy outside the signed body. Rewrite that one to sha1WithRSA, the
      * change a man in the middle can make without touching the signature.
      */
     memcpy(copy, test_device_cert_der, test_device_cert_der_len);
@@ -382,7 +382,7 @@ unsigned             at = 0;
     /*
      * The leaf's RSA-2048 modulus is a 257-byte INTEGER (256 bytes plus the
      * DER sign pad). Shrink the INTEGER's declared length to 65, which is 512
-     * bits -- factorable on a laptop -- and leave the bytes where they are.
+     * bits, factorable on a laptop, and leave the bytes where they are.
      * Everything after it is then garbage, which is the point: the key is
      * refused before any of it is used.
      */
@@ -473,7 +473,7 @@ UINT                                    status;
 
     /*
      * A's issuer is B and B's issuer is A, both are CAs with keyCertSign, and
-     * neither is in the trusted store -- so every signature along the way
+     * neither is in the trusted store, so every signature along the way
      * verifies and the walk never arrives anywhere. Without a depth cap this
      * call does not return.
      */

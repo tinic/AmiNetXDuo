@@ -1,7 +1,7 @@
-# tcpdrill -- an abortive close from a half-closed socket.
+# tcpdrill, an abortive close from a half-closed socket.
 #
-# c09 and c10 in tcp.drill assert the two abortive closes -- unread data, and
-# SO_LINGER with a zero timeout -- from ESTABLISHED, and both pass.  Neither
+# c09 and c10 in tcp.drill assert the two abortive closes, unread data, and
+# SO_LINGER with a zero timeout, from ESTABLISHED, and both pass.  Neither
 # says anything about a socket that has already sent its FIN, which is where
 # every program that does shutdown(SHUT_WR) and then decides to give up ends up.
 #

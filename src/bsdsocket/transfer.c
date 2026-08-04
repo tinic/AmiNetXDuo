@@ -1,5 +1,5 @@
 /*
- * bsdsocket.library -- send/sendto/sendmsg and recv/recvfrom/recvmsg.
+ * bsdsocket.library, send/sendto/sendmsg and recv/recvfrom/recvmsg.
  *
  * NetX Duo is packet-oriented: a send allocates an NX_PACKET from the stack
  * pool, appends the caller's bytes to it and hands it over; a receive returns
@@ -33,7 +33,7 @@
 /*
  * struct msghdr / struct iovec are ABI. The definitions come from the Roadshow
  * netinclude headers in the toolchain's ndk-include (sys/socket.h, sys/uio.h),
- * the only ones on the include path -- this toolchain's newlib tree has
+ * the only ones on the include path, this toolchain's newlib tree has
  * neither, so the wrong lineage cannot be picked up the way ndk-include/pwd.h
  * shadows the usergroup struct passwd.
  *
@@ -162,7 +162,7 @@ static VOID bsd_iov_advance(BsdIovCursor *cur, ULONG bytes)
     }
 }
 
-/* ---------------------------------------------------------------- packet -- */
+/* ---------------------------------------------------------------- packet, */
 
 static ULONG bsd_packet_len(NX_PACKET *packet)
 {
@@ -224,7 +224,7 @@ static LONG bsd_packet_append_iov(NX_PACKET *packet, BsdIovCursor *cur,
     return (LONG)done;
 }
 
-/* ------------------------------------------------------------------- send -- */
+/* ------------------------------------------------------------------- send, */
 
 /* The two blocking points of a TCP send: waiting for a free packet (pool
    empty -> NX_NO_PACKET) and waiting for send-window room (peer not reading ->
@@ -263,7 +263,7 @@ UINT bsd_send_once(VOID *arg, ULONG wait)
  * It is not all-or-nothing. _nx_tcp_socket_send_internal() segments the packet
  * itself, to min(peer window, congestion window, MSS), in a loop: each pass
  * copies that many bytes into a segment, queues it on the socket's transmit
- * list and hands it to _nx_ip_packet_send() -- it is on the wire -- and then
+ * list and hands it to _nx_ip_packet_send(), it is on the wire, and then
  * TRIMS those bytes off the caller's packet before looking at the window
  * again. When a later pass finds no room and may not wait, it returns
  * NX_WINDOW_OVERFLOW or NX_TX_QUEUE_DEPTH with the earlier segments long gone.
@@ -271,7 +271,7 @@ UINT bsd_send_once(VOID *arg, ULONG wait)
  * So the packet that comes back holds only what did not go, and `filled` less
  * that is what the peer has already seen. Releasing the packet and reporting
  * only the chunks that completed tells the caller to send those bytes a second
- * time, which is a duplicate in the middle of the stream -- and a stream is
+ * time, which is a duplicate in the middle of the stream, and a stream is
  * exactly the thing that cannot show it.
  *
  * Safe on every error return in that function: none of them releases the
@@ -297,7 +297,7 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
     /*
      * Why the loop stopped. Every first-iteration failure below breaks out and
      * lands on the "sent == 0" test at the bottom, which used to answer
-     * EWOULDBLOCK whatever had happened -- so a signalled thread
+     * EWOULDBLOCK whatever had happened, so a signalled thread
      * (NX_WAIT_ABORTED, EINTR) and a stack being torn down (NX_POOL_DELETED,
      * ENOBUFS) both came back as EAGAIN on a blocking socket.
      * docs/RESEARCH.md 37.2.
@@ -413,8 +413,8 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
  * The largest UDP payload that can leave here in one datagram, from the three
  * things that fix it:
  *
- *   1. Transmit fragmentation is available -- src/netstack/ calls
- *      nx_ip_fragment_enable() for the receive side -- and is not used here.
+ *   1. Transmit fragmentation is available, src/netstack/ calls
+ *      nx_ip_fragment_enable() for the receive side, and is not used here.
  *      A UDP datagram larger than the path is a datagram that will be
  *      reassembled by whatever receives it, out of a pool as small as ours,
  *      and BSD returning EMSGSIZE for it is an answer the caller can act on.
@@ -490,7 +490,7 @@ static LONG bsd_udp_maxdgram(NX_IP *ip, const NXD_ADDRESS *addr)
  * The interface a received datagram arrived on.
  *
  * nx_packet_ip_interface is one arm of a union, and the IPv6 receive path
- * overwrites the other with the NXD_IPV6_ADDRESS the datagram matched --
+ * overwrites the other with the NXD_IPV6_ADDRESS the datagram matched,
  * nx_ipv6_packet_receive.c, "Set the matching address to the packet address".
  * Reading it as an NX_INTERFACE * after that dereferences an address structure
  * as an interface, so the version has to decide which arm to read. Getting
@@ -518,7 +518,7 @@ static const NX_INTERFACE *bsd_packet_interface(const NX_PACKET *packet)
  * by the whole four-tuple, and a datagram from anywhere else is not for it.
  * NetX Duo cannot enforce that: _nx_udp_packet_receive() demultiplexes on the
  * local port alone, and NX_UDP_SOCKET has neither a local address nor a peer to
- * compare against -- "connected" is a notion of this layer, so the test is
+ * compare against, "connected" is a notion of this layer, so the test is
  * this layer's to make.
  *
  * It is the resolver that pays for it being absent. netstack_dns sends a query
@@ -589,7 +589,7 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_EDESTADDRREQ);
 
     /*
-     * Which address this leaves from -- one an RFC 3542 PKTINFO named, the
+     * Which address this leaves from, one an RFC 3542 PKTINFO named, the
      * bound one, the one the zone names, or NetX's pick. Settled before the
      * packet is allocated so a send that cannot be honoured costs nothing and
      * sends nothing.
@@ -597,7 +597,7 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
      * PKTINFO wins over bind() and over the zone because it is the narrower
      * statement: bind() is standing and this one was supplied for this
      * datagram. A source the machine does not have is refused either way,
-     * rather than replaced by the stack's own choice -- refusing is what the
+     * rather than replaced by the stack's own choice, refusing is what the
      * option was given to do.
      */
     if (src != NULL && src->cs_Have)
@@ -653,9 +653,9 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     mcast_if = bsd_mcast_prepare_send(sock, addr);
 #ifdef AMINETXDUO_IPV6
     /*
-     * The v6 half. It answers with an ADDRESS index, not an interface one --
+     * The v6 half. It answers with an ADDRESS index, not an interface one,
      * IPV6_MULTICAST_IF names an interface and the source send wants the
-     * link-local address on it -- and it puts IPV6_MULTICAST_HOPS on the
+     * link-local address on it, and it puts IPV6_MULTICAST_HOPS on the
      * NX_IP, which bsd_mcast6_finish_send() takes back off below. Nothing
      * between the two may return.
      */
@@ -665,7 +665,7 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
      * IPV6_MULTICAST_HOPS is 0 for this group: RFC 3493 5.2 makes that "this
      * host only", and there is nothing here to deliver it to. So it is
      * consumed rather than put on the link, and the caller is told the whole
-     * write was accepted -- which it was; it simply had nowhere to go.
+     * write was accepted, which it was; it simply had nowhere to go.
      */
     if (mcast6_src == BSD_MCAST6_NO_LINK)
     {
@@ -710,8 +710,8 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
 
     /*
      * Four ways to name where this leaves from, most specific first. The two
-     * multicast ones only answer for a group of their own family -- the
-     * prepare calls give -1 for anything else -- so in practice neither
+     * multicast ones only answer for a group of their own family, the
+     * prepare calls give -1 for anything else, so in practice neither
      * competes with the other two, or with each other.
      */
 #ifdef AMINETXDUO_MULTICAST
@@ -761,8 +761,8 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
 }
 
 /*
- * One raw datagram out. The caller writes the protocol payload -- an ICMP
- * message, say -- and nxd_ip_raw_packet_send() prepends the IP header from the
+ * One raw datagram out. The caller writes the protocol payload, an ICMP
+ * message, say, and nxd_ip_raw_packet_send() prepends the IP header from the
  * socket's protocol, TTL and TOS. No partial send: a datagram goes whole or
  * not at all.
  */
@@ -814,7 +814,7 @@ static LONG bsd_send_raw(struct AmiSocketBase *base, AmiSocket *sock,
     return len;
 }
 
-/* ---------------------------------------------------------------- receive -- */
+/* ---------------------------------------------------------------- receive, */
 
 /* bsd_wait_sliced() drives this; see select.c for why the wait is sliced. */
 typedef struct
@@ -834,7 +834,7 @@ UINT bsd_recv_once(VOID *arg, ULONG wait)
     return nx_tcp_socket_receive(a->tcp, a->packet, wait);
 }
 
-/* The UDP and raw receives slice the same way -- see bsd_recv_once's note on
+/* The UDP and raw receives slice the same way, see bsd_recv_once's note on
    why these are global rather than static. */
 typedef struct
 {
@@ -894,8 +894,8 @@ static BOOL bsd_nx_need(struct AmiSocketBase *base, BOOL *held)
 /*
  * Can this stream read be answered out of the parked packet alone?
  *
- * bsd_recv_tcp() reaches a THREADS_ONLY entry point in exactly one place --
- * bsd_wait_sliced() -> nx_tcp_socket_receive() -- and only when as_RxPending
+ * bsd_recv_tcp() reaches a THREADS_ONLY entry point in exactly one place,
+ * bsd_wait_sliced() -> nx_tcp_socket_receive(), and only when as_RxPending
  * is empty. A read strictly shorter than what the parked packet still holds
  * never empties it, so it never receives and never releases: it reads a length
  * out of the packet header and memcpys out of the chain, on a packet
@@ -905,7 +905,7 @@ static BOOL bsd_nx_need(struct AmiSocketBase *base, BOOL *held)
  * Strictly shorter, not "at least as long as": a read that drains the packet
  * exactly calls nx_packet_release(), which puts it back in the shared pool.
  * That is the one nx_packet_* helper here that touches state the IP thread
- * also touches, and it is cheap to stay away from -- the case is one read
+ * also touches, and it is cheap to stay away from, the case is one read
  * length in a packet's worth, and the call that would have hit it takes the
  * bracket for its receive anyway.
  *
@@ -960,7 +960,7 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
             /*
              * Only the first read of a call may block: after that, a stream
              * receive returns whatever the socket buffer holds. MSG_WAITALL
-             * asks for the opposite -- keep waiting until the caller's buffers
+             * asks for the opposite, keep waiting until the caller's buffers
              * are full or the connection ends.
              */
             ULONG now = (first || (flags & MSG_WAITALL) != 0) ? wait
@@ -1333,7 +1333,7 @@ static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
     /* A stream read the parked packet already covers touches nothing
        THREADS_ONLY, so it skips the bracket; bsd_nx_need() takes it if that
        turns out to be wrong. A nested call inside one that took it stays
-       covered either way -- sb_NxNest is still up. */
+       covered either way, sb_NxNest is still up. */
     if (!bsd_recv_parked(sock, len))
     {
         if (bsd_nx_enter(base) != 0)
@@ -1425,7 +1425,7 @@ static LONG bsd_transfer_check(struct AmiSocketBase *base, AmiSocket *sock,
 
 /*
  * send(..., MSG_OOB): every byte goes and the last one is the urgent one.
- * That is 4.4BSD's rule, and what telnet and ftp rely on -- they write a short
+ * That is 4.4BSD's rule, and what telnet and ftp rely on, they write a short
  * command whose final byte is the signal. The leading bytes take the ordinary
  * path; only the last needs oob.c.
  */
@@ -1489,7 +1489,7 @@ static LONG bsd_recv_oob(struct AmiSocketBase *base, AmiSocket *sock,
     return 1;
 }
 
-/* ---------------------------------------------------------------- vectors -- */
+/* ---------------------------------------------------------------- vectors, */
 
 /*
  * MHT_Send: the hook that can refuse a send before any of it happens.
@@ -1498,8 +1498,8 @@ static LONG bsd_recv_oob(struct AmiSocketBase *base, AmiSocket *sock,
  * 'sendto()' or 'sendmsg()' calls ... any error value > 0 will cause the call
  * to be aborted and the errno variable to be set to this value."
  *
- * It runs after the descriptor and the arguments have been checked -- so a
- * monitor cannot be used to probe which descriptors exist -- and before
+ * It runs after the descriptor and the arguments have been checked, so a
+ * monitor cannot be used to probe which descriptors exist, and before
  * anything is queued, resolved or transmitted.
  *
  * On smm_To and smm_Msg: "Depending upon the type of function to perform, the
@@ -1507,7 +1507,7 @@ static LONG bsd_recv_oob(struct AmiSocketBase *base, AmiSocket *sock,
  * the 'smm_To' or the 'smm_Msg' field will be NULL." That is an exclusion, not
  * a requirement that exactly one be set. The three calls give:
  *
- *   send()      smm_To NULL, smm_Msg NULL   -- no destination and no msghdr;
+ *   send()      smm_To NULL, smm_Msg NULL  , no destination and no msghdr;
  *                                              the peer is implied
  *   sendto()    smm_To the caller's, smm_Msg NULL   (smm_To is NULL too when
  *                                              the caller passed none, which
@@ -1707,7 +1707,7 @@ LONG bsd_recvfrom(register LONG sock_fd          __asm("d0"),
                         NULL, NULL);
 }
 
-/* ------------------------------------------------------ sendmsg / recvmsg -- */
+/* ------------------------------------------------------ sendmsg / recvmsg, */
 
 /*
  * msg_control carries the RFC 3542 subset in cmsg.c: PKTINFO and HOPLIMIT in,
@@ -1717,7 +1717,7 @@ LONG bsd_recvfrom(register LONG sock_fd          __asm("d0"),
  * file descriptor, and handing a socket to another task on AmigaOS is
  * ObtainSocket()/ReleaseSocket() (handoff.c). It is refused rather than
  * ignored, along with every other ancillary type this library does not
- * implement -- bsd_cmsg_parse() answers EINVAL, so a caller that asks for
+ * implement, bsd_cmsg_parse() answers EINVAL, so a caller that asks for
  * something it will not get is told so.
  *
  * MSG_CTRUNC now means what it says: the caller's msg_control was too small

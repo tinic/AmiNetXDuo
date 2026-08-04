@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# mkofs -- an empty 880 KB OFS floppy image.
+# mkofs, an empty 880 KB OFS floppy image.
 #
 #   tests/tools/mkofs.py OUT.adf [VOLUME]
 #
@@ -8,7 +8,7 @@
 #
 #   OFS stores 30 characters of a name, takes a longer one, and answers
 #   SUCCESS.  So two names that differ only after the cut are one file, and a
-#   server that trusts the create cannot see it -- a DELETE of one removes the
+#   server that trusts the create cannot see it, a DELETE of one removes the
 #   other, and nothing in the exchange says so.
 #
 #   Every filesystem an emulator offers by default hides that.  A directory

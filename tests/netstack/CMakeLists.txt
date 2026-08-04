@@ -1,7 +1,7 @@
 # Milestone 3 bring-up test: the whole stack against a real SANA-II device.
 #
 # Needs a machine (or an emulator) with an Ethernet card and a
-# DEVS:NetInterfaces/<name> file -- see tools/fsuae-run.sh -n, which wires an
+# DEVS:NetInterfaces/<name> file, see tools/fsuae-run.sh -n, which wires an
 # FS-UAE A2065 up to SLIRP.
 
 add_executable(netstack_test netstack_test.c)
@@ -22,8 +22,8 @@ if(AMIGA_SIZE)
 endif()
 
 # The DHCP lease lifecycle and RFC 3927.  This one reaches into the singleton
-# -- it has to read the live NX_DHCP record and shorten its timers, because
-# SLIRP's lease is 24 hours and never expires -- so it gets src/netstack/ on
+# it has to read the live NX_DHCP record and shorten its timers, because
+# SLIRP's lease is 24 hours and never expires, so it gets src/netstack/ on
 # its include path.  See tests/netstack/run-dhcp3927.sh.
 add_executable(dhcp3927_test dhcp3927_test.c)
 
@@ -48,10 +48,10 @@ endif()
 # ---------------------------------------------------------------- host tier --
 #
 # The retransmission retry limit, checked against a socket rather than against
-# a network.  It compiles the vendored TCP output path a second time -- with
+# a network.  It compiles the vendored TCP output path a second time, with
 # tests/perf/host/shim's tx_port.h for the m68k's type widths, and with
 # port/netxduo-amiga/inc on the include path so nx_user.h is the one that
-# ships -- and drives the fast periodic timer by hand.  See the file header
+# ships, and drives the fast periodic timer by hand.  See the file header
 # for what that answers that a packet capture cannot.
 #
 # The linux port's nx_port.h has to come BEFORE port/netxduo-amiga/inc, or the
@@ -160,7 +160,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME bcast_loopback COMMAND test_bcast_loopback)
 
     # Whether a TCP connect leaves from the source it was named, on a machine
-    # with two interfaces on one subnet -- the topology the lab guest cannot
+    # with two interfaces on one subnet, the topology the lab guest cannot
     # boot, built here out of two filled-in nx_ip_interface[] entries.  Links
     # the real connect, the real route lookup and the real SYN build, so the
     # assertion is the source address the SYN carried.  -UAMINETXDUO_IPV6 for
@@ -225,7 +225,7 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME tcp_rtt COMMAND test_tcp_rtt)
 
-    # Whether a name lookup stops when it is told to -- the retransmission
+    # Whether a name lookup stops when it is told to, the retransmission
     # ladder on its own, with the DNS client replaced by scripted answers and
     # the clock by a variable.  A black hole, a Ctrl-C and a mistyped name are
     # the three shapes, and none of them can be produced on demand against a

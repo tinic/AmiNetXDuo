@@ -7,7 +7,7 @@ WHY A LOCAL SERVER AND NOT A REAL URL
 
 A test that reaches the public internet fails when the network is down, when a
 CDN changes its cipher preference, and when somebody's front end decides a
-14 MHz 68020 has taken too long over a handshake -- which it does; that last
+14 MHz 68020 has taken too long over a handshake, which it does; that last
 one is a known property of this machine (docs/RESEARCH.md 11.8) and it would
 turn a throughput test into a flake.  A server on 10.0.2.2 removes all three
 and leaves the two things being measured: the TLS stack and the transport.

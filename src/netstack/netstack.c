@@ -1,22 +1,22 @@
 /*
- * AmiNetXDuo -- the stack singleton.
+ * AmiNetXDuo, the stack singleton.
  *
  * Startup order:
  *
- *   1. config          -- AmigaDOS file I/O, so it must happen on a Process
+ *   1. config         , AmigaDOS file I/O, so it must happen on a Process
  *                         and before this task becomes a ThreadX thread.
- *   2. SANA-II opens   -- OpenDevice()/DoIO(), same reason.
- *   3. sizing          -- AvailMem() decides the packet pool; the 1 MB floor
+ *   2. SANA-II opens  , OpenDevice()/DoIO(), same reason.
+ *   3. sizing         , AvailMem() decides the packet pool; the 1 MB floor
  *                         (docs/RESEARCH.md 81) means NetX Duo's own defaults
  *                         are not usable.
- *   4. ThreadX         -- tx_amiga_kernel_start() returns once the scheduler
+ *   4. ThreadX        , tx_amiga_kernel_start() returns once the scheduler
  *                         is live, unlike tx_kernel_enter().
- *   5. adoption        -- everything below suspends the calling thread inside
+ *   5. adoption       , everything below suspends the calling thread inside
  *                         NetX Duo, and nx_dns_create() is threads-only.
- *   6. NetX Duo        -- pool, NX_IP, ARP/TCP/UDP/ICMP, extra interfaces.
- *   7. addresses       -- DHCP, or AutoIP, or the static config; block until
+ *   6. NetX Duo       , pool, NX_IP, ARP/TCP/UDP/ICMP, extra interfaces.
+ *   7. addresses      , DHCP, or AutoIP, or the static config; block until
  *                         the first interface has one or DHCP gives up.
- *   8. DNS             -- needs the resolver config and a running IP.
+ *   8. DNS            , needs the resolver config and a running IP.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -34,8 +34,8 @@
 
 /*
  * tx_kernel_enter() calls this before the scheduler starts. AmiNetXDuo builds
- * everything from netstack_startup() instead -- on an adopted task, after the
- * kernel is live -- because the SANA-II devices have to be opened by a Process
+ * everything from netstack_startup() instead, on an adopted task, after the
+ * kernel is live, because the SANA-II devices have to be opened by a Process
  * and nx_dns_create() is threads-only. Weak, so a standalone test executable
  * (tests/ram_driver) can still supply its own.
  */
@@ -80,7 +80,7 @@ AmiNetStack *ami_netstack_raw(VOID)
  *
  * It is not only a flag, which this comment used to claim. AMITCP is AmiTCP's
  * ARexx host port, and 31 of the 2,149 archives surveyed in 75 send commands to
- * it -- AmiTCP's own stopnet and netstat among them. A port nobody services
+ * it, AmiTCP's own stopnet and netstat among them. A port nobody services
  * turns their clean "host environment not found" into a hang, so netstack_rexx.c
  * runs a process that answers, and the port lives and dies with it.
  */
@@ -175,7 +175,7 @@ LONG ami_netstack_enter(AmiNetCaller *caller)
         return AMI_NET_ERR_STATE;
 
     /*
-     * Already inside -- an adopted task deeper in the call chain, or a thread
+     * Already inside, an adopted task deeper in the call chain, or a thread
      * ThreadX created? Then nothing to do.
      *
      * tx_thread_identify() cannot answer that here, and asking it was the
@@ -183,7 +183,7 @@ LONG ami_netstack_enter(AmiNetCaller *caller)
      * _tx_thread_current_ptr, which on this port is the global baton holder and
      * not the caller. A second Task arriving while the first holds the baton
      * therefore reads "already a thread", skips the adoption and goes straight
-     * into NetX Duo without ever acquiring the baton -- two Tasks inside the
+     * into NetX Duo without ever acquiring the baton, two Tasks inside the
      * stack at once. Two processes sharing bsdsocket.library is all it takes.
      */
     if (tx_amiga_caller_is_thread() != (UINT) TX_FALSE)
@@ -215,7 +215,7 @@ VOID ami_netstack_leave(AmiNetCaller *caller)
     }
 }
 
-/* The same bracket with the TX_THREAD off the caller's stack -- see the note
+/* The same bracket with the TX_THREAD off the caller's stack, see the note
    in <aminetxduo/netstack.h>. */
 AmiNetCaller *ami_netstack_enter_alloc(VOID)
 {
@@ -263,7 +263,7 @@ LONG ami_netstack_enter_cached(AmiNetCaller *caller)
     if (tx_amiga_kernel_running() != TX_TRUE)
         return AMI_NET_ERR_STATE;
 
-    /* Ours, not merely somebody's -- see ami_netstack_enter(). */
+    /* Ours, not merely somebody's, see ami_netstack_enter(). */
     if (tx_amiga_caller_is_thread() != (UINT) TX_FALSE)
         return AMI_NET_OK;                  /* nested */
 
@@ -278,7 +278,7 @@ LONG ami_netstack_enter_cached(AmiNetCaller *caller)
         }
 
         /*
-         * The cached thread is no longer usable -- torn down under us, or in
+         * The cached thread is no longer usable, torn down under us, or in
          * a state resume will not take. Drop it and adopt afresh. Orphan
          * rather than discard, since this is the owning task and the Exec
          * signal can be recovered; tx_amiga_orphan_thread() handles a
@@ -570,7 +570,7 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
 
         /*
          * Move the configuration down with its slot.  ns_Iface[k] and
-         * interfaces[k] are one interface everywhere else -- ns_DhcpState[],
+         * interfaces[k] are one interface everywhere else, ns_DhcpState[],
          * ns_LastAddress[], the attach loops, ami_ns_create_ip()'s cfg0.  The
          * two indices diverge the moment a device fails to open, and then the
          * machine comes up on the surviving card wearing the failed one's
@@ -697,8 +697,8 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
      * path MTU never arrived and the application saw a timeout with nothing
      * logged.
      *
-     * It enables transmit fragmentation in the same call -- there is no
-     * receive-only arm -- but nothing reaches it from here: bsd_send_udp()
+     * It enables transmit fragmentation in the same call, there is no
+     * receive-only arm, but nothing reaches it from here: bsd_send_udp()
      * and the raw send both refuse an oversize datagram with EMSGSIZE before
      * the stack sees it, and TCP sizes to the MSS. The stack's own senders
      * are all under one MTU.
@@ -745,7 +745,7 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
     /*
      * RFC 1112 group membership. Without this call every _nxe_igmp_multicast_
      * *_join() returns NX_NOT_ENABLED, so setsockopt(IP_ADD_MEMBERSHIP) has
-     * nothing to do -- the option surface in src/bsdsocket/mcast.c is useless
+     * nothing to do, the option surface in src/bsdsocket/mcast.c is useless
      * on its own.
      *
      * It also starts the periodic that answers a router's membership query;
@@ -794,7 +794,7 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
      * STATE=down in DEVS:NetInterfaces, honoured last because attaching is
      * what brings an interface up: nx_ip_interface_attach() drives NX_LINK_
      * ENABLE itself, so the only way to arrive down is to be taken down after.
-     * AMI_LINK_STACK_DISABLE and not NX_LINK_DISABLE, to match SM_Down --
+     * AMI_LINK_STACK_DISABLE and not NX_LINK_DISABLE, to match SM_Down,
      * the device stays open and Online brings it back.
      */
     for (i = 0; i < ns->ns_IfaceCount; i++)
@@ -903,12 +903,12 @@ static VOID ami_ns_start_autoip(AmiNetStack *ns)
     }
 }
 
-/* --------------------------------------------------- address notifications --
+/* --------------------------------------------------- address notifications,
  *
  * NetX Duo's DHCP client and its AutoIP module both change the interface
  * address from their own threads and announce nothing unless somebody
- * registers for it. Without these callbacks, losing a lease -- address
- * removed, gateway cleared, every socket dead -- goes unreported.
+ * registers for it. Without these callbacks, losing a lease, address
+ * removed, gateway cleared, every socket dead, goes unreported.
  *
  * Both run on a NetX Duo thread. AMI_INFO()/AMI_WARN() are RawPutChar() and
  * RawDoFmt(), which are Exec-only and legal from any Task, and nothing here
@@ -932,7 +932,7 @@ static VOID ami_ns_log_address(const char *what, UWORD index, ULONG addr)
 }
 
 /*
- * Called by NetX Duo whenever any interface's address or mask changes -- from
+ * Called by NetX Duo whenever any interface's address or mask changes, from
  * the DHCP thread on a lease, from the AutoIP thread on a link-local claim,
  * and from ami_ns_configure_addresses() for a static one.
  */
@@ -942,8 +942,8 @@ static VOID ami_ns_log_address(const char *what, UWORD index, ULONG addr)
  * NetX Duo already defends the address; what it did not do is tell anyone,
  * because nx_interface_ip_conflict_notify_handler was registered nowhere.  A
  * duplicate address is the fault where every counter looks healthy and the
- * network still does not work -- both hosts answer, and whichever is first
- * wins each exchange -- so it is counted as well as logged: the log is off in
+ * network still does not work, both hosts answer, and whichever is first
+ * wins each exchange, so it is counted as well as logged: the log is off in
  * a shipping build and the count outlives it.
  *
  * Runs from _nx_arp_packet_receive() on the IP thread.  Nothing here allocates
@@ -1001,14 +1001,14 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
         /*
          * Announce it.  RFC 5227 2.3: a host that has just configured an
          * address broadcasts an ARP for it, so every neighbour's cache is
-         * corrected at once rather than after its own entry ages out -- which
+         * corrected at once rather than after its own entry ages out, which
          * is what made a DHCP address that moved between machines take
          * minutes to become reachable.
          *
          * Safe here: _nx_ip_interface_address_set() releases the protection
          * mutex before calling this notify, so re-taking it inside
          * nx_arp_gratuitous_send() is not a recursion.  Failure is not worth a
-         * branch -- the address works either way, the neighbours are just
+         * branch, the address works either way, the neighbours are just
          * slower to learn it.
          */
         if (addr != 0UL)
@@ -1029,8 +1029,8 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
 
         /*
          * RFC 3927 1.9: a routable address supersedes a link-local one. The
-         * AutoIP thread does not watch for this itself -- it sits in an
-         * indefinite wait for a conflict -- so it is stopped here, and can be
+         * AutoIP thread does not watch for this itself, it sits in an
+         * indefinite wait for a conflict, so it is stopped here, and can be
          * restarted if the lease is later lost.
          *
          * Never from the AutoIP thread itself: nx_auto_ip_stop() is
@@ -1188,7 +1188,7 @@ static BOOL ami_ns_wait_for_address(AmiNetStack *ns, ULONG timeout_ticks)
  * first DHCPDISCOVER, so that a room of machines returning together after a
  * power cut does not answer as one. NetX Duo takes the bottom of that range,
  * writes NX_IP_PERIODIC_RATE into the interface record's timeout, and lets the
- * client's own one-second timer expire before anything is sent -- a flat
+ * client's own one-second timer expire before anything is sent, a flat
  * second of nothing on every boot, and the largest single item in
  * AddNetInterface: 1,201 ms of DHCP in a 1,980 ms command, of which 1,000 ms
  * was this wait and ~200 ms the four packets. The herd it guards against is a
@@ -1198,9 +1198,9 @@ static BOOL ami_ns_wait_for_address(AmiNetStack *ns, ULONG timeout_ticks)
  * The timer gates the first send, so re-arming it to expire on the next tick
  * is the whole change: the expiry that follows finds the same
  * NX_IP_PERIODIC_RATE timeout already at or below one interval and runs the
- * INIT case as it would have a second later. Every interval after it -- the
+ * INIT case as it would have a second later. Every interval after it, the
  * retransmission backoff, the `secs` field the INIT case zeroes, the renewal
- * times -- is left as NetX Duo set it, because the reschedule period handed
+ * times, is left as NetX Duo set it, because the reschedule period handed
  * back here is the one it created the timer with.
  */
 static VOID ami_ns_dhcp_discover_now(NX_DHCP *dhcp)
@@ -1464,7 +1464,7 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
      * Every interface configured down is not a failure.
      *
      * STATE=down says "bring the stack up, leave this card alone", and a card
-     * that is down cannot be given an address -- so waiting for one and then
+     * that is down cannot be given an address, so waiting for one and then
      * calling its absence a configuration error refuses the exact thing that
      * was asked for. bsd_lib_open() turns that into a NULL, so OpenLibrary()
      * fails and NOTHING on the machine can open bsdsocket.library: no Online
@@ -1472,7 +1472,7 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
      *
      * A stack with no address is a working stack that has no address. It is
      * the same state a machine reaches when DHCP does not answer, which
-     * already returns OK for exactly this reason -- the difference is only
+     * already returns OK for exactly this reason, the difference is only
      * that here it was deliberate.
      */
     if (!resolved)
@@ -1676,7 +1676,7 @@ static LONG ami_ns_bring_up(VOID)
     return AMI_NET_OK;
 }
 
-/* --------------------------------------------------------------- the API -- */
+/* --------------------------------------------------------------- the API, */
 
 LONG netstack_startup(VOID)
 {
@@ -1908,7 +1908,7 @@ LONG netstack_interface_down(UWORD index)
 
 /*
  * Roadshow's SM_Down: stop transmitting, leave the device on the network.
- * IFA_DownGoesOffline turns this back into the offline path -- "bringing the
+ * IFA_DownGoesOffline turns this back into the offline path, "bringing the
  * interface 'down' ... will cause the associated SANA-II device driver to be
  * switched offline". Default is FALSE, which is the bzero of the field.
  */
@@ -1945,13 +1945,13 @@ BOOL netstack_interface_is_up(UWORD index)
  *
  * A removal does not decrement ns_IfaceCount. It counts slots ever populated,
  * not slots live, so a removal in the middle does not renumber the ones above
- * it -- an interface index is a handle a caller may already hold. Every loop
+ * it, an interface index is a handle a caller may already hold. Every loop
  * over it that touches ns_Iface[] checks the slot; loops that read ns_Config
  * or call a NetX Duo API by index are safe on a hole either way.
  */
 
 /*
- * Whether anything is still using this interface -- the question
+ * Whether anything is still using this interface, the question
  * RemoveInterface()'s `force` parameter overrides: "RemoveInterface() will
  * refuse to remove an interface which is still in use."
  *
@@ -2016,7 +2016,7 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
     /*
      * Stop the readers before anything is detached. NX_LINK_DISABLE takes the
      * wire offline and reclaims the outstanding CMD_READs, and it is where a
-     * device that will not give them back shows up -- which has to be known
+     * device that will not give them back shows up, which has to be known
      * before nx_ip_interface_detach() zeroes the NX_INTERFACE.
      */
     (VOID)netstack_interface_down(index);
@@ -2040,7 +2040,7 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
      * Stop the DHCP client on this interface before the interface goes.
      * nx_ip_interface_detach() knows nothing about DHCP, so a client left
      * enabled would keep trying to renew a lease for a slot that no longer
-     * exists, and ns_DhcpState[] would keep saying BOUND -- the state a later
+     * exists, and ns_DhcpState[] would keep saying BOUND, the state a later
      * BeginInterfaceConfig() on the same slot reads to decide whether an
      * allocation is already under way. Not clearing it made a
      * removed-and-re-added interface answer AAMR_Busy forever.
@@ -2066,7 +2066,7 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
      * the TCP connections that went out of this interface, deletes its ARP
      * entries, drops the static routes and the default gateway that pointed
      * at it, leaves its multicast groups, calls the driver with
-     * NX_LINK_INTERFACE_DETACH -- which is where sana2_driver.c unbinds -- and
+     * NX_LINK_INTERFACE_DETACH, which is where sana2_driver.c unbinds, and
      * zeroes the NX_INTERFACE.
      */
     status = nx_ip_interface_detach(&ns->ns_Ip, (UINT)index);
@@ -2134,7 +2134,7 @@ static LONG ami_ns_dhcp_ensure(AmiNetStack *ns)
         return AMI_NET_OK;
 
     /* NetX Duo keeps the host name pointer rather than a copy, so it must be
-       storage that outlives the NX_DHCP -- the same reason start-up hands it
+       storage that outlives the NX_DHCP, the same reason start-up hands it
        ns_Config. */
     status = nx_dhcp_create(&ns->ns_Dhcp, &ns->ns_Ip,
                             (ns->ns_Config.hostname[0] != '\0')
@@ -2287,7 +2287,7 @@ static UWORD ami_ns_dhcp_addr_list(AmiNetStack *ns, UWORD index, UINT option,
                      ((ULONG)buffer[i * 4 + 2] << 8) |
                       (ULONG)buffer[i * 4 + 3];
 
-        /* "A router address of 0 should be ignored" -- and the same for the
+        /* "A router address of 0 should be ignored", and the same for the
            other two lists, which the autodoc says in the same words. */
         if (addr != 0)
             out[count++] = addr;
@@ -2571,7 +2571,7 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
      * "such as setting interface addresses, status and routing metrics" is
      * ConfigureInterfaceTagList()'s sentence. So an interface added through
      * that vector arrives bare and is addressed by the configure that follows,
-     * and only startup -- which reads DEVS:NetInterfaces -- reaches here with a
+     * and only startup, which reads DEVS:NetInterfaces, reaches here with a
      * static pair to attach with.
      */
     status = nx_ip_interface_attach(&ns->ns_Ip, (CHAR *)slot_cfg->name,
@@ -2611,7 +2611,7 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
     /*
      * IPv6, which startup does once in ami_ns_configure_addresses() for the
      * interfaces the file named. Without this an interface added here has no
-     * link-local address at all -- RFC 4291 requires one -- and no
+     * link-local address at all, RFC 4291 requires one, and no
      * solicited-node multicast membership, so neighbour discovery cannot reach
      * it. nx_ip_interface_detach() zeroes the interface's whole IPv6 address
      * list, so a remove/add pair loses it and nothing else puts it back.
@@ -2641,8 +2641,8 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
 }
 
 /*
- * The slot is picked, then the SANA-II device is opened -- Exec I/O, and long
- * -- before anything marks it taken, so two tasks adding at once could both
+ * The slot is picked, then the SANA-II device is opened, Exec I/O, and long
+ * before anything marks it taken, so two tasks adding at once could both
  * leave with the same one. ami_ns_lock is the outer lock the startup and
  * shutdown paths already use; the ThreadX bracket cannot serve here because
  * add and remove deliberately run most of their work outside it. Exec

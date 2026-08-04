@@ -10,7 +10,7 @@ AmiNetXDuo.info             drawer icon
 Drawer.info Document.info   generic icons for Docs/, Examples/, ReadMe
 Guide.info                  icon for AmiNetXDuo.guide, default tool "MultiView"
 
-devs/Internet/              protocols, services, networks -- shipped as-is
+devs/Internet/              protocols, services, networks, shipped as-is
 examples/NetInterfaces/     one commented interface file per card
 examples/Internet/          routes, name_resolution, hosts
 
@@ -30,7 +30,7 @@ test/run-all.sh             all five
 
 Written for Commodore's Installer, whose language is documented in
 `installer.doc` (Commodore, 9 February 1993) and implemented in the Installer
-2.17 sources.  Where the two disagree, the sources win -- `compile.c`'s
+2.17 sources.  Where the two disagree, the sources win, `compile.c`'s
 symbol tables are the authority for which keywords exist and which parameters
 are legal in which statement.
 
@@ -74,12 +74,12 @@ install/test/run-all.sh
 
 Needs, besides the usual FS-UAE setup:
 
-* `build/Installer` or `AMINETXDUO_INSTALLER=<path>` -- Commodore's Installer,
+* `build/Installer` or `AMINETXDUO_INSTALLER=<path>`, Commodore's Installer,
   which is in the root of the Workbench 3.1 Install disk.  Not ours to ship.
 * `build/a2065.device` or `AMINETXDUO_A2065=<path>`.
 
-Each scenario stages a bare machine -- an empty `LIBS:`, a `DEVS:` holding
-only the card driver, an empty `S:` -- plus the unpacked distribution
+Each scenario stages a bare machine, an empty `LIBS:`, a `DEVS:` holding
+only the card driver, an empty `S:`, plus the unpacked distribution
 archive, and runs the real Installer on it.  FS-UAE mounts the staging
 directory as a hard drive, so everything the Installer writes lands on the
 host and is checked there.  Then, for every scenario that produces a

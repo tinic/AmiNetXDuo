@@ -1,15 +1,15 @@
 /*
- * AmiNetXDuo -- crypto68k long division, 32-bit limbs.
+ * AmiNetXDuo, crypto68k long division, 32-bit limbs.
  *
  *   Measured: on an RSA-2048 public operation through crypto68k, 36.6 ms of
- *   163.9 went into one routine -- the R^2 mod m setup in c68k_powm.c, which
+ *   163.9 went into one routine, the R^2 mod m setup in c68k_powm.c, which
  *   reduces through the vendored _nx_crypto_huge_number_modulus().  AmiSSL's
  *   equivalent is 15.9 ms.  With the exponentiation itself level at 0.997x
  *   after Karatsuba, that setup was 98% of the remaining gap to OpenSSL on
  *   that operation.
  *
  *   The vendored divider is a correct implementation of the right algorithm
- *   -- traditional long division with a two-digit quotient estimate -- done in
+ *  , traditional long division with a two-digit quotient estimate, done in
  *   16-bit half-limbs.  Its own declarations say so ("In number of USHORT
  *   words") and it takes its estimate from `>> (HN_SHIFT >> 1)`.  Halving the
  *   digit size doubles the number of quotient digits and doubles the length of
@@ -20,7 +20,7 @@
  *   machine's own word size, not a better one.
  *
  *   Rejected: caching R^2 against the modulus, which avoids the division
- *   rather than speeding it up.  It buys nothing for a TLS client -- the three
+ *   rather than speeding it up.  It buys nothing for a TLS client, the three
  *   RSA public operations in a handshake verify the leaf with the
  *   intermediate's key, the intermediate with the root's, and the
  *   ServerKeyExchange with the leaf's, three different moduli, so a cache
@@ -223,7 +223,7 @@ subtract:
         if (un[(UINT)j + n] < borrow)
         {
             /*
-             * The estimate was one too large -- rare after normalisation, but
+             * The estimate was one too large, rare after normalisation, but
              * possible.  Add the divisor back once.
              */
             un[(UINT)j + n] = (c68k_limb)(un[(UINT)j + n] - borrow);

@@ -1,34 +1,34 @@
 /*
- * AmiNetXDuo -- the API from a 4 KB stack, and how much of it gets touched.
+ * AmiNetXDuo, the API from a 4 KB stack, and how much of it gets touched.
  *
  * WHY THIS EXISTS
  *
  * A bsdsocket.library vector runs on the CALLER's stack. An AmigaDOS Shell
  * gives a command 4 KB by default, there is no guard page and no MMU, so a
- * frame that does not fit does not fault -- it writes over whatever lies below
+ * frame that does not fit does not fault, it writes over whatever lies below
  * the stack and the machine dies later, somewhere unrelated. That is the
  * opposite of a hosted C environment, where the same mistake is a clean
  * SIGSEGV at the instruction that made it.
  *
  * Every other harness in this tree hides that. tests/soak/fitz_soak.c,
  * tests/endurance/endurance.c and tests/concurrent/concurrent_test.c all spawn
- * their workers with a generous NP_StackSize -- concurrent_test at 8 KB, the
- * others more -- because a test that is about concurrency does not want to
+ * their workers with a generous NP_StackSize, concurrent_test at 8 KB, the
+ * others more, because a test that is about concurrency does not want to
  * think about stack. So nothing here has ever called the API from a stack a
  * real user's program would have.
  *
  * An A3000 owner on English Amiga Board reported applications freezing under
  * an ordinary file copy, a jerky pointer, then the machine gone, with an
  * upscroller of MungWall hits from this library in the Sashimi window as it
- * died -- and said to go and look at stack usage in the API calls. He was
+ * died, and said to go and look at stack usage in the API calls. He was
  * reading a stack overflow: on AmigaOS a Process's stack is itself an AllocMem
  * block, so running off the bottom of it lands in the guard MungWall put
  * there, which is exactly the "massive hitting" he saw.
  *
  * WHAT IT DOES
  *
- * A worker Process with NP_StackSize 4096 -- not a number chosen to be
- * dramatic, it is what `Execute` and the Shell hand out -- then hammers the
+ * A worker Process with NP_StackSize 4096, not a number chosen to be
+ * dramatic, it is what `Execute` and the Shell hand out, then hammers the
  * entry points that matter: the loopback connect/send/recv/WaitSelect loop
  * that a file copy is made of, plus the resolver and interface calls, which
  * measurement says are the deep ones.
@@ -88,7 +88,7 @@
 /*
  * Generous because the resolver calls are meant to fail and each one waits out
  * BSD_RESOLVE_TIMEOUT (src/bsdsocket/resolver.c). Waiting them out is the
- * point -- the depth reached on the way to the timeout is the measurement --
+ * point, the depth reached on the way to the timeout is the measurement,
  * and under SLIRP a lookup with nowhere to go has been seen to take
  * substantially longer than the 30 s nominal.
  */
@@ -103,7 +103,7 @@
 /*
  * Offsets and register assignments from src/bsdsocket/bsdsocket_vectors.c and
  * the NDK's pragmas, not from counting in sixes. Every stub declares d1/a0/a1
- * clobbered -- the one in tests/concurrent that did not turned an
+ * clobbered, the one in tests/concurrent that did not turned an
  * IoctlSocket() into a call with a garbage request code (RESEARCH 42).
  */
 
@@ -473,7 +473,7 @@ typedef struct StResult
 /*
  * The worker cannot report for itself. A Process made by CreateNewProc with no
  * NP_Output has no Output() to Printf to, so everything it "logs" goes nowhere
- * -- and a worker that overflows its stack could not be trusted to say so
+ * and a worker that overflows its stack could not be trusted to say so
  * anyway. It writes a phase number into the shared struct instead, and the
  * parent prints the phase names, including on the timeout path where the last
  * phase reached IS the failure report.
@@ -501,7 +501,7 @@ static struct Task *st_parent;
 /*
  * Flushed per line: the emulator runner reads stdout out of a file after the
  * run, so a line still sitting in a buffer is a line that does not exist if
- * the program never exits -- and never exiting is one of the two failures this
+ * the program never exits, and never exiting is one of the two failures this
  * test is for.
  */
 static VOID st_log(const char *fmt, ...)
@@ -535,7 +535,7 @@ static VOID st_check(LONG ok, const char *what, LONG detail)
  *
  * tc_SPLower/tc_SPUpper bound the block CreateNewProc allocated. Painting
  * stops a margin below the current stack pointer so this function's own frame
- * and its return address survive being written over -- taking the address of a
+ * and its return address survive being written over, taking the address of a
  * local is what the C standard gives us for "roughly where the stack is now".
  *
  * The mark is then the distance from tc_SPUpper down to the lowest word that
@@ -572,7 +572,7 @@ static ULONG st_mark(VOID)
 
     /*
      * The stack that arrived, not the one asked for. AROS rounds NP_StackSize
-     * up to its own floor -- 16 KB under the ROM the emulator tier boots -- so
+     * up to its own floor, 16 KB under the ROM the emulator tier boots, so
      * a run that reports 4096 without checking would be measuring something
      * else and calling it the Shell default.
      */
@@ -603,7 +603,7 @@ static VOID st_phase(LONG which)
 /* ------------------------------------------------------------- the server -- */
 
 /*
- * A peer, on a stack of its own choosing. It is not the thing under test --
+ * A peer, on a stack of its own choosing. It is not the thing under test,
  * the point is to give the 4 KB worker a real connection to drive, so this one
  * gets room and is not measured.
  */
@@ -811,7 +811,7 @@ static VOID st_worker_entry(VOID)
     /*
      * The resolver last, because it is the part that can hang.
      *
-     * These lookups are meant to MISS -- "localhost" is answered out of
+     * These lookups are meant to MISS, "localhost" is answered out of
      * DEVS:Internet/hosts before netstack_resolve() enters the bracket at all,
      * so a run that only asked for that would measure the shallow path and
      * call it a pass. A name under .invalid (RFC 2606, guaranteed never to
@@ -823,7 +823,7 @@ static VOID st_worker_entry(VOID)
      * Failure is the expected answer; the depth reached on the way to it is
      * the measurement. Each miss waits out BSD_RESOLVE_TIMEOUT, which is why
      * this is minutes rather than seconds and why it runs after the loopback
-     * rounds instead of before them -- a resolver that never comes back must
+     * rounds instead of before them, a resolver that never comes back must
      * not take the send/recv/WaitSelect figures with it.
      */
     (VOID)s_gethostbyname(base, "localhost");
@@ -838,7 +838,7 @@ static VOID st_worker_entry(VOID)
         UBYTE quad[4];
 
         /* 127.0.0.1, which DEVS:Internet/hosts answers: this is here for the
-           entry point's own frame, not for the resolver below it -- the deep
+           entry point's own frame, not for the resolver below it, the deep
            reverse path is getnameinfo's, and paying the timeout twice buys
            nothing. */
         quad[0] = 127; quad[1] = 0; quad[2] = 0; quad[3] = 1;

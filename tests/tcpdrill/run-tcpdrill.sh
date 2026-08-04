@@ -6,15 +6,15 @@
 #                                  [-s SCRIPT] [-A]
 #
 # -A PICKS AMIBERRY.  FS-UAE needs an X server and dies in GLAD without one,
-# so on a headless box -- which the Amiga lab machine is -- the run ends with
+# so on a headless box, which the Amiga lab machine is, the run ends with
 # "fs-uae exited early after 1s" and no results at all.  Amiberry runs
 # genuinely headless.  Same block tests/ipv6/run-socket-fsuae.sh carries, and
 # the same flag.
 #
 # ONE BOOT PER SCRIPT FILE.  Every case in the file runs inside a single
 # emulator run, because build/.fsuae.lock serialises runs and the queue is
-# deep.  Cases are independent -- each opens its own socket and each uses a
-# different peer ISN -- so the only thing they share is the stack, which is
+# deep.  Cases are independent, each opens its own socket and each uses a
+# different peer ISN, so the only thing they share is the stack, which is
 # the point.
 #
 # NO NETWORK.  There is no `-n` here and no a2065.device: the guest's only

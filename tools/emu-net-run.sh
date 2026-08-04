@@ -13,10 +13,10 @@
 #   The Debian fs-uae 3.1.66 imports SLIRP from the qemu-uae plugin and, with
 #   the plugin absent, logs
 #
-#       -- stub -- uae_slirp_start
+#      , stub, uae_slirp_start
 #
 #   and carries on.  The A2065 initialises, the link comes up, DHCP is
-#   answered inside the stub -- and there is no NAT behind any of it, so every
+#   answered inside the stub, and there is no NAT behind any of it, so every
 #   TCP connection to 10.0.2.2 is refused and the host peer never sees one.
 #   A workload measuring the wire then reports a timeout that looks exactly
 #   like a defect in the stack.  That is how tests/compare/run-compare.sh and
@@ -28,7 +28,7 @@
 #   against fs-uae's 6,368-tick timeout, ping 229 against 825.
 #
 #   AMINETXDUO_EMULATOR=fsuae forces the old path back for a comparison, and
-#   says so when it does -- a silent fallback is what this file exists to stop.
+#   says so when it does, a silent fallback is what this file exists to stop.
 #
 # SPDX-License-Identifier: MIT
 
@@ -76,7 +76,7 @@ case "$EMU" in
         set -e
 
         # The two emulators write the guest disk to different names --
-        # build/testhd-<tag> and build/amiberry-testhd-<tag> -- and every
+        # build/testhd-<tag> and build/amiberry-testhd-<tag>, and every
         # caller of this script reads results out of the first.  Link the
         # second onto it rather than teach each of them both, so a harness
         # that finds no results means the run produced none.

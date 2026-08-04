@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- usergroup.library public vectors.
+ * AmiNetXDuo, usergroup.library public vectors.
  *
  * One declaration per LVO, in table order, with the register assignment each
  * argument must arrive in. Transcribed verbatim from AmiTCP's
@@ -19,7 +19,7 @@
 
 #define UG_A6   register struct UserGroupBase *base __asm("a6")
 
-/* bias 30 -- setup ------------------------------------------------------- */
+/* bias 30, setup ------------------------------------------------------- */
 LONG   ugl_SetupContextTagList(UG_A6, register STRPTR name __asm("a0"),
                                register struct TagItem *tags __asm("a1"));
 LONG   ugl_GetErr  (UG_A6);

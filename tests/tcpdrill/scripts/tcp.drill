@@ -1,4 +1,4 @@
-# tcpdrill -- the first set of cases.
+# tcpdrill, the first set of cases.
 #
 # Read this as a specification, because that is what it is: every line says
 # either what the application asked for or what must appear on the wire, and a
@@ -45,7 +45,7 @@ tx S seq=0 mss=1460
 # docs/RESEARCH.md 16.9 observed a RESET here in every capture ever taken, and
 # 27.6 put the packet next to it.  The rest of the case is the four-way close
 # it opens: our FIN is acknowledged, the peer sends its own, and we acknowledge
-# that -- which is also what keeps this case from leaving a FIN retransmitting
+# that, which is also what keeps this case from leaving a FIN retransmitting
 # into the next one.
 case c03_close_sends_fin
 socket
@@ -111,7 +111,7 @@ rx PA seq=1 ack=1 len=10
 tx R seq=1
 
 # RFC 1122 4.2.3.2: acknowledge AT LEAST every second full-sized segment.
-# "At least" is a floor, not a schedule -- acknowledging both is conformant,
+# "At least" is a floor, not a schedule, acknowledging both is conformant,
 # and is what this stack does, so each segment gets its own expectation and the
 # transcript records which of the two behaviours was seen.
 case a01_ack_every_second_segment
@@ -154,7 +154,7 @@ tx S seq=0 after=1500 within=3000
 # Duo will only resend a packet it has been given back.
 #
 # ONLY THE FIRST INTERVAL IS ASSERTED, and only loosely.  What the intervals
-# are -- flat, doubling, and how many there are before the socket gives up --
+# are, flat, doubling, and how many there are before the socket gives up --
 # is the retransmission timer's business and x01 is where it is stated; this
 # case is about whether anything comes back at all, so the rest is a count --
 # and a wide one: four seconds of a doubling interval is one retransmission and
@@ -190,7 +190,7 @@ tx A seq=101 ack=1 len=1 within=6000
 #
 # nx_tcp_socket_send() is not all-or-nothing.  It segments to the peer's window
 # inside its own loop, queues each segment as it goes, and keeps the ones it
-# already sent when a later one will not fit -- so a window that ends part-way
+# already sent when a later one will not fit, so a window that ends part-way
 # through a segment is the one shape where what left and what send() admits to
 # can differ.  They did: the sliver went out and only the whole segments before
 # it were reported, and a caller doing the correct thing with a short send()
@@ -212,7 +212,7 @@ wirebytes
 
 # The same fault with nothing in front of it to hide it.  The window is
 # narrower than one segment, so every byte that leaves is part of a cut segment
-# and there is no completed chunk to report -- this is the send() that used to
+# and there is no completed chunk to report, this is the send() that used to
 # answer EWOULDBLOCK having already put 1000 bytes on the wire.
 case z03_send_below_one_segment_is_credited
 socket
@@ -230,7 +230,7 @@ wirebytes
 # packet, so the retransmission of the first segment arrived 917 ms after a
 # send() the application happened to make and never otherwise.  Here nothing
 # else is sent: the first segment must come back on its own, and only then does
-# a second send() go out -- in the right order, behind the retransmission that
+# a second send() go out, in the right order, behind the retransmission that
 # was already due.
 case x03_retransmission_needs_no_later_send
 socket
@@ -246,7 +246,7 @@ send 100
 tx PA seq=101 ack=1 len=100 within=400
 
 # ELEVEN SECONDS.  This case used to assert eleven seconds of TOTAL SILENCE
-# after one unacknowledged segment, and pass -- which docs/RESEARCH.md 27.4
+# after one unacknowledged segment, and pass, which docs/RESEARCH.md 27.4
 # calls the worst green line in the section.  It now asserts the opposite, over
 # the same eleven seconds, and the range is wide on purpose: how many
 # retransmissions fit in eleven seconds depends on the interval and the retry
@@ -292,8 +292,8 @@ tx A seq=1 ack=101 within=400
 recv 400 = 100
 
 # RFC 1122 4.2.2.4: the urgent pointer points at the byte AFTER the urgent
-# data.  docs/RESEARCH.md 17 records one deliberate divergence here -- the
-# urgent byte is also delivered in the ordinary stream -- so with
+# data.  docs/RESEARCH.md 17 records one deliberate divergence here, the
+# urgent byte is also delivered in the ordinary stream, so with
 # SO_OOBINLINE off the byte count below is what that divergence predicts.
 case u01_urgent_inbound
 socket
@@ -335,7 +335,7 @@ recv 100 = 20
 # ---------------------------------------------------------------------------
 
 # One FIN per connection.  A close after shutdown(SHUT_WR) has nothing left to
-# send -- the FIN already went -- and must not send a second one, which would
+# send, the FIN already went, and must not send a second one, which would
 # be a sequence number the peer has already acknowledged.
 case c08_close_after_shutdown_wr_sends_one_fin
 socket
@@ -395,7 +395,7 @@ tx FA seq=1 ack=2
 rx A seq=2 ack=2
 notx 400
 
-# THE PEER NEVER ANSWERS.  CloseSocket() must still return at once -- a program
+# THE PEER NEVER ANSWERS.  CloseSocket() must still return at once, a program
 # that closes and exits cannot be made to wait on a host that has gone away --
 # and the connection, which now outlives the descriptor, retransmits its FIN on
 # the stack's own time.

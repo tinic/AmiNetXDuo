@@ -1,10 +1,10 @@
 /*
- * AmiNetXDuo -- net68k: 68k data-path primitives for NetX Duo.
+ * AmiNetXDuo, net68k: 68k data-path primitives for NetX Duo.
  *
  * The same arrangement src/crypto68k/ uses, for the same reason: NetX Duo's
  * portable C is correct everywhere and fast nowhere in particular, and a
  * handful of its inner loops are on every byte of every packet.  Nothing here
- * modifies third_party/ -- the vendored object is dropped from the build in
+ * modifies third_party/, the vendored object is dropped from the build in
  * the top-level CMakeLists and this module supplies the symbol instead.
  *
  * SPDX-License-Identifier: MIT
@@ -45,7 +45,7 @@ USHORT n68k_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
                                 ULONG *dest_ip_addr);
 
 /*
- * Bulk copy.  On the assembly path this is movem.l based -- see n68k_copy.S
+ * Bulk copy.  On the assembly path this is movem.l based, see n68k_copy.S
  * for what it is measured against and why C cannot reach it.  Off that path it
  * is a plain loop, present so a host build links.
  */

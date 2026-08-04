@@ -1,10 +1,10 @@
 /*
- * AmiNetXDuo -- SANA-II receive pipeline.
+ * AmiNetXDuo, SANA-II receive pipeline.
  *
  * SANA-II devices have no buffers of their own: a frame that arrives with no
  * matching CMD_READ outstanding is dropped, and CMD_READ is per packet type.
- * So the shim runs one reader thread per type -- 0x0800, 0x0806 and, when
- * AMINETXDUO_IPV6 is defined, 0x86DD -- each keeping several reads in flight
+ * So the shim runs one reader thread per type, 0x0800, 0x0806 and, when
+ * AMINETXDUO_IPV6 is defined, 0x86DD, each keeping several reads in flight
  * so the pipeline never empties.
  *
  * Because S2_CopyToBuff is called at interrupt level, the NX_PACKET a read
@@ -398,8 +398,8 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet)
 /*
  * The pad is what makes every longword access above this line legal.
  *
- * nx_packet_data_start is a multiple of NX_PACKET_ALIGNMENT (4) --
- * _nx_packet_pool_create() rounds it -- and the IP header sits at
+ * nx_packet_data_start is a multiple of NX_PACKET_ALIGNMENT (4),
+ * _nx_packet_pool_create() rounds it, and the IP header sits at
  * data_start + AMI_SANA2_RX_PAD + AMI_ETH_HEADER_SIZE in both modes.  If that
  * sum is not a multiple of 4, every IP, TCP and UDP header field NetX Duo
  * reads as a ULONG is misaligned, n68k_checksum.c's `long_ptr` walks the
@@ -778,7 +778,7 @@ static UWORD ami_sana2_rx_reap(AmiSana2Rx *rx, UWORD tries)
  *   2. CMD_FLUSH, which exec defines as "abort all queued requests for this
  *      unit" and SANA-II carries forward. Unit-wide rather than per-request,
  *      hence second: x-surf-100.device returns every opener's reads, not just
- *      ours. That is accepted rather than overlooked -- the alternative is
+ *      ours. That is accepted rather than overlooked, the alternative is
  *      step 3, and another program losing its posted reads is recoverable
  *      where writing into memory we have freed is not.
  *   3. Give up and report it, having freed nothing the device can still write
@@ -1170,8 +1170,8 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
      * S2_OFFLINE returns every queued CMD_READ with S2ERR_OUTOFSERVICE (see
      * ami_sana2_rx_drain()), and it is the only mechanism that works on a
      * device which ignores AbortIO(), as Commodore's a2065.device 2.16 does.
-     * Taking the interface offline after stopping the readers -- the shape
-     * ami_sana2_close(), NX_LINK_DISABLE and NX_LINK_UNINITIALIZE all use --
+     * Taking the interface offline after stopping the readers, the shape
+     * ami_sana2_close(), NX_LINK_DISABLE and NX_LINK_UNINITIALIZE all use,
      * issues that command ten seconds after the readers gave up waiting, and
      * tears them down, threads terminated and stacks freed, with reads still
      * queued. Measured on an A1200 profile: `curl --version` took 16.22 s when
@@ -1191,9 +1191,9 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
      * 200 ms before taking the wire away.
      *
      * Three phases, each needing the one before it:
-     *   1. stop posting  -- `stop` seen at the top of the reader's loop
-     *   2. offline       -- S2_OFFLINE returns every read still queued
-     *   3. join          -- every reader is then guaranteed to reach its exit
+     *   1. stop posting , `stop` seen at the top of the reader's loop
+     *   2. offline      , S2_OFFLINE returns every read still queued
+     *   3. join         , every reader is then guaranteed to reach its exit
      */
     for (i = 0; i < AMI_SANA2_RX_READERS; i++)
     {

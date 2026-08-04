@@ -1,5 +1,5 @@
 /*
- * mcastprobe -- exercises group membership the way an SSDP client does.
+ * mcastprobe, exercises group membership the way an SSDP client does.
  *
  * Both families, one pass each.  The order matters and is the point: an SSDP
  * receiver binds the group, joins it, and only then reads.  Each step is
@@ -7,7 +7,7 @@
  * "nothing arrived".
  *
  *   1. multicast TTL / hops, LOOP and IF set and read back
- *   2. bind to the group -- refused by every build before 0.15.2
+ *   2. bind to the group, refused by every build before 0.15.2
  *   3. join, then again (must be EADDRINUSE)
  *   4. one M-SEARCH to the group
  *   5. read for a few seconds, printing whatever answers
@@ -17,11 +17,11 @@
  * pass is skipped, not failed, on a build without IPv6: socket(AF_INET6)
  * fails and there is nothing to test.
  *
- * IPV6_MULTICAST_LOOP reads back 0 whatever is set, on purpose -- this stack
+ * IPV6_MULTICAST_LOOP reads back 0 whatever is set, on purpose, this stack
  * has no IPv6 multicast loopback, and the option says so rather than storing
  * a value it will not honour.
  *
- * Step 5 needs something on the LAN that answers SSDP -- a router, a printer,
+ * Step 5 needs something on the LAN that answers SSDP, a router, a printer,
  * a TV.  Steps 1-4 and 6 do not, and are the ones that test this stack; the
  * wire side is in the frame dump:
  *
@@ -64,7 +64,7 @@ typedef struct ProbeAddr
 
 /*
  * struct sockaddr_in6 on this NDK: 28 bytes, family at offset 0 and NO length
- * byte.  See aminetxduo/in6.h -- it is not a sockaddr_in with a wider address.
+ * byte.  See aminetxduo/in6.h, it is not a sockaddr_in with a wider address.
  */
 typedef struct ProbeAddr6
 {
@@ -110,11 +110,11 @@ typedef struct ProbeMreq6
 #define P_EADDRINUSE        48
 #define P_EADDRNOTAVAIL     49
 
-/* 239.255.255.250:1900 -- SSDP (RFC-less, but universally implemented). */
+/* 239.255.255.250:1900, SSDP (RFC-less, but universally implemented). */
 #define P_SSDP_GROUP    ((239UL << 24) | (255UL << 16) | (255UL << 8) | 250UL)
 #define P_SSDP_PORT     1900
 
-/* ff02::c -- the link-local SSDP group.  Link-local scope is the one that
+/* ff02::c, the link-local SSDP group.  Link-local scope is the one that
    works without MLD, which is why the probe uses it and not ff05::c. */
 static const UBYTE p_ssdp6_group[16] =
 {
@@ -273,7 +273,7 @@ static LONG p_errno(struct Library *base)
 }
 
 /*
- * WaitSelect(nfds, read, write, except, timeout, signals) -- so the read in
+ * WaitSelect(nfds, read, write, except, timeout, signals), so the read in
  * step 5 gives up instead of blocking for ever on a LAN with no UPnP on it.
  */
 static LONG p_waitselect(struct Library *base, LONG nfds, ULONG *readfds,

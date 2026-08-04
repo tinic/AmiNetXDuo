@@ -1,15 +1,15 @@
 /*
- * AmiNetXDuo -- host fuzz driver for the DHCP option parser.
+ * AmiNetXDuo, host fuzz driver for the DHCP option parser.
  *
  * DHCP is the parser with the shortest path from a hostile LAN to this
  * machine: it runs on every boot, before anything is configured, against
  * whatever answers a broadcast. With no MMU a walk off the end of an option
- * is not a crashed process -- it is a write into whatever Exec put next.
+ * is not a crashed process, it is a write into whatever Exec put next.
  *
  * What is under test is the vendored client's option walk, not our policy.
  * netstack.c only asks for options (nx_dhcp_user_option_request) and reads the
  * results; the bytes are parsed by addons/dhcp/nxd_dhcp_client.c. Its parser
- * is `static`, so the translation unit is #included here rather than linked --
+ * is `static`, so the translation unit is #included here rather than linked,
  * the alternative is fuzzing an entry point the wire cannot reach, which
  * proves nothing.
  *
@@ -35,11 +35,11 @@
 
 /*
  * The DHCP client stashes back-pointers in ThreadX thread and timer extension
- * slots, and those macros cast the slot -- a ULONG, 32-bit from the shim's
- * tx_port.h -- to a pointer, which does not survive a 64-bit host. Defined
+ * slots, and those macros cast the slot, a ULONG, 32-bit from the shim's
+ * tx_port.h, to a pointer, which does not survive a 64-bit host. Defined
  * away rather than building this driver 32-bit only: nothing here starts a
  * thread or a timer, the parser is called directly, so the slots are never
- * read. (fuzz_mdns is 32-bit-only for a different reason -- its cache really
+ * read. (fuzz_mdns is 32-bit-only for a different reason, its cache really
  * does store pointers in ULONG slots at run time.)
  */
 #define NX_THREAD_EXTENSION_PTR_GET(a, b, c)    { (a) = NX_NULL; }
@@ -50,7 +50,7 @@
 /*
  * The parser is static; reach it the only way the wire's shape allows.
  *
- * The push/pop is around the vendored file alone -- it has unused parameters
+ * The push/pop is around the vendored file alone, it has unused parameters
  * this build's -Werror would reject, and they are not ours to fix. Everything
  * below the pop is this driver, under the full set.
  */
@@ -307,7 +307,7 @@ static void fd_run(const unsigned char *msg, unsigned len)
      * gateway. So the IP instance has to exist and one interface has to be
      * valid, or every run stops on a null dereference in the IP layer that the
      * real client could never reach. Zeroed and valid is what an interface
-     * looks like before DHCP has given it anything -- which is exactly the
+     * looks like before DHCP has given it anything, which is exactly the
      * state a reply arrives in.
      */
     ip.nx_ip_id = NX_IP_ID;
@@ -328,8 +328,8 @@ static void fd_run(const unsigned char *msg, unsigned len)
 /*
  * Proof that the driver reaches the parser at all.
  *
- * A fuzzer that silently stopped short -- a struct the parser rejects on its
- * first field, a length that never clears the contract -- reports "clean"
+ * A fuzzer that silently stopped short, a struct the parser rejects on its
+ * first field, a length that never clears the contract, reports "clean"
  * for every input and is worse than not having one, because it reads as
  * coverage. So a known-good OFFER is parsed once at startup and the fields it
  * must have filled are checked. If this fails the sweep does not run.
@@ -436,8 +436,8 @@ static unsigned fd_below(unsigned n)
     return (n == 0) ? 0 : (fd_rand() % n);
 }
 
-/* Aimed at the bytes that decide how far the walk goes -- an option code or a
-   length -- not at the payload. A flipped address byte changes an answer; a
+/* Aimed at the bytes that decide how far the walk goes, an option code or a
+   length, not at the payload. A flipped address byte changes an answer; a
    flipped length byte changes where the next read lands. */
 static void fd_mutate(FdBuf *w)
 {

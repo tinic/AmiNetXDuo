@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- host-side test for the mbuf emulation.
+ * AmiNetXDuo, host-side test for the mbuf emulation.
  *
  * Builds and runs on the development host, not on the Amiga: mbuf_alloc.c and
  * mbuf_ops.c contain no AmigaOS calls, so all they need is the <exec/types.h>
@@ -12,7 +12,7 @@
  *   - MSIZE being 128 and MLEN/MHLEN being 108/100: the replica scales those
  *     with the pointer width, so on a 64-bit host they are 256/224/208. Every
  *     invariant the code relies on still holds and every boundary case below
- *     is still a boundary case -- it just sits at a different number. The
+ *     is still a boundary case, it just sits at a different number. The
  *     on-Amiga test in tests/mbuf_bpf/ runs the same battery at the real ones;
  *   - Forbid()/Permit(), and the 128-byte alignment AllocVec() does not
  *     promise: also tests/mbuf_bpf/;
@@ -425,7 +425,7 @@ static void test_copydata(void)
     CHECK(ami_mbuf_copydata(m, 9, 12, out) == 0);
     CHECK(ramp_ok(out, 12, 9));
 
-    /* Past the end: rejected, and nothing is written -- 4.4BSD panics here. */
+    /* Past the end: rejected, and nothing is written, 4.4BSD panics here. */
     memset(out, 0xAA, sizeof(out));
     CHECK(ami_mbuf_copydata(m, 0, 31, out) == -1);
     CHECK(out[0] == 0xAA);

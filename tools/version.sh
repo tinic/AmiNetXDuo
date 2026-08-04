@@ -15,14 +15,14 @@
 #
 # WHY THIS EXISTS SEPARATELY FROM CMAKE
 #
-# A workflow has to label its own artefacts before -- or without -- a build:
+# A workflow has to label its own artefacts before, or without, a build:
 # naming the .lha, naming an upload, deciding whether a tag matches the tree.
 # Making that require a configured build directory would mean a job that only
 # uploads has to compile first, and making it require running a built m68k
 # binary would mean it cannot be done at all on a Linux runner.
 #
 # So this reads the same three files cmake/AmiNetXDuoVersion.cmake reads --
-# the project() line, nx_api.h, tx_api.h -- and applies the same pin check.
+# the project() line, nx_api.h, tx_api.h, and applies the same pin check.
 # The two implementations agreeing is enforced by the `version_scheme` host
 # test, which diffs this script's answers against the generated header.
 #
@@ -89,7 +89,7 @@ upstream() {
     check_pin THREADX "$threadx" "$(read_pin THREADX)" "$TX_API"
 }
 
-# Commit count, empty outside a checkout -- an unpacked source tarball has no
+# Commit count, empty outside a checkout, an unpacked source tarball has no
 # .git and must still be able to say what version it is.
 build_count() {
     if command -v git >/dev/null 2>&1 && [ -e "$ROOT/.git" ]; then

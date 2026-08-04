@@ -1,10 +1,10 @@
 /*
- * AmiNetXDuo -- crypto68k before/after benchmark.
+ * AmiNetXDuo, crypto68k before/after benchmark.
  *
  *   Every figure below is a pair run back to back in the same process, on the
  *   same operands: the unmodified vendored routine, then this module.  Only
  *   the ratio of a pair is trustworthy.  FS-UAE's 68020 is not a 14 MHz A1200
- *   and its 68030 model is not cycle exact at all -- a sibling measurement
+ *   and its 68030 model is not cycle exact at all, a sibling measurement
  *   found the same code running 31x to 45x faster on the 68030 model depending
  *   on the operation, which is noise rather than a speed.  A ratio between two
  *   routines timed seconds apart survives that; an absolute millisecond count
@@ -59,7 +59,7 @@ static ULONG        b_failures;
 typedef VOID (*B_OP)(VOID);
 
 /*
- * Time one operation, in microseconds per operation -- one unit everywhere, so
+ * Time one operation, in microseconds per operation, one unit everywhere, so
  * that dividing one result by another is always meaningful.  Microseconds in a
  * ULONG reach 4,295 seconds; the longest thing here is under 200.
  *

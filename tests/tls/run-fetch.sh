@@ -13,7 +13,7 @@
 # This is the TRAVELLER test.  tests/tls/run-api.sh proves tls.library works
 # for a program written against it; this proves the command we ship uses it,
 # over http: as well as https:, and that the failures a user will actually
-# meet -- a certificate for somebody else, a scheme nobody supports -- are
+# meet, a certificate for somebody else, a scheme nobody supports, are
 # legible rather than mysterious.
 #
 # NOT A BASELINE, for the same reasons as run-api.sh: it depends on the
@@ -109,7 +109,7 @@ fi
 #                      which exercises the redirect follow and the ":1012" in
 #                      the URL parser at the same time
 #   ecc256.badssl.com  an ECDSA leaf, so the P-256 verify path is covered too
-#   wrong.host.badssl.com  a valid chain for somebody else -- must be REFUSED
+#   wrong.host.badssl.com  a valid chain for somebody else, must be REFUSED
 #   ftp://             a scheme this command does not do
 #
 # DELIBERATELY ABSENT: https://example.com/, https://www.iana.org/ and every
@@ -117,7 +117,7 @@ fi
 # which at 14 MHz take longer to verify than their front end is willing to wait
 # for a ClientKeyExchange, so they fail with "the connection is closed" through
 # no fault of ours and would make this run look broken.  Not a crash and not a
-# library defect -- that was the harness losing the EMULATOR to SIGPIPE; see
+# library defect, that was the harness losing the EMULATOR to SIGPIPE; see
 # docs/RESEARCH.md.  www.iana.org completes in 11.3 s at -k 28.
 if [ -n "${AMINETXDUO_FETCH_COMMANDS:-}" ]; then
     cp "$AMINETXDUO_FETCH_COMMANDS" "$STAGE/commands.txt"

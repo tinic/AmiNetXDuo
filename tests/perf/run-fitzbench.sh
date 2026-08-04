@@ -13,7 +13,7 @@
 #   The guest mounts a Fitz share served by a THIRD machine on the LAN and
 #   FitzBench writes a file to it and reads it back, timed with ReadEClock().
 #   Then it does the same against RAM:, which is the same program and the same
-#   AmigaDOS with no network under it -- the control that says how much of the
+#   AmigaDOS with no network under it, the control that says how much of the
 #   figure is ours.
 #
 #   READ IS THE FIGURE TO COMPARE ON.  tools/profiler/Profile over a real mount,
@@ -33,7 +33,7 @@
 #   on a real adapter, so the guest takes a real DHCP lease and the peer is a
 #   real machine several hops of real hardware away.
 #
-#   -a is bridged AMIBERRY, run on the Linux host it is installed on -- the
+#   -a is bridged AMIBERRY, run on the Linux host it is installed on, the
 #   emulator is local, so this script has to BE on that machine.  -B names the
 #   host NIC (ens18) and tools/amiberry-run.sh reads the backend back out of the
 #   emulator log, so a run that quietly fell back to NAT fails rather than
@@ -69,7 +69,7 @@
 # rather than downstream of everything.  -l fails the run above a raw loss
 # percentage and -L above the percentage with spurious retransmissions
 # removed; both imply -w.  What to set them to is a property of the rig and
-# has to be measured on it -- across 29 runs of 13 libraries on one rig the
+# has to be measured on it, across 29 runs of 13 libraries on one rig the
 # raw rate's within-library spread was 13% of its own mean and the worst pair
 # differed by 58%, so a single run cannot carry a tight threshold and the
 # useful gate is the median of three.
@@ -84,7 +84,7 @@ cd "$ROOT"
 
 # NOT playhouse2, whatever its convenience: it is an LXC container on a veth,
 # so its SYN-ACK carries an uncomputed TX-offload checksum that no NIC ever
-# fixes up.  Our stack rejects it -- correctly -- and the run reads as "1
+# fixes up.  Our stack rejects it, correctly, and the run reads as "1
 # connection made, 6 bad packets, 6 checksum errors" and no transfer, which
 # looks like our defect and is not.  The peer must also be a THIRD machine:
 # a frame the emulator's own host sends to the guest's MAC never comes back to
@@ -247,7 +247,7 @@ cp "$BENCH" "$STAGE/FitzBench"
 
 # `&` is SYS_Asynch: a Fitz mount stays resident as a DOS handler and never
 # returns, so the benchmark line after it would never run otherwise.  The RAM:
-# arm is last and deliberately in the same boot -- it prices this program,
+# arm is last and deliberately in the same boot, it prices this program,
 # AmigaDOS and the emulator's current mood with no network under any of it, and
 # a network figure is only worth reading beside it.
 STATARGS="-s"
@@ -297,7 +297,7 @@ if [ "$SLIRP" = "1" ]; then
         "$STAGE/AddNetInterface" "$STAGE/NetStat" "$STAGE/fitz" "$STAGE/FitzBench"
 elif [ "$AMIBERRY" = "1" ]; then
     # Amiberry is local, so this branch only works ON the machine it is
-    # installed on -- there is no ssh half the way winuae-run.sh has one.
+    # installed on, there is no ssh half the way winuae-run.sh has one.
     # amiberry-run.sh has no warp to drop, so -x has nothing to do here.
     HD="$ROOT/build/amiberry-testhd-$TAG"
     "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
@@ -348,7 +348,7 @@ grep "fitzbench: RESULT\|fitzbench: file=" "$REPORT" | sed 's/^/    /'
 # frame size here mixes a write's full segments with the read's bare ACKs.
 #
 # ONLY THE ip: BLOCK IS READ.  NetStat prints "packets sent" three times per
-# run -- under ip:, under tcp: and again in the SANA-II interface statistics --
+# run, under ip:, under tcp: and again in the SANA-II interface statistics --
 # and taking them positionally reads the driver's counter as the second run's
 # IP counter, which comes out negative.
 echo

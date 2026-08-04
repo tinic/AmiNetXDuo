@@ -1,5 +1,5 @@
 /*
- * nc -- netcat.  Copy bytes between a socket and the Shell.
+ * nc, netcat.  Copy bytes between a socket and the Shell.
  *
  *     nc HOST,PORT,LISTEN=-l/S,UDP=-u/S,SCAN=-z/S,TIMEOUT=-w/N/K,
  *        LOCALPORT=-p/N/K,HALFCLOSE=-N/S,VERBOSE=-v/S,CRLF/S,
@@ -14,7 +14,7 @@
  *                     a range, "20-25", which is a port scan.
  *   nc -4 / nc -6     pin the family a name resolves to.  Without either, the
  *                     library answers AF_UNSPEC and prefers IPv6 where the
- *                     machine has it and the name has an AAAA -- so on a dual
+ *                     machine has it and the name has an AAAA, so on a dual
  *                     stack there is otherwise no way to ask for the other one.
  *
  * Every other network command in this tree is a client: socket() and
@@ -28,7 +28,7 @@
  * remembered destination, which is all this needs.
  *
  * End of input does not close the connection unless -N says so, following
- * OpenBSD nc -- see the comment on -N in nc_shovel().
+ * OpenBSD nc, see the comment on -N in nc_shovel().
  *
  * SPDX-License-Identifier: MIT
  */
@@ -65,8 +65,8 @@ enum
 };
 
 /*
- * Static, not automatic: a Shell command gets whatever stack the Shell has --
- * 4 KB on a stock Kickstart 3.1 -- and these are 12 KB between them.  Same as
+ * Static, not automatic: a Shell command gets whatever stack the Shell has,
+ * 4 KB on a stock Kickstart 3.1, and these are 12 KB between them.  Same as
  * src/tools/fetch.c.
  */
 #define NC_CHUNK        4096
@@ -150,7 +150,7 @@ static BOOL parse_range(const char *text, UWORD *lo, UWORD *hi)
 }
 
 
-/* ------------------------------------------------------------ connecting -- */
+/* ------------------------------------------------------------ connecting, */
 
 /*
  * connect(), with a ceiling on how long it may take.
@@ -448,7 +448,7 @@ static LONG nc_shovel(struct Library *sb, LONG sock, const NcOptions *opt)
 /* --------------------------------------------------------------- listen --- */
 
 /*
- * bind(), listen(), accept() -- the half of the ABI a client never reaches.
+ * bind(), listen(), accept(), the half of the ABI a client never reaches.
  *
  * SO_REUSEADDR goes on first: a listener that has just exited leaves the port
  * in TIME-WAIT, and without it the next `nc -l` on the same port fails with
@@ -487,10 +487,6 @@ static LONG nc_listen(struct Library *sb, const NcOptions *opt,
 
         if (err == TOOL_EADDRINUSE)
         {
-            tool_advise_blank();
-            tool_advise("Something else has that port, or the last program to "
-                        "use it has not finished closing it down.  netstat -a "
-                        "says which.");
         }
 
         (VOID)tool_sock_close(sb, lsock);
@@ -558,8 +554,8 @@ static LONG nc_listen(struct Library *sb, const NcOptions *opt,
 
     /*
      * accept() blocks, and a blocked accept() cannot see Ctrl-C, so it is
-     * armed through WaitSelect() first -- a listening socket becomes readable
-     * exactly when there is a connection to take -- which gives the break a
+     * armed through WaitSelect() first, a listening socket becomes readable
+     * exactly when there is a connection to take, which gives the break a
      * place to be noticed and TIMEOUT somewhere to apply.
      */
     waited = 0;
@@ -862,7 +858,7 @@ int main(int argc, char **argv)
         /* -k serves one caller after another. Each pass rebinds rather than
            holding the listener open across clients, which is what the plain
            mode already does; the only difference is that it comes back.
-           Ctrl-C is how it ends, so nc_listen()'s SO_REUSEADDR matters here --
+           Ctrl-C is how it ends, so nc_listen()'s SO_REUSEADDR matters here,
            without it the rebind meets the previous socket's TIME_WAIT. */
         if (opt.keep)
             tool_break_arm();

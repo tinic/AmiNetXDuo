@@ -1,5 +1,5 @@
 /***************************************************************************
- * Eclipse ThreadX NetX Duo -- AmigaOS / m68k port.
+ * Eclipse ThreadX NetX Duo, AmigaOS / m68k port.
  *
  * Derived from ports/linux/gnu/inc/nx_port.h
  *   Copyright (c) 2024 Microsoft Corporation
@@ -51,7 +51,7 @@
  * Random numbers.
  *
  * Left undefined, nx_api.h falls back to NX_RAND == rand(), which on this
- * toolchain is newlib's 32-bit LCG -- and NX_RAND generates ECDHE private keys
+ * toolchain is newlib's 32-bit LCG, and NX_RAND generates ECDHE private keys
  * and the TLS client random in nx_secure, as well as TCP initial sequence
  * numbers, IP identification fields, ephemeral ports and the DHCP transaction
  * id in the core.  An LCG is fully recoverable from one output.
@@ -79,7 +79,7 @@ extern void ami_random_srand(unsigned int seed);
  * NX_CRYPTO_RBG is the huge-number source: the ECDHE private key comes out of
  * it, through _nx_crypto_ec_key_pair_generation_extra().  nx_crypto.h defaults
  * it to _nx_crypto_huge_number_rbg(), which assembles the number one
- * NX_CRYPTO_RAND() per 32 bits -- and NX_CRYPTO_RAND is NX_RAND is
+ * NX_CRYPTO_RAND() per 32 bits, and NX_CRYPTO_RAND is NX_RAND is
  * ami_random_rand(), which owes rand()'s caller a value in 0..0x7FFFFFFF and
  * masks bit 31 off to provide it.  So every 32-bit word of the number is one
  * bit short, at a known position.
@@ -116,8 +116,8 @@ extern unsigned int ami_crypto_rbg(unsigned int bits, unsigned char *result);
  *       *(USHORT *)(... + NX_MDNS_FLAGS_OFFSET) |= NX_CHANGE_USHORT_ENDIAN(tc_bit);
  *
  * which expanded to `x |= ;` and would not compile.  It is the only such use in
- * the vendored tree -- six others exist, all in nx_icmpv6_*, all in statement
- * position -- so no big-endian NetX Duo port has hit it, the mDNS add-on
+ * the vendored tree, six others exist, all in nx_icmpv6_*, all in statement
+ * position, so no big-endian NetX Duo port has hit it, the mDNS add-on
  * apparently never having been built on one.  Fixing it here rather than in
  * third_party/ keeps the rule that vendored source is not modified, and this
  * definition evaluates to the value and requires an lvalue exactly as the
@@ -156,14 +156,14 @@ extern unsigned int ami_crypto_rbg(unsigned int bits, unsigned char *result);
  * The error-checking shell's caller checks.
  *
  * The generic ones read _tx_thread_system_state, which on a target is "an ISR is
- * running" -- one CPU-wide fact, so it is the same answer for every caller.  Here
+ * running", one CPU-wide fact, so it is the same answer for every caller.  Here
  * interrupt context is an Exec Task holding the core lock, and the ThreadX port
  * raises that same counter around _tx_thread_terminate()/_tx_thread_delete()
  * with task switching enabled, because the reaper underneath can Wait().  During
  * that window every other Task reads a non-zero counter and fails a check it
  * should pass.  Two processes sharing bsdsocket.library is enough to hit it:
  * docs/RESEARCH.md 77.6 has a 44-byte write returning NX_CALLER_ERROR in a
- * loopback SSH session, mapped to EINVAL, killing the session -- while the same
+ * loopback SSH session, mapped to EINVAL, killing the session, while the same
  * binary against a remote server never failed, because only one process was
  * bracketing.
  *
@@ -178,7 +178,7 @@ extern unsigned int ami_crypto_rbg(unsigned int bits, unsigned char *result);
  * still exposed to the teardown window, on nx_*_socket_create() only.
  *
  * TX_TIMER_PROCESS_IN_ISR is never defined for this port (timer callbacks run on
- * _tx_timer_thread so they may take mutexes -- see tx_port.h), so there is one
+ * _tx_timer_thread so they may take mutexes, see tx_port.h), so there is one
  * set of definitions rather than the vendor's two.
  */
 
@@ -214,7 +214,7 @@ extern  UINT    tx_amiga_caller_is_thread(void);
  * _tx_mutex_get()/_tx_mutex_put() are ThreadX core and the vendored tree is not
  * patched, so the count is taken at the call site instead.  nx_port.h reaches
  * every NetX Duo translation unit and every file of ours that includes
- * nx_api.h, which between them are all of the mutex traffic in the data path --
+ * nx_api.h, which between them are all of the mutex traffic in the data path,
  * the IP protection mutex and nothing else.  ThreadX's own internal uses are
  * not counted, and there are none on this path.
  */

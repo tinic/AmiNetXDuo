@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- host fuzz driver for the DNS response parser.
+ * AmiNetXDuo, host fuzz driver for the DNS response parser.
  *
  * What is under test is the code that reads a datagram from whatever answered
  * a query.  In this stack that is addons/dns/nxd_dns.c: src/netstack/
@@ -8,8 +8,8 @@
  * nx_dns_host_by_address_get() and nxd_dns_ipv6_address_by_name_get() to do
  * the parsing.  SECURITY.md named netstack_dns.c as the parser; it is not one,
  * and fuzzing it would have proved nothing.  So the vendored parser is
- * compiled here and driven through those three entry points -- the three the
- * library exposes -- with the response supplied a datagram at a time.
+ * compiled here and driven through those three entry points, the three the
+ * library exposes, with the response supplied a datagram at a time.
  *
  * The wire is one stub.  _nxe_udp_socket_receive() below hands the parser the
  * fuzz bytes as a real NX_PACKET off a real packet pool; everything above it,
@@ -234,7 +234,7 @@ UINT _nxd_udp_socket_send(NX_UDP_SOCKET *socket_ptr, NX_PACKET *packet_ptr,
 }
 
 /*
- * The wire.  One datagram per query, then nothing -- which is what a resolver
+ * The wire.  One datagram per query, then nothing, which is what a resolver
  * sees when a single hostile answer arrives and the real server never
  * replies.
  */
@@ -283,7 +283,7 @@ UINT _nx_udp_socket_receive(NX_UDP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,
 
     /*
      * The client checks that an answer came from the server it asked, so the
-     * stub has to say who sent this one -- the real receive path fills
+     * stub has to say who sent this one, the real receive path fills
      * nx_packet_ip_header in as it hands a packet up, and without it every
      * case was rejected before it reached the parser this fuzzer is aiming at.
      *
@@ -475,7 +475,7 @@ static void fz_selftest(void)
     /*
      * An A record in the authority section is not an answer.  Nothing here
      * ties its owner name to the question, so accepting one let a server
-     * answering about one name hand back -- and cache -- an address for
+     * answering about one name hand back, and cache, an address for
      * another.
      */
     fzw_reset(&w);
@@ -566,7 +566,7 @@ static void fz_selftest(void)
  * used to move the record's clock to the current tick afterwards, throwing the
  * part-second away.  A name looked up more often than once a second therefore
  * charged nothing, every time, and the record stayed at its full TTL for as
- * long as anything kept asking -- which is exactly what a transfer that keeps
+ * long as anything kept asking, which is exactly what a transfer that keeps
  * reconnecting does.
  *
  * So: cache an answer with a two-second TTL, then ask for it repeatedly with

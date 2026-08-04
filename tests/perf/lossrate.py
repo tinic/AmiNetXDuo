@@ -40,7 +40,7 @@ transferred carries bulk segments, so the phase boundaries come from those:
 bulk segments (payload >= --bulk) are cut into runs wherever the direction
 changes or the stream is quiet for longer than --gap, and a run of peer->guest
 bulk carrying at least --min-phase bytes is a read phase.  Everything else --
-retransmission counting, hole lifetimes, round trips -- is then restricted to
+retransmission counting, hole lifetimes, round trips, is then restricted to
 those windows.  This is what tests/perf/profsplit.py does to a profile,
 except that a capture carries the direction of every segment so the windows
 need no arithmetic to place.
@@ -88,7 +88,7 @@ them apart:
                   counter sees the same events but only for a guest whose
                   acknowledgements carry timestamps, so it reports zero for a
                   stack that does not send them and cannot compare two
-                  stacks.  Where both are available they agree -- on a
+                  stacks.  Where both are available they agree, on a
                   Roadshow arm whose 156 retransmissions the peer kernel
                   undid all 156, this test called 153 of them spurious.
 
@@ -112,7 +112,7 @@ number is ahead of the highest yet sent, leaving a hole the peer itself fills
 later.  On an egress capture that is the peer's own transmission order, so it
 is normally zero and a non-zero count means the qdisc or the NIC is
 reordering before the frames even leave.  Reordering that happens further
-downstream cannot be seen directly in an egress capture at all -- it is only
+downstream cannot be seen directly in an egress capture at all, it is only
 visible through hole lifetimes, which is why those are computed.
 
 ROUND TRIPS PER CHUNK
@@ -130,7 +130,7 @@ THE `ss` LOG
 --ss adds cwnd and ssthresh from an `ss -tim` poll of the peer.  Two things
 make a naive read of one wrong.  `ss` keeps a closed socket visible for about
 100 seconds, so a log contains the PREVIOUS arm's dead socket as well as this
-one's -- they are told apart by the ephemeral port, and a dead one is
+one's, they are told apart by the ephemeral port, and a dead one is
 recognisable anyway as a socket whose byte counters never move.  And the poll
 covers writes as well as reads, so samples are kept only where bytes_sent is
 climbing at more than --ss-idle of its own peak rate, which is the read
@@ -191,7 +191,7 @@ def tcp(data):
     The payload length comes from the IP header's total length, not from the
     captured bytes: these captures are taken with a short snaplen, so the
     frame on disk is truncated and len(data) is not the segment's size.  A
-    header is never truncated -- 14 + 20 + 40 is 74 bytes at the very most.
+    header is never truncated, 14 + 20 + 40 is 74 bytes at the very most.
     """
     if len(data) < 34:
         return None
@@ -710,8 +710,8 @@ def main():
             # A hole that closed inside a round trip was filled by something
             # already in flight, which is the same statement the spurious
             # test makes about a retransmission.  The two count different
-            # populations -- one hole can attract several retransmissions,
-            # and a hole the sender never reacted to attracts none -- so
+            # populations, one hole can attract several retransmissions,
+            # and a hole the sender never reacted to attracts none, so
             # these are not equal, but they should move together, and a
             # reading where one says reordering and the other says loss is a
             # reading not to quote.

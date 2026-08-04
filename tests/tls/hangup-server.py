@@ -10,8 +10,8 @@ without the host having to be told anything between commands:
     4446  garbage  read the ClientHello, answer with bytes that are not TLS
 
 The point is not to be a TLS server.  It is to reach the state a real server
-reaches when it gives up on a slow client -- which is what a 14 MHz 68020
-looks like to anything on the modern internet -- without waiting for a real
+reaches when it gives up on a slow client, which is what a 14 MHz 68020
+looks like to anything on the modern internet, without waiting for a real
 server to time out, and to do it deterministically.
 
 Binds 127.0.0.1 on purpose: fs-uae's SLIRP maps the guest's 10.0.2.2 to the

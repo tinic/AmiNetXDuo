@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- milestone 2 bring-up test.
+ * AmiNetXDuo, milestone 2 bring-up test.
  *
  * Proves, on real 68k, that:
  *   - the ThreadX Exec port schedules (baton model, docs/RESEARCH.md 6.2);
@@ -12,12 +12,12 @@
  *
  * main() is an ordinary AmigaDOS Process.  It starts ThreadX on a private task
  * with tx_amiga_kernel_start(), then adopts itself so it can run the client
- * half of the test in its own context -- what bsdsocket.library will have to
+ * half of the test in its own context, what bsdsocket.library will have to
  * do for every application task.  The server half runs on a thread that
  * ThreadX created, so both thread flavours are exercised against each other.
  *
  * Output goes to the serial debug port (visible in FS-UAE/WinUAE's serial log)
- * as it happens, and is replayed to stdout at the end -- ThreadX threads are
+ * as it happens, and is replayed to stdout at the end, ThreadX threads are
  * Tasks, not Processes, so they cannot use dos.library themselves.
  *
  * SPDX-License-Identifier: MIT

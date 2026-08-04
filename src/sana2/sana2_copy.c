@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- SANA-II buffer-management hooks.
+ * AmiNetXDuo, SANA-II buffer-management hooks.
  *
  * OpenDevice() is handed a tag list carrying these two functions. The device
  * calls them, in m68k register convention (a0 = to, a1 = from, d0 = length),
@@ -28,7 +28,7 @@
  * emulated 68020 over 1460 bytes (tests/perf/perf_test.c):
  *
  *     parities agree     240.3 ns/B
- *     parities differ   1203.4 ns/B      -- a 5.0x cliff
+ *     parities differ   1203.4 ns/B     , a 5.0x cliff
  *
  * on every frame whose driver buffer landed on the wrong parity, and SANA-II
  * promises nothing about a device's buffer parity.  For comparison, the

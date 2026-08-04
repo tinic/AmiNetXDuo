@@ -8,7 +8,7 @@
 #
 #   ObtainInterfaceList(), ReleaseInterfaceList(), QueryInterfaceTagList() and
 #   ConfigureInterfaceTagList() are the vectors a monitoring or configuration
-#   tool -- Roadie, NetMon, RoadshowControl -- reaches for first, and both of
+#   tool, Roadie, NetMon, RoadshowControl, reaches for first, and both of
 #   the shapes they traffic in are shapes a compiler cannot check:
 #
 #     * a 'struct List' whose Nodes carry a name in ln_Name and nothing else.
@@ -29,7 +29,7 @@
 #   documented in src/bsdsocket/interfaces.c to be LEFT ALONE rather than
 #   answered with an invented zero.  IfProbe fills every destination with 0xA5
 #   first, so the transcript distinguishes "answered zero" from "not answered"
-#   -- a test that pre-zeroed could not tell a deliberate omission from a case
+#  , a test that pre-zeroed could not tell a deliberate omission from a case
 #   that fell through, which is the mistake this whole file exists to prevent.
 #
 # WHAT THE CONFIGURATION HALF ASSERTS
@@ -133,7 +133,7 @@ cp "$AAMPROBE" "$STAGE/AamProbe"
 cp "$MONPROBE" "$STAGE/MonProbe"
 
 # The probe runs twice, either side of AddNetInterface.  Not to catch an empty
-# list -- there is no such state to catch, because OpenLibrary("bsdsocket")
+# list, there is no such state to catch, because OpenLibrary("bsdsocket")
 # starts the whole stack, DHCP included, so by the time the FIRST IfProbe can
 # ask, eth0 is already up.  It runs twice because obtaining and releasing the
 # list has to survive being done again: a block freed twice, or a Node still
@@ -216,7 +216,7 @@ else
     # Every assertion below reads $REPORT, so a guest that stopped early fails
     # all of them at once and the output reads as sixty defects in the code
     # under test. It is not: it is one run that did not happen. That has cost a
-    # four-run bisect of a change that turned out to be innocent -- the same
+    # four-run bisect of a change that turned out to be innocent, the same
     # binary passed on the next attempt and three times after it.
     #
     # Seen once in about nine runs of this harness, cause unknown, so it is
@@ -353,7 +353,7 @@ fi
 # The atomicity assertion is the one worth having. The refused list had a
 # legal IFC_NetMask in front of the unsupported IFC_Metric, so a one-pass
 # implementation would refuse the call AND leave 255.255.0.0 on the
-# interface -- passing the "refused" check and failing this one.
+# interface, passing the "refused" check and failing this one.
 if grep -q "config: mask+metric: .* -- refused, correctly" "$REPORT"; then
     pass "a tag list containing an unsupported tag is refused"
 else
@@ -403,7 +403,7 @@ else
     fail "IFC_LimitMTU did not lower the MTU"
 fi
 
-# "you can request that a smaller size is used" -- so more than the hardware
+# "you can request that a smaller size is used", so more than the hardware
 # can carry is the hardware's own number, not an error.
 if grep -q "config: IFC_LimitMTU 9000: rc 0, IFQ_MTU now 1500" "$REPORT"; then
     pass "a request above the hardware MTU is clamped to 1500, not refused"
@@ -454,7 +454,7 @@ fi
 # ---- AddInterfaceTagList / RemoveInterface --------------------------------
 #
 # "It tries to release all the resources associated with a networking
-# interface, thus permitting it to be added again with new parameters" -- so
+# interface, thus permitting it to be added again with new parameters", so
 # removing and re-adding IS the documented use, and doing exactly that is the
 # only way to find out whether the SANA-II device was really closed and really
 # reopened.  The machine this test runs on has one card, and the round trip
@@ -466,7 +466,7 @@ else
     fail "RemoveInterface accepted an unknown interface"
 fi
 
-# TRUE for success, 0 for failure -- the opposite of every other call in the
+# TRUE for success, 0 for failure, the opposite of every other call in the
 # API, and the NDK header types it LONG where the autodoc says BOOL.
 if grep -q "^remove eth0: rc 1 .* -- removed, correctly" "$REPORT"; then
     pass "RemoveInterface returned TRUE, not 0-for-success"
@@ -497,7 +497,7 @@ else
 fi
 
 # And the tuning tags a Roadshow caller passes as a matter of course --
-# IFA_NumReadRequests, IFA_CopyMode, IFA_PacketFilterMode PFM_Local -- are
+# IFA_NumReadRequests, IFA_CopyMode, IFA_PacketFilterMode PFM_Local, are
 # accepted. None is implemented and none changes anything this API or the wire
 # can show; refusing one refused the interface itself, which is the likeliest
 # reason a third-party tool worked on Roadshow and not here.
@@ -540,7 +540,7 @@ fi
 # Three things a build cannot check: that the return value is a BYTE COUNT
 # rather than zero-or-an-entry-count, that the numbers are the running
 # stack's, and that pcd_tcp_state is 4.4BSD's enumeration rather than NetX
-# Duo's -- the two agree up to CLOSE_WAIT and diverge after it.
+# Duo's, the two agree up to CLOSE_WAIT and diverge after it.
 
 for case in "version 0" "type 99" "NETSTATUS_mb"; do
     if grep -q "^$case: .* -- refused, correctly" "$REPORT"; then
@@ -682,7 +682,7 @@ else
     fail "CAAMTA_RequestUnicast was not stored"
 fi
 
-# THE ONE THAT MATTERS.  Not the result code -- the message coming back.
+# THE ONE THAT MATTERS.  Not the result code, the message coming back.
 for case in "on an addressed interface" "on an unknown interface" \
             "with a bad version"; do
     if grep -q "^begin $case: .* replied -- correctly" "$REPORT"; then
@@ -701,8 +701,8 @@ fi
 # ---- a real DHCP allocation ----------------------------------------------
 #
 # The interface this run is riding on already has an address, so the probe
-# removes it and adds it back -- which is what AddInterfaceTagList leaves you
-# with, an interface with no address at all -- and then asks
+# removes it and adds it back, which is what AddInterfaceTagList leaves you
+# with, an interface with no address at all, and then asks
 # BeginInterfaceConfig for one.  SLIRP runs a DHCP server, so this is a real
 # DISCOVER/OFFER/REQUEST/ACK on the wire.
 
@@ -752,7 +752,7 @@ fi
 # AAMR_Timeout and AAMR_Aborted cannot be reached while SLIRP is answering in
 # four tenths of a second: neither the deadline nor the abort window ever
 # opens.  The probe takes the interface DOWN first, so DISCOVER goes nowhere
-# and the worker runs to its own deadline -- the only path that proves the
+# and the worker runs to its own deadline, the only path that proves the
 # deadline exists, and the only one that releases a lease never granted.
 
 if grep -q "^slow: still running after a second: yes -- correctly" "$REPORT"; then
@@ -763,7 +763,7 @@ fi
 
 # ---- and only one of them at a time --------------------------------------
 #
-# "AAMR_Busy -- Address allocation is already in progress for this interface."
+# "AAMR_Busy, Address allocation is already in progress for this interface."
 # bsd_aam_launch() claims bsd_aam_jobs[index] under Forbid() and refuses a
 # launch that finds it taken.  Nothing one process does can reach that guard:
 # BeginInterfaceConfig() is asynchronous, but the caller holding the job is the
@@ -772,8 +772,8 @@ fi
 # in which a worker is certainly running.
 #
 # THE RESULT CODE ALONE WOULD NOT CATCH IT.  AAMR_Busy is answered twice over:
-# at the door by that guard, and -- if the guard is gone and the worker starts
-# anyway -- by netstack_interface_dhcp_start() refusing a second DHCP client on
+# at the door by that guard, and, if the guard is gone and the worker starts
+# anyway, by netstack_interface_dhcp_start() refusing a second DHCP client on
 # one interface, which bsd_aam_worker() also reports as AAMR_Busy.  Measured:
 # with the guard deleted the second caller is STILL told 11.  What changes is
 # when.  A refusal comes back inside BeginInterfaceConfig(); the other answer
@@ -783,7 +783,7 @@ fi
 #
 # NEGATIVE CONTROL, measured: delete the `if (bsd_aam_jobs[index] != NULL)`
 # branch from src/bsdsocket/addralloc.c and this line reads "REPLIED LATE, so a
-# worker was started".  The collateral is worth knowing too -- the second
+# worker was started".  The collateral is worth knowing too, the second
 # launch overwrites bsd_aam_jobs[index], so the FIRST caller's
 # AbortInterfaceConfig() can no longer find its own job and the three `slow:`
 # assertions below fail with it.
@@ -827,9 +827,9 @@ fi
 
 # ---- SM_Down is not SM_Offline -------------------------------------------
 #
-# "SM_Down -- the stack will no longer attempt to transmit messages through
+# "SM_Down, the stack will no longer attempt to transmit messages through
 # this interface.  However, the underlying SANA-II device driver may still be
-# connected to the network", against "SM_Offline -- same as SM_Down, but also
+# connected to the network", against "SM_Offline, same as SM_Down, but also
 # sends an S2_OFFLINE command".  The document separates them so that a unit
 # shared with Envoy or ACS keeps working when this stack lets go of it.
 #
@@ -1010,7 +1010,7 @@ fi
 
 # STATE=down, when it was staged.  SM_Down is 2 and SM_Up is 3
 # (libraries/bsdsocket.h).  The first IfProbe runs before anything has called
-# Online, so the state it reports is the one the config asked for -- and with
+# Online, so the state it reports is the one the config asked for, and with
 # the default config that same reading is SM_Up, which is what makes this an
 # assertion rather than a restatement of the file.
 if [ "$STATE_DOWN" = "1" ]; then

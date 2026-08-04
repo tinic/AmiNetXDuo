@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the DEVS:Internet netdb store.
+ * AmiNetXDuo, the DEVS:Internet netdb store.
  *
  * Backs get{host,net,proto,serv}by*() in bsdsocket.library. The four files are
  * in the standard /etc layout: whitespace-separated columns, '#' starts a
@@ -18,7 +18,7 @@
  * skipped here; ami_config_load() feeds them to the resolver instead.
  *
  * Each file is read once into one buffer and tokenised in place, so an entry's
- * strings point straight into that buffer -- three allocations per table, not
+ * strings point straight into that buffer, three allocations per table, not
  * one per name.
  *
  * SPDX-License-Identifier: MIT

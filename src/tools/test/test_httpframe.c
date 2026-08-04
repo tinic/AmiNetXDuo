@@ -1,12 +1,12 @@
 /*
- * The tests for src/tools/httpframe.c -- how long a request body is, and where
+ * The tests for src/tools/httpframe.c, how long a request body is, and where
  * it ends.
  *
  * WHY THIS IS A TEST AND NOT A REVIEW
  *
  *   Every failure here is silent on the wire.  A Content-Length that
  *   overflowed leaves the tail of a body in the socket, and the server reads
- *   it as the next request -- so a PUT whose body happens to contain a
+ *   it as the next request, so a PUT whose body happens to contain a
  *   "DELETE /x HTTP/1.1" line has that DELETE executed, and the transcript
  *   shows two requests where the client sent one.  A chunk size that wrapped
  *   to zero does the same thing and reads as a well-formed end of body.
@@ -14,7 +14,7 @@
  *   that carried it.
  *
  *   So the cases are written down: what each parser accepts, what it refuses,
- *   and -- for the decoder -- how much of the buffer it says belonged to the
+ *   and, for the decoder, how much of the buffer it says belonged to the
  *   body, because that number is where the next request starts.
  *
  *   cc -std=c11 -Wall -Wextra -Isrc/tools \
@@ -101,7 +101,7 @@ static void test_coding(void)
     CHECK(http_frame_coding("identity") == HTTP_TE_IDENTITY);
 
     /* The two halves of the seven-character prefix test.  "chunkedX" used to
-       match and "gzip, chunked" used to be missed entirely -- so a body that
+       match and "gzip, chunked" used to be missed entirely, so a body that
        WAS chunked was read as a Content-Length one, and one that was not was
        read as chunked. */
     CHECK(http_frame_coding("chunkedX") == HTTP_TE_UNSUPPORTED);

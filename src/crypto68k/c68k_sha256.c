@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- crypto68k: SHA-256.  The portable C compression function, the
+ * AmiNetXDuo, crypto68k: SHA-256.  The portable C compression function, the
  * buffering and padding layer both variants share, and the dispatch.
  *
  * Two things the C here does that the vendored implementation does not, both
@@ -8,7 +8,7 @@
  *   1. The first sixteen message words are loaded, not assembled.  This is a
  *      big-endian machine, so W[t] for t < 16 is the longword at data + 4t.
  *      nx_crypto_sha2.c's W0(t) macro builds each one from four byte loads,
- *      three shifts and three ORs -- 128 instructions a block that need not
+ *      three shifts and three ORs, 128 instructions a block that need not
  *      exist.  The byte path remains for pointers that are not longword
  *      aligned on targets that fault on such a load.
  *
@@ -56,7 +56,7 @@ UINT c68k_sha256_variant_is_asm(UINT variant)
 /* ------------------------------------------------------------ constants --- */
 
 /*
- * Shared with the assembly, which walks it with (An)+ -- so the order is the
+ * Shared with the assembly, which walks it with (An)+, so the order is the
  * round order and nothing may be inserted.
  */
 const ULONG c68k_sha256_k[64] =
@@ -107,7 +107,7 @@ const ULONG c68k_sha256_k[64] =
  * packet buffer, so misaligned is the normal case here.
  *
  * nx_crypto_sha2.c's W0() macro builds each of the sixteen message words from
- * four byte loads, three shifts and three ORs -- 128 instructions a block that
+ * four byte loads, three shifts and three ORs, 128 instructions a block that
  * need not exist on a big-endian machine, and most of why the C below is 1.29x
  * the vendored implementation before any assembly.
  *

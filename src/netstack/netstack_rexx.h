@@ -1,7 +1,7 @@
 #ifndef NETSTACK_REXX_H
 #define NETSTACK_REXX_H
 /*
- * AmiNetXDuo -- what the AMITCP host and its variable space share.
+ * AmiNetXDuo, what the AMITCP host and its variable space share.
  *
  * SPDX-License-Identifier: MIT
  */

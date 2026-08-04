@@ -1,4 +1,4 @@
-| AmiNetXDuo -- known-hot kernels for the profiler's self-test.
+| AmiNetXDuo, known-hot kernels for the profiler's self-test.
 |
 | These are assembly and not C for one reason: the check they exist for is
 | "did the sample land inside this exact function", and that needs the exact
@@ -9,7 +9,7 @@
 | Each kernel is a self-contained loop with no calls, so during its phase
 | essentially every sample must land inside it.  If the vector read the frame
 | at the wrong offset the recorded value would be half the SR concatenated
-| with half the PC -- an address nowhere near these ranges -- so the in-range
+| with half the PC, an address nowhere near these ranges, so the in-range
 | fraction is a sharp test rather than a plausible-looking one.
 |
 | SPDX-License-Identifier: MIT
@@ -18,7 +18,7 @@
         .even
 
 | ---------------------------------------------------------------------------
-| VOID pv_spin_a(ULONG reps) -- two instructions per iteration.
+| VOID pv_spin_a(ULONG reps), two instructions per iteration.
 | ---------------------------------------------------------------------------
         .globl  _pv_spin_a
         .globl  _pv_spin_a_end
@@ -33,7 +33,7 @@ _pv_spin_a:
 _pv_spin_a_end:
 
 | ---------------------------------------------------------------------------
-| VOID pv_spin_b(ULONG reps) -- three, and a different body so that nothing
+| VOID pv_spin_b(ULONG reps), three, and a different body so that nothing
 | downstream can fold it onto pv_spin_a.
 | ---------------------------------------------------------------------------
         .globl  _pv_spin_b
@@ -51,7 +51,7 @@ _pv_spin_b:
 _pv_spin_b_end:
 
 | ---------------------------------------------------------------------------
-| VOID pv_spin_c(ULONG reps) -- five.  d2 and up are callee-saved, so this
+| VOID pv_spin_c(ULONG reps), five.  d2 and up are callee-saved, so this
 | stays inside the scratch registers.
 | ---------------------------------------------------------------------------
         .globl  _pv_spin_c

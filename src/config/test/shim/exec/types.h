@@ -1,6 +1,6 @@
 /*
  * Minimal <exec/types.h> for the host-side config parser test only.
- * Never compiled for the Amiga -- the NDK header is used there.
+ * Never compiled for the Amiga, the NDK header is used there.
  *
  * SPDX-License-Identifier: MIT
  */

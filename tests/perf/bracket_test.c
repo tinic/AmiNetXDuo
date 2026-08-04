@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- what the ThreadX adoption bracket costs, measured.
+ * AmiNetXDuo, what the ThreadX adoption bracket costs, measured.
  *
  * docs/RESEARCH.md 29.3 records two instruments disagreeing about this stack's
  * throughput: our own NetTrace makes it 55% faster than Roadshow on the wire
@@ -16,7 +16,7 @@
  *
  *   1. One tx_amiga_adopt_thread() + tx_amiga_orphan_thread() pair, split
  *      into its two halves, from a plain Exec Task with the kernel up and an
- *      NX_IP running -- the real bracket in the real population.
+ *      NX_IP running, the real bracket in the real population.
  *   2. Its parts, so the fix has somewhere to aim: the AllocSignal()/
  *      FreeSignal() pair, the _tx_amiga_wake_scheduler() poke, and the
  *      already-adopted fast path bsd_nx_enter() takes when tx_thread_identify()
@@ -28,13 +28,13 @@
  *                   src/bsdsocket/transfer.c does today;
  *        on-miss    a bracket only when the parked packet is exhausted and
  *                   nx_tcp_socket_receive() has to be called;
- *        once       one bracket around the whole transfer -- the floor.
+ *        once       one bracket around the whole transfer, the floor.
  *
  *      The difference between the first two is what a recv() satisfied from
  *      already-extracted data pays for nothing.  The difference between the
  *      first and the third is the whole bracket bill for that read size.
  *
- * Only the 68020 profiles mean anything -- tests/perf/cpucal.c measures why:
+ * Only the 68020 profiles mean anything, tests/perf/cpucal.c measures why:
  * FS-UAE charges no cycles at all above a 68020.  Run under -m A1200.
  *
  *   cmake --build build/cm --parallel --target bracket_test
@@ -220,7 +220,7 @@ ULONG            i, t0, t1, total;
    that thirteen arms fit inside one emulator session. */
 #define B_XFER_BYTES        (256UL * 1024UL)
 
-/* What the sender hands NetX Duo per call -- the same 8 KB bsd_send_tcp()
+/* What the sender hands NetX Duo per call, the same 8 KB bsd_send_tcp()
    sees from an application, clamped to the MSS on the way out. */
 #define B_SEND_CHUNK        8192UL
 
@@ -479,7 +479,7 @@ NX_PACKET  *pkt;
 
     /*
      * The listen and the accept happen here, on a native ThreadX thread, and
-     * the client connects from the Exec Task in main() -- the shape
+     * the client connects from the Exec Task in main(), the shape
      * tests/perf/perf_test.c uses.  A listen armed from the same task that
      * then blocks in connect() never completes on this port.
      */
@@ -643,7 +643,7 @@ UINT        status;
                 /*
                  * The first read after a miss is the only place the arms
                  * differ, so on-miss gives the context back here rather than
-                 * holding it for the copy -- nx_packet_data_extract_offset()
+                 * holding it for the copy, nx_packet_data_extract_offset()
                  * and nx_packet_release() are among the nx_packet_* helpers
                  * with no caller check at all.
                  *
@@ -854,7 +854,7 @@ UINT    status;
      * decides where a frame goes by walking it.  With one instance in the
      * table it accepts the frame and delivers it nowhere, and a loopback
      * connect() on the sole instance times out with its SYN counted as
-     * received and never matched -- measured, five SYN attempts and zero TCP
+     * received and never matched, measured, five SYN attempts and zero TCP
      * packets received, before this line existed.  tests/perf/perf_test.c
      * creates two for the same reason.
      */

@@ -1,5 +1,5 @@
 /***************************************************************************
- * Eclipse ThreadX -- AmigaOS/m68k port.
+ * Eclipse ThreadX, AmigaOS/m68k port.
  *
  * Derived in structure from ports/linux/gnu/src/tx_thread_context_restore.c
  *   Copyright (c) 2024 Microsoft Corporation
@@ -30,7 +30,7 @@
 /*    than at tick granularity.  For a network stack whose threads block   */
 /*    constantly this costs latency, not correctness.  It does mean a      */
 /*    ThreadX thread that neither blocks nor calls a ThreadX service will  */
-/*    not be preempted -- see the adoption notes in tx_amiga_adopt.c.      */
+/*    not be preempted, see the adoption notes in tx_amiga_adopt.c.      */
 /*                                                                        */
 /*    When the system was idle (no baton holder) the scheduler task is     */
 /*    poked so it dispatches whatever the tick made ready.                 */

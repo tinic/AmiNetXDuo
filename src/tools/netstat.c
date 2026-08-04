@@ -1,5 +1,5 @@
 /*
- * netstat -- interfaces, routes and connections.
+ * netstat, interfaces, routes and connections.
  *
  *     netstat INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S,HEALTH=-h/S
  *
@@ -16,11 +16,11 @@
  * makes it usable on a machine that is halfway into the fault it is meant to
  * describe, and it is why it is the one switch that works without a stack
  * answering for itself. It is the command to ask for in a fault report, for a
- * freeze and for a suspected leak alike -- docs/FREEZE-DIAGNOSTIC.md.
+ * freeze and for a suspected leak alike, docs/FREEZE-DIAGNOSTIC.md.
  *
  * This command covers the same ground as ShowNetStatus: that one has named
  * categories and a diagnosis, this one has switches and columns. Neither reads
- * the stack directly -- both take the same two snapshots from tool_nx.c,
+ * the stack directly, both take the same two snapshots from tool_nx.c,
  * ToolSnapshot and ToolStats, so they cannot disagree.
  *
  * SPDX-License-Identifier: MIT
@@ -127,7 +127,7 @@ static VOID show_interfaces(const AmiConfig *cfg, const ToolSnapshot *snap)
  * one number: allocations are the general heap, sockets are the structure
  * docs/RESEARCH.md 37.5 lost 776 of, and packets are a fixed pool that starves
  * rather than grows. The peak beside each is what makes a single reading worth
- * anything -- a count on its own cannot say whether it is climbing.
+ * anything, a count on its own cannot say whether it is climbing.
  *
  * AvailMem is read here rather than carried in ToolStats so both routes into
  * this function report the same machine at the same moment. It is the number a
@@ -172,7 +172,7 @@ static VOID show_memory(const ToolStats *st)
  * late; lost ones never reach it.
  *
  * Memory first, then the scheduler.  The one function both routes print
- * through -- -h off the published mark and -s -h through the library -- so the
+ * through -- -h off the published mark and -s -h through the library, so the
  * two cannot disagree about what they found.
  */
 static VOID show_health(const ToolStats *st)
@@ -512,7 +512,7 @@ int main(int argc, char **argv)
     /*
      * ami_config_load() loads the netdb (src/config/config_file.c) and
      * ami_alloc() is AllocVec(), which AmigaOS does not reclaim when a process
-     * exits -- 12,616 bytes per run on a stock DEVS:Internet, gone until
+     * exits, 12,616 bytes per run on a stock DEVS:Internet, gone until
      * reboot. atexit() rather than a free before each return: this command
      * leaves main() from several places.
      */

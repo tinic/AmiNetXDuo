@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the resolver's retransmission ladder. See netstack_retry.h.
+ * AmiNetXDuo, the resolver's retransmission ladder. See netstack_retry.h.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -46,7 +46,7 @@ AmiNetLadderResult ami_net_ask_until(AmiNetAskFn ask, VOID *arg, ULONG budget,
         if (result == AMI_NET_ASK_REFUSED)
             return AMI_NET_LADDER_REFUSED;
 
-        /* Came back with time to spare, so somebody answered -- see the
+        /* Came back with time to spare, so somebody answered, see the
            header. */
         if (spent < wait)
             return AMI_NET_LADDER_REFUSED;

@@ -1,9 +1,9 @@
 /*
- * AmiNetXDuo -- shared-library load test.
+ * AmiNetXDuo, shared-library load test.
  *
  * Proves that the two images we ship are real AmigaOS shared libraries: that
  * Exec finds the romtag in the loaded segment, runs the RTF_AUTOINIT init
- * vector, and hands back a working base -- and, for bsdsocket.library, that
+ * vector, and hands back a working base, and, for bsdsocket.library, that
  * OpenLibrary() brings the whole netstack up behind it and the LVO jump table
  * dispatches.
  *
@@ -11,7 +11,7 @@
  * libraries through their ABI, not through the C API: nothing here is linked
  * against our code.
  *
- * Stage the libraries into LIBS: first -- see tests/libraries/run-fsuae.sh.
+ * Stage the libraries into LIBS: first, see tests/libraries/run-fsuae.sh.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -449,7 +449,7 @@ LONG                  fd, rc;
 
     /*
      * "[EPROTONOSUPPORT] The protocol type or the specified protocol is not
-     * supported within this domain." -- the only "not supported" code in
+     * supported within this domain.", the only "not supported" code in
      * socket()'s ERRORS list.  SOCK_SEQPACKET is a defined type this library
      * does not implement.
      */
@@ -529,8 +529,8 @@ LONG                  fd, rc;
      * The ceiling is the egress interface's MTU less the IP and UDP headers,
      * so it is not one number: NetX Duo's loopback interface carries a
      * 65535-byte MTU, making 65507 the largest datagram it will take.  Both
-     * sides of that boundary are checked, because a blanket 1472 -- the
-     * Ethernet figure -- would refuse a datagram loopback can carry.
+     * sides of that boundary are checked, because a blanket 1472, the
+     * Ethernet figure, would refuse a datagram loopback can carry.
      */
     {
         UBYTE *big =  (UBYTE *) AllocMem(T_DGRAM_BUF, MEMF_ANY | MEMF_CLEAR);
@@ -572,7 +572,7 @@ LONG                  fd, rc;
 /* --------------------------------------------------- the bsdsocket phase -- */
 
 /*
- * Run in a Process of its own so main() can put a clock on it -- specifically
+ * Run in a Process of its own so main() can put a clock on it, specifically
  * on the CloseLibrary() at the end, which drops the last netstack reference and
  * tears the stack down.  That close hung for ever: netstack_shutdown() stopped
  * the ARexx host by waiting on a MsgPort created during bring-up, on a Task
@@ -639,7 +639,7 @@ LONG             sock;
     /*
      * The address conversions, against the NDK 3.2 autodoc's own rules: the
      * short dotted forms, INADDR_NONE for anything malformed, and
-     * inet_network()'s byte pack -- "192.168.1" is the network number
+     * inet_network()'s byte pack, "192.168.1" is the network number
      * 0x00C0A801, not an address with a zero host part.
      */
     {

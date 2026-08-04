@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the internet checksum, in the form the 68k actually has.
+ * AmiNetXDuo, the internet checksum, in the form the 68k actually has.
  *
  * third_party/netxduo/common/src/nx_ip_checksum_compute.c walks the payload a
  * longword at a time and splits each one into two 16-bit halves by hand:
@@ -13,15 +13,15 @@
  * has no carry flag.
  *
  * The machine has one.  A one's-complement sum is add.l followed by addx.l of
- * a zero register -- two instructions per longword, no immediate, no swap, and
+ * a zero register, two instructions per longword, no immediate, no swap, and
  * the operand comes straight out of (An)+ with no separate load.  The 32-bit
  * sum that produces is congruent to the 16-bit one modulo 0xFFFF, so folding
  * it at the end gives the same checksum; see n68k_sum_longwords().
  *
- * Everything else -- the pseudo-header arithmetic, the chain walk, the
+ * Everything else, the pseudo-header arithmetic, the chain walk, the
  * end-pointer rounding, the two-byte carry across a packet boundary whose
  * append pointer is 2 mod 4, and the trailing 1/2/3-byte case including its
- * zero-write into the pad byte -- is structurally identical to the vendored
+ * zero-write into the pad byte, is structurally identical to the vendored
  * code.  The requirement is to return exactly what NetX Duo would have
  * returned, not merely a correct internet checksum.  tests/perf/host/ checks
  * that differentially against the vendored function compiled under a different
@@ -46,7 +46,7 @@
  *
  *     movea.l (a1)+,a0 / add.l a0,d0 / cmp.l a0,d0 / bcc.s / addq.l #1,d0
  *
- * -- four instructions and a branch where the machine needs two, still better
+ * four instructions and a branch where the machine needs two, still better
  * than the vendored seven.  Selecting the assembly is a build option
  * (AMINETXDUO_NET68K_ASM) and not a #if on the target, because a host build
  * has to compile this file to run the host tier of the differential test.
@@ -194,8 +194,8 @@ UINT        i;
             /*
              * The vendored loop is `while (long_ptr < end_ptr) long_ptr++`,
              * which is ceil((end_ptr - long_ptr) / 4) iterations.  That equals
-             * consumed/4 whenever the prepend pointer is longword aligned --
-             * always, here -- but it is computed rather than assumed, so a
+             * consumed/4 whenever the prepend pointer is longword aligned,
+             * always, here, but it is computed rather than assumed, so a
              * pool that handed out an odd prepend pointer would still sum the
              * same bytes the vendored code sums.
              */

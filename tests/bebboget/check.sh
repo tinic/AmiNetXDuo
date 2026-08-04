@@ -7,7 +7,7 @@
 # Same shape as tests/bebbossh/check.sh and for the same reasons: a size check
 # is not a check (docs/RESEARCH.md 79.6), and the difference between two sizes
 # is the only figure free of the TLS handshake.  Two clients are scored side by
-# side -- bebboget's own TLS and our tls.library -- from one run.
+# side, bebboget's own TLS and our tls.library, from one run.
 #
 # SPDX-License-Identifier: MIT
 

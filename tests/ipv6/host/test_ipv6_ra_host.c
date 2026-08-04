@@ -1,13 +1,13 @@
 /*
- * AmiNetXDuo -- router advertisement processing and router solicitation
+ * AmiNetXDuo, router advertisement processing and router solicitation
  * retransmission, driven directly rather than over a wire.
  *
  * Three things are checked here that no network can be made to produce on
  * demand:
  *
  *   1. A prefix advertised autonomous (A=1) but not on-link (L=0) forms an
- *      address.  The two flags are independent -- RFC 4862 5.5.3 for A, RFC
- *      4861 6.3.4 for L -- and the combination is what 3GPP and several CPE
+ *      address.  The two flags are independent, RFC 4862 5.5.3 for A, RFC
+ *      4861 6.3.4 for L, and the combination is what 3GPP and several CPE
  *      firmwares advertise.  It used to form nothing, because the autonomous
  *      test was nested inside the on-link one.
  *
@@ -18,7 +18,7 @@
  *   3. Router solicitation does not stop.  RFC 7559 replaces the fixed count
  *      with an unbounded exponential backoff and RFC 8504 5.4 makes it a MUST,
  *      so the sequence is the configured number of solicitations at the base
- *      interval and then a doubling one up to an hour -- and a solicitation an
+ *      interval and then a doubling one up to an hour, and a solicitation an
  *      hour, forever, rather than silence.
  *
  * Real, compiled from third_party/netxduo/common/src into this binary:
@@ -26,7 +26,7 @@
  * functions under test, with nx_icmpv6_validate_ra.c,
  * nx_icmpv6_validate_options.c and nx_ipv6_util.c underneath them.
  *
- * Stubbed: everything the advertisement path calls outward -- the prefix list,
+ * Stubbed: everything the advertisement path calls outward, the prefix list,
  * the default router table, the neighbour cache, multicast join and
  * _nx_icmpv6_send_rs.  Each stub records what it was asked to do, which is how
  * "the prefix list was not touched" can be a check rather than an inference.

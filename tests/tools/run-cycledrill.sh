@@ -15,9 +15,9 @@
 #   and none of it shows on the first cycle.
 #
 #   CycleDrill (tests/tools/cycledrill.c) is the guest half.  It reads
-#   NETSTATUS_HEALTH between cycles -- allocations outstanding, sockets alive,
+#   NETSTATUS_HEALTH between cycles, allocations outstanding, sockets alive,
 #   packet buffers free, and the high-water mark of each, the same numbers
-#   `netstat -h` and `ShowNetStatus MEMORY` print -- rather than inventing
+#   `netstat -h` and `ShowNetStatus MEMORY` print, rather than inventing
 #   instrumentation, and prints the trend rather than a pass/fail on one
 #   reading.
 #
@@ -28,7 +28,7 @@
 #   that command has run, no expunge on this machine can ever succeed again, so
 #   a drill placed after it would print "declined" every cycle and pass.
 #   CycleDrill is therefore the FIRST command in the list, brings the stack up
-#   itself -- the first open starts it, interfaces and all -- and leaves one
+#   itself, the first open starts it, interfaces and all, and leaves one
 #   reference held at the end so the `netstat -h` and `ShowNetStatus MEMORY`
 #   that follow report on the stack it just cycled and not on a fresh one.
 #
@@ -43,8 +43,8 @@
 #
 #   `-n` is the negative control for exactly that.  It asks the drill for
 #   CYCLES 1 EXPUNGE 0 while leaving the gates at the values they would have
-#   had -- a run in which every guest check still passes, and all four count
-#   gates have to fire -- and requires this script to REJECT it.  If -n ever
+#   had, a run in which every guest check still passes, and all four count
+#   gates have to fire, and requires this script to REJECT it.  If -n ever
 #   reports PASSED, the gates have stopped gating and the normal run proves
 #   nothing.
 #
@@ -54,8 +54,8 @@
 #   eight cycles.  It was the DEVS:Internet netdb: ami_netdb_load() fills four
 #   ami_alloc()ed tables held in file-scope statics, the statics went away with
 #   the segment, and bsd_lib_expunge() never freed them.  The phase L control
-#   is what named it -- a close/reopen cycle, same teardown, segment left
-#   loaded, lost nothing -- and the gate below now reads zero on both phases.
+#   is what named it, a close/reopen cycle, same teardown, segment left
+#   loaded, lost nothing, and the gate below now reads zero on both phases.
 #
 # THE KNOWN DEFECT THIS CAN SEE
 #
@@ -315,7 +315,7 @@ else
     if [ "$EXPUNGES" -gt 0 ]; then
         [ "$D_EXP" -ge "$EXPUNGES" ] \
             && pass "$D_EXP expunges completed (wanted $EXPUNGES)" \
-            || fail "only $D_EXP expunges completed, wanted $EXPUNGES -- the library was never unloaded, so nothing here tested the expunge path"
+            || fail "only $D_EXP expunges completed, wanted $EXPUNGES, the library was never unloaded, so nothing here tested the expunge path"
     else
         fail "EXPUNGES is 0: this run did not test the expunge path at all"
     fi

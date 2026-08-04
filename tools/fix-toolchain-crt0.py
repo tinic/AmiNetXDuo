@@ -11,7 +11,7 @@
     fix is in any toolchain anybody installs: the prebuilt m68k-amigaos images
     lag upstream by years, not months, and the one this project pins is named
     for GCC 10 and predates both fixes by eight months. Expect to be running
-    this script for the life of the project, and keep it that way -- verified
+    this script for the life of the project, and keep it that way, verified
     in every configuration, and loud when it meets something new. It has
     already stopped two releases that would otherwise have shipped broken.
 
@@ -30,7 +30,7 @@ WHAT IS WRONG
         exit:       movem.l d2/d7/a2/a6,-(sp)   4 registers
                     ...
                     move.l  __savedSp,sp
-                    movem.l (sp)+,d2/d7/a2/a6   pops 4 -- sp += 16
+                    movem.l (sp)+,d2/d7/a2/a6   pops 4, sp += 16
                     rts
 
     That is correct only if GCC gives the two functions the same callee-saved
@@ -42,7 +42,7 @@ WHAT IS WRONG
 
     It is NOT libnix, despite what an earlier version of this file said.
     libnix produces ncrt0.o/nbcrt0.o and friends, hand-written assembler that
-    keeps no frame and is immune -- -noixemul sidesteps the bug entirely.
+    keeps no frame and is immune, -noixemul sidesteps the bug entirely.
     Reported upstream at codeberg.org/bebbo/amiga-gcc.
 
     Latent since 2018: GCC 6.5 emitted no movem in either function, so
@@ -51,7 +51,7 @@ WHAT IS WRONG
 
 WHY HERE AND NOT IN EVERY LINK LINE
 
-    This was first worked around per command -- patch a private crt0 and link
+    This was first worked around per command, patch a private crt0 and link
     it first under -nostartfiles. That has to be repeated by every target that
     links a command, has to be right once per multilib, and leaves the
     toolchain broken for anything not built through our CMake. The defect is
@@ -63,12 +63,12 @@ HOW IT DECIDES WHAT TO PATCH
     By symbol boundaries from the toolchain's own objdump, not by byte
     patterns. The first attempt anchored on `move.l sp,__savedSp` (23cf) and
     silently MISSED the six baserel variants, which reach __savedSp through a4
-    and never emit that opcode -- they were reported as "skipped", which reads
+    and never emit that opcode, they were reported as "skipped", which reads
     as benign. All eleven crt0.o in the tree carry the bug.
 
     VERIFIED 2026-07-27: crt0.c marks BOTH ____start (line 48) and exit (line
     94) __entrypoint, read from bebbo/newlib-cygwin branch `amiga` at 0909ae9.
-    That is what makes the upstream fix safe -- were only ____start marked,
+    That is what makes the upstream fix safe, were only ____start marked,
     suppressing its save while exit kept a frame would put __savedSp BELOW the
     return address, which is the `refused` case below and worse than the
     original bug. callfuncs and __restore_a4 carry it too.
@@ -77,14 +77,14 @@ HOW IT DECIDES WHAT TO PATCH
     to match ____start's, because exit still USES d7 to carry the return code:
     narrowing would stop d7 being saved while it is still clobbered, breaking
     the callee-saved contract with the Shell. Widening preserves it.
-    ____start's own epilogues are widened with it -- they are unreachable,
+    ____start's own epilogues are widened with it, they are unreachable,
     since exit() never returns, but a 3-register pop against a 4-register push
     is a trap for the next reader.
 
 FIXED UPSTREAM, AND NOT THE WAY WE ASKED
 
     Reported as codeberg.org/bebbo/amiga-gcc issue #12. The report proposed a
-    newlib change -- give exit's return code static storage instead of a
+    newlib change, give exit's return code static storage instead of a
     register variable, so the allocator cannot produce the mismatch. An
     earlier version of this docstring described that as "the upstream source
     fix", which it never was: it was our suggestion, written up as though it
@@ -100,9 +100,9 @@ FIXED UPSTREAM, AND NOT THE WAY WE ASKED
         + if (lookup_attribute ("entrypoint", attrs))
         +   return false;
 
-    crt0.c already marked both ____start and exit with __entrypoint -- the
+    crt0.c already marked both ____start and exit with __entrypoint, the
     attribute was registered (config/m68k/amigaos.h) and the macro predefined
-    (config/m68k/m68kamigaos.h) -- and m68k_save_reg() simply ignored it. An
+    (config/m68k/m68kamigaos.h), and m68k_save_reg() simply ignored it. An
     entry point has no caller to preserve registers for, so it must get no
     prologue at all; once that holds, __savedSp is recorded with nothing
     pushed and lands exactly on the return address, and neither function has
@@ -111,7 +111,7 @@ FIXED UPSTREAM, AND NOT THE WAY WE ASKED
     It is the better fix, and for a reason visible in the disassembly: exit
     STILL uses d7 (`movel d0,d7` on entry, `movel d7,d0` before the rts) to
     carry the return code across _callfuncs and the library closes. Removing
-    the use -- what was proposed from here -- would have meant restructuring
+    the use, what was proposed from here, would have meant restructuring
     exit. Suppressing the save keeps the code and fixes every __entrypoint
     function rather than this one file.
 
@@ -122,7 +122,7 @@ FIXED UPSTREAM, AND NOT THE WAY WE ASKED
     agree because neither keeps a frame, which is the shape the fix produces.
     It does NOT prove the fix is what produced it: the toolchain in use here
     is dated well before 168be3619 and is already frameless, for a reason not
-    established -- a hand build, a different newlib, or an older compiler that
+    established, a hand build, a different newlib, or an older compiler that
     happened to allocate nothing (GCC 6.5 did exactly that, which is why the
     defect stayed latent from 2018). The check reports the shape it sees and
     leaves the cause alone.
@@ -146,18 +146,18 @@ def rev16(m):
 
     -(sp) counts a7,a6..a0,d7..d0 from bit 0; (sp)+ counts d0..d7,a0..a7. So
     the save mask matching a given restore mask is its bit reversal, and this
-    never has to name a register -- which is what lets one rule cover the
+    never has to name a register, which is what lets one rule cover the
     plain model and baserel without knowing either register set.
     """
     return int(f"{m:016b}"[::-1], 2)
 
 
 def find_objdump(root, sample):
-    """A working m68k objdump -- preferably the tree's own.
+    """A working m68k objdump, preferably the tree's own.
 
     The tree's is preferred because it is guaranteed to match the objects it
     ships. It is not guaranteed to RUN: the pinned toolchain is a Linux
-    x86-64 build, so on macOS it fails with "Exec format error" -- the same
+    x86-64 build, so on macOS it fails with "Exec format error", the same
     reason tools/ci.sh cannot be reproduced there. So each candidate is tried
     on a real crt0.o and the first that actually works is used; any m68k
     objdump reads the same Amiga hunk format.
@@ -193,7 +193,7 @@ def text_file_offset(objdump, path):
     objdump -d reports offsets within the SECTION; these are Amiga hunk
     objects with a header in front, so section offset 0 is file offset 0x28 in
     practice and NOT zero. Writing a section offset straight into the file
-    corrupts it -- which is exactly what an earlier version of this script did
+    corrupts it, which is exactly what an earlier version of this script did
     to seven of eleven crt0.o before objdump stopped being able to read them.
     """
     out = subprocess.run([str(objdump), "-h", str(path)],
@@ -244,7 +244,7 @@ def functions(objdump, path):
 
 # --------------------------------------------------------------- SECOND BUG
 #
-# THE ARGV INDIRECTION -- codeberg.org/bebbo/amiga-gcc issue #8.
+# THE ARGV INDIRECTION, codeberg.org/bebbo/amiga-gcc issue #8.
 #
 # Separate from the frame skew above, in the same file, and it breaks a
 # different class of program. crt0.c declared
@@ -252,12 +252,12 @@ def functions(objdump, path):
 #     char * __argv[];        instead of        char ** __argv;
 #
 # An array name decays to its OWN ADDRESS, so ____start passes &__argv where
-# main expects __argv -- one level of indirection too many. main() then reads
+# main expects __argv, one level of indirection too many. main() then reads
 # the pointer variable itself as argv[0], and whatever follows it in .bss as
 # argv[1..]. Compare the two pushes at the call site, argv first:
 #
-#     pea    __argv          ; 4879 -- pushes the ADDRESS       <- wrong
-#     move.l __argc,-(sp)    ; 2f39 -- pushes the VALUE         <- right
+#     pea    __argv          ; 4879, pushes the ADDRESS       <- wrong
+#     move.l __argc,-(sp)    ; 2f39, pushes the VALUE         <- right
 #     jsr    _main
 #
 # WHY IT WENT UNNOTICED HERE. Our own commands take their arguments through
@@ -284,7 +284,7 @@ PUSH_OPS = (PUSH_ABS, PUSH_A4, PUSH_A4_32)
 
 # THE 32-BIT BASEREL FORM NEEDS ITS DISPLACEMENT CHECKED, and the others do
 # not. objdump prints the addend as part of the symbol for the short forms --
-# ".bss" vs ".bss+0x8" -- so requiring a bare ".bss" already proves the target
+# ".bss" vs ".bss+0x8", so requiring a bare ".bss" already proves the target
 # is __argv. The libb32 multilibs put the addend in the instruction instead and
 # print a bare "DREL32 .bss" for __savedSp (.bss+8) just the same, so the only
 # way to tell __argv from __savedSp there is to read the displacement.
@@ -292,7 +292,7 @@ PEA_A4_32_TAIL = bytes((0x01, 0x70, 0x00, 0x00, 0x00, 0x00))   # (bd=0,a4)
 
 # Shape B (see argv_sites): the address is kept in an address register and the
 # REGISTER is pushed. `move.l an,-(sp)` and `move.l (an),-(sp)` differ only in
-# the source addressing mode -- 001nnn against 010nnn -- so this too is a
+# the source addressing mode, 001nnn against 010nnn, so this too is a
 # two-byte swap that leaves everything around it alone.
 LEA_MASK, LEA_OP = 0xF1C0, 0x41C0       # lea <ea>,an  (an in bits 11..9)
 PUSH_AN = 0x2F08                        # move.l an,-(sp)   | reg
@@ -343,7 +343,7 @@ def _addend(text):
         the pinned 2.39       lea 0 0 ___argv,a6         RELOC32 .bss
                               move.l 14 14 ___argc,-(sp) RELOC32 .bss
 
-    The relocation reads `.bss` for EVERY symbol in that section -- __argv,
+    The relocation reads `.bss` for EVERY symbol in that section, __argv,
     __argc, __savedSp, __commandline alike. An earlier version of this file
     assumed a bare `.bss` meant offset zero because that happened to hold on
     the development machine, where __argc is a common symbol and gets its own
@@ -352,7 +352,7 @@ def _addend(text):
 
     THE DISPLACEMENT COMES FIRST, and it is not always leading. `pea a4@(0)`
     has its addend inside the parentheses, and reading the leading token there
-    yields "a4" -- which is valid hex, parses as 0xa4, and quietly disqualified
+    yields "a4", which is valid hex, parses as 0xa4, and quietly disqualified
     seven of the eleven baserel files the first time this check was added.
     """
     m = re.search(r"a[0-7]@\((-?[0-9a-fx]+)\)", text)       # pea a4@(20)
@@ -368,15 +368,15 @@ def _addend(text):
 def argv_sites(objdump, path):
     """Offsets of the argv push before each `jsr _main`, with their opcode.
 
-    Anchored on the ADJACENT PUSH PAIR -- a push referencing .bss immediately
-    followed by one referencing __argc -- and then confirmed by a _main
+    Anchored on the ADJACENT PUSH PAIR, a push referencing .bss immediately
+    followed by one referencing __argc, and then confirmed by a _main
     reference within the next few instructions.
 
     Anchoring on the call itself does not work. The 68020 baserel multilibs
     reach main with a bsr.l, which objdump renders as TWO lines (`bsrs` plus a
     bogus `orib`) carrying RELRELOC32 rather than RELOC32, so "the instruction
     two before the _main reloc" is not the argv push there. That mistake
-    silently skipped six of eleven files -- benign-looking output for exactly
+    silently skipped six of eleven files, benign-looking output for exactly
     the variants a 68020 build uses.
 
     The .bss reference must carry NO addend: __argv is at .bss+0, while
@@ -387,13 +387,13 @@ def argv_sites(objdump, path):
     express it however it likes. Which one appears is a property of the
     toolchain BUILD, not of the multilib:
 
-      A. pea __argv                   -- a direct push of the address
+      A. pea __argv                  , a direct push of the address
       B. lea __argv,an ... move.l an,-(sp)
 
     Shape B is what the pinned toolchain emits: it needs the address in a
     register anyway (to store into __argv on the Workbench path), so it keeps
     it in a6 and pushes the register. The address never appears as an operand
-    of the push at all, so a matcher written for shape A sees NOTHING -- which
+    of the push at all, so a matcher written for shape A sees NOTHING, which
     is exactly what happened, and why v0.6.2's release job failed rather than
     shipping a second broken archive.
 
@@ -537,7 +537,7 @@ def repair(objdump, path, check_only):
     # return false for any function carrying the `entrypoint` attribute, which
     # crt0.c puts on both ____start and exit. Neither then saves anything, so
     # __savedSp is recorded with no frame pushed and lands exactly on the
-    # return address -- which is what `move.l __savedSp,sp / rts` needs.
+    # return address, which is what `move.l __savedSp,sp / rts` needs.
     #
     # Nothing to repair, and nothing wrong. Reporting it as "refused" told a
     # user with a REPAIRED toolchain that theirs was broken.
@@ -549,8 +549,8 @@ def repair(objdump, path, check_only):
         # exit frameless but ____start not is WORSE than the original bug:
         # __savedSp would point below the return address rather than above it,
         # so the rts reads a saved register instead of overshooting. Nothing
-        # here can repair it -- widening exit is not possible without knowing
-        # what it clobbers -- so say so plainly.
+        # here can repair it, widening exit is not possible without knowing
+        # what it clobbers, so say so plainly.
         return ("refused",
                 f"exit keeps no frame but ____start has {len(start)} movem: "
                 f"__savedSp would point BELOW the return address")
@@ -617,7 +617,7 @@ def main():
         return 1
 
     # The two bugs are independent, so they are counted and reported
-    # independently -- a tree can be immune to one and carry the other, which
+    # independently, a tree can be immune to one and carry the other, which
     # is exactly the state the pinned toolchain was in.
     rc = 0
     for label, fn in (("frame skew", repair), ("argv indirection", repair_argv)):
@@ -639,7 +639,7 @@ def main():
             rc = 1
         if check_only and counts.get("buggy"):
             rc = 1
-        # Skipping EVERYTHING is not a pass -- that is how an earlier version
+        # Skipping EVERYTHING is not a pass, that is how an earlier version
         # returned success over an unrepaired toolchain. "buggy" counts as
         # understood: under --check a wholly unrepaired tree is every file
         # buggy and none ok, which is a real verdict, not a parse failure.

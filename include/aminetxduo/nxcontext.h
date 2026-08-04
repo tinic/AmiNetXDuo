@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the private handle bsdsocket.library gives tls.library.
+ * AmiNetXDuo, the private handle bsdsocket.library gives tls.library.
  *
  *   The whole NetX Duo/ThreadX stack is a singleton that lives inside
  *   bsdsocket.library's segment: one NX_IP, one packet pool, one ThreadX
@@ -38,7 +38,7 @@
  *
  *   tls.library and bsdsocket.library share struct layouts (NX_TCP_SOCKET,
  *   NX_PACKET, NX_PACKET_POOL) and must be built from the same tree with the
- *   same options -- AMINETXDUO_IPV6 above all, since it changes the layout of
+ *   same options, AMINETXDUO_IPV6 above all, since it changes the layout of
  *   every one of them.  nxc_Version is bumped whenever anything here or in
  *   those layouts changes, and tls.library refuses to run against a version it
  *   does not recognise.  Ship the two files together.
@@ -117,8 +117,8 @@ typedef struct AmiNetXDuoContext
      * Returns NX_NULL unless the descriptor is a connected TCP socket.  Once a
      * descriptor has been passed over this way, the application must not
      * recv()/send() on it: those would take bytes out of the middle of a TLS
-     * record.  Nothing enforces that -- enforcing it would mean a flag test on
-     * the hot path of every recv() in the system -- so the caller must observe
+     * record.  Nothing enforces that, enforcing it would mean a flag test on
+     * the hot path of every recv() in the system, so the caller must observe
      * it until TLSClose().
      */
     NX_TCP_SOCKET      *(*nxc_TcpSocket)(APTR socket_base, LONG fd);
@@ -138,8 +138,8 @@ typedef struct AmiNetXDuoContext
      * legal for a ThreadX thread to sit in Wait() for an IORequest.
      *
      * tls.library needs them for one thing: reading a CA root out of
-     * DEVS:Internet/certificates happens inside the handshake -- the issuer is
-     * not known until the server sends its chain -- and dos.library's Read()
+     * DEVS:Internet/certificates happens inside the handshake, the issuer is
+     * not known until the server sends its chain, and dos.library's Read()
      * blocks in Exec.  Doing that while holding the baton would stop the IP
      * thread and both SANA-II readers for the duration of a disk access, which
      * on a floppy is long enough to lose packets.  Bracketing the file I/O with

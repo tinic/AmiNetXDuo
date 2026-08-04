@@ -1,11 +1,11 @@
 /*
- * bsdsocket.library -- TCP urgent data: MSG_OOB, SIOCATMARK and SIGURG.
+ * bsdsocket.library, TCP urgent data: MSG_OOB, SIOCATMARK and SIGURG.
  *
  * Receive needed only wiring up: _nx_tcp_socket_packet_process() tests
  * NX_TCP_URG_BIT and calls the socket's nx_tcp_urgent_data_callback
  * (nx_tcp_socket_packet_process.c:465-483), the segment is still on
- * nx_tcp_socket_receive_queue_head with its TCP header -- the header is only
- * stripped at delivery, in nx_tcp_socket_receive.c:176 -- and the urgent
+ * nx_tcp_socket_receive_queue_head with its TCP header, the header is only
+ * stripped at delivery, in nx_tcp_socket_receive.c:176, and the urgent
  * pointer is in the low half of nx_tcp_header_word_4 in host order.
  * bsdsocket.library was passing NX_NULL for that callback.
  *
@@ -15,7 +15,7 @@
  *
  *     header_ptr -> nx_tcp_header_word_4 = (checksum << NX_SHIFT_BY_16);
  *
- * -- a plain assignment, after the checksum has been computed
+ * a plain assignment, after the checksum has been computed
  * (nx_tcp_socket_send_internal.c:856, nx_tcp_packet_send_control.c:312).  Any
  * urgent pointer planted beforehand is destroyed, and the checksum was
  * computed over it, so you get both a zero pointer and a wrong sum.
@@ -26,7 +26,7 @@
  * and consumes a sequence number, so a copy of nx_tcp_socket_send_internal()
  * would have to reproduce the window arithmetic, the transmit-queue linking,
  * the outstanding-bytes accounting and the mutex-drop race check around the
- * checksum -- some eight hundred lines -- or skip the retransmit queue and
+ * checksum, some eight hundred lines, or skip the retransmit queue and
  * leave a hole in the sequence space that stalls the connection permanently
  * the first time the segment is lost.
  *
@@ -43,8 +43,8 @@
  * retransmission of the urgent segment therefore carries the byte but not the
  * URG bit (_nx_tcp_socket_retransmit rebuilds word_3 without it anyway,
  * nx_tcp_socket_retransmit.c:283).  The data is always reliable; only the
- * urgency marking is best effort, which both real callers -- ftp's ABOR and
- * telnet's interrupt -- already assume, since both also send the command
+ * urgency marking is best effort, which both real callers, ftp's ABOR and
+ * telnet's interrupt, already assume, since both also send the command
  * inline.
  *
  * nx_ip_packet_filter is the plain hook and is free; src/netstack/ uses
@@ -54,7 +54,7 @@
  * Two divergences from BSD, both recorded in docs/RESEARCH.md 17
  *
  *   1. The urgent byte is also delivered in the normal stream, as though
- *      SO_OOBINLINE were set -- recv(MSG_OOB) returns a copy.  Taking a byte
+ *      SO_OOBINLINE were set, recv(MSG_OOB) returns a copy.  Taking a byte
  *      back out of the middle of a queued NX_PACKET would mean rewriting a
  *      segment the TCP state machine still owns and still counts in its
  *      sequence space, to hide one byte the caller is about to see again.
@@ -93,7 +93,7 @@
  */
 #define BSD_TCP_URGENT_PTR       1
 
-/* -------------------------------------------------------------- checksum -- */
+/* -------------------------------------------------------------- checksum, */
 
 /*
  * RFC 1624 equation 3: HC' = ~(~HC + ~m + m').  Equation 3 rather than 1 or 2
@@ -110,7 +110,7 @@ static UWORD bsd_oob_csum_update(UWORD hc, UWORD old_word, UWORD new_word)
     return (UWORD)~(UWORD)sum;
 }
 
-/* ---------------------------------------------------------- the send mark -- */
+/* ---------------------------------------------------------- the send mark, */
 
 /*
  * Which segment the filter is looking for.  One record rather than a list: it
@@ -194,7 +194,7 @@ static UINT bsd_oob_ip_filter(VOID *ip_header_ptr, UINT direction)
     return NX_SUCCESS;
 }
 
-/* ------------------------------------------------------------------- send -- */
+/* ------------------------------------------------------------------- send, */
 
 LONG bsd_oob_send(struct AmiSocketBase *base, AmiSocket *sock, UBYTE byte)
 {
@@ -272,7 +272,7 @@ LONG bsd_oob_send(struct AmiSocketBase *base, AmiSocket *sock, UBYTE byte)
     return 1;
 }
 
-/* ---------------------------------------------------------------- receive -- */
+/* ---------------------------------------------------------------- receive, */
 
 /*
  * A segment with URG set has arrived.  Runs on the IP thread, from
@@ -284,7 +284,7 @@ LONG bsd_oob_send(struct AmiSocketBase *base, AmiSocket *sock, UBYTE byte)
  * satisfied a thread already suspended inside nx_tcp_socket_receive() has been
  * dequeued and header-stripped before this runs
  * (nx_tcp_socket_state_data_check.c:1066-1122).  In both the exception is
- * still reported -- WaitSelect() wakes, SIGURG fires -- and the byte is in the
+ * still reported, WaitSelect() wakes, SIGURG fires, and the byte is in the
  * stream either way, since this implementation is always OOBINLINE.  Only
  * recv(MSG_OOB) misses it, and it answers EINVAL.
  */

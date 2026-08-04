@@ -1,9 +1,9 @@
 /*
- * AmiNetXDuo -- IPv6 over a real SANA-II device.
+ * AmiNetXDuo, IPv6 over a real SANA-II device.
  *
  * The companion to ipv6_test.c. That one proves the protocol machinery over
  * the in-tree RAM driver, where both ends are ours; this one drives the whole
- * stack -- config file, SANA-II shim, 0x86DD reader, neighbour discovery --
+ * stack, config file, SANA-II shim, 0x86DD reader, neighbour discovery,
  * against whatever is on the wire, and reports what it found.
  *
  * FS-UAE's SLIRP user-mode NAT is the only network an emulated Amiga has
@@ -14,7 +14,7 @@
  *   - the interface configured its fe80::/64 address from the MAC and it
  *     survived duplicate address detection;
  *   - ICMPv6 echo to ::1 works;
- *   - ICMPv6 echo to our own link-local address works -- a real round trip
+ *   - ICMPv6 echo to our own link-local address works, a real round trip
  *     through _nx_ipv6_packet_send and back, not a shortcut.
  *
  * Routers, prefixes and off-link destinations are printed as findings, not
@@ -361,7 +361,7 @@ UWORD            slot;
         }
         else if ((addr[0] & 0xE0000000UL) == 0x20000000UL)
         {
-            /* 2000::/3 -- a global address, which on this link can only have
+            /* 2000::/3, a global address, which on this link can only have
                come from a router advertisement. */
             t_finding("global address from stateless autoconfiguration",
                       TX_TRUE);
@@ -386,7 +386,7 @@ UWORD            slot;
 
     /*
      * Router solicitation went out when IPv6 was enabled. Give an
-     * advertisement time to come back before deciding nothing is there --
+     * advertisement time to come back before deciding nothing is there,
      * RFC 4861 puts the first RS up to one second after the interface comes
      * up, and a router may take a moment more.
      */

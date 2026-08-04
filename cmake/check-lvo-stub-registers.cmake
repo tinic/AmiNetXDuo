@@ -8,14 +8,14 @@
 # is entered with `jsr a6@(-LVO:W)`.  A local register variable lives in its
 # hard register from its initialiser onwards and GCC does not reload it, so a
 # call made after one of them has been set returns having clobbered d0, d1, a0
-# and a1 -- and the library is entered with the callee's leftovers in the
+# and a1, and the library is entered with the callee's leftovers in the
 # caller's arguments.
 #
 # `tool_sock_sendto()` computed the sockaddr length that way.  At -Os the
 # helper inlines and nothing is wrong; at -O0 it is a real `jsr`, and sendto()
 # reached the library with d0 holding 16 instead of the descriptor, which the
 # stack answered with EBADF.  `ping` printed "could not send the request" on
-# every packet in every build that did not inline the helper -- which is every
+# every packet in every build that did not inline the helper, which is every
 # build without CMAKE_BUILD_TYPE=Release, since the commands only get their -Os
 # under $<CONFIG:Release>.
 #
@@ -32,7 +32,7 @@
 # is hoisted out of the register variables.
 #
 # Written as a rule about registers rather than "no calls before a vector",
-# because the second is not true of ordinary C -- a function may call anything
+# because the second is not true of ordinary C, a function may call anything
 # and then make an NDK inline call, since GCC reloads the arguments after it.
 # The rule here is the one that actually distinguishes the two.
 #

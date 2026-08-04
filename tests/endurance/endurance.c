@@ -1,5 +1,5 @@
 /*
- * Endurance -- hours of mixed TCP traffic, with the pool on a timeline.
+ * Endurance, hours of mixed TCP traffic, with the pool on a timeline.
  *
  *   The other harnesses in this tree run for seconds or minutes: tests/compare
  *   moves a few megabytes, tests/trace moves 512 KB, tests/tcpdrill moves a few
@@ -8,8 +8,8 @@
  *
  *   A report on English Amiga Board (thread 122501) says both AmiTCP 4 and
  *   Roadshow fail after several hours of a TCP connection driven with wildly
- *   varying read/write sequences: they return EAGAIN on a *blocking* socket --
- *   which should be impossible -- after which the socket is finished and the
+ *   varying read/write sequences: they return EAGAIN on a *blocking* socket,
+ *   which should be impossible, after which the socket is finished and the
  *   only thing left is to close it.  The reporter blames mbuf fragmentation
  *   and sequence-number overrun.  Neither claim has ever been tested here.
  *
@@ -17,12 +17,12 @@
  *   (a driver and a responder, each with its own bsdsocket.library base,
  *   because the library is per-opener).  Every transaction picks:
  *
- *     - a direction   -- PUT (driver writes), GET (driver reads) or ECHO
+ *     - a direction  , PUT (driver writes), GET (driver reads) or ECHO
  *                        (driver writes and reads the same bytes back);
- *     - a length      -- log-uniform from 1 byte to `maxxfer`, so the mix is
+ *     - a length     , log-uniform from 1 byte to `maxxfer`, so the mix is
  *                        mostly small with a long tail, which is what copying
  *                        a directory of files over a share looks like;
- *     - a chunk size  -- redrawn log-uniform for every send() and recv() on
+ *     - a chunk size , redrawn log-uniform for every send() and recv() on
  *                        both sides independently, so the two ends never
  *                        agree about framing and the stack has to.
  *
@@ -64,7 +64,7 @@
  *   P2  a blocking send() into a peer that is not reading must wait, and must
  *       not come back short
  *   P3  the same blocking send() while the packet pool is exhausted by
- *       connections nobody reads -- the specific suspect, because
+ *       connections nobody reads, the specific suspect, because
  *       NX_NO_PACKET means both "nothing to read" and "the pool is empty",
  *       and src/bsdsocket/errno.c maps it to EWOULDBLOCK either way
  *   P4  the same three on a non-blocking socket, as the control: EWOULDBLOCK
@@ -72,9 +72,9 @@
  *       anything
  *
  *   P3 is supervised from the main Process rather than timed inside the
- *   worker, because it distinguishes three outcomes -- "returned EAGAIN" (the
+ *   worker, because it distinguishes three outcomes, "returned EAGAIN" (the
  *   reported defect), "waited and then succeeded" (correct) and "never
- *   returned at all" (a deadlock) -- and only an observer outside the call can
+ *   returned at all" (a deadlock), and only an observer outside the call can
  *   tell the third from the second.
  *
  *   bsdsocket.library is reached through its published LVOs, as a third-party
@@ -1489,7 +1489,7 @@ static VOID end_leaker_body(EndWorker *w)
                 UBYTE hdr[END_HDR];
 
                 /* The responder answers a BYE with an ACK; anything shorter
-                   just closes, which is fine -- this is a lifecycle test, not
+                   just closes, which is fine, this is a lifecycle test, not
                    a protocol test. */
                 (VOID)e_recv(w->w_Base, s, hdr, (LONG)sizeof(hdr), 0);
             }
@@ -1745,7 +1745,7 @@ static VOID end_filer_body(EndWorker *w)
         /*
          * Every so often, delete rather than overwrite.  A share that is only
          * ever rewritten in place never exercises create/delete, and the
-         * reported workload -- copying directories back and forth -- is
+         * reported workload, copying directories back and forth, is
          * mostly create and delete.
          */
         if ((round % 7UL) == 6UL)
@@ -2380,7 +2380,7 @@ static VOID end_worker_buf(EndWorker *w, ULONG size)
  * Give the memory back on the way out.
  *
  * AmigaOS does not reclaim AllocMem() memory when a process exits, and this
- * command leaves main() from six places -- so atexit(), not a free before each
+ * command leaves main() from six places, so atexit(), not a free before each
  * return.  A worker that never set w_Done is still running on its buffer, and
  * on ES, which is where every worker lives: those stay, and the leak is the
  * price of not freeing a stack out from under a Process that would not stop.

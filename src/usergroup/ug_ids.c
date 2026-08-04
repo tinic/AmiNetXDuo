@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- usergroup.library: ids, groups, umask, sessions, login name.
+ * AmiNetXDuo, usergroup.library: ids, groups, umask, sessions, login name.
  *
  * AmigaOS has no protection domain: there is one user, and it is root. The
  * set*id() calls therefore always succeed for the default context and simply
@@ -249,7 +249,7 @@ LONG ugl_initgroups(UG_A6, register STRPTR name __asm("a1"),
 
 /*
  * The .sfd declares "ULONG umask(UWORD mask)", so only the low word of d0 is
- * meaningful -- the caller may well leave garbage in the top half.
+ * meaningful, the caller may well leave garbage in the top half.
  */
 ULONG ugl_umask(UG_A6, register ULONG mask __asm("d0"))
 {

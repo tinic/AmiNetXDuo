@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- crypto68k test: E-Clock timing.
+ * AmiNetXDuo, crypto68k test: E-Clock timing.
  *
  * A private copy of the timer glue rather than a link against src/tls, which
  * only builds when AMINETXDUO_TLS is ON; this test has to stand alone, and

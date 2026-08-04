@@ -1,5 +1,5 @@
 /*
- * bsdsocket.library -- gethostby*, gethostname, gethostid.
+ * bsdsocket.library, gethostby*, gethostname, gethostid.
  *
  * Everything routes through netstack_resolve()/netstack_resolve_reverse()
  * (include/aminetxduo/netstack.h), which drives the NetX Duo DNS client and
@@ -64,7 +64,7 @@ static struct hostent *bsd_hostent_fill(struct AmiSocketBase *base,
  *
  *   char *addr_list[2] | char *aliases[1] | ULONG address | name
  *
- * all longword aligned, which is what m68k needs -- and which the caller's
+ * all longword aligned, which is what m68k needs, and which the caller's
  * buffer does not supply.  `buf` is an APTR from an application; every field
  * above is written through a pointer derived from it, so an odd `buf` is an
  * address error on a 68000 at the first store.  The buffer is stepped up to a
@@ -182,7 +182,7 @@ static LONG bsd_herrno_of(LONG status)
  * signal too.
  *
  * The unit is one query per configured name server rather than the 200 ms
- * bsd_wait_sliced() manages, because a DNS query cannot be resumed -- see the
+ * bsd_wait_sliced() manages, because a DNS query cannot be resumed, see the
  * note on netstack_resolve_until().
  */
 BOOL bsd_resolve_break(VOID *arg)
@@ -241,7 +241,7 @@ static LONG bsd_resolve_name(struct AmiSocketBase *base, const char *name,
     return 0;
 }
 
-/* ---------------------------------------------------------------- vectors -- */
+/* ---------------------------------------------------------------- vectors, */
 
 /*
  * h_name is "official name of the host" (autodoc), which is not the string
@@ -255,7 +255,7 @@ static LONG bsd_resolve_name(struct AmiSocketBase *base, const char *name,
  * nx_dns_host_by_name_get() returns one address and no name. Recovering it
  * means either patching vendored source (docs/RESEARCH.md 13.2 says no) or
  * building with NX_DNS_ENABLE_EXTENDED_RR_TYPES and asking nx_dns_cname_get()
- * as a second query per lookup -- which answers for an alias and errors for
+ * as a second query per lookup, which answers for an alias and errors for
  * everything else, so every ordinary name would pay a round trip to learn
  * nothing.
  */
@@ -392,7 +392,7 @@ struct hostent *bsd_gethostbyaddr_r(register STRPTR addr        __asm("a0"),
 
 /*
  * "The returned name is null-terminated unless insufficient space is
- * provided" (autodoc), and the ERRORS list is EFAULT and EPERM only -- so a
+ * provided" (autodoc), and the ERRORS list is EFAULT and EPERM only, so a
  * name that does not fit is truncated into the buffer and the call still
  * succeeds. Taken literally: the terminator is dropped when there is no room
  * for it, rather than always written.
@@ -447,8 +447,8 @@ static ULONG bsd_first_online_address(VOID)
  * disagreeing with what the machine tells the network would be the worse
  * divergence; and the two address-driven steps need an interface that is up
  * with an address, which is not true at the point most programs ask. The
- * configured name covers the autodoc's HOSTNAME step as well -- ENV:HOSTNAME
- * is one of the ranked sources cfg->hostname is resolved from -- so what
+ * configured name covers the autodoc's HOSTNAME step as well, ENV:HOSTNAME
+ * is one of the ranked sources cfg->hostname is resolved from, so what
  * follows is the autodoc's order exactly. netstack_resolve_reverse() consults
  * DEVS:Internet/hosts before it asks a name server, which is the first two
  * steps in one call.

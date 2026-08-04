@@ -1,5 +1,5 @@
 /*
- * TcpHandoff -- give a connection to a program that knows nothing about
+ * TcpHandoff, give a connection to a program that knows nothing about
  * sockets.
  *
  * This is the sequence docs/RESEARCH.md scoped for a telnet server, and the

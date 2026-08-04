@@ -42,7 +42,7 @@
 # TWO CLOCKS
 #
 #   The workload's clock is the GUEST's.  Under this load the emulated A3000
-#   runs at half real time -- measured, twice, at exactly 0.5 -- so -t 5400
+#   runs at half real time, measured, twice, at exactly 0.5, so -t 5400
 #   costs about three hours of wall clock.  The emulator deadline is sized for
 #   that (2x plus a margin) and -D overrides it; a deadline that assumed 1:1
 #   killed a run two thirds of the way through and made a healthy machine
@@ -51,8 +51,8 @@
 # SIZES
 #
 #   -s and -g are the two file sizes in KB.  Their RATIO is the thing to keep
-#   (1 : 10); the absolute sizes are bounded by RAM: -- workers 1 and 2 hold a
-#   copy each, so RAM: alone needs 2 x -s -- and by the guest's memory.  -M
+#   (1 : 10); the absolute sizes are bounded by RAM:, workers 1 and 2 hold a
+#   copy each, so RAM: alone needs 2 x -s, and by the guest's memory.  -M
 #   sets Zorro III Fast RAM, which is what makes the sizes in the original
 #   recipe reachable at all.
 #
@@ -151,7 +151,7 @@ fi
 #
 # TX checksum offload on the peer is not a preference.  With it on, the
 # server's segments leave with an uncomputed checksum, our stack rejects them
-# -- correctly -- and the run reads as "connection made, N bad packets, N
+# correctly, and the run reads as "connection made, N bad packets, N
 # checksum errors" and no transfer, which looks exactly like our defect.
 
 echo "==> peer $PEER ($PEER_ADDR)"
@@ -246,7 +246,7 @@ cp "$OUT/FitzStress"        "$STAGE/FitzStress"
 cp -R "$TREE"               "$STAGE/sysimage"
 
 # comparetree's snprintf("%lld") drags libnix's double formatting in, which
-# opens mathieeedoubbas.library -- a disk library, not a ROM one.  Without it
+# opens mathieeedoubbas.library, a disk library, not a ROM one.  Without it
 # comparetree exits 20 with "mathieeedoubbas.library failed to load" and the
 # content check silently never happens.  The extracted Workbench has it.
 MATHLIB=$(find "$TREE" -iname 'mathieeedoubbas.library' -print -quit)
@@ -274,7 +274,7 @@ EOF
 
 # `&` is SYS_Asynch: a Fitz mount stays resident as a DOS handler and never
 # returns, so nothing after it would run otherwise.  netstat -a brackets the
-# workload so the connection count can be read off both ends of it -- that is
+# workload so the connection count can be read off both ends of it, that is
 # the single-connection assertion, and it is why the mount is given time to
 # settle before the first one is taken.
 cat > "$STAGE/commands.txt" <<EOF
@@ -305,7 +305,7 @@ export AMINETXDUO_AMIBERRY_EXTRA="z3mem_size=$RAM_MB${AMINETXDUO_AMIBERRY_EXTRA:
 # every counter healthy, and reported as a machine that never finished.
 #
 # -t is a deadline on DH0:.done, not on the test.  A run that wedges never
-# writes .done at all, and the timeout IS the result -- which is exactly why
+# writes .done at all, and the timeout IS the result, which is exactly why
 # a deadline that fires for any other reason has to be ruled out first.
 DEADLINE="${DEADLINE:-$((SECONDS_RUN * 2 + 1800))}"
 
@@ -364,7 +364,7 @@ fi
 
 
 # Guest seconds against host seconds.  It is not a curiosity: everything the
-# stack sees -- timers, retransmit backoff, keepalive -- runs on the guest's
+# stack sees, timers, retransmit backoff, keepalive, runs on the guest's
 # clock, and everything scheduling this run runs on the host's.
 WALL=$(grep -o "after [0-9]* s of host wall clock" \
        "$ROOT/build/stress-$TAG-run.log" 2>/dev/null | grep -o "[0-9]*" || true)

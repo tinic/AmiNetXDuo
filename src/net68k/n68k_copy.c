@@ -1,11 +1,11 @@
 /*
- * AmiNetXDuo -- portable fallback for n68k_copy_bytes().
+ * AmiNetXDuo, portable fallback for n68k_copy_bytes().
  *
  * The point of n68k_copy_bytes() is the movem.l loop in n68k_copy.S, which
  * has no C spelling: the compiler cannot emit a memory-to-memory move, let
  * alone a multi-register one.  This file exists so the symbol is present when
- * AMINETXDUO_NET68K_ASM is off -- a host build, or a bisect of a suspected
- * assembly bug -- and so it is not compiled at all on the target.
+ * AMINETXDUO_NET68K_ASM is off, a host build, or a bisect of a suspected
+ * assembly bug, and so it is not compiled at all on the target.
  *
  * It follows the same rule the assembly does, and the same one libm020's
  * memcpy follows: align the destination, then move longwords whatever the
@@ -13,7 +13,7 @@
  * byte per iteration when they do not, is the mistake this replaces.
  *
  * On a 68000 that rule is illegal, not merely slow, and the guard below is the
- * same one n68k_copy.S carries -- see the comment there.  A word or longword
+ * same one n68k_copy.S carries, see the comment there.  A word or longword
  * access to an odd address is an address error on a 68000, so when the two
  * pointers disagree in bit 0 there is no alignment of the destination that
  * leaves the source even, and only the byte loop is available.  When they

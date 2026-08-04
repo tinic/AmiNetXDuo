@@ -1,9 +1,9 @@
 /*
- * AmiNetXDuo -- does a TCP connect leave from the source it was told to?
+ * AmiNetXDuo, does a TCP connect leave from the source it was told to?
  *
  * The case is two interfaces on one subnet.  bind() names an address on the
  * second one and the destination is reachable from both, so the route lookup
- * -- which walks nx_ip_interface[] in order -- answers with the FIRST.  Before
+ * which walks nx_ip_interface[] in order, answers with the FIRST.  Before
  * nxd_tcp_client_socket_source_connect() there was nothing to say otherwise
  * and connect() refused rather than leave from an address nobody asked for.
  *
@@ -13,7 +13,7 @@
  *
  * Real, compiled from third_party/netxduo/common/src into this binary:
  * nxd_tcp_client_socket_connect.c and nxd_tcp_client_socket_source_connect.c
- * -- the whole source decision -- nx_ip_route_find.c, which is what the
+ * the whole source decision, nx_ip_route_find.c, which is what the
  * decision is made of, and nx_tcp_packet_send_syn.c, so the assertion is on
  * the source address the SYN actually carried rather than on a field.
  *

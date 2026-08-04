@@ -1,5 +1,5 @@
 /*
- * ResolveBreak -- how long a name lookup blocks, and whether Ctrl-C gets it
+ * ResolveBreak, how long a name lookup blocks, and whether Ctrl-C gets it
  * back.
  *
  * The Roadshow autodoc requires a blocking operation to be abortable:
@@ -10,7 +10,7 @@
  *
  * Neither half can be shown by a build or by a lookup against a working name
  * server.  It needs a server that answers nothing, a clock, and something to
- * press Ctrl-C in the middle -- so this points the resolver at an address on a
+ * press Ctrl-C in the middle, so this points the resolver at an address on a
  * network reserved for documentation (RFC 5737 TEST-NET-1, 192.0.2.0/24), which
  * nothing routes and nothing answers, and times three arms:
  *
@@ -23,7 +23,7 @@
  *      the number that decides whether Ctrl-C feels like it works.
  *
  * Everything goes through the published LVOs.  Nothing of ours is linked, so
- * the same binary measures any bsdsocket.library -- which is the point: the
+ * the same binary measures any bsdsocket.library, which is the point: the
  * before and after numbers come from one probe.
  *
  *   ResolveBreak [blackhole-address] [name] [seconds-before-break]
@@ -199,7 +199,7 @@ int main(int argc, char **argv)
 
     /*
      * Leave exactly one name server, and let it be one that cannot answer.
-     * The list has to be walked to a private copy first -- removing from it
+     * The list has to be walked to a private copy first, removing from it
      * while holding it would be walking a list that is being changed.
      */
     {

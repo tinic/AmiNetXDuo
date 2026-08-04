@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the socket leak of docs/RESEARCH.md 37.5, reduced.
+ * AmiNetXDuo, the socket leak of docs/RESEARCH.md 37.5, reduced.
  *
  * 37.5 measured AvailMem falling 1009 bytes/s and 776 AmiSocket structures
  * NetX Duo never released, under a concurrent workload, with
@@ -10,16 +10,16 @@
  * This program is a matrix of socket lifecycles, each measured the same way,
  * so the arms that leak can be told from the arms that do not, in one run:
  *
- *   A  dial a port with nothing on it                  -- 37.5's control
- *   B  dial a port whose listener never accept()s      -- the named suspect
+ *   A  dial a port with nothing on it                 , 37.5's control
+ *   B  dial a port whose listener never accept()s     , the named suspect
  *   C  the same, with a non-blocking connect()
- *   D  full lifecycle, the client closes first         -- 37.5's other control
+ *   D  full lifecycle, the client closes first        , 37.5's other control
  *   E  full lifecycle, the server closes first
- *   F  full lifecycle, only the client closes at all   -- a half-open peer
- *   G  three dials, then three accept()s, eight times   -- 37.4's defect
+ *   F  full lifecycle, only the client closes at all  , a half-open peer
+ *   G  three dials, then three accept()s, eight times  , 37.4's defect
  *
  * The measurement is AvailMem(MEMF_PUBLIC), the library's own live socket
- * count, and a histogram of what state those sockets are in -- all three from
+ * count, and a histogram of what state those sockets are in, all three from
  * NetStackQuery (docs/RESEARCH.md 34), sampled before and after each arm.
  * A leaked AmiSocket shows up in all three: AvailMem is what the machine
  * agrees it has lost, the count is what the library still owns, and the
@@ -49,7 +49,7 @@
 static const char version_tag[] __attribute__((used)) =
     "$VER: refused_leak_test 1.0 (26.7.2026)";
 
-/* ------------------------------------------------------------------ LVOs --
+/* ------------------------------------------------------------------ LVOs,
  *
  * Hand-vectored for the same reason tests/endurance/endurance.c does it: the
  * NDK inlines read the base from a global, and nothing here wants that.
@@ -58,7 +58,7 @@ static const char version_tag[] __attribute__((used)) =
  * d1, a0 and a1.  A register that is only an input operand is one GCC may
  * assume the asm leaves alone, so a stub that passes an argument in d1 and
  * does not also declare d1 written lets GCC keep a value there across the
- * `jsr` -- and reuse, or spill, whatever the library left behind.  That turned
+ * `jsr`, and reuse, or spill, whatever the library left behind.  That turned
  * IoctlSocket(FIONBIO) into a call with a garbage request code and wedged a
  * test for a day (docs/RESEARCH.md 42).  The `_clob_*` dummies bound to those
  * registers and listed as outputs are the NDK's own idiom, from
@@ -479,7 +479,7 @@ static ULONG leak_arm(struct Library *base, UWORD port, UWORD shape,
     }
 
     /* The closing sweep runs from CloseSocket(), so give the last rounds the
-       same chance to complete that every earlier round had -- and, for an arm
+       same chance to complete that every earlier round had, and, for an arm
        that is about the sweep's own deadline, wait it out. */
     Delay(settle);
     leak_kick_sweep(base);
@@ -543,8 +543,8 @@ static VOID leak_report(const char *name, ULONG refused,
 
 /*
  * Whether the listener keeps accepting.  docs/RESEARCH.md 37.4 found one that
- * stopped for good -- 1,951 consecutive EINVALs after a single failed
- * relisten -- and the trigger for that relisten failure is not established,
+ * stopped for good, 1,951 consecutive EINVALs after a single failed
+ * relisten, and the trigger for that relisten failure is not established,
  * so this cannot provoke it directly.  It instead drives the path the failure
  * was seen on hardest: three dials before any accept(), so two of them sit in
  * the listen queue and the re-arm after each accept() has to replay a queued
@@ -801,7 +801,7 @@ int main(VOID)
      *
      * Counted differently from the others: this arm abandons 32 server
      * descriptors, so 32 more live sockets is the arm working, not leaking.
-     * The clients are the tell -- each sent its FIN and waits for one that is
+     * The clients are the tell, each sent its FIN and waits for one that is
      * never coming, so after the sweep's deadline every one must be gone.  Any
      * still in FIN_WAIT_1 or FIN_WAIT_2 is a socket the sweep tried and failed
      * to collect, the 830 NX_STILL_BOUND of 37.5.

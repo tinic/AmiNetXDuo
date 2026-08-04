@@ -6,7 +6,7 @@
 #   tools/winuae-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-a ARGS] [-n] [-x]
 #                       [-K] <executable> [extra files...]
 #
-# -a passes arguments to the executable under test -- `-a 'eth0 QUIET'`.  Same
+# -a passes arguments to the executable under test, `-a 'eth0 QUIET'`.  Same
 # string as AMINETXDUO_GUEST_ARGS; the flag wins when both are set.
 #
 # -m selects the machine.  A3000 is the default and the one that matters: a
@@ -14,7 +14,7 @@
 # actually aimed at.  A1200 (68EC020) and A4000 (68040) are also here.
 # -c overrides the CPU on any model (68020/68030/68040/68060).
 # -n attaches an emulated Commodore A2065 on WinUAE's SLIRP user-mode NAT
-# (10.0.2.0/24, gateway and DHCP/DNS 10.0.2.2) -- the same network the FS-UAE
+# (10.0.2.0/24, gateway and DHCP/DNS 10.0.2.2), the same network the FS-UAE
 # harness gives you, so tests/netstack expectations carry over unchanged.
 # -N picks a different card; see the board table below.
 # -x turns warp mode off and asks for cycle accounting.  See the -x block.
@@ -28,7 +28,7 @@
 #   * FS-UAE switches cycle accounting off for every CPU above a 68020, so no
 #     68030/68040/68060 timing claim can be made on it at all.  WinUAE has
 #     cycle-exact modes above the 68020.  Whether they are accurate ENOUGH is a
-#     separate question this harness does not answer -- see -x.
+#     separate question this harness does not answer, see -x.
 #
 # HOW IT WORKS
 #
@@ -144,15 +144,15 @@ shift $((OPTIND - 1))
 #   ne2000_pcmcia   RTL8019 PCMCIA (NE2000)           cnet.device
 #
 # ne2000_pcmcia is the odd one.  It is a PC Card behind Gayle, so it needs
-# pcmcia=true and a machine that has a Gayle -- an A1200, not the A3000
-# default -- and it is BOARD_NONAUTOCONFIG_BEFORE in WinUAE, so it never
+# pcmcia=true and a machine that has a Gayle, an A1200, not the A3000
+# default, and it is BOARD_NONAUTOCONFIG_BEFORE in WinUAE, so it never
 # appears in the autoconfig board list however well it is working.  The only
 # proof it is there is a driver opening it.
 #
 # The A2065 keeps its own legacy config key; everything else is an expansion
 # board and is switched on with <name>_rom_file=:ENABLED.  All of them come up
-# on SLIRP without being asked to -- slirp is WinUAE's default network device
-# -- which is why there is no per-board backend option below.  a2065=none is
+# on SLIRP without being asked to, slirp is WinUAE's default network device
+# which is why there is no per-board backend option below.  a2065=none is
 # the only "fit the card, wire it to nothing" setting proven to work; the
 # equivalent for the other boards is UNTESTED.
 case "$BOARD" in
@@ -161,7 +161,7 @@ case "$BOARD" in
         #
         # A bridged adapter is NOT just its pcap name.  WinUAE stores it as
         # rpcap://<pcap name> and keeps it in the board's rom_options, and the
-        # legacy `a2065=' key alone is ignored -- even `a2065=slirp_inbound',
+        # legacy `a2065=' key alone is ignored, even `a2065=slirp_inbound',
         # a name WinUAE hardcodes, comes back as 'slirp' in the log.  Both
         # lines are written, which is what WinUAE itself saves.
         #
@@ -198,7 +198,7 @@ ${BOARD}_rom_options=$AMINETXDUO_WINUAE_BOARD_OPTIONS" ;;
     ne2000_pcmcia)
                # inserted=true is what actually puts the card in the slot.
                # Without it WinUAE maps the Gayle windows, logs nothing, and
-               # Kickstart's card.resource never initialises -- which reads
+               # Kickstart's card.resource never initialises, which reads
                # from the guest as a driver that cannot find its hardware.
                BOARD_LINE="pcmcia=true
 ne2000pcmcia_rom_file=:ENABLED
@@ -216,7 +216,7 @@ EXE_NAME=$(basename "$EXE")
 TAG="${AMINETXDUO_RUN_TAG:-winuae}"
 # The remote run directory, the serial port and the local staging directory are
 # all keyed on the tag so two runs never share any of them.  The emulator
-# itself is still serialised by a mutex on the Windows side -- one interactive
+# itself is still serialised by a mutex on the Windows side, one interactive
 # session, one machine.
 PORT=$((11000 + $(printf '%s' "$TAG" | cksum | cut -d' ' -f1) % 900))
 
@@ -230,8 +230,8 @@ RRUN_FWD="$RROOT_FWD/run/$TAG"
 # text says; 4 is 2 MB.  Verified from the emulator's memory map, not assumed:
 # `2048K/1 = 2048K ID* C32 Chip memory`.
 #
-# a3000mem_size is the A3000/A4000's own RAMSEY memory on the CPU bus -- 32
-# bits wide -- and it is the entire point of having an A3000 profile, exactly
+# a3000mem_size is the A3000/A4000's own RAMSEY memory on the CPU bus, 32
+# bits wide, and it is the entire point of having an A3000 profile, exactly
 # as motherboard_ram is under FS-UAE.  fastmem_size on these machines is Zorro
 # II, i.e. a 16-bit path, and putting the working set there would measure the
 # 68030 while throwing away the reason to use one.  Confirmed in the memory
@@ -259,7 +259,7 @@ case "$MODEL" in
         # The supported floor, and the machine a PCMCIA card actually lives in.
         # 1 MB of chip and nothing else: chipmem_size counts 512 KB units, so 2
         # is the megabyte, and no Fast RAM at all is what keeps the credit-card
-        # window at $600000 clear (see the note below -- an A1200 with 8 MB of
+        # window at $600000 clear (see the note below, an A1200 with 8 MB of
         # Z2 Fast cannot see its own PCMCIA slot, and neither can a real one).
         #
         # Kickstart 2.05 rather than 3.1: 37.350 is the A600HD ROM and carries
@@ -280,7 +280,7 @@ esac
 # The A1200's PCMCIA credit-card window starts at $600000, and 8 MB of Zorro II
 # Fast RAM at $200000 runs straight over it.  Kickstart's card.resource then
 # declines to initialise and every PCMCIA driver reports that it cannot find
-# its hardware -- which is what a real A1200 with 8 MB of Z2 Fast does too.
+# its hardware, which is what a real A1200 with 8 MB of Z2 Fast does too.
 # 4 MB stops short of the window; the rest comes back as Zorro III, out of the
 # way, so a run on this board has as much memory as a run on any other.
 Z3MEM=0
@@ -378,7 +378,7 @@ done
 
 # ENV: is DH0:env, which the extras loop cannot write into: cp -R of a
 # directory called `env' would land in DH0:env/env.  Drivers that read their
-# settings from ENV: -- x-surf-100.device reads ENV:sana2/ -- need the contents
+# settings from ENV:, x-surf-100.device reads ENV:sana2/, need the contents
 # merged instead.
 if [ -n "${AMINETXDUO_GUEST_ENVDIR:-}" ]; then
     [ -d "${AMINETXDUO_GUEST_ENVDIR}" ] || {
@@ -411,8 +411,8 @@ QUIT_LINE=""
 [ -f "$UAEQUIT" ] && { cp "$UAEQUIT" "$HD/c/uaequit"; QUIT_LINE="c:uaequit"; }
 
 # AMINETXDUO_GUEST_PRECMD runs before the executable, one command per line.
-# A command that needs the network up -- nc, ping, anything using
-# bsdsocket.library rather than linking the stack -- wants an
+# A command that needs the network up, nc, ping, anything using
+# bsdsocket.library rather than linking the stack, wants an
 # AddNetInterface here, and the library and DEVS:NetInterfaces staged as
 # extra files.
 # Enforcer needs a real MMU and no JIT cache: it traps through the MMU tables,
@@ -588,7 +588,7 @@ case "$REASON" in
     quit)
         # UAEquit is the normal end, so RC is there. Without it the emulator
         # went away before the guest finished, and reporting the empty RC as 0
-        # turns that into a pass -- which is how a WinUAE that died mid-suite
+        # turns that into a pass, which is how a WinUAE that died mid-suite
         # read as a truncated but successful run for three attempts.
         if [ -n "$RC" ]; then
             status=$RC

@@ -1,25 +1,25 @@
 /*
- * AmiNetXDuo -- the RFC 6298 round-trip time estimator, as arithmetic.
+ * AmiNetXDuo, the RFC 6298 round-trip time estimator, as arithmetic.
  *
  * Sections 2.2 and 2.3 are four lines of integer maths, and getting them
  * wrong is quiet: the connection still works, the timeout is merely the wrong
  * length, and no capture shows which of the two weighted averages drifted.
- * The classic way to get it wrong is order -- section 2.3 computes RTTVAR
+ * The classic way to get it wrong is order, section 2.3 computes RTTVAR
  * against the SRTT this sample has NOT yet moved, and updating SRTT first
  * gives an answer that is close enough to look right and is not.  So the
  * expected values below are worked out by hand in the comments, and one case
  * exists purely to separate the two orders.
  *
  * Real, compiled from third_party/netxduo/common/src into this binary:
- * nx_tcp_socket_rtt_sample.c, and around it the whole path that feeds it --
+ * nx_tcp_socket_rtt_sample.c, and around it the whole path that feeds it,
  * nx_tcp_socket_create.c, nx_tcp_socket_send_internal.c,
- * nx_tcp_socket_state_ack_check.c and nx_tcp_socket_retransmit.c -- so the
+ * nx_tcp_socket_state_ack_check.c and nx_tcp_socket_retransmit.c, so the
  * second half of this file asserts on the wiring rather than on the formula:
  * which segment gets timed, which acknowledgment ends the measurement, and
  * which one is thrown away because Karn's algorithm says it is ambiguous.
  *
  * Stubbed: everything that would touch a driver, a packet pool or another
- * thread, exactly as test_tcp_retries_host.c stubs them, plus the clock --
+ * thread, exactly as test_tcp_retries_host.c stubs them, plus the clock,
  * tx_time_get() reads a variable this file sets, so a round trip of any
  * length costs nothing and is exact.
  *
@@ -464,7 +464,7 @@ static void formula_cases(void)
     h_check_eq(h_sock.nx_tcp_socket_timeout_rate, NX_TCP_RTO_MINIMUM,
                "the section 2.4 floor did not hold");
 
-    /* A measurement of nothing is one tick of clock granularity, not zero --
+    /* A measurement of nothing is one tick of clock granularity, not zero,
        zero would make the first sample leave SRTT at 0 and every later one
        re-initialise. */
     h_fixture();
@@ -507,7 +507,7 @@ static void formula_cases(void)
     /*
      * Twenty identical samples at 40 ticks.  SRTT never moves, RTTVAR decays
      * towards nothing, and the computed timeout walks down until section
-     * 2.4's floor catches it -- so a short path ends up with exactly the one
+     * 2.4's floor catches it, so a short path ends up with exactly the one
      * second the stack used to use unconditionally, which is the point: the
      * estimator costs nothing there and earns its keep on a long path.
      */
@@ -528,7 +528,7 @@ static void formula_cases(void)
     /*
      * And a steady LONG path settles above it.  Twenty samples at 200 ticks
      * (four seconds) leave SRTT at 200 and the timeout above the floor by
-     * more than a factor of four -- which a fixed one-second base cannot do
+     * more than a factor of four, which a fixed one-second base cannot do
      * and is the case the estimator exists for.
      */
     h_fixture();

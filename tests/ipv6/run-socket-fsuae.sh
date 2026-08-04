@@ -7,7 +7,7 @@
 # Stages LIBS:bsdsocket.library, LIBS:usergroup.library and the DEVS: config.
 #
 # NO DRIVER.  The test talks only over ::1, but the library will not bring a
-# stack up with no interface to put it on -- so the test installs one itself,
+# stack up with no interface to put it on, so the test installs one itself,
 # tests/tcpdrill/tapdev.c, made at run time with MakeLibrary()/AddDevice().
 # DEVS:NetInterfaces/tap0 names it and src/sana2/ brings it up through exactly
 # the code a real card goes through.

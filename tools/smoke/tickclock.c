@@ -15,7 +15,7 @@
  * numbers say which port this is rather than the probe having to know.
  *
  * ami_millis() is the reference.  It is E-Clock based and has nothing to do
- * with ThreadX, which is the point -- and it keeps working inside the Forbid(),
+ * with ThreadX, which is the point, and it keeps working inside the Forbid(),
  * because ReadEClock() reads a CIA and never waits.
  *
  *   AMINETXDUO_RUN_TAG=tick ./tools/fsuae-run.sh   -t 120 build/cm/tools/smoke/tickclock
@@ -69,7 +69,7 @@ static ULONG tx_ms(void)
 /*
  * Hold the machine for `ms` and give the tick task no chance to run.  Forbid()
  * stops every task switch, so the tick's timer.device requests still complete
- * and still Signal() it, and it still is not dispatched -- which is exactly the
+ * and still Signal() it, and it still is not dispatched, which is exactly the
  * shape of the 745 ms stall in docs/RESEARCH.md 42.6.
  */
 static ULONG hold_machine(ULONG ms)

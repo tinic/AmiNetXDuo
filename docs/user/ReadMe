@@ -1,8 +1,8 @@
-AmiNetXDuo -- TCP/IP for classic AmigaOS
+AmiNetXDuo, TCP/IP for classic AmigaOS
 ========================================
 
 AmiNetXDuo is a bsdsocket.library for classic AmigaOS: the shared library that
-Amiga network software -- browsers, FTP clients, telnet, file sharing --
+Amiga network software (browsers, FTP clients, telnet, file sharing)
 opens in order to reach the network. It talks to your network card through
 the card's ordinary SANA-II driver, and it is configured with the same
 files and the same commands as Roadshow.
@@ -98,7 +98,7 @@ every boot:
 
   C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET
 
-If you run a server on this machine -- an FTP daemon, a web server --
+If you run a server on this machine, an FTP daemon or a web server,
 list it in DEVS:Internet/service_discovery and other machines on the
 network will find it by browsing:
 
@@ -123,7 +123,7 @@ no DHCP server answering, a cable or driver problem, a missing interface
 file, and a stack that is up while DNS is not.
 
 From another machine on the same network, this Amiga also answers to its
-own name with .local on the end -- "ping amiga.local" from a Mac, from
+own name with .local on the end, "ping amiga.local" from a Mac, from
 Linux with Avahi, or from Windows 10 or later. Nothing has to be set up
 for that, and it keeps working when there is no DHCP server to hand out
 an address anyone could guess.

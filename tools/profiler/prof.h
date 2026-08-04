@@ -1,5 +1,5 @@
 /*
- * Profile -- timer-driven PC sampling for AmigaOS/m68k.
+ * Profile, timer-driven PC sampling for AmigaOS/m68k.
  *
  * Self-contained: this core needs nothing but exec, dos and the chipset, so
  * it can be lifted out of this tree whole.  tools/profiler/profile.c drives an
@@ -20,7 +20,7 @@
  *
  *      0(SP)   SR      word
  *      2(SP)   PC      long
- *      6(SP)   format/vector word   -- 68010 and up only
+ *      6(SP)   format/vector word  , 68010 and up only
  *
  * That layout is identical on every 68k.  The 68010+ frame is EIGHT bytes
  * rather than six, but the extra word is APPENDED; SR and PC do not move, so
@@ -28,7 +28,7 @@
  * anyway and prof_write() checks that every sample carried format $0.
  *
  * WHAT RAISES THE INTERRUPT: an audio channel, at level 4.  A CIA timer is the
- * obvious choice and does not work -- see the source table in prof.c for the
+ * obvious choice and does not work, see the source table in prof.c for the
  * two separate ways both CIA-B timers were lost.  Audio DMA raises the
  * interrupt and nothing latches, so nothing wedges.  Level 4 also means a
  * sample can be taken inside a level-2 or level-3 handler, which is where a
@@ -37,7 +37,7 @@
  * WHICH CHANNEL: 3 by preference, then 2, 1, 0, and the channel is taken
  * through audio.device rather than by poking DMACON.  A general-purpose
  * profiler runs against programs that may want the audio hardware themselves,
- * so it has to arbitrate for it and be told when it loses -- see prof_audio_*
+ * so it has to arbitrate for it and be told when it loses, see prof_audio_*
  * in prof.c.
  *
  * WHAT IS INVISIBLE, stated here because a profiler that hides its blind
@@ -64,9 +64,9 @@
 #include <dos/dos.h>
 
 /*
- * One sample, 16 bytes -- four more than without a timestamp.
+ * One sample, 16 bytes, four more than without a timestamp.
  *
- * ps_Time is the raw longword at $DFF004 -- VPOSR in the high word, VHPOSR in
+ * ps_Time is the raw longword at $DFF004, VPOSR in the high word, VHPOSR in
  * the low.  A single `move.l` with no latch, no side effect and no chip that
  * has to be acknowledged, which is the same reasoning that chose audio over
  * the CIA in the first place.  The beam position is the only free-running
@@ -87,7 +87,7 @@
  * It wraps once a frame, i.e. every ~20 ms PAL / ~17 ms NTSC, and consecutive
  * samples at any rate this tool will run at are far closer together than that,
  * so unwrapping is unambiguous.  A gap that swallowed a WHOLE frame would
- * alias -- ph_Frames is the independent count that catches that.
+ * alias, ph_Frames is the independent count that catches that.
  *
  * prof_vector.S knows these offsets.
  */
@@ -122,7 +122,7 @@ struct ProfSample
 #define PROFF_LOSTAUDIO 0x00000010UL    /* something took the channel back    */
 #define PROFF_RATEDIP   0x00000020UL    /* a window ran well under rate       */
 
-/* Everything is big-endian and naturally aligned -- the file is written by the
+/* Everything is big-endian and naturally aligned, the file is written by the
    68k and read by tools/profiler/profreport.py. */
 struct ProfHeader
 {
@@ -171,7 +171,7 @@ struct ProfLib
 struct ProfLVO  { ULONG pv_Target; UWORD pv_LibIdx; UWORD pv_LVO; };
 
 /*
- * One hunk of a library that let its seglist be found -- the same pair as
+ * One hunk of a library that let its seglist be found, the same pair as
  * ProfSeg, plus which library and which hunk of it.  This is what turns a
  * sample inside a shared library from a module into a function: subtract
  * pls_Base and the remainder is a link-time offset into that hunk, which the
@@ -189,8 +189,8 @@ struct ProfLibSeg
  * HOW A LIBRARY LETS ITS SEGLIST BE FOUND.
  *
  * A library base is a private struct.  Exec publishes the two dozen bytes of
- * struct Library at the front of it and nothing after, so the seglist -- which
- * every library keeps, because Expunge has to return it -- sits at an offset
+ * struct Library at the front of it and nothing after, so the seglist, which
+ * every library keeps, because Expunge has to return it, sits at an offset
  * only that library's own source knows.  Reading it from a hard-coded offset
  * would be a profiler asserting a layout it cannot check, and the first field
  * anybody inserted would move it silently: the walk would still find eight
@@ -199,13 +199,13 @@ struct ProfLibSeg
  *
  * So the library says where it is instead, in a record that identifies itself:
  *
- *   * Anywhere in the library's own positive half, at any word boundary -- a
+ *   * Anywhere in the library's own positive half, at any word boundary, a
  *     longword on m68k is aligned to two bytes, so a record of longwords lands
  *     four-aligned only by luck.  The profiler scans [base, base + PosSize)
  *     for the magic; no offset is agreed in advance and none can go stale.
  *   * pst_LibBase must equal the base it was found in, so a copy of the record
- *     that has been moved -- a cloned library base, a stale image in freed
- *     memory -- is refused rather than believed.
+ *     that has been moved, a cloned library base, a stale image in freed
+ *     memory, is refused rather than believed.
  *   * pst_Sum makes the five longwords add to zero, so the magic appearing by
  *     accident in somebody's data is not enough.
  *
@@ -213,7 +213,7 @@ struct ProfLibSeg
  * hull of the library's own jump-table targets must lie inside the hunks the
  * seglist walk produced.  A seglist that fails that is discarded and the
  * library falls back to being named by module.  Which is also what a library
- * that carries no tag at all gets -- most of them, since this is our
+ * that carries no tag at all gets, most of them, since this is our
  * convention and not Exec's.  See prof_find_segtag() in prof.c.
  *
  * A library adopting this needs no header from here.  It is five longwords:
@@ -316,7 +316,7 @@ VOID        prof_free(VOID);
 /* -------------------------------------------------------- what is loaded --- */
 
 /*
- * Record the hunks of a seglist as the PROFILED PROGRAM -- the thing the host
+ * Record the hunks of a seglist as the PROFILED PROGRAM, the thing the host
  * cross-checks against the executable.  Call before prof_start(); Profile
  * calls it with what LoadSeg() returned.
  */

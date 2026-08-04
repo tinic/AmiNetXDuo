@@ -1,5 +1,5 @@
 /***************************************************************************
- * AmiNetXDuo -- ThreadX thread adoption for pre-existing Exec Tasks.
+ * AmiNetXDuo, ThreadX thread adoption for pre-existing Exec Tasks.
  *
  * SPDX-License-Identifier: MIT
  **************************************************************************/
@@ -48,8 +48,8 @@
 /*    - an adopted Task that blocks on something other than ThreadX while  */
 /*      holding the baton.  Wait() on an Intuition port, a DOS packet or a */
 /*      device IORequest leaves the baton held by a task that is not       */
-/*      runnable, and the entire stack -- IP thread, timer thread, every   */
-/*      other socket user -- stops behind it.  Nothing in the port can     */
+/*      runnable, and the entire stack, IP thread, timer thread, every   */
+/*      other socket user, stops behind it.  Nothing in the port can     */
 /*      detect this; the caller must adopt on entry to a stack call,       */
 /*      orphan on exit, and never hold the baton across application code.  */
 /*    - a Task terminated by Exec (or crashing) while adopted never        */
@@ -72,7 +72,7 @@
 /*        on completion;                                                  */
 /*      - a cancellation path, because WaitSelect() must abort on an Exec */
 /*        break signal while a worker is parked inside                    */
-/*        nx_tcp_socket_receive() -- tx_thread_wait_abort() on the worker */
+/*        nx_tcp_socket_receive(), tx_thread_wait_abort() on the worker */
 /*        plus a protocol for what the worker does next.                  */
 /*                                                                        */
 /*    It buys: no application task ever holds the baton, so the "adopted  */
@@ -135,7 +135,7 @@ BYTE    bit;
  *
  * NetX Duo's caller checks ask "is a thread calling me" and the generic answer
  * is _tx_thread_system_state == 0, which on a target means "no ISR is running"
- * -- a property of the CPU, and therefore the same answer for everybody.  Here
+ * a property of the CPU, and therefore the same answer for everybody.  Here
  * interrupt context is a Task holding the core lock, and the teardown paths in
  * this file raise the counter with switching enabled because
  * _tx_thread_delete() can Wait() in the reaper.  So the generic answer is
@@ -350,7 +350,7 @@ UINT         wake;
     /* The core lock stays held across the suspend.  _tx_thread_system_state is
        one global counter and every Task reads it, NetX Duo's caller checks
        included, so a window in which it is raised with task switching enabled
-       makes every other Task look like an ISR -- and a socket call in flight on
+       makes every other Task look like an ISR, and a socket call in flight on
        one comes back NX_CALLER_ERROR.  Nothing under _tx_thread_suspend() can
        Wait() while it is raised: every _tx_thread_system_return() in
        tx_thread_system_suspend.c is behind TX_THREAD_SYSTEM_RETURN_CHECK, which
@@ -364,7 +364,7 @@ UINT         wake;
      *
      * _tx_thread_execute_ptr == TX_NULL means no ThreadX thread is ready, so
      * the poke would wake the scheduler Task, have it find nothing and put it
-     * back to sleep -- two Exec context switches, measured at 202 us on a
+     * back to sleep, two Exec context switches, measured at 202 us on a
      * 14 MHz 68020, a quarter of what this bracket used to cost.  Skipping it
      * cannot lose a dispatch: every path that makes a thread ready afterwards
      * wakes the scheduler itself, from an interrupt
@@ -499,8 +499,8 @@ BYTE         sig;
 
     /* The core lock stays held, for the reason tx_amiga_adopt_suspend() gives.
        _tx_amiga_reap() is the one thing under delete that Wait()s, and it
-       returns at its first test for an adopted thread -- which this is, checked
-       above -- so nothing here blocks.  */
+       returns at its first test for an adopted thread, which this is, checked
+       above, so nothing here blocks.  */
     (VOID) _tx_thread_terminate(thread_ptr);
     (VOID) _tx_thread_delete(thread_ptr);
 
@@ -510,7 +510,7 @@ BYTE         sig;
        FreeSignal() only works on the Task that allocated the bit, so a foreign
        caller can only drop the registration and leave the bit to die with its
        owner.  When the owner is the one calling, the bit is recoverable and
-       leaving it is a permanent loss out of that Task's 32 -- netstack.c
+       leaving it is a permanent loss out of that Task's 32, netstack.c
        reaches here on the owning Task from both ami_netstack_enter_cached()
        and ami_netstack_release().  */
     sigmask =  0UL;
@@ -569,8 +569,8 @@ UINT         wake;
        check, and against tx_thread_amiga_signal_owner rather than against it.
        _tx_amiga_reap() zeroes tx_thread_amiga_task for an adopted thread on the
        way through _tx_thread_delete(), so a caller arriving here after that ran
-       failed the old ownership test, took TX_CALLER_ERROR, and this branch --
-       the one written to recover the bit -- could never be reached.  Thirty-two
+       failed the old ownership test, took TX_CALLER_ERROR, and this branch,
+       the one written to recover the bit, could never be reached.  Thirty-two
        adoptions of a torn-down thread on one Task and no adoption on it ever
        succeeds again.  netstack.c's ami_netstack_enter_cached() is the path
        that does exactly this.  */

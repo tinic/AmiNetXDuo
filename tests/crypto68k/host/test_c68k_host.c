@@ -1,12 +1,12 @@
 /*
- * AmiNetXDuo -- crypto68k correctness gate, host tier.
+ * AmiNetXDuo, crypto68k correctness gate, host tier.
  *
  * The same four checks as tests/crypto68k/c68k_test.c, run on the build
  * machine instead of under FS-UAE:
  *
  *   1. Known answers from Python's arbitrary-precision integers, including
  *      the full RSA-2048 public and private operations, straight out of the
- *      generated c68k_vectors.h -- the same file the Amiga tier reads.
+ *      generated c68k_vectors.h, the same file the Amiga tier reads.
  *   2. The limb primitive against a straight-line C model, over random limb
  *      counts including 0 and 1, operands biased to 0 and 0xFFFFFFFF.
  *   3. Montgomery multiply and square against the unmodified vendored
@@ -20,7 +20,7 @@
  *
  * The checks are duplicated here rather than built from c68k_test.c because
  * that file is ILP32 code by construction: it logs through RawDoFmt(), which
- * takes every argument longword sized, so it passes strings as `(LONG)ptr` --
+ * takes every argument longword sized, so it passes strings as `(LONG)ptr`,
  * lossless on m68k, truncating on any LP64 host.  Retargeting it would mean
  * editing the program the emulator tier runs.
  *
@@ -57,7 +57,7 @@ static c68k_limb    t_m[T_MAX_LIMBS];
 /*
  * t_x and t_y are +8 because section 2 sweeps n up to 70 to catch the loop
  * tails, and T_MAX_LIMBS is 64.  Without the slack the test wrote past t_y
- * for n in 65..70 and reported ~8% of its own trials as addmul mismatches --
+ * for n in 65..70 and reported ~8% of its own trials as addmul mismatches,
  * 316 of 4000, against the 6/71 = 8.45% of draws that overrun.
  */
 static c68k_limb    t_x[T_MAX_LIMBS + 8u];
@@ -345,7 +345,7 @@ UINT                    bad_sqr = 0;
 
         /* Forced low so that every even width here goes through Karatsuba and
            is checked against the vendored routine, not just against our own
-           schoolbook.  Random operands, so the reference is trustworthy --
+           schoolbook.  Random operands, so the reference is trustworthy,
            unlike the near-maximal ones in 3b. */
         c68k_karatsuba_limbs = 2u;
 
@@ -588,8 +588,8 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
  * nothing about Karatsuba, at the widths where the split actually engages.
  */
 /*
- * c68k_mod() against the vendored divider, which -- unlike the vendored
- * Montgomery -- has no known defect and is what the rest of this suite has
+ * c68k_mod() against the vendored divider, which, unlike the vendored
+ * Montgomery, has no known defect and is what the rest of this suite has
  * always been validated against.
  *
  * Two code paths in algorithm D are almost unreachable by chance and are
@@ -601,8 +601,8 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
  *                   for it before dividing.  Driven by giving u and m the
  *                   same top limb.
  *   the add-back    the estimate one too large, needing the divisor added
- *                   back.  Normalisation makes it rare -- textbooks quote
- *                   about one in 2^31 for random operands -- so it is driven
+ *                   back.  Normalisation makes it rare, textbooks quote
+ *                   about one in 2^31 for random operands, so it is driven
  *                   by the classic shape: a divisor just above a power of the
  *                   radix, with a dividend that straddles it.
  *
@@ -918,7 +918,7 @@ static void t_bulk_aes(unsigned variant)
     t_bytes("FIPS-197 AES-256 plaintext", back, t_aes_pt, 16u);
 
     /* The awkward shapes: a chaining value carried across calls, a decrypt
-       in place, and zero blocks -- each of which has been somebody's CBC
+       in place, and zero blocks, each of which has been somebody's CBC
        bug. */
     (void)c68k_aes_key_set(&aes, t_aes_k128, 128u);
     for (i = 0; i < 16u; i++)
@@ -1158,7 +1158,7 @@ static void t_bulk_chacha(void)
             (const unsigned char *)t_aead_plain, 114);
     t_bytes("RFC 8439 2.8.2 tag on decrypt", tag, t_aead_tag, 16);
 
-    /* One flipped ciphertext bit must not verify -- the one AEAD property no
+    /* One flipped ciphertext bit must not verify, the one AEAD property no
        published vector states. */
     t_checks++;
     if (c68k_chacha20_poly1305_verify(tag, t_aead_tag) != NX_CRYPTO_TRUE)

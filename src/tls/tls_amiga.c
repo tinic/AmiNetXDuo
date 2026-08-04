@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- nx_secure glue: entropy seeding and an E-Clock microsecond
+ * AmiNetXDuo, nx_secure glue: entropy seeding and an E-Clock microsecond
  * timer.
  *
  * SPDX-License-Identifier: MIT
@@ -192,7 +192,7 @@ ULONG ami_tls_eclock_micros(ULONG ticks)
      * 64-bit intermediate: at ~709 kHz a one-second measurement is ~709,000
      * ticks, and ticks * 1,000,000 overflows 32 bits after ~4,295 ticks (6 ms).
      * This is a report path, not a hot path, so the __udivdi3 call (out of
-     * src/common/ami_udivdi3.c -- this toolchain's libgcc.a is empty) is
+     * src/common/ami_udivdi3.c, this toolchain's libgcc.a is empty) is
      * acceptable here.  It is not acceptable inside the timed region, so every
      * measurement below accumulates raw ticks and converts once.
      */

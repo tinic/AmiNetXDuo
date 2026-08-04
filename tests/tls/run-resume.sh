@@ -22,7 +22,7 @@
 #   -p boot   two FS-UAE runs with the machine rebooted in between, carrying
 #             DEVS:Internet/tlssessions across.  Proves the disk mirror, and is
 #             the only way to seed a host whose COLD handshake a 14 MHz 68020
-#             cannot finish -- the seeding run uses -k to give the arithmetic
+#             cannot finish, the seeding run uses -k to give the arithmetic
 #             enough clock, and the resuming run is the A1200's own 14 MHz.
 #             That is the www.iana.org headline.
 #
@@ -49,7 +49,7 @@ PHASE=all
 
 # The clock the SEEDING run of the boot phase uses.  www.iana.org is three
 # certificates behind Cloudflare, and a cold verification at 14 MHz takes
-# longer than that front end will wait -- so the cache has to be filled at a
+# longer than that front end will wait, so the cache has to be filled at a
 # clock where it completes.  The number that matters is the RESUMED one, and
 # that is measured at the A1200's own 14 MHz.
 SEED_CLOCK="${AMINETXDUO_RESUME_SEED_CLOCK:-28}"
@@ -113,7 +113,7 @@ cp "$ADDIF"  "$STAGE/AddNetInterface"
 # A SECOND trust store: valid, well-formed, and holding one root that signed
 # nothing on the public internet.  It is the acceptance test for the defect
 # where a session verified against one store was resumed by a caller
-# presenting another -- the correct answer is the same refusal a cold
+# presenting another, the correct answer is the same refusal a cold
 # handshake gives, and the only way to test that is to have a store that is
 # real enough to be opened and wrong enough to be useless.
 OTHER="$ROOT/build/resume-otherstore.pem"

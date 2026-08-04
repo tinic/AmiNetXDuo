@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- what a NetX Duo DNS status means. See netstack_dns_status.h.
+ * AmiNetXDuo, what a NetX Duo DNS status means. See netstack_dns_status.h.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -30,7 +30,7 @@ LONG ami_ns_dns_error(UINT status)
          * client's mutex with the caller's wait_option and hands this back when
          * another task still holds it. Two programs resolving at once is the
          * ordinary case, and the second of them was being told the name does
-         * not exist -- the default below -- rather than to try again.
+         * not exist, the default below, rather than to try again.
          */
         case TX_NOT_AVAILABLE:
             return AMI_NET_ERR_TIMEOUT;

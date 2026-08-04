@@ -25,7 +25,7 @@ over a minute-long run would need the tick source to be exact to a part in
 THE CONTROL IS REPORTED WITH THE RESULT.  The harness's own injections were
 spaced by a pseudo-random UNIT_MICROHZ sleep, so their intervals must show NO
 tooth anywhere.  If they do, the harness was aliasing against the system tick
-and the result line is meaningless -- so both are printed, always.
+and the result line is meaningless, so both are printed, always.
 
 SPDX-License-Identifier: MIT
 """
@@ -198,7 +198,7 @@ def grid_report(name, times_s, lo_ms=1.0, hi_ms=260.0):
 
     # Ranked by R, not by T.  A comb has a tooth at the grid AND at every
     # submultiple of it, and it also has weaker teeth at multiples when most
-    # but not all of the intervals happen to be multiples of those too -- so
+    # but not all of the intervals happen to be multiples of those too, so
     # "the largest T with a tooth" is the wrong rule and the strongest one,
     # with the harmonic ratios printed next to it, is the right one.
     best = max(refined, key=lambda tr: tr[1])
@@ -319,7 +319,7 @@ def report(run):
               f"p90 {h['p90']:.2f}  max {h['max']:.2f} ms")
         # A delay counted down in whole ticks from an arrival that lands at a
         # uniformly random phase is uniform over ONE tick, so the width of the
-        # delay distribution reads the tick period off directly -- and it does
+        # delay distribution reads the tick period off directly, and it does
         # so without any of the periodogram's assumptions.
         print(f"    spread {h['max'] - h['min']:.2f} ms  <- one tick, if the "
               "hold is a whole number of ticks")

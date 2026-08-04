@@ -1,9 +1,9 @@
 /*
- * AmiNetXDuo -- host vectors for src/crypto68k/c68k_25519.c.
+ * AmiNetXDuo, host vectors for src/crypto68k/c68k_25519.c.
  *
  * The code is portable C over <stdint.h> and makes every arithmetic error
- * identically on both machines, so the vectors run here -- in a second, on
- * every push -- rather than only under the emulator, where queue time is the
+ * identically on both machines, so the vectors run here, in a second, on
+ * every push, rather than only under the emulator, where queue time is the
  * scarcest resource in the project.  §18's SHA-256 endianness bug was caught
  * this way and would not have been by a vector run only on the guest.
  *
@@ -13,7 +13,7 @@
  *      a squaring bug: they exercise a handful of values and both routines
  *      would have to be wrong in the same way to agree.  This is the check
  *      that would have caught the lazy-reduction carry bug that made an
- *      Ed25519 doubling return 37 where it owed -1 -- see the fe_fold comment.
+ *      Ed25519 doubling return 37 where it owed -1, see the fe_fold comment.
  *   2. RFC 7748 section 5.2 and 6.1: X25519 against the published values, and
  *      a full Diffie-Hellman where both sides have to reach the same secret.
  *   3. RFC 8032 section 7.1: Ed25519 tests 1, 2, 3 and SHA(abc), each checking

@@ -13,7 +13,7 @@
 #                           workarounds explained below
 #   AMIGA_CLIENT_LDFLAGS    -L for the fabricated support archives
 #   AMIGA_CLIENT_LIBDIR     where those archives are
-#   AMIGA_CLIENT_COMPAT_A   libamigaclient.a -- the libc and libgcc gaps
+#   AMIGA_CLIENT_COMPAT_A   libamigaclient.a, the libc and libgcc gaps
 #
 # amiga_client_prepare [BUILDROOT]  builds the archives.  Call it once before
 # configuring; it is cheap and idempotent.
@@ -33,7 +33,7 @@
 #
 #   -D_SYS_MBUF_H
 #       <proto/bsdsocket.h> pulls in <sys/mbuf.h>, which pulls in <net/if.h>,
-#       which has `struct __timeval ifi_lastchange;` as a FIELD -- and
+#       which has `struct __timeval ifi_lastchange;` as a FIELD, and
 #       `struct __timeval` is never defined anywhere in the NDK.  It is an
 #       opaque type the inline stubs use behind a pointer, so a pointer is
 #       fine and a field is not.  Nothing in a client wants mbufs, so the
@@ -46,7 +46,7 @@
 #       ssize_t without including anything that declares ssize_t.  On the
 #       bebbo/clib2 toolchain curl's build is upstream-tested against, some
 #       other header has already done it.  Here it has not, so
-#       proto/bsdsocket.h fails to compile at all -- which a configure script
+#       proto/bsdsocket.h fails to compile at all, which a configure script
 #       reports as "AmigaOS bsdsocket.library not found" and then silently
 #       builds a client that calls a libc networking API that does not exist.
 #       tests/conformance/build.sh carries the identical line for the
@@ -66,7 +66,7 @@
 #                       "atomic")` for AMIGA and there is no switch for it.
 #                       libm.a is real and in the toolchain.  The other two
 #                       are ours: libnet.a holds a weak SocketBase (see
-#                       clients/compat/amiga_net.c -- it is what makes
+#                       clients/compat/amiga_net.c, it is what makes
 #                       configure-time socket feature tests LINK, which is
 #                       not optional), and libatomic.a is empty because
 #                       clients/compat/amiga_libgcc.c supplies the one atomic
@@ -92,7 +92,7 @@ AMIGA_CLIENT_ARCH="${AMIGA_CLIENT_ARCH:--m68020}"
 AMIGA_CLIENT_OPT="${AMIGA_CLIENT_OPT:--O2}"
 
 # -include amiga_compat.h so the shims in clients/compat that newlib has no
-# header for -- nanosleep(), clearenv() -- are declared everywhere.  See that
+# header for, nanosleep(), clearenv(), are declared everywhere.  See that
 # file for why it is a forced include and not a patch or a shadowed <time.h>.
 AMIGA_CLIENT_CFLAGS="$AMIGA_CLIENT_ARCH $AMIGA_CLIENT_OPT -fomit-frame-pointer -fno-strict-aliasing -D__USE_NEW_TIMEVAL__ -D_SYS_MBUF_H -include sys/types.h -I$AMIGA_CLIENT_ROOT/clients/compat -include amiga_compat.h"
 

@@ -1,5 +1,5 @@
 /*
- * src/tools -- what a command needs in order to explain a network card.
+ * src/tools, what a command needs in order to explain a network card.
  *
  * Kept out of tool_diag.c, which is in TOOLS_COMMON_SOURCES and so linked by
  * every command: this material is 3.8 KB of prose plus a table of sixteen
@@ -27,8 +27,8 @@
  *
  * The remaining mechanism is not to compile it into commands that cannot reach
  * it, which is what this file is for.  The three functions that touch the
- * device table -- tool_explain_device, tool_explain_no_interfaces and
- * tool_scan_devices -- live here with it.
+ * device table, tool_explain_device, tool_explain_no_interfaces and
+ * tool_scan_devices, live here with it.
  *
  * tool_find_interface() came from tool_util.c, which is also common: its
  * "there is no interface called X" path calls tool_explain_no_interfaces(),
@@ -87,7 +87,7 @@ static const char *const diag_known_devices[] =
      *   pi-net.device      captain-amygdala/pistorm, the built driver at
      *                      platforms/amiga/net/net_driver_amiga/
      *   a314eth.device     the same repo, a314/software-amiga/ethernet_pistorm
-     *                      build.sh -- "-o ../a314eth.device"
+     *                      build.sh, "-o ../a314eth.device"
      *   scsidayna.device   RobSmithDev/daynaport-amiga, Makefile DEVICEID
      *                      (a DaynaPORT SCSI/Link, still being worked on)
      *
@@ -199,17 +199,8 @@ const ToolDevice *tool_scan_device(ULONG index)
 
 VOID tool_explain_device_refused(const char *device, ULONG unit)
 {
-    tool_advise_blank();
     tool_printf("  %s unit %lu opened, then refused a SANA-II command.\n",
                 (LONG)device, unit);
-    tool_advise_blank();
-    tool_advise("The card is fitted and the driver is loaded, so neither the");
-    tool_advise("unit number nor the seating is what to look at. The driver");
-    tool_advise("would not report its capabilities or take a station address,");
-    tool_advise("which usually means the card is held by another network stack");
-    tool_advise("or the driver needs settings it has not been given.");
-    tool_advise_blank();
-    tool_advise("The serial debug log names the command that was refused.");
 }
 
 VOID tool_explain_device(const char *device, ULONG unit)
@@ -217,7 +208,6 @@ VOID tool_explain_device(const char *device, ULONG unit)
     const char *where = tool_device_where(device);
     LONG        probe;
 
-    tool_advise_blank();
 
     /*
      * Ask the machine before saying the driver is not on it.
@@ -234,7 +224,7 @@ VOID tool_explain_device(const char *device, ULONG unit)
 
     /*
      * Opened and then refused a SANA-II command. The driver is installed, the
-     * unit is right and the card answered -- so none of the advice below about
+     * unit is right and the card answered, so none of the advice below about
      * missing files or wrong unit numbers applies, wherever the file turned out
      * to be. This is the case AddNetInterface reaches when a PCMCIA card is in
      * the slot and will not initialise, and it used to print "there is no
@@ -250,30 +240,17 @@ VOID tool_explain_device(const char *device, ULONG unit)
     {
         tool_printf("  %s unit %lu opens, and no driver file was found in the\n",
                     (LONG)device, unit);
-        tool_advise("usual places -- so it is loaded from somewhere else: a card");
-        tool_advise("ROM, an assign, or a directory this command does not scan.");
-        tool_advise_blank();
-        tool_advise("The driver is not what to look at. Something else has the");
-        tool_advise("card open, or it opened and then would not answer; the");
-        tool_advise("serial debug log records which.");
         return;
     }
 
     if (where == NULL)
     {
         tool_printf("  There is no %s on this machine.\n", (LONG)device);
-        tool_advise_blank();
-        tool_advise("That is the driver for your network card, and it has to be");
-        tool_advise("installed before anything can use the card. Drivers belong");
-        tool_advise("in DEVS:Networks/ -- they come with the card, or with the");
-        tool_advise("operating system for cards Commodore made.");
 
         if (tool_scan_devices() > 0)
         {
             ULONG i;
 
-            tool_advise_blank();
-            tool_advise("These network drivers ARE installed:");
             for (i = 0; i < tool_scan_devices(); i++)
             {
                 const ToolDevice *dev = tool_scan_device(i);
@@ -281,7 +258,6 @@ VOID tool_explain_device(const char *device, ULONG unit)
                 tool_printf("      %-24s (%s)\n", (LONG)dev->name,
                             (LONG)dev->where);
             }
-            tool_advise("If one of those is your card, run NetSetup and pick it.");
         }
 
         return;
@@ -294,12 +270,6 @@ VOID tool_explain_device(const char *device, ULONG unit)
     {
         tool_printf("  %s unit %lu opens perfectly well on its own, so the\n",
                     (LONG)device, unit);
-        tool_advise("card and its driver are fine.");
-        tool_advise_blank();
-        tool_advise("Something else has it open -- another network stack, or an");
-        tool_advise("earlier copy of this one that is still running. A reboot");
-        tool_advise("clears that. If this machine has no other stack installed,");
-        tool_advise("the serial debug log records what actually failed.");
         return;
     }
 
@@ -308,7 +278,6 @@ VOID tool_explain_device(const char *device, ULONG unit)
 
     if (unit != 0 && tool_device_probe(device, 0) == 0)
     {
-        tool_advise_blank();
         tool_printf("  Unit 0 opens. Almost every card is unit 0: change the UNIT\n");
         tool_printf("  line in DEVS:NetInterfaces to 0, or run NetSetup again.\n");
         return;
@@ -318,29 +287,17 @@ VOID tool_explain_device(const char *device, ULONG unit)
        Anywhere else has to be named in full in DEVS:NetInterfaces. */
     if (where[0] == 'S' && where[1] == 'Y' && where[2] == 'S' && where[3] == ':')
     {
-        tool_advise_blank();
         tool_printf("  A driver in %s cannot be opened by name alone.\n",
                     (LONG)where);
-        tool_advise("Move it to DEVS:Networks/, or write the whole path on the");
-        tool_advise("DEVICE line in DEVS:NetInterfaces.");
         return;
     }
 
-    tool_advise_blank();
-    tool_advise("The driver is installed but the card is not answering. Usually");
-    tool_advise("that means the card is not in the machine, is not seated");
-    tool_advise("properly, or needs a different unit number.");
 }
 
 VOID tool_explain_no_interfaces(VOID)
 {
     ULONG n;
 
-    tool_advise_blank();
-    tool_advise("No network interfaces are configured.");
-    tool_advise_blank();
-    tool_advise("The stack reads one file per network card from");
-    tool_advise("DEVS:NetInterfaces. There is nothing usable there yet.");
 
     n = tool_scan_devices();
 
@@ -348,25 +305,15 @@ VOID tool_explain_no_interfaces(VOID)
     {
         ULONG i;
 
-        tool_advise_blank();
-        tool_advise("The network card drivers on this machine are:");
         for (i = 0; i < n; i++)
         {
             const ToolDevice *dev = tool_scan_device(i);
 
             tool_printf("      %-24s (%s)\n", (LONG)dev->name, (LONG)dev->where);
         }
-        tool_advise_blank();
-        tool_advise("Run  NetSetup  and pick it from the list. Nothing has been");
-        tool_advise("changed for you -- NetSetup asks first and writes after.");
     }
     else
     {
-        tool_advise_blank();
-        tool_advise("No network card driver could be found either. The driver for");
-        tool_advise("your card belongs in DEVS:Networks/ -- for example");
-        tool_advise("DEVS:Networks/ariadne.device for an Ariadne, or a2065.device");
-        tool_advise("for an A2065. Copy it there first, then run  NetSetup.");
     }
 }
 
@@ -378,9 +325,9 @@ LONG tool_find_interface(const char *name)
     if (cfg == NULL)
     {
         if (tool_stack_library_running())
-            tool_error("the network is up, but this command cannot read it");
+            tool_error("cannot read the running stack");
         else
-            tool_error("the network has not been started");
+            tool_error("network not started");
 
         tool_explain_no_stack();
         return -1;
@@ -416,11 +363,8 @@ LONG tool_find_interface(const char *name)
     }
     else
     {
-        tool_advise_blank();
-        tool_advise("The interfaces this machine has are:");
         for (i = 0; i < cfg->interface_count; i++)
             tool_printf("      %s\n", (LONG)cfg->interfaces[i].name);
-        tool_advise("The name is the name of the file in DEVS:NetInterfaces.");
     }
 
     return -1;

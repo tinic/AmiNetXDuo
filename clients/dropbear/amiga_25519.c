@@ -1,5 +1,5 @@
 /*
- * clients/dropbear/amiga_25519.c -- give Dropbear src/crypto68k's 25519
+ * clients/dropbear/amiga_25519.c, give Dropbear src/crypto68k's 25519
  * instead of TweetNaCl's, without patching third_party/dropbear.
  *
  * docs/RESEARCH.md 35 profiled a connection and found the whole of it here.

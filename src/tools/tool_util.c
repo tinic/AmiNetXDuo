@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- shared plumbing for the command-line tools.
+ * AmiNetXDuo, shared plumbing for the command-line tools.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -16,7 +16,7 @@
  *
  * The argarray cast is (APTR), not (CONST_APTR). The two NDKs disagree about
  * the parameter: NDK 3.2 declares it CONST_APTR (`const void *`), NDK 3.9's
- * <inline/dos.h> writes `const APTR` (`void *const` -- a const pointer, not a
+ * <inline/dos.h> writes `const APTR` (`void *const`, a const pointer, not a
  * pointer to const). Handing the latter a CONST_APTR is "initialization
  * discards const qualifier", which -Werror turns into a build failure. A plain
  * APTR converts cleanly to either, and the stream is a local va_list.
@@ -34,7 +34,7 @@ VOID tool_printf(const char *fmt, ...)
  * Where diagnostics go.
  *
  * Not ErrorOutput(): that is dos.library LVO -1134, which only exists from V50
- * on. On Kickstart 3.1 (V40, the floor -- docs/RESEARCH.md 9) the LVO table
+ * on. On Kickstart 3.1 (V40, the floor, docs/RESEARCH.md 9) the LVO table
  * stops well short of it, so calling it jumps into whatever follows the library
  * and hangs the machine. Verified under FS-UAE, 2026-07-25.
  *
@@ -184,9 +184,9 @@ AmiNetStack *tool_require_stack(VOID)
          * tool_explain_no_stack() prints the rest.
          */
         if (tool_stack_library_running())
-            tool_error("the network is up, but this command cannot read it");
+            tool_error("cannot read the running stack");
         else
-            tool_error("the network has not been started");
+            tool_error("network not started");
 
         tool_explain_no_stack();
     }

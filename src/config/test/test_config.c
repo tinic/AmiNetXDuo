@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- host-side test for the configuration and netdb parsers.
+ * AmiNetXDuo, host-side test for the configuration and netdb parsers.
  *
  * Builds and runs on the development host (cc -std=c99), not on the Amiga:
  * config_text.c, config_parse.c and netdb.c contain no AmigaDOS calls, so all
@@ -7,8 +7,8 @@
  * below (ami_alloc/ami_free/ami_log and the ami_cfg_read_file hook, which is
  * answered here from an in-memory fixture table rather than from disk).
  *
- * config_file.c -- the dos.library Open/Read/Close and the Examine/ExNext scan
- * of DEVS:NetInterfaces -- is therefore not covered here; it is verified by
+ * config_file.c, the dos.library Open/Read/Close and the Examine/ExNext scan
+ * of DEVS:NetInterfaces, is therefore not covered here; it is verified by
  * compilation and needs an on-Amiga run to be tested properly.
  *
  *   cc -std=c99 -Wall -Wextra -I../../../include -Ishim \
@@ -473,7 +473,7 @@ static void test_ip6(void)
             CHECK_STR(zone, "eth0");
         }
 
-        /* Malformed: nothing after the '%', and a zone too long to hold --
+        /* Malformed: nothing after the '%', and a zone too long to hold,
            truncating one would name a different interface. */
         CHECK(!ami_config_parse_ip6_zone("fe80::1%", got, NULL,
                                          zone, sizeof(zone)));
@@ -833,7 +833,7 @@ static void test_problem_reporter(void)
  * interface with ID=a1200 was written and the machine kept answering to
  * "a3000", because ID= was parsed and thrown away.
  *
- * ENV:HOSTNAME still wins, deliberately -- see AmiHostnameSource. What was
+ * ENV:HOSTNAME still wins, deliberately, see AmiHostnameSource. What was
  * actually missing is that nothing said so, which is why the reporter could
  * not see the remnant. ID= now works once the remnant is removed.
  */
@@ -1438,7 +1438,7 @@ static void test_service_discovery(void)
 
     CHECK_STR(svc[2].name, "Quoted Name");
 
-    /* txt= takes the rest of the line, ';' included -- it is the separator. */
+    /* txt= takes the rest of the line, ';' included, it is the separator. */
     CHECK_STR(svc[3].type, "_http._udp");
     CHECK(svc[3].port == 8080);
     CHECK_STR(svc[3].name, "");

@@ -1,5 +1,5 @@
 /*
- * httppath -- request target to AmigaOS path.  See httppath.h for what this
+ * httppath, request target to AmigaOS path.  See httppath.h for what this
  * is defending against and why it is its own file.
  *
  * Includes nothing, deliberately.  This translation unit is compiled twice:
@@ -89,7 +89,7 @@ static const char *hp_skip_authority(const char *target)
 
 /*
  * The decode.  Everything a client can say arrives here as text and leaves as
- * bytes, and the checks that follow read the bytes -- which is the whole point:
+ * bytes, and the checks that follow read the bytes, which is the whole point:
  * %2E%2E is ".." by the time anything asks whether it is.
  */
 static HttpPathResult hp_decode(const char *target, char *out,
@@ -173,7 +173,7 @@ HttpPathResult http_path_resolve(const char *root, const char *target,
      * function returns can contain the doubled slash that means "parent" on
      * AmigaOS.  A root ending in ':' or '/' already carries its separator;
      * "DH0:" + "foo" is "DH0:foo" and not "DH0:/foo", which is a different
-     * place -- the root directory of the volume rather than the drawer.
+     * place, the root directory of the volume rather than the drawer.
      */
     i = 0;
     while (i < declen)
@@ -206,12 +206,12 @@ HttpPathResult http_path_resolve(const char *root, const char *target,
         {
             /* The AmigaOS one.  Everything left of a colon is a device or an
                assign, so a single one anywhere in the path leaves the document
-               root entirely -- "RAM:", "DH0:", "S:startup-sequence". */
+               root entirely, "RAM:", "DH0:", "S:startup-sequence". */
             if (decoded[k] == ':')
                 return HTTP_PATH_DEVICE;
 
             /* Not a separator on this machine, and a legal file name
-               character -- but it is a separator to whoever sent it, so a
+               character, but it is a separator to whoever sent it, so a
                request containing one does not mean what it says. */
             if (decoded[k] == '\\')
                 return HTTP_PATH_BACKSLASH;
@@ -361,7 +361,7 @@ const char *http_path_error(HttpPathResult why)
         case HTTP_PATH_CONTROL:      return "a control character";
         case HTTP_PATH_NOT_ABSOLUTE: return "not an absolute path";
         case HTTP_PATH_PARENT:       return "a .. that leaves the root";
-        case HTTP_PATH_DEVICE:       return "a colon -- an AmigaOS device";
+        case HTTP_PATH_DEVICE:       return "a colon, an AmigaOS device";
         case HTTP_PATH_BACKSLASH:    return "a backslash";
         case HTTP_PATH_TOO_LONG:     return "too long";
         case HTTP_PATH_TOO_DEEP:     return "too many directories";
@@ -445,7 +445,7 @@ int http_path_within(const char *prefix, const char *path)
         return 1;
 
     /* "Work:Public" must not match "Work:PublicSecrets", so what follows the
-       prefix has to be a separator -- unless the prefix ended in one. */
+       prefix has to be a separator, unless the prefix ended in one. */
     return (path[n] == '/' || prefix[n - 1] == ':' || prefix[n - 1] == '/')
                ? 1 : 0;
 }

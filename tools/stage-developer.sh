@@ -7,7 +7,7 @@
 # One script because there are two consumers and they must not disagree about
 # what is published: dist/make-dist.sh stages it into the archive, and the
 # CMake build stages it into the build tree so tests/tools/ifnames.c can be
-# compiled against the drawer ALONE -- no -I into include/, no internal
+# compiled against the drawer ALONE, no -I into include/, no internal
 # headers.  A header that is missing here fails that build.
 #
 # PUBLIC_HEADERS is a list and not a wildcard on purpose.  include/aminetxduo/
@@ -23,7 +23,7 @@ DEST="${1:?usage: stage-developer.sh <destdir>}"
 
 # The published half of include/aminetxduo/.
 #
-#   ifindex.h  RFC 3493 section 4 -- the four LVOs at -0x372..-0x384.
+#   ifindex.h  RFC 3493 section 4, the four LVOs at -0x372..-0x384.
 #   in6.h      the AF_INET6 names the NDK does not define.  No vectors: it is
 #              option numbers, address macros and the sockaddr_in6 warning.
 #   cmsg.h     RFC 3542 ancillary data.  No vectors either: it rides
@@ -33,8 +33,8 @@ DEST="${1:?usage: stage-developer.sh <destdir>}"
 # NOT netstatus.h: NetStackQuery and NetStackControl work and are stable, but
 # publishing them freezes their request structures, and that is a decision to
 # take deliberately rather than by adding a line here.  NOT bpf.h: the
-# application-facing BPF surface -- BIOC*, bpf_hdr, bpf_program, bpf_stat,
-# DLT_*, the BPF_* opcodes, FIONREAD, SIOCGIFADDR -- is already in the NDK's
+# application-facing BPF surface, BIOC*, bpf_hdr, bpf_program, bpf_stat,
+# DLT_*, the BPF_* opcodes, FIONREAD, SIOCGIFADDR, is already in the NDK's
 # net/bpf.h, sys/filio.h and sys/sockio.h, and everything AMI_BPF_* in ours is
 # implementation internals.
 PUBLIC_HEADERS=(ifindex.h in6.h cmsg.h netstatus.h)

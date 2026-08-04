@@ -1,20 +1,20 @@
 /*
- * AmiNetXDuo -- eight applications inside the stack at once.
+ * AmiNetXDuo, eight applications inside the stack at once.
  *
  * WHY THIS EXISTS
  *
  * The baton defect of docs/RESEARCH.md 78 was a second Task entering NetX Duo
  * without the baton, and it survived every automated harness in this tree. Not
- * for want of concurrency tests -- for want of one that is concurrent through
+ * for want of concurrency tests, for want of one that is concurrent through
  * bsdsocket.library:
  *
  *   tests/soak         4 adopted Tasks, 2 ThreadX threads, deliberate baton
- *                      churn -- and zero socket calls. It drives the ThreadX
+ *                      churn, and zero socket calls. It drives the ThreadX
  *                      port directly, so ami_netstack_enter() is never on the
  *                      path.
  *   tests/ram_driver   nx_tcp_* directly, same gap.
  *   tests/endurance    up to 34 worker contexts, each with its own library
- *                      base -- exactly the right shape, and not in
+ *                      base, exactly the right shape, and not in
  *                      EMULATOR_TESTS, because it runs for hours.
  *   tests/soak/fitz_soak   the same, and the same reason.
  *
@@ -23,7 +23,7 @@
  *
  * WHAT IT DOES
  *
- * Eight Processes, each with its OWN bsdsocket.library base -- which is what
+ * Eight Processes, each with its OWN bsdsocket.library base, which is what
  * makes them applications rather than threads, and what makes each one arrive
  * at the bracket as an unrelated Exec Task. Four listen on 127.0.0.1, four
  * connect and echo-verify against them, all at the same time.
@@ -76,22 +76,22 @@
 #define CT_CHUNK        2048UL
 
 /*
- * A bsdsocket call runs NetX Duo on the CALLER's stack -- ami_netstack_enter()
- * takes the baton and descends from there -- so a child's stack has to carry
+ * A bsdsocket call runs NetX Duo on the CALLER's stack, ami_netstack_enter()
+ * takes the baton and descends from there, so a child's stack has to carry
  * the whole TCP/IP call depth, not just this file's frames. The stack's own
  * session processes get TCP_SESSION_STACK (16 KB) and its startup process gets
  * BSD_STARTUP_STACK (64 KB); every other harness here spawns at 64 KB or more.
  *
  * The first version of this test used 8 KB, and that was the hang: RESEARCH
- * 16.9 records the same failure from the other end -- a 4 KB Shell stack under
+ * 16.9 records the same failure from the other end, a 4 KB Shell stack under
  * NetTrace gave an F-line trap and a reboot loop, which the runner reported as
  * a timeout with truncated output, because a reboot reopens DH0:stdout.txt.
  */
 #define CT_STACK        (64UL * 1024UL)
 
 /*
- * Two deadlines run back to back -- servers reaching listen(), then everything
- * finishing -- so the harness needs 2 x CT_DEADLINE_SECS of its own, and the
+ * Two deadlines run back to back, servers reaching listen(), then everything
+ * finishing, so the harness needs 2 x CT_DEADLINE_SECS of its own, and the
  * -t it runs under has to cover that PLUS the boot it does not control.
  *
  * CT_BUDGET_SECS is that arithmetic, and run-concurrent.sh derives its default
@@ -113,7 +113,7 @@
 
 /*
  * Offsets and register assignments from the NDK's own
- * pragmas/bsdsocket_pragmas.h -- socket 0x01e, send 0x042, recv 0x04e -- and
+ * pragmas/bsdsocket_pragmas.h, socket 0x01e, send 0x042, recv 0x04e, and
  * not from counting in sixes. Every stub declares d1/a0/a1 clobbered: the one
  * that did not turned IoctlSocket(FIONBIO) into a call with a garbage request
  * code and wedged a test for a day (RESEARCH 42).
@@ -662,7 +662,7 @@ done:
 
 /*
  * One application. Its own library base, opened here and closed here, so the
- * bracket sees an unrelated Exec Task with an unrelated base -- which is the
+ * bracket sees an unrelated Exec Task with an unrelated base, which is the
  * whole point of spawning Processes instead of starting threads.
  */
 static VOID ct_app_entry(VOID)
@@ -915,7 +915,7 @@ static VOID ct_main_body(VOID)
     /*
      * The verdict goes out before the park below, not after it. A wedged run
      * never leaves that loop, so a summary printed afterwards is a summary
-     * nobody ever reads -- which is how the first version of this managed to
+     * nobody ever reads, which is how the first version of this managed to
      * hang and report nothing.
      */
     ct_log("%ld checks, %ld failures -- %s\n",
@@ -956,7 +956,7 @@ static VOID ct_main_body(VOID)
     }
 
     /*
-     * The parent's is the last base, so this is what shuts the stack down --
+     * The parent's is the last base, so this is what shuts the stack down,
      * and bsd_lib_close() runs netstack_shutdown() on the CALLER's stack.
      * Startup does not: bsd_lib_open() hands it to a 64 KB Process precisely
      * because an opener's stack cannot carry it. That asymmetry is why this
@@ -973,7 +973,7 @@ static VOID ct_main_body(VOID)
  *
  * A Shell command gets 4,096 bytes on Kickstart 3.1 and this toolchain's crt0
  * exports no __stack hook to ask for more (RESEARCH 11.5), so every harness
- * here that touches the library does its work on a spawned Process instead --
+ * here that touches the library does its work on a spawned Process instead,
  * tests/crypto68k, tests/compare, ClientRun. This one is an application like
  * the eight it spawns, and it has the same reason to be one.
  */

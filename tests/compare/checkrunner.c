@@ -1,5 +1,5 @@
 /*
- * CheckRunner -- the guest half of every harness in tests/compare.
+ * CheckRunner, the guest half of every harness in tests/compare.
  *
  *   A harness points a command at bsdsocket.library and asks whether the stack
  *   survived, so the driver has to keep running when the command does not.
@@ -9,7 +9,7 @@
  *
  *   For the same reason it scores nothing.  The expectations live on the host,
  *   so a run that dies in the middle is scored the same way as one that
- *   finishes -- every case with no result line is a failure, and the first of
+ *   finishes, every case with no result line is a failure, and the first of
  *   them names the command that did it.
  *
  *   Written for a curl suite that no longer exists; nothing about it was ever
@@ -23,7 +23,7 @@
  *                          nettools harness grew one and it costs four lines)
  *   NAME<TAB>COMMAND       run COMMAND, calling the result NAME
  *
- *   DH0:results.txt        NAME rc ticks availmem   -- one line per case
+ *   DH0:results.txt        NAME rc ticks availmem  , one line per case
  *   DH0:w/NAME.txt         that command's own stdout and stderr
  *   DH0:checkrunner.txt    the same thing for a human
  *
@@ -64,9 +64,9 @@ static const char version_tag[] __attribute__((used)) =
 
 /*
  * NP_WindowPtr = -1 turns "Please insert volume Foo:" into a failed call.
- * A client that names a path on a volume or assign which does not exist --
+ * A client that names a path on a volume or assign which does not exist,
  * AmiSSL is configured OPENSSLDIR=AmiSSL:, so any AmiSSL-linked binary does
- * this if the assign is missing -- otherwise puts up a requester on a machine
+ * this if the assign is missing, otherwise puts up a requester on a machine
  * with nobody at the keyboard, and the run sits there until the harness times
  * out.
  */
@@ -196,7 +196,7 @@ int main(int argc, char **argv)
         if (line[0] == '\0' || line[0] == '#')
             continue;
 
-        /* wait N -- seconds */
+        /* wait N, seconds */
         if (line[0] == 'w' && line[1] == 'a' && line[2] == 'i' &&
             line[3] == 't' && line[4] == ' ')
         {

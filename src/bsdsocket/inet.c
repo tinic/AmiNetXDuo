@@ -1,5 +1,5 @@
 /*
- * bsdsocket.library -- the inet_* address conversions.
+ * bsdsocket.library, the inet_* address conversions.
  *
  * Self-contained: no libc, no NetX Duo. m68k is big-endian, so the network
  * byte order these functions traffic in is also the host byte order, and the
@@ -12,13 +12,13 @@
 
 #ifdef AMINETXDUO_IPV6
 /*
- * The IPv6 text conversions are src/config/config_text.c's -- the same
+ * The IPv6 text conversions are src/config/config_text.c's, the same
  * routines the DEVS:NetInterfaces parser uses for ADDRESS6. One parser means
  * the config file and inet_pton()/inet_ntop() cannot disagree about what an
  * address is.
  *
- * The dialect difference -- the config file takes a "/prefixlen" suffix and
- * inet_pton() must not -- is expressed by passing NULL for the prefix output.
+ * The dialect difference, the config file takes a "/prefixlen" suffix and
+ * inet_pton() must not, is expressed by passing NULL for the prefix output.
  */
 #include "aminetxduo/config.h"
 #endif
@@ -156,7 +156,7 @@ static BOOL bsd_inet_parse(const char *cp, ULONG *result, LONG *nparts,
  * range 0..255": four parts, decimal only, no short forms.
  *
  * Sharing bsd_inet_parse() made inet_pton(AF_INET,"0177.0.0.1") succeed as
- * 127.0.0.1 and "0x1.2.3.4" parse, which is the classic allow-list bypass --
+ * 127.0.0.1 and "0x1.2.3.4" parse, which is the classic allow-list bypass,
  * a caller that uses inet_pton() to decide whether a string is a literal
  * address sees one string and the next resolver sees another. Leading zeros
  * are refused rather than read as decimal for the same reason: "0177" must not
@@ -246,7 +246,7 @@ static ULONG bsd_format_ip(char *dst, ULONG addr)
     return len;
 }
 
-/* ---------------------------------------------------------------- vectors -- */
+/* ---------------------------------------------------------------- vectors, */
 
 in_addr_t bsd_inet_addr(register STRPTR cp __asm("a0"),
                         register struct AmiSocketBase *SocketBase __asm("a6"))
@@ -294,7 +294,7 @@ in_addr_t bsd_inet_network(register STRPTR cp __asm("a0"),
 
     /*
      * 4.3BSD: each part is one byte of the network number, packed left to
-     * right and right-aligned in the result -- "192.168.1" is 0x00C0A801, not
+     * right and right-aligned in the result, "192.168.1" is 0x00C0A801, not
      * an address with a zero host part. Same rule as
      * ami_cfg_parse_net_number(), which reads DEVS:Internet/networks.
      */

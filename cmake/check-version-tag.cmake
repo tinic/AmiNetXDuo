@@ -12,11 +12,11 @@
 # finds it by scanning the file for the magic prefix.  `used` stops the
 # COMPILER discarding it; it says nothing to the linker, and this toolchain
 # ignores the `retain` attribute that would (gcc 15.2.0 warns
-# "'retain' attribute ignored" -- the m68k assembler has no SHF_GNU_RETAIN).
+# "'retain' attribute ignored", the m68k assembler has no SHF_GNU_RETAIN).
 #
 # So under `--gc-sections` the tag lives or dies by which section it lands in.
 # With -fdata-sections it gets a section of its own, nothing relocates to it,
-# and every command in the tree silently loses its version string -- measured,
+# and every command in the tree silently loses its version string, measured,
 # all seventeen of them.  Without -fdata-sections it shares the object's
 # read-only section with the string literals main() prints, which are
 # referenced, so it survives.  That is why src/tools/CMakeLists.txt passes

@@ -4,7 +4,7 @@
 # Three files in third_party/netxduo are dropped from their glob so that a copy
 # or a rewrite of ours is what the linker resolves to.  The mechanism is silent
 # in both directions: the vendored file stays in the tree, still compiles, still
-# shows up in `git log` when the submodule is bumped -- and has no effect on the
+# shows up in `git log` when the submodule is bumped, and has no effect on the
 # binary.  A fix that lands upstream is therefore invisible unless somebody
 # remembers to look.
 #

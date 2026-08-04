@@ -1,4 +1,4 @@
-# crypto68k -- 68020 multi-precision arithmetic for nx_crypto.
+# crypto68k, 68020 multi-precision arithmetic for nx_crypto.
 #
 #   cmake -S . -B build/cm -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
 #         -DCMAKE_BUILD_TYPE=Release
@@ -10,8 +10,8 @@
 # that cannot run.  Turning it off is the supported way to bisect a suspected
 # assembly bug: the C fallback is the same algorithm, limb for limb.
 #
-# The module needs the vendored huge-number code for exactly one thing -- the
-# radix^2 mod m long division in the exponentiation setup -- and the test needs
+# The module needs the vendored huge-number code for exactly one thing, the
+# radix^2 mod m long division in the exponentiation setup, and the test needs
 # it as the reference to check every result against.  src/tls/ owns the full
 # nx_crypto target but only builds it when AMINETXDUO_TLS is ON, and this must
 # stand alone, so the two files that are actually required are compiled here
@@ -32,8 +32,8 @@
 #           68060 build without its own m68k bignum assembly.
 #
 # Hence the default is a function of the CPU rather than of cross-compiling
-# alone.  It can still be forced either way by hand -- turning it off is the
-# supported way to bisect a suspected assembly bug -- but nobody has to know
+# alone.  It can still be forced either way by hand, turning it off is the
+# supported way to bisect a suspected assembly bug, but nobody has to know
 # the above to get a working build.  docs/RESEARCH.md §45.
 if(CMAKE_CROSSCOMPILING AND AMINETXDUO_CPU MATCHES "^(68020|68040)$")
     set(_crypto68k_asm_default ON)
@@ -73,8 +73,8 @@ else()
 endif()
 
 # When AMINETXDUO_TLS is ON, src/tls has ALREADY built the whole of
-# crypto_libraries/src as `nx_crypto` -- it is configured first, see the top
-# level CMakeLists.txt -- and compiling these ten files a second time here puts
+# crypto_libraries/src as `nx_crypto`, it is configured first, see the top
+# level CMakeLists.txt, and compiling these ten files a second time here puts
 # two definitions of every huge-number and EC symbol on the link line.  Reuse
 # that target instead; it is a superset of this list.  The standalone archive is
 # only for the AMINETXDUO_TLS=OFF build, where crypto68k and its tests still
@@ -129,7 +129,7 @@ set(CRYPTO68K_SOURCES
     c68k_aes.c
     c68k_sha256.c
     # ChaCha20-Poly1305, the AEAD record path.  Both halves have a 68020
-    # counterpart -- c68k_chacha20.S and c68k_poly1305.S -- and in both cases
+    # counterpart, c68k_chacha20.S and c68k_poly1305.S, and in both cases
     # the reason is register allocation rather than instruction selection: the
     # cipher is sixteen state words against eight data registers (57, 58), and
     # the authenticator is fourteen live values and a 32x32 -> 64 product that
@@ -155,7 +155,7 @@ target_include_directories(crypto68k PUBLIC ${CRYPTO68K_INCLUDES})
 target_link_libraries(crypto68k PUBLIC crypto68k_ref)
 
 if(AMINETXDUO_CRYPTO68K_ASM)
-    # The .S needs the define too -- it is #ifdef'd end to end so that an
+    # The .S needs the define too, it is #ifdef'd end to end so that an
     # accidental host build assembles to nothing instead of failing.
     #
     # It also needs the arch flag explicitly.  CMAKE_C_FLAGS_INIT in the

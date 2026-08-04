@@ -7,8 +7,8 @@
 # WHY A LOCAL PKI AND NOT badssl.com
 #
 #   Because a suite that needs the internet is not a baseline.  Every TLS
-#   property the brief asks for -- chain depth 2, 3 and 4, RSA and ECDSA,
-#   expired, self-signed, wrong host, --cacert -- is a property of the
+#   property the brief asks for, chain depth 2, 3 and 4, RSA and ECDSA,
+#   expired, self-signed, wrong host, --cacert, is a property of the
 #   certificates, and certificates are free.  badssl is still worth pointing at
 #   occasionally against a real server, but it is a
 #   different kind of test: it tells you the internet still works, not that the
@@ -16,7 +16,7 @@
 #
 # WHAT IS GENERATED
 #
-#   root-rsa          RSA-2048 CA, self-signed             -- in the trust store
+#   root-rsa          RSA-2048 CA, self-signed            , in the trust store
 #     int-rsa-1       RSA-2048 CA, signed by root-rsa
 #       leaf rsa2.test                                     chain: leaf,int1
 #       leaf expired.test        notAfter in 2020          chain: leaf,int1
@@ -24,12 +24,12 @@
 #         leaf rsa3.test                                   chain: leaf,int2,int1
 #         int-rsa-3   signed by int-rsa-2
 #           leaf rsa4.test                                 chain: leaf,int3,int2,int1
-#   root-ec           P-256 CA, self-signed                -- in the trust store
+#   root-ec           P-256 CA, self-signed               , in the trust store
 #     int-ec-1
 #       leaf ec2.test                                      chain: leaf,int1
 #       int-ec-2
 #         leaf ec3.test                                    chain: leaf,int2,int1
-#   root-other        RSA-2048 CA, self-signed             -- NOT in the store,
+#   root-other        RSA-2048 CA, self-signed            , NOT in the store,
 #                                                             for --cacert tests
 #   selfsigned.test   its own issuer, in nobody's store
 #
@@ -77,14 +77,14 @@ cd "$OUT"
 #
 #   AmigaOS DateStamp() is local time and has no timezone concept at all, so
 #   an emulated machine synchronised to this host reads whatever the host's
-#   wall clock says -- and tls.library compares that against a certificate's
+#   wall clock says, and tls.library compares that against a certificate's
 #   notBefore, which is UTC.  West of Greenwich the Amiga is therefore hours
 #   BEHIND every certificate issued today, and `-days 7300` (notBefore = now,
 #   in UTC) produced a whole PKI that the guest rejected as "not yet valid".
 #   Measured, not guessed: host 04:09 UTC, guest 21:09, every leaf refused.
 #
 #   So both ends are pinned.  notBefore is after tls.library's clock floor
-#   (2026-01-01, src/tls_time.c) so the validity check still RUNS -- pinning it
+#   (2026-01-01, src/tls_time.c) so the validity check still RUNS, pinning it
 #   to 1990 would make the library treat the clock as unset and skip the very
 #   check the expired-certificate case exists to prove.
 NOT_BEFORE=20260201000000Z

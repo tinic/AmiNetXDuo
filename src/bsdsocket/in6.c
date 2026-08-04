@@ -1,5 +1,5 @@
 /*
- * bsdsocket.library -- the AF_INET6 ABI, pinned.
+ * bsdsocket.library, the AF_INET6 ABI, pinned.
  *
  * Compiled only in an AMINETXDUO_IPV6 build.
  *
@@ -54,7 +54,7 @@ _Static_assert(sizeof(struct in6_addr) == 16, "in6_addr is not 16 bytes");
 
 /*
  * 28 bytes: family(1) + pad(1) + port(2) + flowinfo(4) + addr(16) + scope(4).
- * The pad at offset 1 is not a length byte -- see the header comment.
+ * The pad at offset 1 is not a length byte, see the header comment.
  */
 _Static_assert(sizeof(struct sockaddr_in6) == 28,
                "sockaddr_in6 is not the 28-byte no-sin6_len shape");
@@ -183,7 +183,7 @@ BOOL bsd_addr_normalise(const AmiSocket *sock, NXD_ADDRESS *addr)
  * Level IPPROTO_IPV6.
  *
  * The option numbers are not in the NDK and differ between BSD and Linux, so
- * both numberings are accepted -- see the note in bsdsocket_internal.h for why
+ * both numberings are accepted, see the note in bsdsocket_internal.h for why
  * that is safe, and bsd_v6_linux_numbering() below for the one socket where it
  * is not.  An option that cannot be implemented correctly is refused with
  * ENOPROTOOPT rather than accepted and ignored, the same rule MSG_OOB is held
@@ -191,17 +191,17 @@ BOOL bsd_addr_normalise(const AmiSocket *sock, NXD_ADDRESS *addr)
  *
  * IPV6_MULTICAST_HOPS/_IF/_LOOP, IPV6_JOIN_GROUP and IPV6_LEAVE_GROUP are
  * mcast.c's, dispatched from here in an AMINETXDUO_MULTICAST build and
- * ENOPROTOOPT without one -- the same arm the IPv4 five answer to.
+ * ENOPROTOOPT without one, the same arm the IPv4 five answer to.
  *
  * Refused, and why:
  *   IPV6_RTHDR, HOPOPTS, DSTOPTS, RTHDRDSTOPTS, PATHMTU, RECVPATHMTU,
  *   USE_MIN_MTU, DONTFRAG, NEXTHOP
- *       -- the rest of RFC 3542.  The subset that is implemented -- PKTINFO,
- *          HOPLIMIT and ICMP6_FILTER -- lives in cmsg.c and is dispatched
+ *      , the rest of RFC 3542.  The subset that is implemented, PKTINFO,
+ *          HOPLIMIT and ICMP6_FILTER, lives in cmsg.c and is dispatched
  *          from here; these name IPv6 extension headers and path-MTU state
  *          NetX Duo does not expose.
  *   IPV6_CHECKSUM
- *       -- names the offset of a checksum field the stack should fill in for
+ *      , names the offset of a checksum field the stack should fill in for
  *          an arbitrary raw protocol.  ICMPv6's is filled in unconditionally
  *          (raw.c) because RFC 4443 makes it mandatory and the sender cannot
  *          compute it; nothing else raw.c carries has one to place.
@@ -212,8 +212,8 @@ BOOL bsd_addr_normalise(const AmiSocket *sock, NXD_ADDRESS *addr)
  *
  * It is a convenience for a caller who took the numbers from that lineage
  * rather than from in6.h, and it is only safe where nothing else claims them.
- * On a RAW IPv6 socket RFC 3542 3.1 claims 26 for IPV6_CHECKSUM -- an offset
- * into the payload where the kernel is to compute and verify a checksum -- and
+ * On a RAW IPv6 socket RFC 3542 3.1 claims 26 for IPV6_CHECKSUM, an offset
+ * into the payload where the kernel is to compute and verify a checksum, and
  * 26 is also Linux's IPV6_V6ONLY.  Reading it as the latter answers an
  * application that asked for a checksum with success, computes none, verifies
  * none, and switches V6ONLY on as a side effect of a call that never mentioned
@@ -315,7 +315,7 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
          * setting here.  -1 means "use the default", per RFC 3493.
          *
          * Where it reaches the wire: raw (raw.c), UDP over either family, and
-         * TCP over IPv4.  Not TCP over IPv6 -- _nx_tcp_socket_send_internal()
+         * TCP over IPv4.  Not TCP over IPv6, _nx_tcp_socket_send_internal()
          * passes nx_ipv6_hop_limit off the NX_IP there, not the socket's, and
          * moving that would be a change inside NetX Duo.
          */

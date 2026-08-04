@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- milestone 7 on-Amiga test: mbuf_* and bpf_*.
+ * AmiNetXDuo, milestone 7 on-Amiga test: mbuf_* and bpf_*.
  *
  * The host tests in src/mbuf/test/ and src/bpf/test/ carry the exhaustive
  * batteries. This one exists for the four things a host cannot answer:
@@ -13,7 +13,7 @@
  *      allocator's rounding is only really tested against the real allocator.
  *   3. The NX_PACKET bridge, which needs a live packet pool, which needs
  *      ThreadX running.
- *   4. Forbid()/Permit(), Signal() and GetSysTime() -- the four platform
+ *   4. Forbid()/Permit(), Signal() and GetSysTime(), the four platform
  *      hooks that the host build replaces with stubs.
  *
  * Everything runs on main()'s own Process, adopted as a TX_THREAD, so
@@ -376,7 +376,7 @@ UBYTE        out[200];
     ami_mbuf_freem(m);
 
     /* cat compaction happens at MLEN, which is 108 here and 224 on a
-       64-bit host -- this is the case the host test cannot place. */
+       64-bit host, this is the case the host test cannot place. */
     m = ami_mbuf_get();
     m->m_len = 100;
     t_ramp((UBYTE *) m->m_data, 100, 0);
@@ -618,7 +618,7 @@ ULONG len;
               "packet bytes are assembled network order");
     }
 
-    /* Out-of-range reads reject rather than trapping -- on a machine where an
+    /* Out-of-range reads reject rather than trapping, on a machine where an
        odd-address longword read is an address error, this matters. */
     {
         static const struct bpf_insn p[] =
@@ -1099,7 +1099,7 @@ static const UBYTE our_mac[6] = { 0x00, 0x80, 0x10, 0x44, 0x55, 0x66 };
     }
     CHECK(same, "payload follows the header unmodified");
 
-    /* The packet itself must be untouched -- TCP hands the same NX_PACKET
+    /* The packet itself must be untouched, TCP hands the same NX_PACKET
        back for retransmission. */
     CHECK(packet->nx_packet_length == sizeof(payload),
           "the NX_PACKET was not modified");

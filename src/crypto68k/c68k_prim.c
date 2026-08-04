@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- crypto68k portable limb primitives.
+ * AmiNetXDuo, crypto68k portable limb primitives.
  *
  * The fallback half of the build option: when C68K_ASM is not defined these
  * definitions are used, and when it is they are replaced wholesale by

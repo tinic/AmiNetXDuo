@@ -1,4 +1,4 @@
-# Profile -- a sampling profiler for AmigaOS/m68k.
+# Profile, a sampling profiler for AmigaOS/m68k.
 #
 # Self-contained on purpose.  Nothing here links anything from src/, port/ or
 # third_party/, and nothing in the stack knows it exists: this directory is
@@ -9,7 +9,7 @@
 #
 # Prove it before believing it, on more than one CPU, because the exception
 # frame is what is in question.  tools/profiler/selftest.sh is the whole loop
-# -- run, resolve, check containment and proportionality -- in one command:
+# run, resolve, check containment and proportionality, in one command:
 #
 #   AMINETXDUO_KICKSTART=<a 3.1 ROM>   tools/profiler/selftest.sh -b build/p20
 #   AMINETXDUO_KICKSTART=<a 2.04 ROM>  tools/profiler/selftest.sh -b build/p00 -m A500
@@ -24,8 +24,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     return()
 endif()
 
-# The core.  prof_vector.S needs no arch flags -- MOVEC is hand-encoded there
-# precisely so it assembles for the 68000 profile too -- but pass them anyway
+# The core.  prof_vector.S needs no arch flags, MOVEC is hand-encoded there
+# precisely so it assembles for the 68000 profile too, but pass them anyway
 # so the object matches the rest of the build.
 add_library(profile_core STATIC prof.c prof_vector.S)
 target_include_directories(profile_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -60,7 +60,7 @@ target_link_libraries(Profile PRIVATE profile_core)
 target_compile_options(Profile PRIVATE -Wall -Wextra)
 profile_binary(Profile)
 
-# An ordinary program to point it at.  It links NOTHING from here -- that is
+# An ordinary program to point it at.  It links NOTHING from here, that is
 # the point of it: the profiler has to work on a program that was not built
 # for it, and profspin is the one whose exact byte ranges we happen to know.
 add_executable(profspin profspin.c profspin.S)

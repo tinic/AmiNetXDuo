@@ -6,7 +6,7 @@
 #
 # Unlike tests/tls/run-https.sh this stages the two SHARED LIBRARIES and the
 # trust store, because the program under test is linked against none of our
-# code -- it opens LIBS:bsdsocket.library and LIBS:tls.library by name and
+# code, it opens LIBS:bsdsocket.library and LIBS:tls.library by name and
 # verifies the chain against DEVS:Internet/certificates.
 #
 # The trust store is built here rather than checked in: a CA bundle changes

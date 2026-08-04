@@ -1,5 +1,5 @@
 /*
- * ClockSet -- set the guest's clock.
+ * ClockSet, set the guest's clock.
  *
  * SECONDS is seconds since the AmigaOS epoch, 1978-01-01, the same count
  * timer.device and battclock.resource keep.  `ClockSet 0` is the machine with

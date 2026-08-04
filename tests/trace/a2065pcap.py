@@ -10,7 +10,7 @@ failure messages.
 
 It does not need one.  The emulated Commodore A2065 writes every frame it
 handles, in both directions, complete, as hex into ``<base_dir>/Cache/Logs/
-fs-uae.log.txt`` -- unconditionally whenever ``network_card = a2065``, with no
+fs-uae.log.txt``, unconditionally whenever ``network_card = a2065``, with no
 option to request it and none to suppress it.  That output is produced inside
 the emulated hardware, below every line of AmiNetXDuo, so it is independent of
 the guest-side capture by construction: a frame that appears here and not in
@@ -19,7 +19,7 @@ the shape of the AMI_SANA2_RX_DEPTH_IPV4 defect.
 
 WHAT IT CANNOT TELL YOU
 
-  * There are NO TIMESTAMPS.  Not "low resolution" -- absent.  The records
+  * There are NO TIMESTAMPS.  Not "low resolution", absent.  The records
     below are stamped with a synthetic monotonic counter so that ORDER is
     preserved and Wireshark will open the file; every interval in it is a
     fiction.  Take every timing from the guest pcap, which has real

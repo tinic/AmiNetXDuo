@@ -8,7 +8,7 @@
 #
 #   1. THE RESPONDER CLAIMED A NAME, and the right one.  `hostname` in
 #      DEVS:Internet/name_resolution is set to a FULLY QUALIFIED name here on
-#      purpose -- "amigatest.home.lan" -- because mDNS wants one DNS label and
+#      purpose, "amigatest.home.lan", because mDNS wants one DNS label and
 #      HOSTNAME may not be one.  The name that must appear is "amigatest".
 #
 #   2. THE RESOLVER TAKES ".local" TO mDNS, from every command, with no
@@ -21,14 +21,14 @@
 #
 #   3. THE SERVICES DECLARED IN DEVS:Internet/service_discovery ARE ON THE
 #      WIRE, as records and not as a parse.  A service is four records --
-#      PTR, SRV, TXT and the _services._dns-sd._udp enumeration PTR -- and a
+#      PTR, SRV, TXT and the _services._dns-sd._udp enumeration PTR, and a
 #      browser needs all of them, so each is asserted separately.  The file
 #      written below has a deliberately broken line in it, because "a typo in
 #      one service must not stop the network coming up" is a claim about what
 #      happens to the OTHER lines.
 #
 #   4. WHAT ACTUALLY LEFT THE MACHINE, taken from the emulated A2065's own
-#      frame log -- below every line of our code -- and read with tcpdump.  An
+#      frame log, below every line of our code, and read with tcpdump.  An
 #      mDNS probe is a specific thing: UDP 5353 to 224.0.0.251, at the
 #      Ethernet layer to 01:00:5e:00:00:fb.  If that is not on the wire, the
 #      responder is answering itself in a cupboard.
@@ -42,7 +42,7 @@
 #   from "the instrument was not working".
 #
 #   The answer, measured: it relays OUTBOUND, rewriting the source port.  The
-#   reply comes back too -- but SLIRP leaves the host's REAL LAN address on it
+#   reply comes back too, but SLIRP leaves the host's REAL LAN address on it
 #   as the source, so a guest on 10.0.2.0/24 sees a unicast mDNS response from
 #   off-link, and RFC 6762 11 says drop it.  The module drops it.  That is
 #   conformance rather than a defect, and it means the QUERIER half against a
@@ -103,12 +103,12 @@ MDNS_LABEL="amigatest"
 # What DEVS:Internet/service_discovery declares.  Three services, chosen to
 # separate three things that could each be got wrong on their own:
 #
-#   _ftp._tcp with no instance name  -- must be announced under the DERIVED
+#   _ftp._tcp with no instance name , must be announced under the DERIVED
 #       host label, not under the fully-qualified HOSTNAME.
-#   _http._tcp with a multi-word name and a txt= field -- must arrive as one
+#   _http._tcp with a multi-word name and a txt= field, must arrive as one
 #       instance name with spaces in it, and as a TXT record with content
 #       rather than the empty one the module writes when none is given.
-#   _telnet._udp -- the transport is taken from the file and not assumed.
+#   _telnet._udp, the transport is taken from the file and not assumed.
 SD_HTTP_NAME="Amiga web server"
 SD_HTTP_TXT="path=/"
 
@@ -175,7 +175,7 @@ EOF
 # Sized against the LOCK QUEUE and not against the run: build/.fsuae.lock
 # serialises every emulator run in the tree and the queue can be deep, so a
 # watcher that lived for TIMEOUT seconds would routinely be dead before the
-# guest booted -- and its silence would then be read as "SLIRP dropped it".
+# guest booted, and its silence would then be read as "SLIRP dropped it".
 # Same lesson as tests/tools/run-nettools.sh and run-sntp.sh.
 
 WATCHLOG="$ROOT/build/mdnswatch.log"
@@ -439,8 +439,8 @@ echo "====================================================================="
 
 #
 # Three separate things, and the run only comments on the ones it has evidence
-# for.  The instrument is calibrated FIRST -- mdnswatch sends one query of its
-# own with id 0x4d44 at startup and must see it come back -- so that "nothing
+# for.  The instrument is calibrated FIRST, mdnswatch sends one query of its
+# own with id 0x4d44 at startup and must see it come back, so that "nothing
 # arrived" and "nothing was listening" are never confused.  The trailer
 # mdnswatch writes at the end of its own countdown is NOT available here,
 # because this script kills it; the calibration is read from the body instead.
@@ -482,7 +482,7 @@ else
     elif [ "$IN" -gt 0 ] && [ "$OFFLINK" -gt 0 ]; then
         #
         # This is the interesting outcome, and it is NOT a defect.  The reply
-        # crossed the NAT and reached the card -- but SLIRP passes the host's
+        # crossed the NAT and reached the card, but SLIRP passes the host's
         # REAL LAN address through as the source, so a guest on 10.0.2.0/24
         # sees a unicast mDNS response from off-link.  RFC 6762 11 says drop
         # it, and _nx_mdns_packet_address_check() does, unconditionally and

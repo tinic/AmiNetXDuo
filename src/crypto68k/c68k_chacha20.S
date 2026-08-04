@@ -1,9 +1,9 @@
-| AmiNetXDuo -- crypto68k: the ChaCha20 block function, 68020 assembly.
+| AmiNetXDuo, crypto68k: the ChaCha20 block function, 68020 assembly.
 |
 |   One entry point with the same interface as c68k_chacha20_core_c() beside
 |   it: twenty rounds over a copy of a sixteen-word state, then the original
-|   state added back in.  Everything else -- the buffering, the counter, the
-|   little-endian serialisation, the AEAD -- stays in C, as c68k_aes.S leaves
+|   state added back in.  Everything else, the buffering, the counter, the
+|   little-endian serialisation, the AEAD, stays in C, as c68k_aes.S leaves
 |   the key schedule and CBC there.
 |
 |   Written here from RFC 8439 section 2.3, as the C beside it was.  The
@@ -18,7 +18,7 @@
 |   ChaCha20 is worth hand-writing not because it is hot but because it is add,
 |   rotate and exclusive-or over sixteen 32-bit words with no table and no
 |   carry, so the only thing left to decide is which words are in registers
-|   when -- which a compiler answers with a spill heuristic and a human can
+|   when, which a compiler answers with a spill heuristic and a human can
 |   answer exactly.
 |
 | Sixteen words, eight data registers
@@ -30,7 +30,7 @@
 |
 |   and all four operands have to be in data registers, not three and an
 |   address register: EOR has no An destination and no An source, and the
-|   rotates have neither, so `b`, `c` and `d` are excluded outright -- and `a`,
+|   rotates have neither, so `b`, `c` and `d` are excluded outright, and `a`,
 |   which is only ever added to, is still read by `d ^= a`.  Four data
 |   registers per quarter-round, no temporary needed, so the part's eight hold
 |   exactly two quarter-rounds at a time.
@@ -44,7 +44,7 @@
 |       G4  QR(2,7,8,13)  QR(3,4,9,14)
 |
 |   G1 and G2 are disjoint, so are G3 and G4, and every diagonal quarter-round
-|   takes exactly one word from each column quarter-round -- so a group of two
+|   takes exactly one word from each column quarter-round, so a group of two
 |   column quarter-rounds and a group of two diagonal ones always share four
 |   words, whichever way the four are paired.  Eight words change at G1->G2,
 |   four at G2->G3, eight at G3->G4, four at G4->G1: 24 word exchanges a double
@@ -60,7 +60,7 @@
 |       EXG    Dn,An                             4.01
 |
 |   A spill to the stack costs 13.8 cycles a round trip and an address register
-|   costs 4, so the seven address registers are the store -- but the pair of
+|   costs 4, so the seven address registers are the store, but the pair of
 |   MOVEs cannot be used, because there is no ninth data register to stage the
 |   outgoing word through.  EXG is the whole exchange in one instruction, at
 |   the price of the two MOVEs and with no temporary: it retires the word this
@@ -77,7 +77,7 @@
 |   that touches memory inside the loop.
 |
 |   The round loop therefore costs 22 EXG, one store and one load a double
-|   round -- 115.6 cycles against 336 of arithmetic, so state traffic is a
+|   round, 115.6 cycles against 336 of arithmetic, so state traffic is a
 |   quarter of the work rather than the half it was.
 |
 | The map, which repeats every double round
@@ -130,7 +130,7 @@
 | One quarter-round, RFC 8439 section 2.1, on four data registers.
 |
 | ROTL 16 is SWAP, at 3.99 cycles the cheapest rotate the part has.  ROTL 12
-| is SWAP and then ROR.L #4 -- 9.97 cycles -- because ROR.L takes an immediate
+| is SWAP and then ROR.L #4, 9.97 cycles, because ROR.L takes an immediate
 | count of 1..8 only and the register-count form costs 7.97 plus a data
 | register this schedule does not have.  ROTL 8 and ROTL 7 are single
 | instructions at 5.99.  Thirteen instructions, 26 bytes, ~42 cycles.
@@ -204,7 +204,7 @@ _c68k_chacha20_core_asm:
         movea.l 44(a0),a5               | x11
         movea.l 56(a0),a6               | x14
         move.l  60(a0),CC_S1(sp)        | x15
-        movea.l 8(a0),a0                | x2, last -- this was the pointer
+        movea.l 8(a0),a0                | x2, last, this was the pointer
 
 | --------------------------------------------------------- the double round
 .Lcc_round:
@@ -288,8 +288,8 @@ _c68k_chacha20_core_asm:
 | out = in XOR the little-endian serialisation of one 64-byte keystream block.
 |
 | Here because it measured a sixth of the cipher.  The C beside it is already
-| the right seven instructions a word -- load, the three-instruction byte
-| reversal, load, EOR, store -- and at -O3 that is what it compiled to; at -Os
+| the right seven instructions a word, load, the three-instruction byte
+| reversal, load, EOR, store, and at -O3 that is what it compiled to; at -Os
 | GCC gave every word two LEAs, a reloaded `moveq #64` and the 68020's
 | full-extension double-indexed addressing for both the load and the store,
 | about 64 cycles a word where 37 buys the same four bytes.  Post-increment

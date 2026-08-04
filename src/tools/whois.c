@@ -1,5 +1,5 @@
 /*
- * whois -- ask a registry what it knows about a name or an address.
+ * whois, ask a registry what it knows about a name or an address.
  *
  *     whois QUERY/A,SERVER/K,PORT/N/K,FOLLOW/S
  *
@@ -327,7 +327,7 @@ int main(int argc, char **argv)
 
     if (port == 0)
     {
-        tool_error("port 0 is not a port anything listens on");
+        tool_error("port 0 is not a port");
         FreeArgs(rda);
         return RETURN_ERROR;
     }

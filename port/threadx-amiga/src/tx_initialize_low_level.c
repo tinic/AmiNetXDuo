@@ -1,5 +1,5 @@
 /***************************************************************************
- * Eclipse ThreadX -- AmigaOS/m68k port.
+ * Eclipse ThreadX, AmigaOS/m68k port.
  *
  * Derived in structure from ports/linux/gnu/src/tx_initialize_low_level.c
  *   Copyright (c) 2024 Microsoft Corporation
@@ -72,7 +72,7 @@
 /* ReadEClock() is an inline that resolves the timer.device base through the
    symbol named by TIMER_BASE_NAME.  Point it at a base of our own rather than
    the global TimerBase: src/common/compat.c defines that one for ami_millis(),
-   and the port must not depend on which of the two opened the device first --
+   and the port must not depend on which of the two opened the device first,
    or on compat.c being linked in at all.  __NOLIBBASE__ suppresses proto's
    declaration of the global we are not using.  */
 
@@ -83,7 +83,7 @@
 #include "aminetxduo/compat.h"      /* ami_log() + AMI_LOG_* only */
 
 
-/* ---------------------------------------------------------------- state -- */
+/* ---------------------------------------------------------------- state, */
 
 VOID           *_tx_amiga_scheduler_task      = (VOID *) 0;
 ULONG           _tx_amiga_scheduler_signal    = 0UL;
@@ -172,8 +172,8 @@ ULONG                    top;
        FreeEntry(), the exact inverse of AllocEntry(): it frees every
        me_Addr/me_Length the list describes and then the MemList itself.
        Putting the MemList inside the block it describes therefore frees that
-       address twice -- FreeMem(block, block_size) followed by FreeMem(block,
-       sizeof(struct MemList)) -- which is Guru 01000009, AN_FreeTwice, on every
+       address twice, FreeMem(block, block_size) followed by FreeMem(block,
+       sizeof(struct MemList)), which is Guru 01000009, AN_FreeTwice, on every
        task that exits.  amiga.lib's CreateTask() keeps them apart for the same
        reason.  */
 
@@ -266,7 +266,7 @@ VOID _tx_amiga_signal_task(VOID *task, ULONG sigmask)
 }
 
 
-/* ------------------------------------------------------- initialisation -- */
+/* ------------------------------------------------------- initialisation, */
 
 VOID tx_amiga_set_kernel_memory(VOID *memory, ULONG size)
 {
@@ -427,7 +427,7 @@ VOID _tx_amiga_start_interrupts(void)
  * This runs as an ordinary (high priority) Exec Task, not an interrupt server.
  * _tx_thread_context_save() takes the core lock with Forbid(), which gives the
  * tick ISR semantics: while it is held, no other task in the machine runs, so
- * the ThreadX thread that holds the baton is frozen -- the property the Linux
+ * the ThreadX thread that holds the baton is frozen, the property the Linux
  * port buys with pthread_kill().
  *
  * The wakeup source is not the time base.  The task parks on timer.device
@@ -439,8 +439,8 @@ VOID _tx_amiga_start_interrupts(void)
  * how many _tx_timer_interrupt() calls one wakeup may make, and whatever they
  * refuse is added to _tx_timer_system_clock directly instead.  So tx_time_get()
  * is the E-Clock's answer whatever the display or the machine is doing, and only
- * the timer wheel -- which must be walked a slot at a time or timers in the
- * skipped slots go unseen for a whole revolution -- falls behind.  How far
+ * the timer wheel, which must be walked a slot at a time or timers in the
+ * skipped slots go unseen for a whole revolution, falls behind.  How far
  * behind is tx_amiga_tick_skew.
  *
  * VBlank is 50 Hz PAL and 60 Hz NTSC, so a stack that counts frames (as the
@@ -450,8 +450,8 @@ VOID _tx_amiga_start_interrupts(void)
  * outside our control.  The E-Clock is CIA-derived and reports its own
  * frequency, so it is right on all of them.
  *
- * The previous design -- 100 Hz on UNIT_MICROHZ, one fresh IORequest round trip
- * per tick, ticks counted rather than measured -- lost 4-5% of the clock under
+ * The previous design, 100 Hz on UNIT_MICROHZ, one fresh IORequest round trip
+ * per tick, ticks counted rather than measured, lost 4-5% of the clock under
  * soak load, because every re-arm paid its own scheduling latency and nothing
  * noticed the shortfall.
  */
@@ -476,7 +476,7 @@ static VOID _tx_amiga_stop_notify(volatile ULONG *flag)
  * Park a tick task that has no usable wakeup source, so that it is still
  * reapable.
  *
- * This used to be Wait(0UL) -- park forever -- which is correct for a kernel
+ * This used to be Wait(0UL), park forever, which is correct for a kernel
  * that never comes down and fatal for one that does: the Task would keep its
  * entry point inside a code hunk that AmigaDOS is about to unload, and nothing
  * could wake it to say so.  Waiting on SIGF_SINGLE instead costs nothing and
@@ -526,8 +526,8 @@ static VOID _tx_amiga_timer_arm(struct timerequest *tr, ULONG secs, ULONG micro)
  *
  * `guard` is a request on a different unit and port, and it bounds the
  * measurement: the window ends when the guard completes, so a source with no
- * VERTB interrupt behind it -- the configuration this check exists to survive
- * -- yields 0 rather than parking the tick task in Wait() forever.
+ * VERTB interrupt behind it, the configuration this check exists to survive
+ * yields 0 rather than parking the tick task in Wait() forever.
  *
  * Nothing here is ever AbortIO()ed.  The guard always completes on its own, and
  * the source's outstanding request is left pending for the caller: if the
@@ -810,7 +810,7 @@ UINT                 armed;
 
         /*
          * UNIT_VBLANK rounds any request up to the next vertical blank, so the
-         * smallest request asks for one frame -- 50 Hz PAL, 60 Hz NTSC, and on
+         * smallest request asks for one frame, 50 Hz PAL, 60 Hz NTSC, and on
          * either the tick's own 50 Hz is delivered from the E-Clock underneath.
          */
         rate_chz =  _tx_amiga_timer_probe(tr, port_sig, guard, guard_sig, eclock_per_ms);
@@ -829,7 +829,7 @@ UINT                 armed;
 
             /* Throw the rejected source away whole and promote the guard.  Its
                outstanding request may be one that will never complete, so it is
-               aborted -- and then destroyed rather than re-armed, for the reason
+               aborted, and then destroyed rather than re-armed, for the reason
                in _tx_amiga_timer_probe().  */
             _tx_amiga_timer_discard(tr, port);
 
@@ -928,9 +928,9 @@ UINT                 armed;
 
         if (CheckIO((struct IORequest *) tr) == (struct IORequest *) 0)
         {
-            /* Woken by something that was not our request.  Do not abort it --
+            /* Woken by something that was not our request.  Do not abort it,
                an aborted timer request cannot be re-armed (see
-               _tx_amiga_timer_probe) -- just go back to sleep.  */
+               _tx_amiga_timer_probe), just go back to sleep.  */
             continue;
         }
         WaitIO((struct IORequest *) tr);
@@ -1013,7 +1013,7 @@ UINT                 armed;
             backlog +=  measured;
 
             /* Sampled here because this is the moment the wheel is furthest
-               behind the clock -- the whole backlog, plus everything dropped
+               behind the clock, the whole backlog, plus everything dropped
                for good earlier.  That is the worst lateness a timer sitting on
                the wheel can have seen.  */
             if ((backlog + _tx_amiga_tick.tx_amiga_tick_lost) >
@@ -1031,7 +1031,7 @@ UINT                 armed;
                    without this a machine that never catches up would grow an
                    unbounded backlog and the wheel would fall further behind
                    forever.  This is also the only path that skips a wheel slot,
-                   which hides the timers in it for a revolution -- so it is
+                   which hides the timers in it for a revolution, so it is
                    deliberately the pathological case and not the ordinary one. */
                 _tx_amiga_tick.tx_amiga_tick_lost +=
                     backlog - (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP;
@@ -1203,7 +1203,7 @@ TX_AMIGA_TICK_STATS *tx_amiga_tick_stats_live(VOID)
 }
 
 
-/* -------------------------------------------------- library-style start -- */
+/* -------------------------------------------------- library-style start, */
 
 static VOID _tx_amiga_kernel_task_entry(VOID)
 {
@@ -1480,8 +1480,8 @@ UINT         status;
     /* ---- preconditions --------------------------------------------------- */
 
     /*
-     * The caller may be adopted -- netstack_shutdown() calls from that position
-     * -- so its own TX_THREAD does not count against it.  Nothing is orphaned
+     * The caller may be adopted, netstack_shutdown() calls from that position
+     * so its own TX_THREAD does not count against it.  Nothing is orphaned
      * yet: every refusal below has to leave the caller as it found it.
      */
     adopted =  tx_amiga_adopted_thread();
@@ -1676,8 +1676,8 @@ UINT         status;
 
         /*
          * Something the port created is still alive and cannot be reached.
-         * Leave every allocation where it is -- the survivor is standing on
-         * some of it -- and tell the caller that exiting is not safe.  The
+         * Leave every allocation where it is, the survivor is standing on
+         * some of it, and tell the caller that exiting is not safe.  The
          * stopping flag stays set, so nothing will start a second kernel on top
          * of it.
          */

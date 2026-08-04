@@ -8,7 +8,7 @@
 #   tools/ci.sh emulator             # tier 2: FS-UAE, needs a boot ROM
 #   tools/ci.sh host cross emulator  # pick and choose
 #
-# .github/workflows/ci.yml and emulator.yml call THIS -- they add caching,
+# .github/workflows/ci.yml and emulator.yml call THIS, they add caching,
 # a matrix and a job summary and nothing else.  If it passes here it passes
 # there, and a workflow edit cannot quietly change what is tested.
 #
@@ -20,7 +20,7 @@
 #   cross        every build configuration, warnings fatal
 #   analyze      GCC -fanalyzer over our own sources vs a triaged baseline
 #   conformance  build the bsdsocktest suite for m68k (running it needs tier 2)
-#   emulator     tier 2 -- boots FS-UAE, needs a ROM
+#   emulator     tier 2, boots FS-UAE, needs a ROM
 #
 # `tools/ci.sh` with no arguments runs toolchain, host, host32, cross, analyze
 # and conformance: everything that needs neither an emulator nor a licensed ROM.
@@ -51,7 +51,7 @@ JOBS="${AMINETXDUO_CI_JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl 
 # limb primitives for the portable C.  Each has broken while the others built.
 #
 # TLS and IPv6 are both ON by default now, so `default` covers them and the
-# entries here are the OFF ones -- the configurations a user gets by asking for
+# entries here are the OFF ones, the configurations a user gets by asking for
 # a smaller stack, and the ones that would otherwise stop being compiled at all.
 #
 # Then the three CPU targets.  They are not "the same build with a different
@@ -66,7 +66,7 @@ JOBS="${AMINETXDUO_CI_JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl 
 #           anyone "fixing" that mapping to -m68040, which would silently
 #           link the 68000 C library.
 #   m68060  the 64-bit-result MULU.L and DIVU.L are gone, so GCC calls
-#           __muldi3 -- the symbol whose absence blocked this target.
+#           __muldi3, the symbol whose absence blocked this target.
 #
 # `default`, m68000, m68060 and minimal68000 are the four libraries the archive
 # ships, in the options the release workflow gives them, so a break in any of
@@ -83,7 +83,7 @@ CROSS_CONFIGS=(
     "notls:-DAMINETXDUO_TLS=OFF"
     # The floor drawer's answer to IGMP. mcast.c is the only caller of NetX
     # Duo's IGMP services, so this arm is what proves the rest of the tree
-    # still builds and binds without it -- bind() classifies a class D address
+    # still builds and binds without it, bind() classifies a class D address
     # here and not there.
     "nomcast:-DAMINETXDUO_MULTICAST=OFF"
     "noasm:-DAMINETXDUO_CRYPTO68K_ASM=OFF"
@@ -94,7 +94,7 @@ CROSS_CONFIGS=(
     # than one thing off at once.  Every option above is a separate arm because
     # each has its own compile-time surface; this one exists because the
     # combination is what a user downloads, and the arms above do not cover it
-    # -- BPF=OFF appears nowhere else at all, and the interactions between five
+    # BPF=OFF appears nowhere else at all, and the interactions between five
     # of them appear nowhere else at all.  It must stay byte-for-byte the
     # options .github/workflows/release.yml gives build/release-68000-minimal.
     "minimal68000:-DAMINETXDUO_CPU=68000 -DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF"
@@ -102,7 +102,7 @@ CROSS_CONFIGS=(
 
 # Host-side test executables.  ctest fails loudly ("Unable to find executable")
 # if one is registered but not built, so a test added without touching this
-# list turns CI red rather than silently disappearing -- which is what used to
+# list turns CI red rather than silently disappearing, which is what used to
 # happen when `ctest` reported "No tests were found" and nobody noticed.
 HOST_TEST_TARGETS=(test_config test_usergroup test_mbuf test_bpf test_httppath test_httpif test_fetchurl test_crypto68k test_crypto68k_25519 test_net68k_checksum
                    test_tcp_retries test_bcast_loopback test_tcp_source_connect test_tcp_rtt
@@ -112,9 +112,9 @@ HOST_TEST_TARGETS=(test_config test_usergroup test_mbuf test_bpf test_httppath t
                    fuzz_dhcp fuzz_tls_record fuzz_tls_x509)
 
 # The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against
-# Kickstart 3.1 -- identical check counts on both.  Deliberately NOT here:
+# Kickstart 3.1, identical check counts on both.  Deliberately NOT here:
 #   netstack_test, and the bsdsocktest conformance suite, both of which need
-#   DEVS:a2065.device -- Commodore's driver, not redistributable, so those
+#   DEVS:a2065.device, Commodore's driver, not redistributable, so those
 #   stay on a machine that has one (see tools/ci.sh emulator + a real ROM).
 #
 # tools/smoke/crashtest and tools/smoke/gurutest are excluded on purpose: they
@@ -169,7 +169,7 @@ stage_toolchain() {
     # A locally installed toolchain is not the toolchain CI builds with, and the
     # difference is not only the compiler: NDK header sets diverge.  A green
     # cross build here against an NDK that declares SetRexxVarFromMsg said
-    # nothing about CI, whose pinned NDK does not -- which is how v0.13.0 got
+    # nothing about CI, whose pinned NDK does not, which is how v0.13.0 got
     # tagged on code that did not compile.  Warn rather than override: building
     # against what you have installed is usually what you want locally.
     # Resolved with pwd -P, because the pinned tree is normally reached through
@@ -223,8 +223,8 @@ stage_host() {
 #                     pointer to a 32-bit ULONG, and in the second one that
 #                     cast is the signature bounds check under test.
 #
-# Both read bytes chosen by someone else -- unauthenticated multicast, and a
-# TLS server's handshake before any key exists to check it against -- which
+# Both read bytes chosen by someone else, unauthenticated multicast, and a
+# TLS server's handshake before any key exists to check it against, which
 # makes them worth a build of their own rather than leaving them unexercised.
 HOST32_TEST_TARGETS=(fuzz_mdns fuzz_tls_crypto)
 
@@ -266,7 +266,7 @@ stage_cross() {
     local entry name opts
 
     # The Developer drawer's inline/proto/pragma headers are committed, so
-    # packaging never needs sfdc -- which means nothing would notice them
+    # packaging never needs sfdc, which means nothing would notice them
     # drifting from the SFD they came from.  This is what notices.
     if [ -x "${AMIGA_TOOLCHAIN_ROOT:-}/bin/sfdc" ] || command -v sfdc >/dev/null; then
         if tools/gen-developer.sh --check > "$BUILD/gen-developer.log" 2>&1; then
@@ -283,7 +283,7 @@ stage_cross() {
         name="${entry%%:*}"
         opts="${entry#*:}"
 
-        # AMINETXDUO_CI_CROSS=default builds just one -- what the emulator
+        # AMINETXDUO_CI_CROSS=default builds just one, what the emulator
         # tier needs, and what you want when bisecting.
         if [ -n "${AMINETXDUO_CI_CROSS:-}" ]; then
             case " $AMINETXDUO_CI_CROSS " in
@@ -308,7 +308,7 @@ stage_cross() {
             # `|| tail`, not a bare pipeline.  Under `set -euo pipefail` the
             # grep exits 1 when nothing matches and 141 when head -20 closes
             # the pipe on a broad break, and either one killed the shell here
-            # -- before `fail` recorded anything, before the remaining configs
+            # before `fail` recorded anything, before the remaining configs
             # were attempted and before the summary printed.  The fallback also
             # gives this path the log tail the configure path above already has,
             # so a failure is never reported with no output at all.
@@ -341,7 +341,7 @@ stage_analyze() {
     #
     # Off unless AMINETXDUO_ANALYZE=1. It is 2.5 minutes, its findings have not
     # moved in weeks, and it was being run over and over by parallel agents who
-    # had been told to "run the full set once at the end" -- which is the wrong
+    # had been told to "run the full set once at the end", which is the wrong
     # instruction and was mine. A refusal here holds whatever a brief says; the
     # release workflow sets the variable, so nothing ships unanalysed.
     #
@@ -400,7 +400,7 @@ stage_emulator() {
     export AMINETXDUO_KICKSTART_EXT="${AMINETXDUO_KICKSTART_EXT:-}"
 
     # TWO MACHINES, not one.  The default cross build on a 68020, and the
-    # m68000 build on an actual 68000 -- which is a different compiler output
+    # m68000 build on an actual 68000, which is a different compiler output
     # (no 32-bit multiply or divide, the 68000 C library) executing under a
     # different scheduler budget, and for a long time nothing ran it at all.
     #
@@ -419,7 +419,7 @@ stage_emulator() {
     for dir in default m68000; do
         # These budgets multiply the per-test ceilings below.  They are ceilings,
         # not fixed waits, so a passing run finishes long before them and paying
-        # for headroom is free -- and the hosted GitHub runner is markedly slower
+        # for headroom is free, and the hosted GitHub runner is markedly slower
         # at emulation than a dedicated box, enough to time a test out on the old
         # 68020 x1 / 68000 x2 budgets.  Doubled so a slow runner has rope.
         if [ "$dir" = "m68000" ]; then
@@ -461,7 +461,7 @@ mkdir -p "$BUILD"
 #
 # analyze is NOT in the default set. It is 2.5 minutes of the roughly four a
 # default run takes, and its findings do not move between commits the way a
-# build break does -- the baseline has sat at 13 for weeks. Naming it runs it:
+# build break does, the baseline has sat at 13 for weeks. Naming it runs it:
 #
 #     tools/ci.sh analyze                  just it
 #     tools/ci.sh host host32 cross analyze conformance    the release set

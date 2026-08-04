@@ -1,5 +1,5 @@
 /*
- * bsdsocket.library -- the local network database.
+ * bsdsocket.library, the local network database.
  *
  *   get{serv,proto,net}by*()          lookups
  *   set/get/end{serv,proto,net}ent()  iteration
@@ -14,10 +14,10 @@
  *   1. The returned struct is per opener, not a file static. Two tasks each
  *      have their own SocketBase (docs/RESEARCH.md S3.1), and a shared static
  *      would mean task A's getservbyname() overwrites the servent task B is
- *      still holding -- Amiberry's "getservbyname() returns stale pointer"
+ *      still holding, Amiberry's "getservbyname() returns stale pointer"
  *      bug, test 93.
  *
- *   2. s_port is in network byte order, as BSD specifies -- callers do
+ *   2. s_port is in network byte order, as BSD specifies, callers do
  *      ntohs(s->s_port). That is identity on m68k, so it is spelled out with
  *      BSD_HTONS() rather than left implicit; the port number a caller passes
  *      to getservbyport() comes back the same way. (Amiberry's test 94
@@ -56,7 +56,7 @@ static __STRPTR *bsd_aliases_of(const AmiNetdbEntry *entry)
     return (__STRPTR *)(APTR)entry->aliases;
 }
 
-/* ------------------------------------------------------------- servent -- */
+/* ------------------------------------------------------------- servent, */
 
 static struct servent *bsd_servent_fill(struct AmiSocketBase *base,
                                         const AmiNetdbEntry *entry)
@@ -123,7 +123,7 @@ struct servent *bsd_getservent(register struct AmiSocketBase *SocketBase __asm("
     return bsd_servent_fill(SocketBase, entry);
 }
 
-/* ------------------------------------------------------------ protoent -- */
+/* ------------------------------------------------------------ protoent, */
 
 static struct protoent *bsd_protoent_fill(struct AmiSocketBase *base,
                                           const AmiNetdbEntry *entry)
@@ -177,7 +177,7 @@ struct protoent *bsd_getprotoent(register struct AmiSocketBase *SocketBase __asm
     return bsd_protoent_fill(SocketBase, entry);
 }
 
-/* -------------------------------------------------------------- netent -- */
+/* -------------------------------------------------------------- netent, */
 
 static struct netent *bsd_netent_fill(struct AmiSocketBase *base,
                                       const AmiNetdbEntry *entry)

@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- bpf ABI pin.
+ * AmiNetXDuo, bpf ABI pin.
  *
  * Amiga-only, and a translation unit of its own so that every assertion runs
  * against the Roadshow NDK <net/bpf.h> itself. The record layout is what
@@ -20,7 +20,7 @@
 #  error "bpf_abi_check.c is only meaningful against the real NDK <net/bpf.h>"
 #endif
 
-/* struct bpf_hdr -- 8 + 4 + 4 + 2 = 18 bytes on 68k, where a struct needs no
+/* struct bpf_hdr, 8 + 4 + 4 + 2 = 18 bytes on 68k, where a struct needs no
    more than 2-byte alignment. BPF_WORDALIGN rounds it to 20 for the record. */
 AMI_STATIC_ASSERT(sizeof(struct bpf_hdr) == AMI_BPF_HDR_BYTES, "bpf_hdr size");
 AMI_STATIC_ASSERT(offsetof(struct bpf_hdr, bh_tstamp)  == AMI_BPF_OFF_TSTAMP_SEC, "bh_tstamp");
@@ -31,12 +31,12 @@ AMI_STATIC_ASSERT(sizeof(((struct bpf_hdr *)0)->bh_caplen)  == 4, "bh_caplen wid
 AMI_STATIC_ASSERT(sizeof(((struct bpf_hdr *)0)->bh_datalen) == 4, "bh_datalen width");
 AMI_STATIC_ASSERT(sizeof(((struct bpf_hdr *)0)->bh_hdrlen)  == 2, "bh_hdrlen width");
 
-/* bh_tstamp is a `struct timeval` -- the Amiga one, two ULONGs. If a
+/* bh_tstamp is a `struct timeval`, the Amiga one, two ULONGs. If a
    toolchain substituted a Unix timeval with a 64-bit time_t the record would
    grow silently and every consumer would misparse it. */
 AMI_STATIC_ASSERT(sizeof(((struct bpf_hdr *)0)->bh_tstamp) == 8, "bh_tstamp size");
 
-/* struct bpf_insn -- an array of these is copied verbatim out of application
+/* struct bpf_insn, an array of these is copied verbatim out of application
    memory by BIOCSETF, so the width of every field matters. Note `code` is a
    16-bit UWORD here, not the 32-bit int some BPF headers use. */
 AMI_STATIC_ASSERT(sizeof(struct bpf_insn) == 8, "bpf_insn size");

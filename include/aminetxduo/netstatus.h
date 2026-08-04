@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- asking the running stack what it is doing.
+ * AmiNetXDuo, asking the running stack what it is doing.
  *
  *   The whole ThreadX/NetX Duo stack is a singleton inside bsdsocket.library's
  *   segment. A Shell command that links libnetxduo.a gets a second set of NetX
@@ -32,7 +32,7 @@
  *   buffer with plain scalars, and releases the baton before returning. Nothing
  *   the caller holds afterwards points into the stack.
  *
- *   These two slots sit past every offset any published bsdsocket ABI names --
+ *   These two slots sit past every offset any published bsdsocket ABI names,
  *   past AmiTCP V3, past AmiTCP V4, past Roadshow's extension set and past the
  *   six reserved-for-expansion slots that clib/bsdsocket_protos.h documents
  *   after getnameinfo(). The only way to reach them is on purpose. But if some
@@ -57,7 +57,7 @@
 extern "C" {
 #endif
 
-/* ------------------------------------------------------------------ LVOs --
+/* ------------------------------------------------------------------ LVOs,
  *
  * -0x360 is bsd_ObtainNetXDuoContext (aminetxduo/nxcontext.h), which exists
  * only in an AMINETXDUO_TLS build, but its slot is unconditional, so these two
@@ -119,19 +119,19 @@ extern "C" {
  *
  * Bump this when a *caller of this interface* needs a newer library: when a
  * netstatus vector is added, or when AMI_NETSTATUS_VERSION moves. Not merely
- * because BSD_LIB_REVISION did -- revision 3 added the RFC 3493 if_* vectors,
+ * because BSD_LIB_REVISION did, revision 3 added the RFC 3493 if_* vectors,
  * which no netstatus caller touches, so a revision-2 library still answers
  * everything here and refusing it would be a wrong diagnosis.
  *
  * The version check inside the library catches a mismatched pair too, but only
  * after the call, where it is indistinguishable from the feature being absent
- * -- ShowNetServices read it as "this library has no mDNS" and told the reader
+ * ShowNetServices read it as "this library has no mDNS" and told the reader
  * to stop looking. This check runs before any call and says the true thing:
  * finish the install.
  */
 #define AMI_NETSTATUS_MIN_REVISION  2
 
-/* ------------------------------------------------------------ selectors --
+/* ------------------------------------------------------------ selectors,
  *
  * One selector per table, so adding a table later costs a selector, not an LVO.
  */
@@ -213,8 +213,8 @@ typedef struct NetStatusSystem
     /*
      * Which of the places that can name a machine named this one:
      * AmiHostnameSource (aminetxduo/config.h). A name is not self-explaining
-     * -- a remnant ENV:HOSTNAME kept a renamed machine answering to its old
-     * name and nothing said so -- and this is the only field that says.
+     * a remnant ENV:HOSTNAME kept a renamed machine answering to its old
+     * name and nothing said so, and this is the only field that says.
      *
      * Zero is AMI_HOSTNAME_NONE and means either that nothing named the
      * machine or that the library predates the field, so a reader reports
@@ -276,7 +276,7 @@ typedef struct NetStatusInterface
  * netstack_ipv6_address_get() and ami_config_format_ip6() both speak.
  */
 
-/* nsn_State -- NX_IPV6_ADDR_STATE_*, spelled out so a caller need not include
+/* nsn_State, NX_IPV6_ADDR_STATE_*, spelled out so a caller need not include
    nx_api.h.  A TENTATIVE address is still running duplicate address detection
    and must not be used as a source. */
 #define NETSTATUS_IP6_TENTATIVE     1
@@ -339,7 +339,7 @@ typedef struct NetStatusDhcp
 
 /* ---------------------------------------------------- NETSTATUS_STATS --- */
 
-/* nsx_Have -- a protocol NetX Duo was not built with is not "all zero". */
+/* nsx_Have, a protocol NetX Duo was not built with is not "all zero". */
 #define NETSTATUS_HAVE_IP       0x0001UL
 #define NETSTATUS_HAVE_ICMP     0x0002UL
 #define NETSTATUS_HAVE_TCP      0x0004UL
@@ -433,8 +433,8 @@ typedef struct NetStatusStats
  *
  * nsl_TickSkew is how far behind real time the timer wheel is, in ticks: what
  * it has yet to be given plus what nsl_TickLost took off it for good. The
- * ThreadX clock is not in it -- that comes from the E-Clock and is true either
- * way -- so this is a measure of how late timers are running and of nothing
+ * ThreadX clock is not in it, that comes from the E-Clock and is true either
+ * way, so this is a measure of how late timers are running and of nothing
  * else. nsl_TickSkewPeak is sampled before a backlog is worked off, so it moves
  * on a machine where nothing was ever lost.
  *
@@ -509,7 +509,7 @@ typedef struct NetStatusArp
  * An IPv4-only build answers with no entries rather than an error.
  */
 
-/* nsn6_State -- ND_CACHE_STATE_*, spelled out so a caller need not include
+/* nsn6_State, ND_CACHE_STATE_*, spelled out so a caller need not include
    nx_nd_cache.h.  INVALID entries are not reported at all. */
 #define NETSTATUS_ND_INCOMPLETE 1   /* asked, nothing back yet              */
 #define NETSTATUS_ND_REACHABLE  2   /* answered within the reachable time   */
@@ -535,7 +535,7 @@ typedef struct NetStatusNeighbour
 
 /* --------------------------------------------------- NETSTATUS_ROUTES --- */
 
-/* nsr_Flags -- the BSD spelling, because that is what netstat -r prints. */
+/* nsr_Flags, the BSD spelling, because that is what netstat -r prints. */
 #define NETSTATUS_RT_UP         0x0001
 #define NETSTATUS_RT_GATEWAY    0x0002  /* nsr_Gateway is a next hop         */
 #define NETSTATUS_RT_HOST       0x0004  /* a /32                             */
@@ -557,11 +557,11 @@ typedef struct NetStatusRoute
  * goes from two lists, and this selector reports both in the order
  * _nx_ipv6_packet_send() consults them:
  *
- *   1. the on-link prefixes -- nx_ipv6_prefix_list_ptr, plus the prefix of
+ *   1. the on-link prefixes, nx_ipv6_prefix_list_ptr, plus the prefix of
  *      every manually configured address, which is what _nxd_ipv6_search_onlink()
  *      looks at.  A destination inside one of these is reached directly and
  *      nsr6_NextHop is all zero.
- *   2. the default routers -- nx_ipv6_default_router_table, destination ::/0.
+ *   2. the default routers, nx_ipv6_default_router_table, destination ::/0.
  *      Everything with nowhere better to go is handed to one of these.
  *
  * A stateless-autoconfigured address is deliberately NOT reported from its own
@@ -577,7 +577,7 @@ typedef struct NetStatusRoute
  * An IPv4-only build answers with no entries rather than an error.
  */
 
-/* nsr6_Flags -- the same bits and the same letters as nsr_Flags. */
+/* nsr6_Flags, the same bits and the same letters as nsr_Flags. */
 #define NETSTATUS_RT6_UP        0x0001
 #define NETSTATUS_RT6_GATEWAY   0x0002  /* nsr6_NextHop is a next hop        */
 #define NETSTATUS_RT6_HOST      0x0004  /* a /128                            */
@@ -628,13 +628,13 @@ typedef struct NetStatusSocket
 #define NETSTATUS_TCP_TIMED_WAIT    10
 #define NETSTATUS_TCP_LAST_ACK      11
 
-/* ------------------------------------------------- NETSTATUS_SERVICES --
+/* ------------------------------------------------- NETSTATUS_SERVICES,
  *
  * What a browse has heard so far. This is a read of the mDNS cache:
  * NETCTRL_MDNS_BROWSE starts the query, answers arrive on the responder's own
  * thread over the following seconds, and this selector says what has landed by
  * the time it is called. Calling it twice gives two different answers, and
- * neither is "everything on the network" -- mDNS has no end of results.
+ * neither is "everything on the network", mDNS has no end of results.
  *
  * One thing it does put on the wire: a service whose SRV record arrived without
  * an address record beside it has its target resolved here, because a row with
@@ -676,7 +676,7 @@ typedef struct NetStatusService
     char    nsv_Text[NETSTATUS_SVC_TXT_LEN];    /* "key=value;key=value"     */
 } NetStatusService;
 
-/* ------------------------------------------------------------- control --
+/* ------------------------------------------------------------- control,
  *
  * NetStackControl() is the mutating half, on a separate LVO from the reading
  * half so that a caller which only reads cannot get one of these by mistyping a
@@ -689,7 +689,7 @@ typedef struct NetStatusService
 #define NETCTRL_INTERFACE_UP    1   /* nsc_Index                             */
 #define NETCTRL_INTERFACE_DOWN  2   /* nsc_Index                             */
 #define NETCTRL_GATEWAY_SET     3   /* nsc_Gateway                           */
-#define NETCTRL_GATEWAY_CLEAR   4   /* --                                    */
+#define NETCTRL_GATEWAY_CLEAR   4   /*,                                    */
 /*
  * ROUTE_ADD takes nsc_Destination/NetMask/Gateway and not nsc_Index: NetX Duo
  * derives the interface from the next hop, which must be on an interface's own
@@ -701,11 +701,11 @@ typedef struct NetStatusService
 #define NETCTRL_ROUTE_DELETE    6   /* nsc_Destination/NetMask               */
 #define NETCTRL_ARP_ADD         7   /* nsc_Destination, nsc_HwAddress, Index */
 #define NETCTRL_ARP_DELETE      8   /* nsc_Destination                       */
-#define NETCTRL_ARP_FLUSH       9   /* --                                    */
+#define NETCTRL_ARP_FLUSH       9   /*,                                    */
 
 /*
  * The IPv6 pair. One operation covers both of the mechanisms NETSTATUS_ROUTES6
- * reports, because a caller writes the same thing either way -- a destination,
+ * reports, because a caller writes the same thing either way, a destination,
  * a prefix length and somewhere to send it:
  *
  *   nsc_PrefixLength 0 with a next hop        a default router
@@ -714,9 +714,9 @@ typedef struct NetStatusService
  *                                             no destination-to-next-hop table
  *                                             for IPv6 and cannot store one.
  *
- * nsc_Index names the interface. It is required for a link-local next hop --
+ * nsc_Index names the interface. It is required for a link-local next hop,
  * fe80::/64 exists on every interface, so the address alone does not say which
- * -- and ignored for a prefix, which is a property of the machine's whole
+ * and ignored for a prefix, which is a property of the machine's whole
  * prefix list rather than of one interface.
  *
  * Both invalidate the IPv6 destination cache, which is a per-destination
@@ -736,7 +736,7 @@ typedef struct NetStatusService
  * there is to browse for.
  *
  * BROWSE registers a continuous query (RFC 6762 5.2, exponential backoff) and
- * returns at once -- it does not wait for an answer, because mDNS has none to
+ * returns at once, it does not wait for an answer, because mDNS has none to
  * wait for. The caller sleeps for as long as it is prepared to wait, then reads
  * NETSTATUS_SERVICES.
  *

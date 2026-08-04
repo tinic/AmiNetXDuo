@@ -6,7 +6,7 @@
 #                                  [-k MHZ] [-x] [-E] [-1] [-C FILE]
 #
 #   -x  take the emulator alone.  Every timing needs it.
-#   -E  Enforcer + MungWall instead.  Not a timing run -- it boots a 68030.
+#   -E  Enforcer + MungWall instead.  Not a timing run, it boots a 68030.
 #   -C  a command list to stage instead of the default.
 #   -1  pin BOTH ends to the one ciphersuite the two TLS stacks share.
 #
@@ -15,8 +15,8 @@
 #   Left to themselves the two arms negotiate different crypto: our
 #   tls.library offers no GCM and no TLS 1.3, so it lands on TLS 1.2 with
 #   ECDHE-RSA-CHACHA20-POLY1305, while bebboget lands on TLS 1.3 with
-#   AES-256-GCM.  Both figures are real -- they are what each program does
-#   against a normal server -- but the difference between them is partly the
+#   AES-256-GCM.  Both figures are real, they are what each program does
+#   against a normal server, but the difference between them is partly the
 #   algorithm and not the implementation.
 #
 #   src/tls/ami_tls_crypto.c offers 0xC023, 0xC027, 0xCCA8 and 0xCCA9 plus two
@@ -29,8 +29,8 @@
 # WHY THIS EXISTS
 #
 #   bebboget is an HTTPS downloader by the author of BebboSSH and of the m68k
-#   toolchain this tree builds with.  It carries its own TLS -- SSL 3.0 to TLS
-#   1.3, its own ChaCha20-Poly1305 and AES, hot loops in assembly -- and needs
+#   toolchain this tree builds with.  It carries its own TLS, SSL 3.0 to TLS
+#   1.3, its own ChaCha20-Poly1305 and AES, hot loops in assembly, and needs
 #   nothing but bsdsocket.library.  So it is a second independent client of our
 #   ABI, and a different shape of load from BebboSSH: one long unidirectional
 #   read rather than a request/response ping-pong.
@@ -48,14 +48,14 @@
 # WHY A LOCAL SERVER AND NOT A REAL URL
 #
 #   A public URL makes the test depend on the network being up, on a CDN's
-#   cipher preference, and on a front end's patience -- and a first TLS
+#   cipher preference, and on a front end's patience, and a first TLS
 #   handshake at 14 MHz can outlast a busy peer's timeout, which is a property
 #   of the machine (docs/RESEARCH.md 11.8) and would show up here as a flake
 #   rather than as the finding it is.  tests/bebboget/httpsd.py serves fixed
 #   payloads from the build host at 10.0.2.2.
 #
-#   Both clients are told to skip certificate verification -- bebboget's
-#   --sloppy, fetch's NOVERIFY -- because the server's certificate is
+#   Both clients are told to skip certificate verification, bebboget's
+#   --sloppy, fetch's NOVERIFY, because the server's certificate is
 #   self-signed and generated here.  That measures the transport and the record
 #   layer, which is what is being compared; it does not measure either
 #   program's trust store, and the report should not pretend otherwise.
@@ -66,7 +66,7 @@
 #   51.5 KB/s against the 68000 build's 28.9 on the same machine, so the two
 #   are not interchangeable.
 #
-# locale.library IS REQUIRED, exactly as for BebboSSH -- see
+# locale.library IS REQUIRED, exactly as for BebboSSH, see
 # tests/bebbossh/run-bebbossh.sh for what its absence looks like.
 #
 # SCORING
@@ -262,8 +262,8 @@ else
     #
     # Each arm fetches the 45-byte file once BEFORE it is measured, and the
     # warm-up is thrown away.  The first run of either program pays for loading
-    # its libraries off DH0: -- tls.library for ours, libcryptossh and
-    # locale.library for bebboget -- and AmigaOS keeps a library resident after
+    # its libraries off DH0:, tls.library for ours, libcryptossh and
+    # locale.library for bebboget, and AmigaOS keeps a library resident after
     # the last close, so only the first process pays.  Measured: the first
     # `fetch` took 4.02 s for 45 bytes and the next took 2.14 s for 64 KB, i.e.
     # the handshake column was mostly library loading.

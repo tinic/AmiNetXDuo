@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- crypto68k: 68020 multi-precision arithmetic for nx_crypto.
+ * AmiNetXDuo, crypto68k: 68020 multi-precision arithmetic for nx_crypto.
  *
  *   docs/RESEARCH.md 9 makes TLS conditional on a 68020 benchmark, and that
  *   benchmark is dominated by one loop: the multiply-accumulate at the heart
@@ -14,7 +14,7 @@
  *   1. Exponent leading-zero bits are skipped.  The vendored
  *      _nx_crypto_huge_number_mont_power_modulus walks all 32 bits of the top
  *      exponent word, so e = 65537 (0x00010001) costs 32 squarings where 16
- *      are needed.  That alone is ~1.9x on every RSA *public* operation --
+ *      are needed.  That alone is ~1.9x on every RSA *public* operation,
  *      certificate signature verification, which a TLS client does three times
  *      per handshake.
  *
@@ -27,7 +27,7 @@
  *      every operation is a squaring.
  *
  *   4. The limb multiply-accumulate loop is hand-written 68020 assembly.  GCC
- *      does emit MULU.L for the portable C (verified -- see the header comment
+ *      does emit MULU.L for the portable C (verified, see the header comment
  *      in c68k_prim.S), so this is the smallest of the four levers: worth
  *      1.4x, and MULU.L's 44 cycles are the floor.
  *
@@ -73,14 +73,14 @@ typedef HN_UBASE    c68k_limb;
 #endif
 
 
-/* ------------------------------------------------------------ primitives -- */
+/* ------------------------------------------------------------ primitives, */
 
 /*
  * r[0..n-1] += a * b[0..n-1], carry propagating.  Returns the carry out of
  * the top limb (a full limb, not a single bit).
  *
- * The multiply-accumulate every multi-precision algorithm is built from --
- * OpenSSL calls it bn_mul_add_words, GMP calls it addmul_1 -- and on this
+ * The multiply-accumulate every multi-precision algorithm is built from,
+ * OpenSSL calls it bn_mul_add_words, GMP calls it addmul_1, and on this
  * machine it is where essentially all the time goes.
  *
  * The 64-bit intermediate cannot overflow: the largest possible value is
@@ -132,14 +132,14 @@ c68k_limb c68k_submul_1(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a);
  *
  * Caller must ensure hi < d.  On a 68020 the assembly form is a single
  * DIVU.L, which traps when the quotient will not fit in 32 bits.  Knuth's
- * algorithm D produces exactly one case where it would -- the partial
- * remainder's top limb equal to the divisor's -- and c68k_mod() below tests
+ * algorithm D produces exactly one case where it would, the partial
+ * remainder's top limb equal to the divisor's, and c68k_mod() below tests
  * for it and substitutes B-1 rather than dividing.
  *
  * DIVU.L is in the same class as MULU.L 32x32->64: real on a 68020, 68030 and
  * 68040, unimplemented on a 68060, where it traps to the emulator.  So it
  * lives in c68k_prim.S under the same AMINETXDUO_CRYPTO68K_ASM guard, with
- * the portable C fallback below it, and the same rule applies -- that option
+ * the portable C fallback below it, and the same rule applies, that option
  * must never be enabled for a 68060 build.
  */
 c68k_limb c68k_div_2by1(c68k_limb hi, c68k_limb lo, c68k_limb d,
@@ -152,8 +152,8 @@ c68k_limb c68k_div_2by1(c68k_limb hi, c68k_limb lo, c68k_limb d,
  * scratch needs C68K_MOD_SCRATCH_LIMBS(u_len, m_len) and must not alias.
  *
  * The vendored _nx_crypto_huge_number_modulus() does the same job in 16-bit
- * half-limbs -- its own comments say "In number of USHORT words" and it
- * estimates each quotient digit from HN_SHIFT >> 1 -- so it runs twice the
+ * half-limbs, its own comments say "In number of USHORT words" and it
+ * estimates each quotient digit from HN_SHIFT >> 1, so it runs twice the
  * outer iterations over twice as many inner limbs.  On an RSA-2048 public
  * operation that one routine was 22% of the whole thing.
  */
@@ -175,7 +175,7 @@ extern UINT c68k_fast_modulus;
 /*
  * rr = R^2 mod m, where R = 2^(32*m_len).  setup needs 7*m_len + 8 limbs.
  *
- * Public so it can be timed on its own -- it was 22% of an RSA-2048 public
+ * Public so it can be timed on its own, it was 22% of an RSA-2048 public
  * operation before c68k_mod() replaced the reduction inside it, large enough
  * to want measuring directly rather than by subtraction.
  */
@@ -194,7 +194,7 @@ INT c68k_cmp(const c68k_limb *a, const c68k_limb *b, UINT n);
 UINT c68k_using_assembly(VOID);
 
 
-/* ------------------------------------------------------------ Montgomery -- */
+/* ------------------------------------------------------------ Montgomery, */
 
 /*
  * -m[0]^-1 mod 2^32, by Newton iteration.  m must be odd.
@@ -210,7 +210,7 @@ c68k_limb c68k_mont_n0inv(c68k_limb m0);
  * this machine and is measured by sweeping it at run time rather than by
  * rebuilding once per candidate.  And it lets the test diff the split against
  * schoolbook inside this module, a better oracle than the vendored Montgomery
- * -- that one is wrong for operands within a whisker of the modulus (see the
+ * that one is wrong for operands within a whisker of the modulus (see the
  * comment in tests/crypto68k/host/test_c68k_host.c), so it cannot check the
  * operands Karatsuba's carry paths most need checking on.
  *
@@ -228,7 +228,7 @@ extern UINT c68k_karatsuba_limbs;
  * C68K_MONT_WORK_LIMBS(m_len) limbs, below, and must not alias anything.
  *
  * Separated form (SOS in Koc/Acar/Kaliski's taxonomy) rather than the usually
- * recommended CIOS -- see the header comment in c68k_mont.c for why the 68020
+ * recommended CIOS, see the header comment in c68k_mont.c for why the 68020
  * inverts that advice.  The product is Karatsuba above a threshold and
  * schoolbook below it; the reduction is a chain of scalar-by-vector products
  * and is always schoolbook, since Karatsuba cannot apply to it.
@@ -262,7 +262,7 @@ VOID c68k_mont_sqr(c68k_limb *r,
                    c68k_limb *work);
 
 
-/* -------------------------------------------------------- exponentiation -- */
+/* -------------------------------------------------------- exponentiation, */
 
 /*
  * Scratch, in limbs, that c68k_mont_power_modulus() needs for a modulus of
@@ -299,7 +299,7 @@ VOID c68k_mont_sqr(c68k_limb *r,
  *   - the final conditional subtraction of each Montgomery step is a branch;
  *   - leading zero bits of the exponent are skipped, which leaks its bit length.
  *
- * The vendored implementation is not constant time either -- it branches per
+ * The vendored implementation is not constant time either, it branches per
  * exponent bit between one Montgomery step and two, the textbook square-and-
  * multiply leak, a stronger signal than anything here.  So this is not a
  * regression, but it is not a defence.  For the threat model in

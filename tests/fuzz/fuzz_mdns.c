@@ -1,18 +1,18 @@
 /*
- * AmiNetXDuo -- host fuzz driver for the mDNS packet parser.
+ * AmiNetXDuo, host fuzz driver for the mDNS packet parser.
  *
  * mDNS is the more exposed of the two parsers: 224.0.0.251:5353 takes
  * unauthenticated multicast from any host on the segment, and no query has to
  * have been sent for a packet to arrive.  The parsing is in
- * addons/mdns/nxd_mdns.c -- src/netstack/netstack_mdns.c starts the module,
+ * addons/mdns/nxd_mdns.c, src/netstack/netstack_mdns.c starts the module,
  * picks the host label and maps ".local" onto it, and parses nothing.
  *
  * The entry point is _nx_mdns_thread_entry(), the module's own thread, and it
  * is reached without touching vendored source: nx_mdns_create() registers it
  * with tx_thread_create(), the stub below keeps the function pointer, and the
- * driver calls it.  Its loop then runs for real -- event flags, the receive
+ * driver calls it.  Its loop then runs for real, event flags, the receive
  * loop, the packet-chain check, the interface lookup, _nx_mdns_packet_process()
- * and the release -- with _nx_udp_socket_receive() handing over the fuzz bytes
+ * and the release, with _nx_udp_socket_receive() handing over the fuzz bytes
  * as a packet.  The loop is a `while(1)`, so the escape is a longjmp from the
  * event-flag wait at the top of it, where nothing is in flight.
  *
@@ -266,7 +266,7 @@ UINT _txe_timer_change(TX_TIMER *t, ULONG initial_ticks, ULONG reschedule_ticks)
 /*
  * Reported inactive with nothing remaining.  _nx_mdns_timer_set() then makes
  * nx_mdns_timer_min_count equal to the record's own timer count, so one
- * NX_MDNS_TIMER_EVENT expires whatever was just scheduled -- which is how the
+ * NX_MDNS_TIMER_EVENT expires whatever was just scheduled, which is how the
  * driver walks probing and announcing forward without a real timer.
  */
 UINT _txe_timer_info_get(TX_TIMER *t, CHAR **name, UINT *active,
@@ -465,7 +465,7 @@ UINT _nxd_udp_socket_source_send(NX_UDP_SOCKET *socket_ptr,
  * paths leave them in.
  *
  * The IP header is a separate object rather than bytes in front of
- * nx_packet_prepend_ptr, because NX_IPV4_HEADER's fields are ULONG -- eight
+ * nx_packet_prepend_ptr, because NX_IPV4_HEADER's fields are ULONG, eight
  * bytes on this host, four in the space NetX Duo leaves in a packet.
  */
 static NX_IPV4_HEADER   fz_wire_ip_header;
@@ -923,7 +923,7 @@ static void fz_stop(void)
 
 /*
  * One datagram.  The module is created and deleted around it so a case cannot
- * be shielded by state the previous one left in the caches -- and so the
+ * be shielded by state the previous one left in the caches, and so the
  * caches are exercised from empty every time, which is the state a machine is
  * in when it has just booted onto a hostile segment.
  */
@@ -940,7 +940,7 @@ static void fz_run_once(const unsigned char *data, size_t len)
     fz_delivered = 0;
     fz_pump(NX_MDNS_PKT_RX_EVENT);
 
-    /* And again, so the second copy meets the cache the first one filled --
+    /* And again, so the second copy meets the cache the first one filled,
        which is where duplicate suppression and conflict handling live. */
     fz_delivered = 0;
     fz_pump(NX_MDNS_PKT_RX_EVENT | NX_MDNS_TIMER_EVENT);

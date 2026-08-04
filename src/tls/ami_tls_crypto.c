@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- nx_secure crypto tables wired to src/crypto68k/.
+ * AmiNetXDuo, nx_secure crypto tables wired to src/crypto68k/.
  *
  * See ami_tls_crypto.h for why this exists and why the mechanism is a private
  * set of NX_CRYPTO_METHOD entries rather than a patch to third_party/.
@@ -110,7 +110,7 @@ VOID ami_tls_crypto_counters_reset(VOID)
 }
 
 
-/* ------------------------------------------------------------ P-256 curve -- */
+/* ------------------------------------------------------------ P-256 curve, */
 
 /*
  * A private, mutable copy of the vendored secp256r1 curve.  The vendored
@@ -277,7 +277,7 @@ NX_CRYPTO_METHOD ami_crypto_method_ec_secp256 =
  * modulus without supplying the primes.
  *
  * Four entries: this stack does not yet offer a local certificate chain
- * needing more than a leaf and a client certificate.  Nothing is copied -- the
+ * needing more than a leaf and a client certificate.  Nothing is copied, the
  * pointers are into the caller's DER, as
  * nx_secure_process_client_key_exchange.c's own CRT setup does.
  */
@@ -408,7 +408,7 @@ UINT    i;
  * Scratch for c68k, in limbs, on top of the vendored NX_CRYPTO_RSA context.
  *
  * c68k_mont_power_modulus() picks the largest sliding window that fits what it
- * is given -- C68K_POWM_SCRATCH_LIMBS(m_len, w) = (10 + 2^(w-1)) * m_len + 8 --
+ * is given, C68K_POWM_SCRATCH_LIMBS(m_len, w) = (10 + 2^(w-1)) * m_len + 8,
  * and 1536 limbs buys:
  *
  *     CRT half of a 2048-bit key (m_len 32)   w = 6   the case that matters
@@ -419,7 +419,7 @@ UINT    i;
  *
  * 6 KB per RSA context.  Measured effect on a session:
  * nx_secure_tls_metadata_size_calculate() goes from 10,128 bytes with the
- * vendored table to 16,272 with this one -- exactly one scratch area, because
+ * vendored table to 16,272 with this one, exactly one scratch area, because
  * the public-cipher slot is already sized by NX_CRYPTO_ECDH and only the
  * public-auth slot grows.
  *
@@ -438,7 +438,7 @@ typedef struct AMI_CRYPTO_RSA_STRUCT
  * Anything longer than this is a private exponent.  Real public exponents are
  * 3 (0x010001) or 1 byte; the largest that has ever been seen in the wild is a
  * handful of bytes.  The test only decides whether it is worth consulting the
- * prime table -- getting it wrong costs a table walk, not a wrong answer.
+ * prime table, getting it wrong costs a table walk, not a wrong answer.
  */
 #define AMI_TLS_RSA_PUBLIC_EXPONENT_MAX  16u
 
@@ -650,8 +650,8 @@ ULONG                       elapsed;
 
         /*
          * The missing 3.6x.  nx_secure sets the primes on one path out of
-         * three; on the other two -- the ECDHE_RSA ServerKeyExchange signature
-         * and CertificateVerify -- it hands over the full private exponent and
+         * three; on the other two, the ECDHE_RSA ServerKeyExchange signature
+         * and CertificateVerify, it hands over the full private exponent and
          * takes the 158 s branch.  If the application registered the
          * certificate, the primes are recoverable here.
          */
@@ -733,8 +733,8 @@ NX_CRYPTO_METHOD ami_crypto_method_rsa =
  *   `http`'s 114,598 on this machine, and most of that ceiling is these two
  *   functions.
  *
- *   These two are the record path for 0xC027 and 0xC023 -- ECDHE_RSA and
- *   ECDHE_ECDSA with AES_128_CBC_SHA256 -- which a server negotiates when it
+ *   These two are the record path for 0xC027 and 0xC023, ECDHE_RSA and
+ *   ECDHE_ECDSA with AES_128_CBC_SHA256, which a server negotiates when it
  *   will not take the AEAD offered above them.  GitHub is one.
  *   ChaCha20-Poly1305 is preferred and is the other record path; see the
  *   block above ami_crypto_method_chacha20_poly1305.
@@ -943,7 +943,7 @@ NX_CRYPTO_METHOD ami_crypto_method_aes_cbc_256 =
 };
 
 
-/* --------------------------------------------- ChaCha20-Poly1305 (AEAD) -- */
+/* --------------------------------------------- ChaCha20-Poly1305 (AEAD), */
 
 /*
  * RFC 7905, ciphersuites 0xCCA8 and 0xCCA9.
@@ -960,13 +960,13 @@ NX_CRYPTO_METHOD ami_crypto_method_aes_cbc_256 =
  *   charges 344.6 ms for 1 KB against AES-CBC's 21.9 (docs/RESEARCH.md 5.5).
  *   Negotiating it would trade an impossible handshake for a download nobody
  *   would wait for.  ChaCha20 is add, rotate and exclusive-or on 32-bit words
- *   and Poly1305 is MULU.L; both come out ahead of the CBC suite --
+ *   and Poly1305 is MULU.L; both come out ahead of the CBC suite,
  *   docs/RESEARCH.md 54 has the measurement, and it is why the 0xCCA8 rows sit
  *   at the top of the table.
  *
  *   An NX_CRYPTO_METHOD is handed a nonce and a buffer; what a record looks
  *   like on the wire is decided before it is called.  RFC 7905 differs from
- *   the GCM suites there -- no nonce_explicit, a twelve-byte implicit IV --
+ *   the GCM suites there, no nonce_explicit, a twelve-byte implicit IV,
  *   and that lives in src/tls/rfc7905/.
  */
 
@@ -1038,8 +1038,8 @@ static UINT ami_crypto_method_chacha20_poly1305_cleanup(VOID *crypto_metadata)
 }
 
 /*
- * The record, call for call.  INITIALIZE carries the nonce in `iv_ptr` --
- * length in byte 0, twelve bytes after it, nx_secure's own convention -- and
+ * The record, call for call.  INITIALIZE carries the nonce in `iv_ptr`,
+ * length in byte 0, twelve bytes after it, nx_secure's own convention, and
  * the additional data in `input`.  UPDATE moves payload, possibly several
  * times for a chained packet.  CALCULATE produces the tag on the way out and
  * checks it on the way in.
@@ -1174,7 +1174,7 @@ NX_CRYPTO_METHOD ami_crypto_method_chacha20_poly1305 =
 };
 
 
-/* -------------------------------------------------------------- SHA-256 -- */
+/* -------------------------------------------------------------- SHA-256, */
 
 static UINT ami_crypto_method_sha256_init(struct NX_CRYPTO_METHOD_STRUCT *method,
                                           UCHAR *key,
@@ -1294,7 +1294,7 @@ NX_CRYPTO_METHOD ami_crypto_method_sha256 =
 };
 
 
-/* --------------------------------------------------------- HMAC-SHA256 -- */
+/* --------------------------------------------------------- HMAC-SHA256, */
 /*
  * nx_crypto's own HMAC framing with the hash swapped underneath it.
  * _nx_crypto_hmac_metadata_set() takes the three hash entry points as
@@ -1463,7 +1463,7 @@ NX_CRYPTO_METHOD ami_crypto_method_hmac_sha256 =
 
 /*
  * AMINETXDUO_TLS_STOCK_BULK selects the vendored AES and SHA-256 in the tables
- * below, with everything else -- RSA, P-256, the suites, their order --
+ * below, with everything else, RSA, P-256, the suites, their order,
  * unchanged.
  *
  * For measurement only.  Whether the record path got faster on the wire cannot
@@ -1491,7 +1491,7 @@ NX_CRYPTO_METHOD ami_crypto_method_hmac_sha256 =
 #endif
 
 
-/* ------------------------------------------------------------- the tables -- */
+/* ------------------------------------------------------------- the tables, */
 
 /* Everything untouched comes straight from nx_crypto_methods.c. */
 extern NX_CRYPTO_METHOD crypto_method_none;
@@ -1538,7 +1538,7 @@ extern NX_CRYPTO_METHOD crypto_method_hmac;
  * longer verifies.  No public CA has issued one since 2016, but a device on
  * somebody's own network might still present one, and that connection now
  * fails where it used to work.  A self-signed root in the trust store is
- * unaffected whatever it is signed with -- the walk stops when it reaches the
+ * unaffected whatever it is signed with, the walk stops when it reaches the
  * trusted store and never checks a root's signature on itself.
  */
 static NX_SECURE_X509_CRYPTO ami_x509_cipher_table[] =
@@ -1558,8 +1558,8 @@ static NX_SECURE_X509_CRYPTO ami_x509_cipher_table[] =
  * it carries it, so it is also the client's stated preference.
  *
  * ChaCha20-Poly1305 is first.  It has to be present because the CBC suites
- * underneath it no longer reach a large and growing share of the web --
- * Google's front end refuses a ClientHello that offers only those -- and it is
+ * underneath it no longer reach a large and growing share of the web,
+ * Google's front end refuses a ClientHello that offers only those, and it is
  * first because it is also the cheaper record path on this machine: ~120
  * cycles a byte for the cipher and ~67 for the authenticator, against
  * AES-128-CBC's measured 233 and HMAC-SHA256's 236 (docs/RESEARCH.md 18.2 and
@@ -1569,7 +1569,7 @@ static NX_SECURE_X509_CRYPTO ami_x509_cipher_table[] =
  * plenty of servers still speak nothing else.
  *
  * AES-GCM is absent.  It would restore the same reach, at 344.6 ms for 1 KB
- * against AES-CBC's 21.9 (docs/RESEARCH.md 5.5) -- nx_crypto_gcm.c's GHASH is
+ * against AES-CBC's 21.9 (docs/RESEARCH.md 5.5), nx_crypto_gcm.c's GHASH is
  * a bit-serial GF(2^128) multiply, because a 68k has no carry-less multiply to
  * build it from.  Offering it would mean some servers negotiating a download
  * nobody would wait for, and no server takes GCM but neither

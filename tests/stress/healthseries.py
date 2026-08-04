@@ -7,9 +7,9 @@ The leak question, as a series rather than as two endpoints.
 FitzStress appends a `netstat -h` block every sample, stamped with the second
 it was taken.  Two things are being told apart:
 
-  * a LEAK -- allocations outstanding or sockets open that do not come back to
+  * a LEAK, allocations outstanding or sockets open that do not come back to
     where they started between iterations, while the peaks climb with them;
-  * the pool STARVING -- `fewest ever` walking down towards zero, which is a
+  * the pool STARVING, `fewest ever` walking down towards zero, which is a
     fixed pool being drained faster than it is returned and is a different
     fault with a different fix.
 

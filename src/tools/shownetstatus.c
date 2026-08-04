@@ -1,5 +1,5 @@
 /*
- * ShowNetStatus -- report the stack's view of the network, and what is wrong
+ * ShowNetStatus, report the stack's view of the network, and what is wrong
  * with it.
  *
  *     ShowNetStatus INTERFACE/M,INTERFACES/S,ARPCACHE=ARP/S,ROUTES/S,
@@ -18,8 +18,8 @@
  *
  * The summary prints the parsed Roadshow configuration (netstack_config(), or
  * the files themselves when nothing is running) as the intent, and the live
- * NX_IP plus the SANA-II shim as the reality. Where they disagree -- a DHCP
- * lease against the static address in the file -- the live values are shown.
+ * NX_IP plus the SANA-II shim as the reality. Where they disagree, a DHCP
+ * lease against the static address in the file, the live values are shown.
  *
  * The diagnosis at the end covers states where every field printed above is
  * individually correct and the machine still cannot reach anything: interface
@@ -31,12 +31,12 @@
  *
  * Three categories the interface carries elsewhere are absent: IGMP (the
  * groups are joined and reported, but only four of igmpstat's nine members
- * have anything behind them -- see NETSTATUS_igmp in src/bsdsocket/
+ * have anything behind them, see NETSTATUS_igmp in src/bsdsocket/
  * netstats.c), MULTICASTROUTING (no multicast router to have statistics
  * about) and ROUTING as a statistics category (NetX Duo keeps no routing
  * counters, and
  * NX_ENABLE_IP_STATIC_ROUTING is off, so the routing table is the connected
- * routes plus the default gateway -- what ROUTES prints).
+ * routes plus the default gateway, what ROUTES prints).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -101,7 +101,7 @@ typedef struct Wanted
     BOOL    summary;                /* no category was asked for            */
 } Wanted;
 
-/* ------------------------------------------------------------- diagnosis -- */
+/* ------------------------------------------------------------- diagnosis, */
 
 static UWORD problem_count;
 
@@ -111,7 +111,7 @@ static VOID problem_head(VOID)
         tool_printf("\nWhat to look at\n");
 }
 
-/* ------------------------------------------------------------------ names -- */
+/* ------------------------------------------------------------------ names, */
 
 /*
  * NAMES prints symbolic names instead of numbers: two lookups, first the local
@@ -131,7 +131,7 @@ static VOID names_prepare(BOOL wanted)
         /*
          * AmigaOS does not reclaim AllocVec() memory when a process exits, and
          * ami_alloc() is AllocVec(), so the twelve blocks ami_netdb_load() builds
-         * out of DEVS:Internet outlive this command -- 12,616 bytes per run on a
+         * out of DEVS:Internet outlive this command, 12,616 bytes per run on a
          * stock netdb, gone until reboot. atexit() rather than a free before each
          * return: this command leaves main() from several places and the leak is
          * one missed path away from coming back.
@@ -171,7 +171,7 @@ static VOID address_text(ULONG addr, char *buf, ULONG buflen)
     }
 }
 
-/* The service this port belongs to, or NULL -- see the callers for the format. */
+/* The service this port belongs to, or NULL, see the callers for the format. */
 static const char *service_name(UWORD port, BOOL is_tcp)
 {
     const AmiNetdbEntry *entry;
@@ -184,7 +184,7 @@ static const char *service_name(UWORD port, BOOL is_tcp)
     return (entry != NULL) ? entry->name : NULL;
 }
 
-/* ---------------------------------------------------------------- report -- */
+/* ---------------------------------------------------------------- report, */
 
 static const char *iface_name(const AmiConfig *cfg, UWORD index)
 {
@@ -292,7 +292,7 @@ static VOID show_lease(const ToolDhcpInfo *d)
 
     if (d->state == NETSTATUS_DHCP_WORKING)
     {
-        tool_printf("  lease       asking -- no server has answered yet\n");
+        tool_printf("  lease       asking, no server has answered yet\n");
         return;
     }
 
@@ -398,7 +398,7 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
         {
             tool_printf("  NOTE        running on this driver, but the "
                         "configuration file says\n");
-            tool_printf("              %s unit %ld -- the file has been "
+            tool_printf("              %s unit %ld, the file has been "
                         "changed since\n", (LONG)cfg->device, (LONG)cfg->unit);
             tool_printf("              the network started, or this "
                         "interface was brought up by hand.\n");
@@ -487,7 +487,7 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
  * Whether the interface is switched on, read from the running stack.
  *
  * Was netstack_interface_is_up(), one of src/tools/netstack_weak.c's weak
- * stubs, which answered FALSE for every interface in every shipped build -- so
+ * stubs, which answered FALSE for every interface in every shipped build, so
  * this column read "offline" beside an interface carrying traffic.
  * docs/RESEARCH.md 22.
  *
@@ -716,7 +716,7 @@ static BOOL show_dns(const AmiConfig *cfg, BOOL elsewhere, BOOL from_disk)
      * Always ask the running stack first, whether or not the snapshot worked.
      *
      * This was once gated on `elsewhere`, so it asked the stack only when the
-     * snapshot had failed -- backwards, since the snapshot does not carry name
+     * snapshot had failed, backwards, since the snapshot does not carry name
      * servers at all. A DHCP machine reported "none configured" while
      * resolving through the server its lease supplied, the disagreement
      * netstack_dns.c's note on recording DHCP servers exists to prevent.
@@ -748,7 +748,7 @@ static BOOL show_dns(const AmiConfig *cfg, BOOL elsewhere, BOOL from_disk)
     return (BOOL)(cfg->resolver.nameserver_count > 0);
 }
 
-/* ----------------------------------------------------- protocol counters -- */
+/* ----------------------------------------------------- protocol counters, */
 
 static VOID show_ip_stats(const ToolStats *st)
 {
@@ -857,7 +857,7 @@ static VOID show_memory(const ToolStats *st)
 
 /*
  * TCPSOCKETS / UDPSOCKETS. Without ALL only sockets with a peer are listed;
- * ALL adds the merely bound ones -- every listener and every idle datagram
+ * ALL adds the merely bound ones, every listener and every idle datagram
  * socket.
  */
 static VOID show_tcp_sockets(const ToolSnapshot *snap, BOOL all)
@@ -937,7 +937,7 @@ static VOID show_udp_sockets(const ToolSnapshot *snap, BOOL all)
         tool_printf("(none)\n");
 }
 
-/* ------------------------------------------------------------- diagnosis -- */
+/* ------------------------------------------------------------- diagnosis, */
 
 /*
  * States that are individually correct field values and collectively a machine
@@ -994,7 +994,7 @@ static VOID diagnose_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
         {
             tool_printf("    It is set to ask for one (DHCP) and nothing has\n");
             tool_printf("    answered. Check the cable, and that something on\n");
-            tool_printf("    this network hands out addresses -- or run\n");
+            tool_printf("    this network hands out addresses, or run\n");
             tool_printf("    NetSetup and choose a fixed address instead.\n");
         }
         else
@@ -1005,14 +1005,14 @@ static VOID diagnose_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
     }
 }
 
-/* --------------------------------------------------------- the host name --
+/* --------------------------------------------------------- the host name,
  *
  * The reported fault: a machine renamed to a1200 by an interface file went on
  * calling itself a3000.local. Two things were wrong with the report itself.
  *
  * The domain. ".local" is the mDNS suffix, and RFC 6762 3 makes a .local name
  * link-local in scope and explicitly not globally unique, so it is never this
- * machine's name -- it is the name it answers to on this wire, which is a
+ * machine's name, it is the name it answers to on this wire, which is a
  * different thing and is reported on its own line. When a domain is known, it
  * goes after the host name instead.
  *
@@ -1045,7 +1045,7 @@ static BOOL host_domain(const AmiConfig *cfg, const ToolDhcp *dhcp,
         return TRUE;
     }
 
-    /* A lease whose domain the stack has not adopted -- an older library. */
+    /* A lease whose domain the stack has not adopted, an older library. */
     for (i = 0; have_lease && i < (UWORD)dhcp->count; i++)
     {
         if (dhcp->iface[i].domain_name[0] != '\0')
@@ -1146,7 +1146,7 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
      * reads it, or it is not running and the files on disk are all there is.
      *
      * There used to be a third, "the stack is linked into this command", which
-     * was never true in a shipped build -- no tool links aminetxduo_netstack,
+     * was never true in a shipped build, no tool links aminetxduo_netstack,
      * so netstack_get() is src/tools/netstack_weak.c's stub and returns NULL.
      * That left "running but unreadable", which made this report print the
      * configuration and nothing else while the network worked.
@@ -1196,7 +1196,7 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
          * not tell installed versions apart: C: and LIBS: are updated
          * separately, so the library in memory is the one worth reporting and
          * it is not necessarily the same age as this command. Nothing is said
-         * when no library is loaded -- there is no version to report, and the
+         * when no library is loaded, there is no version to report, and the
          * line above has already said the stack is not started.
          */
         {
@@ -1224,7 +1224,7 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
 
         /*
          * The name other machines can use, which differs from the host name
-         * and was reported nowhere -- netstack_mdns_hostname() had no caller.
+         * and was reported nowhere, netstack_mdns_hostname() had no caller.
          * Without it a user hands out the address instead, which DHCP will
          * change.
          */
@@ -1234,7 +1234,7 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
                 tool_printf("Known here as:  %s (to other machines on this "
                             "network)\n", (LONG)snap.mdns_name);
             else
-                tool_printf("Known here as:  nothing yet -- still claiming a "
+                tool_printf("Known here as:  nothing yet, still claiming a "
                             "name on this network\n");
         }
 
@@ -1306,8 +1306,6 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
 
                 if (cfg->interface_count > 0)
                 {
-                    tool_advise_blank();
-                    tool_advise("The interfaces this machine has are:");
                     for (i = 0; i < cfg->interface_count; i++)
                         tool_printf("      %s\n",
                                     (LONG)cfg->interfaces[i].name);
@@ -1405,7 +1403,7 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
                 problem_head();
                 tool_printf("  * There is no default route, so only machines on "
                             "your own\n");
-                tool_printf("    network can be reached -- nothing beyond it.\n");
+                tool_printf("    network can be reached, nothing beyond it.\n");
                 tool_printf("    Run NetSetup and give it your router's address, "
                             "or put\n");
                 tool_printf("    DEFAULT=<router address> in "
@@ -1528,7 +1526,7 @@ int main(int argc, char **argv)
 
         /*
          * ami_config_load() loads the netdb too (src/config/config_file.c), and
-         * this branch is taken on every run -- netstack_config() above is the
+         * this branch is taken on every run, netstack_config() above is the
          * weak stub in netstack_weak.c and is always NULL in a command. So the
          * twelve blocks leak without NAMES as well as with it; names_prepare()
          * covers only its own load.

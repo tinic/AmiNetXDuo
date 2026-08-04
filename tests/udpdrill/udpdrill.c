@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- which datagrams a UDP socket is allowed to receive.
+ * AmiNetXDuo, which datagrams a UDP socket is allowed to receive.
  *
  * RFC 1122 4.1.3.5: a UDP socket that has been connected is identified by the
  * full four-tuple, and a datagram whose source is not the connected peer is
@@ -11,8 +11,8 @@
  * will take one from any host on the wire that gets in first.  That is what
  * these cases inject.
  *
- * The peer is a synthetic SANA-II device made at run time --
- * tests/tcpdrill/tapdev.c, the same interface tests/sockopt uses -- so a
+ * The peer is a synthetic SANA-II device made at run time,
+ * tests/tcpdrill/tapdev.c, the same interface tests/sockopt uses, so a
  * datagram can carry any source address and port, which is the whole point
  * and is not reachable through a real driver or through SLIRP.
  *
@@ -34,7 +34,7 @@
 /* ------------------------------------------------------------- the wire -- */
 
 /* DEVS:NetInterfaces/tap0 gives the stack 10.9.9.1/24; 10.9.9.2 is this
-   harness.  10.9.9.3 is a second host on the same wire -- the one that has no
+   harness.  10.9.9.3 is a second host on the same wire, the one that has no
    business answering a socket connected to 10.9.9.2. */
 #define LOCAL_IP        0x0A090901UL
 #define PEER_IP         0x0A090902UL
@@ -296,7 +296,7 @@ static UWORD ones_fold(ULONG sum)
 
 /*
  * One UDP datagram from src_ip:src_port to this machine's address, carrying
- * `len` bytes whose first byte is `tag` -- so a case can say which datagram
+ * `len` bytes whose first byte is `tag`, so a case can say which datagram
  * came back rather than merely that one did.
  */
 static BOOL t_inject(ULONG src_ip, UWORD src_port, UBYTE tag, ULONG len)

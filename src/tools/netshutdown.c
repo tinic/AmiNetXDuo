@@ -1,5 +1,5 @@
 /*
- * NetShutdown -- take every network interface down.
+ * NetShutdown, take every network interface down.
  *
  *     NetShutdown TIMEOUT/N,QUIET/S
  *
@@ -18,7 +18,7 @@
  * reboot.
  *
  * What is stoppable is the traffic. Every interface is taken down through
- * NETCTRL_INTERFACE_DOWN -- the same call Offline makes, reaching
+ * NETCTRL_INTERFACE_DOWN, the same call Offline makes, reaching
  * nx_ip_driver_interface_direct_command(NX_LINK_DISABLE) and stopping the
  * SANA-II readers with it. Afterwards nothing is sent and nothing is received.
  *
@@ -223,10 +223,6 @@ int main(int argc, char **argv)
             {
                 tool_error("%ld interface(s) were still up %lu seconds after "
                            "being told to stop", still_up, timeout);
-                tool_advise_blank();
-                tool_advise("The shutdown was asked for and has not been");
-                tool_advise("cancelled; it may still finish on its own.");
-                tool_advise("ShowNetStatus says where it got to.");
             }
             tool_netstatus_close(base);
             FreeArgs(rda);
@@ -253,7 +249,7 @@ int main(int argc, char **argv)
     }
 
     say("\nThe network is stopped: nothing is sent and nothing is received.\n");
-    say("bsdsocket.library stays in memory with the stack inside it -- the\n");
+    say("bsdsocket.library stays in memory with the stack inside it. The\n");
     say("reference that keeps it there belongs to whatever started the\n");
     say("network, and only a reboot drops it. Online <interface> starts a\n");
     say("stopped interface again.\n");

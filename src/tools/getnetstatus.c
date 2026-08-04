@@ -1,5 +1,5 @@
 /*
- * GetNetStatus -- report network readiness as a return code, for scripts.
+ * GetNetStatus, report network readiness as a return code, for scripts.
  *
  *     GetNetStatus CHECK/K,QUIET/S
  *
@@ -11,7 +11,7 @@
  * Return codes:
  *
  *     0  (RETURN_OK)     every condition asked about is satisfied
- *     5  (RETURN_WARN)   at least one is not -- this is what IF WARN tests
+ *     5  (RETURN_WARN)   at least one is not, this is what IF WARN tests
  *    10  (RETURN_ERROR)  the command could not find out: a name in CHECK that
  *                        is not a condition, or a bsdsocket.library that is
  *                        not this stack's
@@ -19,7 +19,7 @@
  * Nothing here starts the network; doing so would make the answer true.
  *
  * With no CHECK it lists every condition, says which are satisfied, and returns
- * the answer to INTERFACES alone -- an interface that is up and has an address.
+ * the answer to INTERFACES alone, an interface that is up and has an address.
  *
  * The conditions are Roadshow's, so a script written for one stack works on the
  * other. Two mean something specific here:
@@ -54,7 +54,7 @@ enum
     ARG_COUNT
 };
 
-/* ------------------------------------------------------------ conditions -- */
+/* ------------------------------------------------------------ conditions, */
 
 enum
 {
@@ -85,7 +85,7 @@ static const struct ConditionName
     { "DEFAULTROUTE",    "there is a route off this network"        }
 };
 
-/* --------------------------------------------------------------- the run -- */
+/* --------------------------------------------------------------- the run, */
 
 static BOOL gns_quiet;
 
@@ -204,11 +204,8 @@ static LONG select_conditions(const char *list, BOOL wanted[COND_COUNT])
             {
                 tool_error("\"%s\" is not something this command can check",
                            (LONG)name);
-                tool_advise_blank();
-                tool_advise("The conditions are:");
                 for (i = 0; i < (UWORD)COND_COUNT; i++)
                     tool_printf("      %s\n", (LONG)conditions[i].name);
-                tool_advise("Separate several of them with commas.");
                 return -1;
             }
 
@@ -263,7 +260,7 @@ int main(int argc, char **argv)
     check     = (const char *)args[ARG_CHECK];
 
     /*
-     * VERSION reports the LIBRARY's version, not this command's -- C: and
+     * VERSION reports the LIBRARY's version, not this command's, C: and
      * LIBS: are updated separately and the copy in memory is the one a script
      * wants to know about. `Version C:GetNetStatus` answers the other
      * question. Asked for by a user with no way to tell installed versions
@@ -352,7 +349,7 @@ int main(int argc, char **argv)
         missing++;
 
         if (check != NULL)
-            say("%s: no -- %s\n", (LONG)conditions[i].name,
+            say("%s: no, %s\n", (LONG)conditions[i].name,
                 (LONG)conditions[i].asks);
     }
 

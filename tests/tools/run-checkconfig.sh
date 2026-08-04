@@ -9,7 +9,7 @@
 #   CheckNetConfig exists to name a file, a line and a fix.  A checker that
 #   printed "there are problems" would pass any test written against its exit
 #   code and be worth nothing to the person at the keyboard, so every assertion
-#   here is on a SPECIFIC finding against a SPECIFIC file -- and one of them is
+#   here is on a SPECIFIC finding against a SPECIFIC file, and one of them is
 #   the reverse: a correct file that must not be complained about, because a
 #   checker that fires on correct configuration gets ignored and then protects
 #   nothing.

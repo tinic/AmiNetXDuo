@@ -1,5 +1,5 @@
 /*
- * DnsProbe -- exercises the resolver half of the Roadshow API on a running
+ * DnsProbe, exercises the resolver half of the Roadshow API on a running
  * stack, through the published LVOs and nothing of ours.
  *
  * Three things a build cannot check:
@@ -21,11 +21,11 @@
  *      0..255", decimal, four of them; inet_addr() keeps the 4.3BSD radixes
  *      and short forms.  Both go through the same LVO table to the same
  *      library, so the probe asks each the same strings and prints both
- *      answers side by side -- a shared parser shows up as agreement.
+ *      answers side by side, a shared parser shows up as agreement.
  *
  *   4. gethostname() into a buffer that is too small.  "The returned name is
  *      null-terminated unless insufficient space is provided", and the ERRORS
- *      list is EFAULT and EPERM -- a short buffer is not a failure at all.
+ *      list is EFAULT and EPERM, a short buffer is not a failure at all.
  *      The probe asks byte by byte and prints what came back and whether it
  *      was terminated; only a stack with a real name can answer that.
  *
@@ -156,7 +156,7 @@ static VOID p_release_dns_list(struct Library *base, struct List *list)
  * This one returns BOOL, which is a 16-bit short: the answer is D0.w and the
  * top half of D0 is whatever the callee left there. Reading all 32 bits gets
  * a number like 2621440 for FALSE, so the probe takes the word the ABI
- * defines -- as any caller compiled against the published prototype does.
+ * defines, as any caller compiled against the published prototype does.
  */
 static LONG p_get_domain(struct Library *base, char *buffer, LONG size)
 {
@@ -267,7 +267,7 @@ static BOOL p_same(const char *a, const char *b)
 }
 
 /*
- * The use count of one address in the live list, or 0 if it is not there --
+ * The use count of one address in the live list, or 0 if it is not there,
  * a slot in use never reports 0, so that is an unambiguous "absent".
  */
 static LONG p_dns_use(struct Library *base, const char *address)

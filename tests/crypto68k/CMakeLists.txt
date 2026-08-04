@@ -19,8 +19,8 @@
 
 # The on-Amiga executables below are cross-only: c68k_support.c and
 # c68k_timer.c are RawDoFmt and timer.device, and they link aminetxduo_common,
-# which does not compile on a host.  Guarded so that a host configure -- the
-# one CI uses for the parser/VM/vector tests -- has a buildable `all`.
+# which does not compile on a host.  Guarded so that a host configure, the
+# one CI uses for the parser/VM/vector tests, has a buildable `all`.
 # The host tier of the same vectors is at the bottom of this file.
 if(CMAKE_CROSSCOMPILING)
 
@@ -153,7 +153,7 @@ endif() # CMAKE_CROSSCOMPILING
 # The same two correctness programs, built for the host and registered with
 # ctest.  c68k_test.c and c68k_ec_test.c are ordinary C; what ties them to the
 # Amiga is the support layer (RawDoFmt logging, timer.device, the crash guard),
-# and host/ replaces exactly that -- see host/c68k_host.c.
+# and host/ replaces exactly that, see host/c68k_host.c.
 #
 # This is worth having because it is where the vectors actually get run in CI:
 # the Amiga tier needs an emulator and a Kickstart ROM, neither of which exists
@@ -171,7 +171,7 @@ endif() # CMAKE_CROSSCOMPILING
 # therefore the NDK.  Same pattern as src/config, src/mbuf and src/bpf.
 
 # NX_CRYPTO_STANDALONE_ENABLE is nx_crypto's own switch for building the
-# crypto library with no NetX Duo underneath it -- nx_crypto.h then takes its
+# crypto library with no NetX Duo underneath it, nx_crypto.h then takes its
 # types from nx_crypto_port.h, and host/shim/ supplies one whose LONG/ULONG are
 # fixed-width 32 bit.  That is not a host liberty, it is the m68k widths: the
 # huge-number code needs HN_UBASE2 to be exactly twice HN_UBASE, and every
@@ -206,7 +206,7 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     # The 25519 vectors are their own executable rather than another section of
     # test_c68k_host.c: c68k_25519.c shares nothing with the huge-number code
-    # -- no nx_crypto types, no NX_CRYPTO_STANDALONE_ENABLE, no port shim --
+    # no nx_crypto types, no NX_CRYPTO_STANDALONE_ENABLE, no port shim --
     # and the only thing it needs from this tree is a SHA-512, which
     # nx_crypto_sha5.c supplies.  Keeping them separate means a failure names
     # which half broke.
@@ -215,7 +215,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_25519.c"
         "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha5.c"
         # nx_crypto_sha5.c calls through _nx_crypto_memcpy_ptr, and this file
-        # is where the library defines it -- the same reason test_crypto68k
+        # is where the library defines it, the same reason test_crypto68k
         # already compiles it in.
         "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_initialize.c")
 

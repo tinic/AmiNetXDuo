@@ -7,7 +7,7 @@
 # Fitz is Timm S. Müller's cross-platform network file server and mounter,
 # MIT licensed with full source.  It is not vendored into this tree: it is a
 # third-party program, and the value of testing against it is precisely that
-# it is somebody else's -- a copy in third_party/ would be a copy we could
+# it is somebody else's, a copy in third_party/ would be a copy we could
 # drift from, and a stack that only passes against a pinned copy of a client
 # has not been tested against that client at all.
 #

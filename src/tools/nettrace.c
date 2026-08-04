@@ -1,5 +1,5 @@
 /*
- * NetTrace -- capture the stack's own traffic to a pcap file while running a
+ * NetTrace, capture the stack's own traffic to a pcap file while running a
  * workload underneath it.
  *
  *     NetTrace [WIRE|LOOPBACK] [HOST=..] [PORT=n] [PATH=..] [BYTES=n]
@@ -177,7 +177,7 @@ static LONG nt_bpf_ioctl(struct Library *base, LONG channel, ULONG cmd,
 /*
  * Every line is flushed as it is written: VPrintf() buffers through
  * dos.library, so the last lines are lost if the machine has to be killed.
- * It is also the only progress indicator -- a megabyte at 14 MHz takes
+ * It is also the only progress indicator, a megabyte at 14 MHz takes
  * seconds, and a stalled run looks like a working one without it.
  */
 static VOID nt_say(const char *fmt, ...)
@@ -425,7 +425,7 @@ static BOOL nt_cap_start(NtCap *cap, struct Library *base, const char *iface,
     if (cap->channel < 0)
     {
         cap->channel = 0;
-        tool_error("bpf_open failed -- is this bsdsocket.library ours, and "
+        tool_error("bpf_open failed: is this bsdsocket.library ours, and "
                    "was it built with BPF on?");
         return FALSE;
     }
@@ -526,7 +526,7 @@ static VOID nt_cap_stop(NtCap *cap)
                 (LONG)st.bs_recv, (LONG)st.bs_drop, (LONG)cap->short_reads);
 
     if (cap->out.failed)
-        tool_error("the trace file was truncated -- disk full?");
+        tool_error("the trace file was truncated, disk full?");
 
     if (st.bs_drop != 0)
         tool_error("%lu frames were seen and NOT written: the trace has holes",
@@ -777,7 +777,7 @@ static VOID nt_wire(struct Library *base, NtCap *cap, const ToolAddr *address,
      * PATH comes off the command line and `req` is on the caller's stack,
      * which a Shell command gets four kilobytes of. Copying it unbounded let
      * any PATH longer than 462 characters overwrite this frame's return
-     * address, silently -- there is no MMU here. The trailer is appended only
+     * address, silently, there is no MMU here. The trailer is appended only
      * if it still fits, so a truncated request is refused by the server rather
      * than sent as something else.
      */

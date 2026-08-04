@@ -6,7 +6,7 @@
  * IN6ADDR_*_INIT, no PF_INET6, no sockaddr_storage.  An application written
  * against it has therefore spelled the numbers out itself, which is why every
  * definition below is #ifndef-guarded and why each one has to be the value
- * everyone else uses -- a caller who already has them keeps their own and must
+ * everyone else uses, a caller who already has them keeps their own and must
  * still be right.  Verified absent from the NDK include tree on 2026-07-31.
  *
  * There are no vectors here.  Everything is a macro or a type; the calls these
@@ -20,7 +20,7 @@
  *
  * The NDK's `struct sockaddr_in` is 4.4BSD's: sin_len at offset 0, sin_family
  * at offset 1.  The `struct sockaddr_in6` immediately below it in the same
- * header is the LINUX one, pasted in verbatim -- sin6_family at offset 0, and
+ * header is the LINUX one, pasted in verbatim, sin6_family at offset 0, and
  * no sin6_len at all.  The two are not interchangeable through a
  * `struct sockaddr *`:
  *
@@ -83,17 +83,17 @@ extern "C" {
  *
  * Each of these has two numbers in the wild and the NDK picks neither.  This
  * header set is 4.4BSD everywhere except the pasted-in sockaddr_in6, so the
- * BSD number is what is published -- but the library accepts BOTH on
+ * BSD number is what is published, but the library accepts BOTH on
  * setsockopt() and getsockopt(), because a caller who spelled the numbers out
  * may have taken them from either lineage and neither is wrong here.
  *
  * One alternative DOES collide, on one kind of socket.  26 is IPV6_CHECKSUM in
- * BSD, a raw-socket option, and raw IPv6 sockets exist here --
+ * BSD, a raw-socket option, and raw IPv6 sockets exist here,
  * socket(AF_INET6, SOCK_RAW, ...) is what a traceroute or a ping opens.  So on
  * a RAW socket the Linux numbering is not accepted: 26 there would otherwise
  * answer an application asking for a checksum offset with success, compute no
  * checksum, verify none, and switch IPV6_V6ONLY on into the bargain.  Use the
- * numbers published here -- they are the BSD ones, and they reach every option
+ * numbers published here, they are the BSD ones, and they reach every option
  * this library offers on every socket.  (27 is IPV6_JOIN_ANYCAST in Linux,
  * which is not offered here, so the published number needs no such guard.)
  */
@@ -119,14 +119,14 @@ extern "C" {
 #endif
 
 /*
- * RFC 3542's ancillary-data options -- IPV6_PKTINFO, IPV6_RECVPKTINFO,
- * IPV6_HOPLIMIT, IPV6_RECVHOPLIMIT, ICMP6_FILTER -- and struct in6_pktinfo,
+ * RFC 3542's ancillary-data options, IPV6_PKTINFO, IPV6_RECVPKTINFO,
+ * IPV6_HOPLIMIT, IPV6_RECVHOPLIMIT, ICMP6_FILTER, and struct in6_pktinfo,
  * struct icmp6_filter and the CMSG_ macros the NDK is missing are NOT here.
  * They are in aminetxduo/cmsg.h, which includes this header for IPPROTO_IPV6.
  * The NDK does define struct cmsghdr, CMSG_DATA, CMSG_FIRSTHDR and
  * CMSG_NXTHDR in <sys/socket.h>; what it is missing is CMSG_LEN, CMSG_SPACE,
  * CMSG_ALIGN, and the ALIGN() its own CMSG_NXTHDR expands to and nothing
- * defines -- so cmsg.h replaces the last two rather than adding to them.
+ * defines, so cmsg.h replaces the last two rather than adding to them.
  *
  * IPv4 multicast is not here either, and does not need to be: IP_MULTICAST_IF,
  * IP_MULTICAST_TTL, IP_MULTICAST_LOOP, IP_ADD_MEMBERSHIP, IP_DROP_MEMBERSHIP
@@ -139,7 +139,7 @@ extern "C" {
  * RFC 3493 section 5.2.  BSD 9/10/11/12/13, Linux 17/18/19/20/21; the BSD
  * five are published and both are accepted, as above.
  *
- * Taking the BSD numbers costs the Linux names that sit on them --
+ * Taking the BSD numbers costs the Linux names that sit on them,
  * IPV6_NEXTHOP 9, IPV6_AUTHHDR 10 and IPV6_FLOWINFO 11, none of which this
  * library offers; 12 and 13 are unassigned there.  Same trade
  * IPV6_UNICAST_HOPS made against IPV6_2292DSTOPTS.
@@ -158,8 +158,8 @@ extern "C" {
  * reaches the link anyway, which off the local segment is nothing.
  */
 
-/* BSD 9, Linux 17.  Both accepted.  Takes an interface index -- the
-   if_nametoindex() kind -- and 0 gives the choice back to the route. */
+/* BSD 9, Linux 17.  Both accepted.  Takes an interface index, the
+   if_nametoindex() kind, and 0 gives the choice back to the route. */
 #ifndef IPV6_MULTICAST_IF
 #define IPV6_MULTICAST_IF        9
 #endif
@@ -233,11 +233,11 @@ struct ipv6_mreq
  * in6addr_any and in6addr_loopback, the two extern constants RFC 3493 also
  * names, are deliberately NOT declared: they are data, a library vector
  * cannot export data, and there is no link library in this drawer for them to
- * live in.  Define one where it is wanted --
+ * live in.  Define one where it is wanted,
  *
  *     static const struct in6_addr any = IN6ADDR_ANY_INIT;
  *
- * -- which is what the initialisers are for.
+ * which is what the initialisers are for.
  */
 
 #ifndef IN6_IS_ADDR_UNSPECIFIED
@@ -334,7 +334,7 @@ struct ipv6_mreq
  * member, and on this NDK there is nowhere honest to put one: the family byte
  * is at offset 1 for AF_INET and at offset 0 for AF_INET6, so a member at
  * either offset would be right for one family and silently wrong for the
- * other -- the trap at the top of this file, wearing a struct member's name.
+ * other, the trap at the top of this file, wearing a struct member's name.
  * Read the family the way the library does: from the length the call returned
  * and then from that offset.
  */
@@ -352,7 +352,7 @@ struct sockaddr_storage
  *
  * The NDK's netdb.h has AI_PASSIVE, AI_CANONNAME, AI_NUMERICHOST,
  * AI_NUMERICSERV and AI_EXT, and its AI_MASK is the set getaddrinfo() will
- * accept -- a bit outside it is EAI_BADFLAGS, not a flag quietly ignored.
+ * accept, a bit outside it is EAI_BADFLAGS, not a flag quietly ignored.
  *
  * AI_ADDRCONFIG is 0 because the behaviour it asks for is unconditional here:
  * an AAAA lookup only happens when the stack has IPv6 running and an A lookup

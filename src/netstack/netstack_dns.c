@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- name resolution.
+ * AmiNetXDuo, name resolution.
  *
  * DEVS:Internet/hosts wins over the network, as in any BSD resolver; only then
  * does the query go to NetX Duo's addons/dns. The DNS client creates its own
@@ -27,7 +27,7 @@
  * build and DEVS:Internet/name_resolution takes a dotted quad only.
  *
  * The advertisement arrives on the IP thread, which may not call the DNS
- * client -- nxd_dns_server_add() waits on the mutex a query holds, and that
+ * client, nxd_dns_server_add() waits on the mutex a query holds, and that
  * query is waiting on this thread.  So the callback records and the next
  * lookup absorbs.
  */
@@ -121,7 +121,7 @@ VOID ami_ns_copy_name(char *dst, const char *src, ULONG size)
  *
  * The name is offered rather than assigned: a HOSTNAME in name_resolution
  * outranks it, and an option 12 that is not a host name is refused (see
- * AmiHostnameSource). The domain only fills a gap -- a DOMAIN= somebody wrote
+ * AmiHostnameSource). The domain only fills a gap, a DOMAIN= somebody wrote
  * is the one they meant.
  *
  * From the first interface holding a lease, not always interface 0: a machine
@@ -300,8 +300,8 @@ VOID ami_netstack_dns_stop(AmiNetStack *ns)
  *
  * Each of these is one attempt for the ladder in netstack_retry.c, which
  * decides whether there is another. They take the ThreadX bracket themselves
- * rather than sharing one across the ladder, so the caller's give_up() -- an
- * exec SetSignal(), for bsdsocket.library -- is asked outside it.
+ * rather than sharing one across the ladder, so the caller's give_up(), an
+ * exec SetSignal(), for bsdsocket.library, is asked outside it.
  *
  * "Nobody answered" and "answered, but not with an address" are different
  * outcomes and only the first is worth repeating. On the unicast path that
@@ -336,7 +336,7 @@ typedef struct
  * Case-insensitive, as DNS is (RFC 4343). A trailing dot is accepted:
  * "amiga.local." is the fully-qualified spelling of the same name.
  *
- * The bare name "local" is not in the .local domain -- it is a single label
+ * The bare name "local" is not in the .local domain, it is a single label
  * with no domain, and sending it to mDNS would claim a top-level name.
  */
 BOOL ami_netstack_mdns_is_local(const char *name)
@@ -469,7 +469,7 @@ static LONG ami_ns_resolve_once(const char *name, ULONG *addr_out,
     AmiNsNameAsk         ask;
     AmiNetLadderResult   done;
 
-    /* DEVS:Internet/hosts first -- it must work with the network down. */
+    /* DEVS:Internet/hosts first, it must work with the network down. */
     entry = ami_netdb_host_by_name(name);
     if (entry != NULL)
     {
@@ -495,8 +495,8 @@ static LONG ami_ns_resolve_once(const char *name, ULONG *addr_out,
      * the branch is exclusive: no mDNS answer means the name does not exist.
      *
      * The check lives here rather than in a new command because every name an
-     * AmigaOS program looks up arrives at this function -- gethostbyname() and
-     * getaddrinfo() in src/bsdsocket/ both route through it -- so
+     * AmigaOS program looks up arrives at this function, gethostbyname() and
+     * getaddrinfo() in src/bsdsocket/ both route through it, so
      * `host amiga.local`, `ping amiga.local` and `fetch http://amiga.local/`
      * work unchanged, as does any Roadshow-era program.
      *
@@ -525,7 +525,7 @@ static LONG ami_ns_resolve_once(const char *name, ULONG *addr_out,
     }
 #else
     /*
-     * No responder in this build, so nothing can answer a .local name -- but
+     * No responder in this build, so nothing can answer a .local name, but
      * RFC 6762 3 still forbids asking a unicast server, and that is what
      * happened: the whole test sat inside the #ifdef, so the floor tier
      * published every local host name it looked up to whatever server DHCP
@@ -599,7 +599,7 @@ static BOOL ami_ns_join_domain(char *dst, ULONG size, const char *name,
     }
 
     /* A trailing dot on the domain would give "host..", and an empty domain
-       would give "host." -- neither is the name the caller meant. */
+       would give "host.", neither is the name the caller meant. */
     if (dst[n - 1] == '.')
         return FALSE;
 
@@ -626,13 +626,13 @@ LONG netstack_resolve_until(const char *name, ULONG *addr_out,
 
     /*
      * "If no domain name is part of a host name, a default domain name can be
-     * added to it if the host name lookup fails" -- GetDefaultDomainName().
+     * added to it if the host name lookup fails", GetDefaultDomainName().
      * So `ping fileserver` reaches fileserver.lan.
      *
      * Only after a definite no: TIMEOUT and NOSERVER say nothing about the
      * name, and a second query would just double the wait. ERR_STATE is worth
      * a retry even so, because with the stack down the retry never reaches the
-     * network -- it can only hit DEVS:Internet/hosts, which costs nothing.
+     * network, it can only hit DEVS:Internet/hosts, which costs nothing.
      * ABORTED is the caller leaving, and must not start another lookup.
      */
     if (err != AMI_NET_ERR_NONAME && err != AMI_NET_ERR_STATE)
@@ -682,8 +682,8 @@ LONG netstack_resolve_reverse_until(ULONG addr, char *name_out, ULONG name_len,
     /*
      * RFC 6762 3, the other direction: 254.169.in-addr.arpa is reserved for
      * link-local multicast, so a reverse lookup of a 169.254/16 address must
-     * not go to a unicast server.  It cannot be answered by one either --
-     * nobody is authoritative for another machine's self-assigned address --
+     * not go to a unicast server.  It cannot be answered by one either,
+     * nobody is authoritative for another machine's self-assigned address,
      * so the query only tells that server which link-local addresses this
      * machine is talking to, and then times out.
      *
@@ -853,7 +853,7 @@ LONG netstack_resolve6(const char *name, ULONG addr_out[4], ULONG timeout_ticks)
  * other one's resolver with it.
  *
  * nameserver_use[] carries the count, signed as ObtainDomainNameServerList()
- * reports it -- negative for a server from DEVS:Internet/name_resolution,
+ * reports it, negative for a server from DEVS:Internet/name_resolution,
  * positive for one DHCP or this call put there. Adding to a static entry keeps
  * it static and deepens it (-1 -> -2); the entry only leaves the list when the
  * count reaches zero. NetX Duo's own list does not count, so it is touched
@@ -1003,7 +1003,7 @@ LONG netstack_set_domain_name(const char *name)
     }
 
     /* Truncating a domain name silently would produce wrong lookups, so the
-       length is checked before anything is stored -- writing the truncated
+       length is checked before anything is stored, writing the truncated
        form and then reporting failure left the resolver on a domain the caller
        was told had been refused. */
     for (i = 0; name[i] != '\0'; i++)

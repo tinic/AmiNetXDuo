@@ -1,5 +1,5 @@
 /*
- * httpframe -- how long a request body is, and where it ends.
+ * httpframe, how long a request body is, and where it ends.
  *
  * Separate from httpd.c, and including nothing, for the reason httppath.c is:
  * it is one of the parts that must not be wrong, and splitting it is what lets
@@ -12,7 +12,7 @@
  * needs no attacker: a Content-Length that overflowed, or a chunk size that
  * did, leaves the rest of an upload sitting in the buffer to be read as
  * methods.  So everything here refuses rather than guesses, and the caller
- * closes the connection when it does -- there is no way to resynchronise a
+ * closes the connection when it does, there is no way to resynchronise a
  * stream whose framing is already lost.
  *
  * SPDX-License-Identifier: MIT
@@ -80,8 +80,8 @@ enum
 
 /*
  * 24 held a size line with room to spare and truncated anything longer into
- * something that still parsed.  Nothing legitimate is near it -- eight hex
- * digits is the whole of a 32-bit count -- so a line that does not fit is a
+ * something that still parsed.  Nothing legitimate is near it, eight hex
+ * digits is the whole of a 32-bit count, so a line that does not fit is a
  * refusal now, and the buffer only has to be big enough to recognise one.
  */
 #define HTTP_CHUNK_LINE     40
@@ -108,7 +108,7 @@ void http_chunk_off(HttpChunk *ch);
  * middle of is in the HttpChunk.
  *
  * Returns how much of `data` was consumed.  Anything after that is the next
- * request -- or, when the state is HTTP_CHUNK_ERROR, nothing the caller may
+ * request, or, when the state is HTTP_CHUNK_ERROR, nothing the caller may
  * use.
  */
 long http_chunk_feed(HttpChunk *ch, const unsigned char *data, long len,

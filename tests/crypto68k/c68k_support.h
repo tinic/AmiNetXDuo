@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- crypto68k test support: logging, RNG, huge-number glue.
+ * AmiNetXDuo, crypto68k test support: logging, RNG, huge-number glue.
  *
  * Shared by tests/crypto68k/c68k_test.c (correctness) and c68k_bench.c
  * (timings), separate executables because of their run times: the correctness

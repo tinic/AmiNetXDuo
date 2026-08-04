@@ -5,7 +5,7 @@
 #   tools/amiberry-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-N BOARD]
 #                         [-B BACKEND] [-a ARGS] <executable> [extra files...]
 #
-# -a passes arguments to the executable under test -- `-a 'eth0 QUIET'` -- which
+# -a passes arguments to the executable under test, `-a 'eth0 QUIET'`, which
 # is the only way to reach a command that takes a parameter.  It is the same
 # string as AMINETXDUO_GUEST_ARGS, which tools/winuae-run.sh already read; the
 # flag wins when both are set.
@@ -16,7 +16,7 @@
 #
 # WHY THIS EXISTS ALONGSIDE fsuae-run.sh
 #
-#   Amiberry runs genuinely headless -- `headless=true` and SDL is never asked
+#   Amiberry runs genuinely headless, `headless=true` and SDL is never asked
 #   for a video device, where FS-UAE needs an X server on a Linux runner.  It
 #   emulates all nine ethernet boards rather than only the A2065.  And it has
 #   backends that reach the real network: -B <interface> puts the guest on the
@@ -26,13 +26,13 @@
 #
 #   slirp           user-mode NAT, 10.0.2.0/24, gateway 10.0.2.2 (the default)
 #   slirp_inbound   the same, with the standard ports forwarded in
-#   <interface>     a host NIC (`ens18`), a bridge, or a tap device -- the
+#   <interface>     a host NIC (`ens18`), a bridge, or a tap device, the
 #                   guest is then a machine on the host's own LAN
 #
 #   THE NAME GOES IN BARE, not as `netmode=<name>`.  It is an
 #   EXPANSIONBOARD_MULTI, and cfgfile_read_rom_settings() picks the item by
 #   looking for each candidate as an option of its own; `netmode=ens18` parses
-#   as an option called netmode, matches no item, and selects index 0 -- which
+#   as an option called netmode, matches no item, and selects index 0, which
 #   is slirp.  `netmode=slirp` therefore appears to work and is doing nothing,
 #   which is how the spelling survives.  WinUAE's own saved configs write the
 #   bare name too (tools/winuae-run.sh: `mac=...,rpcap://...`).
@@ -52,8 +52,8 @@
 #   machine with an illegal instruction before anything under test runs.
 #
 #   The executable under test is NOT rebuilt to match.  Pass one from a build
-#   configured for the machine -- `cmake -DAMINETXDUO_CPU=68000` for an A500 or
-#   an A600 -- or the run dies the same way for the same reason.
+#   configured for the machine, `cmake -DAMINETXDUO_CPU=68000` for an A500 or
+#   an A600, or the run dies the same way for the same reason.
 #
 #   A host NIC needs CAP_NET_RAW on the amiberry binary (libpcap), a tap or
 #   bridge needs CAP_NET_ADMIN.  Both are cleared by every relink, so
@@ -66,7 +66,7 @@
 #   LOOPBACK_SERIAL.  A path is not among them, so FS-UAE's
 #   `serial_port = build/serial.log` has no equivalent; the replacement is a
 #   listening socket the host drains with nc.  `/wait` makes the emulator block
-#   until something connects, so the host has to RETRY -- losing that race
+#   until something connects, so the host has to RETRY, losing that race
 #   leaves an emulator waiting forever and looks like a hang, not a lost log.
 #
 # Exit status is the test's own, read from DH0:.done, or 124 on timeout.
@@ -155,7 +155,7 @@ EOF
 # The MAC is set explicitly on a bridged run.  Left alone the emulator invents
 # one, so a DHCP server hands out a different lease every time and nothing on
 # the LAN can hold a reservation.  The A2065 keeps only the last three bytes --
-# a2065.cpp overwrites the first three with Commodore's 00:80:10 -- while the
+# a2065.cpp overwrites the first three with Commodore's 00:80:10, while the
 # NE2000 boards take the whole address.
 MAC="${AMINETXDUO_AMIBERRY_MAC:-02:41:4d:49:00:01}"
 
@@ -169,7 +169,7 @@ board_lines() {
                               "${AMINETXDUO_AMIBERRY_BOARD_OPTIONS:+,$AMINETXDUO_AMIBERRY_BOARD_OPTIONS}" ;;
         # inserted=true is what puts the card in the slot; without it Gayle's
         # windows are mapped, nothing is logged, and card.resource never
-        # initialises -- which reads from the guest as a driver that cannot
+        # initialises, which reads from the guest as a driver that cannot
         # find its hardware.  Needs a machine with a Gayle: an A600 or an A1200.
         ne2000_pcmcia) printf 'pcmcia=true\nne2000pcmcia_rom_file=:ENABLED\nne2000pcmcia_rom_options=inserted=true,mac=%s,%s\n' "$MAC" "$BACKEND" ;;
         *)             echo "unknown network board $1" >&2; exit 2 ;;
@@ -221,7 +221,7 @@ cp "$ENVSETUP" "$HD/c/envsetup"
 # code at or above the fail level, so without it a test that exits nonzero
 # never reaches the line recording its status and the run merely times out.
 #
-# GUEST_ARGS goes in verbatim, so the AmigaDOS shell does the quoting -- which
+# GUEST_ARGS goes in verbatim, so the AmigaDOS shell does the quoting, which
 # is what a command with a ReadArgs template wants.  Empty by default, and then
 # the line is the one this script always wrote.
 cat > "$HD/s/Startup-Sequence" <<EOF
@@ -238,7 +238,7 @@ EOF
 # the real machine as well as here, which is why an A1200 with a PCMCIA card
 # cannot have 8 MB on the trapdoor bus.  Under emulation the collision does not
 # announce itself: the card is logged as inserted, the backend opens, and the
-# driver simply fails to find it -- cnet.device came back with
+# driver simply fails to find it, cnet.device came back with
 # `cannot open cnet.device unit 0 (-1)` and nothing else.  4 MB stops short of
 # 0x600000 and the same run works.
 FASTMEM=8
@@ -293,7 +293,7 @@ trap cleanup EXIT INT TERM HUP
 # headless=true stops Amiberry OPENING A WINDOW; it does not stop it asking SDL
 # for a video subsystem.  osdep_platform_init_sdl() calls SDL_Init with
 # SDL_INIT_VIDEO before any config is read, and aborts the process when there is
-# no driver -- so a run over ssh works only for as long as X11 forwarding does,
+# no driver, so a run over ssh works only for as long as X11 forwarding does,
 # and dies with "No available video device" the moment it does not.  The dummy
 # driver is what makes this reproducible on a headless runner.  DISPLAY is
 # cleared for the same reason: a stale one is worse than none.
@@ -306,11 +306,11 @@ WALL_START=$(date +%s)
 # SIGPIPE is ignored for the same reason tools/fsuae-run.sh ignores it: the
 # emulator writes guest payload to host sockets with plain send(), and a peer
 # that hangs up first otherwise takes the emulator down mid-instruction with no
-# guru and a truncated log -- which reads exactly like the Amiga crashed.
+# guru and a truncated log, which reads exactly like the Amiga crashed.
 #
 # --log is not optional here.  Without it write_log() goes to Amiberry's own
 # amiberry_log.txt, which is off by default, and the emulator's stdout carries
-# one line about an IPC socket -- so the backend assertion below has nothing to
+# one line about an IPC socket, so the backend assertion below has nothing to
 # read and a bridged run that silently came up on SLIRP cannot be told from one
 # that did not.
 ( trap '' PIPE; exec "$AMIBERRY" --log -f "$CFG" ) >"$UAELOG" 2>&1 &
@@ -318,7 +318,7 @@ AMIBERRY_PID=$!
 
 # serial_port=.../wait blocks the emulator until this connects, so retry until
 # it does.  A single attempt loses the race often enough to matter, and the
-# failure is not a missing log -- it is an emulator that waits forever.
+# failure is not a missing log, it is an emulator that waits forever.
 (
     for _ in $(seq 1 60); do
         kill -0 "$AMIBERRY_PID" 2>/dev/null || exit 0

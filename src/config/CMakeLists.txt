@@ -1,8 +1,8 @@
 # Roadshow-layout configuration and the DEVS:Internet netdb store.
 #
-# config_text.c / config_parse.c / netdb.c are free of AmigaDOS calls -- all
+# config_text.c / config_parse.c / netdb.c are free of AmigaDOS calls, all
 # file access goes through the ami_cfg_read_file() hook that config_file.c
-# implements -- so the same sources build and run on the host (see below).
+# implements, so the same sources build and run on the host (see below).
 
 add_library(aminetxduo_config STATIC
     config_text.c
@@ -19,13 +19,13 @@ target_include_directories(aminetxduo_config
 target_link_libraries(aminetxduo_config PUBLIC aminetxduo_common)
 
 # This archive has two very different consumers.  bsdsocket.library wants all
-# of it; a Shell command wants a slice -- Online reads one interface file and
+# of it; a Shell command wants a slice, Online reads one interface file and
 # never touches netdb.c, and before -ffunction-sections it carried the whole
 # parser anyway, because a pulled archive member is kept whole.  Splitting the
 # functions lets src/tools/'s --gc-sections drop what a given command cannot
 # reach; with the same flag on the commands' own objects that is 12 KB off
 # Online and 9 KB off host.  The library link does not collect,
-# so all it pays is per-section padding -- 1,848 bytes across bsdsocket.library,
+# so all it pays is per-section padding, 1,848 bytes across bsdsocket.library,
 # measured.  See docs/RESEARCH.md §21.
 target_compile_options(aminetxduo_config PRIVATE -ffunction-sections)
 # -fno-optimize-sibling-calls TRAVELS WITH -ffunction-sections, ALWAYS.
@@ -33,7 +33,7 @@ target_compile_options(aminetxduo_config PRIVATE -ffunction-sections)
 # A tail call to a function in ANOTHER SECTION of the SAME object is the one
 # construct that makes this toolchain emit a 32-bit PC-relative branch against
 # a local section symbol, and the linker resolves that relocation TWELVE BYTES
-# SHORT -- into the middle of the preceding function.  `ping` rebooted the
+# SHORT, into the middle of the preceding function.  `ping` rebooted the
 # machine on exactly this: `return tool_break();` at the end of
 # tool_delay_ticks() landed inside tool_break_arm()'s `move.l #4096,d1`.
 #

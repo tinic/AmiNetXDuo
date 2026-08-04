@@ -1,8 +1,8 @@
-# tcpdrill -- a SYN whose IP destination is not this machine.
+# tcpdrill, a SYN whose IP destination is not this machine.
 #
 # RFC 1122 4.2.3.10, MUST-57: a TCP segment addressed to a broadcast or a
 # multicast destination MUST be silently discarded.  "Silently" is the whole
-# assertion -- neither a SYN-ACK nor a RST may leave, because either one
+# assertion, neither a SYN-ACK nor a RST may leave, because either one
 # answers a frame every machine on the wire received, and every machine that
 # answers it sends the same reply to whatever address the SYN claimed to come
 # from.

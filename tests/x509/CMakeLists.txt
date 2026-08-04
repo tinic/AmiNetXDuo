@@ -41,7 +41,7 @@ add_library(test_x509_nx_secure STATIC ${_x509_secure_all})
 add_library(test_x509_nx_crypto STATIC ${_x509_crypto_all})
 
 # tests/tls is on the path for the sample leaf, the sample CA and ISRG Root X1
-# -- the certificates that have to keep parsing.
+# the certificates that have to keep parsing.
 #
 # NX_SECURE_ENABLE_AEAD_CIPHER matches src/tls/CMakeLists.txt, where it is set
 # PUBLIC on nx_secure: it changes structure layouts in nx_secure_tls.h, so
@@ -84,7 +84,7 @@ target_link_libraries(test_tls_x509 PRIVATE
 target_compile_options(test_tls_x509 PRIVATE -Wall -Wextra -UAMINETXDUO_IPV6)
 
 # The ECDSA section only, and for the reason fuzz_tls_crypto is 32-bit only:
-# nx_crypto_ec.c does pointer arithmetic through ULONG -- `(ULONG)ptr -
+# nx_crypto_ec.c does pointer arithmetic through ULONG, `(ULONG)ptr -
 # (ULONG)naf_data` at :2606, and a loop bound compared the same way at :2713 --
 # and ULONG is the target's 32 bits everywhere in this tree, so on an LP64 host
 # every one of those truncates a pointer. It is correct on m68k, where ULONG
@@ -93,9 +93,9 @@ target_compile_options(test_tls_x509 PRIVATE -Wall -Wextra -UAMINETXDUO_IPV6)
 # Raising ULONG to the host's width instead is not available: HN_UBASE follows
 # it, and the huge-number carry needs a type twice as wide again.
 #
-# The other three sections do no such cast -- the PKCS#1 and DER work is byte
+# The other three sections do no such cast, the PKCS#1 and DER work is byte
 # arithmetic, and the RSA path stays inside nx_crypto_rsa.c and
-# nx_crypto_huge_number.c, neither of which casts a pointer to ULONG -- so they
+# nx_crypto_huge_number.c, neither of which casts a pointer to ULONG, so they
 # run in every build. tools/ci.sh's host32 stage is where the ECDSA checks run.
 if(CMAKE_SIZEOF_VOID_P EQUAL 4)
     target_compile_definitions(test_tls_x509 PRIVATE X509_TEST_ECDSA=1)

@@ -1,12 +1,12 @@
 /*
- * AmiNetXDuo -- crypto68k: Poly1305 (RFC 8439 section 2.5).
+ * AmiNetXDuo, crypto68k: Poly1305 (RFC 8439 section 2.5).
  *
  * See c68k_poly1305.h for why the limbs are 2^26 wide.
  *
  * Written here from RFC 8439's specification.  The five-limb radix-2^26
- * decomposition is the standard one for a 32-bit machine -- what Bernstein's
+ * decomposition is the standard one for a 32-bit machine, what Bernstein's
  * original description does and what poly1305-donna (Andrew Moon, public
- * domain) made the common spelling -- and the clamp constants below are the
+ * domain) made the common spelling, and the clamp constants below are the
  * RFC's, transposed into those limbs.  No code was copied from either.
  *
  * SPDX-License-Identifier: MIT
@@ -63,7 +63,7 @@ ULONG   t0, t1, t2, t3;
     t3 = c68k_poly1305_load_le(&key[12]);
 
     /*
-     * r &= 0x0ffffffc0ffffffc0ffffffc0fffffff -- RFC 8439's clamp, folded
+     * r &= 0x0ffffffc0ffffffc0ffffffc0fffffff, RFC 8439's clamp, folded
      * into the limb masks so that the AND and the split are one operation.
      */
     ctx -> c68k_poly1305_r[0] = (t0) & 0x03FFFFFFuL;
@@ -95,7 +95,7 @@ ULONG   t0, t1, t2, t3;
  * loop has no branch in it.
  *
  * The twenty-five products are the whole cost.  Each is a MULU.L with a 64-bit
- * destination -- real on a 68020, and the reason src/crypto68k exists at all.
+ * destination, real on a 68020, and the reason src/crypto68k exists at all.
  * The s1..s4 values are r1..r4 pre-multiplied by five: the reduction of the
  * terms that fall off the top of the 130-bit accumulator, folded into the
  * multiplier instead of into a separate pass.
@@ -156,7 +156,7 @@ ULONG64 d0, d1, d2, d3, d4;
         d4 = ((ULONG64)h0 * r4) + ((ULONG64)h1 * r3) + ((ULONG64)h2 * r2) +
              ((ULONG64)h3 * r1) + ((ULONG64)h4 * r0);
 
-        /* h %= 2^130 - 5, partially -- enough that the next block cannot
+        /* h %= 2^130 - 5, partially, enough that the next block cannot
            overflow, with the last carry folded round by the factor of five. */
         c  = (ULONG)(d0 >> 26); h0 = (ULONG)d0 & 0x03FFFFFFuL;
         d1 += c; c = (ULONG)(d1 >> 26); h1 = (ULONG)d1 & 0x03FFFFFFuL;
@@ -181,7 +181,7 @@ ULONG64 d0, d1, d2, d3, d4;
 /*
  * Which one the rest of this file calls.  A macro rather than a wrapper, as in
  * c68k_chacha20.c: a build without the assembly gets no extra call, and there
- * is nothing to choose between -- the assembly is the same function, faster,
+ * is nothing to choose between, the assembly is the same function, faster,
  * on every part that can run it.  AMINETXDUO_CRYPTO68K_ASM=OFF, the 68000 and
  * the 68060 take the C.
  */

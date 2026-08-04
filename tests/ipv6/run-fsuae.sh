@@ -4,7 +4,7 @@
 #
 #   tests/ipv6/run-fsuae.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
 #
-# Stages the same DEVS: tree tests/netstack uses -- its DEVS:NetInterfaces/eth0
+# Stages the same DEVS: tree tests/netstack uses, its DEVS:NetInterfaces/eth0
 # names no IPv6 keyword at all, which is the point: the default (CONFIGURE6
 # absent == AUTO) is what almost every real installation will run.
 #

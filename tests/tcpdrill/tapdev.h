@@ -1,5 +1,5 @@
 /*
- * tcpdrill -- the synthetic SANA-II device.
+ * tcpdrill, the synthetic SANA-II device.
  *
  * packetdrill drives a real stack from below through a TUN device: the script
  * says what the application asks for and what must appear on the wire, and the
@@ -7,8 +7,8 @@
  * number, window, option, order and timing.
  *
  * None of that is reachable from the host here.  FS-UAE's A2065 has exactly
- * three backends -- `slirp`, `slirp_inbound` and `none` (grep the binary; there
- * is no tap, no bridge and no libpcap on this build) -- and SLIRP is a
+ * three backends, `slirp`, `slirp_inbound` and `none` (grep the binary; there
+ * is no tap, no bridge and no libpcap on this build), and SLIRP is a
  * user-mode NAT that terminates the guest's TCP connection and re-originates
  * it as its own.  A host peer therefore never sees the guest's sequence
  * numbers, never sees its flags, and cannot put a byte of its own choosing into
@@ -24,7 +24,7 @@
  * tested.  That gives:
  *
  *   * every frame the stack transmits arrives here complete, timestamped, in
- *     order, and is never lost -- CMD_WRITE is a function call, not a wire;
+ *     order, and is never lost, CMD_WRITE is a function call, not a wire;
  *   * every frame the stack receives is one this harness composed, byte for
  *     byte, including sequence numbers it has no business knowing;
  *   * the peer is not a TCP implementation, so nothing answers by accident.
@@ -88,7 +88,7 @@ ULONG tap_tx_get(UBYTE *buf, ULONG max, ULONG *stamp);
 
 /*
  * Hand one complete Ethernet frame to the stack.  Returns 0 on delivery, -1
- * when no CMD_READ of that EtherType was outstanding -- a real SANA-II
+ * when no CMD_READ of that EtherType was outstanding, a real SANA-II
  * behaviour rather than an error, so the caller decides what it means.
  */
 LONG tap_rx_put(const UBYTE *frame, ULONG len);

@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- mbuf chain operations.
+ * AmiNetXDuo, mbuf chain operations.
  *
  * The seven chain-manipulating vectors. Behaviour follows 4.4BSD's documented
  * semantics for m_adj / m_cat / m_copyback / m_copydata / m_copym / m_prepend
@@ -188,7 +188,7 @@ LONG ami_mbuf_cat(struct mbuf *m, struct mbuf *n)
     {
         /*
          * Compact n into m's trailing free space while it fits and m owns its
-         * storage internally. An M_EXT tail is never compacted into -- the
+         * storage internally. An M_EXT tail is never compacted into, the
          * cluster may be shared.
          */
         if ((m->m_flags & M_EXT) != 0 ||
@@ -233,7 +233,7 @@ LONG ami_mbuf_copydata(struct mbuf *m, LONG off, LONG len, APTR cp)
 
     /*
      * Pass one: prove the chain is long enough. Nothing is written to cp
-     * unless the whole copy will succeed -- 4.4BSD panics here instead, which
+     * unless the whole copy will succeed, 4.4BSD panics here instead, which
      * is not an option across an LVO.
      */
     p = m;
@@ -435,7 +435,7 @@ struct mbuf *ami_mbuf_copym(struct mbuf *m, LONG off, LONG len)
 
         if ((m->m_flags & M_EXT) != 0 && ami_mbuf_ext_is_ours(m))
         {
-            /* Share the cluster rather than copy it -- the only reason our
+            /* Share the cluster rather than copy it, the only reason our
                clusters carry a reference count at all. */
             n->m_ext.ext_buf  = m->m_ext.ext_buf;
             n->m_ext.ext_free = m->m_ext.ext_free;

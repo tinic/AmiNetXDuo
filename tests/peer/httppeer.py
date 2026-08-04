@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""httppeer -- the host end every guest-side network test is pointed at.
+"""httppeer, the host end every guest-side network test is pointed at.
 
 tools/fsuae-run.sh attaches FS-UAE's SLIRP user-mode NAT, so a server bound to
 127.0.0.1 here is what the guest reaches at 10.0.2.2:<port>.  Same arrangement
@@ -506,7 +506,7 @@ def serve_http_conn(sock, tag, server, peer):
     # not decoration: it is the measurement that told the 40-way parallel
     # failure apart from every other explanation.  The host had ACCEPTED 213
     # connections while only 145 transfers completed on the Amiga, so the SYN
-    # was reaching the peer and the answer was not getting back -- which is a
+    # was reaching the peer and the answer was not getting back, which is a
     # very different bug from "the guest never dialled".
     with COUNT_LOCK:
         ACCEPTED[tag] = ACCEPTED.get(tag, 0) + 1
@@ -728,7 +728,7 @@ def main():
     # FTP, out of tests/tools/netpeer.py.  Its in-memory file set gains one
     # deterministic blob so a download can be hash-checked like every other.
     # The ftp removal took FtpHandler with it, so this is skipped rather than
-    # fatal -- without the guard every caller of this peer, http included,
+    # fatal, without the guard every caller of this peer, http included,
     # dies here on an AttributeError before it serves a byte.
     ftp_up = 0
     if hasattr(netpeer, "FtpHandler"):

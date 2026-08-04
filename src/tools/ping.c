@@ -1,5 +1,5 @@
 /*
- * ping -- ICMP echo, over a raw socket.
+ * ping, ICMP echo, over a raw socket.
  *
  *     ping -c=COUNT/K/N,-i=INTERVAL/K/N,-l=LOAD/K/N,-n=NUMERICONLY=NUMERIC/S,
  *          -o=ONEREPLY/S,-q=QUIET/S,-s=SIZE/K/N,-t=TIMEOUT/K/N,BELL/S,HOST/A
@@ -12,7 +12,7 @@
  *   LOAD      send this many requests back to back before the interval
  *             starts being honoured.
  *   NUMERIC   do not put a name to an address given as a number. That lookup
- *             is the local host table only -- see the note where it happens.
+ *             is the local host table only, see the note where it happens.
  *   ONEREPLY  stop as soon as one reply has come back.
  *   QUIET     only the summary.
  *   SIZE      payload bytes. Default 56, matching other implementations.
@@ -108,7 +108,7 @@ static LONG arg_or(const LONG *args, int index, LONG fallback)
     return (p != NULL) ? *p : fallback;
 }
 
-/* --------------------------------------------------------------- packets -- */
+/* --------------------------------------------------------------- packets, */
 
 static VOID ping_put16(UBYTE *p, UWORD v)
 {
@@ -123,7 +123,7 @@ static UWORD ping_get16(const UBYTE *p)
 
 /* The 16-bit one's-complement sum. Nothing below this command computes the
    ICMP checksum: the raw send path prepends the IP header and nothing else.
-   ICMPv6 is the exception -- its checksum covers the IPv6 pseudo-header, so
+   ICMPv6 is the exception, its checksum covers the IPv6 pseudo-header, so
    the source address decides it and only the stack knows that. */
 static UWORD ping_checksum(const UBYTE *data, ULONG len)
 {
@@ -166,8 +166,8 @@ static ULONG ping_build(BOOL v6, UWORD ident, UWORD seq, ULONG payload)
 /*
  * Is this datagram the reply to the probe we are waiting on?
  *
- * A raw ICMP socket sees every inbound ICMP datagram -- src/bsdsocket/raw.c
- * filters on the IP protocol number, not on the type -- so the checks have to
+ * A raw ICMP socket sees every inbound ICMP datagram, src/bsdsocket/raw.c
+ * filters on the IP protocol number, not on the type, so the checks have to
  * be strict. An IPv4 read hands back the IP header too; an IPv6 read does not.
  *
  * `seq == 0` is accepted alongside the expected number because FS-UAE's SLIRP
@@ -340,7 +340,7 @@ int main(int argc, char **argv)
          *
          * gethostbyaddr() would cost BSD_RESOLVE_TIMEOUT: thirty seconds
          * (src/bsdsocket/resolver.c:18) per name server, against a server that
-         * may never answer a PTR query -- FS-UAE's SLIRP does not -- all of it
+         * may never answer a PTR query, FS-UAE's SLIRP does not, all of it
          * before the first packet leaves, for a cosmetic change to one line of
          * output. The host table is instant and needs no name server. NUMERIC
          * skips even that.
@@ -350,7 +350,7 @@ int main(int argc, char **argv)
         /*
          * AmigaOS does not reclaim AllocVec() memory when a process exits, and
          * ami_alloc() is AllocVec(), so the twelve blocks ami_netdb_load() builds
-         * out of DEVS:Internet outlive this command -- 12,616 bytes per run on a
+         * out of DEVS:Internet outlive this command, 12,616 bytes per run on a
          * stock netdb, gone until reboot. atexit() rather than a free before each
          * return: this command leaves main() from several places and the leak is
          * one missed path away from coming back.
@@ -382,9 +382,6 @@ int main(int argc, char **argv)
         if (err == TOOL_EPROTONOSUPPORT || err == TOOL_ESOCKTNOSUPPORT ||
             err == TOOL_EOPNOTSUPP || err == TOOL_EAFNOSUPPORT)
         {
-            tool_advise_blank();
-            tool_advise("An ICMP echo needs SOCK_RAW, and the TCP/IP stack on");
-            tool_advise("this machine does not offer it.");
         }
 
         CloseLibrary(sb);
@@ -403,8 +400,8 @@ int main(int argc, char **argv)
      * trace that stopped at `recvfrom` as proof that WaitSelect() and
      * bsd_raw_receive() disagreed about the queue. They never did. The command
      * was jumping into the middle of another function on the way out of
-     * tool_delay_ticks() -- a mis-resolved 32-bit PC-relative branch,
-     * docs/RESEARCH.md 25 -- and the trace stopped because the machine
+     * tool_delay_ticks(), a mis-resolved 32-bit PC-relative branch,
+     * docs/RESEARCH.md 25, and the trace stopped because the machine
      * stopped, not because a read blocked. Adding FIONBIO changed nothing. The
      * raw receive path is not to be "fixed" on the strength of that old note.
      */
@@ -491,13 +488,6 @@ int main(int argc, char **argv)
 
             if (err == TOOL_ENETUNREACH || err == TOOL_EHOSTUNREACH)
             {
-                tool_advise_blank();
-                tool_advise("This machine has no address on the network that");
-                tool_advise("would reach that host, so the request never left.");
-                tool_advise_blank();
-                tool_advise("ShowNetStatus  says what the interfaces have; the");
-                tool_advise("usual causes are an interface that is offline and");
-                tool_advise("a DHCP server that never answered.");
             }
 
             rc = RETURN_ERROR;

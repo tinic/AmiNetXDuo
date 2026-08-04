@@ -31,7 +31,7 @@ if(AMINETXDUO_BPF)
 endif()
 
 # mDNS: the RFC 6762 responder and the ".local" branch in netstack_resolve().
-# Same arrangement as IPv6 above -- a build without it does not compile the
+# Same arrangement as IPv6 above, a build without it does not compile the
 # file, so the floor build pays nothing, not even a test on a flag.
 if(AMINETXDUO_MDNS)
     list(APPEND NETSTACK_SOURCES netstack_mdns.c)

@@ -28,21 +28,21 @@ this document names its untested parts rather than only its tested ones.
 
 ## The trust boundary
 
-**Untrusted — anything reachable from the network:**
+**Untrusted, anything reachable from the network:**
 
 | what | parsed by |
 |---|---|
 | IPv4/IPv6, TCP, UDP, ICMP, ICMPv6, ARP, neighbour discovery | NetX Duo |
 | DHCP and DHCPv6 responses, router advertisements | NetX Duo |
 | DNS responses, including compression pointers | `src/netstack/netstack_dns.c` |
-| mDNS queries and responses — unauthenticated multicast from any host on the segment | `src/netstack/netstack_mdns.c` |
+| mDNS queries and responses, unauthenticated multicast from any host on the segment | `src/netstack/netstack_mdns.c` |
 | TLS records and X.509 certificate chains | NX Secure, in `tls.library` |
 | SSH protocol | Dropbear's `dbclient`, vendored in `clients/` |
-| HTTP requests, chunked bodies and WebDAV XML — from any client that reaches the port, with no authentication anywhere in the server | `src/tools/httpd.c` |
+| HTTP requests, chunked bodies and WebDAV XML, from any client that reaches the port, with no authentication anywhere in the server | `src/tools/httpd.c` |
 
 **Trusted, and worth knowing that it is:**
 
-- `DEVS:NetInterfaces/`, `DEVS:Internet/` and `ENV:` — whoever writes those
+- `DEVS:NetInterfaces/`, `DEVS:Internet/` and `ENV:`, whoever writes those
   configures the machine, and is assumed to be its owner.
 - The SANA-II driver. It is third-party code the stack hands buffers and
   callbacks to, and it can write wherever it likes. This is not theoretical:
@@ -57,10 +57,10 @@ this document names its untested parts rather than only its tested ones.
 
 ## What is tested, and how
 
-- **`bsdsocktest`** — an independent conformance suite written for this ABI by
+- **`bsdsocktest`**, an independent conformance suite written for this ABI by
   someone else. 142/142 on a bridged real network; 130/142 with 12 skipped on
   loopback, where the skipped tests need a second machine. Roadshow scores 138.
-- **Fuzzing** — `fuzz_config` over the configuration parsers, `fuzz_bpf` over the
+- **Fuzzing**, `fuzz_config` over the configuration parsers, `fuzz_bpf` over the
   filter VM, `fuzz_dns` over DNS responses and `fuzz_mdns` over mDNS, all under
   ASan and UBSan on the host and all in `ctest`. Every parser that reads a file
   out of `DEVS:` is in `fuzz_config`, including
@@ -70,8 +70,8 @@ this document names its untested parts rather than only its tested ones.
   `_nx_dns_response_receive()`, the name unencoder and the resource walk, with
   compression pointers that point at themselves, cycle, or run past the
   datagram: 250,128 datagrams across two seeds, no undefined behaviour. The one
-  UB found during that work was in the harness — a packet pool aligned to the
-  target's 4 bytes on a host needing 8 — not in a parser.
+  UB found during that work was in the harness, a packet pool aligned to the
+  target's 4 bytes on a host needing 8, not in a parser.
   `fuzz_mdns` enters at `_nx_mdns_thread_entry()`, so the module's own receive
   loop, interface lookup and `_nx_mdns_packet_process()` run for real: queries,
   answers, cache-flush records, conflicts and goodbyes, 500,250 datagrams across
@@ -82,7 +82,7 @@ this document names its untested parts rather than only its tested ones.
   registered none. This one can fail: reverting netxduo `6baec373`, which fixed a
   signed shift on the first byte of every A record, makes `fuzz_mdns -s` abort
   on its own seed corpus with the UB that patch removed.
-- **Static analysis** — GCC `-fanalyzer` over the whole tree against a triaged
+- **Static analysis**, GCC `-fanalyzer` over the whole tree against a triaged
   baseline of 13 findings, in CI, warnings fatal. cppcheck against a separate
   baseline of 18, run locally rather than in CI because its output moves between
   its own releases.
@@ -90,7 +90,7 @@ this document names its untested parts rather than only its tested ones.
   builds with IPv6 and with TLS turned off.
 - **Enforcer and MungWall** runs under emulation, which is how illegal accesses
   and freed-memory writes surface on a machine with no MMU.
-- **Real hardware** — an A3000/060 with an X-Surf-100, by a user, which is where
+- **Real hardware**, an A3000/060 with an X-Surf-100, by a user, which is where
   two bugs were found that emulation had not.
 
 ## What is not tested

@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- entropy pool and random number generation.
+ * AmiNetXDuo, entropy pool and random number generation.
  *
  * A classic Amiga has no hardware RNG.  This samples many individually weak
  * sources, mixes them through SHA-256 and expands with a hash DRBG.  The
@@ -21,8 +21,8 @@
  * TLS does not check it; a caller with real entropy feeds it in through
  * ami_random_add_entropy().
  *
- * For what the stack uses it for -- IP ids, TCP initial sequence numbers,
- * ephemeral ports, DHCP and DNS transaction ids, and TLS key agreement -- it is
+ * For what the stack uses it for, IP ids, TCP initial sequence numbers,
+ * ephemeral ports, DHCP and DNS transaction ids, and TLS key agreement, it is
  * an improvement on the 32-bit LCG it replaces, at 21 ms once at init.
  *
  * SPDX-License-Identifier: MIT
@@ -86,7 +86,7 @@ ULONG ami_random_entropy_bits(VOID);
 BOOL ami_random_is_seeded(VOID);
 
 /*
- * NX_RAND / NX_SRAND bindings -- port/netxduo-amiga/inc/nx_port.h points the
+ * NX_RAND / NX_SRAND bindings, port/netxduo-amiga/inc/nx_port.h points the
  * NetX Duo and nx_secure macros at these.  ami_random_rand() returns
  * 0..0x7FFFFFFF like C's rand().
  *
@@ -100,7 +100,7 @@ void ami_random_srand(unsigned int seed);
 
 /*
  * NX_CRYPTO_RBG binding.  nx_crypto's own is _nx_crypto_huge_number_rbg(),
- * which builds the number one NX_CRYPTO_RAND() per 32 bits -- and
+ * which builds the number one NX_CRYPTO_RAND() per 32 bits, and
  * NX_CRYPTO_RAND is ami_random_rand(), whose contract is rand()'s 0..0x7FFFFFFF.
  * The top bit of every word it packs is therefore always zero, in the ECDHE
  * private key among other things.  This fills the buffer from the generator
@@ -108,7 +108,7 @@ void ami_random_srand(unsigned int seed);
  *
  * Writes ceil(bits/8) bytes, like the function it replaces, and always
  * succeeds: 0 is NX_CRYPTO_SUCCESS.  Plain C types because nx_port.h has to
- * repeat this declaration by hand -- they are UINT and UCHAR on both ports.
+ * repeat this declaration by hand, they are UINT and UCHAR on both ports.
  */
 unsigned int ami_crypto_rbg(unsigned int bits, unsigned char *result);
 

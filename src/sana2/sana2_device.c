@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- SANA-II device setup, control commands and statistics.
+ * AmiNetXDuo, SANA-II device setup, control commands and statistics.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -184,8 +184,8 @@ static LONG ami_sana2_query(AmiSana2If *iface)
         iface->mtu = 1500;
 
     /*
-     * SANA-II's MTU is the maximum packet data size -- the IP payload, with no
-     * link header in it -- so it maps straight onto NetX Duo's
+     * SANA-II's MTU is the maximum packet data size, the IP payload, with no
+     * link header in it, so it maps straight onto NetX Duo's
      * nx_interface_ip_mtu_size. Clamp to what one packet buffer holds once the
      * alignment pad and the synthesised Ethernet header are accounted for.
      */
@@ -249,7 +249,7 @@ static LONG ami_sana2_configure(AmiSana2If *iface)
     {
         if (req.ios2_WireError == S2WERR_IS_CONFIGURED)
         {
-            /* Already up under another opener -- re-read the live address. */
+            /* Already up under another opener, re-read the live address. */
             struct IOSana2Req again = iface->templ;
 
             err = ami_sana2_command(iface, &again, S2_GETSTATIONADDRESS);
@@ -293,7 +293,7 @@ static BOOL ami_sana2_probe_raw(AmiSana2If *iface)
     struct MsgPort   *port;
     struct IOSana2Req req;
     /* A slot with no packet: the copy hook rejects anything aimed at it. On
-       the stack, not at file scope -- it is per-probe, it lives only until the
+       the stack, not at file scope, it is per-probe, it lives only until the
        WaitIO() below, and a shared one is a shared write target for any driver
        that writes ios2_Data itself instead of calling the copy hooks. */
     AmiRxSlot         slot;
@@ -397,7 +397,7 @@ LONG ami_sana2_multicast(AmiSana2If *iface, UWORD command,
      * x-surf-100.device 1.16 answers S2ERR_BAD_ADDRESS/S2WERR_BAD_MULTICAST to
      * every join, and no address we could pass would change that: it tests bit
      * 7 of ios2_SrcAddr[0] where the Ethernet group bit is bit 0. See
-     * docs/RESEARCH.md 44.9 -- there is nothing to work around here.
+     * docs/RESEARCH.md 44.9, there is nothing to work around here.
      */
     req.ios2_SrcAddr[0] = (UBYTE)(addr_msw >> 8);
     req.ios2_SrcAddr[1] = (UBYTE)(addr_msw);
@@ -585,7 +585,7 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
         status = ami_sana2_open_device(iface->device, iface->unit,
                                        (struct IORequest *)&iface->templ);
 
-        /* The template is never sent again -- everything is cloned from it. */
+        /* The template is never sent again, everything is cloned from it. */
         iface->templ.ios2_Req.io_Message.mn_ReplyPort = NULL;
         DeleteMsgPort(port);
     }
@@ -685,7 +685,7 @@ VOID ami_sana2_close(AmiSana2If *iface)
          * and this memory must not be freed: the request points into this
          * allocation and into a reply port inside it, so the next completion
          * would be written over whatever took their place. True of a queued
-         * CMD_WRITE as much as a CMD_READ -- tx_port and the tx ring are
+         * CMD_WRITE as much as a CMD_READ, tx_port and the tx ring are
          * fields of AmiSana2If.
          */
         if (iface->rx_orphaned || iface->tx_orphaned)

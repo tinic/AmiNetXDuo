@@ -1,5 +1,5 @@
 /*
- * AddNetInterface -- bring up the interface described by
+ * AddNetInterface, bring up the interface described by
  * DEVS:NetInterfaces/<name>.
  *
  * This is the command S:User-Startup invokes, so it is the one that starts the
@@ -8,7 +8,7 @@
  *     C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET
  *
  * INTERFACE is either a bare interface name or the full path to the interface
- * file -- only the name matters, the directory is fixed -- and more than one
+ * file, only the name matters, the directory is fixed, and more than one
  * may be given. Several names are sorted before they are used, so a list
  * brings interfaces up in a defined order rather than in the order typed; the
  * ceiling is AMI_CFG_MAX_INTERFACES, which is what the parsed configuration
@@ -52,12 +52,12 @@ enum
     ARG_COUNT
 };
 
-/* Seconds. Both the default and the floor -- see the note at the top. */
+/* Seconds. Both the default and the floor, see the note at the top. */
 #define ADDIF_TIMEOUT       10UL
 
 /*
  * Below this much free, a failed start is a memory problem and no other
- * explanation is worth printing. It is not what the stack costs -- 81 measured
+ * explanation is worth printing. It is not what the stack costs, 81 measured
  * that at 432-439 KB resident plus the packet pool. A 512 KB machine reads
  * about 73 KB here, measured, so the line sits well clear of both.
  */
@@ -70,11 +70,7 @@ enum
  */
 static VOID advise_out_of_memory(ULONG freemem)
 {
-    tool_advise_blank();
-    tool_advise("There is not enough free memory to start the network.");
     tool_printf("  %lu bytes are free; the stack needs about 450K.\n", freemem);
-    tool_advise("Close some programs and try again. A machine with less than");
-    tool_advise("1 MB of RAM cannot run it at all.");
 }
 
 /*
@@ -105,13 +101,7 @@ static VOID explain_startup_failure(LONG err, const AmiIfConfig *ifc)
             }
             else
             {
-                tool_advise_blank();
                 tool_printf("  %s has no usable address.\n", (LONG)ifc->name);
-                tool_advise_blank();
-                tool_advise("The interface file says to use a fixed address, so");
-                tool_advise("it needs an ADDRESS line and a NETMASK line. Run");
-                tool_advise("NetSetup to set them, or add  CONFIGURE = DHCP  to");
-                tool_advise("have an address handed out instead.");
             }
             break;
 
@@ -120,10 +110,6 @@ static VOID explain_startup_failure(LONG err, const AmiIfConfig *ifc)
             break;
 
         case AMI_NET_ERR_KERNEL:
-            tool_advise_blank();
-            tool_advise("The network could not be started at all. This is a");
-            tool_advise("fault in the stack rather than in your configuration --");
-            tool_advise("the serial debug log records what went wrong.");
             break;
 
         default:
@@ -136,12 +122,6 @@ static VOID explain_library_failure(const AmiIfConfig *ifc)
 {
     if (!tool_stack_installed())
     {
-        tool_advise_blank();
-        tool_advise("bsdsocket.library is not installed.");
-        tool_advise_blank();
-        tool_advise("The network stack lives in that library, and it belongs in");
-        tool_advise("LIBS:. The installer puts it there; if you copied files by");
-        tool_advise("hand, LIBS:bsdsocket.library is the one that matters.");
         return;
     }
 
@@ -162,9 +142,6 @@ static VOID explain_library_failure(const AmiIfConfig *ifc)
         }
     }
 
-    tool_advise_blank();
-    tool_advise("bsdsocket.library is installed, so the network stack is here;");
-    tool_advise("it was the interface that would not come up.");
 
     /* Probe the hardware rather than guess at it. */
     tool_explain_device(ifc->device, ifc->unit);
@@ -174,10 +151,6 @@ static VOID explain_library_failure(const AmiIfConfig *ifc)
         tool_device_where(ifc->device) != NULL &&
         tool_device_probe(ifc->device, ifc->unit) == 0)
     {
-        tool_advise_blank();
-        tool_advise("The card is fine, so what failed was getting an address:");
-        tool_advise("nothing answered. Check the cable, and that something on");
-        tool_advise("this network hands out addresses.");
     }
 }
 
@@ -209,9 +182,6 @@ static BOOL load_interface(const char *name, AmiIfConfig *ifc, BOOL quiet)
     {
         tool_error("DEVS:NetInterfaces/%s cannot be used as it stands",
                    (LONG)name);
-        tool_advise_blank();
-        tool_advise("Fix the line named above, or run  NetSetup  to write");
-        tool_advise("the file from scratch.");
     }
     else
     {
@@ -348,7 +318,6 @@ int main(int argc, char **argv)
         tool_fault(IoErr());
         tool_usage("<interface name> [<interface name>...]",
                    "The name of a file in DEVS:NetInterfaces, e.g. eth0.");
-        tool_advise("NetSetup writes that file for you if you have none.");
         return RETURN_ERROR;
     }
 
@@ -373,7 +342,6 @@ int main(int argc, char **argv)
             tool_error("which interface?");
             tool_usage("<interface name> [<interface name>...]",
                        "The name of a file in DEVS:NetInterfaces, e.g. eth0.");
-            tool_advise("NetSetup writes that file for you if you have none.");
         }
 
         FreeArgs(rda);
@@ -443,8 +411,8 @@ int main(int argc, char **argv)
     /*
      * netstack_startup() is idempotent and reference counted, and is the call
      * to use when the stack is linked into this command. It is not in the
-     * shipped build -- the stack has to outlive the command, so it lives in
-     * bsdsocket.library -- and AMI_NET_ERR_STATE is what says so.
+     * shipped build, the stack has to outlive the command, so it lives in
+     * bsdsocket.library, and AMI_NET_ERR_STATE is what says so.
      */
     err = netstack_startup();
 
@@ -531,11 +499,8 @@ int main(int argc, char **argv)
                          */
                         tool_printf("%s: the network is running, and %s is "
                                     "configured down\n", (LONG)name, (LONG)name);
-                        tool_advise_blank();
-                        tool_advise("STATE=down in the interface file is why. The stack");
                         tool_printf("  is up and every command works; run  Online %s  to\n",
                                     (LONG)name);
-                        tool_advise("bring the card up and ask for an address.");
                     }
                     else
                     {
@@ -590,11 +555,6 @@ int main(int argc, char **argv)
              */
             if (!quiet)
             {
-                tool_advise_blank();
-                tool_advise("The network was already running when this interface");
-                tool_advise("file was added, and interfaces are read once at");
-                tool_advise("startup. Reboot, or take the network down and start");
-                tool_advise("it again.");
             }
             FreeArgs(rda);
             return RETURN_FAIL;

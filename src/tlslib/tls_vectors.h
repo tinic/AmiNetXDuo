@@ -1,8 +1,8 @@
 /*
- * tls.library -- LVO declarations.
+ * tls.library, LVO declarations.
  *
  * Hand-written, unlike src/bsdsocket/bsdsocket_vectors.h, because there is no
- * vendor .fd to generate them from -- this ABI is local.  The register
+ * vendor .fd to generate them from, this ABI is local.  The register
  * assignment here is the ABI, and has to match the inline stubs in
  * include/aminetxduo/tlslib.h exactly; those are the only other place it
  * appears.

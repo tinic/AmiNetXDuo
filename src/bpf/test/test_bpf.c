@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- host-side test for the BPF filter VM, the validator and the
+ * AmiNetXDuo, host-side test for the BPF filter VM, the validator and the
  * capture ring.
  *
  * Builds and runs on the development host: bpf_filter.c, bpf_validate.c,
@@ -306,7 +306,7 @@ static void test_validator(void)
     }
 
     {
-        /* Conditional jump landing exactly at the end -- still out of range,
+        /* Conditional jump landing exactly at the end, still out of range,
            same as 4.4BSD's `from + jt >= len`. */
         static const struct bpf_insn bad[] = {
             BPF_STMT(BPF_LD  | BPF_W | BPF_ABS, 0),
@@ -463,7 +463,7 @@ static void test_filter_edges(void)
     CHECK(ami_bpf_filter(prog_ip, 0, frame, len, len) == (ULONG)-1);
 
     {
-        /* A read past the end rejects rather than trapping -- the same frame
+        /* A read past the end rejects rather than trapping, the same frame
            truncated to 20 bytes cannot answer a load at offset 34. */
         static const struct bpf_insn p[] = {
             BPF_STMT(BPF_LD  | BPF_W | BPF_ABS, 34),
@@ -546,7 +546,7 @@ static void test_filter_edges(void)
 
     {
         /* An unvalidated jump past the end of the program must not run off
-           the array -- the interpreter range-checks jumps itself. */
+           the array, the interpreter range-checks jumps itself. */
         static const struct bpf_insn p[] = {
             BPF_STMT(BPF_JMP | BPF_JA, 1000),
             BPF_STMT(BPF_RET | BPF_K, 1)
@@ -678,7 +678,7 @@ static void test_channel_basics(void)
     CHECK(ami_bpf_open(T_BPF_OWNER, AMI_BPF_MAX_CHANNELS) == AMI_BPF_ENXIO);
 
     /* "Any free one" skips the channel already taken and names the one it
-       claimed -- the form Roadshow's libpcap uses. */
+       claimed, the form Roadshow's libpcap uses. */
     CHECK(ami_bpf_open(T_BPF_OWNER, -1) == 1);
     CHECK(ami_bpf_close(T_BPF_OWNER, 1) == 0);
     CHECK(ami_bpf_ioctl(T_BPF_OWNER, 1, BIOCFLUSH, NULL) == AMI_BPF_ENXIO);
@@ -781,7 +781,7 @@ static void test_capture_records(void)
     CHECK(memcmp(out + r0.stride + r1.hdrlen, frame, 61) == 0);
 
     /* The read returns both whole records and NO trailing alignment on the
-       last one -- a consumer that walked by stride would otherwise overrun. */
+       last one, a consumer that walked by stride would otherwise overrun. */
     CHECK(got == (LONG)(r0.stride + r1.hdrlen + r1.caplen));
     CHECK(got == 80 + 81);
 

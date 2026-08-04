@@ -23,7 +23,7 @@
 #
 #   3. -D'__asm(x)='.  cppcheck cannot parse GCC's register-variable syntax --
 #      `register ULONG version __asm("d0")`, which is how every library vector
-#      in this tree is declared -- and abandons the file at the first one.
+#      in this tree is declared, and abandons the file at the first one.
 #      With the NDK's real headers on the include path and this define, 32
 #      files that used to be silently skipped are checked, src/bsdsocket among
 #      them.  The define is safe because a function-like macro only expands
@@ -37,7 +37,7 @@
 #   unusedStructMember and friends: they are a house-style argument, not a
 #   defect report, and a baseline of a thousand of them would never be read.
 #   All thirteen of the error/warning findings were triaged and are false --
-#   see the baseline for what each one is -- but that class is small enough to
+#   see the baseline for what each one is, but that class is small enough to
 #   watch, so it is the one this gate watches.  --style prints the rest.
 #
 # NOT INSTALLED IN CI, ON PURPOSE
@@ -148,9 +148,9 @@ if [ "$UPDATE" = 1 ]; then
 #     Read(fh,&c,1) and FGets() are `jsr` inside __asm volatile, so no analyser
 #     sees the store.  All the uninitvar entries are this.
 #   * a ReadArgs() /A argument.  ReadArgs writes the array and returns NULL if
-#     a /A is missing, so args[0] is non-NULL past the check -- clockset.c.
+#     a /A is missing, so args[0] is non-NULL past the check, clockset.c.
 #   * NX_ASSERT, which is a no-op under NDEBUG.  cppcheck reads the assert as
-#     the NULL test it then says is redundant -- n68k_checksum.c and the
+#     the NULL test it then says is redundant, n68k_checksum.c and the
 #     rfc7905 copy, both of which mirror vendored NetX Duo code.
 #   * dead under this configuration, live under another: c68k_crt.c's last
 #     scratch advance is the vendored carving kept deliberately intact.
@@ -169,7 +169,7 @@ HDR
     exit 0
 fi
 
-# Findings from a different cppcheck are not comparable with these -- versions
+# Findings from a different cppcheck are not comparable with these, versions
 # differ by hundreds of syntaxError lines on files nobody touched, and diffing
 # them buries a real regression in noise.  Say so and stop rather than report a
 # failure that means nothing: the stage has been red on the gate host for a
@@ -178,7 +178,7 @@ fi
 BASE_VER=$(sed -n 's/^# Produced by Cppcheck \(.*\)\.$/\1/p' "$BASELINE")
 HAVE_VER=$(cppcheck --version 2>/dev/null | sed 's/^Cppcheck //')
 if [ -n "$BASE_VER" ] && [ "$BASE_VER" != "$HAVE_VER" ]; then
-    printf '\033[33mcppcheck %s here, baseline from %s -- not comparable, skipping.\033[0m\n' \
+    printf '\033[33mcppcheck %s here, baseline from %s, not comparable, skipping.\033[0m\n' \
            "${HAVE_VER:-unknown}" "$BASE_VER"
     echo "Install $BASE_VER, or regenerate with tools/cppcheck.sh --update."
     exit 0

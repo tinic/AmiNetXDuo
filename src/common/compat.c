@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- shared AmigaOS glue.
+ * AmiNetXDuo, shared AmigaOS glue.
  *
  * Dependency-free beyond exec.library and timer.device: this code runs inside
  * a shared library, so it must not drag in newlib's stdio.
@@ -185,7 +185,7 @@ static ULONG               ami_eclock_rem;
 static ULONG               ami_eclock_carry;   /* thousandths of a tick */
 
 /*
- * One request, one port, opened lazily -- so the open has to be serialised.
+ * One request, one port, opened lazily, so the open has to be serialised.
  * ami_millis() is called from SANA-II reader Tasks (bpf_amiga.c) as well as
  * from application tasks, and two of them racing the TimerBase test both
  * OpenDevice() the same static timerequest: the second overwrites io_Device
@@ -202,7 +202,7 @@ static volatile BOOL           ami_timer_lock_ready;
 /*
  * The "it is safe to use" flag, and not TimerBase, because TimerBase cannot be
  * both. The NDK's ReadEClock() inline resolves the library base through it, so
- * it has to be set BEFORE the rate is read -- which leaves a window where a
+ * it has to be set BEFORE the rate is read, which leaves a window where a
  * caller taking the fast path below sees a non-NULL TimerBase and an
  * ami_eclock_hz still at zero, and ami_millis() divides by it. This is set
  * after the last field and is what the fast path tests.
@@ -327,12 +327,12 @@ ULONG ami_millis(VOID)
     /*
      * Accumulated, not measured from a fixed base.  ev_lo is 32 bits at
      * ~710 kHz and wraps every ~100 minutes, so subtracting a base captured at
-     * init is right once and wrong afterwards -- a machine up two hours would
+     * init is right once and wrong afterwards, a machine up two hours would
      * report a few minutes.  Each call adds the interval since the last one,
      * which is correct across a wrap, and carries the remainder.
      *
      * Divided by the rate rather than by a ticks-per-millisecond, because
-     * 709379/1000 truncates to 709 and runs the clock 0.05% fast -- 46 seconds
+     * 709379/1000 truncates to 709 and runs the clock 0.05% fast, 46 seconds
      * a day, which shows up as drift against anything honest.
      *
      * The one thing it cannot survive is two calls more than ~100 minutes
@@ -413,7 +413,7 @@ static LONG ami_sana2_open_once(const char *name, ULONG unit,
     LONG status;
 
     /* An iComp driver samples the AMITCP port here and bypasses our copy
-       callbacks if it finds one -- see ami_ns_port_suspend(). */
+       callbacks if it finds one, see ami_ns_port_suspend(). */
     if (ami_sana2_quiesce != NULL)
         ami_sana2_quiesce();
 

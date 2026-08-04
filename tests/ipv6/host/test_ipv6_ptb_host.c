@@ -1,11 +1,11 @@
 /*
- * AmiNetXDuo -- the ICMPv6 Packet Too Big receive path, driven directly.
+ * AmiNetXDuo, the ICMPv6 Packet Too Big receive path, driven directly.
  *
  * Path MTU Discovery is the one part of IPv6 where a hostile packet changes
  * how this node sends for the next ten minutes, so what it refuses matters as
  * much as what it accepts.  Neither half can be produced on a lab network on
- * demand -- there is no router on it with a narrow link behind it, and nothing
- * on it will forge an error message -- so both are driven here.
+ * demand, there is no router on it with a narrow link behind it, and nothing
+ * on it will forge an error message, so both are driven here.
  *
  * What is checked, all of it RFC 8201 4:
  *
@@ -23,7 +23,7 @@
  *
  *   4. A report whose embedded packet was not sent from this node's address is
  *      discarded, so an off-path sender cannot create table entries for
- *      destinations this node never addressed -- nor fill a four-entry table
+ *      destinations this node never addressed, nor fill a four-entry table
  *      with them.
  *
  *   5. A full destination table is survived.  _nx_icmpv6_dest_table_add()
@@ -32,7 +32,7 @@
  *
  * Real, compiled from third_party/netxduo/common/src into this binary:
  * nx_icmpv6_process_packet_too_big.c with the destination table underneath it
- * -- add, find and the periodic sweep -- so the table state each check reads
+ * add, find and the periodic sweep, so the table state each check reads
  * is the table the stack would have.
  *
  * Stubbed: the neighbour cache and the two things the handler calls outward,
@@ -97,8 +97,8 @@ TX_THREAD *_tx_thread_identify(VOID)
 
 /*
  * NX_ASSERT's failure arm, which on a real target is an endless sleep.  The
- * asserts stay compiled in -- the destination table has several and they are
- * worth having under this test -- so one firing has to end the run rather than
+ * asserts stay compiled in, the destination table has several and they are
+ * worth having under this test, so one firing has to end the run rather than
  * hang it.
  */
 UINT _tx_thread_sleep(ULONG timer_ticks)
@@ -261,9 +261,9 @@ NX_INTERFACE *if_ptr;
 
 /*
  * A Packet Too Big.  The outer header is in host order, which is what
- * _nx_ipv6_packet_receive() leaves for the dispatcher.  The message body --
+ * _nx_ipv6_packet_receive() leaves for the dispatcher.  The message body,
  * the ICMPv6 header with the MTU in it, then as much of the offending packet
- * as fits -- is in network order, which is what came off the wire.
+ * as fits, is in network order, which is what came off the wire.
  *
  * `sent_from` is the source of the offending packet, which for anything this
  * node really sent is this node's own address.

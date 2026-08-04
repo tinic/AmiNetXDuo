@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the NX_IP driver entry.
+ * AmiNetXDuo, the NX_IP driver entry.
  *
  * NetX Duo talks to this in NX_LINK_* commands; SANA-II answers in exec
  * IORequests. Framing is handled elsewhere: sana2_tx.c never builds a link
@@ -26,7 +26,7 @@
  * `iface` is the publication flag: attach writes it last, unbind clears it
  * first, and ami_sana2_lookup() below tests it first and reads the other two
  * only after. The reader takes no lock, so that ordering is the whole of what
- * makes it safe -- volatile is here to stop the compiler sinking the `ip` and
+ * makes it safe, volatile is here to stop the compiler sinking the `ip` and
  * `index` stores past the `iface` one, which it is otherwise free to do: the
  * three are independent stores to distinct members of a plain static that it
  * can prove nothing about. Three extra stores once per interface attach.
@@ -251,7 +251,7 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
 
     /*
      * SM_Down: "the stack will no longer attempt to transmit messages through
-     * this interface", and nothing more. The readers are left alone -- stopping
+     * this interface", and nothing more. The readers are left alone, stopping
      * them means S2_OFFLINE, because that is the only thing that returns a
      * queued CMD_READ on a device which ignores AbortIO() (ami_sana2_rx_stop),
      * and taking the wire away is what this command exists not to do. NetX Duo

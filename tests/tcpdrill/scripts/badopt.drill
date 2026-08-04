@@ -1,4 +1,4 @@
-# tcpdrill -- a segment carrying both a RESET and an illegal option length.
+# tcpdrill, a segment carrying both a RESET and an illegal option length.
 #
 # RFC 793 3.4 page 36: a RESET is never answered with a RESET.  Two machines
 # that both answer would otherwise reset each other for as long as the frames

@@ -1,5 +1,5 @@
 /*
- * tls.library -- TLS for ordinary Amiga programs.
+ * tls.library, TLS for ordinary Amiga programs.
  *
  *   A small shared library that puts TLS 1.2 over a descriptor you already
  *   have from bsdsocket.library.  You do the socket(), the DNS lookup and the
@@ -31,7 +31,7 @@
  *       while ((n = TLSRead(TLSBase, tls, buf, sizeof(buf))) > 0)
  *           FWrite(Output(), buf, 1, n);
  *
- *       TLSClose(TLSBase, tls);       -- the descriptor is yours again
+ *       TLSClose(TLSBase, tls);      , the descriptor is yours again
  *       CloseLibrary(TLSBase);
  *       CloseLibrary(SocketBase);
  *
@@ -42,7 +42,7 @@
  *
  *   A full handshake to a public HTTPS server is about seven seconds on a
  *   14 MHz 68020 for an RSA certificate chain and about twenty-three for an
- *   ECDSA one, nearly all of it public-key arithmetic -- one signature
+ *   ECDSA one, nearly all of it public-key arithmetic, one signature
  *   verification per certificate, plus a key exchange.  Budget roughly 40 KB of
  *   Fast RAM per open connection.  See docs/RESEARCH.md 9.
  *
@@ -50,14 +50,14 @@
  *   automatically: there is no API for it, and the second connection to a host
  *   you have already visited takes a fraction of a second instead of seven or
  *   twenty-three.  The cache lives in the library and in
- *   DEVS:Internet/tlssessions, so it survives your program exiting -- running
+ *   DEVS:Internet/tlssessions, so it survives your program exiting, running
  *   the same command twice is the case it exists for.  TLSInfo()'s ti_Resumed
  *   says which kind of handshake you got.
  *
  *   What that costs: a cached session holds the master secret for that session
  *   in the library's memory and on disk, in the clear.  On a machine with no
- *   memory protection the memory copy changes little -- every task can already
- *   read every other task's memory -- but the file means an attacker who takes
+ *   memory protection the memory copy changes little, every task can already
+ *   read every other task's memory, but the file means an attacker who takes
  *   the disk can decrypt captured traffic from the resumed sessions, which the
  *   full handshake would not have allowed.  TLSA_NoResume turns it off
  *   entirely; TLSA_SessionFile with an empty string keeps the cache in RAM and
@@ -97,7 +97,7 @@
  *   bundle into one.
  *
  *   Certificates carry validity dates and a great many Amigas have no working
- *   clock, in which case AmigaOS reports 1978 -- earlier than every certificate
+ *   clock, in which case AmigaOS reports 1978, earlier than every certificate
  *   on the internet.  Rather than refuse every connection on such a machine,
  *   this library skips the validity dates when the clock is obviously unset and
  *   checks them when it is not.  TLSInfo()'s ti_ExpiryChecked says which
@@ -153,7 +153,7 @@ extern "C" {
  *   1   TLSOpenA TLSClose TLSRead TLSWrite TLSPending TLSInfo
  *       TLSErrorString TLSWaitSelect
  *   2   + TLSRandom, TLSBuffered.  Also the version at which TLSInfo() began
- *       filling ti_Resumed, ti_Resumable and ti_SessionsCached -- see the note
+ *       filling ti_Resumed, ti_Resumable and ti_SessionsCached, see the note
  *       on ti_Size, which is what makes asking version 1 for those fields safe.
  */
 #define TLS_LIB_VERSION     2
@@ -234,14 +234,14 @@ struct TLSConnection;
 /*
  * ULONG, default 4.  How many certificates the server may send.  Each costs an
  * NX_SECURE_X509_CERT plus a 2 KB DER buffer, and each costs one public-key
- * verification -- seconds, on this hardware.
+ * verification, seconds, on this hardware.
  */
 #define TLSA_MaxChain       (TLSA_Dummy + 7)
 
 /*
  * BOOL.  Do not offer a cached session and do not remember this one.  Every
- * connection then pays the full public-key cost -- seven seconds for an RSA
- * chain on a 68020, twenty-three for an ECDSA one -- so this is for a program
+ * connection then pays the full public-key cost, seven seconds for an RSA
+ * chain on a 68020, twenty-three for an ECDSA one, so this is for a program
  * that wants forward secrecy on every connection more than it wants speed.
  * Resumption is on by default because on this hardware the trade usually goes
  * the other way.
@@ -302,7 +302,7 @@ struct TLSInfo
 
     /*
      * FALSE when the machine's clock is unset and the certificate's validity
-     * dates were therefore not checked -- see the note in the library's
+     * dates were therefore not checked, see the note in the library's
      * documentation.  ti_UnixTime is what we believed the time was, or 0.
      */
     BOOL    ti_ExpiryChecked;
@@ -399,7 +399,7 @@ struct TLSSelect
  * Inline stubs.  Hand-written rather than generated from an .fd because there
  * is no .fd to generate them from yet, and because a caller should be able to
  * use this library with nothing but this header.  Every one takes the library
- * base explicitly -- no global TLSBase -- so that a program can hold two, and
+ * base explicitly, no global TLSBase, so that a program can hold two, and
  * so that nothing here fights a <proto/> header.
  *
  * a0 and a1 are read-write operands rather than plain inputs.
@@ -559,8 +559,8 @@ static __inline LONG TLSWaitSelect(struct Library *base, struct TLSSelect *sel)
  * for data it already has.
  *
  * Non-zero means TLSRead() can make progress without another byte arriving.  It
- * does not mean TLSRead() will not block -- what is buffered may be half a
- * record -- which is what TLSA_Timeout puts a ceiling on.
+ * does not mean TLSRead() will not block, what is buffered may be half a
+ * record, which is what TLSA_Timeout puts a ceiling on.
  */
 static __inline LONG TLSBuffered(struct Library *base,
                                  struct TLSConnection *conn)
@@ -579,8 +579,8 @@ static __inline LONG TLSBuffered(struct Library *base,
 /*
  * Fill a buffer with random bytes.  Returns the count, or -1.
  *
- * This is the machine's one entropy pool -- the same SHA-256 hash DRBG the TLS
- * session keys come from, seeded by bsdsocket.library -- rather than a second
+ * This is the machine's one entropy pool, the same SHA-256 hash DRBG the TLS
+ * session keys come from, seeded by bsdsocket.library, rather than a second
  * generator of unknown quality.  It is here because a ported client asks its
  * TLS layer for randomness (curl routes every Curl_rand() through it) and the
  * alternative is the client seeding an LCG off the clock.

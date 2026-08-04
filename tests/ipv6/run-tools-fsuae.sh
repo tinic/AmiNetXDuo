@@ -6,7 +6,7 @@
 #
 # docs/RESEARCH.md 66 measured every command answering an IPv6 literal with
 # "cannot resolve", followed by advice to check the spelling and the name
-# servers -- neither of which has anything to do with a literal.  This is the
+# servers, neither of which has anything to do with a literal.  This is the
 # test for the other side of that: a bare literal must never reach the
 # resolver, a real name failure must still say so, and the addresses the stack
 # configures must be visible through a shipped command.
@@ -24,7 +24,7 @@
 #          library they talk to is built either way, so "what does this
 #          command say when the address is valid and the machine cannot use
 #          it" is a question only the IPv4-only build asks.  It found three
-#          commands giving the wrong answer -- `host ::1` blamed the spelling,
+#          commands giving the wrong answer, `host ::1` blamed the spelling,
 #          `nslookup ::1` reported NXDOMAIN for a literal, and `arp ::1`
 #          called a valid address "not an address".  This mode used to refuse
 #          to start.
@@ -310,7 +310,7 @@ want_soon() { if have "$1" "$2"; then ok   "$3"; else soon "$3"; fi; }
 # on how long ago it last answered, and every one of them is a pass.
 want_re()   { if have_re "$1" "$2"; then ok "$3"; else bad "$3"; fi; }
 
-# failed CASE WHY / worked CASE WHY -- the return code, for the cases where a
+# failed CASE WHY / worked CASE WHY, the return code, for the cases where a
 # command must refuse rather than appear to have an answer.
 failed() { if [ "$(code "$1")" != "0" ]; then ok "$2"; else bad "$2"; fi; }
 worked() { if [ "$(code "$1")" =  "0" ]; then ok "$2"; else bad "$2"; fi; }
@@ -353,7 +353,7 @@ want "SYS:nc no.such.host.invalid 80" "cannot resolve" \
 # ---- both modes: host refuses a literal, for the reason that is true ------
 #
 # `host` answers through the machine's resolver, and no build has a call that
-# reverses an IPv6 address -- so the message is the same on both, and both
+# reverses an IPv6 address, so the message is the same on both, and both
 # assert it.  It used to say "cannot resolve", then blame the spelling.
 failed "SYS:host ::1" "host ::1 fails"
 want "SYS:host ::1" "is an address, not a name" \
@@ -431,8 +431,8 @@ deny "SYS:traceroute ::1 -m 2 -q 1 -w 3 -n" "did not answer" \
 
 # ---- display: 66's acceptance test --------------------------------------
 #
-# The stack really does configure this -- an INFO-level library prints
-# "netstack: eth0 fd00::10/64" in the same boot -- and until NETSTATUS_ADDRESSES6
+# The stack really does configure this, an INFO-level library prints
+# "netstack: eth0 fd00::10/64" in the same boot, and until NETSTATUS_ADDRESSES6
 # no shipped command showed it, so a user could not tell whether ADDRESS6 took.
 want "SYS:ShowNetStatus ALL"        "fd00::10" \
      "ShowNetStatus ALL shows the configured fd00::10"
@@ -554,7 +554,7 @@ want "SYS:ping ::1 -c 2 -t 20" "this machine's network has no IPv6" \
 # ---- nslookup: the lookup this machine can still do ----------------------
 #
 # An ip6.arpa PTR travels over IPv4 like any other question, so this is not a
-# degradation case at all -- it is the same answer the IPv6 build gives, and
+# degradation case at all, it is the same answer the IPv6 build gives, and
 # the assertions above are shared with it.  Asserted here as well: it fails
 # for a wholly different reason than the commands above, and that is the point.
 # The dotted quad beside it, so the two reverse forms are asserted together.

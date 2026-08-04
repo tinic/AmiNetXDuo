@@ -1,5 +1,5 @@
 /*
- * bsdsocket.library -- WaitSelect() and the socket event plumbing.
+ * bsdsocket.library, WaitSelect() and the socket event plumbing.
  *
  * WaitSelect() is the central call in Amiga network programming and the one
  * conformance suites exercise most (docs/RESEARCH.md S3.1, risk 3). It waits
@@ -35,7 +35,7 @@
 #define BSD_FD_WORD(fd)     ((ULONG)(fd) / BSD_FD_BITS)
 #define BSD_FD_MASK(fd)     (1UL << ((ULONG)(fd) % BSD_FD_BITS))
 
-/* --------------------------------------------------------- event callbacks -- */
+/* --------------------------------------------------------- event callbacks, */
 
 VOID bsd_event_post(AmiSocket *sock, ULONG events)
 {
@@ -98,8 +98,8 @@ VOID bsd_tcp_disconnect_callback(NX_TCP_SOCKET *socket_ptr)
  * nx_tcp_socket_establish_notify() returns NX_NOT_SUPPORTED and completion has
  * to be polled out of nx_tcp_socket_state. It fires from two places:
  *
- *   nx_tcp_socket_state_syn_sent.c      -- our connect() got its SYN+ACK
- *   nx_tcp_socket_state_syn_received.c  -- a client's handshake with a socket
+ *   nx_tcp_socket_state_syn_sent.c     , our connect() got its SYN+ACK
+ *   nx_tcp_socket_state_syn_received.c , a client's handshake with a socket
  *                                          we parked on a listen port
  *
  * The second case matters beyond non-blocking connect: bsd_listen_callback()
@@ -135,7 +135,7 @@ static VOID bsd_tcp_establish_notify(NX_TCP_SOCKET *socket_ptr)
  * ran out (_nx_tcp_socket_connection_reset), or an orderly close finished.
  *
  * The other half of the extended notify set, and the only thing that can tell
- * a pending connect() it has failed -- the create-time disconnect callback
+ * a pending connect() it has failed, the create-time disconnect callback
  * above is not invoked for a socket that never reached ESTABLISHED.
  */
 static VOID bsd_tcp_disconnect_complete_notify(NX_TCP_SOCKET *socket_ptr)
@@ -176,7 +176,7 @@ static VOID bsd_udp_receive_notify(NX_UDP_SOCKET *socket_ptr)
  * and this only moves one.
  *
  * Without it the port answers nothing until the application next calls
- * accept(), which is what listen()'s backlog exists to prevent -- and a
+ * accept(), which is what listen()'s backlog exists to prevent, and a
  * connection whose handshake never completes then holds the port for the
  * whole SYN/ACK retransmit ladder.
  *
@@ -248,7 +248,7 @@ VOID bsd_events_attach(AmiSocket *sock)
         /* The disconnect callback is installed at nx_tcp_socket_create() time
            (socket.c); everything else is a *_notify() setter. The last two
            need NX_ENABLE_EXTENDED_NOTIFY_SUPPORT and would silently return
-           NX_NOT_SUPPORTED without it -- see port/netxduo-amiga/inc/nx_user.h. */
+           NX_NOT_SUPPORTED without it, see port/netxduo-amiga/inc/nx_user.h. */
         nx_tcp_socket_receive_notify(&sock->as_Nx.tcp, bsd_tcp_receive_notify);
         nx_tcp_socket_window_update_notify_set(&sock->as_Nx.tcp,
                                                bsd_tcp_window_notify);
@@ -279,14 +279,14 @@ VOID bsd_events_attach(AmiSocket *sock)
  *   nx_packet_allocate.c:178          suspends on `if (wait_option)`;
  *                                     NX_NO_PACKET at :268 is the else
  *
- * So each of those returns needs either wait_option == 0 -- a non-blocking
- * socket, where EWOULDBLOCK is right -- or the calling thread to be
+ * So each of those returns needs either wait_option == 0, a non-blocking
+ * socket, where EWOULDBLOCK is right, or the calling thread to be
  * ip->nx_ip_thread, which it never is: no bsdsocket.library vector is ever
  * entered on the NetX Duo IP thread.
  *
  * bsd_nx_enter() (netx_call.c) brackets every vector with
  * ami_netstack_enter_cached(), which gives the calling Exec task a TX_THREAD
- * of its own -- built once per base and resumed thereafter, but never
+ * of its own, built once per base and resumed thereafter, but never
  * ip->nx_ip_thread. Only the callback set runs on the IP thread: the five
  * notify hooks above, bsd_listen_callback, bsd_tcp_disconnect_callback,
  * bsd_tcp_urgent_notify (oob.c), bsd_oob_ip_filter and bsd_raw_filter (raw.c).
@@ -343,7 +343,7 @@ UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
     *aborted = FALSE;
 
     /* A caller that asked not to block, or a base with no break signal, gets
-       the plain call -- there is nothing to interleave. */
+       the plain call, there is nothing to interleave. */
     if (wait == NX_NO_WAIT || break_mask == 0)
         return call(arg, wait);
 
@@ -408,7 +408,7 @@ BOOL bsd_readable(AmiSocket *sock)
              * test is a finished handshake and nothing weaker. The parked
              * socket sits in SYN_RECEIVED from the moment bsd_listen() arms it
              * (see socket.c), and ASF_ACCEPTPEND is set by the listen callback
-             * when the SYN lands -- both are true well before the handshake
+             * when the SYN lands, both are true well before the handshake
              * finishes, so neither can stand in for readiness.
              *
              * Nothing stronger either: bsd_incoming_ready() counts a peer that
@@ -429,7 +429,7 @@ BOOL bsd_readable(AmiSocket *sock)
          * The states are listed by name, not compared with >=. NetX Duo
          * numbers them CLOSE_WAIT 6, FIN_WAIT_1 7, FIN_WAIT_2 8 (nx_api.h), so
          * ">= NX_TCP_CLOSE_WAIT" would also catch the two states that mean we
-         * sent the FIN and are still waiting for the peer's -- a socket after
+         * sent the FIN and are still waiting for the peer's, a socket after
          * shutdown(SHUT_WR), where nothing has arrived and nothing may ever
          * arrive. Reporting that readable makes `nc -N` (half-close, then
          * select for the rest of the answer) spin at full speed on a select()
@@ -504,7 +504,7 @@ BOOL bsd_exception(AmiSocket *sock)
             sock->as_SoError != 0);
 }
 
-/* --------------------------------------------------------------- timeout -- */
+/* --------------------------------------------------------------- timeout, */
 
 static BOOL bsd_timer_open(struct AmiSocketBase *base)
 {
@@ -551,7 +551,7 @@ static BOOL bsd_timer_open(struct AmiSocketBase *base)
     return TRUE;
 }
 
-/* ------------------------------------------------------------- WaitSelect -- */
+/* ------------------------------------------------------------- WaitSelect, */
 
 
 /*
@@ -561,9 +561,9 @@ static BOOL bsd_timer_open(struct AmiSocketBase *base)
  * vectors: it parks in Exec Wait() for as long as the caller asked for, and an
  * adopted task holding the ThreadX scheduler lock across that would stop the
  * IP thread, the timer and every other socket user until the wait ended. So
- * the bracket covers only the poll -- bsd_readable() reaches
+ * the bracket covers only the poll, bsd_readable() reaches
  * nx_tcp_socket_bytes_available() and nx_udp_socket_bytes_available(), both
- * THREADS_ONLY -- and the Wait() and the timer IO below run as an ordinary
+ * THREADS_ONLY, and the Wait() and the timer IO below run as an ordinary
  * Exec task.
  */
 static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
@@ -645,7 +645,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
                     register ULONG *signals           __asm("d1"),
                     register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    /* In the base, not on the caller's stack -- see sb_SelIn. */
+    /* In the base, not on the caller's stack, see sb_SelIn. */
     ULONG     *in_read   = SocketBase->sb_SelIn.read;
     ULONG     *in_write  = SocketBase->sb_SelIn.write;
     ULONG     *in_except = SocketBase->sb_SelIn.except;
@@ -665,7 +665,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
      * "The 'nfds' parameter may be truncated if it covers more sockets than
      * are currently in use. This has the side-effect of filling in only as
      * many socket bits in the fd_set parameters you provide as are currently
-     * in use, and not as many as you asked for." -- so an over-large nfds is
+     * in use, and not as many as you asked for.", so an over-large nfds is
      * clamped, not refused. It only bites a program that lowered
      * SBTC_DTABLESIZE and still passes FD_SETSIZE; at the default table size
      * of 256, which is FD_SETSIZE, nothing is truncated.
@@ -679,7 +679,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
     if (timeout != NULL)
     {
         /* "the number of microseconds must be smaller than 1000000 and the
-           number of seconds must not be larger than 100000000" -- the seconds
+           number of seconds must not be larger than 100000000", the seconds
            bound catches a negative tv_secs too, since the field is unsigned. */
         if ((ULONG)timeout->tv_micro >= 1000000UL ||
             (ULONG)timeout->tv_secs > BSD_SELECT_MAX_SECS)
@@ -741,7 +741,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
          * the break signal altogether if a zero length timeout is given, or
          * sockets are ready at the time the function is entered. This
          * behaviour was changed in bsdsocket.library V4.289, which will always
-         * make sure that the break signal is tested and acted upon -- note
+         * make sure that the break signal is tested and acted upon, note
          * that no other AmiTCP-alike Amiga TCP/IP stack may check the break
          * signal under these circumstances".
          *
@@ -773,7 +773,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
 
         /*
          * Clear first, then poll. An event that arrives after the clear sets
-         * the signal again, so Wait() below returns immediately -- there is
+         * the signal again, so Wait() below returns immediately, there is
          * no window in which a wakeup goes missing.
          */
         SetSignal(0, SocketBase->sb_EventSigMask);
@@ -851,7 +851,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
     return (count > 0) ? count : 0;
 }
 
-/* -------------------------------------------------- the AmiTCP event API -- */
+/* -------------------------------------------------- the AmiTCP event API, */
 
 VOID bsd_SetSocketSignals(register ULONG int_mask    __asm("d0"),
                           register ULONG io_mask     __asm("d1"),

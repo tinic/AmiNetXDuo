@@ -1,4 +1,4 @@
-| AmiNetXDuo -- the level-N autovector interposer.
+| AmiNetXDuo, the level-N autovector interposer.
 |
 | This runs as the FIRST instruction after the CPU takes the interrupt
 | exception, which is the only reason the profile can be trusted.  At entry SP
@@ -9,7 +9,7 @@
 |       2(SP)   PC                      long
 |       6(SP)   format/vector word      68010 and up only
 |
-| Identical on 68000, 68010, 68020, 68030, 68040 and 68060 -- the later chips
+| Identical on 68000, 68010, 68020, 68030, 68040 and 68060, the later chips
 | append a word, they do not move SR or PC.  Nothing here needs to know which
 | CPU it is on.  The format word is recorded anyway so prof_stop() can assert
 | it was $0 for every sample, which is what would catch a 68020 throwaway
@@ -18,7 +18,7 @@
 |
 | An Exec interrupt server cannot do this.  By the time the AddIntServer()
 | dispatcher reaches a server it has pushed d0/d1/a0/a1/a5/a6 over the frame
-| and the distance back to it is undocumented -- and a guessed offset yields a
+| and the distance back to it is undocumented, and a guessed offset yields a
 | valid-looking address, not a crash.
 |
 | Registers: the interrupted code's registers are all still live here, so
@@ -62,7 +62,7 @@ _prof_vector:
 
 | ---------------------------------------------------------------------------
 | The cia.resource ICR vector.  cia.resource's own level-N server reads the
-| ICR -- which is what acknowledges the chip -- and then calls this.  All the
+| ICR, which is what acknowledges the chip, and then calls this.  All the
 | sampling has already happened above, so there is nothing to do but count,
 | which is worth doing: prof_hits counts every level-N interrupt and this
 | counts only ours, so the two together say how much of the profile came from
@@ -78,7 +78,7 @@ _prof_cia_stub:
 |
 | It clears INTREQ itself rather than trusting Exec's dispatcher to have done
 | it.  Not defensive programming: leaving it to Exec hung the machine solidly
-| every time -- the request bit stayed set, the interrupt re-entered as fast
+| every time, the request bit stayed set, the interrupt re-entered as fast
 | as the CPU could return from it, and the run timed out with no output at all.
 | ---------------------------------------------------------------------------
         .globl  _prof_audio_stub
@@ -88,7 +88,7 @@ _prof_audio_stub:
         rts
 
 | ---------------------------------------------------------------------------
-| ULONG prof_read_vbr(VOID) -- via Supervisor(), so it must end in RTE.
+| ULONG prof_read_vbr(VOID), via Supervisor(), so it must end in RTE.
 |
 | MOVEC VBR,D0 is hand-encoded because this file is also assembled for the
 | 68000 profile, where the assembler rejects the mnemonic outright.  It is

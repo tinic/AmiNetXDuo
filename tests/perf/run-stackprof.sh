@@ -23,7 +23,7 @@
 #
 # THE PEER IS NOT playhouse2.  VMs on one Proxmox host never cross a NIC, so a
 # deferred TX checksum is never computed and our stack correctly rejects the
-# result -- which reads as "6 bad packets, 6 checksum errors" and looks like
+# result, which reads as "6 bad packets, 6 checksum errors" and looks like
 # our defect.  The peer needs `ethtool -K <iface> tx off` either way.
 #
 # OPTIONS
@@ -58,12 +58,12 @@
 #               everything and moves on its own, while retransmissions over
 #               data segments sent is one number taken where the counts are
 #               exact.  It also separates a segment that was LOST from one
-#               that merely arrived late -- a distinction that decides which
+#               that merely arrived late, a distinction that decides which
 #               of two stacks is actually doing better and that a rate cannot
 #               make.
 #   -W PCT      -w, and fail above PCT raw loss
 #   -E PCT      -w, and fail above PCT with spurious retransmissions removed
-#   -M "ARGS"   extra arguments to `fitz mount` -- `-M "BUFS 262144"`.  This
+#   -M "ARGS"   extra arguments to `fitz mount`, `-M "BUFS 262144"`.  This
 #               is NOT part of a matched stack comparison: it changes the
 #               client, so a run using it is a diagnostic arm of its own and
 #               has to be labelled as one.
@@ -134,7 +134,7 @@ done
 case "$BUILD" in /*) ;; *) BUILD="$ROOT/$BUILD" ;; esac
 
 case "$PEER" in
-    *playhouse2*) echo "not playhouse2 -- see the header" >&2; exit 2 ;;
+    *playhouse2*) echo "not playhouse2, see the header" >&2; exit 2 ;;
 esac
 
 # ---------------------------------------------------------------- the stack --

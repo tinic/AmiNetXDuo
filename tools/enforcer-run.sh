@@ -16,11 +16,11 @@
 #
 #   * Enforcer needs a real MMU.  The A1200 model fs-uae-run.sh boots is a bare
 #     68020 with no 68851, and on that machine Enforcer does not print its
-#     "MMU is not available" message -- it WEDGES.  So this script overrides the
+#     "MMU is not available" message, it WEDGES.  So this script overrides the
 #     CPU to a 68030, which makes FS-UAE set mmu_model=68030 and cachesize=0.
 #   * JIT must stay off.  With jit_compiler=1 FS-UAE logs "MMU emulation ...
 #     is not JIT compatible", Enforcer installs anyway and then reports nothing
-#     at all -- a silent false negative.  FS-UAE defaults to JIT off; do not
+#     at all, a silent false negative.  FS-UAE defaults to JIT off; do not
 #     turn it on here.
 #   * FS-UAE's directory-hard-drive handler lives in a trap ROM at $00F00000,
 #     which Enforcer counts as illegal.  Without the FSPACE option every file
@@ -189,7 +189,7 @@ export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
 #
 # Without this, two things leak emulator processes:
 #   * fs-uae ignoring SIGTERM (it can wedge in SDL/GL teardown), and
-#   * this script being killed -- an interrupted run orphans its child, which
+#   * this script being killed, an interrupted run orphans its child, which
 #     then sits forever holding a window and a CPU.
 # Escalate TERM -> KILL, and run it from a trap so it happens even when the
 # script does not reach its own exit path.
@@ -208,7 +208,7 @@ cleanup_emulator() {
 trap cleanup_emulator EXIT INT TERM HUP
 
 
-# SIGPIPE ignored, inherited across execve() -- see the long note in
+# SIGPIPE ignored, inherited across execve(), see the long note in
 # tools/fsuae-run.sh.  Without it a guest that writes to a peer which has
 # already hung up kills the EMULATOR, which under -n is exactly the situation
 # this script exists to look at.

@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the SANA-II buffer-management hooks, on the host.
+ * AmiNetXDuo, the SANA-II buffer-management hooks, on the host.
  *
  * S2_CopyToBuff and S2_CopyFromBuff are the two functions a driver calls with
  * our packet in its hands, at interrupt level, and nothing in the tree tested
@@ -9,14 +9,14 @@
  *
  * What is under test is the arithmetic, and it is real: src/sana2/sana2_copy.c
  * is compiled into this binary. Only n68k_copy_bytes() is stubbed, with
- * memcpy -- the copy primitive is priced by tests/perf and has its own
+ * memcpy, the copy primitive is priced by tests/perf and has its own
  * assembly; the cursor around it has nothing.
  *
  * The awkward part is S2_CopyFromBuff. A device may take a frame in one call
  * or in several, and may restart the whole transfer when it has to retry the
  * wire, with no signal that it has done so. The rewind conditions are what
  * distinguish the two, and getting them wrong sends a frame that is part
- * header and part middle -- at interrupt level, on a machine with no MMU.
+ * header and part middle, at interrupt level, on a machine with no MMU.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -73,8 +73,8 @@ static void frame_init(void)
 }
 
 /*
- * NX_PACKETs built by hand. The hooks read exactly three fields --
- * nx_packet_prepend_ptr, nx_packet_append_ptr and nx_packet_next -- so a real
+ * NX_PACKETs built by hand. The hooks read exactly three fields,
+ * nx_packet_prepend_ptr, nx_packet_append_ptr and nx_packet_next, so a real
  * packet pool would add nothing but a dependency.
  */
 #define MAX_SEGS    6
@@ -367,7 +367,7 @@ static void test_from_buff_restart(void)
 
     /*
      * The narrow one: 40 bytes taken, 260 left, and the device asks for 261.
-     * It cannot be a continuation, so it is a restart -- and the answer must
+     * It cannot be a continuation, so it is a restart, and the answer must
      * be the first 261 bytes of the frame, not the last 261.
      */
     memset(out, 0, sizeof(out));

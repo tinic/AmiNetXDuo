@@ -7,8 +7,8 @@
 # -A picks Amiberry, which runs genuinely headless; FS-UAE dies in GLAD without
 # an X server. Same flag tests/sockopt/run-fsuae.sh carries.
 #
-# NO DRIVER. The test installs its own interface -- tests/tcpdrill/tapdev.c,
-# made at run time -- and tests/tcpdrill/devs/NetInterfaces/tap0 names it, so
+# NO DRIVER. The test installs its own interface, tests/tcpdrill/tapdev.c,
+# made at run time, and tests/tcpdrill/devs/NetInterfaces/tap0 names it, so
 # nothing here needs a2065.device or anything on the wire.
 #
 # SPDX-License-Identifier: MIT

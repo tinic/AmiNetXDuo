@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- TLS session resumption, measured against a real public server.
+ * AmiNetXDuo, TLS session resumption, measured against a real public server.
  *
  *   A full TLS handshake on a 14 MHz 68020 is 6.8 s for an RSA certificate
  *   chain and 23.3 s for an ECDSA one, nearly all of it public-key
@@ -22,7 +22,7 @@
  *   and running it again.
  *
  *   Needs LIBS:bsdsocket.library, LIBS:tls.library, DEVS:Internet/certificates,
- *   DEVS:NetInterfaces/eth0 and DEVS:a2065.device -- see run-resume.sh.
+ *   DEVS:NetInterfaces/eth0 and DEVS:a2065.device, see run-resume.sh.
  *
  * Not a baseline: it depends on the internet, on FS-UAE's SLIRP NAT, on a
  * third party's server, and on that server's willingness to issue and honour a
@@ -214,7 +214,7 @@ static struct r_hostent *bsd_gethostbyname(struct Library *base, const char *nam
 
 #define R_SESSIONS      "DEVS:Internet/tlssessions"
 
-/* A valid trust store holding one unrelated self-signed root -- staged by
+/* A valid trust store holding one unrelated self-signed root, staged by
    tests/tls/run-resume.sh, which builds it with tools/mkcertstore.py. */
 #define R_OTHERSTORE    "DEVS:Internet/otherstore"
 #define R_TAMPERED      "DH0:tampered.sessions"
@@ -353,7 +353,7 @@ static ULONG r_handshake(struct Library *sbase, struct Library *tbase,
     /*
      * Static, not automatic: a Shell command gets 4,096 bytes of stack on
      * Kickstart 3.1, and tls.library brackets its caller into ThreadX with
-     * that stack -- NetX Duo, nx_secure and the bignum code all run on it
+     * that stack, NetX Duo, nx_secure and the bignum code all run on it
      * (docs/RESEARCH.md).  This program calls into the library three frames
      * deeper than tests/tls/tls_api.c does, and every local here is a byte the
      * record layer does not get.
@@ -438,7 +438,7 @@ static ULONG r_handshake(struct Library *sbase, struct Library *tbase,
  *
  * Both have to be corrupted.  A ticket the server rejects would still leave
  * the session ID on the wire, and a server with a working ID cache could
- * resume from that instead -- correct behaviour, and a failed test.
+ * resume from that instead, correct behaviour, and a failed test.
  */
 static BOOL r_tamper(const char *in, const char *out)
 {
@@ -559,7 +559,7 @@ static VOID r_host_round(struct Library *sbase, struct Library *tbase,
 
 /*
  *   A command started by the Kickstart 3.1 Shell gets 4,096 bytes of stack,
- *   and tls.library brackets its caller into ThreadX with that stack -- NetX
+ *   and tls.library brackets its caller into ThreadX with that stack, NetX
  *   Duo, nx_secure and the bignum code all run on it (docs/RESEARCH.md, the
  *   `fetch` traveller).  This program calls into the library from three frames
  *   down rather than from main(), and running out did not crash it: the
@@ -683,7 +683,7 @@ static int r_run(VOID)
     /*
      * Regression test for a real defect.
      *
-     * A resumed handshake verifies nothing -- no certificate, no signature, no
+     * A resumed handshake verifies nothing, no certificate, no signature, no
      * host name.  So a session cached after verification against one trust
      * store must not be handed to a caller presenting a different store: the
      * caller would get a connection the library says is verified, against

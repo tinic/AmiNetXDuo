@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- nx_secure feasibility gate (docs/RESEARCH.md 9, decision 4).
+ * AmiNetXDuo, nx_secure feasibility gate (docs/RESEARCH.md 9, decision 4).
  *
  * Section 9 records that TLS ships as a separate library behind its own build
  * option and that it is benchmarked on 68020 before any API is promised.  This
@@ -7,36 +7,36 @@
  * takes on the floor target.
  *
  *   Public key, per handshake, once:
- *     RSA-2048 public op   -- every certificate signature the client checks,
+ *     RSA-2048 public op  , every certificate signature the client checks,
  *                             plus the ServerKeyExchange signature under
  *                             ECDHE_RSA, plus the premaster encryption under
  *                             plain RSA key exchange.  e = 65537, so this is
  *                             17 squarings and a multiply: the cheap one.
- *     RSA-2048 private op  -- only if the Amiga is the TLS server, or presents
+ *     RSA-2048 private op , only if the Amiga is the TLS server, or presents
  *                             a client certificate.  Full 2048-bit exponent;
  *                             measured both plain and CRT, because CRT is ~3x
  *                             and nx_crypto only uses it when the primes are
  *                             supplied.
- *     ECDHE P-256 keygen   -- one fixed-point scalar multiply.
- *     ECDHE P-256 shared   -- one variable-point scalar multiply.  These two
+ *     ECDHE P-256 keygen  , one fixed-point scalar multiply.
+ *     ECDHE P-256 shared  , one variable-point scalar multiply.  These two
  *                             are what an ECDHE_* suite costs the client.
- *     ECDSA P-256 verify   -- for hosts that serve ECDSA certificates, which
+ *     ECDSA P-256 verify  , for hosts that serve ECDSA certificates, which
  *                             is most of the modern web.
  *
  *   Bulk, per byte, forever after:
  *     SHA-256, HMAC-SHA256, AES-128/256-CBC, AES-128/256-GCM.  These decide
- *     whether a connection is usable once it is up -- a 14 MHz 68020 pulling
+ *     whether a connection is usable once it is up, a 14 MHz 68020 pulling
  *     150 KB/s off the wire cannot afford a cipher that runs at 40 KB/s.
  *
  *   No ThreadX, NetX Duo, packet pool or network is needed.
  *   crypto_libraries/src makes no tx_* or nx_* call at runtime (verified by
  *   grep over all 56 files), so the primitives are timed in a plain AmigaDOS
- *   process with nothing else running -- no tick task, no driver interrupts.
+ *   process with nothing else running, no tick task, no driver interrupts.
  *   The handshake-composition figures at the end are arithmetic on these
  *   measurements, and are labelled as such.
  *
  *   nx_port.h does not define NX_RAND, so nx_api.h falls back to newlib rand()
- *   -- a 32-bit LCG.  ECDHE private keys come out of it.  That is fine for a
+ *  , a 32-bit LCG.  ECDHE private keys come out of it.  That is fine for a
  *   benchmark (the arithmetic is identical whatever the bits are) and is a
  *   hard blocker for shipping.  Flagged in src/tls/tls.h.
  *
@@ -165,7 +165,7 @@ static ULONG    b_result_count;
 /*
  * Named slots the composition step reads back, in the order the benchmarks run
  * in: cheapest first.  The RSA private operation without CRT takes minutes on
- * the floor target, so it goes last -- a run that hits the harness timeout
+ * the floor target, so it goes last, a run that hits the harness timeout
  * still delivers every other figure.
  */
 #define B_SHA256            0
@@ -249,7 +249,7 @@ static VOID b_fail(const char *what, UINT status)
 
     /*
      * Still record a slot so the composition indices stay aligned with the
-     * B_* constants -- a missing measurement must read as zero, not shift
+     * B_* constants, a missing measurement must read as zero, not shift
      * every later result up by one.
      */
     if (b_result_count < B_MAX_RESULTS)
@@ -266,8 +266,8 @@ static VOID b_fail(const char *what, UINT status)
  * Time one operation.
  *
  * A fixed iteration count cannot work here.  The operations span five orders
- * of magnitude -- an AES block against a 2048-bit modular exponentiation with
- * a 2048-bit exponent -- and the program has to finish inside the harness
+ * of magnitude, an AES block against a 2048-bit modular exponentiation with
+ * a 2048-bit exponent, and the program has to finish inside the harness
  * timeout on a CPU whose speed is the thing being measured.
  *
  * So run once, timed.  If that single run already took longer than
@@ -526,7 +526,7 @@ VOID   *handler = NX_CRYPTO_NULL;
 
 /*
  * The message: raw modexp input, high byte zeroed so it is safely below the
- * modulus.  Not PKCS#1 padded -- padding is a memcpy standing next to a
+ * modulus.  Not PKCS#1 padded, padding is a memcpy standing next to a
  * 2048-bit exponentiation and would only blur the figure.
  */
 static UCHAR    b_rsa_message[256];
@@ -576,8 +576,8 @@ B_RSA_CONTEXT   private_ctx;
 
     /*
      * Correctness first: public(private(m)) must be m.  The private half uses
-     * CRT, which is both the fast path and the one nx_secure actually takes --
-     * the PKCS#1 parser hands it p and q -- so this validates the path that
+     * CRT, which is both the fast path and the one nx_secure actually takes,
+     * the PKCS#1 parser hands it p and q, so this validates the path that
      * matters and costs a quarter of what the plain exponentiation would.
      */
     status = b_rsa_op_crt(b_rsa_message, b_rsa_output);
@@ -1220,7 +1220,7 @@ ULONG   hz;
 
     /*
      * Bulk first.  It is the fast half, and the RSA private operation at the
-     * end can run for minutes on the floor target -- if the harness timeout
+     * end can run for minutes on the floor target, if the harness timeout
      * bites, everything above it is already on the serial port.
      */
     b_log("");

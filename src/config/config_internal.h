@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- internal helpers for the configuration/netdb parsers.
+ * AmiNetXDuo, internal helpers for the configuration/netdb parsers.
  *
  * Split so that the text handling (config_text.c), the file-format parsers
  * (config_parse.c) and the netdb store (netdb.c) make no dos.library calls:
@@ -44,8 +44,8 @@ extern "C" {
  * DNS-SD advertisements, and NOT "/services": that name is the netdb file
  * above, the /etc/services equivalent that maps a name to a port number for
  * getservbyname(). The two would be confused by every reader and by anyone
- * migrating a real /etc tree, so this one is named after what it does --
- * service discovery -- in the same two-word-underscore style as
+ * migrating a real /etc tree, so this one is named after what it does,
+ * service discovery, in the same two-word-underscore style as
  * name_resolution and default_gateway.
  */
 #define AMI_CFG_FILE_DNSSD          AMI_CFG_DIR_INTERNET "/service_discovery"
@@ -84,7 +84,7 @@ VOID ami_cfg_problem_file(const char *path);
 
 /*
  * Hand one problem to whatever reporter is installed (usually none). `text`
- * says what is wrong, `hint` -- which may be NULL -- says what to do about it.
+ * says what is wrong, `hint`, which may be NULL, says what to do about it.
  * Both are copied nowhere: they may point at the caller's stack.
  */
 VOID ami_cfg_problem(ULONG line, UWORD severity, const char *text,
@@ -105,7 +105,7 @@ VOID ami_cfg_join3(char *dst, ULONG dstlen, const char *a, const char *b,
 /*
  * Pull the next line out of *cursor, NUL-terminating it in place. Handles LF,
  * CRLF and bare CR. Returns NULL once the buffer is exhausted. Blank lines are
- * returned as empty strings -- callers skip them.
+ * returned as empty strings, callers skip them.
  */
 char *ami_cfg_next_line(char **cursor);
 

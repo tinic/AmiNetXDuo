@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- usergroup.library: passwords, terminal input, utmp, lastlog.
+ * AmiNetXDuo, usergroup.library: passwords, terminal input, utmp, lastlog.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -19,7 +19,7 @@
  * verify against: the built-in database has no passwords, and a passwd file
  * on an AmigaOS volume is readable by anyone anyway.
  *
- * So crypt() fails, but it fails the safe way -- it returns a valid, stable,
+ * So crypt() fails, but it fails the safe way, it returns a valid, stable,
  * never-NULL string that cannot match any stored hash. Callers that do the
  * usual strcmp(crypt(typed, salt), pw->pw_passwd) get "no match" instead of a
  * NULL dereference, and callers that check ug_GetErr() see ENOSYS.

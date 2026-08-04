@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- shared AmigaOS glue.
+ * AmiNetXDuo, shared AmigaOS glue.
  *
  * Everything in this header is available to every component. Keep it small: it
  * exists so the port layer, the SANA-II shim, bsdsocket.library and the tools
@@ -40,7 +40,7 @@ ULONG ami_alloc_count(VOID);          /* outstanding allocations */
  *
  * One record, so the published health mark (aminetxduo/health.h) can point at
  * it and a reader gets one instant.  It lives here because src/common is the
- * one place every component links -- src/bsdsocket fills the socket and open
+ * one place every component links, src/bsdsocket fills the socket and open
  * counts, src/netstack samples the packet pool into it, and the bracket that
  * publishes the mark links neither of those.
  *
@@ -88,11 +88,11 @@ VOID ami_mem_open_delta(LONG delta);
  * for AMI_LOG_ERROR. Never call from an interrupt.
  *
  * Formatting goes through exec's RawDoFmt, which is not printf.
- *   * Use %ld / %lu / %lx / %s only -- all longword-sized. Cast every argument
+ *   * Use %ld / %lu / %lx / %s only, all longword-sized. Cast every argument
  *     to LONG, including pointers and strings: ami_log(..., "%s", (LONG)str).
  *   * Do not use %c or bare %d/%u/%x: RawDoFmt consumes a *word* for those,
  *     while the C caller pushes a longword, so every argument after one is
- *     misaligned and prints garbage, silently -- the first few values look
+ *     misaligned and prints garbage, silently, the first few values look
  *     right and the rest are nonsense.
  *   * No %p, no %f, no field-width-from-argument.
  */
@@ -108,7 +108,7 @@ VOID ami_log(int level, const char *fmt, ...);
 /*
  * AMINETXDUO_LOG off compiles the three out.  AMINETXDUO_LOG_LEVEL does not:
  * it is tested inside ami_log(), so the format strings are still linked and
- * still passed -- silencing the port costs nothing and saves nothing.
+ * still passed, silencing the port costs nothing and saves nothing.
  *
  * `if (0)` rather than `((void)0)` so the arguments are still type-checked and
  * a variable used only in a log call is still used.  The optimiser drops the
@@ -141,8 +141,8 @@ VOID ami_timer_close(VOID);
 /*
  * OpenDevice() for a SANA-II driver, with the DEVS:Networks retry.
  *
- * A bare device name reaches DOS as DEVS:<name>, and DEVS:Networks -- where
- * every third-party SANA-II driver is installed -- is not on that path. The
+ * A bare device name reaches DOS as DEVS:<name>, and DEVS:Networks, where
+ * every third-party SANA-II driver is installed, is not on that path. The
  * name is tried as given first, so an absolute or already-resident one is
  * unaffected. 0 on success, otherwise the OpenDevice() error.
  */
@@ -155,7 +155,7 @@ LONG ami_sana2_open_device(const char *name, ULONG unit, struct IORequest *req);
 VOID ami_sana2_set_open_hooks(VOID (*quiesce)(VOID), VOID (*restore)(VOID));
 
 /*
- * An interface address changed -- a DHCP lease arriving or being lost, an
+ * An interface address changed, a DHCP lease arriving or being lost, an
  * AutoIP fallback, or a static address configured.
  *
  * bsdsocket.library registers the hook so it can signal the openers that asked

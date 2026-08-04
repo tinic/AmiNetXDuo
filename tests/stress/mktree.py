@@ -11,7 +11,7 @@ same shape is synthesised: the same nesting, the same wide file-size
 distribution, deterministic from a fixed seed so the host can rebuild it and
 compare.
 
-Neither carries Amiga protection bits or comments -- a host filesystem has no
+Neither carries Amiga protection bits or comments, a host filesystem has no
 place to put them and UAE's directory filesystem only writes its .uaem sidecar
 when the guest sets something.  FitzStress stamps both onto this tree before
 the workers start, so what Fitz carries over the wire and comparetree checks is
@@ -36,7 +36,7 @@ def i32(b, o):
 
 
 class ADF:
-    """Minimal OFS/FFS reader -- enough to walk and read a Workbench floppy."""
+    """Minimal OFS/FFS reader, enough to walk and read a Workbench floppy."""
 
     def __init__(self, path):
         self.d = open(path, "rb").read()

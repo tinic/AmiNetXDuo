@@ -1,4 +1,4 @@
-# tcpdrill -- the retransmission timeout, now that it is measured.
+# tcpdrill, the retransmission timeout, now that it is measured.
 #
 # retransmit.drill asserts that the interval DOUBLES.  This file asserts what
 # it doubles FROM: NX_ENABLE_TCP_RTT_ESTIMATOR makes nx_tcp_socket_timeout_rate
@@ -6,7 +6,7 @@
 # used to get, so the same ladder now starts from whatever the path measured.
 #
 # HOW A ROUND TRIP IS INDUCED.  `idle MS` between a segment leaving and the
-# acknowledgment being injected is the round trip the stack sees -- it is the
+# acknowledgment being injected is the round trip the stack sees, it is the
 # only delay in the loop, because the peer is inside the guest.  The delay has
 # to stay under the timeout currently armed or the segment is retransmitted
 # first, which is a different case (rto02), so the delay here is 600 ms
@@ -67,7 +67,7 @@ rx R seq=101
 
 # RFC 6298 2.4.  The peer answers at once, so the measurement is a tick or two
 # and three times it is under a tenth of a second.  The floor keeps the timeout
-# at one second -- which is what this lab's own links produce, and why the
+# at one second, which is what this lab's own links produce, and why the
 # estimator is not expected to change anything measurable here.
 case rto03_the_one_second_floor_holds
 socket
@@ -102,8 +102,8 @@ tx PA seq=101 ack=1 len=100 after=1400 within=2600
 tx PA seq=101 ack=1 len=100 after=2800 within=5200
 rx R seq=101
 
-# RFC 6298 2.3.  The first sample is deliberately pessimistic -- RTTVAR is set
-# to half of R with nothing to average against -- and later samples of the same
+# RFC 6298 2.3.  The first sample is deliberately pessimistic, RTTVAR is set
+# to half of R with nothing to average against, and later samples of the same
 # path narrow it by a quarter each time.  Six exchanges over the same 600 ms
 # path therefore end up near the floor rather than at rto01's 1.9 s, which is
 # the difference between the section 2.2 initialisation and the section 2.3
@@ -111,8 +111,8 @@ rx R seq=101
 #
 # This case does NOT discriminate on its own: the estimate narrows to the floor,
 # and the floor is the second a build without the estimator uses, so the bound
-# below passes either way.  What it asserts is the CONTRAST with rto01 -- same
-# script, same path, 1.9 s there and 1.0 s here -- and it is the one case in
+# below passes either way.  What it asserts is the CONTRAST with rto01, same
+# script, same path, 1.9 s there and 1.0 s here, and it is the one case in
 # this file that would catch an estimate that never narrowed.
 case rto05_the_estimate_narrows_on_a_steady_path
 socket

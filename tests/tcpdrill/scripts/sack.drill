@@ -1,4 +1,4 @@
-# tcpdrill -- RFC 2018 selective acknowledgment, receive side.
+# tcpdrill, RFC 2018 selective acknowledgment, receive side.
 #
 # The stack generates SACK; it does not process the blocks a peer sends it.
 # So every case here is about what leaves: the option on the SYN, the option
@@ -66,7 +66,7 @@ tx A seq=1 ack=1461 sack=- hdrlen=20 within=400
 recv 2000 = 1460
 
 # RFC 2018 section 3, the whole point: one hole, one block.  The
-# acknowledgement stays at the left edge of the hole -- that part is o01 --
+# acknowledgement stays at the left edge of the hole, that part is o01 --
 # and the block says what is being held above it, so the peer retransmits
 # 100 bytes rather than everything it has sent.
 case s05_one_hole_is_one_block
@@ -170,7 +170,7 @@ tx A seq=1 ack=1 sack=901:1001,701:801,501:601,301:401 hdrlen=56 within=400
 # A BLOCK CLOSED BY ARRIVING DATA STOPS BEING A BLOCK.  Filling the hole from
 # the left leaves the block whose data is now in sequence out of the option
 # entirely, rather than reporting sequence space the cumulative
-# acknowledgement already covers -- which RFC 2018 section 4 says a block
+# acknowledgement already covers, which RFC 2018 section 4 says a block
 # must never do.
 case s11_filled_hole_leaves_the_option
 socket
@@ -200,7 +200,7 @@ rx PA seq=101 ack=1 len=100
 tx A seq=1 ack=1 sack=101:201 hdrlen=32 within=400
 rx PA seq=101 ack=1 len=100
 # The second arrival of 101:201 is a duplicate of a range already reported,
-# which RFC 2883 section 4 says to lead with as a D-SACK block -- so the hole
+# which RFC 2883 section 4 says to lead with as a D-SACK block, so the hole
 # is reported twice over, once as the duplicate and once as the block still
 # covering it.  dsack.drill d03 is where that pairing is pinned down; what
 # this case still asserts is that the ordinary block does not go missing.

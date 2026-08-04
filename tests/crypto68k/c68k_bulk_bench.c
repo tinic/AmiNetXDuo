@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the TLS record path, measured: AES-128-CBC and SHA-256.
+ * AmiNetXDuo, the TLS record path, measured: AES-128-CBC and SHA-256.
  *
  *   docs/RESEARCH.md 15 left the bulk path as the one row where neither this
  *   tree nor AmiSSL had any m68k assembly, and named it the largest remaining
@@ -47,8 +47,8 @@
 #include <proto/dos.h>
 
 
-/* 16 KiB is one TLS record's worth of payload and then some -- RFC 5246 caps
-   a plaintext fragment at 2^14 -- so it is the unit the bulk path moves. */
+/* 16 KiB is one TLS record's worth of payload and then some, RFC 5246 caps
+   a plaintext fragment at 2^14, so it is the unit the bulk path moves. */
 #define B_BULK_BYTES        16384UL
 #define B_BULK_BLOCKS       (B_BULK_BYTES / 16UL)
 
@@ -341,7 +341,7 @@ static VOID b_bench_kernels(VOID)
 
 /* ============================================================== vectors ==== */
 
-/* FIPS-197 C.1 -- AES-128 with key 000102..0f. */
+/* FIPS-197 C.1, AES-128 with key 000102..0f. */
 static const UCHAR b_fips_key128[16] =
 {
     0x00u, 0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u,
@@ -370,7 +370,7 @@ static const UCHAR b_fips_c256[16] =
     0xEAu, 0xFCu, 0x49u, 0x90u, 0x4Bu, 0x49u, 0x60u, 0x89u
 };
 
-/* FIPS 180-4 -- SHA-256("abc") and the 56-byte message. */
+/* FIPS 180-4, SHA-256("abc") and the 56-byte message. */
 static const UCHAR b_sha_abc[32] =
 {
     0xBAu, 0x78u, 0x16u, 0xBFu, 0x8Fu, 0x01u, 0xCFu, 0xEAu,
@@ -392,7 +392,7 @@ static const UCHAR b_sha_448[32] =
     0xA3u, 0x3Cu, 0xE4u, 0x59u, 0x64u, 0xFFu, 0x21u, 0x67u,
     0xF6u, 0xECu, 0xEDu, 0xD4u, 0x19u, 0xDBu, 0x06u, 0xC1u
 };
-/* FIPS 180-4 -- one million 'a', the case that exercises the length counter
+/* FIPS 180-4, one million 'a', the case that exercises the length counter
    and every buffering path there is. */
 static const UCHAR b_sha_million[32] =
 {
@@ -692,7 +692,7 @@ ULONG           left;
     (VOID)c68k_sha256_digest_calculate(&ctx, b_digest, NX_CRYPTO_HASH_SHA256);
     b_check("SHA-256 split across three updates", b_digest, b_sha_448, 32uL);
 
-    /* One million 'a' -- the vector that catches a 64-bit length counter that
+    /* One million 'a', the vector that catches a 64-bit length counter that
        is really a 32-bit one, and every buffering path in update(). */
     for (i = 0; i < 56u; i++)
     {
@@ -774,7 +774,7 @@ C68K_SHA256 ctx;
 /* ================================================= HMAC, through nx_crypto == */
 /*
  * HMAC is nx_crypto's framing with the hash swapped underneath it, which is
- * exactly how src/tls/ami_tls_crypto.c wires it -- so measuring it any other
+ * exactly how src/tls/ami_tls_crypto.c wires it, so measuring it any other
  * way would measure something the TLS stack does not run.
  */
 
@@ -851,7 +851,7 @@ UINT    saved;
  * The other record path.  The case for adding it rests on one claim: that on a
  * 68020 an AEAD nobody has hand-optimised beats the AES-CBC-plus-HMAC pair two
  * rounds of work have already gone into.  Checked against RFC 8439's own
- * vectors first -- 2.4.2 for the cipher, 2.5.2 for the authenticator, 2.8.2
+ * vectors first, 2.4.2 for the cipher, 2.5.2 for the authenticator, 2.8.2
  * for the AEAD.
  */
 
@@ -896,7 +896,7 @@ static const UCHAR b_poly_tag[16] =
     0xC2, 0x2B, 0x8B, 0xAF, 0x0C, 0x01, 0x27, 0xA9
 };
 
-/* RFC 8439 2.8.2 -- the AEAD, tag only; the ciphertext is checked by the
+/* RFC 8439 2.8.2, the AEAD, tag only; the ciphertext is checked by the
    round trip below. */
 static const UCHAR b_aead_key[32] =
 {
@@ -1052,7 +1052,7 @@ UINT            o;
  * the carry between limbs or in the fold round the top of 2^130 can hide until
  * the accumulator is large and the limbs have been near their bounds a few
  * hundred times.  So it runs both over 1, 2, 3, 5, 17 and 200 blocks, twice
- * per count -- once with the 2^128 bit a full block carries and once without,
+ * per count, once with the 2^128 bit a full block carries and once without,
  * which is the short-final-block case c68k_poly1305_finish() takes and which
  * nothing else here reaches with a grown accumulator.
  *
@@ -1108,13 +1108,13 @@ UINT            pass;
 /*
  * Independent known answers: the tag over the first N bytes of b_plain under
  * RFC 8439 2.5.2's key, for seventeen lengths that straddle every boundary the
- * buffering has -- empty, one byte, one short of a block, exactly a block, one
+ * buffering has, empty, one byte, one short of a block, exactly a block, one
  * past it, and the same around 32, 64, 128, 1024 and the whole 16 KiB.
  *
- * They were computed off-target from the definition in RFC 8439 2.5 -- r
+ * They were computed off-target from the definition in RFC 8439 2.5, r
  * clamped, the message read little-endian sixteen bytes at a time with the
  * 2^128 bit appended, the accumulator multiplied by r modulo 2^130 - 5, s
- * added at the end -- by a generator that reproduces 2.5.2's own tag before it
+ * added at the end, by a generator that reproduces 2.5.2's own tag before it
  * emits any of these.  They are not this implementation's own output recorded,
  * which would only prove it is deterministic.
  *
@@ -1292,7 +1292,7 @@ ULONG   odd_us;
     mac_us = c68k_eclock_micros(c68k_eclock() - start);
 
     /* And the portable C block function over the same bytes, in the same run
-       -- the only comparison an emulator does not distort, and the one that
+      , the only comparison an emulator does not distort, and the one that
        says what the assembly is worth on this machine. */
     c68k_poly1305_initialize(&b_poly, b_poly_key);
     start = c68k_eclock();

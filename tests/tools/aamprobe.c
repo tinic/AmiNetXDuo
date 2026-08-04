@@ -1,5 +1,5 @@
 /*
- * AamProbe -- the address allocation message.
+ * AamProbe, the address allocation message.
  *
  * BeginInterfaceConfig() returns VOID and reports everything by filling in
  * aam_Result and replying the message, so an ENOSYS stub for it hangs rather
@@ -12,7 +12,7 @@
  * The probe calls DeleteAddrAllocMessage() on a message it built itself, on
  * the stack.  "This routine can only deallocate address allocation messages
  * created by CreateAddrAllocMessageA() and will not work with anything else"
- * -- so it has to be able to tell, and a library that could not would free a
+ * so it has to be able to tell, and a library that could not would free a
  * stack frame here and take the machine with it.
  *
  * Vectors are called by hand at their LVOs, as in the other probes.
@@ -230,7 +230,7 @@ static VOID p_begin_and_collect(struct Library *base, struct MsgPort *port,
 /* ------------------------------------------------------- the second caller */
 
 /*
- * "AAMR_Busy -- Address allocation is already in progress for this interface."
+ * "AAMR_Busy, Address allocation is already in progress for this interface."
  *
  * bsd_aam_launch() claims bsd_aam_jobs[index] under Forbid() and answers
  * AAMR_Busy to a launch that finds it taken.  That guard cannot be reached
@@ -238,15 +238,15 @@ static VOID p_begin_and_collect(struct Library *base, struct MsgPort *port,
  * that already owns the interface is the one holding the job, so a second call
  * has to come from somewhere else while the first is still in flight.
  *
- * So this is a Process of its own with a bsdsocket.library base of its own --
+ * So this is a Process of its own with a bsdsocket.library base of its own,
  * an unrelated program asking for the same interface, which is the case the
  * autodoc's AAMR_Busy exists for.  It prints nothing (NP_Cli FALSE, no
  * Output()); everything it saw goes back in the block below and the parent
  * reports it.
  *
  * The interface it asks about is the one the parent has a DHCP worker running
- * on, with no address and the link down, so every check ahead of the guard --
- * version, name, broadcast type, address not already known, protocol -- passes
+ * on, with no address and the link down, so every check ahead of the guard,
+ * version, name, broadcast type, address not already known, protocol, passes
  * for it exactly as it did for the parent.  A result that is not AAMR_Busy is
  * therefore the guard, and not one of those.
  *
@@ -255,7 +255,7 @@ static VOID p_begin_and_collect(struct Library *base, struct MsgPort *port,
  *   AAMR_Busy is answered in two places, and only one of them is the guard.
  *   bsd_aam_launch() refuses at the door.  If it did not, the worker would be
  *   created, and netstack_interface_dhcp_start() would then refuse the SECOND
- *   client on an interface that already has one -- AMI_NET_ERR_BUSY, which
+ *   client on an interface that already has one, AMI_NET_ERR_BUSY, which
  *   bsd_aam_worker() also reports as AAMR_Busy.  Deleting the guard therefore
  *   still produces AAMR_Busy, measured, so a probe that read only the result
  *   code would pass a build with no guard in it at all.
@@ -263,7 +263,7 @@ static VOID p_begin_and_collect(struct Library *base, struct MsgPort *port,
  *   What separates them is WHEN.  A refusal is replied inside
  *   BeginInterfaceConfig(), so the message is on the port before the call
  *   returns.  The other answer costs a CreateNewProc(), a PutMsg() and a
- *   worker getting as far as its first DHCP call -- it is never there yet.  So
+ *   worker getting as far as its first DHCP call, it is never there yet.  So
  *   the first GetMsg() is the assertion and the result code only says which
  *   refusal it was.
  */
@@ -320,7 +320,7 @@ static VOID p_second_caller(VOID)
                 p_begin_config(sb, aam);
 
                 /*
-                 * This GetMsg() is the assertion -- see the note above the
+                 * This GetMsg() is the assertion, see the note above the
                  * block.  A refusal is replied inside the call; a worker that
                  * was allowed to start cannot have got anywhere yet.
                  */
@@ -615,7 +615,7 @@ int main(void)
     }
 
     /* "the timeout must be at least 10 seconds long. If it is shorter, it is
-       automatically extended to 10 seconds" -- extended, not refused. */
+       automatically extended to 10 seconds", extended, not refused. */
     Printf((CONST_STRPTR)"timeout asked 3, got %ld%s\n", aam->aam_Timeout,
            (LONG)((aam->aam_Timeout == AAM_TIMEOUT_MIN) ? " -- extended, correctly"
                                                         : " -- WRONG"));
@@ -737,8 +737,8 @@ int main(void)
      *
      * The interface this run is riding on already has an address, so the only
      * way to ask for one is to take it away first.  RemoveInterface() and
-     * AddInterfaceTagList() do that -- "permitting it to be added again with
-     * new parameters" -- and an interface added that way arrives with no
+     * AddInterfaceTagList() do that, "permitting it to be added again with
+     * new parameters", and an interface added that way arrives with no
      * address at all, which is the state BeginInterfaceConfig() is for.
      *
      * SLIRP runs a DHCP server, so this is a real DISCOVER/OFFER/REQUEST/ACK
@@ -776,7 +776,7 @@ int main(void)
         if (rc == CAAME_Success && live != NULL)
         {
             /*
-             * The call must return promptly -- "This routine starts an
+             * The call must return promptly, "This routine starts an
              * asynchronous operation, very much like exec.library/SendIO()".
              * A synchronous implementation would sit here for the whole
              * ten-second timeout, so the message must not be on the port yet.
@@ -998,7 +998,7 @@ int main(void)
     /*
      * A message this library did not allocate, on the stack.  "This routine
      * can only deallocate address allocation messages created by
-     * CreateAddrAllocMessageA() and will not work with anything else" -- a
+     * CreateAddrAllocMessageA() and will not work with anything else", a
      * library that could not tell would free a stack frame, and the machine
      * would not survive the next allocation.
      */

@@ -13,7 +13,7 @@
  * them a lost connection is only ever an inference.
  *
  * So the two entry points are reimplemented here, on the same Exec primitive
- * the original uses (RawDoFmt), with the same semantics -- including
+ * the original uses (RawDoFmt), with the same semantics, including
  * mysnprintf()'s non-C99 return value, which Fitz's own header calls out
  * ("does not allow str=NULL, size=0") and which its callers rely on.
  *
@@ -37,7 +37,7 @@
 /* ------------------------------------------------- 64-bit division ------- */
 
 /*
- * `__udivdi3` and `__umoddi3` are absent from this toolchain's libgcc.a --
+ * `__udivdi3` and `__umoddi3` are absent from this toolchain's libgcc.a,
  * checked with `nm`, which finds neither in any archive it ships.  Fitz's
  * `ds_to_unix()` (src/amiga-common.c) needs one: it composes a Unix timestamp
  * in `uint64_t` and divides the tick field by 50 there.
@@ -55,7 +55,7 @@ unsigned long long __umoddi3(unsigned long long n, unsigned long long d);
 /*
  * Written on 32-bit limbs rather than on `unsigned long long` directly,
  * because a variable-count 64-bit shift compiles to `__lshrdi3`/`__ashldi3`
- * -- which this libgcc.a does not have either, so the obvious version of this
+ * which this libgcc.a does not have either, so the obvious version of this
  * function fails to link for the same reason it exists.
  */
 typedef struct

@@ -1,5 +1,5 @@
 /*
- * The tests for src/tools/httpif.c -- the If: header, which decides whether a
+ * The tests for src/tools/httpif.c, the If: header, which decides whether a
  * write goes ahead against somebody else's lock.
  *
  * WHY THIS IS A TEST AND NOT A REVIEW
@@ -179,7 +179,7 @@ static void test_tagged_lists(void)
     CHECK(eval("<http://amiga:8080/other> (<" TOKEN ">)") == 0);
 
     /* Two tags, each with its own list, both of which have to be about the
-       right resource -- and either one holding is enough. */
+       right resource, and either one holding is enough. */
     CHECK(eval("</other> (<" OTHER ">) </elsewhere> (<" TOKEN ">)") == 1);
     CHECK(eval("</elsewhere> (<" TOKEN ">) </nowhere> (<" OTHER ">)") == 0);
 
@@ -195,7 +195,7 @@ static void test_tagged_lists(void)
     CHECK(lookups == 1);
 
     /* But a new tag is a new resource and a new lookup, even for the same
-       name -- the first list here fails, so the second is reached. */
+       name, the first list here fails, so the second is reached. */
     lookups = 0;
     CHECK(eval("</other> (<" TOKEN ">) </other> (<" OTHER ">)") == 1);
     CHECK(lookups == 2);
@@ -217,7 +217,7 @@ static void test_malformed(void)
     CHECK(eval("()") == 0);
     CHECK(eval("() (<" TOKEN ">)") == 1);
 
-    /* Junk inside a list is a list nobody can read, so it does not hold --
+    /* Junk inside a list is a list nobody can read, so it does not hold,
        even when a condition beside it does. */
     CHECK(eval("(rubbish <" TOKEN ">)") == 0);
 

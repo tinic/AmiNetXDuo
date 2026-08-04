@@ -19,7 +19,7 @@ WHY THIS EXISTS
 
     A NEGATIVE RESULT IS THE POINT.  If nothing arrives, that is the measured
     answer to "does SLIRP pass multicast", and it is worth just as much as a
-    positive one -- provided the instrument is known to work, which is what
+    positive one, provided the instrument is known to work, which is what
     --selftest is for.
 
 --respond, and why it is optional
@@ -93,7 +93,7 @@ def summarise(data):
     The answer section is walked as well as the question section: an
     announcement carries no questions at all, so a summary that stopped at the
     questions would print "response an=8" and nothing about WHAT was announced
-    -- which is the whole thing a service test wants to read.
+   , which is the whole thing a service test wants to read.
     """
     if len(data) < 12:
         return "short packet (%d bytes)" % len(data)
@@ -242,7 +242,7 @@ def main():
                     # And again, UNICAST straight back to where it came from.
                     #
                     # RFC 6762 6.7 already requires this of any responder when
-                    # the query's source port is not 5353 -- and a query that
+                    # the query's source port is not 5353, and a query that
                     # crossed FS-UAE's SLIRP arrives with a rewritten source
                     # port, so it always looks like a legacy unicast query from
                     # out here.  Sending it deliberately is how the NAT's

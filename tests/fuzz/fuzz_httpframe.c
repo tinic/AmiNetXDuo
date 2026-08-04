@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- host fuzz driver for httpd's request framing: the
+ * AmiNetXDuo, host fuzz driver for httpd's request framing: the
  * Content-Length parser, the Transfer-Encoding list, and the chunked decoder.
  *
  * WHY THIS ONE
@@ -9,7 +9,7 @@
  * against. A parser that gets a header wrong sends a wrong reply and somebody
  * notices; a parser that gets the LENGTH wrong sends a right reply and leaves
  * the rest of the body in the socket, where the server reads it as the next
- * request. That is request smuggling, and it needs no attacker here -- a
+ * request. That is request smuggling, and it needs no attacker here, a
  * Content-Length that overflowed does it by itself.
  *
  * There is no MMU underneath, so a decoder that walks off its size line is not
@@ -19,27 +19,27 @@
  *
  * WHAT IS ASSERTED, beyond "it did not crash"
  *
- *   the count      -- http_chunk_feed() may never claim more of the buffer
+ *   the count     , http_chunk_feed() may never claim more of the buffer
  *                     than it was given, and never less than zero. The count
  *                     is where the server starts parsing the next request, so
  *                     one byte of slack there IS the smuggle.
- *   the sink       -- no more bytes are handed out than the chunk sizes asked
+ *   the sink      , no more bytes are handed out than the chunk sizes asked
  *                     for, and `total` agrees with what the sink counted.
- *   the dribble    -- the same bytes fed one at a time must reach the same
+ *   the dribble   , the same bytes fed one at a time must reach the same
  *                     state and produce the same output. Everything the
  *                     decoder is in the middle of is supposed to live in the
  *                     HttpChunk, and this is the only cheap way to find out
  *                     whether any of it is really living on the stack.
- *   the stop       -- once DONE or ERROR, nothing more is consumed. A decoder
+ *   the stop      , once DONE or ERROR, nothing more is consumed. A decoder
  *                     that keeps reading after a framing failure is reading
  *                     the next request as body.
- *   the reference  -- and the one that matters. fz_reference() below is a
+ *   the reference , and the one that matters. fz_reference() below is a
  *                     second decoder, written straight through with 64-bit
  *                     arithmetic and no state machine, and the two must agree
  *                     on all three of: is this body well formed, where does it
  *                     end, and what are its bytes. The structural checks above
- *                     pass on a decoder that is merely memory-safe -- the
- *                     framing faults in docs/BACKLOG.md all were -- so without
+ *                     pass on a decoder that is merely memory-safe, the
+ *                     framing faults in docs/BACKLOG.md all were, so without
  *                     an oracle the sweep says "clean" about a decoder that
  *                     reads 0x100000000 as the end of the body.
  *
@@ -162,7 +162,7 @@ static int fz_reference(const unsigned char *buf, unsigned long len)
             if (buf[p] != '\r')
             {
                 /* Longer than the buffer holds is refused, and refused as
-                   soon as it is too long -- there may be no LF coming. */
+                   soon as it is too long, there may be no LF coming. */
                 if (n >= FZ_REF_LINE - 1UL)
                     return FZ_REF_BAD;
 
@@ -460,7 +460,7 @@ static int fz_body(const unsigned char *body, unsigned long len)
 /*
  * A body that is mostly a chunked body.  Pure random bytes reach ERROR on the
  * first size line and never see CHUNK_DATA or the trailer, so most cases are
- * built to the grammar and then damaged -- which is what puts the interesting
+ * built to the grammar and then damaged, which is what puts the interesting
  * states under the mutation.
  */
 static unsigned long fz_make(unsigned char *out)

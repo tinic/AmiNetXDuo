@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the transmit capture tap.
+ * AmiNetXDuo, the transmit capture tap.
  *
  * Separate from bpf_tap.c only because it needs NX_PACKET, and therefore
  * tx_api.h / nx_api.h ahead of any exec header (same rule as
@@ -17,9 +17,9 @@
  * complete Ethernet frame that goes on the wire never exists in memory.
  *
  * A DLT_EN10MB consumer must see that frame, so the tap reconstructs the 14
- * bytes on the stack from the three things the CMD_WRITE carries --
+ * bytes on the stack from the three things the CMD_WRITE carries,
  * destination from nx_ip_driver_physical_address_msw/lsw, source from the
- * interface's own MAC, type from the driver command -- and hands the filter a
+ * interface's own MAC, type from the driver command, and hands the filter a
  * two-segment view. The packet is not touched, since it is often a queued TCP
  * segment that will be handed back for retransmission.
  *
@@ -59,7 +59,7 @@ VOID ami_bpf_tap_tx(APTR cookie, NX_PACKET *packet, BOOL has_link_header,
 
     if (!has_link_header && ifp->dlt == DLT_EN10MB)
     {
-        /* msw carries the top two address bytes, lsw the bottom four -- the
+        /* msw carries the top two address bytes, lsw the bottom four, the
            same split nx_ip_driver_physical_address_msw/lsw uses. */
         eth[0] = (UBYTE)(dst_msw >> 8);
         eth[1] = (UBYTE)(dst_msw);

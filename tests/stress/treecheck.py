@@ -7,8 +7,8 @@ disk?
     tests/stress/treecheck.py check tree.manifest DIR
 
 CONTENT, AS A MULTISET, NOT AS A PATH MAP.  The bytes make two hops before they
-land -- UAE's directory filesystem, which encodes host names AmigaDOS cannot
-spell, and Fitz, which writes AmigaDOS names back onto a POSIX server -- so the
+land, UAE's directory filesystem, which encodes host names AmigaDOS cannot
+spell, and Fitz, which writes AmigaDOS names back onto a POSIX server, so the
 path a file arrives under is not necessarily the path it left under, and a
 path-keyed comparison reports encoding as corruption.  What must be identical
 is the set of file contents and how many times each appears.

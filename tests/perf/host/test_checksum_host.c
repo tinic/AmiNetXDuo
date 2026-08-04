@@ -1,10 +1,10 @@
 /*
- * AmiNetXDuo -- src/net68k/ checksum, differentially against the vendored one.
+ * AmiNetXDuo, src/net68k/ checksum, differentially against the vendored one.
  *
  * A faster checksum that is wrong corrupts silently: every packet still goes
  * out, the peer drops some of them, and the symptom is "the network is a bit
  * flaky".  So this does not check that n68k_ip_checksum_compute() computes a
- * correct internet checksum -- it checks that it returns exactly what
+ * correct internet checksum, it checks that it returns exactly what
  * _nx_ip_checksum_compute() returns, for every input shape the stack can
  * produce and several it cannot.
  *
@@ -19,7 +19,7 @@
  *   - prepend offsets 0..7, i.e. every alignment including the odd ones the
  *     packet pool never produces
  *   - chains of 1..5 packets, with per-packet fill chosen so append pointers
- *     land on all four residues mod 4 -- that is where the vendored code has
+ *     land on all four residues mod 4, that is where the vendored code has
  *     its two-byte carry across the boundary
  *   - the trailing 1/2/3-byte cases, which write a zero pad byte into the
  *     packet buffer, so the buffer is restored between the two calls
@@ -41,8 +41,8 @@ USHORT n68k_checksum_reference(NX_PACKET *packet_ptr, ULONG protocol,
 
 /*
  * NX_ASSERT's failure path parks the calling thread in tx_thread_sleep(-1).
- * Both implementations reference it and neither reaches it -- every call
- * below passes non-null addresses -- but the link needs the symbol.  The stub
+ * Both implementations reference it and neither reaches it, every call
+ * below passes non-null addresses, but the link needs the symbol.  The stub
  * aborts rather than returns: reaching it would mean the test had stopped
  * testing what it thinks it is.
  */
@@ -131,7 +131,7 @@ static void h_restore(h_chain *c)
 
 /*
  * One comparison.  Ours runs first on a pristine chain, the chain is restored,
- * then the reference runs -- both of them may write a zero pad byte past the
+ * then the reference runs, both of them may write a zero pad byte past the
  * data, and neither may be allowed to see the other's.
  */
 static void h_compare(h_chain *c, ULONG protocol, UINT data_length,
@@ -315,7 +315,7 @@ int main(void)
     /* ---- 7. the sum primitive on its own -------------------------------- */
     /*
      * n68k_sum_longwords() is what the assembly replaces, so it gets checked
-     * against a plain 64-bit sum folded by hand -- the property the C caller
+     * against a plain 64-bit sum folded by hand, the property the C caller
      * relies on is congruence modulo 0xFFFF, plus "zero only when empty".
      */
     {

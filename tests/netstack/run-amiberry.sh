@@ -10,11 +10,11 @@
 # -N picks the card and -B picks what it is wired to.  The default is the
 # A2065 on SLIRP, which is what the other two harnesses do.  -B <interface>
 # puts the guest on the host's own LAN instead, with its own MAC and a lease
-# from the real DHCP server -- see tools/amiberry-run.sh for what that needs
+# from the real DHCP server, see tools/amiberry-run.sh for what that needs
 # from the host.
 #
 # -m picks the machine, and the board picks it when -m is absent.  A 68000
-# machine -- A500, A600 -- needs a netstack_test built for one, so pass -b at
+# machine, A500, A600, needs a netstack_test built for one, so pass -b at
 # a build configured with -DAMINETXDUO_CPU=68000; a 68020 binary stops it with
 # an illegal instruction before the stack starts.  It also needs a ROM that
 # boots it, which is AMINETXDUO_KICKSTART_A600 and friends.
@@ -54,7 +54,7 @@ done
 
 # The board decides the machine when -m did not.  A Zorro III card in an A1200
 # is not a configuration that exists: the bus is not there, the card never
-# autoconfigs, and the run fails as netstack_startup() 0xFFFFFFFE -- which
+# autoconfigs, and the run fails as netstack_startup() 0xFFFFFFFE, which
 # reads exactly like a missing driver and is not one.
 if [ -z "$MODEL" ]; then
     case "$BOARD" in
@@ -63,7 +63,7 @@ if [ -z "$MODEL" ]; then
     esac
 fi
 
-# cnet.device dumps every PCMCIA CIS tuple it walks to the serial port -- about
+# cnet.device dumps every PCMCIA CIS tuple it walks to the serial port, about
 # 127,000 lines of it, since it reads attribute memory to the end and most of it
 # is CISTPL_NULL.  That is the run, not the network: three minutes of serial at
 # the emulated UART's rate.  So the PCMCIA board gets its own default rather

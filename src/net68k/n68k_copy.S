@@ -1,4 +1,4 @@
-| AmiNetXDuo -- bulk copy, 68020.
+| AmiNetXDuo, bulk copy, 68020.
 |
 | VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len);
 |
@@ -11,7 +11,7 @@
 |
 | The C loop loses to newlib by 11% because C cannot express a
 | memory-to-memory move, so GCC emits a load into a data register and a
-| separate store where the machine has a single addressing-mode pair -- the
+| separate store where the machine has a single addressing-mode pair, the
 | same kind of gap src/crypto68k/ finds around the carry flag.
 |
 | This routine uses movem.l, which moves eight longwords per instruction pair
@@ -21,7 +21,7 @@
 |
 | Alignment: the 68020 will fetch a longword from any address, but an unaligned
 | one costs an extra bus cycle, measured at about 18% (218 ns/B aligned against
-| 254-260 ns/B for every misaligned combination -- 18%, not the order of
+| 254-260 ns/B for every misaligned combination, 18%, not the order of
 | magnitude a byte-loop fallback would cost; libm020's memcpy has no byte-loop
 | cliff).  So this brings the destination to a longword boundary and then moves
 | longwords whatever the source is doing, as libm020 does.  See the parity
@@ -30,7 +30,7 @@
 |
 | 68000 and 68060: this file runs on both.  move.l, movem.l and dbf are in the
 | original 68000 instruction set and none of them was dropped from the 68060,
-| so AMINETXDUO_NET68K_ASM stays on for every target -- unlike
+| so AMINETXDUO_NET68K_ASM stays on for every target, unlike
 | AMINETXDUO_CRYPTO68K_ASM, which is 68020-only and is gated on the CPU.
 |
 | SPDX-License-Identifier: MIT
@@ -44,7 +44,7 @@
 | An odd address is fatal on a 68000.
 |
 | The routine aligns the destination and then reads longwords from wherever
-| the source happens to be, which is right for a 68020 -- it fetches a
+| the source happens to be, which is right for a 68020, it fetches a
 | longword from any address and charges one extra bus cycle.  A 68000 does
 | not: a word or longword access to an odd address is an address error,
 | exception 3, and the machine gurus.  This routine is also the tree's
@@ -53,7 +53,7 @@
 | died of: `Exception 3 (20d9 ...)`, opcode 20d9 being the move.l a1@+,a0@+
 | at .Llong below.  docs/RESEARCH.md §45.
 |
-| The condition is parity, not longword alignment -- an address of 2 mod 4 is
+| The condition is parity, not longword alignment, an address of 2 mod 4 is
 | legal for move.l on a 68000, it simply becomes two word accesses.  So the
 | guard is one test: if the two pointers disagree in bit 0 then no amount of
 | aligning the destination will make the source even, and the byte loop is the
@@ -122,15 +122,15 @@ _n68k_copy_bytes:
 | WHAT DOES NOT WORK, at a source offset of 2 mod 4.  That offset is exactly a
 | word, so the reads can be moved to the aligned side and put back with swap
 | and move.w instead of paying the split bus cycle.  It loses, badly, and so
-| does every other word-granularity idea -- same machine, same run, s2:
+| does every other word-granularity idea, same machine, same run, s2:
 |
 |   movem.l, dest aligned (this)       233     | the split read costs ~3 cycles
 |   movem.w, both sides word aligned   349     | per longword; swap + move.w
 |   aligned movem.l + swap recombine   359     | costs ~7.  No way to win.
 |   move.w a1@+,a0@+                   419
 |
-| Aligning the source instead of the destination -- moving the split from the
-| read to the write -- measured 232.8 against 229.8.  Nothing in it.
+| Aligning the source instead of the destination, moving the split from the
+| read to the write, measured 232.8 against 229.8.  Nothing in it.
 .Lbig:
         movem.l a1@+,d2-d7/a2-a3
         movem.l d2-d7/a2-a3,a0@

@@ -8,7 +8,7 @@
 # WHY THIS IS NOT IN EMULATOR_TESTS
 #
 # The harness reaches bsdsocket.library through its LVOs, so the library and a
-# SANA-II driver both have to be staged -- unlike ram_driver_test and soak_test,
+# SANA-II driver both have to be staged, unlike ram_driver_test and soak_test,
 # which link the stack into themselves and need no driver at all. The only
 # driver that brings an interface up under FS-UAE here is a2065.device, which is
 # Commodore's and not redistributable, so this cannot run in public CI for the
@@ -28,7 +28,7 @@ MODEL="A1200"
 BUILD="build/ci/default"
 
 # -t is derived, not picked. The harness runs two internal deadlines back to
-# back -- servers reaching listen(), then everything finishing -- and boot and
+# back, servers reaching listen(), then everything finishing, and boot and
 # the DHCP attempt against SLIRP come out of a budget it does not control. The
 # same three numbers are in concurrent_test.c (CT_DEADLINE_SECS, CT_BOOT_SECS,
 # CT_BUDGET_SECS) and it prints the total on startup, so a -t below its own
@@ -84,7 +84,7 @@ UG="$ROOT/$BUILD/src/usergroup/usergroup.library"
 [ -f "$UG" ] && cp "$UG" "$STAGE/libs/usergroup.library"
 
 # FS-UAE's own bsdsocket emulation off, as every other harness here does it, so
-# a result cannot be the host-socket shim answering instead of ours -- which
+# a result cannot be the host-socket shim answering instead of ours, which
 # would be a particularly bad way to pass a test about our own bracket.
 BASEDIR="$ROOT/build/fsuae-base-$TAG"
 mkdir -p "$BASEDIR/Configurations"

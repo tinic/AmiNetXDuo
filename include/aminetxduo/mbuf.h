@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- 4.4BSD mbuf emulation behind the mbuf_* LVOs.
+ * AmiNetXDuo, 4.4BSD mbuf emulation behind the mbuf_* LVOs.
  *
  * NetX Duo has no mbuf. An NX_PACKET is one header plus one payload window
  * (prepend_ptr..append_ptr) inside a fixed-size pool block, chained through
@@ -24,7 +24,7 @@
  *      6-8 of them). Handing one to an application that may never free it
  *      would starve the receive path.
  *   3. mbuf_prepend/mbuf_adj/mbuf_pullup/mbuf_cat mutate a chain in ways an
- *      NX_PACKET cannot express -- splitting one buffer into two, growing the
+ *      NX_PACKET cannot express, splitting one buffer into two, growing the
  *      front past data_start, splicing foreign storage in with M_EXT.
  *
  * Conversion is therefore an explicit copy at the boundary:
@@ -57,7 +57,7 @@
  * ABI provenance: the layout below is the Roadshow netinclude `<sys/mbuf.h>`
  * (Olaf Barthel, 2001-2016, over the 4.4BSD `@(#)mbuf.h 8.5 (Berkeley)
  * 2/19/95` header), as shipped in this toolchain's ndk-include. That is the
- * Amiga lineage, not newlib's -- newlib has no <sys/mbuf.h> at all, so the
+ * Amiga lineage, not newlib's, newlib has no <sys/mbuf.h> at all, so the
  * pwd.h substitution trap (docs/RESEARCH.md 3.3) cannot happen here.
  *
  * On the Amiga this header includes that NDK header directly, so the ABI is the
@@ -104,7 +104,7 @@ extern "C" {
  * MHLEN follow, which keeps every property the code relies on (MSIZE a power of
  * two, the internal data area ending exactly at the end of the mbuf, dtom()
  * meaningful) while the arithmetic constants differ. The exact 68k offsets are
- * asserted only on the Amiga, where they are the ABI -- see the assert block
+ * asserted only on the Amiga, where they are the ABI, see the assert block
  * below and src/mbuf/mbuf_abi_check.c.
  */
 
@@ -195,7 +195,7 @@ struct mbstat {
     ULONG m_drain;
 };
 
-#else /* !AMI_MBUF_REPLICA -- the real thing */
+#else /* !AMI_MBUF_REPLICA, the real thing */
 
 /*
  * <sys/mbuf.h> reaches <net/if.h> -> <sys/socket.h>, which uses ssize_t
@@ -263,7 +263,7 @@ AMI_STATIC_ASSERT(MHLEN == AMI_MBUF_MHLEN,  "MHLEN");
 /* ------------------------------------------------------------ mbuf types */
 
 /*
- * The NDK header defines mh_type but not the MT_* constants that go in it --
+ * The NDK header defines mh_type but not the MT_* constants that go in it,
  * they live in the 4.4BSD <sys/mbuf.h> section Roadshow dropped. These are the
  * 4.4BSD values; only MT_FREE, MT_DATA and MT_HEADER are used by this code.
  * Inferred from 4.4BSD, not confirmed against any Amiga header.
@@ -303,7 +303,7 @@ LONG ami_mbuf_init(ULONG max_mbufs, ULONG max_clusters);
  * Nothing in production calls this, and nothing can: the eleven mbuf_* LVOs
  * are bsd_enosys stubs and aminetxduo_mbuf is not linked into
  * bsdsocket.library at all, so the pool never comes up and there is nothing to
- * release. Wiring any of those LVOs to this pool is three steps, not one --
+ * release. Wiring any of those LVOs to this pool is three steps, not one,
  * link the library, and call this from ami_ns_destroy() after nx_ip_delete()
  * and the SANA-II closes, which is where ami_bpf_cleanup() is called from for
  * the same reason. Do all three or the slabs are resident until reboot.
@@ -313,7 +313,7 @@ VOID ami_mbuf_cleanup(VOID);
 /* Fill in a 4.4BSD mbstat. m_spare, m_wait and m_drain are always 0. */
 VOID ami_mbuf_stats(struct mbstat *out);
 
-/* Outstanding (allocated but not freed) mbufs and clusters -- for leak tests. */
+/* Outstanding (allocated but not freed) mbufs and clusters, for leak tests. */
 ULONG ami_mbuf_outstanding(VOID);
 ULONG ami_mbuf_clusters_outstanding(VOID);
 
@@ -324,8 +324,8 @@ ULONG ami_mbuf_clusters_outstanding(VOID);
  * the NDK pragmas/bsdsocket_pragmas.h and confirmed against amitools'
  * bsdsocket_lib.fd and ndk-include/interfaces/bsdsocket.h:
  *
- *   0x28e mbuf_get      ()                       -- no arguments
- *   0x294 mbuf_gethdr   ()                       -- no arguments
+ *   0x28e mbuf_get      ()                      , no arguments
+ *   0x294 mbuf_gethdr   ()                      , no arguments
  *   0x282 mbuf_free     (m)            a0
  *   0x288 mbuf_freem    (m)            a0
  *   0x2a6 mbuf_adj      (mp,req_len)   a0/d0

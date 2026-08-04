@@ -1,11 +1,11 @@
 /*
- * AmiNetXDuo -- CPU and memory timing calibration.
+ * AmiNetXDuo, CPU and memory timing calibration.
  *
  * Every performance number this project has recorded carries the same
  * disclaimer: "only the 68020 column is meaningful, FS-UAE's 68030 model is
- * not cycle-exact".  None of the symptoms behind it -- a 95x memory-to-memory
+ * not cycle-exact".  None of the symptoms behind it, a 95x memory-to-memory
  * copy, a MULU.L that costs nothing, an RSA ratio that came out 1.7x, 3.0x and
- * 3.1x on three runs of one binary -- measured *what* the model gets wrong, so
+ * 3.1x on three runs of one binary, measured *what* the model gets wrong, so
  * nobody could say what an A3000 profile would be good for.
  *
  * This runs instruction sequences whose cost on real silicon is published, and
@@ -204,14 +204,14 @@ static VOID c_run(ULONG kind, ULONG reps)
  * count that suits the slow one measures nothing but quantisation on the fast
  * one.
  *
- * Returns picoseconds per unit -- an instruction for the register kernels, a
- * byte for the memory ones -- so an operation an unthrottled model charges a
+ * Returns picoseconds per unit, an instruction for the register kernels, a
+ * byte for the memory ones, so an operation an unthrottled model charges a
  * fraction of a nanosecond for still has digits left.
  *
  * There is no 64-bit divide worth linking here.  `ticks * c_tick_ns` is about
  * 1e8 and fits; multiplying that by the further 1000 picoseconds need does
  * not.  The first version of this file did exactly that and printed a 32 KB
- * memory sweep as 3.3 ns/B -- faster than the 68020's bus can physically go,
+ * memory sweep as 3.3 ns/B, faster than the 68020's bus can physically go,
  * and faster than the same routine over 64 bytes.  So the scaling divides the
  * unit count by 1000 instead, and the loop below refuses to stop until there
  * are at least 1000 units to make that exact.
@@ -283,7 +283,7 @@ ULONG   units;
  * rep, so subtracting it here leaves the instruction under test.
  */
 static ULONG    c_empty_ps;
-static ULONG    c_add_ps;               /* one ADD.L, ps -- the yardstick */
+static ULONG    c_add_ps;               /* one ADD.L, ps, the yardstick */
 
 static VOID c_print_reg(const char *what, ULONG kind, ULONG real_020,
                         ULONG real_030)
@@ -301,7 +301,7 @@ ULONG   ratio_x100;
     ratio_x100 = (c_add_ps != 0UL) ? ((ps * 100UL) / c_add_ps) : 0UL;
 
     /*
-     * "implied cycles" is the ratio to ADD.L times ADD.L's published two --
+     * "implied cycles" is the ratio to ADD.L times ADD.L's published two,
      * i.e. what the model charges for this instruction, expressed in the only
      * unit that survives not knowing the clock.
      */

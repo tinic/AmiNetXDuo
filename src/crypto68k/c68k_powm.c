@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- crypto68k modular exponentiation.
+ * AmiNetXDuo, crypto68k modular exponentiation.
  *
  *   The vendored _nx_crypto_huge_number_mont_power_modulus() is bit-at-a-time
  *   square-and-multiply over every bit of every exponent limb.  Two
@@ -8,8 +8,8 @@
  *   1. It never skips the leading zero bits of the top exponent limb.  For
  *      e = 65537 the exponent is one limb, 0x00010001, so it performs 32
  *      squarings and 2 multiplies where 16 squarings and 1 multiply suffice.
- *      An RSA *public* operation -- the certificate signature check a TLS
- *      client does three times per handshake -- therefore costs about twice
+ *      An RSA *public* operation, the certificate signature check a TLS
+ *      client does three times per handshake, therefore costs about twice
  *      what it should.  The largest win in the module, and not an assembly
  *      trick.
  *
@@ -22,7 +22,7 @@
  *   Squarings are then most of the work, which is what makes c68k_mont_sqr()'s
  *   ~24% over c68k_mont_mul() matter.
  *
- *   The setup -- radix^2 mod m -- still goes through the vendored long
+ *   The setup, radix^2 mod m, still goes through the vendored long
  *   division.  It is O(s^2) and runs once, so replacing it would buy little;
  *   leaving it keeps the before/after numbers differing only in the part being
  *   optimised, and leaves one less division routine to get subtly wrong.
@@ -33,7 +33,7 @@
 #include "crypto68k.h"
 
 
-/* --------------------------------------------------------------- helpers -- */
+/* --------------------------------------------------------------- helpers, */
 
 static VOID c68k_zero(c68k_limb *p, UINT n)
 {
@@ -128,7 +128,7 @@ static UINT c68k_window_for(UINT bits)
 }
 
 
-/* ---------------------------------------------------- radix^2 mod m setup -- */
+/* ---------------------------------------------------- radix^2 mod m setup, */
 
 /*
  * rr = radix^(2*m_len) mod m, i.e. R^2 mod m.
@@ -166,7 +166,7 @@ UINT                    i;
     {
         /*
          * R mod m and then (R mod m)^2 mod m, both through this module's
-         * 32-bit divider -- all the fast path changes.  The square in between
+         * 32-bit divider, all the fast path changes.  The square in between
          * is the vendored one either way: 2080 limb products against the tens
          * of thousands of limb operations the two reductions cost.
          */
@@ -208,7 +208,7 @@ UINT                    i;
 }
 
 
-/* -------------------------------------------------------- exponentiation -- */
+/* -------------------------------------------------------- exponentiation, */
 
 UINT c68k_mont_power_modulus(c68k_limb *result,
                              const c68k_limb *x, UINT x_len,
@@ -309,7 +309,7 @@ UINT        started;
 
     /*
      * Left-to-right sliding window.  `started` stays false until the first set
-     * bit, so the leading zeros of the top exponent limb cost nothing -- the
+     * bit, so the leading zeros of the top exponent limb cost nothing, the
      * change that halves the RSA public operation.
      */
     started = 0;
@@ -374,7 +374,7 @@ UINT        started;
 }
 
 
-/* ------------------------------------------------- nx_crypto-shaped entry -- */
+/* ------------------------------------------------- nx_crypto-shaped entry, */
 
 VOID c68k_huge_number_mont_power_modulus(NX_CRYPTO_HUGE_NUMBER *x,
                                          NX_CRYPTO_HUGE_NUMBER *e,

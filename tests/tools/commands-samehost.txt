@@ -4,8 +4,8 @@
 #   AMINETXDUO_NETTOOLS_COMMANDS=tests/tools/commands-samehost.txt \
 #       tests/tools/run-nettools.sh -t 150
 #
-# This is the only listen/accept this emulator can drive end to end -- SLIRP
-# forwards nothing inward -- so it is what proves bind/listen/accept work
+# This is the only listen/accept this emulator can drive end to end, SLIRP
+# forwards nothing inward, so it is what proves bind/listen/accept work
 # between two processes rather than inside one.
 #
 # Three cases, each a superset of the last:
@@ -18,7 +18,7 @@
 # on a same-machine connection wedged the caller in the library, past the
 # reach of Ctrl-C.  Fixed in bsdsocket.library (e63e5f1 + ed548df); this file
 # is what keeps it fixed.  All three cases end with both ends reporting their
-# own TIMEOUT, or -- for C -- the client seeing the peer's FIN and exiting 0.
+# own TIMEOUT, or, for C, the client seeing the peer's FIN and exiting 0.
 SYS:AddNetInterface eth0
 &SYS:nc -l 7099 -v -w 10 >DH0:a-listen.txt
 wait 4

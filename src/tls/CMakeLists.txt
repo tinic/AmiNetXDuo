@@ -1,18 +1,18 @@
-# nx_secure TLS -- built only when AMINETXDUO_TLS is ON.
+# nx_secure TLS, built only when AMINETXDUO_TLS is ON.
 #
 # This is deliberately NOT linked into bsdsocket.library.  docs/RESEARCH.md 9
 # records the decision: TLS ships as a separate library behind its own build
 # option, and is benchmarked on 68020 before any API is promised.  The gate is
-# tests/tls/tls_bench -- see docs/RESEARCH.md 5.5 for the numbers it produced.
+# tests/tls/tls_bench, see docs/RESEARCH.md 5.5 for the numbers it produced.
 #
 # Two static libraries, because they have very different dependency shapes:
 #
-#   nx_crypto  -- crypto_libraries/src.  Compiles against nx_api.h for its
+#   nx_crypto , crypto_libraries/src.  Compiles against nx_api.h for its
 #                 types only; it makes no ThreadX or NetX Duo call at runtime
 #                 (verified: zero tx_*/nx_* references in crypto_libraries/src).
 #                 That is what makes a primitive benchmark possible without
 #                 bringing the scheduler up.
-#   nx_secure  -- nx_secure/src.  The TLS/DTLS/X.509 state machines.  These do
+#   nx_secure , nx_secure/src.  The TLS/DTLS/X.509 state machines.  These do
 #                 need NetX Duo (packets, TCP sockets) and therefore ThreadX.
 #
 # SPDX-License-Identifier: MIT
@@ -69,7 +69,7 @@ endif()
 # rfc7905/ supplies the two record-payload objects, so the vendored ones must
 # not.  Same mechanism as _nx_ip_checksum_compute() at the top level: drop the
 # file from the glob and every internal caller resolves to ours instead.  The
-# copies differ from the originals by one branch each -- the ChaCha20-Poly1305
+# copies differ from the originals by one branch each, the ChaCha20-Poly1305
 # record framing, which is decided before an NX_CRYPTO_METHOD is ever called
 # and therefore cannot be supplied by one.  src/tls/rfc7905/README is the diff
 # and the reason.
@@ -84,8 +84,8 @@ target_link_libraries(nx_secure PUBLIC nx_crypto netxduo)
 
 # The AEAD record path is compiled out by default: nx_secure_tls.h only defines
 # this when TLS 1.3 or EC-JPAKE is on, and both are off here.  It is what makes
-# the AEAD branches in the two files above -- and the 0xCCA8/0xCCA9 rows in
-# ami_tls_crypto.c's ciphersuite table -- exist at all.  PUBLIC so that every
+# the AEAD branches in the two files above, and the 0xCCA8/0xCCA9 rows in
+# ami_tls_crypto.c's ciphersuite table, exist at all.  PUBLIC so that every
 # translation unit that includes nx_secure_tls.h agrees with this one.
 target_compile_definitions(nx_secure PUBLIC NX_SECURE_ENABLE_AEAD_CIPHER)
 
@@ -108,7 +108,7 @@ target_compile_definitions(nx_crypto PUBLIC NX_SECURE_KEY_CLEAR)
 # ami_tls_crypto.c is what connects src/crypto68k/ to a handshake: it supplies
 # our own NX_CRYPTO_METHOD entries for RSA and P-256 and the ciphersuite tables
 # that use them.  `crypto68k` is defined in src/crypto68k, which the top level
-# configures AFTER this directory -- naming a target that does not exist yet is
+# configures AFTER this directory, naming a target that does not exist yet is
 # fine, CMake resolves target names at generate time.
 # The record path's A/B switch.  ON puts the VENDORED AES and SHA-256 back in
 # the ciphersuite table and leaves everything else alone, so that "did the

@@ -12,11 +12,11 @@ set(CMAKE_SYSTEM_PROCESSOR m68k)
 # Search order, first hit wins.  Kept identical to tools/amiga-toolchain.sh so
 # that a shell script and a CMake configure never pick different compilers:
 #
-#   1. -DAMIGA_TOOLCHAIN_ROOT / $AMIGA_TOOLCHAIN_ROOT   -- explicit
-#   2. the tools/fetch-toolchain.sh cache               -- what CI uses
-#   3. m68k-amigaos-gcc on $PATH                        -- container, module
-#   4. /opt/m68k-amigaos                                -- crosstools layout
-#   5. $HOME/amigaos/tools/m68k-amigaos-gcc             -- local default
+#   1. -DAMIGA_TOOLCHAIN_ROOT / $AMIGA_TOOLCHAIN_ROOT  , explicit
+#   2. the tools/fetch-toolchain.sh cache              , what CI uses
+#   3. m68k-amigaos-gcc on $PATH                       , container, module
+#   4. /opt/m68k-amigaos                               , crosstools layout
+#   5. $HOME/amigaos/tools/m68k-amigaos-gcc            , local default
 #
 # Before this list existed there was only entry 5, which meant a clean checkout
 # on any machine but one configured a compiler that was not there and failed
@@ -115,17 +115,17 @@ endif()
 #
 # -DAMINETXDUO_CPU=68000|68020|68040|68060.  The default is 68020 because that
 # is what §9 chose and what everything has been measured on, NOT because the
-# others do not work -- see docs/RESEARCH.md §45, which is where the four
+# others do not work, see docs/RESEARCH.md §45, which is where the four
 # entries below come from.
 #
 # THE FLAGS ARE NOT THE OBVIOUS ONES, because this toolchain ships exactly
-# three multilibs -- `.` (68000), `libm020` (@mcpu=68020) and `libm060`
-# (@mcpu=68060) -- and the multilib is selected by the canonical -mcpu value:
+# three multilibs, `.` (68000), `libm020` (@mcpu=68020) and `libm060`
+# (@mcpu=68060), and the multilib is selected by the canonical -mcpu value:
 #
 #   68000   -m68020 is the whole difference; the C library is the `.` one.
 #   68020   as before.
 #   68040   -m68020 -mtune=68040, NOT -m68040.  There is no 68040 multilib, so
-#           -m68040 silently selects `.` and links the 68000 C library -- code
+#           -m68040 silently selects `.` and links the 68000 C library, code
 #           that works but has had every 32-bit multiply and divide turned
 #           into a subroutine call.  -m68020 -mtune=68040 keeps libm020 and
 #           schedules for the 040, and the 040 implements every 68020
@@ -159,8 +159,8 @@ endif()
 
 # AMIGA_ARCH_FLAGS is what the rest of the tree reads, including the two
 # CMakeLists that hand it to the assembler by name.  Setting it explicitly
-# still works and wins -- the probe builds that established §45 were done
-# that way -- so this only fills it in when nobody has said otherwise.
+# still works and wins, the probe builds that established §45 were done
+# that way, so this only fills it in when nobody has said otherwise.
 set(AMIGA_ARCH_FLAGS "${_amiga_cpu_flags_${AMINETXDUO_CPU}}"
     CACHE STRING "Target CPU flags (derived from AMINETXDUO_CPU)")
 string(REPLACE ";" " " AMIGA_ARCH_FLAGS_STR "${AMIGA_ARCH_FLAGS}")

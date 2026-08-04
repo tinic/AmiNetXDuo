@@ -19,7 +19,7 @@
 #
 #   FS-UAE's SLIRP intercepts UDP port 67 itself (its own bootp.c) and answers
 #   from 10.0.2.2.  A DHCP server on the host can therefore never see a
-#   DISCOVER, a renewal or anything else -- see docs/RESEARCH.md.  SLIRP's
+#   DISCOVER, a renewal or anything else, see docs/RESEARCH.md.  SLIRP's
 #   lease is 24 hours and it never withdraws one, so "the server stopped
 #   answering" is produced by disabling the link instead.
 #

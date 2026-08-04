@@ -3,7 +3,7 @@
 # WHAT THIS CATCHES, AND WHY IT IS A POST-LINK CHECK
 #
 # This toolchain mis-resolves a 32-bit PC-relative relocation (RELRELOC32)
-# against a LOCAL SECTION SYMBOL -- the shape produced by a tail call from one
+# against a LOCAL SECTION SYMBOL, the shape produced by a tail call from one
 # -ffunction-sections section to another section of the SAME object.  The
 # assembler leaves a non-zero addend in the displacement field and the linker
 # adds it a second time, so the branch lands twelve bytes short of its target:
@@ -14,14 +14,14 @@
 # and the object's disassembly shows only a placeholder; the wrong number
 # exists solely in the linked image.  Hence POST_BUILD, on the image.
 #
-# `ping` rebooted an A1200 on exactly this -- and did it silently: six boots
+# `ping` rebooted an A1200 on exactly this, and did it silently: six boots
 # for a two-command list, which from the outside reads as a hang.
 # docs/RESEARCH.md §25.
 #
 # THE INVARIANT
 #
 # A 68020 `bra.l`/`bsr.l` (opcode 60FF / 61FF) is emitted by this compiler only
-# for a call or a tail call, so the target is always a function entry -- an
+# for a call or a tail call, so the target is always a function entry, an
 # address that appears in the symbol table.  A branch that lands anywhere else
 # is a mis-resolved relocation.  Cross-OBJECT tail calls relocate against a
 # global symbol with a zero addend and come out right, which is why the great
@@ -57,7 +57,7 @@ if(NOT nm_rc EQUAL 0 OR NOT dis_rc EQUAL 0)
 endif()
 
 # Every code symbol address, in decimal, so the comparison needs no hex
-# formatting -- CMake has no printf.
+# formatting, CMake has no printf.
 set(code_addrs "")
 string(REPLACE "\n" ";" nm_lines "${nm_out}")
 foreach(line IN LISTS nm_lines)
@@ -70,7 +70,7 @@ endforeach()
 # Walk the disassembly.  objdump decodes 60FF/61FF for a plain 68000, so it
 # prints them as a two-byte short branch and then carries on decoding the
 # 32-bit displacement as if it were code.  The mnemonics below the branch are
-# therefore meaningless -- what matters is the BYTE COLUMN, which is contiguous
+# therefore meaningless, what matters is the BYTE COLUMN, which is contiguous
 # and in address order, so the displacement is simply the next two words.
 string(REPLACE "\n" ";" dis_lines "${dis_out}")
 set(want 0)          # words still needed to complete a displacement
@@ -93,7 +93,7 @@ endforeach()
 #
 # On m68k-amigaos there is no .rodata: string literals live in the plain .text
 # (docs/RESEARCH.md 46).  objdump disassembles .text linearly, so it renders
-# those strings, and the tables beside them, as instructions -- and a table
+# those strings, and the tables beside them, as instructions, and a table
 # entry whose bytes are 61 FF at an even address, first on an objdump line, is
 # indistinguishable from a bsr.l here.
 #
@@ -108,12 +108,12 @@ endforeach()
 #
 # The second is range: a target outside the disassembled code cannot be a
 # branch destination either.  The 68k has no code there to reach.  A switch
-# dispatch table in bsdsocket.library hit exactly this -- {UWORD case, ULONG
+# dispatch table in bsdsocket.library hit exactly this, {UWORD case, ULONG
 # target} pairs whose second half read as 60FF at an even line start, giving a
 # 393216-byte displacement to an address past the end of the image.
 #
 # The real defect this check exists for lands twelve bytes short of a function
-# -- even, and inside the code -- so neither rule loses anything it was written
+#, even, and inside the code, so neither rule loses anything it was written
 # to catch.
 #
 # Attributing the data to a symbol does not help: objdump counts it as part of
@@ -154,7 +154,7 @@ foreach(line IN LISTS dis_lines)
                 math(EXPR target "${branch_at} + 2 + (${disp})")
                 math(EXPR odd "${target} % 2")
                 if(odd EQUAL 1)
-                    # Data, not an instruction -- see the note above.
+                    # Data, not an instruction, see the note above.
                 elseif(target LESS 0 OR target GREATER max_addr)
                     # Ditto: nothing to branch to out there.
                 elseif(NOT target IN_LIST code_addrs)

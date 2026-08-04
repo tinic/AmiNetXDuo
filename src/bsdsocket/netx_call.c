@@ -1,5 +1,5 @@
 /*
- * bsdsocket.library -- putting the calling task into ThreadX context.
+ * bsdsocket.library, putting the calling task into ThreadX context.
  *
  * NetX Duo checks who is calling. Roughly forty of its entry points are wrapped
  * in NX_THREADS_ONLY_CALLER_CHECKING and return NX_CALLER_ERROR unless the
@@ -24,7 +24,7 @@
  * gives an adopted Task that lock: while it is adopted, no other ThreadX thread
  * runs, including the NetX Duo IP thread and the periodic timer. Holding it
  * from OpenLibrary() to CloseLibrary() would park it inside application code
- * for the lifetime of the base -- one Wait() on an Intuition port and the
+ * for the lifetime of the base, one Wait() on an Intuition port and the
  * entire stack stops. So it is acquired and released on every call.
  *
  * The TX_THREAD does not have to be rebuilt each time. It used to be: this file
@@ -34,14 +34,14 @@
  * _tx_thread_terminate(), a _tx_thread_delete() and a scheduler poke.
  * tests/perf/bracket_test.c prices that pair at ~790 us on a 14 MHz 68020, of
  * which AllocSignal()/FreeSignal() is 17 us. It is a per-call constant, so it
- * scales with how a client reads rather than with how much it reads -- the
+ * scales with how a client reads rather than with how much it reads, the
  * shape of docs/RESEARCH.md §29.3, where this stack beat Roadshow on connect
  * and on time-to-first-byte and lost the body, on a client that reads small and
  * selects between reads.
  *
  * A base belongs to one task (library.c records it in sb_Task) and that task
  * gets the same TX_THREAD every time, so ami_netstack_enter_cached() builds it
- * once and keeps it dormant between brackets -- TX_SUSPENDED, on no ready list,
+ * once and keeps it dormant between brackets, TX_SUSPENDED, on no ready list,
  * dispatchable by nobody. The same measurement prices that pair at ~270 us.
  * bsd_nx_release() gives it back; library.c calls it from bsd_child_destroy(),
  * which runs on the owning task with every socket already closed.
@@ -175,7 +175,7 @@ VOID bsd_nx_leave(struct AmiSocketBase *base)
  * Give the cached TX_THREAD back. Called from bsd_child_destroy() (library.c)
  * after the last socket is shut, so it runs on the base's own task with no
  * bracket open. A base torn down by anyone else still gets the registration
- * removed -- see ami_netstack_release().
+ * removed, see ami_netstack_release().
  */
 VOID bsd_nx_release(struct AmiSocketBase *base)
 {

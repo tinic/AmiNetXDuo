@@ -1,5 +1,5 @@
 /*
- * ttlprobe -- measures whether setsockopt(IP_TTL) reaches the wire, and on
+ * ttlprobe, measures whether setsockopt(IP_TTL) reaches the wire, and on
  * which socket type.
  *
  * This is the measurement `traceroute` is designed around: IP_TTL is honoured
@@ -37,7 +37,7 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 
-/* struct sockaddr_in, open-coded -- four fields and a pad, unchanged since
+/* struct sockaddr_in, open-coded, four fields and a pad, unchanged since
    4.2BSD. */
 typedef struct ProbeAddr
 {

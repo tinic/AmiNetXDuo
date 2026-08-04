@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AmiNetXDuo -- turn sampled PCs back into a ranked list of functions.
+"""AmiNetXDuo, turn sampled PCs back into a ranked list of functions.
 
 Three things stand between a sampled address and a name, and getting any of
 them wrong produces a ranking that looks entirely reasonable and is not.
@@ -21,7 +21,7 @@ them wrong produces a ranking that looks entirely reasonable and is not.
 
 3. KICKSTART.  A sample can land in our code, in Exec, or anywhere else in
    ROM, and Forbid()/Permit()/Signal()/Wait() time is part of what is being
-   hunted -- a separate probe put the ThreadX bracket at 214 us per socket
+   hunted, a separate probe put the ThreadX bracket at 214 us per socket
    call and all of it is in Exec.  Every AmigaOS library is a jump table, so
    the Amiga side resolved every LVO of every library, device and resource to
    its ROM address; a ROM sample is named by the nearest preceding one.  The
@@ -229,7 +229,7 @@ def build_symbol_table(nm, mapfile, objdir):
 
     The map says where each object's .text landed in the output; nm says where
     each symbol sits inside that object.  Adding them is the whole trick, and
-    it is the only route to the statics -- 79 KB of code carries 409 global
+    it is the only route to the statics, 79 KB of code carries 409 global
     symbols and several hundred file-static ones that HUNK_SYMBOL never saw.
     """
     contributions = parse_map(mapfile)
@@ -322,7 +322,7 @@ class Resolver:
         self.lvo_rows = lvos
 
         # The jump tables themselves.  Not every entry is a JMP: Exec keeps
-        # inline code in some slots -- Forbid() and Permit() among them -- so
+        # inline code in some slots, Forbid() and Permit() among them, so
         # the Amiga side could not resolve a target for them and a PC landing
         # there matches no target at all.  In the self-test that was 7.2% of
         # the profile sitting in "unattributed", and it was Forbid/Permit
@@ -378,7 +378,7 @@ class Resolver:
 _LVO_CACHE = {}
 
 # Exec's scheduler entry points are private, so the NDK's exec_lib.i does not
-# list them -- and they are among the most interesting things in a profile of
+# list them, and they are among the most interesting things in a profile of
 # this stack, because a ThreadX thread switch on this port is an Exec task
 # switch.  From the V33+ exec.library LVO table.
 EXEC_PRIVATE = {

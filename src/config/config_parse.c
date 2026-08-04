@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- Roadshow configuration file parsers.
+ * AmiNetXDuo, Roadshow configuration file parsers.
  *
  * Formats implemented here, per the Roadshow manual (Olaf Barthel, 1.15,
  * 4 September 2023), sections 7.1.1 (DEVS:NetInterfaces), 7.1.2.3
@@ -75,8 +75,8 @@ ami_if_keywords[] =
     { "state",              IF_KEY_STATE     },
 
     /*
-     * IPv6. Roadshow has no IPv6 keywords -- no Amiga stack has ever had IPv6
-     * -- so these are ours, named by appending "6" to the IPv4 keyword they
+     * IPv6. Roadshow has no IPv6 keywords, no Amiga stack has ever had IPv6
+     * so these are ours, named by appending "6" to the IPv4 keyword they
      * mirror. That is the one naming rule that needs no documentation to
      * guess, it cannot collide with a real Roadshow keyword (the manual has
      * none ending in a digit), and it keeps one interface file describing both
@@ -147,7 +147,7 @@ static IfKey lookup_if_keyword(const char *name)
     return IF_KEY_UNKNOWN;
 }
 
-/* ------------------------------------------------ "did you mean DEVICE?" --
+/* ------------------------------------------------ "did you mean DEVICE?",
  *
  * A mistyped keyword is the commonest fault in a hand-edited interface file,
  * and "unknown keyword 'devcie'" alone leaves the reader hunting for the
@@ -367,7 +367,7 @@ static BOOL lookup_ip6type(const char *value, AmiIp6Type *out)
 /*
  * RFC 4007 11's "%zone" in an interface file.
  *
- * The file already names the interface -- DEVS:NetInterfaces/eth0 -- so a zone
+ * The file already names the interface, DEVS:NetInterfaces/eth0, so a zone
  * on an address in it is either the same interface again, which is redundant
  * and harmless, or a different one, which contradicts the file it is written
  * in. Nothing is stored: there is no zone to remember that the file name does
@@ -433,8 +433,8 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
      *
      * AUTO means: always configure the link-local address, and take a global
      * one from a router advertisement if one arrives. On a link with no IPv6
-     * router that is indistinguishable from LINKLOCAL -- one router
-     * solicitation goes out and nothing answers -- so the cost of defaulting
+     * router that is indistinguishable from LINKLOCAL, one router
+     * solicitation goes out and nothing answers, so the cost of defaulting
      * to it is three ICMPv6 packets, and the benefit is that IPv6 works on a
      * network that has it without anyone editing a file. It is also what every
      * other operating system on the same wire is already doing.
@@ -511,7 +511,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
              * Roadshow's ID= is a free-text label for the interface and has no
              * IP meaning, which is why it was ignored. It is kept now because
              * ami_config_load() will name the machine after it when nothing
-             * more deliberate did -- see AmiHostnameSource. Stored verbatim;
+             * more deliberate did, see AmiHostnameSource. Stored verbatim;
              * whether it is usable as a host name is decided there.
              */
             case IF_KEY_ID:
@@ -1006,7 +1006,7 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
         /*
          * DEVS:Internet/default_gateway has no DEFAULT keyword: the GATEWAY in
          * it is the default route. In DEVS:Internet/routes a line is the
-         * default route only when it carries DEFAULT= -- a line with a
+         * default route only when it carries DEFAULT=, a line with a
          * DST/HOSTDST/NETDST destination is a specific route we do not keep.
          */
         if (have_dst && !is_default)
@@ -1097,7 +1097,7 @@ VOID ami_cfg_parse_tcp_handler(char *buf, BOOL *out)
  *
  * The file exists because the alternative does not reach anyone. AmiNetXDuo
  * ships clients only, so an API for a server to call would be an API no
- * server calls -- the servers an Amiga runs are AmiFTPd and its kind, already
+ * server calls, the servers an Amiga runs are AmiFTPd and its kind, already
  * built, and they will not be recompiled against ours. What the user can do
  * is say what is listening, which is exactly the assertion a _ftp._tcp record
  * makes. AmiTCP's db/inetd.conf declares the same thing the same way.

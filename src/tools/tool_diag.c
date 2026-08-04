@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo tools -- console diagnostics for the user at the keyboard.
+ * AmiNetXDuo tools, console diagnostics for the user at the keyboard.
  *
  * The stack's own diagnostics go to the serial port through ami_log() and are
  * aimed at whoever is debugging the stack. This file is the other half: what
@@ -11,8 +11,8 @@
  *   2. Where: a path, a line number, a device name.
  *   3. What to do next, as a command they can type.
  *
- * Nothing here needs a running stack -- the machine that needs explaining is
- * the one where the stack did not come up -- so every check below works off the
+ * Nothing here needs a running stack, the machine that needs explaining is
+ * the one where the stack did not come up, so every check below works off the
  * file system, the Exec device list and a throw-away OpenDevice().
  *
  * SPDX-License-Identifier: MIT
@@ -189,7 +189,7 @@ VOID tool_join_path(char *dst, ULONG dstlen, const char *dir, const char *name)
     tool_copy_string(dst + pos, dstlen - pos, name);
 }
 
-/* ------------------------------------------------------- device discovery -- */
+/* ------------------------------------------------------- device discovery, */
 
 /*
  * Where a SANA-II driver could be. DEVS:Networks is where Roadshow, AmiTCP and
@@ -253,7 +253,7 @@ const char *tool_device_where(const char *device)
     return NULL;
 }
 
-/* ----------------------------------------------------------- device probe -- */
+/* ----------------------------------------------------------- device probe, */
 
 /*
  * SANA-II drivers are told at OpenDevice() time how to move packet data, and
@@ -312,7 +312,7 @@ LONG tool_device_probe(const char *device, ULONG unit)
          * Opening proves the driver and the unit; it does not prove the card.
          * src/sana2/sana2_device.c calls S2_DEVICEQUERY straight after its own
          * open and reports a refusal as AMI_NET_ERR_DEVBAD, so ask the same
-         * question here -- otherwise a card that opens and then answers
+         * question here, otherwise a card that opens and then answers
          * nothing is reported as "opens perfectly well", which is true and
          * useless.
          */
@@ -336,17 +336,7 @@ LONG tool_device_probe(const char *device, ULONG unit)
     return status;
 }
 
-/* ---------------------------------------------------------------- output -- */
-
-/*
- * Advice prints as a block: a blank line, then lines indented two spaces under
- * the one-line complaint tool_error() has already produced. The indentation is
- * what ties it to that error on an 80-column screen.
- */
-VOID tool_advise(const char *text)
-{
-    tool_printf("  %s\n", (LONG)text);
-}
+/* ---------------------------------------------------------------- output, */
 
 /*
  * Wrap `text` to the width of a Shell window, every line indented by `indent`
@@ -411,12 +401,7 @@ VOID tool_wrap(ULONG indent, const char *text)
     }
 }
 
-VOID tool_advise_blank(VOID)
-{
-    tool_printf("\n");
-}
-
-/* ------------------------------------------------------- config reporting -- */
+/* ------------------------------------------------------- config reporting, */
 
 static UWORD diag_problem_total;
 
@@ -452,154 +437,52 @@ VOID tool_config_unwatch(VOID)
     ami_config_set_reporter(NULL, NULL);
 }
 
-/* ------------------------------------------------------------- explainers -- */
+/* ------------------------------------------------------------- explainers, */
 
 VOID tool_explain_interface_file(const char *name)
 {
-    char  path[TOOL_NAME_LEN * 2];
-    char  names[TOOL_MAX_DEVICES][TOOL_NAME_LEN];
-    ULONG n;
-    ULONG i;
+    char path[TOOL_NAME_LEN * 2];
 
     tool_join_path(path, sizeof(path), DIAG_DIR_INTERFACES, name);
-
-    tool_advise_blank();
-    tool_printf("  There is no file called %s.\n", (LONG)path);
-    tool_advise("That file is how the stack learns which network card to use");
-    tool_advise("and how it should get an address.");
-
-    if (!tool_exists(DIAG_DIR_INTERFACES))
-    {
-        tool_advise_blank();
-        tool_advise("The DEVS:NetInterfaces drawer does not exist at all, so no");
-        tool_advise("network has ever been set up on this machine.");
-    }
-    else
-    {
-        n = tool_list_dir(DIAG_DIR_INTERFACES, names,
-                          (ULONG)TOOL_MAX_DEVICES, NULL);
-        if (n > 0)
-        {
-            tool_advise_blank();
-            tool_advise("The interfaces that do exist are:");
-            for (i = 0; i < n; i++)
-                tool_printf("      %s\n", (LONG)names[i]);
-            tool_advise("Check the spelling -- the name is the file name.");
-        }
-        else
-        {
-            tool_advise_blank();
-            tool_advise("The DEVS:NetInterfaces drawer is empty.");
-        }
-    }
-
-    tool_advise_blank();
-    tool_advise("Run  NetSetup  to answer a few questions and have the file");
-    tool_advise("written for you.");
+    tool_printf("%s: %s: no such interface file\n", (LONG)tool_name, (LONG)path);
 }
 
 
 VOID tool_explain_dhcp(const char *name)
 {
-    tool_advise_blank();
-    tool_printf("  %s is up, but nothing on the network handed out an address.\n",
-                (LONG)name);
-    tool_advise_blank();
-    tool_advise("That is what DHCP means: the Amiga asks, and a server -- on a");
-    tool_advise("home network, the broadband router -- answers. Nothing did.");
-    tool_advise_blank();
-    tool_advise("Check, in this order:");
-    tool_advise("   1. the network cable, at both ends;");
-    tool_advise("   2. that the router or switch at the other end is powered on;");
-    tool_advise("   3. that something on this network hands out addresses.");
-    tool_advise_blank();
-    tool_advise("If nothing does, run  NetSetup  and choose a fixed address");
-    tool_advise("instead of DHCP.  ShowNetStatus  shows where it got to.");
+    tool_printf("%s: %s: no address from DHCP\n", (LONG)tool_name, (LONG)name);
 }
 
 VOID tool_explain_resolve(const char *name, LONG err)
 {
-    tool_advise_blank();
+    const char *why;
 
     switch (err)
     {
-        case AMI_NET_ERR_NONAME:
-            tool_printf("  The name servers were asked and none of them knows\n");
-            tool_printf("  \"%s\".\n", (LONG)name);
-            tool_advise_blank();
-            tool_advise("Check the spelling. If it is right, the name may");
-            tool_advise("simply not exist -- nothing is wrong with this");
-            tool_advise("machine's network.");
-            break;
-
-        case AMI_NET_ERR_NOSERVER:
-            tool_advise("This machine has no name server, so names cannot be");
-            tool_advise("looked up at all. Numeric addresses still work.");
-            tool_advise_blank();
-            tool_advise("Run  NetSetup  and give it one, or put");
-            tool_advise("   NAMESERVER <address>");
-            tool_advise("in DEVS:Internet/name_resolution. On a home network");
-            tool_advise("the router is usually the name server too.");
-            break;
-
-        case AMI_NET_ERR_TIMEOUT:
-            tool_advise("The name server did not answer in time.");
-            tool_advise_blank();
-            tool_advise("Either it is not reachable from here or the address");
-            tool_advise("configured for it is wrong.  ShowNetStatus  lists the");
-            tool_advise("one in use, and  ping <that address>  says whether it");
-            tool_advise("can be reached at all.");
-            break;
-
-        case AMI_NET_ERR_STATE:
-            tool_advise("The network is not running, so nothing can be looked");
-            tool_advise("up. Start it with  AddNetInterface eth0.");
-            break;
-
-        default:
-            tool_advise("ShowNetStatus reports the state of the network.");
-            break;
+        case AMI_NET_ERR_NONAME:   why = "no such name";              break;
+        case AMI_NET_ERR_NOSERVER: why = "no name server configured"; break;
+        case AMI_NET_ERR_TIMEOUT:  why = "name server did not answer"; break;
+        case AMI_NET_ERR_STATE:    why = "network not started";       break;
+        default:                   why = "lookup failed";             break;
     }
+
+    tool_printf("%s: cannot resolve \"%s\": %s\n",
+                (LONG)tool_name, (LONG)name, (LONG)why);
 }
 
 VOID tool_explain_no_stack(VOID)
 {
-    tool_advise_blank();
-
     if (tool_stack_library_running())
     {
-        ULONG addr = 0;
-        char  text[16];
-
-        tool_advise("The network itself is up -- another program has");
-        tool_advise("bsdsocket.library open -- but this command cannot read the");
-        tool_advise("details out of it.");
-
-        if (tool_stack_query(&addr, NULL, 0) && addr != 0)
-        {
-            ami_config_format_ip(addr, text, sizeof(text));
-            tool_advise_blank();
-            tool_printf("  This machine's address is %s.\n", (LONG)text);
-        }
-
-        tool_advise_blank();
-        tool_advise("The stack lives inside bsdsocket.library and there is no");
-        tool_advise("call yet that lets a separate command look inside it, so");
-        tool_advise("counters and per-interface detail are not available.");
-        tool_advise("Nothing is wrong with your network. AddNetInterface,");
-        tool_advise("Online and Offline work regardless.");
+        tool_printf("%s: the running stack does not report its state\n",
+                    (LONG)tool_name);
         return;
     }
 
-    tool_advise("Nothing has started the network yet.");
-    tool_advise_blank();
-    tool_advise("Start it with:   AddNetInterface eth0");
-    tool_advise("substituting the name of your interface file in");
-    tool_advise("DEVS:NetInterfaces. If you have not set one up,  NetSetup");
-    tool_advise("will do it for you.");
+    tool_printf("%s: network not started\n", (LONG)tool_name);
 }
 
-/* ------------------------------------------------------------ stack state -- */
+/* ------------------------------------------------------------ stack state, */
 
 BOOL tool_stack_library_running(VOID)
 {
@@ -611,7 +494,7 @@ BOOL tool_stack_library_running(VOID)
      * stack up, which a status command must not do.
      *
      * Either sign is enough. The AMITCP public message port is the conventional
-     * Amiga barrier -- src/netstack adds it when the stack comes up and removes
+     * Amiga barrier, src/netstack adds it when the stack comes up and removes
      * it on the way down, and `WaitForPort AMITCP` in S:User-Startup waits on
      * the same thing. The library's open count also counts as running, and
      * catches a stack whose port could not be added because another one already
@@ -644,7 +527,7 @@ BOOL tool_stack_library_running(VOID)
  * machine with new commands over an old library is exactly the case worth
  * reporting. Reading lib_IdString answers for the copy actually in memory.
  *
- * Looking, not opening, for the reason tool_stack_library_running() gives --
+ * Looking, not opening, for the reason tool_stack_library_running() gives,
  * a status command must not start the network as a side effect of being asked
  * a question. Copied rather than returned by pointer, because the library can
  * expunge the moment Forbid() ends and the string goes with it.
@@ -837,7 +720,7 @@ struct Library *tool_stack_start(VOID)
      * (docs/RESEARCH.md 3.3, "self-starting").
      *
      * Opening it starts the network; not closing it is how it stays up. The
-     * leaked reference is intentional -- the same one AddNetInterface's comment
+     * leaked reference is intentional, the same one AddNetInterface's comment
      * describes.
      */
     return OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
@@ -846,7 +729,7 @@ struct Library *tool_stack_start(VOID)
 /*
  * Name lookup through the running stack's own vectors. A command cannot reach
  * netstack_resolve() inside bsdsocket.library, but gethostbyname() is a
- * published entry point into the same resolver -- including name servers a DHCP
+ * published entry point into the same resolver, including name servers a DHCP
  * lease supplied, which the configuration files know nothing about.
  */
 BOOL tool_stack_lookup(const char *name, ULONG *addr_out)
@@ -994,17 +877,11 @@ ULONG tool_stack_name_servers(char out[][16], ULONG max)
 
 VOID tool_explain_foreign_stack(struct Library *base)
 {
-    tool_advise_blank();
-    tool_printf("  bsdsocket.library on this machine is \"%s\",\n",
+    tool_printf("%s: bsdsocket.library is \"%s\", not AmiNetXDuo\n",
+                (LONG)tool_name,
                 (LONG)((base != NULL && base->lib_IdString != NULL)
                            ? (const char *)base->lib_IdString
                            : "unidentified"));
-    tool_advise("which is not AmiNetXDuo's.");
-    tool_advise_blank();
-    tool_advise("Every Amiga TCP/IP stack answers to that name and only one");
-    tool_advise("can be installed at a time, so this machine is running the");
-    tool_advise("other one -- your DEVS:NetInterfaces settings belong to it,");
-    tool_advise("not to us. Remove the other stack, or use its own commands.");
 }
 
 BOOL tool_stack_query(ULONG *addr_out, char *host, ULONG hostlen)
@@ -1062,7 +939,7 @@ BOOL tool_stack_domain(char *domain, ULONG domainlen)
     /*
      * Only our own library. GetDefaultDomainName() is a Roadshow extension, so
      * on an AmiTCP-era bsdsocket.library -0x2be can be past the end of the
-     * vector table -- a guru rather than an answer, the same hazard
+     * vector table, a guru rather than an answer, the same hazard
      * aminetxduo/netstatus.h describes for its own two slots.
      */
     if (!tool_stack_is_ours(base))
@@ -1079,7 +956,7 @@ BOOL tool_stack_domain(char *domain, ULONG domainlen)
     return (BOOL)(got && domain[0] != '\0');
 }
 
-/* ----------------------------------------------------------------- usage -- */
+/* ----------------------------------------------------------------- usage, */
 
 VOID tool_usage(const char *tmpl, const char *summary)
 {
@@ -1146,7 +1023,7 @@ static LONG tool_call_netstatus_control(struct Library *base, ULONG op,
  * Not through the library's inet_ntop() / inet_pton(): those answer
  * EAFNOSUPPORT for AF_INET6 on an IPv4-only library, and one set of commands
  * serves a library built either way.  A command has to tell "::1" from a typo
- * whether the machine can route to it or not -- see the head of
+ * whether the machine can route to it or not, see the head of
  * config_text6.c.  Neither needs the library open.
  */
 VOID tool_format_ip6(const ULONG addr[4], char *buf, ULONG buflen)
@@ -1197,13 +1074,7 @@ VOID tool_explain_no_netstatus(struct Library *base)
      * lib_Revision and reports that itself before any call is made. Reaching
      * this point means a new enough library answered no.
      */
-    tool_advise_blank();
-    tool_advise("The network is up and the library is the right one, but it");
-    tool_advise("would not report on itself.");
-    tool_advise_blank();
-    tool_advise("That happens when the stack is starting or stopping and there");
-    tool_advise("is no IP instance for a moment. Try again; if it persists the");
-    tool_advise("serial debug log has what the stack said.");
+    tool_printf("%s: the stack would not report on itself\n", (LONG)tool_name);
 }
 
 struct Library *tool_netstatus_open(BOOL quiet)
@@ -1219,7 +1090,7 @@ struct Library *tool_netstatus_open(BOOL quiet)
     {
         if (!quiet)
         {
-            tool_error("the network has not been started");
+            tool_error("network not started");
             tool_explain_no_stack();
         }
         return NULL;
@@ -1236,7 +1107,7 @@ struct Library *tool_netstatus_open(BOOL quiet)
     /*
      * Required, not a nicety. These two vectors sit past everything any
      * published bsdsocket ABI names, so on somebody else's library that slot is
-     * whatever their table ends with -- possibly the (APTR)-1 terminator,
+     * whatever their table ends with, possibly the (APTR)-1 terminator,
      * possibly nothing. Jumping through it takes the machine down. The magic
      * argument protects against a future vendor defining the same offset; only
      * this check protects against a present one that has not.
@@ -1262,17 +1133,10 @@ struct Library *tool_netstatus_open(BOOL quiet)
     {
         if (!quiet)
         {
-            tool_error("the network is up, but the library running it is "
-                       "older than this command");
-            tool_advise_blank();
-            tool_printf("  LIBS:bsdsocket.library is revision %ld; this "
-                        "command needs %ld.\n",
+            tool_printf("%s: bsdsocket.library is revision %ld, need %ld\n",
+                        (LONG)tool_name,
                         (LONG)base->lib_Revision,
                         (LONG)AMI_NETSTATUS_MIN_REVISION);
-            tool_advise_blank();
-            tool_advise("The library and the commands come out of one build.");
-            tool_advise("Install them together, and reboot so the new library");
-            tool_advise("is the one in memory.");
         }
         CloseLibrary(base);
         return NULL;

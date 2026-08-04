@@ -3,7 +3,7 @@
 # WHY THIS EXISTS AT ALL, AND WHY IT IS HOST-ONLY
 #
 # The target has no MMU and cannot run Enforcer, so a stray write does not
-# fault -- it corrupts another task and surfaces later as something unrelated.
+# fault, it corrupts another task and surfaces later as something unrelated.
 # There is no crash to bisect and no sanitizer to run there.
 #
 # The parsers, though, are portable C. They can be compiled for the host under
@@ -11,7 +11,7 @@
 # the Amiga cannot provide. That is how the netdb alias-pool overflow was
 # found: the sizing pass counted a run of non-whitespace as one token while the
 # parse pass saw one token per "" pair, so `1.2.3.4 h """"..."""` wrote 29
-# pointers past a 48-byte block -- silently, on every library open, from a file
+# pointers past a 48-byte block, silently, on every library open, from a file
 # in DEVS:.
 #
 # THE REGRESSION CASE RUNS EVERY TIME. The random sweep is bounded so `ctest`
@@ -19,7 +19,7 @@
 #
 #     AMINETXDUO_FUZZ_CASES=200000 ctest -R fuzz
 #
-# Sanitizers are probed rather than assumed -- a host toolchain without them
+# Sanitizers are probed rather than assumed, a host toolchain without them
 # still configures, and says so, rather than failing the build.
 
 if(CMAKE_CROSSCOMPILING)
@@ -64,7 +64,7 @@ target_link_options(fuzz_config PRIVATE ${_fuzz_san})
 
 # The BPF filter VM, which runs programs a caller supplies over packets the
 # wire supplies. The driver deliberately runs UNVALIDATED programs, and
-# wirelen > caplen, and short buffers -- the interpreter claims to be total and
+# wirelen > caplen, and short buffers, the interpreter claims to be total and
 # this is what tests that claim rather than repeating it.
 add_executable(fuzz_bpf
     fuzz_bpf.c
@@ -84,7 +84,7 @@ target_link_options(fuzz_bpf PRIVATE ${_fuzz_san})
 
 # DEVS:Internet/passwd and .../group. Same shape as the netdb pool above: the
 # group parser sizes an arena in one pass and fills it in another, and the two
-# passes disagreed on what ends a line -- a CR-terminated file sized for one
+# passes disagreed on what ends a line, a CR-terminated file sized for one
 # line and parsed all of them.
 add_executable(fuzz_usergroup
     fuzz_usergroup.c
@@ -101,7 +101,7 @@ target_link_options(fuzz_usergroup PRIVATE ${_fuzz_san})
 # httpd's request framing: Content-Length, Transfer-Encoding and the chunked
 # decoder. The only one of these drivers whose input is chosen by whoever
 # connected to the machine rather than by a file in DEVS:, and the only parser
-# whose mistakes are silent in both directions -- a length read wrong is
+# whose mistakes are silent in both directions, a length read wrong is
 # answered correctly and leaves the rest of the body in the socket, where it is
 # parsed as the next request.
 #
@@ -186,7 +186,7 @@ set(_fuzz_nx_inc
     "${AMINETXDUO_THREADX}/common/inc")
 
 # NX_PACKET_ALIGNMENT defaults to sizeof(ULONG), and the shim makes ULONG the
-# target's 32 bits -- so the pool would align packets to 4 while this host's
+# target's 32 bits, so the pool would align packets to 4 while this host's
 # NX_PACKET holds 64-bit pointers and needs 8. Misaligned on every second
 # packet, before any datagram is parsed. On m68k, 4 is right and correct.
 set(_fuzz_nx_def
@@ -208,7 +208,7 @@ target_compile_options(fuzz_dns PRIVATE -UAMINETXDUO_IPV6 ${_fuzz_san})
 target_link_options(fuzz_dns PRIVATE ${_fuzz_san})
 
 # The DHCP client's option walk. Its parser is static, so fuzz_dhcp.c #includes
-# the translation unit rather than linking it -- the .c must NOT be listed here
+# the translation unit rather than linking it, the .c must NOT be listed here
 # as well, or it is compiled twice.
 add_executable(fuzz_dhcp
     fuzz_dhcp.c
@@ -253,16 +253,16 @@ target_link_options(fuzz_mdns PRIVATE ${_fuzz_san})
 # TLS: the record layer, the plaintext handshake, and the X.509 path.
 #
 # Every byte these parse is a byte the server chose, and all of it is parsed
-# before there is any key to authenticate it with -- so "the peer had to
+# before there is any key to authenticate it with, so "the peer had to
 # complete a handshake first" protects none of it. It is also the headline
 # feature, which means it is what a hostile host gets pointed at.
 #
 # The three drivers split the way the code does: fuzz_tls_record stops at the
 # handshake message boundary, fuzz_tls_x509 starts at the Certificate message
-# and goes down through the DER walk, and fuzz_tls_crypto -- further down, in
-# the 32-bit build -- takes the three messages that dispatch through a
+# and goes down through the DER walk, and fuzz_tls_crypto, further down, in
+# the 32-bit build, takes the three messages that dispatch through a
 # ciphersuite into NX_CRYPTO_METHOD entries. The first two list their nx_secure
-# sources explicitly rather than linking the `nx_secure` target -- that target's
+# sources explicitly rather than linking the `nx_secure` target, that target's
 # dependency chain reaches aminetxduo_common, which is AmigaOS code and does
 # not build on a host.
 #
@@ -276,8 +276,8 @@ target_link_options(fuzz_mdns PRIVATE ${_fuzz_san})
 #   The TLS 1.2 NewSessionTicket. nx_secure only parses one under
 #   NX_SECURE_TLS_TLS_1_3_ENABLED, which is off; the TLS 1.2 ticket is read by
 #   tls_resume_take_ticket() in src/tlslib/tls_resume.c, which takes a
-#   TLSConnection * and so needs tls_internal.h -- the whole AmigaOS library
-#   ABI -- on a host. docs/BACKLOG.md has the reasoning and the by-inspection
+#   TLSConnection * and so needs tls_internal.h, the whole AmigaOS library
+#   ABI, on a host. docs/BACKLOG.md has the reasoning and the by-inspection
 #   result.
 #
 #   tls_store.c's issuer-name walk, for the same reason. It calls the same
@@ -367,14 +367,14 @@ target_link_options(fuzz_tls_x509 PRIVATE ${_fuzz_san})
 
 # ---------------------------------------------------------------------------
 # TLS: the three handshake messages that dispatch through a ciphersuite into
-# the crypto -- ServerKeyExchange, CertificateVerify and Finished.
+# the crypto, ServerKeyExchange, CertificateVerify and Finished.
 #
 # 32-BIT ONLY, and not for fuzz_mdns's reason. ami_tls_crypto.c checks metadata
 # alignment with ((ULONG)crypto_metadata & 3), and
 # nx_secure_tls_process_certificate_verify.c bounds its signature with
 # ((ULONG)packet_buffer + message_length) < ((ULONG)received_signature +
 # length). ULONG is the target's 32 bits everywhere in this tree, so on an LP64
-# host both of those truncate a pointer -- and the second one is the bounds
+# host both of those truncate a pointer, and the second one is the bounds
 # check under test. tools/ci.sh's host32 stage is where this builds and runs;
 # `cmake -DCMAKE_C_FLAGS=-m32` by hand does the same.
 #
@@ -406,7 +406,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
     list(FILTER _fuzz_crypto_all EXCLUDE REGEX "self_test")
     add_library(fuzz_tls_nx_crypto STATIC ${_fuzz_crypto_all})
 
-    # The NetX Duo surface underneath, without fuzz_nxstub.c -- the executable
+    # The NetX Duo surface underneath, without fuzz_nxstub.c, the executable
     # supplies that, and a stub inside an archive would be pulled or not
     # depending on link order.
     set(_fuzz_tls_netx_src ${_fuzz_nx_src})
@@ -417,7 +417,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
     # src/crypto68k, compiled in rather than linked from the `crypto68k`
     # target: that target's dependency chain reaches aminetxduo_common and
     # therefore the NDK. Same pattern as tests/crypto68k's host tier. The
-    # portable C only -- the 68020 assembly cannot be assembled here.
+    # portable C only, the 68020 assembly cannot be assembled here.
     set(_fuzz_c68k_src
         "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_prim.c"
         "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_div.c"
@@ -505,9 +505,9 @@ add_test(NAME fuzz_dhcp_seeds
 add_test(NAME fuzz_dhcp_sweep
          COMMAND fuzz_dhcp -r 1 ${AMINETXDUO_FUZZ_CASES})
 
-# The seed set carries the backlog's chunk sizes -- the nine-hex-digit one that
+# The seed set carries the backlog's chunk sizes, the nine-hex-digit one that
 # wrapped to zero and read as a terminator, and the size line long enough to be
-# truncated into one that parsed -- so those run on every ctest.
+# truncated into one that parsed, so those run on every ctest.
 add_test(NAME fuzz_httpframe_seeds
          COMMAND fuzz_httpframe -s)
 add_test(NAME fuzz_httpframe_sweep
@@ -539,7 +539,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
     # target, not because it has anything to do with mDNS. Every case here
     # rebuilds a session, parses a certificate and can run an RSA public
     # operation and a P-256 scalar multiplication, so it is the slowest case in
-    # the set at roughly 5 ms -- AMINETXDUO_FUZZ_CASES all the same, because a
+    # the set at roughly 5 ms, AMINETXDUO_FUZZ_CASES all the same, because a
     # second knob is a second thing to remember to raise for a soak.
     add_test(NAME fuzz_tls_crypto_seeds
              COMMAND fuzz_tls_crypto -s)

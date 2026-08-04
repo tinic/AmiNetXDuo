@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- usergroup.library: the passwd and group file parsers.
+ * AmiNetXDuo, usergroup.library: the passwd and group file parsers.
  *
  * ug_db.c reads the files and calls these; the host test and the fuzz driver
  * call them directly with bytes of their own.

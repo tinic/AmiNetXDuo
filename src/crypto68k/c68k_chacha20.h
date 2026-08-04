@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- crypto68k: ChaCha20, and the RFC 8439 AEAD built from it and
+ * AmiNetXDuo, crypto68k: ChaCha20, and the RFC 8439 AEAD built from it and
  * Poly1305.  This is the TLS record path for ciphersuites 0xCCA8 and 0xCCA9.
  *
  *   Reach, first.  This client offered two ciphersuites, `0xC027` and
@@ -12,7 +12,7 @@
  *   Which AEAD is a question about this machine.  AES-GCM's GHASH is a
  *   carry-less multiply in GF(2^128) which no 68k instruction does, so
  *   nx_crypto does it bit by bit and charges 344.6 ms for 1 KB against
- *   AES-CBC's 21.9 (docs/RESEARCH.md 5.5) -- twenty times slower than the
+ *   AES-CBC's 21.9 (docs/RESEARCH.md 5.5), twenty times slower than the
  *   cipher it replaces, which would make `https` unusable.  ChaCha20 is add,
  *   rotate and exclusive-or on 32-bit words, which a 68020 is good at, and
  *   Poly1305 is 130-bit adds and a 32x32 -> 64 multiply, the one wide
@@ -72,7 +72,7 @@ typedef struct C68K_CHACHA20_STRUCT
 } C68K_CHACHA20;
 
 /*
- * `key` is 32 bytes, `nonce` 12, `counter` the initial block counter -- 0 for
+ * `key` is 32 bytes, `nonce` 12, `counter` the initial block counter, 0 for
  * RFC 8439's own test vectors and for the Poly1305 key derivation, 1 for the
  * first block of AEAD payload.
  */
@@ -98,7 +98,7 @@ VOID c68k_chacha20_keystream(C68K_CHACHA20 *ctx, UCHAR *out, ULONG length);
  *
  * Exposed so it can be checked against c68k_chacha20.S, which implements the
  * same interface in 68020 assembly.  The calls above take whichever this build
- * has -- ask with c68k_chacha20_core_is_asm() -- but the C stays compiled
+ * has, ask with c68k_chacha20_core_is_asm(), but the C stays compiled
  * either way, so a test can run both and compare.
  * tests/crypto68k/crypto68k_bulk does.
  */
@@ -108,7 +108,7 @@ VOID c68k_chacha20_core_c(const ULONG *in, ULONG *out);
 UINT c68k_chacha20_core_is_asm(VOID);
 
 
-/* ------------------------------------------------------------- the AEAD -- */
+/* ------------------------------------------------------------- the AEAD, */
 
 /*
  * RFC 8439 section 2.8: ChaCha20 from block counter 1 over the payload,
@@ -120,8 +120,8 @@ UINT c68k_chacha20_core_is_asm(VOID);
  * some number of UPDATEs over a packet chain, one CALCULATE.
  *
  *   c68k_chacha20_poly1305_initialize(ctx, key, nonce)
- *   c68k_chacha20_poly1305_associate(ctx, aad, aad_length)   -- zero or more
- *   c68k_chacha20_poly1305_encrypt(ctx, in, out, n)          -- or _decrypt
+ *   c68k_chacha20_poly1305_associate(ctx, aad, aad_length)  , zero or more
+ *   c68k_chacha20_poly1305_encrypt(ctx, in, out, n)         , or _decrypt
  *   c68k_chacha20_poly1305_tag(ctx, tag)
  *
  * No associated data may be added once the first payload byte has gone

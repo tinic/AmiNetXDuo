@@ -1,5 +1,5 @@
 /*
- * bsdsocket.library -- runtime pieces a shared library has to supply itself.
+ * bsdsocket.library, runtime pieces a shared library has to supply itself.
  *
  * An AmigaOS shared library is loaded by Exec, not by a C startup, so there is
  * no crt0 to open dos.library, no _exit, and no newlib reentrancy structure:
@@ -8,7 +8,7 @@
  *             dos.library, so the library opens it in its own init.
  *
  *   rand()    NetX Duo used to take NX_RAND from <stdlib.h> (nx_api.h's
- *             default), and newlib's rand() reaches through _impure_ptr --
+ *             default), and newlib's rand() reaches through _impure_ptr,
  *             which nothing has initialised. Pulling it in also drags
  *             lib_a-open.o, which wants _exit and takes the whole link down.
  *             NX_RAND now points at src/common/ami_random.c instead
@@ -32,7 +32,7 @@
 
 __attribute__((weak)) struct DosLibrary *DOSBase;
 
-/* --------------------------------------------------------------- rand() -- */
+/* --------------------------------------------------------------- rand(), */
 
 __attribute__((weak)) void srand(unsigned int seed)
 {
@@ -44,7 +44,7 @@ __attribute__((weak)) int rand(void)
     return ami_random_rand();
 }
 
-/* ------------------------------------------------------------- lifecycle -- */
+/* ------------------------------------------------------------- lifecycle, */
 
 /*
  * Called from bsd_lib_init(), i.e. from InitResident() on the first

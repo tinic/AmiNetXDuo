@@ -1,9 +1,9 @@
 /*
- * bsdsocket.library -- getaddrinfo / getnameinfo / freeaddrinfo / gai_strerror.
+ * bsdsocket.library, getaddrinfo / getnameinfo / freeaddrinfo / gai_strerror.
  *
  * These are the four vectors at the very end of the Roadshow LVO table
  * (0x324..0x336) and the only family-agnostic name lookup the ABI has.  They
- * ship in both build configurations -- an IPv4-only build still answers them,
+ * ship in both build configurations, an IPv4-only build still answers them,
  * just never with an AF_INET6 result.
  *
  * What AF_UNSPEC returns, and in what order.
@@ -98,7 +98,7 @@ static BOOL bsd_gai_number(const char *s, ULONG *out)
 
 /*
  * Resolve the service name. Returns an EAI_* code, or 0 with *port set in host
- * order -- the sockaddr writers do the conversion.
+ * order, the sockaddr writers do the conversion.
  */
 static LONG bsd_gai_service(const char *servname, LONG flags, LONG socktype,
                             UINT *port)
@@ -141,7 +141,7 @@ static LONG bsd_gai_service(const char *servname, LONG flags, LONG socktype,
 /*
  * Build one node. `canon` is copied into it when non-NULL; otherwise the node
  * carries no name and ai_canonname is set to `inherit`, which points into an
- * earlier node's block -- see the memory note at the top.
+ * earlier node's block, see the memory note at the top.
  */
 #ifdef AMINETXDUO_IPV6
 /*
@@ -209,7 +209,7 @@ static BsdAddrInfoNode *bsd_gai_node(LONG family, LONG socktype, LONG protocol,
 #ifdef AMINETXDUO_IPV6
     if (family == AF_INET6)
     {
-        /* No sin6_len on this NDK -- see src/bsdsocket/in6.c. */
+        /* No sin6_len on this NDK, see src/bsdsocket/in6.c. */
         node->addr.sin6.sin6_family = AF_INET6;
         node->addr.sin6.sin6_port   = (in_port_t)BSD_HTONS((UWORD)port);
         bsd_words_to_in6(addr->nxd_ip_address.v6,
@@ -245,7 +245,7 @@ static BsdAddrInfoNode *bsd_gai_node(LONG family, LONG socktype, LONG protocol,
  * netstack error -> EAI_*, the getaddrinfo() half of bsd_herrno_of()
  * (resolver.c).
  *
- * RFC 3493 6.1 requires EAI_AGAIN -- "temporary failure in name resolution" --
+ * RFC 3493 6.1 requires EAI_AGAIN, "temporary failure in name resolution",
  * and every failure here used to be reported as EAI_NONAME, so a caller that
  * retries on EAI_AGAIN never retried and a name server that was merely slow
  * looked like a name that does not exist. The backend has always told the two
@@ -521,7 +521,7 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
      * Both lookups are given the caller's break signal, so Ctrl-C reaches a
      * getaddrinfo() the way it reaches a recv(); see bsd_resolve_break() in
      * resolver.c. A break during the second lookup does not throw away what the
-     * first one found -- an answer already in hand is still an answer.
+     * first one found, an answer already in hand is still an answer.
      */
     verdict = EAI_NONAME;
 
@@ -619,7 +619,7 @@ VOID bsd_freeaddrinfo(register struct addrinfo *ai __asm("a0"),
         /*
          * ai_canonname is never freed separately: it is either inside this
          * node's own block or inside the first node's, and both go with the
-         * ami_free() below. The first node is freed first, which is fine --
+         * ami_free() below. The first node is freed first, which is fine,
          * nothing reads the name once freeaddrinfo() has started.
          */
         ami_free(ai);
@@ -786,7 +786,7 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
                  * RFC 4007 11.1: the "%zone" notation is for addresses of
                  * non-global scope. A scope_id sitting on a global address
                  * names nothing, so it is not printed even when a caller has
-                 * set one -- printing it would produce a string that parses
+                 * set one, printing it would produce a string that parses
                  * back to a destination the caller never gave.
                  *
                  * bsd_if_name_by_index() rather than the if_indextoname()

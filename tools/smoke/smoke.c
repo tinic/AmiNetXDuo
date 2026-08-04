@@ -27,7 +27,7 @@ int main(void)
     t1 = ami_millis();
     check("ami_millis tracks Delay(25)", (t1 - t0) >= 300 && (t1 - t0) <= 800);
 
-    /* ENV: -- this is what the bare Startup-Sequence used to lack. */
+    /* ENV:, this is what the bare Startup-Sequence used to lack. */
     check("SetVar ENV:", SetVar((STRPTR)"AmiNetXDuoProbe", (STRPTR)"hello", -1,
                                 GVF_GLOBAL_ONLY | LV_VAR) != 0);
     buf[0] = '\0';
@@ -40,7 +40,7 @@ int main(void)
     check("ENV: is a real assign", fh != 0);
     if (fh) Close(fh);
 
-    /* T: -- scratch space. */
+    /* T:, scratch space. */
     fh = Open((STRPTR)"T:probe.tmp", MODE_NEWFILE);
     check("T: is writable", fh != 0);
     if (fh) { FPuts(fh, (STRPTR)"t\n"); Close(fh); }

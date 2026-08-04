@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo tools -- reading the running NetX Duo instance.
+ * AmiNetXDuo tools, reading the running NetX Duo instance.
  *
  * Only ShowNetStatus and netstat need this; the rest of the tools stay clear
  * of the stack's internals.
@@ -40,7 +40,7 @@ extern "C" {
  */
 VOID tool_nx_quiet(BOOL quiet);
 
-/* ----------------------------------------------------------- snapshots -- */
+/* ----------------------------------------------------------- snapshots, */
 
 #define TOOL_MAX_IF     NX_MAX_PHYSICAL_INTERFACES
 #define TOOL_MAX_SOCK   32
@@ -67,8 +67,8 @@ typedef struct ToolIfInfo
      * the config file names: the file can be edited after the stack starts,
      * and an interface brought up by hand need never have been in it.
      *
-     * Empty when the interface has no SANA-II device -- a loopback or an
-     * unattached slot -- so an empty string is a fact, not a failure.
+     * Empty when the interface has no SANA-II device, a loopback or an
+     * unattached slot, so an empty string is a fact, not a failure.
      */
     char            nx_device[NETSTATUS_DEVICE_LEN];
     ULONG           nx_unit;
@@ -83,7 +83,7 @@ typedef struct ToolIfInfo
  * One IPv6 address of one interface, already in text.
  *
  * The text is made while the library is open, because the only RFC 5952
- * formatter on the machine is bsdsocket.library's inet_ntop() -- a command
+ * formatter on the machine is bsdsocket.library's inet_ntop(), a command
  * built from an IPv4-only tree has none of its own, and the tools are one
  * binary whichever way the library was built.
  */
@@ -140,7 +140,7 @@ typedef struct ToolSnapshot
  */
 LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets);
 
-/* -------------------------------------------------- protocol counters -- */
+/* -------------------------------------------------- protocol counters, */
 
 /*
  * The per-protocol counters and the ARP cache in one place, so ShowNetStatus
@@ -164,7 +164,7 @@ typedef struct ToolArpEntry
     UWORD   nx_index;                /* the interface it was learnt on       */
 } ToolArpEntry;
 
-/* ------------------------------------------------------- neighbours -- */
+/* ------------------------------------------------------- neighbours, */
 
 /*
  * The IPv6 half of the address cache. There is no ARP in IPv6: neighbour
@@ -327,7 +327,7 @@ LONG tool_stats(ToolStats *out);
  */
 BOOL tool_health_mark(ToolStats *out);
 
-/* --------------------------------------------------------------- DHCP -- */
+/* --------------------------------------------------------------- DHCP, */
 
 /*
  * What the server said, per interface. The lease used to be applied at
@@ -365,7 +365,7 @@ typedef struct ToolDhcp
  */
 LONG tool_dhcp(ToolDhcp *out);
 
-/* ------------------------------------------------------------- routes -- */
+/* ------------------------------------------------------------- routes, */
 
 #define TOOL_MAX_ROUTE  8
 
@@ -385,7 +385,7 @@ typedef struct ToolRoutes
     BOOL        truncated;
     /*
      * FALSE when NX_ENABLE_IP_STATIC_ROUTING is not in the running stack's
-     * build -- the directly-attached prefixes and the default gateway are
+     * build, the directly-attached prefixes and the default gateway are
      * still reported and are still real, but there is no table to add to.
      */
     BOOL        static_routing;
@@ -396,7 +396,7 @@ LONG tool_routes(ToolRoutes *out);
 /*
  * The IPv6 routes: the on-link prefixes and the default routers, in the order
  * the stack consults them. Separate from ToolRoutes because IPv6 has no
- * netmask and no single default gateway -- there may be several default
+ * netmask and no single default gateway, there may be several default
  * routers, each with its own lifetime.
  *
  * Text rather than words, for ToolAddr6Info's reason.

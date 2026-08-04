@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- SANA-II device interface definitions.
+ * AmiNetXDuo, SANA-II device interface definitions.
  *
  * The m68k-amigaos-gcc NDK that this project builds against ships no
  * <devices/sana2.h>, so the interface is restated here from the published

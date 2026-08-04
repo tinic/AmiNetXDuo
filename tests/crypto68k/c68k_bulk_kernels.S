@@ -1,13 +1,13 @@
-| AmiNetXDuo -- instruction-cost kernels for the AES and SHA-256 work.
+| AmiNetXDuo, instruction-cost kernels for the AES and SHA-256 work.
 |
 | WHY THESE EXIST SEPARATELY FROM tests/perf/cpucal
 |
 |   cpucal answers "is this emulator charging for the instructions a real
 |   68020 charges for", and its kernels are the ones whose costs the
 |   MC68020UM publishes: MOVE, ADD, ADDX, MULU, and the memory sweeps.  The
-|   bulk crypto work turns on a different set -- rotates by an immediate
+|   bulk crypto work turns on a different set, rotates by an immediate
 |   count, SWAP, byte moves between registers, and the 68020's scaled indexed
-|   addressing mode -- and the design questions in src/crypto68k/c68k_aes.h
+|   addressing mode, and the design questions in src/crypto68k/c68k_aes.h
 |   and c68k_sha256.h are decided by their relative costs.
 |
 |   Written in assembly for the same reason cpucal's are: a C loop that
@@ -20,7 +20,7 @@
 |                                  column.  ROR.L takes an immediate count of
 |                                  1..8 only; anything larger is either two
 |                                  rotates, a SWAP and one rotate, or a count
-|                                  in a data register -- and this is what says
+|                                  in a data register, and this is what says
 |                                  which of the three to reach for.
 |   idx1k / idx4k                  the AES table read.  Identical costs is
 |                                  the whole argument for four tables over
@@ -31,7 +31,7 @@
 |   ic32 .. ic2048                 the instruction cache.  It is 256 bytes on
 |                                  this part, so a straight-line body larger
 |                                  than that costs more per instruction than
-|                                  the same body wrapped in a loop -- which is
+|                                  the same body wrapped in a loop, which is
 |                                  the limit on how far an AES round or a
 |                                  SHA-256 block may be unrolled.
 |
@@ -105,7 +105,7 @@ _bk_\name:
 | them are somewhere else at any moment and the question is where.  A spill to
 | the stack is MOVE.L Dm,d16(An) out and MOVE.L d16(An),Dm back, which the
 | rows above price at 8.8 and 5.0; an address register is a third home, and
-| EXG Dn,An is the exchange the schedule actually wants -- one instruction that
+| EXG Dn,An is the exchange the schedule actually wants, one instruction that
 | retires a live word and produces the next one in the same data register.
 |
 | These three rows decide src/crypto68k/c68k_chacha20.S's register allocation.
@@ -149,7 +149,7 @@ _bk_\name:
 | ADD.L and one ADDX.L per product and nothing else prices it.
 |
 | The multiplicand is d4 and the product overwrites d5:d4, so d4 walks a
-| pseudo-random sequence rather than settling -- both seeds are odd and an odd
+| pseudo-random sequence rather than settling, both seeds are odd and an odd
 | product stays odd, so it never reaches zero and no early-out in the model
 | can flatter the row.
 | ---------------------------------------------------------------------------

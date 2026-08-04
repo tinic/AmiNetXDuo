@@ -1,5 +1,5 @@
 /*
- * The tests for src/tools/httppath.c -- the one part of the WebDAV server
+ * The tests for src/tools/httppath.c, the one part of the WebDAV server
  * that decides whether a request can reach a file outside the document root.
  *
  * WHY THIS IS A TEST AND NOT A REVIEW
@@ -13,7 +13,7 @@
  *   somebody boots an Amiga.
  *
  *   Three of the destructive primitives live in that file for the same
- *   reason -- joining a child onto a walked path, backing up one level, and
+ *   reason, joining a child onto a walked path, backing up one level, and
  *   asking whether one path is inside another.  A walk that appends the
  *   wrong separator deletes the parent, and the containment test is what
  *   both a lock and a COPY-into-itself check are made of.
@@ -143,7 +143,7 @@ static void test_device_escape(void)
     CHECK(refused("/Docs/RAM:secret") == HTTP_PATH_DEVICE);
     CHECK(refused("/Docs/DH0:/x") == HTTP_PATH_DEVICE);
 
-    /* A colon anywhere in a segment, not only at its end -- "a:b" is still a
+    /* A colon anywhere in a segment, not only at its end, "a:b" is still a
        device reference to AmigaDOS. */
     CHECK(refused("/a:b") == HTTP_PATH_DEVICE);
     CHECK(refused("/x/a:b/y") == HTTP_PATH_DEVICE);
@@ -174,7 +174,7 @@ static void test_parent_escape(void)
     /*
      * The doubly-awkward one: an encoded SEPARATOR next to an encoded parent.
      * Decoding first turns %2F into a real separator, which can only ever
-     * create more segments -- and every segment is checked, so the ".." it was
+     * create more segments, and every segment is checked, so the ".." it was
      * hiding is found rather than smuggled through as one long name.
      */
     CHECK(refused("/a%2F..%2Fsecret") == HTTP_PATH_PARENT);
@@ -327,7 +327,7 @@ static void test_root_is_identifiable(void)
 /*
  * COPY and MOVE take the other end of the operation in a header rather than
  * on the request line, and it is an absolute URI.  It goes through this same
- * function, and these are the shapes clients send -- a Destination given its
+ * function, and these are the shapes clients send, a Destination given its
  * own decoder is exactly the mistake this file exists to make impossible, so
  * every escape is asserted here too and not only on the request line.
  */
@@ -374,7 +374,7 @@ static void test_destination_forms(void)
     CHECK(refused("http://amiga.local/%zz") == HTTP_PATH_BAD_ESCAPE);
 
     /* A Destination that is only an authority is the root, which the server
-       refuses to overwrite -- but it must resolve rather than fall through as
+       refuses to overwrite, but it must resolve rather than fall through as
        a relative path. */
     CHECK(http_path_resolve("Work:Public", "http://amiga.local", &p) ==
           HTTP_PATH_OK);
@@ -475,7 +475,7 @@ static void test_long_name_refused(void)
 
 /*
  * The document root is the one path a server does not resolve, so the
- * doubled-slash rule has to be applied to it separately -- and "Work:Public/"
+ * doubled-slash rule has to be applied to it separately, and "Work:Public/"
  * is what a person types when the drawer requester put a separator on the end.
  */
 static void test_root_trimmed(void)
@@ -609,7 +609,7 @@ static void test_join(void)
 
     /* A device root already carries its separator.  "RAM:/foo" is the root
        DIRECTORY of the volume and not the drawer, which is a different
-       place -- and "RAM://foo" is somewhere else again. */
+       place, and "RAM://foo" is somewhere else again. */
     strcpy(path, "RAM:");
     CHECK(http_path_join(path, sizeof(path), "foo") == 1);
     CHECK_STR(path, "RAM:foo");
@@ -641,7 +641,7 @@ static void test_join(void)
     CHECK(http_path_join(path, sizeof(path), "") == 0);
     CHECK_STR(path, "RAM:Docs");
 
-    /* It does not fit, so it does not happen -- and the path is still the
+    /* It does not fit, so it does not happen, and the path is still the
        path it was, because the walk carries on using it. */
     {
         char tiny[16];
@@ -667,7 +667,7 @@ static void test_up(void)
     CHECK_STR(path, "Work:");
 
     /* A device reference has nothing above it, and going up from it for ever
-       must not empty the string -- a walk that did would then delete
+       must not empty the string, a walk that did would then delete
        whatever the current directory happens to be. */
     http_path_up(path);
     CHECK_STR(path, "Work:");

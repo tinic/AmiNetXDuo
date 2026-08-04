@@ -25,8 +25,8 @@ if(NOT CMAKE_CROSSCOMPILING OR NOT AMINETXDUO_PROFILER)
     return()
 endif()
 
-# prof_vector.S needs no arch flags -- MOVEC is hand-encoded there precisely so
-# this file assembles for the 68000 profile too -- but pass them anyway so the
+# prof_vector.S needs no arch flags, MOVEC is hand-encoded there precisely so
+# this file assembles for the 68000 profile too, but pass them anyway so the
 # object matches the rest of the build.
 add_library(aminetxduo_prof STATIC prof.c prof_vector.S)
 target_include_directories(aminetxduo_prof PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")

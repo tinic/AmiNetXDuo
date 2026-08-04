@@ -32,14 +32,14 @@
 #   Hyperion's 2021 SDK, and it renamed some long-standing types (`struct
 #   timerequest` -> `struct TimeRequest`, and so on) while keeping the old
 #   names as aliases.  Neither published amigadev/crosstools m68k tag carries
-#   it -- the build selects the NDK with `make NDK=3.9` -- so pinning a 3.2
+#   it, the build selects the NDK with `make NDK=3.9`, so pinning a 3.2
 #   toolchain would mean building and hosting one ourselves.  The sources are
 #   written to the spellings both NDKs accept instead, which costs nothing and
 #   lets anyone build the tree with whichever NDK their toolchain shipped.
 #
 # TWO SOURCES, IN ORDER
 #
-#   1. OUR MIRROR -- a release asset on this repository:
+#   1. OUR MIRROR, a release asset on this repository:
 #
 #        github.com/tinic/AmiNetXDuo/releases/tag/toolchain-m68k-amigaos-gcc-15.2.0
 #
@@ -52,7 +52,7 @@
 #      so the corresponding-source directions required by GPLv3 6(d) are in
 #      the release body.  If the asset is ever re-cut, they go with it.
 #
-#   2. THE UPSTREAM REGISTRY -- the original image layer, if the mirror
+#   2. THE UPSTREAM REGISTRY, the original image layer, if the mirror
 #      cannot be reached.  We do not pull the image; the whole thing is
 #      1.2 GB, of which the toolchain is one layer (the `COPY
 #      /opt/m68k-amigaos` step).  That layer is fetched straight from the
@@ -80,7 +80,7 @@
 #       <cache>/<digest12>/        the extracted tree
 #       <cache>/current            symlink to it
 #
-#   <digest12> is the upstream layer digest either way -- it names the
+#   <digest12> is the upstream layer digest either way, it names the
 #   toolchain, not the route we took to get it.
 #
 #   cmake/toolchain-m68k-amigaos.cmake and tools/amiga-toolchain.sh both look
@@ -165,7 +165,7 @@ if [ "$MODE" = "printsha" ]; then
 fi
 
 # Answers "does the toolchain I am about to build with still have the crt0 bug"
-# for a tree this script did not install -- a hand-built toolchain, or one from
+# for a tree this script did not install, a hand-built toolchain, or one from
 # before the repair existed.  Exits non-zero if any crt0.o is still broken.
 #
 # A toolchain whose ____start and exit both keep no frame never had the bug --
@@ -253,8 +253,8 @@ ARCHIVE="$TMP/toolchain.tar.compressed"
 fetch_mirror() {
     say "    mirror $TC_MIRROR_URL"
 
-    # curl's own diagnostic is worth keeping -- "404" and "connection refused"
-    # are different problems -- but --retry repeats it, so keep the last line
+    # curl's own diagnostic is worth keeping, "404" and "connection refused"
+    # are different problems, but --retry repeats it, so keep the last line
     # only and say once what we are going to do about it.
     if ! curl -fsSL --retry 3 --retry-connrefused --retry-delay 2 \
               --connect-timeout 20 "$TC_MIRROR_URL" -o "$ARCHIVE" 2>"$TMP/curl.err"; then
@@ -267,7 +267,7 @@ fetch_mirror() {
 
     # xz support is not universal: GNU tar shells out to the xz binary, bsdtar
     # has liblzma built in.  The hash already passed, so a failure here is this
-    # machine's tooling, not the payload -- exactly the case where falling back
+    # machine's tooling, not the payload, exactly the case where falling back
     # to the gzipped layer is the right answer.
     if ! extract_archive; then
         say "    !! cannot unpack .tar.xz here (no xz?)"
@@ -344,7 +344,7 @@ esac
 
 # The libnix crt0.o in this image saves three registers at _start and restores
 # four at ___exit, so every command built with it dies the moment it returns to
-# the Shell.  It is repaired HERE, once, before the tree is installed -- not in
+# the Shell.  It is repaired HERE, once, before the tree is installed, not in
 # every link line downstream.  There are four affected crt0.o files, one per
 # CPU multilib, which is a second reason a per-target workaround was the wrong
 # shape.  tools/fix-toolchain-crt0.py says what the bug is and why this is the

@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the bpf_* raw packet path: capture channels plus a Berkeley
+ * AmiNetXDuo, the bpf_* raw packet path: capture channels plus a Berkeley
  * packet filter interpreter.
  *
  * Two halves that only meet at one place (the tap):
@@ -20,13 +20,13 @@
  * SANA-II is cooked (docs/RESEARCH.md 3.4): the device owns the link header.
  * The two directions are therefore not symmetric:
  *
- *   RX -- src/sana2/sana2_rx.c has already synthesised a 14-byte Ethernet
+ *   RX, src/sana2/sana2_rx.c has already synthesised a 14-byte Ethernet
  *         header from ios2_DstAddr / ios2_SrcAddr / ios2_PacketType by the
  *         time the frame reaches ami_sana2_rx_deliver(). Tapped there, the
  *         frame is already what a DLT_EN10MB consumer expects, in one
  *         contiguous run, and the filter reads it in place with no copy.
  *
- *   TX -- in cooked mode no Ethernet header is ever built; the wire buffer
+ *   TX, in cooked mode no Ethernet header is ever built; the wire buffer
  *         starts at the IP or ARP header. ami_bpf_tap_tx() synthesises the 14
  *         bytes itself, from the same three facts SANA-II is about to be given
  *         (ios2_PacketType, ios2_DstAddr, and our own MAC as the source), and
@@ -87,7 +87,7 @@ extern "C" {
  * over 4.4BSD's @(#)bpf.h 8.2 1/9/95). Structurally identical; on a 64-bit host
  * `struct bpf_hdr` gets two bytes of tail padding that the 68k struct does not
  * have, which is one reason nothing in the implementation uses
- * sizeof(struct bpf_hdr) -- see AMI_BPF_HDR_BYTES below.
+ * sizeof(struct bpf_hdr), see AMI_BPF_HDR_BYTES below.
  */
 
 #define BPF_ALIGNMENT       ((ULONG)sizeof(LONG))
@@ -242,7 +242,7 @@ struct bpf_insn {
 
 #define BPF_MEMWORDS    16
 
-#else /* !AMI_BPF_REPLICA -- the real thing */
+#else /* !AMI_BPF_REPLICA, the real thing */
 
 /*
  * Include order matters here, in two ways.
@@ -297,7 +297,7 @@ struct bpf_insn {
 /*
  * Measured 2026-07-24 with m68k-amigaos-gcc 15.2.0 -m68020 against the NDK
  * <net/bpf.h>. On 68k a struct is 2-byte aligned, so `struct bpf_hdr` is 18
- * bytes -- 8 for the timeval, 4 + 4 for the two lengths, 2 for bh_hdrlen --
+ * bytes, 8 for the timeval, 4 + 4 for the two lengths, 2 for bh_hdrlen,
  * and BPF_WORDALIGN rounds the header to 20, leaving two pad bytes before the
  * captured data. Consumers step to the next record with
  * BPF_WORDALIGN(bh_hdrlen + bh_caplen) and read the data at record +
@@ -470,8 +470,8 @@ VOID ami_bpf_cleanup(VOID);
 /*
  * Claim a channel: 0..AMI_BPF_MAX_CHANNELS-1 for a particular one, negative
  * for any free one. Returns the channel claimed, AMI_BPF_ENXIO if the number
- * is out of range, or AMI_BPF_EBUSY if that channel -- or, for the negative
- * form, every channel -- is already open. A channel captures nothing until
+ * is out of range, or AMI_BPF_EBUSY if that channel, or, for the negative
+ * form, every channel, is already open. A channel captures nothing until
  * BIOCSETIF.
  *
  * Roadshow's libpcap is the reference client for the negative form: it calls
@@ -549,8 +549,8 @@ LONG ami_bpf_data_waiting(APTR owner, LONG channel);
 /*
  * How many channels are currently bound to an interface, i.e. whether tapping
  * is worth any preparation. The two taps below check this themselves; this is
- * for a caller that has to build something -- a scatter view over a packet
- * chain -- before it can call one.
+ * for a caller that has to build something, a scatter view over a packet
+ * chain, before it can call one.
  */
 UWORD ami_bpf_capturing(VOID);
 
@@ -576,7 +576,7 @@ LONG ami_bpf_attach_interface(const char *name, APTR cookie, ULONG dlt,
 /*
  * What address the interface behind `cookie` has right now, host order, or 0
  * if it has none. Asked rather than stored: a DHCP lease changes it, and a
- * copy taken at attach would be stale the moment it did -- and every future
+ * copy taken at attach would be stale the moment it did, and every future
  * path that moves an address would have to remember to update it.
  */
 typedef ULONG (*AmiBpfAddrFn)(APTR cookie);
@@ -590,7 +590,7 @@ VOID ami_bpf_detach_interface(APTR cookie);
 
 /*
  * The two calls src/sana2/ has to add. Both are no-ops when no channel is
- * capturing on that interface -- a load, a compare and a return.
+ * capturing on that interface, a load, a compare and a return.
  *
  * 1. Receive. In src/sana2/sana2_rx.c, at the top of ami_sana2_rx_deliver(),
  *    before the length check and before the link header is stripped:

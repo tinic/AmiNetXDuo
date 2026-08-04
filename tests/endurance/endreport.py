@@ -6,7 +6,7 @@
 A multi-hour run produces a few hundred rows and the question asked of them is
 never "what was the value" but "did it move".  A leak, a fragmenting heap and a
 packet pool that never comes back are all *trends*, and all three look like
-noise in any single row -- docs/RESEARCH.md 24.9 already records one 291 KB
+noise in any single row, docs/RESEARCH.md 24.9 already records one 291 KB
 AvailMem drop that was a library loading and not a leak.
 
 So this prints, for every column that can only be read as a trend, the first

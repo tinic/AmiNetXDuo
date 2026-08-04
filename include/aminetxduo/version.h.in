@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo version -- GENERATED.  Edit include/aminetxduo/version.h.in.
+ * AmiNetXDuo version, GENERATED.  Edit include/aminetxduo/version.h.in.
  *
  * The one product version lives in project(AmiNetXDuo VERSION ...) in the
  * root CMakeLists.txt; the NetX Duo and ThreadX versions are read out of the
@@ -54,7 +54,7 @@
  *
  * ONE version for the whole project, not one per command. AmigaOS's `Version`
  * reads $VER: out of the file, so this is all `version full file C:ping` has
- * to go on -- and what it used to find was "ping 3.0 (26.7.2026)", a number
+ * to go on, and what it used to find was "ping 3.0 (26.7.2026)", a number
  * private to ping and a date typed by whoever last edited it. Nothing said
  * which AmiNetXDuo release the file came from, which made keeping track of an
  * installation error-prone. A user reported exactly that.
@@ -66,7 +66,7 @@
  *   ping 0.16.1 (1.8.2026) AmiNetXDuo f75f058
  *
  * "AmiNetXDuo" is in there because Roadshow ships commands with these exact
- * names -- AddNetInterface, ping, arp, netstat -- and its own tags say only
+ * names, AddNetInterface, ping, arp, netstat, and its own tags say only
  * "AddNetInterface 4.62 (27.8.2023)". On a machine that has had both, the
  * product name is the only thing that tells the two apart. Same placement
  * Roadshow uses for its library: after the date, where `Version` prints it.

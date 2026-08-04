@@ -471,7 +471,7 @@ UINT                                  message_length;
            partially explicit nonce the GCM and CCM suites do: there is no
            nonce_explicit on the wire, and the per-record nonce is the
            twelve-byte write IV exclusive-ored with the sequence number padded
-           on the left -- the TLS 1.3 construction, arrived at two years
+           on the left, the TLS 1.3 construction, arrived at two years
            earlier.  The additional data stays TLS 1.2's thirteen bytes.
 
            The record is therefore eight bytes shorter than a GCM one and this

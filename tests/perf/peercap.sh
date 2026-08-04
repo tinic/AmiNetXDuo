@@ -13,15 +13,15 @@
 #   The number wanted is how many of the peer's segments it had to send twice,
 #   and the peer is where that is exact: it is the sender, so its own egress
 #   is the whole population, no inference and nothing on the Amiga.  A capture
-#   at the emulator's bridge would answer a different question -- what
-#   arrived -- and would need the guest to be instrumented to answer this one.
+#   at the emulator's bridge would answer a different question, what
+#   arrived, and would need the guest to be instrumented to answer this one.
 #
 # WHAT IS COLLECTED
 #
 #   - a pcap of the fitz port.  -s 96 is deliberate: every IPv4 TCP header
 #     fits in 74 bytes, the payload is not read, and a full-length capture of
 #     a 4 MB transfer is 40 MB of disk for nothing.  Payload LENGTHS come from
-#     the IP header, which is not truncated -- a short snaplen has previously
+#     the IP header, which is not truncated, a short snaplen has previously
 #     been misread as short segments and sent an investigation the wrong way.
 #   - an `ss -tim` poll of the same socket, because rwnd_limited,
 #     sndbuf_limited and app_limited cannot be inferred from a capture at all.
@@ -50,7 +50,7 @@ peercap_start() {
     [ -n "$peer" ] || { echo "peercap: no peer, not capturing" >&2; return 1; }
     mkdir -p "$outdir"
     # The poll interval is 50 ms.  It is not a sampling rate for anything
-    # timed -- the capture carries the timing -- it just has to be short
+    # timed, the capture carries the timing, it just has to be short
     # enough that the read phases contain samples at all.
     ssh "$peer" "
         rm -f $PEERCAP_TMP/peercap-$tag.pcap $PEERCAP_TMP/peercap-$tag.ss

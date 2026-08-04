@@ -1,11 +1,11 @@
 /*
- * Online / Offline -- switch a network interface up or down.
+ * Online / Offline, switch a network interface up or down.
  *
  *     Online  NAME/A,UNIT/N,TIMEOUT/N
  *
  * NAME is either a configured interface or a SANA-II driver. Commands like
- * these are usually given a driver and a unit -- "Offline a2065.device UNIT 0"
- * -- since that is the level at which a driver can be switched off to run
+ * these are usually given a driver and a unit, "Offline a2065.device UNIT 0"
+ * since that is the level at which a driver can be switched off to run
  * hardware diagnostics. What this stack acts on is a configured interface: a
  * file in DEVS:NetInterfaces naming a driver and a unit, which is the handle
  * ShowNetStatus prints, AddNetInterface takes, and the netstack indexes by.
@@ -22,8 +22,8 @@
  *      may be a card installed, but nothing here has been told to use it,
  *      so there is nothing to switch.
  *
- * A name that is both -- an interface file called the same thing as a driver
- * -- is taken as the interface, and says so.
+ * A name that is both, an interface file called the same thing as a driver
+ * is taken as the interface, and says so.
  *
  * TIMEOUT is how many seconds to wait for the interface to reach the state
  * that was asked for, with 0 meaning wait for as long as it takes; Ctrl-C
@@ -95,9 +95,6 @@ static BOOL load_interface(const char *name, AmiIfConfig *ifc, BOOL loud)
     {
         tool_error("DEVS:NetInterfaces/%s cannot be used as it stands",
                    (LONG)name);
-        tool_advise_blank();
-        tool_advise("Fix the line named above, or run  NetSetup  to write the");
-        tool_advise("file from scratch.");
     }
 
     return FALSE;
@@ -164,9 +161,6 @@ static VOID explain_unknown_name(const char *given, ULONG unit, BOOL had_unit)
 
         if (listed++ == 0)
         {
-            tool_advise_blank();
-            tool_advise("A name is either an interface or the driver one uses.");
-            tool_advise("This machine has:");
         }
 
         tool_printf("      %-15s %s unit %ld\n", (LONG)names[i],
@@ -179,9 +173,6 @@ static VOID explain_unknown_name(const char *given, ULONG unit, BOOL had_unit)
         return;
     }
 
-    tool_advise_blank();
-    tool_advise("Either column works as the name; a driver that no interface");
-    tool_advise("uses has nothing here to switch, even when the card is installed.");
 }
 
 /* ------------------------------------------------- the running stack -----
@@ -249,7 +240,7 @@ static LONG live_index(struct Library *base, const char *name, BOOL *online)
 /*
  * Wait for the interface to reach the state that was asked for, reading the
  * live stack each time round. `seconds` 0 waits for as long as it takes.
- * FALSE means the time ran out, or -- with *broken set -- that Ctrl-C was
+ * FALSE means the time ran out, or, with *broken set, that Ctrl-C was
  * pressed.
  */
 static BOOL wait_for_live_state(struct Library *base, const char *name,
@@ -310,10 +301,6 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
     {
         tool_error("%s is configured but the running stack has no such "
                    "interface", (LONG)name);
-        tool_advise_blank();
-        tool_advise("The network was started before this interface file was");
-        tool_advise("written, or with a different one. AddNetInterface adds an");
-        tool_advise("interface to a stack that is already running.");
         tool_netstatus_close(base);
         FreeArgs(rda);
         return RETURN_ERROR;
@@ -408,8 +395,8 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
 
 /*
  * Wait for the interface to reach the state that was asked for. `seconds` 0
- * waits for as long as it takes. FALSE means the time ran out, or -- with
- * *broken set -- that Ctrl-C was pressed.
+ * waits for as long as it takes. FALSE means the time ran out, or, with
+ * *broken set, that Ctrl-C was pressed.
  */
 static BOOL wait_for_state(LONG index, BOOL want_up, ULONG seconds,
                            BOOL *broken)
@@ -490,9 +477,6 @@ int main(int argc, char **argv)
         {
             tool_error("%s is %s unit %ld, and unit %lu was asked for",
                        (LONG)name, (LONG)ifc.device, (LONG)ifc.unit, unit);
-            tool_advise_blank();
-            tool_advise("The unit an interface uses is set in its file, in");
-            tool_advise("DEVS:NetInterfaces. Leave UNIT off to use that one.");
             FreeArgs(rda);
             return RETURN_ERROR;
         }
@@ -565,9 +549,6 @@ int main(int argc, char **argv)
 
                 if (!tool_stack_installed())
                 {
-                    tool_advise_blank();
-                    tool_advise("bsdsocket.library is not installed. The network");
-                    tool_advise("stack lives in that library and belongs in LIBS:.");
                 }
                 else
                 {

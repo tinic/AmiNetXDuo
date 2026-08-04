@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- host fuzz driver for the X.509 certificate path.
+ * AmiNetXDuo, host fuzz driver for the X.509 certificate path.
  *
  * A certificate is the largest thing a TLS client parses before it has any
  * reason to trust the sender, and the only one whose grammar is recursive.
@@ -7,7 +7,7 @@
  * nesting level subtracts one from another, and the walk is done with UINT
  * arithmetic that wraps. Chain verification happens after all of it. With no
  * MMU, a length that underflows in the middle of that walk is not a crashed
- * process -- it is a read, and then a memcpy, wherever the arithmetic landed.
+ * process, it is a read, and then a memcpy, wherever the arithmetic landed.
  *
  * WHAT IS DRIVEN
  *
@@ -23,7 +23,7 @@
  * _nx_secure_x509_common_name_dns_check() (tls_conn.c calls it with the
  * hostname), extension_find, key usage, extended key usage, subject alt names,
  * expiration, distinguished name compare. Those run ONLY after a successful
- * parse -- their callers only ever see a parsed certificate, and driving them
+ * parse, their callers only ever see a parsed certificate, and driving them
  * on a half-filled struct reports null dereferences the wire cannot produce.
  * That is not hypothetical: an earlier version of this driver called
  * subject_alt_names_find() on a zeroed extension and UBSan duly complained
@@ -32,8 +32,8 @@
  * THE TWO LENGTH CONTRACTS, WHICH ARE NOT THE SAME
  *
  *   fx_parse()   allocates exactly the DER's length. That is the contract
- *                _nx_secure_x509_certificate_parse() states -- it is given a
- *                buffer and a length and must not read past it -- so anything
+ *                _nx_secure_x509_certificate_parse() states, it is given a
+ *                buffer and a length and must not read past it, so anything
  *                beyond is a real over-read whatever the caller's buffer
  *                happens to be padded with.
  *
@@ -70,7 +70,7 @@
 
 /*
  * tls_test_certs.h also carries the leaf's private key, which tls_handshake.c
- * needs for its server side and this driver does not -- a private key is not
+ * needs for its server side and this driver does not, a private key is not
  * something a peer supplies. GCC's -Wunused-variable would fail the build over
  * the two symbols, so the push/pop is around the include alone; everything
  * below the pop is under the full set.
@@ -92,8 +92,8 @@ TX_MUTEX _nx_secure_tls_protection;
  * _nx_secure_x509_asn1_tlv_block_parse() reads buffer[0] one statement before
  * it tests *buffer_length < 1, so every caller that reaches the end of its
  * data with nothing left over-reads by one byte. It is reachable from the wire
- * -- a two-byte certificate through _nx_secure_x509_certificate_parse() gets
- * there -- and from tls_store.c's issuer walk, which calls the same function
+ * a two-byte certificate through _nx_secure_x509_certificate_parse() gets
+ * there, and from tls_store.c's issuer walk, which calls the same function
  * with whatever is left. Found by this driver at FX_KNOWN_SLOP 0, and fixed on the fork; recorded in
  * docs/BACKLOG.md; the fix is to move the test above the read, in nx_secure.
  *
@@ -103,8 +103,8 @@ TX_MUTEX _nx_secure_tls_protection;
  */
 #define FX_KNOWN_SLOP       0
 
-/* tls_internal.h's TLS_DEFAULT_RECORD_BUFFER. Not included from there --
-   tls_internal.h pulls in exec/types.h and the AmigaOS library ABI -- so it is
+/* tls_internal.h's TLS_DEFAULT_RECORD_BUFFER. Not included from there,
+   tls_internal.h pulls in exec/types.h and the AmigaOS library ABI, so it is
    restated, and it is the size tls_conn.c actually allocates. */
 #define FX_RECORD_BUFFER    10240
 
@@ -449,7 +449,7 @@ static void fx_parse(const unsigned char *der, unsigned len)
 
 /* The chain verify a real session would do needs the crypto table and a
    trusted root. Answering NX_SUCCESS here is "the chain checked out", which is
-   the branch that continues into the endpoint copy -- the part of
+   the branch that continues into the endpoint copy, the part of
    _nx_secure_tls_process_remote_certificate() that moves attacker bytes. */
 static UINT fx_verify_ok(NX_SECURE_X509_CERTIFICATE_STORE *store,
                          NX_SECURE_X509_CERT *certificate, ULONG current_time)
@@ -508,7 +508,7 @@ static void fx_message(const unsigned char *der, unsigned len, unsigned chain,
     /*
      * The three buffer fields are set here rather than through
      * _nx_secure_tls_session_packet_buffer_set(), which rounds the pointer by
-     * casting it to a ULONG -- the target's pointer width, and not this
+     * casting it to a ULONG, the target's pointer width, and not this
      * host's. original_size matters: _nx_secure_tls_remote_certificate_free_all()
      * restores size from it before the endpoint is copied, and leaving it zero
      * underflows cert_buf_size into a wild memset that is the harness's fault
@@ -540,8 +540,8 @@ static void fx_run(const unsigned char *der, unsigned len, unsigned chain,
 /*
  * Proof that the driver reaches the parser.
  *
- * A driver that stopped at the outer SEQUENCE -- a length that never cleared,
- * a struct rejected on its first field -- would report "clean" for every input
+ * A driver that stopped at the outer SEQUENCE, a length that never cleared,
+ * a struct rejected on its first field, would report "clean" for every input
  * and read as coverage. So the sample leaf certificate is parsed at startup
  * and the fields it must have filled are checked: the whole DER consumed, an
  * RSA public key recognised, a common name found in the subject, and the
@@ -615,8 +615,8 @@ static unsigned fx_below(unsigned n)
 }
 
 /*
- * Aimed at DER's structure bytes -- a tag, a length, a long-form length count
- * -- rather than at the payload. A flipped byte in a modulus changes a key
+ * Aimed at DER's structure bytes, a tag, a length, a long-form length count
+ * rather than at the payload. A flipped byte in a modulus changes a key
  * nobody uses here; a flipped length byte changes where the next TLV starts
  * and how much of the buffer the rest of the walk believes it has.
  */

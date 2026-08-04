@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the BPF filter interpreter.
+ * AmiNetXDuo, the BPF filter interpreter.
  *
  * A classic Berkeley packet filter VM: accumulator A, index register X,
  * BPF_MEMWORDS words of scratch, eight instruction classes, and a return value
@@ -117,7 +117,7 @@ static BOOL ami_bpf_load(const AmiBpfView *view, ULONG off, UWORD size,
         return TRUE;
     }
 
-    /* Straddles a segment boundary -- only possible on the transmit path,
+    /* Straddles a segment boundary, only possible on the transmit path,
        between the synthesised link header and the packet payload. */
     value = 0;
     for (i = 0; i < size; i++)

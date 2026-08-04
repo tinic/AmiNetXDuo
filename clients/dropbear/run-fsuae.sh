@@ -9,7 +9,7 @@
 #   -A  Amiberry instead of FS-UAE, which is what a headless box needs: FS-UAE
 #       wants an X server and dies in GLAD before the guest boots.  Its slirp
 #       is the same 10.0.2.0/24 with the host at 10.0.2.2, so the target does
-#       not move.  NOT a timing lane -- -x is FS-UAE's.
+#       not move.  NOT a timing lane, -x is FS-UAE's.
 #
 #   -x  take the emulator alone (tools/fsuae-run.sh's measurement lane).  EVERY
 #       timing here needs it: a handshake measured while two other FS-UAE
@@ -48,8 +48,8 @@
 #
 # WHY -T IS IN EVERY COMMAND
 #
-#   -T asks for no pseudo-terminal.  AmigaOS has none -- tcgetattr() answers
-#   ENOTTY in the shim, deliberately -- so `dbclient host` without -T fails at
+#   -T asks for no pseudo-terminal.  AmigaOS has none, tcgetattr() answers
+#   ENOTTY in the shim, deliberately, so `dbclient host` without -T fails at
 #   "Failed to set raw TTY mode" and `dbclient -T host command` is the whole
 #   supported shape.  See clients/dropbear/amiga_dropbear.c.
 #
@@ -229,8 +229,8 @@ fi
 # -S stages the Dropbear SERVER as well and points the client at 127.0.0.1
 # instead of the host.
 #
-# It has to be loopback.  FS-UAE's SLIRP is outbound-only -- there is no way
-# for anything on this machine to open a connection INTO the guest -- so a
+# It has to be loopback.  FS-UAE's SLIRP is outbound-only, there is no way
+# for anything on this machine to open a connection INTO the guest, so a
 # server on the Amiga cannot be reached from here at all.  Running both ends
 # inside the guest is not a workaround for that, it is the only arrangement
 # that exercises the accept() side of the stack under emulation, and it puts
@@ -242,7 +242,7 @@ fi
 # run.
 #
 # authorized_keys goes to DH0:.ssh/ because getpwnam() in the shim reports a
-# home of SYS: and Dropbear appends "/.ssh/authorized_keys" -- which reaches
+# home of SYS: and Dropbear appends "/.ssh/authorized_keys", which reaches
 # the right place only because amiga_fix_path() collapses the "SYS:/" that
 # produces.  If that ever regresses, this test is what notices.
 if [ -n "$DB_SERVER" ]; then
@@ -290,7 +290,7 @@ elif [ -n "$DB_SERVER" ]; then
     # whole flag list: this build has no syslog, so it already logs to stderr
     # and there is no -E to ask for it, and DROPBEAR_SVR_PASSWORD_AUTH is 0 in
     # localoptions.h, so there is no -s to disable either.  Both were tried and
-    # both are "Invalid option" -- the usage text a server prints is the list
+    # both are "Invalid option", the usage text a server prints is the list
     # of what this configuration actually built.
     #
     # authorized_keys is found through the home directory rather than -D, on

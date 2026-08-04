@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- whether a name lookup stops when it is told to.
+ * AmiNetXDuo, whether a name lookup stops when it is told to.
  *
  * A gethostbyname() against a name server that answers nothing used to hold the
  * calling task for minutes with no way out: NetX Duo's DNS client took the
@@ -12,12 +12,12 @@
  * with the DNS client replaced by a table of scripted answers, because the
  * three cases that matter cannot be produced on demand against a real server:
  *
- *   1. a black hole      -- every attempt uses its whole wait and nothing comes
+ *   1. a black hole     , every attempt uses its whole wait and nothing comes
  *                           back.  The lookup must end inside its budget rather
  *                           than at a multiple of it.
- *   2. Ctrl-C            -- the break signal arrives mid-lookup.  It must be
+ *   2. Ctrl-C           , the break signal arrives mid-lookup.  It must be
  *                           acted on within one rung, not at the end.
- *   3. a fast refusal    -- a server answers immediately without an address.
+ *   3. a fast refusal   , a server answers immediately without an address.
  *                           Re-asking cannot change that, so the ladder must
  *                           stop rather than spend the rest of the budget.
  *
@@ -180,7 +180,7 @@ static void h_case_break(void)
 
     /*
      * The break is sampled between queries and never during one, so the worst
-     * case is one attempt -- a query to each configured server at the ceiling.
+     * case is one attempt, a query to each configured server at the ceiling.
      * With two servers that is four seconds, against the minutes it was.
      */
     h_check(h_now <= h_break_at + s.servers * AMI_NET_ASK_CEILING,
@@ -207,7 +207,7 @@ static void h_case_break_first(void)
 }
 
 /*
- * A name server that answers immediately without an address -- what NXDOMAIN
+ * A name server that answers immediately without an address, what NXDOMAIN
  * looks like from up here, since a blocking query in addons/dns folds every
  * per-server failure into one status before returning.  Re-asking cannot
  * change the answer, so a mistyped host name must not cost the whole budget.
@@ -254,7 +254,7 @@ static void h_case_answer(void)
 /*
  * The loser of a race for the DNS client's mutex.  addons/dns waits the
  * caller's timeout for it and then fails, which reads here as an attempt that
- * used its whole wait and came back with nothing -- silence.  It must stay
+ * used its whole wait and came back with nothing, silence.  It must stay
  * silence all the way out, because "somebody else is resolving" mapped onto
  * "no such host" is what told the second of two programs that the name does
  * not exist.

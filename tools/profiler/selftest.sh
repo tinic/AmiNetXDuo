@@ -12,7 +12,7 @@
 #   CONTAINMENT      the samples are inside the kernels that were running.
 #                    This is the exception-frame test.  Read the frame two
 #                    bytes off and every recorded value is half an SR
-#                    concatenated with half a PC -- a number that lands
+#                    concatenated with half a PC, a number that lands
 #                    somewhere and resolves to something.  It scores
 #                    approximately zero here rather than a bit less.
 #
@@ -26,7 +26,7 @@
 #   tools/profiler/selftest.sh -b build/p20                 68020, 8-byte frame
 #   tools/profiler/selftest.sh -b build/p00 -m A500         68000, 6-byte frame
 #
-# and with AMINETXDUO_KICKSTART pointing at a ROM the model can boot -- an
+# and with AMINETXDUO_KICKSTART pointing at a ROM the model can boot, an
 # A1200 ROM in an A500 does not fail as a bad ROM, it fails as an emulator
 # that dies host-side before the guest runs.
 #
@@ -35,7 +35,7 @@
 #   Profile OUT=RAM:spin.prof profspin RANGES=RAM:spin.ranges
 #
 # then bring both files back and run the profreport.py line this script
-# prints.  That is the whole point of the tool -- an emulator above a 68020
+# prints.  That is the whole point of the tool, an emulator above a 68020
 # has no usable cycle model, so the interesting answer only exists on iron.
 #
 # SPDX-License-Identifier: MIT

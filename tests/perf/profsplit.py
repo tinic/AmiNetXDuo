@@ -8,14 +8,14 @@ WHY THIS IS NOT --phase
 tools/profiler/Profile can mark phases, but only a program that calls the
 marking API produces them, and FitzBench is an ordinary benchmark that does
 not.  What it DOES produce is its own per-pass timings, in EClock ticks, on
-stdout -- which is a better clock than the sampler's anyway.
+stdout, which is a better clock than the sampler's anyway.
 
 So the windows are placed from FitzBench's own numbers, ANCHORED AT THE END.
 FitzBench does one untimed write and one untimed read to warm up, then
 `reps` timed (write, read) pairs, then a 64 KB verify read.  The warm-up
 duration is not reported and the process prologue is not either, so anchoring
 at the start would put every boundary behind an unmeasured offset.  The
-epilogue -- the verify read plus a Close() and two Printf()s -- is the only
+epilogue, the verify read plus a Close() and two Printf()s, is the only
 part of the run whose length is both short and computable, so the sequence is
 laid backwards from the last sample.
 

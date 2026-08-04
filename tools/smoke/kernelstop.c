@@ -1,18 +1,18 @@
 /*
- * tx_amiga_kernel_stop() -- does the machine survive the program?
+ * tx_amiga_kernel_stop(), does the machine survive the program?
  *
  * The failure this exists to catch is not a wrong return code, it is a wild
  * jump one tick AFTER a clean "PASS": tx_amiga_kernel_start() leaves the tick
  * Task and the scheduler Task running with their entry points inside the
  * program's code hunk, and AmigaDOS frees that hunk the instant the program
  * exits.  A test that merely called stop and returned could not tell a working
- * shutdown from a broken one -- both print PASS, and only one of them takes the
+ * shutdown from a broken one, both print PASS, and only one of them takes the
  * machine down 20 ms later, by which time the harness has already recorded the
  * exit status.
  *
  * So this binary runs as TWO processes.
  *
- *   parent (no arguments -- what s/Startup-Sequence runs)
+ *   parent (no arguments, what s/Startup-Sequence runs)
  *       System()s a SECOND COPY of itself.  AmigaDOS LoadSeg()s that copy into
  *       its own hunk and UnLoadSeg()s it when the child exits, so the child
  *       really does experience the thing a program experiences on exit, while
@@ -22,7 +22,7 @@
  *         - Fills free memory with the 68000 ILLEGAL INSTRUCTION, so that a
  *           stale Task jumping into the child's freed hunk faults immediately
  *           and visibly instead of running whatever happens to be there;
- *         - stays alive for several seconds -- hundreds of ticks -- and only
+ *         - stays alive for several seconds, hundreds of ticks, and only
  *           then reports.
  *
  *   child (one argument)
@@ -117,10 +117,10 @@ static void checkv(const char *what, BOOL ok, LONG value)
 
 /*
  * How much of `before` is still out, once the machine has stopped handing it
- * back.  Freeing is not synchronous with the call that causes it -- a Task's
+ * back.  Freeing is not synchronous with the call that causes it, a Task's
  * stack and MemList go back when exec reaps it, and a Process's stack, CLI and
  * Process structure go back after System() has already returned to its caller
- * -- so a single AvailMem() taken at the moment of interest reads whatever
+ * so a single AvailMem() taken at the moment of interest reads whatever
  * teardown happens to still be in flight.  Measured on a run that leaked
  * nothing: 18936 bytes out at the instant System() returned, 72 five ticks
  * later.
@@ -176,7 +176,7 @@ VOID tx_application_define(VOID *first_unused)
 }
 
 /* Everything the "real work" phase creates, and its teardown.  Split out
-   because the child does it twice -- once per kernel lifetime. */
+   because the child does it twice, once per kernel lifetime. */
 
 static void work_start(void)
 {
@@ -219,7 +219,7 @@ static void work_stop(void)
 }
 
 /*
- * A ThreadX thread that blocks in EXEC rather than on its ThreadX run signal --
+ * A ThreadX thread that blocks in EXEC rather than on its ThreadX run signal,
  * the SANA-II reader parked in WaitIO() on a device that ignores AbortIO().
  * The port cannot wake it, so tx_thread_delete() detaches it and declares a
  * zombie; the zombie keeps running on its stack until it unblocks on its own.
@@ -301,7 +301,7 @@ static int child_main(void)
 
     /*
      * Three worker threads are still alive.  Stop must refuse, must not take
-     * the kernel down, and must not orphan us on the way out -- a refusal that
+     * the kernel down, and must not orphan us on the way out, a refusal that
      * left the caller half-detached would be worse than no refusal at all.
      */
     status = tx_amiga_kernel_stop();
@@ -463,7 +463,7 @@ static int child_main(void)
  * these allocations very probably land on top of it.  Any Task the port failed
  * to reap is parked with its return address inside that hunk; the next time it
  * runs it executes this instead, and takes an illegal-instruction exception
- * that ami_crash_install() catches and prints -- instead of running whatever
+ * that ami_crash_install() catches and prints, instead of running whatever
  * stale bytes happened to survive, which might do nothing at all and let a real
  * bug pass as a PASS.
  *
@@ -525,7 +525,7 @@ static int parent_main(void)
     /*
      * Runaway guard.  If the child ever fails to recognise itself it runs this
      * function instead, System()s another copy, and the emulator dies of
-     * recursion rather than of anything to do with the kernel -- which is
+     * recursion rather than of anything to do with the kernel, which is
      * exactly how the first version of this test failed.  One lock file turns
      * that into an immediate, legible error.
      */
@@ -566,7 +566,7 @@ static int parent_main(void)
 
     /*
      * SystemTags() returns when the child's shell replies, which is before
-     * AmigaDOS has freed the child Process, its stack and its CLI -- so this
+     * AmigaDOS has freed the child Process, its stack and its CLI, so this
      * has to settle.  Under host contention the deficit here reads 18936 and
      * is back to 72 within five ticks, on both CPU tiers.
      */
@@ -604,7 +604,7 @@ static int parent_main(void)
  *
  * NOT argc/argv: this program links dos.library directly rather than a C
  * runtime that parses a command line, and a System()ed copy arrives with
- * argc == 1 exactly like the Startup-Sequence's copy does -- which made the
+ * argc == 1 exactly like the Startup-Sequence's copy does, which made the
  * first version of this test fork-bomb the emulator until it ran out of RAM.
  * GetArgStr() asks dos.library for the Shell argument string itself and is
  * true regardless of what the startup code did or did not do.

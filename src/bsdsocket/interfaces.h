@@ -1,12 +1,12 @@
 /*
- * bsdsocket.library -- interface lookup shared between interfaces.c and its
+ * bsdsocket.library, interface lookup shared between interfaces.c and its
  * callers.
  *
  * interfaces.c holds the naming rule: the name from DEVS:NetInterfaces if
  * there is one, otherwise the name NetX Duo gave the slot, compared
- * case-insensitively. addralloc.c needs the same lookup --
+ * case-insensitively. addralloc.c needs the same lookup,
  * CreateAddrAllocMessageA() returns CAAME_Interface_not_found for an unknown
- * name -- so the rule is implemented once and declared here.
+ * name, so the rule is implemented once and declared here.
  *
  * SPDX-License-Identifier: MIT
  */

@@ -4,8 +4,8 @@ Everything about building, testing and measuring the stack. The
 [README](../README.md) is for people who want to *use* it; this is for people
 working on it.
 
-The engineering record — every decision, every measurement, and the ones that
-were later overturned — is in [RESEARCH.md](RESEARCH.md). This file is the
+The engineering record, every decision, every measurement, and the ones that
+were later overturned, is in [RESEARCH.md](RESEARCH.md). This file is the
 working reference distilled out of it.
 
 ---
@@ -127,12 +127,12 @@ defect. Two things about them are worth knowing before reading a result:
 
 * `tools/analyze.sh` compiles with `-D_NO_INLINE`, which swaps the NDK's inline
   `jsr` stubs for the `clib/` prototypes. Without it `-fanalyzer` believes
-  `ReadEClock(&ev)` leaves `ev` uninitialised — an `__asm volatile` with a
-  `"memory"` clobber is not a store it can see — and two thirds of its findings
+  `ReadEClock(&ev)` leaves `ev` uninitialised, an `__asm volatile` with a
+  `"memory"` clobber is not a store it can see, and two thirds of its findings
   on this tree are that one blind spot.
 * Both scripts print what they could **not** cover: units too complex for the
   analyser to finish, and units that would not compile under `_NO_INLINE`. At
-  GCC's default exploration limit 48 of 213 units gave up silently — including
+  GCC's default exploration limit 48 of 213 units gave up silently, including
   `netdb.c`, `nettrace.c` and `telnet.c`, three of the five files the
   memory-safety audit found defects in. The limit is raised until three units
   are left, and those three are named on every run.
@@ -190,7 +190,7 @@ cycles where a 68020 charges 43, which mildly flatters the crypto assembly in
 only harness that can put the guest on a real network. `-N` takes WinUAE's board
 keys, so all nine ethernet cards are available rather than only the A2065, and
 `-B <interface>` bridges the card onto a host NIC through libpcap instead of
-SLIRP — the guest then takes a lease from the real DHCP server and answers pings
+SLIRP, the guest then takes a lease from the real DHCP server and answers pings
 from other machines. That needs `sudo setcap cap_net_admin,cap_net_raw=eip` on
 the Amiberry binary, reapplied after every relink, and the binary must not live
 on a `nosuid` mount. `tests/netstack/run-amiberry.sh` is the bring-up test on
@@ -227,8 +227,8 @@ tests/conformance/run-fsuae.sh -a "LOOPBACK NOPAGE"
 | | |
 |---|---|
 | conformance, loopback tier | **130/142** (0 fail, 12 skip) |
-| conformance, network tier | **142/142** (0 fail, 0 skip) on a bridged real network — Roadshow 4.364 scores 138. Over FS-UAE's SLIRP it is 141/142: that emulator has no inbound path, so the accept-from-remote test cannot run there at all |
-| client access patterns | **94/94** (`tests/clients`) — the call sequences curl, wget, nc, ftp and telnet actually issue, each group named for the program and file it came from |
+| conformance, network tier | **142/142** (0 fail, 0 skip) on a bridged real network, Roadshow 4.364 scores 138. Over FS-UAE's SLIRP it is 141/142: that emulator has no inbound path, so the accept-from-remote test cannot run there at all |
+| client access patterns | **94/94** (`tests/clients`), the call sequences curl, wget, nc, ftp and telnet actually issue, each group named for the program and file it came from |
 | ThreadX-on-Exec soak | 98 checks, 4+ adopted tasks, Enforcer-clean on 68030 |
 | TCP throughput, 13.9 MHz 68020 | **518 KB/s** loopback, **394 KB/s** to a host over SLIRP, both through the library (was 454 / 381 before the nest-counter critical section and the loopback checksum, and 261 / 312 before `src/net68k/`) |
 | TCP throughput, 24.5 MHz 68020 | **636 KB/s** through the library, 1.78× for a 1.76× clock; conformance unchanged |
@@ -246,7 +246,7 @@ so on a real network the connection is already in `CLOSE_WAIT` by the time the
 application looks at it, and both halves of the accept path demanded
 `NX_TCP_ESTABLISHED` exactly. `bsd_readable()` never reported the listener
 readable, `WaitSelect()` slept out its timeout, and the test failed with no
-diagnostic — while the connection was complete and its 30 bytes sat queued the
+diagnostic, while the connection was complete and its 30 bytes sat queued the
 whole time. Fixed in `bsd_incoming_ready()`; docs/RESEARCH.md 63.6.
 
 It took a bridged network only because FS-UAE cannot provide one: `uae_slirp_redir`
@@ -257,7 +257,7 @@ the same window on real hardware.
 
 Roadshow 4.364 scores 138 with four known deviations of its own and no skips,
 which places it on the network tier with a helper connected and a working
-`SOCK_RAW` — so the figure to have compared against all along was our 133, not
+`SOCK_RAW`, so the figure to have compared against all along was our 133, not
 our loopback score.
 
 ### Measuring throughput
@@ -289,8 +289,8 @@ Two things decide whether a number from it means anything:
   an implied 568 MHz and charges `MULU.L` 2.64 cycles against a real 68020's
   43. Nothing measured there is a claim about hardware.
 
-Throughput on the floor target is a linear function of clock — 1.78× for a
-1.76× clock — and a flat function of receive window above 8 KB. The working
+Throughput on the floor target is a linear function of clock, 1.78× for a
+1.76× clock, and a flat function of receive window above 8 KB. The working
 out is [RESEARCH 64](RESEARCH.md#64-the-68020-is-cpu-bound-and-the-window-has-nothing-left-to-give-2026-07-28).
 
 ## Continuous integration
@@ -298,7 +298,7 @@ out is [RESEARCH 64](RESEARCH.md#64-the-68020-is-cpu-bound-and-the-window-has-no
 There are two workflows, kept deliberately separate, because a green tick on one
 must never be read as a claim about the other.
 
-**`.github/workflows/ci.yml` — tier 1, runs on every push.** It requires nothing
+**`.github/workflows/ci.yml`, tier 1, runs on every push.** It requires nothing
 beyond a network connection.
 
 | | |
@@ -310,7 +310,7 @@ beyond a network connection.
 | host compilers | GCC on Linux and clang on macOS, so that neither becomes the only one that works |
 | conformance | `bsdsocktest` is compiled for m68k; running it belongs to tier 2 |
 
-**`.github/workflows/emulator.yml` — tier 2, the on-Amiga harnesses.** These
+**`.github/workflows/emulator.yml`, tier 2, the on-Amiga harnesses.** These
 require a boot ROM, and two of them are supported.
 
 *The AROS m68k ROM.* AROS is an open-source reimplementation of AmigaOS,
@@ -363,7 +363,7 @@ be distributed with the source.
 Two programs by Stefan "Bebbo" Franke open this library and were written
 without reference to our source, which is why they are worth running: BebboSSH
 (`bebbossh`, `bebboscp`) and bebboget, an HTTPS downloader with its own TLS.
-Both live in the local store -- `~/amiga-assets/bebbossh` and
+Both live in the local store, `~/amiga-assets/bebbossh` and
 `~/amiga-assets/bebboget`, or `AMINETXDUO_BEBBOSSH_DIR` / `AMINETXDUO_BEBBOGET_DIR`.
 Both are GPLv3+ and neither is vendored or linked; they are separate programs we
 install and run.
@@ -388,8 +388,8 @@ mid-session to check that `window-change` follows, and reads back the termios
 the `pty-req` asked for. docs/RESEARCH.md §78.9 has the numbers.
 
 These stay out of CI at either tier. They need `a2065.device`, they need a
-Workbench `locale.library` — without which BebboSSH does not start at all, and
-the way it fails looks exactly like a bug in this stack — and the BebboSSH arm
+Workbench `locale.library`, without which BebboSSH does not start at all, and
+the way it fails looks exactly like a bug in this stack, and the BebboSSH arm
 needs an `sshd` *and* an `sftp-server` on the build host, since `bebboscp`
 speaks SFTP rather than the old `scp -f`/`-t` protocol. Set
 `AMINETXDUO_LOCALE_LIBRARY` if `install/test/run-workbench-fsuae.sh` has not
@@ -429,7 +429,7 @@ Handshake arithmetic for a two-certificate chain comes to 850 ms against 2,525.
 
 Two of those rows deserve their explanation rather than the number alone. **We
 win the elliptic-curve operations because OpenSSL is constant-time and we are
-not** — `ossl_ec_wNAF_mul` forces a Montgomery ladder for any scalar that might
+not**, `ossl_ec_wNAF_mul` forces a Montgomery ladder for any scalar that might
 be secret, which is 5,120 field operations against our comb's ~760. That was
 demonstrated rather than assumed, by setting `BN_FLG_CONSTTIME` and watching
 `k·G` move 0.07%, because the ladder was already running. It is a trade suited
@@ -450,7 +450,7 @@ Three are offered, ChaCha20-Poly1305 first:
 | `0xC027` / `0xC023` | ECDHE-RSA / ECDHE-ECDSA with AES-128-CBC and HMAC-SHA256 |
 
 The AEAD is there because the CBC pair no longer reaches a growing share of the
-web — Google's front end refuses a ClientHello offering only those — and it is
+web, Google's front end refuses a ClientHello offering only those, and it is
 *first* because it is also the cheaper record path here: **1.72× the CBC pair on
 send and 1.73× on receive** over 16 KiB, measured on the 68020. AES-GCM would
 restore the same reach and is deliberately not offered: GHASH is a carry-less
@@ -465,7 +465,7 @@ difference, so two of its record files are copied and edited in
 Two measurement notes, since both would otherwise flatter us. FS-UAE charges
 `MULU.L` 32 cycles where a 68020 charges 43, and `DIVU.L` 51.8 where the manual
 says 78, so every figure above carries a correction derived from per-operation
-multiply counts. And a contended host inflates *cold* handshake timings — the
+multiply counts. And a contended host inflates *cold* handshake timings, the
 resumed column does not move, so a cold number measured while other emulators
 are running should not be quoted.
 
@@ -485,9 +485,9 @@ host costs about half a second whatever the first one cost:
 | `ecc256.badssl.com` | 2, ECDSA, `0xC023` | 23,419 ms | **595 ms** |
 
 It survives both a new process and a reboot, because the cache lives in
-`DEVS:Internet/tlssessions` as well as in the library. `www.iana.org` — three
+`DEVS:Internet/tlssessions` as well as in the library. `www.iana.org`, three
 certificates behind Cloudflare, which cannot complete a cold handshake at
-13.9 MHz at all — was seeded once at 24.5 MHz, the machine rebooted with only
+13.9 MHz at all, was seeded once at 24.5 MHz, the machine rebooted with only
 the 436-byte session file carried across, and then fetched in **0.5 s at
 13.9 MHz**, chain verified.
 
@@ -496,7 +496,7 @@ gave tickets 40/40 and session IDs 2/40. Session IDs still work where a server
 offers them. A rejected ticket falls back to a full handshake.
 
 The cache is keyed on host, port, and a fingerprint of the trust decision
-itself — which trust store, by the identity of its root set rather than merely
+itself, which trust store, by the identity of its root set rather than merely
 its presence; whether the chain and host name were verified at all; whether the
 certificate validity dates were checked; and how deep a chain the caller was
 willing to accept. A session can therefore only be resumed by a connection whose
@@ -506,7 +506,7 @@ That key is narrower than it first shipped, and the difference was a real
 defect: the original recorded *that* verification had happened rather than *what
 against*, so a session established under one trust store was resumed by a caller
 presenting a different one, or none, and the second connection verified nothing.
-The curl suite caught it — `--cacert` pointing at a store that signed nothing in
+The curl suite caught it, `--cacert` pointing at a store that signed nothing in
 the chain returned HTTP 200 in 1.64 s where a cold handshake takes 5.68 s.
 
 The security trade is the ordinary one every TLS session cache has made since
@@ -516,15 +516,15 @@ can decrypt captured traffic for them. On a machine with no memory protection
 the in-memory half changes little.
 
 TLS is nevertheless still disabled by default, because a *first* connection to a
-CDN-fronted host still does not complete at 13.9 MHz — resumption helps only
+CDN-fronted host still does not complete at 13.9 MHz, resumption helps only
 once there is something to resume. Raise the clock and the cold handshakes
 complete too: `www.iana.org` in 11.3 s at 24.5 MHz, and `example.com`, at four
 certificates, in 9.8 s at 56 MHz. See
 [docs/RESEARCH.md §9](RESEARCH.md#9-decisions-2026-07-24) and §13.
 
 Nothing here can be taken down by a peer that is slow, rude or absent:
-`tests/tls/run-hangup.sh` stands four badly-behaved servers on the host — reset,
-FIN, silence, and non-TLS bytes — and each produces a legible error and `rc 10`
+`tests/tls/run-hangup.sh` stands four badly-behaved servers on the host, reset,
+FIN, silence, and non-TLS bytes, and each produces a legible error and `rc 10`
 with the machine carrying on.
 
 ## What an adversarial client suite found
@@ -542,7 +542,7 @@ count. Two presented as *slowness* and were something worse underneath:
 
 - **The SANA-II receive window was 4 frames**, that constant being a window
   rather than a queue length. A concurrency sweep lost 87 of 232 transfers. The
-  case that had never failed got 2.5x faster once fixed -- TCP had been hiding
+  case that had never failed got 2.5x faster once fixed, TCP had been hiding
   the loss in retransmissions, which means every throughput figure this project
   took before it was measured through it.
 - **Every last close of the library cost fifteen seconds**, so `curl --version`
@@ -558,8 +558,8 @@ BREAK the stack finds things a suite that checks conformance cannot, because
 the second one only ever asks questions the implementer already thought of.
 
 Its host end survives and is still load-bearing. `tests/peer/httppeer.py` and
-`tests/peer/mkpki.sh` -- HTTP with keep-alive, ranges, chunking and drip-feed,
-seven HTTPS servers on seven certificate chains, and a whole test PKI -- now
+`tests/peer/mkpki.sh`, HTTP with keep-alive, ranges, chunking and drip-feed,
+seven HTTPS servers on seven certificate chains, and a whole test PKI, now
 serve `tests/compare`, `tests/tools/run-sntp.sh` and `tests/trace`. The guest
 end survives too, as `tests/compare/checkrunner.c`: nothing about running a
 list of commands and writing down what happened was ever curl-specific.
@@ -569,8 +569,8 @@ list of commands and writing down what happened was ever curl-specific.
 [`clients/`](../clients/) is a harness for porting a Unix network client to
 AmigaOS 3.x: toolchain resolution, the NDK flags every such port needs, and the
 libc and libgcc gaps in `clients/compat/`. curl was the first client through it
-and is the reason several of those shims exist -- `__ctzdi2` for a bitset scan,
-`__floatdidf` for a progress meter -- which is why `clients/compat/` still
+and is the reason several of those shims exist, `__ctzdi2` for a bitset scan,
+`__floatdidf` for a progress meter, which is why `clients/compat/` still
 names it. It is no longer built or shipped here: no TLS through our own
 `tls.library`, and its remaining faults were the toolchain's rather than the
 stack's.
@@ -590,12 +590,12 @@ addition-chain inversion and a dedicated Edwards doubling, it is 6.93x faster,
 with no assembly at all.
 
 Switching to the algorithms `crypto68k` already accelerates was tried and is
-**1.8x worse** -- 149.62 s -- because Dropbear's P-256 goes through libtommath,
+**1.8x worse**, 149.62 s, because Dropbear's P-256 goes through libtommath,
 which is 5x slower per scalar multiply than TweetNaCl's curve25519.
 
 Two things a person running a ported client needs to know, both of which cost
 several failed runs to find. It wants **`mathieeedoubbas.library` in `LIBS:`**
-— newlib implements double arithmetic by calling it, and it is *not* in the
+newlib implements double arithmetic by calling it, and it is *not* in the
 Kickstart 3.1 ROM, though every Workbench install has it; if the client is
 linked against AmiSSL it wants `mathieeedoubtrans.library` too, as a **matched
 pair from the same source**, since a mixed pair does not work. And a Shell
@@ -638,7 +638,7 @@ CONNECTIONS, ICMPHIST and ROUTES, `kern/amiga_netdb.c` for ADD and RESET.
 One name is ours: `QUERY SERVICES <type|ALL> [<seconds>]`, appended to the
 variable space so every index below it keeps the value `FindArg()` has always
 returned. AmiTCP had no service discovery, so there was nothing to copy. It is
-the only command here that blocks -- an mDNS browse is a subscription with no
+the only command here that blocks, an mDNS browse is a subscription with no
 completion, so the verb holds a collection window open and returns what
 answered. The window is three seconds by default and capped at thirty, because
 the host services one message at a time: a script that browses stops the port
@@ -648,8 +648,8 @@ wait is `Delay()` on the host's own task with no ThreadX bracket held;
 own, so nothing waits while holding the baton and nothing waits on a `MsgPort`
 belonging to another Process (544398f).
 
-The answer is one service per line, TAB between fields -- instance, type,
-host, address, port, TXT -- rather than the fixed-width hex the AmiTCP answers
+The answer is one service per line, TAB between fields, instance, type,
+host, address, port, TXT, rather than the fixed-width hex the AmiTCP answers
 use. RFC 6763 §4.1.1 instance names are free text with spaces in them, so
 positional parsing cannot survive contact with a real network. A line whose
 instance is empty is a service *type* from the meta-query with no instance
@@ -657,14 +657,14 @@ behind it.
 
 ### What the corpus actually sends
 
-Re-scanned `comm/tcp` + `comm/net` -- 1,024 archives, each downloaded,
+Re-scanned `comm/tcp` + `comm/net`, 1,024 archives, each downloaded,
 extracted, grepped and deleted; 1,002 were actually read (21 over a 2 MB cap, one
 404). Fifteen send `ADDRESS AMITCP`, and between them they send six distinct
 commands:
 
 One caveat on the method, because it bit once. The first pass filtered with
 `grep --binary-files=without-match`, and AmigaDOS scripts often carry high-bit
-bytes, so grep called them binary and skipped them -- which is how SLIPShuttle's
+bytes, so grep called them binary and skipped them, which is how SLIPShuttle's
 `startnet` was missed. Every archive §75.7 names was then re-fetched and read
 with `grep -a`, including the compiled ones: SLIPCall and SLIPShuttle carry the
 command in a binary string table, and it is `KILL` in both.
@@ -704,8 +704,8 @@ of them has reached ten digits. They are 1024 here.
 
 `RESET` is cheap and `ADD` is not, and the reason is the same for both.
 
-AmiTCP kept a `struct NetDataBase` of `MinList`s -- hosts, networks, services,
-protocols, nameservers, domains, access rules -- built from `AmiTCP:db/netdb`
+AmiTCP kept a `struct NetDataBase` of `MinList`s, hosts, networks, services,
+protocols, nameservers, domains, access rules, built from `AmiTCP:db/netdb`
 and mutable at runtime under a read/write lock. `ADD` appended a node to one
 list; `RESET` built a whole second database from the file and swapped the lists
 into the live one.
@@ -714,7 +714,7 @@ into the live one.
 `NetdbTable`s, each one flat `AmiNetdbEntry` array whose `name`, `aliases` and
 `proto` pointers all point into a single tokenised copy of the file text, plus a
 shared alias pool. It is built once by `ami_netdb_load()` and **immutable
-afterwards, which is why no lock exists** -- eight lookup entry points and three
+afterwards, which is why no lock exists**, eight lookup entry points and three
 iterators read it from any task with no synchronisation at all.
 
 So:

@@ -1,5 +1,5 @@
 /***************************************************************************
- * Eclipse ThreadX -- AmigaOS/m68k port.
+ * Eclipse ThreadX, AmigaOS/m68k port.
  *
  * Derived in structure from ports/linux/gnu/src/tx_thread_stack_build.c
  *   Copyright (c) 2024 Microsoft Corporation
@@ -25,7 +25,7 @@
 /*    _tx_amiga_adopt_signal and we bind to those.  The handshake is a     */
 /*    pair of globals rather than an argument because _tx_thread_create()  */
 /*    zeroes the whole control block, extension fields included, before it */
-/*    calls us -- anything staged in the TX_THREAD would be wiped.         */
+/*    calls us, anything staged in the TX_THREAD would be wiped.         */
 /*                                                                        */
 /**************************************************************************/
 
@@ -69,7 +69,7 @@ CHAR        *name;
     {
 
         thread_ptr -> tx_thread_amiga_task         =  _tx_amiga_adopt_task;
-        /* The same Task, recorded twice on purpose -- see tx_port.h.  Teardown
+        /* The same Task, recorded twice on purpose, see tx_port.h.  Teardown
            clears the first one and must not clear this one.  */
         thread_ptr -> tx_thread_amiga_signal_owner =  _tx_amiga_adopt_task;
         thread_ptr -> tx_thread_amiga_run_signal   =  _tx_amiga_adopt_signal;
@@ -133,7 +133,7 @@ struct _tx_amiga_ctrl   *ctrl;
        It does return if _tx_thread_system_suspend() declines to switch (the
        preempt-disable / system-state guard), and falling off the end of an
        Exec task entry point lands in Exec's default finaliser, which removes
-       the task without telling the port -- leaving tx_thread_amiga_task
+       the task without telling the port, leaving tx_thread_amiga_task
        pointing at freed memory.  Go through the port's own teardown instead.  */
 
     TXTRACE("TXT shell_entry returned task=%08lx", (LONG) FindTask((STRPTR) 0));

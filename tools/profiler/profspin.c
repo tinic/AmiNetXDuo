@@ -1,5 +1,5 @@
 /*
- * profspin -- an ordinary program, for proving the profiler on something that
+ * profspin, an ordinary program, for proving the profiler on something that
  * is not part of it.
  *
  * This links nothing from tools/profiler.  It does not know it is being
@@ -23,8 +23,8 @@
  *
  *   PROPORTIONALITY.  Does each kernel's share of the samples match its share
  *   of the measured wall clock?  A sampler can be correctly aimed and still
- *   biased -- by only firing when some other periodic thing is also running,
- *   say -- and this is what catches that.
+ *   biased, by only firing when some other periodic thing is also running,
+ *   say, and this is what catches that.
  *
  * There are no phase marks.  The profiler cannot ask a program it did not
  * build to call anything, so the check is made over the whole run against the
@@ -172,7 +172,7 @@ char           line[128];
             default:
                 /* Forbid()/Permit() in a loop.  Those are ROM code reached
                    through exec.library's jump table, and Exec keeps them as
-                   inline code in the table rather than as a JMP -- so this
+                   inline code in the table rather than as a JMP, so this
                    phase tests the other half of the attribution: that a
                    Kickstart sample is named from the slot it is standing in
                    rather than dropped. */

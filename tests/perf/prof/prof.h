@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- timer-driven PC sampling for AmigaOS/m68k.
+ * AmiNetXDuo, timer-driven PC sampling for AmigaOS/m68k.
  *
  * tests/perf/perf_test.c prices every primitive the data path touches and
  * multiplies by call counts.  It accounts for about 22% of a wire transfer and
@@ -21,7 +21,7 @@
  *
  *      0(SP)   SR      word
  *      2(SP)   PC      long
- *      6(SP)   format/vector word   -- 68010 and up only
+ *      6(SP)   format/vector word  , 68010 and up only
  *
  * That layout is identical on every 68k.  The 68010+ frame is EIGHT bytes
  * rather than six, but the extra word is APPENDED; SR and PC do not move, so
@@ -32,7 +32,7 @@
  * stale stack and is ignored; PROFF_FMTVALID says which.
  *
  * WHAT RAISES THE INTERRUPT: audio channel 3, at level 4.  A CIA timer is the
- * obvious choice and does not work -- see the source table in prof.c for the
+ * obvious choice and does not work, see the source table in prof.c for the
  * two separate ways both CIA-B timers were lost, and for why an interrupt
  * acknowledged through a chip that latches its own request cannot be trusted
  * at kHz rates on this OS.  Audio DMA raises the interrupt and Exec's
@@ -73,7 +73,7 @@ struct ProfSample
 #define PROFF_OVERFLOW  0x00000002UL    /* buffer filled; samples were lost   */
 #define PROFF_ODDFORMAT 0x00000004UL    /* a frame arrived that was not fmt 0 */
 
-/* Everything is big-endian and naturally aligned -- the file is written by the
+/* Everything is big-endian and naturally aligned, the file is written by the
    68k and read by tools/prof-report.py. */
 struct ProfHeader
 {

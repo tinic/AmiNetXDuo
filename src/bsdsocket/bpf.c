@@ -1,5 +1,5 @@
 /*
- * bsdsocket.library -- the eight bpf_* LVOs.
+ * bsdsocket.library, the eight bpf_* LVOs.
  *
  * Thin wrappers: the work lives in src/bpf/, and what is here is the m68k
  * register convention, the SocketBase argument every vector carries, and the
@@ -10,7 +10,7 @@
  * caller gets a documented failure instead of a jump into a slot that means
  * something else in the next build.
  *
- * bpf_set_notify_mask takes (d1, d0) -- channel in d1, mask in d0 -- the
+ * bpf_set_notify_mask takes (d1, d0), channel in d1, mask in d0, the
  * reverse of every other call in the group, including bpf_set_interrupt_mask.
  * Both pragmas/bsdsocket_pragmas.h and the .fd agree, so it is real.
  * tools/gen_vectors.py reads the order from the pragma, so the declaration in

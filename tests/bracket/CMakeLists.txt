@@ -1,4 +1,4 @@
-# The ThreadX/Exec adoption layer on its own -- docs/RESEARCH.md 79's defect,
+# The ThreadX/Exec adoption layer on its own, docs/RESEARCH.md 79's defect,
 # reduced to the layer it lived in.
 #
 # Links threadx_port and nothing else of the stack: no NetX Duo, no
@@ -17,7 +17,7 @@ endif()
 # netstack_baton.c is compiled in rather than linked from aminetxduo_netstack:
 # the bracket is the thing under test and the rest of that library is the stack
 # this file exists to stay out of. It needs NetX Duo HEADERS, because
-# netstack_internal.h declares the singleton in terms of them -- no NetX Duo
+# netstack_internal.h declares the singleton in terms of them, no NetX Duo
 # code is linked.
 add_executable(bracket_invariants
     bracket_test.c

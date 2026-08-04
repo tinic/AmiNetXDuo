@@ -1,5 +1,5 @@
 /*
- * RtProbe -- exercises the Roadshow routing API on a running stack.
+ * RtProbe, exercises the Roadshow routing API on a running stack.
  *
  * tests/tools/routeprobe.c covers the private NETCTRL_ROUTE_ADD vector.  This
  * covers the published API on top of it: AddRouteTagList(),
@@ -10,8 +10,8 @@
  * The autodoc says the table is "a header followed by a small number of
  * sockadders, interpreted by position", with rtm_addrs as the map and a
  * terminator whose rtm_msglen is zero.  So this walks the table the way a
- * caller must -- advance by rtm_msglen, stop at zero, read the sockaddrs by
- * their bit order -- rather than indexing an array of rt_msghdr, which the
+ * caller must, advance by rtm_msglen, stop at zero, read the sockaddrs by
+ * their bit order, rather than indexing an array of rt_msghdr, which the
  * prototype alone would suggest and which walks off the end of the first
  * entry.
  *
@@ -236,7 +236,7 @@ static LONG p_show_table(struct Library *base, const char *label, LONG af,
     return count;
 }
 
-/* The default gateway's address, or 0 -- the entry whose destination and mask
+/* The default gateway's address, or 0, the entry whose destination and mask
    are both zero. */
 static ULONG p_default_gateway(struct Library *base)
 {
@@ -296,7 +296,7 @@ int main(void)
      *
      * There is no netmask tag. 192.168.66.0 has a zero host part under its
      * classful mask, so "the route is assumed to be a to a network" and the
-     * mask must come back as 255.255.255.0 -- from nothing but the address.
+     * mask must come back as 255.255.255.0, from nothing but the address.
      */
     tags[0].ti_Tag  = RTA_Destination;
     tags[0].ti_Data = (ULONG)PROBE_NET;
@@ -326,7 +326,7 @@ int main(void)
     /* ---- the flags filter ------------------------------------------------
      *
      * "Flags which have to be set in each routing table entry to be returned"
-     * -- so RTF_STATIC returns the two just added and nothing else; the count
+     * so RTF_STATIC returns the two just added and nothing else; the count
      * is the assertion.
      */
     (VOID)p_show_table(base, "static-only", AF_INET, RTF_STATIC);
@@ -387,7 +387,7 @@ int main(void)
          * Deleting it by naming a gateway that is not the installed one.  The
          * tag is "the address of the default gateway all packets WERE
          * forwarded to", so this names no entry and must not take the real one
-         * away -- which is what the read-back below checks.
+         * away, which is what the read-back below checks.
          */
         tags[0].ti_Tag  = RTA_DefaultGateway;
         tags[0].ti_Data = (ULONG)"10.99.99.99";
@@ -425,7 +425,7 @@ int main(void)
      * two above are still in the static table:
      * nx_ip_static_route_delete() returns NX_SUCCESS outright when
      * nx_ip_routing_table_entry_count is zero, without searching, and the
-     * default gateway is not in that table -- it lives in
+     * default gateway is not in that table, it lives in
      * nx_ip_gateway_address.  A machine whose only route is its default
      * gateway has an empty static table, so run after the two deletes below
      * this call reports success regardless.

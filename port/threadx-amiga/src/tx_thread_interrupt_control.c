@@ -1,5 +1,5 @@
 /***************************************************************************
- * Eclipse ThreadX -- AmigaOS/m68k port.
+ * Eclipse ThreadX, AmigaOS/m68k port.
  *
  * Derived in structure from ports/linux/gnu/src/tx_thread_interrupt_control.c
  *   Copyright (c) 2024 Microsoft Corporation
@@ -46,9 +46,9 @@
  * about 26 pairs per received TCP segment (tests/perf/perf_test.c counted
  * 10,042 over a 256 KB transfer across the simulated wire, and 2,537 over
  * loopback; tests/perf/prof counted 38,853 over 1 MB).  A Forbid()/Permit()
- * pair through the library vectors costs 9,923 ns on the A1200 profile -- two
+ * pair through the library vectors costs 9,923 ns on the A1200 profile, two
  * indirect jumps into a jump table that is not in the same memory as the
- * caller -- so the pair alone was 8.5% of that transfer.
+ * caller, so the pair alone was 8.5% of that transfer.
  *
  * The bodies are now inline at every call site: tx_port.h has them, and the
  * reasoning for the AttnResched test is there too.  What is left here is the
@@ -93,7 +93,7 @@ VOID _tx_amiga_permit_finish(void)
 
 
 /* The out-of-line spellings.  Nothing on the data path reaches them any more
-   -- TX_DISABLE/TX_RESTORE are the inline pair -- but they are part of the
+  , TX_DISABLE/TX_RESTORE are the inline pair, but they are part of the
    port's surface and cost nothing unreferenced.  */
 
 UINT _tx_thread_interrupt_disable(void)
@@ -111,7 +111,7 @@ VOID _tx_thread_interrupt_restore(UINT previous_posture)
 
 
 /*
- * tx_interrupt_control() -- the application-visible service.
+ * tx_interrupt_control(), the application-visible service.
  *
  * Unlike the pair above, this one may be called unbalanced, so it changes the
  * nesting by at most one level and reports what the posture was.  Requesting
@@ -136,7 +136,7 @@ UINT    old_posture;
     }
     else
     {
-        /* Already enabled -- nothing to do.  */
+        /* Already enabled, nothing to do.  */
     }
 
     return(old_posture);

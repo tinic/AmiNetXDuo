@@ -1,5 +1,5 @@
 /*
- * McastRace -- two openers racing for the same row of the multicast table.
+ * McastRace, two openers racing for the same row of the multicast table.
  *
  * bsd_mcast_table[16] is one table for the machine, keyed by AmiSocket *, and
  * a row is free precisely because bm_Sock is NULL.  bsd_mcast_join() picks a
@@ -27,7 +27,7 @@
  *
  * HOW THE WINDOW IS FORCED
  *
- *   The window is a handful of instructions, so it is not waited for -- it is
+ *   The window is a handful of instructions, so it is not waited for, it is
  *   aimed at.
  *
  *   bsd_nx_leave() drops the ThreadX baton and pokes the scheduler Task, which
@@ -40,8 +40,8 @@
  *   HAMMER (this Process, priority 0) joins and drops one group as fast as it
  *   can, so it is inside a bracket nearly all the time.
  *
- *   SNIPER (the child, priority 2) sleeps, wakes on the VBlank interrupt --
- *   asynchronously, wherever HAMMER happens to be -- and joins a different
+ *   SNIPER (the child, priority 2) sleeps, wakes on the VBlank interrupt,
+ *   asynchronously, wherever HAMMER happens to be, and joins a different
  *   group.  A wake that lands while HAMMER holds the baton parks SNIPER on it,
  *   and HAMMER's next bsd_nx_leave() hands over inside the window.
  *
@@ -230,8 +230,8 @@ static VOID r_run(struct Library *sb, LONG s, ULONG group, RaceStats *st,
         }
         else
         {
-            /* The membership is held -- the join above returned 0 and nothing
-               since has dropped it -- so the only way here is a row that now
+            /* The membership is held, the join above returned 0 and nothing
+               since has dropped it, so the only way here is a row that now
                belongs to somebody else. */
             st->rs_Stolen++;
             st->rs_LastDropErr = r_errno(sb);
@@ -291,7 +291,7 @@ static VOID r_sniper(VOID)
     /*
      * The shots are spent, so HAMMER stops too: its own ceiling is only there
      * so that a sniper that died on its first call cannot leave it running for
-     * ever.  Then the handshake, and nothing after it -- this Process exits
+     * ever.  Then the handshake, and nothing after it, this Process exits
      * next and the parent is already free to look at the counters.
      */
     sniper.rc_Stop = 1;

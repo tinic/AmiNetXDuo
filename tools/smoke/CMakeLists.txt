@@ -1,9 +1,9 @@
 # Diagnostic probes.  Built with everything else; NOT registered with ctest.
 #
 # These are not pass/fail regression tests.  Three of them are deliberate
-# fault injectors -- two crash the CPU or Guru the machine on purpose, and the
+# fault injectors, two crash the CPU or Guru the machine on purpose, and the
 # third boots a child process specifically to find out whether the machine
-# survives it -- so they belong nowhere near a "run all tests" flow.  They are
+# survives it, so they belong nowhere near a "run all tests" flow.  They are
 # here so they keep compiling: every one of them was written to answer a
 # question that came back later, and a probe that no longer builds is a probe
 # that gets rewritten from scratch instead.
@@ -27,16 +27,16 @@
 # SPDX-License-Identifier: MIT
 
 # smoke        harness self-test: serial output, ENV:/T: assigns, EClock timing.
-# crashtest    CRASHES ON PURPOSE -- jumps to 0x2 to prove the CPU-exception
+# crashtest    CRASHES ON PURPOSE, jumps to 0x2 to prove the CPU-exception
 #              guard in include/aminetxduo/crashguard.h catches and reports it.
 #              EXITS 10 AND REPORTS "1 failure" ON A GOOD RUN, which is not a
-#              regression: the report works (measured -- "CHK instruction
+#              regression: the report works (measured, "CHK instruction
 #              (exception 6) at PC=00000044" reached both the serial log and
 #              DH0:crash.txt), but the unwind resumes *after* the
 #              ami_crash_install() call site rather than at it, so the probe's
 #              "unreachable" assertion fires. crashguard.h documents that under
 #              WHAT IS NOT RELIABLE. Read the crash report, not the exit code.
-# gurutest     GURUS ON PURPOSE -- double-frees a block to prove the exec
+# gurutest     GURUS ON PURPOSE, double-frees a block to prove the exec
 #              Alert() hook decodes AN_FreeTwice (0x01000009).
 # lifecycle    ThreadX task lifecycle probe; this is what found the
 #              AN_FreeTwice root cause.  Arms the Alert hook, so it may Guru
@@ -58,9 +58,9 @@
 #              bsdsocket.library in LIBS: and a driver in DEVS:.  DOES NOT
 #              REACH ITS LAST TWO REPORTS: the final CloseLibrary() hangs
 #              (§81.5), which is the bug rather than the probe.
-# alignprobe   prints this machine's alignment rules -- alignof for a long and
+# alignprobe   prints this machine's alignment rules, alignof for a long and
 #              for struct cmsghdr, what CMSG_BUFFER() delivers on the stack and
-#              in static storage, what AllocVec() and AllocMem() return -- and
+#              in static storage, what AllocVec() and AllocMem() return, and
 #              reads a longword from an address 2 mod 4.  Run it on an A600 or
 #              an A500: a 68000 is the only CPU in the family that faults, so a
 #              pass on an A1200 says nothing.  Does not crash anything and does

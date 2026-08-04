@@ -1,5 +1,5 @@
 /*
- * FitzBench -- bulk file throughput over a mounted Fitz share.
+ * FitzBench, bulk file throughput over a mounted Fitz share.
  *
  *     FitzBench PATH [KB=<n>] [CHUNK=<n>] [REPS=<n>] [NOVERIFY]
  *
@@ -10,8 +10,8 @@
  * mounted share is the same path a user's `copy` takes with none of `copy`'s
  * directory scanning or console output in the timing.
  *
- * What it does NOT do is subtract the peer.  A run against a local path --
- * FitzBench RAM: -- prices AmigaDOS and this program with no network under
+ * What it does NOT do is subtract the peer.  A run against a local path,
+ * FitzBench RAM:, prices AmigaDOS and this program with no network under
  * them, and is the control every network figure should be read against.
  *
  * Timing is ReadEClock(), ~709 kHz PAL, so a one-second transfer is timed to
@@ -238,7 +238,7 @@ static ULONG fb_read_once(CONST_STRPTR path, ULONG total)
  * Read the first VERIFY_KB back and compare against what was written.  Not in
  * the timed path: a per-byte comparison on a 68020 is a measurable share of a
  * transfer, and this exists to catch a share that silently truncates, not to
- * be the correctness suite -- tests/endurance does that byte for byte.
+ * be the correctness suite, tests/endurance does that byte for byte.
  */
 static BOOL fb_verify(CONST_STRPTR path, ULONG total)
 {
@@ -392,8 +392,8 @@ int main(VOID)
 
     /*
      * One untimed pass first.  The first read of a freshly written file is
-     * consistently an order of magnitude slower than the ones after it -- 36
-     * KB/s against 344 on the same boot -- and averaging that in measures the
+     * consistently an order of magnitude slower than the ones after it, 36
+     * KB/s against 344 on the same boot, and averaging that in measures the
      * first exchange rather than the transfer.  It is a real effect and worth
      * its own investigation; it is not what a throughput number is for.
      */

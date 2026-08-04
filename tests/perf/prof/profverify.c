@@ -1,9 +1,9 @@
 /*
- * AmiNetXDuo -- does the sampler report the PC it thinks it does?
+ * AmiNetXDuo, does the sampler report the PC it thinks it does?
  *
  * A sampling profiler is the one measurement tool that can be comprehensively
  * wrong and still look right.  Read the exception frame two bytes off and
- * every recorded value is half an SR concatenated with half a PC -- a number
+ * every recorded value is half an SR concatenated with half a PC, a number
  * that lands somewhere, resolves to some function, and ranks it convincingly.
  * Nothing downstream can detect that.  So it is established here, first,
  * against kernels whose exact byte ranges are known from the linker.
@@ -23,7 +23,7 @@
  *
  *   1. CONTAINMENT.  >= 90% of each spin phase's samples inside that
  *      function's [start, end).  This is the frame-offset test and it is
- *      sharp -- a wrong offset scores approximately zero, not a bit less.
+ *      sharp, a wrong offset scores approximately zero, not a bit less.
  *   2. PROPORTIONALITY.  Each phase's share of samples within four percentage
  *      points of its share of measured wall-clock.  A sampler can be
  *      correctly aimed and still biased, e.g. by only firing when some
@@ -58,7 +58,7 @@ extern UBYTE pv_spin_a_end, pv_spin_b_end, pv_spin_c_end;
 #define PV_PHASES       4
 
 /* Roughly 6:3:1 of wall clock, and long enough that a phase is thousands of
-   samples rather than hundreds.  The exact figures do not matter -- the test
+   samples rather than hundreds.  The exact figures do not matter, the test
    compares sampled share against measured share, it does not assume either. */
 static const ULONG pv_reps[PV_PHASES] = { 2700000UL, 900000UL, 220000UL, 0UL };
 

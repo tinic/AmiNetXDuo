@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- text handling for the configuration parsers.
+ * AmiNetXDuo, text handling for the configuration parsers.
  *
  * No dos.library, no newlib: these are user-edited files and this code runs
  * inside a shared library, so everything here works on a plain memory buffer

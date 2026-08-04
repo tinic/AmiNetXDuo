@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- crypto68k against AmiSSL, one process, identical inputs.
+ * AmiNetXDuo, crypto68k against AmiSSL, one process, identical inputs.
  *
  *   src/crypto68k/ has only ever been measured against the vendored nx_crypto
  *   it replaces, which answers "did the change work" but not "is this stack
@@ -16,7 +16,7 @@
  *   is the code that ran.
  *
  *   FS-UAE's A1200 model charges MULU.L 32.14 cycles where a real 68020
- *   charges 45 for the 64-bit form -- measured, tests/perf/cpucal, and
+ *   charges 45 for the 64-bit form, measured, tests/perf/cpucal, and
  *   reproduced by a_calibrate() below in this very run.  That is a 29%
  *   discount on the one instruction bignum arithmetic is made of, and it does
  *   not cancel between two implementations that issue different numbers of it:
@@ -73,8 +73,8 @@ extern NX_CRYPTO_METHOD crypto_method_hmac_sha256;
 #define A_POWM_SCRATCH      4096u
 #define A_HN_SCRATCH        4096u
 
-/* 16 KiB is one TLS record's worth of payload and then some -- RFC 5246 caps
-   a plaintext fragment at 2^14 -- so this is the unit the bulk path actually
+/* 16 KiB is one TLS record's worth of payload and then some, RFC 5246 caps
+   a plaintext fragment at 2^14, so this is the unit the bulk path actually
    moves. */
 #define A_BULK_BYTES        16384UL
 
@@ -162,7 +162,7 @@ static UINT     a_row_count;
 /* =========================================== the emulator's MULU.L discount ==
  *
  * FS-UAE's A1200 model charges MULU.L 32.1 cycles where an MC68020 charges 43
- * (Dn,Dm) or 45 (Dn,Dh:Dl) -- measured, tests/perf/cpucal, and reproduced by
+ * (Dn,Dm) or 45 (Dn,Dh:Dl), measured, tests/perf/cpucal, and reproduced by
  * a_calibrate() below in this very run.  Every other instruction the model
  * charges is faithful to under 2%.
  *
@@ -196,8 +196,8 @@ static UINT     a_row_count;
  *     multiply  M(N) + N^2 + N     square  S(N) + N^2 + N
  *     N = 32 -> 1632 / 1380      N = 64 -> 5888 / 5132
  *
- *   P-256 field operations cost the same on both sides -- 64 multiplies for a
- *   multiply, 36 for a square -- because AmiSSL reaches bn_mul_comba8 /
+ *   P-256 field operations cost the same on both sides, 64 multiplies for a
+ *   multiply, 36 for a square, because AmiSSL reaches bn_mul_comba8 /
  *   bn_sqr_comba8 (hand-written 68020 assembly, one mulu.l per product) and
  *   ours reaches eight c68k_addmul_1 rows and a triangle.  The whole
  *   difference is how many field operations each scalar multiplication needs.
@@ -234,7 +234,7 @@ static UINT     a_row_count;
  * the vendored code and is schoolbook.
  *
  * AmiSSL reaches 103,936 by recursing three levels, to bn_sqr_comba8.  We stop
- * at one because the measurement says deeper loses -- see the crossover sweep
+ * at one because the measurement says deeper loses, see the crossover sweep
  * this program prints before the RSA rows.
  */
 #define A_M_SQR64_KAR   ((3UL * 528UL) + 4160UL)        /* 5744 */
@@ -243,7 +243,7 @@ static UINT     a_row_count;
 /*
  * The setup used to contribute only its 2080-product square, because the
  * reduction around it was the vendored divider working in 16-bit half-limbs
- * -- different instructions entirely.  c68k_mod() does the same job in 32-bit
+ * different instructions entirely.  c68k_mod() does the same job in 32-bit
  * limbs, so its multiply-subtract passes show up here now: 67 quotient digits
  * across the two reductions, 64 limbs each, is 4,288 more MULU.L.
  *
@@ -253,7 +253,7 @@ static UINT     a_row_count;
  * The 136 is those 67 DIVU.L expressed as their MULU.L equivalent, so the one
  * correction covers both.  The emulator charges DIVU.L 51.8 cycles against the
  * MC68020UM's 78, a 34% discount and larger than MULU.L's 29%, so it does need
- * correcting -- it is just small: 61 us of an 11.9 ms setup.
+ * correcting, it is just small: 61 us of an 11.9 ms setup.
  */
 #define A_MULU_RSAPUB_OURS      ((16UL * A_M_SQR64_KAR) + (3UL * A_M_MUL64_KAR) + 2080UL + 4288UL + 136UL)
 #define A_MULU_RSAPUB_THEIRS    ((16UL * A_O_SQR64) + (3UL * A_O_MUL64) + 4160UL)
@@ -293,7 +293,7 @@ static UINT     a_row_count;
  *   AmiSSL ossl_ec_GFp_simple_dbl      4M + 4S = 400
  *          ossl_ec_GFp_simple_add, Z2=1 8M + 3S = 620
  *          ladder step (ecp_smpl.c)   13M + 7S = 1084, and there are exactly
- *                256 of them -- one per bit of the group order, no skipping
+ *                256 of them, one per bit of the group order, no skipping
  *          k*G and ECDH both take the ladder: ec_mult.c forces it whenever
  *                the scalar could be secret, ignoring BN_FLG_CONSTTIME
  *          ECDSA verify takes interleaved wNAF, width 3 for a 256-bit scalar,
@@ -1004,7 +1004,7 @@ ULONG   plain;
     {
         /*
          * The path nx_secure takes when it hands over a full 2048-bit private
-         * exponent with no primes -- what our own tree does on two of its
+         * exponent with no primes, what our own tree does on two of its
          * three private-key call sites (see c68k_crt.c).  Measured on the
          * AmiSSL side to put a number on the cost of skipping CRT.
          */
@@ -1319,7 +1319,7 @@ UINT    i;
 
     /*
      * HMAC is nx_crypto's framing with our compression function underneath,
-     * which is exactly what src/tls/ami_tls_crypto.c wires -- so this measures
+     * which is exactly what src/tls/ami_tls_crypto.c wires, so this measures
      * what the TLS stack runs rather than a standalone hash.
      */
     _nx_crypto_hmac_metadata_set(&a_hmac_meta, &a_hmac_ctx,
@@ -1721,7 +1721,7 @@ ULONG   start;
  * OpenSSL cannot run on a boot Shell's 4 KB stack, and this toolchain's crt0
  * exports no __stack hook to ask for more (docs/RESEARCH.md 11.5).  So the
  * work happens in a process created with NP_StackSize and main() waits for it.
- * Everything AmiSSL touches -- InitAmiSSL is per process -- happens inside
+ * Everything AmiSSL touches, InitAmiSSL is per process, happens inside
  * that process, which is also what the autodoc requires.
  */
 
@@ -1745,7 +1745,7 @@ BPTR            lock;
      * OPENSSLDIR=AmiSSL: ENGINESDIR=AmiSSL:engines MODULESDIR=AmiSSL:modules),
      * so OpenSSL 3.x's configuration and provider loading opens
      * AmiSSL:openssl.cnf on the first API call anybody makes.  On a machine
-     * with no AmiSSL: assign, AmigaDOS does not return an error -- it puts up
+     * with no AmiSSL: assign, AmigaDOS does not return an error, it puts up
      * "Please insert volume AmiSSL: in any drive", and on a bare boot with no
      * Workbench and no user there is nobody to cancel it.  The benchmark sat
      * there for twenty minutes looking like a slow library.

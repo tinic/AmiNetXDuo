@@ -1,9 +1,9 @@
 /*
- * tcpdrill -- a packet-level conformance harness for AmiNetXDuo's TCP.
+ * tcpdrill, a packet-level conformance harness for AmiNetXDuo's TCP.
  *
  * Google's packetdrill states a test as two interleaved things: the socket
  * calls an application makes, and the exact packets that must appear on the
- * wire in response -- flags, sequence numbers, window, options, and the time
+ * wire in response, flags, sequence numbers, window, options, and the time
  * between them.  A failing case is then a specification of what should have
  * happened, which is the property this harness is after.  Its published
  * scripts were read as a description of correct TCP behaviour; none of its
@@ -39,7 +39,7 @@
  *   tx FLAGS [key=value]   the next frame the stack sends must be this
  *   notx MS                the stack must send nothing for MS
  *   txcount MIN MAX        discard everything queued, and assert how much of
- *                          it there was -- a retransmission series is a count
+ *                          it there was, a retransmission series is a count
  *   rx FLAGS [key=value]   inject this frame into the stack
  *
  * FLAGS is a string from FSRPAUEC, or `-` for none.  Keys:
@@ -76,7 +76,7 @@
  *   within=MS / after=MS
  *           bounds on the gap between this frame and the previous event,
  *           measured from the E-Clock reading taken inside the device's
- *           BeginIO -- the instant the stack handed the frame over -- so the
+ *           BeginIO, the instant the stack handed the frame over, so the
  *           harness's own polling interval does not enter the measurement.
  *
  * Output goes to DH0:tcpdrill.txt: one line per directive that asserted
@@ -769,7 +769,7 @@ static ULONG n_background;      /* frames dropped by the filter in pump() */
  * A HIGH-WATER MARK, not a sum: a retransmission carries bytes the peer has
  * already been sent, and counting it twice would make every case with one in
  * it look like the fault this measures.  What is left is the distinct sequence
- * space the stack has committed to -- the number a capture is summed for.
+ * space the stack has committed to, the number a capture is summed for.
  *
  * Called from pump(), so it sees every frame including the ones a `tx`
  * directive is about to consume and the ones nothing ever asks for.
@@ -811,7 +811,7 @@ static VOID pump(VOID)
         /*
          * Traffic that is not part of any case.  The stack under test is a
          * whole stack: it answers ARP (above), and anything else in the tree
-         * that opens a UDP socket -- mDNS, a DHCP renewal, an IGMP report --
+         * that opens a UDP socket, mDNS, a DHCP renewal, an IGMP report,
          * puts frames on this wire that no script mentions.  They used to be
          * queued like everything else, so the next `tx` in whatever case was
          * running failed with "non-TCP frame ether=0x0800" and every assertion
@@ -820,7 +820,7 @@ static VOID pump(VOID)
          *
          * Anything IPv4 that is not TCP to the peer is therefore counted and
          * dropped.  A malformed TCP segment, or one aimed at the peer, still
-         * reaches the queue -- those are results.
+         * reaches the queue, those are results.
          */
         if (ether != ETYPE_IP)
         {
@@ -923,7 +923,7 @@ static VOID build_and_inject(const Inject *in)
 
     /* The Ethernet destination has to agree with the IP one, or tap_rx_put()
        hands the frame up without SANA2IOF_BCAST and the stack sees a unicast
-       frame carrying a broadcast address -- which is a different case. */
+       frame carrying a broadcast address, which is a different case. */
     if (in->dst_ip == LIMITED_BCAST_IP || in->dst_ip == SUBNET_BCAST_IP)
     {
         for (i = 0; i < 6; i++)
@@ -974,7 +974,7 @@ static VOID build_and_inject(const Inject *in)
     }
     if (in->sackok)
     {
-        /* NOP, NOP, kind 4, length 2 -- a whole option word, so the data
+        /* NOP, NOP, kind 4, length 2, a whole option word, so the data
            offset stays a whole number of words with or without the MSS. */
         UWORD at = (UWORD)(20 + (in->mss >= 0 ? 4 : 0));
 
@@ -1631,10 +1631,10 @@ static VOID do_send(const char *args, const char *raw)
         want = (LONG)sizeof(payload);
 
     /*
-     * `send N = AGAIN` -- the send is expected to be refused, which is what a
+     * `send N = AGAIN`, the send is expected to be refused, which is what a
      * non-blocking socket must do against a closed window.
      *
-     * `send N = SHORT` -- the send may take any part of it, including none.
+     * `send N = SHORT`, the send may take any part of it, including none.
      * How much is not the assertion; `wirebytes` is, and it needs a directive
      * that does not decide the answer in advance.
      */
@@ -1899,7 +1899,7 @@ static VOID do_opt(const char *args, const char *raw)
  * `close [within=MS]`.
  *
  * CloseSocket() sends a FIN and the connection outlives the descriptor, so the
- * call must never wait for a peer that has stopped answering -- a program that
+ * call must never wait for a peer that has stopped answering, a program that
  * closes and exits would hang on the way out.  The optional bound asserts
  * that.  The number in the transcript is the whole CloseSocket(), measured
  * across the call rather than off the frame it produced.
@@ -1947,7 +1947,7 @@ static VOID do_close(const char *args, const char *raw)
 }
 
 /*
- * `txcount MIN MAX` -- how many frames the stack sent while we were not
+ * `txcount MIN MAX`, how many frames the stack sent while we were not
  * looking, discarded.
  *
  * A retransmission series is asserted as a count: ten separate `tx` lines
@@ -1995,14 +1995,14 @@ static VOID do_txcount(const char *args, const char *raw)
 }
 
 /*
- * `wirebytes` -- what left must equal what send() said it took.
+ * `wirebytes`, what left must equal what send() said it took.
  *
  * The one invariant a stream cannot state any other way.  A transfer that
  * merely completes proves nothing: duplicated bytes inside a stream still
  * arrive as a plausible file, and the 512 KB the fault was found on differed
  * from its source by 3888 bytes without ever failing to transfer.  So the
- * assertion is arithmetic on both sides -- the sum of the send() return values
- * against the distinct sequence space the stack committed to -- which is the
+ * assertion is arithmetic on both sides, the sum of the send() return values
+ * against the distinct sequence space the stack committed to, which is the
  * same sum a capture is put through, done here with no capture at all.
  */
 static VOID do_wirebytes(const char *raw)
@@ -2051,8 +2051,8 @@ static VOID do_wirebytes(const char *raw)
  * in the middle of the wait.  That reads as the stack sending a frame it
  * should not have, which is the opposite of what happened.
  *
- * Cases that assert on an interval are unaffected either way -- `after` and
- * `within` are measured from the tap device's own E-Clock stamps -- so this
+ * Cases that assert on an interval are unaffected either way, `after` and
+ * `within` are measured from the tap device's own E-Clock stamps, so this
  * changes only how long `idle` actually idles for.
  */
 static VOID do_idle(const char *args, const char *raw)
@@ -2080,8 +2080,8 @@ static VOID do_idle(const char *args, const char *raw)
 /*
  * Tear a case's socket down so that nothing of it appears in the next case.
  *
- * SO_LINGER {on, 0} is required. Once CloseSocket() started sending a FIN --
- * which is what RFC 793 3.5 asks for and what this harness asserts in c03 --
+ * SO_LINGER {on, 0} is required. Once CloseSocket() started sending a FIN,
+ * which is what RFC 793 3.5 asks for and what this harness asserts in c03,
  * a plain close left a connection retransmitting that FIN into a peer that had
  * stopped listening, once a second, for ten seconds. Those frames turned up in
  * the next four cases, and every case that leaves unacknowledged data behind

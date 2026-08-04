@@ -1,5 +1,5 @@
 /*
- * bsdsocket.library -- errno, h_errno and SocketBaseTagList().
+ * bsdsocket.library, errno, h_errno and SocketBaseTagList().
  *
  * errno is per-opener and is optionally mirrored into a caller-supplied
  * variable whose width the caller chooses (1, 2 or 4 bytes), so this cannot be
@@ -19,7 +19,7 @@
 #include <proto/exec.h>
 #include <stddef.h>
 
-/* ------------------------------------------------------------------ errno -- */
+/* ------------------------------------------------------------------ errno, */
 
 /*
  * SBTC_ERROR_HOOK. "Install or remove a hook which is called whenever the
@@ -107,7 +107,7 @@ static const BsdStatusMap bsd_status_map[] =
     /*
      * NX_NO_PACKET means both "nothing to read" and "the packet pool is
      * empty"; EWOULDBLOCK is only right for the first. It holds here because
-     * no caller can reach the second on a socket that was willing to wait --
+     * no caller can reach the second on a socket that was willing to wait,
      * see bsd_wait_option() in select.c before adding a call site that does
      * not go through it. New code should use bsd_wait_errno() below, which
      * checks the wait value instead of assuming this.
@@ -184,7 +184,7 @@ LONG bsd_errno_from_nx(UINT status)
  * data, or no packet in the pool), NX_TX_QUEUE_DEPTH and NX_WINDOW_OVERFLOW.
  * EWOULDBLOCK is right for all three only when the caller asked not to wait.
  * On a socket prepared to block for ever it tells the application to retry a
- * call that cannot succeed -- the failure English Amiga Board thread 122501
+ * call that cannot succeed, the failure English Amiga Board thread 122501
  * reports against AmiTCP and Roadshow (docs/RESEARCH.md 37). ENOBUFS is used
  * instead, and it is reachable: the pool is a fixed 16..256 packets and
  * docs/RESEARCH.md 37.5 measured it at 1 free of 256 for 316 consecutive
@@ -219,7 +219,7 @@ LONG bsd_wait_errno(ULONG wait, UINT status)
     }
 }
 
-/* ------------------------------------------------------------ error texts -- */
+/* ------------------------------------------------------------ error texts, */
 
 typedef struct
 {
@@ -301,7 +301,7 @@ static const char *bsd_text_lookup(const BsdErrText *table, ULONG count,
     return fallback;
 }
 
-/* ---------------------------------------------------------------- vectors -- */
+/* ---------------------------------------------------------------- vectors, */
 
 LONG bsd_Errno(register struct AmiSocketBase *SocketBase __asm("a6"))
 {
@@ -384,9 +384,9 @@ static const BsdSimpleTag bsd_simple_tags[] =
     { SBTC_LOGFACILITY,  SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_LogFacility)  },
     { SBTC_LOGMASK,      SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_LogMask)      },
     /*
-     * Stored and read back; never called. The NDK deprecates it in place --
+     * Stored and read back; never called. The NDK deprecates it in place,
      * "Link library fd allocation callback; don't use this in new code!", and
-     * the same again over FDCB_FREE/ALLOC/CHECK -- and it is the AmiTCP 3
+     * the same again over FDCB_FREE/ALLOC/CHECK, and it is the AmiTCP 3
      * mechanism by which a link library kept its own descriptor table in step
      * with the socket library's. Calling it would mean bsd_fd_alloc() and
      * bsd_fd_free() reaching out into caller code while they hold library
@@ -401,7 +401,7 @@ static const BsdSimpleTag bsd_simple_tags[] =
      * Both of these are per-opener state a caller may set and read back. They
      * are here rather than among the constants because refusing a documented
      * SET returns the tag's index and discards every tag after it in the same
-     * call -- which is how an errno link in the next slot goes missing.
+     * call, which is how an errno link in the next slot goes missing.
      */
     { SBTC_SIG_ADDRESS_CHANGE_MASK, SBT_RW,
       (UWORD)offsetof(struct AmiSocketBase, sb_SigAddressChangeMask) },
@@ -416,7 +416,7 @@ static const BsdSimpleTag bsd_simple_tags[] =
  * changing". A SET on those is accepted when the value asked for is the value
  * already in force and refused when it is a real change: configuration code
  * routinely reads a tunable and writes it straight back, and refusing that
- * returns the tag's index and discards every tag after it in the same call --
+ * returns the tag's index and discards every tag after it in the same call,
  * which is how an SBTC_ERRNOPTR in the next slot goes missing. A caller
  * genuinely trying to turn IP forwarding on still gets told.
  *
@@ -431,7 +431,7 @@ typedef struct
 } BsdConstTag;
 
 /*
- * How many bpf_* capture channels this build has -- all that
+ * How many bpf_* capture channels this build has, all that
  * SBTC_NUM_PACKET_FILTER_CHANNELS asks. It is the first thing Roadshow's
  * tcpdump does: main() reads this code by reference and, if it comes back
  * zero, prints `"%s" V%ld.%ld does not support the raw packet access method
@@ -507,8 +507,8 @@ static const BsdConstTag bsd_const_tags[] =
      * release were already there, so the DNS management API is complete.
      *
      * This tag gates more than its name suggests: every form of Roadshow's
-     * ShowNetStatus -- interfaces, routes, DNS, IP, ICMP, TCP, UDP, sockets,
-     * all ten -- refuses outright when it reads FALSE (docs/RESEARCH.md 55).
+     * ShowNetStatus, interfaces, routes, DNS, IP, ICMP, TCP, UDP, sockets,
+     * all ten, refuses outright when it reads FALSE (docs/RESEARCH.md 55).
      */
     { SBTC_HAVE_DNS_API,                SBT_RO, TRUE  },
     { SBTC_IPF_API_VERSION,             SBT_RO, 0     },
@@ -516,7 +516,7 @@ static const BsdConstTag bsd_const_tags[] =
      * TRUE since netdb.c: the tag names setnetent() and getprotoent(), and all
      * nine of set/get/end {net,proto,serv}ent are there over the DEVS:Internet
      * store. This answered FALSE while they worked, which is the mirror image
-     * of the SBTC_HAVE_DNS_API bug in docs/RESEARCH.md 55 -- there we claimed
+     * of the SBTC_HAVE_DNS_API bug in docs/RESEARCH.md 55, there we claimed
      * an API we did not have, here we denied one we do.
      */
     { SBTC_HAVE_LOCAL_DATABASE_API,     SBT_RO, TRUE  },
@@ -608,7 +608,7 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
             bsd_tag_store(item, by_ref, (ULONG)"SANA-II device error");
             return TRUE;
 
-        /* "the protocol stack's name and version information string" -- the
+        /* "the protocol stack's name and version information string", the
            name alone was neither half of that. */
         case SBTC_RELEASESTRPTR:
             bsd_tag_store(item, by_ref, (ULONG)AMINETXDUO_VERSION_LONG);
@@ -674,7 +674,7 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
 
         /*
          * All six bits, not just the first. Roadshow's GetNetStatus reports
-         * one line per bit and its startup scripts wait on them --
+         * one line per bit and its startup scripts wait on them,
          * "GetNetStatus CHECK=RESOLVER" is the documented way to hold a script
          * until the network is usable. Answering Interfaces alone made four of
          * its six lines wrong (docs/RESEARCH.md 55).

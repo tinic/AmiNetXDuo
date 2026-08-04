@@ -1,23 +1,23 @@
 /*
- * AmiNetXDuo -- milestone 8: the IPv6 dual stack, on 68k.
+ * AmiNetXDuo, milestone 8: the IPv6 dual stack, on 68k.
  *
  * Shaped like tests/ram_driver/ram_driver_test.c, and for the same reason:
  * two NX_IP instances on one simulated wire prove the stack end to end
  * without needing anything outside the emulator.  That matters more here than
- * it did for IPv4, since the emulated network may not carry IPv6 at all --
+ * it did for IPv4, since the emulated network may not carry IPv6 at all,
  * see tests/ipv6/ipv6_link_test.c, which probes that empirically.  This
  * test's result does not depend on it.
  *
  *   1. nxd_ipv6_enable() + nxd_icmp_enable() bring the dual stack up on a
  *      68020, and ::1 is configured by doing so.
  *   2. A link-local address is derived from the interface MAC as RFC 4291
- *      modified EUI-64 requires, and survives duplicate address detection --
+ *      modified EUI-64 requires, and survives duplicate address detection,
  *      which means solicited-node multicast, neighbour solicitations and
  *      neighbour advertisements all work.
  *   3. ICMPv6 echo request/reply works, over loopback and between two
  *      separate NX_IP instances across the link.
  *   4. TCP over IPv6 completes a three-way handshake, moves data both ways
- *      and closes -- between an adopted Exec Task and a ThreadX-created one.
+ *      and closes, between an adopted Exec Task and a ThreadX-created one.
  *   5. UDP over IPv6 carries a datagram and reports the source correctly
  *      through nxd_udp_source_extract().
  *   6. The IPv6 text conversions round-trip.
@@ -284,7 +284,7 @@ UINT    if_index = 0;
                   "link-local subnet id is zero", out -> nxd_ip_address.v6[1]);
     /*
      * The interface identifier is the MAC with 0xFFFE inserted in the middle
-     * and the universal/local bit (bit 1 of the first byte) inverted --
+     * and the universal/local bit (bit 1 of the first byte) inverted,
      * RFC 4291 appendix A. The RAM driver's MACs are 00:11:22:33:44:56 and
      * ...:57, so the identifier must read 0211:22ff:fe33:4456: the ff is the
      * low byte of word 2, the fe is the high byte of word 3, and the leading
@@ -347,7 +347,7 @@ CHAR        buffer[80];
     {
         /*
          * The peer must come back as an IPv6 address. nx_tcp_socket_peer_
-         * info_get() -- the v4-only entry point -- reports zero here, which
+         * info_get(), the v4-only entry point, reports zero here, which
          * is why bsdsocket.library's accept() uses the nxd_ form.
          */
         peer.nxd_ip_version =  0;
@@ -677,7 +677,7 @@ UINT        i;
         ULONG       msw = 0, lsw = 0;
         UINT        if_index =  0;
 
-        /* interface_index is not optional -- the error-checking wrapper
+        /* interface_index is not optional, the error-checking wrapper
            returns NX_PTR_ERROR (0x07) for a NULL, unlike most NetX Duo
            out-parameters. */
         status =  nxd_nd_cache_hardware_address_find(&t_ip0, &lookup,

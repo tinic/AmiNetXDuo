@@ -1,4 +1,4 @@
-Profile -- a sampling profiler for AmigaOS/m68k
+Profile, a sampling profiler for AmigaOS/m68k
 ===============================================
 
     Profile [RATE=n] [SAMPLES=n] [CHANNEL=n] [STACK=n] [OUT=file]
@@ -26,7 +26,7 @@ Anything the CPU executes while the program runs, wherever it is:
   * Kickstart.  Every AmigaOS library is a jump table, so exec.library/Forbid
     is named as exec.library/Forbid rather than as an address in ROM.
   * Shared libraries and devices, including ones loaded from disk while the
-    program runs and ones with no symbols at all -- those are named by module.
+    program runs and ones with no symbols at all, those are named by module.
   * Inside a shared library, by function, if the library cooperates.  See
     SEEING INSIDE A SHARED LIBRARY below; without it a library is one bar.
   * Interrupt handlers, including the SANA-II driver's receive path: sampling
@@ -48,7 +48,7 @@ WHAT IT CANNOT PROFILE
     longest gaps were.  Forbid()/Permit() does not mask interrupts and is
     sampled normally.
 
-  * Code inside a level-5 or level-6 interrupt handler -- disk sync, serial
+  * Code inside a level-5 or level-6 interrupt handler, disk sync, serial
     receive, CIA-B.  A level-4 interrupt cannot preempt those.  It shows up as
     a gap, and the gap is reported.
 
@@ -61,8 +61,8 @@ WHAT IT CANNOT PROFILE
     program in its own process with RunCommand(), so Exit() unwinds past it and
     the profile is not written.  It says so when it happens.
 
-  * A program that does not return at all.  A resident DOS handler -- `fitz
-    mount` -- is sampled correctly and forever, and nothing is written because
+  * A program that does not return at all.  A resident DOS handler, `fitz
+    mount`, is sampled correctly and forever, and nothing is written because
     the run never ends.  Break it and it returns normally: the handler and the
     profiler are the same process, so a CTRL-C to that task reaches both.
 
@@ -79,8 +79,8 @@ audio.device so a program that wants it can have it.  CHANNEL=n demands one.
 
 If every channel is taken, Profile refuses to sample rather than fighting for
 the hardware and reporting whatever comes out.  If a program takes the channel
-back mid-run -- audio.device gives it to a higher-precedence claimant without
-asking -- a vertical-blank watchdog notices the rate collapse and the report
+back mid-run, audio.device gives it to a higher-precedence claimant without
+asking, a vertical-blank watchdog notices the rate collapse and the report
 says so.  A profile of half a program that looks like a profile of all of it is
 the failure this tool exists to avoid.
 
@@ -93,7 +93,7 @@ THE RATE
 
 1000 Hz on a 68010 and up, 250 Hz on a plain 68000, and RATE= overrides both.
 
-WHAT THAT COSTS, measured rather than estimated -- profspin timing itself with
+WHAT THAT COSTS, measured rather than estimated, profspin timing itself with
 and without the profiler attached, under FS-UAE:
 
     68EC020, 14 MHz, 1000 Hz    12.52 s -> 13.00 s      3.8%
@@ -123,7 +123,7 @@ THE HOST SIDE
 Function names need the executable's symbols, which is why this half runs on
 the machine that built the program.  It recovers file-static functions too, by
 walking the linker map for where each object landed and running nm on that
-object -- without that, every sample in a static lands silently on the
+object, without that, every sample in a static lands silently on the
 preceding global.
 
     profreport.py fitz.prof --ndk <NDK include dir> \
@@ -144,8 +144,8 @@ naming that time needs the same two things the program itself needs: where the
 hunks landed, and the symbols.
 
 The symbols are the library's own file, which is what --lib takes.  Where the
-hunks landed is the problem.  A library base is a private struct -- Exec
-publishes struct Library at the front and nothing after it -- so the seglist,
+hunks landed is the problem.  A library base is a private struct, Exec
+publishes struct Library at the front and nothing after it, so the seglist,
 which every library has because Expunge must return it, sits at an offset only
 that library's own source knows.  Reading it from a hard-coded number would be
 this tool asserting a layout it cannot check, and the first field anybody
@@ -154,7 +154,7 @@ like a segment header, still produce hunk bases, and still resolve every
 address in the library to a wrong and entirely plausible name.
 
 So the library says where it is, in a record that identifies itself.  Five
-longwords anywhere in its own positive half, at any word boundary -- a magic,
+longwords anywhere in its own positive half, at any word boundary, a magic,
 its own size, the base it is embedded in, the seglist, and a sum that makes the
 five add to zero.  (Any WORD boundary: a longword on m68k is aligned to two
 bytes, so a record of longwords is four-aligned only by luck, and scanning in
@@ -170,7 +170,7 @@ needs no header from here: declare five longwords, fill them in at init, and
 if the base is ever cloned fix up the base field and the sum in the clone.
 
 A LIBRARY THAT DOES NOT CARRY ONE IS STILL NAMED, by module, from the hull of
-its jump-table targets -- which is what it has always been and what every
+its jump-table targets, which is what it has always been and what every
 third-party library will be.  The difference is a bar labelled with the
 library's name against a list of its functions.
 
@@ -184,7 +184,7 @@ Two exports, for viewers that already exist:
 
     --trace out.json     Chrome Trace Event JSON.  ui.perfetto.dev and
                          speedscope.app both read it, and it is a real
-                         timeline rather than an aggregate -- if two threads
+                         timeline rather than an aggregate, if two threads
                          alternate per packet, this shows the switch rate on
                          its face.
 
@@ -203,7 +203,7 @@ PROVING IT
 
 A sampling profiler is the one measurement tool that can be comprehensively
 wrong and still look right: read the exception frame two bytes off and every
-recorded value is half an SR concatenated with half a PC -- a number that lands
+recorded value is half an SR concatenated with half a PC, a number that lands
 somewhere, resolves to some function, and ranks it convincingly.
 
 profspin is the answer to that.  It is an ordinary program that links nothing

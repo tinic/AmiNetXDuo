@@ -8,7 +8,7 @@
 # It needs no network at all: the two NX_IP instances on the simulated wire are
 # both ends, which makes this the one IPv6 test that cannot be affected by what
 # happens to be outside the emulator.  (FS-UAE's SLIRP does turn out to carry
-# IPv6 -- see ipv6_link_test -- but that was not known when this was written
+# IPv6, see ipv6_link_test, but that was not known when this was written
 # and is not something to depend on.)
 
 add_executable(ipv6_test ipv6_test.c)
@@ -27,8 +27,8 @@ if(AMIGA_SIZE)
         COMMENT "ipv6_test size")
 endif()
 
-# The companion that drives the whole stack -- config file, SANA-II shim,
-# 0x86DD reader, neighbour discovery -- against a real device, and reports
+# The companion that drives the whole stack, config file, SANA-II shim,
+# 0x86DD reader, neighbour discovery, against a real device, and reports
 # what the wire actually has rather than asserting what it should have.
 #
 #   AMINETXDUO_RUN_TAG=v6link ./tests/ipv6/run-fsuae.sh -b build/v6
@@ -50,7 +50,7 @@ if(AMIGA_SIZE)
         COMMENT "ipv6_link_test size")
 endif()
 
-# AF_INET6 through the bsdsocket.library ABI -- linked against none of our
+# AF_INET6 through the bsdsocket.library ABI, linked against none of our
 # code, exactly like tests/libraries/library_test.
 #
 #   AMINETXDUO_RUN_TAG=v6sock ./tests/ipv6/run-socket-fsuae.sh -b build/v6
@@ -59,13 +59,13 @@ endif()
 # runs anywhere tier 2 runs.  It links nothing from src/; it includes
 # src/sana2/sana2_device.h for the SANA-II command numbers and structures
 # alone, which are protocol facts and whose alternative is a second copy of
-# them -- the same trade tests/tcpdrill states for itself.  What the test's own
+# them, the same trade tests/tcpdrill states for itself.  What the test's own
 # code takes from this tree is still <aminetxduo/cmsg.h> and nothing else.
 add_executable(ipv6_socket_test
     ipv6_socket_test.c
     "${CMAKE_SOURCE_DIR}/tests/tcpdrill/tapdev.c")
 
-# include/ for aminetxduo/cmsg.h -- RFC 3542 is struct shapes and macros, not
+# include/ for aminetxduo/cmsg.h, RFC 3542 is struct shapes and macros, not
 # vectors, so the header is the only thing this program takes from us.  Having
 # it on the path here is also the check that it compiles standalone.
 target_include_directories(ipv6_socket_test PRIVATE

@@ -6,8 +6,8 @@ headers at all**, and `include/aminetxduo/` is internal. A caller can link
 against the 0..143 range because the NDK declares it, and cannot reach anything
 we have added since.
 
-This is the plan for closing that. It covers what to ship, and -- more
-importantly -- the three places where shipping it means *fixing* an ABI that
+This is the plan for closing that. It covers what to ship, and, more
+importantly, the three places where shipping it means *fixing* an ABI that
 nobody else will fix for us.
 
 ## What exists to build on
@@ -29,7 +29,7 @@ that loads the argument registers and jumps through `SocketBase` at the LVO.
 LVO arithmetic: entry *n* of the SFD is at `-(30 + 6n)`, and our vector array
 carries the four standard library vectors (Open/Close/Expunge/Reserved) at
 `-6..-24` before `socket`. Do not derive the mapping from the SFD by counting
-`==reserve` directives -- there are three of them (10, 2, 6) and they do not all
+`==reserve` directives, there are three of them (10, 2, 6) and they do not all
 consume callable slots. `src/bsdsocket/bsdsocket_vectors.c` is the authority.
 
 The layout that matters:
@@ -37,7 +37,7 @@ The layout that matters:
 ```
   -0x336 [136]  getnameinfo     last entry the NDK's SFD defines
   -0x33c [137] ..
-  -0x35a [142]  the ==reserve 6 block -- Commodore's "six reserved
+  -0x35a [142]  the ==reserve 6 block, Commodore's "six reserved
                 slots for future expansion", the last directive before ==end
   -0x360 [143]  ObtainNetXDuoContext   ours, past the end of the SFD
   -0x366 [144]  NetStackQuery          ours
@@ -66,7 +66,7 @@ Once we hand out `-0x372` for `if_nametoindex`, it is that forever.
 implementation, so we pick it, and every ancillary-data buffer any caller ever
 builds depends on the choice.
 
-`struct cmsghdr` itself *is* in the NDK, and is 12 bytes -- the assessment that
+`struct cmsghdr` itself *is* in the NDK, and is 12 bytes, the assessment that
 said otherwise was wrong. What is missing is `CMSG_LEN` and `CMSG_SPACE`; what
 is present but broken is `CMSG_NXTHDR`, which expands to an `ALIGN()` no NDK
 header defines, and `CMSG_FIRSTHDR`, which does not test `msg_controllen`. The
@@ -82,7 +82,7 @@ numbering it gets back as `cmsg_type`**. `IPV6_RECVPKTINFO` 36 yields
 `cmsg_type` `IPV6_PKTINFO` 46; 49 yields 50. Mixing them on one socket reads as
 whichever was set last.
 
-`IP_PKTINFO` takes 8, which this NDK spells `IP_RETOPTS` -- a 4.3BSD get/set of
+`IP_PKTINFO` takes 8, which this NDK spells `IP_RETOPTS`, a 4.3BSD get/set of
 arriving IP options that no AmigaOS stack ever answered and this one refuses.
 That is the one place the addendum takes a number the NDK had already used.
 
@@ -120,7 +120,7 @@ Developer/
 **A separate SFD, not a fork of Commodore's.** A fork has to be re-merged every
 time the NDK moves and silently diverges when it is not. A small separate file
 declaring the same `==base _SocketBase` generates its own inline header, and a
-caller including both reaches all of it -- the base variable is shared, so the
+caller including both reaches all of it, the base variable is shared, so the
 two sets mix with no glue.
 
 **Additive header paths, not shadowed ones.** RFC 3493 says `if_nametoindex()`
@@ -129,7 +129,7 @@ shipping a `net/if.h` means include order decides whether ours or the NDK's
 wins, silently, per translation unit. So: the headers live under
 `aminetxduo/` and never replace an NDK header. If the standard spellings turn
 out to matter, an optional overlay drawer can be documented as
-put-this-first-and-here-is-the-risk -- opt-in, not the default.
+put-this-first-and-here-is-the-risk, opt-in, not the default.
 
 **Runtime detection is `lib_Revision`.** A header cannot tell a caller whether
 the library actually in memory has the vectors; only the revision can, which is
@@ -140,18 +140,18 @@ caller to invent one.
 
 ## Contents, in dependency order
 
-1. **RFC 3493 §4** -- `struct if_nameindex`, `IF_NAMESIZE`, and the four
+1. **RFC 3493 §4**, `struct if_nameindex`, `IF_NAMESIZE`, and the four
    prototypes. New LVOs `[146]`..`[149]`. Indices are 1-based, matching
    `rtm_index`; change neither alone.
-2. **RFC 3542** -- WRITTEN, `include/aminetxduo/cmsg.h`: the `CMSG_*` macros,
+2. **RFC 3542**, WRITTEN, `include/aminetxduo/cmsg.h`: the `CMSG_*` macros,
    `CMSG_BUFFER()` for the aligned control buffer a `char[]` cannot be,
    `struct in6_pktinfo`, `struct in_pktinfo`, `struct icmp6_filter` + its six
    macros, and the option numbers. No new LVOs: it rides `sendmsg`/`recvmsg`,
    and `struct msghdr` is already the 28-byte 4.4BSD shape with `msg_control` at
    offset 16. The header is on the include path of
    `tests/ipv6/ipv6_socket_test.c`, which links against none of our code, so it
-   is already proved usable from outside -- what is left is shipping it.
-3. **What is already ours and private** -- `netstatus.h`'s `NetStackQuery` /
+   is already proved usable from outside, what is left is shipping it.
+3. **What is already ours and private**, `netstatus.h`'s `NetStackQuery` /
    `NetStackControl` at `-0x366`/`-0x36c`. Publishing these is what lets someone
    else write a `netstat`. Decide deliberately: published means frozen.
 
@@ -179,12 +179,12 @@ tools/stage-developer.sh           assemble the drawer into a destdir
 The generated headers are committed so that packaging never needs sfdc.
 `tools/gen-developer.sh --check` regenerates into a temp directory and diffs,
 and `ci.sh`'s cross stage runs it wherever the resolved toolchain has an
-`sfdc` -- which the pinned one does.
+`sfdc`, which the pinned one does.
 
 `tools/stage-developer.sh` has one consumer too many to be inlined into
 either: `dist/make-dist.sh` stages the drawer into the archive, and
 `tests/tools/CMakeLists.txt` stages it into the build tree and compiles
-`IfNames.c` against **that alone** -- the staged include directory and the
+`IfNames.c` against **that alone**, the staged include directory and the
 NDK, and nothing else. A type that only exists in `include/aminetxduo/` and
 never reaches the drawer is a compile error rather than a download.
 
@@ -203,19 +203,19 @@ worth more than the deduplication.
 
 Still open: item 2 (RFC 3542) is on another branch and the SFD carries a
 marker where it does not go. Item 3 (`NetStackQuery`/`NetStackControl`) is
-recorded as a recommendation in `BACKLOG.md`, not taken -- publishing them
+recorded as a recommendation in `BACKLOG.md`, not taken, publishing them
 freezes `NetStatusHeader` and every `NETCTRL_*` request struct.
 
 ## The drawer is not only the vectors
 
 Added the same day, after the item was widened: a constant is as much of a
 wall as a vector. `include/aminetxduo/in6.h` is the second published header
-and carries what the NDK leaves out of AF_INET6 -- `IPPROTO_IPV6`,
+and carries what the NDK leaves out of AF_INET6, `IPPROTO_IPV6`,
 `PF_INET6`, `INET6_ADDRSTRLEN`, `IPV6_V6ONLY` / `IPV6_UNICAST_HOPS` /
 `IPV6_TCLASS`, `IN6ADDR_*_INIT`, the `IN6_IS_ADDR_*` macros,
 `struct sockaddr_storage` and `AI_ADDRCONFIG`. No vectors: the calls are
 `setsockopt()`, `socket()` and `getaddrinfo()`, which the NDK declares
-already, so there is no revision to check -- what a caller wants to know is
+already, so there is no revision to check, what a caller wants to know is
 whether `socket(AF_INET6, ...)` succeeds.
 
 It is the SINGLE definition. `bsdsocket_internal.h` now includes it and its
@@ -239,11 +239,11 @@ Two decisions worth writing down:
 `developer/examples/V6Only.c` exercises all of it, compiled against the
 staged drawer alone like `IfNames.c`.
 
-## What the NDK actually has -- audited 2026-07-31
+## What the NDK actually has, audited 2026-07-31
 
 Re-verified against `ndk-include` rather than taken from the comments, and
-two of the comments were wrong. (`grep -r` reads those headers as binary --
-they are Latin-1 and carry a `©` -- so it silently finds nothing. Use
+two of the comments were wrong. (`grep -r` reads those headers as binary,
+they are Latin-1 and carry a `©`, so it silently finds nothing. Use
 `LC_ALL=C grep -a`, or a negative result means nothing.)
 
 Absent, and therefore ours to define: `sockaddr_storage`, `PF_INET6`,
@@ -254,11 +254,11 @@ Absent, and therefore ours to define: `sockaddr_storage`, `PF_INET6`,
 **Present, contrary to what `BACKLOG.md` says about RFC 3542:**
 `struct cmsghdr`, `CMSG_DATA`, `CMSG_FIRSTHDR` and `CMSG_NXTHDR` are all in
 `<sys/socket.h>`, and `struct cmsghdr` is already the 12-byte
-`socklen_t`+`LONG`+`LONG` shape that `CMSG_ALIGN` = 4 implies -- so that
+`socklen_t`+`LONG`+`LONG` shape that `CMSG_ALIGN` = 4 implies, so that
 decision is consistent with what is there, which is worth knowing before
 writing a second `struct cmsghdr`. What is genuinely missing is `CMSG_LEN`,
 `CMSG_SPACE`, `CMSG_ALIGN`, and the bare `ALIGN()` the NDK's own
-`CMSG_NXTHDR` expands to and which nothing in the NDK defines -- so
+`CMSG_NXTHDR` expands to and which nothing in the NDK defines, so
 `CMSG_NXTHDR` as shipped does not compile.
 
 **Present, so IPv4 multicast needs no header work:** `IP_MULTICAST_IF`,
@@ -266,7 +266,7 @@ writing a second `struct cmsghdr`. What is genuinely missing is `CMSG_LEN`,
 `IP_DROP_MEMBERSHIP` and `struct ip_mreq` are in `<netinet/in.h>`. The IPv6
 equivalents are absent, so `in6.h` publishes `IPV6_JOIN_GROUP`,
 `IPV6_LEAVE_GROUP`, `IPV6_MULTICAST_IF`, `IPV6_MULTICAST_HOPS`,
-`IPV6_MULTICAST_LOOP` and `struct ipv6_mreq` -- BSD numbers published, Linux
+`IPV6_MULTICAST_LOOP` and `struct ipv6_mreq`, BSD numbers published, Linux
 numbers accepted, as the other three options are. A join sends no MLD report,
 because there is none in the stack to send; link-local scope is what to rely
 on.
@@ -275,11 +275,11 @@ on.
 `struct bpf_program`, `struct bpf_stat`, `struct bpf_version`, `DLT_*`, the
 `BPF_*` opcodes and `BPF_WORDALIGN` are in `<net/bpf.h>`; `FIONREAD` is in
 `<sys/filio.h>` and `SIOCGIFADDR` in `<sys/sockio.h>`. Everything `AMI_BPF_*`
-in `include/aminetxduo/bpf.h` is implementation internals -- segment views,
+in `include/aminetxduo/bpf.h` is implementation internals, segment views,
 channel limits, internal error codes, the offsets the host-test replica
-pins -- and none of it is an application's business.
+pins, and none of it is an application's business.
 
 ## What this does not cover
 
-RFC 4007's `%zone` text form is behaviour, not header -- it needs a parser and a
+RFC 4007's `%zone` text form is behaviour, not header, it needs a parser and a
 formatter, and no ABI. It is in `BACKLOG.md` on its own.

@@ -1,4 +1,4 @@
-| AmiNetXDuo -- crypto68k: the AES round, 68020 assembly.
+| AmiNetXDuo, crypto68k: the AES round, 68020 assembly.
 |
 |   Four entry points, all with the same interface as the C round cores in
 |   c68k_aes.c: (round keys, number of rounds, a four-longword state in
@@ -8,7 +8,7 @@
 |
 |   The buffering, the key schedule and CBC stay in C.  They are 9% of a
 |   block, they are where the awkward cases live, and the one instruction that
-|   mattered in them -- a misaligned MOVE.L for a big-endian longword -- is
+|   mattered in them, a misaligned MOVE.L for a big-endian longword, is
 |   already inline assembly there.
 |
 | The state is kept in memory
@@ -61,7 +61,7 @@
         .text
         .even
 
-| Stack layout after `movem.l d2-d7/a2-a6,-(sp)` -- eleven longwords.
+| Stack layout after `movem.l d2-d7/a2-a6,-(sp)`, eleven longwords.
         .set    AES_ARG,        44
 
 | ---------------------------------------------------------------------------
@@ -162,7 +162,7 @@
 | VOID c68k_aes_core_enc_t4_asm(const ULONG *rk, UINT nr, ULONG *st)
 |
 | ShiftRows for encryption picks bytes 0,5,10,15 / 4,9,14,3 / 8,13,2,7 /
-| 12,1,6,11 -- the diagonals of the state read column by column.
+| 12,1,6,11, the diagonals of the state read column by column.
 | ---------------------------------------------------------------------------
         .globl  _c68k_aes_core_enc_t4_asm
 _c68k_aes_core_enc_t4_asm:

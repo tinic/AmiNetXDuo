@@ -1,10 +1,10 @@
 /*
- * memprobe -- what opening the stack costs the machine.
+ * memprobe, what opening the stack costs the machine.
  *
  * AvailMem() at four points in one run: before OpenLibrary(), with the stack
  * up, after the last close (which stops the stack but leaves the segment
  * loaded), and after the segment has been expunged.  Nothing else measures the
- * library code itself -- netstat -h reads the same AvailMem, but it needs a
+ * library code itself, netstat -h reads the same AvailMem, but it needs a
  * running stack and so has no baseline to compare against.
  *
  * The last two never print today: the final CloseLibrary() does not return

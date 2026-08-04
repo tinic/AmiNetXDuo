@@ -6,9 +6,9 @@
 #     Read(fh,&c,1) and FGets() are `jsr` inside __asm volatile, so no analyser
 #     sees the store.  All the uninitvar entries are this.
 #   * a ReadArgs() /A argument.  ReadArgs writes the array and returns NULL if
-#     a /A is missing, so args[0] is non-NULL past the check -- clockset.c.
+#     a /A is missing, so args[0] is non-NULL past the check, clockset.c.
 #   * NX_ASSERT, which is a no-op under NDEBUG.  cppcheck reads the assert as
-#     the NULL test it then says is redundant -- n68k_checksum.c and the
+#     the NULL test it then says is redundant, n68k_checksum.c and the
 #     rfc7905 copy, both of which mirror vendored NetX Duo code.
 #   * dead under this configuration, live under another: c68k_crt.c's last
 #     scratch advance is the vendored carving kept deliberately intact.
@@ -18,7 +18,7 @@
 #     uninitialised local for entropy and never reads it.  netstack_rexx.c is
 #     the same shape from the other end: ami_rx_service() substitutes "" when
 #     ARG0 is NULL, so cppcheck models the parameter as char[1] and then reads
-#     the copy loop's len < 1024 against it -- but "" stops that loop at len 0,
+#     the copy loop's len < 1024 against it, but "" stops that loop at len 0,
 #     and index 1024 is unreachable on the only path that makes it char[1].
 #   * tests/tls/tls_resume.c: a static tag array pointing at an automatic that
 #     is alive for the whole call and rebuilt on the next one.

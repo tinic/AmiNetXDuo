@@ -1,17 +1,17 @@
 /*
- * AmiNetXDuo -- whether a TCP connection gives up after
+ * AmiNetXDuo, whether a TCP connection gives up after
  * NX_TCP_MAXIMUM_RETRIES.
  *
- * Over an impaired link -- loss, a 576-byte path MTU, and a router silently
- * dropping the oversized datagrams -- a socket retransmitted the same sequence
+ * Over an impaired link, loss, a 576-byte path MTU, and a router silently
+ * dropping the oversized datagrams, a socket retransmitted the same sequence
  * number at +1, +2, +4, +8, +16, +32, +64 and +128 seconds.  The doubling is
  * NX_TCP_RETRY_SHIFT 1, so port/netxduo-amiga/inc/nx_user.h had plainly been
  * read; the +128 is a retry that NX_TCP_MAXIMUM_RETRIES 6 should never have
  * allowed, and 600 s later curl was still blocked with an empty stderr.
  *
- * Two explanations fit that from the outside -- the macro did not reach the
+ * Two explanations fit that from the outside, the macro did not reach the
  * vendored translation unit, or the limit is tested against the wrong counter
- * -- and they need opposite fixes.  A packet capture cannot separate them,
+ * and they need opposite fixes.  A packet capture cannot separate them,
  * because the interval ladder is driven by nx_tcp_socket_timeout_retries and
  * looks identical either way.  So this prints what the socket holds after
  * nx_tcp_socket_create() and then drives the timer that has to act on it.
@@ -19,7 +19,7 @@
  * Real, compiled from third_party/netxduo/common/src into this binary:
  * nx_tcp_socket_create.c, nx_tcp_socket_send_internal.c,
  * nx_tcp_socket_retransmit.c, nx_tcp_fast_periodic_processing.c,
- * nx_tcp_socket_connection_reset.c and nx_tcp_socket_block_cleanup.c -- the
+ * nx_tcp_socket_connection_reset.c and nx_tcp_socket_block_cleanup.c, the
  * whole decision path from "the application could not queue a segment" to
  * "the connection is reset and the application is told".
  *
@@ -477,7 +477,7 @@ static NX_PACKET *h_app_packet(void)
 /*
  * H_APP_WRITES models a caller stuck in send().  bsd_wait_sliced()
  * (src/bsdsocket/select.c:300) re-enters nx_tcp_socket_send() every
- * BSD_BREAK_SLICE_TICKS -- 200 ms -- for as long as the status is
+ * BSD_BREAK_SLICE_TICKS, 200 ms, for as long as the status is
  * NX_WINDOW_OVERFLOW or NX_TX_QUEUE_DEPTH, so that Ctrl-C still works; a
  * non-blocking caller such as curl comes back on its select loop just as
  * often, and for the same two statuses.  Either way the application offers
@@ -565,7 +565,7 @@ int main(void)
     /* ---- 2. the ladder, with nothing else going on ---------------------- */
     /*
      * Six retries at a shift of one is 1, 2, 4, 8, 16, 32 and 64 seconds of
-     * waiting -- six datagrams, at +1, +3, +7, +15, +31 and +63 -- and the
+     * waiting, six datagrams, at +1, +3, +7, +15, +31 and +63, and the
      * expiry of that last 64 s interval, at 127 s, is a reset rather than a
      * seventh datagram.
      */
@@ -587,8 +587,8 @@ int main(void)
 
     /* ---- 4. one send that cannot be queued ----------------------------- */
     /*
-     * Nothing can be queued -- the transmit queue is full and one segment is
-     * already in flight against a one-segment congestion window -- so
+     * Nothing can be queued, the transmit queue is full and one segment is
+     * already in flight against a one-segment congestion window, so
      * _nx_tcp_socket_send_internal() answers NX_TX_QUEUE_DEPTH, which the BSD
      * layer turns into EWOULDBLOCK and bsd_wait_sliced() retries.
      *
@@ -598,8 +598,8 @@ int main(void)
      * decide which counter the retry limit is tested against, so setting it
      * here aimed the test at nx_tcp_socket_zero_window_probe_failure, which
      * the ordinary data path never advances.  The neighbouring arm of the
-     * same else -- NX_WINDOW_OVERFLOW, when the queue has room but the window
-     * does not -- set it in exactly the same way.
+     * same else, NX_WINDOW_OVERFLOW, when the queue has room but the window
+     * does not, set it in exactly the same way.
      */
     h_fixture();
 
@@ -621,7 +621,7 @@ int main(void)
      * retransmission clears the flag again (nx_tcp_socket_retransmit.c:158).
      * A caller stuck in send() re-arms it every 200 ms, which is faster than
      * the ladder doubles, so from the second rung onwards the flag is set
-     * every time the timer looks -- and the connection is never abandoned.
+     * every time the timer looks, and the connection is never abandoned.
      * This is the 600-second stall, reproduced without a network.
      */
     h_fixture();
@@ -638,7 +638,7 @@ int main(void)
     /* ---- 6. a genuine zero window, with nobody answering the probes ---- */
     /*
      * Here the flag is right: the peer really has closed its window, so the
-     * limit is tested against nx_tcp_socket_zero_window_probe_failure -- and
+     * limit is tested against nx_tcp_socket_zero_window_probe_failure, and
      * that counter has to be allowed to grow.  It was reset on every probe,
      * so it never passed 1 and the second arm of the test could not fire
      * either.
@@ -680,8 +680,8 @@ int main(void)
      * at the ceiling rather than doubling past it.
      *
      * Seven retries with the shift capped at 6 is 1, 2, 4, 8, 16, 32, 64 and 64
-     * seconds of waiting -- seven datagrams at +1, +3, +7, +15, +31, +63 and
-     * +127 -- and the expiry of that last 64 s interval, at 191 s, is the reset.
+     * seconds of waiting, seven datagrams at +1, +3, +7, +15, +31, +63 and
+     * +127, and the expiry of that last 64 s interval, at 191 s, is the reset.
      * Without the cap the seventh interval is 128 seconds and the reset lands on
      * 255.
      */

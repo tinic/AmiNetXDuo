@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- bpf_* internals.
+ * AmiNetXDuo, bpf_* internals.
  *
  * Private to src/bpf/. bpf_filter.c, bpf_validate.c, bpf_channel.c and
  * bpf_tap.c contain no AmigaOS calls; everything platform-specific is behind
@@ -105,7 +105,7 @@ AmiBpfIf *ami_bpf_iface_by_cookie(APTR cookie);
 AmiBpfIf *ami_bpf_iface_by_name(const char *name);
 ULONG     ami_bpf_iface_address(const AmiBpfIf *ifp);
 
-/* bpf_filter.c -- byte count for a BPF_SIZE field, 0 if the encoding is bad. */
+/* bpf_filter.c, byte count for a BPF_SIZE field, 0 if the encoding is bad. */
 UWORD ami_bpf_size_bytes(UWORD code);
 
 /* Endian- and alignment-neutral field access inside a capture record. */

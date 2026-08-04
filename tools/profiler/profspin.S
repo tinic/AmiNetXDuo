@@ -1,4 +1,4 @@
-| profspin -- known-hot kernels, for proving the profiler against a program it
+| profspin, known-hot kernels, for proving the profiler against a program it
 | is not part of.
 |
 | These are assembly and not C for one reason: the check they exist for is "did
@@ -9,7 +9,7 @@
 | Each kernel is a self-contained loop with no calls, so during its phase
 | essentially every sample must land inside it.  If the vector read the frame
 | at the wrong offset the recorded value would be half the SR concatenated with
-| half the PC -- an address nowhere near these ranges -- so the in-range
+| half the PC, an address nowhere near these ranges, so the in-range
 | fraction is a sharp test rather than a plausible-looking one.
 |
 | SPDX-License-Identifier: MIT
@@ -18,7 +18,7 @@
         .even
 
 | ---------------------------------------------------------------------------
-| VOID spin_a(ULONG reps) -- two instructions per iteration.
+| VOID spin_a(ULONG reps), two instructions per iteration.
 | ---------------------------------------------------------------------------
         .globl  _spin_a
         .globl  _spin_a_end
@@ -33,7 +33,7 @@ _spin_a:
 _spin_a_end:
 
 | ---------------------------------------------------------------------------
-| VOID spin_b(ULONG reps) -- three, and a different body so that nothing
+| VOID spin_b(ULONG reps), three, and a different body so that nothing
 | downstream can fold it onto spin_a.
 | ---------------------------------------------------------------------------
         .globl  _spin_b
@@ -51,7 +51,7 @@ _spin_b:
 _spin_b_end:
 
 | ---------------------------------------------------------------------------
-| VOID spin_c(ULONG reps) -- five.  d2 and up are callee-saved, so this stays
+| VOID spin_c(ULONG reps), five.  d2 and up are callee-saved, so this stays
 | inside the scratch registers.
 | ---------------------------------------------------------------------------
         .globl  _spin_c

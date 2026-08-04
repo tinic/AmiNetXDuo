@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- host fuzz driver for the DEVS:Internet parsers.
+ * AmiNetXDuo, host fuzz driver for the DEVS:Internet parsers.
  *
  * Same shim arrangement as src/config/test/test_config.c: the AmigaOS calls
  * the parsers need are answered here, and ami_cfg_read_file() comes from an
@@ -9,7 +9,7 @@
  * input under -fsanitize=address,undefined.
  *
  * Every parser that reads a file out of DEVS: belongs here, including
- * DEVS:Internet/service_discovery -- see SECURITY.md.
+ * DEVS:Internet/service_discovery, see SECURITY.md.
  *
  * Build (see fuzz.sh):
  *   cc -fsanitize=address,undefined -g -std=c99 -Iinclude \

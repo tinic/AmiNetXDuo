@@ -8,16 +8,16 @@
 #
 # WHAT THE PUBLISHED API SAYS
 #
-#   AddInterfaceTagList() -- "Make a new interface available for network
+#   AddInterfaceTagList(), "Make a new interface available for network
 #   access ... Each such device must be assigned a unique interface name and
 #   refer to a SANA-II device name and unit number."  Its whole tag set is
 #   device-facing: IFA_IPType, IFA_ARPType, IFA_Num*Requests,
 #   IFA_PacketFilterMode, IFA_PointToPoint, IFA_Multicast, IFA_DownGoesOffline,
 #   IFA_ReportOffline.  There is no address, netmask, gateway or broadcast tag.
 #
-#   ConfigureInterfaceTagList() -- "for changing the configuration of an
+#   ConfigureInterfaceTagList(), "for changing the configuration of an
 #   interface previously added with AddInterfaceTagList(), such as setting
-#   interface addresses, status and routing metrics" -- IFC_Address,
+#   interface addresses, status and routing metrics", IFC_Address,
 #   IFC_NetMask, IFC_DestinationAddress, IFC_BroadcastAddress.
 #
 #   So the add creates a bare interface and the configure addresses it.  An
@@ -60,7 +60,7 @@
 # WHY NOT IN run-ifquery.sh, WHICH ALSO RUNS IfProbe
 #
 #   That harness runs IfProbe as its FIRST command, and this stack cannot get
-#   past the `AddNetInterface` that follows the probe -- observed hanging there
+#   past the `AddNetInterface` that follows the probe, observed hanging there
 #   on more than one build.  That is a separate defect and not this one, which
 #   is why nothing is added to that file: an assertion behind a hang is an
 #   assertion that never runs.
@@ -250,7 +250,7 @@ fi
 #
 # AddInterfaceTagList() has no address tag, so the interface it hands back must
 # be carrying nothing.  A library vector that put the old addressing back would
-# read as still addressed here -- and would also stop BeginInterfaceConfig()
+# read as still addressed here, and would also stop BeginInterfaceConfig()
 # from ever running a DHCP allocation on a re-added interface, which is how it
 # was found.
 if grep -q "^bare after add: address 0\.0\.0\.0 netmask 0\.0\.0\.0 -- bare, correctly" "$REPORT"; then

@@ -1,5 +1,5 @@
 /*
- * Profile -- sample any AmigaOS program.
+ * Profile, sample any AmigaOS program.
  *
  *      Profile [RATE=n] [SAMPLES=n] [CHANNEL=n] [STACK=n] [OUT=file]
  *              [FOLDED=file] [TOP=n] [QUIET] <program> [arguments]
@@ -19,7 +19,7 @@
  * That leaves LoadSeg() plus one of two ways to enter it.
  *
  *   RunCommand()      synchronous, in this process, returns the program's
- *                     return code, and takes the seglist WE loaded -- so the
+ *                     return code, and takes the seglist WE loaded, so the
  *                     hunk table is recorded before the first instruction
  *                     runs and is exact by construction.  prof_start() before
  *                     and prof_stop() after bracket the run with nothing in
@@ -29,7 +29,7 @@
  *   CreateNewProc()   asynchronous, in a new process.  Everything above has to
  *                     be rebuilt: NP_ExitCode or a signal to learn that it
  *                     finished, and a race at both ends between the child
- *                     starting and the sampler starting.  It buys one thing --
+ *                     starting and the sampler starting.  It buys one thing,
  *                     the program gets its own stack and its own process, so a
  *                     program that Exit()s does not take the profiler with it.
  *
@@ -37,7 +37,7 @@
  * calls Exit() rather than returning from main() unwinds past us, and the
  * profile for that run is not written.  That is the same deal the Shell makes,
  * which is what a Shell command is written against, so in practice it is the
- * uncommon case -- and it is loud when it happens rather than quiet.
+ * uncommon case, and it is loud when it happens rather than quiet.
  *
  * RunCommand() runs the program in THIS process, so a program that reads
  * cli_Module to find its own seglist sees Profile's, not its own.  Nothing in
@@ -74,7 +74,7 @@ enum { OPT_RATE, OPT_SAMPLES, OPT_CHANNEL, OPT_STACK, OPT_OUT, OPT_FOLDED,
  * Measured, by having profspin time itself with the profiler attached and
  * without: 12.52 s against 13.00 s on a 14 MHz 68EC020 at 1000 Hz, and
  * 16.66 s against 17.30 s on a 7 MHz 68000 at 250 Hz.  Both 3.8%, which is
- * roughly 38 us an interrupt on the 020 and 150 us on the 68000 -- most of it
+ * roughly 38 us an interrupt on the 020 and 150 us on the 68000, most of it
  * Exec's own level-4 dispatch rather than the eleven instructions in the
  * vector.  The 68000 is about four times slower and samples four times less
  * often, so the two defaults cost the same fraction.
@@ -102,7 +102,7 @@ static VOID say(const char *fmt, ...);
  *
  * As given first, so an absolute or relative path is never second-guessed,
  * then each directory on the Shell's own path, then C:.  A resident command is
- * loaded from disk instead of being taken from the resident list -- which is
+ * loaded from disk instead of being taken from the resident list, which is
  * what we want, because a fresh copy is a seglist we know the extent of.
  */
 struct PathEntry { BPTR pe_Next; BPTR pe_Lock; };
@@ -174,8 +174,8 @@ char                         buf[256];
  * a device driver's.  Function names need the executable's symbols and stay
  * with tools/profiler/profreport.py on the host.
  *
- * Ranges overlap on purpose -- a library's jump table and its code hull are
- * two ranges over the same module -- so the narrowest containing range wins.
+ * Ranges overlap on purpose, a library's jump table and its code hull are
+ * two ranges over the same module, so the narrowest containing range wins.
  */
 static const struct ProfRange *ranges;
 static ULONG                   nranges;
@@ -376,7 +376,7 @@ LONG  shown;
         /*
          * Profile allocates its channel at the normal application precedence,
          * so a program that asks audio.device for the same one with a higher
-         * precedence takes it -- and that is the right way round.  A profiler
+         * precedence takes it, and that is the right way round.  A profiler
          * that wins the fight has changed the thing it is measuring; one that
          * loses it has only lost the measurement, and can say so.
          */
@@ -391,7 +391,7 @@ LONG  shown;
 /*
  * One line per unique stack, "frame1;frame2;frame3 <count>".  speedscope,
  * flamegraph.pl and inferno all read it directly, so this is three viewers for
- * one trivial emitter -- and emitting it here rather than only on the host
+ * one trivial emitter, and emitting it here rather than only on the host
  * means somebody at a real Amiga can produce something a browser will draw
  * without a cross-development machine anywhere in the loop.
  *
@@ -400,7 +400,7 @@ LONG  shown;
  * bar chart with extra steps.  What is emitted instead is a synthetic
  * hierarchy that the sample already carries: task, then task-versus-interrupt
  * context, then module.  For "how much of this is Exec, and under which task"
- * that is more use than a real call graph would be, and it is honest -- every
+ * that is more use than a real call graph would be, and it is honest, every
  * level of it is measured, none of it is inferred.
  *
  * The host tool adds a fourth level, the function, which needs the
@@ -498,7 +498,7 @@ int              i;
             : (((eb->AttnFlags & AFF_68010) != 0) ? RATE_68010UP : RATE_68000);
 
     /* COMMAND/A/F is the rest of the line: the program, then its arguments
-       verbatim.  Splitting on the first space is all that is needed -- the
+       verbatim.  Splitting on the first space is all that is needed, the
        program under test parses the rest itself, exactly as the Shell would
        have handed it over. */
     cmdline = (const char *)opt[OPT_COMMAND];

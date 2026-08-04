@@ -1,7 +1,7 @@
 # 4.4BSD mbuf emulation for the mbuf_* LVOs (docs/RESEARCH.md 3.2, milestone 7).
 #
-# mbuf_alloc.c and mbuf_ops.c contain no AmigaOS calls -- the two locking hooks
-# live in mbuf_amiga.c -- so the same sources build and run on the host against
+# mbuf_alloc.c and mbuf_ops.c contain no AmigaOS calls, the two locking hooks
+# live in mbuf_amiga.c, so the same sources build and run on the host against
 # the replica layout in include/aminetxduo/mbuf.h. See the host test below.
 
 add_library(aminetxduo_mbuf STATIC

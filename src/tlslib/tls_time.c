@@ -1,10 +1,10 @@
 /*
- * tls.library -- what "now" means on a machine that does not know.
+ * tls.library, what "now" means on a machine that does not know.
  *
  *   A certificate carries notBefore and notAfter, and checking them needs a
  *   clock.  A great many Amigas do not have one: no battery-backed RTC, or a
  *   dead battery, and AmigaOS then starts at its epoch, 1 January 1978.
- *   tests/tls/tls_https saw this -- `tv_secs == 0`.  Every certificate on the
+ *   tests/tls/tls_https saw this, `tv_secs == 0`.  Every certificate on the
  *   internet was issued after 1978, so on such a machine every certificate
  *   fails notBefore and every HTTPS connection fails.
  *
@@ -17,7 +17,7 @@
  *   when it is not, and report which happened.
  *
  *   What that costs.  Expiry checking does not stop an attacker from
- *   impersonating a site -- the signature chain to a trusted root and the host
+ *   impersonating a site, the signature chain to a trusted root and the host
  *   name check do that, and both still run.  Expiry bounds how long a
  *   certificate whose private key has leaked stays useful.  An attacker who
  *   has stolen a key and can get between this Amiga and the site can use it
@@ -68,7 +68,7 @@
  *
  * On a machine with a set clock this is wall time.  On one without it starts
  * at the AmigaOS epoch and counts up from boot, which is wrong as a date and
- * still useful as elapsed time -- tls_resume.c ages cached sessions against
+ * still useful as elapsed time, tls_resume.c ages cached sessions against
  * it, and TLS_CLOCK_FLOOR is what tells the two cases apart.
  */
 ULONG tls_time_monotonic(VOID)

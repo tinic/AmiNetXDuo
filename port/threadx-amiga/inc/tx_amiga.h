@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- public API of the ThreadX AmigaOS/Exec port.
+ * AmiNetXDuo, public API of the ThreadX AmigaOS/Exec port.
  *
  * Include after tx_api.h.
  *
@@ -29,7 +29,7 @@ VOID    tx_amiga_set_kernel_memory(VOID *memory, ULONG size);
 /*
  * Start ThreadX on a private Exec Task and return once tx_application_define()
  * has run and the scheduler is live.  This is the entry point a shared library
- * wants, because tx_kernel_enter() never returns -- the task that calls it
+ * wants, because tx_kernel_enter() never returns, the task that calls it
  * becomes the ThreadX scheduler for the lifetime of the kernel.
  *
  * A standalone program may equally well just call tx_kernel_enter() from
@@ -44,7 +44,7 @@ UINT    tx_amiga_kernel_running(VOID);
 
 /*
  * Bring the kernel down and return only once nothing the port created will
- * execute again -- no tick, no scheduler, no ThreadX thread.
+ * execute again, no tick, no scheduler, no ThreadX thread.
  *
  * This is what makes it safe for a program to exit.  tx_amiga_kernel_start()
  * leaves two Exec Tasks running with their entry points inside the caller's
@@ -55,7 +55,7 @@ UINT    tx_amiga_kernel_running(VOID);
  *
  * Torn down:
  *   1. the periodic tick Task, including its timer.device request;
- *   2. ThreadX's own system timer thread -- ThreadX creates it, on a stack in
+ *   2. ThreadX's own system timer thread, ThreadX creates it, on a stack in
  *      ThreadX's BSS, so it is neither the application's to delete nor safe to
  *      leave behind;
  *   3. the master Task that has been sitting in tx_kernel_enter() since start;
@@ -76,7 +76,7 @@ UINT    tx_amiga_kernel_running(VOID);
  *
  * Callable from any Exec Task the port did not create, including one that is
  * currently adopted: the caller's own thread does not count against it, and is
- * orphaned on its behalf -- but only once the stop is going ahead, so a refusal
+ * orphaned on its behalf, but only once the stop is going ahead, so a refusal
  * leaves the caller adopted and the kernel as it found them.  Calling it from a
  * Task the port created (a ThreadX thread, the tick, the master) returns
  * TX_CALLER_ERROR: it would be waiting for itself.  Idempotent: calling it on a
@@ -92,7 +92,7 @@ UINT    tx_amiga_kernel_running(VOID);
  *   TX_NO_MEMORY     Refused for want of an Exec signal; kernel untouched and
  *                    still usable.  Not safe to exit.
  *   TX_CALLER_ERROR  Wrong caller; kernel untouched.  Not safe to exit.
- *   TX_NOT_DONE      Teardown began and did not finish -- something the port
+ *   TX_NOT_DONE      Teardown began and did not finish, something the port
  *                    created could not be woken.  The kernel is now unusable
  *                    and something is still running in the program's hunk.  Do
  *                    not exit.  Every failure is logged through ami_log().
@@ -112,8 +112,8 @@ UINT    tx_amiga_kernel_stop(VOID);
  *
  * tx_thread_delete() removes the backing Exec Task by asking it to destroy
  * itself, and waits a bounded time for it to do so.  A thread that is blocked
- * inside Exec rather than inside ThreadX -- parked in WaitIO() on a device
- * that ignores AbortIO(), say -- cannot be woken and cannot safely be removed
+ * inside Exec rather than inside ThreadX, parked in WaitIO() on a device
+ * that ignores AbortIO(), say, cannot be woken and cannot safely be removed
  * by anyone else, so the wait times out.  The thread is then detached: it can
  * no longer touch its TX_THREAD, the ThreadX baton is recovered if it held
  * one, and the task destroys itself whenever it finally unblocks.
@@ -189,7 +189,7 @@ typedef struct TX_AMIGA_TICK_STATS_STRUCT
     ULONG   tx_amiga_tick_deferred;
     /* How far behind real time the timer wheel is, in ticks: what it has yet to
        be given, plus everything the clip above took off it for good.  The clock
-       is not in this -- it comes from the E-Clock and is true regardless -- so
+       is not in this, it comes from the E-Clock and is true regardless, so
        this is a measure of how late timers are running and of nothing else.
        The peak is sampled before a backlog is worked off, so it moves on a
        machine where nothing was ever clipped or lost. */
@@ -218,7 +218,7 @@ TX_AMIGA_TICK_STATS *tx_amiga_tick_stats_live(VOID);
  * tx_mutex_get(), ... all suspend "the calling thread").
  *
  * thread_ptr must point at storage that stays valid until orphaned; it is
- * initialised here -- do not pass it to tx_thread_create() as well.  No stack
+ * initialised here, do not pass it to tx_thread_create() as well.  No stack
  * is allocated: the Task already owns one, and _tx_thread_stack_build() binds
  * to it instead of building a frame.
  *
@@ -228,8 +228,8 @@ TX_AMIGA_TICK_STATS *tx_amiga_tick_stats_live(VOID);
  *
  * While adopted, the Task must not block on anything except ThreadX.  An
  * adopted Task that Wait()s on an Intuition port, a DOS packet or a device
- * IORequest holds the baton while unrunnable, and the whole stack -- including
- * the NetX Duo IP thread and the periodic timer -- stalls behind it.  Intended
+ * IORequest holds the baton while unrunnable, and the whole stack, including
+ * the NetX Duo IP thread and the periodic timer, stalls behind it.  Intended
  * usage is therefore: adopt on entry to a stack call, orphan on exit.  See
  * docs/RESEARCH.md 6.3 and the notes in tx_amiga_adopt.c.
  *
@@ -259,8 +259,8 @@ UINT    tx_amiga_orphan_thread(TX_THREAD *thread_ptr);
  * gets the same TX_THREAD every time.
  *
  * A caller that owns persistent storage may therefore adopt once and use this
- * pair as its bracket.  Between them the thread is TX_SUSPENDED -- not on any
- * ready list, never dispatched by the scheduler, and the baton is free -- so
+ * pair as its bracket.  Between them the thread is TX_SUSPENDED, not on any
+ * ready list, never dispatched by the scheduler, and the baton is free, so
  * the "never block outside ThreadX while adopted" rule is unchanged: it applies
  * between resume and suspend as it applies between adopt and orphan.
  *
@@ -283,7 +283,7 @@ UINT    tx_amiga_adopt_resume(TX_THREAD *thread_ptr);
 UINT    tx_amiga_adopt_suspend(TX_THREAD *thread_ptr);
 
 /*
- * Deregister a thread adopted by some other Task -- the teardown path for a
+ * Deregister a thread adopted by some other Task, the teardown path for a
  * cached adoption whose owner is gone or is not the one closing.  The Exec
  * signal is not recovered, because only its owner may FreeSignal() it; if the
  * owner is alive it keeps a bit it will never use again, and if it is dead the
@@ -298,7 +298,7 @@ UINT    tx_amiga_discard_thread(TX_THREAD *thread_ptr);
 TX_THREAD *tx_amiga_adopted_thread(VOID);
 
 /*
- * TX_TRUE if the calling Exec Task is the ThreadX baton holder -- the port's
+ * TX_TRUE if the calling Exec Task is the ThreadX baton holder, the port's
  * answer to "is a thread calling me", which on a hosted port is not the same
  * question as "is _tx_thread_system_state zero".  NetX Duo's caller-checking
  * macros use it; port/netxduo-amiga/inc/nx_port.h says why.

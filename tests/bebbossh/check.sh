@@ -16,8 +16,8 @@
 #   Each command's elapsed time is connect + key exchange + auth + transfer,
 #   and on a 14 MHz 68020 the handshake is several seconds.  The difference
 #   between two sizes cancels everything fixed, so (256K - 64K) / (t256 - t64)
-#   is the per-byte rate.  Two slopes are computed -- 45B to 64K and 64K to
-#   256K -- and they have to agree.  If they do not, the number is a window, a
+#   is the per-byte rate.  Two slopes are computed, 45B to 64K and 64K to
+#   256K, and they have to agree.  If they do not, the number is a window, a
 #   round-trip count or a buffer, not a per-byte cost, and calling it KB/s
 #   would be wrong.
 #
@@ -48,10 +48,10 @@ NOK=0
 check_pair() {
     local what="$1" got="$2" want="$3"
     # A -C list may run a subset.  Something the guest was never asked to
-    # transfer is not a failure -- but something it WAS asked for and did not
+    # transfer is not a failure, but something it WAS asked for and did not
     # produce is, which is why this keys on the command list and not on whether
     # the file happens to exist.
-    grep -q -- "$(basename "$got")" "$REPORT" || return 0
+    grep -q, "$(basename "$got")" "$REPORT" || return 0
     NCHECK=$((NCHECK + 1))
     if [ ! -f "$got" ]; then
         printf '  %-28s MISSING\n' "$what"
@@ -68,16 +68,16 @@ check_pair() {
         printf '  %-28s WRONG SIZE: %s bytes, wanted %s\n' "$what" "$gs" "$ws"
         FAIL=1
     else
-        printf '  %-28s RIGHT SIZE, WRONG BYTES -- %s\n' \
+        printf '  %-28s RIGHT SIZE, WRONG BYTES, %s\n' \
                "$what" "$(cmp "$got" "$want" 2>&1 | head -1)"
         FAIL=1
     fi
 }
 
 if [ ! -f "$REPORT" ]; then
-    echo "no DH0:client.txt -- the guest never ran the command list."
+    echo "no DH0:client.txt, the guest never ran the command list."
     echo "-------------------------------------------------------------"
-    echo "VERDICT: FAIL -- no run"
+    echo "VERDICT: FAIL, no run"
     exit 1
 fi
 
@@ -85,7 +85,7 @@ fi
 # discovered rather than assumed: a -C list may have run only one.
 ARMS=()
 for suf in gcm cha; do
-    if grep -q -- "-$suf-" "$REPORT" 2>/dev/null; then ARMS+=("$suf"); fi
+    if grep -q, "-$suf-" "$REPORT" 2>/dev/null; then ARMS+=("$suf"); fi
 done
 [ "${#ARMS[@]}" -gt 0 ] || ARMS=("")
 
@@ -155,7 +155,7 @@ for suf in "${ARMS[@]}"; do
             continue
         fi
         if [ -z "$t1" ] || [ -z "$t2" ] || [ -z "$t3" ]; then
-            printf '%-32s partial -- only some sizes ran, no slope\n' "$label"
+            printf '%-32s partial, only some sizes ran, no slope\n' "$label"
             continue
         fi
         s1=$(slope 45 "$t1" 65536 "$t2")
@@ -176,7 +176,7 @@ for row in "${ROWS[@]}"; do
         if (s1 == "n/a" || s2 == "n/a") { printf "  %-32s slopes not comparable\n", l; exit }
         d = (s1 > s2 ? s1 - s2 : s2 - s1) / ((s1 + s2) / 2) * 100;
         printf "  %-32s slopes agree to %.1f%%%s\n", l, d,
-               (d < 5 ? "" : "   -- ABOVE 5%, these are totals, not per-byte rates");
+               (d < 5 ? "" : "  , ABOVE 5%, these are totals, not per-byte rates");
     }'
 done
 
@@ -185,8 +185,8 @@ echo "The 45 B column is the handshake: connect, curve25519 twice, an ed25519"
 echo "verify and an ed25519 sign.  It is not part of any KB/s figure above."
 echo "-------------------------------------------------------------"
 if [ "$FAIL" = "0" ] && [ "$NOK" = "$NCHECK" ]; then
-    echo "VERDICT: PASS -- $NOK/$NCHECK transfers byte-identical"
+    echo "VERDICT: PASS, $NOK/$NCHECK transfers byte-identical"
     exit 0
 fi
-echo "VERDICT: FAIL -- $NOK/$NCHECK transfers byte-identical"
+echo "VERDICT: FAIL, $NOK/$NCHECK transfers byte-identical"
 exit 1

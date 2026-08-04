@@ -1,5 +1,5 @@
 /*
- * arp -- the address resolution cache: what is at each address on this network.
+ * arp, the address resolution cache: what is at each address on this network.
  *
  *     arp [ADDRESS] [DELETE] [SET=<hardware address>] [UNIT=<n>] [STATS]
  *
@@ -11,7 +11,7 @@
  *
  *   an entry with a hardware address   it answered; the wire is fine, and
  *                                      whatever is wrong is above this layer
- *   an entry with no reply             we asked and nothing came back --
+ *   an entry with no reply             we asked and nothing came back,
  *                                      wrong address, wrong network, or it
  *                                      is switched off
  *   no entry at all                    nothing here has tried to reach it
@@ -25,8 +25,8 @@
  *                             answer ARP or that keeps changing
  *
  * IPv6 is in the same command, in a section of its own. There is no ARP in
- * IPv6 -- RFC 4861 neighbour discovery does the same job over ICMPv6, and NetX
- * Duo keeps its answers in a separate table -- but it is the same question,
+ * IPv6, RFC 4861 neighbour discovery does the same job over ICMPv6, and NetX
+ * Duo keeps its answers in a separate table, but it is the same question,
  * asked of the same wire, and every command in this suite that grew IPv6 grew
  * it inside itself rather than beside itself: one ping, one nslookup, one
  * netstat. A second binary would put "what is at that address" in two places
@@ -192,7 +192,7 @@ static VOID print_entry(const ToolArpEntry *e, BOOL have_snapshot)
     tool_printf("\n");
 }
 
-/* ------------------------------------------------------------- neighbours -- */
+/* ------------------------------------------------------------- neighbours, */
 
 /*
  * A colon says the user meant an IPv6 address. Nothing else can have one: not
@@ -413,14 +413,10 @@ static VOID explain_absence6(const ULONG addr[4], BOOL have_routes)
 
     if (off_link6(addr, have_routes))
     {
-        tool_advise("It is not on any network this machine is attached to, so "
-                    "it is reached through a router rather than by neighbour "
-                    "discovery -- it will never appear here.");
 
         router = default_router6(have_routes);
         if (router != NULL)
         {
-            tool_advise_blank();
             tool_printf("  The router is %s, and THAT is the entry worth "
                         "checking:\n", (LONG)router);
             tool_printf("      arp %s\n", (LONG)router);
@@ -428,8 +424,6 @@ static VOID explain_absence6(const ULONG addr[4], BOOL have_routes)
         return;
     }
 
-    tool_advise("Nothing here has tried to reach it yet. Anything that sends "
-                "it a packet -- ping, nc, fetch -- will put it in.");
 }
 
 /* TRUE when `addr` is on the network of an interface this machine has up. */
@@ -469,14 +463,10 @@ static VOID explain_absence(ULONG addr, BOOL have_snapshot)
 
     if (!on_our_network(addr, have_snapshot))
     {
-        tool_advise("It is not on this machine's own network, so it is "
-                    "reached through the router rather than by ARP -- it "
-                    "will never appear here.");
 
         if (arp_snap.have_gateway && arp_snap.gateway != 0)
         {
             ami_config_format_ip(arp_snap.gateway, gw, sizeof(gw));
-            tool_advise_blank();
             tool_printf("  The router is %s, and THAT is the entry worth "
                         "checking:\n", (LONG)gw);
             tool_printf("      arp %s\n", (LONG)gw);
@@ -484,8 +474,6 @@ static VOID explain_absence(ULONG addr, BOOL have_snapshot)
         return;
     }
 
-    tool_advise("Nothing here has tried to reach it yet. Anything that sends "
-                "it a packet -- ping, nc, fetch -- will put it in.");
 }
 
 /*
@@ -527,8 +515,6 @@ static VOID print_stats(const ToolStats *s)
         tool_printf("Discarded    %lu malformed message%s\n",
                     (LONG)s->arp_invalid_messages,
                     (LONG)((s->arp_invalid_messages == 1) ? "" : "s"));
-        tool_advise("Malformed ARP comes from another machine on this "
-                    "network, not from this one.");
     }
 }
 
@@ -580,8 +566,6 @@ int main(int argc, char **argv)
         if (!tool_parse_ip6(address_text, want6))
         {
             tool_error("\"%s\" is not an address", (LONG)address_text);
-            tool_advise("It has a colon in it, so it was read as an IPv6 "
-                        "address -- fe80::1, or fd00::10.");
             FreeArgs(rda);
             return RETURN_ERROR;
         }
@@ -606,15 +590,6 @@ int main(int argc, char **argv)
         if (!has6)
         {
             tool_error("the running stack has no IPv6");
-            tool_advise_blank();
-            tool_advise("That is a well-formed IPv6 address, but the running");
-            tool_advise("stack was built without IPv6, so it has no IPv6");
-            tool_advise("neighbours and no cache of them. That is a build");
-            tool_advise("option and not anything that can be switched on");
-            tool_advise("from here.");
-            tool_advise_blank();
-            tool_advise("Run  arp  with no address for the ARP cache this");
-            tool_advise("machine does keep.");
             FreeArgs(rda);
             return RETURN_FAIL;
         }
@@ -626,8 +601,6 @@ int main(int argc, char **argv)
         if (!ami_config_parse_ip(address_text, &want))
         {
             tool_error("\"%s\" is not an address", (LONG)address_text);
-            tool_advise("arp takes a numeric address like 192.168.1.1, not a "
-                        "name -- use nslookup to turn a name into one.");
             FreeArgs(rda);
             return RETURN_ERROR;
         }
@@ -662,7 +635,6 @@ int main(int argc, char **argv)
         {
             tool_error("\"%s\" is not a hardware address",
                        (LONG)args[ARG_SET]);
-            tool_advise("Six bytes in hex, like 02:11:22:33:44:55.");
             FreeArgs(rda);
             return RETURN_ERROR;
         }
@@ -708,25 +680,6 @@ int main(int argc, char **argv)
                 tool_error("%s was not added to the cache",
                            (LONG)address_text);
 
-                /*
-                 * Nearly always the cause: an entry maps an address to a card
-                 * on the same wire, so an address on another network has no
-                 * card here to map it to.
-                 */
-                if (want_one6)
-                {
-                    if (off_link6(want6, have_routes6))
-                        tool_advise("It is not on any network this machine is "
-                                    "attached to, and only addresses on one of "
-                                    "them can have an entry.");
-                }
-                else if (!on_our_network(want, have_snapshot))
-                {
-                    tool_advise("It is not on any network this machine has an "
-                                "interface on, and only addresses on this "
-                                "machine's own network can have one.");
-                }
-
                 tool_netstatus_close(base);
                 FreeArgs(rda);
                 return RETURN_FAIL;
@@ -746,8 +699,6 @@ int main(int argc, char **argv)
             {
                 tool_error("%s was not removed from the cache",
                            (LONG)address_text);
-                tool_advise("It may not have been in it -- arp with no "
-                            "arguments lists what is.");
                 tool_netstatus_close(base);
                 FreeArgs(rda);
                 return RETURN_FAIL;
@@ -849,8 +800,6 @@ int main(int argc, char **argv)
         else if (!quiet)
         {
             tool_printf("The address cache is empty.\n");
-            tool_advise("It fills as this machine talks to others on the "
-                        "local network.");
         }
     }
     else if ((arp_stats.arp_truncated || arp_nd.truncated) && !quiet)
@@ -860,7 +809,6 @@ int main(int argc, char **argv)
          * nsh_Available says so; a list that silently stops reads as complete.
          */
         tool_printf("\n");
-        tool_advise("More entries exist than are shown here.");
     }
 
     FreeArgs(rda);

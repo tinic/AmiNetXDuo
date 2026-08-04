@@ -1,5 +1,5 @@
 /*
- * traceroute -- report the routers between here and a host.
+ * traceroute, report the routers between here and a host.
  *
  *     traceroute MAXTTL=-m/N/K,NUMERIC=-n/S,QUERIES=-q/N/K,TOS=-t/N/K,
  *                WAIT=-w/N/K,VERBOSE=-v/S,HOST/A,PACKETSIZE/N/K
@@ -16,7 +16,7 @@
  * absent; they are listed with reasons above the argument template below.
  *
  * Probes are ICMP echo rather than the classic Unix UDP datagrams. That began
- * as a limitation -- a UDP probe left with the TTL nx_udp_socket_create() was
+ * as a limitation, a UDP probe left with the TTL nx_udp_socket_create() was
  * given, NX_IP_TIME_TO_LIVE, whatever setsockopt(IPPROTO_IP, IP_TTL) said, so
  * every hop reported as the destination (measured on the wire;
  * docs/RESEARCH.md 19 has the capture). It is not one any more: IP_TTL,
@@ -32,7 +32,7 @@
  *
  * A raw ICMP socket sees the whole ICMP input: TIME_EXCEEDED from each router,
  * ECHOREPLY from the destination, and any ICMP belonging to another program's
- * ping. Probes are matched by identifier and sequence -- ours in the echo
+ * ping. Probes are matched by identifier and sequence, ours in the echo
  * request, and in the copy a router quotes back inside the TIME_EXCEEDED.
  *
  * SPDX-License-Identifier: MIT
@@ -57,9 +57,9 @@ static const char version_tag[] __attribute__((used)) =
  *   -r DONTROUTE  SO_DONTROUTE. bsdsocket.library does not implement it and
  *                 NetX Duo has no equivalent to implement it with.
  *   -s SOURCE     the address to send from. bind() on a raw socket records an
- *                 address and nothing more -- NetX Duo binds sockets to ports,
+ *                 address and nothing more, NetX Duo binds sockets to ports,
  *                 and the route chooses the source address of a raw datagram
- *                 -- so the option would change nothing.
+ *                , so the option would change nothing.
  *
  * Each would parse and then do nothing, so accepting them would misreport
  * which interface the probe left by.
@@ -116,13 +116,13 @@ enum
 static UBYTE tr_probe[TR_MAX_SIZE + 8];
 static UBYTE tr_reply[2048];
 
-/* ------------------------------------------------------------- the clock -- */
+/* ------------------------------------------------------------- the clock, */
 
 /*
  * Tenths of a millisecond since the first call.
  *
  * ami_millis() counts whole milliseconds, which is too coarse for the first
- * hop on a local link -- every probe would read "0 ms". The EClock is read
+ * hop on a local link, every probe would read "0 ms". The EClock is read
  * directly instead, through the timer.device ami_millis() has already opened
  * (that is what TimerBase is), which is why the first call here is to
  * ami_millis() with its result discarded.
@@ -163,7 +163,7 @@ static ULONG tr_now(VOID)
     return (ev.ev_lo - tr_epoch.ev_lo) / tr_ticks_per_tenth_ms;
 }
 
-/* --------------------------------------------------------------- checksum -- */
+/* --------------------------------------------------------------- checksum, */
 
 /* The 16-bit one's-complement sum every IP protocol uses. */
 static UWORD tr_checksum(const UBYTE *data, ULONG len)
@@ -230,7 +230,7 @@ static ULONG tr_build_echo(BOOL v6, UWORD ident, UWORD seq, ULONG payload)
  */
 enum
 {
-    TR_OTHER = 0,       /* not ours -- keep waiting                         */
+    TR_OTHER = 0,       /* not ours, keep waiting                         */
     TR_HOP,             /* TIME_EXCEEDED: a router on the way              */
     TR_ARRIVED,         /* ECHOREPLY: the destination itself               */
     TR_UNREACH          /* DEST_UNREACHABLE: the path ends here            */
@@ -375,7 +375,7 @@ static VOID tr_print_unreach(BOOL v6, UBYTE code)
     tool_printf("%s", (LONG)other);
 }
 
-/* ------------------------------------------------------------------ names -- */
+/* ------------------------------------------------------------------ names, */
 
 /*
  * gethostbyaddr(), LVO -0x0d8. Open-coded here rather than added to toolsock:
@@ -434,7 +434,7 @@ static VOID tr_show_address(struct Library *sb, const ToolAddr *address,
     tool_printf(" %s", (LONG)dotted);
 }
 
-/* ------------------------------------------------------------------- main -- */
+/* ------------------------------------------------------------------- main, */
 
 static LONG arg_or(const LONG *args, int index, LONG fallback)
 {
@@ -566,10 +566,6 @@ int main(int argc, char **argv)
         if (err == TOOL_EPROTONOSUPPORT || err == TOOL_ESOCKTNOSUPPORT ||
             err == TOOL_EOPNOTSUPP || err == TOOL_EAFNOSUPPORT)
         {
-            tool_advise_blank();
-            tool_advise("This command needs SOCK_RAW, and the TCP/IP stack on");
-            tool_advise("this machine does not offer it.  Neither ping nor");
-            tool_advise("traceroute can work without it.");
         }
 
         CloseLibrary(sb);

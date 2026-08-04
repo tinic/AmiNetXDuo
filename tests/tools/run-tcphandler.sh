@@ -9,9 +9,9 @@
 #   The claim behind src/bsdsocket/tcp_handler.c is that a socket becomes an
 #   ORDINARY AmigaDOS file handle.  The only way to show that is to hand one to
 #   a program that has never heard of a network and watch it work, so the
-#   commands below are Commodore's own `Type` and `Copy` -- the binaries out of
+#   commands below are Commodore's own `Type` and `Copy`, the binaries out of
 #   the AmigaOS 3.1 C: drawer, unmodified, with no networking code in them at
-#   all -- plus the Shell's own `>` redirection, which is dos.library and
+#   all, plus the Shell's own `>` redirection, which is dos.library and
 #   nothing else.
 #
 #   1. Type TCP:10.0.2.2/amitest       reads a connection to end of file and

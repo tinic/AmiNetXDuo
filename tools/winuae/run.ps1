@@ -1,7 +1,7 @@
 # Windows side of tools/winuae-run.sh: start WinUAE, wait for the guest, reap.
 #
 # WHY PSEXEC.  WinUAE is a GUI application.  It creates a window and a D3D
-# device even with headless=true (that option only hides the window -- it does
+# device even with headless=true (that option only hides the window, it does
 # not remove it), and from an SSH session, which lands in session 0, that init
 # never completes: the process sits there after "Windowsmouse initialization"
 # and has to be killed.  PsExec -i <session> launches it into the interactive
@@ -11,7 +11,7 @@
 #
 # HOW A RUN ENDS.  Three ways, in order of preference:
 #   * the guest's Startup-Sequence runs UAEquit, WinUAE exits by itself, and
-#     its log is flushed properly -- this is the normal path;
+#     its log is flushed properly, this is the normal path;
 #   * DH0:.done appears and we kill the emulator (UAEquit missing or refused);
 #   * the timeout expires and we kill it.
 # The exit status always comes from DH0:.done, never from the emulator, for the
@@ -44,7 +44,7 @@ $ErrorActionPreference = "Continue"
 # ONE EMULATOR AT A TIME.  There is a single interactive console session on
 # this box and a single serial TCP port, so two concurrent runs fight over both
 # and one of them dies in a way that looks exactly like a crash in the code
-# under test -- the failure mode that already cost this project time under
+# under test, the failure mode that already cost this project time under
 # FS-UAE.  A named mutex is the right primitive on Windows because the kernel
 # releases it when the holder dies, so a killed run cannot wedge the queue.
 $mutex = New-Object System.Threading.Mutex($false, "Global\AmiNetXDuoWinUAE")

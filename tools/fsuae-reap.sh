@@ -11,7 +11,7 @@
 # The runners kill their own emulator from a trap, but a process can still be
 # orphaned if a run is killed with SIGKILL, or if fs-uae wedges before the trap
 # is installed. An age threshold is the default so this is safe to run while
-# other tests are in flight -- a legitimate run is minutes old at most.
+# other tests are in flight, a legitimate run is minutes old at most.
 #
 # SPDX-License-Identifier: MIT
 
@@ -30,7 +30,7 @@ while getopts "a:fn" opt; do
     esac
 done
 
-# etime is [[dd-]hh:]mm:ss -- normalise to seconds.
+# etime is [[dd-]hh:]mm:ss, normalise to seconds.
 etime_to_seconds() {
     local t="$1" days=0 rest="$1"
     case "$t" in

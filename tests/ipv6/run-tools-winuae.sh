@@ -17,8 +17,8 @@
 # The run needs, and checks for, four things:
 #
 #   * a pcap device to bridge onto, in AMINETXDUO_WINUAE_A2065;
-#   * a WinUAE built from master -- 6.0.3 dies on the first coalesced frame,
-#     RESEARCH 63.4 -- with tools/winuae/a2065-multicast-loopback.patch on
+#   * a WinUAE built from master, 6.0.3 dies on the first coalesced frame,
+#     RESEARCH 63.4, with tools/winuae/a2065-multicast-loopback.patch on
 #     top of it.  Without that patch the guest gets no IPv6 address at all;
 #     the patch header says why;
 #   * a router advertisement on the LAN.  Without one the guest has a
@@ -242,7 +242,7 @@ fi
 V6FIRST=$(hops "SYS:traceroute $V6TARGET -m 20 -q 1 -w 3 -n" | head -1)
 [ -n "$V6FIRST" ] && [ "$V6FIRST" != "$V6TARGET" ] \
     && ok "hop 1 is a router ($V6FIRST), not the destination" \
-    || bad "hop 1 was '$V6FIRST' -- the destination was one hop away"
+    || bad "hop 1 was '$V6FIRST', the destination was one hop away"
 
 echo
 if [ "$FAILED" -gt 0 ]; then

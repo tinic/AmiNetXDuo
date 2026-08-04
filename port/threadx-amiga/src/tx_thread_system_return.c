@@ -1,5 +1,5 @@
 /***************************************************************************
- * Eclipse ThreadX -- AmigaOS/m68k port.
+ * Eclipse ThreadX, AmigaOS/m68k port.
  *
  * Derived in structure from ports/linux/gnu/src/tx_thread_system_return.c
  *   Copyright (c) 2024 Microsoft Corporation
@@ -113,7 +113,7 @@ TX_THREAD       *owner;
  * returns, and before _tx_thread_system_suspend() unlinks the thread from the
  * ready lists.  For a thread the reaper had to abandon (see _tx_amiga_reap())
  * that unlinking would be done with a TX_THREAD that has already been deleted
- * -- tx_thread_ready_next/previous still point at live threads, so it splices a
+ * tx_thread_ready_next/previous still point at live threads, so it splices a
  * dead node's stale neighbours into the live list and the next dispatch jumps
  * through whatever that leaves behind.  Dying here avoids that.
  *
@@ -146,7 +146,7 @@ struct _tx_amiga_ctrl   *ctrl;
  * Park the calling Exec Task until it is the ThreadX baton holder.
  *
  * Never returns if the thread has been marked for teardown and it is a Task
- * that ThreadX created -- in that case the task destroys itself here.
+ * that ThreadX created, in that case the task destroys itself here.
  * Returns TX_FALSE if the thread was torn down but the Task is the
  * application's (an adopted thread), so the caller must unwind.
  */
@@ -165,7 +165,7 @@ struct _tx_amiga_ctrl   *ctrl;
        Everything the teardown below touches lives in it, so a task that the
        reaper gave up on can still destroy itself safely long after the
        TX_THREAD has been deleted and reused.  An adopted Task has no control
-       block -- its teardown is a return, not a RemTask().  */
+       block, its teardown is a return, not a RemTask().  */
     ctrl =  (adopted != 0U) ? ((struct _tx_amiga_ctrl *) 0)
                             : _tx_amiga_ctrl_of(FindTask((STRPTR) 0));
 
@@ -209,7 +209,7 @@ struct _tx_amiga_ctrl   *ctrl;
             return(TX_TRUE);
         }
 
-        /* Spurious wake-up -- the scheduler changed its mind, or a stale
+        /* Spurious wake-up, the scheduler changed its mind, or a stale
            signal latched.  Go back to sleep.  */
         TX_AMIGA_COUNT(TX_AMIGA_SC_PARK_SPURIOUS);
         Permit();

@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo tools -- weak netstack_* stubs.
+ * AmiNetXDuo tools, weak netstack_* stubs.
  *
  * src/netstack/ is being written by another workstream; the declarations are in
  * include/aminetxduo/netstack.h. These definitions are weak, so the real
@@ -98,7 +98,7 @@ TOOL_WEAK LONG netstack_resolve_reverse(ULONG addr, char *name_out,
 /*
  * ThreadX's tx_kernel_enter() calls this, and the linker pulls
  * tx_initialize_kernel_enter.c in behind tx_amiga_kernel_running(). No tool
- * starts the kernel -- the stack does -- so this only satisfies the reference,
+ * starts the kernel, the stack does, so this only satisfies the reference,
  * weakly, letting the stack's own definition win.
  */
 TOOL_WEAK VOID tx_application_define(void *first_unused_memory)

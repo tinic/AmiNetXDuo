@@ -1,5 +1,5 @@
 /*
- * bsdsocket.library -- GetNetworkStatistics().
+ * bsdsocket.library, GetNetworkStatistics().
  *
  * The one call in the Roadshow API that hands back 4.4BSD's own kernel
  * statistics structures: struct ipstat, tcpstat, udpstat, icmpstat, and the
@@ -11,7 +11,7 @@
  * and the netinet/ *_var.h headers from the same NDK, used as an ABI reference only. No
  * Roadshow, AmiTCP, AROSTCP or Miami code was consulted or is present.
  *
- *   The return value is a byte count: "length -- Number of bytes copied, or -1
+ *   The return value is a byte count: "length, Number of bytes copied, or -1
  *   for failure". Not zero-on-success and not an entry count, the two other
  *   readings the prototype allows.
  *
@@ -103,7 +103,7 @@ static VOID bsd_stat_ip(NX_IP *ip, struct ipstat *out)
  * not. NetX Duo counts no replies sent, so icps_reflect stays zero.
  *
  * ping_threads_suspended and ping_timeouts describe this host's own outbound
- * pings and have no icmpstat member -- icmpstat is a per-message-type
+ * pings and have no icmpstat member, icmpstat is a per-message-type
  * histogram, not a client statistic.
  */
 static VOID bsd_stat_icmp(NX_IP *ip, struct icmpstat *out)
@@ -118,7 +118,7 @@ static VOID bsd_stat_icmp(NX_IP *ip, struct icmpstat *out)
     out->icps_checksum = checksum;
 
     /* The histograms are indexed by ICMP type, and both indices are inside
-       ICMP_MAXTYPE by inspection -- 8 and 0 against a bound of 18. */
+       ICMP_MAXTYPE by inspection, 8 and 0 against a bound of 18. */
     out->icps_outhist[ICMP_ECHO]     = sent;
     out->icps_inhist[ICMP_ECHOREPLY] = responses;
 }
@@ -209,8 +209,8 @@ static VOID bsd_stat_udp(NX_IP *ip, struct udpstat *out)
  * enumerations agree up to CLOSE_WAIT and then diverge. NetX Duo has
  * FIN_WAIT_2 = 8, CLOSING = 9, TIMED_WAIT = 10, LAST_ACK = 11;
  * <netinet/tcp_fsm.h> has CLOSING = 7, LAST_ACK = 8, FIN_WAIT_2 = 9,
- * TIME_WAIT = 10. Subtracting one -- which the first four states invite, since
- * NX_TCP_CLOSED is 1 and TCPS_CLOSED is 0 -- reports a connection in LAST_ACK
+ * TIME_WAIT = 10. Subtracting one, which the first four states invite, since
+ * NX_TCP_CLOSED is 1 and TCPS_CLOSED is 0, reports a connection in LAST_ACK
  * as being in FIN_WAIT_2.
  */
 typedef struct BsdTcpStateMap
@@ -271,8 +271,8 @@ static ULONG bsd_queue_bytes(NX_PACKET *head, ULONG count)
 
 /*
  * How many entries the caller's buffer holds, and where the next one goes.
- * `size` may be smaller than the whole answer -- "size -- Number of bytes to
- * copy" is the caller's limit, not the total -- so this is bounded both ways.
+ * `size` may be smaller than the whole answer, "size, Number of bytes to
+ * copy" is the caller's limit, not the total, so this is bounded both ways.
  */
 typedef struct BsdPcdWriter
 {
@@ -341,7 +341,7 @@ static NX_TCP_SOCKET *bsd_listen_spare(NX_IP *ip, UINT port)
 /*
  * The created-socket lists are singly linked and circular, so the walk is
  * bounded by the count NetX Duo keeps rather than by a NULL that never comes
- * -- the same trap netstatus.c notes for the same two lists.
+ * the same trap netstatus.c notes for the same two lists.
  */
 static VOID bsd_pcd_tcp(NX_IP *ip, BsdPcdWriter *w)
 {
@@ -424,8 +424,8 @@ static VOID bsd_pcd_udp(NX_IP *ip, BsdPcdWriter *w)
                 bsd_queue_bytes(sock->nx_udp_socket_receive_head,
                                 sock->nx_udp_socket_receive_count);
 
-            /* A datagram socket has no peer and nothing queued for output --
-               sendto() hands the packet to the IP thread and returns -- so the
+            /* A datagram socket has no peer and nothing queued for output,
+               sendto() hands the packet to the IP thread and returns, so the
                foreign address, foreign port and send queue really are zero
                rather than uncounted. */
         }
@@ -434,7 +434,7 @@ static VOID bsd_pcd_udp(NX_IP *ip, BsdPcdWriter *w)
     }
 }
 
-/* ------------------------------------------------- GetNetworkStatistics -- */
+/* ------------------------------------------------- GetNetworkStatistics, */
 
 LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
                               register LONG version __asm("d1"),
@@ -480,13 +480,13 @@ LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
          *                   same reason.
          *   NETSTATUS_igmp  IGMP runs (src/bsdsocket/mcast.c), but NetX Duo
          *                   counts five things and 4.4BSD's igmpstat has
-         *                   nine. Four map -- badsum, queries, snd_reports
-         *                   and part of tooshort -- and the other five are
+         *                   nine. Four map, badsum, queries, snd_reports
+         *                   and part of tooshort, and the other five are
          *                   unknown rather than zero.
          *   NETSTATUS_mrt   no multicast routing.
          *   NETSTATUS_rt    three of rtstat's five members would be genuinely
-         *                   zero -- this stack creates no dynamic routes and
-         *                   processes no redirects -- and the other two,
+         *                   zero, this stack creates no dynamic routes and
+         *                   processes no redirects, and the other two,
          *                   rts_unreach and rts_wildcard, are lookups nothing
          *                   counts.
          */
@@ -496,7 +496,7 @@ LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
         case NETSTATUS_rt:
             return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
 
-        /* "This must be one of ..." -- anything else is a bad argument. */
+        /* "This must be one of ...", anything else is a bad argument. */
         default:
             return bsd_fail(SocketBase, AMI_EINVAL);
     }
@@ -554,7 +554,7 @@ LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
 
     bsd_nx_leave(SocketBase);
 
-    /* "size -- Number of bytes to copy" is the caller's limit; a caller built
+    /* "size, Number of bytes to copy" is the caller's limit; a caller built
        against an older struct may ask for less than all of it, and copying
        `need` regardless would overrun its buffer. */
     copy = ((ULONG)size < need) ? (ULONG)size : need;

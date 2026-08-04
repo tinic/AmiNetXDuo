@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the ThreadX priority ladder, in one place.
+ * AmiNetXDuo, the ThreadX priority ladder, in one place.
  *
  * This header exists because the ladder used to live in two: netstack_internal.h
  * defined the IP thread's priority and sana2_internal.h the readers', each with
@@ -12,7 +12,7 @@
  * Both internal headers include this and neither defines a priority.
  *
  * ThreadX counts DOWN: lowest number wins. From the scheduler itself,
- * tx_thread_system_resume.c:213 --
+ * tx_thread_system_resume.c:213,
  *
  *     if (priority < _tx_thread_highest_priority)
  *         // A new highest priority thread is present.
@@ -27,7 +27,7 @@
  * The SANA-II readers sit at the top. The device has no buffers of its own and
  * drops any frame arriving with no CMD_READ outstanding, so a reader that
  * cannot get the CPU during a burst loses packets on the wire and the far end
- * retransmits. Nothing may preempt them -- least of all the IP thread, which
+ * retransmits. Nothing may preempt them, least of all the IP thread, which
  * has continuous work during a bulk transfer and would otherwise starve the
  * threads feeding it.
  */

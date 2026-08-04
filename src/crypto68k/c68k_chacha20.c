@@ -1,12 +1,12 @@
 /*
- * AmiNetXDuo -- crypto68k: ChaCha20 and the RFC 8439 AEAD.
+ * AmiNetXDuo, crypto68k: ChaCha20 and the RFC 8439 AEAD.
  *
  * See c68k_chacha20.h for why this cipher and not AES-GCM.
  *
  * Written here from RFC 8439.  The quarter-round, the state layout and the
  * AEAD's padding rule are the RFC's; no code was copied from any
- * implementation of it.  Checked against RFC 8439's own vectors -- the 2.3.2
- * block, the 2.4.2 keystream and the 2.8.2 AEAD -- in tests/crypto68k, on the
+ * implementation of it.  Checked against RFC 8439's own vectors, the 2.3.2
+ * block, the 2.4.2 keystream and the 2.8.2 AEAD, in tests/crypto68k, on the
  * host and on the Amiga.
  *
  * SPDX-License-Identifier: MIT
@@ -52,15 +52,15 @@ ULONG   v;
 
 /*
  * The core: twenty rounds over a copy of the state, then the original added
- * back in.  The state is an array rather than sixteen locals -- the part has
+ * back in.  The state is an array rather than sixteen locals, the part has
  * eight data registers and a quarter-round needs four of them, so a compiler
  * given sixteen live values spills them anyway, and an array lets it spill the
  * ones it chooses.  docs/RESEARCH.md 18.1 is the same finding from the AES
  * side: on this machine the state lives in memory.
  *
  * The reference, not the fast path.  c68k_chacha20.S does the same sixteen
- * words in registers -- eight in d0-d7, seven in a0-a6 and one on the stack,
- * exchanged with EXG -- and crypto68k_bulk checks the two against each other
+ * words in registers, eight in d0-d7, seven in a0-a6 and one on the stack,
+ * exchanged with EXG, and crypto68k_bulk checks the two against each other
  * block for block before timing either.  This stays compiled and reachable in
  * the assembly build so that check is possible.
  */
@@ -128,7 +128,7 @@ UINT c68k_chacha20_core_is_asm(VOID)
  * out = in XOR the little-endian serialisation of one keystream block.
  *
  * On a 68020 that is one MOVE.L in, a three-instruction byte reversal of the
- * keystream word, an EOR.L and one MOVE.L out -- about 34 cycles for four
+ * keystream word, an EOR.L and one MOVE.L out, about 34 cycles for four
  * bytes.  Serialising the block to a byte array and exclusive-oring byte by
  * byte, which is what the portable form below has to do, is four times that
  * by the instruction table in docs/RESEARCH.md 18.1.
@@ -181,7 +181,7 @@ extern VOID c68k_chacha20_xor_block_asm(const ULONG *ks, const UCHAR *in,
 #define c68k_chacha20_xor_block  c68k_chacha20_xor_block_asm
 #endif /* C68K_ASM */
 
-/* The same block, serialised rather than applied -- for the tail of a
+/* The same block, serialised rather than applied, for the tail of a
    transfer, which has to be held until the next call asks for it. */
 static VOID c68k_chacha20_store_block(const ULONG *ks, UCHAR *out)
 {
@@ -306,7 +306,7 @@ UINT    i;
 }
 
 
-/* ------------------------------------------------------------- the AEAD -- */
+/* ------------------------------------------------------------- the AEAD, */
 
 /* The zero padding that brings a half to a multiple of sixteen.  RFC 8439
    pads the associated data and the ciphertext independently, so one cannot be
@@ -404,7 +404,7 @@ VOID c68k_chacha20_poly1305_encrypt(C68K_CHACHA20_POLY1305 *ctx,
 
     c68k_chacha20_xor(&ctx -> c68k_aead_cipher, in, out, length);
 
-    /* The tag covers the ciphertext -- encrypt-then-MAC, so a forged record
+    /* The tag covers the ciphertext, encrypt-then-MAC, so a forged record
        costs nothing to reject. */
     c68k_poly1305_update(&ctx -> c68k_aead_mac, out, length);
     ctx -> c68k_aead_data_length += length;

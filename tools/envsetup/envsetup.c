@@ -1,5 +1,5 @@
 /*
- * envsetup -- prepare the AmigaDOS environment for a harness test run.
+ * envsetup, prepare the AmigaDOS environment for a harness test run.
  *
  * The harness boots from a bare directory hard drive with a minimal
  * Startup-Sequence, so none of the assigns a normal Workbench boot makes exist.
@@ -7,7 +7,7 @@
  * fails without them.
  *
  * Doing this in C rather than with C:Assign and C:MakeDir keeps the harness
- * self-contained -- no Workbench binaries have to be extracted or staged.
+ * self-contained, no Workbench binaries have to be extracted or staged.
  *
  * ENV: and T: are backed by directories on the *host*, not RAM:, so env vars a
  * test sets are visible from the host after the run, and can be pre-seeded by
@@ -33,7 +33,7 @@ static const struct Assignment assignments[] =
     { "CLIPS",  "DH0:clips"     },
     /* LIBS: and DEVS: so a staged bsdsocket.library or SANA-II driver can be
        found.  A command that links the stack does not need them; one that
-       opens the library -- nc, ping, bsdsocktest -- finds nothing without
+       opens the library, nc, ping, bsdsocktest, finds nothing without
        them, and fails in a way that looks like the stack rather than the
        harness.  CreateDir() below makes them when nothing was staged, so an
        empty assign is harmless. */
@@ -64,7 +64,7 @@ int main(void)
             continue;
         }
 
-        /* AssignLock() takes ownership of the lock -- do not UnLock it. */
+        /* AssignLock() takes ownership of the lock, do not UnLock it. */
         if (!AssignLock((STRPTR)a->name, lock))
         {
             Printf("envsetup: cannot assign %s: %s\n", (LONG)a->name, (LONG)a->path);

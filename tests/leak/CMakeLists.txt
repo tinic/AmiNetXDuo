@@ -29,7 +29,7 @@ set_target_properties(refused_leak_test PROPERTIES
 # 41.4), and an arm that hangs means the six that pass never report.  The wedge
 # was this file's own LVO stubs not telling GCC that a library call clobbers
 # d1/a0/a1, so IoctlSocket(FIONBIO) got a stale request code and the dial
-# became a blocking connect() that never returns -- 42.  Fixed, so the arm is
+# became a blocking connect() that never returns, 42.  Fixed, so the arm is
 # built by default and covers 37.4's accept path again.
 #
 # LEAK_BURST_DELAY=OFF removes the Delay(1) between the three dials, which is

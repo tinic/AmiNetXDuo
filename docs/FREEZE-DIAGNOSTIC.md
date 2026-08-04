@@ -1,7 +1,7 @@
 # Reading the health counters
 
-Two faults leave no evidence behind. A total lockup writes nothing -- no
-Enforcer hit, no MungWall hit, no log line -- because the machine stops before
+Two faults leave no evidence behind. A total lockup writes nothing, no
+Enforcer hit, no MungWall hit, no log line, because the machine stops before
 anything can be written. A slow leak writes nothing either: `AvailMem` falls,
 but it falls for every program on the machine and cannot say whose.
 
@@ -46,7 +46,7 @@ nothing about what happened before it.
 
 ## What a healthy machine looks like
 
-A freshly started stack with one interface up and nothing using it -- an A1200,
+A freshly started stack with one interface up and nothing using it, an A1200,
 68020, 10 MB, address from DHCP:
 
 ```
@@ -85,7 +85,7 @@ and returned to its own baseline is the thing to compare against.
 
 ## The memory block
 
-**allocations outstanding** -- blocks the stack has taken and not given back.
+**allocations outstanding**, blocks the stack has taken and not given back.
 It is ours alone, which is the whole point: it does not move when another
 program allocates. Tens on an idle stack, rising and falling with the number of
 open sockets. **A number that only ever rises is the report to make.** The
@@ -93,37 +93,37 @@ figure beside it is the most there have ever been at once; one reading cannot
 say whether a number is climbing, and the peak is what makes one reading worth
 sending.
 
-**refused** -- allocations that came back empty. Above zero means the machine
+**refused**, allocations that came back empty. Above zero means the machine
 ran out of memory, which is a different fault from a leak and usually has one
 behind it.
 
-**sockets open** -- `AmiSocket` structures the library owns. Not the same as the
+**sockets open**, `AmiSocket` structures the library owns. Not the same as the
 sockets a program has open: a closed TCP connection is held until the protocol
 has finished with it, so this lags a program's own count by up to a minute and
 then comes back. §37.5 of the research notes was 776 of these, and nothing on
 the machine could say so at the time. Anything in the hundreds on a machine
 with a handful of connections is that fault.
 
-**programs have it open** -- how many programs hold `bsdsocket.library`. The
+**programs have it open**, how many programs hold `bsdsocket.library`. The
 denominator for the line above: forty sockets across ten programs is a busy
 machine, forty across one is worth a look. `netstat -s -h` counts itself and so
 reads one higher than `netstat -h` does; that is not a discrepancy.
 
-**packets free** -- the network's own fixed pool of packet buffers. It does not
+**packets free**, the network's own fixed pool of packet buffers. It does not
 grow, so it starves rather than leaks, and that is a different fault with a
 different fix. **fewest ever** is the closest it has come to running out. On a
 healthy machine it stays within a few packets of the total; a workload that
 takes it to single figures is running the pool at its limit.
 
-**found the pool empty, waited** -- what happened when it did run out. Both must
+**found the pool empty, waited**, what happened when it did run out. Both must
 be zero. Above zero, something asked for a packet and there was none: the stack
 either dropped what it was doing or suspended waiting, and both reach a user as
 the network stalling.
 
-**released twice** -- must be zero. Above zero is a defect in the stack, not a
+**released twice**, must be zero. Above zero is a defect in the stack, not a
 capacity problem.
 
-**system memory free** -- `AvailMem`, the machine's own figure, printed here so
+**system memory free**, `AvailMem`, the machine's own figure, printed here so
 it can be read next to ours. Falling while our numbers stay flat means the leak
 is not the network's.
 
@@ -135,15 +135,15 @@ a fault.
 
 ## The scheduler block
 
-**ticks in ms** -- the stack's 50 Hz clock. Ticks divided by seconds should come
+**ticks in ms**, the stack's 50 Hz clock. Ticks divided by seconds should come
 out at 50 whatever else is happening. The ms figure is time since the stack
 started, so it also dates each block in the log.
 
-**clipped, lost** -- times the clock fell so far behind that the arrears were
+**clipped, lost**, times the clock fell so far behind that the arrears were
 thrown away, and how many ticks that cost. Above zero means the machine was
 held by something.
 
-**worst stall, service** -- the longest gap ever seen between two clock ticks,
+**worst stall, service**, the longest gap ever seen between two clock ticks,
 and how long the clock's own work took on the wakeup before it. These two
 together say which of the two possible faults it was:
 
@@ -153,22 +153,22 @@ together say which of the two possible faults it was:
 * stall and service close together: the clock overran its own period. That one
   is ours.
 
-**transitions** -- times a stack thread stepped aside to wait on the network
+**transitions**, times a stack thread stepped aside to wait on the network
 card. The rate matters, not the total: it rises with the number of packets, not
 with the number of bytes, which is why a copy of many small files is harder on
 the machine than a bulk transfer of the same size.
 
-**at once at the peak** -- the most threads that were waiting on the card at the
+**at once at the peak**, the most threads that were waiting on the card at the
 same moment. The table holds 16.
 
-**table full** -- must be zero. Above zero, a thread waited on the card while
+**table full**, must be zero. Above zero, a thread waited on the card while
 holding the lock the whole stack runs under, and everything else queued behind
 an event that may never come.
 
-**moved** -- must be zero. Above zero, the stack suspended a thread and left
+**moved**, must be zero. Above zero, the stack suspended a thread and left
 itself with nothing to dispatch.
 
-**state max** -- 0 or 1 is normal.
+**state max**, 0 or 1 is normal.
 
 Either of the two "must be zero" lines being non-zero after a freeze is the
 freeze, not a statistic.

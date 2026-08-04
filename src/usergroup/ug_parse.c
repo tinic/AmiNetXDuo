@@ -1,9 +1,9 @@
 /*
- * AmiNetXDuo -- usergroup.library: parsing the passwd and group files.
+ * AmiNetXDuo, usergroup.library: parsing the passwd and group files.
  *
  * Split out of ug_db.c, which keeps the file reading and the library vectors.
  * Nothing here calls dos.library or exec.library, so the source that runs on
- * the Amiga is the source tests/fuzz drives under ASan -- the arrangement
+ * the Amiga is the source tests/fuzz drives under ASan, the arrangement
  * src/config has, and for the same reason: a sizing pass that disagrees with
  * the parse pass is a heap overrun on a machine with no MMU.
  *
@@ -24,7 +24,7 @@ static char ug_def_shell[] = "C:Shell";
 
 static char *ug_def_members[] = { ug_def_name, NULL };
 
-/* -------------------------------------------------------------- parsing -- */
+/* -------------------------------------------------------------- parsing, */
 
 static char *ug_next_line(char **cursor)
 {
@@ -130,7 +130,7 @@ static LONG ug_atol(const char *s)
     return negative ? -(LONG)value : (LONG)value;
 }
 
-/* --------------------------------------------------------- passwd table -- */
+/* --------------------------------------------------------- passwd table, */
 
 void ug_db_default_passwd(struct UgDatabase *db)
 {
@@ -183,7 +183,7 @@ void ug_db_parse_passwd(struct UgDatabase *db, char *text)
         ug_db_default_passwd(db);
 }
 
-/* ---------------------------------------------------------- group table -- */
+/* ---------------------------------------------------------- group table, */
 
 void ug_db_default_group(struct UgDatabase *db)
 {
