@@ -41,7 +41,7 @@
 #
 # Compression: a real `lha a` is used when one is on the PATH.  Homebrew's
 # `lha` is Lhasa, which can only extract, so the fallback is dist/lhapack.py
-# -- correct, readable by every LhA, and uncompressed.  Build the upload on a
+# correct, readable by every LhA, and uncompressed.  Build the upload on a
 # machine with a proper archiver.
 #
 # SPDX-License-Identifier: MIT
@@ -96,7 +96,7 @@ CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ShowNetServices
 # ---------------------------------------------------------- the CPU builds --
 #
 # ONE ARCHIVE, THREE LIBRARIES, and the installer picks.  The alternative --
-# three archives -- was rejected: the thing a user has to get right is the one
+# three archives, was rejected: the thing a user has to get right is the one
 # thing they cannot see from the outside, and an Amiga owner who downloads the
 # wrong one gets either a machine that will not boot the stack or a library
 # that quietly runs emulated instructions.  The installer already reads
@@ -109,7 +109,7 @@ CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ShowNetServices
 #
 #   68000     68000 and 68010.
 #   68020-40  68020, 68030 and 68040.  A 68040 implements the whole 68020
-#             instruction set, so the 020 build is COMPLETE for it -- there is
+#             instruction set, so the 020 build is COMPLETE for it, there is
 #             no 68040 multilib to link against and -m68040 would silently
 #             select the 68000 C library.  AMINETXDUO_CPU=68040 exists for
 #             someone building their own tuned copy; it produces the same
@@ -126,7 +126,7 @@ CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ShowNetServices
 # it and cannot be pointed at a tree from a different commit by accident.
 #
 # AMINETXDUO_DIST_CPUS names a subset, for building a test archive from one
-# build tree -- install/test/run-installer-fsuae.sh uses it, because it boots
+# build tree, install/test/run-installer-fsuae.sh uses it, because it boots
 # one emulated machine and only ever installs one of the three.  A RELEASE
 # must not set it: the installer aborts on a machine whose drawer is absent,
 # which is the right behaviour for a damaged download and the wrong thing to
@@ -142,7 +142,7 @@ declare -A CPU_BUILD=(
 # 68000-minimal is the same stack with IPv6, mDNS, the packet filter, TLS and
 # IPv4 multicast compiled out, stripped: 222 KB against the 68000 drawer's
 # 326 KB.  On the 1 MB machine 81 measured, that is 104 KB back out of the
-# 371 KB the stack leaves free -- a 28% increase in what is left for programs.
+# 371 KB the stack leaves free, a 28% increase in what is left for programs.
 #
 # Multicast is the cheapest of the five at 3,888 bytes (3,696 of code and the
 # 192-byte membership table) and is out for the same reason the others are:
@@ -156,7 +156,7 @@ declare -A CPU_BUILD=(
 # THE COMMANDS ARE BUILT ONCE, FOR THE 68000, and every machine runs that one
 # set.  They are not where the work happens: each is a few hundred lines around
 # bsdsocket.library calls, and the code whose instruction set actually matters
-# -- the checksums, the copies, the bignums -- is inside the libraries, which
+# the checksums, the copies, the bignums, is inside the libraries, which
 # ARE per-CPU.  Twenty-one commands times three would add roughly 9 MB to the
 # archive to make `ping` parse its arguments faster.
 #
@@ -180,7 +180,7 @@ done
 
 # Normally the 68000 build, per the note above.  When AMINETXDUO_DIST_CPUS has
 # excluded it there is no 68000 tree to take them from, so a subset archive
-# falls back to the primary build -- which is right for what that option is
+# falls back to the primary build, which is right for what that option is
 # for, and never happens in a release.
 CMD_BUILD="${CPU_BUILD[68000]:-$BUILD}"
 [ -d "$CMD_BUILD" ] || CMD_BUILD="$BUILD"
@@ -269,12 +269,12 @@ chmod 755 "$TREE"/C/*
 # clients/ rather than the CMake tree and a plain `cmake --build` does not
 # produce it. It goes into C: with the other commands: the argv/stack shim
 # (clients/compat/amiga_argv.c) now gives it a real POSIX argv[] and its own
-# 256 KB stack, so the two reasons the clients used to be kept out of C: -- no
+# 256 KB stack, so the two reasons the clients used to be kept out of C:, no
 # tokenised arguments, and a stack far bigger than a Shell hands a command --
 # are both gone. It still wants mathieeedoubbas.library in LIBS:, which every
 # Workbench installation has; the installer's help text says so.
 #
-# AMINETXDUO_SSH names the built binary outright -- the release workflow sets
+# AMINETXDUO_SSH names the built binary outright, the release workflow sets
 # it, so the path it builds into and the path packed here cannot drift.
 CLIENT_SSH="${AMINETXDUO_SSH:-$ROOT/build/dropbear/dbclient}"
 if [ -x "$CLIENT_SSH" ]; then
@@ -299,7 +299,7 @@ cp "$INSTALL/AmiNetXDuo.info"          "$OUTDIR/"
 
 # The Commodore Installer, bundled in the same drawer.  Install-AmiNetXDuo.info's
 # default tool is "Installer", so Workbench finds it here and a double-click just
-# works -- nothing to fetch or install first.
+# works, nothing to fetch or install first.
 cp "$INSTALL/Installer" "$TREE/Installer"
 chmod 755 "$TREE/Installer"
 
@@ -333,7 +333,7 @@ cp "$INSTALL/Document.info" "$TREE/Developer/ReadMe.info"
 # profiles ANY AmigaOS program, it depends on nothing in this archive, and a
 # network stack has no business putting a developer tool in somebody's C:.
 # It is HERE because this is the only way it reaches a real machine, and a
-# real machine is the only place the answer can come from -- no emulator above
+# real machine is the only place the answer can come from, no emulator above
 # a 68020 has a usable cycle model, so what this stack costs on a 68060 with a
 # real card is not currently knowable any other way.
 #
@@ -341,9 +341,9 @@ cp "$INSTALL/Document.info" "$TREE/Developer/ReadMe.info"
 # handler is assembly and identical on every 68k, and nothing else in the tool
 # is on a hot path.  One binary runs on every machine.
 #
-# profspin goes with it.  It is the self-test -- an ordinary program that
+# profspin goes with it.  It is the self-test, an ordinary program that
 # links nothing from the profiler and writes the exact byte ranges of its own
-# assembly kernels -- so that "is this profiler telling me the truth on MY
+# assembly kernels, so that "is this profiler telling me the truth on MY
 # machine" has an answer that does not require taking our word for it.
 PROFILE_BUILD="$CMD_BUILD/tools/profiler"
 if [ -x "$PROFILE_BUILD/Profile" ]; then
@@ -367,7 +367,7 @@ fi
 #
 # The glob used to read docs/*.guide.  docs/ holds only Markdown, so it matched
 # nothing, the empty-Docs fallback fired, and every release shipped a Docs
-# drawer holding a second copy of the ReadMe and no manual -- for a month,
+# drawer holding a second copy of the ReadMe and no manual, for a month,
 # because the fallback printed a note and carried on.  It is fatal now.
 
 DOCSRC="$ROOT/docs/user"

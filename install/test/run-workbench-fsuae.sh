@@ -11,8 +11,8 @@
 # boots.  That harness stages the machine itself: it makes an empty LIBS:, a
 # DEVS: holding one driver and an S: with nothing in it, boots a bare
 # directory hard drive with no Workbench on it at all, and drives its own
-# boot script.  Every failure a user has reported so far -- `fetch https://`
-# not working, a command not seeing its arguments -- happened on a real
+# boot script.  Every failure a user has reported so far, `fetch https://`
+# not working, a command not seeing its arguments, happened on a real
 # Workbench and was invisible here, because "works on the staging tree" and
 # "works on a Workbench" are different claims and only the second one is the
 # product.
@@ -21,13 +21,13 @@
 #
 #   0. assembles a genuine Workbench 3.1 SYS: out of Commodore's five
 #      floppies (workbench, fonts, locale, storage, extras) and caches it;
-#   1. boots it -- SetPatch, IPrefs, LoadWB, the real Startup-Sequence;
+#   1. boots it, SetPatch, IPrefs, LoadWB, the real Startup-Sequence;
 #   2. unpacks the release .lha into DH0:Unpacked/ the way a download
 #      would arrive, and runs Install-AmiNetXDuo through Commodore's
 #      Installer with installdrive clicking Proceed;
 #   3. POWER CYCLES the machine.  The second boot runs the stock 3.1
 #      Startup-Sequence untouched, which reaches `Execute S:User-Startup`
-#      and starts the network from the line the installer wrote -- nothing
+#      and starts the network from the line the installer wrote, nothing
 #      the harness knows is in the path;
 #   4. runs, from an ordinary Shell script, the four things a user does
 #      first: look at the network, fetch an http: URL, fetch an https: URL,
@@ -48,8 +48,8 @@
 #     install/test/run-workbench-fsuae.sh -a /tmp/rel/AmiNetXDuo-0.8.1.lha
 #
 # Without it the archive is built here, from this machine's toolchain, and a
-# defect that lives in the RELEASE build -- a different compiler, a different
-# crt0 -- cannot show up.  Run it both ways before believing a release.
+# defect that lives in the RELEASE build, a different compiler, a different
+# crt0, cannot show up.  Run it both ways before believing a release.
 #
 # INGREDIENTS, none of which are ours to ship:
 #
@@ -247,7 +247,7 @@ if [ "$wb_stale" = "1" ]; then
     rm -rf "$SCRATCH"
 
     # A directory hard drive takes its Amiga protection bits from the host's
-    # mode bits, and xdftool unpacks everything 0644 -- which would leave
+    # mode bits, and xdftool unpacks everything 0644, which would leave
     # every command in C: without its E bit.  LhA on a real Amiga restores
     # the bits from the archive; here the host has to.
     chmod -R a+rx "$WB"
@@ -312,7 +312,7 @@ chmod -R a+rx "$HD/Unpacked"
 # WHAT IS IN THE ARCHIVE, said out loud BEFORE anything is installed.  The
 # https: check below cannot pass if the archive has no tls.library, and an
 # archive built from a tree configured without TLS is an ordinary thing to
-# have lying around -- so the difference between "the product is broken" and
+# have lying around, so the difference between "the product is broken" and
 # "you packed a build that never had it" is stated here rather than left for
 # somebody to work out from a return code.
 echo "==> the archive holds:"
@@ -337,7 +337,7 @@ fi
 # tools/fsuae-run.sh cannot drive these runs: it wipes the staging drive and
 # writes its own Startup-Sequence, and the whole point here is a machine that
 # boots Commodore's.  So the emulator is started directly, with the same
-# config that harness generates -- and with its lock, in its measurement lane,
+# config that harness generates, and with its lock, in its measurement lane,
 # so a run here does not share the host with anything else.
 
 LOCKDIR="$ROOT/build/.fsuae.lock"
@@ -470,7 +470,7 @@ EOF
 }
 
 # The stock 3.1 Startup-Sequence, with the tail replaced.  LoadWB stays --
-# the Installer draws on the Workbench screen and a user has one -- and only
+# the Installer draws on the Workbench screen and a user has one, and only
 # `EndCLI`, which would take the boot shell away before our line runs, goes.
 STARTUP_SUM=""
 startup_with() {
@@ -556,8 +556,8 @@ fi
 # ------------------------------------------------------------------ run 2 ---
 #
 # A POWER CYCLE, not a continuation.  The Startup-Sequence is put back to
-# Commodore's -- the installer's work has to be reached through its own
-# `Execute S:User-Startup`, exactly as on the user's machine -- and the only
+# Commodore's, the installer's work has to be reached through its own
+# `Execute S:User-Startup`, exactly as on the user's machine, and the only
 # thing added is the line that runs the checks afterwards.
 
 echo
@@ -572,8 +572,8 @@ fi
 
 # An ordinary Shell script, doing ordinary things, with every command's return
 # code written down beside its output.  `Stack 200000` is the Shell's internal
-# stack command.  It is NOT needed any more -- clients/compat/amiga_argv.c
-# swaps in 256 KB of its own before main() runs, and the ReadMe says so -- and
+# stack command.  It is NOT needed any more, clients/compat/amiga_argv.c
+# swaps in 256 KB of its own before main() runs, and the ReadMe says so, and
 # it stays here precisely because a cautious user will still type it: a client
 # that mishandled an already-large Shell stack would fail nowhere else.
 cat > "$HD/S/AmiNetXDuo-Check" <<EOF

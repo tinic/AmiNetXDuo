@@ -10,7 +10,7 @@
 #   Every other harness in this tree runs headless, asserts something and
 #   exits.  This one does the opposite: it opens a window, boots a Workbench,
 #   and leaves a person in front of it.  There is no timeout, no verdict and
-#   nothing to grep -- the thing being checked is what the Installer LOOKS
+#   nothing to grep, the thing being checked is what the Installer LOOKS
 #   like, which no assertion reaches.
 #
 #   It exists because the Installer script is the one part of this project a
@@ -33,7 +33,7 @@
 #
 #   The guest comes up on the Workbench desktop.  Open the DH0: icon, open
 #   AmiNetXDuo, and double-click Install-AmiNetXDuo.  That is the same path a
-#   user takes out of an .lha, including the icon's own tooltypes -- the
+#   user takes out of an .lha, including the icon's own tooltypes, the
 #   default user level among them, which is what decides how much the script
 #   shows.
 #
@@ -102,7 +102,7 @@ fi
 
 # ------------------------------------------------------------- the drive ---
 #
-# A copy, so the Installer writing into it -- and it does, that is the point --
+# A copy, so the Installer writing into it, and it does, that is the point --
 # leaves the archive tree alone and every run starts from the same place.
 HD="$ROOT/build/try-installer-hd"
 rm -rf "$HD"
@@ -111,7 +111,7 @@ cp -R "$ARCHIVE" "$HD/AmiNetXDuo"
 
 # A card to find.
 #
-# The archive ships no SANA-II drivers -- none of them are ours -- and a bare
+# The archive ships no SANA-II drivers, none of them are ours, and a bare
 # Workbench floppy has an empty DEVS:Networks, so without this the installer is
 # quite correctly unable to detect anything and the card question cannot be
 # exercised at all. Anything named in AMINETXDUO_TRY_DEVS, or whatever is in

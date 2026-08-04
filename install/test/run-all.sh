@@ -6,7 +6,7 @@
 #
 # Each scenario is a full install onto a freshly staged bare machine:
 #
-#   NOVICE    no questions asked at all -- the card is auto-detected from
+#   NOVICE    no questions asked at all, the card is auto-detected from
 #             DEVS: and every default has to be right on its own
 #   AVERAGE   the questions a normal install asks, all answered with the
 #             default

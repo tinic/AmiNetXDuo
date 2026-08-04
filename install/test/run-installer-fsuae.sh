@@ -8,8 +8,8 @@
 #
 # Two FS-UAE runs against the same staging directory:
 #
-#   1. A clean machine -- an empty LIBS:, a DEVS: holding only the card's
-#      driver, an S: with nothing in it -- plus the unpacked distribution
+#   1. A clean machine, an empty LIBS:, a DEVS: holding only the card's
+#      driver, an S: with nothing in it, plus the unpacked distribution
 #      archive and Commodore's Installer.  installdrive starts the Installer
 #      on Install-AmiNetXDuo and clicks Proceed until it finishes.
 #   2. The same machine, now installed, with the emulated A2065 attached to
@@ -17,7 +17,7 @@
 #      put in it, and then pings the gateway.
 #
 # Because FS-UAE mounts the staging directory as a real hard drive, whatever
-# the Installer writes lands on the host and can be read afterwards -- which
+# the Installer writes lands on the host and can be read afterwards, which
 # is what makes this a test of the generated files and not just of the
 # script's syntax.
 #
@@ -58,7 +58,7 @@ case "$LEVEL" in
     # STATIC answers "no" to the DHCP question, which is the only route to
     # the four validated address prompts and to a static interface file.
     # The address it then writes is 192.168.1.10, which is not on the
-    # emulator's 10.0.2.0/24 SLIRP network -- so this one checks the files
+    # emulator's 10.0.2.0/24 SLIRP network, so this one checks the files
     # and stops there rather than pretending a ping should work.
     STATIC) DRIVE_FLAGS=(-DDRIVE_LEVEL='"AVERAGE"' -DDRIVE_NO_ON_YESNO=1)
             SKIP_BOOT=1 ;;
@@ -103,7 +103,7 @@ fi
 #
 # One CPU drawer, not the release's three: this boots a single emulated A1200,
 # so the other two would be built and packed to be ignored.  The installer's
-# CPU pick is still exercised -- it has to resolve 68020 to Libs/68020-40 and
+# CPU pick is still exercised, it has to resolve 68020 to Libs/68020-40 and
 # find the library there, and it aborts if it does not.
 AMINETXDUO_DIST_CPUS="68020-40" \
 "$ROOT/dist/make-dist.sh" -b "$BUILD" >/dev/null || {
@@ -249,7 +249,7 @@ fi
 #
 # Boot the machine the installer just made.  The staging directory that
 # fsuae-run.sh built for run one *is* that machine, so it is handed straight
-# back as the extras for run two -- nothing is re-staged, and in particular
+# back as the extras for run two, nothing is re-staged, and in particular
 # nothing this script knows is written into DEVS: between the two runs.
 
 echo
@@ -263,7 +263,7 @@ echo "============================================================"
 # apart from the boot script.  So the emulator is driven directly, using the
 # same lock directory so that runs from other work still serialise.
 #
-# Everything else -- LIBS:, C:, DEVS:, S:User-Startup -- is exactly what the
+# Everything else, LIBS:, C:, DEVS:, S:User-Startup, is exactly what the
 # Installer left.
 
 KICKSTART="${AMINETXDUO_KICKSTART:-}"
@@ -285,7 +285,7 @@ cp "$ROOT/build/bootcheck" "$HD/c/bootcheck"
 rm -f "$HD/.done" "$HD/stdout.txt"
 
 # The one thing this run stages: a boot script that runs bootcheck.  It does
-# NOT execute S:User-Startup itself -- bootcheck reads that file and runs the
+# NOT execute S:User-Startup itself, bootcheck reads that file and runs the
 # commands out of it, so that a startup line the installer got wrong shows up
 # as a failure rather than being papered over by the harness.
 cat > "$HD/s/Startup-Sequence" <<'EOF'
