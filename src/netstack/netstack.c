@@ -688,6 +688,29 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
     if (status != NX_SUCCESS)
         AMI_WARN("netstack: nx_udp_enable failed (%ld)", (long)status);
 
+    /*
+     * Inbound reassembly, both families. Until this call the three fragment
+     * function pointers are NULL, and a fragment arriving is counted and then
+     * released: nx_ipv4_packet_receive.c tests nx_ip_fragment_assembly before
+     * queueing, and _nx_ipv6_process_fragment_option() returns
+     * NX_OPTION_HEADER_ERROR straight away. So a UDP answer larger than the
+     * path MTU never arrived and the application saw a timeout with nothing
+     * logged.
+     *
+     * It enables transmit fragmentation in the same call -- there is no
+     * receive-only arm -- but nothing reaches it from here: bsd_send_udp()
+     * and the raw send both refuse an oversize datagram with EMSGSIZE before
+     * the stack sees it, and TCP sizes to the MSS. The stack's own senders
+     * are all under one MTU.
+     *
+     * What reassembly holds is bounded in the fork: a fragment is refused
+     * once the pool is half consumed, and the IPv4 hold time no longer
+     * follows the sender's TTL.
+     */
+    status = nx_ip_fragment_enable(&ns->ns_Ip);
+    if (status != NX_SUCCESS)
+        AMI_WARN("netstack: nx_ip_fragment_enable failed (%ld)", (long)status);
+
     /* Secondary interfaces. nx_ip_interface_attach() drives the driver from
        this context, so the binding must exist first here too. */
     for (i = 1; i < ns->ns_IfaceCount; i++)

@@ -845,8 +845,12 @@
  *                                  and now cost nothing measurable.
  *   NX_DISABLE_PACKET_CHAIN     -- would break TCP receives larger than one
  *                                  payload.
- *   NX_DISABLE_FRAGMENTATION    -- fragmentation is already off unless
- *                                  nx_ip_fragment_enable() is called.
+ *   NX_DISABLE_FRAGMENTATION    -- src/netstack/ calls
+ *                                  nx_ip_fragment_enable(), so inbound
+ *                                  reassembly is wanted and this would
+ *                                  compile it out.  What it holds is bounded
+ *                                  by NX_IP_FRAGMENT_POOL_RESERVE in the
+ *                                  fork rather than by the pool alone.
  *   NX_TCP_ACK_TIMER_RATE 25    -- a 40 ms delayed ACK rather than 200 ms,
  *                                  which is what AmiTCP_NG 4.1.4 did.  It
  *                                  needs NX_TCP_FAST_TIMER_RATE raised with
