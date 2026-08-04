@@ -298,7 +298,15 @@ LONG ami_mbuf_init(ULONG max_mbufs, ULONG max_clusters);
 
 /*
  * Release every slab and cluster. Only safe when no mbuf is outstanding; it
- * does not chase live chains. Called at stack shutdown.
+ * does not chase live chains.
+ *
+ * Nothing in production calls this, and nothing can: the eleven mbuf_* LVOs
+ * are bsd_enosys stubs and aminetxduo_mbuf is not linked into
+ * bsdsocket.library at all, so the pool never comes up and there is nothing to
+ * release. Wiring any of those LVOs to this pool is three steps, not one --
+ * link the library, and call this from ami_ns_destroy() after nx_ip_delete()
+ * and the SANA-II closes, which is where ami_bpf_cleanup() is called from for
+ * the same reason. Do all three or the slabs are resident until reboot.
  */
 VOID ami_mbuf_cleanup(VOID);
 
