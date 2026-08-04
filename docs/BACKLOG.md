@@ -54,6 +54,26 @@ So the cost is one shim of a few hundred lines, after which any file in
 `src/config/test/shim` are the precedents, and their own comments say the
 difference between them is deliberate, so this is a third rather than a merge.
 
+**Measured 2026-08-04, after building it.** The shim reaches six of the
+twenty-nine files: `bpf`, `bsdsocket_vectors`, `inet`, `library_runtime`,
+`netx_call`, `nxcontext`. The rest fail in two ways, and the second is a wall
+rather than more work:
+
+| Class | Files | What it takes |
+|---|---|---|
+| Missing declarations | `routing` (`RTA_*`), `socket` (`FDCB_*`), `errno` | Grow `libraries/bsdsocket.h` in the shim |
+| The host's structures are not the Amiga's | `transfer` (`iovec is not 8 bytes`), `addrinfo` (`sin_len`), `options` and `select` (`tv_secs`), `cmsg` (`cmsghdr is not 12 bytes`) | Nothing, on a 64-bit host: an Amiga `iovec` is a 4-byte pointer plus a ULONG, and no header choice makes a pointer four bytes |
+
+The second class needs `-m32`, which puts these in the `host32` tier rather
+than `host`. `-m32` works on the Linux build host; the arm64 Mac cannot do it
+at all.
+
+**Using the NDK's own headers instead of the shim was tried and is worse**:
+`-I $TOOLCHAIN/m68k-amigaos/ndk-include` with `__asm`, `__stdargs`, `__saveds`
+and `__regargs` neutered brings `bsdsocket_internal.h` to one error, but zero
+of the twenty-nine files compile, against the shim's six. The NDK also defines
+`struct timeval` a second time against ThreadX's linux port. Do not repeat it.
+
 | Phase | What | Why in this order |
 |---|---|---|
 | 0 | The shim, under `tests/bsdsocket/host/shim` | Everything below is blocked on it and nothing else is |
