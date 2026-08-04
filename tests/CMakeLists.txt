@@ -9,6 +9,7 @@ add_subdirectory(perf)
 add_subdirectory(tools)
 add_subdirectory(tcpdrill)
 add_subdirectory(sockopt)
+add_subdirectory(sana2)
 add_subdirectory(udpdrill)
 
 # Host-only, and it says so itself: the sanitizer fuzz drivers for the parsers
