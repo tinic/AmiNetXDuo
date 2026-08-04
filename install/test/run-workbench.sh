@@ -3,11 +3,11 @@
 # Install the release archive on a REAL Workbench 3.1, reboot, and then use
 # the machine the way its owner would.
 #
-#   install/test/run-workbench-fsuae.sh [-b BUILDDIR] [-a ARCHIVE.lha]
+#   install/test/run-workbench.sh [-b BUILDDIR] [-a ARCHIVE.lha]
 #                                       [-l NOVICE|AVERAGE|EXPERT]
 #                                       [-t SECONDS] [-T SECONDS] [-k]
 #
-# WHY THIS EXISTS, given that run-installer-fsuae.sh already installs and
+# WHY THIS EXISTS, given that install/test/run-installer.sh already installs and
 # boots.  That harness stages the machine itself: it makes an empty LIBS:, a
 # DEVS: holding one driver and an S: with nothing in it, boots a bare
 # directory hard drive with no Workbench on it at all, and drives its own
@@ -45,7 +45,7 @@
 # -a TAKES THE ARCHIVE AS GIVEN, and that is the strongest form of this test:
 #
 #     gh release download v0.8.1 -D /tmp/rel
-#     install/test/run-workbench-fsuae.sh -a /tmp/rel/AmiNetXDuo-0.8.1.lha
+#     install/test/run-workbench.sh -a /tmp/rel/AmiNetXDuo-0.8.1.lha
 #
 # Without it the archive is built here, from this machine's toolchain, and a
 # defect that lives in the RELEASE build, a different compiler, a different
@@ -151,8 +151,24 @@ fi
     exit 2
 }
 
-FSUAE="${FSUAE:-$(command -v fs-uae || true)}"
-[ -n "$FSUAE" ] || { echo "fs-uae not found; set FSUAE=<path>" >&2; exit 2; }
+# Amiberry, not fs-uae.  fs-uae opens an SDL window even with nothing to open
+# it on, so on a headless machine it dies in seconds and the failure reads as
+# a guest that never booted; and the Debian build's SLIRP is a stub that logs
+# `stub, uae_slirp_start` and carries on, so the network half of this test
+# would measure nothing.  tools/amiberry-run.sh's header has the long version.
+AMIBERRY="${AMIBERRY:-$(command -v amiberry || true)}"
+if [ -z "$AMIBERRY" ]; then
+    for candidate in "$HOME/amiberry/build/amiberry" "$HOME/amiberry/amiberry"; do
+        [ -x "$candidate" ] && { AMIBERRY="$candidate"; break; }
+    done
+fi
+[ -n "$AMIBERRY" ] || { echo "amiberry not found; set AMIBERRY=<path>" >&2; exit 2; }
+
+# The network backend the guest's A2065 is wired to.  A bare interface name
+# (`ens18`) puts it on the host's own LAN with its own MAC, which is what
+# makes the DHCP, DNS and http checks below real rather than NAT-shaped.
+BACKEND="${AMINETXDUO_EMU_BACKEND:-slirp}"
+MAC="${AMINETXDUO_EMU_MAC:-52:54:00:c0:ff:ee}"
 
 XDFTOOL="${AMINETXDUO_XDFTOOL:-}"
 if [ -z "$XDFTOOL" ]; then
@@ -334,15 +350,15 @@ fi
 
 # ------------------------------------------------------------- the emulator --
 #
-# tools/fsuae-run.sh cannot drive these runs: it wipes the staging drive and
+# tools/amiberry-run.sh cannot drive these runs: it wipes the staging drive and
 # writes its own Startup-Sequence, and the whole point here is a machine that
 # boots Commodore's.  So the emulator is started directly, with the same
 # config that harness generates, and with its lock, in its measurement lane,
 # so a run here does not share the host with anything else.
 
-LOCKDIR="$ROOT/build/.fsuae.lock"
-SLOTDIR="$ROOT/build/.fsuae.slots"
-PERFWAIT="$ROOT/build/.fsuae.perfwait"
+LOCKDIR="$ROOT/build/.emu.lock"
+SLOTDIR="$ROOT/build/.emu.slots"
+PERFWAIT="$ROOT/build/.emu.perfwait"
 LOCK_HELD=0
 
 slots_busy() { ls -d "$SLOTDIR"/*/ 2>/dev/null | wc -l | tr -d ' '; }
@@ -387,19 +403,29 @@ release_lock() {
     LOCK_HELD=0
 }
 
-FSUAE_PID=""
+EMU_PID=""
+SERIAL_PID=""
 cleanup() {
-    if [ -n "$FSUAE_PID" ]; then
-        kill -TERM "$FSUAE_PID" 2>/dev/null || true
+    if [ -n "$EMU_PID" ]; then
+        kill -TERM "$EMU_PID" 2>/dev/null || true
         sleep 1
-        kill -KILL "$FSUAE_PID" 2>/dev/null || true
-        FSUAE_PID=""
+        kill -KILL "$EMU_PID" 2>/dev/null || true
+        EMU_PID=""
     fi
+    [ -n "$SERIAL_PID" ] && kill -TERM "$SERIAL_PID" 2>/dev/null || true
+    SERIAL_PID=""
     release_lock
 }
 trap cleanup EXIT INT TERM HUP
 
+# The headless switch.  Amiberry links SDL2 with no driver of its own, so
+# without this it asks for a video device, finds a stale DISPLAY from an ssh
+# X11 forward that failed, and aborts in about a second -- which reads as a
+# guest that never booted.  DISPLAY is cleared for the same reason: a stale one
+# is worse than none.  tools/amiberry-run.sh does exactly this.
+export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-dummy}"
 export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
+[ "${SDL_VIDEODRIVER}" = "dummy" ] && unset DISPLAY WAYLAND_DISPLAY || true
 
 # One boot of the machine as it stands.  $1 names the run, $2 is the timeout,
 # $3 is "net" to attach the A2065 to SLIRP.  Returns the guest's own exit
@@ -407,41 +433,55 @@ export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
 BOOT_STATUS=0
 boot() {
     local name="$1" timeout="$2" net="${3:-}"
-    local cfg="$ROOT/build/wb31-$name.fs-uae"
+    local cfg="$ROOT/build/wb31-$name.uae"
     local serial="$ROOT/build/serial-wb31-$name.log"
-    local base="$ROOT/build/fsuae-base-wb31-$name"
     local elapsed=0
+    local port
 
-    mkdir -p "$base"
+    # One listening port per run name, so two runs never collide.  Same
+    # hashing as tools/amiberry-run.sh.
+    port=$((12000 + $(printf '%s' "wb31-$name" | cksum | cut -d' ' -f1) % 900))
+
     : > "$serial"
     rm -f "$HD/.done"
 
     cat > "$cfg" <<EOF
-[fs-uae]
-floppy_drive_volume = 0
-floppy_drive_volume_empty = 0
-base_dir = $base
-amiga_model = $MODEL
-kickstart_file = $KICKSTART
-hard_drive_0 = $HD
-hard_drive_0_label = DH0
-fast_memory = 8192
-serial_port = $serial
-fullscreen = 0
+config_description=AmiNetXDuo wb31 $name
+use_gui=no
+headless=true
+quickstart=$MODEL,0
+kickstart_rom_file=$KICKSTART
+fastmem_size=8
+floppy0type=-1
+nr_floppies=0
+uaehf0=dir,rw,DH0:DH0:$HD,0
+serial_port=tcp://127.0.0.1:$port/wait
 EOF
     if [ "$net" = "net" ]; then
         cat >> "$cfg" <<EOF
-network_card = a2065
-uae_a2065 = slirp
+a2065_rom_file=:ENABLED
+a2065_rom_options=mac=$MAC,$BACKEND
 EOF
     fi
 
-    echo "==> booting ($name, timeout ${timeout}s)"
-    # SIGPIPE ignored for the same reason tools/fsuae-run.sh ignores it: SLIRP
+    echo "==> booting ($name, timeout ${timeout}s, network $([ "$net" = net ] && echo "$BACKEND" || echo off))"
+    # SIGPIPE ignored for the reason tools/amiberry-run.sh ignores it: SLIRP
     # writes guest payload to host sockets without MSG_NOSIGNAL, so a peer that
     # hangs up first otherwise kills the emulator and it looks like a guru.
-    ( trap '' PIPE; exec "$FSUAE" "$cfg" ) >"$ROOT/build/fsuae-wb31-$name.log" 2>&1 &
-    FSUAE_PID=$!
+    ( trap '' PIPE; exec "$AMIBERRY" --log -f "$cfg" ) \
+        >"$ROOT/build/amiberry-wb31-$name.log" 2>&1 &
+    EMU_PID=$!
+
+    # serial_port=.../wait blocks the emulator until something connects, so
+    # retry until it is listening or the emulator is gone.
+    (
+        for _ in $(seq 1 60); do
+            kill -0 "$EMU_PID" 2>/dev/null || exit 0
+            nc 127.0.0.1 "$port" >> "$serial" 2>/dev/null && exit 0
+            sleep 0.5
+        done
+    ) &
+    SERIAL_PID=$!
 
     BOOT_STATUS=124
     while [ "$elapsed" -lt "$timeout" ]; do
@@ -450,17 +490,19 @@ EOF
             BOOT_STATUS=${BOOT_STATUS:-0}
             break
         fi
-        kill -0 "$FSUAE_PID" 2>/dev/null || {
-            echo "!! fs-uae exited early after ${elapsed}s" >&2
+        kill -0 "$EMU_PID" 2>/dev/null || {
+            echo "!! amiberry exited early after ${elapsed}s" >&2
             break
         }
         sleep 1
         elapsed=$((elapsed + 1))
     done
 
-    kill -TERM "$FSUAE_PID" 2>/dev/null || true
-    wait "$FSUAE_PID" 2>/dev/null || true
-    FSUAE_PID=""
+    kill -TERM "$EMU_PID" 2>/dev/null || true
+    wait "$EMU_PID" 2>/dev/null || true
+    EMU_PID=""
+    kill -TERM "$SERIAL_PID" 2>/dev/null || true
+    SERIAL_PID=""
 
     echo "    ($name finished after ${elapsed}s, status $BOOT_STATUS)"
     if [ -s "$serial" ]; then
@@ -512,8 +554,28 @@ echo "  what the installer put on a real Workbench"
 echo "============================================================"
 
 fail=0
+
+# AmigaDOS does not care about case and this host does, so a file the guest
+# wrote as `s/user-startup` is not `S/User-Startup` to `[ -f ]`.  Every name
+# below is checked the way the guest would resolve it, one component at a
+# time; without this the installer looks like it skipped the one file it did
+# write, and the run stops before the half that matters.
+amiga_path() {
+    local cur="$HD" part next
+    local -a parts
+    IFS=/ read -ra parts <<< "$1"
+    for part in "${parts[@]}"; do
+        next=$(ls -1 "$cur" 2>/dev/null |
+               awk -v p="$part" 'tolower($0) == tolower(p) { print; exit }')
+        [ -n "$next" ] || return 1
+        cur="$cur/$next"
+    done
+    printf '%s\n' "$cur"
+}
+
 check_file() {
-    if [ -f "$HD/$1" ]; then
+    local real
+    if real=$(amiga_path "$1") && [ -f "$real" ]; then
         printf '  ok      %s\n' "$1"
     else
         printf '  MISSING %s\n' "$1"
@@ -533,8 +595,9 @@ check_file S/User-Startup
 # tls.library and the trust store are what https: needs, and their absence is
 # the first thing to know if the https: check fails.
 for f in Libs/tls.library Devs/Internet/certificates; do
-    if [ -f "$HD/$f" ]; then
-        printf '  ok      %-32s %s bytes\n' "$f" "$(wc -c < "$HD/$f" | tr -d ' ')"
+    real=$(amiga_path "$f" || true)
+    if [ -n "$real" ] && [ -f "$real" ]; then
+        printf '  ok      %-32s %s bytes\n' "$f" "$(wc -c < "$real" | tr -d ' ')"
     else
         printf '  ABSENT  %s\n' "$f"
     fi
@@ -542,9 +605,9 @@ done
 
 echo
 echo "---- S:User-Startup ----"
-cat "$HD/S/User-Startup" 2>/dev/null || echo "(none)"
+cat "$(amiga_path S/User-Startup 2>/dev/null)" 2>/dev/null || echo "(none)"
 echo "---- DEVS:NetInterfaces/eth0 ----"
-cat "$HD/Devs/NetInterfaces/eth0" 2>/dev/null || echo "(none)"
+cat "$(amiga_path Devs/NetInterfaces/eth0 2>/dev/null)" 2>/dev/null || echo "(none)"
 
 if [ "$INSTALL_STATUS" != "0" ] || [ "$fail" != "0" ]; then
     echo
@@ -577,7 +640,7 @@ fi
 # it stays here precisely because a cautious user will still type it: a client
 # that mishandled an already-large Shell stack would fail nowhere else.
 cat > "$HD/S/AmiNetXDuo-Check" <<EOF
-; Written by install/test/run-workbench-fsuae.sh.  Nothing here is installed
+; Written by install/test/run-workbench.sh.  Nothing here is installed
 ; by AmiNetXDuo, it is what a user would type.
 FailAt 9999
 Stack 200000

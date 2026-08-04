@@ -19,7 +19,7 @@
 #
 # Stages LIBS:bsdsocket.library and LIBS:usergroup.library from build/cm,
 # DEVS:a2065.device plus the netstack DEVS: config, the suite binary and the
-# argument line, then boots tools/fsuae-run.sh with conf_launcher as the
+# argument line, then boots tools/amiberry-run.sh with conf_launcher as the
 # program the Startup-Sequence runs.  See conf_launcher.c for why there is a
 # launcher at all.
 #
@@ -27,7 +27,7 @@
 # OpenLibrary() the whole run would be measuring WinUAE's host-socket shim
 # instead of our stack, so this script sets bsdsocket_library = 0 via a host
 # configuration dropped into the run's private base directory (FS-UAE reads
-# it after resolving base_dir; the config tools/fsuae-run.sh writes cannot
+# it after resolving base_dir; the config tools/amiberry-run.sh writes cannot
 # carry the option).
 #
 # The emulator log still says "bsdsocket.library installed" either way, that
@@ -57,7 +57,7 @@ TIMEOUT=600
 CPU=""
 # -T wins, then AMINETXDUO_RUN_TAG from the environment, then the default. The
 # environment has to be honoured here: this script exports AMINETXDUO_RUN_TAG
-# to tools/fsuae-run.sh, so taking the default unconditionally used to
+# to tools/amiberry-run.sh, so taking the default unconditionally used to
 # OVERWRITE a caller's tag, two runs started with different
 # AMINETXDUO_RUN_TAG values would silently share build/testhd-conformance and
 # clobber each other's results.
@@ -134,13 +134,13 @@ set +e
 if [ "$PROBE" = "1" ]; then
     # The probe needs no arguments and no big stack, so it is run directly
     # instead of through the launcher.
-    "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" ${CPU:+-c "$CPU"} -t "$TIMEOUT" \
+    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" ${CPU:+-c "$CPU"} -t "$TIMEOUT" \
         "$ROOT/build/bsdsocktest/conf_probe" "$STAGE/devs" "$STAGE/libs"
     status=$?
     set -e
     exit "$status"
 fi
-"$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" ${CPU:+-c "$CPU"} -t "$TIMEOUT" \
+"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" ${CPU:+-c "$CPU"} -t "$TIMEOUT" \
     "$LAUNCHER" "$STAGE/devs" "$STAGE/libs" "$STAGE/bsdsocktest" \
     "$STAGE/conf-args"
 status=$?

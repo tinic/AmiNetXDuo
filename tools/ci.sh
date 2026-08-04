@@ -392,18 +392,27 @@ stage_analyze() {
 
 # -------------------------------------------------------------- emulator ----
 
-# Which emulator runs the guests.  fs-uae is the historical one and is
-# unusable on the lab machine: 3.1.66 there has no SLIRP and needs an X
-# server, so every guest boots, runs nothing and times out with no DH0:.done,
-# which reads exactly like a crash in the code under test.  All eight tier-2
-# tests fail that way and all eight pass under Amiberry.
+# Which emulator runs the guests.  Amiberry, and only Amiberry: fs-uae needs an
+# X server, and the 3.1.66 build has no SLIRP, so every guest booted, ran
+# nothing and timed out with no DH0:.done, which reads exactly like a crash in
+# the code under test.  All eight tier-2 tests failed that way and all eight
+# pass under Amiberry.
 EMU_RUNNER="${AMINETXDUO_EMU_RUNNER:-tools/amiberry-run.sh}"
 
 stage_emulator() {
     hr "emulator tests (tier 2)"
 
-    if ! command -v fs-uae >/dev/null 2>&1 && [ -z "${FSUAE:-}" ]; then
-        fail "fs-uae is not installed, tier 2 cannot run"
+    # Check the emulator this stage will actually use, not a different one.
+    # This asked for fs-uae while running Amiberry, so a machine with only
+    # Amiberry -- which is every machine that works -- was told tier 2 could
+    # not run, and the eight tests it would have passed never started.
+    if [ ! -x "$EMU_RUNNER" ]; then
+        fail "$EMU_RUNNER is missing, tier 2 cannot run"
+        return 1
+    fi
+    if ! command -v amiberry >/dev/null 2>&1 &&
+       [ ! -x "${AMIBERRY:-}" ] && [ ! -x "$HOME/amiberry/build/amiberry" ]; then
+        fail "amiberry is not installed, tier 2 cannot run"
         return 1
     fi
 

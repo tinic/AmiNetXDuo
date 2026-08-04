@@ -246,7 +246,7 @@ HD="$ROOT/build/testhd-$AMINETXDUO_RUN_TAG"
 
 echo "==> $BUILD ($MODE) on $MODEL, A2065 on SLIRP, eth0 with ADDRESS6=fd00::10/64"
 set +e
-"$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
+"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
     "$STAGE/greeting.txt" \
     $(for t in $STAGED_TOOLS; do echo "$STAGE/$t"; done)

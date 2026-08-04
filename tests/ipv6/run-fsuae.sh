@@ -76,5 +76,5 @@ if [ "$RUNNER" = "amiberry" ]; then
          -t "$TIMEOUT" ${CPU:+-c "$CPU"} "$EXE" "$STAGE/devs"
 fi
 
-exec "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
+exec "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
      "$EXE" "$STAGE/devs"

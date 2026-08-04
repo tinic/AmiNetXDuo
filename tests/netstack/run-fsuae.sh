@@ -9,7 +9,7 @@
 # without either of them having to be called "cm".
 #
 # Stages DEVS:NetInterfaces/eth0, DEVS:Internet/* and a SANA-II a2065.device
-# onto the test hard drive, then hands off to tools/fsuae-run.sh -n.
+# onto the test hard drive, then hands off to tools/amiberry-run.sh -n.
 #
 # The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
 # or drop a copy in build/a2065.device.
@@ -65,5 +65,5 @@ export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-netstack}"
 CPUARG=()
 [ -z "$CPU" ] || CPUARG=(-c "$CPU")
 
-exec "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
+exec "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
      "$EXE" "$STAGE/devs"

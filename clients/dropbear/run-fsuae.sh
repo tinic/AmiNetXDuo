@@ -11,7 +11,7 @@
 #       is the same 10.0.2.0/24 with the host at 10.0.2.2, so the target does
 #       not move.  NOT a timing lane, -x is FS-UAE's.
 #
-#   -x  take the emulator alone (tools/fsuae-run.sh's measurement lane).  EVERY
+#   -x  take the emulator alone (tools/amiberry-run.sh's measurement lane).  EVERY
 #       timing here needs it: a handshake measured while two other FS-UAE
 #       instances share the host is fiction, and this project has already had
 #       one set of figures corrupted that way.
@@ -351,7 +351,7 @@ if [ "$RUNNER_KIND" = "amiberry" ]; then
         -t "$TIMEOUT" ${CPU:+-c "$CPU"} "$RUNNER" "${STAGED[@]}" \
         2>&1 | tee "$TRANSCRIPT" || true
 else
-    "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
+    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
         "$RUNNER" "${STAGED[@]}" 2>&1 | tee "$TRANSCRIPT" || true
 fi
 

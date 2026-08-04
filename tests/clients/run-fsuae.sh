@@ -82,5 +82,5 @@ EOF
 
 export AMINETXDUO_RUN_TAG="$TAG"
 
-exec "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" ${CPU:+-c "$CPU"} -t "$TIMEOUT" \
+exec "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" ${CPU:+-c "$CPU"} -t "$TIMEOUT" \
      "$EXE" "$STAGE/devs" "$STAGE/libs"
