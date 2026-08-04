@@ -141,6 +141,18 @@ function(aminetxduo_add_tool target output)
                 -P "${CMAKE_SOURCE_DIR}/cmake/check-version-tag.cmake"
         VERBATIM)
 
+    # Symbols, after the version tag is checked and before the size is printed,
+    # so the number reported is the number that ships.  A command carries its
+    # symbol table for nobody: the profiler reads the linker map and the object
+    # files rather than HUNK_SYMBOL (tools/profiler/profreport.py), and a
+    # crash on this machine is diagnosed from an address and the map, not from
+    # the binary.  Worth about 4 KB on ping, which is 15% of it.
+    if(CMAKE_STRIP AND NOT AMINETXDUO_KEEP_SYMBOLS)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND "${CMAKE_STRIP}" "$<TARGET_FILE:${target}>"
+            VERBATIM)
+    endif()
+
     if(AMIGA_SIZE)
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:${target}>"
