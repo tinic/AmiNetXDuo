@@ -35,7 +35,6 @@
 
 #include "tools.h"
 
-#include <stdlib.h>   /* atexit */
 
 const char *const tool_name = "CheckNetConfig";
 
@@ -861,7 +860,23 @@ static VOID check_interfaces(const AmiConfig *cfg)
     }
 }
 
+/*
+ * The body, so that ami_netdb_free() has one place to run.  atexit() is not
+ * free here: libnix satisfies it out of an object that also references malloc
+ * and __errno, which pulls in the C++ AVL allocator and the stdio FILE
+ * machinery, about 7.7 KB nothing in this command calls.
+ */
+static int checknetconfig_main(int argc, char **argv);
+
 int main(int argc, char **argv)
+{
+    int rc = checknetconfig_main(argc, argv);
+
+    ami_netdb_free();
+    return rc;
+}
+
+static int checknetconfig_main(int argc, char **argv)
 {
     LONG           args[ARG_COUNT];
     struct RDArgs *rda;
@@ -920,10 +935,9 @@ int main(int argc, char **argv)
      * ami_config_load() loads the netdb (src/config/config_file.c) and
      * ami_alloc() is AllocVec(), which AmigaOS does not reclaim when a process
      * exits, 12,616 bytes per run on a stock DEVS:Internet, gone until
-     * reboot. atexit() rather than a free before each return: this command
-     * leaves main() from several places.
+     * reboot.  main() frees it on the way out, which is one place however
+     * many ways this command leaves its body.
      */
-    atexit(ami_netdb_free);
 
     if (cnc_verbose)
     {
