@@ -24,6 +24,7 @@ version at the top when it merges.
 - A server that breaks off a secure connection mid-transfer is reported as an error rather than a normal end of file, so a truncated download no longer looks like a complete one
 - Session keys are wiped from memory when a connection closes, and remembered sessions expire after a day on machines with no working clock, where they previously never expired
 - A large reply that arrives split into pieces is now put back together instead of vanishing. A machine that could not do this saw big replies simply never arrive, and the program waiting for one timed out with nothing to show for it
+- An IPv6 address the router hands out can now be taken back. With one router setting, the address was kept for ever and nothing short of a reboot removed it, so a machine that moved networks kept an address belonging to the old one
 - On a network that only speaks IPv6, the machine can now look up names. It previously got an address and could reach numbered addresses but could not resolve a single name
 - A name that does not exist is reported as not existing straight away, instead of every name server on the list being asked in turn and the whole retry ladder run out first
 - Names spelled with capital letters resolve. Some name servers answer in lower case and the reply was being rejected as if it were for a different name

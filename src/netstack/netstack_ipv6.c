@@ -532,9 +532,12 @@ UINT netstack_ipv6_route_add(const ULONG dest[4], ULONG prefix_len,
         if (ami_ns6_prefix_find(ns, prefix, prefix_len) != NX_NULL)
             status = NX_DUPLICATED_ENTRY;
         else
+            /* A route added by hand is on-link by definition: that is what
+               the caller is asserting about it. */
             status = _nx_ipv6_prefix_list_add_entry(&ns->ns_Ip, prefix,
                                                     prefix_len,
-                                                    AMI_NS6_PREFIX_FOREVER);
+                                                    AMI_NS6_PREFIX_FOREVER,
+                                                    (ULONG)1);
 
         if (status == NX_SUCCESS)
             ami_ns6_forget_destinations(ns);
