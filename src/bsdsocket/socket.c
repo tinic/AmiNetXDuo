@@ -824,33 +824,52 @@ static BOOL bsd_tcp_close_start(AmiSocket *sock)
         return TRUE;
     }
 
+    /*
+     * The two abortive closes go through bsd_tcp_abort() rather than calling
+     * nx_tcp_socket_disconnect() themselves. nx_tcp_socket_disconnect.c:107
+     * refuses every state past CLOSE_WAIT with NX_NOT_CONNECTED and sends
+     * nothing, and FIN_WAIT_1 is exactly where a close after
+     * shutdown(SHUT_WR) starts -- so the RESET these two ask for did not
+     * happen. What appeared on the wire came from the bsd_tcp_abort()
+     * fallback after nx_tcp_socket_delete() answered NX_STILL_BOUND: right
+     * answer, wrong route, and only for a socket that reached that path.
+     * bsd_tcp_abort() winds the state back to ESTABLISHED first, which is what
+     * makes the disconnect take the NX_NO_WAIT branch and send.
+     */
+
     /* RFC 1122 4.2.2.13: unread data turns a close into an abort. */
     if (sock->as_RxPending != NULL || tcp->nx_tcp_socket_receive_queue_count != 0)
     {
-        nx_tcp_socket_disconnect(tcp, NX_NO_WAIT);
+        bsd_tcp_abort(tcp);
         return TRUE;
     }
 
     /* SO_LINGER, l_linger == 0: the documented abortive close. */
     if (sock->as_LingerOn != 0 && sock->as_LingerTime == 0)
     {
-        nx_tcp_socket_disconnect(tcp, NX_NO_WAIT);
+        bsd_tcp_abort(tcp);
         return TRUE;
     }
 
-    /* SO_LINGER, l_linger > 0: block until the peer answers or the time is
-       up, which is what NetX Duo's waiting disconnect already is. */
     if (sock->as_LingerOn != 0)
     {
-        nx_tcp_socket_disconnect(tcp, (ULONG)sock->as_LingerTime *
-                                          NX_IP_PERIODIC_RATE);
-        return TRUE;
+        /* SO_LINGER, l_linger > 0: block until the peer answers or the time is
+           up, which is what NetX Duo's waiting disconnect already is. It
+           refuses anything past CLOSE_WAIT, and in that case the FIN has
+           already gone and there is nothing to linger for -- fall through and
+           park the socket rather than tell the caller it is finished with. */
+        if (nx_tcp_socket_disconnect(tcp, (ULONG)sock->as_LingerTime *
+                                              NX_IP_PERIODIC_RATE)
+            != NX_NOT_CONNECTED)
+            return TRUE;
     }
-
-    /* The default. bsd_tcp_send_fin() does nothing if the FIN has already gone
-       (a close after shutdown(SHUT_WR)); the state test below then parks the
-       socket as usual. */
-    bsd_tcp_send_fin(sock);
+    else
+    {
+        /* The default. bsd_tcp_send_fin() does nothing if the FIN has already
+           gone (a close after shutdown(SHUT_WR)); the state test below then
+           parks the socket as usual. */
+        bsd_tcp_send_fin(sock);
+    }
 
     state = tcp->nx_tcp_socket_state;
 
