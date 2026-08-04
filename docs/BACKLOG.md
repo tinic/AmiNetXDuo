@@ -38,26 +38,10 @@ git log; what it declined is under *Decided against*; what it disproved is under
 | **Extended master secret, RFC 7627** | Without it, resumption is exposed to the triple-handshake attack. A change to nx_secure's key schedule, not a table entry; every cached session becomes non-resumable |, |
 | **SACK send side** | Already written and verified on fork branch `amiga-tcp-sack-transmit` (`d8af79c5`), never landed. Adds `nx_tcp_sack_option_get.c` and the retransmit skip | `nx_tcp.h:93` |
 | **An RA with A=1 and L=0 forms an address nothing can remove.** The address is formed at `:344`, `:396-422`, but a prefix-list entry is added only when L is set (`:317`), so nothing ages it out | Found 2026-08-04 while adjudicating the IPv6 address-lifetime rows. A legitimate and not-rare router configuration, and a worse defect than the row that led to it | `nx_icmpv6_process_ra.c` |
+| **A command is mostly C runtime.** `ping` is 15,860 bytes, of which its own code is 2,050 | libnix's crt0 chain pulls in stdio and the C++ AVL allocator through `__stdiowin.o` and `__initcpp.o`; `atexit()` was the other route and is gone. `tool_printf` goes through dos.library `VPrintf` and `ami_alloc` through `AllocVec`, so nothing we wrote calls what remains. `src/tools/CMakeLists.txt:62-76` records why the link line was left alone once before | link map of `tool_ping` |
+| **Parameterise `run-tcphandler.sh`'s peer address** | Every connection in it names 10.0.2.2, fs-uae's SLIRP gateway, so it cannot move to Amiberry. It is the last network test still calling `fsuae-run.sh` directly | `tests/tools/run-tcphandler.sh:137-159` |
+| **`HOST_TEST_TARGETS` count guard does not catch an unbuilt target** | It compares registered tests against targets, and a test registers whether or not its target was built, so five went to `main` reporting Not Run | `tools/ci.sh:207-211` |
 | **EKU, nameConstraints and critical-extension rejection, together** | Accepting a certificate that marks nameConstraints critical while not enforcing it is exactly the failure the critical bit exists to prevent, so doing one without the others is worse than doing none. The known-critical set must be `{basicConstraints, keyUsage, subjectAltName, extendedKeyUsage}`, Let's Encrypt intermediates mark EKU critical. Untestable without hardware | `nx_secure_x509_extension_find.c:191` |
-
-### Found while shipping the 2026-08-04 sweep
-
-| Item | Measured | Cite |
-|---|---|---|
-| **A command is mostly C runtime.** `ping` is 24,116 bytes stripped, of which its own code is **2,050**. libnix's startup pulls in a C++ AVL allocator behind `malloc` (2,952), stdio (2,916) and string/format (1,856): 7,724 bytes, 35% of the binary, none of it referenced by anything we wrote. `tool_printf` already goes through dos.library `VPrintf` and `ami_alloc` through `AllocVec`, so the references come from `__stdiowin.o`, `__initcpp.o` and `atexit.o` in the crt0 chain | link map of `tool_ping` | `src/tools/CMakeLists.txt:62-76` records why the link line was deliberately left alone once before |
-| **The httpd drill cannot be driven from the machine hosting the guest.** Amiberry bridges over pcap on `ens18`, and a GET from that host to the guest's address never answers; the same GET from another machine on the LAN answers 200. `run-httpd.sh` reports "the guest never answered from this host", which reads as a stack fault and is not one. The 2026-08-04 WebDAV run was driven from a third machine | run 2026-08-04 | `tests/tools/run-httpd.sh:183-198` |
-| **`run-tcphandler.sh` cannot leave fs-uae without being parameterised.** Every connection in it names 10.0.2.2, fs-uae's SLIRP gateway. Amiberry bridges over pcap, so the address does not exist there and the guest waits for a peer that never answers. It is the last network test still calling `fsuae-run.sh` directly | run 2026-08-04 | `tests/tools/run-tcphandler.sh:137-159` |
-| **The `HOST_TEST_TARGETS` count guard does not catch an unbuilt target.** It compares the number of *registered* tests against the number of targets, and registration happens whether or not the target was built, so five new tests went to `main` reporting Not Run | CI run 30894986338 | `tools/ci.sh:207-211` |
-
-### Carried caveats
-
-Two verdicts from the sweep rest on comments rather than observation, and are
-recorded so they can be re-checked rather than re-derived.
-
-| Verdict | Rests on | If it is wrong |
-|---|---|---|
-| Unlocked `ami_ns` reads are safe because internal threads are drained before the free | The comment at `netstack.c:1722-1725`, not observation, that `nx_ip_delete()` waits for the IP thread | The row is live; the fix is a reference count taken by every `netstack_ip()` and `netstack_pool()` caller |
-| The baton slot wipe is safe where it is placed, after `tx_amiga_kernel_stop()` returns `TX_SUCCESS` | The comment at `netstack.c:1740-1751` that no bracket can be open at that point | The wipe moves; the conservative arm (leave the table alone on any other status) already holds |
 
 ### Performance, measured positions
 
@@ -463,6 +447,7 @@ plausible reading of a real symptom, and the same reading will recur.
 
 | Item | Detail |
 |---|---|
+| The httpd drill cannot be driven from the machine hosting the guest | Amiberry bridges over pcap, and a GET from that host to the guest's address never answers; the same GET from another machine on the LAN answers 200. `run-httpd.sh` says "the guest never answered from this host", which reads as a stack fault and is not one |
 | A task can hold about five library bases that use a `WaitSelect()` timeout | Each base takes an event signal from the calling task (`library.c:244`) and the first timeout takes another for the timer (`select.c:475`), out of a Task's 32 bits. `OpenLibrary()` refuses once they run out, which is correct. Found 2026-07-31 when eight opens got five; `run-cycledrill.sh` now asks for four |
 | `run-fitzbench.sh`'s write figure is not a rate | Stops timing when the write call returns, not when data drains. Guest-timed 1718 KB/s against a measured wire rate of 364. Reads agree between clocks; writes diverge ~4.7× |
 | `run-fitzbench.sh` refuses a same-host virtual peer | Over the uncomputed TX checksums that `ethtool -K <iface> tx off` fixes. Can be relaxed. Query by full path, `/usr/sbin` is not on a non-login ssh PATH |
