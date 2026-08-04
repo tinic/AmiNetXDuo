@@ -9,6 +9,10 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.17.1
+
+- The archive is compressed. Every release before this one packed every file whole, so the download was about twice the size it needed to be: 0.17.0 is 86 files at a 100.0% ratio. Nothing else in it differs from 0.17.0
+
 ## 0.17.0
 
 - A program that sends to a closed port is told so instead of waiting out its timeout. ICMP error messages never reached the sockets that caused them, so a UDP send to a port with nothing listening blocked until it gave up, and a TCP connection to an unreachable host did the same
