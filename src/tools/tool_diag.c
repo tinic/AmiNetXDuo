@@ -339,13 +339,6 @@ LONG tool_device_probe(const char *device, ULONG unit)
 /* ---------------------------------------------------------------- output -- */
 
 /*
- * Advice prints as a block: a blank line, then lines indented two spaces under
- * the one-line complaint tool_error() has already produced. The indentation is
- * what ties it to that error on an 80-column screen.
- */
-}
-
-/*
  * Wrap `text` to the width of a Shell window, every line indented by `indent`
  * spaces. Only the config layer's messages need this: they are built at run
  * time from a keyword the user typed, so their length is not known in advance.
@@ -406,8 +399,6 @@ VOID tool_wrap(ULONG indent, const char *text)
         line[pos] = '\0';
         tool_printf("%s\n", (LONG)line);
     }
-}
-
 }
 
 /* ------------------------------------------------------- config reporting -- */
