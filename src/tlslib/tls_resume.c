@@ -427,16 +427,35 @@ static ULONG tls_resume_trust_key(const TLSConnection *conn)
     return (hash == 0) ? TLS_R_FNV_PRIME : hash;
 }
 
-/* Has this entry aged out?  A machine with no clock cannot answer, so it never
-   expires anything: a stale ticket costs one round trip and a full handshake,
-   which is what would have happened anyway. */
+/*
+ * Has this entry aged out?
+ *
+ * `now` is tls_time_monotonic(): wall time on a machine with a clock, seconds
+ * since boot on one without.  It used to be tls_time_now(), which is zero on a
+ * machine with no clock -- so on those the cap never fired and a master secret
+ * written to DEVS:Internet/tlssessions was offered again for as long as the
+ * file existed.  A cached master secret is a key on disk, and a key on disk
+ * with no expiry is one an attacker who takes the disk can use against
+ * captured traffic indefinitely.
+ *
+ * TLS_CLOCK_FLOOR separates the two kinds of stamp.  Both sides have to be the
+ * same kind for the subtraction to mean anything: a stamp written under a real
+ * clock cannot be compared with an uptime, and an uptime from a previous boot
+ * cannot be compared with this one.  Where they disagree, or where this boot's
+ * uptime has not yet reached the stored one, the entry is from another boot and
+ * is treated as expired -- which costs one full handshake, and is what would
+ * have happened anyway.
+ */
 static BOOL tls_resume_expired(const TLSResumeEntry *e, ULONG now)
 {
     ULONG age;
     ULONG limit;
 
-    if (now == 0 || e->re_Stamp == 0 || now < e->re_Stamp)
-        return FALSE;
+    if ((now >= TLS_CLOCK_FLOOR) != (e->re_Stamp >= TLS_CLOCK_FLOOR))
+        return TRUE;
+
+    if (now < e->re_Stamp)
+        return TRUE;
 
     age   = now - e->re_Stamp;
     limit = (e->re_Lifetime != 0 && e->re_Lifetime < TLS_RESUME_MAX_AGE)
@@ -795,7 +814,7 @@ VOID tls_resume_prepare(TLSConnection *conn)
     }
 
     base = conn->tc_Base;
-    now  = tls_time_now();
+    now  = tls_time_monotonic();
 
     ObtainSemaphore(&base->tb_Lock);
 
@@ -941,7 +960,7 @@ VOID tls_resume_record(TLSConnection *conn)
                                 tls_resume_trust_key(conn));
         if (entry != NULL)
         {
-            entry->re_Stamp  = tls_time_now();
+            entry->re_Stamp  = tls_time_monotonic();
             entry->re_Serial = ++base->tb_SessionSerial;
 
             if ((conn->tc_ResumeFlags & TLSR_TICKET_NEW) != 0 &&
@@ -979,7 +998,7 @@ VOID tls_resume_record(TLSConnection *conn)
             entry->re_Port        = conn->tc_Port;
             entry->re_CipherSuite = (UWORD)conn->tc_CipherSuite;
             entry->re_Protocol    = (UWORD)conn->tc_Protocol;
-            entry->re_Stamp       = tls_time_now();
+            entry->re_Stamp       = tls_time_monotonic();
             entry->re_Serial      = ++base->tb_SessionSerial;
             entry->re_Valid       = 1;
             entry->re_Flags       = tls_resume_flags(conn);

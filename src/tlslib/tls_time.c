@@ -54,15 +54,24 @@
  */
 #define TLS_AMIGA_EPOCH         252460800UL
 
-/* 2026-01-01 00:00:00 UTC.  Nothing this software runs on is older. */
-#define TLS_CLOCK_FLOOR         1767225600UL
+/* TLS_CLOCK_FLOOR is in tls_internal.h: 2026-01-01 00:00:00 UTC, and nothing
+   this software runs on is older.  tls_resume.c needs it too, to tell a wall
+   clock from an uptime counter. */
 
 /* Fifty years past the floor. */
 #define TLS_CLOCK_CEILING       (TLS_CLOCK_FLOOR + (50UL * 31556952UL))
 
 #define TLS_TICKS_PER_SECOND    50UL
 
-static ULONG tls_time_read(VOID)
+/*
+ * DateStamp() as it stands, with no floor or ceiling applied.
+ *
+ * On a machine with a set clock this is wall time.  On one without it starts
+ * at the AmigaOS epoch and counts up from boot, which is wrong as a date and
+ * still useful as elapsed time -- tls_resume.c ages cached sessions against
+ * it, and TLS_CLOCK_FLOOR is what tells the two cases apart.
+ */
+ULONG tls_time_monotonic(VOID)
 {
     struct DateStamp ds;
     ULONG            seconds;
@@ -84,7 +93,7 @@ static ULONG tls_time_read(VOID)
 
 BOOL tls_time_is_known(VOID)
 {
-    ULONG now = tls_time_read();
+    ULONG now = tls_time_monotonic();
 
     return (BOOL)((now >= TLS_CLOCK_FLOOR && now <= TLS_CLOCK_CEILING)
                   ? TRUE : FALSE);
@@ -98,7 +107,7 @@ BOOL tls_time_is_known(VOID)
  */
 ULONG tls_time_now(VOID)
 {
-    ULONG now = tls_time_read();
+    ULONG now = tls_time_monotonic();
 
     if (now < TLS_CLOCK_FLOOR || now > TLS_CLOCK_CEILING)
         return 0;
