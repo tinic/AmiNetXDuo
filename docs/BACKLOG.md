@@ -32,7 +32,8 @@ shared static is never written and `netdb.c:45` records that as the reason.
 
 | Item | Cite |
 |---|---|
-| `SO_REUSEADDR`, `SO_REUSEPORT`, `SO_BROADCAST` and `SO_OOBINLINE` set a flag that nothing reads: `ASF_REUSEADDR`, `ASF_BROADCAST` and `ASF_OOBINLINE` appear in `options.c` only | `options.c:175-205` |
+| `SO_BROADCAST` is accepted and not enforced. BSD makes it permission -- `sendto()` to a broadcast address is `EACCES` without it -- and this stack has never asked, so enforcing it would start failing sends that work today. A decision, recorded at `options.c:185-190`, not an omission | `options.c` |
+| `SO_OOBINLINE` is accepted and the value deliberately not stored: the urgent byte is delivered in the stream whatever the caller sets, so answering back a 0 would be the one thing it could not find out. Withholding the byte -- the option OFF -- means rewriting a queued segment the TCP state machine still owns and counts in its sequence space, to hide a byte the caller is about to see again (`oob.c:52-62`, RESEARCH 17) | `options.c:266` |
 
 **Resolver**
 
