@@ -441,6 +441,19 @@ stage_emulator() {
         fi
     done
 
+    # Say this once, here, rather than letting four tests time out in turn.
+    # An A600 booted with an A1200 ROM never reaches a Shell, and the only
+    # evidence is an empty serial log, which is what a crash in the code under
+    # test looks like too.
+    if [ -z "${AMINETXDUO_KICKSTART_A600:-}" ]; then
+        note "AMINETXDUO_KICKSTART_A600 is not set: the 68000 arm will fall back"
+        note "  to AMINETXDUO_KICKSTART, and an A1200 ROM does not boot an A600."
+        note "  Point it at the 40.63 A500/A600 image."
+    elif [ ! -f "${AMINETXDUO_KICKSTART_A600}" ]; then
+        fail "AMINETXDUO_KICKSTART_A600 is set to a file that does not exist"
+        return 1
+    fi
+
     local entry exe timeout dir cpuopt tag budget
     for dir in default m68000; do
         # These budgets multiply the per-test ceilings below.  They are ceilings,
@@ -449,7 +462,18 @@ stage_emulator() {
         # at emulation than a dedicated box, enough to time a test out on the old
         # 68020 x1 / 68000 x2 budgets.  Doubled so a slow runner has rope.
         if [ "$dir" = "m68000" ]; then
-            cpuopt="-c 68000"; tag="68000"; budget=4
+            # -m A600, not -c 68000.  Forcing cpu_type=68000 onto the default
+            # A1200 makes a machine that does not exist: the quickstart puts up
+            # an AGA board with a 68EC020 and the ROM to match, and the CPU line
+            # then contradicts both.  It never reaches a Shell, so every test on
+            # this arm timed out with an empty serial log and no DH0:.done,
+            # which reads as eight broken tests rather than one bad config.
+            #
+            # The 68000 build itself was never the problem: it passes on the
+            # A1200 arm.  A600 is a real 68000 machine and needs a 68000 ROM,
+            # AMINETXDUO_KICKSTART_A600 (the 40.63 A500/A600 image); the default
+            # AMINETXDUO_KICKSTART is an A1200 40.68 and will not boot one.
+            cpuopt="-m A600";  tag="68000"; budget=4
         else
             cpuopt="";         tag="68020"; budget=2
         fi
