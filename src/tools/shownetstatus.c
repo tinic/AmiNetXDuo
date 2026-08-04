@@ -292,7 +292,7 @@ static VOID show_lease(const ToolDhcpInfo *d)
 
     if (d->state == NETSTATUS_DHCP_WORKING)
     {
-        tool_printf("  lease       asking -- no server has answered yet\n");
+        tool_printf("  lease       asking, no server has answered yet\n");
         return;
     }
 
@@ -398,7 +398,7 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
         {
             tool_printf("  NOTE        running on this driver, but the "
                         "configuration file says\n");
-            tool_printf("              %s unit %ld -- the file has been "
+            tool_printf("              %s unit %ld, the file has been "
                         "changed since\n", (LONG)cfg->device, (LONG)cfg->unit);
             tool_printf("              the network started, or this "
                         "interface was brought up by hand.\n");
@@ -994,7 +994,7 @@ static VOID diagnose_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
         {
             tool_printf("    It is set to ask for one (DHCP) and nothing has\n");
             tool_printf("    answered. Check the cable, and that something on\n");
-            tool_printf("    this network hands out addresses -- or run\n");
+            tool_printf("    this network hands out addresses, or run\n");
             tool_printf("    NetSetup and choose a fixed address instead.\n");
         }
         else
@@ -1234,7 +1234,7 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
                 tool_printf("Known here as:  %s (to other machines on this "
                             "network)\n", (LONG)snap.mdns_name);
             else
-                tool_printf("Known here as:  nothing yet -- still claiming a "
+                tool_printf("Known here as:  nothing yet, still claiming a "
                             "name on this network\n");
         }
 
@@ -1306,8 +1306,6 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
 
                 if (cfg->interface_count > 0)
                 {
-                    tool_advise_blank();
-                    tool_advise("The interfaces this machine has are:");
                     for (i = 0; i < cfg->interface_count; i++)
                         tool_printf("      %s\n",
                                     (LONG)cfg->interfaces[i].name);
@@ -1405,7 +1403,7 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
                 problem_head();
                 tool_printf("  * There is no default route, so only machines on "
                             "your own\n");
-                tool_printf("    network can be reached -- nothing beyond it.\n");
+                tool_printf("    network can be reached, nothing beyond it.\n");
                 tool_printf("    Run NetSetup and give it your router's address, "
                             "or put\n");
                 tool_printf("    DEFAULT=<router address> in "

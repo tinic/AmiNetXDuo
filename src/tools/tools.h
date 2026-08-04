@@ -147,8 +147,6 @@ const char *tool_device_where(const char *device);
 LONG tool_device_probe(const char *device, ULONG unit);
 
 /* Indented advice under an error line, and a blank separator. */
-VOID tool_advise(const char *text);
-VOID tool_advise_blank(VOID);
 
 /* Word-wrap to the width of a Shell window, indented. */
 VOID tool_wrap(ULONG indent, const char *text);

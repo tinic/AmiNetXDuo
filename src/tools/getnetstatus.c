@@ -204,11 +204,8 @@ static LONG select_conditions(const char *list, BOOL wanted[COND_COUNT])
             {
                 tool_error("\"%s\" is not something this command can check",
                            (LONG)name);
-                tool_advise_blank();
-                tool_advise("The conditions are:");
                 for (i = 0; i < (UWORD)COND_COUNT; i++)
                     tool_printf("      %s\n", (LONG)conditions[i].name);
-                tool_advise("Separate several of them with commas.");
                 return -1;
             }
 
@@ -352,7 +349,7 @@ int main(int argc, char **argv)
         missing++;
 
         if (check != NULL)
-            say("%s: no -- %s\n", (LONG)conditions[i].name,
+            say("%s: no, %s\n", (LONG)conditions[i].name,
                 (LONG)conditions[i].asks);
     }
 

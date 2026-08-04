@@ -341,8 +341,8 @@ static VOID check_addressing(const char *path, const AmiIfConfig *ifc)
         note("this is a loopback address. It always means \"this machine\", "
              "so an interface with one can never be reached from anywhere "
              "else.");
-        note("Use an address on your own network -- 192.168.x.y on nearly "
-             "every home network -- or CONFIGURE = DHCP to be given one.");
+        note("Use an address on your own network, 192.168.x.y on nearly "
+             "every home network, or CONFIGURE = DHCP to be given one.");
         return;
     }
 
@@ -360,7 +360,7 @@ static VOID check_addressing(const char *path, const AmiIfConfig *ifc)
         note("the interface has an address but no NETMASK, so the stack "
              "cannot tell which machines are on the same network as this "
              "one.");
-        note("Add  NETMASK = 255.255.255.0  -- that is the right answer on "
+        note("Add  NETMASK = 255.255.255.0, the right answer on "
              "almost every home network.");
         return;
     }
@@ -398,7 +398,7 @@ static VOID check_addressing(const char *path, const AmiIfConfig *ifc)
         note("this is the network's own address rather than a machine's, "
              "because every bit the netmask leaves free is zero. Nothing can "
              "talk to it.");
-        note("Raise the last part of the address -- .1 is usually the router, "
+        note("Raise the last part of the address: .1 is usually the router, "
              "so .10 or higher is a safe choice for an Amiga.");
         return;
     }
@@ -494,7 +494,7 @@ static VOID check_gateway(const AmiConfig *cfg)
         (LONG)text);
     say("      on, so nothing sent to it can arrive\n");
     note("A router has to be reachable directly. Check its address against "
-         "the ADDRESS and NETMASK of your interface -- all but the last part "
+         "the ADDRESS and NETMASK of your interface: all but the last part "
          "of the two addresses normally match.");
 }
 
@@ -540,7 +540,7 @@ static VOID check_resolver(const AmiConfig *cfg)
         say("      and there is no default route to reach it through\n");
         note("Either give this machine a router (GATEWAY in "
              "DEVS:Internet/routes), or use a name server on your own "
-             "network -- on a home network that is the router itself.");
+             "network, which on a home network is the router itself.");
     }
 }
 

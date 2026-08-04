@@ -955,12 +955,6 @@ int main(int argc, char **argv)
     else if (!nsl_default_server(&server))
     {
         tool_error("no name server is configured");
-        tool_advise_blank();
-        tool_advise("Name servers come from the DHCP lease, or from");
-        tool_advise("DEVS:Internet/name_resolution.  Naming one on the");
-        tool_advise("command line works without either:");
-        tool_advise_blank();
-        tool_advise("  nslookup example.com 8.8.8.8");
         CloseLibrary(sb);
         FreeArgs(rda);
         return RETURN_ERROR;
@@ -1050,7 +1044,7 @@ int main(int argc, char **argv)
     if ((flags & NSL_F_TC) != 0)
     {
         tool_printf("  the answer did not fit in a datagram%s\n",
-                    (LONG)((printed == 0) ? "" : " -- there is more of it"));
+                    (LONG)((printed == 0) ? "" : , there is more of it));
         rc = RETURN_WARN;
     }
     else if (printed == 0)

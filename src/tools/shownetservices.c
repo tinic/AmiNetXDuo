@@ -155,12 +155,6 @@ static BOOL type_is_wellformed(const char *type)
 static VOID explain_type(const char *type)
 {
     tool_error("\"%s\" is not a service type", (LONG)type);
-    tool_advise_blank();
-    tool_advise("A service type is an underscore, a name, and the protocol:");
-    tool_advise("_http._tcp, _ssh._tcp, _ipp._tcp, _sftp-ssh._tcp.");
-    tool_advise_blank();
-    tool_advise("Run ShowNetServices with no type to see which types this");
-    tool_advise("network is offering.");
 }
 
 static const char *plural(ULONG n)
@@ -538,10 +532,6 @@ int main(int argc, char **argv)
     if (!stack_has_mdns(base))
     {
         tool_error("the running stack has no mDNS");
-        tool_advise_blank();
-        tool_advise("Service discovery is a build option, and the library");
-        tool_advise("this machine is running was built without it. There is");
-        tool_advise("nothing to switch on from here.");
         tool_netstatus_close(base);
         FreeArgs(rda);
         return RETURN_FAIL;
@@ -684,24 +674,12 @@ int main(int argc, char **argv)
 
         if (!quiet)
         {
-            tool_advise_blank();
-            tool_advise("That is not the same as nothing being there. A");
-            tool_advise("machine that is asleep, on another network segment,");
-            tool_advise("or simply slow does not answer inside the window --");
-            tool_advise("try again with SECONDS=10.");
 
             if (type != NULL)
             {
-                tool_advise_blank();
-                tool_advise("Run ShowNetServices with no type to see which");
-                tool_advise("types this network is offering at all.");
             }
             else if (all && ntypes != 0)
             {
-                tool_advise_blank();
-                tool_advise("Types answered, instances did not. Run");
-                tool_advise("ShowNetServices ALL SECONDS=10 for a longer look");
-                tool_advise("at each of them.");
             }
         }
 
@@ -719,17 +697,9 @@ int main(int argc, char **argv)
          * machine that did not answer it. Claiming the window would be true
          * only on a cold cache.
          */
-        tool_advise_blank();
-        tool_advise("This is what this machine has heard recently, not");
-        tool_advise("everything on the network, and something listed may");
-        tool_advise("since have gone. Ask again for a longer look with");
-        tool_advise("SECONDS=10.");
 
         if (type == NULL && !all)
         {
-            tool_advise_blank();
-            tool_advise("Browse one of them:  ShowNetServices _http._tcp");
-            tool_advise("Or all of them:      ShowNetServices ALL");
         }
 
         /*
@@ -748,7 +718,6 @@ int main(int argc, char **argv)
 
                 if (first)
                 {
-                    tool_advise_blank();
                     tool_printf("No instance answered for:");
                     first = FALSE;
                 }
@@ -762,16 +731,11 @@ int main(int argc, char **argv)
 
             if (capped)
             {
-                tool_advise_blank();
-                tool_advise("More than 32 types answered; the rest were not");
-                tool_advise("browsed.");
             }
         }
 
         if (svc_answer.hdr.nsh_Available > svc_answer.hdr.nsh_Count)
         {
-            tool_advise_blank();
-            tool_advise("More answered than are shown here.");
         }
     }
 

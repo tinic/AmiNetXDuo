@@ -95,9 +95,6 @@ static BOOL load_interface(const char *name, AmiIfConfig *ifc, BOOL loud)
     {
         tool_error("DEVS:NetInterfaces/%s cannot be used as it stands",
                    (LONG)name);
-        tool_advise_blank();
-        tool_advise("Fix the line named above, or run  NetSetup  to write the");
-        tool_advise("file from scratch.");
     }
 
     return FALSE;
@@ -164,9 +161,6 @@ static VOID explain_unknown_name(const char *given, ULONG unit, BOOL had_unit)
 
         if (listed++ == 0)
         {
-            tool_advise_blank();
-            tool_advise("A name is either an interface or the driver one uses.");
-            tool_advise("This machine has:");
         }
 
         tool_printf("      %-15s %s unit %ld\n", (LONG)names[i],
@@ -179,9 +173,6 @@ static VOID explain_unknown_name(const char *given, ULONG unit, BOOL had_unit)
         return;
     }
 
-    tool_advise_blank();
-    tool_advise("Either column works as the name; a driver that no interface");
-    tool_advise("uses has nothing here to switch, even when the card is installed.");
 }
 
 /* ------------------------------------------------- the running stack -----
@@ -310,10 +301,6 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
     {
         tool_error("%s is configured but the running stack has no such "
                    "interface", (LONG)name);
-        tool_advise_blank();
-        tool_advise("The network was started before this interface file was");
-        tool_advise("written, or with a different one. AddNetInterface adds an");
-        tool_advise("interface to a stack that is already running.");
         tool_netstatus_close(base);
         FreeArgs(rda);
         return RETURN_ERROR;
@@ -490,9 +477,6 @@ int main(int argc, char **argv)
         {
             tool_error("%s is %s unit %ld, and unit %lu was asked for",
                        (LONG)name, (LONG)ifc.device, (LONG)ifc.unit, unit);
-            tool_advise_blank();
-            tool_advise("The unit an interface uses is set in its file, in");
-            tool_advise("DEVS:NetInterfaces. Leave UNIT off to use that one.");
             FreeArgs(rda);
             return RETURN_ERROR;
         }
@@ -565,9 +549,6 @@ int main(int argc, char **argv)
 
                 if (!tool_stack_installed())
                 {
-                    tool_advise_blank();
-                    tool_advise("bsdsocket.library is not installed. The network");
-                    tool_advise("stack lives in that library and belongs in LIBS:.");
                 }
                 else
                 {

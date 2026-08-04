@@ -425,7 +425,7 @@ static BOOL nt_cap_start(NtCap *cap, struct Library *base, const char *iface,
     if (cap->channel < 0)
     {
         cap->channel = 0;
-        tool_error("bpf_open failed -- is this bsdsocket.library ours, and "
+        tool_error("bpf_open failed: is this bsdsocket.library ours, and "
                    "was it built with BPF on?");
         return FALSE;
     }
@@ -526,7 +526,7 @@ static VOID nt_cap_stop(NtCap *cap)
                 (LONG)st.bs_recv, (LONG)st.bs_drop, (LONG)cap->short_reads);
 
     if (cap->out.failed)
-        tool_error("the trace file was truncated -- disk full?");
+        tool_error("the trace file was truncated, disk full?");
 
     if (st.bs_drop != 0)
         tool_error("%lu frames were seen and NOT written: the trace has holes",

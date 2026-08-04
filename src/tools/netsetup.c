@@ -398,7 +398,7 @@ static BOOL write_file(const char *path, const Blob *blob, BOOL *kept_old)
 
     if (written != (LONG)blob->len)
     {
-        tool_error("could not write all of %s -- the disk may be full",
+        tool_error("could not write all of %s, the disk may be full",
                    (LONG)path);
         (VOID)DeleteFile((CONST_STRPTR)path);
         return FALSE;
@@ -641,7 +641,7 @@ static BOOL check_device(Plan *plan, BOOL quiet)
     }
     else if (plan->unit != 0 && tool_device_probe(plan->device, 0) == 0)
     {
-        tool_printf("  Unit 0 of the same driver does answer -- almost every\n");
+        tool_printf("  Unit 0 of the same driver does answer. Almost every\n");
         tool_printf("  card is unit 0.\n");
 
         if (ask_yes("  Use unit 0 instead", TRUE))
@@ -705,7 +705,7 @@ static BOOL ask_name(Plan *plan)
 {
     char answer[ANSWER_LEN];
 
-    tool_printf("\nThe interface needs a name. It is only a label -- it becomes\n");
+    tool_printf("\nThe interface needs a name. It is only a label: it becomes\n");
     tool_printf("the name of the file in %s, and what you type\n", (LONG)DIR_INTERFACES);
     tool_printf("after Online, Offline and ShowNetStatus.\n");
 
@@ -731,7 +731,7 @@ static BOOL ask_addressing(Plan *plan)
 
     tool_printf("\nHow should this Amiga get its address?\n");
     tool_printf("   1  Automatically, from the network (DHCP)\n");
-    tool_printf("      Right for almost every home network -- the broadband\n");
+    tool_printf("      Right for almost every home network, where the broadband\n");
     tool_printf("      router hands one out.\n");
     tool_printf("   2  A fixed address, typed in here\n");
 
@@ -761,7 +761,7 @@ static BOOL ask_static_details(Plan *plan)
 
     tool_printf("\nA fixed address has to be one that nothing else on the\n");
     tool_printf("network is using, and it has to be on the same network as\n");
-    tool_printf("everything else -- if your router is 192.168.1.1, then\n");
+    tool_printf("everything else. If your router is 192.168.1.1, then\n");
     tool_printf("192.168.1.50 is the kind of address you want.\n");
 
     if (!ask_address("Address for this Amiga", "", &plan->address, FALSE))
@@ -874,9 +874,6 @@ static VOID bring_up(const Plan *plan)
     if (rc == -1)
     {
         tool_error("could not run AddNetInterface");
-        tool_advise_blank();
-        tool_advise("The configuration has been written and is fine. Start the");
-        tool_advise("network by hand from a Shell:");
         tool_printf("      AddNetInterface %s\n", (LONG)plan->name);
         return;
     }
@@ -1007,7 +1004,7 @@ int main(int argc, char **argv)
 
     if (!quiet)
     {
-        tool_printf("\nNetSetup -- set up a network interface\n");
+        tool_printf("\nNetSetup: set up a network interface\n");
         if (interactive)
         {
             tool_printf("\nPress Return to accept the [suggested] answer.\n");
@@ -1056,9 +1053,6 @@ int main(int argc, char **argv)
     else if (!name_is_sane(plan.name))
     {
         tool_error("\"%s\" is not a usable interface name", (LONG)plan.name);
-        tool_advise_blank();
-        tool_advise("A name is 1 to 15 characters and cannot contain a slash,");
-        tool_advise("a colon or a space.");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
@@ -1118,9 +1112,6 @@ int main(int argc, char **argv)
          * working configuration.
          */
         tool_error("%s already exists", (LONG)ifpath);
-        tool_advise_blank();
-        tool_advise("Add FORCE to replace it,");
-        tool_advise("or run NetSetup with no arguments to be asked about it.");
         FreeArgs(rda);
         return RETURN_ERROR;
     }

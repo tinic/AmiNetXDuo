@@ -361,7 +361,7 @@ const char *http_path_error(HttpPathResult why)
         case HTTP_PATH_CONTROL:      return "a control character";
         case HTTP_PATH_NOT_ABSOLUTE: return "not an absolute path";
         case HTTP_PATH_PARENT:       return "a .. that leaves the root";
-        case HTTP_PATH_DEVICE:       return "a colon -- an AmigaOS device";
+        case HTTP_PATH_DEVICE:       return "a colon, an AmigaOS device";
         case HTTP_PATH_BACKSLASH:    return "a backslash";
         case HTTP_PATH_TOO_LONG:     return "too long";
         case HTTP_PATH_TOO_DEEP:     return "too many directories";

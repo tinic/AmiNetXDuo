@@ -757,10 +757,6 @@ static VOID tool_no_ipv6(struct Library *base, const char *host)
 
     tool_error("cannot use \"%s\": this machine's network has no IPv6",
                (LONG)host);
-    tool_advise_blank();
-    tool_advise("IPv6 needs a bsdsocket.library built with it, and CONFIGURE6");
-    tool_advise("in DEVS:NetInterfaces/<name>.  ShowNetStatus ALL says which");
-    tool_advise("addresses this machine has.");
 }
 
 /* gethostbyname(), for a library whose table stops short of getaddrinfo. */
@@ -915,9 +911,6 @@ UWORD tool_sock_port(struct Library *base, const char *text, const char *proto)
     {
         tool_error("there is no %s service called \"%s\"",
                    (LONG)proto, (LONG)text);
-        tool_advise_blank();
-        tool_advise("Service names come from DEVS:Internet/services.  "
-                    "A number always works.");
         return 0;
     }
 

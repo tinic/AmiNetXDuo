@@ -640,10 +640,6 @@ static BOOL sntp_exchange(struct Library *sbase, LONG sock, ULONG timeout,
     }
 
     tool_error("the time server did not answer");
-    tool_advise_blank();
-    tool_advise("Nothing came back on UDP port 123.  Check that the name is a");
-    tool_advise("time server, that this machine can reach it -- try  ping  --");
-    tool_advise("and that nothing between the two is blocking NTP.");
 
     return FALSE;
 }

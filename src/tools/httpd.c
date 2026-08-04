@@ -5840,10 +5840,6 @@ static LONG httpd_listen(const ToolAddr *bindaddr, UWORD port)
 
         if (err == TOOL_EADDRINUSE)
         {
-            tool_advise_blank();
-            tool_advise("Something else has that port, or the last program to "
-                        "use it has not finished closing it down.  netstat -a "
-                        "says which.");
         }
 
         (VOID)tool_sock_close(httpd_sb, lsock);

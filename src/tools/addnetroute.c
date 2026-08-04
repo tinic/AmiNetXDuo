@@ -275,11 +275,6 @@ static VOID explain_bad_address(const char *what, const char *text)
 {
     tool_error("%s: \"%s\" is not an address this command can use",
                (LONG)what, (LONG)text);
-    tool_advise_blank();
-    tool_advise("Write it as four numbers with dots between them, for");
-    tool_advise("example 192.168.1.1, optionally with a prefix length after a");
-    tool_advise("slash. A name works too, if it is in DEVS:Internet/hosts or");
-    tool_advise("the name servers know it.");
 }
 
 /* ------------------------------------------------------------------ IPv6 -- */
@@ -414,11 +409,6 @@ static VOID explain_bad_address6(const char *what, const char *text)
 {
     tool_error("%s: \"%s\" is not an address this command can use",
                (LONG)what, (LONG)text);
-    tool_advise_blank();
-    tool_advise("It has a colon in it, so it was read as an IPv6 address --");
-    tool_advise("fd00:9::/64 for a network, 2001:db8::1 for one machine. A");
-    tool_advise("link-local address needs the interface after a '%' sign, as");
-    tool_advise("fe80::1%eth0 does.");
 }
 
 #ifndef TOOL_DELETE
@@ -654,47 +644,23 @@ static VOID explain(LONG err, ULONG gateway)
     switch (err)
     {
         case ROUTE_ENOSYS:
-            tool_advise_blank();
-            tool_advise("The running stack was built without its routing");
-            tool_advise("table, so there is nothing to add to. That is a build");
-            tool_advise("option (NX_ENABLE_IP_STATIC_ROUTING) and not anything");
-            tool_advise("that can be switched on from here.");
-            tool_advise_blank();
-            tool_advise("A default route still works:");
-            tool_advise("   AddNetRoute DEFAULTGATEWAY=<your router>");
             break;
 
         case ROUTE_ENOBUFS:
-            tool_advise_blank();
-            tool_advise("The routing table is full. Delete a route before");
-            tool_advise("adding another -- run  netstat -r  to see them.");
             break;
 
         case ROUTE_ENOENT:
-            tool_advise_blank();
-            tool_advise("Run  netstat -r  to see the routes there are. The");
-            tool_advise("ones marked S were added by hand and are the ones");
-            tool_advise("this command can remove; a directly-attached network");
-            tool_advise("goes away when its interface does, and the default");
-            tool_advise("route is removed with DEFAULTGATEWAY.");
             break;
 
         case ROUTE_EINVAL:
-            tool_advise_blank();
             if (gateway != 0)
             {
                 ami_config_format_ip(gateway, addr, sizeof(addr));
                 tool_printf("  %s is not on any of this machine's own\n",
                             (LONG)addr);
-                tool_advise("networks, so nothing here can reach it to use it");
-                tool_advise("as a next hop. A gateway has to be an address you");
-                tool_advise("could talk to directly -- usually a router on the");
-                tool_advise("same Ethernet. Run  netstat -i  for the addresses");
-                tool_advise("this machine has.");
             }
             else
             {
-                tool_advise("The stack would not accept that route.");
             }
             break;
 
@@ -720,13 +686,6 @@ static BOOL stack_has_ipv6(struct Library *base)
 
 static VOID explain_no_ipv6(VOID)
 {
-    tool_advise_blank();
-    tool_advise("The running stack was built without IPv6, so it has no IPv6");
-    tool_advise("routes and no address to reach one from. That is a build");
-    tool_advise("option and not anything that can be switched on from here.");
-    tool_advise_blank();
-    tool_advise("Run  ShowNetStatus INTERFACES  to see which addresses this");
-    tool_advise("machine actually has.");
 }
 
 #ifndef TOOL_DELETE
@@ -904,47 +863,25 @@ static VOID explain6(LONG err, const char *gateway_text)
     switch (err)
     {
         case ROUTE_ENOSYS:
-            tool_advise_blank();
-            tool_advise("IPv6 has no table that maps a prefix to a next hop --");
-            tool_advise("not in this stack and not in the protocol as NetX Duo");
-            tool_advise("implements it. A packet is either sent straight to a");
-            tool_advise("prefix that is on this link, or handed to a default");
-            tool_advise("router, and those are the two things to write:");
-            tool_advise_blank();
-            tool_advise("   AddNetRoute DESTINATION fd00:9::/64");
-            tool_advise("   AddNetRoute DEFAULTGATEWAY fe80::1%eth0");
             break;
 
         case ROUTE_ENOBUFS:
-            tool_advise_blank();
-            tool_advise("There is no room for another. Run  netstat -r  to see");
-            tool_advise("what is there and DeleteNetRoute to make room.");
             break;
 
         case ROUTE_EEXIST:
-            tool_advise_blank();
-            tool_advise("That prefix is already on the list. Run  netstat -r");
-            tool_advise("to see it.");
             break;
 
         case ROUTE_ENOENT:
-            tool_advise_blank();
-            tool_advise("Run  netstat -r  to see the IPv6 routes there are.");
             break;
 
         case ROUTE_EINVAL:
-            tool_advise_blank();
             if (gateway_text != NULL)
             {
                 tool_printf("  %s is not on any network this machine has an\n",
                             (LONG)gateway_text);
-                tool_advise("interface on, so nothing here can reach it to use");
-                tool_advise("it as a next hop. Run  ShowNetStatus INTERFACES");
-                tool_advise("for the addresses this machine has.");
             }
             else
             {
-                tool_advise("The stack would not accept that route.");
             }
             break;
 
@@ -968,11 +905,6 @@ static VOID usage(VOID)
 static VOID say_no_stack(VOID)
 {
     tool_error("the network is not running, so it has no routes");
-    tool_advise_blank();
-    tool_advise("Routes belong to a running stack and are not remembered");
-    tool_advise("across a reboot. Start the network first with");
-    tool_advise("AddNetInterface, and put this command after it in");
-    tool_advise("S:User-Startup if it should happen at every boot.");
 }
 
 /* ------------------------------------------------------------- the IPv6 run -- */
@@ -1034,9 +966,6 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
         if (via.have_prefix)
         {
             tool_error("DEFAULTGATEWAY is one router, not a prefix");
-            tool_advise_blank();
-            tool_advise("Give the router's own address, with no length after");
-            tool_advise("it. A prefix goes in DESTINATION instead.");
             tool_netstatus_close(base);
             return RETURN_ERROR;
         }
@@ -1086,19 +1015,11 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
 
             if (via.have_zone)
             {
-                tool_advise_blank();
                 tool_printf("  This machine has no interface called \"%s\".\n",
                             (LONG)via.zone);
-                tool_advise("Run  ShowNetStatus INTERFACES  for the ones it");
-                tool_advise("has.");
             }
             else if (is_link_local6(via.addr))
             {
-                tool_advise_blank();
-                tool_advise("An fe80:: address exists on every interface at");
-                tool_advise("once, so with more than one up the address does");
-                tool_advise("not say which router is meant. Write the");
-                tool_advise("interface after a '%' sign:");
                 tool_printf("     AddNetRoute DEFAULTGATEWAY %s%ceth0\n",
                             (LONG)gw_text, (LONG)'%');
             }
@@ -1200,11 +1121,6 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
     if (args[ARG_NETDST] != 0 && !via.have_prefix)
     {
         tool_error("%s is not a network address", (LONG)given);
-        tool_advise_blank();
-        tool_advise("An IPv6 network is written with its prefix length, as");
-        tool_advise("fd00:9::/64 is. There is nothing in the address itself");
-        tool_advise("to work one out from. Use HOSTDESTINATION for a single");
-        tool_advise("machine.");
         tool_netstatus_close(base);
         return RETURN_ERROR;
     }
@@ -1222,9 +1138,6 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
     {
         tool_error("::/0 is not a prefix on this link, it is the default "
                    "route");
-        tool_advise_blank();
-        tool_advise("Name the router it should go to:");
-        tool_advise("   AddNetRoute DEFAULTGATEWAY fe80::1%eth0");
         tool_netstatus_close(base);
         return RETURN_ERROR;
     }
@@ -1382,11 +1295,6 @@ int main(int argc, char **argv)
             if (mask == 0xFFFFFFFFUL || mask == 0)
             {
                 tool_error("%s is not a network address", (LONG)given);
-                tool_advise_blank();
-                tool_advise("A network address ends in zero -- 192.168.1.0 for");
-                tool_advise("a home network, 10.0.0.0 for a large one -- or");
-                tool_advise("carries a prefix length, as 192.168.1.0/24 does.");
-                tool_advise("Use HOSTDESTINATION for a single machine.");
                 FreeArgs(rda);
                 return RETURN_ERROR;
             }
@@ -1412,12 +1320,6 @@ int main(int argc, char **argv)
             format_route(dest, mask, text, sizeof(text));
             tool_error("no GATEWAY was given, so there is nowhere to send "
                        "packets for %s", (LONG)text);
-            tool_advise_blank();
-            tool_advise("A route needs the address of the machine that passes");
-            tool_advise("packets on, and that machine has to be on this");
-            tool_advise("network. For example:");
-            tool_advise("   AddNetRoute NETDESTINATION 192.168.10.0 "
-                        "GATEWAY 192.168.1.1");
             FreeArgs(rda);
             return RETURN_ERROR;
         }
@@ -1483,8 +1385,6 @@ int main(int argc, char **argv)
             ami_config_format_ip(live_gw, have, sizeof(have));
             tool_error("the default route is %s, not %s", (LONG)have,
                        (LONG)text);
-            tool_advise_blank();
-            tool_advise("There is only ever one; give the address it has.");
             tool_netstatus_close(base);
             FreeArgs(rda);
             return RETURN_ERROR;
@@ -1511,8 +1411,6 @@ int main(int argc, char **argv)
             ami_config_format_ip(live_gw, have, sizeof(have));
             tool_error("there is already a default route, through %s",
                        (LONG)have);
-            tool_advise_blank();
-            tool_advise("There is only one, so the old one has to go first:");
             tool_printf("     DeleteNetRoute DEFAULTGATEWAY=%s\n", (LONG)have);
             tool_netstatus_close(base);
             FreeArgs(rda);
@@ -1627,9 +1525,6 @@ int main(int argc, char **argv)
 
         if (err == 0 && find_route(base, dest, NULL) >= 0)
         {
-            tool_advise_blank();
-            tool_advise("There is already a route to it. Remove that one");
-            tool_advise("first with DeleteNetRoute.");
         }
         else
         {

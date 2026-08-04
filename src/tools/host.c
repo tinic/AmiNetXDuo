@@ -110,14 +110,6 @@ int main(int argc, char **argv)
     if (tool_parse_ip6(name, v6))
     {
         tool_error("\"%s\" is an address, not a name", (LONG)name);
-        tool_advise_blank();
-        tool_advise("An address is looked up backwards, and this machine's");
-        tool_advise("resolver does that for IPv4 addresses only. It has no");
-        tool_advise("call that reverses an IPv6 address.");
-        tool_advise_blank();
-        tool_advise("nslookup builds that question itself -- give it the");
-        tool_advise("same address and it asks the DNS for the ip6.arpa");
-        tool_advise("record.");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
@@ -202,7 +194,6 @@ int main(int argc, char **argv)
          * nslookup tells them apart.
          */
         tool_explain_resolve(name, AMI_NET_ERR_NONAME);
-        tool_advise("nslookup will say whether the name servers answer.");
     }
 
     if (tool_break())

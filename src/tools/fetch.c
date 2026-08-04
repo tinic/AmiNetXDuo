@@ -484,7 +484,6 @@ static LONG fetch_run(VOID)
             if (tbase == NULL)
             {
                 tool_error("https: needs LIBS:tls.library, and there is none");
-                tool_advise_blank();
 
                 /*
                  * The archive carries no tls.library for a 68000 -- the
@@ -494,19 +493,11 @@ static LONG fetch_run(VOID)
                  */
                 if ((SysBase->AttnFlags & AFF_68020) == 0)
                 {
-                    tool_advise("This machine is a 68000, and there is no "
-                                "tls.library for one -- the encryption needs "
-                                "a 68020. Nothing is missing from your "
-                                "installation.");
                 }
                 else
                 {
-                    tool_advise("Install it from the same archive as this "
-                                "bsdsocket.library -- the two are a pair and "
-                                "are not interchangeable between builds.");
                 }
 
-                tool_advise("http: URLs work without it.");
                 rc = RETURN_FAIL;
                 break;
             }
@@ -575,20 +566,10 @@ static LONG fetch_run(VOID)
 
                 if (why == TLS_ERR_TRUSTSTORE)
                 {
-                    tool_advise_blank();
-                    tool_advise("DEVS:Internet/certificates is the list of "
-                                "certificate authorities this machine trusts. "
-                                "Install it from the archive, or build one "
-                                "with tools/mkcertstore.py.");
                 }
                 else if (why == TLS_ERR_UNTRUSTED || why == TLS_ERR_HOSTNAME ||
                          why == TLS_ERR_EXPIRED)
                 {
-                    tool_advise_blank();
-                    tool_advise("NOVERIFY connects anyway, encrypted but NOT "
-                                "authenticated -- anyone in the path can be "
-                                "the other end.  Do not use it to reach a "
-                                "site you do not control.");
                 }
 
                 (VOID)sock_close(sbase, io.sock);
@@ -878,8 +859,6 @@ static LONG fetch_run(VOID)
             {
                 tool_error("%s redirects to an unencrypted URL; not following",
                            (LONG)u.host);
-                tool_advise_blank();
-                tool_advise("Ask for that http: URL directly if you meant it.");
                 rc = RETURN_ERROR;
                 break;
             }

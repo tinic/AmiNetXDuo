@@ -223,10 +223,6 @@ int main(int argc, char **argv)
             {
                 tool_error("%ld interface(s) were still up %lu seconds after "
                            "being told to stop", still_up, timeout);
-                tool_advise_blank();
-                tool_advise("The shutdown was asked for and has not been");
-                tool_advise("cancelled; it may still finish on its own.");
-                tool_advise("ShowNetStatus says where it got to.");
             }
             tool_netstatus_close(base);
             FreeArgs(rda);
@@ -253,7 +249,7 @@ int main(int argc, char **argv)
     }
 
     say("\nThe network is stopped: nothing is sent and nothing is received.\n");
-    say("bsdsocket.library stays in memory with the stack inside it -- the\n");
+    say("bsdsocket.library stays in memory with the stack inside it. The\n");
     say("reference that keeps it there belongs to whatever started the\n");
     say("network, and only a reboot drops it. Online <interface> starts a\n");
     say("stopped interface again.\n");

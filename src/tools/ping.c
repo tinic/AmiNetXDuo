@@ -382,9 +382,6 @@ int main(int argc, char **argv)
         if (err == TOOL_EPROTONOSUPPORT || err == TOOL_ESOCKTNOSUPPORT ||
             err == TOOL_EOPNOTSUPP || err == TOOL_EAFNOSUPPORT)
         {
-            tool_advise_blank();
-            tool_advise("An ICMP echo needs SOCK_RAW, and the TCP/IP stack on");
-            tool_advise("this machine does not offer it.");
         }
 
         CloseLibrary(sb);
@@ -491,13 +488,6 @@ int main(int argc, char **argv)
 
             if (err == TOOL_ENETUNREACH || err == TOOL_EHOSTUNREACH)
             {
-                tool_advise_blank();
-                tool_advise("This machine has no address on the network that");
-                tool_advise("would reach that host, so the request never left.");
-                tool_advise_blank();
-                tool_advise("ShowNetStatus  says what the interfaces have; the");
-                tool_advise("usual causes are an interface that is offline and");
-                tool_advise("a DHCP server that never answered.");
             }
 
             rc = RETURN_ERROR;

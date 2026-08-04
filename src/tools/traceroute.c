@@ -566,10 +566,6 @@ int main(int argc, char **argv)
         if (err == TOOL_EPROTONOSUPPORT || err == TOOL_ESOCKTNOSUPPORT ||
             err == TOOL_EOPNOTSUPP || err == TOOL_EAFNOSUPPORT)
         {
-            tool_advise_blank();
-            tool_advise("This command needs SOCK_RAW, and the TCP/IP stack on");
-            tool_advise("this machine does not offer it.  Neither ping nor");
-            tool_advise("traceroute can work without it.");
         }
 
         CloseLibrary(sb);
