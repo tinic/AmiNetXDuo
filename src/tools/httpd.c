@@ -2750,7 +2750,8 @@ static VOID httpd_xml_tag(HttpConn *c, BOOL closing, BOOL selfclose)
 
             /* PROPPATCH's <prop> is a set of values and PROPFIND's is a list
                of names; only the second changes what the 207 reports on. */
-            if (c->method == HTTPD_M_PROPFIND)
+            if (c->method != NULL &&
+                c->method->id == (UBYTE)HTTPD_M_PROPFIND)
                 c->pf_mode = (UBYTE)HTTPD_PF_NAMED;
         }
         else if (hs_equal(local, "allprop"))
