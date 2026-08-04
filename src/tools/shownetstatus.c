@@ -43,7 +43,6 @@
 
 #include "tools_nx.h"
 
-#include <stdlib.h>   /* atexit */
 #include "aminetxduo/version.h"
 
 const char *const tool_name = "ShowNetStatus";
@@ -132,12 +131,9 @@ static VOID names_prepare(BOOL wanted)
          * AmigaOS does not reclaim AllocVec() memory when a process exits, and
          * ami_alloc() is AllocVec(), so the twelve blocks ami_netdb_load() builds
          * out of DEVS:Internet outlive this command, 12,616 bytes per run on a
-         * stock netdb, gone until reboot. atexit() rather than a free before each
-         * return: this command leaves main() from several places and the leak is
-         * one missed path away from coming back.
+         * stock netdb, gone until reboot.  main() frees it on the way out.
          */
         (VOID)ami_netdb_load();
-        atexit(ami_netdb_free);
         netdb_loaded = TRUE;
     }
 }
@@ -1440,7 +1436,23 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
     return RETURN_OK;
 }
 
+/*
+ * The body, so that ami_netdb_free() has one place to run.  atexit() is not
+ * free here: libnix satisfies it out of an object that also references malloc
+ * and __errno, which pulls in the C++ AVL allocator and the stdio FILE
+ * machinery, about 7.7 KB nothing in this command calls.
+ */
+static int shownetstatus_main(int argc, char **argv);
+
 int main(int argc, char **argv)
+{
+    int rc = shownetstatus_main(argc, argv);
+
+    ami_netdb_free();
+    return rc;
+}
+
+static int shownetstatus_main(int argc, char **argv)
 {
     LONG             args[ARG_COUNT];
     struct RDArgs   *rda;
@@ -1531,7 +1543,6 @@ int main(int argc, char **argv)
          * twelve blocks leak without NAMES as well as with it; names_prepare()
          * covers only its own load.
          */
-        atexit(ami_netdb_free);
 
         cfg = from_disk;
     }

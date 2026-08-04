@@ -98,7 +98,6 @@
 
 #include "tools.h"
 
-#include <stdlib.h>   /* atexit */
 
 #ifdef TOOL_DELETE
 const char *const tool_name = "DeleteNetRoute";
@@ -254,12 +253,9 @@ static BOOL resolve_address(const char *text, ULONG *addr, ULONG *mask,
      * AmigaOS does not reclaim AllocVec() memory when a process exits, and
      * ami_alloc() is AllocVec(), so the twelve blocks ami_netdb_load() builds
      * out of DEVS:Internet outlive this command, 12,616 bytes per run on a
-     * stock netdb, gone until reboot. atexit() rather than a free before each
-     * return: this command leaves main() from several places and the leak is
-     * one missed path away from coming back.
+     * stock netdb, gone until reboot.  main() frees it on the way out.
      */
     (VOID)ami_netdb_load();
-    atexit(ami_netdb_free);
 
     entry = ami_netdb_host_by_name(copy);
     if (entry != NULL)
@@ -1168,7 +1164,23 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
 
 /* --------------------------------------------------------------- the run, */
 
+/*
+ * The body, so that ami_netdb_free() has one place to run.  atexit() is not
+ * free here: libnix satisfies it out of an object that also references malloc
+ * and __errno, which pulls in the C++ AVL allocator and the stdio FILE
+ * machinery, about 7.7 KB nothing in this command calls.
+ */
+static int addnetroute_main(int argc, char **argv);
+
 int main(int argc, char **argv)
+{
+    int rc = addnetroute_main(argc, argv);
+
+    ami_netdb_free();
+    return rc;
+}
+
+static int addnetroute_main(int argc, char **argv)
 {
     LONG             args[ARG_COUNT];
     struct RDArgs   *rda;

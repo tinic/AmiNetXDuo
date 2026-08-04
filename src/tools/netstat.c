@@ -28,7 +28,6 @@
 
 #include "tools_nx.h"
 
-#include <stdlib.h>   /* atexit */
 #include "aminetxduo/version.h"
 
 const char *const tool_name = "netstat";
@@ -414,7 +413,23 @@ static VOID show_connections(const ToolSnapshot *snap)
         tool_printf("(list truncated at %ld sockets)\n", (LONG)TOOL_MAX_SOCK);
 }
 
+/*
+ * The body, so that ami_netdb_free() has one place to run.  atexit() is not
+ * free here: libnix satisfies it out of an object that also references malloc
+ * and __errno, which pulls in the C++ AVL allocator and the stdio FILE
+ * machinery, about 7.7 KB nothing in this command calls.
+ */
+static int netstat_main(int argc, char **argv);
+
 int main(int argc, char **argv)
+{
+    int rc = netstat_main(argc, argv);
+
+    ami_netdb_free();
+    return rc;
+}
+
+static int netstat_main(int argc, char **argv)
 {
     LONG             args[ARG_COUNT];
     struct RDArgs   *rda;
@@ -516,7 +531,6 @@ int main(int argc, char **argv)
      * reboot. atexit() rather than a free before each return: this command
      * leaves main() from several places.
      */
-    atexit(ami_netdb_free);
 
     if (want_if)
         show_interfaces(cfg, &snap);
