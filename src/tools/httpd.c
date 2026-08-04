@@ -66,6 +66,7 @@
 
 #include "toolsock.h"
 #include "httppath.h"
+#include "httplock.h"
 #include "httpif.h"
 #include "httpframe.h"
 #include "aminetxduo/version.h"
@@ -163,11 +164,9 @@ enum
 /* Locks.  Fixed, like everything else: eight is more than the clients hold at
    once, Finder locks the file it is writing and nothing else, and a ninth
    asker is told the server is busy rather than costing memory. */
-#define HTTPD_LOCK_MAX         8
 #define HTTPD_LOCK_DEF      180UL   /* seconds granted when none was asked  */
 #define HTTPD_LOCK_CAP     3600UL   /* the longest this server will hold one */
 #define HTTPD_HOST_MAX        80    /* Host:, which decides a Destination   */
-#define HTTPD_TOKEN_MAX       64    /* "opaquelocktoken:...", as text       */
 
 /* An entity tag is four decimal numbers and three separators inside quotes. */
 #define HTTPD_ETAG_MAX        48
@@ -203,7 +202,6 @@ enum
  * HTTPD_CONN_MAX connections: about 2.5 KB, taken once, on a machine that may
  * have a megabyte.
  */
-#define HTTPD_OWNER_MAX      128
 
 /* How long WaitSelect() may sleep with nothing happening.  It is what makes
    Ctrl-C and the connection timeout noticed, and nothing else depends on it. */
@@ -479,22 +477,10 @@ static char     httpd_probe[HTTP_PATH_MAX];
 static HttpPath httpd_ifpath;
 
 /*
- * The lock table.  Static rather than allocated with the connections: it is
- * 3 KB whatever CONNECTIONS says, because a lock outlives the connection that
- * took it, that is the whole point of one.
+ * The lock table is in httplock.c.  Static rather than allocated with the
+ * connections: it is 3 KB whatever CONNECTIONS says, because a lock outlives
+ * the connection that took it, that is the whole point of one.
  */
-typedef struct HttpLock
-{
-    char  path[HTTP_PATH_MAX];      /* the AmigaOS path it covers          */
-    char  token[HTTPD_TOKEN_MAX];
-    char  owner[HTTPD_OWNER_MAX];
-    ULONG expires;                  /* httpd_now() seconds                 */
-    ULONG timeout;                  /* what was granted, for the reply     */
-    UBYTE depth;                    /* 1 when it covers everything below   */
-    UBYTE used;
-} HttpLock;
-
-static HttpLock httpd_locks[HTTPD_LOCK_MAX];
 static ULONG    httpd_token_seed;
 static ULONG    httpd_token_start;      /* the clock when the server started   */
 
@@ -1554,7 +1540,6 @@ static const char *httpd_url_of(const char *path)
 
 /* The lock table is below, and a walk that removed something has to be able
    to say so, the same reason httpd_walk_release() is declared above. */
-static VOID httpd_locks_drop(const char *path);
 
 /* Everything below this level failed with it, so no drawer above can go and
    none of them may be retried. */
@@ -1681,7 +1666,7 @@ static VOID httpd_walk_copy_stage(HttpConn *c)
         if (Rename((CONST_STRPTR)c->path.path, (CONST_STRPTR)c->dest.path))
         {
             /* The source name is gone, so nothing is holding it any more. */
-            httpd_locks_drop(c->path.path);
+            httplock_drop(c->path.path);
             httpd_empty(c, c->walk_new ? 201 : 204);
             return;
         }
@@ -1751,7 +1736,7 @@ static VOID httpd_walk_end(HttpConn *c)
             /* RFC 4918 9.6.  Only when the whole tree went: a name that is
                still there is still the resource its lock was taken on. */
             if (c->fails == 0)
-                httpd_locks_drop(c->path.path);
+                httplock_drop(c->path.path);
             httpd_walk_answer(c, 204);
             break;
 
@@ -1786,7 +1771,7 @@ static VOID httpd_walk_end(HttpConn *c)
 
         default:                        /* WALK_FOR_MOVED                  */
             if (c->fails == 0)
-                httpd_locks_drop(c->path.path);
+                httplock_drop(c->path.path);
             httpd_walk_answer(c, c->walk_new ? 201 : 204);
             break;
     }
@@ -2350,111 +2335,11 @@ static BOOL httpd_parse_rfc1123(const char *text, struct DateStamp *ds)
  * one, and granting an exclusive lock to a client that did is the safe half.
  */
 
-/* Expiry is lazy, on the next question anybody asks: there is no timer here
-   and a lock nobody asks about costs nothing to leave lying. */
-static VOID httpd_locks_expire(VOID)
-{
-    ULONG now = httpd_now();
-    ULONG i;
-
-    for (i = 0; i < (ULONG)HTTPD_LOCK_MAX; i++)
-    {
-        if (httpd_locks[i].used && now >= httpd_locks[i].expires)
-            httpd_locks[i].used = 0;
-    }
-}
-
-/* The lock covering `path`: its own, or a drawer's above it. */
-static HttpLock *httpd_lock_on(const char *path)
-{
-    ULONG i;
-
-    httpd_locks_expire();
-
-    for (i = 0; i < (ULONG)HTTPD_LOCK_MAX; i++)
-    {
-        HttpLock *l = &httpd_locks[i];
-
-        if (!l->used)
-            continue;
-
-        if (hs_equal(l->path, path))
-            return l;
-
-        if (l->depth != 0 && http_path_within(l->path, path))
-            return l;
-    }
-
-    return NULL;
-}
-
 /*
- * Every lock rooted at `path` or below it, gone.  RFC 4918 9.6: a DELETE that
- * succeeded MUST destroy them, and a MOVE's source is a DELETE of that name.
- *
- * Without this the name is unusable by anybody until the lock expires,
- * including the client that just deleted it, whose next PUT of the same name
- * is answered 423 for a lock on a resource that no longer exists.
+ * The table and the rules are in httplock.c so they can be asked questions
+ * without a socket; see src/tools/test/test_httplock.c.  What stays here is
+ * the answer a refusal turns into, which needs the connection.
  */
-static VOID httpd_locks_drop(const char *path)
-{
-    ULONG i;
-
-    for (i = 0; i < (ULONG)HTTPD_LOCK_MAX; i++)
-    {
-        HttpLock *l = &httpd_locks[i];
-
-        if (l->used && http_path_within(path, l->path))
-            l->used = 0;
-    }
-}
-
-/*
- * Does `l` cover `path`?  Its own resource, or, when it was taken with
- * Depth: infinity, anything below it.
- *
- * Both UNLOCK and a LOCK refresh have to ask this.  Holding a token is not
- * enough on its own: the table is global, so a token alone lets any client
- * operate on any lock in it through any address.
- */
-static BOOL httpd_lock_covers(const HttpLock *l, const char *path)
-{
-    if (l == NULL)
-        return FALSE;
-
-    if (hs_equal(l->path, path))
-        return TRUE;
-
-    return (l->depth != 0 && http_path_within(l->path, path)) ? TRUE : FALSE;
-}
-
-static HttpLock *httpd_lock_by_token(const char *token)
-{
-    ULONG i;
-
-    if (token == NULL || token[0] == '\0')
-        return NULL;
-
-    httpd_locks_expire();
-
-    for (i = 0; i < (ULONG)HTTPD_LOCK_MAX; i++)
-    {
-        if (httpd_locks[i].used && hs_equal(httpd_locks[i].token, token))
-            return &httpd_locks[i];
-    }
-
-    return NULL;
-}
-
-/* Does this request carry the token for `l`?  No lock is everybody's. */
-static BOOL httpd_holds(const HttpConn *c, const HttpLock *l)
-{
-    if (l == NULL)
-        return TRUE;
-
-    return (hs_equal(c->iftoken[0], l->token) ||
-            hs_equal(c->iftoken[1], l->token)) ? TRUE : FALSE;
-}
 
 /*
  * The check every write goes through.  FALSE when it has answered with the
@@ -2469,9 +2354,19 @@ static VOID httpd_locked(HttpConn *c)
                     "<D:lock-token-submitted/></D:error>\n");
 }
 
+static HttpLock *httpd_lock_on(const char *path)
+{
+    return httplock_on(path, httpd_now());
+}
+
+static BOOL httpd_holds(const HttpConn *c, const HttpLock *l)
+{
+    return httplock_held(c->iftoken[0], c->iftoken[1], l) ? TRUE : FALSE;
+}
+
 static BOOL httpd_lock_allows(HttpConn *c, const char *path)
 {
-    if (httpd_holds(c, httpd_lock_on(path)))
+    if (httplock_allows(c->iftoken[0], c->iftoken[1], path, httpd_now()))
         return TRUE;
 
     httpd_locked(c);
@@ -2487,58 +2382,18 @@ static BOOL httpd_lock_allows(HttpConn *c, const char *path)
  */
 static BOOL httpd_lock_allows_tree(HttpConn *c, const char *path)
 {
-    ULONG i;
-
-    if (!httpd_lock_allows(c, path))
-        return FALSE;
-
-    httpd_locks_expire();
-
-    for (i = 0; i < (ULONG)HTTPD_LOCK_MAX; i++)
-    {
-        HttpLock *l = &httpd_locks[i];
-
-        if (!l->used || !http_path_within(path, l->path))
-            continue;
-
-        if (httpd_holds(c, l))
-            continue;
-
-        httpd_locked(c);
-
-        return FALSE;
-    }
-
-    return TRUE;
-}
-
-/*
- * The lock on the drawer this address is IN.
- *
- * RFC 4918 7.1: a lock on a collection, at any depth including 0, locks that
- * collection's internal member namespace, so adding a member or taking one
- * away needs the token even when the member itself is not locked.  Changing an
- * existing member's content does not, which is why this is asked only by the
- * methods that create or remove a name.
- *
- * httpd_lock_on() answers about the address itself and about anything under a
- * deep lock; neither of those covers a Depth: 0 lock one level up, and without
- * this a client that locked a shared drawer to add a file to it watched
- * somebody else add one anyway.
- */
-static BOOL httpd_lock_allows_parent(HttpConn *c, const char *path)
-{
-    char parent[HTTP_PATH_MAX];
-
-    hs_copy(parent, (ULONG)sizeof(parent), path);
-    http_path_up(parent);
-
-    /* Unchanged means there is nothing above it: a device reference is the
-       top and has no drawer to be a member of. */
-    if (hs_equal(parent, path) || parent[0] == '\0')
+    if (httplock_allows_tree(c->iftoken[0], c->iftoken[1], path, httpd_now()))
         return TRUE;
 
-    if (httpd_holds(c, httpd_lock_on(parent)))
+    httpd_locked(c);
+
+    return FALSE;
+}
+
+/* The lock on the drawer this address is IN; see httplock.h for why. */
+static BOOL httpd_lock_allows_parent(HttpConn *c, const char *path)
+{
+    if (httplock_allows_parent(c->iftoken[0], c->iftoken[1], path, httpd_now()))
         return TRUE;
 
     httpd_locked(c);
@@ -4462,7 +4317,6 @@ static VOID httpd_do_lock(HttpConn *c)
     HttpLock *l;
     ULONG     secs;
     ULONG     used = 0;
-    ULONG     i;
     BOOL      created;
     BOOL      ok;
 
@@ -4489,9 +4343,9 @@ static VOID httpd_do_lock(HttpConn *c)
        alive, so answering it wrong ends the copy. */
     if (!c->had_body)
     {
-        l = httpd_lock_by_token(c->iftoken[0]);
+        l = httplock_by_token(c->iftoken[0], httpd_now());
         if (l == NULL)
-            l = httpd_lock_by_token(c->iftoken[1]);
+            l = httplock_by_token(c->iftoken[1], httpd_now());
 
         if (l == NULL)
         {
@@ -4507,7 +4361,7 @@ static VOID httpd_do_lock(HttpConn *c)
          * stopped and left it to expire.  UNLOCK has asked this since it was
          * written; LOCK did not.
          */
-        if (!httpd_lock_covers(l, c->path.path))
+        if (!httplock_covers(l, c->path.path))
         {
             httpd_error(c, 412, "that lock is not on that resource");
             return;
@@ -4533,31 +4387,12 @@ static VOID httpd_do_lock(HttpConn *c)
             return;
         }
 
-        /* Only a lock on this exact path is refreshed in place.  One
-           inherited from a drawer above belongs to that drawer, and writing
-           this path into it would move it. */
-        for (i = 0; i < (ULONG)HTTPD_LOCK_MAX; i++)
-        {
-            if (httpd_locks[i].used &&
-                hs_equal(httpd_locks[i].path, c->path.path))
-            {
-                exact = &httpd_locks[i];
-                break;
-            }
-        }
-
-        l = exact;
+        exact = httplock_exact(c->path.path);
+        l     = exact;
 
         if (l == NULL)
         {
-            for (i = 0; i < (ULONG)HTTPD_LOCK_MAX; i++)
-            {
-                if (!httpd_locks[i].used)
-                {
-                    l = &httpd_locks[i];
-                    break;
-                }
-            }
+            l = httplock_free_slot();
 
             if (l == NULL)
             {
@@ -4620,7 +4455,7 @@ static VOID httpd_do_unlock(HttpConn *c)
         return;
     }
 
-    l = httpd_lock_by_token(c->unlock_token);
+    l = httplock_by_token(c->unlock_token, httpd_now());
 
     if (l == NULL)
     {
@@ -4630,7 +4465,7 @@ static VOID httpd_do_unlock(HttpConn *c)
 
     /* RFC 4918 9.11.1: the token has to name a lock that covers the address
        the request was made against, or one client can unlock another's. */
-    if (!httpd_lock_covers(l, c->path.path))
+    if (!httplock_covers(l, c->path.path))
     {
         httpd_error(c, 409, "that lock is not on that address");
         return;

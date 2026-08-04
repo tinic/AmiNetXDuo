@@ -251,14 +251,16 @@ aminetxduo_add_tool(tool_whois   whois    SOURCES whois.c toolsock.c)
 # connections open at once, `nc -l` takes one caller and exits, so it is
 # also the only coverage of accept() being called twice on a live listener.
 #
-# httppath.c, httpif.c and httpframe.c are sources of their own rather than
-# part of httpd.c because they are the parts that must not be wrong, and
+# httppath.c, httpif.c, httpframe.c and httplock.c are sources of their own
+# rather than part of httpd.c because they are the parts that must not be
+# wrong, and
 # splitting them is what lets the host tests below compile them: httpd.c
 # includes tools.h, which reaches tx_api.h and proto/dos.h, and neither builds
 # on a host.  One decides which file a request reaches, the second whether it
-# may write to it, the third where one request ends and the next begins.
+# may write to it, the third where one request ends and the next begins, the
+# fourth who may write to a name somebody else has locked.
 aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httppath.c httpif.c
-                                          httpframe.c toolsock.c)
+                                          httpframe.c httplock.c toolsock.c)
 
 # sntp is config-only in the same sense as fetch: it reaches bsdsocket.library
 # through its published vectors and sets the machine's clock through
@@ -382,6 +384,17 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_httpif PRIVATE -Wall -Wextra)
     set_target_properties(test_httpif PROPERTIES C_STANDARD 11)
 
+    add_executable(test_httplock
+        test/test_httplock.c
+        httplock.c
+        httppath.c)
+
+    target_include_directories(test_httplock PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    target_compile_options(test_httplock PRIVATE -Wall -Wextra)
+    set_target_properties(test_httplock PROPERTIES C_STANDARD 11)
+
     add_executable(test_fetchurl
         test/test_fetchurl.c
         fetchurl.c)
@@ -407,4 +420,5 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME httpif_conditions COMMAND test_httpif)
     add_test(NAME fetchurl_rfc3986 COMMAND test_fetchurl)
     add_test(NAME httpframe_bodies COMMAND test_httpframe)
+    add_test(NAME httplock_rfc4918 COMMAND test_httplock)
 endif()
