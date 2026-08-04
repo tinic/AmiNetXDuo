@@ -377,6 +377,50 @@ static void fd_selftest(void)
                (unsigned long)rec.nx_dhcp_network_mask);
         exit(2);
     }
+
+    /*
+     * A renewal time (option 58) longer than the lease it belongs to must not
+     * be stored. Both fields end up in timer ticks, and the guard used to
+     * compare the option's seconds against the lease already converted, so it
+     * admitted a T1 up to NX_IP_PERIODIC_RATE times the lease and scheduled
+     * the renewal for after the lease had expired.
+     *
+     * 3600-second lease, 180000-second T1: fifty times too long, and exactly
+     * the value that slips through a comparison against the lease in ticks.
+     */
+    {
+        unsigned char type      = 2;
+        unsigned char lease[4]  = { 0, 0, 0x0E, 0x10 };         /* 3600     */
+        unsigned char renew[4]  = { 0, 0x02, 0xBF, 0x20 };      /* 180000   */
+
+        fd_reset(&w);
+        fd_header(&w, 0xC0A80164UL);
+        fd_opt(&w, NX_DHCP_OPTION_DHCP_TYPE, 1, &type);
+        fd_opt(&w, NX_DHCP_OPTION_DHCP_LEASE, 4, lease);
+        fd_opt(&w, NX_DHCP_OPTION_RENEWAL, 4, renew);
+        fd_end(&w);
+
+        memset(&rec, 0, sizeof(rec));
+        rec.nx_dhcp_interface_index = 0;
+        memcpy(copy, w.b, w.len);
+        (void)_nx_dhcp_extract_information(&dhcp, &rec, copy, w.len);
+
+        if (rec.nx_dhcp_lease_time != 3600UL * (ULONG)NX_IP_PERIODIC_RATE)
+        {
+            printf("fuzz_dhcp: SELFTEST FAILED -- option 51 not stored in "
+                   "ticks (%lu)\n", (unsigned long)rec.nx_dhcp_lease_time);
+            exit(2);
+        }
+
+        if (rec.nx_dhcp_renewal_time > rec.nx_dhcp_lease_time)
+        {
+            printf("fuzz_dhcp: SELFTEST FAILED -- a renewal time of %lu ticks "
+                   "was accepted against a lease of %lu\n",
+                   (unsigned long)rec.nx_dhcp_renewal_time,
+                   (unsigned long)rec.nx_dhcp_lease_time);
+            exit(2);
+        }
+    }
 }
 
 static unsigned long fd_state = 1;
