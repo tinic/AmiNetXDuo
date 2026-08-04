@@ -327,7 +327,6 @@ VOID ami_ns_dhcp_text(AmiNetStack *ns, UWORD index, UINT option,
    netstack_resolve() takes before it reaches the unicast DNS client. */
 LONG ami_netstack_mdns_start(AmiNetStack *ns);
 VOID ami_netstack_mdns_stop(AmiNetStack *ns);
-BOOL ami_netstack_mdns_is_local(const char *name);
 LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
                                ULONG timeout_ticks);
 /* The browse is public to bsdsocket.library; see <aminetxduo/netstack.h>. */
@@ -350,6 +349,14 @@ VOID ami_netstack_rexx_stop(VOID);
 VOID ami_netstack_rexx_suspend(VOID);
 VOID ami_netstack_rexx_resume(VOID);
 #endif
+
+/*
+ * Is this name in the .local domain?  Defined in netstack_dns.c and declared
+ * outside the mDNS guard on purpose: a build without the responder still has
+ * to keep a .local name away from the unicast server (RFC 6762 3), so the
+ * test has to exist whether or not anything can answer one.
+ */
+BOOL ami_netstack_mdns_is_local(const char *name);
 
 /* The singleton, without the "is it up" filtering the public accessor does. */
 AmiNetStack *ami_netstack_raw(VOID);

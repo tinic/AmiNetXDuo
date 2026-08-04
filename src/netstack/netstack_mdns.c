@@ -336,50 +336,6 @@ VOID ami_netstack_mdns_stop(AmiNetStack *ns)
 
 /* ------------------------------------------------------------- resolving */
 
-/*
- * Test whether `name` is in the .local domain.
- *
- * Case-insensitive, as DNS is (RFC 4343). A trailing dot is accepted:
- * "amiga.local." is the fully-qualified spelling of the same name.
- *
- * The bare name "local" is not in the .local domain -- it is a single label
- * with no domain, and sending it to mDNS would claim a top-level name.
- */
-BOOL ami_netstack_mdns_is_local(const char *name)
-{
-    static const char suffix[] = ".local";
-    ULONG             len;
-    ULONG             slen = (ULONG)(sizeof(suffix) - 1);
-    ULONG             i;
-
-    if (name == NULL)
-        return FALSE;
-
-    for (len = 0; name[len] != '\0'; len++)
-        ;
-
-    /* One trailing dot is the root label, and is not part of the comparison. */
-    if (len > 0 && name[len - 1] == '.')
-        len--;
-
-    /* Strictly longer: ".local" alone is a name with an empty label. */
-    if (len <= slen)
-        return FALSE;
-
-    for (i = 0; i < slen; i++)
-    {
-        char a = name[len - slen + i];
-        char b = suffix[i];
-
-        if (a >= 'A' && a <= 'Z')
-            a = (char)(a - 'A' + 'a');
-
-        if (a != b)
-            return FALSE;
-    }
-
-    return TRUE;
-}
 
 /*
  * Strip the domain: nx_mdns_host_address_get() wants the host label and

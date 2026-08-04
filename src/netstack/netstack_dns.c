@@ -250,6 +250,51 @@ typedef struct
     BOOL         nocaller;
 } AmiNsAddrAsk;
 
+/*
+ * Test whether `name` is in the .local domain.
+ *
+ * Case-insensitive, as DNS is (RFC 4343). A trailing dot is accepted:
+ * "amiga.local." is the fully-qualified spelling of the same name.
+ *
+ * The bare name "local" is not in the .local domain -- it is a single label
+ * with no domain, and sending it to mDNS would claim a top-level name.
+ */
+BOOL ami_netstack_mdns_is_local(const char *name)
+{
+    static const char suffix[] = ".local";
+    ULONG             len;
+    ULONG             slen = (ULONG)(sizeof(suffix) - 1);
+    ULONG             i;
+
+    if (name == NULL)
+        return FALSE;
+
+    for (len = 0; name[len] != '\0'; len++)
+        ;
+
+    /* One trailing dot is the root label, and is not part of the comparison. */
+    if (len > 0 && name[len - 1] == '.')
+        len--;
+
+    /* Strictly longer: ".local" alone is a name with an empty label. */
+    if (len <= slen)
+        return FALSE;
+
+    for (i = 0; i < slen; i++)
+    {
+        char a = name[len - slen + i];
+        char b = suffix[i];
+
+        if (a >= 'A' && a <= 'Z')
+            a = (char)(a - 'A' + 'a');
+
+        if (a != b)
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
 static AmiNetAskResult ami_ns_ask_name(VOID *arg, ULONG wait)
 {
     AmiNsNameAsk *ask = (AmiNsNameAsk *)arg;
@@ -394,6 +439,16 @@ static LONG ami_ns_resolve_once(const char *name, ULONG *addr_out,
 
         return AMI_NET_ERR_NONAME;
     }
+#else
+    /*
+     * No responder in this build, so nothing can answer a .local name -- but
+     * RFC 6762 3 still forbids asking a unicast server, and that is what
+     * happened: the whole test sat inside the #ifdef, so the floor tier
+     * published every local host name it looked up to whatever server DHCP
+     * handed it.
+     */
+    if (ami_netstack_mdns_is_local(name))
+        return AMI_NET_ERR_NONAME;
 #endif
 
     done = ami_net_ask_until(ami_ns_ask_name, &ask, timeout_ticks, give_up,
@@ -540,6 +595,21 @@ LONG netstack_resolve_reverse_until(ULONG addr, char *name_out, ULONG name_len,
         return AMI_NET_OK;
     }
 
+    /*
+     * RFC 6762 3, the other direction: 254.169.in-addr.arpa is reserved for
+     * link-local multicast, so a reverse lookup of a 169.254/16 address must
+     * not go to a unicast server.  It cannot be answered by one either --
+     * nobody is authoritative for another machine's self-assigned address --
+     * so the query only tells that server which link-local addresses this
+     * machine is talking to, and then times out.
+     *
+     * The immediate negative is also the fast answer: ShowNetStatus NAMES and
+     * netstat reverse every address on screen, and on a network that fell back
+     * to link-local that was one full DNS timeout per line.
+     */
+    if ((addr & 0xFFFF0000UL) == 0xA9FE0000UL)
+        return AMI_NET_ERR_NONAME;
+
     if (ns == NULL || !ns->ns_DnsCreated)
         return AMI_NET_ERR_STATE;
 
@@ -633,6 +703,15 @@ LONG netstack_resolve6_until(const char *name, ULONG addr_out[4],
      */
     if (ns == NULL || !ns->ns_DnsCreated)
         return AMI_NET_ERR_STATE;
+
+    /*
+     * The IPv4 path routes a .local name to mDNS; this one had no test at all
+     * and handed it straight to the configured server.  Refused rather than
+     * routed: the vendored module's IPv6 half is not enabled in this build
+     * (ami_ns_mdns_lookup() says why), so there is nothing to ask.
+     */
+    if (ami_netstack_mdns_is_local(name))
+        return AMI_NET_ERR_NONAME;
 
     ask.ns       = ns;
     ask.name     = name;
