@@ -43,7 +43,7 @@ Not detectable by the caller.
 |---|---|---|
 | `SBTC_CAN_SHARE_LIBRARY_BASES` | never written, never read | `library.c:270` |
 | `SO_REUSEADDR/REUSEPORT/BROADCAST/OOBINLINE/SNDBUF` | success, no effect | `options.c:105-122`, `:148-189` |
-| `SO_RCVBUF` on TCP | calls a function compiled out without `NX_ENABLE_LOW_WATERMARK`; status discarded | `options.c:171-178` |
+| `SO_RCVBUF` on TCP | recorded and answered, never applied: the only knob NetX Duo offers is `nx_tcp_socket_receive_queue_max_set()`, whose whole body is inside `NX_ENABLE_LOW_WATERMARK`, which this port does not define. The advertised window is sized from the packet pool at create time and is not settable afterwards | `options.c:313-344` |
 | `IPV6_DSTOPTS` (BSD 50) | taken as `IPV6_PKTINFO`; reads `struct in6_pktinfo` from the caller's buffer | `cmsg.c` Linux aliases 49/50/51 collide with `IPV6_HOPOPTS`/`DSTOPTS`/`RTHDR`. Unfixed |
 | `DAV: 1,2` | class claim; §18.1 needs all Class 1 MUSTs (PROPFIND body gap) and §18.2 needs §6-§10 (LOCK on unmapped URL, Depth-0 collection) | `httpd.c:3132`, `:3219`. Advertising `DAV: 1` is honest but Finder reads it as read-only |
 

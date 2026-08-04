@@ -7772,14 +7772,20 @@ be the only input.**
 
 ```
 budget = (pool_total / 8) * pool_payload      /* 1 in 8 of the pool, in bytes */
-window = clamp(budget / (live_tcp_sockets + 1), 8192, 32768)
+window = clamp(budget / (live_tcp_sockets + 1), 8192, BSD_TCP_WINDOW_CEILING)
 ```
 
 **The pool sets a budget; the live socket count divides it.**
 
 | sockets open | 1 | 2 | 3 | 4 | 5 | 6 | 7+ |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| window, 8 MB profile | 32768 | 25088 | 16725 | 12544 | 10035 | 8362 | 8192 |
+| window, 8 MB profile | 33580 | 25088 | 16725 | 12544 | 10035 | 8362 | 8192 |
+
+The ceiling was 32768 when this section was written and is now 33580
+(`bsdsocket_internal.h:345`, 23 x 1460 -- Roadshow's value). Only the
+one-socket column moves: every other figure is the budget divided, not the
+ceiling. The constant is named here rather than spelled so the next change does
+not leave a third stale number behind.
 
 - **The floor is the status quo, deliberately.** 8192 is what every socket got
   before this function existed, and it is what §16.8 measured forty concurrent
