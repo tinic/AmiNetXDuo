@@ -159,9 +159,6 @@ static VOID explain_unknown_name(const char *given, ULONG unit, BOOL had_unit)
         if (!load_interface(names[i], &ifc, FALSE))
             continue;
 
-        if (listed++ == 0)
-        {
-        }
 
         tool_printf("      %-15s %s unit %ld\n", (LONG)names[i],
                     (LONG)ifc.device, (LONG)ifc.unit);
@@ -547,9 +544,6 @@ int main(int argc, char **argv)
             {
                 tool_error("%s would not come online", (LONG)name);
 
-                if (!tool_stack_installed())
-                {
-                }
                 else
                 {
                     tool_explain_device(ifc.device, ifc.unit);

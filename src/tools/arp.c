@@ -679,20 +679,6 @@ int main(int argc, char **argv)
             {
                 tool_error("%s was not added to the cache",
                            (LONG)address_text);
-
-                /*
-                 * Nearly always the cause: an entry maps an address to a card
-                 * on the same wire, so an address on another network has no
-                 * card here to map it to.
-                 */
-                if (want_one6)
-                {
-                    if (off_link6(want6, have_routes6))
-                }
-                else if (!on_our_network(want, have_snapshot))
-                {
-                }
-
                 tool_netstatus_close(base);
                 FreeArgs(rda);
                 return RETURN_FAIL;

@@ -486,9 +486,6 @@ int main(int argc, char **argv)
             tool_error("could not send the request: %s",
                        (LONG)tool_sock_errstr(err));
 
-            if (err == TOOL_ENETUNREACH || err == TOOL_EHOSTUNREACH)
-            {
-            }
 
             rc = RETURN_ERROR;
             break;

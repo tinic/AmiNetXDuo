@@ -659,9 +659,6 @@ static VOID explain(LONG err, ULONG gateway)
                 tool_printf("  %s is not on any of this machine's own\n",
                             (LONG)addr);
             }
-            else
-            {
-            }
             break;
 
         default:
@@ -879,9 +876,6 @@ static VOID explain6(LONG err, const char *gateway_text)
             {
                 tool_printf("  %s is not on any network this machine has an\n",
                             (LONG)gateway_text);
-            }
-            else
-            {
             }
             break;
 
@@ -1523,9 +1517,6 @@ int main(int argc, char **argv)
     {
         tool_error("the route to %s was not added", (LONG)text);
 
-        if (err == 0 && find_route(base, dest, NULL) >= 0)
-        {
-        }
         else
         {
             explain(err, gateway);

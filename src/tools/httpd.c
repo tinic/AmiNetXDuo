@@ -5838,9 +5838,6 @@ static LONG httpd_listen(const ToolAddr *bindaddr, UWORD port)
         tool_error("cannot listen on port %ld: %s", (LONG)port,
                    (LONG)tool_sock_errstr(err));
 
-        if (err == TOOL_EADDRINUSE)
-        {
-        }
 
         (VOID)tool_sock_close(httpd_sb, lsock);
         return -1;

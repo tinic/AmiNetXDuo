@@ -553,9 +553,6 @@ int main(int argc, char **argv)
              * The file parses but the running stack does not know the name:
              * the stack was already up when this interface file was added.
              */
-            if (!quiet)
-            {
-            }
             FreeArgs(rda);
             return RETURN_FAIL;
         }

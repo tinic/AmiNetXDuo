@@ -485,9 +485,6 @@ static LONG nc_listen(struct Library *sb, const NcOptions *opt,
         tool_error("cannot listen on port %ld: %s", (LONG)port,
                    (LONG)tool_sock_errstr(err));
 
-        if (err == TOOL_EADDRINUSE)
-        {
-        }
 
         (VOID)tool_sock_close(sb, lsock);
         return -1;
