@@ -1090,7 +1090,7 @@ struct Library *tool_netstatus_open(BOOL quiet)
     {
         if (!quiet)
         {
-            tool_error("the network has not been started");
+            tool_error("network not started");
             tool_explain_no_stack();
         }
         return NULL;

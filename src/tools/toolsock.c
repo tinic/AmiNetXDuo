@@ -71,7 +71,7 @@ struct Library *tool_socket_open(VOID)
         if (tool_stack_installed())
             tool_error("the network would not start");
         else
-            tool_error("there is no bsdsocket.library on this machine");
+            tool_error("no bsdsocket.library");
         tool_explain_no_stack();
     }
 
@@ -750,12 +750,12 @@ static VOID tool_no_ipv6(struct Library *base, const char *host)
 
     if (tool_sock_have_ipv6(base))
     {
-        tool_error("\"%s\" is not an address this command can read",
+        tool_error("%s: not an address",
                    (LONG)host);
         return;
     }
 
-    tool_error("cannot use \"%s\": this machine's network has no IPv6",
+    tool_error("%s: no IPv6 on this machine",
                (LONG)host);
 }
 
@@ -895,7 +895,7 @@ UWORD tool_sock_port(struct Library *base, const char *text, const char *proto)
 
         if (value == 0)
         {
-            tool_error("port 0 is not a port anything listens on");
+            tool_error("port 0 is not a port");
             return 0;
         }
 
@@ -909,7 +909,7 @@ UWORD tool_sock_port(struct Library *base, const char *text, const char *proto)
     se = tool_sock_getservbyname(base, text, proto);
     if (se == NULL)
     {
-        tool_error("there is no %s service called \"%s\"",
+        tool_error("%s: no such service: %s",
                    (LONG)proto, (LONG)text);
         return 0;
     }
@@ -962,15 +962,15 @@ const char *tool_sock_errstr(LONG err)
     {
         case 0:                  return "no error";
         case TOOL_EINTR:         return "interrupted";
-        case TOOL_EPIPE:         return "the other end has gone";
-        case TOOL_EWOULDBLOCK:   return "nothing to do yet";
+        case TOOL_EPIPE:         return "broken pipe";
+        case TOOL_EWOULDBLOCK:   return "would block";
         case TOOL_EINPROGRESS:   return "still connecting";
-        case TOOL_EADDRINUSE:    return "that port is already in use";
-        case TOOL_ENETUNREACH:   return "there is no route to that network";
-        case TOOL_ECONNRESET:    return "the other end reset the connection";
-        case TOOL_ETIMEDOUT:     return "the other end never answered";
+        case TOOL_EADDRINUSE:    return "address already in use";
+        case TOOL_ENETUNREACH:   return "network unreachable";
+        case TOOL_ECONNRESET:    return "connection reset by peer";
+        case TOOL_ETIMEDOUT:     return "connection timed out";
         case TOOL_ECONNREFUSED:  return "connection refused";
-        case TOOL_EHOSTUNREACH:  return "there is no route to that host";
+        case TOOL_EHOSTUNREACH:  return "host unreachable";
         default:                 return tool_sock_unnamed(err);
     }
 }

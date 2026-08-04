@@ -184,9 +184,9 @@ AmiNetStack *tool_require_stack(VOID)
          * tool_explain_no_stack() prints the rest.
          */
         if (tool_stack_library_running())
-            tool_error("the network is up, but this command cannot read it");
+            tool_error("cannot read the running stack");
         else
-            tool_error("the network has not been started");
+            tool_error("network not started");
 
         tool_explain_no_stack();
     }

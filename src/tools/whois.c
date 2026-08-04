@@ -327,7 +327,7 @@ int main(int argc, char **argv)
 
     if (port == 0)
     {
-        tool_error("port 0 is not a port anything listens on");
+        tool_error("port 0 is not a port");
         FreeArgs(rda);
         return RETURN_ERROR;
     }

@@ -437,7 +437,7 @@ static LONG fetch_run(VOID)
         if (tool_stack_installed())
             tool_error("the network would not start");
         else
-            tool_error("there is no bsdsocket.library on this machine");
+            tool_error("no bsdsocket.library");
         tool_explain_no_stack();
         return RETURN_FAIL;
     }
