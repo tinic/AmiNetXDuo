@@ -15,10 +15,11 @@
  * makes the stack accept datagrams sent to it.  It sends no Multicast Listener
  * Report, because there is none in the vendored NetX Duo to send -- nx_mld.h
  * is a stub that declares nothing and no nx_mld_*.c exists.  Link-local groups
- * (ff02::fb, ff02::c, ff02::1:3) therefore work on any segment; a switch
- * running MLD snooping with an active querier will prune anything, and no
- * router will forward a wider scope here.  port/netxduo-amiga/inc/nx_user.h
- * has the decision and the two numbers behind it.
+ * (ff02::fb, ff02::c, ff02::1:3) work on any segment for it: RFC 4541 section
+ * 3 has an MLD snooping switch forward FF02::/16 on every port regardless of
+ * membership, so a querier prunes none of them.  Wider scopes are where the
+ * missing report is felt, and no router forwards one here.
+ * port/netxduo-amiga/inc/nx_user.h has the decision and the numbers behind it.
  *
  * Three things NetX Duo keeps somewhere other than where BSD keeps them, and
  * this file is where they are reconciled:

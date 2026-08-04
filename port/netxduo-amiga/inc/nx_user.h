@@ -719,12 +719,28 @@
  * receive path drops every non-solicited-node IPv6 multicast datagram outright
  * (nx_ipv6_packet_receive.c, the NX_ENABLE_IPV6_MULTICAST arm around the join
  * list).  There is no partial capability to preserve: it is 172 bytes for
- * group reception, or no group reception.  MLD would add reachability through
- * a snooping switch with an active querier and through a router, neither of
- * which applies to a link-local group -- ff02::fb, ff02::c, ff02::1:3 are what
- * an Amiga program joins, and those are never forwarded by anything.  MLD is a
- * protocol and belongs in the NetX fork if it is ever wanted; it is not a
- * prerequisite for this.
+ * group reception, or no group reception.
+ *
+ * What silence on the wire costs is a question of scope, not of switches.
+ * RFC 4541 section 3 requires an MLD snooping switch to forward FF02::/16 on
+ * every port whatever its membership table says, precisely so that a node
+ * which has not reported still receives neighbour discovery and the
+ * link-scope service protocols; ff02::fb, ff02::c and ff02::1:3 are what an
+ * Amiga program joins and all three are inside it.  A querying switch
+ * therefore prunes none of them, and a router forwards none of them either,
+ * so a report would change nothing for the groups that are used.
+ *
+ * Above link-local scope it would change everything: ff05:: and ff0e:: are
+ * forwarded on membership and nothing here reports any, so a join of one of
+ * those receives only what is already on the link.  IPV6_JOIN_GROUP does not
+ * refuse them -- refusing would break the on-link half, which works.
+ *
+ * MLD is a protocol, not a define: nx_mld.h is a 48-line stub that declares
+ * nothing and there is no nx_mld_*.c to enable, so wanting it means writing
+ * MLDv1 -- query reception, per-group report timers with the RFC 2710 random
+ * delay, and a done message on leave -- into the NetX fork.  That is a piece
+ * of work for a scope no Amiga program asks for, and it is not a prerequisite
+ * for this.
  */
 #ifdef AMINETXDUO_MULTICAST
 #define NX_ENABLE_IPV6_MULTICAST
