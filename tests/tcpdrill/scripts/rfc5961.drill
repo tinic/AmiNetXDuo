@@ -1,0 +1,122 @@
+# tcpdrill -- RFC 5961, the blind in-window attacks.
+#
+# RFC 793 lets a segment that lands anywhere in the receive window decide the
+# fate of the connection: a RESET tears it down, and so does a SYN.  The window
+# is tens of kilobytes wide, so an attacker who knows the four-tuple has to
+# guess one number out of a few thousand rather than one out of four billion.
+# RFC 5961 narrows that to a single number for the RESET and removes it
+# altogether for the SYN.
+#
+# THE ANSWER IN BOTH CASES IS A CHALLENGE ACKNOWLEDGMENT: an ordinary ACK
+# carrying SND.NXT and RCV.NXT, which is byte-identical to the last one this
+# side sent.  A peer that really did lose the connection answers it with a
+# RESET carrying the sequence number the challenge named, and that one is
+# honoured -- n06 is that exchange end to end, and is what keeps this from
+# being a refusal to close.
+#
+# NONE OF THESE CASES HAS EVER BEEN RUN.
+#
+# WHAT IS NOT ASSERTED HERE.  RFC 5961 section 3's motivating case is a RESET
+# arriving while RCV.WND is 0, which RFC 793's acceptability test admits at any
+# sequence number at all.  Filling this stack's receive window takes between
+# 8 KB and 33 KB of unread data (w01 in tcp.drill bounds it) and the exact
+# figure is pool-derived, so there is no segment count a script can name.  It
+# is the same branch n01 exercises, reached from a different direction.
+#
+# SPDX-License-Identifier: MIT
+
+# RFC 5961 3: a RESET inside the window but not at RCV.NXT is answered with a
+# challenge and changes nothing.  50 bytes past the left edge is inside any
+# window this stack can advertise.
+case n01_off_sequence_rst_is_challenged
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx R seq=51
+tx A seq=1 ack=1 within=400
+send 10
+tx PA seq=1 ack=1 len=10 within=400
+
+# The control.  A RESET at exactly RCV.NXT is the one RFC 5961 still honours,
+# so r03 in tcp.drill keeps its meaning: torn down, and nothing sent back.
+case n02_rst_at_rcv_nxt_still_tears_down
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx R seq=1
+notx 200
+recv 100 = 0
+
+# RFC 5961 4: a SYN on an established connection is answered with a challenge
+# and NOT with a reset, and the connection carries on.
+case n03_in_window_syn_is_challenged_not_reset
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx S seq=51
+tx A seq=1 ack=1 within=400
+send 10
+tx PA seq=1 ack=1 len=10 within=400
+
+# The same at the left edge.  RFC 5961 4 makes no exception for a SYN that
+# happens to carry RCV.NXT, which is the sequence number a peer that genuinely
+# restarted would not have.
+case n04_syn_at_rcv_nxt_is_challenged
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx S seq=1
+tx A seq=1 ack=1 within=400
+recv 100 = AGAIN
+
+# A SYN carrying an acknowledgement is the same segment as far as this side is
+# concerned, and gets the same answer.
+case n05_syn_ack_in_window_is_challenged
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx SA seq=51 ack=1
+tx A seq=1 ack=1 within=400
+send 10
+tx PA seq=1 ack=1 len=10 within=400
+
+# THE RECOVERY, which is the whole reason a challenge is an adequate answer.
+# The peer really did restart: it sends a SYN, is challenged, learns RCV.NXT
+# from the challenge, and sends the RESET that the challenge invited.  That one
+# is at RCV.NXT, so it is honoured and the connection goes away.
+case n06_challenged_peer_closes_with_a_reset
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx S seq=51
+tx A seq=1 ack=1 within=400
+rx R seq=1
+notx 200
+recv 100 = 0
+
+# A RESET the acceptability test rejects outright is still dropped in silence
+# -- the challenge is for segments INSIDE the window, and a segment far past
+# the right edge must not draw one.  40000 is beyond the widest window w01
+# allows.
+case n07_out_of_window_rst_draws_nothing
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx R seq=40001
+notx 400
+send 10
+tx PA seq=1 ack=1 len=10 within=400

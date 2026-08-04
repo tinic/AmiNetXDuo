@@ -897,6 +897,7 @@ typedef struct Inject
     ULONG   dlen;
     LONG    mss;
     BOOL    sackok;
+    BOOL    badopt;             /* an MSS option whose length byte says 3 */
     ULONG   dst_ip;             /* IP destination; LOCAL_IP unless dst= said */
 } Inject;
 
@@ -906,11 +907,15 @@ static VOID build_and_inject(const Inject *in)
     UBYTE *ip  = &f[ETH_HDR];
     UBYTE *tcp;
     UWORD  opt = (UWORD)((in->mss >= 0) ? 4 : 0);
+    UWORD  badopt_at;
     UWORD  thl;
     ULONG  i;
     ULONG  iplen;
 
     if (in->sackok)
+        opt = (UWORD)(opt + 4);
+    badopt_at = (UWORD)(20 + opt);
+    if (in->badopt)
         opt = (UWORD)(opt + 4);
     thl = (UWORD)(20 + opt);
 
@@ -977,6 +982,16 @@ static VOID build_and_inject(const Inject *in)
         tcp[at + 1] = 1;
         tcp[at + 2] = 4;
         tcp[at + 3] = 2;
+    }
+    if (in->badopt)
+    {
+        /* An MSS option whose length byte says 3.  RFC 1122 4.2.2.5 calls this
+           an illegal option length; _nx_tcp_mss_option_get() rejects it and the
+           receive path decides what to answer. */
+        tcp[badopt_at]     = 2;
+        tcp[badopt_at + 1] = 3;
+        tcp[badopt_at + 2] = 0;
+        tcp[badopt_at + 3] = 0;
     }
 
     for (i = 0; i < in->dlen; i++)
@@ -1058,6 +1073,7 @@ typedef struct Expect
     BOOL    have_urg;   LONG urg;
     BOOL    have_mss;   LONG mss;
     BOOL    have_sackok; LONG sackok;
+    BOOL    have_badopt; LONG badopt;
     BOOL    have_sack;  UWORD sack_n; ULONG sack_l[4]; ULONG sack_r[4];
     BOOL    have_hdrlen; LONG hdrlen;
     BOOL    have_within; LONG within;
@@ -1127,6 +1143,7 @@ static const char *parse_keys(const char *p, Expect *e)
             else if (streq(key, "urg"))   { e->have_urg = TRUE;    e->urg = to_num(eq + 1); }
             else if (streq(key, "mss"))   { e->have_mss = TRUE;    e->mss = to_num(eq + 1); }
             else if (streq(key, "sackok")){ e->have_sackok = TRUE; e->sackok = to_num(eq + 1); }
+            else if (streq(key, "badopt")){ e->have_badopt = TRUE; e->badopt = to_num(eq + 1); }
             else if (streq(key, "hdrlen")){ e->have_hdrlen = TRUE; e->hdrlen = to_num(eq + 1); }
             else if (streq(key, "sack"))
             {
@@ -1455,6 +1472,7 @@ static VOID do_rx(const char *args, const char *raw)
     in.dlen  = (ULONG)(e.have_len ? e.len : 0);
     in.mss   = e.have_mss ? e.mss : -1;
     in.sackok = (e.have_sackok && e.sackok) ? TRUE : FALSE;
+    in.badopt = (e.have_badopt && e.badopt) ? TRUE : FALSE;
     in.dst_ip = e.have_dst ? e.dst : LOCAL_IP;
 
     /* Give the stack a moment to post its reads before the very first
