@@ -391,7 +391,10 @@ BOOL  tls_time_is_known(VOID);
  * ageing a cached session needs.  TLS_CLOCK_FLOOR tells the two apart.
  */
 ULONG tls_time_monotonic(VOID);
-#define TLS_CLOCK_FLOOR         1767225600UL    /* 2026-01-01 00:00:00 UTC */
+
+/* TLS_CLOCK_FLOOR, TLS_RESUME_MAX_AGE and tls_expired() live here.  The header
+   includes nothing, so it costs this one nothing to pull in. */
+#include "tls_expiry.h"
 
 /* -------------------------------------------------------- tls_runtime.c, */
 

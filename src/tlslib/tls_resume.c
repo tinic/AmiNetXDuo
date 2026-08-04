@@ -182,13 +182,6 @@ VOID tls_trace(const char *fmt, ...)
 #define TLS_SESSIONS_HEADER         16UL
 #define TLS_SESSIONS_RECORD         424UL   /* 168 + TLS_RESUME_TICKET_MAX */
 
-/* Ceiling on how long a cached session is offered when the server gave no
-   lifetime hint, and on how far a server's hint is believed.  Cloudflare says
-   64800 s, badssl says 300; a client that offers a stale session loses one
-   round trip and gets a full handshake, so this is a comfort limit and not a
-   security boundary. */
-#define TLS_RESUME_MAX_AGE          86400UL
-
 /*
  * The direct entry points, not the nx_/tx_ spellings.  Those map to the
  * argument-checking nxe_/txe_ wrappers, whose archive members reference
@@ -427,41 +420,12 @@ static ULONG tls_resume_trust_key(const TLSConnection *conn)
     return (hash == 0) ? TLS_R_FNV_PRIME : hash;
 }
 
-/*
- * Has this entry aged out?
- *
- * `now` is tls_time_monotonic(): wall time on a machine with a clock, seconds
- * since boot on one without.  It used to be tls_time_now(), which is zero on a
- * machine with no clock, so on those the cap never fired and a master secret
- * written to DEVS:Internet/tlssessions was offered again for as long as the
- * file existed.  A cached master secret is a key on disk, and a key on disk
- * with no expiry is one an attacker who takes the disk can use against
- * captured traffic indefinitely.
- *
- * TLS_CLOCK_FLOOR separates the two kinds of stamp.  Both sides have to be the
- * same kind for the subtraction to mean anything: a stamp written under a real
- * clock cannot be compared with an uptime, and an uptime from a previous boot
- * cannot be compared with this one.  Where they disagree, or where this boot's
- * uptime has not yet reached the stored one, the entry is from another boot and
- * is treated as expired, which costs one full handshake, and is what would
- * have happened anyway.
- */
+/* Has this entry aged out?  The rule is tls_expiry.c, which is host-tested. */
 static BOOL tls_resume_expired(const TLSResumeEntry *e, ULONG now)
 {
-    ULONG age;
-    ULONG limit;
-
-    if ((now >= TLS_CLOCK_FLOOR) != (e->re_Stamp >= TLS_CLOCK_FLOOR))
-        return TRUE;
-
-    if (now < e->re_Stamp)
-        return TRUE;
-
-    age   = now - e->re_Stamp;
-    limit = (e->re_Lifetime != 0 && e->re_Lifetime < TLS_RESUME_MAX_AGE)
-            ? e->re_Lifetime : TLS_RESUME_MAX_AGE;
-
-    return (BOOL)((age > limit) ? TRUE : FALSE);
+    return tls_expired((unsigned long)e->re_Stamp,
+                       (unsigned long)e->re_Lifetime,
+                       (unsigned long)now) ? TRUE : FALSE;
 }
 
 /*

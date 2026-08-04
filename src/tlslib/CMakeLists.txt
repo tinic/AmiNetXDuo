@@ -34,6 +34,7 @@ set(TLSLIB_SOURCES
     tls_conn.c
     tls_store.c
     tls_resume.c
+    tls_expiry.c
     tls_time.c
     tls_runtime.c)
 
@@ -199,3 +200,29 @@ add_custom_command(
     COMMENT "Building the trust store from ${AMINETXDUO_CA_BUNDLE}"
     VERBATIM)
 add_custom_target(certstore ALL DEPENDS "${CMAKE_BINARY_DIR}/certificates")
+
+# --------------------------------------------------------------- host test --
+#
+# tls_expiry.c is the one file here free of AmigaOS calls, and its rule is the
+# kind whose failure is silent: a cached master secret that never ages out is
+# a key on disk an attacker can use against captured traffic, and it looks
+# exactly like resumption working.  Two of its four rules exist only for
+# machines with no battery-backed clock, where a stamp is seconds since boot
+# rather than since 1970.
+#
+#   cc -std=c11 -Wall -Wextra -Isrc/tlslib \
+#      src/tlslib/test/test_tls_expiry.c src/tlslib/tls_expiry.c \
+#      -o test_tls_expiry
+if(NOT CMAKE_CROSSCOMPILING)
+    add_executable(test_tls_expiry
+        test/test_tls_expiry.c
+        tls_expiry.c)
+
+    target_include_directories(test_tls_expiry PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    target_compile_options(test_tls_expiry PRIVATE -Wall -Wextra)
+    set_target_properties(test_tls_expiry PROPERTIES C_STANDARD 11)
+
+    add_test(NAME tls_session_expiry COMMAND test_tls_expiry)
+endif()
