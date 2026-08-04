@@ -87,6 +87,21 @@ HttpPathResult http_path_resolve(const char *root, const char *target,
 const char *http_path_error(HttpPathResult why);
 
 /*
+ * The document root as http_path_resolve() wants it: `given` with any trailing
+ * separator removed.
+ *
+ * The root is the one path a server does not resolve -- it is what everything
+ * else is resolved UNDER -- so the doubled-slash rule this file exists to
+ * enforce has to be applied to it here or not at all.  "Work:Public/" joined
+ * with a leading separator is "Work:Public//", which is Work: on this machine
+ * and not a subdirectory of anything.
+ *
+ * A device or assign keeps its colon: "RAM:" is not "RAM".  A root that is
+ * only separators is left as one, because there is nothing to trim it to.
+ */
+void http_path_root(const char *given, char *out, unsigned long outlen);
+
+/*
  * The three a writing server walks a tree with.  They are here rather than in
  * the server for the reason everything else in this file is here: between them
  * they decide which file gets deleted, and a walk that appends the wrong

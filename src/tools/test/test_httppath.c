@@ -473,6 +473,63 @@ static void test_long_name_refused(void)
     CHECK(refused(target) == HTTP_PATH_OK);
 }
 
+/*
+ * The document root is the one path a server does not resolve, so the
+ * doubled-slash rule has to be applied to it separately -- and "Work:Public/"
+ * is what a person types when the drawer requester put a separator on the end.
+ */
+static void test_root_trimmed(void)
+{
+    char out[64];
+
+    printf("the document root, trimmed\n");
+
+    http_path_root("Work:Public/", out, sizeof(out));
+    CHECK(strcmp(out, "Work:Public") == 0);
+
+    http_path_root("Work:Public//", out, sizeof(out));
+    CHECK(strcmp(out, "Work:Public") == 0);
+
+    /* Already right, and left alone. */
+    http_path_root("Work:Public", out, sizeof(out));
+    CHECK(strcmp(out, "Work:Public") == 0);
+
+    /* A device or assign keeps its colon; "RAM" is not "RAM:". */
+    http_path_root("RAM:", out, sizeof(out));
+    CHECK(strcmp(out, "RAM:") == 0);
+
+    http_path_root("RAM:/", out, sizeof(out));
+    CHECK(strcmp(out, "RAM:") == 0);
+
+    /* Nothing to trim to, so nothing is trimmed. */
+    http_path_root("/", out, sizeof(out));
+    CHECK(strcmp(out, "/") == 0);
+
+    http_path_root("", out, sizeof(out));
+    CHECK(strcmp(out, "") == 0);
+
+    /* And a trimmed root joins the way the resolver expects. */
+    {
+        HttpPath p;
+
+        http_path_root("Work:Public/", out, sizeof(out));
+        CHECK(http_path_resolve(out, "/a/b", &p) == HTTP_PATH_OK);
+        CHECK(strcmp(p.path, "Work:Public/a/b") == 0);
+
+        /* The root itself, which is the case a trailing slash reached. */
+        CHECK(http_path_resolve(out, "/", &p) == HTTP_PATH_OK);
+        CHECK(strcmp(p.path, "Work:Public") == 0);
+    }
+
+    /* It never writes past what it was given. */
+    {
+        char small[6];
+
+        http_path_root("Work:Public/", small, sizeof(small));
+        CHECK(strlen(small) < sizeof(small));
+    }
+}
+
 /* ------------------------------------------------------------- the walk --- */
 
 static void test_join(void)
@@ -690,6 +747,7 @@ int main(void)
     test_destination_forms();
     test_resolved_shape();
     test_long_name_refused();
+    test_root_trimmed();
     test_join();
     test_up();
     test_within();

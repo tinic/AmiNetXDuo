@@ -469,6 +469,7 @@ typedef struct HttpLock
 static HttpLock httpd_locks[HTTPD_LOCK_MAX];
 static ULONG    httpd_token_seed;
 
+static char        httpd_root_buf[HTTP_PATH_MAX];
 static const char *httpd_root = "";
 static ULONG  httpd_conns   = HTTPD_CONN_DEFAULT;
 static ULONG  httpd_timeout = HTTPD_TIMEOUT_DEF;
@@ -1275,6 +1276,58 @@ static BOOL httpd_name_cut(const char *path, const char *name)
 }
 
 /*
+ * TRUE when creating something called `name` at `path` would leave it under a
+ * different name -- asked by doing it, because there is no call that says how
+ * long a name a filesystem will carry and the answer differs per filesystem.
+ *
+ * httpd_name_cut() above catches a COLLISION: something already there under
+ * the cut name.  It cannot catch the FIRST one, where nothing is there and the
+ * create succeeds shortened, because it starts by locking a name that does not
+ * exist yet and reads that as "nothing to collide with".
+ *
+ * PUT and MKCOL catch that afterwards and undo it -- one file, one create.
+ * COPY and MOVE cannot: by the time the destination exists the walk has copied
+ * a tree into it, and undoing that is a second walk.  So they ask first.
+ *
+ * Only ever called with nothing at `path`; MODE_NEWFILE would truncate a file
+ * that was.
+ */
+static BOOL httpd_name_survives(const char *path, const char *name)
+{
+    BPTR probe;
+    BOOL cut;
+
+    if (name[0] == '\0')
+        return TRUE;
+
+    probe = Open((CONST_STRPTR)path, MODE_NEWFILE);
+    if (probe == (BPTR)0)
+        return TRUE;                /* the operation itself will say why   */
+
+    (VOID)Close(probe);
+
+    cut = httpd_name_cut(path, name);
+
+    (VOID)DeleteFile((CONST_STRPTR)path);
+
+    return cut ? FALSE : TRUE;
+}
+
+/*
+ * A directory entry that stands for something somewhere else.  ExNext() is the
+ * only place one is visible: Lock() follows a link, so Examine() of the result
+ * reports what it points AT and never that it was reached through one.
+ *
+ * ST_LINKFILE is deliberately not here.  A hard link to a file is one file,
+ * the machine's owner put it in the served drawer on purpose, and copying it
+ * copies bytes rather than walking anywhere.
+ */
+static BOOL httpd_entry_is_link(LONG type)
+{
+    return (type == ST_SOFTLINK || type == ST_LINKDIR) ? TRUE : FALSE;
+}
+
+/*
  * The entity tag for something the filesystem has already been asked about:
  * its size and the three fields of its DateStamp, which between them are
  * everything a FileInfoBlock knows that changes when the bytes do.  No I/O
@@ -1807,6 +1860,46 @@ static VOID httpd_walk_slice(HttpConn *c)
                     UnLock(c->walk_lock);
                     c->walk_lock = (BPTR)0;
                     c->walk = c->walk_copy ? WALK_UP : WALK_RMDIR;
+                    break;
+                }
+
+                /*
+                 * A link is not walked through, whatever it points at.  This
+                 * is the only place one can be recognised, and it is the
+                 * place that matters: a hard-linked drawer inside the served
+                 * tree used to be descended into, so a DELETE of the tree
+                 * deleted what was on the far side of it -- outside the
+                 * document root, which nothing else here can reach.
+                 *
+                 * The entry itself still goes on a DELETE.  Removing a link
+                 * removes the link.
+                 */
+                if (httpd_entry_is_link((LONG)c->fib->fib_DirEntryType))
+                {
+                    if (!http_path_join(c->walk_src, sizeof(c->walk_src),
+                                        (const char *)c->fib->fib_FileName))
+                    {
+                        httpd_walk_failed(c, c->walk_src, 414);
+                        httpd_walk_mark(c);
+                        break;
+                    }
+
+                    if (c->walk_copy)
+                    {
+                        /* Copying it would copy what it points at, which is
+                           not what was asked for and may not be in the tree
+                           at all. */
+                        httpd_walk_failed(c, c->walk_src, 403);
+                        httpd_walk_mark(c);
+                    }
+                    else if (!DeleteFile((CONST_STRPTR)c->walk_src))
+                    {
+                        httpd_walk_failed(c, c->walk_src,
+                                          httpd_dos_status(IoErr()));
+                        httpd_walk_mark(c);
+                    }
+
+                    http_path_up(c->walk_src);
                     break;
                 }
 
@@ -3779,6 +3872,21 @@ static VOID httpd_copy_or_move(HttpConn *c, BOOL moving)
 
     dst_kind = httpd_kind(c->dest.path);
 
+    /*
+     * The check above catches a name the filesystem would shorten onto
+     * something that is already there.  With nothing there it says nothing --
+     * it locks a name that does not exist yet -- and the destination is
+     * created shortened, answering to two addresses with reads refused under
+     * both.  PUT and MKCOL undo that afterwards; a copied tree is too much to
+     * undo, so it is asked before the walk starts.
+     */
+    if (dst_kind < 0 && !httpd_name_survives(c->dest.path, c->dest.name))
+    {
+        httpd_error(c, 400,
+                    "that name is longer than this filesystem keeps");
+        return;
+    }
+
     c->walk_move = moving ? 1 : 0;
     c->walk_new  = (dst_kind < 0) ? 1 : 0;
 
@@ -5615,7 +5723,12 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    httpd_root    = (const char *)args[ARG_ROOT];
+    /* Trimmed before anything is resolved under it: the root is the one path
+       here that does not go through http_path_resolve(), which is where every
+       other doubled slash is prevented. */
+    http_path_root((const char *)args[ARG_ROOT], httpd_root_buf,
+                   sizeof(httpd_root_buf));
+    httpd_root    = httpd_root_buf;
     httpd_verbose = (args[ARG_VERBOSE] != 0) ? TRUE : FALSE;
     httpd_trace   = (args[ARG_TRACE]   != 0) ? TRUE : FALSE;
 
