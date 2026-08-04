@@ -63,6 +63,7 @@ typedef struct AmiBpfChan
     ULONG            hold_len;
     ULONG            hold_pos;
     volatile BOOL    reading;                   /* a copy-out is in flight  */
+    volatile BOOL    release_pending;           /* closed under a reader    */
 
     struct bpf_insn *filter;
     ULONG            filter_len;
