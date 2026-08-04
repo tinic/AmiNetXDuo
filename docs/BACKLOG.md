@@ -68,7 +68,17 @@ The second class needs `-m32`, which puts these in the `host32` tier rather
 than `host`. `-m32` works on the Linux build host; the arm64 Mac cannot do it
 at all.
 
-**The Amiga `struct timeval` is the single blocking dependency.** It is
+**The Amiga `struct timeval` blocker is solved**, 2026-08-04, by renaming the
+tag in `host_prelude.h` after the C library's headers are in: glibc keeps
+`struct timeval` for everything it declared, and the tree's code from that
+point down sees `struct ami_timeval` with `tv_secs` and `tv_micro`. It works
+because nothing in `src/bsdsocket` hands a timeval to libc; the only calls that
+take one are timer.device's. `options.c` went 14 errors to 8, `select.c` to 26
+and `tcp_handler.c` to 1, all of them now missing ABI constants rather than a
+type. The original diagnosis is kept below because the reasoning is what makes
+the rename safe.
+
+**The Amiga `struct timeval` was the single blocking dependency.** It is
 `{ULONG tv_secs; ULONG tv_micro;}` and POSIX's is `{time_t tv_sec;
 suseconds_t tv_usec;}`: same tag, different members, different types. glibc
 brings its own in through `<sys/select.h>`, `<netinet/in.h>` needs that, and
@@ -77,7 +87,18 @@ three directions on 2026-08-04 and it is the same wall each time: `options.c`,
 `select.c` and `tcp_handler.c` read `tv_secs` directly, and the NDK's own
 `libraries/bsdsocket.h` has a `struct timeval` member (`lhm_Date`), so even
 pulling that one header in through `#include_next` with `-idirafter` fails on
-it. Anything that clears this clears most of the twenty-three.
+it. Anything that clears this clears most of the twenty-three, and the rename
+above does.
+
+What now stands in the way is `libraries/bsdsocket.h`: `FD_READ`,
+`SO_EVENTMASK`, `RTA_*`, `FDCB_*` and the AmigaDOS `ACTION_*` numbers. The shim
+deliberately does not restate them, because a second copy of a number the NDK
+owns can disagree with it and a test asserting the wrong one passes while the
+library fails. Reaching the NDK's own header with `#include_next` and
+`-idirafter` was tried three times and fails on `lhm_Date` every time. The
+remaining options are to restate the constants with a test that checks them
+against the NDK on a cross build, the way `test_sockopt_numbers` already does
+for the socket options, or to leave these files to the guest suites.
 
 **Using the NDK's own headers instead of the shim was tried and is worse**:
 `-I $TOOLCHAIN/m68k-amigaos/ndk-include` with `__asm`, `__stdargs`, `__saveds`

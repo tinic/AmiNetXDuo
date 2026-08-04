@@ -24,8 +24,7 @@
 
 struct timerequest {
     struct IORequest tr_node;
-    ULONG            tr_time_secs;
-    ULONG            tr_time_micro;
+    struct timeval   tr_time;      /* host_prelude.h renamed the tag */
 };
 
 #define UNIT_VBLANK    1

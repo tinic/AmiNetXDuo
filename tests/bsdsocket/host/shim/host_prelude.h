@@ -81,6 +81,25 @@
 struct rt_msghdr;
 struct AddressAllocationMessage;
 
+/*
+ * The Amiga's struct timeval, under a name of its own.
+ *
+ * It is {ULONG tv_secs; ULONG tv_micro;} and POSIX's is {time_t tv_sec;
+ * suseconds_t tv_usec;}: the same tag, different members, different types.
+ * The C library's headers are above and have already defined theirs, and
+ * <netinet/in.h> needs that one, so it cannot simply be displaced.
+ *
+ * Renaming the tag from here down gives the tree's code the Amiga shape while
+ * everything the C library declared keeps the POSIX one.  It works because
+ * nothing in src/bsdsocket passes a timeval to libc: the only calls that take
+ * one are timer.device's, which are the Amiga's.
+ */
+#define timeval ami_timeval
+struct ami_timeval {
+    unsigned int tv_secs;
+    unsigned int tv_micro;
+};
+
 #define __asm(x)
 
 #endif
