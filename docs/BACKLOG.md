@@ -90,6 +90,8 @@ name always misses, and a CNAME-only response yields `NX_DNS_QUERY_FAILED`.
 | UDP demux ignores the 4-tuple | `nx_udp_packet_receive.c:247` |
 | UDP checksum verified at dequeue, not enqueue | `nx_udp_socket_receive.c` |
 | `o02_duplicate_segment` fails: a duplicate of acknowledged data is not re-acked when the receive queue is non-empty | `tests/tcpdrill` |
+| No FIN-WAIT-2 timeout. `nx_tcp_fast_periodic_processing.c:142-193` ages SYN_SENT, SYN_RECEIVED, FIN_WAIT_1, CLOSING, LAST_ACK and TIMED_WAIT — not FIN_WAIT_2 — so a socket the application has `shutdown(SHUT_WR)` and not closed sits there indefinitely. Orphans are bounded by `bsd_closing_sweep`'s 60 s deadline; sockets the caller still holds are not | `nx_tcp_fast_periodic_processing.c` |
+| `bsd_tcp_close_start()` discards every `nx_tcp_socket_disconnect()` status and returns TRUE regardless (`socket.c:823`, `:830`, `:837`). In FIN_WAIT_1 that call returns `NX_NOT_CONNECTED` and sends nothing, so the `SO_LINGER{1,0}` abortive close is a no-op; the RST that does appear comes from the `bsd_tcp_abort()` fallback after `nx_tcp_socket_delete()` answers `NX_STILL_BOUND`. Right answer, wrong route, and the caller is told it worked either way | `src/bsdsocket/socket.c:823-845` |
 
 **IPv6**
 
