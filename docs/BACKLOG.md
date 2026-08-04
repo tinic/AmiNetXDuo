@@ -26,7 +26,6 @@ git log; what it declined is under *Decided against*; what it disproved is under
 
 | Item | Why it is here rather than under *Decided against* | Cite |
 |---|---|---|
-| **Entropy: ~18 credited bits on a machine with no RTC.** No reseeding, no persisted seed, no health tests | An attacker who knows roughly when the machine booted can enumerate the DRBG state and recover session keys. Two designs, both outside `src/tlslib/`: mix the E-clock low bits of packet arrival into the pool at one credited bit per packet, capped, DNS and the TCP handshake spend enough packets to cross 64 bits before a TLS handshake starts; and persist a seed in `DEVS:Internet/`, written at close and mixed at open, so only a machine's first boot is weak | `ami_random.c:590`, `random.h:39-44` |
 | **Encrypt-then-MAC, RFC 7366** | The answer to the CBC padding-timing row, which is declined on its own terms below. EtM fails the MAC before padding is examined, at no per-record cost; constant-time padding costs ~10 ms per record at 7 MHz |, |
 | **Extended master secret, RFC 7627** | Without it, resumption is exposed to the triple-handshake attack. A change to nx_secure's key schedule, not a table entry; every cached session becomes non-resumable |, |
 | **SACK send side** | Already written and verified on fork branch `amiga-tcp-sack-transmit` (`d8af79c5`), never landed. Adds `nx_tcp_sack_option_get.c` and the retransmit skip | `nx_tcp.h:93` |
@@ -214,6 +213,12 @@ requirement. Measured 2026-08-02 as the third arm: read 1108 KB/s against our
 | Dead properties, RFC 4918 §9.2 SHOULD | AmigaOS offers a 79-byte filenote or a sidecar; a sidecar costs `Lock`+`Examine`+`Open`+`Read` per entry per PROPFIND, doubling listing cost on a 68000 and the file count of every drawer, and a `.props-<name>` scheme collides on OFS's 30-character truncation. Measured client cost of having none: Explorer's creation/access times and attribute bits, nothing else |
 | Unbounded multistatus, §9.8.3 | The 8-entry / 768-byte / 8-property bound is deliberate. Honouring it needs a spill file or a streamed 207, and a streamed 207 cannot be retracted once the head is out |
 | Top-level DELETE aimed straight at a hard link | `Lock()` follows the link and `Examine()` reports the target's type, so catching this needs a parent-directory scan. The entry has to be placed by the machine's owner, `httpd` creates no links, which makes it a footgun rather than a remote attack. The `ExNext()` recursion, which was the reachable half, is fixed |
+
+**Entropy**
+
+| Item | Cost of doing it |
+|---|---|
+| Better entropy gathering than E-clock jitter | There is none below timer.device V51, and the supported floor is 2.04. `gather_clock()` credits 8 bits only when `tv_secs != 0`, so a machine with no RTC credits nothing and `gather_jitter()`'s 12-bit cap plus the memory and task scraps is what is left: about 18 bits. Inventing a source the hardware does not have is worse than recording the number |
 
 **Infrastructure**
 
