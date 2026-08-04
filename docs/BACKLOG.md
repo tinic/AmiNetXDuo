@@ -51,6 +51,14 @@ Nothing else in the 2026-08-04 httpd batch was shipped without a host compile.
 | **An RA with A=1 and L=0 forms an address nothing can remove.** The address is formed at `:344`, `:396-422`, but a prefix-list entry is added only when L is set (`:317`), so nothing ages it out | Found 2026-08-04 while adjudicating the IPv6 address-lifetime rows. A legitimate and not-rare router configuration, and a worse defect than the row that led to it | `nx_icmpv6_process_ra.c` |
 | **EKU, nameConstraints and critical-extension rejection, together** | Accepting a certificate that marks nameConstraints critical while not enforcing it is exactly the failure the critical bit exists to prevent, so doing one without the others is worse than doing none. The known-critical set must be `{basicConstraints, keyUsage, subjectAltName, extendedKeyUsage}`, Let's Encrypt intermediates mark EKU critical. Untestable without hardware | `nx_secure_x509_extension_find.c:191` |
 
+### Found while shipping the 2026-08-04 sweep
+
+| Item | Measured | Cite |
+|---|---|---|
+| **A command is mostly C runtime.** `ping` is 24,116 bytes stripped, of which its own code is **2,050**. libnix's startup pulls in a C++ AVL allocator behind `malloc` (2,952), stdio (2,916) and string/format (1,856): 7,724 bytes, 35% of the binary, none of it referenced by anything we wrote. `tool_printf` already goes through dos.library `VPrintf` and `ami_alloc` through `AllocVec`, so the references come from `__stdiowin.o`, `__initcpp.o` and `atexit.o` in the crt0 chain | link map of `tool_ping` | `src/tools/CMakeLists.txt:62-76` records why the link line was deliberately left alone once before |
+| **`run-tcphandler.sh` cannot leave fs-uae without being parameterised.** Every connection in it names 10.0.2.2, fs-uae's SLIRP gateway. Amiberry bridges over pcap, so the address does not exist there and the guest waits for a peer that never answers. It is the last network test still calling `fsuae-run.sh` directly | run 2026-08-04 | `tests/tools/run-tcphandler.sh:137-159` |
+| **The `HOST_TEST_TARGETS` count guard does not catch an unbuilt target.** It compares the number of *registered* tests against the number of targets, and registration happens whether or not the target was built, so five new tests went to `main` reporting Not Run | CI run 30894986338 | `tools/ci.sh:207-211` |
+
 ### Carried caveats
 
 Two verdicts from the sweep rest on comments rather than observation, and are
