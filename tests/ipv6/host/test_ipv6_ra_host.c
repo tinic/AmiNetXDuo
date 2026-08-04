@@ -114,9 +114,11 @@ static UINT  h_prefix_add_full;       /* make the next add fail */
 static UINT  h_rdnss_count;
 static ULONG h_rdnss_address[H_RDNSS_MAX][4];
 static ULONG h_rdnss_lifetime[H_RDNSS_MAX];
+static ULONG h_prefix_added_onlink;
 
 UINT _nx_ipv6_prefix_list_add_entry(NX_IP *ip_ptr, ULONG *prefix,
-                                    ULONG prefix_length, ULONG valid_lifetime)
+                                    ULONG prefix_length, ULONG valid_lifetime,
+                                    ULONG onlink)
 {
     NX_PARAMETER_NOT_USED(ip_ptr);
     NX_PARAMETER_NOT_USED(valid_lifetime);
@@ -127,6 +129,7 @@ UINT _nx_ipv6_prefix_list_add_entry(NX_IP *ip_ptr, ULONG *prefix,
     }
 
     h_prefix_adds++;
+    h_prefix_added_onlink = onlink;
     h_prefix_added[0] = prefix[0];
     h_prefix_added[1] = prefix[1];
     h_prefix_added[2] = prefix[2];
@@ -650,8 +653,16 @@ char  what[128];
     /* On-link and autonomous, which always worked. */
     h_prefix_case(H_ONLINK | H_AUTONOMOUS, 3600, 1, 1, "A=1 L=1");
 
-    /* Autonomous only.  This is the one that formed nothing. */
-    h_prefix_case(H_AUTONOMOUS, 3600, 1, 0, "A=1 L=0");
+    /*
+     * Autonomous only.  The address is formed AND the prefix goes on the list:
+     * that list is what nxd_ipv6_prefix_router_timer_tick.c counts down, so a
+     * prefix that is not on it leaves an address nothing can ever remove.  It
+     * is marked not-on-link, so _nxd_ipv6_search_onlink() passes over it and
+     * the L bit still means what it says.
+     */
+    h_prefix_case(H_AUTONOMOUS, 3600, 1, 1, "A=1 L=0");
+    h_check(h_prefix_added_onlink == 0,
+            "A=1 L=0: the entry is on the list but not on-link");
 
     /* On-link only: a prefix to route directly to, and no address from it. */
     h_prefix_case(H_ONLINK, 3600, 0, 1, "A=0 L=1");
@@ -698,8 +709,9 @@ char  what[128];
         h_check(h_formed_address() == NX_NULL,
                 "A=1 L=1 with a full prefix list: forms no address");
 
-        /* And a prefix that was never offered on-link is not affected by the
-           prefix list's capacity at all. */
+        /* And A=1 L=0 is refused for the same reason: with no room on the
+           list there is nothing to age the address out, and an address that
+           cannot expire is worse than an address that was never formed. */
         h_reset();
         h_prefix_add_full = 1;
         h_build_ra(h_message, &length, 1800);
@@ -707,8 +719,8 @@ char  what[128];
         h_deliver(h_message, length);
 
         formed = h_formed_address();
-        h_check(h_is_expected_address(formed),
-                "A=1 L=0 with a full prefix list: forms an address");
+        h_check(formed == NX_NULL,
+                "A=1 L=0 with a full prefix list: forms no address");
     }
 
     /* ------------------------- (2) the MTU option ------------------------- */
