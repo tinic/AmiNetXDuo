@@ -21,13 +21,10 @@ add_executable(test_sana2_copy
     host/test_sana2_copy_host.c
     "${CMAKE_SOURCE_DIR}/src/sana2/sana2_copy.c")
 
-# The hooks are declared in the m68k register convention -- `register APTR to
-# __asm("a0")` -- which no host compiler can honour. Neutering `__asm` as a
-# function-like macro keeps the declarations exactly as they ship rather than
-# putting a host #ifdef into a file that runs at interrupt level. It is safe
-# here because nothing in this translation unit's include set spells symbol
-# renaming that way; glibc and the BSDs use `__asm__`.
-target_compile_options(test_sana2_copy PRIVATE "-D__asm(x)=")
+# host/shim/host_regargs.h says why, and why it is a forced include rather than
+# a -D: it pulls libc in ahead of the macro so the macro cannot reach it.
+target_compile_options(test_sana2_copy PRIVATE
+    -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_regargs.h")
 
 # -UAMINETXDUO_IPV6 for the reason tests/netstack/host's targets carry it: it
 # changes the layout of NX_PACKET, and the vendored headers here are the linux
