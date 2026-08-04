@@ -69,6 +69,17 @@ int main(void)
     h_check(ami_ns_dns_again(NX_DNS_QUERY_FAILED),
             "and is worth repeating, since it also covers silence");
 
+    /*
+     * RCODE 3.  An authoritative "no such name" is an answer, so it is
+     * host-not-found like the others AND it must not be retried: asking the
+     * next server on the list cannot produce a different answer, and doing so
+     * costs the caller the whole retry ladder for a name that does not exist.
+     */
+    h_check(ami_ns_dns_error(NX_DNS_NAME_ERROR) == AMI_NET_ERR_NONAME,
+            "NXDOMAIN is host-not-found");
+    h_check(!ami_ns_dns_again(NX_DNS_NAME_ERROR),
+            "and is not worth repeating, unlike a query that merely failed");
+
     /* A caller's mistake, which no retry fixes. */
     h_check(ami_ns_dns_error(NX_DNS_PARAM_ERROR) == AMI_NET_ERR_CONFIG,
             "a bad argument is a configuration error");

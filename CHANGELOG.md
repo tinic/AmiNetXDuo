@@ -25,6 +25,7 @@ version at the top when it merges.
 - Session keys are wiped from memory when a connection closes, and remembered sessions expire after a day on machines with no working clock, where they previously never expired
 - A large reply that arrives split into pieces is now put back together instead of vanishing. A machine that could not do this saw big replies simply never arrive, and the program waiting for one timed out with nothing to show for it
 - On a network that only speaks IPv6, the machine can now look up names. It previously got an address and could reach numbered addresses but could not resolve a single name
+- A name that does not exist is reported as not existing straight away, instead of every name server on the list being asked in turn and the whole retry ladder run out first
 - Names spelled with capital letters resolve. Some name servers answer in lower case and the reply was being rejected as if it were for a different name
 - A name server answering about one name can no longer slip in an address for a different one, and a reverse lookup checks that the reply is about the address that was asked about
 - A name whose address has changed is no longer remembered past the time the server asked for it, even while a program keeps looking it up

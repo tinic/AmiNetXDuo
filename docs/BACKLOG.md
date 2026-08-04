@@ -22,13 +22,6 @@ Everything below survived the 2026-08-04 sweep. What that sweep fixed is in the
 git log; what it declined is under *Decided against*; what it disproved is under
 *Withdrawn*. Conformance status and citations are in `CONFORMANCE.md`.
 
-### Blocked
-
-| Item | Blocked on | Cite |
-|---|---|---|
-| RFC 2308 §5 negative cache. Needs the SOA MINIMUM held against a name with no record to attach it to | `NX_DNS_NAME_ERROR` does not exist until the pin moves past fork branch `amiga-dns-name-error`; `ami_ns_dns_error()` cannot gain the case before then. Sequence immediately after it lands | `nxd_dns.c:3587` |
-| Bailiwick check on cached records | Must land with CNAME chain following. `NX_DNS_ENABLE_EXTENDED_RR_TYPES` is undefined, so the A record after a CNAME, owner = CNAME target, is accepted only because no owner-name check exists; adding the check alone fails every CNAME-hosted name | `nxd_dns.c` |
-
 ### Recommended, not scheduled
 
 | Item | Why it is here rather than under *Decided against* | Cite |
@@ -38,6 +31,8 @@ git log; what it declined is under *Decided against*; what it disproved is under
 | **Extended master secret, RFC 7627** | Without it, resumption is exposed to the triple-handshake attack. A change to nx_secure's key schedule, not a table entry; every cached session becomes non-resumable |, |
 | **SACK send side** | Already written and verified on fork branch `amiga-tcp-sack-transmit` (`d8af79c5`), never landed. Adds `nx_tcp_sack_option_get.c` and the retransmit skip | `nx_tcp.h:93` |
 | **An RA with A=1 and L=0 forms an address nothing can remove.** The address is formed at `:344`, `:396-422`, but a prefix-list entry is added only when L is set (`:317`), so nothing ages it out | Found 2026-08-04 while adjudicating the IPv6 address-lifetime rows. A legitimate and not-rare router configuration, and a worse defect than the row that led to it | `nx_icmpv6_process_ra.c` |
+| **RFC 2308 §5 negative cache.** A name that does not exist is looked up again on every call | The SOA MINIMUM has to be held against a name with no record to attach it to, which means a synthetic entry type and storage for a name with no data. `NX_DNS_NAME_ERROR` now exists and reaches `ami_ns_dns_error()`, so nothing outside this row is in the way | `nxd_dns.c:3587`, `netstack_dns_status.c` |
+| **Bailiwick check on cached records, with CNAME chain following** | One item, not two: `NX_DNS_ENABLE_EXTENDED_RR_TYPES` is undefined, so the A record after a CNAME has the CNAME target as its owner and is accepted only because no owner-name check exists. Adding the check alone fails every CNAME-hosted name | `nxd_dns.c` |
 | **A command is mostly C runtime.** `ping` is 15,860 bytes, of which its own code is 2,050 | libnix's crt0 chain pulls in stdio and the C++ AVL allocator through `__stdiowin.o` and `__initcpp.o`; `atexit()` was the other route and is gone. `tool_printf` goes through dos.library `VPrintf` and `ami_alloc` through `AllocVec`, so nothing we wrote calls what remains. `src/tools/CMakeLists.txt:62-76` records why the link line was left alone once before | link map of `tool_ping` |
 | **Parameterise `run-tcphandler.sh`'s peer address** | Every connection in it names 10.0.2.2, fs-uae's SLIRP gateway, so it cannot move to Amiberry. It is the last network test still calling `fsuae-run.sh` directly | `tests/tools/run-tcphandler.sh:137-159` |
 | **`HOST_TEST_TARGETS` count guard does not catch an unbuilt target** | It compares registered tests against targets, and a test registers whether or not its target was built, so five went to `main` reporting Not Run | `tools/ci.sh:207-211` |

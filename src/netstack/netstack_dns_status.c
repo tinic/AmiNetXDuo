@@ -8,6 +8,8 @@
 
 BOOL ami_ns_dns_again(UINT status)
 {
+    /* NX_DNS_NAME_ERROR is deliberately absent: RCODE 3 is an answer about
+       the name, so asking another server cannot change it. */
     return (BOOL)(status == NX_DNS_QUERY_FAILED ||
                   status == NX_DNS_TIMEOUT ||
                   status == TX_NOT_AVAILABLE);
@@ -34,6 +36,17 @@ LONG ami_ns_dns_error(UINT status)
          */
         case TX_NOT_AVAILABLE:
             return AMI_NET_ERR_TIMEOUT;
+
+        /*
+         * RCODE 3, and an answer rather than a failure: the server that gave
+         * it is authoritative for the zone, so no other server would say
+         * anything different.  NX_DNS_ERROR_MASK matched it the same way it
+         * matches RCODE 2, so both arrived as NX_DNS_SERVER_AUTH_ERROR and the
+         * resolver asked every remaining server, once per retry rung, for an
+         * answer it already had.
+         */
+        case NX_DNS_NAME_ERROR:
+            return AMI_NET_ERR_NONAME;
 
         case NX_DNS_QUERY_FAILED:
         case NX_DNS_MISMATCHED_RESPONSE:
