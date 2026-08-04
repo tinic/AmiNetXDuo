@@ -85,6 +85,15 @@ function(_aminetxduo_warnings_apply_dir dir)
             if(_s MATCHES "/third_party/")
                 continue()
             endif()
+            # tests/atf/ holds FreeBSD's tests/sys/netinet sources byte for
+            # byte, under their own BSD-2-Clause header, so the same rule
+            # applies: not ours, not modifiable, not warning-clean against the
+            # Roadshow NDK's prototypes (sendto() takes APTR where FreeBSD's
+            # takes const void *).  The shim beside them -- atf-c.h,
+            # atf_main.c, atf-prelude.h -- is ours and is not exempt.
+            if(_s MATCHES "/tests/atf/" AND NOT _s MATCHES "/tests/atf/atf")
+                continue()
+            endif()
             list(APPEND _ours "${_s}")
         endforeach()
 
