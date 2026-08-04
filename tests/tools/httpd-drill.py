@@ -621,6 +621,103 @@ def test_name_truncation():
     once(req("DELETE", a))
 
 
+# ------------------------------------------------------- propfind bodies ---
+
+def test_propfind_body():
+    print("PROPFIND answers the body it was given")
+
+    once(req("PUT", BASE + "/pf.txt", body="body"))
+
+    # <propname/>: the names, and no values.
+    body = ('<?xml version="1.0" encoding="utf-8"?>'
+            '<D:propfind xmlns:D="DAV:"><D:propname/></D:propfind>')
+    a = once(req("PROPFIND", BASE + "/pf.txt", {"Depth": "0",
+                 "Content-Type": "text/xml"}, body=body))
+    check(a is not None and a[0] == 207, "propname is a 207")
+    if a is not None:
+        check(b"getcontentlength" in a[2], "propname names getcontentlength")
+        check(b"<D:getcontentlength>4</D:getcontentlength>" not in a[2],
+              "and does not carry its value")
+
+    # A named list: what was asked for, and nothing else.
+    body = ('<?xml version="1.0" encoding="utf-8"?>'
+            '<D:propfind xmlns:D="DAV:"><D:prop>'
+            '<D:getcontentlength/></D:prop></D:propfind>')
+    a = once(req("PROPFIND", BASE + "/pf.txt", {"Depth": "0",
+                 "Content-Type": "text/xml"}, body=body))
+    check(a is not None and a[0] == 207, "a named prop list is a 207")
+    if a is not None:
+        check(b"getcontentlength" in a[2], "the named property is reported")
+        check(b"getcontenttype" not in a[2],
+              "and one that was not named is not")
+
+    # A property this server does not keep is 404, not silence.
+    body = ('<?xml version="1.0" encoding="utf-8"?>'
+            '<D:propfind xmlns:D="DAV:" xmlns:Z="urn:drill"><D:prop>'
+            '<D:getcontentlength/><Z:nosuchprop/></D:prop></D:propfind>')
+    a = once(req("PROPFIND", BASE + "/pf.txt", {"Depth": "0",
+                 "Content-Type": "text/xml"}, body=body))
+    if a is not None:
+        check(b"404" in a[2], "an unknown named property draws a 404 propstat")
+        check(b"nosuchprop" in a[2], "and the propstat names it")
+
+    # No body still means everything, which is what every client sends.
+    a = once(req("PROPFIND", BASE + "/pf.txt", {"Depth": "0"}))
+    if a is not None:
+        check(b"getcontenttype" in a[2] and b"getcontentlength" in a[2],
+              "an empty body is still allprop")
+
+    once(req("DELETE", BASE + "/pf.txt"))
+
+
+def test_depth0_collection_lock():
+    print("a Depth: 0 lock on a drawer holds its membership")
+
+    once(req("MKCOL", BASE + "/locked"))
+
+    lock = once(req("LOCK", BASE + "/locked", {"Timeout": "Second-600",
+                     "Depth": "0"},
+                    body='<?xml version="1.0" encoding="utf-8"?>'
+                         '<D:lockinfo xmlns:D="DAV:">'
+                         '<D:lockscope><D:exclusive/></D:lockscope>'
+                         '<D:locktype><D:write/></D:locktype>'
+                         '<D:owner>drill</D:owner></D:lockinfo>'))
+    token = ""
+    if lock is not None and lock[0] in (200, 201):
+        i = lock[2].find(b"opaquelocktoken:")
+        if i >= 0:
+            j = lock[2].find(b"<", i)
+            token = lock[2][i:j].decode("ascii", "replace").strip()
+    check(token != "", "the collection lock hands out a token")
+
+    # Somebody without the token may not add a name to it.
+    a = once(req("PUT", BASE + "/locked/intruder.txt", body="x"))
+    check(a is not None and a[0] == 423,
+          "a PUT into it without the token is 423")
+
+    a = once(req("MKCOL", BASE + "/locked/sub"))
+    check(a is not None and a[0] == 423,
+          "and so is a MKCOL inside it")
+
+    # The holder may.
+    if token:
+        a = once(req("PUT", BASE + "/locked/mine.txt",
+                     {"If": "(<%s>)" % token}, body="x"))
+        check(a is not None and a[0] in (201, 204),
+              "the token holder may add one")
+
+        once(req("DELETE", BASE + "/locked/mine.txt",
+                 {"If": "(<%s>)" % token}))
+        once(req("UNLOCK", BASE + "/locked", {"Lock-Token": "<%s>" % token}))
+
+    # And with the lock gone, anybody may again.
+    a = once(req("PUT", BASE + "/locked/after.txt", body="x"))
+    check(a is not None and a[0] in (201, 204),
+          "with the lock released it is open again")
+
+    once(req("DELETE", BASE + "/locked"))
+
+
 def main():
     print("httpd-drill against http://%s:%d/\n" % (ADDR, PORT))
 
@@ -636,6 +733,8 @@ def main():
         test_proppatch_atomic()
         test_overlapping_moves()
         test_name_truncation()
+        test_propfind_body()
+        test_depth0_collection_lock()
     finally:
         teardown()
 
