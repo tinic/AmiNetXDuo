@@ -67,6 +67,7 @@
 #include "toolsock.h"
 #include "httppath.h"
 #include "httpif.h"
+#include "httpframe.h"
 #include "aminetxduo/version.h"
 
 #include <libraries/locale.h>
@@ -287,18 +288,6 @@ enum
     PROD_PROPFIND       /* a generated 207 multistatus                     */
 };
 
-/* Reading a chunked request body.  The framing is a size line, that many
-   bytes, a CRLF, and a zero-sized chunk with optional trailers to end. */
-enum
-{
-    CHUNK_OFF = 0,      /* the body is a Content-Length one                */
-    CHUNK_SIZE,
-    CHUNK_DATA,
-    CHUNK_CRLF,
-    CHUNK_TRAILER,
-    CHUNK_DONE
-};
-
 /* The XML skimmer's position.  Not a parser: it finds element names and the
    text between them and has no opinion about anything else. */
 enum
@@ -347,10 +336,9 @@ struct HttpConn
     UBYTE   framed;                 /* the whole head was read, so the     */
                                     /* body's length is known              */
     UBYTE   drain;                  /* a refused body still to be read away */
-    UBYTE   chunk_state;            /* CHUNK_OFF unless the body is chunked */
-    ULONG   chunk_left;
-    UBYTE   chunk_n;
-    char    chunk_line[24];         /* the size line, as it arrives        */
+    HttpChunk chunk;                /* HTTP_CHUNK_OFF unless it is chunked  */
+    ULONG   body_start;             /* seconds, when the body began         */
+    ULONG   body_got;               /* bytes of it that have arrived        */
     ULONG   lock_secs;              /* Timeout: seconds asked for, 0 if none */
     char    dest_url[HTTP_URL_MAX]; /* Destination:, still as it arrived   */
     HttpPath dest;                  /* and what it resolved to             */
@@ -1146,9 +1134,9 @@ static VOID httpd_reset(HttpConn *c)
     c->had_body    = 0;
     c->framed      = 0;
     c->drain       = 0;
-    c->chunk_state = CHUNK_OFF;
-    c->chunk_left  = 0;
-    c->chunk_n     = 0;
+    http_chunk_off(&c->chunk);
+    c->body_start  = 0;
+    c->body_got    = 0;
     c->lock_secs   = 0;
     c->dest_url[0] = '\0';
     c->dest.path[0] = '\0';
@@ -3459,6 +3447,15 @@ static BOOL httpd_begin_put(HttpConn *c)
         return FALSE;
     }
 
+    /*
+     * Measured before the client sends a byte, which is the difference
+     * between a 507 and a floppy full of a temporary file.
+     *
+     * A chunked upload cannot be measured here: it does not say how long it
+     * is until it has finished, which is why a client chunks in the first
+     * place.  It is bounded on the way in instead -- httpd_sink_put() turns a
+     * short write into a 507 -- and that is the whole of what can be done.
+     */
     if (c->body_left > 0UL)
     {
         ULONG room = httpd_free_bytes(c->put_temp);
@@ -4323,6 +4320,8 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
     ULONG  i = 0;
     ULONG  n = 0;
     ULONG  headers = 0;
+    BOOL   seen_len = FALSE;
+    BOOL   seen_te  = FALSE;
     HttpPathResult why;
 
     /* ---- the request line ------------------------------------------- */
@@ -4383,6 +4382,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
     {
         char  name[40];
         ULONG start = i;
+        BOOL  cut   = FALSE;        /* the value did not fit in httpd_value */
 
         while (i < headlen && c->in[i] != '\n')
             i++;
@@ -4422,6 +4422,8 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
             {
                 if (n + 1UL < sizeof(httpd_value))
                     httpd_value[n++] = (char)c->in[j];
+                else
+                    cut = TRUE;
                 j++;
             }
             httpd_value[n] = '\0';
@@ -4431,22 +4433,52 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
 
         if (hs_equal(name, "Content-Length"))
         {
-            ULONG len = 0;
-            const char *p = httpd_value;
+            ULONG           len;
+            HttpFrameResult bad = http_frame_length(httpd_value, &len);
 
-            while (*p >= '0' && *p <= '9')
-                len = (len * 10UL) + (ULONG)(*p++ - '0');
+            /* A length this server cannot read is not a length it may guess
+               at: whatever it gets wrong stays in the socket and is parsed as
+               the next request. */
+            if (cut || bad != HTTP_FRAME_OK)
+            {
+                const char *said = cut ? "longer than this server reads"
+                                       : http_frame_error(bad);
+
+                if (httpd_verbose || httpd_trace)
+                    httpd_log(c, "refused Content-Length: %s", (LONG)said, 0);
+
+                httpd_error(c, 400, "that is not a Content-Length");
+                return FALSE;
+            }
+
+            /* RFC 7230 3.3.3: two of them that disagree is the same hazard as
+               one that overflowed, and for the same reason. */
+            if (seen_len && len != c->body_left)
+            {
+                httpd_error(c, 400, "two Content-Lengths that disagree");
+                return FALSE;
+            }
 
             c->body_left = len;
+            seen_len     = TRUE;
         }
         else if (hs_equal(name, "Depth"))
         {
-            if (hs_nicmp(httpd_value, "infinity", 8) == 0)
+            /* RFC 4918 10.2 has three values and no others.  "2" used to be
+               read as 0, so a client asking for two levels got one and no
+               indication that it had not been understood. */
+            if (hs_nicmp(httpd_value, "infinity", 8) == 0 &&
+                httpd_value[8] == '\0')
                 c->depth = -1;
-            else if (httpd_value[0] == '1')
+            else if (httpd_value[0] == '1' && httpd_value[1] == '\0')
                 c->depth = 1;
-            else
+            else if (httpd_value[0] == '0' && httpd_value[1] == '\0')
                 c->depth = 0;
+            else
+            {
+                httpd_error(c, 400, "that is not a Depth this server has");
+                return FALSE;
+            }
         }
         else if (hs_equal(name, "Connection"))
         {
@@ -4464,8 +4496,29 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
             /* Finder does not know how long a file it is uploading is until
                it has sent it, so it chunks -- which makes this the difference
                between PUT working from macOS and not working at all. */
-            if (hs_nicmp(httpd_value, "chunked", 7) == 0)
-                c->chunk_state = CHUNK_SIZE;
+            HttpFrameCoding te = http_frame_coding(httpd_value);
+
+            /* Two of these is the same list written on two lines, and this
+               server can apply one coding or none. */
+            if (seen_te)
+            {
+                httpd_error(c, 400, "two Transfer-Encodings");
+                return FALSE;
+            }
+
+            if (cut || te == HTTP_TE_UNSUPPORTED)
+            {
+                httpd_error(c, 501, "that is not a transfer encoding this "
+                                    "server can undo");
+                return FALSE;
+            }
+
+            if (te == HTTP_TE_CHUNKED)
+                http_chunk_start(&c->chunk);
+            else
+                http_chunk_off(&c->chunk);
+
+            seen_te = TRUE;
         }
         else if (hs_equal(name, "Expect"))
         {
@@ -4476,6 +4529,19 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
         else if (hs_equal(name, "Destination"))
         {
+            /*
+             * A Destination that did not fit used to be truncated into a
+             * shorter path that still resolved -- and Overwrite defaults to
+             * T, so a COPY of a deep tree landed on, and replaced, whatever
+             * happened to be at the cut.  Nothing is guessed here.
+             */
+            if (cut || hs_len(httpd_value) + 1UL >= sizeof(c->dest_url))
+            {
+                httpd_error(c, 414, "that destination is longer than this "
+                                    "server will read");
+                return FALSE;
+            }
+
             hs_copy(c->dest_url, sizeof(c->dest_url), httpd_value);
         }
         else if (hs_equal(name, "Overwrite"))
@@ -4485,12 +4551,28 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
         else if (hs_equal(name, "If"))
         {
+            /* Half an If: is not a weaker condition, it is a different one --
+               and the half that survives the cut can be the one that says
+               yes. */
+            if (cut || hs_len(httpd_value) + 1UL >= sizeof(c->ifhdr))
+            {
+                httpd_error(c, 431, "that If: is longer than this server "
+                                    "will read");
+                return FALSE;
+            }
+
             hs_copy(c->ifhdr, sizeof(c->ifhdr), httpd_value);
             httpd_parse_if(c, httpd_value);
         }
         else if (hs_equal(name, "Lock-Token"))
         {
             const char *p = httpd_value;
+
+            if (cut)
+            {
+                httpd_error(c, 400, "that is not a lock token");
+                return FALSE;
+            }
 
             while (*p != '\0' && *p != '<')
                 p++;
@@ -4516,6 +4598,20 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
 
     /* ---- what to do with it ------------------------------------------ */
 
+    /*
+     * RFC 7230 3.3.3: both together is a request whose length two ends of a
+     * connection can read differently, which is the whole of request
+     * smuggling.  The precedence rule -- Transfer-Encoding wins -- is what a
+     * proxy in front of this server may not agree with, so the request is
+     * refused rather than resolved.
+     */
+    if (seen_te && seen_len)
+    {
+        httpd_error(c, 400, "a body cannot have both a length and an "
+                            "encoding");
+        return FALSE;
+    }
+
     /* Past this point Content-Length and Transfer-Encoding have been read, so
        a refusal knows whether there is a body and how long it is.  A refusal
        BEFORE it does not, and must close rather than guess. */
@@ -4532,7 +4628,8 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
     }
 
     c->head_only = (c->method->id == HTTPD_M_HEAD) ? 1 : 0;
-    c->had_body  = (c->body_left > 0UL || c->chunk_state != CHUNK_OFF) ? 1 : 0;
+    c->had_body  = (c->body_left > 0UL ||
+                    c->chunk.state != HTTP_CHUNK_OFF) ? 1 : 0;
 
     /*
      * The ceiling is on a body this server HOLDS.  A PUT's goes to a file as
@@ -4651,111 +4748,58 @@ static VOID httpd_dispatch(HttpConn *c)
         httpd_log_status(c);
 }
 
+/* http_chunk_feed() hands the decoded bytes here, and here is where they meet
+   the method that asked for them. */
+static VOID httpd_chunk_sink(void *ctx, const UBYTE *data, LONG len)
+{
+    HttpConn *c = (HttpConn *)ctx;
+
+    if (c->method != NULL && c->method->sink != NULL)
+        c->method->sink(c, data, len);
+}
+
 /*
- * A chunked request body, decoded as it arrives.  Everything the decoder is in
- * the middle of lives in the connection, because a chunk boundary falls
- * wherever the network put it and not where the framing wanted it.
+ * A chunked request body, decoded as it arrives by httpframe.c.  Everything
+ * the decoder is in the middle of lives in the connection, because a chunk
+ * boundary falls wherever the network put it and not where the framing wanted
+ * it.
  *
- * There is no ceiling on what a chunked body may total.  The sinks are what
- * bound it: PUT's writes to a file, and the ones that read XML have fixed
- * buffers, so an endless body costs time -- which the connection timeout
- * already bounds -- and not memory.
+ * A ceiling applies to a body this server HOLDS, exactly as Content-Length's
+ * does: the methods that read XML have fixed buffers, and a chunked body used
+ * to reach them without being measured at all -- Content-Length's 413 was on
+ * `body_left`, which a chunked request never sets.  An upload is still the
+ * client's business and is not measured.
  *
  * Returns how much of `data` belonged to the body; anything after that is the
- * next request.
+ * next request.  A body that failed has answered by the time this returns, and
+ * says so through HTTP_CHUNK_ERROR: the caller must stop reading rather than
+ * ask whether the body is finished, because a failed one never will be.
  */
 static LONG httpd_feed_chunked(HttpConn *c, const UBYTE *data, LONG len)
 {
-    LONG i = 0;
+    LONG took = http_chunk_feed(&c->chunk, data, len, httpd_chunk_sink, c);
 
-    while (i < len && c->chunk_state != CHUNK_DONE)
+    if (c->chunk.state == HTTP_CHUNK_ERROR)
     {
-        switch (c->chunk_state)
-        {
-            case CHUNK_SIZE:
-            {
-                int ch = data[i++];
-
-                if (ch != '\n')
-                {
-                    if (ch != '\r' &&
-                        c->chunk_n + 1U < sizeof(c->chunk_line))
-                        c->chunk_line[c->chunk_n++] = (char)ch;
-                    break;
-                }
-
-                {
-                    const char *p = c->chunk_line;
-
-                    c->chunk_line[c->chunk_n] = '\0';
-                    c->chunk_n    = 0;
-                    c->chunk_left = 0;
-
-                    /* Hex, and it stops at the ';' of a chunk extension. */
-                    for (;;)
-                    {
-                        int d = *p;
-
-                        if (d >= '0' && d <= '9')      d -= '0';
-                        else if (d >= 'a' && d <= 'f') d -= 'a' - 10;
-                        else if (d >= 'A' && d <= 'F') d -= 'A' - 10;
-                        else                           break;
-
-                        c->chunk_left = (c->chunk_left << 4) | (ULONG)d;
-                        p++;
-                    }
-                }
-
-                c->chunk_state = (c->chunk_left > 0UL)
-                                     ? CHUNK_DATA : CHUNK_TRAILER;
-                break;
-            }
-
-            case CHUNK_DATA:
-            {
-                ULONG take = (ULONG)(len - i);
-
-                if (take > c->chunk_left)
-                    take = c->chunk_left;
-
-                if (c->method != NULL && c->method->sink != NULL)
-                    c->method->sink(c, &data[i], (LONG)take);
-
-                i += (LONG)take;
-                c->chunk_left -= take;
-
-                if (c->chunk_left == 0UL)
-                    c->chunk_state = CHUNK_CRLF;
-                break;
-            }
-
-            case CHUNK_CRLF:
-                if (data[i++] == '\n')
-                    c->chunk_state = CHUNK_SIZE;
-                break;
-
-            default:                    /* CHUNK_TRAILER                   */
-            {
-                int ch = data[i++];
-
-                /* Trailer lines, then a blank one.  Nothing here reads a
-                   trailer; they are counted so the blank line is found. */
-                if (ch == '\n')
-                {
-                    if (c->chunk_n == 0U)
-                        c->chunk_state = CHUNK_DONE;
-                    c->chunk_n = 0;
-                }
-                else if (ch != '\r')
-                {
-                    c->chunk_n = 1;
-                }
-                break;
-            }
-        }
+        /* Nothing after a framing failure is known to be a request, so this
+           answers and closes rather than resynchronising on the body's own
+           bytes. */
+        httpd_error(c, 400, "that is not a chunked body this server can read");
+        c->keepalive = 0;
+        return len;
     }
 
-    return i;
+    if (c->method != NULL && (c->method->flags & HTTPD_F_UPLOAD) == 0 &&
+        c->chunk.total > HTTPD_BODY_MAX)
+    {
+        httpd_error(c, 413, "that request body is larger than this server "
+                            "will read");
+        c->keepalive     = 0;
+        c->chunk.state   = HTTP_CHUNK_ERROR;
+        return len;
+    }
+
+    return took;
 }
 
 /*
@@ -4774,7 +4818,7 @@ static LONG httpd_consume_body(HttpConn *c, const UBYTE *data, LONG len)
     if (len <= 0)
         return 0;
 
-    if (c->chunk_state != CHUNK_OFF)
+    if (c->chunk.state != HTTP_CHUNK_OFF)
         return httpd_feed_chunked(c, data, len);
 
     take = ((ULONG)len > c->body_left) ? (LONG)c->body_left : len;
@@ -4811,10 +4855,50 @@ static LONG httpd_consume_body(HttpConn *c, const UBYTE *data, LONG len)
 
 static BOOL httpd_body_done(const HttpConn *c)
 {
-    if (c->chunk_state != CHUNK_OFF)
-        return (c->chunk_state == CHUNK_DONE) ? TRUE : FALSE;
+    if (c->chunk.state != HTTP_CHUNK_OFF)
+        return (c->chunk.state == HTTP_CHUNK_DONE) ? TRUE : FALSE;
 
     return (c->body_left == 0UL) ? TRUE : FALSE;
+}
+
+/* A body that will never finish, because its framing did not hold.  It has
+   been answered already; what is left is to stop reading. */
+static BOOL httpd_body_failed(const HttpConn *c)
+{
+    return (c->chunk.state == HTTP_CHUNK_ERROR) ? TRUE : FALSE;
+}
+
+/*
+ * A body still arriving, and whether it is arriving at all.
+ *
+ * The no-progress timeout asks whether ANYTHING came, and one byte answers it
+ * -- so a client sending a byte every 29 seconds held its slot for as long as
+ * it liked, and HTTPD_CONN_MAX of them held the whole table.  This asks the
+ * other question: at what rate.
+ *
+ * The floor is far below any real transfer.  A 7 MHz machine writing to a
+ * floppy manages some tens of kilobytes a second; the attack above is a
+ * thirtieth of a byte.  The grace period is there so that a client which
+ * pauses to think -- Expect: 100-continue, or a Finder that opens the
+ * connection before the user has chosen a file -- is not counted against it.
+ */
+#define HTTPD_BODY_RATE     32UL    /* bytes a second, averaged             */
+#define HTTPD_BODY_GRACE    60UL    /* seconds before the average is asked  */
+
+static BOOL httpd_body_rate_ok(const HttpConn *c, ULONG now)
+{
+    ULONG elapsed;
+
+    if (c->state != CONN_BODY || c->body_start == 0UL || now < c->body_start)
+        return TRUE;
+
+    elapsed = now - c->body_start;
+
+    if (elapsed <= HTTPD_BODY_GRACE)
+        return TRUE;
+
+    return (c->body_got >= (elapsed - HTTPD_BODY_GRACE) * HTTPD_BODY_RATE)
+               ? TRUE : FALSE;
 }
 
 /* The head, out of the buffer, leaving whatever the client pipelined behind
@@ -4867,7 +4951,7 @@ static VOID httpd_refuse_drain(HttpConn *c)
     ULONG i;
 
     if (!c->keepalive || !c->framed || c->expect ||
-        c->chunk_state != CHUNK_OFF || c->body_left > HTTPD_BODY_MAX)
+        c->chunk.state != HTTP_CHUNK_OFF || c->body_left > HTTPD_BODY_MAX)
     {
         c->keepalive = 0;
         c->in_len    = 0;
@@ -4940,8 +5024,23 @@ static VOID httpd_after_head(HttpConn *c, ULONG headlen)
         }
     }
 
+    /* The framing failed inside what had already arrived.  It is answered;
+       what is in the buffer behind it is not a request. */
+    if (httpd_body_failed(c))
+    {
+        c->in_len = 0;
+        c->state  = CONN_SEND;
+        httpd_log_status(c);
+        return;
+    }
+
     if (!httpd_body_done(c))
     {
+        /* The clock the arrival rate is measured against starts here, and not
+           when the connection opened: what came before was the head. */
+        c->body_start = httpd_now();
+        c->body_got   = 0;
+
         if (c->expect)
         {
             /* The client is waiting for this before it sends anything: curl
@@ -5014,7 +5113,7 @@ static BOOL httpd_readable(HttpConn *c)
 
         /* A chunked body has no count to stop at, so the framing is what says
            where it ends and the read is whatever the socket has. */
-        if (c->chunk_state == CHUNK_OFF && (ULONG)want > c->body_left)
+        if (c->chunk.state == HTTP_CHUNK_OFF && (ULONG)want > c->body_left)
             want = (LONG)c->body_left;
 
         got = tool_sock_recv(httpd_sb, c->sock, scratch, want);
@@ -5030,7 +5129,16 @@ static BOOL httpd_readable(HttpConn *c)
         }
 
         took = httpd_consume_body(c, scratch, got);
-        c->progress = httpd_now();
+        c->progress  = httpd_now();
+        c->body_got += (ULONG)got;
+
+        if (httpd_body_failed(c))
+        {
+            c->in_len = 0;
+            c->state  = CONN_SEND;
+            httpd_log_status(c);
+            return TRUE;
+        }
 
         /* Anything past the end of the body is the next request, and it has
            already been taken out of the socket. */
@@ -5462,6 +5570,14 @@ static VOID httpd_serve(LONG lsock)
             else if (now < c->progress)
             {
                 c->progress = now;
+            }
+            else if (!httpd_body_rate_ok(c, now))
+            {
+                if (httpd_verbose || httpd_trace)
+                    httpd_log(c, "body arriving slower than %lu bytes a "
+                                 "second; closing",
+                              (LONG)HTTPD_BODY_RATE, 0);
+                httpd_close(c);
             }
         }
     }
