@@ -147,11 +147,15 @@ extern "C" {
  * WHAT A JOIN DOES AND DOES NOT DO.  There is no MLD in this stack: joining a
  * group registers the 33:33:xx:xx:xx:xx address with the interface and makes
  * the stack accept datagrams sent to it, and sends no Multicast Listener
- * Report.  On a plain switch, and for the link-local groups that carry mDNS
- * (ff02::fb), LLMNR (ff02::1:3) and SSDP (ff02::c), that is the whole
- * transaction and it works.  A switch running MLD snooping with an active
- * querier will prune the group, and no router will forward a wider-scope
- * group here.  Link-local scope is what to rely on.
+ * Report.  For the link-local groups that carry mDNS (ff02::fb), LLMNR
+ * (ff02::1:3) and SSDP (ff02::c) that is the whole transaction, on a plain
+ * switch and on a snooping one alike: RFC 4541 section 3 requires an MLD
+ * snooping switch to forward FF02::/16 on every port whatever its membership
+ * table holds, so an active querier prunes none of these.
+ *
+ * Above link-local scope a report is what earns delivery, and there is none to
+ * send.  A join of an ff05:: or ff0e:: group is accepted and receives whatever
+ * reaches the link anyway, which off the local segment is nothing.
  */
 
 /* BSD 9, Linux 17.  Both accepted.  Takes an interface index -- the
