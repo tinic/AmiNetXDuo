@@ -466,6 +466,24 @@ function(aminetxduo_check_pcrel target)
         VERBATIM)
 endfunction()
 
+# Applied to every image rather than to the ones that remembered to ask.  Four
+# CMakeLists called the function above and twenty-four others link m68k
+# executables without it -- smoke, bracket and soak among them, and those are
+# the harnesses that say whether the machine survived something.  A branch into
+# the middle of a function reboots an A1200 wherever it lands, and the four that
+# were covered were the four that had already been bitten.
+#
+# Overriding add_executable rather than editing twenty-four files: the check is
+# only worth having if a harness added next month cannot be added without it.
+# The old command is available as _add_executable.  IMPORTED and ALIAS targets
+# have no file to check.
+function(add_executable name)
+    _add_executable(${name} ${ARGN})
+    if(NOT "IMPORTED" IN_LIST ARGN AND NOT "ALIAS" IN_LIST ARGN)
+        aminetxduo_check_pcrel(${name})
+    endif()
+endfunction()
+
 add_subdirectory(port/threadx-amiga)
 add_subdirectory(port/netxduo-amiga)
 
