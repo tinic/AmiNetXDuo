@@ -18,6 +18,15 @@ version at the top when it merges.
 - Ctrl-C stops a name lookup, and a lookup that cannot be answered gives up when its timeout says to. A 30 second timeout was being applied to each attempt in turn rather than to the whole call, so a name server that never replies held the program for over two minutes with one server configured and closer to thirteen with five, and nothing could interrupt it
 - Looking up a name while another program is looking one up no longer reports the name as not existing
 - A lookup that failed because no server could be reached is now distinguishable from one that failed because the name does not exist
+- An address a DHCP server hands out is checked for a machine already using it, and refused if there is one. Bringing the network up takes about three seconds longer as a result, which is the check itself waiting for an answer that should not come
+- A server program can now hold the queue of waiting connections it asked for. `listen` accepted a backlog figure and kept one connection regardless, so a second caller arriving before the first was accepted was turned away
+- A UDP socket that has named its peer accepts datagrams from that peer only. It was accepting anything sent to its port, from anyone
+- `IP_TTL` and `IP_TOS` now reach the wire on TCP and UDP rather than being stored and ignored, and four more options stop reporting a value they never applied
+- Multicast options set with a two-byte value are read correctly. A `short` was read as a single byte, so `IP_MULTICAST_TTL` came out as zero and the datagram never left the machine
+- Asking for a socket option that belongs to a different kind of socket is refused rather than answered with an invented value
+- A connection request sent to a broadcast or multicast address is discarded instead of answered
+- An IPv6 router that advertises a prefix as usable but not local now results in a working address, every interface asks for a router rather than only the first, and the stack stops asking on the schedule the standard sets instead of giving up after three tries
+- `Info TCP:` no longer prints a name read out of low memory, which appeared as garbage characters
 
 ## 0.16.8
 
