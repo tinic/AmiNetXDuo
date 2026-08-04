@@ -9,6 +9,10 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.17.2
+
+- A machine that installed 0.17.0 or 0.17.1 no longer stops part way through its Startup-Sequence. The line the installer writes into `S:User-Startup` runs `AddNetInterface`, which opens `bsdsocket.library`, which brings the stack up and waits for DHCP; the first lease arrived while the library still held the lock that the code answering it wanted, and neither side moved again. A static address was unaffected
+
 ## 0.17.1
 
 - The archive is compressed. Every release before this one packed every file whole, so the download was about twice the size it needed to be: 0.17.0 is 86 files at a 100.0% ratio. Nothing else in it differs from 0.17.0
