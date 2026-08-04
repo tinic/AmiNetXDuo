@@ -90,3 +90,24 @@ __pycache__/
 
 # macOS
 .DS_Store
+
+# The staged installer drawer, written by dist/make-dist.sh into the tree root.
+# Binaries and generated configuration, not sources; install/ holds the sources.
+/C/
+/Libs/
+/Devs/
+/Examples/
+/Docs.info
+/Examples.info
+/Developer.info
+/Developer/
+/AmiNetXDuo.info
+/Install-AmiNetXDuo
+/Install-AmiNetXDuo.info
+/Installer
+/ReadMe
+/ReadMe.info
+docs/ReadMe
+docs/ReadMe.info
+developer/ReadMe.info
+developer/include/aminetxduo/
