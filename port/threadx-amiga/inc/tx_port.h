@@ -1,5 +1,5 @@
 /***************************************************************************
- * Eclipse ThreadX -- AmigaOS / m68k port.
+ * Eclipse ThreadX, AmigaOS / m68k port.
  *
  * Derived from ports/linux/gnu/inc/tx_port.h
  *   Copyright (c) 2024 Microsoft Corporation
@@ -27,7 +27,7 @@
 /*    ThreadX thread executes at a time.  See docs/RESEARCH.md 6.2.        */
 /*                                                                        */
 /*    Critical sections map to Forbid()/Permit(), not Disable()/Enable().  */
-/*    Nothing in ThreadX or NetX Duo runs at Exec interrupt level here --  */
+/*    Nothing in ThreadX or NetX Duo runs at Exec interrupt level here,  */
 /*    the SANA-II reader is a Task, packet arrival is an IORequest         */
 /*    completion, and the periodic tick is a Task.  Forbid() nests, which  */
 /*    matches the save/restore posture idiom, and Exec preserves the       */
@@ -97,7 +97,7 @@ typedef uint64_t                                ULONG64;
 
 /* The system timer thread.  Timer expiration is processed on a real ThreadX
    thread (TX_TIMER_PROCESS_IN_ISR is not defined), so application timer
-   callbacks -- including NetX Duo's periodic handlers -- run at thread level
+   callbacks, including NetX Duo's periodic handlers, run at thread level
    where they may take mutexes.  */
 
 #ifndef TX_TIMER_THREAD_STACK_SIZE
@@ -172,7 +172,7 @@ typedef uint64_t                                ULONG64;
  * a struct, because this header must stay includable before <exec/types.h>;
  * tx_amiga_sched_stats() copies it into the named struct in tx_amiga.h.
  *
- * Every increment below is inside a Forbid(), so none is lost -- a plain ULONG
+ * Every increment below is inside a Forbid(), so none is lost, a plain ULONG
  * ++ from two Exec Tasks otherwise would be.
  */
 
@@ -213,7 +213,7 @@ VOID   _tx_thread_interrupt_restore(UINT previous_posture);
  * Expanded at the call site, which is what the ThreadX porting model expects
  * of TX_DISABLE/TX_RESTORE and what every other port does.  They were
  * out-of-line calls here so that this header could stay free of the AmigaOS
- * includes -- and that cost more than the work.  A 1 MB TCP transfer takes
+ * includes, and that cost more than the work.  A 1 MB TCP transfer takes
  * 38,853 of these pairs; the profiler charged them 8.8% of it, 8.8 us a pair
  * on a 14 MHz 68020, for a body that is two instructions.  Nearly all of the
  * difference is the jsr/rts and the reload of SysBase on each side
@@ -232,7 +232,7 @@ VOID   _tx_thread_interrupt_restore(UINT previous_posture);
 
 /*
  * SysBase.  Loaded with asm rather than by dereferencing the constant, because
- * -Warray-bounds rejects a deref of absolute location 4 -- reasonably, since it
+ * -Warray-bounds rejects a deref of absolute location 4, reasonably, since it
  * cannot know this target puts a pointer there.  One instruction either way.
  * Not volatile: the value never changes, so GCC may hoist it out of a loop.
  */
@@ -249,7 +249,7 @@ char   *base;
 
 /* Both fields off one base register.  Written this way rather than as two
    independent volatile derefs because GCC will not hold a volatile address
-   across a volatile access, and reloads location 4 for each -- which restore
+   across a volatile access, and reloads location 4 for each, which restore
    touches twice.  */
 #define TX_AMIGA_TDNESTCNT_AT(b)    (*((volatile signed char *) \
                                        ((b) + TX_AMIGA_OFF_TDNESTCNT)))
@@ -291,7 +291,7 @@ char   *execbase;
  * three of these hold: the count went below zero (this was the outermost
  * Forbid), no interrupt is in progress (IDNestCnt < 0), and the attention word
  * has something in it.  AttnResched is tested first because it is the cheapest
- * of the three and the one that is nearly always zero -- a clear word proves
+ * of the three and the one that is nearly always zero, a clear word proves
  * Exec's Permit would not have rescheduled, whatever the other two say, so
  * returning here is exactly what the library call would have done.  When it is
  * set, _tx_amiga_permit_finish() applies the full test and calls the real
@@ -357,7 +357,7 @@ char   *execbase;
 
    tx_thread_amiga_signal_owner is not a duplicate of tx_thread_amiga_task.
    _tx_amiga_reap() clears tx_thread_amiga_task on teardown, deliberately, so
-   the scheduler cannot poke a Task that is no longer a thread -- but the run
+   the scheduler cannot poke a Task that is no longer a thread, but the run
    signal outlives the TX_THREAD and only the Task that allocated it may call
    FreeSignal() on it.  Losing that record is losing the bit: there are 32 per
    Task and no way to recover one.  Cleared by whoever frees the signal.
@@ -396,7 +396,7 @@ char   *execbase;
 #endif
 
 
-/* Object create/delete extensions -- all white space for this port.  */
+/* Object create/delete extensions, all white space for this port.  */
 
 #define TX_BLOCK_POOL_CREATE_EXTENSION(pool_ptr)
 #define TX_BLOCK_POOL_DELETE_EXTENSION(pool_ptr)
@@ -451,7 +451,7 @@ void    _tx_amiga_thread_completed(void);
 
 
 /* Start the periodic tick task once the kernel is initialised but before the
-   scheduler runs -- the exact hook the Linux port uses.  */
+   scheduler runs, the exact hook the Linux port uses.  */
 
 void    _tx_amiga_start_interrupts(void);
 
@@ -470,7 +470,7 @@ void    _tx_amiga_start_interrupts(void);
 #define TX_AMIGA_MEMORY_SIZE                    (32UL * 1024UL)
 #endif
 
-/* Exec priority for Tasks that ThreadX creates.  ThreadX -- not Exec -- picks
+/* Exec priority for Tasks that ThreadX creates.  ThreadX, not Exec, picks
    which of them runs, so they all share one priority; making it depend on the
    ThreadX priority would put Exec's scheduler in competition with ours.  */
 
@@ -491,8 +491,8 @@ void    _tx_amiga_start_interrupts(void);
  * 50 Hz.  The wakeup source is not the time base.
  *
  * The AmiTCP-derived stacks have run a 50 Hz computational clock since 1993
- * (`#define hz (50)`), and 4.4BSD's protocol timers -- what a TCP stack
- * consumes ticks for -- are hz/2 (500 ms) and hz/5 (200 ms).  20 ms of
+ * (`#define hz (50)`), and 4.4BSD's protocol timers, what a TCP stack
+ * consumes ticks for, are hz/2 (500 ms) and hz/5 (200 ms).  20 ms of
  * granularity is an order of magnitude finer than anything above us asks for,
  * at half the wakeups the previous 100 Hz cost.
  *
@@ -527,7 +527,7 @@ void    _tx_amiga_start_interrupts(void);
    away.  A Forbid()-heavy section, a disk access or an emulator host hiccup can
    stall the tick task for a long time; without a cap the catch-up would fire
    thousands of timer callbacks back to back with the core lock held, which is
-   worse than the lateness.  8 ticks is 160 ms -- more than any stall the port
+   worse than the lateness.  8 ticks is 160 ms, more than any stall the port
    causes itself, and still below BSD's 200 ms fast timer.
 
    Ticks past the cap are dropped, which is the one thing that makes the wheel
@@ -546,7 +546,7 @@ void    _tx_amiga_start_interrupts(void);
    burst runs under Forbid(), so this is the ceiling on how long one wakeup can
    stop every other task in the machine.  Four fifths of 20 ms for the tick
    leaves 4 ms for everyone else, and keeps the hold inside the ~27 ms an
-   A2065's 32 KB ring holds at 10 Mbit -- the real deadline, since a hold longer
+   A2065's 32 KB ring holds at 10 Mbit, the real deadline, since a hold longer
    than that costs packets on hardware whatever the tick does.
 
    Nothing is lost here: the wheel is walked a slot at a time and gets every one

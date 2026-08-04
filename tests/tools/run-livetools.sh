@@ -15,7 +15,7 @@
 #       netstat: the network is up, but this command cannot read it
 #
 #   and exited.  That is a well-formed, polite, correctly-spelled message, and
-#   every test that existed read it as a pass -- because the commands handle
+#   every test that existed read it as a pass, because the commands handle
 #   the not-up case gracefully and no test asserted that the case was not
 #   supposed to be reached.  The one capture that showed live counters came
 #   from a purpose-built `LiveTools` binary that linked the netstack and ran
@@ -27,9 +27,9 @@
 #
 # THE SHAPE OF THE ASSERTION
 #
-#   Two halves, and both are needed.  A negative half -- these phrases must
-#   not appear anywhere after the stack is up -- catches the exact regression.
-#   A positive half -- the leased address, a non-zero counter, a ping reply --
+#   Two halves, and both are needed.  A negative half, these phrases must
+#   not appear anywhere after the stack is up, catches the exact regression.
+#   A positive half, the leased address, a non-zero counter, a ping reply --
 #   catches a command that stops printing the message by printing nothing.
 #
 #   The negative half is written against the MESSAGES rather than against exit
@@ -48,7 +48,7 @@
 #   Every other command test starts a Python server on the host and gives it a
 #   lifetime.  With several agents queued on the emulator lock that lifetime
 #   can expire before the guest has booted, and then every case fails with
-#   "connection refused" -- which looks exactly like the command being broken
+#   "connection refused", which looks exactly like the command being broken
 #   and is not.  tests/tools/netpeer.py did precisely that.
 #
 #   This test needs no peer.  SLIRP answers DHCP itself, answers ICMP to its
@@ -125,7 +125,7 @@ done
 # the ICMP identifier AND sequence preserved, while a proxied reply comes back
 # with the sequence zeroed (docs/RESEARCH.md 20.2).  Both are pinged, because
 # the second is the case that separates a command matching replies properly
-# from one that does not -- but only the first is asserted on, since a star
+# from one that does not, but only the first is asserted on, since a star
 # against 8.8.8.8 is the emulator and not us.
 cat > "$STAGE/commands.txt" <<'EOF'
 SYS:AddNetInterface eth0
@@ -196,7 +196,7 @@ pass() { echo "  ok: $*"; }
 # `ping` used to jump into the middle of another function and take the machine
 # down (docs/RESEARCH.md §25).  The guest restarted, ToolsSmoke reopened
 # DH0:tools.txt from the top, and the transcript that came back was a short,
-# well-formed file that simply stopped -- indistinguishable from a command that
+# well-formed file that simply stopped, indistinguishable from a command that
 # was still running when the timeout fired.  Two separate investigations wrote
 # it up as a hang before anyone counted the boots.
 #
@@ -206,7 +206,7 @@ pass() { echo "  ok: $*"; }
 # defect than a command that blocks, and a test that cannot say which it saw
 # sends the next person looking in the wrong place.
 #
-# FS-UAE writes nothing to the serial port on some hosts -- build/serial-*.log
+# FS-UAE writes nothing to the serial port on some hosts, build/serial-*.log
 # is zero bytes for every run on this Mac, INCLUDING runs that demonstrably
 # worked.  Failing there reported a broken stack on a host where nothing was
 # broken, and it did so for long enough to be recorded twice as a known false
@@ -246,7 +246,7 @@ fi
 #
 # They are matched as whole phrases, not as fragments.  An earlier draft of
 # this list had a bare "there is no", which "there is no interface called
-# \"eth9\"" -- a correct answer to a mistyped name -- trips on.  A regression
+# \"eth9\"", a correct answer to a mistyped name, trips on.  A regression
 # test that fires on correct behaviour gets disabled, and then it protects
 # nothing.
 while IFS= read -r phrase; do
@@ -356,8 +356,8 @@ check_rc 0 \
 check_rc 0 "SYS:AddNetRoute NETDESTINATION=192.168.77.0 GATEWAY=10.0.2.2" \
     "AddNetRoute added a route"
 
-# Two blocks carry this header -- one before the route was added and one
-# after -- so the scan must cover both rather than stopping at the first.
+# Two blocks carry this header, one before the route was added and one
+# after, so the scan must cover both rather than stopping at the first.
 if awk '$0 == "===== SYS:netstat -r =====" { on = 1; next }
         on && /^----- / { on = 0 }
         on && /192\.168\.77\.0/ { found = 1 }

@@ -1,4 +1,4 @@
-| AmiNetXDuo -- crypto68k limb primitives, 68020 assembly.
+| AmiNetXDuo, crypto68k limb primitives, 68020 assembly.
 |
 |   GCC 15.2 does emit MULU.L for the portable C.  Checked, not assumed:
 |   nx_crypto_huge_number.c built -O2 -m68020 disassembles to
@@ -30,7 +30,7 @@
 |   So there is no __muldi3 helper call to eliminate.  That matters for
 |   calibration against the prior art: when Howard Chu measured his 68k bignum
 |   assembly at "over 4x faster than gcc -O3" in 2002 (openssl-dev, "M68020
-|   bn_asm", https://marc.info/?l=openssl-dev&m=101407286200398&w=2 -- the code
+|   bn_asm", https://marc.info/?l=openssl-dev&m=101407286200398&w=2, the code
 |   that lives on in AmiSSL as crypto/bn/asm/bn_m68k.s), he was measuring
 |   against GCC 2.95, which called a helper.  Against a compiler that emits the
 |   instruction, the headroom is far smaller.  Nineteen instructions per limb
@@ -59,7 +59,7 @@
 |
 |   MULU.L <ea>,Dh:Dl is 41 best / 43 cached / 44 worst on 68020, and 44 max on
 |   68030.  It is 20 on a 68040.  On a 68060 the 64-bit form is unimplemented
-|   -- it traps to vector 61 and is emulated in software -- so this file is a
+|  , it traps to vector 61 and is emulated in software, so this file is a
 |   pessimisation there and must not be enabled for a 68060 build.  Confirmed
 |   elsewhere: AmiSSL shipped the same finding in 4.4 ("disabled m68k asm
 |   replacement as it's slower"), and Roberto Ragusa's 1998 PGP 68060 patch got
@@ -120,8 +120,8 @@ Lam_odd:
         bra.s   Lam_half                | one limb, then n/2 full passes
 
 Lam_loop:
-        move.l  (a1)+,d3                | b[j]        -- MOVE leaves X alone
-        mulu.l  d2,d1:d3                | d1:d3 = a * b[j]   -- as does MULU
+        move.l  (a1)+,d3                | b[j]       , MOVE leaves X alone
+        mulu.l  d2,d1:d3                | d1:d3 = a * b[j]  , as does MULU
         addx.l  d0,d3                   | + carry + X
         addx.l  d5,d1
         add.l   d3,(a0)+                | r[j] += ; X = carry out
@@ -189,11 +189,11 @@ Lac_done:
 |
 | The caller must ensure hi < d.  DIVU.L traps on quotient overflow rather than
 | saturating, and Knuth's algorithm D produces exactly one case that would
-| overflow -- the partial remainder's top limb equal to the divisor's, whose
+| overflow, the partial remainder's top limb equal to the divisor's, whose
 | quotient digit is B-1.  c68k_mod() tests for it and never calls here with it.
 |
 | DIVU.L is 78 cycles on a 68020 and, like MULU.L's 32x32->64 form, is
-| unimplemented on a 68060 -- it traps to vector 61 and is emulated.  Same
+| unimplemented on a 68060, it traps to vector 61 and is emulated.  Same
 | guard, same rule: AMINETXDUO_CRYPTO68K_ASM must never be enabled for a 68060
 | build.
 |
@@ -202,8 +202,8 @@ Lac_done:
 
         .globl  _c68k_div_2by1
 _c68k_div_2by1:
-        move.l  4(sp),d1                | hi -- the remainder half
-        move.l  8(sp),d0                | lo -- the quotient half
+        move.l  4(sp),d1                | hi, the remainder half
+        move.l  8(sp),d0                | lo, the quotient half
         divu.l  12(sp),d1:d0            | d0 = quotient, d1 = remainder
         move.l  16(sp),a0
         move.l  d1,(a0)
@@ -219,7 +219,7 @@ _c68k_div_2by1:
 |
 |   Added for Karatsuba.  The recombination is four passes of add and subtract
 |   over half-width operands and nothing else, so on the 64-limb squaring it
-|   runs about 320 limbs per call -- small against the 1,108 limb products the
+|   runs about 320 limbs per call, small against the 1,108 limb products the
 |   split removes, but not small enough to leave to the compiler, which spends
 |   five instructions and a branch where this needs two.
 | ---------------------------------------------------------------------------

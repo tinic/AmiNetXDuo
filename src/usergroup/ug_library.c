@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- usergroup.library: romtag, library structure, vector table.
+ * AmiNetXDuo, usergroup.library: romtag, library structure, vector table.
  *
  * ug_LibEntry() must be the first thing in the linked image so that running
  * the file as a program returns -1 instead of executing the library. Keep
@@ -24,7 +24,7 @@
  * The first code in the image, ahead of everything the compiler emits below.
  * Running a .library as a program must fail with a return code, not fall into
  * the romtag. Written as top-level asm because GCC is free to order the
- * functions it generates however it likes -- and does.
+ * functions it generates however it likes, and does.
  */
 __asm__ (
     "   .text                   \n"
@@ -47,7 +47,7 @@ struct DosLibrary *DOSBase;
 static char ug_lib_name[] = "usergroup.library";
 static char ug_lib_id[]   = "usergroup.library 4.0 (AmiNetXDuo)\r\n";
 
-/* ------------------------------------------------------- ABI assertions -- */
+/* ------------------------------------------------------- ABI assertions, */
 
 /*
  * If any of these fire, the records we hand back are not the ones AmiTCP and
@@ -73,7 +73,7 @@ _Static_assert(offsetof(struct ug_credentials, cr_groups)  ==  16, "cr_groups");
 _Static_assert(offsetof(struct ug_credentials, cr_session) == 144, "cr_session");
 _Static_assert(offsetof(struct ug_credentials, cr_login)   == 148, "cr_login");
 
-/* --------------------------------------------------------- tiny string -- */
+/* --------------------------------------------------------- tiny string, */
 
 ULONG ug_strlen(const char *s)
 {
@@ -126,12 +126,12 @@ void ug_newlist(struct MinList *list)
     list->mlh_TailPred = (struct MinNode *)&list->mlh_Head;
 }
 
-/* ------------------------------------------------------------- dos base -- */
+/* ------------------------------------------------------------- dos base, */
 
 /*
  * Opened on first use rather than at init: the database files are optional,
  * and a caller that never touches them never pays for dos.library. Safe to
- * call with the global lock already held -- Exec semaphores nest per task.
+ * call with the global lock already held, Exec semaphores nest per task.
  */
 struct DosLibrary *ug_dos(struct UserGroupBase *base)
 {
@@ -174,7 +174,7 @@ void ug_db_free(struct UgGlobal *g)
     g->db.gr_loaded = FALSE;
 }
 
-/* ----------------------------------------------------- standard vectors -- */
+/* ----------------------------------------------------- standard vectors, */
 
 static struct UserGroupBase *ug_LibOpen(UG_A6);
 static BPTR ug_LibClose(UG_A6);
@@ -226,7 +226,7 @@ static struct UserGroupBase *ug_LibOpen(UG_A6)
 
     /*
      * Forbid(), not ug_Global->lock. Exec calls this vector with a Forbid()
-     * already held, and that lock is the database lock -- ug_db.c holds it
+     * already held, and that lock is the database lock, ug_db.c holds it
      * across file reads and ug_dos() across an OpenLibrary(). Waiting for it
      * here would break exec's Forbid for the length of a disk access, with the
      * library list supposedly frozen. The list this guards is short and
@@ -312,11 +312,11 @@ static LONG ug_LibReserved(UG_A6)
     return 0;
 }
 
-/* --------------------------------------------------------- vector table --
+/* --------------------------------------------------------- vector table,
  *
  * Dense: slot 4 lands on bias 30 (ug_SetupContextTagList) and slot 42 on
  * -258 (getcredentials), exactly as the .fd/.sfd require. There is no gap in
- * the range, so no slot needs a failure stub -- every one of the 39 public
+ * the range, so no slot needs a failure stub, every one of the 39 public
  * vectors below is a real implementation.
  */
 static const APTR ug_func_table[] =
@@ -421,7 +421,7 @@ static const struct ug_init_table ug_init_table =
     (APTR)ug_LibInit
 };
 
-/* --------------------------------------------------------------- romtag -- */
+/* --------------------------------------------------------------- romtag, */
 
 /* const so it lands in the code hunk, right behind ug_LibEntry(). */
 extern const struct Resident ug_romtag;

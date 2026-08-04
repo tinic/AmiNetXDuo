@@ -1,5 +1,5 @@
 /*
- * bsdsocket.library -- multicast group membership, both families.
+ * bsdsocket.library, multicast group membership, both families.
  *
  * IP_ADD_MEMBERSHIP, IP_DROP_MEMBERSHIP, IP_MULTICAST_IF, IP_MULTICAST_TTL
  * and IP_MULTICAST_LOOP, over nx_igmp_multicast_interface_join()/_leave().
@@ -13,7 +13,7 @@
  *
  * NO MLD.  A v6 join registers the group's 33:33 MAC with the interface and
  * makes the stack accept datagrams sent to it.  It sends no Multicast Listener
- * Report, because there is none in the vendored NetX Duo to send -- nx_mld.h
+ * Report, because there is none in the vendored NetX Duo to send, nx_mld.h
  * is a stub that declares nothing and no nx_mld_*.c exists.  Link-local groups
  * (ff02::fb, ff02::c, ff02::1:3) work on any segment for it: RFC 4541 section
  * 3 has an MLD snooping switch forward FF02::/16 on every port regardless of
@@ -39,7 +39,7 @@
  *   group's own entry; the send path reads that copy.  So setting the global
  *   immediately before a join gives per-group loopback, which is as close to
  *   per-socket as this stack gets.  Two sockets joining the SAME group on the
- *   same interface share the first one's setting -- the second join only
+ *   same interface share the first one's setting, the second join only
  *   increments a count and never reaches the copy.
  *
  * SPDX-License-Identifier: MIT
@@ -66,12 +66,12 @@ typedef struct BsdMcastEntry
  * One table for the machine, not one per opener: the NX_IP is the singleton
  * the memberships belong to. Every entry point below runs inside a
  * bsd_nx_enter() bracket, and that bracket holds the ThreadX scheduler lock
- * (netx_call.c), so the table needs no lock of its own -- the same reasoning
+ * (netx_call.c), so the table needs no lock of its own, the same reasoning
  * raw.c's registry rests on.
  */
 static BsdMcastEntry bsd_mcast_table[BSD_MCAST_MEMBERSHIPS];
 
-/* ------------------------------------------------------------- addresses -- */
+/* ------------------------------------------------------------- addresses, */
 
 static BOOL bsd_mcast_is_group(ULONG addr)
 {
@@ -114,7 +114,7 @@ static LONG bsd_mcast_iface_of(NX_IP *ip, ULONG addr)
     return -1;
 }
 
-/* ------------------------------------------------------------- the table -- */
+/* ------------------------------------------------------------- the table, */
 
 static BsdMcastEntry *bsd_mcast_find(const AmiSocket *sock, ULONG group,
                                      UINT iface)
@@ -145,7 +145,7 @@ static BsdMcastEntry *bsd_mcast_free_row(VOID)
     return NULL;
 }
 
-/* ---------------------------------------------------------- join / leave -- */
+/* ---------------------------------------------------------- join / leave, */
 
 static LONG bsd_mcast_join(struct AmiSocketBase *base, AmiSocket *sock,
                            const struct ip_mreq *mreq)
@@ -279,7 +279,7 @@ VOID bsd_mcast_close(AmiSocket *sock)
 #endif
 }
 
-/* ------------------------------------------------------------ the sender -- */
+/* ------------------------------------------------------------ the sender, */
 
 LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr)
 {
@@ -297,7 +297,7 @@ LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr)
     return sock->as_McastIf;
 }
 
-/* ----------------------------------------------------------- the options -- */
+/* ----------------------------------------------------------- the options, */
 
 /*
  * 4.4BSD types IP_MULTICAST_TTL and IP_MULTICAST_LOOP as u_char and everything
@@ -308,7 +308,7 @@ LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr)
  * Two bytes matters as much as one and four.  m68k is big-endian, so a caller
  * passing a `short` of 5 hands over 0x00,0x05: read as a UBYTE that is the
  * high byte, 0, and IP_MULTICAST_TTL 0 keeps the datagram off the link
- * entirely.  The reply had the mirror-image fault -- one byte written into a
+ * entirely.  The reply had the mirror-image fault, one byte written into a
  * two-byte buffer left the low half untouched and the caller read 5 as 1280.
  */
 static LONG bsd_mcast_get_byte_or_long(struct AmiSocketBase *base, APTR optval,
@@ -468,7 +468,7 @@ LONG bsd_mcast_getopt(struct AmiSocketBase *base, AmiSocket *sock,
                                               sock->as_McastLoop);
 
         /*
-         * "IP_ADD_MEMBERSHIP ... may only be set" -- 4.4BSD answers EOPNOTSUPP
+         * "IP_ADD_MEMBERSHIP ... may only be set", 4.4BSD answers EOPNOTSUPP
          * for a read of either, which is what ip_ctloutput() does for a
          * PRCO_GETOPT it has no case for.
          */
@@ -493,7 +493,7 @@ LONG bsd_mcast_getopt(struct AmiSocketBase *base, AmiSocket *sock,
  *   rather than a widened first one so that a no-IPv6 build carries neither
  *   the bytes nor the branch.
  *
- *   The hop limit is nx_ipv6_hop_limit on the NX_IP -- not on the socket, as
+ *   The hop limit is nx_ipv6_hop_limit on the NX_IP, not on the socket, as
  *   the IPv4 TTL is.  nxd_udp_socket_send() reads it at send time, so
  *   IPV6_MULTICAST_HOPS is applied by writing it, sending, and putting it
  *   back.  Safe because every send runs inside a bsd_nx_enter() bracket, which
@@ -518,7 +518,7 @@ typedef struct BsdMcast6Entry
 
 static BsdMcast6Entry bsd_mcast6_table[BSD_MCAST6_MEMBERSHIPS];
 
-/* ------------------------------------------------------------- addresses -- */
+/* ------------------------------------------------------------- addresses, */
 
 static BOOL bsd_mcast6_is_group(const ULONG group[4])
 {
@@ -542,7 +542,7 @@ static BOOL bsd_mcast6_same(const ULONG a[4], const ULONG b[4])
  * ipv6mr_interface -> NetX interface index.  The caller's number is the
  * if_nametoindex() kind, one higher than NetX's, the same convention
  * sin6_scope_id follows here.  0 means "the one the route would pick", which
- * for a group is the first interface whose link is up -- said here rather than
+ * for a group is the first interface whose link is up, said here rather than
  * deferred, so the membership and the sends agree.
  *
  * -1 when there is no such interface.
@@ -581,7 +581,7 @@ static LONG bsd_mcast6_iface_of(NX_IP *ip, ULONG posix_index)
  * The IPv6 ADDRESS index to send a group datagram from, given the interface it
  * must leave by.  nxd_udp_socket_source_send() indexes nx_ipv6_address, not
  * nx_ip_interface, and a group has no address of its own to match against, so
- * the link-local one on that interface is the answer -- it is the source a
+ * the link-local one on that interface is the answer, it is the source a
  * link-local group wants and the one that always exists once the interface is
  * up.
  *
@@ -617,7 +617,7 @@ static LONG bsd_mcast6_source_index(NX_IP *ip, UINT iface)
     return fallback;
 }
 
-/* ------------------------------------------------------------- the table -- */
+/* ------------------------------------------------------------- the table, */
 
 static BsdMcast6Entry *bsd_mcast6_find(const AmiSocket *sock,
                                        const ULONG group[4], UINT iface)
@@ -649,7 +649,7 @@ static BsdMcast6Entry *bsd_mcast6_free_row(VOID)
     return NULL;
 }
 
-/* ---------------------------------------------------------- join / leave -- */
+/* ---------------------------------------------------------- join / leave, */
 
 static LONG bsd_mcast6_join(struct AmiSocketBase *base, AmiSocket *sock,
                             const struct ipv6_mreq *mreq)
@@ -689,7 +689,7 @@ static LONG bsd_mcast6_join(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_ENOBUFS);
     }
 
-    /* Claim the row inside the bracket -- see bsd_mcast_join(). */
+    /* Claim the row inside the bracket, see bsd_mcast_join(). */
     row->bm_Sock = sock;
     row->bm_Group[0] = group.nxd_ip_address.v6[0];
     row->bm_Group[1] = group.nxd_ip_address.v6[1];
@@ -784,7 +784,7 @@ static VOID bsd_mcast6_close(NX_IP *ip, AmiSocket *sock)
     }
 }
 
-/* ------------------------------------------------------------ the sender -- */
+/* ------------------------------------------------------------ the sender, */
 
 LONG bsd_mcast6_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr,
                              ULONG *saved)
@@ -800,8 +800,8 @@ LONG bsd_mcast6_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr,
 
     /*
      * RFC 3493 5.2: a hop limit of 0 is "this host only". Nothing here
-     * delivers a multicast datagram back to its sender -- IPV6_MULTICAST_LOOP
-     * is accepted and reads back 0 -- so it goes nowhere at all, which is
+     * delivers a multicast datagram back to its sender, IPV6_MULTICAST_LOOP
+     * is accepted and reads back 0, so it goes nowhere at all, which is
      * still not the same as going one hop onto the link. Coercing 0 to 1 is
      * what this used to do and it leaked every such datagram.
      */
@@ -826,7 +826,7 @@ VOID bsd_mcast6_finish_send(ULONG saved)
         ip->nx_ipv6_hop_limit = saved;
 }
 
-/* ----------------------------------------------------------- the options -- */
+/* ----------------------------------------------------------- the options, */
 
 BOOL bsd_mcast6_is_option(const AmiSocket *sock, LONG optname)
 {
@@ -975,7 +975,7 @@ LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
              * RFC 3493 5.2's table, exactly: x < -1 is EINVAL, -1 is "the
              * default", which that section puts at one hop, and 0 <= x <= 255
              * uses x. 0 is "this host only", and bsd_mcast6_prepare_send()
-             * keeps the datagram off the link for it -- it used to be rounded
+             * keeps the datagram off the link for it, it used to be rounded
              * up to one hop, which put it on the link.
              */
             sock->as_Mcast6Hops = (value < 0) ? 1 : value;

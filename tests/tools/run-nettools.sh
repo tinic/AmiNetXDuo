@@ -9,7 +9,7 @@
 # stands in the middle and runs DH0:commands.txt.  Same shape as
 # tests/tls/run-fetch.sh, with two additions ToolsSmoke grew for this run:
 # "&<command>" starts something in the background and "wait <secs>" lets it
-# settle -- without which a listener and the thing that connects to it can
+# settle, without which a listener and the thing that connects to it can
 # never be running at the same time, and `nc -l` could not be tested at all.
 #
 # WHAT IS ON THE OTHER END
@@ -21,8 +21,8 @@
 # AND WHAT REACHES THE GUEST
 #
 #   SLIRP is a NAT, so nothing outside can open a connection INTO the Amiga
-#   unless a port is forwarded.  FS-UAE's `slirp_redir` does that -- the
-#   option is UAE's, so it goes through the uae_ passthrough -- and this
+#   unless a port is forwarded.  FS-UAE's `slirp_redir` does that, the
+#   option is UAE's, so it goes through the uae_ passthrough, and this
 #   script forwards NC_INBOUND_PORT, so the host can connect to `nc -l` on
 #   the Amiga.
 #
@@ -60,7 +60,7 @@ done
 ECHO_PORT="${AMINETXDUO_ECHO_PORT:-7001}"
 TELNET_PORT="${AMINETXDUO_TELNET_PORT:-7023}"
 NC_INBOUND_PORT="${AMINETXDUO_NC_PORT:-7042}"
-# TFTP's own port is 69, and binding it needs root on this host -- a test that
+# TFTP's own port is 69, and binding it needs root on this host, a test that
 # asks for a password is a test nobody runs.  The command takes the port as an
 # argument, so the rig uses a high one.
 TFTP_PORT="${AMINETXDUO_TFTP_PORT:-7069}"
@@ -172,7 +172,7 @@ SYS:whois ?
 #   8.8.8.8    proxied by SLIRP, which ignores the TTL and returns replies
 #              with the sequence number zeroed.  Every probe is a star, and
 #              that is the emulator rather than the command.
-#   192.0.2.1  TEST-NET-1, and 10.11.12.13 -- addresses the HOST cannot
+#   192.0.2.1  TEST-NET-1, and 10.11.12.13, addresses the HOST cannot
 #              reach, so SLIRP would answer with an ICMP unreachable quoting
 #              the probe.  It does not; see 20.2.
 SYS:traceroute 10.0.2.2 -m 4 -q 2 -w 3 -n
@@ -181,7 +181,7 @@ SYS:traceroute 8.8.8.8 -m 3 -q 1 -w 3 -n -v
 SYS:traceroute 192.0.2.1 -m 2 -q 1 -w 3 -n -v
 SYS:traceroute 10.11.12.13 -m 2 -q 1 -w 3 -n -v
 # tftp against netpeer.py's server: a small file, a big one, one that is an
-# exact multiple of the block size -- which ends with an EMPTY data block --
+# exact multiple of the block size, which ends with an EMPTY data block --
 # one going the other way, and one that is not there.
 SYS:tftp 10.0.2.2 PORT $TFTP_PORT GET hello.txt AS DH0:tftp-hello.txt
 SYS:tftp 10.0.2.2 PORT $TFTP_PORT GET big.bin AS DH0:tftp-big.bin
@@ -191,7 +191,7 @@ SYS:tftp 10.0.2.2 PORT $TFTP_PORT GET no.such.file
 # whois against netpeer.py's, whose canned records cover the three shapes.
 # referral.test refers to the server it came from, which is a loop and has to
 # be recognised as one; chain.test refers somewhere ELSE, so without FOLLOW
-# the line to type next is printed and with it the client goes there -- to
+# the line to type next is printed and with it the client goes there, to
 # 127.0.0.1, where nothing is listening, so the second hop demonstrates the
 # failure being legible.
 SYS:whois plain.test SERVER 10.0.2.2 PORT $WHOIS_PORT
@@ -199,8 +199,8 @@ SYS:whois referral.test SERVER 10.0.2.2 PORT $WHOIS_PORT FOLLOW
 SYS:whois chain.test SERVER 10.0.2.2 PORT $WHOIS_PORT
 SYS:whois chain.test SERVER 10.0.2.2 PORT $WHOIS_PORT FOLLOW
 # ... and the default server, which is a real registry over the real internet.
-# example.com produces NO referral -- IANA administers it and answers for it
-# directly -- so amiga.com is here as well: IANA refers that one to Verisign,
+# example.com produces NO referral, IANA administers it and answers for it
+# directly, so amiga.com is here as well: IANA refers that one to Verisign,
 # and Verisign's record carries the indented "Registrar WHOIS Server:" line
 # that a matcher anchored at column zero silently misses.  That is the case
 # which found the bug, so it is the case that keeps it fixed.
@@ -221,7 +221,7 @@ fi
 
 # The peer has to outlive the QUEUE, not just the run.  Emulator runs
 # serialise on build/.fsuae.lock and several may be ahead of this one, so the
-# wait before a single byte is exchanged can be half an hour -- and a peer
+# wait before a single byte is exchanged can be half an hour, and a peer
 # sized to the run's own timeout exits while the run is still waiting its
 # turn, whereupon every local-server case fails with "connection refused" or
 # "the server stopped answering" and looks exactly like a broken command.

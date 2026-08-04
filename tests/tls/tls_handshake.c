@@ -1,10 +1,10 @@
 /*
- * AmiNetXDuo -- a real TLS 1.2 handshake, on a real 68k, end to end.
+ * AmiNetXDuo, a real TLS 1.2 handshake, on a real 68k, end to end.
  *
  * tls_bench.c times the primitives.  This times the thing itself: a complete
  * TLS 1.2 handshake between an nx_secure client and an nx_secure server, over
  * real TCP, on one Amiga, including everything the primitive benchmark leaves
- * out -- ClientHello/ServerHello negotiation, X.509 DER parsing, certificate
+ * out, ClientHello/ServerHello negotiation, X.509 DER parsing, certificate
  * chain verification against a trust store, key derivation, Finished hashing
  * and the record layer.
  *
@@ -12,7 +12,7 @@
  *                   arithmetic, CRT on every private-key path.  This is the
  *                   correctness gate and the headline number.
  *
- *   tls_decompose   four rounds -- {reference, crypto68k} x {no CRT, CRT} --
+ *   tls_decompose   four rounds, {reference, crypto68k} x {no CRT, CRT},
  *                   so the before number, the after number and the two levers
  *                   in between are measured through identical instrumentation
  *                   in one process.  Composing a decomposition out of separate
@@ -284,7 +284,7 @@ static TX_SEMAPHORE             h_server_done;
 /*
  * Signals that the server is listening and the client may connect.  Without it
  * the two halves race, and nx_tcp_client_socket_connect() against a port with
- * no listener does not wait -- it comes straight back NX_NOT_CONNECTED.  The
+ * no listener does not wait, it comes straight back NX_NOT_CONNECTED.  The
  * client only won before the rounds became a loop, when the server's setup
  * happened once at thread start.
  */
@@ -412,7 +412,7 @@ ULONG       start;
     /*
      * The handshake.  On this side it costs one RSA-2048 private operation
      * (the ServerKeyExchange signature under an ECDHE_RSA suite) plus an ECDHE
-     * key pair -- the expensive half.
+     * key pair, the expensive half.
      */
     start =  ami_tls_eclock();
     status = nx_secure_tls_session_start(&h_server_session, &h_server_socket,
@@ -520,7 +520,7 @@ ULONG       start;
      * The trust store, and the buffers the incoming chain is parsed into.
      * Without the remote-certificate allocation nx_secure has nowhere to put
      * what the server sends and the handshake fails with a buffer error
-     * rather than a verification error -- a distinction that matters when
+     * rather than a verification error, a distinction that matters when
      * debugging this.
      */
     status =  nx_secure_x509_certificate_initialize(&h_trusted_certificate,
@@ -561,7 +561,7 @@ ULONG       start;
     }
 
     /*
-     * The measurement: everything from ClientHello to Finished -- negotiation,
+     * The measurement: everything from ClientHello to Finished, negotiation,
      * the server's certificate chain parsed and verified against the trust
      * store, the key exchange, key derivation and the handshake hash.
      *
@@ -639,7 +639,7 @@ ULONG   start;
 
     /*
      * Ask nx_secure how much crypto metadata this ciphersuite table really
-     * needs, rather than trusting a round number -- the memory figure in the
+     * needs, rather than trusting a round number, the memory figure in the
      * report should be measured.
      *
      * This has to happen here and not in tx_application_define(): the nxe_

@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- Fitz connection-drop soak.
+ * AmiNetXDuo, Fitz connection-drop soak.
  *
  * A report from a real A3000 running Fitz 1.21: "I've seen Fitz connections
  * dropping, I would need to investigate this further."  No reproduction, no
@@ -20,7 +20,7 @@
  *      that a Linux client mounts, and no harness in this tree has ever run
  *      `fitz serve` at all.  The server path is the one that calls accept(),
  *      and 37.4 found a listener in this library that dies permanently when a
- *      relisten does not take -- intermittently, trigger not established.  A
+ *      relisten does not take, intermittently, trigger not established.  A
  *      soak that accepts thousands of connections is the way to hit it again.
  *   2. Hours, with idle in them.  A drop after twenty minutes of silence and
  *      a drop under load are different bugs and every earlier run was load
@@ -40,7 +40,7 @@
  * uae_a2065 = slirp_inbound binds nothing either.  So the guest's own
  * `fitz serve` is driven from the guest, through 127.0.0.1, and the wire arm
  * runs at the same time in the other direction.  The loopback path is a
- * different path from the A2065 one -- it does not touch the driver -- and
+ * different path from the A2065 one, it does not touch the driver, and
  * this file says so wherever it reports a result.
  *
  * THE SHAPE OF A RUN
@@ -53,7 +53,7 @@
  *   IDLE
  *   BOTH    every filer at once
  *   CHURN   no file traffic; `fitz query` back to back against both ends,
- *           which is a connect, a hello, a capability exchange and a close --
+ *           which is a connect, a hello, a capability exchange and a close,
  *           one accept per iteration on whichever server is being asked
  *
  * The first operation after each IDLE is timed and recorded separately.  That
@@ -98,7 +98,7 @@ _Static_assert(AMI_NETSTATUS_QUERY_LVO == -870, "NetStackQuery LVO moved");
 
 /*
  * Only Errno and the status query are needed: this harness makes no socket
- * calls of its own.  Fitz makes them, which is the point -- the traffic under
+ * calls of its own.  Fitz makes them, which is the point, the traffic under
  * test is a third party's use of the library, not ours.
  */
 static LONG s_query(struct Library *base, ULONG what, APTR buf, ULONG size)
@@ -180,7 +180,7 @@ typedef struct SoakFiler
     volatile UWORD  f_Run;          /* the supervisor's go/no-go per phase   */
 
     /* Stamped `s_ticks() | 1` around every DOS call, so 0 means "not in
-       one" -- the watchdog needs to tell a slow call from no call. */
+       one", the watchdog needs to tell a slow call from no call. */
     volatile ULONG  f_CallStart;
     volatile ULONG  f_CallKind;
 
@@ -306,7 +306,7 @@ static LONG s_ask(struct Library *base, ULONG what, APTR buf, ULONG size)
 /*
  * Every socket the library holds, with its TCP state number, written one line
  * per socket.  This is the half of a failure snapshot that says whether the
- * listener is still a listener -- 37.4's dead listener is a socket that stays
+ * listener is still a listener, 37.4's dead listener is a socket that stays
  * in state 2 while every accept() on it returns EINVAL, and nothing else in
  * this harness would show it.
  */
@@ -759,7 +759,7 @@ static VOID s_filer_entry(VOID)
  * being asked, which is what 37.4's listener needs to be pushed at, and it is
  * Fitz's own code doing it rather than a reimplementation of the handshake.
  *
- * Output goes to NIL: -- the return code is the result.  A query that fails
+ * Output goes to NIL:, the return code is the result.  A query that fails
  * is a connection that could not be made, which is the failure this whole
  * harness exists to catch, so it takes a snapshot with it.
  */
@@ -1401,7 +1401,7 @@ static VOID s_summary(struct Library *base, ULONG ran)
  * Give SoakState back on the way out.
  *
  * AmigaOS does not reclaim AllocVec() memory when a process exits, and this
- * command leaves main() from three places -- so atexit(), not a free before
+ * command leaves main() from three places, so atexit(), not a free before
  * each return.  Every filer lives inside SS, so a filer still stuck in a DOS
  * call keeps it: freeing here would pull the structure out from under a live
  * Process.  Each filer's own f_Buf is allocated and freed by the filer.
@@ -1691,7 +1691,7 @@ int main(void)
 
     /*
      * Nonzero only for a failure of the harness itself.  A drop is a result,
-     * not a broken run, and the caller reads soak-events.txt for it -- a
+     * not a broken run, and the caller reads soak-events.txt for it, a
      * harness that exits 20 because the stack misbehaved cannot be told from
      * one that exits 20 because it could not start.
      */

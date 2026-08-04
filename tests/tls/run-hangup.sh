@@ -14,7 +14,7 @@
 #   particular moment.  tests/tls/hangup-server.py does it on demand instead,
 #   four ways, from the host side.
 #
-#   The bar is not "the handshake succeeds" -- none of these can succeed.  It
+#   The bar is not "the handshake succeeds", none of these can succeed.  It
 #   is that each one produces an ERROR THE CALLER CAN ACT ON and the next
 #   command still runs.  A peer must not be able to take the machine down by
 #   hanging up, and "the machine" includes the four other things a real Amiga
@@ -77,7 +77,7 @@ EOF
 SERVER_LOG="$ROOT/build/hangup-server.log"
 
 # The server reads stdin and stops at EOF, so the FIFO going away is what
-# shuts it down -- no pid file, and no stray listener left behind if this
+# shuts it down, no pid file, and no stray listener left behind if this
 # script is interrupted.
 FIFO="$ROOT/build/hangup-server.fifo"
 rm -f "$FIFO"

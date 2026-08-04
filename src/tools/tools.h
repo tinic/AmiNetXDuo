@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- shared plumbing for the command-line tools.
+ * AmiNetXDuo, shared plumbing for the command-line tools.
  *
  * These are AmigaDOS commands, not library code: they use dos.library freely,
  * parse arguments with ReadArgs() (so "?" prints the template like every other
@@ -93,7 +93,7 @@ const char *tool_basename(const char *path);
 /* Was this started from Workbench? These commands are Shell-only. */
 BOOL tool_from_workbench(int argc);
 
-/* ------------------------------------------------------------- diagnosis --
+/* ------------------------------------------------------------- diagnosis,
  *
  * tool_diag.c. Everything here works with the stack down, which is the state
  * that needs explaining.
@@ -138,7 +138,7 @@ const char *tool_device_where(const char *device);
 #define TOOL_PROBE_NO_NAME      (-100)
 #define TOOL_PROBE_NO_MEMORY    (-101)
 
-/* The device opened and then refused S2_DEVICEQUERY -- the driver is there and
+/* The device opened and then refused S2_DEVICEQUERY, the driver is there and
    the card answered the open, so neither the unit number nor a missing file is
    what to look at. Same distinction the library draws as AMI_NET_ERR_DEVBAD;
    the probe has to derive it because a failed OpenLibrary() carries no status
@@ -152,7 +152,7 @@ LONG tool_device_probe(const char *device, ULONG unit);
 VOID tool_wrap(ULONG indent, const char *text);
 
 /*
- * Print configuration-file problems -- file, line number, suggestion -- while
+ * Print configuration-file problems, file, line number, suggestion, while
  * the config layer is parsing. Bracket a call to ami_config_load() or
  * ami_config_load_interface() with these.
  */
@@ -169,7 +169,7 @@ VOID tool_explain_resolve(const char *name, LONG err); /* a lookup failed    */
 VOID tool_explain_no_stack(VOID);                     /* nothing is running  */
 
 /*
- * TRUE when bsdsocket.library is in memory with at least one opener -- the
+ * TRUE when bsdsocket.library is in memory with at least one opener, the
  * only way one command can tell that another has the stack up. Does not open
  * the library, since that would start the stack.
  */
@@ -211,8 +211,8 @@ BOOL tool_stack_domain(char *domain, ULONG domainlen);
 
 /*
  * Look a name up through the running stack's own gethostbyname() /
- * gethostbyaddr() vectors. Works when netstack_resolve() cannot be reached --
- * the normal case, with the stack inside bsdsocket.library -- and uses the
+ * gethostbyaddr() vectors. Works when netstack_resolve() cannot be reached,
+ * the normal case, with the stack inside bsdsocket.library, and uses the
  * name servers it is really using, DHCP-supplied included. FALSE when nothing
  * is running or the name is not known.
  */
@@ -226,7 +226,7 @@ BOOL tool_stack_lookup_addr(ULONG addr, char *name_out, ULONG name_len);
  */
 ULONG tool_stack_name_servers(char out[][16], ULONG max);
 
-/* --------------------------------------------------- the running stack --
+/* --------------------------------------------------- the running stack,
  *
  * Everything above this line works with the stack down. Everything below it
  * asks the running stack, through the two private LVOs in
@@ -254,7 +254,7 @@ VOID            tool_netstatus_close(struct Library *base);
 /*
  * One snapshot. `what` is a NETSTATUS_* selector; `buffer` starts with a
  * NetStatusHeader this fills in. Returns the number of entries written, or -1
- * having printed nothing -- the caller decides what a failure means, since "no
+ * having printed nothing, the caller decides what a failure means, since "no
  * ARP entries" and "this is not our library" need different words.
  *
  * A buffer that holds the header but no entries asks how many there are:
@@ -276,7 +276,7 @@ LONG tool_netstatus_query(struct Library *base, ULONG what,
 /*
  * The mutating half. The caller fills `ctl` except for the magic and version,
  * which this sets. Returns 0, or -1 with *errno_out (if given) set to the
- * library's errno -- ENOSYS for an operation this build cannot do.
+ * library's errno, ENOSYS for an operation this build cannot do.
  */
 LONG tool_netstatus_control(struct Library *base, ULONG op,
                             NetStatusControl *ctl, LONG *errno_out);

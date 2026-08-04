@@ -1,5 +1,5 @@
 /*
- * SrcProbe -- does a socket send from the address it was bound to?
+ * SrcProbe, does a socket send from the address it was bound to?
  *
  * bind() names a local address; the send direction is meant to honour it.
  * NetX Duo has no bind-to-address, so the library maps the bound address to
@@ -11,7 +11,7 @@
  * measured here is the single-interface half:
  *
  *   * a datagram bound to the interface address arrives with that address as
- *     its source -- not merely "the send returned len", which was already true
+ *     its source, not merely "the send returned len", which was already true
  *     when the source was whatever NetX picked;
  *   * the same on loopback, bound to 127.0.0.1;
  *   * a destination the bound address cannot reach is refused, rather than
@@ -28,7 +28,7 @@
  * argv[3] and argv[4] are the two-interface arm and are optional: the guest's
  * address on its SECOND interface, and a host on the same subnet with a
  * listener on port 7805.  Given both, the probe connects from the second
- * address to that host -- the case a one-interface guest cannot reach, where
+ * address to that host, the case a one-interface guest cannot reach, where
  * the bound address is on one interface and the unconstrained route leaves by
  * the other.  It is the RECEIVER that has to be asked what source it saw; all
  * the guest can say is that the connect was made.
@@ -45,7 +45,7 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 
-/* struct sockaddr_in, open-coded -- four fields and a pad, unchanged since
+/* struct sockaddr_in, open-coded, four fields and a pad, unchanged since
    4.2BSD. */
 typedef struct ProbeAddr
 {
@@ -511,7 +511,7 @@ int main(int argc, char **argv)
              *
              * ENETUNREACH and not EADDRNOTAVAIL: the bound address exists, it
              * just has no route to the destination.  EADDRNOTAVAIL is now
-             * only a bound address the machine does not have -- the case that
+             * only a bound address the machine does not have, the case that
              * used to be refused, source on one interface and route out of
              * the other, is what source_connect() connects.
              */

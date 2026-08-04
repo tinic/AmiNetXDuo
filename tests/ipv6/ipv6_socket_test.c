@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- AF_INET6 through bsdsocket.library's ABI.
+ * AmiNetXDuo, AF_INET6 through bsdsocket.library's ABI.
  *
  * The third IPv6 test, and the only one that goes through the LVO jump table:
  * ipv6_test.c drives NetX Duo directly, ipv6_link_test.c drives the netstack,
@@ -9,7 +9,7 @@
  *
  * Everything happens over ::1, which nxd_ipv6_enable() configures on the
  * internal loopback interface, so the wire is not a variable.  What is under
- * test is the socket layer -- sockaddr_in6 in and out of bind/connect/accept/
+ * test is the socket layer, sockaddr_in6 in and out of bind/connect/accept/
  * getsockname/getpeername, IPV6_V6ONLY, inet_ntop/inet_pton for AF_INET6,
  * getaddrinfo.
  *
@@ -35,7 +35,7 @@
  * The one header this program takes from us, and on purpose: RFC 3542's
  * ancillary data is struct shapes and macros, not vectors, so a caller has to
  * have them from somewhere.  Including it here is also the check that it
- * compiles standalone against the NDK -- the CMSG_* macros it replaces are
+ * compiles standalone against the NDK, the CMSG_* macros it replaces are
  * <sys/socket.h>'s own.
  */
 #include <stddef.h>
@@ -140,7 +140,7 @@ static BOOL t_check(BOOL ok, const char *what, LONG detail)
  * test, so writing it out keeps the expectation independent of whatever
  * header is on the include path.
  *
- * This must match ndk-include/netinet/in.h:182 exactly -- 28 bytes, family at
+ * This must match ndk-include/netinet/in.h:182 exactly, 28 bytes, family at
  * offset 0, no length byte.
  */
 struct t_in6_addr
@@ -150,8 +150,8 @@ struct t_in6_addr
 
 struct t_sockaddr_in6
 {
-    UBYTE               sin6_family;    /* offset  0 -- not a length byte */
-    UBYTE               sin6_pad;       /* offset  1 -- compiler padding  */
+    UBYTE               sin6_family;    /* offset  0, not a length byte */
+    UBYTE               sin6_pad;       /* offset  1, compiler padding  */
     UWORD               sin6_port;      /* offset  2 */
     ULONG               sin6_flowinfo;  /* offset  4 */
     struct t_in6_addr   sin6_addr;      /* offset  8 */
@@ -204,8 +204,8 @@ struct t_addrinfo
 /*
  * Every stub declares three variables it never uses because d0, d1, a0 and a1
  * are scratch on AmigaOS: a library function may destroy them without saying
- * so.  An `asm` block that lists them only as inputs tells GCC the opposite --
- * that whatever was in them survives the call -- and GCC will reuse the
+ * so.  An `asm` block that lists them only as inputs tells GCC the opposite,
+ * that whatever was in them survives the call, and GCC will reuse the
  * "still valid" copy afterwards.  The first version of this file did that, and
  * `send()` returned the right value while `rc == sizeof(message)` compared
  * false immediately after, because GCC had kept `len` in d1 and the library
@@ -588,7 +588,7 @@ BSD_SCRATCH;
                       : "cc", "memory");
 }
 
-/* gai_strerror takes its argument in a0, not d0 -- pragmas line 141. */
+/* gai_strerror takes its argument in a0, not d0, pragmas line 141. */
 static APTR bsd_gai_strerror(LONG code)
 {
 register struct Library *a6  __asm("a6") = SocketBase;
@@ -869,7 +869,7 @@ char                    buffer[64];
                   "getpeername reports ::1 port 9099", bsd_Errno());
 
     /* And getsockname on a socket bound to :: reports the source the stack
-       actually chose -- ::1 for a loopback connection. */
+       actually chose, ::1 for a loopback connection. */
     t_bzero(&sa, sizeof(sa));
     len = sizeof(sa);
     rc  = bsd_getsockname(client, &sa, &len);
@@ -955,13 +955,13 @@ char                    buffer[64];
  * A control buffer has to be aligned for a socklen_t, and a bare char array is
  * not: on a 68000 an odd cmsg_len would be an address error rather than a
  * wrong answer.  CMSG_BUFFER() is the declaration that cannot be wrong, and
- * this is the program that has to demonstrate it -- it is a caller of the
+ * this is the program that has to demonstrate it, it is a caller of the
  * published header and nothing else.
  */
 #define T_CBUF_BYTES    (CMSG_SPACE(sizeof(struct in6_pktinfo)) + \
                          CMSG_SPACE(sizeof(LONG)))
 
-/* The macros on their own -- no library involved, so a failure here is the
+/* The macros on their own, no library involved, so a failure here is the
    header being wrong rather than the stack. */
 static VOID t_test_cmsg_macros(VOID)
 {
@@ -1089,7 +1089,7 @@ struct icmp6_filter filt;
      * 49, 50, 51 and 52 are IPV6_HOPOPTS, IPV6_DSTOPTS, IPV6_RTHDR and
      * IPV6_PKTOPTIONS in the BSD numbering this header set follows, and this
      * library implements none of them.  They used to be taken as the Linux
-     * spellings of the four options above -- so a caller passing an option
+     * spellings of the four options above, so a caller passing an option
      * buffer to IPV6_DSTOPTS had it read as a struct in6_pktinfo and the
      * socket's sticky source set from it.
      */
@@ -1432,7 +1432,7 @@ ULONG                   arrived_on = 0;
     /*
      * The other half, and the reason the option exists: answer from the
      * address the query was sent to.  Over ::1 that is the address half of the
-     * in6_pktinfo rather than the index half, which loopback does not have --
+     * in6_pktinfo rather than the index half, which loopback does not have,
      * on a machine with two interfaces the index works the same way.
      */
     if (saw_pktinfo && peer.sin6_port != 0)
@@ -1548,7 +1548,7 @@ ULONG                   arrived_on = 0;
 
         /*
          * RFC 3542 6.3, both halves of it: the socket's own hop limit reaches
-         * the wire, and a per-datagram one overrides it.  Neither used to --
+         * the wire, and a per-datagram one overrides it.  Neither used to,
          * IPV6_UNICAST_HOPS was stored and read back and never applied.
          */
         value = 1;
@@ -1898,7 +1898,7 @@ int main(void)
      * An interface, without needing anyone's driver.
      *
      * Every check below talks over ::1 and nothing else, but the library will
-     * not bring a stack up with no interface to put it on -- so this used to
+     * not bring a stack up with no interface to put it on, so this used to
      * need Commodore's a2065.device, which is not ours to ship and which
      * therefore pinned the whole test to the one CI runner that had a copy.
      *
@@ -1910,7 +1910,7 @@ int main(void)
      * It has to be installed by THIS process: the device lives in the
      * installer's address space and dies with it, so a launcher cannot do it.
      * That is also why tapdev.c is linked here rather than the test staying a
-     * single translation unit -- it takes nothing from this tree either, only
+     * single translation unit, it takes nothing from this tree either, only
      * NDK headers, so what the test itself uses of ours is still just
      * <aminetxduo/cmsg.h>.
      */

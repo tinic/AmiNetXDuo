@@ -1,5 +1,5 @@
 /*
- * Host test shim -- struct Library, which every AmiNetXDuo library base starts
+ * Host test shim, struct Library, which every AmiNetXDuo library base starts
  * with. See exec/types.h. Never compiled for the Amiga.
  *
  * SPDX-License-Identifier: MIT

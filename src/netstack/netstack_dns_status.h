@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- what a NetX Duo DNS status means.
+ * AmiNetXDuo, what a NetX Duo DNS status means.
  *
  * Its own translation unit, and its own header, because the two questions below
  * decide user-visible behaviour that no lookup against a real name server can
@@ -30,7 +30,7 @@
  * A blocking query in addons/dns folds every per-server failure into
  * NX_DNS_QUERY_FAILED before it returns, so "the name server said NXDOMAIN" and
  * "nothing came back" arrive as the same status and both land here. They are
- * separated by how long the attempt took instead -- see netstack_retry.h.
+ * separated by how long the attempt took instead, see netstack_retry.h.
  */
 BOOL ami_ns_dns_again(UINT status);
 

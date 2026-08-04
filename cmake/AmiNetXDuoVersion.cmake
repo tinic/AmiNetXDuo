@@ -1,7 +1,7 @@
 # AmiNetXDuo version: our own, compounded with the stack we are built on.
 #
-# There is one product version -- the VERSION argument to project() in the
-# root CMakeLists.txt -- and nothing else in the tree may spell one out.  This
+# There is one product version, the VERSION argument to project() in the
+# root CMakeLists.txt, and nothing else in the tree may spell one out.  This
 # module turns that number, plus the NetX Duo and ThreadX versions READ OUT OF
 # the submodule headers, into the strings the build, the distribution archive
 # and CI all quote.
@@ -39,7 +39,7 @@ set(AMINETXDUO_THREADX_VERSION_PIN "6.5.1")
 #
 # <prefix> is the macro stem: NETXDUO for NETXDUO_MAJOR_VERSION and friends,
 # THREADX for THREADX_MAJOR_VERSION.  A header that does not define all three
-# is a hard error -- upstream renaming the macros must not silently degrade
+# is a hard error, upstream renaming the macros must not silently degrade
 # into an empty version string.
 function(_aminetxduo_read_version out header prefix)
     if(NOT EXISTS "${header}")
@@ -124,7 +124,7 @@ set(AMINETXDUO_VERSION_LONG
     "AmiNetXDuo ${AMINETXDUO_VERSION} (NetX Duo ${AMINETXDUO_NETXDUO_VERSION}, ThreadX ${AMINETXDUO_THREADX_VERSION})")
 
 # The short commit, for the $VER: strings. A release tag pins the version, but
-# a build from a working tree does not -- and "which 0.16.1 is this" is exactly
+# a build from a working tree does not, and "which 0.16.1 is this" is exactly
 # the question a user tracking an installation asks. Empty outside a checkout.
 set(AMINETXDUO_VERSION_HASH "")
 find_package(Git QUIET)
@@ -156,7 +156,7 @@ if(AMINETXDUO_VERSION_DATE STREQUAL "")
 endif()
 
 # The commit count, by the project's convention, appears in a binary's version
-# output and nowhere else -- not in the tag, not in the release name, not in
+# output and nowhere else, not in the tag, not in the release name, not in
 # the archive filename.  Snapshot at configure time; empty outside a checkout,
 # which is what an unpacked source tarball looks like.
 set(AMINETXDUO_VERSION_BUILD "")

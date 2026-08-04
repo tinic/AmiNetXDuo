@@ -14,7 +14,7 @@
 # client_patterns: against the Roadshow NDK headers with
 # tests/conformance/compat first on the include path, so the regenerated
 # inline/bsdsocket.h wins over the NDK one, which GCC 15 cannot compile.
-# Fitz needs exactly the same treatment for exactly the same reason -- its
+# Fitz needs exactly the same treatment for exactly the same reason, its
 # amiga-server.c calls SetSocketSignals(), and the NDK's inline for that one
 # is the specific macro that fails.
 #
@@ -22,7 +22,7 @@
 #
 # The released binary has debug compiled out.  Its client treats EAGAIN on a
 # blocking socket as retryable (src/amiga-client.c, checkretry()) and retries
-# ten times before giving up, silently -- so on the released binary the defect
+# ten times before giving up, silently, so on the released binary the defect
 # this harness hunts is visible only as a connection that eventually dies.
 # Built with -DADEBUG=5 the same code prints
 #

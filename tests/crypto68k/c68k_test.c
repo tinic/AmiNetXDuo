@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- crypto68k correctness gate.
+ * AmiNetXDuo, crypto68k correctness gate.
  *
  * Bignum bugs are input dependent: a carry that only propagates when a limb is
  * 0xFFFFFFFF, a modulus whose top limb is small, an exponent whose leading

@@ -10,7 +10,7 @@ checksum through the stack under test.
 
 `pat` is 8 KB of xorshift32 output.  The high-bits term makes the period 2 MB,
 so a block that is repeated or dropped is caught as well as a byte that is
-altered -- unless the displacement is an exact multiple of 2 MB.
+altered, unless the displacement is an exact multiple of 2 MB.
 
     tests/stress/pattern.py write FILE BYTES [SEED]
     tests/stress/pattern.py check FILE [SEED]        exit 0 if it matches

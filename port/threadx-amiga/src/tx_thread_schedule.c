@@ -1,5 +1,5 @@
 /***************************************************************************
- * Eclipse ThreadX -- AmigaOS/m68k port.
+ * Eclipse ThreadX, AmigaOS/m68k port.
  *
  * Derived in structure from ports/linux/gnu/src/tx_thread_schedule.c
  *   Copyright (c) 2024 Microsoft Corporation
@@ -27,7 +27,7 @@
 /*                                                                        */
 /*    "Runs forever" has one exception: tx_amiga_kernel_stop() sets        */
 /*    _tx_amiga_kernel_stopping and pokes the scheduler signal, and this   */
-/*    function then returns -- through _tx_initialize_kernel_enter() and   */
+/*    function then returns, through _tx_initialize_kernel_enter() and   */
 /*    back into _tx_amiga_kernel_task_entry(), which destroys the master   */
 /*    Task.  By then stop has already reaped every thread, so the loop     */
 /*    below is sitting in its idle wait when the flag arrives.             */
@@ -112,17 +112,17 @@ TX_THREAD   *thread_ptr;
  * The task is normally parked in Wait() inside _tx_amiga_thread_park().
  * Setting ctrl_die and poking its run signal makes it fall out of that Wait
  * and destroy itself.  It signals back first, under Forbid(), and only then
- * calls RemTask(NULL) -- Exec discards the forbid nesting of a task it is
+ * calls RemTask(NULL), Exec discards the forbid nesting of a task it is
  * removing, so the "signal the reaper then die" pair is atomic and the reaper
  * cannot observe a half-removed task.
  *
  * The wait is bounded.  A ThreadX thread may be blocked inside Exec rather than
- * on its run signal -- a SANA-II reader parked in WaitIO() on a device that
+ * on its run signal, a SANA-II reader parked in WaitIO() on a device that
  * ignores AbortIO() is the case that matters.  Such a task cannot be woken by
  * the port and cannot be removed by it either: RemTask() on another task would
  * leave that device holding a queued IORequest that it will later write into
  * freed memory.  There is therefore no interleaving in which an unbounded
- * Wait() terminates, and the caller -- likely holding the ThreadX baton --
+ * Wait() terminates, and the caller, likely holding the ThreadX baton,
  * would become permanently unrunnable, taking the whole stack with it.
  *
  * The defined outcome when the task cannot be woken is a zombie:

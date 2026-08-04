@@ -10,7 +10,7 @@
 # WHY THIS SCRIPT EXISTS RATHER THAN A LINE IN THE README
 #
 # The emulated machine resolves amissl.library through LIBS:, and
-# amisslmaster.library then opens `LIBS:AmiSSL/amissl_v362.library` -- that
+# amisslmaster.library then opens `LIBS:AmiSSL/amissl_v362.library`, that
 # path is a literal inside amisslmaster (checked with `strings`), so the
 # directory layout is not negotiable.  Getting it wrong produces
 # "OpenAmiSSLTags failed", which says nothing about which of the two files was
@@ -54,7 +54,7 @@ EXE="${1:-$ROOT/build/cm-tls/tests/crypto68k/crypto68k_amissl}"
 
 # ------------------------------------------------------------- the library --
 #
-# AMINETXDUO_AMISSL_OS3 points at the unpacked OS3 release -- the directory
+# AMINETXDUO_AMISSL_OS3 points at the unpacked OS3 release, the directory
 # that holds Libs/AmigaOS3.  Searched rather than required, because the two
 # archives usually land side by side.
 CANDIDATES=(
@@ -106,7 +106,7 @@ echo "    CPU build: 68020-40 (the one with bn_m68k.s; the 68060 build has none)
 # "mathieeedoubtrans.library could not be opened." and exits 20.  That is the
 # loud version of the failure.  The quiet version is what
 # amissl_v362.library's own LibInit does with the same missing library, which
-# is to sit there -- the benchmark looked hung for a quarter of an hour before
+# is to sit there, the benchmark looked hung for a quarter of an hour before
 # this probe was run.
 #
 # They must be a MATCHED PAIR.  Measured, with AmiSSL's own `OpenSSL` command
@@ -119,7 +119,7 @@ echo "    CPU build: 68020-40 (the one with bn_m68k.s; the 68060 build has none)
 #
 # Getting them: the AROS m68k boot ISO carries all four in Libs/, and
 # `bsdtar xf aros-amiga-m68k.iso Libs/mathieeedoub*.library` extracts them.
-# Not vendored here -- they are somebody else's binaries.
+# Not vendored here, they are somebody else's binaries.
 MATH_MISSING=0
 for lib in mathieeedoubbas mathieeedoubtrans; do
     src=""
@@ -152,7 +152,7 @@ done
 # the first API call.  Without the assign AmigaDOS asks for the volume rather
 # than returning an error, and on a bare boot nobody can cancel it.  The
 # benchmark makes the assign itself from DH0:AmiSSL; this stages what it points
-# at.  Certs/ is not staged -- 290 PEM files that no arithmetic benchmark reads.
+# at.  Certs/ is not staged, 290 PEM files that no arithmetic benchmark reads.
 mkdir -p "$STAGE/AmiSSL"
 if [ -f "$OS3/C/openssl.cnf" ]; then
     cp "$OS3/C/openssl.cnf" "$STAGE/AmiSSL/"

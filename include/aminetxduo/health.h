@@ -1,11 +1,11 @@
 /*
- * AmiNetXDuo -- the scheduling counters, where a freeze cannot hide them.
+ * AmiNetXDuo, the scheduling counters, where a freeze cannot hide them.
  *
  * A total lockup leaves no Enforcer hit, no MungWall hit and no log line: the
  * machine stops before anything can be written, and the reset that follows
  * takes the evidence with it.  So the counters that say how the stack was
- * being scheduled -- the tick task's stalls (TX_AMIGA_TICK_STATS) and what the
- * baton bracket did (AmiBatonStats) -- are published at a place that can be
+ * being scheduled, the tick task's stalls (TX_AMIGA_TICK_STATS) and what the
+ * baton bracket did (AmiBatonStats), are published at a place that can be
  * found without the stack's cooperation.
  *
  * NETSTATUS_HEALTH reports the same numbers and is the way to read them from a
@@ -33,7 +33,7 @@
  *
  * Reading is a Forbid(), a magic check and a copy.  Nothing obtains the
  * semaphore: blocking on a machine that may already be wedged is the one thing
- * a diagnostic must not do.  The Forbid() is against a concurrent shutdown --
+ * a diagnostic must not do.  The Forbid() is against a concurrent shutdown,
  * the mark is removed under Forbid() before the segment holding these counters
  * can go away.
  *

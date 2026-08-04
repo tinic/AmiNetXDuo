@@ -1,9 +1,9 @@
 /*
- * AmiNetXDuo -- give the net68k checksum NetX Duo's name.
+ * AmiNetXDuo, give the net68k checksum NetX Duo's name.
  *
  * The top-level CMakeLists drops nx_ip_checksum_compute.c from the vendored
  * source glob, so _nx_ip_checksum_compute() is undefined and every internal
- * caller inside NetX Duo -- IP, TCP, UDP, ICMP, ICMPv6 -- resolves to this
+ * caller inside NetX Duo, IP, TCP, UDP, ICMP, ICMPv6, resolves to this
  * one instead.  No vendored file is edited and no call site is patched.
  *
  * The hook lives in a file of its own so a program can link the algorithm

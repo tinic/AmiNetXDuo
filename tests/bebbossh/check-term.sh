@@ -7,8 +7,8 @@
 #
 # THE COMPARISON, AND WHY IT NEEDS BOTH SIDES
 #
-#   BebboSSH asks the AmigaDOS console its size with CSI '0 q' -- the Window
-#   Bounds Report -- and puts the answer in pty-req.  ClientRun asks the same
+#   BebboSSH asks the AmigaDOS console its size with CSI '0 q', the Window
+#   Bounds Report, and puts the answer in pty-req.  ClientRun asks the same
 #   console the same question before handing it over and prints the answer;
 #   the remote command runs `stty size` and writes it into a file on the build
 #   host.  A wrong size is not an error anywhere, it is `vi` drawing in the
@@ -164,7 +164,7 @@ fi
 # says data actually flowed in the terminal direction.
 echo ""
 # The resize arm's session output goes to DH0:server.txt, so both files are
-# searched -- see the note in clientrun.c about interleaved appends.
+# searched, see the note in clientrun.c about interleaved appends.
 ALL=$(cat "$REPORT" "$HD/server.txt" 2>/dev/null)
 # RESIZE-ARM-DONE is deliberately not looked for: that arm's stdout IS the
 # console, which is the only way the console gets told to report resizes, so

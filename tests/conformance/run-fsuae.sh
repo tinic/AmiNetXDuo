@@ -30,12 +30,12 @@
 # it after resolving base_dir; the config tools/fsuae-run.sh writes cannot
 # carry the option).
 #
-# The emulator log still says "bsdsocket.library installed" either way -- that
+# The emulator log still says "bsdsocket.library installed" either way, that
 # line is printed when the emulation is *built*, not when it is registered.
 # It is not the proof.  The proof is threefold and checked below / visible in
 # the output:
 #   1. Removing build/cm/.../bsdsocket.library from the staged LIBS: makes the
-#      suite bail with "bsdsocket.library not available" -- so nothing else on
+#      suite bail with "bsdsocket.library not available", so nothing else on
 #      the machine answers OpenLibrary("bsdsocket.library", 4).
 #   2. The TAP log's "# bsdsocket.library:" line reads AmiNetXDuo, our
 #      SBTC_RELEASESTRPTR.  UAE's emulation answers "UAE <version>".
@@ -43,7 +43,7 @@
 #      (DHCP lease, resolver) as the library is opened.
 #
 # Results land in:
-#   build/testhd-<tag>/bsdsocktest.log   the TAP log -- the actual result
+#   build/testhd-<tag>/bsdsocktest.log   the TAP log, the actual result
 #   build/testhd-<tag>/conf-out.txt      the suite's console summary
 #   build/serial-<tag>.log               our ami_log output
 #
@@ -58,7 +58,7 @@ CPU=""
 # -T wins, then AMINETXDUO_RUN_TAG from the environment, then the default. The
 # environment has to be honoured here: this script exports AMINETXDUO_RUN_TAG
 # to tools/fsuae-run.sh, so taking the default unconditionally used to
-# OVERWRITE a caller's tag -- two runs started with different
+# OVERWRITE a caller's tag, two runs started with different
 # AMINETXDUO_RUN_TAG values would silently share build/testhd-conformance and
 # clobber each other's results.
 TAG="${AMINETXDUO_RUN_TAG:-conformance}"
@@ -152,7 +152,7 @@ ident=$(grep -m1 "^# bsdsocket.library:" \
 case "$ident" in
     *AmiNetXDuo*) echo "$ident  (ours)" ;;
     "")           echo "!! no stack identification in the TAP log" ;;
-    *)            echo "!! $ident -- NOT our library, results are meaningless" ;;
+    *)            echo "!! $ident, NOT our library, results are meaningless" ;;
 esac
 
 exit "$status"

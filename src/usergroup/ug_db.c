@@ -1,9 +1,9 @@
 /*
- * AmiNetXDuo -- usergroup.library: the passwd and group databases.
+ * AmiNetXDuo, usergroup.library: the passwd and group databases.
  *
  * AmigaOS has no user database, so the no-file path is the one that matters
  * and it is the one that must be perfect: every real system takes it. It
- * yields exactly one user -- root, uid 0, gid 0, home SYS:, shell C:Shell --
+ * yields exactly one user, root, uid 0, gid 0, home SYS:, shell C:Shell,
  * and one group.
  *
  * If DEVS:Internet/passwd (or AmiTCP:db/passwd) does exist, it is parsed in
@@ -42,12 +42,12 @@ static const char *const ug_group_paths[] =
     NULL
 };
 
-/* ---------------------------------------------------------- file access -- */
+/* ---------------------------------------------------------- file access, */
 
 /*
  * Read a whole small file through dos.library. Returns a NUL-terminated
  * ami_alloc() buffer, or NULL if the file is absent, unreadable, or larger
- * than UG_MAX_FILE. A missing file is not an error -- it is the normal case.
+ * than UG_MAX_FILE. A missing file is not an error, it is the normal case.
  */
 char *ug_db_read_file(struct UserGroupBase *base, const char *path, ULONG *len_out)
 {
@@ -132,7 +132,7 @@ static char *ug_db_read_first(struct UserGroupBase *base,
     return NULL;
 }
 
-/* --------------------------------------------------------- passwd table -- */
+/* --------------------------------------------------------- passwd table, */
 
 void ug_db_require_passwd(struct UserGroupBase *base)
 {
@@ -154,7 +154,7 @@ void ug_db_require_passwd(struct UserGroupBase *base)
     ReleaseSemaphore(&g->lock);
 }
 
-/* ---------------------------------------------------------- group table -- */
+/* ---------------------------------------------------------- group table, */
 
 void ug_db_require_group(struct UserGroupBase *base)
 {

@@ -6,7 +6,7 @@
 Two kinds of vector, and the distinction matters:
 
   PUBLISHED.  The ECDSA signatures are RFC 6979 A.2.5 (NIST P-256 with
-  SHA-256, messages "sample" and "test") -- values that exist outside this
+  SHA-256, messages "sample" and "test"), values that exist outside this
   repository and were not produced by anything being tested.  They are
   re-verified here by this script's own arithmetic before being emitted, so a
   transcription error cannot slip through as a passing test.

@@ -1,10 +1,10 @@
 /*
- * AmiNetXDuo -- mDNS (RFC 6762), the responder and the ".local" resolver.
+ * AmiNetXDuo, mDNS (RFC 6762), the responder and the ".local" resolver.
  *
  * A machine that fell back to an RFC 3927 link-local address has 169.254.x.y
  * and nothing on the network knows how to reach it: no DHCP server, so no
  * router client list and no local DNS zone carrying its name, and the address
- * was drawn at random and changes on the next boot. mDNS makes it findable --
+ * was drawn at random and changes on the next boot. mDNS makes it findable,
  * `ping amiga.local` works from any Mac, any Linux box running Avahi and any
  * Windows since 10, with no server on that network. On an ordinary DHCP LAN it
  * saves looking up whichever address the router handed out this week.
@@ -13,7 +13,7 @@
  * interface currently has. HOSTNAME is the same string DHCP option 12 sends
  * (docs/RESEARCH.md 27), resolved from the ranked sources in
  * aminetxduo/config.h. That is the single source of truth for the name, not
- * this file. It can be empty -- nothing named the machine -- and a label is
+ * this file. It can be empty, nothing named the machine, and a label is
  * still needed, so "amiga" is the fallback here, as it is for option 12.
  *
  * <label>.local is not this machine's fully-qualified name and must never be
@@ -21,11 +21,11 @@
  * unique. ShowNetStatus reports it on a line of its own for that reason.
  *
  * Services are advertised only when the user declares them, in
- * DEVS:Internet/service_discovery. AmiNetXDuo ships clients -- fetch, ftp,
- * telnet, tftp, nc, sntp, whois -- and no servers, so nothing here may invent
+ * DEVS:Internet/service_discovery. AmiNetXDuo ships clients, fetch, ftp,
+ * telnet, tftp, nc, sntp, whois, and no servers, so nothing here may invent
  * a _ftp._tcp record: it would point at nothing and a browser that believed it
  * would hang on a connection nothing will accept. What the machine may well be
- * running is somebody else's server -- AmiFTPd and its kind -- and those
+ * running is somebody else's server, AmiFTPd and its kind, and those
  * binaries will never be recompiled to call an API of ours, so an API would
  * reach nothing that exists. A file the user writes does, and it is the user's
  * claim rather than ours. AmiTCP's db/inetd.conf says the same thing the same
@@ -50,7 +50,7 @@
 
 /*
  * mDNS wants a single DNS label; HOSTNAME may not be one. A configured name
- * is often fully qualified -- "amiga.home.lan" -- and handing that to
+ * is often fully qualified, "amiga.home.lan", and handing that to
  * nx_mdns_create() would claim "amiga.home.lan.local", which no querier asks
  * for.
  *
@@ -107,8 +107,8 @@ static BOOL ami_ns_mdns_differs(const char *a, const char *b)
  *
  * Known wart: the vendored renamer appends the RFC 6763 service-instance
  * suffix, so "amiga" becomes "amiga (2)". That is correct for a service
- * instance but not for a host name -- RFC 6762 9's example is
- * "PrinterOne-2.local." -- and a label with a space and parentheses is hard to
+ * instance but not for a host name, RFC 6762 9's example is
+ * "PrinterOne-2.local.", and a label with a space and parentheses is hard to
  * type at a shell. The rename function is `static` in nxd_mdns.c, so neither a
  * symbol override nor -Wl,--wrap can reach it, and this project does not patch
  * vendored source (docs/RESEARCH.md 13.2). Instead the claimed name is logged
@@ -173,7 +173,7 @@ static VOID ami_ns_mdns_probing(NX_MDNS *mdns_ptr, UCHAR *name, UINT state)
  * Unique rather than shared, because RFC 6763 4.1.1 makes the instance name
  * the thing that must not clash: the module then probes the SRV and TXT and
  * renames on a conflict. That is also where the renaming wart noted above
- * stops being one -- " (2)" is the RFC 6763 spelling for a second service
+ * stops being one, " (2)" is the RFC 6763 spelling for a second service
  * instance, and wrong only for a host name.
  *
  * A TXT record goes out either way (RFC 6763 6.1; the module writes one empty
@@ -384,7 +384,7 @@ LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
      * NULL for ipv6_address. A non-NULL buffer makes the module also ask for
      * AAAA, and it does so serially: a full A timeout followed by a full AAAA
      * timeout. That doubles the wire traffic of every successful lookup and
-     * the wall time of every failed one -- `host nosuchbox.local TIMEOUT 5`
+     * the wall time of every failed one, `host nosuchbox.local TIMEOUT 5`
      * spent fifteen seconds retrying, half of it for a record this build
      * cannot use. This is the IPv4 entry point and the module's IPv6 half is
      * not enabled (see CMakeLists.txt); netstack_resolve6() is where to ask if
@@ -409,7 +409,7 @@ LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
  * A browse is a subscription, not a call: nx_mdns_service_continuous_query()
  * registers a query record, the module's thread sends it and re-sends it on the
  * RFC 6762 5.2 backoff, and answers land in the peer cache whenever they
- * arrive. There is no completion -- a responder that boots in ten minutes will
+ * arrive. There is no completion, a responder that boots in ten minutes will
  * answer then. So start and stop do not wait for anything, and the caller
  * decides how long it is prepared to listen; ShowNetServices and the ARexx host
  * sleep on their own tasks, outside the bracket, because an Amiga Wait() taken
@@ -417,7 +417,7 @@ LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
  *
  * Collect is the exception: it chases a missing address, which is a query and
  * does wait, bounded (see AMI_MDNS_CHASE_BUDGET). That wait is a ThreadX
- * suspension and not a Wait() -- it hands the baton on, as the mDNS branch of
+ * suspension and not a Wait(), it hands the baton on, as the mDNS branch of
  * netstack_resolve() already does.
  *
  * type NULL asks _services._dns-sd._udp.local (RFC 6763 9), which enumerates
@@ -425,7 +425,7 @@ LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
  * it directly rather than needing the name spelled out: a NULL type in
  * _nx_mdns_service_continuous_query() selects that name and a PTR query, and
  * _nx_mdns_service_lookup() resolves the answers back through the same path as
- * an instance -- with a NULL service_name, which is how a type-only row is told
+ * an instance, with a NULL service_name, which is how a type-only row is told
  * from an instance below.
  */
 
@@ -441,7 +441,7 @@ LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
  *
  * The module fills service_ipv4 from an A record already in the cache and never
  * asks for one, so a responder that answered with PTR and SRV and nothing else
- * leaves a row carrying a host name and no address -- a service that cannot be
+ * leaves a row carrying a host name and no address, a service that cannot be
  * used. nx_mdns_host_address_get() puts the question on the wire, and returns
  * out of the cache without a packet when the record is already there, so the
  * wait falls only on the rows that need it.
@@ -461,8 +461,8 @@ static UCHAR *ami_ns_mdns_type_arg(const char *type)
 }
 
 /*
- * Is this SRV target this machine? The target is a full name -- "amiga.local"
- * -- and nx_mdns_host_name is the label alone, so the comparison is against the
+ * Is this SRV target this machine? The target is a full name, "amiga.local"
+ *, and nx_mdns_host_name is the label alone, so the comparison is against the
  * first label, case-insensitively (RFC 6762 16). mDNS probing makes that label
  * unique on the link, so matching it is enough to be sure.
  */
@@ -573,7 +573,7 @@ LONG netstack_mdns_browse_stop(const char *type)
  * What has arrived so far.
  *
  * nx_mdns_service_lookup() answers by index and walks both caches from the top
- * each time, so this is quadratic -- in a cache that holds about twenty
+ * each time, so this is quadratic, in a cache that holds about twenty
  * services, which is the size the loop is against.
  *
  * The NX_MDNS_SERVICE it fills is 600-odd bytes and this runs on an ARexx host
@@ -581,8 +581,8 @@ LONG netstack_mdns_browse_stop(const char *type)
  * reused across the loop: the module memsets it per call.
  *
  * *available counts what the cache had, so a caller with a smaller array can
- * tell a truncated list from a complete one. The cache is live -- the responder
- * thread is still writing to it -- so two calls a second apart legitimately
+ * tell a truncated list from a complete one. The cache is live, the responder
+ * thread is still writing to it, so two calls a second apart legitimately
  * disagree, and neither is wrong.
  *
  * A row whose SRV came without an A record has its address asked for here, so
@@ -604,7 +604,7 @@ typedef struct AmiMdnsScratch
  * RFC 6763 4.1.1 makes instance plus type the identity of a service, so that
  * is the comparison. It is needed because the answers repeat: a responder
  * re-announces, and each announcement of the same PTR lands in the cache as a
- * record of its own -- five cameras on a real network came back as seven rows,
+ * record of its own, five cameras on a real network came back as seven rows,
  * three of them the same camera. nx_mdns_service_lookup() only merges
  * duplicates for the meta-query, and not for a named type.
  */
@@ -764,7 +764,7 @@ UWORD netstack_mdns_browse_collect(const char *type, AmiMdnsService *out,
         /*
          * The PTR and the SRV arrived, the A did not. A host name cut short to
          * fit the row is not the name the responder gave, so it is not asked
-         * about -- the query would be about a different machine.
+         * about, the query would be about a different machine.
          */
         if (row->ams_Address == 0UL && row->ams_Host[0] != '\0' && !host_cut)
         {

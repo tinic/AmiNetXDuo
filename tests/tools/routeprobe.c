@@ -1,5 +1,5 @@
 /*
- * RouteProbe -- checks that NX_ENABLE_IP_STATIC_ROUTING reaches the wire.
+ * RouteProbe, checks that NX_ENABLE_IP_STATIC_ROUTING reaches the wire.
  *
  * Rather than stopping at "nx_ip_static_route_add() returned NX_SUCCESS", it
  * adds a route whose next hop is an address nothing else in the run names,
@@ -8,7 +8,7 @@
  *
  *   destination 192.168.77.5      not on any of the guest's own subnets
  *   next hop    10.0.2.99         on the guest's subnet, so NetX Duo will
- *                                 accept it -- and answered by nothing, since
+ *                                 accept it, and answered by nothing, since
  *                                 SLIRP is 10.0.2.2 and 10.0.2.3
  *
  *   with the route     _nx_ip_route_find() matches the table entry, the next
@@ -44,12 +44,12 @@
 #include "aminetxduo/netstatus.h"
 
 /* The experiment, in one place so the shell script can quote it. */
-#define PROBE_DEST      0xC0A84D05UL    /* 192.168.77.5  -- nothing routes here */
+#define PROBE_DEST      0xC0A84D05UL    /* 192.168.77.5 , nothing routes here */
 #define PROBE_NETWORK   0xC0A84D00UL    /* 192.168.77.0                         */
 #define PROBE_MASK      0xFFFFFF00UL    /* /24                                  */
-#define PROBE_NEXTHOP   0x0A000263UL    /* 10.0.2.99 -- on-subnet, answered by  */
+#define PROBE_NEXTHOP   0x0A000263UL    /* 10.0.2.99, on-subnet, answered by  */
                                         /*              nothing at all          */
-#define PROBE_ABSENT    0xC0A85800UL    /* 192.168.88.0 -- never added          */
+#define PROBE_ABSENT    0xC0A85800UL    /* 192.168.88.0, never added          */
 #define PROBE_PORT      9999
 
 typedef struct ProbeAddr

@@ -12,7 +12,7 @@
 #      non-counting implementation, two programs share a name server, the
 #      first one exits, and the second one's resolver stops working.  The
 #      probe adds the running stack's own server a second time and removes it
-#      once -- and the server must still be there.
+#      once, and the server must still be there.
 #
 #   2. dnsn_UseCount SAYS WHERE THE ENTRY CAME FROM.  Negative is "configured
 #      statically in the file", positive is a real count of run-time adds.
@@ -24,7 +24,7 @@
 #   3. THE DEFAULT DOMAIN IS USED.  "If no domain name is part of a host name,
 #      a default domain name can be added to it if the host name lookup fails"
 #      (GetDefaultDomainName).  Get/SetDefaultDomainName used to be a property
-#      bag over a feature that did not exist -- NetX Duo stores the domain and
+#      bag over a feature that did not exist, NetX Duo stores the domain and
 #      never reads it.  The control arm runs FIRST, with the domain cleared,
 #      so that the bare name is seen to fail before it is seen to succeed; and
 #      the bare name's answer must equal the fully qualified name's, which is
@@ -42,7 +42,7 @@
 #
 #   5. A SHORT BUFFER TRUNCATES.  "The returned name is null-terminated unless
 #      insufficient space is provided" (gethostname), and its ERRORS are
-#      EFAULT and EPERM -- there is no error for a name that does not fit.
+#      EFAULT and EPERM, there is no error for a name that does not fit.
 #      This stack answered -1/ENAMETOOLONG and wrote nothing, so a caller that
 #      sized its buffer from the autodoc got a failure the autodoc does not
 #      list.  The script asks one byte at a time and checks each prefix,
@@ -272,7 +272,7 @@ else
 fi
 
 # THE REGRESSION. Each of these used to be -1/ENAMETOOLONG with the buffer
-# untouched. A truncated name is not terminated -- that is the only way the
+# untouched. A truncated name is not terminated, that is the only way the
 # caller can tell it was cut.
 for n in 1 2 3 4 5 6 7 8; do
     WANT=$(printf '%s' "$SELF_NAME" | cut -c "1-$n")
@@ -410,7 +410,7 @@ else
     fail "the default domain store is still too small for the documented 255"
 fi
 
-# "success -- FALSE if the default domain name is not set" (autodoc).
+# "success, FALSE if the default domain name is not set" (autodoc).
 if grep -q "^domain cleared: rc 0$" "$REPORT"; then
     pass "GetDefaultDomainName is FALSE once the domain is cleared"
 else

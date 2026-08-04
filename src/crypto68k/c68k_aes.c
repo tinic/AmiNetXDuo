@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- crypto68k: AES-128/192/256 CBC.  Tables, key schedule, and
+ * AmiNetXDuo, crypto68k: AES-128/192/256 CBC.  Tables, key schedule, and
  * the portable C forms of every variant the 68020 assembly is measured
  * against.  See c68k_aes.h for why this file exists and what the machine's
  * missing data cache changed about it.
@@ -16,7 +16,7 @@
  *           what AmiSSL runs on this target.
  *     T1    one 1 KB table and three rotates per column.  What
  *           nx_crypto_aes.c does.  Costs 12 rotates a round to save 3 KB of
- *           table -- a trade that only pays if the 3 KB would have displaced
+ *           table, a trade that only pays if the 3 KB would have displaced
  *           something from a data cache.
  *     SBOX  a 256-byte S-box and MixColumns done in the ALU, word-parallel.
  *           Trades 4-byte reads for 1-byte reads, which is the right trade
@@ -183,7 +183,7 @@ ULONG   w;
     {
         s = c68k_aes_sbox[i];
 
-        /* Te0 = [2s, s, s, 3s], most significant byte first -- which on this
+        /* Te0 = [2s, s, s, 3s], most significant byte first, which on this
            machine is byte order, so the assembly can load it with MOVE.L. */
         w = (((ULONG)c68k_gf_mul(s, 2u)) << 24) |
             (((ULONG)s) << 16) |
@@ -197,7 +197,7 @@ ULONG   w;
 
         s = c68k_aes_isbox[i];
 
-        /* Td0 = [14s, 9s, 13s, 11s] -- the first column of InvMixColumns. */
+        /* Td0 = [14s, 9s, 13s, 11s], the first column of InvMixColumns. */
         w = (((ULONG)c68k_gf_mul(s, 14u)) << 24) |
             (((ULONG)c68k_gf_mul(s, 9u)) << 16) |
             (((ULONG)c68k_gf_mul(s, 13u)) << 8) |
@@ -226,7 +226,7 @@ static const UCHAR c68k_aes_rcon[11] =
  *
  * On the 68020 that is one MOVE.L: the part does misaligned data accesses in
  * hardware, at the cost of an extra bus cycle, and misaligned is the normal
- * case here -- a TLS record's payload starts 21 bytes into the packet buffer,
+ * case here, a TLS record's payload starts 21 bytes into the packet buffer,
  * so every CBC block in the record path is on an odd address.  Inline
  * assembly because C cannot express an intentionally unaligned load: GCC
  * compiles the portable form below into four byte reads, three shifts and
@@ -600,7 +600,7 @@ UINT    r;
  *
  * Tried for the bus: four byte reads per column instead of four longword
  * reads is half the traffic on a 16-bit path.  It loses because the traffic
- * was never the binding constraint -- see c68k_aes.h.
+ * was never the binding constraint, see c68k_aes.h.
  */
 
 #define ROL8(v)     (((v) << 8) | ((v) >> 24))
@@ -776,14 +776,14 @@ UINT    r;
 
 /*
  * The assembly, when this build has it.  Same interface as the C round cores
- * -- (round keys, rounds, four-longword state in memory) -- so the dispatch is
+ *, (round keys, rounds, four-longword state in memory), so the dispatch is
  * a switch and not two code paths.
  *
  * The state lives in memory.  The 68020 has eight data registers; a round
  * needs four state words, four accumulators, an index and a temporary, which
  * is ten.  The choice is between extracting the sixteen index bytes from
- * registers -- MOVE.B plus a ROL.L each, since only the low byte of a register
- * can be moved out -- and reading them straight out of a sixteen-byte buffer
+ * registers, MOVE.B plus a ROL.L each, since only the low byte of a register
+ * can be moved out, and reading them straight out of a sixteen-byte buffer
  * with MOVE.B d16(An),Dn, one instruction and no rotate.  The second is fewer
  * instructions and leaves four registers free for the accumulators, so the
  * round ends with a single MOVEM.L of all four.  On a part with a data cache

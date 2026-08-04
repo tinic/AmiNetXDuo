@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the stack singleton.
+ * AmiNetXDuo, the stack singleton.
  *
  * One AmiNetStack exists per machine. It holds the ThreadX kernel, the NetX Duo
  * NX_IP instance, the packet pool, the DHCP/DNS clients and the SANA-II
@@ -57,7 +57,7 @@ typedef struct AmiNetStack AmiNetStack;
 #define AMI_NET_ERR_DEVBAD    (-10)
 
 /*
- * The caller asked to be let go before the call finished -- see
+ * The caller asked to be let go before the call finished, see
  * netstack_resolve_until(). Nothing failed and nothing was learnt; the caller
  * decides what to report.
  */
@@ -83,8 +83,8 @@ AmiNetStack   *netstack_get(VOID);
  * in NX_THREADS_ONLY_CALLER_CHECKING and return NX_CALLER_ERROR unless the
  * caller is the ThreadX baton holder (port/netxduo-amiga/inc/nx_port.h). An Exec
  * Task that ThreadX has never adopted fails every one of them, so everything
- * that touches a NetX Duo API -- the netstack itself, bsdsocket.library, the
- * tools -- has to bracket the call.
+ * that touches a NetX Duo API, the netstack itself, bsdsocket.library, the
+ * tools, has to bracket the call.
  *
  * This is public rather than private to src/netstack/ so there is exactly one
  * bracket: bsdsocket.library used to carry a second, equivalent implementation
@@ -93,7 +93,7 @@ AmiNetStack   *netstack_get(VOID);
  * `caller` is caller-supplied storage that must stay valid until
  * ami_netstack_leave(). Brackets nest: a nested enter() finds the calling task
  * already holds the baton, borrows the context and leaves it alone. "Already
- * holds" and not "somebody holds" -- the baton is one global pointer, so a
+ * holds" and not "somebody holds", the baton is one global pointer, so a
  * second task must acquire it rather than read another's as its own.
  *
  * Nothing inside a bracket may block on anything except ThreadX. An adopted
@@ -116,7 +116,7 @@ VOID ami_netstack_leave(AmiNetCaller *caller);
  *
  * A TX_THREAD is ~230 bytes and these brackets sit under bsdsocket.library
  * vectors, which run on the CALLER's stack: an AmigaDOS Shell gives 4 KB, with
- * no guard page and no MMU, so an oversized frame does not fault -- it
+ * no guard page and no MMU, so an oversized frame does not fault, it
  * overwrites what is below it and the machine dies later somewhere unrelated.
  * A file-scope AmiNetCaller would not do, because two tasks can be inside the
  * bracket at once and each needs its own registration.
@@ -158,8 +158,8 @@ VOID ami_netstack_leave_cached(AmiNetCaller *caller);
 VOID ami_netstack_release(AmiNetCaller *caller);
 
 /*
- * Bracket counters. A freeze in here leaves nothing behind -- no Enforcer hit,
- * and a log that never reached disk -- so the evidence has to survive in memory
+ * Bracket counters. A freeze in here leaves nothing behind, no Enforcer hit,
+ * and a log that never reached disk, so the evidence has to survive in memory
  * for a debugger or NETSTATUS_HEALTH to pick up.
  *
  *   bs_Live / bs_LiveMax   tasks inside a bracket now, and the most ever
@@ -183,7 +183,7 @@ typedef struct AmiBatonStats
 
 extern AmiBatonStats ami_baton_stats;
 
-/* Accessors -- all return NULL when the stack is down. */
+/* Accessors, all return NULL when the stack is down. */
 NX_IP          *netstack_ip(VOID);
 NX_PACKET_POOL *netstack_pool(VOID);
 const AmiConfig *netstack_config(VOID);
@@ -194,8 +194,8 @@ const AmiConfig *netstack_config(VOID);
  *
  * A pool draining and a heap leak look the same from outside and want
  * different answers, so the two are counted separately.  There is no single
- * place to hook a packet allocation -- NetX Duo makes them from its own
- * internals as well as from ours -- so this samples instead: once at bring-up,
+ * place to hook a packet allocation, NetX Duo makes them from its own
+ * internals as well as from ours, so this samples instead: once at bring-up,
  * on the way out of every stack operation, on every baton transition, and
  * again from NETSTATUS_HEALTH so a program that asks gets the figure as of the
  * asking.  A dozen loads, against a bracket that costs hundreds of
@@ -230,7 +230,7 @@ LONG    netstack_interface_down(UWORD index);
 LONG    netstack_interface_stack_down(UWORD index);
 BOOL    netstack_interface_is_up(UWORD index);
 
-/* ------------------------------------------------- interfaces at run time --
+/* ------------------------------------------------- interfaces at run time,
  *
  * Adding and removing an interface after netstack_startup() has run. This is
  * what bsdsocket.library's AddInterfaceTagList() and RemoveInterface() are
@@ -257,8 +257,8 @@ LONG    netstack_interface_remove(UWORD index, BOOL force);
 /* ------------------------------------------- DHCP on one interface --------
  *
  * What bsdsocket.library's BeginInterfaceConfig() drives. The netstack holds
- * the single NX_DHCP -- there can only be one, because there is only one UDP
- * port 68 -- so an allocation asked for by an application goes through the same
+ * the single NX_DHCP, there can only be one, because there is only one UDP
+ * port 68, so an allocation asked for by an application goes through the same
  * client the boot-time configuration uses, on the interface it names and no
  * other.
  *
@@ -269,7 +269,7 @@ LONG    netstack_interface_remove(UWORD index, BOOL force);
  *
  *   netstack_interface_dhcp_start()   enable and start, creating the client
  *                                     if the machine booted without one.
- *   netstack_interface_dhcp_state()   AMI_DHCP_* -- poll it.
+ *   netstack_interface_dhcp_state()   AMI_DHCP_*, poll it.
  *   netstack_interface_dhcp_lease()   what the server said. BOUND only.
  *   netstack_interface_dhcp_stop()    give up, or let go of the lease.
  */
@@ -303,7 +303,7 @@ LONG    netstack_interface_dhcp_state(UWORD index);
 LONG    netstack_interface_dhcp_lease(UWORD index, AmiDhcpLease *out);
 LONG    netstack_interface_dhcp_stop(UWORD index, BOOL release);
 
-/* ------------------------------------------------------------------ IPv6 --
+/* ------------------------------------------------------------------ IPv6,
  *
  * Present only in an AMINETXDUO_IPV6 build. The floor build has no IPv6 at all,
  * so callers ask with #ifdef rather than at run time: there is no "IPv6 is
@@ -356,7 +356,7 @@ LONG netstack_resolve6(const char *name, ULONG addr_out[4],
  *                                           `interface_index`
  *   next_hop NULL or ::                     an on-link prefix; the packet goes
  *                                           straight to the destination
- *   next_hop given with a prefix            NX_NOT_SUPPORTED -- there is
+ *   next_hop given with a prefix            NX_NOT_SUPPORTED, there is
  *                                           nowhere to put it
  *
  * These return NetX Duo's own status rather than an AMI_NET_* code because
@@ -406,7 +406,7 @@ LONG    netstack_resolve_reverse(ULONG addr, char *name_out, ULONG name_len,
 /*
  * The same three, told how to give up early.
  *
- * `give_up` is asked between queries -- never during one -- whether to stop,
+ * `give_up` is asked between queries, never during one, whether to stop,
  * and a TRUE answer ends the lookup with AMI_NET_ERR_ABORTED. It runs outside
  * the ThreadX bracket, so it may call exec, which is what bsdsocket.library
  * needs: it answers from SetSignal() against SBTC_BREAKMASK, so Ctrl-C reaches
@@ -415,8 +415,8 @@ LONG    netstack_resolve_reverse(ULONG addr, char *name_out, ULONG name_len,
  * Between queries and not during one, because the DNS client's mutex covers a
  * single UDP socket, one transmit id and a file-scope decode buffer; a lookup
  * that walked away mid-query would leave all three to the next caller. The
- * granularity is therefore one query per configured name server -- a few
- * seconds -- rather than the sub-second slice a socket read can offer.
+ * granularity is therefore one query per configured name server, a few
+ * seconds, rather than the sub-second slice a socket read can offer.
  *
  * A NULL `give_up` is the plain call above.
  */
@@ -486,7 +486,7 @@ typedef struct AmiMdnsService
  *
  * Each brackets itself.  Start and stop do not wait: mDNS answers arrive over
  * seconds and there is no completion to wait for, so the caller owns the
- * collection window -- and must not be holding the ThreadX baton across it.
+ * collection window, and must not be holding the ThreadX baton across it.
  *
  * Collect does wait, for a bounded time and only when it has to.  A service
  * whose SRV arrived without the A record beside it has its target resolved

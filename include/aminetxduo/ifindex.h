@@ -1,5 +1,5 @@
 /*
- * RFC 3493 section 4 -- interface identification.
+ * RFC 3493 section 4, interface identification.
  *
  * The first extension to the bsdsocket LVO table since the NDK stopped moving
  * in 2006. Four vectors at -0x372 .. -0x384, continuing past the end of
@@ -64,7 +64,7 @@ struct if_nameindex
 
 /*
  * if_nametoindex(): the index of `ifname`, or 0. RFC 3493 defines no errors
- * for it, so errno is not set -- 0 is the whole answer.
+ * for it, so errno is not set, 0 is the whole answer.
  *
  * if_indextoname(): writes into `ifname`, which must have room for
  * IF_NAMESIZE bytes, and returns it. NULL with errno ENXIO when no interface

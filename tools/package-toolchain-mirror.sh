@@ -16,7 +16,7 @@
 #   that way.
 #
 #   It also fixes the source of the copy.  Packaging is always done from the
-#   UPSTREAM REGISTRY, never from our own mirror -- otherwise re-cutting the
+#   UPSTREAM REGISTRY, never from our own mirror, otherwise re-cutting the
 #   asset would copy from the last copy, and any drift becomes permanent.
 #
 # THE OUTPUT IS NOT BIT-REPRODUCIBLE
@@ -30,7 +30,7 @@
 # WHAT TO DO WITH THE RESULT
 #
 #   The release body carries the provenance and the GPLv3 6(d) corresponding
-#   source directions -- we redistribute GCC binaries, so that is not
+#   source directions, we redistribute GCC binaries, so that is not
 #   optional.  It is kept in tools/toolchain-mirror-release-notes.md rather
 #   than only on the release page, because an obligation that exists solely in
 #   a text box on github.com is one nobody can review, diff, or reinstate.

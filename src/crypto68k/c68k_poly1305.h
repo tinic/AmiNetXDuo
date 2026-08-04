@@ -1,9 +1,9 @@
 /*
- * AmiNetXDuo -- crypto68k: Poly1305, the authenticator half of RFC 8439.
+ * AmiNetXDuo, crypto68k: Poly1305, the authenticator half of RFC 8439.
  *
  *   docs/RESEARCH.md 5.5 measured AES-GCM at 344.6 ms for 1 KB against
  *   AES-CBC's 21.9, twenty times slower, because nx_crypto_gcm.c's GHASH is a
- *   bit-serial GF(2^128) multiply -- and then said what the alternative was:
+ *   bit-serial GF(2^128) multiply, and then said what the alternative was:
  *   "nx_secure has no ChaCha20-Poly1305 (verified: no source files, no
  *   ciphersuite entries).  That is the AEAD a 68k would want."  This is the
  *   authenticator half of writing it.
@@ -17,8 +17,8 @@
  *
  *   Poly1305 is arithmetic modulo 2^130 - 5, so a 32-bit machine holds the
  *   accumulator in five limbs either way.  The 2^26 layout is the standard
- *   32-bit one -- the same decomposition RFC 8439 2.5 describes and that
- *   poly1305-donna uses -- in which every partial product fits a 64-bit
+ *   32-bit one, the same decomposition RFC 8439 2.5 describes and that
+ *   poly1305-donna uses, in which every partial product fits a 64-bit
  *   accumulator with room to add four more, so a block is twenty-five MULU.L
  *   and no carry chain at all.  A 2^32 layout needs twenty multiplies
  *   but pays for them in explicit carry propagation, which on this part costs
@@ -67,7 +67,7 @@ typedef struct C68K_POLY1305_STRUCT
 
 /*
  * `key` is 32 bytes: r in the first sixteen, s in the second.  A Poly1305 key
- * is one-time -- reusing one over two messages hands over r -- so the AEAD in
+ * is one-time, reusing one over two messages hands over r, so the AEAD in
  * c68k_chacha20.h derives a fresh one per record from the cipher itself, and
  * this interface takes the key rather than generating it.
  */
@@ -89,7 +89,7 @@ VOID c68k_poly1305_finish(C68K_POLY1305 *ctx, UCHAR *tag);
  *
  * Exposed so it can be checked against c68k_poly1305.S, which implements the
  * same interface in 68020 assembly.  The three calls above take whichever this
- * build has -- ask with c68k_poly1305_blocks_is_asm() -- but the C stays
+ * build has, ask with c68k_poly1305_blocks_is_asm(), but the C stays
  * compiled either way, so a test can run both over the same blocks and compare
  * the accumulator.  tests/crypto68k/crypto68k_bulk does; a kernel bug that
  * only showed once the accumulator had grown would pass RFC 8439 2.5.2's

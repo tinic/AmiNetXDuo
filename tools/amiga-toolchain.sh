@@ -12,11 +12,11 @@
 # configure never disagree about which compiler they are using.
 #
 # Order, first hit wins:
-#   1. $AMIGA_TOOLCHAIN_ROOT              -- explicit, always wins
-#   2. the fetch cache                    -- what tools/fetch-toolchain.sh made
-#   3. m68k-amigaos-gcc on $PATH          -- a container or a module load
-#   4. /opt/m68k-amigaos                  -- the amigadev/crosstools layout
-#   5. $HOME/amigaos/tools/m68k-amigaos-gcc -- the historical local default
+#   1. $AMIGA_TOOLCHAIN_ROOT             , explicit, always wins
+#   2. the fetch cache                   , what tools/fetch-toolchain.sh made
+#   3. m68k-amigaos-gcc on $PATH         , a container or a module load
+#   4. /opt/m68k-amigaos                 , the amigadev/crosstools layout
+#   5. $HOME/amigaos/tools/m68k-amigaos-gcc, the historical local default
 #
 # 2 through 5 have to RUN on this host to be chosen, not merely exist: the
 # fetch cache is a linux/amd64 tree and can be populated on a machine that
@@ -30,7 +30,7 @@ _ami_tc_ok() {
     [ -n "$1" ] && [ -x "$1/bin/m68k-amigaos-gcc" ]
 }
 
-# For a SEARCHED candidate, being executable is not enough -- it has to be
+# For a SEARCHED candidate, being executable is not enough, it has to be
 # executable HERE.  tools/fetch-toolchain.sh caches a linux/amd64 tree, and it
 # will happily do so on a Mac (the headers and the pin are still useful), which
 # left the cache outranking a perfectly good native install and every cross

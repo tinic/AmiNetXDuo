@@ -1,4 +1,4 @@
-# tcpdrill -- packet-level TCP conformance.
+# tcpdrill, packet-level TCP conformance.
 #
 # One AmigaOS executable holding both halves of the experiment: a synthetic
 # SANA-II device that the shipped stack opens exactly as it opens
@@ -9,7 +9,7 @@
 # packet is seen through the device interface, so a change that broke the
 # library's ABI or its SANA-II contract would fail here rather than be
 # compiled around.  src/sana2/sana2_device.h is included for the SANA-II
-# command numbers and structures alone -- they are protocol facts, and the
+# command numbers and structures alone, they are protocol facts, and the
 # alternative is a second copy of them.
 
 add_executable(test_tcpdrill tcpdrill.c tapdev.c)

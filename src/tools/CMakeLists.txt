@@ -1,14 +1,14 @@
 # Roadshow-era command set (docs/RESEARCH.md 3.3, 6.6).
 #
 # One AmigaOS executable per tool.  These are ordinary Shell commands, not
-# library code, so newlib is available -- but output goes through
+# library code, so newlib is available, but output goes through
 # dos.library's Printf/VPrintf and arguments through ReadArgs(), which keeps
 # them small and makes them behave like every other AmigaDOS command.
 #
 # Two flavours of tool:
-#   * config-only  (AddNetInterface, Online, Offline, host) -- they never
+#   * config-only  (AddNetInterface, Online, Offline, host), they never
 #     touch NetX Duo directly, so they do not link ThreadX.
-#   * stack-reading (ShowNetStatus, netstat, ping) -- they adopt themselves
+#   * stack-reading (ShowNetStatus, netstat, ping), they adopt themselves
 #     as a TX_THREAD and read the live NX_IP, so they link the ThreadX port
 #     and the SANA-II shim.
 
@@ -29,7 +29,7 @@ set(TOOLS_WARNINGS -Wall -Wextra)
 # The commands are built for size, the libraries for speed.
 #
 # Nothing here is a hot path: ping waits on the wire, ShowNetStatus prints a
-# table once, and there is no throughput number the level can move -- the
+# table once, and there is no throughput number the level can move, the
 # libraries that actually move bytes are compiled separately.
 #
 # Re-measured 2026-07-27 over all 21 commands, and it does NOT reproduce the
@@ -46,12 +46,12 @@ set(TOOLS_WARNINGS -Wall -Wextra)
 # two duplicates to win, in fact: CMake's own GNU defaults append "-O3 -DNDEBUG"
 # after whatever the toolchain file puts in CMAKE_C_FLAGS_RELEASE_INIT, so the
 # libraries are -O3 builds and not the -O2 that file asks for.  See
-# docs/RESEARCH.md §21.6 -- it is a real finding and deliberately left alone.
+# docs/RESEARCH.md §21.6, it is a real finding and deliberately left alone.
 #
 # AMINETXDUO_TOOLS_OPTIMISE makes the level measurable instead of a constant
 # somebody has to edit.  Note it governs a command's OWN objects only: a tool
 # that asks for NX links aminetxduo_sana2, aminetxduo_config, threadx_port and
-# netxduo_port, which are built at the tree's level -- so a command is a MIX,
+# netxduo_port, which are built at the tree's level, so a command is a MIX,
 # and its size moves when the global level moves even with this pinned.  That
 # is measured, not assumed: ping is 34,652 bytes in an -O2 tree and 35,572 in
 # an -O3 one with -Os set here in both.
@@ -61,14 +61,14 @@ set(TOOLS_OPTIMISE $<$<CONFIG:Release>:${AMINETXDUO_TOOLS_OPTIMISE}>)
 
 # The libnix crt0.o register-save bug that made every command crash on return
 # to the Shell is repaired in the TOOLCHAIN, by tools/fix-toolchain-crt0.py at
-# fetch time -- not here.  It was briefly worked around per target, by patching
+# fetch time, not here.  It was briefly worked around per target, by patching
 # a private crt0 and linking it first under -nostartfiles; that had to be
 # repeated for every command, had to be right once per CPU multilib (there are
 # four affected crt0.o files), and left the toolchain broken for anything not
 # built through this file.  Nothing about it belongs in a link line.
 #
 # `tools/fetch-toolchain.sh --check-crt0` says whether the toolchain in use has
-# been repaired -- or does not need repairing.  Reported as bebbo/amiga-gcc
+# been repaired, or does not need repairing.  Reported as bebbo/amiga-gcc
 # issue #12 and fixed there: m68k_save_reg() now honours the __entrypoint
 # attribute crt0.c already carried, on amiga15.2 (168be3619), amiga13.4 and
 # amiga16.1.  A toolchain built from those reports "immune".  The repair stays for the toolchains
@@ -98,7 +98,7 @@ function(aminetxduo_add_tool target output)
 
     # A command is an ordinary executable with one entry point, so everything
     # unreachable from main() is dead and the linker may be told to say so.
-    # This is where the size of these commands actually was -- NOT newlib,
+    # This is where the size of these commands actually was, NOT newlib,
     # which contributes 4 KB of the 37 KB Online used to be.
     # TOOLS_COMMON_SOURCES is named in add_executable() rather than pulled
     # from an archive, so before --gc-sections the linker had no choice but to
@@ -152,7 +152,7 @@ aminetxduo_add_tool(tool_addnetinterface AddNetInterface
     SOURCES addnetinterface.c ${TOOLS_DEVDIAG})
 
 # CheckNetConfig is config-only in the strictest sense there is: it never opens
-# bsdsocket.library at all.  That is not an omission -- the machine that needs
+# bsdsocket.library at all.  That is not an omission, the machine that needs
 # checking is the one where the stack did not come up, so a checker that needed
 # a running stack would be unavailable in precisely the state it is for.
 aminetxduo_add_tool(tool_checknetconfig CheckNetConfig
@@ -164,7 +164,7 @@ aminetxduo_add_tool(tool_netsetup NetSetup SOURCES netsetup.c ${TOOLS_DEVDIAG})
 
 # AddNetRoute and DeleteNetRoute are one source, the same way Online and
 # Offline are: they parse the same destination and differ in one library call.
-# Config-only -- they reach the live routing table through NetStackControl()
+# Config-only, they reach the live routing table through NetStackControl()
 # and never link NetX Duo.
 aminetxduo_add_tool(tool_addnetroute    AddNetRoute    SOURCES addnetroute.c)
 aminetxduo_add_tool(tool_deletenetroute DeleteNetRoute SOURCES addnetroute.c
@@ -172,7 +172,7 @@ aminetxduo_add_tool(tool_deletenetroute DeleteNetRoute SOURCES addnetroute.c
 
 # GetNetStatus is the scriptable counterpart of ShowNetStatus: it answers with
 # a return code rather than a table.  NX, because it answers from the SAME two
-# snapshots ShowNetStatus and netstat print from -- three commands that disagree
+# snapshots ShowNetStatus and netstat print from, three commands that disagree
 # about whether the network is up would be worse than not having the third.
 aminetxduo_add_tool(tool_getnetstatus GetNetStatus NX SOURCES getnetstatus.c)
 
@@ -185,18 +185,18 @@ aminetxduo_add_tool(tool_offline Offline  SOURCES onoff.c ${TOOLS_DEVDIAG}
     DEFINES TOOL_OFFLINE)
 
 # host resolves through bsdsocket.library like every other client command,
-# and toolsock.c is where tool_socket_open() lives -- opening the library is
+# and toolsock.c is where tool_socket_open() lives, opening the library is
 # what starts the stack, which host used to refuse to do.
 aminetxduo_add_tool(tool_host    host     SOURCES host.c toolsock.c)
 
 # nslookup asks for the record types host cannot: MX, TXT, NS, SRV, SOA and
-# CNAME.  It is config-only in the same sense as tftp -- one datagram socket
-# through the published vectors, and toolsock.c for them -- because there is no
+# CNAME.  It is config-only in the same sense as tftp, one datagram socket
+# through the published vectors, and toolsock.c for them, because there is no
 # published call that asks for an MX and it therefore writes the RFC 1035 query
 # itself.  See the header of nslookup.c for why that is the right shape.
 aminetxduo_add_tool(tool_nslookup nslookup SOURCES nslookup.c toolsock.c)
 
-# arp reads NETSTATUS_ARP and writes through NETCTRL_ARP_ADD/DELETE -- both
+# arp reads NETSTATUS_ARP and writes through NETCTRL_ARP_ADD/DELETE, both
 # already existed with nothing driving them.  Status-only, so it must never
 # start the stack: see the header of arp.c.
 aminetxduo_add_tool(tool_arp     arp      NX SOURCES arp.c)
@@ -211,7 +211,7 @@ aminetxduo_add_tool(tool_fetch   fetch    SOURCES fetch.c fetchurl.c toolsock.c)
 # nc and telnet are config-only in the same sense as fetch, and share
 # toolsock.c: bsdsocket.library through its published vectors, including the
 # bind/listen/accept half that no client-only command reaches.  Neither needs
-# TLS, and neither needs a libc porting shim -- which is what makes them
+# TLS, and neither needs a libc porting shim, which is what makes them
 # writable natively rather than ported.
 aminetxduo_add_tool(tool_nc      nc       SOURCES nc.c     toolsock.c)
 
@@ -223,7 +223,7 @@ aminetxduo_add_tool(tool_nettrace NetTrace SOURCES nettrace.c toolsock.c)
 aminetxduo_add_tool(tool_telnet  telnet   SOURCES telnet.c toolsock.c)
 
 # traceroute is config-only too, and is the first command here to open a
-# SOCK_RAW descriptor -- so it reaches the raw half of the ABI the same way it
+# SOCK_RAW descriptor, so it reaches the raw half of the ABI the same way it
 # reaches every other part of it, through the published vectors.
 aminetxduo_add_tool(tool_traceroute traceroute SOURCES traceroute.c toolsock.c)
 
@@ -236,7 +236,7 @@ aminetxduo_add_tool(tool_whois   whois    SOURCES whois.c toolsock.c)
 # httpd is the first SERVER here, and config-only in the same sense as the
 # clients: bsdsocket.library through its published vectors, and no part of the
 # stack linked in.  It is the only thing in the tree that holds several
-# connections open at once -- `nc -l` takes one caller and exits -- so it is
+# connections open at once, `nc -l` takes one caller and exits, so it is
 # also the only coverage of accept() being called twice on a live listener.
 #
 # httppath.c, httpif.c and httpframe.c are sources of their own rather than
@@ -251,14 +251,14 @@ aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httppath.c httpif.c
 # sntp is config-only in the same sense as fetch: it reaches bsdsocket.library
 # through its published vectors and sets the machine's clock through
 # timer.device and battclock.resource.  It does NOT link the vendored NetX Duo
-# SNTP add-on, and the comment at the top of sntp.c says why -- the short
+# SNTP add-on, and the comment at the top of sntp.c says why, the short
 # version is that the add-on wants a running ThreadX, and a Shell command's
 # copy of ThreadX is not the one the stack is using.
 aminetxduo_add_tool(tool_sntp    sntp     SOURCES sntp.c toolsock.c)
 
 # ShowNetServices browses for mDNS services.  Config-only: it starts and stops
 # the browse through NETCTRL_MDNS_BROWSE and reads the answers through
-# NETSTATUS_SERVICES, and never touches an NX_IP -- the collection window is a
+# NETSTATUS_SERVICES, and never touches an NX_IP, the collection window is a
 # Delay() on its own task, which is the whole reason it does not need one.
 aminetxduo_add_tool(tool_shownetservices ShowNetServices
     SOURCES shownetservices.c)
@@ -298,7 +298,7 @@ set_target_properties(tool_smoke PROPERTIES OUTPUT_NAME "ToolsSmoke")
 # toolsock.c enters bsdsocket.library with its arguments in local register
 # variables, and a call made after one of them is set clobbers the earlier
 # ones.  Compiled here at -O0 and disassembled, because -Os inlines the only
-# helper involved and hides it -- see cmake/check-lvo-stub-registers.cmake.
+# helper involved and hides it, see cmake/check-lvo-stub-registers.cmake.
 #
 # A target of its own rather than a POST_BUILD on a command: the check wants
 # the file at an optimisation level no command is built at, and running it once
@@ -335,7 +335,7 @@ endif()
 # Host only: httppath.c, httpif.c and fetchurl.c are the files here free of
 # AmigaDOS calls, and the ones whose mistakes a reviewer cannot be relied on to
 # see.  One decides which file a request reaches, the second whether the
-# request may have it, the third where a redirect goes -- and an If: evaluator
+# request may have it, the third where a redirect goes, and an If: evaluator
 # that always says yes reads exactly like one that works, as does a resolver
 # that turns "about.html" into a host name.
 #

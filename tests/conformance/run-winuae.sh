@@ -8,7 +8,7 @@
 #
 # WHY THIS EXISTS SEPARATELY, stated carefully because the obvious version of
 # it is wrong: FS-UAE runs the HOST tier perfectly well.  The guest dials out
-# to 10.0.2.2 and SLIRP carries it -- measured, 18 of 19 in the sendrecv
+# to 10.0.2.2 and SLIRP carries it, measured, 18 of 19 in the sendrecv
 # category.  What SLIRP cannot do is let the helper dial BACK, so the one test
 # where the peer connects to the guest fails there with ECONNREFUSED, and
 # uae_slirp_redir is an empty function in every slirp backend FS-UAE ships
@@ -16,20 +16,20 @@
 #
 # WinUAE bridges the A2065 onto a real adapter, so the guest takes a real DHCP
 # lease and a third machine on the LAN can reach it.  Point -a "HOST <ip>" at
-# a machine running the suite's helper -- a THIRD machine, not this one and
+# a machine running the suite's helper, a THIRD machine, not this one and
 # not the Windows host: a frame the Windows host sends to the guest's MAC
 # leaves its NIC and never returns to that NIC's own pcap capture, so it looks
 # unreachable from there while being reachable from everywhere else.
 #
-# AMINETXDUO_WINUAE_A2065 must name the host adapter to bridge onto -- the
+# AMINETXDUO_WINUAE_A2065 must name the host adapter to bridge onto, the
 # bare pcap device name from pcap_findalldevs; tools/winuae-run.sh adds the
 # rpcap:// prefix.  Without it this runs on SLIRP and the HOST tier cannot
 # pass.
 #
 # THE HOST TIER'S BULK TESTS DO NOT RUN ON A HOST THAT COALESCES RECEIVES.
 # WinUAE 6.0.3 copies a captured frame into a 4000-byte buffer without
-# checking its length, so the first coalesced frame -- 11734 bytes on
-# winbuilder, where both ends of the LAN are virtual -- kills the emulator
+# checking its length, so the first coalesced frame, 11734 bytes on
+# winbuilder, where both ends of the LAN are virtual, kills the emulator
 # mid-suite.  Roadshow dies identically, so this is not ours; docs/RESEARCH.md
 # 63.4 has the measurement and the upstream commit that fixes it.
 #
@@ -61,12 +61,12 @@
 # it after resolving base_dir; the config tools/fsuae-run.sh writes cannot
 # carry the option).
 #
-# The emulator log still says "bsdsocket.library installed" either way -- that
+# The emulator log still says "bsdsocket.library installed" either way, that
 # line is printed when the emulation is *built*, not when it is registered.
 # It is not the proof.  The proof is threefold and checked below / visible in
 # the output:
 #   1. Removing build/cm/.../bsdsocket.library from the staged LIBS: makes the
-#      suite bail with "bsdsocket.library not available" -- so nothing else on
+#      suite bail with "bsdsocket.library not available", so nothing else on
 #      the machine answers OpenLibrary("bsdsocket.library", 4).
 #   2. The TAP log's "# bsdsocket.library:" line reads AmiNetXDuo, our
 #      SBTC_RELEASESTRPTR.  UAE's emulation answers "UAE <version>".
@@ -74,7 +74,7 @@
 #      (DHCP lease, resolver) as the library is opened.
 #
 # Results land in:
-#   build/winuae-testhd-<tag>/bsdsocktest.log   the TAP log -- the result
+#   build/winuae-testhd-<tag>/bsdsocktest.log   the TAP log, the result
 #   build/winuae-testhd-<tag>/conf-out.txt      the suite's console summary
 #   build/winuae-serial-<tag>.log               our ami_log output
 #
@@ -89,7 +89,7 @@ CPU=""
 # -T wins, then AMINETXDUO_RUN_TAG from the environment, then the default. The
 # environment has to be honoured here: this script exports AMINETXDUO_RUN_TAG
 # to tools/fsuae-run.sh, so taking the default unconditionally used to
-# OVERWRITE a caller's tag -- two runs started with different
+# OVERWRITE a caller's tag, two runs started with different
 # AMINETXDUO_RUN_TAG values would silently share build/testhd-conformance and
 # clobber each other's results.
 TAG="${AMINETXDUO_RUN_TAG:-conformance}"
@@ -157,7 +157,7 @@ printf '%s\n' "$ARGS" > "$STAGE/conf-args"
 
 # WinUAE's own bsdsocket.library emulation is off unless bsdsocket_emu is
 # set, and tools/winuae-run.sh never sets it, so there is nothing to disable
-# here -- the FS-UAE runner needs a Host.fs-uae for exactly that reason.
+# here, the FS-UAE runner needs a Host.fs-uae for exactly that reason.
 
 # ------------------------------------------------------------- the helper --
 #
@@ -167,7 +167,7 @@ printf '%s\n' "$ARGS" > "$STAGE/conf-args"
 # Not a convenience.  A helper left running across runs wedges, and the run
 # after it fails in one of two ways that both look like the stack: `Bail out!
 # Could not connect to host helper`, 0/142, or a suite that stops dead after
-# test 41 -- the one where the helper dials back into the guest -- and times
+# test 41, the one where the helper dials back into the guest, and times
 # out.  Measured 2026-07-28 on both the floor and the IPv6 build, three of six
 # runs each way, and gone once every run got a fresh helper.
 #
@@ -220,7 +220,7 @@ ident=$(grep -m1 "^# bsdsocket.library:" \
 case "$ident" in
     *AmiNetXDuo*) echo "$ident  (ours)" ;;
     "")           echo "!! no stack identification in the TAP log" ;;
-    *)            echo "!! $ident -- NOT our library, results are meaningless" ;;
+    *)            echo "!! $ident, NOT our library, results are meaningless" ;;
 esac
 
 exit "$status"

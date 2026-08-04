@@ -1,5 +1,5 @@
 /*
- * CycleDrill -- open/expunge/reopen and interface Online/Offline, repeatedly,
+ * CycleDrill, open/expunge/reopen and interface Online/Offline, repeatedly,
  * with the counters read between every cycle.
  *
  * The soak suite covers steady state.  What kills a long-lived Amiga stack is
@@ -28,9 +28,9 @@
  *
  *   Phase L is phase E without the expunge: open, last close, open again, and
  *   the segment never unloaded.  It is the control that tells the two halves
- *   of phase E apart.  A last close already runs the whole teardown --
+ *   of phase E apart.  A last close already runs the whole teardown,
  *   netstack_shutdown(), the IP stack, the packet pool, the SANA-II readers,
- *   ThreadX -- so a loss that shows in both phases is in the teardown, and a
+ *   ThreadX, so a loss that shows in both phases is in the teardown, and a
  *   loss that shows only in phase E is in the unload and reload, which is to
  *   say in something whose only owner was a file-scope static in the segment.
  *   Phase C cannot make this split: its pairs are nested inside the anchor and
@@ -51,8 +51,8 @@
  * WHAT IS MEASURED
  *
  *   NETSTATUS_HEALTH already reports allocations outstanding, sockets alive,
- *   packet buffers free and the high-water mark of each -- the same numbers
- *   `netstat -h` and `ShowNetStatus MEMORY` print -- so nothing new is
+ *   packet buffers free and the high-water mark of each, the same numbers
+ *   `netstat -h` and `ShowNetStatus MEMORY` print, so nothing new is
  *   instrumented here.  Two things it cannot report are read from Exec
  *   instead, because both are leaked ONTO THE CALLER by a bad close and
  *   neither lives in the library:
@@ -65,15 +65,15 @@
  *       nowhere else.
  *
  *   Every phase samples at the SAME point of each cycle, so a cost that is
- *   paid once -- a segment, a pool -- cancels between cycles and only a trend
+ *   paid once, a segment, a pool, cancels between cycles and only a trend
  *   survives.  The verdict at the end is that trend, not a pass/fail on one
  *   reading.
  *
  * WHAT IT COUNTS ABOUT ITSELF
  *
  *   The last line reports how many opens, bounces, round trips and expunges
- *   actually happened.  A drill that stopped cycling -- because an interface
- *   would not come back, or an expunge was declined every time -- would
+ *   actually happened.  A drill that stopped cycling, because an interface
+ *   would not come back, or an expunge was declined every time, would
  *   otherwise report "no drift" and pass.  tests/tools/run-cycledrill.sh
  *   asserts those counts, not just the absence of the word FAIL.
  *
@@ -131,9 +131,9 @@ enum
 /* Nested OpenLibrary()s per cycle.  Eight is past any plausible off-by-one in
    an open count and still cheap: only the first one starts a stack. */
 /*
- * Four, not eight. A base costs the calling task signal bits -- one for its
+ * Four, not eight. A base costs the calling task signal bits, one for its
  * event signal and, the first time a caller passes a timeout, one more for the
- * timer -- out of the 32 a Task has. With the drill's own bits already spent,
+ * timer, out of the 32 a Task has. With the drill's own bits already spent,
  * eight nested bases each doing a timed WaitSelect() runs the Process out and
  * OpenLibrary() correctly refuses the sixth. That ceiling is real and is
  * recorded in docs/EXECRESOURCES.md; asserting past it tests the platform's
@@ -232,7 +232,7 @@ static LONG p_getsockname(struct Library *base, LONG s, ProbeAddr *name,
  * Here for one reason: a timeout is what makes the library open timer.device
  * and AllocSignal() a bit out of THIS Process, lazily, per base (select.c).
  * A drill that never passes one never reaches that code, so the signal check
- * below had nothing to check -- and the bit was leaked on every close.
+ * below had nothing to check, and the bit was leaked on every close.
  */
 static LONG p_waitselect(struct Library *base, LONG nfds, ULONG *readfds,
                          struct timeval *tv)
@@ -458,8 +458,8 @@ static ULONG own_signals(VOID)
 
 /*
  * Tasks and Processes on the system lists.  A Process left running after an
- * expunge is the worst of the failures this drill looks for -- it is executing
- * out of a segment that has been handed back -- and it is also the cheapest
+ * expunge is the worst of the failures this drill looks for, it is executing
+ * out of a segment that has been handed back, and it is also the cheapest
  * explanation for a fixed amount of memory going missing every cycle, since a
  * Process is its control block plus its stack.
  *
@@ -553,8 +553,8 @@ static struct Library *lib_find(VOID)
 
 /*
  * Take TCP: down.  bsd_lib_expunge() declines while the handler process
- * exists -- its code is in the segment expunge would hand back and it holds no
- * open count -- so this is the documented way to make an expunge reachable.
+ * exists, its code is in the segment expunge would hand back and it holds no
+ * open count, so this is the documented way to make an expunge reachable.
  *
  * 1 the handler answered and went, 0 it refused (a session is running),
  * -1 there was no TCP: to begin with.
@@ -687,7 +687,7 @@ static VOID if_look(struct Library *base, const char *want, IfInfo *out)
         /* LINKUP, not ONLINE: NETCTRL_INTERFACE_UP/DOWN reach NX_LINK_ENABLE
            and NX_LINK_DISABLE, which is what LINKUP records.  The SANA-II
            shim's own online flag is a layer below and does not follow in
-           step -- the same note is in src/tools/onoff.c. */
+           step, the same note is in src/tools/onoff.c. */
         out->linkup  = (nsi->nsi_Flags & NETSTATUS_IF_LINKUP) ? TRUE : FALSE;
         out->address = nsi->nsi_Address;
         out->netmask = nsi->nsi_NetMask;
@@ -730,8 +730,8 @@ static struct Library *nest[NEST_OPENS];
 static LONG            socks[MAX_SOCKETS];
 
 /*
- * Nested opens.  Every one of them gets its own child base -- opening a child
- * again redirects to the master (library.c) -- and nsl_Opens is the number
+ * Nested opens.  Every one of them gets its own child base, opening a child
+ * again redirects to the master (library.c), and nsl_Opens is the number
  * that says whether the library agrees about how many callers it has.
  */
 /*
@@ -997,7 +997,7 @@ static VOID phase_addremove(struct Library *base, const char *iface,
  * RemLibrary() while this program still holds the library open.  Three things
  * have to be true afterwards, and only the first is obvious: the library is
  * still in the list, LIBF_DELEXP is set so the last close will retry, and the
- * base we are holding still answers a vector -- which is the one that says the
+ * base we are holding still answers a vector, which is the one that says the
  * segment was not handed back under a live caller.
  */
 static VOID phase_guarded_expunge(struct Library *anchor)
@@ -1089,7 +1089,7 @@ static VOID phase_expunge_cycle(LONG n, const char *iface, Sample *at_open,
     /*
      * Last close: netstack_shutdown() has run and the SANA-II readers have
      * been stopped.  This is where a driver that ignores AbortIO() orphans a
-     * reader thread -- the serial log carries the message, and the free memory
+     * reader thread, the serial log carries the message, and the free memory
      * sampled below carries the cost.
      */
 
@@ -1121,7 +1121,7 @@ static VOID phase_expunge_cycle(LONG n, const char *iface, Sample *at_open,
  *
  * tcp_started was set on the first bring-up and never cleared, so once TCP:
  * had been taken down every OpenLibrary() afterwards got a library that
- * answered every vector and had no TCP: device -- until the last close let the
+ * answered every vector and had no TCP: device, until the last close let the
  * segment go and the static reset itself.
  *
  * Which is why this phase holds a base open across the ACTION_DIE.  The
@@ -1364,7 +1364,7 @@ int main(VOID)
          * are the difference between a figure and a coin toss:
          *
          *   the FIRST and the LAST, not the last adjacent pair, because one
-         *   pair is one sample -- measured spread over five cycles was 12,568,
+         *   pair is one sample, measured spread over five cycles was 12,568,
          *   12,616, 12,592 and 21,104 bytes, so the last pair alone answers
          *   anything from 12 KB to 21 KB;
          *
@@ -1374,8 +1374,8 @@ int main(VOID)
          *   way out; the open one is taken with the stack fully up and is
          *   quiet.  The 21,104 above is that, and only that.
          *
-         * Anything paid once -- the packet pool, whatever RemLibrary() does
-         * with the seglist -- is in both samples and cancels.
+         * Anything paid once, the packet pool, whatever RemLibrary() does
+         * with the seglist, is in both samples and cancels.
          */
         LONG last  = expunge - 1;
         LONG total = (LONG)exp_open[0].free_mem -
@@ -1420,7 +1420,7 @@ int main(VOID)
 
     /*
      * The anchor is deliberately left open, the same way AddNetInterface leaks
-     * one: it keeps this stack -- the one every number above is about -- up
+     * one: it keeps this stack, the one every number above is about, up
      * for the `netstat -h` and `ShowNetStatus MEMORY` that follow in the
      * command list.  Closing it here would tear the stack down and leave those
      * two reporting on a fresh one.

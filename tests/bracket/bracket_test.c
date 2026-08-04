@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the ThreadX/Exec adoption layer, on its own.
+ * AmiNetXDuo, the ThreadX/Exec adoption layer, on its own.
  *
  * WHY THIS EXISTS
  *
@@ -14,7 +14,7 @@
  * It survived every automated harness, and the reason is worth stating: the
  * tests that are concurrent do not go through this layer, and the tests that go
  * through this layer are not concurrent. tests/soak has four adopted Tasks and
- * deliberate adopt/orphan churn -- and never asks the question this file asks.
+ * deliberate adopt/orphan churn, and never asks the question this file asks.
  *
  * So this tests the layer itself: no sockets, no NetX Duo, no SANA-II driver,
  * no interface. That is not minimalism for its own sake. It means this can run
@@ -26,7 +26,7 @@
  *
  * The invariant that failed, first and by name: while one Task holds the baton,
  * an unrelated Task must be told it does NOT. Everything else here is secondary
- * to that one, and t_baton_is_not_shared() can fail against the old code --
+ * to that one, and t_baton_is_not_shared() can fail against the old code,
  * which is the property that makes it a test rather than a description.
  *
  * SPDX-License-Identifier: MIT
@@ -91,7 +91,7 @@ static ULONG t_failures;
 /*
  * Flushed per line. The emulator runner reads stdout out of a file after the
  * run, so an unflushed line is a line that does not exist if the program wedges
- * -- and wedging is one of the things this file is here to catch. A sibling
+ *, and wedging is one of the things this file is here to catch. A sibling
  * harness lost two emulator runs to exactly that.
  */
 static VOID t_log(const char *fmt, LONG a, LONG b)
@@ -124,7 +124,7 @@ static VOID t_check(LONG ok, const char *what, LONG detail)
  * The stack is a SEPARATE AllocMem() from the task structure, and the MemList
  * covers only the task: RemTask() frees the task's own MemList entries, and a
  * list covering both frees one address twice. tests/soak/soak_test.c carries
- * the full account of what that looked like -- AN_FreeTwice when Exec noticed,
+ * the full account of what that looked like, AN_FreeTwice when Exec noticed,
  * recycled memory executing as code when it did not.
  */
 typedef struct BtTask
@@ -147,7 +147,7 @@ static BtTask bt_worker[BT_WORKERS];
 static BtTask bt_holder;
 
 /*
- * How far the holder got. It runs as a plain Task, so it cannot print -- and a
+ * How far the holder got. It runs as a plain Task, so it cannot print, and a
  * bounded wait that says nothing is no better than the unbounded one it
  * replaced.
  */
@@ -226,11 +226,11 @@ static struct Task *bt_spawn(BtTask *bt, VOID (*entry)(VOID), const char *name,
  * Returning instead lets Exec's default finaliser remove the task some
  * instructions later, and in those instructions main() has already seen
  * bt_Done, run bt_reap() and FreeMem()ed the stack the dying task is still
- * standing on -- and then handed that same block to the next Task it spawns.
+ * standing on, and then handed that same block to the next Task it spawns.
  * The machine resets: the entry point returns through a stack that now belongs
  * to somebody else, and the PC lands in the middle of a struct Task.  100%
  * reproducible on Kickstart 3.1 under both Amiberry and FS-UAE, and it is what
- * "17/17 checks passed" was hiding -- the checks that print are the ones before
+ * "17/17 checks passed" was hiding, the checks that print are the ones before
  * the first reap.
  *
  * Exec discards the forbid nesting of a task it removes, so the flag, the
@@ -363,7 +363,7 @@ static VOID bt_worker_entry(VOID)
  * the object's suspension list, with the object's suspended count already
  * incremented. List and count then disagree, and the next
  * _tx_event_flags_set() walks past the end of the list into offset 0x80 of
- * address zero -- the Enforcer hits this phase exists for.
+ * address zero, the Enforcer hits this phase exists for.
  *
  * The port's rule is therefore that the counter may only be raised under an
  * unbroken Forbid(): tx_thread_context_save.c states it, tx_amiga_adopt.c
@@ -371,7 +371,7 @@ static VOID bt_worker_entry(VOID)
  * defect.
  *
  * Catching that needs an observer that runs INSIDE the window, and no Task can
- * poll its way in -- Exec will not switch between two Tasks of the same
+ * poll its way in, Exec will not switch between two Tasks of the same
  * priority except on a quantum boundary. The probe below is dispatched the way
  * the SANA-II readers are on real hardware: it is the highest-priority Task in
  * the phase and it wakes on a device interrupt, so Exec dispatches it at the
@@ -579,8 +579,8 @@ int main(int argc, char **argv)
         /*
          * THE ONE THAT MATTERS. Another Task holds the baton right now. main()
          * has adopted nothing, so the layer must say no. The released defect
-         * said yes here, and everything downstream -- a caller skipping
-         * adoption and entering NetX Duo unbracketed -- followed from it.
+         * said yes here, and everything downstream, a caller skipping
+         * adoption and entering NetX Duo unbracketed, followed from it.
          */
         t_check(tx_amiga_caller_is_thread() == (UINT)TX_FALSE,
                 "another Task holding the baton does not make us a thread", 0);
@@ -746,7 +746,7 @@ int main(int argc, char **argv)
     /*
      * THE ONE THAT MATTERS. Every one of these is a moment where ThreadX was
      * told an interrupt was in progress while Exec was free to dispatch any
-     * Task in the machine -- and the Task it dispatches is holding the baton,
+     * Task in the machine, and the Task it dispatches is holding the baton,
      * one blocking call away from being left on a suspension list it has been
      * taken off.
      */

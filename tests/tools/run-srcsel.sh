@@ -13,17 +13,17 @@
 #   nxd_tcp_client_socket_source_connect() takes for a connect.
 #
 #   The assertion is on the source address the RECEIVER saw, not on the send
-#   returning len -- the send returned len before any of this existed, with
+#   returning len, the send returned len before any of this existed, with
 #   whatever source NetX picked.  The TCP arm asserts the address the
 #   ACCEPTING end reports, for the same reason.
 #
 #   It also holds the refusal.  A destination the bound address cannot reach
-#   is ENETUNREACH -- for a datagram, which used to be dropped inside
+#   is ENETUNREACH, for a datagram, which used to be dropped inside
 #   _nx_ip_packet_send() with the send already reported successful, and for a
 #   connect(), before the SYN.
 #
 # WHAT IT DOES NOT PROVE.  The case the source connect exists for is two
-# interfaces -- source on one, route out of the other -- and the guest here
+# interfaces, source on one, route out of the other, and the guest here
 # has one.  What is measured is the single-interface half: that the bound
 # address really is the source on loopback and on the interface, and that the
 # refusal fires where the bound address has no route at all.

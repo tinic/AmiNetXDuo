@@ -1,19 +1,19 @@
 /*
- * ShowNetServices -- what else on this network is offering something.
+ * ShowNetServices, what else on this network is offering something.
  *
  *     ShowNetServices [TYPE] [ALL] [SECONDS=<n>] [TXT/S] [QUIET/S]
  *
  * The other half of mDNS. netstack_mdns.c makes this machine findable by name
  * and advertises whatever DEVS:Internet/service_discovery declares; this asks
  * the same wire what everything else has to offer. No server, no configuration
- * and no address typed by hand -- a Mac, a Linux box running Avahi, a network
+ * and no address typed by hand, a Mac, a Linux box running Avahi, a network
  * printer and any Windows since 10 all answer.
  *
  * WHY IT TAKES A FEW SECONDS AND WHY THE LIST IS NOT "EVERYTHING"
  *
  *   A browse is a subscription, not a lookup. The query goes out, answers
  *   arrive over the following seconds from whatever is awake and listening,
- *   and there is no point at which mDNS says "that is all of them" -- a
+ *   and there is no point at which mDNS says "that is all of them", a
  *   machine that boots in a minute will answer then. So this command listens
  *   for a fixed window and then prints the peer cache, which is a different
  *   thing from what is on the network in both directions: shorter, because
@@ -23,8 +23,8 @@
  *   one that is still up, will file a bug about the wrong thing.
  *
  *   The window is three seconds. A responder on the same wire answers in well
- *   under one -- RFC 6762 6 gives a shared record a 20-120 ms delay before it
- *   replies -- so three catches the ordinary case with room to spare, and a
+ *   under one, RFC 6762 6 gives a shared record a 20-120 ms delay before it
+ *   replies, so three catches the ordinary case with room to spare, and a
  *   command that sat there for ten would read as hung. SECONDS raises it for a
  *   busy or a slow network.
  *
@@ -33,7 +33,7 @@
  *   RFC 6763 9's meta-query: _services._dns-sd._udp.local enumerates the
  *   service TYPES present rather than instances of any one of them. That is
  *   how a browser finds out what there is to browse for, and it is what this
- *   command does when asked for nothing in particular -- a user does not know
+ *   command does when asked for nothing in particular, a user does not know
  *   that a network printer is _ipp._tcp until something tells them.
  *
  * WITH ALL
@@ -45,7 +45,7 @@
  *
  *   What it does cost is peer cache. Four records land per instance and the
  *   queries themselves take a record each, and when the cache fills the module
- *   evicts the least recently used record rather than refusing the new one --
+ *   evicts the least recently used record rather than refusing the new one,
  *   which used to mean an SRV outliving the A record it points at, and a row
  *   printing "no address". That is now chased: netstack_mdns_browse_collect()
  *   asks for an address the browse did not carry. SVC_TYPES_MAX bounds the
@@ -86,7 +86,7 @@ enum
 
 /*
  * How many rows to ask the library for. The stack's peer cache holds about
- * twenty services, so this is not the limit that binds -- but nsh_Available
+ * twenty services, so this is not the limit that binds, but nsh_Available
  * comes back regardless, so a network larger than either is reported as
  * truncated rather than silently cut.
  */
@@ -109,7 +109,7 @@ static struct
 /* Off the stack for the same reason svc_answer is. */
 static char svc_types[SVC_TYPES_MAX][NETSTATUS_SVC_TYPE_LEN];
 
-/* ------------------------------------------------------------------ types -- */
+/* ------------------------------------------------------------------ types, */
 
 /*
  * A service type, as RFC 6763 4.1.2 spells one: "_" then one to fifteen
@@ -162,7 +162,7 @@ static const char *plural(ULONG n)
     return (n == 1) ? "" : "s";
 }
 
-/* --------------------------------------------------------------- the list -- */
+/* --------------------------------------------------------------- the list, */
 
 /*
  * A field a responder chose, printed. A TXT record is arbitrary bytes and an
@@ -278,7 +278,7 @@ static BOOL same_name(const char *a, const char *b)
  * Whether this type has already been listed.
  *
  * NETSTATUS_SERVICES answers with the whole cache, so the type list is every
- * distinct nsv_Type in it -- taken from the instances as well as from the
+ * distinct nsv_Type in it, taken from the instances as well as from the
  * meta-query's bare rows, because the two overlap. The module drops a bare
  * type row once it holds an instance of that type, it being the less
  * informative of the two, so a list built from the bare rows alone loses
@@ -297,7 +297,7 @@ static BOOL type_already_shown(UWORD upto, const char *type)
     return FALSE;
 }
 
-/* --------------------------------------------------------------- every type -- */
+/* --------------------------------------------------------------- every type, */
 
 /*
  * The types the meta-query turned up, so that one continuous query can be
@@ -384,7 +384,7 @@ static UWORD print_type(UWORD count, const char *type, BOOL want_txt)
     return shown;
 }
 
-/* ------------------------------------------------------------------ browse -- */
+/* ------------------------------------------------------------------ browse, */
 
 /*
  * Whether the library on this machine has a responder in it at all. A build

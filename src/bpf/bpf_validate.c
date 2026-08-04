@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- BPF program validator.
+ * AmiNetXDuo, BPF program validator.
  *
  * Runs at BIOCSETF time, on a program that came from an application over an
  * LVO, on a machine with no memory protection. Anything the interpreter in
@@ -145,7 +145,7 @@ LONG ami_bpf_validate(const struct bpf_insn *insns, ULONG count)
             {
             case BPF_JA:
                 /* A negative k becomes a huge unsigned one and is caught by
-                   the same test -- backward jumps do not exist. */
+                   the same test, backward jumps do not exist. */
                 if (k >= room)
                     return -1;
                 break;

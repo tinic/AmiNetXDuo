@@ -1,5 +1,5 @@
 /*
- * httpif -- the If: request header, evaluated.
+ * httpif, the If: request header, evaluated.
  *
  * Separate from httpd.c, and including nothing, for the reason httppath.c is
  * separate: what this decides is whether a write goes ahead against a lock or
@@ -29,7 +29,7 @@ typedef struct HttpIfState
 } HttpIfState;
 
 /*
- * Fill *out for `tag` -- a Resource-Tag out of the header, or "" for an
+ * Fill *out for `tag`, a Resource-Tag out of the header, or "" for an
  * untagged list, which is about the request target.  Both fields arrive
  * empty, so a resource the caller cannot find needs nothing written.
  */

@@ -1,5 +1,5 @@
 /*
- * arp -- the address resolution cache: what is at each address on this network.
+ * arp, the address resolution cache: what is at each address on this network.
  *
  *     arp [ADDRESS] [DELETE] [SET=<hardware address>] [UNIT=<n>] [STATS]
  *
@@ -11,7 +11,7 @@
  *
  *   an entry with a hardware address   it answered; the wire is fine, and
  *                                      whatever is wrong is above this layer
- *   an entry with no reply             we asked and nothing came back --
+ *   an entry with no reply             we asked and nothing came back,
  *                                      wrong address, wrong network, or it
  *                                      is switched off
  *   no entry at all                    nothing here has tried to reach it
@@ -25,8 +25,8 @@
  *                             answer ARP or that keeps changing
  *
  * IPv6 is in the same command, in a section of its own. There is no ARP in
- * IPv6 -- RFC 4861 neighbour discovery does the same job over ICMPv6, and NetX
- * Duo keeps its answers in a separate table -- but it is the same question,
+ * IPv6, RFC 4861 neighbour discovery does the same job over ICMPv6, and NetX
+ * Duo keeps its answers in a separate table, but it is the same question,
  * asked of the same wire, and every command in this suite that grew IPv6 grew
  * it inside itself rather than beside itself: one ping, one nslookup, one
  * netstat. A second binary would put "what is at that address" in two places
@@ -192,7 +192,7 @@ static VOID print_entry(const ToolArpEntry *e, BOOL have_snapshot)
     tool_printf("\n");
 }
 
-/* ------------------------------------------------------------- neighbours -- */
+/* ------------------------------------------------------------- neighbours, */
 
 /*
  * A colon says the user meant an IPv6 address. Nothing else can have one: not

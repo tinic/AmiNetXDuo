@@ -1,4 +1,4 @@
-# tcpdrill -- what an unacceptable segment is answered with.
+# tcpdrill, what an unacceptable segment is answered with.
 #
 # RFC 793 3.9 page 69: an unacceptable segment is answered with an
 # acknowledgment, unless it carries a RESET.  f7ca23ec narrowed that to segments

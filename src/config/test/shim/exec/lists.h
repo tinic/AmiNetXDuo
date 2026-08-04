@@ -1,5 +1,5 @@
 /*
- * Host test shim -- the list heads usergroup_internal.h embeds. See
+ * Host test shim, the list heads usergroup_internal.h embeds. See
  * exec/types.h. Never compiled for the Amiga.
  *
  * SPDX-License-Identifier: MIT

@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- crash guard.
+ * AmiNetXDuo, crash guard.
  *
  * AmigaOS has no memory protection, so a bad pointer produces a Guru and takes
  * the whole machine down. Under the test harness that means the emulator dies
@@ -79,7 +79,7 @@ VOID ami_crash_set_reference(APTR code_address, const char *label);
 const char *ami_crash_name(ULONG number);
 
 /*
- * Exec Alert (Guru) interception. A Guru is not a CPU exception -- Exec calls
+ * Exec Alert (Guru) interception. A Guru is not a CPU exception, Exec calls
  * its own Alert() when it detects corruption, so the trap handler never sees
  * it. These hook exec's Alert vector so a double free, corrupt memory list or
  * reused IORequest gets logged with a decoded reason before the Guru appears.

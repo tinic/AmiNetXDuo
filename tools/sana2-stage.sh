@@ -10,7 +10,7 @@
 #
 # Third-party drivers are staged into DEVS:Networks, which is where they are
 # really installed, and DEVICE= is left as the bare name so the run exercises
-# the fallback in ami_sana2_open_device() -- docs/RESEARCH.md 44.9.  The A2065
+# the fallback in ami_sana2_open_device(), docs/RESEARCH.md 44.9.  The A2065
 # keeps DEVS: itself, which is where our own tests have always put it.
 #
 # Environment:
@@ -36,8 +36,8 @@ sana2_driver_for() {
     esac
 }
 
-# Where a hand-placed driver lives.  Most of these cannot be fetched -- the
-# licences in docs/RESEARCH.md 77 permit two of eight -- so the rest arrive by
+# Where a hand-placed driver lives.  Most of these cannot be fetched, the
+# licences in docs/RESEARCH.md 77 permit two of eight, so the rest arrive by
 # somebody putting the file there, and that store is the supported way to do
 # it.  Echoes the path, or nothing.
 sana2_local_driver() {

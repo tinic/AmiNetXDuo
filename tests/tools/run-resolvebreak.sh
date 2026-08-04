@@ -23,7 +23,7 @@
 #
 # THE ONE EXTERNAL DEPENDENCY, stated rather than hidden: an address that
 # nothing answers.  192.0.2.1 is in RFC 5737's TEST-NET-1, reserved for
-# documentation, so no real name server can be there -- but a network that
+# documentation, so no real name server can be there, but a network that
 # answers it (a captive portal, a router that NXDOMAINs everything) makes the
 # measurement meaningless, and the probe fails rather than reporting a number
 # from it.

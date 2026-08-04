@@ -1,4 +1,4 @@
-# tcpdrill -- TCP keepalive, which setsockopt(SO_KEEPALIVE) used to promise and
+# tcpdrill, TCP keepalive, which setsockopt(SO_KEEPALIVE) used to promise and
 # nothing delivered.
 #
 # THIS SCRIPT NEEDS A BUILD WITH A SHORT IDLE TIMER.  NX_TCP_KEEPALIVE_INITIAL
@@ -12,7 +12,7 @@
 # not passed.
 #
 # WHAT A KEEPALIVE PROBE LOOKS LIKE ON THE WIRE.  It is an ACK carrying
-# tx_sequence - 1 -- a sequence number one behind what we have already sent,
+# tx_sequence - 1, a sequence number one behind what we have already sent,
 # which the peer is obliged to acknowledge because it looks like a retransmitted
 # byte it has already seen (RFC 1122 4.2.3.6).  After the handshake our
 # tx_sequence is 1, so the probe is `A seq=0 ack=1`.

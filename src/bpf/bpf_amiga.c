@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the AmigaOS half of the bpf_* path.
+ * AmiNetXDuo, the AmigaOS half of the bpf_* path.
  *
  * Four functions, so that bpf_filter.c, bpf_validate.c, bpf_channel.c and
  * bpf_tap.c stay host-buildable and host-testable.
@@ -69,14 +69,14 @@ ULONG ami_bpf_signals_set(ULONG mask)
  *
  * GetSysTime() rather than DateStamp(): it is a timer.device library call, so
  * it is safe from a Task that is not a Process, which the SANA-II readers are
- * not. It reports Amiga time -- seconds since 1978-01-01 -- so the epoch
+ * not. It reports Amiga time, seconds since 1978-01-01, so the epoch
  * difference goes on top, or every capture would appear to have happened in
  * the 1970s.
  *
  * TimerBase is opened by src/common/compat.c for its EClock millisecond
  * counter, and ami_bpf_time_init() forces that open from ami_bpf_open(). It has
  * to happen there rather than here: ami_bpf_capture() calls ami_bpf_now() with
- * the channel lock -- a Forbid() -- held, and ami_millis() reaches
+ * the channel lock, a Forbid(), held, and ami_millis() reaches
  * OpenDevice("timer.device") on the first call. That would have run on a
  * SANA-II reader thread with task switching off, and once per captured frame
  * for as long as the open kept failing.
@@ -95,8 +95,8 @@ VOID ami_bpf_now(ULONG *sec, ULONG *usec)
 {
     /* `struct timeval`, not `TimeVal_Type`: the typedef is NDK 3.2's, and NDK
        3.9 has no such name.  Both NDKs declare GetSysTime() as taking the
-       Amiga timeval -- 3.2 spells that parameter TimeVal_Type, which is a
-       typedef for exactly this struct -- and both give it tv_secs/tv_micro. */
+       Amiga timeval, 3.2 spells that parameter TimeVal_Type, which is a
+       typedef for exactly this struct, and both give it tv_secs/tv_micro. */
     struct timeval tv;
 
     if (TimerBase == NULL)

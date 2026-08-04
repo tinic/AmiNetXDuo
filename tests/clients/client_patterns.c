@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the access patterns real network clients use.
+ * AmiNetXDuo, the access patterns real network clients use.
  *
  * bsdsocktest checks that each vector behaves; this checks that the sequences
  * a ported client actually issues behave.  A stack can pass "connect() to
@@ -28,7 +28,7 @@
  *
  * Style follows tests/conformance/conf_probe.c: an ordinary AmigaOS program
  * that opens bsdsocket.library and calls vectors, linked against none of our
- * code.  Unlike the probe this one asserts -- it exits RETURN_FAIL if any
+ * code.  Unlike the probe this one asserts, it exits RETURN_FAIL if any
  * check fails, so it can be a gate.
  *
  * SPDX-License-Identifier: MIT
@@ -591,7 +591,7 @@ static VOID group_f(VOID)
     }
 
     /*
-     * One listener, many accepted connections -- the shape of a curl multi
+     * One listener, many accepted connections, the shape of a curl multi
      * handle with parallel transfers, or an ssh session with several channels.
      */
     lst = make_listener(0, &port);
@@ -650,7 +650,7 @@ static VOID group_f(VOID)
              FD_ISSET(srv[5], &rfds) && FD_ISSET(srv[11], &rfds),
              "and set exactly those three bits, no others", ready);
 
-        /* Everything writable at once -- curl's send path asks this. */
+        /* Everything writable at once, curl's send path asks this. */
         {
             fd_set wfds;
 
@@ -677,7 +677,7 @@ static VOID group_f(VOID)
 /*
  * Under the 8 KB receive window: the reader below does not read until the
  * writer has closed, so a payload larger than the window would deadlock a
- * blocking send() -- correct BSD behaviour, and not what this group is about.
+ * blocking send(), correct BSD behaviour, and not what this group is about.
  */
 #define N_BYTES     6144
 
@@ -1003,7 +1003,7 @@ static VOID group_j(VOID)
 
     /*
      * WaitSelect() over a range wider than the old table.  The caller's fd_set
-     * has to be big enough -- FD_SETSIZE is 64 in this toolchain -- so this
+     * has to be big enough, FD_SETSIZE is 64 in this toolchain, so this
      * uses a hand-built 128-bit map, which is what a client that raised the
      * table would have to do too.
      */
@@ -1215,7 +1215,7 @@ static VOID group_p(VOID)
 
     /*
      * These four vectors are in the Roadshow tail of the LVO table, past where
-     * bsdsocktest's own inline header stops -- so nothing in the conformance
+     * bsdsocktest's own inline header stops, so nothing in the conformance
      * suite calls them and this is their only coverage in a non-IPv6 build.
      */
 
@@ -1314,7 +1314,7 @@ static VOID group_p(VOID)
         res = NULL;
     }
 
-    /* 4. getnameinfo, the reverse direction -- ftp's PORT, nc -v, ssh logs. */
+    /* 4. getnameinfo, the reverse direction, ftp's PORT, nc -v, ssh logs. */
     {
         struct sockaddr_in sa;
 

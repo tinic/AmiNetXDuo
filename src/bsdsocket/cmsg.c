@@ -1,10 +1,10 @@
 /*
- * bsdsocket.library -- RFC 3542 ancillary data.
+ * bsdsocket.library, RFC 3542 ancillary data.
  *
  * The subset worth having, and no more: which interface and local address a
  * datagram arrived on, what its hop limit was, and which source to answer
  * from.  The routing-header, path-MTU and options families of RFC 3542 are
- * not here and are not planned -- docs/BACKLOG.md says which and why.
+ * not here and are not planned, docs/BACKLOG.md says which and why.
  *
  * Nothing in this file needs a new LVO.  sendmsg()/recvmsg() already carry
  * msg_control, and `struct msghdr` in the Roadshow NDK is already the 28-byte
@@ -14,8 +14,8 @@
  * WHERE THE ANSWERS COME FROM
  *
  * NX_PACKET carries both halves already.  nx_packet_ip_header points at the
- * arriving IP header for the life of the packet -- the receive path advances
- * nx_packet_prepend_ptr past it rather than dropping it -- so the destination
+ * arriving IP header for the life of the packet, the receive path advances
+ * nx_packet_prepend_ptr past it rather than dropping it, so the destination
  * address, the TTL and the hop limit are read straight out of the wire bytes
  * rather than reconstructed.  nx_packet_address holds the arrival interface,
  * but NOT the same way in both families: nx_ipv4_packet_receive leaves an
@@ -28,15 +28,15 @@
  *
  * cmsg_len is a socklen_t, which is a 32-bit load, and a 68000 takes an
  * address error on an odd one.  A caller's msg_control is whatever it handed
- * us -- a `char buf[CMSG_SPACE(n)]` is only byte-aligned as far as the
- * language is concerned -- so an odd buffer is reported as MSG_CTRUNC with
+ * us, a `char buf[CMSG_SPACE(n)]` is only byte-aligned as far as the
+ * language is concerned, so an odd buffer is reported as MSG_CTRUNC with
  * nothing written rather than faulted on.  cmsg.h's CMSG_BUFFER() is the
  * declaration that cannot be wrong.
  *
  * Odd, and not "not a multiple of 4".  The test used to be `& 3`, which is the
  * alignment struct cmsghdr would have on a machine that aligns a long to its
  * width.  m68k does not: __alignof__(long) is 2 there, so every m68k object
- * this could describe -- a stack local, an AllocVec block, a CMSG_BUFFER --
+ * this could describe, a stack local, an AllocVec block, a CMSG_BUFFER,
  * is even, and half of them are 2 mod 4.  `& 3` refused those, which meant it
  * refused CMSG_BUFFER() itself about half the time it was used.  Two bytes
  * short of a longword boundary is a perfectly good place to read a longword
@@ -57,7 +57,7 @@
 #define BSD_CMSG_IPV4_HDR       20
 #define BSD_CMSG_IPV6_HDR       40
 
-/* ---------------------------------------------------------------- the ABI --
+/* ---------------------------------------------------------------- the ABI,
  *
  * Every one of these is a number an application will have compiled into it.
  * A toolchain whose <sys/socket.h> disagrees is a build failure here, the
@@ -70,7 +70,7 @@ _Static_assert(offsetof(struct cmsghdr, cmsg_type)  == 8, "cmsg_type moved");
 _Static_assert(sizeof(((struct cmsghdr *)0)->cmsg_len) == 4,
                "socklen_t is not four bytes");
 
-/* CMSG_ALIGN is 4 and that is ABI -- see aminetxduo/cmsg.h. */
+/* CMSG_ALIGN is 4 and that is ABI, see aminetxduo/cmsg.h. */
 _Static_assert(CMSG_ALIGN(0) == 0 && CMSG_ALIGN(1) == 4 && CMSG_ALIGN(4) == 4 &&
                CMSG_ALIGN(5) == 8, "CMSG_ALIGN is not 4-byte");
 _Static_assert(CMSG_LEN(0) == 12 && CMSG_LEN(4) == 16,
@@ -102,7 +102,7 @@ _Static_assert(offsetof(struct in6_pktinfo, ipi6_ifindex) == 16, "ipi6_ifindex m
 _Static_assert(sizeof(struct icmp6_filter) == 32, "icmp6_filter is not 256 bits");
 #endif
 
-/* ------------------------------------------------------------- the packet -- */
+/* ------------------------------------------------------------- the packet, */
 
 /*
  * The arriving IP header, or NULL when `need` bytes of it are not readable.
@@ -139,7 +139,7 @@ static const UBYTE *bsd_cmsg_iphdr(NX_PACKET *packet, ULONG need)
  * Loopback is numbered here too, and is the whole of NX_MAX_IP_INTERFACES
  * rather than NX_MAX_PHYSICAL_INTERFACES below.  NetX Duo parks it at
  * nx_ip_interface[NX_LOOPBACK_INTERFACE], one past the physical slots, and the
- * convention this library settled on is slot + 1 -- so loopback is
+ * convention this library settled on is slot + 1, so loopback is
  * NX_LOOPBACK_INTERFACE + 1 and nothing else has to move.  if_indextoname()
  * names it and if_nametoindex() takes the name back, so the number a datagram
  * over ::1 reports is one a caller can resolve and one bsd_cmsg_source_index()
@@ -180,7 +180,7 @@ static ULONG bsd_cmsg_ifindex(NX_IP *ip, NX_PACKET *packet)
     return 0UL;
 }
 
-/* ------------------------------------------------------------- the buffer -- */
+/* ------------------------------------------------------------- the buffer, */
 
 typedef struct
 {
@@ -213,11 +213,11 @@ static VOID bsd_cmsg_put(BsdCmsgOut *out, LONG level, LONG type,
     out->co_Used += space;
 }
 
-/* --------------------------------------------------------------- defaults -- */
+/* --------------------------------------------------------------- defaults, */
 
 #ifdef AMINETXDUO_IPV6
 /* "When an ICMPv6 raw socket is created, it will by default pass all ICMPv6
-   message types" -- RFC 3542 3.2, and what a zero-length setsockopt restores. */
+   message types", RFC 3542 3.2, and what a zero-length setsockopt restores. */
 static VOID bsd_cmsg_filter_passall(AmiSocket *sock)
 {
     UINT i;
@@ -237,7 +237,7 @@ VOID bsd_cmsg_reset(AmiSocket *sock)
     bsd_bzero(&sock->as_CmsgSticky, sizeof(sock->as_CmsgSticky));
 }
 
-/* -------------------------------------------------------------- receiving -- */
+/* -------------------------------------------------------------- receiving, */
 
 #ifdef AMINETXDUO_IPV6
 static VOID bsd_cmsg_build_v6(AmiSocket *sock, NX_IP *ip, NX_PACKET *packet,
@@ -366,7 +366,7 @@ VOID bsd_cmsg_build(AmiSocket *sock, NX_PACKET *packet, struct msghdr *msg)
         msg->msg_flags |= MSG_CTRUNC;
 }
 
-/* ---------------------------------------------------------------- sending -- */
+/* ---------------------------------------------------------------- sending, */
 
 /*
  * RFC 3542 6.6 lets a PKTINFO name an address, an interface, or both, and
@@ -461,8 +461,8 @@ LONG bsd_cmsg_parse(struct AmiSocketBase *base, AmiSocket *sock,
     /*
      * The sticky IPV6_PKTINFO is the default a per-datagram one overrides.
      * Copied whether or not ACW_STICKY6 is set, because clearing the option
-     * zeroes the record: cs_Have is the authority, and send()/sendto() -- which
-     * never come through here -- read the same field directly.
+     * zeroes the record: cs_Have is the authority, and send()/sendto(), which
+     * never come through here, read the same field directly.
      *
      * cs_HaveHops is not part of it: IPV6_HOPLIMIT is ancillary-only, so the
      * sticky record can never carry one and send()/sendto() get FALSE from the
@@ -560,14 +560,14 @@ LONG bsd_cmsg_parse(struct AmiSocketBase *base, AmiSocket *sock,
  * nxd_ip_raw_packet_source_send() want.  It is not the same number in the two
  * families: for IPv4 it indexes nx_ip_interface[], for IPv6 nx_ipv6_address[].
  * -1 when the source cannot be resolved, which the caller turns into
- * EADDRNOTAVAIL rather than letting NetX pick -- picking is what the option
+ * EADDRNOTAVAIL rather than letting NetX pick, picking is what the option
  * was given to prevent.
  *
  * Not bsd_source_select() (socket.c), which produces the same kind of index
  * and is deliberately left alone: it answers "where does this SOCKET send
  * from", from the bound address and the RFC 4007 zone, both standing state.
  * This answers "where does this DATAGRAM send from", and takes a bare
- * interface index -- which a bind cannot express -- as well as an address.
+ * interface index, which a bind cannot express, as well as an address.
  * The one thing they must agree on is the +NX_LOOPBACK_IPV6_ENABLED bound
  * below; both have it, and a comment at each.
  */
@@ -778,7 +778,7 @@ static LONG bsd_cmsg_sticky(struct AmiSocketBase *base, AmiSocket *sock,
 }
 
 /*
- * ICMP6_FILTER.  Only on a raw ICMPv6 socket -- it filters by ICMPv6 type,
+ * ICMP6_FILTER.  Only on a raw ICMPv6 socket, it filters by ICMPv6 type,
  * and nothing else this library carries has one.
  */
 static LONG bsd_cmsg_icmp6_filter(struct AmiSocketBase *base, AmiSocket *sock,
@@ -794,7 +794,7 @@ static LONG bsd_cmsg_icmp6_filter(struct AmiSocketBase *base, AmiSocket *sock,
     if (set)
     {
         /* "In order to clear an installed filter the application can issue a
-           setsockopt for ICMP6_FILTER with a zero length." -- RFC 3542 3.2. */
+           setsockopt for ICMP6_FILTER with a zero length.", RFC 3542 3.2. */
         if (*optlen == 0)
         {
             bsd_cmsg_filter_passall(sock);
@@ -860,7 +860,7 @@ LONG bsd_cmsg_option(struct AmiSocketBase *base, AmiSocket *sock, LONG level,
 
         /*
          * RFC 3542 6.3: the hop limit of one datagram is ancillary data on
-         * sendmsg(), never a sticky option -- IPV6_UNICAST_HOPS is the sticky
+         * sendmsg(), never a sticky option, IPV6_UNICAST_HOPS is the sticky
          * one, and in6.c answers it.
          */
         if (optname == IPV6_HOPLIMIT)

@@ -1,10 +1,10 @@
-# tls.library -- TLS for ordinary Amiga programs.
+# tls.library, TLS for ordinary Amiga programs.
 #
 # Built only when AMINETXDUO_TLS is ON, and shipped alongside a
 # bsdsocket.library from the SAME build: the two share struct layouts and the
 # private context ABI (include/aminetxduo/nxcontext.h).
 #
-# tls_library.c MUST stay first in the object order -- its "moveq #-1,d0 / rts"
+# tls_library.c MUST stay first in the object order, its "moveq #-1,d0 / rts"
 # has to land at offset 0 of the first code hunk, the same rule
 # bsdsocket.library and usergroup.library follow.
 #
@@ -39,7 +39,7 @@ set(TLSLIB_SOURCES
 
 # TLS 1.2 session resumption.  nx_secure has none, and the two vendored
 # functions that would have to change are reached through the linker rather
-# than by editing third_party/ -- see the header comment in tls_resume.c for
+# than by editing third_party/, see the header comment in tls_resume.c for
 # why --wrap was chosen over defining the symbols outright (450 lines of state
 # machine that would have to be re-merged at every submodule bump).
 #
@@ -54,7 +54,7 @@ set(TLSLIB_WRAP_OPTIONS
 # serial port: what went into each ClientHello, every handshake message type
 # seen, and what the ServerHello echoed back against what was offered.  Off by
 # default and worth keeping, because a resumption that silently does not happen
-# looks exactly like one the server declined -- and telling those two apart was
+# looks exactly like one the server declined, and telling those two apart was
 # the whole of finding the empty-session-ID rule (docs/RESEARCH.md 13.4).
 set(TLSLIB_TRACE_DEFS "" CACHE STRING
     "Extra defines for tls.library, e.g. -DTLS_RESUME_TRACE")
@@ -108,7 +108,7 @@ endif()
 #
 # tools/mkcertstore.py turns a PEM bundle into DEVS:Internet/certificates.
 #
-# The bundle is a VENDORED, DATED, HASH-PINNED snapshot -- third_party/cacert/,
+# The bundle is a VENDORED, DATED, HASH-PINNED snapshot, third_party/cacert/,
 # which carries the provenance and the licence reasoning.  It used to be
 # scavenged from the host (/etc/ssl/cert.pem and friends), and that was wrong
 # in both directions: a release carried whatever roots the release engineer's
@@ -125,7 +125,7 @@ endif()
 #     the result, the digest moves and the build stops.
 #
 # -DAMINETXDUO_CA_BUNDLE=<file> still works, for a machine with its own set.
-# It skips the output pin -- there is nothing to pin it to -- says so, and
+# It skips the output pin, there is nothing to pin it to, says so, and
 # keeps a floor on the root count so a truncated bundle cannot pass.
 
 set(AMINETXDUO_CA_BUNDLE "" CACHE FILEPATH

@@ -1,5 +1,5 @@
 /*
- * IfProbe -- exercises the Roadshow interface query API on a running stack.
+ * IfProbe, exercises the Roadshow interface query API on a running stack.
  *
  * ObtainInterfaceList(), ReleaseInterfaceList() and QueryInterfaceTagList()
  * are the three vectors Roadie, NetMon and RoadshowControl reach for first.
@@ -19,7 +19,7 @@
  *      its neighbour;
  *   3. query a name that does not exist, which must fail with -1 and leave a
  *      sensible errno rather than succeed quietly;
- *   4. query with an empty tag list, which must succeed -- that is how a
+ *   4. query with an empty tag list, which must succeed, that is how a
  *      caller asks "does this interface exist?";
  *   5. release the list.
  *
@@ -46,7 +46,7 @@
  * The IFQ_* tags come from the NDK's own header, not from a copy: a probe that
  * restated the numbers could agree with a wrong implementation.  That header
  * pulls in <sys/socket.h>, which uses size_t and ssize_t without declaring
- * them, so these two come first -- the same ordering bsdsocket_internal.h
+ * them, so these two come first, the same ordering bsdsocket_internal.h
  * documents.
  */
 #include <stddef.h>
@@ -272,7 +272,7 @@ static VOID p_query_one(struct Library *base, const char *name)
     struct sockaddr_in_probe mask;
     struct sockaddr_in_probe bcast;
     struct sockaddr_in_probe dns;
-    /* Documented to be left alone by this implementation -- proving it. */
+    /* Documented to be left alone by this implementation, proving it. */
     LONG                     bytes_in[2];
     LONG                     last_start[2];
     LONG                     rc;
@@ -673,7 +673,7 @@ static LONG p_count_interfaces(struct Library *base, const char *want,
  * RemoveInterface() and AddInterfaceTagList(), on the interface this run is
  * riding on.  "It tries to release all the resources associated with a
  * networking interface, thus permitting it to be added again with new
- * parameters" -- removing and re-adding is the documented use, and the only
+ * parameters", removing and re-adding is the documented use, and the only
  * way to find out whether the SANA-II device was really closed and reopened.
  *
  * The hardware address is the evidence.  It is read from the card by
@@ -683,7 +683,7 @@ static LONG p_count_interfaces(struct Library *base, const char *want,
  *
  * The addressing is the other half.  AddInterfaceTagList() has no address,
  * netmask, gateway or broadcast tag, so the interface comes back BARE and the
- * ConfigureInterfaceTagList() below is what addresses it -- "such as setting
+ * ConfigureInterfaceTagList() below is what addresses it, "such as setting
  * interface addresses, status and routing metrics".  Both halves are printed:
  * what the freshly added interface is carrying, which must be nothing, and
  * what it is carrying after the configure, which must be what was asked for
@@ -750,7 +750,7 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
      * must fail as a whole and leave nothing half-created, or the retry below
      * would hit "an interface of that name already exists".
      *
-     * PFM_Everything is the refusable kind of tag -- it asks for promiscuous
+     * PFM_Everything is the refusable kind of tag, it asks for promiscuous
      * capture, and a caller told it got that while seeing local traffic only
      * would read a busy wire as a quiet one.
      */
@@ -885,7 +885,7 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
 /*
  * `IfProbe DOWN|OFFLINE|UP` moves the first interface to that state and does
  * nothing else, so that `netstat` can be run after it.  SM_Down and SM_Offline
- * both report IFQ_State == SM_Down -- the difference between them is whether
+ * both report IFQ_State == SM_Down, the difference between them is whether
  * the SANA-II device is still on the network, which the published API has no
  * way to ask.  netstat prints it, so the harness reads it from there.
  *

@@ -22,7 +22,7 @@
 # SPDX-License-Identifier: MIT
 
 # perf_test defines _nx_ip_checksum_compute() itself, so it can only be built
-# when the vendored object is out of the core -- i.e. when the replacement is
+# when the vendored object is out of the core, i.e. when the replacement is
 # switched on.  With -DAMINETXDUO_NET68K_CHECKSUM=OFF the two definitions would
 # collide, and the A/B it exists to run would be meaningless anyway.
 if(CMAKE_CROSSCOMPILING AND AMINETXDUO_NET68K_CHECKSUM)
@@ -40,7 +40,7 @@ target_include_directories(perf_checksum_ref PUBLIC ${AMINETXDUO_CORE_INCLUDES})
 target_compile_definitions(perf_checksum_ref PRIVATE
     _nx_ip_checksum_compute=n68k_checksum_reference)
 
-# aminetxduo_sana2 is here for exactly one object -- sana2_copy.c, whose
+# aminetxduo_sana2 is here for exactly one object, sana2_copy.c, whose
 # ami_sana2_copy_bytes() is the copy loop the RX interrupt runs.  Archive
 # semantics pull that member and nothing else.
 target_link_libraries(perf_test PRIVATE
@@ -65,7 +65,7 @@ endif() # CMAKE_CROSSCOMPILING
 # ------------------------------------------------------------- FitzBench --
 #
 # Bulk file throughput over a mounted share.  Links against nothing of ours --
-# it is AmigaDOS Read()/Write() and timer.device -- so the library under test
+# it is AmigaDOS Read()/Write() and timer.device, so the library under test
 # is whatever is in LIBS:, which is what makes an A/B of two builds possible
 # without rebuilding the benchmark.
 #
@@ -94,7 +94,7 @@ endif()
 #   AMINETXDUO_RUN_TAG=brk ./tools/fsuae-run.sh -x -t 900 -m A1200 \
 #       build/cm/tests/perf/bracket_test
 #
-# Read the header of bracket_test.c before quoting anything it prints -- and
+# Read the header of bracket_test.c before quoting anything it prints, and
 # only the 68020 profiles mean anything, for the reason cpucal.c measures.
 
 if(CMAKE_CROSSCOMPILING)
@@ -121,7 +121,7 @@ endif()
 # cpucal answers the question every other number in this directory depends on:
 # what does the emulator actually charge for an instruction?  It has no
 # dependency on NetX Duo at all, so it builds whatever the net68k options say
-# -- including on a profile where perf_test above is switched off.
+#, including on a profile where perf_test above is switched off.
 #
 #   cmake --build build/cm --parallel --target cpucal
 #   AMINETXDUO_RUN_TAG=cal ./tools/fsuae-run.sh -t 300 -m A1200 build/cm/tests/perf/cpucal
@@ -131,7 +131,7 @@ endif()
 
 # 68020 AND UP ONLY, and not for the usual "we did not get round to it"
 # reason: cpucal exists to time MULU.L against the MC68020UM's published
-# figures, so on a 68000 -- which has no MULU.L -- there is no measurement for
+# figures, so on a 68000, which has no MULU.L, there is no measurement for
 # it to make.  Excluded rather than made portable.  docs/RESEARCH.md §45.
 if(CMAKE_CROSSCOMPILING AND NOT AMINETXDUO_CPU STREQUAL "68000")
 

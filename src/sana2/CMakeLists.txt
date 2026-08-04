@@ -10,7 +10,7 @@ target_include_directories(aminetxduo_sana2
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # aminetxduo_net68k explicitly, not by way of netxduo: the checksum
-# replacement is switchable and this does not depend on it -- sana2_copy.c
+# replacement is switchable and this does not depend on it, sana2_copy.c
 # wants n68k_copy_bytes() whatever the checksum is doing.
 target_link_libraries(aminetxduo_sana2 PUBLIC
     netxduo aminetxduo_common aminetxduo_net68k)

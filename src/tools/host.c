@@ -1,5 +1,5 @@
 /*
- * host -- resolve a name the way this machine's own programs would.
+ * host, resolve a name the way this machine's own programs would.
  *
  *     host NAME/A,TIMEOUT/N/K
  *
@@ -24,13 +24,13 @@
  * address family and this library only ever fills it with IPv4.
  *
  * nslookup differs in that it bypasses the resolver: it builds a DNS query and
- * sends it to a name server itself, so it reports what that server said -- no
- * hosts file, no mDNS, no cache -- and can ask for record types the resolver has
+ * sends it to a name server itself, so it reports what that server said, no
+ * hosts file, no mDNS, no cache, and can ask for record types the resolver has
  * no call for (MX, TXT, NS, SRV, SOA) against a nominated server. Comparing the
  * two gives the diagnosis:
  *
  *     both agree                  the name is fine
- *     host works, nslookup fails  the answer came from this machine --
+ *     host works, nslookup fails  the answer came from this machine,
  *                                 DEVS:Internet/hosts, or mDNS, or the cache
  *     host fails, nslookup works  this machine's resolver configuration is
  *                                 wrong; not the network and not the name
@@ -97,7 +97,7 @@ int main(int argc, char **argv)
 
     /*
      * An IPv6 literal, in either build. host answers through the machine's
-     * resolver, and the resolver reverses IPv4 addresses only -- there is no
+     * resolver, and the resolver reverses IPv4 addresses only, there is no
      * ip6.arpa call behind gethostbyaddr() or getnameinfo() to ask. Handing
      * the literal to the forward path instead is what used to produce
      * "cannot resolve", with advice about spelling and name servers that has

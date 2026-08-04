@@ -1,5 +1,5 @@
 /*
- * httpframe -- how long a request body is, and where it ends.
+ * httpframe, how long a request body is, and where it ends.
  *
  * See httpframe.h for what this is separate for.  Nothing here calls anything:
  * no library, no allocation, no I/O.
@@ -49,7 +49,7 @@ HttpFrameResult http_frame_length(const char *value, unsigned long *out)
         return HTTP_FRAME_EMPTY;
 
     /* Trailing whitespace is allowed and anything else is not.  A value of
-       "5abc" is not a length with junk after it -- it is a header this server
+       "5abc" is not a length with junk after it, it is a header this server
        does not understand, and a body it therefore cannot place. */
     while (*value == ' ' || *value == '\t')
         value++;
@@ -171,7 +171,7 @@ void http_chunk_off(HttpChunk *ch)
  *
  * Hex, at most eight digits of it, then either the end of the line or the ';'
  * that starts a chunk extension.  Eight is not a taste: it is the whole of a
- * 32-bit count, and a ninth used to shift the first one out -- which is how
+ * 32-bit count, and a ninth used to shift the first one out, which is how
  * "100000000" became 0, was read as the terminator, and left the body to be
  * parsed as the next request.
  */

@@ -22,7 +22,7 @@ byte-swaps nothing.
 
 THE KEY
 
-    FNV-1a 32 over the certificate's SUBJECT Name -- the DER SEQUENCE
+    FNV-1a 32 over the certificate's SUBJECT Name, the DER SEQUENCE
     including its tag and length bytes, not the parsed fields.  tls.library
     computes the same hash over a certificate's ISSUER Name, so a lookup is
     exactly the RFC 5280 rule "issuer matches subject when the encoded Names
@@ -57,7 +57,7 @@ REPRODUCIBILITY
     the caller expected to work, and finding that out on the Amiga is much
     worse than finding it out here.
 
-This script has no dependencies beyond the standard library on purpose -- it
+This script has no dependencies beyond the standard library on purpose, it
 has to run in CI, on a developer's machine and on whatever a packager has.
 The DER walking below is about sixty lines and is the entire reason no
 cryptography package is needed.

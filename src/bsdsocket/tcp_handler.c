@@ -1,5 +1,5 @@
 /*
- * TCP: -- an AmigaDOS handler that makes a socket a file handle.
+ * TCP:, an AmigaDOS handler that makes a socket a file handle.
  *
  * AmigaOS has no socket-as-file-handle. A descriptor belongs to a SocketBase,
  * a SocketBase belongs to one task, and there is no way to hand either to
@@ -40,8 +40,8 @@
  * So this is shaped like console.handler: a control process owns the device
  * node and answers ACTION_FINDINPUT/FINDOUTPUT/FINDUPDATE by starting a
  * session process, handing it the packet, and forgetting about it. The session
- * opens its own bsdsocket.library -- every opener gets its own child base
- * (library.c), which is how it gets a descriptor table -- connects, points the
+ * opens its own bsdsocket.library, every opener gets its own child base
+ * (library.c), which is how it gets a descriptor table, connects, points the
  * FileHandle's fh_Type at its own port, and replies. Every later packet for
  * that handle goes straight to the session, which may block in recv() for as
  * long as it likes because nobody else is behind it.
@@ -49,7 +49,7 @@
  * Changing fh_Type is allowed: dos.library sets it to the device's port before
  * sending the packet and re-initialises it on every retry "in case handler
  * played with it" (v40 dos, bcplio.c findstream). It is also what makes
- * ACTION_WAIT_CHAR usable -- WaitForChar() sends only a timeout, not the file
+ * ACTION_WAIT_CHAR usable, WaitForChar() sends only a timeout, not the file
  * handle, so a handler with one port for many files cannot tell which file is
  * being asked about. One port per file resolves that.
  *
@@ -87,13 +87,13 @@
 #include <dos/dostags.h>
 #include <dos/filehandler.h>
 
-/* ------------------------------------------------------------- constants -- */
+/* ------------------------------------------------------------- constants, */
 
 #define TCP_DEVICE_NAME     "TCP"
 
 /*
  * Session stacks. A session runs the resolver and, if it is the first opener
- * on the machine, netstack_startup() -- both of which run NetX Duo code on the
+ * on the machine, netstack_startup(), both of which run NetX Duo code on the
  * calling task's stack through the bsd_nx_enter() bracket.
  */
 #define TCP_CTRL_STACK      8192UL
@@ -109,7 +109,7 @@
 /* fd_set words, matching select.c's layout: bit (fd%32) of word (fd/32). */
 #define TCP_FD_WORDS        ((BSD_MAX_DTABLESIZE + 31) / 32)
 
-/* ----------------------------------------------------------------- state -- */
+/* ----------------------------------------------------------------- state, */
 
 typedef struct TcpBoot
 {
@@ -147,7 +147,7 @@ typedef struct TcpName
 static VOID tcp_ctrl_main(VOID);
 static VOID tcp_session_main(VOID);
 
-/* ------------------------------------------------------------- utilities -- */
+/* ------------------------------------------------------------- utilities, */
 
 static BOOL tcp_ci_equal(const char *a, const char *b)
 {
@@ -234,7 +234,7 @@ static VOID tcp_reply(struct DosPacket *pkt, LONG res1, LONG res2,
     PutMsg(reply, msg);
 }
 
-/* --------------------------------------------------------- errno -> DOS -- */
+/* --------------------------------------------------------- errno -> DOS, */
 
 /*
  * There is no DOS error for most of these, so the table records what each one
@@ -283,7 +283,7 @@ static LONG tcp_dos_error(LONG err)
     return ERROR_OBJECT_NOT_FOUND;
 }
 
-/* ---------------------------------------------------------- name parsing -- */
+/* ---------------------------------------------------------- name parsing, */
 
 /*
  * "TCP:host/service" -> TcpName. Returns 0, or a DOS error code.
@@ -412,7 +412,7 @@ static LONG tcp_parse(const char *path, TcpName *out)
     return 0;
 }
 
-/* --------------------------------------------------------- socket set-up -- */
+/* --------------------------------------------------------- socket set-up, */
 
 /* A service name or a port number -> a port. 0 means "no such service". */
 static UWORD tcp_service_port(struct AmiSocketBase *base, const char *service)
@@ -570,7 +570,7 @@ static LONG tcp_open_socket(struct AmiSocketBase *base, const TcpName *name,
         /*
          * No host: Roadshow's "allow other networked hosts to open a
          * connection to the local machine on the port specified here". One
-         * connection, then the listener is closed -- a DOS file handle is one
+         * connection, then the listener is closed, a DOS file handle is one
          * stream, so there is nowhere to put a second.
          */
         {
@@ -615,7 +615,7 @@ static LONG tcp_open_socket(struct AmiSocketBase *base, const TcpName *name,
     }
 }
 
-/* ---------------------------------------------------------- the session -- */
+/* ---------------------------------------------------------- the session, */
 
 static VOID tcp_session_read(TcpSession *s, struct DosPacket *pkt)
 {
@@ -689,7 +689,7 @@ static VOID tcp_session_write(TcpSession *s, struct DosPacket *pkt)
 
 /*
  * ACTION_WAIT_CHAR. dp_Arg1 is a timeout in microseconds and the packet
- * carries no file handle -- see the header comment on why each handle has its
+ * carries no file handle, see the header comment on why each handle has its
  * own port. One descriptor and one timeout maps straight onto WaitSelect().
  */
 static VOID tcp_session_wait_char(TcpSession *s, struct DosPacket *pkt)
@@ -914,7 +914,7 @@ static VOID tcp_session_main(VOID)
     tcp_sessions--;
 }
 
-/* ---------------------------------------------------------- the control -- */
+/* ---------------------------------------------------------- the control, */
 
 static VOID tcp_ctrl_find(struct DosPacket *pkt)
 {
@@ -983,7 +983,7 @@ static VOID tcp_ctrl_disk_info(struct DosPacket *pkt, struct InfoData *info)
      * them, and whatever control characters they contain then eat the rest of
      * the listing.
      *
-     * There is no volume -- a connection is not a disk -- so this points at
+     * There is no volume, a connection is not a disk, so this points at
      * the device node, which is on the DOS list already, lives as long as
      * TCP: does, and holds "TCP" in dn_Name. DeviceNode's dn_Name and
      * DosList's dol_Name are the same offset, which is what makes that legal.
@@ -1114,8 +1114,8 @@ static VOID tcp_ctrl_main(VOID)
                  * opens the stream instead.
                  *
                  * The error code is load-bearing and is not the accurate one.
-                 * ERROR_OBJECT_WRONG_TYPE describes TCP: better -- a stream is
-                 * not a thing that can be locked -- and Copy stops on it:
+                 * ERROR_OBJECT_WRONG_TYPE describes TCP: better, a stream is
+                 * not a thing that can be locked, and Copy stops on it:
                  * "Can't open TCP:10.0.2.2/amitest for input - object is not
                  * of required type". On ERROR_ACTION_NOT_KNOWN it carries on
                  * and opens the stream, which is the whole point.
@@ -1128,7 +1128,7 @@ static VOID tcp_ctrl_main(VOID)
                 /*
                  * Reachable only from a program holding a lock on TCP:, and
                  * nothing hands one out. Here so that the refusal names the
-                 * reason -- TCP: is not a directory -- rather than arriving in
+                 * reason, TCP: is not a directory, rather than arriving in
                  * the log as a packet nobody considered.
                  */
                 case ACTION_EXAMINE_OBJECT:
@@ -1169,7 +1169,7 @@ static VOID tcp_ctrl_main(VOID)
                         tcp_ctrl_port = NULL;
                         DeleteMsgPort(port);
 
-                        /* The segment may well stay loaded -- ACTION_DIE is
+                        /* The segment may well stay loaded, ACTION_DIE is
                            accepted with openers still holding the library, and
                            the expunge only runs once the last one goes. Leaving
                            the latch set means every later OpenLibrary() gets a
@@ -1197,7 +1197,7 @@ static VOID tcp_ctrl_main(VOID)
     /* Still inside the Forbid() taken above; the port dies with us. */
 }
 
-/* ----------------------------------------------------------------- entry -- */
+/* ----------------------------------------------------------------- entry, */
 
 VOID bsd_tcp_handler_start(struct AmiSocketBase *master)
 {
@@ -1216,7 +1216,7 @@ VOID bsd_tcp_handler_start(struct AmiSocketBase *master)
 
     /*
      * DEVS:Internet/tcp_handler can turn the device off. Checked before the
-     * latch, so nothing is started and nothing published -- a handler that
+     * latch, so nothing is started and nothing published, a handler that
      * came up and was then removed would still have taken the name for as
      * long as it took to remove it. A machine with no config at all keeps the
      * device, which is the Roadshow-compatible default.

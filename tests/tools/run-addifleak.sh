@@ -16,7 +16,7 @@
 # THE MACHINE, AND WHY THIS ONE
 #
 #   An A1200 with a PCMCIA card.  NOT an A600, tempting as the supported floor
-#   is: Amiberry's A600 PCMCIA emulation does not work for ANY stack -- the
+#   is: Amiberry's A600 PCMCIA emulation does not work for ANY stack, the
 #   Roadshow 1.15 demo fails there with "Input/output error" on the same card
 #   that it and we both drive to a DHCP lease on an A1200.  An A600 run would
 #   fail for a reason that has nothing to do with this code, which is the worst
@@ -25,7 +25,7 @@
 #   The card is cnet.device on the emulated PCMCIA slot, because THE FAILURE
 #   MODE IS THE POINT.  A device that does not exist fails at OpenDevice(),
 #   before the packet pool, the NX_IP and the ThreadX threads are made, so there
-#   is nothing allocated yet to leak -- a run against `nosuchdevice.device`
+#   is nothing allocated yet to leak, a run against `nosuchdevice.device`
 #   passes whatever the library does with a half-built stack.  A real driver
 #   that opens and then cannot bring its card up is the case that gets far
 #   enough to strand one, and it is what a user with a card in the slot and no
@@ -39,7 +39,7 @@
 #
 #   The serial log is worth reading when this fails.  `pool = ` in it means the
 #   packet pool was created before the failure, so the stack was built and
-#   stranded rather than never started -- which is the difference between the
+#   stranded rather than never started, which is the difference between the
 #   two things this test can catch.
 #
 # WHAT IT NEEDS
@@ -125,8 +125,8 @@ cp "$ADDIF" "$STAGE/AddNetInterface"
 # STATE=down is what makes this test the RIGHT failure.
 #
 # The card works on this machine, so a plain configuration comes up and there
-# is no failure to measure. Configured down, the device still OPENS -- the
-# packet pool, the NX_IP and the ThreadX threads are all made -- and bring-up
+# is no failure to measure. Configured down, the device still OPENS, the
+# packet pool, the NX_IP and the ThreadX threads are all made, and bring-up
 # fails afterwards, on the DHCP wait, with no address. That is the state that
 # strands a stack: netstack_startup() keeps ns_Refs at 1 "because a live stack
 # has an owner" when bsd_lib_open() is about to return NULL and there will

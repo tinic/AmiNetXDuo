@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# httpd-drill -- the WebDAV assertions that need a socket rather than a client.
+# httpd-drill, the WebDAV assertions that need a socket rather than a client.
 #
 #   tests/tools/httpd-drill.py ADDRESS [PORT]
 #
@@ -14,7 +14,7 @@
 #   success either way.
 #
 #   So the requests are written out as bytes and the answers read back off the
-#   same connection.  The server is whatever is listening at ADDRESS -- the
+#   same connection.  The server is whatever is listening at ADDRESS, the
 #   emulated Amiga that tests/tools/run-httpd.sh puts on the wire.
 #
 # WHAT IT NEEDS OF THE SERVER
@@ -182,7 +182,7 @@ def test_desync():
 
     The body here IS a DELETE of a file that exists.  Before the fix the
     server answered 405, left the body in the socket, and parsed it as a
-    fresh request -- so the file went."""
+    fresh request, so the file went."""
     print("a refused body is not the next request")
 
     poison = ("DELETE %s/keepme.txt HTTP/1.1\r\n"
@@ -435,7 +435,7 @@ def test_lock_below_stops_delete():
               % (a[0] if a else "?"))
 
         # Tagged, because an untagged list is about the request target and
-        # the drawer itself is not what is locked -- RFC 4918 10.4.1.
+        # the drawer itself is not what is locked, RFC 4918 10.4.1.
         a = once(req("DELETE", BASE + "/tree",
                      {"If": "<http://%s:%d%s/tree/inside.txt> (<%s>)"
                             % (ADDR, PORT, BASE, token)}))
@@ -511,7 +511,7 @@ def test_overlapping_moves():
     The destinations are made to EXIST first, on purpose.  A MOVE onto a name
     nothing is using is one Rename inside the handler and never spans a pass
     of the event loop; one that has to clear the destination first walks, and
-    the walk reads the destination back after the handler has returned -- so
+    the walk reads the destination back after the handler has returned, so
     that is the shape where a shared destination is two clients' at once."""
     print("two MOVEs at once keep their own destinations")
 

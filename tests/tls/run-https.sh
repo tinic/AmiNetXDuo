@@ -4,8 +4,8 @@
 #
 #   tests/tls/run-https.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
 #
-# Same staging as tests/netstack/run-fsuae.sh -- DEVS:NetInterfaces/eth0,
-# DEVS:Internet/* and a SANA-II a2065.device -- because this test brings the
+# Same staging as tests/netstack/run-fsuae.sh, DEVS:NetInterfaces/eth0,
+# DEVS:Internet/* and a SANA-II a2065.device, because this test brings the
 # whole stack up through netstack_startup() before it opens a socket.
 #
 # The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,

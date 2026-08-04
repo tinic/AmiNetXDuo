@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- SANA-II <-> NetX Duo driver shim.
+ * AmiNetXDuo, SANA-II <-> NetX Duo driver shim.
  *
  * NetX Duo expects an Ethernet-shaped driver: on TX it hands the driver a
  * packet with a 14-byte Ethernet header already prepended, and on RX the driver
@@ -21,7 +21,7 @@
 /*
  * tx_api.h has to come first: exec/types.h turns VOID into a macro, which
  * breaks tx_port.h's `typedef void VOID`. The undef/restore pair makes this
- * header safe to include after an exec header too -- whichever of the two
+ * header safe to include after an exec header too, whichever of the two
  * spellings of VOID survives, it still means `void`.
  */
 #undef VOID
@@ -66,7 +66,7 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req);
 
 /*
  * Open the SANA-II device named in cfg and prepare it for use. Does not bring
- * the link online -- NX_LINK_ENABLE does that. Returns NULL on failure and sets
+ * the link online, NX_LINK_ENABLE does that. Returns NULL on failure and sets
  * *err to an AMI_NET_ERR_* code.
  */
 AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err);
@@ -84,7 +84,7 @@ BOOL        ami_sana2_is_online(const AmiSana2If *iface);
 /*
  * Whether the stack has been told to use this interface, as opposed to whether
  * the wire is there. NX_LINK_ENABLE sets it, the three disables clear it, and
- * a cable pulled out from under a running interface does not -- that clears
+ * a cable pulled out from under a running interface does not, that clears
  * nx_interface_link_up from the reader (sana2_rx.c) and nothing else. IFQ_State
  * is defined in these terms: "the stack will attempt to transmit messages
  * through this interface. However, the underlying SANA-II device driver may not

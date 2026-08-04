@@ -1,8 +1,8 @@
 # Guest-side helpers for the command tests.
 #
 # Nothing here is installed.  ClockSet moves the guest's clock so that
-# run-sntp.sh can start from the machine a real Amiga user has -- one whose
-# battery died -- rather than from FS-UAE's default of "the host's wall clock",
+# run-sntp.sh can start from the machine a real Amiga user has, one whose
+# battery died, rather than from FS-UAE's default of "the host's wall clock",
 # which is the one state in which the interesting half of the test cannot run.
 
 add_executable(test_clockset clockset.c)
@@ -51,8 +51,8 @@ set_target_properties(test_idxprobe PROPERTIES OUTPUT_NAME "IdxProbe")
 
 # RtProbe drives AddRouteTagList/DeleteRouteTagList/GetRouteInfo/FreeRouteInfo
 # through the published LVOs.  It walks the returned table the way the routing
-# socket convention requires -- advance by rtm_msglen, read the sockaddrs by
-# their bit order in rtm_addrs -- rather than by indexing an array of
+# socket convention requires, advance by rtm_msglen, read the sockaddrs by
+# their bit order in rtm_addrs, rather than by indexing an array of
 # rt_msghdr, which is what the prototype alone would suggest and which would
 # walk off the end of the first entry.
 add_executable(test_rtprobe rtprobe.c)
@@ -64,8 +64,8 @@ target_compile_options(test_rtprobe PRIVATE -Wall -Wextra)
 set_target_properties(test_rtprobe PROPERTIES OUTPUT_NAME "RtProbe")
 
 # StatProbe drives GetNetworkStatistics().  It asserts the byte-count return,
-# the guard bytes past the end of each copy, and -- the one that no build can
-# check -- that pcd_tcp_state is 4.4BSD's enumeration and not NetX Duo's,
+# the guard bytes past the end of each copy, and, the one that no build can
+# check, that pcd_tcp_state is 4.4BSD's enumeration and not NetX Duo's,
 # which diverge after CLOSE_WAIT.
 add_executable(test_statprobe statprobe.c)
 target_include_directories(test_statprobe PRIVATE ${AMINETXDUO_CORE_INCLUDES})
@@ -77,7 +77,7 @@ set_target_properties(test_statprobe PROPERTIES OUTPUT_NAME "StatProbe")
 
 # AamProbe drives CreateAddrAllocMessageA/DeleteAddrAllocMessage/
 # BeginInterfaceConfig/AbortInterfaceConfig.  BeginInterfaceConfig returns
-# VOID, so its only channel is the replied message -- which is why the dullest
+# VOID, so its only channel is the replied message, which is why the dullest
 # assertion in that file (the message came back on the port) is the one that
 # matters: an ENOSYS stub for it is a hang, not a refusal.
 add_executable(test_aamprobe aamprobe.c)
@@ -92,7 +92,7 @@ set_target_properties(test_aamprobe PROPERTIES OUTPUT_NAME "AamProbe")
 # The row is claimed inside the bsd_nx_enter() bracket and a claim made after
 # it would let a second base take the same row; the assertion is the only thing
 # the loser can see, which is its own IP_DROP_MEMBERSHIP refused on a group it
-# holds.  The window is aimed at rather than waited for -- see the file.
+# holds.  The window is aimed at rather than waited for, see the file.
 add_executable(test_mcastrace mcastrace.c)
 target_include_directories(test_mcastrace PRIVATE ${AMINETXDUO_CORE_INCLUDES})
 if(AMIGA_NDK_INCLUDE)
@@ -104,7 +104,7 @@ set_target_properties(test_mcastrace PROPERTIES OUTPUT_NAME "McastRace")
 # MonProbe drives AddNetMonitorHookTagList/RemoveNetMonitorHook and the two
 # call-site hook types.  The hook register convention (Hook in A0, NULL in A2,
 # message in A1) is not the pair a reader would guess, and a wrong guess hands
-# the message in the wrong register -- so the probe poisons A2 beforehand and
+# the message in the wrong register, so the probe poisons A2 beforehand and
 # asserts it came back NULL.
 add_executable(test_monprobe monprobe.c)
 target_include_directories(test_monprobe PRIVATE ${AMINETXDUO_CORE_INCLUDES})
@@ -117,7 +117,7 @@ set_target_properties(test_monprobe PROPERTIES OUTPUT_NAME "MonProbe")
 # DnsProbe drives AddDomainNameServer/RemoveDomainNameServer/
 # ObtainDomainNameServerList, Get/SetDefaultDomainName and inet_pton against a
 # running stack.  The nesting rule and dnsn_UseCount's sign only exist at run
-# time -- a server added twice and removed once has to still be there -- and
+# time, a server added twice and removed once has to still be there, and
 # inet_pton()'s strictness is only visible next to inet_addr()'s laxity, which
 # is why the probe asks both the same strings.
 add_executable(test_dnsprobe dnsprobe.c)
@@ -128,8 +128,8 @@ endif()
 target_compile_options(test_dnsprobe PRIVATE -Wall -Wextra)
 set_target_properties(test_dnsprobe PROPERTIES OUTPUT_NAME "DnsProbe")
 
-# TcpHandoff runs the whole socket-to-file-handle sequence -- accept(),
-# ReleaseCopyOfSocket(), Open("TCP:OBTAIN="), SystemTagList() -- against two
+# TcpHandoff runs the whole socket-to-file-handle sequence, accept(),
+# ReleaseCopyOfSocket(), Open("TCP:OBTAIN="), SystemTagList(), against two
 # stock AmigaDOS commands.  Linked against nothing of ours: it reaches
 # bsdsocket.library through its published LVOs, as a third-party program does.
 add_executable(test_tcphandoff tcphandoff.c)
@@ -143,7 +143,7 @@ set_target_properties(test_tcphandoff PROPERTIES OUTPUT_NAME "TcpHandoff")
 # SrcProbe measures the send direction of bind(): a datagram bound to an
 # address has to arrive with that address as its source, and a TCP connect()
 # that would have to leave from another one has to be refused.  Neither is
-# reachable from a host build -- both read NX_IP's live interface table -- and
+# reachable from a host build, both read NX_IP's live interface table, and
 # a send that merely returns len proves nothing, so the assertion is on the
 # source address the receiver saw.
 add_executable(test_srcprobe srcprobe.c)
@@ -155,7 +155,7 @@ target_compile_options(test_srcprobe PRIVATE -Wall -Wextra)
 set_target_properties(test_srcprobe PROPERTIES OUTPUT_NAME "SrcProbe")
 # IfNames is the Developer drawer's own example, built here so the drawer
 # cannot ship incomplete.  The drawer is staged into the build tree and that
-# staged copy plus the NDK is the WHOLE include path -- no
+# staged copy plus the NDK is the WHOLE include path, no
 # AMINETXDUO_CORE_INCLUDES, so a type or a prototype that only exists in
 # include/aminetxduo/ and never reaches Developer/ fails to compile.
 #
@@ -193,7 +193,7 @@ add_dependencies(test_ifnames developer_drawer)
 # V6Only is the other half of the same check, for the half of the drawer that
 # has no vectors: IPPROTO_IPV6, IPV6_V6ONLY, INET6_ADDRSTRLEN,
 # IN6ADDR_LOOPBACK_INIT, the IN6_IS_ADDR_* macros and sockaddr_storage, none
-# of which the NDK defines.  Same include path as IfNames -- the staged drawer
+# of which the NDK defines.  Same include path as IfNames, the staged drawer
 # and the NDK, nothing else.
 add_executable(test_v6only "${AMINETXDUO_DEVELOPER_STAGE}/examples/V6Only.c")
 target_include_directories(test_v6only PRIVATE
@@ -224,7 +224,7 @@ set_target_properties(test_cycledrill PROPERTIES OUTPUT_NAME "CycleDrill")
 # the middle.  A build cannot show either half and neither can a lookup against
 # a server that works: the two numbers are how long the lookup blocks and how
 # long after Ctrl-C it comes back.  Published LVOs only, so the same binary
-# measures any bsdsocket.library -- which is how a before and an after are
+# measures any bsdsocket.library, which is how a before and an after are
 # comparable.
 add_executable(test_resolvebreak resolvebreak.c)
 target_include_directories(test_resolvebreak PRIVATE ${AMINETXDUO_CORE_INCLUDES})

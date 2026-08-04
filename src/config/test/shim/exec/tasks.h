@@ -1,5 +1,5 @@
 /*
- * Host test shim -- struct Task, referenced only through pointers. See
+ * Host test shim, struct Task, referenced only through pointers. See
  * exec/types.h. Never compiled for the Amiga.
  *
  * SPDX-License-Identifier: MIT

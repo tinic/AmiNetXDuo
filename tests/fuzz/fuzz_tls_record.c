@@ -1,10 +1,10 @@
 /*
- * AmiNetXDuo -- host fuzz driver for the TLS record and handshake layers.
+ * AmiNetXDuo, host fuzz driver for the TLS record and handshake layers.
  *
  * Everything here runs on bytes a server chose, before a single one of them
  * has been authenticated: the record header arrives first, and the whole
- * plaintext handshake -- ServerHello, Certificate, CertificateRequest,
- * NewSessionTicket, ChangeCipherSpec -- is parsed before any key exists to
+ * plaintext handshake, ServerHello, Certificate, CertificateRequest,
+ * NewSessionTicket, ChangeCipherSpec, is parsed before any key exists to
  * check it against. A hostile server, or anyone who can answer a TCP connect,
  * reaches all of it. With no MMU that is not a crashed process, it is a read
  * or a write with the whole machine's privileges.
@@ -16,7 +16,7 @@
  * payload walked message by message with
  * _nx_secure_tls_process_handshake_header() and dispatched by type. Driving
  * the vendored client_handshake() itself would need the crypto table, a packet
- * pool and a TCP socket, because it answers what it parses -- and every reply
+ * pool and a TCP socket, because it answers what it parses, and every reply
  * path is code the wire does not choose. The parsers are what the wire
  * chooses, so the parsers are what runs.
  *
@@ -58,7 +58,7 @@
 #include "nx_secure_tls.h"
 
 /* The vendored parsers take the TLS protection mutex around anything that can
-   suspend. Nothing suspends here -- no thread runs -- so the object only has
+   suspend. Nothing suspends here, no thread runs, so the object only has
    to exist. */
 TX_MUTEX _nx_secure_tls_protection;
 
@@ -71,7 +71,7 @@ TX_MUTEX _nx_secure_tls_protection;
  * that needed it are fixed.
  *
  *   _nx_secure_tls_process_serverhello() read the ciphersuite and compression
- *   method after checking only the session ID -- a 38-byte ServerHello with a
+ *   method after checking only the session ID, a 38-byte ServerHello with a
  *   session_id_length of 3 left length at exactly 38 and the next three bytes
  *   came from past the message.
  *
@@ -183,7 +183,7 @@ static void fr_msg_end(FrBuf *w, unsigned at)
 
 /*
  * The IDs from ami_ciphersuite_table in src/tls/ami_tls_crypto.c, in its
- * order. The method pointers are null because no parser here calls one --
+ * order. The method pointers are null because no parser here calls one,
  * _nx_secure_tls_process_serverhello() compares the ID and stores the row.
  */
 static NX_SECURE_TLS_CIPHERSUITE_INFO fr_suites[] =
@@ -393,7 +393,7 @@ static void frs_multi_message(FrBuf *w)
     fr_seal(w);
 }
 
-/* A message header that claims more than the record holds -- the fragment
+/* A message header that claims more than the record holds, the fragment
    path, which must not read the tail it was promised. */
 static void frs_msg_past_record(FrBuf *w)
 {
@@ -549,7 +549,7 @@ static const FrSeed fr_seeds[] =
  * The record payload, message by message, exactly as
  * _nx_secure_tls_client_handshake() walks it: the same header call, the same
  * fragment test, the same dispatch. `data` is a fresh allocation of `len`
- * bytes -- the record buffer -- so that a parser reading past the payload
+ * bytes, the record buffer, so that a parser reading past the payload
  * lands in the redzone rather than in whatever the last case left behind.
  */
 static void fr_dispatch(NX_SECURE_TLS_SESSION *s, UCHAR *data, unsigned len)
@@ -592,7 +592,7 @@ static void fr_dispatch(NX_SECURE_TLS_SESSION *s, UCHAR *data, unsigned len)
          * is inside #if NX_SECURE_TLS_TLS_1_3_ENABLED and TLS 1.3 is off here,
          * so nothing vendored parses one. The TLS 1.2 ticket is parsed by
          * tls_resume_take_ticket() in src/tlslib/tls_resume.c, which cannot be
-         * built on a host -- see the note in tests/fuzz/CMakeLists.txt. The
+         * built on a host, see the note in tests/fuzz/CMakeLists.txt. The
          * seed still carries one, because the header walk has to step over it.
          */
         default:
@@ -695,8 +695,8 @@ static void fr_run(const unsigned char *msg, unsigned len, unsigned split)
 /*
  * Proof that the driver reaches the parsers.
  *
- * A driver that stopped at the record header -- a version check that always
- * failed, a length that never cleared -- would report "clean" for every input
+ * A driver that stopped at the record header, a version check that always
+ * failed, a length that never cleared, would report "clean" for every input
  * and read as coverage. So a known-good ServerHello goes in and the fields it
  * must have filled come out: the negotiated version, the session ID it
  * carried, and the ciphersuite row the lookup chose. If any of that is missing
@@ -781,8 +781,8 @@ static unsigned fr_below(unsigned n)
 }
 
 /*
- * Aimed at the bytes that decide how far a walk goes -- a record length, a
- * message length, an extension length, the session ID byte -- rather than at
+ * Aimed at the bytes that decide how far a walk goes, a record length, a
+ * message length, an extension length, the session ID byte, rather than at
  * the payload. A flipped random byte changes a key nobody derives here; a
  * flipped length byte changes where the next read lands.
  */

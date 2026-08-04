@@ -1,19 +1,19 @@
 /*
- * __wrap_main -- give a ported Unix client a real POSIX argv[] and a big stack.
+ * __wrap_main, give a ported Unix client a real POSIX argv[] and a big stack.
  *
  * This toolchain's newlib crt0 does not turn the CLI command line into an
  * argv[]: on the Shell path it hands main() argc = 1 and a single "argv" that
  * is the whole raw argument string (and, before tools/fix-toolchain-crt0.py
  * repaired the indirection, the address of that pointer rather than the
- * pointer).  AmiNetXDuo's own commands never noticed -- they read their
- * arguments through ReadArgs() and only look at argc -- but Dropbear parses
+ * pointer).  AmiNetXDuo's own commands never noticed, they read their
+ * arguments through ReadArgs() and only look at argc, but Dropbear parses
  * argv and nothing else, so every invocation comes back as "no host", or
  * dereferences the garbage and crashes.
  *
  * -Wl,--wrap=main (clients/amiga-client.sh) routes the crt0's call to main()
  * through here, leaving the client's real main() reachable as __real_main().
- * argv is built from dos.library -- GetProgramName() for argv[0], GetArgStr()
- * for the tail -- split on whitespace with "..." grouping and the '*' escape
+ * argv is built from dos.library, GetProgramName() for argv[0], GetArgStr()
+ * for the tail, split on whitespace with "..." grouping and the '*' escape
  * AmigaDOS uses inside quotes.
  *
  * GetArgStr() is the same command tail ReadArgs() would parse, so this stays
@@ -53,7 +53,7 @@ static char *argv_vec[AMIGA_ARGV_MAX + 1];
  *
  * 8 KB, measured rather than guessed: AMIGA_ARGV_STACKCHECK below paints the
  * block and reports the deepest word touched, and dbclient's high-water is
- * 5,008 bytes -- a full key exchange no deeper than `dbclient -V`, because
+ * 5,008 bytes, a full key exchange no deeper than `dbclient -V`, because
  * Dropbear targets routers and libtommath keeps bignum digits on the heap.
  *
  * It was 256 KB, sized by a comment that named curl first.  Nothing here has
@@ -118,7 +118,7 @@ static VOID argv_paint(VOID)
  * Where a run's memory goes, under the same variable.
  *
  * A ported client loses a constant amount per invocation that is not the stack
- * -- 4,224 bytes for dbclient, the same for `dbclient -V`, which opens no
+ *, 4,224 bytes for dbclient, the same for `dbclient -V`, which opens no
  * socket.  Three readings bracket it: entering __wrap_main, the moment before
  * __real_main, and after the stack has been freed.  Whatever is missing
  * between the last of those and what the parent sees is the crt0's teardown
@@ -169,8 +169,8 @@ static __attribute__((noinline)) VOID argv_run_on_stack(VOID)
 /*
  * exit() unwinds through the swapped stack.
  *
- * A client that ends by calling exit() rather than returning from main() --
- * Dropbear always -- never comes back to
+ * A client that ends by calling exit() rather than returning from main(),
+ * Dropbear always, never comes back to
  * argv_run_on_stack(), so its second StackSwap() does not run.  The crt0's exit
  * restores the stack pointer from its own saved copy, but not tc_SPLower/
  * tc_SPUpper: the task is left advertising the swapped, about-to-be-abandoned
@@ -187,7 +187,7 @@ static __attribute__((noinline)) VOID argv_run_on_stack(VOID)
  *
  * The same path also loses the stack itself.  AmigaOS does not reclaim
  * AllocMem() memory when a process exits, and the FreeMem() in __wrap_main()
- * sits after argv_run_on_stack() returns -- which it never does on an exit().
+ * sits after argv_run_on_stack() returns, which it never does on an exit().
  * That is one stack per invocation of every client that ends this way, gone
  * until reboot, on a machine whose supported floor is 1 MB.  It was 256 KB a
  * run when this was found.
@@ -196,15 +196,15 @@ static __attribute__((noinline)) VOID argv_run_on_stack(VOID)
  * caller's stack, and the free happens there.
  *
  * BOTH wrappers, not only __wrap__exit().  This crt0 defines exit(), _exit()
- * and __exit() as three names for ONE function -- `nm` puts all three at the
- * same address -- so a client that calls exit() never makes a second call that
+ * and __exit() as three names for ONE function, `nm` puts all three at the
+ * same address, so a client that calls exit() never makes a second call that
  * the linker can see and redirect.  --wrap=_exit gives a wrapper that is never
  * reached, and an earlier version of this file put the longjmp only there:
  * measured on an emulated A1200, every dbclient run still lost 266,368 bytes,
  * the same figure five times running.
  *
  * stdio is flushed here rather than left to the crt0, because after the
- * longjmp we are on the caller's stack -- 4 KB under a Shell -- and the flush
+ * longjmp we are on the caller's stack, 4 KB under a Shell, and the flush
  * wants the big one.  What is left to run then is the atexit() handlers and
  * the return to DOS, which __real__exit() does from __wrap_main().
  */
@@ -227,7 +227,7 @@ static VOID argv_restore_bounds(VOID)
  * atexit() does nothing on this crt0, so run the handlers here.
  *
  * exit(), _exit() and __exit() are one function at one address (see below),
- * and it terminates without walking the atexit list -- measured, not read: a
+ * and it terminates without walking the atexit list, measured, not read: a
  * Printf() put inside amiga_dropbear.c's amiga_sock_cleanup(), which is
  * registered with atexit(), never appeared on any run.
  *
@@ -237,8 +237,8 @@ static VOID argv_restore_bounds(VOID)
  * stops the console reader child, whose own comment says AmigaOS reclaims
  * neither its structure nor its two signal bits.
  *
- * Nothing else calls them -- the leak was the same size before the longjmp
- * below existed and the exit went straight through __real_exit() -- so calling
+ * Nothing else calls them, the leak was the same size before the longjmp
+ * below existed and the exit went straight through __real_exit(), so calling
  * them here runs each exactly once.  Newlib walks its own list and empties it,
  * so a second call is a no-op regardless.
  */
@@ -307,12 +307,12 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
     }
     else
     {
-        /* argv[0] -- the program name, as the Shell knows it. */
+        /* argv[0], the program name, as the Shell knows it. */
         argv_name[0] = '\0';
         (void)GetProgramName((STRPTR)argv_name, (LONG)sizeof(argv_name));
         argv_vec[argc++] = argv_name;
 
-        /* argv[1..] -- the argument tail, tokenised in a private buffer. */
+        /* argv[1..], the argument tail, tokenised in a private buffer. */
         args = (const char *)GetArgStr();
         if (args != NULL)
         {
@@ -376,7 +376,7 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
         argv_sss.stk_Pointer = (APTR)((ULONG)argv_stack + AMIGA_ARGV_STACK);
 
         /* setjmp() here, so a client that exits instead of returning comes
-           back to this frame -- on the caller's stack -- and the FreeMem()
+           back to this frame, on the caller's stack, and the FreeMem()
            below runs either way.  argv_stack is static because a local
            written before setjmp() is not guaranteed to survive the longjmp. */
         if (argv_stackcheck_wanted())

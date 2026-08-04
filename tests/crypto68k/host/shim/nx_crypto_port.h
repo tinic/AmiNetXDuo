@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- nx_crypto port header for the host build of the crypto68k
+ * AmiNetXDuo, nx_crypto port header for the host build of the crypto68k
  * vector test.  Never compiled for the Amiga.
  *
  * NX_CRYPTO_STANDALONE_ENABLE is nx_crypto's own supported way to build the
@@ -8,7 +8,7 @@
  * tx_port.h, nx_port.h and everything else that only makes sense on a 68k.
  *
  * The types are fixed width rather than `unsigned long` because every
- * nx_crypto port in third_party -- and tx_port.h in ours -- spells ULONG as
+ * nx_crypto port in third_party, and tx_port.h in ours, spells ULONG as
  * `unsigned long`, which is 32 bits on m68k-amigaos and 64 bits on any LP64
  * host.  nx_crypto's multi-precision code is built on
  *

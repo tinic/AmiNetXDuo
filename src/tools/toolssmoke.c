@@ -1,5 +1,5 @@
 /*
- * ToolsSmoke -- run every command-line tool under the emulator and record
+ * ToolsSmoke, run every command-line tool under the emulator and record
  * what it printed.
  *
  * tools/fsuae-run.sh boots a real Kickstart 3.1 A1200, runs one executable
@@ -36,7 +36,7 @@ static const char version_tag[] __attribute__((used)) =
 /*
  * "<NIL:" so that ReadArgs()'s "?" prompt reads EOF instead of waiting for a
  * keyboard nobody is sitting at. No "*>>": the 3.1 Shell does not understand
- * appending stderr redirection and passes it through as an argument -- and
+ * appending stderr redirection and passes it through as an argument, and
  * there is no need, because a child of System() has no separate error stream,
  * so tool_error() and PrintFault() both land on stdout anyway.
  *
@@ -51,7 +51,7 @@ static const char version_tag[] __attribute__((used)) =
 /*
  * The command list can be staged as DH0:commands.txt, one command per line,
  * '#' and blank lines ignored. Staging different directories lets the harness
- * -- which can only start one executable with no arguments -- exercise a
+ *, which can only start one executable with no arguments, exercise a
  * machine with no configuration, one with a broken configuration, and one whose
  * config names a device that is not there.
  *
@@ -59,7 +59,7 @@ static const char version_tag[] __attribute__((used)) =
  * thing that connects to it must run at the same time. Without them no staged
  * list can test `nc -l`.
  *
- *   &<command>   run it and carry straight on -- SYS_Asynch, which is what
+ *   &<command>   run it and carry straight on, SYS_Asynch, which is what
  *                the Shell's own `Run` does. Its output must be redirected by
  *                the line itself; a detached process shares no console with
  *                this one and its Output() is NIL:.
@@ -222,7 +222,7 @@ int main(int argc, char **argv)
 
         report((const char *)"\n===== %s =====\n", (LONG)command, 0);
 
-        /* "wait <seconds>" -- for letting a background listener settle. */
+        /* "wait <seconds>", for letting a background listener settle. */
         if ((command[0] == 'w' || command[0] == 'W') &&
             (command[1] == 'a' || command[1] == 'A') &&
             (command[2] == 'i' || command[2] == 'I') &&
@@ -328,7 +328,7 @@ int main(int argc, char **argv)
              * allocated and did not give back is gone until the next reboot,
              * and a leak reads here as the same step down run after run.
              * SystemTagList() above passes no NP_StackSize, so these run on
-             * the Shell's own stack -- which is what a 1 MB machine has.
+             * the Shell's own stack, which is what a 1 MB machine has.
              */
             report((const char *)"----- rc %ld, free %ld -----\n", rc,
                    (LONG)AvailMem(MEMF_ANY));

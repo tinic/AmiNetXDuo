@@ -1,10 +1,10 @@
 /*
- * AmiNetXDuo -- the ThreadX thread and timer surface fuzz_dhcp stands on.
+ * AmiNetXDuo, the ThreadX thread and timer surface fuzz_dhcp stands on.
  *
  * fuzz_nxstub.c covers the mutex and event-flag calls the DNS and mDNS
  * parsers reach. The DHCP client is a different shape: it owns a thread and a
  * timer and creates both in nx_dhcp_create(), so the whole thread/timer
- * surface has to resolve even though the driver never calls it -- fd_run()
+ * surface has to resolve even though the driver never calls it, fd_run()
  * enters the option parser directly, below all of this.
  *
  * Every function here returns TX_SUCCESS and does nothing. That is safe only

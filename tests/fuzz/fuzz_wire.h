@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- DNS wire-format helpers shared by fuzz_dns and fuzz_mdns.
+ * AmiNetXDuo, DNS wire-format helpers shared by fuzz_dns and fuzz_mdns.
  *
  * mDNS is DNS on the wire (RFC 6762 §18), so one builder and one mutator serve
  * both drivers.  Only plain C types here: the two drivers compile with
@@ -7,10 +7,10 @@
  * depend on that.
  *
  * The seed table below is the part worth reading.  It is the list of shapes a
- * hostile answer can take -- self-referential and cyclic compression
+ * hostile answer can take, self-referential and cyclic compression
  * pointers, offsets past the datagram, names that expand beyond 255 bytes,
  * labels longer than 63, an RDLENGTH that disagrees with the bytes present,
- * header counts that disagree with the records -- and the mutator works from
+ * header counts that disagree with the records, and the mutator works from
  * those rather than from noise, because uniform random bytes almost never
  * produce a parsable header, let alone a pointer loop.
  *
@@ -146,7 +146,7 @@ static void fzw_patch16(FzwBuf *w, size_t at, unsigned v)
 
 /* unsigned long long, not unsigned long: fuzz_mdns is built -m32 (NetX Duo's
    mDNS cache keeps pointers in ULONG slots, so it needs sizeof(void*) == 4),
-   where unsigned long is 32 bits -- the multiplier would truncate and the
+   where unsigned long is 32 bits, the multiplier would truncate and the
    shift would be undefined. Fixing the width also makes a seed mean the same
    sequence on a 32- and a 64-bit host. */
 static unsigned long long fzw_state = 1;
@@ -166,8 +166,8 @@ static unsigned fzw_below(unsigned n)
 
 /*
  * The hazards, as whole datagrams.  `qname` is the name the driver told the
- * resolver to look up, so a seed can either match it -- which gets past the
- * question-section comparison and into the record loop -- or not.
+ * resolver to look up, so a seed can either match it, which gets past the
+ * question-section comparison and into the record loop, or not.
  */
 
 typedef void (*FzwSeedFn)(FzwBuf *w, const char *qname);
@@ -204,7 +204,7 @@ static void fzs_aaaa_answer(FzwBuf *w, const char *qname)
 /*
  * The question a reverse lookup of 10.0.0.9 asks.  addons/dns builds it from
  * the octets in reverse followed by lookup_end[], which is spelled in capitals
- * -- so this is the exact string on the wire, and a server that answers in
+ *, so this is the exact string on the wire, and a server that answers in
  * lower case is answering the same question in the other case.
  */
 #define FZW_INADDR_QNAME    "9.0.0.10.IN-ADDR.ARPA"
@@ -359,7 +359,7 @@ static void fzs_name_over_255_via_ptr(FzwBuf *w, const char *qname)
 }
 
 /* A label length above the 63 the format allows, but below 0xC0 so it is not
-   a pointer either -- the reserved encodings of RFC 1035 §4.1.4. */
+   a pointer either, the reserved encodings of RFC 1035 §4.1.4. */
 static void fzs_label_over_63(FzwBuf *w, const char *qname)
 {
     (void)qname;
@@ -647,7 +647,7 @@ static void fzs_wrong_question(FzwBuf *w, const char *qname)
  * answer section.  The authority section names the servers to ask next; it is
  * not where an answer lives, and the owner name of a record there is never
  * compared with the question.  Taking one as an answer meant a server asked
- * about one name could return -- and get cached -- an address for another.
+ * about one name could return, and get cached, an address for another.
  */
 static void fzs_a_in_authority(FzwBuf *w, const char *qname)
 {

@@ -9,8 +9,8 @@
 #
 #   tls.library skips a certificate's notBefore/notAfter when the machine's
 #   clock is outside a plausible window (src/tlslib/tls_time.c).  That is the
-#   right call on an Amiga with a dead battery -- the alternative is a machine
-#   that cannot reach any HTTPS site -- but it means an EXPIRED certificate is
+#   right call on an Amiga with a dead battery, the alternative is a machine
+#   that cannot reach any HTTPS site, but it means an EXPIRED certificate is
 #   accepted.  `sntp` puts the clock right, and the check comes back.
 #
 #   So the run is a before and an after, against the same expired certificate:

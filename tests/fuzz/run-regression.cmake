@@ -6,7 +6,7 @@
 # netdb_measure() counts the whole run as ONE token; scan_item() returns an
 # empty non-NULL token for each "" pair, so the parse pass produces thirty-two.
 # alias_pool was sized by the first and written by the second, putting 29
-# pointer writes past a 48-byte block for every such line -- from a file in
+# pointer writes past a 48-byte block for every such line, from a file in
 # DEVS:, at library-open time, on a machine with no MMU.
 #
 # Under ASan this aborts. Without the fix it must abort; with it, it must not.

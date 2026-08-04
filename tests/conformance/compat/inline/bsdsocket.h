@@ -1,9 +1,9 @@
 /*
- * inline/bsdsocket.h -- replacement for the Roadshow NDK header.
+ * inline/bsdsocket.h, replacement for the Roadshow NDK header.
  *
  * The NDK ships inline/bsdsocket.h in fd2pragma "special 46" form (direct
- * preprocessor asm).  For every void-returning vector -- SetErrnoPtr,
- * setnetent, endnetent, ... -- that form declares an input register variable
+ * preprocessor asm).  For every void-returning vector, SetErrnoPtr,
+ * setnetent, endnetent, ..., that form declares an input register variable
  * in a register that also appears in the __asm clobber list, which GCC 15
  * rejects outright:
  *
@@ -11,7 +11,7 @@
  *          conflicts with 'asm' clobber list
  *
  * So the suite cannot be compiled against it at all.  This file is the same
- * ABI regenerated in "special 40" form -- the inline/macros.h LP<n> style
+ * ABI regenerated in "special 40" form, the inline/macros.h LP<n> style
  * that every other header in this NDK (dos.h, exec.h, ...) already uses and
  * that this toolchain compiles cleanly:
  *
@@ -528,7 +528,7 @@
 	, BSDSOCKET_BASE_NAME)
 
 /*
- * The Roadshow tail, added by hand -- the FD this file was generated from
+ * The Roadshow tail, added by hand, the FD this file was generated from
  * stops at ObtainServerSocket().  Register assignment is Roadshow's, and it
  * matches src/bsdsocket/bsdsocket_vectors.h vector for vector.
  *

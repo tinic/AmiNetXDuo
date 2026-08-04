@@ -1,5 +1,5 @@
 /*
- * Host test shim -- struct SignalSemaphore. Nothing on the host locks it; it
+ * Host test shim, struct SignalSemaphore. Nothing on the host locks it; it
  * is here so a structure that embeds one has a size. See exec/types.h.
  *
  * SPDX-License-Identifier: MIT

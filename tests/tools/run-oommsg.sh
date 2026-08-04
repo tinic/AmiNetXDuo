@@ -11,7 +11,7 @@
 #   instance and the thread stacks do not fit, bsdsocket.library's first
 #   OpenLibrary() fails, and AddNetInterface has to say why.  Its failure text
 #   walks a decision tree that used to end at "The card is fine, so what failed
-#   was getting an address ... Check the cable" -- which is what someone with
+#   was getting an address ... Check the cable", which is what someone with
 #   73 KB free was told to go and look at.  docs/RESEARCH.md 81.3 found it.
 #
 #   The out-of-memory branch that replaced it cannot be reached by a unit test:
@@ -21,7 +21,7 @@
 #
 #     * the text says out of memory
 #     * it quotes a free-byte figure, and the figure is under the threshold
-#       that fired -- a plausible number, not a constant someone typed
+#       that fired, a plausible number, not a constant someone typed
 #     * it does NOT mention the cable
 #
 #   AddNetInterface must also still FAIL, exit code and all: a diagnosis that
@@ -37,7 +37,7 @@
 #
 # THE MACHINE
 #
-#   A2000, 68000, Kickstart 2.04, 512 KB of Chip RAM and nothing else -- no
+#   A2000, 68000, Kickstart 2.04, 512 KB of Chip RAM and nothing else, no
 #   Fast RAM and no Slow RAM, which the stock quickstart profile would
 #   otherwise add half a megabyte of and take the machine back over the floor.
 #   docs/RESEARCH.md 81 established this configuration refuses cleanly, so the
@@ -54,7 +54,7 @@
 #   ~/amiga-assets/env.sh exports by default is not it.  a2065.device is not
 #   ours to ship: AMINETXDUO_A2065, or a copy in build/a2065.device.  The card
 #   is staged even though nothing gets as far as using it, because the branch
-#   under test has to be chosen IN PREFERENCE to the device probe -- a run with
+#   under test has to be chosen IN PREFERENCE to the device probe, a run with
 #   no driver would take a different path and prove nothing.
 #
 # Amiberry only.  FS-UAE cannot be driven headless on the Linux box that has

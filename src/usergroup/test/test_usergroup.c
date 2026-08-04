@@ -1,9 +1,9 @@
 /*
- * AmiNetXDuo -- host-side test for the passwd and group file parsers.
+ * AmiNetXDuo, host-side test for the passwd and group file parsers.
  *
  * ug_parse.c makes no AmigaDOS call, so it needs only the <exec/types.h>
- * shim in src/config/test/shim and the three stubs below. ug_db.c -- the
- * dos.library Open/Read/Close around it -- is not covered here.
+ * shim in src/config/test/shim and the three stubs below. ug_db.c, the
+ * dos.library Open/Read/Close around it, is not covered here.
  *
  * LINE ENDINGS ARE THE POINT. ug_next_line() ends a line on '\n' or '\r',
  * so a group file written by a classic-Mac editor is many lines to the

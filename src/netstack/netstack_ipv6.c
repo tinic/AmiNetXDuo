@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the IPv6 half of the stack singleton.
+ * AmiNetXDuo, the IPv6 half of the stack singleton.
  *
  * Compiled only in an AMINETXDUO_IPV6 build (docs/RESEARCH.md §9, decision 1:
  * IPv6 is a build option, not a default). The floor build never sees it.
@@ -45,7 +45,7 @@
 #define AMI_DAD_TIMEOUT_TICKS   ((ULONG)(NX_IPV6_DAD_TRANSMITS + 2) * \
                                  (ULONG)NX_IP_PERIODIC_RATE)
 
-/* -------------------------------------------------------------- bring-up -- */
+/* -------------------------------------------------------------- bring-up, */
 
 LONG ami_netstack_ipv6_enable(AmiNetStack *ns)
 {
@@ -98,7 +98,7 @@ LONG ami_netstack_ipv6_enable(AmiNetStack *ns)
     return AMI_NET_OK;
 }
 
-/* ------------------------------------------------------------- addressing -- */
+/* ------------------------------------------------------------- addressing, */
 
 static VOID ami_ns6_log(const char *what, const ULONG addr[4], ULONG prefix)
 {
@@ -112,7 +112,7 @@ static VOID ami_ns6_log(const char *what, const ULONG addr[4], ULONG prefix)
  * Wait for duplicate address detection to move an address out of TENTATIVE.
  * A TENTATIVE address cannot be used as a source, so a connect() issued before
  * DAD completes either picks a different source or fails. The wait is bounded,
- * and costs about three seconds each time an interface is configured -- once
+ * and costs about three seconds each time an interface is configured, once
  * per interface at startup, and once per AddInterfaceTagList(). With
  * NX_DISABLE_IPV6_DAD the address is PREFERRED immediately and this returns on
  * the first look.
@@ -156,7 +156,7 @@ static BOOL ami_ns6_wait_ready(AmiNetStack *ns, UINT index)
  * returns before it would have reset the counter.
  *
  * Without a solicitation the interface still autoconfigures, off the router's
- * next unsolicited advertisement -- which RFC 4861 permits to be half an hour
+ * next unsolicited advertisement, which RFC 4861 permits to be half an hour
  * away, and which a router answering solicitations only never sends at all.
  */
 static VOID ami_ns6_arm_solicitation(AmiNetStack *ns, UWORD i)
@@ -225,7 +225,7 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
          * here and everything below it was done then. Not an error: this runs
          * once per boot and again for every interface added at run time, and
          * an interface that was never detached is still holding what the first
-         * pass gave it. `index` is not usable after this -- the duplicate
+         * pass gave it. `index` is not usable after this, the duplicate
          * check happens after the free slot has been picked.
          */
         return;
@@ -342,7 +342,7 @@ VOID ami_netstack_ipv6_configure_one(AmiNetStack *ns, UWORD i)
     ami_ns6_configure_interface(ns, i);
 }
 
-/* ---------------------------------------------------------------- the API -- */
+/* ---------------------------------------------------------------- the API, */
 
 BOOL netstack_ipv6_enabled(VOID)
 {
@@ -403,7 +403,7 @@ BOOL netstack_ipv6_address_get(UWORD interface_index, UWORD slot,
     return FALSE;
 }
 
-/* ---------------------------------------------------------------- routes -- */
+/* ---------------------------------------------------------------- routes, */
 
 /*
  * The lifetime the once-a-second tick in nxd_ipv6_prefix_router_timer_tick.c

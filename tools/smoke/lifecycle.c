@@ -334,7 +334,7 @@ int main(void)
 
     /* ---------------------------------------------------------------- (e) */
     /* tx_thread_delete() of a thread that is blocked in Exec, not on its    */
-    /* run signal -- the SANA-II reader stuck in WaitIO() case.  Run as a    */
+    /* run signal, the SANA-II reader stuck in WaitIO() case.  Run as a    */
     /* plain Exec task (orphaned above), exactly like netstack_shutdown().   */
 
     AMI_ERROR("=== phase e (deleting a thread blocked in Exec)");

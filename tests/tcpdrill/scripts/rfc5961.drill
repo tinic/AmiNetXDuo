@@ -1,4 +1,4 @@
-# tcpdrill -- RFC 5961, the blind in-window attacks.
+# tcpdrill, RFC 5961, the blind in-window attacks.
 #
 # RFC 793 lets a segment that lands anywhere in the receive window decide the
 # fate of the connection: a RESET tears it down, and so does a SYN.  The window
@@ -11,7 +11,7 @@
 # carrying SND.NXT and RCV.NXT, which is byte-identical to the last one this
 # side sent.  A peer that really did lose the connection answers it with a
 # RESET carrying the sequence number the challenge named, and that one is
-# honoured -- n06 is that exchange end to end, and is what keeps this from
+# honoured, n06 is that exchange end to end, and is what keeps this from
 # being a refusal to close.
 #
 # NONE OF THESE CASES HAS EVER BEEN RUN.
@@ -107,7 +107,7 @@ notx 200
 recv 100 = 0
 
 # A RESET the acceptability test rejects outright is still dropped in silence
-# -- the challenge is for segments INSIDE the window, and a segment far past
+#, the challenge is for segments INSIDE the window, and a segment far past
 # the right edge must not draw one.  40000 is beyond the widest window w01
 # allows.
 case n07_out_of_window_rst_draws_nothing

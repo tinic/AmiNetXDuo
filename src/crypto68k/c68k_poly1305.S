@@ -1,20 +1,20 @@
-| AmiNetXDuo -- crypto68k: the Poly1305 block function, 68020 assembly.
+| AmiNetXDuo, crypto68k: the Poly1305 block function, 68020 assembly.
 |
 |   One entry point with the same interface as c68k_poly1305_blocks_c() beside
 |   it: h = (h + m) * r mod 2^130 - 5 over some number of whole 16-byte
 |   blocks, five limbs of 26 bits, `hibit` supplying the 2^128 term that a
 |   full block carries and a short final one does not.  Everything else --
-|   the clamp, the buffering, the final reduction, the one-time key -- stays
+|   the clamp, the buffering, the final reduction, the one-time key, stays
 |   in C, as c68k_chacha20.S leaves the AEAD there.
 |
 |   Written here from RFC 8439 section 2.5, as the C beside it was.  The
 |   five-limb radix-2^26 split is the standard 32-bit decomposition --
 |   Bernstein described it and poly1305-donna (Andrew Moon, public domain) made
-|   it the common spelling -- and the clamp constants are the RFC's.  No code
+|   it the common spelling, and the clamp constants are the RFC's.  No code
 |   or schedule was taken from donna or any other implementation; what is
-|   shared is the RFC's mathematics, and nothing below -- the register map, the
+|   shared is the RFC's mathematics, and nothing below, the register map, the
 |   memory-operand multiply, the misaligned limb loads, the loop over the five
-|   product columns -- has a counterpart there.  The schedule was simulated
+|   product columns, has a counterpart there.  The schedule was simulated
 |   against RFC 8439 section 2.5.2 before this was written, and the result is
 |   checked against 2.5.2, against 2.8.2 and against the C limb for limb over
 |   many blocks by tests/crypto68k/crypto68k_bulk.
@@ -24,7 +24,7 @@
 |   docs/RESEARCH.md 58 wrote the cipher and left this: Poly1305 became 64% of
 |   an AEAD record.  Its estimate of what was available was 20-30% rather than
 |   the third ChaCha20 gave up, because twenty-five MULU.L a block cannot be
-|   scheduled away -- 1,075 cycles of about 2,900 on real hardware, and this
+|   scheduled away, 1,075 cycles of about 2,900 on real hardware, and this
 |   emulator charges 32 for MULU.L where a 68020 charges 43
 |   (docs/RESEARCH.md 18.1, 54).
 |
@@ -32,8 +32,8 @@
 |   structural disadvantage rather than a scheduling one.  A 32x32 -> 64
 |   product lands in a register pair and a 64-bit add is ADD.L plus ADDX.L; C
 |   can only reach either through `unsigned long long`, and at -Os GCC gives
-|   every one of the twenty-five products a round trip through the frame -- two
-|   stores and two loads, ~28 cycles, 690 a block -- on top of not inlining the
+|   every one of the twenty-five products a round trip through the frame, two
+|   stores and two loads, ~28 cycles, 690 a block, on top of not inlining the
 |   little-endian limb load at all.  That is the 300-byte stack frame in the
 |   -Os disassembly, and what this file removes.
 |
@@ -43,7 +43,7 @@
 |
 |       d_j = sum over i of h_i * K[j][i],   j, i in 0..4
 |
-|   where K is r0..r4 below the diagonal and 5*r1..5*r4 above it -- the
+|   where K is r0..r4 below the diagonal and 5*r1..5*r4 above it, the
 |   reduction of the terms that fall off the top of 2^130, folded into the
 |   multiplier instead of into a separate pass.  So the values live across the
 |   whole block are five accumulator limbs and nine constants, and the five
@@ -55,7 +55,7 @@
 |       mulu.l  d16(An),Dh:Dl        Dl * memory -> Dh:Dl
 |
 |   so the nine constants live in the frame and are never loaded, and the five
-|   accumulator limbs live in address registers -- MOVE.L An,Dn costs what
+|   accumulator limbs live in address registers, MOVE.L An,Dn costs what
 |   MOVE.L Dn,Dm costs, and the multiplicand has to be moved into Dl either
 |   way.  tests/crypto68k/crypto68k_bulk prices the operand before this file
 |   relies on it; it is very nearly free:
@@ -68,23 +68,23 @@
 |   form, so the constant pointer is stepped rather than indexed from the frame
 |   pointer.  ADDX.L Dn,Dm costs 1.99 in the same table, so a 64-bit accumulate
 |   is 4 cycles on top of the multiply and the whole block is twenty-five
-|   products of four instructions -- MOVE.L An,Dl, MULU.L, ADD.L, ADDX.L --
+|   products of four instructions, MOVE.L An,Dl, MULU.L, ADD.L, ADDX.L --
 |   with no spills.
 |
 | The loop over j is a cache decision, not a size one
 |
 |   Fully unrolled, the five columns are 25 products of 12 bytes and the block
 |   body comes to about 500 bytes against a 256-byte instruction cache.  Rolled
-|   up -- the five products unrolled, the five columns a DBRA -- the per-block
+|   up, the five products unrolled, the five columns a DBRA, the per-block
 |   body is 228 bytes and the loop that runs five times inside it is 80, so the
 |   whole of it fits.  The price is a DBRA, a pointer step and a store of h'[j]
 |   to the frame per column, and reading those five back in the message phase:
 |   roughly 125 cycles of about 1,425, a tenth.
 |
 |   This is the one measurement in the file the emulator argues against.  It
-|   does not charge for instruction fetch -- section 1's cache sweep reports a
+|   does not charge for instruction fetch, section 1's cache sweep reports a
 |   2048-byte straight-line body faster per ADD.L (144.8 ns) than a 256-byte
-|   one (151.2) -- so the unrolled form measures better here and would be
+|   one (151.2), so the unrolled form measures better here and would be
 |   fetching 500 bytes over a 16-bit bus on the target machine.  Every figure
 |   this file is credited with is therefore a lower bound on real hardware, by
 |   a wider margin than the unrolled version would be.
@@ -93,8 +93,8 @@
 |
 |       C[0..8] = s1 s2 s3 s4 r0 r1 r2 r3 r4      s_i = 5 * r_i
 |
-|   because K[j][i] is exactly C[4+j-i] -- check the corners, K[0][0] = C[4] =
-|   r0 and K[4][4] = C[4] = r0, K[0][4] = C[0] = s1, K[4][0] = C[8] = r4 -- so
+|   because K[j][i] is exactly C[4+j-i], check the corners, K[0][0] = C[4] =
+|   r0 and K[4][4] = C[4] = r0, K[0][4] = C[0] = s1, K[4][0] = C[8] = r4, so
 |   column j reads five descending longwords from &C[4+j], and stepping to the
 |   next column is one ADDQ.
 |
@@ -103,7 +103,7 @@
 |   A 16-byte block splits into limbs at bits 26, 52, 78 and 104, which do not
 |   fall on longword boundaries, so the obvious form reads four longwords and
 |   reassembles each limb from two of them with shift counts of 26, 20, 14, 12,
-|   18 and 6 -- and LSR.L takes an immediate count of 1..8 only, so every one
+|   18 and 6, and LSR.L takes an immediate count of 1..8 only, so every one
 |   of those is a register count or a SWAP and a shift.
 |
 |   Reading the block at byte offsets 0, 3, 6, 9 and 12 instead puts every
@@ -115,9 +115,9 @@
 | Registers
 |
 |   d0       the low half of the 64-bit column accumulator, and between
-|            columns the carry -- it is left there rather than moved
+|            columns the carry, it is left there rather than moved
 |   d1       the high half
-|   d2, d3   MULU.L's Dl:Dh -- Dl carries the multiplicand in
+|   d2, d3   MULU.L's Dl:Dh, Dl carries the multiplicand in
 |   d4       blocks remaining
 |   d5       0x03FFFFFF, the limb mask
 |   d6       the column counter
@@ -169,7 +169,7 @@
 | docs/RESEARCH.md 54.3 priced.
 |
 | \msk is `d5` where the shift leaves more than 26 bits and blank where it does
-| not -- offset 9 shifted down 6 has exactly 26 left, and offset 12 shifted
+| not, offset 9 shifted down 6 has exactly 26 left, and offset 12 shifted
 | down 8 has 24 and takes the 2^128 bit instead.
 | ---------------------------------------------------------------------------
         .macro  PB_LIMB off, sh, msk
@@ -227,7 +227,7 @@ _c68k_poly1305_blocks_asm:
         dbra    d6,.Lpb_five
 
 | The accumulator arrives reduced and leaves reduced, so it goes to the frame
-| where the column loop writes it, not to the address registers -- the first
+| where the column loop writes it, not to the address registers, the first
 | thing the block loop does is fold and add the message, and that reads it
 | from there.
         lea     PB_CTX_H(a0),a1
@@ -320,7 +320,7 @@ _c68k_poly1305_blocks_asm:
 
 | ------------------------------------------------------------- and out ----
 | The last column's carry has nowhere to go but round the top, where 2^130 is
-| 5, so it is the same fold the block loop opens with -- without a message.
+| 5, so it is the same fold the block loop opens with, without a message.
         move.l  d0,d1
         lsl.l   #2,d0
         add.l   d1,d0

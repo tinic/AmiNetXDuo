@@ -1,5 +1,5 @@
 /*
- * Profile -- timer-driven PC sampling.  See prof.h for why the sample is taken
+ * Profile, timer-driven PC sampling.  See prof.h for why the sample is taken
  * in the autovector rather than in an Exec interrupt server.
  *
  * This file does the parts that need AmigaOS rather than 68k: getting an audio
@@ -19,8 +19,8 @@
  *      library is a jump table: LVO -6*n of a base is a JMP to the real entry
  *      point.  prof_scan_libs() resolves all of them for every library, device
  *      and resource on Exec's lists, so a PC in Kickstart can be named by the
- *      nearest preceding entry -- "exec.library/Forbid" rather than
- *      "$00f8xxxx" -- and the hull of one library's targets becomes a named
+ *      nearest preceding entry, "exec.library/Forbid" rather than
+ *      "$00f8xxxx", and the hull of one library's targets becomes a named
  *      range, so a sample in a disk-loaded device with no symbols at all still
  *      gets a module.
  *
@@ -174,7 +174,7 @@ extern ULONG prof_read_vbr(VOID);
 
 /*
  * Colour clocks per second and lines per frame.  PAL and NTSC are told apart
- * by ex_EClockFrequency -- 709379 against 715909 -- rather than by opening
+ * by ex_EClockFrequency, 709379 against 715909, rather than by opening
  * graphics.library, because that is one fewer thing to fail on a machine whose
  * display the program under test has taken.
  */
@@ -187,7 +187,7 @@ extern ULONG prof_read_vbr(VOID);
 
 /* One watchdog window per this many video frames: about half a second, and
    512 of them is four minutes of run.  The table is allocated, so the size is
-   memory somebody on the 1 MB floor does not get back -- 6 KB against the
+   memory somebody on the 1 MB floor does not get back, 6 KB against the
    24 KB a longer history would cost, and a run this tool is used on is
    seconds, not hours. */
 #define PROF_WIN_FRAMES 25UL
@@ -279,7 +279,7 @@ VOID prof_note_range(ULONG lo, ULONG hi, const char *name)
 /*
  * Each segment is [size][next][code...], the size longword sitting four bytes
  * below BADDR() and covering the eight-byte header as well.  That is the same
- * walk for any seglist -- the one LoadSeg() returned, or the one a running
+ * walk for any seglist, the one LoadSeg() returned, or the one a running
  * process has in cli_Module.
  */
 static ULONG prof_walk_seglist(BPTR seglist, UWORD kind, const char *name,
@@ -315,7 +315,7 @@ char  label[32];
 
 /*
  * Both of these are called BEFORE prof_start(), because the caller wants to
- * record what it loaded before anything of it runs -- and the range table does
+ * record what it loaded before anything of it runs, and the range table does
  * not exist until prof_start() has counted the machine and allocated one.  So
  * they remember the seglist and prof_start() does the walk.  The alternative,
  * allocating the tables here, would mean the caller had to get the order right
@@ -385,7 +385,7 @@ VOID prof_target_is_self(VOID)
  * place worth looking.
  *
  * THE STEP IS TWO BYTES, NOT FOUR.  A longword on m68k is aligned to two, so
- * a record of longwords sits at a four-byte offset only by luck -- and it does
+ * a record of longwords sits at a four-byte offset only by luck, and it does
  * not: put this at the end of a struct with an odd number of words before it
  * and it lands two mod four.  A four-byte scan walks straight past it and the
  * library reports no tag at all, which looks exactly like a library that
@@ -432,7 +432,7 @@ ULONG        span;
  * of them is code in this library, so the hull of them must lie inside the
  * hunks this walk produced.  A tag that points at some other program's
  * seglist, or at a freed one, or at eight bytes that merely look like a
- * segment header, fails that and the whole walk is discarded -- the library
+ * segment header, fails that and the whole walk is discarded, the library
  * keeps its hull and stays named by module, which is where it started.
  *
  * The hunks go in only after the check passes, so a rejected library leaves
@@ -516,7 +516,7 @@ BOOL                     lo_in = FALSE, hi_in = FALSE;
 /*
  * Resolve one jump table.  Entry n of a library sits at base - 6*n and is
  * normally `JMP abs.l`; a few are `JMP d16(PC)`.  Anything else is left out
- * rather than guessed at -- a wrong target here would pull unrelated samples
+ * rather than guessed at, a wrong target here would pull unrelated samples
  * onto a name, which is precisely the failure this whole tool exists to avoid.
  *
  * The hull of the targets becomes a named range, which is what gives a module
@@ -598,7 +598,7 @@ UWORD   idx;
     }
 
     /* The jump table itself belongs to the library too: Exec keeps inline code
-       in some slots -- Forbid() and Permit() among them -- so a PC standing in
+       in some slots, Forbid() and Permit() among them, so a PC standing in
        the table resolves to no target at all and would otherwise go missing. */
     prof_add_range((ULONG)lib - lib->lib_NegSize, (ULONG)lib + lib->lib_PosSize,
                    PRK_LIB, idx, prof_libs[idx].pl_Name);
@@ -614,7 +614,7 @@ UWORD   idx;
      *
      * THE CAP IS NOT DECORATION.  A hull is only a module's extent if the
      * entry points are all in the module, and that is an assumption, not a
-     * fact -- FS-UAE's uaehf.device points its jump table at trap addresses
+     * fact, FS-UAE's uaehf.device points its jump table at trap addresses
      * scattered across memory, which gives a "hull" of several megabytes that
      * then swallows every other range inside it.  Half a megabyte is the whole
      * of Kickstart, so nothing genuine is lost by refusing anything wider, and
@@ -767,8 +767,8 @@ static VOID prof_watchdog_stop(VOID)
  * the audio hardware, and poking DMACON behind audio.device's back means the
  * two quietly fight: the program's sound stutters, our interrupt rate goes
  * wrong, and the profile is garbage that looks like a profile.  Allocating
- * makes the collision an answer -- "channel 3 is in use, using channel 2", or
- * "all four channels are in use, refusing to sample" -- rather than a wrong
+ * makes the collision an answer, "channel 3 is in use, using channel 2", or
+ * "all four channels are in use, refusing to sample", rather than a wrong
  * ranking.
  *
  * Channel 3 first because it is the one least often used alone: a program that
@@ -785,7 +785,7 @@ static UWORD            prof_audio_per;
 
 /* Precedence.  Zero is the documented "normal application" level: a program
    that asks for the channel with a higher precedence takes it from us, which
-   is right -- the program under test matters more than the measurement -- and
+   is right, the program under test matters more than the measurement, and
    the watchdog then reports that it happened rather than letting the profile
    pretend otherwise. */
 #define PROF_AUDIO_PRI  0
@@ -878,7 +878,7 @@ static BOOL prof_audio_start(ULONG ch, ULONG rate_hz)
 
     /* After the allocation, so that whatever audio.device did on the way in is
        done with before we own the slot.  SetIntVector rather than
-       AddIntServer: AUDx is a handler slot.  The stub clears INTREQ itself --
+       AddIntServer: AUDx is a handler slot.  The stub clears INTREQ itself,
        see prof_vector.S.  Nothing latches the way a CIA does, so the
        acknowledgement cannot be lost. */
     prof_audio_old  = SetIntVector(PROF_INTB_AUD(ch), &prof_irq);
@@ -954,7 +954,7 @@ static VOID prof_remove_vector(VOID)
  *
  * Every static test passes for timers that do not work.  Both CIA-B timers
  * were handed over by AddICRVector(), programmed cleanly, read back exactly
- * what was written -- and then stopped, one at the first timer.device open and
+ * what was written, and then stopped, one at the first timer.device open and
  * one at the first line of output.  Both failures produced a handful of real,
  * correctly sampled PCs over more than a second, which is exactly the shape of
  * an answer and none of the substance.  So the probe does those things inside
@@ -1132,7 +1132,7 @@ ULONG i, worst = 100UL, per;
  *
  * This is the whole point of carrying a timestamp.  Disable() masks INTENA, so
  * a Disable()/Enable() pair takes no samples and its time is charged to
- * whatever runs next -- and with the sample ordinal as the clock that is
+ * whatever runs next, and with the sample ordinal as the clock that is
  * invisible, because a dropped sample simply shifts every sample after it.
  * With a real clock, consecutive samples one interval apart missed nothing and
  * samples four intervals apart swallowed three, and the report can say how
@@ -1265,7 +1265,7 @@ int              pass;
     for (n = eb->TaskWait.lh_Head;  n->ln_Succ != NULL; n = n->ln_Succ) { ntask++; }
     Permit();
 
-    /* Headroom for what the program under test opens while it runs -- the
+    /* Headroom for what the program under test opens while it runs, the
        second scan at prof_stop() is what picks those up. */
     nlib  += 32UL;
     nlvo  += 2048UL;
@@ -1372,7 +1372,7 @@ BOOL             claimed = FALSE;
     /* &SysBase->ThisTask, resolved once so the handler is one indirection. */
     prof_taskptr = (ULONG)&eb->ThisTask;
 
-    /* The vector base.  Zero on a 68000, and MOVEC does not exist there --
+    /* The vector base.  Zero on a 68000, and MOVEC does not exist there,
        AttnFlags is the documented way to ask, and prof_read_vbr() is only
        reached when the answer is yes. */
     prof_vbr = 0UL;
@@ -1383,7 +1383,7 @@ BOOL             claimed = FALSE;
 
     prof_watchdog_start();
 
-    /* Channel 3 first, then 2, 1, 0 -- or exactly the one asked for. */
+    /* Channel 3 first, then 2, 1, 0, or exactly the one asked for. */
     if (channel <= 3UL)
     {
         first = last = channel;
@@ -1456,8 +1456,8 @@ BOOL             claimed = FALSE;
     /*
      * A channel that was busy is history now, not a conflict: we moved, and
      * prof_source() already says where to.  Clearing both means PROFF_LOSTAUDIO
-     * and prof_conflict() mean exactly one thing -- that the run itself was
-     * interfered with -- rather than sometimes meaning "the first choice was
+     * and prof_conflict() mean exactly one thing, that the run itself was
+     * interfered with, rather than sometimes meaning "the first choice was
      * taken and everything after that was fine".
      */
     if (prof_conf[0] != '\0')

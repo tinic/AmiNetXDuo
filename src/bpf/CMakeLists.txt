@@ -2,7 +2,7 @@
 # milestone 7).
 #
 # bpf_filter.c, bpf_validate.c, bpf_channel.c and bpf_tap.c contain no AmigaOS
-# calls -- the platform hooks live in bpf_amiga.c -- so they build and run on
+# calls, the platform hooks live in bpf_amiga.c, so they build and run on
 # the host against the replica layout in include/aminetxduo/bpf.h.
 
 add_library(aminetxduo_bpf STATIC

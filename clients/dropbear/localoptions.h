@@ -1,5 +1,5 @@
 /*
- * clients/dropbear/localoptions.h -- what is compiled into the AmigaOS
+ * clients/dropbear/localoptions.h, what is compiled into the AmigaOS
  * dbclient, and why each thing is off.
  *
  * Dropbear reads this from the BUILD directory if it exists; clients/dropbear/
@@ -26,8 +26,8 @@
  *   DROPBEAR_CLI_AGENTFWD   talks to ssh-agent over AF_UNIX.  bsdsocket.library
  *                           has no AF_UNIX and there is no agent to talk to.
  *   DROPBEAR_CLI_LOCALTCPFWD / REMOTETCPFWD
- *                           -L / -R.  These work in principle -- listen() and
- *                           accept() are published vectors -- and are off only
+ *                           -L / -R.  These work in principle, listen() and
+ *                           accept() are published vectors, and are off only
  *                           because nothing has tested them yet.  First line to
  *                           turn back on.
  *
@@ -89,8 +89,8 @@
  * With DROPBEAR_KEX_FIRST_FOLLOWS on (upstream's default), dbclient sends a
  * KEXDH_INIT for its own first-preference kex before it has seen the server's
  * KEXINIT, betting the server prefers the same one.  When the bet is wrong the
- * server discards the packet -- `proposal mismatch: my mlkem768x25519-sha256
- * peer curve25519-sha256`, `skipped packet (type 30)` in its log -- and
+ * server discards the packet, `proposal mismatch: my mlkem768x25519-sha256
+ * peer curve25519-sha256`, `skipped packet (type 30)` in its log, and
  * cli-kex.c's send_msg_kexdh_init() runs again, starting with
  * cli_kex_free_param() and a fresh gen_kexcurve25519_param().
  *

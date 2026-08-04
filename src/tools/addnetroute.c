@@ -1,5 +1,5 @@
 /*
- * AddNetRoute / DeleteNetRoute -- routes for packets that are not for this
+ * AddNetRoute / DeleteNetRoute, routes for packets that are not for this
  * network.
  *
  *     AddNetRoute    QUIET/S,DST=DESTINATION/K,HOSTDST=HOSTDESTINATION/K,
@@ -27,7 +27,7 @@
  *   DESTINATION / HOSTDESTINATION / NETDESTINATION with GATEWAY add an entry
  *   to the static routing table, which NetX Duo consults before the gateway
  *   and matches longest prefix first, so a route can override the default for
- *   part of the address space -- what a subnet behind a second router needs,
+ *   part of the address space, what a subnet behind a second router needs,
  *   and not expressible as a gateway. NETSTATUS_SYS_ROUTING says which build
  *   this is, and is asked before anything is attempted so the command refuses
  *   rather than quietly doing nothing.
@@ -47,18 +47,18 @@
  *                         network and is refused rather than guessed at.
  *   DESTINATION           whichever of the two the address looks like.
  *
- * A prefix length written into the address -- 10.1.2.0/24 -- overrides all of
+ * A prefix length written into the address, 10.1.2.0/24, overrides all of
  * that. It is not a new keyword, so the template is still Roadshow's.
  *
  * IPv6 uses the same keywords and a different pair of mechanisms, because NetX
- * Duo has no IPv6 equivalent of the static routing table -- nothing anywhere in
+ * Duo has no IPv6 equivalent of the static routing table, nothing anywhere in
  * it maps a prefix to a next hop. _nx_ipv6_packet_send() asks two lists and
  * nothing else, so those two are what these commands write:
  *
  *   DEFAULTGATEWAY fe80::1%eth0    the default-router list. Everything with
  *                                  nowhere better to go is handed to a router
  *                                  on it. Unlike IPv4 there may be more than
- *                                  one, and each is per interface -- which is
+ *                                  one, and each is per interface, which is
  *                                  why a link-local next hop needs the zone
  *                                  after the '%': fe80::/64 exists on every
  *                                  interface and the address alone does not
@@ -162,7 +162,7 @@ enum
 /* An interface index that was not given. */
 #define NR_NO_ZONE          0xFFFFU
 
-/* ---------------------------------------------------------------- output -- */
+/* ---------------------------------------------------------------- output, */
 
 static BOOL nr_quiet;
 
@@ -188,7 +188,7 @@ static union
     struct { NetStatusHeader hdr; NetStatusAddress6  e[NR_MAX_ADDRS6]; } addr6;
 } nr_answer;
 
-/* ------------------------------------------------------------- addresses -- */
+/* ------------------------------------------------------------- addresses, */
 
 /*
  * An address, an address with a prefix length, or a name. The local hosts file
@@ -253,7 +253,7 @@ static BOOL resolve_address(const char *text, ULONG *addr, ULONG *mask,
     /*
      * AmigaOS does not reclaim AllocVec() memory when a process exits, and
      * ami_alloc() is AllocVec(), so the twelve blocks ami_netdb_load() builds
-     * out of DEVS:Internet outlive this command -- 12,616 bytes per run on a
+     * out of DEVS:Internet outlive this command, 12,616 bytes per run on a
      * stock netdb, gone until reboot. atexit() rather than a free before each
      * return: this command leaves main() from several places and the leak is
      * one missed path away from coming back.
@@ -277,7 +277,7 @@ static VOID explain_bad_address(const char *what, const char *text)
                (LONG)what, (LONG)text);
 }
 
-/* ------------------------------------------------------------------ IPv6 -- */
+/* ------------------------------------------------------------------ IPv6, */
 
 /*
  * An IPv6 address as it was written: the address, the prefix length if one was
@@ -294,7 +294,7 @@ typedef struct NrAddr6
 
 /*
  * A colon is the whole test. No host name has one, and neither has a dotted
- * quad, so a text with one is meant as an IPv6 literal and nothing else --
+ * quad, so a text with one is meant as an IPv6 literal and nothing else,
  * which is what lets the IPv4 half below stay exactly as it was, including
  * when and how it refuses.
  */
@@ -518,7 +518,7 @@ static VOID format_route(ULONG dest, ULONG mask, char *buf, ULONG buflen)
     buf[pos]   = '\0';
 }
 
-/* ----------------------------------------------------------- the library -- */
+/* ----------------------------------------------------------- the library, */
 
 static VOID zero_control(NetStatusControl *ctl)
 {
@@ -669,7 +669,7 @@ static VOID explain(LONG err, ULONG gateway)
     }
 }
 
-/* --------------------------------------------------- IPv6, the live stack -- */
+/* --------------------------------------------------- IPv6, the live stack, */
 
 /* TRUE when the running library has IPv6 in it at all. */
 static BOOL stack_has_ipv6(struct Library *base)
@@ -716,7 +716,7 @@ static BOOL zone_matches(const NetStatusInterface *nsi, const char *zone)
  * with one interface up can say, since fe80::/64 is on every interface at
  * once. Anything else: the interface holding an address whose prefix covers
  * it, which is also the test nxd_ipv6_default_router_add() applies before it
- * will store the entry -- so failing here gives the reason instead of an
+ * will store the entry, so failing here gives the reason instead of an
  * unexplained refusal from the stack.
  */
 static BOOL interface_for_next_hop(struct Library *base, const NrAddr6 *gw,
@@ -819,7 +819,7 @@ static LONG find_router6(struct Library *base, const ULONG addr[4])
 #ifdef TOOL_DELETE
 /*
  * The live on-link prefix `addr` falls in. With `bits` given only that exact
- * length matches; without, the first covering entry does -- the table is kept
+ * length matches; without, the first covering entry does, the table is kept
  * longest prefix first, so that is the one the stack would use.
  *
  * Delete half only: the add path lets the stack answer EEXIST rather than
@@ -907,12 +907,12 @@ static VOID say_no_stack(VOID)
     tool_error("the network is not running, so it has no routes");
 }
 
-/* ------------------------------------------------------------- the IPv6 run -- */
+/* ------------------------------------------------------------- the IPv6 run, */
 
 /*
  * Reached when any address on the command line was written with a colon in
  * it. Everything below this point talks to the two IPv6 lists and nothing to
- * the IPv4 routing table, so the IPv4 path above is untouched -- including
+ * the IPv4 routing table, so the IPv4 path above is untouched, including
  * which of its refusals come before the library is opened.
  */
 static LONG run_ipv6(const LONG *args, BOOL have_default)
@@ -1166,7 +1166,7 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
     return RETURN_OK;
 }
 
-/* --------------------------------------------------------------- the run -- */
+/* --------------------------------------------------------------- the run, */
 
 int main(int argc, char **argv)
 {
@@ -1335,8 +1335,8 @@ int main(int argc, char **argv)
         dest &= mask;
 #endif
         /*
-         * Not done on the delete path: there the mask is not known yet -- it
-         * comes out of the live table below -- and masking with the zero it
+         * Not done on the delete path: there the mask is not known yet, it
+         * comes out of the live table below, and masking with the zero it
          * still holds turned every DESTINATION into 0.0.0.0, answering "there
          * is no route to 0.0.0.0" for a route that was plainly there. Caught
          * by tests/tools/run-livetools.sh.

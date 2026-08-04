@@ -1,5 +1,5 @@
 /*
- * clients/compat -- the libgcc helpers this toolchain's zero-byte libgcc.a
+ * clients/compat, the libgcc helpers this toolchain's zero-byte libgcc.a
  * does not supply, beyond the 64-bit division already in src/common.
  *
  * $AMIGA_TOOLCHAIN_ROOT/lib/gcc/m68k-amigaos/15.2.0/libgcc.a is 0 bytes.

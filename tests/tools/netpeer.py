@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-netpeer -- the other end, on the host, for the nc / telnet runs.
+netpeer, the other end, on the host, for the nc / telnet runs.
 
 tools/fsuae-run.sh attaches FS-UAE's SLIRP user-mode NAT.  From inside the
 guest the host is 10.0.2.2, so a server bound to 127.0.0.1 here is reachable
@@ -79,7 +79,7 @@ class DaytimeHandler(socketserver.BaseRequestHandler):
     """RFC 867 in spirit: send a fixed body and close.
 
     The echo server above never closes, which makes it useless to a command
-    that reads until end of file -- and reading until end of file is exactly
+    that reads until end of file, and reading until end of file is exactly
     what `Type TCP:...` and `Copy TCP:... TO ...` do.  This is the other end
     of those: a finite stream with a real FIN at the end of it, so that what
     the Amiga wrote to disk can be compared byte for byte.
@@ -186,7 +186,7 @@ FILES = {
 #
 # Port 69 needs root on this host, so the port is an argument and the guest is
 # told to use it.  That costs nothing: TFTP's interesting property is not the
-# well-known port, it is the TRANSFER IDENTIFIER -- the answer comes from a
+# well-known port, it is the TRANSFER IDENTIFIER, the answer comes from a
 # port the server picks, and every later packet belongs to that port.  Each
 # session below therefore gets its own socket, exactly as a real server does,
 # which is what makes the client's TID handling something this test can prove
@@ -202,7 +202,7 @@ TFTP_BLOCK = 512
 
 
 def tftp_request_parts(data):
-    """opcode, filename, mode -- or (None, None, None) if it is not a request."""
+    """opcode, filename, mode, or (None, None, None) if it is not a request."""
     if len(data) < 4:
         return None, None, None
     opcode = int.from_bytes(data[:2], "big")
@@ -330,7 +330,7 @@ def tftp_server(bind, port):
 # -------------------------------------------------------------------- whois --
 #
 # RFC 3912 in twenty lines, which is all of it: read a line, write a record,
-# hang up.  What is worth testing here is not the record -- it is the REFERRAL,
+# hang up.  What is worth testing here is not the record, it is the REFERRAL,
 # so `referral.test` is answered with a `refer:` line pointing back at this
 # same server.  That exercises the follow, and then the client's own guard
 # against a server that refers you to itself.

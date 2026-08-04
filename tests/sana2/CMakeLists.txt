@@ -5,8 +5,8 @@
 # assertion it makes is about TCP frames on the wire, in one device shape, and
 # only where an emulator runs.
 #
-# sana2_copy.c is the part that can be compiled here as it ships -- no Exec
-# calls, no NetX Duo objects beyond the three NX_PACKET fields it reads -- and
+# sana2_copy.c is the part that can be compiled here as it ships, no Exec
+# calls, no NetX Duo objects beyond the three NX_PACKET fields it reads, and
 # it is the part where a mistake is least recoverable: the hooks run at
 # interrupt level, called by somebody else's driver, on a machine with no MMU.
 #

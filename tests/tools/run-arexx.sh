@@ -29,14 +29,14 @@
 #                          the port means.
 #   QUERY HOSTNAME         a command we implement: RC 0 and a result string.
 #   FROBNICATE             a command nobody implements. RC must be non-zero and
-#                          the script must continue -- that is the whole fix.
+#                          the script must continue, that is the whole fix.
 #   QUERY NOSUCHVARIABLE   a keyword we know with a variable we do not.
 #   READ something         a keyword AmiTCP has and we decline. Distinct from
 #                          FROBNICATE on purpose: "not implemented" and "unknown
 #                          command" are different answers.
 #   ''  (empty)            AmiTCP returns RETURN_OK for an empty line, so we do.
 #   KILL                   last, because it takes the interfaces down. The most
-#                          commonly sent command in the corpus -- every stopnet.
+#                          commonly sent command in the corpus, every stopnet.
 #
 #   The script writes a sentinel line last. A hang is then not "some case
 #   failed", it is "the sentinel is missing", which is the assertion that would
@@ -311,7 +311,7 @@ else
 fi
 
 # SERVICES is the only command that blocks. The assertion is that it comes
-# back at all -- what it found is a property of the network the emulator is on,
+# back at all, what it found is a property of the network the emulator is on,
 # and on SLIRP the answer is nothing.
 for case_name in browse browse1; do
     if grep -qE "case $case_name:.*rc= *0" "$SCRIPTOUT"; then

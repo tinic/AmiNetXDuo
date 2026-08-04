@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the AmiSSL side of tests/crypto68k/c68k_amissl.
+ * AmiNetXDuo, the AmiSSL side of tests/crypto68k/c68k_amissl.
  *
  *   OpenSSL, and nothing of ours except c68k_amissl.h.  The orchestrator holds
  *   the clock, the vectors and the reporting; this file performs the operation
@@ -7,7 +7,7 @@
  *   same timing loop, with the same inputs, in the same process.
  *
  *   Every OpenSSL function here is a macro from <inline/amissl.h> that expands
- *   to a jsr through AmiSSLBase or AmiSSLExtBase -- AmiSSL v5 spans two library
+ *   to a jsr through AmiSSLBase or AmiSSLExtBase, AmiSSL v5 spans two library
  *   bases because OpenSSL has more entry points than one LVO table holds.  So
  *   nothing is linked: no libamisslauto.a, no libamisslstubs.a, no object of
  *   AmiSSL's in this binary at all.  That sidesteps the question of whether an
@@ -24,7 +24,7 @@
  *   and padding is a memcpy and a memcmp on this scale.  RSA_public_encrypt()
  *   and RSA_private_decrypt() with RSA_NO_PADDING are the shortest route to
  *   "raise this 2048-bit number to this power" through OpenSSL's real RSA path
- *   -- the same rsa_ossl_mod_exp() a TLS handshake reaches, including its CRT,
+ *  , the same rsa_ossl_mod_exp() a TLS handshake reaches, including its CRT,
  *   its constant-time exponentiation and (unless turned off) its blinding.
  *
  * SPDX-License-Identifier: MIT
@@ -99,8 +99,8 @@ struct TagItem  tags[5];
      * OpenLibrary() of LIBS:AmiSSL/amissl_v362.library, which is 3.5 MB of
      * hunk file that AmigaDOS has to read and relocate.  a_ossl_init_ssl()
      * below then does the per-process InitAmiSSLA().  Split because they are
-     * paid at different times by a real program -- the library stays resident
-     * after the first opener exits, the per-process init does not -- and
+     * paid at different times by a real program, the library stays resident
+     * after the first opener exits, the per-process init does not, and
      * because a single number for the pair says nothing about either.
      *
      * The tag list is built by hand rather than through the OpenAmiSSLTags()
@@ -138,7 +138,7 @@ struct TagItem  tags[5];
     /*
      * AmiSSL_SocketBase is absent deliberately.  The autodoc says it may be
      * omitted when the caller needs no networking, which is the case here, and
-     * it keeps bsdsocket.library -- ours or anybody's -- out of a measurement
+     * it keeps bsdsocket.library, ours or anybody's, out of a measurement
      * of arithmetic.
      */
     tags[0].ti_Tag = AmiSSL_GetAmiSSLBase;    tags[0].ti_Data = (ULONG)&AmiSSLBase;
@@ -261,7 +261,7 @@ int     ok   = 1;
 
     /*
      * The CRT exponents.  rsa_ossl_mod_exp() takes the CRT path only when all
-     * three are present -- without them OpenSSL falls back to a full-width
+     * three are present, without them OpenSSL falls back to a full-width
      * BN_mod_exp_mont_consttime over a 2048-bit exponent, about four times the
      * work and not the comparison intended here.  Computed before
      * RSA_set0_key() takes over d.

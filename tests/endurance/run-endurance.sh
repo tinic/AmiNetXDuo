@@ -17,7 +17,7 @@
 #   P1  a blocking recv() on an idle established socket must WAIT
 #   P2  a blocking send() into a peer that is not reading must WAIT
 #   P3  a blocking send() while the packet pool has been driven to its floor
-#       by connections nobody reads -- the specific suspect, because
+#       by connections nobody reads, the specific suspect, because
 #       NX_NO_PACKET means both "nothing to read" and "the pool is empty" and
 #       src/bsdsocket/errno.c:63 maps it to EWOULDBLOCK without asking which
 #   P4  the same on a NON-BLOCKING socket, as the control

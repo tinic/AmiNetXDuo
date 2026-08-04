@@ -1,5 +1,5 @@
 /*
- * bsdsocket.library -- the private vector that hands tls.library the stack.
+ * bsdsocket.library, the private vector that hands tls.library the stack.
  *
  * Compiled only when AMINETXDUO_TLS_CONTEXT is defined, which happens only in
  * an AMINETXDUO_TLS build.  A default build has neither this object nor the
@@ -28,7 +28,7 @@ VOID ami_netstack_baton_acquire(VOID);
 /*
  * The table is const and static; every entry is a function this library
  * already contains.  Nothing in it is per opener, so one copy serves every
- * caller -- the only per-caller argument is the SocketBase passed to
+ * caller, the only per-caller argument is the SocketBase passed to
  * nxc_TcpSocket().
  */
 
@@ -97,7 +97,7 @@ LONG ami_nxd_context_obtain(ULONG magic, ULONG version,
 {
     (VOID)socket_base;
 
-    /* Write nothing unless every one of these holds -- see the header. */
+    /* Write nothing unless every one of these holds, see the header. */
     if (magic != AMI_NXD_CONTEXT_MAGIC)
         return -1;
     if (version != AMI_NXD_CONTEXT_VERSION)

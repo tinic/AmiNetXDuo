@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- fetching a real HTTPS URL through tls.library, and nothing else.
+ * AmiNetXDuo, fetching a real HTTPS URL through tls.library, and nothing else.
  *
  * tests/tls/tls_https.c is linked against our whole stack: it calls
  * netstack_startup(), nx_tcp_socket_create(), nx_secure_tls_session_create(),
@@ -8,7 +8,7 @@
  *
  * This program is linked against nothing of ours.  It opens two shared
  * libraries by name, calls their published vectors, and verifies the chain
- * against DEVS:Internet/certificates -- 119 Mozilla roots on disk, of which it
+ * against DEVS:Internet/certificates, 119 Mozilla roots on disk, of which it
  * parses the one the chain actually needs.
  *
  * Everything below the TLSOpen() call is therefore evidence about the design
@@ -18,7 +18,7 @@
  * does not hang when the plaintext is already decrypted.
  *
  * Needs LIBS:bsdsocket.library, LIBS:tls.library, DEVS:Internet/certificates,
- * DEVS:NetInterfaces/eth0 and DEVS:a2065.device -- see tests/tls/run-api.sh.
+ * DEVS:NetInterfaces/eth0 and DEVS:a2065.device, see tests/tls/run-api.sh.
  *
  * Not a baseline: it depends on the internet, on FS-UAE's SLIRP NAT, on a
  * third party's server, and on a certificate that rotates every ninety days.
@@ -221,7 +221,7 @@ static const char a_request[] =
 
 static UBYTE a_body[2048];
 
-/* fd_set, open-coded -- see the note in src/tlslib/tls_conn.c. */
+/* fd_set, open-coded, see the note in src/tlslib/tls_conn.c. */
 static ULONG a_readfds[8];
 
 struct t_timeval
@@ -411,7 +411,7 @@ int main(VOID)
         /*
          * Which refusal is the server's business, not ours.  Asked for a name
          * it does not serve, this host answers with whatever its default vhost
-         * has -- and badssl.com's is broken in assorted ways, so the observed
+         * has, and badssl.com's is broken in assorted ways, so the observed
          * reason has been "issued to another host" and "expired" on different
          * days.  Pinning the test to one of them would make it fail when
          * somebody else changes their configuration.  What must hold is that
@@ -610,7 +610,7 @@ int main(VOID)
             /*
              * TLSA_NoResume is load-bearing.  This is the fourth connection to
              * A_HOST in this run, so without it the library would resume the
-             * session the third one established -- and a resumed handshake
+             * session the third one established, and a resumed handshake
              * sends no certificate, verifies no chain and checks no host name,
              * which is what the two assertions below claim still happened.
              */

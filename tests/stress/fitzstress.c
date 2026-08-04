@@ -1,5 +1,5 @@
 /*
- * FitzStress -- four concurrent AmigaDOS copies over ONE TCP connection.
+ * FitzStress, four concurrent AmigaDOS copies over ONE TCP connection.
  *
  * WHOSE TEST THIS IS
  *
@@ -37,15 +37,15 @@
  *   reports is that the stack delivers wrong bytes before it stops delivering
  *   any, and a silent corruption would be worse than the hang.  So every byte
  *   that comes off the share is checked against a position-addressable
- *   pattern as it arrives --
+ *   pattern as it arrives,
  *
  *       byte(o) = pat[o & 8191] ^ (UBYTE)(o >> 13)
  *
- *   -- which catches a single altered byte, and, because the period is 2 MB,
+ *  , which catches a single altered byte, and, because the period is 2 MB,
  *   a repeated or dropped block as well.  The host side knows the same
  *   pattern and checks everything the guest wrote to the share.  The tree
  *   worker is checked by Fitz's own `comparetree ... crc`, run from the
- *   supervisor against a copy the worker has finished with -- at the end by
+ *   supervisor against a copy the worker has finished with, at the end by
  *   default, because it is minutes of the same connection and no health
  *   sample is taken while it runs.
  *
@@ -58,7 +58,7 @@
  *   DH0:stress-summary.txt    totals, and which worker was where at the end
  *   serial                    one line per sample, so a machine whose
  *                             filesystem has stopped can still be seen to be
- *                             executing -- and a machine that stops emitting
+ *                             executing, and a machine that stops emitting
  *                             them has stopped executing
  *
  *   A worker that stops advancing its phase stamp is the freeze, and the
@@ -167,8 +167,8 @@ static LONG fs_pat_check(const UBYTE *buf, ULONG off, ULONG len)
  * The supervisor's loop does more than Delay(): it runs netstat, and it can
  * run comparetree, which walks a 4 MB tree with CRC over the same connection
  * four workers are hammering and takes minutes.  A clock that adds `sample`
- * per iteration therefore reads far behind real time -- a run asked for 420
- * seconds sat there for 22 minutes and reported t=300 -- and the emulator's
+ * per iteration therefore reads far behind real time, a run asked for 420
+ * seconds sat there for 22 minutes and reported t=300, and the emulator's
  * deadline arrives long before the workload's own.
  */
 static struct DateStamp g_start;
@@ -208,8 +208,8 @@ static ULONG fs_elapsed(VOID)
 typedef struct
 {
     char    cf_Share[MAXPATH];      /* the Fitz mount, e.g. FITZ:            */
-    char    cf_Ram[MAXPATH];        /* RAM: -- worker 1's sink, 2's source   */
-    char    cf_Disk[MAXPATH];       /* a real disk -- worker 3's sink        */
+    char    cf_Ram[MAXPATH];        /* RAM:, worker 1's sink, 2's source   */
+    char    cf_Disk[MAXPATH];       /* a real disk, worker 3's sink        */
     char    cf_Tree[MAXPATH];       /* the system tree worker 4 copies       */
     ULONG   cf_SmallKB;             /* workers 1 and 2                       */
     ULONG   cf_BigKB;               /* worker 3                              */
@@ -220,7 +220,7 @@ typedef struct
     /*
      * comparetree with CRC reads the whole tree back over the same connection
      * the four workers are on, and the supervisor is inside SystemTagList()
-     * for as long as it takes -- minutes under load, during which no health
+     * for as long as it takes, minutes under load, during which no health
      * sample is taken.  So it is off by default and the run gets one at the
      * end, once the workers have stopped.  Content is still checked
      * continuously: workers 1 and 3 verify every byte off the share against
@@ -446,7 +446,7 @@ static VOID fs_join(char *out, const char *base, const char *name)
     out[i] = '\0';
 }
 
-/* "<base>/<stem><n>" -- worker 4's numbered tree slots. */
+/* "<base>/<stem><n>", worker 4's numbered tree slots. */
 static VOID fs_join_num(char *out, const char *base, const char *stem, ULONG n)
 {
     char  tail[64];
@@ -534,7 +534,7 @@ static LONG fs_copy_file(StressWorker *w, const char *src, const char *dst,
             if (got == 0)
             {
                 /* End of file before the length that was asked for.  Not an
-                   I/O error, so IoErr() says nothing -- and a copy that
+                   I/O error, so IoErr() says nothing, and a copy that
                    stopped early must not pass for a clean one, which is why
                    it is recorded here rather than left to the caller. */
                 fs_event(w->w_Role, "short", (LONG)off, (LONG)bytes);
@@ -597,8 +597,8 @@ out:
  * `copy <tree> <share>/testsysN ALL QUIET CLONE`, written out rather than
  * shelled out: this rig's DH0: is a bare directory hard drive with no
  * Workbench on it, so there is no C:Copy to call.  CLONE is the part that
- * matters -- the comment, the protection bits and the datestamp are what
- * Fitz carries over the wire for every entry and what comparetree checks --
+ * matters, the comment, the protection bits and the datestamp are what
+ * Fitz carries over the wire for every entry and what comparetree checks,
  * so all three are set, in that order, because SetProtection() can take the
  * write bit away and SetComment() would then fail.
  */
@@ -823,7 +823,7 @@ static VOID fs_tree_delete(StressWorker *w, const char *path, LONG depth)
  *
  * mktree.py builds it on the host, where a protection bit and a file comment
  * have nowhere to live, so every entry would arrive with the same default
- * ----rwed and no comment -- and comparetree would then be checking two
+ * ----rwed and no comment, and comparetree would then be checking two
  * fields that are constant, which is no check at all.  This walks the tree
  * once at startup and gives each file a comment of its own and a protection
  * word that varies.
@@ -1195,7 +1195,7 @@ static VOID fs_timeline(ULONG t)
 /*
  * `netstat -h` opens no library, allocates nothing and takes no lock, which is
  * why it is safe to run from here while four processes are hammering the
- * machine -- and why it still answers when the rest of the stack does not.
+ * machine, and why it still answers when the rest of the stack does not.
  * The block is stamped so the series can be read against the timeline.
  */
 static VOID fs_health(ULONG t)
@@ -1332,7 +1332,7 @@ int main(int argc, char **argv)
     }
 
     /* Before any worker starts, so the tree it copies has something to
-       carry.  Local disk only -- no network is involved in this. */
+       carry.  Local disk only, no network is involved in this. */
     {
         ULONG idx = 0UL;
 
@@ -1445,7 +1445,7 @@ int main(int argc, char **argv)
     {
         /*
          * Do not return.  Returning unloads this segment, and a child still
-         * inside fs_copy_file() would then execute freed memory -- turning a
+         * inside fs_copy_file() would then execute freed memory, turning a
          * freeze that can be read off the timeline into a crash that cannot.
          * The emulator's own deadline ends the run; everything worth having
          * is already on DH0:, and the heartbeat keeps saying whether the

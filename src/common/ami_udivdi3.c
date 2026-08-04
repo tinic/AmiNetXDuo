@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the compiler runtime this toolchain does not ship.
+ * AmiNetXDuo, the compiler runtime this toolchain does not ship.
  *
  * The set depends on the target, and grew when the 68000 and 68060 builds were
  * added (docs/RESEARCH.md 45):
@@ -68,7 +68,7 @@ typedef unsigned short      u16;
  *
  * divu.l <ea>,Dr:Dq divides the 64-bit value Dr:Dq by a 32-bit divisor,
  * leaving the quotient in Dq and the remainder in Dr.  It is only defined when
- * the quotient fits in 32 bits, i.e. when hi < divisor -- every caller below
+ * the quotient fits in 32 bits, i.e. when hi < divisor, every caller below
  * guarantees that before calling.
  */
 #if defined(__mc68020__) || defined(__mc68030__) || defined(__mc68040__) || \
@@ -186,7 +186,7 @@ u32     rem;
     /*
      * Divisor is >= 2^32, so the quotient is < 2^32.  Shift-subtract over the
      * 32 candidate bits.  nx_crypto reaches this only when the trial divisor
-     * genuinely exceeds a word, which is rare -- it is not worth a Knuth
+     * genuinely exceeds a word, which is rare, it is not worth a Knuth
      * algorithm D implementation.
      */
     {
@@ -282,7 +282,7 @@ u64     remainder = 0;
     return(negate ? -(s64)remainder : (s64)remainder);
 }
 
-/* ------------------------------------------------------------ __muldi3 --
+/* ------------------------------------------------------------ __muldi3,
  *
  * 64x64 -> 64.  Needed by the 68000 and 68060 builds and by no other, for
  * opposite reasons:
@@ -291,8 +291,8 @@ u64     remainder = 0;
  *                       so GCC composes the 64-bit product inline and never
  *                       calls this.
  *   68060               that 64-bit-result form is one of the integer
- *                       instructions the 68060 dropped -- it traps to vector
- *                       61 and the 68060 support code emulates it -- so GCC
+ *                       instructions the 68060 dropped, it traps to vector
+ *                       61 and the 68060 support code emulates it, so GCC
  *                       will not emit it and calls here instead.
  *   68000               no 32-bit multiply of any kind; only mulu.w.
  *
@@ -350,7 +350,7 @@ u64     product = ami_umul32_wide(a_lo, b_lo);
     return(product);
 }
 
-/* ------------------------------------------------ the 68000 32-bit set --
+/* ------------------------------------------------ the 68000 32-bit set,
  *
  * mulu.l, divu.l and divs.l do not exist before the 68020, so on a plain
  * 68000 every 32-bit `*`, `/` and `%` in C becomes a libgcc call, into the

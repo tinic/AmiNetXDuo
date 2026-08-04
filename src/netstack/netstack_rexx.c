@@ -1,16 +1,16 @@
 /*
- * AmiNetXDuo -- the AMITCP public port, and the ARexx host behind it.
+ * AmiNetXDuo, the AMITCP public port, and the ARexx host behind it.
  *
  * The port exists so `WaitForPort AMITCP` in a startup script returns once the
  * stack is up. That is not all it is, which is what this file is for: AMITCP is
  * AmiTCP's *ARexx host port*, and 31 of the 2,149 comm/ archives
- * surveyed in docs/RESEARCH.md 75 send commands to it -- AmiTCP's own
+ * surveyed in docs/RESEARCH.md 75 send commands to it, AmiTCP's own
  * bin/stopnet and bin/netstat, Genesis's copies of both, SLIPCall, Netdial,
  * TCPFront, netbeginner, interinstall, TCP_Start_Stop, rx.fingerd.
  *
  * A port with PA_IGNORE and no signal task answers none of them. RexxSysLib
  * finds the port, PutMsg()es a RexxMsg and waits for a reply that never comes,
- * so the script hangs -- where with no port at all it would have failed at once
+ * so the script hangs, where with no port at all it would have failed at once
  * with "host environment not found". So the port has to be serviced, and every
  * message replied to, including the ones we do not implement: an error reply is
  * what restores the behaviour the port's absence used to give.
@@ -19,7 +19,7 @@
  *
  *     #define REXXKEYWORDS "Q=QUERY,S=SET,READ,ROUTE,ADD,RESET,KILL"
  *
- * parsed the way AmiTCP parsed it -- ReadItem() then FindArg() -- so
+ * parsed the way AmiTCP parsed it, ReadItem() then FindArg(), so
  * abbreviation and quoting behave identically without us reimplementing them.
  * What each keyword does here, and why, is at ami_rx_execute();
  * netstack_rexx_vars.c has QUERY and SET's variable space.
@@ -50,7 +50,7 @@
 
 struct Library *ami_rx_rexxbase;
 
-/* ----------------------------------------------------------------- names -- */
+/* ----------------------------------------------------------------- names, */
 
 static char ami_rx_port_name[]  = "AMITCP";
 
@@ -81,7 +81,7 @@ enum
 #define RX_STACK        8192
 #define RX_PRIORITY     0
 
-/* ----------------------------------------------------------------- state -- */
+/* ----------------------------------------------------------------- state, */
 
 typedef struct AmiRexxBoot
 {
@@ -102,7 +102,7 @@ static AmiRexxBoot     *ami_rx_boot;
  * whichever task drops the last reference. A MsgPort cannot carry a handshake
  * across that. CreateMsgPort() takes mp_SigBit from the creating task's signal
  * allocation and points mp_SigTask at it, so the reply woke the bring-up
- * Process -- gone by then -- while the stopper sat in WaitPort() on a bit
+ * Process, gone by then, while the stopper sat in WaitPort() on a bit
  * nothing would ever set. That was CloseLibrary() never returning, and
  * DeleteMsgPort() would have freed the signal out of the wrong task too.
  *
@@ -114,19 +114,19 @@ static volatile ULONG   ami_rx_gone;
 static struct Task     *ami_rx_stopper;
 static ULONG            ami_rx_stop_sig;
 
-/* ------------------------------------------------------- rexxsyslib calls --
+/* ------------------------------------------------------- rexxsyslib calls,
  *
  * AmiTCP also set an ARexx variable, AMITCP.LASTERROR, alongside the return
  * code. That is not done here. SetRexxVarFromMsg() is the only way to reach it
- * from a shared library -- amiga.lib's SetRexxVar() needs a base we do not have
- * -- and only some NDKs declare it, so building against it makes the result
+ * from a shared library, amiga.lib's SetRexxVar() needs a base we do not have
+ *, and only some NDKs declare it, so building against it makes the result
  * depend on which NDK is installed. Nothing in the 31-archive corpus reads
  * LASTERROR (docs/RESEARCH.md 75.7); what a script reads as RC is rm_Result1,
  * which is set, and an error string comes back in rm_Result2 when the caller
  * asked for a result.
  */
 
-/* --------------------------------------------------------------- commands -- */
+/* --------------------------------------------------------------- commands, */
 
 static ULONG ami_rx_strlen(const char *s)
 {
@@ -139,7 +139,7 @@ static ULONG ami_rx_strlen(const char *s)
 }
 
 /*
- * KILL. AmiTCP's was Signal(AmiTCP_Task, SIGBREAKF_CTRL_C) -- the stack task
+ * KILL. AmiTCP's was Signal(AmiTCP_Task, SIGBREAKF_CTRL_C), the stack task
  * exited and the library went with it. Ours cannot: bsdsocket.library is a
  * singleton that lives until reboot once anything has opened it, which
  * src/tools/netshutdown.c documents at length. What is stoppable is the
@@ -147,7 +147,7 @@ static ULONG ami_rx_strlen(const char *s)
  * through the same netstack_interface_down() that Offline calls.
  *
  * The port stays. `stopnet`'s optional FLUSH branch tests Show(ports, AMITCP)
- * before flushing memory, so it correctly declines to flush -- the stack really
+ * before flushing memory, so it correctly declines to flush, the stack really
  * is still resident.
  */
 static LONG ami_rx_kill(void)
@@ -246,7 +246,7 @@ static LONG ami_rx_execute(const char *line, const char **errstr,
          * and parseroute() "ROUTE not implemented." with the working body
          * #if 0'ed out around an INCOMPLETE marker. ADD and RESET edit the net
          * database AmiTCP kept in memory (its kern/amiga_netdb.c), which this
-         * stack does not have -- docs/DEVELOPMENT.md sizes what adding one
+         * stack does not have, docs/DEVELOPMENT.md sizes what adding one
          * would mean.
          *
          * Recognised so the caller is told "not implemented" rather than
@@ -263,12 +263,12 @@ static LONG ami_rx_execute(const char *line, const char **errstr,
     }
 }
 
-/* -------------------------------------------------------- message handling -- */
+/* -------------------------------------------------------- message handling, */
 
 /*
  * One RexxMsg, answered. rm_Result1 is the return code the script sees as RC;
  * rm_Result2 is a result string, but only when the script asked for one with
- * OPTIONS RESULTS -- creating one otherwise leaks an argstring the interpreter
+ * OPTIONS RESULTS, creating one otherwise leaks an argstring the interpreter
  * will not free.
  */
 static VOID ami_rx_service(struct RexxMsg *rmsg)
@@ -306,8 +306,8 @@ static VOID ami_rx_service(struct RexxMsg *rmsg)
          * than the uninitialised variable's own name.
          */
         /* STRPTR, not CONST_STRPTR: the pinned NDK types this parameter
-           `const STRPTR`, which is UBYTE *const -- a const pointer, not a
-           pointer to const -- so CONST_STRPTR discards a qualifier there and
+           `const STRPTR`, which is UBYTE *const, a const pointer, not a
+           pointer to const, so CONST_STRPTR discards a qualifier there and
            builds only against an NDK that spells it CONST_STRPTR. The reply is
            our own buffer, so handing it over non-const costs nothing. */
         rmsg->rm_Result2 =
@@ -329,7 +329,7 @@ static VOID ami_rx_service(struct RexxMsg *rmsg)
 /*
  * The port is a parameter, not read from ami_rx_port: the closing drain runs
  * after RemPort() has already cleared the global, so reading it there was
- * GetMsg(NULL) -- two Enforcer hits (a NULL MsgPort's mp_MsgList is at offset
+ * GetMsg(NULL), two Enforcer hits (a NULL MsgPort's mp_MsgList is at offset
  * 0x14, and then through the head at 0), and worse, the drain that is supposed
  * to answer whatever arrived between RemPort() and here answered nothing. A
  * sender that got its message in during that window waited for a reply that
@@ -368,7 +368,7 @@ static VOID ami_rx_drain(struct MsgPort *port, BOOL closing)
     }
 }
 
-/* ----------------------------------------------------------- the process -- */
+/* ----------------------------------------------------------- the process, */
 
 static VOID ami_rx_main(VOID)
 {
@@ -421,7 +421,7 @@ static VOID ami_rx_main(VOID)
         return;
 
     /*
-     * rexxsyslib is what makes a reply meaningful -- without it we can still
+     * rexxsyslib is what makes a reply meaningful, without it we can still
      * reply, which is what stops the hang, but not set rm_Result1 (the message
      * cannot be confirmed to be a RexxMsg) or hand back a result string.
      * Nothing can send us a RexxMsg without it either, so this is theoretical.
@@ -478,7 +478,7 @@ static VOID ami_rx_main(VOID)
         Signal(ami_rx_stopper, ami_rx_stop_sig);
 }
 
-/* ---------------------------------------------------------------- the API -- */
+/* ---------------------------------------------------------------- the API, */
 
 VOID ami_netstack_rexx_start(VOID)
 {
@@ -491,7 +491,7 @@ VOID ami_netstack_rexx_start(VOID)
 
     /* CreateNewProc() needs a Process to inherit from, the same requirement
        bsd_tcp_handler_start() has. A bare Task gets no port rather than a
-       crash -- and no port is the failure mode that was always safe. */
+       crash, and no port is the failure mode that was always safe. */
     if (me == NULL || me->tc_Node.ln_Type != NT_PROCESS)
     {
         AMI_WARN("AMITCP: opener is not a Process; no ARexx host");
@@ -584,7 +584,7 @@ VOID ami_netstack_rexx_stop(VOID)
 /*
  * iComp's SANA-II drivers read the AMITCP port as "this stack hands AmiTCP
  * mbufs to the copy callbacks", and on finding it they stop calling the
- * callbacks and walk ios2_Data as an IOIPReq instead -- into our slot, which is
+ * callbacks and walk ios2_Data as an IOIPReq instead, into our slot, which is
  * not one (docs/RESEARCH.md 71). Their flag is sampled once per OpenDevice and
  * defaults to on, so the port is taken down across the open and put back after.
  *
@@ -593,7 +593,7 @@ VOID ami_netstack_rexx_stop(VOID)
  * untouched, so a message already queued is still serviced and a PutMsg()
  * through a pointer someone found earlier still arrives and still signals. The
  * window hides the name from FindPort(), which is the whole point, and changes
- * nothing about delivery -- so there is no state to share and no lock between
+ * nothing about delivery, so there is no state to share and no lock between
  * the suspending task and the host.
  *
  * What does matter is that the port is not *freed* under the host: suspend and

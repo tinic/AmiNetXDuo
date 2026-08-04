@@ -6,8 +6,8 @@
 #
 # Stages LIBS:bsdsocket.library, LIBS:usergroup.library and the DEVS: config.
 #
-# NO DRIVER.  Almost nothing here goes on the wire -- an option is set and read
-# back -- but the library will not bring a stack up with no interface to put it
+# NO DRIVER.  Almost nothing here goes on the wire, an option is set and read
+# back, but the library will not bring a stack up with no interface to put it
 # on, so the test installs one itself: tests/tcpdrill/tapdev.c, made at run
 # time with MakeLibrary()/AddDevice().  DEVS:NetInterfaces/tap0 names it.
 #

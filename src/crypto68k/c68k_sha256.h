@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- crypto68k: SHA-256, for the TLS record path and everything
+ * AmiNetXDuo, crypto68k: SHA-256, for the TLS record path and everything
  * else in the handshake that hashes.
  *
  *   docs/RESEARCH.md 15.7 named "an unwritten 68020 SHA-256" as the largest
@@ -7,8 +7,8 @@
  *   tree was already 1.28x AmiSSL on HMAC-SHA256 with both sides portable C,
  *   so that 1.28x described two C implementations, not the machine.
  *
- *   The C below is 1.29x the vendored implementation on the same buffer --
- *   85,952 us to 66,687 for 16 KiB -- with no assembly.  Two changes did it:
+ *   The C below is 1.29x the vendored implementation on the same buffer,
+ *   85,952 us to 66,687 for 16 KiB, with no assembly.  Two changes did it:
  *
  *     1. The sixteen message words are loaded, not assembled.  This is a
  *        big-endian machine, so W[t] for t < 16 is the longword at data + 4t,
@@ -23,7 +23,7 @@
  *   against this, on the argument that SHA-256's rotations map onto ROR.L,
  *   ROL.L and SWAP and that a compiler cannot use a count above eight without
  *   burning a data register.  It lost: 67,656 us against 66,687.  The measured
- *   instruction costs say why -- on this part ROR.L #n is 5.94 cycles and
+ *   instruction costs say why, on this part ROR.L #n is 5.94 cycles and
  *   ROR.L Dm,Dn is 7.91, so SWAP-then-rotate (9.89) and MOVEQ-then-rotate
  *   (9.91) are the same price.  The SWAP idiom is a 68000 habit, where a
  *   rotate cost 8+2n; a 68020's shifter is flat.  docs/RESEARCH.md 18 has the
@@ -72,7 +72,7 @@ UINT c68k_sha256_digest_calculate(C68K_SHA256 *ctx, UCHAR *digest,
 
 /*
  * The compression function itself: `blocks` 64-byte blocks folded into the
- * eight-word state.  `data` needs no alignment -- the 68020 does misaligned
+ * eight-word state.  `data` needs no alignment, the 68020 does misaligned
  * longword reads in hardware, and a TLS record's payload starts 21 bytes into
  * the packet buffer.
  *
@@ -82,14 +82,14 @@ UINT c68k_sha256_digest_calculate(C68K_SHA256 *ctx, UCHAR *digest,
 VOID c68k_sha256_blocks(ULONG *state, const UCHAR *data, ULONG blocks);
 
 
-/* ---------------------------------------------------------- the variants -- */
+/* ---------------------------------------------------------- the variants, */
 
 /*
  * Only one, which is the result.  A 68020 assembly compression function was
  * written, checked against the vectors and measured against this C in the same
  * process: 67,656 us against 66,687 for 16 KiB on an aligned buffer, 67,653
- * against 70,241 on a misaligned one.  Once the misaligned MOVE.L -- the
- * assembly's only real advantage -- moved into the C as three lines of inline
+ * against 70,241 on a misaligned one.  Once the misaligned MOVE.L, the
+ * assembly's only real advantage, moved into the C as three lines of inline
  * assembly, the C was ahead on both and the 230 lines of hand-written rounds
  * were dropped.  See docs/RESEARCH.md 18 for the instruction costs, and for
  * the 68000-era SWAP idiom that a 68020's flat shifter makes pointless.

@@ -1,10 +1,10 @@
 /*
- * AmiNetXDuo -- inbound fragment reassembly and what bounds it.
+ * AmiNetXDuo, inbound fragment reassembly and what bounds it.
  *
  * nx_ip_fragment_enable() is now called, so a fragmented datagram is held and
  * put back together instead of counted and released.  What that adds is a
  * queue with the packet pool behind it, and the pool on the smallest supported
- * machine is AMI_POOL_MIN_PACKETS -- sixteen.  A first fragment whose tail
+ * machine is AMI_POOL_MIN_PACKETS, sixteen.  A first fragment whose tail
  * never arrives pins a whole pool packet for the reassembly timeout however
  * few bytes it carried, so the interesting cases here are the ones a lab
  * network will not produce on demand: a tail that never comes, a pool already
@@ -14,7 +14,7 @@
  *
  *   1. Three IPv6 fragments arriving in order become one datagram, delivered
  *      once, with the fragment header gone and the length the sum of the
- *      parts.  Arriving in the reverse order they become the same datagram --
+ *      parts.  Arriving in the reverse order they become the same datagram,
  *      the assembly list is ordered by offset, not by arrival.
  *
  *   2. A fragment arriving while the pool is at or below the reserve is
@@ -33,7 +33,7 @@
  *
  * Real, compiled from third_party/netxduo/common/src into this binary:
  * nx_ipv6_process_fragment_option.c, nx_ip_fragment_assembly.c and
- * nx_ip_fragment_timeout_check.c -- the queue, the reassembly and the sweep,
+ * nx_ip_fragment_timeout_check.c, the queue, the reassembly and the sweep,
  * so the list state each check reads is the list the stack would have.
  *
  * Stubbed: the packet pool, _nx_packet_release, _nx_ip_dispatch_process and
@@ -358,8 +358,8 @@ ULONG           total_length;
 
 /*
  * Leave the pool with `free` packets at the moment the next fragment is
- * examined.  The fragment itself is already out of the pool by then -- it had
- * to be allocated to be received -- so this is one more than the level the
+ * examined.  The fragment itself is already out of the pool by then, it had
+ * to be allocated to be received, so this is one more than the level the
  * guard reads.
  */
 static VOID h_pool_free_after_next(ULONG free)

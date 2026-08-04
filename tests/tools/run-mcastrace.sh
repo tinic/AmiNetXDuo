@@ -15,7 +15,7 @@
 #
 #   One process cannot reach this.  A base belongs to one Task and serialises
 #   itself on its own nesting counter, so the two joins have to come from two
-#   Processes with a base each -- which is what McastRace is.
+#   Processes with a base each, which is what McastRace is.
 #
 # THE ASSERTION
 #
@@ -38,7 +38,7 @@
 #   run.  If -n ever reports PASSED the gates have stopped gating.
 #
 #   That control tests the gates.  The control for the DEFECT is to put it
-#   back -- move the three stores in bsd_mcast_join() below bsd_nx_leave() --
+#   back, move the three stores in bsd_mcast_join() below bsd_nx_leave() --
 #   and see this script fail.  Measured on Amiberry/A1200, 200 shots:
 #
 #     row claimed inside the bracket   200 joined, 200 dropped,  0 stolen
@@ -261,11 +261,11 @@ else
 
     [ "$D_HAM" -ge "$MIN_HAMMER" ] \
         && pass "$D_HAM hammer joins (wanted $MIN_HAMMER)" \
-        || fail "only $D_HAM hammer joins, wanted $MIN_HAMMER -- the window was barely opened, so nothing here tested the race"
+        || fail "only $D_HAM hammer joins, wanted $MIN_HAMMER, the window was barely opened, so nothing here tested the race"
 
     [ "$D_SNI" -ge "$MIN_SNIPER" ] \
         && pass "$D_SNI sniper joins (wanted $MIN_SNIPER)" \
-        || fail "only $D_SNI sniper joins, wanted $MIN_SNIPER -- the second base barely ran, so nothing here tested the race"
+        || fail "only $D_SNI sniper joins, wanted $MIN_SNIPER, the second base barely ran, so nothing here tested the race"
 fi
 
 # ---- the second base really was a second base -----------------------------

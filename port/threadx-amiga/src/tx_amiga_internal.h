@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- private glue shared between the ThreadX Exec port sources.
+ * AmiNetXDuo, private glue shared between the ThreadX Exec port sources.
  * Not installed; not visible to the ThreadX or NetX Duo cores.
  *
  * Include order matters: "tx_api.h" (and therefore tx_port.h) must come first
@@ -50,7 +50,7 @@ static __inline VOID _tx_amiga_newlist(struct List *list)
  * around is the control block.
  *
  * Identifying one from a bare struct Task * has to be safe on a foreign task
- * too -- _tx_amiga_thread_completed() runs before the port knows whose task it
+ * too, _tx_amiga_thread_completed() runs before the port knows whose task it
  * is on.  The test therefore never reads past the struct Task: tc_UserData
  * points back at the Task itself, which no other task does, and only once that
  * holds is ctrl_magic (our own memory by then) consulted.
@@ -77,7 +77,7 @@ struct _tx_amiga_ctrl
  * Two allocations, because RemTask() hands each MemList in tc_MemEntry to
  * FreeEntry(), which frees both the entries the list describes and the MemList
  * structure itself.  A MemList that lives inside the block it describes is
- * therefore freed twice -- Guru 01000009, AN_FreeTwice -- on every task that
+ * therefore freed twice, Guru 01000009, AN_FreeTwice, on every task that
  * exits.  The Task (inside its control block) and the MemList are separate
  * blocks for that reason.
  *
@@ -188,7 +188,7 @@ TX_THREAD   *thread_ptr;
  * tx_thread_system_return.c).
  *
  * Returns TX_TRUE when the thread has been dispatched.  Returns TX_FALSE only
- * for an adopted thread that was torn down under it -- the Task must then
+ * for an adopted thread that was torn down under it, the Task must then
  * unwind out of ThreadX.  For a Task that ThreadX created, teardown is handled
  * in place and the function does not return at all.
  */

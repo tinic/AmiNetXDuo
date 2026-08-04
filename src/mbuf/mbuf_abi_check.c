@@ -1,12 +1,12 @@
 /*
- * AmiNetXDuo -- mbuf ABI pin.
+ * AmiNetXDuo, mbuf ABI pin.
  *
  * Amiga-only, and deliberately a translation unit of its own: on the Amiga
  * "aminetxduo/mbuf.h" is <sys/mbuf.h>, so every assertion below runs against
  * the Roadshow NDK header itself. If a future toolchain substitutes a
- * different <sys/mbuf.h> -- the way this toolchain's <pwd.h> turned out to be
+ * different <sys/mbuf.h>, the way this toolchain's <pwd.h> turned out to be
  * newlib's rather than the usergroup ABI's, silently wrong by 12 bytes
- * (docs/RESEARCH.md 3.3) -- the build stops here instead of shipping a struct
+ * (docs/RESEARCH.md 3.3), the build stops here instead of shipping a struct
  * that applications walk wrongly.
  *
  * Every number was measured on 2026-07-24 with
@@ -25,7 +25,7 @@
 #  error "mbuf_abi_check.c is only meaningful against the real NDK <sys/mbuf.h>"
 #endif
 
-/* struct m_hdr -- the part callers walk directly. */
+/* struct m_hdr, the part callers walk directly. */
 AMI_STATIC_ASSERT(offsetof(struct mbuf, m_next)    == AMI_MBUF_OFF_NEXT,    "mh_next");
 AMI_STATIC_ASSERT(offsetof(struct mbuf, m_nextpkt) == AMI_MBUF_OFF_NEXTPKT, "mh_nextpkt");
 AMI_STATIC_ASSERT(offsetof(struct mbuf, m_data)    == AMI_MBUF_OFF_DATA,    "mh_data");
@@ -77,6 +77,6 @@ AMI_STATIC_ASSERT(M_BCAST   == 0x0100, "M_BCAST");
 AMI_STATIC_ASSERT(M_MCAST   == 0x0200, "M_MCAST");
 AMI_STATIC_ASSERT(M_COPYALL == 1000000000, "M_COPYALL");
 
-/* Not an empty translation unit -- ISO C forbids that, and some linkers
+/* Not an empty translation unit, ISO C forbids that, and some linkers
    dislike the empty object it produces. */
 const char ami_mbuf_abi_checked[] = "mbuf ABI pinned against ndk-include/sys/mbuf.h";

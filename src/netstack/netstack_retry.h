@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the resolver's retransmission ladder.
+ * AmiNetXDuo, the resolver's retransmission ladder.
  *
  * NetX Duo's DNS client used to own this: it took the caller's timeout as a
  * per-query wait and spent it NX_DNS_MAX_RETRIES times over every server,
@@ -53,8 +53,8 @@ typedef enum
  * RFC 1035 4.2.1 wants a client to try other servers before repeating itself
  * and to back off; the ceiling is what bounds how long a Ctrl-C waits, since
  * the break signal is only sampled between rungs. Two seconds against five
- * configured servers is a ten-second worst case, and one or two servers -- what
- * a lease actually hands out -- is two to four.
+ * configured servers is a ten-second worst case, and one or two servers, what
+ * a lease actually hands out, is two to four.
  */
 #define AMI_NET_ASK_FIRST       (1UL * (ULONG)NX_IP_PERIODIC_RATE)
 #define AMI_NET_ASK_CEILING     (2UL * (ULONG)NX_IP_PERIODIC_RATE)

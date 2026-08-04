@@ -1,5 +1,5 @@
 /*
- * CheckNetConfig -- read the network configuration and report what is wrong
+ * CheckNetConfig, read the network configuration and report what is wrong
  * with it.
  *
  *     CheckNetConfig QUIET/S,VERBOSE/S
@@ -60,7 +60,7 @@ enum
 /* Long enough for any line in these files; longer ones are read in pieces. */
 #define CNC_LINE_MAX        200
 
-/* ---------------------------------------------------------------- output --
+/* ---------------------------------------------------------------- output,
  *
  * QUIET suppresses the findings but not the counting, so the return code is
  * the same either way. Every printing path goes through these three;
@@ -140,7 +140,7 @@ static VOID cnc_report(const AmiCfgProblem *problem, APTR user)
         note(problem->hint);
 }
 
-/* --------------------------------------------------------------- reading --
+/* --------------------------------------------------------------- reading,
  *
  * The files are read a second time, by hand, to be able to name a line number:
  * a parsed AmiConfig no longer carries the positions.
@@ -196,7 +196,7 @@ static ULONG keyword_line(const char *path, const char *keyword)
     return found;
 }
 
-/* ------------------------------------------------------------ addressing -- */
+/* ------------------------------------------------------------ addressing, */
 
 /*
  * A netmask is a run of ones followed by a run of zeroes and nothing else.
@@ -265,14 +265,14 @@ static BOOL any_static_address(const AmiConfig *cfg)
     return FALSE;
 }
 
-/* ------------------------------------------------------- the driver check --
+/* ------------------------------------------------------- the driver check,
  *
  * Catches the commonest way for a configuration to be wrong while looking
  * right: the file names a driver that is not on this machine, or the wrong
  * unit of one that is.
  *
- * tool_explain_device() asks the hardware -- it probes the unit, and unit 0
- * too when another was asked for -- and prints what to do about it, so the
+ * tool_explain_device() asks the hardware, it probes the unit, and unit 0
+ * too when another was asked for, and prints what to do about it, so the
  * finding here only says where.
  */
 static VOID check_device(const char *path, const AmiIfConfig *ifc)
@@ -320,7 +320,7 @@ static VOID check_device(const char *path, const AmiIfConfig *ifc)
         tool_explain_device(ifc->device, ifc->unit);
 }
 
-/* ------------------------------------------------------ the address check -- */
+/* ------------------------------------------------------ the address check, */
 
 static VOID check_addressing(const char *path, const AmiIfConfig *ifc)
 {
@@ -834,7 +834,7 @@ static VOID check_netdb_file(const NetdbFile *spec)
     Close(file);
 }
 
-/* --------------------------------------------------------------- the run -- */
+/* --------------------------------------------------------------- the run, */
 
 /* Static: an AmiConfig is far larger than a Shell command's 4 KB stack. */
 static AmiConfig cnc_config;
@@ -908,8 +908,8 @@ int main(int argc, char **argv)
     }
 
     /*
-     * Everything the parser finds -- bad syntax, unknown keywords, a missing
-     * DEVICE line, a static interface with no address -- arrives through this
+     * Everything the parser finds, bad syntax, unknown keywords, a missing
+     * DEVICE line, a static interface with no address, arrives through this
      * hook with the file and line already attached.
      */
     ami_config_set_reporter(cnc_report, NULL);
@@ -919,7 +919,7 @@ int main(int argc, char **argv)
     /*
      * ami_config_load() loads the netdb (src/config/config_file.c) and
      * ami_alloc() is AllocVec(), which AmigaOS does not reclaim when a process
-     * exits -- 12,616 bytes per run on a stock DEVS:Internet, gone until
+     * exits, 12,616 bytes per run on a stock DEVS:Internet, gone until
      * reboot. atexit() rather than a free before each return: this command
      * leaves main() from several places.
      */

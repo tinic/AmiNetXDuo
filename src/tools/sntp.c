@@ -1,17 +1,17 @@
 /*
- * sntp -- set the system clock from a time server.
+ * sntp, set the system clock from a time server.
  *
  *     sntp SERVER/A,TIMEOUT/N/K,SHOW/S,QUIET/S
  *
  * tls.library skips a certificate's notBefore/notAfter entirely when the
  * machine's clock is outside a plausible window (src/tlslib/tls_time.c), so an
- * Amiga whose battery died in 2003 can still reach HTTPS sites -- at the price
+ * Amiga whose battery died in 2003 can still reach HTTPS sites, at the price
  * of accepting an expired certificate.  A correct clock restores the check.
  * `fetch` reports which of the two happened on every https: URL.
  *
  * RFC 4330 defines broadcast and unicast.  Broadcast means waiting for a LAN
- * server to announce the time on its own schedule -- NetX Duo's own client
- * allows two hours between announcements -- and believing whatever claims to
+ * server to announce the time on its own schedule, NetX Duo's own client
+ * allows two hours between announcements, and believing whatever claims to
  * be a time server; neither suits a Shell command.  This is unicast: ask the
  * named server, get an answer or a timeout.
  *
@@ -29,7 +29,7 @@
  * Local time.  NTP is UTC; AmigaOS keeps local time, and neither DateStamp()
  * nor the battery clock has any timezone concept, so writing the clock needs
  * an offset.  It comes from locale.library's loc_GMTOffset, held since
- * AmigaOS 2.1 and set by the Locale preferences editor -- not from a new
+ * AmigaOS 2.1 and set by the Locale preferences editor, not from a new
  * configuration file, since nothing in DEVS:Internet or DEVS:NetInterfaces
  * has ever known about time and NetSetup has never asked.  When
  * locale.library is absent (a bare 3.1 install may not have it) or the offset
@@ -37,15 +37,15 @@
  * daylight-saving rules: the preferences offset is the whole answer, summer
  * and winter alike.
  *
- * Both clocks are written -- timer.device's TR_SETSYSTIME for the running
- * system, battclock.resource for the next boot -- because setting only the
+ * Both clocks are written, timer.device's TR_SETSYSTIME for the running
+ * system, battclock.resource for the next boot, because setting only the
  * system time loses it at the next reboot, which is what SetClock SAVE exists
  * for.  A machine with no real-time clock has no battclock.resource,
  * OpenResource() returns NULL, and that half is skipped and reported.
  *
  * NetX Duo vendors an SNTP client at third_party/netxduo/addons/sntp; it
  * cannot be used from a Shell command.  A command links its own copy of
- * ThreadX and NetX Duo whose kernel is not running -- the running one is
+ * ThreadX and NetX Duo whose kernel is not running, the running one is
  * inside bsdsocket.library.  nx_sntp_client_create() calls tx_thread_create(),
  * tx_timer_create() and tx_mutex_create(); nx_sntp_client_run_unicast() calls
  * nx_udp_socket_bind(), which suspends the calling thread.  All of those touch
@@ -240,7 +240,7 @@ static LONG sock_errno(struct Library *base)
 /* ------------------------------------------------------ the machine's clock */
 
 /*
- * timer.device through exec.library alone -- a timerequest and DoIO(), with no
+ * timer.device through exec.library alone, a timerequest and DoIO(), with no
  * TimerBase to collide with anything else the command links.  tests/tls/
  * tls_api.c does the same to push the clock back to 1978.
  */
@@ -311,7 +311,7 @@ static VOID clock_set(ULONG secs, ULONG micro)
 /*
  * The battery-backed clock, which survives the power switch.  It holds the same
  * "seconds since 1978, local time" as the system clock.  A machine without a
- * real-time chip -- a bare A500 or A1200 -- has no resource at all, and this
+ * real-time chip, a bare A500 or A1200, has no resource at all, and this
  * returns FALSE.
  *
  * Through the NDK inlines rather than by hand: fetch.c and toolsock.c hand-code
@@ -360,7 +360,7 @@ static BOOL locale_gmt_offset(LONG *minutes_west)
     return got;
 }
 
-/* ------------------------------------------------------------- formatting -- */
+/* ------------------------------------------------------------- formatting, */
 
 /*
  * dos.library's date formatter, so the time reads like every other date on the
@@ -397,7 +397,7 @@ static VOID format_amiga_time(ULONG secs, SntpDateText *out)
 }
 
 /*
- * "3 days 4 hours", "12 minutes", "6 seconds" -- the two largest useful units.
+ * "3 days 4 hours", "12 minutes", "6 seconds", the two largest useful units.
  * Printed rather than formatted into a buffer, because dos.library's only
  * formatter is VPrintf and it writes to a file.
  */
@@ -447,7 +447,7 @@ static VOID put_be32(UBYTE *p, ULONG v)
  * microseconds.  The exact conversion, frac * 1000000 / 2^32, needs 64 bits,
  * and 64-bit division on a 68020 is a libgcc call for a number whose bottom
  * sixteen bits are noise.  Dropping those first leaves g * 15625 / 1024 with
- * g < 65536, exact in 32 bits, resolving to about 15 microseconds -- four
+ * g < 65536, exact in 32 bits, resolving to about 15 microseconds, four
  * orders of magnitude finer than the round trip it is added to.
  */
 static ULONG frac_to_micro(ULONG frac)
@@ -769,7 +769,7 @@ int main(int argc, char **argv)
      * The server's transmit timestamp plus half the round trip is the time
      * now.  The four-timestamp offset formula is not used: it is for
      * disciplining a clock that is already close, and it overflows 32 bits
-     * when the local clock is 48 years out -- the case this command is for.
+     * when the local clock is 48 years out, the case this command is for.
      */
     new_utc   = reply.transmit_secs - SNTP_NTP_TO_AMIGA;
     new_micro = frac_to_micro(reply.transmit_frac) + reply.round_trip_us / 2UL;

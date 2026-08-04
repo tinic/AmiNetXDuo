@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- crypto68k test: E-Clock timing.
+ * AmiNetXDuo, crypto68k test: E-Clock timing.
  *
  * SPDX-License-Identifier: MIT
  */

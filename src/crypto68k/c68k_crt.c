@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- crypto68k RSA CRT exponentiation.
+ * AmiNetXDuo, crypto68k RSA CRT exponentiation.
  *
  *   Structurally identical to the vendored
  *   _nx_crypto_huge_number_crt_power_modulus().  The only difference is the
@@ -8,7 +8,7 @@
  *   the largest single lever available.
  *
  *   The measured baseline on the emulated 68020 is 44.4 s with CRT against
- *   158.0 s without -- 3.6x -- and nx_secure reaches for CRT on exactly one
+ *   158.0 s without, 3.6x, and nx_secure reaches for CRT on exactly one
  *   code path.  NX_CRYPTO_SET_PRIME_P appears once in the whole of
  *   nx_secure/src, in nx_secure_process_client_key_exchange.c (the server side
  *   of a plain-RSA key exchange).  The ECDHE_RSA ServerKeyExchange signature
@@ -21,7 +21,7 @@
  *
  *   CRT is ~4x because each half works modulo a number of half the width, so
  *   each Montgomery multiply costs a quarter, and each exponent is half as
- *   long, so there are half as many of them -- 8x per half, two halves, 4x
+ *   long, so there are half as many of them, 8x per half, two halves, 4x
  *   overall (HAC Note 14.75(ii)).  The recombination is O(s^2) and eats the
  *   rest.
  *
@@ -87,7 +87,7 @@ HN_UBASE                digit_value;
     NX_CRYPTO_HUGE_NUMBER_COPY(xp, x);
     _nx_crypto_huge_number_modulus(xp, p);
 
-    /* m1 = xp ^ ep mod p -- the only line that differs from the vendored code. */
+    /* m1 = xp ^ ep mod p, the only line that differs from the vendored code. */
     m1 = &temp1;
     c68k_huge_number_mont_power_modulus(xp, ep, p, m1,
                                         powm_scratch, powm_scratch_limbs);
@@ -108,7 +108,7 @@ HN_UBASE                digit_value;
     NX_CRYPTO_HUGE_NUMBER_COPY(xq, x);
     _nx_crypto_huge_number_modulus(xq, q);
 
-    /* m2 = xq ^ eq mod q -- the other differing line. */
+    /* m2 = xq ^ eq mod q, the other differing line. */
     m2 = &temp1;
     c68k_huge_number_mont_power_modulus(xq, eq, q, m2,
                                         powm_scratch, powm_scratch_limbs);

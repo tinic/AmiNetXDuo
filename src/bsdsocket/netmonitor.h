@@ -1,5 +1,5 @@
 /*
- * bsdsocket.library -- monitoring hook dispatch, for the call sites.
+ * bsdsocket.library, monitoring hook dispatch, for the call sites.
  *
  * netmonitor.c holds the hook lists; the calls that consult them live
  * elsewhere (socket.c for connect() and bind()), so the dispatch is declared
@@ -30,7 +30,7 @@ LONG bsd_netmon_dispatch(LONG type, APTR message);
  */
 BOOL bsd_netmon_have(LONG type);
 
-/* The name the caller chose to be known by, or NULL -- see netmonitor.c. */
+/* The name the caller chose to be known by, or NULL, see netmonitor.c. */
 STRPTR bsd_netmon_caller(struct AmiSocketBase *base);
 
 /*

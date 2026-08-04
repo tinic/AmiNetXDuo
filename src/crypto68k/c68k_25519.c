@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- crypto68k: X25519 and Ed25519 over eight 32-bit limbs.
+ * AmiNetXDuo, crypto68k: X25519 and Ed25519 over eight 32-bit limbs.
  *
  * Read src/crypto68k/c68k_25519.h first; it says why this file exists.  This
  * comment covers how, and the two decisions that are not obvious.
@@ -15,7 +15,7 @@
  *
  *   For comparison, what Dropbear runs today: TweetNaCl stores sixteen 16-bit
  *   limbs in an `i64[16]` and multiplies with `t[i+j] += a[i]*b[j]` on those
- *   i64s -- 256 iterations, each a software 64x64 multiply, on a machine whose
+ *   i64s, 256 iterations, each a software 64x64 multiply, on a machine whose
  *   MULU.L does 32x32->64 in one instruction.  Here it is 64 iterations of
  *   that instruction.
  *
@@ -50,7 +50,7 @@ typedef uint32_t fe[8];
 /* ------------------------------------------------------------- constants */
 
 /* d = -121665/121666, the Edwards curve constant; d2 = 2d; sqrtm1 = sqrt(-1).
-   Generated rather than transcribed -- see the derivation in the commit that
+   Generated rather than transcribed, see the derivation in the commit that
    added this file. */
 static const fe fe_d      = { 0x135978a3u, 0x75eb4dcau, 0x4141d8abu, 0x00700a4du,
                               0x7779e898u, 0x8cc74079u, 0x2b6ffe73u, 0x52036ceeu };
@@ -87,7 +87,7 @@ static void fe_copy(fe r, const fe a)
  * dropped whatever came out of limb 7, assuming a value near 2^256-1 could not
  * arise.  It arises constantly: this representation is lazy, so 0 is routinely
  * carried as 2^256-38 and 1 as 2^256-37, and adding 38 to either carries
- * straight through all eight limbs.  Dropping that carry loses exactly 38 --
+ * straight through all eight limbs.  Dropping that carry loses exactly 38,
  * the symptom was an Ed25519 doubling returning 37 where it owed -1.  A second
  * pass always terminates: a carry out means every limb is now small.
  */
@@ -298,7 +298,7 @@ static void fe_frombytes(fe r, const unsigned char b[32])
 /*
  * Full reduction, then little-endian bytes.
  *
- * Two steps.  First fold bit 255 back in -- 2^255 = 19 (mod p) -- which leaves
+ * Two steps.  First fold bit 255 back in, 2^255 = 19 (mod p), which leaves
  * a value below 2^255.  That is still not canonical, because anything from p
  * to 2^255-1 is a second representation of 0..18.  So compute t+19 and look at
  * its bit 255: it is set exactly when t >= p, and in that case t+19-2^255 is

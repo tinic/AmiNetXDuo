@@ -11,17 +11,17 @@
 # /opt/amiga and -noixemul, neither of which works here, so we drive the
 # compiler ourselves rather than fighting the Makefile's link rule:
 #
-#   * -noixemul is dropped -- it is a libnix switch and it breaks
+#   * -noixemul is dropped, it is a libnix switch and it breaks
 #     sys/reent.h on this newlib toolchain (docs/RESEARCH.md 5.4).
-#   * -include sys/types.h -- the Roadshow NDK sys/socket.h uses ssize_t
+#   * -include sys/types.h, the Roadshow NDK sys/socket.h uses ssize_t
 #     without pulling in the newlib header that declares it.
-#   * -include stdio.h, -Dstricmp=strcasecmp -- helper_proto.c calls sprintf()
+#   * -include stdio.h, -Dstricmp=strcasecmp, helper_proto.c calls sprintf()
 #     without including stdio.h, and stricmp is an SAS/libnix name that newlib
 #     spells strcasecmp.  Both are -noixemul-isms, not suite bugs.
 #   * compat/ goes first on the include path so our regenerated
-#     inline/bsdsocket.h wins over the NDK one -- see that file for why.
+#     inline/bsdsocket.h wins over the NDK one, see that file for why.
 #   * src/common/ami_udivdi3.c supplies __udivdi3 and friends, which this
-#     toolchain's empty libgcc.a does not -- newlib's printf references them.
+#     toolchain's empty libgcc.a does not, newlib's printf references them.
 #     Compiled straight out of src/common rather than copied here: it is the
 #     one copy in the tree (see the header comment in that file).
 #   * printf -> iprintf etc: newlib's float-capable printf makes the startup
@@ -71,7 +71,7 @@ CC="$AMIGA_GCC"
 # its ToolTypes array CONST_STRPTR*, which is exactly what NDK 3.2's
 # FindToolType() takes; NDK 3.9's <inline/icon.h> writes the parameter `const
 # STRPTR *` (a const array of non-const strings) instead, so the same call is a
-# pointer mismatch there -- and GCC 14 promoted that from a warning to an error
+# pointer mismatch there, and GCC 14 promoted that from a warning to an error
 # by default.  We cannot fix a submodule we do not own, and we want the suite
 # to build against either NDK, so the diagnostic goes back to being a warning.
 CFLAGS=(-O2 -Wall -Wno-error=incompatible-pointer-types

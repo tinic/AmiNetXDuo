@@ -1,11 +1,11 @@
 /*
- * StatProbe -- checks that GetNetworkStatistics() reports the running stack.
+ * StatProbe, checks that GetNetworkStatistics() reports the running stack.
  *
  * The call hands back 4.4BSD's own kernel statistics structures by value.
  * Three things a build cannot check and this can:
  *
  *   1. The return value is a byte count, not zero-on-success and not an entry
- *      count -- the two other readings the prototype allows.  A NULL
+ *      count, the two other readings the prototype allows.  A NULL
  *      destination asks how much would be needed and copies nothing.
  *
  *   2. The numbers are the running stack's.  This machine got its address by
@@ -16,8 +16,8 @@
  *   3. pcd_tcp_state is 4.4BSD's enumeration, not NetX Duo's, and a BSD
  *      listen() is one entry.  The enumerations agree up to CLOSE_WAIT and
  *      diverge after it.  This stack implements one listening descriptor as
- *      two NX_TCP_SOCKETs -- the descriptor's own, left in CLOSED, and a spare
- *      parked on the port in SYN_RECEIVED (src/bsdsocket/socket.c) -- so a
+ *      two NX_TCP_SOCKETs, the descriptor's own, left in CLOSED, and a spare
+ *      parked on the port in SYN_RECEIVED (src/bsdsocket/socket.c), so a
  *      literal report would show one listen() as two sockets on one port,
  *      neither listening and one apparently mid-handshake with nobody.  The
  *      probe listens on a port and asserts that exactly one entry appears and
@@ -280,7 +280,7 @@ int main(void)
 
     /* ---- a caller that asks for less than the whole struct ----------------
      *
-     * "size -- Number of bytes to copy" is the caller's limit. Copying the
+     * "size, Number of bytes to copy" is the caller's limit. Copying the
      * whole struct regardless would overrun a buffer sized against an older
      * layout, which is the one way this call can corrupt an application.
      */

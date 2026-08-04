@@ -9,15 +9,15 @@
 #   Every other harness in this tree stages OUR library out of a build
 #   directory, which makes it structurally incapable of measuring anybody
 #   else's.  The comparison that is worth having is against the stacks this
-#   project is compatible with -- Roadshow, whose ABI we implement, and
-#   AmiTCP_NG, which implements the same one -- on the same emulator profile,
+#   project is compatible with, Roadshow, whose ABI we implement, and
+#   AmiTCP_NG, which implements the same one, on the same emulator profile,
 #   the same ROM, the same a2065.device and the same host, back to back.
 #
 #   So the stack is a parameter here, and everything else is held fixed:
 #
 #     * the driver is tests/compare/checkrunner.c, built once and reused,
 #       which runs each command with a 512 KB stack and records its exit
-#       code and elapsed ticks -- so the DHCP figure is the stack's own
+#       code and elapsed ticks, so the DHCP figure is the stack's own
 #       AddNetInterface and the throughput figure is one binary run twice;
 #     * NetTrace comes out of ONE build and is staged unchanged against every
 #       stack.  It links nothing of src/: every call into the library is a
@@ -26,8 +26,8 @@
 #     * bsdsocktest is the upstream suite, which knows about none of us.
 #
 # NOTHING OF THEIRS IS COPIED INTO THIS REPOSITORY.  Both foreign stacks are
-# located at run time through a path -- AMINETXDUO_CMP_ROADSHOW and
-# AMINETXDUO_CMP_AMITCPNG, or -R / -G -- and staged straight from wherever
+# located at run time through a path, AMINETXDUO_CMP_ROADSHOW and
+# AMINETXDUO_CMP_AMITCPNG, or -R / -G, and staged straight from wherever
 # they were unpacked.  Roadshow is a commercial demo and AmiTCP_NG is GPL;
 # this tree is MIT and stays that way.
 #
@@ -44,7 +44,7 @@
 #               HOST starts the suite's host helper on this machine.
 #   -b DIR      build directory for the `ours` stack (default build/cm)
 #   -B BYTES    NetTrace workload size (default 524288, as docs/RESEARCH.md 24)
-#   -m MODEL    emulator profile (default A1200 -- the only timing profile)
+#   -m MODEL    emulator profile (default A1200, the only timing profile)
 #   -t SECS     timeout
 #   -T TAG      run tag; results land in build/testhd-<tag>/
 #   -P PORT     base port for the workload peer (default 7500)
@@ -201,8 +201,8 @@ cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 
 # -i replaces DEVS:NetInterfaces/eth0 with a file of the caller's choosing.
 # It exists because "the interface would not come up" has two causes that look
-# identical from the outside -- the stack cannot drive the card, or it did not
-# understand the configuration file -- and a stack should be measured with a
+# identical from the outside, the stack cannot drive the card, or it did not
+# understand the configuration file, and a stack should be measured with a
 # configuration it agrees is well formed.
 if [ -n "${IFCONFIG:-}" ]; then
     [ -f "$IFCONFIG" ] || { echo "no such interface file: $IFCONFIG" >&2; exit 2; }
@@ -233,18 +233,18 @@ fi
 # before main(), and a bare directory hard drive has no LIBS: to find it in.
 # Staging it for every stack costs nothing and is not a thumb on the scale:
 # it is a maths library, not a network one.
-# -L stages a whole LIBS: tree of the caller's own -- amisslmaster.library and
+# -L stages a whole LIBS: tree of the caller's own, amisslmaster.library and
 # its versioned library under AmiSSL/, which no stack here supplies.
 # Defaulted, because the failure without it is unreadable: a client that opens
 # a library BEFORE main() gives no output at all when it is missing, only a
-# return code -- indistinguishable from the stack under test being broken.
+# return code, indistinguishable from the stack under test being broken.
 # That cost an hour once, on the third-party curl this harness no longer runs;
 # the trap is the pre-main open, not that client, so the default stays.
 # build/amissl-stage/libs is where the TLS tests leave the tree.
 if [ -z "${EXTRALIBS:-}" ] && [ -d "$ROOT/build/amissl-stage/libs" ]; then
     EXTRALIBS="$ROOT/build/amissl-stage/libs"
     # echo, NOT say(): say() is defined ~40 lines below this and appends to
-    # $PLAN, so calling it here was "command not found" under set -e -- rc 127
+    # $PLAN, so calling it here was "command not found" under set -e, rc 127
     # for every run that had build/amissl-stage/libs, which is every run after
     # the TLS tests have been built once. It was committed as a cosmetic change
     # to where the message goes; it was not, it was a fatal one.
@@ -257,8 +257,8 @@ fi
 
 # build/amissl-mathlibs first, and it has to be: the two have to be a matched
 # pair or a clib2 client sits there forever, and tools/amissl-run.sh says why.
-# Loose in build/ they are not a pair -- the doubtrans there is the -os one and
-# the doubbas is not -- so taking them from a directory that holds both is the
+# Loose in build/ they are not a pair, the doubtrans there is the -os one and
+# the doubbas is not, so taking them from a directory that holds both is the
 # difference between a client that runs and a run that times out.
 for lib in mathieeedoubbas mathieeedoubtrans; do
     for cand in "$ROOT/build/amissl-mathlibs/$lib.library" \
@@ -438,7 +438,7 @@ done
     # TAP counts a skip as `ok N ... # SKIP`, so the passed figure is the ok
     # lines LESS the skips.  Reporting the raw ok count would have called our
     # loopback tier 142/142 when the suite's own summary says 130 passed, 12
-    # skipped -- the difference between a headline and a wrong headline.
+    # skipped, the difference between a headline and a wrong headline.
     ok=$(grep -c "^ok " "$HD/bsdsocktest.log" || true)
     sk=$(grep -c "# SKIP" "$HD/bsdsocktest.log" || true)
     nk=$(grep -c "^not ok " "$HD/bsdsocktest.log" || true)

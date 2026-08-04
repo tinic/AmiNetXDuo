@@ -1,10 +1,10 @@
 /*
- * httppath -- the request target a client sent, turned into an AmigaOS path
+ * httppath, the request target a client sent, turned into an AmigaOS path
  * or refused, plus the escaping the answer needs.
  *
  * Separate from httpd.c, and including nothing, for two reasons.  It is the
- * one part of a file server that must not be wrong -- everything a client can
- * reach outside the document root, it reaches through here -- so it is written
+ * one part of a file server that must not be wrong, everything a client can
+ * reach outside the document root, it reaches through here, so it is written
  * to be tested rather than reviewed, and tests/tools/httppath_test.c compiles
  * this file natively and drives it directly.  And it is written to the standard
  * a writing server needs, not the one a reading server would get away with: a
@@ -20,7 +20,7 @@
  *               produce more segments, and every segment is checked.
  *   RAM:        AmigaOS's own.  A colon anywhere in a path makes everything
  *               before it a device or assign name, so "GET /RAM:foo" is not a
- *               file called "RAM:foo" under the root -- it is RAM DISK, and no
+ *               file called "RAM:foo" under the root, it is RAM DISK, and no
  *               amount of ../ checking sees it.
  *
  * A fourth is AmigaOS-specific and does not come from the client at all: a
@@ -57,8 +57,8 @@ typedef enum HttpPathResult
     HTTP_PATH_CONTROL,          /* a control character, before or after   */
     HTTP_PATH_NOT_ABSOLUTE,     /* the target did not begin with /        */
     HTTP_PATH_PARENT,           /* a ".." segment                         */
-    HTTP_PATH_DEVICE,           /* a ':' -- an AmigaOS device reference   */
-    HTTP_PATH_BACKSLASH,        /* a '\' -- a separator to the client     */
+    HTTP_PATH_DEVICE,           /* a ':', an AmigaOS device reference   */
+    HTTP_PATH_BACKSLASH,        /* a '\', a separator to the client     */
     HTTP_PATH_TOO_LONG,
     HTTP_PATH_TOO_DEEP
 } HttpPathResult;
@@ -90,8 +90,8 @@ const char *http_path_error(HttpPathResult why);
  * The document root as http_path_resolve() wants it: `given` with any trailing
  * separator removed.
  *
- * The root is the one path a server does not resolve -- it is what everything
- * else is resolved UNDER -- so the doubled-slash rule this file exists to
+ * The root is the one path a server does not resolve, it is what everything
+ * else is resolved UNDER, so the doubled-slash rule this file exists to
  * enforce has to be applied to it here or not at all.  "Work:Public/" joined
  * with a leading separator is "Work:Public//", which is Work: on this machine
  * and not a subdirectory of anything.
@@ -111,7 +111,7 @@ void http_path_root(const char *given, char *out, unsigned long outlen);
 
 /*
  * Append `name` to `path` as a child of it, in place.  The separator AmigaOS
- * wants is added and never doubled -- "a//b" is a's PARENT's b here.
+ * wants is added and never doubled, "a//b" is a's PARENT's b here.
  *
  * 0 when it would not fit, or when `name` is empty or carries a separator of
  * its own: a name out of a FileInfoBlock cannot contain one, so a name that
@@ -147,7 +147,7 @@ unsigned long http_xml_escape(const char *text, char *out, unsigned long outlen)
  *
  * Anything collected into a fixed buffer stops where the buffer ends, which is
  * not where a character ends: half of a two-byte sequence is not a character,
- * and an XML document containing one is not well formed -- so a client that
+ * and an XML document containing one is not well formed, so a client that
  * validates rejects the whole answer over the last byte of a lock owner's
  * name.  Cheaper to cut the half character than to reject the name.
  */

@@ -1,5 +1,5 @@
 /*
- * IdxProbe -- bisects the RFC 3493 if_* vectors, one flushed line per call.
+ * IdxProbe, bisects the RFC 3493 if_* vectors, one flushed line per call.
  *
  * IfProbe's transcript stops mid-word inside its last phase, which is where
  * DOS's buffer happened to fill and not necessarily where the machine stopped.

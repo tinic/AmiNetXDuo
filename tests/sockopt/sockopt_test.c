@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the socket option surface, through bsdsocket.library's ABI.
+ * AmiNetXDuo, the socket option surface, through bsdsocket.library's ABI.
  *
  * setsockopt() and getsockopt() are the part of the library a caller cannot
  * check for itself: an option that is stored, answered back and applied to
@@ -9,7 +9,7 @@
  * width paths, and that is where every finding of the audit landed.
  *
  * So each option below has a case, including the ones this library
- * deliberately does not honour -- SO_REUSEADDR and SO_BROADCAST are stored and
+ * deliberately does not honour, SO_REUSEADDR and SO_BROADCAST are stored and
  * answered and change nothing, and a test that says so is what stops that
  * being rediscovered as a defect.
  *
@@ -732,7 +732,7 @@ LONG value;
 /*
  * IP_TTL 256 read back as 256 and went on the wire as zero, so every packet
  * was dropped at the first hop.  Both options are also applied to the NX
- * socket now, which getsockopt cannot see -- what it can see is that the
+ * socket now, which getsockopt cannot see, what it can see is that the
  * out-of-range value is refused and the in-range one survives.
  */
 static VOID t_test_ip_options(LONG type, const char *what)
@@ -794,7 +794,7 @@ LONG value;
  * 4.4BSD types IP_MULTICAST_TTL and IP_MULTICAST_LOOP as u_char and everything
  * since passes an int, so all three widths have to work.  Two bytes did not:
  * m68k is big-endian, a short of 5 is 0x00,0x05, and the one-byte read took
- * the high half -- IP_MULTICAST_TTL 0, which keeps the datagram off the link.
+ * the high half, IP_MULTICAST_TTL 0, which keeps the datagram off the link.
  * The reply had the mirror-image fault and answered 5 as 1280.
  */
 static VOID t_test_multicast_widths(VOID)
@@ -936,8 +936,8 @@ UBYTE           buf[512];
                   "an unknown request is ENOTTY", bsd_Errno());
 
     /*
-     * The interface queries.  They ignore the socket -- BSD requires one to be
-     * passed and says nothing about which -- and answer out of interfaces.c.
+     * The interface queries.  They ignore the socket, BSD requires one to be
+     * passed and says nothing about which, and answer out of interfaces.c.
      */
     t_bzero(&ifc, sizeof(ifc));
     ifc.ifc_len = (LONG)sizeof(buf);
@@ -979,7 +979,7 @@ int main(void)
 
     /*
      * The stack needs an interface to come up on, and this one is made at run
-     * time rather than opened out of DEVS: -- see tests/tcpdrill/tapdev.c.  It
+     * time rather than opened out of DEVS:, see tests/tcpdrill/tapdev.c.  It
      * has to be installed by this process, because the device lives in the
      * installer's address space.
      */

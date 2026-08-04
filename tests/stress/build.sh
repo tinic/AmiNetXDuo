@@ -74,7 +74,7 @@ cp "$FITZ/src/fitz-serve" "$OUT/fitz-serve"
 cp "$FITZ/fitz" "$OUT/fitz-release"
 chmod +w "$OUT/fitz-release"
 
-# Ours, with the diagnostics on -- the released binary has debug compiled out
+# Ours, with the diagnostics on, the released binary has debug compiled out
 # and its client retries EAGAIN on a blocking socket ten times in silence, so
 # on that binary the defect this harness hunts is only ever visible as a
 # connection that eventually died.  See tests/endurance/build.sh.

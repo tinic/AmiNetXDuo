@@ -1,4 +1,4 @@
-# Turn compiler warnings into build failures -- for OUR sources only.
+# Turn compiler warnings into build failures, for OUR sources only.
 #
 # Usage (no edit to any CMakeLists.txt is needed; CMake includes this file at
 # the end of the top-level project() call):
@@ -15,7 +15,7 @@
 #   warning-clean under -Wextra.  A global flag would therefore fail the build
 #   on code we have a standing rule never to modify.
 #
-#   Filtering by target does not work either -- `threadx`, `netxduo`,
+#   Filtering by target does not work either, `threadx`, `netxduo`,
 #   `netxduo_addons` and `crypto68k_ref` are declared in OUR CMakeLists.txt
 #   files but compile vendored sources.  So the filter is per SOURCE FILE:
 #   every source whose path contains /third_party/ is left alone, everything
@@ -23,7 +23,7 @@
 #   is covered the day it is added.
 #
 # The work is deferred to the end of the top-level directory because targets do
-# not exist yet at the point this file is included -- add_subdirectory() has
+# not exist yet at the point this file is included, add_subdirectory() has
 # not run.  set_property(SOURCE ... TARGET_DIRECTORY ...) is what makes it
 # legal to reach into a target declared in another directory.
 #
@@ -41,7 +41,7 @@ set(AMINETXDUO_WARNING_FLAGS "-Wall;-Wextra" CACHE STRING
 #       CHECK_STR(text, "...") expands to `(got) ? (got) : "(null)"` with `got`
 #       an ARRAY, so the test is always true.  GCC says so (-Waddress, part of
 #       -Wall); clang does not, which is why it went unnoticed.  Harmless as
-#       written -- an array is never null -- but it means the macro's null
+#       written, an array is never null, but it means the macro's null
 #       guard does nothing for its array callers.  The fix is one line in the
 #       macro (take a pointer, or drop the guard); it lives under src/, which
 #       the change that added this file was not allowed to touch.

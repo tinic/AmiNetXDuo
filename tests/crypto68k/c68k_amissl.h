@@ -1,11 +1,11 @@
 /*
- * AmiNetXDuo -- the AmiSSL half of the crypto68k-versus-AmiSSL benchmark.
+ * AmiNetXDuo, the AmiSSL half of the crypto68k-versus-AmiSSL benchmark.
  *
  * Split across two translation units because nx_crypto's headers and OpenSSL's
  * headers both want to own names like SHA256_CTX, and both arrive through
  * <exec/types.h>, which defines BOOL, LONG and VOID for everyone.  Separate
- * files mean neither has to be taught about the other, and this header --
- * plain C types only, no nx_crypto and no OpenSSL -- is the whole interface
+ * files mean neither has to be taught about the other, and this header,
+ * plain C types only, no nx_crypto and no OpenSSL, is the whole interface
  * between them.
  *
  * Every function returns 0 for success and non-zero for failure, so the
@@ -35,7 +35,7 @@ int         a_ossl_init_ssl(char *err, unsigned long err_len);
 void        a_ossl_close(void);
 
 /*
- * One trivial OpenSSL call -- BN_new() and BN_free().
+ * One trivial OpenSSL call, BN_new() and BN_free().
  *
  * OpenSSL 3.x initialises itself lazily, on first use, not at InitAmiSSL: the
  * default provider, the property cache and the DRBG chain are all built behind

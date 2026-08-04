@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- SANA-II shim internals.
+ * AmiNetXDuo, SANA-II shim internals.
  *
  * Private to src/sana2/. Include "tx_api.h" and "nx_api.h" before any exec
  * header: exec/types.h turns VOID into a macro, which breaks tx_port.h's
@@ -31,7 +31,7 @@
  * The IPv4 depth is the receive window in frames, and four is too few.
  * Measured with tests/curl/run-curlverify.sh -p: sixteen concurrent HTTP
  * transfers through curl's multi interface lost six, twenty-four lost seven,
- * forty lost fifteen -- all as `curl: (7) Could not connect` after about
+ * forty lost fifteen, all as `curl: (7) Could not connect` after about
  * thirteen seconds, on connections the host had already accepted. The SYN went
  * out, the peer answered, and the SYN/ACK arrived in a burst with no read
  * outstanding to catch it. At depth eight, forty concurrent transfers lost
@@ -107,7 +107,7 @@
 #endif
 
 /* Offer the 16-bit buffer-management tags. Off: the tag numbers could not be
-   verified against any header on this toolchain -- see sana2_device.h. */
+   verified against any header on this toolchain, see sana2_device.h. */
 #ifndef AMI_SANA2_OFFER_COPY16
 #define AMI_SANA2_OFFER_COPY16      0
 #endif
@@ -128,7 +128,7 @@
  *   cmake -B build/rxprobe -DAMINETXDUO_RXPROBE=ON ...
  *
  * It answers two questions the existing counters cannot. How many CMD_READs
- * the device still held each time the reader woke -- the receive window in
+ * the device still held each time the reader woke, the receive window in
  * frames, live rather than configured, since a frame arriving with none
  * outstanding is dropped by the device and counted nowhere. And whether the
  * TCP sequence space is already holed at the moment the frame is handed to
@@ -275,7 +275,7 @@ typedef struct AmiSana2Rx
 
     /* Reads the device would not give back at teardown. Nonzero means this
        reader's slots, pinned packets and reply port are still reachable by the
-       device, so none may be freed -- see ami_sana2_rx_teardown(). */
+       device, so none may be freed, see ami_sana2_rx_teardown(). */
     volatile UWORD      orphans;
 
 #ifdef AMINETXDUO_RXPROBE
@@ -287,7 +287,7 @@ typedef struct AmiSana2Rx
 
 /* --------------------------------------------------------------- TX slots */
 
-/* `req` must stay first -- same GetMsg() cast as AmiRxSlot. */
+/* `req` must stay first, same GetMsg() cast as AmiRxSlot. */
 typedef struct AmiTxSlot
 {
     struct IOSana2Req   req;
@@ -307,7 +307,7 @@ typedef struct AmiTxSlot
 struct AmiSana2If
 {
     /* Device. The opened request doubles as the template every cloned
-       request is copied from -- it carries io_Device, io_Unit and the
+       request is copied from, it carries io_Device, io_Unit and the
        device-side ios2_BufferManagement cookie. */
     struct IOSana2Req   templ;
     BOOL                device_open;
@@ -346,7 +346,7 @@ struct AmiSana2If
     AmiSana2Rx          rx[AMI_SANA2_RX_READERS];
     BOOL                rx_running;
 
-    /* Set when a reader could not be reclaimed -- either it never exited or
+    /* Set when a reader could not be reclaimed, either it never exited or
        the device kept its CMD_READs. The whole interface is then unfreeable
        and unrestartable, because the device holds pointers into it. */
     BOOL                rx_orphaned;
@@ -367,7 +367,7 @@ struct AmiSana2If
 
 /* ------------------------------------------------------------- internals */
 
-/* sana2_copy.c -- called by the device in m68k register convention. */
+/* sana2_copy.c, called by the device in m68k register convention. */
 BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
                             register APTR from  __asm("a1"),
                             register ULONG len  __asm("d0"));

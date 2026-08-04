@@ -1,10 +1,10 @@
 /*
- * AmiNetXDuo -- crypto68k P-256 before/after benchmark.
+ * AmiNetXDuo, crypto68k P-256 before/after benchmark.
  *
  * Same method as c68k_bench.c: every figure is a pair, the unmodified vendored
  * routine and this module, run back to back in one process on the same
  * operands, and only the ratio of a pair is trustworthy.  FS-UAE's 68020 is
- * not a 14 MHz A1200, and its 68030 model is not a timing model at all -- it
+ * not a 14 MHz A1200, and its 68030 model is not a timing model at all, it
  * does not charge for MULU.L, so it flatters anything that moves work into
  * multiplies.  Read the 68020 column; the 68030 column is printed so the
  * figure is attributable.
@@ -437,7 +437,7 @@ ULONG   ratio;
 
     /*
      * _nx_crypto_ecdh_key_pair_import() sets the key size but not the curve
-     * pointer -- only _nx_crypto_ecdh_setup() does that, and setup generates a
+     * pointer, only _nx_crypto_ecdh_setup() does that, and setup generates a
      * random key, which a known-answer test cannot use.  So the curve is
      * assigned here.  Vendored behaviour, not ours; without it compute_secret
      * dereferences a null curve.

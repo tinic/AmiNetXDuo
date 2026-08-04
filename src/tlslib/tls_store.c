@@ -1,5 +1,5 @@
 /*
- * tls.library -- the trust store, and the lazy loader that reads it.
+ * tls.library, the trust store, and the lazy loader that reads it.
  *
  *   The Mozilla root set is about 120 certificates and 125 KB of DER.  This
  *   machine has four megabytes.  Parsing all of them at startup is not viable
@@ -30,7 +30,7 @@
  *
  *   RFC 5280 says a certificate's issuer field matches a CA's subject field
  *   when the two encoded Names are equal.  The key is a hash of exactly those
- *   bytes -- the Name SEQUENCE including its tag and length -- taken from the
+ *   bytes, the Name SEQUENCE including its tag and length, taken from the
  *   subject side by the generator and from the issuer side here.  Nothing is
  *   parsed into fields on either side, so the two implementations cannot
  *   disagree about what a Name means.
@@ -49,7 +49,7 @@
  *   replace the file.  Either copy a fresh `certificates` from a release, or
  *   run tools/mkcertstore.py over a current cacert.pem.  The index is read
  *   fresh at every TLSOpen() and belongs to that connection, so a replacement
- *   takes effect on the next connection -- no reboot, no `avail flush`, no
+ *   takes effect on the next connection, no reboot, no `avail flush`, no
  *   cache to invalidate.  See the note on TLSStore in tls_internal.h for the
  *   cost.
  *
@@ -104,7 +104,7 @@ static ULONG tls_fnv1a(const UCHAR *data, ULONG length)
 /*
  * The issuer Name, as bytes.  nx_secure parses the issuer into fields and
  * keeps pointers to the field values, which is not enough to recover the
- * enclosing Name, so this walks the TBSCertificate again -- four fields deep,
+ * enclosing Name, so this walks the TBSCertificate again, four fields deep,
  * using the vendored TLV parser so there is no second ASN.1 implementation in
  * the tree.
  *
@@ -155,9 +155,9 @@ static const UCHAR *tls_issuer_name_der(const NX_SECURE_X509_CERT *cert,
 
     /*
      * Walk to the issuer.  `field` counts what has been consumed:
-     *   0 -- nothing yet; the next block is either [0] version or the serial
-     *   1 -- serial consumed
-     *   2 -- signature AlgorithmIdentifier consumed; the next block is the
+     *   0, nothing yet; the next block is either [0] version or the serial
+     *   1, serial consumed
+     *   2, signature AlgorithmIdentifier consumed; the next block is the
      *        issuer
      */
     for (field = 0; field < 3; field++)
@@ -321,7 +321,7 @@ LONG tls_store_open(TLSStore *store, const char *path)
      * The fingerprint of this root set, computed here because this is the one
      * moment the whole index is in memory.  src/tlslib/tls_resume.c keys a
      * cached session on it, so a session verified against one trust store
-     * cannot be resumed by a caller presenting a different one -- a resumed
+     * cannot be resumed by a caller presenting a different one, a resumed
      * handshake verifies nothing, so the trust decision has to travel with the
      * session.
      *
@@ -392,8 +392,8 @@ ULONG tls_store_fetch(TLSStore *store, ULONG key, UCHAR *buffer, ULONG size)
         return 0;
 
     /*
-     * The one disk access that happens inside the handshake -- the issuer is
-     * not known until the server has sent its chain -- and therefore inside
+     * The one disk access that happens inside the handshake, the issuer is
+     * not known until the server has sent its chain, and therefore inside
      * the ThreadX bracket, holding the baton.  dos.library blocks in Exec, so
      * without this the IP thread and both SANA-II readers would stop for the
      * length of a disk access; on a floppy that is long enough to drop
@@ -450,7 +450,7 @@ static TLSRegistrySlot tls_registry[TLS_REGISTRY_SLOTS];
 /*
  * The scans take the same Forbid() as the claim and the release. One registry
  * for every opener, so a TLSClose() on another task can clear a slot and free
- * the TLSConnection between the load of rs_Conn and the dereference below --
+ * the TLSConnection between the load of rs_Conn and the dereference below,
  * which tls_conn_for_session() does, reading tc_Session through it.
  */
 static TLSConnection *tls_conn_for_store(NX_SECURE_X509_CERTIFICATE_STORE *store)

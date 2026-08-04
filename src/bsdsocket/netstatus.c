@@ -1,5 +1,5 @@
 /*
- * bsdsocket.library -- NetStackQuery() and NetStackControl().
+ * bsdsocket.library, NetStackQuery() and NetStackControl().
  *
  * The two private LVOs that let a separate Shell command ask the running
  * stack what it is doing, and tell it to change. include/aminetxduo/
@@ -7,7 +7,7 @@
  *
  * Before these existed, every command that wanted live numbers linked its own
  * copy of NetX Duo, got its own NX_IP with no interfaces in it, and read
- * zeroes -- or, once src/tools/netstack_weak.c's weak stubs answered NULL,
+ * zeroes, or, once src/tools/netstack_weak.c's weak stubs answered NULL,
  * printed "the network is up, but this command cannot read it" and exited 5.
  *
  * Three rules here:
@@ -16,8 +16,8 @@
  *      stack; the caller gets scalars in its own buffer.
  *
  *   2. One bracket, held briefly. bsd_nx_enter() adopts the calling task as a
- *      TX_THREAD -- required, because nx_*_info_get() are behind
- *      NX_THREADS_ONLY_CALLER_CHECKING -- and the walk does nothing but read
+ *      TX_THREAD, required, because nx_*_info_get() are behind
+ *      NX_THREADS_ONLY_CALLER_CHECKING, and the walk does nothing but read
  *      memory and call those. No dos.library, no Wait(), no allocation.
  *
  *   3. The caller's buffer is touched only after the header checks pass, so a
@@ -26,7 +26,7 @@
  *      gets -1 with nothing written.
  *
  * There is no "ping for me" vector. nx_icmp_ping() matches an inbound echo
- * reply on the sequence number alone -- nx_icmpv4_process_echo_reply.c:124
+ * reply on the sequence number alone, nx_icmpv4_process_echo_reply.c:124
  * compares tx_thread_suspend_info against nx_icmpv4_echo_sequence_num and
  * looks at nothing else, and nx_icmpv4.h:191 says the identifier "is not used
  * as a host". A vector wrapping it would inherit that. The raw socket path
@@ -112,7 +112,7 @@ _Static_assert(sizeof(((NetStatusControl *)0)->nsc_Name)
                    == NETSTATUS_SVC_TYPE_LEN, "service ABI");
 #endif
 
-/* ------------------------------------------------------------- plumbing -- */
+/* ------------------------------------------------------------- plumbing, */
 
 static VOID ns_zero(APTR mem, ULONG len)
 {
@@ -154,7 +154,7 @@ static VOID ns_mac_from_words(ULONG msw, ULONG lsw, UBYTE *mac)
 /*
  * How many entries of `entry_size` fit after the header, and where the first
  * one goes. `room` is 0 when the buffer holds only the header, which is a
- * legitimate way to ask "how many are there?" -- nsh_Available is still
+ * legitimate way to ask "how many are there?", nsh_Available is still
  * filled in.
  */
 typedef struct NsWriter
@@ -208,7 +208,7 @@ static VOID ns_writer_finish(NsWriter *w)
     w->hdr->nsh_Available = (UWORD)w->available;
 }
 
-/* ------------------------------------------------------------- the walks -- */
+/* ------------------------------------------------------------- the walks, */
 
 static VOID ns_fill_system(NX_IP *ip, NetStatusSystem *out)
 {
@@ -294,7 +294,7 @@ static VOID ns_fill_system(NX_IP *ip, NetStatusSystem *out)
  * netstack_interface_dhcp_lease() re-reads the live NX_DHCP every time, so
  * this is current rather than a copy of what was true at bring-up. It brackets
  * itself with ami_netstack_enter(), which is a no-op inside the bsd_nx_enter()
- * this already runs under -- the nesting is detected, not paid for.
+ * this already runs under, the nesting is detected, not paid for.
  */
 static VOID ns_fill_dhcp(NsWriter *w)
 {
@@ -467,8 +467,8 @@ static UWORD ns_interface_index(NX_IP *ip, const NX_INTERFACE *nxif)
  * The on-link half has two sources and needs both, because _nxd_ipv6_search_onlink()
  * looks at both: the prefix list, which router advertisements fill, and the
  * prefix of each MANUAL address, which they do not. In that order, which is
- * why the prefix list is walked first here. A prefix in both -- an address
- * configured by hand on a prefix a router also advertises -- is one on-link
+ * why the prefix list is walked first here. A prefix in both, an address
+ * configured by hand on a prefix a router also advertises, is one on-link
  * route and is reported once.
  *
  * A stateless-autoconfigured address is not reported from its own prefix: an
@@ -613,7 +613,7 @@ static VOID ns_fill_routes6(NX_IP *ip, NsWriter *w)
         if (out == NULL)
             continue;
 
-        /* ::/0 -- the destination is everything the lists above did not claim. */
+        /* ::/0, the destination is everything the lists above did not claim. */
         out->nsr6_NextHop[0] = e->nx_ipv6_default_router_entry_router_address[0];
         out->nsr6_NextHop[1] = e->nx_ipv6_default_router_entry_router_address[1];
         out->nsr6_NextHop[2] = e->nx_ipv6_default_router_entry_router_address[2];
@@ -681,8 +681,8 @@ static VOID ns_fill_neighbours(NX_IP *ip, NsWriter *w)
 
         /*
          * nx_nd_cache_num_solicit counts down from NX_MAX_MULTICAST_SOLICIT,
-         * so the number a caller wants -- how many times this machine has
-         * asked -- is the difference, and the constant is only known here.
+         * so the number a caller wants, how many times this machine has
+         * asked, is the difference, and the constant is only known here.
          */
         if (e->nx_nd_cache_nd_status == ND_CACHE_STATE_INCOMPLETE &&
             e->nx_nd_cache_num_solicit <= (UCHAR)NX_MAX_MULTICAST_SOLICIT)
@@ -821,7 +821,7 @@ static VOID ns_fill_stats(NX_IP *ip, NetStatusStats *out)
 
 /*
  * Neither half of this touches NetX Duo, so the caller does not take the
- * baton to read it -- which matters, because taking the baton to ask whether
+ * baton to read it, which matters, because taking the baton to ask whether
  * the baton is stuck would be the one query that cannot answer.
  */
 static VOID ns_fill_health(NetStatusHealth *out)
@@ -872,8 +872,8 @@ static VOID ns_fill_health(NetStatusHealth *out)
 }
 
 /*
- * The ARP cache is a hash table of circular lists -- nx_arp_active_next of the
- * last entry in a bucket points back at the bucket head, not at NX_NULL -- so
+ * The ARP cache is a hash table of circular lists, nx_arp_active_next of the
+ * last entry in a bucket points back at the bucket head, not at NX_NULL, so
  * the walk needs the head comparison below. Without it the loop spins inside
  * the bracket, holding the lock.
  */
@@ -939,7 +939,7 @@ static VOID ns_fill_arp(NX_IP *ip, NsWriter *w)
  * Three kinds of route, reported in the order the stack consults them:
  *
  *   1. the directly-attached prefix of each interface that has an address;
- *   2. NetX Duo's static routing table, longest prefix first -- it keeps
+ *   2. NetX Duo's static routing table, longest prefix first, it keeps
  *      nx_ip_routing_table[] sorted by netmask descending, so the order here
  *      is the order _nx_ip_route_find() matches in;
  *   3. the default gateway (nx_ip_gateway_address), consulted last and
@@ -1082,7 +1082,7 @@ static VOID ns_fill_sockets(NX_IP *ip, NsWriter *w)
  * gets a stable meaning out of the selector in exchange: this is the cache.
  *
  * Outside the bracket, unlike every other walk here: netstack_mdns_browse_
- * collect() takes its own, and it allocates -- an NX_MDNS_SERVICE is 600-odd
+ * collect() takes its own, and it allocates, an NX_MDNS_SERVICE is 600-odd
  * bytes and belongs on neither this stack nor the module's. Rule 2 at the top
  * of this file says no allocation while adopted, and this is how it is kept.
  * The same call also waits, for the address of a service whose SRV came without
@@ -1153,7 +1153,7 @@ static VOID ns_fill_services(NsWriter *w)
 /*
  * The service type a browse was asked for, terminated whatever the caller sent.
  * Empty is the DNS-SD meta-query and comes back NULL, which is what the module
- * wants for it. Anything else the module validates itself -- it has to assemble
+ * wants for it. Anything else the module validates itself, it has to assemble
  * "<type>.local" and fails on what it cannot.
  */
 static const char *ns_service_type(const NetStatusControl *ctl,
@@ -1420,7 +1420,7 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
 
         /*
          * The browse pair, outside the bracket for the same reason: both take
-         * their own, and neither goes near an NX_IP -- so neither needs the
+         * their own, and neither goes near an NX_IP, so neither needs the
          * netstack_ip() check the rest of this function opens with, and both
          * answer on a stack whose interfaces are all down.
          */

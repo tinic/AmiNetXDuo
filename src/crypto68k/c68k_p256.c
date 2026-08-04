@@ -1,9 +1,9 @@
 /*
- * AmiNetXDuo -- crypto68k: P-256 field and point arithmetic for the 68020.
+ * AmiNetXDuo, crypto68k: P-256 field and point arithmetic for the 68020.
  *
  * See c68k_p256.h for what this replaces and why.  In short: the vendored
- * nx_crypto_ec.c has the right algorithms -- NAF, Solinas reduction, a
- * fixed-base comb, Jacobian coordinates with one inversion -- and runs them on
+ * nx_crypto_ec.c has the right algorithms, NAF, Solinas reduction, a
+ * fixed-base comb, Jacobian coordinates with one inversion, and runs them on
  * a representation that costs more than the arithmetic does.  This file keeps
  * the algorithms and drops the representation.
  *
@@ -95,7 +95,7 @@ c68k_limb   t;
  *
  * where each s_k is a permutation of the sixteen product limbs c0..c15.  The
  * vendored implementation materialises each s_k as a 64-byte big-endian byte
- * stream -- built one byte at a time -- and adds them as sign-carrying huge
+ * stream, built one byte at a time, and adds them as sign-carrying huge
  * numbers.  Here the nine terms are collapsed into one pass: limb 0 is
  * c0 + c8 + c9 - c11 - c12 - c13 - c14 and so on, accumulated in a (lo, hi)
  * pair where hi is the signed carry into the next limb.  Nothing is
@@ -504,7 +504,7 @@ c68k_p256_fe    x2;
  *     Y3 = alpha * (4*beta - X3) - 8*gamma^2
  *
  * 3M + 5S, against the vendored 4M + 4S.  A win only because squaring here is
- * cheaper than multiplying -- 28 limb products against 64.
+ * cheaper than multiplying, 28 limb products against 64.
  */
 VOID c68k_p256_jac_double(c68k_p256_jac *r, const c68k_p256_jac *p1)
 {
@@ -590,7 +590,7 @@ c68k_p256_fe    y3;
 c68k_p256_fe    z3;
 
 
-    /* q at infinity is (0, 0) -- the representation the vendored code uses. */
+    /* q at infinity is (0, 0), the representation the vendored code uses. */
     if (fe_is_zero(q -> x) && fe_is_zero(q -> y))
     {
         if (r != p1)
@@ -718,7 +718,7 @@ UINT            row;
      * Lim-Lee: k = sum_c 2^c * T1[digit(c)] over c in 0..d-1, split at e so
      * that columns e..d-1 are served by T2 = 2^e * T1 in the same iteration.
      * 26 doublings and 52 additions, against 256 doublings for a generic
-     * point -- why ECDH key generation measures at 1.52 s while an ECDH shared
+     * point, why ECDH key generation measures at 1.52 s while an ECDH shared
      * secret measures at 5.18 s.
      */
     for (c = C68K_P256_COMB_E; c > 0u; c--)
@@ -760,7 +760,7 @@ UINT            row;
 
 /*
  * Width-5 non-adjacent form.  Digits are odd and in [-15, 15], one nonzero in
- * six on average, so 256 bits cost about 43 additions -- against 85 for the
+ * six on average, so 256 bits cost about 43 additions, against 85 for the
  * vendored width-2 NAF.  Returns the digit count, at most 257.
  */
 static UINT p256_wnaf(signed char *naf, const c68k_limb k[C68K_P256_LIMBS])

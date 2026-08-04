@@ -1,5 +1,5 @@
 /*
- * bsdsocket.library -- the network monitoring hooks.
+ * bsdsocket.library, the network monitoring hooks.
  *
  *   AddNetMonitorHookTagList()  install a callback
  * "Monitoring hooks can be used both for inspecting and filtering data that
@@ -20,12 +20,12 @@
  *   The two families answer with different vocabularies:
  *
  *     the in-stack types  return MA_Continue / MA_Ignore / MA_Drop /
- *     (ICMP, UDP,         MA_DropWithReset -- what to do with a packet.
+ *     (ICMP, UDP,         MA_DropWithReset, what to do with a packet.
  *      TCP_Connect,       "Any positive return value will cause the data to
  *      Packet)            be dropped and the corresponding errno value to be
  *                        set to the result."
  *
- *     the call-site types return an ERRNO -- "An error value of 0 will allow
+ *     the call-site types return an ERRNO, "An error value of 0 will allow
  *     (Connect, Bind,     the call to proceed (unless another hook denies
  *      Send)              this), and any error value > 0 will cause the call
  *                        to be aborted and the errno variable to be set to
@@ -35,7 +35,7 @@
  *   different in each. MA_Continue is 0, which is what lets one dispatcher
  *   serve both.
  *
- *   RemoveNetMonitorHook() takes only the hook -- no type -- so removal
+ *   RemoveNetMonitorHook() takes only the hook, no type, so removal
  *   searches every list, and one hook cannot be installed for two types at
  *   once: there would be no way to say which one to remove.
  *
@@ -132,7 +132,7 @@ LONG bsd_AddNetMonitorHookTagList(register LONG type __asm("d0"),
                                   register struct TagItem *tags __asm("a1"),
                                   register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    /* "tags -- Pointer to a 'struct TagItem' list. No tags are defined yet."
+    /* "tags, Pointer to a 'struct TagItem' list. No tags are defined yet."
        Accepted and ignored; refusing a non-NULL one would break the first
        caller that passed TAG_DONE. */
     (VOID)tags;
@@ -151,7 +151,7 @@ LONG bsd_AddNetMonitorHookTagList(register LONG type __asm("d0"),
      * hears anything and cannot tell that from a quiet network.
      *
      *   MHT_ICMP           all four are invoked "from within the TCP/IP stack
-     *   MHT_UDP            itself" -- the IP receive path, which reaches this
+     *   MHT_UDP            itself", the IP receive path, which reaches this
      *   MHT_TCP_Connect    library only through the NX_IP packet filter that
      *   MHT_Packet         netstack_capture.c already installs for src/bpf/.
      *                      Dispatching them means chaining that filter, which
@@ -218,7 +218,7 @@ VOID bsd_RemoveNetMonitorHook(register struct Hook *hook __asm("a0"),
     Permit();
 }
 
-/* ---------------------------------------------------------- the dispatch -- */
+/* ---------------------------------------------------------- the dispatch, */
 
 /*
  * The hook itself, called the way the autodoc lays it out: the Hook in A0,
@@ -231,7 +231,7 @@ typedef LONG (*BsdMonitorFn)(register struct Hook *hook __asm("a0"),
                              register APTR message __asm("a1"));
 
 /*
- * utility/hooks.h declares h_Entry as `ULONG (*)()` -- no parameters, because
+ * utility/hooks.h declares h_Entry as `ULONG (*)()`, no parameters, because
  * a Hook carries whatever shape the installer agreed on. Reaching the real
  * shape is a conversion between two function types, which a plain cast cannot
  * express without tripping -Wcast-function-type. The union does it without

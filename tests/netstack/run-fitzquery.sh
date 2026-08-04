@@ -13,8 +13,8 @@
 #
 #   `fitz query` broadcasts "LIST\n" to 255.255.255.255:17710
 #   (fitz-common-client.c, fitz_pms_list_udp) and `fitz serve` binds that port
-#   on INADDR_ANY.  Ethernet is simplex -- a card does not hear its own
-#   transmission -- so a broadcast has to be copied back in software or the
+#   on INADDR_ANY.  Ethernet is simplex, a card does not hear its own
+#   transmission, so a broadcast has to be copied back in software or the
 #   sender never sees it.  NetX Duo's _nx_ip_driver_packet_send() copies one
 #   back for a unicast to our own address and for a joined multicast group, and
 #   did not for a broadcast; see NX_ENABLE_IP_BROADCAST_LOOPBACK in
@@ -25,8 +25,8 @@
 #   tests/netstack/host/test_bcast_loopback_host.c already answers the question
 #   at the packet level, deterministically, in a millisecond.  What it cannot
 #   answer is whether the datagram reaches bsdsocket.library's recvfrom() and
-#   whether the reply -- which the server unicasts back to the sender's
-#   ephemeral port on our own address -- gets home.  This runs the reporter's
+#   whether the reply, which the server unicasts back to the sender's
+#   ephemeral port on our own address, gets home.  This runs the reporter's
 #   two commands, on the released Fitz binary, and reads what the second one
 #   printed.
 #
@@ -96,7 +96,7 @@ cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
 cp "$FITZ" "$STAGE/fitz"
 
 # The reporter's two commands.  `&` is SYS_Asynch: the server stays resident,
-# which is the whole point -- it has to be listening when the query goes out.
+# which is the whole point, it has to be listening when the query goes out.
 # `fitz query` with no host is the broadcast form; `fitz query localhost` is
 # the TCP form and would pass whether or not the broadcast is looped back, so
 # it is here as a control rather than as the assertion.

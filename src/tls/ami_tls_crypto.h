@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the nx_secure crypto table that actually uses src/crypto68k/.
+ * AmiNetXDuo, the nx_secure crypto table that actually uses src/crypto68k/.
  *
  *   src/crypto68k/ made RSA-2048 2.9x/2.2x faster and P-256 3.6-3.9x faster,
  *   measured, and none of it reached a handshake: nothing outside
@@ -7,8 +7,8 @@
  *   entirely on the vendored arithmetic.  This file is the wire.
  *
  *   nx_secure already has the extension point needed.
- *   nx_secure_tls_session_create() takes a `const NX_SECURE_TLS_CRYPTO *` -- a
- *   table of NX_CRYPTO_METHOD pointers -- and nx_secure_tls_ecc_initialize()
+ *   nx_secure_tls_session_create() takes a `const NX_SECURE_TLS_CRYPTO *`, a
+ *   table of NX_CRYPTO_METHOD pointers, and nx_secure_tls_ecc_initialize()
  *   takes an application-supplied array of curve methods.  Every path that
  *   reaches a big-number operation goes through one of those two, so supplying
  *   replacement tables redirects all of them with no vendored source touched:
@@ -42,7 +42,7 @@
  *   signature (nx_secure_tls_ecc_generate_keys.c:773) and
  *   nx_secure_tls_send_certificate_verify.c:670 both hand the full 2048-bit
  *   private exponent to the RSA method with p and q left NULL, so they take the
- *   non-CRT path -- a measured 3.6x penalty on the operation that is most of a
+ *   non-CRT path, a measured 3.6x penalty on the operation that is most of a
  *   server handshake.
  *
  *   Adding the two missing nx_crypto_operation() calls would mean editing
@@ -53,7 +53,7 @@
  *   The pairing comes from one certificate object, so it cannot be mismatched
  *   any more than the vendored CRT path's can.
  *
- * Not constant time -- see the note above c68k_mont_power_modulus().  This
+ * Not constant time, see the note above c68k_mont_power_modulus().  This
  * changes nothing about that; both the vendored and the fast exponentiation
  * branch on exponent bits.
  *
@@ -73,7 +73,7 @@ extern "C" {
 /*
  * RFC 7905's two ciphersuite numbers.  nx_secure_tls.h has a define for every
  * suite the vendored tables mention and these were never among them, because
- * nx_secure has no ChaCha20-Poly1305 at all -- src/crypto68k/c68k_chacha20.c
+ * nx_secure has no ChaCha20-Poly1305 at all, src/crypto68k/c68k_chacha20.c
  * is where it now comes from.
  */
 #define TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256     0xCCA8
@@ -101,7 +101,7 @@ extern const UINT                   ami_crypto_ecc_supported_groups_size;
  * nx_secure_tls_initialize().
  *
  * Returns NX_SUCCESS, or NX_NOT_SUCCESSFUL if the curve could not be found or
- * the self check failed -- in which case the tables still work, they just fall
+ * the self check failed, in which case the tables still work, they just fall
  * through to the vendored arithmetic.
  */
 UINT ami_tls_crypto_initialize(VOID);
@@ -138,7 +138,7 @@ UINT ami_tls_local_certificate_add(NX_SECURE_TLS_SESSION *tls_session,
  * values; REFERENCE lets "before" and "after" be measured through identical
  * instrumentation in one process, rather than composed from separate runs.
  *
- * Not for production use -- the shipping configuration is C68K, the default.
+ * Not for production use, the shipping configuration is C68K, the default.
  */
 #define AMI_TLS_ARITH_C68K          0u
 #define AMI_TLS_ARITH_REFERENCE     1u

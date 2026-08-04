@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo tools -- talking to the live NetX Duo instance.
+ * AmiNetXDuo tools, talking to the live NetX Duo instance.
  *
  * Every function here is a NetStackQuery() call and a copy out of the answer.
  * No ThreadX is involved: the ThreadX a command could adopt into is never the
@@ -66,7 +66,7 @@ static struct Library *nx_open(VOID)
     return tool_netstatus_open(nx_quiet);
 }
 
-/* ------------------------------------------------------------ snapshots -- */
+/* ------------------------------------------------------------ snapshots, */
 
 LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
 {
@@ -246,7 +246,7 @@ const char *tool_addr6_state(UWORD state)
     }
 }
 
-/* ---------------------------------------------------- protocol counters -- */
+/* ---------------------------------------------------- protocol counters, */
 
 LONG tool_stats(ToolStats *out)
 {
@@ -448,12 +448,12 @@ LONG tool_stats(ToolStats *out)
     return 0;
 }
 
-/* ------------------------------------------------------------- the mark -- */
+/* ------------------------------------------------------------- the mark, */
 
 /*
  * The same numbers as NETSTATUS_HEALTH, off the published mark instead
  * (aminetxduo/health.h).  Nothing is opened and nothing is obtained, so this
- * answers on a machine where the library would not -- which is the machine
+ * answers on a machine where the library would not, which is the machine
  * this whole block of counters exists for.
  *
  * Forbid() rather than ObtainSemaphore(): the stack removes the mark under
@@ -543,7 +543,7 @@ BOOL tool_health_mark(ToolStats *out)
     return TRUE;
 }
 
-/* ------------------------------------------------------------------ DHCP -- */
+/* ------------------------------------------------------------------ DHCP, */
 
 LONG tool_dhcp(ToolDhcp *out)
 {
@@ -617,7 +617,7 @@ LONG tool_dhcp(ToolDhcp *out)
     return 0;
 }
 
-/* ---------------------------------------------------------------- routes -- */
+/* ---------------------------------------------------------------- routes, */
 
 LONG tool_routes(ToolRoutes *out)
 {
@@ -748,7 +748,7 @@ VOID tool_print_routes(const ToolRoutes *routes, const AmiConfig *cfg,
         tool_printf("(more routes than this command can hold)\n");
 }
 
-/* ----------------------------------------------------------- IPv6 routes -- */
+/* ----------------------------------------------------------- IPv6 routes, */
 
 LONG tool_routes6(ToolRoutes6 *out)
 {
@@ -881,7 +881,7 @@ VOID tool_print_routes6(const ToolRoutes6 *routes, const AmiConfig *cfg)
         tool_printf("(more IPv6 routes than this command can hold)\n");
 }
 
-/* ------------------------------------------------------------ neighbours -- */
+/* ------------------------------------------------------------ neighbours, */
 
 LONG tool_neighbours(ToolNeighbours *out)
 {

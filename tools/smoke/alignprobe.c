@@ -1,5 +1,5 @@
 /*
- * alignprobe -- what this machine's alignment rules actually are.
+ * alignprobe, what this machine's alignment rules actually are.
  *
  * Run it on an A600 or an A500 and every number below comes from a real 68000,
  * which is the only CPU in the family that faults rather than tolerates.  On a
@@ -77,8 +77,8 @@ CMSG_BUFFER(a_static_cbuf, CMSG_SPACE(16));
 /*
  * The deterministic case, and the one that made this a bug rather than a coin
  * flip: a control buffer inside a struct, behind something two bytes wide.
- * Where the union's alignment is 2 -- which is all m68k gives it without the
- * attribute -- the compiler puts the buffer at offset 2 and every instance of
+ * Where the union's alignment is 2, which is all m68k gives it without the
+ * attribute, the compiler puts the buffer at offset 2 and every instance of
  * this struct has it 2 mod 4.  Where it is 4, the compiler pads and the offset
  * is 4.  A stack local's address depends on the frame; a struct member's does
  * not, so this is the half of the probe that answers the same way every run.

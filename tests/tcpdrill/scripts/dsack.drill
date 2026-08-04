@@ -1,4 +1,4 @@
-# tcpdrill -- RFC 2883 duplicate selective acknowledgment, receive side.
+# tcpdrill, RFC 2883 duplicate selective acknowledgment, receive side.
 #
 # A D-SACK block reports data that arrived twice.  It differs from an ordinary
 # RFC 2018 block in two ways a capture can check: it is FIRST in the option,
@@ -12,7 +12,7 @@
 
 # RFC 2883 section 4, first example: the whole segment is below the cumulative
 # acknowledgement.  Nothing is held above it, so the option exists ONLY to
-# carry the D-SACK block -- 101:201 sits below ack=201 and is the sole block.
+# carry the D-SACK block, 101:201 sits below ack=201 and is the sole block.
 case d01_duplicate_below_the_cumulative_ack
 socket
 connect
@@ -45,8 +45,8 @@ tx A seq=1 ack=201 sack=- hdrlen=20 within=400
 recv 400 = 200
 
 # RFC 2883 section 4, second example: the duplicate is a subset of a range
-# already reported in an ordinary block.  BOTH blocks appear -- the D-SACK
-# first, then the ordinary block that still covers the same bytes -- because
+# already reported in an ordinary block.  BOTH blocks appear, the D-SACK
+# first, then the ordinary block that still covers the same bytes, because
 # it is their coexistence that tells the sender the arrival was a duplicate
 # rather than new data closing the hole.
 case d03_duplicate_of_an_already_sacked_range
@@ -100,7 +100,7 @@ rx PA seq=1 ack=1 len=200
 tx A seq=1 ack=201 sack=1:101 hdrlen=32 within=400
 recv 400 = 200
 
-# NO PERMISSION, NO D-SACK -- BUT STILL AN ACKNOWLEDGEMENT.  RFC 2883 rides on
+# NO PERMISSION, NO D-SACK, BUT STILL AN ACKNOWLEDGEMENT.  RFC 2883 rides on
 # RFC 2018, so a peer that never sent SACK-Permitted gets no SACK block back
 # for a repeat: hdrlen stays 20 and sack=- asserts the option is absent.  What
 # it does get is the plain acknowledgement RFC 9293 3.10.7.4 requires for any
@@ -111,7 +111,7 @@ recv 400 = 200
 # Both halves were wrong.  It is how the peer learns its ACK was lost rather
 # than its data, and the duplicate-ACK count it was feared to feed is only
 # incremented for an ACK arriving with a segment still on the transmit queue
-# (nx_tcp_socket_state_ack_check.c) -- which is never the case here.  Held the
+# (nx_tcp_socket_state_ack_check.c), which is never the case here.  Held the
 # opposite position to o02_duplicate_segment in tcp.drill, and lost.
 case d06_no_dsack_without_permission
 socket

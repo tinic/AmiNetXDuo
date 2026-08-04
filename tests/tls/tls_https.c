@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- a TLS 1.2 handshake against a real public HTTPS server.
+ * AmiNetXDuo, a TLS 1.2 handshake against a real public HTTPS server.
  *
  * tls_handshake.c runs both ends of the conversation, which measures the
  * arithmetic exactly and says nothing about interoperating with anybody else.
@@ -11,7 +11,7 @@
  *
  * tls-v1-2.badssl.com exists to be connected to, speaks TLS 1.2, its chain is
  * two deep (leaf + Let's Encrypt R13) rather than the four Cloudflare and
- * SSL.com hand out, and -- checked, not assumed -- it will negotiate
+ * SSL.com hand out, and, checked, not assumed, it will negotiate
  * TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256, the same suite the loopback test
  * uses.  That last point matters on this machine: nx_crypto's AES-GCM is a
  * bit-serial GHASH at 345 ms per KB against AES-CBC's 22 ms, so a GCM suite
@@ -19,7 +19,7 @@
  *
  * Measured cost of that chain, 68020: three signature verifications totalling
  * 4.1 s, not 3 x 0.68 s, because ISRG Root X1 is a 4096-bit key and verifying
- * the intermediate against it is a 4096-bit modular exponentiation -- roughly
+ * the intermediate against it is a 4096-bit modular exponentiation, roughly
  * 4x a 2048-bit one.  Root key size is a real term in a client's handshake
  * cost here, and the client does not get to choose it.
  *
@@ -262,7 +262,7 @@ char                        line[96];
     }
 
     /*
-     * SNI is not optional against anything modern -- a shared-IP host answers
+     * SNI is not optional against anything modern, a shared-IP host answers
      * with the wrong certificate, or a handshake_failure, without it.  The DNS
      * name struct must outlive the handshake, so it is static.
      */
@@ -285,8 +285,8 @@ char                        line[96];
     handshake_us = ami_tls_eclock_micros(ami_tls_eclock() - start);
 
     /*
-     * One thread does everything here and is not registered as the client --
-     * there is no server half to tell it apart from -- so fold both counter
+     * One thread does everything here and is not registered as the client,
+     * there is no server half to tell it apart from, so fold both counter
      * banks together rather than reading the one that happens to be empty.
      */
     ami_tls_crypto_counters_get(&ops, &other);

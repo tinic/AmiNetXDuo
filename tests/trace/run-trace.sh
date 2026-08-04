@@ -13,7 +13,7 @@
 #          straight to DH0:.  Real microsecond timestamps from GetSysTime().
 #
 #   host   FS-UAE's emulated A2065 writes every frame it handles, both
-#          directions, as hex into its own log -- unconditionally, with no
+#          directions, as hex into its own log, unconditionally, with no
 #          option to ask for it and none to turn it off.  That is a capture
 #          taken inside the emulated hardware, below every line of our code,
 #          so where it disagrees with the guest pcap the disagreement is

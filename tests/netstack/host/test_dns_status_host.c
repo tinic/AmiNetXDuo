@@ -1,9 +1,9 @@
 /*
- * AmiNetXDuo -- what a failed lookup is reported as.
+ * AmiNetXDuo, what a failed lookup is reported as.
  *
  * "Host not found" is a claim about the name.  Three of the things that reach
- * this map are claims about the machine instead -- nobody to ask, nobody
- * answered, and another task holding the DNS client -- and a program that
+ * this map are claims about the machine instead, nobody to ask, nobody
+ * answered, and another task holding the DNS client, and a program that
  * retries on "try again" has to be able to tell them apart.  RFC 3493 6.1
  * requires EAI_AGAIN for exactly that, and h_errno has TRY_AGAIN for the same
  * reason.
@@ -61,7 +61,7 @@ int main(void)
     /*
      * The one that is genuinely about the name.  A blocking query folds every
      * per-server failure into this before returning, so it also covers a server
-     * that answered NXDOMAIN -- which is why it is retryable here and separated
+     * that answered NXDOMAIN, which is why it is retryable here and separated
      * by timing in netstack_retry.c rather than by status.
      */
     h_check(ami_ns_dns_error(NX_DNS_QUERY_FAILED) == AMI_NET_ERR_NONAME,

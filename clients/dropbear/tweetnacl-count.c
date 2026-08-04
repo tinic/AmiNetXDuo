@@ -1,5 +1,5 @@
 /*
- * clients/dropbear/tweetnacl-count.c -- how many field multiplications an SSH
+ * clients/dropbear/tweetnacl-count.c, how many field multiplications an SSH
  * handshake costs, counted on the build host.
  *
  * The emulator queue is deep and every timing run has to hold the machine
@@ -14,8 +14,8 @@
  * clients/dropbear/tweetnacl-count.sh derives a copy of
  * third_party/dropbear/src/curve25519.c into build/, renaming the two
  * definitions `M` and `S` and inserting counting macros of the same names
- * directly after them.  Every later use in the file -- and every use is later,
- * because TweetNaCl defines bottom-up -- goes through the counter.  The
+ * directly after them.  Every later use in the file, and every use is later,
+ * because TweetNaCl defines bottom-up, goes through the counter.  The
  * submodule is untouched; the derived file is a build artifact the script
  * regenerates, so it cannot drift from the pinned tag unnoticed.
  *
@@ -78,8 +78,8 @@ static const unsigned char basepoint[32] = { 9 };
 
 /* dropbear_ed25519_make_key() is compiled into curve25519.c and reaches
    dbrandom.c, which reaches an entropy device this program has no business
-   opening.  It is never called here -- key generation is not part of a
-   handshake -- so one stub satisfies the linker without pulling in a random
+   opening.  It is never called here, key generation is not part of a
+   handshake, so one stub satisfies the linker without pulling in a random
    pool.  If it is ever reached, it says so rather than returning zeros. */
 void genrandom(unsigned char *buf, unsigned int len);
 void genrandom(unsigned char *buf, unsigned int len)

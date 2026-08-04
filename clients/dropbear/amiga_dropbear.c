@@ -1,11 +1,11 @@
 /*
- * clients/dropbear -- the AmigaOS half of the Dropbear port.
+ * clients/dropbear, the AmigaOS half of the Dropbear port.
  *
  * Everything `dbclient` calls that this toolchain does not have, in one
  * translation unit.  curl did not need this file: its own lib/curl_setup.h
  * already knows that on classic AmigaOS a socket is not a file descriptor,
  * that close() is CloseSocket() and that select() is WaitSelect().  Dropbear
- * knows none of that -- `grep -ril amiga src/` finds nothing -- which is the
+ * knows none of that, `grep -ril amiga src/` finds nothing, which is the
  * situation docs/RESEARCH.md §11.7 predicted for wget.
  *
  * Nothing in third_party/dropbear is patched.  The whole port is this file,
@@ -15,15 +15,15 @@
  * descriptors from its own table starting at 0 (src/bsdsocket/socket.c,
  * bsd_fd_alloc()).  newlib hands out file descriptors starting at 0 as well,
  * and 0/1/2 are the Shell's stdin/stdout/stderr.  So `socket()` can and does
- * return 0, and a program holding both -- which every SSH client is, since it
- * copies between a socket and a terminal -- cannot tell them apart.
+ * return 0, and a program holding both, which every SSH client is, since it
+ * copies between a socket and a terminal, cannot tell them apart.
  *
  * Rather than teach Dropbear the difference, which is a patch to every call
  * site rebased forever, the two spaces are merged here by offset:
  *
  *     fd  0 ..  63     newlib: stdin, stdout, stderr, and files
  *     fd 64 .. 191     bsdsocket, biased by DB_SOCK_BASE
- *     fd 192, 193      the wakeup "pipe" -- see pipe() below
+ *     fd 192, 193      the wakeup "pipe", see pipe() below
  *
  * Every function that takes a descriptor dispatches on that range, so
  * Dropbear's read()/write()/close()/select()/fcntl() do the right thing for
@@ -50,7 +50,7 @@
  *
  * tcgetattr()/tcsetattr() fabricate a termios and drive raw mode with
  * SetMode().  AmigaOS has no termios, but a console has the one capability an
- * interactive session needs -- SetMode(handle, 1) is raw -- so tcgetattr()
+ * interactive session needs, SetMode(handle, 1) is raw, so tcgetattr()
  * reports a plausible cooked terminal and tcsetattr() maps Dropbear's ICANON
  * switch onto SetMode().  A non-console fd still returns ENOTTY, so
  * `dbclient -T user@host command` still asks the server for no pty.
@@ -67,8 +67,8 @@
  * and for the same reason: it leaves third_party/dropbear unpatched.
  *
  * The command line is not guessed and not parsed out of a log.  The wrapper
- * calls Dropbear's own exec_fn (execchild), which does the real work -- forced
- * commands, the environment, the chdir to the home directory -- and ends in
+ * calls Dropbear's own exec_fn (execchild), which does the real work, forced
+ * commands, the environment, the chdir to the home directory, and ends in
  * execv(shell, {"sh", "-c", cmd}).  execv() then longjmp()s back into the
  * wrapper with that command in hand; the wrapper's frame is live, because
  * exec_fn was called from it.
@@ -77,7 +77,7 @@
  */
 
 #include <exec/types.h>
-#include <exec/io.h>            /* struct IOStdReq -- the console ConUnit */
+#include <exec/io.h>            /* struct IOStdReq, the console ConUnit */
 #include <dos/dos.h>
 #include <dos/dosextens.h>
 #include <dos/dostags.h>        /* SystemTagList() tags */
@@ -188,7 +188,7 @@ static LONG nx_socketbasetaglist(APTR tags)            { return SocketBaseTagLis
 #define SOCKOF(fd)      ((LONG)((fd) - DB_SOCK_BASE))
 
 /* Set while __wrap_spawn_command() is running Dropbear's own child path in
-   this process -- see the spawn_command() note at the top of the file, and
+   this process, see the spawn_command() note at the top of the file, and
    the two places below that have to know: close() and execv(). */
 static int exec_capturing;
 
@@ -382,7 +382,7 @@ __attribute__((constructor)) static void amiga_no_requesters(void)
  * opened lazily rather than in a constructor for the reason curl's
  * lib/amigaos.c gives: a program that never reaches the network should not
  * fail to start because a library is missing.  SBTC_ERRNOPTR is what makes
- * `errno` after a failed connect() mean anything -- without it every socket
+ * `errno` after a failed connect() mean anything, without it every socket
  * error reads as whatever the last stdio call left behind.
  */
 struct Library *SocketBase = NULL;
@@ -583,7 +583,7 @@ int inet_aton(const char *cp, struct in_addr *addr)
 
 /*
  * dbrandom.c's seedrandom() opens DROPBEAR_URANDOM_DEV, reads 32 bytes, and
- * dropbear_exit()s if it cannot -- there is no fallback and no way to build
+ * dropbear_exit()s if it cannot, there is no fallback and no way to build
  * without one.  This machine has no /dev/urandom, so localoptions.h renames
  * the device to "RANDOM:" (a name shaped like an AmigaOS device, so nothing
  * pretends to be Unix) and open() answers it here.
@@ -593,7 +593,7 @@ int inet_aton(const char *cp, struct in_addr *addr)
  * for TLS key agreement: one entropy story per machine, and one place to fix
  * it.
  *
- * The conditioning is textbook -- SHA-256 mixing, counter-mode expansion,
+ * The conditioning is textbook, SHA-256 mixing, counter-mode expansion,
  * forward ratchet.  The collection is guesswork: it credits itself about 21
  * bits from E-Clock jitter, the clock and the task list against the 64 it sets
  * as its own bar, so ami_random_is_seeded() returns FALSE by construction and
@@ -665,7 +665,7 @@ int __wrap_read(int fd, void *buf, size_t len)
     if (IS_SOCK(fd))
         return (int)nx_recv(SOCKOF(fd), (APTR)buf, (LONG)len, 0);
 
-    /* stdin, while an interactive session's console reader child is running --
+    /* stdin, while an interactive session's console reader child is running,
        hand back what it has buffered rather than read the console twice. */
     if (fd == 0 && con_active())
         return con_read(buf, len);
@@ -705,7 +705,7 @@ int __wrap_write(int fd, const void *buf, size_t len)
  * Dropbear tells the server the terminal geometry (put_winsize()), and without
  * an answer here it ships a fixed 80x25, leaving vim, nano, less and every
  * other full-screen program drawing to the wrong size.  The Amiga console will
- * report it: a Window Status Request written to it -- CSI '0' SP 'q' -- comes
+ * report it: a Window Status Request written to it, CSI '0' SP 'q', comes
  * back through the input stream as a Window Bounds Report,
  * CSI 1;1;<rows>;<cols> SP 'r'.  Raw mode is required to read that reply
  * without waiting for a newline.
@@ -716,10 +716,10 @@ int __wrap_write(int fd, const void *buf, size_t len)
  * that ever change; the wait is bounded so a console that never answers cannot
  * stall the connection.
  */
-static struct ConUnit *con_unit;    /* the console's ConUnit -- stable once found */
+static struct ConUnit *con_unit;    /* the console's ConUnit, stable once found */
 
-/* Dynamic resize.  The reader child polls the ConUnit's live size -- its poll
-   already runs every CON_POLL_US for the quit check -- and on a change wakes the
+/* Dynamic resize.  The reader child polls the ConUnit's live size, its poll
+   already runs every CON_POLL_US for the quit check, and on a change wakes the
    parent, which hands it to the SIGWINCH handler Dropbear gave us (the only door
    to cli_ses.winchange, which the port cannot reach directly). */
 static int          con_last_x, con_last_y;    /* last-seen console size        */
@@ -771,7 +771,7 @@ static struct ConUnit *con_get_unit(void)
  * The real size of the Amiga console, for TIOCGWINSZ.
  *
  * cu_XMax/cu_YMax are the last column and row (so the count is one more).  This
- * is a plain memory read of a live structure -- no console I/O, so nothing to
+ * is a plain memory read of a live structure, no console I/O, so nothing to
  * echo and no bell.  The documented Window Status Request (CSI 0 SP q) would be
  * the portable route, but Kickstart 3.x's CON: handler does not answer it.
  */
@@ -791,7 +791,7 @@ static int con_query_size(int *rows, int *cols)
 /*
  * Capture Dropbear's SIGWINCH handler.
  *
- * AmigaOS delivers no Unix signals, so signal() has nothing to install -- but
+ * AmigaOS delivers no Unix signals, so signal() has nothing to install, but
  * Dropbear's SIGWINCH handler is the only door to cli_ses.winchange, which this
  * file cannot reach directly.  Remember it; the resize path calls it by hand.
  * Return SIG_DFL rather than SIG_ERR so Dropbear does not think it failed.
@@ -860,8 +860,8 @@ int __wrap_close(int fd)
      * On Unix a process owns its own descriptor table and close(1) at exit is
      * free.  On AmigaOS a Shell command does not own Input() and Output():
      * they are the parent's DOS FileHandles, lent for the duration.  newlib's
-     * close() Close()s the BPTR, and then the Shell -- or, here,
-     * SystemTagList() in ClientRun -- Close()s the same freed FileHandle
+     * close() Close()s the BPTR, and then the Shell, or, here,
+     * SystemTagList() in ClientRun, Close()s the same freed FileHandle
      * again.  A double Close() on a machine with no memory protection is not
      * an error return.
      *
@@ -889,7 +889,7 @@ int __wrap_close(int fd)
      * before it execs, so that a child cannot inherit a file the server opened
      * as root.  In a forked child that is right.  Here it runs in the server's
      * own process, and that range is the session socket, the listener's pipes
-     * and the pipes the command's output is about to arrive on -- closing them
+     * and the pipes the command's output is about to arrive on, closing them
      * ends the session in the middle of setting it up.
      */
     if (exec_capturing)
@@ -918,7 +918,7 @@ int __wrap_close(int fd)
  * F_GETFL / F_SETFL|O_NONBLOCK pair.  For a socket that is
  * IoctlSocket(FIONBIO), which is a different call and not a flag word, so
  * F_GETFL answers 0 and F_SETFL does the work.  For a DOS handle there is no
- * non-blocking mode at all, and saying so would make Dropbear exit -- so it
+ * non-blocking mode at all, and saying so would make Dropbear exit, so it
  * succeeds, and select() below is what keeps the promise instead, by never
  * reporting a handle readable unless a read will return.
  */
@@ -948,8 +948,8 @@ int fcntl(int fd, int cmd, ...)
  * WaitSelect() waits on sockets and Exec signals, never on a DOS console, so an
  * interactive session cannot wait on the keyboard and the socket at once
  * through it directly.  A small child process bridges the gap: it blocks on
- * WaitForChar() -- which wakes the instant a key is pressed, so it is not a
- * spin -- reads each byte into a ring the parent drains, and Signal()s the
+ * WaitForChar(), which wakes the instant a key is pressed, so it is not a
+ * spin, reads each byte into a ring the parent drains, and Signal()s the
  * parent.  select() (below) folds that signal into WaitSelect()'s mask, so
  * Dropbear's loop waits on the socket and the keyboard with no polling.
  *
@@ -959,7 +959,7 @@ int fcntl(int fd, int cmd, ...)
  * freeing anything it might still Signal, so a stray signal to a dead task
  * cannot happen.
  */
-#define CON_RING_SIZE   256U                  /* power of two -- see the mask */
+#define CON_RING_SIZE   256U                  /* power of two, see the mask */
 #define CON_POLL_US     100000UL              /* WaitForChar() quit-check bound */
 
 typedef struct
@@ -1029,7 +1029,7 @@ static void con_child(void)
         if ((UBYTE)c == 0x9B)
         {
             /* The Amiga console emits an 8-bit CSI (0x9B) to introduce a control
-               sequence -- arrow keys are 0x9B 'A'..'D'.  The server, and the
+               sequence, arrow keys are 0x9B 'A'..'D'.  The server, and the
                ncurses "amiga" terminfo, speak the 7-bit form ESC '[', and a lone
                0x9B is not valid UTF-8 either, so rewrite it. */
             con_ring_put(cr, 0x1B);
@@ -1060,7 +1060,7 @@ static void con_reader_start(BPTR handle)
      * Dropbear ends by calling exit(), and a session torn down by an error
      * never gets back to tcsetattr()'s cooked branch.  Without this the child
      * Process is left running on a ConReader the exiting task will not free,
-     * signalling a Task that is gone -- and AmigaOS reclaims neither the
+     * signalling a Task that is gone, and AmigaOS reclaims neither the
      * structure nor the two signal bits.  con_reader_stop() returns at once
      * when there is nothing running, so registering once covers every cycle.
      */
@@ -1091,7 +1091,7 @@ static void con_reader_start(BPTR handle)
     }
 
     /* Same priority as us, not higher.  A higher-priority reader that keeps
-       finding input -- fast typing -- never blocks, so the parent (this task)
+       finding input, fast typing, never blocks, so the parent (this task)
        is never scheduled to drain the ring or service the socket, and the
        session hangs until the typing stops.  Equal priority time-slices the
        two, so the parent always gets the CPU back. */
@@ -1147,7 +1147,7 @@ static int con_read(void *buf, size_t len)
     int        n = 0;
 
     /* A Ctrl-C the local Shell raised goes to the remote as a literal ^C rather
-       than aborting the client -- select() sets con_intr; see there. */
+       than aborting the client, select() sets con_intr; see there. */
     if (con_intr && (size_t)n < len)
     {
         con_intr = 0;
@@ -1173,12 +1173,12 @@ static int con_read(void *buf, size_t len)
 /*
  * Console output with the newline the Amiga console wants.
  *
- * Dropbear is Unix code and ends its own lines -- the password prompt, "Host
- * key...", "Permission denied" -- with a bare '\n', but the Amiga console only
+ * Dropbear is Unix code and ends its own lines, the password prompt, "Host
+ * key...", "Permission denied", with a bare '\n', but the Amiga console only
  * moves to the start of the next line on CR+LF, so those prompts pile up on one
  * line.  Insert a CR before any LF that does not already have one (so the
  * server's own CRLF, once the session is up, is never doubled).  Only the
- * client's own output -- fd 1/2 while no interactive session is running -- goes
+ * client's own output, fd 1/2 while no interactive session is running, goes
  * through here; the session's byte stream is passed straight through untouched.
  */
 static char con_wr_prev[3];               /* last byte written per fd, for CRLF */
@@ -1222,11 +1222,11 @@ static int con_write(int fd, const void *buf, size_t len)
  * WaitSelect() understands sockets and nothing else, so the mixed set has to
  * be taken apart.  A DOS handle's readiness is answered without blocking:
  *
- *   not interactive (a file, or NIL:)  -- always readable.  read() returns
+ *   not interactive (a file, or NIL:) , always readable.  read() returns
  *                                         data or 0 for end of file, and
  *                                         either is progress.
- *   interactive (a console)            -- WaitForChar(handle, 0).
- *   any handle, for writing            -- always writable.  A DOS Write() to
+ *   interactive (a console)           , WaitForChar(handle, 0).
+ *   any handle, for writing           , always writable.  A DOS Write() to
  *                                         a console or a file completes.
  *
  * If anything off-socket is already ready, WaitSelect() is called with a zero
@@ -1315,7 +1315,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
 
         /* The interactive console is read by the child reader, not here: its
            readiness is the ring it fills, and its wakeup is an Exec signal that
-           goes into WaitSelect()'s mask below -- never WaitForChar() from this
+           goes into WaitSelect()'s mask below, never WaitForChar() from this
            process, which would fight the child for the same handle. */
         if (want_r && fd == 0 && con_active())
         {
@@ -1351,7 +1351,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
            Always include it while watching the console, never conditionally on
            the ring being empty: a byte can land between the readiness check
            above and here, and excluding the signal then would block with the
-           byte already queued and its wake-up not in the mask -- a lost wakeup
+           byte already queued and its wake-up not in the mask, a lost wakeup
            that hangs until some other signal (Ctrl-C) happens to arrive.  A
            stale signal only costs one harmless spurious wakeup.
            Ctrl-C rides the same USER mask: kept out of the break mask, it is
@@ -1394,7 +1394,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
     }
     else if (con_watch && !con_readable())
     {
-        /* No socket in the set -- only the console.  Wait on its signal or a
+        /* No socket in the set, only the console.  Wait on its signal or a
            Ctrl-C (a key always ends it; an interactive loop always has the
            socket too, so this is the rare case). */
         ULONG got = Wait(con_reader->cr_DataSig | SIGBREAKF_CTRL_C);
@@ -1436,7 +1436,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
  * command adds three more.
  *
  * Freed on close, so a server that handled connections in a loop would not run
- * out.  This one cannot -- DEBUG_NOFORK means it handles one and exits -- but a
+ * out.  This one cannot, DEBUG_NOFORK means it handles one and exits, but a
  * pipe table that leaks only because nothing loops is a trap for whatever
  * changes that.
  *
@@ -1513,7 +1513,7 @@ pid_t setsid(void) { errno = ENOSYS; return -1; }
  * equivalent of "run this and give me its output" is SystemTagList(), which
  * starts a Shell:
  *
- *   the command line   comes from Dropbear, via execv() -- see exec_capturing
+ *   the command line   comes from Dropbear, via execv(), see exec_capturing
  *   stdin              NIL:.  A synchronous Shell cannot be fed by a channel
  *                      that is only read while the session loop runs.
  *   stdout and stderr  one file, because AmigaOS 3.x has one: a process's
@@ -1524,7 +1524,7 @@ pid_t setsid(void) { errno = ENOSYS; return -1; }
  *   the exit status    System()'s return code, which is the command's rc
  *
  * Nothing crosses a task boundary.  The command runs in a Process of its own
- * and never touches the server's SocketBase -- src/bsdsocket/tcp_handler.c
+ * and never touches the server's SocketBase, src/bsdsocket/tcp_handler.c
  * states the rule and the ThreadX bracket enforces it, so a spawned process
  * using its parent's base gets ENETDOWN.  The socket stays in the session's
  * task and only a DOS file passes between them; a network command run over SSH
@@ -1554,7 +1554,7 @@ static char    exec_cmd[DB_CMD_MAX];
  * ENOSYS is still the answer for a caller that means "replace this process",
  * and there is no such caller: the one execv() in a linked server is
  * run_command()'s, at the end of the child path __wrap_spawn_command() calls.
- * While that is running, execv() is a hand-back rather than a call -- it takes
+ * While that is running, execv() is a hand-back rather than a call, it takes
  * the argv apart and jumps to the wrapper, whose frame is live because it is
  * the frame that called into here.
  *
@@ -1623,8 +1623,8 @@ int fsync(int fd)
 }
 
 /*
- * SetProtection().  The RWED bits are active low -- a set bit forbids the
- * operation -- the opposite of every POSIX mode, so the conversion is
+ * SetProtection().  The RWED bits are active low, a set bit forbids the
+ * operation, the opposite of every POSIX mode, so the conversion is
  * inverted.  The other AmigaOS bits (archive, script, pure) are cleared: a
  * chmod states the whole mode rather than adjusting part of it.
  *
@@ -1661,8 +1661,8 @@ int chown(const char *path, uid_t uid, gid_t gid)
 }
 
 /*
- * There is a child now -- SystemTagList()'s, already finished by the time
- * anybody asks -- so this reports it once and ECHILD after that.
+ * There is a child now, SystemTagList()'s, already finished by the time
+ * anybody asks, so this reports it once and ECHILD after that.
  *
  * The status word is newlib's: WIFEXITED() reads the low byte and
  * WEXITSTATUS() the next one up, so an AmigaDOS return code (0, 5, 10, 20)
@@ -1728,8 +1728,8 @@ int sigaction(int sig, const struct sigaction *act, struct sigaction *oldact)
 /*
  * Dropbear's, declared rather than included: this file includes none of
  * Dropbear's headers, and a prototype plus two return codes is the whole ABI
- * it needs.  <syslog.h> is not included either -- proto/bsdsocket.h makes
- * syslog() a macro and the NDK header then does not compile -- so the two
+ * it needs.  <syslog.h> is not included either, proto/bsdsocket.h makes
+ * syslog() a macro and the NDK header then does not compile, so the two
  * priorities are spelled out.  This build has no syslog anyway
  * (--disable-syslog), so svr_dropbear_log() ignores the value and writes to
  * stderr; the numbers are the syslog ones so that a build which did have one
@@ -1895,7 +1895,7 @@ int __wrap_spawn_command(void (*exec_fn)(const void *user_data),
 
     if (rc == -1)
     {
-        /* System() could not start a Shell at all -- not the command failing,
+        /* System() could not start a Shell at all, not the command failing,
            which comes back as that command's rc with its complaint in the
            output file.  127 is what a Unix shell reports for the same thing,
            and it is the only number a client can act on. */
@@ -1932,7 +1932,7 @@ int __wrap_spawn_command(void (*exec_fn)(const void *user_data),
     /*
      * The child has already exited, so raise SIGCHLD's handler now.  It writes
      * to ses.signal_pipe, the session loop notices on its next pass and calls
-     * svr_chansess_checksignal(), and waitpid() above hands over the status --
+     * svr_chansess_checksignal(), and waitpid() above hands over the status,
      * the same sequence a real signal would have produced.  noptycommand() has
      * not yet called addchildpid(), so the reap lands in svr_ses.lastexit, the
      * race upstream already handles two lines later.
@@ -1945,7 +1945,7 @@ int __wrap_spawn_command(void (*exec_fn)(const void *user_data),
 
 /*
  * <unistd.h> defines environ as (*environ_ptr), and environ_ptr is declared
- * by that header but defined nowhere in the toolchain -- so any client that
+ * by that header but defined nowhere in the toolchain, so any client that
  * touches environ fails to link rather than failing at runtime.
  *
  * An empty, correctly terminated environment is the accurate answer: AmigaOS
@@ -1994,7 +1994,7 @@ char *__wrap_getenv(const char *name)
 
 /*
  * A Process address is unique for as long as the process exists, which is
- * what dbrandom.c and gensignkey.c want it for -- a per-run distinguisher
+ * what dbrandom.c and gensignkey.c want it for, a per-run distinguisher
  * hashed into the pool, not an identity.
  */
 pid_t getpid(void)
@@ -2043,7 +2043,7 @@ int initgroups(const char *user, gid_t group)
 
 /*
  * NULL, always.  There is no group database on AmigaOS 3.x, and unlike
- * getpwnam() -- which can answer with the user running the program -- there is
+ * getpwnam(), which can answer with the user running the program, there is
  * no group that could be meant.  sshpty.c uses it to find "tty" so it can
  * chown a pty node, which this machine does not have.
  */
@@ -2058,7 +2058,7 @@ struct group *getgrnam(const char *name)
  * ENOSYS, and it has to be exactly that.  common-session.c:71 checks
  * `getgroups(0, NULL) == -1 && errno == ENOSYS` when DROPBEAR_SVR_MULTIUSER is
  * 0, as a guard against that option being set by accident on a machine that
- * does have users -- and dropbear_exit()s if the call succeeds.  AmigaOS 3.x
+ * does have users, and dropbear_exit()s if the call succeeds.  AmigaOS 3.x
  * has no groups and no users, so ENOSYS is both what the guard wants and what
  * is true.
  */
@@ -2202,7 +2202,7 @@ int tcsetattr(int fd, int actions, const struct termios *t)
     }
 
     /* Dropbear clears ICANON for its raw local mode.  SetMode(h, 1) is the
-       console's raw mode -- no echo, no line editing, a keystroke at a time --
+       console's raw mode, no echo, no line editing, a keystroke at a time,
        and SetMode(h, 0) restores cooked mode on cleanup.  The raw/cooked switch
        is also where the console reader child lives and dies (see it above): raw
        means an interactive session is starting, cooked means it is ending. */

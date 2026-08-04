@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- dos.library file access for the configuration layer.
+ * AmiNetXDuo, dos.library file access for the configuration layer.
  *
  * This is the only file in src/config that talks to AmigaDOS. Everything else
  * works on memory buffers, which is what lets the host test drive the same
@@ -137,7 +137,7 @@ LONG ami_config_load_interface(const char *name, AmiIfConfig *out)
 
     /*
      * `path` is on this stack frame and the reporter is handed it by pointer,
-     * so the name has to be taken back before we return -- hence the explicit
+     * so the name has to be taken back before we return, hence the explicit
      * clear rather than letting the next caller overwrite it.
      */
     ami_cfg_problem_file(path);
@@ -409,8 +409,8 @@ static VOID load_dnssd(AmiConfig *cfg)
  *
  * Nothing is invented after that: gethostname() derives a name from the
  * interface address instead (bsdsocket.doc NOTES), and the two consumers that
- * need a network label whatever happens -- DHCP option 12 and the mDNS host
- * label -- carry their own default.
+ * need a network label whatever happens, DHCP option 12 and the mDNS host
+ * label, carry their own default.
  */
 static VOID load_hostname(AmiConfig *cfg)
 {

@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- netstack singleton internals.
+ * AmiNetXDuo, netstack singleton internals.
  *
  * Private to src/netstack/. Include order matters: tx_api.h and nx_api.h come
  * before any exec header, because <exec/types.h> turns VOID into a macro and
@@ -28,7 +28,7 @@
 #include "aminetxduo/compat.h"
 #include "aminetxduo/sana2.h"
 
-/* ------------------------------------------------------------- tunables -- */
+/* ------------------------------------------------------------- tunables, */
 
 #include "../thread_priorities.h"
 
@@ -40,7 +40,7 @@
  * on this port is not the one those samples describe.  -fstack-usage over the
  * m68000 build puts the deepest chain from _nx_auto_ip_thread_entry at 704
  * bytes, and it gets there through _nx_ip_interface_status_check into
- * ami_sana2_driver_entry -- so this thread reaches a SANA-II device and makes
+ * ami_sana2_driver_entry, so this thread reaches a SANA-II device and makes
  * exec DoIO/SendIO calls, which run on whatever stack is current and are not
  * in that 704.  1,344 bytes of headroom for an Exec device call, on a machine
  * with no guard page and no fault, is not a margin worth defending; the other
@@ -85,14 +85,14 @@
  *
  * Same layout as the DNS answer cache above: fixed records growing up from the
  * bottom of one buffer, the strings they name growing down from the top, the
- * two end pointers in between.  An NX_MDNS_RR is larger than an NX_DNS_RR --
+ * two end pointers in between.  An NX_MDNS_RR is larger than an NX_DNS_RR,
  * it carries the record's state machine, its retransmit counters and its
- * interface index as well as the data -- so the arithmetic differs.
+ * interface index as well as the data, so the arithmetic differs.
  *
  * The local cache holds what this machine claims: the A record for
- * <host>.local per interface, plus four records per declared service -- an
+ * <host>.local per interface, plus four records per declared service, an
  * SRV, a TXT and two PTRs, one of them the _services._dns-sd._udp enumeration
- * -- and the names they point at.  An NX_MDNS_RR is 56 bytes and the names run
+ *, and the names they point at.  An NX_MDNS_RR is 56 bytes and the names run
  * to about 90 more, so 384 per service covers it with room over; the base
  * kilobyte is the host's own name.  If it will not hold our own name, the
  * machine has no name; if it will not hold a service, that service is not
@@ -100,23 +100,23 @@
  *
  * The peer cache holds what has been learnt; full means the oldest record is
  * evicted, nothing fails.  Two workloads land here.  Name resolution is the
- * small one -- one or two names per shell session, reverse lookups behind
+ * small one, one or two names per shell session, reverse lookups behind
  * `netstat` and ShowNetStatus NAMES bounded by TOOL_MAX_SOCK (32), and
  * undersizing costs only a query on the wire.
  *
  * Browsing is the one that sizes it.  ShowNetServices holds a continuous query
  * open (itself a record here) and every instance it hears about arrives as
- * four -- PTR, SRV, TXT and A -- plus the names they point at, around 400
+ * four, PTR, SRV, TXT and A, plus the names they point at, around 400
  * bytes together.
  *
  * 32 KB, and it is measured rather than chosen.  A browse of one ordinary
- * house LAN -- five cameras, two printers, a 3D printer, an amplifier, a Hue
- * bridge, several Macs -- turns up over twenty service types and more than
+ * house LAN, five cameras, two printers, a 3D printer, an amplifier, a Hue
+ * bridge, several Macs, turns up over twenty service types and more than
  * thirty instances.  At 2 KB most of them were evicted before the window
  * closed; at 8 KB they were listed but two thirds of them printed "no address",
  * because the PTR and SRV records survived and the A record they pointed at
  * had been thrown out from under them.  A cache that is too small does not
- * report a smaller network, which would be honest -- it reports the same
+ * report a smaller network, which would be honest, it reports the same
  * network with the answers hollowed out.
  *
  * Both are inline in the AmiNetStack for the reason ns_DnsCache is: identical
@@ -184,7 +184,7 @@ struct AmiNetStack
     /*
      * The name the client announces as option 12. nx_dhcp_create() keeps the
      * pointer rather than a copy, so it needs storage that outlives the
-     * NX_DHCP -- and storage of its own, because ns_Config.hostname is now
+     * NX_DHCP, and storage of its own, because ns_Config.hostname is now
      * written after startup: an option 12 coming back from the server can
      * rename the machine, and feeding that straight back into what the next
      * REQUEST announces would let a server rewrite the name from under a
@@ -227,9 +227,9 @@ struct AmiNetStack
 #ifdef AMINETXDUO_IPV6
     /*
      * Recursive DNS servers a router advertised, RFC 8106.  ami_ns6_rdnss()
-     * runs on the IP thread and may not call into the DNS client -- that
+     * runs on the IP thread and may not call into the DNS client, that
      * client holds its mutex across a query, and a query needs the IP thread
-     * -- so it only writes here, and the next lookup takes what it finds.
+     *, so it only writes here, and the next lookup takes what it finds.
      *
      * Four is what RFC 8106 section 5.1 expects a router to advertise (it
      * recommends no more than three) and is the same order as
@@ -274,7 +274,7 @@ struct AmiNetStack
 };
 
 #ifdef AMINETXDUO_IPV6
-/* netstack_ipv6.c -- run from ami_ns_create_ip()/ami_ns_configure_addresses()
+/* netstack_ipv6.c, run from ami_ns_create_ip()/ami_ns_configure_addresses()
    at the points marked there, and from netstack_interface_add() for an
    interface that arrives after startup. Both callers must hold a ThreadX
    bracket. _configure_one() is idempotent: an interface that already has its
@@ -317,7 +317,7 @@ VOID ami_netstack_baton_set_sampler(VOID (*fn)(VOID));
    says what it is for. */
 VOID ami_netstack_baton_reset(VOID);
 
-/* ---------------------------------------------------------- adoption glue --
+/* ---------------------------------------------------------- adoption glue,
  *
  * AmiNetCaller / ami_netstack_enter() / ami_netstack_leave() are public; they
  * live in include/aminetxduo/netstack.h so bsdsocket.library and the tools
@@ -325,7 +325,7 @@ VOID ami_netstack_baton_reset(VOID);
  */
 
 #ifdef AMINETXDUO_BPF
-/* netstack_capture.c -- registers the interfaces with src/bpf/ and installs
+/* netstack_capture.c, registers the interfaces with src/bpf/ and installs
    the IP-level filter, the only way to trace loopback. */
 VOID ami_netstack_capture_start(AmiNetStack *ns);
 VOID ami_netstack_capture_stop(AmiNetStack *ns);
@@ -355,7 +355,7 @@ VOID ami_ns_dhcp_text(AmiNetStack *ns, UWORD index, UINT option,
                       char *out, ULONG outlen);
 
 #ifdef AMINETXDUO_MDNS
-/* netstack_mdns.c -- the RFC 6762 responder, and the ".local" branch
+/* netstack_mdns.c, the RFC 6762 responder, and the ".local" branch
    netstack_resolve() takes before it reaches the unicast DNS client. */
 LONG ami_netstack_mdns_start(AmiNetStack *ns);
 VOID ami_netstack_mdns_stop(AmiNetStack *ns);
@@ -364,9 +364,9 @@ LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
 /* The browse is public to bsdsocket.library; see <aminetxduo/netstack.h>. */
 #endif
 
-/* ------------------------------------------------------------ AMITCP port --
+/* ------------------------------------------------------------ AMITCP port,
  *
- * netstack_rexx.c -- the AMITCP public port and the ARexx host servicing it.
+ * netstack_rexx.c, the AMITCP public port and the ARexx host servicing it.
  * The port is what `WaitForPort AMITCP` waits on; the host is why a script that
  * addresses it gets an answer instead of blocking (docs/RESEARCH.md 75.7).
  *

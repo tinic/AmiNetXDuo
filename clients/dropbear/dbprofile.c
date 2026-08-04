@@ -1,5 +1,5 @@
 /*
- * clients/dropbear/dbprofile.c -- where an SSH handshake's 84 seconds go.
+ * clients/dropbear/dbprofile.c, where an SSH handshake's 84 seconds go.
  *
  * docs/RESEARCH.md 31.5 measured a whole connection (96.06 s, 84.07 s once the
  * optimistic kex guess was off) and could not split it: that attempt
@@ -158,7 +158,7 @@ static void p_report(void)
     /*
      * stderr, not stdout.  The first profiling run printed nothing at all
      * through printf(), while Dropbear's own "Caution, skipping hostkey check"
-     * -- dbutil.c's fprintf(stderr) -- came through in the same transcript.
+     *, dbutil.c's fprintf(stderr), came through in the same transcript.
      * stderr is the stream that is wired up under ClientRun on this platform.
      */
     fprintf(stderr, "\n--- dbprofile: where this connection went ---\n");
@@ -203,8 +203,8 @@ static void p_report(void)
 /*
  * Arming is not done in the constructor.  The first version registered
  * p_report() with atexit() from a constructor and nothing was ever printed.
- * The constructor does run -- the linked ___CTOR_LIST__ grew by one entry when
- * this file joined the link -- but it runs before this crt0 has finished
+ * The constructor does run, the linked ___CTOR_LIST__ grew by one entry when
+ * this file joined the link, but it runs before this crt0 has finished
  * setting newlib up, so an atexit() registered there does not survive and an
  * fprintf() from there goes nowhere.  amiga_dropbear.c's own constructor gets
  * away with it because it touches only dos.library.
@@ -331,8 +331,8 @@ P_WRAP_RET(P_ED25519_VERIFY, int, dropbear_ed25519_verify,
 #if DBPROF_ECC
 /*
  * The two libtomcrypt/libtommath entry points a P-256 handshake goes through.
- * ltc_ecc_mulmod is every scalar multiply -- the kex keypair, the ECDH, and
- * both halves of an ECDSA verify -- so its call count matters as much as its
+ * ltc_ecc_mulmod is every scalar multiply, the kex keypair, the ECDH, and
+ * both halves of an ECDSA verify, so its call count matters as much as its
  * total.
  */
 P_WRAP_RET(P_ECC_MULMOD, int, ltc_ecc_mulmod,

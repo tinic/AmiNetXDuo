@@ -13,21 +13,21 @@
 #   looks for the consequence on the wire.
 #
 #   The consequence is chosen so that it cannot be produced any other way.
-#   The route's next hop is 10.0.2.99 -- on the guest's own subnet, so NetX
+#   The route's next hop is 10.0.2.99, on the guest's own subnet, so NetX
 #   Duo will accept it, and answered by nothing, because SLIRP is 10.0.2.2 and
 #   10.0.2.3.  Sending to 192.168.77.5:
 #
-#     * with the route     -- _nx_ip_route_find() matches the table entry,
+#     * with the route    , _nx_ip_route_find() matches the table entry,
 #                             the next hop becomes 10.0.2.99, and the stack
 #                             emits  ARP who-has 10.0.2.99  and nothing else;
-#     * without the route  -- the default gateway 10.0.2.2 is used, whose ARP
+#     * without the route , the default gateway 10.0.2.2 is used, whose ARP
 #                             entry the DHCP exchange already resolved, so the
 #                             frame goes straight out with no ARP at all.
 #
 #   "ARP who-has 10.0.2.99" therefore appears if and only if the routing table
-#   was consulted.  It is read out of the EMULATOR's own frame log -- the
+#   was consulted.  It is read out of the EMULATOR's own frame log, the
 #   a2065 writes every frame it handles as hex, unconditionally, below every
-#   line of our code -- rather than out of a capture the stack took of itself.
+#   line of our code, rather than out of a capture the stack took of itself.
 #
 # WHAT ELSE IT ASSERTS
 #
@@ -244,7 +244,7 @@ fi
 # ---- THE WIRE ------------------------------------------------------------
 #
 # The whole point.  The emulator's own frame log, converted, must contain an
-# ARP request for the route's next hop -- an address nothing in this test ever
+# ARP request for the route's next hop, an address nothing in this test ever
 # named to the stack except through AddNetRoute.
 if [ -f "$FSLOG" ]; then
     python3 "$ROOT/tests/trace/a2065pcap.py" "$FSLOG" -o "$HD/host.pcap" \
@@ -284,7 +284,7 @@ fi
 #
 # Everything above drives the private NETCTRL_ROUTE_ADD vector.  RtProbe
 # drives AddRouteTagList()/DeleteRouteTagList()/GetRouteInfo()/FreeRouteInfo()
-# instead -- the Roadshow ABI a third-party tool uses -- and walks the
+# instead, the Roadshow ABI a third-party tool uses, and walks the
 # returned table by rtm_msglen, which is the shape no build can check.
 
 if grep -q "^add 192.168.66.0 via 10.0.2.98: rc 0 " "$REPORT"; then

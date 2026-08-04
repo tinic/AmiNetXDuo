@@ -1,8 +1,8 @@
-# tcpdrill -- the receiver's silly window avoidance floor.
+# tcpdrill, the receiver's silly window avoidance floor.
 #
 # RFC 1122 4.2.3.3: the receiver must not advertise a window increment smaller
 # than min(MSS, RCV.BUFF/2).  Only the RCV.BUFF/2 term was implemented, so on
-# this stack's window -- 8 KB to 33 KB, w01 in tcp.drill bounds it -- the
+# this stack's window, 8 KB to 33 KB, w01 in tcp.drill bounds it, the
 # smallest window update that could ever leave was between 4 KB and 16 KB.  A
 # sender whose window had run down to a few hundred bytes had to wait for the
 # application to read half the buffer before it heard otherwise, when one
@@ -11,7 +11,7 @@
 # WHAT THESE TWO CASES SEPARATE.  s01 reads exactly one segment and asserts the
 # window update; before the MSS floor it did not come out.  s02 reads a hundred
 # bytes and asserts that nothing does, which is the half of the rule that has to
-# survive -- an update per byte read is the silly window itself.
+# survive, an update per byte read is the silly window itself.
 #
 # THE ACKNOWLEDGEMENT NUMBER DOES NOT MOVE across the read, because a read
 # changes the window and nothing else.  That is what makes the frame a window
@@ -24,7 +24,7 @@
 
 # Two full segments in, one read out.  The receive queue still holds the second,
 # so the window is credited by what was read rather than reset to the default,
-# and the credit is exactly one MSS -- the floor, and nothing above it.
+# and the credit is exactly one MSS, the floor, and nothing above it.
 case s01_reading_one_segment_updates_the_window
 socket
 connect

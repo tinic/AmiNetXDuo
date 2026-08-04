@@ -1,23 +1,23 @@
 /*
- * tls.library -- TLS 1.2 session resumption.
+ * tls.library, TLS 1.2 session resumption.
  *
  *   A full handshake on a 14 MHz 68020 costs 6.8 s for a two-certificate RSA
  *   chain and 23.3 s for a two-certificate ECDSA one, and essentially all of
- *   that is public-key arithmetic -- three signature verifications, one ECDHE
+ *   that is public-key arithmetic, three signature verifications, one ECDHE
  *   key generation, one ECDHE shared secret.  Cloudflare gives up on a
  *   handshake somewhere between 11 and 20 seconds, so a three-deep chain does
  *   not complete at all.
  *
  *   A resumed handshake does none of that arithmetic.  It is one ClientHello,
- *   one ServerHello, two ChangeCipherSpecs and two Finished messages -- four
+ *   one ServerHello, two ChangeCipherSpecs and two Finished messages, four
  *   PRF invocations and a pair of hashes.  The master secret comes out of a
  *   cache instead of a key exchange.  Twenty-three seconds becomes under one.
  *
  *   Which mechanism, and the measurement that decided it:
  *
- *   RFC 5077 session tickets -- the server hands the client an opaque blob
+ *   RFC 5077 session tickets, the server hands the client an opaque blob
  *   encrypted under a key only the server knows, and the client presents it
- *   next time.  Or session IDs -- the classic mechanism, where the server
+ *   next time.  Or session IDs, the classic mechanism, where the server
  *   keeps the session in its own memory and the client presents a 32-byte
  *   handle.
  *
@@ -60,7 +60,7 @@
  *
  *   The established pattern in this project for changing vendored behaviour is
  *   to define the symbol in a local archive and let the linker resolve it
- *   there -- src/net68k/ for the IP checksum, src/tlslib/tls_netx.c for twelve
+ *   there, src/net68k/ for the IP checksum, src/tlslib/tls_netx.c for twelve
  *   NetX Duo entry points.  That works here but costs more than it should:
  *   replacing _nx_secure_tls_client_handshake() outright means copying 450
  *   lines of state machine that has nothing to do with resumption, and every
@@ -74,12 +74,12 @@
  *   function, which is still linked and still does all the work it always did.
  *   Two functions are wrapped and nothing else:
  *
- *     _nx_secure_tls_send_clienthello -- the vendored one builds the whole
+ *     _nx_secure_tls_send_clienthello, the vendored one builds the whole
  *         message, then a session ID and a session_ticket extension are
  *         spliced in.  The splice is TLS wire format, not nx_secure
  *         internals, so a submodule bump cannot silently invalidate it.
  *
- *     _nx_secure_tls_client_handshake -- three handshake message types need
+ *     _nx_secure_tls_client_handshake, three handshake message types need
  *         behaviour the vendored state machine does not have.  Everything else
  *         is handed to the vendored function byte for byte, in the same record
  *         boundaries it would have seen.
@@ -99,18 +99,18 @@
  *   NewSessionTicket.  The vendored switch has no case for it and its
  *   `default:` leaves status at NX_SECURE_TLS_HANDSHAKE_FAILURE, so merely
  *   asking for a ticket would break every full handshake.  Handled here: hash
- *   it into the transcript (RFC 5077 3.3 -- it counts), keep the blob.
+ *   it into the transcript (RFC 5077 3.3, it counts), keep the blob.
  *
  *   Finished, on a resumed handshake only.  The abbreviated handshake reverses
  *   the order: the server finishes first.  So the server's Finished has to go
  *   into the transcript before the client's is generated, and the client's
- *   ChangeCipherSpec and Finished have to be sent afterwards -- neither of
+ *   ChangeCipherSpec and Finished have to be sent afterwards, neither of
  *   which the vendored state machine does.  It also destroys the SHA-256
  *   handshake hash context immediately after processing a Finished, which is
  *   the context the client's Finished needs.  So this message is handled here.
  *
  *   No renegotiation interaction: this library never renegotiates.  No TLS 1.3
- *   (nx_secure's TLS 1.3 is impractical here anyway -- its GCM is a bit-serial
+ *   (nx_secure's TLS 1.3 is impractical here anyway, its GCM is a bit-serial
  *   GHASH).  No attempt to resume a session whose ciphersuite the server then
  *   changes: that is a broken server, and the cache entry is dropped so the
  *   next attempt is a clean full handshake.
@@ -172,7 +172,7 @@ VOID tls_trace(const char *fmt, ...)
 /* The on-disk mirror; see the disk-mirror section below. */
 /*
  * 'ATS2'.  The magic is the format version, and it moved when the record
- * gained the trust key -- an 'ATS1' file holds sessions keyed only on whether
+ * gained the trust key, an 'ATS1' file holds sessions keyed only on whether
  * verification happened, the defect this format fixes, and reading one with
  * the new layout would misread every field after the master secret.  An
  * unrecognised magic is not an error: the file is ignored, every connection is
@@ -192,7 +192,7 @@ VOID tls_trace(const char *fmt, ...)
 /*
  * The direct entry points, not the nx_/tx_ spellings.  Those map to the
  * argument-checking nxe_/txe_ wrappers, whose archive members reference
- * ThreadX data symbols that tls_netx.c cannot forward -- see the note there.
+ * ThreadX data symbols that tls_netx.c cannot forward, see the note there.
  * The rest of this library calls the underscore forms for the same reason.
  */
 extern UINT _nx_packet_release(NX_PACKET *packet_ptr);
@@ -299,8 +299,8 @@ static BOOL tls_r_path_equal(const char *a, const char *b)
  *   The base, because a shared library on AmigaOS outlives the programs that
  *   open it: `fetch` runs, exits, and tls.library stays in memory with its
  *   open count at zero until something needs the RAM.  A cache with the
- *   library's lifetime therefore already answers the case that matters --
- *   somebody running curl twice -- and it answers it with no disk access at
+ *   library's lifetime therefore already answers the case that matters,
+ *   somebody running curl twice, and it answers it with no disk access at
  *   all, which on a floppy-based machine is worth having.
  *
  *   The file, because "until something needs the RAM" is not dependable:
@@ -308,7 +308,7 @@ static BOOL tls_r_path_equal(const char *a, const char *b)
  *   goes with it, as does a reboot.  DEVS:Internet/tlssessions sits beside
  *   DEVS:Internet/certificates in the same Roadshow configuration drawer the
  *   rest of this stack uses, is read once per library lifetime and written
- *   only when the cache changes -- once per full handshake, against a
+ *   only when the cache changes, once per full handshake, against a
  *   handshake that just spent seconds on arithmetic.
  *
  *   The cache is shared between programs: a ticket obtained by `fetch` is a
@@ -343,7 +343,7 @@ static TLSResumeEntry *tls_resume_table(struct TLSLibBase *base)
 
 /*
  *   A resumed handshake verifies nothing.  No certificate is sent, no
- *   signature is checked, no host name is compared -- that is the whole
+ *   signature is checked, no host name is compared, that is the whole
  *   saving.  So every cached session carries a trust decision made once and
  *   then reused, and the cache key has to name that decision completely or the
  *   library ends up claiming a verification it did not perform.
@@ -358,18 +358,18 @@ static TLSResumeEntry *tls_resume_table(struct TLSLibBase *base)
  *
  *   So the key is now everything that changes what the connection is worth:
  *
- *     the trust store's identity, not its presence -- ts_Fingerprint, an
+ *     the trust store's identity, not its presence, ts_Fingerprint, an
  *     FNV-1a over the index's count and every (subject-name hash, offset,
  *     length) record.  Zero when there is no store.
  *
- *     TLSA_NoVerify -- TLSRE_VERIFIED.  Two populations that must never mix.
+ *     TLSA_NoVerify, TLSRE_VERIFIED.  Two populations that must never mix.
  *
- *     whether the validity dates were checked -- TLSRE_DATED.  Skipped on a
+ *     whether the validity dates were checked, TLSRE_DATED.  Skipped on a
  *     machine with no clock (tls_time.c), and a session established that way
  *     must not survive the clock being set, or setting the clock silently
  *     fails to start checking expiry.
  *
- *     TLSA_MaxChain -- how deep a chain this caller was willing to accept.  A
+ *     TLSA_MaxChain, how deep a chain this caller was willing to accept.  A
  *     resource bound rather than a policy, included on the cautious reading:
  *     a session established under a limit of eight was verified over a chain
  *     a caller limiting itself to two would have refused outright.
@@ -389,7 +389,7 @@ static TLSResumeEntry *tls_resume_table(struct TLSLibBase *base)
  *   What the fingerprint does not cover:
  *
  *   Two stores whose indexes agree record for record but whose certificate
- *   DER differs -- someone rewriting a root in place, at the same offset and
+ *   DER differs, someone rewriting a root in place, at the same offset and
  *   length, under the same subject Name.  That is an attacker who can already
  *   write the trust store, and such an attacker owns verification outright:
  *   they would simply add a root of their own.  Not a new exposure, and
@@ -423,7 +423,7 @@ static ULONG tls_resume_trust_key(const TLSConnection *conn)
     hash ^= store;                          hash *= TLS_R_FNV_PRIME;
 
     /* Zero means "not set" in a decoded record, so it must not be a real key
-       -- a stale or truncated file would otherwise match a live one. */
+      , a stale or truncated file would otherwise match a live one. */
     return (hash == 0) ? TLS_R_FNV_PRIME : hash;
 }
 
@@ -432,7 +432,7 @@ static ULONG tls_resume_trust_key(const TLSConnection *conn)
  *
  * `now` is tls_time_monotonic(): wall time on a machine with a clock, seconds
  * since boot on one without.  It used to be tls_time_now(), which is zero on a
- * machine with no clock -- so on those the cap never fired and a master secret
+ * machine with no clock, so on those the cap never fired and a master secret
  * written to DEVS:Internet/tlssessions was offered again for as long as the
  * file existed.  A cached master secret is a key on disk, and a key on disk
  * with no expiry is one an attacker who takes the disk can use against
@@ -443,7 +443,7 @@ static ULONG tls_resume_trust_key(const TLSConnection *conn)
  * clock cannot be compared with an uptime, and an uptime from a previous boot
  * cannot be compared with this one.  Where they disagree, or where this boot's
  * uptime has not yet reached the stored one, the entry is from another boot and
- * is treated as expired -- which costs one full handshake, and is what would
+ * is treated as expired, which costs one full handshake, and is what would
  * have happened anyway.
  */
 static BOOL tls_resume_expired(const TLSResumeEntry *e, ULONG now)
@@ -523,11 +523,11 @@ static TLSResumeEntry *tls_resume_slot(TLSResumeEntry *table, const char *host,
     return victim;
 }
 
-/* ------------------------------------------------------ the disk mirror -- */
+/* ------------------------------------------------------ the disk mirror, */
 
 /*
  * 'ATS1', big-endian, fixed 484-byte records so a truncated or corrupt file
- * cannot be mis-parsed into a wild pointer -- it is either a whole number of
+ * cannot be mis-parsed into a wild pointer, it is either a whole number of
  * records or it is rejected:
  *
  *    0   'A' 'T' 'S' '1'
@@ -617,8 +617,8 @@ static BOOL tls_resume_decode(TLSResumeEntry *e, const UBYTE *rec)
     }
 
     /*
-     * A record with no trust key cannot be matched against anything -- the
-     * live key is never zero -- so refusing it here rather than letting it sit
+     * A record with no trust key cannot be matched against anything, the
+     * live key is never zero, so refusing it here rather than letting it sit
      * unmatchable is only tidiness.  It is also the shape a truncated or
      * zero-filled file takes, and those should not look like sessions.
      */
@@ -783,7 +783,7 @@ ULONG tls_resume_count(struct TLSLibBase *base)
     return count;
 }
 
-/* ---------------------------------------------------- the API this side -- */
+/* ---------------------------------------------------- the API this side, */
 
 VOID tls_resume_prepare(TLSConnection *conn)
 {
@@ -852,7 +852,7 @@ VOID tls_resume_prepare(TLSConnection *conn)
         /*
          * A generated session ID, when the cached session has none.  Without
          * it resumption cannot work at all.  A server that issues a ticket
-         * returns an empty session ID in the ServerHello -- RFC 5077 3.4, and
+         * returns an empty session ID in the ServerHello, RFC 5077 3.4, and
          * measured: nginx does exactly that, so the session recorded from a
          * first handshake has no session ID.  Offering nothing then leaves the
          * server nothing to echo, and the echo is the only acceptance signal a
@@ -862,7 +862,7 @@ VOID tls_resume_prepare(TLSConnection *conn)
          * RFC 5077 3.4 covers this: a client presenting a ticket MAY generate
          * a session ID, and a server accepting the ticket MUST echo it.
          * Thirty-two random bytes, from the machine's own pool, per attempt
-         * and never cached -- a correlation handle, not a secret, and reusing
+         * and never cached, a correlation handle, not a secret, and reusing
          * one would let an observer link two connections.
          */
         if (conn->tc_OfferSidLength == 0 && conn->tc_TicketLength > 0)
@@ -1039,7 +1039,7 @@ VOID tls_resume_record(TLSConnection *conn)
     ReleaseSemaphore(&base->tb_Lock);
 }
 
-/* ------------------------------------------------ __wrap send_clienthello -- */
+/* ------------------------------------------------ __wrap send_clienthello, */
 
 /*
  * The vendored function builds the whole ClientHello.  This splices two things
@@ -1052,7 +1052,7 @@ VOID tls_resume_record(TLSConnection *conn)
  *
  *   the session_ticket extension, appended after every extension the vendored
  *   code wrote.  Sent even when empty, because an empty session_ticket
- *   extension is how a client asks to be issued one -- without it the first
+ *   extension is how a client asks to be issued one, without it the first
  *   handshake never produces anything to resume from.
  *
  * The layout being patched is the TLS 1.2 wire format, fixed by RFC 5246 and
@@ -1111,8 +1111,8 @@ UINT __wrap__nx_secure_tls_send_clienthello(NX_SECURE_TLS_SESSION *tls_session,
      * The packet has to hold what is about to be written, the ordinary check
      * the vendored code makes for its own content.
      *
-     * And the finished handshake message -- four header bytes plus this body
-     * -- has to fit in nx_secure_tls_handshake_cache[500], because
+     * And the finished handshake message, four header bytes plus this body
+     *, has to fit in nx_secure_tls_handshake_cache[500], because
      * _nx_secure_tls_send_handshake_record() copies a ClientHello into that
      * fixed array with no bounds check.  Overrunning it would write through
      * the middle of NX_SECURE_TLS_SESSION.  Rather than trip that, drop the
@@ -1133,7 +1133,7 @@ UINT __wrap__nx_secure_tls_send_clienthello(NX_SECURE_TLS_SESSION *tls_session,
         }
 
         /* The cached ticket cannot be presented, so the cached master secret
-           must not be either -- otherwise the ServerHello echo test could
+           must not be either, otherwise the ServerHello echo test could
            match a session-ID resumption this connection is not set up for. */
         if ((conn->tc_ResumeFlags & TLSR_OFFERED) != 0 && sid_length == 0)
             conn->tc_ResumeFlags &= ~TLSR_OFFERED;
@@ -1209,7 +1209,7 @@ UINT __wrap__nx_secure_tls_send_clienthello(NX_SECURE_TLS_SESSION *tls_session,
     return NX_SUCCESS;
 }
 
-/* ------------------------------------------------ __wrap client_handshake -- */
+/* ------------------------------------------------ __wrap client_handshake, */
 
 /* The ServerHello echoed the offered session ID: restore the cached session. */
 static UINT tls_resume_accept(TLSConnection *conn, NX_SECURE_TLS_SESSION *s)
@@ -1225,7 +1225,7 @@ static UINT tls_resume_accept(TLSConnection *conn, NX_SECURE_TLS_SESSION *s)
     /*
      * TLS 1.2 says the server MUST choose the same ciphersuite it used for
      * the session it just agreed to resume.  A server that does not is broken
-     * in a way this code cannot recover from mid-handshake, so fail -- and
+     * in a way this code cannot recover from mid-handshake, so fail, and
      * TLSOpenA drops the cache entry on failure, so the retry is a clean full
      * handshake rather than the same failure forever.
      */
@@ -1419,7 +1419,7 @@ UINT __wrap__nx_secure_tls_client_handshake(NX_SECURE_TLS_SESSION *tls_session,
      * Scanning first leaves the common case untouched.  A record carrying
      * ServerHello, Certificate, ServerKeyExchange and ServerHelloDone together
      * goes to the vendored function exactly as it would have, with the same
-     * data_length -- which matters, because that length is what
+     * data_length, which matters, because that length is what
      * _nx_secure_tls_process_remote_certificate() bounds itself with.  Only a
      * record containing a message the vendored code cannot handle is taken
      * apart, and such a record never contains a certificate.

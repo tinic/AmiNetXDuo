@@ -1,18 +1,18 @@
 /*
- * tls.library -- borrowing bsdsocket.library's NetX Duo instead of linking one.
+ * tls.library, borrowing bsdsocket.library's NetX Duo instead of linking one.
  *
  *   NetX Duo and ThreadX are singletons with file-scope state: the IP thread,
  *   the created-object lists, _tx_thread_current_ptr.  bsdsocket.library
  *   contains the only copy on the machine.  If this library linked netxduo
- *   too it would get a second, private set of those globals -- a stack with no
- *   interfaces, a scheduler with no threads -- and every call would fail in a
+ *   too it would get a second, private set of those globals, a stack with no
+ *   interfaces, a scheduler with no threads, and every call would fail in a
  *   way that looked like a NetX Duo bug.
  *
  *   nx_secure and nx_crypto have no such state that is not per-session, so
  *   linking them here is correct and keeps 227 KB out of the resident library
  *   of every machine that never makes a TLS connection.
  *
- *   nx_secure calls twelve NetX Duo/ThreadX entry points and nothing else --
+ *   nx_secure calls twelve NetX Duo/ThreadX entry points and nothing else,
  *   measured with `nm` over the archives, not assumed.  This file defines those
  *   twelve names, so the linker resolves nx_secure's references here, and each
  *   definition is a one-line call through the table bsdsocket.library supplies
@@ -22,7 +22,7 @@
  *   The same mechanism carries the entropy pool: NX_RAND is ami_random_rand()
  *   (port/netxduo-amiga/inc/nx_port.h), and defining the ami_random_* names
  *   here rather than linking src/common/ami_random.c means a TLS handshake
- *   draws from the pool bsdsocket.library already seeded -- one pool per
+ *   draws from the pool bsdsocket.library already seeded, one pool per
  *   machine, not two.
  *
  *   Every forwarder checks for a context.  Reaching one without a context is a
@@ -107,7 +107,7 @@ const AmiNetXDuoContext *tls_netx_ctx(VOID)
     return tls_ctx;
 }
 
-/* ------------------------------------------- what nx_secure links against -- */
+/* ------------------------------------------- what nx_secure links against, */
 
 UINT _nx_packet_allocate(NX_PACKET_POOL *pool_ptr, NX_PACKET **packet_ptr,
                          ULONG packet_type, ULONG wait_option)
@@ -222,7 +222,7 @@ UINT _tx_thread_sleep(ULONG timer_ticks)
  * nx_secure's `nxe_*` objects reference _tx_thread_current_ptr,
  * _tx_thread_system_state and _tx_timer_thread directly, out of
  * NX_THREADS_ONLY_CALLER_CHECKING.  Those are ThreadX *data*, not functions,
- * so they cannot be forwarded through a table -- a definition here would be a
+ * so they cannot be forwarded through a table, a definition here would be a
  * copy, not an alias, and would read as "no thread is running" forever.
  *
  * That is normally moot, because this library calls the `_nx_secure_*` entry
@@ -230,8 +230,8 @@ UINT _tx_thread_sleep(ULONG timer_ticks)
  * object is pulled in.  One exception: src/tls/ami_tls_crypto.c offers
  * ami_tls_local_certificate_add() for a server or a client certificate, and
  * that spells the call `nx_secure_tls_local_certificate_add`, which the
- * vendored header maps to the wrapper.  Nothing in tls.library uses it -- it
- * arrives only because it shares a translation unit with the crypto tables --
+ * vendored header maps to the wrapper.  Nothing in tls.library uses it, it
+ * arrives only because it shares a translation unit with the crypto tables,
  * but the linker does not know that, so defining the wrapper here keeps the
  * archive member out and the three data symbols with it.
  *
@@ -247,7 +247,7 @@ UINT _nxe_secure_tls_local_certificate_add(NX_SECURE_TLS_SESSION *tls_session,
     return _nx_secure_tls_local_certificate_add(tls_session, certificate);
 }
 
-/* --------------------------------------------- the machine's entropy pool -- */
+/* --------------------------------------------- the machine's entropy pool, */
 
 int ami_random_rand(void)
 {

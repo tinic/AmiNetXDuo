@@ -1,5 +1,5 @@
 /*
- * tls.library -- library skeleton.
+ * tls.library, library skeleton.
  *
  * This file must be linked first so that the "moveq #-1,d0 / rts" below is at
  * offset 0 of the first code hunk, which makes the library file harmless if
@@ -18,7 +18,7 @@
 
 /* Included explicitly, not transitively.  NDK 3.2 reaches <exec/resident.h>
    through another header and NDK 3.9 does not, so leaving it out builds here
-   and fails on a machine with the other NDK -- which is how it reached CI.
+   and fails on a machine with the other NDK, which is how it reached CI.
    src/bsdsocket/bsdsocket_internal.h and src/usergroup/ug_library.c both name
    it for the same reason. */
 #include <exec/resident.h>

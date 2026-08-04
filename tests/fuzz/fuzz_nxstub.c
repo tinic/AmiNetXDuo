@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the ThreadX surface fuzz_dns and fuzz_mdns stand on.
+ * AmiNetXDuo, the ThreadX surface fuzz_dns and fuzz_mdns stand on.
  *
  * The drivers run NetX Duo's DNS and mDNS parsers on one host thread, so the
  * mutex is uncontended by construction and granting it always is correct here

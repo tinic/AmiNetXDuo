@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- whether a broadcast this host sends reaches this host's own
+ * AmiNetXDuo, whether a broadcast this host sends reaches this host's own
  * sockets.
  *
  * Reported from an A3000 running Fitz 1.21: `fitz serve ram: name ramdisk` in
@@ -9,19 +9,19 @@
  * and `fitz serve` binds that port on INADDR_ANY, so the two are on the same
  * machine and never meet.
  *
- * Ethernet is simplex -- a card does not hear its own transmissions -- so the
+ * Ethernet is simplex, a card does not hear its own transmissions, so the
  * copy has to be made in software.  _nx_ip_driver_packet_send() makes it for a
  * unicast to our own address and, on request, for a multicast, and did not
  * make it for a broadcast.  4.4BSD copies one back in ether_output() and Linux
  * in ip_mc_output(), which is why the same program works everywhere else.
  *
  * Real, compiled from third_party/netxduo/common/src into this binary: the
- * whole path from nx_udp_socket_send() to nx_udp_socket_receive() --
+ * whole path from nx_udp_socket_send() to nx_udp_socket_receive(),
  * nx_udp_socket_send.c, nxd_udp_socket_send.c, nx_ip_packet_send.c,
  * nx_ip_header_add.c, nx_ip_route_find.c, nx_ip_driver_packet_send.c (the
  * function under test), nx_packet_copy.c, nx_ipv4_packet_receive.c,
  * nx_ip_dispatch_process.c, nx_udp_packet_receive.c and nx_udp_socket_receive.c
- * -- plus the packet pool and the UDP port table underneath them.
+ *, plus the packet pool and the UDP port table underneath them.
  *
  * Stubbed: the link driver, which counts what would have gone on the wire and
  * releases the packet, and the IP thread.  _nx_ip_packet_deferred_receive()
@@ -398,7 +398,7 @@ int main(void)
 
     /*
      * Another host on the same prefix.  There is no ARP entry, so the packet
-     * is queued for one and never reaches the driver -- which is the point:
+     * is queued for one and never reaches the driver, which is the point:
      * nothing about it is delivered locally.
      */
     h_wire_sends = 0;

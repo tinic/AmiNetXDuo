@@ -24,10 +24,10 @@
 #     * one in tests/tools/ifprobe.c, where p_poison() fills the struct in a
 #       loop the analyser unrolls once.
 #     * five uninitialised E-Clock reads in the units listed as falling back
-#       below -- the NDK blind spot this script otherwise removes.
+#       below, the NDK blind spot this script otherwise removes.
 #
 #   Silencing those would mean adding dead NULL tests, pragmas over whole
-#   functions, or a rewrite of a test's formatter -- all of which cost more
+#   functions, or a rewrite of a test's formatter, all of which cost more
 #   than they buy.  So they are recorded, and anything NEW fails the build.
 #   Verified to do that: a `return *(long *)0` planted in src/sana2 is reported
 #   as a new finding and exits 1.
@@ -43,13 +43,13 @@
 #   output constraint for the destination.  -fanalyzer does not read a "memory"
 #   clobber as a store, so after ReadEClock(&ev) it still believes ev.ev_lo is
 #   uninitialised.  Measured: 32 of 48 findings on this tree were that, and
-#   only that -- the same call declared as a plain extern produces none.
+#   only that, the same call declared as a plain extern produces none.
 #
 #   <proto/*.h> already has the switch: _NO_INLINE takes the clib/*_protos.h
 #   prototypes instead of the inline macros.  Objects built that way would not
 #   link, which is why this pass compiles to /dev/null and the real build is
-#   left alone.  A handful of files do not compile under it -- they hand-roll
-#   an LPnNR() for a call the NDK has no prototype for -- and those fall back
+#   left alone.  A handful of files do not compile under it, they hand-roll
+#   an LPnNR() for a call the NDK has no prototype for, and those fall back
 #   to a normal -fanalyzer pass so they are still covered, just noisier.
 #
 # SPDX-License-Identifier: MIT
@@ -99,7 +99,7 @@ if grep -q '\\' "$BUILD/compile_commands.json"; then
 fi
 grep '"command":' "$BUILD/compile_commands.json" |
     sed -e 's/^ *"command": "//' -e 's/",$//' -e 's|-o [^ ]*|-o /dev/null|' |
-    grep -v -- '-c .*/third_party/' |
+    grep -v, '-c .*/third_party/' |
     sort -u > "$WORK/cmds"
 
 echo "analysing $(wc -l < "$WORK/cmds" | tr -d ' ') translation units with $JOBS jobs"
@@ -110,9 +110,9 @@ echo "analysing $(wc -l < "$WORK/cmds" | tr -d ' ') translation units with $JOBS
 #
 #   -Wanalyzer-too-complex is off by default, and when the analyser gives up on
 #   a function it then says nothing at all about it.  At GCC's default
-#   bb-explosion-factor of 5, 48 of this tree's 213 units gave up -- including
+#   bb-explosion-factor of 5, 48 of this tree's 213 units gave up, including
 #   socket.c, select.c, tcp_handler.c, netdb.c, fetch.c, telnet.c and
-#   nettrace.c -- which is to say three of the five defects the memory-safety
+#   nettrace.c, which is to say three of the five defects the memory-safety
 #   audit found were in files -fanalyzer had never actually looked at.  A run
 #   that reports "clean" for those is worse than no run.
 #
@@ -120,9 +120,9 @@ echo "analysing $(wc -l < "$WORK/cmds" | tr -d ' ') translation units with $JOBS
 #   so the five that remain are printed rather than assumed away, and the two
 #   that are worth more time get it by name:
 #
-#     netdb.c    3.2s at 200 -- parses DEVS:Internet/*, and is where the alias
+#     netdb.c    3.2s at 200, parses DEVS:Internet/*, and is where the alias
 #                pool overflow lived
-#     nettrace.c 4.1s at 200 -- parses what comes back off the wire
+#     nettrace.c 4.1s at 200, parses what comes back off the wire
 #
 #   Not raised: c68k_25519.c and c68k_mont.c (bignum limb loops, 18s each and
 #   no pointer arithmetic over untrusted input) and tcpdrill.c (over eight
@@ -200,7 +200,7 @@ export LC_ALL=C
 # distinguishes a genuine second site from a rebuild of the first.
 cat "$WORK"/log.* |
     grep -E 'warning: .*\[-Wanalyzer' |
-    grep -v -- '-Wanalyzer-too-complex' |
+    grep -v, '-Wanalyzer-too-complex' |
     sed -e "s|$ROOT/||" |
     sort -u |
     sed -E -e 's| \[CWE-[0-9]+\]||' \

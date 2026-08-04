@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- picking this machine's name out of the places that offer one.
+ * AmiNetXDuo, picking this machine's name out of the places that offer one.
  *
  * Four sources, ranked by AmiHostnameSource (aminetxduo/config.h). Everything
  * here is pure: the callers read the files and hand the text over, so the host

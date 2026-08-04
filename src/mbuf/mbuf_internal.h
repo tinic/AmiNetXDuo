@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- mbuf emulation internals.
+ * AmiNetXDuo, mbuf emulation internals.
  *
  * Private to src/mbuf/. mbuf_alloc.c and mbuf_ops.c contain no AmigaOS calls
  * at all; everything platform-specific is behind the three hooks at the bottom
@@ -20,7 +20,7 @@
 /*
  * Ceilings, not reservations: slabs are carved on demand and the cluster pool
  * grows one cluster at a time. 256 mbufs is 32 KB and 16 clusters is 32 KB, so
- * the worst case is 64 KB of the 4 MB floor (docs/RESEARCH.md 9) -- and only
+ * the worst case is 64 KB of the 4 MB floor (docs/RESEARCH.md 9), and only
  * if something actually uses them, which on a normal system nothing does.
  */
 #ifndef AMI_MBUF_DEFAULT_MBUFS
@@ -57,7 +57,7 @@ typedef struct AmiMbufSlab
 /*
  * One MCLBYTES cluster. The reference count lives here rather than in
  * `struct m_ext` because that struct has no room for one and is ABI. We never
- * find this header by walking backwards from an arbitrary ext_buf -- clusters
+ * find this header by walking backwards from an arbitrary ext_buf, clusters
  * we own are identified by searching the `all` list, so a foreign ext_buf can
  * never make us read memory we do not own.
  */
@@ -103,7 +103,7 @@ VOID        ami_mbuf_ext_ref(struct mbuf *m);
 VOID        ami_mbuf_ext_unref(struct mbuf *m);
 
 /*
- * Start of the internal data area for m -- m_pktdat when M_PKTHDR is set,
+ * Start of the internal data area for m, m_pktdat when M_PKTHDR is set,
  * m_dat otherwise. Both end at (UBYTE *)m + MSIZE.
  */
 #define AMI_MBUF_BASE(m) \
@@ -114,7 +114,7 @@ VOID        ami_mbuf_ext_unref(struct mbuf *m);
 
 /*
  * Guard the free lists and the counters. Short, non-blocking, and reentrant
- * from any Exec task -- Forbid()/Permit() on the Amiga, nothing on the host.
+ * from any Exec task, Forbid()/Permit() on the Amiga, nothing on the host.
  * Never call anything that can block inside the bracket.
  */
 VOID ami_mbuf_lock(VOID);

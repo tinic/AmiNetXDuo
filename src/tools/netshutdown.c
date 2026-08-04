@@ -1,5 +1,5 @@
 /*
- * NetShutdown -- take every network interface down.
+ * NetShutdown, take every network interface down.
  *
  *     NetShutdown TIMEOUT/N,QUIET/S
  *
@@ -18,7 +18,7 @@
  * reboot.
  *
  * What is stoppable is the traffic. Every interface is taken down through
- * NETCTRL_INTERFACE_DOWN -- the same call Offline makes, reaching
+ * NETCTRL_INTERFACE_DOWN, the same call Offline makes, reaching
  * nx_ip_driver_interface_direct_command(NX_LINK_DISABLE) and stopping the
  * SANA-II readers with it. Afterwards nothing is sent and nothing is received.
  *

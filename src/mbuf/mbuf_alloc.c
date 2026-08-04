@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- mbuf and cluster allocator.
+ * AmiNetXDuo, mbuf and cluster allocator.
  *
  * Slab allocator, because dtom() is part of the published ABI:
  *
@@ -11,7 +11,7 @@
  * over-allocated slabs whose first mbuf is rounded up to MSIZE, and the slab
  * keeps the raw pointer for ami_free().
  *
- * No AmigaOS calls here -- see mbuf_internal.h for the three hooks.
+ * No AmigaOS calls here, see mbuf_internal.h for the three hooks.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -455,7 +455,7 @@ VOID ami_mbuf_ext_unref(struct mbuf *m)
     {
         /*
          * Foreign storage with a release hook. 4.4BSD's signature is
-         * void (*)(caddr_t, u_int) -- stack arguments, which is what
+         * void (*)(caddr_t, u_int), stack arguments, which is what
          * __stdargs gives us here. INFERRED from 4.4BSD; no Amiga header
          * documents the calling convention for ext_free.
          */

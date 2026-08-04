@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- releasing and reacquiring the ThreadX baton around an exec
+ * AmiNetXDuo, releasing and reacquiring the ThreadX baton around an exec
  * Wait().
  *
  * The port uses the baton model (docs/RESEARCH.md 6.2): a ThreadX thread runs
@@ -208,7 +208,7 @@ VOID ami_netstack_baton_reset(VOID)
  * _tx_thread_system_state is one global counter and every Task reads it.  A
  * window in which it is raised with task switching enabled makes every other
  * Task look like an ISR, and a blocking ThreadX service entered on one comes
- * back without blocking -- after it has already linked the caller into the
+ * back without blocking, after it has already linked the caller into the
  * object's suspension list and bumped the object's suspended count.  The list
  * and the count then disagree, and the next _tx_event_flags_set() walks off the
  * end of the list into whatever offset 0x80 of address zero holds.
@@ -292,12 +292,12 @@ VOID ami_netstack_baton_release(VOID)
     slot->bs_Nesting = 1;
 
     /* Interrupt context: _tx_thread_system_suspend() must not try to switch
-       for us -- we are about to leave ThreadX entirely. */
+       for us, we are about to leave ThreadX entirely. */
     _tx_thread_system_state++;
 
     /* Off the ready list. With the system state raised this returns here
        rather than ending in _tx_thread_system_return(). The Forbid() is held
-       across it -- see the note above ami_baton_observe_state(). */
+       across it, see the note above ami_baton_observe_state(). */
     (VOID)tx_thread_suspend(thread);
 
     if (_tx_thread_current_ptr == thread)

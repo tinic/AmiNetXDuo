@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- BPF capture channels: the buffers, the record format, the
+ * AmiNetXDuo, BPF capture channels: the buffers, the record format, the
  * ioctls and the six data-path vectors.
  *
  * Record format, which is what consumers depend on. Every captured frame is
@@ -192,7 +192,7 @@ LONG ami_bpf_init(VOID)
     /*
      * The interface table too. Both are file-scope, so a detach the last
      * teardown missed leaves a row with `used` set and a cookie into the
-     * AmiSana2If that went with the old stack -- which the next bring-up's
+     * AmiSana2If that went with the old stack, which the next bring-up's
      * ami_bpf_iface_by_cookie() would hand to an injector.
      */
     for (i = 0; i < AMI_BPF_MAX_IFACES; i++)
@@ -208,7 +208,7 @@ LONG ami_bpf_init(VOID)
  *
  * `force` says what to do when a copy-out is in flight. ami_bpf_read() drops
  * the lock for the copy and reads `hold` from a pointer it captured before
- * dropping it, so freeing the buffer here would hand the reader freed memory --
+ * dropping it, so freeing the buffer here would hand the reader freed memory,
  * and there is no MMU to catch it. Unforced, the channel is taken away from its
  * owner immediately and only the two frees are deferred: `release_pending` says
  * the buffers are the reader's to release when it is done with them.
@@ -249,7 +249,7 @@ static VOID ami_bpf_chan_release(AmiBpfChan *ch, BOOL force)
 }
 
 /*
- * The owner is going away, so its channels go with it -- the autodoc's
+ * The owner is going away, so its channels go with it, the autodoc's
  * "automatically closed when the library is closed". Nothing here blocks: the
  * lock is Forbid()/Permit() and the frees are FreeMem().
  */
@@ -556,7 +556,7 @@ LONG ami_bpf_read(APTR owner, LONG channel, APTR buffer, LONG len)
     /*
      * BIOCSRTIMEOUT as 4.4BSD reads it: zero is "do not wait", anything else
      * is how long to wait for the first record. Waited by sleeping in slices
-     * on the calling task and looking again -- never on a MsgPort, which would
+     * on the calling task and looking again, never on a MsgPort, which would
      * belong to whichever Process happened to call in (544398f), and never
      * while holding the lock the tap needs in order to deliver anything.
      *
@@ -649,7 +649,7 @@ LONG ami_bpf_read(APTR owner, LONG channel, APTR buffer, LONG len)
 
     /* The owner closed the library while the copy above was running, so the
        buffers were left for this task to free. The caller still gets the bytes
-       it asked for -- they were copied out of memory that was still ours. */
+       it asked for, they were copied out of memory that was still ours. */
     if (pending)
         ami_bpf_chan_release(ch, FALSE);
 
@@ -820,7 +820,7 @@ static LONG ami_bpf_ioctl_setif(AmiBpfChan *ch, const char *name)
 
     if (base != NULL)
     {
-        /* The bufbase test above was outside the lock -- ami_alloc() is not
+        /* The bufbase test above was outside the lock, ami_alloc() is not
            something to call under Forbid(). A second BIOCSETIF on this channel
            can have installed one since, and overwriting it here would drop the
            only reference to that block. */
@@ -920,8 +920,8 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
      * Every command below either reads or writes a ULONG or a UWORD through
      * `buffer`, which is the caller's, and an odd one is an address error on a
      * 68000. Refused rather than faulted on. The three ifreq commands are the
-     * exception -- they touch bytes only, including the sockaddr_in
-     * SIOCGIFADDR writes by hand -- and refusing an odd one would be a
+     * exception, they touch bytes only, including the sockaddr_in
+     * SIOCGIFADDR writes by hand, and refusing an odd one would be a
      * restriction with nothing behind it.
      */
     switch (AMI_BPF_CMD(command))

@@ -1,5 +1,5 @@
 /*
- * fetch -- retrieve an http:// or https:// URL.
+ * fetch, retrieve an http:// or https:// URL.
  *
  *     fetch URL/A,TO/K,HEADERS/S,QUIET/S,NOVERIFY/S,TIMEOUT/N/K
  *
@@ -11,8 +11,8 @@
  * eight (include/aminetxduo/tlslib.h).  Nothing here links our stack; this is
  * an ordinary Amiga network application.
  *
- * Opening bsdsocket.library starts the network -- the library is
- * self-starting -- and closing it stops it again unless something else (Online,
+ * Opening bsdsocket.library starts the network, the library is
+ * self-starting, and closing it stops it again unless something else (Online,
  * AddNetInterface) is holding it open.
  *
  * No chunked transfer decoding and no keep-alive: the request goes out as
@@ -23,7 +23,7 @@
  * The URL, the Location: resolved against it and the framing of a response's
  * header block are in fetchurl.c, which includes nothing and is driven
  * directly by src/tools/test/test_fetchurl.c.  A 1xx interim response is
- * discarded there rather than taken for a final one -- note that a server is
+ * discarded there rather than taken for a final one, note that a server is
  * not supposed to send one to an HTTP/1.0 request at all (RFC 9110 15.2), but
  * the same section makes parsing one a client's obligation regardless, and
  * the failure it used to cause was the real response landing in the user's
@@ -75,14 +75,14 @@ enum
 /*
  * A server that answered every request with a 1xx would keep this loop going
  * for as long as it kept sending, which is no worse than one that streams a
- * body forever -- but a bound costs nothing and makes the diagnostic say what
+ * body forever, but a bound costs nothing and makes the diagnostic say what
  * happened.
  */
 #define FETCH_MAX_INTERIM       8
 
 /*
- * Static, not automatic: a Shell command gets whatever stack the Shell has --
- * 4 KB on a stock Kickstart 3.1 -- and these are 10 KB between them.  Same
+ * Static, not automatic: a Shell command gets whatever stack the Shell has,
+ * 4 KB on a stock Kickstart 3.1, and these are 10 KB between them.  Same
  * reasoning as src/tools/toolssmoke.c.
  */
 static UBYTE fetch_chunk[FETCH_CHUNK];
@@ -404,7 +404,7 @@ static BOOL emit(struct FetchState *st, const UBYTE *data, LONG len)
 
 /*
  * What main() hands over to the transfer.  File-static because the transfer
- * runs on a different stack -- see the StackSwap() note at the bottom.
+ * runs on a different stack, see the StackSwap() note at the bottom.
  */
 static struct FetchState fetch_init_state;
 static FetchUrl          fetch_init_url;
@@ -486,8 +486,8 @@ static LONG fetch_run(VOID)
                 tool_error("https: needs LIBS:tls.library, and there is none");
 
                 /*
-                 * The archive carries no tls.library for a 68000 -- the
-                 * encryption needs a 68020 -- so telling that user to install
+                 * The archive carries no tls.library for a 68000, the
+                 * encryption needs a 68020, so telling that user to install
                  * one sends them after a file that does not exist.  One binary
                  * serves every CPU, so the check can only happen at run time.
                  */
@@ -630,7 +630,7 @@ static LONG fetch_run(VOID)
             /*
              * RFC 9112 section 3.2: "a client MUST send a field value for Host
              * that is identical to that authority component" of the target
-             * URI.  So a non-default port belongs in it -- without one,
+             * URI.  So a non-default port belongs in it, without one,
              * "fetch http://host:8080/" reaches whichever virtual host the
              * server answers for port 80.
              */
@@ -718,7 +718,7 @@ static LONG fetch_run(VOID)
                     /*
                      * RFC 9110 15.2: a 1xx is an interim response, terminated
                      * by the end of its header section and carrying no
-                     * content.  Discard it and read the next block -- taking
+                     * content.  Discard it and read the next block, taking
                      * it for the final answer wrote the real response into the
                      * user's file as body and reported success.
                      */
@@ -845,7 +845,7 @@ static LONG fetch_run(VOID)
             /*
              * RFC 9110 10.2.2: the Location value is a URI reference, and the
              * target is it resolved against the URI this request was made to.
-             * Most of them are relative -- "about.html" and "docs/x.html" both
+             * Most of them are relative, "about.html" and "docs/x.html" both
              * used to be handed to the absolute parser, which made them a host
              * called about.html and a host called docs.
              */

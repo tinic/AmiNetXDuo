@@ -1,5 +1,5 @@
 /***************************************************************************
- * Eclipse ThreadX -- AmigaOS/m68k port.
+ * Eclipse ThreadX, AmigaOS/m68k port.
  *
  * Derived from ports/linux/gnu/src/tx_timer_interrupt.c
  *   Copyright (c) 2024 Microsoft Corporation
@@ -97,7 +97,7 @@ VOID _tx_timer_interrupt(VOID)
  * count of calls made rather than a measure of time: every tick the tick task
  * cannot deliver is time gone for good and never reconciled.  Here the tick
  * task reads ReadEClock() at each wakeup, works out how many whole tick periods
- * have really elapsed, and passes that -- so the clock is true against real
+ * have really elapsed, and passes that, so the clock is true against real
  * time however many or few calls were made, and the wheel is free to run behind
  * it without taking timekeeping with it.
  *

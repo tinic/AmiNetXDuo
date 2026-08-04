@@ -1,5 +1,5 @@
 /*
- * src/tools -- what a command needs in order to explain a network card.
+ * src/tools, what a command needs in order to explain a network card.
  *
  * Kept out of tool_diag.c, which is in TOOLS_COMMON_SOURCES and so linked by
  * every command: this material is 3.8 KB of prose plus a table of sixteen
@@ -27,8 +27,8 @@
  *
  * The remaining mechanism is not to compile it into commands that cannot reach
  * it, which is what this file is for.  The three functions that touch the
- * device table -- tool_explain_device, tool_explain_no_interfaces and
- * tool_scan_devices -- live here with it.
+ * device table, tool_explain_device, tool_explain_no_interfaces and
+ * tool_scan_devices, live here with it.
  *
  * tool_find_interface() came from tool_util.c, which is also common: its
  * "there is no interface called X" path calls tool_explain_no_interfaces(),
@@ -87,7 +87,7 @@ static const char *const diag_known_devices[] =
      *   pi-net.device      captain-amygdala/pistorm, the built driver at
      *                      platforms/amiga/net/net_driver_amiga/
      *   a314eth.device     the same repo, a314/software-amiga/ethernet_pistorm
-     *                      build.sh -- "-o ../a314eth.device"
+     *                      build.sh, "-o ../a314eth.device"
      *   scsidayna.device   RobSmithDev/daynaport-amiga, Makefile DEVICEID
      *                      (a DaynaPORT SCSI/Link, still being worked on)
      *
@@ -224,7 +224,7 @@ VOID tool_explain_device(const char *device, ULONG unit)
 
     /*
      * Opened and then refused a SANA-II command. The driver is installed, the
-     * unit is right and the card answered -- so none of the advice below about
+     * unit is right and the card answered, so none of the advice below about
      * missing files or wrong unit numbers applies, wherever the file turned out
      * to be. This is the case AddNetInterface reaches when a PCMCIA card is in
      * the slot and will not initialise, and it used to print "there is no

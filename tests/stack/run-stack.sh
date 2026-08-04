@@ -13,7 +13,7 @@
 # WHY THIS IS NOT IN EMULATOR_TESTS
 #
 # The harness reaches bsdsocket.library through its LVOs, so the library and a
-# SANA-II driver both have to be staged -- unlike ram_driver_test and soak_test,
+# SANA-II driver both have to be staged, unlike ram_driver_test and soak_test,
 # which link the stack into themselves and need no driver at all. The only
 # driver that brings an interface up under FS-UAE here is a2065.device, which is
 # Commodore's and not redistributable, so this cannot run in public CI for the
@@ -25,7 +25,7 @@
 #     never gets the 4 KB it asked for. The harness reports the granted size and
 #     holds the bar at 4096 anyway, but it is not measuring a Shell stack.
 #   * the reverse lookup (getnameinfo on an unroutable address) has not been
-#     seen to return under AROS on SLIRP -- 600 s and still waiting -- where on
+#     seen to return under AROS on SLIRP, 600 s and still waiting, where on
 #     Kickstart 3.1 it comes back and is the deepest phase of the run. An AROS
 #     run therefore fails at that phase whatever the library does.
 #

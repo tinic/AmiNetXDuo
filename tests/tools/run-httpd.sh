@@ -13,7 +13,7 @@
 #   three other machines.  None of them can be driven from inside this script,
 #   so what it does is put the server on the wire at a known address and hold
 #   it there for a window, print the address, and afterwards print the guest's
-#   own TRACE log -- every method and every header, in the order it arrived.
+#   own TRACE log, every method and every header, in the order it arrived.
 #   The transcript is the result; a green tick would be a weaker claim.
 #
 #   The one thing it does assert is that the server answered at all, with a
@@ -44,7 +44,7 @@
 #
 #     macOS      WebDAVFS/3.0.0 (Darwin 25.5.0).  OPTIONS, then PROPFIND
 #                Depth 0 on /, then Depth 1.  Mounts READ-ONLY off the Allow
-#                header alone -- it never attempted a write, so a `cp` to the
+#                header alone, it never attempted a write, so a `cp` to the
 #                volume fails locally without a request leaving the machine.
 #                Probes six Finder metadata names that do not exist
 #                (/._., /.hidden, /.metadata_never_index, /.Spotlight-V100 and
@@ -52,14 +52,14 @@
 #     Windows    Microsoft-WebDAV-MiniRedir/10.0.22621.  Needs the WebClient
 #                service, which is demand-start and comes up on the first
 #                `net use`.  27 PROPFINDs for the same work the others do in
-#                five, all Depth 0 -- it walks a path one segment at a time.
+#                five, all Depth 0, it walks a path one segment at a time.
 #                Sends `translate: f` on everything.  Maps as a drive letter
 #                and reachable as \\<address>@<port>\DavWWWRoot.
 #     Linux      gvfs/1.57.2.  The fewest requests of the three, and the only
 #                one that reports the server's own words back to the user:
 #                "HTTP Error: Method Not Allowed" for a write.
 #
-#   NOT ONE OF THEM SENT LOCK.  Nor PROPPATCH, nor Depth: infinity -- 25
+#   NOT ONE OF THEM SENT LOCK.  Nor PROPPATCH, nor Depth: infinity, 25
 #   Depth 0 and 7 Depth 1 across the whole run.  `DAV: 1` with no locking is
 #   enough to mount read-only on all three.
 #

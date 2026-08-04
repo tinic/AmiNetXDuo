@@ -1,11 +1,11 @@
 /*
- * The tests for src/tools/fetchurl.c -- the URL half of `fetch`.
+ * The tests for src/tools/fetchurl.c, the URL half of `fetch`.
  *
  * WHY THIS IS A TEST AND NOT A REVIEW
  *
  *   Both halves of this file fail silently when they are wrong.  A relative
  *   Location: resolved as if it were absolute asks the resolver for a host
- *   called "about.html", and "docs/x.html" becomes host "docs" -- neither
+ *   called "about.html", and "docs/x.html" becomes host "docs", neither
  *   reads as a bug in the code that does it.  An interim 1xx response taken
  *   for a final one writes the real response, status line and headers
  *   included, into the user's file as body and returns success.
@@ -13,7 +13,7 @@
  *   RFC 3986 section 5.4 is a ready-made table of thirty-six references and
  *   the target URI each one resolves to against a single base, so the
  *   resolution half is not tested against what this implementation happens to
- *   do -- it is tested against the specification's own worked answers, which
+ *   do, it is tested against the specification's own worked answers, which
  *   is the only kind of test worth having here.  The handful that cannot pass
  *   verbatim are listed in the deviations block below with the reason.
  *
@@ -84,7 +84,7 @@ static const char *composed(const FetchUrl *u)
  * DEVIATIONS, all deliberate:
  *
  *   "g:h"  ->  "g:h".  A URI in a scheme this command does not speak.  It is
- *              resolved correctly -- scheme "g", no authority -- and then
+ *              resolved correctly, scheme "g", no authority, and then
  *              refused, which is checked below rather than skipped.
  *
  *   Every expected target carrying a "#fragment" has it dropped, so "#s"
@@ -429,7 +429,7 @@ static void test_interim_responses(void)
 }
 
 /* One byte at a time: the terminator scan must survive a split across reads,
-   which is how a 1xx arrives in practice -- alone in its own segment. */
+   which is how a 1xx arrives in practice, alone in its own segment. */
 static void test_interim_split_reads(void)
 {
     static const char wire[] =

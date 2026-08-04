@@ -1,11 +1,11 @@
 /*
- * AmiNetXDuo -- host fuzz driver for the three TLS handshake messages that
+ * AmiNetXDuo, host fuzz driver for the three TLS handshake messages that
  * dispatch through a negotiated ciphersuite into NX_CRYPTO_METHOD entries.
  *
  * fuzz_tls_record stops where the crypto starts: it carries a ciphersuite
  * table of six IDs and no method pointers, because none of the parsers it
  * drives calls one. ServerKeyExchange, CertificateVerify and Finished all do,
- * so they need the real tables -- ami_crypto_tls_ciphers_ecc and
+ * so they need the real tables, ami_crypto_tls_ciphers_ecc and
  * ami_crypto_ecc_curves from src/tls/ami_tls_crypto.c, the ones tls_conn.c
  * hands to _nx_secure_tls_session_create(). That is this driver.
  *
@@ -15,7 +15,7 @@
  * ((ULONG)crypto_metadata & 3), and _nx_secure_tls_process_certificate_verify()
  * bounds its signature with ((ULONG)packet_buffer + message_length) <
  * ((ULONG)received_signature + length). ULONG is the target's 32 bits, so on
- * an LP64 host both truncate a pointer -- the second one is the bounds check
+ * an LP64 host both truncate a pointer, the second one is the bounds check
  * under test, and a truncated bounds check is not the one that ships. The
  * -m32 build makes ULONG and the pointer the same width again, which is what
  * the m68k has. tools/ci.sh's host32 stage is where this runs.
@@ -30,14 +30,14 @@
  * ami_crypto_tls_ciphers_ecc, ecc_initialize with ami_crypto_ecc_curves, a
  * record buffer of TLS_DEFAULT_RECORD_BUFFER, four remote certificate slots,
  * and the server's Certificate message already processed so the remote
- * endpoint certificate is in the store -- which is where all three of these
+ * endpoint certificate is in the store, which is where all three of these
  * read the peer's public key from. Everything after that is bytes off the wire.
  *
  * THE LENGTH CONTRACT IS THE RECORD PAYLOAD, NOT THE MESSAGE.
  *
  * Same as fuzz_tls_record. The message is copied into an allocation sized to
  * itself, which models the record payload ending exactly where the message
- * does -- and a hostile server produces that at will by putting filler
+ * does, and a hostile server produces that at will by putting filler
  * messages in front of it until the target message ends at the record buffer's
  * last byte. An over-read this reports is one a real record reproduces.
  *
@@ -47,7 +47,7 @@
  * over (client_random || server_random || params) before it touches the peer's
  * ECDHE point, so a ServerKeyExchange with a made-up signature stops at the
  * verify and the ECDH import is never exercised. The party that gets past it
- * is a server holding a certificate -- which is exactly the hostile server
+ * is a server holding a certificate, which is exactly the hostile server
  * this driver models. So the seeds are SIGNED, at startup, with the private
  * key of the sample leaf in tests/tls/tls_test_certs.h: the same key, the same
  * PKCS#1 v1.5 construction and the same RSA operation
@@ -60,7 +60,7 @@
  *
  * ServerKeyExchange and Finished are what a server sends a client, so
  * tls.library reaches both on any HTTPS fetch. CertificateVerify is the other
- * direction -- only _nx_secure_tls_server_handshake() calls it -- and
+ * direction, only _nx_secure_tls_server_handshake() calls it, and
  * tls_conn.c only ever starts a client session, so nothing in the shipped
  * library reaches it today. It is driven anyway: the function is linked into
  * tls.library, the ciphersuite tables that reach it are ours, and a driver
@@ -98,7 +98,7 @@
 #include "tls.h"
 
 /* tls_test_certs.h carries the leaf's private key, which this driver does use
-   -- see the signing note above -- and the CA's, which it does not. */
+  , see the signing note above, and the CA's, which it does not. */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #include "tls_test_certs.h"
@@ -106,7 +106,7 @@
 
 /*
  * ami_tls_crypto.c times every operation through timer.device. There is no
- * timer.device here and the counters it keeps are still exact without one --
+ * timer.device here and the counters it keeps are still exact without one,
  * ami_tls_timer_is_open() answering FALSE is the documented "counts but no
  * microseconds" case, and this driver reads only the counts.
  */
@@ -191,7 +191,7 @@ static UCHAR                fc_server_random[32];
 
 /* The chain verify a real session does needs a trust anchor this driver has
    no reason to supply. Answering NX_SUCCESS is "the chain checked out", which
-   is the branch that installs the remote endpoint -- and the endpoint is what
+   is the branch that installs the remote endpoint, and the endpoint is what
    all three parsers under test read the peer's public key from. */
 static UINT fc_verify_ok(NX_SECURE_X509_CERTIFICATE_STORE *store,
                          NX_SECURE_X509_CERT *certificate, ULONG current_time)
@@ -298,7 +298,7 @@ static UINT fc_session_open(NX_SECURE_TLS_SESSION *s, UINT suite)
 }
 
 /* nx_secure keeps every created session on a global ring, so a driver that
-   builds one per case has to take each one off again -- the next
+   builds one per case has to take each one off again, the next
    session_create() walks the ring and follows whatever the last one left. */
 static void fc_session_close(NX_SECURE_TLS_SESSION *s)
 {
@@ -309,7 +309,7 @@ static void fc_session_close(NX_SECURE_TLS_SESSION *s)
 
 /*
  * The sample leaf's private key, and the RSA method out of the ciphersuite
- * table -- the same object ami_tls_crypto.c puts in nx_secure_tls_public_auth
+ * table, the same object ami_tls_crypto.c puts in nx_secure_tls_public_auth
  * for the ECDHE_RSA suites, which is what verifies what this signs.
  */
 static NX_SECURE_X509_CERT      fc_signer;
@@ -358,8 +358,8 @@ static UINT fc_params_hash(const unsigned char *params, unsigned params_len,
 {
     NX_CRYPTO_METHOD *m = (NX_CRYPTO_METHOD *)
                           fc_x509_hash(NX_SECURE_TLS_X509_TYPE_RSA_SHA_256);
-    /* Whichever SHA-256 the table holds -- ami_tls_crypto.c's or nx_crypto's
-       -- states its own metadata size, so the buffer is checked against it
+    /* Whichever SHA-256 the table holds, ami_tls_crypto.c's or nx_crypto's
+      , states its own metadata size, so the buffer is checked against it
        rather than sized from one of the two structures. */
     static ULONG      metadata[256];
     VOID             *handler = NX_NULL;
@@ -404,7 +404,7 @@ static UINT fc_params_hash(const unsigned char *params, unsigned params_len,
 }
 
 /*
- * PKCS#1 v1.5 over the SHA-256 DigestInfo, then the RSA private operation --
+ * PKCS#1 v1.5 over the SHA-256 DigestInfo, then the RSA private operation,
  * nx_secure_tls_send_certificate_verify.c's construction, spelled out here
  * because that function needs a packet and a whole session to reach.
  */
@@ -479,7 +479,7 @@ static const unsigned char fc_p256_g[FC_POINT_BYTES] =
 /*
  * A ServerKeyExchange, signed. `key_len` bytes of ECDHE point are written
  * starting at offset 4, and the signature covers exactly the range the
- * verifier hashes -- packet_buffer[0 .. 4 + key_len).
+ * verifier hashes, packet_buffer[0 .. 4 + key_len).
  */
 static void fcs_ske(FcBuf *w, unsigned curve, unsigned key_len, int sign_it)
 {
@@ -611,7 +611,7 @@ static void fcs_cv_full(FcBuf *w)
 }
 
 /* The signature is as long as the certificate's modulus and the message stops
-   four bytes short of holding it -- length is checked against message_length,
+   four bytes short of holding it, length is checked against message_length,
    which does not account for the four-byte header in front of it. */
 static void fcs_cv_exact(FcBuf *w)
 {
@@ -669,7 +669,7 @@ static void fcs_ones(FcBuf *w)
 
 /* Which parser a seed is for. A ServerKeyExchange is not a Finished and
    feeding one to the other only tests the length gate, so each seed names its
-   own message -- and the sweep still crosses them, because every mutation is
+   own message, and the sweep still crosses them, because every mutation is
    run through all three. */
 #define FC_SKE          0
 #define FC_CV           1
@@ -717,8 +717,8 @@ static const FcSeed fc_seeds[] =
 /*
  * "Clean" means nothing if the sweep never got past a length check, so every
  * case is measured rather than assumed. The crypto counts come from
- * ami_tls_crypto.c's own instrumentation -- the code under test reporting that
- * one of its NX_CRYPTO_METHOD entries ran -- and the rest from the status,
+ * ami_tls_crypto.c's own instrumentation, the code under test reporting that
+ * one of its NX_CRYPTO_METHOD entries ran, and the rest from the status,
  * which for these three functions names how far the parse got.
  */
 static unsigned long fc_n_ske;          /* ServerKeyExchange calls           */
@@ -826,8 +826,8 @@ static void fc_fail(const char *what)
 /*
  * Proof that the driver reaches the parsers.
  *
- * A driver that stopped at the first length check -- a ciphersuite that never
- * resolved, a certificate that never reached the store -- would report "clean"
+ * A driver that stopped at the first length check, a ciphersuite that never
+ * resolved, a certificate that never reached the store, would report "clean"
  * for every input and read as coverage. So each of the three is run on a case
  * it must get all the way through, and the thing it must have produced is
  * checked by name:
@@ -964,7 +964,7 @@ static void fc_env_init(void)
     /* nx_secure owns _nx_secure_tls_protection here rather than the driver
        declaring one, because linking the whole archive means
        nx_secure_tls_initialize.c is in it. The mutex it creates is uncontended
-       by construction -- one thread, nothing suspends. */
+       by construction, one thread, nothing suspends. */
     _nx_secure_tls_initialize();
 
     status = ami_tls_crypto_initialize();
@@ -1033,8 +1033,8 @@ static unsigned fc_below(unsigned n)
 }
 
 /*
- * Aimed at the bytes that decide how far a walk goes -- the curve id, the
- * one-byte key length, the two-byte signature length, the algorithm pair --
+ * Aimed at the bytes that decide how far a walk goes, the curve id, the
+ * one-byte key length, the two-byte signature length, the algorithm pair,
  * rather than at the signature, where a flipped byte only fails a comparison
  * that was going to fail anyway.
  */
@@ -1097,7 +1097,7 @@ static void fc_mutate(FcBuf *w)
              * A CertificateVerify head, likewise: the algorithm pair has to be
              * (SHA-256, RSA) and the length has to equal the certificate's
              * modulus before a signature byte is read at all. The lengths
-             * offered are the ones the bounds arithmetic turns on -- the
+             * offered are the ones the bounds arithmetic turns on, the
              * modulus, its neighbours, and the message's own size.
              */
             if (w->len > 3)

@@ -1,5 +1,5 @@
 /*
- * tickprobe -- a TCP/IP stack's periodic-timer rate and packet turnaround,
+ * tickprobe, a TCP/IP stack's periodic-timer rate and packet turnaround,
  * measured from outside, with no knowledge of its internals and nothing of its
  * code inspected.
  *
@@ -36,14 +36,14 @@
  * be locked to whatever grid the harness polls on, every measured delay would
  * come out identical, and a stack with no periodic timer at all would look
  * perfectly quantised.  So each injection is preceded by a timer.device
- * UNIT_MICROHZ sleep of a pseudo-random length -- Delay() is one 20 ms
+ * UNIT_MICROHZ sleep of a pseudo-random length, Delay() is one 20 ms
  * AmigaDOS tick and sleeping on it would alias the experiment into agreeing
  * with whatever the system tick is.  The analyser checks the control as well
  * as the result: the injection intervals must show no concentration at any
  * period, or the run says nothing.
  *
  * The competing explanation is measured in the same run.  An ICMP echo reply
- * is not timer-driven -- it is generated when the request arrives -- so the
+ * is not timer-driven, it is generated when the request arrives, so the
  * time from handing an echo request to the device to the stack handing the
  * reply back is the whole receive-and-reply path with the wire, the emulator's
  * SLIRP and the application all taken out of it.  Phase I measures it at two
@@ -53,7 +53,7 @@
  * Every call into the stack is a published LVO and every packet is seen
  * through a SANA-II device this program installs in its own address space
  * (tests/tcpdrill/tapdev.c, linked unchanged).  With a foreign stack,
- * DH0:tickif.txt holds the command line that brings its interface up -- our
+ * DH0:tickif.txt holds the command line that brings its interface up, our
  * own library configures DEVS:NetInterfaces itself when it opens, and Roadshow
  * needs its own AddNetInterface to be run.
  *
@@ -299,7 +299,7 @@ static UWORD ones_fold(ULONG sum)
 /* ----------------------------------------------------------- fine sleeps -- */
 /*
  * Delay() is one AmigaDOS tick, 20 ms, which is the same order as the grid
- * being measured -- sleeping on it would alias the experiment into agreeing
+ * being measured, sleeping on it would alias the experiment into agreeing
  * with whatever the system tick is.  UNIT_MICROHZ is CIA-derived and
  * independent of it.
  */

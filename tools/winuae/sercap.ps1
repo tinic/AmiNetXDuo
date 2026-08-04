@@ -2,8 +2,8 @@
 #
 # WinUAE cannot write the emulated serial port to a file: the only backends it
 # has are a real COM port, an inter-process pipe, a loopback, and TCP.  So the
-# config points the serial port at TCP://0.0.0.0:<port>/wait -- WinUAE listens,
-# and blocks the emulation until something connects -- and this script is the
+# config points the serial port at TCP://0.0.0.0:<port>/wait, WinUAE listens,
+# and blocks the emulation until something connects, and this script is the
 # something.  /wait is what makes the capture race-free: no character can be
 # transmitted before we are attached, so the first line of the guest's log is
 # never lost.
@@ -32,8 +32,8 @@ while ($sw.Elapsed.TotalSeconds -lt $Wait -and -not $client) {
     }
 }
 if (-not $client) {
-    # Say so in the log itself.  An empty serial log is ambiguous -- it could
-    # mean the guest printed nothing -- and this failure is not that.
+    # Say so in the log itself.  An empty serial log is ambiguous, it could
+    # mean the guest printed nothing, and this failure is not that.
     [System.IO.File]::WriteAllText($Out, "(serial capture never connected to port $Port)`n")
     exit 1
 }

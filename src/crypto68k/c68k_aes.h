@@ -1,8 +1,8 @@
 /*
- * AmiNetXDuo -- crypto68k: AES-128/192/256 in CBC, for the TLS record path.
+ * AmiNetXDuo, crypto68k: AES-128/192/256 in CBC, for the TLS record path.
  *
  *   docs/RESEARCH.md 15 measured the bulk path against AmiSSL and found a dead
- *   heat -- 85.3 ms against 84.2 ms for 16 KiB of AES-128-CBC -- for the same
+ *   heat, 85.3 ms against 84.2 ms for 16 KiB of AES-128-CBC, for the same
  *   reason on both sides: neither tree has any m68k assembly for it.  That row
  *   decides `https://` throughput, being paid on every byte of every transfer
  *   rather than once per connection.
@@ -14,8 +14,8 @@
  *
  *   tests/perf/cpucal on the A1200 profile, -k 56:
  *
- *     32 KB / 64 B read ratio  0.88x        -- no data cache
- *     Fast RAM longword read   117.7 ns     -- 6.6 cycles, against ADD.L's 2
+ *     32 KB / 64 B read ratio  0.88x       , no data cache
+ *     Fast RAM longword read   117.7 ns    , 6.6 cycles, against ADD.L's 2
  *     Fast RAM byte read        29.4 ns/B
  *     instruction cache        256 bytes
  *
@@ -23,8 +23,8 @@
  *   layout is an argument about cache footprint, and here footprint costs
  *   nothing: a lookup into a 4 KB table and a lookup into a 1 KB table are the
  *   same instruction with the same bus cycle.  The usual reason to prefer one
- *   table and three rotates over four tables -- the 3 KB it saves in a cache
- *   that would otherwise hold the state -- does not apply, and the rotates are
+ *   table and three rotates over four tables, the 3 KB it saves in a cache
+ *   that would otherwise hold the state, does not apply, and the rotates are
  *   pure loss.  Measured, not assumed; see c68k_aes_variant below and
  *   docs/RESEARCH.md 16.
  *
@@ -32,14 +32,14 @@
  *   at ~140 ns is 22 us against a measured 83 us per block, so three quarters
  *   of the cost is instruction issue, and the lever is the instruction count
  *   of the byte extraction rather than the number of bytes read.  A
- *   byte-oriented S-box implementation -- trading 4-byte reads for 1-byte
- *   reads and paying for MixColumns in the ALU -- moves the wrong one of those
+ *   byte-oriented S-box implementation, trading 4-byte reads for 1-byte
+ *   reads and paying for MixColumns in the ALU, moves the wrong one of those
  *   two, and measured accordingly.
  *
  * Not constant time.  Table-driven AES cannot be, on a machine with no data
  * cache to hide the access pattern in, and this one has neither the cache nor
- * a defence.  docs/RESEARCH.md 9's threat model -- a vintage machine on a LAN,
- * no remote timing attacker -- makes that acceptable here.  It would not be
+ * a defence.  docs/RESEARCH.md 9's threat model, a vintage machine on a LAN,
+ * no remote timing attacker, makes that acceptable here.  It would not be
  * for a server.
  *
  * SPDX-License-Identifier: MIT
@@ -102,7 +102,7 @@ VOID c68k_aes_cbc_decrypt(const C68K_AES *aes, UCHAR *iv,
                           const UCHAR *in, UCHAR *out, ULONG blocks);
 
 
-/* ---------------------------------------------------------- the variants -- */
+/* ---------------------------------------------------------- the variants, */
 
 /*
  * Which implementation the entry points above dispatch to.  A variable and
@@ -121,8 +121,8 @@ VOID c68k_aes_cbc_decrypt(const C68K_AES *aes, UCHAR *iv,
 #define C68K_AES_V_COUNT    5u
 
 /*
- * Resolves to the C form in a build without the assembly --
- * AMINETXDUO_CRYPTO68K_ASM=OFF, one of CI's four configurations -- so the
+ * Resolves to the C form in a build without the assembly,
+ * AMINETXDUO_CRYPTO68K_ASM=OFF, one of CI's four configurations, so the
  * reported variant never names code that is not there.
  */
 #ifdef C68K_ASM

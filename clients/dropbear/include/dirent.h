@@ -1,4 +1,4 @@
-/* clients/dropbear/include -- see clients/dropbear/build.sh.
+/* clients/dropbear/include, see clients/dropbear/build.sh.
  * newlib's <dirent.h> on this toolchain is `#error "<dirent.h> not supported"`.
  * Dropbear's includes.h includes it unconditionally and dbclient never opens a
  * directory, so this is the declaration nothing calls.

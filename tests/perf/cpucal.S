@@ -1,4 +1,4 @@
-| AmiNetXDuo -- CPU/memory calibration kernels.
+| AmiNetXDuo, CPU/memory calibration kernels.
 |
 | Exact instruction sequences with published 68020 and 68030 cycle costs, so
 | an emulator's timing model can be checked against the machine it claims to
@@ -53,7 +53,7 @@ _cal_empty:
 | Register-only kernels.  VOID cal_xxx(ULONG reps); 16 instructions per rep.
 |
 | The body is 32-64 bytes, so it sits entirely inside the 256-byte instruction
-| cache of both the 68020 and the 68030 after the first pass -- which is the
+| cache of both the 68020 and the 68030 after the first pass, which is the
 | condition the published "cache case" timings assume.
 | ---------------------------------------------------------------------------
 
@@ -114,7 +114,7 @@ _cal_addx:
         rts
 
 | MULU.L 32x32->32.  44 cycles on a real 68030, i.e. 22x the cost of ADD.L.
-| A model that reports anything near 1x is not charging for it -- which is
+| A model that reports anything near 1x is not charging for it, which is
 | exactly what the P-256 work found and why it refused to quote 68030 ratios.
         .globl  _cal_mulu
 _cal_mulu:
@@ -255,7 +255,7 @@ _cal_m2m:
 | instruction pair, two pairs per inner iteration = the same 16 longwords the
 | other memory kernels move.
 | Eight registers per MOVEM is 32 bytes, and two pairs per inner iteration is
-| the same 16 longwords the other memory kernels move -- so the rows are
+| the same 16 longwords the other memory kernels move, so the rows are
 | directly comparable.  d2-d7/a2-a3 IS the movem list, which leaves nothing to
 | hold the base pointers in: they are re-read from the argument slots on every
 | outer pass instead.

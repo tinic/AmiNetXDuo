@@ -1,5 +1,5 @@
 /*
- * NetSetup -- set up a network interface by answering questions.
+ * NetSetup, set up a network interface by answering questions.
  *
  *     NetSetup [NAME] [DEVICE=..] [UNIT=n] [DHCP] [ADDRESS=..] [NETMASK=..]
  *              [GATEWAY=..] [DNS=..] [ONLINE] [NOONLINE] [FORCE] [QUIET]
@@ -80,11 +80,11 @@ typedef struct Plan
     BOOL  have_dns;
 } Plan;
 
-/* ------------------------------------------------------------------ input -- */
+/* ------------------------------------------------------------------ input, */
 
 /*
  * Abort is a state rather than a return code because every question can hit
- * it: Ctrl-C, "Q", or end of input -- which is what NetSetup driven from a
+ * it: Ctrl-C, "Q", or end of input, which is what NetSetup driven from a
  * script that ran out of answers looks like, and it stops having written
  * nothing.
  */
@@ -225,7 +225,7 @@ static BOOL ask_address(const char *prompt, const char *suggestion,
     }
 }
 
-/* ------------------------------------------------------------ validation -- */
+/* ------------------------------------------------------------ validation, */
 
 /* A netmask has to be a run of ones then a run of zeroes; 255.255.0.255 is not. */
 static BOOL netmask_is_sane(ULONG mask)
@@ -276,7 +276,7 @@ static BOOL name_is_sane(const char *name)
     return (BOOL)(len > 0 && len <= 15);
 }
 
-/* ---------------------------------------------------------------- writing -- */
+/* ---------------------------------------------------------------- writing, */
 
 /*
  * Files are built here in full and written in one go at the end, so an abort,
@@ -427,7 +427,7 @@ static VOID restore_file(const char *path, BOOL kept_old)
     (VOID)Rename((CONST_STRPTR)keep, (CONST_STRPTR)path);
 }
 
-/* --------------------------------------------------------------- the plan -- */
+/* --------------------------------------------------------------- the plan, */
 
 static VOID build_interface_file(const Plan *plan, Blob *out)
 {
@@ -526,7 +526,7 @@ static VOID show_plan(const Plan *plan, const char *ifpath)
     }
 }
 
-/* ------------------------------------------------------------- questions -- */
+/* ------------------------------------------------------------- questions, */
 
 /* The card. Numbered list of what is installed, or type a name. */
 static BOOL ask_device(Plan *plan)
@@ -825,7 +825,7 @@ static BOOL ask_static_details(Plan *plan)
     return !setup_aborted;
 }
 
-/* --------------------------------------------------------------- bring up -- */
+/* --------------------------------------------------------------- bring up, */
 
 static VOID bring_up(const Plan *plan)
 {
@@ -892,7 +892,7 @@ static VOID bring_up(const Plan *plan)
     }
 }
 
-/* ------------------------------------------------------------------- main -- */
+/* ------------------------------------------------------------------- main, */
 
 int main(int argc, char **argv)
 {
@@ -1190,7 +1190,7 @@ int main(int argc, char **argv)
     }
 
     /* All the files are in place, so the interface's .old rollback backup has
-       done its job -- delete it.  Left in DEVS:NetInterfaces it would be loaded
+       done its job, delete it.  Left in DEVS:NetInterfaces it would be loaded
        as a second, phantom interface, because the drawer is read whole
        (src/config/config_file.c). */
     if (kept_if)

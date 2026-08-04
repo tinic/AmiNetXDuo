@@ -1,8 +1,8 @@
-| AmiNetXDuo -- one's-complement longword sum, 68k.
+| AmiNetXDuo, one's-complement longword sum, 68k.
 |
 | ULONG n68k_sum_longwords(const ULONG *p, ULONG count);
 |
-| This was two instructions per longword -- add.l a0@+,d0 to sum and set X,
+| This was two instructions per longword, add.l a0@+,d0 to sum and set X,
 | addx.l d2,d0 with d2 zero to fold the carry back in.  C reaches neither: it
 | has no carry flag and cannot fold the load into the add's addressing mode.
 |
@@ -15,7 +15,7 @@
 |       ...
 |
 | Eight instructions per seven longwords rather than sixteen per eight.  Not
-| the earlier movem experiment that bought nothing -- that one still ran
+| the earlier movem experiment that bought nothing, that one still ran
 | add.l/addx.l on each loaded register, 19 instructions per 32 bytes against
 | 18, and measured 201.27 against 201.39.  movem.l pays only when what it feeds
 | needs one instruction per longword, not two.
@@ -24,15 +24,15 @@
 | moveq and the branches leave it alone; add, sub, the shifts and addx do not.
 | Hence the setup shifts before the chain is armed, and cmpa against a
 | precomputed limit for loop control rather than subq, which writes X.  dbf
-| does NOT write X -- DBcc leaves the condition codes alone -- so it is barred
+| does NOT write X, DBcc leaves the condition codes alone, so it is barred
 | for the other reason instead: it counts in a data register, and all eight are
 | spoken for, d0 the accumulator and d1-d7 the movem payload.  Seven is the
 | ceiling: d0 is the accumulator, addx takes only data registers, and folding an
 | address register in with add.l would drop the pending carry.
 |
-| The chain leaves one carry in X.  Folding it can carry again -- d0 =
+| The chain leaves one carry in X.  Folding it can carry again, d0 =
 | 0xFFFFFFFF with X set is reachable here, unlike in the add/addx form where a
-| carry out of the add bounds the result at 0xFFFFFFFE -- so the fold runs
+| carry out of the add bounds the result at 0xFFFFFFFE, so the fold runs
 | twice.  Twice is enough: the first can only carry by taking d0 to zero, and
 | 0 + 1 does not.  That keeps what n68k_checksum.c relies on: congruent to the
 | 16-bit sum modulo 0xFFFF, and the zero spelling only when every longword was
@@ -43,12 +43,12 @@
 | both directions it was a 24-32% loss, measured.  So 64 longwords and under
 | take a second shape that saves nothing: a computed jump into 64 unrolled
 | move.l/addx.l pairs, entered so exactly `count` of them run.  Straight-line
-| code run once, so its 256 bytes cost nothing in the instruction cache -- a
+| code run once, so its 256 bytes cost nothing in the instruction cache, a
 | cache charges only for code that repeats.
 |
 | A1200 profile, ns/B, best of five, every candidate in one binary so no
-| cross-run drift reads as a difference.  Floor -- this loop assembled twice at
-| two addresses -- is 1.3-3.3% at 128 B and up, 5% at 20-40 B, where placement
+| cross-run drift reads as a difference.  Floor, this loop assembled twice at
+| two addresses, is 1.3-3.3% at 128 B and up, 5% at 20-40 B, where placement
 | alone moves the number.
 |
 |   bytes    1460   1024    512    400    296    260    200    128     40     20
@@ -61,7 +61,7 @@
 | Losers, so they are not tried again.  add/addx unrolled 16/32/64 longwords:
 | 166-175 at 1460 B, the subq/bne being 11% of the budget and all there was;
 | unrolled 128: 184, worse than eight.  dbf for loop control: identical within
-| the floor.  Two accumulators: flat -- the addx reads the X the add just set,
+| the floor.  Two accumulators: flat, the addx reads the X the add just set,
 | so the flag serialises the pairs whatever the data does.  Movem chain 7x13
 | and 7x16: match 7x8 at 1460 B, lose 5-11% at 260-512 B where the deeper block
 | no longer fits the packet.  7x32: 7% worse everywhere.  A middle loop level:
@@ -70,7 +70,7 @@
 |
 | 68000 and 68060: this file runs on both.  movem.l, addx.l, the computed jump
 | and everything else here are original 68000 instructions and none was dropped
-| from the 68060, so AMINETXDUO_NET68K_ASM stays on for every target -- unlike
+| from the 68060, so AMINETXDUO_NET68K_ASM stays on for every target, unlike
 | AMINETXDUO_CRYPTO68K_ASM, which is 68020-only because its MULU.L 32x32 traps
 | to vector 61 on an 060.
 |

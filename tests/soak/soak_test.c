@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- milestone 1 exit-criterion soak test.
+ * AmiNetXDuo, milestone 1 exit-criterion soak test.
  *
  * docs/RESEARCH.md 8, milestone 1: "a soak test with 4 adopted tasks
  * contending on a mutex and a timer, clean under Enforcer."
@@ -9,7 +9,7 @@
  *
  *   - 4 long-lived adopted Exec contexts (2 raw AddTask() Tasks, 2
  *     CreateNewProc() Processes), plus main() itself, plus 2 more that adopt
- *     and orphan continuously -- 7 adopted contexts in total;
+ *     and orphan continuously, 7 adopted contexts in total;
  *   - 2 ThreadX-created threads running the identical worker body, so both
  *     thread flavours interleave on the same objects;
  *   - one TX_MUTEX with priority inheritance that everybody fights over,
@@ -25,7 +25,7 @@
  *     costs in wake-up latency;
  *   - tx_thread_wait_abort() and tx_thread_suspend()/tx_thread_resume()
  *     applied to an adopted thread, because bsdsocket.library needs both;
- *   - a watchdog Process -- not a ThreadX thread -- that samples the baton
+ *   - a watchdog Process, not a ThreadX thread, that samples the baton
  *     from outside the model and can still report when everything inside it
  *     is wedged.
  *
@@ -39,7 +39,7 @@
  * Found so far (2026-07-25, FS-UAE A1200/68020, Kickstart 3.1):
  *
  *   1. Open, blocking: an Exec Task that was adopted and then orphaned cannot
- *      call RemTask(NULL).  Doing so raises "GURU 01000009 -- freeing memory
+ *      call RemTask(NULL).  Doing so raises "GURU 01000009, freeing memory
  *      already freed" and stops the machine, reproducibly, in every run.  The
  *      Task's tc_MemEntry block is intact and correct at that moment (this test
  *      prints it), so the block has already been freed once by the time Exec
@@ -110,7 +110,7 @@ extern ULONG            _tx_thread_created_count;
 /*
  * The port has no tx_amiga_kernel_stop().  A program that links it and then
  * returns to AmigaDOS leaves the periodic tick Task running with its entry
- * point inside the code hunk DOS has just freed -- it fires 100 times a second
+ * point inside the code hunk DOS has just freed, it fires 100 times a second
  * and takes the machine down within milliseconds, before the boot script can
  * record the exit status.  These two are the port's own tick controls
  * (port/threadx-amiga/src/tx_initialize_low_level.c); the teardown below uses
@@ -154,7 +154,7 @@ extern volatile UINT    _tx_amiga_timer_stop;
  * The two adopted raw Exec Tasks park in Wait(0) at the end instead of calling
  * RemTask(NULL).  RemTask() frees the block registered in tc_MemEntry, and by
  * the end of a soak this port has corrupted the Exec free list, so the first
- * FreeMem() anywhere raises "GURU 01000009 -- freeing memory already freed"
+ * FreeMem() anywhere raises "GURU 01000009, freeing memory already freed"
  * and stops the machine before the test can report anything.  Parking
  * postpones the first free until after the verdict has been written out.
  *
@@ -191,7 +191,7 @@ extern volatile UINT    _tx_amiga_timer_stop;
 
 /*
  * Stack for the CreateNewProc() contexts.  Unlike the Task and ThreadX stacks
- * above -- which are static arrays in BSS -- a Process stack comes out of the
+ * above, which are static arrays in BSS, a Process stack comes out of the
  * Exec heap, so an overflow here lands on other people's allocations rather
  * than on our own BSS.  Overridable so a suspected overflow can be ruled out
  * in one rebuild.
@@ -402,7 +402,7 @@ ULONG            block_size;
      * RemTask() hands each MemList in tc_MemEntry to FreeEntry(), the inverse
      * of AllocEntry(): it frees every me_Addr entry and then frees the MemList
      * structure itself. Putting the MemList inside the block that ml_ME[0]
-     * covers therefore frees one address twice -- AN_FreeTwice
+     * covers therefore frees one address twice, AN_FreeTwice
      * (Guru 0x01000009) when Exec notices, and silent free-list corruption
      * when it does not. The corrupted list later hands out memory that is
      * still in use, so a task ends up executing recycled bytes: that is where
@@ -661,7 +661,7 @@ struct s_snap
 };
 
 /*
- * Snapshot every TX_THREAD under Forbid(), then log outside it -- RawPutChar()
+ * Snapshot every TX_THREAD under Forbid(), then log outside it, RawPutChar()
  * busy-waits on the serial port and holding Forbid() across it would stop the
  * machine for tens of milliseconds per line.
  */
@@ -729,7 +729,7 @@ ULONG           n;
  *
  *   - s_cs_inside must be exactly 1 for the whole visit;
  *   - s_cs_unsafe (read, pause, write) must end up equal to s_cs_safe
- *     (incremented under Forbid) -- if the mutex ever let two contexts in, the
+ *     (incremented under Forbid), if the mutex ever let two contexts in, the
  *     unsafe counter loses updates and the safe one does not;
  *   - the mutex must report us as owner with the right nesting count;
  *   - while a thread is suspended on the mutex, priority inheritance must have
@@ -1149,7 +1149,7 @@ struct s_worker *w;
  * _tx_thread_system_state raised but Forbid() released.  Both windows are
  * exercised here thousands of times against a fully loaded system, and the
  * Delay() at the bottom of the loop is a genuine non-ThreadX block by a task
- * that has just orphaned -- if orphan ever left the baton behind, everything
+ * that has just orphaned, if orphan ever left the baton behind, everything
  * else would stall behind that Delay() and the watchdog would say so.
  */
 static VOID s_churn_body(struct s_churner *c)
@@ -1270,7 +1270,7 @@ struct s_churner *c;
 /*
  * Not a ThreadX thread and never adopted: it observes the baton from outside
  * the model, so it keeps reporting when everything inside is wedged.  An
- * ordinary Process at Exec priority 5 -- above the ThreadX tasks (priority 1)
+ * ordinary Process at Exec priority 5, above the ThreadX tasks (priority 1)
  * and below the tick (priority 20).
  */
 static VOID s_watchdog_entry(VOID)
@@ -1325,7 +1325,7 @@ ULONG           i;
         /*
          * The baton must never be held by a task that is not running.  A holder
          * parked in Wait() with its run signal not pending, across several
-         * samples, with its run count unchanged, is a stuck baton -- the
+         * samples, with its run count unchanged, is a stuck baton, the
          * failure mode of an adopted Task that blocks on something other than
          * ThreadX (tx_amiga_adopt.c, "What it does not close").
          */
@@ -1555,7 +1555,7 @@ ULONG   fires;
     Permit();
 
     /* Timer expirations run on the ThreadX system timer thread, so ThreadX
-       services are legal here -- including taking a mutex.  */
+       services are legal here, including taking a mutex.  */
     if (tx_mutex_get(&s_mutex2, TX_NO_WAIT) == TX_SUCCESS)
     {
         Forbid();
@@ -1685,7 +1685,7 @@ ULONG            i;
     }
 
     /* Wait until it really is suspended on the semaphore, not merely about to
-       be -- otherwise the abort would race the suspend and prove nothing.  */
+       be, otherwise the abort would race the suspend and prove nothing.  */
     state =  0U;
     for (i = 0UL; i < 200UL; i++)
     {
@@ -1763,7 +1763,7 @@ ULONG            i;
  * Must be called after this Process has orphaned itself and before main()
  * returns.  The tick Task's entry point lives in this program's code hunk; the
  * moment AmigaDOS unloads the hunk, the next tick executes freed memory and the
- * machine is gone inside 10 ms -- fast enough that the boot script never gets
+ * machine is gone inside 10 ms, fast enough that the boot script never gets
  * to record the exit status, so a FAIL looks like a hang.
  *
  * There is no public API for this.  _tx_amiga_timer_stop and
@@ -2130,7 +2130,7 @@ struct EClockVal ev;
     (VOID) S_CHECK(S_CURRENT == &s_main_thread,
                    "main: we hold the baton after adoption", (ULONG) S_CURRENT);
 
-    /* One Forbid, so every adopted context races into the port at once --
+    /* One Forbid, so every adopted context races into the port at once,
        the worst case for the adoption fast path.  */
     Forbid();
     for (i = 0UL; i < (ULONG) S_WORKERS; i++)
@@ -2273,7 +2273,7 @@ struct EClockVal ev;
      * wrong: the lowest-priority worker (pri 22) finished 44 iterations
      * against a floor of 50 and the suite failed, while every other check
      * passed and that worker had taken the mutex 44 times and inherited
-     * priority 20 times -- outrun by the priority order, not starved.
+     * priority 20 times, outrun by the priority order, not starved.
      *
      * The counts are a clean monotonic decay by priority on both machines:
      *
@@ -2342,7 +2342,7 @@ struct EClockVal ev;
         ULONG actual;
         ULONG drift;
 
-        /* Derive from S_TPS -- hardcoding 10 ms per tick silently breaks the
+        /* Derive from S_TPS, hardcoding 10 ms per tick silently breaks the
            moment TX_TIMER_TICKS_PER_SECOND changes (it did: 100 -> 50). */
         expected =  (wall_ms / (1000UL / S_TPS));
         actual   =  end_tick - start_tick;

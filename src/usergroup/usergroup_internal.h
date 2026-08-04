@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- usergroup.library internals.
+ * AmiNetXDuo, usergroup.library internals.
  *
  * usergroup.library is AmiTCP's companion to bsdsocket.library. Ported Unix
  * software links against it for the BSD user/group database calls; without it
@@ -27,7 +27,7 @@
  * NOTE: the local toolchain's ndk-include/pwd.h is NOT the usergroup ABI. It
  * is newlib's own 10-field 4.4BSD struct passwd, substituted over Roadshow's.
  * That is exactly why the toolchain's AmiTCP inline header spells the return
- * type "struct TCP_passwd" -- the 7-field layout we use here.
+ * type "struct TCP_passwd", the 7-field layout we use here.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -44,7 +44,7 @@
 #include <dos/dos.h>
 #include <utility/tagitem.h>
 
-/* ------------------------------------------------------------ ABI records --
+/* ------------------------------------------------------------ ABI records,
  *
  * Layout-compatible with AmiTCP's and Roadshow's <pwd.h>, <grp.h>, <utmp.h>
  * and <libraries/usergroup.h>. Deliberately given our own tag names so they
@@ -90,7 +90,7 @@ struct ug_lastlog {
 
 /*
  * struct UserGroupCredentials. cr_umask is a UWORD between two LONGs, so this
- * only matches on a 2-byte-alignment ABI -- which is what m68k gives us and
+ * only matches on a 2-byte-alignment ABI, which is what m68k gives us and
  * what Roadshow's "#pragma pack(2)" forces on PPC. Asserted in ug_library.c.
  */
 struct ug_credentials {
@@ -126,7 +126,7 @@ struct ug_credentials {
 #define UG_ERANGE       34
 #define UG_ENOSYS       78
 
-/* ---------------------------------------------------------- the database --
+/* ---------------------------------------------------------- the database,
  *
  * Parsed once, shared by every opener, immutable thereafter. Only the
  * iteration cursor and the returned record are per-opener.
@@ -189,7 +189,7 @@ struct UserGroupBase {
     char                   ug_SaltBuf[16];
 };
 
-/* --------------------------------------------------------------- helpers -- */
+/* --------------------------------------------------------------- helpers, */
 
 /* ug_library.c */
 struct DosLibrary *ug_dos(struct UserGroupBase *base);

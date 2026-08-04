@@ -1,5 +1,5 @@
 /*
- * bsdsocket.library -- socket options, ioctls and names.
+ * bsdsocket.library, socket options, ioctls and names.
  *
  * setsockopt/getsockopt/IoctlSocket/getsockname/getpeername/getdtablesize
  * plus Dup2Socket, which is nearly free once descriptors are reference
@@ -90,7 +90,7 @@ static LONG bsd_opt_set_long(struct AmiSocketBase *base, APTR optval,
  * value was stored, echoed back by getsockopt, and never used. raw.c reads
  * as_Ttl and as_Tos directly and needs nothing from here.
  *
- * NetX Duo carries the TOS octet in bits 16..23 of a ULONG -- that is where
+ * NetX Duo carries the TOS octet in bits 16..23 of a ULONG, that is where
  * NX_IP_NORMAL and NX_IP_MIN_DELAY sit, and NX_IP_TOS_MASK is 0x00FF0000.
  *
  * The IPv6 halves are not covered: _nx_ipv6_packet_send() takes the traffic
@@ -145,7 +145,7 @@ static VOID bsd_ticks_timeval(ULONG ticks, struct timeval *tv)
                    (1000000UL / (ULONG)NX_IP_PERIODIC_RATE);
 }
 
-/* ------------------------------------------------------------ setsockopt -- */
+/* ------------------------------------------------------------ setsockopt, */
 
 LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                     register LONG level      __asm("d1"),
@@ -179,8 +179,8 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
              * to 2MSL and the program looks broken.
              *
              * It cannot displace a live listener or an established
-             * connection -- nx_tcp_socket_reuse_address_set() says so and the
-             * bind enforces it -- which is the BSD rule.
+             * connection, nx_tcp_socket_reuse_address_set() says so and the
+             * bind enforces it, which is the BSD rule.
              *
              * SO_REUSEPORT is the same flag here.  BSD's REUSEPORT also
              * allows several live sockets on one port and shares arrivals
@@ -213,8 +213,8 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 return 0;
 
             /*
-             * Likewise. BSD uses this as permission -- sendto() to a broadcast
-             * address is EACCES without it -- and this stack has never asked,
+             * Likewise. BSD uses this as permission, sendto() to a broadcast
+             * address is EACCES without it, and this stack has never asked,
              * so enforcing it now would start failing sends that work today.
              * The flag is kept so getsockopt answers what was set.
              */
@@ -302,7 +302,7 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
              * On TCP nothing is applied. The receive queue depth is the only
              * knob NetX Duo offers and the whole body of
              * nx_tcp_socket_receive_queue_max_set() is inside
-             * NX_ENABLE_LOW_WATERMARK, which this port does not define -- the
+             * NX_ENABLE_LOW_WATERMARK, which this port does not define, the
              * note at the end of nx_user.h says why, and it is a piece of work
              * with its own measurement rather than a define. The advertised
              * window is sized from the packet pool at socket-create time
@@ -400,8 +400,8 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
              * NetX Duo does not implement Nagle, so a segment is sent as soon
              * as there is one to send and getsockopt answers 1 whatever was
              * asked for. The arguments are still checked, and the socket type
-             * still has to be TCP: accepting this on a UDP socket -- which it
-             * did, by returning before looking at anything -- told a caller
+             * still has to be TCP: accepting this on a UDP socket, which it
+             * did, by returning before looking at anything, told a caller
              * that a level it does not have was configured.
              */
             case TCP_NODELAY:
@@ -531,7 +531,7 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
     return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
 }
 
-/* ------------------------------------------------------------ getsockopt -- */
+/* ------------------------------------------------------------ getsockopt, */
 
 LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
                     register LONG level       __asm("d1"),
@@ -550,7 +550,7 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
         switch (optname)
         {
             /*
-             * SO_ERROR clears on read -- but only on a read that happened.
+             * SO_ERROR clears on read, but only on a read that happened.
              * Clearing first meant a bad optval returned EFAULT and destroyed
              * the pending error on the way out, and a non-blocking connect()
              * has no other way to find out why it failed.
@@ -719,7 +719,7 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
     return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
 }
 
-/* ----------------------------------------------------------- IoctlSocket -- */
+/* ----------------------------------------------------------- IoctlSocket, */
 
 LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
                      register ULONG req    __asm("d1"),
@@ -794,7 +794,7 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
              * not taken it yet".  A caller that uses SIOCATMARK to decide when
              * to stop discarding, as telnet does, gets the right answer; a
              * caller that expects the byte to be absent from the stream does
-             * not -- the divergence oob.c documents.
+             * not, the divergence oob.c documents.
              */
             *(LONG *)argp = ((sock->as_Flags & ASF_OOBHAVE) != 0) ? 1 : 0;
             return 0;
@@ -831,7 +831,7 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
     }
 }
 
-/* ------------------------------------------------------------------ names -- */
+/* ------------------------------------------------------------------ names, */
 
 LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
                      register struct sockaddr *name __asm("a0"),

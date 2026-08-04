@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- IPv6 addresses to and from text.
+ * AmiNetXDuo, IPv6 addresses to and from text.
  *
  * Compiled whether the tree has AMINETXDUO_IPV6 or not, and in its own file
  * rather than config_text.c.  Both halves are deliberate.
@@ -7,7 +7,7 @@
  * Unconditional: the Shell commands are one binary for a library built either
  * way, so a command handed "::1" on an IPv4-only machine still has to tell a
  * valid address from a typo.  It used to ask the library's inet_pton(), which
- * answers EAFNOSUPPORT there -- `arp ::1` called a good address "not an
+ * answers EAFNOSUPPORT there, `arp ::1` called a good address "not an
  * address" and `nslookup ::1` asked the DNS for a name spelt like one.
  *
  * Its own file: a pulled archive member is kept whole and the library link
@@ -89,7 +89,7 @@ static BOOL ami_cfg_parse_ip6_inner(const char *text,
 
         /* A dotted quad here consumes the last two groups and ends the
            address.  Detected by scanning ahead for a '.' before the next
-           ':' -- the digits themselves are ambiguous until then. */
+           ':', the digits themselves are ambiguous until then. */
         {
             const char *look = s;
 
@@ -168,7 +168,7 @@ static BOOL ami_cfg_parse_ip6_inner(const char *text,
 
     /*
      * RFC 4007 11: "<address>%<zone_id>", before any prefix. A caller that
-     * cannot carry a zone refuses one rather than dropping it -- a link-local
+     * cannot carry a zone refuses one rather than dropping it, a link-local
      * address whose zone was silently discarded names a different destination,
      * and would be sent on whichever interface the stack guessed.
      *
@@ -235,7 +235,7 @@ static BOOL ami_cfg_parse_ip6_inner(const char *text,
     else
     {
         /*
-         * "::" must stand for at least one group -- "1:2:3:4:5:6:7::8" has
+         * "::" must stand for at least one group, "1:2:3:4:5:6:7::8" has
          * eight groups already and is malformed, not merely redundant.
          */
         if (count >= 8)

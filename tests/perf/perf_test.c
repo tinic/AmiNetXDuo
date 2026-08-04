@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- where a megabyte of TCP actually goes.
+ * AmiNetXDuo, where a megabyte of TCP actually goes.
  *
  * There is no profiler on this platform, so this is the substitute: measure
  * every primitive the data path touches per byte, count how many times the
@@ -17,7 +17,7 @@
  *   3. An alignment census of the pointers the stack actually hands those
  *      routines, because a memcpy penalty that never fires is not a finding.
  *   4. A pipeline benchmark: exactly the operations a loopback segment pays
- *      for, in order, with no protocol -- so its reciprocal is the ceiling the
+ *      for, in order, with no protocol, so its reciprocal is the ceiling the
  *      copy loops impose.
  *   5. End to end: TCP over 127.0.0.1 and TCP between two NX_IP instances
  *      over the simulated RAM driver, each run with the vendored checksum and
@@ -31,8 +31,8 @@
  * Only the 68020 profiles mean anything, and that is measured rather than
  * suspected: tests/perf/cpucal.c times instructions with published cycle costs
  * and finds FS-UAE's A1200 model faithful to under 2% for two-cycle integer
- * work, while its 68030 -- any 68030, including `-c 68030` on the A1200 model
- * -- charges no cycles at all, because FS-UAE turns cycle accounting off above
+ * work, while its 68030, any 68030, including `-c 68030` on the A1200 model
+ *, charges no cycles at all, because FS-UAE turns cycle accounting off above
  * a 68020.  Run this under `-m A3000` as a correctness check and do not quote
  * the numbers.
  *
@@ -191,7 +191,7 @@ static ULONG p_ms(ULONG ticks)
  * Nanoseconds per byte, x100 so a fraction survives an integer print, taken
  * over the whole loop rather than as a per-iteration mean.
  *
- * The per-iteration form quantises to one E-Clock tick per rep -- 1.409 us --
+ * The per-iteration form quantises to one E-Clock tick per rep, 1.409 us,
  * and at 14 MHz a 1460-byte copy is ~180 ticks, so the granularity is half a
  * percent and invisible.  At 24.5 MHz with `fsuae-run.sh -k 25` it is ~105
  * ticks, and three copy routines that differ by 4% all printed the same
@@ -476,7 +476,7 @@ ULONG   len = 1460UL;
      * to 256 bytes and a 56-longword movem.l block above that, so a sweep
      * that stops short of 224 bytes never reaches the second shape at all and
      * one that stops short of 448 never runs its loop twice.  The host tier
-     * cannot check either -- it compiles the C fallback -- so this is the only
+     * cannot check either, it compiles the C fallback, so this is the only
      * place the assembly is checked against the vendored answer.
      *
      * The fills are the carry cases: all ones makes every add carry, and the
@@ -544,12 +544,12 @@ UINT    da, sa;
      * memcpy(), at every combination of destination and source alignment.
      *
      * Read the build flags before reading these rows.  With
-     * AMINETXDUO_NET68K_MEMCPY=ON -- the default on a cross build -- memcpy()
+     * AMINETXDUO_NET68K_MEMCPY=ON, the default on a cross build, memcpy()
      * is n68k_copy_bytes(), and these rows measure it twice under two names.
      * The C library's own numbers quoted in docs/RESEARCH.md were taken from a
      * -DAMINETXDUO_NET68K_MEMCPY=OFF build, which is the only way to get them.
-     * The libm020 multilib -- which -m68020 selects, verified in the link map
-     * -- aligns only the destination and then moves longwords regardless of
+     * The libm020 multilib, which -m68020 selects, verified in the link map
+     *, aligns only the destination and then moves longwords regardless of
      * what the source is doing, so the expensive case is supposed to be a
      * misaligned destination, not a misaligned source.  This measurement says
      * whether that is true.
@@ -589,7 +589,7 @@ UINT    da, sa;
      * at least one of them.
      *
      * The ceiling is 288 rather than 96 so that two whole 128-byte blocks
-     * plus a remainder run at every alignment pair -- at 96 the unrolled
+     * plus a remainder run at every alignment pair, at 96 the unrolled
      * block never executes and the sweep silently covers nothing.
      */
     {
@@ -726,7 +726,7 @@ UINT    da, sa;
     p_report("ami_sana2_copy_bytes d0 s2", ticks, reps, len);
 
     /*
-     * Opposite parity, where a real cliff lives -- in our own code, not the C
+     * Opposite parity, where a real cliff lives, in our own code, not the C
      * library: the SANA-II shim's loop takes its longword path only when
      * source and destination agree mod 2, and drops to one byte per iteration
      * when they do not.
@@ -813,7 +813,7 @@ ULONG       len = 1460UL;
     ticks = p_elapsed(t0, p_now());
     p_report("allocate + append 1460 + release", ticks, reps, len);
 
-    /* data_append of a full application chunk -- this is the one that chains. */
+    /* data_append of a full application chunk, this is the one that chains. */
     t0 = p_now();
     for (i = 0UL; i < reps; i++)
     {
@@ -1059,7 +1059,7 @@ static volatile UINT    p_srv_status;
 /*
  * Sender phase accounting.  Bracketing every call costs one bracket (30 ticks,
  * 42 us) per call, which against a transfer measured in seconds is under one
- * part in a thousand -- and it is the only way to tell "the copy loops are
+ * part in a thousand, and it is the only way to tell "the copy loops are
  * slow" from "the sender is asleep waiting for an acknowledgement".
  */
 static ULONG    p_phase_alloc;
@@ -1175,7 +1175,7 @@ ULONG       t0;
          * told the transfer finished, so nobody completes the handshake and
          * the disconnect burns its whole timeout.  Every figure in the first
          * pass was ~5000 ms of nothing plus the real transfer, and they all
-         * came out around 45 KB/s regardless of what was changed -- a constant
+         * came out around 45 KB/s regardless of what was changed, a constant
          * offset that flattens every comparison.
          */
         (VOID)tx_semaphore_put(&p_srv_gotall);
@@ -1191,7 +1191,7 @@ ULONG       t0;
 
 /*
  * One transfer.  Returns the elapsed E-Clock ticks, or 0 if it did not
- * complete -- the caller prints the failure.
+ * complete, the caller prints the failure.
  */
 static ULONG p_transfer(NX_IP *cip, NX_IP *sip, ULONG peer, UINT port,
                         UINT extract, ULONG bytes, ULONG *packets_out)
@@ -1309,7 +1309,7 @@ ULONG       before_sent;
     /*
      * Read the socket's own counters before it is torn down.  A retransmit
      * count above zero on a loopback transfer means packets are being dropped
-     * -- almost always the pool -- and every conclusion about copy cost drawn
+     *, almost always the pool, and every conclusion about copy cost drawn
      * from a lossy run would be wrong.
      */
     (VOID)nx_tcp_socket_info_get(&p_client, NX_NULL, NX_NULL, NX_NULL, NX_NULL,
@@ -1390,8 +1390,8 @@ ULONG   calls, ckbytes, misaligned;
  * curve is flat and every byte of extra window is pool held for nothing.
  *
  * 65535 is the last window a socket can be created with while
- * NX_ENABLE_TCP_WINDOW_SCALING is off -- nxe_tcp_socket_create.c:170 refuses
- * anything larger -- so it is the ceiling of the sweep rather than an
+ * NX_ENABLE_TCP_WINDOW_SCALING is off, nxe_tcp_socket_create.c:170 refuses
+ * anything larger, so it is the ceiling of the sweep rather than an
  * arbitrary stopping point.
  */
 

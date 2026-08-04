@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- conformance triage probe.
+ * AmiNetXDuo, conformance triage probe.
  *
  * bsdsocktest reports pass/fail; when a whole category collapses it does not
  * say which call broke first.  This walks the same sequence by hand and
@@ -261,7 +261,7 @@ static VOID probe_doc_edges(VOID)
     p("ReleaseSocket(99)            [EBADF 9]", rc);
 
     /* The doc says shutdown() on an unconnected socket is [ENOTCONN]; this
-       library returns 0. Recorded, not asserted -- see the socket audit. */
+       library returns 0. Recorded, not asserted, see the socket audit. */
     fd = socket(AF_INET, SOCK_STREAM, 0);
     rc = shutdown(fd, 2);
     p("shutdown(unconnected)        [doc: ENOTCONN 57]", rc);
@@ -319,7 +319,7 @@ static VOID probe_audit_fixes(VOID)
     CloseSocket(lst);
 
     /* "The 'nfds' parameter may be truncated if it covers more sockets than
-       are currently in use." -- clamped, not EINVAL. */
+       are currently in use.", clamped, not EINVAL. */
     tv.tv_secs = 0; tv.tv_micro = 0;
     rc = WaitSelect(getdtablesize() + 64, NULL, NULL, NULL, &tv, NULL);
     p("WaitSelect(nfds > table)     [0, truncated]", rc);

@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- timer-driven PC sampling.  See prof.h for why the sample is
+ * AmiNetXDuo, timer-driven PC sampling.  See prof.h for why the sample is
  * taken in the autovector rather than in an Exec interrupt server.
  *
  * This file does the parts that need AmigaOS rather than 68k: getting a CIA
@@ -19,7 +19,7 @@
  *      library is a jump table: LVO -6*n of a base is a JMP to the real
  *      entry point.  prof_scan_libs() resolves all of them for every library,
  *      device and resource on Exec's lists, so a PC in Kickstart can be named
- *      by the nearest preceding entry -- "exec.library/Forbid" rather than
+ *      by the nearest preceding entry, "exec.library/Forbid" rather than
  *      "$00f8xxxx".  This is not decoration.  A separate probe measured the
  *      ThreadX bracket at 214 us per socket call and that time is spent in
  *      Exec; a profile that lumped Kickstart into one bucket would hide the
@@ -152,8 +152,8 @@ struct ProfSource
  *   timers were handed over and programmed cleanly.  Timer B then stopped at
  *   the first ami_millis(), which opens timer.device's MICROHZ unit and takes
  *   the timer back.  Timer A ran at a correct 1000 Hz for anything from 0.4
- *   to 1.5 seconds and then stopped dead -- vector still ours, INTENA's EXTER
- *   still set, control register still $01, counter still counting -- with the
+ *   to 1.5 seconds and then stopped dead, vector still ours, INTENA's EXTER
+ *   still set, control register still $01, counter still counting, with the
  *   chip's ICR reading $85: an interrupt raised and never acknowledged.
  *   Reading the ICR by hand restarted it immediately.
  *
@@ -170,7 +170,7 @@ struct ProfSource
  *
  * Audio DMA has no second chip latching anything.  The chipset raises the
  * interrupt, Exec's dispatcher clears INTREQ, and that is the whole
- * acknowledgement path -- so the race above cannot occur.  Level 4 also beats
+ * acknowledgement path, so the race above cannot occur.  Level 4 also beats
  * the CIA-A fallback's level 2: it can sample inside a level-2 or level-3
  * handler, which is where a SANA-II driver's receive path runs.
  */
@@ -257,7 +257,7 @@ BPTR                         seg;
 /*
  * Resolve one jump table.  Entry n of a library sits at base - 6*n and is
  * normally `JMP abs.l`; a few are `JMP d16(PC)`.  Anything else is left out
- * rather than guessed at -- a wrong target here would pull unrelated samples
+ * rather than guessed at, a wrong target here would pull unrelated samples
  * onto a name, which is precisely the failure this whole tool exists to avoid.
  */
 static VOID prof_scan_one(struct Library *lib, UWORD type)
@@ -411,7 +411,7 @@ struct CIA *cia = prof_src->src_CIA;
  *
  * The channel is taken directly rather than through audio.device.  Nothing in
  * this tree opens audio.device, the tool is not something the library ships,
- * and everything touched -- DMACON, INTENA, the AUD3 interrupt vector -- is
+ * and everything touched, DMACON, INTENA, the AUD3 interrupt vector, is
  * saved and put back by prof_audio_stop().
  */
 #define PROF_CUSTOM     0xDFF000UL
@@ -464,7 +464,7 @@ static BOOL prof_audio_start(ULONG rate_hz)
     prof_irq.is_Code         = (VOID (*)())prof_audio_stub;
 
     /* SetIntVector rather than AddIntServer: AUD3 is a handler slot.  The
-       stub clears INTREQ itself -- see prof_vector.S.  Nothing latches the
+       stub clears INTREQ itself, see prof_vector.S.  Nothing latches the
        way a CIA does, so the acknowledgement cannot be lost. */
     prof_audio_old  = SetIntVector(PROF_INTB_AUD3, &prof_irq);
     prof_audio_held = TRUE;
@@ -563,7 +563,7 @@ static VOID prof_uninstall(VOID)
     {
     struct CIA *cia = prof_src->src_CIA;
 
-        /* Best effort: the control register goes back, the latch cannot -- a
+        /* Best effort: the control register goes back, the latch cannot, a
            CIA timer reads back its counter, not what was written.  Which is
            why prof_start() will not touch one that was already running. */
         if (prof_src->src_Bit == CIAICRB_TA)
@@ -585,13 +585,13 @@ static VOID prof_uninstall(VOID)
  *
  * Every static test passes for timers that do not work.  AddICRVector()
  * arbitrates the ICR vector and not the hardware, so both CIA-B timers were
- * handed over, programmed cleanly, read back exactly what was written -- and
+ * handed over, programmed cleanly, read back exactly what was written, and
  * then stopped:
  *
  *   timer B  ran at a correct 1000 Hz until the first ami_millis(), which
  *            opens timer.device's MICROHZ unit and takes the timer back.
  *   timer A  ran at a correct 1000 Hz until the first line of serial output,
- *            and then never fired again -- vector still ours, INTENA's EXTER
+ *            and then never fired again, vector still ours, INTENA's EXTER
  *            still set, control register still $01, and no interrupts.
  *
  * Both failures produced a handful of real, correctly sampled PCs over more
@@ -794,7 +794,7 @@ ULONG            i;
     /* &SysBase->ThisTask, resolved once so the handler is one indirection. */
     prof_taskptr = (ULONG)&eb->ThisTask;
 
-    /* The vector base.  Zero on a 68000, and MOVEC does not exist there --
+    /* The vector base.  Zero on a 68000, and MOVEC does not exist there,
        AttnFlags is the documented way to ask, and prof_read_vbr() is only
        reached when the answer is yes. */
     prof_vbr = 0UL;
@@ -831,7 +831,7 @@ ULONG            i;
             }
 
             /* A running timer belongs to somebody, whether or not they took
-               the ICR vector.  Reprogramming it would break them silently --
+               the ICR vector.  Reprogramming it would break them silently,
                there is no way to read a CIA latch back and put it as it
                was. */
             if ((prof_read_cr(cand) &

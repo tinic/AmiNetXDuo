@@ -1,5 +1,5 @@
 /*
- * toolsock -- bsdsocket.library through its published vectors, for the
+ * toolsock, bsdsocket.library through its published vectors, for the
  * commands that are network applications rather than parts of the stack.
  *
  * nc and telnet must run on an Amiga with Roadshow or AmiTCP underneath, so
@@ -9,7 +9,7 @@
  * programs demonstrate.
  *
  * fetch open-codes the eight vectors it needs. These three need nineteen
- * between them, including the server half -- bind, listen, accept -- that no
+ * between them, including the server half, bind, listen, accept, that no
  * client-only tool touches, so they are written once here.
  *
  * SPDX-License-Identifier: MIT
@@ -24,7 +24,7 @@
 extern "C" {
 #endif
 
-/* ------------------------------------------------------------ the shapes --
+/* ------------------------------------------------------------ the shapes,
  *
  * Open-coded rather than included: <sys/socket.h> in this toolchain is the
  * socket world's, tools.h has already pulled in NetX Duo's <sys/types.h>, and
@@ -45,7 +45,7 @@ typedef struct ToolSockAddr
  * The AF_INET6 shape, as this NDK spells it: no sin6_len, so byte 0 is the
  * family. src/bsdsocket/in6.c pins every offset with _Static_assert and
  * bsd_sa_family() reads byte 0 plus the declared length, which is why the two
- * structs can share the union below without ambiguity -- a sockaddr_in's byte
+ * structs can share the union below without ambiguity, a sockaddr_in's byte
  * 0 is its length, 16, and never 23.
  */
 typedef struct ToolSockAddr6
@@ -119,7 +119,7 @@ typedef struct ToolAddrInfo
 #define TOOL_SO_ERROR       0x1007
 
 /*
- * <netinet/in.h>'s and <sys/socket.h>'s -- 4.4BSD's, and Roadshow's -- not
+ * <netinet/in.h>'s and <sys/socket.h>'s, 4.4BSD's, and Roadshow's, not
  * NetX Duo's addons/BSD layer, which numbers IPPROTO_IP 2 and IP_TTL 26 and is
  * not what this library speaks.  Shared by `ping` and `traceroute`.
  */
@@ -132,7 +132,7 @@ typedef struct ToolAddrInfo
 #define TOOL_SHUT_WR        1
 #define TOOL_SHUT_RDWR      2
 
-/* _IOW('f', 126, int) -- non-blocking mode. */
+/* _IOW('f', 126, int), non-blocking mode. */
 #define TOOL_FIONBIO        0x8004667EUL
 
 /* The errno numbers these commands name.  4.4BSD's, which is what every
@@ -178,8 +178,8 @@ BOOL tool_fd_isset(const ToolFdSet *set, LONG fd);
 /* ---------------------------------------------------------- the library --- */
 
 /*
- * Open bsdsocket.library, which starts the network -- the library is
- * self-starting -- and print an explanation when it will not.  NULL on
+ * Open bsdsocket.library, which starts the network, the library is
+ * self-starting, and print an explanation when it will not.  NULL on
  * failure, nothing printed on success.
  *
  * Not tool_require_stack(): these commands exist to use the network, so they
@@ -291,7 +291,7 @@ VOID tool_sock_addr_text(struct Library *base, const ToolSockAddrAny *sa,
 
 /*
  * A literal of either family as itself, anything else through the library's
- * own getaddrinfo() with AF_UNSPEC -- so an IPv6 answer is preferred when the
+ * own getaddrinfo() with AF_UNSPEC, so an IPv6 answer is preferred when the
  * machine has IPv6 and the name has an AAAA.  Prints the failure and returns
  * FALSE; on success nothing is printed.
  *
@@ -318,7 +318,7 @@ UWORD tool_sock_port(struct Library *base, const char *text, const char *proto);
 const char *tool_sock_errstr(LONG err);
 
 /*
- * "cannot connect to 10.0.2.2 port 21: connection refused" -- the standard
+ * "cannot connect to 10.0.2.2 port 21: connection refused", the standard
  * failure line, so all three commands word it the same way.
  */
 VOID tool_sock_fail(struct Library *base, const char *what,
@@ -334,7 +334,7 @@ VOID tool_sock_fail(struct Library *base, const char *what,
  *   * an interactive stream (a Shell window) is put in RAW mode and read one
  *     keystroke at a time behind WaitForChar(), the only way to get
  *     character-at-a-time out of the Amiga console;
- *   * anything else -- a file, NIL:, a redirection -- is read in blocks, since
+ *   * anything else, a file, NIL:, a redirection, is read in blocks, since
  *     a file read returns immediately.
  *
  * tool_input_open() must be paired with tool_input_close(): RAW mode outlives

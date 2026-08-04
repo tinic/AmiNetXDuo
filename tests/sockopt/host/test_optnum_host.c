@@ -6,8 +6,8 @@
  * for a few options, the Linux ones as well.  An alias is only safe while
  * nothing else claims that number, and twice now one has not been:
  *
- *   26  Linux IPV6_V6ONLY, BSD IPV6_CHECKSUM -- withdrawn on a raw socket
- *   50  Linux IPV6_PKTINFO, BSD IPV6_DSTOPTS -- the alias set removed
+ *   26  Linux IPV6_V6ONLY, BSD IPV6_CHECKSUM, withdrawn on a raw socket
+ *   50  Linux IPV6_PKTINFO, BSD IPV6_DSTOPTS, the alias set removed
  *
  * Neither is visible from the outside.  setsockopt returns success, getsockopt
  * answers, and a caller who spelled the BSD number has its buffer read as
@@ -28,7 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ------------------------------------------------------- the BSD numbering --
+/* ------------------------------------------------------- the BSD numbering,
  *
  * netinet6/in6.h as KAME wrote it and the BSDs ship it, plus the RFC 3542
  * additions.  This is the external fact the tree is checked against; only the
@@ -111,7 +111,7 @@ typedef struct
 
 static const Claim claims[] =
 {
-    /* aminetxduo/in6.h -- the published numbers, which are BSD's. */
+    /* aminetxduo/in6.h, the published numbers, which are BSD's. */
     { "include/aminetxduo/in6.h",  "IPV6_V6ONLY",          "IPV6_V6ONLY"       },
     { "include/aminetxduo/in6.h",  "IPV6_UNICAST_HOPS",    "IPV6_UNICAST_HOPS" },
     { "include/aminetxduo/in6.h",  "IPV6_TCLASS",          "IPV6_TCLASS"       },
@@ -121,7 +121,7 @@ static const Claim claims[] =
     { "include/aminetxduo/in6.h",  "IPV6_JOIN_GROUP",      "IPV6_JOIN_GROUP"   },
     { "include/aminetxduo/in6.h",  "IPV6_LEAVE_GROUP",     "IPV6_LEAVE_GROUP"  },
 
-    /* aminetxduo/cmsg.h -- RFC 3542's ancillary options, also BSD's numbers. */
+    /* aminetxduo/cmsg.h, RFC 3542's ancillary options, also BSD's numbers. */
     { "include/aminetxduo/cmsg.h", "IPV6_RECVPKTINFO",     "IPV6_RECVPKTINFO"  },
     { "include/aminetxduo/cmsg.h", "IPV6_PKTINFO",         "IPV6_PKTINFO"      },
     { "include/aminetxduo/cmsg.h", "IPV6_RECVHOPLIMIT",    "IPV6_RECVHOPLIMIT" },

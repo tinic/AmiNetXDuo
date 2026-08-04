@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- "wait N seconds" for boot scripts.
+ * AmiNetXDuo, "wait N seconds" for boot scripts.
  *
  * The bare directory-hardfile boot used by tools/fsuae-run.sh has no C:
  * commands at all, so there is no C:Wait and no C:Delay with which to give a

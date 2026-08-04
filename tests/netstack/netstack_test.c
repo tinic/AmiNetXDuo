@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- milestone 3 bring-up test.
+ * AmiNetXDuo, milestone 3 bring-up test.
  *
  * Brings the whole stack up against a real SANA-II device and reports what
  * happened:
@@ -154,8 +154,8 @@ static VOID t_log_ip(const char *label, ULONG addr)
 
 /*
  * A bring-up test that hangs reports nothing. This dumps the ThreadX
- * scheduler state -- the current thread, the thread due to execute, and what
- * every thread in the system is doing -- from an ordinary Exec Process, so it
+ * scheduler state, the current thread, the thread due to execute, and what
+ * every thread in the system is doing, from an ordinary Exec Process, so it
  * keeps running even when every ThreadX thread is wedged.
  */
 static const char *const t_state_name[] =

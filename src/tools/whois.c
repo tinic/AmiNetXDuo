@@ -1,5 +1,5 @@
 /*
- * whois -- ask a registry what it knows about a name or an address.
+ * whois, ask a registry what it knows about a name or an address.
  *
  *     whois QUERY/A,SERVER/K,PORT/N/K,FOLLOW/S
  *

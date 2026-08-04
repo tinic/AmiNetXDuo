@@ -1,5 +1,5 @@
 /*
- * clients/dropbear/localoptions-p256.h -- the same client with the other half
+ * clients/dropbear/localoptions-p256.h, the same client with the other half
  * of its algorithm set: P-256 and RSA instead of curve25519 and ed25519.
  *
  * docs/RESEARCH.md 31.6 asked whether P-256 is faster on this machine than
@@ -19,7 +19,7 @@
  * by the hostkey and publickey algorithm lists, and with ed25519 still
  * compiled in the client asks for ssh-ed25519 and keeps paying TweetNaCl for
  * both.  So this file moves the whole suite or none of it, and the client key
- * handed to -i has to be an ECDSA one -- clients/dropbear/sshd-testserver.sh
+ * handed to -i has to be an ECDSA one, clients/dropbear/sshd-testserver.sh
  * makes build/sshd-test/id_amiga_ecdsa alongside the ed25519 one, and installs
  * an ECDSA host key for the server to answer with.
  *

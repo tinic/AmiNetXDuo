@@ -1,13 +1,13 @@
 /*
- * AmiNetXDuo -- attaching src/bpf/ to the running stack.
+ * AmiNetXDuo, attaching src/bpf/ to the running stack.
  *
  * There are two capture points:
  *
- *   eth0 -- the SANA-II taps in src/sana2/sana2_rx.c and sana2_tx.c.  Every
+ *   eth0, the SANA-II taps in src/sana2/sana2_rx.c and sana2_tx.c.  Every
  *           frame that crosses a wire, in the exact shape the device saw it,
  *           ARP included.
  *
- *   lo0  -- the NetX Duo IP packet filter, installed here.  NetX Duo's
+ *   lo0 , the NetX Duo IP packet filter, installed here.  NetX Duo's
  *           loopback interface has no link driver (nx_ip_create.c:157 sets
  *           nx_interface_link_driver_entry to NX_NULL) and
  *           _nx_ip_driver_packet_send() shortcuts a loopback destination

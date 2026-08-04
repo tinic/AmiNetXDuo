@@ -1,4 +1,4 @@
-# NetX Duo AmigaOS port -- headers only.
+# NetX Duo AmigaOS port, headers only.
 #
 # nx_port.h and nx_user.h are picked up by the vendored NetX Duo core through
 # AMINETXDUO_PORT_INCLUDES in the top-level CMakeLists, which is why there is

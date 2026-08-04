@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- host fuzz driver for the BPF filter VM, the validator and the
+ * AmiNetXDuo, host fuzz driver for the BPF filter VM, the validator and the
  * capture ring.
  *
  * Same shim arrangement as src/bpf/test/test_bpf.c (-DAMI_BPF_REPLICA plus the
@@ -8,9 +8,9 @@
  * unit test uses.  Two trust boundaries meet in this code and both are
  * covered:
  *
- *   the wire       -- ami_bpf_tap_rx() runs the filter over untrusted frame
+ *   the wire      , ami_bpf_tap_rx() runs the filter over untrusted frame
  *                     bytes on the IP thread;
- *   the library    -- bpf_setf() runs a caller-chosen program, and the
+ *   the library   , bpf_setf() runs a caller-chosen program, and the
  *                     interpreter is documented to be total whether or not
  *                     ami_bpf_validate() accepted it, so both the validated
  *                     and the unvalidated path are exercised here.
@@ -215,7 +215,7 @@ int main(int argc, char **argv)
          */
         (void)ami_bpf_filter(prog, insns, frame, flen, flen);
 
-        /* A caplen shorter than the frame, and a wirelen longer than both --
+        /* A caplen shorter than the frame, and a wirelen longer than both,
            the shapes ami_bpf_capture() produces from a truncated capture. */
         (void)ami_bpf_filter(prog, insns, frame, flen + 1000, flen / 2 + 1);
 

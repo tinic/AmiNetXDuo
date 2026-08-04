@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo tools -- console diagnostics for the user at the keyboard.
+ * AmiNetXDuo tools, console diagnostics for the user at the keyboard.
  *
  * The stack's own diagnostics go to the serial port through ami_log() and are
  * aimed at whoever is debugging the stack. This file is the other half: what
@@ -11,8 +11,8 @@
  *   2. Where: a path, a line number, a device name.
  *   3. What to do next, as a command they can type.
  *
- * Nothing here needs a running stack -- the machine that needs explaining is
- * the one where the stack did not come up -- so every check below works off the
+ * Nothing here needs a running stack, the machine that needs explaining is
+ * the one where the stack did not come up, so every check below works off the
  * file system, the Exec device list and a throw-away OpenDevice().
  *
  * SPDX-License-Identifier: MIT
@@ -189,7 +189,7 @@ VOID tool_join_path(char *dst, ULONG dstlen, const char *dir, const char *name)
     tool_copy_string(dst + pos, dstlen - pos, name);
 }
 
-/* ------------------------------------------------------- device discovery -- */
+/* ------------------------------------------------------- device discovery, */
 
 /*
  * Where a SANA-II driver could be. DEVS:Networks is where Roadshow, AmiTCP and
@@ -253,7 +253,7 @@ const char *tool_device_where(const char *device)
     return NULL;
 }
 
-/* ----------------------------------------------------------- device probe -- */
+/* ----------------------------------------------------------- device probe, */
 
 /*
  * SANA-II drivers are told at OpenDevice() time how to move packet data, and
@@ -312,7 +312,7 @@ LONG tool_device_probe(const char *device, ULONG unit)
          * Opening proves the driver and the unit; it does not prove the card.
          * src/sana2/sana2_device.c calls S2_DEVICEQUERY straight after its own
          * open and reports a refusal as AMI_NET_ERR_DEVBAD, so ask the same
-         * question here -- otherwise a card that opens and then answers
+         * question here, otherwise a card that opens and then answers
          * nothing is reported as "opens perfectly well", which is true and
          * useless.
          */
@@ -336,7 +336,7 @@ LONG tool_device_probe(const char *device, ULONG unit)
     return status;
 }
 
-/* ---------------------------------------------------------------- output -- */
+/* ---------------------------------------------------------------- output, */
 
 /*
  * Wrap `text` to the width of a Shell window, every line indented by `indent`
@@ -401,7 +401,7 @@ VOID tool_wrap(ULONG indent, const char *text)
     }
 }
 
-/* ------------------------------------------------------- config reporting -- */
+/* ------------------------------------------------------- config reporting, */
 
 static UWORD diag_problem_total;
 
@@ -437,7 +437,7 @@ VOID tool_config_unwatch(VOID)
     ami_config_set_reporter(NULL, NULL);
 }
 
-/* ------------------------------------------------------------- explainers -- */
+/* ------------------------------------------------------------- explainers, */
 
 VOID tool_explain_interface_file(const char *name)
 {
@@ -482,7 +482,7 @@ VOID tool_explain_no_stack(VOID)
     tool_printf("%s: network not started\n", (LONG)tool_name);
 }
 
-/* ------------------------------------------------------------ stack state -- */
+/* ------------------------------------------------------------ stack state, */
 
 BOOL tool_stack_library_running(VOID)
 {
@@ -494,7 +494,7 @@ BOOL tool_stack_library_running(VOID)
      * stack up, which a status command must not do.
      *
      * Either sign is enough. The AMITCP public message port is the conventional
-     * Amiga barrier -- src/netstack adds it when the stack comes up and removes
+     * Amiga barrier, src/netstack adds it when the stack comes up and removes
      * it on the way down, and `WaitForPort AMITCP` in S:User-Startup waits on
      * the same thing. The library's open count also counts as running, and
      * catches a stack whose port could not be added because another one already
@@ -527,7 +527,7 @@ BOOL tool_stack_library_running(VOID)
  * machine with new commands over an old library is exactly the case worth
  * reporting. Reading lib_IdString answers for the copy actually in memory.
  *
- * Looking, not opening, for the reason tool_stack_library_running() gives --
+ * Looking, not opening, for the reason tool_stack_library_running() gives,
  * a status command must not start the network as a side effect of being asked
  * a question. Copied rather than returned by pointer, because the library can
  * expunge the moment Forbid() ends and the string goes with it.
@@ -720,7 +720,7 @@ struct Library *tool_stack_start(VOID)
      * (docs/RESEARCH.md 3.3, "self-starting").
      *
      * Opening it starts the network; not closing it is how it stays up. The
-     * leaked reference is intentional -- the same one AddNetInterface's comment
+     * leaked reference is intentional, the same one AddNetInterface's comment
      * describes.
      */
     return OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
@@ -729,7 +729,7 @@ struct Library *tool_stack_start(VOID)
 /*
  * Name lookup through the running stack's own vectors. A command cannot reach
  * netstack_resolve() inside bsdsocket.library, but gethostbyname() is a
- * published entry point into the same resolver -- including name servers a DHCP
+ * published entry point into the same resolver, including name servers a DHCP
  * lease supplied, which the configuration files know nothing about.
  */
 BOOL tool_stack_lookup(const char *name, ULONG *addr_out)
@@ -939,7 +939,7 @@ BOOL tool_stack_domain(char *domain, ULONG domainlen)
     /*
      * Only our own library. GetDefaultDomainName() is a Roadshow extension, so
      * on an AmiTCP-era bsdsocket.library -0x2be can be past the end of the
-     * vector table -- a guru rather than an answer, the same hazard
+     * vector table, a guru rather than an answer, the same hazard
      * aminetxduo/netstatus.h describes for its own two slots.
      */
     if (!tool_stack_is_ours(base))
@@ -956,7 +956,7 @@ BOOL tool_stack_domain(char *domain, ULONG domainlen)
     return (BOOL)(got && domain[0] != '\0');
 }
 
-/* ----------------------------------------------------------------- usage -- */
+/* ----------------------------------------------------------------- usage, */
 
 VOID tool_usage(const char *tmpl, const char *summary)
 {
@@ -1023,7 +1023,7 @@ static LONG tool_call_netstatus_control(struct Library *base, ULONG op,
  * Not through the library's inet_ntop() / inet_pton(): those answer
  * EAFNOSUPPORT for AF_INET6 on an IPv4-only library, and one set of commands
  * serves a library built either way.  A command has to tell "::1" from a typo
- * whether the machine can route to it or not -- see the head of
+ * whether the machine can route to it or not, see the head of
  * config_text6.c.  Neither needs the library open.
  */
 VOID tool_format_ip6(const ULONG addr[4], char *buf, ULONG buflen)
@@ -1107,7 +1107,7 @@ struct Library *tool_netstatus_open(BOOL quiet)
     /*
      * Required, not a nicety. These two vectors sit past everything any
      * published bsdsocket ABI names, so on somebody else's library that slot is
-     * whatever their table ends with -- possibly the (APTR)-1 terminator,
+     * whatever their table ends with, possibly the (APTR)-1 terminator,
      * possibly nothing. Jumping through it takes the machine down. The magic
      * argument protects against a future vendor defining the same offset; only
      * this check protects against a present one that has not.

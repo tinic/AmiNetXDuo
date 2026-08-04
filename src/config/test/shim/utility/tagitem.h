@@ -1,5 +1,5 @@
 /*
- * Host test shim -- struct TagItem, referenced only through pointers.
+ * Host test shim, struct TagItem, referenced only through pointers.
  *
  * SPDX-License-Identifier: MIT
  */

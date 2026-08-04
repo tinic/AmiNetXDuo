@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- ISRG Root X1, the trust anchor tests/tls/tls_https.c uses.
+ * AmiNetXDuo, ISRG Root X1, the trust anchor tests/tls/tls_https.c uses.
  *
  * DER, verbatim, from https://letsencrypt.org/certs/isrgrootx1.pem.
  *   subject/issuer  C=US, O=Internet Security Research Group, CN=ISRG Root X1

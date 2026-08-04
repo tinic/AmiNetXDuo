@@ -1,5 +1,5 @@
 /*
- * bsdsocket.library -- the Tier 3 Roadshow extensions we can implement.
+ * bsdsocket.library, the Tier 3 Roadshow extensions we can implement.
  *
  *   GetDefaultDomainName()          the resolver's default domain
  *   ObtainDomainNameServerList()    the configured name servers
@@ -17,7 +17,7 @@
  *                  FreeRouteInfo()
  *   netstats.c     GetNetworkStatistics()
  *   addralloc.c    CreateAddrAllocMessageA(), DeleteAddrAllocMessage(),
- *                  BeginInterfaceConfig(), AbortInterfaceConfig() -- the
+ *                  BeginInterfaceConfig(), AbortInterfaceConfig(), the
  *                  message and every documented refusal. The allocation
  *                  itself is the one gap left, and it answers AAMR_Ignored
  *                  rather than being a stub, because that vector returns VOID
@@ -49,7 +49,7 @@
  *
  *                              Implementing them would also mean a real BSD
  *                              mbuf allocator, since sys/mbuf.h pins the
- *                              layout callers compile against -- next/len/
+ *                              layout callers compile against, next/len/
  *                              data chains NetX Duo has no use for, as it
  *                              allocates fixed-size NX_PACKETs from one pool.
  *
@@ -74,7 +74,7 @@
  * socket.c dispatches MHT_Connect and MHT_Bind.
  *
  * The autodoc exists: NDK 3.2 ships it at SANA+RoadshowTCP-IP/doc/
- * bsdsocket.doc, beside interfaces/bsdsocket.xml -- the same NDK this project
+ * bsdsocket.doc, beside interfaces/bsdsocket.xml, the same NDK this project
  * builds against. 10,436 lines, 121 functions, including 35 of the vectors
  * that used to answer ENOSYS here. The remaining stubs are unwritten, not
  * unknowable.
@@ -94,7 +94,7 @@
 
 #include <proto/exec.h>
 
-/* ------------------------------------------------------ default domain -- */
+/* ------------------------------------------------------ default domain, */
 
 BOOL bsd_GetDefaultDomainName(register STRPTR buffer   __asm("a0"),
                               register LONG buffer_size __asm("d0"),
@@ -130,7 +130,7 @@ BOOL bsd_GetDefaultDomainName(register STRPTR buffer   __asm("a0"),
  *
  * struct DomainNameServerNode (libraries/bsdsocket.h) embeds a MinNode, not a
  * Node, while the prototype says struct List. The two are layout-compatible
- * for AddTail/traversal -- lh_Head and mlh_Head are at the same offset -- so
+ * for AddTail/traversal, lh_Head and mlh_Head are at the same offset, so
  * the list header is a struct List and the nodes are MinNodes, which is the
  * only reading that satisfies both halves of the published interface.
  */
@@ -181,7 +181,7 @@ struct List *bsd_ObtainDomainNameServerList(
         /*
          * "How many times this server address has been added to the list so
          * far. A negative value indicates that this server was configured
-         * statically in the 'DEVS:Internet/resolver' file" -- autodoc.
+         * statically in the 'DEVS:Internet/resolver' file", autodoc.
          * netstack_dns_server_add() keeps both halves in nameserver_use[]:
          * the sign says where the entry came from, the magnitude is the nest
          * count. A slot in use is never 0, so that stands in for an
@@ -202,7 +202,7 @@ struct List *bsd_ObtainDomainNameServerList(
  * hands over the name servers from the lease it obtained by calling
  * AddDomainNameServer(). With these as ENOSYS stubs it configured the
  * interface, took a DHCP lease, set the netmask and the default route, then
- * returned rc 20 on the last step -- so the command in every Roadshow user's
+ * returned rc 20 on the last step, so the command in every Roadshow user's
  * S:Network-Startup reported failure after doing everything right
  * (docs/RESEARCH.md 55).
  *
@@ -247,7 +247,7 @@ LONG bsd_RemoveDomainNameServer(register STRPTR address __asm("a0"),
     switch (netstack_dns_server_remove(addr))
     {
         case AMI_NET_OK:          return 0;
-        /* "[ENOENT] The IP address to remove was not found" -- autodoc. */
+        /* "[ENOENT] The IP address to remove was not found", autodoc. */
         case AMI_NET_ERR_NONAME:  return bsd_fail(SocketBase, AMI_ENOENT);
         case AMI_NET_ERR_STATE:   return bsd_fail(SocketBase, AMI_ENETDOWN);
         default:                  return bsd_fail(SocketBase, AMI_EINVAL);

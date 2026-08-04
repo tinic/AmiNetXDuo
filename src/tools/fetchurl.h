@@ -1,5 +1,5 @@
 /*
- * fetchurl -- the part of `fetch` that is string work: the URL, the redirect
+ * fetchurl, the part of `fetch` that is string work: the URL, the redirect
  * target resolved against it, and the framing of a response's header block.
  *
  * Its own file for the reason httppath.c is: these are the pieces whose
@@ -27,7 +27,7 @@
 /*
  * 3072 was too small: some front ends answer a plain GET with more than that
  * in headers alone, so a good 301 arrived and was refused.  Running out is not
- * fatal -- see `truncated` below.
+ * fatal, see `truncated` below.
  */
 #define FETCH_HEAD_MAX          16384
 
@@ -41,7 +41,7 @@ typedef enum FetchUrlResult
     FETCH_URL_BRACKET,          /* an IPv6 literal with no closing ]      */
     FETCH_URL_PORT,             /* the port is not a number               */
     FETCH_URL_PORT_RANGE,
-    FETCH_URL_USERINFO          /* "user@" -- RFC 9110 section 4.2.4      */
+    FETCH_URL_USERINFO          /* "user@", RFC 9110 section 4.2.4      */
 } FetchUrlResult;
 
 typedef struct FetchUrl
@@ -62,8 +62,8 @@ typedef struct FetchUrl
 FetchUrlResult fetch_url_parse(const char *url, FetchUrl *out);
 
 /*
- * RFC 3986 section 5.2.2, strict: resolve `ref` -- a Location: value, absolute
- * or relative -- against `base`.  `out` may alias neither argument.
+ * RFC 3986 section 5.2.2, strict: resolve `ref`, a Location: value, absolute
+ * or relative, against `base`.  `out` may alias neither argument.
  *
  * Strict means a reference that names its own scheme is not merged with the
  * base even when the two schemes match, so "http:g" resolves to the path-only

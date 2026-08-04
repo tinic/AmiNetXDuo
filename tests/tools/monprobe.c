@@ -1,5 +1,5 @@
 /*
- * MonProbe -- the network monitoring hooks, and whether they can deny a call.
+ * MonProbe, the network monitoring hooks, and whether they can deny a call.
  *
  * "Monitoring hooks can be used both for inspecting and filtering data that
  * enters the stack, or for denying access to certain APIs."  This exercises
@@ -9,12 +9,12 @@
  * Three things here cannot be checked by a build:
  *
  *   1. The register convention.  The hook is entered with the Hook in A0, NULL
- *      in A2 and the message in A1 -- not the A0/A1 pair a reader would guess,
+ *      in A2 and the message in A1, not the A0/A1 pair a reader would guess,
  *      and not utility.library's usual "object in A2".  A wrong guess passes
  *      the message in the wrong register and the hook reads rubbish.
  *
  *   2. The walk stops at the first refusal.  "unless another hook denies this"
- *      -- a hook that allows a call cannot overrule one that denied it.  The
+ *     , a hook that allows a call cannot overrule one that denied it.  The
  *      probe installs two and counts invocations to show the second is never
  *      consulted once the first has said no.
  *
@@ -252,7 +252,7 @@ static LONG p_errno(struct Library *base)
 /* ---------------------------------------------------------------- hooks --- */
 
 /*
- * h_Entry is declared `ULONG (*)()` -- no parameters -- because a Hook
+ * h_Entry is declared `ULONG (*)()`, no parameters, because a Hook
  * carries whatever shape the installer and the caller agreed on. Reaching the
  * agreed shape is a conversion between function types, which a plain cast
  * cannot express without tripping -Wcast-function-type. The union says the
@@ -305,7 +305,7 @@ static LONG probe_hook(register struct Hook *hook __asm("a0"),
 
     /*
      * BindMonitorMsg and ConnectMonitorMsg have the same first four members
-     * in the same order -- size, caller, socket, name -- so one reader serves
+     * in the same order, size, caller, socket, name, so one reader serves
      * both.
      */
     if (message != NULL)
@@ -726,7 +726,7 @@ int main(void)
         /*
          * The autodoc states, across all three, that smm_To and smm_Msg are
          * never both set: "either ... will be NULL".  That excludes them both
-         * being set and does not require exactly one -- send() has neither,
+         * being set and does not require exactly one, send() has neither,
          * because there is neither to report.
          */
         Printf((CONST_STRPTR)"never both set: yes -- correctly\n");

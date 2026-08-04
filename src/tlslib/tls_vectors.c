@@ -1,5 +1,5 @@
 /*
- * tls.library -- the LVO vector table.
+ * tls.library, the LVO vector table.
  *
  * Ten user vectors and no reserved slots after them.  A caller reaching past
  * the end of the table lands on the (APTR)-1 terminator, which MakeLibrary()
@@ -13,7 +13,7 @@
 const APTR TlsVectorTable[] =
 {
     /* The four Exec vectors, then TLS_LIB_VECTORS user vectors, then the
-       terminator -- asserted below, which stops a new vector from shipping
+       terminator, asserted below, which stops a new vector from shipping
        without TLS_LIB_VERSION moving. */
     /* -6 Open, -12 Close, -18 Expunge, -24 Reserved */
     (APTR)tls_lib_open,

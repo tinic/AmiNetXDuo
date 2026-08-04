@@ -1,9 +1,9 @@
 /*
- * AmiNetXDuo -- SANA-II transmit path.
+ * AmiNetXDuo, SANA-II transmit path.
  *
  * Framing: NetX Duo does not prepend the Ethernet header before calling the
  * driver. It reserves NX_PHYSICAL_HEADER (16) bytes of headroom and leaves the
- * link header to the driver -- see nx_ram_network_driver.c, which builds all
+ * link header to the driver, see nx_ram_network_driver.c, which builds all
  * 14 bytes itself. Cooked mode therefore never builds one, and hands SANA-II
  * what it wants: ios2_PacketType from the driver command, ios2_DstAddr from
  * nx_ip_driver_physical_address_msw/lsw, and the payload from the prepend
@@ -29,8 +29,8 @@
  * ami_sana2_tx_reap() instead.
  *
  * Calling that only from the transmit path means a packet is released by the
- * next packet. On a link that goes quiet -- a lost HTTP GET, a lost TLS
- * ClientHello, any request/response protocol with a single request segment --
+ * next packet. On a link that goes quiet, a lost HTTP GET, a lost TLS
+ * ClientHello, any request/response protocol with a single request segment,
  * there is no next packet, so the segment stays un-reaped and TCP believes the
  * driver still has it. docs/RESEARCH.md 27.4 measured eleven seconds of
  * silence after one unacknowledged segment.
@@ -117,7 +117,7 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
  * The task is one of the SANA-II readers because it is the only thread in this
  * shim that blocks in exec rather than in ThreadX: the NX_IP thread waits on
  * ThreadX event flags, which Signal() cannot break. Which reader does not
- * matter, so it is the first one -- see ami_sana2_rx_start().
+ * matter, so it is the first one, see ami_sana2_rx_start().
  *
  * Disable() rather than Forbid(): a device may ReplyMsg from its interrupt,
  * and exec's PutMsg reads mp_Flags, mp_SigTask and mp_SigBit as one Disabled
@@ -232,7 +232,7 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
  *
  * The deadline is the same admission ami_sana2_rx_teardown() makes: AbortIO()
  * is a request and a driver may decline it. What the reader path already
- * understood and this one did not is what a refusal costs -- slot->req and its
+ * understood and this one did not is what a refusal costs, slot->req and its
  * mn_ReplyPort both live inside AmiSana2If, so a device still holding a
  * CMD_WRITE writes into this allocation whenever it finishes. tx_orphaned is
  * what stops ami_sana2_close() from freeing it, exactly as rx_orphaned does.

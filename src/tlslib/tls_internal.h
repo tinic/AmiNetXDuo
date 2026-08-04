@@ -1,12 +1,12 @@
 /*
- * tls.library -- internals.
+ * tls.library, internals.
  *
  * The public contract is include/aminetxduo/tlslib.h; nothing here is visible
  * to a caller.
  *
  *   One master base, one semaphore, and everything else hanging off a
  *   TLSConnection.  Unlike bsdsocket.library there is no per-opener state to
- *   keep apart -- no errno, no descriptor table -- so OpenLibrary() hands back
+ *   keep apart, no errno, no descriptor table, so OpenLibrary() hands back
  *   the same base every time and the connection is the only object with
  *   identity.
  *
@@ -143,7 +143,7 @@ typedef struct TLSResumeEntry
  *
  * TLSRE_VERIFIED: a session established without chain and host-name
  * verification must never be resumed by a connection that asked for
- * verification -- that would let a program which used TLSA_NoVerify to reach a
+ * verification, that would let a program which used TLSA_NoVerify to reach a
  * printer poison the cache for every program after it.
  *
  * TLSRE_DATED: whether the certificate validity dates were checked.  On a
@@ -181,8 +181,8 @@ typedef struct TLSStoreEntry
  * Caching it in the base fails twice over.  It needs reload detection, because
  * replacing the file is the whole update story and a resident library would
  * otherwise keep serving the old roots.  And it puts a pointer that one task
- * can free -- a second TLSOpen() with a different TLSA_TrustStore, or after
- * the file changed -- under a pointer another task is reading from inside a
+ * can free, a second TLSOpen() with a different TLSA_TrustStore, or after
+ * the file changed, under a pointer another task is reading from inside a
  * handshake, on a machine with no memory protection.
  *
  * A per-connection index costs 1,428 bytes for the Mozilla set, against the
@@ -197,7 +197,7 @@ typedef struct TLSStore
     ULONG           ts_Count;
 
     /*
-     * A fingerprint of which roots this store holds -- FNV-1a over the count
+     * A fingerprint of which roots this store holds, FNV-1a over the count
      * and every index record.  Computed once when the index is read, the only
      * moment the whole of it is in memory, so it costs one pass over 1,428
      * bytes that were just read off the disk.
@@ -290,7 +290,7 @@ struct TLSConnection
     ULONG                       tc_RootsLoaded;
     ULONG                       tc_RootKey[TLS_MAX_ROOTS];
 
-    /* Plaintext already decrypted and not yet handed to the caller -- why
+    /* Plaintext already decrypted and not yet handed to the caller, why
        TLSPending() and TLSWaitSelect() exist. */
     NX_PACKET                  *tc_Pending;
     ULONG                       tc_PendingOffset;
@@ -305,7 +305,7 @@ struct TLSConnection
     UWORD                       tc_Port;
 
     /* What went into the ClientHello, kept so the ServerHello's echo can be
-       compared against it -- that echo is the acceptance signal. */
+       compared against it, that echo is the acceptance signal. */
     UBYTE                       tc_OfferSid[TLS_RESUME_SID_MAX];
     UBYTE                       tc_OfferSidLength;
 
@@ -331,7 +331,7 @@ struct TLSConnection
 
 typedef struct TLSConnection TLSConnection;
 
-/* ------------------------------------------------------------ tls_netx.c -- */
+/* ------------------------------------------------------------ tls_netx.c, */
 
 /*
  * The stack, borrowed from bsdsocket.library.  tls_netx_bind() is called once
@@ -341,7 +341,7 @@ typedef struct TLSConnection TLSConnection;
 LONG                     tls_netx_bind(APTR socket_base);
 const AmiNetXDuoContext *tls_netx_ctx(VOID);
 
-/* ---------------------------------------------------------- tls_store.c -- */
+/* ---------------------------------------------------------- tls_store.c, */
 
 LONG  tls_store_open(TLSStore *store, const char *path);
 VOID  tls_store_close(TLSStore *store);
@@ -376,10 +376,10 @@ VOID  tls_store_detach(TLSConnection *conn);
    session pointer to. */
 TLSConnection *tls_conn_for_session(const NX_SECURE_TLS_SESSION *session);
 
-/* ----------------------------------------------------------- tls_time.c -- */
+/* ----------------------------------------------------------- tls_time.c, */
 
 /*
- * The value handed to nx_secure as "now", in UNIX seconds -- or 0, which is
+ * The value handed to nx_secure as "now", in UNIX seconds, or 0, which is
  * nx_secure's own encoding for "do not check validity dates".  See tls_time.c.
  */
 ULONG tls_time_now(VOID);
@@ -393,7 +393,7 @@ BOOL  tls_time_is_known(VOID);
 ULONG tls_time_monotonic(VOID);
 #define TLS_CLOCK_FLOOR         1767225600UL    /* 2026-01-01 00:00:00 UTC */
 
-/* -------------------------------------------------------- tls_runtime.c -- */
+/* -------------------------------------------------------- tls_runtime.c, */
 
 BOOL  tls_runtime_open(VOID);
 VOID  tls_runtime_close(VOID);
@@ -407,7 +407,7 @@ VOID  tls_strncpy(char *dst, const char *src, ULONG size);
 extern struct ExecBase   *SysBase;
 extern struct DosLibrary *DOSBase;
 
-/* ----------------------------------------------------------- tls_conn.c -- */
+/* ----------------------------------------------------------- tls_conn.c, */
 
 LONG  tls_conn_enter(TLSConnection *conn);
 VOID  tls_conn_leave(TLSConnection *conn);
@@ -424,13 +424,13 @@ VOID tls_trace(const char *fmt, ...);
 #  define tls_trace(...)    ((VOID)0)
 #endif
 
-/* --------------------------------------------------------- tls_resume.c -- */
+/* --------------------------------------------------------- tls_resume.c, */
 
 /* Before the handshake: find a cached session for this host and arm the
    connection to offer it.  Silent no-op when there is nothing to offer. */
 VOID  tls_resume_prepare(TLSConnection *conn);
 
-/* After a successful handshake: record what was learned -- a new master
+/* After a successful handshake: record what was learned, a new master
    secret and session ID, a new ticket, or a refreshed entry after a
    resumption.  Writes the disk mirror when the cache changed. */
 VOID  tls_resume_record(TLSConnection *conn);

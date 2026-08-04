@@ -1,22 +1,22 @@
 /*
- * tcpdrill -- the synthetic SANA-II device.  See tapdev.h for why it exists.
+ * tcpdrill, the synthetic SANA-II device.  See tapdev.h for why it exists.
  *
- * MakeLibrary() builds a six-entry Exec device vector -- Open, Close, Expunge,
- * Null, BeginIO, AbortIO -- and AddDevice() puts it where OpenDevice() looks
+ * MakeLibrary() builds a six-entry Exec device vector, Open, Close, Expunge,
+ * Null, BeginIO, AbortIO, and AddDevice() puts it where OpenDevice() looks
  * first.  Everything is in this program's own address space, so there is no
  * segment list, no __saveds and nothing resident: the device dies with the
  * process that installed it.
  *
  * OpenDevice() is handed a tag list carrying S2_CopyToBuff and S2_CopyFromBuff,
- * and a SANA-II device moves packet data only through them -- the stack's
+ * and a SANA-II device moves packet data only through them, the stack's
  * NX_PACKET is not something the device may touch directly.
  * src/sana2/sana2_copy.c is the other end of both, so calling them tests the
  * shipped receive and transmit paths rather than a bypass around them.
  *
  * They are m68k register-convention functions (a0 = to, a1 = from, d0 = len).
- * A `register ... __asm()` typedef miscompiles on this toolchain -- GCC 15
+ * A `register ... __asm()` typedef miscompiles on this toolchain, GCC 15
  * loads the function pointer into a0 and then jumps through it, destroying the
- * first argument -- so the call is written out as inline asm below.  The wrong
+ * first argument, so the call is written out as inline asm below.  The wrong
  * version compiles cleanly and corrupts every received frame, so it shows up
  * only under a disassembler.
  *
@@ -222,7 +222,7 @@ static VOID tap_complete(struct IOSana2Req *io, LONG err, ULONG wire)
 /*
  * CMD_WRITE.  The stack hands over an IP-or-ARP payload with no link header
  * (cooked framing), so the 14 bytes are rebuilt here from the fields SANA-II
- * carries them in -- the same reconstruction sana2_rx.c performs in the other
+ * carries them in, the same reconstruction sana2_rx.c performs in the other
  * direction, so one pcap-shaped decoder reads both.
  */
 static VOID tap_capture(TapDevice *dev, struct IOSana2Req *io)
@@ -327,7 +327,7 @@ static VOID tap_begin_io(register struct Device     *dev __asm("a6"),
     {
     case CMD_READ:
         /*
-         * Raw reads are refused on purpose -- see the file header.  The
+         * Raw reads are refused on purpose, see the file header.  The
          * refusal has to happen here, in BeginIO, because that is the only
          * signal ami_sana2_probe_raw() reads.
          */

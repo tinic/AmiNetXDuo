@@ -25,8 +25,8 @@
 #
 # WHY THIS EXISTS
 #
-#   BebboSSH is an independent SSH2 suite for AmigaOS -- not Dropbear, not
-#   OpenSSH, not libssh -- by the author of the m68k toolchain this project
+#   BebboSSH is an independent SSH2 suite for AmigaOS, not Dropbear, not
+#   OpenSSH, not libssh, by the author of the m68k toolchain this project
 #   builds with.  It opens bsdsocket.library version 4, and it was written
 #   without ever seeing our source, so it tests the ABI rather than our idea of
 #   the ABI.  The binaries live in the local store; nothing is vendored (it is
@@ -51,7 +51,7 @@
 #
 # WHAT IT MEASURES
 #
-#   Three sizes -- 45 B, 64 KB and 256 KB -- in each direction, which is the
+#   Three sizes, 45 B, 64 KB and 256 KB, in each direction, which is the
 #   shape the Dropbear work used, so the two are comparable.  Two
 #   sizes give a slope with the handshake cancelled out; three give two slopes
 #   that must agree, which is what says a figure is a per-byte cost and not a
@@ -119,7 +119,7 @@ BEBVER=$(cat "$BEB/VERSION" 2>/dev/null || echo unknown)
 #
 # NOT OPTIONAL, and nothing to do with this stack.  Every BebboSSH binary is
 # linked against a runtime that auto-opens locale.library; without it the
-# program prints "locale.library failed to load" and then WEDGES -- verified
+# program prints "locale.library failed to load" and then WEDGES, verified
 # with no network involved at all, `bebboscp -?` on its own, on Kickstart 3.1
 # and on the AROS ROM alike.  Under Enforcer it is six illegal accesses at
 # NULL from inside ROM, i.e. a library base that was never checked.  It costs
@@ -127,7 +127,7 @@ BEBVER=$(cat "$BEB/VERSION" 2>/dev/null || echo unknown)
 # hangs, which reads exactly like a stack bug.
 #
 # locale.library is Commodore's and is not in Kickstart ROM, so it is located
-# here and never committed -- the same arrangement as the ROM itself and
+# here and never committed, the same arrangement as the ROM itself and
 # a2065.device.  install/test/run-workbench-fsuae.sh unpacks a Workbench 3.1
 # set into build/wb31-sys, which is the first place looked.
 LOCALE="${AMINETXDUO_LOCALE_LIBRARY:-}"
@@ -183,7 +183,7 @@ KEY="$ROOT/build/bebbossh-test/id_ed25519"
 #
 # Deterministic, not /dev/urandom: a rerun must compare against the same bytes,
 # and a payload that changes every run cannot tell a transfer bug from a
-# staging bug.  AES-CTR over zeros because it is non-repeating -- a constant
+# staging bug.  AES-CTR over zeros because it is non-repeating, a constant
 # payload would flatter anything that compresses, and the payload should not be
 # the reason a number looks good.
 mkpayload() {
@@ -210,7 +210,7 @@ cp "$ADDIF" "$STAGE/AddNetInterface"
 
 cp "$LOCALE" "$STAGE/libs/locale.library"
 
-# The 020 build under the plain name -- see the header.
+# The 020 build under the plain name, see the header.
 cp "$BEB/libcryptossh.library020" "$STAGE/libs/libcryptossh.library"
 cp "$BEB/bebboscp" "$STAGE/bebboscp"
 cp "$BEB/bebbossh" "$STAGE/bebbossh"
@@ -222,7 +222,7 @@ cp "$XFER/tiny.bin" "$XFER/mid.bin" "$XFER/big.bin" "$STAGE/up/"
 #
 # bebbosshd reads ENVARC:ssh/sshd_config, its host key from
 # ENVARC:ssh/ssh_host_ed25519_key and the authorised keys from
-# ENVARC:.ssh/authorized_keys -- the client's own directory, since one machine
+# ENVARC:.ssh/authorized_keys, the client's own directory, since one machine
 # is both ends here.
 #
 # The host key is generated on the BUILD HOST.  bebbosshkeygen would run in the
@@ -233,7 +233,7 @@ cp "$XFER/tiny.bin" "$XFER/mid.bin" "$XFER/big.bin" "$STAGE/up/"
 # src/loaded25519key.cpp parses.
 #
 # Its public key is what the client must already trust, and the fingerprint
-# BebboSSH stores is base64(SHA-256(the host key blob)) -- OpenSSH's own
+# BebboSSH stores is base64(SHA-256(the host key blob)), OpenSSH's own
 # SHA256: display with the '=' padding ssh-keygen omits.
 if [ "$LOOPBACK" = "1" ]; then
     cp "$BEB/bebbosshd" "$STAGE/bebbosshd"
@@ -278,15 +278,15 @@ HOST="${AMINETXDUO_SSH_HOST:-10.0.2.2}"
 #
 # THE WINDOW SIZES ARE THE MEASUREMENT.
 #
-# BebboSSH asks the AmigaDOS console for its size with CSI '0 q' -- the Window
-# Bounds Report -- and puts the answer in pty-req.  So the check is whether the
+# BebboSSH asks the AmigaDOS console for its size with CSI '0 q', the Window
+# Bounds Report, and puts the answer in pty-req.  So the check is whether the
 # remote end's `stty size` matches what the console itself says, and both
 # numbers have to be collected: ClientRun prints the console's own answer, the
 # remote command writes its answer into a file on the host.
 #
 # CON: takes PIXELS, so two windows of deliberately different and non-default
 # sizes are used.  A test that only ever asked for 640x200 could not tell a
-# correct implementation from one that returns a hardcoded 80x24 -- 640x200 in
+# correct implementation from one that returns a hardcoded 80x24, 640x200 in
 # topaz-8 is very close to exactly that.
 CONW1="CON:0/0/512/128/BebboSSH-A/CLOSE"
 CONW2="CON:0/0/720/232/BebboSSH-B/CLOSE"
@@ -297,7 +297,7 @@ CONW3="CON:0/0/448/104/BebboSSH-R/CLOSE"
 
 if [ "$INTERACTIVE" = "1" ]; then
     # The terminal BebboSSH names in pty-req is `xterm-amiga`, which no host
-    # has.  Without it `tput` answers "unknown terminal type" -- which looks
+    # has.  Without it `tput` answers "unknown terminal type", which looks
     # like a BebboSSH defect and is not one.  Its own terminfo source ships in
     # the archive; compiling it here means the `tput` column tests what
     # BebboSSH intends rather than what a stock host happens to know.
@@ -345,7 +345,7 @@ if [ -n "$COMMANDS" ]; then
     echo "==> command list: $COMMANDS"
 elif [ "$INTERACTIVE" = "1" ] && [ "$LOOPBACK" = "1" ]; then
     # bebbosshd in the guest, and the client logging in to it.  There is no
-    # `stty` on the other end -- the other end is an AmigaDOS Shell -- so this
+    # `stty` on the other end, the other end is an AmigaDOS Shell, so this
     # arm asks a different question from the outbound one: does logging IN to
     # the Amiga give a working shell, and does the server accept the pty
     # dimensions the client sends.  -v6 on the server is what prints the
@@ -362,7 +362,7 @@ wait 10
 EOF
 
     # A shell session, piped.  Echo is a Shell built-in, so this needs nothing
-    # staged in C: -- which matters, because the boot drive here has only what
+    # staged in C:, which matters, because the boot drive here has only what
     # the harness put there.
     #
     # ONE command and then EndCLI, on purpose.  A four-line script executed its
@@ -371,7 +371,7 @@ EOF
     # prompt that never came until the harness timed out.  The same client
     # reading the same kind of file drove a five-line session against OpenSSH
     # to a clean exit, so that is bebbosshd's shell channel and not the send
-    # path -- see docs/RESEARCH.md 78.11.  Kept short so this arm terminates.
+    # path, see docs/RESEARCH.md 78.11.  Kept short so this arm terminates.
 cat > "$STAGE/stdin.txt" <<EOF
 Echo "SHELL-SESSION-START"
 EndCLI
@@ -386,7 +386,7 @@ elif [ "$INTERACTIVE" = "1" ]; then
 
     # The probe is a script ON THE HOST taking one argument, not a semicolon
     # chain on the command line.  ClientRun's line limit is 320 characters and
-    # the chain was longer than that, which does not fail -- it silently
+    # the chain was longer than that, which does not fail, it silently
     # becomes several commands, three of which are not commands.  Everything
     # the remote learns is written on the host, because capturing it on the
     # Amiga would mean capturing the console, and the console is the thing
@@ -395,12 +395,12 @@ elif [ "$INTERACTIVE" = "1" ]; then
     # `stty size` reads the pty's dimensions from the kernel and needs no
     # terminfo, so it is the primary evidence.  `stty -a` is the second and
     # sharper one: BebboSSH's pty-req carries a termios block setting VERASE to
-    # ^H, and a host's own default is ^? -- so `erase = ^H` on the remote side
+    # ^H, and a host's own default is ^?, so `erase = ^H` on the remote side
     # is proof the block was parsed and applied rather than ignored.
     # The output directory and the terminfo tree are baked in rather than
     # passed, so the remote command line carries ONE absolute path instead of
     # three.  That is not tidiness: ClientRun truncates a long line, and a
-    # truncated line does not fail -- its tail becomes the next "command",
+    # truncated line does not fail, its tail becomes the next "command",
     # which runs, returns 10 and reads as the program refusing an argument.
     cat > "$RES/probe.sh" <<PROBE
 #!/bin/sh
@@ -416,7 +416,7 @@ TERMINFO="\$ti" tput cols  > "\$out/\$arm.cols"  2>&1
 TERMINFO="\$ti" tput lines > "\$out/\$arm.lines" 2>&1
 # TIOCGWINSZ on the terminal itself, which is what an application asks and what
 # vi and less use.  fd 0 rather than 1, because tput's and this program's
-# stdout is a file here -- which is also why the tput columns fall back on the
+# stdout is a file here, which is also why the tput columns fall back on the
 # terminfo entry's static cols#80 lines#24 and say nothing about the pty.
 python3 -c 'import os;s=os.get_terminal_size(0);print(s.lines,s.columns)' \\
                        > "\$out/\$arm.winsz" 2>&1
@@ -468,7 +468,7 @@ else
     #
     # -v3 is WARN.  The default 4 (INFO) prints a line per SFTP request, which
     # over 256 KB is thousands of Write()s to a file on the host inside the
-    # measured window -- that measures the logger.
+    # measured window, that measures the logger.
     : > "$STAGE/commands.txt"
     echo "SYS:AddNetInterface eth0" >> "$STAGE/commands.txt"
     if [ "$LOOPBACK" = "1" ]; then
@@ -506,7 +506,7 @@ rm -f "$XFER"/up-*.bin
 #
 # clients/dropbear/clientrun.c, unchanged: a list of command lines, each run
 # through SystemTagList() with NP_StackSize and each timed on the GUEST's
-# clock.  The stack is the reason it exists -- a Kickstart 3.1 Shell gives a
+# clock.  The stack is the reason it exists, a Kickstart 3.1 Shell gives a
 # command 4 KB, a bsdsocket call runs NetX Duo on the CALLER's stack, and
 # docs/RESEARCH.md 16.9 records that too little of it is an F-line trap and a
 # reboot loop the harness reports as a timeout.  Timing on the guest matters

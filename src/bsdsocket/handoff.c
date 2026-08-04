@@ -1,5 +1,5 @@
 /*
- * bsdsocket.library -- handing a socket from one task to another.
+ * bsdsocket.library, handing a socket from one task to another.
  *
  *   ReleaseSocket()        give a socket up; it is parked under an id
  *   ReleaseCopyOfSocket()  park a second reference and keep using the first
@@ -11,7 +11,7 @@
  * There are no file descriptors and no descriptor passing over a socket
  * (docs/RESEARCH.md S3.1): a SocketBase belongs to exactly one task, its
  * descriptor table is private, and a socket crosses between tasks only through
- * the registry here. That is how an inetd-style server works -- the daemon
+ * the registry here. That is how an inetd-style server works, the daemon
  * accepts, releases, launches a child and tells it the id; the child opens its
  * own bsdsocket.library and obtains it.
  *
@@ -25,7 +25,7 @@
  * existing reference into the registry; a *copy* takes an extra one, so the
  * original descriptor stays usable and the socket survives whichever of the
  * two goes away first. Anything still parked when the last opener closes the
- * library is released there -- see bsd_handoff_flush(), called from
+ * library is released there, see bsd_handoff_flush(), called from
  * bsd_lib_close().
  *
  * SPDX-License-Identifier: MIT
@@ -110,7 +110,7 @@ static BsdHandoff *bsd_handoff_match(struct AmiSocketBase *master, LONG id,
             continue;
 
         /* Protocol 0 means "the default for this type", which is what the
-           socket was created with -- so it matches whatever is parked. */
+           socket was created with, so it matches whatever is parked. */
         if (protocol != 0 && sock->as_Protocol != protocol)
             continue;
 
@@ -251,7 +251,7 @@ VOID bsd_handoff_flush(struct AmiSocketBase *base)
         bsd_nx_leave(base);
 }
 
-/* ---------------------------------------------------------------- vectors -- */
+/* ---------------------------------------------------------------- vectors, */
 
 LONG bsd_ReleaseSocket(register LONG sock_fd __asm("d0"),
                        register LONG id      __asm("d1"),
@@ -351,7 +351,7 @@ LONG bsd_ObtainSocket(register LONG id       __asm("d0"),
     /*
      * The socket is ours now: events go to this task. A socket obtained from
      * a ReleaseCopyOfSocket() therefore stops signalling the base that still
-     * holds the original descriptor -- one NX socket has one owner, and there
+     * holds the original descriptor, one NX socket has one owner, and there
      * is no second control block for the other half.
      */
     sock->as_Owner = SocketBase;
@@ -367,7 +367,7 @@ LONG bsd_ObtainSocket(register LONG id       __asm("d0"),
  * is always no:
  *
  *   - ProcessIsServer() returns FALSE. A generic stub returning -1 would be
- *     all-bits-set, which every BOOL test reads as TRUE -- i.e. reporting that
+ *     all-bits-set, which every BOOL test reads as TRUE, i.e. reporting that
  *     every Process on the machine is a server process.
  *   - ObtainServerSocket() returns -1, what Roadshow documents for a process
  *     that is not a server process.

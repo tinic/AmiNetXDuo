@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- crypto68k test support.
+ * AmiNetXDuo, crypto68k test support.
  *
  * SPDX-License-Identifier: MIT
  */

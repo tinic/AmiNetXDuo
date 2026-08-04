@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- usergroup.library: per-opener context, errors, credentials.
+ * AmiNetXDuo, usergroup.library: per-opener context, errors, credentials.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -12,7 +12,7 @@
 
 #include <stddef.h>
 
-/* ----------------------------------------------------------------- errno -- */
+/* ----------------------------------------------------------------- errno, */
 
 /*
  * Mirror the error into the caller's errno at the width it asked for through
@@ -33,7 +33,7 @@ void ug_set_err(struct UserGroupBase *base, LONG err)
     }
 }
 
-/* --------------------------------------------------------------- context -- */
+/* --------------------------------------------------------------- context, */
 
 void ug_context_init(struct UserGroupBase *base)
 {

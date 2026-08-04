@@ -1,7 +1,7 @@
 # Shared-library load test: opens LIBS:usergroup.library and
 # LIBS:bsdsocket.library through the ABI and calls a few LVOs.
 #
-# Deliberately linked against nothing of ours -- the point is that the library
+# Deliberately linked against nothing of ours, the point is that the library
 # images stand on their own.
 
 add_executable(library_test library_test.c)

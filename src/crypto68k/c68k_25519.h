@@ -1,10 +1,10 @@
 /*
- * AmiNetXDuo -- crypto68k: X25519 and Ed25519 for a 32-bit machine with a
+ * AmiNetXDuo, crypto68k: X25519 and Ed25519 for a 32-bit machine with a
  * 32x32->64 multiplier.
  *
  *   docs/RESEARCH.md 31.6 recorded that src/crypto68k/ accelerated RSA, P-256,
- *   SHA-256 and AES, and that the suite a modern OpenSSH negotiates --
- *   curve25519, ed25519, chacha20-poly1305 -- used none of it.  32 measured
+ *   SHA-256 and AES, and that the suite a modern OpenSSH negotiates,
+ *   curve25519, ed25519, chacha20-poly1305, used none of it.  32 measured
  *   where the 84 seconds went and the answer was entirely here.
  *
  *   Dropbear's 25519 is TweetNaCl, the smallest correct implementation in
@@ -22,8 +22,8 @@
  *   against a measurement of this.
  *
  *   Ed25519 is defined over SHA-512 and this file does not contain one.  Every
- *   program that wants Ed25519 here already has one -- Dropbear has
- *   libtomcrypt's, a TLS build has nx_crypto's -- and a second copy would be a
+ *   program that wants Ed25519 here already has one, Dropbear has
+ *   libtomcrypt's, a TLS build has nx_crypto's, and a second copy would be a
  *   second thing to keep right.  The callback takes up to three chunks because
  *   that is what RFC 8032 hashes (prefix||M, and R||A||M); a NULL chunk with
  *   length 0 is skipped.

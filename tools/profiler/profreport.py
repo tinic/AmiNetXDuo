@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Profile -- turn sampled PCs back into a ranked list of functions.
+"""Profile, turn sampled PCs back into a ranked list of functions.
 
 Four things stand between a sampled address and a name, and getting any of
 them wrong produces a ranking that looks entirely reasonable and is not.
@@ -25,7 +25,7 @@ them wrong produces a ranking that looks entirely reasonable and is not.
    file.  Without that a sample in a library can only be named by module.
 
 4. EVERYTHING ELSE.  A sample can land in Kickstart, in a device driver, in a
-   library that does not cooperate -- most of them, since 3 is this tool's
+   library that does not cooperate, most of them, since 3 is this tool's
    convention and not Exec's.  Every AmigaOS library is a jump table, so the
    Amiga side resolved every LVO of every library, device and resource to its
    address; a sample there is named by the nearest preceding one, and one that
@@ -78,7 +78,7 @@ CCK_LINE = 227
 # A sample near no jump-table target is named by the nearest preceding one only
 # if it is NEAR one.  Kickstart entry points are dense enough that 12 KB is
 # generous; past that the name would be a guess, and the module range takes
-# over -- an honest "a2065.device" is worth more than a plausible wrong
+# over, an honest "a2065.device" is worth more than a plausible wrong
 # "a2065.device/CMD_WRITE".
 LVO_WINDOW = 12 * 1024
 
@@ -172,7 +172,7 @@ class Profile:
         Consecutive samples at any rate this tool runs at are far closer
         together than a frame, so a position that went backwards means one
         frame passed.  A gap that swallowed a WHOLE frame aliases to a short
-        one -- that is what the window table is for, and gap_report() says so
+        one, that is what the window table is for, and gap_report() says so
         when the two disagree.
         """
         out, base, prev = [], 0, None
@@ -574,7 +574,7 @@ class Resolver:
         rng = self.module_of(pc)
 
         # Standing in a jump table: name the slot.  Exec keeps inline code in
-        # some of them -- Forbid() and Permit() among them -- so a PC there
+        # some of them, Forbid() and Permit() among them, so a PC there
         # resolves to no target at all and would otherwise go missing.
         for base, neg, _t, name in self.prof.libs:
             if neg and base - neg <= pc < base:
@@ -605,7 +605,7 @@ class Resolver:
 _LVO_CACHE = {}
 
 # Exec's scheduler entry points are private, so the NDK's exec_lib.i does not
-# list them -- and they are among the most interesting things in any profile of
+# list them, and they are among the most interesting things in any profile of
 # this system.  From the V33+ exec.library LVO table.
 EXEC_PRIVATE = {
     36: "ExitIntr", 42: "Schedule", 48: "Reschedule", 54: "Switch",
@@ -700,8 +700,8 @@ def folded_stacks(prof, res, samples):
     THERE ARE NO CALL STACKS IN THIS.  A PC sampler records one address, so a
     literal folded stack is one frame deep and an icicle graph of it is a bar
     chart with extra steps.  What is emitted instead is a synthetic hierarchy
-    the sample already carries -- task, task-versus-interrupt context, module,
-    function -- and every level of it is measured rather than inferred.  For
+    the sample already carries, task, task-versus-interrupt context, module,
+    function, and every level of it is measured rather than inferred.  For
     "how much of this is Exec, and under which task" it is more use than a real
     call graph would be, and it renders in speedscope, flamegraph.pl and
     inferno without any of them being told it is synthetic.
@@ -733,7 +733,7 @@ def write_trace(path, prof, res, samples, times):
     An aggregate ranking cannot show alternation.  If two threads trade the CPU
     once per packet, a timeline shows the switch rate on its face; a table of
     shares shows two numbers that add to 100 and say nothing about the order.
-    That is only possible because the samples carry a real clock -- with
+    That is only possible because the samples carry a real clock, with
     ordinals it would be a picture of the sample index.
 
     Consecutive samples with the same task, context and function become one
@@ -802,8 +802,8 @@ def check_contain(prof, res, samples, path):
       CONTAINMENT is the frame-offset test.  The kernels contain no calls, so
       a sample taken while one was running must land inside it.  A vector that
       read the exception frame two bytes off would record half an SR
-      concatenated with half a PC -- an address nowhere near any of these
-      ranges -- so this scores approximately zero rather than a bit less.
+      concatenated with half a PC, an address nowhere near any of these
+      ranges, so this scores approximately zero rather than a bit less.
 
       PROPORTIONALITY is the bias test.  A sampler can be correctly aimed and
       still fire only when something else periodic is also running.  Each
@@ -915,7 +915,7 @@ def main():
     res = Resolver(prof, args.exe, symtab, libspecs, args.nm)
 
     # A --lib for a library that never appeared, or appeared without a
-    # seglist, silently does nothing -- so say so rather than printing a
+    # seglist, silently does nothing, so say so rather than printing a
     # report that is missing exactly what was asked for.
     named = {res.prof.libs[i][3] for i in res.libsegs
              if i < len(res.prof.libs)}
@@ -1021,7 +1021,7 @@ def main():
                   % gaps["lost_frames"])
         if gaps["extra_frames"] > 0:
             # The two clocks are independent, so this cannot be a property of
-            # the run -- it means the beam position is being decoded wrongly
+            # the run, it means the beam position is being decoded wrongly
             # and every duration here is inflated.  It is how the hpos scaling
             # bug was found; leaving the check in is what stops it coming back.
             print("!! the beam says %d frames and the vertical blank says %d "

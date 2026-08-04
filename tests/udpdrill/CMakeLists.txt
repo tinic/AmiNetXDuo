@@ -3,7 +3,7 @@
 # An AmigaOS executable that opens bsdsocket.library and calls through the LVO
 # table, linked against none of our code. Its interface comes from
 # tests/tcpdrill/tapdev.c, a SANA-II device made at run time, so a datagram can
-# carry a source address of the test's choosing -- which is the only way to ask
+# carry a source address of the test's choosing, which is the only way to ask
 # whether a connected socket checks who sent one.
 #
 #   tests/udpdrill/run-udpdrill.sh -A -b build/cm

@@ -1,4 +1,4 @@
-/* clients/dropbear/include -- see clients/dropbear/build.sh.
+/* clients/dropbear/include, see clients/dropbear/build.sh.
  *
  * newlib on this toolchain has <sys/termios.h> with `struct termios` and the
  * flag constants, and declares none of the functions.  AmigaOS has no termios

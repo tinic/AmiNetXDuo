@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- nx_secure glue.
+ * AmiNetXDuo, nx_secure glue.
  *
  * docs/RESEARCH.md 9 gates the TLS work on a 68020 benchmark
  * (tests/tls/tls_bench), so nothing here promises an API shape.  Only the
@@ -27,8 +27,8 @@ extern "C" {
  *
  * Returns the pool's own credited entropy estimate in bits.  A caller about
  * to perform a real TLS handshake must treat a value below
- * AMI_RANDOM_MIN_BITS as a refusal to proceed -- ami_random_is_seeded() is
- * the same test -- and either obtain a seed from the operator, a persisted
+ * AMI_RANDOM_MIN_BITS as a refusal to proceed, ami_random_is_seeded() is
+ * the same test, and either obtain a seed from the operator, a persisted
  * seed file or user input timing and feed it to ami_random_add_entropy(), or
  * decline to generate the key.  Generating an ECDHE private key from a pool
  * that credits itself 6 bits is worse than not offering TLS at all: the caller

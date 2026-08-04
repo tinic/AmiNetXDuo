@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- crypto68k Montgomery multiplication and squaring.
+ * AmiNetXDuo, crypto68k Montgomery multiplication and squaring.
  *
  *   Koc, Acar and Kaliski ("Analyzing and Comparing Montgomery Multiplication
  *   Algorithms", IEEE Micro 16(3), 1996,
@@ -9,7 +9,7 @@
  *   memory traffic and temporary space.  Their measurements make CIOS the
  *   default recommendation, and SOS a close second at twice the scratch.
  *
- *   This module uses SOS -- full product first, then reduce in place -- for a
+ *   This module uses SOS, full product first, then reduce in place, for a
  *   reason specific to the 68020, recorded here because it contradicts the
  *   paper's headline advice.
  *
@@ -18,20 +18,20 @@
  *   write straight into the accumulator, with the memory carry folded into the
  *   next limb through the X flag.  That instruction only exists when the
  *   destination is the source.  CIOS's second inner loop writes one limb below
- *   where it reads -- that displacement is how CIOS gets its divide-by-radix
- *   for free -- so half of all limb products would have to use a slower
+ *   where it reads, that displacement is how CIOS gets its divide-by-radix
+ *   for free, so half of all limb products would have to use a slower
  *   two-pointer loop.  SOS keeps every one of its 2s^2 products in the
  *   read-modify-write form; the shift disappears because the reduction's
  *   window into the 2s-limb product moves instead of the data.  The paper
  *   counts memory operations; this machine also cares which addressing mode
  *   they use.
  *
- *   Karatsuba, above a measured threshold -- see the block further down.  The
+ *   Karatsuba, above a measured threshold, see the block further down.  The
  *   earlier judgement here was "not Karatsuba", on the grounds that the
  *   reduction is not Karatsuba-able and that one level buys about 5% at the
  *   32-limb halves an RSA-2048 CRT operation runs.  Both of those still hold,
  *   but an RSA-2048 public operation is 64 limbs, not 32, and the split
- *   removes more than twice as many limb products there -- and a TLS client
+ *   removes more than twice as many limb products there, and a TLS client
  *   does three public operations per handshake and one private one only if it
  *   holds a certificate.  The threshold, not the technique, was what needed
  *   getting right.
@@ -53,8 +53,8 @@
  *   m = 2^64 - 1 and x = m-1, mont(x,x) must be 1 and the vendored routine
  *   returns 0; at 32 limbs with m nearly all ones and x = m-1, its top limb is
  *   one less than the true value.  Random operands never come that close to m
- *   -- which is why a 400-trial sweep never caught it, and why no RSA or EC
- *   path can reach it -- but it means the vendored routine cannot be the
+ *  , which is why a 400-trial sweep never caught it, and why no RSA or EC
+ *   path can reach it, but it means the vendored routine cannot be the
  *   oracle for exactly the extreme operands Karatsuba's carry handling most
  *   needs checking on.  So that test diffs the split against this module's own
  *   schoolbook instead, which is what c68k_karatsuba_limbs exists for.
@@ -91,7 +91,7 @@ UINT        i;
 }
 
 
-/* ------------------------------------------------------- final reduction -- */
+/* ------------------------------------------------------- final reduction, */
 
 /*
  * high holds m_len+1 limbs and is known to be < 2m.  Reduce to m_len limbs and
@@ -147,7 +147,7 @@ c68k_limb   sum;
         /*
          * Propagate into the limbs above.  The first addition almost always
          * absorbs it; the loop covers the rest.  The bound cannot be reached
-         * -- the running value stays below 2*m*R, so t[top] is 0 or 1 -- but
+         *, the running value stays below 2*m*R, so t[top] is 0 or 1, but
          * an unreachable bound is cheaper than a buffer overrun if that
          * analysis is ever wrong.
          */
@@ -175,7 +175,7 @@ c68k_limb   sum;
  *     multiply   1.00x  1.33x   1.78x   2.37x
  *
  * So the threshold is the whole design, set from measurement on this machine
- * rather than copied out of another project.  Below it, schoolbook -- which at
+ * rather than copied out of another project.  Below it, schoolbook, which at
  * 8 limbs is exactly as good (36 products either way).
  *
  * The delivered gain is less than that table suggests.  A Montgomery step is a
@@ -192,7 +192,7 @@ c68k_limb   sum;
  *   limbs with no carry out.  Nothing to sign-track and nothing to carry.
  *
  *   Multiplying:  the matching subtractive form is (x1-x0)*(y0-y1), whose sign
- *   depends on the operands -- the term OpenSSL's bn_mul_recursive carries a
+ *   depends on the operands, the term OpenSSL's bn_mul_recursive carries a
  *   `neg` flag for, and where this kind of code goes wrong.  The additive form
  *   (x0+x1)*(y0+y1) has no sign, at the price of two h-limb sums that can
  *   carry out.  Those carries are handled below as two conditional adds and
@@ -237,7 +237,7 @@ UINT    i;
 
     /*
      * The carry out of row i lands in t[i+n], which no earlier row has
-     * touched -- row i' writes at most t[i'+n] -- so storing it is the same as
+     * touched, row i' writes at most t[i'+n], so storing it is the same as
      * adding it, hence a store and not an accumulate.
      */
     for (i = 0; i < n; i++)
@@ -312,7 +312,7 @@ c68k_limb   borrow;
     mid[n] = (c68k_limb)(mid[n] - borrow);
 
     /* t += mid * B^h.  mid is n+1 limbs, so it reaches t[h .. h+n], which is
-       t[h .. 3h] -- inside the 4h limbs of t.  The carry goes above that. */
+       t[h .. 3h], inside the 4h limbs of t.  The carry goes above that. */
     carry = c68k_add(&t[h], mid, n + 1u);
     if (carry != 0u)
     {

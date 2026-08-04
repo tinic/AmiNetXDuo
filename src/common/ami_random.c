@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- entropy collection and a hash DRBG.
+ * AmiNetXDuo, entropy collection and a hash DRBG.
  *
  * See include/aminetxduo/random.h for the scope and limits.  The conditioning
  * is textbook, the collection is estimated, and ami_random_is_seeded() reports
@@ -42,7 +42,7 @@
 
 /* ==================================================================== SHA-256
  *
- * FIPS 180-4.  Self-contained: no libc, no nx_crypto -- a shared library must
+ * FIPS 180-4.  Self-contained: no libc, no nx_crypto, a shared library must
  * not drag newlib in, and nx_crypto is a TLS-only build.
  *
  * Verified against the published vectors (empty string, "abc", both
@@ -59,7 +59,7 @@ typedef char ami_random_ulong_is_32_bits[(sizeof(ULONG) == 4) ? 1 : -1];
 typedef struct
 {
     ULONG state[8];
-    ULONG length;               /* bytes, low 32 -- we never hash 4 GB */
+    ULONG length;               /* bytes, low 32, we never hash 4 GB */
     ULONG block_used;
     UBYTE block[64];
 } Sha256;
@@ -261,7 +261,7 @@ static VOID pool_mix(const void *data, ULONG length, ULONG credit_bits)
      * The caller's material is folded to 32 bytes out here, not inside the
      * Forbid(). ami_random_add_entropy() is public and its length is whatever
      * the caller read out of a seed file: hashing it under Forbid() would hold
-     * the scheduler for a compression per 64 bytes -- around 100 ms for 16 KB
+     * the scheduler for a compression per 64 bytes, around 100 ms for 16 KB
      * on a 68020. What is left inside is a fixed 97 bytes, two compressions,
      * the same cost random_refill() already pays.
      */
@@ -430,8 +430,8 @@ static ULONG gather_jitter(EntropySample *s)
  * value that is the same on every boot, since the allocator hands out the same
  * block to the same caller at the same point in the same boot sequence.
  *
- * On a machine that has been used -- a warm reboot, a Workbench that launched
- * and quit things, a fragmented pool -- these carry real information, and it
+ * On a machine that has been used, a warm reboot, a Workbench that launched
+ * and quit things, a fragmented pool, these carry real information, and it
  * still goes into the pool.  It does not go into the accounting, because
  * nothing here can tell the two cases apart.
  */
@@ -565,8 +565,8 @@ static ULONG gather_tasks(EntropySample *s)
  *
  * On a machine with a battery-backed clock that somebody has set, this is real
  * wall time: 1532507776.382025 / 1532507783.606435 / 1532507798.617969 across
- * three cold boots, so both fields move.  Without one -- or on a boot that
- * never ran SetClock -- timer.device starts at 1978-01-01 and this degenerates
+ * three cold boots, so both fields move.  Without one, or on a boot that
+ * never ran SetClock, timer.device starts at 1978-01-01 and this degenerates
  * to uptime, the same every boot, so the credit is conditional on the seconds
  * field being non-zero.
  *
@@ -595,7 +595,7 @@ static ULONG gather_clock(EntropySample *s)
 /*
  * The sample is static, not a local: at 460 bytes it was the largest single
  * frame anywhere below a bsdsocket.library vector, and a vector runs on the
- * caller's stack -- 4 KB from an AmigaDOS Shell, with no guard page and no
+ * caller's stack, 4 KB from an AmigaDOS Shell, with no guard page and no
  * MMU, so the overflow is silent and kills the machine somewhere else later.
  * -fstack-usage put random_gather at 516 bytes and it sat under send(),
  * connect() and every DNS lookup, since ami_random_bytes() seeds on first use.
@@ -643,7 +643,7 @@ static VOID random_gather(VOID)
 }
 
 /*
- * Repeat calls still add, as the header promises -- what is excluded is two
+ * Repeat calls still add, as the header promises, what is excluded is two
  * collections at once. random_gather() writes the ~800-byte file-scope
  * random_sample from top to bottom, and the two lazy callers below are plain
  * test-then-act on pool_started, so two tasks could both fall through and
@@ -655,7 +655,7 @@ static VOID random_gather(VOID)
  *
  * The residual is in docs/REENTRANCY.md: that caller can draw a block from a
  * pool the first collection has not mixed yet. It does not arise in the shipped
- * library -- bsd_runtime_open() seeds from InitResident(), before any opener
+ * library, bsd_runtime_open() seeds from InitResident(), before any opener
  * exists.
  */
 VOID ami_random_init(VOID)

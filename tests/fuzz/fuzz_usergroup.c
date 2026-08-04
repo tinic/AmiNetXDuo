@@ -1,8 +1,8 @@
 /*
- * AmiNetXDuo -- host fuzz driver for DEVS:Internet/passwd and .../group.
+ * AmiNetXDuo, host fuzz driver for DEVS:Internet/passwd and .../group.
  *
  * Both files are read on the first getpwnam()/getgrnam() of every program
- * that opens usergroup.library, and neither is written by us -- an ftp or
+ * that opens usergroup.library, and neither is written by us, an ftp or
  * ssh port hands them to whatever the machine's owner, or whatever unpacked
  * an archive into DEVS:, left there. There is no MMU underneath, so a write
  * past an arena is not a fault but somebody else's memory.
@@ -10,7 +10,7 @@
  * The group parser sizes an arena in one pass and fills it in another, which
  * is the shape the netdb alias pool had when it overran: a disagreement
  * between the two passes is invisible on the Amiga and immediate here. Its
- * particular disagreement was line endings -- ug_next_line() ends a line on
+ * particular disagreement was line endings, ug_next_line() ends a line on
  * '\r' as well as '\n', and the sizing pass counted only '\n', so a
  * CR-terminated file sized for one line and parsed dozens.
  *
@@ -180,7 +180,7 @@ static void fz_run_once(const char *data, size_t len, int which)
  * The regression case is first and is the reason this file exists. Sixty-four
  * CR-terminated member-less groups contain no '\n' at all, so the sizing pass
  * that counted '\n' alone allocated four pointers while the parse wrote
- * sixty-four NULL terminators -- 240 bytes past a 16-byte block on the target.
+ * sixty-four NULL terminators, 240 bytes past a 16-byte block on the target.
  */
 static void fz_seeds(void)
 {

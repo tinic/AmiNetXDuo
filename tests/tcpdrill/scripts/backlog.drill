@@ -1,4 +1,4 @@
-# tcpdrill -- what a listening port does while it is already busy.
+# tcpdrill, what a listening port does while it is already busy.
 #
 # listen(fd, backlog) promises that `backlog` connections may be in flight
 # before the application has accepted any of them.  These are the two ways a
@@ -7,7 +7,7 @@
 # called accept() yet.  Both must leave the second client with a SYN-ACK.
 #
 # TWO PEERS OUT OF ONE.  `peerport` changes the source port mid-case, so the
-# two SYNs are two different connections to the same listening port -- which
+# two SYNs are two different connections to the same listening port, which
 # is what a second client is.  The second SYN carries a sequence number a
 # thousand on so the two are never confused in the log.
 #
@@ -18,7 +18,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-# The first handshake never completes -- the client's ACK is lost, or it went
+# The first handshake never completes, the client's ACK is lost, or it went
 # away between the SYN and the ACK.  The half-open connection then sits in
 # SYN_RECEIVED for the whole retransmit ladder, and a second client must not
 # have to wait for it.
@@ -33,7 +33,7 @@ rx S seq=2000 win=8192 mss=1460
 tx SA ack=2001 mss=1460
 
 # The first handshake DID complete, and the application has not called
-# accept() yet -- the ordinary case for any server doing work between
+# accept() yet, the ordinary case for any server doing work between
 # accepts.  The finished connection belongs in the accept queue; it must not
 # stop the port answering.
 case q02_second_connection_behind_an_unaccepted_one

@@ -1,5 +1,5 @@
 /*
- * clients/compat/amiga_compat.h -- prototypes for the shims in this directory
+ * clients/compat/amiga_compat.h, prototypes for the shims in this directory
  * that newlib's headers do not declare.
  *
  * amiga_posix.c supplies functions the toolchain's libc.a does not have.
@@ -32,7 +32,7 @@ extern "C" {
    to the parameter list. */
 struct timespec;
 
-/* Collapse ":/" to ":" -- see amiga_posix.c.  Returns its argument unchanged
+/* Collapse ":/" to ":", see amiga_posix.c.  Returns its argument unchanged
    when there is nothing to fix, and otherwise a pointer to a static buffer,
    so the result is only valid until the next call. */
 const char *amiga_fix_path(const char *path);
@@ -41,7 +41,7 @@ const char *amiga_fix_path(const char *path);
 int nanosleep(const struct timespec *req, struct timespec *rem);
 
 /* Not ours: newlib's libc.a defines clearenv() (lib_a-environ.o) but never
-   declares it -- <stdlib.h> puts it behind a visibility guard this toolchain
+   declares it, <stdlib.h> puts it behind a visibility guard this toolchain
    does not set.  Declared here rather than defined, because defining it is a
    multiple definition at link time.
 

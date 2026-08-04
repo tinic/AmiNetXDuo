@@ -1,4 +1,4 @@
-# bsdsocket.library -- the AmiTCP/Roadshow compatibility surface.
+# bsdsocket.library, the AmiTCP/Roadshow compatibility surface.
 #
 # Built as a static library here; the final shared-library link happens once
 # the ThreadX Exec port, the SANA-II shim and the netstack singleton exist
@@ -48,7 +48,7 @@ endif()
 
 # tcp_handler.c is the TCP: DOS handler: a socket reachable as a file handle,
 # so `Type TCP:host/port` works and a program that speaks DOS files can speak
-# the network. Nothing in the library depends on it -- library.c starts it and
+# the network. Nothing in the library depends on it, library.c starts it and
 # asks whether it is alive, and both are compiled out with it.
 if(AMINETXDUO_TCPDEVICE)
     list(APPEND BSDSOCKET_SOURCES tcp_handler.c)
@@ -64,7 +64,7 @@ endif()
 
 # mcast.c is the RFC 1112 membership surface. It is the only thing that calls
 # NetX Duo's IGMP services, so leaving it out is what keeps the nx_igmp_*
-# objects out of the link -- see the floor tier in dist/make-dist.sh.
+# objects out of the link, see the floor tier in dist/make-dist.sh.
 if(AMINETXDUO_MULTICAST)
     list(APPEND BSDSOCKET_SOURCES mcast.c)
 endif()
@@ -108,14 +108,14 @@ endif()
 # --------------------------------------------------------------------- link --
 #
 # library.c MUST come first so its "moveq #-1,d0 / rts" lands at offset 0 of
-# the first code hunk -- that is what makes the library file safe to execute.
+# the first code hunk, that is what makes the library file safe to execute.
 # -nostartfiles because a shared library has no crt0. Note that -noixemul is
 # NOT usable with this newlib toolchain (docs/RESEARCH.md S5.4).
 
 if(AMINETXDUO_BSDSOCKET_LINK)
     # The sources are listed directly rather than linked from the archive: an
     # archive member is only pulled in when something references it, and NOTHING
-    # references the romtag -- it is found by Exec scanning the loaded segment.
+    # references the romtag, it is found by Exec scanning the loaded segment.
     add_executable(bsdsocket_library ${BSDSOCKET_SOURCES})
     set_target_properties(bsdsocket_library PROPERTIES
         OUTPUT_NAME "bsdsocket.library")
@@ -138,11 +138,11 @@ if(AMINETXDUO_BSDSOCKET_LINK)
     # -nostartfiles, not -nostdlib: there is no crt0 in a shared library, but
     # ThreadX and NetX Duo do want memset/memcpy/memcmp and gcc wants its
     # integer-divide helpers, and the linker only pulls the archive members that
-    # are actually referenced -- no stdio comes along for the ride.
+    # are actually referenced, no stdio comes along for the ride.
     #
     # The map is for tools/profiler/profreport.py --lib.  A profile of a real
     # application samples this library as a shared library, and the linker
-    # leaves file statics out of HUNK_SYMBOL entirely -- their samples land
+    # leaves file statics out of HUNK_SYMBOL entirely, their samples land
     # silently on the preceding global.  The map's placement of each object,
     # plus nm on that object, is the only route to them, and it is roughly half
     # the symbols here.  It does not change the binary.

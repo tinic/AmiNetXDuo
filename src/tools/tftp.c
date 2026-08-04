@@ -1,5 +1,5 @@
 /*
- * tftp -- the trivial file transfer protocol, client half.
+ * tftp, the trivial file transfer protocol, client half.
  *
  *     tftp HOST/A,GET/K,PUT/K,AS/K,PORT/N/K,TIMEOUT/N/K,QUIET/S
  *
@@ -76,7 +76,7 @@ enum
 static UBYTE tftp_out[TFTP_BLOCK + 4];
 static UBYTE tftp_in[TFTP_BLOCK + 4 + 64];
 
-/* ---------------------------------------------------------------- helpers -- */
+/* ---------------------------------------------------------------- helpers, */
 
 static VOID tftp_put16(UBYTE *p, UWORD v)
 {
@@ -175,7 +175,7 @@ static VOID tftp_stray(struct Library *sb, LONG sock,
 }
 
 /*
- * A request packet -- opcode, filename, 0, "octet", 0 -- built into tftp_out.
+ * A request packet, opcode, filename, 0, "octet", 0, built into tftp_out.
  * Returns its length, or 0 when the name will not fit.
  */
 static ULONG tftp_build_request(UWORD opcode, const char *name)
@@ -248,8 +248,8 @@ static LONG tftp_wait(struct Library *sb, LONG sock, ULONG secs,
 }
 
 /*
- * Everything both directions share. `last` is whatever was last sent -- the
- * request, an ACK or a DATA block -- since TFTP's entire reliability mechanism
+ * Everything both directions share. `last` is whatever was last sent, the
+ * request, an ACK or a DATA block, since TFTP's entire reliability mechanism
  * is sending that again.
  */
 typedef struct TftpXfer

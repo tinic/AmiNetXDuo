@@ -1,5 +1,5 @@
 /*
- * clients/compat -- the whole of "libnet" for a Roadshow-NDK client build.
+ * clients/compat, the whole of "libnet" for a Roadshow-NDK client build.
  *
  * Every Unix client's build system, curl's included, expects `-lnet` on
  * AmigaOS, because bebbo's amiga-gcc ships a libnet.a holding C wrappers
@@ -19,8 +19,8 @@
  *
  * Hence a weak definition, in an archive.  A member of an archive is pulled in
  * only to satisfy an undefined symbol, so during feature detection this
- * supplies SocketBase, and during the real link -- where the client has
- * already defined it -- the member is never extracted and there is no
+ * supplies SocketBase, and during the real link, where the client has
+ * already defined it, the member is never extracted and there is no
  * duplicate.  Weak as well as archived covers the client that defines it in a
  * translation unit the linker sees later.
  *

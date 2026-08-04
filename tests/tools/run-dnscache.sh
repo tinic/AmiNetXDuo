@@ -12,8 +12,8 @@
 #   PUT NO QUERY ON THE WIRE.
 #
 #   Two names are looked up three times each, alternating, from six separate
-#   invocations of `host`.  The stack survives between them -- AddNetInterface
-#   holds the reference that keeps it up -- so all six share one NX_DNS.
+#   invocations of `host`.  The stack survives between them, AddNetInterface
+#   holds the reference that keeps it up, so all six share one NX_DNS.
 #
 #     with the cache     two queries leave the machine, one per name;
 #     without it         six do, one per invocation.
@@ -30,7 +30,7 @@
 #
 #   * every lookup of a name returned the SAME address.  A cache that returned
 #     nothing, or something else, on the hit would otherwise show up here as a
-#     pass -- there would be no query on the wire either way.
+#     pass, there would be no query on the wire either way.
 #   * the reverse direction is exercised too, because PTR records go through
 #     the same cache by a different path (_nx_dns_host_by_address_get_internal).
 #

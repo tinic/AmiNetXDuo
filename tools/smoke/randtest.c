@@ -1,11 +1,11 @@
 /*
- * Entropy pool probe -- what is src/common/ami_random.c actually worth?
+ * Entropy pool probe, what is src/common/ami_random.c actually worth?
  *
  * Three separate questions, and it is worth being clear which is which:
  *
- *   1. Is the CONDITIONING correct?  The obvious output failure modes --
+ *   1. Is the CONDITIONING correct?  The obvious output failure modes,
  *      constant output, a repeated block, a stuck bit, a wildly skewed byte
- *      distribution -- plus the DRBG wiring.  These are cheap and a failure
+ *      distribution, plus the DRBG wiring.  These are cheap and a failure
  *      here is a real bug.  The SHA-256 itself is NOT checked here; it is
  *      verified against the FIPS 180-4 vectors in a host harness, because
  *      exposing the hash just to test it would be the wrong trade.
@@ -19,7 +19,7 @@
  *      matters and it cannot be answered from inside one run.  The probe
  *      writes its first 32 output bytes to DH0:randtest.txt; run it twice
  *      from a cold boot and diff the file.  Identical output would NOT
- *      automatically be a bug -- it would be the honest measurement of how
+ *      automatically be a bug, it would be the honest measurement of how
  *      little a fixed boot image has to offer.  Measured under FS-UAE: three
  *      cold boots gave three different streams, driven almost entirely by the
  *      host wall clock reaching GetSysTime().  Different is not the same
@@ -94,7 +94,7 @@ static void hex32(char *out, const UBYTE *in, int n)
  * NOT a SHA-256 known-answer test: ami_random.c does not export its hash and
  * widening the API to allow one would be the wrong trade.  The hash is
  * verified separately by lifting that block into a host harness and running
- * the FIPS 180-4 vectors through it -- see the comment above sha256_init() in
+ * the FIPS 180-4 vectors through it, see the comment above sha256_init() in
  * src/common/ami_random.c.
  *
  * What is left for here is the wiring: consecutive draws must differ (a stuck
@@ -164,9 +164,9 @@ static void probe_jitter(void)
 /*
  * The individual sources, printed raw.
  *
- * ami_random.c deliberately does not expose a per-source breakdown -- an
+ * ami_random.c deliberately does not expose a per-source breakdown, an
  * attacker-facing number that granular would be a liability in a shipping
- * library -- so this reads the same things it reads and prints them.  Diffing
+ * library, so this reads the same things it reads and prints them.  Diffing
  * two cold-boot runs of this block is what tells you WHICH source is
  * responsible for the streams differing, and which are constants dressed up
  * as entropy.

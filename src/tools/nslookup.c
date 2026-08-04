@@ -1,5 +1,5 @@
 /*
- * nslookup -- ask the DNS for one kind of record.
+ * nslookup, ask the DNS for one kind of record.
  *
  *     nslookup NAME/A,SERVER,TYPE/K,TIMEOUT/N/K
  *
@@ -28,7 +28,7 @@
  *
  * A datagram from port 53 is unvalidated input and this machine has no MMU, so
  * every length in the reply is bounded against the bytes actually received.
- * Message compression (RFC 1035 4.1.4 -- a label length byte with its top two
+ * Message compression (RFC 1035 4.1.4, a label length byte with its top two
  * bits set points to an earlier name) is followed only backwards and at most
  * sixteen times; a forward or self-referential pointer would otherwise let a
  * fourteen-byte reply loop until the machine is reset. Text out of a record is
@@ -235,7 +235,7 @@ static ULONG nsl_encode_name(const char *name, UBYTE *out, ULONG outlen)
 }
 
 /*
- * "::1" -> "1.0.0. ... .0.ip6.arpa" -- RFC 3596's reverse form: the thirty-two
+ * "::1" -> "1.0.0. ... .0.ip6.arpa", RFC 3596's reverse form: the thirty-two
  * nibbles of the address, lowest first, one per label.
  */
 static VOID nsl_reverse_name6(const UBYTE *addr, char *out, ULONG outlen)
@@ -302,9 +302,9 @@ static VOID nsl_reverse_name(ULONG addr, char *out, ULONG outlen)
  * A name out of a reply at `pos`, as text in `out` (NULL when only the length
  * is wanted).
  *
- * Returns the offset of the byte after the name as it appears at `pos` -- for
+ * Returns the offset of the byte after the name as it appears at `pos`, for
  * a compressed name that is two past the pointer, not the end of whatever it
- * pointed at -- or -1 when the message will not support one.
+ * pointed at, or -1 when the message will not support one.
  *
  * Every exit from the loop is a bound. `len` is the bytes received, never a
  * length the message claimed. A pointer must go strictly backwards, which is
@@ -397,7 +397,7 @@ static LONG nsl_decode_name(const UBYTE *msg, ULONG len, ULONG pos,
     return end;
 }
 
-/* --------------------------------------------------------- the question -- */
+/* --------------------------------------------------------- the question, */
 
 /* The query message, built into nsl_query. Its length, or 0. */
 static ULONG nsl_build(const char *qname, UWORD type, UWORD id)
@@ -436,7 +436,7 @@ static UWORD nsl_id(VOID)
     return (UWORD)(((t << 5) ^ (t >> 3) ^ (a >> 2) ^ (a << 7)) & 0xffffUL);
 }
 
-/* ----------------------------------------------------------- the answer -- */
+/* ----------------------------------------------------------- the answer, */
 
 /* One record of the answer section, formatted for the type it turned out to
    be, which is not always the type asked for: an A question is answered with
@@ -575,7 +575,7 @@ static VOID nsl_print_record(const UBYTE *msg, ULONG len, UWORD type,
 
         default:
             /*
-             * A record we cannot format -- an AAAA, a signature, an OPT.
+             * A record we cannot format, an AAAA, a signature, an OPT.
              * Still reported, since "no records" would be wrong.
              */
             tool_printf("  type %-6lu %lu bytes\n", (LONG)type, (LONG)rdlen);
@@ -630,7 +630,7 @@ static LONG nsl_print_answers(const UBYTE *msg, ULONG len)
     return printed;
 }
 
-/* --------------------------------------------------------- the exchange -- */
+/* --------------------------------------------------------- the exchange, */
 
 /*
  * Send the query and wait for its answer. Returns bytes received into
@@ -723,7 +723,7 @@ static LONG nsl_exchange(struct Library *sb, LONG sock,
     return 0;
 }
 
-/* ------------------------------------------------------------- arguments -- */
+/* ------------------------------------------------------------- arguments, */
 
 static LONG nsl_type_from_name(const char *text, UWORD *type_out)
 {
@@ -775,7 +775,7 @@ static BOOL nsl_default_server(ToolAddr *out)
     /*
      * ami_config_load() loads the netdb (src/config/config_file.c) and
      * ami_alloc() is AllocVec(), which AmigaOS does not reclaim when a process
-     * exits -- 12,616 bytes per run on a stock DEVS:Internet, gone until
+     * exits, 12,616 bytes per run on a stock DEVS:Internet, gone until
      * reboot. Registered before the call because the && below short-circuits
      * after it, so the load happens either way.
      */
@@ -805,7 +805,7 @@ static const char *nsl_rcode_text(UWORD rcode)
     }
 }
 
-/* ------------------------------------------------------------------ main -- */
+/* ------------------------------------------------------------------ main, */
 
 int main(int argc, char **argv)
 {
@@ -863,7 +863,7 @@ int main(int argc, char **argv)
      * tool_parse_ip6() rather than the library's inet_pton(): an IPv4-only
      * library answers EAFNOSUPPORT for AF_INET6, and a command that took that
      * for "not an address" asked the DNS for a name spelt "::1" and reported
-     * NXDOMAIN. Nothing about a PTR question needs IPv6 to carry it -- the
+     * NXDOMAIN. Nothing about a PTR question needs IPv6 to carry it, the
      * ip6.arpa query travels to the name server over whatever this machine
      * has, and the answer is the same either way.
      */

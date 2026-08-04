@@ -1,8 +1,8 @@
-| AmiNetXDuo -- crypto68k: P-256 carry chains, 68020 assembly.
+| AmiNetXDuo, crypto68k: P-256 carry chains, 68020 assembly.
 |
 |   The sibling RSA work established the rule that matters on this machine:
 |   GCC 15.2 emits MULU.L, so hand-written multiply loops buy 1.4x and not 4x.
-|   That still holds -- c68k_p256.c's field multiply calls c68k_addmul_1 and is
+|   That still holds, c68k_p256.c's field multiply calls c68k_addmul_1 and is
 |   within a whisker of the MULU.L floor, and nothing here touches it.
 |
 |   Carry propagation is a different case, per the disassembly.  GCC cannot
@@ -16,7 +16,7 @@
 |       bccs    .+4
 |       addql   #1,d0
 |
-|   -- five instructions and a branch where the machine has two.  Rewriting the
+|  , five instructions and a branch where the machine has two.  Rewriting the
 |   C as a 64-bit accumulator does not fix it: GCC then emits a CLR.L for a
 |   fresh zero register per term instead of hoisting one, and spills to the
 |   stack besides.  Both forms were compiled and disassembled before this file
@@ -24,7 +24,7 @@
 |
 |   The Solinas reduction for P-256 is sixty-three such terms.  Measured on the
 |   emulated 68020: the C version runs it in 127 us, against 469 us for the
-|   64 MULU.L of a field multiply -- 26% of a field multiply.  This file takes
+|   64 MULU.L of a field multiply, 26% of a field multiply.  This file takes
 |   that 127 us to 84 us, which is 1.5x on the reduction, 449 us against 489 us
 |   on a field multiply, and 1.13x on every elliptic curve operation above it
 |   (an ECDSA verify went from 2.209 s to 1.961 s).
@@ -158,7 +158,7 @@ _c68k_p256_sub_raw:
 .endm
 
 | Store the finished limb and shift the signed carry down into lo.
-| MOVE.L sets N from hi, Scc reads it, and neither writes X -- immaterial here
+| MOVE.L sets N from hi, Scc reads it, and neither writes X, immaterial here
 | because every limb below starts with a plain ADD.L.
 .macro  PNEXT
         move.l  d0,(a0)+

@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo -- the NX_PACKET <-> mbuf boundary.
+ * AmiNetXDuo, the NX_PACKET <-> mbuf boundary.
  *
  * Both directions COPY. See the ownership decision at the top of
  * include/aminetxduo/mbuf.h for why an mbuf may not reference an NX_PACKET's
@@ -7,7 +7,7 @@
  * NX_PACKETs are a pinned pool resource that must not escape into application
  * hands.
  *
- * tx_api.h / nx_api.h must come before any exec header -- exec/types.h turns
+ * tx_api.h / nx_api.h must come before any exec header, exec/types.h turns
  * VOID into a macro, which breaks tx_port.h's `typedef void VOID`. Same rule
  * as src/sana2/sana2_internal.h.
  *

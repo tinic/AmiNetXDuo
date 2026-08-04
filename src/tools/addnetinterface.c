@@ -1,5 +1,5 @@
 /*
- * AddNetInterface -- bring up the interface described by
+ * AddNetInterface, bring up the interface described by
  * DEVS:NetInterfaces/<name>.
  *
  * This is the command S:User-Startup invokes, so it is the one that starts the
@@ -8,7 +8,7 @@
  *     C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET
  *
  * INTERFACE is either a bare interface name or the full path to the interface
- * file -- only the name matters, the directory is fixed -- and more than one
+ * file, only the name matters, the directory is fixed, and more than one
  * may be given. Several names are sorted before they are used, so a list
  * brings interfaces up in a defined order rather than in the order typed; the
  * ceiling is AMI_CFG_MAX_INTERFACES, which is what the parsed configuration
@@ -52,12 +52,12 @@ enum
     ARG_COUNT
 };
 
-/* Seconds. Both the default and the floor -- see the note at the top. */
+/* Seconds. Both the default and the floor, see the note at the top. */
 #define ADDIF_TIMEOUT       10UL
 
 /*
  * Below this much free, a failed start is a memory problem and no other
- * explanation is worth printing. It is not what the stack costs -- 81 measured
+ * explanation is worth printing. It is not what the stack costs, 81 measured
  * that at 432-439 KB resident plus the packet pool. A 512 KB machine reads
  * about 73 KB here, measured, so the line sits well clear of both.
  */
@@ -411,8 +411,8 @@ int main(int argc, char **argv)
     /*
      * netstack_startup() is idempotent and reference counted, and is the call
      * to use when the stack is linked into this command. It is not in the
-     * shipped build -- the stack has to outlive the command, so it lives in
-     * bsdsocket.library -- and AMI_NET_ERR_STATE is what says so.
+     * shipped build, the stack has to outlive the command, so it lives in
+     * bsdsocket.library, and AMI_NET_ERR_STATE is what says so.
      */
     err = netstack_startup();
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate c68k_p256_table.c -- the fixed-base comb table for P-256's G.
+"""Generate c68k_p256_table.c, the fixed-base comb table for P-256's G.
 
     python3 src/crypto68k/gen_p256_table.py > src/crypto68k/c68k_p256_table.c
 
@@ -19,7 +19,7 @@ and the scalar multiplication is 26 doublings with two additions each, versus
 table exists.
 
 Points are stored affine, x then y, eight 32-bit limbs each least significant
-first, which is the layout c68k_p256.c computes in -- so the table is loaded
+first, which is the layout c68k_p256.c computes in, so the table is loaded
 with a copy and never byte-swapped.
 
 SPDX-License-Identifier: MIT

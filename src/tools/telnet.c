@@ -1,5 +1,5 @@
 /*
- * telnet -- the TELNET protocol, RFC 854.
+ * telnet, the TELNET protocol, RFC 854.
  *
  *     telnet HOST/A,PORT,DEBUG=-d/S,QUIET/S
  *
@@ -74,7 +74,7 @@ enum
 #define TNOPT_LINEMODE  34
 #define TNOPT_NEWENV    39
 
-/* Ctrl-] -- the escape character. */
+/* Ctrl-], the escape character. */
 #define TN_ESCAPE       0x1D
 
 #define TN_CHUNK        4096
@@ -89,7 +89,7 @@ static UBYTE tn_staged[TN_CHUNK * 2];   /* IAC and CR both double a byte */
  * (st->saw_cr survives between calls) resolves into a '\n' and then the byte
  * that decided it is emitted as well. A segment ending on a bare CR followed
  * by a full 4096-byte segment with no CR and no IAC therefore produces 4097
- * bytes -- a server-controlled one-byte write past the end of a static, which
+ * bytes, a server-controlled one-byte write past the end of a static, which
  * on a machine with no MMU lands in whichever static the linker put next.
  *
  * TN_CHUNK + 1 is exact: no other path in the parser expands.
@@ -653,7 +653,7 @@ int main(int argc, char **argv)
 
             /*
              * End of input is not the end of the session.  Half-closing here
-             * -- shutdown(SHUT_WR), right for nc -- breaks telnet, because
+             *, shutdown(SHUT_WR), right for nc, breaks telnet, because
              * negotiation is still going on: the server's WILL ECHO can
              * arrive after the last line of a script, and the DO ECHO that
              * answers it then fails with EPIPE on a write half already given

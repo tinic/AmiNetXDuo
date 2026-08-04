@@ -1,5 +1,5 @@
 /*
- * clients/compat -- the POSIX calls a ported Unix network client references
+ * clients/compat, the POSIX calls a ported Unix network client references
  * and this toolchain's newlib does not define.
  *
  * curl, wget and every other Unix client were written against a libc that has
@@ -20,14 +20,14 @@
  *                    st_nlink are real.  AmigaOS has no symbolic links in the
  *                    POSIX sense, so lstat() is stat().
  *   fstat()          newlib's _fstat() returns 0 and writes nothing to the
- *                    struct, which is worse than failing -- callers read
+ *                    struct, which is worse than failing, callers read
  *                    uninitialised st_mode.  This one zeroes the struct,
  *                    asks _isatty() what kind of thing the descriptor is, and
  *                    measures a regular file with _lseek().
  *   ftruncate()      SetFileSize() needs a BPTR and only a newlib descriptor
  *                    is available, so this fails with EINVAL.  curl calls it
- *                    in one place -- truncating a partially written --output
- *                    file after a failed resume -- and handles the failure.
+ *                    in one place, truncating a partially written --output
+ *                    file after a failed resume, and handles the failure.
  *   link()           AmigaOS has MakeLink(), but hard links are a filesystem
  *                    option most Amiga volumes do not have.  ENOSYS.
  *   gettimeofday()   DateStamp().  Resolution is one tick (1/50 s), and the
@@ -192,8 +192,8 @@ int lstat(const char *path, struct stat *st)
 /*
  * newlib's _fstat() returns success and leaves the caller's struct alone, so a
  * caller that checks S_ISREG() is reading whatever was on the stack.  This one
- * answers the two questions a client asks -- "is this a terminal" and "how big
- * is it" -- and says nothing it does not know.
+ * answers the two questions a client asks, "is this a terminal" and "how big
+ * is it", and says nothing it does not know.
  */
 int fstat(int fd, struct stat *st)
 {
