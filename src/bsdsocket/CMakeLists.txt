@@ -150,11 +150,3 @@ if(AMINETXDUO_BSDSOCKET_LINK)
         "-Wl,-Map=$<TARGET_FILE_DIR:bsdsocket_library>/bsdsocket.library.map")
 endif()
 
-# The map is written above and is what the profiler reads, so the symbol table
-# in the library itself is carried for nobody.  Stripped after every other
-# POST_BUILD step, so the checks that read the linked file see it whole.
-if(CMAKE_STRIP AND NOT AMINETXDUO_KEEP_SYMBOLS)
-    add_custom_command(TARGET bsdsocket_library POST_BUILD
-        COMMAND "${CMAKE_STRIP}" "$<TARGET_FILE:bsdsocket_library>"
-        VERBATIM)
-endif()
