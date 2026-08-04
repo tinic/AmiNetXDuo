@@ -97,7 +97,25 @@ VOID ami_log(int level, const char *fmt, ...)
 }
 
 VOID ami_bpf_lock(VOID)   { }
-VOID ami_bpf_unlock(VOID) { }
+
+/*
+ * Unlock is the only place inside ami_bpf_read() where another task could get
+ * in, so it is where the interleaving test below wedges its second task. The
+ * hook fires once, on the Nth unlock, and clears itself.
+ */
+static void (*stub_on_unlock)(void);
+static int    stub_unlock_after;
+
+VOID ami_bpf_unlock(VOID)
+{
+    if (stub_on_unlock != NULL && --stub_unlock_after == 0)
+    {
+        void (*fn)(void) = stub_on_unlock;
+
+        stub_on_unlock = NULL;
+        fn();
+    }
+}
 
 VOID ami_bpf_time_init(VOID) { }
 
@@ -1078,6 +1096,82 @@ static void test_channel_ownership(void)
     CHECK(ami_alloc_count() == 0);
 }
 
+/*
+ * The base is closed while one of its channels is copying out.
+ *
+ * ami_bpf_close() answers EBUSY for this, because a caller can be told to try
+ * again; ami_bpf_close_owner() cannot, because it runs from bsd_child_destroy()
+ * on CloseLibrary() and has nowhere to put a refusal.  So it takes the channel
+ * away at once and leaves the two allocations for the reader, which is still
+ * copying out of one of them.  Freeing them there would hand a live memcpy
+ * freed memory, and there is no MMU to notice.
+ *
+ * Reproduced exactly rather than approximated: the hook below runs on the
+ * unlock ami_bpf_read() takes to do the copy outside the lock, which is the one
+ * moment the window is open.
+ */
+static ULONG t_race_allocs;
+
+static void t_close_owner_mid_read(void)
+{
+    ami_bpf_close_owner(T_BPF_OWNER);
+    t_race_allocs = ami_alloc_count();
+}
+
+static void test_close_owner_under_reader(void)
+{
+    UBYTE frame[128];
+    UBYTE out[512];
+    ULONG before;
+    ULONG len;
+    LONG  got;
+
+    printf("bpf: closing the base under a reader keeps its buffer alive\n");
+
+    CHECK(ami_bpf_init() == 0);
+    CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
+                                   test_inject) == 0);
+
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0") == 0);
+
+    len = make_tcp(frame, 1234, 80, 5, 0, 6);
+    ami_bpf_tap_rx(iface_cookie, frame, len);
+    CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) > 0);
+
+    /* The first unlock inside ami_bpf_read() is the copy-out one: there is a
+       record waiting, so the wait loop breaks with the lock still held. */
+    before            = ami_alloc_count();
+    t_race_allocs     = 0;
+    stub_unlock_after = 1;
+    stub_on_unlock    = t_close_owner_mid_read;
+
+    got = ami_bpf_read(T_BPF_OWNER, 0, out, (LONG)sizeof(out));
+
+    CHECK(stub_on_unlock == NULL);                  /* the hook did fire */
+
+    /* What the defect was: the channel's allocations still exist at the moment
+       the close returns, so the copy below them reads memory that is ours. */
+    CHECK(before != 0);
+    CHECK(t_race_allocs == before);
+
+    /* And the caller gets the frame it asked for. */
+    CHECK(got == (LONG)(AMI_BPF_HDRLEN + len));
+    CHECK(memcmp(out + AMI_BPF_HDRLEN, frame, len) == 0);
+
+    /* Nothing is left behind: the reader freed what the close deferred. */
+    CHECK(ami_alloc_count() == 0);
+    CHECK(ami_bpf_capturing() == 0);
+    CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) == AMI_BPF_ENXIO);
+
+    /* The slot is genuinely free again, not left reserved by the deferral. */
+    CHECK(ami_bpf_open(T_BPF_OTHER, -1) == 0);
+    CHECK(ami_bpf_close(T_BPF_OTHER, 0) == 0);
+
+    ami_bpf_detach_interface(iface_cookie);
+    CHECK(ami_alloc_count() == 0);
+}
+
 /* -------------------------------------------------------------------- main */
 
 int main(int argc, char **argv)
@@ -1097,6 +1191,7 @@ int main(int argc, char **argv)
     test_overflow_and_signals();
     test_write_and_binding();
     test_channel_ownership();
+    test_close_owner_under_reader();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
 
