@@ -33,7 +33,7 @@ git log; what it declined is under *Decided against*; what it disproved is under
 | **Bailiwick check on cached records, with CNAME chain following** | One item, not two: `NX_DNS_ENABLE_EXTENDED_RR_TYPES` is undefined, so the A record after a CNAME has the CNAME target as its owner and is accepted only because no owner-name check exists. Adding the check alone fails every CNAME-hosted name | `nxd_dns.c` |
 | **`src/bsdsocket` has one host test**, `test_inet`, reaching 7 of 29 files | The other 22 are blocked on 253 Amiga constants and on structures the host cannot shape, and their ABI is already held by 80 `_Static_assert`s on the cross build. What is left un-held is behaviour needing the real ABI: `bsd_route_mtu()`, `bsd_udp_from_peer()`, the 4-tuple filter. That is guest-suite work, so this row is about `bsdsocktest` coverage, not host coverage | `src/bsdsocket/`, measured under *Host-testing* below |
 | **`src/tools` is 32,412 lines behind five host tests.** `httppath`, `httpif`, `httplock`, `fetchurl`, `httpframe`, all of them httpd's | The other twenty-five commands have none. The 2026-08-04 diagnostics rewrite changed every one of them and nothing on the host could have caught a mistake; the cross build was the only gate, and it only proves they compile | `src/tools/` |
-| **`src/tlslib` is 4,628 lines behind two.** No test of the handshake, of resumption, or of the record layer beyond the fuzzers | `tls_conn.c`'s alert handling and `tls_resume.c`'s expiry were both changed on 2026-08-04 and neither is exercised except by `run-https.sh` on hardware | `src/tlslib/` |
+| **`src/tlslib` is 4,628 lines behind three.** No test of the handshake, of the record layer beyond the fuzzers, or of resumption past the expiry rule | `tls_conn.c`'s alert handling is still exercised only by `run-https.sh` on hardware. `tls_resume.c`'s expiry is now `tls_expiry.c` and host-tested; what remains there is the ticket and session-ID handling, which needs a server to answer | `src/tlslib/` |
 | **`src/sana2` has one test, added 2026-08-04**, covering `sana2_copy.c` alone out of 3,704 lines | The driver-facing code runs at interrupt time, which is where a mistake takes the machine down rather than failing a check | `src/sana2/` |
 | **A command is mostly C runtime.** `ping` is 15,860 bytes, of which its own code is 2,050 | libnix's crt0 chain pulls in stdio and the C++ AVL allocator through `__stdiowin.o` and `__initcpp.o`; `atexit()` was the other route and is gone. `tool_printf` goes through dos.library `VPrintf` and `ami_alloc` through `AllocVec`, so nothing we wrote calls what remains. `src/tools/CMakeLists.txt:62-76` records why the link line was left alone once before | link map of `tool_ping` |
 | **Parameterise `run-tcphandler.sh`'s peer address** | Every connection in it names 10.0.2.2, fs-uae's SLIRP gateway, so it cannot move to Amiberry. It is the last network test still calling `fsuae-run.sh` directly | `tests/tools/run-tcphandler.sh:137-159` |
@@ -94,10 +94,12 @@ it.
 | 1 | `inet.c` | Done. `tests/bsdsocket/host/test_inet_host.c`, 49 checks against the BSD manual page: short forms, octal and hex radix, `inet_aton` against `inet_addr` on broadcast, `inet_pton` strictness |
 | 2 | `cmsg.c`, `errno.c`, `routing.c`, `addrinfo.c` | Not worth the shim's cost. `cmsg.c`'s only host errors are its own ABI assertions; the other three need a share of the 253 constants |
 | 3 | Extract httpd's `If` header and lock evaluation as `httppath.c`, `httpif.c` and `httpframe.c` were extracted | Done. `If` was already `httpif.c`; the lock table is now `httplock.c` and `src/tools/test/test_httplock.c`, 88 checks over RFC 4918 §6.6, §7.1, §9.6, §9.6.1 and §9.10 |
-| 4 | `tls_resume.c` expiry, `tls_conn.c` alert-versus-FIN | Open. Both changed 2026-08-04, neither host-tested |
+| 4 | `tls_resume.c` expiry, `tls_conn.c` alert-versus-FIN | Expiry done: `tls_expiry.c` and `src/tlslib/test/test_tls_expiry.c`, 34 checks. `tls_conn.c`'s alert-versus-FIN is open and needs a record-layer harness rather than a split, so it is not the same shape of work |
 
-Phase 4 is the remaining host-test work; like phase 3 it is outside
-`src/bsdsocket` and needs no shim. Phase 2 belongs to the guest suites:
+What is left of phase 4 is `tls_conn.c`'s alert-versus-FIN, which unlike
+everything above cannot be reached by splitting a file: it is a question about
+a record arriving on a socket, so it needs a harness that can feed one. Phase 2
+belongs to the guest suites:
 `bsdsocktest`
 and `tests/sockopt` reach the real ABI, which is the property those files turn
 on. `tests/sockopt/host/test_optnum_host.c:14` is the pattern where a host test
