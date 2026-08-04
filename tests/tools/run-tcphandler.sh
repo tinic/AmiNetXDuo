@@ -168,7 +168,7 @@ printf '\n%s\t%d/tcp\n' "$SERVICE_NAME" "$DAYTIME_PORT" \
 
 # ------------------------------------------------------- the host servers ---
 #
-# Sized against the LOCK QUEUE, not the run: the emulator lock serialises every
+# Sized against the LOCK QUEUE, not the run: build/.fsuae.lock serialises every
 # emulator run in the tree, so a server that lived for TIMEOUT seconds would
 # routinely be dead before the guest booted.
 
@@ -195,7 +195,7 @@ SERIAL="$ROOT/build/serial-$AMINETXDUO_RUN_TAG.log"
 
 echo "==> booting $MODEL with the A2065 on SLIRP"
 set +e
-"$ROOT/tools/emu-net-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
+"$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
     "$STAGE/AddNetInterface" "$STAGE/TcpHandoff" \
     "$STAGE/Type" "$STAGE/Copy"
