@@ -750,6 +750,24 @@
 #define NX_ENABLE_IPV6_PATH_MTU_DISCOVERY
 
 /*
+ * Recursive DNS servers out of a router advertisement, RFC 8106.
+ *
+ * The one thing standing between an IPv6-only link and a usable machine.  A
+ * link with no IPv4 on it configures addresses and a default route from the
+ * advertisement and stops there: there is no DHCPv6 in this build
+ * (src/netstack/netstack_ipv6.c says why), and DEVS:Internet/name_resolution
+ * parses a nameserver as a dotted quad, so an IPv6 resolver cannot even be
+ * written down.  The machine comes up routable and cannot resolve a name.
+ *
+ * The option costs one else-if in nx_icmpv6_process_ra.c's option walk, which
+ * skipped type 25 with everything else it does not know, and a callback field
+ * on NX_IP.  src/netstack/netstack_dns.c takes it from there; what it does not
+ * do is call the DNS client from the IP thread, which would deadlock against
+ * a query already holding that client's mutex.
+ */
+#define NX_ENABLE_IPV6_RDNSS
+
+/*
  * Not set, and why:
  *
  *   NX_IPSEC_ENABLE              -- out of scope; §9 decision 4 lists the four

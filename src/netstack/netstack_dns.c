@@ -18,6 +18,86 @@
 /* RFC 1035 2.3.4: 255 octets of domain name, plus the NUL. */
 #define AMI_DNS_NAME_MAX    256
 
+#ifdef AMINETXDUO_IPV6
+
+/*
+ * The RFC 8106 half of the resolver.  An IPv6-only link configures addresses
+ * from a router advertisement and nothing else, so without this the machine
+ * comes up routable and cannot resolve a name: there is no DHCPv6 in this
+ * build and DEVS:Internet/name_resolution takes a dotted quad only.
+ *
+ * The advertisement arrives on the IP thread, which may not call the DNS
+ * client -- nxd_dns_server_add() waits on the mutex a query holds, and that
+ * query is waiting on this thread.  So the callback records and the next
+ * lookup absorbs.
+ */
+VOID ami_ns6_rdnss(NX_IP *ip_ptr, UINT interface_index, ULONG *dns_address,
+                   ULONG lifetime)
+{
+    AmiNetStack *ns = ami_netstack_raw();
+    UWORD        i;
+
+    (VOID)ip_ptr;
+    (VOID)interface_index;
+
+    if (ns == NULL || dns_address == NULL)
+        return;
+
+    /* RFC 8106 5.1: a lifetime of zero withdraws the server. */
+    if (lifetime == 0UL)
+        return;
+
+    for (i = 0; i < ns->ns_RdnssCount; i++)
+    {
+        if (ns->ns_Rdnss[i].nxd_ip_address.v6[0] == dns_address[0] &&
+            ns->ns_Rdnss[i].nxd_ip_address.v6[1] == dns_address[1] &&
+            ns->ns_Rdnss[i].nxd_ip_address.v6[2] == dns_address[2] &&
+            ns->ns_Rdnss[i].nxd_ip_address.v6[3] == dns_address[3])
+            return;
+    }
+
+    if (ns->ns_RdnssCount >= (UWORD)AMI_RDNSS_MAX)
+        return;
+
+    i = ns->ns_RdnssCount;
+
+    ns->ns_Rdnss[i].nxd_ip_version       = NX_IP_VERSION_V6;
+    ns->ns_Rdnss[i].nxd_ip_address.v6[0] = dns_address[0];
+    ns->ns_Rdnss[i].nxd_ip_address.v6[1] = dns_address[1];
+    ns->ns_Rdnss[i].nxd_ip_address.v6[2] = dns_address[2];
+    ns->ns_Rdnss[i].nxd_ip_address.v6[3] = dns_address[3];
+
+    ns->ns_RdnssCount  = (UWORD)(i + 1);
+    ns->ns_RdnssPending = TRUE;
+}
+
+/*
+ * Hand anything the callback recorded to the DNS client.  Called from a
+ * caller thread on the way into a lookup, which is where it is safe.
+ */
+static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
+{
+    UWORD i;
+
+    if (ns == NULL || !ns->ns_DnsCreated || !ns->ns_RdnssPending)
+        return;
+
+    ns->ns_RdnssPending = FALSE;
+
+    for (i = 0; i < ns->ns_RdnssCount; i++)
+    {
+        UINT status = nxd_dns_server_add(&ns->ns_Dns, &ns->ns_Rdnss[i]);
+
+        /* Already there is the ordinary case: every advertisement repeats the
+           option, and the count above only grows. */
+        if (status != NX_SUCCESS && status != NX_DNS_DUPLICATE_ENTRY)
+            AMI_WARN("netstack: advertised name server rejected (%ld)",
+                     (long)status);
+    }
+}
+
+#endif /* AMINETXDUO_IPV6 */
+
 VOID ami_ns_copy_name(char *dst, const char *src, ULONG size)
 {
     ULONG i = 0;
@@ -306,6 +386,10 @@ static AmiNetAskResult ami_ns_ask_name(VOID *arg, ULONG wait)
         ask->nocaller = TRUE;
         return AMI_NET_ASK_REFUSED;
     }
+
+#ifdef AMINETXDUO_IPV6
+    ami_ns_dns_absorb_rdnss(ask->ns);
+#endif
 
     ask->status = nx_dns_host_by_name_get(&ask->ns->ns_Dns,
                                           (UCHAR *)ask->name, &ask->address,
@@ -664,6 +748,8 @@ static AmiNetAskResult ami_ns_ask_name6(VOID *arg, ULONG wait)
         ask->nocaller = TRUE;
         return AMI_NET_ASK_REFUSED;
     }
+
+    ami_ns_dns_absorb_rdnss(ask->ns);
 
     ask->count  = 0;
     ask->status = nxd_dns_ipv6_address_by_name_get(&ask->ns->ns_Dns,
