@@ -625,7 +625,7 @@ static BOOL bsd_socket_destroy(AmiSocket *sock);
  *     if (so->so_state & SS_NOFDREF && tp->t_state > TCPS_CLOSE_WAIT && tlen)
  *             tp = tcp_drop(tp, ECONNRESET);
  *
- *, the same rule as RFC 1122 4.2.2.13's "close with unread data", one
+ * the same rule as RFC 1122 4.2.2.13's "close with unread data", one
  * segment later. Without it a closed socket in FIN_WAIT_2 goes on
  * acknowledging for as long as the peer keeps writing, which is what made
  * tests/clients' "send() to a closed peer eventually fails" stop failing.

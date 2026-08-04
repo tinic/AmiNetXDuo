@@ -151,7 +151,7 @@ fi
 #
 # TX checksum offload on the peer is not a preference.  With it on, the
 # server's segments leave with an uncomputed checksum, our stack rejects them
-#, correctly, and the run reads as "connection made, N bad packets, N
+# correctly, and the run reads as "connection made, N bad packets, N
 # checksum errors" and no transfer, which looks exactly like our defect.
 
 echo "==> peer $PEER ($PEER_ADDR)"

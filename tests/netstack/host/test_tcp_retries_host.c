@@ -11,7 +11,7 @@
  *
  * Two explanations fit that from the outside, the macro did not reach the
  * vendored translation unit, or the limit is tested against the wrong counter
- *, and they need opposite fixes.  A packet capture cannot separate them,
+ * and they need opposite fixes.  A packet capture cannot separate them,
  * because the interval ladder is driven by nx_tcp_socket_timeout_retries and
  * looks identical either way.  So this prints what the socket holds after
  * nx_tcp_socket_create() and then drives the timer that has to act on it.

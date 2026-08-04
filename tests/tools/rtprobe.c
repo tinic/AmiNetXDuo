@@ -326,7 +326,7 @@ int main(void)
     /* ---- the flags filter ------------------------------------------------
      *
      * "Flags which have to be set in each routing table entry to be returned"
-     *, so RTF_STATIC returns the two just added and nothing else; the count
+     * so RTF_STATIC returns the two just added and nothing else; the count
      * is the assertion.
      */
     (VOID)p_show_table(base, "static-only", AF_INET, RTF_STATIC);

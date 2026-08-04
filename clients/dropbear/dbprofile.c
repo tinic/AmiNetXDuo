@@ -158,7 +158,7 @@ static void p_report(void)
     /*
      * stderr, not stdout.  The first profiling run printed nothing at all
      * through printf(), while Dropbear's own "Caution, skipping hostkey check"
-     *, dbutil.c's fprintf(stderr), came through in the same transcript.
+     * dbutil.c's fprintf(stderr), came through in the same transcript.
      * stderr is the stream that is wired up under ClientRun on this platform.
      */
     fprintf(stderr, "\n--- dbprofile: where this connection went ---\n");

@@ -243,7 +243,7 @@ static UINT     a_row_count;
 /*
  * The setup used to contribute only its 2080-product square, because the
  * reduction around it was the vendored divider working in 16-bit half-limbs
- *, different instructions entirely.  c68k_mod() does the same job in 32-bit
+ * different instructions entirely.  c68k_mod() does the same job in 32-bit
  * limbs, so its multiply-subtract passes show up here now: 67 quotient digits
  * across the two reductions, 64 limbs each, is 4,288 more MULU.L.
  *

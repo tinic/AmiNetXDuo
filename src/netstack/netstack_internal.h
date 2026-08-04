@@ -92,7 +92,7 @@
  * The local cache holds what this machine claims: the A record for
  * <host>.local per interface, plus four records per declared service, an
  * SRV, a TXT and two PTRs, one of them the _services._dns-sd._udp enumeration
- *, and the names they point at.  An NX_MDNS_RR is 56 bytes and the names run
+ * and the names they point at.  An NX_MDNS_RR is 56 bytes and the names run
  * to about 90 more, so 384 per service covers it with room over; the base
  * kilobyte is the host's own name.  If it will not hold our own name, the
  * machine has no name; if it will not hold a service, that service is not
@@ -229,7 +229,7 @@ struct AmiNetStack
      * Recursive DNS servers a router advertised, RFC 8106.  ami_ns6_rdnss()
      * runs on the IP thread and may not call into the DNS client, that
      * client holds its mutex across a query, and a query needs the IP thread
-     *, so it only writes here, and the next lookup takes what it finds.
+     * so it only writes here, and the next lookup takes what it finds.
      *
      * Four is what RFC 8106 section 5.1 expects a router to advertise (it
      * recommends no more than three) and is the same order as

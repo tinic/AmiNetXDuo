@@ -776,7 +776,7 @@ UINT    r;
 
 /*
  * The assembly, when this build has it.  Same interface as the C round cores
- *, (round keys, rounds, four-longword state in memory), so the dispatch is
+ * (round keys, rounds, four-longword state in memory), so the dispatch is
  * a switch and not two code paths.
  *
  * The state lives in memory.  The 68020 has eight data registers; a round

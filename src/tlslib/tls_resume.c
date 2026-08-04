@@ -1112,7 +1112,7 @@ UINT __wrap__nx_secure_tls_send_clienthello(NX_SECURE_TLS_SESSION *tls_session,
      * the vendored code makes for its own content.
      *
      * And the finished handshake message, four header bytes plus this body
-     *, has to fit in nx_secure_tls_handshake_cache[500], because
+     * has to fit in nx_secure_tls_handshake_cache[500], because
      * _nx_secure_tls_send_handshake_record() copies a ClientHello into that
      * fixed array with no bounds check.  Overrunning it would write through
      * the middle of NX_SECURE_TLS_SESSION.  Rather than trip that, drop the

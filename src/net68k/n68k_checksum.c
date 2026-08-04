@@ -46,7 +46,7 @@
  *
  *     movea.l (a1)+,a0 / add.l a0,d0 / cmp.l a0,d0 / bcc.s / addq.l #1,d0
  *
- *, four instructions and a branch where the machine needs two, still better
+ * four instructions and a branch where the machine needs two, still better
  * than the vendored seven.  Selecting the assembly is a build option
  * (AMINETXDUO_NET68K_ASM) and not a #if on the target, because a host build
  * has to compile this file to run the host tier of the differential test.

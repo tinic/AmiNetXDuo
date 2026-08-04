@@ -969,7 +969,7 @@ VOID bsd_AbortInterfaceConfig(register struct AddressAllocationMessage *aam __as
      *
      * The flag is raised under Forbid() and the worker reads it at the top of
      * its next poll. If the worker has already taken the job out of the table
-     *, which it does before it replies, there is nothing to find, which is
+     * which it does before it replies, there is nothing to find, which is
      * the race the autodoc describes. Setting a flag in a job that is no
      * longer listed would write into memory that is about to be freed.
      *

@@ -152,7 +152,7 @@ shift $((OPTIND - 1))
 # The A2065 keeps its own legacy config key; everything else is an expansion
 # board and is switched on with <name>_rom_file=:ENABLED.  All of them come up
 # on SLIRP without being asked to, slirp is WinUAE's default network device
-#, which is why there is no per-board backend option below.  a2065=none is
+# which is why there is no per-board backend option below.  a2065=none is
 # the only "fit the card, wire it to nothing" setting proven to work; the
 # equivalent for the other boards is UNTESTED.
 case "$BOARD" in

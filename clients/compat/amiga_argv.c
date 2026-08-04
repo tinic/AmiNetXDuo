@@ -118,7 +118,7 @@ static VOID argv_paint(VOID)
  * Where a run's memory goes, under the same variable.
  *
  * A ported client loses a constant amount per invocation that is not the stack
- *, 4,224 bytes for dbclient, the same for `dbclient -V`, which opens no
+ * 4,224 bytes for dbclient, the same for `dbclient -V`, which opens no
  * socket.  Three readings bracket it: entering __wrap_main, the moment before
  * __real_main, and after the stack has been freed.  Whatever is missing
  * between the last of those and what the parent sees is the crt0's teardown

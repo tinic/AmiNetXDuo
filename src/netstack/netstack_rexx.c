@@ -119,7 +119,7 @@ static ULONG            ami_rx_stop_sig;
  * AmiTCP also set an ARexx variable, AMITCP.LASTERROR, alongside the return
  * code. That is not done here. SetRexxVarFromMsg() is the only way to reach it
  * from a shared library, amiga.lib's SetRexxVar() needs a base we do not have
- *, and only some NDKs declare it, so building against it makes the result
+ * and only some NDKs declare it, so building against it makes the result
  * depend on which NDK is installed. Nothing in the 31-archive corpus reads
  * LASTERROR (docs/RESEARCH.md 75.7); what a script reads as RC is rm_Result1,
  * which is set, and an error string comes back in rm_Result2 when the caller

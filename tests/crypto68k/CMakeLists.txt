@@ -206,7 +206,7 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     # The 25519 vectors are their own executable rather than another section of
     # test_c68k_host.c: c68k_25519.c shares nothing with the huge-number code
-    #, no nx_crypto types, no NX_CRYPTO_STANDALONE_ENABLE, no port shim --
+    # no nx_crypto types, no NX_CRYPTO_STANDALONE_ENABLE, no port shim --
     # and the only thing it needs from this tree is a SHA-512, which
     # nx_crypto_sha5.c supplies.  Keeping them separate means a failure names
     # which half broke.

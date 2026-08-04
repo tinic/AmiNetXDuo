@@ -9,7 +9,7 @@
 #
 # Prove it before believing it, on more than one CPU, because the exception
 # frame is what is in question.  tools/profiler/selftest.sh is the whole loop
-#, run, resolve, check containment and proportionality, in one command:
+# run, resolve, check containment and proportionality, in one command:
 #
 #   AMINETXDUO_KICKSTART=<a 3.1 ROM>   tools/profiler/selftest.sh -b build/p20
 #   AMINETXDUO_KICKSTART=<a 2.04 ROM>  tools/profiler/selftest.sh -b build/p00 -m A500

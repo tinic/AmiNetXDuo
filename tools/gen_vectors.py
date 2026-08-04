@@ -154,7 +154,7 @@ IMPLEMENTED = {
     # Tier 3, the interface query API (interfaces.c).
     #
     # These are written against NDK 3.2's SANA+RoadshowTCP-IP/doc/bsdsocket.doc
-    #, Barthel's own autodoc, which ships in the same NDK this project builds
+    # Barthel's own autodoc, which ships in the same NDK this project builds
     # against and which settles the two things libraries/bsdsocket.h does not:
     # the node shape ObtainInterfaceList() returns, and that every IFQ_* tag's
     # ti_Data is a pointer to caller storage rather than the value.  Everything
@@ -165,7 +165,7 @@ IMPLEMENTED = {
     "CreateAddrAllocMessageA", "DeleteAddrAllocMessage",
     "BeginInterfaceConfig", "AbortInterfaceConfig",
     # Tier 3, the monitoring hooks (netmonitor.c).  MHT_Send is not dispatched
-    #, see the foot of netmonitor.c, but the registry serves all types.
+    # see the foot of netmonitor.c, but the registry serves all types.
     "AddNetMonitorHookTagList", "RemoveNetMonitorHook",
     # Tier 3, the routing API (routing.c).  ChangeRouteTagList is NOT here:
     # the NDK assigns it an offset and neither the autodoc nor

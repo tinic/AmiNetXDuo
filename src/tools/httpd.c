@@ -5355,7 +5355,7 @@ static BOOL httpd_body_failed(const HttpConn *c)
  * A body still arriving, and whether it is arriving at all.
  *
  * The no-progress timeout asks whether ANYTHING came, and one byte answers it
- *, so a client sending a byte every 29 seconds held its slot for as long as
+ * so a client sending a byte every 29 seconds held its slot for as long as
  * it liked, and HTTPD_CONN_MAX of them held the whole table.  This asks the
  * other question: at what rate.
  *
@@ -5480,7 +5480,7 @@ static VOID httpd_after_head(HttpConn *c, ULONG headlen)
     /*
      * Nothing reaches the sink until the method has said it can take it.  A
      * PUT that cannot be started, no drawer, no room, somebody else's lock
-     *, is refused here, which is before the client has sent the file rather
+     * is refused here, which is before the client has sent the file rather
      * than after.
      */
     if (c->method->begin != NULL && !c->method->begin(c))

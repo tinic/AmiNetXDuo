@@ -21,7 +21,7 @@
  * variable and the `jsr`.  A local register variable lives in its hard
  * register from its initialiser onwards, and GCC does not reload it after a
  * call, so a call in a later initialiser returns having clobbered d0/d1/a0/a1
- *, the earlier arguments, and the library is entered with the callee's
+ * the earlier arguments, and the library is entered with the callee's
  * leftovers.  bind(), connect() and sendto() each computed the sockaddr
  * length that way.  At -Os tool_sock_len() inlines and nothing shows; at -O0
  * it is a real `jsr` and sendto() went to the library with d0 holding 16

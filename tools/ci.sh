@@ -94,7 +94,7 @@ CROSS_CONFIGS=(
     # than one thing off at once.  Every option above is a separate arm because
     # each has its own compile-time surface; this one exists because the
     # combination is what a user downloads, and the arms above do not cover it
-    #, BPF=OFF appears nowhere else at all, and the interactions between five
+    # BPF=OFF appears nowhere else at all, and the interactions between five
     # of them appear nowhere else at all.  It must stay byte-for-byte the
     # options .github/workflows/release.yml gives build/release-68000-minimal.
     "minimal68000:-DAMINETXDUO_CPU=68000 -DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF"
@@ -308,7 +308,7 @@ stage_cross() {
             # `|| tail`, not a bare pipeline.  Under `set -euo pipefail` the
             # grep exits 1 when nothing matches and 141 when head -20 closes
             # the pipe on a broad break, and either one killed the shell here
-            #, before `fail` recorded anything, before the remaining configs
+            # before `fail` recorded anything, before the remaining configs
             # were attempted and before the summary printed.  The fallback also
             # gives this path the log tail the configure path above already has,
             # so a failure is never reported with no output at all.

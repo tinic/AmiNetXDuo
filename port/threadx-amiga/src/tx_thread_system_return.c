@@ -113,7 +113,7 @@ TX_THREAD       *owner;
  * returns, and before _tx_thread_system_suspend() unlinks the thread from the
  * ready lists.  For a thread the reaper had to abandon (see _tx_amiga_reap())
  * that unlinking would be done with a TX_THREAD that has already been deleted
- *, tx_thread_ready_next/previous still point at live threads, so it splices a
+ * tx_thread_ready_next/previous still point at live threads, so it splices a
  * dead node's stale neighbours into the live list and the next dispatch jumps
  * through whatever that leaves behind.  Dying here avoids that.
  *

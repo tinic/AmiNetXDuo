@@ -107,7 +107,7 @@ notx 200
 recv 100 = 0
 
 # A RESET the acceptability test rejects outright is still dropped in silence
-#, the challenge is for segments INSIDE the window, and a segment far past
+# the challenge is for segments INSIDE the window, and a segment far past
 # the right edge must not draw one.  40000 is beyond the widest window w01
 # allows.
 case n07_out_of_window_rst_draws_nothing

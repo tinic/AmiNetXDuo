@@ -653,7 +653,7 @@ int main(int argc, char **argv)
 
             /*
              * End of input is not the end of the session.  Half-closing here
-             *, shutdown(SHUT_WR), right for nc, breaks telnet, because
+             * shutdown(SHUT_WR), right for nc, breaks telnet, because
              * negotiation is still going on: the server's WILL ECHO can
              * arrive after the last line of a script, and the DO ECHO that
              * answers it then fails with EPIPE on a write half already given

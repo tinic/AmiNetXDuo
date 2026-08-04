@@ -91,7 +91,7 @@ static ULONG t_failures;
 /*
  * Flushed per line. The emulator runner reads stdout out of a file after the
  * run, so an unflushed line is a line that does not exist if the program wedges
- *, and wedging is one of the things this file is here to catch. A sibling
+ * and wedging is one of the things this file is here to catch. A sibling
  * harness lost two emulator runs to exactly that.
  */
 static VOID t_log(const char *fmt, LONG a, LONG b)

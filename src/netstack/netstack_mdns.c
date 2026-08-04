@@ -462,7 +462,7 @@ static UCHAR *ami_ns_mdns_type_arg(const char *type)
 
 /*
  * Is this SRV target this machine? The target is a full name, "amiga.local"
- *, and nx_mdns_host_name is the label alone, so the comparison is against the
+ * and nx_mdns_host_name is the label alone, so the comparison is against the
  * first label, case-insensitively (RFC 6762 16). mDNS probing makes that label
  * unique on the link, so matching it is enough to be sure.
  */

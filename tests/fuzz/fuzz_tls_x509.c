@@ -92,7 +92,7 @@ TX_MUTEX _nx_secure_tls_protection;
  * _nx_secure_x509_asn1_tlv_block_parse() reads buffer[0] one statement before
  * it tests *buffer_length < 1, so every caller that reaches the end of its
  * data with nothing left over-reads by one byte. It is reachable from the wire
- *, a two-byte certificate through _nx_secure_x509_certificate_parse() gets
+ * a two-byte certificate through _nx_secure_x509_certificate_parse() gets
  * there, and from tls_store.c's issuer walk, which calls the same function
  * with whatever is left. Found by this driver at FX_KNOWN_SLOP 0, and fixed on the fork; recorded in
  * docs/BACKLOG.md; the fix is to move the test above the read, in nx_secure.
@@ -616,7 +616,7 @@ static unsigned fx_below(unsigned n)
 
 /*
  * Aimed at DER's structure bytes, a tag, a length, a long-form length count
- *, rather than at the payload. A flipped byte in a modulus changes a key
+ * rather than at the payload. A flipped byte in a modulus changes a key
  * nobody uses here; a flipped length byte changes where the next TLV starts
  * and how much of the buffer the rest of the walk believes it has.
  */

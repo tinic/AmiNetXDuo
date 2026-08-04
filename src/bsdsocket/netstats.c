@@ -341,7 +341,7 @@ static NX_TCP_SOCKET *bsd_listen_spare(NX_IP *ip, UINT port)
 /*
  * The created-socket lists are singly linked and circular, so the walk is
  * bounded by the count NetX Duo keeps rather than by a NULL that never comes
- *, the same trap netstatus.c notes for the same two lists.
+ * the same trap netstatus.c notes for the same two lists.
  */
 static VOID bsd_pcd_tcp(NX_IP *ip, BsdPcdWriter *w)
 {

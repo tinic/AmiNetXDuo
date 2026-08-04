@@ -32,7 +32,7 @@
  *
  * Real, compiled from third_party/netxduo/common/src into this binary:
  * nx_icmpv6_process_packet_too_big.c with the destination table underneath it
- *, add, find and the periodic sweep, so the table state each check reads
+ * add, find and the periodic sweep, so the table state each check reads
  * is the table the stack would have.
  *
  * Stubbed: the neighbour cache and the two things the handler calls outward,

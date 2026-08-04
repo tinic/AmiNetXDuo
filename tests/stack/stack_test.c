@@ -473,7 +473,7 @@ typedef struct StResult
 /*
  * The worker cannot report for itself. A Process made by CreateNewProc with no
  * NP_Output has no Output() to Printf to, so everything it "logs" goes nowhere
- *, and a worker that overflows its stack could not be trusted to say so
+ * and a worker that overflows its stack could not be trusted to say so
  * anyway. It writes a phase number into the shared struct instead, and the
  * parent prints the phase names, including on the timeout path where the last
  * phase reached IS the failure report.

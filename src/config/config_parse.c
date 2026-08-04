@@ -76,7 +76,7 @@ ami_if_keywords[] =
 
     /*
      * IPv6. Roadshow has no IPv6 keywords, no Amiga stack has ever had IPv6
-     *, so these are ours, named by appending "6" to the IPv4 keyword they
+     * so these are ours, named by appending "6" to the IPv4 keyword they
      * mirror. That is the one naming rule that needs no documentation to
      * guess, it cannot collide with a real Roadshow keyword (the manual has
      * none ending in a digit), and it keeps one interface file describing both

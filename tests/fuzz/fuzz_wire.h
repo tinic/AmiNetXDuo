@@ -204,7 +204,7 @@ static void fzs_aaaa_answer(FzwBuf *w, const char *qname)
 /*
  * The question a reverse lookup of 10.0.0.9 asks.  addons/dns builds it from
  * the octets in reverse followed by lookup_end[], which is spelled in capitals
- *, so this is the exact string on the wire, and a server that answers in
+ * so this is the exact string on the wire, and a server that answers in
  * lower case is answering the same question in the other case.
  */
 #define FZW_INADDR_QNAME    "9.0.0.10.IN-ADDR.ARPA"

@@ -237,7 +237,7 @@ struct ipv6_mreq
  *
  *     static const struct in6_addr any = IN6ADDR_ANY_INIT;
  *
- *, which is what the initialisers are for.
+ * which is what the initialisers are for.
  */
 
 #ifndef IN6_IS_ADDR_UNSPECIFIED

@@ -120,7 +120,7 @@ static void checkv(const char *what, BOOL ok, LONG value)
  * back.  Freeing is not synchronous with the call that causes it, a Task's
  * stack and MemList go back when exec reaps it, and a Process's stack, CLI and
  * Process structure go back after System() has already returned to its caller
- *, so a single AvailMem() taken at the moment of interest reads whatever
+ * so a single AvailMem() taken at the moment of interest reads whatever
  * teardown happens to still be in flight.  Measured on a run that leaked
  * nothing: 18936 bytes out at the instant System() returned, 72 five ticks
  * later.

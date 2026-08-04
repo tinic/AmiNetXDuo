@@ -51,7 +51,7 @@ static const char version_tag[] __attribute__((used)) =
 /*
  * The command list can be staged as DH0:commands.txt, one command per line,
  * '#' and blank lines ignored. Staging different directories lets the harness
- *, which can only start one executable with no arguments, exercise a
+ * which can only start one executable with no arguments, exercise a
  * machine with no configuration, one with a broken configuration, and one whose
  * config names a device that is not there.
  *

@@ -21,7 +21,7 @@
  * nx_ip_header_add.c, nx_ip_route_find.c, nx_ip_driver_packet_send.c (the
  * function under test), nx_packet_copy.c, nx_ipv4_packet_receive.c,
  * nx_ip_dispatch_process.c, nx_udp_packet_receive.c and nx_udp_socket_receive.c
- *, plus the packet pool and the UDP port table underneath them.
+ * plus the packet pool and the UDP port table underneath them.
  *
  * Stubbed: the link driver, which counts what would have gone on the wire and
  * releases the packet, and the IP thread.  _nx_ip_packet_deferred_receive()

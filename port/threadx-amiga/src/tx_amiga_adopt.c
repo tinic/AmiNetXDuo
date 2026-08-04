@@ -135,7 +135,7 @@ BYTE    bit;
  *
  * NetX Duo's caller checks ask "is a thread calling me" and the generic answer
  * is _tx_thread_system_state == 0, which on a target means "no ISR is running"
- *, a property of the CPU, and therefore the same answer for everybody.  Here
+ * a property of the CPU, and therefore the same answer for everybody.  Here
  * interrupt context is a Task holding the core lock, and the teardown paths in
  * this file raise the counter with switching enabled because
  * _tx_thread_delete() can Wait() in the reaper.  So the generic answer is

@@ -210,7 +210,7 @@
  * "at least 100 seconds", and not MUST-23.
  *
  * Seven with the shift capped at 6 gives 1 2 4 8 16 32 64 64 seconds of waiting
- *, seven retransmissions, the last at 127 s, and abandons at 191 s.  The cap
+ * seven retransmissions, the last at 127 s, and abandons at 191 s.  The cap
  * is what keeps this off 255: without it the seventh interval alone is 128
  * seconds.  Data keeps the six and its 127 s, because a transfer that has
  * stopped should report sooner than a connection that has not started.
@@ -443,7 +443,7 @@
  * free half of it is done in src/netstack/ instead.
  *
  * Without the define, nx_ip_header_add.c:151 uses `ip_ptr -> nx_ip_packet_id++`
- *, a global counter that nx_ip_create.c zeroes at startup and increments once
+ * a global counter that nx_ip_create.c zeroes at startup and increments once
  * per transmitted IP datagram.  That is (1) a fingerprint, since the rate it
  * climbs at is a machine-wide packet counter readable from any single flow, and
  * (2) RFC 6274 5.1's idle scan, where an off-path attacker reads the ID this

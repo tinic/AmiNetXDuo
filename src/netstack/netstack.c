@@ -2642,7 +2642,7 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
 
 /*
  * The slot is picked, then the SANA-II device is opened, Exec I/O, and long
- *, before anything marks it taken, so two tasks adding at once could both
+ * before anything marks it taken, so two tasks adding at once could both
  * leave with the same one. ami_ns_lock is the outer lock the startup and
  * shutdown paths already use; the ThreadX bracket cannot serve here because
  * add and remove deliberately run most of their work outside it. Exec

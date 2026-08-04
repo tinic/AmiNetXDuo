@@ -278,7 +278,7 @@ typedef struct
 
 /*
  * TCP receive window. This is what limits a bulk transfer, and it was measured
- *, see tests/trace/. On loopback the sender held exactly one 4096-byte
+ * see tests/trace/. On loopback the sender held exactly one 4096-byte
  * segment in flight against a 4096-byte advertised window, 100% of it, and
  * waited 14.9 ms (median) between segments; over the wire it reached 7200
  * bytes against 8192, 88%. Neither the CPU, the link nor the periodic tick was
@@ -1013,7 +1013,7 @@ LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr);
  * the five; bsd_mcast_close() drops both families' memberships.
  *
  * bsd_mcast6_prepare_send() answers with the IPv6 ADDRESS index to send from
- *, what nxd_udp_socket_source_send() wants, or -1, and stores the NX_IP
+ * what nxd_udp_socket_source_send() wants, or -1, and stores the NX_IP
  * hop limit it overwrote in *saved. bsd_mcast6_finish_send() puts it back;
  * the pair must bracket the send, and 0 in *saved means nothing changed.
  *

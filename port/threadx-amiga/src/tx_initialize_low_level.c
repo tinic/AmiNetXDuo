@@ -527,7 +527,7 @@ static VOID _tx_amiga_timer_arm(struct timerequest *tr, ULONG secs, ULONG micro)
  * `guard` is a request on a different unit and port, and it bounds the
  * measurement: the window ends when the guard completes, so a source with no
  * VERTB interrupt behind it, the configuration this check exists to survive
- *, yields 0 rather than parking the tick task in Wait() forever.
+ * yields 0 rather than parking the tick task in Wait() forever.
  *
  * Nothing here is ever AbortIO()ed.  The guard always completes on its own, and
  * the source's outstanding request is left pending for the caller: if the
@@ -1481,7 +1481,7 @@ UINT         status;
 
     /*
      * The caller may be adopted, netstack_shutdown() calls from that position
-     *, so its own TX_THREAD does not count against it.  Nothing is orphaned
+     * so its own TX_THREAD does not count against it.  Nothing is orphaned
      * yet: every refusal below has to leave the caller as it found it.
      */
     adopted =  tx_amiga_adopted_thread();

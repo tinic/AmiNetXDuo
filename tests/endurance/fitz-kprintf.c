@@ -55,7 +55,7 @@ unsigned long long __umoddi3(unsigned long long n, unsigned long long d);
 /*
  * Written on 32-bit limbs rather than on `unsigned long long` directly,
  * because a variable-count 64-bit shift compiles to `__lshrdi3`/`__ashldi3`
- *, which this libgcc.a does not have either, so the obvious version of this
+ * which this libgcc.a does not have either, so the obvious version of this
  * function fails to link for the same reason it exists.
  */
 typedef struct

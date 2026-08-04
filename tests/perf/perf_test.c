@@ -32,7 +32,7 @@
  * suspected: tests/perf/cpucal.c times instructions with published cycle costs
  * and finds FS-UAE's A1200 model faithful to under 2% for two-cycle integer
  * work, while its 68030, any 68030, including `-c 68030` on the A1200 model
- *, charges no cycles at all, because FS-UAE turns cycle accounting off above
+ * charges no cycles at all, because FS-UAE turns cycle accounting off above
  * a 68020.  Run this under `-m A3000` as a correctness check and do not quote
  * the numbers.
  *
@@ -549,7 +549,7 @@ UINT    da, sa;
      * The C library's own numbers quoted in docs/RESEARCH.md were taken from a
      * -DAMINETXDUO_NET68K_MEMCPY=OFF build, which is the only way to get them.
      * The libm020 multilib, which -m68020 selects, verified in the link map
-     *, aligns only the destination and then moves longwords regardless of
+     * aligns only the destination and then moves longwords regardless of
      * what the source is doing, so the expensive case is supposed to be a
      * misaligned destination, not a misaligned source.  This measurement says
      * whether that is true.
@@ -1309,7 +1309,7 @@ ULONG       before_sent;
     /*
      * Read the socket's own counters before it is torn down.  A retransmit
      * count above zero on a loopback transfer means packets are being dropped
-     *, almost always the pool, and every conclusion about copy cost drawn
+     * almost always the pool, and every conclusion about copy cost drawn
      * from a lossy run would be wrong.
      */
     (VOID)nx_tcp_socket_info_get(&p_client, NX_NULL, NX_NULL, NX_NULL, NX_NULL,

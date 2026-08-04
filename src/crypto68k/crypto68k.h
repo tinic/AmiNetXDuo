@@ -210,7 +210,7 @@ c68k_limb c68k_mont_n0inv(c68k_limb m0);
  * this machine and is measured by sweeping it at run time rather than by
  * rebuilding once per candidate.  And it lets the test diff the split against
  * schoolbook inside this module, a better oracle than the vendored Montgomery
- *, that one is wrong for operands within a whisker of the modulus (see the
+ * that one is wrong for operands within a whisker of the modulus (see the
  * comment in tests/crypto68k/host/test_c68k_host.c), so it cannot check the
  * operands Karatsuba's carry paths most need checking on.
  *

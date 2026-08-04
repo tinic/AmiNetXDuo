@@ -147,7 +147,7 @@ c68k_limb   sum;
         /*
          * Propagate into the limbs above.  The first addition almost always
          * absorbs it; the loop covers the rest.  The bound cannot be reached
-         *, the running value stays below 2*m*R, so t[top] is 0 or 1, but
+         * the running value stays below 2*m*R, so t[top] is 0 or 1, but
          * an unreachable bound is cheaper than a buffer overrun if that
          * analysis is ever wrong.
          */

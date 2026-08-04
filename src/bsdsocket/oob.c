@@ -15,7 +15,7 @@
  *
  *     header_ptr -> nx_tcp_header_word_4 = (checksum << NX_SHIFT_BY_16);
  *
- *, a plain assignment, after the checksum has been computed
+ * a plain assignment, after the checksum has been computed
  * (nx_tcp_socket_send_internal.c:856, nx_tcp_packet_send_control.c:312).  Any
  * urgent pointer planted beforehand is destroyed, and the checksum was
  * computed over it, so you get both a zero pointer and a wrong sum.

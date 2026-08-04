@@ -41,7 +41,7 @@ add_library(test_x509_nx_secure STATIC ${_x509_secure_all})
 add_library(test_x509_nx_crypto STATIC ${_x509_crypto_all})
 
 # tests/tls is on the path for the sample leaf, the sample CA and ISRG Root X1
-#, the certificates that have to keep parsing.
+# the certificates that have to keep parsing.
 #
 # NX_SECURE_ENABLE_AEAD_CIPHER matches src/tls/CMakeLists.txt, where it is set
 # PUBLIC on nx_secure: it changes structure layouts in nx_secure_tls.h, so

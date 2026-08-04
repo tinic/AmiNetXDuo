@@ -121,7 +121,7 @@ endif()
 # cpucal answers the question every other number in this directory depends on:
 # what does the emulator actually charge for an instruction?  It has no
 # dependency on NetX Duo at all, so it builds whatever the net68k options say
-#, including on a profile where perf_test above is switched off.
+# including on a profile where perf_test above is switched off.
 #
 #   cmake --build build/cm --parallel --target cpucal
 #   AMINETXDUO_RUN_TAG=cal ./tools/fsuae-run.sh -t 300 -m A1200 build/cm/tests/perf/cpucal

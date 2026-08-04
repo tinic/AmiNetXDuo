@@ -22,7 +22,7 @@ if(AMIGA_SIZE)
 endif()
 
 # The DHCP lease lifecycle and RFC 3927.  This one reaches into the singleton
-#, it has to read the live NX_DHCP record and shorten its timers, because
+# it has to read the live NX_DHCP record and shorten its timers, because
 # SLIRP's lease is 24 hours and never expires, so it gets src/netstack/ on
 # its include path.  See tests/netstack/run-dhcp3927.sh.
 add_executable(dhcp3927_test dhcp3927_test.c)

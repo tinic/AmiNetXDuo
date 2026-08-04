@@ -5,7 +5,7 @@
  *
  * NAME is either a configured interface or a SANA-II driver. Commands like
  * these are usually given a driver and a unit, "Offline a2065.device UNIT 0"
- *, since that is the level at which a driver can be switched off to run
+ * since that is the level at which a driver can be switched off to run
  * hardware diagnostics. What this stack acts on is a configured interface: a
  * file in DEVS:NetInterfaces naming a driver and a unit, which is the handle
  * ShowNetStatus prints, AddNetInterface takes, and the netstack indexes by.
@@ -23,7 +23,7 @@
  *      so there is nothing to switch.
  *
  * A name that is both, an interface file called the same thing as a driver
- *, is taken as the interface, and says so.
+ * is taken as the interface, and says so.
  *
  * TIMEOUT is how many seconds to wait for the interface to reach the state
  * that was asked for, with 0 meaning wait for as long as it takes; Ctrl-C

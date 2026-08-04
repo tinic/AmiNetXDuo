@@ -125,7 +125,7 @@ extern "C" {
  *
  * The version check inside the library catches a mismatched pair too, but only
  * after the call, where it is indistinguishable from the feature being absent
- *, ShowNetServices read it as "this library has no mDNS" and told the reader
+ * ShowNetServices read it as "this library has no mDNS" and told the reader
  * to stop looking. This check runs before any call and says the true thing:
  * finish the install.
  */
@@ -213,7 +213,7 @@ typedef struct NetStatusSystem
     /*
      * Which of the places that can name a machine named this one:
      * AmiHostnameSource (aminetxduo/config.h). A name is not self-explaining
-     *, a remnant ENV:HOSTNAME kept a renamed machine answering to its old
+     * a remnant ENV:HOSTNAME kept a renamed machine answering to its old
      * name and nothing said so, and this is the only field that says.
      *
      * Zero is AMI_HOSTNAME_NONE and means either that nothing named the
@@ -716,7 +716,7 @@ typedef struct NetStatusService
  *
  * nsc_Index names the interface. It is required for a link-local next hop,
  * fe80::/64 exists on every interface, so the address alone does not say which
- *, and ignored for a prefix, which is a property of the machine's whole
+ * and ignored for a prefix, which is a property of the machine's whole
  * prefix list rather than of one interface.
  *
  * Both invalidate the IPv6 destination cache, which is a per-destination

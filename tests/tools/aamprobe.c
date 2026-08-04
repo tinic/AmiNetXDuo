@@ -12,7 +12,7 @@
  * The probe calls DeleteAddrAllocMessage() on a message it built itself, on
  * the stack.  "This routine can only deallocate address allocation messages
  * created by CreateAddrAllocMessageA() and will not work with anything else"
- *, so it has to be able to tell, and a library that could not would free a
+ * so it has to be able to tell, and a library that could not would free a
  * stack frame here and take the machine with it.
  *
  * Vectors are called by hand at their LVOs, as in the other probes.

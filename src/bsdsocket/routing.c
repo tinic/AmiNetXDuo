@@ -35,7 +35,7 @@
  * There is no netmask tag. AddRouteTagList() takes RTA_Destination,
  * RTA_Gateway, RTA_DefaultGateway, RTA_DestinationHost and RTA_DestinationNet
  * and nothing else, so the prefix length is implied by which of them was used
- *, see bsd_route_mask_for() below.
+ * see bsd_route_mask_for() below.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -100,7 +100,7 @@ static ULONG bsd_route_mask_for(ULONG addr, UWORD kind)
 /*
  * A destination or gateway string: "a host name to be resolved or an IP
  * address in dotted-decimal notation (see RFC1700)", plus, for a destination
- *, "the symbolic name of a network". That is a different database and a
+ * "the symbolic name of a network". That is a different database and a
  * different shape: DEVS:Internet/networks holds network numbers (127, not
  * 127.0.0.0), so a hit there is shifted back into an address the way
  * inet_makeaddr() does.
@@ -257,7 +257,7 @@ LONG bsd_AddRouteTagList(register struct TagItem *tags __asm("a0"),
     {
         /*
          * A destination with no gateway. The autodoc allows the combination
-         *, "The RTA_Destination tag CAN be used in conjunction with the
+         * "The RTA_Destination tag CAN be used in conjunction with the
          * RTA_Gateway tag", but every entry NetX Duo's table holds has a
          * next hop. The routes that do not (the directly attached prefix of
          * each interface) come from configuring the interface and cannot be
@@ -327,7 +327,7 @@ LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
     {
         /*
          * "The address of the default gateway all packets were forwarded to"
-         *, past tense, on the delete page.
+         * past tense, on the delete page.
          * The tag names the entry to remove, so it has to be the one installed:
          * clearing on any address at all would let `route delete default
          * 10.0.0.1` succeed on a machine whose default gateway is 192.168.1.1
