@@ -16,6 +16,44 @@ empty results.
 
 ---
 
+## Critical — a connection can hang for good
+
+One item. It is here rather than in the TCP table because a stall has no
+symptom a user can act on: the program is running, the network is up, every
+counter is healthy, and the transfer never finishes.
+
+### A zero-window probe never arms for a non-blocking sender whose data is acknowledged
+
+There are two arming sites and neither covers the ordinary case.
+
+| Site | Why it does not fire |
+|---|---|
+| `nx_tcp_socket_send_internal.c:1046-1055` | inside `else if ((wait_option) && ...)`, so it runs only when the caller BLOCKS. A non-blocking `send()` refused against a zero window arms nothing |
+| `nx_tcp_socket_retransmit.c:105-140` | takes the probe byte from `transmit_sent_head` and returns at `:143` when that is NULL and no probe is armed |
+
+So the probe exists only while an unacknowledged segment is still queued at the
+moment the zero window is learned. If the peer acknowledges everything and then
+advertises zero, a non-blocking sender is silent for ever. A window update lost
+after that strands the connection permanently — the one failure RFC 1122
+§4.2.2.17's persist timer exists to prevent.
+
+Isolated on hardware over six drill variants. `m01` is the one that pins the
+mechanism: the peer sends data, the application reads it, and the zero-window
+ACK is also the ACK that drains our transmit queue — the probe fires. Same
+inbound data as the failing cases, opposite result. An earlier version of this
+entry blamed inbound data; that was the correlation, not the cause.
+
+`tcp.drill` z01 has covered this path since it was written and passes, because
+in that case the zero-window ACK is the one that drains the queue.
+
+**What a fix has to be careful of:** arming from the non-blocking path is the
+obvious patch, but `nx_tcp_socket_zero_window_probe_has_data` also moves the
+retransmission retry limit onto the probe failure count
+(`nx_tcp_fast_periodic_processing.c:130-132`), so setting it when the socket is
+not really in the persist state stops that limit being reached — which is the
+defect the comment at `nx_tcp_socket_send_internal.c:1037-1045` records having
+already been fixed once.
+
 ## Open — no decision taken
 
 ### From the 0.16.7 audit and RFC survey (2026-08-02)
@@ -90,7 +128,6 @@ name always misses, and a CNAME-only response yields `NX_DNS_QUERY_FAILED`.
 | UDP demux ignores the 4-tuple | `nx_udp_packet_receive.c:247` |
 | UDP checksum verified at dequeue, not enqueue | `nx_udp_socket_receive.c` |
 | `o02_duplicate_segment` fails: a duplicate of acknowledged data is not re-acked when the receive queue is non-empty | `tests/tcpdrill` |
-| **A zero-window probe never arms for a non-blocking sender whose data is already acknowledged.** There are two arming sites. `nx_tcp_socket_send_internal.c:1046-1055` is inside `else if ((wait_option) && ...)`, so it runs only when the caller BLOCKS -- a non-blocking `send()` refused against a zero window arms nothing there. That leaves `nx_tcp_socket_retransmit.c:105-140`, which takes the probe byte from `transmit_sent_head` and returns at `:143` when that is NULL and no probe is armed. So the probe exists only while an unacknowledged segment is still queued when the zero window is learned. If the peer acknowledges everything and then advertises zero, a non-blocking sender is silent for ever, and a lost window update strands the connection -- the one failure the persist timer exists to prevent. Isolated on hardware over six variants; `m01` (peer data received, then a zero-window ACK that also drains the queue) probes, which is what rules out inbound data as the cause | `nx_tcp_socket_send_internal.c:1046`, `nx_tcp_socket_retransmit.c:143` |
 | No FIN-WAIT-2 timeout. `nx_tcp_fast_periodic_processing.c:142-193` ages SYN_SENT, SYN_RECEIVED, FIN_WAIT_1, CLOSING, LAST_ACK and TIMED_WAIT — not FIN_WAIT_2 — so a socket the application has `shutdown(SHUT_WR)` and not closed sits there indefinitely. Orphans are bounded by `bsd_closing_sweep`'s 60 s deadline; sockets the caller still holds are not | `nx_tcp_fast_periodic_processing.c` |
 | `bsd_tcp_close_start()` discards every `nx_tcp_socket_disconnect()` status and returns TRUE regardless (`socket.c:823`, `:830`, `:837`). In FIN_WAIT_1 that call returns `NX_NOT_CONNECTED` and sends nothing, so the `SO_LINGER{1,0}` abortive close is a no-op; the RST that does appear comes from the `bsd_tcp_abort()` fallback after `nx_tcp_socket_delete()` answers `NX_STILL_BOUND`. Right answer, wrong route, and the caller is told it worked either way | `src/bsdsocket/socket.c:823-845` |
 
