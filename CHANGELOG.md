@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.17.0
+
 - A program that sends to a closed port is told so instead of waiting out its timeout. ICMP error messages never reached the sockets that caused them, so a UDP send to a port with nothing listening blocked until it gave up, and a TCP connection to an unreachable host did the same
 - A name ending in `.local` is no longer sent to the name server the router handed out. It leaked on the IPv6 path always, and on every path in the smallest build, which published the names of machines on the local network to whoever runs that server. A reverse lookup of a self-assigned `169.254` address leaked the same way and timed out once per line in `ShowNetStatus` and `netstat`
 - A reply to a name lookup is accepted only from the server it was asked of, and only if it carries the question it answers. Either one missing was enough for a forged reply that guessed a sixteen-bit number to be believed and cached
