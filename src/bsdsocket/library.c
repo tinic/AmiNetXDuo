@@ -178,10 +178,25 @@ static VOID bsd_new_list(struct MinList *list)
  * to UnLoadSeg() and a stale hook would be called into freed memory.
  *
  * Runs on the IP thread.  Signal() is Exec, does not block and is legal from
- * any Task; sb_Lock is held for the two list operations bsd_child_create() and
- * bsd_child_free() take it for, so blocking the IP thread on it is bounded.
- * Nothing here calls into NetX Duo: this is a notification NetX Duo is already
- * inside.
+ * any Task.  Nothing here calls into NetX Duo: this is a notification NetX Duo
+ * is already inside.
+ *
+ * ATTEMPT, NEVER OBTAIN.  This claimed sb_Lock was only ever held for the two
+ * short list operations bsd_child_create() and bsd_child_free() take it for,
+ * and that was wrong: bsd_lib_open() holds it across bsd_netstack_bringup(),
+ * which blocks until the stack is up and DHCP has answered.  The first lease
+ * then arrives on the IP thread, lands here, waits for a semaphore the opener
+ * cannot release until this returns, and the two sit there.  What a user saw
+ * was AddNetInterface never returning from its OpenLibrary(), so
+ * S:User-Startup never finished and the machine stopped part way through its
+ * Startup-Sequence (0.17.0 and 0.17.1; found by
+ * install/test/run-workbench.sh).
+ *
+ * A signal that cannot be delivered is dropped rather than waited for.  That
+ * costs nothing real: the only caller who can hold the lock long enough to
+ * lose one is an opener still inside OpenLibrary(), which by definition has
+ * not yet had the chance to ask for the mask, and every later change signals
+ * normally.
  */
 static struct AmiSocketBase *bsd_master_base;
 
@@ -193,7 +208,9 @@ static VOID bsd_address_changed(VOID)
     if (master == NULL)
         return;
 
-    ObtainSemaphore(&master->sb_Lock);
+    if (!AttemptSemaphore(&master->sb_Lock))
+        return;
+
     for (node = master->sb_Children.mlh_Head;
          node->mln_Succ != NULL;
          node = node->mln_Succ)
