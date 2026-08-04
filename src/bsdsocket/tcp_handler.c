@@ -960,42 +960,6 @@ static VOID tcp_ctrl_find(struct DosPacket *pkt)
  * like a full disk. There is no disk, so report plenty of space and a valid
  * state.
  */
-static VOID tcp_ctrl_disk_info(struct DosPacket *pkt, struct InfoData *info)
-{
-    if (info == NULL)
-    {
-        tcp_reply(pkt, DOSFALSE, ERROR_INVALID_LOCK, tcp_ctrl_port);
-        return;
-    }
-
-    bsd_bzero(info, sizeof(*info));
-
-    info->id_DiskState     = ID_VALIDATED;
-    info->id_NumBlocks     = 0x100000;
-    info->id_NumBlocksUsed = 0;
-    info->id_BytesPerBlock = 512;
-    info->id_DiskType      = ID_DOS_DISK;
-
-    /*
-     * `Info` takes the name it prints from id_VolumeNode's dol_Name. A zero
-     * BPTR is not "no name": BADDR(0) is address 0, so it reads a length byte
-     * and that many characters out of the 68k exception vector table, prints
-     * them, and whatever control characters they contain then eat the rest of
-     * the listing.
-     *
-     * There is no volume, a connection is not a disk, so this points at
-     * the device node, which is on the DOS list already, lives as long as
-     * TCP: does, and holds "TCP" in dn_Name. DeviceNode's dn_Name and
-     * DosList's dol_Name are the same offset, which is what makes that legal.
-     *
-     * id_UnitNumber stays 0: the node has no dn_Startup and there is one TCP:,
-     * not a unit of one.
-     */
-    info->id_VolumeNode = MKBADDR(tcp_node);
-
-    tcp_reply(pkt, DOSTRUE, 0, tcp_ctrl_port);
-}
-
 static BOOL tcp_ctrl_publish(VOID)
 {
     struct DosList *list;
@@ -1098,9 +1062,22 @@ static VOID tcp_ctrl_main(VOID)
                     tcp_reply(pkt, DOSFALSE, 0, tcp_ctrl_port);
                     break;
 
+                /*
+                 * Refused, which is what keeps TCP: out of `Info` and off the
+                 * Workbench.  Both walk the DOS list and ask each device for
+                 * its disk info; a device that answers is drawn as a drive and
+                 * listed as one.  CON: and PIPE: refuse for the same reason,
+                 * and TCP: is the same kind of thing: a stream, with no blocks,
+                 * no volume and nothing to be full of.
+                 *
+                 * Answering was also what made `Info TCP:` read a name out of
+                 * low memory, because InfoData has nowhere to put "there is no
+                 * volume" except a zero BPTR, and BADDR(0) is the exception
+                 * vector table.
+                 */
                 case ACTION_DISK_INFO:
-                    tcp_ctrl_disk_info(pkt, (struct InfoData *)
-                                            BADDR(pkt->dp_Arg1));
+                    tcp_reply(pkt, DOSFALSE, ERROR_ACTION_NOT_KNOWN,
+                              tcp_ctrl_port);
                     break;
 
                 case ACTION_FLUSH:

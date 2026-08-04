@@ -150,6 +150,11 @@ printf '\n%s\t%d/tcp\n' "$SERVICE_NAME" "$DAYTIME_PORT" \
     echo "wait 3"
     echo "SYS:Type DH0:listened.txt"
 
+    # 6: TCP: is a stream, not a drive.  Info walks the DOS list asking each
+    # device for its disk info, and a device that answers is what Workbench
+    # then draws an icon for, so refusing is what keeps it out of both.
+    echo "SYS:Info"
+
     # 5: two ways of being wrong, both of which must fail fast.
     echo "SYS:Type TCP:10.0.2.2/nosuchservice"
     echo "SYS:Type TCP:"
@@ -219,6 +224,18 @@ if [ "$STARTS" -eq 1 ]; then
     pass "the machine booted exactly once (no reset)"
 else
     fail "the command list ran $STARTS times -- the machine reset"
+fi
+
+# ---- 6: not a drive, so not in Info and not on the Workbench --------------
+
+if grep -qi "^Unit  *Size" "$REPORT" || grep -qi "Volume.*Size" "$REPORT"; then
+    if grep -E "^(TCP|TCP:)" "$REPORT" | grep -qv "^TCP:[0-9a-zA-Z]"; then
+        fail "Info lists TCP: as a device, so Workbench will draw it as a drive"
+    else
+        pass "Info does not list TCP:"
+    fi
+else
+    note "Info printed nothing recognisable, cannot judge the device list"
 fi
 
 # ---- 1: Type read a connection -------------------------------------------
