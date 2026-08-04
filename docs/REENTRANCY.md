@@ -15,7 +15,7 @@ The mechanism for per-opener state is the **child library base**:
 `struct AmiSocketBase` and `bsdsocket_internal.h` carries sixty-odd `sb_*`
 fields on it. `usergroup.library` does the same (`ug_library.c:184`). Anything
 belonging to one program belongs there. **`tls.library` deliberately does not**
--- `tls_library.c:8` -- so every static in `src/tls` and `src/tlslib` is
+`tls_library.c:8`, so every static in `src/tls` and `src/tlslib` is
 machine-wide whether or not that is semantically right.
 
 **`grep` needs `LC_ALL=C grep -a`** in this tree: the NDK headers are Latin-1 and
@@ -24,8 +24,8 @@ a plain `grep` reads them as binary and silently returns nothing.
 ## The census
 
 Counted against `origin/main`, over the seventy-five shipping `.c` files in the
-nine directories (`src/*/test/` excluded). The tables below are the authority --
-one row per object, or per named group -- and these totals are read off them:
+nine directories (`src/*/test/` excluded). The tables below are the authority,
+one row per object, or per named group, and these totals are read off them:
 
 | | |
 |---|---|
@@ -41,11 +41,11 @@ And the verdicts on the 122:
 
 | Verdict | Count | Fixed here |
 |---|---|---|
-| 1 -- singleton, correctly guarded | 58 | -- |
-| 2 -- constant | 23 | -- |
-| 3 -- misplaced | 21 | 2 |
-| 4 -- unguarded | 19 | 17 |
-| could not settle | 1 | -- |
+| 1, singleton, correctly guarded | 58 |, |
+| 2, constant | 23 |, |
+| 3, misplaced | 21 | 2 |
+| 4, unguarded | 19 | 17 |
+| could not settle | 1 |, |
 
 Two more were touched without changing class: `bsd_raw_list` and
 `bsd_raw_installed` are correctly guarded singletons that had one leak path.
@@ -60,19 +60,19 @@ ones, and the serious one is `_nx_secure_tls_record_block_buffer`.
 
 ## The four verdicts
 
-1. **Singleton** -- one per machine, and a shared static is right. The `NX_IP`,
+1. **Singleton**, one per machine, and a shared static is right. The `NX_IP`,
    the packet pool, the interface table, the SANA-II readers.
-2. **Constant** -- never written. Several cannot be `const` because an Exec or
+2. **Constant**, never written. Several cannot be `const` because an Exec or
    NetX Duo struct field is typed `char *` or non-const; those are named below.
-3. **Misplaced** -- per-opener or per-connection state at file scope. The bug
+3. **Misplaced**, per-opener or per-connection state at file scope. The bug
    class.
-4. **Unguarded** -- sharing is right, but two openers on two tasks can collide.
+4. **Unguarded**, sharing is right, but two openers on two tasks can collide.
 
 ## The three locks that do the work
 
 - **The ThreadX baton.** `bsd_nx_enter()` (`netx_call.c`) adopts the calling Task
   as a ThreadX thread, and `port/threadx-amiga/src/tx_amiga_adopt.c:35` is
-  explicit that while it is adopted no other ThreadX thread runs -- including the
+  explicit that while it is adopted no other ThreadX thread runs, including the
   NetX Duo IP thread and every other base. It is a machine-wide mutex, which is
   why `bsd_raw_list`, `bsd_closing_head` and the multicast tables need no lock of
   their own. **It is released at every ThreadX suspension point**, so a static
@@ -95,7 +95,7 @@ allocation or a monitor hook is live (`library.c:539/552/565`).
 **So a static is re-initialised only when the segment is reloaded.** Everything
 below keeps its value across any number of last-close-without-expunge cycles, and
 a value one program left is what the next unrelated program sees.
-`tests/tools/run-cycledrill.sh` exercises exactly that cycle -- from one task, so
+`tests/tools/run-cycledrill.sh` exercises exactly that cycle, from one task, so
 it proves the persistence half and not the concurrency half.
 
 Two statics were found to be wrong on precisely this point, `tcp_started` and
@@ -127,13 +127,13 @@ Two statics were found to be wrong on precisely this point, `tcp_started` and
 | `socket.c:59` `bsd_udp_name` | constant | as above |
 | `socket.c:196` `last_budget` | singleton | function-local; a log de-duplicator, and a torn read costs one repeated line |
 | `socket.c:580` `bsd_closing_head` | singleton | the baton. Drained on the last close by `bsd_closing_drain()` (`docs/ALLOCATIONS.md`) |
-| `mcast.c:71` `bsd_mcast_table[16]` | **unguarded -- FIXED** | see below |
-| `mcast.c:499` `bsd_mcast6_table[16]` | **unguarded -- FIXED** | see below |
+| `mcast.c:71` `bsd_mcast_table[16]` | **unguarded, FIXED** | see below |
+| `mcast.c:499` `bsd_mcast6_table[16]` | **unguarded, FIXED** | see below |
 | `tcp_handler.c:122` `tcp_ctrl_port` | singleton | written only by the handler Process; `bsd_tcp_handler_alive()` reads it to decline the expunge |
 | `tcp_handler.c:123` `tcp_node` | singleton | as above |
 | `tcp_handler.c:124` `tcp_boot` | singleton | the `tcp_started` latch is tested and set under `master->sb_Lock`, so only one launcher at a time reaches this and it is cleared before that launcher returns |
 | `tcp_handler.c:125` `tcp_sessions` | singleton | `Forbid()` |
-| `tcp_handler.c:126` `tcp_started` | **unguarded -- FIXED** | see below |
+| `tcp_handler.c:126` `tcp_started` | **unguarded, FIXED** | see below |
 
 ### The multicast tables were the right shape and the wrong window (FIXED)
 
@@ -152,8 +152,8 @@ identically.
 
 Both now claim the row inside the bracket and give it back if the join fails.
 
-`tests/tools/run-mcastrace.sh` is the test. One process cannot reach this -- a
-base serialises itself on its own nesting counter -- so `McastRace` runs two,
+`tests/tools/run-mcastrace.sh` is the test. One process cannot reach this, a
+base serialises itself on its own nesting counter, so `McastRace` runs two,
 with a base each. The window is a handful of instructions and is aimed at rather
 than waited for: `bsd_nx_leave()` pokes the ThreadX scheduler Task, which runs at
 Exec priority 1 and preempts a priority-0 caller *at that instruction*, so a
@@ -169,8 +169,8 @@ destroys is this library's own socket-to-group mapping.
 
 `bsd_mcast_close()` walks the tables with no bracket of its own; that is fine.
 Its only caller is `bsd_socket_destroy()` (`socket.c:856`), and every path into
-that -- `bsd_socket_release`, `bsd_close_all`, `bsd_closing_sweep`,
-`bsd_closing_drain`, the listen-spare teardown -- is already inside one.
+that, `bsd_socket_release`, `bsd_close_all`, `bsd_closing_sweep`,
+`bsd_closing_drain`, the listen-spare teardown, is already inside one.
 
 ### `tcp_started` could not be cleared, so TCP: could not come back (FIXED)
 
@@ -178,7 +178,7 @@ that -- `bsd_socket_release`, `bsd_close_all`, `bsd_closing_sweep`,
 openers still holding the library (it only requires `tcp_sessions == 0`), and
 the expunge that would reload the segment and reset the static runs only after
 the last close. Between the two, every `OpenLibrary()` reached
-`bsd_tcp_handler_start()`, found the latch set, and returned -- a library with
+`bsd_tcp_handler_start()`, found the latch set, and returned, a library with
 no TCP: device and no way to get one.
 
 Cleared now on `ACTION_DIE` inside the existing `Forbid()`, so no opener can see
@@ -190,8 +190,8 @@ left the same latch set with no handler behind it.
 
 `bsd_aam_boot` and `bsd_aam_boot_parent` were claimed under `Forbid()`, but the
 launcher has to `Permit()` before it can `Wait()`, and the worker collects the
-slot after that. A second `BeginInterfaceConfig()` -- legal, on another
-interface -- could enter that window, take the `Forbid()`, and overwrite both.
+slot after that. A second `BeginInterfaceConfig()`, legal, on another
+interface, could enter that window, take the `Forbid()`, and overwrite both.
 The first launcher then waited for a `SIGF_SINGLE` its worker had sent to the
 second launcher's task.
 
@@ -204,18 +204,18 @@ safe.
 
 What remains, and is what the test below exercises, is the per-interface claim:
 `bsd_aam_jobs[index]` is taken under `Forbid()` alongside the interface row, and
-a launch that finds it taken is answered `AAMR_Busy` -- an error the API already
+a launch that finds it taken is answered `AAMR_Busy`, an error the API already
 defines.
 
 The per-interface half of that is tested. `AamProbe` forks a Process with a
 bsdsocket.library base of its own and has it ask for the same interface while the
-first allocation is in flight -- the case `AAMR_Busy` exists for, and one no
+first allocation is in flight, the case `AAMR_Busy` exists for, and one no
 single caller can reach, since the caller holding the job is the one that would
 ask again. `tests/tools/run-ifquery.sh` asserts it.
 
 The result code alone would not have caught it. `AAMR_Busy` is answered twice
-over: at the door by `bsd_aam_jobs[index]`, and -- if that guard is gone and the
-worker starts anyway -- by `netstack_interface_dhcp_start()` refusing a second
+over: at the door by `bsd_aam_jobs[index]`, and, if that guard is gone and the
+worker starts anyway, by `netstack_interface_dhcp_start()` refusing a second
 DHCP client on one interface, which `bsd_aam_worker()` also reports as
 `AAMR_Busy`. Deleting the guard still produces an 11, measured. What changes is
 *when*: a refusal is replied inside `BeginInterfaceConfig()`, the other answer
@@ -230,7 +230,7 @@ and left on `bsd_raw_list`, and `bsd_raw_installed` never returned to zero, whic
 is the filter never being installed again. Unlinked under `Forbid()` now, since
 `nx_ip_protection` lives inside the `NX_IP` that has gone.
 
-### The netmonitor registry -- shared by contract, not fixed
+### The netmonitor registry, shared by contract, not fixed
 
 `bsd_mon_list[]` holds `struct Hook *` from any opener, and nothing removes a
 base's hooks when it closes. That is the documented contract, not an oversight:
@@ -259,13 +259,13 @@ pointer, in two file-scope statics written as two separate unguarded stores. It
 is **not reachable inside the shipped library**: nothing in `src/bsdsocket`,
 `src/netstack` or `src/config` calls it, and the two real installers
 (`tool_diag.c:425`, `checknetconfig.c:915`) are separate executables with private
-copies. It is one call from being a bug -- the moment any in-library code sets
+copies. It is one call from being a bug, the moment any in-library code sets
 it, two openers clobber each other's callback and can pair one program's
 function with another's `user` pointer. Recorded, not moved: moving it means
 inventing an owner it does not have.
 
-`ami_cfg_current_file` *is* live in the library -- `ami_config_load()` writes it
-ten times from `config_file.c` -- but every reachable caller sits inside
+`ami_cfg_current_file` *is* live in the library, `ami_config_load()` writes it
+ten times from `config_file.c`, but every reachable caller sits inside
 `bsd_lib_open()`'s `master->sb_Lock`, so two loads cannot interleave. It also
 holds a pointer to a stack-local `path[]` between `config_file.c:143` and `:145`;
 the code comments that and clears it, and there is no return between the two.
@@ -273,7 +273,7 @@ the code comments that and clears it, and there is no return between the two.
 The netdb was the subject of two separate defects on the same day
 (`docs/ALLOCATIONS.md`) and neither was a reentrancy defect: both were leaks.
 The concurrency is sound. `ami_netdb_load()` sets `ami_netdb_loaded` *before* it
-parses, which would let a second caller read half-built tables -- but the only
+parses, which would let a second caller read half-built tables, but the only
 caller inside the library holds `master->sb_Lock`, and the lazy path in
 `netdb_table()` cannot fire because `bsd_lib_open()` has already loaded.
 
@@ -295,17 +295,17 @@ caller inside the library holds `master->sb_Lock`, and the lazy path in
 | `netstack_baton.c:87` `ami_baton_sampler` | singleton | write under `Forbid()`; cleared at shutdown before the stack goes |
 | `netstack_rexx.c:51` `ami_rx_rexxbase` | singleton | task-confined: only the host Process ever touches it |
 | `netstack_rexx.c:55` `ami_rx_port_name` | constant | never written; `char[]` because it goes on Exec's public port list |
-| `netstack_rexx.c:92` `ami_rx_port` | **unguarded -- FIXED** | `AddPort()` and the record are one step now |
+| `netstack_rexx.c:92` `ami_rx_port` | **unguarded, FIXED** | `AddPort()` and the record are one step now |
 | `netstack_rexx.c:93` `ami_rx_proc` | singleton | unguarded locally; serialised by `ami_ns_lock` at both call sites |
 | `netstack_rexx.c:94` `ami_rx_boot` | singleton | as above; the pointer targets the starter's stack and both early returns precede the Process existing |
 | `netstack_rexx.c:113` `ami_rx_gone` | singleton | `volatile`, one-shot, set under a deliberately unmatched `Forbid()` in the exiting process |
 | `netstack_rexx.c:114` `ami_rx_stopper` | singleton | `Forbid()`, taken together with the `Signal()` so the host cannot finish and find nobody |
 | `netstack_rexx.c:115` `ami_rx_stop_sig` | singleton | as above |
 
-### `ami_ns` -- readers versus teardown, recorded and not fixed
+### `ami_ns`, readers versus teardown, recorded and not fixed
 
 Every write to `ami_ns` holds `ami_ns_lock`; not one of the eighteen reads does.
-A pointer load is atomic on m68k, so there is no torn value -- but there is no
+A pointer load is atomic on m68k, so there is no torn value, but there is no
 reference on the read path either. `netstack_shutdown()` NULLs it at
 `netstack.c:1428` and `ami_ns_destroy()` frees it at `:1445`, so a reader that
 loaded the pointer a moment before uses freed memory. `netstack_ip()`,
@@ -341,12 +341,12 @@ Exec does not offer cheaply, and getting it wrong is worse than the leak.
 | `sana2_device.c:22` `ami_raw_allowed` | **unsettled** | see below |
 | `sana2_device.c:31` `ami_block_enter` | singleton | no local guard; installed before `tx_amiga_kernel_start()` and cleared after `ami_ns_destroy()`, both under `ami_ns_lock`. Safe by ordering |
 | `sana2_device.c:32` `ami_block_leave` | singleton | as above |
-| `sana2_device.c:280` `ami_raw_probe_slot` | **misplaced -- FIXED** | now a stack local in `ami_sana2_probe_raw()` |
+| `sana2_device.c:280` `ami_raw_probe_slot` | **misplaced, FIXED** | now a stack local in `ami_sana2_probe_raw()` |
 | `sana2_driver.c:32` `ami_sana2_bindings[]` | singleton | `Forbid()` on attach and unbind; `ami_sana2_lookup()` reads it lock-free from the IP thread |
 
 `ami_raw_probe_slot` was a file-scope `AmiRxSlot` handed to a driver as
 `ios2_Data` for one probe that begins and ends inside one function. It was safe
-only by absence -- the copy hook refuses anything aimed at it because
+only by absence, the copy hook refuses anything aimed at it because
 `packet == NULL`, and the two callers happen to sit under `ami_ns_lock`. Neither
 is a property of the slot. A driver that writes `ios2_Data` directly instead of
 calling the copy hooks (documented iComp behaviour, `netstack_rexx.c:578`) writes
@@ -375,7 +375,7 @@ later brings up, which argues otherwise. Left as it is rather than guessing.
 |---|---|---|
 | `bpf_channel.c:40` `ami_bpf_chan[]` | singleton | `Forbid()`. Owner is the **child** base (`src/bsdsocket/bpf.c:84`), and `bsd_child_destroy()` closes them, so channels die with their opener |
 | `bpf_channel.c:41` `ami_bpf_bound_channels` | singleton | `Forbid()` on every update, decrements predicated on `> 0`; read lock-free as a fast gate and re-validated per channel under the lock |
-| `bpf_tap.c:23` `ami_bpf_iface[]` | **unguarded -- FIXED** | see below |
+| `bpf_tap.c:23` `ami_bpf_iface[]` | **unguarded, FIXED** | see below |
 | `bpf_tap.c:70` `ami_bpf_addr_hook` | singleton | no local guard; installed and cleared under `ami_ns_lock`, cleared before the interfaces are detached |
 
 `ami_bpf_init()` zeroed the channel table and not the interface table, although
@@ -398,26 +398,26 @@ problem: one program can exhaust the pool and every other opener gets `EBUSY`.
 | Object | Verdict | Guard |
 |---|---|---|
 | `compat.c:30` `ami_mem` | singleton | `Forbid()` inside compat.c. `netstack.c:1436` and `netstack_pool_sample()` write the same struct through `ami_mem_stats()` **without** it; individual counters are atomic, the snapshot is not |
-| `compat.c:175` `TimerBase` | **unguarded -- FIXED** | see below |
-| `compat.c:177` `ami_timer_req` | **unguarded -- FIXED** | as above. Never `DoIO`'d -- `ReadEClock()` bypasses it -- so the only exposure was the double open |
-| `compat.c:178` `ami_timer_port` | **unguarded -- FIXED** | as above. `mp_SigTask` records whichever task opened first, and is inert only because the port is `PA_IGNORE` and nothing is ever queued |
-| `compat.c:179` `ami_eclock_hz` | **unguarded -- FIXED** | init only; steady-state reads are under the `ami_millis()` `Forbid()` |
+| `compat.c:175` `TimerBase` | **unguarded, FIXED** | see below |
+| `compat.c:177` `ami_timer_req` | **unguarded, FIXED** | as above. Never `DoIO`'d, `ReadEClock()` bypasses it, so the only exposure was the double open |
+| `compat.c:178` `ami_timer_port` | **unguarded, FIXED** | as above. `mp_SigTask` records whichever task opened first, and is inert only because the port is `PA_IGNORE` and nothing is ever queued |
+| `compat.c:179` `ami_eclock_hz` | **unguarded, FIXED** | init only; steady-state reads are under the `ami_millis()` `Forbid()` |
 | `compat.c:181-184` `ami_eclock_last/ms/rem/carry` | singleton | the read-modify-write in `ami_millis()` was already fully bracketed by `Forbid()`. Only the init was open, and that is now closed |
 | `compat.c:296` `ami_sana2_quiesce` | singleton | no local guard; set and cleared under `ami_ns_lock` at `netstack.c:1353`/`:1432` |
 | `compat.c:297` `ami_sana2_restore` | singleton | as above |
 | `ami_random.c:239-243` `pool_key`, `pool_out`, `pool_out_used`, `pool_counter`, `pool_bits` | singleton | `Forbid()` per block, correctly. One CSPRNG per machine is the right design and this is the cleanest guard discipline in the tree |
-| `ami_random.c:244` `pool_started` | **unguarded -- FIXED** | see below |
+| `ami_random.c:244` `pool_started` | **unguarded, FIXED** | see below |
 | `ami_random.c` `pool_gathering` | singleton | new; the latch that closes the above |
-| `ami_random.c:579` `random_sample` | **unguarded -- FIXED** | 800 bytes at file scope to keep it off a small stack, which is what created the sharing. Closed by the same latch |
-| `crashguard.c:33-38, 41-45, 253` | **misplaced -- not fixed** | see below |
+| `ami_random.c:579` `random_sample` | **unguarded, FIXED** | 800 bytes at file scope to keep it off a small stack, which is what created the sharing. Closed by the same latch |
+| `crashguard.c:33-38, 41-45, 253` | **misplaced, not fixed** | see below |
 
 ### The two timer opens were the same bug twice (FIXED)
 
 `ami_timer_init()` (`compat.c`) and `ami_tls_timer_open()` (`tls_amiga.c`) were
 both `if (base != NULL) return TRUE;` followed by an unprotected open. Two tasks
 reaching either for the first time together both fell through and both
-`OpenDevice()`d the same static `struct timerequest` -- Exec's "reuse of an
-active IORequest" -- and in compat.c the second re-zeroed `ami_eclock_ms` under
+`OpenDevice()`d the same static `struct timerequest`, Exec's "reuse of an
+active IORequest", and in compat.c the second re-zeroed `ami_eclock_ms` under
 the first, which a caller computing `ami_millis() - start` sees as an unsigned
 wrap of about 49 days.
 
@@ -425,7 +425,7 @@ Both re-test under `Forbid()` now. `timer.device`'s Open is a table lookup and
 does not `Wait()`, so the Forbid holds across it, and no other task can observe
 the half-built state inside it. `TimerBase` is still assigned immediately after
 `OpenDevice()` and before `ReadEClock()`, which is a `proto/timer.h` inline and
-calls through that base -- publishing it later looks tidier and hangs the first
+calls through that base, publishing it later looks tidier and hangs the first
 `OpenLibrary()`, which is what `run-cycledrill.sh` caught.
 
 `ami_millis()` is not a theoretical concurrent caller: it is reached from the
@@ -438,7 +438,7 @@ SANA-II receive path through `ami_bpf_now()` (`bpf_channel.c:432`), from
 `if (!pool_started) ami_random_init();`, and `ami_random_init()` set
 `pool_started` *before* the 22 ms `random_gather()`. Two tasks could both pass
 the test and both run the gather, which writes the 800-byte file-scope
-`random_sample` from end to end -- two machine fingerprints interleaved into one
+`random_sample` from end to end, two machine fingerprints interleaved into one
 buffer.
 
 One collection at a time now, latched under `Forbid()`. Repeat calls still add,
@@ -465,7 +465,7 @@ itself inside Exec's `Alert()`.
 
 **Not fixed, because none of it is in a shared library.** `aminetxduo_common` is a
 static archive and nothing under `src/` references any `ami_crash_*` entry point
--- the only callers are `tools/smoke/{crashtest,lifecycle,kernelstop,gurutest}.c`,
+the only callers are `tools/smoke/{crashtest,lifecycle,kernelstop,gurutest}.c`,
 which are separate single-task executables, so `crashguard.o` is never extracted
 into `bsdsocket.library`. The file already documents the single-task resume as a
 "KNOWN LIMITATION"; the multi-task case is strictly worse and is recorded here
@@ -485,42 +485,42 @@ the `TLSConnection` or the nx_secure per-session metadata area that
 |---|---|---|
 | `ami_tls_crypto.c:36` `ami_arithmetic` | constant | the setter has no LVO; write-never in the shipped library |
 | `ami_tls_crypto.c:37` `ami_crt_enabled` | constant | as above |
-| `ami_tls_crypto.c:56` `ami_counters[2]` | **misplaced -- not fixed** | per-opener instrumentation; inert, see below |
-| `ami_tls_crypto.c:57` `ami_client_thread` | **misplaced -- not fixed** | as above |
+| `ami_tls_crypto.c:56` `ami_counters[2]` | **misplaced, not fixed** | per-opener instrumentation; inert, see below |
+| `ami_tls_crypto.c:57` `ami_client_thread` | **misplaced, not fixed** | as above |
 | `ami_tls_crypto.c:128` `ami_p256_curve` | singleton | two lazy inits that do not exclude each other, but every write is byte-identical. See below |
 | `ami_tls_crypto.c:129` `ami_p256_ready` | singleton | set last, so a reader either re-inits or sees a complete curve |
-| `ami_tls_crypto.c:296` `ami_rsa_keys[4]` | **misplaced -- not fixed** | unreachable in the shipped library, see below |
-| `ami_tls_crypto.c:297` `ami_rsa_key_count` | **misplaced -- not fixed** | as above |
+| `ami_tls_crypto.c:296` `ami_rsa_keys[4]` | **misplaced, not fixed** | unreachable in the shipped library, see below |
+| `ami_tls_crypto.c:297` `ami_rsa_key_count` | **misplaced, not fixed** | as above |
 | `ami_tls_crypto.c:1528` `ami_x509_cipher_table` | constant | no writer; non-`const` only because `NX_SECURE_TLS_CRYPTO` takes a mutable pointer |
 | `ami_tls_crypto.c:1565` `ami_ciphersuite_table` | constant | as above |
-| `tls_amiga.c:30` `ami_tls_timer_base` | **unguarded -- FIXED** | the second of the two timer opens |
-| `tls_amiga.c:32` `ami_tls_req` | **unguarded -- FIXED** | as above |
-| `tls_amiga.c:33` `ami_tls_port` | **unguarded -- FIXED** | as above |
-| `tls_amiga.c:34` `ami_tls_hz` | **unguarded -- FIXED** | as above |
+| `tls_amiga.c:30` `ami_tls_timer_base` | **unguarded, FIXED** | the second of the two timer opens |
+| `tls_amiga.c:32` `ami_tls_req` | **unguarded, FIXED** | as above |
+| `tls_amiga.c:33` `ami_tls_port` | **unguarded, FIXED** | as above |
+| `tls_amiga.c:34` `ami_tls_hz` | **unguarded, FIXED** | as above |
 | `rfc7905/..._decrypt.c:38` `save_iv[20]` | constant | dead storage, see below |
-| `rfc7905/..._encrypt.c:42` `_nx_secure_tls_record_block_buffer` | **misplaced -- not fixed** | the most serious finding here, see below |
+| `rfc7905/..._encrypt.c:42` `_nx_secure_tls_record_block_buffer` | **misplaced, not fixed** | the most serious finding here, see below |
 | `tls_library.c:27` `SysBase` | singleton | written once at `LibInit` |
 | `tls_library.c:36` `tls_lib_name` | constant | `rt_Name` is `char *` |
 | `tls_library.c:37` `tls_lib_id` | constant | `rt_IdString` |
 | `tls_netx.c:40` `tls_ctx` | singleton | write-once under `TLSBase->tb_Lock`, every reader NULL-checks |
 | `tls_runtime.c:21` `DOSBase` | singleton | opened at `LibInit`, closed at expunge |
-| `tls_store.c:448` `tls_registry[8]` | **unguarded -- FIXED** | see below |
+| `tls_store.c:448` `tls_registry[8]` | **unguarded, FIXED** | see below |
 
-### `_nx_secure_tls_record_block_buffer` -- per-record scratch in a global
+### `_nx_secure_tls_record_block_buffer`, per-record scratch in a global
 
 One `NX_SECURE_TLS_MAX_CIPHER_BLOCK_SIZE` buffer for the whole machine, used as
 the CBC padding source, the AEAD ICV destination, and both the input and the
 output of the record decrypt. **The baton does not cover it**, because it stays
 live across exactly the calls that release the baton:
 
-- encrypt `:731` -- `MEMSET` the padding in, then
+- encrypt `:731`, `MEMSET` the padding in, then
   `nx_packet_data_append(..., NX_WAIT_FOREVER)`. On an empty packet pool that
   suspends, and another adopted task can `MEMSET` different padding into the same
   bytes before the first append copies them out.
-- decrypt `:816` -- fill the buffer as `input`, then
+- decrypt `:816`, fill the buffer as `input`, then
   `nx_packet_allocate(..., wait_option)` at `:860` before decrypting from it at
   `:911`.
-- decrypt `:876` -- decrypt into the buffer, then
+- decrypt `:876`, decrypt into the buffer, then
   `nx_packet_data_append(..., wait_option)` at `:922` with plaintext sitting in
   it.
 
@@ -539,7 +539,7 @@ references in the file are the definition and a `sizeof()`. The TLS 1.0 body tha
 used it is gone from this copy. If TLS 1.0 is ever re-enabled it becomes the same
 bug.
 
-### `tls_registry[]` -- claim guarded, scan not (FIXED)
+### `tls_registry[]`, claim guarded, scan not (FIXED)
 
 Eight `{store, connection}` pairs, the back-pointer nx_secure's store-only verify
 hook needs. `tls_registry_add()` and `tls_registry_remove()` both take `Forbid()`;
@@ -573,7 +573,7 @@ Instrumentation only; no handshake depends on it.
 ### The P-256 curve init is racy and benign
 
 `ami_tls_crypto_initialize()` is called from two paths that do not exclude each
-other -- `tls_conn.c:307` under `TLSBase->tb_Lock`, and
+other, `tls_conn.c:307` under `TLSBase->tb_Lock`, and
 `ami_crypto_method_ec_secp256_operation()` at `:243` under the baton. Both can
 run the init. Every write is byte-identical: the same struct copy from the same
 const curve and the same function pointer. `ami_p256_ready` is set last, so a
@@ -604,7 +604,7 @@ to move.**
 The one thing worth naming: those defaults are handed straight out to callers in
 `struct ug_passwd`/`struct ug_group` on the no-file path, so a client that writes
 through `pw->pw_dir` or edits `gr_mem` in place corrupts the default for every
-program on the machine, permanently. `ug_def_empty` is the most exposed --
+program on the machine, permanently. `ug_def_empty` is the most exposed,
 `ug_field()` returns it for every missing field of every parsed line. That is the
 BSD ABI's fault, not this code's, and copying on return is a different change.
 
@@ -622,7 +622,7 @@ tables, and `netstack_capture.c:39`'s `ami_ns_lo_cookie`, whose *address* is the
 loopback identity and whose contents are never read. None is written; all are
 read-only from every opener; nothing to do.
 
-Eleven more are function-local `static const` -- log prefixes, hex digit strings,
+Eleven more are function-local `static const`, log prefixes, hex digit strings,
 boolean word lists, the mDNS `.local` suffix. Same verdict.
 
 The writable objects that are constants in practice are named in the tables
@@ -653,23 +653,23 @@ ABI. `ami_cfg_empty` is the one that could genuinely be `const` if
 
 ## What was not
 
-- **`_nx_secure_tls_record_block_buffer`** -- two concurrent TLS connections can
+- **`_nx_secure_tls_record_block_buffer`**, two concurrent TLS connections can
   corrupt each other. Needs the buffer moved into the per-session metadata area;
   a crypto change, not an audit change.
-- **`ami_ns` readers versus teardown** -- needs a reference count on
+- **`ami_ns` readers versus teardown**, needs a reference count on
   `netstack_ip()`/`netstack_pool()`.
-- **`ami_baton_slot[]` leaking on a task that dies mid-bracket** -- needs a
+- **`ami_baton_slot[]` leaking on a task that dies mid-bracket**, needs a
   liveness test for a `struct Task *`.
-- **`ami_rsa_keys[]`, `ami_counters[]`, `ami_client_thread`** -- per-session and
+- **`ami_rsa_keys[]`, `ami_counters[]`, `ami_client_thread`**, per-session and
   per-opener state in globals, all unreachable through any LVO in the shipped
   library.
-- **`ami_cfg_reporter`/`ami_cfg_reporter_user`** -- per-caller callback, dormant
+- **`ami_cfg_reporter`/`ami_cfg_reporter_user`**, per-caller callback, dormant
   in the library.
-- **crashguard** -- per-task state in globals, not linked into any shared library.
-- **The netmonitor hook list** -- shared by documented contract; there is nowhere
+- **crashguard**, per-task state in globals, not linked into any shared library.
+- **The netmonitor hook list**, shared by documented contract; there is nowhere
   to record an owner.
-- **The `ug_def_*` defaults handed out as mutable `char *`** -- BSD ABI.
-- **The CSPRNG's second caller during a collection** -- fixing it means a 22 ms
+- **The `ug_def_*` defaults handed out as mutable `char *`**, BSD ABI.
+- **The CSPRNG's second caller during a collection**, fixing it means a 22 ms
   Forbid.
 
 ## What could not be settled
@@ -683,7 +683,7 @@ ABI. `ami_cfg_empty` is the one that could genuinely be `const` if
   `tx_amiga_kernel_stop()`/`_start()`. The asymmetry is visible and intentional;
   nothing in-tree explains it, and `third_party/netxduo` is a submodule that is
   not checked out here, so the function could not be read.
-- **`ami_cfg_empty`** -- handed out as a mutable `char *` to four call sites in
+- **`ami_cfg_empty`**, handed out as a mutable `char *` to four call sites in
   `config_parse.c`. A write through it would corrupt one shared byte for every
   later parse. Whether any of those four can write a non-NUL byte was not
   established; the type permits it.
@@ -694,7 +694,7 @@ ABI. `ami_cfg_empty` is the one that could genuinely be `const` if
 
 `tests/tools/run-cycledrill.sh` opens the library many times over, nested and
 cycled, which is the closest existing test to any of this. It opens from **one
-task**, so it exercises the persistence half of the problem -- what a static
-carries from one program into the next -- and not the concurrency half. Nothing
+task**, so it exercises the persistence half of the problem, what a static
+carries from one program into the next, and not the concurrency half. Nothing
 in the tree today puts two tasks inside the library at once on purpose. That is
 the gap this document leaves behind.

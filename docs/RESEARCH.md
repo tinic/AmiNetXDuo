@@ -1,4 +1,4 @@
-# AmiNetXDuo — Feasibility Research
+# AmiNetXDuo, Feasibility Research
 
 *An AmiTCP/Roadshow-compatible `bsdsocket.library` for AmigaOS built on Eclipse ThreadX NetX Duo.*
 
@@ -8,7 +8,7 @@
 >
 > A new finding goes in two places instead:
 >
-> * **the comment beside the code it explains** — `n68k_checksum.S`,
+> * **the comment beside the code it explains**, `n68k_checksum.S`,
 >   `netx_call.c`, `nx_user.h` and `sana2_rx.c` all carry their measured
 >   rationale inline, and it gets read because you are already in the file when
 >   you need it;
@@ -19,11 +19,11 @@
 > anything written here. And a recorded conclusion is only as good as the
 > instrument behind it: §39.3 rejected an optimisation on a table whose two
 > arms were charged 525 µs and 214 µs per bracket, a comparison that was never
-> valid, and that stood until 2026-08-01 — when the thing it discouraged turned
+> valid, and that stood until 2026-08-01, when the thing it discouraged turned
 > out to be worth 21% of throughput. If a citation is load-bearing for what you
 > are about to decide, re-measure rather than inherit it.
 
-Status: no longer research only — this began as a feasibility study and the thing now
+Status: no longer research only, this began as a feasibility study and the thing now
 builds, runs, passes 125/142 of an independent conformance suite and carries upstream
 curl. The early sections are kept as they were written, because how a conclusion was
 reached matters when a later section overturns it, and several have been overturned.
@@ -48,36 +48,36 @@ NetX Duo core is portable, endian-clean C, and it compiles for 68020 out of the 
 |---|---|---|---|
 | ThreadX core | 185 | **0** | 27.7 KB |
 | NetX Duo core (all, IPv4+IPv6) | 511 | **0** | 111.9 KB |
-| NetX Duo IPv4 subset (tcp/udp/ip/arp/icmp/packet) | — | — | ~73 KB |
+| NetX Duo IPv4 subset (tcp/udp/ip/arp/icmp/packet) |, |, | ~73 KB |
 | DHCP client | 1 | 0 | 15.2 KB |
 | DNS client | 1 | 0 | 9.5 KB |
 | PPP | 1 | 0 | 22.2 KB |
 
 A shippable IPv4 + DHCP + DNS `bsdsocket.library` therefore lands in the **100–140 KB**
-range — the same order as Roadshow's. That is not the problem.
+range, the same order as Roadshow's. That is not the problem.
 
-**The problem is ThreadX.** NetX Duo does not merely call the ThreadX API — it reaches
+**The problem is ThreadX.** NetX Duo does not merely call the ThreadX API, it reaches
 into ThreadX *internals* to implement its own socket suspension (`_tx_thread_system_suspend`,
 `_tx_thread_system_resume`, `_tx_thread_preempt_disable`, `tx_thread_suspend_cleanup`,
 and direct manipulation of `TX_THREAD` suspension-list fields, across **~40 core files**).
-There is no `NX_STANDALONE`/no-RTOS mode — the string `STANDALONE` does not appear
+There is no `NX_STANDALONE`/no-RTOS mode, the string `STANDALONE` does not appear
 anywhere in `common/`, `addons/`, or `ports/`. So AmiNetXDuo must ship a real ThreadX
 kernel running on top of Exec, not a thin `tx_*` shim. See [§6.2](#62-threadx-on-exec-the-central-problem).
 
 **The competitive picture changed two weeks ago.** Two independent modern-stack projects
 appeared in July 2026 ([§2](#2-prior-art)): `lwip-amiga` (lwIP + `bsdsocket.library`, but
-**no SANA-II** — PiStorm/Emu68 `genet.device` only) and `AmiTCP_NG` (GPL fork of AmiTCP
+**no SANA-II**, PiStorm/Emu68 `genet.device` only) and `AmiTCP_NG` (GPL fork of AmiTCP
 3.0b2 with a clean-room Roadshow ABI, SANA-II, DHCP, BPF). Neither is a blocker, but they
 change what "new" means. AmiNetXDuo's defensible ground is: **MIT-licensed, no BSD/GPL
 lineage, IPv4 + IPv6 dual stack, SANA-II compatible, with NetX Duo's protocol add-on
 catalogue (DHCP/DNS/PPP/PPPoE/SNTP/mDNS/NAT/TLS) available for free.** IPv6 in particular
-would be an Amiga first — no classic stack has ever had it.
+would be an Amiga first, no classic stack has ever had it.
 
 ---
 
 ## 2. Prior art
 
-### 2.1 NetX Duo / ThreadX on Amiga or 68k — none
+### 2.1 NetX Duo / ThreadX on Amiga or 68k, none
 
 - GitHub repository search, `netxduo amiga OR threadx amiga`: **0 results**.
 - `eclipse-threadx/threadx` `ports/`, `ports_arch/`, `ports_module/`, `ports_smp/`: ARC,
@@ -89,7 +89,7 @@ The two hosted ports (`linux`, `win32`) are the useful precedent: they run Threa
 on host threads with a global scheduler mutex. That is the template for an Exec port
 ([§6.2](#62-threadx-on-exec-the-central-problem)).
 
-### 2.2 `rondoval/lwip-amiga` — the closest analogue (created 2026-07-10)
+### 2.2 `rondoval/lwip-amiga`, the closest analogue (created 2026-07-10)
 
 The direct architectural precedent: a modern embedded TCP/IP core (lwIP 2.2.1) plus an
 AmigaOS port layer plus a `bsdsocket.library` front end, for AmigaOS 3.2. BSD-3-Clause.
@@ -100,22 +100,22 @@ What it proves works:
 - **Core-locking direct path**: application tasks execute stack code *in their own
   context* under a single core semaphore, using Exec signals as the blocking primitive.
   (This works for lwIP because lwIP's core-lock mode has no notion of "the calling
-  thread is suspended by the stack". NetX Duo does — see [§6.3](#63-who-runs-the-stack-code).)
-- **A generated LVO vector table** — 139 slots emitted from the NDK `bsdsocket` SFD by a
+  thread is suspended by the stack". NetX Duo does, see [§6.3](#63-who-runs-the-stack-code).)
+- **A generated LVO vector table**, 139 slots emitted from the NDK `bsdsocket` SFD by a
   Python script. Same trick applies here.
 - **76 of 121 LVOs implemented** is enough to be genuinely useful; it scores **138/142 on
   the `bsdsocktest` conformance suite** (4 skipped, 0 failed).
 - Real numbers on real silicon: 944 Mb/s TCP down / 558 Mb/s up on Pi4/PiStorm.
 
-What it deliberately does *not* do — and this is AmiNetXDuo's opening:
+What it deliberately does *not* do, and this is AmiNetXDuo's opening:
 - **No SANA-II.** It defines its own `netdev` ABI (direct-call, zero-copy, batched,
   checksum offload). Only `genet.device` on Pi4/CM4 under PiStorm/Emu68 implements it.
-  Every real Amiga NIC — A2065, Ariadne, X-Surf, PCMCIA, the PPP/SLIP drivers — is
+  Every real Amiga NIC, A2065, Ariadne, X-Surf, PCMCIA, the PPP/SLIP drivers, is
   excluded by design.
 - No IPv6, no TLS.
 - Not implemented: Roadshow interface-config/routing/monitor calls, `mbuf_*`, `bpf_*`, `ipf_*`.
 
-### 2.3 `MW0MWZ/AmiTCP_NG` — the incumbent-killer (created 2026-07-19, GPL-2.0)
+### 2.3 `MW0MWZ/AmiTCP_NG`, the incumbent-killer (created 2026-07-19, GPL-2.0)
 
 A modernised GPL fork of AmiTCP/IP 3.0b2, positioned as a **drop-in Roadshow replacement
 with no time limit**. Claims: full `bsdsocket.library` API over SANA-II + loopback, DHCP
@@ -131,13 +131,13 @@ Relevance: it removes "there is no free, modern, SANA-II TCP stack" as a motivat
 does **not** remove: GPL-2 lineage (a problem if you want MIT), 4.4BSD-derived core code,
 no IPv6, no TLS.
 
-### 2.4 The 2017 NetBSD-stack proposal — never delivered
+### 2.4 The 2017 NetBSD-stack proposal, never delivered
 
 Swift Griggs, `port-amiga` list, Dec 2017: proposed adapting NetBSD's `src/netinet` to
 AmigaOS 3.x as a `bsdsocket.library` replacement, citing dissatisfaction with all existing
-stacks. Obstacles they identified — no kernel threads (strip fine-grained locking), no
+stacks. Obstacles they identified, no kernel threads (strip fine-grained locking), no
 kernel-only allocators, SANA-II vs BSD ifnet mismatch, no memory protection to debug with
-— are exactly the obstacles here, minus locking (ThreadX brings its own). No code shipped.
+are exactly the obstacles here, minus locking (ThreadX brings its own). No code shipped.
 
 ### 2.5 AROSTCP
 
@@ -145,7 +145,7 @@ AROS's stack, in `workbench/network/stacks/AROSTCP`. Descends from the **AmiTCP/
 (HUT) 1993–94 sources**, plus Neil Cafferkey (2005) and Pavel Fedin (2005–06); ISC DHCP
 suite bundled. **GPL-2** for the stack, **LGPL-2** for `netinclude/` and `netlib/`, over a
 4.4BSD base. The most complete open `bsdsocket.library` implementation in existence and
-the best *behavioural* reference — but its licence rules it out as a code source for an
+the best *behavioural* reference, but its licence rules it out as a code source for an
 MIT project.
 
 ### 2.6 Others worth knowing
@@ -156,7 +156,7 @@ MIT project.
 | `cnvogelg/aminisocket` | "Minimal Amiga BSDSocket Library Implementation" | Smallest reference for the library-base plumbing |
 | `jbilander/catalyst` (LGPL-2.1) | Offloads TCP/IP **and TLS** to a hardware coprocessor over a mailbox | The "don't run a stack on the 68k at all" school |
 | `lainejones/a314bsd`, `AmiSSL-Tunnel` | `bsdsocket.library` over an a314 adapter; TLS offloaded to a LAN daemon | Same school |
-| WinUAE / FS-UAE / Amiberry | Native `bsdsocket.library` *emulation* (host sockets) | Not a stack — but it means "works under emulation" ≠ "works". Must be disabled when testing. |
+| WinUAE / FS-UAE / Amiberry | Native `bsdsocket.library` *emulation* (host sockets) | Not a stack, but it means "works under emulation" ≠ "works". Must be disabled when testing. |
 | `obarthel/amiga-smbfs` | SMB filesystem written against the AmiTCP V3 API | A real-world client to validate against |
 
 ---
@@ -165,8 +165,8 @@ MIT project.
 
 ### 3.1 The library model
 
-AmigaOS has no kernel networking. A TCP/IP stack is a **shared library** —
-`LIBS:bsdsocket.library` — running in user space in the same address space as every
+AmigaOS has no kernel networking. A TCP/IP stack is a **shared library**,
+`LIBS:bsdsocket.library`, running in user space in the same address space as every
 application, reached by `JSR` through a negative-offset LVO table. There is no syscall,
 no fd table, no memory protection.
 
@@ -175,20 +175,20 @@ Consequences that shape the whole design:
 - **Per-opener library base.** Every task calls `OpenLibrary("bsdsocket.library", 4)` and
   gets *its own* base with a private descriptor table, errno pointer and tag state.
   `SocketBase` must never be shared between tasks. This is the single most important
-  structural requirement — the classic implementation is a child-base clone per opener.
-- **`Errno()` / `SetErrnoPtr()`** — errno is per-opener and optionally written through a
+  structural requirement, the classic implementation is a child-base clone per opener.
+- **`Errno()` / `SetErrnoPtr()`**, errno is per-opener and optionally written through a
   caller-supplied pointer of caller-chosen width (1/2/4 bytes), configured via
   `SBTC_ERRNOPTR` in `SocketBaseTagList`.
-- **`CloseSocket()`, not `close()`** — sockets are not DOS file handles.
+- **`CloseSocket()`, not `close()`**, sockets are not DOS file handles.
 - **`WaitSelect()` is the core primitive**, not `select()`: it waits on socket readiness
   **and Exec signal bits** simultaneously, so one loop serves network + Intuition + ARexx
   + timers, with break signals surfacing as `EINTR`. Getting its documented edge cases
   right (sets unmodified on error, break repost, user signal mask) is most of the
   compatibility work.
-- **`SetSocketSignals()` / `GetSocketEvents()` / `SO_EVENTMASK`** — the async, signal-driven
+- **`SetSocketSignals()` / `GetSocketEvents()` / `SO_EVENTMASK`**, the async, signal-driven
   alternative (AmiTCP V4 event API).
 - **`ObtainSocket()` / `ReleaseSocket()` / `ReleaseCopyOfSocket()` / `ObtainServerSocket()`**
-  — descriptor hand-off between tasks (how `inetd`-style servers and launched children get
+, descriptor hand-off between tasks (how `inetd`-style servers and launched children get
   a socket). Reference-counted, cross-base.
 - **`Dup2Socket()`** for descriptor cloning.
 
@@ -231,52 +231,52 @@ Roadshow's extension set. The gap `0x132`–`0x168` is reserved/private.
 
 Practical tiering for implementation:
 
-- **Tier 1 (must, ~45 vectors)** — socket core, data transfer, `WaitSelect`, `IoctlSocket`
+- **Tier 1 (must, ~45 vectors)**, socket core, data transfer, `WaitSelect`, `IoctlSocket`
   (`FIONBIO`/`FIONREAD`), errno family, `SocketBaseTagList`, `getdtablesize`, the `inet_*`
   conversions, `gethostbyname`/`_r`, `gethostbyaddr`/`_r`, `gethostname`.
-- **Tier 2 (should, ~25)** — `getaddrinfo`/`getnameinfo`/`freeaddrinfo`/`gai_strerror`,
+- **Tier 2 (should, ~25)**, `getaddrinfo`/`getnameinfo`/`freeaddrinfo`/`gai_strerror`,
   `sendmsg`/`recvmsg`, `Dup2Socket`, `ObtainSocket` family, `GetSocketEvents` +
   `SO_EVENTMASK`, the `get{serv,proto,net}*` netdb iterators, `vsyslog`.
-- **Tier 3 (Roadshow parity, ~35)** — interface config/query, routing, DNS-server
+- **Tier 3 (Roadshow parity, ~35)**, interface config/query, routing, DNS-server
   management, `GetNetworkStatistics`, `*RoadshowData`. Needed for `ShowNetStatus`,
   `AddNetInterface`, `netinfo`-style tools to work unchanged.
-- **Tier 4 (out of scope)** — `ipf_*`, Roadshow's private packet filter. lwip-amiga skips
+- **Tier 4 (out of scope)**, `ipf_*`, Roadshow's private packet filter. lwip-amiga skips
   it by design; nothing outside Roadshow's own tools calls it.
 
 `mbuf_*` and `bpf_*` were **promoted from Tier 4 to Tier 3** by the §9 decisions.
 `mbuf_*` exposes 4.4BSD mbuf chains to applications; NetX Duo's `NX_PACKET` is a different
 shape (single header + payload, chained via `nx_packet_next`), so this is an emulation
 layer written from scratch. `bpf_*` needs a raw packet path plus a BPF filter VM. Both are
-milestone 7 (§8) — real work, not trim.
+milestone 7 (§8), real work, not trim.
 
 ### 3.3 Everything else a stack is expected to provide
 
 `bsdsocket.library` alone is not a usable stack. Roadshow/AmiTCP-era software also expects:
 
-- **`usergroup.library`** — `getuid`/`getpwent`/`getgrent` etc.; AmiTCP's companion, shipped
+- **`usergroup.library`**, `getuid`/`getpwent`/`getgrent` etc.; AmiTCP's companion, shipped
   by Roadshow too. Many ported Unix tools link it.
 
   ABI **confirmed 2026-07-24** from two primary sources that agree function-for-function
   and register-for-register: AmiTCP's `fd/usergroup_lib.fd` (© 1993 AmiTCP/IP Group, HUT)
   and Roadshow's `sfd/usergroup_lib.sfd` (v1.4, 2004, Barthel). Both give
-  `##base _UserGroupBase`, `##bias 30`, **39 public vectors, LVO −30 … −258** — which the
+  `##base _UserGroupBase`, `##bias 30`, **39 public vectors, LVO −30 … −258**, which the
   toolchain's own `pragmas/usergroup_pragmas.h` corroborates exactly (0x01e … 0x102).
   No `usergroup.doc` autodoc could be found anywhere, so the vector *table* is settled but
   documented per-call *semantics* are not; the AmiTCP 4.x SDK would close that gap.
 
   > **Trap, found the hard way.** The local toolchain's `ndk-include/pwd.h` is **not** the
-  > usergroup ABI — it is newlib's 10-field 4.4BSD `struct passwd` (with `pw_change`,
+  > usergroup ABI, it is newlib's 10-field 4.4BSD `struct passwd` (with `pw_change`,
   > `pw_class`, `pw_expire`) substituted over Roadshow's. The real usergroup `struct passwd`
   > has **7 fields**. Anything returning a `struct passwd` built from that header is wrong
   > by 12 bytes and misaligned from `pw_gecos` onward. This is why bebbo's AmiTCP inline
   > header calls the type `struct TCP_passwd`. Use private tag names and pin the layout
   > with `_Static_assert`.
-- **The `AMITCP` public message port** — `WaitForPort AMITCP` in `S:User-Startup` is the
+- **The `AMITCP` public message port**, `WaitForPort AMITCP` in `S:User-Startup` is the
   canonical "is the stack up" barrier. Cheap to honour, and worth honouring.
-- **Config files** — Roadshow's `DEVS:NetInterfaces/<name>`, `DEVS:Internet/name_resolution`,
+- **Config files**, Roadshow's `DEVS:NetInterfaces/<name>`, `DEVS:Internet/name_resolution`,
   `DEVS:Internet/routes`; AmiTCP's `AmiTCP:db/{interfaces,netdb-myhost,static-routes}`;
   the standard `/etc`-style netdb (`services`, `protocols`, `hosts`, `networks`).
-  lwip-amiga instead uses a single `ENV:netstack.prefs` — simpler, but breaks tools.
+  lwip-amiga instead uses a single `ENV:netstack.prefs`, simpler, but breaks tools.
 
   > **Corrected 2026-07-24**, against the Roadshow 1.15 manual and real in-the-wild
   > interface files. Two errors in the earlier draft, both inherited from secondary
@@ -295,12 +295,12 @@ milestone 7 (§8) — real work, not trim.
   > The parser in `src/config/` accepts both spellings (numeric `IPTYPE` = packet type,
   > alphabetic = address mode) and reads both `routes` and a `default_gateway` file if
   > present, so nothing is lost either way.
-- **The command set** — `AddNetInterface`, `Online`, `Offline`, `ShowNetStatus`, `ping`,
+- **The command set**, `AddNetInterface`, `Online`, `Offline`, `ShowNetStatus`, `ping`,
   `netstat`, `route`, `nslookup`/`host`, `traceroute`.
-- **Self-starting** — modern practice (both AmiTCP_NG and lwip-amiga) is that the library
+- **Self-starting**, modern practice (both AmiTCP_NG and lwip-amiga) is that the library
   brings the whole stack up on first open, rather than requiring a separate daemon.
 
-### 3.4 SANA-II — the driver contract
+### 3.4 SANA-II, the driver contract
 
 SANA-II is an `exec.device` protocol; the stack is the client. Any SANA-II driver works
 with any SANA-II stack, which is why supporting it buys the entire installed base
@@ -319,13 +319,13 @@ Shape of the interface:
 | 14/15 | `S2_ONLINE` / `S2_OFFLINE` | link up/down |
 | 16/17 | `S2_ADDMULTICASTADDRESS` / `S2_DELMULTICASTADDRESS` | multicast |
 | 21/22 | `S2_GETGLOBALSTATS` / `S2_GETSPECIALSTATS` | counters |
-| — | `SANA2IOF_RAW` in `io_Flags` | full frames including link header (optional, not universally reliable) |
+|, | `SANA2IOF_RAW` in `io_Flags` | full frames including link header (optional, not universally reliable) |
 
 > **Corrected 2026-07-24.** Raw mode is a **flag on `CMD_READ`/`CMD_WRITE`**, not a pair of
-> `S2_RAWREAD`/`S2_RAWWRITE` commands — those names appear in no version of the spec or any
+> `S2_RAWREAD`/`S2_RAWWRITE` commands, those names appear in no version of the spec or any
 > header on this machine. It also cannot be capability-probed: SANA-II offers no way to ask
 > whether a device implements the flag, and a device that *accepts* it and then ignores it
-> is indistinguishable from one that honours it — while silently mis-framing every packet.
+> is indistinguishable from one that honours it, while silently mis-framing every packet.
 > The shim therefore ships with raw **off**, requiring an explicit opt-in.
 
 Two properties drive the port layer:
@@ -340,12 +340,12 @@ Two properties drive the port layer:
    > header entirely to the driver: `nx_ram_network_driver.c:388` moves `prepend_ptr`
    > back by `NX_ETHERNET_SIZE` and writes all 14 bytes itself, taking the destination
    > from `nx_ip_driver_physical_address_msw/lsw`. So in cooked mode the shim **never
-   > builds an Ethernet header at all** — payload goes straight from `prepend_ptr`, and
+   > builds an Ethernet header at all**, payload goes straight from `prepend_ptr`, and
    > retransmitting the same `NX_PACKET` works for free. Only RX needs synthesis, and
    > only so the receive path can demux EtherType.
 
-   RX still **synthesises** a header from `ios2_SrcAddr`/`ios2_DstAddr`/`ios2_PacketType`
-   — mechanical, but it must be exactly right for ARP. Note that delivery must go through
+   RX still **synthesises** a header from  478 / 479 / 480 
+, mechanical, but it must be exactly right for ARP. Note that delivery must go through
    `_nx_ip_packet_deferred_receive` / `_nx_arp_packet_deferred_receive` /
    `_nx_rarp_packet_deferred_receive` rather than `_nx_ip_packet_receive`: the reader is
    not the IP thread, and `_nx_ip_packet_receive` does not demux EtherType, so handing it
@@ -355,10 +355,10 @@ Two properties drive the port layer:
    `S2_CopyToBuff16`/`S2_CopyFromBuff16`). The driver calls *our* hooks in m68k register
    convention (`a0`=dst, `a1`=src, `d0`=len) to move packet data, because it may be using
    DMA or chip RAM. This is a natural place to copy straight into an `NX_PACKET` payload
-   — one copy, no bounce buffer.
+, one copy, no bounce buffer.
 
 `CMD_READ` is per-packet-type, so the stack keeps a pool of outstanding reads for
-`0x0800` (IPv4), `0x0806` (ARP), and — for IPv6 — `0x86DD`, each with its own reader.
+`0x0800` (IPv4), `0x0806` (ARP), and, for IPv6, `0x86DD`, each with its own reader.
 
 ---
 
@@ -380,7 +380,7 @@ Two properties drive the port layer:
 The licensing situation for an MIT project is clean but narrow: **AmiTCP 3.0b2, AROSTCP
 and AmiTCP_NG are all GPL or BSD-with-advertising-clause 4.4BSD lineage, and the AmiTCP 4.x
 SDK is proprietary.** None of their *code* can be used. The Roadshow SDK's headers and
-autodocs are freely distributable and are the correct **ABI reference** — same posture
+autodocs are freely distributable and are the correct **ABI reference**, same posture
 AmiTCP_NG documents (reference only, no code, no disassembly). The local NDK in
 `amigaos/tools/m68k-amigaos-gcc/.../ndk-include` already contains those headers.
 
@@ -391,19 +391,19 @@ AmiTCP_NG documents (reference only, no code, no disassembly). The local NDK in
 ### 5.1 What it gives us
 
 - **MIT licence** (Microsoft → Eclipse Foundation). Same as this repo. No lineage problem.
-- **Dual IPv4 / IPv6** in one stack — an Amiga first.
+- **Dual IPv4 / IPv6** in one stack, an Amiga first.
 - **Add-ons already written**: `dhcp` (client+server, v4 and v6), `dns`, `ppp`, `pppoe`,
   `sntp`, `mdns`, `nat`, `auto_ip` (RFC 3927), `telnet`, `ftp`, `http`, `mqtt`, `smtp`,
   `pop3`, `tftp`, `web`, `websocket`, `rtp`/`rtsp`, `snmp`, `ptp`.
-- **`nx_secure` TLS 1.2/1.3 + crypto** — an MIT-licensed TLS that could underpin an
+- **`nx_secure` TLS 1.2/1.3 + crypto**, an MIT-licensed TLS that could underpin an
   `amissl.library`-alternative, subject to 68k performance reality.
-- **`addons/BSD/nxd_bsd.c`** — an existing BSD-sockets veneer (~657 KB of C) with
+- **`addons/BSD/nxd_bsd.c`**, an existing BSD-sockets veneer (~657 KB of C) with
   `socket`/`bind`/`listen`/`accept`/`connect`/`send`/`recv`/`select`/`poll`/`fcntl`/
-  `ioctl`/`getaddrinfo`/`recvmsg`/… Useful as a semantic reference, but see §6.4 — it is
+  `ioctl`/`getaddrinfo`/`recvmsg`/… Useful as a semantic reference, but see §6.4, it is
   probably the *wrong* layer to build `bsdsocket.library` on.
 - Industrial pedigree: a large regression suite lives in `test/`.
 
-### 5.2 What it costs — the ThreadX dependency
+### 5.2 What it costs, the ThreadX dependency
 
 Measured over `common/src` + `common/inc`:
 
@@ -412,7 +412,7 @@ Measured over `common/src` + `common/inc`:
 | Public API used | `tx_mutex_get`/`put` (660 call sites), `tx_event_flags_*`, `tx_thread_create`/`delete`/`identify`/`sleep`/`preemption_change`, `tx_timer_create`/`delete`/`deactivate`, `tx_time_get` |
 | **ThreadX internals used** | `_tx_thread_current_ptr`, `_tx_thread_system_suspend`, `_tx_thread_system_resume`, `_tx_thread_preempt_disable`, `_tx_thread_system_preempt_check`, `_tx_thread_timeout`, `_tx_thread_terminate`, `_tx_thread_system_state`, and direct writes to `TX_THREAD` fields `tx_thread_suspend_cleanup`, `tx_thread_suspended_next/previous`, `tx_thread_suspend_status`, `tx_thread_suspend_control_block`, `tx_thread_additional_suspend_info` |
 
-~40 core files build their own suspension lists on top of ThreadX's thread control block —
+~40 core files build their own suspension lists on top of ThreadX's thread control block,
 that is how `nx_tcp_socket_receive(..., wait_option)` blocks a caller. A shim that maps
 `tx_mutex_*` onto `SignalSemaphore` will not satisfy this. **Real ThreadX is required.**
 
@@ -421,16 +421,16 @@ Confirmed absent: no `NX_STANDALONE`, no bare-metal mode, no OS abstraction laye
 
 ### 5.3 68k-specific concerns, resolved
 
-- **Endianness** — NetX Duo is endian-parameterised: leaving `NX_LITTLE_ENDIAN` undefined
+- **Endianness**, NetX Duo is endian-parameterised: leaving `NX_LITTLE_ENDIAN` undefined
   compiles the big-endian path, where `NX_CHANGE_ULONG_ENDIAN`/`NX_CHANGE_USHORT_ENDIAN`
   become no-ops. m68k is the *native* wire order; header swapping disappears entirely.
   This is a real performance win over x86-class targets.
-- **Alignment** — NetX Duo does 32-bit accesses into packet headers. On m68k, longword
+- **Alignment**, NetX Duo does 32-bit accesses into packet headers. On m68k, longword
   access at any **even** address is legal (only odd addresses raise an address error), and
   the Ethernet header is 14 bytes, so the IP header lands at an even offset. Unlike ARMv5
   or SPARC, no alignment fixup layer is needed. (68020+ handles it without penalty beyond
   an extra bus cycle.)
-- **Compiler** — the codebase is clean C89/C99 with no GCC-specific extensions; GCC 15.2
+- **Compiler**, the codebase is clean C89/C99 with no GCC-specific extensions; GCC 15.2
   for m68k accepts it unmodified (§5.4).
 - **`ULONG`/`LONG` = 32-bit** on m68k, matching NetX Duo's assumption exactly (the Linux
   port needs a special case for LP64; we don't).
@@ -462,13 +462,13 @@ nx_packet 3,108   nx_igmp 2,352   nx_rarp 1,088   nx_system 100
 IPv6 add-on: nxd* 13,408 + nx_icmpv6 9,532 + nx_ipv6 5,436 + nx_nd 1,472  ≈ 30 KB
 ```
 
-Notes: `-noixemul` is not usable with this (newlib-based) toolchain — it breaks
+Notes: `-noixemul` is not usable with this (newlib-based) toolchain, it breaks
 `sys/reent.h`. The library build will want `-fbaserel`/`-msmall-code` experiments and a
 no-libc discipline anyway (a shared library cannot drag in newlib's stdio); NetX Duo's
 only libc uses are `memset`/`memcpy`/`memcmp`, which we supply.
 
 The three biggest single objects are `nx_tcp_socket_send_internal` (2,884), `nx_md5`
-(2,716 — droppable) and `nx_tcp_packet_process` (2,308). Nothing pathological.
+(2,716, droppable) and `nx_tcp_packet_process` (2,308). Nothing pathological.
 
 **Conclusion: the port is a plumbing problem, not a portability problem.**
 
@@ -508,19 +508,19 @@ The three biggest single objects are `nx_tcp_socket_send_internal` (2,884), `nx_
 
 Four new components, in dependency order.
 
-### 6.1 `port/amiga/` — ThreadX Exec port
+### 6.1 `port/amiga/`, ThreadX Exec port
 
-Model it on `threadx/ports/linux/gnu` (2,594 lines total, 8 files) — the only
+Model it on `threadx/ports/linux/gnu` (2,594 lines total, 8 files), the only
 non-bare-metal precedent:
 
 | File | Amiga realisation |
 |---|---|
-| `inc/tx_port.h` | types (already proven), `TX_THREAD_EXTENSION_0` carries `struct Task *` + run-signal mask, `TX_DISABLE`/`TX_RESTORE` → `Forbid()`/`Permit()` (task-level; no ISR touches ThreadX state — see §6.2) |
+| `inc/tx_port.h` | types (already proven), `TX_THREAD_EXTENSION_0` carries `struct Task *` + run-signal mask, `TX_DISABLE`/`TX_RESTORE` → `Forbid()`/`Permit()` (task-level; no ISR touches ThreadX state, see §6.2) |
 | `tx_thread_schedule.c` | pick `_tx_thread_execute_ptr`, `Signal()` its task's run bit, master waits |
 | `tx_thread_system_return.c` | current thread yields back to the scheduler |
 | `tx_thread_context_save/restore.c` | no-ops in a hosted port (Exec does the real switching) |
-| `tx_thread_stack_build.c` | trivial — stacks belong to Exec tasks |
-| `tx_timer_interrupt.c` | driven by a dedicated tick task on `timer.device` (or a VBlank server); `NX_IP_PERIODIC_RATE` must equal `TX_TIMER_TICKS_PER_SECOND`. **See the tick-rate finding below — 100 Hz on `UNIT_MICROHZ` is the wrong choice for this platform.** |
+| `tx_thread_stack_build.c` | trivial, stacks belong to Exec tasks |
+| `tx_timer_interrupt.c` | driven by a dedicated tick task on `timer.device` (or a VBlank server); `NX_IP_PERIODIC_RATE` must equal `TX_TIMER_TICKS_PER_SECOND`. **See the tick-rate finding below, 100 Hz on `UNIT_MICROHZ` is the wrong choice for this platform.** |
 
 #### Tick rate: 100 Hz on `UNIT_MICROHZ` is wrong for AmigaOS
 
@@ -531,15 +531,15 @@ pays the scheduling latency of a fresh IORequest round trip through a Task.
 
 What the incumbent stack does, from the AmiTCP-derived AROSTCP sources:
 
-- `bsdsocket/sys/kernel.h`: **`#define hz (50)`** — a 50 Hz computational clock.
-- `bsdsocket/kern/amiga_time.c:111`: `OpenDevice(TIMERNAME, **UNIT_VBLANK**, …)` — the
+- `bsdsocket/sys/kernel.h`: **`#define hz (50)`**, a 50 Hz computational clock.
+- `bsdsocket/kern/amiga_time.c:111`: `OpenDevice(TIMERNAME, **UNIT_VBLANK**, …)`, the
   tick comes from the vertical-blank interrupt, not the microsecond timer.
 - `bsdsocket/kern/uipc_domain.c`: `timeout(pfslowtimo, 0, **hz / 2**)` and
-  `timeout(pffasttimo, 0, **hz / 5**)` — the classic 4.4BSD protocol timers at
+  `timeout(pffasttimo, 0, **hz / 5**)`, the classic 4.4BSD protocol timers at
   **2 Hz (500 ms)** and **5 Hz (200 ms)**.
 
-So TCP itself needs nothing finer than 200 ms. A 50 Hz tick gives 20 ms granularity —
-an order of magnitude more than the protocol timers require — at half our current
+So TCP itself needs nothing finer than 200 ms. A 50 Hz tick gives 20 ms granularity,
+an order of magnitude more than the protocol timers require, at half our current
 wakeup rate, from a hardware interrupt rather than a device round trip. `UNIT_VBLANK`
 is also documented as having "very low overhead" and being *more* accurate than
 `UNIT_MICROHZ` over long periods.
@@ -551,14 +551,14 @@ is also documented as having "very low overhead" and being *more* accurate than
 shipped, because the tick source cannot be trusted as the *time base*:
 
 - VBlank is 50 Hz PAL but **60 Hz NTSC**. AROSTCP hardcodes 50, so its clock runs 20%
-  fast on an NTSC machine — a bug to avoid inheriting, not a precedent.
+  fast on an NTSC machine, a bug to avoid inheriting, not a precedent.
 - Under **RTG** (Picasso96/CyberGraphX) and on PiStorm/Emu68-class systems, the rate,
   the regularity, and in exotic configurations the existence of a well-behaved chipset
   VERTB are all outside our control.
 
 So the port **separates the two concerns: the tick source provides *wakeups*, `ReadEClock()`
 provides *time*.** Each wakeup computes how many 50 Hz periods have actually elapsed and
-delivers exactly that many `_tx_timer_interrupt()` calls — catching up after a late or
+delivers exactly that many `_tx_timer_interrupt()` calls, catching up after a late or
 coalesced wakeup, delivering none after an early one. E-Clock is CIA-derived, independent
 of the display, and reports its own frequency, so this is correct on PAL, NTSC, RTG and
 accelerated systems alike. Catch-up is capped (8 ticks) and resyncs beyond that rather
@@ -575,19 +575,19 @@ Measured on the emulated 68020 floor, before → after:
 | **CPU spent on the tick** | **4.38%** | **1.93%** |
 
 Two controls isolate the cause: the same code at 100 Hz on `UNIT_MICROHZ` gives 3000
-ticks and at 50 Hz gives 1507 — **the drift fix is the E-Clock catch-up, not the unit
+ticks and at 50 Hz gives 1507, **the drift fix is the E-Clock catch-up, not the unit
 change**. The unit change is what buys the CPU saving.
 
 Caveats that emulation cannot settle: RTG itself is untestable under FS-UAE (native PAL
 chipset only), NTSC is untested, and the per-wakeup cost deserves confirmation on real
 iron. Also found on the way: **a `timer.device` request that has been `AbortIO`'d does
-not complete again when re-armed** — recycling one silently killed the ThreadX clock.
+not complete again when re-armed**, recycling one silently killed the ThreadX clock.
 The port no longer aborts and reuses a request.
 | `tx_initialize_low_level.c` | create the tick task, the scheduler lock, adopt the caller |
 
 ### 6.2 ThreadX-on-Exec: the central problem
 
-The Linux port's model is *one global mutex* — only one ThreadX thread runs at a time,
+The Linux port's model is *one global mutex*, only one ThreadX thread runs at a time,
 and `tx_thread_schedule` hands the baton to the highest-priority ready thread. Exec is a
 preemptive priority scheduler already, so there are two options:
 
@@ -596,7 +596,7 @@ preemptive priority scheduler already, so there are two options:
   (priority, preemption-threshold, `TX_DISABLE` regions all behave), and it makes ThreadX's
   internal data structures safe without touching Exec's scheduler. Cost: every stack
   operation serialises, and each ThreadX-level context switch costs a `Signal`+`Wait` pair.
-  At the 14 MHz 68020 floor that is measurable but bounded — this is exactly what lwip-amiga's
+  At the 14 MHz 68020 floor that is measurable but bounded, this is exactly what lwip-amiga's
   "single core semaphore" does, and it reaches 944 Mb/s on fast hardware.
 - **(B) Let Exec schedule, protect ThreadX state with `Forbid`/`Permit`.** Cheaper, but
   ThreadX's ready-list/preemption logic then models a world it does not control, and any
@@ -605,7 +605,7 @@ preemptive priority scheduler already, so there are two options:
 **Recommendation: (A).** Predictability beats throughput here, and (A) is the only variant
 with an upstream precedent to crib from.
 
-Interrupt safety: with (A), nothing in ThreadX or NetX Duo runs at interrupt level — the
+Interrupt safety: with (A), nothing in ThreadX or NetX Duo runs at interrupt level, the
 SANA-II reader is a Task, packet arrival is an IORequest completion, and the timer tick is
 a task. So `TX_DISABLE`/`TX_RESTORE` can be `Forbid()`/`Permit()` rather than
 `Disable()`/`Enable()`, which matters a lot for Amiga system health (long `Disable()`
@@ -617,12 +617,12 @@ NetX Duo suspends **the calling thread** inside `nx_tcp_socket_receive`, `nx_tcp
 `nx_packet_allocate`, etc. Callers on AmigaOS are pre-existing Exec Tasks that we did not
 create. Two ways out:
 
-- **(A) Thread adoption** — when a task opens `bsdsocket.library`, allocate a `TX_THREAD`
+- **(A) Thread adoption**, when a task opens `bsdsocket.library`, allocate a `TX_THREAD`
   control block for it and register it with the port so ThreadX can suspend/resume it via
   Exec signals. `tx_thread_create`'s stack-build step is skipped for adopted threads.
   Direct-path, no marshalling, matches lwip-amiga's "app tasks execute stack code in their
   own context" and preserves blocking-socket semantics for free.
-- **(B) Worker pool** — `bsdsocket` marshals every call to NetX Duo worker threads.
+- **(B) Worker pool**, `bsdsocket` marshals every call to NetX Duo worker threads.
   Simplest port, but a blocking socket ties up a worker, and `WaitSelect` across many
   sockets becomes an N-worker problem. Adds a round-trip per call.
 
@@ -635,12 +635,12 @@ shape, so no socket code is written until it is settled.
 Tempting to wrap `addons/BSD`, but:
 
 - `WaitSelect` must wait on **sockets *and* Exec signal bits** simultaneously and return
-  `EINTR` on break — `nx_bsd_select` has no such concept, so it would have to be
+  `EINTR` on break, `nx_bsd_select` has no such concept, so it would have to be
   reimplemented anyway.
 - `SetSocketSignals`/`GetSocketEvents` map onto NetX Duo's native receive/connect/disconnect
   **callbacks**, which `nxd_bsd` consumes for its own purposes.
 - `ObtainSocket`/`ReleaseCopyOfSocket` need descriptor ownership transfer across library
-  bases — outside `nxd_bsd`'s per-`tx_thread` fd model.
+  bases, outside `nxd_bsd`'s per-`tx_thread` fd model.
 - Per-opener errno with caller-chosen width doesn't fit `nx_bsd_set_errno`.
 - It is 657 KB of C carrying a POSIX-ish model we then fight.
 
@@ -652,13 +652,13 @@ scores 138/142.
 Generate the LVO vector table mechanically from the NDK SFD/FD (`fd2sfd`/`fd2pragma` are
 already in the local toolchain), rather than hand-writing 121 stubs.
 
-### 6.5 `sana2/` — driver shim
+### 6.5 `sana2/`, driver shim
 
 - One `NX_IP` driver entry handling `NX_LINK_INITIALIZE`, `ENABLE`, `DISABLE`,
   `PACKET_SEND`, `PACKET_BROADCAST`, `ARP_SEND`, `ARP_RESPONSE_SEND`, `MULTICAST_JOIN/LEAVE`,
   `GET_STATUS/SPEED/DUPLEX/ERROR_COUNT`, `SET_PHYSICAL_ADDRESS`, `INTERFACE_ATTACH/DETACH`,
   `UNINITIALIZE`, `DEFERRED_PROCESSING`.
-- TX: no header construction at all in cooked mode (see the correction in §3.4) —
+- TX: no header construction at all in cooked mode (see the correction in §3.4),
   `ios2_PacketType` from the driver command or `nx_packet_ip_version`, `ios2_DstAddr` from
   `nx_ip_driver_physical_address_msw/lsw`, payload straight from `prepend_ptr` →
   `CMD_WRITE`. A pool of write requests, `SendIO`, never `DoIO`: the driver entry is
@@ -681,11 +681,11 @@ already in the local toolchain), rather than hand-writing 121 stubs.
   `GetNetworkStatistics`/`netstat`.
 - Optional fast path: probe for `S2_RAWREAD`/`S2_RAWWRITE` and use full-frame mode when
   the driver supports it (skips header synthesis), falling back to cooked mode.
-- The copy hooks are called in m68k register convention — small asm trampolines.
+- The copy hooks are called in m68k register convention, small asm trampolines.
 
 ### 6.6 Configuration, tools, and the "is it up?" contract
 
-**Decided (§9): Roadshow's file layout**, rather than inventing one — this is where
+**Decided (§9): Roadshow's file layout**, rather than inventing one, this is where
 AmiTCP_NG is right and lwip-amiga is convenient-but-incompatible. `DEVS:NetInterfaces/*`,
 `DEVS:Internet/name_resolution`, `DEVS:Internet/default_gateway`, standard netdb files.
 Create the `AMITCP` public port. Self-start on first `OpenLibrary`. Ship `AddNetInterface`,
@@ -698,13 +698,13 @@ alongside (§9, scope).
 
 | # | Risk | Severity | Mitigation |
 |---|---|---|---|
-| 1 | ThreadX Exec port + **thread adoption** (§6.3) proves fragile — races in `_tx_thread_system_suspend` against Exec's own scheduling | **High** | Prototype this *first*, before any socket code. Fall back to the worker-pool model. |
+| 1 | ThreadX Exec port + **thread adoption** (§6.3) proves fragile, races in `_tx_thread_system_suspend` against Exec's own scheduling | **High** | Prototype this *first*, before any socket code. Fall back to the worker-pool model. |
 | 2 | No memory protection: a bug anywhere corrupts the whole machine; debugging is Enforcer/Mungwall + emulator | High | Develop under WinUAE/FS-UAE with Enforcer; keep the stack's state in one allocation; assert aggressively in debug builds |
-| 3 | `WaitSelect` fidelity — the single most-used call, with subtle documented behaviour | High | `bsdsocktest` from day one; target ≥138/142 |
-| 4 | Footprint/perf at the 68020/4 MB floor — NetX Duo's packet pools are not tuned for this, and IPv6 + TLS + `bpf_*` are all in scope | Medium | Size pools from available RAM; keep IPv6, TLS and `bpf_*` behind build options so the floor build stays small; measure with `sockbench`-style tooling |
-| 4b | **Scope breadth** — v1 carries IPv6, `usergroup.library`, TLS and `mbuf_*`/`bpf_*`, none of which lwip-amiga or AmiTCP_NG attempt in full | Medium | Milestones 7–9 are strictly after a passing `bsdsocktest`; TLS ships as its own library so it can slip without blocking the stack |
+| 3 | `WaitSelect` fidelity, the single most-used call, with subtle documented behaviour | High | `bsdsocktest` from day one; target ≥138/142 |
+| 4 | Footprint/perf at the 68020/4 MB floor, NetX Duo's packet pools are not tuned for this, and IPv6 + TLS + `bpf_*` are all in scope | Medium | Size pools from available RAM; keep IPv6, TLS and `bpf_*` behind build options so the floor build stays small; measure with `sockbench`-style tooling |
+| 4b | **Scope breadth**, v1 carries IPv6, `usergroup.library`, TLS and `mbuf_*`/`bpf_*`, none of which lwip-amiga or AmiTCP_NG attempt in full | Medium | Milestones 7–9 are strictly after a passing `bsdsocktest`; TLS ships as its own library so it can slip without blocking the stack |
 | 5 | Two fresh competitors (§2.2, §2.3) may reach "good enough" first | Medium | Differentiate on SANA-II + IPv6 + MIT + TLS; treat their public ABI notes as free validation |
-| 6 | Licence hygiene — no AmiTCP/AROSTCP/Roadshow code may be copied | Medium | Reference the freely-distributable Roadshow SDK headers/autodocs for the **ABI only**; document the clean-room posture in the README as AmiTCP_NG does |
+| 6 | Licence hygiene, no AmiTCP/AROSTCP/Roadshow code may be copied | Medium | Reference the freely-distributable Roadshow SDK headers/autodocs for the **ABI only**; document the clean-room posture in the README as AmiTCP_NG does |
 | 7 | `mbuf_*` / `bpf_*` have no NetX Duo analogue, and both are now in scope (§9) | Medium | Milestone 7, after the socket surface is proven. `mbuf_*` emulates 4.4BSD chains over `NX_PACKET`; `bpf_*` needs a raw path + filter VM. `ipf_*` stays stubbed |
 | 8 | Shared-library build discipline (no newlib stdio, base-relative data, per-opener bases) | Low | Solved problem; the local toolchain and NDK have the machinery |
 
@@ -714,9 +714,9 @@ alongside (§9, scope).
 
 1. **Spike: ThreadX on Exec.** Port the 8 Linux port files; run ThreadX's own
    `sample_threadx.c` (two threads, a queue, a semaphore, a timer) under FS-UAE. Nothing
-   else matters until this is solid. Then build **both** §6.3 candidates against it —
+   else matters until this is solid. Then build **both** §6.3 candidates against it,
    thread adoption (a pre-existing Exec task calling `tx_mutex_get`/`tx_thread_sleep`
-   and being suspended/resumed by ThreadX) and a minimal worker pool — and pick on
+   and being suspended/resumed by ThreadX) and a minimal worker pool, and pick on
    evidence. Exit criterion: a soak test with 4 adopted tasks contending on a mutex and a
    timer, clean under Enforcer.
 2. **NetX Duo on the RAM driver.** `nx_ram_network_driver.c` already exists in
@@ -730,10 +730,10 @@ alongside (§9, scope).
 6. **Tier 3 Roadshow parity + tools + `usergroup.library`.** Success = stock Roadshow-era
    software (`AmiTCP`-linked clients, `smbfs`, a browser) running unchanged against the
    Roadshow config layout.
-7. **`mbuf_*` over `NX_PACKET` and the `bpf_*` raw path + filter VM.** Own milestone —
+7. **`mbuf_*` over `NX_PACKET` and the `bpf_*` raw path + filter VM.** Own milestone,
    no upstream support to lean on. Success = a `tcpdump`-shaped tool capturing on a real
    interface.
-8. **IPv6 build option** — third SANA-II reader for `0x86DD`, `nxd_*` socket paths,
+8. **IPv6 build option**, third SANA-II reader for `0x86DD`, `nxd_*` socket paths,
    DHCPv6/RA. Success = `bsdsocktest` passing with IPv6 enabled and an IPv6 `ping`.
 9. **`nx_secure` TLS**, as a separate library on the same core. Benchmark a TLS 1.2
    handshake on a real 68020 *before* committing to an API.
@@ -756,7 +756,7 @@ Consequences of decision 4 worth stating plainly, since it is the widest of the 
 
 - **`mbuf_*` / `bpf_*` move from Tier 4 to Tier 3** in §3.2. `mbuf_*` means emulating 4.4BSD
   mbuf chains over `NX_PACKET` (NetX Duo has no equivalent shape); `bpf_*` means a raw
-  packet path plus a BPF filter VM. Neither has upstream support to lean on — lwip-amiga
+  packet path plus a BPF filter VM. Neither has upstream support to lean on, lwip-amiga
   skips both, AmiTCP_NG inherits `mbuf_*` from its 4.4BSD core and wrote `bpf_*` itself.
   Budget these as their own milestone, not as trim on the socket work.
 - **`nx_secure` TLS on a 68020 is the one item where the target decision fights the scope
@@ -765,7 +765,7 @@ Consequences of decision 4 worth stating plainly, since it is the widest of the 
   same core, gated behind its own build option, and that it is benchmarked on 68020 before
   any API is promised. Keeping it in the v1 *plan* is fine; keeping it on the v1 *critical
   path* is not.
-- `ipf_*` (Roadshow's private packet filter) remains out of scope — it is undocumented
+- `ipf_*` (Roadshow's private packet filter) remains out of scope, it is undocumented
   beyond its vector offsets and nothing outside Roadshow's own tools calls it.
 
 ### M9 gate result (2026-07-25): TLS is NOT viable on the 68020 floor
@@ -784,7 +784,7 @@ with a **real TLS 1.2 handshake** completing between an `nx_secure` client and s
 | SHA-256 / AES-128-CBC, 1 KB | 23.2 ms / 21.9 ms |
 | AES-128-**GCM**, 1 KB | 344.6 ms |
 
-`nx_secure` compiles clean for m68k (361/361 files, ~208 KB linked) and works — it is
+`nx_secure` compiles clean for m68k (361/361 files, ~208 KB linked) and works, it is
 simply too slow as a transparent socket layer. **Offload (`catalyst`, `AmiSSL-Tunnel`)
 is the realistic path for the floor target.** Note the 185 s figure has client *and*
 server on one CPU; a **client-only** handshake derives to **~13–20 s**, since a client
@@ -793,7 +793,7 @@ deliberate "fetch this URL" operation is defensible where a transparent socket i
 
 Findings worth keeping regardless of whether TLS ships:
 
-- **`nx_secure` uses RSA CRT on only one path** — `NX_CRYPTO_SET_PRIME_P` appears solely
+- **`nx_secure` uses RSA CRT on only one path**, `NX_CRYPTO_SET_PRIME_P` appears solely
   in `nx_secure_process_client_key_exchange.c`; the ECDHE_RSA ServerKeyExchange signature
   and `send_certificate_verify` pass the full 2048-bit private exponent. A measured
   **3.6×** penalty, on a server path we would only hit if we ever act as a server.
@@ -801,7 +801,7 @@ Findings worth keeping regardless of whether TLS ships:
   bit-serial GF(2¹²⁸) multiply. TLS 1.3 mandates AEAD, so **TLS 1.3 is impractical as
   shipped**. A 4-bit table-driven GHASH would be ~20–30×.
 - **`nx_secure` has no ChaCha20-Poly1305** (verified: no source files, no ciphersuite
-  entries). That is the AEAD a 68k would want — ChaCha20 is pure ARX with no multiplies —
+  entries). That is the AEAD a 68k would want, ChaCha20 is pure ARX with no multiplies,
   so making TLS 1.3 practical means *writing* it, not just tuning GHASH.
 - **ECDSA P-256 verify is 3.5× slower than RSA-2048 verify** here, inverting the usual
   modern advice: prefer RSA certificate chains on this hardware. The industry's drift
@@ -809,10 +809,10 @@ Findings worth keeping regardless of whether TLS ships:
   **→ Superseded by the P-256 work below**: verify is now 1.961 s against RSA's 0.681 s,
   so the gap is 2.9× on a sub-second operation rather than 3.5× on a seven-second one.
   ECDSA chains are fine; RSA is merely still cheaper.
-- **`NX_RAND` was undefined**, so `nx_api.h` fell back to newlib `rand()` — a 32-bit LCG.
+- **`NX_RAND` was undefined**, so `nx_api.h` fell back to newlib `rand()`, a 32-bit LCG.
   Now replaced by a SHA-256 hash DRBG (`src/common/ami_random.c`). The seed is weak by any
-  modern standard — a vintage machine has no hardware RNG, and the credited entropy is
-  ~21 bits — but this stack exists so a classic Amiga can talk to modern sites, not to
+  modern standard, a vintage machine has no hardware RNG, and the credited entropy is
+  ~21 bits, but this stack exists so a classic Amiga can talk to modern sites, not to
   protect valuable secrets. It is a strict improvement on the LCG, it does not gate
   anything, and the threat model does not justify refusing to run.
   **→ Half-addressed**; see "The `NX_RAND` problem" below. The generator is now a SHA-256
@@ -831,8 +831,8 @@ than keeping its own.
 
 #### The `NX_RAND` problem (2026-07-25): an entropy pool that says it is not enough
 
-`NX_RAND` now points at `src/common/ami_random.c` — a SHA-256 hash DRBG over an entropy
-pool — instead of newlib's `rand()`. That closes the *expansion* hole: with an LCG, one
+`NX_RAND` now points at `src/common/ami_random.c`, a SHA-256 hash DRBG over an entropy
+pool, instead of newlib's `rand()`. That closes the *expansion* hole: with an LCG, one
 32-bit output is the entire state, and a TLS client random goes on the wire in clear, so
 an observer who sees it can compute the ECDHE private key that follows. The DRBG is
 counter-mode `SHA-256(key ‖ counter)` with a forward ratchet after every 32-byte block,
@@ -840,7 +840,7 @@ so a disclosed block reveals neither its predecessors nor the key that made it.
 
 **The entropy is still the blocker, and the module now says so in its API rather than in
 a comment.** `ami_random_is_seeded()` reports FALSE until the pool has been credited 64
-bits, and the internal collection *cannot reach that by construction* — the four sources
+bits, and the internal collection *cannot reach that by construction*, the four sources
 credited anything at all cap at 8 + 4 + 2 + 12 = 26 bits. So the answer to "may I run a
 TLS handshake?" on an unattended Amiga is **no**, and the caller has to supply a seed
 through `ami_random_add_entropy()` to change that.
@@ -850,45 +850,45 @@ cold boots of an emulated 68020 (FS-UAE, identical boot image):
 
 | source | varies across cold boots? | credited |
 |---|---|---|
-| `GetSysTime()` wall clock | **yes** — `1532507776.382025` / `…783.606435` / `…798.617969` | 8, and 0 when `tv_secs == 0` (no battery clock) |
-| E-Clock interval jitter | **yes** — 22–27 distinct deltas out of 256 samples, 52–263 ticks | 7–9 measured, capped at 12 |
-| `IdleCount` / `DispCount` | **yes** — 44/66/57 and 282/276/283 | 4 |
+| `GetSysTime()` wall clock | **yes**, `1532507776.382025` / `…783.606435` / `…798.617969` | 8, and 0 when `tv_secs == 0` (no battery clock) |
+| E-Clock interval jitter | **yes**, 22–27 distinct deltas out of 256 samples, 52–263 ticks | 7–9 measured, capped at 12 |
+| `IdleCount` / `DispCount` | **yes**, 44/66/57 and 282/276/283 | 4 |
 | task-list walk | not measurably | 2 (charity; a real Workbench would earn it) |
-| `AvailMem()` ×4 | **no** — identical to the byte, all three runs | 0 |
-| `AllocVec()` address | **no** — identical, all three runs | 0 |
-| uninitialised `MEMF_ANY` residue | **no** — identical, all three runs, *and non-zero* | 0 |
+| `AvailMem()` ×4 | **no**, identical to the byte, all three runs | 0 |
+| `AllocVec()` address | **no**, identical, all three runs | 0 |
+| uninitialised `MEMF_ANY` residue | **no**, identical, all three runs, *and non-zero* | 0 |
 | `AttnFlags`, `VBlankFrequency`, E-Clock rate, `FindTask(NULL)`, `LastAlert` | no | 0 |
 
 Two findings worth keeping:
 
 - **FS-UAE is not the metronome the plan assumed.** The E-Clock interval genuinely varies
-  under emulation, so the jitter source is not dead there — but the variation comes from
+  under emulation, so the jitter source is not dead there, but the variation comes from
   the *host's* scheduler, and how much of that an attacker can see or influence is exactly
   what nobody has analysed. Hence the cap at 12 bits rather than the ~4.6 bits/sample that
   24 distinct values would nominally support.
 - **"Non-zero therefore unpredictable" is a trap, and this code fell into it.** The first
   version credited 8 bits for uninitialised `MEMF_ANY` residue whenever any byte came back
-  non-zero. It always came back non-zero — and always the same sixteen bytes, because the
+  non-zero. It always came back non-zero, and always the same sixteen bytes, because the
   allocator hands the same block to the same caller at the same point in the same boot
   sequence. The credit was 31 bits before that was measured and ~21 after. Everything
   still goes *into* the pool; it no longer goes into the accounting.
 
 **Three cold boots produced three different output streams** (`b0bfd079…`, `259ea84d…`,
-`1862a377…`), which is the good outcome and is *not* the same claim as unpredictability —
+`1862a377…`), which is the good outcome and is *not* the same claim as unpredictability,
 the difference comes from the host wall clock and the E-Clock jitter, and an attacker who
 knows when the machine was switched on has most of the first of those.
 
 The SHA-256 is verified: the empty string, `"abc"`, both FIPS 180-4 Appendix B multi-block
 examples and the one-million-`a` vector, run through the implementation lifted verbatim
 into a host harness. Worth recording that the *first* harness reported all five as
-failures — it typed `ULONG` as `unsigned long`, which is 64 bits on a modern host and 32 on
+failures, it typed `ULONG` as `unsigned long`, which is 64 bits on a modern host and 32 on
 m68k-amigaos. The code was right and the test was wrong, which is the more dangerous way
 round; `src/common/ami_random.c` now carries a compile-time assertion on the width.
 
 **What an attacker-facing assessment would say:** this is a well-conditioned DRBG on a
 badly-sourced seed. Against an off-path attacker guessing a TCP initial sequence number or
 a DNS query id it is a large improvement on the LCG and is fine. Against anyone attacking a
-TLS session key it is **not adequate** — around 20 bits of credited entropy, over a source
+TLS session key it is **not adequate**, around 20 bits of credited entropy, over a source
 set that is unaudited, on a machine whose boot time an adversary on the same LAN can
 observe. **Do not enable `AMINETXDUO_TLS` for adversarial use without supplying a seed.**
 
@@ -897,7 +897,7 @@ What would actually improve it, roughly in order of value:
 1. **A persisted seed file.** Read `DEVS:Internet/random_seed` at startup, mix it, write 32
    fresh bytes back immediately. This is the single change that breaks the "every boot
    starts from the same place" property, and it is how every Unix has solved this since
-   the 1990s. Not implemented — it needs `dos.library` in a path that is currently
+   the 1990s. Not implemented, it needs `dos.library` in a path that is currently
    `exec`-only, and the decision of where to put it belongs with whoever ships TLS.
 2. **User input timing.** A `Process` can sample `IECLASS_RAWKEY` / mouse timings from
    `input.device`. Slow to accumulate, and genuinely unpredictable.
@@ -908,14 +908,14 @@ What would actually improve it, roughly in order of value:
 
 Cost, measured: `ami_random_init()` takes **21–22 ms** on the emulated 68020 (nearly all of
 it jitter sampling), called once from `bsd_runtime_open()`. Steady state is one SHA-256 per
-eight `NX_RAND()` calls — a 200 packet/s TCP stream spends well under 1% of the CPU there.
+eight `NX_RAND()` calls, a 200 packet/s TCP stream spends well under 1% of the CPU there.
 `bsdsocket.library` grew **5,224 bytes** of text: `ami_random.o` is 5,328 (SHA-256 plus the
 collection), less the 104 saved by deleting the xorshift in `library_runtime.c` that it
 replaces. `Forbid()` is taken per 32-byte block rather than per request, so the longest
 uninterruptible stretch is one SHA-256 pair and not the 200 ms a 16 KB draw would
 otherwise hold the scheduler off for.
 
-#### Update: `src/crypto68k/` makes RSA 8× faster — the blocker moves to EC
+#### Update: `src/crypto68k/` makes RSA 8× faster, the blocker moves to EC
 
 A follow-on optimised the bignum arithmetic (`src/crypto68k/`, behind
 `AMINETXDUO_CRYPTO68K_ASM`). Measured on the emulated 68020, pairs run back-to-back:
@@ -934,10 +934,10 @@ known answers *and* differentially against the unmodified vendored code.
 **The biggest single lever was not assembly.** The vendored exponentiation walks all 32
 bits of the top exponent limb, so `e = 65537` (`0x00010001`) costs 32 squarings where 16
 are needed; sliding-window plus leading-zero skipping nearly doubles every RSA *public*
-operation on its own. Karatsuba was costed and **rejected** (~5% — Montgomery reduction
+operation on its own. Karatsuba was costed and **rejected** (~5%, Montgomery reduction
 is not Karatsuba-able, so only half the work is eligible). SOS was chosen over the
 textbook CIOS recommendation because this machine's fast path is `ADD.L Dn,(An)+`, which
-requires destination == source — an addressing-mode argument, not an operation count.
+requires destination == source, an addressing-mode argument, not an operation count.
 
 **Consequence for viability: RSA is no longer the blocker for a TLS client.** Three
 RSA-2048 public operations per handshake go from 5.95 s to **2.04 s**. What now dominates
@@ -945,11 +945,11 @@ is elliptic-curve arithmetic, untouched by that work: ECDHE P-256 shared secret 
 and ECDSA P-256 verify 6.97 s, so an ECDHE_ECDSA handshake is still ~30 s.
 
 **→ Also superseded.** The follow-on took the EC arithmetic 3.6–3.9× (table below), so
-that ~30 s of asymmetric work is now **3.71 s**. The expectation stated here — that the
-~1.4× limb-loop win would carry over — turned out to be the *wrong* prediction: the limb
+that ~30 s of asymmetric work is now **3.71 s**. The expectation stated here, that the
+~1.4× limb-loop win would carry over, turned out to be the *wrong* prediction: the limb
 loop was not the bottleneck, the field *representation* was. See below.
 
-#### Update: `src/crypto68k/c68k_p256.*` makes P-256 3.7× faster — EC is no longer the blocker either
+#### Update: `src/crypto68k/c68k_p256.*` makes P-256 3.7× faster, EC is no longer the blocker either
 
 The follow-on to the follow-on. Measured on the emulated 68020,
 `tests/crypto68k/crypto68k_ec_bench`, every pair run back to back in one process
@@ -973,7 +973,7 @@ The three vendored absolutes reproduce the M9 gate figures above (1.52 / 5.18 /
 the same computation.
 
 **Only the 68020 column is meaningful.** The same binary under FS-UAE's 68030
-model reports 4.5–5.0× — and an ECDSA verify of 196 ms against the 68020 model's
+model reports 4.5–5.0×, and an ECDSA verify of 196 ms against the 68020 model's
 7028 ms, which is 36× and is not a clock ratio. The 68030 model does not charge
 for `MULU.L`, so it flatters exactly the work this change moves *out* of the
 multiply and into carry chains. Quoted here so nobody re-measures it and
@@ -982,20 +982,20 @@ believes it.
 **None of the textbook algorithmic levers were missing, and that is the finding.**
 `nx_crypto_ec.c` already has NAF point multiplication, Solinas reduction rather
 than Barrett or Montgomery, a real Yang squaring, Jacobian coordinates with a
-single final inversion, and a fixed-base comb table for `G` — and the comb **is**
+single final inversion, and a fixed-base comb table for `G`, and the comb **is**
 reached on the paths that matter (verified: `_nx_crypto_ec_fp_projective_multiple`
 dispatches on pointer identity with `curve->nx_crypto_ec_g`, and both ECDSA
 verify's `u1·G` half and ECDH key generation pass exactly that pointer; the
 measured 1.48 s keygen against 5.18 s shared secret *is* the comb working).
 
 What was slow was the layer underneath. **`_nx_crypto_ec_secp256r1_reduce()` is
-67% of a field multiply** — measured, not estimated — because it does not work on
+67% of a field multiply**, measured, not estimated, because it does not work on
 limbs at all: it serialises the value into a 64-byte big-endian byte stream one
 byte at a time, memmoves it, parses 32 bytes back into limbs one byte at a time,
 then builds nine 8-limb terms with 64 more per-word byte swaps and adds them as
 sign-carrying variable-length huge numbers. Collapsing that to one pass over
-eight limb positions with a signed carry — the same mathematics, no byte touched
-— is **12.1×** on the reduction and most of the 3.8× overall.
+eight limb positions with a signed carry, the same mathematics, no byte touched
+is **12.1×** on the reduction and most of the 3.8× overall.
 
 **Hand-written assembly was worth 1.13×, and only for the carry chains.**
 `c68k_p256.S` covers the eight-limb add and subtract and the reduction's 63-term
@@ -1003,12 +1003,12 @@ pass, because C has no carry flag and GCC therefore spends five instructions and
 a branch where `ADD.L`/`ADDX.L` needs two (both plausible C spellings were
 compiled and disassembled first; the 64-bit-accumulator form emits a `CLR.L` per
 term instead of hoisting one zero register). The **multiply is deliberately left
-to the compiler** — it is already within ~25% of the 68020's `MULU.L` floor, which
+to the compiler**, it is already within ~25% of the 68020's `MULU.L` floor, which
 is the same conclusion the RSA work reached.
 
-**Shamir's trick for ECDSA verify was costed and rejected.** The usual argument —
+**Shamir's trick for ECDSA verify was costed and rejected.** The usual argument,
 verify is `u1·G + u2·Q`, two scalar multiplications, interleave them and halve the
-doublings — does not apply here, because `u1·G` is not a generic scalar
+doublings, does not apply here, because `u1·G` is not a generic scalar
 multiplication. It is a comb, and a comb needs 26 doublings, not 256; interleaving
 would drag the `G` half up to 256 shared doublings to save the 26 it already needs.
 Priced at the measured point-operation costs: 284 doublings + 100 additions
@@ -1016,20 +1016,20 @@ Priced at the measured point-operation costs: 284 doublings + 100 additions
 verify, for a second scalar routine and a second static table. Available if
 anyone needs it; not free, and not the 1.5–1.8× the textbook promises.
 
-Correctness: **1730 checks, 0 failures** (`tests/crypto68k/crypto68k_ec_test`) —
+Correctness: **1730 checks, 0 failures** (`tests/crypto68k/crypto68k_ec_test`),
 RFC 6979 A.2.5 published signatures verified through the real
 `_nx_crypto_ecdsa_verify`, 1600 field operations and 70 scalar multiplications
 differentially against the unmodified vendored code including k = 0, 1, 2, n−1,
 n, n+1, 2²⁵⁶−1 and the small scalars where the accumulator meets a table entry,
 a known-answer ECDH secret computed from both sides, and **ten invalid
-signatures that must be and are rejected** — because an "optimisation" that made
+signatures that must be and are rejected**, because an "optimisation" that made
 verify always succeed would pass every positive test in the file.
 
 **Consequence for viability: a client ECDHE_ECDSA handshake's asymmetric
 arithmetic goes from 13.7 s to 3.7 s.** Combined with the RSA work, that
 removes the last of the "tens of seconds" from a TLS client's public-key cost;
 what remains is one keygen, one ECDH and one verify per certificate. ECDHE_RSA
-is no longer obviously preferable — an RSA-2048 verify is 0.681 s against
+is no longer obviously preferable, an RSA-2048 verify is 0.681 s against
 1.961 s for ECDSA, so an RSA chain is still cheaper per certificate, but the gap
 is now 3× on a sub-second operation rather than 3.5× on a seven-second one.
 
@@ -1037,14 +1037,14 @@ Prior art, worth knowing before anyone re-treads it:
 
 - **Howard Chu wrote a complete 68020 OpenSSL bignum assembly in 2002** (`bn_m68k.s`,
   1604 lines, all ten BN primitives with unrolled Comba kernels). It was never merged
-  upstream — OpenSSL has no m68k bignum asm at any tag — but **it survives in AmiSSL** and
+  upstream, OpenSSL has no m68k bignum asm at any tag, but **it survives in AmiSSL** and
   is built for `amiga-os3-68020`. GMP, libgcrypt and mbedTLS all ship m68k `MULADDC`
   variants; libtommath, wolfSSL and nettle have nothing.
 - **Chu's "over 4× faster than gcc" does not transfer.** It was measured against GCC 2.95,
-  which called a helper. **GCC 15.2 already emits `MULU.L`** — verified in the
-  disassembly — so the realistic ceiling is ~1.4× on the limb loop, and expecting 4×
+  which called a helper. **GCC 15.2 already emits `MULU.L`**, verified in the
+  disassembly, so the realistic ceiling is ~1.4× on the limb loop, and expecting 4×
   would be chasing a number that no longer exists.
-- **`MULU.L` 32×32→64 is NOT implemented on the 68060** — it traps to vector 61 and is
+- **`MULU.L` 32×32→64 is NOT implemented on the 68060**, it traps to vector 61 and is
   emulated. AmiSSL disabled Chu's assembly for 68060 for exactly this reason. Our floor
   is 68020 so this is fine, but `AMINETXDUO_CRYPTO68K_ASM` must never be enabled for a
   68060 target.
@@ -1059,7 +1059,7 @@ Prior art, worth knowing before anyone re-treads it:
 > compiler emits no 32×32 multiply at all. Verified here: `.short 0x4c06` becomes
 > `mulul d6,d2,d3` with the right `-m`.
 
-#### Update: the fast crypto is now IN the handshake — 185.5 s → 26.7 s, and a real site answers
+#### Update: the fast crypto is now IN the handshake, 185.5 s → 26.7 s, and a real site answers
 
 Both optimisation workstreams above measured their speedups **standalone**. Neither was
 connected: `src/crypto68k/` was not referenced by `src/tls/CMakeLists.txt`, and `nm` on
@@ -1068,7 +1068,7 @@ ran entirely on the vendored arithmetic. That is now fixed.
 
 **The mechanism: our own `NX_CRYPTO_METHOD` entries, no vendored source touched.**
 `nx_secure_tls_session_create()` takes an application-supplied `NX_SECURE_TLS_CRYPTO *`
-and `nx_secure_tls_ecc_initialize()` takes an application-supplied curve-method array —
+and `nx_secure_tls_ecc_initialize()` takes an application-supplied curve-method array,
 both are the vendor's own extension points, and every path that reaches a big-number
 operation goes through one of them. `src/tls/ami_tls_crypto.c` supplies:
 
@@ -1084,7 +1084,7 @@ context in the process; casting the `const` away and writing to it is undefined,
 process-global, and would silently defeat the differential tests that check us *against*
 the vendored path. Verified first: ECDH and ECDSA obtain their curve **only** by calling
 `NX_CRYPTO_EC_CURVE_GET` on whichever curve method they were handed, and they store the
-pointer rather than copying the struct — so one function pointer in a private copy is the
+pointer rather than copying the struct, so one function pointer in a private copy is the
 whole integration.
 
 **RSA CRT, on the two paths that skip it.** `NX_CRYPTO_SET_PRIME_P` appears exactly once
@@ -1097,15 +1097,15 @@ certificate, and the RSA method looks the modulus up when asked for a private-ke
 exponentiation with no primes set. The pairing comes from one certificate object, so it
 cannot be mismatched any more than the vendored CRT path's can.
 
-**Measured, emulated 68020, `tests/tls/tls_decompose` — four rounds in ONE process with
+**Measured, emulated 68020, `tests/tls/tls_decompose`, four rounds in ONE process with
 identical instrumentation, so this is a measurement and not a composition:**
 
 | round | connect → first record | client arithmetic | server arithmetic | RSA private op |
 |---|---|---|---|---|
 | reference, no CRT (**the M9 gate**) | **185.8 s** | 11.2 s | 173.6 s | 166.7 s |
-| reference, CRT — *the CRT lever alone* | 64.4 s | 11.2 s | 52.5 s | 45.4 s |
-| crypto68k, no CRT — *the module alone* | 77.8 s | **3.2 s** | 73.9 s | 72.1 s |
-| **crypto68k + CRT — shipping** | **26.7 s** | **3.2 s** | 22.6 s | **20.8 s** |
+| reference, CRT, *the CRT lever alone* | 64.4 s | 11.2 s | 52.5 s | 45.4 s |
+| crypto68k, no CRT, *the module alone* | 77.8 s | **3.2 s** | 73.9 s | 72.1 s |
+| **crypto68k + CRT, shipping** | **26.7 s** | **3.2 s** | 22.6 s | **20.8 s** |
 
 Round 1 reproduces the M9 gate's independently measured 185.5 s to within 0.3 s, which is
 the check that this is timing the same computation. Every predicted ratio landed: CRT
@@ -1152,7 +1152,7 @@ Correctness, all still passing: `crypto68k_test` 4964/0, `crypto68k_ec_test` 173
 all ten invalid signatures still rejected, `tls_handshake` 44/0 on **both** 68020 and
 68030 (the original 38 checks unchanged, plus six new ones: the comb-table self check, the
 curve build, and per-round assertions that the server really took CRT and the client
-really went through crypto68k). The default build is **byte-identical** — every artifact,
+really went through crypto68k). The default build is **byte-identical**, every artifact,
 `bsdsocket.library` included, compared against a build of the tree without these changes.
 
 Only the 68020 column is a timing. The same binary under FS-UAE's 68030 model reports
@@ -1169,12 +1169,12 @@ does not charge for `MULU.L`. It is run as a correctness check and nothing else.
 | `aminetxduo_tls` (glue + tables) | 4,000 | 292 | 428 |
 | **TLS total** | **227,280** | **3,184** | **7,444** |
 
-`bsdsocket.library` is 249,892 bytes today, so a TLS-carrying build lands at **≈ 480 KB —
+`bsdsocket.library` is 249,892 bytes today, so a TLS-carrying build lands at **≈ 480 KB,
 inside the 512 KB budget with ~32 KB of headroom**, and that is before any trimming (the
 147 KB of `nx_crypto` still includes DES/3DES, MD5, the CCM and GCM modes and ECJPAKE).
 
 Per connection, measured rather than estimated: crypto metadata **16,272 bytes** (against
-10,128 with the vendored tables — the delta is exactly one 6 KB sliding-window scratch,
+10,128 with the vendored tables, the delta is exactly one 6 KB sliding-window scratch,
 because the public-cipher slot is already sized by `NX_CRYPTO_ECDH` and only the
 public-auth slot grows), plus `sizeof(NX_SECURE_TLS_SESSION)` = 1,700, plus an
 application-chosen reassembly buffer (8 KB holds a two-certificate RSA-2048 chain, 12 KB a
@@ -1186,12 +1186,12 @@ certificate in the chain. **≈ 28 KB for a client connection.**
 Two things, and neither is speed.
 
 1. **No application can open a TLS connection.** `AMINETXDUO_TLS=ON` builds static
-   libraries and tests. It links nothing into `bsdsocket.library` — proved, the library is
-   byte-identical either way — and `dist/make-dist.sh` ships only `bsdsocket.library`,
+   libraries and tests. It links nothing into `bsdsocket.library`, proved, the library is
+   byte-identical either way, and `dist/make-dist.sh` ships only `bsdsocket.library`,
    `usergroup.library` and the tools. Flipping the default today changes build time and
    nothing a user can observe.
 
-   Of the three routes: an **AmiSSL-shaped library** is rejected — `nx_secure` has no
+   Of the three routes: an **AmiSSL-shaped library** is rejected,  991  has no
    `BIO`, no `SSL_CTX`, no `EVP`, certificates are caller-allocated fixed buffers and
    ciphersuites are a static table, so a faithful emulation is a rewrite of OpenSSL's API
    on a library without its concepts, and a *partial* one is worse than nothing because
@@ -1199,16 +1199,16 @@ Two things, and neither is speed.
    socket option or new LVO** is rejected as the primary route: `SOL_SOCKET` option numbers
    are not ours to allocate (AmiTCP, Roadshow and the tunnel implementations each have
    their own), it puts 227 KB and ~28 KB/connection inside the resident library for every
-   program including the ones that will never use it, and — decisively — a TLS record
+   program including the ones that will never use it, and, decisively, a TLS record
    boundary is not a byte-stream boundary, so `WaitSelect()` readability would stop
    meaning "`recv()` will return data".
 
-   **Recommended: a small `tls_*` API in its own library**, opened only by programs that
+   **Recommended: a small  999  API in its own library**, opened only by programs that
    want it, plus **one private LVO** on `bsdsocket.library` handing out the
    `NX_TCP_SOCKET *` behind an fd. That last part is forced, not chosen: `nx_secure` binds
    a session to `NX_TCP_SOCKET *` (`nx_secure_tls_session_start()`, and
    `nx_secure_tls_tcp_socket` in the session struct) and has no transport abstraction. The
-   public 121-LVO contract is untouched. It needs its own task — the I/O currency is
+   public 121-LVO contract is untouched. It needs its own task, the I/O currency is
    `NX_PACKET *`, so a byte-oriented `TLSRead()` has to buffer partial records, and the
    library scaffolding, docs and installer integration are all new.
 
@@ -1216,7 +1216,7 @@ Two things, and neither is speed.
    ONE root CA is compiled into it. A usable client needs ~140 roots: where they live on
    disk, in what format, parsed lazily by issuer match (parsing all of them up front is not
    viable on 4 MB), how they are updated, and what "expired" means on a machine whose
-   battery clock reports `tv_secs == 0` — the same machines the `NX_RAND` work already
+   battery clock reports `tv_secs == 0`, the same machines the `NX_RAND` work already
    found. That is a design task of comparable size to this one, and until it exists an
    application can only reach servers whose root it was compiled with.
 
@@ -1224,11 +1224,11 @@ Two things, and neither is speed.
 argues against TLS and size no longer argues against it; the only thing default-on would
 currently produce is 227 KB of code with no route to it.
 
-#### Update (2026-07-25): both of those landed — `tls.library` and a real trust store
+#### Update (2026-07-25): both of those landed, `tls.library` and a real trust store
 
 A program that is linked against **nothing of ours** now opens two shared libraries by
 name, fetches `https://tls-v1-2.badssl.com/` over SLIRP, and verifies the chain against
-**119 Mozilla roots on disk** rather than one compiled in. `tests/tls/tls_api` — 26
+**119 Mozilla roots on disk** rather than one compiled in. `tests/tls/tls_api`, 26
 checks, 0 failures, 6.8 s handshake, `HTTP/1.1 301`, `TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256`.
 
 ##### 1. `tls.library`, and the one private LVO under it
@@ -1254,13 +1254,13 @@ TLSClose(TLSBase, tls);        /* the descriptor is the caller's again */
 
 Chain verification and host-name checking are **on by default**; `TLSA_NoVerify` has to be
 asked for in those words. Worth recording: `nx_secure` verifies the chain but does **not**
-check who the certificate is *for* — `_nx_secure_x509_common_name_dns_check()` exists and
+check who the certificate is *for*, `_nx_secure_x509_common_name_dns_check()` exists and
 nothing calls it unless the application installs a certificate callback. `tests/tls/tls_https`
 never did, so until now nothing in this tree checked the host name at all.
 
 **How a second library borrows a singleton.** NetX Duo and ThreadX have file-scope state
 and there is exactly one copy, inside `bsdsocket.library`. `tls.library` therefore links
-`nx_secure`, `nx_crypto` and `crypto68k` — which have no such state — and links **no NetX
+`nx_secure`, `nx_crypto` and `crypto68k`, which have no such state, and links **no NetX
 Duo object at all**. The coupling surface was measured, not guessed: `nm` over
 `libnx_secure.a + libnx_crypto.a + libcrypto68k.a + libaminetxduo_tls.a`, minus everything
 they define themselves, leaves 25 externals, of which **twelve** are NetX Duo/ThreadX:
@@ -1279,22 +1279,22 @@ resolves `nx_secure`'s references to us and no vendored source is touched. The
 the entropy pool `bsdsocket.library` already seeded, rather than starting a colder second
 one.
 
-The table arrives through **one private LVO at -0x360** — the first slot past the six
+The table arrives through **one private LVO at -0x360**, the first slot past the six
 reserved ones `clib/bsdsocket_protos.h` documents after `getnameinfo()`, i.e. past every
 offset any published bsdsocket ABI assigns. It takes a magic (`'ANXD'`) and a version and
 writes nothing unless both match, so a program aiming at some future vendor's vector at the
 same offset gets a clean failure instead of a pointer. The version carries
 `AMINETXDUO_IPV6` in its low half, because that option changes the layout of `NX_IP`,
-`NX_PACKET` and `NX_TCP_SOCKET` — all of which cross this interface — so a mismatched pair
+`NX_PACKET` and `NX_TCP_SOCKET`, all of which cross this interface, so a mismatched pair
 of libraries is refused at `TLSOpen()` rather than reading each other's structs at the wrong
 offsets. It exists **only in an
 `AMINETXDUO_TLS` build**: `src/bsdsocket/nxcontext.c` is not compiled and the table slot is
-not emitted otherwise, which is what keeps the default build byte-identical (verified —
+not emitted otherwise, which is what keeps the default build byte-identical (verified,
 `bsdsocket.library`, `usergroup.library` and all six commands compare identical against a
 tree with the vector removed).
 
 Three ThreadX **data** symbols (`_tx_thread_current_ptr`, `_tx_thread_system_state`,
-`_tx_timer_thread`) cannot be forwarded through a table — a copy would be a copy, not an
+`_tx_timer_thread`) cannot be forwarded through a table, a copy would be a copy, not an
 alias. They are referenced only by `nx_secure`'s `nxe_*` argument-checking wrappers, and
 `tls.library` calls the `_nx_secure_*` entry points directly, so those archive members are
 never pulled in. One exception had to be handled by hand:
@@ -1319,12 +1319,12 @@ readable and **returns without waiting**; otherwise it delegates to `bsdsocket.l
 `WaitSelect()` through the caller's own `SocketBase`. `TLSPending()` is the same test on
 its own for a caller who would rather write the loop.
 
-The second lie is not removable without a non-blocking record layer and is bounded — the
-rest of a record is already in flight — so it is documented and `TLSA_Timeout` caps it.
+The second lie is not removable without a non-blocking record layer and is bounded, the
+rest of a record is already in flight, so it is documented and `TLSA_Timeout` caps it.
 Reporting *fewer* ready descriptors than exist is a spurious-wakeup shape every `select()`
 caller already tolerates; claiming a TLS socket is not readable is a hang. The test proves
 the fix rather than asserting it: it reads **one byte**, then calls `TLSWaitSelect()` with a
-**zero timeout** — a poll that plain `WaitSelect()` must answer 0 — and gets 1 with the
+**zero timeout**, a poll that plain `WaitSelect()` must answer 0, and gets 1 with the
 right descriptor set.
 
 ##### 3. The trust store: ~120 roots, 126 KB on disk, 1.4 KB resident
@@ -1339,7 +1339,7 @@ already uses. Indexed binary, big-endian (the machine's own order, so nothing is
 ...  the DER blobs, concatenated
 ```
 
-**Only the index is ever resident** — 12 bytes per root, 1,428 bytes for the Mozilla set —
+**Only the index is ever resident**, 12 bytes per root, 1,428 bytes for the Mozilla set,
 and the one root a chain actually needs is read from the file *during* the handshake.
 Parsing all 119 eagerly was never viable: an `NX_SECURE_X509_CERT` is 252 bytes, so the
 parsed set alone is 30 KB before the DER it points into, on a 4 MB machine.
@@ -1360,17 +1360,17 @@ name `nx_secure` then looks up is unambiguous by construction.
 `nx_secure_remote_certificate_verify` function pointer, set by
 `nx_secure_tls_session_create_ext()` and never consulted before. `tls.library` replaces it:
 its version asks every certificate the server sent "who issued you?", looks the answer up in
-the index, and adds a root only on a hit — then calls the vendored verifier. A two-deep
+the index, and adds a root only on a hit, then calls the vendored verifier. A two-deep
 public chain costs one index miss (the leaf's issuer is the intermediate), one hit, and one
 2 KB read. Measured: `TLSInfo()` reports `128 roots on disk, 1 parsed for this chain`.
 
 **Updates: replace the file.** There is no package manager and there is not going to be
 one. `tools/mkcertstore.py` turns any PEM bundle into the file (no dependencies beyond the
-standard library — the DER walk is sixty lines, which is the entire reason no `cryptography`
+standard library, the DER walk is sixty lines, which is the entire reason no `cryptography`
 package is needed), so the story is `curl -o cacert.pem https://curl.se/ca/cacert.pem` and
 re-run it, or copy a prebuilt `certificates` over the old one. **The index is read fresh at
 every `TLSOpen()` and belongs to that connection**, so a replacement takes effect on the very
-next connection — no reboot, no `avail flush`, and no cache to invalidate. Caching it in the
+next connection, no reboot, no `avail flush`, and no cache to invalidate. Caching it in the
 library base was the first design and was wrong twice: it needs reload detection, and it puts
 a pointer one task can free (a second `TLSOpen()` with a different `TLSA_TrustStore`) under a
 pointer another task is reading from inside a handshake, on a machine with no memory
@@ -1389,7 +1389,7 @@ validity dates unconditionally **cannot reach a single HTTPS site** from such a 
 
 **Decision: skip the validity dates when the clock is obviously unset, check them when it is
 not, and report which happened.** "Obviously unset" is anything outside a fifty-year window
-starting at 2026-01-01 — the floor catches 1978 and every partially-set clock, and the
+starting at 2026-01-01, the floor catches 1978 and every partially-set clock, and the
 ceiling catches the machine whose date was typed in wrong and now reads 2145, which would
 otherwise reject every valid certificate as expired and look identical to a real failure.
 The floor is a constant, not `__DATE__`: a build-date check would make the binary
@@ -1400,7 +1400,7 @@ No vendored change was needed. `nx_secure_x509_certificate_chain_verify.c` alrea
 `if (current_time != 0)`, so returning 0 from the session's time function **is** its own
 "do not check" encoding.
 
-What this gives up, precisely: expiry does not stop impersonation — the signature chain to a
+What this gives up, precisely: expiry does not stop impersonation, the signature chain to a
 trusted root and the host-name check do that, and **both still run**. What expiry adds is a
 bound on how long a certificate whose private key has leaked stays useful. An attacker who
 has stolen a key *and* can get between this Amiga and the site can use it indefinitely
@@ -1424,7 +1424,7 @@ were NOT checked"*, *"while the chain and the host name still were"*.
 | `bsdsocket.library`, `AMINETXDUO_TLS=ON` | 250,084 (**+448**, the private vector) |
 | `tls.library` | 273,080 |
 | **the pair** | **523,164 = 510.9 KiB** |
-| `DEVS:Internet/certificates` | 128,928 (119 Mozilla roots) / 142,693 (128 Apple roots) — on disk only |
+| `DEVS:Internet/certificates` | 128,928 (119 Mozilla roots) / 142,693 (128 Apple roots), on disk only |
 
 **1,124 bytes inside the 512 KiB budget.** That is not headroom, it is a coincidence, and it
 should be said plainly rather than rounded off. The estimate this replaces (≈480 KB) counted
@@ -1436,7 +1436,7 @@ reaches. Anyone who needs room should start there.
 
 Per connection, allocated at `TLSOpen()` and freed at `TLSClose()`: crypto metadata sized by
 `_nx_secure_tls_metadata_size_calculate()` rather than guessed (16 KB), a 10 KB record
-buffer, four remote-certificate slots and two root slots at 2.5 KB of DER each — **about
+buffer, four remote-certificate slots and two root slots at 2.5 KB of DER each, **about
 40 KB**, and none of it resident when no connection is open.
 
 **Recommendation: not yet, and for one reason that is not technical.** Both stated blockers
@@ -1445,7 +1445,7 @@ distribution opens `tls.library`, so default-on would ship 273 KB that only thir
 software could use, and no third-party software exists because the library has never
 shipped. Two things would settle it, and both are small:
 
-1. **A shipped command that uses it** — a `fetch`/`urlget` alongside `ping` and `host`.
+1. **A shipped command that uses it**, a `fetch`/`urlget` alongside `ping` and `host`.
    `tests/tls/tls_api.c` is already the worked example; it needs a URL parser and an
    argument line.
 2. **A deterministic trust store at release time.** Today `dist/make-dist.sh` packs whatever
@@ -1455,7 +1455,7 @@ shipped. Two things would settle it, and both are small:
    job, or vendor a dated snapshot.
 
 Neither is a research question. Until they land, `AMINETXDUO_TLS=ON` is a supported build
-that is worth running — `tests/tls/run-api.sh` is the proof it works end to end — and the
+that is worth running, `tests/tls/run-api.sh` is the proof it works end to end, and the
 default stays OFF.
 
 `dist/make-dist.sh` and the Installer script already handle both files when the build has
@@ -1465,11 +1465,11 @@ wrong thing entirely. **The Installer takes its window down while it copies**, a
 finished". Adding `tls.library` (273 KB) and the certificate store (140 KB) to the archive
 pushed that copy past six seconds, so the driver stopped clicking, `S:User-Startup` was never
 written, and the harness reported *"the install run did not complete cleanly"* with every
-file up to the copy correctly installed — which reads exactly like an Installer script that
+file up to the copy correctly installed, which reads exactly like an Installer script that
 aborted mid-way, and is not one. `GONE_LIMIT` is now 20; `MAX_POLLS` still bounds the run,
 and a genuinely stuck Installer keeps its window up, so it fails on the cap instead.
 
-#### Update (2026-07-25, later): the client and a reproducible store landed — the default still does not
+#### Update (2026-07-25, later): the client and a reproducible store landed, the default still does not
 
 The two things the section above said stood between this and "TLS on by default" are
 both done. A third thing turned up while proving the first one works, and it is worse
@@ -1487,7 +1487,7 @@ defect is that. See "The three-certificate 'crash' was the emulator dying of SIG
 fetch URL/A,TO/K,HEADERS/S,QUIET/S,NOVERIFY/S,TIMEOUT/N/K
 ```
 
-It resolves, connects, and — if the URL says `https:` — opens `LIBS:tls.library` and
+It resolves, connects, and, if the URL says `https:`, opens `LIBS:tls.library` and
 runs the transfer through `TLSRead()`/`TLSWrite()`. **One binary serves both build
 options**: nothing in it is conditional on `AMINETXDUO_TLS`, because the decision is an
 `OpenLibrary()` at run time, so a default build ships a `fetch` that does `http:` and
@@ -1501,7 +1501,7 @@ quietly dropping the encryption that was asked for. Without `TO` the body goes t
 standard output and nothing else does, so `fetch URL >file` is not corrupted by a
 progress line; with `TO` there is a free channel and the summary is worth having.
 
-Verified by running it, not by asserting it — `tests/tls/run-fetch.sh`, which stages the
+Verified by running it, not by asserting it, `tests/tls/run-fetch.sh`, which stages the
 two libraries, the trust store and an A2065 on SLIRP and drives the command through
 `ToolsSmoke`'s staged command list (the harness starts one executable with no
 arguments, and `fetch` takes arguments):
@@ -1511,7 +1511,7 @@ arguments, and `fetch` takes arguments):
 | `fetch ?` | prints the template, then the usage line, `rc 10` |
 | `http://example.com/` | 559 bytes of HTML on stdout, `rc 0` |
 | `http://example.com/ TO DH0:plain.txt` | `HTTP/1.1 200 OK`, `559 bytes -> DH0:plain.txt` |
-| `https://tls-v1-2.badssl.com/ TO …` | 0xC027, chain verified, **6.8 s**; follows the 301 to `…:1012/` — a second handshake at 0x3D, 5.0 s — then 200 OK, 502 bytes |
+| `https://tls-v1-2.badssl.com/ TO …` | 0xC027, chain verified, **6.8 s**; follows the 301 to `…:1012/`, a second handshake at 0x3D, 5.0 s, then 200 OK, 502 bytes |
 | `https://ecc256.badssl.com/ TO …` | 0xC023 (ECDHE_ECDSA), chain verified, **23.3 s**, 200 OK, 684 bytes |
 | `https://wrong.host.badssl.com/` | `fetch: wrong.host.badssl.com: the certificate is issued to another host`, `rc 10` |
 | `ftp://example.com/` | `"ftp://example.com/" is not an http: or https: URL` |
@@ -1525,7 +1525,7 @@ The first `https:` run took the machine down, and the reason was not the reason 
 looked like. A command started by the Kickstart 3.1 Shell gets **4,096 bytes** of stack
 (`tc_SPUpper - tc_SPLower`, measured on the machine), of which **2,736 were still free**
 by the time `TLSOpen()` was reached. And `tls.library` brackets its caller into ThreadX
-to reach the stack, which — `port/threadx-amiga/src/tx_amiga_adopt.c` — hands
+to reach the stack, which, `port/threadx-amiga/src/tx_amiga_adopt.c`, hands
 `_tx_thread_create()` **the caller's own stack region** as the ThreadX thread stack. So
 those 2,736 bytes are not the command's: NetX Duo, `nx_secure` and the bignum code all
 run on them. `fetch` therefore allocates 64 KB and runs the transfer on it through
@@ -1535,13 +1535,13 @@ type `stack 65536` first.
 `StackSwap()` has one trap and it is worth writing down: **the function that calls it
 must not touch a stack-based local of its own between the two calls**, because between
 them the stack pointer belongs to the other stack. `fetch_trampoline()` therefore has no
-locals, no arguments, only file-static state, and is `noinline` — GCC inlined the first
+locals, no arguments, only file-static state, and is `noinline`, GCC inlined the first
 version straight into `main()`, which is exactly the hazard. The generated code was read
 rather than hoped at: one `move.l a6,-(sp)` before the first swap and its matching
 `move.l (sp)+,a6` after the second, which balances because `StackSwap()` restores the
 pointer exactly.
 
-(That was not, in the end, what was crashing — see §3 — but 2.7 KB for a handshake is
+(That was not, in the end, what was crashing, see §3, but 2.7 KB for a handshake is
 not something to ship either way.)
 
 ##### 2. A trust store that is the same bytes on every machine
@@ -1551,7 +1551,7 @@ not something to ship either way.)
 failure modes, and the release engineer sees neither: a release carries whatever roots
 that laptop happened to have, and a build on a machine with none ships a `tls.library`
 that refuses every connection with `TLS_ERR_TRUSTSTORE`. On the machine this was
-developed on the scavenged bundle was **Apple's 128 roots, 142,693 bytes** — which is a
+developed on the scavenged bundle was **Apple's 128 roots, 142,693 bytes**, which is a
 perfectly good root set and is not the one anyone thought they were shipping.
 
 **Now: a vendored, dated, hash-pinned snapshot.** `third_party/cacert/cacert.pem`, a
@@ -1573,7 +1573,7 @@ unreviewable data in git and hides the input the licence attaches to.
   stops with both hashes printed.
 
 `mkcertstore.py` also grew `--min-roots` and now treats an oversized or unparseable
-certificate as a **hard error** instead of a warning — a store missing roots produces a
+certificate as a **hard error** instead of a warning, a store missing roots produces a
 machine that reaches most sites and mysteriously refuses the rest, and finding that out
 on the Amiga is much worse than finding it out in CI.
 
@@ -1582,10 +1582,10 @@ Proved rather than asserted, four ways:
 | | |
 |---|---|
 | two build trees, same machine | byte-identical, `35a1d1c9…` |
-| **a different host** — playhouse2, Linux 6.17 x86-64, Python 3.13.5, whose own `/etc/ssl/certs/ca-certificates.crt` is a *different* 224,449-byte bundle | byte-identical, `35a1d1c9…` |
+| **a different host**, playhouse2, Linux 6.17 x86-64, Python 3.13.5, whose own `/etc/ssl/certs/ca-certificates.crt` is a *different* 224,449-byte bundle | byte-identical, `35a1d1c9…` |
 | the vendored snapshot removed (a host with no CA bundle at all) | configure **fails**: "The vendored CA bundle is missing"; no store written |
 | one byte appended to the snapshot | configure **fails**, printing expected and actual |
-| `-DAMINETXDUO_CA_BUNDLE=/etc/ssl/cert.pem` | builds, is labelled `(NOT the pinned snapshot)`, keeps only the `--min-roots` floor — and `dist/make-dist.sh` then **refuses to pack it**, exit 2 |
+| `-DAMINETXDUO_CA_BUNDLE=/etc/ssl/cert.pem` | builds, is labelled `(NOT the pinned snapshot)`, keeps only the `--min-roots` floor, and `dist/make-dist.sh` then **refuses to pack it**, exit 2 |
 
 `dist/make-dist.sh`'s warning is now a hard failure in both directions: no store beside a
 packed `tls.library` is exit 2, and a store whose digest is not the pin is exit 2.
@@ -1617,14 +1617,14 @@ tenth. The bisect, all on the A1200 profile at 14 MHz unless stated:
 | `www.iana.org` | 3, ECDSA | 0xC023 | **crash** |
 | `www.iana.org`, `NOVERIFY` | 3 | 0xC023 | **OK**, 4.5 s, 6,253 bytes |
 | `www.iana.org`, **`-k 28`** (28 MHz, same cycle-exact profile) | 3 | 0xC023 | **OK** |
-| `www.iana.org`, 68030 under Enforcer (no cycle accounting) | 3 | — | **OK** |
-| `example.com` | 4, ECDSA | — | **crash** |
-| `example.com`, `-k 28` | 4 | — | **crash** |
+| `www.iana.org`, 68030 under Enforcer (no cycle accounting) | 3 |, | **OK** |
+| `example.com` | 4, ECDSA |, | **crash** |
+| `example.com`, `-k 28` | 4 |, | **crash** |
 
 Four things that pin it down:
 
-1. **It is not `fetch`.** `tests/tls/tls_api` — linked against nothing of ours, run
-   directly from the Startup-Sequence with its own stack — dies at the same place when
+1. **It is not `fetch`.** `tests/tls/tls_api`, linked against nothing of ours, run
+   directly from the Startup-Sequence with its own stack, dies at the same place when
    its `A_HOST` is changed to `www.iana.org`. One line, reproducible by anyone.
 2. **It is not the stack.** It survives the 64 KB `StackSwap()` unchanged, and it kills a
    program that never swapped.
@@ -1656,7 +1656,7 @@ ChangeCipherSpec being built ...        <- and never anything again
 
 So the handshake gets to within two records of finishing and stops. Under Enforcer on a
 68030 the same run **completes** and reports exactly two hits, both
-`LONG-READ from 00000000` at `PC 00290E46` inside `SYS:fetch` — a null dereference that
+`LONG-READ from 00000000` at `PC 00290E46` inside `SYS:fetch`, a null dereference that
 is survivable on a machine with real memory at address 0 and is not, on its own, the
 crash. (`tools/enforcer-run.sh` gained a `-n` so this could be run at all; it had no way
 to attach the A2065.)
@@ -1666,10 +1666,10 @@ a minute, and the library walks into freed or reused state instead of returning
 `TLS_ERR_IO`. Both failing hosts are Cloudflare-fronted; both passing ones are badssl's
 nginx. Whatever the mechanism, the shape of it is the part that matters: **a peer can
 crash this machine by being slow to be verified**, and there is no application-side
-defence — `fetch` cannot decline to be verified against a three-deep chain.
+defence, `fetch` cannot decline to be verified against a three-deep chain.
 
 **→ Answered, and the answer is no.** The peer did send a FIN, and the library handled it
-exactly as it should — `TLS_ERR_CLOSED`, "the connection is closed", return code 10. What
+exactly as it should, `TLS_ERR_CLOSED`, "the connection is closed", return code 10. What
 died was `fs-uae` itself, on SIGPIPE, when SLIRP wrote the guest's ChangeCipherSpec to a
 host socket the far end had already closed. The serial trace above stops where it does
 because the emulator stops there, not because the record layer does. See "The
@@ -1692,8 +1692,8 @@ inside 512 KiB. A client: `fetch` ships. A trust store: 119 roots, 128,928 bytes
 byte-reproducible on any host.
 
 What is left is that turning it on would put a `tls.library` in `LIBS:` that any program
-can open and that a large share of the public web — everything behind Cloudflare and
-Google Trust Services — can use to take the machine down. That is not a default. It is
+can open and that a large share of the public web, everything behind Cloudflare and
+Google Trust Services, can use to take the machine down. That is not a default. It is
 also not a reason to hide the work: `-DAMINETXDUO_TLS=ON` remains a supported,
 CI-covered configuration, `fetch` works over `https:` to two-deep chains today, and the
 CI matrix still builds all four configurations with the TLS one among them.
@@ -1701,14 +1701,14 @@ CI matrix still builds all four configurations with the TLS one among them.
 **The one thing to fix, in order:** find why the record layer walks off after a long
 verification. Start from the trace above with `-k 14` and a packet capture, and the first
 question to answer is whether the peer sent a FIN or an RST while the 68020 was still
-doing arithmetic — because if it did, the fix is a mid-handshake disconnect being
+doing arithmetic, because if it did, the fix is a mid-handshake disconnect being
 handled, and every other TLS user of this stack needs it too. After that, the remaining
 work is arithmetic, and arithmetic is the one thing on this machine that has always been
 possible to make faster.
 
-The default-build artefacts are **byte-identical** to the pre-change build — every one of
+The default-build artefacts are **byte-identical** to the pre-change build, every one of
 `bsdsocket.library`, `usergroup.library` and the eight existing commands compares equal
-against a build of the tree before this work — so the whole of the change to the shipping
+against a build of the tree before this work, so the whole of the change to the shipping
 floor is one new 45,632-byte command. Baselines re-run on it: conformance **125/142**
 (loopback, 1 failed, 16 skipped), soak 98/0, libraries 8/0, ram_driver 32/0,
 `tls_handshake` 44/0 on the TLS build, `tools/ci.sh host cross conformance` all green
@@ -1720,7 +1720,7 @@ across all four configurations.
 68030 and does, as far as can be established, something no classic Amiga TCP/IP stack
 has done before: **it speaks IPv6.**
 
-**FS-UAE's SLIRP DOES carry IPv6** — the assumption that it would not is wrong, and
+**FS-UAE's SLIRP DOES carry IPv6**, the assumption that it would not is wrong, and
 finding that out changed what "verified" means for this milestone. FS-UAE 3.2.35's
 `qemu-uae` plugin links a libslirp with the v6 half compiled in (`ip6_input`,
 `ip6_output`, `icmp6_input`, `ndp_send_ra`, `ndp_send_ns` are all in the binary), and it
@@ -1739,7 +1739,7 @@ interface 0 IPv6 addresses:
 
 So the highest-value test route in the plan was available after all: **real ICMPv6
 packets, EtherType 0x86DD, across an emulated Commodore A2065 through the SANA-II shim
-to the host** — plus a router advertisement, stateless autoconfiguration of the global
+to the host**, plus a router advertisement, stateless autoconfiguration of the global
 `fd00::/64` address, duplicate address detection, and neighbour discovery resolving the
 router's MAC. `ff02::2` (all-routers) and `fec0::2` are not answered; SLIRP's IPv6 router
 lives at `fe80::2` and its prefix is `fd00::/64`, not libslirp's stock `fec0::`.
@@ -1748,14 +1748,14 @@ All three test routes in the plan were taken, and they prove different things:
 
 | | `ipv6_test` (RAM driver) | `ipv6_socket_test` (`::1` via the LVOs) | `ipv6_link_test` (A2065 + SLIRP) |
 |---|---|---|---|
-| ICMPv6 echo | ✅ `::1` and peer link-local | — | ✅ `::1`, self, and the router |
-| TCP over IPv6 | ✅ handshake + data both ways | ✅ `bind`/`listen`/`connect`/`accept` over `::1` | — |
-| UDP over IPv6 | ✅ + `nxd_udp_source_extract` | ✅ `sendto`/`recvfrom` over `::1` | — |
-| `sockaddr_in6` in and out | — | ✅ `getsockname`/`getpeername`/`accept`/`recvfrom` | — |
-| `IPV6_V6ONLY`, `inet_ntop`/`pton`, `getaddrinfo` | — | ✅ | — |
-| Duplicate address detection | ✅ between two real peers | — | ✅ against whatever is on the wire |
-| Router advertisement / SLAAC | — (no router on a two-node wire) | — | ✅ |
-| SANA-II `0x86DD` reader | — | — | ✅ |
+| ICMPv6 echo | ✅ `::1` and peer link-local |, | ✅ `::1`, self, and the router |
+| TCP over IPv6 | ✅ handshake + data both ways | ✅ `bind`/`listen`/`connect`/`accept` over `::1` |, |
+| UDP over IPv6 | ✅ + `nxd_udp_source_extract` | ✅ `sendto`/`recvfrom` over `::1` |, |
+| `sockaddr_in6` in and out |, | ✅ `getsockname`/`getpeername`/`accept`/`recvfrom` |, |
+| `IPV6_V6ONLY`, `inet_ntop`/`pton`, `getaddrinfo` |, | ✅ |, |
+| Duplicate address detection | ✅ between two real peers |, | ✅ against whatever is on the wire |
+| Router advertisement / SLAAC |, (no router on a two-node wire) |, | ✅ |
+| SANA-II `0x86DD` reader |, |, | ✅ |
 | Goes through `bsdsocket.library`'s ABI | no | **yes**, linked against none of our code | no |
 | Result, 68020 and 68030 | **78 checks, 0 failures** | **54 checks, 0 failures** | **6 checks, 0 failures** + findings |
 
@@ -1771,7 +1771,7 @@ AMINETXDUO_RUN_TAG=v6c ./tests/ipv6/run-socket-fsuae.sh -b build/v6   # AF_INET6
 
 What is **not** proven: nothing has been run on real Amiga hardware with a real Ethernet
 card, so the `0x86DD` `CMD_READ` path is verified against `a2065.device` under emulation
-only. And no IPv6 traffic has crossed SLIRP's NAT to the outside world — SLIRP answers
+only. And no IPv6 traffic has crossed SLIRP's NAT to the outside world, SLIRP answers
 for itself, but whether the host had global IPv6 to forward to was not tested.
 
 #### The ABI, verified rather than assumed
@@ -1786,10 +1786,10 @@ both are pinned with `_Static_assert` in `src/bsdsocket/in6.c`:
    interchangeable through `struct sockaddr *`: reading `sa->sa_family` from a
    `sockaddr_in6` reads the pad. `bsd_sa_family()` decides the family from the bytes plus
    the caller's declared length instead of from a struct member, and nothing writes a
-   length byte into a `sockaddr_in6` — on this NDK that byte *is* the family.
+   length byte into a `sockaddr_in6`, on this NDK that byte *is* the family.
    Confirmed layout: 28 bytes, offsets 0 / 2 / 4 / 8 / 24, `sa_family_t` 1 byte,
    `in_port_t` 2.
-2. **`gai_strerror()` takes its argument in `a0`, not `d0`** —
+2. **`gai_strerror()` takes its argument in `a0`, not `d0`**,
    `pragmas/bsdsocket_pragmas.h:141` says `gai_strerror(a0)` and the `libcall` form on
    line 264 agrees. Same class of surprise as `bpf_set_notify_mask` taking `(d1,d0)`.
    Caught because every prototype is generated from the pragma table by
@@ -1800,18 +1800,18 @@ both are pinned with `_Static_assert` in `src/bsdsocket/in6.c`:
 **Not in the NDK, so chosen and documented here:** `IPPROTO_IPV6` (41),
 `INET6_ADDRSTRLEN` (46), every `IPV6_*` socket option, `in6addr_any`, `IN6_IS_ADDR_*`,
 `sockaddr_storage`, `PF_INET6`. `IPV6_V6ONLY` is 27 in the BSDs and 26 in Linux and the
-NDK picks neither, so **both are accepted** — 26 is `IPV6_CHECKSUM` in BSD and 27 is
+NDK picks neither, so **both are accepted**, 26 is `IPV6_CHECKSUM` in BSD and 27 is
 `IPV6_JOIN_ANYCAST` in Linux, both raw-socket/multicast options this library does not
 offer, so the collision risk is nil. `IPV6_UNICAST_HOPS` (4 / 16) is treated the same way
 and maps onto the same per-socket hop limit as `IP_TTL`.
 
-**`IPV6_V6ONLY` defaults to OFF (dual-stack).** Not copied from anyone — it follows from
+**`IPV6_V6ONLY` defaults to OFF (dual-stack).** Not copied from anyone, it follows from
 NetX Duo. Its port tables are family-agnostic: `nx_tcp_server_socket_listen()` registers a
 listen against a *port*, and the SYN that arrives may be v4 or v6. There is no
 arrangement under which an `AF_INET6` and an `AF_INET` socket both hold port 80 here, so
 the usual argument for defaulting it *on* does not apply. Setting it to 1 is honoured:
 `connect()`/`sendto()` refuse a v4-mapped destination, and `accept()` disconnects an IPv4
-peer and returns `EWOULDBLOCK` — enforcement has to happen at accept time because by then
+peer and returns `EWOULDBLOCK`, enforcement has to happen at accept time because by then
 NetX Duo's TCP state machine has already completed the handshake.
 
 #### `getaddrinfo(AF_UNSPEC)`: what it returns and why
@@ -1841,7 +1841,7 @@ and everyone else gets the numeric form.
 
 #### Address configuration
 
-Three modes, all of which configure the `fe80::/64` link-local address first — that one
+Three modes, all of which configure the `fe80::/64` link-local address first, that one
 needs no router, no server and no configuration file, and RFC 4291 requires it anyway.
 Selected by a new `CONFIGURE6` keyword in `DEVS:NetInterfaces/<name>`, named by appending
 `6` to the IPv4 keyword it mirrors (Roadshow has no keyword ending in a digit, so nothing
@@ -1856,11 +1856,11 @@ ADDRESS6   = 2001:db8::10/64   ; STATIC only; /64 if the length is omitted
 GATEWAY6   = fe80::1
 ```
 
-**This settles the last open question in §9: the default is `AUTO`** — link-local always,
+**This settles the last open question in §9: the default is `AUTO`**, link-local always,
 plus RFC 4862 stateless autoconfiguration from router advertisements. On a link with no
 IPv6 router that is indistinguishable from `LINKLOCAL`: one router solicitation goes out
 and nothing answers, so the cost of defaulting to it is three ICMPv6 packets. On a link
-that has one, IPv6 works with nobody editing a file — which is what happened above.
+that has one, IPv6 works with nobody editing a file, which is what happened above.
 `ADDRESS6` with no `CONFIGURE6` implies `STATIC`, exactly as `ADDRESS` implies a static
 IPv4 interface. In the floor build the three keywords are recognised and ignored, so one
 config file works in both builds without "unknown keyword" warnings.
@@ -1869,7 +1869,7 @@ config file works in both builds without "unknown keyword" warnings.
 `NX_IPV6_STATELESS_AUTOCONFIG_CONTROL` in `nx_user.h`. Without it,
 `nx_icmpv6_process_ra.c` forms a global address from any advertised prefix and consults no
 flag, and `nxd_ipv6_stateless_address_autoconfig_{enable,disable}()` are stubs returning
-`NX_NOT_SUPPORTED` — so both modes would have been lies, and the first `netstack_test` run
+`NX_NOT_SUPPORTED`, so both modes would have been lies, and the first `netstack_test` run
 of the IPv6 build said so out loud (`stateless autoconfiguration failed (75)` = 0x4B =
 `NX_NOT_SUPPORTED`). Cost: one `ULONG` per `NX_INTERFACE` and one comparison per prefix
 option received.
@@ -1889,7 +1889,7 @@ Measured with `m68k-amigaos-size` on `-m68020 -O2` Release builds, `.text` only:
 | `bsdsocket.library` | 190,208 | 193,636 | 237,252 | **+43,616** |
 | `netstack_test` | 162,936 | 162,964 | 201,840 | +38,876 |
 | `ram_driver_test` (no bsdsocket/netstack) | 80,244 | 80,244 | 95,968 | +15,724 |
-| `soak_test`, `usergroup.library`, `ping`(v4) | — | byte-identical | — | 0 |
+| `soak_test`, `usergroup.library`, `ping`(v4) |, | byte-identical |, | 0 |
 | `sizeof(NX_IP)` | 2,128 | 2,128 | 3,164 | +1,036 |
 
 The **floor build is unchanged by IPv6**: +28 bytes in `netstack_test` for five extra
@@ -1897,7 +1897,7 @@ entries in the interface-keyword table, and nothing at all elsewhere. The +3,428
 `bsdsocket.library` is the four new `getaddrinfo` vectors, which are a feature the floor
 build gained, not IPv6 it does not use. (An earlier revision leaked 3.4 KB of IPv6 text
 conversion into the floor build because `config_text.c` is one object and the linker pulls
-it whole — caught by measuring rather than reasoning, and now `#ifdef`-guarded.)
+it whole, caught by measuring rather than reasoning, and now `#ifdef`-guarded.)
 
 The ~44 KB full-stack delta is larger than §5.4's ~30 KB estimate for the `nxd*`/
 `nx_icmpv6`/`nx_ipv6`/`nx_nd` objects, and the difference is not those files: it is
@@ -1917,18 +1917,18 @@ default routers 8 → 2, prefix list 8 → 4).
   Ethernet interface the two answers are identical. The `fe80::1%eth0` text form is not
   parsed at all.
 - **`bind()` to a specific local address still only binds a port**, for IPv6 exactly as
-  for IPv4 — NetX Duo has no `nx_*_socket_bind` that takes an address.
+  for IPv4, NetX Duo has no `nx_*_socket_bind` that takes an address.
 - **`DEVS:Internet/hosts` cannot hold an IPv6 address.** `src/config/netdb.c` parses an
   entry's address with `ami_config_parse_ip()`, which understands dotted quads only, so
   `netstack_resolve6()` goes straight to DNS. Fixing it is a netdb schema change that
   touches `get{host,net}by*` and belongs with that work.
 - **IPv6 multicast membership is not exposed.** `IPV6_JOIN_GROUP`/`LEAVE_GROUP` return
   `ENOPROTOOPT` because `NX_ENABLE_IPV6_MULTICAST` is off in the floor-target tuning.
-  Neighbour discovery does not need it — solicited-node joins go through
+  Neighbour discovery does not need it, solicited-node joins go through
   `_nx_ipv6_multicast_join()` and reach the driver as `NX_LINK_MULTICAST_JOIN` either way.
 - **A link-local address reports `prefix /64` as `/10`.** That is NetX Duo's own
   convention (`nxd_ipv6_address_set()` takes 10 to mean "derive `fe80::/64` from the
-  MAC" and stores the 10), and it is harmless — `fe80::/10` and `fe80::/64` both make
+  MAC" and stores the 10), and it is harmless, `fe80::/10` and `fe80::/64` both make
   every other link-local address on-link.
 - **`sana2: reader N did not stop` at shutdown is pre-existing**, not an IPv6 regression:
   the floor build logs it for readers 0 and 1, and the IPv6 build logs the same thing for
@@ -1943,18 +1943,18 @@ default routers 8 → 2, prefix list 8 → 4).
 first version listed `d1`/`a0`/`a1` only as *inputs*. On AmigaOS those are **scratch**:
 the callee may destroy them and need not say so. GCC believed they survived and reused
 the "still valid" copies, so `send()` returned 18 and `rc == sizeof(message)` compared
-false on the next line — three checks failing with the correct number printed beside
+false on the next line, three checks failing with the correct number printed beside
 them, which is about as misleading as a bug gets. The NDK's own `inline/bsdsocket.h`
 solves it by declaring `register int _d1 __asm("d1")` (and `_a0`, `_a1`) as `"=r"`
 outputs; adopting that idiom took the test from 46/49 to **54/54**. Nothing in the
-library was wrong — but anyone writing a bare-metal LVO caller against this stack will
+library was wrong, but anyone writing a bare-metal LVO caller against this stack will
 meet the same thing.
 
 #### One latent bug found and fixed on the way
 
 `AMINETXDUO_IPV6` was set as a **`PUBLIC` compile definition on `aminetxduo_sana2` only**.
 `nx_user.h` turns it into `NX_DISABLE_IPV6`, which decides `FEATURE_NX_IPV6`, which
-changes the layout of `NX_IP`, `NX_INTERFACE`, `NX_PACKET` and `NX_TCP_SOCKET` — so with
+changes the layout of `NX_IP`, `NX_INTERFACE`, `NX_PACKET` and `NX_TCP_SOCKET`, so with
 `IPV6=ON` the SANA-II shim saw a different `NX_IP` from the NetX Duo core it was driving.
 It does not fail to link; it reads the wrong offsets. The definition is now global, in the
 root `CMakeLists.txt`, with a comment saying why it must stay that way.
@@ -1962,8 +1962,8 @@ root `CMakeLists.txt`, with a comment saying why it must stay that way.
 ### Data-path performance (2026-07-25): 261 KB/s → 356 KB/s, and the checksum was the reason
 
 TCP throughput measured **261 KB/s loopback / 312 KB/s to a host over SLIRP** and nobody
-had profiled the stack. It now measures **356 KB/s loopback / 368 KB/s over SLIRP** —
-**+36%** and **+18%** — from two changes in `src/net68k/` plus one in `src/sana2/`. There
+had profiled the stack. It now measures **356 KB/s loopback / 368 KB/s over SLIRP**,
+**+36%** and **+18%**, from two changes in `src/net68k/` plus one in `src/sana2/`. There
 is no profiler on this platform, so the method is the one §5.4 and the crypto68k work
 use: measure each primitive, count how often the data path runs it, multiply, and check
 the model against an end-to-end run.
@@ -1987,7 +1987,7 @@ the per-packet costs the changes do not touch weigh more heavily.
 **Only the 68020 column is meaningful.** Every figure below is FS-UAE's A1200 model
 (68020, Kickstart 3.1 40.68), timed with `ReadEClock()` and the bracket's own cost
 (29 ticks, 41 µs) calibrated over 256 pairs and subtracted. The 68030 model is used as a
-correctness check and nothing else, for the same reason the P-256 work records — and
+correctness check and nothing else, for the same reason the P-256 work records, and
 this harness makes the point unusually plainly, because it measures a copy loop rather
 than arithmetic:
 
@@ -2001,7 +2001,7 @@ than arithmetic:
 for the bus. The 68030 runs are quoted here **only** as evidence that they must not be
 quoted anywhere else. *(Since resolved into a mechanism rather than a suspicion: FS-UAE
 switches cycle accounting off for every CPU above a 68020, and there is now a probe that
-measures it — see "Machine profiles, and calibrating the emulator before believing it"
+measures it, see "Machine profiles, and calibrating the emulator before believing it"
 below.)*
 
 The harness is `tests/perf/perf_test.c`, run with
@@ -2009,7 +2009,7 @@ The harness is `tests/perf/perf_test.c`, run with
 
 #### Where a megabyte of TCP goes
 
-Loopback, through `bsdsocket.library`, 8 KB application writes — the shape the
+Loopback, through `bsdsocket.library`, 8 KB application writes, the shape the
 conformance suite's throughput category measures. Cost centres are per-primitive
 measurements multiplied by the invocation counts the harness reports; the subtotals are
 independently measured, and they agree.
@@ -2018,19 +2018,19 @@ independently measured, and they agree.
 |---|---:|---:|---:|
 | TCP checksum, transmit | 651 | 199 | 16.6% |
 | TCP checksum, receive | 651 | 199 | 16.6% |
-| `nx_packet_data_append` — the `send()` copy, plus the chain it allocates | 295 | 254 | 7.5% |
-| `nx_packet_copy` — the loopback hand-over | 321 | 280 | 8.2% |
-| `nx_packet_data_extract_offset` — the `recv()` copy | 234 | 193 | 6.0% |
+| `nx_packet_data_append`, the `send()` copy, plus the chain it allocates | 295 | 254 | 7.5% |
+| `nx_packet_copy`, the loopback hand-over | 321 | 280 | 8.2% |
+| `nx_packet_data_extract_offset`, the `recv()` copy | 234 | 193 | 6.0% |
 | **data path, subtotal** | **2152** | **1125** | **54.9%** |
 | NetX Duo protocol + ThreadX scheduling | 758 | 750 | 19.3% |
-| `bsdsocket.library` — per-call adopt/orphan, `WaitSelect`, descriptor lookup | 1007 | 1011 | 25.7% |
+| `bsdsocket.library`, per-call adopt/orphan, `WaitSelect`, descriptor lookup | 1007 | 1011 | 25.7% |
 | **total** | **3922** | **2869** | |
 
 Provenance, because a table like this is only worth having if it says which numbers were
 measured and which were derived. Every per-byte figure in the "before" column is a
 measured primitive multiplied by the invocation count the harness reports; the data-path
 subtotal is *also* measured directly and independently, by a benchmark that runs exactly
-those operations in order with no protocol — 2057 ns/B, i.e. 2157 ms/MB, against the
+those operations in order with no protocol, 2057 ns/B, i.e. 2157 ms/MB, against the
 2152 the parts add up to (0.2%). In the "after" column the two checksum rows and their
 subtotal are likewise measured directly (1190 ns/B, 1248 ms/MB); the three copy rows are
 the same measurement minus the 39 ns/B the `movem.l` copy saves, and the end-to-end
@@ -2040,8 +2040,8 @@ The three layers were separated by measuring the same transfer three ways in the
 session: a pipeline benchmark that performs exactly the operations a loopback segment
 pays for with no protocol at all (474 → 820 KB/s), the same transfer through raw NetX Duo
 sockets (351 → 512 KB/s), and the conformance suite through the library (261 → 356 KB/s).
-The differences are stable across the checksum change — the protocol layer costs
-~755 ms/MB and the library ~1010 ms/MB whatever the copies underneath are doing — which
+The differences are stable across the checksum change, the protocol layer costs
+~755 ms/MB and the library ~1010 ms/MB whatever the copies underneath are doing, which
 is what makes the subtraction trustworthy.
 
 **The library layer is a quarter of a megabyte's cost and is the biggest thing left.**
@@ -2057,7 +2057,7 @@ checksum += (*long_ptr & NX_LOWER_16_MASK);
 checksum += (*long_ptr >> NX_SHIFT_BY_16);
 ```
 
-GCC 15.2 `-O2 -m68020` compiles that to **seven instructions per longword** —
+GCC 15.2 `-O2 -m68020` compiles that to **seven instructions per longword**,
 `move.l (a1)+,d1 / move.l d1,d0 / andi.l #65535,d0 / clr.w d1 / swap d1 / add.l d0,d1 /
 adda.l d1,a0` — plus the `dbf`. It is the price of expressing a carry in a language that
 has none.
@@ -2075,13 +2075,13 @@ Two other C spellings were compiled and disassembled first, because the RSA and 
 work both found the compiler had already done the obvious thing:
 
 - a 64-bit accumulator gives five instructions and a `dbf`, and **rebuilds the zero
-  register on every iteration** (`suba.l a0,a0 / move.l a0,d1`) rather than hoisting it —
+  register on every iteration** (`suba.l a0,a0 / move.l a0,d1`) rather than hoisting it,
   the same failure the P-256 notes record;
 - an explicit carry test (`acc += w; if (acc < w) acc++;`) gives four and a branch. That
   one is the portable fallback in `n68k_checksum.c`, so the C path is within ~2× and the
   assembly is worth about that much and no more.
 
-**The vendored checksum was the most expensive per-byte operation in the stack — three
+**The vendored checksum was the most expensive per-byte operation in the stack, three
 times the cost of copying the same bytes.** A loopback byte is checksummed twice
 (transmit and receive), so at 626 ns/B the two passes alone were a third of the entire
 per-byte budget.
@@ -2090,7 +2090,7 @@ Predicted saving from the micro-benchmark: 2 × (621 − 190) ns/B × 1 MB = **9
 Measured on the conformance suite's 1 MB sustained loopback transfer: 3922 ms → 3009 ms =
 **913 ms**, i.e. 261 → **340 KB/s**. The cost model is right to within 0.5%.
 
-*Correctness.* A faster checksum that is wrong corrupts silently — every packet still goes
+*Correctness.* A faster checksum that is wrong corrupts silently, every packet still goes
 out and the peer quietly drops some. So `n68k_ip_checksum_compute()` is not "a correct
 internet checksum", it is *exactly what NetX Duo returns*: the pseudo-header arithmetic,
 the chain walk, the end-pointer rounding, the two-byte carry across a packet boundary
@@ -2101,7 +2101,7 @@ into the pad byte are all structurally identical. Only the inner loop changed.
 the two differentially: **10,030 comparisons, 0 failures**, over every length 0–96 at
 every prepend alignment 0–7, lengths to 8 KB, chains of 2–5 packets with append pointers
 on all four residues mod 4, `data_length` shorter than the packet and longer, and
-all-zero / all-ones payloads — the inputs where a one's-complement sum can disagree with a
+all-zero / all-ones payloads, the inputs where a one's-complement sum can disagree with a
 16-bit accumulation over 0x0000 against 0xFFFF. That tier runs under `ctest` on every
 push. The assembly cannot be assembled on a host, so the on-Amiga harness repeats the
 comparison for the 1460-byte, chained and 0–40-byte cases.
@@ -2111,7 +2111,7 @@ comparison for the 1460-byte, chained and 0–40-byte cases.
 The misaligned-`memcpy` hypothesis is **wrong for this toolchain, and the measurement
 that kills it is worth keeping**.
 
-`-m68020` selects the `libm020` multilib — verified in the link map, not assumed — and
+`-m68020` selects the `libm020` multilib, verified in the link map, not assumed, and
 that `memcpy` is not the one in the base `libc.a`. The base (68000) version does require
 length ≥ 8 **and both pointers 4-byte aligned**, falling back to `moveb a1@+,a0@+`
 otherwise. The `libm020` version aligns **only the destination** and then moves longwords
@@ -2123,14 +2123,14 @@ combinations:
 | `memcpy`, both aligned | 216 – 224 |
 | `memcpy`, any misalignment | 252 – 260 |
 
-**An 18% penalty, not a cliff** — and the alignment census says it never fires anyway:
+**An 18% penalty, not a cliff**, and the alignment census says it never fires anyway:
 application buffers, `nx_packet_data_start`, `nx_packet_prepend_ptr` and
 `nx_packet_append_ptr` are all 0 mod 4, and **0 of the 272 checksum calls in a 256 KB
 transfer saw a misaligned prepend pointer**. The 16-byte `NX_PHYSICAL_HEADER` that
 `nx_user.h` deliberately leaves at its default is doing exactly the job its comment claims.
 
 What *was* available is `movem.l`, which moves eight longwords per instruction pair and
-has no C spelling at all — the compiler cannot emit a memory-to-memory move, let alone a
+has no C spelling at all, the compiler cannot emit a memory-to-memory move, let alone a
 multi-register one. `src/net68k/n68k_copy.S`:
 
 | | ns/byte |
@@ -2140,18 +2140,18 @@ multi-register one. `src/net68k/n68k_copy.S`:
 | `n68k_copy_bytes`, misaligned | 225.8 – 228.7 |
 
 **1.23× on the primitive.** `AMINETXDUO_NET68K_MEMCPY` resolves `memcpy()` to it for the
-whole library by the same mechanism the checksum uses — define the symbol, and the linker
+whole library by the same mechanism the checksum uses, define the symbol, and the linker
 never pulls libm020's member. The loopback data path spends three copies on every byte,
 so this was predicted to be worth 123 ms/MB; measured **140 ms/MB**, 340 → **356 KB/s**.
 
-*Correctness.* 1,552 cases on the target — every length 0–96 × every one of the sixteen
+*Correctness.* 1,552 cases on the target, every length 0–96 × every one of the sixteen
 alignment combinations, checking the copied bytes, the byte before the destination and
-the byte after it — plus one 8,184-byte misaligned copy that exercises the `movem` block.
+the byte after it, plus one 8,184-byte misaligned copy that exercises the `movem` block.
 
 #### 3. The cliff that does exist is in our own code
 
-`ami_sana2_copy_bytes()` — the loop the SANA-II shim runs at interrupt level on every
-frame in both directions — took its longword path only when source and destination agreed
+`ami_sana2_copy_bytes()`, the loop the SANA-II shim runs at interrupt level on every
+frame in both directions, took its longword path only when source and destination agreed
 mod 2:
 
 ```c
@@ -2166,7 +2166,7 @@ and copied **one byte per iteration** when they did not. Measured over 1460 byte
 | parities differ | **1203.4** |
 
 **A 5.0× cliff**, avoided only because the driver buffers happen to land on the right
-parity — nothing in SANA-II promises anything about a device's buffer alignment, so that
+parity, nothing in SANA-II promises anything about a device's buffer alignment, so that
 was luck. It is now `n68k_copy_bytes()`, which has no such condition: 179.5 ns/B when the
 parities agree (1.34× on what used to be the fast path) and 228.7 when they differ (5.3×
 on what used to be the slow one).
@@ -2186,7 +2186,7 @@ micro-benchmark is the evidence for it.
 - **A packet allocation costs 88–90 µs, and roughly half of it is `Forbid()`/`Permit()`.**
   One pair measures **9.9 µs** on this port, and `TX_DISABLE`/`TX_RESTORE` expand to a
   `_tx_amiga_forbidden()` plus a `Forbid()`, and a `Permit()`. At twelve packets per 8 KB
-  loopback segment that is ~135 ms/MB, about 3.5% — real, but behind the library layer
+  loopback segment that is ~135 ms/MB, about 3.5%, real, but behind the library layer
   and the remaining copies, and changing the port's interrupt-lockout model is not a
   performance decision (§6.2). Recorded, not acted on.
 - **`ami_sana2_copy_bytes()`'s own C longword loop is 11% *slower* than `memcpy`**
@@ -2200,8 +2200,8 @@ micro-benchmark is the evidence for it.
    completely untouched here. It is a per-call `tx_amiga_adopt_thread()` /
    `tx_amiga_orphan_thread()` bracket (§6.3), a `WaitSelect()` poll loop, and a
    descriptor lookup, on every `send()` and `recv()`. The per-call bracket is a
-   correctness requirement, not an oversight — an adopted Task holds the ThreadX baton,
-   so it may not be held across application code — but "per call" is not the only
+   correctness requirement, not an oversight, an adopted Task holds the ThreadX baton,
+   so it may not be held across application code, but "per call" is not the only
    granularity that satisfies that.
 2. **The copies that remain: ~727 ms/MB** across `nx_packet_data_append`,
    `nx_packet_copy` and `nx_packet_data_extract_offset`. Two of the three are real work.
@@ -2217,7 +2217,7 @@ The first end-to-end pass reported ~45 KB/s for every configuration, and a 3.11�
 moved it by 4%. The harness was stopping its clock after `nx_tcp_socket_disconnect()`,
 and because the server closed first while the client was still waiting to be told the
 transfer had finished, that call burned its full five-second timeout on every run. A flat
-constant added to both arms of an A/B **does not cancel** — it flattens the ratio and
+constant added to both arms of an A/B **does not cancel**, it flattens the ratio and
 makes a real 1.55× look like 1.04×. The phase accounting that found it (bracket every
 call, and check that the parts add up to the whole) is still in `p_transfer()`; the
 symptom was that sender-busy plus receiver-busy came to 1.25 s of a 5.65 s "transfer".
@@ -2230,10 +2230,10 @@ Re-measured on the final build, not assumed:
 |---|---|---|
 | ThreadX-on-Exec `soak` | 98 checks, 0 fail | 98 checks, 0 fail |
 | `ram_driver` | 32/32 | 32/32 |
-| `netstack` (real SANA-II device) | 14/14 | — |
-| `libraries` (the ABI, through `OpenLibrary`) | 8/8 | — |
+| `netstack` (real SANA-II device) | 14/14 |, |
+| `libraries` (the ABI, through `OpenLibrary`) | 8/8 |, |
 | conformance, loopback tier | 125 passed, 1 failed, 16 skipped | 125 passed, 1 failed, 16 skipped |
-| conformance, network tier | 6/6 throughput, 0 skipped | — |
+| conformance, network tier | 6/6 throughput, 0 skipped |, |
 | `perf_test` self-checks (checksum differential + copy exactness) | 28/28 | 28/28 |
 | host `ctest` | 6 suites, 0 fail (was 5; `net68k_checksum` is the new one) | |
 
@@ -2243,14 +2243,14 @@ documented in the README, unchanged.
 ### Machine profiles, and calibrating the emulator before believing it (2026-07-25)
 
 Every performance figure above is an A1200: 68EC020 at 14 MHz, 16-bit path to memory.
-An A3000 — 68030 at 25 MHz, 32-bit Fast RAM on a 32-bit bus, and a data cache the 020
-does not have at all — is a materially different machine, and for a stack dominated by
+An A3000, 68030 at 25 MHz, 32-bit Fast RAM on a 32-bit bus, and a data cache the 020
+does not have at all, is a materially different machine, and for a stack dominated by
 copying and checksumming the memory width plausibly matters more than the clock. So
 `tools/fsuae-run.sh` grew an A3000 profile.
 
 It also grew the thing that had to come first. This project has concluded three separate
 times, from three unrelated symptoms, that FS-UAE's 68030 model cannot be trusted for
-timing — 1.93 ns/byte for a memory copy against the 68020's 184, a `MULU.L` that appears
+timing, 1.93 ns/byte for a memory copy against the 68020's 184, a `MULU.L` that appears
 to cost nothing, and one RSA measurement that came out 1.7×, then 3.0×, then 3.1× on
 three runs of one binary. Nobody had measured *what* it gets wrong, so nobody could say
 what an A3000 profile would be good for. **`tests/perf/cpucal.c` measures it**, and the
@@ -2260,7 +2260,7 @@ answer turns out to be a single mechanism that explains all three symptoms at on
 
 `cpucal` runs instruction sequences whose cost on real silicon is published (`cpucal.S`),
 times them with `ReadEClock()`, and reports what the emulator charged. An absolute
-nanoseconds-per-instruction is worth nothing on its own — it conflates the model's cycle
+nanoseconds-per-instruction is worth nothing on its own, it conflates the model's cycle
 accounting with whatever clock the emulator thinks it is running at, and one figure
 cannot separate them. So the primary results are **ratios between kernels measured in
 the same run**, which are clock-independent by construction:
@@ -2272,7 +2272,7 @@ the same run**, which are clock-independent by construction:
 
 Only after those does it quote an implied clock, from `ADD.L` at its published two
 cycles. The published costs are from the MC68020UM and MC68030UM timing appendices
-(`MUL.L EA,Dn` 43 and 44 respectively — checked in the manuals, not recalled).
+(`MUL.L EA,Dn` 43 and 44 respectively, checked in the manuals, not recalled).
 
 #### What the A1200 profile reproduces: essentially everything
 
@@ -2285,17 +2285,17 @@ cycles. The published costs are from the MC68020UM and MC68030UM timing appendic
 | `MULU.L Dn,Dh:Dl` | 2303.71 ns | 45 | **32.14** implied |
 | implied clock | **13.95 MHz** | 14.187 MHz | **1.7% low** |
 
-Three runs of the binary gave `ADD.L` at 143.304, 143.317 and 143.317 ns — a spread of
+Three runs of the binary gave `ADD.L` at 143.304, 143.317 and 143.317 ns, a spread of
 one part in ten thousand. The memory rows repeat to 1.4%.
 
 **Two-cycle integer work is faithful to under 2%. `MULU.L` is not: the model charges 32
 cycles where the part charges 43, so it is 25% cheap even here.** That is a new caveat on
-the crypto68k figures, and a mild one — it flatters assembly that moves work out of the
+the crypto68k figures, and a mild one, it flatters assembly that moves work out of the
 multiplier by at most a quarter, where the 68030 model flatters it by a factor of ten.
 
 The memory model is internally coherent, which is the check that matters more than any
 single row. Per longword, Fast RAM: read 6.75 cycles, write 3.64, and memory-to-memory
-10.47 — against 6.75 + 3.64 = 10.39 for the parts, i.e. 0.8% out. Chip RAM comes out
+10.47, against 6.75 + 3.64 = 10.39 for the parts, i.e. 0.8% out. Chip RAM comes out
 1.88× slower than Fast, which is the right shape for a machine whose Chip bus is shared
 with the DMA. And the 32 KB / 64 B read ratio is 0.89, correctly saying that a 68020 has
 no data cache.
@@ -2320,10 +2320,10 @@ does not. Two harnesses written months apart, one answer.
 |---|---:|---:|---:|
 | implied clock | 13.95 MHz | **323.9 MHz** | 25 MHz |
 | `MULU.L` implied cycles | 32.1 | **3.2** | 44 |
-| Fast RAM read, ns/B | 121.07 | 2.31 | — |
-| Chip RAM read, ns/B | 227.29 | 2.60 | — |
+| Fast RAM read, ns/B | 121.07 | 2.31 |, |
+| Chip RAM read, ns/B | 227.29 | 2.60 |, |
 | Chip / Fast | 1.88× | **1.12×** | should be several × |
-| 32 KB / 64 B read | 0.89× | 0.82× | above 1 — the 030 has a data cache |
+| 32 KB / 64 B read | 0.89× | 0.82× | above 1, the 030 has a data cache |
 | forcing `CACRF_EnableD` on | n/a | **no effect at all** | should be large |
 
 **The root cause is one line in FS-UAE's own log, and it explains all three of this
@@ -2341,7 +2341,7 @@ The A1200 model, in the same build, gets `cpu_speed = real` and `cpu_cycle_exact
 **FS-UAE 3.2.35 switches cycle accounting off for every CPU above a 68020**, and that is
 why `-c 68030` has always produced nonsense too: the A1200 model with `cpu = 68030` gets
 the same `max` / `false` pair. With no cycle accounting the CPU runs as fast as the host
-allows, so the E-Clock — which advances with emulated chipset time — sees the work
+allows, so the E-Clock, which advances with emulated chipset time, sees the work
 complete almost instantly. A 95× memory copy, a free `MULU.L` and an RSA ratio that
 wanders between 1.7× and 3.1× are three faces of one thing.
 
@@ -2351,24 +2351,24 @@ Swept with `cpucal`, one variable at a time, through `AMINETXDUO_FSUAE_EXTRA`:
 
 | | effect |
 |---|---|
-| `accuracy = 1` | none — it is already the A3000 model's default (`accuracy=1` in the log) |
-| `cpu_speed = real` | none — overwritten by the quickstart |
-| `cpu_cycle_exact = 1`, `blitter_cycle_exact = 1` | none — overwritten |
-| `cpu_frequency = 25000000` | none — not an FS-UAE option at all, silently ignored |
+| `accuracy = 1` | none, it is already the A3000 model's default (`accuracy=1` in the log) |
+| `cpu_speed = real` | none, overwritten by the quickstart |
+| `cpu_cycle_exact = 1`, `blitter_cycle_exact = 1` | none, overwritten |
+| `cpu_frequency = 25000000` | none, not an FS-UAE option at all, silently ignored |
 | `cpu_multiplier = 4`, `uae_cpu_frequency` | none |
-| `cpu_model = 68020` on the A3000 model | none — the log still reports `CPU=68030` |
-| **`uae_cpu_cycle_exact = true`** | **works** — the `uae_` passthrough is applied last |
+| `cpu_model = 68020` on the A3000 model | none, the log still reports `CPU=68030` |
+| **`uae_cpu_cycle_exact = true`** | **works**, the `uae_` passthrough is applied last |
 
 So cycle accounting *can* be forced back on (`CPU=68030 … ~cycle-exact fast` in the log),
 and the result is deterministic to the picosecond across runs. It is still not an A3000:
 
 - the clock lands at an implied **3.38 MHz** and `uae_cpu_multiplier` does not move it
-  (3.36 at ×2, 3.29 at ×4) — seven times too slow;
+  (3.36 at ×2, 3.29 at ×4), seven times too slow;
 - `MULU.L` is charged **4.1 cycles against 44**, so the crypto caveat is unaffected;
-- Chip RAM and 32-bit motherboard RAM measure **479.0 and 480.0 ns/B** — the model does
+- Chip RAM and 32-bit motherboard RAM measure **479.0 and 480.0 ns/B**, the model does
   not distinguish them, which is exactly the distinction an A3000 profile exists to make;
 - `MOVEM.L` comes out **5.4× cheaper per byte** than `MOVE.L (An)+,(Am)+`, against about
-  1.3× on the real part — so it is wrong in the one place `src/net68k/` is optimised.
+  1.3× on the real part, so it is wrong in the one place `src/net68k/` is optimised.
 
 **It is not more faithful, it is differently unfaithful, and three times slower to run.**
 It is therefore not in the profile; the recipe is in the comment in `tools/fsuae-run.sh`
@@ -2378,8 +2378,8 @@ for anyone who wants to reproduce the finding.
 
 `-m A3000` gives a 68030 with an MMU, both caches, 32-bit addressing and 8 MB of
 motherboard RAM rather than Zorro II. That is a genuine second target for **correctness**
-— it is where Enforcer can run, and where a DMA-coherency bug against the 030 data cache
-would show — and the profile is built and kept for that. It prints
+it is where Enforcer can run, and where a DMA-coherency bug against the 030 data cache
+would show, and the profile is built and kept for that. It prints
 `(NOT a timing profile)` when it starts, because the failure mode being guarded against
 is somebody quoting it in six months.
 
@@ -2390,7 +2390,7 @@ worse than none.
 
 #### The measurement that survives: `-k`, a clock that moves without breaking anything
 
-The 68030 model cannot be made faithful. The 68020 model already is — and
+The 68030 model cannot be made faithful. The 68020 model already is, and
 `uae_cpu_multiplier` *does* get through on it, because the A1200 quickstart leaves
 cycle-exact on. `tools/fsuae-run.sh -k MHZ` uses that:
 
@@ -2401,21 +2401,21 @@ cycle-exact on. `tools/fsuae-run.sh -k MHZ` uses that:
 | `-k 25` | 24.5 MHz | **24.48 MHz** | 2.00 | 31.98 |
 | `-k 28` | 28.0 MHz | 28.01 MHz | 2.00 | 31.98 |
 
-The instruction accounting is unchanged at every clock — only the rate moves. The
+The instruction accounting is unchanged at every clock, only the rate moves. The
 multiplier's unit is half the 7.09 MHz PAL chipset clock, ~3.5 MHz per step, measured
 because the emulator documents it nowhere.
 
 **And the memory model does the right thing under it, which is what makes the option
 worth having.** Doubling the clock from 13.95 to 28.01 MHz buys **2.03×** on Fast RAM
 and only **1.49×** on Chip RAM, and `MOVEM.L` from Chip RAM barely moves at all
-(**1.07×**) — because Chip RAM is chipset-bound and the model knows it. A knob that made
+(**1.07×**), because Chip RAM is chipset-bound and the model knows it. A knob that made
 everything uniformly faster would be measuring nothing.
 
 So `-m A1200 -k 25` is a **clock-matched, cycle-accurate 68020 at 24.5 MHz**. It is not
 an A3000, and it differs in exactly two known ways: it is a 68020, so there is no data
 cache; and its memory is the A1200's, which the model charges 6.75 cycles per longword
 read where a 32-bit port costs the 68020's published 4. **It is therefore a defensible
-lower bound on an A3000, not an estimate of one** — a real A3000 has the same clock and a
+lower bound on an A3000, not an estimate of one**, a real A3000 has the same clock and a
 wider path to memory, so it can only be faster.
 
 Three clocks make a slope rather than a ratio, and the slope is the interesting part:
@@ -2425,7 +2425,7 @@ Three clocks make a slope rather than a ratio, and the slope is the interesting 
 | ns/byte | 243.97 | 120.00 | 67.55 | 58.90 |
 | **ns/byte × MHz** | **1659** | **1674** | **1653** | **1650** |
 
-Constant to 1.4% — Fast RAM costs a fixed number of *CPU cycles* in this model, as
+Constant to 1.4%, Fast RAM costs a fixed number of *CPU cycles* in this model, as
 CPU-synchronous memory should. Chip RAM does not: the same product goes 1667 → 3171 →
 3737 → 4269, i.e. it is CPU-bound below ~7 MHz and bus-bound above it. **The model has a
 memory wall in it and puts it in the right place**, which is the licence to use `-k` for
@@ -2447,12 +2447,12 @@ with `src/net68k/`'s checksum and copy, 28/28 self-checks passing on every profi
 | `n68k_copy_bytes`, ns/B | 383.7 | 184.7 | 99.5 | 2.6 |
 | `nx_packet_copy`, ns/B | 578.3 | 276.6 | 153.1 | 4.7 |
 | `Forbid()`/`Permit()` pair | 18.9 µs | 10.5 µs | 5.4 µs | 0.13 µs |
-| TLS 1.2 handshake, loopback | — | **26.7 s** | **15.0 s** | 0.8 s |
-| … client-only public-key arithmetic | — | **3.2 s** | **1.8 s** | 0.0 s |
-| ECDSA P-256 verify, `crypto68k` | — | **1966 ms** | **1113 ms** | 44 ms |
-| ECDHE P-256 shared secret | — | **1372 ms** | **776 ms** | 29 ms |
+| TLS 1.2 handshake, loopback |, | **26.7 s** | **15.0 s** | 0.8 s |
+| … client-only public-key arithmetic |, | **3.2 s** | **1.8 s** | 0.0 s |
+| ECDSA P-256 verify, `crypto68k` |, | **1966 ms** | **1113 ms** | 44 ms |
+| ECDHE P-256 shared secret |, | **1372 ms** | **776 ms** | 29 ms |
 
-And the figure the README quotes, which is the same transfer one layer further up —
+And the figure the README quotes, which is the same transfer one layer further up,
 `bsdsocktest`'s throughput category through `bsdsocket.library`, 1 MB sustained:
 
 | | **13.95 MHz** | **24.48 MHz** | A3000 model |
@@ -2461,7 +2461,7 @@ And the figure the README quotes, which is the same transfer one layer further u
 | TCP loopback, 512 KB | 358 KB/s | 638 KB/s | 12,800 KB/s |
 | conformance score | 125/1/16 | 125/1/16 | 125/1/16 |
 
-357 KB/s against the 356 recorded above, and **636 KB/s at 24.48 MHz — 1.78× for a 1.76×
+357 KB/s against the 356 recorded above, and **636 KB/s at 24.48 MHz, 1.78× for a 1.76×
 clock**, the same linear scaling the raw-socket figure shows. The library layer is as
 CPU-bound as everything under it.
 
@@ -2471,7 +2471,7 @@ accounting" looks like.
 
 And one row that shows the distortion directly rather than by argument. The `crypto68k`
 speedups are *ratios* measured back to back in one process, so they should not depend on
-the clock at all — and on the profiles that charge cycles, they do not:
+the clock at all, and on the profiles that charge cycles, they do not:
 
 | `crypto68k` against vendored | 13.95 MHz | 24.48 MHz | A3000 model |
 |---|---:|---:|---:|
@@ -2482,7 +2482,7 @@ the clock at all — and on the profiles that charge cycles, they do not:
 | RSA-2048 private, CRT | 2.2× | **2.2×** | **3.0×** |
 | RSA-2048 private, plain | 2.4× | **2.4×** | **3.7×** |
 
-Identical across a 1.76× clock change, inflated by 25–54% on the A3000 model — which is
+Identical across a 1.76× clock change, inflated by 25–54% on the A3000 model, which is
 exactly the failure the P-256 notes predicted from first principles ("the 68030 model
 does not charge for `MULU.L`, so it flatters exactly the work this change moves *out* of
 the multiply"). It is pleasant to have it confirmed by an experiment designed
@@ -2502,13 +2502,13 @@ because `cpucal` auto-scales each measurement to about a tenth of a second. Over
 minutes an RSA benchmark takes, the same unthrottled CPU is measuring the host's
 scheduler, and that is where 1.7× against 3.1× comes from.
 
-The 13.95 MHz column reproduces what this section recorded before the profiles existed —
+The 13.95 MHz column reproduces what this section recorded before the profiles existed,
 203.8 against 200.7 ns/B for the checksum, 541 against 512 KB/s for loopback, 26.7 s
-against 26.7 s for the handshake, and RSA-2048 public at 681.1 ms against 681 — which is
+against 26.7 s for the handshake, and RSA-2048 public at 681.1 ms against 681, which is
 the check that nothing about the new profiles disturbed the old ones.
 
 **A defect in `perf_test` that the new `-k` option exposed, and what it does and does not
-change.** `p_report()` computed a per-primitive ns/byte from `ticks / reps` — an integer
+change.** `p_report()` computed a per-primitive ns/byte from `ticks / reps`, an integer
 count of 1.409 µs E-Clock ticks. That is harmless at 14 MHz, where a 1460-byte copy is
 ~190 ticks and the truncation is bounded by 0.5%; at 24.48 MHz it is ~105 ticks, and
 three copy routines that differ by 4% all printed *the same* 102.29 ns/B. It now divides
@@ -2517,13 +2517,13 @@ once, by the total byte count, at the end.
 Fixing it moved the 13.95 MHz `n68k_copy_bytes` row from the 176.6 ns/B recorded above to
 **184.7**, and the arithmetic says that is mostly *not* the fix: truncation can only
 account for 0.5% of a 4.6% move. The rest is run-to-run variation, which the copy rows
-have and the others do not — the same binary reported 257 µs and 269 µs per repetition in
+have and the others do not, the same binary reported 257 µs and 269 µs per repetition in
 two sessions, while the checksum repeated to 0.6% and every end-to-end throughput figure
 repeated exactly. **Read a 3% difference between two copy rows as noise.** The
 1.23×-over-`libm020` conclusion stands regardless: that comparison was two arms of one
 session, truncated identically, and the gap is far larger than either effect.
 
-The per-cycle cost falls slightly as the clock rises — checksum ns/B × MHz goes 2902 →
+The per-cycle cost falls slightly as the clock rises, checksum ns/B × MHz goes 2902 →
 2843 → 2756 across the three columns, about 5%. That is not a modelling error: interrupts
 arrive at a fixed *wall* rate and cost a fixed number of *cycles*, so a benchmark that
 finishes in half the time absorbs half of them. Real hardware does the same.
@@ -2538,14 +2538,14 @@ Every primitive underneath behaves the same way: the checksum, the copy and
 
 So the answer to "does an A3000 change what to optimise?" is **no, and the reason is
 worth having**: nothing on the loopback path is waiting for memory that a faster CPU
-would not fix. The ranking recorded above — `bsdsocket.library`'s per-call overhead
-first at ~1010 ms/MB, the remaining copies second — survives the clock change unaltered,
+would not fix. The ranking recorded above, `bsdsocket.library`'s per-call overhead
+first at ~1010 ms/MB, the remaining copies second, survives the clock change unaltered,
 because both scale with it. A 25 MHz machine runs the same profile 1.8× faster.
 
 **The wire path is the exception, and it is the finding the A3000 profile earned its
 keep with.** Over the RAM driver, throughput goes 105 → 174 → 239 KB/s: 1.66× for a
 2.05× clock, then 1.37× for a 1.76×. Sub-linear, and flattening. The unfaithful A3000
-profile is what identifies the wall — with the CPU effectively free it still manages only
+profile is what identifies the wall, with the CPU effectively free it still manages only
 **412 KB/s**, so 412 KB/s is the ceiling imposed by everything that is *not* the CPU.
 Fitting the three trustworthy points against a fixed ceiling in series:
 
@@ -2553,11 +2553,11 @@ Fitting the three trustworthy points against a fixed ceiling in series:
 |---|---:|---:|---:|
 | measured | 105 KB/s | 174 KB/s | 239 KB/s |
 | implied CPU-bound component | 141 KB/s | 301 KB/s | 569 KB/s |
-| scaling of that component | — | 2.14× | 1.89× |
+| scaling of that component |, | 2.14× | 1.89× |
 
 The CPU-bound part is linear in the clock to within 7%, and the model fits all three
 points. **So on a real interface, above about 15 MHz, roughly half of what is left is
-not CPU at all** — it is the 50 Hz IP periodic tick and the round trips paced by it, and
+not CPU at all**, it is the 50 Hz IP periodic tick and the round trips paced by it, and
 no amount of assembly in `src/net68k/` will touch it. That is a different optimisation
 (window sizes, delayed-ACK behaviour, tick rate) from anything this section has done so
 far, and it is the one that matters for the machine most likely to have an Ethernet card.
@@ -2565,7 +2565,7 @@ far, and it is the one that matters for the machine most likely to have an Ether
 **TLS is entirely CPU-bound**, as arithmetic should be: 26.7 s → 15.0 s for a 1.76×
 clock is 1.78×. An A3000 owner sees a ~15 s handshake and a ~1.8 s client-side
 public-key cost. That is the same shape of answer AmiSSL's own A3000 datapoint gives
-(issue #67, `SSL_connect` in 2.99 s on a 68030 at 25 MHz — TLS 1.3, a different
+(issue #67, `SSL_connect` in 2.99 s on a 68030 at 25 MHz, TLS 1.3, a different
 handshake and a heavily optimised bignum library, but the same universe).
 
 #### Baselines, on both profiles
@@ -2576,8 +2576,8 @@ and nothing about the harness change disturbed the A1200 path:
 | | A1200 | A1200 `-k 25` | A3000 profile |
 |---|---|---|---|
 | ThreadX-on-Exec `soak` | 98/0 | 98/0 | 98/0 |
-| `ram_driver` | 32/0 | — | 32/0 |
-| `libraries` (the ABI through `OpenLibrary`) | 8/0 | — | 8/0 |
+| `ram_driver` | 32/0 |, | 32/0 |
+| `libraries` (the ABI through `OpenLibrary`) | 8/0 |, | 8/0 |
 | conformance, loopback tier | 125 passed, 1 failed, 16 skipped | same | same |
 | `perf_test` self-checks | 28/0 | 28/0 | 28/0 |
 | `tls_handshake` | 44/0 | 44/0 | 44/0 |
@@ -2594,7 +2594,7 @@ Three measurements, in order of what they would change:
    would give the one number this whole section had to work around: what a 68030 at 25
    MHz actually charges for a longword read from 32-bit motherboard RAM. Everything
    above is bounded rather than known because of that single unknown.
-2. **`perf_test` and the conformance suite on an A3000**, for the loopback figures — the
+2. **`perf_test` and the conformance suite on an A3000**, for the loopback figures, the
    predictions being **≥966 KB/s** raw and **≥636 KB/s** through the library, those being
    the `-k 25` lower bounds, with the excess over them being what the 32-bit path and the
    data cache are worth.
@@ -2610,7 +2610,7 @@ entropy pool documented under the M9 gate above.
 - **The 64-bit division helpers are one copy again.** `__udivdi3` and friends had grown
   to three (see the toolchain landmine note under the M9 gate). `src/common/ami_udivdi3.c`
   is now the only one, built as `aminetxduo_m68k_rt`, keeping the 68020 `divu.l` fast path
-  and gaining `__udivmoddi4`/`__divdi3`/`__moddi3` from the conformance copy — newlib's
+  and gaining `__udivmoddi4`/`__divdi3`/`__moddi3` from the conformance copy, newlib's
   `printf` calls all five. `tests/conformance/build.sh` compiles that file out of
   `src/common/` rather than keeping its own; `src/crypto68k/` no longer builds a second
   copy of the TLS one. Verified by building the default tree, `-DAMINETXDUO_IPV6=ON`,
@@ -2620,16 +2620,16 @@ entropy pool documented under the M9 gate above.
   they were on their way to rotting. They build with everything else and are deliberately
   **not** registered with `ctest`: `crashtest` jumps to `0x2` and `gurutest` double-frees,
   both on purpose, and `KernelStop` re-execs itself and fills free memory with `ILLEGAL`.
-  `KernelStop`'s output name is relied on — its parent process runs
+  `KernelStop`'s output name is relied on, its parent process runs
   `SYS:KernelStop child`.
 - **The netdb file parser now runs on the Amiga.** `tests/netstack/devs/Internet/` held
   only `hosts` and `name_resolution`, so every on-Amiga `get{serv,proto,net}by*` test was
-  hitting `src/config/netdb.c`'s built-in fallback tables — the file parser had 157/157 on
+  hitting `src/config/netdb.c`'s built-in fallback tables, the file parser had 157/157 on
   the host and had never executed on the target. Representative `services`, `protocols`
   and `networks` files in the standard `/etc` format are staged now. Proof that the files
   and not the fallbacks are in use, from a debug-logging run: **`services: 92 entries`,
   `protocols: 42`, `networks: 7`**, against built-in tables of 30, 7 and 1. Conformance
-  `dns` stays 15/15. **No defect found** — the parser handled tab/space mixtures, trailing
+  `dns` stays 15/15. **No defect found**, the parser handled tab/space mixtures, trailing
   `#` comments, multi-alias rows and the truncated dotted network numbers (`10.0.2`,
   `169.254`) exactly as the host test said it would.
 
@@ -2645,7 +2645,7 @@ and `nx_secure` then walked into reused or freed state on the close.
 
 **It was none of that. `fs-uae` was being killed by SIGPIPE.** Run in the foreground the
 emulator exits **141**, and 141 is 128 + 13. Set the disposition to `SIG_IGN` in the
-parent — which, unlike a handler, survives `execve()` — and the identical run at the
+parent, which, unlike a handler, survives `execve()`, and the identical run at the
 identical clock finishes: `fetch: www.iana.org: the connection is closed`, return code
 10, `DH0:.done` written, and the commands after it still run.
 
@@ -2655,12 +2655,12 @@ The chain from cause to symptom, read off FS-UAE's own A2065 packet dump:
    ServerHello, three certificates (883 + 675 + 894 bytes), ServerKeyExchange,
    ServerHelloDone.
 2. The client disappears into the verification arithmetic for tens of seconds and
-   **acknowledges nothing at all** while it is in there — SLIRP retransmits the same
+   **acknowledges nothing at all** while it is in there, SLIRP retransmits the same
    segment three and four times over. The stack cannot answer, because the calling task
    is holding the ThreadX baton across the whole of `_nx_secure_tls_session_start()`.
 3. The far end gives up waiting for a ClientKeyExchange and closes. Its FIN sits behind
    the unacknowledged data in SLIRP's send queue, so it reaches the guest only *after*
-   the client finally speaks — which is why the FIN's sequence number is exactly the end
+   the client finally speaks, which is why the FIN's sequence number is exactly the end
    of the certificate flight.
 4. The client, which has meanwhile finished and knows nothing of any of this, sends
    ClientKeyExchange, ChangeCipherSpec and Finished.
@@ -2671,7 +2671,7 @@ The chain from cause to symptom, read off FS-UAE's own A2065 packet dump:
 Everything that made this look like a guru follows from step 5. No `.done`, because there
 is no emulator left to write one. Nothing on the serial port, for the same reason. And a
 core log whose size is always an exact multiple of 4,096 because stdio's buffer was never
-flushed — four older runs in `build/` carry that same fingerprint.
+flushed, four older runs in `build/` carry that same fingerprint.
 
 **`B-Trap F201 at 00F80CA0` is Kickstart's own FPU probe and is unrelated.** It is the
 UAE core's `op_illg()` reporting a line-F opcode; it sits at line 910 of the log, some
@@ -2684,8 +2684,8 @@ section of the output as evidence about the host, not about the Amiga.
 `SIG_IGN` (repeated for both the three- and the four-certificate host), the packet
 sequence above, the position of the `B-Trap` line, and the four-kilobyte log truncation.
 **Inferred:** that the EPIPE is on SLIRP's host socket specifically. Nothing else in the
-configuration is a pipe or a socket — stdout, the emulator log and the serial port are
-all plain files — and there is a control for it: `run-hangup.sh`, where the peer closes
+configuration is a pipe or a socket, stdout, the emulator log and the serial port are
+all plain files, and there is a control for it: `run-hangup.sh`, where the peer closes
 *before* the guest writes again, does **not** kill the emulator even with SIGPIPE left at
 its default. The death needs a guest write into a closed connection, which is what SLIRP
 turns into a host `write()`. What was not done is attaching a debugger to catch the
@@ -2713,7 +2713,7 @@ ClientHello and then misbehaves in one specific way. On the 14 MHz A1200:
 | answers bytes that are not TLS | the connection is closed | 10 |
 
 Four legible errors, and the machine carries on to the next command every time. **A peer
-cannot take this machine down by hanging up, and could not before this change either** —
+cannot take this machine down by hanging up, and could not before this change either**,
 the fault was never in `tls.library`. Unlike `run-fetch.sh` and `run-api.sh` this one *is*
 a baseline: the rude peer is a script in this tree, on loopback, so there is no internet,
 no third party and no certificate that can rotate underneath it.
@@ -2725,15 +2725,15 @@ Measured through `fetch`, `TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256` throughout:
 
 | host | front end | certificates | 14 MHz | `-k 28` | `-k 56` |
 |---|---|---|---|---|---|
-| `ecc256.badssl.com` | GCP | 2 | **23.3 s** verified | **11.7 s** verified | — |
-| `www.iana.org` | Cloudflare | 3 (883 + 675 + 894 B) | closed on us | **11.3 s** verified | — |
+| `ecc256.badssl.com` | GCP | 2 | **23.3 s** verified | **11.7 s** verified |, |
+| `www.iana.org` | Cloudflare | 3 (883 + 675 + 894 B) | closed on us | **11.3 s** verified |, |
 | `example.com` | Cloudflare | 4 (1003 + 742 + 824 + 1090 B) | closed on us | closed on us | **9.8 s** verified |
 
 Every one of those that completes reports `chain verified, validity dates checked`, so
 nothing about three- or four-deep chains is wrong: **the only variable is elapsed time
 against how long a given front end will wait for a ClientKeyExchange**, and that differs
 between operators by more than a factor of two. The two Cloudflare hosts bracket their
-own timeout — `www.iana.org` succeeds at 11.3 s, and `example.com`, which by its 56 MHz
+own timeout, `www.iana.org` succeeds at 11.3 s, and `example.com`, which by its 56 MHz
 figure costs about 19.6 s at 28 MHz, does not. So Cloudflare's patience is somewhere
 between 11.3 and roughly 20 seconds, which a **15-second handshake timeout** would fit.
 badssl.com's, on Google Cloud, is over 23.3 s, which is why the two-certificate hosts in
@@ -2758,7 +2758,7 @@ Two things follow that are worth keeping.
   ThreadX baton being held by the adopted task across the whole handshake
   (`port/threadx-amiga/src/tx_amiga_adopt.c` documents the hazard; this is it happening).
   Under SLIRP it is cosmetic, because SLIRP terminates TCP and has already acknowledged
-  the real server on our behalf — what the real server is waiting for is a
+  the real server on our behalf, what the real server is waiting for is a
   ClientKeyExchange, not an ACK. On real hardware it will not be cosmetic: the server
   sees the silence directly. `tls_store_fetch()` already shows the shape of the fix,
   releasing and reacquiring the baton around a blocking call, and the certificate
@@ -2768,7 +2768,7 @@ Two things follow that are worth keeping.
 
 #### TLS by default: still no, and now for a different reason
 
-The blocker is no longer a crash — there was no crash, and the argument in §4 above that
+The blocker is no longer a crash, there was no crash, and the argument in §4 above that
 rested on one is void. Nothing can be taken down by a peer that is slow, rude or absent;
 that is four measured cases and a baseline test that keeps them measured.
 
@@ -2780,8 +2780,8 @@ two-certificate case works today and works well, `-DAMINETXDUO_TLS=ON` stays a s
 CI-covered configuration, and `fetch` says something true and actionable when it cannot
 connect.
 
-What would change the answer is roughly a **2× on the client half of the handshake** —
-enough to bring 23 s under 15 — and it is arithmetic, which is the one thing on this
+What would change the answer is roughly a **2× on the client half of the handshake**,
+enough to bring 23 s under 15, and it is arithmetic, which is the one thing on this
 machine that has repeatedly turned out to be possible to make faster. Specifically not
 the error paths, which are now known good, and specifically not the certificate store or
 the chain walk, both of which were checked here and are already doing the minimum.
@@ -2796,7 +2796,7 @@ yet measured: `TLSInfo()` reports only the total.
   matching) with a documented gap?
 - ~~IPv6 default: built and off, or built and on when router advertisements appear?~~
   **Settled by M8**: built off (`AMINETXDUO_IPV6=OFF` is the shipping floor), and when
-  built, on by default with `CONFIGURE6=AUTO` — link-local always, SLAAC when a router
+  built, on by default with `CONFIGURE6=AUTO`, link-local always, SLAAC when a router
   advertises.
 
 ---
@@ -2810,9 +2810,9 @@ headers, `pragmas/bsdsocket_pragmas.h` LVO table), `amigaos/reference/amiga-boot
 - [bsdsocket.library autodoc](https://wiki.amigaos.net/amiga/autodocs/bsdsocket.doc.txt)
 - [SANA-II Network Device Driver Specification (AmigaMail Vol. 2)](http://amigadev.elowar.com/read/ADCD_2.1/AmigaMail_Vol2_guide/node01DE.html) · [SANA-II Revision 7](https://wiki.amigaos.net/wiki/SANA-II_Revision_7)
 - [eclipse-threadx/netxduo](https://github.com/eclipse-threadx/netxduo) · [eclipse-threadx/threadx](https://github.com/eclipse-threadx/threadx) · [NetX Duo BSD support](https://github.com/eclipse-threadx/rtos-docs/blob/main/rtos-docs/netx-duo/netx-duo-bsd/chapter2.md) · [issue #182: NetX Duo with and without an OS](https://github.com/eclipse-threadx/netxduo/issues/182)
-- [rondoval/lwip-amiga](https://github.com/rondoval/lwip-amiga) · [MW0MWZ/AmiTCP_NG](https://github.com/MW0MWZ/AmiTCP_NG) · [tbdye/bsdsocktest](https://github.com/tbdye/bsdsocktest) · [jbilander/catalyst](https://github.com/jbilander/catalyst) · [aros-development-team/AROS — AROSTCP](https://github.com/aros-development-team/AROS/tree/master/workbench/network/stacks/AROSTCP)
+- [rondoval/lwip-amiga](https://github.com/rondoval/lwip-amiga) · [MW0MWZ/AmiTCP_NG](https://github.com/MW0MWZ/AmiTCP_NG) · [tbdye/bsdsocktest](https://github.com/tbdye/bsdsocktest) · [jbilander/catalyst](https://github.com/jbilander/catalyst) · [aros-development-team/AROS, AROSTCP](https://github.com/aros-development-team/AROS/tree/master/workbench/network/stacks/AROSTCP)
 - [Using NetBSD's TCP/IP stack for AmigaOS (port-amiga, 2017)](http://mail-index.netbsd.org/port-amiga/2017/12/13/msg008038.html)
-- [Which is the best TCP/IP stack on the Amiga? — maidavale.org](https://maidavale.org/blog/amiga-which-is-the-best-tcpip-stack/)
+- [Which is the best TCP/IP stack on the Amiga?, maidavale.org](https://maidavale.org/blog/amiga-which-is-the-best-tcpip-stack/)
 - [Roadshow](http://roadshow.apc-tcp.de/index-en.php) · [AmiTCP/IP FAQ](https://wiki.preterhuman.net/AmiTCP/IP_Frequently_Asked_Questions)
 - [Aros/Developer/Docs/Libraries/BSDsocket](https://en.wikibooks.org/wiki/Aros/Developer/Docs/Libraries/BSDsocket)
 - [WinUAE features (uaenet.device / SLIRP / A2065)](https://www.winuae.net/features/) · [EAB: SANA2 / SLIRP / A2065](https://eab.abime.net/showthread.php?p=969044)
@@ -2822,7 +2822,7 @@ headers, `pragmas/bsdsocket_pragmas.h` LVO table), `amigaos/reference/amiga-boot
 Three more Roadshow-era commands, written against `bsdsocket.library`'s published
 vectors rather than ported: `src/tools/nc.c`, `src/tools/telnet.c`,
 `src/tools/ftp.c`, sharing `src/tools/toolsock.c` for the LVO calls. Nineteen
-vectors between them, against `fetch`'s eight — and the extra eleven are the
+vectors between them, against `fetch`'s eight, and the extra eleven are the
 point. `bind`, `listen` and `accept` had never been called by anything in this
 tree except `tests/conformance/conf_probe.c`, which calls them from **one**
 process. `nc -l` calls them from a different process from the one that connects,
@@ -2831,15 +2831,15 @@ connection open.
 
 #### What the commands are
 
-- **`nc`** — `HOST,PORT,LISTEN=-l/S,UDP=-u/S,SCAN=-z/S,TIMEOUT=-w/N/K,LOCALPORT=-p/N/K,HALFCLOSE=-N/S,VERBOSE=-v/S,CRLF/S`.
+- **`nc`**, `HOST,PORT,LISTEN=-l/S,UDP=-u/S,SCAN=-z/S,TIMEOUT=-w/N/K,LOCALPORT=-p/N/K,HALFCLOSE=-N/S,VERBOSE=-v/S,CRLF/S`.
   Connect mode, listen mode, and `-z` for a connection test over a port or a
   range. `-w` switches `connect()` to the non-blocking `FIONBIO` +
   `WaitSelect(writefds)` + `SO_ERROR` form, so the plain path stays blocking
   and simple.
-- **`telnet`** — `HOST/A,PORT,DEBUG=-d/S,QUIET/S`. Agrees to `ECHO` and
+- **`telnet`**, `HOST/A,PORT,DEBUG=-d/S,QUIET/S`. Agrees to `ECHO` and
   `SUPPRESS-GO-AHEAD`, refuses everything else with `WONT`/`DONT`, and skips
   subnegotiations to `IAC SE`.
-- **`ftp`** — `HOST,PORT,USER/K,PASSWORD/K,ACTIVE/S,DATAPORT/N/K,TIMEOUT/N/K,DEBUG=-d/S`,
+- **`ftp`**, `HOST,PORT,USER/K,PASSWORD/K,ACTIVE/S,DATAPORT/N/K,TIMEOUT/N/K,DEBUG=-d/S`,
   commands on standard input. Both transfer modes; `DATAPORT` pins the
   active-mode data port so a forwarding rule can name it.
 
@@ -2847,20 +2847,20 @@ connection open.
 
 `nc -N` (shutdown the write half at end of input) was the first thing in the
 tree to call `shutdown(SHUT_WR)` in anger, and on a connection whose **two ends
-were both on this machine** it wedged the caller inside the library — past the
+were both on this machine** it wedged the caller inside the library, past the
 reach of Ctrl-C, past `-w`, and past the harness timeout. The peer's next
 `recv()` failed with an errno the command had no name for.
 
 The A/B that identified it, on `fd1de16`: the identical staged command list
 completed in 70 s with the `shutdown()` call compiled out, and never finished
-with it in. Over a wire — the same `nc` against a host-side echo server through
-SLIRP — the half-close was correct throughout: the FIN arrived, the answer came
+with it in. Over a wire, the same `nc` against a host-side echo server through
+SLIRP, the half-close was correct throughout: the FIN arrived, the answer came
 back, the connection closed.
 
 By the time it was written up, `src/bsdsocket/` had it. `e63e5f1` gave
 `shutdown(SHUT_WR)` a real FIN instead of a `nx_tcp_socket_disconnect()` RESET,
 and `ed548df` stopped `bsd_readable()` counting `FIN_WAIT_1`/`FIN_WAIT_2` as
-readable — which is what left a half-closed socket spinning on a `select()` that
+readable, which is what left a half-closed socket spinning on a `select()` that
 returned immediately and a `recv()` that then blocked forever. Re-verified on
 `ed548df`: all three cases of `tests/tools/commands-samehost.txt` pass, `-N`
 included, and that file is now the regression test rather than the reproducer.
@@ -2872,7 +2872,7 @@ included, and that file is now the regression test rather than the reproducer.
 SLIRP is a NAT, so testing `accept()` against something outside the guest needs
 a forward. FS-UAE has the option and takes it: with
 `uae_slirp_redir = tcp:7042:7042` in the config, `fs-uae.log.txt` records
-`set option "slirp_redir" to "tcp:7042:7042" (result: 1)` — and **no host socket
+`set option "slirp_redir" to "tcp:7042:7042" (result: 1)`, and **no host socket
 is ever created**. Measured three ways: `lsof -nP -iTCP:7042 -sTCP:LISTEN`
 finds nothing while the emulator is up; a host-side dialler retrying every two
 seconds got `ECONNREFUSED` 120 times in a row; and the guest's `nc -l 7042`
@@ -2890,7 +2890,7 @@ So of the two ways to exercise the server half:
 The same limit is why **active-mode FTP is proven up to `accept()` and not
 through it**: the client binds, listens, sends a correct
 `PORT 10,0,2,15,27,148` (27·256+148 = 7060, the pinned `DATAPORT`), takes the
-server's `200` and `150` — and the callback cannot reach it, so it reports
+server's `200` and `150`, and the callback cannot reach it, so it reports
 "the server never opened the data connection" and carries on with the session.
 The `accept()` that would have completed it is the same code path the guest-to-
 guest `nc` runs, which does complete.
@@ -2908,7 +2908,7 @@ comes back, and an FTP server doing both `PASV` and `PORT`.
 - `nc -l` binds, listens, accepts a connection from another process on the
   Amiga and prints what it is sent, over `127.0.0.1` and over `10.0.2.15`.
 - `telnet` answers `DO ECHO`, `DO SUPPRESS-GO-AHEAD`, `WONT TERMINAL-TYPE`,
-  `WONT WINDOW-SIZE` — verified from the server's side, not just ours — then
+  `WONT WINDOW-SIZE`, verified from the server's side, not just ours, then
   carries the session and reports the close.
 - `ftp` passive: `USER`/`PASS`/`SYST`/`PWD`/`PASV`/`LIST`/`TYPE I`/`RETR`/
   `SIZE`/`STOR`/`QUIT`, 49 bytes down and 21 up, both byte-exact.
@@ -2923,7 +2923,7 @@ comes back, and an FTP server doing both `PASV` and `PORT`.
 `NIL:` handles) and a `wait <secs>` line, because a listener and the thing that
 connects to it must be running at the same time and `SystemTagList()` waits.
 Its redirection also now adds only the half the command has not brought itself
-— appending a second `>` made the Shell silently drop one of them.
+appending a second `>` made the Shell silently drop one of them.
 
 And `tool_output_write()` calls `Flush()` first. These commands print through
 `VPrintf()`, which dos.library buffers, and socket bytes through `Write()`,
@@ -2980,8 +2980,8 @@ AmigaOS 3.x / m68k support are different ports and neither implies the other.
 - `.github/workflows/non-native.yml` has an `amiga` job that cross-builds m68k on
   **every push**, with both autotools and CMake, against bebbo's amiga-gcc 6.5.0
   and AmiSSL 5.27. Classic AmigaOS is a live target in curl, not a historical one.
-- **8.21.0 was chosen over master**, not because master is broken — the OS3 branch
-  is identical in both — but because a build harness should pin a release. Nothing
+- **8.21.0 was chosen over master**, not because master is broken, the OS3 branch
+  is identical in both, but because a build harness should pin a release. Nothing
   older is needed: there is no "last version that worked on Amiga" cliff to find.
 
 The upstream CI recipe is `-mcrt=clib2 … -lnet -lm -latomic`. Our toolchain is
@@ -2991,7 +2991,7 @@ between that CI job and this one.
 ### 11.2 What the toolchain does not provide, enumerated by linking
 
 `libcurl.a` builds clean. The `curl` command-line tool does not, and the whole
-gap is this list — the complete set of undefined symbols from the first link:
+gap is this list, the complete set of undefined symbols from the first link:
 
 | missing | class | answer |
 |---|---|---|
@@ -3002,7 +3002,7 @@ gap is this list — the complete set of undefined symbols from the first link:
 Three of those deserve their own note.
 
 **`_fstat` exists and is worse than missing.** `libc.a`'s `lib_a-dummy.o` defines
-it as `moveq #0,d0 / rts` — success, with **nothing written to the caller's
+it as `moveq #0,d0 / rts`, success, with **nothing written to the caller's
 struct**. So `S_ISREG(st.st_mode)` reads whatever was on the stack. Our
 replacement zeroes the struct, asks `_isatty()` what the descriptor is, and
 measures a regular file with `_lseek()`.
@@ -3023,8 +3023,8 @@ before `main()`. Checked rather than assumed: the Kickstart 3.1 40.68 A1200 imag
 contains `mathieeesingbas.library` and **no other math library**. Every Workbench
 install has `mathieeedoubbas.library` in `LIBS:`, so a real machine is fine and a
 bare directory hard drive is not; `clients/curl/run-fsuae.sh` stages one and says
-so if it cannot find one. curl cannot avoid doubles — the progress meter,
-`--max-time` and `--write-out` all use them — and there is no reason to try.
+so if it cannot find one. curl cannot avoid doubles, the progress meter,
+`--max-time` and `--write-out` all use them, and there is no reason to try.
 
 ### 11.3 The toolchain hands `main()` the wrong `argv`
 
@@ -3036,8 +3036,8 @@ so if it cannot find one. curl cannot avoid doubles — the progress meter,
     jsr      _main            ; 4eb9 xxxxxxxx
 ```
 
-`__argv` is a pointer, not an array — crt0.o's entire `.bss` is 16 bytes, holding
-`__argv` at 0 and `__savedSp` at 8 — so `pea` pushes its **address** and `main()`
+`__argv` is a pointer, not an array, crt0.o's entire `.bss` is 16 bytes, holding
+`__argv` at 0 and `__savedSp` at 8, so `pea` pushes its **address** and `main()`
 gets one level of indirection too many. Measured, `argvtest alpha beta`:
 
 | | argc | argv[0] | argv[1] | argv[2] |
@@ -3055,9 +3055,9 @@ takes its arguments through `ReadArgs()` and reads `argc` only, to tell a
 Workbench launch from a Shell one. A ported Unix client reads `argv` and nothing
 else, so for curl this is the difference between working and printing nothing.
 
-`clients/compat/fix-crt0.py` swaps two bytes — `pea (xxx).L` and
+`clients/compat/fix-crt0.py` swaps two bytes, `pea (xxx).L` and
 `move.l (xxx).L,-(sp)` are both six bytes with the same 32-bit absolute operand,
-so no offset and no relocation moves — into a **copy in the build directory**. The
+so no offset and no relocation moves, into a **copy in the build directory**. The
 installed toolchain is never modified: a build host is not ours to change, and the
 next person to fetch the pinned toolchain has to get the same result. The script
 matches the whole three-instruction sequence rather than a bare `pea`, patches
@@ -3099,40 +3099,40 @@ What is *not* fixed, and is a stack question rather than a fixture one: **thirty
 seconds is a long time to spend deciding a nameserver is not answering.** BIND's
 own default is five seconds a try with two retries. Whatever `nx_dns`'s
 `wait_option` is set to on our resolve path, a machine whose first configured
-nameserver is dead currently stalls every lookup by half a minute — and a real
+nameserver is dead currently stalls every lookup by half a minute, and a real
 Amiga with a hand-typed `name_resolution` is exactly where that happens.
 
 ### 11.5 The harness
 
 `clients/` is a general *port a Unix network client to m68k AmigaOS* harness, not
-a curl-specific one — wget is the next tenant and should need nothing new from
+a curl-specific one, wget is the next tenant and should need nothing new from
 `clients/compat/`.
 
-- `clients/amiga-client.sh` — sourceable. Resolves the toolchain through
+- `clients/amiga-client.sh`, sourceable. Resolves the toolchain through
   `tools/amiga-toolchain.sh` (so a client build and a stack build never disagree
   about the compiler), builds the support archives, exports the flags.
-- `clients/compat/` — the libc, libgcc and crt0 gaps above.
-- `clients/curl/build.sh` — CMake, not autotools, because autotools would need
+- `clients/compat/`, the libc, libgcc and crt0 gaps above.
+- `clients/curl/build.sh`, CMake, not autotools, because autotools would need
   `autoreconf` on the build host and CMake is already a dependency of this tree.
-- `clients/curl/run-fsuae.sh`, `clients/curl/clientrun.c` — the run.
-- `third_party/curl` — a submodule pinned to `curl-8_21_0`. **Nothing in curl is
+- `clients/curl/run-fsuae.sh`, `clients/curl/clientrun.c`, the run.
+- `third_party/curl`, a submodule pinned to `curl-8_21_0`. **Nothing in curl is
   patched.**
 
 Three flags every such port needs, all of them Roadshow NDK facts rather than
 curl facts:
 
-- **`-D__USE_NEW_TIMEVAL__`** — the NDK's `<devices/timer.h>` and newlib both
+- **`-D__USE_NEW_TIMEVAL__`**, the NDK's `<devices/timer.h>` and newlib both
   define `struct timeval`, incompatibly. The NDK provides this switch itself, in
   as many words, and it is the supported route: define it and AmigaOS uses
   `struct TimeVal` and leaves `struct timeval` to libc.
-- **`-D_SYS_MBUF_H`** — `<proto/bsdsocket.h>` reaches `<net/if.h>`, which has
+- **`-D_SYS_MBUF_H`**, `<proto/bsdsocket.h>` reaches `<net/if.h>`, which has
   `struct __timeval ifi_lastchange;` as a **field**, and `struct __timeval` is
   never defined anywhere in the NDK. It is an opaque type the inline stubs use
   behind a pointer. Nothing in a client wants mbufs; the header is suppressed by
   its own guard.
-- **`-include sys/types.h`** — the NDK's `<sys/socket.h>` declares
+- **`-include sys/types.h`**, the NDK's `<sys/socket.h>` declares
   `recv`/`send`/`sendto` returning `ssize_t` without declaring `ssize_t`. Without
-  this, `proto/bsdsocket.h` does not compile at all — which a configure script
+  this, `proto/bsdsocket.h` does not compile at all, which a configure script
   reports as *"AmigaOS bsdsocket.library not found"* and then silently builds a
   client against a libc networking API this toolchain does not have.
   `tests/conformance/build.sh` carries the identical line for the identical
@@ -3142,7 +3142,7 @@ Two settings that are curl's own quirks:
 
 - **`-DHAVE_SELECT=1`.** `lib/select.c` is `#if !defined(HAVE_SELECT) &&
   !defined(HAVE_POLL)` → `#error`. curl's probe cannot see `select` here because
-  Roadshow has `WaitSelect()` and no `select()` — and `lib/curl_setup.h` then
+  Roadshow has `WaitSelect()` and no `select()`, and `lib/curl_setup.h` then
   `#define`s `select(a,b,c,d,e)` to `WaitSelect(a,b,c,d,e,0)` itself. The function
   is there; the probe does not include `curl_setup.h`. On the clib2 toolchain
   upstream tests against, libc has a real `select()` and the probe passes for the
@@ -3154,7 +3154,7 @@ Two settings that are curl's own quirks:
 **A fabricated `libnet.a` is relied on and not cosmetic.** curl's CMakeLists
 hardcodes `list(APPEND CURL_NETWORK_AND_TIME_LIBS "net" "m" "atomic")` for AMIGA,
 with no switch. `libm.a` is real; the other two we make. `libatomic.a` is empty on
-purpose. `libnet.a` holds **one weak `SocketBase`** — because the NDK inlines all
+purpose. `libnet.a` holds **one weak `SocketBase`**, because the NDK inlines all
 dereference it, and a `check_symbol_exists("IoctlSocket", …)` probe has no
 translation unit that defines it, so the probe **links** rather than compiles and
 fails. That is how curl silently loses `HAVE_IOCTLSOCKET_CAMEL_FIONBIO`, which is
@@ -3166,14 +3166,14 @@ have to be re-patched on every version bump.
 4,096 bytes; this toolchain's `crt0.o` exports no `__stack` hook to ask for more
 (checked). `ClientRun` starts everything with `NP_StackSize` = 256 KB, `System()`
 passing unknown tags through to `CreateNewProc()` being the documented route. A
-human at a Shell prompt needs `stack 200000` first — ordinary Amiga practice for a
+human at a Shell prompt needs `stack 200000` first, ordinary Amiga practice for a
 ported program, and worth putting in the README.
 
 ### 11.6 The TLS question: write the backend, do not import a library
 
 **Recommendation: write a curl `vtls` backend over `tls.library`.** Not mbedTLS,
-not wolfSSL. The reason is not size — a multi-megabyte curl is explicitly
-acceptable here — it is that `src/crypto68k/` is wired into `nx_secure` and a
+not wolfSSL. The reason is not size, a multi-megabyte curl is explicitly
+acceptable here, it is that `src/crypto68k/` is wired into `nx_secure` and a
 third-party library would not reach it.
 
 The arithmetic, from the measured per-operation figures earlier in this document
@@ -3184,8 +3184,8 @@ The arithmetic, from the measured per-operation figures earlier in this document
 | ECDHE_RSA, 2-cert chain: 3 × RSA-2048 public + keygen + shared | 3×0.681 + 0.381 + 1.368 = **3.79 s** | 3×2.011 + 1.475 + 5.245 = **12.75 s** |
 | ECDHE_ECDSA, 2-cert chain: 3 × P-256 verify + keygen + shared | 3×1.961 + 0.381 + 1.368 = **7.63 s** | 3×7.028 + 1.475 + 5.245 = **27.80 s** |
 
-Against the **measured whole-handshake** totals through `tls.library` — 6.8 s for
-the RSA case, 23.3 s for `ecc256.badssl.com` — losing `crypto68k` adds about
+Against the **measured whole-handshake** totals through `tls.library`, 6.8 s for
+the RSA case, 23.3 s for `ecc256.badssl.com`, losing `crypto68k` adds about
 **9 seconds** to an RSA chain and **20 seconds** to an ECDSA one. Cloudflare gives
 up somewhere between 11.3 s and roughly 20 s. So this is not "slower", it is the
 difference between a handshake that completes and one the far end abandons: the
@@ -3194,7 +3194,7 @@ from 23.3 s (already failing on Cloudflare, fine on GCP) to ~43 s (failing
 everywhere).
 
 **Two honest caveats on those numbers.** The right-hand column is *vendored
-`nx_crypto`*, not mbedTLS or wolfSSL, and neither of those is that slow — both
+`nx_crypto`*, not mbedTLS or wolfSSL, and neither of those is that slow, both
 have decent portable bignum, and `crypto68k`'s win came mostly from *algorithmic*
 fixes (sliding-window plus leading-zero skipping for RSA; a limb-domain Solinas
 reduction for P-256) that a well-maintained library already has. Hand-written
@@ -3207,9 +3207,9 @@ recommendation that is the measurement to make.**
 **On mbedTLS's `MBEDTLS_*_ALT` hooks specifically**, since they are the obvious
 counter-argument: they do not rescue this. `crypto68k`'s P-256 code is written
 against `nx_crypto`'s `NX_CRYPTO_EC` structures and its huge-number
-representation, and the two things that made it fast — the Solinas reduction
+representation, and the two things that made it fast, the Solinas reduction
 rewritten to work on limbs instead of a byte stream, and the eight-limb
-add/subtract carry chains in `c68k_p256.S` — are *representation-specific*.
+add/subtract carry chains in `c68k_p256.S`, are *representation-specific*.
 Retargeting them to `mbedtls_mpi` is a rewrite of the arithmetic layer, not a
 recompile, and `MBEDTLS_BIGNUM_ALT` is all-or-nothing. The work is larger than
 writing the vtls backend, and at the end of it there would be two TLS
@@ -3222,7 +3222,7 @@ All of that would have to be built again around an imported library.
 
 #### What the backend actually costs
 
-`struct Curl_ssl` (`lib/vtls/vtls_int.h`) is 20 slots and many are NULL-able —
+`struct Curl_ssl` (`lib/vtls/vtls_int.h`) is 20 slots and many are NULL-able,
 `mbedtls.c` leaves six NULL and uses the shared `Curl_ssl_adjust_pollset`. The
 mapping is close to one-to-one:
 
@@ -3251,18 +3251,18 @@ Four things it is *not* free of, stated in advance:
    properly means a state-machine handshake in `tls.library`, which is a bigger
    piece of work than the backend.
 2. **No ALPN**, so HTTP/1.1 only. `nghttp2` is not built for m68k anyway.
-3. **curl has to be patched after all** — a new `CURLSSLBACKEND_*` value in
+3. **curl has to be patched after all**, a new `CURLSSLBACKEND_*` value in
    `include/curl/curl.h`, an entry in `vtls.c`'s backend table, `Makefile.inc`,
    `CMakeLists.txt`, `curl_setup.h`. Five small patches, rebased on each pinned
    tag. The "nothing in curl is patched" property of the `http://` build does not
    survive TLS.
-4. **No session resumption** — see below, because it is the largest number on the
+4. **No session resumption**, see below, because it is the largest number on the
    table and it is missing at the `nx_secure` level, not the `tls.library` level.
 
 #### Where a verified-chain cache would sit, and what it is worth
 
 It belongs **inside `tls.library`**, in the `nx_secure_remote_certificate_verify`
-replacement it already installs — the one that asks each received certificate who
+replacement it already installs, the one that asks each received certificate who
 issued it and looks the answer up in the trust-store index. Add a second index,
 keyed by a hash of the intermediate's whole DER, of certificates whose signature
 has already been checked against a trusted root; on a hit, admit the intermediate
@@ -3287,7 +3287,7 @@ fifteen seconds, and anyone who expects it to will be disappointed. It is cheap
 and it is worth having; it is not the answer.
 
 **The answer, if there is one, is session resumption**, because a resumed
-handshake does *no* public-key work at all — 23 s would become well under one
+handshake does *no* public-key work at all, 23 s would become well under one
 second on the second and every subsequent connection to a host. curl already has
 the machinery on its side (`lib/vtls/vtls_scache.c` exists for exactly this).
 `nx_secure` does not: `nx_secure_tls_send_clienthello.c:199` sets
@@ -3296,14 +3296,14 @@ the machinery on its side (`lib/vtls/vtls_scache.c` exists for exactly this).
 no `session_ticket` extension anywhere in the tree (`nx_secure_tls_process_
 newsessionticket.c` is TLS 1.3 only). The ServerHello's session ID *is* stored
 (`nx_secure_tls_process_serverhello.c:158`) and then never used. So resumption is
-a real piece of work in the vendored library — offering the stored ID, and the
-abbreviated-handshake path when the server accepts it — and it is the single
+a real piece of work in the vendored library, offering the stored ID, and the
+abbreviated-handshake path when the server accepts it, and it is the single
 highest-value thing anyone could do to make HTTPS practical on this machine.
 Larger than the backend; larger than the chain cache; worth more than both.
 
 #### Order
 
-1. `http://` — **done**, above.
+1. `http://`, **done**, above.
 2. The vtls backend over `tls.library`, with a blocking handshake. Puts `https://`
    on two-certificate hosts and on anything with a patient front end.
 3. Session resumption in `nx_secure`, then the verified-chain cache. In that
@@ -3323,7 +3323,7 @@ not built. Four differences that matter, in the order they will bite:
    `WaitSelect()`; **wget knows none of it**, and gnulib's `socket`, `connect`,
    `recv`, `send`, `select` and `close` modules assume POSIX descriptors or
    Winsock. Teaching wget the bsdsocket ABI is the port, and it is a larger job
-   than everything in §11.2 and §11.3 put together — those were toolchain gaps,
+   than everything in §11.2 and §11.3 put together, those were toolchain gaps,
    this is the client's own model of the world.
 
 2. **gnulib, and therefore autotools.** wget's `bootstrap.conf` lists ~110
@@ -3331,13 +3331,13 @@ not built. Four differences that matter, in the order they will bite:
    `sigpipe`, `flock`, `futimens`, `symlink`, `group-member`, `getpass-gnu`,
    `iconv`, `regex` and `unicase/u8-tolower`. A git checkout needs `./bootstrap`,
    which needs autoconf, automake, libtool, gettext and a gnulib checkout on the
-   build host — exactly what `clients/curl/build.sh` avoids by using CMake. **Use
+   build host, exactly what `clients/curl/build.sh` avoids by using CMake. **Use
    a pinned release tarball**, which ships a generated `configure` and the gnulib
    sources in `lib/`. Note also that this toolchain has no `pipe()`, no `fork()`
    and no `posix_spawn()`; several of those modules have gnulib replacements and
    several do not.
 
-   The precedent to copy is in the tree already: `msdos/config.h` +
+   The precedent to copy is in the tree already:  2250  +
    `msdos/Makefile.DJ` is a **hand-written config and makefile** for DJGPP that
    skips `configure` entirely, and `vms/` is the same idea again. An
    `amiga/config.h` in that style is very likely the right shape, and it means
@@ -3345,25 +3345,20 @@ not built. Four differences that matter, in the order they will bite:
 
 3. **No non-blocking connect, and no timeout that works.**
    `connect_with_timeout()` bounds a *blocking* `connect()` with
-   `run_with_timeout()`, which is `sigsetjmp` + `alarm` — neither of which does
+   `run_with_timeout()`, which is `sigsetjmp` + `alarm`, neither of which does
    anything here. A blocking `connect()` to a dead port therefore has to fail
    promptly by itself or wget hangs with nothing of its own to save it. Our
    `connect()`'s own timeout becomes relied on in a way it is not for curl.
 
 4. **TLS is *easier* than curl's, which is the one pleasant surprise.** wget has
-   no plugin backend — `--with-ssl={gnutls,openssl,no}` and nothing else — but
+   no plugin backend, `--with-ssl={gnutls,openssl,no}` and nothing else, but
    the interface those two implement is four functions (`src/ssl.h`):
 
-   ```c
-   bool ssl_init (void);
-   void ssl_cleanup (void);
-   bool ssl_connect_wget (int fd, const char *host, int *continue_session);
-   bool ssl_check_certificate (int fd, const char *host);
-   ```
+    18 
 
-   plus one `fd_register_transport()` call to route reads and writes. Against
+   plus one  2265  call to route reads and writes. Against
    `tls.library` that is on the order of 150 lines, against 600–900 for curl's
-   20-slot `Curl_ssl` vtable — and `ssl_check_certificate()` is a no-op for us,
+   20-slot `Curl_ssl` vtable, and `ssl_check_certificate()` is a no-op for us,
    because `TLSOpen()` has already verified the chain and the host name and will
    not return a connection it could not vouch for.
 
@@ -3397,8 +3392,8 @@ Features: alt-svc HSTS SSL threadsafe
 ```
 
 The 502 bytes are byte-identical to the host's copy (SHA-256 `7e93f4f1…`), and
-so are `ecc256.badssl.com`'s 684 and — the one that matters for the record
-loop — **998,733 bytes of `www.iana.org/assignments/media-types/media-types.xhtml`
+so are `ecc256.badssl.com`'s 684 and, the one that matters for the record
+loop, **998,733 bytes of `www.iana.org/assignments/media-types/media-types.xhtml`
 over TLS, SHA-256 `f0771af7…`**.
 
 #### Which hosts answer, and where the failures are
@@ -3412,10 +3407,10 @@ real page; the body sizes are the servers'.
 | `ecc256.badssl.com` | 2 | ECDHE-ECDSA | **200**, 684 B, 24.26 s | **200**, 12.38 s |
 | `www.iana.org` | 3 | ECDHE-ECDSA, Cloudflare | (35) closed at 23.3 s | **200**, 6,253 B, 12.04 s |
 | `example.com` | 4 | Cloudflare | (35) closed at 39.7 s | (35) closed at 19.9 s |
-| `wrong.host.badssl.com` | 2 | — | **(60) refused**, 6.1 s | — |
+| `wrong.host.badssl.com` | 2 |, | **(60) refused**, 6.1 s |, |
 
 **The two failures are the far end's patience, not ours.** Both are Cloudflare
-and both are `curl: (35) the connection is closed` — the peer hanging up while
+and both are `curl: (35) the connection is closed`, the peer hanging up while
 this machine is still doing arithmetic, which is the same wall §11.6 predicted
 and `src/tools/fetch.c` already documents. Note `ecc256.badssl.com` succeeding
 at 24.26 s where a Cloudflare host gives up at 20: nginx will wait and a CDN
@@ -3458,7 +3453,7 @@ https www.iana.org 998,733 B in 63.90 s =  15,634 B/s
 
 **7.0× to 7.5×**, and it is all symmetric: AES-128-CBC plus HMAC-SHA256 over every byte,
 twice (decrypt and authenticate). That is a `crypto68k` question and not a
-backend one — the handshake is a fixed cost per connection and this is a cost
+backend one, the handshake is a fixed cost per connection and this is a cost
 per byte, so it is the number that decides whether a 5 MB download over HTTPS is
 five minutes or fifty. It is also the reason the 998 KB test exists at all:
 without it the backend would have been declared working on three pages of under
@@ -3468,14 +3463,14 @@ without it the backend would have been declared working on three pages of under
 
 | | |
 |---|---|
-| `clients/curl/amitls.c` | the backend, 703 lines — ~300 of preamble and 405 of code, against the 600–900 estimated |
+| `clients/curl/amitls.c` | the backend, 703 lines, ~300 of preamble and 405 of code, against the 600–900 estimated |
 | `clients/curl/amitls.h` | the one `extern` |
 | `clients/curl/curl-amitls.patch` | **31 added lines over six files** |
 
 The 20-slot `struct Curl_ssl` mapped as §11.6 said it would. Eight slots are
-NULL — `shut_down` (`TLSClose()` sends `close_notify` itself), `cert_status_
+NULL, `shut_down` (`TLSClose()` sends `close_notify` itself), `cert_status_
 request`, `close_all`, the three engine slots, `sha256sum` and
-`get_channel_binding` — and `adjust_pollset` is curl's shared
+`get_channel_binding`, and `adjust_pollset` is curl's shared
 `Curl_ssl_adjust_pollset`. What was not foreseen is that `random` cannot be
 NULL: with `USE_SSL` defined, `lib/rand.c` routes **every** `Curl_rand()` in
 libcurl through the TLS backend, and `Curl_ssl_random()` answers
@@ -3485,7 +3480,7 @@ libcurl through the TLS backend, and `Curl_ssl_random()` answers
 naming. `_curl_ca_bundle_supported` is a variable each backend's CMake block
 sets for itself; a backend that does not set it skips curl's whole "CA
 handling" section, and a `-DCURL_CA_BUNDLE=…` then reaches `curl_config.h`
-**verbatim** — including the literal string `none`, which libcurl dutifully
+**verbatim**, including the literal string `none`, which libcurl dutifully
 tries to open. That failure arrives as `TLS_ERR_TRUSTSTORE`, which reads as
 "your trust store is missing" and sent this in the wrong direction for a while.
 
@@ -3510,8 +3505,8 @@ What the blocking handshake does cost is exactly one thing: for 4 to 24 seconds
 curl's event loop is stopped, so the progress meter does not move, `--max-time`
 cannot fire and Ctrl-C is not read. `TLSA_Timeout` is set from
 `Curl_timeleft_ms()` so a dead peer is still bounded. Making it properly
-non-blocking means a state-machine handshake **inside tls.library** — `TLSOpen()`
-returning `TLS_PENDING` and a `TLSHandshake()` to pump — which is a larger piece
+non-blocking means a state-machine handshake **inside tls.library**, `TLSOpen()`
+returning `TLS_PENDING` and a `TLSHandshake()` to pump, which is a larger piece
 of work than this whole backend and is worth doing only if curl's multi
 interface ever matters here.
 
@@ -3520,14 +3515,14 @@ The obvious `recv_plain` polls the socket with a zero timeout and answers
 `CURLE_AGAIN` when nothing is readable. It hangs, and the reason is a layer
 nobody had looked at: `nx_secure` keeps *undecrypted* bytes of its own in
 `nx_secure_record_queue_header` (`nx_secure_tls_session_receive_records.c:106`)
-whenever one TCP segment carried more than one TLS record — the ordinary case
+whenever one TCP segment carried more than one TLS record, the ordinary case
 for a server that writes headers and body separately. In that state the socket
 is not readable, `TLSPending()` is 0 because no plaintext exists yet, and a
 complete record is sitting there ready to decrypt. A backend that answered
 `CURLE_AGAIN` would wait on a descriptor that will never become readable again.
 
-`TLSBuffered()` now answers that half, so `amitls_recv()` asks all three —
-plaintext ready, ciphertext held, bytes on the socket — and only answers
+`TLSBuffered()` now answers that half, so `amitls_recv()` asks all three,
+plaintext ready, ciphertext held, bytes on the socket, and only answers
 `CURLE_AGAIN` when all three say no. **Reads are therefore non-blocking**:
 `--max-time` fires during a transfer, the progress meter moves and Ctrl-C is
 read. The handshake is the one place that still stops the world. What is not
@@ -3542,7 +3537,7 @@ same two runs. That is the network, not the extra library call: a few hundred
 
 **3. No ALPN, and curl says so out loud.** `Curl_alpn_set_negotiated(…, NULL, 0)`
 prints *"ALPN: server did not agree on a protocol. Uses default."* and curl
-uses HTTP/1.1. Nothing is lost — `nghttp2` is not built for m68k.
+uses HTTP/1.1. Nothing is lost, `nghttp2` is not built for m68k.
 
 Connection reuse across requests works and is tested: two URLs on the same host
 in one command line report `1 connects` then `0 connects`, the second answering
@@ -3552,8 +3547,8 @@ in one command line report `1 connects` then `0 connects`, the second answering
 
 Both landed in `src/tlslib/` while this was being written, and both are wired.
 
-**`TLSRandom(base, buffer, length)`** is the machine's one entropy pool — the
-SHA-256 DRBG the session keys come from — and it is what `amitls_random()` asks
+**`TLSRandom(base, buffer, length)`** is the machine's one entropy pool, the
+SHA-256 DRBG the session keys come from, and it is what `amitls_random()` asks
 now. It answers -1 until a connection has been opened in the calling program,
 because the pool lives in `bsdsocket.library` and `tls.library` reaches it
 through the link `TLSOpen()` makes; curl calls `Curl_rand()` well before its
@@ -3569,7 +3564,7 @@ possible. It is deliberately not folded into `TLSPending()` and should not be:
 
 **One hazard they arrived with.** `TLS_LIB_VERSION` is still 1 and
 `TLS_LIB_REVISION` still 0, so `OpenLibrary("tls.library", 1)` happily returns a
-library that predates both vectors — and calling one would jump past the
+library that predates both vectors, and calling one would jump past the
 `(APTR)-1` terminator `MakeLibrary()` stopped at, on a machine with no memory
 protection. `amitls_open_library()` compares `lib_NegSize` against the LVO and
 falls back to the blocking read and the LCG when they are missing, which is what
@@ -3605,19 +3600,19 @@ Three `curl` invocations, three separate processes, 14 MHz:
 ```
 
 **5.10 s to 0.62 s**, and it crosses process boundaries because the cache is the
-library's rather than curl's — which is why `lib/vtls/vtls_scache.c` is compiled
+library's rather than curl's, which is why `lib/vtls/vtls_scache.c` is compiled
 in and unused, and should stay that way. A per-process cache would have helped
 nobody here: the case that matters on this machine is running the same command
 twice.
 
 `TLSA_NoResume` is deliberately not wired to a curl option. curl has no switch
-that means it — `--no-sessionid` turns off *curl's* cache, not the library's —
+that means it, `--no-sessionid` turns off *curl's* cache, not the library's,
 and inventing one would be a patch to curl for something nobody asked for.
 
 **The one thing that did not resume, chased down.** During development a
 second connection to `ecc256.badssl.com` failed with `(35) the connection is
 closed` after **61.6 s**, against 24.9 s for the full handshake before it. The
-standing hypothesis was the header bug that `1ceb741` fixed — `a0`/`a1` were
+standing hypothesis was the header bug that `1ceb741` fixed, `a0`/`a1` were
 listed as inputs only in the inline stubs, so the compiler assumed they survived
 a call and a second call could be made on a stale pointer.
 
@@ -3632,7 +3627,7 @@ build/curl-oldabi/…/vtls/amitls.c.obj   6216 bytes   IDENTICAL
 
 Byte for byte, at `-O2`. The bug needs two stub calls close enough together for
 the compiler to keep the register live across both, which is what
-`src/tools/fetch.c` does — `io_write()` then `io_read()` through one small
+`src/tools/fetch.c` does, `io_write()` then `io_read()` through one small
 struct in one function. This backend loads `backend->conn` from memory in each
 of `amitls_recv`, `amitls_send`, `amitls_close` and `amitls_data_pending`, so
 there was never a load to eliminate. The generated code was correct by accident
@@ -3641,19 +3636,19 @@ of shape, not by the constraint being right.
 So the 61.6 s remains unexplained, and the most likely answer is the dullest:
 it ran against a `tls.library` built from an uncommitted working tree, mid
 development, which has never existed as a commit. Against `e42db07` the case is
-clean — `ecc256.badssl.com` three times in three separate processes, 14 MHz:
+clean, `ecc256.badssl.com` three times in three separate processes, 14 MHz:
 **23.27 s, then 0.58 s, then 0.58 s**, all three HTTP 200 with the same 684
 bytes.
 
 **The tables above are first connections**, which is what a host still costs
 before it is in the cache. They were first measured against the `tls.library` at
 `f535728` and re-measured against `e42db07` with the non-blocking read in place;
-nothing moved by more than a tick — `tls-v1-2` 6.18 → 5.78 s, `ecc256` 24.42 →
+nothing moved by more than a tick, `tls-v1-2` 6.18 → 5.78 s, `ecc256` 24.42 →
 24.38 s, `www.iana.org` and `example.com` still closed on by the CDN at 23.5 and
 39.5 s, `wrong.host.badssl.com` still refused.
 
 
-## 12. Conformance, named — and the client access patterns behind it (2026-07-25)
+## 12. Conformance, named, and the client access patterns behind it (2026-07-25)
 
 The loopback tier reads **125 passed, 1 failed, 16 skipped**. A count is not a work list,
 so here is every one of the 17 with its name, its cause, and a classification that does
@@ -3666,7 +3661,7 @@ not flatter us:
 
 | # | Name | Class | Why |
 |---|---|---|---|
-| 3 | `socket(): create SOCK_RAW (ICMP)` — **failed** | **(a)** + (b) | We do not implement `SOCK_RAW` at all. The *red* is (b): `test_socket.c:52` skips only on `EACCES`, and `EACCES` means "you lack privilege" on an OS with no privilege model, so we answer `ESOCKTNOSUPPORT` and the test stays red. The *absence* is (a). |
+| 3 | `socket(): create SOCK_RAW (ICMP)`, **failed** | **(a)** + (b) | We do not implement `SOCK_RAW` at all. The *red* is (b): `test_socket.c:52` skips only on `EACCES`, and `EACCES` means "you lack privilege" on an OS with no privilege model, so we answer `ESOCKTNOSUPPORT` and the test stays red. The *absence* is (a). |
 | 27 | `recv(MSG_OOB): urgent data delivery` | **(a)** | NetX Duo's TCP has no urgent pointer: no `URG` on transmit, none parsed on receive. `ftp`'s `ABOR` and `telnet`'s interrupt both send `IAC IP` as urgent data. |
 | 64 | `WaitSelect(): exceptfds detects OOB data` | **(a)** | Same root as 27. Skipped because the `send(MSG_OOB)` that sets it up already fails. |
 | 39–42 | `tcp_network_64k`, `udp_network_datagram`, `accept_external`, `tcp_network_large` | **(c)** | `helper_is_connected()` is false on the loopback tier by construction. 39, 40 and 42 pass on the network tier. |
@@ -3684,11 +3679,11 @@ That one is **(c)**, and the evidence is on the host side rather than the Amiga 
 suite asks the helper to connect back to the Amiga on port 7861, and the helper log says
 `CONNECT to 127.0.0.1:7861 failed: [Errno 61] Connection refused`. Under FS-UAE's SLIRP
 the guest has no inbound path unless one is opened explicitly, and the obvious lever does
-not work — `uae_slirp_ports = 7861` reaches the config (it is in the FS-UAE log) and
+not work, `uae_slirp_ports = 7861` reaches the config (it is in the FS-UAE log) and
 changes nothing; FS-UAE 3.2.35's inbound mode appears to be the fixed `21-23,80` set, and
 7861 cannot be moved into it because the suite derives that port as `base + 161`.
 The capability itself is verified elsewhere, on loopback, by `tests/clients` groups D, E,
-I and M — see below.
+I and M, see below.
 
 ### 12.1 What curl actually calls
 
@@ -3699,11 +3694,11 @@ and the OS3 path is one `OpenLibrary` plus one `SocketBaseTags`.
 
 - `OpenLibrary("bsdsocket.library", 4)`, then
   `SocketBaseTags(SBTM_SETVAL(SBTC_ERRNOPTR(sizeof(errno))), &errno,
-  SBTM_SETVAL(SBTC_LOGTAGPTR), "curl", TAG_DONE)`. **Any nonzero return is fatal** —
+  SBTM_SETVAL(SBTC_LOGTAGPTR), "curl", TAG_DONE)`. **Any nonzero return is fatal**,
   curl reports "SocketBaseTags ERROR" and refuses to run. This one call gates the port.
 - `select()` is `#define`d to `WaitSelect(a, b, c, d, e, 0)` (`curl_setup.h:461`).
   `HAVE_POLL` is off, so every wait in curl goes through it, with `FD_SETSIZE` = 64 from
-  this toolchain's `sys/select.h` — which happens to equal our `BSD_DEFAULT_DTABLESIZE`.
+  this toolchain's `sys/select.h`, which happens to equal our `BSD_DEFAULT_DTABLESIZE`.
 - `HAVE_FCNTL` is explicitly undefined for the bsdsocket build, so non-blocking mode is
   `IoctlSocket(sockfd, FIONBIO, (char *)&flags)` with a `long`.
 - Non-blocking connect, then writable, then `getsockopt(SOL_SOCKET, SO_ERROR)`
@@ -3718,11 +3713,11 @@ and the OS3 path is one `OpenLibrary` plus one `SocketBaseTags`.
   `bind(127.0.0.1, 0)` + `getsockname` + `listen(1)` + `connect` + non-blocking
   `accept(listener, NULL, NULL)` + a nonce round trip. So **curl exercises the server side
   of the ABI on every multi handle**, `accept()` with two NULLs included. If `HAVE_PIPE`
-  is detected instead, curl uses `pipe()` — and a newlib pipe descriptor is not a
+  is detected instead, curl uses `pipe()`, and a newlib pipe descriptor is not a
   bsdsocket descriptor, so it would end up inside a `WaitSelect()` fd set and nothing
   would ever wake. Checked rather than assumed: this toolchain **declares** `pipe()` in
   `sys-include/sys/unistd.h:182` but does not **link** it (`undefined reference to
-  'pipe'`), and curl detects it with `check_function_exists`, which links — so
+  'pipe'`), and curl detects it with `check_function_exists`, which links, so
   `HAVE_PIPE` comes out 0 and `wakeup_inet` is chosen. That is luck, not design: a port
   that pre-fills the feature cache or sets `HAVE_PIPE` by hand breaks curl's multi
   interface in a way that looks like a hang rather than an error.
@@ -3732,11 +3727,11 @@ harder one: `connect_with_timeout()` bounds a **blocking** connect with
 `run_with_timeout()`, which needs `sigsetjmp` + `alarm` and therefore does nothing on
 AmigaOS. wget has no non-blocking connect path at all, so a blocking `connect()` to a
 dead port must fail promptly by itself or wget hangs with no timeout of its own to save
-it. wget also uses `bind_local()` + `accept_connection()` for FTP active mode — the same
+it. wget also uses `bind_local()` + `accept_connection()` for FTP active mode, the same
 `socket`/`SO_REUSEADDR`/`bind`/`getsockname`/`listen`/`select`/`accept` sequence, this
-time with a real `sockaddr` out of `accept()` — and `getaddrinfo` when built with IPv6.
+time with a real `sockaddr` out of `accept()`, and `getaddrinfo` when built with IPv6.
 
-### 12.2 `tests/clients` — the sequences, not the vectors
+### 12.2 `tests/clients`, the sequences, not the vectors
 
 `tests/clients/client_patterns.c` replays those sequences: an ordinary AmigaOS program,
 linked against none of our code, with sixteen groups each named after the program and file
@@ -3749,8 +3744,8 @@ because none of them is reachable one vector at a time.
   wait option it sends a FIN and then calls `_nx_tcp_socket_block_cleanup()` when the peer
   does not also close. Either way the direction the caller asked to *keep* died: after the
   half-close the peer's `send()` failed with `EPIPE` and its queued data went in the bin.
-  The state machine itself is fine with it — `nx_tcp_socket_packet_process.c` runs
-  `_nx_tcp_socket_state_data_check()` in both `FIN_WAIT_1` and `FIN_WAIT_2` — so
+  The state machine itself is fine with it, `nx_tcp_socket_packet_process.c` runs
+  `_nx_tcp_socket_state_data_check()` in both `FIN_WAIT_1` and `FIN_WAIT_2`, so
   `bsd_tcp_send_fin()` open-codes the graceful branch and stops before the suspension and
   the cleanup. This is `nc -N`, it is `telnet`, and it is every ftp data connection.
 - **Ten simultaneous listeners, and the eleventh failed with `ENOBUFS`.**
@@ -3759,11 +3754,11 @@ because none of them is reachable one vector at a time.
   kinds of socket does not help. `ssh -L` wants one listener per forward and an ftp client
   one per active-mode transfer. Now 32, which costs under a kilobyte inside the single
   `NX_IP`.
-- **A half-closed socket then reported itself readable**, forever, with nothing to read —
+- **A half-closed socket then reported itself readable**, forever, with nothing to read,
   a defect the half-close fix created and the same test caught in the next run.
   `bsd_readable()` tested `nx_tcp_socket_state >= NX_TCP_CLOSE_WAIT` to mean "the peer's
   FIN arrived before the disconnect callback was attached", and NetX Duo numbers the
-  states `CLOSE_WAIT` 6, `FIN_WAIT_1` 7, `FIN_WAIT_2` 8 — so `>=` also caught the two
+  states `CLOSE_WAIT` 6, `FIN_WAIT_1` 7, `FIN_WAIT_2` 8, so `>=` also caught the two
   that mean *we* sent the FIN. `nc -N` half-closes and then selects for the rest of the
   answer, and would have spun at full speed on a `select()` that returned at once and a
   `recv()` that returned `EWOULDBLOCK`. The states are named individually now, and the
@@ -3787,7 +3782,7 @@ It also covers `getaddrinfo`, `getnameinfo`, `freeaddrinfo` and `gai_strerror`, 
 Roadshow tail past where the FD that generated
 `tests/conformance/compat/inline/bsdsocket.h` stops, so bsdsocktest cannot reach them and
 the only other coverage was the IPv6-only socket test. All twelve of those checks passed
-as they stood — coverage, not a fix.
+as they stood, coverage, not a fix.
 
 The whole file is **94 checks, 0 failures** on A1200/68020, and both conformance tiers are
 unchanged by the three fixes: **125/1/16** on loopback, **133/2/7** on the network tier,
@@ -3795,17 +3790,17 @@ with the same names in each list as before.
 
 ### 12.3 What is left, in the order it matters
 
-1. **`SOCK_RAW`** (test 3 plus skips 132–136 — six results, and the only red on the
+1. **`SOCK_RAW`** (test 3 plus skips 132–136, six results, and the only red on the
    loopback tier). NetX Duo can do it: `nx_ip_raw_packet_enable()`,
    `nx_ip_raw_packet_send()` and `nx_ip_raw_packet_filter_set()` are all there. Two things
    make it more than a wrapper. `ICMP` is dispatched to `nx_ip_icmp_packet_receive` before
-   the raw path is consulted, so reaching it needs `NX_ENABLE_IP_RAW_PACKET_ALL_STACK` —
+   the raw path is consulted, so reaching it needs `NX_ENABLE_IP_RAW_PACKET_ALL_STACK`,
    which puts our filter callback on **every** inbound IP packet, TCP included. And when a
    filter is installed, `_nx_ip_raw_packet_processing()` stops queueing entirely
    (`nx_ip_raw_packet_processing.c`) and expects the filter to consume the packet, so
    `nx_ip_raw_packet_receive()` becomes unusable and bsdsocket has to own the queue,
-   the per-protocol demux and the wakeup. Nothing on the target tool list needs it —
-   `ping` already works through `nx_icmp_ping()` — but `traceroute` and any third-party
+   the per-protocol demux and the wakeup. Nothing on the target tool list needs it,
+   `ping` already works through `nx_icmp_ping()`, but `traceroute` and any third-party
    `ping` port do.
 2. **`MSG_OOB`** (skips 27 and 64), plus `SIOCATMARK`, which `IoctlSocket()` currently
    answers with `ENOSYS`. This is not a bsdsocket change: NetX Duo's TCP neither sets the
@@ -3818,7 +3813,7 @@ with the same names in each list as before.
    requires `CLOSED`, and a graceful close leaves the socket in `FIN_WAIT_1`, so going
    graceful here needs a deferred-reap list or it leaks an `AmiSocket` per connection.
    Group N of `tests/clients` writes a whole response and closes without the peer having
-   read a byte, and every byte still arrives — but that is loopback, where everything is
+   read a byte, and every byte still arrives, but that is loopback, where everything is
    acknowledged before the close, so **this is a risk that has not been reproduced, not a
    defect that has been ruled out**. On a slow link with a large final write it would
    truncate.
@@ -3848,11 +3843,11 @@ point: the ECDSA case, the expensive one, is the one that gains most.
 **Measure the cold column on a quiet host.** These runs reach a real server over SLIRP, so
 the figure is not purely emulated cycles, and repeats taken while two other FS-UAE
 instances shared the machine read 12.1 s and 28.7 s for the same two hosts. The resumed
-column is unmoved by that — 589 to 620 ms across every run in this work, contended or not,
+column is unmoved by that, 589 to 620 ms across every run in this work, contended or not,
 because there is almost nothing in it to contend for.
 
 **And the headline. `www.iana.org` is three certificates behind Cloudflare and does not
-complete a cold handshake at 14 MHz — the front end gives up first.** Seeded once at
+complete a cold handshake at 14 MHz, the front end gives up first.** Seeded once at
 `-k 28` (11.2 s), then the machine REBOOTED and only the 436-byte session file carried
 across:
 
@@ -3869,7 +3864,7 @@ That is the difference between `https://` working and not.
 ### 13.1 Tickets, not session IDs, and the measurement that decided it
 
 Both mechanisms were probed before anything was written, against the four hosts this
-library is developed against — ten trials each, first connection then immediate second,
+library is developed against, ten trials each, first connection then immediate second,
 `openssl s_client` with `-no_ticket` for the session-ID arm:
 
 | host | session ID | ticket |
@@ -3882,7 +3877,7 @@ library is developed against — ten trials each, first connection then immediat
 Not a close call. A modern front end is a farm of machines behind one address; a session
 ID is state on **one** of them and a ticket is stateless, so every machine in the farm can
 decrypt it. The two hits on iana are the second connection happening to land on the same
-edge node. **The probe method is sound and was controlled** — the same script against a
+edge node. **The probe method is sound and was controlled**, the same script against a
 local `openssl s_server -no_ticket` resumes every time, which is what says the 0/10s are
 the servers' answer and not the script's bug.
 
@@ -3906,7 +3901,7 @@ hold up:
 
 - `nx_secure_tls_send_clienthello.c:199` sets `nx_secure_tls_session_id_length = 0`
   unconditionally, with a comment saying session resumption is not implemented;
-- there is no `session_ticket` extension anywhere in the tree — not even a constant for
+- there is no `session_ticket` extension anywhere in the tree, not even a constant for
   0x0023; `nx_secure_tls_process_newsessionticket.c` is TLS 1.3 only;
 - `nx_secure_tls_process_serverhello.c:158` stores the ServerHello's session ID and
   nothing ever reads it.
@@ -3925,19 +3920,19 @@ them by hand at each submodule bump.
 **So this uses the linker's other tool for the same job.**
 `-Wl,--wrap=_nx_secure_tls_client_handshake` sends every call from every other object to
 `__wrap__nx_secure_tls_client_handshake()` in `src/tlslib/tls_resume.c`, and leaves
-`__real__nx_secure_tls_client_handshake()` pointing at the vendored function — still
+`__real__nx_secure_tls_client_handshake()` pointing at the vendored function, still
 linked, still doing all the work it always did. Two functions are wrapped and nothing
 else. Verified on this toolchain **before** anything was written, with a three-object test
 where the caller is a separate archive member: it disassembles to `jsr ___wrap_vendored`.
-Verified again on the shipping binary — `_nx_secure_tls_process_record` calls
+Verified again on the shipping binary, `_nx_secure_tls_process_record` calls
 `___wrap__nx_secure_tls_client_handshake`, and the wrapper calls `__nx_secure_tls_client_handshake`.
 
 The flag is on `tls.library`'s link **only**. `tls_handshake`, `tls_https` and `tls_bench`
 link the same archives without it, so their baselines are untouched by construction rather
-than by testing — `tls_handshake` is still 44/0.
+than by testing, `tls_handshake` is still 44/0.
 
 **Carrying this across a submodule bump.** The `ClientHello` interception is a splice into
-the finished message and reads only TLS wire format — RFC 5246's field order — so a
+the finished message and reads only TLS wire format, RFC 5246's field order, so a
 vendored rewrite cannot silently invalidate it; a shape it does not recognise makes it
 leave the message alone and lose resumption rather than corrupt anything. The handshake
 interception is the exposure: it calls seven `_nx_secure_*` entry points and depends on
@@ -3951,7 +3946,7 @@ tests assert `ti_Resumed` and not just success.
 **ServerHello.** Handed to the vendored function unchanged; afterwards its echoed session
 ID is compared against the one offered. Equal and non-empty means the server resumed. Then
 the cached master secret goes into the key material and the record keys are derived from
-it through `nx_secure_generate_session_keys` — a *session function pointer*, so a caller
+it through `nx_secure_generate_session_keys`, a *session function pointer*, so a caller
 that replaced it keeps its replacement, and `_nx_secure_tls_generate_keys()` never has to
 be reimplemented. Two pieces of state have to be set that the vendored code has no path
 to: `nx_secure_tls_received_remote_credentials`, because `_nx_secure_tls_process_finished()`
@@ -3960,11 +3955,11 @@ refuses a Finished from a peer that sent no certificate and a resumed handshake 
 `_nx_secure_tls_process_changecipherspec()` rejects a client CCS in any other state and
 the server's CCS is the very next thing on the wire.
 
-**NewSessionTicket.** Hashed into the transcript (RFC 5077 §3.3 — it counts) and kept.
+**NewSessionTicket.** Hashed into the transcript (RFC 5077 §3.3, it counts) and kept.
 
 **Finished, on a resumed handshake only.** The abbreviated handshake reverses the order:
 the server finishes first. So the server's Finished has to go *into* the transcript before
-ours is generated, and our ChangeCipherSpec and Finished have to be sent afterwards —
+ours is generated, and our ChangeCipherSpec and Finished have to be sent afterwards,
 neither of which the vendored state machine does. It also **destroys the SHA-256 handshake
 hash context the instant it processes a Finished**, which is exactly the context our own
 Finished needs, so this message cannot be delegated at all.
@@ -3991,8 +3986,8 @@ A serial trace through the wrapper said it in one line:
 ```
 
 **The server WAS resuming.** A 45-byte ServerHello with nothing after it is an abbreviated
-handshake. But a server that issues a ticket returns an **empty** session ID — RFC 5077
-§3.4, and nginx does exactly that — so the session recorded from the first handshake had
+handshake. But a server that issues a ticket returns an **empty** session ID, RFC 5077
+§3.4, and nginx does exactly that, so the session recorded from the first handshake had
 no session ID at all, there was nothing to echo, and the only acceptance signal a TLS 1.2
 client gets could never fire. The client then walked into the ChangeCipherSpec with no
 keys derived and failed.
@@ -4001,7 +3996,7 @@ keys derived and failed.
 reports a `Session-ID:` for a ticket session because it **fabricates one** for its own
 cache. The bytes on the wire have none.
 
-RFC 5077 §3.4 provides for exactly this — a client presenting a ticket MAY generate a
+RFC 5077 §3.4 provides for exactly this, a client presenting a ticket MAY generate a
 session ID and a server accepting the ticket MUST echo it. So the client now offers **32
 random bytes from the machine's own pool** when the cached session has no session ID of
 its own. Per attempt, never cached: it is a correlation handle, not a secret, and reusing
@@ -4012,7 +4007,7 @@ one would let an observer link two connections.
 Found while chasing a second symptom.
 
 `tests/tls/tls_resume` completed a handshake, reported 6.8 s, and then `TLSRead()`
-returned **-1 with no error set** — a combination the library cannot produce. It happened
+returned **-1 with no error set**, a combination the library cannot produce. It happened
 on every connection including `TLSA_NoResume`, i.e. on a code path byte-identical to the
 one before this work. `tests/tls/tls_api` did the same thing and worked.
 
@@ -4033,19 +4028,19 @@ compiler the opposite, and the compiler believed it: two calls in a row got the 
 loaded once, and the second ran on whatever the first left behind. `TLSRead()` was
 dereferencing a stale pointer and taking its own `conn == NULL` branch.
 
-`tls_api` escaped it by accident — different register pressure, so GCC reloaded anyway.
+`tls_api` escaped it by accident, different register pressure, so GCC reloaded anyway.
 Fixed by marking them `"+r"`; the reload appears in the disassembly, and `tls_api` went
 from 24 checks/1 failure back to **26/0**.
 
 **It looked like the explanation for the curl backend's one-off `ecc256` failure and it is
 not.** That agent rebuilt with and without the `"+r"` constraints and got **byte-identical
 object files**, because its stub callers reload the connection pointer from memory every
-time, so there was no load for the compiler to eliminate. The fix is still right — that
+time, so there was no load for the compiler to eliminate. The fix is still right, that
 code was correct by the accident of its shape rather than by the constraint that should
-have guaranteed it — but it explains nothing about the 61.6 s. See §13.8.
+have guaranteed it, but it explains nothing about the 61.6 s. See §13.8.
 
 Two things this says beyond the fix. A hand-written inline stub is ABI-critical code and
-should be read as such — the register assignment appears in exactly two places
+should be read as such, the register assignment appears in exactly two places
 (`tlslib.h` and `src/tlslib/tls_vectors.h`) and only one of them was wrong. And a
 symptom that says "the library is broken" while the library's own tests pass is usually
 the caller.
@@ -4054,29 +4049,29 @@ the caller.
 
 **Both the library base and a file, for two different reasons.** The base, because a
 shared library on AmigaOS outlives the programs that open it: `fetch` runs, exits, and
-`tls.library` stays in memory. That already answers the case that matters — somebody
-running curl twice — with no disk access at all, which on a floppy machine is worth
+`tls.library` stays in memory. That already answers the case that matters, somebody
+running curl twice, with no disk access at all, which on a floppy machine is worth
 having. The file, `DEVS:Internet/tlssessions` beside the trust store, because "stays in
 memory" is not a guarantee: `AllocMem()` failure or `avail flush` expunges the library,
 and so does a reboot. It is read once per library lifetime and written only when the cache
 changes, which is once per full handshake against a handshake that just spent seconds on
 arithmetic. Eight entries, fixed 420-byte records, 3,376 bytes at most; the whole file for
-one host is 436 bytes. **Shared between programs, deliberately** — a ticket `fetch`
+one host is 436 bytes. **Shared between programs, deliberately**, a ticket `fetch`
 obtained is a ticket curl can use, against the same server on behalf of the same user.
 
 Lifetime and invalidation: the server's ticket lifetime hint, clamped to 24 hours (iana
 says 64,800 s, badssl 300). A machine with no clock cannot age anything and therefore does
-not try — a stale ticket costs one round trip and a full handshake, which is what would
+not try, a stale ticket costs one round trip and a full handshake, which is what would
 have happened anyway. An entry is replaced when a new session for the same host arrives,
 evicted LRU when the table is full, and **evicted immediately when a handshake that
 offered it failed**, so a broken entry cannot make a host permanently unreachable.
 
-**Entries are keyed by host, port and a fingerprint of the whole trust decision** — see
+**Entries are keyed by host, port and a fingerprint of the whole trust decision**, see
 §13.6.1, because getting that wrong was a security defect and not a detail.
 
 **The security properties, stated and then left alone.** Each entry holds a 48-byte TLS
 master secret and a session ticket in the clear. Anyone who can read the library's memory
-can decrypt any session resumed from it — and this is a machine with no memory protection
+can decrypt any session resumed from it, and this is a machine with no memory protection
 where every task can already read every other task's memory. Anyone who can read
 `DEVS:Internet/tlssessions` can do the same, offline, until the entry ages out; the file
 is exactly as sensitive as the sessions it stands for and is not protected, because on
@@ -4099,7 +4094,7 @@ checked against*. Found by the curl verification suite, RSA host, cold handshake
 | a valid store holding a root that signed **nothing** in the chain | 60 | **200** |
 
 The second row is the defect. The session cached by the first case was resumed under a
-different store, and **a resumed handshake verifies nothing** — no certificate is sent, no
+different store, and **a resumed handshake verifies nothing**, no certificate is sent, no
 signature is checked, no host name is compared. So the library returned a connection it
 called verified, against roots the caller never offered. Cold verification was never
 broken: expired, self-signed and wrong-host were all still refused. It was only the second
@@ -4112,7 +4107,7 @@ connection that stopped checking, and it survived a reboot through the disk mirr
 | the trust store's **identity** | the whole point: FNV-1a over the index's count and every (subject-name hash, offset, length) record |
 | `TLSA_NoVerify` | two populations that must never mix |
 | whether validity **dates** were checked | skipped on a clockless machine, so setting your clock must not silently fail to start checking expiry |
-| `TLSA_MaxChain` | the cautious reading — a session verified over an eight-deep chain is not one a caller limiting itself to two would have established |
+| `TLSA_MaxChain` | the cautious reading, a session verified over an eight-deep chain is not one a caller limiting itself to two would have established |
 | host name, port | already the primary key |
 
 What stayed out, because a key that includes things which do not affect trust only costs
@@ -4122,18 +4117,18 @@ parameterising it, `TLSA_SessionFile` selects *which* cache and is handled by th
 base reloading when it changes.
 
 **Cost.** The fingerprint is computed in `tls_store_open()`, where the whole index is
-already in memory because it was just read off the disk — one pass over 1,428 bytes for
+already in memory because it was just read off the disk, one pass over 1,428 bytes for
 the Mozilla set, once per connection, against a handshake that spends seconds on
 arithmetic. Hashing the 126 KB of DER instead would have cost more than the resumption
 saves, which is the trade that made the index the right object to hash.
 
 **What that does not protect against, stated rather than implied.** Two stores whose
-indexes agree record for record but whose certificate DER differs — someone rewriting a
+indexes agree record for record but whose certificate DER differs, someone rewriting a
 root in place, at the same offset and length, under the same subject Name. That is an
 attacker who can already write the trust store, and such an attacker owns verification
 outright: they would simply add a root of their own. It is not a new exposure. It also
 does not distinguish two different *files* holding the same roots, which is correct rather
-than a gap — the same root set is the same trust, and keying on the path would lose
+than a gap, the same root set is the same trust, and keying on the path would lose
 resumptions to an assign or a copy without buying anything.
 
 **The disk format moved with it, `ATS1` → `ATS2`.** An `ATS1` record holds a key this code
@@ -4143,7 +4138,7 @@ handshake and the next session written replaces the file.
 
 The regression test is in `tests/tls/`, and it tests both directions.
 `run-resume.sh` stages a **second, valid** trust store holding one unrelated self-signed
-root — real enough to open, wrong enough to be useless — and `tls_resume.c` checks that a
+root, real enough to open, wrong enough to be useless, and `tls_resume.c` checks that a
 cached verified session is refused under it, with an `UNTRUSTED` reason, and then that the
 **correct** store still resumes and still transfers data. A fix that simply stops resuming
 is not a fix.
@@ -4152,7 +4147,7 @@ is not a fix.
 
 `TLSOpen()` resumes when it can. There is no tag to ask for it, no call to make first, and
 a program written against the previous header gets resumption by being relinked. The curl
-vtls backend adopted it that way — rebuilt, not restructured.
+vtls backend adopted it that way, rebuilt, not restructured.
 
 Three additions, all optional:
 
@@ -4164,17 +4159,17 @@ Three additions, all optional:
 
 `struct TLSInfo` grew, and `ti_Size` is what makes that safe: a caller compiled against the
 older header passes the older size and gets every field it knows about. `TLS_INFO_SIZE_V1`
-is 40 — **not 44, because `BOOL` on classic AmigaOS is a SHORT** — and the library asserts
+is 40, **not 44, because `BOOL` on classic AmigaOS is a SHORT**, and the library asserts
 that number against the real offset at build time rather than trusting the arithmetic.
 
 Two more vectors were added for the curl backend, neither related to resumption. **Both
-are library version 2**, and a program calling either must open with 2 — see the version
+are library version 2**, and a program calling either must open with 2, see the version
 note below, which is where that nearly went wrong:
 
 - **`LONG TLSRandom(struct Library *base, APTR buffer, LONG length)`**, LVO **-78**,
   `a0` = buffer, `d0` = length, `a6` = base, returns bytes written or -1. Puts the
-  machine's one entropy pool — the SHA-256 hash DRBG `bsdsocket.library` seeds, the same
-  generator the session keys come from — behind a published vector, so a ported client
+  machine's one entropy pool, the SHA-256 hash DRBG `bsdsocket.library` seeds, the same
+  generator the session keys come from, behind a published vector, so a ported client
   does not seed an LCG off the clock. It answers -1 until a connection has been opened in
   that program, because the pool is reached through the link `TLSOpen()` establishes;
   §9's assessment of how little entropy the seed carries applies unchanged and this call
@@ -4183,7 +4178,7 @@ note below, which is where that nearly went wrong:
   `a0` = connection, `a6` = base, returns undecrypted bytes held or -1. `TLSPending()`
   answers "is plaintext ready"; this answers the other half. `nx_secure` keeps
   *undecrypted* bytes in `nx_secure_record_queue_header` whenever one TCP segment carried
-  more than one TLS record — the ordinary case — and in that state the socket is not
+  more than one TLS record, the ordinary case, and in that state the socket is not
   readable, `TLSPending()` is 0, and a whole record is sitting in memory. Non-zero means
   `TLSRead()` can make progress without another byte arriving. It deliberately does **not**
   promise `TLSRead()` will not block, because what is buffered may be half a record; that
@@ -4196,7 +4191,7 @@ note below, which is where that nearly went wrong:
 `TLSRandom` and `TLSBuffered` went into the vector table while `TLS_LIB_VERSION` stayed at
 1. **Exec opens a library when `lib_Version >= the version asked for` and looks at nothing
 else**, so `OpenLibrary("tls.library", 1)` would have handed an older library to a caller
-compiled against the newer header — and `MakeLibrary()` stopped at the `(APTR)-1`
+compiled against the newer header, and `MakeLibrary()` stopped at the `(APTR)-1`
 terminator, so the jump table is not that long. The jump lands in whatever is in front of
 the base, on a machine with no memory protection. Caught by the curl backend agent, which
 had already defended itself with a `lib_NegSize` check.
@@ -4205,33 +4200,33 @@ had already defended itself with a `lib_NegSize` check.
 `usergroup.library` already follow and it is worth stating because it looks like laziness
 and is not: nothing in this project reads a revision, and a number nobody reads goes
 stale. Those two report *version* 4 because 4 is the AmiTCP/Roadshow level applications
-pass to `OpenLibrary()` — fixed by an external compatibility contract, as
+pass to `OpenLibrary()`, fixed by an external compatibility contract, as
 `include/aminetxduo/version.h.in` says in as many words. `tls.library`'s ABI is ours, so
 its version is simply its vector level and moves when the table does.
 
 **The rule is now a build failure rather than a comment**, which is the part worth
 copying elsewhere. `TLS_LIB_VECTORS` is *derived* from `TLS_LIB_VERSION` by token
-pasting — `TLS_LIB_VECTORS_V1` is 8, `TLS_LIB_VECTORS_V2` is 10 — and
+pasting, `TLS_LIB_VECTORS_V1` is 8, `TLS_LIB_VECTORS_V2` is 10, and
 `src/tlslib/tls_vectors.c` asserts the real table length against it. Add a vector and the
 build stops; the only way to make it pass is to declare a `TLS_LIB_VECTORS_V<n>` and point
 `TLS_LIB_VERSION` at it, which puts the version constant under your cursor at the moment
 you need to change it. A second assertion ties `TLS_LVO_LAST` to the same table so a
 caller checking `lib_NegSize` checks the right offset. **Both were verified to fire**, by
-setting the version back to 1 and watching the build stop — a guard that has never been
+setting the version back to 1 and watching the build stop, a guard that has never been
 seen to fail is not a guard.
 
 **`fetch` asks for 1, not `TLS_LIB_VERSION`**, because 1 is what it uses: every vector it
 calls is original. Asking for the constant would mean a recompile silently demanded a
 newer library than the transfer needs, and a user with a working older pair would lose
-`https:` for nothing. It zeroes its `TLSInfo` before the call so `ti_Resumed` — a
-version-2 field — reads FALSE against a version-1 library instead of reading the stack.
+`https:` for nothing. It zeroes its `TLSInfo` before the call so `ti_Resumed`, a
+version-2 field, reads FALSE against a version-1 library instead of reading the stack.
 That is the general rule and the header now states it: **`ti_Size` lets an old caller talk
 to a new library; a new caller talking to an old one has to zero the structure**, because
 the old library will fill what it knows and leave the rest of your stack alone.
 
 ### 13.8 What was measured, and what was not
 
-**Cross-process, proved.** Four `fetch` invocations — four processes — in one boot:
+**Cross-process, proved.** Four `fetch` invocations, four processes, in one boot:
 
 | | |
 |---|---|
@@ -4248,21 +4243,21 @@ keyed by port and not only by name.
 only `DEVS:Internet/tlssessions` crossed.
 
 **A rejected ticket falls back, proved.** `tests/tls/tls_resume` copies the session cache,
-flips a byte in the ticket *and* in the session ID — both, because a server with a working
+flips a byte in the ticket *and* in the session ID, both, because a server with a working
 session-ID cache could otherwise resume from the ID and the test would fail for being
-right — and connects. The result is a full handshake, 6.8 s, the page still arrives, and
+right, and connects. The result is a full handshake, 6.8 s, the page still arrives, and
 **the very next connection resumes again**, which is the check that the broken entry was
 replaced rather than left to fail forever.
 
 **`TLSA_NoResume`, proved.** Full handshake with a valid session sitting in the cache.
 
-**A different trust store cannot inherit a verification, proved** — §13.6.1, and the check
+**A different trust store cannot inherit a verification, proved**, §13.6.1, and the check
 runs in both directions in the same test so a pass cannot come from having simply stopped
 resuming.
 
 **The one-off `ecc256.badssl.com` failure reported against `f535728` is closed, and it was
-never a library bug.** It did not reproduce here — two cross-process attempts resumed in
-0.5 s and the in-process test resumes it every run — and the register bug in §13.5 turned
+never a library bug.** It did not reproduce here, two cross-process attempts resumed in
+0.5 s and the in-process test resumes it every run, and the register bug in §13.5 turned
 out not to explain it either, because the backend compiles byte-identically with and
 without the fix. It is now believed to have been a `tls.library` built from an uncommitted
 working tree. Against `e42db07` that host gives 23.27 s cold and then 0.58 s and 0.58 s
@@ -4274,8 +4269,8 @@ while on the strength of a plausible mechanism that happened to be in the right 
 
 **Not measured, and worth saying:** how long a Cloudflare ticket actually stays good on
 this path (the hint is 64,800 s and nothing here has waited that long); whether an
-`AmigaOS` machine with a genuinely dead clock resumes across a reboot (it should — a
-zero timestamp disables ageing — but the test sets the clock rather than removing it);
+`AmigaOS` machine with a genuinely dead clock resumes across a reboot (it should, a
+zero timestamp disables ageing, but the test sets the clock rather than removing it);
 and anything at all about a server that rotates its ticket keys mid-session, which is the
 case the fallback path exists for and which no public host will perform on demand.
 
@@ -4291,7 +4286,7 @@ case the fallback path exists for and which no public host will perform on deman
 | **the pair** | **532,764 = 520.3 KiB** |
 
 Roughly 9.4 KiB of `tls.library`'s growth is this work; the rest is other traffic in the
-tree. Nothing resident changes for a machine that never opens a connection — the cache is
+tree. Nothing resident changes for a machine that never opens a connection, the cache is
 allocated on the first handshake that has something to remember and freed at expunge.
 
 **Against a 512 KiB figure the pair is now 8.3 KiB over**, which §9 tracked closely when
@@ -4306,7 +4301,7 @@ reaches. Anyone who ever does need the space should start there.
 **The first connection to a host still costs what it always cost.** Resumption is a second
 connection's optimisation, so a machine that has never spoken to `www.iana.org` still
 cannot reach it at 14 MHz. The seed has to come from somewhere: a faster clock, a patient
-host, or — nobody has built this — a way to carry a session file between
+host, or, nobody has built this, a way to carry a session file between
 machines.
 
 **A verified-chain cache is still worth 8–10% and is still not the answer.** That estimate
@@ -4316,7 +4311,7 @@ something that happens once is worth much less than it was.
 
 **Nothing here helps TLS 1.3**, which is where the web is going. `nx_secure`'s TLS 1.3 is
 impractical on this hardware for an unrelated reason (a bit-serial GHASH), and its
-resumption is a different mechanism — PSK, not tickets — so none of this code carries over.
+resumption is a different mechanism, PSK, not tickets, so none of this code carries over.
 
 
 ## 14. curl as an adversary: a verification suite for bsdsocket.library (2026-07-25)
@@ -4328,7 +4323,7 @@ tools do not**, and does the stack survive it.
 The framing matters, because it decides what a red result means. curl is not
 the thing under test. It is a client that has been driven against every TCP
 implementation in commercial use for twenty-five years, so its transfers are a
-far better probe than anything written here on purpose — and every failure the
+far better probe than anything written here on purpose, and every failure the
 suite finds is a bug in `bsdsocket.library` until somebody proves otherwise.
 
 **It found three.** The SANA-II receive queue was four frames deep and sixteen
@@ -4344,7 +4339,7 @@ touched.
 | | |
 |---|---|
 | `tests/peer/httppeer.py` | the host end: HTTP/1.1 with keep-alive, ranges, chunking and drip-feeding; seven HTTPS servers on seven certificate chains; FTP (borrowed from `tests/tools/netpeer.py` rather than rewritten); and four deliberately rude listeners |
-| `tests/peer/mkpki.sh` | a whole test PKI — RSA and ECDSA roots, three levels of intermediates, expired, self-signed, and a root nobody trusts |
+| `tests/peer/mkpki.sh` | a whole test PKI, RSA and ECDSA roots, three levels of intermediates, expired, self-signed, and a root nobody trusts |
 | `tests/curl/curlsuite.py` | the cases and the scoring, in one file |
 | `tests/curl/curlcheck.c` | the Amiga-side driver |
 | `tests/curl/run-curlverify.sh` | stage, serve, run, score |
@@ -4380,7 +4375,7 @@ few kilobytes per socket becomes a trend somebody can see.
 
 ### 14.2 The first finding: the SANA-II receive queue was four frames deep
 
-`d03_parallel_40` — forty concurrent transfers through curl's multi interface —
+`d03_parallel_40`, forty concurrent transfers through curl's multi interface,
 came back `curl: (7) Could not connect` for thirteen of the forty, each after
 about thirteen seconds. A sweep found the cliff between eight and sixteen:
 
@@ -4399,7 +4394,7 @@ about thirteen seconds. A sweep found the cliff between eight and sixteen:
 diagnosis is on the host side: `httppeer.py` logs every connection it accepts,
 and it accepted **213** across the sweep while only **145** transfers completed
 on the Amiga. Sixty-eight connections were therefore established at the far end
-and never used — the SYN went out, the peer answered, and the answer was never
+and never used, the SYN went out, the peer answered, and the answer was never
 seen. Thirteen seconds is our own connect giving up, retransmitting a SYN into
 a connection the other end already considers open.
 
@@ -4410,13 +4405,13 @@ without drawing the conclusion:
 > frame that arrives with no matching read outstanding is dropped on the floor.
 
 `AMI_SANA2_RX_DEPTH_IPV4` was **4**. That is not a queue length, it is the
-receive window measured in frames — and sixteen sockets opening at once produce
+receive window measured in frames, and sixteen sockets opening at once produce
 sixteen SYN/ACKs inside a few hundred microseconds, which a 14 MHz 68020 cannot
 re-post a read between. Twelve of them hit a device with nothing outstanding
 and were discarded by `a2065.device` before any of our code ran.
 
-Rebuilt with the depth at 8 and nothing else changed — same build directory,
-same flags, one `-D` — the same sweep loses **nothing** up to forty.
+Rebuilt with the depth at 8 and nothing else changed, same build directory,
+same flags, one `-D`, the same sweep loses **nothing** up to forty.
 
 **And the eight-way case, which never failed, was 2.5× slower than it had to
 be.** That is the part worth noticing: loss was not a cliff that only appeared
@@ -4435,11 +4430,11 @@ retransmissions.
 **The fix is not "8".** A fixed number here is what caused the problem, and the
 right bound is memory: each outstanding read pins an `NX_PACKET` for its whole
 life, and the pool is already sized from `AvailMem()`.
-`ami_sana2_rx_ipv4_depth()` therefore takes a fixed share of the pool —
-`AMI_SANA2_RX_POOL_SHARE`, one in eight — with the old 4 as the floor and 32 as
+`ami_sana2_rx_ipv4_depth()` therefore takes a fixed share of the pool,
+`AMI_SANA2_RX_POOL_SHARE`, one in eight, with the old 4 as the floor and 32 as
 the ceiling. On the 8 MB profile the pool is 256 packets and the depth comes
 out at the ceiling; on the 4 MB / 68020 floor the pool is
-`AMI_POOL_MIN_PACKETS` (16), one eighth of which is 2 — below the old floor —
+`AMI_POOL_MIN_PACKETS` (16), one eighth of which is 2, below the old floor,
 so such a machine keeps its four and **cannot** absorb the burst. That limit is
 real and is stated rather than hidden. ARP and IPv6 ND are low-rate and stay
 shallow.
@@ -4460,7 +4455,7 @@ the new one should get an explanation instead of a mystery.
 So the ceiling is somewhere between 40 concurrent sockets and 56. Three things
 govern it and the suite cannot say which binds first: the packet pool
 (`AMI_POOL_MAX_PACKETS` is 256 and the IPv4 reader now pins 32 of them), our
-`BSD_DEFAULT_DTABLESIZE` of 64, and curl's own `FD_SETSIZE` of 64 — 56
+`BSD_DEFAULT_DTABLESIZE` of 64, and curl's own `FD_SETSIZE` of 64, 56
 transfers plus the multi handle's wakeup socketpair is 58 descriptors, which is
 close enough to both 64s to be suspicious. It is **not diagnosed and not
 fixed**: nobody runs 56 simultaneous transfers on a 14 MHz 68020 in earnest,
@@ -4492,8 +4487,8 @@ also took **15.92 s**, and every curl after `AddNetInterface` loads the same
 939 KB binary in a second or two.
 
 **It is not the stack coming up either, and that is the useful part.**
-`AddNetInterface` brings the whole thing up — `NX_IP`, the ThreadX threads, the
-SANA-II device, ARP, DHCP — in **1.46 s**. What it does not do is close its
+`AddNetInterface` brings the whole thing up, `NX_IP`, the ThreadX threads, the
+SANA-II device, ARP, DHCP, in **1.46 s**. What it does not do is close its
 handle again; `tool_stack_start()` says in as many words that the leaked
 reference is how the interface stays up. curl closes, and closing is what cost
 fifteen seconds.
@@ -4505,7 +4500,7 @@ The serial log named the culprit and it can be counted:
 [WARN] sana2: reader 1 did not stop
 ```
 
-**Exactly one pair per shutdown** — one pre-interface `curl --version` logs one
+**Exactly one pair per shutdown**, one pre-interface `curl --version` logs one
 pair, two log two. `ami_sana2_rx_stop()` waited `5 * NX_IP_PERIODIC_RATE` for
 each reader's exit semaphore and gave up, so ten of the sixteen seconds were
 two five-second timeouts, on every last close of `bsdsocket.library`.
@@ -4517,7 +4512,7 @@ somebody looking at the other end of the same lifecycle:
 
 > The SANA-II raw-framing probe posts a `CMD_READ` with `SANA2IOF_RAW` and takes
 > it straight back with `AbortIO()`. Commodore's `a2065.device` 2.16 does not
-> abort it, so `ami_sana2_open()` never returns — verified under FS-UAE.
+> abort it, so `ami_sana2_open()` never returns, verified under FS-UAE.
 
 That was worked around by turning the probe off, which left every other
 `AbortIO()` in the shim still assuming it works. `ami_sana2_rx_teardown()`
@@ -4528,7 +4523,7 @@ on requests the device was never going to return.
 
 `S2_OFFLINE` returns every queued `CMD_READ` with `S2ERR_OUTOFSERVICE`.
 `ami_sana2_rx_drain()` has said so in a comment since it was written, and it is
-the SANA-II documented behaviour — it does not depend on `AbortIO()` at all.
+the SANA-II documented behaviour, it does not depend on `AbortIO()` at all.
 
 **It was being issued too late.** `ami_sana2_close()`, `NX_LINK_DISABLE` and
 `NX_LINK_UNINITIALIZE` all read `rx_stop(); tx_drain(); offline();`. The one
@@ -4548,7 +4543,7 @@ Three further things were wrong underneath it, and each is worse than the delay:
 - **Nothing the device still owns is freed any more.** The old path freed the
   reply port, released the pinned `NX_PACKET`s, terminated the reader thread,
   freed the stack it was running on and let `ami_sana2_close()` free the whole
-  interface — with reads still queued into all of it. On a machine with no
+  interface, with reads still queued into all of it. On a machine with no
   memory protection that is not a leak, it is a corruption waiting for the next
   matching frame. It now refuses to free any of it, says so at `AMI_ERROR`, and
   marks the interface unrestartable. **A 32 KB leak is recoverable and a thread
@@ -4562,8 +4557,8 @@ Measured after the change, same profile, same binaries, nothing else touched:
 | `reader did not stop` warnings | 2 | **0** |
 
 The 2.20 s that is left is a whole stack brought up and taken down again for a
-command that prints a version string — consistent with the 1.46 s
-`AddNetInterface` pays for the bring-up alone — and `curl --version` with
+command that prints a version string, consistent with the 1.46 s
+`AddNetInterface` pays for the bring-up alone, and `curl --version` with
 `AddNetInterface` already run is unchanged at 0.30 s. Fifteen seconds of it
 were a driver's refusal to honour `AbortIO()`, waited out twice, on every
 command a user typed.
@@ -4577,8 +4572,8 @@ host and once after everything has, and the two answers differ:
 
 | case | trust store offered | order | rc | `time_appconnect` |
 |---|---|---|---|---|
-| `e01` | a valid store holding a root that signed **nothing** in the chain | cold | **60 refused** | — |
-| `e02` | none at all — `DEVS:Internet/certificates`, the real Mozilla set | cold | **60 refused** | — |
+| `e01` | a valid store holding a root that signed **nothing** in the chain | cold | **60 refused** |, |
+| `e02` | none at all, `DEVS:Internet/certificates`, the real Mozilla set | cold | **60 refused** |, |
 | `rsa2.test` | the correct store | cold | 0 | **5.68 s** |
 | `e23` | the same wrong store as `e01`, byte for byte | warm | **0, HTTP 200** | **0.70 s** |
 | `e24` | the same absence as `e02` | warm | **0, HTTP 200** | **0.70 s** |
@@ -4586,7 +4581,7 @@ host and once after everything has, and the two answers differ:
 **Identical commands. Opposite outcomes. One variable: whether a session was
 already in the cache.** A full RSA handshake here is 5.68 s and a resumed one
 is 0.70 s, so `e23` and `e24` did no public-key work and verified no
-certificate — which is what resumption is *for*, and precisely the problem.
+certificate, which is what resumption is *for*, and precisely the problem.
 `tls.library` keys its cache on `TLSA_HostName` alone, so the trust decision
 is cached alongside the session and reused under a different `--cacert`, or
 under none.
@@ -4597,7 +4592,7 @@ wrong root and no store at all are all refused with curl's own exit 60. It is
 only the second connection that stops looking.
 
 Two things make it worth more than a curiosity. The cache is **mirrored to
-`DEVS:Internet/tlssessions`**, so it survives a reboot — §13's headline result
+`DEVS:Internet/tlssessions`**, so it survives a reboot, §13's headline result
 depends on exactly that. And `--cacert` is the switch a user reaches for when
 they do *not* trust the default store, which is the case where being ignored
 matters most.
@@ -4614,14 +4609,14 @@ design is the acceptance test and it passes:
 | `e02` no store, cold | 60 | **60** |
 | `e23` wrong store, warm | **0, HTTP 200** | **60** |
 | `e24` no store, warm | **0, HTTP 200** | **60** |
-| `e25` `-k` cached, then without `-k` | — | **60**, `appconnect` 0.0 — not resumed at all |
+| `e25` `-k` cached, then without `-k` |, | **60**, `appconnect` 0.0, not resumed at all |
 
 **One of those expectations needed settling rather than assuming, and it is
 worth recording which way it went.** `e24` passes no `--cacert`, and if that
 resolved to the same store which cached the session then resuming would be
 *correct* and 200 would be the right answer. Read from the source rather than
 guessed: `amitls.c:391` passes `TLSA_TrustStore` only when `CAfile` is set, and
-`tls_conn.c:392` falls back to `TLS_DEFAULT_STORE` when it is not — and the
+`tls_conn.c:392` falls back to `TLS_DEFAULT_STORE` when it is not, and the
 build bakes `CURL_CA_BUNDLE` with that same path, so both routes name
 `DEVS:Internet/certificates`. Every earlier case to that host passed
 `--cacert DH0:teststore`. **Different root sets, so 60 is right**, and the case
@@ -4640,7 +4635,7 @@ copy. It is worth listing because a suite that finds one bug and reports
 nothing else is not saying much:
 
 - **Sizes.** 1 byte, 1 KB, 64 KB, 65,537 bytes (one past a power of two),
-  1,200,000 bytes, and an empty body — all byte-identical.
+  1,200,000 bytes, and an empty body, all byte-identical.
 - **Framing.** `Content-Length`, chunked, chunked with a trailer, chunked in
   4,096 writes of ONE byte, 256 KB in 1,024 writes, and a body with no length
   at all that ends when the peer closes.
@@ -4654,14 +4649,14 @@ nothing else is not saying much:
 - **Redirects.** 1, 3, 5 and 20 deep, 301/302/307, the `--max-redirs` cap (47)
   and a redirect loop (47).
 - **Uploads.** 4 KB and 200 KB by POST and by PUT, each verified by the server
-  hashing what it received and curl saving the answer — with a 100-continue
+  hashing what it received and curl saving the answer, with a 100-continue
   round trip in front of the large ones.
 - **Connection behaviour.** Four transfers on one connection (`conns_total=1`),
   four with the peer closing each time (`conns_total=4`), reuse after a 404 and
   after a HEAD, 60 transfers on one handle and one connection, and 20
   connect/transfer/close cycles with descriptors coming back.
 - **The multi interface.** 4, 8 and 40 concurrent transfers, a slow drip
-  alongside fast ones, and chunked in parallel — which is `WaitSelect()` over
+  alongside fast ones, and chunked in parallel, which is `WaitSelect()` over
   the whole set plus the `bind`/`listen`/`connect`/`accept` socketpair
   `lib/socketpair.c` builds for the wakeup.
 - **Failure paths, every one of them an error rather than a crash.** Connection
@@ -4671,12 +4666,12 @@ nothing else is not saying much:
   and never speaks, ended by `--max-time` (28); `--max-time` firing mid-body
   with data still arriving (28); `--connect-timeout` to a black hole (28);
   `--max-filesize` aborting a transfer (63); and curl walking away from a
-  1.9 MB download after three seconds with the connection full — the
+  1.9 MB download after three seconds with the connection full, the
   Ctrl-C-equivalent. An ordinary transfer immediately after all of them
   succeeds, which is the case that would have caught a stack left damaged.
 - **Memory.** `AvailMem(MEMF_ANY)` was **9,563,984 bytes at the first case and
   9,563,776 at the last**, across 124 cases, ~250 transfers, 20 separate curl
-  processes and every failure path above — a drift of 208 bytes. Not "roughly
+  processes and every failure path above, a drift of 208 bytes. Not "roughly
   stable": the same number.
 
 The score, on the A1200 profile with both fixes in:
@@ -4690,12 +4685,12 @@ group E (TLS, hermetic)           28 passed, 0 failed,  28 cases
 listed rather than explained away (group E's two are gone: the trust-store
 defect of §14.4 was fixed and the cases now pass):
 
-- `a44_cookies_send` — **curl does not write its cookie jar on AmigaOS**, and
+- `a44_cookies_send`, **curl does not write its cookie jar on AmigaOS**, and
   this one is neither ours nor the stack's. `-c DH0:cj.txt` leaves a zero-byte
   file with no temporary beside it: `Curl_fopen()` truncates the target, fstats
   it, and then fails somewhere in the write-to-temp-and-rename path. The
   attribution is settled by the third-party binary of §14.7, which **fails
-  identically** — two curls built independently, one newlib and one clib2,
+  identically**, two curls built independently, one newlib and one clib2,
   sharing no libc between them, so what they share is curl's own code and an
   AmigaOS path. `dirslash("DH0:cj.txt")` finds no `/` and yields an empty
   directory, so the temporary is created relative to a current directory a
@@ -4703,7 +4698,7 @@ defect of §14.4 was fixed and the cases now pass):
   and are real implementations here, so it is not the §11.2 missing-wrapper
   problem. It costs the cookie jar, the alt-svc cache and the HSTS cache, all
   three of which go through that one function.
-- `f07_ftp_active` — see §14.8; the guest listens correctly and the host cannot
+- `f07_ftp_active`, see §14.8; the guest listens correctly and the host cannot
   reach it, because FS-UAE never opens the forward.
 
 ### 14.6 Regression cover for the fixes
@@ -4722,7 +4717,7 @@ costs nothing on the path that was already working.
 The failing-before / passing-after test is in the suite itself:
 `d03_parallel_40`, and `tests/curl/run-curlverify.sh -p 8,16,24,32,40,48` is
 the sweep that produced the table above. Note that it only fails on a machine
-whose pool is large enough for the fix to raise the depth — on the 4 MB floor
+whose pool is large enough for the fix to raise the depth, on the 4 MB floor
 the depth stays at 4 and so does the loss.
 
 ### 14.7 Somebody else's curl, on our stack
@@ -4744,7 +4739,7 @@ its diagnosis was wrong.** There is no current 8.11.1-DEV package; that was the
 first release (2024-11-24) and has been superseded three times. The port's own
 `docs/AMIGAOS.md` says the 8.18 release "increased the default stack size from
 16384 to 32768. This fixes crashes during TLS handshakes, certificate
-validation, compressed downloads, and large HTTPS transfers" — and the 8.11.2
+validation, compressed downloads, and large HTTPS transfers", and the 8.11.2
 binary does carry a literal `$STACK:16384` cookie. So the crashes were stack
 exhaustion in the port, not an incompatibility with Roadshow, and the buggy
 release's own readme already claimed Roadshow worked. Both current readmes say
@@ -4752,16 +4747,16 @@ release's own readme already claimed Roadshow worked. Both current readmes say
 
 **The stack cookie is worth stealing.** At file offset `0x1c3ec` their binary
 contains the plain string `$STACK:32768`, NUL-terminated, sitting in the text
-segment as a dead constant. That is the entire mechanism — no `__stack` symbol
-— and AmigaOS 3.1.4+ scans a loaded executable for it. §11.5 records that this
+segment as a dead constant. That is the entire mechanism, no `__stack` symbol
+and AmigaOS 3.1.4+ scans a loaded executable for it. §11.5 records that this
 toolchain's `crt0.o` exports no `__stack` hook and that ours therefore needs
 `stack 200000` typed by hand; a `$STACK:` string constant would remove that
 step on 3.1.4 and newer, and would be ignored harmlessly on 3.1. Kickstart 3.1
 is what this harness boots, so `CurlCheck` still supplies the stack itself.
 
 **What it demands of the ABI that ours does not.** `curl_setup.h` gives OS3 the
-same bsdsocket path either way — `select()` is `WaitSelect()`, `HAVE_FCNTL` is
-off, sockets close with `CloseSocket()` — but `lib/amigaos.c`'s
+same bsdsocket path either way, `select()` is `WaitSelect()`, `HAVE_FCNTL` is
+off, sockets close with `CloseSocket()`, but `lib/amigaos.c`'s
 `Curl_amiga_init()` is compiled `#elif !defined(USE_AMISSL)`, so **their build
 never makes the `SocketBaseTags` call at all**. clib2's own networking startup
 opens the library and installs the errno pointer instead, and it also opens
@@ -4782,7 +4777,7 @@ because the next ported binary will hit the same two.
 prints `mathieeedoubtrans.library could not be opened.` if it cannot; there is
 no partial mode. Kickstart 3.1's ROM has `mathieeesingbas` and nothing else,
 and this harness boots a bare directory hard drive, so the pair has to be
-staged. They must also be a MATCHED pair — the `.ld.strip` builds out of the
+staged. They must also be a MATCHED pair, the `.ld.strip` builds out of the
 AmigaOS source tree work together; a `doubbas` from one build and a `doubtrans`
 from another do not. Our own curl is newlib and never asks for `doubtrans`,
 which is exactly why nothing in this tree had needed it until somebody else's
@@ -4799,15 +4794,15 @@ directory is staged, since a bare boot has no `C:assign` to type it with.
 #### What a different entry into the ABI proved
 
 The reason a foreign binary is worth the trouble is that it does not reach our
-library the way ours does. `lib/amigaos.c`'s `Curl_amiga_init()` — the
+library the way ours does. `lib/amigaos.c`'s `Curl_amiga_init()`, the
 `OpenLibrary("bsdsocket.library", 4)` plus `SocketBaseTags(SBTC_ERRNOPTR)` that
-§12.1 calls "the one call that gates the port" — is compiled `#elif
+§12.1 calls "the one call that gates the port", is compiled `#elif
 !defined(USE_AMISSL)`, and their build defines `USE_AMISSL`. **So that function
 is not in their binary at all.** clib2's own networking startup opens the
 library and installs the errno pointer instead, and it opens
 `usergroup.library` besides, which nothing of ours has ever called at runtime.
-Everything above that is identical — `select()` is still `WaitSelect()`,
-`HAVE_FCNTL` is still off, sockets still close with `CloseSocket()` — so this
+Everything above that is identical, `select()` is still `WaitSelect()`,
+`HAVE_FCNTL` is still off, sockets still close with `CloseSocket()`, so this
 is the same ABI entered through a different door, by code neither written nor
 tuned here.
 
@@ -4828,10 +4823,10 @@ Features: alt-svc HSTS HTTPS-proxy libz SSL threadsafe
 **The same two, and neither of them is the stack**: `a44_cookies_send`, which
 fails identically on both and is therefore curl's own AmigaOS path handling
 rather than anybody's libc; and `f07_ftp_active`, which FS-UAE cannot deliver
-(§14.8). Every other case — 1,200,000-byte bodies checked byte for byte,
+(§14.8). Every other case, 1,200,000-byte bodies checked byte for byte,
 4,096 one-byte chunked writes, a 60 KB header line, 40-way concurrency through
 the multi interface, twenty separate processes, a peer that RESETs mid-body,
-another that accepts and never speaks, an FTP upload read back and compared —
+another that accepts and never speaks, an FTP upload read back and compared,
 passes on a binary nobody here built.
 
 `AvailMem` over the 124 cases went 6,114,048 → 6,062,448. That is not a trend:
@@ -4843,9 +4838,9 @@ because it has no AmiSSL to load.)
 #### Its HTTPS did not complete a case, and that is AmiSSL rather than us
 
 Group E was run against the same binary with AmiSSL staged and **not one case
-finished**. The host peer logged sixteen handshake attempts in nine minutes —
+finished**. The host peer logged sixteen handshake attempts in nine minutes,
 one about every thirty-two seconds, each ending with the guest closing the
-connection mid-handshake — and the Amiga side never got as far as writing an
+connection mid-handshake, and the Amiga side never got as far as writing an
 exit code. Not diagnosed, and deliberately not chased: OpenSSL 3.6.2's generic
 bignum on a 14 MHz 68020 is the subject of §15, `--cacert` was being handed a
 PEM rather than the indexed store our own backend takes, and none of it is the
@@ -4871,7 +4866,7 @@ already claimed Roadshow worked.
   other case has that kind of corroboration.
 - **Every measurement is on a 68EC020 at 14 MHz with 8 MB of Zorro II Fast
   RAM.** The packet pool is 256 packets there. On the 4 MB floor the pool is
-  16 and several of these numbers would be different -- the RX depth for one,
+  16 and several of these numbers would be different, the RX depth for one,
   which is exactly why it is now computed rather than fixed.
 - **`--max-time` cannot fire inside a TLS handshake**, because `TLSOpen()`
   blocks (§11.8). `e16_tls_silent` accepts either exit code for that reason and
@@ -4880,9 +4875,9 @@ already claimed Roadshow worked.
   stack and curl is built with `ENABLE_IPV6=OFF` to match.
 - **Active-mode FTP cannot pass under FS-UAE 3.2.35, and it is the emulator
   rather than us.** `f07_ftp_active` fails with curl's exit 10 and the server's
-  425. The Amiga does its half correctly — the peer log records
+  425. The Amiga does its half correctly, the peer log records
   `PORT 10,0,2,15,27,249`, so the guest bound port 7161, listened, and
-  advertised its own address — and the host then cannot reach it. Checked from
+  advertised its own address, and the host then cannot reach it. Checked from
   the side rather than inferred: with the emulator running and
   `uae_slirp_redir = tcp:7260:7260` through `tcp:7263:7263` all accepted by the
   config parser (`set option "slirp_redir" ... (result: 1)`, four times, in
@@ -4907,7 +4902,7 @@ it is timed, and a MULU.L-corrected figure beside every measured one.
 
 ### 15.1 What AmiSSL is on this target, and why the CPU build decides the answer
 
-AmiSSL **5.27** is OpenSSL **3.6.2** — read from the running library, not from a header:
+AmiSSL **5.27** is OpenSSL **3.6.2**, read from the running library, not from a header:
 `OpenSSL 3.6.2 7 Apr 2026`, `amissl_v362.library 5.27 (8.4.2026) os3-68020 version`.
 
 The OS3 release ships exactly two m68k builds and one CPU-neutral master:
@@ -4918,15 +4913,15 @@ The OS3 release ships exactly two m68k builds and one CPU-neutral master:
 | `Libs/AmigaOS3/AmiSSL/68020-40/amissl_v362.library` | 3,587,424 | `-m68020-40 -msoft-float` |
 | `Libs/AmigaOS3/AmiSSL/68060/amissl_v362.library` | 3,591,992 | `-m68060 -msoft-float` |
 
-`amisslmaster` resolves the second by a literal path — `LIBS:AmiSSL/amissl_v%ld.library`,
-visible in `strings` — so the directory layout is not negotiable. **The 68020-40 build is
+`amisslmaster` resolves the second by a literal path, `LIBS:AmiSSL/amissl_v%ld.library`,
+visible in `strings`, so the directory layout is not negotiable. **The 68020-40 build is
 the one used here, and it is the one that gets the assembly:**
 
 - `Configurations/15-amissl.conf` gives `amiga-os3-68020` `asm_arch => 'm68k'` and
   `bn_ops => add("BN_LLONG")`. `amiga-os3-68060` gets neither.
 - `crypto/bn/build.info:90` sets `$BNASM_m68k=asm/bn_m68k.s` and the dispatch below it
   **overwrites** `$BNASM`, so on this target `bn_asm.c` is not compiled at all and the
-  ten bignum primitives come from **Howard Chu's 2002 68020 assembly** — 1604 lines,
+  ten bignum primitives come from **Howard Chu's 2002 68020 assembly**, 1604 lines,
   never merged upstream, carried by AmiSSL. §9 recorded that it "survives in AmiSSL";
   it is now confirmed that it is built and that it is what runs.
 - The 68060 build has none of it, for the reason §9 already gave: `MULU.L`'s 32×32→64
@@ -4934,7 +4929,7 @@ the one used here, and it is the one that gets the assembly:**
 
 So this is not our assembly against OpenSSL's C. It is **our assembly against OpenSSL's
 assembly**, on a target where OpenSSL got the same idea twenty-four years earlier.
-`BN_ULONG` is `unsigned int` — 32 bits, the same limb width we use.
+`BN_ULONG` is `unsigned int`, 32 bits, the same limb width we use.
 
 ### 15.2 The harness, and the one thing it does not link
 
@@ -4944,20 +4939,20 @@ headers and OpenSSL's both arrive through `<exec/types.h>` and both want names l
 `SHA256_CTX`.
 
 **Nothing of AmiSSL's is linked.** Every OpenSSL call is a macro from
-`<inline/amissl.h>` that expands to a `jsr` through `AmiSSLBase` or `AmiSSLExtBase` —
+`<inline/amissl.h>` that expands to a `jsr` through `AmiSSLBase` or `AmiSSLExtBase`,
 AmiSSL v5 spans two library bases because OpenSSL has more entry points than one LVO
 table holds. Verified in the disassembly: `BN_new()` is `jsr a6@(-2196)`. That sidesteps
 whether an archive built by adtools GCC 2.95.3 links against GCC 15.2 output, and it
 guarantees every measured cycle ran inside `amissl_v362.library`.
 
-The vectors are the existing `c68k_vectors.h` and `c68k_ec_vectors.h` — the same
-throwaway RSA-2048 key and the same RFC 6979 A.2.5 signatures the crypto68k tests use —
+The vectors are the existing `c68k_vectors.h` and `c68k_ec_vectors.h`, the same
+throwaway RSA-2048 key and the same RFC 6979 A.2.5 signatures the crypto68k tests use,
 converted from HN_UBASE limb order to big-endian bytes at the boundary.
 
 ### 15.3 The measurement trap, handled rather than discovered
 
 FS-UAE's A1200 model charges `MULU.L` **32.14 cycles where an MC68020 charges 45**
-(`Dn,Dh:Dl`; 43 for the 32-bit form) — measured by `tests/perf/cpucal`, and reproduced by
+(`Dn,Dh:Dl`; 43 for the 32-bit form), measured by `tests/perf/cpucal`, and reproduced by
 this program's own inline-assembly calibration kernel in the same run. Every other
 instruction the model charges is faithful to under 2%.
 
@@ -4985,7 +4980,7 @@ operands.
 | 32 (1024-bit) | 2s²+s = **2,080** | 1.5s²+1.5s = **1,584** | 576+1,056 = **1,632** | 324+1,056 = **1,380** |
 | 64 (2048-bit) | **8,256** | **6,240** | 1,728+4,160 = **5,888** | 972+4,160 = **5,132** |
 
-Ours is SOS, with the product split by Karatsuba at 64 limbs and schoolbook below —
+Ours is SOS, with the product split by Karatsuba at 64 limbs and schoolbook below,
 §15.9 is how that threshold was arrived at, and why it is one level and not three.
 AmiSSL's differs in a way that matters: because `OPENSSL_BN_ASM_MONT` is **not** defined
 for this target, `bn_mul_mont` does not exist, and `bn_mul_mont_fixed_top()` falls through
@@ -5003,7 +4998,7 @@ runs, OpenSSL issues about 22% fewer multiplies per Montgomery step than we do.
 | ECDSA P-256 verify | 164,476 | 186,280 | 0.88 |
 | ECDH P-256 shared secret | 125,204 | **277,504** | 0.45 |
 | k·G, an ECDHE key generation | 39,272 | **277,504** | 0.14 |
-| AES-128-CBC, HMAC-SHA256 | 0 | 0 | — |
+| AES-128-CBC, HMAC-SHA256 | 0 | 0 |, |
 
 Read the last two rows before any timing: they are the whole story, and §15.5 says why.
 
@@ -5013,14 +5008,14 @@ Traced through the AmiSSL 5.27 tree, not assumed.
 
 | | what runs on `amiga-os3-68020` |
 |---|---|
-| limb primitives | `bn_m68k.s` — `bn_mul_add_words`, `bn_mul_words`, `bn_sqr_words`, `bn_mul_comba4/8`, `bn_sqr_comba4/8`, `bn_add_words`, `bn_sub_words`, `bn_div_words`. One `mulu.l` per limb, unrolled 4× |
+| limb primitives | `bn_m68k.s`, `bn_mul_add_words`, `bn_mul_words`, `bn_sqr_words`, `bn_mul_comba4/8`, `bn_sqr_comba4/8`, `bn_add_words`, `bn_sub_words`, `bn_div_words`. One `mulu.l` per limb, unrolled 4× |
 | Montgomery | no `bn_mul_mont`; `BN_mul`/`BN_sqr` + `bn_from_montgomery_word` |
 | big multiply | `bn_mul_comba8` at 8 limbs, `bn_mul_recursive` (Karatsuba) at 16 and above |
-| RSA public | `BN_mod_exp_mont`, **no** `BN_FLG_CONSTTIME`, window 1 for a 17-bit exponent, leading zeros skipped — the same algorithm we use |
+| RSA public | `BN_mod_exp_mont`, **no** `BN_FLG_CONSTTIME`, window 1 for a 17-bit exponent, leading zeros skipped, the same algorithm we use |
 | RSA private | `BN_mod_exp_mont_consttime` on both CRT halves, fixed window 6, no zero skipping |
-| P-256 field | `EC_GFp_nist_method` with `BN_nist_mod_256` — a limb-domain Solinas reduction, the same idea as ours, and because `BN_LLONG` is set it takes the `NIST_INT64` path: ~200 32-bit ALU operations, no multiplies |
+| P-256 field | `EC_GFp_nist_method` with `BN_nist_mod_256`, a limb-domain Solinas reduction, the same idea as ours, and because `BN_LLONG` is set it takes the `NIST_INT64` path: ~200 32-bit ALU operations, no multiplies |
 | P-256 scalar | `ossl_ec_wNAF_mul` → **Montgomery ladder** for ECDH and k·G, wNAF (width 3) for ECDSA verify |
-| generator table | none — `ossl_ec_wNAF_precompute_mult` is reached only from the deprecated `EC_GROUP_precompute_mult`, which nothing in OpenSSL's own ECDSA or ECDH calls |
+| generator table | none, `ossl_ec_wNAF_precompute_mult` is reached only from the deprecated `EC_GROUP_precompute_mult`, which nothing in OpenSSL's own ECDSA or ECDH calls |
 | AES | no `AES_ASM`; `aes_core.c`'s table-driven `AES_encrypt`, four 1 KB T-tables, `FULL_UNROLL` off |
 | SHA-256 | no `SHA256_ASM`; generic C, with a big-endian fast path that skips the byte swap for rounds 0–15 |
 
@@ -5035,12 +5030,12 @@ field operations each scalar multiplication needs.
 gaps, and it is a trade rather than a win.
 
 - **ECDH and k·G take a Montgomery ladder.** `ec_mult.c` routes any scalar that *could*
-  be secret to `ossl_ec_scalar_mul_ladder`, **ignoring `BN_FLG_CONSTTIME`** — the comment
+  be secret to `ossl_ec_scalar_mul_ladder`, **ignoring `BN_FLG_CONSTTIME`**, the comment
   says so in as many words. That is 256 ladder steps, one per bit of the group order with
   no skipping, each a fused differential add-and-double costing 13 field multiplies and 7
   field squarings: **5,120 field operations, every time, whatever the scalar.** Ours is a
   width-5 wNAF (≈256 doublings, ≈43 additions) for a generic point and a Lim–Lee comb (26
-  doublings, ≈50 additions) for the generator — **≈2,570 and ≈760**. Both of ours leak:
+  doublings, ≈50 additions) for the generator, **≈2,570 and ≈760**. Both of ours leak:
   wNAF and comb digits select table entries by value, and every conditional field
   correction is a branch.
 - **RSA private is a fixed window with a full-table gather.** 1,021 squarings and 232
@@ -5053,7 +5048,7 @@ gaps, and it is a trade rather than a win.
   multiplies mod *n* per private operation, plus a full re-derivation (including an
   `A^e mod n`) every 32nd call. `RSA_blinding_off()` turns it off; the benchmark measures
   both.
-- **`rsa_ossl_private_decrypt` ends with an unconditional verification** — it recomputes
+- **`rsa_ossl_private_decrypt` ends with an unconditional verification**, it recomputes
   `r₀^e mod n` and compares. That is a whole RSA public operation, about 3% of a CRT
   private operation, and it cannot be disabled.
 - **RSA public is the one place the two agree.** OpenSSL sets no `BN_FLG_CONSTTIME` for a
@@ -5062,25 +5057,25 @@ gaps, and it is a trade rather than a win.
   multiplies on both sides.
 
 If we win the elliptic-curve operations, that is what buys it, and it is security we are
-not paying for rather than arithmetic we do better. The threat model in §9 — a vintage
-machine on a LAN, no remote timing attacker — is what makes that acceptable here; it would
+not paying for rather than arithmetic we do better. The threat model in §9, a vintage
+machine on a LAN, no remote timing attacker, is what makes that acceptable here; it would
 not be acceptable for a server.
 
 ### 15.6 What it costs to open AmiSSL at all, and the trap that cost a day
 
 Measured on the way in, because a program that opens AmiSSL pays this before it does any
-crypto (`-k 56`, so divide the clock into it as you like — these are I/O and setup, not
+crypto (`-k 56`, so divide the clock into it as you like, these are I/O and setup, not
 arithmetic):
 
 | | |
 |---|---:|
 | reading all 3,587,424 bytes of `amissl_v362.library` off DH0: | **55 ms** |
 | `OpenLibrary("amisslmaster.library")` | **3 ms** |
-| `OpenAmiSSL()` — `LoadSeg` of the 3.5 MB library | **139 ms** |
-| `InitAmiSSLA()` — the per-process init | **0 ms** |
-| the first OpenSSL call — its lazy provider/DRBG setup | **0 ms** |
+| `OpenAmiSSL()`, `LoadSeg` of the 3.5 MB library | **139 ms** |
+| `InitAmiSSLA()`, the per-process init | **0 ms** |
+| the first OpenSSL call, its lazy provider/DRBG setup | **0 ms** |
 
-**Opening AmiSSL is cheap — about a fifth of a second, once, and the library then stays
+**Opening AmiSSL is cheap, about a fifth of a second, once, and the library then stays
 resident for the next program.** That is worth stating because the first four attempts at
 this measurement looked like the opposite: the benchmark sat with the CPU busy and no
 output for between eight and twenty minutes of emulated time, four times, at three
@@ -5089,18 +5084,18 @@ different clocks. Neither cause was AmiSSL and neither was the emulator.
 **The first was a missing math library.** AmiSSL is built against clib2, whose library
 initialisation opens `mathieeedoubbas.library` *and* `mathieeedoubtrans.library`
 (`src/amissl_libinit.c:780-782`), and Kickstart 3.1's ROM contains `mathieeesingbas` and
-nothing else — verified against the 40.68 A1200 image in §11.2. A bare directory hard
+nothing else, verified against the 40.68 A1200 image in §11.2. A bare directory hard
 drive has neither. With them missing, `OpenAmiSSL()` never returns; with both staged it
 returns in 139 ms. What happens inside clib2 in between was not isolated and is not
-claimed here — the observation is the one that matters to anyone staging AmiSSL.
+claimed here, the observation is the one that matters to anyone staging AmiSSL.
 
 What found it was AmiSSL's *own* `OpenSSL` command, staged and run under the same harness:
-it prints `mathieeedoubtrans.library could not be opened.` and exits 20 — the loud version
+it prints `mathieeedoubtrans.library could not be opened.` and exits 20, the loud version
 of the same fault. Two further facts fell out of that probe:
 
 - **They have to be a matched pair.** A stock `mathieeedoubbas.library` beside the AROS
   `mathieeedoubtrans.library` still reports the trans library as unopenable. Both from the
-  AROS m68k boot ISO and it works — the `OpenSSL` command then gets all the way to its own
+  AROS m68k boot ISO and it works, the `OpenSSL` command then gets all the way to its own
   `Couldn't open bsdsocket.library v4!`, which is that command's requirement and not
   AmiSSL's.
 - **A real machine is fine and a test rig is not**, which is the same shape of finding as
@@ -5110,8 +5105,8 @@ of the same fault. Two further facts fell out of that probe:
   not spend the afternoon.
 
 OpenSSL 3.x also initialises itself lazily, on first API use rather than at
-`InitAmiSSL` — the default provider, the property cache and the DRBG chain are all built
-behind whichever call happens to be first — so the benchmark times a bare
+`InitAmiSSL`, the default provider, the property cache and the DRBG chain are all built
+behind whichever call happens to be first, so the benchmark times a bare
 `BN_new()`/`BN_free()` immediately afterwards to put that where it belongs. **It is 0 ms.**
 The whole of OpenSSL 3.x's startup on a 68020 is below the E-Clock's millisecond.
 
@@ -5121,7 +5116,7 @@ the math libraries staged the benchmark still sat inside its first OpenSSL call 
 ENGINESDIR=AmiSSL:engines MODULESDIR=AmiSSL:modules` (its own `Makefile:492`), so OpenSSL
 3.x's configuration and provider loading opens `AmiSSL:openssl.cnf` on the first API call
 anyone makes. There was no `AmiSSL:` assign. AmigaDOS does not return an error for an
-unknown volume — **it puts up "Please insert volume AmiSSL: in any drive"**, and on a bare
+unknown volume, **it puts up "Please insert volume AmiSSL: in any drive"**, and on a bare
 boot with no Workbench and no user there is nobody to cancel it.
 
 Two lines fix it and both belong in any AmigaOS test harness:
@@ -5137,7 +5132,7 @@ worth copying.
 
 ### 15.7 The measurement
 
-`-k 56`, so the CPU is a cycle-exact 68020 at an implied **56.53 MHz** — measured
+`-k 56`, so the CPU is a cycle-exact 68020 at an implied **56.53 MHz**, measured
 in-process by the MULU.L kernel, against `cpucal`'s 56.0. **Every operation agreed with
 the other side and with the published vector: 0 failures, 0 mismatches.** That covers the
 RSA-2048 public and CRT private results byte for byte against Python-derived known answers
@@ -5159,12 +5154,12 @@ ECDH against 1,368, 381 for `k·G` against 381, and 20,150 for the CRT private a
 | ECDSA P-256 verify | 484.9 ms | 840.2 ms | ours 1.73× | **ours 1.69×** |
 | ECDH P-256 shared secret | 338.3 ms | 1,049.7 ms | ours 3.10× | **ours 3.03×** |
 | k·G, an ECDHE key generation | 94.1 ms | 1,047.4 ms | ours 11.1× | **ours 10.76×** |
-| AES-128-CBC, 16 KiB | 85.3 ms | 84.2 ms | AmiSSL 1.01× | — |
-| HMAC-SHA256, 16 KiB | 86.9 ms | 111.2 ms | **ours 1.28×** | — |
+| AES-128-CBC, 16 KiB | 85.3 ms | 84.2 ms | AmiSSL 1.01× |, |
+| HMAC-SHA256, 16 KiB | 86.9 ms | 111.2 ms | **ours 1.28×** |, |
 
 **It is mixed, and the split is exactly where the code said it would be.**
 
-**AmiSSL wins the RSA public operation, and it is NOT the multiplies — it is the setup.**
+**AmiSSL wins the RSA public operation, and it is NOT the multiplies, it is the setup.**
 That was this section's first conclusion and it was wrong; §15.9 records adopting
 Karatsuba on the strength of it and then measuring what it actually bought. The
 decomposition, all of it measured in the same run:
@@ -5172,7 +5167,7 @@ decomposition, all of it measured in the same run:
 | | ours | AmiSSL |
 |---|---:|---:|
 | exponentiation, 16 squarings + 3 multiplies | 127.3 ms | 126.9 ms |
-| setup — R² mod m, built per call by both | **11.9 ms** | 16.0 ms |
+| setup, R² mod m, built per call by both | **11.9 ms** | 16.0 ms |
 | total | **139.5 ms** | 142.7 ms |
 
 Both figures moved after this section was first written, and §15.9 and §15.10 are the two
@@ -5187,26 +5182,26 @@ now the same speed to within the correction's own uncertainty.
 
 **We win the private operation, and constant time is why.** OpenSSL issues 7% *fewer*
 multiplies than we do and is still slower, because a fixed window with no zero-skipping
-reads the whole 64-entry table before every one of its 171 multiplies — 2,048 volatile
-`BN_ULONG` loads a time, about 350,000 per 1024-bit half — where our sliding window
+reads the whole 64-entry table before every one of its 171 multiplies, 2,048 volatile
+`BN_ULONG` loads a time, about 350,000 per 1024-bit half, where our sliding window
 indexes straight into it. And that is before blinding, which is OpenSSL's default and
 which the benchmark priced separately: **1.59 s, 30% of AmiSSL's unblinded operation.**
 Against the default configuration we are 1.38× faster; against the arithmetic alone,
 1.07× measured and 1.22× corrected.
 
-**We win the elliptic curve, and constant time is why again — but much harder.**
+**We win the elliptic curve, and constant time is why again, but much harder.**
 `ossl_ec_wNAF_mul` forces a Montgomery ladder for any scalar that could be secret, and
 the benchmark proves the source reading rather than citing it: **setting
 `BN_FLG_CONSTTIME` on the scalar changed `k·G` from 1,047,399 µs to 1,046,628 µs, 0.07%.**
 The flag is ignored because the ladder was already running. 256 steps, one per bit of the
 group order, 13 field multiplies and 7 squarings each, 5,120 field operations whatever the
-scalar — against our comb's 26 doublings and 50 additions. Eleven times.
+scalar, against our comb's 26 doublings and 50 additions. Eleven times.
 `EC_GROUP_have_precompute_mult()` answers **no**, as the source said it would, and it
 would not help if it were yes: the generator case is routed to the ladder before
 `pre_comp` is ever consulted.
 
 ECDSA verify sits in the middle. Both sides run a variable-time wNAF because both
-scalars are public, we issue 12% *fewer* multiplies, and we are 1.69× faster — so about
+scalars are public, we issue 12% *fewer* multiplies, and we are 1.69× faster, so about
 half of that gap is not multiplies at all. It is the same diagnosis §9 made about
 `nx_crypto`, one level less severe: OpenSSL's field elements are `BIGNUM`s with a size
 field, a sign, a `bn_correct_top()` after every operation and a `BN_CTX` allocation around
@@ -5214,17 +5209,17 @@ it, where ours are eight limbs in a fixed array. `BN_nist_mod_256` is a good Sol
 reduction and `bn_mul_comba8` is good assembly; the wrapper around them is what costs.
 
 **The bulk path is a dead heat, and that is the most consequential row.** AES-128-CBC is
-187 KB/s against 189 — both are the same table-driven C, and neither has a byte of m68k
+187 KB/s against 189, both are the same table-driven C, and neither has a byte of m68k
 assembly. HMAC-SHA256 is 183 KB/s against 143, ours ahead by 28%. Encrypting and MACing
 one 16 KiB TLS record costs 172 ms our way and 195 ms AmiSSL's: **92 KB/s against
 81 KB/s** of application data, 13% in our favour.
 
 That row is where §11's `https` figure comes from. `https` measured 16,464 B/s against
-`http`'s 114,598 — and 92 KB/s of record processing at 56 MHz is about 23 KB/s at 14 MHz,
+`http`'s 114,598, and 92 KB/s of record processing at 56 MHz is about 23 KB/s at 14 MHz,
 so the record path accounts for most of that ceiling and everything else in the stack
 shares what is left. Swapping our bulk crypto for AmiSSL's would move it about a tenth,
 in the wrong direction. **Nothing in AmiSSL rescues the bulk path, because nobody has
-written AES or SHA-256 assembly for m68k in either tree** — and the
+written AES or SHA-256 assembly for m68k in either tree**, and the
 1.28× on HMAC says the plainest thing in this whole section: the largest single lever
 available to `https://` on a classic Amiga is still an unwritten 68020 SHA-256.
 
@@ -5238,7 +5233,7 @@ than 3–4×". For the handshake that guess was right and slightly conservative:
 | ECDHE_RSA, 2-cert chain (3 verify + keygen + ECDH) | 850 ms | 2,525 ms | ours 2.9× |
 | ECDHE_ECDSA, 2-cert chain (3 verify + keygen + ECDH) | 1,887 ms | 4,617 ms | ours 2.4× |
 
-corrected, 971 / 2,723 and 2,036 / 4,871 — 2.8× and 2.3×. At 14 MHz that is 3.8 s
+corrected, 971 / 2,723 and 2,036 / 4,871, 2.8× and 2.3×. At 14 MHz that is 3.8 s
 against 10.2 s of arithmetic for an RSA chain and 7.6 s against 18.7 s for an ECDSA one,
 which is the difference between a handshake Cloudflare tolerates and one it abandons
 (§11.6, §13).
@@ -5257,23 +5252,23 @@ the measurement, in order of value:
 1. **A 68020 SHA-256.** The bulk path is 92 KB/s and neither implementation has any
    assembly in it at all. This is the only lever in the section that moves `https://`
    throughput rather than handshake latency.
-2. **A 32-bit long division — done, and it is what reversed the RSA public result.**
+2. **A 32-bit long division, done, and it is what reversed the RSA public result.**
    See §15.10. Worth 24.4 ms of a 164 ms operation, 3.05× on the setup itself.
-3. **Karatsuba — done, and worth 2.7%.** See §15.9. Kept, but it is not the lever the
+3. **Karatsuba, done, and worth 2.7%.** See §15.9. Kept, but it is not the lever the
    multiply count made it look like.
 
 And one thing that should *not* change: `crypto68k` stays variable-time. AmiSSL is
-constant-time on the private and ephemeral paths and that is most of what it costs — the
+constant-time on the private and ephemeral paths and that is most of what it costs, the
 ladder, the fixed window, the full-table gather, the blinding. For a vintage machine on a
 LAN (§9's threat model) that is a defence with no attacker, and we already say so in the
 headers of both modules. It is a trade, and it is the trade this project made on purpose.
 
 ### 15.9 Sources, and how to run it again
 
-- [jens-maus/amissl](https://github.com/jens-maus/amissl) — tag `5.27`; the OS3 runtime
+- [jens-maus/amissl](https://github.com/jens-maus/amissl), tag `5.27`; the OS3 runtime
   and the SDK are separate release assets, and `crypto/bn/asm/bn_m68k.s` exists only in
   the source tree, not in either archive.
-- Howard Chu, *M68020 bn_asm*, openssl-dev, 2002 —
+- Howard Chu, *M68020 bn_asm*, openssl-dev, 2002,
   [marc.info/?l=openssl-dev&m=101407286200398](https://marc.info/?l=openssl-dev&m=101407286200398).
   The same 1604 lines AmiSSL builds today.
 - MC68020UM / MC68030UM instruction-timing appendices, for the 43/45-cycle `MUL.L` the
@@ -5302,12 +5297,12 @@ is derived from a `t_mulu` measured in the same run, so it holds at 14 MHz too. 
 ### 15.9 Adopting Karatsuba, and what it was actually worth
 
 §15.7 originally blamed the RSA public gap on OpenSSL's Karatsuba, so `src/crypto68k/`
-grew one. It works, it is correct, and it is worth **2.7%** — an order of magnitude less
+grew one. It works, it is correct, and it is worth **2.7%**, an order of magnitude less
 than the limb-product count predicts. Both halves of that are worth writing down.
 
 **The prize was smaller than it looked before a line was written.** `c68k_sqr()` has
-always been a dedicated symmetric squarer — n(n−1)/2 off-diagonal products accumulated
-once, doubled, plus n diagonal squares — so the free ~2× that a naive "squaring by
+always been a dedicated symmetric squarer, n(n−1)/2 off-diagonal products accumulated
+once, doubled, plus n diagonal squares, so the free ~2× that a naive "squaring by
 calling multiply" would have left on the table was already banked. And a Montgomery step
 is a product *and* a reduction, where the reduction is a chain of scalar-by-vector
 `c68k_addmul_1` calls that Karatsuba cannot touch at all. So 2.14× on the raw squaring of
@@ -5329,7 +5324,7 @@ limbs, so T = n is one level and T = 8 is four):
 | Montgomery multiply | 2,256 µs | **2,160 (1.04×)** | 2,245 (1.00×) | 2,670 (0.84×) |
 
 **One level, and only at 64 limbs.** Every level past the first costs more than it saves,
-and at four levels the split is 28% *slower* than schoolbook — the recombination is O(n)
+and at four levels the split is 28% *slower* than schoolbook, the recombination is O(n)
 per level with a real constant, and by the time the operands are 8 limbs it dwarfs the
 products it removes. §9's rejection at 32 limbs was right and remains right: the square
 loses there and the multiply gains 4%. OpenSSL reaches 103,936 limb products by recursing
@@ -5343,11 +5338,11 @@ removes 496 from a square, predicting 0.28 ms, and the measured saving is 0.145 
 
 **Correctness.** The vendored `_nx_crypto_huge_number_mont()` could not be the oracle for
 this, and finding that out was most of the work. It is **wrong** for operands within a
-whisker of the modulus — with m = 2⁶⁴−1 and x = m−1, `mont(x,x)` must be 1 and it returns
+whisker of the modulus, with m = 2⁶⁴−1 and x = m−1, `mont(x,x)` must be 1 and it returns
 0; at 32 limbs with m nearly all ones it gets the top limb one too low. Both checked
 against an independently computed answer, not against either implementation. Random
 operands never come that close to m, which is why a 400-trial sweep never caught it and
-why no RSA or EC path can reach it — but those are exactly the operands Karatsuba's carry
+why no RSA or EC path can reach it, but those are exactly the operands Karatsuba's carry
 and borrow handling most needs testing on. So `c68k_karatsuba_limbs` doubles as the test
 hook: the suite computes each result twice in the same process, once schoolbook and once
 with the split forced down to 2-limb leaves, and compares. Six widths including odd ones,
@@ -5358,22 +5353,22 @@ against AmiSSL across the whole suite.
 
 One thing fixed on the way past: the host test's own `addmul` section swept n to 70 while
 writing into 64-limb arrays, and had been reporting 316 of its own 4,000 trials as
-failures — 7.9%, against the 6/71 = 8.45% of draws that overrun. `ctest` had been red for
+failures, 7.9%, against the 6/71 = 8.45% of draws that overrun. `ctest` had been red for
 this reason and not for a real one.
 
 **The shape of the answer.** Karatsuba took our exponentiation from
 131.6 ms to 127.3 ms and put it level with OpenSSL's 126.9. It did not move the headline,
 because the headline was never the multiplies: 98% of what remains is a 16-bit long
-division in the setup. Adopting it was right — it is 2.7% and it is now the reason our
-exponentiation is not behind — but the instruction to reverse the RSA public gap is
+division in the setup. Adopting it was right, it is 2.7% and it is now the reason our
+exponentiation is not behind, but the instruction to reverse the RSA public gap is
 answered by `_nx_crypto_huge_number_modulus()`, not by this.
 
 ### 15.10 The R² mod m setup: a 16-bit long division, and 3.05× for fixing it
 
 §15.9 ended by saying the RSA public gap was not the multiplies but a 16-bit long
 division in the setup, and that `_nx_crypto_huge_number_modulus()` was the thing to fix.
-It was. `src/crypto68k/c68k_div.c` is the same algorithm — Knuth's algorithm D, a
-two-digit quotient estimate, normalisation, add-back — at the machine's own word size:
+It was. `src/crypto68k/c68k_div.c` is the same algorithm, Knuth's algorithm D, a
+two-digit quotient estimate, normalisation, add-back, at the machine's own word size:
 
 | R² mod m | vendored, 16-bit digits | ours, 32-bit digits | |
 |---|---:|---:|---|
@@ -5381,7 +5376,7 @@ two-digit quotient estimate, normalisation, add-back — at the machine's own wo
 | 32-limb modulus (a CRT half) | 9,115 µs | **3,307 µs** | 2.75× |
 
 **And that reverses the headline.** RSA-2048 public goes 163.9 → **139.5 ms** against
-AmiSSL's 142.7 — ours by 1.02× measured, theirs by 1.004× corrected, which is a dead
+AmiSSL's 142.7, ours by 1.02× measured, theirs by 1.004× corrected, which is a dead
 heat. An ECDHE_RSA handshake's arithmetic goes 938 → **850 ms** against 2,525, ours by
 2.9×.
 
@@ -5390,13 +5385,13 @@ doubles the number of quotient digits *and* doubles the length of the multiply-s
 pass under each one, so 16-bit digits are about four times the inner work of the same
 algorithm over 32-bit limbs. The quotient estimate itself barely matters: a 64-limb setup
 issues **67** `DIVU.L` in total, which at the emulator's 921 ns is 61 µs of an 11,901 µs
-setup — **0.5%**. Anyone reading this expecting `bn_div_words` to be the secret should
+setup, **0.5%**. Anyone reading this expecting `bn_div_words` to be the secret should
 know that it is not; the limb width is.
 
 **`DIVU.L` was calibrated before being trusted, and it is discounted harder than
 `MULU.L`.** The benchmark times it in-process with an inline-assembly kernel, the same
 way it does the multiply: **921.9 ns**, which against `MULU.L`'s 568.6 ns and its known
-32.14 cycles works out at **51.8 cycles where the MC68020UM says 78** — a 34% discount,
+32.14 cycles works out at **51.8 cycles where the MC68020UM says 78**, a 34% discount,
 larger than `MULU.L`'s 29%. It is folded into the same correction as an equivalent
 multiply count rather than given a column of its own, because at 0.5% of the setup it is
 below the noise; the calibration is reported so that the next person does not have to
@@ -5407,20 +5402,20 @@ same class as `MULU.L` 32×32→64: real on a 68020, 68030 and 68040, **not impl
 68060**, where it traps to the emulator. So it lives in `c68k_prim.S` under the existing
 `AMINETXDUO_CRYPTO68K_ASM` guard with a portable C fallback beside it, and that option
 must still never be enabled for a 68060 build. `c68k_submul_1`, the multiply-subtract
-inner loop, is deliberately left to the compiler — GCC emits `MULU.L` for it, the same
+inner loop, is deliberately left to the compiler, GCC emits `MULU.L` for it, the same
 finding that kept `c68k_addmul_1_c` within 1.4× of hand-written assembly, and the
 measurement above says the estimate is not where the time goes anyway.
 
 **Caching R² was costed first and rejected.** It would have avoided the division rather
 than speeding it up, and it buys nothing for a client: the three RSA public operations in
 a handshake verify the leaf with the intermediate's key, the intermediate with the root's,
-and the ServerKeyExchange with the leaf's — **three different moduli**
+and the ServerKeyExchange with the leaf's, **three different moduli**
 (`_nx_secure_x509_certificate_chain_verify` walks "each issuer back to" the root), so a
 cache keyed on the modulus never hits inside a handshake. Across handshakes to one host,
 session resumption (§13) does no public-key work at all, so it would never be consulted
 there either. Two other division-free routes were priced and are worse than what they
 replace: R² by repeated modular doubling from R mod m is 2,048 shift-and-subtract passes
-over 64 limbs, and by a Montgomery-squaring ladder is eleven Montgomery squares — ~42 ms
+over 64 limbs, and by a Montgomery-squaring ladder is eleven Montgomery squares, ~42 ms
 and ~72 ms against the 36.6 being replaced.
 
 **The CRT private operation barely moves**, and the earlier guess that this would "pay
@@ -5428,8 +5423,8 @@ again" there was wrong: 4,976 → 4,951 ms, about 0.5%. Two 32-limb setups are a
 error next to two 1,024-bit exponentiations. The setup was 22% of the *public* operation
 because that operation is short.
 
-**Correctness.** 600 trials against the vendored divider — which, unlike the vendored
-Montgomery, has no known defect — across moduli of 1..32 limbs and dividends up to twice
+**Correctness.** 600 trials against the vendored divider, which, unlike the vendored
+Montgomery, has no known defect, across moduli of 1..32 limbs and dividends up to twice
 that, in six shapes chosen to reach the two paths random operands almost never do: the
 `B−1` clamp, where the partial remainder's top limb equals the divisor's and a `DIVU.L`
 would **trap** rather than saturate, so the code must test before dividing; and the
@@ -5458,13 +5453,13 @@ unit-test checks. It was reachable from nothing:
 
 - **No tap call in `src/sana2/`, in either direction.** The two call sites are named
   and located, with the exact arguments, in a block comment in
-  `include/aminetxduo/bpf.h` — "THE TWO CALLS `src/sana2/` MUST ADD" — and neither
+  `include/aminetxduo/bpf.h`, "THE TWO CALLS `src/sana2/` MUST ADD", and neither
   existed.
 - **`ami_bpf_attach_interface()` had no caller**, so no interface was ever registered
   and `BIOCSETIF` could not have succeeded against any name.
 - **All eight `bpf_*` LVOs** (0x16e–0x198) pointed at `bsd_enosys()`.
 - **The `aminetxduo_bpf` archive was linked by `tests/mbuf_bpf` and by nothing that
-  ships** — not by `bsdsocket.library`, not by the netstack.
+  ships**, not by `bsdsocket.library`, not by the netstack.
 
 So the answer to "can `bpf_*` do this?" was *no*, for the most ordinary reason: it
 had been written, tested against synthetic input, and never connected. Both ends are
@@ -5482,7 +5477,7 @@ The second one is the interesting one. NetX Duo's loopback interface has
 `nx_interface_link_driver_entry == NX_NULL` (`nx_ip_create.c:157`), and
 `_nx_ip_driver_packet_send()` shortcuts a loopback destination straight into
 `_nx_ip_packet_deferred_receive()`. **No driver is called at all**, so no tap on a
-driver can ever see loopback traffic — and loopback is the path every throughput
+driver can ever see loopback traffic, and loopback is the path every throughput
 figure in §11 was measured on. Without `NX_ENABLE_IP_PACKET_FILTER` the fastest path
 in the stack would have been the one path with no instrument on it.
 
@@ -5495,7 +5490,7 @@ in Wireshark serve both. `lo0`'s fourteen bytes are synthesised with zeroed addr
 
 `NetTrace` is the consumer: it runs a workload and captures it to a **classic pcap
 that opens in Wireshark and tcpdump with no conversion**. It links no part of `src/`
-— every call is a published `bsdsocket.library` LVO, because a
+every call is a published `bsdsocket.library` LVO, because a
 tool that linked the archive would get its own copy of the channel table and capture
 nothing. It is one program rather than a daemon plus a workload because the trace
 exists to explain a throughput number, and a number and a trace from two separate
@@ -5514,8 +5509,8 @@ Stated plainly, because it decides what an independent view can be:
   is not linked. The only `pcap` strings in the binary are three Windows-only winpcap
   failure messages.
 - **`tcpdump` on the host is not an alternative.** SLIRP is user-mode NAT *inside* the
-  emulator process, so none of the guest's own framing — no Ethernet header, no ARP,
-  no DHCP, and not the guest's TCP headers — ever reaches a host interface. What the
+  emulator process, so none of the guest's own framing, no Ethernet header, no ARP,
+  no DHCP, and not the guest's TCP headers, ever reaches a host interface. What the
   host would see on `lo0` is SLIRP's re-originated connection, which is a different
   TCP conversation. And `/dev/bpf` on this machine needs a password.
 - **What does exist, and is better:** the emulated A2065 writes every frame it
@@ -5526,7 +5521,7 @@ Stated plainly, because it decides what an independent view can be:
   code, so it is independent by construction: a frame that appears there and not in
   the guest's own pcap was lost between the card and NetX Duo, which is the exact
   shape of the `AMI_SANA2_RX_DEPTH_IPV4` defect.
-- **What it cannot tell you: there are no timestamps.** Not coarse — absent. The
+- **What it cannot tell you: there are no timestamps.** Not coarse, absent. The
   converter stamps records with a counter so the file opens and the ORDER is right,
   and `tests/trace/tcpaudit.py` detects that synthetic clock and suppresses every
   timing rather than printing percentiles computed from a fiction. Take timing from
@@ -5572,7 +5567,7 @@ moment each segment left, against the window the other side had advertised.**
 
 | A1200, 14 MHz, 524288 B | max in flight | advertised | |
 |---|---|---|---|
-| **loopback** | 4096 | 4096 | **100% — window-limited** |
+| **loopback** | 4096 | 4096 | **100%, window-limited** |
 | wire | 7200 | 8192 | 88% |
 
 - **Loopback is window-limited, flatly.** Exactly one 4096-byte segment in flight,
@@ -5580,16 +5575,16 @@ moment each segment left, against the window the other side had advertised.**
   allowed to do. Raising the window to 32 KB moves loopback from **297 to 352 KB/s
   (+18%)** and drops occupancy to 33%.
 - **The wire is not.** With prompt acknowledgements the peer never has more than
-  **2880 bytes** outstanding — 9% of a 32 KB window, 35% of an 8 KB one. At 179 KB/s
+  **2880 bytes** outstanding, 9% of a 32 KB window, 35% of an 8 KB one. At 179 KB/s
   and a 1440-byte segment that is 8 ms per segment, which is the receive pipeline's
   own cost, not a window stall. So the ~117 KB/s that §11 measured through curl, and
   the 161–179 KB/s `NetTrace` measures without curl's copies, are **not** capped by
   the advertised window.
 
 **The window never reached zero on the shipped configuration.** It does now, on
-loopback, as a consequence of §16.6 — see there.
+loopback, as a consequence of §16.6, see there.
 
-### 16.6 Delayed ACK, Nagle, the tick — and the defect
+### 16.6 Delayed ACK, Nagle, the tick, and the defect
 
 **The tick first, from the running system rather than from a comment.** The serial
 log prints it at startup:
@@ -5603,7 +5598,7 @@ log prints it at startup:
 derives its own rates from it: the fast periodic timer is `50/10` = 5 ticks = 100 ms,
 and the delayed-ACK timer `50/5` = 10 ticks = **200 ms**.
 
-**Nagle does not exist.** Not "is disabled" — the string `nagle` does not appear
+**Nagle does not exist.** Not "is disabled", the string `nagle` does not appear
 anywhere in the vendored NetX Duo tree, and `setsockopt(TCP_NODELAY)` returns success
 without doing anything, which is honest because the behaviour is always no-delay. The
 trace agrees: 32 separate 4096-byte segments went out on loopback with an ACK
@@ -5620,7 +5615,7 @@ quantised at 20 ms. Whatever the residual ceiling above ~15 MHz is, it is not th
 
 `NX_TCP_ACK_EVERY_N_PACKETS` is defined nowhere in the vendored tree, so the whole
 `need_ack` block in `nx_tcp_socket_state_data_check.c` is compiled out and
-**4.2.3.2 — "acknowledge at least every second full-sized segment" — is simply
+**4.2.3.2, "acknowledge at least every second full-sized segment", is simply
 absent.** What remains acknowledges on two triggers, and neither is per-segment:
 
 1. a **window update**, sent only once the receive window has re-opened by **half of
@@ -5631,7 +5626,7 @@ absent.** What remains acknowledges on two triggers, and neither is per-segment:
 So **the interval between acknowledgements is proportional to the window**, and when
 the application cannot consume half a window inside 200 ms the timer becomes the
 pacer. The consequence is worse than the delay: it makes the obvious remedy for a
-small window — enlarging it — actively harmful. Measured over the wire, 524288 bytes,
+small window, enlarging it, actively harmful. Measured over the wire, 524288 bytes,
 changing `BSD_TCP_WINDOW` from 8192 to 32768 and **nothing else**:
 
 | | 8 KB | 32 KB |
@@ -5664,12 +5659,12 @@ comparison per received data segment.
 | retransmissions | 0 | 0 |
 | throughput | 161–174 KB/s | 163–174 KB/s |
 
-#### Does this explain the sub-linear wire scaling? No — and that is worth as much
+#### Does this explain the sub-linear wire scaling? No, and that is worth as much
 
 §11 fitted a fixed ceiling against three honest clock points (105 / 174 / 239 KB/s at
 6.80 / 13.95 / 24.48 MHz) and concluded that **above about 15 MHz roughly half of what
 is left is not CPU at all**, attributing it to "the 50 Hz IP periodic tick and the
-round trips paced by it" — offered as a hypothesis and never confirmed. The obvious
+round trips paced by it", offered as a hypothesis and never confirmed. The obvious
 successor hypothesis, once the ACK rule above was found, is that the missing rule was
 that ceiling.
 
@@ -5686,7 +5681,7 @@ that ceiling.
 
 What the trace says the wire ceiling actually is, arithmetically: 524,288 bytes in
 2.92 s is **8.0 ms per 1440-byte segment** at 14 MHz. Nothing in the trace is idle for
-that 8 ms — no window stall, no ACK wait, no timer — so it is the per-segment cost of
+that 8 ms, no window stall, no ACK wait, no timer, so it is the per-segment cost of
 the receive pipeline itself: the a2065 interrupt, the SANA-II copy hook, the deferred
 receive, the checksum, the TCP reassembly and the copy out through `recv()`. That is
 CPU work, and it is the same work §11 already ranked (`bsdsocket.library`'s per-call
@@ -5705,8 +5700,8 @@ path. The difference is curl's own buffering and HTTP handling, not the stack.
 
 **Bulk throughput does not move**, and that is stated rather than buried: at an 8 KB
 window, half the window is already about three segments, so the window update was
-already firing often enough. What moves is **latency** — a 3.3× cut in the median and
-a 9× cut in the worst case — and that is what every request/response exchange pays:
+already firing often enough. What moves is **latency**, a 3.3× cut in the median and
+a 9× cut in the worst case, and that is what every request/response exchange pays:
 each HTTP round trip, each DNS query, each leg of a TLS handshake. It is also the
 prerequisite for ever raising the window: with it, the 32 KB build returns to
 179 KB/s and 208 acknowledgements instead of 59.
@@ -5714,7 +5709,7 @@ prerequisite for ever raising the window: with it, the 32 KB build returns to
 **One thing got worse and it is worth naming.** On loopback the receiver now
 advertises a **zero window 64 times** in a 128-segment transfer, where before it never
 did, and loopback bulk throughput falls about 3% (297 → 287 KB/s). That is not the
-ACK rule misbehaving — it is the 8192-byte window being too small for a 4096-byte
+ACK rule misbehaving, it is the 8192-byte window being too small for a 4096-byte
 application write, exposed rather than caused. Two 4096-byte segments fill the window
 exactly; acknowledging on the second one therefore advertises zero, honestly. The
 window reopens on the next `recv()` with no persist-timer stall, which is why the
@@ -5726,11 +5721,11 @@ than hidden: the receive queue is drawn from the same `NX_PACKET` pool the SANA-
 readers pin 32 of, the pool is 256 packets on the 8 MB profile and
 `AMI_POOL_MIN_PACKETS` (16) on the 4 MB floor, and 32 KB of window per socket times
 forty concurrent sockets is several times the whole pool. That is a **functional
-limit, not a memory budget** — exhausting the pool drops frames — and it needs the
+limit, not a memory budget**, exhausting the pool drops frames, and it needs the
 same treatment `AMI_SANA2_RX_DEPTH_IPV4` got: derived from the pool, with the
 concurrency case (`tests/curl` `d03_parallel_40`) as the acceptance test. Until that
 measurement exists, `AMINETXDUO_TCP_WINDOW` is the knob that made this section
-possible — two libraries out of one tree, differing in one constant — and the default
+possible, two libraries out of one tree, differing in one constant, and the default
 stays at 8192.
 
 ### 16.7 MSS, fragmentation and segment sizes
@@ -5757,12 +5752,12 @@ on the guest capture shows
     options [mss 1460,nop,nop,nop,eol], length 0
 ```
 
-— MSS and then NetX Duo's fixed eight-byte option block padded out. **No window
+MSS and then NetX Duo's fixed eight-byte option block padded out. **No window
 scale, and no SACK.** `NX_ENABLE_TCP_WINDOW_SCALING` exists in NetX Duo and is not
 defined here, which puts a hard **64 KB ceiling on the receive window** whatever
 §16.6's pool-derived sizing eventually decides; SACK is not implemented in the
-vendored tree at all, so a burst loss costs a full go-back-N. Neither binds today —
-the window is 8 KB and nothing is being lost — but both bound where this can go, and
+vendored tree at all, so a burst loss costs a full go-back-N. Neither binds today,
+the window is 8 KB and nothing is being lost, but both bound where this can go, and
 the window-scale option is bilateral, so not offering it also stops the *peer*
 scaling.
 
@@ -5775,7 +5770,7 @@ own ACK of the SYN/ACK went out **1.6 ms** after it arrived.
 
 The suite that found the four-frame receive window is the gate that matters here,
 because an ACK change can move it either way and every body it fetches is hashed
-against the server's copy — a correctness regression cannot pass quietly.
+against the server's copy, a correctness regression cannot pass quietly.
 
 | | |
 |---|---|
@@ -5785,7 +5780,7 @@ against the server's copy — a correctness regression cannot pass quietly.
 | host `ctest` | **6/6** |
 
 The two curl failures are the two §14 already names and neither is ours:
-`a44_cookies_send` (curl does not write its cookie jar on AmigaOS — settled against
+`a44_cookies_send` (curl does not write its cookie jar on AmigaOS, settled against
 a third-party binary in §14.7) and `f07_ftp_active` (FS-UAE 3.2.35's SLIRP opens no
 inbound path, §12). The loopback tier reads 128/0/14 rather than §12's 125/1/16
 because `SOCK_RAW` landed alongside this work, not because of anything here.
@@ -5806,7 +5801,7 @@ one-time load, not a per-socket leak.
 | 48 | 8.68 s | **8.40 s** |
 
 Every transfer completes, every body byte-identical, `AvailMem` delta **+0**. Five of
-six points faster, one marginally slower, about 7% in the mean — which is the shape
+six points faster, one marginally slower, about 7% in the mean, which is the shape
 the mechanism predicts: with forty sockets sharing one packet pool each socket's
 window is small relative to what it wants, so the interval between acknowledgements
 is exactly what a concurrent client spends its time waiting on. It is a modest win,
@@ -5817,8 +5812,8 @@ and it is stated as one; the point of running it was that it could have been a l
 - **`CloseSocket()` sending a RESET is visible in every trace.** §12.3 lists it third
   and calls it "a risk that has not been reproduced". It is now *observed*: every
   completed flow in every capture ends `RST 1` from the Amiga side. Still not
-  reproduced as data loss — on these paths everything was acknowledged before the
-  close — but it is no longer an inference from source code.
+  reproduced as data loss, on these paths everything was acknowledged before the
+  close, but it is no longer an inference from source code.
 - **The capture costs about 10% on loopback and nothing measurable on the wire.**
   Loopback 297 → 266 KB/s with a channel bound; wire 161 → 174 KB/s, i.e. inside
   run-to-run variance. Both are reported rather than one, because the
@@ -5826,7 +5821,7 @@ and it is stated as one; the point of running it was that it could have been a l
 - **`NetTrace` itself found a class of bug the harness could not report.** Its 16 KB
   capture buffer started life as a local in `main()`, and an AmigaDOS Shell command
   runs on a 4 KB stack. The result was an F-line trap (`#8000000B`) and a **reboot
-  loop** — the machine ran the command list, crashed, reset, and ran it again, four
+  loop**, the machine ran the command list, crashed, reset, and ran it again, four
   times, while `DH0:` kept only what had been flushed before the last reset. The
   harness reported it as a timeout. Two lessons went into the tool: the control block
   is static, and every line of output is flushed as it is written, because a
@@ -5834,8 +5829,8 @@ and it is stated as one; the point of running it was that it could have been a l
   is not a diagnostic tool.
 - **The emulator log is a capture nobody knew they had.** 41 MB of it was already
   sitting in `build/fsuae-base-*/Cache/Logs/` from earlier curl runs, and converting
-  a two-week-old log reproduced §14's traffic — 834 segments, 1,200,106 bytes, window
-  minima of 5312 and 3780 — without re-running anything.
+  a two-week-old log reproduced §14's traffic, 834 segments, 1,200,106 bytes, window
+  minima of 5312 and 3780, without re-running anything.
 
 
 ## 17. Closing the gap with Roadshow: SOCK_RAW and urgent data (2026-07-26)
@@ -5843,9 +5838,9 @@ and it is stated as one; the point of running it was that it could have been a l
 §12 named seventeen results that were not green and classified each one. This section
 does the arithmetic §12 did not, and then closes the part of it that is ours.
 
-### 17.1 The thirteen, named — and which tier the number belongs to
+### 17.1 The thirteen, named, and which tier the number belongs to
 
-**Roadshow 4.364 scores 138 passed, 4 known deviations, 0 unexpected failures — and no
+**Roadshow 4.364 scores 138 passed, 4 known deviations, 0 unexpected failures, and no
 skips at all.** The four are in the suite's own `src/known_failures.c`, which is the
 authority rather than a claim we are making about a stack we do not have:
 
@@ -5860,16 +5855,16 @@ authority rather than a claim we are making about a stack we do not have:
 working `SOCK_RAW`**. It is a network-tier number. Our comparable number was 133, not
 125, and the thirteen decompose as
 
-* **sixteen** Roadshow passes and we did not — the seventeen of §12 less test 27, which
+* **sixteen** Roadshow passes and we did not, the seventeen of §12 less test 27, which
   Roadshow fails as well; minus
-* **three** we pass and Roadshow does not — 35, 76 and 77.
+* **three** we pass and Roadshow does not, 35, 76 and 77.
 
 As a work list, thirteen of our seventeen have to turn green, and they are:
 
 | Count | Tests | Class |
 |---:|---|---|
-| 6 | 3 `socket_create_raw`, 132–136 the ICMP family | **(a)** real gap — §17.2 |
-| 2 | 27 `recv(MSG_OOB)`, 64 `ws_exceptfds_oob` | **(a)** real gap — §17.3 |
+| 6 | 3 `socket_create_raw`, 132–136 the ICMP family | **(a)** real gap, §17.2 |
+| 2 | 27 `recv(MSG_OOB)`, 64 `ws_exceptfds_oob` | **(a)** real gap, §17.3 |
 | 5 | five of the nine helper-gated | **(c)** environment |
 
 **A correction to §12.3**, which said `SOCK_RAW` was worth six results. It is worth six on
@@ -5890,8 +5885,8 @@ descriptor, and the second is the one that decides the whole design.
 
 1. **ICMP never reaches it.** `_nx_ip_dispatch_process()` sends ICMPv4 to
    `nx_ip_icmp_packet_receive` and consults the raw hook only in the "protocol I do not
-   recognise" branch, so a raw socket opened with `IPPROTO_ICMP` — the one every `ping`
-   and `traceroute` opens — never sees a byte. `NX_ENABLE_IP_RAW_PACKET_ALL_STACK` moves
+   recognise" branch, so a raw socket opened with `IPPROTO_ICMP`, the one every `ping`
+   and `traceroute` opens, never sees a byte. `NX_ENABLE_IP_RAW_PACKET_ALL_STACK` moves
    the hook to the top of the dispatch, ahead of TCP, UDP, ICMP and IGMP. It is not
    documented in `nx_user_sample.h`; it appears only in `nx_ip_dispatch_process.c`, and
    it does nothing unless `NX_ENABLE_IP_RAW_PACKET_FILTER` is on too.
@@ -5905,13 +5900,13 @@ descriptor, and the second is the one that decides the whole design.
 `src/bsdsocket/raw.c` owns all three. The filter's return value decides ownership:
 `NX_SUCCESS` means "I took it" and the stack stops processing the packet, anything else
 means "not mine". **Ours copies a packet for each interested descriptor and always
-declines.** Consuming would be one packet copy cheaper and would break the machine — an
+declines.** Consuming would be one packet copy cheaper and would break the machine, an
 echo request claimed by a raw socket is a request nobody answers, and a claimed reply is
 one `nx_icmp_ping()` never wakes on. Test 132 depends on exactly that: it pings 127.0.0.1
 *from a raw socket* and waits for the reply the ICMP layer still generates from the
 request it still sees.
 
-A reader gets a whole IP datagram, header included — the suite parses `(buf[0] & 0x0F) * 4`
+A reader gets a whole IP datagram, header included, the suite parses `(buf[0] & 0x0F) * 4`
 to find the ICMP header, and so does every `ping` ever written. The header is still
 physically in the buffer when the filter runs (`nx_ipv4_packet_receive.c` only advances
 `nx_packet_prepend_ptr` past it and leaves `nx_packet_ip_header` pointing at it), so the
@@ -5952,7 +5947,7 @@ header, because **both** senders finish with
 header_ptr -> nx_tcp_header_word_4 = (checksum << NX_SHIFT_BY_16);
 ```
 
-— a plain assignment, *after* the checksum has been computed over that word
+a plain assignment, *after* the checksum has been computed over that word
 (`nx_tcp_socket_send_internal.c`, `nx_tcp_packet_send_control.c`). Any urgent pointer
 planted beforehand is destroyed and the checksum is wrong as well.
 
@@ -5961,14 +5956,14 @@ open-codes the graceful FIN. **It is not the same problem.** A FIN is a control 
 fire-and-forget, never retransmitted. An urgent byte is *data*, it consumes a sequence
 number, and a copy of `_nx_tcp_socket_send_internal()` would have to reproduce the window
 arithmetic, the transmit-queue linking, the outstanding-byte accounting and the
-mutex-drop race check around the checksum — or skip the retransmit queue and leave a hole
+mutex-drop race check around the checksum, or skip the retransmit queue and leave a hole
 in the sequence space that stalls the connection permanently the first time the segment is
 lost.
 
 So the byte goes out through `nx_tcp_socket_send()` like any other: queued, retransmitted,
 accounted, with NetX Duo owning all of it. The `URG` bit and the urgent pointer are
 written into that one segment on its way past `nx_ip_packet_filter`, which
-`_nx_ip_packet_send()` consults *after* `_nx_ip_header_add()` and *before* the driver —
+`_nx_ip_packet_send()` consults *after* `_nx_ip_header_add()` and *before* the driver,
 the last point at which the bytes are still ours. Two 16-bit words change, so the TCP
 checksum is repaired incrementally by RFC 1624 equation 3 rather than recomputed. The
 filter is installed for the duration of that one send and removed immediately, so the
@@ -5988,7 +5983,7 @@ half is a hook `NX_ENABLE_IP_PACKET_FILTER` already installs for us.
    `SO_OOBINLINE` were always set; `recv(MSG_OOB)` returns a copy. Taking a byte back out
    of the middle of a queued `NX_PACKET` would mean rewriting a segment the TCP state
    machine still owns and still counts in its sequence space, to hide one byte that both
-   real callers — `ftp`'s `ABOR` and `telnet`'s interrupt — send inline anyway.
+   real callers, `ftp`'s `ABOR` and `telnet`'s interrupt, send inline anyway.
 2. **A retransmission carries the byte but not the `URG` bit.**
    `_nx_tcp_socket_retransmit()` rebuilds `nx_tcp_header_word_3` without it in any case.
    That is the right failure mode: the data is always reliable, only the urgency marking
@@ -6014,9 +6009,9 @@ Everything still not green, named:
 |---|---|---|---|
 | 39, 40, 42 | `tcp_network_64k`, `udp_network_datagram`, `tcp_network_large` | **(c)** | `helper_is_connected()` gate; green on the network tier |
 | 103, 104 | `gethostbyname_external`, `gethostbyaddr_external` | **(c)** | same gate; green on the network tier |
-| 133, 134, 135 | `icmp_network`, `icmp_large_payload`, `icmp_multi_ping` | **(c)** | same gate; green on the network tier — 2.5 ms, 9.9 ms and 5/5 replies |
+| 133, 134, 135 | `icmp_network`, `icmp_large_payload`, `icmp_multi_ping` | **(c)** | same gate; green on the network tier, 2.5 ms, 9.9 ms and 5/5 replies |
 | 138, 140, 142 | `tp_tcp_network`, `tp_udp_network`, `tp_tcp_sustained_network` | **(c)** | same gate; green on the network tier |
-| 41 | `accept(): incoming connection from remote host` | **(c)** | the one result neither tier reaches — see below |
+| 41 | `accept(): incoming connection from remote host` | **(c)** | the one result neither tier reaches, see below |
 
 Nothing is left in class **(a)**.
 
@@ -6028,8 +6023,8 @@ Nothing is left in class **(a)**.
 so it was checked again with the option UAE actually documents for the job.
 
 `uae_slirp_redir = T:7861:7861`, dropped into the run's private `Host.fs-uae` (the same
-route that turns FS-UAE's own bsdsocket emulation off), **reaches the emulator** — it is
-echoed in `fs-uae.log.txt` right after `bsdsocket_library = 0` — and test 41 still fails.
+route that turns FS-UAE's own bsdsocket emulation off), **reaches the emulator**, it is
+echoed in `fs-uae.log.txt` right after `bsdsocket_library = 0`, and test 41 still fails.
 The decisive measurement is on the host side: with the guest booted and the suite running,
 
 ```
@@ -6059,8 +6054,8 @@ with throughput, so it was measured rather than argued.
 | host `ctest` | **6/6** |
 | `tools/ci.sh` on playhouse2, NDK 3.9 | host + all four cross configs + conformance, **all green** |
 
-The two curl failures are §16.8's two and §14's two — `a44_cookies_send` and
-`f07_ftp_active` — unchanged in identity and in count.
+The two curl failures are §16.8's two and §14's two, `a44_cookies_send` and
+`f07_ftp_active`, unchanged in identity and in count.
 
 **The concurrency sweep, against §16.8's own numbers on the same profile:**
 
@@ -6074,7 +6069,7 @@ The two curl failures are §16.8's two and §14's two — `a44_cookies_send` and
 | 48 | 8.40 s | **8.52 s** |
 
 Every transfer completes, every body byte-identical, `AvailMem` delta **+0**. Three
-points faster, two slower, one identical, about 3% either way — which is run-to-run
+points faster, two slower, one identical, about 3% either way, which is run-to-run
 noise on this profile and is stated as noise, not as a win.
 
 **And the reason it is noise is structural, which is why the sweep was expected to be
@@ -6143,8 +6138,8 @@ spends to save 3 KB are pure loss.
 
 **A byte read from a table costs exactly what a longword read costs**, 159.842
 against 159.845. The addressing mode dominates and the operand size does not
-appear at all. So the byte-oriented S-box variant — which trades 4-byte reads
-for 1-byte reads and pays for MixColumns in the ALU — buys nothing on the side
+appear at all. So the byte-oriented S-box variant, which trades 4-byte reads
+for 1-byte reads and pays for MixColumns in the ALU, buys nothing on the side
 it was supposed to win on, and pays full price on the other.
 
 **Rotates are not the bottleneck they look like, and SWAP is a trap.** A rotate
@@ -6165,7 +6160,7 @@ Sweeping a straight-line body of `ADD.L` from 32 bytes to 2 KB:
 ```
 
 That is monotonically *decreasing* and it flattens at exactly `ADD.L`'s 35.9 ns
-— it is the loop's `SUBQ`/`BNE` being amortised over more instructions and
+it is the loop's `SUBQ`/`BNE` being amortised over more instructions and
 nothing else. A real 68EC020 has 256 bytes of direct-mapped instruction cache
 and a 2 KB straight-line body would fetch every instruction from the bus;
 FS-UAE's A1200 model charges nothing for that. **So this emulator would reward
@@ -6217,7 +6212,7 @@ and 1.27×/1.63× over what we shipped. What it does differently:
   words, four accumulators, an index and a temporary; that is ten values and
   the 68020 has eight data registers. Reading an index byte out of a register
   costs `MOVE.B` plus a `ROL.L` to bring the next byte down, because only the
-  low byte of a register can be moved out — two instructions and 7.94 cycles.
+  low byte of a register can be moved out, two instructions and 7.94 cycles.
   Reading it out of a sixteen-byte buffer costs one `MOVE.B d16(An),Dn` and
   4.93, *and* leaves four registers free to hold the accumulators, so the round
   ends in a single `MOVEM.L`. On a part with a data cache the sixteen byte reads
@@ -6234,9 +6229,9 @@ and 1.27×/1.63× over what we shipped. What it does differently:
 What is **not** taken, with its price, because a measured option declined is
 worth more than one not noticed: the CBC loop is still C, and it costs one
 `JSR`, one `MOVEM` of eleven registers each way and four longword loads, four
-`EOR`s and four stores a block — about 600 cycles of a 3,725 cycle block, 16%,
+`EOR`s and four stores a block, about 600 cycles of a 3,725 cycle block, 16%,
 priced from the instruction table above rather than measured on its own.
-Fusing CBC into the assembly would recover perhaps two thirds of it — 11% of
+Fusing CBC into the assembly would recover perhaps two thirds of it, 11% of
 AES, 5% of the record path, and about 4% on the wire, which is below what the
 wire measurement resolves.
 
@@ -6250,7 +6245,7 @@ wire measurement resolves.
 | HMAC-SHA256, ours | **66,869 µs (239 KB/s)** | |
 
 **1.30× on the compression function and 1.30× through HMAC**, and the
-misaligned case — which is the one a TLS record actually presents — costs 0.4%
+misaligned case, which is the one a TLS record actually presents, costs 0.4%
 rather than the 6.3% it cost before the `MOVE.L` went in.
 
 Two changes produced all of it and neither is assembly:
@@ -6258,7 +6253,7 @@ Two changes produced all of it and neither is assembly:
 1. **The sixteen message words are loaded, not assembled.** This is a
    big-endian machine, so `W[t]` for t < 16 is the longword at `data + 4t`.
    `nx_crypto_sha2.c`'s `W0()` macro builds each one from four byte loads,
-   three shifts and three ORs — 128 instructions a block that need not exist.
+   three shifts and three ORs, 128 instructions a block that need not exist.
    OpenSSL has had a big-endian fast path here for decades; the vendored code
    does not.
 2. **The message schedule is computed up front** rather than interleaved with
@@ -6287,21 +6282,21 @@ table is the explanation: `SWAP` + immediate rotate is 9.89 cycles and the
 whole file was built on does not exist on this part.
 
 So the assembly's one genuine advantage was the misaligned `MOVE.L` for the
-message words — and that is three lines of inline assembly, not 230 lines of
+message words, and that is three lines of inline assembly, not 230 lines of
 hand-written rounds. It moved into the C, which is now ahead on both
 alignments, and `c68k_sha256.S` was deleted.
 
 **This is a real result and it is worth stating without hedging: for SHA-256 on
 a 68020, GCC 15.2 is not leaving anything on the table.** The 1.29× came from
 knowing the machine is big-endian, which is an algorithm question, not from
-instruction selection. The AES assembly earns its place — 8-9% over the best C
+instruction selection. The AES assembly earns its place, 8-9% over the best C
 and a question about table layout that could not have been settled any other
-way — and the SHA-256 assembly did not.
+way, and the SHA-256 assembly did not.
 
 ### 18.5 §15's table, re-run
 
 Same harness, same process, same `-k 56`, every result checked against
-AmiSSL's before it is timed. **0 failures, 0 mismatches** — 16 KiB of AES
+AmiSSL's before it is timed. **0 failures, 0 mismatches**, 16 KiB of AES
 ciphertext identical, 16 KiB of recovered plaintext identical, the HMAC tag
 identical. The handshake rows are unchanged and are reproduced for context.
 
@@ -6313,12 +6308,12 @@ identical. The handshake rows are unchanged and are reproduced for context.
 | ECDSA P-256 verify | 484.9 ms | 840.2 ms | ours 1.73× | ours 1.69× |
 | ECDH P-256 shared secret | 338.3 ms | 1,049.7 ms | ours 3.10× | ours 3.03× |
 | k·G, an ECDHE key generation | 94.1 ms | 1,047.4 ms | ours 11.1× | ours 10.76× |
-| **AES-128-CBC encrypt, 16 KiB** | **67.4 ms** | 84.2 ms | **ours 1.25×** | — |
-| **AES-128-CBC decrypt, 16 KiB** | **67.9 ms** | 85.5 ms | **ours 1.26×** | — |
-| **HMAC-SHA256, 16 KiB** | **68.5 ms** | 111.2 ms | **ours 1.62×** | — |
+| **AES-128-CBC encrypt, 16 KiB** | **67.4 ms** | 84.2 ms | **ours 1.25×** |, |
+| **AES-128-CBC decrypt, 16 KiB** | **67.9 ms** | 85.5 ms | **ours 1.26×** |, |
+| **HMAC-SHA256, 16 KiB** | **68.5 ms** | 111.2 ms | **ours 1.62×** |, |
 
 No MULU.L correction applies to the last three rows: neither implementation
-contains a single multiply, which was true in §15 and is still true — the
+contains a single multiply, which was true in §15 and is still true, the
 inline-assembly `MOVE.L` and the byte-parallel `xtime` were both chosen partly
 so that it stayed true. `tests/perf/cpucal` reports MULU.L at 32.06 cycles
 against the part's 45 in the same run, and it is irrelevant here.
@@ -6337,7 +6332,7 @@ direction that matters.
 ### 18.6 The number that actually matters: the wire
 
 The primitive is not the deliverable. `tests/curl/run-curlverify.sh` is, and
-the case is `e18_tls_large` — half a megabyte through the record layer against
+the case is `e18_tls_large`, half a megabyte through the record layer against
 the suite's own host peer and its own PKI, with the body hashed against the
 server's copy, so a fast wrong AES cannot pass.
 
@@ -6360,14 +6355,14 @@ goes from about 11.6× to about 8.0×.
 
 **The `http` control needs saying carefully rather than quoting.** The two
 `http` rows differ by 12%, and they differ in the direction *opposite* to the
-`https` gain — which is the tell that it is not a property of either build.
+`https` gain, which is the tell that it is not a property of either build.
 `bsdsocket.library` is byte-identical between them (`md5` 6386710…, both), only
 `tls.library` differs, and the ciphersuite table is consulted for nothing but
 TLS. What moves is the measurement: every one of these numbers goes through
 FS-UAE's SLIRP, whose packet delivery is scheduled by the *host* and is not
 part of the cycle-exact model, so a contended host puts variance into any wire
 figure however deterministic the CPU is. The control says what a control can
-say — the `http` path is untouched by construction, and its noise does not
+say, the `http` path is untouched by construction, and its noise does not
 favour the result.
 
 What does corroborate the `https` row is the arithmetic below, measured on the
@@ -6378,7 +6373,7 @@ The arithmetic. Receiving
 costs HMAC plus AES-decrypt: 135.9 ms per 16 KiB at 56.4 MHz is 548 ms at
 14 MHz, and 524,288 bytes is 32 records, so 17.5 s of the measured 26.14. The
 stock path is 197.4 ms per 16 KiB, 795 ms at 14 MHz, 25.5 s of the measured
-33.18. The predicted difference is 8.0 s and the measured one is 7.04 — the
+33.18. The predicted difference is 8.0 s and the measured one is 7.04, the
 rest is TCP, the handshake and the file writes, and they are the same on both
 sides.
 
@@ -6397,7 +6392,7 @@ about two thirds of the cost and everything else in the stack shares the rest.
 
 ### 18.7 Where it is wired, and what is checked
 
-`src/tls/ami_tls_crypto.c` — private `NX_CRYPTO_METHOD` entries, the same
+`src/tls/ami_tls_crypto.c`, private `NX_CRYPTO_METHOD` entries, the same
 mechanism the RSA and P-256 methods use, no vendored source touched. HMAC is
 `nx_crypto`'s own framing with the hash swapped underneath it through
 `_nx_crypto_hmac_metadata_set()`, which takes the three hash entry points as
@@ -6420,7 +6415,7 @@ on the build machine, and the first version had no endianness guard on it.
 
 And the wire is the last check, because a cipher that corrupts one byte in a
 million looks exactly like a network problem. `run-curlverify.sh -g E` on the
-new build: **21 of 28 cases run and every one of them passes** — six chain
+new build: **21 of 28 cases run and every one of them passes**, six chain
 fetches at depths 2, 3 and 4 in RSA and ECDSA with every body hashed against
 the server's copy, the half-megabyte transfer, TLS reuse across processes, and
 the five negative cases (wrong CA, wrong host, expired, self-signed, TLS on a
@@ -6438,7 +6433,7 @@ to change that, and what the attempt found out about the command set on the way.
 
 ### 19.1 The thing a clock is actually worth
 
-`src/tlslib/tls_time.c` returns 0 — NetX Duo's "do not check" sentinel — whenever
+`src/tlslib/tls_time.c` returns 0, NetX Duo's "do not check" sentinel, whenever
 `DateStamp()` lands outside a fifty-year window starting 2026-01-01. The reasoning is in
 the file and it is right: an Amiga with a dead battery starts at 1978, every certificate
 on the internet was issued after 1978, and a library that refused them all would be a
@@ -6484,13 +6479,13 @@ The *after* fetches did **not** resume the sessions the *before* fetches cached:
 presented two certificates again and re-verified from scratch. `tls_resume_flags()` folds
 `tc_ExpiryChecked` into the resumption trust key, so a ticket cached while the clock was
 unset cannot be reused once the clock is set. Without that, setting the clock would have
-changed nothing until the cache aged out — the second `fetch` would have resumed, no
+changed nothing until the cache aged out, the second `fetch` would have resumed, no
 certificate would have been sent, and nothing would have been checked.
 
 ### 19.2 Three epochs, and the subtraction that spans two of them
 
-NTP counts seconds from 1900-01-01. UNIX counts from 1970-01-01. AmigaOS —
-`DateStamp()`, `timer.device` and `battclock.resource` alike — counts from 1978-01-01.
+NTP counts seconds from 1900-01-01. UNIX counts from 1970-01-01. AmigaOS,
+`DateStamp()`, `timer.device` and `battclock.resource` alike, counts from 1978-01-01.
 Only the first and the last matter, and the gap is
 
 ```
@@ -6512,7 +6507,7 @@ four orders of magnitude finer than the round trip it is added to.
 
 The offset is **not** computed with RFC 4330's four-timestamp formula. That formula is for
 disciplining a clock that is already close, and it overflows 32 bits outright when the
-local clock is 48 years out — which is precisely the machine this command exists for. The
+local clock is 48 years out, which is precisely the machine this command exists for. The
 server's transmit timestamp plus half the locally-measured round trip is the answer, and
 both ends of that measurement are read from `timer.device` before anything is changed, so
 however wrong the clock is it cancels exactly.
@@ -6528,13 +6523,13 @@ comes from.
 **Not from a new configuration file.** Nothing in `DEVS:Internet` or `DEVS:NetInterfaces`
 has ever known about time, and `NetSetup` has never asked. Adding an eleventh place to
 configure the machine, to serve one command, would be the wrong answer when the machine
-already knows: `locale.library` has carried `loc_GMTOffset` — minutes west of Greenwich —
+already knows: `locale.library` has carried `loc_GMTOffset`, minutes west of Greenwich,
 since AmigaOS 2.1, the Locale preferences editor is where a user sets it, and every other
 program that cares reads it there. So `sntp` reads it there.
 
 Two consequences, both stated in the command's own output rather than buried:
 
-* when `locale.library` is absent — a bare 3.1 install may well not have it — the clock is
+* when `locale.library` is absent, a bare 3.1 install may well not have it, the clock is
   set to **UTC** and the command says *"This machine has no locale.library, so nothing here
   knows its timezone"*, because a machine three hours out is worth mentioning;
 * AmigaOS has no daylight-saving rules of any kind. The offset in the preferences is the
@@ -6562,14 +6557,14 @@ machine that has just been given a correct clock for the first time, losing it a
 reboot is the one outcome that must not happen. So `sntp` writes both: `TR_SETSYSTIME`,
 and then `battclock.resource`'s `WriteBattClock()`.
 
-A machine with no real-time chip — a bare A500, a bare A1200 — has no `battclock.resource`
+A machine with no real-time chip, a bare A500, a bare A1200, has no `battclock.resource`
 at all; `OpenResource()` returns NULL, and the command says the time will be lost at the
 next reboot rather than pretending it saved it.
 
 ### 19.5 Unicast, and why broadcast was never a candidate
 
 RFC 4330 has both. Broadcast means waiting for a server on the LAN to announce the time
-whenever it feels like it — NetX Duo's own client allows two hours between announcements —
+whenever it feels like it, NetX Duo's own client allows two hours between announcements,
 which is not something a command you type can do; and it means believing whatever on the
 LAN claims to be a time server, which is a security decision the user did not make.
 Unicast asks a server the user named, and gets an answer or a timeout.
@@ -6579,7 +6574,7 @@ The client checks RFC 4330 §5's list and nothing beyond it: mode 4, `LI != 3`, 
 source address needs no check of its own, because the socket is `connect()`ed and the stack
 has already dropped every datagram that did not come from the server.
 
-### 19.6 The vendored SNTP add-on cannot be used from a Shell command — and neither can most of the command set
+### 19.6 The vendored SNTP add-on cannot be used from a Shell command, and neither can most of the command set
 
 NetX Duo vendors an SNTP client at `third_party/netxduo/addons/sntp` and it is the obvious
 thing to build this on. It cannot be used, for a reason that has nothing to do with SNTP,
@@ -6597,7 +6592,7 @@ The same fact is already visible in three other places in the tree, and they are
 naming together because they are one fact and not three:
 
 * `src/tools/netstack_weak.c` supplies **weak** `netstack_get()` / `netstack_ip()` /
-  `netstack_pool()` that return NULL, and no tool links `aminetxduo_netstack` — check any
+  `netstack_pool()` that return NULL, and no tool links `aminetxduo_netstack`, check any
   tool's `link.txt`. In a shipped build the weak stubs *are* the implementation, so
   `netstat`, `ping` and `ShowNetStatus`'s live path reach `tool_require_stack()`, get NULL,
   and say so. Measured in the same run, with the stack up and an address leased:
@@ -6625,14 +6620,14 @@ same batch as `sntp`. All three are behind this wall and none was shipped:
 
 | Command | What it needs | Where that is |
 |---|---|---|
-| `arp` list | read `ip->nx_ip_arp_table[]` | inside `bsdsocket.library`'s `NX_IP` — unreachable |
+| `arp` list | read `ip->nx_ip_arp_table[]` | inside `bsdsocket.library`'s `NX_IP`, unreachable |
 | `arp` delete / flush | `nx_arp_static_entry_delete()`, `nx_arp_dynamic_entries_invalidate()` | ditto, and they suspend the caller |
 | `AddNetRoute DEFAULT=` | `nx_ip_gateway_address_set()` | ditto |
-| `AddNetRoute DST=/VIA=` | `nx_ip_static_route_add()` | ditto — **and** `NX_ENABLE_IP_STATIC_ROUTING` is not defined in `port/netxduo-amiga/inc/nx_user.h`, so the routing table is not in the build at all. `NX_IP_ROUTING_TABLE_SIZE` *is* set there, which reads as though it were, and is inert without the enable. |
+| `AddNetRoute DST=/VIA=` | `nx_ip_static_route_add()` | ditto, **and** `NX_ENABLE_IP_STATIC_ROUTING` is not defined in `port/netxduo-amiga/inc/nx_user.h`, so the routing table is not in the build at all. `NX_IP_ROUTING_TABLE_SIZE` *is* set there, which reads as though it were, and is inert without the enable. |
 
 `ObtainNetXDuoContext` (LVO -0x360, `src/bsdsocket/nxcontext.c`) is the nearest thing to a
 way in: it hands out `netstack_ip()`, `netstack_pool()` and the stack's own adopt/orphan
-hooks, which between them would be enough to *read* the ARP and routing tables — those are
+hooks, which between them would be enough to *read* the ARP and routing tables, those are
 plain memory reads once the caller holds the ThreadX baton. It is not the answer as it
 stands, for two reasons. It is compiled only under `AMINETXDUO_TLS_CONTEXT`, so it does not
 exist in the `-DAMINETXDUO_TLS=OFF` configuration at all, and a network command that works
@@ -6641,7 +6636,7 @@ points `tls.library` needs and no UDP, no ARP and no routing, so it could not ba
 modifying half of either command however the reading half were done.
 
 **The shape of the fix**, if these commands are wanted: a small set of published LVOs on
-`bsdsocket.library`, in exactly the idiom `bpf_*` already established — the vector table
+`bsdsocket.library`, in exactly the idiom `bpf_*` already established, the vector table
 has reserved slots at [124], [125] and [137]–[142]. `Online`/`Offline` against a running
 stack, `netstat`, `ping`, `arp`, `AddNetRoute` and `DeleteNetRoute` all land on the same
 handful of calls, so it is one piece of work rather than six. It belongs in
@@ -6651,7 +6646,7 @@ handful of calls, so it is one piece of work rather than six. It belongs in
 
 `tests/tools/run-sntp.sh`, on an A1200 with the A2065 on SLIRP:
 
-1. `ClockSet 0` — `tests/tools/clockset.c`, a test-only helper that puts the guest where a
+1. `ClockSet 0`, `tests/tools/clockset.c`, a test-only helper that puts the guest where a
    real Amiga with a dead battery is. It exists because FS-UAE hands its guest the host's
    wall clock, so under the emulator every run would otherwise start with the clock already
    right and the interesting half would never execute; and because the harness disk has no
@@ -6664,7 +6659,7 @@ handful of calls, so it is one piece of work rather than six. It belongs in
 
 **The time server is a real one on the internet, and that is a considered choice rather
 than laziness.** SLIRP is a NAT and forwards outbound UDP perfectly well, so a real server
-is reachable — measured: `time.apple.com` answers stratum 1 through it, from the guest. A
+is reachable, measured: `time.apple.com` answers stratum 1 through it, from the guest. A
 local one is not possible, because SNTP is UDP port 123 and ports below 1024 need root on
 macOS and on Linux alike, and this suite does not ask for root. Giving `sntp` a `PORT`
 argument would have made the run hermetic at the cost of a knob that exists only for the
@@ -6676,11 +6671,11 @@ what it is rather than like a bug in `sntp`.
 One bug was found this way and is worth recording, because the symptom named the wrong
 thing. The resolver can return a `hostent` it could not fill: the pointers are all
 non-NULL, `h_length` is not 4, and the address is four bytes of nothing. `sntp` accepted
-it, `connect()` recorded 0.0.0.0 quite happily — a connected UDP socket is only a stored
-destination — and the failure surfaced two calls later as *"could not send the request"*,
+it, `connect()` recorded 0.0.0.0 quite happily, a connected UDP socket is only a stored
+destination, and the failure surfaced two calls later as *"could not send the request"*,
 which is an error about the wrong subsystem entirely. `fetch.c` already checked
 `h_length != 4`; `sntp` now does too.
-## 20. `traceroute`, `tftp` and `whois` — and what SLIRP will not let anyone test (2026-07-26)
+## 20. `traceroute`, `tftp` and `whois`, and what SLIRP will not let anyone test (2026-07-26)
 
 Three commands, and one measurement that decided the design of the first.
 
@@ -6696,13 +6691,13 @@ It is not. `setsockopt(IPPROTO_IP, IP_TTL)` at `src/bsdsocket/options.c:227` sto
 value on the socket, and **exactly one send path reads it**: `bsd_raw_send_packet()`
 hands `sock->as_Ttl` to `nxd_ip_raw_packet_send()`. `bsd_send_udp()` calls
 `nxd_udp_socket_send()`, and a NetX Duo UDP socket carries the TTL it was created with
-— `NX_IP_TIME_TO_LIVE`, fixed at `nx_udp_socket_create()` time in `socket.c:821`.
+`NX_IP_TIME_TO_LIVE`, fixed at `nx_udp_socket_create()` time in `socket.c:821`.
 
 A case label that compiles is not a TTL that reaches the wire, so this was measured
 rather than read. `tests/tools/ttlprobe.c` sets `IP_TTL` on a raw socket and on a UDP
-socket, reads it back, and sends one datagram from each; the A2065 frame dump —
+socket, reads it back, and sends one datagram from each; the A2065 frame dump,
 `tests/trace/a2065pcap.py`, the view from inside the emulated hardware and below every
-line of this stack — says what actually left:
+line of this stack, says what actually left:
 
 ```
    5 TX ttl=1   10.0.2.15 -> 8.8.8.8   ICMP echo-request  id=16705 seq=1
@@ -6721,7 +6716,7 @@ UDP     : asked for TTL 5, getsockopt says 5, sendto returned 16 (errno 0)
 ```
 
 **`getsockopt` reads back 1 and 5 on both sockets and the UDP datagrams leave with 128
-anyway.** The library is not lying — it stored what it was told — but the value never
+anyway.** The library is not lying, it stored what it was told, but the value never
 reaches the header. Frame 45 of the same capture, an ordinary DNS query, is `ttl=128`
 as well, which is the default and confirms 128 is simply what UDP always sends.
 
@@ -6734,7 +6729,7 @@ broken behaviour is not an option, it is a trap.
 would have to apply `sock->as_Ttl` to the datagram. NetX Duo has no per-send TTL
 argument for UDP, so it means either `nx_udp_socket_create()` taking the current value
 and being re-created when it changes, or the `nx_ip_packet_filter` trick §17.3 already
-uses for the URG bit — write the byte on the way past and repair the header checksum
+uses for the URG bit, write the byte on the way past and repair the header checksum
 by RFC 1624. That is a `src/bsdsocket/` change and is not made here.
 
 ### 20.2 What FS-UAE's SLIRP does with a TTL: nothing at all
@@ -6763,7 +6758,7 @@ tried specifically to provoke an unreachable that quotes the probe, and SLIRP an
 one with silence and the other with a forged echo reply.
 
 **And SLIRP zeroes the ICMP sequence number on a proxied reply while preserving the
-identifier** — `seq=1..6` goes out, `seq=0` comes back every time. That is why
+identifier**, `seq=1..6` goes out, `seq=0` comes back every time. That is why
 `traceroute 8.8.8.8` prints stars: the replies cannot be attributed to a probe, and
 attributing them anyway would mean matching on the identifier alone, which with three
 queries per hop would credit a stale reply to the wrong probe. The command is right to
@@ -6780,7 +6775,7 @@ Frames 11–14 are the control: to `10.0.2.2`, which is SLIRP's own alias and is
 locally rather than proxied, **both** the identifier and the sequence survive, and the
 trace completes.
 
-### 20.3 Verified on the wire, and inferred — stated separately
+### 20.3 Verified on the wire, and inferred, stated separately
 
 **Verified, from the A2065 frame dump:**
 
@@ -6791,7 +6786,7 @@ trace completes.
 | `IP_TOS` reaches the wire on a raw socket | `-t 16` observed in the header's TOS byte |
 | the ICMP echo requests are well formed | SLIRP and the far side both answer them, so the checksum is right |
 | a raw ICMP socket receives inbound ICMP it did not solicit | the unattributable echo replies above arrive and are reported |
-| a complete trace, end to end | `traceroute 10.0.2.2` and `traceroute 10.0.2.15` — one hop each, with timings |
+| a complete trace, end to end | `traceroute 10.0.2.2` and `traceroute 10.0.2.15`, one hop each, with timings |
 
 ```
 ===== SYS:traceroute 10.0.2.2 -m 4 -q 2 -w 3 -n =====
@@ -6807,11 +6802,11 @@ traceroute to 10.0.2.2 (10.0.2.2), 4 hops max, 60 byte packets
 | the hop-by-hop walk past the first hop | same |
 | the `!H` / `!N` / `!X` unreachable annotations | SLIRP never sends a type 3 either |
 
-Those three are the quoted-datagram path in `tr_classify()` — parse the ICMP header,
+Those three are the quoted-datagram path in `tr_classify()`, parse the ICMP header,
 step over its eight bytes, parse the quoted IP header, check that the quoted payload is
 our own echo with our identifier and sequence. **It is written and it is not proven.**
 What is proven is everything either side of it: the probe leaves with the TTL asked for,
-and inbound ICMP of a type we did not solicit reaches the raw socket and is examined —
+and inbound ICMP of a type we did not solicit reaches the raw socket and is examined,
 the filter in `raw.c` keys on the IP protocol number, not on the ICMP type, so a type 11
 takes exactly the same path to the reader as the type 0s that demonstrably arrive.
 
@@ -6819,7 +6814,7 @@ takes exactly the same path to the reader as the type 0s that demonstrably arriv
 not rhetorical: the TTL half is the half that lives in our code, and it is the half that
 is measured on the wire. What is missing is a router between the guest and the
 destination, and FS-UAE does not contain one. Confirming the rest needs real hardware on
-a real network with at least one router in the path — the same class of gap as test 41
+a real network with at least one router in the path, the same class of gap as test 41
 in §17.5, and recorded the same way rather than papered over.
 
 ### 20.4 The option set is Roadshow's, less three it cannot honestly back
@@ -6836,7 +6831,7 @@ Roadshow's names and short forms, so a habit carries over. Three of its options 
 |---|---|
 | `-p PORT` | the destination port of a UDP probe. There are no UDP probes here, so there is no port. |
 | `-r DONTROUTE` | `SO_DONTROUTE` is not in `bsd_setsockopt()` and NetX Duo has nothing to implement it with. |
-| `-s SOURCE` | `bind()` on a raw socket records an address and nothing more — NetX Duo binds sockets to ports, and a raw datagram's source address comes from the route (`socket.c:902`). |
+| `-s SOURCE` | `bind()` on a raw socket records an address and nothing more, NetX Duo binds sockets to ports, and a raw datagram's source address comes from the route (`socket.c:902`). |
 
 A traceroute that accepts `-s` and ignores it is one that lies about which interface it
 went out of, which is worse than not offering it.
@@ -6877,7 +6872,7 @@ tftp: there is no such file on the server (no such file)
 `exact.bin` is 2048 bytes, an exact multiple of the block size, which is the case a
 client that stops at the first short block gets wrong: the transfer ends with an *empty*
 data block and both directions have to expect it. The host log confirms the shape from
-the other side — `sent 'exact.bin', 2048 bytes in 5 blocks`, four full and one empty.
+the other side, `sent 'exact.bin', 2048 bytes in 5 blocks`, four full and one empty.
 
 The duplicate-block path is the sorcerer's-apprentice one: a data block that arrives
 twice is acknowledged again *without* advancing, because advancing doubles every packet
@@ -6885,7 +6880,7 @@ on the wire for the rest of the transfer.
 
 ### 20.6 `whois`: the default server is the one that knows where to ask
 
-Twenty lines of protocol — connect, send the query, read until the far end hangs up.
+Twenty lines of protocol, connect, send the query, read until the far end hangs up.
 The only decision in it is the default server, and it is `whois.iana.org` rather than
 the traditional `whois.internic.net`, which has known only `.com` and `.net` for twenty
 years. IANA's knows one thing about everything: which registry to ask. So the default
@@ -6894,7 +6889,7 @@ the server with the detail.
 
 That referral is handled two ways. Without `FOLLOW` the line to type next is printed
 underneath the record, which is the minimum a command owes someone it has just given a
-partial answer to. With it, the referral is chased — up to three hops, and a server that
+partial answer to. With it, the referral is chased, up to three hops, and a server that
 refers you to itself is recognised as a loop rather than followed. Four spellings are
 recognised, case-insensitively, at the start of a line **after any indentation**:
 `refer:` and `whois:` (IANA), `Registrar WHOIS Server:` (the gTLD registries) and
@@ -6903,10 +6898,10 @@ recognised, case-insensitively, at the start of a line **after any indentation**
 The indentation is not a detail, and the first version of this got it wrong. IANA writes
 its fields hard against the left margin; the gTLD registries indent every one of theirs
 by three spaces. A matcher anchored at column zero therefore finds IANA's referral and
-silently misses the registry-to-registrar one — which is the referral anybody looking up
+silently misses the registry-to-registrar one, which is the referral anybody looking up
 a domain actually needs. It was caught by running the chain rather than by reading it.
 
-Against real registries over the real internet, through SLIRP — two hops, unedited apart
+Against real registries over the real internet, through SLIRP, two hops, unedited apart
 from the elision:
 
 ```
@@ -6924,7 +6919,7 @@ organisation: VeriSign Global Registry Services
 ```
 
 `refer:` is taken from IANA's answer and the later `whois:` line in the same record is
-not, because only the first referral counts — a registry answer that mentions several
+not, because only the first referral counts, a registry answer that mentions several
 servers means the one nearest the top, and chasing the last would follow whatever
 happened to be in the legal notice at the bottom.
 
@@ -6934,14 +6929,14 @@ happened to be in the legal notice at the bottom.
 duplicated: the peer gained a TFTP server (UDP, per-session TID, both directions) and a
 whois server whose canned records exercise the referral, the self-referral loop and the
 no-match answer, and the command list gained the traceroute, tftp and whois cases quoted
-above. `ToolsSmoke`'s staged-command ceiling went from 40 to 96 in the same change —
+above. `ToolsSmoke`'s staged-command ceiling went from 40 to 96 in the same change,
 it truncates silently, and a run that quietly stops reading at line 40 looks exactly
 like a set of commands that were never written.
 
 One harness defect worth recording because it produced a page of convincing false
 failures. `netpeer.py` was given a lifetime of the run's own timeout plus two minutes,
 and emulator runs serialise on `build/.fsuae.lock`. With three other runs ahead of it in
-the queue, the peer exited **before the guest had exchanged a single byte** — and every
+the queue, the peer exited **before the guest had exchanged a single byte**, and every
 local-server case then reported `connection refused` or `the server stopped answering
 after 0 bytes`, which is indistinguishable from a broken command until the peer's own log
 is read and shows it shut down at 540 seconds. The peer now outlives the queue rather
@@ -6952,7 +6947,7 @@ than the run.
 ## 21. Ten times Roadshow: where a Shell command's size actually goes (2026-07-26)
 
 `Online` reads one configuration file and calls into `bsdsocket.library`. Roadshow's is
-5,064 bytes. Ours was 44,396 — nearly nine times the size for the same job, and `-Os`
+5,064 bytes. Ours was 44,396, nearly nine times the size for the same job, and `-Os`
 was already on. The standing hypothesis was newlib: that the C runtime's startup, its
 `stdio` or its floating-point formatting was being dragged in behind everyone's back.
 
@@ -6970,42 +6965,42 @@ bytes, by input object, with the map's "included to satisfy reference by" column
 | 4,376 | 11.8% | `netdb.c` | `config_file.c` (`ami_netdb_load`) |
 | 3,868 | 10.4% | `config_file.c` | `onoff.c` (`ami_config_load_interface`) |
 | 3,804 | 10.3% | `config_text.c` | `tool_diag.c` (`ami_config_set_reporter`) |
-| 1,896 | 5.1% | `onoff.c` — **the command itself** | — |
+| 1,896 | 5.1% | `onoff.c`, **the command itself** |, |
 | 1,580 | 4.3% | newlib `strstr` | `crt0.o` |
 | 1,420 | 3.8% | `tool_util.c` | named in `add_executable()` |
-| 772 | 2.1% | newlib `crt0.o` | — |
+| 772 | 2.1% | newlib `crt0.o` |, |
 | 764 | 2.1% | `compat.c` | `tool_diag.c` (`ami_alloc`) |
 | 1,236 | 3.3% | newlib `mem*`/`str*` | `crt0.o`, `config_file.c`, `strstr.o` |
 | 48 | 0.1% | `netstack_weak.c` | named in `add_executable()` |
 
-**All of newlib is 3,588 bytes — 9.7%.** No `stdio`, no `malloc`, no `printf`, no
+**All of newlib is 3,588 bytes, 9.7%.** No `stdio`, no `malloc`, no `printf`, no
 floating point: `dos.library`'s `Printf`/`VPrintf` and `ReadArgs()` did their job exactly
 as the comment at the top of `src/tools/CMakeLists.txt` claims. The largest single newlib
-item is `strstr` at 1,580 bytes — the Two-Way algorithm, referenced by `crt0.o`, which
+item is `strstr` at 1,580 bytes, the Two-Way algorithm, referenced by `crt0.o`, which
 then drags in `memchr`, `memcmp` and `strchr` for another 540 between them. That is the
 whole newlib story, and `strstr` alone is 43% of it.
 
 The size is in two things we wrote:
 
-- **The configuration parser, 20,424 bytes — 55%.** `Online` calls
+- **The configuration parser, 20,424 bytes, 55%.** `Online` calls
   `ami_config_load_interface()`; that reaches `ami_cfg_parse_interface()`, which lives in
   the same object as the gateway and resolver parsers; `config_file.c` also references
   `ami_netdb_load`, so the whole `/etc/hosts`, `/etc/services` and `/etc/protocols` store
   arrives with its built-in fallback tables. `Online` never calls any of it.
-- **The prose diagnostics, 8,952 bytes — 24%.** `tool_diag.c` is what prints
+- **The prose diagnostics, 8,952 bytes, 24%.** `tool_diag.c` is what prints
   *"No network interfaces are configured"* and the paragraph of advice under it. It is in
-  `TOOLS_COMMON_SOURCES`, so it is named in `add_executable()` for every command — and an
+  `TOOLS_COMMON_SOURCES`, so it is named in `add_executable()` for every command, and an
   object named in `add_executable()` is not an archive member. The linker has no choice:
   it goes in whole, whether the command explains anything or not.
 
 That is the answer to the headline question. Roadshow's `Online` is 5 KB because the
 configuration parsing lives in Roadshow's library and the command asks for it. Ours
-carries its own copy, because there is no LVO to ask — and `bsdsocket.library` links the
+carries its own copy, because there is no LVO to ask, and `bsdsocket.library` links the
 *same* `aminetxduo_config` archive, so the parser is in the tree twice over.
 
 ### 21.2 What was actually fixed
 
-Not the duplication — that is an interface question, and the same one being answered for
+Not the duplication, that is an interface question, and the same one being answered for
 `netstack_ip()`. What was fixed is that **none of it could be dropped even when
 unreachable**, because nothing in the build was compiled at function granularity.
 
@@ -7033,7 +7028,7 @@ unreachable**, because nothing in the build was compiled at function granularity
 | `netstat` | 89,320 | 80,264 | −10.1% |
 | `ShowNetStatus` | 111,920 | 105,676 | −5.6% |
 
-`Online`'s `.text` goes 37,072 → 26,832. `host` — which loads no interface at all — goes
+`Online`'s `.text` goes 37,072 → 26,832. `host`, which loads no interface at all, goes
 18,936 → 11,980, because `--gc-sections` throws the entire parser and netdb store away.
 
 ### 21.3 Why the flag is not in the toolchain file
@@ -7042,7 +7037,7 @@ unreachable**, because nothing in the build was compiled at function granularity
 sweeps anything up. Two measurements decided where each half goes.
 
 **A `.library` must never be collected.** Its romtag is found by Exec scanning the loaded
-segment, and no relocation points at it — exactly the shape a garbage collector removes.
+segment, and no relocation points at it, exactly the shape a garbage collector removes.
 Putting `--gc-sections` in `CMAKE_EXE_LINKER_FLAGS` for the whole tree took **60 KB out of
 `tls.library`** and 19 KB out of `bsdsocket.library`. So `--gc-sections` lives in
 `src/tools/CMakeLists.txt` and nowhere else.
@@ -7050,12 +7045,12 @@ Putting `--gc-sections` in `CMAKE_EXE_LINKER_FLAGS` for the whole tree took **60
 **`-ffunction-sections` is not free for the library either.** In the tree-wide form it
 adds per-section padding to every archive the library links: +4,448 bytes on
 `bsdsocket.library`, +3,552 on `tls.library`. Scoped to `aminetxduo_config` and
-`aminetxduo_common` — the two archives a command takes a slice of — every config-only
+`aminetxduo_common`, the two archives a command takes a slice of, every config-only
 command comes out **byte-for-byte identical**, and the cost falls to +1,848 bytes on
 `bsdsocket.library` and **zero** on `tls.library`.
 
 The NX-linked three (`ping`, `netstat`, `ShowNetStatus`) would gain another 12–51 KB from
-extending the flag to `threadx`, `threadx_port`, `netxduo_port` and `aminetxduo_sana2` —
+extending the flag to `threadx`, `threadx_port`, `netxduo_port` and `aminetxduo_sana2`,
 `netstat` reaches 29,276 that way. That is deliberately not done: those three link a
 complete dead copy of the stack, which is a bug being fixed by publishing LVOs, and paying
 `bsdsocket.library` +2,600 bytes to shrink code that is about to be deleted is the wrong
@@ -7071,7 +7066,7 @@ static const char version_tag[] __attribute__((used)) = "$VER: Online 2.0 (26.7.
 
 and nothing ever reads it: AmigaDOS's `Version` finds it by scanning the file. `used`
 stops the *compiler* discarding it and says nothing to the linker. The attribute that
-would speak to the linker, `retain`, **this toolchain ignores** — gcc 15.2.0 answers
+would speak to the linker, `retain`, **this toolchain ignores**, gcc 15.2.0 answers
 `warning: 'retain' attribute ignored`, because the m68k assembler has no
 `SHF_GNU_RETAIN`.
 
@@ -7084,21 +7079,21 @@ and it is the right 150–1,100 bytes to spend.
 
 Beyond that one case, `--gc-sections` is sound here by construction: it removes an input
 section only when no relocation from a live section points at it, and a Shell command has
-no AmigaOS mechanism that reaches code without a relocation — the romtag scan belongs to
+no AmigaOS mechanism that reaches code without a relocation, the romtag scan belongs to
 libraries, and the only inline assembly in `src/tools/` addresses registers and library
 offsets, never a symbol. What it actually took out of `Online` is 46 symbols, and the list
 reads exactly as it should: the gateway and resolver parsers, the whole `ami_netdb_*` API,
 `tool_explain_resolve`, `tool_format_mac`, the `netstack_*` weak stubs. `ami_netdb_load()`
-is called from `bsdsocket.library` and from `shownetstatus.c` and nowhere else — so
+is called from `bsdsocket.library` and from `shownetstatus.c` and nowhere else, so
 `ShowNetStatus` keeps the built-in `127.0.0.1 localhost loopback` table and `Online` and
 `AddNetInterface` lose it, which is the correct answer in all three cases.
 
 Checked on the machine as well as on paper. `ToolsSmoke` under FS-UAE, run twice from a
-clean checkout — once as committed, once with these flags — produces **byte-identical**
+clean checkout, once as committed, once with these flags, produces **byte-identical**
 output, down to the `rc 10`, the `NAME/A,QUIET/S` template echo and the harness timeout at
 `AddNetInterface eth0` that both builds share.
 
-That reasoning is correct but fragile — a future flag change breaks it silently, with no
+That reasoning is correct but fragile, a future flag change breaks it silently, with no
 test failing. `cmake/check-version-tag.cmake` therefore greps the linked binary after
 every link and fails the build if the tag is gone. It has already caught one real case: a
 stale `CMakeCache.txt` still carrying `-fdata-sections` from an earlier configure.
@@ -7120,7 +7115,7 @@ stale `CMakeCache.txt` still carrying `-fdata-sections` from an earlier configur
 | 892 | newlib `mem*`/`str*` |
 | 380 | `compat.c`, `netstack_weak.c` |
 
-`netdb.c` is gone entirely — 4,376 bytes of `/etc/hosts`, `/etc/services` and
+`netdb.c` is gone entirely, 4,376 bytes of `/etc/hosts`, `/etc/services` and
 `/etc/protocols` handling that `Online` was carrying and could not reach.
 
 Nothing here is waste in the sense that `--gc-sections` understands. `tool_diag.c` and
@@ -7128,7 +7123,7 @@ the parser are code the command genuinely reaches, and they are the difference b
 our `Online` and Roadshow's: theirs prints an error number, ours prints a paragraph that
 names the file, the device and the thing to fix. Closing the remaining 5× would mean
 moving the parser and the diagnostics behind `bsdsocket.library`'s LVOs so a command asks
-instead of carrying — the same shape as the `bpf_*` idiom `NetTrace` already uses, and
+instead of carrying, the same shape as the `bpf_*` idiom `NetTrace` already uses, and
 the same shape as the `netstack_ip()` fix. That is an architecture change, not a build
 flag, and it is the only lever left that is worth anything.
 
@@ -7148,9 +7143,9 @@ are
 -m68020 -fomit-frame-pointer -fno-strict-aliasing -O2 -DNDEBUG -O3 -DNDEBUG
 ```
 
-and the last `-O` wins. The commands are unaffected — `src/tools/` appends `-Os` after
+and the last `-O` wins. The commands are unaffected, `src/tools/` appends `-Os` after
 that, which is exactly why the comment there says "appended after `CMAKE_C_FLAGS_RELEASE`
-so it wins the duplicate `-O`" — but "`-O2` stays for the libraries" has never been true.
+so it wins the duplicate `-O`", but "`-O2` stays for the libraries" has never been true.
 `bsdsocket.library` and `tls.library` are `-O3` builds, and every throughput and size
 figure recorded for them was measured that way.
 
@@ -7176,7 +7171,7 @@ This is the fix.
 `netstack_config()` / `netstack_interface_is_up()` that answer NULL, NULL, NULL and
 FALSE. Its own header comment says *"Delete this file once src/netstack exists and is
 linked into the tools."* It was never deleted, and **no tool links
-`aminetxduo_netstack`** — `src/tools/CMakeLists.txt` links `aminetxduo_sana2
+`aminetxduo_netstack`**, `src/tools/CMakeLists.txt` links `aminetxduo_sana2
 aminetxduo_config threadx_port netxduo_port` and nothing else. So in every shipped
 build the weak stubs *are* the implementation.
 
@@ -7194,8 +7189,8 @@ The consequences, one per call site:
 **Why nothing caught it.** Each of those is the *graceful* branch. The commands were
 written to behave well when the network is not up, they behaved well, and a well-formed
 "the network is not up" message reads as a pass in a transcript. Worse, the one capture
-in the tree that shows these commands printing live interface counters —
-`build/testhd-doclive/` — was produced by a purpose-built `LiveTools` binary that links
+in the tree that shows these commands printing live interface counters,
+`build/testhd-doclive/`, was produced by a purpose-built `LiveTools` binary that links
 the netstack and calls each command's `main()` in-process. That binary works. The
 shipped executables never could, and nothing compared the two.
 
@@ -7204,7 +7199,7 @@ shipped executables never could, and nothing compared the two.
 It is tempting to read "no tool links `aminetxduo_netstack`" as a missing line in a
 `CMakeLists.txt`. It is not. Adding it gives the command a *second* NetX Duo: its own
 `NX_IP`, its own packet pool, its own ThreadX scheduler globals, its own SANA-II
-attachments — none of them the ones the running stack is using. `netstack_ip()` would
+attachments, none of them the ones the running stack is using. `netstack_ip()` would
 stop returning NULL and start returning a pointer to an `NX_IP` with no interfaces in
 it, and `netstat -i` would print an empty table instead of an error. That is strictly
 worse: the error was at least true.
@@ -7227,14 +7222,14 @@ answer was not in doubt:
     NetStackControl(magic d0, op   d1, arg    a0, size d2)   LVO -0x36c
 ```
 
-**Two, not six.** `Query` takes a selector — `SYSTEM`, `INTERFACES`, `STATS`, `ARP`,
-`ROUTES`, `SOCKETS` — so a seventh table costs a selector rather than a vector. `Control`
+**Two, not six.** `Query` takes a selector, `SYSTEM`, `INTERFACES`, `STATS`, `ARP`,
+`ROUTES`, `SOCKETS`, so a seventh table costs a selector rather than a vector. `Control`
 is separate from `Query` on purpose: a caller that only reads cannot get a mutation by
 mistyping a number.
 
 **A snapshot, not an `NX_IP *`.** Handing out the live pointer is the smaller change and
 the wrong one. AmigaOS has no memory protection, so a pointer into the stack's
-structures stays dereferenceable long after the stack has gone down — and this project
+structures stays dereferenceable long after the stack has gone down, and this project
 has already shipped one use-after-free of exactly that shape, a teardown path that freed
 a reply port and the stack a thread was still running on. Walking those tables also
 requires holding the ThreadX baton, which a Shell command must not do while it prints.
@@ -7245,8 +7240,8 @@ into the stack.
 The buffer starts with a `NetStatusHeader`. The caller writes a magic and the version it
 was built against; the library writes back the entry size **it** was built with, how many
 entries it wrote, and how many it had. A caller with a small buffer therefore learns how
-big one it needs instead of being silently truncated, and a half-installed pair —
-`bsdsocket.library` from one build, `netstat` from another — is caught at the size check
+big one it needs instead of being silently truncated, and a half-installed pair,
+`bsdsocket.library` from one build, `netstat` from another, is caught at the size check
 rather than printing plausible nonsense from shifted offsets.
 
 **Where the slots are.** Both sit past every offset any published bsdsocket ABI names:
@@ -7255,8 +7250,8 @@ reserved-for-expansion slots `clib/bsdsocket_protos.h` documents after `getnamei
 §19.6 suggested `[124]`, `[125]` and `[137]`–`[142]`; those were **not** used, because
 `[137]`–`[142]` are precisely Roadshow's documented expansion reservation and `[124]`/
 `[125]` sit inside the published table between `gethostbyaddr_r` and `ipf_open`.
-`tools/gen_vectors.py` already knew this and said so — `0x360` is described there as
-"the first slot after ... every offset any published bsdsocket ABI assigns" — so the new
+`tools/gen_vectors.py` already knew this and said so, `0x360` is described there as
+"the first slot after ... every offset any published bsdsocket ABI assigns", so the new
 pair went after it, at `0x366` and `0x36c`.
 
 **One latent bug had to be fixed to put them there.** `bsd_ObtainNetXDuoContext` at
@@ -7275,7 +7270,7 @@ a command.
 `bsdsocket.library` that is not ours before it calls either vector. The magic argument
 guards against a *future* vendor defining the same offset; only the identity check guards
 against a *present* one that has not defined it, where the slot is whatever that table
-happens to end with — possibly the `(APTR)-1` terminator.
+happens to end with, possibly the `(APTR)-1` terminator.
 
 ### 22.4 There is no ping vector, and the measurement that decided it
 
@@ -7291,7 +7286,7 @@ then compares:
     if ((USHORT)(thread_ptr -> tx_thread_suspend_info) == sequence_num)
 ```
 
-and nothing else — not the identifier, not the source address. `nx_icmpv4.h:191` says so
+and nothing else, not the identifier, not the source address. `nx_icmpv4.h:191` says so
 outright: the identifier *"is not used as a host"*.
 
 §20.2 measured, on the A2065 frame dump, that **FS-UAE's SLIRP zeroes the ICMP sequence
@@ -7299,7 +7294,7 @@ number on a proxied reply and preserves the identifier**. Those two facts multip
 vector wrapping `nx_icmp_ping()` would match on the one field the NAT destroys and ignore
 the one it keeps, so `ping 8.8.8.8` would time out on every probe except the very first
 of the `NX_IP`'s lifetime (the counter starts at 0, and `nx_ip_create.c:106` memsets it)
-— while the replies arrived, were counted in `nx_ip_ping_responses_received`, and were
+while the replies arrived, were counted in `nx_ip_ping_responses_received`, and were
 dropped.
 
 So `ping` was rewritten over `SOCK_RAW` instead, the same path `traceroute` already uses.
@@ -7308,7 +7303,7 @@ That is not a workaround; it is better on every axis that matters here:
 | | `nx_icmp_ping()` via a new LVO | `SOCK_RAW` via the published ABI |
 |---|---|---|
 | reply attribution | sequence only, fixed | the command's own rule |
-| identifier | the interface address — same for every process | per-task, so two pings do not steal each other's replies |
+| identifier | the interface address, same for every process | per-task, so two pings do not steal each other's replies |
 | Ctrl-C during the wait | suspended in ThreadX, where an Exec signal means nothing | `WaitSelect` with a 200 ms cap |
 | runs on Roadshow / AmiTCP | no | yes |
 | new ABI surface | one more vector | none |
@@ -7348,7 +7343,7 @@ answers to the address.
 Worth restating where the new code is, because it is the one loop here that punishes a
 plausible mistake with a hang rather than an error: NetX Duo's ARP table is a hash table
 of **circular** lists. `nx_arp_active_next` of the last entry in a bucket points back at
-the bucket head, not at `NX_NULL`. A walk written the obvious way never terminates — and
+the bucket head, not at `NX_NULL`. A walk written the obvious way never terminates, and
 it would not terminate *inside the ThreadX bracket*, with the baton held, which stops the
 IP thread and every other socket user on the machine.
 
@@ -7356,14 +7351,14 @@ IP thread and every other socket user on the machine.
 
 `tests/tools/run-livetools.sh`. It brings the stack up with `AddNetInterface eth0` and
 then runs **the shipped executables**, from the staged directory a user would install,
-through `ToolsSmoke` in a single emulator boot — not a purpose-built binary that links
+through `ToolsSmoke` in a single emulator boot, not a purpose-built binary that links
 the netstack, because that is exactly how this stayed hidden for a release.
 
 Two halves, and both are needed:
 
-* **Negative.** A list of the real sentences that mean *"I cannot see the stack"* —
+* **Negative.** A list of the real sentences that mean *"I cannot see the stack"*,
   `the network is up, but this command cannot read it`, `the network has not been
-  started`, `the stack is running but has no IP instance`, and the rest — none of which
+  started`, `the stack is running but has no IP instance`, and the rest, none of which
   may appear anywhere after the interface is up. This is the assertion a human would
   make, and it is written against the *messages* rather than the exit codes, because the
   failing commands exited 5 (`RETURN_ERROR`) and a `ToolsSmoke` transcript records that
@@ -7375,7 +7370,7 @@ Two halves, and both are needed:
 **It needs no host-side peer, and that is deliberate.** Every other command test starts a
 Python server on the host with a lifetime; with several agents queued on the FS-UAE lock
 that lifetime can expire before the guest has booted, and then every case fails with
-"connection refused" — which looks exactly like a broken command and is not.
+"connection refused", which looks exactly like a broken command and is not.
 `tests/tools/netpeer.py` did precisely that. SLIRP answers DHCP itself, answers ICMP to
 its own alias `10.0.2.2` itself, and lives exactly as long as the emulator does. There is
 nothing in this test that can time out while the run waits its turn, so a failure from it
@@ -7432,7 +7427,7 @@ Every one of those numbers came out of the running `NX_IP` through `NetStackQuer
 Before this work each of those five commands printed *"the network is up, but this
 command cannot read it"* and exited 5. **`netstat` and `ShowNetStatus` are verified.**
 
-**`ping` is not.** It does not merely fail — **it takes the machine down, and the machine
+**`ping` is not.** It does not merely fail, **it takes the machine down, and the machine
 comes back up and does it again.** That is the finding, and it took three runs and a
 correction to see it.
 
@@ -7448,12 +7443,12 @@ counter was looked at:
 
 One boot starts the stack once. The guest is restarting, `ToolsSmoke` opens
 `DH0:tools.txt` afresh each time it starts, and the file therefore truncates and refills
-to exactly the same point on every pass — which is why watching its length shows it
+to exactly the same point on every pass, which is why watching its length shows it
 shrink from 184 lines to 75 and climb back, and why the instrumented `ping` printed its
 trace three times for a list that contains one `ping`.
 
 **Where it stops is measured.** `AMI_INFO` writes to the serial port unbuffered, which is
-the only way to see inside a command that never exits — the Shell holds a command's stdout
+the only way to see inside a command that never exits, the Shell holds a command's stdout
 until it terminates, so a command that dies prints nothing wherever it got to:
 
 ```
@@ -7474,7 +7469,7 @@ Every stage before the read is fine: the library opens, the raw socket opens, th
 request is built and `sendto()` returns the full 64 bytes. `WaitSelect()` then reports the
 descriptor readable, and **the `recvfrom()` that follows never returns**. In the blocking
 build it went into `bsd_raw_receive()`'s `tx_semaphore_get(TX_WAIT_FOREVER)` with
-`as_RawHead` empty — so `select()` and the queue disagreed. Making the descriptor
+`as_RawHead` empty, so `select()` and the queue disagreed. Making the descriptor
 non-blocking (`FIONBIO`) so the read cannot suspend **did not fix it**, which rules the
 blocking wait out as the whole story and puts the fault inside the raw receive path
 itself.
@@ -7486,7 +7481,7 @@ hand over are: `select()` reports a raw descriptor readable when `bsd_raw_receiv
 find nothing queued, and the read that follows takes the machine down.
 
 `traceroute` reaches the wire through the same helpers and completes (§20.3), so this is
-not "raw sockets do not work" — it is something narrower, and the difference between the
+not "raw sockets do not work", it is something narrower, and the difference between the
 two commands is the place to start.
 
 **Until that is fixed, `ping` must not be described as working, and should not be shipped
@@ -7494,13 +7489,13 @@ at all**: a command that reboots the machine is worse than the one that printed 
 network is up, but this command cannot read it".
 
 **The `NUMERIC` change stands on its own** and is not part of this. A reverse lookup
-through `gethostbyaddr()` costs `BSD_RESOLVE_TIMEOUT` — thirty seconds
+through `gethostbyaddr()` costs `BSD_RESOLVE_TIMEOUT`, thirty seconds
 (`src/bsdsocket/resolver.c:18`), retried per name server, against a server that need not
 answer a PTR query, and FS-UAE's SLIRP does not. That is spent *before the first packet
 leaves*, which is the one place a ping cannot be slow, for a cosmetic change to one line
 of output; `ping` reads `DEVS:Internet/hosts` instead. It was the first explanation
-offered for the hang and it was **wrong** — the run with the DNS query already gone
-behaved identically — and that is recorded here rather than quietly dropped, because a
+offered for the hang and it was **wrong**, the run with the DNS query already gone
+behaved identically, and that is recorded here rather than quietly dropped, because a
 wrong cause in this document is worse than an open question. The thirty seconds remain a
 real property of the stack that any command reverse-resolving an address will pay, and
 `ShowNetStatus NAMES` and `host` both do.
@@ -7512,7 +7507,7 @@ before it calls either vector, because on somebody else's library that offset is
 their table happens to end with. Writing that down made the other half obvious and it had
 been missed: **it is also whatever OURS ends with.**
 
-In the v0.2.0 library — which is published — `-0x366` is past the last vector, on the
+In the v0.2.0 library, which is published, `-0x366` is past the last vector, on the
 `(APTR)-1` terminator `MakeLibrary()` puts there. A user who installed the new commands
 over the old library would have got a guru, which is a worse answer than the message this
 whole interface exists to stop being printed, and is precisely the class of defect §22 is
@@ -7536,7 +7531,7 @@ a slot is added.
 
 `ping` sends through `SOCK_RAW` now, so it never calls `nx_icmp_ping()` and
 `nx_ip_pings_sent` never moves. Replies are a different matter:
-`src/bsdsocket/raw.c`'s filter **copies the datagram and then declines it** — it always
+`src/bsdsocket/raw.c`'s filter **copies the datagram and then declines it**, it always
 returns `NX_NOT_SUCCESSFUL`, so the stack goes on to process the packet normally and
 `_nx_icmpv4_process_echo_reply()` increments `nx_ip_ping_responses_received` as it
 always did.
@@ -7557,7 +7552,7 @@ their own options. That is not a matter of taste. The premise of this project
 is that a program, a script or a person that worked against the reference
 stack works here, and the first thing any of the three touches is the argument
 template. A command whose template differs is a compatibility bug in the same
-sense that a missing library vector is one — it just fails at a layer that is
+sense that a missing library vector is one, it just fails at a layer that is
 easier to look at and therefore easier to excuse.
 
 The reference was the per-command documentation shipped with the Roadshow 1.15
@@ -7575,7 +7570,7 @@ wording from it is reproduced anywhere in this tree.
 
 `netstat` keeps its template and is discussed in 23.5.
 
-The dual-form convention — `-c` and `COUNT` naming one option — was already in
+The dual-form convention, `-c` and `COUNT` naming one option, was already in
 `nc` and `netstat` (`LISTEN=-l/S`, `INTERFACES=-i/S`) and is now in `ping` as
 well. ReadArgs takes more than one alias per item, so
 `-n=NUMERICONLY=NUMERIC/S` is a single switch with three spellings. That was
@@ -7586,7 +7581,7 @@ with "required argument missing", which reads like a bug in the command.
 ### 23.2 `ping`: implement it or leave it out
 
 Ten of the fourteen options are implemented. Four are absent, and absent is the
-point — a template that accepts `RECORDROUTE` and then does not record the
+point, a template that accepts `RECORDROUTE` and then does not record the
 route is worse than one that rejects it, because the second tells the truth
 immediately.
 
@@ -7600,7 +7595,7 @@ name, had drifted:
 
 **`TIMEOUT` is the whole run, not one reply.** Ours used to be the per-reply
 wait, so `ping host TIMEOUT 5` with the default count waited up to twenty
-seconds — four times what anyone typing it expects. It is now the elapsed
+seconds, four times what anyone typing it expects. It is now the elapsed
 limit it is documented to be everywhere, `0` meaning no limit, and the
 per-reply wait is fixed and not exposed. The reply wait is clamped to the time
 remaining, so a short `TIMEOUT` cannot be overshot by one outstanding request.
@@ -7635,7 +7630,7 @@ nothing.
 ### 23.4 `Online` / `Offline`: one argument, two kinds of thing
 
 This one needed a decision rather than a rename. The reference commands take a
-**SANA-II device driver name and a unit** — that is the level at which a
+**SANA-II device driver name and a unit**, that is the level at which a
 driver is switched off to run diagnostics on a card. Ours took a **configured
 interface**, which is the handle every other command here uses.
 
@@ -7664,7 +7659,7 @@ meaning indefinitely, as documented; Ctrl-C aborts it either way.
 The decision, and the reasoning:
 
 * **`ShowNetStatus` grows the full category set.** It is the Amiga-shaped
-  introspection command — named categories, a general summary when no category
+  introspection command, named categories, a general summary when no category
   is given, and a "what to look at" diagnosis aimed at somebody who does not
   yet know what is wrong. That summary and that diagnosis are why a beginner
   types it, and they have no equivalent anywhere else.
@@ -7673,36 +7668,36 @@ The decision, and the reasoning:
   Roadshow's, so it owes nothing to this section, and it is what a decade of
   Amiga documentation and install scripts type.
 * **Neither reads the stack for itself.** Both take the same two snapshots
-  from `tool_nx.c` — `ToolSnapshot` for interfaces, routes and sockets,
-  `ToolStats` for the protocol counters, the ARP cache and the packet pool —
+  from `tool_nx.c`, `ToolSnapshot` for interfaces, routes and sockets,
+  `ToolStats` for the protocol counters, the ARP cache and the packet pool,
   so they cannot report different values for one fact, and a counter added in
   one place is available to both. Only the layout differs.
 
 Three categories are absent because there is nothing behind them:
 
-* `IGMP` — `nx_igmp_enable()` is never called, so there is no group
+* `IGMP`, `nx_igmp_enable()` is never called, so there is no group
   membership and the counters do not exist.
-* `MR`/`MULTICASTROUTING` — there is no multicast router to have statistics
+* `MR`/`MULTICASTROUTING`, there is no multicast router to have statistics
   about.
-* `RT`/`ROUTING` as a *statistics* category — no routing counters are kept,
+* `RT`/`ROUTING` as a *statistics* category, no routing counters are kept,
   and `NX_ENABLE_IP_STATIC_ROUTING` is off, so the routing table is the
   connected routes plus the default gateway. `ROUTES` prints exactly that.
 
 The rest are implemented against real data. `netstat -s` used to say
 per-protocol statistics were switched off in this build; that had stopped
-being true — `nx_user.h` defines no `NX_DISABLE_*_INFO` — and it now prints
+being true, `nx_user.h` defines no `NX_DISABLE_*_INFO`, and it now prints
 them.
 
 `NAMES` resolves both halves: addresses through `ami_netdb_host_by_addr()` and
 then a reverse lookup, ports through `ami_netdb_serv_by_port()`. `ALL` is a
 modifier on the two socket categories rather than a category of its own, so
-`ShowNetStatus ALL` is still the summary — which is what the installer's boot
+`ShowNetStatus ALL` is still the summary, which is what the installer's boot
 check had been relying on it to be. `REPEAT` reprints every second after a
 form feed until Ctrl-C.
 
 One trap worth recording for anyone reading the ARP cache directly:
-`nx_ip_arp_table[]` is a hash of **circular** lists — the last entry in a
-bucket points back at the head, not at NULL — so a walk needs a head
+`nx_ip_arp_table[]` is a hash of **circular** lists, the last entry in a
+bucket points back at the head, not at NULL, so a walk needs a head
 comparison. Getting it wrong does not fail. It spins.
 
 ### 23.6 How it was exercised
@@ -7724,7 +7719,7 @@ allowed to do. §16.6 measured what raising the window is worth and then did not
 ship it, for a stated reason: a TCP socket's receive queue is packets off the
 same `NX_PACKET` pool the SANA-II readers pin an eighth of, and 32 KB of window
 times forty concurrent sockets is several times the whole pool. Exhausting it
-drops frames stack-wide, which is a **functional** failure and not a slowdown —
+drops frames stack-wide, which is a **functional** failure and not a slowdown,
 so the trade on offer was a loopback gain against a stack that falls over at
 forty sockets, and that is not a trade.
 
@@ -7739,7 +7734,7 @@ retransmissions on either path and `d03_parallel_40` green.**
 real. Before commit `78b4ed9`, RFC 1122's "acknowledge at least every second
 full-sized segment" was absent, the ACK interval was therefore proportional to
 the window, and 8 KB → 32 KB took the **wire** from 161 to 89 KB/s with
-**zero retransmissions in both columns** — the sender waiting, nothing lost, and
+**zero retransmissions in both columns**, the sender waiting, nothing lost, and
 no instrument in the tree able to tell those two apart.
 
 `78b4ed9` has landed, so that measurement is stale, and everything below is
@@ -7759,7 +7754,7 @@ starts**: two reader threads, three with IPv6. One in eight of the pool, floor
 Here the consumer count is neither known at start-up nor small. It is one socket
 for a bulk transfer and **forty** for `tests/curl` `d03_parallel_40`, and a
 single number chosen at stack start would have to assume the worst. Assuming
-forty gives every socket `(256/8 × 1568) / 40 = 1254` bytes — below the floor,
+forty gives every socket `(256/8 × 1568) / 40 = 1254` bytes, below the floor,
 so every socket back at 8192 and the entire gain thrown away.
 
 **So the variable that matters is sockets, not interfaces, and the pool cannot
@@ -7782,7 +7777,7 @@ window = clamp(budget / (live_tcp_sockets + 1), 8192, BSD_TCP_WINDOW_CEILING)
 | window, 8 MB profile | 33580 | 25088 | 16725 | 12544 | 10035 | 8362 | 8192 |
 
 The ceiling was 32768 when this section was written and is now 33580
-(`bsdsocket_internal.h:345`, 23 x 1460 -- Roadshow's value). Only the
+(`bsdsocket_internal.h:345`, 23 x 1460, Roadshow's value). Only the
 one-socket column moves: every other figure is the budget divided, not the
 ceiling. The constant is named here rather than spelled so the next change does
 not leave a third stale number behind.
@@ -7791,15 +7786,15 @@ not leave a third stale number behind.
   before this function existed, and it is what §16.8 measured forty concurrent
   transfers passing on. No socket can come out of here with less than a
   configuration that is known to work, so the change has no downside case to
-  argue about — only an upside case to bound.
+  argue about, only an upside case to bound.
 - **The budget bounds the upside.** Only the first six sockets get more than the
   floor at all, and the excess over the floor summed across every socket comes
   to **56,370 bytes = 36 of 256 packets**, about 1.1× the budget. That is the
   same order as the eighth the SANA-II readers take, which is why the share here
   is also an eighth rather than a number picked to make loopback look good.
 - **On the 4 MB / 68020 floor nothing changes at all.** The pool is
-  `AMI_POOL_MIN_PACKETS` (16), an eighth of which is 3136 bytes — below the
-  floor — so every socket gets 8192 exactly as before. Same outcome, and the
+  `AMI_POOL_MIN_PACKETS` (16), an eighth of which is 3136 bytes, below the
+  floor, so every socket gets 8192 exactly as before. Same outcome, and the
   same reason, as the RX depth's on that machine.
 
 **Why at create time rather than continuously.** A window that tracked the
@@ -7819,7 +7814,7 @@ moment every one of them would be sized. It would hand out forty large windows
 and then discover the problem.
 
 **The counter is NetX Duo's own.** `ip->nx_ip_tcp_created_sockets_count` is
-maintained by `nx_tcp_socket_create/delete`, so there is none here to leak —
+maintained by `nx_tcp_socket_create/delete`, so there is none here to leak,
 which matters, because a leaked one would pin every future socket at the floor
 and look like nothing at all. It counts listeners and parked spares, neither of
 which ever carries a connection; that over-counts consumers, which is the
@@ -7827,7 +7822,7 @@ direction to be wrong in.
 
 `AMINETXDUO_TCP_WINDOW` now **pins** the window, floor and ceiling together,
 rather than setting a floor, so a fixed window is still one `-D` out of one
-tree — which is how every A/B below was taken. `getsockopt(SO_RCVBUF)` reports
+tree, which is how every A/B below was taken. `getsockopt(SO_RCVBUF)` reports
 what the socket actually got rather than the compile-time floor, because the
 floor is now a number no particular socket necessarily has.
 
@@ -7835,7 +7830,7 @@ floor is now a number no particular socket necessarily has.
 
 Two libraries out of one tree, differing only in `AMINETXDUO_TCP_WINDOW`; same
 `NetTrace`, same toolchain, same 524,288-byte workload, `tests/trace/run-trace.sh`.
-**Each arm was run twice and the two passes agree to the millisecond** — FS-UAE
+**Each arm was run twice and the two passes agree to the millisecond**, FS-UAE
 measures the guest's own `GetSysTime()`, so these are emulated-time figures and
 host contention does not enter them.
 
@@ -7852,7 +7847,7 @@ distinguish any of this:
 | loopback | pinned 8192 | pool-derived |
 |---|---|---|
 | advertised window | 8192 | **16725** |
-| max bytes in flight | 4096 of 4096 — **100%** | 8192 of 8533 |
+| max bytes in flight | 4096 of 4096, **100%** | 8192 of 8533 |
 | **zero-window advertisements** | **64** in 128 segments | **0** |
 | gap before a data segment, p50 | 22.4 ms | **17.8 ms** |
 | ACK delay, p50 | 8.0 ms | 5.5 ms |
@@ -7874,13 +7869,13 @@ Three things are worth reading off these rather than only the throughput:
   of the application's write, and the count is zero.
 - **The window did not have to reach 32 KB to collect the gain.** Loopback's
   receiver is the third socket created (listener, client, the socket `listen()`
-  parks) so it gets 16,725 — half the ceiling — and lands on the same throughput
+  parks) so it gets 16,725, half the ceiling, and lands on the same throughput
   a pinned 32 KB reached in §16.6 relative to its own control. What the path
   needed was a window larger than the delayed-ACK quantum of two application
   writes, not a large window.
 - **The wire moved a little, and the trace says why it is not the window.** The
   peer still holds only 2880 bytes outstanding, 9% of what it is now offered, so
-  the wire is not window-limited before or after — exactly as §16.5 said. What
+  the wire is not window-limited before or after, exactly as §16.5 said. What
   changed is the p90 gap between data segments, 23.7 → 6.6 ms, i.e. our own
   acknowledgements are no longer occasionally waiting on a window edge. A 4.5%
   wire gain from a change aimed at loopback is a small side effect and is
@@ -7890,8 +7885,8 @@ Three things are worth reading off these rather than only the throughput:
 points, `bs_drop` 0 on every channel. This was checked deliberately rather than
 assumed: there is no SACK in the vendored tree, so a bigger window means more in
 flight to lose, and the trace is the only thing that can tell a stall from a
-loss. One earlier, uncontrolled run — taken before the arms were rebuilt against
-one another — did show a single 1440-byte retransmission and a ten-deep
+loss. One earlier, uncontrolled run, taken before the arms were rebuilt against
+one another, did show a single 1440-byte retransmission and a ten-deep
 duplicate-ACK run on the wire; it did not reproduce in either controlled pass
 and is recorded here rather than swept up.
 
@@ -7913,8 +7908,8 @@ every body hashed against the server's copy:
 **Nothing is lost at any point on either build, every body is byte-identical,
 and `AvailMem` delta is +0 on both.** Five of six points are faster and one (the
 eight-way) is slower; the mean is 10% better. The direction is what the
-mechanism predicts — the sockets that get a window above the floor are the ones
-opened while few others are — but the reading of a single sweep with this
+mechanism predicts, the sockets that get a window above the floor are the ones
+opened while few others are, but the reading of a single sweep with this
 spread is **no regression**, not a 10% win.
 
 The named acceptance test and curl's own throughput, groups A–D on both builds:
@@ -7922,10 +7917,10 @@ The named acceptance test and curl's own throughput, groups A–D on both builds
 | | pinned 8192 | pool-derived |
 |---|---:|---:|
 | `d03_parallel_40` | 7.02 s | **6.90 s** |
-| `a04_get_1m2` — 1,200,000 B over `http://` | 8.06 s = **145 KB/s** | 6.44 s = **182 KB/s** |
+| `a04_get_1m2`, 1,200,000 B over `http://` | 8.06 s = **145 KB/s** | 6.44 s = **182 KB/s** |
 | groups A–D | 112 passed, 1 failed | 112 passed, 1 failed |
 
-The single failure is `a44_cookies_send` on both arms — the pre-existing one
+The single failure is `a44_cookies_send` on both arms, the pre-existing one
 §14.7 settled against a third-party binary, not ours. Note that curl's ~117 KB/s
 in §11 is a **public-internet** fetch and is not this number; against the
 hermetic peer on the same wire `NetTrace` measures 159 KB/s, curl 182 KB/s of
@@ -7942,7 +7937,7 @@ Both bounds §16.7 named still bind where this can go, and neither has moved:
 - **No SACK.** Not implemented in the vendored tree at all, so a burst loss
   inside a larger window costs a full go-back-N. That is why the ceiling is the
   largest window that has been **measured** rather than the largest that is
-  representable — and, per §24.4, loopback collects its whole gain at 16,725
+  representable, and, per §24.4, loopback collects its whole gain at 16,725
   bytes, so the ceiling is not where the value is anyway.
 
 ### 24.7 Two guards NetX Duo ships for exactly this, and both are compiled out
@@ -7958,12 +7953,12 @@ it, two mechanisms that are currently dead code become live:
    own receive queue** rather than the stack dropping frames, and
    `nx_tcp_socket_packet_process.c:137` reopens the window when the pool
    recovers. That converts pool exhaustion from a stack-wide functional failure
-   into a per-socket stall — precisely the failure this section guards against
+   into a per-socket stall, precisely the failure this section guards against
    by arithmetic instead.
 2. **`nx_tcp_socket_receive_queue_maximum`.** `NX_TCP_MAXIMUM_RX_QUEUE` defaults
    to 20 and `nx_tcp_socket_create.c:136` only assigns it under the same
    `#ifdef`, so today a socket's receive queue has **no packet-count cap at
-   all** — the advertised window is its only bound.
+   all**, the advertised window is its only bound.
 
 It is not switched on here because it is a second behaviour change, touching
 IPv4 fragment reassembly and UDP receive as well as TCP, and because the
@@ -7975,7 +7970,7 @@ land together rather than one, which is why it is separate work:
   `nx_packet_pool_create()` never touches the field and a zeroed watermark means
   the guard is compiled in but can never fire;
 - `NX_TCP_MAXIMUM_RX_QUEUE` raised, because at 20 packets and 1440-byte wire
-  segments it binds at about 28 KB — **before** a 32 KB window does — and the
+  segments it binds at about 28 KB, **before** a 32 KB window does, and the
   tail-drop it would then perform costs a retransmission this stack has no SACK
   to recover cheaply.
 
@@ -7992,7 +7987,7 @@ protect the path that is not, and would leave the concurrency case exactly where
 it started.
 
 Two supporting facts, checked rather than assumed. There is one pool in the
-whole stack — `netstack_pool()`, which is also the IP instance's default — and
+whole stack, `netstack_pool()`, which is also the IP instance's default, and
 `_nx_tcp_socket_send_internal()` allocates each segment from
 `packet_ptr -> nx_packet_pool_owner` *before* anything knows the destination is
 loopback; `_nx_ip_driver_packet_send()` only shortcuts into
@@ -8016,14 +8011,14 @@ nothing in `third_party/` is patched (§17.3).
 Both conformance tiers are unchanged from §17.4's numbers and the full curl
 suite is unchanged from §16.8's, which is the result that matters: this touches
 the size of a window and nothing about what the socket API does. The two curl
-failures are the two §14 already names and neither is ours — `a44_cookies_send`
+failures are the two §14 already names and neither is ours, `a44_cookies_send`
 (curl does not write its cookie jar on AmigaOS, §14.7) and `f07_ftp_active`
 (FS-UAE 3.2.35's SLIRP opens no inbound path, §12). `AvailMem` drops once, by
 291 KB, when `tls.library` loads and is flat either side of it.
 
 One measurement hazard is worth recording because it cost two runs. The absolute
-throughputs here are **lower than §16's** — 230 KB/s on loopback at a pinned
-8192 where §16.6 reports 287 — and the reason is not this change. `NetTrace` is
+throughputs here are **lower than §16's**, 230 KB/s on loopback at a pinned
+8192 where §16.6 reports 287, and the reason is not this change. `NetTrace` is
 a command in `src/tools/`, that directory has been under active change, and the
 instrument moved under the measurement. Both arms were therefore rebuilt from
 one tree into private build directories and taken back to back; a comparison
@@ -8034,9 +8029,9 @@ one another piece of work also builds is not a controlled arm.
 ## 25. `ping` rebooted the machine, and none of it was the network (2026-07-26)
 
 `ping` was pulled from the distribution archive because it took the Amiga down.
-§22.8 recorded where it stopped — the library opened, the raw socket opened,
+§22.8 recorded where it stopped, the library opened, the raw socket opened,
 `sendto()` returned all 64 bytes, `WaitSelect()` called the descriptor readable,
-and the `recvfrom()` that followed never returned — and handed over two facts:
+and the `recvfrom()` that followed never returned, and handed over two facts:
 that `select()` and `bsd_raw_receive()` disagreed about the queue, and that the
 read that followed killed the machine.
 
@@ -8049,8 +8044,8 @@ in the linked image, it is put there by the toolchain, and it is not confined to
 ### 25.1 What the bisection actually showed
 
 The repro is `AddNetInterface eth0` followed by `ping 10.0.2.2 -c 3 -t 20`: six
-boots for two commands. `-c 1` passes. `-c 3 -i 0` — three probes, three replies,
-no interval — passes. So the fault is not in a probe, a reply or a read; it needs
+boots for two commands. `-c 1` passes. `-c 3 -i 0`, three probes, three replies,
+no interval, passes. So the fault is not in a probe, a reply or a read; it needs
 the machine to still be running about a second after `ping` starts.
 
 Instrumenting the receive path with `ami_log()` showed it working perfectly:
@@ -8078,7 +8073,7 @@ From there each step removed something and the fault stayed:
 | `Delay()`, replaced by a busy-wait of the same length | yes |
 | the `select()`/`recvfrom()` loop, never entered | yes |
 | `sendto()` | yes |
-| the raw socket — `SOCK_DGRAM` instead | yes |
+| the raw socket, `SOCK_DGRAM` instead | yes |
 | the socket entirely | yes |
 | `OpenLibrary("bsdsocket.library")` entirely | yes |
 | `ami_millis()` / `timer.device` | yes |
@@ -8099,7 +8094,7 @@ build, not of the program.
 ### 25.2 The actual defect
 
 `-O0` passes. `-O1` passes. `-Os` reboots. Narrowing by file, with everything
-else at `-O1`, put it in `src/tools/tool_util.c` — and specifically in the one
+else at `-O1`, put it in `src/tools/tool_util.c`, and specifically in the one
 thing `-Os` does there that `-O1` does not:
 
 ```c
@@ -8122,7 +8117,7 @@ linked binary:
 ```
 
 `_tool_break` is at **0x5a88**. The branch lands on **0x5a7c**, twelve bytes
-short — in the middle of `_tool_break_arm`, on the second word of
+short, in the middle of `_tool_break_arm`, on the second word of
 
 ```
     5a7a:   223c 0000 1000  movel #4096,d1
@@ -8131,7 +8126,7 @@ short — in the middle of `_tool_break_arm`, on the second word of
 so the machine resumes executing at an instruction boundary that does not exist,
 with `a6` holding whatever the caller left there and `d1` about to be loaded with
 `0x00001000`. **`d1=00001000` appears in every register dump the crash guard
-took**, and so does a PC inside `_tool_break_arm` — a function that is called
+took**, and so does a PC inside `_tool_break_arm`, a function that is called
 exactly once, at the top of `main()`, and could not possibly have been running.
 That contradiction was the tell, and it was on the screen for a long time before
 it was read correctly.
@@ -8139,8 +8134,8 @@ it was read correctly.
 The assembler leaves a non-zero addend in the displacement field and the linker
 adds it a second time. Cross-**object** tail calls relocate against a global
 symbol with a zero addend and come out right, which is why the 219 other 32-bit
-PC-relative branches in `bsdsocket.library` — the `_nxe_*` error-checking
-wrappers, which all end `return _nx_...()` — are correct and always have been.
+PC-relative branches in `bsdsocket.library`, the `_nxe_*` error-checking
+wrappers, which all end `return _nx_...()`, are correct and always have been.
 
 Auditing every linked image found the same defect in four more places:
 
@@ -8155,7 +8150,7 @@ else calls `tool_delay_ticks()` only on a path that a healthy machine skips.
 
 ### 25.3 The fix
 
-`-fno-optimize-sibling-calls` wherever `-ffunction-sections` is used —
+`-fno-optimize-sibling-calls` wherever `-ffunction-sections` is used,
 `src/tools`, `src/config`, `src/common`. The tail call is the only construct that
 produces the broken relocation here: ordinary calls are absolute `jsr`, and
 intra-section branches need no relocation at all. The two flags are now one
@@ -8212,12 +8207,12 @@ like a hang is not one. Checked both ways against real logs: the pre-fix run
 macOS cannot execute the pinned `m68k-amigaos-gcc`, so everything above was
 found with the local NDK and had to be confirmed against the toolchain CI
 actually ships from. It was, on `turo@playhouse2`, and the pinned toolchain is
-**not better — it is worse**:
+**not better, it is worse**:
 
 | toolchain | mis-resolved branches in `ping` |
 |---|---|
-| local NDK (`~/amigaos/tools`, 15.2.0) | 1 — `tool_delay_ticks` → `tool_break` |
-| pinned (`~/.cache/aminetxduo/toolchain/current`, 15.2.0) | **3** — the same one, plus two more |
+| local NDK (`~/amigaos/tools`, 15.2.0) | 1, `tool_delay_ticks` → `tool_break` |
+| pinned (`~/.cache/aminetxduo/toolchain/current`, 15.2.0) | **3**, the same one, plus two more |
 
 So this was never a property of one developer's machine. The `ping` in the
 v0.2.0 archive carried three of these, and the same audit found four in
@@ -8227,7 +8222,7 @@ linked image passes the check.
 
 One thing about the check itself is worth recording, because it failed in the
 way checks characteristically do. `cmake -P` starts a script with **no policies
-set**, so `IN_LIST` is an `if` operator only under CMP0057 — which CMake 4.x
+set**, so `IN_LIST` is an `if` operator only under CMP0057, which CMake 4.x
 turns on by default and 3.31 does not. The check therefore passed on the machine
 it was written on and failed every cross build on the Linux host with "Unknown
 arguments specified": a script error wearing a build failure's clothes, which is
@@ -8240,7 +8235,7 @@ exactly the shape that gets a check disabled rather than fixed.
 inference: the trace stopped at `recvfrom`, therefore `recvfrom` blocked. The
 trace stopped at `recvfrom` because the machine stopped. **`FIONBIO` was added
 specifically to rule the blocking wait out, it changed nothing, and that result
-was recorded and then not believed** — the search stayed inside the receive path
+was recorded and then not believed**, the search stayed inside the receive path
 for another whole investigation on the strength of a story that its own control
 experiment had already falsified.
 
@@ -8256,12 +8251,12 @@ trace stopping is not evidence about the last line in it.
 
 §22 gave a Shell command a way to reach the running stack. This is what that made
 writable: the part of Roadshow's command set we had never shipped. Roadshow 1.15 and
-AmiTCP_NG both have all six; we had none of them, and the reason was never taste — a
+AmiTCP_NG both have all six; we had none of them, and the reason was never taste, a
 command that cannot reach the stack cannot start one, stop one, or route through one.
 
 **The provenance rule, restated because it is the whole basis for doing this at all.**
 Roadshow's documentation was read for one thing: the argument templates. Those are
-interface facts — a script written against `AddNetRoute VIA=…` has to keep working — and
+interface facts, a script written against `AddNetRoute VIA=…` has to keep working, and
 matching them is the point. Nothing else was taken. Every description, every diagnostic
 and every comment in `src/tools/` here is written from scratch, and AmiTCP_NG was not
 opened at all: it is GPL, this project is MIT throughout, and that is one of its few
@@ -8284,7 +8279,7 @@ to be.
 | `ConfigureNetInterface` | `INTERFACE/A,…` | **not written** |
 
 The last two are not deferred for time. They are blocked on capabilities the stack does
-not have, and §26.5 says which — a command that took the arguments and could not act on
+not have, and §26.5 says which, a command that took the arguments and could not act on
 them would be exactly the class of defect §22 exists to stop.
 
 ### 26.2 `CheckNetConfig`, and the checks a parser cannot make
@@ -8297,11 +8292,11 @@ a driver you do not have*.
 `src/config` already reports bad syntax, unknown keywords, a missing `DEVICE` line and a
 static interface with no `ADDRESS`, each with a file and a line number, through the
 `AmiCfgReporter` hook that `tool_config_watch()` installs. All of that is **forwarded**
-rather than reimplemented — `cnc_report()` is four lines and hands the parser's own
+rather than reimplemented, `cnc_report()` is four lines and hands the parser's own
 `AmiCfgProblem` straight to the same formatter everything else here uses. What the command
 adds is the set of checks that need more than the line in front of them:
 
-* the driver named is on this machine, and the **unit** named opens — asked of the
+* the driver named is on this machine, and the **unit** named opens, asked of the
   hardware through `tool_device_probe()`, not guessed at;
 * the netmask is a mask at all (a contiguous run of ones), and the address is a host on
   it rather than the network address or the broadcast address;
@@ -8316,17 +8311,17 @@ checking is the one where the stack did not come up. It never opens `bsdsocket.l
 Three decisions in it are worth recording because each was a bug first.
 
 **The probe is skipped while the network is running.** The stack holds the card's driver
-open, and a second `OpenDevice()` of a unit already in use fails — so probing would report
+open, and a second `OpenDevice()` of a unit already in use fails, so probing would report
 a working interface as broken on precisely the machine where it is demonstrably working.
 Whether the card opens is answered by the network being up.
 
 **The duplicate-card finding names the drawer, not a file.** The first version attributed
 it to whichever of the two interfaces sorted later, which on the test configuration was
-`eth0` — the *correct* one. Nothing here can tell which of two files is the mistake, so
+`eth0`, the *correct* one. Nothing here can tell which of two files is the mistake, so
 both are named and neither is accused.
 
 **One assertion in the test is the reverse of all the others.** `DEVS:Internet/name_resolution`
-in the broken fixture names `8.8.8.8`, which is not on this machine's network — and is
+in the broken fixture names `8.8.8.8`, which is not on this machine's network, and is
 reachable, because a default route exists. It must produce no finding. A checker that
 fires on correct configuration gets ignored, and then it protects nothing; the same
 reasoning `tests/tools/run-livetools.sh` already records for its forbidden-phrase list.
@@ -8368,11 +8363,11 @@ Roadshow's templates have nowhere to write a netmask, so one has to be inferred,
 rule is stated in the source rather than left to be discovered: `HOSTDESTINATION` is /32,
 `NETDESTINATION` takes the mask covering the octets that are not zero, and `DESTINATION`
 is whichever of the two the address looks like. A prefix length written into the address
-(`10.1.2.0/24`) overrides all of it — that is a superset of `<IP>`, not a new keyword, so
+(`10.1.2.0/24`) overrides all of it, that is a superset of `<IP>`, not a new keyword, so
 the template is still Roadshow's.
 
 `DeleteNetRoute` infers nothing. It reads the live table and deletes the entry the
-destination falls in, with the netmask **that entry really has** — which is the only way
+destination falls in, with the netmask **that entry really has**, which is the only way
 to implement a template with no netmask in it, and means a route added with any idea of
 the mask can be removed by naming where it goes. It matches **static entries only**: a
 directly-attached prefix is a real route that `netstat -r` prints, but it belongs to the
@@ -8388,7 +8383,7 @@ well-formed diagnostic and exited with a defensible code. Only running it agains
 that was demonstrably there found it.
 
 **And the harness caught a second thing that was not in the commands at all.** The first
-live run refused both route commands with *this stack has no routing table* — correctly,
+live run refused both route commands with *this stack has no routing table*, correctly,
 because `NETSTATUS_SYS_ROUTING` was clear in the `bsdsocket.library` that had been staged.
 `NX_ENABLE_IP_STATIC_ROUTING` had just been turned on in `port/netxduo-amiga/inc/nx_user.h`
 and only `--target tools` had been rebuilt. The refusal is the design working: the flag is
@@ -8409,7 +8404,7 @@ No other command holds that reference, so no other command can drop it. The libr
 in memory with its ThreadX kernel running until a reboot.
 
 What is stoppable is the traffic. Every interface goes down through
-`NETCTRL_INTERFACE_DOWN` — the same call `Offline` makes — and afterwards nothing is sent
+`NETCTRL_INTERFACE_DOWN`, the same call `Offline` makes, and afterwards nothing is sent
 and nothing is received. The command says that in those words. A command that claimed to
 have shut the stack down and left it running would be worse than one that explains the
 distinction.
@@ -8418,13 +8413,13 @@ distinction.
 purpose is to make the stack forget an interface *so that it may be added again with
 different parameters*. There is no detach: `include/aminetxduo/netstack.h` has
 `netstack_interface_up/down` and nothing else, `NetStatusControl` has no operation for it,
-and interfaces are read once at startup — `AddNetInterface` already tells a user who adds
+and interfaces are read once at startup, `AddNetInterface` already tells a user who adds
 a file to a running stack to reboot. The command would take its arguments and be unable to
 do the one thing its name promises. It needs a `netstack_interface_detach()` and a
 `NETCTRL_` selector to reach it, both outside `src/tools/`.
 
 **`ConfigureNetInterface` was not written for a different reason.** The part of its
-template this stack can act on — `ONLINE`, `OFFLINE`, `UP`, `DOWN` — is exactly what
+template this stack can act on, `ONLINE`, `OFFLINE`, `UP`, `DOWN`, is exactly what
 `Online` and `Offline` already do, and the part that would justify a separate command
 (`ADDRESS`, `NETMASK`, `CONFIGURE=DHCP`, `LEASE`, `ALIASADDR`) needs a control operation
 that can change a live interface's addressing, which does not exist. What is left is a
@@ -8435,7 +8430,7 @@ command that mostly refuses.
 `tests/tools/run-livetools.sh` was extended rather than duplicated: it already boots once,
 brings the stack up with `AddNetInterface eth0` and runs the shipped executables from a
 staged directory. The new half checks each command on **what it printed and on what it
-returned**, and requires the two to agree — a route command that printed a success line
+returned**, and requires the two to agree, a route command that printed a success line
 while adding nothing, or a `GetNetStatus` that answered "not ready" because it could not
 see in, would both pass a test written against exit status alone. So `AddNetRoute` is
 followed by `netstat -r`, which reads the same table through a different command, and
@@ -8460,8 +8455,8 @@ a NAK. FS-UAE's SLIRP grants a lease and never takes it away, so there was no wa
 of it to happen by accident.
 
 Behind that, `nx_auto_ip_create/start/stop/delete` had been wired into `netstack.c` since
-the interface work — two triggers, an explicit `CONFIGURE=AUTO` and a DHCP-timeout
-fallback commented *"RFC 3927: fall back to a link-local address"* — with no test anywhere
+the interface work, two triggers, an explicit `CONFIGURE=AUTO` and a DHCP-timeout
+fallback commented *"RFC 3927: fall back to a link-local address"*, with no test anywhere
 and no `169.254` in the tree outside a config fixture. This project has a recent record of
 wired-and-broken (§16's capture subsystem with 201 green checks and no caller; §22's three
 commands that could never read the running stack), so "it is wired" was treated as no
@@ -8473,12 +8468,12 @@ Nine phases, and every claim below is from a run, not from reading the source.
 ### 27.1 A DHCP server on the host is not reachable, and here is the proof
 
 The obvious rig is a Python DHCP server in the style of `tests/tools/netpeer.py`. It cannot
-work, and the reason is not "SLIRP intercepts broadcasts" — that would leave unicast
+work, and the reason is not "SLIRP intercepts broadcasts", that would leave unicast
 renewals as a way in. **FS-UAE 3.2.35 embeds libslirp** (`slirp/src/bootp.c`,
 `slirp/src/udp.c` and thirteen more are in the binary's string table) and it answers UDP
 port 67 at *both* the addresses a DHCP client can ever send to.
 
-From the A2065 frame dump of a real run — `tests/trace/a2065pcap.py` over the emulator's
+From the A2065 frame dump of a real run, `tests/trace/a2065pcap.py` over the emulator's
 own log, which is produced inside the emulated hardware and below every line of this stack:
 
 ```
@@ -8494,7 +8489,7 @@ own log, which is produced inside the emulated hardware and below every line of 
 Frame 10 is the renewal RFC 2131 4.4.5 requires to be **unicast to the server**
 (`nxd_dhcp_client.c:6377` picks `nx_dhcp_server_ip` for exactly this case), and frame 11 is
 an answer to it. `lsof -nP -iUDP:67` on the host at the time: nothing. No process on the
-host was listening on port 67, and the datagram was answered anyway — it never left the
+host was listening on port 67, and the datagram was answered anyway, it never left the
 emulator. Broadcast is eaten the same way, so both halves are closed.
 
 There is no second way round it either. `otool -L` on the fs-uae binary shows no libpcap;
@@ -8506,7 +8501,7 @@ the only ethernet backends its string table offers are `slirp` and `SLIRP + Open
 knows the difference:
 
 * **A clock that moves.** SLIRP's lease is 24 hours (`lease 4320000 s, T1 2160000 s`,
-  measured off the live record — the fields are in ticks, `_nx_dhcp_extract_information()`
+  measured off the live record, the fields are in ticks, `_nx_dhcp_extract_information()`
   multiplies the server's seconds by `NX_IP_PERIODIC_RATE` on the way in). The test writes
   `nx_dhcp_renewal_time`, `nx_dhcp_rebind_time` and `nx_dhcp_lease_time` in the live
   `NX_DHCP_INTERFACE_RECORD` and leaves everything else alone: the state machine, the
@@ -8519,8 +8514,8 @@ knows the difference:
   probes and then claims the address anyway. Those two are synthesised: a correctly formed
   ARP frame handed to `_nx_arp_packet_deferred_receive()`, which is the same function the
   SANA-II reader calls for every ARP frame off the card (`sana2_rx.c:95`). Everything
-  downstream of that — `nx_arp_packet_receive.c`'s conflict detection, the defence it
-  sends, the AutoIP thread's response — is the real thing.
+  downstream of that, `nx_arp_packet_receive.c`'s conflict detection, the defence it
+  sends, the AutoIP thread's response, is the real thing.
 
 One new knob makes the fourth case possible. `AMINETXDUO_FSUAE_A2065` in
 `tools/fsuae-run.sh` picks the card's backend, and `none` fits the A2065 and wires it to
@@ -8567,7 +8562,7 @@ nothing on the wire). This is the part that cannot be checked from counters:
 | announce 1 | 6000 ms | 2.4: +2.00 s = ANNOUNCE_WAIT |
 | announce 2 | 8000 ms | +2.00 s = ANNOUNCE_INTERVAL, ANNOUNCE_NUM = 2 |
 
-and the same sequence read off the wire rather than off the counters — three probes with a
+and the same sequence read off the wire rather than off the counters, three probes with a
 zero sender, then two announcements with the sender filled in, which is precisely what
 RFC 3927 2.2.1 and 2.4 ask for:
 
@@ -8585,18 +8580,18 @@ the candidate is thrown away and a fresh one is drawn from 169.254.1.0-169.254.2
 
 **Rate limiting.** Eleven conflicts in a row, one per candidate, using the synthetic peer.
 Past `NX_AUTO_IP_MAX_CONFLICTS` (10) the next probe came **61 seconds** later against a
-`NX_AUTO_IP_RATE_LIMIT_INTERVAL` of 60 — timed, not assumed, and reproduced at 60 s and
+`NX_AUTO_IP_RATE_LIMIT_INTERVAL` of 60, timed, not assumed, and reproduced at 60 s and
 61 s on separate runs.
 
 **Conflict after the address is in use.** Another host announces the address we are using:
-`nx_ip_arp_requests_sent` goes up by one — that is the defence leaving on the wire, from
-`nx_arp_packet_receive.c`'s `nx_interface_arp_defend_timeout` path — and
+`nx_ip_arp_requests_sent` goes up by one, that is the defence leaving on the wire, from
+`nx_arp_packet_receive.c`'s `nx_interface_arp_defend_timeout` path, and
 `nx_auto_ip_defend_count` goes up by one. See 27.5 for what happens next, which is where
 this implementation stops being conformant.
 
 **DHCP arriving later.** With the wire back, the still-running DHCP client takes a lease
 and writes over the link-local address, which is what RFC 3927 1.9 wants. Nothing in the
-stack arbitrated that before — it happened only because the DHCP client wrote last — and
+stack arbitrated that before, it happened only because the DHCP client wrote last, and
 nothing stopped the AutoIP module, which then sat holding an address the interface no
 longer had. Fixed in 27.4.
 
@@ -8607,24 +8602,21 @@ longer had. Fixed in 27.4.
    and `ami_ns_address_changed()` now log every transition, and the one that matters says
    so plainly:
 
-   ```
-   [WARN] netstack: interface 0 has LOST its DHCP lease -- the address and the gateway
-          have been taken off it, and every open connection through it is dead
-   ```
+    70 
 
-   Both callbacks run on a NetX Duo thread. `AMI_INFO`/`AMI_WARN` are `RawPutChar()` and
+   Both callbacks run on a NetX Duo thread.  4608 / 4609  are  4610  and
    `RawDoFmt()`, which is Exec-only and legal from any Task, and neither blocks.
 
 2. **Losing the lease did not start the RFC 3927 fallback.** `netstack.c` fell back to
    link-local when DHCP never answered at startup and did nothing at all when a lease was
-   lost afterwards — the same machine, the same absence of a server, two different
+   lost afterwards, the same machine, the same absence of a server, two different
    answers. The state-change callback now calls `ami_ns_start_autoip()` on
    `BOUND|RENEWING|REBINDING -> INIT`. Deliberately **not** on `REQUESTING -> INIT`: a NAK
    there is an ordinary part of acquiring a lease, and a first boot reporting a lost lease
    would be a false alarm on the one message that has to be believed.
 
 3. **`nx_ip_status_check()` is interface 0 only.** It is one line at the bottom of
-   `nx_ip_status_check.c` — `return(_nx_ip_interface_status_check(ip_ptr, 0, ...))` — and
+   `nx_ip_status_check.c`, `return(_nx_ip_interface_status_check(ip_ptr, 0, ...))`, and
    the startup wait was built on it. A machine whose Ethernet is static and whose second
    interface is the DHCP one waited out the full thirty seconds and then reported that
    nothing had an address. `ami_ns_wait_for_address()` polls every configured interface.
@@ -8633,7 +8625,7 @@ longer had. Fixed in 27.4.
    what a router's client list shows and what many of them put in local DNS, and
    `nx_dhcp_create()` was passed a string literal, silently discarding the `HOSTNAME` the
    user configured. Two of these machines on one network were indistinguishable. It now
-   passes `ns_Config.hostname` — NetX Duo keeps the pointer rather than a copy, so it has
+   passes `ns_Config.hostname`, NetX Duo keeps the pointer rather than a copy, so it has
    to be storage with the lifetime of the `NX_DHCP`, and `ns_Config` is inside the same
    `AmiNetStack`.
 
@@ -8645,23 +8637,18 @@ longer had. Fixed in 27.4.
 
 6. **AutoIP was left running once DHCP won.** Its thread waits indefinitely for a conflict
    and never re-reads the address, so it sat defending one the interface no longer had.
-   `ami_ns_address_changed()` stops it when a routable address appears — never from the
+   `ami_ns_address_changed()` stops it when a routable address appears, never from the
    AutoIP thread itself, because `nx_auto_ip_stop()` is `tx_thread_suspend()` and calling
    it on the running thread would suspend it in the middle of its own announcement. Stop
    is a suspend, so 2 above can start it again:
 
-   ```
-   [INFO] netstack: link-local configuration stopped -- interface 0 has a routable address now
-   ...
-   [WARN] netstack: interface 0 has LOST its DHCP lease -- ...
-   [INFO] netstack: RFC 3927 link-local configuration restarted
-   ```
+    71 
 
-   The `ns_AutoIpRunning` guard is not decoration. `nx_auto_ip_start()` writes
+   The  4633  guard is not decoration.  4634  writes
    `nx_auto_ip_current_local_address` from the caller's thread with no synchronisation
    against the AutoIP thread reading it, and starting an instance that is already running
    loses a race: frame 25 of one capture is
-   `ARP req sender=0.0.0.0 target=0.0.0.0` — a probe for the null address, sent because
+   `ARP req sender=0.0.0.0 target=0.0.0.0`, a probe for the null address, sent because
    `start` cleared the candidate between the module deriving one and probing for it. The
    test provokes that on purpose; the stack now cannot.
 
@@ -8670,7 +8657,7 @@ longer had. Fixed in 27.4.
 `third_party/netxduo` is consumed unmodified, so these are stated rather than patched.
 
 **AutoIP gives the address up on the first late conflict.** RFC 3927 2.5 describes a host
-that has already announced an address defending it once — a single ARP announcement, and
+that has already announced an address defending it once, a single ARP announcement, and
 only if a *second* conflict arrives inside DEFEND_INTERVAL does it give the address up.
 `nx_auto_ip.c:1083` says what it does instead, in its own words: *"No defense currently,
 just clear the IP address once a late collision is detected and start over."* Measured:
@@ -8681,8 +8668,8 @@ wrong: a single stray ARP from a misconfigured host costs this machine its addre
 
 **`DHCPDECLINE` cannot be sent at all.** RFC 2131 4.4.1 says a client SHOULD ARP-probe the
 address the server offered and DECLINE if something answers. NetX Duo compiles the whole of
-that — the `ADDRESS_PROBING` state, `_nx_dhcp_ip_conflict()` and
-`_nx_dhcp_interface_decline()` — behind `NX_DHCP_CLIENT_SEND_ARP_PROBE`, which this port
+that, the `ADDRESS_PROBING` state, `_nx_dhcp_ip_conflict()` and
+`_nx_dhcp_interface_decline()`, behind `NX_DHCP_CLIENT_SEND_ARP_PROBE`, which this port
 does not define, so **no DHCP probe and no DECLINE has ever been possible**.
 
 It works when it is switched on. A measurement build with the define, answering the
@@ -8708,7 +8695,7 @@ from `tx_amiga_kernel_start()` to `netstack_startup()` returning, same SLIRP, sa
 | with `NX_DHCP_CLIENT_SEND_ARP_PROBE` | 250 | 5.00 |
 
 Three ARP probes at `NX_DHCP_ARP_PROBE_MIN`..`MAX` apiece, on every bring-up, for a
-conflict that a home network with one DHCP server cannot produce — **3.9 seconds added to
+conflict that a home network with one DHCP server cannot produce, **3.9 seconds added to
 every boot**, and this stack is brought up and torn down by `bsdsocket.library` on the
 first `OpenLibrary()`, so it is 3.9 seconds added to the first network command in a Shell
 session as well. The line to change is one `#define` in
@@ -8717,13 +8704,13 @@ as it is there.
 
 ### 27.6 What could not be tested here at all
 
-* **A DHCP server that behaves differently from SLIRP** — a different lease length, options
+* **A DHCP server that behaves differently from SLIRP**, a different lease length, options
   SLIRP does not send, a server that offers an address already in use. 27.1 is the
   evidence; it needs an emulator with a bridged or tap backend, or real hardware.
 * **Two DHCP servers on one wire**, which is the case `SELECTING` exists to arbitrate. Same
   reason.
 * **The AutoIP defend counter reaching a second conflict inside DEFEND_INTERVAL**, which is
-  the branch RFC 3927 2.5 turns on — moot while the module abandons the address on the
+  the branch RFC 3927 2.5 turns on, moot while the module abandons the address on the
   first one.
 
 ### 27.7 Running it
@@ -8735,7 +8722,7 @@ AMINETXDUO_FSUAE_A2065=none \
     tests/netstack/run-dhcp3927.sh -C AUTO           # RFC 3927 on its own, no server
 ```
 
-The first two are the ones to keep an eye on -- **35 checks, 0 failures** and **40 checks,
+The first two are the ones to keep an eye on, **35 checks, 0 failures** and **40 checks,
 0 failures** on the runs this section is written from. The third is situational: with no
 server on the wire its DHCP phases have nothing to work with and say so rather than
 failing.
@@ -8751,7 +8738,7 @@ read. §16 built the instrument that shows what TCP is doing. This section
 builds the one that says what it *should* be doing, and then disagrees with it.
 
 **Result, on `b3b4b49`: 21 cases, 152 checks passed, 4 failed, and three
-defects — one of which means that unacknowledged data is never retransmitted at
+defects, one of which means that unacknowledged data is never retransmitted at
 all.**
 
 ### 27.1 packetdrill cannot run here, and neither can any host-side injector
@@ -8765,8 +8752,8 @@ correct behaviour. None of its code, and none of its syntax, is used here.
 **The tool itself is unusable and so is its architecture.** packetdrill is a
 POSIX program that opens a TUN device and makes the system calls locally;
 neither exists on AmigaOS, and porting it would be a larger job than the stack
-under test. The obvious substitute — a host-side peer that injects raw frames
-into the emulated wire — is not available either, and this is worth stating
+under test. The obvious substitute, a host-side peer that injects raw frames
+into the emulated wire, is not available either, and this is worth stating
 with evidence because it is the first thing anyone will try:
 
 - **FS-UAE's A2065 has three backends and no more.** `slirp`, `slirp_inbound`
@@ -8787,7 +8774,7 @@ with evidence because it is the first thing anyone will try:
 
 **So the peer goes below the stack instead of beside it.** `tests/tcpdrill/
 tapdev.c` is an AmigaOS Exec device — `MakeLibrary()` plus `AddDevice()`, six
-vectors, no segment list — that implements enough of SANA-II for `src/sana2/`
+vectors, no segment list, that implements enough of SANA-II for `src/sana2/`
 to open it, query it, configure it, take it online and run its reader threads
 against it. `DEVS:NetInterfaces/tap0` names it, so the stack brings it up
 through exactly the code that brings up `a2065.device`, with no build switch
@@ -8802,9 +8789,9 @@ What that buys:
 
 | | |
 |---|---|
-| every transmitted frame | arrives complete, timestamped and in order, and is never lost — `CMD_WRITE` is a function call, not a wire |
+| every transmitted frame | arrives complete, timestamped and in order, and is never lost, `CMD_WRITE` is a function call, not a wire |
 | every received frame | is one the harness composed byte for byte, including sequence numbers it has no business knowing |
-| the peer | is not a TCP implementation, so **nothing answers by accident** — which is what makes an RTO measurable |
+| the peer | is not a TCP implementation, so **nothing answers by accident**, which is what makes an RTO measurable |
 | the emulator | is not involved: no `-n`, no `a2065.device`, no SLIRP, no host networking |
 
 Two things are deliberately *not* bypassed. The buffer-management hooks are
@@ -8812,7 +8799,7 @@ real: `S2_CopyToBuff` and `S2_CopyFromBuff` are called for every byte in both
 directions, so `src/sana2/sana2_copy.c` and the packet positioning in
 `sana2_rx.c` are under test rather than around it. And raw framing is refused
 with `S2ERR_NOT_SUPPORTED`, so `ami_sana2_probe_raw()` decides against it and
-the stack runs the **cooked** path — the one `a2065.device` drives and the one
+the stack runs the **cooked** path, the one `a2065.device` drives and the one
 every measurement in this document was taken through.
 
 One implementation note, because it compiles cleanly and corrupts every frame.
@@ -8858,8 +8845,8 @@ Two decisions are worth defending:
   with no concurrency of its own. The blocking paths are already covered by
   `tests/conformance` and `tests/clients`.
 - **Timing is taken from the frame, not from the harness.** Every transmitted
-  frame is stamped with `ReadEClock()` **inside the device's `BeginIO`** — the
-  instant the stack handed it over — so `after=` and `within=` do not measure
+  frame is stamped with `ReadEClock()` **inside the device's `BeginIO`**, the
+  instant the stack handed it over, so `after=` and `within=` do not measure
   the harness's 20 ms poll interval. That mattered: `a02` asserts a 200 ms
   delayed-ACK timer and would be untestable through a 20 ms poll otherwise.
 
@@ -8876,19 +8863,19 @@ these are the successors of defects this project has already paid for:
 | | |
 |---|---|
 | three-way handshake, active and passive | ISN, MSS 1460 offered and echoed, ACK carries the peer's ISN + 1 |
-| `shutdown(SHUT_WR)` | **FIN, not RESET** — the third of the four historical defects, asserted rather than assumed |
+| `shutdown(SHUT_WR)` | **FIN, not RESET**, the third of the four historical defects, asserted rather than assumed |
 | peer half-close | our ACK of the FIN, `recv()` = 0, socket still writable, and a 50-byte segment sent afterwards |
-| an idle established socket | **not readable**, and `recv()` = `EWOULDBLOCK` — the fourth historical defect, likewise |
+| an idle established socket | **not readable**, and `recv()` = `EWOULDBLOCK`, the fourth historical defect, likewise |
 | SYN to a closed port | `RST|ACK`, seq 0, ack 1 |
 | data to a closed port | bare `RST` whose sequence number is the segment's ACK number |
 | delayed ACK | 153–213 ms after a lone segment: the 200 ms timer, on the 50 Hz tick, exactly as §16.6 predicts |
 | out-of-order | the hole holds the ACK at its left edge (dup ACK at 10 ms), the fill produces a cumulative ACK, and `recv()` returns both segments in order |
 | duplicate segment | acknowledged twice, delivered once |
-| urgent data | ACK covers the urgent byte, and `recv()` returns 4 bytes — the deliberate inline divergence §17 records, now asserted |
+| urgent data | ACK covers the urgent byte, and `recv()` returns 4 bytes, the deliberate inline divergence §17 records, now asserted |
 | RESET on an established connection | tears it down, **answers nothing**, `recv()` = 0 |
 | zero window | `send()` correctly refused with `EWOULDBLOCK`, and a **one-byte probe follows 919 ms later** (RFC 1122 4.2.2.17) |
 | advertised window | inside §24.3's floor and ceiling, 8192–32768 |
-| TCP and IP checksums | verified on **every** frame the stack sent — 71 frames, no failures |
+| TCP and IP checksums | verified on **every** frame the stack sent, 71 frames, no failures |
 
 `tap: tx 71  rx delivered 33  rx no-reader 0  copy-failed 0  tx-overrun 0`.
 Nothing was dropped in either direction, so no assertion in the run is standing
@@ -8916,7 +8903,7 @@ case x04_eleven_seconds_of_silence
   ok   notx 11000
 ```
 
-Eleven seconds of total silence — no retransmission, and not even the RESET
+Eleven seconds of total silence, no retransmission, and not even the RESET
 that ten expired retries should produce. A green line, and it is the worst
 result in the section.
 
@@ -8939,25 +8926,25 @@ while (packet_ptr && (packet_ptr -> nx_packet_queue_next == (NX_PACKET *)NX_DRIV
 ```
 
 and `NX_DRIVER_TX_DONE` is written by `_nx_packet_transmit_release()`
-(`nx_packet_transmit_release.c:98`) — i.e. **only a packet the driver has given
+(`nx_packet_transmit_release.c:98`), i.e. **only a packet the driver has given
 back can be retransmitted.** Every NetX Duo reference driver releases inside
 the `NX_LINK_PACKET_SEND` handler. Ours cannot: a SANA-II `CMD_WRITE` is
 asynchronous, so `src/sana2/sana2_tx.c` releases in `ami_sana2_tx_reap()`
-instead — and reap has exactly three callers, all of them reactive:
+instead, and reap has exactly three callers, all of them reactive:
 
 | `sana2_tx.c:215, 228` | the **start of the next transmit**, and the spin when the ring is full |
 | `sana2_driver.c:316` | `NX_LINK_GET_TX_COUNT` |
-| `sana2_driver.c:362` | `NX_LINK_DEFERRED_PROCESSING`, which this shim never asks for — it calls `_nx_ip_packet_deferred_receive()` directly and never sets `NX_IP_DRIVER_DEFERRED_PROCESSING` |
+| `sana2_driver.c:362` | `NX_LINK_DEFERRED_PROCESSING`, which this shim never asks for, it calls `_nx_ip_packet_deferred_receive()` directly and never sets `NX_IP_DRIVER_DEFERRED_PROCESSING` |
 
 So on a link that goes quiet, the last packets sent are never released and
 never become retransmittable. The TX reply port is `PA_IGNORE` (`sana2_tx.c:41`
-— deliberately, so any thread may post to it), which means the completion
+deliberately, so any thread may post to it), which means the completion
 signals nobody and there is no context in which reaping could happen on its
 own.
 
 **Why no instrument in this tree could have seen it.** §16.4 and §24.4 report
 **zero retransmissions** across every trace ever taken here, in both
-directions, on both paths, in both views — because nothing was ever lost on an
+directions, on both paths, in both views, because nothing was ever lost on an
 emulated wire or on loopback. A bulk transfer never triggers it either: the
 next segment's `tx_send()` reaps the previous one, so under load the queue
 drains and retransmission works. The failure is precisely the case that has no
@@ -8966,7 +8953,7 @@ lost. An HTTP GET, a DNS query over TCP, a TLS ClientHello. It hangs until the
 application's own timeout, having put nothing back on the wire.
 
 **Where the fix goes: `src/sana2/`, not `third_party/`.** Reaping needs a
-context that runs when nothing is being sent. Not implemented here — this is
+context that runs when nothing is being sent. Not implemented here, this is
 `src/`, and it is a lifecycle change to the transmit ring rather than a
 one-liner.
 
@@ -9006,7 +8993,7 @@ workstream's, so this is reported rather than changed.
 
 The same flat 1 s governs the zero-window probe, which `z01` measures at
 919 ms. RFC 1122 4.2.2.17 asks for exponentially increasing probe intervals and
-`nx_tcp_socket_retransmit.c:133` writes the code for it — through the same
+`nx_tcp_socket_retransmit.c:133` writes the code for it, through the same
 `timeout_shift` of 0.
 
 ### 27.6 Defect 3: `CloseSocket()` sends a RESET, now with the packet
@@ -9027,7 +9014,7 @@ RESET, seq 1, no ACK flag, where RFC 793 §3.5 requires a FIN.
 
 Two things make this worse than a style point. `shutdown(SHUT_WR)` on the same
 connection, in `c04`, sends a correct `FIN|ACK` and takes the correct ACK back
-— so **the stack contains a working orderly-close path and `close()` does not
+so **the stack contains a working orderly-close path and `close()` does not
 use it**. And a RESET tells the peer to discard anything it has not yet handed
 to its application, which is the same class of data loss as the
 `shutdown(SHUT_WR)` defect that has already been fixed once here.
@@ -9042,7 +9029,7 @@ one call for another, so it is reported here and not made.
   originally asserted that the first of two 1460-byte segments went
   unacknowledged, and it fails: the first is acknowledged after 213 ms (the
   delayed-ACK timer) and the second after 30 ms. RFC 1122 4.2.3.2 is a floor
-  — "at least every second" — so acknowledging both is conformant, and the
+, "at least every second", so acknowledging both is conformant, and the
   script now says so. Worth writing down because §16.6's headline was that
   this rule was *missing*, and the natural next mistake is to assert the
   stricter reading of it.
@@ -9069,7 +9056,7 @@ Not covered, and named rather than left to be discovered:
 - **Blocking-call semantics**, by the choice in §27.2.
 - **Loopback.** The device is an interface; `lo0` does not go through it.
 - **Congestion control.** Slow start and the cwnd after a loss are visible in
-  this format — segment counts per RTT — and nothing here asserts on them.
+  this format, segment counts per RTT, and nothing here asserts on them.
 
 
 ## 28. Three macros AmiTCP_NG has and we did not, and what each was actually worth (2026-07-26)
@@ -9078,7 +9065,7 @@ Three capabilities this stack lacked were, in every case, code NetX Duo already
 ships behind a `#define` nobody here had written. That is a pleasant kind of gap
 and a dangerous one: the work looks like typing, so the temptation is to type it
 and move on. **A `#define` that changes no packet is not a feature**, so each one
-below was taken to the wire — two of them are now proven there, and the third is
+below was taken to the wire, two of them are now proven there, and the third is
 switched off with the measurement that says why.
 
 A fourth item, randomised initial sequence numbers, turned out to be a claim
@@ -9110,7 +9097,7 @@ pair reads exactly as though routing were compiled in. It was not:
 
 One gateway is enough for a machine on one Ethernet, which is why nobody
 noticed. It is not enough for a second interface reachable only through its own
-next hop — the configuration `NX_MAX_PHYSICAL_INTERFACES 2` exists for — or for
+next hop, the configuration `NX_MAX_PHYSICAL_INTERFACES 2` exists for, or for
 a subnet behind a router that is not the default one. §22.5 and §26 both record
 this as the thing blocking `AddNetRoute`; it is now on, and §26 covers the two
 commands that became writable because of it.
@@ -9125,14 +9112,14 @@ because three of these are surprising:**
   sorted by netmask descending on insertion. `_nx_ip_route_find()` itself walks
   it in order and takes the first hit.
 * **The table is consulted after the on-link check and before the gateway**, so
-  a route can override the default for part of the address space — which is the
+  a route can override the default for part of the address space, which is the
   whole reason to have one rather than a second name for the gateway.
 * **Deleting from an EMPTY table returns `NX_SUCCESS`** (`nx_ip_static_route_delete.c:97`).
   Deleting an absent entry from a non-empty one returns failure. A test that
   checks "deleting a route that is not there fails" has to make sure the table
   is not empty, or it is testing nothing.
 
-`NX_OVERFLOW` — the four-entry table full — now maps to `ENOBUFS` rather than
+`NX_OVERFLOW`, the four-entry table full, now maps to `ENOBUFS` rather than
 falling through to `EINVAL`, because with the table compiled in that outcome is
 reachable by a user rather than only by a bug.
 
@@ -9167,8 +9154,8 @@ The experiment is built so that the answer cannot come from anywhere else:
 
 | | |
 |---|---|
-| destination | `192.168.77.5` — on none of the guest's subnets |
-| next hop | `10.0.2.99` — on the guest's subnet, so NetX Duo will accept it, and answered by nothing, because SLIRP is `10.0.2.2` and `10.0.2.3` |
+| destination | `192.168.77.5`, on none of the guest's subnets |
+| next hop | `10.0.2.99`, on the guest's subnet, so NetX Duo will accept it, and answered by nothing, because SLIRP is `10.0.2.2` and `10.0.2.3` |
 
 *With* the route, `_nx_ip_route_find()` matches, the next hop becomes
 `10.0.2.99`, and the stack has to resolve an address it has never seen.
@@ -9191,8 +9178,8 @@ routing table was consulted.
 ```
 
 **And the negative control ran by accident, which is the best kind.** An earlier
-pass of this test had a wrong constant in the probe — `0x0A020263` is 10.2.2.99,
-not 10.0.2.99 — so every `ROUTE_ADD` was refused, correctly, for a next hop on
+pass of this test had a wrong constant in the probe, `0x0A020263` is 10.2.2.99,
+not 10.0.2.99, so every `ROUTE_ADD` was refused, correctly, for a next hop on
 no local subnet. That run shows exactly what the paragraph above predicts for a
 stack with no route: no ARP for anything, and **one packet for 192.168.77.5 out
 through the default gateway**. The two runs differ in one 32-bit constant and
@@ -9206,8 +9193,8 @@ sensitive to.
 ### 28.2 Window scaling: measured, and left off
 
 `NX_ENABLE_TCP_WINDOW_SCALING` exists in the vendored tree, §16.7 recorded its
-absence as a documented limitation — "a hard 64 KB ceiling, and it is bilateral,
-so it also caps the peer" — and §24.6 named it as one of the two things bounding
+absence as a documented limitation, "a hard 64 KB ceiling, and it is bilateral,
+so it also caps the peer", and §24.6 named it as one of the two things bounding
 where the pool-derived window can go. It is a one-line change. **It is still off,
 and this is the measurement that says why.**
 
@@ -9224,7 +9211,7 @@ each workload run twice (once captured, once not) as always.
 \* Arm A's uncaptured wire pass is quoted from arm B's re-run: arm A's own
 uncaptured pass hit a host peer that had expired while the run queued for the
 emulator lock, and 115 KB/s from a connection that had to be re-established is
-not a measurement. The captured passes — the ones the traces come from — were
+not a measurement. The captured passes, the ones the traces come from, were
 taken cleanly in both arms and are **identical to the millisecond**, 2963 ms
 each.
 
@@ -9258,7 +9245,7 @@ Two things to read off that. First, **the option costs nothing**: NetX Duo
 builds a fixed eight-byte option area, and the window scale replaces the
 `nop,nop,nop,eol` padding that is otherwise there, so the SYN is 24 bytes in
 both A and B and no other segment carries options at all. Second, **arm B's
-scale factor is 0** — and that is not a property of this workload.
+scale factor is 0**, and that is not a property of this workload.
 
 #### Why the scale is *structurally* always zero here
 
@@ -9266,7 +9253,7 @@ NetX Duo picks the smallest shift that brings the receive window under 65536
 (`nx_tcp_packet_send_syn.c:292`). §24.3's `ami_bsd_tcp_window()` draws every
 window from one eighth of the packet pool, and the pool is bounded by
 `AMI_POOL_MAX_PACKETS` (256), so the **largest window any socket can ever be
-offered is 256/8 × 1568 = 50,176 bytes** — and that is with the 32768 ceiling
+offered is 256/8 × 1568 = 50,176 bytes**, and that is with the 32768 ceiling
 removed entirely. 50,176 < 65,536, so the shift is zero on every socket this
 stack can create.
 
@@ -9275,8 +9262,8 @@ two sockets advertise 25,088 and 16,725, which are 50,176/2 and 50,176/3, and
 the wire's single socket advertises 32,768, which is the ceiling clamping
 50,176/1.
 
-The other half of §16.7's argument — that not offering the option also stops the
-*peer* scaling — is true and does not help either. The peer's scale governs
+The other half of §16.7's argument, that not offering the option also stops the
+*peer* scaling, is true and does not help either. The peer's scale governs
 **our send window**, and §16.5 measured the peer holding at most 2,880 bytes
 outstanding against the window it is already offered. There is nothing there for
 a larger send window to collect.
@@ -9302,7 +9289,7 @@ end to end.
 A 5.5× regression, reproduced across two passes (15,856 / 15,767 ms, then
 16,228 / 16,085 ms), with real loss where the shipped configuration has none.
 There is no SACK in the vendored tree (§16.7), so a burst loss inside a larger
-window costs a full go-back-N — §24.6 said that was why the ceiling is the
+window costs a full go-back-N, §24.6 said that was why the ceiling is the
 largest window that has been *measured*, and this is the measurement that would
 have been taken if anyone had tried.
 
@@ -9322,15 +9309,15 @@ would change it: SACK, or a pool budget that can offer one socket more than
 ### 28.3 DNS caching: six lookups, two queries
 
 `addons/dns` has had a cache all along. `nxd_dns.h` ships the define commented
-out, nothing here uncommented it, and so **every lookup went to the wire** —
+out, nothing here uncommented it, and so **every lookup went to the wire**,
 including the second lookup of a name resolved a moment earlier, which is what a
 shell session, an FTP transfer and a redirect-following `fetch` all do.
 
 Two changes, and both are needed: `NX_DNS_CACHE_ENABLE` in `nx_user.h` compiles
 the code in, and a call to `nx_dns_cache_initialize()` from
 `src/netstack/netstack_dns.c` gives it a buffer. Without the second the feature
-is present and inert — `nx_dns_create()` leaves `nx_dns_cache` NULL and every
-path checks for it — which is the same shape of trap as
+is present and inert, `nx_dns_create()` leaves `nx_dns_cache` NULL and every
+path checks for it, which is the same shape of trap as
 `NX_IP_ROUTING_TABLE_SIZE` above.
 
 **Sizing, and how the number was chosen.** The cache is one buffer with resource
@@ -9347,8 +9334,8 @@ is not forward lookups at all but the reverse ones `ShowNetStatus NAMES` and
 (32). Fifty covers both at once.
 
 Being wrong is cheap in one direction only, which is why the number leans small:
-too small costs a DNS query — exactly the behaviour being replaced, since NetX
-Duo evicts the least recently used record rather than failing — while too large
+too small costs a DNS query, exactly the behaviour being replaced, since NetX
+Duo evicts the least recently used record rather than failing, while too large
 costs resident memory on a 4 MB machine forever. For scale, 2048 bytes is 0.05%
 of the floor target's RAM and a fifth of the **9,792-byte packet pool the DNS
 client already carries inside the same `NX_DNS`** (10,112 bytes) for its own
@@ -9356,13 +9343,13 @@ queries. The buffer is inline in `AmiNetStack` rather than separately allocated:
 same lifetime, and an allocation that can fail would need a "no cache" path for
 no benefit.
 
-Forward (A, AAAA) and reverse (PTR) lookups share it — everything funnels
+Forward (A, AAAA) and reverse (PTR) lookups share it, everything funnels
 through `_nx_dns_host_resource_data_by_name_get()` and
 `_nx_dns_host_by_address_get_internal()`, and both consult the cache before
 binding a socket. TTLs are the server's own, aged from `tx_time_get()` against
 `NX_IP_PERIODIC_RATE`. `DEVS:Internet/hosts` still wins over all of it, because
 `netstack_resolve()` consults the file first and never reaches NetX Duo for a
-name that is in it — so a hosts entry cannot be shadowed by a cached answer.
+name that is in it, so a hosts entry cannot be shadowed by a cached answer.
 
 #### On the wire
 
@@ -9370,7 +9357,7 @@ name that is in it — so a hosts entry cannot be shadowed by a cached answer.
 from six separate invocations of `host`. Six processes, one `NX_DNS`, because
 `AddNetInterface`'s deliberately-leaked library reference keeps the stack up
 between commands. Two names rather than one so that the count is the assertion
-by itself — a stack that never queried and one that queried every time both
+by itself, a stack that never queried and one that queried every time both
 fail, and no separately built control arm is needed to tell them apart.
 
 ```
@@ -9394,7 +9381,7 @@ wire if it cannot.
 ### 28.4 Initial sequence numbers: NetX Duo does randomise, and the bias is worth nine bits
 
 The starting claim was that `nx_tcp_socket_connect.c` contains no randomisation.
-It does — in `nxd_tcp_client_socket_connect.c:411` and
+It does, in `nxd_tcp_client_socket_connect.c:411` and
 `nx_tcp_server_socket_accept.c:106`, both of which read:
 
 ```c
@@ -9407,15 +9394,15 @@ else
     socket -> nx_tcp_socket_tx_sequence += 0x10000 + (ULONG)NX_RAND();
 ```
 
-`NX_RAND()` is `ami_random_rand()` on this port — a SHA-256 hash DRBG over an
-entropy pool (`src/common/ami_random.c`, and `nx_port.h` says why) — so the
+`NX_RAND()` is `ami_random_rand()` on this port, a SHA-256 hash DRBG over an
+entropy pool (`src/common/ami_random.c`, and `nx_port.h` says why), so the
 generator is not the problem.
 
 **A first reading of this file missed the second line and concluded the ISN had
 16 bits of entropy and always ended in four zero nibbles. That was wrong, and
 the trace said so before anything was written**: the ISNs in the captures had
 non-zero low halves. Recording it because the failure mode is the one this
-document keeps finding — a confident claim about code from a grep rather than a
+document keeps finding, a confident claim about code from a grep rather than a
 read, when an instrument that could settle it was already running.
 
 **What is actually wrong is `|`.** It is a bitwise OR of two independent draws,
@@ -9428,7 +9415,7 @@ and `rand()` returns `0..0x7FFFFFFF`, so:
 | 31 | first draw's bit 15 alone (the second draw's bit 31 is always 0) | 1/2 |
 
 Fifteen of thirty-two bits are three-quarters ones. That is **29.2 bits of
-Shannon entropy**, and — the number that matters for guessing — a **min-entropy
+Shannon entropy**, and, the number that matters for guessing, a **min-entropy
 of 23.2 bits**: the single likeliest ISN comes up **438 times** more often than
 it would under a uniform distribution, and an attacker who tries the dense
 upper-half values first faces 2^23 rather than 2^32.
@@ -9458,12 +9445,12 @@ back to 1 because it is the value that means "not seeded" to the code above.
 `M + F(local addr, local port, remote addr, remote port, secret)`; the
 four-tuple hash exists so that a new connection on a *recently used* four-tuple
 gets an ISN above the old one, which is what makes TIME-WAIT recycling safe.
-What ships here is a purely random ISN — RFC 793 / RFC 1948 against prediction,
+What ships here is a purely random ISN, RFC 793 / RFC 1948 against prediction,
 and silent about recycling, which the 2 MSL timer already answers. 6528 proper
 is not reachable from this seam in any case: NetX Duo picks `tx_sequence` inside
 `connect()`, and at socket-create time there is no peer to hash. Doing it
-properly would mean patching the vendored connect path, and prediction — which
-is the attack — is fixed without that.
+properly would mean patching the vendored connect path, and prediction, which
+is the attack, is fixed without that.
 
 ### 28.5 Regression cover
 
@@ -9476,7 +9463,7 @@ Everything §24.9 measured, re-measured on the shipping configuration.
 | `tests/clients` | 94 checks, 0 failures | **94 checks, 0 failures** |
 | `tests/curl` groups A–F | 147 passed, 2 failed, 149 cases | **147 passed, 2 failed, 149 cases** |
 | `tests/curl` concurrency sweep | 9 passed, 0 failed | **9 passed, 0 failed**, `AvailMem` delta +0 |
-| `tests/tools/run-livetools.sh` | — | every functional check passes; see below |
+| `tests/tools/run-livetools.sh` |, | every functional check passes; see below |
 | `tools/ci.sh` | all green | **all green** on macOS (host, four cross configs, conformance build) |
 
 The two curl failures are the two §14 already names and neither is ours:
@@ -9487,7 +9474,7 @@ The two curl failures are the two §14 already names and neither is ours:
 stack and is worth recording so the next person does not chase it.** Its first
 assertion counts `netstack: starting ThreadX` in the serial log to tell a reboot
 from a hang (§25), and FS-UAE writes **nothing at all** to the serial port on
-this machine — `build/serial-*.log` is zero bytes for every run in this section,
+this machine, `build/serial-*.log` is zero bytes for every run in this section,
 including runs that demonstrably worked. Every functional assertion in that
 script passes. `tests/tools/run-routes.sh` counts the first command's banner in
 the transcript instead, which works here because `ToolsSmoke` reopens
@@ -9497,7 +9484,7 @@ the transcript instead, which works here because `ToolsSmoke` reopens
 ### 28.6 What is still not there
 
 * **SACK.** Not implemented in the vendored tree at all, and it is now the thing
-  standing between §24's pool-derived window and anything larger — arm C above
+  standing between §24's pool-derived window and anything larger, arm C above
   is what a bigger window costs without it.
 * **RFC 6528 proper**, for the TIME-WAIT recycling property rather than for
   prediction. It needs the four-tuple, which does not exist where the ISN is
@@ -9531,7 +9518,7 @@ and `HOSTNAME` may not be one.** The hosts-file fallback in particular finds ful
 qualified names, because that is what a hosts file conventionally holds. Handing
 `amigatest.home.lan` to `nx_mdns_create()` would claim `amigatest.home.lan.local`, which
 nothing will ever ask for. `ami_ns_mdns_label()` takes everything up to the first dot and
-changes nothing else — in particular it does **not** lowercase, because mDNS comparison is
+changes nothing else, in particular it does **not** lowercase, because mDNS comparison is
 case-insensitive (RFC 6762 §16) and a log that disagreed with the configuration file would
 be worse than a mixed-case label.
 
@@ -9540,19 +9527,19 @@ AmiNetXDuo ships `fetch`, `ftp`, `telnet`, `tftp`, `nc`, `sntp` and `whois`, and
 of them is a *client*. There is no FTP server and no telnet server on this machine, so a
 `_ftp._tcp` or `_telnet._tcp` record would advertise something that is not there, and a
 browser that believed it would hang on a connection nothing will accept. `src/tools/tftp.c`
-already settles the general question for this tree — *"a mode that is announced and not
-honoured is worse than one that is absent"* — and the same applies to a service record.
+already settles the general question for this tree, *"a mode that is announced and not
+honoured is worse than one that is absent"*, and the same applies to a service record.
 `nx_mdns_service_add()` is one call, and `netstack_mdns.c` says where it goes on the day a
 server exists. (§30.7 is about that day.)
 
 **Name collisions: the module renames, we report.** RFC 6762 §9 says probe three times and
-pick another name on a conflict, and the vendored module does exactly that —
+pick another name on a conflict, and the vendored module does exactly that,
 `NX_MDNS_CONFLICT_COUNT` is set to 4 here rather than the default 8, because past
 `amiga (4)` the answer is to set `HOSTNAME`, not to keep counting.
 
 **One wart, recorded rather than patched.** The vendored renamer appends the *RFC 6763
 service-instance* suffix: `amiga` becomes `amiga (2)`. For a service instance that is
-correct and is what Bonjour shows in a browser. For a **host** name it is not — RFC 6762
+correct and is what Bonjour shows in a browser. For a **host** name it is not, RFC 6762
 §9's own example is `PrinterOne-2.local.`, and a host label containing a space and
 parentheses is one nobody will successfully type at a shell. `_nx_mdns_conflict_process()`
 is `static` in `nxd_mdns.c`, so neither a symbol override nor `-Wl,--wrap` can reach it
@@ -9573,13 +9560,13 @@ random, and the check would reject exactly the case §27 exists to serve.
 ### 30.2 `.local` is resolved in the resolver, not in a new command
 
 The obvious shape for "let a user see it work" is a new command. It would have been the
-wrong one. Every name any AmigaOS program looks up arrives at `netstack_resolve()` —
-`gethostbyname()` and `getaddrinfo()` in `src/bsdsocket/` both route through it — so a
+wrong one. Every name any AmigaOS program looks up arrives at `netstack_resolve()`,
+`gethostbyname()` and `getaddrinfo()` in `src/bsdsocket/` both route through it, so a
 seven-line branch there gives `.local` to the whole command set at once, and to somebody
 else's program written for Roadshow. No command was modified.
 
 The branch is **exclusive**, and RFC 6762 §6.7 is explicit about why: a name ending in
-`.local` goes to 224.0.0.251 and never to a unicast server. It is not a matter of taste —
+`.local` goes to 224.0.0.251 and never to a unicast server. It is not a matter of taste,
 a great many home routers answer any name at all with their own NXDOMAIN-substitute page,
 and a few forward `.local` upstream where somebody else's server answers. So no mDNS answer
 means the name does not exist, which is the truth, and asking the unicast servers
@@ -9597,7 +9584,7 @@ instruction from the machine's owner and outranks anything the network claims.
         |= NX_CHANGE_USHORT_ENDIAN(tc_bit);
 ```
 
-Every little-endian port defines that macro as `a = ((a >> 8) | (a << 8))` — an assignment
+Every little-endian port defines that macro as `a = ((a >> 8) | (a << 8))`, an assignment
 *expression*, legal in statement position and in the middle of a larger one. Every
 big-endian port defines it as nothing at all, which is legal only in the first. So the line
 expands to `x |= ;` and the file will not compile. It is the **only** expression use in the
@@ -9606,7 +9593,7 @@ far as this project can tell, nobody has ever built the mDNS add-on on a big-end
 machine.
 
 Fixed in `port/netxduo-amiga/inc/nx_port.h` rather than in `third_party/`, and it is a
-correction rather than a workaround — `(a)` is the exact big-endian analogue of what the
+correction rather than a workaround, `(a)` is the exact big-endian analogue of what the
 little-endian definition evaluates to:
 
 ```c
@@ -9620,7 +9607,7 @@ exempts from `-Wall` anyway.
 ### 30.4 One lookup, not two: `ipv6_address` is a second serial query
 
 `nx_mdns_host_address_get()` takes an `ipv4_address` and an `ipv6_address`, and a non-NULL
-second pointer means "also ask for AAAA" — **serially**, with its own full timeout after
+second pointer means "also ask for AAAA", **serially**, with its own full timeout after
 the A query's. The first version of `netstack_mdns.c` passed a buffer it then ignored. On
 the wire that doubled the traffic of every successful lookup, and `host nosuchbox.local
 TIMEOUT 5` spent fifteen seconds failing rather than five. `NX_NULL` there is the whole fix
@@ -9655,8 +9642,8 @@ resolver and does not break it.
 packet** (`_nx_mdns_query_check()` scans the local cache before the peer one), which is
 what makes this half testable inside an emulator whose network is a NAT.
 
-And what actually left the machine, from the emulated A2065's own frame log — below every
-line of our code (§16.3) — read with `tcpdump`:
+And what actually left the machine, from the emulated A2065's own frame log, below every
+line of our code (§16.3), read with `tcpdump`:
 
 ```
   00:80:10:32:33:34 > 01:00:5e:00:00:fb, IPv4, length 106:
@@ -9670,8 +9657,8 @@ line of our code (§16.3) — read with `tcpdump`:
           (Cache flush) A 10.0.2.15, (Cache flush) NSEC (90)
 ```
 
-Three probes — an ANY question with the proposed record in the authority section, RFC 6762
-§8.1 — then the announcements, unsolicited responses with the cache-flush bit set, §10.2.
+Three probes, an ANY question with the proposed record in the authority section, RFC 6762
+§8.1, then the announcements, unsolicited responses with the cache-flush bit set, §10.2.
 `tcpdump` decodes them as mDNS without being told to. Wireshark opens the same file.
 
 #### FS-UAE's SLIRP **does** relay outbound multicast, and that was not expected
@@ -9693,7 +9680,7 @@ see it come back. What it recorded:
 ```
 
 `192.168.1.193` is the *host's* address. The guest's mDNS crossed SLIRP, was NAT'd, and
-arrived on a real home network — where `192.168.1.191`, a Windows machine that had never
+arrived on a real home network, where `192.168.1.191`, a Windows machine that had never
 heard of any of this, queried for `amigatest.local` in response to hearing it announced.
 
 **Outbound works, with the source port rewritten.** The guest sends from
@@ -9704,7 +9691,7 @@ port, as a NAT does for any UDP flow.
 
 This took a second run to establish and the first answer was wrong. `mdnswatch.py` was made
 to answer `mdnspeer.local` by **both** multicast **and** unicast straight back to
-`192.168.1.193:58517` — the latter being what RFC 6762 §6.7 requires of any responder facing
+`192.168.1.193:58517`, the latter being what RFC 6762 §6.7 requires of any responder facing
 a query whose source port is not 5353, which every query crossing this NAT looks like. The
 guest did not resolve the name. The obvious reading is "the NAT has no return path".
 
@@ -9729,7 +9716,7 @@ receiving interface's subnet.
 ```
 
 The guest is `10.0.2.15/24`. **SLIRP passes the host's real LAN address through unchanged**
-as the source — `192.168.1.193`, which is off-link by any reading — while rewriting only
+as the source, `192.168.1.193`, which is off-link by any reading, while rewriting only
 the destination. So the packet genuinely arrives from off-link as far as the guest can
 tell, and §11 says drop it. That check is unconditional in the vendored source; it is not
 behind `NX_MDNS_ENABLE_ADDRESS_CHECK`, which guards something else.
@@ -9738,7 +9725,7 @@ So the precise statement is:
 
 * **The responder half is provable end to end under this emulator, and was proved.**
 * **The querier half against a real peer is not, and the obstruction is the emulator
-  forging an off-link source address** — not the NAT's return path, which works, and not
+  forging an off-link source address**, not the NAT's return path, which works, and not
   the stack, which is doing exactly what the RFC requires. On a bridged backend or on real
   hardware the peer is on link and the check passes.
 
@@ -9766,7 +9753,7 @@ Every one of these add-ons is created against an `NX_IP`:
 ```
 
 In a shipped tool `netstack_ip()` and `netstack_pool()` are the weak stubs in
-`src/tools/netstack_weak.c` and return NULL — check any tool's `link.txt`. And even given
+`src/tools/netstack_weak.c` and return NULL, check any tool's `link.txt`. And even given
 a valid pointer, `nx_tcp_socket_create()`, `nx_tcp_socket_receive()`,
 `nx_udp_socket_bind()` and `nx_tcp_client_socket_connect()` all suspend the calling thread
 through scheduler state belonging to a kernel that was never entered. That is precisely why
@@ -9775,7 +9762,7 @@ changes it.
 
 Two further facts settle it even if that wall were removed:
 
-* **The FTP and TFTP *servers* need FileX** — `nxd_ftp_server.h` and `nxd_tftp_server.h`
+* **The FTP and TFTP *servers* need FileX**, `nxd_ftp_server.h` and `nxd_tftp_server.h`
   both `#include "fx_api.h"`, and the sources carry 116 and 47 `fx_` references. This
   machine has AmigaDOS. Already recorded in §5.4 and in `src/tools/tftp.c`'s own header.
 * **A server is not a substitute for a client** in any case, and the client halves are
@@ -9790,7 +9777,7 @@ Two further facts settle it even if that wall were removed:
 And on maintenance, the direction is the opposite of the premise. Ours are AmigaDOS
 commands with `ReadArgs` templates and prose diagnostics, they run on Roadshow and AmiTCP
 as well as on this stack because they use nothing but the published socket vectors, and
-they are code we own. Theirs is vendored code consumed unmodified — the category this
+they are code we own. Theirs is vendored code consumed unmodified, the category this
 project has repeatedly had to work around with symbol overrides, `-Wl,--wrap` (§13.2) and,
 as §30.3 above shows, port-header corrections for defects nobody upstream has hit.
 
@@ -9803,13 +9790,13 @@ than a duplicate: everything this project ships is a client, and `listen()`/`acc
 exercised only by `nc -l` and active-mode FTP, guest-to-guest, because SLIRP forwards
 nothing inward (§10).
 
-**Can the vendored telnet server be used?** Not from a Shell command — same wall, it takes
+**Can the vendored telnet server be used?** Not from a Shell command, same wall, it takes
 an `NX_IP` and calls `tx_thread_create()`, `tx_timer_create()` and
 `tx_event_flags_create()`. But unlike the FTP and TFTP servers it needs **no FileX**, and
 unlike a command it *could* live inside `bsdsocket.library`, which is where the kernel
 actually runs. What it would give: a listener on port 23, up to `NX_TELNET_MAX_CLIENTS`
 (4) sessions, `WILL ECHO` / `DONT ECHO` / `WILL SGA` on connect, an activity timeout, and
-three callbacks — `new_connection`, `receive_data`, `connection_end`. What it would not
+three callbacks, `new_connection`, `receive_data`, `connection_end`. What it would not
 give is the entire hard part: it has no notion of authentication and no notion of a shell.
 
 **The hard part, and what it actually costs.** AmigaOS has no socket-as-file-handle, so a
@@ -9838,11 +9825,11 @@ published at LVOs -0x090, -0x096 and -0x09c. So a telnet server becomes
                                     SYS_Asynch, TRUE)
 ```
 
-and the cost is one handler process answering the nine packet types above — a few hundred
+and the cost is one handler process answering the nine packet types above, a few hundred
 lines, in `src/` and not in `third_party/`. `ACTION_WAIT_CHAR` is the one that matters for
 a Shell: it is what lets the console layer poll rather than block.
 
-The alternative — pumping bytes between the socket and a Shell's input and output handles —
+The alternative, pumping bytes between the socket and a Shell's input and output handles,
 is worse than it looks. It needs `PIPE:` (`L:Queue-Handler`, present on a normal 3.x
 install but not something to depend on), and it needs to wait simultaneously on a socket,
 which is `WaitSelect()`, and on a DOS `Read()`, which is not selectable. That is two
@@ -9854,13 +9841,13 @@ handler.
 the documented Roadshow surface this project is tracking.
 
 **And it generalises to Dropbear**, which is the stated next destination. An SSH server has
-the identical problem — attach a shell to a socket, on a system with no pty — with
+the identical problem, attach a shell to a socket, on a system with no pty, with
 authentication and crypto on top, and `src/crypto68k/` already accelerates the primitives it
 would want. The socket-to-filehandle bridge should be built **once**, as a handler, and used
 by both.
 
 **Security, stated rather than omitted.** A telnet server with no authentication is a
-remote shell for anyone on the LAN, in clear text, with no audit trail — and unlike a
+remote shell for anyone on the LAN, in clear text, with no audit trail, and unlike a
 client, it is reachable by people who did not choose to run it. The user's position is that
 this is an obsolete machine protecting nothing valuable, which is a fair assessment of the
 *data*; it is not an assessment of the machine as a foothold on the network it is plugged
@@ -9892,7 +9879,7 @@ Sun Jul 26 13:30:35 PDT 2026
 ```
 
 `curve25519-sha256`, host key `ssh-ed25519`, `chacha20-poly1305@openssh.com`
-both directions, public-key authentication with an ed25519 key — the modern
+both directions, public-key authentication with an ed25519 key, the modern
 default suite, negotiated with a **stock OpenSSH 10.2** that knows nothing about
 this client and was given no compatibility settings. The binary is 331,220 bytes
 (278 KB text), against curl's 899,048.
@@ -9909,8 +9896,8 @@ curl was easy for a reason that is easy to miss: **curl already knows this
 platform.** `lib/curl_setup.h` knows a socket is not a file descriptor here,
 that `close()` is `CloseSocket()`, that `fcntl()` must not touch a socket and
 that `select()` is `WaitSelect()`. §11.7 predicted wget would be harder because
-it knows none of that. Dropbear is in wget's position — `grep -ril amiga src/`
-finds nothing — and this is what that costs.
+it knows none of that. Dropbear is in wget's position, `grep -ril amiga src/`
+finds nothing, and this is what that costs.
 
 Everything **compiled**. The whole gap arrived as one link error list, 36
 symbols:
@@ -9925,7 +9912,7 @@ tcsetattr vfork
 
 `socket` and `connect` being in that list is the finding. The Roadshow NDK's
 `<proto/bsdsocket.h>` defines them as inline macros with the plain BSD names, so
-a client that includes it gets them free — and Dropbear includes
+a client that includes it gets them free, and Dropbear includes
 `<sys/socket.h>`, which **declares** them and links against nothing.
 
 ### 31.2 The one real problem: two descriptor spaces that both start at zero
@@ -9933,7 +9920,7 @@ a client that includes it gets them free — and Dropbear includes
 `bsdsocket.library` allocates socket descriptors from its own table starting at
 0 (`src/bsdsocket/socket.c`, `bsd_fd_alloc()`). newlib allocates file
 descriptors starting at 0 as well, and 0/1/2 are the Shell's standard streams.
-So `socket()` returns 0 while `stdin` is also 0 — and an SSH client is precisely
+So `socket()` returns 0 while `stdin` is also 0, and an SSH client is precisely
 a program that holds both at once and copies between them.
 
 `clients/dropbear/amiga_dropbear.c` merges the two spaces by **offset**:
@@ -9952,7 +9939,7 @@ decisions rather than details:
   live in ONE object in newlib's `libc.a` (`lib_a-open.o`), so referencing any
   of them drags in all four and none can be redefined. `--wrap` is also the only
   route that survives `atomicio(read, …)`, which passes `read` as a **function
-  pointer** — a macro would not have.
+  pointer**, a macro would not have.
 - **`FD_SETSIZE` is 256.** newlib's default is 64 and 192 has to fit.
   `dbutil.c`'s `dropbear_fd_set()` checks the bound itself, so an overflow is a
   legible error rather than a smashed stack.
@@ -9970,7 +9957,7 @@ Neither is a Dropbear bug, and neither would have been found by reading.
 
 **A requester nobody could click.** `dbrandom.c`'s `write_urandom()` feeds the
 pool back with `fopen(DROPBEAR_URANDOM_DEV, "w")` and calls the result
-opportunistic — *"don't worry about failure"*. On Unix it is. Our device is
+opportunistic, *"don't worry about failure"*. On Unix it is. Our device is
 named `RANDOM:`, which to dos.library is a **volume name**, and its answer to an
 unmounted volume is not an error code:
 
@@ -9979,7 +9966,7 @@ Please insert volume RANDOM: in any drive
 ```
 
 On a headless run there is nobody to press Cancel, so the process waits forever.
-The symptom was `dbclient -V` — *print the version and exit* — hanging until the
+The symptom was `dbclient -V`, *print the version and exit*, hanging until the
 run timed out, because `seedrandom()` happens before option parsing.
 `pr_WindowPtr = -1` is dos.library's documented "fail the call instead of
 asking"; it is set in a constructor so it is in place before `main()`, and it is
@@ -9998,7 +9985,7 @@ Sun Jul 26 13:25:07 PDT 2026
      <machine reboots; ClientRun restarts and the command list begins again>
 ```
 
-A complete, correct transcript, and then nothing — no return code, because the
+A complete, correct transcript, and then nothing, no return code, because the
 machine did not survive to write one.
 
 On Unix a process owns its descriptor table and `close(1)` at exit is free. On
@@ -10017,7 +10004,7 @@ several seconds after a run that looked successful.
 
 ### 31.4 The three questions that decided whether this was possible
 
-**1. `fork()` — the client needs none, and that is a property of the client
+**1. `fork()`, the client needs none, and that is a property of the client
 rather than a workaround.** Dropbear calls `fork()` in eight places. Six are
 server-only or `scp`. The two a client can reach are `-J proxycmd` / `-B netcat`
 (`spawn_command()`) and the `SSH_ASKPASS` helper, and all three are switched off
@@ -10025,13 +10012,13 @@ in `clients/dropbear/localoptions.h`. A linked `dbclient` contains the `ENOSYS`
 stubs and calls none of them. Nothing was worked around, and `getpass()` over
 `dos.library` is a better answer than the forked helper anyway.
 
-**2. The pty — sidestepped, and it is the exact boundary of what works.**
+**2. The pty, sidestepped, and it is the exact boundary of what works.**
 `tcgetattr()`/`tcsetattr()` fail with `ENOTTY`, deliberately: AmigaOS has no
 termios, a console is a DOS handle and raw mode is `SetMode()`. Dropbear calls
 them only on the pty path, so `dbclient -T user@host command` never does. The
 consequence is precise: **`dbclient host` without `-T` fails at Dropbear's own
 "Failed to set raw TTY mode"**, and an interactive session needs the same
-mechanism a telnet server needs — a DOS handler that makes a Shell look like a
+mechanism a telnet server needs, a DOS handler that makes a Shell look like a
 socket. Roadshow solves it with `tcp-handler`. That is being scoped separately
 and there should not be two.
 
@@ -10040,11 +10027,11 @@ notice an interactive `stdin` when `WaitSelect()` next returns, so a keystroke
 can wait as long as `select_timeout()`. Non-interactive input (a file, `NIL:`)
 is unaffected, which is why the supported shape is the one that works.
 
-**3. Entropy — survivable for a client, disqualifying for a server.**
+**3. Entropy, survivable for a client, disqualifying for a server.**
 `dbrandom.c`'s `seedrandom()` opens `DROPBEAR_URANDOM_DEV`, reads 32 bytes and
 `dropbear_exit()`s if it cannot. There is no build without one. So the device is
-renamed `RANDOM:` — shaped like an AmigaOS device, because nothing here should
-pretend to be Unix — and the shim answers `open()` for that one string from
+renamed `RANDOM:`, shaped like an AmigaOS device, because nothing here should
+pretend to be Unix, and the shim answers `open()` for that one string from
 **`src/common/ami_random.c`**, the same generator `bsdsocket.library` uses for
 TCP initial sequence numbers and `nx_secure` uses for TLS key agreement. One
 entropy story per machine, and one place to fix it.
@@ -10057,7 +10044,7 @@ sources were measured byte-identical across three cold boots and are credited
 nothing.
 
 For the client, what comes out of that pool is the ephemeral curve25519 private
-key and the session cookie — per-connection, forward-secret, never written down.
+key and the session cookie, per-connection, forward-secret, never written down.
 An attacker who can predict them reads *that* session.
 
 For a server it is disqualifying, and this is the finding to carry forward: a
@@ -10098,7 +10085,7 @@ makes the per-handshake number matter more here than it does for HTTPS.
 Dropbear sets `first_kex_follows` and sends a `KEXDH_INIT` for its own
 first-preference key exchange before it has seen the server's `KEXINIT`,
 betting the server prefers the same one. Against OpenSSH 10.2 that bet is not a
-gamble, it is a guaranteed loss — OpenSSH prefers an ML-KEM hybrid we do not
+gamble, it is a guaranteed loss, OpenSSH prefers an ML-KEM hybrid we do not
 offer:
 
 ```
@@ -10112,8 +10099,8 @@ same binary otherwise, same server:
 
 | | wall clock |
 |---|---|
-| `DROPBEAR_KEX_FIRST_FOLLOWS 1` (upstream default) | 96.06 95.88 96.06 95.92 s — mean **95.98** |
-| `DROPBEAR_KEX_FIRST_FOLLOWS 0` | 84.18 83.96 s — mean **84.07** |
+| `DROPBEAR_KEX_FIRST_FOLLOWS 1` (upstream default) | 96.06 95.88 96.06 95.92 s, mean **95.98** |
+| `DROPBEAR_KEX_FIRST_FOLLOWS 0` | 84.18 83.96 s, mean **84.07** |
 
 **About twelve seconds, which is one curve25519 scalar multiplication on this
 part.** What the guess buys in exchange is one round trip. It is off in
@@ -10123,7 +10110,7 @@ part.** What the guess buys in exchange is one round trip. It is off in
 
 **OpenSSH's default `LoginGraceTime` is 120 seconds** from TCP connect to
 completed authentication, and 96 seconds of arithmetic does not leave much of
-it — a slower machine, a deeper `-v`, or one retry and the server hangs up
+it, a slower machine, a deeper `-v`, or one retry and the server hangs up
 first. This is the wall §11.8 hit with Cloudflare, arriving from a different
 direction. `clients/dropbear/sshd-testserver.sh` sets `LoginGraceTime 600` so
 that a run measures the Amiga rather than the server's patience, and that
@@ -10139,7 +10126,7 @@ host-side log timestamp is not a measurement of the guest.
 
 ### 31.6 None of `src/crypto68k/` applies to this, and that is fixable
 
-`src/crypto68k/` accelerates RSA-2048, P-256, SHA-256 and AES-128-CBC — 1.25×
+`src/crypto68k/` accelerates RSA-2048, P-256, SHA-256 and AES-128-CBC, 1.25×
 AmiSSL on AES, 1.62× on HMAC-SHA256, 10.8× on a P-256 scalar multiply (§15,
 §18). The suite this handshake negotiated is **curve25519, ed25519 and
 chacha20-poly1305**, and `crypto68k` accelerates none of them. Wiring it in
@@ -10158,7 +10145,7 @@ mac     hmac-sha2-256
 The second column of each row is `crypto68k`'s territory. `ecdh-sha2-nistp256`
 is the P-256 scalar multiply that is 10.8× faster in our code than in AmiSSL's;
 `rsa-sha2-256` is RSA-2048; `aes128-ctr` + `hmac-sha2-256` is the record path
-§18 rewrote — and row 3 of the table above proves the client negotiates it on
+§18 rewrote, and row 3 of the table above proves the client negotiates it on
 request. So the question is not "does `crypto68k` apply to SSH" but **"is P-256
 with our assembly faster on this machine than curve25519 in portable C"**, and
 nobody has measured it. `-c` and `-m` select the cipher and MAC at runtime; the
@@ -10168,7 +10155,7 @@ key exchange list is compile-time, so the experiment is one more build with
 Two things bias the answer in opposite directions and neither is obvious. Our
 P-256 is hand-written 68020 assembly with a limb-domain Solinas reduction;
 Dropbear's curve25519 is portable C over 64-bit arithmetic, which on m68k means
-software 64-bit multiplies — that favours us. Against it, **chacha20 is
+software 64-bit multiplies, that favours us. Against it, **chacha20 is
 add-rotate-xor with nothing to look up**, and §18 established that this part has
 no data cache and charges 159.8 ns for a table read regardless of table size, so
 AES pays full memory latency on all sixteen lookups per round and chacha20 pays
@@ -10187,7 +10174,7 @@ record path with AES, and that the right answer is a mixture.
 | `clients/dropbear/run-fsuae.sh` | the run |
 | `clients/dropbear/sshd-testserver.sh` | a rootless OpenSSH on port 2222 for it to talk to |
 
-`clients/compat/` and `clients/amiga-client.sh` were reused **unchanged** — the
+`clients/compat/` and `clients/amiga-client.sh` were reused **unchanged**, the
 `stat`/`fstat`/`mkdir`/`unlink`/`isatty`/`gettimeofday` shims, the libgcc
 helpers, the `crt0.o` `argv` repair and the three NDK flags all carried over with
 no edit at all. `clients/curl/clientrun.c` was reused as the driver as well; it
@@ -10199,7 +10186,7 @@ tenant without being touched**, which is what §11.5 claimed it would do.
 hand-written route for wget because wget needs `./bootstrap` and therefore
 autoconf, automake, libtool, gettext and a gnulib checkout on the build host.
 Dropbear ships a **generated** `configure`, so a cross-configure is one command
-with no build-host autotools — and it is worth more than a hand-written header,
+with no build-host autotools, and it is worth more than a hand-written header,
 because it finds the gaps by **linking** rather than by somebody remembering to
 list them.
 
@@ -10214,7 +10201,7 @@ describes the toolchain honestly.
 compiles. All three "compile", and the third is fatal several tests later:
 `_FORTIFY_SOURCE` pulls in newlib's `<ssp/*.h>`, whose `__ssp_redirect0` macros
 do not expand under this GCC, so **every subsequent configure test fails for a
-reason unrelated to what it was testing** — which is how `netinet/in.h` and
+reason unrelated to what it was testing**, which is how `netinet/in.h` and
 `netdb.h` get reported missing when both are present. None of the three means
 anything on a machine with no MMU, no ASLR and no guard page. `build.sh` fails
 loudly if `HAVE_NETINET_IN_H` is not set, because that is the symptom rather
@@ -10225,15 +10212,15 @@ than the cause.
 One premise needs correcting first. **Dropbear's server does not have to fork
 per connection.** `INETD_MODE` is a supported build (`svr-main.c`,
 `main_inetd()`): it takes the connection on descriptor 0, runs one session and
-exits, and `NON_INETD_MODE` — the accept loop with the `fork()` at
-`svr-main.c:313` — can be compiled out entirely. On the *connection* axis
+exits, and `NON_INETD_MODE`, the accept loop with the `fork()` at
+`svr-main.c:313`, can be compiled out entirely. On the *connection* axis
 Dropbear and TinySSH are therefore the same shape: both need an external
 supervisor to accept and spawn.
 
 **The fork neither of them avoids is the other one.** Dropbear forks at
 `svr-chansession.c:835` to run the user's shell or command; TinySSH forks at
 `channel_fork.c:34` and `channel_forkpty.c` for the same reason. That is not a
-process-model quirk, it is what an SSH server *is* — and on AmigaOS it is the
+process-model quirk, it is what an SSH server *is*, and on AmigaOS it is the
 pty question in disguise, because the child has to be a Shell attached to
 something the parent can read and write. **Blocker 1 and blocker 2 are the same
 blocker**, and it is the one already being scoped for telnet.
@@ -10245,14 +10232,14 @@ With that established:
 | licence | MIT (+ PD libtom, + 2-clause BSD in `loginrec.c`/`sshpty.c`) | CC0-1.0 OR 0BSD OR MIT-0 OR MIT |
 | connection model | `-i` inetd mode, no fork | inetd only, no fork |
 | session model | `fork()` + pty | `fork()` + `forkpty()` |
-| auth | pubkey only here — password auth is `#error … requires crypt()` and this toolchain has none | pubkey only by design |
-| crypto | curve25519 / P-256 / RSA / ed25519 / AES-CTR / chacha20 — includes everything `crypto68k` accelerates | curve25519 / sntrup761 / ed25519 / chacha20-poly1305 — includes **none** of it |
-| entropy | `open()` on a device, `dropbear_exit()` on failure | `open("/dev/urandom")` in a **constructor**, inside `for(;;) { …; sleep(1); }` — a port that does not intercept it hangs forever with no message |
+| auth | pubkey only here, password auth is `#error … requires crypt()` and this toolchain has none | pubkey only by design |
+| crypto | curve25519 / P-256 / RSA / ed25519 / AES-CTR / chacha20, includes everything `crypto68k` accelerates | curve25519 / sntrup761 / ed25519 / chacha20-poly1305, includes **none** of it |
+| entropy | `open()` on a device, `dropbear_exit()` on failure | `open("/dev/urandom")` in a **constructor**, inside `for(;;) { …; sleep(1); }`, a port that does not intercept it hangs forever with no message |
 | the AmigaOS port | **already written**, and shared with `dbclient` | a second port of the same shape: descriptor map, `poll()` rather than `select()`, entropy, `openpty` |
 
 **Recommendation: Dropbear's server, and the deciding argument is reuse rather
 than merit.** `dropbear -i` is `clients/dropbear/build.sh -P dropbear` against
-the shim that already exists — the same descriptor map, the same `select()`, the
+the shim that already exists, the same descriptor map, the same `select()`, the
 same entropy device, the same requester fix, the same `close(1)` fix. TinySSH is
 a second port of every one of those, and its `randombytes()` constructor fails
 by *hanging* rather than by exiting, which is the failure mode that costs the
@@ -10261,7 +10248,7 @@ most to diagnose; §31.3 has a worked example of exactly that costing a run.
 TinySSH's genuine advantages are real and should be recorded rather than
 dismissed. The licence is cleaner, the code is far smaller, there is no password
 path to disable, and its algorithm set is precisely the one that needs no tables
-on a machine with no data cache — if the chacha20-versus-AES question in §31.6
+on a machine with no data cache, if the chacha20-versus-AES question in §31.6
 resolves the way §18's instruction timings hint, its crypto choice is the right
 one for this hardware. What it does **not** do is avoid the blocker it was
 proposed for, and it would cost a second port to establish that.
@@ -10269,16 +10256,16 @@ proposed for, and it would cost a second port to establish that.
 Against either candidate the same three things bind:
 
 1. **A supervisor.** A small AmigaOS program: `socket`, `bind`, `listen`,
-   `accept`, then `CreateNewProc()` with the accepted socket handed across —
+   `accept`, then `CreateNewProc()` with the accepted socket handed across,
    `ObtainSocket()`/`ReleaseSocket()` are published vectors and exist for
    precisely this. Shared between the two candidates, and reusable for telnet.
 2. **A Shell on a socket.** The same DOS handler telnet needs. Not to be built
    twice.
 3. **A host key.** Blocking, and not an engineering problem anywhere else in the
    stack can solve. Twenty-one bits of credited entropy is not a host key. The
-   options are to generate it off-machine and install it — which is what
+   options are to generate it off-machine and install it, which is what
    `sshd-testserver.sh` does for the client key today, and what a shipping
-   server could reasonably require — or to feed `ami_random_add_entropy()` a
+   server could reasonably require, or to feed `ami_random_add_entropy()` a
    real seed, for which operator keystroke timing at first boot is the classic
    answer and this machine does have a keyboard. Either is fine. Neither is not.
 
@@ -10286,8 +10273,8 @@ Against either candidate the same three things bind:
 
 Everything above compares this stack against itself. This section compares it
 against the two other SANA-II stacks that can be dropped into the same FS-UAE
-profile: **Roadshow 1.15** — the commercial stack whose ABI this project
-implements — and **AmiTCP_NG 4.1.1**, a GPL fork of AmiTCP 3.0b2 with a
+profile: **Roadshow 1.15**, the commercial stack whose ABI this project
+implements, and **AmiTCP_NG 4.1.1**, a GPL fork of AmiTCP 3.0b2 with a
 clean-room Roadshow ABI.
 
 **Nothing of either was copied into this tree.** `tests/compare/run-compare.sh`
@@ -10306,18 +10293,18 @@ the most useful result in the section and it is stated first for that reason.
 | ROM | Kickstart 3.1 40.68 (A1200) |
 | NIC | one `a2065.device` on SLIRP, 10.0.2.0/24 |
 | host | macOS 26.5, Apple M3; `build/.fsuae.lock` held for every run, so no two emulators ran together |
-| UAE's own emulation | `bsdsocket_library = 0` — otherwise there is a fourth stack in the room |
+| UAE's own emulation | `bsdsocket_library = 0`, otherwise there is a fourth stack in the room |
 
 Four things are the **same binary in every column**:
 
-* **the driver** — `tests/curl/curlcheck.c`, which runs each command with a
+* **the driver**, `tests/curl/curlcheck.c`, which runs each command with a
   512 KB stack and records its exit code, elapsed ticks and `AvailMem`;
 * **`NetTrace`**, built once from this tree and staged unchanged against all
   three. It links nothing of `src/`: every call into the library is a published
   LVO through `toolsock.c`'s inline `jsr a6@(-n:W)`, so it is exactly as foreign
   to Roadshow as to us;
 * **`bsdsocktest`**, the upstream suite, which knows about none of the three;
-* **the third-party `curl.020` 8.22.0-DEV** of §14.7 — clib2, AmiSSL, built by
+* **the third-party `curl.020` 8.22.0-DEV** of §14.7, clib2, AmiSSL, built by
   somebody with no stake in the result.
 
 Each stack supplies only its **own** `bsdsocket.library`, `AddNetInterface` and
@@ -10341,7 +10328,7 @@ to exactly that. **`b3b4b49` contains §24's pool-derived receive window**, so
 these are post-window figures, not stale ones. Neither foreign stack was tuned;
 both ran as shipped.
 
-### 29.2 Conformance — we are four ahead of Roadshow on both tiers
+### 29.2 Conformance, we are four ahead of Roadshow on both tiers
 
 The suite identifies the library it ran against in its own TAP output, so there
 is no question which one answered: `# bsdsocket.library: AmiNetXDuo` and
@@ -10351,8 +10338,8 @@ is no question which one answered: `# bsdsocket.library: AmiNetXDuo` and
 |---|---|---|---|
 | **network tier** (`HOST 10.0.2.2`) | **141 passed, 1 failed, 0 skipped** | **137 passed, 5 failed, 0 skipped** | could not run |
 | **loopback tier** (`LOOPBACK`) | **130 passed, 0 failed, 12 skipped** | **126 passed, 4 failed, 12 skipped** | could not run |
-| suite wall time, network tier | 35.6 s | 49.6 s | — |
-| suite wall time, loopback tier | 15.0 s | 28.9 s | — |
+| suite wall time, network tier | 35.6 s | 49.6 s |, |
+| suite wall time, loopback tier | 15.0 s | 28.9 s |, |
 
 Roadshow's five network-tier failures:
 
@@ -10368,7 +10355,7 @@ Roadshow's five network-tier failures:
 3.2.35's SLIRP opens no inbound TCP socket, so the helper cannot connect back
 to the guest. It fails on both stacks for the same environmental reason. The
 honest scoreline is **141–137 with one shared environmental loss**, and the four
-we win are exactly the four the suite itself documents as Roadshow deviations —
+we win are exactly the four the suite itself documents as Roadshow deviations,
 i.e. we are ahead precisely where §17 predicted and nowhere else.
 
 **A correction to §17.4, which quoted Roadshow at 138 passed, 4 known,
@@ -10391,7 +10378,7 @@ which is what makes the Roadshow column trustworthy.
 
 **Loopback is the solid one.** Six of our samples span 2 KB/s; four Roadshow
 samples span 31. The *first* wire fetch after bring-up is noisy on both stacks
-and both directions — ours has been as low as 115 and Roadshow as high as 190 —
+and both directions, ours has been as low as 115 and Roadshow as high as 190,
 so only the second fetch of each boot is quoted, where ours is 176/177/179/186
 and Roadshow's is 115/117.
 
@@ -10410,7 +10397,7 @@ fetches each:
 **This is a loss and it is reported as one.** With a client that has no stake in
 either stack, Roadshow moves the same 1.2 MB about 1.3 seconds faster, every
 time, five times out of five, and the gap scales with the body rather than
-sitting in setup — 123 against 141 kB/s at 1.2 MB and 126 against 138 at 300 KB.
+sitting in setup, 123 against 141 kB/s at 1.2 MB and 126 against 138 at 300 KB.
 
 Three things are worth reading off it:
 
@@ -10420,8 +10407,8 @@ Three things are worth reading off it:
 * **The disagreement between the two instruments is the finding, not a
   contradiction.** Same wire, same peer, same payload size, same boot order:
   `NetTrace` says we are 55% faster and curl says we are 12% slower. What
-  differs is the *receive call pattern* — read size, and how many `WaitSelect()`
-  round trips a megabyte costs — so the gap lives in our recv/select path and
+  differs is the *receive call pattern*, read size, and how many `WaitSelect()`
+  round trips a megabyte costs, so the gap lives in our recv/select path and
   not on the wire. `NetTrace` reads 4,096 bytes at a time through its own
   single-`WaitSelect()` loop, and curl does not.
 * **It is not a regression against §24.** §24's 182 KB/s for `a04_get_1m2` is
@@ -10435,7 +10422,7 @@ fetch of the same size, with the bpf capture of §16 running on both, and compar
 segment counts and inter-segment gaps. If curl is making several times as many
 short reads, the cost is per-call and measurable directly.
 
-### 29.4 Time to a DHCP lease — ours, by a factor of about three
+### 29.4 Time to a DHCP lease, ours, by a factor of about three
 
 Each stack's own `AddNetInterface`, timed by the driver at 50 Hz. All three
 commands block until the interface has an address or the attempt has failed, so
@@ -10450,7 +10437,7 @@ the lease. **This is the figure most likely to be stale first**: the DHCP
 lifecycle is under active change in `src/netstack/` and the number above is
 `b3b4b49`'s.
 
-### 29.5 ICMP round trip — Roadshow, by about 2 ms
+### 29.5 ICMP round trip, Roadshow, by about 2 ms
 
 Each stack's own `ping`, five probes to 10.0.2.2, no loss on either.
 
@@ -10475,8 +10462,8 @@ eth0: AddInterface failed, errno 43
 # bsdsocket.library: not available                          (the suite's own line)
 ```
 
-`OpenLibrary("bsdsocket.library", 4)` **succeeds** — `NetTrace` gets past it and
-prints its banner — and then `socket(AF_INET, SOCK_STREAM, 0)` returns
+`OpenLibrary("bsdsocket.library", 4)` **succeeds**, `NetTrace` gets past it and
+prints its banner, and then `socket(AF_INET, SOCK_STREAM, 0)` returns
 `EPROTONOSUPPORT`, which is what BSD returns when the INET domain was never
 attached. The stack's self-start does not complete here. The suite runs to test
 49, fails 42 of the first 49, and the machine then stops responding; the run
@@ -10490,7 +10477,7 @@ Five things were eliminated rather than assumed:
 | the device named by full path, `DEVS:Networks/a2065.device`, as their own troubleshooting note recommends | identical |
 | their `db/` staged at `SYS:AmiTCP` **and** an `AmiTCP:` assign made before the first library call | identical |
 | an empty `AmiTCP:db/interfaces`, in case a missing file aborted init | identical |
-| a **different driver** — `ToolsSmoke` instead of `CurlCheck`, no `NP_WindowPtr`, no per-command redirection | identical, so the driver is not the variable |
+| a **different driver**, `ToolsSmoke` instead of `CurlCheck`, no `NP_WindowPtr`, no per-command redirection | identical, so the driver is not the variable |
 
 The same `a2065.device`, `DEVS:` tree and boot volume bring up the other two
 stacks in the same harness, so this is not a broken rig. **Their project
@@ -10508,14 +10495,14 @@ Their release ships no `usergroup.library`, which a clib2-built client opens
 before `main()`, so the curl workload would have needed one borrowed from
 elsewhere. That never became relevant.
 
-### 29.7 lwip-amiga cannot be compared — confirmed, and stopped there
+### 29.7 lwip-amiga cannot be compared, confirmed, and stopped there
 
 Its README settles it in its own words: it is **not a SANA-II stack**, it is
 built on a purpose-built `netdev` driver ABI, and the only driver that
 implements it is `genet.device` 4.x for the onboard Ethernet of a Raspberry Pi
 4/CM4 under PiStorm or Emu68. There is no SANA-II shim and the repository
 publishes no releases. FS-UAE's emulated A2065 cannot present a `netdev` device,
-so nothing in this section can be run against it — including the loopback tier,
+so nothing in this section can be run against it, including the loopback tier,
 which would still need an AmigaOS 3.2 machine and a build. Confirmed in a few
 minutes and not pursued further.
 
@@ -10540,7 +10527,7 @@ Two implementation notes worth keeping:
 `src/`'s and this section is those two.
 
 **The first is the most serious thing this project has found.** One 100-byte
-segment left unacknowledged produced **eleven seconds of total silence** — no
+segment left unacknowledged produced **eleven seconds of total silence**, no
 retransmission, and not even the reset that ten expired retries should produce.
 The failure is not in TCP and it is not in the timer: it is a lifecycle bug in
 the SANA-II transmit ring, and it means that until now this stack could not
@@ -10563,13 +10550,13 @@ while (packet_ptr && (packet_ptr -> nx_packet_queue_next == (NX_PACKET *)NX_DRIV
 and `NX_DRIVER_TX_DONE` is written by `_nx_packet_transmit_release()`. So **only
 a packet the driver has handed back can be retransmitted**, and that is the
 whole mechanism. Every NetX Duo reference driver hands it back inside
-`NX_LINK_PACKET_SEND`, because their sends are synchronous — `nx_ram_network_
+`NX_LINK_PACKET_SEND`, because their sends are synchronous, `nx_ram_network_
 driver.c` copies the frame and releases before it returns.
 
 Ours cannot. A SANA-II `CMD_WRITE` is an exec `IORequest` that completes long
 after `BeginIO()` returns, and the packet must stay intact until the device's
 `S2_CopyFromBuff` has read every byte of it. So `src/sana2/sana2_tx.c` releases
-in `ami_sana2_tx_reap()` instead — and reap had three callers, every one of them
+in `ami_sana2_tx_reap()` instead, and reap had three callers, every one of them
 reactive:
 
 | `sana2_tx.c` | the start of the **next** transmit, and the spin when the ring is full |
@@ -10583,7 +10570,7 @@ exactly: a *later* `send()` on the same socket released the stranded segment,
 which then went out 917 ms afterwards.
 
 The failure is precisely the shape of a request/response protocol whose single
-request segment is lost — an HTTP GET, a DNS query over TCP, a TLS ClientHello.
+request segment is lost, an HTTP GET, a DNS query over TCP, a TLS ClientHello.
 A bulk transfer self-heals, because the next segment reaps the previous one.
 
 **Nothing in this tree could have found it by accident.** SLIRP does not drop,
@@ -10606,7 +10593,7 @@ thread comes back into `ami_sana2_driver_entry()` with
 `NX_LINK_DEFERRED_PROCESSING`, and the reap happens there.
 
 The second hop is not ceremony. Releasing a packet mutates NetX Duo's transmit
-queue *and* the packet's own prepend pointer — `_nx_packet_transmit_release()`
+queue *and* the packet's own prepend pointer, `_nx_packet_transmit_release()`
 strips the IP header back off, which is what makes a retransmission's
 `_nx_ip_packet_send()` balance. Doing that from a reader thread would interleave
 it with whatever the IP thread was in the middle of. On the IP thread it runs
@@ -10616,7 +10603,7 @@ for.
 
 **The transmit path pays almost nothing, and that is by construction rather than
 by hope.** The reader asks for deferred processing only when the reply port is
-**not already empty** — one pointer compare — and during a bulk transfer the
+**not already empty**, one pointer compare, and during a bulk transfer the
 next `ami_sana2_tx_send()` has already drained it. So the IP thread is never
 disturbed while data is flowing, and the extra hop happens only when the link
 goes quiet, which is the case that was broken. The emptiness test cannot be
@@ -10652,7 +10639,7 @@ neither of them is `close()`:
 | `NX_NO_WAIT` | sends a RESET and returns |
 | any wait | sends a FIN and then **suspends the caller** until the peer answers or the wait expires, then tears the connection down anyway |
 
-A blocking `CloseSocket()` is not acceptable — the descriptor is gone the
+A blocking `CloseSocket()` is not acceptable, the descriptor is gone the
 instant the call is made, and a program that closes and exits must not be made
 to wait on a host that has gone away. The RESET was what was left.
 
@@ -10661,7 +10648,7 @@ same open-coded path `shutdown(SHUT_WR)` uses, `CloseSocket()` returns, and the
 `AmiSocket` is parked on a list until TCP has finished. NetX Duo's fast periodic
 does the rest by itself: FIN_WAIT_1 → FIN_WAIT_2 → TIMED_WAIT and LAST_ACK →
 CLOSED, retransmitting the FIN and giving up after `NX_TCP_MAXIMUM_RETRIES`. The
-state machine needs nothing from us except that the control block stay alive —
+state machine needs nothing from us except that the control block stay alive,
 `nx_tcp_socket_delete()` refuses anything that is not CLOSED, and deleting
 nothing is the `AmiSocket`-per-connection leak §12.5 predicted.
 
@@ -10670,7 +10657,7 @@ does after `close()` is very often exit; a per-base list would be freed with the
 base while NetX Duo still pointed into it. It is swept from `socket()`,
 `CloseSocket()` and `CloseLibrary()`, each inside a bracket the caller already
 holds, and it needs no lock of its own because that bracket is the ThreadX baton
-— one holder at a time across every base. A socket that has not finished after
+one holder at a time across every base. A socket that has not finished after
 60 s is reset and reclaimed.
 
 Two cases are still a RESET, and both are the rule rather than an escape hatch:
@@ -10689,7 +10676,7 @@ it now does what its name says.
 
 Making `close()` send a FIN broke `tests/clients`' *"send() to a closed peer
 eventually fails"* and the conformance suite's `send(): error after peer closes
-connection [BSD 4.4]` — sixteen sends in a row, all of them succeeding.
+connection [BSD 4.4]`, sixteen sends in a row, all of them succeeding.
 
 They were right and the change was incomplete. With a RESET, a peer's `close()`
 destroyed our socket and the next `send()` failed. With a FIN, the peer's socket
@@ -10710,7 +10697,7 @@ A parked socket now installs a receive-notify callback that does exactly that.
 inside `_nx_tcp_socket_state_data_check()`, which has more to do with both the
 socket and the packet after it returns, and tearing the control block down
 underneath it for a corner case is not a trade worth making. Sending the RST is
-safe — it only builds and transmits a packet — so the callback sends it and then
+safe, it only builds and transmits a packet, so the callback sends it and then
 gives the socket an expired timeout, and NetX Duo's own fast periodic reaches
 `_nx_tcp_socket_connection_reset()` on the next 20 ms tick, from the top of the
 IP thread with nothing in flight. The sweep collects the block after that.
@@ -10723,8 +10710,8 @@ that long: the sweep reclaims a socket as soon as it *reaches* TIMED_WAIT.
 
 That is a deliberate divergence and it is worth being plain about. Four minutes
 of an `AmiSocket` and an ephemeral port per closed connection is not affordable
-on the 4 MB floor. It is also what NetX Duo itself does — `nx_tcp_client_socket_
-unbind()` collapses TIMED_WAIT to CLOSED whenever an application unbinds — and
+on the 4 MB floor. It is also what NetX Duo itself does, `nx_tcp_client_socket_
+unbind()` collapses TIMED_WAIT to CLOSED whenever an application unbinds, and
 what this library has always done. What it costs is the protection TIME_WAIT
 exists for, an old duplicate landing on a reused four-tuple; what bounds that is
 NetX Duo allocating ephemeral ports in ascending order rather than reusing the
@@ -10761,7 +10748,7 @@ second one after `shutdown(SHUT_WR)`), `c09` (unread data is an abort), `c10`
 (`SO_LINGER {on,0}`), `c11`, `c12`.
 
 **Only the first retransmission interval is asserted, and loosely.** What the
-intervals are — flat, doubling, and how many before the socket gives up —
+intervals are, flat, doubling, and how many before the socket gives up,
 belongs to the timer and to `scripts/retransmit.drill`, so the rest of `x02` and
 `x04` is a frame count with a wide bound. Four seconds of a doubling interval is
 one retransmission and four seconds of a flat one is eight; both were measured,
@@ -10784,15 +10771,15 @@ the one that matters, because it means some of §27's numbers were luck.
    script.
 
 2. **The harness queued traffic that no case is about.** The stack under test is
-   a whole stack: anything in the tree that opens a UDP socket — mDNS, a DHCP
-   renewal — puts frames on this wire, and they were queued like everything
+   a whole stack: anything in the tree that opens a UDP socket, mDNS, a DHCP
+   renewal, puts frames on this wire, and they were queued like everything
    else. The next expectation then failed with `non-TCP frame ether=0x0800` and
    **every assertion after it was one frame out of step**. That is how `c04`,
    `c05` and `a01` failed against an unchanged stack in one run and passed in
    the next, and it is why `c07_passive_open` was failing at `bind()` in some
    runs and not others. `pump()` now drops IPv4 traffic that is not TCP to the
    peer, and counts it in the summary. A malformed segment, or one aimed at the
-   peer, still reaches the queue — those are results.
+   peer, still reaches the queue, those are results.
 
 3. **`non-TCP frame ether=0x0800` is not a diagnosis.** It cost an emulator boot
    to find out that the frame was mDNS. A rejected frame now reports its length,
@@ -10802,7 +10789,7 @@ Two directives were added for these cases. `txcount MIN MAX` discards what is
 queued and asserts how much of it there was, because a retransmission series is
 a count rather than a sequence and asserting ten `tx` lines would be asserting
 the interval as well. `close within=MS` bounds `CloseSocket()` itself, measured
-across the call rather than off the frame it produced — the one thing that must
+across the call rather than off the frame it produced, the one thing that must
 never wait for a peer.
 
 ### 32.8 What it cost, measured on both paths
@@ -10810,7 +10797,7 @@ never wait for a peer.
 §24's figures are the ones at risk, because the fix is on the transmit path.
 Clean `HEAD` against `HEAD` + these fixes, `tests/trace/run-trace.sh`, 1,048,576
 bytes, **two passes each, alternating, with `AMINETXDUO_PERF=1` so the emulator
-had the machine to itself** (the second lane commit 81b8f8d added — a throughput
+had the machine to itself** (the second lane commit 81b8f8d added, a throughput
 number taken while two other emulators run is fiction):
 
 | | `HEAD` p1 | fixes p1 | `HEAD` p2 | fixes p2 |
@@ -10827,7 +10814,7 @@ wire arm is -1.5% and also stable.
 
 **The non-capturing wire row is not a measurement and is printed to say so.**
 Two runs of the *same* library in the same configuration came out at 186 and
-120 KB/s — a 55% spread with nothing changed between them — so no reading of
+120 KB/s, a 55% spread with nothing changed between them, so no reading of
 that row distinguishes a 1% effect from a 30% one. It is SLIRP, and §24.4 saw
 the same instability from the other side. The capturing arm is the one to read,
 because it runs the same workload behind a bpf channel that paces it.
@@ -10836,7 +10823,7 @@ because it runs the same workload behind a bpf channel that paces it.
 unchanged.
 
 The concurrency sweep, `tests/curl/run-curlverify.sh -p`: 9 passed, 0 failed,
-`AvailMem` delta +0, `p04_parallel_40` green — which is the case §24.5 named as
+`AvailMem` delta +0, `p04_parallel_40` green, which is the case §24.5 named as
 the one this class of change is guarded against.
 
 ### 32.8.1 The wider cover, two arms, nothing moved
@@ -10849,7 +10836,7 @@ Clean `HEAD` and `HEAD` + these fixes, same harnesses, same machine:
 | conformance, `HOST 10.0.2.2` | 141 passed, 1 failed | **identical** |
 | `tests/clients` | 94 checks, 0 failures | **identical** |
 | `tests/curl` A–F | 147 passed, 2 failed | **identical** |
-| `tests/curl -p`, 8…48 | — | 9 passed, 0 failed |
+| `tests/curl -p`, 8…48 |, | 9 passed, 0 failed |
 | `tests/tools/run-livetools.sh` | 23 ok, harness `FAIL` | **identical** |
 
 The conformance host failure is `accept(): incoming connection from remote host`
@@ -10857,9 +10844,9 @@ and the two curl failures are `a44_cookies_send` (the one §14.7 settled against
 a third-party binary) and `f07_ftp_active`; all three are on both arms.
 
 `run-livetools.sh` deserves a sentence of its own, because it is a false red and
-somebody will hit it again. All 23 of its checks pass — the lease, the gateway,
+somebody will hit it again. All 23 of its checks pass, the lease, the gateway,
 the live counters, `ping`, `CheckNetConfig`, the three route commands and
-`NetShutdown` — and the run then fails on
+`NetShutdown`, and the run then fails on
 
     FAIL: no serial log at build/serial-livetools.log -- cannot tell a reboot from a hang
 
@@ -10867,7 +10854,7 @@ with the serial log present and **zero bytes long**. Other runs in the same
 sweep produced empty serial logs too (`serial-cfh3.log`) and others did not, so
 it is FS-UAE not flushing the debug port rather than a guest that rebooted; a
 clean-`HEAD` control run does exactly the same thing. The check is right to
-exist — §25 is a section about a command that rebooted the machine — but "the
+exist, §25 is a section about a command that rebooted the machine, but "the
 file is empty" and "the machine went away" are not the same event and the script
 treats them as one.
 
@@ -10876,7 +10863,7 @@ treats them as one.
 `ObtainSocket()` sets `as_Owner` to the base that took the socket, and
 `as_Owner` is what a NetX Duo receive or disconnect callback `Signal()`s.
 `bsd_socket_release()` decremented the reference count and **returned early when
-another reference was still held** — leaving `as_Owner` pointing at a base that
+another reference was still held**, leaving `as_Owner` pointing at a base that
 is about to be freed. The next callback then reads a `struct Task` out of freed
 memory and signals it, which on a machine with no memory protection is a write
 into whatever now occupies the address.
@@ -10888,7 +10875,7 @@ general fix is three lines in `bsd_socket_release()` and the local guard is now
 redundant rather than relied on.
 
 `NULL` is the right answer rather than "the other holder", because there is no
-way to know which holder that is — one NX socket has one owner and `handoff.c`
+way to know which holder that is, one NX socket has one owner and `handoff.c`
 says so. Events are still recorded in `as_Events`, so a poll sees them; only the
 asynchronous wakeup is lost, and it is lost to a base that no longer exists.
 
@@ -10917,8 +10904,8 @@ is no second check after taking it. So:
 2. the IP thread processes the client's final ACK, moves the socket to
    ESTABLISHED, looks for `nx_tcp_socket_connect_suspended_thread` and finds
    nothing, because nobody has suspended yet;
-3. `accept()` takes the mutex — skipping the LISTEN block, since the state is
-   now ESTABLISHED — and suspends;
+3. `accept()` takes the mutex, skipping the LISTEN block, since the state is
+   now ESTABLISHED, and suspends;
 4. nothing will ever resume it.
 
 Step 2 needs the IP thread to run between steps 1 and 3, which is exactly what
@@ -10927,21 +10914,21 @@ thread blocks on the mutex, yields the baton, and the transition completes while
 it waits. That is why it is intermittent and why it happens under load.
 
 **Not fixed here, and the reason is the shape of the fix rather than its size.**
-The obvious repair — slice the wait and call again — is unsafe: on a timeout
+The obvious repair, slice the wait and call again, is unsafe: on a timeout
 `_nx_tcp_server_socket_accept()` runs `_nx_tcp_connect_cleanup` and winds the
 socket back to `NX_TCP_LISTEN_STATE`, so the next call re-enters the LISTEN
 block and **sends a second SYN+ACK** on a half-open connection. Only two repairs
 are actually safe, and both are a change of mechanism rather than a patch:
 
 - call `nx_tcp_server_socket_accept()` with `NX_NO_WAIT` and do the waiting in
-  `bsd_accept()` — no suspension means no cleanup and no state damage, at the
+  `bsd_accept()`, no suspension means no cleanup and no state damage, at the
   cost of turning an event-driven accept into a polled one; or
 - wait on the establish notification `bsd_events_attach()` already installs,
   which is event-driven but has to drop out of ThreadX context to park, the way
   `select.c` does.
 
-The workaround both the handler and its test already use — `WaitSelect()` before
-`accept()` — is sound, because it makes the socket ESTABLISHED before the
+The workaround both the handler and its test already use, `WaitSelect()` before
+`accept()`, is sound, because it makes the socket ESTABLISHED before the
 unlocked check runs and the suspension is never reached.
 
 ### 32.11 Two things noticed in the receive path, not changed
@@ -10954,7 +10941,7 @@ touched:
 
 - **Every call adopts and orphans a ThreadX thread.** `bsd_nx_enter()` /
   `bsd_nx_leave()` brackets each `recv()`, each `send()`, and *each poll pass
-  inside `WaitSelect()`* — `netx_call.c` describes the cost as an
+  inside `WaitSelect()`*, `netx_call.c` describes the cost as an
   `AllocSignal()`, a `_tx_thread_create()`, a baton acquire and their inverses.
   curl's pattern is many small `recv()` calls with a `select()` between them, so
   it pays the bracket twice per chunk where `NetTrace` pays it about once per
@@ -10967,8 +10954,8 @@ touched:
 Nothing in the copy path looks wasteful: `nx_packet_data_extract_offset()`
 scatters straight into the caller's buffers, a partially drained packet is
 parked on the socket rather than copied, and there is no bounce buffer anywhere.
-§29.3's next experiment — a bpf capture of both clients comparing `recv()`
-counts — would say directly whether the call count is the whole of it.
+§29.3's next experiment, a bpf capture of both clients comparing `recv()`
+counts, would say directly whether the call count is the whole of it.
 
 
 ## 33. Nine more NetX Duo flags, weighed one at a time (2026-07-26)
@@ -10989,7 +10976,7 @@ measured at 5% of loopback throughput.**
 | `NX_ENABLE_LOW_WATERMARK` | off | §24.7's argument, unchanged; three changes must land together |
 | `NX_DISABLE_ARP_AUTO_ENTRY` | off | it does not close the poisoning path it looks like it closes |
 | `NX_ENABLE_ARP_MAC_CHANGE_NOTIFICATION` | off | a notification with nothing that could act on it |
-| `NX_ENABLE_PACKET_DEBUG_INFO` | off | right idea, wrong lifetime — belongs behind a debug option |
+| `NX_ENABLE_PACKET_DEBUG_INFO` | off | right idea, wrong lifetime, belongs behind a debug option |
 | `NX_ENABLE_DUAL_PACKET_POOL` | off | §24.8 settled the one-pool question already |
 
 ### 33.1 Keepalive: the option that was already saying yes
@@ -11009,7 +10996,7 @@ reaped.
 `nx_tcp_socket_create.c:166` sets `nx_tcp_socket_keepalive_enabled = NX_TRUE`
 **unconditionally** under this define. Turning it on alone would have put every
 socket in the machine on a two-hour keepalive timer whether anything asked or
-not — which is not what `SO_KEEPALIVE` means and not what 4.4BSD, POSIX or any
+not, which is not what `SO_KEEPALIVE` means and not what 4.4BSD, POSIX or any
 other stack does. `src/bsdsocket/socket.c` now clears it at create, next to the
 ISN seed, and `options.c` is the only thing that sets it.
 
@@ -11020,7 +11007,7 @@ retries.
 
 A two-hour idle timer cannot be observed inside an emulator run, so
 `AMINETXDUO_TCP_KEEPALIVE_INITIAL` exists to build an arm with a five-second one
-— `nx_tcp.h` guards the macro with `#ifndef`, so it reaches it without
+`nx_tcp.h` guards the macro with `#ifndef`, so it reaches it without
 `nx_user.h` holding a number nobody ships. `tests/tcpdrill/scripts/keepalive.drill`
 is four cases against that arm, and a keepalive probe is unmistakable on the
 wire: it is an ACK carrying `tx_sequence - 1`, a deliberately backward sequence
@@ -11048,7 +11035,7 @@ which never asked stays silent for twice the idle timer.
 
 ### 33.2 The retransmission timer: backoff, and the ceiling NetX Duo does not have
 
-§27 measured SYN retransmissions at **890 ms and then 1002 ms** — flat, forever.
+§27 measured SYN retransmissions at **890 ms and then 1002 ms**, flat, forever.
 `NX_TCP_RETRY_SHIFT` defaults to 0, so the shift in
 
 ```c
@@ -11056,7 +11043,7 @@ timeout = nx_tcp_socket_timeout_rate << (timeout_retries * timeout_shift);
 ```
 
 is a no-op and the interval is `NX_IP_PERIODIC_RATE / NX_TCP_TRANSMIT_TIMER_RATE`
-— one second. There is no RTT estimator anywhere in the vendored tree either, so
+one second. There is no RTT estimator anywhere in the vendored tree either, so
 the interval was not merely constant but constant at a number nobody chose for
 this path.
 
@@ -11108,7 +11095,7 @@ exchange, so the FIN it sends is never acknowledged and is retransmitted for as
 long as the timer allows. With a flat one-second timer and ten retries that was
 ten seconds of noise which mostly fell between cases. With 1-2-4-8-16-32-64 it
 is 127 seconds, and every later case saw an earlier one's FIN arrive in the
-middle of its own expectation — `wanted PA, got FA`, with a sequence number from
+middle of its own expectation, `wanted PA, got FA`, with a sequence number from
 another socket entirely.
 
 That is a harness isolation problem rather than a stack defect, and it is not
@@ -11120,7 +11107,7 @@ previous one finished.
 **And a second source of noise, from the same afternoon, is worth recording
 because it looked identical.** The mDNS responder (§30) landed while these
 measurements were being taken, and its multicast announcements are non-TCP IPv4
-frames that tcpdrill's strict matcher fails on — `non-TCP frame ether=0x0800`,
+frames that tcpdrill's strict matcher fails on, `non-TCP frame ether=0x0800`,
 six of twenty-one cases, in a run that had nothing to do with mDNS. The arms
 here are built with `-DAMINETXDUO_MDNS=OFF` for that reason. Both of these are
 worth a look from whoever owns the harness: strict "nothing else was on the
@@ -11138,14 +11125,14 @@ nothing in a trace would look like an error.**
 
 With it, a SYN whose MSS is below `NX_TCP_MSS_MINIMUM` (128, the default, kept)
 is answered with a RESET and counted in `nx_ip_tcp_invalid_packets`. A peer that
-offers **no** MSS option is unaffected — the code substitutes the
-interface-derived default before this check runs — so nothing conformant is
+offers **no** MSS option is unaffected, the code substitutes the
+interface-derived default before this check runs, so nothing conformant is
 refused.
 
 **It is not demonstrated on the wire here, and that is stated rather than
 implied.** The check is on the passive-open path only (the branch that handles a
 connection request), and tcpdrill's `c07_passive_open` fails in the current tree
-for an unrelated reason — `bind()` on the listen port — so there is no case that
+for an unrelated reason, `bind()` on the listen port, so there is no case that
 can drive a SYN into it yet. What is shipped is a compiled-in comparison whose
 effect is legible in ten lines of vendored source; when passive open works, one
 case with `mss=1` will settle it.
@@ -11157,10 +11144,10 @@ Without `NX_ENABLE_IP_ID_RANDOMIZATION`, `nx_ip_header_add.c:151` uses
 that increments once per transmitted datagram. Two consequences, of very
 different sizes:
 
-1. **it is a fingerprint** — monotonic, boot-zeroed, machine-wide, and the rate
+1. **it is a fingerprint**, monotonic, boot-zeroed, machine-wide, and the rate
    it climbs at is a packet counter for the whole machine readable from any one
    flow;
-2. **it is RFC 6274 §5.1's idle scan** — an off-path attacker who can send to
+2. **it is RFC 6274 §5.1's idle scan**, an off-path attacker who can send to
    this machine and read the ID it answers with learns how many packets it sent
    in between, which is how a host is used as a zombie to scan a third party.
 
@@ -11174,14 +11161,14 @@ The define fixes both. Two arms out of one tree, A1200, 524,288 bytes:
 
 **The mechanism is not in doubt, because the two paths differ by exactly the
 ratio of datagrams they send.** Loopback puts about 130 datagrams a second on
-the wire and the wire path about 70 — we are the receiver there and send mostly
-ACKs — and 5.2/2.3 is that ratio. It works out at roughly **400 µs per
+the wire and the wire path about 70, we are the receiver there and send mostly
+ACKs, and 5.2/2.3 is that ratio. It works out at roughly **400 µs per
 transmitted datagram**.
 
 That is `NX_RAND`, which `nx_port.h` maps to `ami_random_rand()`: a SHA-256 hash
 DRBG with a `Forbid()`/`Permit()` pair per draw and a SHA-256 pair per 32 bytes
 of output, so one refill every eight calls. It is the right generator for what
-it was chosen for — TLS key material, ECDHE privates, TCP sequence numbers — and
+it was chosen for, TLS key material, ECDHE privates, TCP sequence numbers, and
 much too expensive to spend on a 16-bit header field once per packet. NetX Duo
 offers no way to pick a cheaper source for this one field: it is the same
 `NX_RAND` macro everywhere.
@@ -11190,8 +11177,8 @@ offers no way to pick a cheaper source for this one field: it is the same
 `nx_ip_packet_id` from the DRBG **once**, when the `NX_IP` is created. One draw
 at startup, nothing per packet, and it removes (1): the counter no longer starts
 at zero, so the absolute value says nothing about uptime or about how much this
-machine has sent. **It does not remove (2)** — idle scan reads the delta between
-two observations, not the value — and saying so is the point, because the cheap
+machine has sent. **It does not remove (2)**, idle scan reads the delta between
+two observations, not the value, and saying so is the point, because the cheap
 half looks like a complete answer and is not.
 
 `-DAMINETXDUO_IP_ID_RANDOMIZATION=ON` pays the 5% and closes the second one. On
@@ -11218,8 +11205,8 @@ anything on the wire".
 **`NX_ENABLE_ARP_MAC_CHANGE_NOTIFICATION`** is a notification and nothing else:
 `nx_arp_packet_receive.c:418` calls it **after** writing the new address, so
 nothing it does can refuse the change, and there is no handler in this tree that
-would act on it. It becomes worth having the day something can act — a static
-ARP pin for the gateway, or a warning surfaced in `ShowNetStatus` — and not
+would act on it. It becomes worth having the day something can act, a static
+ARP pin for the gateway, or a warning surfaced in `ShowNetStatus`, and not
 before.
 
 **`NX_ENABLE_PACKET_DEBUG_INFO`** is not rejected on merit. It records the file
@@ -11233,7 +11220,7 @@ next to the debug log level, and that option does not exist yet.
 this machine. §24.8 already settled that there is one pool here on purpose: a
 second pool takes memory permanently away from the 4 MB floor to guard against
 an exhaustion that §24.3's arithmetic is what actually prevents. It is also the
-wrong half of the problem — an ACK that cannot be allocated is a symptom of a
+wrong half of the problem, an ACK that cannot be allocated is a symptom of a
 data pool already empty, and the data is what was lost.
 
 **`NX_ENABLE_LOW_WATERMARK`** is unchanged from §24.7, which found it and
@@ -11242,7 +11229,7 @@ the define, an `nx_packet_pool_low_watermark_set()` call from `src/netstack/`
 (because `nx_packet_pool_create()` never touches the field, so a zeroed
 watermark means the guard is compiled in and can never fire), and
 `NX_TCP_MAXIMUM_RX_QUEUE` raised, because at its default of 20 and 1440-byte
-segments it binds at about 28 KB — **before** a 32 KB window does — and the
+segments it binds at about 28 KB, **before** a 32 KB window does, and the
 tail-drop it would then perform costs a retransmission this stack has no SACK to
 recover cheaply. It also changes IPv4 fragment reassembly and UDP receive. That
 is a piece of work with its own measurement.
@@ -11260,11 +11247,11 @@ Everything §28.5 measured, re-measured with all four changes in.
 | `tests/curl` concurrency sweep | 9 passed, 0 failed | **9 passed, 0 failed**, `AvailMem` delta +0 |
 | `tests/tools/run-routes.sh` | PASSED | **PASSED** |
 | `tests/tools/run-dnscache.sh` | PASSED | **PASSED** |
-| `tests/tcpdrill` retransmit / keepalive | — | **3/3 and 4/4, 58 checks, 0 failed** |
+| `tests/tcpdrill` retransmit / keepalive |, | **3/3 and 4/4, 58 checks, 0 failed** |
 | `tools/ci.sh` | all green | **all green** |
 
 **One scare, chased down rather than explained away.** An intermediate run of
-`tests/clients` reported 94 checks with **2 failures** — `send() to a closed peer
+`tests/clients` reported 94 checks with **2 failures**, `send() to a closed peer
 eventually fails`, sixteen sends and none of them refused. That is exactly the
 shape a longer retransmission timer would produce, and exactly the shape the
 `CloseSocket()`-sends-a-FIN change landing the same hour would produce, so it
@@ -11275,12 +11262,12 @@ shipping build **and** against one built from the same tree with
 `#ifndef`-guarded so that arm can be built again in one command the next time
 somebody needs to ask.
 
-## 34. `TCP:` — a socket that AmigaDOS commands can open (2026-07-26)
+## 34. `TCP:`, a socket that AmigaDOS commands can open (2026-07-26)
 
 §30.7 scoped a telnet server and stopped at the wall in front of it: AmigaOS has no
 socket-as-file-handle, so a descriptor cannot be handed to `SystemTagList()`, `Open()` or
 `Read()`. The mechanism that gets through that wall is a DOS handler, and the half of it
-this project already had was the other one — `ObtainSocket()`, `ReleaseSocket()` and
+this project already had was the other one, `ObtainSocket()`, `ReleaseSocket()` and
 `ReleaseCopyOfSocket()` in `src/bsdsocket/handoff.c` at LVOs −0x090/−0x096/−0x09c.
 
 The handler is now built: `src/bsdsocket/tcp_handler.c`, published as `TCP:` from the first
@@ -11293,8 +11280,8 @@ document is written by several hands at once and the numbers are claimed, not so
 
 The claim is that a socket becomes an *ordinary* file handle. The only way to show that is
 to give one to a program that has never heard of a network, so the run uses **Commodore's
-own `Type` and `Copy`** — the 1496- and 5580-byte binaries out of the AmigaOS 3.1 `C:`
-drawer, unmodified — and the Shell's own `>` redirection, which is `dos.library` and
+own `Type` and `Copy`**, the 1496- and 5580-byte binaries out of the AmigaOS 3.1 `C:`
+drawer, unmodified, and the Shell's own `>` redirection, which is `dos.library` and
 nothing else. `tests/tools/run-tcphandler.sh`, on an A1200 with the A2065 on SLIRP:
 
 ```
@@ -11324,10 +11311,10 @@ matches. What `Echo` wrote is read out of the **host's** log rather than ours:
 ```
 
 `amitest` is a *service name*, resolved out of `DEVS:Internet/services`, so the name path
-is in the picture too — deliberately not a well-known one, because a run that passed
+is in the picture too, deliberately not a well-known one, because a run that passed
 because port 13 happened to be open somewhere would prove nothing about `getservbyname()`.
 
-The other half of the syntax — no host, meaning "wait for somebody" — needs no host at all,
+The other half of the syntax, no host, meaning "wait for somebody", needs no host at all,
 because both ends can be `TCP:` handles held by stock commands:
 
 ```
@@ -11386,7 +11373,7 @@ documented as equivalent to `TCP:service=<service name>` even though `HOST` is t
 positional. So the template is not what the handler really does, and the parse implemented
 here is the one that satisfies both examples: components are split on `/`, a component
 containing `=` is a keyword (`H`/`HOST`, `P`/`PORT`/`S`/`SERVICE`, `O`/`OBTAIN`), and bare
-components go **service first, host second** — one bare word is a service (a listener), two
+components go **service first, host second**, one bare word is a service (a listener), two
 are host then service (a connection). Case-insensitive. Everything else is a name error.
 
 `OBTAIN` ignores every other parameter, as documented.
@@ -11395,16 +11382,16 @@ are host then service (a connection). Case-insensitive. Everything else is a nam
 
 A handler answers a `DOSPACKET` when it can and not before, and the sender is asleep in
 `DoPkt()` meanwhile. A single-process handler therefore queues every packet it cannot
-answer yet and drives them all from one `WaitSelect()`. That works — for the packets. It
+answer yet and drives them all from one `WaitSelect()`. That works, for the packets. It
 does nothing for the two things that genuinely block and are not sockets:
 `gethostbyname()` and `connect()`. One name lookup would stall every other file handle the
 handler owns, and there is no way to make a DNS query selectable here.
 
 So `TCP:` is shaped like `con-handler`: a **control process** owns the device node and
 answers `FINDINPUT`/`FINDOUTPUT`/`FINDUPDATE` by starting a **session process**, handing it
-the packet, and forgetting about it. The session opens its own `bsdsocket.library` — the
+the packet, and forgetting about it. The session opens its own `bsdsocket.library`, the
 only correct way to get a descriptor table, because every opener gets its own child base
-(§3.1) — connects, points the `FileHandle`'s `fh_Type` at its own port, and replies. Every
+(§3.1), connects, points the `FileHandle`'s `fh_Type` at its own port, and replies. Every
 later packet for that handle goes straight to the session, which may block for as long as
 it likes because nobody else is behind it.
 
@@ -11412,7 +11399,7 @@ it likes because nobody else is behind it.
 just before sending the packet and re-initialises the whole file handle on every retry "in
 case handler played with it" (v40 `dos/bcplio.c`, `findstream`). One port per open file is
 also the *only* way to implement `ACTION_WAIT_CHAR`, which is on Roadshow's packet list:
-Commodore's own source says so in a comment above the implementation —
+Commodore's own source says so in a comment above the implementation,
 
 ```
 /* DOESN'T pass fh_Arg1! - no error reporting! */
@@ -11423,19 +11410,19 @@ waitforchar (REG(d1) BPTR scb, REG(d2) LONG timeout)
 }
 ```
 
-— the packet carries a timeout and nothing else. A handler serving many files from one port
+the packet carries a timeout and nothing else. A handler serving many files from one port
 literally cannot tell which file `WaitForChar()` is asking about. With a port per file the
 question is unambiguous, and the answer is one `WaitSelect()` on one descriptor with one
 timeout, which is what `WaitSelect()` is for.
 
-**Neither process uses `pr_MsgPort` for DOS packets.** Both make their own DOS calls —
+**Neither process uses `pr_MsgPort` for DOS packets.** Both make their own DOS calls,
 `CreateNewProc()` duplicates the parent's current directory, the resolver reads
-`DEVS:Internet` — and `dos.library`'s `DoPkt()` replies land on `pr_MsgPort`. Sharing the
+`DEVS:Internet`, and `dos.library`'s `DoPkt()` replies land on `pr_MsgPort`. Sharing the
 two would put a reply and an incoming packet in the same queue and require a `pr_PktWait`
 hook to tell them apart. A second `MsgPort` costs nothing and deletes the problem. The one
 exception is deliberate: the control process forwards the `FIND` packet to the new session
 by `PutMsg`-ing it to the session's `pr_MsgPort`, and that is the only message that port
-ever receives — the session takes it before it makes any DOS call of its own.
+ever receives, the session takes it before it makes any DOS call of its own.
 
 ### 34.4 The packet list, established rather than assumed
 
@@ -11478,18 +11465,18 @@ A path with a colon on a device that is not a filesystem is returned *verbatim*,
 `Lock()` and no `Examine()`. That is why a handler with no directory structure at all can
 be the argument to a command whose template is `FROM/A/M`. Answer `IS_FILESYSTEM` with an
 error in `dp_Res2` and `Type` reports that error instead of opening anything. `Copy` reaches
-the same conclusion by a different route — it calls `IsFileSystem()` on both its source and
-its destination explicitly (v40 `copy.c`) — which is why `Copy TCP:… TO …` also works, and
+the same conclusion by a different route, it calls `IsFileSystem()` on both its source and
+its destination explicitly (v40 `copy.c`), which is why `Copy TCP:… TO …` also works, and
 why the `Lock()` it does on its source can simply be refused.
 
 ### 34.5 What a program that only knows `Read()` sees
 
 | what happened | what `Read()` does |
 |---|---|
-| peer closed, all data delivered | returns 0 — ordinary EOF |
+| peer closed, all data delivered | returns 0, ordinary EOF |
 | connection reset | returns −1, `IoErr()` set |
 | nothing to read yet | blocks; there is no idle timeout |
-| name lookup or `connect()` failed | never happens — `Open()` failed |
+| name lookup or `connect()` failed | never happens, `Open()` failed |
 
 A reset is **not** reported as EOF on purpose. EOF would turn a truncated transfer into a
 successful `Copy` with a short file and a return code of 0, which is the one outcome nobody
@@ -11498,7 +11485,7 @@ in `tcp_handler.c` says what each errno is being reported *as* rather than prete
 a translation, and the real errno goes to the serial log next to it.
 
 Two of those choices were made by reading `Fault()`'s own table (v40 `dos/fault.c`).
-`ERROR_BAD_STREAM_NAME` (206) is semantically exactly right for a malformed `TCP:` name —
+`ERROR_BAD_STREAM_NAME` (206) is semantically exactly right for a malformed `TCP:` name,
 and its text is **"invalid window description"**, because 206 is what `CON:` returns for a
 bad window spec. `Type TCP:` printed that, and it is useless. Name errors are therefore
 reported as `ERROR_OBJECT_NOT_FOUND` (205), whose text is "object not found":
@@ -11520,7 +11507,7 @@ The reason is on the serial line for whoever is debugging rather than using:
 ### 34.6 Two defects this turned up in code that was already here
 
 **A base can be freed while a socket it owns is still referenced.** `ObtainSocket()` sets
-`as_Owner` to the obtaining base, which is right — that is the task NetX Duo's callbacks
+`as_Owner` to the obtaining base, which is right, that is the task NetX Duo's callbacks
 must signal. But a socket taken through `TCP:OBTAIN=` outlives the session that took it:
 the program that released a *copy* still holds the original descriptor. When the session
 closes its library, the base is freed and `as_Owner` is left pointing into freed memory, so
@@ -11530,7 +11517,7 @@ its file.
 
 The local half of the fix is in `tcp_handler.c`: the session reads the reference count
 *before* the close (after it, the block may be gone), and if the socket survives with
-`as_Owner` still pointing at the base about to be freed, it clears it — which is precisely
+`as_Owner` still pointing at the base about to be freed, it clears it, which is precisely
 what `handoff.c` already does to a *parked* socket, and `bsd_event_post()` already treats a
 NULL owner as "there is no task to wake". **The general fix belongs in
 `bsd_socket_release()`** and is not made here: `src/bsdsocket/socket.c` is under active
@@ -11538,7 +11525,7 @@ change for the retransmission work. Any inetd-style handoff has this hazard, not
 `TCP:`.
 
 **A blocking `accept()` was observed not to return.** In the second of four runs, `accept()`
-on a listening descriptor never woke although the peer's `Open()` had plainly succeeded —
+on a listening descriptor never woke although the peer's `Open()` had plainly succeeded,
 the connection was established and `Copy` was sitting on it, and the first run had gone all
 the way through the same code. Replacing the blocking wait with `WaitSelect()` on the
 listener followed by an `accept()` that cannot block made it reproducible-good;
@@ -11552,7 +11539,7 @@ wakeup should be looked at on its own.
 ### 34.7 Lifetime, and the one thing the library will not do any more
 
 `TCP:` is published from the first `OpenLibrary()` rather than from `bsd_lib_init()`,
-because that runs in the opener's own Process (`CreateNewProc()` wants one) — and it has to
+because that runs in the opener's own Process (`CreateNewProc()` wants one), and it has to
 be at open time rather than at first use, because DOS must find the device node before it
 can route an `Open("TCP:…")` and `Type` does not open `bsdsocket.library`. Roadshow states
 the same rule: the device appears when the library is initialised. In practice the library
@@ -11567,8 +11554,8 @@ session is running.
 `bsd_lib_expunge()` now **declines** while the handler process exists. Its code lives in the
 segment expunge is about to hand back for `UnLoadSeg()`, it holds no open count, and there
 is no way to prove it is not executing. `ACTION_DIE` is the supported way to take `TCP:`
-down — it removes the DOS entry, replies inside `Forbid()` so the caller cannot free the
-segment out from under the last few instructions, and exits — and after it, expunge
+down, it removes the DOS entry, replies inside `Forbid()` so the caller cannot free the
+segment out from under the last few instructions, and exits, and after it, expunge
 succeeds normally.
 
 ### 34.8 What is not there
@@ -11593,7 +11580,7 @@ The telnet server from §30.7 is now the small half of itself: `accept()`, a pas
 `TCP:OBTAIN=`. The security recommendations in §30.7 are unchanged and none of them got
 cheaper. Note the one wrinkle a shell will hit that `Echo` did not: `SYS_Input` and
 `SYS_Output` must be *different* file handles (`dos.library` says so explicitly), so a
-server needs **two** `ReleaseCopyOfSocket()` ids for the one connection — and the second
+server needs **two** `ReleaseCopyOfSocket()` ids for the one connection, and the second
 `ObtainSocket()` will move `as_Owner` to the second session, which is the same ownership
 question §34.6 is about and should be settled before, not during.
 
@@ -11607,8 +11594,8 @@ telnet-specific and nothing about it is ours-only: it is `Open()`, `Read()`, `Wr
 connection to a stock OpenSSH 10.2, with the optimistic kex guess already
 disabled, no session resumption in the protocol to soften a second connection,
 and OpenSSH's default `LoginGraceTime` of 120 s only 43% away. It also left one
-question unanswered — is P-256 with our assembly faster on this part than
-portable-C curve25519 — and one assumption unchecked: that the whole cost is
+question unanswered, is P-256 with our assembly faster on this part than
+portable-C curve25519, and one assumption unchecked: that the whole cost is
 public-key arithmetic.
 
 Both are now measured. **The same connection, same server, same command line, is
@@ -11622,9 +11609,9 @@ server that was given no compatibility settings.
 §31.5 tried to split the handshake by timestamping the server's log host-side
 and got a split that contradicted itself, and drew the right conclusion from
 that: **trust the guest's own clock**. `clients/dropbear/dbprofile.c` is that
-conclusion applied one level down. It attaches with `-Wl,--wrap` — the mechanism
+conclusion applied one level down. It attaches with `-Wl,--wrap`, the mechanism
 `clients/dropbear/build.sh` already uses for `open`/`read`/`write`/`close`, so
-the submodule stays byte-identical to its tag — and times each primitive on
+the submodule stays byte-identical to its tag, and times each primitive on
 `ReadEClock()` inside the process that is doing the handshake.
 
 One real connection, authenticated with a real key, running a real command:
@@ -11638,7 +11625,7 @@ One real connection, authenticated with a real key, running a real command:
 | `sha256_process` | 33 | 5 | 0% |
 | `chacha_crypt` | 80 | 74 | 0% |
 | `poly1305_process` | 22 | 24 | 0% |
-| `select()` — waiting for the network | 42 | 1,462 | 1.7% |
+| `select()`, waiting for the network | 42 | 1,462 | 1.7% |
 | **public-key subtotal** | | **82,620** | **97%** |
 | whole process | | 84,517 | 100% |
 
@@ -11655,7 +11642,7 @@ see". Dropbear's read pattern is neither `NetTrace`'s nor curl's, and it spends
 1.7% of a login in `select()`.
 
 **The single largest row is the one nobody would have guessed.** Not the key
-exchange — the *host key signature check*. `ed25519 verify` alone is 39.4 s,
+exchange, the *host key signature check*. `ed25519 verify` alone is 39.4 s,
 more than both curve25519 scalar multiplications together. That is the fourth
 wrong prediction this project has recorded, and it is wrong in a useful
 direction: verification is the one operation a client cannot avoid, cache or
@@ -11665,8 +11652,8 @@ defer.
 
 A wall clock cannot say how much work a primitive did.
 `clients/dropbear/tweetnacl-count.sh` derives a counting copy of
-`third_party/dropbear/src/curve25519.c` into `build/` — the two field routines
-renamed, counting macros of the original names inserted below them — and runs it
+`third_party/dropbear/src/curve25519.c` into `build/`, the two field routines
+renamed, counting macros of the original names inserted below them, and runs it
 natively. 2^255−19 arithmetic executes the same multiplies on any machine, so
 this needs no emulator slot, and the queue is the scarcest resource here.
 
@@ -11688,7 +11675,7 @@ multiplies.
 
 ### 35.3 Why it costs 54,600 cycles, which is the actual finding
 
-Dropbear's 25519 is **TweetNaCl** — the smallest correct implementation in
+Dropbear's 25519 is **TweetNaCl**, the smallest correct implementation in
 existence, 100 tweets, and never intended to be the fastest. Its field element
 is:
 
@@ -11704,9 +11691,9 @@ sv M(gf o,const gf a,const gf b)
   ...
 ```
 
-256 iterations, and every one of them is a **software 64×64 multiply** — `a[i]`
+256 iterations, and every one of them is a **software 64×64 multiply**, `a[i]`
 and `b[j]` are `long long`, so GCC cannot know the operands fit in 32 bits and
-emits the full expansion — plus a 64-bit load, a 64-bit accumulate and a 64-bit
+emits the full expansion, plus a 64-bit load, a 64-bit accumulate and a 64-bit
 store. 54,600 cycles over 256 iterations is 213 cycles each, which is exactly
 what that costs.
 
@@ -11714,7 +11701,7 @@ The 68020 has `MULU.L Dn,Dh:Dl`: 32×32→64 in **one instruction**, measured at
 32.06 cycles by `tests/perf/cpucal`. The whole of §35.4 is the observation that
 16-bit limbs in 64-bit slots are the wrong shape for a machine with that
 instruction, and that this is a question about the **representation** and not
-about instruction selection — the same distinction §11.6 drew for the RSA limb
+about instruction selection, the same distinction §11.6 drew for the RSA limb
 loop and §18.4 drew for SHA-256.
 
 ### 35.4 `src/crypto68k/c68k_25519.c`: eight 32-bit limbs
@@ -11734,7 +11721,7 @@ Three things beyond the representation, all of them algorithm rather than code:
 
 - **A dedicated squaring**, 36 multiplies instead of 64, because every
   off-diagonal product appears twice.
-- **Addition-chain inversion** — ref10's, 254 squarings and **11** multiplies —
+- **Addition-chain inversion**, ref10's, 254 squarings and **11** multiplies,
   against TweetNaCl's square-and-multiply over every exponent bit, which costs
   254 squarings and **251** multiplies. That is 240 field multiplies saved per
   inversion and there are three inversions in a handshake.
@@ -11754,7 +11741,7 @@ It arises constantly: with lazy reduction 0 is routinely carried as 2^256−38 a
 dropping that carry loses **exactly 38**. `fe_sub` had the mirror-image defect.
 
 The symptom was an Ed25519 doubling of the identity returning 37 where it owed
-−1 — and it is 38 away, which is what named it. What is worth recording is what
+−1, and it is 38 away, which is what named it. What is worth recording is what
 found it: not a published vector, but `fe_sqr` checked against `fe_mul` on random
 inputs. Every RFC vector exercises the same handful of values, and two routines
 that share a broken helper agree with each other. `tests/crypto68k/host/`
@@ -11784,7 +11771,7 @@ question rather than arguing about it.
 | **the whole connection** | **85.10 s** | **12.28 s** | **6.93×** |
 
 Repeated back to back in the same run: 12.28 s and 12.28 s. A later run with the
-shipping binary — no profiler linked — gives **12.18 s** and **11.74 s**, running
+shipping binary, no profiler linked, gives **12.18 s** and **11.74 s**, running
 `echo; uname -a; date` and returning `rc 0` with the right output.
 
 **Against `LoginGraceTime`**: a connection goes from 71% of a stock server's
@@ -11799,8 +11786,8 @@ change in everything around it.
 ### 35.6 P-256 instead: the question §31.6 asked, answered
 
 §31.6 proposed that the answer might be to negotiate the other half of
-Dropbear's algorithm list — `ecdh-sha2-nistp256`, `ecdsa-sha2-nistp256`,
-`rsa-sha2-256` — because `src/crypto68k/` accelerates P-256 by 10.8× over AmiSSL
+Dropbear's algorithm list, `ecdh-sha2-nistp256`, `ecdsa-sha2-nistp256`,
+`rsa-sha2-256`, because `src/crypto68k/` accelerates P-256 by 10.8× over AmiSSL
 and accelerates 25519 by nothing. `clients/dropbear/localoptions-p256.h` is that
 build: `DROPBEAR_CURVE25519 0` **and** `DROPBEAR_ED25519 0`, because turning off
 only the first moves the key exchange and leaves the host key and the client
@@ -11820,9 +11807,9 @@ between them, one of them (the ECDH) 62.8 s on its own.
 The reasoning in §31.6 was sound and the premise was wrong. `crypto68k`'s P-256
 is fast; **Dropbear's** P-256 is `ltc_ecc_mulmod` over libtommath, which is not
 `crypto68k` and is slower per scalar multiplication than TweetNaCl's curve25519
-by a factor of five. §31.6's own caveat — that our speed lives in the
+by a factor of five. §31.6's own caveat, that our speed lives in the
 representation and wiring `nx_crypto`'s limb layout to libtommath's `mp_int`
-may be a rewrite rather than a shim — was the relied on sentence, and this
+may be a rewrite rather than a shim, was the relied on sentence, and this
 result is what makes it decisive rather than cautionary. **Route A was never a
 cheap experiment with an expensive follow-up; it was an expensive rewrite with
 nothing in front of it.** Route B needed one new file and no bridge at all,
@@ -11831,8 +11818,8 @@ because the field code and the curve code are the same file.
 For the record, in case anyone revisits it: §15's figures scale to about 4.2 s of
 arithmetic for a P-256 handshake **if** `crypto68k`'s assembly could be reached
 through Dropbear's `ecc_key`/`mp_int`. That is genuinely faster than 10.5 s. It
-also costs interoperability — a modern OpenSSH does not have to offer either
-`ecdh-sha2-nistp256` or an ECDSA host key, and increasingly does not — and it
+also costs interoperability, a modern OpenSSH does not have to offer either
+`ecdh-sha2-nistp256` or an ECDSA host key, and increasingly does not, and it
 buys less than §35.7 does for less work.
 
 ### 35.7 What is left, and what the floor actually is
@@ -11840,20 +11827,20 @@ buys less than §35.7 does for less work.
 At 12.28 s the split is 10.5 s of public-key arithmetic, 1.1 s in `select()`
 and about 0.5 s of everything else. The cost model from §35.2 still applies and
 now reads **0.54 ms per field operation**, consistent to 5% across all three
-primitives — which is the check that the model is a model and not a coincidence.
+primitives, which is the check that the model is a model and not a coincidence.
 
 The remaining arithmetic, in field operations:
 
 | | now | with a base-point table and a 4-bit window |
 |---|---:|---:|
-| curve25519 (×2, Montgomery ladder — already near optimal) | ~5,120 | ~5,120 |
+| curve25519 (×2, Montgomery ladder, already near optimal) | ~5,120 | ~5,120 |
 | ed25519 sign (one fixed-base multiplication) | ~4,620 | ~715 |
 | ed25519 verify (one fixed-base, one variable-base) | ~9,480 | ~4,106 |
 
 A signed-window table over the base point turns Ed25519 signing from 256
 doublings and 256 additions into 64 additions, and a 4-bit window turns the
 variable-base half of verification from 256 additions into 64. **That predicts
-about 5.3 s of arithmetic and a roughly 7-second connection** — another 1.7×,
+about 5.3 s of arithmetic and a roughly 7-second connection**, another 1.7×,
 from tables that cost nothing to look up on a part §18.1 measured as having no
 data cache. It is a contained, testable change against the same vectors and it
 is the obvious next piece of work.
@@ -11861,7 +11848,7 @@ is the obvious next piece of work.
 Below that, the answer starts to arrive. A curve25519 scalar
 multiplication is irreducibly about 2,500 field multiplications and a field
 multiplication is irreducibly 72 `MULU.L` at 32 cycles, which is 2,300 cycles of
-pure multiply — 0.16 ms at 14 MHz, against the 0.54 ms measured. So there is
+pure multiply, 0.16 ms at 14 MHz, against the 0.54 ms measured. So there is
 perhaps another 2× available in the field routine itself, in assembly, and
 essentially nothing after that. **The floor for this suite on this part is around
 two seconds of arithmetic, and a login of three to four seconds.** Not 84, and
@@ -11870,7 +11857,7 @@ not zero.
 Which makes the conclusion the opposite of §31's. `ssh` from an Amiga is not
 "possible but unpleasant, so make the wait tolerable". At 12 seconds it is
 already usable, at 7 it would be unremarkable, and none of that needed a faster
-machine — it needed a field element that was the right shape for the one we
+machine, it needed a field element that was the right shape for the one we
 have.
 
 ### 35.8 The harness, and three things that cost a run each
@@ -11883,7 +11870,7 @@ have.
 | `clients/dropbear/localoptions-p256.h` | the no-25519 arm; `build.sh -O` selects it |
 | `src/crypto68k/c68k_25519.c` | the implementation |
 | `tests/crypto68k/host/test_c68k_25519.c` | the vectors, in `tools/ci.sh host` |
-| `build.sh -S` | stock TweetNaCl — the other arm of the A/B, not a fallback |
+| `build.sh -S` | stock TweetNaCl, the other arm of the A/B, not a fallback |
 
 **`make` did not relink, and that looked exactly like the change not working.**
 Dropbear's Makefile makes `dbclient` depend on its own objects; ours arrive
@@ -11894,7 +11881,7 @@ object is newer than it.
 
 **A constructor runs before this `crt0` has finished setting newlib up.** An
 `atexit()` registered from one does not survive and an `fprintf()` from one goes
-nowhere — `amiga_dropbear.c`'s constructor gets away with it because it touches
+nowhere, `amiga_dropbear.c`'s constructor gets away with it because it touches
 only `dos.library`. Arm on the first real call instead. The linked
 `___CTOR_LIST__` did grow by one entry, so "the constructor did not run" was the
 wrong diagnosis and cost the time it takes to check a symbol table.
@@ -11903,8 +11890,8 @@ wrong diagnosis and cost the time it takes to check a symbol table.
 `fprintf(stderr)` came through in the same transcript. An instrument should use
 the channel that is demonstrably wired up rather than the one that ought to be.
 
-Verified on `turo@playhouse2` with the pinned Linux toolchain: `tools/ci.sh` —
-host, all four cross configurations, conformance — all green.
+Verified on `turo@playhouse2` with the pinned Linux toolchain: `tools/ci.sh`,
+host, all four cross configurations, conformance, all green.
 
 ## 36. Does Roadshow run a faster timer? Asked from outside, and answered (2026-07-26)
 
@@ -11928,14 +11915,14 @@ in the same sense that 27.1 characterised SLIRP's DHCP interception.
 
 ### 36.1 The instrument: their stack, our wire
 
-27.1 established that a host-side packet injector is impossible here — SLIRP
+27.1 established that a host-side packet injector is impossible here, SLIRP
 terminates the guest's TCP and re-originates it, so nothing on the host ever
-sees a guest sequence number — and built `tests/tcpdrill/tapdev.c` instead: an
+sees a guest sequence number, and built `tests/tcpdrill/tapdev.c` instead: an
 Exec device created at run time with `MakeLibrary()`/`AddDevice()` that
 implements enough of SANA-II for a TCP/IP stack to open it, configure it, take
 it online and run its readers against it. **Every frame it is handed is
-timestamped with `ReadEClock()` inside `BeginIO`** — the instant the stack
-handed it over, 1.4 µs resolution — and every frame the stack receives is one
+timestamped with `ReadEClock()` inside `BeginIO`**, the instant the stack
+handed it over, 1.4 µs resolution, and every frame the stack receives is one
 the harness composed.
 
 Nothing about that device is ours. `tests/compare/tickprobe.c` installs it,
@@ -11950,7 +11937,7 @@ tests/compare/run-tickprobe.sh -s ours|roadshow
 recorded because each cost a boot:
 
 * **`S2_ONEVENT`.** `tapdev.c` answered it `IOERR_NOCMD`, which is fine for
-  ours — we never issue it — and wrong for a stack that watches its link for a
+  ours, we never issue it, and wrong for a stack that watches its link for a
   living. It now completes at once if the named event has already happened and
   is otherwise **held**, which for a device with no wire means forever, and
   released by `S2_OFFLINE` and by `tap_remove()`.
@@ -11961,7 +11948,7 @@ recorded because each cost a boot:
   configured with the right address, and a device that had never been sent
   `S2_ONLINE`. The two stacks' interface files are therefore different and
   both are in the tree (`tests/compare/tick-if.ours`,
-  `tests/compare/tick-if.roadshow`) — a stack should be measured with a
+  `tests/compare/tick-if.roadshow`), a stack should be measured with a
   configuration it agrees is well formed.
 
 There is **no `-n` and no `a2065.device`** in any run here: SLIRP, the emulated
@@ -11981,7 +11968,7 @@ is near 1 when every interval is a whole number of T and near 0 otherwise, and
 sweeping T draws a comb with a tooth at the grid and at every submultiple of
 it. `tests/compare/tickphase.py` does the sweep and prints the harmonic ratios
 next to the teeth, because **"the gaps are multiples of 10 ms" settles
-nothing** — quantisation at 20 ms implies quantisation at 10.
+nothing**, quantisation at 20 ms implies quantisation at 10.
 
 Intervals rather than absolute times, deliberately: absolute phase coherence
 across a minute would need the tick source exact to a part in 10^6, and a
@@ -12001,8 +11988,8 @@ fiction**, and the second one is checked in the output rather than asserted:
 * **The injections are spaced by a pseudo-random 0..400 ms**, so the arming
   segments land at uniformly distributed phases. The analyser runs the same
   comb over the **injection** intervals and prints it every time: they must
-  show no tooth anywhere. In every run reported below they do not —
-  `R(T) < 0.75` across 1..260 ms — and the harness's own loop is therefore not
+  show no tooth anywhere. In every run reported below they do not,
+  `R(T) < 0.75` across 1..260 ms, and the harness's own loop is therefore not
   what any grid below is made of.
 
 Nought..400 ms rather than nought..20, for a reason that is easy to get wrong
@@ -12017,7 +12004,7 @@ unit, timed with the same E-Clock:
 
 | | measured | asked for |
 |---|---|---|
-| `UNIT_VBLANK` | **19.853 / 19.848 / 19.880 ms** per frame (50.30–50.37 Hz) | — |
+| `UNIT_VBLANK` | **19.853 / 19.848 / 19.880 ms** per frame (50.30–50.37 Hz) |, |
 | `UNIT_MICROHZ` | 5.373 ms | 5.000 ms |
 
 Two things to take from it. The vertical blank in this emulator is **not** a
@@ -12029,7 +12016,7 @@ crystal: it moves 0.16% between boots. And a `DoIO()` round trip costs about
 Same instrument, same machine, same harness binary, `-x` throughout so no other
 agent's boot shares the emulator.
 
-**Ours** — `bsdsocket.library` built from `b0dd15f` in a private build
+**Ours**, `bsdsocket.library` built from `b0dd15f` in a private build
 directory (24.9 and 29.8 both record measurements lost to another workstream
 rebuilding the instrument underneath them), plus two runs from `build/cm` that
 agree with it:
@@ -12047,7 +12034,7 @@ held acks: 79 intervals, 299.8..902.1 ms (spread 602 ms)
 
 **20.031 ms, 49.92 Hz**, reproduced at 20.0311 / 20.0329 / 20.0381 ms across
 three boots. That is the 50 Hz tick 16.6 read off the startup line, now
-measured from the wire instead — and the comb's `× 4.999` tooth at 100.13 ms is
+measured from the wire instead, and the comb's `× 4.999` tooth at 100.13 ms is
 NetX Duo's fast periodic processing, five ticks, which is what actually
 releases the acknowledgement.
 
@@ -12062,7 +12049,7 @@ held acks: 159 intervals, 219.2..441.8 ms (spread 223 ms)
     -> strongest grid: 220.3562 ms, R = 0.9999
 ```
 
-**220.356 and 220.275 ms** — the cleanest fit in this whole document,
+**220.356 and 220.275 ms**, the cleanest fit in this whole document,
 `R = 0.9999`, and stable to 366 ppm across boots.
 
 | | finest grid any timer-driven frame lands on | |
@@ -12082,7 +12069,7 @@ delivers.
 220.316 ms is `11 × 20.029` and equally `22 × 10.014`; a 100 Hz tick with a
 protocol timer counting 22 of them fits the data exactly as well as a 50 Hz
 tick counting 11. Nothing in any run separates them, because **every** frame
-Roadshow emits on a timer lands on that one grid — its intervals are 1× or 2×
+Roadshow emits on a timer lands on that one grid, its intervals are 1× or 2×
 220 ms and never anything between, so there is no finer structure to fit. The
 analyser prints the warning itself rather than letting the fit look better than
 it is.
@@ -12097,22 +12084,22 @@ Two things were tried to break the tie and neither did:
 * **The retransmission grid**, which would be a second population with a
   different period and hence a common divisor. Roadshow retransmits an
   unanswered SYN once in 20 seconds, at 5.740 s on one boot and 5.859 s on the
-  other, and that gap runs from an *application* instant to a *timer* instant —
+  other, and that gap runs from an *application* instant to a *timer* instant,
   it is not a whole number of ticks and cannot be used. Getting two
   timer-to-timer intervals out of it needs a 45-second window per boot and was
   not run.
 
 **What is settled is the thing the question was actually about.** A tick that
 cannot produce a wire event more finely spaced than 220 ms cannot be the reason
-their ICMP round trip is 2.7 ms shorter than ours — and 36.6 shows it is not
+their ICMP round trip is 2.7 ms shorter than ours, and 36.6 shows it is not
 the reason for anything else either.
 
 ### 36.6 The competing explanation, and it does not go their way
 
 An ICMP echo reply is **not** timer-driven: it is generated because a request
 arrived. The time from handing an echo request to the device to the stack
-handing the reply back is therefore the entire receive-and-reply path — the
-SANA-II copy hooks, the shim, the IP and ICMP code, and the transmit — with the
+handing the reply back is therefore the entire receive-and-reply path, the
+SANA-II copy hooks, the shim, the IP and ICMP code, and the transmit, with the
 wire, SLIRP, the emulated card and the application all removed.
 
 64 samples at 56 bytes (what every `ping` sends) and 32 at 1400:
@@ -12131,14 +12118,14 @@ out; theirs is about twenty-one.
 **Neither distribution is quantised.** p50 minus min is 4 µs on ours and 10 µs
 on theirs; the comb finds nothing anywhere in 1..260 ms. An ICMP round trip on
 either stack is not paced by a timer, which on its own disposes of the timer
-explanation for 29.5 — a 20 ms grid cannot produce a 7 ms round trip with a
+explanation for 29.5, a 20 ms grid cannot produce a 7 ms round trip with a
 2 ms spread.
 
 The same run gives one more arrival-driven figure, for TCP rather than ICMP:
 
 | | AmiNetXDuo | Roadshow 1.15 |
 |---|---|---|
-| one data segment in, ACK out, when the ACK is not held | **2.03 ms**, 80 of 160 segments | never — all 160 were held |
+| one data segment in, ACK out, when the ACK is not held | **2.03 ms**, 80 of 160 segments | never, all 160 were held |
 
 That is 16.6's `NX_TCP_ACK_EVERY_N_PACKETS 2` seen from outside: on a stream of
 lone segments we answer every second one in about 2 ms, and Roadshow answers
@@ -12156,7 +12143,7 @@ faster** at 1400, and neither is timer-paced. Yet on the real wire, through
 therefore in what this instrument replaces, and the candidates are named rather
 than guessed at:
 
-* **`a2065.device` and the interrupt path** — how many `CMD_READ`s each stack
+* **`a2065.device` and the interrupt path**, how many `CMD_READ`s each stack
   keeps queued, what it costs to re-post one, and what the driver does between
   the card's interrupt and the reply. Ours posts 32 IPv4 reads (16.4);
   Roadshow's default is 32 and this harness asked it for 8.
@@ -12179,7 +12166,7 @@ retransmitted at
 802.3, 1982.5, 4006.4, 7992.7 ms
 ```
 
-— 1, 2, 4, 8 seconds, and in units of the 20.031 ms tick measured in the same
+1, 2, 4, 8 seconds, and in units of the 20.031 ms tick measured in the same
 run those are 40.05, 98.97, 200.01, 398.99. `nx_user.h` now carries
 `NX_TCP_RETRY_SHIFT 1`; the change is another workstream's and is noted here
 because a reader comparing 27.5's numbers with these would otherwise think one
@@ -12213,14 +12200,14 @@ packets and moves a few hundred bytes; the longest thing here before today was
 tested what happens after an hour.**
 
 A report on English Amiga Board (thread 122501) says that matters: weeks of
-long-term testing with **Fitz** — a cross-platform network file server and
-mounter — made **both AmiTCP 4 and Roadshow return `EAGAIN` on a *blocking*
+long-term testing with **Fitz**, a cross-platform network file server and
+mounter, made **both AmiTCP 4 and Roadshow return `EAGAIN` on a *blocking*
 socket**, which should be impossible, after which the connection was finished
 and the only thing left to do was close it. The reporter blames mbuf
 fragmentation and sequence-number overrun.
 
 This section builds the harness that would find that, points it at the same
-program, and reports what it found — which is not what it went looking for.
+program, and reports what it found, which is not what it went looking for.
 
 **Headline: a blocking socket in this stack cannot return `EAGAIN` the way the
 report describes, and the reason is arithmetic rather than luck. But the run
@@ -12239,16 +12226,16 @@ socket that mapping would produce exactly the reported symptom.
 It does not, and the reason is one line: `bsd_wait_option()`
 (`src/bsdsocket/select.c:228`) hands NetX Duo `NX_WAIT_FOREVER` for a blocking
 socket with no `SO_RCVTIMEO`/`SO_SNDTIMEO`, and with a non-zero wait option
-**NetX Duo does not have a path that returns `NX_NO_PACKET`** — it suspends:
+**NetX Duo does not have a path that returns `NX_NO_PACKET`**, it suspends:
 
 | | |
 |---|---|
-| `_nx_tcp_socket_receive.c:231` | `else if ((wait_option) && (_tx_thread_current_ptr != &(ip_ptr -> nx_ip_thread)))` — suspends; the `NX_NO_PACKET` at :263 is the `else` |
+| `_nx_tcp_socket_receive.c:231` | `else if ((wait_option) && (_tx_thread_current_ptr != &(ip_ptr -> nx_ip_thread)))`, suspends; the `NX_NO_PACKET` at :263 is the `else` |
 | `_nx_tcp_socket_send_internal.c:1006` | the same guard; `NX_WINDOW_OVERFLOW` (:1086) and `NX_TX_QUEUE_DEPTH` (:1098) are its `else` |
 | `_nx_packet_allocate.c:178` | `if (wait_option)` suspends unconditionally; `NX_NO_PACKET` at :268 is the `else` |
 
-So every one of those returns needs either `wait_option == 0` — a **non**-blocking
-socket, where `EWOULDBLOCK` is correct — or the calling thread to **be the IP
+So every one of those returns needs either `wait_option == 0`, a **non**-blocking
+socket, where `EWOULDBLOCK` is correct, or the calling thread to **be the IP
 thread**. And it never is. Every vector in this library brackets itself with
 `bsd_nx_enter()`, which calls `tx_amiga_adopt_thread()` to make the *calling
 Exec task* a TX_THREAD of its own (`src/netstack/netstack.c:143`), so an
@@ -12287,7 +12274,7 @@ answering.
 The measured control is in the harness: `tests/endurance/` records every errno
 **with the socket's blocking state at the time**, because that pairing is the
 whole question. In the loopback arm, 2,796 errno events were recorded, all on
-blocking sockets, and **not one of them was `EWOULDBLOCK`** — they were
+blocking sockets, and **not one of them was `EWOULDBLOCK`**, they were
 `ECONNREFUSED`, `EINVAL`, `EPIPE` and `EIO`, which is a different section
 (§37.4).
 
@@ -12300,7 +12287,7 @@ licensed with full source, symmetric between Amiga and Unix, no central server.
 `tests/endurance/fetch-fitz.sh` downloads it and `build.sh` builds **two**
 m68k binaries from the same sources: the released one, and one with
 `-DADEBUG=5`. The second is the point. Fitz's client treats `EAGAIN` on its
-blocking socket as retryable —
+blocking socket as retryable,
 
 ```c
 static BOOL checkretry(FitzClient *fc)          /* src/amiga-client.c:583 */
@@ -12316,7 +12303,7 @@ static BOOL checkretry(FitzClient *fc)          /* src/amiga-client.c:583 */
 }
 ```
 
-— and retries it **ten times** (`MAXRETRY`) before `send_all()`/`recv_all()`
+and retries it **ten times** (`MAXRETRY`) before `send_all()`/`recv_all()`
 give up and the connection is abandoned. That is the reported symptom seen from
 the application's side, and on the released binary it is silent. Built with
 debug at WARN, the same code prints `* EAGAIN` and `* recv error err=-1 len=N
@@ -12331,8 +12318,8 @@ recur:
   `tests/endurance/fitz-kprintf.c` reimplements `kprintf()` and `mysnprintf()`
   on `RawDoFmt()`, including `mysnprintf()`'s deliberately non-C99 return
   value, which Fitz's own header calls out and its callers depend on.
-- **`__udivdi3` is not in this toolchain's `libgcc.a`** — checked with `nm`
-  across every archive it ships, not assumed — and Fitz's `ds_to_unix()` needs
+- **`__udivdi3` is not in this toolchain's `libgcc.a`**, checked with `nm`
+  across every archive it ships, not assumed, and Fitz's `ds_to_unix()` needs
   one. Supplied in the same file, on 32-bit limbs, because the obvious
   `unsigned long long` version needs `__lshrdi3` and `__ashldi3`, which are
   missing for the same reason.
@@ -12351,7 +12338,7 @@ is recorded there.)
 host has FUSE, and Fitz's Makefile splits the Unix side into `fitz-serve` (no
 FUSE) and `fitz-mount` (FUSE) for precisely that case. So `fitz-serve` runs on
 the host, the guest runs `fitz mount 10.0.2.2:17711 FITZ:`, and the workload is
-AmigaDOS `Open`/`Write`/`Read`/`Close` against a mounted volume — which Fitz's
+AmigaDOS `Open`/`Write`/`Read`/`Close` against a mounted volume, which Fitz's
 handler turns into blocking `send()`/`recv()` pairs on one long-lived TCP
 connection. Both directions are covered: every file is written to the share and
 read back, byte for byte.
@@ -12425,7 +12412,7 @@ probably the same root cause and are certainly not separate bugs to chase
 independently:
 
 - **The one connection that *is* accepted is unusable.** Its first `recv()`
-  fails immediately — `EDESTADDRREQ` on the server side, which is
+  fails immediately, `EDESTADDRREQ` on the server side, which is
   `bsd_errno_from_nx(NX_NOT_BOUND)`, and `EIO` on the client side, which is
   `bsd_errno_from_nx()`'s fallback for a status the table does not name. An
   accepted socket that NetX Duo does not consider bound.
@@ -12447,7 +12434,7 @@ if ((listen_ptr -> nx_tcp_listen_port == port) &&
 ```
 
 and `bsd_accept()`'s success path never calls
-`nx_tcp_server_socket_unaccept()` on the socket it has just promoted — though
+`nx_tcp_server_socket_unaccept()` on the socket it has just promoted, though
 both of its *failure* paths do, unaccept → relisten → accept, which is the
 NetX Duo server idiom. So "the listen request still points at the accepted
 socket, therefore relisten can never match" is the obvious conclusion, and it
@@ -12465,7 +12452,7 @@ listen_ptr -> nx_tcp_listen_socket_ptr =  NX_NULL;
 ```
 
 So by the time `accept()` returns, the slot is normally already empty and the
-relisten normally succeeds — and the measurement agrees: in the `leak` arm the
+relisten normally succeeds, and the measurement agrees: in the `leak` arm the
 same responder accepted **three or more** connections in a row with no accept
 error and no `relisten failed` at all. **The failure is intermittent, not
 structural, and what distinguishes the runs that hit it is not established.**
@@ -12476,7 +12463,7 @@ cleared and has exactly one assignment. 1,951 consecutive `EINVAL`s in one run
 and 673 in another, each behind exactly one `relisten failed` line. A
 listening socket that reports no error at `listen()` time and refuses every
 connection afterwards is the shape the EAB report calls a permanently degraded
-socket — and this one is ours rather than inherited.
+socket, and this one is ours rather than inherited.
 
 `tests/endurance/run-endurance.sh` reproduces it in both its `loop` and
 `churn` shapes. The recovery is a separate question from the trigger and is
@@ -12489,7 +12476,7 @@ is another workstream's.
 `EINVAL` after it are library behaviour and a plain reading of the code: the
 warning is the library's own, and `as_Incoming` has exactly one assignment.
 What provoked the *first* accept to hand back an unbound socket is not settled
-— it could be an ordering mistake in the harness, which spawns its responder
+it could be an ordering mistake in the harness, which spawns its responder
 and its driver as separate Processes half a second apart. Those two are worth
 separating deliberately rather than assumed to be one bug, and only the second
 is claimed here.
@@ -12508,7 +12495,7 @@ what it recorded there is the second defect:
 | 235 | 8,815,304 | 6,738,072 | 1 | 248 | 467 |
 | 431 | **8,617,832** | **6,540,600** | 1 | 622 | **841** |
 
-- **`AvailMem` falls by 409,728 bytes in 406 seconds — 1009 bytes/s — and
+- **`AvailMem` falls by 409,728 bytes in 406 seconds, 1009 bytes/s, and
   never recovers.** The largest contiguous block falls with it, so this is
   consumption, not fragmentation.
 - **The live socket count climbs 1.91 a second and never falls**: 776 in
@@ -12516,7 +12503,7 @@ what it recorded there is the second defect:
   One socket structure leaked per socket created, plus allocator overhead.
 - **The packet pool is gone in 115 seconds.** From `t = 25` (65 sockets, 157
   free) to `t = 115` (235 sockets, 1 free) is 170 sockets against 156 packets:
-  about **one packet leaked per leaked socket** — the SYN that is never
+  about **one packet leaked per leaked socket**, the SYN that is never
   released, because the socket holding it is never deleted.
 - After that, `pool_empty_requests` and `nsx_IpSendDropped` rise together, 622
   each, while `pool_empty_suspensions` stays at **0**. Nothing is waiting for
@@ -12533,7 +12520,7 @@ The library says so itself, 830 times in ten minutes:
 66 is `0x42` = **`NX_STILL_BOUND`**. `bsd_socket_destroy()`
 (`src/bsdsocket/socket.c:786-820`) calls `nx_tcp_client_socket_unbind()` and
 then `nx_tcp_socket_delete()`; the unbind does not take, the delete refuses,
-and the code does the only safe thing left — it leaks the block rather than
+and the code does the only safe thing left, it leaks the block rather than
 free memory NetX Duo still has on `nx_ip_tcp_created_sockets_ptr`, which its
 own comment correctly says would be worse. **The leak is the safe half of a
 bug whose unsafe half was already anticipated.** Two more lines from the same
@@ -12548,7 +12535,7 @@ State 7 is `FIN_WAIT_2`, state 8 is `CLOSING`. Worth reading next to §32:
 `close()` sending a FIN instead of a RESET landed in this tree **today**, and a
 socket that resets never had a `FIN_WAIT_2` to get stuck in.
 
-**What it is not.** The obvious explanation — that closing a socket leaks — is
+**What it is not.** The obvious explanation, that closing a socket leaks, is
 wrong, and `mode leak` exists to say so. It does the smallest repeatable
 thing: create a socket, put it through one lifecycle, close it, in two arms
 (one `connect()` refused by a port with nothing on it, one full
@@ -12560,19 +12547,19 @@ lifecycle is clean.
 Nor is it the dead listener by itself. A third run put **one** client against
 **one** listener in exactly the §37.4 failure state for eight and a half
 minutes: 673 `EINVAL`s, one `relisten failed`, and **`AvailMem` 9,320,552 →
-9,359,304 — up — live sockets 5 → 3, pool 222 → 221, and no `NX_STILL_BOUND`
+9,359,304, up, live sockets 5 → 3, pool 222 → 221, and no `NX_STILL_BOUND`
 at all.**
 
 | run | conns | listener state | lifecycles | `AvailMem` drift | leaked sockets |
 |---|---:|---|---:|---:|---:|
-| `mode leak` | — | live, healthy | 11,915 | **+34,872** | 0 |
+| `mode leak` |, | live, healthy | 11,915 | **+34,872** | 0 |
 | churn, `-c 1` | 1 | dead (§37.4) | ~3 | **+38,752** | 0 |
 | soak, `-c 2` + hogs | 2 | dead (§37.4) | ~830 | **−409,728** | 776 |
 
 So the trigger is narrower than "close" and narrower than "§37.4", and the
 measured difference between the third row and the second is that in the third
-the client kept dialling — about twice a second, and getting `ECONNREFUSED`
-back — where in the second it went into `connect()` once and never came out.
+the client kept dialling, about twice a second, and getting `ECONNREFUSED`
+back, where in the second it went into `connect()` once and never came out.
 The leaking lifecycle is a **refused** `connect()` to a port that has a listen
 request on it, as opposed to one with nothing on it at all, which `mode leak`
 row 1 does 11,915 times without leaking a byte.
@@ -12584,8 +12571,8 @@ another workstream's.
 
 **What it costs, if it is ever reached in the field.** 1009 bytes/s is
 3.6 MB/hour against a machine with about 9 MB free: out of memory in **under
-three hours**, and out of packet pool — hence dropping every frame it tries to
-send — after **two minutes**. That is the "hours of mixed traffic" failure the
+three hours**, and out of packet pool, hence dropping every frame it tries to
+send, after **two minutes**. That is the "hours of mixed traffic" failure the
 report describes, arrived at from a different direction.
 
 **And, incidentally, the best test of the suspect this section started with.**
@@ -12602,14 +12589,14 @@ different answers.
 **Is it reachable?** A 32-bit sequence space is 4,294,967,296 bytes. §24.4
 measures 159 KB/s on the wire and 283 KB/s on loopback, so one direction of
 one connection wraps after **7.5 hours on the wire** or **4.2 hours on
-loopback** — and Fitz over a mounted share is slower still, 68 KB/s of payload
+loopback**, and Fitz over a mounted share is slower still, 68 KB/s of payload
 combined at 14 MHz, which is **17 hours**. That is inside a long test but outside every test this project has
-ever run — and it is *exactly* the duration the EAB report describes. So the
+ever run, and it is *exactly* the duration the EAB report describes. So the
 suspicion is well-formed: it is the first thing that becomes reachable at that
 timescale and at no shorter one.
 
 **Where does a connection start?** `bsd_tcp_seed_isn()`
-(`src/bsdsocket/socket.c:322`) gives every socket a uniform random 32-bit ISN —
+(`src/bsdsocket/socket.c:322`) gives every socket a uniform random 32-bit ISN,
 that is §28.4's fix for the `|`-instead-of-`+` bias. A uniform ISN means the wrap
 point is uniformly distributed over the connection's life, so a connection
 carrying 4 GB wraps **exactly once**, whatever its ISN, and one carrying less
@@ -12618,9 +12605,9 @@ arrange a wrap; you can only buy one with bytes.
 
 **Does NetX Duo handle it?** Yes, and deliberately. Every sequence comparison
 in the two files that matter uses the RFC 1982 signed-difference idiom rather
-than an unsigned compare —
+than an unsigned compare,
 `nx_tcp_socket_state_data_check.c:366, 384, 636, 678, 696, 718, 738, 785, 887,
-893` are all `(INT)(a - b)` — and
+893` are all `(INT)(a - b)`, and
 `nx_tcp_socket_state_ack_check.c:262–398` carries an explicit `wrapped_flag`
 with a full case analysis of an ACK and a queued segment falling on either side
 of the wrap. This is not a place where wrap was forgotten.
@@ -12637,11 +12624,11 @@ The report's first suspicion, and it is worth answering literally rather than
 translating it into the nearest thing we do have.
 
 **There are no mbufs in the shipped `bsdsocket.library` at all.** All eleven
-`mbuf_*` LVOs — `-0x270` through `-0x2ac` — are `bsd_enosys`/`bsd_enosys_ptr`
+`mbuf_*` LVOs, `-0x270` through `-0x2ac`, are `bsd_enosys`/`bsd_enosys_ptr`
 stubs in `src/bsdsocket/bsdsocket_vectors.c:132-142`, unconditionally, and
 `src/mbuf/` is not linked into the library. The emulation exists (and
 `tests/mbuf_bpf` exercises it), but nothing in this stack's data path has ever
-allocated one: `src/mbuf/`'s own header says so in its first paragraph — an
+allocated one: `src/mbuf/`'s own header says so in its first paragraph, an
 mbuf here does not own, wrap or reference an `NX_PACKET`, it comes out of a
 **private slab allocator** with its own storage, and conversion is an explicit
 copy at the API boundary. An application that never calls `mbuf_get()` cannot
@@ -12651,11 +12638,11 @@ fragment a pool it never touches, and in this build it cannot call it anyway.
 fragment either: it is a fixed count of fixed-size blocks on a free list, so
 it is either exhausted or it is not. That is why the timeline records
 `nss_PoolFree` and `nss_PoolEmptyRequests` rather than anything shaped like a
-fragmentation metric — and why §37.5's answer to "does the pool run out" is a
+fragmentation metric, and why §37.5's answer to "does the pool run out" is a
 straight line to 1 rather than a distribution.
 
 So the phenomenon the report names cannot occur here, and the phenomenon it is
-standing in for — a stack that runs out of buffers and never gets them back —
+standing in for, a stack that runs out of buffers and never gets them back,
 **does**, by an entirely different route.
 
 ### 37.8 Does the pool scale with memory?
@@ -12676,8 +12663,8 @@ So: **yes between the floor and the ceiling, and not at all above it.** One
 sixteenth of free public memory, in packets of 1568 bytes plus header, floored
 at 16 and capped at **256**.
 
-The stride is 1628 bytes — `sizeof(NX_PACKET)` is 56 in the default build,
-measured with a `_Static_assert` bisect rather than counted off the header —
+The stride is 1628 bytes, `sizeof(NX_PACKET)` is 56 in the default build,
+measured with a `_Static_assert` bisect rather than counted off the header,
 so the arithmetic puts the two bounds at
 
 | | free public memory | pool |
@@ -12696,8 +12683,8 @@ So an A1200 with 8 MB of Fast RAM and an A4000 with 128 MB get **the same
 revisited. A machine that frees 100 MB after the stack comes up gets nothing
 for it, and neither does one that is given a 256 MB Zorro III card.
 
-That is a defensible design for the floor — §24.3 makes the same argument about
-the 4 MB machine — and an undefended one for the ceiling. 256 is the number
+That is a defensible design for the floor, §24.3 makes the same argument about
+the 4 MB machine, and an undefended one for the ceiling. 256 is the number
 `AMI_POOL_MAX_PACKETS` has always had; nothing in this document measured it.
 
 ### 37.9 What is in the tree
@@ -12719,7 +12706,7 @@ Modes: `fitz` (files over a mounted share), `loop` (synthetic, both ends here),
 **What it deliberately does not capture, and why.** Retransmissions come from
 `nsx_TcpRetransmits`, which the library already counts. **Duplicate ACKs do
 not, and cannot**: they exist only in a packet trace, and `NetTrace` cannot
-supply one for a run of hours — it owns its own workload and exits with it, it
+supply one for a run of hours, it owns its own workload and exits with it, it
 drains the capture channel from inside that workload's loop, and the channel is
 two buffers of at most `BPF_MAXBUFSIZE` = 32 KB which do not wrap but **drop**
 (`src/bpf/bpf_channel.c:391`). At `SNAP=96` that is a few hundred records. A
@@ -12756,12 +12743,12 @@ true answer rather than a convenient one:
 
 | call | answer | why that is the truth and not a shortcut |
 |---|---|---|
-| `setuid`/`setgid`/`initgroups` | 0 for id 0, `EPERM` otherwise | `getuid()` is 0 and `getpwnam()` reports uid 0, so `svr_switch_user()` is switching from 0 to 0 — a no-op, which POSIX also reports as success. The comparison is there so a future nonzero uid gets refused rather than appearing to work. |
+| `setuid`/`setgid`/`initgroups` | 0 for id 0, `EPERM` otherwise | `getuid()` is 0 and `getpwnam()` reports uid 0, so `svr_switch_user()` is switching from 0 to 0, a no-op, which POSIX also reports as success. The comparison is there so a future nonzero uid gets refused rather than appearing to work. |
 | `getgrnam` | `NULL` | Unlike `getpwnam`, which has one honest answer, there is no group that could be meant. |
 | `chmod` | `SetProtection()` | Real. The RWED bits are active low, so the conversion is inverted. |
 | `chown` | `ENOSYS` | Telling a caller it gave a file away would be worse than telling it we cannot. |
 | `waitpid` | `ECHILD` | Not a stub: `fork()` always fails, so there has never been a child. |
-| `sigaction` | 0, installs nothing | Failing is worse. `commonsetup()` treats an error as fatal, so `-1` refuses to start the server over handlers that cannot fire — `SIGCHLD` needs a child, and bsdsocket raises no `SIGPIPE`. |
+| `sigaction` | 0, installs nothing | Failing is worse. `commonsetup()` treats an error as fatal, so `-1` refuses to start the server over handlers that cannot fire, `SIGCHLD` needs a child, and bsdsocket raises no `SIGPIPE`. |
 | `environ_ptr` | defined, empty | `<unistd.h>` makes `environ` a macro for `(*environ_ptr)` and nothing in the toolchain defines it, so *touching* environ was a link failure. |
 
 `clearenv` was the odd one. newlib really does have one, in
@@ -12778,7 +12765,7 @@ than the scheduler and round-trip variance the delay is hiding behind.
 
 `svr-main.c` forks per connection and treats a failed fork as *log a warning
 and drop the connection*. So the `ENOSYS` above would have produced a
-server that accepted every connection and instantly hung up — the exact
+server that accepted every connection and instantly hung up, the exact
 failure mode this project keeps finding, a well-formed thing that never runs.
 
 `DEBUG_NOFORK` sets `fork_ret` to 0 instead of calling `fork()`, which takes
@@ -12792,7 +12779,7 @@ broken one. Upstream's `DEBUG_` prefix is a misnomer here.
 FS-UAE's SLIRP is outbound-only. Nothing on the host can open a connection
 *into* the guest, so a server on the Amiga is unreachable from here by
 construction. Running both ends inside the guest is not a way around that
-limitation — it is the only arrangement that exercises `accept()` under
+limitation, it is the only arrangement that exercises `accept()` under
 emulation at all, and it puts a real key exchange over the loopback interface
 as a bonus.
 
@@ -12808,12 +12795,12 @@ starts:
 **`accept()` did not exist.** `amiga_dropbear.c` wraps every bsdsocket call
 into the merged descriptor space, and `accept` was the one call dbclient never
 makes. It refuses an out-of-window descriptor the same way `socket()` does,
-which matters more on a listener — that is where high descriptors come from.
+which matters more on a listener, that is where high descriptors come from.
 
 **`pipe()` handed out one pair.** Enough for dbclient, not for a server:
 `svr-main.c` makes a childpipe per connection and `common-session.c` then makes
 `ses.signal_pipe`, so the second call failed and the session died with
-`Early exit: Signal pipe failed` — *after* a successful accept, which made it
+`Early exit: Signal pipe failed`, *after* a successful accept, which made it
 read as an accept problem. Eight pairs now, released when both ends close,
 since freeing on the first would hand a live end to the next caller.
 
@@ -12821,7 +12808,7 @@ since freeing on the first would hand a live end to the next caller.
 
 Every ported program builds a path by writing `"%s/.ssh/..."` after the home
 directory `getpwnam()` gave it. On AmigaOS a home is a device or assign name
-ending in a colon, so that produces `SYS:/.ssh/authorized_keys` — and a colon
+ending in a colon, so that produces `SYS:/.ssh/authorized_keys`, and a colon
 followed by a slash means the *parent of the root*, which does not exist. The
 `Lock()` fails and the program reports the file as missing rather than as
 misspelled.
@@ -12842,7 +12829,7 @@ subpath hit it.
 
 Our `dropbear` accepting from our `dbclient`, through our `bsdsocket.library`,
 on one 14 MHz 68020. 22.02 s for the exchange, which is *both* halves of the
-cryptography on one CPU — §35 measured the client half alone at about 12 s, and
+cryptography on one CPU, §35 measured the client half alone at about 12 s, and
 this is consistent with that.
 
 The server also found `authorized_keys` through the home directory, which means
@@ -12861,7 +12848,7 @@ which is a real question for a server and not for a client.
 ### What shipped
 
 v0.4.0 carries `Clients/curl` and `Clients/ssh` and **not** the server. It
-links, it accepts, it authenticates, and it cannot yet give anybody a shell —
+links, it accepts, it authenticates, and it cannot yet give anybody a shell,
 which is not a thing to put in an archive labelled as an SSH server.
 
 ### 37.10 The Fitz arm: eleven minutes, 224 MB, and one counter that moved
@@ -12910,7 +12897,7 @@ above it can produce that, and the one that fits a mounted file share is the
 data branch with `rx_window == 0`: Fitz reads on demand, so between a request
 going out and the application's next `Read()` the socket's advertised window
 can genuinely be zero, and the peer's data arriving in that gap is refused and
-re-sent by *the peer* — which our retransmit counter, by definition, does not
+re-sent by *the peer*, which our retransmit counter, by definition, does not
 see. That is work redone on the wire, at about half a segment per transaction.
 It is an observation with a rate attached, not a defect, and it is recorded
 because §16.4 and §24.4 both report "zero drops" from workloads that drained
@@ -12935,13 +12922,13 @@ what makes a soak of this shape affordable at all.
 **Where it got to on the questions this section asks.** 112 MB in one direction
 on one connection is 2.7% of the 4,096 MB a 32-bit sequence number covers, so
 §37.6's wrap was not approached. `AvailMem` and the packet pool are flat, and
-the socket count is constant at 4 — which is the useful negative next to
+the socket count is constant at 4, which is the useful negative next to
 §37.5: **the leak does not touch a workload that opens one connection and keeps
 it.** Fitz's mount is exactly that, and eleven minutes of it moved 224 MB
 without losing a byte or a packet.
 
 **Not concluded.** Eleven minutes is not hours, and the report this section
-comes from describes a failure at several hours. The run should be re-armed —
+comes from describes a failure at several hours. The run should be re-armed,
 and it is more useful re-armed *after* the `src/bsdsocket/socket.c` fixes for
 §37.4 and §37.5 land, because then it tests the stack somebody would ship
 rather than the one that was measured.
@@ -12961,12 +12948,12 @@ acquire and their inverses. curl reads small and selects between reads;
 constant is exactly the shape of "we win the first byte and lose everything
 after it".
 
-**The bracket is real, it cost 790 µs, it is now 268 µs — and it was never the
+**The bracket is real, it cost 790 µs, it is now 268 µs, and it was never the
 reason we lose to Roadshow.** One 1.2 MB curl fetch takes **108** brackets, not
 the thousands the mechanism assumed, so the whole of that saving is 76
 milliseconds of a 17-second fetch and the throughput A/B is a flat line. The
 same change moves `NetTrace`'s loopback figure by 12.8%, which is what 380
-brackets at 522 µs comes to — so the mechanism is right about everything except
+brackets at 522 µs comes to, so the mechanism is right about everything except
 the client that loses. That is the sixth predicted bottleneck this project has
 had overturned by measurement in three days, and this section is written that
 way round on purpose.
@@ -13001,7 +12988,7 @@ and `_tx_thread_terminate()` + `_tx_thread_delete()` on the way out.
 
 **The scheduler poke is a quarter of it.** `_tx_amiga_wake_scheduler()`
 `Signal()`s the scheduler Task, which on Exec is an immediate switch to a
-higher-priority task that finds nothing to dispatch and goes back to sleep —
+higher-priority task that finds nothing to dispatch and goes back to sleep,
 two context switches, 202 µs, at the end of *every* orphan.
 
 ### 39.2 Two changes, and what each is worth
@@ -13016,14 +13003,14 @@ state, so the answer cannot go stale between the test and its use. The
 adopt/orphan pair goes **790 → 596 µs**, all of it out of the orphan half
 (551 → 367).
 
-**Keep the TX_THREAD between calls.** The baton must be given back per call —
+**Keep the TX_THREAD between calls.** The baton must be given back per call,
 an adopted task that holds it across application code stops the IP thread, the
 timer and every other socket user, and that is not negotiable. The
 *registration* is a different thing and is repeatable: a base belongs to one
 task (`library.c` records it in `sb_Task`) and that task gets the same
 `TX_THREAD` every time. `tx_amiga_adopt_suspend()`/`tx_amiga_adopt_resume()`
-leave the thread `TX_SUSPENDED` between brackets — on no ready list,
-dispatchable by nobody, with the baton free — and only hand the baton back and
+leave the thread `TX_SUSPENDED` between brackets, on no ready list,
+dispatchable by nobody, with the baton free, and only hand the baton back and
 forth. Measured: **268 µs**, resume 134 and suspend 134.
 
 So the bracket is **2.9× cheaper** and the invariants are untouched:
@@ -13034,7 +13021,7 @@ is still taken and released on every call.
 twice.** A Task that exits without closing the library leaves a suspended
 `TX_THREAD` in ThreadX's created list whose `tx_thread_amiga_task` points at
 freed memory. Nothing dispatches a suspended thread and nothing else resumes
-one, so it is inert — but only for as long as that stays true.
+one, so it is inert, but only for as long as that stays true.
 `bsd_child_destroy()` releases it, which is the one path that runs on the
 owning task with every socket already closed; a base torn down by anyone else
 gets `tx_amiga_discard_thread()`, which removes the registration and leaves the
@@ -13065,7 +13052,7 @@ the read grows, which is the whole claim: this is a per-CALL constant. At
 
 `on-miss` is in the table because it is the next idea and it is **not taken**:
 it drops the bracket for a `recv()` that can be served out of the packet
-already parked on the socket, which is arithmetic and a copy — but it also
+already parked on the socket, which is arithmetic and a copy, but it also
 moves `nx_packet_release()` outside the baton, and releasing a packet can
 resume a thread suspended on the pool. That is precisely what the baton exists
 to serialise. It is worth 86 KB/s at 512-byte reads and it is not worth
@@ -13080,7 +13067,7 @@ inferring a call count from a throughput delta is how a prediction gets
 confirmed instead of tested.
 
 One fetch of 1,200,000 bytes over `http://` with the third-party `curl.020`
-8.22.0-DEV — the third-party binary, nothing of ours in it — repeated twice per
+8.22.0-DEV, the third-party binary, nothing of ours in it, repeated twice per
 boot:
 
 | | brackets | in `enter` | in `leave` |
@@ -13090,13 +13077,13 @@ boot:
 
 **108 brackets for 1.2 MB.** curl is not making thousands of short reads with a
 `select()` between them: it is averaging **11 kB per library call**, because on
-this machine it spends most of the fetch outside the stack — writing the body
-out — while the receive queue fills behind it. §32.11's "twice per chunk" is
+this machine it spends most of the fetch outside the stack, writing the body
+out, while the receive queue fills behind it. §32.11's "twice per chunk" is
 wrong by more than an order of magnitude.
 
 **The `leave` column is not bracket overhead and must not be read as any.** The
 uncontended suspend is 134 µs (§39.1); 21 ms is what releasing the baton
-actually does — it hands the CPU to the ThreadX scheduler, which dispatches the
+actually does, it hands the CPU to the ThreadX scheduler, which dispatches the
 IP thread, which does all the inbound processing it could not do while an
 application task held the baton. That is the stack working, charged to whoever
 happened to open the gate.
@@ -13117,7 +13104,7 @@ suspend: **35 ms before, 24 ms after, out of ~17,000 ms**. 0.2% of a fetch.
 | Roadshow 1.15 | 782 | **746** | 14.92 s = 80.4 kB/s |
 
 **Nothing moved.** Two ticks on the first fetch and zero on the second, against
-a predicted 76 ms — which is four ticks, i.e. below what this instrument can
+a predicted 76 ms, which is four ticks, i.e. below what this instrument can
 see. The census says why, and the two agree to within the resolution of the
 clock. Roadshow is **10.6% ahead**, in the same direction and about the same
 size as §29's 14%, so the finding reproduces; the bracket is not what it is
@@ -13133,14 +13120,14 @@ between them holds and the comparison with §29 does not.
 ### 39.6 The other instrument, which does move
 
 `NetTrace` is the arm §29.3 said was 55% faster than Roadshow, and it reads
-4,096 bytes at a time through one `WaitSelect()` loop -- so 524,288 bytes is
+4,096 bytes at a time through one `WaitSelect()` loop, so 524,288 bytes is
 about 128 receives and twice that many poll passes, call it 380 brackets where
 curl makes 108 for more than twice the payload. If the diagnosis has any
 predictive power left, this is where it has to show.
 
 `run-compare.sh -w bench`, one `NetTrace` binary staged unchanged against all
 three libraries, `AMINETXDUO_PERF=1`, 524,288 bytes, the command's own elapsed
-time (which *is* the transfer -- `NetTrace` does one and exits):
+time (which *is* the transfer, `NetTrace` does one and exits):
 
 | | loopback | | wire | |
 |---|---:|---|---:|---|
@@ -13160,7 +13147,7 @@ Loopback is the solid one and always has been.
 this change `NetTrace` makes us 1.49× faster than Roadshow on loopback and the
 third-party curl makes us 10.6% slower on the wire. The gap between them did not
 close, which was the outcome that would have proved the diagnosis; what closed
-instead is the question of *why* they differ -- they are counting different
+instead is the question of *why* they differ, they are counting different
 things, 380 brackets against 108, and the one that counts more of them
 improved by exactly what the arithmetic predicts. The bracket was a real cost
 on `NetTrace`'s pattern and never a large one on curl's.
@@ -13181,7 +13168,7 @@ on `NetTrace`'s pattern and never a large one on curl's.
   ("our per-packet path costs more than Roadshow's") and nothing here has
   measured it.
 * **The tick task stalled for 743–761 ms in every arm**, ours and the control
-  alike — `tick: stalled 745 ms, dropping 29 of 37 ticks (cap 8)` — which means
+  alike, `tick: stalled 745 ms, dropping 29 of 37 ticks (cap 8)`, which means
   TCP's own timers stopped advancing for three quarters of a second in the
   middle of a transfer. It is present with and without this change, it is not
   caused by it, and nobody has looked at it.
@@ -13190,10 +13177,10 @@ on `NetTrace`'s pattern and never a large one on curl's.
 
 Both switches stay in the tree, and both are off by default:
 
-* `-DAMINETXDUO_NXCENSUS=ON` — the bracket count and its time, per base, to the
+* `-DAMINETXDUO_NXCENSUS=ON`, the bracket count and its time, per base, to the
   serial log. It puts two `ReadEClock()` calls around the thing it measures, so
   it is not something to ship.
-* `-DAMINETXDUO_NXCACHE=OFF` — the control arm, restoring the per-call
+* `-DAMINETXDUO_NXCACHE=OFF`, the control arm, restoring the per-call
   adopt/orphan. Two libraries out of one tree differing in one decision is how
   §39.4's table was taken, and it is the only way to take it again once the tree
   has moved.
@@ -13215,7 +13202,7 @@ is the figure the same suite gives on clean `HEAD`.
 | `tests/curl` A–F | 147 passed, 2 failed (`a44_cookies_send`, `f07_ftp_active`) |
 | `tests/curl -p`, 8…48 | 9 passed, 0 failed, `AvailMem` delta **+0** |
 | `tests/libraries` | 8 checks, 0 failures |
-| `tests/tools/run-livetools.sh` | 23 ok, harness `FAIL` — the empty-serial-log false red of §32.8.1 |
+| `tests/tools/run-livetools.sh` | 23 ok, harness `FAIL`, the empty-serial-log false red of §32.8.1 |
 | `tools/ci.sh` (host + all four cross configs) | green |
 
 The concurrency sweep is the one that matters most for a change of this shape,
@@ -13250,7 +13237,7 @@ There is no build option that skips it and no shape of it this machine can run:
 the child branch needs `fork`, `dup2` and `execv`, and the parent branch is
 where the three descriptors the session channel reads and writes come from. A
 failed `vfork()` reports `DROPBEAR_FAILURE`, the exec request fails, and the
-client gets a well-formed session that runs nothing — the failure this project
+client gets a well-formed session that runs nothing, the failure this project
 keeps finding.
 
 **No upstream source is patched.** The whole function is replaced with
@@ -13270,7 +13257,7 @@ The wrapper is handed `exec_fn` and an opaque `exec_data`, which is the
 * let Dropbear tell us
 
 The second one is exact and costs nothing. `execchild()` is called, in this
-process, and it does the whole real job — the forced command, the pubkey
+process, and it does the whole real job, the forced command, the pubkey
 `command=` option, `USER`/`HOME`/`PATH`, and the `chdir()` to the home
 directory. It ends in `run_shell_command()`, which builds
 `{shell, "-c", cmd, NULL}` and calls `execv()`. `execv()` is ours, so it takes
@@ -13299,7 +13286,7 @@ In a forked child that is correct and important. Here it is running in the
 server's own process, and 3..`ses.maxfd` is the session socket, the listener's
 pipes and the pipes the command's output is about to arrive on. `close()`
 therefore does nothing while the child path runs, which is stated in
-`amiga_dropbear.c` next to the other reason `close()` refuses — 0, 1 and 2 are
+`amiga_dropbear.c` next to the other reason `close()` refuses, 0, 1 and 2 are
 the Shell's and closing them reboots the machine.
 
 This is worth writing down because it would not have looked like a bug in the
@@ -13309,7 +13296,7 @@ authentication, with no error anywhere.
 ### 40.4 What runs the command, and what "stdout" means on this machine
 
 `SystemTagList()`, synchronously, with `SYS_Input` on `NIL:`, `SYS_Output` on a
-file in `T:`, and `NP_StackSize` at 256 KB — a Shell gives a command 4 KB and
+file in `T:`, and `NP_StackSize` at 256 KB, a Shell gives a command 4 KB and
 every ported program on this machine needs far more, which is the same reason
 `clients/curl/clientrun.c` allocates 512 KB.
 
@@ -13321,7 +13308,7 @@ before: a byte in, a byte out.
 
 **The redirection is passed as a tag and not written into the command line, and
 that was a defect found in a run.** With `cmd <NIL: >T:file`, the redirection
-applies to the *command* — so a Shell that cannot find the command prints
+applies to the *command*, so a Shell that cannot find the command prints
 `Unknown command` on its own `Output()`, which is the server's stderr. The
 client got an empty transfer with a return code of 10 and no statement of why:
 
@@ -13332,7 +13319,7 @@ client got an empty transfer with a return code of 10 and no statement of why:
 
 with the reason in the server's log where nobody asking the question can see it.
 Passing `SYS_Output` makes the Shell's own `Output()` the file, so its messages
-land with the command's, and it leaves the user's command line alone — a command
+land with the command's, and it leaves the user's command line alone, a command
 containing a redirection of its own is no longer fighting an appended one.
 
 Handing a file handle to `System()` is safe, and this is documented rather than
@@ -13360,13 +13347,13 @@ stream. That is the machine's answer, not a simplification of it.
 there is no handler and no byte, so a client would have waited for a status that
 could never arrive.
 
-`sigaction()` now remembers one thing — `SIGCHLD`'s handler — and the wrapper
+`sigaction()` now remembers one thing, `SIGCHLD`'s handler, and the wrapper
 calls it directly once the command has exited. That is the same sequence a real
 signal produces with the asynchrony removed, and every step after it is
 upstream's: the handler writes the wakeup byte, the loop reaps with `waitpid()`,
 and `waitpid()` reports the one child there is. Because `noptycommand()` has not
 yet called `addchildpid()` when this happens, the reap lands in
-`svr_ses.lastexit` — which is exactly the race upstream already handles two
+`svr_ses.lastexit`, which is exactly the race upstream already handles two
 lines further down, and it is now the normal path rather than the unlikely one.
 
 `System()` returns the command's return code, so an AmigaDOS `rc` shifted left
@@ -13409,7 +13396,7 @@ with the server saying, on the other side of the loopback:
 ```
 
 Three things are established there and not one. The output of a Shell built-in
-comes back. A **return code comes back** — `rc 10` is the AmigaDOS return code
+comes back. A **return code comes back**, `rc 10` is the AmigaDOS return code
 of a command the Shell could not find, carried as an SSH exit status. And a real
 ported binary runs: `SYS:dbclient -V` is a 345 KB program started by the server,
 on a stack the server gave it, with its output on the channel.
@@ -13425,7 +13412,7 @@ run over SSH opens its own `bsdsocket.library`, which is what any AmigaOS
 program does anyway.
 
 So `TCP:` (§34) is not needed for this and is not used. It is the answer to a
-different question — attaching a socket to a program that only knows `Read()` —
+different question, attaching a socket to a program that only knows `Read()`,
 and it stays that.
 
 ### 40.8 What this is not
@@ -13435,7 +13422,7 @@ and it stays that.
   returns. `SYS_Asynch` plus a wakeup through `WaitSelect()`'s signal mask is the
   design that fixes it, and it is a real one rather than a small one.
 * **There is no stdin.** The command reads `NIL:`. Feeding it from the channel
-  needs the asynchronous shape first — there is nothing to read the channel
+  needs the asynchronous shape first, there is nothing to read the channel
   while a synchronous `System()` holds the process.
 * **There is no interactive shell.** `ssh amiga` with no command is refused with
   a message. A Shell needs a console handle and there is no pty to make one; that
@@ -13464,7 +13451,7 @@ is the number to beat if anybody takes the underlying wakeup seriously.
 
 A second server on the same port inside one run does not work either: the second
 `bind()` gets `Address already in use` five seconds after the first server
-exited. Use a different port per connection — the test above does.
+exited. Use a different port per connection, the test above does.
 
 ## 41. The listener that could not be re-armed, and the close that reset nothing (2026-07-26)
 
@@ -13479,7 +13466,7 @@ TCP states a half-closed connection is actually stuck in, so the sweep's
 sixty-second "resetting" was a no-op and every one of those sockets was leaked
 520 bytes at a time. 33 in 66 seconds before, 0 after, measured. The listener
 repair is a recovery rather than a cause, deliberately, and is NOT covered by a
-test — the trigger is still not reachable from the API.**
+test, the trigger is still not reachable from the API.**
 
 ### 41.1 The reproducer, and what it took to find the right one
 
@@ -13487,7 +13474,7 @@ test — the trigger is still not reachable from the API.**
 one boot, 91 seconds of host wall clock on the shared lane, and every arm
 measures the same three things through `NetStackQuery()` (§34): `AvailMem`,
 the library's live socket count, and **a histogram of the TCP state those
-sockets are in**. The histogram is what made the difference — a socket count
+sockets are in**. The histogram is what made the difference, a socket count
 that goes up says "something leaked", a histogram that says 33 sockets are in
 `FIN_WAIT_2` names the bug.
 
@@ -13499,7 +13486,7 @@ that goes up says "something leaked", a histogram that says 33 sockets are in
 | D | full lifecycle, client closes first | no |
 | E | full lifecycle, **server** closes first | no |
 | F | full lifecycle, **only the client closes at all** | **yes: 33** |
-| G | three dials then three `accept()`s | off by default -- §41.4 |
+| G | three dials then three `accept()`s | off by default, §41.4 |
 
 **§37.5's named suspect is arm B, and arm B is clean.** "Dial a port that has a
 listen request outstanding and get `ECONNREFUSED` back" was labelled in §37.5
@@ -13518,7 +13505,7 @@ because §37.5 pointed at it in bold and this run says no.
 
 `bsd_socket_release()` parks such a socket on the closing list
 (`bsd_closing_park`), and `bsd_closing_sweep()` gives it
-`BSD_CLOSING_DEADLINE` -- 60 seconds -- before deciding the peer has stopped
+`BSD_CLOSING_DEADLINE`, 60 seconds, before deciding the peer has stopped
 answering and resetting it. That is the right design. The reset is what does
 not work:
 
@@ -13535,7 +13522,7 @@ if ((state != NX_TCP_ESTABLISHED) && (state != NX_TCP_SYN_SENT) &&
 handed the socket to `bsd_socket_destroy()`, whose `nx_tcp_client_socket_unbind()`
 refuses a state that is not `CLOSED` (`NX_NOT_CLOSED`) and whose
 `nx_tcp_socket_delete()` refuses a socket that is still on a port list or not
-`CLOSED` (`NX_STILL_BOUND`, `nx_tcp_socket_delete.c:94`) -- and 520 bytes were
+`CLOSED` (`NX_STILL_BOUND`, `nx_tcp_socket_delete.c:94`), and 520 bytes were
 leaked, for ever, exactly as §37.5 measured 830 times.
 
 Measured here, on the library as it stood, with the state added to the
@@ -13568,13 +13555,13 @@ It is called from two places:
 - `bsd_closing_sweep()`, replacing the `nx_tcp_socket_disconnect()` that did
   nothing;
 - `bsd_socket_destroy()`, as a **retry** when the first `nx_tcp_socket_delete()`
-  answers `NX_STILL_BOUND` -- so every caller is covered, not just the sweep,
+  answers `NX_STILL_BOUND`, so every caller is covered, not just the sweep,
   and the repair does not depend on knowing which caller got there.
 
 One more line in the same sweep: `done` now includes `NX_TCP_LISTEN_STATE`.
 `_nx_tcp_socket_block_cleanup()` branches on `nx_tcp_socket_client_type`, so a
 **server** socket that completes its shutdown lands in `LISTEN`, not `CLOSED`
--- and every accepted socket was therefore sitting out the full sixty seconds
+and every accepted socket was therefore sitting out the full sixty seconds
 before anybody looked at it again.
 
 **Before and after, same harness, same boot sequence:**
@@ -13598,7 +13585,7 @@ when the SYN arrives. Nothing here depends on knowing which it was.
 
 What is established is the consequence: `bsd_accept()` cleared `as_Incoming`
 before securing its replacement, `as_Incoming` had exactly one assignment, and
-`bsd_accept()`'s first test refuses a listener that has none -- 1,951
+`bsd_accept()`'s first test refuses a listener that has none, 1,951
 consecutive `EINVAL`s behind one warning line.
 
 `bsd_listen_rearm()` is the repair, and it changes three things:
@@ -13617,7 +13604,7 @@ failure is intermittent and cannot be provoked through the API:
 `NX_INVALID_RELISTEN` needs either no listen request on the port or a listen
 request whose socket slot is occupied, and no sequence of `socket`/`bind`/
 `listen`/`connect`/`accept`/`close` reaches either while a listener is healthy.
-The shared path -- allocate, create, relisten, arm -- is exercised 96 times per
+The shared path, allocate, create, relisten, arm, is exercised 96 times per
 run by arms D, E and F. The *failure* branch is not exercised at all. Untested
 means untested.
 
@@ -13630,8 +13617,8 @@ each re-arm has to replay a queued connection rather than park an idle socket.
 **It never got that far. The dial loop itself wedges the calling task, on the
 second or the third `connect()`.** Reproduced three times out of three, and
 reproduced identically on the library **before** any of §41's repairs, so it is
-not one of them. The stack stays alive around it -- the sixty-second sweep
-warning still fires afterwards -- so it is the application task that is stuck,
+not one of them. The stack stays alive around it, the sixty-second sweep
+warning still fires afterwards, so it is the application task that is stuck,
 not the machine.
 
 Two facts about it, both measured:
@@ -13652,8 +13639,8 @@ Build `-DLEAK_BURST_ARM=1` to work on it.
 ### 41.5 The errno mappings, and the invariant nobody had written down
 
 §37.2's list. `transfer.c`'s TCP send loop discarded the NetX Duo status before
-choosing an errno -- every first-iteration failure `break`s out and landed on
-one unconditional `EWOULDBLOCK` -- so a signalled thread (`NX_WAIT_ABORTED`,
+choosing an errno, every first-iteration failure `break`s out and landed on
+one unconditional `EWOULDBLOCK`, so a signalled thread (`NX_WAIT_ABORTED`,
 `EINTR`) and a stack being torn down (`NX_POOL_DELETED`, `ENOBUFS`) both came
 back as `EAGAIN` on a socket that was blocking. The status is now carried out
 of the loop, and out of `bsd_packet_append_iov()`, which swallowed it too.
@@ -13663,7 +13650,7 @@ use. It takes **the wait option the call was given**, not the socket, because
 that is the only thing that decides it: `NX_NO_WAIT` and an expired
 `SO_RCVTIMEO`/`SO_SNDTIMEO` both mean the caller asked for a bounded wait and
 `EWOULDBLOCK` is right for either, while on `NX_WAIT_FOREVER` `EAGAIN` is a lie
--- it tells the application to retry a call that cannot succeed, which is
+it tells the application to retry a call that cannot succeed, which is
 thread 122501's complaint exactly. There it answers `ENOBUFS`.
 
 `bsd_raw_receive()` now reports why it came back empty, so `transfer.c:640` can
@@ -13708,7 +13695,7 @@ They are two. One is found and fixed; the other did not reproduce at all.
 `tests/leak/refused_leak_test.c` do not tell GCC that an AmigaOS library call
 clobbers `d1`/`a0`/`a1`, so `IoctlSocket(FIONBIO)` was handed a stale request
 code, `ASF_NONBLOCK` was never set, and the "non-blocking" dial was a BLOCKING
-`connect()` to a listen request with no socket parked on it — which, as that
+`connect()` to a listen request with no socket parked on it, which, as that
 file's own header says, never returns. The same defect is in 117 inline-asm
 blocks across 20 files of this tree, including the shipped tools. All of them
 are fixed here. The tick stall is a different mechanism, is not caused by
@@ -13720,8 +13707,8 @@ Arm G, built with `-DLEAK_BURST_ARM=ON -DLEAK_BURST_DELAY=OFF`, wedges on the
 first attempt and on every attempt after it. That much §41.4 already had.
 
 What it did not have is *where*. "The application task is stuck" has two
-completely different causes — the port failed to wake it, or something inside
-NetX Duo suspended it and never resumed it — and nothing in the tree could tell
+completely different causes, the port failed to wake it, or something inside
+NetX Duo suspended it and never resumed it, and nothing in the tree could tell
 them apart. So the port learned to say:
 
 ```c
@@ -13746,7 +13733,7 @@ TXT nxsusp cb=002FA924 cl=0025F18C tmo=FFFFFFFF tl=00000000 ref=00267448
 ```
 
 `0x25F18C - 0x267448 = -0x82BC`, and `_tx_thread_system_return` is at `0x427C0`
-in the library, so the cleanup routine is at `0x3A504` — which `nm` gives as
+in the library, so the cleanup routine is at `0x3A504`, which `nm` gives as
 **`_nx_tcp_connect_cleanup`, offset zero**. `tmo=FFFFFFFF` is `TX_WAIT_FOREVER`
 and `tl=0` says no timer was ever armed.
 
@@ -13758,7 +13745,7 @@ this about a blocking connect to that port.
 
 Four such suspensions and only four: the deliberate "spend the first dial"
 `connect()` before arm G, which is blocking on purpose, and arm G's three
-dials — **which are supposed to be non-blocking.** The library did what it was
+dials, **which are supposed to be non-blocking.** The library did what it was
 told. The question is why it was told that.
 
 ### 42.2 `IoctlSocket()` was called with a request code the library had just overwritten
@@ -13788,7 +13775,7 @@ __asm __volatile ("jsr a6@(-114:W)"
 ```
 
 `d1` and `a0` are *inputs*. An operand that is only an input is one GCC may
-assume the asm leaves alone — and an AmigaOS library call clobbers `d0`, `d1`,
+assume the asm leaves alone, and an AmigaOS library call clobbers `d0`, `d1`,
 `a0` and `a1`, always has, and the NDK's own `LP*` macros in
 `inline/macros.h` say so by declaring dummy `_d1`/`_a0`/`_a1` variables and
 listing them as *outputs*. Ours did not. So GCC kept a six-byte immediate
@@ -13796,8 +13783,8 @@ listing them as *outputs*. Ours did not. So GCC kept a six-byte immediate
 reloaded it for the next three calls.
 
 `bsd_IoctlSocket()` took the garbage request, fell through its `switch` to
-`default`, returned `EINVAL`, and the test — which ignores the return value, as
-BSD code does for `FIONBIO` — carried on with a blocking socket.
+`default`, returned `EINVAL`, and the test, which ignores the return value, as
+BSD code does for `FIONBIO`, carried on with a blocking socket.
 
 The fix is the NDK's:
 
@@ -13816,7 +13803,7 @@ spill is gone.
 
 §41.4 recorded two things that looked like scheduling and were not.
 
-**`Delay(1)` does not help — correct, and now with a reason.** Compiling the
+**`Delay(1)` does not help, correct, and now with a reason.** Compiling the
 unfixed source *with* the `Delay(1)` in place gives:
 
 ```
@@ -13830,18 +13817,18 @@ c30:  jsr   a6@(-30)       ; socket()
 c40:  jsr   a6@(-114)      ; ioctl -- still no reload
 ```
 
-`Delay()` *is* an honest inline — the LP macros declare `d1` written — so GCC
+`Delay()` *is* an honest inline, the LP macros declare `d1` written, so GCC
 knows `d1` dies there. It does not matter: the stale value was spilled to the
 stack before the loop was ever entered, and every iteration reloads the spill.
 A delay cannot repair a value that is already wrong.
 
-**Console I/O does help — also correct.** `VPrintf()`/`Flush()` are ordinary C
+**Console I/O does help, also correct.** `VPrintf()`/`Flush()` are ordinary C
 calls, so the value cannot live in a register across them and the extra
 pressure makes rematerialising a six-byte immediate cheaper than keeping a
 stack slot alive for it. The constant gets reloaded, the ioctl works, the dial
 is non-blocking, and 24 of 24 pass. That is why the one thing that looked most
-like a scheduling clue — "another Exec interaction fixes it, a delay does not"
-— was a register allocator all along.
+like a scheduling clue, "another Exec interaction fixes it, a delay does not"
+was a register allocator all along.
 
 And it explains the rest of §41.4 without any of it being about the library:
 it reproduces on the library before §41's changes (the defect is in the test),
@@ -13855,7 +13842,7 @@ where `d1`, `a0` or `a1` is passed in and not declared written. Two files were
 already correct and are untouched: `tests/ipv6/ipv6_socket_test.c`, which has a
 `BSD_SCRATCH` macro that does exactly the right thing, and
 `include/aminetxduo/tlslib.h`, which uses `"+r"`. Everything else is fixed
-here, including `src/tools/toolsock.c` — the one every shipped Shell command
+here, including `src/tools/toolsock.c`, the one every shipped Shell command
 calls the stack through.
 
 **Whether any of the other 117 miscompiles today is not established.** GCC
@@ -13865,8 +13852,8 @@ anyway. They are fixed because the contract was wrong, not because each one was
 measured, and that distinction is the whole reason this paragraph exists.
 
 **Clients are not affected.** curl and Dropbear reach the stack through the
-NDK's `inline/bsdsocket.h`, whose `send()` — to take the one §40.9 complains
-about — declares `register int _d1 __asm("d1")` and lists it as an output. So
+NDK's `inline/bsdsocket.h`, whose `send()`, to take the one §40.9 complains
+about, declares `register int _d1 __asm("d1")` and lists it as an output. So
 the `send()` returning `EINVAL` on an established loopback socket in §40.9,
 §37 and §34.6 is **not** this bug, and this section makes no claim about it.
 
@@ -13884,7 +13871,7 @@ refused_leak: clean
 ```
 
 Eight rounds, three dials before each set of three `accept()`s, 24 accepts, no
-failures — which is also the first time §37.4's accept path has actually been
+failures, which is also the first time §37.4's accept path has actually been
 exercised by this arm, and it does not reproduce there. Verified in both
 shapes, `-DLEAK_BURST_DELAY=ON` and `OFF`, against a library built without any
 of the tracing. **Arm G is now built by default**; the reason it was not is
@@ -13902,9 +13889,9 @@ half of the brief. It did not happen once here.
 | the same, under ten host CPU hogs on eight cores | 1 | 14 s | 0 |
 | `tests/compare/run-tickprobe.sh -s ours` | 1 | ~3 min | 0 |
 | `tests/compare/run-compare.sh -s ours -w bench` | 2 | ~6 min | 0 |
-| three emulators at once, plus a full `tools/ci.sh` | (above) | — | 0 |
+| three emulators at once, plus a full `tools/ci.sh` | (above) |, | 0 |
 
-Every recorded instance in `build/serial-*.log` — 13 files out of 763 — falls
+Every recorded instance in `build/serial-*.log`, 13 files out of 763, falls
 in two windows: 2026-07-25 22:52–2026-07-26 01:59, and 2026-07-26 13:39–16:28.
 Both are windows in which this machine was shared, the second of them with the
 orphaned emulator that had been running for 219 minutes before it was reaped.
@@ -13932,7 +13919,7 @@ tick: stalled 745 ms, dropping 29 of 37 ticks (cap 8, previous service 412 us)
 
 The previous wakeup's service cost is the discriminator the message was
 missing. A stall with a service figure close to it is the tick task overrunning
-its own period — too much work under the core lock — and is ours to fix. A
+its own period, too much work under the core lock, and is ours to fix. A
 stall with a service figure in the ordinary hundreds of microseconds (355 µs
 average over 4,354 wakeups, measured here) means the tick was simply not
 dispatched, and the repair is somewhere else entirely. One number, and it
@@ -13949,14 +13936,14 @@ else.
 `97dcf6b` skips `_tx_amiga_wake_scheduler()` when `_tx_thread_execute_ptr ==
 TX_NULL`, which is exactly the shape of "a task that fails to wake", so it was
 the first thing to look at. It is not implicated, on two grounds: the wedged
-task was never waiting for a dispatch — it was on a NetX Duo suspension list
-with `TX_WAIT_FOREVER` — and the tick task pokes the scheduler unconditionally
+task was never waiting for a dispatch, it was on a NetX Duo suspension list
+with `TX_WAIT_FOREVER`, and the tick task pokes the scheduler unconditionally
 on every wakeup that delivers a tick (`tx_initialize_low_level.c`), so the
 worst a lost poke could cost is 20 ms rather than forever. It was not reverted
 and did not need to be.
 
-`df924b5`'s change of behaviour — a `SocketBase` used from a task other than
-its opener now answers `ENETDOWN` — is not involved either: arm G is one task
+`df924b5`'s change of behaviour, a `SocketBase` used from a task other than
+its opener now answers `ENETDOWN`, is not involved either: arm G is one task
 throughout, and `ami_netstack_enter_cached()` took the resume path on every one
 of its calls.
 
@@ -13975,7 +13962,7 @@ of its calls.
 ## 43. The accept() that suspended on a finished connection, fixed upstream (2026-07-26)
 
 §32.10 diagnosed a blocking `accept()` that never returned, named the two
-repairs it thought were safe, and deliberately shipped neither — because both
+repairs it thought were safe, and deliberately shipped neither, because both
 were a change of mechanism in `src/bsdsocket/socket.c` for a defect that is in
 `third_party/netxduo`. This is the third option, which §32.10 did not have:
 **we maintain a fork, so the vendored file can simply be correct.**
@@ -13984,7 +13971,7 @@ were a change of mechanism in `src/bsdsocket/socket.c` for a defect that is in
 it takes `nx_ip_protection` and never reads it again. Moving the mutex above
 the two early-out checks fixes it, matches what `_nxd_tcp_client_socket_connect()`
 already does, and is nine lines. Reproduced on the ThreadX linux port with an
-injected delay of one tick — HUNG before, returns after. `tools/ci.sh host
+injected delay of one tick, HUNG before, returns after. `tools/ci.sh host
 cross conformance` green. Nothing in `src/` changed and nothing in `src/`
 needs to.**
 
@@ -13996,7 +13983,7 @@ a harness that can be made to fail on demand.
 
 It is not on the Amiga. Two `NX_IP` instances over `nx_ram_network_driver`, the
 ThreadX `linux/gnu` port, `x86_64`, built straight from the vendored trees at
-`473d1928` — the same code the m68k build compiles, running where it can be
+`473d1928`, the same code the m68k build compiles, running where it can be
 provoked in milliseconds instead of on a shared emulator lane. Two things had
 to be sorted out before it ran at all, both of them upstream's problem and
 neither of them ours:
@@ -14008,7 +13995,7 @@ neither of them ours:
   `test/cmake/netxduo64/nx_user.h`, which redefines
   `NX_THREAD_EXTENSION_PTR_SET/GET` to stash the pointer in a `TX_THREAD`
   extension field; it is not wired into `ports/linux/gnu`.
-- macOS cannot host this port at all — the ThreadX linux port needs unnamed
+- macOS cannot host this port at all, the ThreadX linux port needs unnamed
   POSIX semaphores and `sem_timedwait()`, which macOS does not implement. The
   harness runs on `playhouse2`.
 
@@ -14018,7 +14005,7 @@ The sequence is AmiNetXDuo's, not a demo's: the server arms its listener with
 thread to complete the handshake between the unlocked read and the mutex
 acquire, so the harness calls a hook at exactly that point and the hook sleeps.
 **That is not cheating; it is the only way to ask for a specific interleaving.**
-The delay does nothing the IP thread cannot do on its own — it just stops the
+The delay does nothing the IP thread cannot do on its own, it just stops the
 experiment from being a lottery.
 
 | injected delay (ticks) | vendored, before | vendored, after |
@@ -14031,7 +14018,7 @@ experiment from being a lottery.
 
 In every HUNG run the client reports `NX_SUCCESS` from `connect()`, the
 server's socket state is 5 (`NX_TCP_ESTABLISHED`), and
-`nx_tcp_socket_connect_suspended_thread` is non-NULL — a thread parked on a
+`nx_tcp_socket_connect_suspended_thread` is non-NULL, a thread parked on a
 connection that finished before it got there. That is §32.10's step 4, printed.
 
 **One tick is enough**, which matters: this does not need the Amiga port's
@@ -14058,7 +14045,7 @@ The repair is to stop reading the state without the mutex:
 The mutex moves above the two early-out checks and each of them grows a
 `tx_mutex_put()`. Nothing else moves.
 
-**The argument that this is right is not "a lock fixes a race" — it is that the
+**The argument that this is right is not "a lock fixes a race", it is that the
 sibling function already does exactly this.**
 `_nxd_tcp_client_socket_connect()` takes `nx_ip_protection` at
 `nxd_tcp_client_socket_connect.c:305` and reads `nx_tcp_socket_state` at `:320`,
@@ -14067,15 +14054,15 @@ release. The accept path is the one that got it backwards.
 
 **It fixes more than the reported hang.** The `ESTABLISHED` recheck is the case
 §32.10 saw, but the second check has the same shape: a socket that races from
-`SYN_RECEIVED` to `CLOSED` — a RST during the handshake — passes the unlocked
+`SYN_RECEIVED` to `CLOSED`, a RST during the handshake, passes the unlocked
 check, and `nx_tcp_socket_connection_reset.c:115` only cleans up a thread that
 is *already* suspended. Rechecking `ESTABLISHED` alone would leave that one.
 Moving the mutex closes both, which is why the whole check moved rather than a
 recheck being bolted on.
 
 **No new deadlock, and this had to be checked rather than assumed.** The
-function can be reached from the IP thread — the `_tx_thread_current_ptr !=
-&(ip_ptr -> nx_ip_thread)` test at the bottom exists for that case — and the IP
+function can be reached from the IP thread, the `_tx_thread_current_ptr !=
+&(ip_ptr -> nx_ip_thread)` test at the bottom exists for that case, and the IP
 thread holds `nx_ip_protection` while it runs callbacks. `tx_mutex_get.c:175`
 is the answer: ThreadX mutexes are recursive, an owner re-acquiring only bumps
 `tx_mutex_ownership_count`. Every non-early-return path through this function
@@ -14098,8 +14085,8 @@ this defect. That is the whole reason it belongs upstream.
 `473d1928` and signed off. Merged into `amiga-integration` (`08f7ec99`), which
 is what the submodule tracks.
 
-It shares a file with `amiga-tcp-isn-entropy` — both defects are in
-`nx_tcp_server_socket_accept.c` — but not a hunk: the ISN change is at old line
+It shares a file with `amiga-tcp-isn-entropy`, both defects are in
+`nx_tcp_server_socket_accept.c`, but not a hunk: the ISN change is at old line
 108 inside the `LISTEN` block, this one ends at old line 104. Checked rather
 than assumed. All three branches `git am` cleanly onto `473d1928` in either
 order (mdns → isn → accept, and accept → isn → mdns) and produce byte-identical
@@ -14116,7 +14103,7 @@ workaround, and it was: it makes the socket `ESTABLISHED` before the unlocked
 check runs, so the suspension is never reached.
 
 **It stays, and it stays for a reason that is not inertia.** With the vendored
-file correct it is no longer relied on — but it was never only a workaround.
+file correct it is no longer relied on, but it was never only a workaround.
 `nc.c` says why in its own comment: *a blocked `accept()` cannot see Ctrl-C*.
 Waiting on readiness and then taking the connection is what gives a break
 somewhere to be noticed and a timeout somewhere to apply, and that argument
@@ -14131,7 +14118,7 @@ yet connected".
 **Not verified on target.** The linux-port harness proves the defect and the
 fix; the m68k side has the four cross configurations building clean and no
 semantic change at any of our call sites, and that is all. The emulator was not
-run for this — `port/threadx-amiga/` had another workstream's uncommitted
+run for this, `port/threadx-amiga/` had another workstream's uncommitted
 changes in it at the time, so neither a pass nor a failure would have been
 attributable.
 
@@ -14141,7 +14128,7 @@ attributable.
 |---|---|
 | `third_party/netxduo` | submodule bumped to `08f7ec99` (the merge) |
 | `common/src/nx_tcp_server_socket_accept.c` | in the submodule: the mutex moved above both checks |
-| `src/` | unchanged, deliberately — see 43.4 |
+| `src/` | unchanged, deliberately, see 43.4 |
 
 ## 44. WinUAE, driven from a Mac over SSH, and the nine ethernet cards it emulates (2026-07-26)
 
@@ -14151,15 +14138,15 @@ card, the A2065, and it switches cycle accounting off for every CPU above a
 68020, so no 68030/68040/68060 timing taken there means anything. WinUAE has
 neither limit. It runs on `winbuilder`, the Windows box this project already
 uses for MSVC builds, and it is a GUI application on the far side of an SSH
-connection — which is the whole problem.
+connection, which is the whole problem.
 
 **Headline: it works. `tools/winuae-run.sh` boots an A3000 with Kickstart 3.1,
 runs a binary staged from this Mac, and brings back the guest's stdout, its
 serial log and its exit status in about six seconds. The netstack bring-up test
 passes 14/14 on it over an emulated A2065 on SLIRP, including a DNS lookup that
 resolved `example.com` against the real internet. WinUAE presents seven more
-ethernet cards — Ariadne, Ariadne II, AmigaNet, LAN Rover/EB920, X-Surf and
-X-Surf-100 in both Zorro flavours — every one of which was brought up and
+ethernet cards, Ariadne, Ariadne II, AmigaNet, LAN Rover/EB920, X-Surf and
+X-Surf-100 in both Zorro flavours, every one of which was brought up and
 confirmed in its autoconfig dump. We cannot drive any of them, because the only
 SANA-II driver binary we possess is `a2065.device`.**
 
@@ -14198,7 +14185,7 @@ itself, flushes its log properly, and the host never has to guess.
 about **30 seconds** of host wall clock at normal speed and about **7** in warp,
 and a correctness run does not care how many cycles it took. The hand-written
 config uses `warpboot=true` instead, which warps the boot only and drops to
-normal speed once the machine is up — the right setting for a human.
+normal speed once the machine is up, the right setting for a human.
 
 ### 44.3 WinUAE cannot write serial output to a file
 
@@ -14206,7 +14193,7 @@ normal speed once the machine is up — the right setting for a human.
 learned from a failing run. WinUAE has four serial backends and none of them is
 a file: a real COM port, an inter-process pipe, a loopback, and TCP.
 
-`-seriallog` was the obvious first try and produced nothing — the emulator logs
+`-seriallog` was the obvious first try and produced nothing, the emulator logs
 `SERIAL: period=372/3357, baud=9600` and not one character of payload.
 
 TCP works. `win32.serial_port=TCP://0.0.0.0:<port>/wait` makes WinUAE listen and
@@ -14228,7 +14215,7 @@ the emulator never opens a socket, and the only evidence is the absence of
 | `chipset` / `chipset_compatible` | `ecs` / `A3000` | |
 | `chipmem_size` | `4` | 512 KB units, **not** the megabytes the help text claims |
 | `a3000mem_size` | `8` | RAMSEY memory: the A3000's own 32-bit RAM on the CPU bus |
-| `fastmem_size` | `0` | Zorro II, i.e. a 16-bit path — the wrong place for the working set |
+| `fastmem_size` | `0` | Zorro II, i.e. a 16-bit path, the wrong place for the working set |
 | `filesystem2` + `uaehf0` | directory | DH0: is a host folder, so the guest reports by writing a file |
 
 Confirmed from WinUAE's own memory map, which is why the units question is
@@ -14242,7 +14229,7 @@ CPU=68030, FPU=68882 (host 64b), MMU=0, JIT=0
 ```
 
 `-m A4000` (68040) and `-c 68060` both boot and run the smoke probe, and the
-guest sees the CPU it was given — which is what the 68040/68060 build variants
+guest sees the CPU it was given, which is what the 68040/68060 build variants
 being added elsewhere will need somewhere to run on.
 
 ### 44.5 The ROM: Kickstart, with AROS behind it
@@ -14268,7 +14255,7 @@ off) and without:
 | implied clock | **26.42 MHz** | 180.13 MHz | 323 MHz |
 | `ADD.L Dn,Dm` | 2.00 cycles (published 2) | 2.00 | 2 |
 | `MULU.L Dn,Dm` | 3.88 cycles (**real 44**) | 3.18 | 3.2 |
-| Fast RAM read, 32 KB | 24611 KB/s | 32524 KB/s | — |
+| Fast RAM read, 32 KB | 24611 KB/s | 32524 KB/s |, |
 | Chip RAM read, 32 KB | 6749 KB/s | 6697 KB/s | same as Fast |
 | data cache visible | no | no | no |
 
@@ -14281,7 +14268,7 @@ comparisons defensible in a way they were not before.
 
 The **instruction costs are still wrong**, and not slightly: `MULU.L` is charged
 3.88 cycles against a 68030's published 44. And no data cache effect is visible
-even with `cpu_data_cache=true` and CacheControl asking for it — the 32 KB / 64 B
+even with `cpu_data_cache=true` and CacheControl asking for it, the 32 KB / 64 B
 read ratio is 0.88x, which `cpucal` reads as "no data cache, i.e. a 68020".
 
 So the rule is: **anything bus-bound can be compared on WinUAE `-x`; anything
@@ -14291,7 +14278,7 @@ ALU-bound cannot.** Neither emulator can price a multiply.
 
 Every card below was enabled one at a time and confirmed in WinUAE's autoconfig
 dump on the A3000 profile on 2026-07-26. All of them come up on SLIRP without
-being asked to — `slirp` is WinUAE's default network device — so there is no
+being asked to, `slirp` is WinUAE's default network device, so there is no
 per-board backend setting in the harness.
 
 **Every driver name below was read off a binary that has since driven its card
@@ -14356,14 +14343,14 @@ runs the same test that passes 14/14 on the A2065. It fails in four lines:
 That is the correct behaviour and it is as far as this can go. The hardware is
 emulated; the driver is a third-party binary nobody in this tree has. The
 `ariadne.device` in `build/testhd-ux4/devs/Networks/` is an 18-byte file reading
-`not a real driver` — an installer-detection fixture, not a driver.
+`not a real driver`, an installer-detection fixture, not a driver.
 
 **Superseded on 2026-07-29 by 44.11.** Every card in 44.7 now has a driver and
 every one of them has been run. The transcript above is what the Ariadne
 printed when nobody had `ariadne.device`; it is kept because it is still what a
 missing driver looks like, and because `AMINETXDUO_SANA2_DRIVER` being unset is
-the ordinary way to get it. The claim it was making — that acquiring the
-drivers is a licensing question rather than an engineering one — turned out to
+the ordinary way to get it. The claim it was making, that acquiring the
+drivers is a licensing question rather than an engineering one, turned out to
 be wrong in the easy direction. Seven of the eight were a search away.
 
 ### 44.9 The X-Surf-100, and the bug it found in us
@@ -14382,7 +14369,7 @@ name from the board key; it has a table.
 
 **The bug, and it is ours.** The card presented as
 `x-surf-100.device is installed (DEVS:Networks) but unit 0 would not open`, and
-that message was true — the open really did fail, in the stack and again in the
+that message was true, the open really did fail, in the stack and again in the
 diagnostic's own probe. It failed because **`DEVS:Networks` is not on the search
 path a bare device name reaches.** Exec hands an unqualified name to DOS, which
 loads `DEVS:<name>`; every third-party SANA-II driver since 1994 is installed
@@ -14400,18 +14387,18 @@ changed between them:
 
 The third line is the fix: `ami_sana2_open_device()` in `src/common/compat.c`
 tries the name as given and then retries `Networks/<name>`, which reaches DOS
-as `DEVS:Networks/<name>`. Both SANA-II opens in the tree go through it — the
+as `DEVS:Networks/<name>`. Both SANA-II opens in the tree go through it, the
 stack's in `src/sana2/sana2_device.c` and the diagnostic probe's in
-`src/tools/tool_diag.c` — so a driver in the conventional place opens, and the
+`src/tools/tool_diag.c`, so a driver in the conventional place opens, and the
 command that explains a failure agrees with the stack about whether it did. A
 name that already carries a `/` or a `:` is taken literally and never retried.
 
 **The AmiTCP hypothesis was wrong, and here is why it was worth checking.**
-(**Withdrawn — see §71.3.** The hypothesis was right; these three experiments
+(**Withdrawn, see §71.3.** The hypothesis was right; these three experiments
 could not reach the mechanism, because the driver decides once in its
 `initRoutine` and this stack opens the device before it creates the port.) The
 release notes advertise routines that "replace AmiTCP's mbuf copy routines",
-and the driver detects AmiTCP by `FindPort("AMITCP")` — a port
+and the driver detects AmiTCP by `FindPort("AMITCP")`, a port
 `src/netstack/netstack.c` creates under exactly that name. Every `mbuf_*` vector
 in our `bsdsocket.library` is `bsd_enosys`, so the theory had a mechanism. It is
 not what happened:
@@ -14424,7 +14411,7 @@ not what happened:
   and in every command's output. That switch short-circuits the detection
   before `FindPort`, so it is a clean A/B on precisely this mechanism.
 * Opening the device on an **already-running** stack, where the `AMITCP` port
-  does exist — `AddNetInterface eth1` after `eth0` is up — works, and traffic
+  does exist, `AddNetInterface eth1` after `eth0` is up, works, and traffic
   through it works.
 
 The driver contains no `bsdsocket.library` string. Nothing in this project's
@@ -14500,9 +14487,9 @@ Eight more drivers were found and every card WinUAE emulates has now been run.
 Seven of the eight came off `driver/net` or `amiga.resource.cx`; none
 of them is redistributable and none is in this repository.
 
-Each card was taken through the netstack bring-up test twice — once with
+Each card was taken through the netstack bring-up test twice, once with
 `DEVICE=` set to the bare driver name and once with the full
-`DEVS:Networks/<name>` — then through the conformance suite's `sendrecv`
+`DEVS:Networks/<name>`, then through the conformance suite's `sendrecv`
 category, then through three 300 KB HTTP transfers checked byte for byte
 against what the peer meant to send.
 
@@ -14516,7 +14503,7 @@ against what the peer meant to send.
 | X-Surf | `x-surf.device` 1.16 | autoconfig | yes | yes | 10.0.2.15 | 3/3 | yes | verified | 17/19 |
 | X-Surf-100 Z2 | `x-surf-100.device` 1.16 | autoconfig | yes | yes | 10.0.2.15 | 3/3 | yes | verified | 17/19 |
 | X-Surf-100 Z3 | `x-surf-100.device` 1.16 | autoconfig | yes | yes | 10.0.2.15 | 3/3 | yes | verified | 17/19 |
-| RTL8019 PCMCIA | `cnet.device` 1.9 | never — see 44.7 | yes | yes | 10.0.2.15 | 3/3 | yes | verified | 17/19 |
+| RTL8019 PCMCIA | `cnet.device` 1.9 | never, see 44.7 | yes | yes | 10.0.2.15 | 3/3 | yes | verified | 17/19 |
 
 **17/19 is the ceiling on SLIRP and is not a property of any card.** Test 18
 needs the helper to dial back into the guest and test 19 echoes 256 KB; both
@@ -14545,13 +14532,13 @@ host.
 | X-Surf-100 Z2 | 192.1 | 161.0 | 217.0 |
 | Ariadne | 169.4 | 136.8 | 196.2 |
 | X-Surf | 145.4 | 35.4 | 214.4 |
-| LAN Rover/EB920 | — | — | — |
+| LAN Rover/EB920 |, |, |, |
 
 The spread is worth more than the ordering. Six cards sit inside a band a
 couple of runs wide and the ranking between them moves between sessions.
 **X-Surf is the one real outlier**: two of its six transfers took 8.5 seconds
-instead of 1.4, so the mean is a stall rate rather than a rate. It recovers —
-every transfer completed and every one verified — but roughly a third of them
+instead of 1.4, so the mean is a stall rate rather than a rate. It recovers,
+every transfer completed and every one verified, but roughly a third of them
 stall first.
 
 **The EB920 does not survive a sustained receive, and that is the only card
@@ -14570,7 +14557,7 @@ profiles:
 | `sendrecv`, A3000 | identical |
 
 So the boundary is between 16 KB and 64 KB, it is not the machine profile, and
-it is not our SANA-II layer — the same code moves 300 KB through eight other
+it is not our SANA-II layer, the same code moves 300 KB through eight other
 drivers. The card's own README says it ships in an int2 and an int6 build and
 that the hardware has no ethernet address of its own. WinUAE's LAN Rover has an
 `irq` setting to match, and `AMINETXDUO_WINUAE_BOARD_OPTIONS=irq=6` with the
@@ -14600,7 +14587,7 @@ Computers built from one source tree, and our reader being forgiving about
 those two drivers contain the string `AMITCP`; none of the other six does, so
 there is no bypass to trip in them. For the two that do, the exposed case is a
 driver opened while the port exists, which a cold boot never produces. Probed
-directly — `AddNetInterface eth1` on a stack already carrying `eth0`, with
+directly, `AddNetInterface eth1` on a stack already carrying `eth0`, with
 `DEBUGLEV 5` set so the driver would say `AmiTCP optimizations enabled` if it
 had taken the path:
 
@@ -14617,14 +14604,14 @@ and on the other one in the family.
 
 `cmake/toolchain-m68k-amigaos.cmake` said `-m68020`, "68020 floor, see §9", and
 had said it since the beginning. The question was whether that floor is a
-*decision* or a *dependency* — whether something in the stack genuinely needs
+*decision* or a *dependency*, whether something in the stack genuinely needs
 68020 instructions, in which case a 68000 build is a porting job rather than a
 build-matrix entry.
 
 **§9 is a decision, and it says so.** Decision 1 reads "Minimum target: 68020 +
 OS 3.1, 4 MB. Build `-m68020`; size packet pools for ~4 MB Fast RAM". Its stated
-consequences are about *scope* — which optional subsystems fit, and whether TLS
-is viable — not about instruction availability. The one place §9 talks about the
+consequences are about *scope*, which optional subsystems fit, and whether TLS
+is viable, not about instruction availability. The one place §9 talks about the
 instruction set at all is the M9 gate, which measured a TLS handshake and
 rejected it for being slow, not for failing to assemble.
 
@@ -14649,12 +14636,12 @@ is the finding worth keeping:
 | target | 32×32 → 64 | needs `__muldi3` |
 |---|---|---|
 | 68000 | no 32-bit multiply at all, only `mulu.w` | yes |
-| 68020/68030/68040 | `mulu.l Dn,Dh:Dl`, one instruction | no — GCC inlines it |
+| 68020/68030/68040 | `mulu.l Dn,Dh:Dl`, one instruction | no, GCC inlines it |
 | 68060 | **dropped**; traps to vector 61, emulated by `68060.library` | yes |
 
 Both new targets failed the link with exactly one missing symbol and the same
 one. `libgcc.a` in this toolchain is the zero-byte file §9's landmine note
-already described, and there is only one of it — `-print-libgcc-file-name`
+already described, and there is only one of it, `-print-libgcc-file-name`
 returns the same empty archive for every multilib. `src/common/ami_udivdi3.c`
 now supplies `__muldi3`, plus `__mulsi3`, `__udivsi3`, `__umodsi3`, `__divsi3`
 and `__modsi3` for the 68000, where every 32-bit `*`, `/` and `%` in C becomes a
@@ -14666,7 +14653,7 @@ edge cases, 0 failures.
 
 `__muldi3` is written as four `mulu.w` partial products with the operands
 declared `unsigned short`, so GCC uses its widening `umulhisi3` pattern rather
-than promoting to `int` and calling `__mulsi3` — which would have recursed. On
+than promoting to `int` and calling `__mulsi3`, which would have recursed. On
 a 68060 this routine *is* the bignum inner loop, reached from every RSA and EC
 operation, so it is worth the care.
 
@@ -14682,8 +14669,8 @@ keys on the canonical `-mcpu` value, so:
 -m68060   -> libm060    -m68020-40 -> .      <-- not libm020
 ```
 
-**`-m68040` silently selects the 68000 C library.** It links and it runs — 68000
-code is valid on a 68040 — but every 32-bit multiply and divide inside newlib
+**`-m68040` silently selects the 68000 C library.** It links and it runs, 68000
+code is valid on a 68040, but every 32-bit multiply and divide inside newlib
 becomes a subroutine call, on the one target that has the instructions. The
 mapping used instead is `-m68020 -mtune=68040`, which keeps `libm020` and
 schedules for the 040; the 68040 implements the entire 68020 instruction set, so
@@ -14716,7 +14703,7 @@ Exception 3 (20d9 222a9c) at 222a9c -> f80ad0!
 Exception 3 is an **address error**, and `20d9` is `move.l (a1)+,(a0)+` at
 `.Llong` in `src/net68k/n68k_copy.S`. That routine brings the *destination* to a
 longword boundary and then reads longwords from wherever the source happens to
-be — correct on a 68020, which fetches a longword from any address for one extra
+be, correct on a 68020, which fetches a longword from any address for one extra
 bus cycle, and fatal on a 68000, which traps on any word or longword access to an
 odd address. `AMINETXDUO_NET68K_MEMCPY` resolves `memcpy()` to this routine, so
 the fault was every copy in the stack with mismatched pointer parity. The C
@@ -14724,12 +14711,12 @@ fallback in `n68k_copy.c` had the identical bug, because it was written to follo
 the identical rule.
 
 **The condition is parity, not alignment.** An address of 2 mod 4 is perfectly
-legal for `move.l` on a 68000 — it simply becomes two word accesses. So the fix
+legal for `move.l` on a 68000, it simply becomes two word accesses. So the fix
 is one test at entry: if the two pointers disagree in bit 0, no amount of
 aligning the destination will ever make the source even and the byte loop is the
 only option; if they agree, aligning the destination advances the source by the
 same count and leaves it even, and the existing code is legal unchanged. Five
-instructions, `#ifdef`'d to the 68000 — on a 68020 that guard would be a 4×
+instructions, `#ifdef`'d to the 68000, on a 68020 that guard would be a 4×
 slowdown taken to avoid an 18% one, and the 68020 object is byte-for-byte what
 it was before.
 
@@ -14740,16 +14727,16 @@ could not open a socket.
 ### 45.4 What was run, and on what
 
 `-m A600` with `Kickstart v3.1 r40.63 (A500-A600-A2000)`, which is a real 7 MHz
-68000 with no MMU. The A1200 ROM cannot be used for this — it wants a 68020 and
-FS-UAE refuses it — and neither can the AROS ROM be assumed equivalent.
+68000 with no MMU. The A1200 ROM cannot be used for this, it wants a 68020 and
+FS-UAE refuses it, and neither can the AROS ROM be assumed equivalent.
 
 | harness | 68000 / A600 | 68060 | 68040 |
 |---|---|---|---|
 | `tools/smoke/smoke` | 5 / 5 | 5 / 5 | 5 / 5 |
-| `tools/smoke/lifecycle` | 18 / 18 | 18 / 18 | — |
-| `tools/smoke/KernelStop` | 8 / 8 | — | — |
+| `tools/smoke/lifecycle` | 18 / 18 | 18 / 18 |, |
+| `tools/smoke/KernelStop` | 8 / 8 |, |, |
 | `tests/ram_driver` | 32 / 32 | 32 / 32 | 32 / 32 |
-| `tests/mbuf_bpf` | 154 / 154 | 154 / 154 | — |
+| `tests/mbuf_bpf` | 154 / 154 | 154 / 154 |, |
 | `tests/soak` | 98 / 98 | 98 / 98 | 98 / 98 |
 
 315 checks on the 68000, 0 failures. The 68060 and 68040 runs are CPU overrides
@@ -14757,7 +14744,7 @@ on the A1200 profile.
 
 **One harness obstacle, not fixed here.** `tools/fsuae-run.sh:184` compiles its
 `envsetup` helper with a hardcoded `-m68020`, and the Startup-Sequence runs it
-before the test — so on a 68000 the run dies with `Illegal instruction: 49c1`
+before the test, so on a 68000 the run dies with `Illegal instruction: 49c1`
 (`extb.l`) before any of our code executes. The runs above were done by
 populating that script's cached `build/envsetup` with a `-m68000` build of the
 same source. The arch there should follow the binary under test; that file has
@@ -14765,7 +14752,7 @@ another owner and was left alone.
 
 **Two things the emulator does not prove.** FS-UAE executes the 68060's dropped
 `MULU.L` forms rather than trapping them, so a 68060 run here does not exercise
-`68060.library`'s emulation path — which is precisely the cost that keeps
+`68060.library`'s emulation path, which is precisely the cost that keeps
 `AMINETXDUO_CRYPTO68K_ASM` off for that target, and it remains reasoned rather
 than measured. And an A600 with 8 MB of Zorro II Fast RAM is not a machine
 anyone owns; the CPU is real, the memory configuration is not.
@@ -14793,7 +14780,7 @@ used to turn away 68000s and 68010s outright.
 
 **The commands are built once, for the 68000, and every machine runs that set.**
 They are a few hundred lines each around `bsdsocket.library` calls; the code
-whose instruction set matters — checksums, copies, bignums — is in the
+whose instruction set matters, checksums, copies, bignums, is in the
 libraries, which are per-CPU. Twenty-one commands times three would add roughly
 9 MB to a 3.8 MB archive so that `ping` could parse its arguments faster. It
 costs no features: `src/tools` reaches `tls.library` through its published
@@ -14801,9 +14788,9 @@ vectors at run time, so the 68000-built `fetch` still does `https:` on a machine
 whose installed library has TLS.
 
 **There is no 68000 `tls.library`, and that is a judgement rather than an
-omission.** §9's M9 gate measured a real handshake on the 68020 floor — 185.5 s
+omission.** §9's M9 gate measured a real handshake on the 68020 floor, 185.5 s
 with both ends on one CPU, 158.0 s for the RSA-2048 private operation alone,
-~13–20 s derived for a client-only handshake — and concluded that offload is the
+~13–20 s derived for a client-only handshake, and concluded that offload is the
 realistic path even there. A 7 MHz 68000 on a 16-bit bus is roughly a quarter of
 that 14 MHz 68020 before accounting for having no 32-bit multiply, and the
 hand-written limb assembly cannot run on it either. Shipping it would ship the
@@ -14820,7 +14807,7 @@ configurations it had. The `m68040` entry earns its place by catching anyone who
 ## 46. Why a WHOIS client knew what an Ariadne was (2026-07-27)
 
 Every command carried the SANA-II driver table and the prose that goes with
-it — sixteen device names, and paragraphs about routers and cables — because
+it, sixteen device names, and paragraphs about routers and cables, because
 `tool_diag.c` is in `TOOLS_COMMON_SOURCES`. **3,842 bytes of it in `whois`,**
 a 27 KB program with no way to reach a line of it.
 
@@ -14853,7 +14840,7 @@ never collect its text, because the text was never attached to it.
 
 The `-fdata-sections` result is worth restating because it is the one the
 internet recommends: it does not shrink anything here, it *grows* the output,
-and it silently destroys the version tag — which is why
+and it silently destroys the version tag, which is why
 `cmake/check-version-tag.cmake` exists. That guard caught it within a minute.
 
 **`-flto` is the one to revisit.** It is the only mechanism that acts before
@@ -14863,7 +14850,7 @@ section assignment.
 future image will not fix it.** A custom bebbo `amiga16.1` toolchain was built
 with `--disable-plugins` removed. Result: `liblto_plugin.so` installed, `ld`
 with plugin support compiled in, and the plugin symlinked into
-`/opt/amiga/lib/bfd-plugins` where `ld` auto-loads it -- and the error is
+`/opt/amiga/lib/bfd-plugins` where `ld` auto-loads it, and the error is
 byte-identical, `plugin needed to handle lto object`.
 
 The reason is the object format. `m68k-amigaos-objdump -f` reports **`file
@@ -14878,7 +14865,7 @@ Two failure modes, one cause: the commands fail loudly because `crt0.o` is a
 real object demanding `main` and `main` exists only as IR; `bsdsocket.library`
 fails **silently** because it links `-nostartfiles`, so nothing demands
 anything and `ld` emits a structurally valid hunk file of symbols and IR with
-no code -- 1,089,004 bytes that `strip --strip-unneeded` reduces to 196.
+no code, 1,089,004 bytes that `strip --strip-unneeded` reduces to 196.
 
 Enabling it would need a hunk backend in libiberty `simple-object`, which
 serves both the plugin claim path and `lto1`'s section read-back. Before that
@@ -14893,8 +14880,8 @@ route to what 46.1 is actually about.
 
 ### 46.3 What was done instead
 
-Exactly three functions touch the device table — `tool_explain_device`,
-`tool_explain_no_interfaces`, `tool_scan_devices` — so they moved to
+Exactly three functions touch the device table, `tool_explain_device`,
+`tool_explain_no_interfaces`, `tool_scan_devices`, so they moved to
 `tool_devdiag.c` with it, linked by the five commands that configure an
 interface.
 
@@ -14922,8 +14909,8 @@ ROM. `whois`'s ~20 KB of accounted code:
 | newlib stdio teardown | 2,090 | 10.3% |
 | crt0/startup | 1,420 | 7.0% |
 
-newlib's `malloc` here is written in **C++** — `Tree::fixAdd`, `MemMap::alloc`,
-mangled symbols and all — which is also why `___exitcpp` and the
+newlib's `malloc` here is written in **C++**, `Tree::fixAdd`, `MemMap::alloc`,
+mangled symbols and all, which is also why `___exitcpp` and the
 constructor/destructor lists appear. The stdio comes in through the **exit
 path**, not through printing: `__sflush_r`, `_fclose_r`, `___fp_unlock_all`,
 dragged in by `crt0`'s `__EXIT_LIST__` although nothing opens a `FILE*`.
@@ -14931,8 +14918,8 @@ dragged in by `crt0`'s `__EXIT_LIST__` although nothing opens a `FILE*`.
 Oddities noted and not chased: `strlen` is 952 bytes and `strstr` 636, which
 look like unrolled multilib versions.
 
-`-noixemul` would sidestep the allocator and the stdio both — libnix's
-`ncrt0.o` is also the crt0 without the frame bug of §42 — but §5.4 already
+`-noixemul` would sidestep the allocator and the stdio both, libnix's
+`ncrt0.o` is also the crt0 without the frame bug of §42, but §5.4 already
 records that it is unusable with this newlib toolchain because it breaks
 `sys/reent.h`.
 
@@ -14950,7 +14937,7 @@ machine". That was wrong, and it had been wrong since the first line of this
 project was written.
 
 **NDK 3.2 ships Olaf Barthel's own `bsdsocket.library` autodoc**, at
-`SANA+RoadshowTCP-IP/doc/bsdsocket.doc` — 10,436 lines, 121 functions, in the
+`SANA+RoadshowTCP-IP/doc/bsdsocket.doc`, 10,436 lines, 121 functions, in the
 same NDK this tree already compiles against, beside `interfaces/bsdsocket.xml`
 and the `netinclude/` headers we have been reading for a year. Nobody looked
 in `doc/`.
@@ -14966,14 +14953,14 @@ Four things, and each of them is a defect that compiles.
 `struct List *` and nothing in any header names the node type, which is why
 this was stubbed. The autodoc: *"Pointer to a 'struct List', whose individual
 Nodes contain the names of the respective interfaces (found in
-`node->ln_Name`)"*. Not a Roadshow-private node with fields after it — a
+`node->ln_Name`)"*. Not a Roadshow-private node with fields after it, a
 plain `Node` carrying a name. A caller walks it with `ln_Name` and nothing
 else. A list of the wrong node shape does not fail here; it gurus inside the
 application on the first dereference.
 
 **Every `IFQ_*` tag's `ti_Data` is a pointer to caller storage.**
 `libraries/bsdsocket.h` documents each tag individually and says nothing about
-this. The autodoc types every one of them — `(LONG *)`, `(ULONG *)`,
+this. The autodoc types every one of them, `(LONG *)`, `(ULONG *)`,
 `(struct sockaddr *)`, `(SBQUAD_T *)`. Getting it backwards writes a number
 into a pointer the application still owns.
 
@@ -14990,7 +14977,7 @@ whose `rtm_msglen` member is zero"*.
 `libraries/bsdsocket.h` defines `SM_Offline`, `SM_Online`, `SM_Down` and
 `SM_Up` in one block with no hint that they are not interchangeable. The
 autodoc: for `IFQ_State`, *"the values returned can be either 'SM_Down' or
-'SM_Up'"* — the online/offline pair belongs to `IFC_State`, which acts on the
+'SM_Up'"*, the online/offline pair belongs to `IFC_State`, which acts on the
 SANA-II device rather than on the stack's view of it. One block of `#define`s,
 two different vocabularies, and only the document says which is which.
 
@@ -14999,7 +14986,7 @@ members are the same eleven; the ORDER is not. The autodoc lists
 `rtm_index, rtm_pid, rtm_addrs, rtm_seq, rtm_errno, rtm_flags, rtm_use`; the
 NDK header has `rtm_index, rtm_flags, rtm_addrs, rtm_pid, rtm_seq, rtm_errno,
 rtm_use`. The header is the ABI, because it is what a caller compiles against
-— which is a reminder that this document is a *description* of the interface
+which is a reminder that this document is a *description* of the interface
 and the headers beside it are the interface.
 
 ### 47.2 Where the document is ambiguous, the vector stays unanswered
@@ -15007,13 +14994,13 @@ and the headers beside it are the interface.
 Two tags out of the forty-two are typed `(LONG)` where every one of their
 neighbours is `(LONG *)`: `IFQ_MaxReadRequests` and `IFQ_MaxWriteRequests`.
 On a query that has no other way to return anything, a bare `LONG` can only be
-a typo — but writing through a `ti_Data` the caller passed as a scalar
+a typo, but writing through a `ti_Data` the caller passed as a scalar
 corrupts its memory, and being right about the typo is not worth that. Both
 are left unanswered.
 
 The same rule is applied at tag granularity throughout. A tag this stack keeps
-no true value for is **left alone** — the caller's storage is not written at
-all — rather than filled with a zero indistinguishable from a measurement:
+no true value for is **left alone**, the caller's storage is not written at
+all, rather than filled with a zero indistinguishable from a measurement:
 `IFQ_LastStart` (nothing records when an interface came up),
 `IFQ_AddressLeaseExpires` (all-zero is documented to mean *infinite*, the one
 wrong answer for a DHCP lease), `IFQ_GetBytesIn`/`Out` (no per-interface byte
@@ -15023,7 +15010,7 @@ counters), `IFQ_GetSANA2CopyStats`, the multicast counters, `IFQ_OutputDrops`.
 and are answered with zero, because zero is what the document says an
 unknown answer looks like: *"If the address is not known, then the IP address
 filled in by this tag will be zero."* The resolver's own name servers are
-deliberately not put there — they are stack-wide, and reporting them as
+deliberately not put there, they are stack-wide, and reporting them as
 belonging to one interface would be a different fact with the same shape.
 
 ### 47.3 Testing a shape a compiler cannot check
@@ -15037,7 +15024,7 @@ hand, and runs on a booted A1200 with an A2065 behind the stack
 
 **It poisons every destination with `0xA5` first.** Half the tags are
 documented above to be left alone, so a test that pre-zeroed could not tell a
-deliberate omission from a case that fell through into its neighbour — which
+deliberate omission from a case that fell through into its neighbour, which
 is the exact defect the poison caught nothing of, and would have.
 
 The transcript from the first green run:
@@ -15068,9 +15055,9 @@ caller reserved, and every other line would still have read correctly.
 ### 47.4 One error the autodoc does not give
 
 There is no documented `errno` for "no such interface". `ENXIO` is used,
-because that is what the rest of this library already answers for one —
+because that is what the rest of this library already answers for one,
 `netstatus.c` maps `NX_INVALID_INTERFACE` to it and 4.4BSD's `SIOCGIF*`
-ioctls use it — so a caller sees one code for the condition however it asked.
+ioctls use it, so a caller sees one code for the condition however it asked.
 That is a choice, not a finding, and it is written down here so the next
 person does not have to work out whether it was.
 
@@ -15078,7 +15065,7 @@ person does not have to work out whether it was.
 
 The autodoc says nothing about what happens to a tag list whose fourth tag is
 refused. Applying tags as they are read would leave the interface half
-configured — new address, old mask, still down — which is the one state from
+configured, new address, old mask, still down, which is the one state from
 which a user cannot tell what went wrong. So the list is parsed and validated
 in full, and **nothing is applied unless all of it can be**.
 
@@ -15087,7 +15074,7 @@ and `nx_ip_interface_address_set()` changes both in one call; applying them
 separately would put a mismatched pair on the interface for as long as it took
 to read the next tag. `tests/tools/ifprobe.c` asserts it directly, by sending
 a legal `IFC_NetMask` in front of an unsupported `IFC_Metric` and reading the
-mask back — a one-pass implementation passes the "call was refused" check and
+mask back, a one-pass implementation passes the "call was refused" check and
 fails that one.
 
 A tag this stack cannot honour makes the whole call fail with `EOPNOTSUPP`
@@ -15119,14 +15106,14 @@ stopped a monitor from ever asking the ones that work.
 
 `AddInterfaceTagList()` and `RemoveInterface()` were on that list and are not
 any more; §47.11 is what it took. `BeginInterfaceConfig()` and
-`AbortInterfaceConfig()` came off it too, though not all the way — §47.12.
+`AbortInterfaceConfig()` came off it too, though not all the way, §47.12.
 
 `GetNetworkStatistics()` is in netstats.c; see 47.9.
 
 ### 47.7 Routing: the grammar has no netmask in it
 
 `AddRouteTagList()` takes `RTA_Destination`, `RTA_Gateway`,
-`RTA_DefaultGateway`, `RTA_DestinationHost` and `RTA_DestinationNet` — and
+`RTA_DefaultGateway`, `RTA_DestinationHost` and `RTA_DestinationNet`, and
 that is the whole grammar. **There is no netmask tag.** The prefix length is
 implied:
 
@@ -15138,8 +15125,8 @@ so `192.168.66.0` becomes a `/24` and `192.168.67.7` becomes a `/32`, from
 nothing but the address, and `RTA_DestinationHost`/`RTA_DestinationNet`
 override the guess. "Network" means the **classful** network, because that is
 the only prefix an address alone can imply. It is a poor netmask in 2026; it
-is also the one the published API defines, and — the part that makes it
-non-negotiable — `DeleteRouteTagList()` has the same grammar, so an entry
+is also the one the published API defines, and, the part that makes it
+non-negotiable, `DeleteRouteTagList()` has the same grammar, so an entry
 added under one rule can only ever be found again under the same rule.
 
 `RTA_Destination` with no `RTA_Gateway` is refused with `EINVAL`. The autodoc
@@ -15153,8 +15140,8 @@ followed by a small number of sockadders, interpreted by position ... the
 sequence is least significant to most significant bit within the vector"*.
 So `rtm_addrs` is the map, the sockaddrs follow in `RTA_DST`, `RTA_GATEWAY`,
 `RTA_NETMASK` order, and the table ends at *"a dummy entry whose `rtm_msglen`
-member is zero"*. A caller handed a bare array of `rt_msghdr` — which is what
-the prototype alone suggests — walks off the end of the first entry.
+member is zero"*. A caller handed a bare array of `rt_msghdr`, which is what
+the prototype alone suggests, walks off the end of the first entry.
 
 The BSD padding rule (each sockaddr rounded up to a multiple of
 `sizeof(long)`) is a no-op here and is deliberately not written out:
@@ -15167,7 +15154,7 @@ started.
 
 ### 47.8 The one hole NetX Duo leaves in `DeleteRouteTagList()`
 
-*"ESRCH if requested to delete a non-existent entry"* — and it does, except on
+*"ESRCH if requested to delete a non-existent entry"*, and it does, except on
 an empty table. `nx_ip_static_route_delete()` returns `NX_SUCCESS` outright
 when `nx_ip_routing_table_entry_count` is zero, without searching.
 
@@ -15178,7 +15165,7 @@ success there and fails everywhere else. `rtprobe.c` ran that experiment in
 the wrong order first and found it; the ordering, and the reason for it, are
 now written into the probe.
 
-`EEXIST` — the other code the `-route-` page names — is not used, because
+`EEXIST`, the other code the `-route-` page names, is not used, because
 NetX Duo does not produce the condition: a second add for a destination
 already in the table updates its next hop and reports success. That is the
 "last one wins" behaviour a route command gives, so it is reported as the
@@ -15192,8 +15179,8 @@ produce an API nothing can use and that silently disagrees with Roadshow.
 
 ### 47.9 `GetNetworkStatistics()`, and the one place the tag rule cannot apply
 
-The return value is a **byte count** — *"length -- Number of bytes copied, or
--1 for failure"* — not zero-on-success and not an entry count, which were the
+The return value is a **byte count**, *"length, Number of bytes copied, or
+-1 for failure"*, not zero-on-success and not an entry count, which were the
 two other readings the prototype allows and which `roadshow.c` named as the
 reason this stayed a stub. A NULL destination is a *success* that copies
 nothing and answers *"how much memory would be required"*.
@@ -15212,14 +15199,14 @@ unnamed is zero because it is uncounted. The four that are answered:
 | `NETSTATUS_icmp` | the two histogram slots `nx_icmp_info_get()` can fill, plus the checksum errors |
 
 `NETSTATUS_mb`, `igmp`, `mrt` and `rt` are refused with `EOPNOTSUPP`, which is
-the same statement — an all-zero `mbstat` would report a
+the same statement, an all-zero `mbstat` would report a
 healthy mbuf allocator that does not exist.
 
 `ip_invalid_packets` and `ip_receive_packets_dropped` are deliberately not
 placed anywhere: `ipstat` splits input failure into seven named causes and
 NetX Duo counts them as one number, so putting it in any of the seven would be
 a diagnosis this stack did not make. `tcps_connattempt`/`tcps_accepts` are
-left alone for the same reason — `tcp_connections` counts both directions
+left alone for the same reason, `tcp_connections` counts both directions
 together.
 
 ### 47.10 One `listen()` was two sockets, and neither was listening
@@ -15229,7 +15216,7 @@ enumeration is **not** NetX Duo's. They agree up to `CLOSE_WAIT` and then
 diverge: NetX Duo has `FIN_WAIT_2 = 8, CLOSING = 9, TIMED_WAIT = 10,
 LAST_ACK = 11`; `tcp_fsm.h` has `CLOSING = 7, LAST_ACK = 8, FIN_WAIT_2 = 9,
 TIME_WAIT = 10`. The first four states invite a subtract-one — `NX_TCP_CLOSED`
-is 1 and `TCPS_CLOSED` is 0 — and a subtract-one reports a connection in
+is 1 and `TCPS_CLOSED` is 0, and a subtract-one reports a connection in
 `LAST_ACK` as being in `FIN_WAIT_2`. It is a table.
 
 The table was the easy half. **Running the probe showed one `listen()` as two
@@ -15244,8 +15231,8 @@ SYN_RECEIVED, not LISTEN". Reported literally, a monitor sees a socket
 apparently mid-handshake with nobody, and a phantom closed socket beside it.
 
 So `netstats.c` reads the IP's active listen requests, **skips** the parked
-spare — before counting it, so a caller that sized its buffer from the
-NULL-destination call gets the same number of entries back — and reports the
+spare, before counting it, so a caller that sized its buffer from the
+NULL-destination call gets the same number of entries back, and reports the
 descriptor's own socket as `TCPS_LISTEN`. One `listen()`, one entry, in the
 state the application is in rather than the state NetX Duo left it in.
 
@@ -15257,15 +15244,15 @@ clean, every structural assertion passed, and the answer was wrong.
 `AddInterfaceTagList()` and `RemoveInterface()` were stubbed on the grounds
 that half the work belongs to NetX Duo and half to the netstack, and an
 interface that got only one half would never have its SANA-II device closed.
-That is still true; the answer was to put both halves in one place —
-`netstack_interface_add()` / `netstack_interface_remove()` — and let the
+That is still true; the answer was to put both halves in one place,
+`netstack_interface_add()` / `netstack_interface_remove()`, and let the
 library call it.
 
 **`nx_ip_interface_detach()` does more of the work than expected.** It resets
 every TCP connection routed out of the interface, deletes its ARP entries,
 drops the static routes and the default gateway that pointed at it, leaves its
-multicast groups, calls the driver with `NX_LINK_INTERFACE_DETACH` — which is
-where `sana2_driver.c` already stops the readers and unbinds — and zeroes the
+multicast groups, calls the driver with `NX_LINK_INTERFACE_DETACH`, which is
+where `sana2_driver.c` already stops the readers and unbinds, and zeroes the
 `NX_INTERFACE`. Almost none of that had to be written.
 
 **The order is the whole design.** `NX_LINK_DISABLE` runs *first*, before
@@ -15276,19 +15263,19 @@ interface is then "unfreeable and unrestartable, because the device holds
 pointers into it". Finding that out *after* `nx_ip_interface_detach()` had
 zeroed the `NX_INTERFACE` would leave nowhere to put the interface back.
 
-When it happens, nothing is freed and the interface stays registered — down,
+When it happens, nothing is freed and the interface stays registered, down,
 and not removable until `NetShutdown`. That is precisely the state the
 autodoc warns about under `force` ("memory may remain allocated until you
 shut down the network"), and it is reported with `EBUSY` rather than entered
 silently. `force` itself overrides only the *other* refusal: TCP connections
 still routed out of the interface, which `nx_ip_interface_detach()` would
-reset — a visible event at the far end of the wire, and the thing
+reset, a visible event at the far end of the wire, and the thing
 "RemoveInterface() will refuse to remove an interface which is still in use"
 is about.
 
 **The slot has to be predicted.** `nx_ip_interface_attach()` scans
 `nx_ip_interface[]` from zero and takes the first entry whose
-`nx_interface_valid` is clear — but `ami_sana2_attach()` has to record the
+`nx_interface_valid` is clear, but `ami_sana2_attach()` has to record the
 `(NX_IP, index)` binding *before* the attach, because the attach calls the
 driver and the driver looks itself up by it. So the scan is done twice, once
 here and once inside NetX Duo, and the result is checked afterwards rather
@@ -15296,7 +15283,7 @@ than assumed.
 
 `ns_IfaceCount` is **not** decremented by a removal. It is the number of slots
 ever populated, not the number live, so that removing one in the middle does
-not renumber the ones above it — an interface index is a handle a caller may
+not renumber the ones above it, an interface index is a handle a caller may
 already be holding.
 
 #### The type disagreement, and which source wins each half
@@ -15311,8 +15298,8 @@ outright:
 
 The header wins on the **type**, because the header is what a caller compiles
 against. The autodoc wins on the **values**, because the header has none.
-`LONG` 1 for success and 0 for failure satisfies both; 0-for-success — which
-every neighbouring call in the API uses — satisfies neither and would report
+`LONG` 1 for success and 0 for failure satisfies both; 0-for-success, which
+every neighbouring call in the API uses, satisfies neither and would report
 failure as success to every `BOOL` test a caller writes.
 
 #### What `AddInterfaceTagList()` refuses, and why it is most of the tag list
@@ -15321,7 +15308,7 @@ The tags describe a driver binding this stack does not make configurable: the
 EtherTypes are the RFC 894 ones, the RX depth is computed from the packet pool
 at open time, the TX ring is a compile-time array, there is no promiscuous
 mode, and the shim reads the station address rather than setting one. All of
-them are refused with `EOPNOTSUPP` rather than ignored — an interface brought
+them are refused with `EOPNOTSUPP` rather than ignored, an interface brought
 up with a packet filter mode that was quietly dropped is not the interface the
 caller asked for, and it would take a packet capture to find out.
 
@@ -15346,7 +15333,7 @@ up like any other interface.
 Everything it has to say, it says by filling in `aam_Result` and replying the
 caller's message. So the `ENOSYS` stub was not refusing anything: it returned
 −1 in a register the caller cannot see, and **never replied the message the
-caller was already waiting on**. An application that did the documented thing —
+caller was already waiting on**. An application that did the documented thing,
 
 ```c
 BeginInterfaceConfig(aam);
@@ -15355,7 +15342,7 @@ WaitPort(port);
 
 waited forever. That is a worse failure than an unimplemented vector, and it
 was invisible because the dense stub table's whole design rule is "never
-NULL, always return an error" — which is exactly right for the 120 vectors
+NULL, always return an error", which is exactly right for the 120 vectors
 that *can* return one.
 
 The same shape applies to `AbortInterfaceConfig()`, `DeleteAddrAllocMessage()`
@@ -15366,32 +15353,32 @@ something the caller is blocked on.
 
 The whole message half, and all of the validation:
 
-* **`CreateAddrAllocMessageA()`** — the autodoc enumerates *ten* distinct
+* **`CreateAddrAllocMessageA()`**, the autodoc enumerates *ten* distinct
   error codes for this one call and names the condition for each, which is
   unusually specific and worth honouring exactly. A caller told
   `CAAME_Client_identifier_too_short` can fix its input; one told "failed"
   cannot. Every buffer the `CAAMTA_*` tags ask for is carved out of one block
-  that the message sits at the top of, longword-aligned — two of them are
+  that the message sits at the top of, longword-aligned, two of them are
   arrays of `ULONG` and an m68k handed a misaligned one takes an address
   error rather than a wrong answer.
-* **`DeleteAddrAllocMessage()`** — *"can only deallocate address allocation
+* **`DeleteAddrAllocMessage()`**, *"can only deallocate address allocation
   messages created by `CreateAddrAllocMessageA()` and will not work with
   anything else"*, so it has to be able to **tell**. The message carries a
   cookie in `aam_Reserved`, which is reserved from the *application's* side
-  and not from the library's. A hand-filled message — which
-  `BeginInterfaceConfig()` explicitly accepts — has no cookie and is refused
+  and not from the library's. A hand-filled message, which
+  `BeginInterfaceConfig()` explicitly accepts, has no cookie and is refused
   rather than freed. `aamprobe.c` calls it on a message on its own stack; a
   library that could not tell would free a stack frame and the machine would
   not survive the next allocation.
-* **`BeginInterfaceConfig()`** — every documented failure condition, checked
+* **`BeginInterfaceConfig()`**, every documented failure condition, checked
   and **replied**: `AAMR_VersionUnknown`, `AAMR_InterfaceNotKnown`,
   `AAMR_InterfaceWrongType`, `AAMR_AddressKnown`.
-* **`AbortInterfaceConfig()`** — a genuine no-op rather than a stub standing
+* **`AbortInterfaceConfig()`**, a genuine no-op rather than a stub standing
   in for one. Nothing is ever in flight, and the autodoc already tells callers
   *"There is no guarantee that the message can be intercepted"*.
 
 `AAM_VERSION` is **2**, not the 1 the autodoc's prose describes, and
-`AAM_VERSION_MINIMUM` is 1 — which only means anything if 1 is still accepted.
+`AAM_VERSION_MINIMUM` is 1, which only means anything if 1 is still accepted.
 Both are taken, and `aam_Unicast` is honoured only at 2 or above, because the
 header says so at the field itself. That is the third place in this document
 where the header and the autodoc disagree and the header is newer.
@@ -15399,7 +15386,7 @@ where the header and the autodoc disagree and the header is newer.
 #### And the allocation itself: `AAMP_DHCP` is run
 
 One `Process` per request, and the deadline problem dissolves with it: the
-worker owns the whole lifecycle — start the client on the interface, poll to
+worker owns the whole lifecycle, start the client on the interface, poll to
 its own deadline, fill the message in, `ReplyMsg()`, exit. Nothing needs a
 timer, because the party with the deadline is the party with a `Process` and
 a `dos.library` to `Delay()` with.
@@ -15410,12 +15397,12 @@ non-blocking pieces; the netstack has no `dos.library` and no business
 blocking, and somebody had to own the ten-second floor.
 
 The worker holds no `OpenCnt` reference while executing out of the library
-segment, exactly like the TCP: handler — so the count is taken *before*
+segment, exactly like the TCP: handler, so the count is taken *before*
 `CreateNewProc()`, given back inside `Forbid()` as the worker's last act, and
 `bsd_lib_expunge()` declines while it is non-zero. That guard already existed
 for `bsd_tcp_handler_alive()`; this is the second user of the same reasoning.
 
-`AAMP_BOOTP` still has no client here — NetX Duo ships DHCP and BOOTP is a
+`AAMP_BOOTP` still has no client here, NetX Duo ships DHCP and BOOTP is a
 different wire protocol. `AAMP_SLOWAUTO`/`AAMP_FASTAUTO` are RFC 3927
 self-assignment and `NX_AUTO_IP` *is* in the build driving the `LINKLOCAL`
 type; what is missing is any way to tell the two flavours apart, since the
@@ -15424,9 +15411,9 @@ are replied `AAMR_Ignored`.
 
 #### Two bugs the live run found, and neither was in the new code
 
-The probe removes the interface the run is riding on, adds it back — which is
+The probe removes the interface the run is riding on, adds it back, which is
 what `AddInterfaceTagList()` leaves you with, an interface with no address at
-all — and asks for a lease. SLIRP runs a DHCP server, so it is a real
+all, and asks for a lease. SLIRP runs a DHCP server, so it is a real
 DISCOVER/OFFER/REQUEST/ACK.
 
 The first run answered **`AAMR_Busy`, instantly**.
@@ -15438,13 +15425,13 @@ byte saying it had a lease. Two separate defects fell out of one symptom:
 
 1. **`netstack_interface_remove()` never stopped DHCP.** A removed interface's
    client went on trying to renew a lease for a detached slot. It now stops
-   and *releases* — the address really is not in use any more, and telling the
+   and *releases*, the address really is not in use any more, and telling the
    server so is what lets the next machine have it.
 2. **The start guard was the wrong shape.** It refused unless the state was
    `NOT_STARTED`, which reads as "has the client ever run here" rather than
    "is an allocation under way". An interface that is `BOUND` has already been
    answered `AAMR_AddressKnown` one layer up, and a re-added one has had its
-   state cleared — so the test is now `AMI_DHCP_WORKING` and nothing else.
+   state cleared, so the test is now `AMI_DHCP_WORKING` and nothing else.
 
 Both are bugs in code shipped earlier in this session, found only because the
 new path exercised the old one from an angle nothing else did.
@@ -15464,7 +15451,7 @@ begin a second time: result 4, replied -- correctly
 
 Every line is an assertion. **"still out"** is the one that says the call is
 asynchronous as documented rather than blocking its caller for ten seconds.
-**10.0.2.15** could not have been invented by this stack — the interface had
+**10.0.2.15** could not have been invented by this stack, the interface had
 been freshly added and was empty. **`router[0]`** is DHCP option 3, which the
 server sends only because `nx_dhcp_user_option_request()` put it in the
 parameter request list, so its presence tests a call that would otherwise
@@ -15475,7 +15462,7 @@ merely reported.
 #### The two paths a working server hides
 
 `AAMR_Timeout` and `AAMR_Aborted` are unreachable while SLIRP answers in four
-tenths of a second — neither the deadline nor the abort window ever opens. The
+tenths of a second, neither the deadline nor the abort window ever opens. The
 fix costs nothing: **take the interface down first.** Nothing leaves the card,
 DISCOVER goes unanswered, and the worker runs to its own deadline. That is the
 only path that proves the deadline exists at all, and the only one that
@@ -15490,7 +15477,7 @@ slow: waited at least -- correctly the 10-second floor
 ```
 
 Five ticks from `AbortInterfaceConfig()` to the reply is the worker noticing
-the flag on its next poll — the race the autodoc warns about ("the process can
+the flag on its next poll, the race the autodoc warns about ("the process can
 complete before this routine has managed to abort it") resolved the other way,
 which is the way that needs the flag to work.
 
@@ -15510,7 +15497,7 @@ bytes, the `rts` reads the longword above the return address, and every command
 dies on return to the Shell. Eleven `crt0.o` in the tree carried it.
 
 We reported it as [bebbo/amiga-gcc issue
-#12](https://codeberg.org/bebbo/amiga-gcc/issues/12). **It is fixed — in GCC,
+#12](https://codeberg.org/bebbo/amiga-gcc/issues/12). **It is fixed, in GCC,
 not in newlib**, and carried to `amiga15.2` (`168be3619`), `amiga13.4` and
 `amiga16.1`. Seven lines in `gcc/config/m68k/m68k.cc`:
 
@@ -15525,7 +15512,7 @@ not in newlib**, and carried to `amiga15.2` (`168be3619`), `amiga13.4` and
 
 `crt0.c` had marked both `____start` and `exit` with `__entrypoint` all along.
 The attribute was registered in `config/m68k/amigaos.h` and the macro
-predefined in `config/m68k/m68kamigaos.h` — and `m68k_save_reg()` ignored it.
+predefined in `config/m68k/m68kamigaos.h`, and `m68k_save_reg()` ignored it.
 An entry point has no caller whose registers it must preserve, so it should
 never have had a prologue; once that holds, `__savedSp` is recorded with
 nothing pushed, lands exactly on the return address, and neither function has
@@ -15536,7 +15523,7 @@ an epilogue left to disagree about.
 Our report proposed a **newlib** change: give `exit`'s return code static
 storage instead of a register variable, so the allocator cannot produce the
 mismatch at any optimisation level. The script's docstring then described that
-as "the upstream source fix" — **our own suggestion, written up as though it
+as "the upstream source fix", **our own suggestion, written up as though it
 described something that had happened**. It is not what was done, and it was
 the worse idea.
 
@@ -15551,7 +15538,7 @@ The disassembly says why. `exit` still uses `d7`:
 ```
 
 Removing the *use* means restructuring `exit`. Suppressing the *save* keeps
-the code exactly as it is — and fixes every `__entrypoint` function in the
+the code exactly as it is, and fixes every `__entrypoint` function in the
 system rather than one file in newlib.
 
 ### 48.2 The check was calling a frameless toolchain broken
@@ -15560,14 +15547,14 @@ The toolchain in use here is already frameless: `_____start` opens with
 `movel sp,__savedSp` and no `movem` at all, despite using `d2` and `a2` for
 `_callfuncs`, and `exit` reads its argument straight off `sp@(4)`.
 
-**That is not evidence the upstream fix is in it** — its `crt0.o` predates
+**That is not evidence the upstream fix is in it**, its `crt0.o` predates
 `168be3619` by weeks. Why it is frameless is not established: a hand build, a
 different newlib, or a compiler that happened to allocate nothing, which is
 what GCC 6.5 did and why the defect stayed latent from 2018. The toolchain the
 repair was written against is the one `fetch-toolchain.sh` installs, and its
 `objdump` is a Linux binary that cannot be run from this host to re-check.
 
-`fix-toolchain-crt0.py --check` classified that as **`refused` — "exit has 0
+`fix-toolchain-crt0.py --check` classified that as **`refused`, "exit has 0
 prologues, expected 1"** on all eleven objects, and exited 1. So did
 `tools/fetch-toolchain.sh --check-crt0`. A repaired toolchain was being
 reported as a broken one.
@@ -15577,10 +15564,10 @@ mean, because they are opposites:
 
 | `exit` | `____start` | verdict |
 |---|---|---|
-| no frame | no frame | **`immune`** — the two agree; nothing to repair, exit 0 |
-| no frame | keeps a frame | **`refused`** — `__savedSp` would point *below* the return address, so the `rts` reads a saved register. Worse than the original bug, and unrepairable from an object file |
-| one frame | disagrees | `buggy` / `patched` — the original case, unchanged |
-| one frame | agrees | `ok` — already repaired |
+| no frame | no frame | **`immune`**, the two agree; nothing to repair, exit 0 |
+| no frame | keeps a frame | **`refused`**, `__savedSp` would point *below* the return address, so the `rts` reads a saved register. Worse than the original bug, and unrepairable from an object file |
+| one frame | disagrees | `buggy` / `patched`, the original case, unchanged |
+| one frame | agrees | `ok`, already repaired |
 
 All four are exercised by stubbing `functions()`, because only the first two
 are reachable with the toolchains on this machine.
@@ -15598,12 +15585,12 @@ against one that does not need it.
 `AddNetMonitorHookTagList()` / `RemoveNetMonitorHook()` are the last of the
 autodoc's monitoring API. "Monitoring hooks can be used both for inspecting
 and filtering data that enters the stack, **or for denying access to certain
-APIs**" — and the denying half is the half with consequences.
+APIs**", and the denying half is the half with consequences.
 
 ### 49.1 What the document settled
 
 **The register convention is not the pair a reader would guess.** The hook is
-entered `hookfunc(hook, reserved, msg)` in **A0, A2, A1** — with *"the
+entered `hookfunc(hook, reserved, msg)` in **A0, A2, A1**, with *"the
 'reserved' parameter will be set to NULL for future expansion"*. That is
 utility.library's `CallHookPkt` shape with the object slot deliberately
 emptied. An A0/A1 guess hands the message in the wrong register and the hook
@@ -15614,18 +15601,18 @@ NULL, so the convention itself is under test rather than assumed.
 
 **The two families answer with different vocabularies.** The in-stack types
 (`MHT_ICMP`, `MHT_UDP`, `MHT_TCP_Connect`, `MHT_Packet`) return `MA_Continue` /
-`MA_Ignore` / `MA_Drop` / `MA_DropWithReset` — what to do with a *packet*. The
-call-site types (`MHT_Connect`, `MHT_Bind`, `MHT_Send`) return an **errno** —
+`MA_Ignore` / `MA_Drop` / `MA_DropWithReset`, what to do with a *packet*. The
+call-site types (`MHT_Connect`, `MHT_Bind`, `MHT_Send`) return an **errno**,
 *"any error value > 0 will cause the call to be aborted and the errno variable
 to be set to this value"*. `MA_Continue` is 0 and so is "no error", which is
 the only reason one dispatcher can serve both.
 
-**The walk stops at the first refusal.** *"unless another hook denies this"* —
+**The walk stops at the first refusal.** *"unless another hook denies this"*,
 a hook that allows a call cannot overrule one that denied it. The probe
 installs two and counts invocations both ways round.
 
 **`RemoveNetMonitorHook()` takes only the hook, no type.** So removal searches
-every list — and one `Hook` cannot be installed for two types at once, because
+every list, and one `Hook` cannot be installed for two types at once, because
 there would be no way to say which to remove. `struct Hook` embeds a `MinNode`
 first, which is what "added to an internal list" means: the caller's own Hook
 is the node.
@@ -15633,7 +15620,7 @@ is the node.
 **An installed hook keeps the library resident.** *"It must be called before
 the library is closed, or the library will stay in memory indefinitely."* That
 is a description of the behaviour, not a warning about a leak, and
-`bsd_lib_expunge()` implements it by declining while `bsd_netmon_busy()` — the
+`bsd_lib_expunge()` implements it by declining while `bsd_netmon_busy()`, the
 third user of a guard that already existed for the TCP: handler and the
 address-allocation workers.
 
@@ -15642,11 +15629,11 @@ address-allocation workers.
 The registry serves any type, but a hook is only ever called from a dispatch
 point, and only `connect()` and `bind()` have one. **Accepting a hook for a
 type nothing dispatches returns success to a caller that then never hears
-anything** — which it cannot tell apart from a quiet network. `EINVAL` is the
+anything**, which it cannot tell apart from a quiet network. `EINVAL` is the
 documented error for a type this library does not support, and it is true.
 
 `MHT_ICMP`, `MHT_UDP`, `MHT_TCP_Connect` and `MHT_Packet` are all invoked
-*"from within the TCP/IP stack itself"* — the IP receive path, which reaches
+*"from within the TCP/IP stack itself"*, the IP receive path, which reaches
 this library only through the `NX_IP` packet filter `netstack_capture.c`
 already installs for `src/bpf/`. §50 is what dispatching them would take.
 
@@ -15661,7 +15648,7 @@ SendMonitorMessage may look different. For example, either the `smm_To` or the
 
 Read as "exactly one of the two is always set", that is wrong, and following
 it would mean inventing data. `send()` has neither a destination nor a
-msghdr — the peer is implied by the socket — so **both** are NULL. What the
+msghdr, the peer is implied by the socket, so **both** are NULL. What the
 sentence actually excludes is the two being set together:
 
 | call | `smm_To` | `smm_Msg` | `smm_Buffer` | `smm_Len` |
@@ -15715,7 +15702,7 @@ send allowed: rc 8, called 1 -- sent in full, correctly
 ```
 
 **Three of those assertions failed on the first run, and the bug was in the
-probe.** `probe_hook_init()` clears `h_MinNode` — and clearing the MinNode of
+probe.** `probe_hook_init()` clears `h_MinNode`, and clearing the MinNode of
 a hook that is still *in* the library's list unlinks it, so the list walks past
 it and the hook is never called again. The symptom was "the hook was not
 consulted", which is indistinguishable from the library having dropped it.
@@ -15733,7 +15720,7 @@ the decision is made deliberately rather than discovered half-way.
 ### 50.1 There is exactly one hole into the receive path, and BPF is in it
 
 All four fire on inbound packets, and the only place this library sees one is
-`nx_ip_packet_filter_extended` — which `netstack_capture.c` already sets to
+`nx_ip_packet_filter_extended`, which `netstack_capture.c` already sets to
 `ami_ns_capture_filter` for `src/bpf/`. NetX Duo has **one** such pointer per
 `NX_IP`, so monitor hooks cannot simply take it.
 
@@ -15748,7 +15735,7 @@ already goes through.
 *"The hook function will be invoked from within the TCP/IP stack itself, which
 disallows calls into `bsdsocket.library`."* That matches where the filter runs
 and is the easy half. The harder half is that §49's dispatcher walks the hook
-list under `Forbid()` — acceptable for a `bind()` on a user task, considerably
+list under `Forbid()`, acceptable for a `bind()` on a user task, considerably
 less so on the packet path, where it would hold off task switching once per
 inbound datagram. Either the list needs a lock that is safe from the IP thread
 and cheap enough to take per packet, or the walk needs to be restructured.
@@ -15760,10 +15747,10 @@ more:
 
 | type | needs |
 |---|---|
-| `MHT_Packet` | `pmm_LinkLayerData`/`Size` — **legitimately NULL/0 here**, the doc says both "may be" — plus payload and length |
-| `MHT_ICMP` | `imm_Src`, `imm_Dst`, `struct icmp *` — parse the IPv4 header, check protocol 1, point at the ICMP header |
-| `MHT_UDP` | `umm_Src`, `umm_Dst`, `struct udphdr *` — the same for protocol 17 |
-| `MHT_TCP_Connect` | `tcmm_Src`, `tcmm_Dst`, `struct tcphdr *`, and only for segments *"about to initiate a connection"* — a SYN without an ACK, before the handshake and before the stack has looked for a listening socket |
+| `MHT_Packet` | `pmm_LinkLayerData`/`Size`, **legitimately NULL/0 here**, the doc says both "may be", plus payload and length |
+| `MHT_ICMP` | `imm_Src`, `imm_Dst`, `struct icmp *`, parse the IPv4 header, check protocol 1, point at the ICMP header |
+| `MHT_UDP` | `umm_Src`, `umm_Dst`, `struct udphdr *`, the same for protocol 17 |
+| `MHT_TCP_Connect` | `tcmm_Src`, `tcmm_Dst`, `struct tcphdr *`, and only for segments *"about to initiate a connection"*, a SYN without an ACK, before the handshake and before the stack has looked for a listening socket |
 
 None of that is difficult; all of it is a hand-rolled IPv4/TCP header walk in a
 path that currently has none, and it must cope with a fragmented `NX_PACKET`
@@ -15784,13 +15771,13 @@ holding whatever the filter holds.
 
 **And the fallback is not acceptable.** Quietly treating `MA_DropWithReset` as
 `MA_Drop` gives a hook that asked for the graceful rejection the ungraceful
-one, with no way to find out — the caller's peer hangs until it times out
+one, with no way to find out, the caller's peer hangs until it times out
 instead of failing at once. That is the same class of defect as accepting a
 hook for a type nothing dispatches: a documented behaviour silently replaced
 by a worse one.
 
 So `MHT_TCP_Connect` should not be accepted until `MA_DropWithReset` is either
-implemented or explicitly refused at install time — and the API has no way to
+implemented or explicitly refused at install time, and the API has no way to
 say "this type, but not that action".
 
 ### 50.5 The order to do it in, if it is done
@@ -15798,7 +15785,7 @@ say "this type, but not that action".
 1. Chain the packet filter in `netstack_capture.c`, with capture and monitor
    both seeing every packet and a stated rule for a drop from either.
 2. Fix the dispatcher's locking for the IP thread.
-3. `MHT_Packet` first — it needs no header parsing beyond what the filter
+3. `MHT_Packet` first, it needs no header parsing beyond what the filter
    already has, and it is the one a traffic monitor actually wants.
 4. `MHT_ICMP` and `MHT_UDP`, which are a protocol check and a header offset.
 5. `MHT_TCP_Connect` last, and only with `MA_DropWithReset` settled.
@@ -15811,7 +15798,7 @@ below them is worth starting first.
 
 §29 records the two instruments disagreeing: our own `NetTrace` has us **40–55%
 ahead** of Roadshow on loopback and wire, while the third-party third-party curl has
-Roadshow **10.6% ahead**. §39 closed half of that — the per-call ThreadX bracket
+Roadshow **10.6% ahead**. §39 closed half of that, the per-call ThreadX bracket
 is not the cause, because one 1.2 MB fetch takes 108 brackets and not thousands.
 What remained was the receive window, which §16.5 and §24 had measured the
 sender filling: 7,200 bytes in flight against 8,192 advertised, 88%.
@@ -15820,8 +15807,8 @@ sender filling: 7,200 bytes in flight against 8,192 advertised, 88%.
 
 ### 51.1 Three arms, same client, same case
 
-`tests/curl/run-curlverify.sh -g A -n a04_get_1m2` — 1,200,000 bytes over
-HTTP — on the exclusive emulator lane, A1200, our own curl in every arm so the
+`tests/curl/run-curlverify.sh -g A -n a04_get_1m2`, 1,200,000 bytes over
+HTTP, on the exclusive emulator lane, A1200, our own curl in every arm so the
 only thing differing is `AMINETXDUO_TCP_WINDOW`.
 
 | window | elapsed | |
@@ -15833,7 +15820,7 @@ only thing differing is `AMINETXDUO_TCP_WINDOW`.
 Two things follow, and the second is the one worth keeping.
 
 **Between 8 KB and the pool-derived default the window does not matter at
-all** — four samples across two builds land on 5.76–5.80. So the advertised
+all**, four samples across two builds land on 5.76–5.80. So the advertised
 window is not what limits this transfer, and the 88%-full observation in §24
 was the sender keeping the pipe full, not the pipe being too small.
 
@@ -15842,7 +15829,7 @@ worse than the worst 8 KB one, and the spread widens run on run (7.28, 8.78,
 10.20) where the 8 KB samples agree to 0.04 s. `AMINETXDUO_TCP_WINDOW` pins the
 floor *and* the ceiling, so this bypasses `ami_bsd_tcp_window()` entirely and
 gives every socket 32 KB regardless of what the pool can support. That is the
-arm §28.6 predicted would cost something without SACK — but there is no loss on
+arm §28.6 predicted would cost something without SACK, but there is no loss on
 this path to recover from, so SACK is not the mechanism. Whatever it is, it is
 not "bigger is better", and the ceiling in `bsdsocket_internal.h` should not be
 raised on argument.
@@ -15850,8 +15837,8 @@ raised on argument.
 ### 51.2 What this does NOT establish
 
 **The 10.6% was measured with the THIRD-PARTY curl and this was not.** That
-binary would not start in the harness here — `curl --version` returns rc 20
-before the network is up, which is a staging problem and not a stack one — so
+binary would not start in the harness here, `curl --version` returns rc 20
+before the network is up, which is a staging problem and not a stack one, so
 these arms use our own curl. They answer "does the window limit *our* client",
 which is what the window hypothesis needed, and they do not reproduce the
 Roadshow comparison. The absolute figures are not comparable to §39's either:
@@ -15859,7 +15846,7 @@ Roadshow comparison. The absolute figures are not comparable to §39's either:
 
 So the 10.6% remains open, with the window eliminated alongside the bracket.
 What is left of the original suspicion is `bsd_nx_leave` handing the CPU to the
-IP thread — ThreadX priority 1 against an adopted caller's 16, so the IP thread
+IP thread, ThreadX priority 1 against an adopted caller's 16, so the IP thread
 is the highest-priority ready thread at every bracket exit. §39 measured 2.3 s
 per 1.2 MB there. That is roughly 2.8 ms per received packet, which for
 checksum and copy on a 14 MHz 68020 may simply be what the work costs; both are
@@ -15870,7 +15857,7 @@ needs the IP thread profiled, not the window moved.
 
 §51.2 could not run the third-party curl: `curl --version` returned rc 20
 before the network was up. The cause was not the stack and not the CPU variant
-— that binary opens `amisslmaster.library` and its versioned library under
+that binary opens `amisslmaster.library` and its versioned library under
 `AmiSSL/` **before `main()`**, and neither is supplied by any stack here. A
 missing one aborts the program with no output, which reads exactly like the
 library under test being broken.
@@ -15887,7 +15874,7 @@ With it, on the exclusive lane, same binary and staging on both stacks,
 | **AmiNetXDuo** | 119,911 B/s | 117,120 | **118,516** |
 | **Roadshow 1.15** | 132,011 B/s | 123,421 | **127,716** |
 
-**Roadshow ahead by 7.8% on the means, 10.1% best against best** — the §29/§39
+**Roadshow ahead by 7.8% on the means, 10.1% best against best**, the §29/§39
 figure, reproduced with the window question already settled. Two samples each,
 so the means are indicative; the direction is not in doubt and matches every
 earlier measurement.
@@ -15899,13 +15886,13 @@ consistent than what we do.
 Both the bracket (§39) and the window (§51.1) are now eliminated by
 measurement. The remaining candidate is unchanged: `bsd_nx_leave` handing the
 CPU to the IP thread at every bracket exit, ThreadX priority 1 against an
-adopted caller's 16. Settling that needs the IP thread profiled — where its
-2.8 ms per received packet goes — not another knob turned.
+adopted caller's 16. Settling that needs the IP thread profiled, where its
+2.8 ms per received packet goes, not another knob turned.
 
 ## 52. The 10.6% was a priority inversion, and the comment had said so all along (2026-07-27)
 
 §51 eliminated the receive window. The bracket had already gone the same way. What was
-left was the scheduler, and it turned out not to need profiling at all — only reading the
+left was the scheduler, and it turned out not to need profiling at all, only reading the
 two constants against the sentences directly above them.
 
 `src/netstack/netstack_internal.h` said:
@@ -15918,9 +15905,9 @@ two constants against the sentences directly above them.
 > Reader threads **run above the IP thread** so the read queue drains promptly.
 
 And the numbers were `AMI_IP_THREAD_PRIORITY 1`, `AMI_SANA2_RX_PRIORITY 2`. Both comments
-state the convention correctly — ThreadX confirms it in
+state the convention correctly, ThreadX confirms it in
 `tx_thread_system_resume.c:213`, `if (priority < _tx_thread_highest_priority)` → *"A new
-highest priority thread is present"* — and both then describe the ordering the constants
+highest priority thread is present"*, and both then describe the ordering the constants
 do not implement. The IP thread outranked the readers and preempted the very threads whose
 job is keeping `CMD_READ`s posted on the driver.
 
@@ -15937,11 +15924,11 @@ image, same session:
 
 | | samples (B/s) | mean | vs Roadshow |
 |---|---|---:|---:|
-| shipping — IP 1, readers 2 | 119,911 / 117,120 / 119,808 / 116,755 | 118,400 | −7.3% |
-| **corrected — readers 1, IP 2** | 127,652 / 124,800 / 127,719 / 124,584 | **126,190** | **−1.2%** |
-| Roadshow 1.15 | 132,011 / 123,421 | 127,716 | — |
+| shipping, IP 1, readers 2 | 119,911 / 117,120 / 119,808 / 116,755 | 118,400 | −7.3% |
+| **corrected, readers 1, IP 2** | 127,652 / 124,800 / 127,719 / 124,584 | **126,190** | **−1.2%** |
+| Roadshow 1.15 | 132,011 / 123,421 | 127,716 |, |
 
-**+6.6%**, and it closes the gap §16 opened. The corrected arm is also visibly steadier —
+**+6.6%**, and it closes the gap §16 opened. The corrected arm is also visibly steadier,
 127,652 against 127,719 is 0.05% apart across separate runs.
 
 The remaining 1.2% is inside the run-to-run spread of the Roadshow samples themselves
@@ -15954,11 +15941,11 @@ The bug survived because the comment was right. Every reading of that file confi
 intent and nobody checked the intent against the two integers underneath it. A prose
 invariant with no test is a wish. The ordering now has its rationale, its ThreadX citation
 and its measurement recorded in place, but the durable fix would be a startup assertion
-that `AMI_SANA2_RX_PRIORITY < AMI_IP_THREAD_PRIORITY` — cheap, and it would have caught
+that `AMI_SANA2_RX_PRIORITY < AMI_IP_THREAD_PRIORITY`, cheap, and it would have caught
 this the day it was written.
 
 That is now `src/thread_priorities.h`: the whole ladder in one file, included by both
-internal headers, with the ordering asserted rather than described --
+internal headers, with the ordering asserted rather than described,
 
 ```c
 #if AMI_SANA2_RX_PRIORITY >= AMI_IP_THREAD_PRIORITY
@@ -15967,14 +15954,14 @@ internal headers, with the ordering asserted rather than described --
 ```
 
 Each of the three `#error`s was verified to fire by reintroducing the failure it guards,
-the shipped inversion included -- an untested assertion being the same kind of wish as an
+the shipped inversion included, an untested assertion being the same kind of wish as an
 untested comment.
 
 ## 53. The second crt0 bug: argv arrived as its own address (2026-07-27)
 
 The shipped `curl` and `ssh` did not work on a real installation. They are the only
-things in the archive that parse `argv` -- every command we write takes its arguments
-through `ReadArgs()`, which reads the Shell's command line and never looks at `argv` --
+things in the archive that parse `argv`, every command we write takes its arguments
+through `ReadArgs()`, which reads the Shell's command line and never looks at `argv`,
 so the whole tool set worked and the two ported Unix programs did not.
 
 It is [bebbo/amiga-gcc issue #8](https://codeberg.org/bebbo/amiga-gcc/issues/8), a
@@ -15986,7 +15973,7 @@ char * __argv[];        /* instead of  char ** __argv; */
 ```
 
 An array name decays to its own address, so `____start` passes `&__argv` where `main`
-expects `__argv` -- one indirection too many. `main` then reads the pointer variable
+expects `__argv`, one indirection too many. `main` then reads the pointer variable
 itself as `argv[0]`. Both pushes are visible at the call site, and only one of them is
 right:
 
@@ -16003,7 +15990,7 @@ right:
 
 Same place as the frame fix, for the same reason (44): the defect is the toolchain's, so
 `tools/fix-toolchain-crt0.py` repairs it after unpacking and before installing, and both
-bugs are now checked and counted independently -- a tree can carry either, both or
+bugs are now checked and counted independently, a tree can carry either, both or
 neither. Ours carried only the second; all eleven `crt0.o` reported `immune` on the frame
 skew and `buggy` on argv.
 
@@ -16045,7 +16032,7 @@ Not by reading the disassembly. The same source built against the backed-up orig
 The first version of this repair was written against the toolchain on the development
 machine and covered one instruction shape. v0.6.2's release job then failed in 45 seconds
 with `nothing was verified on any crt0.o`, because **the pinned toolchain CI actually
-builds with is a different build entirely** -- twelve `crt0.o` rather than eleven, and it
+builds with is a different build entirely**, twelve `crt0.o` rather than eleven, and it
 carries the frame skew that the local one is immune to. The local tree was never the
 shipping tree.
 
@@ -16059,19 +16046,19 @@ which form appears is a property of the toolchain build rather than of the multi
 | C | `moveal a4,a6` / `addal #<.bss>,a6` ... `move.l a6,-(sp)` | `2f0e` -> `2f16` |
 
 Shapes B and C never name `__argv` as an operand of the push at all, which is why a
-matcher written for A saw nothing whatsoever. B is the plain pinned form -- the address is
-needed in a register anyway, to store into `__argv` on the Workbench path -- and C is its
+matcher written for A saw nothing whatsoever. B is the plain pinned form, the address is
+needed in a register anyway, to store into `__argv` on the Workbench path, and C is its
 baserel equivalent, where the address cannot be named absolutely and is built from `a4`.
 C is only adopted when the immediately preceding instruction is `moveal a4,an`, since
 `an + <.bss displacement>` is `&__argv` only if `an` started at the base.
 
 Anchoring on the `argc` push had to go as well: under the pinned toolchain `__argc` is a
 LOCAL `.bss` symbol at `+0x14`, so its relocation reads `.bss`, not `___argc` as it does
-where argc is common. The confirmation is now structural -- two adjacent pushes followed
+where argc is common. The confirmation is now structural, two adjacent pushes followed
 closely by a reference to `main`.
 
-**The failure is the point.** The guard added with the first version -- verifying nothing
-is not a pass -- turned an unrecognised toolchain into a failed release rather than a
+**The failure is the point.** The guard added with the first version, verifying nothing
+is not a pass, turned an unrecognised toolchain into a failed release rather than a
 second archive with broken clients. That is the whole reason it exists, and it earned its
 keep on the first release after it was written. The check also had to learn the
 *repaired* shapes, or a fixed toolchain would report every file `skipped` and fail its own
@@ -16080,8 +16067,8 @@ verification step.
 ### The objdump on this machine is not the objdump in CI either
 
 v0.6.3 failed the same way, and the reason was one layer further down. The pinned
-toolchain ships **binutils 2.39, which disassembles in MIT syntax** -- `movem.l ...,-(sp)`
-where the local 2.4x prints `moveml ...,sp@-` -- and the parsing was written against
+toolchain ships **binutils 2.39, which disassembles in MIT syntax**, `movem.l ...,-(sp)`
+where the local 2.4x prints `moveml ...,sp@-`, and the parsing was written against
 whichever one happened to be on the development machine. Two consequences, neither
 visible locally:
 
@@ -16090,7 +16077,7 @@ visible locally:
   found nothing. It now accepts either.
 - **`.bss` names every symbol in the section.** `__argv`, `__argc`, `__savedSp`,
   `__commandline` all relocate against a bare `.bss`, so "no addend means offset zero"
-  was never true on this toolchain -- it held only on the development machine, where
+  was never true on this toolchain, it held only on the development machine, where
   `__argc` happens to be a common symbol with a relocation of its own. `__argv` is at
   `.bss+0`, so the **addend** is the discriminator, and both objdumps print it.
 
@@ -16101,7 +16088,7 @@ parentheses, and taking the leading token yields `a4`, which is valid hex, parse
 **The local toolchain was never the shipping toolchain**, and
 three rounds of "fixed" were three rounds of testing the wrong binary. The verification
 that finally meant something was running the script under the pinned binutils on a Linux
-host, both directions, before tagging -- pristine reports 11 buggy and rc 1, repaired
+host, both directions, before tagging, pristine reports 11 buggy and rc 1, repaired
 reports 11 immune and rc 0.
 
 ### Note on the pin
@@ -16127,7 +16114,7 @@ taste. From the host, against `www.google.com`:
 ```
 
 and from the Amiga, `fetch https://www.google.com/` returned *the server would
-not complete a TLS handshake* after 1.5 s — a `handshake_failure` alert, before
+not complete a TLS handshake* after 1.5 s, a `handshake_failure` alert, before
 any arithmetic. GitHub still takes CBC, which is why those two suites stay.
 
 So an AEAD was not optional. Which one was the only real question, and it is a
@@ -16137,14 +16124,14 @@ question about this machine.
 
 GHASH is a carry-less multiply in GF(2¹²⁸). A 68020 has no instruction for it,
 so `nx_crypto_gcm.c` does it bit by bit, and §5.5 measured the result at
-**344.6 ms for 1 KB against AES-CBC's 21.9** — twenty times slower than the
+**344.6 ms for 1 KB against AES-CBC's 21.9**, twenty times slower than the
 cipher it would replace. Negotiating GCM would trade a handshake we cannot
 complete for a download nobody would wait for. It is *compiled in* and it is
 deliberately **not offered**: there is no server that takes GCM but takes
 neither ChaCha20-Poly1305 nor CBC.
 
 ChaCha20 is add, rotate and exclusive-or on 32-bit words, and Poly1305 is
-130-bit adds and a 32×32→64 multiply — which is `MULU.L`, the one wide
+130-bit adds and a 32×32→64 multiply, which is `MULU.L`, the one wide
 instruction this part does have and the reason `src/crypto68k` exists.
 
 ### 54.2 What it cost, measured against what it replaces
@@ -16155,13 +16142,13 @@ against `nx_crypto` before a time is believed.
 
 | | measured | corrected |
 |---|---:|---:|
-| AES-128-CBC encrypt, 68020 assembly | 67,264 µs (237 KB/s) | — |
-| AES-128-CBC decrypt, 68020 assembly | 67,897 µs (235 KB/s) | — |
-| HMAC-SHA256 | 66,869 µs (239 KB/s) | — |
-| **ChaCha20 alone** | **32,769 µs (487 KB/s)** | — |
+| AES-128-CBC encrypt, 68020 assembly | 67,264 µs (237 KB/s) |, |
+| AES-128-CBC decrypt, 68020 assembly | 67,897 µs (235 KB/s) |, |
+| HMAC-SHA256 | 66,869 µs (239 KB/s) |, |
+| **ChaCha20 alone** | **32,769 µs (487 KB/s)** |, |
 | **Poly1305 alone** | **45,001 µs (355 KB/s)** | ~50,000 µs (327 KB/s) |
 | **the AEAD, one whole record** | **78,031 µs (204 KB/s)** | ~83,000 µs (193 KB/s) |
-| the CBC pair, one whole record | 134,351 µs (118 KB/s) | — |
+| the CBC pair, one whole record | 134,351 µs (118 KB/s) |, |
 
 **The AEAD is 1.72× the CBC pair on send and 1.73× on receive**, or 1.62× both
 ways after the correction below. The compatible choice and the fast one turned
@@ -16170,11 +16157,11 @@ out to be the same choice, which is not how this usually goes.
 Two notes on the arithmetic, since both would otherwise flatter the new rows.
 
 FS-UAE charges `MULU.L` 32 cycles where a 68020 charges 43 (§18.1). Poly1305 is
-**25 `MULU.L` per 16-byte block** — verified in the disassembly, not assumed —
+**25 `MULU.L` per 16-byte block**, verified in the disassembly, not assumed,
 so 16 KiB is 25,600 multiplies and the emulator under-charges them by 11 cycles
 each: 281,600 cycles, 4,993 µs at 56.4 MHz. That is the correction in the third
 column. **No correction applies to any AES or SHA-256 row**, because neither
-contains a multiply at all — the same thing §18.5 said.
+contains a multiply at all, the same thing §18.5 said.
 
 And ChaCha20 costs **0.8% more** on a buffer starting one byte in (33,021 µs
 against 32,769), which is the alignment a TLS record's payload actually has.
@@ -16184,13 +16171,13 @@ The misaligned `MOVE.L` is doing its job.
 
 ChaCha20 and Poly1305 both read and write little-endian, and this is a
 big-endian machine. Sixteen keystream words a block have to be reversed on the
-way out, which is `ROL.W #8`, `SWAP`, `ROL.W #8` — three instructions, about
+way out, which is `ROL.W #8`, `SWAP`, `ROL.W #8`, three instructions, about
 15.8 cycles by §18.1's table. Folded into the block exclusive-or, one 64-byte
 block costs one `MOVE.L` in, the reversal, an `EOR.L` and one `MOVE.L` out per
 word: ~34 cycles for four bytes, ~8.5 a byte against the cipher's ~120.
 
-The alternative — serialise the keystream into a byte array and exclusive-or
-byte by byte — is four times that by the same table, and it is what the
+The alternative, serialise the keystream into a byte array and exclusive-or
+byte by byte, is four times that by the same table, and it is what the
 portable path (68000, 68040, 68060; `__mc68020__` is defined for `-m68020`
 only) still does.
 
@@ -16200,14 +16187,14 @@ the disassembly agrees: 25 `MULU.L` where the algorithm says 25, and 75
 rotates in the ChaCha20 object.
 
 **That last paragraph did not survive the move to `-Os`.** Instruction *selection*
-was never the question -- register *allocation* was, and §57 measured the cipher
+was never the question, register *allocation* was, and §57 measured the cipher
 losing 22.3% to it. §58 is the ChaCha20 block function in assembly and the 33% it
 gave back. Poly1305's half of the claim still stands.
 
 ### 54.4 The record framing, which is where the work actually was
 
 RFC 7905 is **not** the GCM framing with a different cipher underneath it.
-TLS 1.2's AEAD suites use a partially explicit nonce — a four-byte implicit
+TLS 1.2's AEAD suites use a partially explicit nonce, a four-byte implicit
 salt, an eight-byte `nonce_explicit` at the head of every record, the sequence
 number as the nonce's low half. ChaCha20-Poly1305 instead uses the construction
 TLS 1.3 later adopted for everything: `record_iv_length` is **zero**, nothing
@@ -16219,7 +16206,7 @@ data stays TLS 1.2's thirteen bytes.
 express that: it widens the *test* for "is this an AEAD", and everything it
 matches is then converted to `NX_CRYPTO_ENCRYPTION_AES_GCM_16` and framed as
 GCM. The difference is on the wire, in the record's length and layout, and no
-amount of work inside an `NX_CRYPTO_METHOD` can reach it — a method is handed a
+amount of work inside an `NX_CRYPTO_METHOD` can reach it, a method is handed a
 nonce and a buffer after the framing has been decided.
 
 So `nx_secure_tls_record_payload_encrypt.c` and `..._decrypt.c` are **copied**
@@ -16227,7 +16214,7 @@ into `src/tls/rfc7905/` and dropped from the glob, which is the same mechanism
 the top level uses for `_nx_ip_checksum_compute()`. One hunk each, in the same
 place. `nx_secure_tls_session_iv_size_get.c` is deliberately *not* copied: its
 `switch` has no case for our algorithm, takes the `default:` and returns zero,
-which is exactly what RFC 7905 wants — and leaving `NX_SECURE_AEAD_CIPHER_CHECK`
+which is exactly what RFC 7905 wants, and leaving `NX_SECURE_AEAD_CIPHER_CHECK`
 at its default of `NX_FALSE` is what keeps it there.
 
 `NX_SECURE_ENABLE_AEAD_CIPHER` had to be defined for the build. It is not on by
@@ -16250,7 +16237,7 @@ same clock:
 The handshake times are unchanged, and that is the expected result rather than
 a disappointment: a handshake is public-key arithmetic, and the record path is
 paid on the bytes after it. GitHub moved from `0xC023` to `0xCCA9` because the
-new suites sit at the *head* of the table — the client's stated preference —
+new suites sit at the *head* of the table, the client's stated preference,
 which is also a second server exercising the new code.
 
 **At 24.5 MHz (`-k 28`) Google still does not complete**, with *the connection
@@ -16290,14 +16277,14 @@ rc 20.
 
 `netstack_dns_server_add()`, `netstack_dns_server_remove()` and
 `netstack_set_domain_name()` in `netstack_dns.c`, and the three vectors over them. A
-server has to land in two places or it only half works -- in the NetX Duo DNS client,
+server has to land in two places or it only half works, in the NetX Duo DNS client,
 which resolves, and in `ns_Config.resolver`, which is what every report reads. The DHCP
 path already did exactly that, for the same reason.
 
 `SBTC_HAVE_DNS_API` then goes TRUE, and **the order matters**: flipping it while the
 vectors were stubs would advertise an API we did not have, which is worse than refusing.
 
-`SBTC_SYSTEM_STATUS` now answers all six bits. PTP is never set on purpose -- a
+`SBTC_SYSTEM_STATUS` now answers all six bits. PTP is never set on purpose, a
 point-to-point interface here would mean SLIP or PPP.
 
 ### The bug the test caught
@@ -16321,7 +16308,7 @@ configured" on the same machine, in the same run, where Roadshow's `ShowNetStatu
 
 `SocketBaseTagList()` returns the index of the first tag it could not service and stops
 there. That is the documented contract rather than a shortcut, so **one unserviced code
-discards every tag after it in the same call** -- a foreign client that probes a group of
+discards every tag after it in the same call**, a foreign client that probes a group of
 tunables in one go gets nothing, and it looks like the library not working rather than
 like one tag being unknown.
 
@@ -16332,7 +16319,7 @@ TRUE, `SBTC_IP_FORWARDING` FALSE, `SBTC_IP_DEFAULT_TTL`, `SBTC_ICMP_MASK_REPLY` 
 `SBTC_IDN_DEFAULT_CHARACTER_SET` = IDNCS_ASCII. Where the answer is "no", it says
 no.
 
-`SBTC_GET_BYTES_RECEIVED` / `_SENT` now answer too, from `nx_ip_info_get()` -- the same
+`SBTC_GET_BYTES_RECEIVED` / `_SENT` now answer too, from `nx_ip_info_get()`, the same
 call `netstats.c` already made. They are `SBQUAD_T` by reference; NetX Duo counts in
 ULONG, so the high word is always zero and it wraps at 4 GB, which is its counter and not
 a choice made here.
@@ -16343,9 +16330,9 @@ afterwards, and that was recorded here as "whatever stops it is something else".
 
 Both halves were built on evidence that could not exist. **The harness cannot capture
 stderr.** `curlcheck.c` builds `<cmd> <NIL: >>DH0:w/NAME.txt`, and AmigaDOS 3.x shell
-redirection covers stdout only -- there is no `2>`. Every fatal tcpdump diagnostic goes to
+redirection covers stdout only, there is no `2>`. Every fatal tcpdump diagnostic goes to
 stderr and then `exit(20)`, so **every distinct failure looked identical**: rc 20, empty
-file. "Setting the channel count to 4 changed nothing" was the same illusion -- it moved
+file. "Setting the channel count to 4 changed nothing" was the same illusion, it moved
 the failure to the next call, whose message was equally invisible.
 
 The proof it was the harness and not the stack: against **Roadshow's own**
@@ -16354,14 +16341,14 @@ file, while `-D` returns 0. See 60 for what was actually wrong.
 
 **SampleNetSpeed was never a stack problem.** It reported "Could not query data throughput
 statistics" and exited; with the byte counters answered it gets past that and runs. Its
-argument template is `INTERFACE,LEFT/N,TOP/N,WIDTH/N,HEIGHT/N,SCREEN/K` -- it is a
+argument template is `INTERFACE,LEFT/N,TOP/N,WIDTH/N,HEIGHT/N,SCREEN/K`, it is a
 graphical meter that opens a window and runs until closed, so it now times out a
 scripted plan instead of failing one, which is the tool working rather than a hang.
 
 ### IP_HDRINCL, translated rather than passed through
 
 Roadshow's `traceroute` died at startup in 0.08 s: `setsockopt(IPPROTO_IP, IP_HDRINCL)`
-returned ENOPROTOOPT. `raw.c` had said why since it was written -- NetX Duo's core has no
+returned ENOPROTOOPT. `raw.c` had said why since it was written, NetX Duo's core has no
 header-included transmit; every raw send goes through `nxd_ip_raw_packet_send()`, which
 builds the IP header itself.
 
@@ -16382,7 +16369,7 @@ than guessed at.
 | `traceroute 10.0.2.2` | ENOPROTOOPT at startup, 0.08 s | `1  10.0.2.2 (10.0.2.2)  12.766 ms  8.606 ms  8.884 ms` |
 
 Hops past the first are `* * *`, and that is the environment rather than the stack: SLIRP
-is a terminating NAT and does not relay TTL-exceeded from beyond itself -- the same limit
+is a terminating NAT and does not relay TTL-exceeded from beyond itself, the same limit
 that mangles the forwarded ICMP Roadshow's `ping` complains about above.
 
 ### Refusals that are the right answer
@@ -16399,18 +16386,18 @@ implementation there; ours passes only because it never validates the payload.
 ## 56. A flat second of nothing before every DHCP DISCOVER (2026-07-27)
 
 53 recorded us at 100 ticks to a DHCP lease against AmiTCP_NG's 19.5. The wire turned out
-to be innocent: the whole exchange is four packets -- DISCOVER, OFFER, REQUEST, ACK -- with
+to be innocent: the whole exchange is four packets, DISCOVER, OFFER, REQUEST, ACK, with
 no retries, no ARP probe and no timer waited out.
 
 **1,000 ms of the 1,201 ms spent in DHCP was a fixed delay before the first DISCOVER.**
 `_nx_dhcp_interface_start()` sets `nx_dhcp_timeout = NX_IP_PERIODIC_RATE` and lets the
-client's own 1 Hz timer expire before sending anything -- NetX Duo taking the bottom of
+client's own 1 Hz timer expire before sending anything, NetX Duo taking the bottom of
 RFC 2131 4.4.1's "wait one to ten seconds to desynchronise DHCP at startup". That guards
 against a herd of diskless workstations sharing a power circuit, which an Amiga is not
 part of.
 
 `ami_ns_dhcp_discover_now()` retimes the client's own timer to one tick with public
-ThreadX calls against a public `NX_DHCP` field -- **no vendored code touched**. The expiry
+ThreadX calls against a public `NX_DHCP` field, **no vendored code touched**. The expiry
 runs the INIT case exactly as it would have a second later, and the reschedule period is
 the one NetX Duo created the timer with, so backoff, the `secs` field and the renewal
 times are unchanged. `AMI_ADDRESS_POLL_TICKS` drops 5 -> 1 with it.
@@ -16421,13 +16408,13 @@ figure. Every other bench number is unchanged.
 ### The regression, which is the interesting part
 
 `run-dhcp3927.sh -M killlink` broke. Its phase A needs DHCP to fail, and it allowed itself
-200 ms to settle after link-up before taking the wire away -- free only because the client
+200 ms to settle after link-up before taking the wire away, free only because the client
 was going to sit still for a second anyway. With DISCOVER going out one tick after
 `nx_dhcp_start()`, DHCP won the race and the mode silently tested nothing.
 
 Deleting the settle exposed a second thing: taking the link down within ~20 ms of link-up
 orphans the SANA-II readers ("reader 1 did not stop; leaking its stack"). **That is a
-pre-existing defect** -- `Offline` at the wrong moment during bring-up does it -- and it is
+pre-existing defect**, `Offline` at the wrong moment during bring-up does it, and it is
 still open. The helper now waits on `netstack_interface_dhcp_state()` leaving IDLE rather
 than on a clock, which is deterministic in both directions.
 
@@ -16444,7 +16431,7 @@ measurable**. `nx_ip_address_change_notify()` had been registered all along, so
 sleeping a tick at a time. `AddNetInterface` measured 46 ticks against the 46.3 recorded
 above, with every other bench figure unchanged: the poll had already been cut from 5 ticks
 to 1, and what was left was below the resolution of the harness measuring it. The change
-is kept for removing a poll loop, not for a speedup -- the ~20 ms predicted for it was
+is kept for removing a poll loop, not for a speedup, the ~20 ms predicted for it was
 never there to collect.
 
 ## 57. -Os everywhere, and where it actually costs something (2026-07-27)
@@ -16493,7 +16480,7 @@ Third-party third-party curl, 1.2 MB fetch, back to back in one session:
 | -O3 | 121,748 / 124,004 | 122,876 |
 | **-Os** | 126,362 / 123,496 | **124,929** |
 
-**+1.7%**, which is inside the spread -- so no regression, on a third less code.
+**+1.7%**, which is inside the spread, so no regression, on a third less code.
 
 ### Where it does cost, and the rule that follows
 
@@ -16519,7 +16506,7 @@ helps and exactly what `c68k_bulk_kernels.S` already does for AES.
 
 `libgcc.a` is a zero-byte file in this toolchain, so `src/common/ami_udivdi3.c` supplies
 the 64-bit runtime. At `-O3` GCC expanded 64-bit shifts inline; at `-Os` it calls out for
-them, and the build failed on `__lshrdi3` -- from that same file. `__lshrdi3`, `__ashldi3`
+them, and the build failed on `__lshrdi3`, from that same file. `__lshrdi3`, `__ashldi3`
 and `__ashrdi3` are now all provided, rather than only the one that happened to be missing:
 which of them an `-Os` build needs is a property of the code the optimiser happens to see,
 and finding the next one as a link failure in an unrelated commit is not worth two
@@ -16535,8 +16522,8 @@ RFC 8439 §2.3 as the C beside it was, and it beats the `-O3` C as well as the `
 
 A quarter-round is four `ADD.L`, four `EOR.L` and four rotates, and **all four operands
 must be in DATA registers**. Not three and an address register: `EOR` has no `An` source
-and no `An` destination and neither do the rotates, and `a` -- which is only ever added to
--- is still read by `d ^= a`. So the eight data registers hold exactly two quarter-rounds,
+and no `An` destination and neither do the rotates, and `a`, which is only ever added to
+is still read by `d ^= a`. So the eight data registers hold exactly two quarter-rounds,
 a double round is four such groups,
 
     G1  QR(0,4,8,12)  QR(1,5,9,13)      G3  QR(0,5,10,15) QR(1,6,11,12)
@@ -16554,22 +16541,22 @@ Three new rows in `c68k_bulk_kernels.S`, because this was not obvious:
 
 | | cycles |
 |---|---:|
-| `MOVE.L Dm,d16(An)` + `MOVE.L d16(An),Dm` -- a stack spill, round trip | 13.80 |
+| `MOVE.L Dm,d16(An)` + `MOVE.L d16(An),Dm`, a stack spill, round trip | 13.80 |
 | `MOVEA.L Dn,An` + `MOVE.L An,Dn` | 4.00 |
 | **`EXG Dn,An`** | **4.01** |
 
 The seven address registers are the store, at a third of what the stack costs. But the
 pair of MOVEs **cannot be used**: there is no ninth data register to stage the outgoing
 word through. `EXG` is the entire exchange in one instruction at the price of the two
-MOVEs and with no temporary -- it retires the word a data register has finished with and
+MOVEs and with no temporary, it retires the word a data register has finished with and
 produces the next one in the same register, which is exactly the primitive the schedule
 wants. That does not happen often.
 
 Eight data plus seven address registers is fifteen homes for sixteen words, so one word is
 on the stack at any moment, and **which one is chosen rather than left to chance**. A word
 resident in adjacent groups is exchanged once a double round; a word resident in G1 and G3,
-or G2 and G4, twice. There are two once-only words to place -- x15 (in G2 and G3, so on the
-stack across G4 and G1) and x9 (the reverse) -- and they hand over in `d6`, the one data
+or G2 and G4, twice. There are two once-only words to place, x15 (in G2 and G3, so on the
+stack across G4 and G1) and x9 (the reverse), and they hand over in `d6`, the one data
 register that touches memory inside the loop. That is what turns 24 exchanges into **22
 `EXG`, one store and one load**: 115.6 cycles of state traffic against 336 of arithmetic,
 where at `-O3` the spills roughly doubled the arithmetic.
@@ -16584,8 +16571,8 @@ before a line of assembly was typed.
 
 ### The sixth of the cipher that was not the cipher
 
-The block exclusive-or is seven instructions a word -- load, the three-instruction byte
-reversal, load, `EOR`, store -- and at `-O3` that is what it compiled to. At `-Os` GCC gave
+The block exclusive-or is seven instructions a word, load, the three-instruction byte
+reversal, load, `EOR`, store, and at `-O3` that is what it compiled to. At `-Os` GCC gave
 every word **two `LEA`s, a reloaded `moveq #64` and the 68020's full-extension
 double-indexed addressing for both the load and the store**: about 64 cycles a word where
 37 buys the same four bytes. Post-increment addressing is the whole fix and there is
@@ -16599,7 +16586,7 @@ because it is interesting.
 | | -O3 C | -Os C | **-Os + assembly** | vs -Os | vs -O3 |
 |---|---:|---:|---:|---:|---:|
 | **ChaCha20 alone** | 132,847 | 162,413 | **109,305** | **-32.7%** | **-17.7%** |
-| Poly1305 alone (still C) | 182,297 | 193,691 | 194,167 | — | — |
+| Poly1305 alone (still C) | 182,297 | 193,691 | 194,167 |, |, |
 | **AEAD, one whole record** | 316,156 | 358,142 | **304,696** | **-14.9%** | **-3.6%** |
 
 The cipher is 145 KB/s where it was 97, the `-Os` regression is gone, and the record path
@@ -16610,7 +16597,7 @@ the misaligned `MOVE.L` doing its job.
 ### Two things this does not claim
 
 The body is **270 bytes against a 256-byte instruction cache**, and it overhangs. It is not
-unrolled further for that reason -- two double rounds would be 540 bytes -- but the
+unrolled further for that reason, two double rounds would be 540 bytes, but the
 overhang is real on hardware and **this emulator does not charge for it**: the cache sweep
 in section 1 reports a 2048-byte straight-line body at 144.5 ns per `ADD.L` against a
 256-byte body's 150.0, which is the wrong way round and says instruction fetch is close to
@@ -16618,7 +16605,7 @@ free in the model. Every figure above is therefore a lower bound on a real 68EC0
 
 And **the C core stays compiled and reachable in the assembly build**
 of `c68k_chacha20_core_c()` being in the header. `crypto68k_bulk` now runs both over eight
-consecutive blocks and compares them before it times either -- RFC 8439's vectors check one
+consecutive blocks and compares them before it times either, RFC 8439's vectors check one
 block and one keystream, and an assembly bug that only appeared once the counter had
 advanced would pass those.
 
@@ -16628,7 +16615,7 @@ Poly1305 is now **64% of the record** (194,167 of 304,696). It is worth the same
 but not the same expectations: §54 counted **25 `MULU.L` per 16-byte block** and this
 emulator charges 32 cycles for each where a 68020 charges 43, so on real hardware roughly
 1,075 of about 2,900 cycles a block are a single instruction nobody can schedule away. What
-is addressable is the other two thirds -- the 130-bit accumulate, where the part has
+is addressable is the other two thirds, the 130-bit accumulate, where the part has
 `ADDX.L` and the `MULU.L Dy,Dh:Dl` 64-bit product in a register pair, and C can only reach
 either through `unsigned long long` and this toolchain's zero-byte `libgcc.a`. Expect
 20-30%, not the third ChaCha20 gave up.
@@ -16650,22 +16637,22 @@ real reason is a decision:
   point, is not a good use of anyone's time.
 * **SLOWAUTO / FASTAUTO** are RFC 3927 self-assignment, and we do have that: `NX_AUTO_IP`
   is in the build and drives the `LINKLOCAL` configuration type. What is missing is not
-  the protocol but the *plumbing* — AutoIP is driven entirely inside `netstack.c` and
+  the protocol but the *plumbing*, AutoIP is driven entirely inside `netstack.c` and
   there is no public quartet for it the way there is for DHCP
   (`netstack_interface_dhcp_start/_state/_lease/_stop`), and `NX_AUTO_IP` is a single
   instance rather than one per interface. Building that quartet, and making a single
   AutoIP instance safe to start on an arbitrary interface on demand, is real netstack work
   for a Roadshow call essentially nobody makes.
 
-`AAMP_DHCP` — the one that matters, and the one every real caller uses — takes a genuine
+`AAMP_DHCP`, the one that matters, and the one every real caller uses, takes a genuine
 lease through a worker Process. The other three answer `AAMR_Ignored`, which is literally
 accurate.
 
 ### 59.2 The four monitor hooks stay refused, for now, and the timing is the reason
 
 §50 scoped `MHT_ICMP`, `MHT_UDP`, `MHT_TCP_Connect` and `MHT_Packet` thoroughly enough to
-decide with, and the decision is to wait. Not because the work is unclear — §50 is a good
-plan — but because of what it touches:
+decide with, and the decision is to wait. Not because the work is unclear, §50 is a good
+plan, but because of what it touches:
 
 * it replaces `nx_ip_packet_filter_extended`, which **every inbound packet** passes
   through, and which BPF already occupies, so step one is a filter *chain*;
@@ -16677,7 +16664,7 @@ plan — but because of what it touches:
 That is a change to the hot receive path, and the receive path is currently being measured
 under packet loss for the first time in this project's life. Landing it now would risk
 those measurements and be measured wrong by them. It is worth doing after, with the
-impaired-link results in hand, and worth doing without `MA_DropWithReset` first —
+impaired-link results in hand, and worth doing without `MA_DropWithReset` first,
 `MA_Drop` is honest and needs no RST.
 
 ### 59.3 The toolchain pin stays where it is
@@ -16686,7 +16673,7 @@ impaired-link results in hand, and worth doing without `MA_DropWithReset` first 
 crt0 bugs are fixed upstream. The registry says no:
 
 * the `amigadev/crosstools:m68k-amigaos-gcc10` tag still serves **the exact layer we pin**
-  (`c63033fd…`, layer 8, 93 MB), and the image was built **2025-11-09** — eight months
+  (`c63033fd…`, layer 8, 93 MB), and the image was built **2025-11-09**, eight months
   before either fix landed;
 * there is no prebuilt m68k-amigaos GCC for macOS at all, so the development machine is
   already outside the pin and building its own.
@@ -16695,7 +16682,7 @@ So moving the pin means **becoming a toolchain vendor**: building and hosting a 
 x86-64 artefact for CI and a macOS one besides, then revalidating codegen across
 conformance, the 68000 build and the emulator suite. Against that, the repair script is
 ~500 lines, runs in three seconds, is verified in six configurations, and fails the release
-loudly when it meets something it does not recognise — which it has now done twice,
+loudly when it meets something it does not recognise, which it has now done twice,
 correctly.
 
 `fix-toolchain-crt0.py` is permanent, not a workaround waiting to be deleted. An earlier
@@ -16722,14 +16709,14 @@ exited rc 20 with no output, which read as dying before `main()`. It was not.
 fails **or answers zero**, it goes to `error()`, which does `fprintf(stderr, ...)` and
 `exit(20)`.
 
-Every fatal tcpdump diagnostic is therefore rc 20 on **stderr** — and
+Every fatal tcpdump diagnostic is therefore rc 20 on **stderr**, and
 `tests/curl/curlcheck.c` runs commands as `<cmd> <NIL: >>DH0:w/NAME.txt`, where AmigaDOS
 3.x redirection covers stdout only. There is no `2>`. So every distinct failure produced
 byte-identical evidence, and two investigations drew conclusions from it:
 
-* "setting the channel count to 4 changed nothing" — it did change something; it moved the
+* "setting the channel count to 4 changed nothing", it did change something; it moved the
   failure to the next call, whose message was equally invisible;
-* "the tunables were not the cause, so it is something else" — the tunables were not the
+* "the tunables were not the cause, so it is something else", the tunables were not the
   cause, but the reasoning that established it was worthless.
 
 The control that settles it: against **Roadshow's own** `bsdsocket.library`,
@@ -16739,25 +16726,25 @@ The control that settles it: against **Roadshow's own** `bsdsocket.library`,
 Capturing stderr was attempted and **reverted as inert**: Roadshow's crt0 builds fd 2 at
 constructor time with a NULL DOS handle and never consults `pr_CES`; `SYS_Error` is V50 and
 `NP_Error` was documented in V40 without being implemented. A foreign binary's fatal
-message is visible only from an interactive Shell. Our own tools are unaffected --
+message is visible only from an interactive Shell. Our own tools are unaffected,
 `tool_error()` uses `pr_CES ? pr_CES : Output()`.
 
 ### Bug one: we owned a BPF implementation and denied having it
 
 `SBTC_NUM_PACKET_FILTER_CHANNELS` answered **0** while `src/bpf/` and all eight `bpf_*`
-LVOs were present and working -- and those eight are exactly what Roadshow's libpcap
+LVOs were present and working, and those eight are exactly what Roadshow's libpcap
 drives: `bpf_open`, `bpf_set_interrupt_mask`, then `bpf_ioctl` with BIOCVERSION, BIOCGBLEN,
 BIOCSBLEN, BIOCSETIF, BIOCGDLT, BIOCSRTIMEOUT and BIOCSETF. It now answers
 `AMI_BPF_MAX_CHANNELS`.
 
 ### Bug two: bpf_open()'s ABI was guessed, and guessed wrong
 
-Roadshow's libpcap calls `bpf_open(-1)` -- "any free channel" -- and then uses the
+Roadshow's libpcap calls `bpf_open(-1)`, "any free channel", and then uses the
 **return value** as the channel for every subsequent call (0x59eee: `movel d0,d2`, no
 reload before `jsr a6@(-396)`). Ours rejected every negative argument and returned 0
 rather than the channel number. The header had flagged this convention as unconfirmed;
 the real client confirms it. Fixed in `src/bpf/bpf_channel.c`, with the header, both unit
-tests, and `NetTrace` -- which now asks for `-1` and keeps the answer, so two captures can
+tests, and `NetTrace`, which now asks for `-1` and keeps the answer, so two captures can
 coexist.
 
 ### Measured
@@ -16784,7 +16771,7 @@ family size **32** (`char ifr_name[16]` plus a 16-byte union).
 `sa_len` matters. fad-gifc strides the `SIOCGIFCONF` result by
 `sizeof(ifr_name) + ifr->ifr_addr.sa_len`, not by `sizeof(struct ifreq)`. An entry whose
 sockaddr says 0 makes the walk stride 16 and read the second half of the entry it has
-already read as the next name. Every sockaddr written carries its length -- and because
+already read as the next name. Every sockaddr written carries its length, and because
 `sockaddr` and `sockaddr_in` are both 16 bytes here the stride is 32 either way, which is
 exactly what would have made the bug invisible until somebody went looking.
 
@@ -16812,7 +16799,7 @@ so it is worth obtaining first.
 
 One of the four was wrong in an interesting way. The elimination said `nx_user.h` reaches
 NetX Duo because `third_party/netxduo/CMakeLists.txt:73` defines
-`NX_INCLUDE_USER_DEFINE_FILE`. **That file is never used** -- this tree declares its own
+`NX_INCLUDE_USER_DEFINE_FILE`. **That file is never used**, this tree declares its own
 `netxduo` target at `CMakeLists.txt:267` and never adds the vendored subdirectory. The
 macro arrives because `port/netxduo-amiga/inc/nx_port.h:42` includes `nx_user.h`
 unconditionally. Right conclusion, wrong reason, and the reason mattered here because it
@@ -16821,22 +16808,22 @@ was being used to rule the configuration out.
 ### Two defects, and neither alone would have hidden it
 
 `_nx_tcp_fast_periodic_processing()` tests the limit against **one of two counters**
-depending on `nx_tcp_socket_zero_window_probe_has_data` -- `timeout_retries` when false,
+depending on `nx_tcp_socket_zero_window_probe_has_data`, `timeout_retries` when false,
 `zero_window_probe_failure` when true.
 
 1. **`nx_tcp_socket_send_internal.c` armed the probe for any send it could not queue.**
-   There are three reasons data does not go out -- the receiver's advertised window, the
-   congestion window, the transmit queue depth -- and only the first is a zero window.
+   There are three reasons data does not go out, the receiver's advertised window, the
+   congestion window, the transmit queue depth, and only the first is a zero window.
    Setting the flag for the other two describes a socket as being in persist when it is
    not, moving the limit onto a counter the data path never advances.
 2. **`nx_tcp_socket_retransmit.c` cleared `zero_window_probe_failure` on every probe**
-   rather than when a probe began, pinning it at 1 -- so the second arm could not fire
+   rather than when a probe began, pinning it at 1, so the second arm could not fire
    either, and a peer that stopped answering its probes was never given up on.
 
 **What makes it bite is the caller.** One blocked send does not hide the limit: the next
 retransmission clears the flag. But `bsd_wait_sliced()` re-enters `nx_tcp_socket_send()`
 every 200 ms while the status is `NX_WINDOW_OVERFLOW`/`NX_TX_QUEUE_DEPTH`, and a
-non-blocking caller returns on its select loop just as often -- re-arming the flag faster
+non-blocking caller returns on its select loop just as often, re-arming the flag faster
 than the ladder doubles. From the second rung on, the flag was set every time the timer
 looked.
 
@@ -16846,7 +16833,7 @@ limit at all.
 
 ### The caller learning was the same bug
 
-Nothing was wrong with the notification path -- the reset simply never happened.
+Nothing was wrong with the notification path, the reset simply never happened.
 `_nx_tcp_socket_connection_reset()` invokes `nx_tcp_disconnect_complete_notify`, which is
 `bsd_tcp_disconnect_complete_notify` here, setting `ASF_EOF` and
 `FD_CLOSE|FD_READ|FD_WRITE`; the cleanup routines wake suspended readers and writers, and
@@ -16859,7 +16846,7 @@ because the callback cannot distinguish a timeout reset from a peer's FIN.
 ### Where it is, and how it is tested
 
 `tinic/netxduo`, branch `amiga-tcp-retry-limit` (`540bc8a2`), off `473d1928`, merged into
-`amiga-integration` (`497da7e9`) which the submodule tracks -- the same shape as the three
+`amiga-integration` (`497da7e9`) which the submodule tracks, the same shape as the three
 branches in §43.
 
 `tests/netstack/host/test_tcp_retries_host.c` links six real vendored translation units
@@ -16887,7 +16874,7 @@ interesting result is neither of those numbers.
 
 `-Wanalyzer-too-complex` is **off by default**, and when the analyser exceeds its
 exploration budget it stops and says nothing. At GCC's default `bb-explosion-factor=5`,
-**48 units gave up** -- among them `socket.c`, `select.c`, `tcp_handler.c`, `errno.c`,
+**48 units gave up**, among them `socket.c`, `select.c`, `tcp_handler.c`, `errno.c`,
 `netdb.c`, `fetch.c`, `telnet.c` and `nettrace.c`.
 
 **Three of the five defects §the memory-safety audit found were in files `-fanalyzer` had
@@ -16895,15 +16882,15 @@ never looked at.** "The analyser found nothing real" was, in large part, "the an
 not run". A clean report from a tool that quit is worse than no report, because it is
 indistinguishable from coverage.
 
-Raising the factor to 50 -- 200 for `netdb.c` and `nettrace.c`, measured rather than
-guessed -- brings it to **3 uncovered units**, and `-Wanalyzer-too-complex` is now on so
+Raising the factor to 50, 200 for `netdb.c` and `nettrace.c`, measured rather than
+guessed, brings it to **3 uncovered units**, and `-Wanalyzer-too-complex` is now on so
 those three are named on every run.
 
 ### The NDK blind spot, and the flag that removes it
 
 32 of the 48 findings were one structural class: `ReadEClock`, `GetSysTime`, `DateStamp`,
 `Read`, `FGets` and `ReadArgs` reach the library through `LPn()` macros in
-`<inline/macros.h>` -- `jsr a6@(-offs:W)` inside `__asm volatile` with a `"memory"` clobber
+`<inline/macros.h>`, `jsr a6@(-offs:W)` inside `__asm volatile` with a `"memory"` clobber
 and **no output constraint for the destination**. The analyser cannot know the callee
 filled the caller's variable, so every out-parameter reads as uninitialised.
 
@@ -16923,7 +16910,7 @@ back to an ordinary pass and are **named on every run** rather than quietly drop
 for (i = 0; id[i] != '\0' && i < 200UL; i++)      /* reads before it checks */
 ```
 
-`id` is the `lib_IdString` of a `bsdsocket.library` this code did not write -- the whole
+`id` is the `lib_IdString` of a `bsdsocket.library` this code did not write, the whole
 point of the function is that Roadshow, AmiTCP or an emulator's stack may be answering.
 The 200 is a sanity cap on a foreign string, and the old order evaluates `id[200]` before
 deciding to stop at 200. Read-only and bounded, but a cap that is not a cap. Operands
@@ -16935,7 +16922,7 @@ Everything else. Four structural classes, each with a reproduction rather than a
 the NDK out-parameters above (32); `tcpdrill.c`'s hand-rolled `say()`, where GCC does not
 read the format literal through the call and walks every conversion branch (9); six
 `dereference of NULL 'out'` in `netstatus.c` where a `need` pre-check guarantees
-`room >= 1` through an arithmetic chain the analyser cannot follow -- **documented at the
+`room >= 1` through an arithmetic chain the analyser cannot follow, **documented at the
 site and the code left alone**, because a NULL test there would be dead code reading as if
 the buffer might be short; and `Wait(0UL)`, which is a never-returns trap the analyser
 continues past.
@@ -16948,7 +16935,7 @@ continues past.
 Both configuration mistakes mattered, and both looked like results:
 
 * without `-D'__asm(x)='` it cannot parse `register ULONG version __asm("d0")` and
-  **abandons the file** -- 32 files including all of `src/bsdsocket`;
+  **abandons the file**, 32 files including all of `src/bsdsocket`;
 * without the compiler's own predefines it dies on `#error Endianess not declared!!` in
   `<machine/ieeefp.h>`.
 
@@ -16983,7 +16970,7 @@ upstream report on its own merits:
 uninitialised where `type` and `domain` beside it are `NX_NULL`. For SRV/TXT it is set only
 by `_nx_mdns_service_name_resolve()`, which need not set it; `:10207` passes it to the
 probing-notify callback and `:10219` dereferences it. Then `:10236` does
-`temp_string_buffer[i-2]` with `i` the length just copied from `name` -- so **an empty name
+`temp_string_buffer[i-2]` with `i` the length just copied from `name`, so **an empty name
 with `conflict_count` in 1..3 writes one byte before a static buffer, from peer-supplied
 input on the reachable path.**
 
@@ -16995,8 +16982,8 @@ Also `nx_tcp_packet_process.c` (four `dereference of NULL 'source_ip'`),
 
 FS-UAE cannot bridge: its A2065 has three backends, all SLIRP or nothing, and
 `uae_slirp_redir` is an empty function in every slirp it ships (60). WinUAE on
-`winbuilder` can, so the guest now takes a real DHCP lease -- 192.168.1.133/24,
-gateway 192.168.1.1 -- and a third machine on the LAN can reach it.
+`winbuilder` can, so the guest now takes a real DHCP lease, 192.168.1.133/24,
+gateway 192.168.1.1, and a third machine on the LAN can reach it.
 
 ### Getting there: `rpcap://`, and a MAC that is not yours
 
@@ -17015,8 +17002,8 @@ the router then hands out a different lease every time.
 
 **Test from a third machine, not from the Windows host.** A frame the host
 sends to the guest's MAC leaves its NIC and never returns to that NIC's own
-pcap capture, so ping and TCP fail from there while ARP -- broadcast, and
-reflected by the switch -- succeeds. That pattern reads exactly like a
+pcap capture, so ping and TCP fail from there while ARP, broadcast, and
+reflected by the switch, succeeds. That pattern reads exactly like a
 hypervisor filtering promiscuous mode, and it is not: from `playhouse2` the
 same connection succeeds immediately.
 
@@ -17031,7 +17018,7 @@ default. The ceiling is now 1024 and the table grows for real.
 `tcp_network_64k`: connect to the helper's echo service and push 8 x 8 KB. The
 TAP log stops after test 15, nothing more reaches the serial line, and no
 `DH0:.done` is written. Reproduced three times. No `RECEIVE BUFFER ERROR`
-accompanies it -- the obvious guess, that the Lance receive ring overruns on a
+accompanies it, the obvious guess, that the Lance receive ring overruns on a
 fast link, is not supported.
 
 Bridged without the host tier is 141/142, so bridging alone is fine. FS-UAE
@@ -17039,7 +17026,7 @@ with the host tier is 18/19 dialling out to 10.0.2.2, so the host tier alone is
 fine; its one failure is the helper dialling back, which SLIRP cannot do. The
 crash needs both.
 
-### 63.4 The guest never reset -- WinUAE did
+### 63.4 The guest never reset, WinUAE did
 
 Two things sent this one the wrong way for three runs.
 
@@ -17066,7 +17053,7 @@ normal frames the echo service sends these:
     BC-24-11-7C-B9-B6 > 00-80-10-49-00-01, IPv4, length 11734:
       192.168.1.184.8701 > 192.168.1.133.52483: Flags [P.], length 11680
 
-11680 is 8 x 1460 -- eight TCP segments delivered as one frame. WinUAE 6.0.3's
+11680 is 8 x 1460, eight TCP segments delivered as one frame. WinUAE 6.0.3's
 A2065 receive callback is `gotfunc2()` in `a2065.cpp`, and it starts
 
     uae_u8 tmp[MAX_PACKET_SIZE];   /* MAX_PACKET_SIZE is 4000 */
@@ -17081,12 +17068,12 @@ The frames are a virtual-network artefact. `playhouse2` is a container whose
 the path is veth -> bridge -> virtio, where Linux GSO segments are carried
 whole. Neither obvious remedy helps: disabling Receive Segment Coalescing on
 the Windows adapter changes nothing, and moving the helper to a physical
-machine on the wire changes nothing either -- frames up to 32858 bytes still
+machine on the wire changes nothing either, frames up to 32858 bytes still
 arrive.
 
 **The discriminator: a different stack, same everything else.** Roadshow 4.364
-staged in place of ours -- same `bsdsocktest` binary, same emulator, same
-bridge, same helper -- dies at the same test, and the event log records the
+staged in place of ours, same `bsdsocktest` binary, same emulator, same
+bridge, same helper, dies at the same test, and the event log records the
 same fault offset `0x16043c7`. `# bsdsocket.library: Roadshow 4.364 (1.9.2023)
 DEMO` in its TAP log. Nothing of ours is on the failing path; the frame is
 destroyed before any guest code sees it.
@@ -17110,7 +17097,7 @@ without the host tier is 141/142. 63.5 builds master and the tier runs.
 
 ### Why this was awkward to debug
 
-Enforcer needs an MMU and runs under FS-UAE, which cannot bridge -- so the one
+Enforcer needs an MMU and runs under FS-UAE, which cannot bridge, so the one
 configuration that crashes is the one configuration Enforcer cannot watch.
 WinUAE's own SLIRP does not expose the host at 10.0.2.2 the way FS-UAE's does,
 so the obvious bisect (same emulator, different network) could not be run
@@ -17119,7 +17106,7 @@ either: the suite reports `Bail out! Could not connect to host helper`.
 `AMINETXDUO_WINUAE_ENFORCER=1` now puts Enforcer on a bridged run, which is the
 gap that left. Two things it needs: a CPU with an MMU, because the conformance
 profile is an A1200 and `mmu_model=68020` makes every `PMOVE` take an F-line
-exception -- thousands of `B-Trap F017` and nothing else runs -- and `waitsecs`
+exception, thousands of `B-Trap F017` and nothing else runs, and `waitsecs`
 staged, so a resident tool started with `run` has installed before the program
 under test starts. It reported no hits here, which is correct: the fault is on
 the host side of the emulator.
@@ -17168,14 +17155,14 @@ and reports version 6.1.0; the packaged 6.0.3 in `C:\Program Files\WinUAE` is
 left alone. `AMINETXDUO_WINUAE_EXE` picks between them and defaults to the
 packaged one, so nothing changes for anyone who has not built it.
 
-**What it does.** The run that killed 6.0.3 --
+**What it does.** The run that killed 6.0.3,
 
     AMINETXDUO_WINUAE_EXE='C:\winuae-patched\winuae64.exe' \
     AMINETXDUO_WINUAE_A2065='\Device\NPF_{...}' \
       tests/conformance/run-winuae.sh -T patched -t 400 \
       -a "HOST 192.168.1.184 CATEGORY sendrecv NOPAGE"
 
--- now finishes at 18/19, `reason=done rc=0`, in 15 seconds. The same command
+now finishes at 18/19, `reason=done rc=0`, in 15 seconds. The same command
 without `AMINETXDUO_WINUAE_EXE`, run back to back with it, still dies on 6.0.3:
 `reason=crash` at 8.1 seconds, after test 15 and during test 16, the first one
 that moves 64 KB. Not merely
@@ -17215,7 +17202,7 @@ What the helper does next is the whole story. `_handle_connect()` is
 
     s.connect(...); s.sendall(b"BSDSOCKTEST HELLO FROM HELPER\n"); s.close()
 
--- close immediately, no lingering. On a LAN the FIN lands on the guest a
+close immediately, no lingering. On a LAN the FIN lands on the guest a
 handful of milliseconds behind the handshake, and the guest is a 68020 running
 an emulated Amiga: the parked socket is in CLOSE_WAIT long before the
 application's `WaitSelect()` gets a look at it.
@@ -17231,8 +17218,8 @@ LISTEN nor SYN_RECEIVED, and CLOSE_WAIT is one of those.
 Neither is right. A completed connection whose peer has closed is still a
 connection: the bytes it sent are queued on the socket, and BSD `accept()`
 hands it over so `recv()` can drain them and then report end of file. NetX Duo
-agrees at the layer below -- `nx_tcp_socket_receive()` returns queued packets
-in CLOSE_WAIT and only answers NX_NOT_CONNECTED once the queue is empty -- so
+agrees at the layer below, `nx_tcp_socket_receive()` returns queued packets
+in CLOSE_WAIT and only answers NX_NOT_CONNECTED once the queue is empty, so
 the data was there the whole time, behind a readiness test that would not admit
 it.
 
@@ -17243,7 +17230,7 @@ goes 19/19. Put the sleep back and it is 18/19 again.
 The fix is one predicate, `bsd_incoming_ready()` in `src/bsdsocket/socket.c`,
 used by both halves: ESTABLISHED or any post-established state that still holds
 the connection (CLOSE_WAIT, CLOSING, TIMED_WAIT, LAST_ACK). NX_TCP_CLOSED stays
-out -- it is also the state of a socket that was never connected, so it cannot
+out, it is also the state of a socket that was never connected, so it cannot
 tell a finished connection from an unused one. `bsd_accept_once()` checks it
 before calling `nx_tcp_server_socket_accept()` and answers NX_SUCCESS itself
 when it holds; that gives up nothing, because the ESTABLISHED path of
@@ -17251,8 +17238,8 @@ when it holds; that gives up nothing, because the ESTABLISHED path of
 NX_SUCCESS.
 
 Nothing about this is emulator-specific. Any peer that connects, writes and
-closes in one breath -- `curl` against a small server, a health-check probe, a
-port scanner that sends a banner -- hits the same window on real hardware; it
+closes in one breath, `curl` against a small server, a health-check probe, a
+port scanner that sends a banner, hits the same window on real hardware; it
 took a real LAN only because SLIRP has no inbound path to try it with. The
 loopback accept tests never caught it because their peer stays open.
 
@@ -17260,9 +17247,9 @@ Bridged host tier with the fix: 142 ok, 0 not ok, 0 skipped, all categories.
 
 ## 64. The 68020 is CPU-bound, and the window has nothing left to give (2026-07-28)
 
-AmiTCP_NG 4.1.2–4.1.4 shipped a round of speed work — link-speed-aware TCP
+AmiTCP_NG 4.1.2–4.1.4 shipped a round of speed work, link-speed-aware TCP
 windows, a 200 ms → 40 ms delayed ACK, MSS from the egress MTU, receive-ring
-tiering — and the question was how much of it transfers here. The answer is
+tiering, and the question was how much of it transfers here. The answer is
 that the window is the wrong lever on this machine, and the two things that
 were worth taking are somewhere else entirely: the critical section and the
 loopback checksum, together **+14% through `bsdsocket.library`**.
@@ -17283,7 +17270,7 @@ With `src/net68k/` in place, 256 KB:
 | every checksum compiled out | 782 | 673 | 248 |
 
 So the checksum is 34% of loopback and 15% of the wire, and it is already
-2.65 cycles/byte of `add.l (a0)+,d0` / `addx.l d2,d0` — the published cost of
+2.65 cycles/byte of `add.l (a0)+,d0` / `addx.l d2,d0`, the published cost of
 those two instructions is 2.25, and `movem.l` does not beat it because the
 adds still cost two cycles each whatever loaded them. There is nothing left in
 that loop.
@@ -17291,8 +17278,8 @@ that loop.
 Nor is there anything left in a copy loop. The alignment census says every
 pointer the stack hands a copy routine is longword aligned, `memcpy` runs at
 183 ns/B against `n68k_copy_bytes`'s 181, and the two portable-C routines that
-still show above it — `nx_packet_data_extract_offset` at 203 ns/B and
-`nx_packet_copy` at 271 — are `memcpy` plus per-packet allocator overhead,
+still show above it, `nx_packet_data_extract_offset` at 203 ns/B and
+`nx_packet_copy` at 271, are `memcpy` plus per-packet allocator overhead,
 not slow inner loops. **No per-byte loop is left in portable C.**
 
 What is left is per-packet cost. On the wire arm the identified per-byte work
@@ -17310,13 +17297,13 @@ A temporary counter in `_tx_thread_interrupt_disable()` and in
 | simulated wire, 256 KB | 10,042 | 695 |
 
 That is 26 critical sections per packet on the wire, and `perf_test` prices a
-`Forbid()`/`Permit()` pair at **9,923 ns** on this profile — two indirect jumps
+`Forbid()`/`Permit()` pair at **9,923 ns** on this profile, two indirect jumps
 through a library vector table that is not in the same memory as the caller.
 10,042 × 9.9 µs is 100 ms of an 1,181 ms transfer.
 
 `Forbid()` is `ADDQ.B #1,TDNestCnt(A6)`. `Permit()` is the matching `SUBQ.B`
 plus three tests, and Exec's own Permit does nothing beyond the decrement
-unless all three say a reschedule is due — the count went below zero, no
+unless all three say a reschedule is due, the count went below zero, no
 interrupt is in progress, and the attention word is non-zero. The port now
 does the arithmetic itself and calls the library only for that third case,
 where it puts the nesting back first so the reschedule path stays Exec's.
@@ -17346,7 +17333,7 @@ that define **and only under it**. On 127.0.0.1 the sender computes a checksum
 over a buffer and the receiver verifies it against the same bytes in the same
 RAM, having crossed nothing that could have changed them.
 
-One of the two goes, not both — `_nx_ip_driver_packet_send()` fills the field
+One of the two goes, not both, `_nx_ip_driver_packet_send()` fills the field
 in on the looped-back copy so the packet is well formed, and it is the
 verification that is skipped. 316 checksum calls over 518 KB become 158 over
 259 KB for the same transfer.
@@ -17385,7 +17372,7 @@ host` that SLIRP has never been able to satisfy.
 
 `perf_test` grew a sweep, because a single window figure cannot tell "the
 default is right" from "nothing here responds to the window at all". 128 KB
-per point, `NX_TCP_ACK_EVERY_N_PACKETS 2` already in place throughout —
+per point, `NX_TCP_ACK_EVERY_N_PACKETS 2` already in place throughout,
 §28 established that raising a window without it is actively harmful.
 
 | window | loopback | simulated wire |
@@ -17399,8 +17386,8 @@ per point, `NX_TCP_ACK_EVERY_N_PACKETS 2` already in place throughout —
 
 **The knee is at 8 KB on loopback and 4 KB on the wire, and the shipped floor
 is 8 KB.** Above it the curve is flat to within its own run-to-run spread, and
-65,535 — the largest window a socket can be created with while window scaling
-is off — is no better than 8,192.
+65,535, the largest window a socket can be created with while window scaling
+is off, is no better than 8,192.
 
 This is the same conclusion §51 reached from the other direction (32 KB pinned
 was 25–75% *worse* through curl) with the mechanism now visible: it is not
@@ -17426,14 +17413,14 @@ One thing to know before repeating this: `-DAMINETXDUO_TCP_WINDOW=4096`, below
 the 8,192 floor, hangs the suite at test 25 on the network tier and never
 finishes. It does so identically on a library built before this section's
 changes, so it is not a regression from them, and no shipped configuration can
-reach it -- `ami_bsd_tcp_window()` clamps to the floor. It is recorded here so
+reach it, `ami_bsd_tcp_window()` clamps to the floor. It is recorded here so
 the next person to sweep the window does not debug it as one.
 
 ### 64.6 The regime question, and what a zero-latency link cannot answer
 
 AmiTCP_NG's link-speed-aware window is reported to have roughly doubled a
-single stream on a real 100 Mbit link. The obvious objection — we move
-2.9 Mbit/s on a 13.9 MHz 68020, nowhere near link capacity — is right for
+single stream on a real 100 Mbit link. The obvious objection, we move
+2.9 Mbit/s on a 13.9 MHz 68020, nowhere near link capacity, is right for
 *this* machine and says nothing about a PiStorm or a Vampire, which run the
 68040/68060 builds this project ships and where the CPU is not the bottleneck.
 The regime matters, so both regimes were run.
@@ -17455,7 +17442,7 @@ than as an argument, and it agrees with the 1.78× §29 recorded for the library
 **With the CPU unlocked the curve does not change shape.** FS-UAE's A1200
 model in warp (`accuracy = -1`, `uae_cpu_speed = max`,
 `uae_cpu_cycle_exact = false`) reports an implied clock of 568 MHz and charges
-`MULU.L` 2.64 cycles where the cycle-accurate model charges 32 — `cpucal`
+`MULU.L` 2.64 cycles where the cycle-accurate model charges 32, `cpucal`
 measures this, and no absolute figure from that mode is quotable. The sweep in
 it:
 
@@ -17488,25 +17475,25 @@ target this project has.
 
 ### 64.7 Four of theirs, weighed
 
-**MSS from the egress MTU** — already the case, and not by our doing:
+**MSS from the egress MTU**, already the case, and not by our doing:
 NetX Duo derives the MSS from `nx_interface_ip_mtu_size` and the sweep shows
 it, 193 IP packets for 256 KB across the simulated wire, 1,359 bytes each.
 `BSD_DEFAULT_MSS` (536) in `src/bsdsocket/transfer.c` is only the fallback for
 a socket whose MSS is not yet known, not a fixed 512.
 
-**Receive-ring tiering** — already the case and better argued:
+**Receive-ring tiering**, already the case and better argued:
 `ami_sana2_rx_ipv4_depth()` derives the IPv4 read queue from the packet pool,
 which is itself derived from `AvailMem()`, with a floor and a ceiling. A 4 MB
 machine gets the floor and an 8 MB one the ceiling.
 
-**Delayed ACK, 200 ms → 40 ms** — measured, and rejected. It needs
+**Delayed ACK, 200 ms → 40 ms**, measured, and rejected. It needs
 `NX_TCP_FAST_TIMER_RATE` raised alongside `NX_TCP_ACK_TIMER_RATE`, because the
 fast periodic is what decrements the timeout, and that walks the whole socket
 list 2.5× as often. 592 / 524 / 224 KB/s against 603 / 535 / 229: a 2% cost
 across the board for latency that `NX_TCP_ACK_EVERY_N_PACKETS 2` has already
-bought — §28 measured ACK delay at a 2.0 ms median with it.
+bought, §28 measured ACK delay at a 2.0 ms median with it.
 
-**Link-speed-aware windows** — not applicable at any window this stack can
+**Link-speed-aware windows**, not applicable at any window this stack can
 offer, on the evidence of 64.5 and 64.6, and unanswerable for the fast-CPU
 regime without the bridged link. Their shape is still the right shape for a
 project whose targets run from a 4 MB 68000 to a PiStorm: RAM sets a ceiling,
@@ -17518,7 +17505,7 @@ be expressible at all.
 ### 64.8 Three more, tried and rejected with numbers
 
 **`NX_DISABLE_ERROR_CHECKING`.** The `_nxe_` wrappers are 30% of an
-`nx_packet_allocate`/`release` pair — 90 µs against 63 — and worth nothing end
+`nx_packet_allocate`/`release` pair, 90 µs against 63, and worth nothing end
 to end: 580 / 216 KB/s against 584 / 216. NetX Duo's own internals call `_nx_`
 and never see a wrapper, so only our own call sites pay, and there are not
 enough of them per megabyte to matter. The bring-up milestones keep their
@@ -17545,7 +17532,7 @@ back in one session. One number per stack.
 |---|---:|---|
 | **AmiNetXDuo** `f905707`, `build/cm` | **120.1 KB/s** | 6 fetches, 119.9–120.2 KB/s per boot |
 | **Roadshow 4.364 (1.9.2023) demo 1.15** | **126.5 KB/s** | 6 fetches, 125.2–129.0 KB/s per boot |
-| **AmiTCP_NG 4.1.3a**, 68020 build | — | would not start |
+| **AmiTCP_NG 4.1.3a**, 68020 build |, | would not start |
 
 Roadshow is **5.4% ahead**. The figure is curl's own `%{speed_download}`,
 bytes per second, divided by 1024; each boot did two fetches and each stack
@@ -17588,7 +17575,7 @@ Same failure as 29.6 recorded for 4.1.1, byte for byte:
 `OpenLibrary` succeeds and `socket()` then returns `EPROTONOSUPPORT`, which
 is what BSD returns when the INET domain was never attached. Their own
 interface file, their own `db/` staged behind an `AmiTCP:` assign made before
-the first library call, and their 68020 build rather than the generic one —
+the first library call, and their 68020 build rather than the generic one,
 all as 29.6 already tried, all identical. Their project documents validation
 on AmigaOS 3.2 under Amiberry and this harness boots Kickstart 3.1 with no
 Workbench install, which remains the most likely gap. Reported as "did not
@@ -17602,7 +17589,7 @@ whole boot with it. 29.6 says this about `ShowNetStatus`; it is true of both.
 
 Neither is in `src/` and neither changes what was measured.
 
-`tests/peer/httppeer.py` died on startup for every caller — the ftp removal
+`tests/peer/httppeer.py` died on startup for every caller, the ftp removal
 took `netpeer.FtpHandler` with it and the peer still referenced it, so it
 raised an `AttributeError` before serving a byte. The ftp listener is now
 skipped when there is no handler.
@@ -17611,7 +17598,7 @@ skipped when there is no handler.
 took `mathieeedoubbas` and `mathieeedoubtrans` from loose files in `build/`,
 where the doubtrans is the `-os` one and the doubbas is not, and a clib2
 client with a mismatched pair sits there forever rather than saying anything
-— the failure `tools/amissl-run.sh` spends a paragraph warning about.
+the failure `tools/amissl-run.sh` spends a paragraph warning about.
 `build/amissl-mathlibs/`, which holds both halves of one pair, is now searched
 first.
 
@@ -17647,9 +17634,9 @@ Clean build, no warnings, and all three routes rerun as 1.10 documents them:
 
 | | checks | result |
 |---|---:|---|
-| `ipv6_test` — two `NX_IP` instances over a RAM driver | 78 | 0 failures |
-| `ipv6_socket_test` — `AF_INET6` over `::1` through the LVOs | 54 | 0 failures |
-| `ipv6_link_test` — A2065 + SLIRP, real 0x86DD on the wire | 6 | 0 failures |
+| `ipv6_test`, two `NX_IP` instances over a RAM driver | 78 | 0 failures |
+| `ipv6_socket_test`, `AF_INET6` over `::1` through the LVOs | 54 | 0 failures |
+| `ipv6_link_test`, A2065 + SLIRP, real 0x86DD on the wire | 6 | 0 failures |
 
 The link test still finds SLIRP's router at `fe80::2`, still gets a router
 advertisement, still autoconfigures `fd00::/64`, and still passes duplicate
@@ -17664,13 +17651,13 @@ One boot on the A1200 profile, the IPv6 library, the interface up on
 |---|---|
 | `ping ::1`, `ping fe80::2`, `ping fd00::2` | `cannot resolve "::1"` |
 | `telnet ::1 23`, `tftp ::1 GET foo`, `whois … SERVER ::1`, `sntp ::1`, `nc ::1 80`, `traceroute ::1` | same message, same rc 10 |
-| `host ipv6.google.com` | `cannot resolve` — an AAAA-only name looks exactly like one that does not exist |
+| `host ipv6.google.com` | `cannot resolve`, an AAAA-only name looks exactly like one that does not exist |
 | `nslookup … TYPE=AAAA` | `"AAAA" is not a record type I know` |
 | `nslookup ipv6.google.com` | answers with the CNAME `ipv6.l.google.com` and no address |
 | `fetch http://[::1]/index.html` | `the port number in that URL is not a number` |
 | `AddNetRoute DST fd00::/64` | `not an address this command can use … write it as four numbers with dots between them` |
 | `ShowNetStatus ALL`, `netstat -i`, `netstat -a`, `GetNetStatus`, `arp` | IPv4 only; no IPv6 line anywhere |
-| `ping 10.0.2.2`, `nslookup`, `arp`, `CheckNetConfig` | all fine — nothing here is broken, it is absent |
+| `ping 10.0.2.2`, `nslookup`, `arp`, `CheckNetConfig` | all fine, nothing here is broken, it is absent |
 
 The message every host-taking command gives is wrong in two ways, and it is
 one message because it is one function:
@@ -17688,8 +17675,8 @@ The cause is structural rather than 28 separate omissions.
 `tool_sock_resolve()` in `src/tools/toolsock.c` returns a `ULONG`, rejects any
 `hostent` whose `h_length != 4`, and hands it to `tool_sock_addr()`, which
 fills a `sockaddr_in`. Every command that takes a host goes through it. The
-library's own `getaddrinfo` — which `ipv6_socket_test` exercises and which
-returns IPv6 first — is not called by a single command.
+library's own `getaddrinfo`, which `ipv6_socket_test` exercises and which
+returns IPv6 first, is not called by a single command.
 
 ### 66.3 The configuration keyword nothing can confirm
 
@@ -17703,7 +17690,7 @@ added to `DEVS:NetInterfaces/eth0`, `CheckNetConfig VERBOSE` reads the file
 and reports "the network configuration has nothing wrong with it",
 `AddNetInterface eth0` brings the interface up and says only
 `eth0: online, address 10.0.2.15`, and `ShowNetStatus ALL` prints the IPv4
-address, netmask, broadcast, MAC, MTU, lease and name server — and no IPv6.
+address, netmask, broadcast, MAC, MTU, lease and name server, and no IPv6.
 
 The address is really there. A library built with
 `-DAMINETXDUO_LOG_LEVEL=2` says so on the serial port in the same boot:
@@ -17722,7 +17709,7 @@ Nothing here is a defect in the stack; it is a missing half of the shipped
 surface, and it is worth writing down as a list rather than a feeling:
 
 * `tool_sock_resolve()` returning a `ULONG` is the single thing to change
-  first — an `AF_UNSPEC` `getaddrinfo` behind the same signature would carry
+  first, an `AF_UNSPEC` `getaddrinfo` behind the same signature would carry
   `ping`, `nc`, `telnet`, `traceroute`, `tftp`, `whois` and `NetTrace` at once;
 * `ShowNetStatus` and `netstat` have no line for a second address family, and
   `arp` has no neighbour-discovery cache to show;
@@ -17747,14 +17734,14 @@ commands. Three points made it cheap:
 
 * `getaddrinfo` ships in both build configurations (`src/bsdsocket/addrinfo.c`
   says so at the top), and the commands are one binary that talks to whatever
-  `bsdsocket.library` is installed — so no `#ifdef` reached `src/tools/` at
+  `bsdsocket.library` is installed, so no `#ifdef` reached `src/tools/` at
   all. Nothing in the IPv4-only build changed.
 * `AI_ADDRCONFIG` is implied and cannot be turned off, so `AF_UNSPEC` on a
   machine without IPv6 never returns an AAAA. A name that resolved to IPv4
   before still resolves to IPv4, and there is no dual-stack regression to
   manage.
-* A library whose vector table stops short of `getaddrinfo` — AmiTCP, an old
-  Roadshow — is detected from `lib_NegSize` and falls back to
+* A library whose vector table stops short of `getaddrinfo`, AmiTCP, an old
+  Roadshow, is detected from `lib_NegSize` and falls back to
   `gethostbyname()`. `tool_sock_have_lvo()` is the test.
 
 The sockaddr side is a `ToolSockAddrAny` union and the length follows the
@@ -17771,7 +17758,7 @@ carries one address family and this library only ever fills it with IPv4.
 
 **`NETSTATUS_ADDRESSES6`** is a new selector, one entry per address per
 interface, answered with an empty table rather than an error in a build
-without IPv6 — so the commands need no build-time test either. `ShowNetStatus
+without IPv6, so the commands need no build-time test either. `ShowNetStatus
 ALL` and `INTERFACES` and `netstat -i` print them. The text is made in
 `tool_nx.c` while the library is open: `bsdsocket.library`'s `inet_ntop()` is
 the only RFC 5952 formatter on a machine whose commands came out of an
@@ -17789,7 +17776,7 @@ could offer more, and neither is a wrapper:
   with `ip_ptr->nx_ipv6_hop_limit`, so traceroute could not vary the hop limit;
 * `_nxd_ip_raw_packet_source_send()` is called with `address_index` 0, so the
   source address would be `nx_ipv6_address[0]` rather than the one RFC 6724
-  selection picks — and an ICMPv6 checksum covers the source address, so a
+  selection picks, and an ICMPv6 checksum covers the source address, so a
   wrong one is a dropped packet rather than a cosmetic fault.
 
 So they refuse an IPv6 target and say that is the reason. The message a user
@@ -17819,11 +17806,11 @@ now assertions:
 | | before | after |
 |---|---|---|
 | a literal never reaches the resolver (18 cases over 6 commands) | 0/18 | 18/18 |
-| `nc` over `::1` delivers | — | ok |
+| `nc` over `::1` delivers |, | ok |
 | `tftp ::1` reports the transfer, not the name | fail | ok |
 | `ShowNetStatus ALL` / `INTERFACES`, `netstat -i` show `fd00::10` and `fe80::` | 0/4 | 4/4 |
 | `nslookup ::1` asks `ip6.arpa` | fail | ok, answers `localhost` |
-| `ping`/`traceroute` name the reason they cannot | — | ok |
+| `ping`/`traceroute` name the reason they cannot |, | ok |
 | `ping ::1`, `fd00::10`, `fe80::2` reply | fail | still pending |
 
 Regression set, all on the same tree: default build warning-clean, `ctest`
@@ -17862,8 +17849,8 @@ traceroute.
 The source address is the same shape of asymmetry. The IPv4 branch asks
 `_nx_ip_route_find()` for an outgoing interface; the IPv6 branch takes
 `&(ip_ptr->nx_ipv6_address[address_index])` as given, and both entry points
-that do not name a source — `_nxd_ip_raw_packet_send()` and
-`_nxde_ip_raw_packet_send()` — hardcode index 0. Slot 0 is whichever address
+that do not name a source, `_nxd_ip_raw_packet_send()` and
+`_nxde_ip_raw_packet_send()`, hardcode index 0. Slot 0 is whichever address
 was configured first, not one chosen for the destination.
 `_nxd_ipv6_interface_find()` already exists and is what `_nx_icmp_ping6()`
 calls; `nxd_ipv6_raw_packet_send_internal.c` even lists it under CALLS while
@@ -17890,7 +17877,7 @@ holds it: that nests because `tx_mutex_get.c:170` increments
 `TX_NO_INHERIT` in `nx_ip_create.c:203` is about priority inheritance, not
 recursion. And `_nxde_ip_raw_packet_send()` discarded the status of the send
 it made and returned `NX_SUCCESS` unconditionally, with the caller's packet
-pointer already cleared — fixed in the same commit, because routing it through
+pointer already cleared, fixed in the same commit, because routing it through
 the corrected entry point meant handling the return anyway.
 
 ### 67.2 The raw socket, both families
@@ -17904,7 +17891,7 @@ rather than needing a second path: the IPv4 copy is taken with the prepend
 pointer wound back over the header, and the IPv6 copy is taken where the
 pointer already is. `nx_packet_copy()` carries `nx_packet_ip_header` into the
 copy either way (`nx_packet_copy.c:203`), so `bsd_raw_source()` still finds
-the peer — bytes 8..23 of the fixed IPv6 header. A datagram is teed only to
+the peer, bytes 8..23 of the fixed IPv6 header. A datagram is teed only to
 sockets of its own family.
 
 **Transmit.** The source address is selected before the packet is built and
@@ -17927,7 +17914,7 @@ field and calls `_nx_ip_checksum_compute()`.
 
 One trap there cost a debugging round. `_nx_ip_checksum_compute()` folds four
 bytes of each address into the pseudo-header sum and only extends to sixteen
-`if (packet_ptr->nx_packet_ip_version == NX_IP_VERSION_V6)` — a field the send
+`if (packet_ptr->nx_packet_ip_version == NX_IP_VERSION_V6)`, a field the send
 path sets *after* it would have been read. Setting it before the call is the
 fix, and the failure it produced was precisely diagnostic: `ping ::1` worked
 and `ping fd00::10` did not. The loopback interface claims every checksum
@@ -17935,8 +17922,8 @@ capability (`nx_ip_create.c:169`, under `NX_ENABLE_INTERFACE_CAPABILITY`), so
 `::1` never verifies one; a self-send to `fd00::10` loops back through the
 *ethernet* interface, which offloads nothing, and verified it.
 
-`IPV6_UNICAST_HOPS` needed no work — `in6.c` already mapped it onto the same
-`as_Ttl` the IPv4 `IP_TTL` uses — but until 67.1 it reached the wire on
+`IPV6_UNICAST_HOPS` needed no work, `in6.c` already mapped it onto the same
+`as_Ttl` the IPv4 `IP_TTL` uses, but until 67.1 it reached the wire on
 neither family for IPv6.
 
 ### 67.3 The commands
@@ -17946,14 +17933,14 @@ renumbers everything they read: echo 128/129 rather than 8/0, time exceeded 3
 rather than 11, destination unreachable 1 rather than 3, and the quoted
 datagram inside an error message is a fixed 40-byte header with the next
 header at offset 6 rather than a variable one with the protocol at 9.
-`traceroute`'s unreachable annotations follow the KAME set — `!N` `!P` `!S`
-`!A` — and `PACKETSIZE` counts 48 bytes of headers rather than 28.
+`traceroute`'s unreachable annotations follow the KAME set, `!N` `!P` `!S`
+`!A`, and `PACKETSIZE` counts 48 bytes of headers rather than 28.
 
 Neither command computes an ICMPv6 checksum, for 67.2's reason. `TOS` is
 refused on an IPv6 target rather than accepted and dropped: the IPv6 traffic
 class is not a field the raw send path carries.
 
-`tool_sock_raw_ok()` — the function that printed the refusal — is deleted.
+`tool_sock_raw_ok()`, the function that printed the refusal, is deleted.
 
 ### 67.4 Measured
 
@@ -17965,7 +17952,7 @@ assertions, and two more were added for `traceroute`:
 | `ping ::1` | pending | 2 received, 9 ms |
 | `ping fd00::10` | pending | 2 received |
 | `ping fe80::2` (SLIRP's router) | pending | 2 received |
-| `traceroute ::1` timed a hop, and reached it | — | ok |
+| `traceroute ::1` timed a hop, and reached it |, | ok |
 
 The wire, from the emulated A2065's frame log through
 `tests/trace/a2065pcap.py`, is the part that shows both defects fixed at once:
@@ -17980,8 +17967,8 @@ The wire, from the emulated A2065's frame log through
 A traceroute ramp on the first four, the socket default on `ping`, a global
 source for a global destination and a link-local source for a link-local one,
 and `tcpdump` reports `icmp6 sum ok` on every one of them. FS-UAE's SLIRP
-forwards nothing beyond itself — `traceroute 8.8.8.8` is `*` at every hop too
-— so a multi-hop trace cannot be run here; the hop-limit ramp on the wire is
+forwards nothing beyond itself, `traceroute 8.8.8.8` is `*` at every hop too
+so a multi-hop trace cannot be run here; the hop-limit ramp on the wire is
 the evidence, not the hop list.
 
 Regression set, all on the same tree: default build warning-clean, `ctest`
@@ -18044,7 +18031,7 @@ been updated fails to compile instead of sending whatever was on the stack.
 It is also what IPv4 already does: `_nx_ip_packet_send()` and
 `_nx_ip_header_add()` take `type_of_service` as an argument.
 
-`_nx_ipv6_header_add()` masks — `(traffic_class & 0xFF) << 20` — so the
+`_nx_ipv6_header_add()` masks, `(traffic_class & 0xFF) << 20`, so the
 argument cannot reach the version nibble or the flow label whatever a caller
 passes.
 
@@ -18054,7 +18041,7 @@ The flow label is the other 20 bits of the same word, equally unreachable, and
 it is not in the patch.
 
 It is not the same defect. No argument for it is being discarded, and RFC 6437
-section 2 makes zero the correct value for a packet that is not labelled — so
+section 2 makes zero the correct value for a packet that is not labelled, so
 the current output is right, not wrong. The same RFC requires a flow label to
 stay constant for the lifetime of a flow and to be hard to guess, which is a
 property of an allocator sitting on the socket layer, not of a per-packet
@@ -18091,8 +18078,8 @@ The wire, from the emulated A2065's frame log through
     IP6 (class 0xb8, hlim 1, ...) fe80::280:10ff:fe32:3334 > fe80::2: [icmp6 sum ok] echo request
     IP6 (class 0x20, hlim 1, ...) fe80::280:10ff:fe32:3334 > fe80::2: [icmp6 sum ok] echo request
 
-Header word 0 is `60 00 00 00`, `6B 80 00 00` and `62 00 00 00` — version 6,
-the requested traffic class, flow label 0 in all three — and each drew a
+Header word 0 is `60 00 00 00`, `6B 80 00 00` and `62 00 00 00`, version 6,
+the requested traffic class, flow label 0 in all three, and each drew a
 reply. Every other IPv6 frame in the same capture is still `60 00 00 00`:
 neighbour solicitation, neighbour advertisement, router solicitation, and
 `ping`'s own echo request, which does not go through the raw path at all.
@@ -18113,8 +18100,8 @@ pending; conformance loopback tier 130 passed, 0 failed, 12 skipped;
 
 66.4's list had five items. Four were closed the same day. These are the last
 two: `AddNetRoute`/`DeleteNetRoute` took dotted quads only, and the neighbour
-cache — which this port already tunes, `NX_IPV6_NEIGHBOR_CACHE_SIZE` 16 → 8 in
-`port/netxduo-amiga/inc/nx_user.h` — had no reader anywhere on the machine.
+cache, which this port already tunes, `NX_IPV6_NEIGHBOR_CACHE_SIZE` 16 → 8 in
+`port/netxduo-amiga/inc/nx_user.h`, had no reader anywhere on the machine.
 
 ### 69.1 There is no IPv6 routing table
 
@@ -18158,14 +18145,14 @@ and dropped:
          AddNetRoute DESTINATION fd00:9::/64
          AddNetRoute DEFAULTGATEWAY fe80::1%eth0
 
-The template is still Roadshow's — no keyword was added. Which family is meant
+The template is still Roadshow's, no keyword was added. Which family is meant
 is decided by whether the address has a colon in it, which no host name and no
 dotted quad can, so the IPv4 half is reached by exactly the texts that reached
 it before, including the ones it refuses and the point in the run where it
 refuses them.
 
 Three things follow from the interface being per router rather than per route.
-A link-local next hop needs the zone — `fe80::1%eth0` — because `fe80::/64`
+A link-local next hop needs the zone, `fe80::1%eth0`, because `fe80::/64`
 exists on every interface at once and `nxd_ipv6_default_router_add()` takes an
 interface index; with one interface up the command supplies it and says so
 when it cannot. A global next hop needs no zone: the interface is the one
@@ -18183,7 +18170,7 @@ packet, and both had to be fixed rather than documented.
 **The destination cache.** `_nx_icmpv6_dest_table_find()` is consulted before
 either list, and an entry in it survives a change to both. A machine that had
 sent one packet to an address before the route existed would keep sending to
-the old next hop afterwards — the route in the table, the traffic on the old
+the old next hop afterwards, the route in the table, the traffic on the old
 path. `netstack_ipv6_route_add()` and `_delete()` invalidate the whole
 destination table, which is four slots and what NetX Duo's own
 `_nx_invalidate_destination_entry()` does one entry at a time when a router
@@ -18206,7 +18193,7 @@ a second:
 Zero is not infinite, it is expired. `0xFFFF` is the value that tick treats as
 a static entry. `src/netstack/netstack_ipv6.c` had been passing 0 for
 `GATEWAY6` since it was written, with a comment saying "lifetime 0 means never
-expires" — so a statically configured IPv6 default router was invalidated
+expires", so a statically configured IPv6 default router was invalidated
 within one second of bring-up, and nothing could have noticed because no
 command could show the router table. The two defects were each other's cover.
 
@@ -18259,14 +18246,14 @@ cache underneath it.
 
 ### 69.4 The neighbour cache goes in `arp`, not beside it
 
-`arp` is the wrong name for it — there is no address resolution protocol in
-IPv6 — and it is still the right place, for three reasons, in order of weight.
+`arp` is the wrong name for it, there is no address resolution protocol in
+IPv6, and it is still the right place, for three reasons, in order of weight.
 
 Every command in this suite that grew IPv6 grew it inside itself. One
 `ping` takes either family, one `nslookup` answers `A` and `AAAA`, one
 `netstat -i` prints both address families of an interface. A separate `ndp`
 would be the first place where the suite asks a user to know which family
-their problem is in before they can ask about it — and the whole point of the
+their problem is in before they can ask about it, and the whole point of the
 cache is to answer "is that machine there", which is asked before the answer
 is known.
 
@@ -18278,14 +18265,14 @@ stack in order to report on it.
 And the two are read together far more often than separately. `arp` with no
 arguments prints the ARP cache and then the neighbour cache; `arp <address>`
 looks in whichever one can hold that address, which is decided by the address.
-Nothing about the IPv4 output changed — on a library without IPv6 the
+Nothing about the IPv4 output changed, on a library without IPv6 the
 neighbour query answers with an empty table and not one byte is printed.
 
 What the section adds over the ARP one is the state, which is the reason it is
 worth having at all. An ARP entry has answered or it has not. A neighbour
 entry says what the stack currently believes and what it is doing about it,
 and the RFC 4861 names are meaningless to a reader who has not read the RFC,
-so each state that appears is spelled out under the list — `INCOMPLETE` asked,
+so each state that appears is spelled out under the list, `INCOMPLETE` asked,
 nothing back yet; `STALE` answered once, not checked since; `PROBE` being
 checked now. `router` marks a neighbour the stack is using as one, from
 `nx_nd_cache_is_router`, and the packet count is what is queued waiting for the
@@ -18302,7 +18289,7 @@ Two selectors and four operations. `NETSTATUS_ROUTES6` and
 answers with an empty table rather than an error, so no `#ifdef` reached
 `src/tools/` for these either.
 
-`AMI_NETSTATUS_VERSION` goes 2 → 3, because `NetStatusControl` grew — an IPv6
+`AMI_NETSTATUS_VERSION` goes 2 → 3, because `NetStatusControl` grew, an IPv6
 route needs a destination, a prefix length and a next hop, which is 36 bytes
 against the 16 its reserved words had. That is a real break: a version-2
 command and a version-3 library refuse each other on every call, including the
@@ -18316,7 +18303,7 @@ prefixes, because that is the order `_nxd_ipv6_search_onlink()` matches in, and
 reports a prefix in both once. `fe80::/64` is in neither: that function answers
 1 for every link-local address before it looks at any list, so there is no
 entry to show and none to remove. A stateless-autoconfigured address is not
-reported from its own prefix — an advertisement may set `A` without `L`, in
+reported from its own prefix, an advertisement may set `A` without `L`, in
 which case the address exists and the prefix is not on link, and if it did set
 `L` the prefix list already holds it.
 
@@ -18349,7 +18336,7 @@ skipped; `tests/tools/run-livetools.sh` PASSED and
 ## 70. The configuration everybody gets, and the three commands that lied to it (2026-07-29)
 
 IPv6 is `-DAMINETXDUO_IPV6=ON` and off by default, so what ships is a library
-with no IPv6 and a set of commands that support it unconditionally — the tools
+with no IPv6 and a set of commands that support it unconditionally, the tools
 are one binary talking to whatever library is installed, and there is no
 `#ifdef` in `src/tools/` to make them agree. That combination had no test.
 `tests/ipv6/run-tools-fsuae.sh` refused to start against a build whose cache
@@ -18359,7 +18346,7 @@ there and every case would fail for a reason that is not the commands.
 The unreasonable part is what that hid. "This address is valid and this
 machine cannot use it" is a question only the IPv4-only build asks, and it is
 the question every user's machine asks. Nineteen commands were run by hand
-against it. Nothing crashed and most degraded well — `AddNetRoute` is the
+against it. Nothing crashed and most degraded well, `AddNetRoute` is the
 standard:
 
     AddNetRoute: the running stack has no IPv6
@@ -18377,7 +18364,7 @@ Three did not.
 
 All three share a cause. Telling `::1` from a typo went through the library's
 `inet_pton()`, and `bsd_inet_pton()`'s `AF_INET6` branch is inside
-`#ifdef AMINETXDUO_IPV6` — an IPv4-only library answers `EAFNOSUPPORT`. Every
+`#ifdef AMINETXDUO_IPV6`, an IPv4-only library answers `EAFNOSUPPORT`. Every
 caller read that as "not an address", which is a different statement from
 "an address this machine cannot reach" and led each command somewhere wrong:
 
@@ -18398,8 +18385,8 @@ caller read that as "not an address", which is a different statement from
 
 `host` is 66's exact defect, surviving in the one build 66 never ran. `arp`
 contradicts itself in consecutive lines. `nslookup` had an assertion for this
-since the toolsock conversion — "nslookup treats `::1` as an address, not a
-name" — which passed in the build that could not fail it.
+since the toolsock conversion, "nslookup treats `::1` as an address, not a
+name", which passed in the build that could not fail it.
 
 `ami_config_parse_ip6()` and `ami_config_format_ip6()` are the machine's only
 other IPv6 text conversions, and they were guarded the same way, for a measured
@@ -18409,13 +18396,13 @@ of `ami_cfg_trim()`, and leaving them unguarded cost a floor build 3.4 KB
 once by moving them to `src/config/config_text6.c` and compiling it always: a
 pulled archive member is kept whole, but an archive member nothing refers to is
 never pulled. Nothing in an IPv4-only library refers to them, and the built
-`bsdsocket.library` is byte-for-byte identical before and after — same MD5. The
+`bsdsocket.library` is byte-for-byte identical before and after, same MD5. The
 commands that do refer to them grow about 1.3 KB each.
 
 `tool_parse_ip6()` and `tool_format_ip6()` then lose their `struct Library *`
 and their LVO probes and become what they always claimed to be: text
 conversion, with "can this machine reach it" left to the caller. `nslookup`'s
-AAAA printing goes the same way — an AAAA is a legitimate question to ask an
+AAAA printing goes the same way, an AAAA is a legitimate question to ask an
 IPv4-only machine, and `inet_ntop()` refuses `AF_INET6` there, so a record it
 did receive would have printed as `?`. `tool_sock_pton()` had no callers left
 and is gone.
@@ -18430,7 +18417,7 @@ ask a name server an IPv6 question over IPv4. So neither should get the
 the query and sends the datagram itself. An `ip6.arpa` PTR is an ordinary
 question that travels to `10.0.2.3` over IPv4, and the answer does not depend
 on what this machine can route to. It now gives the same answer in both builds,
-which is also what makes the assertion meaningful — the same two lines are
+which is also what makes the assertion meaningful, the same two lines are
 asserted in both modes of the test:
 
     1.0.0. ... .0.ip6.arpa from 10.0.2.3 (authoritative)
@@ -18438,7 +18425,7 @@ asserted in both modes of the test:
       name       localhost
 
 **host refuses**, and not for the IPv6 reason. `host` answers through the
-machine's resolver, deliberately — that is the whole difference between it and
+machine's resolver, deliberately, that is the whole difference between it and
 `nslookup`, and it is why comparing the two is a diagnosis. The resolver has no
 reverse call for IPv6 in *either* build: `bsd_getnameinfo()` resolves
 `NX_IP_VERSION_V4` only, and there is no "ask this PTR" entry point behind
@@ -18459,7 +18446,7 @@ Checked before `tool_socket_open()`, so a question `host` will not answer no
 longer starts the network in order to say so.
 
 **arp refuses**, with the IPv6 reason, because the neighbour cache is the
-stack's and an IPv4-only stack has none. It grants the address first — a typo
+stack's and an IPv4-only stack has none. It grants the address first, a typo
 still gets "is not an address", and the test asserts both, so the build cannot
 become an excuse for `fe80::zz`:
 
@@ -18485,9 +18472,9 @@ mode from the build directory's `CMakeCache.txt` instead of refusing:
 `AMINETXDUO_IPV6=ON` runs what it always ran, anything else runs the
 degradation. Both are real configurations and both are asserted.
 
-The IPv4-only mode asks the same questions of every command that takes a host —
+The IPv4-only mode asks the same questions of every command that takes a host,
 `ping`, `traceroute`, `nc`, `telnet`, `tftp`, `whois`, `sntp`, `fetch`, `host`,
-`nslookup` — plus `arp`, `netstat`, `ShowNetStatus` and
+`nslookup`, plus `arp`, `netstat`, `ShowNetStatus` and
 `AddNetRoute`/`DeleteNetRoute`. Every degraded case is asserted three ways at
 once, and the first is the one that matters:
 
@@ -18504,7 +18491,7 @@ each set carries a positive one and a return code beside it. The same reason
 the IPv6 mode has always kept `nc no.such.host.invalid 80`: a command that
 answers every failure with the same sentence is not an improvement.
 
-The IPv4 controls are in the same run rather than a separate one — the leased
+The IPv4 controls are in the same run rather than a separate one, the leased
 address, `ping 10.0.2.2`, `nc` over `127.0.0.1`, an IPv4 route added and
 removed through `AddNetRoute`, and both tables printed with no hole where IPv6
 would be. `netstat -i` shows no `fe80::`, `arp` prints no empty neighbour
@@ -18513,14 +18500,14 @@ section, and `ShowNetStatus ALL` still ends "No problems found".
 ### 70.4 Measured
 
 `tests/ipv6/run-tools-fsuae.sh -b build/cm -s`: 106 assertions, PASS, nothing
-pending — a mode that previously exited 2 without booting.
+pending, a mode that previously exited 2 without booting.
 `tests/ipv6/run-tools-fsuae.sh -s` on `build/v6`: 75 assertions (69 before,
 plus the six shared `host` ones), PASS, nothing pending. Its default timeout
 goes 420 s → 540 s; the ipv6 list spends most of its budget on `wait` lines and
 one deliberate 30 s resolver timeout, and 420 had no headroom left.
 
 Regression set, all on the same tree: default build warning-clean, `ctest`
-11/11 — and `config_parsers` now exercises the IPv6 text conversions in the
+11/11, and `config_parsers` now exercises the IPv6 text conversions in the
 IPv4 host build, which it could not before; IPv6 build warning-clean,
 `ipv6_test` 78/0, `ipv6_socket_test` 54/0, `ipv6_link_test` 6/0; conformance
 loopback tier 130 passed, 0 failed, 12 skipped; `tests/tools/run-livetools.sh`
@@ -18542,8 +18529,8 @@ something is an inference rather than a decode, it says so.
 
 ### 71.1 Getting to the code
 
-Standard AmigaOS HUNK: `HUNK_HEADER`, three hunks — code 0x105f longwords, data
-0x2b, BSS 0x1c8 — then one `HUNK_RELOC32SHORT` block (type 0x3f7) carrying 58
+Standard AmigaOS HUNK: `HUNK_HEADER`, three hunks, code 0x105f longwords, data
+0x2b, BSS 0x1c8, then one `HUNK_RELOC32SHORT` block (type 0x3f7) carrying 58
 self-references, 67 into the data hunk and 60 into BSS. The code hunk's payload
 starts at file offset 0x28, and every offset in this section is relative to it.
 
@@ -18602,7 +18589,7 @@ The flag at data+8 is written in exactly one function, `initRoutine`:
 ```
 
 **The flag defaults to enabled and is switched off, not on.** It is read in five
-places — 0x13d0, 0x1718, 0x174a, 0x17a6 on transmit and **0x1a52** on receive —
+places, 0x13d0, 0x1718, 0x174a, 0x17a6 on transmit and **0x1a52** on receive,
 and in every one a set flag routes around the client's buffer-management
 callbacks entirely.
 
@@ -18648,8 +18635,8 @@ Transmit, 0x2218, is the mirror: `a1 = ios2_Data`, `a2 = a1@(100)`, walk
 
 **That is AmiTCP's `struct IOIPReq` and AmiTCP's mbuf, byte for byte.** From
 AmiTCP 3.0b2 and AmiTCP_NG 4.1.3a `net/if_sana.h` and `sys/mbuf.h`: `ioip_s2` is
-the embedded `IOSana2Req` (88 bytes), `ioip_reserved` — the pre-allocated receive
-chain — is at **+96**, `ioip_packet` at **+100**, and AmiTCP's mbuf puts `m_next`
+the embedded `IOSana2Req` (88 bytes), `ioip_reserved`, the pre-allocated receive
+chain, is at **+96**, `ioip_packet` at **+100**, and AmiTCP's mbuf puts `m_next`
 at 0, **`m_len` at 8, `m_data` at 12** (the reverse of 4.4BSD-lite and of
 Roadshow) with `m_pkthdr.len` at 20. AmiTCP sets `ios2_Data = req` once when it
 builds its request pool and never touches it again; its own `sana2.i` comments
@@ -18662,7 +18649,7 @@ Nothing in `ios2_BufferManagement` is consulted on that path at all.
 
 ### 71.3 What that would do to us
 
-`ios2_Data` in this stack is the slot, not a buffer — `sana2_rx.c:181` and
+`ios2_Data` in this stack is the slot, not a buffer, `sana2_rx.c:181` and
 `sana2_tx.c:433` both set `slot->req.ios2_Data = slot`, and the hooks in
 `src/sana2/sana2_copy.c` cast it back. `struct IOSana2Req req` is the first
 member of both slots and is 88 bytes, so the driver's +96 and +100 land on real
@@ -18670,8 +18657,8 @@ fields of ours:
 
 | driver reads | `AmiRxSlot` (`sana2_internal.h:131`) | `AmiTxSlot` (`:182`) |
 |---|---|---|
-| `ios2_Data + 96` | `dst` — `UCHAR *` into an `NX_PACKET` | `cursor` — `NX_PACKET *` |
-| `ios2_Data + 100` | `capacity` — `ULONG`, ~1552 | `cursor_off` — `ULONG`, 0 |
+| `ios2_Data + 96` | `dst`, `UCHAR *` into an `NX_PACKET` | `cursor`, `NX_PACKET *` |
+| `ios2_Data + 100` | `capacity`, `ULONG`, ~1552 | `cursor_off`, `ULONG`, 0 |
 
 Receive is the dangerous direction, because it writes. With the flag set, one
 inbound frame does this, with `dst` valid because `ami_sana2_rx_arm()` re-arms it
@@ -18687,17 +18674,17 @@ before every post:
 
 `dst` points into an `NX_PACKET` payload. NetX Duo does not clear payloads on
 release, so bytes 8..15 of that buffer are **the previous frame's contents at the
-same offset** — which is to say the destination address of a write of up to 1500
+same offset**, which is to say the destination address of a write of up to 1500
 bytes is chosen by whoever sent the previous packet. On a never-used pool block
 it is uninitialised allocator memory instead. This is remotely triggerable
 arbitrary-address memory corruption, not a compatibility wart.
 
 Transmit is read-only by comparison and merely useless: `cursor_off` is 0, so
-0x2236 reads `*(ULONG *)8` — the 68k bus-error vector — as a length and
+0x2236 reads `*(ULONG *)8`, the 68k bus-error vector, as a length and
 `*(ULONG *)12` as the source, and every outbound frame carries Kickstart bytes.
 
 **Why §44.9 saw none of this.** The detection runs in `initRoutine`, which exec
-runs **once**, at `InitResident` time — on the first `OpenDevice()` of the device
+runs **once**, at `InitResident` time, on the first `OpenDevice()` of the device
 in a boot, not on every open. `netstack_startup()` opens its interfaces at
 `netstack.c:476` and creates the `AMITCP` port at `netstack.c:1288`, *after*. So
 on the tested path the port does not exist when the driver initialises, the flag
@@ -18710,7 +18697,7 @@ is withdrawn: the hypothesis was right and the ordering was lucky.
 The luck runs out in an ordinary case: **the stack comes up on some other
 interface, the `AMITCP` port goes in, and `x-surf-100.device` is opened for the
 first time afterwards.** `ami_ns_add_interface()` (`netstack.c:2079`) is exactly
-that call, and so is `tool_device_probe()` (`tool_diag.c:274`) — a status probe
+that call, and so is `tool_device_probe()` (`tool_diag.c:274`), a status probe
 run once while the stack is up poisons the flag for every later open in that
 boot, and only a reboot clears it. It needs a 68020 or better, which every
 machine that takes a Zorro X-Surf-100 has.
@@ -18742,8 +18729,8 @@ treatment.
 28f0:  movel a6@(184),d0 / cmpl d2,d0 / blsw    ; unit >= cards found -> fail
 ```
 
-The three refusals share a trick: each sets `d2` — which started life as the unit
-number — to 50, so the `unit >= 8` guard at 0x28e8 catches all of them. The
+The three refusals share a trick: each sets `d2`, which started life as the unit
+number, to 50, so the `unit >= 8` guard at 0x28e8 catches all of them. The
 messages are logged, not returned; the caller gets `io_Error = -1`
 (`IOERR_OPENFAIL`) with `io_Device` and `io_Unit` set to -1 at 0x2a44.
 
@@ -18752,11 +18739,11 @@ messages are logged, not returned; the caller gets `io_Error = -1`
 | `already open in exclusive mode` | someone holds `SANA2OPF_MINE`; **every** open fails, exclusive or not |
 | `you are not 1st opener` | you asked for `SANA2OPF_MINE` and the unit open count is nonzero |
 | `promisc is only possible in exclusive mode` | you asked for `SANA2OPF_PROM` without `SANA2OPF_MINE` |
-| no message | unit ≥ 8, or ≥ the number of cards found — one card means unit 0 only |
+| no message | unit ≥ 8, or ≥ the number of cards found, one card means unit 0 only |
 
 **We pass `io_Flags = 0` and unit 0** (`compat.c:219`, `sana2_device.c:530`), so
 none of the three can fire and both range checks pass. What would break us:
-opening unit 1, or ever setting `SANA2OPF_PROM` — which `bpf_channel.c:809`
+opening unit 1, or ever setting `SANA2OPF_PROM`, which `bpf_channel.c:809`
 currently records and does not honour, and which here would need
 `SANA2OPF_MINE` alongside it and would then lock every other opener out of the
 card.
@@ -18788,7 +18775,7 @@ unsigned compare and land on the unknown path with everything else.
 
 Better than reading the table: **the driver ships its own list.** 0x4000 is
 `NSCMD_DEVICEQUERY`, and its handler at 0x3a80 fills an `NSDeviceQueryResult`
-— `SizeAvailable` 16, `DeviceType` 7 (`NSDEVTYPE_SANA2`), `SubType` 0 — whose
+`SizeAvailable` 16, `DeviceType` 7 (`NSDEVTYPE_SANA2`), `SubType` 0, whose
 `SupportedCommands` points at a NUL-terminated `UWORD` array at 0x3f78:
 
 ```
@@ -18804,7 +18791,7 @@ Better than reading the table: **the driver ships its own list.** 0x4000 is
 | 9 | `S2_DEVICEQUERY` | 0x3308 | see below |
 | 10 | `S2_GETSTATIONADDRESS` | 0x33d4 | six bytes into both `ios2_SrcAddr` and `ios2_DstAddr` |
 | 11 | `S2_CONFIGINTERFACE` | 0x3410 | second call → `S2ERR_BAD_STATE`/`S2WERR_IS_CONFIGURED`; brings the unit online on success |
-| 12, 13 | — | 0x3d90 | the reserved `S2_START+3/+4` gap, correctly unimplemented |
+| 12, 13 |, | 0x3d90 | the reserved `S2_START+3/+4` gap, correctly unimplemented |
 | 14 | `S2_ADDMULTICASTADDRESS` | 0x37a0 | the bit-7 bug of §44.9, at 0x37b4 |
 | 15 | `S2_DELMULTICASTADDRESS` | 0x3874 | refcounted in a **UBYTE** at entry+14; does not re-check the group bit |
 | 16 | `S2_MULTICAST` | 0x3040 | plain `CMD_WRITE`, no address validation at all |
@@ -18831,12 +18818,12 @@ Command 0x109 takes four private tags off `ios2_Data`, each pointing at a
 shadow at unit+194. A NULL buffer returns the required length, so it is a
 two-call idiom. It is not a SANA-II number in any header available here.
 
-**`AbortIO` (0x2d3c) only knows five commands** — 2, 3, 17, 23, 24, at
+**`AbortIO` (0x2d3c) only knows five commands**, 2, 3, 17, 23, 24, at
 0x2d5a-0x2d6e. An `S2_MULTICAST` (16) sits on the same queue as `CMD_WRITE` and
 cannot be aborted: it returns -3 and logs `Cannot abort IOReq!`. It also returns
 0 immediately for any request whose `ln_Type` is already `NT_REPLYMSG`.
 
-Against all that, this stack issues eleven commands — `CMD_READ`, `CMD_WRITE`,
+Against all that, this stack issues eleven commands, `CMD_READ`, `CMD_WRITE`,
 `CMD_FLUSH`, `S2_DEVICEQUERY`, `S2_GETSTATIONADDRESS`, `S2_CONFIGINTERFACE`,
 `S2_ONLINE`, `S2_OFFLINE`, `S2_GETGLOBALSTATS`, `S2_ADDMULTICASTADDRESS`,
 `S2_DELMULTICASTADDRESS`. **Every one is implemented here**, and the only one
@@ -18845,7 +18832,7 @@ we send gets `IOERR_NOCMD`.
 
 **Why `S2_DEVICEQUERY` leaves `SizeSupplied` at zero.** §44.9 recorded the
 symptom; this is the mechanism. The handler walks a descriptor table at data+0x14
-— eight 8-byte records `{UWORD tag; UWORD size; ULONG value}` — writing each
+eight 8-byte records `{UWORD tag; UWORD size; ULONG value}`, writing each
 field into `ios2_StatData` starting at **offset 0**, so the first two records
 write zeros over `SizeAvailable` and `SizeSupplied` themselves. Only then:
 
@@ -18871,12 +18858,12 @@ At open, 0x292c-0x29c0, the driver calls `FindTagItem` on **exactly three tags**
 | `S2_PacketFilter` 0x800B0003 | BM+16 | `&devbase[118]` |
 
 It never looks at `S2_CopyToBuff16`/`FromBuff16` (0x800B0004/5), the 32-bit
-variants, the DMA variants or `S2_Log` — those constants appear nowhere in the
+variants, the DMA variants or `S2_Log`, those constants appear nowhere in the
 binary. **So `AMI_SANA2_OFFER_COPY16` is moot for this device, and nothing we
 omit is required.**
 
 `devbase+118` is a `struct Hook` embedded in the device base whose `h_Entry` (at
-+126) `initRoutine` points at a `moveq #1,d0 / rts` stub at 0x246c — an
++126) `initRoutine` points at a `moveq #1,d0 / rts` stub at 0x246c, an
 accept-everything filter. It is invoked by the book at 0x1a38-0x1a4a: `a0` =
 hook, `a2` = object, `a1` = message, entry from `hook+8`. Passing no
 `S2_PacketFilter` is safe and is what we do.
@@ -18885,7 +18872,7 @@ The two copy defaults are not safe, and this is a latent driver bug rather than
 anything we hit: `lea a6@(126),a1` (0x29aa, 0x29b8) stores the **address of the
 `h_Entry` slot** where a plain function pointer belongs, so a client that omits
 the copy tags gets a jump into the device base on its first packet. We pass both,
-so it never arises — but it is why "the driver will default sensibly" is not a
+so it never arises, but it is why "the driver will default sensibly" is not a
 safe general assumption.
 
 The allocation is 32 bytes (`AllocMem(0x20, MEMF_PUBLIC|MEMF_CLEAR)`, 0x2914):
@@ -18904,8 +18891,8 @@ dropped with `oops, pkt size is < 46!` (0x13fe).
 
 **One defect in the raw path, and it is the driver's.** At 0x19fe the handler
 tests `io_Flags & SANA2IOF_RAW` and, when set, adds 14 to `ios2_DataLength` and
-takes the copy source from `lea sp@(48),a0` — the **address of its own stack slot
-holding the frame pointer** — where the cooked branch two instructions later does
+takes the copy source from `lea sp@(48),a0`, the **address of its own stack slot
+holding the frame pointer**, where the cooked branch two instructions later does
 `movel sp@(48),d4 / addl #14,d4` and gets the pointer itself. A `SANA2IOF_RAW`
 read therefore receives stack contents rather than the frame. We set that flag in
 two places: `sana2_device.c:312`, the raw probe, which is harmless because
@@ -18925,7 +18912,7 @@ at 0x08d6 and 0x0918). The `Unit` prefix is built from the unit number, so
 
 **`DEBUGLEV` is inverted from its own documentation.** Output goes through
 `RawDoFmt` + `RawPutChar` at 0x2320, gated at each call site by
-`cmpiw #N, DEBUGLEV / bgt skip` — a message of level N prints when
+`cmpiw #N, DEBUGLEV / bgt skip`, a message of level N prints when
 `DEBUGLEV <= N`. `initRoutine` defaults the key to **100** when it is absent
 (0x2506), and that is what turns logging off. The shipped `x-surf-100.txt` says
 "0=off"; `DEBUGLEV 0` in fact prints everything, identically to `DEBUGLEV 1`.
@@ -18935,7 +18922,7 @@ Anything above 10 is silent.
 records: `Transmit Error` (0x3a44), `CopyToBufCnt` (0x3a54), `DeviceOpenCnt`
 (0x3a64, the library open count) and `UnitOpenCnt` (0x3a74). A caller whose
 `RecordCountMax` is under 4 gets **success with nothing filled in and
-`RecordCountSupplied` untouched** (0x39b8) — worth knowing before believing its
+`RecordCountSupplied` untouched** (0x39b8), worth knowing before believing its
 output.
 
 **The data-cache freeze.** After configuring the card the driver writes the
@@ -18975,7 +18962,7 @@ different chip back-end**. Its code hunk is 0x4718 bytes at file 0x28; Open
 Everything a SANA-II client can see is identical: the same `subq #8` / `cmpw #18`
 dispatch into a 19-entry table at 0x42e8, the same commands implemented and the
 same 12/13 gap, the same `NSCMD_DEVICEQUERY` with the same `SupportedCommands`
-list at 0x4514 — including the same omission of 20 and 21 — the same three
+list at 0x4514, including the same omission of 20 and 21, the same three
 buffer-management tags and none of the 16/32/DMA ones, the same broken
 `lea`-instead-of-`move` copy defaults, the same `AbortIO` gap for `S2_MULTICAST`,
 the same 8-unit ceiling, the same `d2 = 50` poison trick, and the three
@@ -19004,7 +18991,7 @@ Ordered by what it buys, with an honest size for each. **None of these are in
 `src/` yet; this section is the input to that work, not a record of it.**
 
 **1. Do not let a third-party SANA-II device initialise while our `AMITCP` port
-is up. Small — about 20 lines and one new pair of functions.** This is the whole
+is up. Small, about 20 lines and one new pair of functions.** This is the whole
 of 71.2, 71.3 and 71.8. `ami_ns_port_create()` / `ami_ns_port_delete()` in
 `netstack.c:89-137` already do the work; expose a suspend/resume pair and bracket
 the `OpenDevice()` in `ami_sana2_open_device()` (`compat.c:210-243`) with it,
@@ -19015,19 +19002,19 @@ nothing. That closes the `AddNetInterface`-after-startup case and the
 driver keying an ABI assumption off that name. Startup ordering already happens
 to be right and stays right.
 
-**2. Say so in the diagnostic. Small — a few lines in `tool_diag.c`.** Once the
+**2. Say so in the diagnostic. Small, a few lines in `tool_diag.c`.** Once the
 flag is set it stays set for the boot, and nothing we do at open time can undo
 it; recovery is a reboot or `NOAMITCPOPT 1` in the driver's config file. When the
 `AMITCP` port is up and an iComp driver is resident, the diagnostic is where a
 user would find that out, and `DEBUGLEV 5` is how they would confirm it.
 
-**3. Leave raw mode off on this card, and record why. Trivial — a comment.**
+**3. Leave raw mode off on this card, and record why. Trivial, a comment.**
 71.6's raw-path defect means `AMI_SANA2_RAW_DEFAULT` must not be flipped for
 x-surf-100 without a WinUAE check first. `ami_sana2_probe_raw()` is safe as
 written, and its NULL-`packet` guard is now load-bearing for a reason it was not
 designed for.
 
-**4. `CMD_FLUSH` at teardown is antisocial here. Small — one call site.**
+**4. `CMD_FLUSH` at teardown is antisocial here. Small, one call site.**
 `sana2_rx.c:345` issues it as a second-stage abort. On this driver (0x2e9c) it
 aborts every *other* opener's pending reads as well as ours. We already
 `AbortIO()` each slot individually at `sana2_rx.c:431`, which is the correct and
@@ -19077,7 +19064,7 @@ sendto(s, "LIST\n", 5, 0, (struct sockaddr *) &bcast, sizeof bcast);
 ```
 
 and then selects for replies. The server half binds the same port on
-`INADDR_ANY` and says why in a comment — "a unicast-bound socket won't receive
+`INADDR_ANY` and says why in a comment, "a unicast-bound socket won't receive
 broadcasts" (`amiga-server.c:2207`). So this is an IPv4 limited broadcast and
 not multicast, which matters: the multicast branch of the code below already
 has a loopback switch, and if Fitz had used multicast the answer would have
@@ -19086,7 +19073,7 @@ been "call `nx_igmp_loopback_enable()`" and nothing else.
 Fitz also carries a `ROADSHOW_SONDERLOCKE` path that detects Roadshow by
 `FindPort("TCP/IP Control")` and, when it finds it, adds a TCP query against
 its own hostname to the broadcast results. That is compiled into the released
-binary. It is direct evidence that Roadshow has the same gap — and it does not
+binary. It is direct evidence that Roadshow has the same gap, and it does not
 fire for us, because this stack creates an `AMITCP` port and not a `TCP/IP
 Control` one, so we take the plain broadcast path.
 
@@ -19108,7 +19095,7 @@ the flag, so the copy is never made and a broadcast this host sends is
 delivered to every host on the link except this one.
 
 Ethernet is simplex: the card does not receive its own transmission. Every
-general-purpose stack therefore makes the copy in software — 4.4BSD in
+general-purpose stack therefore makes the copy in software, 4.4BSD in
 `ether_output()`, which `m_copy()`s a frame carrying `M_BCAST` to the loopback
 input routine, and Linux in `ip_mc_output()`, which `skb_clone()`s a route
 carrying `RTCF_BROADCAST` to `dev_loopback_xmit()`. Neither has a socket
@@ -19140,7 +19127,7 @@ The suite that would break is upstream's own. `netx_icmp_ping_test.c:178` and
 loopback on by default `ip_0` answers its own request and the
 `ping_responses_received` count `nx_icmp_info_get()` reports stops matching
 what those tests assert. Beyond the suite, any application that binds the port
-it broadcasts to would start seeing its own datagrams — which is the behaviour
+it broadcasts to would start seeing its own datagrams, which is the behaviour
 we want, but not one to hand an existing embedded application without asking.
 
 And opt-in is what the function already does. The only unconditional loopback
@@ -19148,8 +19135,8 @@ there is the unicast to our own address, which has nowhere else to go. The
 multicast loopback, which also transmits, is opt-in and defaults to off. A
 broadcast belongs with the second, not the first.
 
-A runtime service — `nx_ip_broadcast_loopback_enable()`, mirroring
-`nx_igmp_loopback_enable()` — was considered and dropped: a field in `NX_IP`,
+A runtime service, `nx_ip_broadcast_loopback_enable()`, mirroring
+`nx_igmp_loopback_enable()`, was considered and dropped: a field in `NX_IP`,
 two services, their `_nxe_` wrappers and documentation, for a switch an
 application sets once at startup.
 
@@ -19158,7 +19145,7 @@ application sets once at startup.
 ### 72.5 What it costs
 
 One `_nx_packet_copy()` from the default pool per broadcast sent, taken with
-`NX_NO_WAIT` — an `AMI_POOL_PAYLOAD` packet (1568 bytes plus the `NX_PACKET`
+`NX_NO_WAIT`, an `AMI_POOL_PAYLOAD` packet (1568 bytes plus the `NX_PACKET`
 header) held until the receive side is done with it, and a memcpy of the
 datagram. Broadcasts on this machine are name lookups, DHCP and ARP-adjacent
 discovery, not a data path. If the pool is empty the copy is skipped,
@@ -19186,7 +19173,7 @@ filter on address. `nx_udp_socket_bind()` binds a port and not an address, so
 (`netstack_capture.c:112`) returns `NX_SUCCESS` unconditionally by design.
 
 `SO_BROADCAST` sets and clears `ASF_BROADCAST` (`options.c:115`) and nothing
-reads it — it gates neither send nor receive. That is a divergence from BSD,
+reads it, it gates neither send nor receive. That is a divergence from BSD,
 which returns `EACCES` on a broadcast `sendto()` from a socket without the
 option, but it is a permissiveness and not a drop, so it is not what this
 report was about. Left alone.
@@ -19199,9 +19186,9 @@ leave and does not see the copy arrive.
 
 `tests/netstack/host/test_bcast_loopback_host.c`, registered as `ctest`
 `bcast_loopback`, compiles the real path from `nx_udp_socket_send()` to
-`nx_udp_socket_receive()` — including `nx_ip_packet_send.c`,
+`nx_udp_socket_receive()`, including `nx_ip_packet_send.c`,
 `nx_ip_driver_packet_send.c`, `nx_packet_copy.c`, `nx_ipv4_packet_receive.c`,
-`nx_ip_dispatch_process.c` and the `_nxe_` wrappers — behind a link driver that
+`nx_ip_dispatch_process.c` and the `_nxe_` wrappers, behind a link driver that
 releases the frame without echoing it. Two UDP sockets on one IP instance, one
 bound to 17710 and one sending to it:
 
@@ -19215,7 +19202,7 @@ bound to 17710 and one sending to it:
 17 checks / 2 failures before the patch, 19 checks / 0 failures after.
 
 `tests/netstack/run-fitzquery.sh` runs the reporter's two commands on the
-released Fitz binary in FS-UAE with the A2065 on SLIRP — no host peer, both
+released Fitz binary in FS-UAE with the A2065 on SLIRP, no host peer, both
 halves in the guest. With the define off:
 
 ```
@@ -19258,13 +19245,13 @@ the network, is the guard already there, and does the threat model apply.
 
 ### 73.1 The only shipped-code MEDIUM, and why it is wrong
 
-`nxd_ipv6_router_lookup.c:132` and `:162` -- "a pointer is possibly assigned to
+`nxd_ipv6_router_lookup.c:132` and `:162`, "a pointer is possibly assigned to
 NULL then used". That file *is* compiled into `bsdsocket.library`, and the
 router table it reads is populated from router advertisements, so it is
 network-reachable. Worth taking seriously for those two reasons alone.
 
 Both lines do `*nd_cache_entry = ...entry_neighbor_cache_ptr` and return
-`NX_SUCCESS`, and the field genuinely can be NULL -- `nxd_ipv6_prefix_router_timer_tick.c`
+`NX_SUCCESS`, and the field genuinely can be NULL, `nxd_ipv6_prefix_router_timer_tick.c`
 nulls it on router expiry, which 69 already had reason to read closely. But both
 callers handle it:
 
@@ -19272,13 +19259,13 @@ callers handle it:
   case: "If the default router did not has a reachable ND_CACHE_ENTRY" ->
   `if ((status == NX_SUCCESS) && !NDCacheEntry)`, substituting the destination
   table's entry.
-- `nx_icmpv6_process_redirect.c:182` uses the call only as a boolean -- is there
-  a default router -- and sets `error = 1` when there is not.
+- `nx_icmpv6_process_redirect.c:182` uses the call only as a boolean, is there
+  a default router, and sets `error = 1` when there is not.
 
 ### 73.2 Every HIGH is uncompiled
 
 Skipjack, XTEA, RC5, SEED, RC2, Blowfish, CAST5, DES, MD4, MD5, SHA1, and
-hardcoded keys in `.java` test vectors -- all in `third_party/dropbear/libtomcrypt/`.
+hardcoded keys in `.java` test vectors, all in `third_party/dropbear/libtomcrypt/`.
 The tool is flagging that a cipher implementation exists in a crypto library,
 not that anything uses it. `third_party/dropbear/src/default_options.h` decides:
 `DROPBEAR_AES128 1`, `DROPBEAR_AES256 1`, `DROPBEAR_3DES 0`,
@@ -19291,11 +19278,11 @@ Same for the `scp.c` double-free and use-after-free cluster: we build
 
 ### 73.3 Guards the tool did not read
 
-- `clients/compat/amiga_posix.c:113` -- `strcpy`, and shipped. Two lines above:
+- `clients/compat/amiga_posix.c:113`, `strcpy`, and shipped. Two lines above:
   `if (head + strlen(colon + 2) + 1 > sizeof(amiga_path_buf)) return path;`,
   which bounds exactly the `memcpy` of `head` plus the `strcpy` of
   `strlen + 1` that follow.
-- `tools/fix-toolchain-crt0.py:181` -- reported as an environment variable
+- `tools/fix-toolchain-crt0.py:181`, reported as an environment variable
   reaching a shell command. `subprocess.run([str(c), "-d", str(sample)])` is a
   list argv with no `shell=True`; the variable becomes `argv[0]`, an executable
   path, which is what `AMINETXDUO_OBJDUMP` exists to let a developer choose.
@@ -19306,23 +19293,23 @@ About forty "path traversal" findings in `tools/`, `tests/`, `install/` and
 `dist/` Python: a command-line argument reaching `open()`. These are build and
 test scripts, and the party supplying the argument is the developer running
 their own script on their own machine. `tests/tools/netpeer.py:222` binding
-`0.0.0.0` is likewise deliberate -- it is a test peer that guests reach over
+`0.0.0.0` is likewise deliberate, it is a test peer that guests reach over
 SLIRP, and a comment saying so would be an improvement over a suppression.
 
 The rest is `third_party/{threadx,netxduo,bsdsocktest}/test*` and libtomcrypt's
-`demos/`, `tests/`, `testprof/` and `notes/` -- none of it compiled here.
+`demos/`, `tests/`, `testprof/` and `notes/`, none of it compiled here.
 
 ### 73.5 What is actually left
 
 Two, both test-only and neither a defect in anything shipped:
 
-- `tests/perf/fitzbench.c:367` -- a `strcpy` in the unfinished Fitz benchmark,
+- `tests/perf/fitzbench.c:367`, a `strcpy` in the unfinished Fitz benchmark,
   worth bounding when that work resumes.
-- `tests/tools/netpeer.py:222` -- wants the comment described above.
+- `tests/tools/netpeer.py:222`, wants the comment described above.
 
 The findings this pass did *not* produce are worth noting too: nothing in
 `src/netstack/`, `src/sana2/` or `src/bsdsocket/`, which is where bytes off the
-wire are parsed. That is not evidence those are clean -- a SAST tool reasons
+wire are parsed. That is not evidence those are clean, a SAST tool reasons
 about patterns, and 66's DNS and mDNS response parsers are still the largest
 stated gap in SECURITY.md. It is evidence that the pattern-matchable mistakes
 are not there.
@@ -19345,13 +19332,13 @@ line 87 and `LONG` is `long`.
 
 **Thirteen HIGH, `cpp/wrong-type-format-argument`**, all on `ami_log` calls in
 `port/threadx-amiga/src/tx_initialize_low_level.c`. CodeQL reports "this format
-specifier for type 'long' does not match the argument type 'signed int'" --
+specifier for type 'long' does not match the argument type 'signed int'",
 which means it resolved line 113, where `LONG` is `int32_t`, i.e. `int` on a
 target whose `int` and `long` are both 32 bits.
 
 Doubly wrong, because `ami_log` is not printf. `include/aminetxduo/compat.h:44`
 says formatting goes through exec's `RawDoFmt` and that **every** argument must
-be cast to `LONG`, strings included -- `ami_log(..., "%s", (LONG)str)` -- and
+be cast to `LONG`, strings included, `ami_log(..., "%s", (LONG)str)`, and
 that a bare `%d` consumes a *word* where the C caller pushes a longword, so
 every argument after one is silently misaligned. The casts CodeQL objects to are
 what makes those calls correct.
@@ -19359,7 +19346,7 @@ what makes those calls correct.
 **Three MEDIUM, `cpp/too-few-arguments`**, on `t_karatsuba()`, `t_division()`
 and `t_bulk()` in `tests/crypto68k/host/test_c68k_host.c`. All three are
 declared and defined `static VOID f(VOID)`, which expands to
-`static void f(void)` -- no parameters, called with none. Without `exec/types.h`
+`static void f(void)`, no parameters, called with none. Without `exec/types.h`
 the extractor meets `VOID` as an unknown identifier inside a parameter list and
 recovers by reading it as an old-style parameter *name* of implicit `int` type.
 One parameter declared, none passed.
@@ -19387,16 +19374,16 @@ usable.
 `src/netstack/netstack_mdns.c` opened with an argument for advertising
 nothing:
 
-> No services are advertised. AmiNetXDuo ships clients -- fetch, ftp, telnet,
-> tftp, nc, sntp, whois -- and no servers, so a `_ftp._tcp` or `_telnet._tcp`
+> No services are advertised. AmiNetXDuo ships clients, fetch, ftp, telnet,
+> tftp, nc, sntp, whois, and no servers, so a `_ftp._tcp` or `_telnet._tcp`
 > record would point at nothing and a browser that believed it would hang on a
 > connection nothing will accept.
 
 That is right about our own binaries and wrong about the machine. An Amiga
 running AmiNetXDuo may well also be running AmiFTPd, or a web server, or a
 file server. Those are somebody else's binaries and they will never be
-recompiled against an API of ours, so the obvious answer — export
-`nx_mdns_service_add()` and let servers call it — reaches nothing that exists.
+recompiled against an API of ours, so the obvious answer, export
+`nx_mdns_service_add()` and let servers call it, reaches nothing that exists.
 
 What the user can do is say what is listening. That is exactly the assertion a
 `_ftp._tcp` record makes, and it makes it the user's claim rather than ours.
@@ -19405,7 +19392,7 @@ AmiTCP already established the convention: `db/inetd.conf` is a file that says
 
 ### 74.1 The name that was already taken
 
-The obvious name, `DEVS:Internet/services`, is the netdb file — the
+The obvious name, `DEVS:Internet/services`, is the netdb file, the
 `/etc/services` equivalent, `<name> <port>/<proto> [alias...]`, parsed in
 `src/config/netdb.c` and backing `getservbyname()`. Two files a directory
 apart with the same name and unrelated formats would be a trap for every
@@ -19428,11 +19415,11 @@ _http._tcp    80    Amiga web server    txt=path=/
 ```
 
 The instance name runs to the end of the line or to the `txt=` field, so a
-multi-word name needs no quotes — RFC 6763 §4.1.1 allows rich text and a name
+multi-word name needs no quotes, RFC 6763 §4.1.1 allows rich text and a name
 like "Amiga web server" is the normal case, not the exotic one. Quotes are
 accepted anyway, since the tokeniser already understands them.
 
-Left out, the instance name defaults to the host name — the same string
+Left out, the instance name defaults to the host name, the same string
 `src/config/config_file.c` resolves from the config, then `ENV:HOSTNAME`, then
 `DEVS:Internet/hosts`, then "amiga". There is no second source of truth: the
 netstack passes `ns_MdnsLabel`, which is what the responder already claimed.
@@ -19440,14 +19427,14 @@ netstack passes `ns_MdnsLabel`, which is what the responder already claimed.
 Comment characters are `#` anywhere and `;` only as the first character of a
 line. `;` cannot be a mid-line comment here because it is the separator
 between key/value pairs inside a TXT record, and eating it would silently
-truncate one — a failure mode with no diagnostic.
+truncate one, a failure mode with no diagnostic.
 
 ### 74.3 The four constants, decided rather than defaulted
 
 `nx_mdns_service_add()` takes a TTL, a priority, a weight and a uniqueness
 flag. Each was chosen and each has a reason.
 
-**TTL: pass 0.** Not "no TTL" — the module reads zero as "use the RFC's own
+**TTL: pass 0.** Not "no TTL", the module reads zero as "use the RFC's own
 values" and then uses 120 seconds for the SRV and 4500 for the TXT and the
 PTRs, which is what RFC 6762 §10 asks for. The SRV is short because it names a
 host whose address can change; the PTR is long because the service either
@@ -19467,8 +19454,8 @@ one: the vendored renamer appends " (2)", which is wrong for a host name and
 is precisely the RFC 6763 spelling for a second service instance. The two PTRs
 stay shared, which the module does on its own.
 
-**TXT: supported.** The module writes a TXT record either way — RFC 6763 §6.1
-requires one and it emits a single empty string when none is given — so the
+**TXT: supported.** The module writes a TXT record either way, RFC 6763 §6.1
+requires one and it emits a single empty string when none is given, so the
 choice was never "TXT or no TXT" but "our empty one or the user's". The field
 is bounded at the module's own `NX_MDNS_NAME_MAX` of 255 and the separator is
 the `;` the module's encoder already expects, so it costs one optional field
@@ -19485,8 +19472,8 @@ The lesson taken is not "count more carefully" but "do not have two passes".
 fixed array the caller owns, and checks `*count` against `max` before every
 write. `AMI_CFG_MAX_SD_SERVICES` is 8.
 
-Nothing can be truncated on the way in either. The type grammar — `_` then 1
-to 15 characters of letters, digits and hyphens, then `._tcp` or `._udp` — is
+Nothing can be truncated on the way in either. The type grammar, `_` then 1
+to 15 characters of letters, digits and hyphens, then `._tcp` or `._udp`, is
 RFC 6763 §7's, and 15 is where the module's `NX_MDNS_TYPE_MAX` of 21 comes
 from, so a type the parser accepts always fits `AMI_CFG_SD_TYPE_LEN`. An
 instance name is rejected if it leaves less than four characters of headroom
@@ -19494,9 +19481,9 @@ for the module's " (2)", and rejected if it contains a dot: the module builds
 `<name>.<type>.local` as text and encodes it by splitting on dots, so
 "My.Server" would claim a name nothing asked for.
 
-Every malformed line is reported through `ami_cfg_problem()` — so
+Every malformed line is reported through `ami_cfg_problem()`, so
 `CheckNetConfig` shows it with a file name and a line number, at no cost,
-because it already installs a reporter around `ami_config_load()` — and then
+because it already installs a reporter around `ami_config_load()`, and then
 skipped. A typo in one service does not stop the network coming up.
 
 `fuzz_config` covers it, and covers it in a way that can fail: the driver
@@ -19509,8 +19496,8 @@ than "the config".
 ### 74.5 What the local cache had to grow to
 
 `AMI_MDNS_LOCAL_CACHE_BYTES` was 1024, sized for one A record per interface.
-A service is four records — SRV, TXT, a PTR from the type to the instance, and
-a PTR from `_services._dns-sd._udp` — plus the names they point at. An
+A service is four records, SRV, TXT, a PTR from the type to the instance, and
+a PTR from `_services._dns-sd._udp`, plus the names they point at. An
 `NX_MDNS_RR` is 56 bytes and the names run to about 90 more, so the constant is
 now `1024 + AMI_CFG_MAX_SD_SERVICES * 384`, written as that arithmetic so the
 relationship cannot drift. If the cache will not hold a service,
@@ -19531,7 +19518,7 @@ walks the local cache and sets the send flag on a PTR only when (`:6605`)
 p1 -> nx_mdns_rr_rdata.nx_mdns_rr_rdata_ptr.nx_mdns_rr_ptr_name == p -> nx_mdns_rr_name
 ```
 
-— the PTR's rdata is the announcing SRV's own name. That is true of the type
+the PTR's rdata is the announcing SRV's own name. That is true of the type
 PTR, whose rdata is the instance name, and false of the enumeration PTR, whose
 rdata is the type. The record is in the cache and the query path in
 `_nx_mdns_packet_process()` (`nxd_mdns.c:7340`, the name match at `:7526`)
@@ -19549,7 +19536,7 @@ the absence and explains it rather than asserting on it.
 
 `tests/tools/run-mdns.sh` now writes a `service_discovery` file into the staged
 `DEVS:` with a deliberately broken line in the middle, and reads the result out
-of the emulated A2065's own frame log — below every line of our code — with
+of the emulated A2065's own frame log, below every line of our code, with
 `tcpdump`. Three services chosen to separate three things that could each be
 wrong on their own: `_ftp._tcp` with no name (must take the *derived* host
 label, not the fully-qualified HOSTNAME), `_http._tcp` with a multi-word name
@@ -19611,7 +19598,7 @@ are the empty string RFC 6763 §6.1 asks for; and `_nope` is absent.
 The same records reached the host's real network through SLIRP, which is the
 only evidence available that anything outside the emulator can see them.
 `tests/tools/mdnswatch.py` had to learn to decode the answer section to show
-it — an announcement carries no questions at all, so a summary that stopped at
+it, an announcement carries no questions at all, so a summary that stopped at
 the question section printed `response an=14` and nothing about what was
 announced:
 
@@ -19628,7 +19615,7 @@ announced:
 
 ### 74.8 Measured
 
-Fresh `build/host`, default configuration, warning-clean. `ctest` 14/14 —
+Fresh `build/host`, default configuration, warning-clean. `ctest` 14/14,
 13 before, plus `fuzz_dnssd_sweep`; the new parser's unit tests are inside the
 existing `config_parsers`, which went from 242 to 271 checks. `-fanalyzer` 13
 known findings and no new ones. `tests/tools/run-mdns.sh` PASSED, 27 checks
@@ -19652,7 +19639,7 @@ Sextant ships a `miami.library` stub whose only job is to answer `MiamiIsOnline(
 so that Miami-gated software runs. We ship none. The question is whether anything
 needs one, and the assumption going in was "this is rare". **It is rare in the way
 that matters and not in the way that was assumed**: `miami.library` appears in a
-shipped binary in 63 of 2,149 archives -- 2.9%, more than expected -- and in **none
+shipped binary in 63 of 2,149 archives, 2.9%, more than expected, and in **none
 of them would a stub that answers "yes" turn a broken program into a working one.**
 For twelve of them a stub would make things worse.
 
@@ -19660,7 +19647,7 @@ The second reason to look was §71: `x-surf-100.device` does `FindPort("AMITCP")
 concludes AmiTCP is running and switches to a buffer contract we do not implement.
 Knowing what else sniffs for a stack tells us what else may conclude wrongly about
 us. That produced one finding that has nothing to do with Miami and is the most
-actionable thing in this section -- §75.7.
+actionable thing in this section, §75.7.
 
 ### 75.1 Method, sample, and what it excludes
 
@@ -19725,7 +19712,7 @@ decoded. Anything not decoded is marked as inferred.
 Three of those rows are worth reading twice.
 
 **`roadshow.library` and `amitcp.library` do not exist as probed names.** All seven
-`amitcp.library` hits are substring accidents -- `ibamitcp.library` (IBrowse's
+`amitcp.library` hits are substring accidents, `ibamitcp.library` (IBrowse's
 transport plugin, six archives) and `awebamitcp.library`. Neither stack ever
 exposed a library under its own name, so nothing probes for one. `bsdsocket.library`
 is the entire interface.
@@ -19748,10 +19735,10 @@ addition to the socket API in 90% of cases, not a replacement for it.
 | Group | Archives | What a "yes" stub does |
 |---|---|---|
 | Miami itself (2.1a, 3.2b, MiamiDx, its GUIs) | 11 | nothing; it *is* the library |
-| Tools that only exist for Miami -- MiLoad, MiSpeedMeter, MiamiGraph, MiamiMonitor, MiamiSSL, three MUI MiamiPanels, gelbesPanel, tcpautostart, Skully | 12 | lets them start, then they fail on the real API |
-| MorphOS MOSNet -- ships its *own* `miami.library` | 2 | n/a, this is the precedent (§75.6) |
-| Needs Miami's packet filter -- QueSO, Sniffy | 2 | lets them start, then they fail |
-| Uses it only as a TLS provider -- AWeb ×5, IBrowse ×4, Voyager, HTTPResume, Charon | 12 | **actively harmful** (§75.5) |
+| Tools that only exist for Miami, MiLoad, MiSpeedMeter, MiamiGraph, MiamiMonitor, MiamiSSL, three MUI MiamiPanels, gelbesPanel, tcpautostart, Skully | 12 | lets them start, then they fail on the real API |
+| MorphOS MOSNet, ships its *own* `miami.library` | 2 | n/a, this is the precedent (§75.6) |
+| Needs Miami's packet filter, QueSO, Sniffy | 2 | lets them start, then they fail |
+| Uses it only as a TLS provider, AWeb ×5, IBrowse ×4, Voyager, HTTPResume, Charon | 12 | **actively harmful** (§75.5) |
 | Optional online-check with a working fallback | 19 | nothing; they already work |
 | `rxsocket.library` / `rxlibnet.library`, reports the stack to ARexx | 5 | changes what a script is told |
 
@@ -19762,8 +19749,8 @@ Nothing lands in the column the stub was proposed for.
 `MiamiIsOnline` is **LVO -210**, established from MOSNet's `miami.library`, which is
 an unstripped PowerPC ELF whose function table relocations name every vector.
 
-`vapor_toolkit.library` -- Vaporware's shared toolkit, present in nine archives
-(AmIRC ×2, AmTelnet, AmTalk, MetalWEB, FreeDB, NetInfo, amrss ×2) -- has one
+`vapor_toolkit.library`, Vaporware's shared toolkit, present in nine archives
+(AmIRC ×2, AmTelnet, AmTalk, MetalWEB, FreeDB, NetInfo, amrss ×2), has one
 online-check entry point, and it is the whole pattern in 41 instructions:
 
 ```
@@ -19806,7 +19793,7 @@ else gets all three past the door and no further.
 
 ### 75.5 Why the stub is not merely useless
 
-Twelve archives -- **AWeb (5), IBrowse (4), Voyager, HTTPResume, Charon** -- open
+Twelve archives, **AWeb (5), IBrowse (4), Voyager, HTTPResume, Charon**, open
 `miami.library` for exactly one thing: `MiamiOpenSSL` at LVO -150. It is their TLS
 back end, and each has an alternative. AWeb's own message says so: *"connections are
 only supported when using AmiSSL or MiamiSSL"*.
@@ -19825,8 +19812,8 @@ AWeb, decoded:
 
 Voyager is the same shape with `voyager_ssleay.vlib` tried first. **A present but
 non-functional `miami.library` moves these programs off the branch that works.**
-They would open the stub, call `MiamiOpenSSL`, and -- depending on what the stub
-returned -- either fail HTTPS or take a null SSL context into their transport. Today
+They would open the stub, call `MiamiOpenSSL`, and, depending on what the stub
+returned, either fail HTTPS or take a null SSL context into their transport. Today
 they miss the branch and use AmiSSL. That is the correct outcome and we get it by
 not existing.
 
@@ -19837,7 +19824,7 @@ first branch. The same file is in `gopher.library` and `ftp.library`.
 
 ### 75.6 MorphOS already built this stub, and that is an argument both ways
 
-`comm/tcp/MOSNet-Base.lha` ships `Libs/miami.library` -- 29 KB, `13.3 (15.12.06)`,
+`comm/tcp/MOSNet-Base.lha` ships `Libs/miami.library`, 29 KB, `13.3 (15.12.06)`,
 PowerPC, part of MorphOS's own TCP/IP stack. So the exact thing being proposed has
 been shipped before by a stack that is not Miami.
 
@@ -19861,7 +19848,7 @@ Packet-filter hooks, SSL, SOCKS, the resolver, the whole POSIX address-conversio
 `if_nameindex` set. MOSNet did not build a compatibility flag; it reimplemented
 Miami's API on top of its own stack. **The precedent is for the expensive version,
 and even that one cannot help QueSO or Sniffy without a real packet filter.** The
-cheap version -- return TRUE from -210 and stub the rest -- has no measured
+cheap version, return TRUE from -210 and stub the rest, has no measured
 beneficiary and twelve measured victims.
 
 ### 75.7 The AMITCP port is an ARexx host port, and ours is a trap
@@ -19870,7 +19857,7 @@ This was not what the survey was looking for.
 
 `ADDRESS AMITCP` appears in **31 of the 221 archives** re-scanned for it: AmiTCP's
 own `bin/stopnet` and `bin/netstat`, the Genesis demo's copies of the same, and
-third-party dialers and front-ends -- SLIPCall, Netdial 4.0, TCPFront, SLIPShuttle,
+third-party dialers and front-ends, SLIPCall, Netdial 4.0, TCPFront, SLIPShuttle,
 TCP_Start_Stop, netbeginner, interinstall, iNTERiNSTALL, CobbWeb, `rx.fingerd`.
 `WaitForPort AMITCP` appears in 32. AmiTCP's own binary carries `AMITCP`,
 `AMITCP.LASTERROR` and `rexxsyslib.library` adjacent in its string table.
@@ -19882,7 +19869,7 @@ port**, and `src/netstack/netstack.c:82` says the opposite:
 > flag.
 
 **Inferred, not tested:** with no stack installed, `ADDRESS AMITCP` fails
-immediately -- RexxSysLib's `FindPort` misses and the script gets "Host environment
+immediately, RexxSysLib's `FindPort` misses and the script gets "Host environment
 not found". With AmiNetXDuo installed, `FindPort` *succeeds*, RexxSysLib `PutMsg()`s
 a `RexxMsg` to a `PA_IGNORE` port with `mp_SigTask == NULL`, and waits on its reply
 port for a `ReplyMsg()` that nothing will ever send. The script hangs rather than
@@ -19909,20 +19896,20 @@ expected. Decoded:
 10554e:  jsr a6@(-282)           ; gethostname()
 ```
 
-We do not create that port, so Fitz takes the non-Roadshow path -- which is the
+We do not create that port, so Fitz takes the non-Roadshow path, which is the
 path it takes on AmiTCP, and the one it was written for first. The other hit is
 `perch_os4`, an OS4 FTPMount extension.
 
 The more interesting Roadshow detector does not use a port at all. **NetMon** issues
-`SocketBaseTagList(SBTM_GETREF(SBTC_HAVE_INTERFACE_API))` -- tag `0x8000805E`,
-code 47 -- and if the call fails or the answer is zero it prints *"This TCP/IP stack
+`SocketBaseTagList(SBTM_GETREF(SBTC_HAVE_INTERFACE_API))`, tag `0x8000805E`,
+code 47, and if the call fails or the answer is zero it prints *"This TCP/IP stack
 seems not to be Roadshow! Found: %s"* with `lib_IdString`. `src/bsdsocket/errno.c:408`
 answers that tag `TRUE`, so NetMon takes the Roadshow path against us and never
 prints it. That is capability probing done right, and it is the pattern to encourage:
 NetMon asks what the stack *can do*, not what it is called.
 
 `rxsocket.library` (5 archives, incl. Hserv, GetIt, Amitory, Aminet.awnp) is the
-opposite extreme -- an ARexx function `ISLIBON <SOCKET|MIAMI|AMITCP|TTCP|USERGROUP>`
+opposite extreme, an ARexx function `ISLIBON <SOCKET|MIAMI|AMITCP|TTCP|USERGROUP>`
 and a string table reading `Miami / TermiteTCP / AmiTCP for Genesis / AmiTCP
 compatible`. Against us it will report "AmiTCP compatible", which is true.
 
@@ -19934,7 +19921,7 @@ made *worse* by a non-functional one; 19 already fall back to "assume online"; 5
 merely report the stack name; 2 need a packet filter no stub provides. **Zero
 archives in a 2,149-archive sample would be fixed by one.** Revisit only if a
 specific program is reported failing *and* its failure is decoded to a bare
-`OpenLibrary("miami.library")` with no fallback -- none was found here.
+`OpenLibrary("miami.library")` with no fallback, none was found here.
 
 The `AMITCP` ARexx-port question in §75.7 is the item that should be opened instead.
 It costs a hang in software we otherwise support, and unlike the Miami question it
@@ -19952,7 +19939,7 @@ Everything in 76.1 to 76.5 was run. 76.6 is the part that could only be read.
 
 ### 76.1 It is headless, and headless is a config option
 
-`headless=true` is a first-class preference — `cfgfile.cpp:3973` parses it into
+`headless=true` is a first-class preference, `cfgfile.cpp:3973` parses it into
 `p->headless`, and `gfx_window.cpp` skips `SDL_CreateWindow` entirely on it,
 with matching early returns in `amiberry_gfx.cpp`, `opengl_renderer.cpp`,
 `vulkan_renderer.cpp`, `gl_overlays.cpp` and `file_dialog.cpp`. No `DISPLAY`,
@@ -19970,8 +19957,8 @@ This is the question that decides whether winbuilder can be retired, and the
 answer is that every card reaches the same backend. `a2065.cpp:1328` and
 `qemuvga/ne2000.cpp:1308` both call `ethernet_enumerate(&td, romtype)` and then
 `ethernet_open()`, which is the same pair `sana2.cpp:459` calls. `ethernet.cpp`
-dispatches on `ndd->type` — `UAENET_SLIRP`, `UAENET_SLIRP_INBOUND`,
-`UAENET_PCAP`, `UAENET_TAP` — with no branch on which card asked. The
+dispatches on `ndd->type`, `UAENET_SLIRP`, `UAENET_SLIRP_INBOUND`,
+`UAENET_PCAP`, `UAENET_TAP`, with no branch on which card asked. The
 `# Add libpcap for uaenet` comment in `cmake/Dependencies.cmake` names the
 backend module, `osdep/amiberry_uaenet.cpp`, not sana2's virtual card, and
 reading it as the latter is what makes the arrangement look card-specific.
@@ -20006,7 +19993,7 @@ The A2065 then passed the whole bring-up test: `netstack_test` 14 checks and 0
 failures, address 10.0.2.15 from DHCP, gateway 10.0.2.2, ICMP to the gateway,
 and `example.com` resolved to a real address through the host's own network.
 
-The other eight stopped at `FAIL netstack_startup() (0xFFFFFFFE)`, exit 20 —
+The other eight stopped at `FAIL netstack_startup() (0xFFFFFFFE)`, exit 20,
 nothing could open the device, because no SANA-II driver was staged. That is
 not an Amiberry limitation and Amiberry does not improve it. The boards need no
 ROM (`ROMTYPE_NOT`, switched on with `:ENABLED`), but `ariadne.device`,
@@ -20048,7 +20035,7 @@ serial_port=tcp://127.0.0.1:7777/wait
 
 `/wait` blocks the emulator until something connects, so nothing is lost to a
 startup race, and `nc 127.0.0.1 7777 > serial.log` is the whole host side. It
-was verified to carry both AROS's own boot output and our `ami_log()` lines —
+was verified to carry both AROS's own boot output and our `ami_log()` lines,
 `[WARN] tick: timer.device unit 1 woke at 23.80 Hz` came through it. This is a
 few lines of shell, not a redesign.
 
@@ -20074,7 +20061,7 @@ matrix multiplies by nine and can afford.
 On the bring-up test the figures are 9.46 seconds against 114.1, and that is
 not a throughput measurement. FS-UAE never got a DHCP lease: it fell back to
 RFC 3927, came up on 169.254.78.15 with no gateway, skipped the wire test, and
-failed the DNS lookup — 11 checks where Amiberry reported 13 — and the missing
+failed the DNS lookup, 11 checks where Amiberry reported 13, and the missing
 100 seconds is the DHCP timeout plus the AutoIP fallback. This reproduced under
 this repository's own unmodified `tests/netstack/run-fsuae.sh` (1m55s,
 169.254.78.15), so it is not an artefact of a config written for this
@@ -20106,7 +20093,7 @@ never bridged.
 Pursue it. Amiberry is WinUAE's core, it runs genuinely headless on Linux with
 one config line, all nine boards instantiate and bind their backend, the A2065
 passes the bring-up test end to end, four runs go in parallel without the
-locking FS-UAE needs, and the config keys for the boards are WinUAE's own — so
+locking FS-UAE needs, and the config keys for the boards are WinUAE's own, so
 `tools/winuae-run.sh`'s board table is the port, not a rewrite. The only new
 code the harness needs is a socket instead of a file for serial.
 
@@ -20115,7 +20102,7 @@ cards are blocked on third-party SANA-II drivers that are missing on Linux for
 the same reason they are missing on winbuilder, and until that is solved the
 nightly tier is one card wide. What Amiberry buys immediately is that the tier
 can exist at all on the machine CI already owns, and that the A2065 leg of it
-actually reaches a network — which, on this host, the current emulator does not.
+actually reaches a network, which, on this host, the current emulator does not.
 
 ## 78. A bridged Amiga on the real LAN, and what that unblocks (2026-07-30)
 
@@ -20166,7 +20153,7 @@ real SLAAC and a real /64, which is a network `tests/ipv6` has never had.
 
 **`netmode=<name>` is wrong and does nothing.** The board option is an
 `EXPANSIONBOARD_MULTI`, and `cfgfile_read_rom_settings()` picks the item by
-looking for each candidate *as an option of its own* — so the name goes in
+looking for each candidate *as an option of its own*, so the name goes in
 bare, `a2065_rom_options=mac=…,ens18`. Written as `netmode=ens18` it parses as
 an option called `netmode`, matches no item, and selects index 0, which is
 slirp. §76.3's spelling therefore appeared to work because the value it was
@@ -20197,7 +20184,7 @@ produces a run that gets 10.0.2.15, passes fourteen checks, and proves nothing.
 `uaenet_tap_enumerate()` lists only bridges and existing tap devices from
 `/sys/class/net`; playhouse3 has `ens18` and `lo`. Creating either needs
 `CAP_NET_ADMIN` on `ip`, and making a bridge *useful* means enslaving `ens18`
-to it — which moves the host's only address off the interface it is reachable
+to it, which moves the host's only address off the interface it is reachable
 on. Asked for a bridge that does not exist, the run came up on SLIRP and the
 assertion caught it:
 
@@ -20215,8 +20202,8 @@ attach it to.
 
 `ne2000_pcmcia` + `cnet.device` on `ens18` reaches `12 checks, 0 failures` with
 a link-local address and no gateway. The driver opens, the stack comes up, and
-the guest is demonstrably transmitting on the real LAN — DHCP, ARP, mDNS for
-`amiga.local`, IPv6 router solicitation — all sourced from the card's MAC. The
+the guest is demonstrably transmitting on the real LAN, DHCP, ARP, mDNS for
+`amiga.local`, IPv6 router solicitation, all sourced from the card's MAC. The
 real router answered its IPv6 solicitation. What it never gets is a DHCP lease.
 
 **The server does answer.** Captured on the host, five times, one per retry:
@@ -20230,7 +20217,7 @@ Every reply is **broadcast**, and none of them reaches the guest, while the
 unicast IPv6 RA does. `ne2000_canreceive()` drops a broadcast frame unless
 `RXCR & 0x04` (accept-broadcast) is set, so the card is being left without that
 bit. Consistent with it: the guest logs `getbyte from invalid address 00a20000`
-twice — the card configuration registers live in attribute memory at 0x20000,
+twice, the card configuration registers live in attribute memory at 0x20000,
 and `initpcmcia()` allocates `pcmcia_attrs` but the driver's access there is
 reported invalid.
 
@@ -20251,28 +20238,28 @@ Two more findings from the same card, both cheap and both wasted a run:
   `ne2000->init(state, NULL)` with no `autoconfig_info`, so
   `ne2000_init_2()` gets a NULL config string, `ethernet_getmac()` fails, and
   the address is always `52:54:05:00:00:00`. Not the cause of the lease
-  failure — an A2065 forced to `00:80:10:00:00:00` gets a lease fine — but it
+  failure, an A2065 forced to `00:80:10:00:00:00` gets a lease fine, but it
   means the card cannot hold a DHCP reservation.
 
 ### 78.5 What this actually unlocks, per card
 
 | board | driver | result |
 | --- | --- | --- |
-| `a2065` | `a2065.device` | **passes bridged, on the real LAN** -- real lease, real gateway, pinged from a third host |
+| `a2065` | `a2065.device` | **passes bridged, on the real LAN**, real lease, real gateway, pinged from a third host |
 | `ariadne` | `ariadne.device` | passes |
 | `ariadne2` | `ariadne_ii.device` | passes |
 | `hydra` | `hydra.device` | passes |
 | `eb920` | `eb920.device` | passes |
 | `xsurf` | `x-surf.device` | passes |
 | `xsurf100z2` | `x-surf-100.device` | passes |
-| `xsurf100z3` | `x-surf-100.device` | passes, on an A3000 -- a Zorro III card needs a Zorro III bus |
+| `xsurf100z3` | `x-surf-100.device` | passes, on an A3000, a Zorro III card needs a Zorro III bus |
 | `ne2000_pcmcia` | `cnet.device` | passes on SLIRP; **opens and transmits bridged but takes no lease** (78.4) |
 
 All nine pass once the driver is in the local store. The blocker was never the
 backend and never the emulator: it was that eight of the nine drivers are
 third-party binaries this repository does not carry.
 
-**Bridging unlocks no card by itself** -- a better backend does not produce a
+**Bridging unlocks no card by itself**, a better backend does not produce a
 driver, and §76.3's eight were blocked on drivers alone. What it changes is what
 a working card is worth: the A2065 leg now exercises real DHCP,
 a real gateway, real DNS servers, real IPv6 RAs and inbound connections from
@@ -20294,8 +20281,8 @@ hermetic and the bridged case is where the interesting failures live.
 
 ## 79. Every hop a packet takes through Amiberry, and the four places they are thrown away (2026-07-30)
 
-An EAB user freezes a real Amiga solid during a filesystem copy — no Enforcer
-hit, no MungWall hit, no log line, several CTRL-Amiga-Amiga to get out — while
+An EAB user freezes a real Amiga solid during a filesystem copy, no Enforcer
+hit, no MungWall hit, no log line, several CTRL-Amiga-Amiga to get out, while
 `ttcp` on the same machine is clean at 850 KB/s both directions. The difference
 between those two workloads is not bytes, it is packet operations per byte: a
 filesystem does small round trips where `ttcp` does 8 KB streaming writes. If
@@ -20310,7 +20297,7 @@ never keep up.
 ### 79.1 The rig, and what in it is a fork
 
 `~/amiberry` on playhouse3 is upstream `0fd577e`, and it was clean before this
-work and clean after — checked both times. **The instrumented tree is a
+work and clean after, checked both times. **The instrumented tree is a
 separate fork**, `~/amiberry-rig`, branch `anxd-packet-rate-rig` off the same
 commit, built into its own `build/`. Nothing here is proposed for upstream and
 nothing in the repository depends on it. It exists because the numbers below
@@ -20348,7 +20335,7 @@ come from a different machine on the LAN.
 
 Every hop below is paced by `devices_hsync()`, called from `hsync_handler_pre()`
 at `custom.cpp:5560`, which runs `execute_device_items(device_hsyncs, ...)`
-(`devices.cpp:346`) — once per emulated scanline. The A2065 registers into that
+(`devices.cpp:346`), once per emulated scanline. The A2065 registers into that
 list at `a2065.cpp:1369`.
 
 Measured, by counting handler entries against `CLOCK_MONOTONIC`, ten one-second
@@ -20374,26 +20361,26 @@ packet path.
 
 | # | what | where | thread | bounded? |
 | --- | --- | --- | --- | --- |
-| 1 | pcap handle, promiscuous, 10 ms read timeout | `osdep/amiberry_uaenet.cpp:552` | — | — |
-| 2 | BPF filter: to our MAC, broadcast or multicast, not from our MAC | `amiberry_uaenet.cpp:566-585` | kernel | — |
+| 1 | pcap handle, promiscuous, 10 ms read timeout | `osdep/amiberry_uaenet.cpp:552` |, |, |
+| 2 | BPF filter: to our MAC, broadcast or multicast, not from our MAC | `amiberry_uaenet.cpp:566-585` | kernel |, |
 | 3 | `pcap_next_ex()` in a loop with no sleep, one frame per call | `amiberry_uaenet.cpp:330,346` | **pcap worker** | unbounded |
-| 4 | GRO/GSO splitter: >1514-byte IPv4/TCP re-segmented at MSS, checksums recomputed | `amiberry_uaenet.cpp:176-281` | pcap worker | — |
-| 5 | `uaenet_queue_one()` — malloc-per-frame linked list under `queue_sem` | `amiberry_uaenet.cpp:142-169` | pcap worker | **cap 51** |
-| 6 | `uaenet_receive_poll()` — `while (uaenet_checkpacket(ud));` | `amiberry_uaenet.cpp:674-681` | **emulation** | drain until empty |
+| 4 | GRO/GSO splitter: >1514-byte IPv4/TCP re-segmented at MSS, checksums recomputed | `amiberry_uaenet.cpp:176-281` | pcap worker |, |
+| 5 | `uaenet_queue_one()`, malloc-per-frame linked list under `queue_sem` | `amiberry_uaenet.cpp:142-169` | pcap worker | **cap 51** |
+| 6 | `uaenet_receive_poll()`, `while (uaenet_checkpacket(ud));` | `amiberry_uaenet.cpp:674-681` | **emulation** | drain until empty |
 | 7 | called from the A2065 hsync handler, every scanline | `a2065.cpp:797` | emulation | 15,628/s |
-| 8 | `gotfunc()` — copy into a 256-slot × 4000-byte ring | `a2065.cpp:605-627` | emulation | **256 slots** |
-| 9 | `device_add_main_thread_callback(receive_queue_drain)` runs **inline** here | `a2065.cpp:626`, `devices.cpp:144-147` | emulation | — |
-| 10 | `receive_queue_drain()` — up to `RECEIVE_DRAIN_LIMIT` frames | `a2065.cpp:582-604` | emulation | **16 per call** |
-| 11 | `gotfunc2()` — MAC filter, FCS append, DMA into the LANCE descriptor ring | `a2065.cpp:326-504` | emulation | ring |
+| 8 | `gotfunc()`, copy into a 256-slot × 4000-byte ring | `a2065.cpp:605-627` | emulation | **256 slots** |
+| 9 | `device_add_main_thread_callback(receive_queue_drain)` runs **inline** here | `a2065.cpp:626`, `devices.cpp:144-147` | emulation |, |
+| 10 | `receive_queue_drain()`, up to `RECEIVE_DRAIN_LIMIT` frames | `a2065.cpp:582-604` | emulation | **16 per call** |
+| 11 | `gotfunc2()`, MAC filter, FCS append, DMA into the LANCE descriptor ring | `a2065.cpp:326-504` | emulation | ring |
 | 12 | `csr[0] \|= CSR0_RINT`, `rethink_a2065()`, `safe_interrupt_set(IRQ_SOURCE_A2065,...)` → Amiga level 2 | `a2065.cpp:302,258,275` | emulation | per frame |
 | 13 | `a2065.device` interrupt server satisfies a pending SANA-II `CMD_READ`; our reader threads copy into `NX_PACKET`s | `src/sana2/sana2_rx.c` | guest | see 79.7 |
 
 Two things in that table are not what a reading of the hsync handler suggests.
 
-**Hop 6 is not one frame per poll and not a batch — it drains until empty.**
+**Hop 6 is not one frame per poll and not a batch, it drains until empty.**
 `uaenet_receive_poll()` is a `while` loop with no counter. Measured: `poll`
 tracks `hsync` exactly (15,628 both), and `got` reached 48,084/s through those
-same 15,628 polls — a mean of 3.1 frames per poll and no ceiling in the loop
+same 15,628 polls, a mean of 3.1 frames per poll and no ceiling in the loop
 itself.
 
 **Hop 9 makes hop 10 run far more often than once per scanline.** Because
@@ -20418,7 +20405,7 @@ five minutes of maximum flood the limit was reached 8 times a second out of
 | uaenet queue | `packetsinbuffer > 50` (`amiberry_uaenet.cpp:150`) | **no log, no counter, nothing** | **530,251/s (91.7% of offered)** |
 | A2065 ring | ring full (`a2065.cpp:616-621`) | `write_log` gated behind `log_a2065` | **15,899/s (33.1% of what got past the first)** |
 | A2065 drain | frame can never fit the RX ring (`a2065.cpp:590-596`, via `receive_packet_can_fit()` `:545`) | gated behind `log_a2065` | 0 |
-| LANCE ring | `receive_space_available()` false (`a2065.cpp:562`) — **not a drop**, the frame stays queued | — | 47,251 stalls/s |
+| LANCE ring | `receive_space_available()` false (`a2065.cpp:562`), **not a drop**, the frame stays queued |, | 47,251 stalls/s |
 
 The first of those is the important one and it is invisible by construction:
 `amiberry_uaenet.cpp:150-153` posts the semaphore and returns, with no log line,
@@ -20431,12 +20418,12 @@ from `uaenet_receive_poll()` for longer than that loses frames, silently.
 are the tests that read it, plus `extern int log_a2065;` in
 `qemuvga/ne2000.cpp:47`. There is no `cfgfile` parse, no debugger command, no
 environment variable. Making the A2065's own drop logging visible is a source
-edit and a rebuild — which is most of why the fork in 79.1 exists.
+edit and a rebuild, which is most of why the fork in 79.1 exists.
 
 ### 79.5 Transmit, guest to host, and why `cnt = 15` is not a throttle
 
 The guest writes its descriptors and sets `CSR0_TDMD` through `chip_wput()`;
-that write **only sets the bit** (`a2065.cpp:919-927`) — no transmit happens at
+that write **only sets the bit** (`a2065.cpp:919-927`), no transmit happens at
 register-write time. Everything else is the hsync handler:
 
 ```c
@@ -20468,12 +20455,12 @@ reasons:
    is never cleared on that path, so the condition is permanently true.
 
 Measured, in every loaded run: `chk` = `do` = 15,628/s, exactly the scanline
-rate, with `nodesc` = 15,625/s — one transmit *attempt* per scanline, almost all
+rate, with `nodesc` = 15,625/s, one transmit *attempt* per scanline, almost all
 of them finding an empty ring. Forcing the period to 1 or to 64 with the fork's
 knob changed the guest's achieved send rate by 0.2% (14,007 / 14,008 / 14,014
 datagrams in the same 15-second window), and an 8-frame burst per check changed
-nothing at all. **The transmit ceiling is one frame per scanline — 15,628
-frames/s, 23.7 MB/s at 1514 bytes** — and no measured workload has come within
+nothing at all. **The transmit ceiling is one frame per scanline, 15,628
+frames/s, 23.7 MB/s at 1514 bytes**, and no measured workload has come within
 4% of it.
 
 ### 79.6 The ceiling, as numbers
@@ -20490,14 +20477,14 @@ own counters:
 | 645,786 | 53,198 | 592,588 | 53,198 | 19,880 | **33,326** | 48,985 |
 
 Receive: **33,326 frames/s into the guest's descriptor ring at peak, 32,186/s
-sustained over four minutes — 4.57 MB/s at 142-byte frames.** That is 2.2× the
+sustained over four minutes, 4.57 MB/s at 142-byte frames.** That is 2.2× the
 14,880 frames/s a real 10 Mbit A2065 can see, so the emulated card is not the
 thing that stops us reaching a real-hardware packet-rate regime.
 
 Transmit: **15,628 frames/s**, one per scanline (79.5).
 
 Neither number is set by `RECEIVE_DRAIN_LIMIT`, and neither is set by the
-256-frame queue. Receive is set by how fast the guest hands descriptors back —
+256-frame queue. Receive is set by how fast the guest hands descriptors back,
 `receive_space_available()` was false 47,251 times a second at saturation, which
 is once for every frame waiting.
 
@@ -20518,7 +20505,7 @@ A2065 queue depth      255 (full)  uaenet queue depth     51 (full)
 
 Both queues sat at their caps for the whole five minutes and 4,898,418 frames
 were dropped from the A2065 ring alone. **The receive path was full at all
-times, continuously, for 300 seconds** — that is the regime, and it is
+times, continuously, for 300 seconds**, that is the regime, and it is
 reproducible on demand.
 
 What our stack did in it is the finding:
@@ -20528,10 +20515,10 @@ What our stack did in it is the finding:
 - The three `sana2 rx` threads were `SUSPENDED` in every watchdog dump.
 - The guest did **not** freeze. Reports kept arriving every five seconds, the
   five-second sleeps overran by about 48%, and the emulator's own scanline rate
-  never moved off 15,6xx — so nothing stopped the machine.
+  never moved off 15,6xx, so nothing stopped the machine.
 - Baton counters were clean throughout: `full=0`, `moved=0`, `statemax=0`,
   `live` 2-3 against a `max` of 4. **No baton defect appears under saturation.**
-- The tick task's worst stall was **1,476 ms — beside a worst service of
+- The tick task's worst stall was **1,476 ms, beside a worst service of
   1,475,964 µs.** The stall and the service are the same event to within 36 µs,
   so that second and a half was spent *inside* the tick task's own service call,
   not waiting for someone else's `Forbid()`. Three stalls were logged in the
@@ -20541,7 +20528,7 @@ What our stack did in it is the finding:
 
 So under sustained inbound saturation the machine is **starved, not
 backlogged**: 32,186 frames/s reach the descriptor ring, `a2065.device` recycles
-descriptors fast enough to keep taking them, and almost none reach our reader —
+descriptors fast enough to keep taking them, and almost none reach our reader,
 consistent with one outstanding `CMD_READ` per protocol and a wake-up latency
 that collapses under the interrupt load, though which of those it is has not yet
 been isolated. The duty-cycle theory is **not** supported by this run: the one
@@ -20576,7 +20563,7 @@ lost 1,900. Timing measurements taken on a raised rig do not transfer.
 
 ### 79.9 The NE2000 / PCMCIA path is a different machine, and one hop of it is missing
 
-Read, not run — this section is source only.
+Read, not run, this section is source only.
 
 The PCMCIA "cnet" card is `ne2000_pci_board_pcmcia` (`qemuvga/ne2000.cpp:1400`),
 instantiated from `gayle.cpp:1585-1602`, and it shares file-scope state with the
@@ -20593,11 +20580,11 @@ Three differences fall out of the trace and explain symptoms we already have:
 
 **Nothing calls `ethernet_receive_poll()` for this card.** The whole tree has
 four references: the declaration (`include/ethernet.h:37`), the definition
-(`ethernet.cpp:120`), and two call sites — `a2065.cpp:797` and `sana2.cpp:1847`
-— each using its own `td`/`sysdata`. `ne2000.cpp` allocates its own `sysdata` at
+(`ethernet.cpp:120`), and two call sites, `a2065.cpp:797` and `sana2.cpp:1847`
+each using its own `td`/`sysdata`. `ne2000.cpp` allocates its own `sysdata` at
 `:1334` and never polls it. On a pcap or TAP backend, `uaenet_checkpacket()` is
 therefore unreachable for this card, its `gotfunc` (`:1192`) is never called,
-and **host→guest receive is dead while transmit still works** — the same defect
+and **host→guest receive is dead while transmit still works**, the same defect
 that was fixed for the A2065, with the fix comment still in place at
 `a2065.cpp:790-795`. SLIRP is unaffected because `slirp_output()`
 (`ethernet.cpp:75`) calls `gotfunc` directly.
@@ -20607,7 +20594,7 @@ that was fixed for the A2065, with the fix comment still in place at
 `RXCR & 0x04`, and the QEMU default of `0x0c` that would have set it lives
 inside an `#if 0` at `:947-997`. The only write is `EN0_RXCR` at `:584-586`.
 Until the guest driver programs it, ARP and DHCP replies are discarded before
-they reach the ring — which is exactly the broadcast DHCP failure we saw.
+they reach the ring, which is exactly the broadcast DHCP failure we saw.
 
 **`0x00a20000` is not where the card's registers are.** Gayle maps the whole
 PCMCIA window at `0xA00000-0xA7FFFF` (`gayle.cpp:1923`), split into attribute
@@ -20616,7 +20603,7 @@ memory below `0xA20000` and the I/O window above it, and
 `0x300` and returns −1 for anything below it. The NE2000 register file is at
 **`0xA20300-0xA2031F`**; the PCMCIA configuration register is at **`0xA003F8`**,
 in *attribute* space (`gayle.cpp:1218-1220`). A probe at `0xA20000` reads
-`pcmcia_attrs[0x20000]`, a zero byte — or nothing at all if `cs_pcmcia` is off,
+`pcmcia_attrs[0x20000]`, a zero byte, or nothing at all if `cs_pcmcia` is off,
 the slot is empty, or `ne2000->init()` failed, in which case
 `gayle_map_pcmcia()` maps `dummy_bank` over the range (`:1919`) and an access
 there is genuinely unmapped. So the guest's complaint is the guest looking
@@ -20634,7 +20621,7 @@ SLIRP. Delivery is a push instead: the `slirp-receive` thread
 `slirp_output()` (`ethernet.cpp:69-77`), which calls `gotfunc` directly. That
 means `gotfunc` runs **off** the emulation thread, so
 `device_add_main_thread_callback()` takes the other branch
-(`devices.cpp:148-153`) — queue plus `SPCFLAG_CALLBACK` — and because
+(`devices.cpp:148-153`), queue plus `SPCFLAG_CALLBACK`, and because
 `add_device_item()` de-duplicates (`devices.cpp:93-103`), N arrivals coalesce
 into one drain of at most 16. Under SLIRP the A2065 drain really is 16 frames
 per pump; under pcap it is not (79.3).
@@ -20668,20 +20655,20 @@ to real hardware.
 The bridged figures are better but come with their own caveat, which is the
 whole point of 79.4: **frames disappear at `amiberry_uaenet.cpp:150` with no
 log, no counter and no error.** Any measurement that offered more than about
-3,000 frames/s was losing frames without saying so — at a 5,000/s offer, 36% of
+3,000 frames/s was losing frames without saying so, at a 5,000/s offer, 36% of
 them. A throughput number taken under those conditions is a measurement of the
 queue cap, not of the stack, and the only way to know which is to count at both
 ends.
 
 The practical result is a rig that can hold the guest's receive path full
-indefinitely, and the finding that when it does, our stack is not backlogged —
+indefinitely, and the finding that when it does, our stack is not backlogged,
 it is starved, at 816 packets in five minutes out of 9.7 million offered to it,
 with the baton counters clean and nothing holding the machine. That is a
 different problem from the one we went looking for, and it is the next thing to
 chase.
 ## 80. Somebody else's SSH and somebody else's TLS, on this library (2026-07-30)
 
-BebboSSH and bebboget are Stefan "Bebbo" Franke's — the author of the
+BebboSSH and bebboget are Stefan "Bebbo" Franke's, the author of the
 `m68k-amigaos-gcc` this tree is built with. Neither is a port of anything:
 BebboSSH is an independent SSH2 implementation and bebboget carries its own
 TLS. Both open `bsdsocket.library` version 4 and need nothing else from us, and
@@ -20690,7 +20677,7 @@ our own tests share an author with the code they test, and two of this week's
 released defects came from third-party programs instead.
 
 The two programs come from the local store
-by sha256 — the archive and every extracted file. Nothing is vendored and
+by sha256, the archive and every extracted file. Nothing is vendored and
 nothing is linked: both are GPLv3+, this tree is MIT, and the clean arrangement
 for a GPL program that talks to an MIT library is that it stays a separate
 program. `bebboget`'s archive carries `lib/libbebboget.a`, which is the one
@@ -20699,8 +20686,8 @@ file somebody might link; it is deliberately not extracted.
 ### 80.1 It does not start without locale.library, and that cost an hour
 
 The first four runs looked like a client that connects to nothing and hangs.
-It was not the network. `bebboscp -?` — no arguments, no sockets, our library
-not even opened — prints
+It was not the network. `bebboscp -?`, no arguments, no sockets, our library
+not even opened, prints
 
     locale.library failed to load
 
@@ -20710,7 +20697,7 @@ and then wedges. Kickstart 3.1 and the AROS ROM alike; neither carries
 00000028`, `LONG-READ from 00000018`, `LONG-WRITE to 00000018` and `LONG-WRITE
 to 00000000`, all with the PC inside ROM and the string "locale.library failed
 to load" still on the stack: a library base that was never checked. The message
-is not in BebboSSH's source or in ours — it comes from the runtime's automatic
+is not in BebboSSH's source or in ours, it comes from the runtime's automatic
 library opening.
 
 Staging one Workbench 3.1 `locale.library` fixed it completely. Both harnesses
@@ -20729,7 +20716,7 @@ break mask is `SBT_RW` in `errno.c` and is serviced.
 twenty-four transfers and eight HTTPS fetches. The serial log across every run
 contains one line, and it is our own `AMITCP: no rexxsyslib.library` notice.
 
-`bebbosshd` — the server — adds `bind`, `listen`, `accept` and
+`bebbosshd`, the server, adds `bind`, `listen`, `accept` and
 `setsockopt(SO_REUSEADDR)`, and §80.4 runs it. Twenty-four sessions, and the
 only thing it ever complained about was its own teardown: two lines per session,
 `failed to send N bytes on socket 1: sent -1, errno=32` then `errno=57`. That is
@@ -20746,7 +20733,7 @@ Under Enforcer with MungWall, on the network, doing a 64 KB transfer each way:
 `tests/bebbossh/run-bebbossh.sh -x`, A1200 profile, `AMINETXDUO_PERF=1`, every
 run announcing "the machine is quiet". Three sizes so there are two slopes and
 the second is free of the handshake, and **every transfer was `cmp`ed against
-its source** — the Dropbear work on the `ssh-server-perf` branch
+its source**, the Dropbear work on the `ssh-server-perf` branch
 records a shim bug that returned the right length and the wrong bytes, and a
 45-byte case never showed it. 24/24 byte-identical across two runs, every `rc 0`.
 
@@ -20765,7 +20752,7 @@ per X25519 key pair on an A3000; our debug log records 0.98 s for the key pair,
 
 The 68020 build of `libcryptossh.library` is staged, under the plain name, as
 the ReadMe instructs. Staging the 68000 file that ships under that name would
-have measured the wrong binary — worth roughly 2× on ChaCha20 by the author's
+have measured the wrong binary, worth roughly 2× on ChaCha20 by the author's
 figures.
 
 ### 80.4 Against our Dropbear numbers, and it took a second arm to be fair
@@ -20782,7 +20769,7 @@ client's half runs on the Amiga. Roughly half the crypto is missing, and that
 branch measured eight to nine tenths of a transferred byte to be the AEAD.
 
 `run-bebbossh.sh -L` is the arm that compares. It runs `bebbosshd` in the guest
-and points `bebboscp` at `127.0.0.1` — the same arrangement, and the only one
+and points `bebboscp` at `127.0.0.1`, the same arrangement, and the only one
 possible, since FS-UAE's SLIRP is outbound-only and nothing on the host can open
 a connection *into* the guest. Two runs, `-x`, 24/24 byte-identical:
 
@@ -20795,7 +20782,7 @@ a connection *into* the guest. Two runs, `-x`, 24/24 byte-identical:
 
 Reproducible to within 1% on the repeat (14.26 / 14.12 / 23.53 / 23.08), every
 slope pair agreeing to under 4%, and the two directions agreeing with each other
-to under 3% — which is what one CPU doing both halves should look like.
+to under 3%, which is what one CPU doing both halves should look like.
 
 So, ChaCha20-Poly1305, both ends on the one CPU, same sizes, same method:
 
@@ -20811,7 +20798,7 @@ The bulk figures are close enough that the honest summary is a draw on
 throughput and a clear loss on connection setup.
 
 The handshake gap is the more interesting number, because it is four curve25519
-and ed25519 operations and nothing else — it says `src/crypto68k/c68k_25519.c`
+and ed25519 operations and nothing else, it says `src/crypto68k/c68k_25519.c`
 has about 2× left in it. His own log breaks it down: 0.98 s for the X25519 key
 pair, 0.98 s for the shared secret, 1.34 s to verify the server's signature and
 1.00 s to sign the auth request.
@@ -20819,7 +20806,7 @@ pair, 0.98 s for the shared secret, 1.34 s to verify the server's signature and
 AES-128-GCM is his slower cipher, 14.1 KB/s against ChaCha20's 23.3. We do not
 implement GCM at all, so there is nothing to compare it against.
 
-Note that §80.3's one-ended figures — 28.2 KB/s on AES-GCM, 44.9 on ChaCha20 —
+Note that §80.3's one-ended figures, 28.2 KB/s on AES-GCM, 44.9 on ChaCha20,
 are roughly double these, which is the arithmetic working: take one of the two
 halves of the crypto off the 68020 and the remaining half goes about twice as
 fast.
@@ -20844,8 +20831,8 @@ layer has a boundary at 64 KB.
 **It is probably not our receive path either**, on three pieces of evidence.
 `bebboget` and our own `fetch` both pulled 256 KB down the same interface in the
 same session without it, and `fetch` at 61.94 KB/s would have shown a 1.5 s
-pause plainly. And §80.4's loopback arm — the same `bebboscp` binary, the same
-sizes, the same 256 KB downloads, but the server inside the guest — has every
+pause plainly. And §80.4's loopback arm, the same `bebboscp` binary, the same
+sizes, the same 256 KB downloads, but the server inside the guest, has every
 slope pair agreeing to under 4% and no stall anywhere, in four arms across two
 runs.
 
@@ -20866,7 +20853,7 @@ one local HTTPS server, so the two arms share the host's load, the SLIRP
 scheduling and the server process and the only difference is which TLS stack is
 working. A public URL was rejected on purpose: it makes the test depend on the
 network being up and on a CDN's cipher preference, and a first handshake at
-14 MHz can outlast a busy front end's patience (§11.8) — which would arrive as
+14 MHz can outlast a busy front end's patience (§11.8), which would arrive as
 a flake rather than as the finding it is.
 
 Both arms skip certificate verification (`--sloppy`, `NOVERIFY`) because the
@@ -20885,7 +20872,7 @@ logs per request:
 | bebboget | TLS 1.3 `TLS_AES_256_GCM_SHA384` | 4.98 s | 7.80 | 16.38 | **22.38 KB/s** |
 | our `fetch` | TLS 1.2 `ECDHE-RSA-CHACHA20-POLY1305` | 1.10 | 2.18 | 5.28 | **61.94 KB/s** |
 
-Both are real — they are what each program does against a normal server — but
+Both are real, they are what each program does against a normal server, but
 the difference is partly the algorithm. `src/tls/ami_tls_crypto.c` offers
 0xC023, 0xC027, 0xCCA8, 0xCCA9 and two RSA CBC suites; bebboget's ChaCha20 is
 the TLS 1.3 suite 0x1303 and not 0xCCA8, so **the two stacks share no AEAD at
@@ -20907,7 +20894,7 @@ second run is the one that means anything. That outlier is the one referred to
 in §80.5.
 
 The other thing the pinned table says is about us: our own `fetch` does 23.76
-KB/s on AES-128-CBC + HMAC-SHA256 and 61.94 KB/s on ChaCha20-Poly1305 — **2.6×,
+KB/s on AES-128-CBC + HMAC-SHA256 and 61.94 KB/s on ChaCha20-Poly1305, **2.6×,
 and that is `src/crypto68k`'s 68020 assembly against the portable CBC path.**
 
 ### 80.8 Which tier this belongs in
@@ -20915,7 +20902,7 @@ and that is `src/crypto68k`'s 68020 assembly against the portable CBC path.**
 **Tier 2, local, not public CI**, on four counts, and only the last is ours to
 fix:
 
-1. `a2065.device` is Commodore's and cannot be fetched — the same reason
+1. `a2065.device` is Commodore's and cannot be fetched, the same reason
    `bsdsocktest` is out of public CI.
 2. `locale.library` is Commodore's too, and §80.1 is what its absence looks
    like. That is a second non-redistributable dependency, and a harder one to
@@ -20931,8 +20918,8 @@ fix:
 
 Point 4 is handled rather than tolerated: `tests/bebbossh/check.sh` and
 `tests/bebboget/check.sh` **print a verdict line and score on that**, ignoring
-what the emulator exited with. In practice every run here exited 0 — both
-clients close their sockets and their library cleanly — but the harness does
+what the emulator exited with. In practice every run here exited 0, both
+clients close their sockets and their library cleanly, but the harness does
 not depend on it.
 
 So they are `run-*.sh` harnesses in the shape of `tests/leak/run-leak.sh`, run
@@ -20955,8 +20942,8 @@ leaves output going to the report file, so the terminal is real and every byte
 still lands on the host.
 
 **Sizes match exactly, and both sides were measured.** ClientRun asks the
-console its own size with CSI `0 q` -- the Window Bounds Report, the same
-question `console.cpp` asks -- and the remote runs `stty size` and
+console its own size with CSI `0 q`, the Window Bounds Report, the same
+question `console.cpp` asks, and the remote runs `stty size` and
 `os.get_terminal_size(0)`, i.e. `TIOCGWINSZ` on the pty:
 
 | CON: window | the console says | remote `stty size` | remote `TIOCGWINSZ` |
@@ -20975,7 +20962,7 @@ falls back on the entry. An application on a real terminal uses `TIOCGWINSZ`,
 and that column is right.
 
 **Resize propagates.** ClientRun starts the session asynchronously, waits, and
-calls `ChangeWindowBox()` on the console's own window -- found through
+calls `ChangeWindowBox()` on the console's own window, found through
 `ACTION_DISK_INFO` to the console handler, because `fh_Arg1` is *not* the
 Window and reading it gives a pointer whose Width and Height come back as 35
 and 9572. The remote samples its size either side:
@@ -20987,7 +20974,7 @@ and 9572. The remote samples its size either side:
 
 **That test was wrong the first three times, and the way it was wrong is worth
 keeping.** A client turns console resize reporting on by *writing* an escape
-sequence -- BebboSSH writes `\x1b[2;11;12{` to its stdout. Point stdout at a
+sequence, BebboSSH writes `\x1b[2;11;12{` to its stdout. Point stdout at a
 file and the sequence lands in the file, the console is never asked to report
 anything, and the window can then be resized all day with nothing to notice.
 That produced a confident "resize is not propagated" three runs running, and it
@@ -21009,7 +20996,7 @@ arrives as `xterm-amiga` and a real pty is allocated (`/dev/ttys008`).
 
 ### 80.10 A shell session, and it is a shell session
 
-Driven from a file rather than a console -- BebboSSH's other input path, which
+Driven from a file rather than a console, BebboSSH's other input path, which
 reads the whole file and sends it, and is how a script gets piped into a
 session. Against the host's `sshd` and zsh, all five lines ran and the session
 ended by itself:
@@ -21043,8 +21030,8 @@ starting and ending a task per command.
 
 **It stops after the second command of a piped script.** A four-line script got
 through `Echo` and `CD`, printed the new prompt, and then nothing: the server
-kept reading the remaining bytes off the socket -- its log records
-`SSH_MSG_CHANNEL_DATA ... consumed 84 of 84` once a minute -- and never ran
+kept reading the remaining bytes off the socket, its log records
+`SSH_MSG_CHANNEL_DATA ... consumed 84 of 84` once a minute, and never ran
 them, and the client waited for a prompt that never came until the harness
 timed out at fifteen minutes.
 
@@ -21065,13 +21052,13 @@ from the socket, and that is exactly what happens: CSI `0 q` to `CON:`,
 `ChangeWindowBox()`, `IsInteractive()`, `SetMode()`. Not one of them is ours.
 
 Confirmed rather than assumed. Across every interactive run the serial log
-contains one line and it is our own `AMITCP: no rexxsyslib.library` notice --
+contains one line and it is our own `AMITCP: no rexxsyslib.library` notice,
 no `ENOSYS`, nothing about an unserviced `SocketBaseTagList` tag, nothing at
 session setup and nothing at resize. The socket calls are the same short list
 as §80.2; the terminal work happens entirely above them.
 
-A full interactive run under `tools/enforcer-run.sh -m` -- two sized sessions,
-the `-T` session, the piped shell and the resize -- reports **0 Enforcer hits
+A full interactive run under `tools/enforcer-run.sh -m`, two sized sessions,
+the `-T` session, the piped shell and the resize, reports **0 Enforcer hits
 and 0 MungWall wall hits.**
 
 ### 80.13 What this means for the Dropbear shim
@@ -21095,14 +21082,14 @@ than an observation about BebboSSH.
 ## 81. The memory floor, measured (2026-07-30)
 
 §9 decision 1 said "68020 + OS 3.1, 4 MB". Two thirds of that were disproved
-earlier today — seven boards pass on a 68000, and the stack runs on Kickstart
+earlier today, seven boards pass on a 68000, and the stack runs on Kickstart
 2.04. The 4 MB was never examined. Nothing in the tree enforces it: the packet
 pool is sized from `AvailMem()` and clamped to 16..256 packets, so the number
 was a design assumption that outlived its evidence.
 
 It was also inconsistent in what we shipped. `README.md` said 4 MB,
 `dist/ReadMe` said "about 1 MB of free memory once it is up, and 4 MB in the
-machine", and `docs/user/ReadMe` said "about 4 MB of Fast RAM" — three
+machine", and `docs/user/ReadMe` said "about 4 MB of Fast RAM", three
 different claims, one of them naming the wrong kind of RAM.
 
 ### 81.1 What the machine actually loses
@@ -21127,14 +21114,14 @@ Kickstart 2.04, `a2065.device`, from a cold `OpenLibrary()`:
 | `usergroup.library` also open | 425,152 |
 
 467,504 bytes for the whole stack including a 22-packet pool. The same probe
-on the same machine with 8 MB of Fast RAM added spends 856,872 — the
+on the same machine with 8 MB of Fast RAM added spends 856,872, the
 difference is almost exactly the pool, 256 packets against 22. Subtract it
 either way and the fixed cost lands at **432–439 KB**: the segment, ThreadX,
 the NX_IP instance and the thread stacks.
 
 ### 81.2 1 MB works, through the shipped library
 
-An A2000 with 1 MB of Chip RAM and no Fast RAM at all — a stock machine —
+An A2000 with 1 MB of Chip RAM and no Fast RAM at all, a stock machine,
 running `AddNetInterface eth0` and then the shipped tools:
 
 ```
@@ -21159,7 +21146,7 @@ transfer:
 **One free packet at the low-water mark, and nothing ever waited on the pool.**
 That is the tight resource at 1 MB, and it held. `tests/netstack/run-amiberry.sh`
 passes 14 of 14 on the same machine, four runs out of four, with the pool at 22
-packets — the test binary is smaller than the library, so it sizes slightly
+packets, the test binary is smaller than the library, so it sizes slightly
 larger.
 
 ### 81.3 512 KB refuses, cleanly
@@ -21178,7 +21165,7 @@ failure is a refusal, not a wedge.
 
 **The diagnosis it prints is wrong, though.** `AddNetInterface`'s failure text
 walks a decision tree that ends at "The card is fine, so what failed was
-getting an address: nothing answered. Check the cable" — it has no branch for
+getting an address: nothing answered. Check the cable", it has no branch for
 running out of memory, so it blames the network. Worth a branch.
 
 Since fixed and, on this machine, read:
@@ -21197,7 +21184,7 @@ requirement: the failed `OpenLibrary()` leaves the segment resident, so what is
 left at the moment `explain_library_failure()` reads `AvailMem()` is nowhere
 near either the 905 KB this machine starts with or the 432–439 KB the stack
 needs. `tests/tools/run-oommsg.sh` is the run; it needed
-`tools/amiberry-run.sh -a`, which did not exist when this was written — see 82.
+`tools/amiberry-run.sh -a`, which did not exist when this was written, see 82.
 
 `tests/netstack/netstack_test` at 512 KB behaves differently and worse: it is
 250 KB smaller than the library, so it gets past sizing, fails later at
@@ -21230,7 +21217,7 @@ MEM closing bsdsocket.library
 
 Reproduced at 1 MB and at 8 MB, so it is not the floor. It does not show in
 normal use because `AddNetInterface` holds a reference for the life of the
-machine — but a tool run on a machine where nothing else has the library open
+machine, but a tool run on a machine where nothing else has the library open
 (`ping` on its own) hangs on exit for the same reason. `netstack_shutdown()`
 called directly, which `tests/netstack` does, returns fine; the library close
 wrapper is what does not.
@@ -21255,7 +21242,7 @@ echo >DH0:.done "$RC"
 ```
 
 The executable ran bare. So no command that takes a parameter could be put
-under test through `tools/fsuae-run.sh` or `tools/amiberry-run.sh` — which is
+under test through `tools/fsuae-run.sh` or `tools/amiberry-run.sh`, which is
 most of them. The workarounds are all over the tree:
 `clients/dropbear/clientrun.c` exists to be a no-argument shim around a client
 that needs arguments, and `tests/tools` drives `AddNetInterface`, `netstat`,
@@ -21265,14 +21252,14 @@ scripted session of a dozen commands, and far too much machinery for "run this
 one command with this one argument and read what it says".
 
 81.3 is what it cost: the out-of-memory branch it asked for was written, built
-clean in all seven cross configs, passed the analyser — and could not be run,
+clean in all seven cross configs, passed the analyser, and could not be run,
 because reaching it means typing `AddNetInterface eth0` on a 512 KB machine.
 It shipped in v0.14.3 having never executed once.
 
 `tools/winuae-run.sh` already read `AMINETXDUO_GUEST_ARGS` and interpolated it
 into that line; the other two did not. All three now do, plus `-a` on the
 command line for the same string. An empty one writes the line these scripts
-always wrote, byte for byte — verified against a real no-argument run.
+always wrote, byte for byte, verified against a real no-argument run.
 
 `tests/tools/run-oommsg.sh` is the first test to use it, and the assertions
 were checked against 81.3's pre-fix transcript: all four fire on it.
@@ -21285,9 +21272,9 @@ were checked against 81.3's pre-fix transcript: all four fire on it.
         playhouse3.local  no address  port 8080
 
 and there was nothing more to be got from it: a service with a name, a port
-and no address is one nothing can connect to. 74 recorded the mitigation —
+and no address is one nothing can connect to. 74 recorded the mitigation,
 raising the peer cache to 32 KB so the A record was less likely to be evicted
-from under the SRV that points at it — and left the real case open. The real
+from under the SRV that points at it, and left the real case open. The real
 case is not eviction at all. `_nx_mdns_service_addition_info_get()`
 (`nxd_mdns.c:10532`) fills `service_ipv4` by walking the cache for an A record
 whose interned name pointer equals the SRV target's, and **asks for nothing**.
@@ -21296,9 +21283,9 @@ finds out what it is.
 
 ### It is one call, and it is nearly free
 
-`nx_mdns_host_address_get()` takes a name that already carries its domain —
+`nx_mdns_host_address_get()` takes a name that already carries its domain,
 `_nx_mdns_host_address_get()` sets `domain_flag` when it sees a dot and uses
-the string verbatim — so the SRV target goes in unchanged. Underneath,
+the string verbatim, so the SRV target goes in unchanged. Underneath,
 `_nx_mdns_one_shot_query()` calls `_nx_mdns_query_check()` first, and a record
 already in either cache comes back as `NX_MDNS_EXIST_SHARED_RR` **before any
 wait or any packet**. So the cost falls only on the rows that need it. With
@@ -21307,14 +21294,14 @@ why "register the question and come back later" is not available through this
 API and the chase has to be a blocking one-shot.
 
 That wait is a ThreadX suspension, not an Amiga `Wait()`, so it hands the baton
-on — the same thing the mDNS branch of `netstack_resolve()` has always done
+on, the same thing the mDNS branch of `netstack_resolve()` has always done
 inside its bracket.
 
 ### Two bounds, and why the second one matters
 
 Per name, half a second: RFC 6762 §6 delays a shared answer 20–120 ms and the
 reply follows, and `NX_MDNS_QUERY_DELAY_MIN`/`_RANGE` work out to 1–5 ticks on
-this port. Over the whole walk, two seconds — because the case that actually
+this port. Over the whole walk, two seconds, because the case that actually
 waits is a machine that has gone while its SRV is still cached, and a cache
 holding a dozen of those would otherwise turn one listing into a dozen full
 timeouts. Rows already written are searched by host name first, so several
@@ -21323,7 +21310,7 @@ answer is not asked about twice.
 
 A host name that had to be truncated to fit `AMI_MDNS_SVC_HOST_LEN` is not
 chased. `NX_MDNS_HOST_NAME_MAX` is 64 and the row holds 63, so it can only
-happen at exactly 64 characters — but the query would be about a different
+happen at exactly 64 characters, but the query would be about a different
 machine, and a wrong address printed as a fact is worse than none.
 
 ### Measured, on the real LAN behind playhouse3
@@ -21349,7 +21336,7 @@ does not send an address for:
 answered. **`playhouse3.local` is an emulation artefact and not a result.**
 playhouse3 is the machine running Amiberry, and a guest bridged onto `ens18`
 through libpcap injects its frames onto the wire without the host's own kernel
-receiving them — so avahi-daemon on playhouse3 never sees the query. The same
+receiving them, so avahi-daemon on playhouse3 never sees the query. The same
 log shows it answering that exact question for everybody else on the LAN
 (`192.168.1.191` asked, `192.168.1.136` replied). Any bridged-Amiberry test
 that needs a `.local` peer must therefore use a machine that is *not* the
@@ -21360,7 +21347,7 @@ emulator host.
 No RR-cache walk. The freshness fields (`nx_mdns_rr_elapsed_time`,
 `nx_mdns_rr_remaining_ticks`) that filtering a browse to its own window would
 require are still not reachable through `NX_MDNS_SERVICE`, and nothing written
-here brings that any closer — see the backlog entry, which stands.
+here brings that any closer, see the backlog entry, which stands.
 
 ## 84. Browsing every type at once (2026-07-31)
 
@@ -21371,7 +21358,7 @@ per type, all at once.
 
 **It costs one more window, not one per type.** RFC 6762 queries are
 subscriptions that run concurrently, and a machine answers whichever of them
-apply to it in a single response — a house LAN offering 22 types was fully
+apply to it in a single response, a house LAN offering 22 types was fully
 listed in two five-second windows. Entirely in the command: `NETCTRL_MDNS_BROWSE`
 already takes a type and `NETSTATUS_SERVICES` already answers with the whole
 cache, so nothing in the library changed.
@@ -21382,7 +21369,7 @@ Half of it is now closed and half is not, and they are different halves.
 
 The peer cache holds one record per registered query and four per instance
 behind it. When it fills, `_nx_mdns_cache_add_resource_record()` does not
-refuse the new record — it evicts the least recently used one
+refuse the new record, it evicts the least recently used one
 (`nxd_mdns.c:10974`) and **does not call the cache-full notify**, which only
 fires from the string table. That eviction is how an SRV came to outlive the A
 record it points at, and it is exactly what §83 now repairs after the fact: the
@@ -21392,7 +21379,7 @@ cache size decide whether an answer had an address in it no longer does.
 What is not repaired is a cache so full that the *reply* to the chase cannot
 land either. That is bounded rather than solved: `SVC_TYPES_MAX` is 32, and 22
 types with 40-odd instances behind them sat inside 32 KB with room left. A
-network past that is not silently truncated — the count of types is capped with
+network past that is not silently truncated, the count of types is capped with
 a message, and `nsh_Available > nsh_Count` already reports a listing that had
 more in it than fit.
 
@@ -21422,8 +21409,8 @@ the shape you get when you cannot say what you mean.
 ### The service, and why the constraint goes into the route lookup
 
 `nxd_tcp_client_socket_source_connect()` takes the `address_index`
-`nxd_udp_socket_source_send()` takes -- an `nx_ip_interface[]` index for IPv4,
-an `nx_ipv6_address[]` index for IPv6 -- and seeds `outgoing_interface` with it
+`nxd_udp_socket_source_send()` takes, an `nx_ip_interface[]` index for IPv4,
+an `nx_ipv6_address[]` index for IPv6, and seeds `outgoing_interface` with it
 before `_nx_ip_route_find()`.
 
 That is the whole mechanism, and it works because `_nx_ip_route_find()` treats
@@ -21447,14 +21434,14 @@ nothing sent.
 not a route. `_nx_ip_packet_send()` calls that "the specified interface is
 unreached" (`nx_ip_packet_send.c:350`) and then does one of two things, neither
 of which a caller can see: it drops the packet with only
-`nx_ip_invalid_transmit_packets` to show for it, or -- with forwarding enabled
--- **re-runs `_nx_ip_route_find()` with no interface constraint at all** and
+`nx_ip_invalid_transmit_packets` to show for it, or, with forwarding enabled
+**re-runs `_nx_ip_route_find()` with no interface constraint at all** and
 sends from whatever it finds. The first is the shape §67 found on the UDP side,
 where the send still returned `NX_SUCCESS`; the second would take a named
 source and quietly replace it, which is worse. So the connect now treats a zero
 next hop as an error on both entry points. It is not reachable through the
-default routing table, which sets a next hop on every success -- it needs a
-static route with a zero gateway -- but the pinned path is what makes a
+default routing table, which sets a next hop on every success, it needs a
+static route with a zero gateway, but the pinned path is what makes a
 mismatched constraint an application-reachable input.
 
 ### bsdsocket.library stops comparing
@@ -21462,7 +21449,7 @@ mismatched constraint an application-reachable input.
 `connect()` now does what the datagram path does: `bsd_source_select()` maps
 the bound address or the RFC 4007 zone to an index, and the connect is
 `source_connect()` when there is one and the plain connect when there is not.
-The two refusals left are the ones `bsd_source_select()` produces on its own --
+The two refusals left are the ones `bsd_source_select()` produces on its own,
 `ENETUNREACH` for a bound address with no route out of its own interface,
 `EADDRNOTAVAIL` for one that is not on any interface. `EADDRNOTAVAIL` for "a
 different interface would be used" is gone, because that connection is now
@@ -21508,7 +21495,7 @@ The first and second rows together are the whole point: the same call, the same
 routing table, and the source is the one that was asked for rather than the one
 that would have been chosen.
 
-On the guest, `tests/tools/run-srcsel.sh` covers what one interface reaches --
+On the guest, `tests/tools/run-srcsel.sh` covers what one interface reaches,
 a pinned connect on loopback, a pinned connect on the physical interface with
 the accepting end asked what source it saw, an unbound connect alongside it,
 and the `ENETUNREACH` refusal. Its two-interface arm exists (`SrcProbe` takes
@@ -21516,9 +21503,9 @@ an optional second local address and a destination) and is not wired into the
 harness, because nothing runs it.
 
 **A two-card guest was attempted and is not the reason this is believed.**
-Amiberry does put two boards in the machine -- `a2065_rom_file=:ENABLED` plus
+Amiberry does put two boards in the machine, `a2065_rom_file=:ENABLED` plus
 an `ariadne_*` pair through `AMINETXDUO_AMIBERRY_EXTRA`, each with its own MAC
--- and logs both, `Card 05: 'A2065'` and `Card 06: 'Ariadne'`, mapped into
+and logs both, `Card 05: 'A2065'` and `Card 06: 'Ariadne'`, mapped into
 Zorro II at `0x00e90000` and `0x00ea0000`. What did not happen is the guest
 coming up on them. Five runs, on an A1200 with 8 MB of Zorro II Fast:
 
@@ -21531,14 +21518,14 @@ a2065 bridged + ariadne on SLIRP  AddNetInterface eth0 alone hangs, same
 ```
 
 So it is the presence of the second board and not the backend, and it is the
-FIRST interface that stops -- the A2065 that comes up on its own every day in
+FIRST interface that stops, the A2065 that comes up on its own every day in
 this lab. The serial log is empty, which means the library never got as far as
 its first warning. Not diagnosed.
 
 The 8 MB of Zorro II Fast RAM is the first thing to look at: it covers
 `0x200000-0x9fffff`, the two cards land immediately above it, and §76 already
 records that this machine's PCMCIA windows collide with that same 8 MB and
-produce exactly this shape -- a card logged as present and a driver that
+produce exactly this shape, a card logged as present and a driver that
 cannot find it.
 
 ### Where it is
@@ -21557,8 +21544,8 @@ history here.
 
 §45 records why `n68k_copy_bytes()` aligns the destination and then reads
 longwords from wherever the source happens to be. The alignment census says
-that source is at 2 mod 4 on eight of the nine drivers surveyed -- ariadne,
-ariadne_ii, x-surf, x-surf-100 on Z2 and Z3, hydra, a2065, cnet -- so 2 mod 4
+that source is at 2 mod 4 on eight of the nine drivers surveyed, ariadne,
+ariadne_ii, x-surf, x-surf-100 on Z2 and Z3, hydra, a2065, cnet, so 2 mod 4
 is not a corner, it is the case.
 
 An instrumented SANA-II device priced `S2_CopyToBuff` per byte for both stacks
@@ -21571,8 +21558,8 @@ on one machine in one run, two-point fit over 64 and 1024 bytes:
 | 2 mod 4 | 182 | 204 |
 | 3 mod 4 | 716 | 204 |
 
-The odd offsets are a rout in our favour -- Roadshow falls off a 5.4x cliff
-where this routine is flat -- and 2 mod 4 is the one alignment where it is
+The odd offsets are a rout in our favour, Roadshow falls off a 5.4x cliff
+where this routine is flat, and 2 mod 4 is the one alignment where it is
 ahead.
 
 ### The idea that does not work
@@ -21597,14 +21584,14 @@ The cost model says why, and it is not the one the idea assumes. On this
 profile memory is nearly free and instructions are not: the aligned `movem.l`
 block runs at 82 cycles per 32 bytes, which is about what the MC68020UM
 charges for the two instructions with no bus cost at all. A misaligned
-longword adds 22 cycles per 32 bytes -- 2.75 per longword. A `swap` plus a
+longword adds 22 cycles per 32 bytes, 2.75 per longword. A `swap` plus a
 `move.w Dn,Dn` is 6 published cycles and measures nearer 7 with the
 instruction fetch. Seven to save 2.75, per longword, every longword. There is
 no arrangement of it that wins, and word-granularity loses harder still
 because it doubles the instruction count outright.
 
-Aligning the source instead of the destination -- keeping the split but moving
-it from the read to the write -- measured 232.8 against 229.8. Nothing in it.
+Aligning the source instead of the destination, keeping the split but moving
+it from the read to the write, measured 232.8 against 229.8. Nothing in it.
 
 ### The thing that does work
 
@@ -21634,13 +21621,13 @@ Three runs each, not averaged, ns/B over 1460 bytes:
 | after | 159.4 / 162.8 / 159.4 | 211.7 / 211.7 / 211.7 | 209.4 / 209.4 / 209.4 | 212.1 / 209.0 / 212.1 |
 
 The "before" row is the unmodified routine measured from the variant harness,
-which is the only place it was ever timed at all four alignments -- the
+which is the only place it was ever timed at all four alignments, the
 shipped harness had no s3 row until this change added one. In its own position
 in its own binary the unmodified routine read 183.6 / 180.9 / 183.5 at s0 and
 227.6 / 226.7 / 227.0 at s2, which is the same figure to within the noise band
 above.
 
-This does not close the 2 mod 4 gap by making 2 mod 4 special -- the split
+This does not close the 2 mod 4 gap by making 2 mod 4 special, the split
 cycle is still paid. It closes it by making the whole routine cheaper, which
 is where Roadshow's lead actually was: it is ahead at 0 mod 4 by the same
 proportion it is ahead at 2. Everything downstream moved with it, in the same
@@ -21651,7 +21638,7 @@ to 244.3.
 ### Coverage
 
 The exactness sweep in `tests/perf/perf_test.c` ran lengths 0 to 96 at all
-sixteen alignment pairs, which never once entered a 128-byte block -- a sweep
+sixteen alignment pairs, which never once entered a 128-byte block, a sweep
 that covers nothing is worse than no sweep, because it passes. It now runs to
 288, so two whole blocks and a remainder execute at every pair. The long
 8184-byte case was at 1 mod 4 once its head bytes were gone; a second one at
@@ -21669,7 +21656,7 @@ addx.l  d2,d0           | d2 is zero, so this adds the carry back in
 ```
 
 201.3 ns/B on the A1200 profile against the vendored loop's 722, unrolled eight
-ways, and by §86's cost model — memory nearly free, instructions the currency —
+ways, and by §86's cost model, memory nearly free, instructions the currency,
 the only thing left to take out was the `subq`/`bne`, two of every eighteen
 instructions. That is an 11% ceiling and the measurements agreed with it: 16,
 32 and 64 longwords per iteration bought 166-172 against 180 for eight, and 128
@@ -21687,8 +21674,8 @@ addx.l  d2,d0
 ...                     | seven of them
 ```
 
-Eight instructions per seven longwords rather than sixteen per eight — 1.14
-against 2.25 — and no `add.l` anywhere to reload X and break the chain.
+Eight instructions per seven longwords rather than sixteen per eight, 1.14
+against 2.25, and no `add.l` anywhere to reload X and break the chain.
 
 This is not the experiment the backlog already records as worthless. That one
 loaded eight longwords with `movem.l` and then ran `add.l Dn,d0` / `addx.l
@@ -21714,7 +21701,7 @@ the shifts and `addx` itself do not. That decides the shape of the loop:
 The chain leaves one carry in X at the end, and folding it can carry again:
 `d0 = 0xFFFFFFFF` with X set is reachable here, which it is not in the
 `add.l`/`addx.l` form, where a carry out of the add bounds the result at
-`0xFFFFFFFE`. So the fold is done twice, and twice is enough — the first fold
+`0xFFFFFFFE`. So the fold is done twice, and twice is enough, the first fold
 can only carry by taking `d0` to zero, and `0 + 1` does not carry. That keeps
 the property `n68k_checksum.c` depends on: the answer is congruent to the
 16-bit sum modulo `0xFFFF`, and it is the zero spelling only when every
@@ -21725,14 +21712,14 @@ longword was zero.
 The chain needs `d2-d7/a2` saved and restored where the old loop saved two
 registers. Over 1460 bytes that vanishes. Over the 20-byte IP header, which
 this stack checksums on every packet in both directions, it was a **24-32%
-loss** — and the wire case runs 1284 checksum calls over 537 KB, a 418-byte
+loss**, and the wire case runs 1284 checksum calls over 537 KB, a 418-byte
 mean over a distribution with a large spike at 20.
 
 So calls of 64 longwords or fewer take a second shape that saves nothing: a
 computed jump into 64 unrolled `move.l`/`addx.l` pairs, entered so exactly
 `count` of them run. Same two instructions per longword as the old loop, minus
 its loop control and minus the register saves. It is straight-line code run
-once, so its 256 bytes cost nothing in the instruction cache — a cache only
+once, so its 256 bytes cost nothing in the instruction cache, a cache only
 charges for code that repeats.
 
 ### Measured
@@ -21743,7 +21730,7 @@ as a difference. Best of five passes, ns/B.
 
 The floor is the old loop assembled twice at two addresses. It is **1.3-3.3%**
 from 128 B up and **5% at 20-40 B**, where code placement alone moves the
-number — two byte-identical routines differed by 5% at 20 B, consistently, in
+number, two byte-identical routines differed by 5% at 20 B, consistently, in
 every pass. Nothing below those bars was treated as a result.
 
 | bytes | 1460 | 1024 | 512 | 400 | 296 | 260 | 200 | 128 | 40 | 20 |
@@ -21768,7 +21755,7 @@ Through `n68k_ip_checksum_compute()` rather than the loop alone, which is what
 
 Both columns are the same tree with only this file changed. Rebased onto
 86's copy work the same row reads 153.05, and the vendored row it shares a
-binary with moves too, 722.21 to 718.80 -- whole-binary code placement, the
+binary with moves too, 722.21 to 718.80, whole-binary code placement, the
 same effect the 5% floor at 20 B is made of, and not something either change
 did.
 
@@ -21793,7 +21780,7 @@ Recorded so none of it is tried again.
 | add/addx unrolled 16 / 32 / 64 | 172-175 / 166 / 170 | the `subq`/`bne` is 11% of the instruction budget and that is all there is |
 | add/addx unrolled 128 | 184 | worse than eight; the loop body is 512 bytes |
 | `dbf` instead of `subq`/`bne` | 181 at x8, 167 at x32 | identical within the floor. One instruction of loop control rather than two is not measurable |
-| two accumulators | 164-170 at x32 | flat. The pairs cannot interleave anyway — the `addx` reads the X the `add` just set, so the flag serialises them whatever the data does |
+| two accumulators | 164-170 at x32 | flat. The pairs cannot interleave anyway, the `addx` reads the X the `add` just set, so the flag serialises them whatever the data does |
 | movem chain 7x13, 7x16 | 127-130 | matches 7x8 at 1460 B and loses 5-11% at 260-512 B, where the deeper block no longer fits inside the packet |
 | movem chain 7x32 | 138-141 | 7% worse everywhere |
 | a middle loop level (7x8 + 7x4) | 130.0, and 189.5 at 296 B | no |
@@ -21805,7 +21792,7 @@ and it does, but softly and later than the arithmetic suggests. The movem
 chain's loop body is `18k + 6` bytes for `k` blocks: 150 bytes at 7x8, 294 at
 7x16, 582 at 7x32. 7x16 is already over the cache and is not measurably slower
 than 7x8; only 7x32 loses, and by 7%. The add/addx family turns in the same
-place — 64 longwords is 262 bytes of body and still beats eight, 128 longwords
+place, 64 longwords is 262 bytes of body and still beats eight, 128 longwords
 is 518 and does not.
 
 So the cache is not the reason to stop unrolling here; running out of packet
@@ -21831,7 +21818,7 @@ machines this project's fastest users actually run:
 The host tier (`tests/perf/host/test_checksum_host.c`, ~10250 cases against the
 vendored function) compiles the C fallback and cannot reach any of this. So the
 on-target sweep in `perf_test` is the only check the assembly gets, and it ran
-lengths 0..40 bytes — ten longwords, which under the new code never leaves the
+lengths 0..40 bytes, ten longwords, which under the new code never leaves the
 first ten entries of the jump table and never reaches the `movem` shape at all.
 Widened to every length from 0 to 700 bytes over three payload fills: the ramp,
 all ones (every add carries), and alternating `0xFFFFFFFF`/`0x00000001`, which
@@ -21844,7 +21831,7 @@ three times and every level of the tail is reached.
 
 > `on-miss` is in the table because it is the next idea and it is **not taken**:
 > it drops the bracket for a `recv()` that can be served out of the packet
-> already parked on the socket, which is arithmetic and a copy — but it also
+> already parked on the socket, which is arithmetic and a copy, but it also
 > moves `nx_packet_release()` outside the baton, and releasing a packet can
 > resume a thread suspended on the pool.
 
@@ -21855,8 +21842,8 @@ releases anything. That read is the one this section takes the bracket off.
 ### 86.1 The instrument was priced against the wrong bracket
 
 `tests/perf/bracket_test.c` set `b_cache_live` only for the `cached` arm. Every
-other arm therefore ran `tx_amiga_adopt_thread()`/`tx_amiga_orphan_thread()` --
-the pair §39.1 prices at 525 us -- while `cached` ran the dormant-TX_THREAD
+other arm therefore ran `tx_amiga_adopt_thread()`/`tx_amiga_orphan_thread()`,
+the pair §39.1 prices at 525 us, while `cached` ran the dormant-TX_THREAD
 pair at 214 us. So `on-miss` was charged 2.5x per bracket for the privilege of
 taking fewer of them, and the two columns of §39.3's table were never
 comparable. Fixed: every arm but `per-call` now uses the cached bracket, and
@@ -21869,7 +21856,7 @@ restores.
 read large enough to span packets misses more than once, so it pays more
 brackets than `per-call` does: at 16 KB reads, 32 brackets over 16 calls. That
 is why it loses to `cached` at the top of the table, and it is not a property of
-the idea -- it is a property of releasing too eagerly. A `lazy` arm that takes
+the idea, it is a property of releasing too eagerly. A `lazy` arm that takes
 the bracket on first need and holds it to the end of the call caps the bill at
 one per call, and is then never worse than `cached` and never worse than
 `on-miss`.
@@ -21900,20 +21887,20 @@ socket is TCP, not read-shut, has a parked packet, and that packet holds
 strictly more than the caller asked for. Under that predicate `bsd_recv_tcp()`
 provably stays inside the pure region: `as_RxPending` is never emptied, so
 `nx_tcp_socket_receive()` is never called and `nx_packet_release()` is never
-called. What runs unbracketed is `nx_packet_length_get()` -- one field read --
+called. What runs unbracketed is `nx_packet_length_get()`, one field read,
 and `nx_packet_data_extract_offset()`, a read-only chain walk and a `memcpy` on
 a packet the IP thread no longer references. Neither has a caller check and
 neither takes a lock, because neither touches anything shared.
 
 "Strictly more", not "at least as much", is the safety argument: a read that
 drains the packet exactly would release it, and that is §39.3's objection,
-unanswered. It costs nothing to stay away from -- the call that would have hit
+unanswered. It costs nothing to stay away from, the call that would have hit
 it takes the bracket for its own receive anyway, so the bracket count is the
 same as `lazy`'s.
 
 The predicate is an optimisation, not a correctness dependency. `bsd_nx_need()`
 takes the bracket at the sites inside the loop that need one, so a predicate
-that were wrong -- or a future edit that added a site -- is slow rather than
+that were wrong, or a future edit that added a site, is slow rather than
 corrupting.
 
 ### 86.4 What it is worth, and to whom
@@ -21935,13 +21922,13 @@ constant is the number to carry, not the percentage.
   bracket there is not overhead, it is the call.
 * **`WaitSelect()`'s poll sweep has one, unmeasured.** `bsd_poll_sets()` takes
   a bracket per pass, and of the three predicates it runs, `bsd_writable()` and
-  `bsd_exception()` read struct fields and make no NetX Duo call at all --
+  `bsd_exception()` read struct fields and make no NetX Duo call at all,
   `bsd_readable()` is the only one that reaches
   `nx_tcp_socket_bytes_available()`, and only after four early-outs, one of
   which is the parked packet. A sweep over a socket that already has data
   therefore needs no bracket. Not taken here: it is a second lock change with
   no instrument behind it, and §39.7 already argued `select()` is not where the
-  money is. Note the shape is the opposite of the obvious guess -- a poll pass
+  money is. Note the shape is the opposite of the obvious guess, a poll pass
   that finds *nothing* ready is the one that must call
   `nx_tcp_socket_bytes_available()`, so it is the pass that finds data parked
   that could skip the bracket, not the empty one.
@@ -21951,7 +21938,7 @@ constant is the number to carry, not the percentage.
 scheduling glue rather than in the copy: `_tx_thread_interrupt_disable` and
 `_restore` together at 8.8%, Exec's `Reschedule`/`Switch`/`Dispatch`/
 `Supervisor` at 10.4%, the mutex pair at 4.5%, `_tx_amiga_thread_park` at 1.4%
-— against 17.6% for `n68k_copy_bytes`, which had been optimised twice.
+against 17.6% for `n68k_copy_bytes`, which had been optimised twice.
 
 A sampled share does not say why. "This primitive is slow" and "this primitive
 is called constantly" want opposite fixes, and there is a third case that looks
@@ -21959,7 +21946,7 @@ like both: a busy-wait, where the PC really is in the function and the fix is
 neither. So the counts were taken before anything was changed.
 
 `-DAMINETXDUO_SCHEDCOUNT=ON` adds a call counter to each of them, in the spirit
-of `AMINETXDUO_NXCENSUS` — off by default, free when off, and every increment
+of `AMINETXDUO_NXCENSUS`, off by default, free when off, and every increment
 inside the `Forbid()` it counts so none is lost to another Task. Exec's own
 `DispCount` and `IdleCount` come straight out of `SysBase`; nothing we could
 instrument would produce them.
@@ -21969,29 +21956,29 @@ instrument would produce them.
 A1200/68020, `tcpprof` wire case, 1 MB, transfer phase only. Shares and
 samples from the clean build (4420 samples at 1 kHz over 4369 ms, so one sample
 is one millisecond); counts from the counting build. Two runs, because the
-increments are on the path being counted — the counts are reproducible to 0.13%
+increments are on the path being counted, the counts are reproducible to 0.13%
 across builds, which is what makes mixing them legitimate.
 
 | function | samples | share | calls | µs/call | progress or waiting |
 |---|---|---|---|---|---|
 | `_tx_thread_interrupt_disable` | 166 | 3.8% | 38,853 | 4.3 | progress |
 | `_tx_thread_interrupt_restore` | 219 | 5.0% | 38,853 | 5.6 | progress |
-| — the pair | 385 | 8.7% | 38,853 | 9.9 | progress |
+|, the pair | 385 | 8.7% | 38,853 | 9.9 | progress |
 | `_tx_mutex_get` | 90 | 2.0% | 5,612 | 16.0 | progress |
 | `_tx_mutex_put` | 111 | 2.5% | 5,672 | 19.6 | progress |
 | `_tx_thread_schedule` | 82 | 1.9% | 2,634 | 31.1 | progress (middleman) |
 | `_tx_amiga_thread_park` | 64 | 1.4% | 2,634 | 24.3 | progress |
 | `_tx_thread_system_return` | 39 | 0.9% | 2,634 | 14.8 | progress |
 | `_tx_amiga_wake_scheduler` | 33 | 0.7% | 2,894 | 11.4 | progress |
-| `exec/Supervisor` | 168 | 3.8% | — | — | progress |
+| `exec/Supervisor` | 168 | 3.8% |, |, | progress |
 | `exec/Reschedule` | 116 | 2.6% | 5,844 | 19.9 | progress |
 | `exec/Switch` | 96 | 2.2% | 5,844 | 16.4 | progress |
 | `exec/Dispatch` | 80 | 1.8% | 5,844 | 13.7 | progress |
 | `exec/Schedule` | 43 | 1.0% | 5,844 | 7.4 | progress |
-| `exec/Permit` | 76 | 1.7% | — | — | progress |
+| `exec/Permit` | 76 | 1.7% |, |, | progress |
 | `exec/Signal` | 40 | 0.9% | ~5,500 | 7.2 | progress |
 | `exec/Wait` | 33 | 0.7% | 5,377 | 6.1 | progress |
-| `exec/Forbid` | 33 | 0.7% | — | — | progress |
+| `exec/Forbid` | 33 | 0.7% |, |, | progress |
 
 `Supervisor`, `Permit` and `Forbid` are reached from more than one of the rows
 above and from Exec itself, so there is no honest denominator for them; they are
@@ -22016,7 +22003,7 @@ again. Six things say there was none:
 - `SysBase->IdleCount` did not move at all over the phase. The machine was never
   in Exec's idle loop, so no time was being lost to a wait that nothing woke.
 - structurally, a Task blocked in Exec's `Wait()` is not executing and therefore
-  cannot be sampled — the PC sampler always records whoever is running. There is
+  cannot be sampled, the PC sampler always records whoever is running. There is
   no mechanism by which "time spent waiting" can appear as share in this
   profile. Every sample in it is a Task executing instructions.
 - the per-Task cross-tab (every sample carries `SysBase->ThisTask`) puts the
@@ -22035,14 +22022,14 @@ released the baton, signalled the scheduler Task and blocked; Exec dispatched
 the scheduler; the scheduler picked `_tx_thread_execute_ptr`, signalled the
 target and blocked; Exec dispatched the target. The middle two exist only to run
 the ten lines of `_tx_thread_schedule()` that assign `_tx_thread_current_ptr`,
-bump the run count, set the time slice and `Signal()` — which the yielding Task
+bump the run count, set the time slice and `Signal()`, which the yielding Task
 can run itself, and which `tx_amiga_adopt_thread()` had already been running
 itself on its fast path since adoption was written.
 
 `_tx_amiga_dispatch_inline()` in `tx_amiga_internal.h` is those ten lines,
 behind the scheduler loop's own guard: a thread to run, the baton free, system
 state zero, the kernel not stopping. Both take `Forbid()` and both test
-`_tx_thread_current_ptr`, so the two can never both dispatch — only one of them
+`_tx_thread_current_ptr`, so the two can never both dispatch, only one of them
 can find it `TX_NULL`. A caller that is refused falls back to the poke, because
 the refusal may be a raised `_tx_thread_system_state` that clears later.
 
@@ -22063,9 +22050,9 @@ scheduler Task's own share 8.1% → 0.4%. Wall clock 4369 → 3936 ms.
 ### 89.4 `TX_DISABLE`/`TX_RESTORE` were out-of-line calls
 
 38,853 pairs at 9.9 µs each, for a body that is two instructions. §6.2 had
-already collapsed the inner layer — `_tx_amiga_forbid_inline()` is one
+already collapsed the inner layer, `_tx_amiga_forbid_inline()` is one
 `ADDQ.B`, not a jump through the Exec vector, and `permit-slow` counted **0**
-reaching the real `Permit()` in the whole transfer — so the remaining cost was
+reaching the real `Permit()` in the whole transfer, so the remaining cost was
 the `jsr`/`rts` and a reload of `SysBase` on each side of it.
 
 They are macros in the standard ThreadX porting model for exactly this reason;
@@ -22082,7 +22069,7 @@ reschedules on `Permit()` when all three of: the count went below zero (this was
 the outermost `Forbid`), no interrupt is in progress (`IDNestCnt < 0`), and the
 attention word is set. The inline tests only `AttnResched != 0`, because a clear
 word proves Exec's `Permit()` would not have rescheduled whatever the other two
-say — so returning there is precisely what the library call would have done. It
+say, so returning there is precisely what the library call would have done. It
 is tested first because it is the cheapest of the three and the one that is
 nearly always zero. When it is set, `_tx_amiga_permit_finish()` applies the full
 three-way test out of line and calls the real `Permit()`, so the reschedule path
@@ -22091,7 +22078,7 @@ moved, it did not change.
 
 A word set in the instant after it is read costs a deferred switch. That is the
 race Exec's own `Permit()` has, closed by the next `Permit()`, `Enable()` or
-interrupt exit — and on this port that is never far off, because the threads
+interrupt exit, and on this port that is never far off, because the threads
 block in `Wait()` constantly and `Wait()` always reschedules.
 
 One `moveal 4,a0` per side rather than two: GCC will not hold a volatile address
@@ -22123,7 +22110,7 @@ runs of the same binary. Read the total.
 Samples are milliseconds here, so the absolute column is the one to read. The
 work that did not change did not move: copy 780 → 799, checksum 573 → 537, NetX
 Duo 1086 → 1104. The overhead did: Exec 833 → 485, ThreadX port 1090 → 666.
-NetX Duo's count rising while everything got faster is the inlining — a
+NetX Duo's count rising while everything got faster is the inlining, a
 `TX_RESTORE` inside `_nx_packet_allocate()` is now charged to
 `_nx_packet_allocate()`, which is where it always was.
 
@@ -22137,7 +22124,7 @@ Counts after, confirming the workload did not change: `disable`/`restore`
 38,853 → 38,850, `permit-slow` still 0, mutex 5,612/5,672 → 5,612/5,671,
 handoffs 2,634 → 2,654, `park_spurious` still 0.
 
-### 89.6 The floor, measured -- and the win does not grow there
+### 89.6 The floor, measured, and the win does not grow there
 
 The A500 profile, 68000 at 7.09 MHz, Kickstart 3.1 r40.63, same `tcpprof` and
 same megabyte. Baseline is e2c03f6, the commit this branch sits on.
@@ -22164,23 +22151,23 @@ sampler's own cost.
 
 **The expectation was that this would be a bigger win on a 68000, and it is
 not.** -17.2% here against -17.6% on the A1200. The reasoning behind the
-expectation is sound as far as it goes -- a 68000 pays 34 cycles for the
+expectation is sound as far as it goes, a 68000 pays 34 cycles for the
 `jsr`/`rts` an inline removes, against a smaller number on a 68020 with a cache
-and a 32-bit bus -- but it prices only the numerator.
+and a 32-bit bus, but it prices only the numerator.
 
 The profile prices both ends:
 
 | | A1200 / 68020 | A500 / 68000 | ratio |
 |---|---|---|---|
 | `TX_DISABLE`+`TX_RESTORE`, baseline samples | 385 | 1,667 | 4.3x |
-| the same, as a share of the transfer | 8.7% | 6.5% | -- |
+| the same, as a share of the transfer | 8.7% | 6.5% |, |
 | whole transfer | 4,420 ms | 25,618 ms | 5.8x |
 | `n68k_copy_bytes` | 780 | 4,000 | 5.1x |
 
 The critical-section pair got 4.3 times dearer on a machine that got 5.8 times
 slower overall, so as a **share** of the transfer it got cheaper, not dearer:
-8.7% on the 68020, 6.5% on the 68000. Everything the pair competes with -- the
-copy, the checksum, NetX Duo's own code -- is bus-bound on a 16-bit machine and
+8.7% on the 68020, 6.5% on the 68000. Everything the pair competes with, the
+copy, the checksum, NetX Duo's own code, is bus-bound on a 16-bit machine and
 suffers more from the move than a `jsr` does. The removed cost is a roughly
 constant fraction of the transfer across both machines, which is why the wall
 clock moves by the same 17% on both.
@@ -22195,7 +22182,7 @@ in 89.1 are the A1200's.
 Those counts are the after-build's, because the counters are part of this
 change and the baseline cannot be built with them. Using them as the baseline's
 denominator is justified by the A1200 control, where a 17% change in duration
-moved the count by 0.01% (38,853 to 38,850) -- the count tracks packets, not
+moved the count by 0.01% (38,853 to 38,850), the count tracks packets, not
 wall clock.
 
 ### 89.7 The 68000 arm needed a ROM, not a fix
@@ -22214,7 +22201,7 @@ at a glance, and it cost a wrong conclusion once.
 ### 89.8 What is left
 
 The `TX_DISABLE` pair is still 38,850 calls. That count is ThreadX's and NetX
-Duo's, not ours, and reducing it means changing vendored critical sections —
+Duo's, not ours, and reducing it means changing vendored critical sections,
 which is a different and much less safe piece of work than making the primitive
 free. The mutex pair at 4.5% is the same shape: 5,612 acquisitions of one IP
 protection mutex, none of them contended enough to block (`permit-slow` 0 and

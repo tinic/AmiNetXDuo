@@ -3,8 +3,8 @@
 # AmiNetXDuo
 
 An IPv4+IPv6 TCP/IP stack for classic AmigaOS, and the networking commands to go with it.
-It provides `bsdsocket.library` — the socket API that Amiga network software
-already speaks — on top of
+It provides `bsdsocket.library`, the socket API that Amiga network software
+already speaks, on top of
 [Eclipse ThreadX NetX Duo](https://github.com/eclipse-threadx/netxduo), and it
 drives the SANA-II network cards you already have.
 
@@ -16,7 +16,7 @@ drives the SANA-II network cards you already have.
 > Roadshow scores 138. Dropbear's `dbclient` runs on it, so the Amiga can `ssh`.
 >
 > Most of what is measured here was measured under emulation. It has since run
-> on real hardware — an A3000 with an X-Surf-100, where a user measured
+> on real hardware, an A3000 with an X-Surf-100, where a user measured
 > 795 KB/s reading and 939 KB/s writing over Fitz, and found two bugs that are
 > fixed.
 >
@@ -27,7 +27,7 @@ drives the SANA-II network cards you already have.
 Claude (Anthropic's Opus 5) wrote the code, under human direction and testing.
 Every commit says so in its `Co-Authored-By` line, and
 [docs/RESEARCH.md](docs/RESEARCH.md) is the engineering record kept as the work
-happened — what was measured, what was tried and abandoned, and the conclusions
+happened, what was measured, what was tried and abandoned, and the conclusions
 that later turned out to be wrong.
 
 Whether that is worth trusting is a question about evidence rather than about
@@ -49,8 +49,8 @@ anywhere in it. It speaks the same socket API and reads the same configuration
 files as Roadshow, so existing software and existing habits carry over. It
 speaks **IPv6**: on a network with an IPv6 router a machine picks up an address
 without being configured for one. The commands that take a host take an IPv6
-address — `ping`, `traceroute`, `nc`, `telnet`, `tftp`, `whois`, `fetch`,
-`sntp`, `nslookup` and `host` — and
+address, `ping`, `traceroute`, `nc`, `telnet`, `tftp`, `whois`, `fetch`,
+`sntp`, `nslookup` and `host`, and
 `ShowNetStatus` and `netstat -i` show the IPv6 addresses an interface holds.
 `netstat -r` shows the IPv6 routes, `AddNetRoute` and `DeleteNetRoute` change
 them, and `arp` lists the neighbours an IPv6 network is reached through.
@@ -64,7 +64,7 @@ of address the network has, and a program that passes it straight to
 
 Software written for IPv4 keeps working over IPv4, which covers most of what is
 already on an Amiga. A program is IPv4-only when it resolves with
-`gethostbyname()` — that call has no way to return an IPv6 address — or when it
+`gethostbyname()`, that call has no way to return an IPv6 address, or when it
 keeps an address in 32 bits, or reads a dotted quad out of a configuration
 file.
 
@@ -92,16 +92,16 @@ Download the `.lha` from [Releases](https://github.com/tinic/AmiNetXDuo/releases
 unpack it, and run `Install-AmiNetXDuo`. It asks a couple of questions and
 writes a working configuration.
 
-Configuration follows Roadshow's layout — `DEVS:NetInterfaces/<name>`,
+Configuration follows Roadshow's layout, `DEVS:NetInterfaces/<name>`,
 `DEVS:Internet/routes`, `DEVS:Internet/name_resolution` and the standard
-`/etc`-style netdb files — so existing documentation and habits apply. The
+`/etc`-style netdb files, so existing documentation and habits apply. The
 `ReadMe` in the archive covers the rest, including writing the files by hand.
 
 ## Commands
 
 | | |
 |---|---|
-| `NetSetup` | set up an interface by answering questions -- start here |
+| `NetSetup` | set up an interface by answering questions, start here |
 | `AddNetInterface`, `Online`, `Offline` | bring an interface up and take it down |
 | `ShowNetStatus`, `netstat` | interface state, routes, connections |
 | `ShowNetServices` | what else on this network is offering something |
@@ -126,7 +126,7 @@ The installer copies all of them into `C:`.
 ## Finding the machine by name
 
 The Amiga answers to **`<hostname>.local`** on the local network, so another
-machine can reach it by name without any DNS server or configuration — and
+machine can reach it by name without any DNS server or configuration, and
 `.local` names work from the Amiga in the other direction too. This matters
 most when there is no DHCP server at all: the machine gives itself an address
 and is still reachable.
@@ -161,8 +161,8 @@ the usual set of root authorities.
 before the prompt appears; almost all of that is the cryptography rather than
 the network.
 
-Keys must be in **Dropbear's own format** — an OpenSSH key copied straight
-across will not be read — and you name the key on the command line with `-i`.
+Keys must be in **Dropbear's own format**, an OpenSSH key copied straight
+across will not be read, and you name the key on the command line with `-i`.
 Make it on your PC rather than on the Amiga, which has neither the entropy nor
 the patience. The ReadMe in the archive has the exact commands.
 
@@ -203,16 +203,16 @@ The ABI itself comes from interface definitions and documentation that exist to
 be read, and naming them is more useful than a blanket denial: Olaf Barthel's
 freely distributable Roadshow SDK headers and autodocs, the NDK's
 `pragmas/bsdsocket_pragmas.h`, and the `.fd`/`.sfd` function-descriptor files
-AmiTCP and Roadshow publish — `usergroup.library`'s 39 vectors, for instance,
+AmiTCP and Roadshow publish, `usergroup.library`'s 39 vectors, for instance,
 were settled by reading AmiTCP's `fd/usergroup_lib.fd` against Roadshow's
 `sfd/usergroup_lib.sfd` and the NDK pragma, all three agreeing.
 [docs/RESEARCH.md](docs/RESEARCH.md) names the source behind each vector table.
 
 MIT. ThreadX and NetX Duo are MIT-licensed as well (© Microsoft and the Eclipse
-ThreadX contributors). ThreadX is an unmodified submodule. **NetX Duo is not** —
+ThreadX contributors). ThreadX is an unmodified submodule. **NetX Duo is not**,
 it is a fork carrying one patch per defect, each on its own branch off upstream
 `473d1928` and each written as a standalone change to submit upstream. The
 branches are at `github.com/tinic/netxduo` and what each one fixes is in the
 engineering record. The one further exception is the CA root
 set in `DEVS:Internet/certificates`, which is
-Mozilla's, under MPL 2.0 — file-scoped, and affecting nothing else here.
+Mozilla's, under MPL 2.0, file-scoped, and affecting nothing else here.
