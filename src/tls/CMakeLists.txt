@@ -89,6 +89,20 @@ target_link_libraries(nx_secure PUBLIC nx_crypto netxduo)
 # translation unit that includes nx_secure_tls.h agrees with this one.
 target_compile_definitions(nx_secure PUBLIC NX_SECURE_ENABLE_AEAD_CIPHER)
 
+# Wipe key material when it stops being needed.  174 sites across nx_secure
+# guard on this, and ami_tls_crypto.c has five of its own; without it the
+# handshake hashes, the decrypted signature blocks, the premaster secret and
+# every record's plaintext staging buffer are left in whatever memory they were
+# in.  On a machine with no MMU that memory goes straight back out to the next
+# AllocVec() caller as its uninitialised contents.
+#
+# It also switches nx_secure_tls_packet_release to the variant that zeroes a
+# packet's payload before releasing it, so the cost is one memset per record.
+# That macro lives in nx_secure_tls.h, so this has to be PUBLIC or two
+# translation units would disagree about which function the name means.
+target_compile_definitions(nx_secure PUBLIC NX_SECURE_KEY_CLEAR)
+target_compile_definitions(nx_crypto PUBLIC NX_SECURE_KEY_CLEAR)
+
 # ------------------------------------------------------------ amiga glue ---
 
 # ami_tls_crypto.c is what connects src/crypto68k/ to a handshake: it supplies
