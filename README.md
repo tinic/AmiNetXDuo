@@ -32,7 +32,7 @@ that later turned out to be wrong.
 
 Whether that is worth trusting is a question about evidence rather than about
 authorship, so the evidence is the part worth checking: an independent
-conformance suite, seven build configurations in continuous integration, a
+conformance suite, every build configuration in continuous integration, a
 triaged static-analysis baseline, fuzzers, and every bug a user has reported
 recorded with its fix and a test that reproduces it.
 

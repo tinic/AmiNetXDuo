@@ -23,17 +23,11 @@ empty results.
 Conformance status and citations are in `CONFORMANCE.md`. This is the work list.
 Items fixed the same day are omitted.
 
-**bsdsocket API**
-
-Audited against the tree 2026-08-04: the 0.16.9 socket-option work closed
-eleven of the fourteen rows this table used to carry, and they are removed
-rather than left to be re-surveyed. `bsd_no_aliases[1]` is also gone -- the
-shared static is never written and `netdb.c:45` records that as the reason.
-
-| Item | Cite |
-|---|---|
-| `SO_BROADCAST` is accepted and not enforced. BSD makes it permission -- `sendto()` to a broadcast address is `EACCES` without it -- and this stack has never asked, so enforcing it would start failing sends that work today. A decision, recorded at `options.c:185-190`, not an omission | `options.c` |
-| `SO_OOBINLINE` is accepted and the value deliberately not stored: the urgent byte is delivered in the stream whatever the caller sets, so answering back a 0 would be the one thing it could not find out. Withholding the byte -- the option OFF -- means rewriting a queued segment the TCP state machine still owns and counts in its sequence space, to hide a byte the caller is about to see again (`oob.c:52-62`, RESEARCH 17) | `options.c:266` |
+**bsdsocket API** — nothing open. The 0.16.9 socket-option work closed eleven of
+the fourteen rows this table used to carry; the remaining two were decisions
+rather than omissions all along and have moved to *Decided against* below.
+`bsd_no_aliases[1]` is also gone -- the shared static is never written and
+`netdb.c:45` records that as the reason.
 
 **Resolver**
 
@@ -214,15 +208,6 @@ Socket-option surface entirely untested — nothing exercises `SO_RCVBUF`,
 `SIOCATMARK`, `FIOASYNC`, any `SIOCGIF*`, or the multicast width paths — which is where the API findings are concentrated · `sana2` has no dedicated suite · **httpd has no fuzzer** and is the newest network-facing parser; the chunked
 state machine is the first target · `usergroup` functional tests were added 2026-08-02.
 
-**Docs**
-
-User guide COMMANDS node says seven Shell commands; the build produces 25 and
-the installer copies all of them · `httpd` missing from `dist/ReadMe`'s C: list
-and uninstall list · `SECURITY.md` trust-boundary table omits `httpd` · README
-says seven build configurations, `ci.sh` has ten (twelve with host tiers) ·
-`install/README.md` needs a line for `Guide.info` · `clients/dropbear/build.sh`
-and `dist/make-dist.sh` are release-only steps CI never runs.
-
 **Withdrawn** — do not re-raise
 
 - The CI analyze stage does **not** skip cppcheck. `stage_analyze` is invoked as
@@ -230,26 +215,12 @@ and `dist/make-dist.sh` are release-only steps CI never runs.
   as part of an `||` list. Reproduced both directions.
 - `ugl_crypt()` returning `"*"` is a hazard for third-party callers, not a live
   bypass: it also sets `UG_ENOSYS`, and nothing in the tree calls it.
-`src/tools.h` are pre-refactor copies of the real files, each missing changes
-the tracked versions have; `stage-developer.sh` and `aminetxduo_lib.sfd` at the
-root are byte-identical to their tracked counterparts; `tmp_x/` holds a third,
-older generation. None is referenced by any build file; all are `grep` traps.
-Separately, a build failure in the `cross` stage whose log contains neither
-`error:` nor `Error` dies on the diagnostic grep itself, before anything is
-recorded and before the summary prints — CI still goes red, so it costs
-diagnosis rather than correctness.
-
-**Two audit claims that did not survive re-checking**, recorded so they are not
-raised again. The CI analyze stage does **not** silently skip cppcheck: the
-`grep '^NOT COVERED'` exiting non-zero under `set -euo pipefail` is a real
-mechanism, but `stage_analyze` is only ever invoked as `stage_analyze || true`,
-and bash suppresses `set -e` inside a function called as part of an `||` list.
-Reproduced in both directions. And the `crypt()` stub is a hazard for
-third-party callers rather than a live lockout bypass: `ugl_crypt()` does return
-`"*"`, inverting the disabled-account convention for anyone using the canonical
-`strcmp(crypt(pw, salt), pw_passwd)` idiom, but it also sets `UG_ENOSYS` which a
-correct caller checks, and nothing in the tree calls it. Worth a documented
-warning, not a defect in shipped code.
+- `clients/dropbear/build.sh` and `dist/make-dist.sh` are **not** unrun. Both are
+  invoked by `.github/workflows/release.yml` (`:155`, `:162`). They run on a
+  release tag rather than on every push, which is a narrower statement than the
+  row made and not by itself a defect.
+- Stale root-level duplicates (`src/tools.h`, `stage-developer.sh`,
+  `aminetxduo_lib.sfd`, `tmp_x/`) are gone. None is in the tree.
 
 ### Performance — measured positions
 
@@ -374,6 +345,18 @@ math libraries are in `LIBS:`. The earlier `errno 43` `EPROTONOSUPPORT` from
 requirement. Measured 2026-08-02 as the third arm: read 1108 KB/s against our
 983 and Roadshow's 1824.
 ## Decided against — do not "fix"
+
+**`SO_BROADCAST` is accepted and not enforced**, recorded at `options.c:185-190`.
+BSD makes it a permission -- `sendto()` to a broadcast address is `EACCES`
+without it -- and this stack has never asked for it, so enforcing it now would
+start failing sends that work today, on a library that has users.
+
+**`SO_OOBINLINE` is accepted and its value deliberately not stored**,
+`options.c:266`. The urgent byte is delivered in the stream whatever the caller
+sets, so reporting back a 0 would be the one answer that is certainly wrong.
+Withholding the byte -- the option OFF -- means rewriting a queued segment the
+TCP state machine still owns and counts in its sequence space, to hide a byte
+the caller is about to see again (`oob.c:52-62`, RESEARCH 17).
 
 **Host-side cycle counting: Moira and Musashi both rejected**, 2026-08-01,
 branch `agent/moira-eval`.

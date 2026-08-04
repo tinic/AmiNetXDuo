@@ -1442,7 +1442,7 @@
 
   @{b}If AddNetInterface says the stack started and the other commands@{ub}
   @{b}still say it is not running@{ub}, you have a mismatched set of files:
-  check that all seven commands and LIBS:bsdsocket.library came from
+  check that the commands in C: and LIBS:bsdsocket.library all came from
   the same release, and that there is no older copy of a command
   earlier in your command path.
 

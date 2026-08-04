@@ -38,6 +38,7 @@ this document names its untested parts rather than only its tested ones.
 | mDNS queries and responses — unauthenticated multicast from any host on the segment | `src/netstack/netstack_mdns.c` |
 | TLS records and X.509 certificate chains | NX Secure, in `tls.library` |
 | SSH protocol | Dropbear's `dbclient`, vendored in `clients/` |
+| HTTP requests, chunked bodies and WebDAV XML — from any client that reaches the port, with no authentication anywhere in the server | `src/tools/httpd.c` |
 
 **Trusted, and worth knowing that it is:**
 

@@ -8,6 +8,7 @@ Install-AmiNetXDuo          the Installer script
 Install-AmiNetXDuo.info     its icon: project, default tool "Installer"
 AmiNetXDuo.info             drawer icon
 Drawer.info Document.info   generic icons for Docs/, Examples/, ReadMe
+Guide.info                  icon for AmiNetXDuo.guide, default tool "MultiView"
 
 devs/Internet/              protocols, services, networks -- shipped as-is
 examples/NetInterfaces/     one commented interface file per card
