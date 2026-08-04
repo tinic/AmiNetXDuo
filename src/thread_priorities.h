@@ -37,6 +37,16 @@
 #define AMI_IP_THREAD_PRIORITY      2
 
 #define AMI_AUTOIP_PRIORITY         3
+
+/*
+ * The mDNS thread wakes on a query, walks two small caches and answers. Below
+ * the SANA-II readers and the IP thread so an inbound burst still drains, but
+ * above an adopted application task: a responder that ran only when nothing
+ * else wanted the CPU would answer after the querier gave up. Next to AutoIP,
+ * which has the same urgency.
+ */
+#define AMI_MDNS_PRIORITY           4
+
 #define AMI_CALLER_PRIORITY        16      /* adopted application tasks      */
 
 /*
@@ -51,6 +61,15 @@
 #endif
 #if AMI_IP_THREAD_PRIORITY >= AMI_AUTOIP_PRIORITY
 #error "the IP thread must outrank AutoIP"
+#endif
+#if AMI_IP_THREAD_PRIORITY >= AMI_MDNS_PRIORITY
+#error "the IP thread must outrank the mDNS responder"
+#endif
+#if AMI_MDNS_PRIORITY >= AMI_CALLER_PRIORITY
+#error "the mDNS responder must outrank adopted callers"
+#endif
+#if AMI_MDNS_PRIORITY < AMI_AUTOIP_PRIORITY
+#error "the mDNS responder must not outrank AutoIP"
 #endif
 
 #endif /* AMINETXDUO_THREAD_PRIORITIES_H */

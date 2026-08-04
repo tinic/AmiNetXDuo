@@ -42,14 +42,8 @@
 
 #include <proto/exec.h>
 
-/*
- * The mDNS thread wakes on a query, walks two small caches and answers. It
- * sits below the IP thread (1) and the SANA-II readers (2) so an inbound burst
- * still drains, but above an adopted application task (16), since a responder
- * that ran only when nothing else wanted the CPU would answer after the
- * querier gave up. Next to AutoIP (3), which has the same urgency.
- */
-#define AMI_MDNS_PRIORITY           4
+/* AMI_MDNS_PRIORITY is in src/thread_priorities.h with the rest of the ladder,
+   which asserts where it sits. Stack sizes are not ladder members. */
 #define AMI_MDNS_STACK_SIZE         4096
 
 /* --------------------------------------------------------- the host label */
