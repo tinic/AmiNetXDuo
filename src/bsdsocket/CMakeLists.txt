@@ -149,3 +149,4 @@ if(AMINETXDUO_BSDSOCKET_LINK)
     target_link_options(bsdsocket_library PRIVATE -nostartfiles
         "-Wl,-Map=$<TARGET_FILE_DIR:bsdsocket_library>/bsdsocket.library.map")
 endif()
+

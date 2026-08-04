@@ -99,7 +99,7 @@ if grep -q '\\' "$BUILD/compile_commands.json"; then
 fi
 grep '"command":' "$BUILD/compile_commands.json" |
     sed -e 's/^ *"command": "//' -e 's/",$//' -e 's|-o [^ ]*|-o /dev/null|' |
-    grep -v, '-c .*/third_party/' |
+    grep -v -- '-c .*/third_party/' |
     sort -u > "$WORK/cmds"
 
 echo "analysing $(wc -l < "$WORK/cmds" | tr -d ' ') translation units with $JOBS jobs"
@@ -200,7 +200,7 @@ export LC_ALL=C
 # distinguishes a genuine second site from a rebuild of the first.
 cat "$WORK"/log.* |
     grep -E 'warning: .*\[-Wanalyzer' |
-    grep -v, '-Wanalyzer-too-complex' |
+    grep -v -- '-Wanalyzer-too-complex' |
     sed -e "s|$ROOT/||" |
     sort -u |
     sed -E -e 's| \[CWE-[0-9]+\]||' \

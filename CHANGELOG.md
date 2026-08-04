@@ -33,6 +33,8 @@ version at the top when it merges.
 - Closing a program that was capturing network traffic no longer frees the capture buffer while it is still being read
 - A connection request from a network the machine cannot reach, and a stream of packets it must refuse, are both answered at a bounded rate rather than one for one
 - Asking to send more than fits in one packet on a raw socket now reports an error instead of reporting success and sending nothing
+- `TCP:` no longer appears as a drive. It was claiming to be a validated disk with a million blocks free, so `Info` listed it and Workbench drew an icon for it. It is a stream, like `CON:` and `PIPE:`, and now says so; `Type TCP:host/port` and everything else that opens it are unchanged
+- The commands are smaller. They no longer carry a symbol table nothing reads, and the diagnostics they print are one line instead of a paragraph: `ping` is 33,020 bytes where it was, down to 24,116. Every failure still names its own cause, and the guide has the explanations that used to be printed
 
 ## 0.16.9
 

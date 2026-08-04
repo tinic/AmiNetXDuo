@@ -108,8 +108,9 @@ HOST_TEST_TARGETS=(test_config test_usergroup test_mbuf test_bpf test_httppath t
                    test_tcp_retries test_bcast_loopback test_tcp_source_connect test_tcp_rtt
                    test_dns_retry test_dns_status
                    test_sockopt_numbers test_sana2_copy test_ipv6_ra test_ipv6_ptb
+                   test_httpframe test_tls_x509 test_ipv6_frag
                    fuzz_config fuzz_bpf fuzz_dns fuzz_usergroup
-                   fuzz_dhcp fuzz_tls_record fuzz_tls_x509)
+                   fuzz_dhcp fuzz_tls_record fuzz_tls_x509 fuzz_httpframe)
 
 # The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against
 # Kickstart 3.1, identical check counts on both.  Deliberately NOT here:

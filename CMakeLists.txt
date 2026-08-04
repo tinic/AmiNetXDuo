@@ -19,7 +19,7 @@ project(AmiNetXDuo VERSION 0.16.9 LANGUAGES C ASM)
 #
 # and the last -O wins. That is exactly how this project spent a year
 # believing it built at -O2 while every published figure was measured at -O3,
-# and it silently swallowed the first attempt at this change too -- the
+# and it silently swallowed the first attempt at this change too, the
 # libraries came out 0.1% smaller, which was the giveaway.
 #
 # Setting the real variable here, after the language is enabled, is the one
@@ -40,7 +40,7 @@ option(AMINETXDUO_IPV6 "Build the IPv6 dual stack"                    ON)
 # nx_user.h turns it into NX_DISABLE_IPV6 (or not), and NX_DISABLE_IPV6 decides
 # FEATURE_NX_IPV6, which changes the layout of NX_IP, NX_INTERFACE, NX_PACKET
 # and NX_TCP_SOCKET. A single translation unit compiled with a different answer
-# from the rest of the tree does not fail to link -- it reads the wrong offsets
+# from the rest of the tree does not fail to link, it reads the wrong offsets
 # out of a shared struct. It used to be set per-target on aminetxduo_sana2
 # only, which meant the SANA-II shim saw a different NX_IP from the NetX Duo
 # core it was driving.
@@ -52,11 +52,11 @@ endif()
 # ON by default.  It was off for a long time and the stated reason changed
 # four times, which is itself the interesting part of the history:
 #
-#   * too slow -- a handshake was 185 s.  That figure was a loopback total
+#   * too slow, a handshake was 185 s.  That figure was a loopback total
 #     dominated by the SERVER half, which a client never performs; the client
 #     cost is ~7 s and resumption makes a repeat connection ~0.6 s.
-#   * too big -- the pair is ~520 KB.  Not a constraint on a 4 MB machine.
-#   * nothing uses it -- `fetch` does.
+#   * too big, the pair is ~520 KB.  Not a constraint on a 4 MB machine.
+#   * nothing uses it, `fetch` does.
 #   * a chain of three or more crashes the machine.  THIS WAS WRONG and is
 #     the one worth remembering: fs-uae was being killed by SIGPIPE on the
 #     HOST when a slow handshake outlasted the peer's patience, and every
@@ -91,7 +91,7 @@ option(AMINETXDUO_BPF  "Build the bpf_* raw path and filter VM"       ON)
 
 # The SANA-II receive probe: how many CMD_READs the device still held at each
 # wake, and whether the TCP sequence space is already holed where the frame is
-# handed to NetX Duo. Off, and a measurement build only -- it costs two
+# handed to NetX Duo. Off, and a measurement build only, it costs two
 # ReadEClock() calls per drain and reports through the serial log.
 option(AMINETXDUO_RXPROBE "Instrument the SANA-II receive path"       OFF)
 if(AMINETXDUO_RXPROBE)
@@ -108,7 +108,7 @@ endif()
 # mDNS (RFC 6762).  On by default, and it pairs with the RFC 3927 link-local
 # work: a machine that fell back to 169.254.x.x has an address nothing on the
 # network can name, which is the hole this fills.  Global for the same reason
-# AMINETXDUO_BPF is -- the netstack's mDNS attachment and the resolver's
+# AMINETXDUO_BPF is, the netstack's mDNS attachment and the resolver's
 # ".local" branch are compiled out without it, and two objects that disagreed
 # about whether the module exists would disagree about netstack_resolve().
 option(AMINETXDUO_MDNS "Build the mDNS responder and .local resolver" ON)
@@ -119,14 +119,14 @@ endif()
 # The ARexx host on the AMITCP port: the QUERY/SET variable space and the
 # process that services it.  Off, netstack.c creates the port as a bare public
 # MsgPort instead, so `WaitForPort AMITCP` in S:User-Startup still returns and
-# a Shell command can still see that a stack is running -- that part is the
+# a Shell command can still see that a stack is running, that part is the
 # convention every stack since AmiTCP has followed and is not optional.
 #
 # What goes with it is the 8 KB process stack, which is the part that matters
 # on a 1 MB machine, and the answer to a script that sends commands: with no
 # host servicing the port, `ADDRESS AMITCP` waits for a reply that never
-# comes.  31 of the 2,149 archives in docs/RESEARCH.md 75 do that -- AmiTCP's
-# own stopnet and netstat among them -- so this is off only in the floor tier,
+# comes.  31 of the 2,149 archives in docs/RESEARCH.md 75 do that, AmiTCP's
+# own stopnet and netstat among them, so this is off only in the floor tier,
 # where those are not installed.
 option(AMINETXDUO_AREXX "Build the ARexx host on the AMITCP port" ON)
 if(AMINETXDUO_AREXX)
@@ -137,7 +137,7 @@ endif()
 #
 # OFF in every shipping build, this one included.  Nothing on a normal machine
 # captures the serial port, so the strings are written and never read, and
-# they are the largest single thing a build can drop -- 12,820 bytes on the
+# they are the largest single thing a build can drop, 12,820 bytes on the
 # 68000 floor tier, more than the ARexx host.  Off,
 # include/aminetxduo/compat.h compiles AMI_ERROR/WARN/INFO to a branch the
 # optimiser removes, arguments still type-checked.
@@ -151,7 +151,7 @@ if(AMINETXDUO_LOG)
     add_compile_definitions(AMINETXDUO_LOG)
 endif()
 
-# The TCP: AmigaDOS handler -- a socket opened as a file handle, so a program
+# The TCP: AmigaDOS handler, a socket opened as a file handle, so a program
 # that speaks DOS files speaks the network without knowing this library
 # exists, and `Type TCP:host/port` works from the Shell.  AmiTCP and Roadshow
 # both shipped one.
@@ -161,6 +161,11 @@ endif()
 # reference for bsd_lib_expunge() to decline over.  Off in the floor tier,
 # where the programs that reach for a device rather than a socket are not
 # installed.
+# Symbols are stripped from the commands and the library.  -DAMINETXDUO_KEEP_SYMBOLS=ON
+# keeps them, which is what a debugging session wants; the profiler does not
+# need them, since it reads the linker map and the object files.
+option(AMINETXDUO_KEEP_SYMBOLS "Keep the symbol table in the built binaries" OFF)
+
 option(AMINETXDUO_TCPDEVICE "Build the TCP: AmigaDOS handler" ON)
 if(AMINETXDUO_TCPDEVICE)
     add_compile_definitions(AMINETXDUO_TCPDEVICE)
@@ -169,7 +174,7 @@ endif()
 # Multicast group membership, both families: nx_igmp_enable() and the five
 # IPPROTO_IP socket options, plus NX_ENABLE_IPV6_MULTICAST and the five
 # IPPROTO_IPV6 ones in an AMINETXDUO_IPV6 build.  On by default, because the
-# programs this stack exists to run -- SSDP/UPnP clients, a ported mDNS -- open
+# programs this stack exists to run, SSDP/UPnP clients, a ported mDNS, open
 # their own multicast sockets and get ENOPROTOOPT without it.  Global:
 # src/netstack/ calls nx_igmp_enable(), port/netxduo-amiga/inc/nx_user.h reads
 # this to size NX_IP, and src/bsdsocket/ carries the per-socket state; all
@@ -188,7 +193,7 @@ option(AMINETXDUO_TESTS "Build the on-Amiga test harnesses"           ON)
 
 # The SANA-II raw-framing probe posts a CMD_READ with SANA2IOF_RAW and takes it
 # straight back with AbortIO(). Commodore's a2065.device 2.16 does not abort it,
-# so ami_sana2_open() never returns -- verified under FS-UAE, 2026-07-25. Raw
+# so ami_sana2_open() never returns, verified under FS-UAE, 2026-07-25. Raw
 # framing is off by default anyway (AMI_SANA2_RAW_DEFAULT), so the probe buys
 # nothing but a hang; leave it off unless you are working on the raw path.
 option(AMINETXDUO_SANA2_PROBE_RAW "Probe SANA-II devices for raw framing" OFF)
@@ -205,7 +210,7 @@ endif()
 # be answered by measurement rather than by arithmetic on a throughput delta --
 # see the census note in src/bsdsocket/netx_call.c.
 # Build tests/perf/prof: a timer-driven PC sampler and the two binaries that
-# use it.  OFF, and it stays OFF -- it is a tool for answering where the 78%
+# use it.  OFF, and it stays OFF, it is a tool for answering where the 78%
 # of a transfer that tests/perf/perf_test.c cannot account for actually goes,
 # not something the library ships.  It adds nothing to src/.
 option(AMINETXDUO_PROFILER "Build the PC sampling profiler in tests/perf/prof" OFF)
@@ -217,7 +222,7 @@ endif()
 
 # Count how often the scheduling primitives are entered.  The PC sampler says
 # where samples land; this says how many calls they landed in, and the two
-# together give a cost per call.  OFF, and free when off -- see the counter
+# together give a cost per call.  OFF, and free when off, see the counter
 # block in port/threadx-amiga/inc/tx_port.h.
 option(AMINETXDUO_SCHEDCOUNT "Count the scheduling primitive calls" OFF)
 if(AMINETXDUO_SCHEDCOUNT)
@@ -237,7 +242,7 @@ endif()
 # instead of letting ami_bsd_tcp_window() size it from the packet pool and the
 # live socket count.  Exists so that "is the window the limiter?" can be
 # answered by building two libraries out of one tree and measuring, which is
-# how tests/trace/ settled it -- see the note on BSD_TCP_WINDOW in
+# how tests/trace/ settled it, see the note on BSD_TCP_WINDOW in
 # src/bsdsocket/bsdsocket_internal.h.  Empty means pool-derived, which is what
 # ships; 8192 reproduces the fixed window that shipped before it.
 set(AMINETXDUO_TCP_WINDOW "" CACHE STRING "Pin the TCP receive window, bytes")
@@ -257,7 +262,7 @@ if(AMINETXDUO_IP_ID_RANDOMIZATION)
 endif()
 
 # TCP keepalive's idle timer, in SECONDS.  Empty keeps NetX Duo's default of
-# 7200 -- two hours, which is BSD's and is what ships.  It exists because a
+# 7200, two hours, which is BSD's and is what ships.  It exists because a
 # two-hour timer cannot be observed inside an emulator run: the keepalive arm
 # in docs/RESEARCH.md 29 is built with 5 so that tests/tcpdrill can watch the
 # probe leave.  nx_tcp.h guards the macro with #ifndef, so this reaches it
@@ -269,7 +274,7 @@ if(NOT AMINETXDUO_TCP_KEEPALIVE_INITIAL STREQUAL "")
         NX_TCP_KEEPALIVE_INITIAL=${AMINETXDUO_TCP_KEEPALIVE_INITIAL})
 endif()
 
-# RFC 1323 window scaling.  OFF, and measured rather than assumed -- the note
+# RFC 1323 window scaling.  OFF, and measured rather than assumed, the note
 # in port/netxduo-amiga/inc/nx_user.h says what it changes (nothing this stack
 # can reach) and what it costs (NetX Duo's own guard against a window larger
 # than this machine can carry).  docs/RESEARCH.md 28.2.
@@ -324,7 +329,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/AmiNetXDuoVersion.cmake")
 # ------------------------------------------------------------ include sets --
 
 # The port headers (tx_port.h, nx_port.h, nx_user.h) must come FIRST on the
-# include path -- ThreadX and NetX Duo pick their port up by plain #include.
+# include path, ThreadX and NetX Duo pick their port up by plain #include.
 set(AMINETXDUO_PORT_INCLUDES
     "${CMAKE_CURRENT_SOURCE_DIR}/port/threadx-amiga/inc"
     "${CMAKE_CURRENT_SOURCE_DIR}/port/netxduo-amiga/inc")
@@ -360,7 +365,7 @@ endif()
 #
 # Turning the option OFF restores the vendored object and drops net68k's hook.
 # That is how the before/after measurements in docs/RESEARCH.md were taken --
-# two libraries built from one tree, differing in this one file -- and it is
+# two libraries built from one tree, differing in this one file, and it is
 # the way to bisect a suspected checksum bug from the outside.
 option(AMINETXDUO_NET68K_CHECKSUM
        "Replace NetX Duo's IP checksum with src/net68k's" ON)
@@ -402,7 +407,7 @@ target_link_libraries(netxduo_addons PUBLIC netxduo)
 if(AMINETXDUO_MDNS)
     # The mDNS module's tunables, set HERE and PUBLIC rather than in
     # port/netxduo-amiga/inc/nx_user.h, because they are the add-on's knobs and
-    # not the core's -- nx_user.h changes the layout of NX_IP and NX_PACKET for
+    # not the core's, nx_user.h changes the layout of NX_IP and NX_PACKET for
     # the whole tree, and nothing about mDNS should reach that far.  PUBLIC so
     # nxd_mdns.c and src/netstack/netstack_mdns.c cannot disagree about the
     # size of an NX_MDNS.
@@ -439,7 +444,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         # Three vendored files are dropped from their glob so that ours are
         # what the linker resolves to. Nothing about that is visible from
         # third_party/, so an upstream fix to one of them can sit in the tree
-        # with no effect on the binary -- which is how the shared TLS record
+        # with no effect on the binary, which is how the shared TLS record
         # block buffer stayed in the shipped record path after the submodule
         # was fixed. This is the alarm for the next one.
         add_test(NAME shadowed_sources
@@ -450,7 +455,7 @@ endif()
 
 # Every linked AmigaOS image is checked for the mis-resolved 32-bit PC-relative
 # branch this toolchain emits from a cross-section tail call.  It is a POST_BUILD
-# check because the wrong address exists only in the linked image -- the object
+# check because the wrong address exists only in the linked image, the object
 # file's relocation is well formed.  `ping` rebooted the machine on one of these.
 # See cmake/check-pcrel-branches.cmake and docs/RESEARCH.md §25.
 function(aminetxduo_check_pcrel target)
@@ -468,7 +473,7 @@ endfunction()
 
 # Applied to every image rather than to the ones that remembered to ask.  Four
 # CMakeLists called the function above and twenty-four others link m68k
-# executables without it -- smoke, bracket and soak among them, and those are
+# executables without it, smoke, bracket and soak among them, and those are
 # the harnesses that say whether the machine survived something.  A branch into
 # the middle of a function reboots an A1200 wherever it lands, and the four that
 # were covered were the four that had already been bitten.
@@ -522,13 +527,13 @@ add_subdirectory(src/tools)
 # Profile, the sampling profiler.  Built for every cross configuration and
 # packed in the archive: it depends on nothing in this tree, it is useful to
 # anyone with an Amiga and a program that is slower than they expected, and it
-# is the only way to see what this stack costs on real hardware -- no emulator
+# is the only way to see what this stack costs on real hardware, no emulator
 # above a 68020 has a usable cycle model.  tools/profiler/CMakeLists.txt.
 add_subdirectory(tools/profiler)
 
 if(AMINETXDUO_TESTS)
     add_subdirectory(tests)
-    # Diagnostic probes -- built, never auto-run.  Two of them crash on
+    # Diagnostic probes, built, never auto-run.  Two of them crash on
     # purpose; see tools/smoke/CMakeLists.txt.
     add_subdirectory(tools/smoke)
 endif()
