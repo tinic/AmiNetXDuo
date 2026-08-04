@@ -100,8 +100,14 @@ Karn. Landed 2026-08-03: **2883 D-SACK receive side** — read 794 -> 985 KB/s
 at 4 MB, wire retransmissions 234 -> 42, peer `TCPDSACKUndo` 0 -> 7. RFC 3708
 (sender side, consuming D-SACK to undo a spurious retransmission) is absent and
 applies to the write direction only. Landed 2026-08-04: 9293 §3.10.7.4
-TIME-WAIT (a retransmitted FIN is acknowledged and 2MSL restarted) and 1337 §4
-(a RST does not end TIME-WAIT).
+TIME-WAIT 2MSL restart, and 1337 §4 (a RST does not end TIME-WAIT).
+
+Corrected 2026-08-04 by a derived packetimpact case: the *acknowledgment* half
+of §3.10.7.4 was never missing. A retransmitted FIN is out of window by then,
+so `nx_tcp_socket_packet_process.c:233` answers it on the unacceptable-segment
+path and returns before the state switch is reached. The commit that added the
+TIME-WAIT arm said the peer got nothing back; it did. What that commit
+genuinely adds is the 2MSL restart, for a FIN still inside the window.
 
 **UDP** — 768 both directions including the IPv4 zero-checksum rule.
 
