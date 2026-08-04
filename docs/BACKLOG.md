@@ -84,7 +84,7 @@ name always misses, and a CNAME-only response yields `NX_DNS_QUERY_FAILED`.
 | UDP demux ignores the 4-tuple | `nx_udp_packet_receive.c:247` |
 | UDP checksum verified at dequeue, not enqueue | `nx_udp_socket_receive.c` |
 | `o02_duplicate_segment` fails: a duplicate of acknowledged data is not re-acked when the receive queue is non-empty | `tests/tcpdrill` |
-| `keepalive.drill` k02 and k03 fail and k04 passes vacuously. All three assert against a probe within 8 s of connect; `NX_TCP_KEEPALIVE_INITIAL` is BSD's 7200 s and nothing overrides it, so no probe is due for two hours and "no probe was sent" is the only outcome any of the three can have. The cases were written with the feature and never run. Keepalive itself is therefore untested, not broken. Testing it needs a per-socket idle interval — `TCP_KEEPIDLE`, which BSD and Linux both carry and this stack does not — since the constant is compile-time and `TcpDrill` is a separate binary | `nx_tcp.h:129`, `tests/tcpdrill/scripts/keepalive.drill` |
+| `o02`'s counterpart `d06_no_dsack_without_permission` asserted the opposite and was wrong; corrected 2026-08-04 | `tests/tcpdrill/scripts/dsack.drill` |
 | No FIN-WAIT-2 timeout. `nx_tcp_fast_periodic_processing.c:142-193` ages SYN_SENT, SYN_RECEIVED, FIN_WAIT_1, CLOSING, LAST_ACK and TIMED_WAIT — not FIN_WAIT_2 — so a socket the application has `shutdown(SHUT_WR)` and not closed sits there indefinitely. Orphans are bounded by `bsd_closing_sweep`'s 60 s deadline; sockets the caller still holds are not | `nx_tcp_fast_periodic_processing.c` |
 | `bsd_tcp_close_start()` discards every `nx_tcp_socket_disconnect()` status and returns TRUE regardless (`socket.c:823`, `:830`, `:837`). In FIN_WAIT_1 that call returns `NX_NOT_CONNECTED` and sends nothing, so the `SO_LINGER{1,0}` abortive close is a no-op; the RST that does appear comes from the `bsd_tcp_abort()` fallback after `nx_tcp_socket_delete()` answers `NX_STILL_BOUND`. Right answer, wrong route, and the caller is told it worked either way | `src/bsdsocket/socket.c:823-845` |
 
@@ -221,6 +221,13 @@ state machine is the first target · `usergroup` functional tests were added 202
   row made and not by itself a defect.
 - Stale root-level duplicates (`src/tools.h`, `stage-developer.sh`,
   `aminetxduo_lib.sfd`, `tmp_x/`) are gone. None is in the tree.
+- **Keepalive is not untested and does not need `TCP_KEEPIDLE`.** A row here
+  claimed both on 2026-08-04, from running `keepalive.drill` against a default
+  build and reading the failures as defects. `CMakeLists.txt:265-270` already
+  exposes `-DAMINETXDUO_TCP_KEEPALIVE_INITIAL=`, and the script's own header
+  names the arm it needs. Built with `=5`: **4 cases, 0 failed, 34 checks.**
+  Against a default build every case fails correctly — two hours have not
+  passed.
 
 ### Performance — measured positions
 
