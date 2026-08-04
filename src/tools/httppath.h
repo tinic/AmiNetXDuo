@@ -143,6 +143,17 @@ unsigned long http_url_escape(const char *path, char *out, unsigned long outlen)
 unsigned long http_xml_escape(const char *text, char *out, unsigned long outlen);
 
 /*
+ * Drop a trailing UTF-8 sequence that is not complete, in place.
+ *
+ * Anything collected into a fixed buffer stops where the buffer ends, which is
+ * not where a character ends: half of a two-byte sequence is not a character,
+ * and an XML document containing one is not well formed -- so a client that
+ * validates rejects the whole answer over the last byte of a lock owner's
+ * name.  Cheaper to cut the half character than to reject the name.
+ */
+void http_utf8_trim(char *text);
+
+/*
  * The Content-Type for a file name, from its suffix.  Never NULL; anything
  * unrecognised is application/octet-stream, which is what a client downloads
  * rather than tries to display.

@@ -300,6 +300,58 @@ void http_path_root(const char *given, char *out, unsigned long outlen)
         out[--n] = '\0';
 }
 
+void http_utf8_trim(char *text)
+{
+    unsigned long n;
+    unsigned long back;
+
+    if (text == 0)
+        return;
+
+    n = hp_len(text);
+
+    /* At most three continuation bytes can precede the lead of the longest
+       sequence there is, so the walk back is bounded whatever the bytes. */
+    for (back = 0; back < 4UL && back < n; back++)
+    {
+        unsigned char c = (unsigned char)text[n - 1UL - back];
+        unsigned long need;
+
+        if ((c & 0xC0) == 0x80)
+            continue;                       /* a continuation byte          */
+
+        if ((c & 0x80) == 0)
+        {
+            /* Plain ASCII, so anything walked over to reach it was a
+               continuation byte with no lead in front of it. */
+            if (back > 0UL)
+                text[n - back] = '\0';
+
+            return;
+        }
+
+        if      ((c & 0xE0) == 0xC0) need = 2UL;
+        else if ((c & 0xF0) == 0xE0) need = 3UL;
+        else if ((c & 0xF8) == 0xF0) need = 4UL;
+        else
+        {
+            /* A continuation or an invalid lead where a lead should be.  Not
+               a sequence this can complete, so it goes. */
+            text[n - 1UL - back] = '\0';
+            return;
+        }
+
+        if (back + 1UL < need)
+            text[n - 1UL - back] = '\0';
+
+        return;
+    }
+
+    /* Four continuation bytes and no lead: nothing here is a character. */
+    if (n >= 4UL)
+        text[n - 4UL] = '\0';
+}
+
 const char *http_path_error(HttpPathResult why)
 {
     switch (why)

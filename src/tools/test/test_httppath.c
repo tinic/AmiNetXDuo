@@ -530,6 +530,69 @@ static void test_root_trimmed(void)
     }
 }
 
+/*
+ * A lock owner is collected into a fixed buffer and handed back inside a
+ * <D:owner> in a document declared UTF-8.  Half a character in it is not a
+ * character, and a client that validates rejects the whole answer over it.
+ */
+static void test_utf8_trim(void)
+{
+    char text[16];
+
+    printf("a UTF-8 sequence cut off by the buffer\n");
+
+    /* Nothing to do. */
+    strcpy(text, "plain");
+    http_utf8_trim(text);
+    CHECK_STR(text, "plain");
+
+    strcpy(text, "");
+    http_utf8_trim(text);
+    CHECK_STR(text, "");
+
+    /* Complete sequences are left alone: two, three and four bytes. */
+    strcpy(text, "Bj\xc3\xb6rn");
+    http_utf8_trim(text);
+    CHECK_STR(text, "Bj\xc3\xb6rn");
+
+    strcpy(text, "a\xe2\x82\xac");             /* a euro sign               */
+    http_utf8_trim(text);
+    CHECK_STR(text, "a\xe2\x82\xac");
+
+    strcpy(text, "a\xf0\x9f\x98\x80");         /* four bytes                */
+    http_utf8_trim(text);
+    CHECK_STR(text, "a\xf0\x9f\x98\x80");
+
+    /* And the cut ones go, at every length and every point in the sequence. */
+    strcpy(text, "Bj\xc3");                    /* half of two              */
+    http_utf8_trim(text);
+    CHECK_STR(text, "Bj");
+
+    strcpy(text, "a\xe2");                     /* one of three             */
+    http_utf8_trim(text);
+    CHECK_STR(text, "a");
+
+    strcpy(text, "a\xe2\x82");                 /* two of three             */
+    http_utf8_trim(text);
+    CHECK_STR(text, "a");
+
+    strcpy(text, "a\xf0\x9f\x98");             /* three of four            */
+    http_utf8_trim(text);
+    CHECK_STR(text, "a");
+
+    /* A continuation byte with no lead is not a character either. */
+    strcpy(text, "a\x82");
+    http_utf8_trim(text);
+    CHECK_STR(text, "a");
+
+    /* It never runs off the front of a string that is all continuations. */
+    strcpy(text, "\x82\x82\x82\x82\x82");
+    http_utf8_trim(text);
+    CHECK(strlen(text) < 5);
+
+    http_utf8_trim(NULL);
+}
+
 /* ------------------------------------------------------------- the walk --- */
 
 static void test_join(void)
@@ -748,6 +811,7 @@ int main(void)
     test_resolved_shape();
     test_long_name_refused();
     test_root_trimmed();
+    test_utf8_trim();
     test_join();
     test_up();
     test_within();
