@@ -28,7 +28,7 @@ ROOT=${1:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}
 
 # vendored path : sha256 it was reconciled at : what shadows it
 MANIFEST='
-third_party/netxduo/nx_secure/src/nx_secure_tls_record_payload_encrypt.c:3b5b8cc8d01dd1101b7a6acac9c963213e7bcca4160fdad3051657dd33230575:src/tls/rfc7905/nx_secure_tls_record_payload_encrypt.c
+third_party/netxduo/nx_secure/src/nx_secure_tls_record_payload_encrypt.c:e4dbffdd5172b1cf2d1c35c6e0c4666a85637006a6936eb7f737eecdbeb31703:src/tls/rfc7905/nx_secure_tls_record_payload_encrypt.c
 third_party/netxduo/nx_secure/src/nx_secure_tls_record_payload_decrypt.c:377035a8b7fa0bd26d277eeb85c7d8a5882129228a1adfd16ff5b2bf6156bd32:src/tls/rfc7905/nx_secure_tls_record_payload_decrypt.c
 third_party/netxduo/common/src/nx_ip_checksum_compute.c:80de6d00317ac27ddbcc1679d7496c057af1f43abeeea28ed11a8053ff929a80:src/net68k/n68k_checksum.c
 '

@@ -34,6 +34,11 @@
 
 #include "nx_secure_tls.h"
 
+/* NX_CRYPTO_RBG's default expansion, for the CBC explicit IV below.  nx_crypto.h
+   defines the macro but not the function it names, and nx_secure_tls.h does not
+   reach this header on its own. */
+#include "nx_crypto_huge_number.h"
+
 static UINT _nx_secure_tls_record_data_encrypt_init(NX_SECURE_TLS_SESSION *tls_session, NX_PACKET *send_packet,
                                                     ULONG sequence_num[NX_SECURE_TLS_SEQUENCE_NUMBER_SIZE],
                                                     UCHAR record_type, UINT *data_offset,
@@ -684,6 +689,22 @@ UINT                                  message_length;
 
                 /* Packet buffer too small. */
                 return(NX_SECURE_TLS_PACKET_BUFFER_TOO_SMALL);
+            }
+
+            /* Draw the explicit IV fresh.  RFC 5246 6.2.3.2 requires it to be
+               "chosen at random ... and MUST be unpredictable"; what `iv` holds
+               on entry is the last ciphertext block of the previous record,
+               which the attacker has already watched go past.  That is the
+               TLS 1.0 chaining the explicit IV exists to replace, and leaving
+               it in place puts a TLS 1.1 or 1.2 connection back inside BEAST's
+               reach: an attacker who can get chosen plaintext into the stream
+               and knows the next IV can test a guess at a secret byte one
+               block at a time. */
+            status = NX_CRYPTO_RBG((UINT)(iv_size << 3), iv);
+
+            if (status != NX_CRYPTO_SUCCESS)
+            {
+                return(status);
             }
 
             /* IV size is equal to the AES block size. Copy our IV into our data buffer
