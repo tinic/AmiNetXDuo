@@ -1,0 +1,65 @@
+# tcpdrill -- an abortive close from a half-closed socket.
+#
+# c09 and c10 in tcp.drill assert the two abortive closes -- unread data, and
+# SO_LINGER with a zero timeout -- from ESTABLISHED, and both pass.  Neither
+# says anything about a socket that has already sent its FIN, which is where
+# every program that does shutdown(SHUT_WR) and then decides to give up ends up.
+#
+# nx_tcp_socket_disconnect() refuses every state past CLOSE-WAIT, so from
+# FIN-WAIT-1 or FIN-WAIT-2 the call that was meant to send the RESET returned
+# NX_NOT_CONNECTED and sent nothing, and bsd_tcp_close_start() returned "the
+# socket is finished with" either way.
+#
+# THE SEQUENCE NUMBER IS 2, NOT 1.  The FIN occupies one, so the RESET this side
+# sends carries SND.NXT = ISN + 2.  That is the difference between these two
+# cases and c09/c10, and the reason they are worth having: a RESET at 1 would be
+# a sequence number the peer has already acknowledged.
+#
+# NEITHER CASE HAS EVER BEEN RUN.
+#
+# SPDX-License-Identifier: MIT
+
+# SO_LINGER{1,0} after shutdown(SHUT_WR).  The FIN has gone and been
+# acknowledged, so the socket is in FIN-WAIT-2; the close must still be a RESET.
+case l01_linger_zero_after_shutdown_wr_resets
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+opt linger 0
+shutdown wr
+tx FA seq=1 ack=1
+rx A seq=1 ack=2
+close within=200
+tx R seq=2
+
+# RFC 1122 4.2.2.13, the same state reached the other way: the peer sent data
+# after this side half-closed, nothing read it, and the close must not pretend
+# it was delivered.
+case l02_unread_data_after_shutdown_wr_resets
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+shutdown wr
+tx FA seq=1 ack=1
+rx A seq=1 ack=2
+rx PA seq=1 ack=2 len=50
+tx A seq=2 ack=51 within=400
+close within=200
+tx R seq=2
+
+# The control, and the case that already passed: from ESTABLISHED the FIN has
+# not gone, so the RESET carries 1.  Here so that a failure in l01 can be read
+# as "the half-closed path" rather than "the abortive close".
+case l03_linger_zero_from_established_still_resets
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+opt linger 0
+close within=200
+tx R seq=1
