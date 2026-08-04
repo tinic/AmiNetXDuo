@@ -40,6 +40,31 @@ git log; what it declined is under *Decided against*; what it disproved is under
 | **`HOST_TEST_TARGETS` count guard does not catch an unbuilt target** | It compares registered tests against targets, and a test registers whether or not its target was built, so five went to `main` reporting Not Run | `tools/ci.sh:207-211` |
 | **EKU, nameConstraints and critical-extension rejection, together** | Accepting a certificate that marks nameConstraints critical while not enforcing it is exactly the failure the critical bit exists to prevent, so doing one without the others is worse than doing none. The known-critical set must be `{basicConstraints, keyUsage, subjectAltName, extendedKeyUsage}`, Let's Encrypt intermediates mark EKU critical. Untestable without hardware | `nx_secure_x509_extension_find.c:191` |
 
+### Host-testing `src/bsdsocket` and `src/tools`, a measured plan
+
+Spiked 2026-08-04. `bsdsocket_internal.h` reaches `tx_api.h`, `nx_api.h` and
+thirteen Amiga headers. ThreadX and NetX Duo both ship Linux ports that satisfy
+the first two; the thirteen are stubs, and once they exist the compile stops on
+eight incomplete types, all public and stable: `Library`, `List`, `MinList`,
+`MinNode`, `Node`, `SignalSemaphore`, `timerequest`, `Task`. `in_pktinfo` and
+`in6_pktinfo` collide with the host's `netinet/in.h` and need excluding.
+
+So the cost is one shim of a few hundred lines, after which any file in
+`src/bsdsocket` compiles natively. `tests/sana2/host/shim` (179 lines) and
+`src/config/test/shim` are the precedents, and their own comments say the
+difference between them is deliberate, so this is a third rather than a merge.
+
+| Phase | What | Why in this order |
+|---|---|---|
+| 0 | The shim, under `tests/bsdsocket/host/shim` | Everything below is blocked on it and nothing else is |
+| 1 | `inet.c` (474), `cmsg.c` (882), `errno.c` (917) | Pure conversion, buffer walking and a mapping table. `cmsg.c` holds the known `IPV6_DSTOPTS`/`IPV6_PKTINFO` collision, which no test would currently catch |
+| 2 | `bsd_route_mtu()`, `bsd_udp_maxdgram()`, `bsd_udp_from_peer()`, `routing.c`, `addrinfo.c` | Where the 2026-08-04 defects were. The EMSGSIZE arithmetic and the 4-tuple filter are both pure functions over structures |
+| 3 | Extract httpd's `If` header and lock evaluation as `httppath.c`, `httpif.c` and `httpframe.c` were extracted | That is where the WebDAV work landed, and where a drill case asserted the wrong thing about `If` scoping |
+| 4 | `tls_resume.c` expiry, `tls_conn.c` alert-versus-FIN | Both changed 2026-08-04, neither host-tested |
+
+Not started: the twenty-five commands other than httpd. Their `ReadArgs`
+templates are the testable part and are worth a pass of their own.
+
 ### Performance, measured positions
 
 **Where transfer time goes.** Sampling profiler, `tools/profiler/`, 1 MB TCP,
