@@ -672,6 +672,16 @@ int main(int argc, char **argv)
             tool_printf("Nothing answered in %lu second%s.\n",
                         (LONG)seconds, (LONG)plural(seconds));
 
+        if (!quiet)
+        {
+
+            if (type != NULL)
+            {
+            }
+            else if (all && ntypes != 0)
+            {
+            }
+        }
 
         rc = RETURN_WARN;
     }
@@ -688,6 +698,9 @@ int main(int argc, char **argv)
          * only on a cold cache.
          */
 
+        if (type == NULL && !all)
+        {
+        }
 
         /*
          * A type the meta-query turned up and no instance answered for. The
@@ -716,8 +729,14 @@ int main(int argc, char **argv)
             if (!first)
                 tool_printf("\n");
 
+            if (capped)
+            {
+            }
         }
 
+        if (svc_answer.hdr.nsh_Available > svc_answer.hdr.nsh_Count)
+        {
+        }
     }
 
     if (broke)

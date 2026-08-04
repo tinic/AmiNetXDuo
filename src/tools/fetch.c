@@ -491,6 +491,12 @@ static LONG fetch_run(VOID)
                  * one sends them after a file that does not exist.  One binary
                  * serves every CPU, so the check can only happen at run time.
                  */
+                if ((SysBase->AttnFlags & AFF_68020) == 0)
+                {
+                }
+                else
+                {
+                }
 
                 rc = RETURN_FAIL;
                 break;
@@ -558,6 +564,9 @@ static LONG fetch_run(VOID)
                 tool_error("%s: %s", (LONG)u.host,
                            (LONG)TLSErrorString(tbase, why));
 
+                if (why == TLS_ERR_TRUSTSTORE)
+                {
+                }
                 else if (why == TLS_ERR_UNTRUSTED || why == TLS_ERR_HOSTNAME ||
                          why == TLS_ERR_EXPIRED)
                 {

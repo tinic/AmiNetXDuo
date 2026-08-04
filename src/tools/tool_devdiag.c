@@ -312,6 +312,9 @@ VOID tool_explain_no_interfaces(VOID)
             tool_printf("      %-24s (%s)\n", (LONG)dev->name, (LONG)dev->where);
         }
     }
+    else
+    {
+    }
 }
 
 LONG tool_find_interface(const char *name)

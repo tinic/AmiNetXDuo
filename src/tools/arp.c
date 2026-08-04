@@ -679,6 +679,7 @@ int main(int argc, char **argv)
             {
                 tool_error("%s was not added to the cache",
                            (LONG)address_text);
+
                 tool_netstatus_close(base);
                 FreeArgs(rda);
                 return RETURN_FAIL;
