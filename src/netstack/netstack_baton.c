@@ -166,6 +166,45 @@ static AmiBatonSlot *ami_baton_claim(struct Task *task)
 }
 
 /*
+ * The table is a file static, so it outlives the stack it describes. Every
+ * bs_Thread in it points into the NX_IP that ami_ns_destroy() has just freed,
+ * and a slot left behind by a Task that died mid-bracket keeps that pointer:
+ * the next Task Exec puts at the same address inherits the slot, and its
+ * acquire() hands the dangling TX_THREAD to tx_thread_resume().
+ *
+ * Called once tx_amiga_kernel_stop() has reported success, so no bracket can be
+ * open and no thread exists to be tracked. That bounds the leak REENTRANCY.md
+ * records to one stack lifetime instead of one seglist's; it does not fix it,
+ * which still needs a liveness test for a struct Task * that Exec does not
+ * offer cheaply.
+ */
+VOID ami_netstack_baton_reset(VOID)
+{
+    UWORD i;
+    UWORD held = 0;
+
+    Forbid();
+
+    for (i = 0; i < AMI_BATON_SLOTS; i++)
+    {
+        if (ami_baton_slot[i].bs_Task != NULL)
+            held++;
+
+        ami_baton_slot[i].bs_Task    = NULL;
+        ami_baton_slot[i].bs_Thread  = NULL;
+        ami_baton_slot[i].bs_Nesting = 0;
+    }
+
+    ami_baton_stats.bs_Live = 0;
+
+    Permit();
+
+    if (held != 0)
+        AMI_WARN("netstack: %ld baton slot(s) still held at shutdown; a task "
+                 "died inside a release/acquire bracket", (LONG)held);
+}
+
+/*
  * _tx_thread_system_state is one global counter and every Task reads it.  A
  * window in which it is raised with task switching enabled makes every other
  * Task look like an ISR, and a blocking ThreadX service entered on one comes
