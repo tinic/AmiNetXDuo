@@ -1757,6 +1757,13 @@ VOID netstack_shutdown(VOID)
             AMI_ERROR("netstack: tx_amiga_kernel_stop failed (%ld) -- ThreadX "
                       "Tasks are still running; do not unload", (LONG)txstatus);
         }
+        else
+        {
+            /* Every TX_THREAD the slot table still names died with the kernel,
+               and the table outlives the stack. Only on success: on anything
+               else a thread may still be inside a bracket. */
+            ami_netstack_baton_reset();
+        }
     }
 
     ReleaseSemaphore(&ami_ns_lock);

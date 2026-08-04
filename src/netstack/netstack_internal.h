@@ -291,6 +291,10 @@ VOID ami_netstack_health_unpublish(VOID);
  */
 VOID ami_netstack_baton_set_sampler(VOID (*fn)(VOID));
 
+/* Wipe the slot table. Only valid once ThreadX has stopped; netstack_baton.c
+   says what it is for. */
+VOID ami_netstack_baton_reset(VOID);
+
 /* ---------------------------------------------------------- adoption glue --
  *
  * AmiNetCaller / ami_netstack_enter() / ami_netstack_leave() are public; they
