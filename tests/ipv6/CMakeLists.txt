@@ -145,4 +145,29 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME ipv6_ptb COMMAND test_ipv6_ptb)
 
+    # Inbound fragment reassembly, the queue and the sweep under it, and the
+    # pool reserve that bounds what a datagram which never completes can hold.
+    # Same shim.  A lab network will not drop the tail of a datagram on cue,
+    # nor arrive with the pool already spent.
+
+    add_executable(test_ipv6_frag
+        host/test_ipv6_frag_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ipv6_process_fragment_option.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_fragment_assembly.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_fragment_timeout_check.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ipv6_util.c")
+
+    target_include_directories(test_ipv6_frag PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_ipv6_frag PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME ipv6_frag COMMAND test_ipv6_frag)
+
 endif()

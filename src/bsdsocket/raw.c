@@ -675,10 +675,10 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
     /*
      * The same test bsd_send_udp() makes, one header shorter, and made here
      * because IP_HDRINCL has by now taken the caller's header off and settled
-     * the destination. Nothing calls nx_ip_fragment_enable(), so a datagram
-     * longer than the egress MTU is dropped in _nx_ip_driver_packet_send()
-     * after the send call has already answered NX_SUCCESS: the caller was told
-     * its ping or its traceroute probe went out when nothing left the machine.
+     * the destination. Transmit fragmentation is available -- src/netstack/
+     * calls nx_ip_fragment_enable() for the receive side -- and deliberately
+     * not used here: a raw sender asking for more than the path carries wants
+     * to be told so, which is what its ping or its traceroute probe is for.
      * IP options are not carried on this path, so 20 and 40 are exact.
      */
     {
