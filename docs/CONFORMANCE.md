@@ -15,22 +15,14 @@ ours = `src/`, `port/`, `include/`.
 |---|---|---|---|
 | 8200 §5 | IPv6 requires a link MTU of at least 1280 | `sana2_device.c:183-201` takes the device figure; `:624-634` applies `MTU=` downwards with no bound | `MTU=576` on an IPv6-enabled interface is accepted |
 | 1122 §3.3.2 / 8504 §5.1 | MUST reassemble; EMTU_R ≥ 576 | `nx_ip_fragment_enable()` never called; drops at `nx_ipv4_packet_receive.c:640`, `nx_ipv6_process_fragment_option.c:95-99` | Inbound fragments dropped, both families |
-| 1122 §3.2.2.1, §4.1.3.3 | ICMP errors MUST reach transport / application | `nx_icmpv4_packet_process.c:143-171` handles echo only | Connected UDP to a closed port blocks to timeout instead of `ECONNREFUSED`. No IPv4 PMTUD input |
 | 9777 §6 | MLD reports MUST be sent for scope ≥ 2 | `nx_mld.h` is a 48-line stub; joins set a MAC filter only, `nx_ipv6_multicast_join.c:79-95` | Solicited-node groups are scope 2. Behind a snooping switch with an active querier, ND fails |
 | 1122 §4.2.3.5 (MUST-23) | R2 for SYN ≥ 3 minutes | `nx_user.h:201,204` → ladder 1+2+4+…+64 = 127 s | 127 s < 180 s. Fix is `NX_TCP_MAXIMUM_RETRIES 7` → 255 s, at the cost of `connect()` blocking that long |
 | 5961 §3, §4 | Challenge ACK required for in-window RST and SYN | `nx_tcp_socket_packet_process.c:234-248`, `:257-271`; RST at any sequence accepted when `RCV.WND==0` at `:165-167` | One in-window guess resets an established connection |
 | 1122 §4.2.3.10 (MUST-57) | SYN to broadcast/multicast MUST be discarded | `nx_ipv4_packet_receive.c:529-550` → `nx_ip_dispatch_process.c:459-476`; only source is checked, `nx_tcp_packet_process.c:517-542` | Broadcast SYN answered. Composes with one half-open slot per listener (`socket.c:1729-1730`), pinning a port for 127 s |
 | 1122 §4.2.3.4 (MUST-38) | Sender SWS avoidance | `nx_tcp_socket_send_internal.c:455-470`, no minimum-usable-window gate | Undersized segments are sent when the peer advertises small window increments. Nagle also absent |
 | 1122 §4.1.3.5 | UDP demux MUST match the 4-tuple | `nx_udp_packet_receive.c:247` compares port only; no local-address field in `NX_UDP_SOCKET` | A `connect()`ed UDP socket accepts datagrams from any peer |
-| 5452 §9.1 | Response MUST match 6 attributes | ID `nxd_dns.c:4306`; source never checked; question check gated on `QDCOUNT==1` at `:4497` | QDCOUNT=0 skips name, type and class. No source validation |
 | 2181 §5.4.1 | AUTHORITY data must not be returned as answers | `nxd_dns.c:4803-4805`, cached under the RR's own owner at `:4866` | One response inserts an A record for a name never queried |
-| 2181 §8 | TTL with the top bit set treated as zero | `nxd_dns.c:8102` stores raw 32-bit | ~68-year cache entry. Second route: tick-division at `:9117`, `:9137` |
-| 2131 §4.4.1 / 5227 §2.1 | ARP probe before use; DHCPDECLINE on conflict | `NX_DHCP_CLIENT_SEND_ARP_PROBE` defined nowhere; test phase `#ifdef`'d out | Duplicate address taken silently. Upstream code exists behind one define |
-| 6762 §3 | `.local` MUST go to 224.0.0.251 | guard at `netstack_dns.c:244-258` is IPv4 only; `netstack_resolve6()` at `:401-446` has none, and `addrinfo.c:476` calls it first | `.local` leaks to the unicast resolver in the default build |
-| 6762 §4 | `254.169.in-addr.arpa.` MUST go to mDNS | `netstack_dns.c:367-398` sends all reverse to unicast | Link-local reverse lookups leak. Fix is an immediate negative; vendored mDNS has no address→name API |
 | 8504 §6.6 / 6724 §5 | RFC 6724 source selection MUST be implemented | `nxd_ipv6_interface_find.c:73-300` is a first-match walk | No candidate set, no policy table, none of Rules 1/2/3/6/7/8 |
-| 4862 §5.5.3 | A-bit governs address formation | `nx_icmpv6_process_ra.c:310` opens on the L-bit; A-test at `:332` is nested inside | Prefix advertised A=1 L=0 forms no address |
-| 7559 / 8504 §5.4 | RS retransmission MUST use exponential backoff | fixed 4 s, stop after 3: `nxd_ipv6_router_solicitation_check.c:86-107` | Boot before the router → no global address until the next unsolicited RA |
 | 5280 §4.2 | Unrecognized critical extension MUST be rejected | flag written `nx_secure_x509_extension_find.c:191`, read nowhere; lookup is by OID, never an enumeration | nameConstraints and any other critical extension silently ignored |
 | 6125 §6.4.4 | MUST NOT match CN when a DNS-ID is present | `nx_secure_x509_common_name_dns_check.c:92-97` compares CN first and returns | Cert whose CN matches and SAN does not is accepted |
 | 5280 §6.1.3 | Revocation | no call to the CRL code that exists | Stolen key usable indefinitely |
@@ -50,17 +42,9 @@ Not detectable by the caller.
 
 | Interface | Behaviour | Cite |
 |---|---|---|
-| `SBTC_FDCALLBACK` | stored, never invoked | `errno.c:386`, `library.c:281` |
-| `SBTC_SIG_ADDRESS_CHANGE_MASK` | stored, never signalled | `bsdsocket_internal.h:441-444` |
 | `SBTC_CAN_SHARE_LIBRARY_BASES` | never written, never read | `library.c:270` |
 | `SO_REUSEADDR/REUSEPORT/BROADCAST/OOBINLINE/SNDBUF` | success, no effect | `options.c:105-122`, `:148-189` |
 | `SO_RCVBUF` on TCP | calls a function compiled out without `NX_ENABLE_LOW_WATERMARK`; status discarded | `options.c:171-178` |
-| `TCP_NODELAY` | success before checking `optval`/`optlen`/type; succeeds on UDP | `options.c:221-223` |
-| `IPV6_UNICAST_HOPS`, `IPV6_TCLASS`, `IP_TOS` on TCP and UDP | stored, echoed, applied on raw only | `in6.c:279-308`, `raw.c:559`, `socket.c:1354`, `:1366` |
-| `IP_TTL` = 256 | succeeds, reads back 256, puts 0 on the wire | `options.c:139-145`; IPv6 siblings are range-checked |
-| `SO_ERROR` | zeroed before a copy-out that can fail | `options.c:161-162` |
-| multicast `optlen` 2 | not handled; big-endian reads the high byte | `mcast.c:313-338` |
-| `SO_LINGER` negative | infinite tick count, `CloseSocket()` blocks forever | `options.c:254-276` |
 | `IPV6_DSTOPTS` (BSD 50) | taken as `IPV6_PKTINFO`; reads `struct in6_pktinfo` from the caller's buffer | `cmsg.c` Linux aliases 49/50/51 collide with `IPV6_HOPOPTS`/`DSTOPTS`/`RTHDR`. Unfixed |
 | `DAV: 1,2` | class claim; §18.1 needs all Class 1 MUSTs (PROPFIND body gap) and §18.2 needs §6-§10 (LOCK on unmapped URL, Depth-0 collection) | `httpd.c:3132`, `:3219`. Advertising `DAV: 1` is honest but Finder reads it as read-only |
 
@@ -115,13 +99,20 @@ MSS option handling. Landed 2026-08-02: 2018 SACK receive side, 6298 RTO with
 Karn. Landed 2026-08-03: **2883 D-SACK receive side** — read 794 -> 985 KB/s
 at 4 MB, wire retransmissions 234 -> 42, peer `TCPDSACKUndo` 0 -> 7. RFC 3708
 (sender side, consuming D-SACK to undo a spurious retransmission) is absent and
-applies to the write direction only.
+applies to the write direction only. Landed 2026-08-04: 9293 §3.10.7.4
+TIME-WAIT (a retransmitted FIN is acknowledged and 2MSL restarted) and 1337 §4
+(a RST does not end TIME-WAIT).
 
 **UDP** — 768 both directions including the IPv4 zero-checksum rule.
 
 **IPv4/link** — 826 ARP with the 5227 §2.4 defence, martian-source filtering,
 894 encapsulation, ICMP echo server with broadcast echo discarded,
 **IGMPv2 in full** (Router Alert, TTL 1, report suppression, Leave).
+
+**ICMP** — 1122 §3.2.2.1 and §4.1.3.3 (a Destination Unreachable reaches the
+transport that drew it), 4443 §2.4(e.3) (no error for a packet sent to a
+multicast group) and §2.4(f) (a token bucket bounds the rate errors are
+originated at). Landed 2026-08-04.
 
 **IPv6** — 4291 §2.8 required address set, SLAAC with DAD at three probes,
 NUD five-state machine, hop limit 255 on all ND, 5095 RH0 refusal, Parameter
@@ -134,7 +125,11 @@ to a Packet Too Big (`nx_icmpv6_dest_table_find.c`). Retry interval 600 s
 against a 5-minute minimum. Cost: +1,112 B of library, +36 B per `NX_IP`;
 read throughput 368.0 -> 365.0 KB/s, inside a 2.4-3.0% within-arm spread.
 
-**DNS/mDNS/DHCP/SNTP** — 2131 T1/T2 renewal, 5452 §9.2 (16-bit ID + 14-bit port
+**DNS/mDNS/DHCP/SNTP** — 5452 §9.1 (an answer is taken only from the server it
+was asked of, carrying the question it answers), 2181 §8 (the TTL sign bit is
+masked), 6762 §3 (.local and 254.169.in-addr.arpa never reach a unicast server,
+in every build), 5227 §2.3 (the address is announced) and §2.4 (a conflict is
+reported), 2131 T1/T2 renewal, 5452 §9.2 (16-bit ID + 14-bit port
 = 30 bits, off the DRBG), compression-pointer handling with bounds checks and a
 pointer cap, 6762 §11 source checks and §8/§9/§10.1 probe-conflict-goodbye,
 6763 DNS-SD publication, 5905 §14 SNTP including the originate-timestamp echo.

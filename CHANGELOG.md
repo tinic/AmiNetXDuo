@@ -7,6 +7,17 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
+## Unreleased
+
+- A program that sends to a closed port is told so instead of waiting out its timeout. ICMP error messages never reached the sockets that caused them, so a UDP send to a port with nothing listening blocked until it gave up, and a TCP connection to an unreachable host did the same
+- A name ending in `.local` is no longer sent to the name server the router handed out. It leaked on the IPv6 path always, and on every path in the smallest build, which published the names of machines on the local network to whoever runs that server. A reverse lookup of a self-assigned `169.254` address leaked the same way and timed out once per line in `ShowNetStatus` and `netstat`
+- A reply to a name lookup is accepted only from the server it was asked of, and only if it carries the question it answers. Either one missing was enough for a forged reply that guessed a sixteen-bit number to be believed and cached
+- A cached name is no longer held for sixty-eight years when a server sends a time-to-live with its top bit set
+- The address a DHCP server hands out is announced on the network, so other machines reach it at once instead of after their own records expire. If another machine is already using it, that is now reported rather than silently worked around
+- A program can ask to be signalled when the machine's address changes -- a lease arriving, changing or being lost -- rather than polling for it
+- Closing a connection is quicker when the last acknowledgement is lost: the far end's repeated goodbye is now answered instead of ignored, where before it retransmitted until its own timer ran out
+- A machine that is sent a stream of packets it must refuse no longer answers every one of them, which was a way to make it flood a third party, and answers none at all to a packet sent to a group address
+
 ## 0.16.9
 
 - `bsdsocket.library` is 16 KB smaller. It was writing diagnostic messages to the serial port on every build, and nothing on an ordinary machine is listening to that port. Reporting a fault now needs a build made for it, which the developer documentation explains

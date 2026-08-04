@@ -32,8 +32,6 @@ shared static is never written and `netdb.c:45` records that as the reason.
 
 | Item | Cite |
 |---|---|
-| `SBTC_FDCALLBACK` stored and never invoked, so a program cannot learn that a socket was created or closed | `errno.c:398`, `library.c:282` |
-| `SBTC_SIG_ADDRESS_CHANGE_MASK` stored and never signalled; the address-change callbacks it would ride on already exist (`netstack.c`, the DHCP and AutoIP hooks) | `errno.c:406`, `library.c:271` |
 | `SO_REUSEADDR`, `SO_REUSEPORT`, `SO_BROADCAST` and `SO_OOBINLINE` set a flag that nothing reads: `ASF_REUSEADDR`, `ASF_BROADCAST` and `ASF_OOBINLINE` appear in `options.c` only | `options.c:175-205` |
 
 **Resolver**
@@ -47,16 +45,11 @@ shared static is never written and `netdb.c:45` records that as the reason.
 
 | Item | Cite |
 |---|---|
-| No source-address validation; `nx_udp_source_extract` unused by `addons/dns` though `tftp`/`snmp`/`BSD` use it | `nxd_dns.c:4279-4360` |
-| QDCOUNT=0 skips name, type and class checks | `:4497` |
 | AUTHORITY records accepted as answers, cached under their own owner | `:4803-4805`, `:4866` |
-| TTL sign bit unmasked → ~68-year entry | `:8102` |
 | Elapsed TTL by integer tick division; `last_used` reset on hit | `:9117`, `:9137` |
 | TC ignored, no TCP fallback, no EDNS0. `NX_DNS_TC_FLAG` defined, never read | `nxd_dns.h:124` |
 | Reverse path validates only the ID | `:3800-3858` |
 | Question comparison case-sensitive; cache path is not — breaks DNS-0x20 | `:4515` vs `:9933` |
-| `.local` leaks on the IPv6 path; `addrinfo.c:476` calls it first | `netstack_dns.c:401-446` |
-| `254.169.in-addr.arpa.` reverse leaks; fix is an immediate negative | `netstack_dns.c:367-398` |
 
 **A bailiwick check must be implemented together with CNAME chain following.**
 CNAME processing is compiled out (`NX_DNS_ENABLE_EXTENDED_RR_TYPES` undefined),
@@ -69,8 +62,6 @@ name always misses, and a CNAME-only response yields `NX_DNS_QUERY_FAILED`.
 
 | Item | Cite |
 |---|---|
-| No gratuitous ARP after a DHCP address is set | `nx_arp_gratuitous_send()` uncalled |
-| ARP conflict defended but never reported; `nx_interface_ip_conflict_notify_handler` registered nowhere | |
 | Option 121 (classless static routes) never requested; we ask for 33 only | `netstack.c:1052`, `:1137` |
 | No RFC 3396 long-option concatenation; first fragment wins | `nxd_dhcp_client.c:7526` |
 | Option 52 (overload) unhandled | |
@@ -84,14 +75,11 @@ name always misses, and a CNAME-only response yields `NX_DNS_QUERY_FAILED`.
 | RFC 3708 (sender-side spurious-retransmission detection from received D-SACK) absent. Applies to the write direction only. The `sack-transmit` branch discards ranges at or below `SND.UNA` as "D-SACK or stale" — correct for RFC 2018, but it drops the information RFC 3708 needs | unlanded branch |
 | Broadcast SYN answered (destination unchecked) + one half-open slot per listener → port dead 127 s | `nx_tcp_packet_process.c:517-542`, `socket.c:1729-1730` |
 | RFC 5961 absent: in-window RST resets, in-window SYN resets and tears down, RST at any sequence when `RCV.WND==0` | `nx_tcp_socket_packet_process.c:234-271`, `:165-167` |
-| ICMP errors never reach TCP or UDP | `nx_icmpv4_packet_process.c:143-171` |
 | MUST-23: R2 for SYN is 127 s, needs 180. `NX_TCP_MAXIMUM_RETRIES 7` → 255 s, `connect()` blocks that long | `nx_user.h:201`, `:204` |
 | Sender SWS avoidance absent; Nagle absent | `nx_tcp_socket_send_internal.c:455-470` |
 | Receiver SWS has no `min(MSS, RCV.BUFF/2)` floor | `nx_tcp_socket_receive.c:210-218` |
 | Restart-after-idle absent; no per-socket last-send time | |
-| TIME-WAIT 2MSL not restarted on a retransmitted FIN | `nx_tcp_socket_packet_process.c:456-459` |
-| In-window RST destroys TIME-WAIT (RFC 1337) | `:234-248` |
-| Listen path sets IW = 1 MSS where the other three paths do RFC 3390 | `nx_tcp_packet_process.c:734-735` |
+| Listen path sets IW = 1 MSS (RFC 2581 §3.1). The claim that three other paths do RFC 3390 was wrong -- nothing in the tree implements it, and raising the initial window is an on-wire change this project has regressed on before, so it wants measurement rather than a patch | `nx_tcp_packet_process.c:734-735` |
 | RST-in-response-to-RST hole on the malformed-option path | `nx_tcp_socket_packet_process.c:298-332` |
 | UDP demux ignores the 4-tuple | `nx_udp_packet_receive.c:247` |
 | UDP checksum verified at dequeue, not enqueue | `nx_udp_socket_receive.c` |
@@ -107,7 +95,6 @@ name always misses, and a CNAME-only response yields `NX_DNS_QUERY_FAILED`.
 | No preferred lifetime, `NX_IPV6_ADDR_STATE_DEPRECATED` assigned nowhere — no graceful window before an address vanishes | `nx_api.h:959` |
 | No privacy addresses (8981) or opaque IIDs (7217); MAC in every global address | |
 | No RDNSS (8106) — IPv6-only link yields addresses but no DNS | `nx_icmpv6.h:68-74` |
-| No ICMPv6 error rate limiting; §2.4(e.3) enforced at one call site only | `nx_icmpv6_send_error_message.c` |
 | No 1280 MTU floor on the IPv6 path: a SANA-II device reporting less is taken at its word (`sana2_device.c:183-201`), and `MTU=` is now applied downwards without a bound (`:624-634`), so `MTU=576` with IPv6 enabled violates RFC 8200 §5 | `sana2_device.c` |
 | Raw oversize send still drops after success | `transfer.c:722-741` |
 
