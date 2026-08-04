@@ -699,16 +699,21 @@ def test_depth0_collection_lock():
     check(a is not None and a[0] == 423,
           "and so is a MKCOL inside it")
 
-    # The holder may.
+    # The holder may.  The list is TAGGED with the collection: RFC 4918
+    # 10.4.1 evaluates an untagged list against the Request-URI, and the file
+    # being created is not what the token locks, so untagged is a 412 and
+    # correctly so.  This is the form a client that locked a drawer to add to
+    # it actually sends.
     if token:
+        tag = "<http://%s:%d%s/locked/>" % (ADDR, PORT, BASE)
         a = once(req("PUT", BASE + "/locked/mine.txt",
-                     {"If": "(<%s>)" % token}, body="x"))
+                     {"If": "%s (<%s>)" % (tag, token)}, body="x"))
         check(a is not None and a[0] in (201, 204),
               "the token holder may add one (got %s)"
               % (a[0] if a else "nothing"))
 
         once(req("DELETE", BASE + "/locked/mine.txt",
-                 {"If": "(<%s>)" % token}))
+                 {"If": "%s (<%s>)" % (tag, token)}))
         once(req("UNLOCK", BASE + "/locked", {"Lock-Token": "<%s>" % token}))
 
     # And with the lock gone, anybody may again.
