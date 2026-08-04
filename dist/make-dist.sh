@@ -433,11 +433,21 @@ done
 if [ "$CAN_CREATE" = "1" ]; then
     echo "==> packing with $ARCHIVER (compressed)"
     (cd "$OUTDIR" && "$ARCHIVER" a "$ARCHIVE_NAME" AmiNetXDuo.info AmiNetXDuo)
-else
+elif [ -n "${AMINETXDUO_ALLOW_STORED:-}" ]; then
     echo "==> no archiver that can create found; using dist/lhapack.py"
     echo "    (valid LHA, but stored rather than compressed)"
     python3 "$ROOT/dist/lhapack.py" "$ARCHIVE" "$OUTDIR" \
             AmiNetXDuo.info AmiNetXDuo
+else
+    # A note here is what let every release up to 0.17.0 ship uncompressed:
+    # the fallback is fine for a local trial and is not fine for the file
+    # people download, and nothing told the difference between the two.
+    echo "!! no archiver that can create was found." >&2
+    echo "   dist/lhapack.py writes a valid archive with NOTHING compressed" >&2
+    echo "   in it, which is not what a release should be.  Install one of" >&2
+    echo "   lha, jlha or lharc -- on Debian and Ubuntu that is jlha-utils." >&2
+    echo "   AMINETXDUO_ALLOW_STORED=1 packs it stored anyway." >&2
+    exit 1
 fi
 
 # --------------------------------------------------------------- checking --

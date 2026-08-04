@@ -154,6 +154,15 @@ jobs:
         run: |
           clients/dropbear/build.sh
 
+      # An archiver that can CREATE.  Lhasa, which is what "lha" usually is on
+      # a Linux box, only extracts, and make-dist.sh then falls back to
+      # dist/lhapack.py, which writes a valid archive with nothing compressed
+      # in it.  Every release up to and including 0.17.0 shipped that way: 86
+      # files at a 100.0% ratio, 3.3 MB that should be about half of it.
+      # jlha is already one of the three make-dist.sh probes for.
+      - name: An archiver that can create
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq jlha-utils
+
       # AMINETXDUO_SSH names exactly what the step above built, so the packed
       # binary cannot be a stale tree.
       - name: Build the distribution archive
