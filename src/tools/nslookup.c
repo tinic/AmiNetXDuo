@@ -1044,7 +1044,7 @@ int main(int argc, char **argv)
     if ((flags & NSL_F_TC) != 0)
     {
         tool_printf("  the answer did not fit in a datagram%s\n",
-                    (LONG)((printed == 0) ? "" : , there is more of it));
+                    (LONG)((printed == 0) ? "" : ", there is more of it"));
         rc = RETURN_WARN;
     }
     else if (printed == 0)
