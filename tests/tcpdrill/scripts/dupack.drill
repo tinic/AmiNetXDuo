@@ -1,0 +1,63 @@
+# tcpdrill -- what an unacceptable segment is answered with.
+#
+# RFC 793 3.9 page 69: an unacceptable segment is answered with an
+# acknowledgment, unless it carries a RESET.  f7ca23ec narrowed that to segments
+# from rx_sequence - 1 onwards, because an acknowledgment identical to the last
+# one is counted as a duplicate ACK by the sender and three of those start a
+# fast retransmit.  That reasoning holds for a segment carrying nothing and
+# fails for one carrying data: the peer retransmitted because it never saw the
+# acknowledgment, so the acknowledgment is the only thing that can stop it.
+#
+# THE THREE CASES ARE THE THREE ANSWERS.  d01 is a retransmission and must be
+# acknowledged; d02 is an ancient acknowledgment and must draw nothing; d03 is a
+# probe at rx_sequence - 1 and must be answered, which is what a keepalive and a
+# zero-window probe both rely on.
+#
+# d01 restates o02_duplicate_segment from tcp.drill, so this file can be run on
+# its own and the three answers read side by side.
+#
+# NONE OF THESE CASES HAS EVER BEEN RUN.
+#
+# SPDX-License-Identifier: MIT
+
+# A hundred bytes, acknowledged, and sent again because the acknowledgment was
+# lost.  Delivered once, acknowledged twice.
+case d01_retransmitted_data_is_acknowledged_again
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=101 within=400
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=101 within=400
+recv 400 = 100
+
+# A bare acknowledgment from far behind the window carries nothing this side has
+# not already answered, and answering it would be the duplicate ACK f7ca23ec
+# measured.  Nothing goes out.
+case d02_ancient_bare_ack_draws_nothing
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=101 within=400
+rx A seq=1 ack=1
+notx 500
+
+# One byte behind the window, which is where a keepalive and a zero-window probe
+# both sit.  Drawing an acknowledgment out is their whole purpose, so this one is
+# answered even though it carries nothing.
+case d03_probe_at_the_left_edge_is_answered
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=101 within=400
+rx A seq=100 ack=1
+tx A seq=1 ack=101 within=400
