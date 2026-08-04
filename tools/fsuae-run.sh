@@ -339,7 +339,7 @@ held_dir() {
     return 0
 }
 
-slots_busy() { set, "$SLOTDIR"/*/; [ -d "$1" ] && ls -d "$SLOTDIR"/*/ 2>/dev/null | wc -l || echo 0; }
+slots_busy() { set -- "$SLOTDIR"/*/; [ -d "$1" ] && ls -d "$SLOTDIR"/*/ 2>/dev/null | wc -l || echo 0; }
 
 if [ "${AMINETXDUO_NO_LOCK:-0}" != "1" ]; then
     mkdir -p "$ROOT/build" "$SLOTDIR"
