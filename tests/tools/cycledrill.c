@@ -1096,7 +1096,17 @@ static VOID phase_expunge_cycle(LONG n, const char *iface, Sample *at_open,
     die  = tcp_die();
     gone = lib_expunge(&held);
 
-    check(die >= 0, "TCP: answered ACTION_DIE", die, 0);
+    /*
+     * A build without AMINETXDUO_TCPDEVICE has no TCP: to take down, and
+     * tcp_die() says so with -1.  That is not a weaker drill: the expunge has
+     * to succeed with no ACTION_DIE at all, and the handler process that
+     * bsd_lib_expunge() used to decline over is the thing that is gone.
+     */
+    if (die < 0)
+        check(!tcp_present(), "no TCP: on this build, so none to take down",
+              die, 0);
+    else
+        check(die >= 0, "TCP: answered ACTION_DIE", die, 0);
     check(gone, "the library expunged after its last close", (LONG)held, die);
 
     if (gone)
@@ -1128,6 +1138,20 @@ static VOID phase_tcp_restart(VOID)
     holder = OpenLibrary((CONST_STRPTR)LIB_NAME, 4UL);
     if (!check(holder != NULL, "the library opened for the TCP: restart", 0, 0))
         return;
+
+    /*
+     * The whole phase is about a static that TCP: sets, so a build without
+     * AMINETXDUO_TCPDEVICE has nothing here to get wrong.  Skipped rather than
+     * failed, and said out loud so a transcript cannot be mistaken for one
+     * that ran it.
+     */
+    if (!tcp_present())
+    {
+        say("  --: no TCP: device; the restart phase does not apply\n",
+            0, 0, 0, 0);
+        CloseLibrary(holder);
+        return;
+    }
 
     check(tcp_present(), "TCP: is there before ACTION_DIE", 0, 0);
 
