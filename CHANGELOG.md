@@ -7,7 +7,7 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
-## Unreleased
+## 0.16.10
 
 - A program that sends to a closed port is told so instead of waiting out its timeout. ICMP error messages never reached the sockets that caused them, so a UDP send to a port with nothing listening blocked until it gave up, and a TCP connection to an unreachable host did the same
 - A name ending in `.local` is no longer sent to the name server the router handed out. It leaked on the IPv6 path always, and on every path in the smallest build, which published the names of machines on the local network to whoever runs that server. A reverse lookup of a self-assigned `169.254` address leaked the same way and timed out once per line in `ShowNetStatus` and `netstat`
