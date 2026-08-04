@@ -485,7 +485,18 @@ struct AmiSocketBase
     LONG                    sb_LogStat;
     LONG                    sb_LogFacility; /* SBTC_LOGFACILITY, BSD_LOG_USER*/
     LONG                    sb_LogMask;     /* SBTC_LOGMASK, 0xFF            */
-    LONG                  (*sb_FDCallback)(LONG fd, LONG action);
+    /*
+     * SBTC_FDCALLBACK.  amitcp/socketbasetags.h states the convention:
+     *
+     *     int fd = fdCallback(int fd, int action);
+     *         D0                  D0      D1
+     *
+     * so the arguments arrive in registers rather than on the stack, and the
+     * field is typed that way.  A plain C prototype here would put them on
+     * the stack and the callee would read whatever D0 and D1 held.
+     */
+    LONG                  (*sb_FDCallback)(register LONG fd     __asm("d0"),
+                                           register LONG action __asm("d1"));
 
     /* SBTC_ERROR_HOOK: called on every errno/h_errno change. */
     struct Hook            *sb_ErrorHook;

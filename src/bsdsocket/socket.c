@@ -395,6 +395,30 @@ AmiSocket *bsd_lookup(struct AmiSocketBase *base, LONG fd)
     return base->sb_Table[fd];
 }
 
+/*
+ * SBTC_FDCALLBACK: tell the opener that a descriptor came or went.
+ *
+ * A program that keeps its own descriptor table -- net.lib's stdio wrapper is
+ * the case the tag was invented for -- registers one of these so its table and
+ * ours stay in step.  FDCB_ALLOC may refuse, and a refusal has to fail the
+ * call that was allocating: a socket the program cannot name is a socket it
+ * cannot close.
+ *
+ * FDCB_CHECK is NOT sent.  It asks the program whether a descriptor is already
+ * in use on its side, and net.lib is the only description of what the answer
+ * means; sending it with the polarity guessed would make an allocation skip
+ * every free slot or none, and the failure would look like the table being
+ * full.  ALLOC and FREE are unambiguous and are what keeps the two tables
+ * matched.
+ */
+static LONG bsd_fd_callback(struct AmiSocketBase *base, LONG fd, LONG action)
+{
+    if (base->sb_FDCallback == NULL)
+        return 0;
+
+    return base->sb_FDCallback(fd, action);
+}
+
 LONG bsd_fd_alloc(struct AmiSocketBase *base, AmiSocket *sock)
 {
     LONG fd;
@@ -407,6 +431,14 @@ LONG bsd_fd_alloc(struct AmiSocketBase *base, AmiSocket *sock)
         if (base->sb_Table[fd] == NULL)
         {
             base->sb_Table[fd] = sock;
+
+            /* Refused: give the slot back and report exhaustion, which is
+               what a caller can act on. */
+            if (bsd_fd_callback(base, fd, FDCB_ALLOC) < 0)
+            {
+                base->sb_Table[fd] = NULL;
+                return -1;
+            }
             return fd;
         }
     }
@@ -417,7 +449,13 @@ LONG bsd_fd_alloc(struct AmiSocketBase *base, AmiSocket *sock)
 VOID bsd_fd_free(struct AmiSocketBase *base, LONG fd)
 {
     if (base->sb_Table != NULL && fd >= 0 && fd < base->sb_TableSize)
+    {
         base->sb_Table[fd] = NULL;
+        /* After the slot is clear, so a callback that asks us about fd during
+           the call sees it already gone.  The return is not read: there is
+           nothing a program can refuse about a descriptor going away. */
+        (VOID)bsd_fd_callback(base, fd, FDCB_FREE);
+    }
 }
 
 /* ----------------------------------------------------------- socket objects */
