@@ -53,11 +53,11 @@
 
 const char ami_rx_err_unknown[]     = "Unknown command\n";
 const char ami_rx_err_syntax[]      = "Syntax error\n";
-const char ami_rx_err_illegal_var[] = "%s: unknown variable %s\n";
-const char ami_rx_err_illegal_ind[] = "%s: unknown index %s\n";
-const char ami_rx_err_too_long[]    = "Result too long\n";
-const char ami_rx_err_memory[]      = "Memory exhausted\n";
-const char ami_rx_err_nowrite[]     = "%s: Variable %s is not writeable\n";
+static const char ami_rx_err_illegal_var[] = "%s: unknown variable %s\n";
+static const char ami_rx_err_illegal_ind[] = "%s: unknown index %s\n";
+static const char ami_rx_err_too_long[]    = "Result too long\n";
+static const char ami_rx_err_memory[]      = "Memory exhausted\n";
+static const char ami_rx_err_nowrite[]     = "%s: Variable %s is not writeable\n";
 const char ami_rx_err_unimpl[]      = "Not implemented\n";
 const char ami_rx_err_state[]       = "No active stack\n";
 

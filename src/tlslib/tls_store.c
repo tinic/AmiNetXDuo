@@ -203,7 +203,7 @@ static const UCHAR *tls_issuer_name_der(const NX_SECURE_X509_CERT *cert,
     return p;
 }
 
-ULONG tls_cert_issuer_key(const NX_SECURE_X509_CERT *cert)
+static ULONG tls_cert_issuer_key(const NX_SECURE_X509_CERT *cert)
 {
     const UCHAR *name;
     ULONG        length = 0;
@@ -354,7 +354,7 @@ ULONG tls_store_count(const TLSStore *store)
     return (store != NULL) ? store->ts_Count : 0;
 }
 
-ULONG tls_store_fetch(TLSStore *store, ULONG key, UCHAR *buffer, ULONG size)
+static ULONG tls_store_fetch(TLSStore *store, ULONG key, UCHAR *buffer, ULONG size)
 {
     const AmiNetXDuoContext *ctx;
     ULONG lo, hi, mid;

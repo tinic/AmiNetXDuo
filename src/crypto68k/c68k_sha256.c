@@ -59,7 +59,7 @@ UINT c68k_sha256_variant_is_asm(UINT variant)
  * Shared with the assembly, which walks it with (An)+, so the order is the
  * round order and nothing may be inserted.
  */
-const ULONG c68k_sha256_k[64] =
+static const ULONG c68k_sha256_k[64] =
 {
     0x428a2f98uL, 0x71374491uL, 0xb5c0fbcfuL, 0xe9b5dba5uL,
     0x3956c25buL, 0x59f111f1uL, 0x923f82a4uL, 0xab1c5ed5uL,
@@ -197,7 +197,7 @@ UINT    t;
     }
 }
 
-VOID c68k_sha256_blocks(ULONG *state, const UCHAR *data, ULONG blocks)
+static VOID c68k_sha256_blocks(ULONG *state, const UCHAR *data, ULONG blocks)
 {
 
     c68k_sha256_blocks_c(state, data, blocks);

@@ -352,12 +352,10 @@ ULONG tls_store_count(const TLSStore *store);
  * or 0 if there is no such root.  This is the only path that touches the disk
  * during a handshake, and it happens at most twice.
  */
-ULONG tls_store_fetch(TLSStore *store, ULONG key, UCHAR *buffer, ULONG size);
 
 /* FNV-1a over a certificate's issuer Name DER, walked out of the raw
    certificate.  0 means not found, which no real key ever is because
    tools/mkcertstore.py rejects that hash. */
-ULONG tls_cert_issuer_key(const NX_SECURE_X509_CERT *cert);
 
 /*
  * Put the connection in the session->connection registry.  Every connection
@@ -409,9 +407,6 @@ extern struct DosLibrary *DOSBase;
 
 /* ----------------------------------------------------------- tls_conn.c, */
 
-LONG  tls_conn_enter(TLSConnection *conn);
-VOID  tls_conn_leave(TLSConnection *conn);
-LONG  tls_error_from_nx(UINT status);
 
 /*
  * Serial-port tracing, compiled in only by -DTLS_RESUME_TRACE.  It lives in

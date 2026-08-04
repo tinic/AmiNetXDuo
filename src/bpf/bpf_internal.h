@@ -83,7 +83,8 @@ typedef struct AmiBpfChan
     ULONG            drop_count;                /* bpf_stat.bs_drop         */
 } AmiBpfChan;
 
-extern AmiBpfChan ami_bpf_chan[AMI_BPF_MAX_CHANNELS];
+/* ami_bpf_chan[] is static in bpf_channel.c: nothing outside it reaches the
+   table, and every path that would is already a function declared below. */
 extern AmiBpfIf   ami_bpf_iface[AMI_BPF_MAX_IFACES];
 
 /*
@@ -108,13 +109,12 @@ ULONG     ami_bpf_iface_address(const AmiBpfIf *ifp);
 /* bpf_filter.c, byte count for a BPF_SIZE field, 0 if the encoding is bad. */
 UWORD ami_bpf_size_bytes(UWORD code);
 
-/* Endian- and alignment-neutral field access inside a capture record. */
-VOID  ami_bpf_put32(UBYTE *p, ULONG value);
-VOID  ami_bpf_put16(UBYTE *p, UWORD value);
+/* Endian- and alignment-neutral field access inside a capture record.  The
+   put and copy halves are static in bpf_channel.c, which is the only writer;
+   the get half stays shared because tests/mbuf_bpf reads records back. */
 ULONG ami_bpf_get32(const UBYTE *p);
 UWORD ami_bpf_get16(const UBYTE *p);
 
-VOID ami_bpf_copy_bytes(void *dst, const void *src, ULONG len);
 VOID ami_bpf_zero_bytes(void *dst, ULONG len);
 
 /* ---------------------------------------------------------- platform hooks */

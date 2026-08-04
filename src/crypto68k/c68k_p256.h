@@ -233,8 +233,6 @@ VOID c68k_p256_fe_mul(c68k_p256_fe r, const c68k_p256_fe a, const c68k_p256_fe b
 VOID c68k_p256_fe_sqr(c68k_p256_fe r, const c68k_p256_fe a);
 
 /* r = a + b mod p, r = a - b mod p.  r may alias either operand. */
-VOID c68k_p256_fe_add(c68k_p256_fe r, const c68k_p256_fe a, const c68k_p256_fe b);
-VOID c68k_p256_fe_sub(c68k_p256_fe r, const c68k_p256_fe a, const c68k_p256_fe b);
 
 /*
  * r = t mod p, where t is a 16-limb product.  The Solinas reduction, and the
@@ -259,7 +257,6 @@ VOID c68k_p256_jac_add_affine(c68k_p256_jac *r, const c68k_p256_jac *p1,
                               const c68k_p256_aff *q);
 
 /* Jacobian to affine.  Infinity becomes (0, 0). */
-VOID c68k_p256_to_affine(c68k_p256_aff *r, const c68k_p256_jac *p1);
 
 
 /* -------------------------------------------- scalar multiplication ------ */

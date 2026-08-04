@@ -18,7 +18,7 @@
 
 #include "mbuf_internal.h"
 
-AmiMbufPool ami_mbuf_pool;
+static AmiMbufPool ami_mbuf_pool;
 
 /* --------------------------------------------------------------- plumbing */
 
@@ -70,7 +70,7 @@ LONG ami_mbuf_init(ULONG max_mbufs, ULONG max_clusters)
     return result;
 }
 
-VOID ami_mbuf_ensure_init(VOID)
+static VOID ami_mbuf_ensure_init(VOID)
 {
     if (!ami_mbuf_pool.inited)
         (VOID)ami_mbuf_init(0, 0);
@@ -421,7 +421,7 @@ VOID ami_mbuf_ext_ref(struct mbuf *m)
     ami_mbuf_unlock();
 }
 
-VOID ami_mbuf_ext_unref(struct mbuf *m)
+static VOID ami_mbuf_ext_unref(struct mbuf *m)
 {
     AmiCluster *cl;
     APTR        buf;

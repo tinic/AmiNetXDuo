@@ -98,7 +98,7 @@ static ULONG tls_tag_data(const struct TagItem *tags, Tag want, ULONG def)
 
 /* ------------------------------------------------------------ brackets --- */
 
-LONG tls_conn_enter(TLSConnection *conn)
+static LONG tls_conn_enter(TLSConnection *conn)
 {
     const AmiNetXDuoContext *ctx = tls_netx_ctx();
 
@@ -119,7 +119,7 @@ LONG tls_conn_enter(TLSConnection *conn)
     return 0;
 }
 
-VOID tls_conn_leave(TLSConnection *conn)
+static VOID tls_conn_leave(TLSConnection *conn)
 {
     const AmiNetXDuoContext *ctx = tls_netx_ctx();
 
@@ -134,7 +134,7 @@ VOID tls_conn_leave(TLSConnection *conn)
 
 /* -------------------------------------------------------------- errors --- */
 
-LONG tls_error_from_nx(UINT status)
+static LONG tls_error_from_nx(UINT status)
 {
     switch (status)
     {

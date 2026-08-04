@@ -79,7 +79,6 @@ UINT c68k_sha256_digest_calculate(C68K_SHA256 *ctx, UCHAR *digest,
  * Public because it is what gets measured; measuring it through the
  * update/padding layer measures the padding layer too.
  */
-VOID c68k_sha256_blocks(ULONG *state, const UCHAR *data, ULONG blocks);
 
 
 /* ---------------------------------------------------------- the variants, */
