@@ -384,6 +384,20 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_httpif PRIVATE -Wall -Wextra)
     set_target_properties(test_httpif PROPERTIES C_STANDARD 11)
 
+    # The ReadArgs templates of every command, against the enums that index
+    # them.  Parses the sources rather than compiling them: they reach
+    # proto/dos.h, and the failure it catches is a template and an enum drifting
+    # apart, which no compiler sees.
+    add_executable(test_argtemplates
+        test/test_argtemplates.c)
+
+    target_compile_definitions(test_argtemplates PRIVATE
+        AMINETXDUO_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+        _GNU_SOURCE)
+
+    target_compile_options(test_argtemplates PRIVATE -Wall -Wextra)
+    set_target_properties(test_argtemplates PROPERTIES C_STANDARD 11)
+
     add_executable(test_httplock
         test/test_httplock.c
         httplock.c
@@ -421,4 +435,5 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME fetchurl_rfc3986 COMMAND test_fetchurl)
     add_test(NAME httpframe_bodies COMMAND test_httpframe)
     add_test(NAME httplock_rfc4918 COMMAND test_httplock)
+    add_test(NAME tools_arg_templates COMMAND test_argtemplates)
 endif()
