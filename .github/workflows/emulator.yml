@@ -56,6 +56,12 @@ jobs:
       # on that machine -- nothing copyrighted is ever uploaded to GitHub.
       AMINETXDUO_KICKSTART: ${{ vars.AMINETXDUO_KICKSTART }}
       AMINETXDUO_A2065: ${{ vars.AMINETXDUO_A2065 }}
+      # The 68000 arm boots an A600, which an A1200 ROM will not start.
+      AMINETXDUO_KICKSTART_A600: ${{ vars.AMINETXDUO_KICKSTART_A600 }}
+      # install/test/run-workbench.sh: the Workbench 3.1 disks and Commodore's
+      # Installer, neither of which is ours to ship.
+      AMINETXDUO_ADF_DIR: ${{ vars.AMINETXDUO_ADF_DIR }}
+      AMINETXDUO_INSTALLER: ${{ vars.AMINETXDUO_INSTALLER }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -100,6 +106,47 @@ jobs:
       # stdout.txt -- the harness prints the verdict either way.
       - name: IPv6 socket surface
         run: tests/ipv6/run-socket-fsuae.sh -A -b build/ci/default
+
+      # The same regression, one tier down and in a minute rather than ten.
+      # A bare drive shows it as an interface that comes up with no address,
+      # where a real Workbench shows it as a machine that stops booting; the
+      # cause is one thing, the IP thread blocked on sb_Lock so the lease never
+      # completes.  Needs a driver, hence the A2065 gate.
+      - name: AddNetInterface comes back
+        if: env.AMINETXDUO_A2065 != ''
+        run: tests/tools/run-addifup.sh -b build/ci/default
+
+      # THE ONE THAT WOULD HAVE STOPPED 0.17.0 AND 0.17.1 SHIPPING.
+      #
+      # Everything above runs a test program on a bare directory drive.  This
+      # installs the release archive on a real Workbench 3.1 through Commodore's
+      # Installer, power cycles, and lets the stock Startup-Sequence reach
+      # S:User-Startup on its own -- which is where those two releases stopped,
+      # deadlocked in bsd_address_changed() the moment a DHCP lease arrived.
+      # Tier 2 was green throughout: none of it opens bsdsocket.library against
+      # a real SANA-II driver and lets DHCP run.
+      #
+      # Runs on tags, where a release is being cut, and on demand.  Needs the
+      # ADFs and the Installer, so it is skipped rather than failed where they
+      # are not configured; the tier report below says which tiers ran.
+      - name: Release archive on a real Workbench 3.1
+        if: env.AMINETXDUO_ADF_DIR != '' && env.AMINETXDUO_INSTALLER != ''
+        run: |
+          for d in cm:68020 cm-68000:68000 cm-68060:68060; do
+            cmake -S . -B "build/${d%%:*}" \
+                  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
+                  -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_CPU="${d##*:}"
+            cmake --build "build/${d%%:*}" --parallel
+          done
+          cmake -S . -B build/cm-68000-minimal \
+                -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
+                -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_CPU=68000 \
+                -DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF \
+                -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF \
+                -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF
+          cmake --build build/cm-68000-minimal --parallel
+          dist/make-dist.sh
+          install/test/run-workbench.sh -a "$PWD/$(ls -t build/dist/*.lha | head -1)"
 
       - name: Upload emulator logs
         if: always()
