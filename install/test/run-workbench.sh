@@ -141,17 +141,46 @@ fi
 # explicitly, and the one chosen is printed.  A CD32 image is never picked by
 # accident because it is not in the list.
 MODEL="${AMINETXDUO_MODEL:-A1200}"
-KICKSTART="${AMINETXDUO_KICKSTART:-}"
+# The pairing above is enforced, not just described.  An A1200 40.68 ROM is
+# AGA and expects an A1200; booting it on quickstart=A600 crashes the guest
+# before Workbench comes up, and the crash presents as a boot that never
+# finishes, so the run dies on INSTALL_TIMEOUT and leaves an empty drive.  An
+# empty drive passes every "file is absent" assertion in this script.  Three
+# runs of the 68000 arm were read as green that way.  So a model outside the
+# AGA set must name its own ROM, and not naming one is fatal here rather than
+# 420 seconds later.
+#
+# AMINETXDUO_KICKSTART_<MODEL> WINS OVER AMINETXDUO_KICKSTART.  The generic one
+# is an A1200 AGA image in every environment that sets it, including the lab's
+# own env.sh, which sets the A600 ROM two lines below it and annotates it "the
+# 68000 machines need a 68000 ROM".  Reading the generic one first threw that
+# away and put the AGA ROM back on the A600.
+eval "KICKSTART=\${AMINETXDUO_KICKSTART_$MODEL:-}"
 if [ -z "$KICKSTART" ]; then
-    for candidate in \
-        "$HOME/Downloads/Kickstart v3.1 rev 40.68 (1993)(Commodore)(A1200)[!].rom" \
-        "$HOME/Downloads/Kickstart v3.1 r40.68 (1993)(Commodore)(A1200)[!].rom" \
-        "$HOME/Downloads/Kickstart v3.1 r40.68 (1993)(Commodore)(A4000).rom" \
-        "$HOME/Downloads/Kickstart v3.1 r40.68 (1993)(Commodore)(A3000).rom" \
-        "$HOME/png2amiga_testing/kick31.rom"
-    do
-        [ -f "$candidate" ] && { KICKSTART="$candidate"; break; }
-    done
+    case "$MODEL" in
+    A1200|A3000|A4000) KICKSTART="${AMINETXDUO_KICKSTART:-}" ;;
+    esac
+fi
+if [ -z "$KICKSTART" ]; then
+    case "$MODEL" in
+    A1200|A3000|A4000)
+        for candidate in \
+            "$HOME/Downloads/Kickstart v3.1 rev 40.68 (1993)(Commodore)(A1200)[!].rom" \
+            "$HOME/Downloads/Kickstart v3.1 r40.68 (1993)(Commodore)(A1200)[!].rom" \
+            "$HOME/Downloads/Kickstart v3.1 r40.68 (1993)(Commodore)(A4000).rom" \
+            "$HOME/Downloads/Kickstart v3.1 r40.68 (1993)(Commodore)(A3000).rom" \
+            "$HOME/png2amiga_testing/kick31.rom"
+        do
+            [ -f "$candidate" ] && { KICKSTART="$candidate"; break; }
+        done
+        ;;
+    *)
+        echo "MODEL=$MODEL needs its own ROM: the default list is AGA and" >&2
+        echo "an AGA ROM on a 68000 machine crashes before Workbench loads." >&2
+        echo "Set AMINETXDUO_KICKSTART_$MODEL=<path> or AMINETXDUO_KICKSTART." >&2
+        exit 2
+        ;;
+    esac
 fi
 [ -n "$KICKSTART" ] && [ -f "$KICKSTART" ] || {
     echo "No Kickstart 3.1 ROM; set AMINETXDUO_KICKSTART=<path>." >&2
@@ -308,7 +337,13 @@ echo "==> archive $(basename "$ARCHIVE") ($(wc -c < "$ARCHIVE" | tr -d ' ') byte
 
 echo "==> building installdrive ($LEVEL)"
 DRIVER="$ROOT/build/installdrive-wb-$LEVEL"
-"$GCC" -O2 -m68020 -Wall -Wextra -DDRIVE_LEVEL="\"$LEVEL\"" -I"$NDK" \
+# -m68000, not -m68020: this runs INSIDE the guest, and the guest is whatever
+# MODEL says.  Built for a 68020 it executed TST.L A0 on the A600 and took an
+# illegal instruction before the Installer ever started, so the boot never
+# finished, INSTALL_TIMEOUT fired, and the drive was left empty -- which reads
+# as a clean pass to every "this file is absent" check below.  Nothing here
+# needs 68020 codegen.
+"$GCC" -O2 -m68000 -Wall -Wextra -DDRIVE_LEVEL="\"$LEVEL\"" -I"$NDK" \
        -o "$DRIVER" "$ROOT/install/test/installdrive.c" || exit 2
 
 rm -rf "$HD"
@@ -661,9 +696,10 @@ Echo >>DH0:usercheck.txt "*N=== 2. fetch http://example.com/"
 C:fetch http://example.com/ TO DH0:http-body.txt >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT fetch-http rc=\$RC"
 
-Echo >>DH0:usercheck.txt "*N=== 3. fetch https://tls-v1-2.badssl.com/"
-C:fetch https://tls-v1-2.badssl.com/ TO DH0:https-body.txt >>DH0:usercheck.txt
+Echo >>DH0:usercheck.txt "*N=== 3. fetch https://www.iana.org/"
+C:fetch https://www.iana.org/ TO DH0:https-body.txt >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT fetch-https rc=\$RC"
+
 
 Echo >>DH0:usercheck.txt "*N=== 4. arp, what answered on this network"
 C:arp >>DH0:usercheck.txt
@@ -705,13 +741,30 @@ echo "  a real installed Workbench 3.1, four things a user does"
 echo "============================================================"
 
 bad=0
+
+# A 68000 install carries no tls.library on purpose, so `fetch https://` there
+# MUST fail: that is the product working, and scoring it as a failure makes the
+# whole 68000 arm red for doing the right thing.  Keyed off what actually
+# landed on the drive rather than off MODEL, so it stays true if the CPU split
+# ever changes.
+HAS_TLS=1
+[ -f "$HD/Libs/tls.library" ] || HAS_TLS=0
+
 report() {
-    local label="$1" name="$2" rc
+    local label="$1" name="$2" expect="${3:-pass}" rc
     rc=$(sed -n "s/^RESULT $name rc=\(.*\)/\1/p" "$HD/usercheck.txt" 2>/dev/null \
          | head -1)
     if [ -z "$rc" ]; then
         printf '  %-34s NEVER RAN\n' "$label"
         bad=1
+    elif [ "$expect" = "fail" ]; then
+        if [ "$rc" = "0" ]; then
+            printf '  %-34s rc=0  !! expected to fail, no tls.library\n' "$label"
+            bad=1
+        else
+            printf '  %-34s rc=%s  (expected: no tls.library on this machine)\n' \
+                   "$label" "$rc"
+        fi
     elif [ "$rc" = "0" ]; then
         printf '  %-34s rc=0\n' "$label"
     else
@@ -722,7 +775,8 @@ report() {
 
 report "ShowNetStatus"                 network
 report "fetch http://example.com/"     fetch-http
-report "fetch https://...badssl.com/"  fetch-https
+report "fetch https://www.iana.org/"       fetch-https \
+       "$([ "$HAS_TLS" = 1 ] && echo pass || echo fail)"
 report "arp"                           arp
 
 # The one that shipped.  0.17.0 and 0.17.1 deadlocked in bsd_address_changed()
