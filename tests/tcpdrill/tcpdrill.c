@@ -59,10 +59,17 @@
  *           the SACK-Permitted option (RFC 2018 kind 4) must be present or
  *           absent (tx); on rx, sackok=1 puts it in the injected SYN.
  *   sack=L:R[,L:R...]
- *           the SACK option (kind 5) must carry exactly these blocks, in this
- *           order.  Sequence numbers are offsets from the ISN this harness
- *           chose, the same space `ack=` counts in, because the blocks
- *           describe data the peer sent.  `sack=-` requires no SACK option.
+ *           on tx, the SACK option (kind 5) must carry exactly these blocks,
+ *           in this order, counted from the ISN this harness chose, the same
+ *           space `ack=` counts in, because those blocks describe data the
+ *           peer sent.  `sack=-` requires no SACK option.
+ *
+ *           on rx, the blocks to PUT IN the injected segment, counted from the
+ *           GUEST's ISN instead, because these describe the guest's own data
+ *           arriving here.  That is the mirror of the tx case and the only way
+ *           to drive the send side: a stack that reads a peer's blocks and
+ *           skips the segments they cover cannot be tested by a harness that
+ *           can only assert the blocks it receives.
  *   hdrlen=N
  *           the TCP data offset, in bytes.  20 is a header with no options.
  *           A wrong data offset is a silently corrupt segment: the payload
@@ -897,6 +904,9 @@ typedef struct Inject
     ULONG   dlen;
     LONG    mss;
     BOOL    sackok;
+    UWORD   sack_n;             /* SACK blocks to send, 0 for none */
+    ULONG   sack_l[4];
+    ULONG   sack_r[4];
     BOOL    badopt;             /* an MSS option whose length byte says 3 */
     ULONG   dst_ip;             /* IP destination; LOCAL_IP unless dst= said */
 } Inject;
@@ -914,6 +924,11 @@ static VOID build_and_inject(const Inject *in)
 
     if (in->sackok)
         opt = (UWORD)(opt + 4);
+    /* kind, length, then eight bytes a block, padded to a multiple of four.
+       2 + 8n is already even; the +2 NOPs keep the option aligned the way a
+       real sender writes it (RFC 2018 section 3). */
+    if (in->sack_n != 0)
+        opt = (UWORD)(opt + 4 + in->sack_n * 8);
     badopt_at = (UWORD)(20 + opt);
     if (in->badopt)
         opt = (UWORD)(opt + 4);
@@ -982,6 +997,28 @@ static VOID build_and_inject(const Inject *in)
         tcp[at + 1] = 1;
         tcp[at + 2] = 4;
         tcp[at + 3] = 2;
+    }
+    if (in->sack_n != 0)
+    {
+        /* NOP, NOP, kind 5, length, then left and right edge a block, which is
+           how RFC 2018 section 3 shows it and what a real sender writes.  The
+           edges go out in the sequence space the guest is SENDING in, so they
+           are counted from the guest's ISN: these blocks describe the guest's
+           own data arriving at us, the mirror of the tx assertion, which counts
+           from ours. */
+        UWORD at = (UWORD)(20 + (in->mss >= 0 ? 4 : 0) + (in->sackok ? 4 : 0));
+        UWORD i2;
+
+        tcp[at]     = 1;
+        tcp[at + 1] = 1;
+        tcp[at + 2] = 5;
+        tcp[at + 3] = (UBYTE)(2 + in->sack_n * 8);
+
+        for (i2 = 0; i2 < in->sack_n; i2++)
+        {
+            wr32(&tcp[at + 4 + i2 * 8],     in->sack_l[i2]);
+            wr32(&tcp[at + 8 + i2 * 8],     in->sack_r[i2]);
+        }
     }
     if (in->badopt)
     {
@@ -1472,6 +1509,17 @@ static VOID do_rx(const char *args, const char *raw)
     in.dlen  = (ULONG)(e.have_len ? e.len : 0);
     in.mss   = e.have_mss ? e.mss : -1;
     in.sackok = (e.have_sackok && e.sackok) ? TRUE : FALSE;
+    if (e.have_sack)
+    {
+        UWORD i2;
+
+        in.sack_n = e.sack_n;
+        for (i2 = 0; i2 < e.sack_n; i2++)
+        {
+            in.sack_l[i2] = cs.u_isn + e.sack_l[i2];
+            in.sack_r[i2] = cs.u_isn + e.sack_r[i2];
+        }
+    }
     in.badopt = (e.have_badopt && e.badopt) ? TRUE : FALSE;
     in.dst_ip = e.have_dst ? e.dst : LOCAL_IP;
 

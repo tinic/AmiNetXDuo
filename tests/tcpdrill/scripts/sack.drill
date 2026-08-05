@@ -208,3 +208,52 @@ tx A seq=1 ack=1 sack=101:201,101:201 hdrlen=40 within=400
 rx PA seq=1 ack=1 len=100
 tx A seq=1 ack=201 sack=- within=400
 recv 400 = 200
+
+# ---------------------------------------------------------------- send side --
+#
+# Everything above is the receive side: the blocks this stack EMITS for holes
+# in what it was given.  The cases below are the other direction, the blocks a
+# peer sends US being read and acted on, which is what RFC 2018 section 5
+# describes and what nothing here reached until now.
+#
+# The harness had to grow for it.  `sack=` was a tx assertion only, so a drill
+# could say what blocks we emit and had no way to send any; rx now takes the
+# same key and puts the blocks in the injected segment, counted from the
+# guest's own ISN because they describe the guest's data.
+#
+# WHY THIS MATTERS MORE THAN THE COUNT OF CASES SUGGESTS.  Without it a stack
+# that ignores the option entirely passes every case in this file, because
+# every one of them only ever looks at what we send.
+
+# A segment the peer says it already has is not sent again.
+#
+# THIS PASSES WITHOUT THE SEND SIDE, and the reason is worth writing down: this
+# stack retransmits the OLDEST unacknowledged segment and only that one, over
+# and over until it is acknowledged.  It never walks forward through the window
+# during recovery, so it never reaches a SACKed segment to skip it.  Measured
+# 2026-08-05 against the amiga-tcp-sack-transmit branch: with the blocks read
+# and with them ignored, the frames on the wire are identical, here and in
+# three other shapes including nothing acknowledged with only the middle
+# segment held.
+#
+# So this case locks the behaviour rather than the option: it says a SACKed
+# segment does not go out again, which is true today for a reason that has
+# nothing to do with reading the block.  A send side that ever does skip will
+# still pass it, and the case that would tell the two apart does not exist yet
+# because there is no scenario in this stack where they differ.
+case s13_a_sacked_segment_is_not_retransmitted
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=100 sackok=1
+tx A seq=1 ack=1
+send 300
+tx PA seq=1 ack=1 len=100 within=400
+tx PA seq=101 ack=1 len=100 within=400
+tx PA seq=201 ack=1 len=100 within=400
+rx A seq=1 ack=101 win=8192 sack=201:301
+rx A seq=1 ack=101 win=8192 sack=201:301
+rx A seq=1 ack=101 win=8192 sack=201:301
+tx PA seq=101 ack=1 len=100 within=2000
+notx 600
+rx A seq=1 ack=301 win=8192
