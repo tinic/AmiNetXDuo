@@ -11,6 +11,8 @@ version at the top when it merges.
 
 ## 0.17.4
 
+- `ssh` no longer installs on a 68000, where it could only crash. It is built for the 68020 and the whole `C:` drawer was copied to every machine, so a 68000 owner was given it, ran it, and took an illegal instruction. The page that explains why a 68000 gets no encrypted connections now names it too
+- `ssh` has a build for the 68060. Its inner loop is curve25519, which carries eight 64-bit `MULU.L` per field multiply and 21,482 field multiplies per handshake; the 68060 dropped that instruction and traps every one of them to 68060.library. The 68060 build has none
 - File server reads are close to write speed now. The receiver announced re-opened window space a single segment at a time, so a bulk read was paced by ~1050 window-update round trips per megabyte; announcing at half the receive buffer instead takes a 68020 fitz read from 640 to a steady 1700+ KB/s, writes unchanged
 
 ## 0.17.3

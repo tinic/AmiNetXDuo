@@ -276,8 +276,34 @@ chmod 755 "$TREE"/C/*
 #
 # AMINETXDUO_SSH names the built binary outright, the release workflow sets
 # it, so the path it builds into and the path packed here cannot drift.
-CLIENT_SSH="${AMINETXDUO_SSH:-$ROOT/build/dropbear/dbclient}"
-if [ -x "$CLIENT_SSH" ]; then
+# ONE PER CPU, both in C:.  dbclient is the only thing in the archive that
+# comes from clients/ rather than the CMake tree, and it is built -m68020
+# while every other command in C: comes from the 68000 build.  Copying the
+# drawer wholesale therefore put a 68020 binary on a 68000 machine: the
+# installer offered it, the user ran it, and the machine took an illegal
+# instruction.
+#
+# So the archive carries ssh.020 and ssh.060 and the installer copies the one
+# this machine can run to C:ssh, or neither below a 68020.  The suffixed pair
+# exists only inside the archive; what lands on the disk is C:ssh, where it
+# has always been.
+#
+# AMINETXDUO_SSH_68020 and AMINETXDUO_SSH_68060 name the two builds; the
+# release workflow runs clients/dropbear/build.sh twice to make them.
+declare -A SSH_BUILD=(
+    [020]="${AMINETXDUO_SSH_68020:-$ROOT/build/ssh20/dbclient}"
+    [060]="${AMINETXDUO_SSH_68060:-$ROOT/build/ssh60/dbclient}"
+)
+for sshcpu in "${!SSH_BUILD[@]}"; do
+    src="${SSH_BUILD[$sshcpu]}"
+    [ -x "$src" ] || continue
+    cp "$src" "$TREE/C/ssh.$sshcpu"
+    chmod 755 "$TREE/C/ssh.$sshcpu"
+    echo "==> including ssh.$sshcpu ($(wc -c < "$src" | tr -d ' ') bytes)"
+done
+
+CLIENT_SSH="${AMINETXDUO_SSH:-}"
+if [ -n "$CLIENT_SSH" ] && [ -x "$CLIENT_SSH" ]; then
     cp "$CLIENT_SSH" "$TREE/C/ssh"
     chmod 755 "$TREE/C/ssh"
     echo "==> including ssh ($(wc -c < "$CLIENT_SSH" | tr -d ' ') bytes)"

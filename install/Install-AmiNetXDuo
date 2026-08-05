@@ -940,16 +940,17 @@
         ; later.
         (message
           "The smallest build was chosen, so several things are not "
-          "installed: encrypted (https:) connections, IPv6, .local name "
+          "installed: encrypted (https:) connections, ssh, IPv6, .local name "
           "lookups, the packet filter and IPv4 multicast.\n\n"
           "The stack, the commands and ordinary http: work normally.  "
           "Installing again and choosing another build brings the rest back.")
         (message
-          "Encrypted (https:) connections are not installed on this machine.\n\n"
+          "Encrypted (https:) connections and ssh are not installed on this "
+          "machine.\n\n"
           "The cryptography a secure connection needs takes minutes on a 68000, "
           "which is long enough that the far end gives up first.  Everything "
           "else -- the stack, the commands, ordinary http: -- works normally.\n\n"
-          "A machine with a 68020 or better gets it.")))
+          "A machine with a 68020 or better gets both.")))
 
 (set @special-msg "")
 
@@ -976,17 +977,43 @@
           "configuration back and says what is wrong with it.  httpd serves "
           "a drawer over HTTP and WebDAV to other machines on the network, "
           "and asks for no password, so give it a drawer you are content for "
-          "them to read and write.  ssh connects "
-          "to an SSH server -- it is Dropbear's dbclient, and brings its own "
-          "stack and arguments, but wants mathieeedoubbas.library in LIBS:, "
-          "which every Workbench installation has.\n\nAll of "
+          "them to read and write.\n\nAll of "
           "them are installed: they are small, and missing the one command "
           "that turns out to be wanted is worse than a few extra files "
-          "in C:.")
+          "in C:.  ssh is installed separately, just after these, because "
+          "it is the one command with a build per processor.")
   (source S_C)
   (dest   "C:")
-  (all)
+  (pattern "~(ssh.#?)")
   (optional "force"))
+
+; ssh is the one thing here that is NOT built for the 68000.  Dropbear comes
+; from clients/ rather than the CMake tree and is compiled for the 68020, so
+; the archive carries ssh.020 and ssh.060 beside the other commands and this
+; copies the one for this machine to C:ssh.  The pattern above keeps the pair
+; itself out of C:; only the copy under the plain name lands.
+;
+; Below a 68020 neither is copied: the binary would take an illegal
+; instruction on the first call, and at 7 MHz a curve25519 handshake is not
+; something anyone would wait through.  The last page says so, beside the
+; tls.library sentence it belongs with.
+(set SSHFILE "")
+(if (= CPUDIR "68020-40") (set SSHFILE "ssh.020"))
+(if (= CPUDIR "68060")    (set SSHFILE "ssh.060"))
+
+(if (> (strlen SSHFILE) 0)
+    (if (exists (tackon S_C SSHFILE) (noreq))
+        (copyfiles
+          (prompt "Installing ssh into C:")
+          (help   "Dropbear's dbclient, the SSH client.  It brings its own "
+                  "argument handling and its own 256 KB stack, but wants "
+                  "mathieeedoubbas.library in LIBS:, which every Workbench "
+                  "installation has.  There is one build per processor and "
+                  "this is the one for yours.")
+          (source  (tackon S_C SSHFILE))
+          (dest    "C:")
+          (newname "ssh")
+          (optional "force" "nofail"))))
 
 (complete 55)
 

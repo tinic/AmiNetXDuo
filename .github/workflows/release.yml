@@ -150,9 +150,15 @@ jobs:
       # not produce it and make-dist.sh would quietly ship an archive without
       # it. Built here so a release always carries it; dbclient defaults to the
       # 25519 rewritten for this machine.
+      # Twice, one per processor drawer.  dbclient is compiled for the 68020,
+      # and the 68060 dropped instructions that target uses, so the two are
+      # not interchangeable and the installer picks by CPU.  There is no 68000
+      # build: it would take an illegal instruction on a 68020 binary, and a
+      # curve25519 handshake at 7 MHz is not something anyone waits through.
       - name: Build the ported clients
         run: |
-          clients/dropbear/build.sh
+          AMIGA_CLIENT_ARCH=-m68020    clients/dropbear/build.sh -b build/ssh20
+          AMIGA_CLIENT_ARCH=-mcpu=68060 clients/dropbear/build.sh -b build/ssh60
 
       # An archiver that can CREATE.  Lhasa, which is what "lha" usually is on
       # a Linux box, only extracts, and make-dist.sh then falls back to
@@ -167,7 +173,8 @@ jobs:
       # binary cannot be a stale tree.
       - name: Build the distribution archive
         env:
-          AMINETXDUO_SSH: build/dropbear/dbclient
+          AMINETXDUO_SSH_68020: build/ssh20/dbclient
+          AMINETXDUO_SSH_68060: build/ssh60/dbclient
         run: dist/make-dist.sh -b build/release
 
       # A release that silently lost ssh or the bundled Installer would look
@@ -177,11 +184,19 @@ jobs:
       # the wrong directory and said so in a note nobody read.
       - name: ssh, the Installer and the manual really are in the archive
         run: |
-          for f in C/ssh Installer Docs/AmiNetXDuo.guide Docs/AmiNetXDuo.guide.info; do
+          for f in C/ssh.020 C/ssh.060 Installer \
+                   Docs/AmiNetXDuo.guide Docs/AmiNetXDuo.guide.info; do
               [ -f "build/dist/AmiNetXDuo/$f" ] || {
                   echo "::error::$f is missing from the archive"; exit 1; }
           done
-          ls -l build/dist/AmiNetXDuo/C/ssh build/dist/AmiNetXDuo/Installer
+          # And no unsuffixed ssh: that name is what the installer WRITES, from
+          # whichever of the pair matches the machine.  One in the archive would
+          # be copied to every machine by the wholesale C: copy, which is how a
+          # 68020 binary reached a 68000 before.
+          [ ! -e "build/dist/AmiNetXDuo/C/ssh" ] || {
+              echo "::error::C/ssh is back; only ssh.020 and ssh.060 belong here"
+              exit 1; }
+          ls -l build/dist/AmiNetXDuo/C/ssh.* build/dist/AmiNetXDuo/Installer
           ls -l build/dist/AmiNetXDuo/Docs/
 
       # And so would a release that lost a CPU drawer -- right up until
