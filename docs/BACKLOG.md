@@ -50,6 +50,13 @@ git log; what it declined is under *Decided against*; what it disproved is under
 Both are known and neither is in the way of a release: the gate runs by hand
 today, and `tools/ci.sh` no longer asks for fs-uae at all.
 
+### The read path, measured 2026-08-05
+
+| Item | State | Cite |
+|---|---|---|
+| **Receive-side direct dispatch** | Built and archived on the lab branch `rig-direct`: SANA-II readers process packets inline under the IP protection mutex, rx ring refilled before processing. Collapses data-to-ACK turnaround from 8-16 ms median to 1.6 ms; throughput-neutral at 14 and 28 MHz (three-rep A/B each). Worth landing only as hardening for the once-per-connection convergence transient below | `src/sana2/sana2_rx.c`, lab branch |
+| **First-bulk-burst convergence transient** | A peer whose RTO was calibrated by the fast handshake retransmits spuriously against this receiver's burst ACK latency until its estimator adapts, about four 512 KB reps on one persistent connection. All 70 retransmissions in the measured run were answered with RFC 2883 D-SACKs, one for one; the guest driver received more frames than the port-filtered wire capture carried, so nothing was lost anywhere. Self-healing and lossless; direct dispatch above would shrink it | `tests/trace/tcpaudit.py`, fitz capture 2026-08-05 |
+
 ### Host-testing `src/bsdsocket` and `src/tools`, a measured plan
 
 Spiked 2026-08-04. `bsdsocket_internal.h` reaches `tx_api.h`, `nx_api.h` and

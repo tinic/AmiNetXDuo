@@ -1,31 +1,34 @@
-# tcpdrill, the receiver's silly window avoidance floor.
+# tcpdrill, the receiver's window update step.
 #
-# RFC 1122 4.2.3.3: the receiver must not advertise a window increment smaller
-# than min(MSS, RCV.BUFF/2).  Only the RCV.BUFF/2 term was implemented, so on
-# this stack's window, 8 KB to 33 KB, w01 in tcp.drill bounds it, the
-# smallest window update that could ever leave was between 4 KB and 16 KB.  A
-# sender whose window had run down to a few hundred bytes had to wait for the
-# application to read half the buffer before it heard otherwise, when one
-# segment's worth of room is all it needs to carry on.
+# RFC 1122 4.2.3.3 suggests announcing once the window can grow by
+# min(MSS, RCV.BUFF/2).  This stack announces at RCV.BUFF/2 alone, on a
+# measurement: taking the MSS term literally made the receiver announce at the
+# earliest permitted moment, and on a receiver slower than its peer that is an
+# oscillator, one segment advertised, filled, and the window straight back to
+# zero, 84 times over a 1 MB transfer, with 574 of 1057 acknowledgments
+# carrying nothing new.  Half the buffer instead was 640 -> 1221 KB/s on the
+# same 68020, writes unchanged.  A sender parked at a small window is released
+# by its own persist timer (t01-t07 in tcp.drill), not by fine-grained
+# announcements, so coarser is the conservative side of SWS avoidance and the
+# cheap side of the read path.
 #
-# WHAT THESE TWO CASES SEPARATE.  s01 reads exactly one segment and asserts the
-# window update; before the MSS floor it did not come out.  s02 reads a hundred
-# bytes and asserts that nothing does, which is the half of the rule that has to
-# survive, an update per byte read is the silly window itself.
+# WHAT THESE CASES SEPARATE.  s01 reads one segment and asserts NOTHING leaves,
+# which is the rule change: one MSS of room is below the step.  s02 reads a
+# hundred bytes and asserts the same, the half that was never in question.  s03
+# reads past half the buffer and asserts the update, the positive half, so a
+# stack that never announces fails here rather than hanging its peer.
 #
 # THE ACKNOWLEDGEMENT NUMBER DOES NOT MOVE across the read, because a read
 # changes the window and nothing else.  That is what makes the frame a window
-# update rather than a data acknowledgment, and it is why these cases assert an
-# ACK carrying an acknowledgement number that has already been sent once.
-#
-# NEITHER CASE HAS EVER BEEN RUN.
+# update rather than a data acknowledgment, and it is why s03 asserts an ACK
+# carrying an acknowledgement number that has already been sent once.
 #
 # SPDX-License-Identifier: MIT
 
-# Two full segments in, one read out.  The receive queue still holds the second,
-# so the window is credited by what was read rather than reset to the default,
-# and the credit is exactly one MSS, the floor, and nothing above it.
-case s01_reading_one_segment_updates_the_window
+# Two full segments in, one read out.  One MSS of new room is below the
+# RCV.BUFF/2 step, so nothing may leave: an update this small is the
+# oscillation the step exists to damp.
+case s01_reading_one_segment_is_not_an_update
 socket
 connect
 tx S seq=0
@@ -36,10 +39,10 @@ tx A seq=1 ack=1461 within=400
 rx PA seq=1461 ack=1 len=1460
 tx A seq=1 ack=2921 within=400
 recv 1460 = 1460
-tx A seq=1 ack=2921 within=400
+notx 500
 
-# A hundred bytes read is not an update.  Both segments are small so that the
-# read cannot reach the floor from below.
+# A hundred bytes read is not an update either.  Both segments are small so
+# the read cannot reach any floor from below.
 case s02_reading_less_than_a_segment_is_not_an_update
 socket
 connect
@@ -52,3 +55,53 @@ rx PA seq=101 ack=1 len=100
 tx A seq=1 ack=201 within=400
 recv 100 = 100
 notx 500
+
+# Thirteen segments in, all of them read, in the 4096-byte bites the harness
+# buffer allows.  Window credit moves at packet granularity, not bytes: a
+# packet is credited when the read consumes into it, so three reads release
+# nine packets, 13140 bytes of room, under half of the 33580-byte buffer, and
+# nothing may leave.  The fourth read releases three more, 17520, over the
+# threshold, and the update must come, repeating the acknowledgement number
+# the data ACKs already carried and advertising exactly the twelve released
+# packets.  The tail read leaves one packet of credit, under the threshold
+# again, and nothing may follow.  The case pins the boundary from both sides.
+case s03_reading_half_the_buffer_is_the_update
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=32768 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=1460
+tx A seq=1 ack=1461 within=400
+rx PA seq=1461 ack=1 len=1460
+tx A seq=1 ack=2921 within=400
+rx PA seq=2921 ack=1 len=1460
+tx A seq=1 ack=4381 within=400
+rx PA seq=4381 ack=1 len=1460
+tx A seq=1 ack=5841 within=400
+rx PA seq=5841 ack=1 len=1460
+tx A seq=1 ack=7301 within=400
+rx PA seq=7301 ack=1 len=1460
+tx A seq=1 ack=8761 within=400
+rx PA seq=8761 ack=1 len=1460
+tx A seq=1 ack=10221 within=400
+rx PA seq=10221 ack=1 len=1460
+tx A seq=1 ack=11681 within=400
+rx PA seq=11681 ack=1 len=1460
+tx A seq=1 ack=13141 within=400
+rx PA seq=13141 ack=1 len=1460
+tx A seq=1 ack=14601 within=400
+rx PA seq=14601 ack=1 len=1460
+tx A seq=1 ack=16061 within=400
+rx PA seq=16061 ack=1 len=1460
+tx A seq=1 ack=17521 within=400
+rx PA seq=17521 ack=1 len=1460
+tx A seq=1 ack=18981 within=400
+recv 4096 = 4096
+recv 4096 = 4096
+recv 4096 = 4096
+notx 300
+recv 4096 = 4096
+tx A seq=1 ack=18981 win=32120 within=900
+recv 2596 = 2596
+notx 300
