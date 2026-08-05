@@ -661,9 +661,10 @@ Echo >>DH0:usercheck.txt "*N=== 2. fetch http://example.com/"
 C:fetch http://example.com/ TO DH0:http-body.txt >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT fetch-http rc=\$RC"
 
-Echo >>DH0:usercheck.txt "*N=== 3. fetch https://tls-v1-2.badssl.com/"
-C:fetch https://tls-v1-2.badssl.com/ TO DH0:https-body.txt >>DH0:usercheck.txt
+Echo >>DH0:usercheck.txt "*N=== 3. fetch https://www.iana.org/"
+C:fetch https://www.iana.org/ TO DH0:https-body.txt >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT fetch-https rc=\$RC"
+
 
 Echo >>DH0:usercheck.txt "*N=== 4. arp, what answered on this network"
 C:arp >>DH0:usercheck.txt
@@ -722,7 +723,7 @@ report() {
 
 report "ShowNetStatus"                 network
 report "fetch http://example.com/"     fetch-http
-report "fetch https://...badssl.com/"  fetch-https
+report "fetch https://www.iana.org/"       fetch-https
 report "arp"                           arp
 
 # The one that shipped.  0.17.0 and 0.17.1 deadlocked in bsd_address_changed()
