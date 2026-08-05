@@ -35,10 +35,20 @@ git log; what it declined is under *Decided against*; what it disproved is under
 | **`src/tools` is 32,412 lines behind five host tests.** `httppath`, `httpif`, `httplock`, `fetchurl`, `httpframe`, all of them httpd's | The other twenty-five commands have none. The 2026-08-04 diagnostics rewrite changed every one of them and nothing on the host could have caught a mistake; the cross build was the only gate, and it only proves they compile | `src/tools/` |
 | **`src/tlslib` is 4,628 lines behind three.** No test of the handshake, of the record layer beyond the fuzzers, or of resumption past the expiry rule | `tls_conn.c`'s alert handling is still exercised only by `run-https.sh` on hardware. `tls_resume.c`'s expiry is now `tls_expiry.c` and host-tested; what remains there is the ticket and session-ID handling, which needs a server to answer | `src/tlslib/` |
 | **`src/sana2` has one test, added 2026-08-04**, covering `sana2_copy.c` alone out of 3,704 lines | The driver-facing code runs at interrupt time, which is where a mistake takes the machine down rather than failing a check | `src/sana2/` |
-| **A command is mostly C runtime.** `ping` is 15,860 bytes, of which its own code is 2,050 | libnix's crt0 chain pulls in stdio and the C++ AVL allocator through `__stdiowin.o` and `__initcpp.o`; `atexit()` was the other route and is gone. `tool_printf` goes through dos.library `VPrintf` and `ami_alloc` through `AllocVec`, so nothing we wrote calls what remains. `src/tools/CMakeLists.txt:62-76` records why the link line was left alone once before | link map of `tool_ping` |
-| **Parameterise `run-tcphandler.sh`'s peer address** | Every connection in it names 10.0.2.2, fs-uae's SLIRP gateway, so it cannot move to Amiberry. It is the last network test still calling `fsuae-run.sh` directly | `tests/tools/run-tcphandler.sh:137-159` |
+| **A command is mostly C runtime.** `ping` is 16,196 bytes in 0.17.3, of which its own code is about 2,050 | libnix's crt0 chain pulls in stdio and the C++ AVL allocator through `__stdiowin.o` and `__initcpp.o`; `atexit()` was the other route and is gone. `tool_printf` goes through dos.library `VPrintf` and `ami_alloc` through `AllocVec`, so nothing we wrote calls what remains. `src/tools/CMakeLists.txt:62-76` records why the link line was left alone once before | link map of `tool_ping` |
+| **Parameterise `run-tcphandler.sh`'s peer address** | Seven connections in it name 10.0.2.2 outright. It runs under Amiberry now, whose SLIRP puts the gateway at the same address, so it passes; the address being written down seven times is what stops it moving to a bridged backend or a real peer | `tests/tools/run-tcphandler.sh` |
 | **`HOST_TEST_TARGETS` count guard does not catch an unbuilt target** | It compares registered tests against targets, and a test registers whether or not its target was built, so five went to `main` reporting Not Run | `tools/ci.sh:207-211` |
 | **EKU, nameConstraints and critical-extension rejection, together** | Accepting a certificate that marks nameConstraints critical while not enforcing it is exactly the failure the critical bit exists to prevent, so doing one without the others is worse than doing none. The known-critical set must be `{basicConstraints, keyUsage, subjectAltName, extendedKeyUsage}`, Let's Encrypt intermediates mark EKU critical. Untestable without hardware | `nx_secure_x509_extension_find.c:191` |
+
+### The release gate, and what is left of the emulators
+
+| Item | State | Cite |
+|---|---|---|
+| **Register a self-hosted runner** | The one thing between the release end-to-end test and it running by itself. `emulator.yml` runs `install/test/run-workbench.sh` and `tests/tools/run-addifup.sh` on tag pushes already, and skips both while `AMINETXDUO_KICKSTART_RUNNER` is unset, which is every tag so far. Minting a registration token needs admin scope the working PAT does not have | `.github/workflows/emulator.yml` |
+| **`tools/enforcer-run.sh` is the last fs-uae caller** | Enforcer needs a real MMU, so this builds its own 68030 configuration rather than calling a runner. Every other harness moved on 2026-08-04; this one is a port, not a substitution | `tools/enforcer-run.sh:96` |
+
+Both are known and neither is in the way of a release: the gate runs by hand
+today, and `tools/ci.sh` no longer asks for fs-uae at all.
 
 ### Host-testing `src/bsdsocket` and `src/tools`, a measured plan
 
