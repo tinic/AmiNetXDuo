@@ -2317,17 +2317,37 @@ struct EClockVal ev;
                        s_worker[i].mutex_ops);
     }
 
-    for (i = 0UL; i < (ULONG) S_CHURNERS; i++)
     {
-        (VOID) S_CHECK(s_churner[i].cycles >= S_MIN_CHURN,
-                       "final: churner completed many adopt/orphan cycles",
-                       s_churner[i].cycles);
-        (VOID) S_CHECK(s_churner[i].fast_path > 0UL,
-                       "final: the adoption fast path was exercised",
-                       s_churner[i].fast_path);
-        (VOID) S_CHECK(s_churner[i].slow_path > 0UL,
+        ULONG fast = 0UL;
+        ULONG slow = 0UL;
+
+        for (i = 0UL; i < (ULONG) S_CHURNERS; i++)
+        {
+            (VOID) S_CHECK(s_churner[i].cycles >= S_MIN_CHURN,
+                           "final: churner completed many adopt/orphan cycles",
+                           s_churner[i].cycles);
+            fast += s_churner[i].fast_path;
+            slow += s_churner[i].slow_path;
+        }
+
+        /*
+         * Summed, not per churner.  Which of the two paths a given adoption
+         * takes is a race with the scheduler, so requiring every churner to
+         * win it at least once asserts a scheduling accident rather than
+         * anything about the code: on 2026-08-04 one run in three failed here
+         * with a churner at zero while the others were in the hundreds, and a
+         * re-run of the same binary passed with 698 and 705 adoptions.
+         *
+         * What is worth asserting is that both paths run at all, which is what
+         * these say.  A test that fails at random is worse than no test: it
+         * teaches everyone to re-run until it is green, and then it cannot
+         * report anything.
+         */
+        (VOID) S_CHECK(fast > 0UL,
+                       "final: the adoption fast path was exercised", fast);
+        (VOID) S_CHECK(slow > 0UL,
                        "final: the adoption scheduler round trip was exercised",
-                       s_churner[i].slow_path);
+                       slow);
     }
 
     for (i = 0UL; i < (ULONG) V_COUNT; i++)
