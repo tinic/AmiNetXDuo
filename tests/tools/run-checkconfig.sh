@@ -114,7 +114,7 @@ HD="$ROOT/build/testhd-$AMINETXDUO_RUN_TAG"
 
 echo "==> booting $MODEL with a deliberately broken DEVS:"
 set +e
-"$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
+"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" \
     "$STAGE/CheckNetConfig" "$STAGE/GetNetStatus" "$STAGE/NetShutdown" \
     "$STAGE/AddNetRoute" "$STAGE/DeleteNetRoute"

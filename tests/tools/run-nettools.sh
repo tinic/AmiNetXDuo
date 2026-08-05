@@ -5,7 +5,7 @@
 #   tests/tools/run-nettools.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
 #                               [-o "line;line;..."]
 #
-# tools/fsuae-run.sh starts ONE executable with no arguments, so ToolsSmoke
+# tools/amiberry-run.sh starts ONE executable with no arguments, so ToolsSmoke
 # stands in the middle and runs DH0:commands.txt.  Same shape as
 # tests/tls/run-fetch.sh, with two additions ToolsSmoke grew for this run:
 # "&<command>" starts something in the background and "wait <secs>" lets it
@@ -289,7 +289,7 @@ CPUARG=()
 ) &
 
 set +e
-"$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
+"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
     "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/nc" "$STAGE/telnet" \
     "$STAGE/traceroute" "$STAGE/tftp" "$STAGE/whois" \
     "$STAGE/AddNetInterface" "$STAGE/commands.txt" \

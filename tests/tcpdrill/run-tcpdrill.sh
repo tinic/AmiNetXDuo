@@ -72,7 +72,7 @@ if [ "$RUNNER" = "amiberry" ]; then
     RUN=("$ROOT/tools/amiberry-run.sh")
     HD="$ROOT/build/amiberry-testhd-$TAG"
 else
-    RUN=("$ROOT/tools/fsuae-run.sh")
+    RUN=("$ROOT/tools/amiberry-run.sh")
     HD="$ROOT/build/testhd-$TAG"
 fi
 

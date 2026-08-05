@@ -4,7 +4,7 @@
 #
 #   tests/tls/run-fetch.sh [-m MODEL] [-t SECONDS] [-c CPU] [-k MHZ] [-b BUILDDIR]
 #
-# tools/fsuae-run.sh starts ONE executable with no arguments, and `fetch` is a
+# tools/amiberry-run.sh starts ONE executable with no arguments, and `fetch` is a
 # command that takes arguments, so ToolsSmoke stands in the middle: it reads
 # DH0:commands.txt and runs each line through SystemTagList() with the output
 # redirected into DH0:tools.txt, which the harness prints back.  Same shape as
@@ -143,6 +143,6 @@ CPUARG=()
 [ -z "$CPU" ]   || CPUARG+=(-c "$CPU")
 [ -z "$CLOCK" ] || CPUARG+=(-k "$CLOCK")
 
-exec "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
+exec "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
      "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/fetch" \
      "$STAGE/AddNetInterface" "$STAGE/commands.txt"

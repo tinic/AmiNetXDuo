@@ -150,7 +150,7 @@ echo "  1/2  installing onto a bare machine, user level $LEVEL"
 echo "============================================================"
 
 set +e
-"$ROOT/tools/fsuae-run.sh" -t "$TIMEOUT" "${CPUARG[@]}" \
+"$ROOT/tools/amiberry-run.sh" -t "$TIMEOUT" "${CPUARG[@]}" \
     "$DRIVER" \
     "$STAGE/libs" "$STAGE/devs" "$STAGE/Unpacked"
 INSTALL_STATUS=$?
@@ -257,7 +257,7 @@ echo "============================================================"
 echo "  2/2  booting it, with an A2065 on SLIRP"
 echo "============================================================"
 
-# tools/fsuae-run.sh cannot be used here.  It wipes and re-creates the
+# tools/amiberry-run.sh cannot be used here.  It wipes and re-creates the
 # staging drive and writes its own s/Startup-Sequence, and the whole point of
 # this run is to boot the machine run one produced, in place and untouched
 # apart from the boot script.  So the emulator is driven directly, using the

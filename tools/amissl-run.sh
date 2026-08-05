@@ -176,5 +176,5 @@ ARGS=(-t "$TIMEOUT")
 [ -z "$CLOCK" ] || ARGS+=(-k "$CLOCK")
 
 AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-amissl}" \
-    "$ROOT/tools/fsuae-run.sh" "${ARGS[@]}" "$EXE" \
+    "$ROOT/tools/amiberry-run.sh" "${ARGS[@]}" "$EXE" \
         "$STAGE/libs" "$STAGE/env" "$STAGE/AmiSSL"

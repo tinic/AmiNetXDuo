@@ -5,7 +5,7 @@
 #   tools/emu-net-run.sh -n [-m MODEL] [-t SECS] [-c CPU] [-a ARGS]
 #                        <executable> [extra files...]
 #
-# Takes tools/fsuae-run.sh's arguments unchanged, so a caller switches to it
+# Takes tools/amiberry-run.sh's arguments unchanged, so a caller switches to it
 # by changing the script name and nothing else.
 #
 # WHY THIS EXISTS
@@ -27,8 +27,8 @@
 #   Amiberry has SLIRP compiled in.  The same plan through it: wire 64 ticks
 #   against fs-uae's 6,368-tick timeout, ping 229 against 825.
 #
-#   AMINETXDUO_EMULATOR=fsuae forces the old path back for a comparison, and
-#   says so when it does, a silent fallback is what this file exists to stop.
+#   fs-uae is gone entirely, 2026-08-04.  It needed an X server and its SLIRP
+#   was a stub, so both halves of what this script exists to pick were bad.
 #
 # SPDX-License-Identifier: MIT
 
@@ -89,19 +89,11 @@ case "$EMU" in
         fi
         exit $RC
         ;;
-    fsuae)
-        echo "==> AMINETXDUO_EMULATOR=fsuae: SLIRP is a stub in fs-uae 3.1.66" \
-             "without the qemu-uae plugin; a wire arm will measure nothing" >&2
-        ARGS=()
-        [ "$NETWORK" = "1" ] && ARGS+=(-n)
-        [ -n "$MODEL" ]      && ARGS+=(-m "$MODEL")
-        [ -n "$TIMEOUT" ]    && ARGS+=(-t "$TIMEOUT")
-        [ -n "$CPU" ]        && ARGS+=(-c "$CPU")
-        [ -n "$GUEST_ARGS" ] && ARGS+=(-a "$GUEST_ARGS")
-        exec "$ROOT/tools/fsuae-run.sh" "${ARGS[@]}" "$@"
-        ;;
     *)
-        echo "AMINETXDUO_EMULATOR: expected amiberry or fsuae, got '$EMU'" >&2
+        echo "AMINETXDUO_EMULATOR: only amiberry is supported now, got '$EMU'" >&2
+        echo "  fs-uae is gone: it needs an X server, and the 3.1.66 SLIRP is a" >&2
+        echo "  stub that logs 'stub, uae_slirp_start' and carries on, so a" >&2
+        echo "  networked run measured nothing." >&2
         exit 2
         ;;
 esac

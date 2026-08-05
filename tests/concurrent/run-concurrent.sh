@@ -111,7 +111,7 @@ export AMINETXDUO_RUN_TAG="$TAG"
 # passing run rather than a failure.
 #
 # A timeout with NO verdict is a real failure and still scores as one.
-OUT=$("$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
+OUT=$("$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
       "$EXE" "$STAGE/devs" "$STAGE/libs" 2>&1) && rc=0 || rc=$?
 printf '%s\n' "$OUT"
 

@@ -21,7 +21,7 @@
 # scheduling are all out of the measurement.
 #
 # MEASUREMENT RUN.  fsuae-run.sh is invoked with -x, which takes the emulator
-# queue alone (tools/fsuae-run.sh, commit 81b8f8d).  A quantisation histogram
+# queue alone (tools/amiberry-run.sh, commit 81b8f8d).  A quantisation histogram
 # taken while another agent's boot shares the machine is a histogram of that
 # agent.
 #
@@ -135,7 +135,7 @@ echo "==> stack: $NOTE"
 export AMINETXDUO_RUN_TAG="$TAG"
 
 set +e
-"$ROOT/tools/fsuae-run.sh" -x -m "$MODEL" -t "$TIMEOUT" \
+"$ROOT/tools/amiberry-run.sh" -x -m "$MODEL" -t "$TIMEOUT" \
     "$PROBE" "${STAGED[@]}" \
     > "$ROOT/build/tickprobe-$TAG.log" 2>&1
 RC=$?

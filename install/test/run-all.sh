@@ -23,7 +23,7 @@
 # All but STATIC then boot the installed machine with an A2065 on SLIRP and
 # require the network to come up from S:User-Startup alone.
 #
-# Runs are serialised by tools/fsuae-run.sh's lock, so this takes a while --
+# Runs are serialised by tools/amiberry-run.sh's lock, so this takes a while --
 # budget about fifteen minutes.
 #
 # SPDX-License-Identifier: MIT
@@ -59,7 +59,7 @@ python3 "$ROOT/install/tools/showicon.py" "$ROOT/install"/*.info >/dev/null
 rm -rf "$ROOT/build/icons-stage"
 mkdir -p "$ROOT/build/icons-stage/AmiNetXDuo"
 cp "$ROOT/install"/*.info "$ROOT/build/icons-stage/AmiNetXDuo/"
-if AMINETXDUO_RUN_TAG=icons "$ROOT/tools/fsuae-run.sh" -t 90 \
+if AMINETXDUO_RUN_TAG=icons "$ROOT/tools/amiberry-run.sh" -t 90 \
         "$ROOT/build/icontest" "$ROOT/build/icons-stage/AmiNetXDuo"; then
     RESULTS+=("  PASS  ICONS")
 else

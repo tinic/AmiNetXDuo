@@ -285,7 +285,7 @@ elif [ "$ENFORCE" = "1" ]; then
     "$ROOT/tools/enforcer-run.sh" -n -t "$TIMEOUT" -T "$TAG" \
         "$DRIVER" "${STAGED[@]}" > "$ROOT/build/legacy-$TAG.log" 2>&1
 else
-    "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
+    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
         "$DRIVER" "${STAGED[@]}" > "$ROOT/build/legacy-$TAG.log" 2>&1
 fi
 RC=$?

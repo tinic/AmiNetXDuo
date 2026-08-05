@@ -547,7 +547,7 @@ if [ "$ENFORCE" = "1" ]; then
     "$ROOT/tools/enforcer-run.sh" -n -m -t "$TIMEOUT" -T "$TAG" \
         "$RUNNER" "${STAGED[@]}"
 else
-    "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" ${CPUARG[@]+"${CPUARG[@]}"} \
+    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" ${CPUARG[@]+"${CPUARG[@]}"} \
         "$RUNNER" "${STAGED[@]}"
 fi
 RC=$?

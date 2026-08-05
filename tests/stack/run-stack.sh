@@ -102,5 +102,5 @@ if [ "$ENFORCE" = "1" ]; then
          "$EXE" "$STAGE/devs" "$STAGE/libs"
 fi
 
-exec "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
+exec "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
      "$EXE" "$STAGE/devs" "$STAGE/libs"

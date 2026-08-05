@@ -77,7 +77,7 @@ echo "==> Profile $BIN/profspin under $MODEL${CPU:+ (CPU $CPU)}"
 # xvfb-run because FS-UAE wants a real GL context and exits in a second
 # without one, and -x because a shared run exits early in a way that looks
 # exactly like a crash in the code under test.
-xvfb-run -a "$ROOT/tools/fsuae-run.sh" -x -t "$TIMEOUT" -m "$MODEL" \
+xvfb-run -a "$ROOT/tools/amiberry-run.sh" -x -t "$TIMEOUT" -m "$MODEL" \
     ${CPU:+-c "$CPU"} \
     -a "OUT=DH0:spin.prof FOLDED=DH0:spin.folded profspin RANGES=DH0:spin.ranges" \
     "$BIN/Profile" "$BIN/profspin"

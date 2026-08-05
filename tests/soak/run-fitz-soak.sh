@@ -187,7 +187,7 @@ echo "==> live: tail -f $ROOT/build/testhd-$TAG/soak-events.txt"
 echo "==> if anyone needs to reap while this runs: tools/fsuae-reap.sh -a $((DEADLINE / 60 + 30))"
 
 set +e
-"$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$DEADLINE" \
+"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$DEADLINE" \
     "$SOAK" "$STAGE/devs" "$STAGE/libs" "$STAGE/fitz" \
     "$STAGE/AddNetInterface" "$STAGE/localshare" "$STAGE/fitzsoak.cfg"
 RUN_RC=$?

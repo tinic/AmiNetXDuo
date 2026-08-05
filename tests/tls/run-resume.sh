@@ -154,7 +154,7 @@ run_api() {
     echo
     echo "======================================================== phase: api"
     AMINETXDUO_RUN_TAG=resume-api \
-    "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
+    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
         "$RESUME" "$STAGE/devs" "$STAGE/libs"
 }
 
@@ -172,7 +172,7 @@ SYS:fetch https://ecc256.badssl.com/ TO DH0:cross4.txt
 EOF
 
     AMINETXDUO_RUN_TAG=resume-cross \
-    "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
+    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
         "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/fetch" \
         "$STAGE/AddNetInterface" "$STAGE/commands.txt"
 }
@@ -190,7 +190,7 @@ SYS:fetch https://www.iana.org/ TO DH0:seed.txt
 EOF
 
     AMINETXDUO_RUN_TAG=resume-seed \
-    "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" -k "$SEED_CLOCK" \
+    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" -k "$SEED_CLOCK" \
         "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/fetch" \
         "$STAGE/AddNetInterface" "$STAGE/commands.txt" || true
 
@@ -202,7 +202,7 @@ SYS:fetch https://www.iana.org/ TO DH0:warm.txt
 EOF
 
     AMINETXDUO_RUN_TAG=resume-warm \
-    "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
+    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
         "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/fetch" \
         "$STAGE/AddNetInterface" "$STAGE/commands.txt"
 }

@@ -131,7 +131,7 @@ echo "==> $SECONDS_RUN s, mode $MODE, $CONNS connection(s), probes=$PROBES"
 echo "==> if anyone needs to reap while this runs: tools/fsuae-reap.sh -a $((DEADLINE / 60 + 30))"
 
 set +e
-"$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$DEADLINE" "${CLOCKARG[@]}" \
+"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$DEADLINE" "${CLOCKARG[@]}" \
     "$OUT/Endurance" "$STAGE/devs" "$STAGE/libs" "$STAGE/endurance.cfg"
 RUN_RC=$?
 set -e

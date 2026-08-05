@@ -79,17 +79,19 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 TIMEOUT=120
 MODEL=A1200
 CPU=""
+CLOCK=""
 BOARD=""
 BACKEND="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
 GUEST_ARGS="${AMINETXDUO_GUEST_ARGS:-}"
 
 USAGE="usage: $0 [-t seconds] [-m model] [-c cpu] [-N board] [-B backend] [-a args] <executable> [files...]"
 
-while getopts "t:m:c:N:B:a:" opt; do
+while getopts "t:m:c:k:N:B:a:" opt; do
     case "$opt" in
         t) TIMEOUT="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
+        k) CLOCK="$OPTARG" ;;
         N) BOARD="$OPTARG" ;;
         B) BACKEND="$OPTARG" ;;
         a) GUEST_ARGS="$OPTARG" ;;
@@ -259,6 +261,32 @@ EOF
 
 [ -z "$KICKSTART_EXT" ] || echo "kickstart_ext_rom_file=$KICKSTART_EXT" >> "$CFG"
 [ -z "$CPU" ] || echo "cpu_type=$CPU" >> "$CFG"
+
+# ------------------------------------------------------------- -k CLOCK MHz --
+#
+# Move the CPU clock and keep the cycle accounting, the same thing
+# tools/fsuae-run.sh -k did through uae_cpu_multiplier.  Amiberry is WinUAE's
+# core and spells it cpu_multiplier; measured here with tests/perf/cpucal on
+# 2026-08-04, because neither documents the unit:
+#
+#     multiplier 2   ADD.L 311.8 ns   6.41 MHz
+#     multiplier 4   ADD.L 152.9 ns  13.08 MHz   (the default A1200)
+#     multiplier 8   ADD.L  75.8 ns  26.40 MHz
+#
+# Linear at 3.27 MHz a step, and ADD.L stays at its published two cycles at
+# every one of them, so the instruction accounting is untouched and only the
+# rate moves.  fs-uae measured 3.5 a step on the same instruction; the two are
+# the same knob, and a figure taken under one is not comparable with the other.
+#
+# Chip RAM deliberately does not scale with it: it is chipset bound, and the
+# difference between a Fast RAM number and a Chip RAM one is the part of a
+# workload the bus owns, which is what makes the option worth having.
+if [ -n "$CLOCK" ]; then
+    MULT=$(( (CLOCK * 100 + 163) / 327 ))
+    [ "$MULT" -ge 1 ] || MULT=1
+    echo "cpu_multiplier=$MULT" >> "$CFG"
+    echo "==> CPU clock: multiplier $MULT, nominally $((MULT * 327 / 100)) MHz"
+fi
 board_lines "$BOARD" >> "$CFG"
 
 # AMINETXDUO_AMIBERRY_EXTRA appends raw `key=value` lines, semicolon separated,

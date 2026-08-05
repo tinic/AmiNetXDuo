@@ -190,7 +190,7 @@ CLOCKARG=()
 [ -z "$CLOCK" ] || CLOCKARG=(-k "$CLOCK")
 
 set +e
-"$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$DEADLINE" "${CLOCKARG[@]}" \
+"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$DEADLINE" "${CLOCKARG[@]}" \
     "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/fitz" "$STAGE/Endurance" \
     "$STAGE/AddNetInterface" "$STAGE/commands.txt" "$STAGE/endurance.cfg"
 RUN_RC=$?
