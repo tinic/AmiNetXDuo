@@ -9,6 +9,10 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.17.3
+
+- The three libraries are smaller. `bsdsocket.library` drops 10,104 bytes, from 349,244 to 339,144, by collecting the sections nothing reaches and giving internal linkage to the 33 symbols only one file uses
+
 ## 0.17.2
 
 - A machine that installed 0.17.0 or 0.17.1 no longer stops part way through its Startup-Sequence. The line the installer writes into `S:User-Startup` runs `AddNetInterface`, which opens `bsdsocket.library`, which brings the stack up and waits for DHCP; the first lease arrived while the library still held the lock that the code answering it wanted, and neither side moved again. A static address was unaffected
