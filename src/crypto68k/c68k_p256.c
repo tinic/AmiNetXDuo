@@ -312,7 +312,7 @@ INT     hi;
 }
 
 
-VOID c68k_p256_fe_add(c68k_p256_fe r, const c68k_p256_fe a, const c68k_p256_fe b)
+static VOID c68k_p256_fe_add(c68k_p256_fe r, const c68k_p256_fe a, const c68k_p256_fe b)
 {
 
 c68k_limb   carry;
@@ -328,7 +328,7 @@ c68k_limb   carry;
 }
 
 
-VOID c68k_p256_fe_sub(c68k_p256_fe r, const c68k_p256_fe a, const c68k_p256_fe b)
+static VOID c68k_p256_fe_sub(c68k_p256_fe r, const c68k_p256_fe a, const c68k_p256_fe b)
 {
 
     if (c68k_p256_sub_raw(r, a, b) != 0)
@@ -661,7 +661,7 @@ c68k_p256_fe    z3;
 }
 
 
-VOID c68k_p256_to_affine(c68k_p256_aff *r, const c68k_p256_jac *p1)
+static VOID c68k_p256_to_affine(c68k_p256_aff *r, const c68k_p256_jac *p1)
 {
 
 c68k_p256_fe    zi;

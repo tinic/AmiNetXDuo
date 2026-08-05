@@ -339,7 +339,7 @@ typedef struct
  * The bare name "local" is not in the .local domain, it is a single label
  * with no domain, and sending it to mDNS would claim a top-level name.
  */
-BOOL ami_netstack_mdns_is_local(const char *name)
+static BOOL ami_netstack_mdns_is_local(const char *name)
 {
     static const char suffix[] = ".local";
     ULONG             len;

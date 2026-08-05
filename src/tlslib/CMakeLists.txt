@@ -96,7 +96,14 @@ if(AMINETXDUO_TLSLIB_LINK)
 
     # -nostartfiles, not -nostdlib: no crt0 in a shared library, but nx_crypto
     # wants memcpy/memset/memcmp and the linker only pulls what is referenced.
-    target_link_options(tls_library PRIVATE -nostartfiles ${TLSLIB_WRAP_OPTIONS})
+    #
+    # --gc-sections is only 308 bytes here -- src/tls/ and nx_crypto are already
+    # close to one function per file -- but it costs nothing and keeps the three
+    # libraries linking the same way.  It composes with --wrap: the wrap target
+    # is a reference like any other, so the wrapper is a root and the wrapped
+    # symbol is reached through it.
+    target_link_options(tls_library PRIVATE -nostartfiles -Wl,--gc-sections
+                        ${TLSLIB_WRAP_OPTIONS})
 
     if(AMIGA_SIZE)
         add_custom_command(TARGET tls_library POST_BUILD

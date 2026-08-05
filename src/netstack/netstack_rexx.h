@@ -42,13 +42,11 @@ LONG ami_rx_setvalue(struct CSource *args, const char **errstr, AmiRxReply *r);
 
 /* AmiTCP's kern/amiga_config.c strings, so a script that prints one sees what
    AmiTCP printed. The two with %s take "getvalue"/"setvalue" and the name. */
+/* The five that only netstack_rexx_vars.c raises -- illegal_var, illegal_ind,
+   too_long, memory, nowrite -- are static there.  These are the ones the
+   command half in netstack_rexx.c also returns. */
 extern const char ami_rx_err_unknown[];
 extern const char ami_rx_err_syntax[];
-extern const char ami_rx_err_illegal_var[];
-extern const char ami_rx_err_illegal_ind[];
-extern const char ami_rx_err_too_long[];
-extern const char ami_rx_err_memory[];
-extern const char ami_rx_err_nowrite[];
 extern const char ami_rx_err_unimpl[];
 extern const char ami_rx_err_state[];
 

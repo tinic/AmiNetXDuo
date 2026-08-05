@@ -255,7 +255,7 @@ static UINT ami_crypto_method_ec_secp256_operation(UINT op,
     return(NX_CRYPTO_SUCCESS);
 }
 
-NX_CRYPTO_METHOD ami_crypto_method_ec_secp256 =
+static NX_CRYPTO_METHOD ami_crypto_method_ec_secp256 =
 {
     NX_CRYPTO_EC_SECP256R1,                     /* EC placeholder             */
     256,                                        /* Key size in bits           */
@@ -704,7 +704,7 @@ ULONG                       elapsed;
     return(status);
 }
 
-NX_CRYPTO_METHOD ami_crypto_method_rsa =
+static NX_CRYPTO_METHOD ami_crypto_method_rsa =
 {
     NX_CRYPTO_KEY_EXCHANGE_RSA,             /* RSA crypto algorithm           */
     0,                                      /* Key size in bits               */
@@ -916,7 +916,7 @@ ULONG               blocks;
     return(NX_CRYPTO_SUCCESS);
 }
 
-NX_CRYPTO_METHOD ami_crypto_method_aes_cbc_128 =
+static NX_CRYPTO_METHOD ami_crypto_method_aes_cbc_128 =
 {
     NX_CRYPTO_ENCRYPTION_AES_CBC,
     NX_CRYPTO_AES_128_KEY_LEN_IN_BITS,
@@ -929,7 +929,7 @@ NX_CRYPTO_METHOD ami_crypto_method_aes_cbc_128 =
     ami_crypto_method_aes_cbc_operation
 };
 
-NX_CRYPTO_METHOD ami_crypto_method_aes_cbc_256 =
+static NX_CRYPTO_METHOD ami_crypto_method_aes_cbc_256 =
 {
     NX_CRYPTO_ENCRYPTION_AES_CBC,
     NX_CRYPTO_AES_256_KEY_LEN_IN_BITS,
@@ -1157,7 +1157,7 @@ UCHAR                    tag[C68K_POLY1305_TAG_SIZE];
     return(NX_CRYPTO_SUCCESS);
 }
 
-NX_CRYPTO_METHOD ami_crypto_method_chacha20_poly1305 =
+static NX_CRYPTO_METHOD ami_crypto_method_chacha20_poly1305 =
 {
     NX_CRYPTO_ENCRYPTION_CHACHA20_POLY1305,
     (C68K_CHACHA20_KEY_SIZE << 3),          /* 256-bit key                    */
@@ -1280,7 +1280,7 @@ C68K_SHA256    *ctx;
                                         method -> nx_crypto_algorithm));
 }
 
-NX_CRYPTO_METHOD ami_crypto_method_sha256 =
+static NX_CRYPTO_METHOD ami_crypto_method_sha256 =
 {
     NX_CRYPTO_HASH_SHA256,
     0,
@@ -1447,7 +1447,7 @@ ULONG                   want;
                            output, (UINT)want));
 }
 
-NX_CRYPTO_METHOD ami_crypto_method_hmac_sha256 =
+static NX_CRYPTO_METHOD ami_crypto_method_hmac_sha256 =
 {
     NX_CRYPTO_AUTHENTICATION_HMAC_SHA2_256,
     0,

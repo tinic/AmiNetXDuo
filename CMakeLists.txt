@@ -404,6 +404,35 @@ target_include_directories(netxduo_addons PUBLIC
     ${NETXDUO_ADDON_INCLUDES})
 target_link_libraries(netxduo_addons PUBLIC netxduo)
 
+# -ffunction-sections ON THE VENDORED ARCHIVES ONLY, so the --gc-sections the
+# three libraries now link with has something to collect.
+#
+# A pulled archive member is kept whole, and the core's one-function-per-file
+# convention already makes that granular enough.  The add-ons do not follow it:
+# nxd_mdns.c, nxd_dhcp_client.c and nxd_dns.c are one translation unit each for
+# a whole protocol, and bsdsocket.library reaches a fraction of every one of
+# them.  Splitting those three is where the saving is -- nxd_dhcp_client 2,176
+# bytes, nxd_mdns 1,960, nxd_dns 1,484, nx_utility 1,056.
+#
+# NOT on src/, measured: our own objects are all reachable, so the flag buys
+# padding, and -fno-optimize-sibling-calls gives up the tail calls that pay for
+# themselves.  Adding src/netstack, src/sana2 and src/bpf to this list puts
+# 1,316 bytes BACK on bsdsocket.library; the tree-wide version costs 3,348.
+# 68000-minimal, the drawer with the least room, gains the most: 249,488 to
+# 239,540, 9,948 bytes and 3.99%, against 2.81% for the default build.
+#
+# NOT -fdata-sections: it isolates a $VER: tag so nothing relocates to it and
+# the collector takes it, which is what cmake/check-version-tag.cmake exists to
+# catch.  The vendored code carries no version tags and would be safe, but 168
+# bytes is not worth a flag that means something different two directories away.
+#
+# -fno-optimize-sibling-calls TRAVELS WITH -ffunction-sections, ALWAYS -- see
+# src/config/CMakeLists.txt for the reboot that rule was written from.
+foreach(_vendored threadx netxduo netxduo_addons)
+    target_compile_options(${_vendored} PRIVATE
+                           -ffunction-sections -fno-optimize-sibling-calls)
+endforeach()
+
 if(AMINETXDUO_MDNS)
     # The mDNS module's tunables, set HERE and PUBLIC rather than in
     # port/netxduo-amiga/inc/nx_user.h, because they are the add-on's knobs and

@@ -388,7 +388,6 @@ VOID ami_netstack_rexx_resume(VOID);
  * to keep a .local name away from the unicast server (RFC 6762 3), so the
  * test has to exist whether or not anything can answer one.
  */
-BOOL ami_netstack_mdns_is_local(const char *name);
 
 /* The singleton, without the "is it up" filtering the public accessor does. */
 AmiNetStack *ami_netstack_raw(VOID);

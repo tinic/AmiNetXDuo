@@ -37,12 +37,12 @@
 
 #include "bpf_internal.h"
 
-AmiBpfChan     ami_bpf_chan[AMI_BPF_MAX_CHANNELS];
+static AmiBpfChan ami_bpf_chan[AMI_BPF_MAX_CHANNELS];
 volatile UWORD ami_bpf_bound_channels;
 
 /* ---------------------------------------------------------------- helpers */
 
-VOID ami_bpf_copy_bytes(void *dst, const void *src, ULONG len)
+static VOID ami_bpf_copy_bytes(void *dst, const void *src, ULONG len)
 {
     UBYTE       *d = (UBYTE *)dst;
     const UBYTE *s = (const UBYTE *)src;
@@ -87,12 +87,12 @@ VOID ami_bpf_zero_bytes(void *dst, ULONG len)
  * `struct bpf_hdr` reads them. Copying the value's own representation byte by
  * byte keeps that true without assuming the record is aligned.
  */
-VOID ami_bpf_put32(UBYTE *p, ULONG value)
+static VOID ami_bpf_put32(UBYTE *p, ULONG value)
 {
     ami_bpf_copy_bytes(p, &value, 4);
 }
 
-VOID ami_bpf_put16(UBYTE *p, UWORD value)
+static VOID ami_bpf_put16(UBYTE *p, UWORD value)
 {
     ami_bpf_copy_bytes(p, &value, 2);
 }

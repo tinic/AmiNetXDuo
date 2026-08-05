@@ -92,15 +92,12 @@ typedef struct AmiMbufPool
     ULONG          drops;           /* mbstat.m_drops                       */
 } AmiMbufPool;
 
-extern AmiMbufPool ami_mbuf_pool;
 
 /* -------------------------------------------------------- shared internals */
 
 /* mbuf_alloc.c */
-VOID        ami_mbuf_ensure_init(VOID);
 AmiCluster *ami_mbuf_cluster_of(const void *ext_buf);
 VOID        ami_mbuf_ext_ref(struct mbuf *m);
-VOID        ami_mbuf_ext_unref(struct mbuf *m);
 
 /*
  * Start of the internal data area for m, m_pktdat when M_PKTHDR is set,
