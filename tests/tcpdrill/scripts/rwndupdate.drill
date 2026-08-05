@@ -105,3 +105,14 @@ recv 4096 = 4096
 tx A seq=1 ack=18981 win=32120 within=900
 recv 2596 = 2596
 notx 300
+
+
+# THERE IS NO CASE FOR A BUFFER AT OR UNDER TWO SEGMENTS, because no such
+# socket can exist: the advertised window is sized from the packet pool at
+# socket create with a floor of BSD_TCP_WINDOW, 8192, and SO_RCVBUF applies
+# nothing on TCP (options.c says why).  8192 is over two segments at any MSS a
+# 1500-byte wire can carry, so the min(MSS, ...) term this file used to assert
+# was the active minimum on every socket this stack ever made, and RCV.BUFF/2
+# alone governs every socket it can make now.  A case was written to pin the
+# small-buffer identity and failed on the SYN: the window came out 33580
+# regardless, which is how this paragraph got measured.

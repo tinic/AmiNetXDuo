@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.17.4
+
 - File server reads are close to write speed now. The receiver announced re-opened window space a single segment at a time, so a bulk read was paced by ~1050 window-update round trips per megabyte; announcing at half the receive buffer instead takes a 68020 fitz read from 640 to a steady 1700+ KB/s, writes unchanged
 
 ## 0.17.3
