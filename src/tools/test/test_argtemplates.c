@@ -113,9 +113,9 @@ static char *slurp(const char *path)
  * `#define TEMPLATE "a,b," \` continued over lines.  Collect every quoted run
  * from the define to the first line that does not end in a backslash.
  */
-static int read_template(const char *src, char *out, size_t outlen)
+static int read_template(const char *from, char *out, size_t outlen)
 {
-    const char *p = strstr(src, "#define TEMPLATE");
+    const char *p = from;
     size_t      n = 0;
 
     if (p == NULL)
@@ -247,9 +247,10 @@ static int sentinel_of(const char *src, char *out, size_t outlen)
 /*
  * The ARG_ enum after the template, minus the sentinel above.
  */
-static int read_args(const char *src, char names[][64], int max)
+static int read_args(const char *src, const char *from, char names[][64],
+                     int max)
 {
-    const char *p = strstr(src, "#define TEMPLATE");
+    const char *p = from;
     char        sentinel[64];
     int         n = 0;
 
@@ -299,10 +300,15 @@ static int read_args(const char *src, char names[][64], int max)
 
 /* ------------------------------------------------------------------ test --- */
 
-static void check_command(const char *name)
+/*
+ * Every template/enum pair in the file, not just the first.  addnetroute.c is
+ * two commands behind #ifdef TOOL_DELETE -- DeleteNetRoute with three
+ * arguments and AddNetRoute with six -- and each carries its own pair.
+ * Checking only the first left the six-argument half unchecked.
+ */
+static void check_pair(const char *name, int pair, const char *src,
+                       const char *from)
 {
-    char  path[512];
-    char *src;
     char  tmpl[1024];
     char  args[64][64];
     int   nargs;
@@ -311,24 +317,19 @@ static void check_command(const char *name)
     char *item;
     char *copy;
 
-    snprintf(path, sizeof(path), "%s/src/tools/%s.c",
-             AMINETXDUO_SOURCE_DIR, name);
-
-    src = slurp(path);
-    CHECK(src != NULL, "%s: cannot read %s", name, path);
-    if (src == NULL)
+    CHECK(read_template(from, tmpl, sizeof(tmpl)),
+          "%s[%d]: no TEMPLATE text", name, pair);
+    if (tmpl[0] == '\0')
         return;
 
-    CHECK(read_template(src, tmpl, sizeof(tmpl)),
-          "%s: no TEMPLATE found", name);
-    if (tmpl[0] == '\0') { free(src); return; }
-
-    nargs = read_args(src, args, 64);
-    CHECK(nargs > 0, "%s: no ARG_ enum found", name);
-    if (nargs == 0) { free(src); return; }
+    nargs = read_args(src, from, args, 64);
+    CHECK(nargs > 0, "%s[%d]: no ARG_ enum after the template", name, pair);
+    if (nargs == 0)
+        return;
 
     copy = strdup(tmpl);
-    if (copy == NULL) { free(src); return; }
+    if (copy == NULL)
+        return;
 
     for (item = strtok_r(copy, ",", &save); item != NULL;
          item = strtok_r(NULL, ",", &save))
@@ -338,18 +339,45 @@ static void check_command(const char *name)
         if (nitems < nargs)
         {
             CHECK(item_has_alias(item, args[nitems], first, sizeof(first)),
-                  "%s: template item %d (%s) has no alias %s, "
+                  "%s[%d]: template item %d (%s) has no alias %s, "
                   "which is what ARG_%s indexes",
-                  name, nitems, first, args[nitems], args[nitems]);
+                  name, pair, nitems, first, args[nitems], args[nitems]);
         }
         nitems++;
     }
 
     CHECK(nitems == nargs,
-          "%s: template has %d items, enum has %d entries",
-          name, nitems, nargs);
+          "%s[%d]: template has %d items, enum has %d entries",
+          name, pair, nitems, nargs);
 
     free(copy);
+}
+
+static void check_command(const char *name)
+{
+    char        path[512];
+    char       *src;
+    const char *p;
+    int         pair = 0;
+
+    snprintf(path, sizeof(path), "%s/src/tools/%s.c",
+             AMINETXDUO_SOURCE_DIR, name);
+
+    src = slurp(path);
+    CHECK(src != NULL, "%s: cannot read %s", name, path);
+    if (src == NULL)
+        return;
+
+    p = src;
+    while ((p = strstr(p, "#define TEMPLATE")) != NULL)
+    {
+        check_pair(name, pair, src, p);
+        pair++;
+        p += strlen("#define TEMPLATE");
+    }
+
+    CHECK(pair > 0, "%s: no TEMPLATE found", name);
+
     free(src);
 }
 
