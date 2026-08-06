@@ -296,6 +296,17 @@ static ULONG bsd_dead_calls;
  */
 static LONG bsd_dead_base_call(VOID)
 {
+    /*
+     * Once, not every time: a program that does this usually does it in a
+     * loop, and the point is to say that it happened, not to fill the log.
+     */
+    if (bsd_dead_calls == 0UL)
+    {
+        AMI_WARN("bsdsocket: a call arrived through a base that was already "
+                 "closed; answering it with 0. The caller closed the library "
+                 "and kept its pointer.");
+    }
+
     bsd_dead_calls++;
     return 0;
 }
