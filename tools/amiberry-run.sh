@@ -458,6 +458,20 @@ fi
 
 if [ "$status" = "124" ]; then
     echo "==> TIMEOUT after ${TIMEOUT}s (no DH0:.done)"
+    # A timeout with NOTHING on the serial port is a different fault from a
+    # slow one, and the two are indistinguishable unless this says so.  The
+    # machine never reached the program: the model, the CPU and the ROM
+    # disagree, or the binary is built for an architecture this machine does
+    # not have -- a 68020 binary halts a 68000 on an illegal instruction
+    # before a line of it executes.  A merely slow run still prints its banner
+    # within seconds, so raising -t cannot fix this one.
+    if [ ! -s "$SERIAL" ]; then
+        echo "!! NOT ONE BYTE reached the serial port in ${TIMEOUT}s." >&2
+        echo "!! This is not a slow run: the machine never ran the program." >&2
+        echo "!! Check -m $MODEL / -c ${CPU:-default} / $(basename "$KICKSTART")" >&2
+        echo "!! and that $EXE_NAME is built for that CPU.  Raising -t will not" >&2
+        echo "!! help." >&2
+    fi
 else
     echo "==> exit status $status after $(( $(date +%s) - WALL_START ))s of host wall clock"
 fi
