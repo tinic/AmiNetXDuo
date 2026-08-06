@@ -35,6 +35,8 @@
 
 #include "tls_internal.h"
 
+#include "crypto68k.h"
+
 #include <proto/exec.h>
 
 static const AmiNetXDuoContext *tls_ctx;
@@ -61,6 +63,25 @@ static LONG tls_obtain_context(APTR socket_base, const AmiNetXDuoContext **out)
                       : "r" (a6), "r" (a0), "r" (d0), "r" (d1)
                       : "a1", "cc", "memory");
     return res;
+}
+
+/*
+ * The handshake's public-key arithmetic is the longest stretch of code in
+ * this library that makes no ThreadX call, and the port only reschedules at
+ * ThreadX API boundaries, so without this the IP thread does not run for the
+ * length of a key exchange or a chain verification.  crypto68k calls this
+ * between iterations; the pair is a no-op for a caller that does not hold
+ * the baton, and nesting-safe for one that does.
+ */
+static VOID tls_crypto_yield(VOID)
+{
+    const AmiNetXDuoContext *ctx = tls_ctx;
+
+    if (ctx != NULL)
+    {
+        ctx->nxc_BatonRelease();
+        ctx->nxc_BatonAcquire();
+    }
 }
 
 LONG tls_netx_bind(APTR socket_base)
@@ -97,7 +118,8 @@ LONG tls_netx_bind(APTR socket_base)
     if (ctx->nxc_Size != (ULONG)sizeof(AmiNetXDuoContext))
         return -1;
 
-    tls_ctx = ctx;
+    tls_ctx         = ctx;
+    c68k_yield_hook = tls_crypto_yield;
 
     return 0;
 }

@@ -66,6 +66,7 @@ set(TLSLIB_INCLUDES
     "${AMINETXDUO_NETXDUO}/nx_secure/ports"
     "${AMINETXDUO_NETXDUO}/crypto_libraries/inc"
     "${CMAKE_SOURCE_DIR}/src/tls"
+    "${CMAKE_SOURCE_DIR}/src/crypto68k"
     "${CMAKE_CURRENT_SOURCE_DIR}")
 
 if(AMINETXDUO_TLSLIB_LINK)

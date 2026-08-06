@@ -17,6 +17,9 @@
 
 #include "crypto68k.h"
 
+/* Declared in crypto68k.h; see the note there. */
+VOID (*c68k_yield_hook)(VOID);
+
 /*
  * Always compiled, under its own name, even in an assembly build: the
  * benchmark measures the two against each other in the same run, the only
