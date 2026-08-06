@@ -1,0 +1,247 @@
+# tcpdrill -- the receive path's checksum, whichever way it was computed.
+#
+# AMINETXDUO_RX_COPY_SUM has the SANA-II copy hook sum the frame while it moves
+# it out of the device's buffer, and n68k_ip_checksum_compute() return that
+# instead of walking the payload.  A faster checksum that is wrong is a stack
+# that accepts damaged segments, so these cases are written to fail if it is:
+# every one of them either damages a segment and requires it to be dropped, or
+# leaves it alone and requires the bytes back unchanged.
+#
+# THEY PASS WITH THE FLAG OFF TOO, and must.  Nothing here names the feature;
+# they are assertions about the receive path, and the point of running them
+# both ways is that the two answers have to be the same.
+#
+# ---------------------------------------------------------------------------
+
+# A damaged payload is dropped: no acknowledgement, nothing delivered, and the
+# connection carries on afterwards so the drop is the checksum's doing and not
+# a socket that fell over.
+case s01_corrupt_payload_is_dropped
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=100 corrupt=50
+notx 400
+recv 200 = AGAIN
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=101 within=400
+recvpat 100
+
+# The LAST byte, which is the one the melded copy has to build a zero-padded
+# longword out of and where a wrong answer would come from the previous
+# frame's bytes rather than this one's.
+case s02_corrupt_last_byte_is_dropped
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=101 corrupt=100
+notx 400
+recv 200 = AGAIN
+
+# The first byte after the TCP header.
+case s03_corrupt_first_byte_is_dropped
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=103 corrupt=0
+notx 400
+recv 200 = AGAIN
+
+# Every length modulo 4, accepted and delivered byte for byte.  The trailing
+# 1, 2 and 3 bytes are three different cases in the checksum and three
+# different cases in the copy.
+case s04_len_101_round_trips
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=101
+tx A seq=1 ack=102 within=400
+recvpat 101
+
+case s05_len_102_round_trips
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=102
+tx A seq=1 ack=103 within=400
+recvpat 102
+
+case s06_len_103_round_trips
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=103
+tx A seq=1 ack=104 within=400
+recvpat 103
+
+case s07_len_104_round_trips
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=104
+tx A seq=1 ack=105 within=400
+recvpat 104
+
+# One byte, the shortest segment that carries anything.
+case s08_len_1_round_trips
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=1
+tx A seq=1 ack=2 within=400
+recvpat 1
+
+# A full-sized segment.
+case s09_full_segment_round_trips
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=1460
+tx A seq=1 ack=1461 within=400
+recvpat 1460
+
+# ETHERNET PADDING.  A frame shorter than 60 bytes is padded on the wire, and
+# the device hands the padding over with the rest: the copy sees more bytes
+# than the datagram claims.  Summing the padding into the answer would drop a
+# segment that is perfectly good, so this is the case that says it must not.
+case s10_padded_frame_is_accepted
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=1 pad=5
+tx A seq=1 ack=2 within=400
+recvpat 1
+
+# Padding on a segment whose length would otherwise take the fast path.
+case s11_padded_full_length_is_accepted
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=102 pad=8
+tx A seq=1 ack=103 within=400
+recvpat 102
+
+# A padded frame whose payload is damaged is still dropped -- the fall-through
+# is a slower path, not a laxer one.
+case s12_padded_and_corrupt_is_dropped
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=60 pad=4 corrupt=30
+notx 400
+recv 200 = AGAIN
+
+# A DEVICE BUFFER ON THE WRONG BOUNDARY.  SANA-II promises nothing about where
+# a driver's buffer sits, and the copy-and-sum path needs a longword.  These
+# frames arrive two bytes off, so the copy takes its ordinary route and the
+# checksum is computed the ordinary way: same answers, both ways.
+case s13_unaligned_source_round_trips
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=103 unaligned=1
+tx A seq=1 ack=104 within=400
+recvpat 103
+
+case s14_unaligned_source_corrupt_is_dropped
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=103 unaligned=1 corrupt=102
+notx 400
+recv 200 = AGAIN
+
+# TRANSMIT, checked from the other side.  Every frame the harness collects has
+# its TCP and IP checksums verified (tcpdrill.c decode()/do_tx), so a stash
+# left over from a received frame and read back on a packet the pool reissued
+# for transmit shows up here as a checksum failure rather than as a stall.
+# The lengths are stepped so that one of them lines up with whatever a
+# previous frame left behind.
+case s15_transmit_after_receive_traffic
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=101 within=400
+recvpat 100
+send 40
+tx PA seq=1 ack=101 len=40
+rx A seq=101 ack=41
+send 60
+tx PA seq=41 ack=101 len=60
+rx A seq=101 ack=101
+send 6
+tx PA seq=101 ack=101 len=6
+rx A seq=101 ack=107
+send 1440
+tx PA seq=107 ack=101 len=1440
+rx A seq=101 ack=1547
+
+# The same thing aimed rather than hoped for.
+#
+# A padded frame is one the fast path declines, so nothing consumes what the
+# copy left in the packet, and the packet goes back to the pool with it.  One
+# pool serves both directions and the pool hands buffers back most recently
+# freed first, so the next send is likely to be that same buffer -- and with
+# NX_PHYSICAL_HEADER at 16 a transmit segment's IP header lands exactly where
+# the received frame's did.  What remains is arithmetic: the segment whose
+# length makes the two agree.  NX_TCP_PACKET is 76 and the TCP header is
+# prepended before the checksum, so the prefix is 40 and the send that lines
+# up with a frame of F copied bytes is F - 60 bytes long.
+#
+# Each pair below is one of those.  A frame we send whose checksum was
+# computed over a frame we received fails do_tx's per-frame verification.
+case s16_a_stale_stash_must_not_reach_transmit
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=60 pad=4
+tx A seq=1 ack=61 within=400
+recvpat 60
+send 44
+tx PA seq=1 ack=61 len=44
+rx A seq=61 ack=45
+rx PA seq=61 ack=45 len=60 pad=8
+tx A seq=45 ack=121 within=400
+recvpat 60
+send 48
+tx PA seq=45 ack=121 len=48
+rx A seq=121 ack=93
+rx PA seq=121 ack=93 len=100 pad=4
+tx A seq=93 ack=221 within=400
+recvpat 100
+send 84
+tx PA seq=93 ack=221 len=84
+rx A seq=221 ack=177

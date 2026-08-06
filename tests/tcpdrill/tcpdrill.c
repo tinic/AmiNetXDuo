@@ -1,9 +1,9 @@
 /*
- * tcpdrill, a packet-level conformance harness for AmiNetXDuo's TCP.
+ * tcpdrill -- a packet-level conformance harness for AmiNetXDuo's TCP.
  *
  * Google's packetdrill states a test as two interleaved things: the socket
  * calls an application makes, and the exact packets that must appear on the
- * wire in response, flags, sequence numbers, window, options, and the time
+ * wire in response -- flags, sequence numbers, window, options, and the time
  * between them.  A failing case is then a specification of what should have
  * happened, which is the property this harness is after.  Its published
  * scripts were read as a description of correct TCP behaviour; none of its
@@ -22,11 +22,8 @@
  *   connect                connect(); EINPROGRESS is the expected answer
  *   listen                 bind localport, listen(4)
  *   accept                 accept(); the accepted socket becomes the subject
- *   send N [= WHAT]        send N bytes of a known pattern.  AGAIN requires
- *                          the send to be refused, as a closed window must;
- *                          SHORT allows any part of it to be taken
- *   wirebytes              the distinct sequence space the stack has sent must
- *                          equal what every send() in the case reported taking
+ *   send N [= AGAIN]       send N bytes of a known pattern; AGAIN requires
+ *                          the send to be refused, as a closed window must
  *   oob N                  send one byte, value N, with MSG_OOB
  *   recv MAX = WHAT        recv(); WHAT is a byte count, EOF, or AGAIN
  *   readable 0|1           WaitSelect() with a zero timeout, read set
@@ -39,7 +36,7 @@
  *   tx FLAGS [key=value]   the next frame the stack sends must be this
  *   notx MS                the stack must send nothing for MS
  *   txcount MIN MAX        discard everything queued, and assert how much of
- *                          it there was, a retransmission series is a count
+ *                          it there was -- a retransmission series is a count
  *   rx FLAGS [key=value]   inject this frame into the stack
  *
  * FLAGS is a string from FSRPAUEC, or `-` for none.  Keys:
@@ -55,28 +52,10 @@
  *   urg=N   urgent pointer.
  *   mss=N   the MSS option must be present with this value (tx) or is sent
  *           with it (rx).
- *   sackok=0|1
- *           the SACK-Permitted option (RFC 2018 kind 4) must be present or
- *           absent (tx); on rx, sackok=1 puts it in the injected SYN.
- *   sack=L:R[,L:R...]
- *           the SACK option (kind 5) must carry exactly these blocks, in this
- *           order.  Sequence numbers are offsets from the ISN this harness
- *           chose, the same space `ack=` counts in, because the blocks
- *           describe data the peer sent.  `sack=-` requires no SACK option.
- *   hdrlen=N
- *           the TCP data offset, in bytes.  20 is a header with no options.
- *           A wrong data offset is a silently corrupt segment: the payload
- *           starts where it says and nowhere else, so it is worth asserting
- *           next to the options that moved it.
- *   dst=WHERE
- *           rx only: the IP destination of the injected frame, and the
- *           Ethernet destination that has to go with it.  `bcast` is
- *           255.255.255.255, `subnet` is the interface's directed broadcast,
- *           `mcast` is 224.0.0.1; the default is the interface address.
  *   within=MS / after=MS
  *           bounds on the gap between this frame and the previous event,
  *           measured from the E-Clock reading taken inside the device's
- *           BeginIO, the instant the stack handed the frame over, so the
+ *           BeginIO -- the instant the stack handed the frame over -- so the
  *           harness's own polling interval does not enter the measurement.
  *
  * Output goes to DH0:tcpdrill.txt: one line per directive that asserted
@@ -101,9 +80,6 @@
 
 #define LOCAL_IP        0x0A090901UL            /* 10.9.9.1, DEVS:NetInterfaces */
 #define PEER_IP         0x0A090902UL            /* 10.9.9.2, this harness       */
-#define SUBNET_BCAST_IP 0x0A0909FFUL            /* 10.9.9.255, NETMASK is /24   */
-#define LIMITED_BCAST_IP 0xFFFFFFFFUL
-#define MCAST_IP        0xE0000001UL            /* 224.0.0.1, all hosts         */
 #define DEFAULT_PEER_PORT   9000
 
 static const UBYTE local_mac[6] = { 0x02, 0x00, 0x44, 0x52, 0x4C, 0x01 };
@@ -111,6 +87,7 @@ static const UBYTE peer_mac[6]  = { 0x02, 0x00, 0x44, 0x52, 0x4C, 0x02 };
 
 #define ETYPE_IP        0x0800
 #define ETYPE_ARP       0x0806
+#define ETYPE_IPV6      0x86DD
 #define ETH_HDR         14
 
 /* --------------------------------------------------------------- sockets -- */
@@ -546,11 +523,6 @@ typedef struct Seg
     UWORD   urg;
     ULONG   dlen;
     LONG    mss;                /* -1 when the option is absent */
-    BOOL    sackok;             /* SACK-Permitted option present */
-    UWORD   sack_n;             /* SACK blocks carried, 0 for none */
-    ULONG   sack_l[4];
-    ULONG   sack_r[4];
-    UWORD   thl;                /* TCP header length in bytes    */
     BOOL    ip_ok;              /* IP header checksum verified  */
     BOOL    tcp_ok;             /* TCP checksum verified        */
 
@@ -613,7 +585,6 @@ static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
     s->win      = rd16(&tcp[14]);
     s->urg      = rd16(&tcp[18]);
     s->dlen     = iplen - ihl - thl;
-    s->thl      = thl;
 
     /* The TCP checksum is verified on every frame the stack sends: it costs
        nothing here and no script would think to assert on it. */
@@ -631,9 +602,7 @@ static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
         s->tcp_ok = ((UWORD)(~sum) == 0) ? TRUE : FALSE;
     }
 
-    /* Options.  MSS on the SYN, SACK-Permitted on the SYN, SACK blocks on an
-       acknowledgement that leaves a hole.  Walk properly regardless: a wrong
-       data offset is exactly the fault an option-length walk catches. */
+    /* Options: MSS is the only one this stack emits, but walk properly. */
     {
         const UBYTE *o   = tcp + 20;
         const UBYTE *end = tcp + thl;
@@ -647,22 +616,6 @@ static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
                 break;
             if (*o == 2 && o[1] == 4 && o + 4 <= end)
                 s->mss = (LONG)rd16(&o[2]);
-            if (*o == 4 && o[1] == 2)
-                s->sackok = TRUE;
-            if (*o == 5 && o[1] >= 10 && ((o[1] - 2) % 8) == 0 && o + o[1] <= end)
-            {
-                UWORD n = (UWORD)((o[1] - 2) / 8);
-                UWORD i;
-
-                if (n > 4)
-                    n = 4;
-                for (i = 0; i < n; i++)
-                {
-                    s->sack_l[i] = rd32(&o[2 + i * 8]);
-                    s->sack_r[i] = rd32(&o[6 + i * 8]);
-                }
-                s->sack_n = n;
-            }
             o += o[1];
         }
     }
@@ -714,12 +667,6 @@ typedef struct Case
     ULONG   t_last;             /* E-Clock of the previous event */
     ULONG   fails;
     ULONG   line;
-
-    /* What `wirebytes` compares: what send() said it took, against how far
-       into our own sequence space anything ever reached. */
-    ULONG   accepted;
-    ULONG   wire_end;           /* highest seq + len seen, absolute */
-    BOOL    wire_seen;
 } Case;
 
 static Case cs;
@@ -763,32 +710,6 @@ static VOID arp_reply(const UBYTE *req)
  */
 static ULONG n_background;      /* frames dropped by the filter in pump() */
 
-/*
- * Note a data segment against the case's sequence space.
- *
- * A HIGH-WATER MARK, not a sum: a retransmission carries bytes the peer has
- * already been sent, and counting it twice would make every case with one in
- * it look like the fault this measures.  What is left is the distinct sequence
- * space the stack has committed to, the number a capture is summed for.
- *
- * Called from pump(), so it sees every frame including the ones a `tx`
- * directive is about to consume and the ones nothing ever asks for.
- */
-static VOID wire_note(const Seg *s)
-{
-    ULONG end;
-
-    if (!s->is_tcp || s->dlen == 0 || s->dst_ip != PEER_IP)
-        return;
-
-    end = s->seq + s->dlen;
-    if (!cs.wire_seen || (LONG)(end - cs.wire_end) > 0)
-    {
-        cs.wire_end  = end;
-        cs.wire_seen = TRUE;
-    }
-}
-
 static VOID pump(VOID)
 {
     ULONG stamp;
@@ -811,7 +732,7 @@ static VOID pump(VOID)
         /*
          * Traffic that is not part of any case.  The stack under test is a
          * whole stack: it answers ARP (above), and anything else in the tree
-         * that opens a UDP socket, mDNS, a DHCP renewal, an IGMP report,
+         * that opens a UDP socket -- mDNS, a DHCP renewal, an IGMP report --
          * puts frames on this wire that no script mentions.  They used to be
          * queued like everything else, so the next `tx` in whatever case was
          * running failed with "non-TCP frame ether=0x0800" and every assertion
@@ -820,21 +741,25 @@ static VOID pump(VOID)
          *
          * Anything IPv4 that is not TCP to the peer is therefore counted and
          * dropped.  A malformed TCP segment, or one aimed at the peer, still
-         * reaches the queue, those are results.
+         * reaches the queue -- those are results.
          */
-        if (ether != ETYPE_IP)
+        if (ether == ETYPE_IP && len >= ETH_HDR + 20 &&
+            (scratch[ETH_HDR + 9] != 6 || rd32(&scratch[ETH_HDR + 16]) != PEER_IP))
         {
-            /* Anything that is not IPv4 is not part of any case either, and
-               the test above used to be written as one the wrong way round:
-               it only ever reached IPv4 frames, so an IPv6 router
-               solicitation or multicast-listener report went into the queue
-               and put every later assertion in the case one frame out. */
             n_background++;
             continue;
         }
 
-        if (len >= ETH_HDR + 20 &&
-            (scratch[ETH_HDR + 9] != 6 || rd32(&scratch[ETH_HDR + 16]) != PEER_IP))
+        /*
+         * IPv6 is the same thing one EtherType along, and it is not optional
+         * traffic: stateless autoconfiguration solicits a router and its own
+         * address as soon as the interface comes up, and duplicate-address
+         * detection repeats on a timer.  Nothing here is scripted in v6, so
+         * the whole EtherType is background.  Without this the first case in
+         * a file catches the startup burst and a later one catches a
+         * retransmission, which is a failure that moves when the timing does.
+         */
+        if (ether == ETYPE_IPV6)
         {
             n_background++;
             continue;
@@ -844,14 +769,13 @@ static VOID pump(VOID)
         {
             /* Dropping here would leave every later assertion one frame out
                of step. */
-            say("  !! frame queue overflow, a case sent more than %u frames "
+            say("  !! frame queue overflow -- a case sent more than %u frames "
                 "between directives", (ULONG)PEND_MAX);
             pend_tail = (UWORD)((pend_tail + 1) % PEND_MAX);
             pend_count--;
         }
 
         (VOID)decode(&pend[pend_head], scratch, len, stamp);
-        wire_note(&pend[pend_head]);
         pend_head = (UWORD)((pend_head + 1) % PEND_MAX);
         pend_count++;
     }
@@ -896,50 +820,34 @@ typedef struct Inject
     UWORD   urg;
     ULONG   dlen;
     LONG    mss;
-    BOOL    sackok;
-    BOOL    badopt;             /* an MSS option whose length byte says 3 */
-    ULONG   dst_ip;             /* IP destination; LOCAL_IP unless dst= said */
+    LONG    corrupt;            /* payload byte to flip after the checksum */
+    ULONG   pad;                /* Ethernet padding past the datagram      */
+    BOOL    unaligned;          /* hand the device an odd buffer           */
 } Inject;
+
+/*
+ * The frame is built inside a longword-aligned buffer and handed over at an
+ * offset, because where it starts decides whether the IP header the device
+ * copies out is longword aligned -- and src/sana2/sana2_copy.c takes its
+ * copy-and-sum path only when it is.  Offset 2 is the aligned case, which is
+ * what a driver that positions its receive buffer for the stack produces;
+ * offset 0 is the other one, which SANA-II equally allows.
+ */
+static ULONG f_aligned[(TAP_FRAME_MAX / 4) + 2];
 
 static VOID build_and_inject(const Inject *in)
 {
-    static UBYTE f[TAP_FRAME_MAX];
+    UBYTE *f   = ((UBYTE *)f_aligned) + (in->unaligned ? 0 : 2);
     UBYTE *ip  = &f[ETH_HDR];
     UBYTE *tcp;
-    UWORD  opt = (UWORD)((in->mss >= 0) ? 4 : 0);
-    UWORD  badopt_at;
-    UWORD  thl;
+    UWORD  opt = (in->mss >= 0) ? 4 : 0;
+    UWORD  thl = (UWORD)(20 + opt);
     ULONG  i;
     ULONG  iplen;
 
-    if (in->sackok)
-        opt = (UWORD)(opt + 4);
-    badopt_at = (UWORD)(20 + opt);
-    if (in->badopt)
-        opt = (UWORD)(opt + 4);
-    thl = (UWORD)(20 + opt);
+    zero((UBYTE *)f_aligned, (ULONG)sizeof(f_aligned));
 
-    zero(f, (ULONG)sizeof(f));
-
-    /* The Ethernet destination has to agree with the IP one, or tap_rx_put()
-       hands the frame up without SANA2IOF_BCAST and the stack sees a unicast
-       frame carrying a broadcast address, which is a different case. */
-    if (in->dst_ip == LIMITED_BCAST_IP || in->dst_ip == SUBNET_BCAST_IP)
-    {
-        for (i = 0; i < 6; i++)
-            f[i] = 0xFF;
-    }
-    else if ((in->dst_ip & 0xF0000000UL) == 0xE0000000UL)
-    {
-        f[0] = 0x01; f[1] = 0x00; f[2] = 0x5E;
-        f[3] = (UBYTE)((in->dst_ip >> 16) & 0x7F);
-        f[4] = (UBYTE)((in->dst_ip >> 8) & 0xFF);
-        f[5] = (UBYTE)(in->dst_ip & 0xFF);
-    }
-    else
-    {
-        cp(&f[0], local_mac, 6);
-    }
+    cp(&f[0], local_mac, 6);
     cp(&f[6], peer_mac, 6);
     wr16(&f[12], ETYPE_IP);
 
@@ -954,7 +862,7 @@ static VOID build_and_inject(const Inject *in)
     ip[8] = 64;
     ip[9] = 6;
     wr32(&ip[12], PEER_IP);
-    wr32(&ip[16], in->dst_ip);
+    wr32(&ip[16], LOCAL_IP);
     wr16(&ip[10], ones_sum(ip, 20, 0));
 
     wr16(&tcp[0], cs.peer_port);
@@ -966,32 +874,11 @@ static VOID build_and_inject(const Inject *in)
     wr16(&tcp[14], in->win);
     wr16(&tcp[18], in->urg);
 
-    if (in->mss >= 0)
+    if (opt != 0)
     {
         tcp[20] = 2;
         tcp[21] = 4;
         wr16(&tcp[22], (UWORD)in->mss);
-    }
-    if (in->sackok)
-    {
-        /* NOP, NOP, kind 4, length 2, a whole option word, so the data
-           offset stays a whole number of words with or without the MSS. */
-        UWORD at = (UWORD)(20 + (in->mss >= 0 ? 4 : 0));
-
-        tcp[at]     = 1;
-        tcp[at + 1] = 1;
-        tcp[at + 2] = 4;
-        tcp[at + 3] = 2;
-    }
-    if (in->badopt)
-    {
-        /* An MSS option whose length byte says 3.  RFC 1122 4.2.2.5 calls this
-           an illegal option length; _nx_tcp_mss_option_get() rejects it and the
-           receive path decides what to answer. */
-        tcp[badopt_at]     = 2;
-        tcp[badopt_at + 1] = 3;
-        tcp[badopt_at + 2] = 0;
-        tcp[badopt_at + 3] = 0;
     }
 
     for (i = 0; i < in->dlen; i++)
@@ -1011,9 +898,20 @@ static VOID build_and_inject(const Inject *in)
         wr16(&tcp[16], (UWORD)(~sum));
     }
 
-    if (tap_rx_put(f, ETH_HDR + iplen) != 0)
+    /*
+     * After the checksum, so the segment is exactly what a damaged one on the
+     * wire looks like: the bytes and the checksum disagree, and nothing else
+     * about the frame is wrong.  The stack has to reject it whether it summed
+     * the payload in a pass of its own or inside the copy.
+     */
+    if ((in->corrupt >= 0) && ((ULONG)in->corrupt < in->dlen))
     {
-        say("  !! injection dropped, no CMD_READ outstanding for 0x0800");
+        tcp[thl + in->corrupt] ^= 0xFF;
+    }
+
+    if (tap_rx_put(f, ETH_HDR + iplen + in->pad) != 0)
+    {
+        say("  !! injection dropped -- no CMD_READ outstanding for 0x0800");
         cs.fails++;
     }
 }
@@ -1072,13 +970,11 @@ typedef struct Expect
     BOOL    have_len;   LONG len;
     BOOL    have_urg;   LONG urg;
     BOOL    have_mss;   LONG mss;
-    BOOL    have_sackok; LONG sackok;
-    BOOL    have_badopt; LONG badopt;
-    BOOL    have_sack;  UWORD sack_n; ULONG sack_l[4]; ULONG sack_r[4];
-    BOOL    have_hdrlen; LONG hdrlen;
     BOOL    have_within; LONG within;
     BOOL    have_after;  LONG after;
-    BOOL    have_dst;   ULONG dst;
+    BOOL    have_corrupt; LONG corrupt;
+    BOOL    have_pad;    LONG pad;
+    BOOL    have_unaligned;
 } Expect;
 
 static UWORD parse_flags(const char *s)
@@ -1142,42 +1038,11 @@ static const char *parse_keys(const char *p, Expect *e)
             else if (streq(key, "len"))   { e->have_len = TRUE;    e->len = to_num(eq + 1); }
             else if (streq(key, "urg"))   { e->have_urg = TRUE;    e->urg = to_num(eq + 1); }
             else if (streq(key, "mss"))   { e->have_mss = TRUE;    e->mss = to_num(eq + 1); }
-            else if (streq(key, "sackok")){ e->have_sackok = TRUE; e->sackok = to_num(eq + 1); }
-            else if (streq(key, "badopt")){ e->have_badopt = TRUE; e->badopt = to_num(eq + 1); }
-            else if (streq(key, "hdrlen")){ e->have_hdrlen = TRUE; e->hdrlen = to_num(eq + 1); }
-            else if (streq(key, "sack"))
-            {
-                /* L:R,L:R... in the peer's sequence space, or `-` for none. */
-                const char *v = eq + 1;
-
-                e->have_sack = TRUE;
-                e->sack_n    = 0;
-                while (*v != '\0' && *v != '-' && e->sack_n < 4)
-                {
-                    ULONG l = 0, r = 0;
-
-                    while (*v >= '0' && *v <= '9') l = l * 10 + (ULONG)(*v++ - '0');
-                    if (*v == ':') v++;
-                    while (*v >= '0' && *v <= '9') r = r * 10 + (ULONG)(*v++ - '0');
-                    e->sack_l[e->sack_n] = l;
-                    e->sack_r[e->sack_n] = r;
-                    e->sack_n++;
-                    if (*v == ',') v++;
-                    else break;
-                }
-            }
             else if (streq(key, "within")){ e->have_within = TRUE; e->within = to_num(eq + 1); }
             else if (streq(key, "after")) { e->have_after = TRUE;  e->after = to_num(eq + 1); }
-            else if (streq(key, "dst"))
-            {
-                const char *v = eq + 1;
-
-                e->have_dst = TRUE;
-                if (streq(v, "bcast"))       e->dst = LIMITED_BCAST_IP;
-                else if (streq(v, "subnet")) e->dst = SUBNET_BCAST_IP;
-                else if (streq(v, "mcast"))  e->dst = MCAST_IP;
-                else                         e->dst = LOCAL_IP;
-            }
+            else if (streq(key, "corrupt")) { e->have_corrupt = TRUE; e->corrupt = to_num(eq + 1); }
+            else if (streq(key, "pad"))   { e->have_pad = TRUE;   e->pad = to_num(eq + 1); }
+            else if (streq(key, "unaligned")) { e->have_unaligned = (to_num(eq + 1) != 0) ? TRUE : FALSE; }
         }
         p = next;
     }
@@ -1238,29 +1103,10 @@ static VOID describe(const Seg *s, char *out, ULONG max)
     fmt_num(&o, s->win, 10, 0, FALSE);
     { const char *t = " len="; while (*t != '\0') *o++ = *t++; }
     fmt_num(&o, s->dlen, 10, 0, FALSE);
-    { const char *t = " hdrlen="; while (*t != '\0') *o++ = *t++; }
-    fmt_num(&o, s->thl, 10, 0, FALSE);
     if (s->mss >= 0)
     {
         const char *t = " mss="; while (*t != '\0') *o++ = *t++;
         fmt_num(&o, (ULONG)s->mss, 10, 0, FALSE);
-    }
-    if (s->sackok)
-    {
-        const char *t = " sackok"; while (*t != '\0') *o++ = *t++;
-    }
-    if (s->sack_n != 0)
-    {
-        const char *t = " sack="; UWORD i;
-
-        while (*t != '\0') *o++ = *t++;
-        for (i = 0; i < s->sack_n; i++)
-        {
-            if (i != 0) *o++ = ',';
-            fmt_num(&o, s->sack_l[i] - cs.p_isn, 10, 0, FALSE);
-            *o++ = ':';
-            fmt_num(&o, s->sack_r[i] - cs.p_isn, 10, 0, FALSE);
-        }
     }
     if ((s->flags & TF_URG) != 0)
     {
@@ -1300,7 +1146,7 @@ static VOID do_tx(const char *args, const char *raw)
     Expect  e;
     Seg     got;
     ULONG   limit;
-    char    desc[360];
+    char    desc[280];
     char    why[280];
     char   *w;
 
@@ -1390,25 +1236,6 @@ static VOID do_tx(const char *args, const char *raw)
         CHECK((LONG)got.urg == e.urg, "urgent pointer", e.urg, got.urg);
     if (e.have_mss)
         CHECK(got.mss == e.mss, "mss option", e.mss, got.mss);
-    if (e.have_sackok)
-        CHECK((got.sackok ? 1 : 0) == e.sackok, "SACK-Permitted option",
-              e.sackok, got.sackok ? 1 : 0);
-    if (e.have_hdrlen)
-        CHECK((LONG)got.thl == e.hdrlen, "TCP header length", e.hdrlen, got.thl);
-    if (e.have_sack)
-    {
-        UWORD i;
-
-        CHECK((LONG)got.sack_n == (LONG)e.sack_n, "SACK block count",
-              e.sack_n, got.sack_n);
-        for (i = 0; i < e.sack_n; i++)
-        {
-            CHECK(got.sack_l[i] == cs.p_isn + e.sack_l[i], "SACK block left edge",
-                  e.sack_l[i], (LONG)(got.sack_l[i] - cs.p_isn));
-            CHECK(got.sack_r[i] == cs.p_isn + e.sack_r[i], "SACK block right edge",
-                  e.sack_r[i], (LONG)(got.sack_r[i] - cs.p_isn));
-        }
-    }
 
     CHECK(got.tcp_ok, "TCP checksum (0 = valid)", 0, 1);
     CHECK(got.ip_ok,  "IP checksum (0 = valid)", 0, 1);
@@ -1438,7 +1265,7 @@ static VOID do_notx(const char *args, const char *raw)
     char  tok[24];
     ULONG ms;
     Seg   got;
-    char  desc[360];
+    char  desc[280];
 
     (VOID)token(args, tok, sizeof(tok));
     ms = (ULONG)to_num(tok);
@@ -1471,9 +1298,9 @@ static VOID do_rx(const char *args, const char *raw)
     in.urg   = (UWORD)(e.have_urg ? e.urg : 0);
     in.dlen  = (ULONG)(e.have_len ? e.len : 0);
     in.mss   = e.have_mss ? e.mss : -1;
-    in.sackok = (e.have_sackok && e.sackok) ? TRUE : FALSE;
-    in.badopt = (e.have_badopt && e.badopt) ? TRUE : FALSE;
-    in.dst_ip = e.have_dst ? e.dst : LOCAL_IP;
+    in.corrupt   = e.have_corrupt ? e.corrupt : -1;
+    in.pad       = (ULONG)(e.have_pad ? e.pad : 0);
+    in.unaligned = e.have_unaligned;
 
     /* Give the stack a moment to post its reads before the very first
        injection of a case; after that they are always outstanding. */
@@ -1622,28 +1449,20 @@ static VOID do_send(const char *args, const char *raw)
     LONG  want;
     LONG  rc;
     ULONG i;
-    BOOL  want_again  = FALSE;
-    BOOL  allow_short = FALSE;
+    BOOL  want_again = FALSE;
 
     args = token(args, tok, sizeof(tok));
     want = to_num(tok);
     if (want > (LONG)sizeof(payload))
         want = (LONG)sizeof(payload);
 
-    /*
-     * `send N = AGAIN`, the send is expected to be refused, which is what a
-     * non-blocking socket must do against a closed window.
-     *
-     * `send N = SHORT`, the send may take any part of it, including none.
-     * How much is not the assertion; `wirebytes` is, and it needs a directive
-     * that does not decide the answer in advance.
-     */
+    /* `send N = AGAIN` -- the send is expected to be refused, which is what a
+       non-blocking socket must do against a closed window. */
     args = token(args, tok, sizeof(tok));
     if (tok[0] == '=')
     {
         (VOID)token(args, tok, sizeof(tok));
-        want_again  = streq(tok, "AGAIN");
-        allow_short = streq(tok, "SHORT");
+        want_again = streq(tok, "AGAIN");
     }
 
     for (i = 0; i < (ULONG)want; i++)
@@ -1651,29 +1470,6 @@ static VOID do_send(const char *args, const char *raw)
 
     cs.t_last = tap_eclock_now();
     rc = s_send(cs.sock, payload, want, 0);
-
-    if (rc > 0)
-        cs.accepted += (ULONG)rc;
-
-    if (allow_short)
-    {
-        if (rc < 0 && s_errno() != E_WOULDBLOCK)
-        {
-            char  why[64];
-            char *w = why;
-            const char *t = "send() failed, errno ";
-
-            while (*t) *w++ = *t++;
-            fmt_num(&w, (ULONG)s_errno(), 10, 0, TRUE);
-            *w = '\0';
-            fail(raw, why);
-            return;
-        }
-
-        n_pass++;
-        say("  ok   %s   [accepted %u]", raw, (rc > 0) ? (ULONG)rc : 0UL);
-        return;
-    }
 
     if (want_again)
     {
@@ -1724,7 +1520,6 @@ static VOID do_oob(const char *args, const char *raw)
         fail(raw, "send(MSG_OOB) did not send one byte");
         return;
     }
-    cs.accepted += 1;
     pass(raw);
 }
 
@@ -1781,6 +1576,67 @@ static VOID do_recv(const char *args, const char *raw)
         *w = '\0';
         fail(raw, why);
     }
+}
+
+/*
+ * recv N bytes and check that they are the bytes that were sent.  A count is
+ * not enough for the copy path: src/sana2/sana2_copy.c moves the frame and
+ * sums it in one pass, and a right checksum over a wrongly-copied payload
+ * would satisfy every other assertion in this file.  build_and_inject() fills
+ * the data with 'a' + i % 26 from the start of the segment, so this is for a
+ * case with one segment outstanding.
+ */
+static VOID do_recvpat(const char *args, const char *raw)
+{
+    char tok[24];
+    LONG want;
+    LONG rc;
+    LONG i;
+
+    (VOID)token(args, tok, sizeof(tok));
+    want = to_num(tok);
+
+    if (want > (LONG)sizeof(payload))
+        want = (LONG)sizeof(payload);
+
+    rc = s_recv(cs.sock, payload, want, 0);
+
+    if (rc != want)
+    {
+        char  why[110];
+        char *w = why;
+        const char *t = "recv() returned ";
+
+        while (*t) *w++ = *t++;
+        fmt_num(&w, (ULONG)rc, 10, 0, TRUE);
+        t = ", wanted "; while (*t) *w++ = *t++;
+        fmt_num(&w, (ULONG)want, 10, 0, TRUE);
+        *w = '\0';
+        fail(raw, why);
+        return;
+    }
+
+    for (i = 0; i < rc; i++)
+    {
+        if (payload[i] != (UBYTE)('a' + (i % 26)))
+        {
+            char  why[110];
+            char *w = why;
+            const char *t = "byte ";
+
+            while (*t) *w++ = *t++;
+            fmt_num(&w, (ULONG)i, 10, 0, FALSE);
+            t = " is 0x"; while (*t) *w++ = *t++;
+            fmt_num(&w, (ULONG)payload[i], 16, 2, FALSE);
+            t = ", expected 0x"; while (*t) *w++ = *t++;
+            fmt_num(&w, (ULONG)('a' + (i % 26)), 16, 2, FALSE);
+            *w = '\0';
+            fail(raw, why);
+            return;
+        }
+    }
+
+    pass(raw);
 }
 
 static VOID do_select(const char *args, const char *raw, BOOL write_set)
@@ -1899,7 +1755,7 @@ static VOID do_opt(const char *args, const char *raw)
  * `close [within=MS]`.
  *
  * CloseSocket() sends a FIN and the connection outlives the descriptor, so the
- * call must never wait for a peer that has stopped answering, a program that
+ * call must never wait for a peer that has stopped answering -- a program that
  * closes and exits would hang on the way out.  The optional bound asserts
  * that.  The number in the transcript is the whole CloseSocket(), measured
  * across the call rather than off the frame it produced.
@@ -1947,47 +1803,13 @@ static VOID do_close(const char *args, const char *raw)
 }
 
 /*
- * `txcount MIN MAX`, how many frames the stack sent while we were not
+ * `txcount MIN MAX` -- how many frames the stack sent while we were not
  * looking, discarded.
  *
  * A retransmission series is asserted as a count: ten separate `tx` lines
  * would assert the intervals too, and the intervals belong to another
  * workstream.  This checks only that the stack kept retrying and then stopped.
  */
-/*
- * rxorder fifo|lifo
- *
- * Which queued CMD_READ the synthetic device completes when a frame arrives.
- * fifo is the default and is what the drivers in the test matrix happen to do,
- * so every existing script is unaffected.  lifo models a device whose firmware
- * owns the RX slots and whose framer returns them out of the order the reads
- * were posted -- ZZ9000Net is the case in hand.  SANA-II promises no order,
- * so nothing in the stack may depend on one.
- */
-static VOID do_rxorder(const char *args, const char *raw)
-{
-    char tok[16];
-
-    (VOID)raw;
-
-    (VOID)token(args, tok, sizeof(tok));
-
-    if (streq(tok, "lifo"))
-    {
-        tap_set_rx_lifo(TRUE);
-        say("   rxorder lifo: reads complete last-matching-first");
-    }
-    else if (streq(tok, "fifo"))
-    {
-        tap_set_rx_lifo(FALSE);
-        say("   rxorder fifo");
-    }
-    else
-    {
-        say("!! rxorder: expected fifo or lifo");
-    }
-}
-
 static VOID do_txcount(const char *args, const char *raw)
 {
     char  tok[24];
@@ -2028,82 +1850,20 @@ static VOID do_txcount(const char *args, const char *raw)
     say("  ok   %s   [%u frame(s)]", raw, n);
 }
 
-/*
- * `wirebytes`, what left must equal what send() said it took.
- *
- * The one invariant a stream cannot state any other way.  A transfer that
- * merely completes proves nothing: duplicated bytes inside a stream still
- * arrive as a plausible file, and the 512 KB the fault was found on differed
- * from its source by 3888 bytes without ever failing to transfer.  So the
- * assertion is arithmetic on both sides, the sum of the send() return values
- * against the distinct sequence space the stack committed to, which is the
- * same sum a capture is put through, done here with no capture at all.
- */
-static VOID do_wirebytes(const char *raw)
-{
-    ULONG wire;
-    char  why[110];
-    char *w = why;
-    const char *t;
-
-    pump();
-
-    if (!cs.u_isn_known)
-    {
-        fail(raw, "no initial sequence number learned yet");
-        return;
-    }
-
-    /* Data starts one past the SYN. */
-    wire = cs.wire_seen ? (cs.wire_end - cs.u_isn - 1UL) : 0UL;
-
-    if (wire != cs.accepted)
-    {
-        t = "wire bytes "; while (*t) *w++ = *t++;
-        fmt_num(&w, wire, 10, 0, FALSE);
-        t = ", send() accepted "; while (*t) *w++ = *t++;
-        fmt_num(&w, cs.accepted, 10, 0, FALSE);
-        t = ", difference "; while (*t) *w++ = *t++;
-        fmt_num(&w, (ULONG)((LONG)wire - (LONG)cs.accepted), 10, 0, TRUE);
-        *w = '\0';
-        fail(raw, why);
-        return;
-    }
-
-    n_pass++;
-    say("  ok   %s   [%u byte(s), both sides]", raw, wire);
-}
-
-/*
- * `idle MS` is REAL time, off the E-Clock, not a count of Delay(1) calls.
- *
- * It used to add 20 per iteration on the grounds that Delay(1) is one 50 Hz
- * tick.  pump() between them is not free, though: measured under an emulator
- * an `idle 700` took about 1,520 ms, and a case that used it to hold an
- * acknowledgment back for less than the one second retransmission timeout
- * instead held it back for longer than one, so the segment was retransmitted
- * in the middle of the wait.  That reads as the stack sending a frame it
- * should not have, which is the opposite of what happened.
- *
- * Cases that assert on an interval are unaffected either way, `after` and
- * `within` are measured from the tap device's own E-Clock stamps, so this
- * changes only how long `idle` actually idles for.
- */
 static VOID do_idle(const char *args, const char *raw)
 {
     char  tok[24];
     ULONG ms;
-    ULONG start;
+    ULONG spent = 0;
 
     (VOID)token(args, tok, sizeof(tok));
     ms = (ULONG)to_num(tok);
 
-    start = tap_eclock_now();
-
-    while (ticks_to_ms(start, tap_eclock_now()) < ms)
+    while (spent < ms)
     {
         pump();
         Delay(1);
+        spent += 20;
     }
     pump();
     pass(raw);
@@ -2114,8 +1874,8 @@ static VOID do_idle(const char *args, const char *raw)
 /*
  * Tear a case's socket down so that nothing of it appears in the next case.
  *
- * SO_LINGER {on, 0} is required. Once CloseSocket() started sending a FIN,
- * which is what RFC 793 3.5 asks for and what this harness asserts in c03,
+ * SO_LINGER {on, 0} is required. Once CloseSocket() started sending a FIN --
+ * which is what RFC 793 3.5 asks for and what this harness asserts in c03 --
  * a plain close left a connection retransmitting that FIN into a peer that had
  * stopped listening, once a second, for ten seconds. Those frames turned up in
  * the next four cases, and every case that leaves unacknowledged data behind
@@ -2228,12 +1988,6 @@ static VOID run_line(char *line)
         char tok[16];
         (VOID)token(args, tok, sizeof(tok));
         cs.peer_port = (UWORD)to_num(tok);
-
-        /* A new source port is a new connection with an initial sequence
-           number of its own, so the one learned from the previous SYN no
-           longer describes it. Forgetting it here is what lets a case drive
-           two connections to the same listening port. */
-        cs.u_isn_known = FALSE;
     }
     else if (streq(verb, "localport"))
     {
@@ -2248,6 +2002,7 @@ static VOID run_line(char *line)
     else if (streq(verb, "send"))     do_send(args, raw);
     else if (streq(verb, "oob"))      do_oob(args, raw);
     else if (streq(verb, "recv"))     do_recv(args, raw);
+    else if (streq(verb, "recvpat"))  do_recvpat(args, raw);
     else if (streq(verb, "readable")) do_select(args, raw, FALSE);
     else if (streq(verb, "writable")) do_select(args, raw, TRUE);
     else if (streq(verb, "shutdown")) do_shutdown(args, raw);
@@ -2257,9 +2012,7 @@ static VOID run_line(char *line)
     else if (streq(verb, "tx"))       do_tx(args, raw);
     else if (streq(verb, "notx"))     do_notx(args, raw);
     else if (streq(verb, "txcount")) do_txcount(args, raw);
-    else if (streq(verb, "wirebytes")) do_wirebytes(raw);
     else if (streq(verb, "rx"))       do_rx(args, raw);
-    else if (streq(verb, "rxorder"))  do_rxorder(args, raw);
     else
         say("!! unknown directive: %s", raw);
 }
@@ -2301,7 +2054,7 @@ int main(void)
 
     out_file = Open((STRPTR)"DH0:tcpdrill.txt", MODE_NEWFILE);
 
-    say("tcpdrill, packet-level TCP conformance");
+    say("tcpdrill -- packet-level TCP conformance");
 
     if (tap_install(local_mac) != 0)
     {
@@ -2333,7 +2086,7 @@ int main(void)
 
     if (!tap_is_online())
     {
-        say("!! the interface never came online, DEVS:NetInterfaces/tap0?");
+        say("!! the interface never came online -- DEVS:NetInterfaces/tap0?");
         CloseLibrary(SockBase);
         tap_remove();
         if (out_file != (BPTR)0) Close(out_file);
