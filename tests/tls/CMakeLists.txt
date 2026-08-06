@@ -3,8 +3,8 @@
 #   cmake -S . -B build/cm -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
 #         -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_TLS=ON
 #   cmake --build build/cm --parallel --target tls_bench
-#   AMINETXDUO_RUN_TAG=tls20 ./tools/fsuae-run.sh        -t 300 build/cm/tests/tls/tls_bench
-#   AMINETXDUO_RUN_TAG=tls30 ./tools/fsuae-run.sh -c 68030 -t 300 build/cm/tests/tls/tls_bench
+#   AMINETXDUO_RUN_TAG=tls20 ./tools/amiberry-run.sh      -t 300 build/cm/tests/tls/tls_bench
+#   AMINETXDUO_RUN_TAG=tls30 ./tools/amiberry-run.sh -c 68030 -t 300 build/cm/tests/tls/tls_bench
 
 add_executable(tls_bench tls_bench.c)
 
@@ -32,9 +32,9 @@ endif()
 # by an order of magnitude, and a correctness regression should be catchable in
 # a short run:
 #
-#   AMINETXDUO_RUN_TAG=hs   ./tools/fsuae-run.sh -t 300 build/tls/tests/tls/tls_handshake
-#   AMINETXDUO_RUN_TAG=hsd  ./tools/fsuae-run.sh -t 900 build/tls/tests/tls/tls_decompose
-#   AMINETXDUO_RUN_TAG=hsi  ./tools/fsuae-run.sh -t 900 build/tls/tests/tls/tls_interop
+#   AMINETXDUO_RUN_TAG=hs   ./tools/amiberry-run.sh -t 300 build/tls/tests/tls/tls_handshake
+#   AMINETXDUO_RUN_TAG=hsd  ./tools/amiberry-run.sh -t 900 build/tls/tests/tls/tls_decompose
+#   AMINETXDUO_RUN_TAG=hsi  ./tools/amiberry-run.sh -t 900 build/tls/tests/tls/tls_interop
 foreach(prog tls_handshake tls_decompose tls_interop)
     add_executable(${prog} tls_handshake.c)
 
