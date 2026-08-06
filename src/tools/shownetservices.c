@@ -391,6 +391,36 @@ static UWORD print_type(UWORD count, const char *type, BOOL want_txt)
  * without AMINETXDUO_MDNS answers ENOSYS to the browse, which on its own would
  * read as "nothing found".
  */
+/*
+ * Is any interface actually answering .local?  Distinct from stack_has_mdns():
+ * that asks whether this build has a responder at all, this asks whether any
+ * interface asked it to run.  MDNS= is per interface and defaults to off, so
+ * "built in and idle" is the ordinary case, not a fault.
+ */
+static BOOL mdns_enabled_somewhere(struct Library *base)
+{
+    struct
+    {
+        NetStatusHeader    hdr;
+        NetStatusInterface e[NX_MAX_PHYSICAL_INTERFACES];
+    } answer;
+    LONG count;
+    LONG i;
+
+    count = tool_netstatus_query(base, NETSTATUS_INTERFACES, &answer,
+                                 sizeof(answer), sizeof(NetStatusInterface));
+    if (count <= 0)
+        return FALSE;
+
+    for (i = 0; i < count && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        if (answer.e[i].nsi_Flags & NETSTATUS_IF_MDNS)
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
 static BOOL stack_has_mdns(struct Library *base)
 {
     struct
@@ -535,6 +565,16 @@ int main(int argc, char **argv)
         tool_netstatus_close(base);
         FreeArgs(rda);
         return RETURN_FAIL;
+    }
+
+    if (!mdns_enabled_somewhere(base))
+    {
+        tool_error("mDNS is not enabled on any interface; add MDNS=YES to "
+                   "the interface file in DEVS:NetInterfaces and restart the "
+                   "stack");
+        tool_netstatus_close(base);
+        FreeArgs(rda);
+        return RETURN_WARN;
     }
 
     if (browse_start(base, type, &err) < 0)

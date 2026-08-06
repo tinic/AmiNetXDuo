@@ -57,6 +57,7 @@ typedef struct ToolIfInfo
     UWORD           nx_index;
     BOOL            attached;        /* NX_INTERFACE is valid                */
     BOOL            link_up;
+    BOOL            mdns;            /* answering .local on this wire        */
     ULONG           address;         /* host byte order                      */
     ULONG           netmask;
     ULONG           mtu;

@@ -129,6 +129,7 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
         info->nx_index = src->nsi_Index;
         info->attached = (src->nsi_Flags & NETSTATUS_IF_ATTACHED) ? TRUE : FALSE;
         info->link_up  = (src->nsi_Flags & NETSTATUS_IF_LINKUP) ? TRUE : FALSE;
+        info->mdns     = (src->nsi_Flags & NETSTATUS_IF_MDNS) ? TRUE : FALSE;
         info->address  = src->nsi_Address;
         info->netmask  = src->nsi_NetMask;
         info->mtu      = src->nsi_MTU;

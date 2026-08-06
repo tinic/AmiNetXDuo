@@ -216,6 +216,33 @@ LONG ami_netstack_mdns_start(AmiNetStack *ns)
     UWORD i;
     UWORD enabled = 0;
 
+    /*
+     * Nothing to do, and this is the point of the option: without a responder
+     * there is no thread, no group membership on 224.0.0.251, and no multicast
+     * query on any of these wires becomes work for this machine.  Enabling it
+     * per interface but always creating the instance would keep most of the
+     * cost.
+     */
+    {
+        UWORD n;
+        BOOL  wanted = FALSE;
+
+        for (n = 0; n < ns->ns_IfaceCount; n++)
+        {
+            if (ns->ns_IfaceMdns[n])
+            {
+                wanted = TRUE;
+                break;
+            }
+        }
+
+        if (!wanted)
+        {
+            AMI_INFO("netstack: mDNS off, no interface asked for it");
+            return AMI_NET_OK;
+        }
+    }
+
     if (ns == NULL || !ns->ns_IpCreated)
         return AMI_NET_ERR_STATE;
 
@@ -270,11 +297,18 @@ LONG ami_netstack_mdns_start(AmiNetStack *ns)
      */
     for (i = 0; i < ns->ns_IfaceCount; i++)
     {
+        if (!ns->ns_IfaceMdns[i])
+        {
+            continue;
+        }
+
         status = nx_mdns_enable(&ns->ns_Mdns, (UINT)i);
         if (status != NX_SUCCESS)
         {
             AMI_WARN("netstack: mDNS not enabled on interface %ld (%ld)",
                      (long)i, (long)status);
+            /* So that what the status call reports is what is running. */
+            ns->ns_IfaceMdns[i] = FALSE;
             continue;
         }
         enabled++;
@@ -303,6 +337,13 @@ LONG ami_netstack_mdns_start(AmiNetStack *ns)
 
 VOID ami_netstack_mdns_stop(AmiNetStack *ns)
 {
+    UWORD n;
+
+    for (n = 0; n < (UWORD)AMI_CFG_MAX_INTERFACES; n++)
+    {
+        ns->ns_IfaceMdns[n] = FALSE;
+    }
+
     UWORD i;
 
     if (ns == NULL || !ns->ns_MdnsCreated)

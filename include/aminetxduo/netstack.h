@@ -189,6 +189,13 @@ NX_PACKET_POOL *netstack_pool(VOID);
 const AmiConfig *netstack_config(VOID);
 
 /*
+ * Is this machine answering .local on that interface?  By NX interface
+ * index.  This is the effective state, not the MDNS= request: an
+ * interface the responder refused reads FALSE.
+ */
+BOOL netstack_iface_mdns(UWORD nx_index);
+
+/*
  * Copy the packet pool's counters into AmiMemStats (aminetxduo/compat.h) and
  * carry the low-water mark of what is free.
  *

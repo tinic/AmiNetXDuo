@@ -106,6 +106,22 @@ typedef struct AmiIfConfig {
     BOOL        down_goes_offline;           /* IFA_DownGoesOffline; default FALSE */
 
     /*
+     * Answer .local queries on this interface.  MDNS=YES in the interface
+     * file; DEFAULT IS OFF, and a file that does not mention it gets no
+     * responder.
+     *
+     * Off by default because the cost is not small and is paid whether or not
+     * anything asks: the responder joins 224.0.0.251 on the interface, so
+     * every multicast query on that wire becomes work for this machine, and
+     * it measurably slows the stack on a 68000.  Per interface because that
+     * cost is per interface.
+     *
+     * Present in every build, like the IPv6 fields below; only the parser and
+     * the netstack act on it, and a build without mDNS ignores it.
+     */
+    BOOL        mdns;
+
+    /*
      * IPv6. These fields exist in both build configurations so that one config
      * file, and one AmiConfig, work whether or not the stack was built with
      * AMINETXDUO_IPV6, only the parser and the netstack act on them. In the
