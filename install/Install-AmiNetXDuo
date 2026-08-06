@@ -945,12 +945,11 @@
           "The stack, the commands and ordinary http: work normally.  "
           "Installing again and choosing another build brings the rest back.")
         (message
-          "Encrypted (https:) connections and ssh are not installed on this "
-          "machine.\n\n"
-          "The cryptography a secure connection needs takes minutes on a 68000, "
-          "which is long enough that the far end gives up first.  Everything "
-          "else -- the stack, the commands, ordinary http: -- works normally.\n\n"
-          "A machine with a 68020 or better gets both.")))
+          "Encrypted (https:) connections are not installed: this build "
+          "carries no tls.library.\n\n"
+          "Everything else -- the stack, the commands, ordinary http:, ssh -- "
+          "works normally.  Installing again and choosing another build "
+          "brings https: back.")))
 
 (set @special-msg "")
 
@@ -987,17 +986,16 @@
   (pattern "~(ssh.#?)")
   (optional "force"))
 
-; ssh is the one thing here that is NOT built for the 68000.  Dropbear comes
-; from clients/ rather than the CMake tree and is compiled for the 68020, so
-; the archive carries ssh.020 and ssh.060 beside the other commands and this
-; copies the one for this machine to C:ssh.  The pattern above keeps the pair
-; itself out of C:; only the copy under the plain name lands.
+; Dropbear comes from clients/ rather than the CMake tree, so it is built once
+; per architecture: the archive carries ssh.000, ssh.020 and ssh.060 beside
+; the other commands and this copies the one for this machine to C:ssh.  The
+; pattern above keeps the suffixed set itself out of C:; only the copy under
+; the plain name lands.
 ;
-; Below a 68020 neither is copied: the binary would take an illegal
-; instruction on the first call, and at 7 MHz a curve25519 handshake is not
-; something anyone would wait through.  The last page says so, beside the
-; tls.library sentence it belongs with.
+; A 68000 gets one too.  It is slower there, which is not a reason to leave
+; it out: the machine that can run it should have it.
 (set SSHFILE "")
+(if (= CPUDIR "68000")    (set SSHFILE "ssh.000"))
 (if (= CPUDIR "68020-40") (set SSHFILE "ssh.020"))
 (if (= CPUDIR "68060")    (set SSHFILE "ssh.060"))
 

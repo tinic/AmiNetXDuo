@@ -155,6 +155,7 @@ jobs:
       # curve25519 handshake at 7 MHz is not something anyone waits through.
       - name: Build the ported clients
         run: |
+          AMIGA_CLIENT_ARCH=-m68000    clients/dropbear/build.sh -b build/ssh00
           AMIGA_CLIENT_ARCH=-m68020    clients/dropbear/build.sh -b build/ssh20
           AMIGA_CLIENT_ARCH=-mcpu=68060 clients/dropbear/build.sh -b build/ssh60
 
@@ -171,6 +172,7 @@ jobs:
       # binary cannot be a stale tree.
       - name: Build the distribution archive
         env:
+          AMINETXDUO_SSH_68000: build/ssh00/dbclient
           AMINETXDUO_SSH_68020: build/ssh20/dbclient
           AMINETXDUO_SSH_68060: build/ssh60/dbclient
         run: dist/make-dist.sh -b build/release

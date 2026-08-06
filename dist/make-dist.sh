@@ -279,21 +279,20 @@ chmod 755 "$TREE"/C/*
 #
 # AMINETXDUO_SSH names the built binary outright, the release workflow sets
 # it, so the path it builds into and the path packed here cannot drift.
-# ONE PER CPU, both in C:.  dbclient is the only thing in the archive that
-# comes from clients/ rather than the CMake tree, and it is built -m68020
-# while every other command in C: comes from the 68000 build.  Copying the
-# drawer wholesale therefore put a 68020 binary on a 68000 machine: the
-# installer offered it, the user ran it, and the machine took an illegal
-# instruction.
+# ONE PER CPU, all in C:.  dbclient is the only thing in the archive that
+# comes from clients/ rather than the CMake tree, so it is built once per
+# architecture rather than inheriting the CMake target's.  Copying the drawer
+# wholesale would put a 68020 binary on a 68000 machine: the installer offered
+# it, the user ran it, and the machine took an illegal instruction.
 #
-# So the archive carries ssh.020 and ssh.060 and the installer copies the one
-# this machine can run to C:ssh, or neither below a 68020.  The suffixed pair
-# exists only inside the archive; what lands on the disk is C:ssh, where it
-# has always been.
+# So the archive carries ssh.000, ssh.020 and ssh.060 and the installer copies
+# the one this machine can run to C:ssh.  The suffixed set exists only inside
+# the archive; what lands on the disk is C:ssh, where it has always been.
 #
-# AMINETXDUO_SSH_68020 and AMINETXDUO_SSH_68060 name the two builds; the
-# release workflow runs clients/dropbear/build.sh twice to make them.
+# AMINETXDUO_SSH_68000, _68020 and _68060 name the three builds; the release
+# workflow runs clients/dropbear/build.sh once per architecture to make them.
 declare -A SSH_BUILD=(
+    [000]="${AMINETXDUO_SSH_68000:-$ROOT/build/ssh00/dbclient}"
     [020]="${AMINETXDUO_SSH_68020:-$ROOT/build/ssh20/dbclient}"
     [060]="${AMINETXDUO_SSH_68060:-$ROOT/build/ssh60/dbclient}"
 )
