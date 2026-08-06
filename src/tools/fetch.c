@@ -840,8 +840,54 @@ static LONG fetch_run(VOID)
 
         if (!head.complete)
         {
-            tool_error("%s closed the connection without answering",
-                       (LONG)u.host);
+            ULONG hs_ms = 0;
+
+            if (io.tls != NULL)
+            {
+                struct TLSInfo  hi;
+                UBYTE          *hb = (UBYTE *)&hi;
+                ULONG           k;
+
+                for (k = 0; k < (ULONG)sizeof(hi); k++)
+                    hb[k] = 0;
+                hi.ti_Size = (ULONG)sizeof(hi);
+
+                if (TLSInfo(tbase, io.tls, &hi) == 0)
+                    hs_ms = hi.ti_HandshakeMillis;
+            }
+
+            /*
+             * A server that closes an idle connection after a handshake that
+             * took a long time is enforcing a budget, not failing.  Say which
+             * it was: at ten seconds and up this is almost always the far end
+             * giving up on a slow machine, and a user who is told only that
+             * the connection closed goes looking for a fault in the trust
+             * store or the configuration instead.
+             */
+            if (hs_ms >= 10000UL)
+            {
+                tool_error("%s closed the connection without answering.  The "
+                           "handshake took %lu.%lu s, and some servers allow "
+                           "about 15 s for one; this machine is slower than "
+                           "that budget, and nothing here is misconfigured",
+                           (LONG)u.host,
+                           (LONG)(hs_ms / 1000UL),
+                           (LONG)((hs_ms % 1000UL) / 100UL));
+            }
+            else if (hs_ms != 0)
+            {
+                tool_error("%s closed the connection without answering "
+                           "(handshake %lu.%lu s)",
+                           (LONG)u.host,
+                           (LONG)(hs_ms / 1000UL),
+                           (LONG)((hs_ms % 1000UL) / 100UL));
+            }
+            else
+            {
+                tool_error("%s closed the connection without answering",
+                           (LONG)u.host);
+            }
+
             rc = RETURN_ERROR;
         }
 
