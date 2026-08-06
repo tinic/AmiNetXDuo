@@ -572,6 +572,14 @@ class Listener(threading.Thread):
 
     def _one(self, raw, peer):
         try:
+            # The listener carries a 0.5 s timeout so run() can poll the stop
+            # flag, and whether an accepted socket inherits it has changed
+            # across CPython versions.  Set it here rather than depend on that:
+            # a 14 MHz 68020 needs tens of seconds for the public-key
+            # arithmetic in a handshake, so a server that gives up early
+            # measures its own patience instead of the client.
+            raw.settimeout(float(os.environ.get("AMINETXDUO_PEER_HS_TIMEOUT",
+                                                "300")))
             if self.tls is not None:
                 try:
                     raw = self.tls.wrap_socket(raw, server_side=True)
