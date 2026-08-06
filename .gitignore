@@ -111,3 +111,7 @@ docs/ReadMe
 docs/ReadMe.info
 developer/ReadMe.info
 developer/include/aminetxduo/
+
+# Guest scratch: a Workbench boot writes these when a redirect is mistyped
+# into the Startup-sequence, and they are AmigaOS device names, not files.
+NIL:*

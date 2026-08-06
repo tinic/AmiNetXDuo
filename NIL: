@@ -1,1 +1,0 @@
-36:            out.append('Echo >DH0:stage-%03d "ok"' % n)
