@@ -11,6 +11,8 @@ version at the top when it merges.
 
 ## 0.18.0
 
+- An ssh handshake is several times quicker. The curve25519 field arithmetic is hand-written now, one multiply and one square where the compiler emitted a call per limb: 1.65x on a 68020, 4.47x on a 68060 and 4.74x on a 68000, measured on a real handshake rather than a bench
+- `ssh` is installed on a 68000. It was built for the 68020 only and the installer copied nothing below that, on the grounds that it would be slow; the archive carries one build per processor now and the installer picks the one this machine can run
 - `https:` works on a 68000. A TLS 1.3 handshake against an RSA-2048 server took 232 seconds at 13 MHz and now takes 60, because the limb multiply-accumulate the handshake spends half its time in is hand-written for the parts with no 32x32 into 64 multiply, which is the 68000 and the 68060 both
 - A 68060 TLS transfer costs a third less processor time, from the same multiply-accumulate: 7,473 samples down to 5,108 across two handshakes, with the function itself 4,853 down to 2,491
 - A program that closes `bsdsocket.library` and then keeps using it no longer takes the machine down. Each opener gets its own library base, and freeing it meant a later call jumped into whatever had claimed that memory since; the base is kept now and answers such a call with zero. AveNTP does this and could not run at all
