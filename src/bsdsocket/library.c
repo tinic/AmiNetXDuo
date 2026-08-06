@@ -265,11 +265,12 @@ static struct AmiSocketBase *bsd_lib_init(
 /* ------------------------------------------------- closed base poisoning, */
 
 /*
- * A call through a base that was already closed lands here.  The alert code is
- * ours and not an exec one on purpose: seeing it in a report means precisely
- * this and nothing else, which no random guru from a reused block can say.
+ * A call through a base that was already closed lands here and does nothing.
+ * Freeing the block instead means such a call jumps into whatever allocated it
+ * next, which is a different guru every time and is what issue #2 looks like.
+ * Answering it harmlessly is what the stacks that survive this already do in
+ * effect, by not handing the memory back so promptly.
  */
-#define BSD_ALERT_DEAD_BASE     0x8ADE0001UL
 
 /* How many closed bases keep their poisoned vectors.  Each costs
    lib_NegSize + lib_PosSize, on the order of a kilobyte.  Past this the oldest
@@ -280,9 +281,28 @@ static APTR  bsd_dead_block[BSD_DEAD_RING];
 static ULONG bsd_dead_bytes[BSD_DEAD_RING];
 static UINT  bsd_dead_next;
 
-static VOID bsd_dead_base_call(VOID)
+static ULONG bsd_dead_calls;
+
+/*
+ * Returns 0 and nothing else.  Zero rather than -1 because the vectors have
+ * assorted shapes and this one handler answers all of them: a caller that
+ * expects a pointer gets NULL, which it has to check anyway, where -1 would be
+ * an address it might dereference.  A caller expecting a count or a status
+ * gets 0, which is the harmless answer for a call that did nothing.
+ *
+ * The counter is not diagnostics for its own sake: it is the only evidence
+ * left that a program called through a base it had closed, now that doing so
+ * no longer announces itself.
+ */
+static LONG bsd_dead_base_call(VOID)
 {
-    Alert(BSD_ALERT_DEAD_BASE);
+    bsd_dead_calls++;
+    return 0;
+}
+
+ULONG bsd_dead_base_calls(VOID)
+{
+    return bsd_dead_calls;
 }
 
 /*
