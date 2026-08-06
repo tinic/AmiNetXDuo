@@ -374,6 +374,22 @@ if(AMINETXDUO_NET68K_CHECKSUM)
     list(FILTER NETXDUO_SOURCES EXCLUDE REGEX "/nx_ip_checksum_compute\\.c$")
 endif()
 
+# Verify receive checksums in the driver glue and tell NetX Duo, through
+# NX_ENABLE_INTERFACE_CAPABILITY, not to walk them again.  It costs a second
+# parse of the IP header; it changes no structure, keeps no state between
+# packets and has nothing that can go stale, which is what the fused
+# copy-and-sum could not manage.  src/net68k/n68k_rx_verify.c.
+#
+# It needs the fork's per-packet capability check: upstream NetX Duo consults
+# only the interface flag, which would leave the glue answerable for frames it
+# cannot verify.
+option(AMINETXDUO_RX_VERIFY
+       "Verify receive checksums in the SANA-II glue" OFF)
+
+if(AMINETXDUO_RX_VERIFY)
+    add_compile_definitions(AMINETXDUO_RX_VERIFY)
+endif()
+
 add_library(threadx STATIC ${THREADX_SOURCES})
 target_include_directories(threadx PUBLIC
     ${AMINETXDUO_PORT_INCLUDES} "${AMINETXDUO_THREADX}/common/inc")

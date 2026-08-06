@@ -31,6 +31,10 @@
 
 #include "sana2_internal.h"
 
+#ifdef AMINETXDUO_RX_VERIFY
+#include "net68k.h"
+#endif
+
 #include "nx_ip.h"
 #ifndef NX_DISABLE_IPV4
 #include "nx_arp.h"
@@ -369,6 +373,32 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet)
     switch (type)
     {
     case AMI_ETHERTYPE_IPV4:
+#ifdef AMINETXDUO_RX_VERIFY
+        /*
+         * Verify here and tell the stack what was verified, so it does not
+         * walk the payload a second time.  A frame this declines carries no
+         * bits and the stack checks it exactly as it always has; a frame it
+         * rejects never reaches the stack at all.  See
+         * src/net68k/n68k_rx_verify.c.
+         */
+        {
+            UINT    drop =  NX_FALSE;
+            ULONG   caps =  n68k_rx_verify(packet, &drop);
+
+            if (drop != NX_FALSE)
+            {
+                nx_packet_release(packet);
+                iface->stats.rx_errors++;
+                return;
+            }
+
+            packet->nx_packet_interface_capability_flag = caps;
+        }
+#endif
+        iface->stats.packets_received++;
+        _nx_ip_packet_deferred_receive(iface->ip, packet);
+        break;
+
     case AMI_ETHERTYPE_IPV6:
         iface->stats.packets_received++;
         _nx_ip_packet_deferred_receive(iface->ip, packet);

@@ -55,4 +55,37 @@ VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len);
 }
 #endif
 
+
+#ifdef AMINETXDUO_RX_VERIFY
+
+/*
+ * Where the receive verification went.  A frame that is vouched for and one
+ * that is declined cost different things and neither shows up in a throughput
+ * figure, so the split is counted rather than assumed.
+ */
+typedef struct N68kRxVerifyStats
+{
+    ULONG   ip_ok;              /* IPv4 header verified                     */
+    ULONG   transport_ok;       /* transport verified too                   */
+    ULONG   bad_ip;             /* dropped here: bad IPv4 header checksum   */
+    ULONG   bad_transport;      /* dropped here: bad transport checksum     */
+    ULONG   skip_short;         /* shorter than the header it claims        */
+    ULONG   skip_version;       /* not IPv4                                 */
+    ULONG   skip_length;        /* truncated, or the header overclaims      */
+    ULONG   skip_fragment;      /* MF or offset: the stack reassembles      */
+    ULONG   skip_protocol;      /* nothing this file verifies               */
+    ULONG   skip_udp_nosum;     /* UDP declining to carry one               */
+} N68kRxVerifyStats;
+
+extern N68kRxVerifyStats n68k_rx_verify_stats;
+
+/*
+ * Verify a freshly received frame, prepend pointing at the IPv4 header.
+ * Returns the nx_packet_interface_capability_flag bits to publish, and sets
+ * *drop when the frame is corrupt and must not reach the stack.
+ */
+ULONG n68k_rx_verify(NX_PACKET *packet, UINT *drop);
+
+#endif /* AMINETXDUO_RX_VERIFY */
+
 #endif /* AMINETXDUO_NET68K_H */

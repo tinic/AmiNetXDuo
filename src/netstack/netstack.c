@@ -25,6 +25,10 @@
 
 #include "tx_amiga.h"
 
+#ifdef AMINETXDUO_RX_VERIFY
+#include "net68k.h"
+#endif
+
 #include "aminetxduo/random.h"
 
 #include <exec/memory.h>
@@ -432,6 +436,22 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
 
     if (ns == NULL)
         return;
+
+#ifdef AMINETXDUO_RX_VERIFY
+    AMI_INFO("net68k rxverify: ip_ok %lu, transport_ok %lu, bad_ip %lu, "
+             "bad_transport %lu; skip short %lu / ver %lu / len %lu / "
+             "frag %lu / proto %lu / udp0 %lu",
+             (unsigned long)n68k_rx_verify_stats.ip_ok,
+             (unsigned long)n68k_rx_verify_stats.transport_ok,
+             (unsigned long)n68k_rx_verify_stats.bad_ip,
+             (unsigned long)n68k_rx_verify_stats.bad_transport,
+             (unsigned long)n68k_rx_verify_stats.skip_short,
+             (unsigned long)n68k_rx_verify_stats.skip_version,
+             (unsigned long)n68k_rx_verify_stats.skip_length,
+             (unsigned long)n68k_rx_verify_stats.skip_fragment,
+             (unsigned long)n68k_rx_verify_stats.skip_protocol,
+             (unsigned long)n68k_rx_verify_stats.skip_udp_nosum);
+#endif
 
 #ifdef AMINETXDUO_BPF
     /* Before anything is deleted: the taps run on the SANA-II reader threads
