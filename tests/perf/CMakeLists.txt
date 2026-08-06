@@ -186,7 +186,29 @@ if(NOT CMAKE_CROSSCOMPILING)
         AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h"
         _nx_ip_checksum_compute=n68k_checksum_reference)
 
+    # The receive verifier, on the host, because its whole job is a decision
+    # about an IPv4 frame in memory and that is steppable here and not in an
+    # emulator.
+    add_executable(test_net68k_rxverify
+        host/test_rxverify_host.c
+        "${CMAKE_SOURCE_DIR}/src/net68k/n68k_rx_verify.c"
+        "${CMAKE_SOURCE_DIR}/src/net68k/n68k_checksum.c")
+
+    target_include_directories(test_net68k_rxverify PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${CMAKE_SOURCE_DIR}/src/net68k")
+
+    target_compile_definitions(test_net68k_rxverify PRIVATE
+        AMINETXDUO_RX_VERIFY
+        NX_ENABLE_INTERFACE_CAPABILITY
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h"
+        _nx_ip_checksum_compute=n68k_ip_checksum_compute)
+
     include(CTest)
+    add_test(NAME net68k_rxverify COMMAND test_net68k_rxverify)
     add_test(NAME net68k_checksum COMMAND test_net68k_checksum)
 
 endif()

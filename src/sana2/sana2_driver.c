@@ -212,6 +212,24 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
         nx_ip_interface_address_mapping_configure(
             ip_ptr, iface->index,
             (iface->addr_bytes == AMI_ETH_ADDR_SIZE) ? NX_TRUE : NX_FALSE);
+
+#ifdef AMINETXDUO_RX_VERIFY
+        /*
+         * RECEIVE only.  ami_sana2_rx_deliver() verifies a frame and publishes
+         * what it verified in nx_packet_interface_capability_flag; the fork
+         * requires that per-packet flag as well as this one, so a frame the
+         * glue declines -- a fragment, IPv6, a protocol it does not know -- is
+         * checked by the stack exactly as before.  Nothing is claimed for
+         * transmit: the stack still computes every outgoing checksum.
+         */
+        nx_ip_interface_capability_set(
+            ip_ptr, iface->index,
+            NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM |
+            NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM |
+            NX_INTERFACE_CAPABILITY_UDP_RX_CHECKSUM |
+            NX_INTERFACE_CAPABILITY_ICMPV4_RX_CHECKSUM |
+            NX_INTERFACE_CAPABILITY_IGMP_RX_CHECKSUM);
+#endif
         break;
 
     case NX_LINK_UNINITIALIZE:

@@ -89,6 +89,41 @@ static ULONG n68k_fold(ULONG sum)
 
 /* --------------------------------------------------------- the compute --- */
 
+/*
+ * The melded copy, in portable form.  The assembly is what earns anything
+ * here -- it feeds the adds from the movem.l the copy already does -- but the
+ * contract is the same either way: copy, and return what n68k_sum_longwords()
+ * would have returned over the source.
+ */
+#ifndef AMINETXDUO_NET68K_ASM
+/* The assembly counterpart is in n68k_checksum.S; same guard as
+   n68k_sum_longwords above, so a host build still has one. */
+ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count)
+{
+
+ULONG   acc = 0;
+
+
+    while (count != 0UL)
+    {
+    ULONG   w = *from++;
+
+        *to++ = w;
+
+        acc += w;
+        if (acc < w)
+        {
+            acc++;                      /* end-around carry */
+        }
+
+        count--;
+    }
+
+    return(acc);
+}
+#endif /* AMINETXDUO_NET68K_ASM */
+
+
 USHORT n68k_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
                                 UINT data_length, ULONG *src_ip_addr,
                                 ULONG *dest_ip_addr)

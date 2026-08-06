@@ -247,4 +247,175 @@ _n68k_sum_longwords:
         movem.l sp@+,d2-d7/a2
         rts
 
+
+| ---------------------------------------------------------------------------
+| ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count)
+|
+|   Copy `count` longwords and return the ones-complement accumulator of what
+|   was copied, carries folded end-around, out of the loads the copy is doing
+|   anyway.
+|
+|   Both pointers are WORD aligned and need not agree beyond that, which is
+|   what ami_sana2_copy_to_buff() checks: on this receive path they are always
+|   two bytes out of phase.  A 68000 raises an address error on an odd
+|   address, not on a 4-misaligned one, and a longword move is two word cycles
+|   on its bus either way; 68020 and 68030 realign in hardware.  The 68040 and
+|   68060 take the arm below that issues no MOVEM at all, so no part is asked
+|   for a misaligned multi-register transfer.
+|
+| ONE INSTRUCTION PER LONGWORD TO SUM, and the loads through MOVEM.
+|
+|   The first version folded each longword with an ADD and an ADDX, because it
+|   loaded four ADDRESS registers and ADDX will not take one.  Loading d1-d7
+|   instead lets the ADDX chain carry through X by itself, which is
+|   docs/RESEARCH.md 87's form and halves the summing instructions.
+|
+|   Nothing between two ADDX may disturb X.  MOVEM, MOVE, LEA and CMPA leave
+|   it alone; only the add/subtract/shift group touches it, which is why both
+|   loops close on CMPA against a precomputed end pointer and never on a SUBQ.
+|
+| THE STORES ARE WHERE THE PARTS DISAGREE, and it was measured rather than
+| argued.  bench/sumbench.c times every candidate against the C reference on
+| target; ns/B over 1460 bytes, seven variants, three rounds:
+|
+|                        68000    68020
+|     add/addx (before)   1489      220
+|     movem + addx        1198      189
+|     discrete moves      1342      164
+|     movem load, x8      1261      157
+|     movem pair, x14     1158      182     <- 68000
+|     movem load, x14      1221      148     <- 68020
+|     stores not interleaved
+|                         1256      190
+|
+|   A 68000 moves a longword as two bus cycles whichever instruction asks, so
+|   MOVEM's amortised cost still pays on the store side.  A 68020 would rather
+|   post-increment, and wants the stores INTERLEAVED with the adds: batching
+|   them costs 20% (190 against 157), so the store between each pair of ADDX
+|   is being overlapped rather than merely tolerated.
+|
+|   68060 gets neither, and touches no MOVEM at all: three instructions a
+|   longword, all of them dual-issuable, against a microcoded MOVEM at each end
+|   of a block.  That is N68K_SUM_NO_MOVEM, the same bet n68k_sum7() and
+|   n68k_copy() already make -- UNMEASURED, like those, because cycle accounting
+|   is off above the 68020 and this lab has no such hardware.
+| ---------------------------------------------------------------------------
+
+        .globl  _n68k_copy_sum_longwords
+_n68k_copy_sum_longwords:
+        movem.l d2-d7/a2-a3,sp@-        | 8 longs
+        movea.l sp@(36),a0              | to
+        movea.l sp@(40),a1              | from
+        move.l  sp@(44),d1              | count, in longwords
+
+        moveq   #0,d0                   | the accumulator
+        tst.l   d1
+        beq     .Lcs_out
+
+        move.l  d1,d2
+        lsl.l   #2,d2
+        movea.l a1,a2
+        adda.l  d2,a2                   | one past the last source longword
+
+        moveq   #14,d3
+        cmp.l   d3,d1                   | fewer than one block?
+        bcs     .Lcs_short
+
+        lea     a2@(-56),a3             | last start a whole block still fits
+
+        moveq   #0,d1
+        add.l   d1,d1                   | X = 0; from here nothing may touch it
+
+.Lcs_block:
+#if defined(N68K_SUM_NO_MOVEM) || defined(__mc68040__)
+        | 68060, and 68040: no MOVEM on either side.
+        .rept   14
+        move.l  a1@+,d1
+        move.l  d1,a0@+
+        addx.l  d1,d0
+        .endr
+#elif defined(__mc68020__) || defined(__mc68030__)
+        | Post-incrementing stores, interleaved with the chain.
+        movem.l a1@+,d1-d7
+        move.l  d1,a0@+
+        addx.l  d1,d0
+        move.l  d2,a0@+
+        addx.l  d2,d0
+        move.l  d3,a0@+
+        addx.l  d3,d0
+        move.l  d4,a0@+
+        addx.l  d4,d0
+        move.l  d5,a0@+
+        addx.l  d5,d0
+        move.l  d6,a0@+
+        addx.l  d6,d0
+        move.l  d7,a0@+
+        addx.l  d7,d0
+        movem.l a1@+,d1-d7
+        move.l  d1,a0@+
+        addx.l  d1,d0
+        move.l  d2,a0@+
+        addx.l  d2,d0
+        move.l  d3,a0@+
+        addx.l  d3,d0
+        move.l  d4,a0@+
+        addx.l  d4,d0
+        move.l  d5,a0@+
+        addx.l  d5,d0
+        move.l  d6,a0@+
+        addx.l  d6,d0
+        move.l  d7,a0@+
+        addx.l  d7,d0
+#else
+        | 68000: MOVEM both ways.  It has no (An)+ to memory, hence the LEA.
+        movem.l a1@+,d1-d7
+        movem.l d1-d7,a0@
+        lea     a0@(28),a0
+        addx.l  d1,d0
+        addx.l  d2,d0
+        addx.l  d3,d0
+        addx.l  d4,d0
+        addx.l  d5,d0
+        addx.l  d6,d0
+        addx.l  d7,d0
+        movem.l a1@+,d1-d7
+        movem.l d1-d7,a0@
+        lea     a0@(28),a0
+        addx.l  d1,d0
+        addx.l  d2,d0
+        addx.l  d3,d0
+        addx.l  d4,d0
+        addx.l  d5,d0
+        addx.l  d6,d0
+        addx.l  d7,d0
+#endif
+        cmpa.l  a3,a1                   | CMPA leaves X alone
+        bls     .Lcs_block
+
+        bra     .Lcs_tail
+
+.Lcs_short:
+        moveq   #0,d1
+        add.l   d1,d1                   | X = 0
+
+.Lcs_tail:
+        cmpa.l  a2,a1
+        bcc     .Lcs_fold
+
+.Lcs_one:
+        move.l  a1@+,d1                 | MOVE leaves X alone
+        move.l  d1,a0@+
+        addx.l  d1,d0                   | + the carry still pending in X
+        cmpa.l  a2,a1
+        bcs     .Lcs_one
+
+.Lcs_fold:
+        moveq   #0,d1                   | MOVEQ leaves X alone
+        addx.l  d1,d0                   | the last carry
+        addx.l  d1,d0                   | and the one folding it can make
+
+.Lcs_out:
+        movem.l sp@+,d2-d7/a2-a3
+        rts
+
 #endif /* AMINETXDUO_NET68K_ASM */
