@@ -116,6 +116,21 @@ jobs:
         if: env.AMINETXDUO_A2065 != ''
         run: tests/tools/run-addifup.sh -b build/ci/default
 
+      # A TLS 1.3 handshake end to end, against a peer that will not fall
+      # back to 1.2, on both tiers -- and the second one is not redundant.
+      # A 68020 takes the hand-written limb primitives in c68k_prim.S; a
+      # 68060 cannot, because MULU.L's 32x32 -> 64 form was dropped from
+      # that part, so it runs the portable C instead. The carry-in bug that
+      # stopped 68060 TLS 1.3 was in that C and a green 68020 run said
+      # nothing about it. Two arms, two code paths.
+      - name: TLS 1.3 handshake, 68020
+        if: env.AMINETXDUO_A2065 != ''
+        run: tests/tls/run-tls13.sh -b build/ci/default -c 68020
+
+      - name: TLS 1.3 handshake, 68060
+        if: env.AMINETXDUO_A2065 != ''
+        run: tests/tls/run-tls13.sh -b build/ci/default -c 68060
+
       # THE ONE THAT WOULD HAVE STOPPED 0.17.0 AND 0.17.1 SHIPPING.
       #
       # Everything above runs a test program on a bare directory drive.  This
