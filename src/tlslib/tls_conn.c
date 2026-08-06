@@ -36,6 +36,32 @@
 #include <exec/execbase.h>
 #include <proto/exec.h>
 
+/*
+ * TEMPORARY, for the TLS 1.3 client bring-up.  tls.library links no ami_log on
+ * purpose, so this goes straight out the serial port.  Remove with the
+ * investigation; it is compiled out unless TLS13_PROBE_ON is defined.
+ */
+#ifdef TLS13_PROBE_ON
+#  ifndef RawPutChar
+#    define RawPutChar(c) \
+        LP1NR(0x204, RawPutChar, UBYTE, (c), d0, , EXEC_BASE_NAME)
+#  endif
+static VOID tls13_probe(const char *tag, ULONG v)
+{
+    static const char hex[] = "0123456789abcdef";
+    INT               i;
+
+    while (*tag != '\0')
+        RawPutChar((UBYTE)*tag++);
+    for (i = 28; i >= 0; i -= 4)
+        RawPutChar((UBYTE)hex[(v >> i) & 0xFUL]);
+    RawPutChar((UBYTE)'\n');
+}
+#  define TLS13_PROBE(tag, v)  tls13_probe((tag), (ULONG)(v))
+#else
+#  define TLS13_PROBE(tag, v)  do { } while (0)
+#endif
+
 /* fd_set, open-coded.  <sys/socket.h> would do, and would also drag
    devices/timer.h and the whole netinclude set into a library that needs eight
    lines of it.  The layout is the one src/bsdsocket/select.c implements. */
@@ -583,8 +609,12 @@ struct TLSConnection *tls_TLSOpenA(
 
     start_ticks = ami_tls_eclock();
 
+    TLS13_PROBE("start.in ", conn->tc_Timeout);
+
     status = _nx_secure_tls_session_start(&conn->tc_Session, conn->tc_Socket,
                                            conn->tc_Timeout);
+
+    TLS13_PROBE("start.out ", (ULONG)status);
 
     conn->tc_HandshakeMillis =
         ami_tls_eclock_micros(ami_tls_eclock() - start_ticks) / 1000UL;
