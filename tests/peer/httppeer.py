@@ -571,6 +571,8 @@ class Listener(threading.Thread):
         self.sock.close()
 
     def _one(self, raw, peer):
+        accepted_at = time.time()
+        log(self.tag, "accept from %s:%d" % (peer[0], peer[1]))
         try:
             # The listener carries a 0.5 s timeout so run() can poll the stop
             # flag, and whether an accepted socket inherits it has changed
@@ -597,8 +599,10 @@ class Listener(threading.Thread):
                 try:
                     raw = self.tls.wrap_socket(raw, server_side=True)
                 except (ssl.SSLError, OSError) as exc:
-                    log(self.tag, "TLS handshake from %s:%d failed: %s"
-                        % (peer[0], peer[1], exc))
+                    log(self.tag, "TLS handshake from %s:%d failed"
+                        " after %.1fs: %s"
+                        % (peer[0], peer[1],
+                           time.time() - accepted_at, exc))
                     try:
                         raw.close()
                     except OSError:
