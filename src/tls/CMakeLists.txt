@@ -89,6 +89,17 @@ target_link_libraries(nx_secure PUBLIC nx_crypto netxduo)
 # translation unit that includes nx_secure_tls.h agrees with this one.
 target_compile_definitions(nx_secure PUBLIC NX_SECURE_ENABLE_AEAD_CIPHER)
 
+# TLS 1.3.  Everything it needs is already here and was only ever compiled
+# out: nx_secure's seven nx_secure_tls_1_3_*.c files, _nx_crypto_rsa_pss_verify
+# for the CertificateVerify that RFC 8446 4.4.3 requires instead of PKCS#1
+# v1.5, crypto_method_hkdf for the key schedule, and the three
+# NX_SECURE_TLS_TLS_1_3_ENABLED rows plus the hkdf/hmac/ecdhe block in
+# ami_tls_crypto.c's table.  PUBLIC for the same reason as the line above: the
+# macro changes structure layouts in nx_secure_tls.h, so a translation unit
+# that disagrees gets a different NX_SECURE_TLS_SESSION.
+target_compile_definitions(nx_secure PUBLIC NX_SECURE_TLS_ENABLE_TLS_1_3)
+target_compile_definitions(nx_crypto PUBLIC NX_SECURE_TLS_ENABLE_TLS_1_3)
+
 # Wipe key material when it stops being needed.  174 sites across nx_secure
 # guard on this, and ami_tls_crypto.c has five of its own; without it the
 # handshake hashes, the decrypted signature blocks, the premaster secret and
