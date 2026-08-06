@@ -169,11 +169,18 @@ HN_UBASE2   num;
 }
 
 
+/*
+ * C68K_ASM_060 is the 68060 build, where c68k_prim_060.S supplies this one
+ * function and everything else in this file stands.  See src/crypto68k/
+ * CMakeLists.txt for why it is a separate option from C68K_ASM.
+ */
+#ifndef C68K_ASM_060
 c68k_limb c68k_addmul_1(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a)
 {
 
     return(c68k_addmul_1_c(r, b, n, a));
 }
+#endif
 
 
 c68k_limb c68k_add_carry(c68k_limb *dst, const c68k_limb *src, UINT n,
@@ -288,9 +295,11 @@ UINT    j;
 UINT c68k_using_assembly(VOID)
 {
 
-#ifdef C68K_ASM
-    return(1u);
+#if defined(C68K_ASM)
+    return(C68K_ASM_68020);
+#elif defined(C68K_ASM_060)
+    return(C68K_ASM_68060);
 #else
-    return(0u);
+    return(C68K_ASM_NONE);
 #endif
 }

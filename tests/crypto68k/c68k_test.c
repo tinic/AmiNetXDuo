@@ -40,6 +40,13 @@
 
 #include "c68k_vectors.h"
 
+static const char *const c68k_prim_names[3] =
+{
+    "portable C",
+    "68020 assembly",
+    "68060 assembly, multiply-accumulate only"
+};
+
 
 /* ------------------------------------------------------------- buffers --- */
 
@@ -511,7 +518,7 @@ ULONG   start;
 
     c68k_log("AmiNetXDuo, crypto68k correctness gate");
     c68k_log("  limb primitives: %s",
-             (LONG)(c68k_using_assembly() ? "68020 assembly" : "portable C"));
+             (LONG)c68k_prim_names[c68k_using_assembly() % 3u]);
 
     (VOID) c68k_timer_open();
     start = c68k_eclock();

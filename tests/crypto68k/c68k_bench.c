@@ -33,6 +33,13 @@
 
 #include "c68k_vectors.h"
 
+static const char *const c68k_prim_names[3] =
+{
+    "portable C",
+    "68020 assembly",
+    "68060 assembly, multiply-accumulate only"
+};
+
 
 #define B_MAX_LIMBS         64u
 #define B_POWM_SCRATCH      4096u
@@ -452,7 +459,7 @@ ULONG   start;
 
     c68k_log("AmiNetXDuo, crypto68k before/after benchmark");
     c68k_log("  limb primitives: %s",
-             (LONG)(c68k_using_assembly() ? "68020 assembly" : "portable C"));
+             (LONG)c68k_prim_names[c68k_using_assembly() % 3u]);
 
     if (!c68k_timer_open())
     {

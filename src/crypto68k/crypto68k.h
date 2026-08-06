@@ -188,9 +188,17 @@ VOID c68k_mont_setup_rr(c68k_limb *rr, const c68k_limb *m, UINT m_len,
 INT c68k_cmp(const c68k_limb *a, const c68k_limb *b, UINT n);
 
 /*
- * TRUE when the assembly primitives are in use, FALSE for the portable C
- * fallback.  The benchmark prints it so a result can never be misattributed.
+ * Which limb primitives were compiled in.  The benchmark and the correctness
+ * gate print it so a result can never be misattributed.
+ *
+ *   0   the portable C
+ *   1   c68k_prim.S, the 68020 set
+ *   2   c68k_prim_060.S, the 68060 multiply-accumulate with the rest still C
  */
+#define C68K_ASM_NONE   0u
+#define C68K_ASM_68020  1u
+#define C68K_ASM_68060  2u
+
 UINT c68k_using_assembly(VOID);
 
 
