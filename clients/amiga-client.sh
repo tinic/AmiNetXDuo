@@ -121,11 +121,9 @@ amiga_client_prepare()
     local objs=()
     for c in "${sources[@]}"; do
         o="$obj/$(basename "${c%.c}").o"
-        if [ ! -f "$o" ] || [ "$c" -nt "$o" ]; then
-            echo "  CC $(basename "$c")"
-            "$AMIGA_GCC" $AMIGA_CLIENT_CFLAGS -Wall -I"$AMIGA_NDK" \
-                         -c -o "$o" "$c" || return 1
-        fi
+        echo "  CC $(basename "$c")"
+        "$AMIGA_GCC" $AMIGA_CLIENT_CFLAGS -Wall -I"$AMIGA_NDK" \
+                     -c -o "$o" "$c" || return 1
         objs+=("$o")
     done
 
@@ -135,21 +133,17 @@ amiga_client_prepare()
 
     # libnet.a: one weak SocketBase, so configure-time socket tests link.
     o="$obj/amiga_net.o"
-    if [ ! -f "$o" ] || [ "$AMIGA_CLIENT_ROOT/clients/compat/amiga_net.c" -nt "$o" ]; then
-        echo "  CC amiga_net.c"
-        "$AMIGA_GCC" $AMIGA_CLIENT_CFLAGS -Wall -I"$AMIGA_NDK" \
-                     -c -o "$o" "$AMIGA_CLIENT_ROOT/clients/compat/amiga_net.c" || return 1
-    fi
+    echo "  CC amiga_net.c"
+    "$AMIGA_GCC" $AMIGA_CLIENT_CFLAGS -Wall -I"$AMIGA_NDK" \
+                 -c -o "$o" "$AMIGA_CLIENT_ROOT/clients/compat/amiga_net.c" || return 1
     rm -f "$AMIGA_CLIENT_LIBDIR/libnet.a"
     "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-ar" rcs \
         "$AMIGA_CLIENT_LIBDIR/libnet.a" "$o" || return 1
 
     # libatomic.a: empty on purpose.  amiga_libgcc.c has the one atomic.
     o="$obj/amiga_empty.o"
-    if [ ! -f "$o" ]; then
-        : > "$obj/amiga_empty.c"
-        "$AMIGA_GCC" $AMIGA_CLIENT_ARCH -c -o "$o" "$obj/amiga_empty.c" || return 1
-    fi
+    : > "$obj/amiga_empty.c"
+    "$AMIGA_GCC" $AMIGA_CLIENT_ARCH -c -o "$o" "$obj/amiga_empty.c" || return 1
     rm -f "$AMIGA_CLIENT_LIBDIR/libatomic.a"
     "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-ar" rcs \
         "$AMIGA_CLIENT_LIBDIR/libatomic.a" "$o" || return 1
@@ -160,12 +154,9 @@ amiga_client_prepare()
     # commands never noticed because they read arguments through ReadArgs().
     AMIGA_CLIENT_STARTFILE="$AMIGA_CLIENT_LIBDIR/crt0.o"
     local stock="$AMIGA_TOOLCHAIN_ROOT/m68k-amigaos/lib/crt0.o"
-    if [ ! -f "$AMIGA_CLIENT_STARTFILE" ] || [ "$stock" -nt "$AMIGA_CLIENT_STARTFILE" ] \
-       || [ "$AMIGA_CLIENT_ROOT/clients/compat/fix-crt0.py" -nt "$AMIGA_CLIENT_STARTFILE" ]; then
-        echo "  FIX crt0.o"
-        python3 "$AMIGA_CLIENT_ROOT/clients/compat/fix-crt0.py" \
-                "$stock" "$AMIGA_CLIENT_STARTFILE" || return 1
-    fi
+    echo "  FIX crt0.o"
+    python3 "$AMIGA_CLIENT_ROOT/clients/compat/fix-crt0.py" \
+            "$stock" "$AMIGA_CLIENT_STARTFILE" || return 1
 
     AMIGA_CLIENT_COMPAT_A="$AMIGA_CLIENT_LIBDIR/libamigaclient.a"
     # --wrap=main: the crt0 does not tokenise the CLI command line into argv[],
