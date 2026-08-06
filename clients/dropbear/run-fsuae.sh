@@ -4,7 +4,7 @@
 #
 #   clients/dropbear/run-fsuae.sh [-m MODEL] [-t SECONDS] [-c CPU] [-k MHZ]
 #                                 [-b STACKBUILD] [-D DBBUILD] [-i KEYFILE]
-#                                 [-x] [-C COMMANDS] [-A]
+#                                 [-x] [-C COMMANDS] [-A] [-X FILE]...
 #
 #   -A  Amiberry instead of FS-UAE, which is what a headless box needs: FS-UAE
 #       wants an X server and dies in GLAD before the guest boots.  Its slirp
@@ -16,6 +16,10 @@
 #       instances share the host is fiction, and this project has already had
 #       one set of figures corrupted that way.
 #   -C  a command list to stage instead of the default four connections
+#   -X  stage one more file into DH0:, repeatable.  It exists for
+#       tools/profiler/Profile, which has to sit beside dbclient in order
+#       to load it, and it keeps a profiling run on THIS staging rather
+#       than on a second copy of it that would drift.
 #   -E  a SECOND dbclient build, staged as SYS:dbclient2.
 #
 #       This exists because of the emulator queue, and it makes the comparison
@@ -88,9 +92,10 @@ COMMANDS="${AMINETXDUO_DB_COMMANDS:-}"
 # same either way and the default command list needs no change.
 RUNNER_KIND="${AMINETXDUO_RUNNER:-fsuae}"
 BOARD=a2065
+EXTRA=()
 BACKEND="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
 
-while getopts "m:t:c:k:b:D:E:i:xC:S:AN:B:" opt; do
+while getopts "m:t:c:k:b:D:E:i:xC:S:AN:B:X:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
@@ -106,7 +111,8 @@ while getopts "m:t:c:k:b:D:E:i:xC:S:AN:B:" opt; do
         A) RUNNER_KIND=amiberry ;;
         N) BOARD="$OPTARG" ;;
         B) BACKEND="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-k MHz] [-b stackbuild] [-D dbbuild] [-i key] [-x] [-C commands] [-E dbbuild2] [-S srvbuild] [-A [-N board] [-B backend]]" >&2; exit 2 ;;
+        X) EXTRA+=("$OPTARG") ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-k MHz] [-b stackbuild] [-D dbbuild] [-i key] [-x] [-C commands] [-E dbbuild2] [-S srvbuild] [-A [-N board] [-B backend]] [-X file]..." >&2; exit 2 ;;
     esac
 done
 
@@ -122,11 +128,28 @@ done
 
 . "$ROOT/tools/amiga-toolchain.sh"
 
-RUNNER="$ROOT/build/clients/ClientRun"
+# ClientRun's architecture follows the machine, which is the rule
+# tools/amiberry-run.sh already applies to envsetup and the same case
+# statement: a 68020 binary stops a 68000 with an illegal instruction before a
+# line of dbclient runs.  This was built -m68020 unconditionally, so every
+# 68000 run loaded a program the machine could not execute, produced an empty
+# serial log, and timed out looking like a slow boot.
+#
+# The architecture is in the FILE NAME too.  One cached ClientRun was serving
+# every model, so even after the flag was right the first run's binary would
+# be handed to the next run on a different CPU with nothing rebuilt and
+# nothing said.
+case "${CPU:-}${MODEL:-}" in
+    *68000*|*A500*|*A600*|*A2000*) RUNNER_ARCH="-m68000" ;;
+    *68060*)                       RUNNER_ARCH="-mcpu=68060" ;;
+    *)                             RUNNER_ARCH="-m68020" ;;
+esac
+
+RUNNER="$ROOT/build/clients/ClientRun$(printf '%s' "$RUNNER_ARCH" | tr -d ' =')"
 mkdir -p "$ROOT/build/clients"
 if [ ! -x "$RUNNER" ] || [ "$ROOT/clients/dropbear/clientrun.c" -nt "$RUNNER" ]; then
-    echo "==> building ClientRun"
-    "$AMIGA_GCC" -O2 -m68020 -fomit-frame-pointer -Wall -I"$AMIGA_NDK" \
+    echo "==> building ClientRun ($RUNNER_ARCH)"
+    "$AMIGA_GCC" -O2 $RUNNER_ARCH -fomit-frame-pointer -Wall -I"$AMIGA_NDK" \
                  -o "$RUNNER" "$ROOT/clients/dropbear/clientrun.c"
 fi
 
@@ -181,6 +204,12 @@ if [ -n "$DB_BUILD2" ]; then
     echo "==> second client staged as SYS:dbclient2: $DB_BUILD2"
 fi
 cp "$ADDIF"    "$STAGE/AddNetInterface"
+
+for x in ${EXTRA[@]+"${EXTRA[@]}"}; do
+    [ -e "$x" ] || { echo "missing -X file: $x" >&2; exit 2; }
+    cp -R "$x" "$STAGE/$(basename "$x")"
+    echo "==> staged $(basename "$x") from $x"
+done
 
 if [ -f "$KEYFILE" ]; then
     cp "$KEYFILE" "$STAGE/id_amiga"
@@ -342,6 +371,9 @@ STAGED=("$STAGE/devs" "$STAGE/libs" "$STAGE/dbclient")
 STAGED+=("$STAGE/AddNetInterface" "$STAGE/id_amiga")
 [ -z "${ECDSAKEY:-}" ] || STAGED+=("$STAGE/id_amiga_ecdsa")
 [ -z "$DB_SERVER" ] || STAGED+=("$STAGE/dropbear" "$STAGE/hostkey" "$STAGE/.ssh")
+for x in ${EXTRA[@]+"${EXTRA[@]}"}; do
+    STAGED+=("$STAGE/$(basename "$x")")
+done
 STAGED+=("$STAGE/commands.txt")
 
 TRANSCRIPT="$ROOT/build/dropbear-run.log"
