@@ -525,7 +525,7 @@ BOOL            quick   = (cmdline != NULL) &&
              (LONG)c68k_prim_names[c68k_using_assembly() % 3u]);
     if (quick)
     {
-        c68k_log("  quick: skipping the RSA-2048 known answers");
+        c68k_log("  quick: no RSA-2048 known answers, differentials scaled down");
     }
 
     (VOID) c68k_timer_open();
@@ -538,8 +538,8 @@ BOOL            quick   = (cmdline != NULL) &&
         t_known_answers();
     }
     t_primitive();
-    t_mont_differential(400u);
-    t_powm_differential(150u);
+    t_mont_differential(quick ?  40u : 400u);
+    t_powm_differential(quick ?  10u : 150u);
     t_edge_cases();
 
     c68k_log("");

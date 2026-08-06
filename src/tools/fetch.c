@@ -663,6 +663,24 @@ static LONG fetch_run(VOID)
             n = io_write(&io, fetch_request, (LONG)used);
             if (n != (LONG)used)
             {
+                if (io.tls != NULL)
+                {
+                    struct TLSInfo  wi;
+
+                    memset(&wi, 0, sizeof(wi));
+                    wi.ti_Size = sizeof(wi);
+                    if (TLSInfo(io.tbase, io.tls, &wi) == TLS_OK)
+                    {
+                        tool_error("the request could not be sent: %s"
+                                   " (%ld), %ld of %ld bytes",
+                                   (LONG)TLSErrorString(io.tbase,
+                                                        wi.ti_Error),
+                                   (LONG)wi.ti_Error, (LONG)n,
+                                   (LONG)used);
+                        rc = RETURN_ERROR;
+                        goto hop_done;
+                    }
+                }
                 tool_error("the request could not be sent");
                 rc = RETURN_ERROR;
                 goto hop_done;
