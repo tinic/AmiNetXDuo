@@ -109,6 +109,13 @@ if(CMAKE_CROSSCOMPILING)
     # crypto68k is configured after this directory; naming a target that does
     # not exist yet is fine, CMake resolves target names at generate time.
     target_link_libraries(nx_crypto PUBLIC crypto68k)
+
+    # nx_crypto_gcm.c already has a longword path for its 16-byte XOR and only
+    # takes it when this is defined.  A 68020 handles a misaligned longword;
+    # a 68000 takes an address error, so this is 68020-and-up only.
+    if(NOT AMINETXDUO_CPU STREQUAL "68000")
+        target_compile_definitions(nx_crypto PRIVATE NX_CRYPTO_ENABLE_UNALIGNED_ACCESS)
+    endif()
 endif()
 
 # Wipe key material when it stops being needed.  174 sites across nx_secure
