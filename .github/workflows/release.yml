@@ -133,7 +133,8 @@ jobs:
 
           # The fourth drawer: a 68000 with everything optional compiled out,
           # for somebody who has measured their machine and wants the memory
-          # back.  Stripped -- the symbols are 29 KB of nothing on an Amiga.
+          # back.  It used to be stripped by hand here, and was the only drawer
+          # that was; the build strips every binary now.
           cmake -S . -B build/release-68000-minimal \
                 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
                 -DCMAKE_BUILD_TYPE=Release \
@@ -142,9 +143,6 @@ jobs:
                 -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF \
                 -DAMINETXDUO_MULTICAST=OFF
           cmake --build build/release-68000-minimal --parallel
-          "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-strip" \
-                build/release-68000-minimal/src/bsdsocket/bsdsocket.library \
-                build/release-68000-minimal/src/usergroup/usergroup.library
 
       # ssh comes from clients/, not the CMake tree, so a `cmake --build` does
       # not produce it and make-dist.sh would quietly ship an archive without
