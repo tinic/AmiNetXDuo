@@ -246,6 +246,12 @@ EOF
 FASTMEM=8
 [ "$BOARD" = ne2000_pcmcia ] && FASTMEM=4
 
+# AMINETXDUO_Z3MEM=<MB> adds Zorro III fast RAM.  The stack sizes its packet
+# pool and its receive window off AvailMem(), so "how much memory does the
+# machine have" is a real variable in its behaviour, and an accelerated Amiga
+# with 128 MB is a configuration this 8 MB default never reaches.
+Z3MEM="${AMINETXDUO_Z3MEM:-0}"
+
 cat > "$CFG" <<EOF
 config_description=AmiNetXDuo $TAG
 use_gui=no
@@ -253,6 +259,7 @@ headless=true
 quickstart=$MODEL,0
 kickstart_rom_file=$KICKSTART
 fastmem_size=$FASTMEM
+z3mem_size=$Z3MEM
 floppy0type=-1
 nr_floppies=0
 uaehf0=dir,rw,DH0:DH0:$HD,0
