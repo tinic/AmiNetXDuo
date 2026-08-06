@@ -68,24 +68,22 @@ endif()
 # the next attempt because the session is cached.  That is not a reason to
 # ship without encryption.
 #
-# OFF BY DEFAULT ON A 68000, and this follows a decision the project has
-# already taken rather than making a new one.  §9's M9 gate benchmarked a real
+# ON EVERYWHERE, including the 68000.  It was off there, and that followed a
+# decision the project had already taken.  §9's M9 gate benchmarked a real
 # TLS 1.2 handshake on the 68020 floor and concluded TLS is not viable there:
 # 185.5 s client-and-server on one CPU, 158.0 s for the RSA-2048 private
 # operation alone, ~13-20 s derived for a client-only handshake, and the
-# recorded conclusion that offload is the realistic path.  A 7 MHz 68000 on a
-# 16-bit bus is around a quarter of that 14 MHz 68020 before accounting for
-# having no 32-bit multiply at all, and the hand-written limb assembly cannot
-# run there either.  Shipping tls.library for a 68000 would ship the number
-# §9 already rejected, several times over.
+# recorded conclusion that offload is the realistic path.  That was measured
+# on a 7 MHz part, before c68k_prim_mulw.S: the limb multiply-accumulate the
+# handshake spends half its time in is four MULU.W, which a 68000 has, and
+# assembles for -m68000.  An RSA-2048 TLS 1.3 handshake at 13 MHz measures
+# 60 s, down from 232 s before that assembly existed.
 #
-# It is an option, not a wall: -DAMINETXDUO_TLS=ON with AMINETXDUO_CPU=68000
-# configures, builds and links.  Nobody should wait for it.
-if(AMINETXDUO_CPU STREQUAL "68000")
-    set(_aminetxduo_tls_default OFF)
-else()
-    set(_aminetxduo_tls_default ON)
-endif()
+# 60 s is slow.  It is not our decision to make for somebody: the archive
+# carries a binary for every processor and the installer picks the one this
+# machine can run, and nothing is withheld for being slow.  The P-256 leg is
+# a separate open defect, see docs/BACKLOG.md.
+set(_aminetxduo_tls_default ON)
 option(AMINETXDUO_TLS  "Build tls.library and its trust store"        ${_aminetxduo_tls_default})
 option(AMINETXDUO_BPF  "Build the bpf_* raw path and filter VM"       ON)
 
