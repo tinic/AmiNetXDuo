@@ -286,12 +286,47 @@ def nm_symbols(nm, path, member=None):
     return syms
 
 
-def build_symbol_table(nm, mapfile, objdir):
+def resolve_object(objdir, spec):
+    """Find the object the map names, or None.
+
+    A linker map records each input the way the LINKER saw it, and CMake does
+    not run every link from the same directory: one map can carry
+    `CMakeFiles/foo.dir/bar.c.obj` relative to the target's own directory and
+    `../libnetxduo.a` relative to a directory further up.  Resolving only
+    against objdir therefore finds some of a map's objects and not others,
+    which is the worst of the three possible outcomes because it looks like
+    success.
+
+    So try objdir and then each parent of it.  This is a search, not a guess:
+    the map's own path is used unchanged, only the base it is joined to moves.
+    """
+    if os.path.isabs(spec):
+        return spec if os.path.exists(spec) else None
+
+    base = os.path.abspath(objdir)
+    while True:
+        cand = os.path.normpath(os.path.join(base, spec))
+        if os.path.exists(cand):
+            return cand
+        parent = os.path.dirname(base)
+        if parent == base:
+            return None
+        base = parent
+
+
+def build_symbol_table(nm, mapfile, objdir, unresolved=None):
     """Link-time address -> name, per section, statics included.
 
     The map says where each object's .text landed in the output; nm says where
     each symbol sits inside that object.  Adding them is the whole trick, and
     it is the only route to the statics that HUNK_SYMBOL never saw.
+
+    `unresolved` collects the objects that could not be found, because a
+    profile built without them is not merely incomplete: every sample inside
+    one lands on the nearest preceding global, and the ranking that produces
+    is entirely plausible and entirely wrong.  It cost this project a reading
+    where a TWENTY-BYTE strlen appeared to own 27% of a file transfer, the
+    samples having really been NetX Duo's statics.
     """
     contributions = parse_map(mapfile)
     if not contributions:
@@ -310,8 +345,16 @@ def build_symbol_table(nm, mapfile, objdir):
         if m:
             spec, member = m.group(1), m.group(2)
 
-        path = spec if os.path.isabs(spec) else os.path.join(objdir, spec)
-        if not os.path.exists(path):
+        path = resolve_object(objdir, spec)
+        if path is None:
+            # NOT `continue`.  Record it, and still place the object in the
+            # table below, so its samples are named after it rather than
+            # silently annexed by the previous symbol.
+            if unresolved is not None:
+                unresolved.add(obj)
+            module = ("%s(%s)" % (os.path.basename(spec), member)) if m \
+                else os.path.basename(spec)
+            table[section].append((addr, "[%s, UNRESOLVED]" % module, module))
             continue
 
         key = (path, member)
@@ -388,7 +431,9 @@ class LibSymbols:
                          % (spec["exe"], sizes, list(run_sizes)))
             return
 
-        self.symtab = (build_symbol_table(nm, spec["map"], spec["objdir"])
+        self.unresolved = set()
+        self.symtab = (build_symbol_table(nm, spec["map"], spec["objdir"],
+                                          self.unresolved)
                        if spec.get("map") else {})
         self.nsyms = sum(len(v) for v in self.symtab.values())
         self.sections = [".text", ".data", ".bss"][:len(sizes)]
@@ -400,6 +445,30 @@ class LibSymbols:
         self.note = ("%d hunks, sizes %s, %d symbols from %s"
                      % (len(sizes), sizes, self.nsyms,
                         spec.get("map") or "(no map, globals only)"))
+
+        # COVERAGE, and this is the check that matters most.
+        #
+        # A symbol table can be the right size and still stop a third of the
+        # way up the module, and then every sample above the last symbol is
+        # credited to it.  That is not a subtle skew: it produced a
+        # twenty-byte libc strlen holding 27% of a file transfer, hot in seven
+        # unrelated tasks at once, while the samples were really spread across
+        # 155 KB of NetX Duo above the last symbol the table knew.
+        #
+        # The count alone cannot show this -- 1285 symbols looked healthy.
+        # What shows it is where the LAST one sits against the hunk it is in.
+        rows = self.symtab.get(".text", [])
+        if rows and sizes:
+            top = max(a for a, _n, _m in rows)
+            self.coverage = float(top) / float(sizes[0]) if sizes[0] else 1.0
+            if self.coverage < 0.9:
+                self.note += (", TABLE COVERS ONLY %.0f%% OF .text "
+                              "(last symbol 0x%x of 0x%x)"
+                              % (self.coverage * 100.0, top, sizes[0]))
+        else:
+            self.coverage = 1.0
+        if self.unresolved:
+            self.note += (", %d OBJECTS UNRESOLVED" % len(self.unresolved))
 
     def lookup(self, hunk, off):
         """(function, object) for an offset into one hunk, or None."""
@@ -892,6 +961,9 @@ def main():
     ap.add_argument("--ndk", help="NDK include dir, for lvo/*.i")
     ap.add_argument("--phase", help="only samples between this mark and the next")
     ap.add_argument("--top", type=int, default=25)
+    ap.add_argument("--allow-unresolved", action="store_true",
+                    help="report even though the map names objects that "
+                         "could not be found; their statics stay unnamed")
     ap.add_argument("--by-module", action="store_true")
     ap.add_argument("--folded", help="write folded stacks here (speedscope, "
                                      "flamegraph.pl, inferno)")
@@ -909,7 +981,9 @@ def main():
     _NDK[0] = args.ndk
 
     prof = Profile(args.profile)
-    symtab = (build_symbol_table(args.nm, args.mapfile, args.objdir)
+    exe_unresolved = set()
+    symtab = (build_symbol_table(args.nm, args.mapfile, args.objdir,
+                                 exe_unresolved)
               if args.mapfile else {})
     libspecs = [parse_lib_spec(spec) for spec in args.lib]
     res = Resolver(prof, args.exe, symtab, libspecs, args.nm)
@@ -973,6 +1047,61 @@ def main():
     for name in unmatched:
         print("!! --lib %s: no library of that name gave the run a seglist; "
               "its samples stay named by module" % name)
+
+    # THE GATE.  An object the map names but that nothing could find is not a
+    # cosmetic gap: every static inside it is missing from the table, so its
+    # samples fall through to the nearest preceding global and the ranking
+    # that results is plausible and wrong.  This is the failure profreport's
+    # own header has warned about since it was written, and warning was not
+    # enough -- it was rediscovered from scratch, twice, by reading a
+    # twenty-byte strlen at 27% of a file transfer as a real result.
+    #
+    # So refuse. --allow-unresolved says the gap is understood and accepted.
+    thin = [lib for lib in res.libsyms.values()
+            if getattr(lib, "coverage", 1.0) < 0.9]
+    if thin:
+        print()
+        for lib in thin:
+            print("!! %s: the symbol table covers only %.0f%% of .text."
+                  % (lib.name, lib.coverage * 100.0))
+        print("!! Every sample above the last symbol is credited to that "
+              "symbol, so the")
+        print("!! top of this ranking is fiction.  Do not read it.  The map "
+              "carries an")
+        print("!! absolute address for every global; if nm cannot be made to "
+              "agree with")
+        print("!! it, rank from the map alone rather than trusting this.")
+        if not args.allow_unresolved:
+            print("!! Refusing. Pass --allow-unresolved to read it anyway.")
+            return 2
+
+    problems = [("(executable)", exe_unresolved)]
+    problems += [(lib.name, getattr(lib, "unresolved", set()))
+                 for lib in res.libsyms.values()]
+    total = sum(len(u) for _, u in problems)
+    if total:
+        print()
+        print("!! %d object(s) named by a linker map could not be found." % total)
+        for who, us in problems:
+            if not us:
+                continue
+            print("!!   %s: %d, for example" % (who, len(us)))
+            for obj in sorted(us)[:4]:
+                print("!!     %s" % obj)
+        print("!! Their statics are NOT in the symbol table.  Samples inside "
+              "them are")
+        print("!! shown as [name, UNRESOLVED] rather than being credited to "
+              "the nearest")
+        print("!! preceding global, so this report is not silently wrong -- "
+              "but it is")
+        print("!! incomplete, and the ranking will move once they resolve.")
+        print("!! --objdir wants the directory the LINK ran in; parents of it "
+              "are searched")
+        print("!! too, so a miss means the tree was moved, or built "
+              "elsewhere, or both.")
+        if not args.allow_unresolved:
+            print("!! Refusing. Pass --allow-unresolved to read it anyway.")
+            return 2
     print()
 
     if not samples:
