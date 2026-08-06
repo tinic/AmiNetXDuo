@@ -170,20 +170,38 @@ set(CRYPTO68K_SOURCES
     # as the reference the tests compare against.
     c68k_chacha20.c
     c68k_poly1305.c
-    # X25519 and Ed25519.  No assembly counterpart: the win is the field
-    # representation (eight 32-bit limbs instead of TweetNaCl's sixteen 16-bit
-    # limbs in an i64[16]), and 18.4 established that this GCC does not leave
-    # instruction selection on the table for a loop like this.  See
-    # docs/RESEARCH.md 35.
+    # X25519 and Ed25519.  The field representation was the first win (eight
+    # 32-bit limbs instead of TweetNaCl's sixteen 16-bit limbs in an i64[16]);
+    # docs/RESEARCH.md 35.4 then deferred assembly, on 18.4's grounds, with the
+    # condition that it "should be asked against a measurement of this, not
+    # instead of one".
+    #
+    # That measurement exists now.  Profiling one real ssh handshake from
+    # inside the guest put 45.8% of the WHOLE CONNECTION in fe_mul and 19.7%
+    # in fe_sqr on a 13.9 MHz 68020, so c68k_25519.S is those four routines,
+    # and it beats the C for three reasons of which only one is instruction
+    # selection: t[16] was zeroed with memset (4.3% of the connection under
+    # its own name, more than sha256 and chacha20 together), the accumulator
+    # made a round trip through an array subscript every limb, and the 38-fold
+    # was a second pass over sixteen words.  The C stays compiled as the
+    # reference the tests compare against, exactly as for chacha20 and
+    # poly1305.
     c68k_25519.c)
 
+# c68k_25519.S is in BOTH lists and is one file: it carries the MULU.L field
+# multiply for the 68020/68040 and the four-MULU.W one for the 68000/68060,
+# picked by the same define that selects the rest of the module.  That is why
+# it is not a third option -- unlike c68k_prim.S and c68k_prim_mulw.S, which
+# are two files defining the same symbol and cannot both be built, these are
+# two halves of one file and exactly one is ever assembled.
 if(AMINETXDUO_CRYPTO68K_ASM)
     list(APPEND CRYPTO68K_SOURCES
-         c68k_prim.S c68k_p256.S c68k_aes.S c68k_chacha20.S c68k_poly1305.S)
+         c68k_prim.S c68k_p256.S c68k_aes.S c68k_chacha20.S c68k_poly1305.S
+         c68k_25519.S)
 endif()
 
 if(AMINETXDUO_CRYPTO68K_ASM_MULW)
-    list(APPEND CRYPTO68K_SOURCES c68k_prim_mulw.S)
+    list(APPEND CRYPTO68K_SOURCES c68k_prim_mulw.S c68k_25519.S)
 endif()
 
 add_library(crypto68k STATIC ${CRYPTO68K_SOURCES})
@@ -205,6 +223,7 @@ if(AMINETXDUO_CRYPTO68K_ASM)
     target_compile_definitions(crypto68k PRIVATE C68K_ASM=1)
     set_source_files_properties(
         c68k_prim.S c68k_p256.S c68k_aes.S c68k_chacha20.S c68k_poly1305.S
+        c68k_25519.S
         PROPERTIES
         COMPILE_DEFINITIONS C68K_ASM=1
         COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
@@ -215,7 +234,7 @@ if(AMINETXDUO_CRYPTO68K_ASM_MULW)
     # assembler does not see CMAKE_C_FLAGS_INIT, so without the arch flag it is
     # a plain 68000 and rejects nothing here but assembles for the wrong part.
     target_compile_definitions(crypto68k PRIVATE C68K_ASM_MULW=1)
-    set_source_files_properties(c68k_prim_mulw.S PROPERTIES
+    set_source_files_properties(c68k_prim_mulw.S c68k_25519.S PROPERTIES
         COMPILE_DEFINITIONS C68K_ASM_MULW=1
         COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
 endif()

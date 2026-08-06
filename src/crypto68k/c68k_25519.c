@@ -106,7 +106,7 @@ static void fe_fold(fe r, uint32_t c)
     }
 }
 
-static void fe_add(fe r, const fe a, const fe b)
+static void fe_add_c(fe r, const fe a, const fe b)
 {
     uint64_t t = 0;
     int      i;
@@ -119,7 +119,7 @@ static void fe_add(fe r, const fe a, const fe b)
     fe_fold(r, (uint32_t)t);
 }
 
-static void fe_sub(fe r, const fe a, const fe b)
+static void fe_sub_c(fe r, const fe a, const fe b)
 {
     uint64_t t = 0;
     int      i;
@@ -149,6 +149,38 @@ static void fe_sub(fe r, const fe a, const fe b)
     }
 }
 
+#if defined(C68K_ASM) || defined(C68K_ASM_MULW)
+extern void c68k_fe_add_asm(fe r, const fe a, const fe b);
+extern void c68k_fe_sub_asm(fe r, const fe a, const fe b);
+#define fe_add  c68k_fe_add_asm
+#define fe_sub  c68k_fe_sub_asm
+#else
+#define fe_add  fe_add_c
+#define fe_sub  fe_sub_c
+#endif
+
+void c68k_25519_fe_add(uint32_t r[8], const uint32_t a[8], const uint32_t b[8])
+{
+    fe_add(r, a, b);
+}
+
+void c68k_25519_fe_add_ref(uint32_t r[8], const uint32_t a[8],
+                           const uint32_t b[8])
+{
+    fe_add_c(r, a, b);
+}
+
+void c68k_25519_fe_sub(uint32_t r[8], const uint32_t a[8], const uint32_t b[8])
+{
+    fe_sub(r, a, b);
+}
+
+void c68k_25519_fe_sub_ref(uint32_t r[8], const uint32_t a[8],
+                           const uint32_t b[8])
+{
+    fe_sub_c(r, a, b);
+}
+
 /*
  * The multiply.  Operand scanning, 64 MULU.L, then the 2^256 = 38 fold.
  *
@@ -156,7 +188,7 @@ static void fe_sub(fe r, const fe a, const fe b)
  * 2^64-1, so the product, the running word and the carry can all be added
  * before the store without a second accumulator word.
  */
-static void fe_mul(fe r, const fe a, const fe b)
+static void fe_mul_c(fe r, const fe a, const fe b)
 {
     uint32_t t[16];
     uint64_t v;
@@ -189,6 +221,51 @@ static void fe_mul(fe r, const fe a, const fe b)
 }
 
 /*
+ * Which one the rest of this file calls, the same shape c68k_poly1305.c uses:
+ * a macro rather than a wrapper, so a build without the assembly gets no extra
+ * call and there is nothing to choose between at run time.
+ *
+ * BOTH assembly options select it, and they are different code.  C68K_ASM is
+ * the 68020/68040 build and c68k_25519.S uses MULU.L there; C68K_ASM_MULW is
+ * the 68000 and 68060 build, where that form of MULU.L either does not exist
+ * or traps, and the same file builds the product from four MULU.W.  The two
+ * are mutually exclusive and src/crypto68k/CMakeLists.txt refuses both at
+ * once, because they define the same symbol.
+ */
+#if defined(C68K_ASM) || defined(C68K_ASM_MULW)
+extern void c68k_fe_mul_asm(fe r, const fe a, const fe b);
+#define fe_mul  c68k_fe_mul_asm
+#else
+#define fe_mul  fe_mul_c
+#endif
+
+/*
+ * The dispatch and the reference, as real functions, so an on-Amiga test can
+ * run the shipped kernel and the portable one over the same input and compare.
+ * Neither is on any hot path: everything below calls the macro.  They also
+ * keep fe_mul_c referenced in an assembly build, where nothing else calls it.
+ */
+void c68k_25519_fe_mul(uint32_t r[8], const uint32_t a[8], const uint32_t b[8])
+{
+    fe_mul(r, a, b);
+}
+
+void c68k_25519_fe_mul_ref(uint32_t r[8], const uint32_t a[8],
+                           const uint32_t b[8])
+{
+    fe_mul_c(r, a, b);
+}
+
+int c68k_25519_fe_mul_is_asm(void)
+{
+#if defined(C68K_ASM) || defined(C68K_ASM_MULW)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+/*
  * The squaring.  Thirty-six multiplies instead of sixty-four, because every
  * off-diagonal product appears twice: sum them once, double the lot, then add
  * the eight diagonal squares.
@@ -197,7 +274,7 @@ static void fe_mul(fe r, const fe a, const fe b)
  * tests/crypto68k/host checks it against fe_mul(r,a,a) on random inputs rather
  * than only against published vectors.
  */
-static void fe_sqr(fe r, const fe a)
+static void fe_sqr_c(fe r, const fe a)
 {
     uint32_t t[16];
     uint64_t v;
@@ -246,6 +323,23 @@ static void fe_sqr(fe r, const fe a)
         v >>= 32;
     }
     fe_fold(r, (uint32_t)v);
+}
+
+#if defined(C68K_ASM) || defined(C68K_ASM_MULW)
+extern void c68k_fe_sqr_asm(fe r, const fe a);
+#define fe_sqr  c68k_fe_sqr_asm
+#else
+#define fe_sqr  fe_sqr_c
+#endif
+
+void c68k_25519_fe_sqr(uint32_t r[8], const uint32_t a[8])
+{
+    fe_sqr(r, a);
+}
+
+void c68k_25519_fe_sqr_ref(uint32_t r[8], const uint32_t a[8])
+{
+    fe_sqr_c(r, a);
 }
 
 /* r = a * k for a small k; used for a24 = 121666 in the ladder. */

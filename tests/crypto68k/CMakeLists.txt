@@ -46,6 +46,20 @@ add_executable(crypto68k_bench c68k_bench.c)
 #   AMINETXDUO_RUN_TAG=ec20  ./tools/fsuae-run.sh        -t 400 build/cm/tests/crypto68k/crypto68k_ec_test
 #   AMINETXDUO_RUN_TAG=ecb20 ./tools/fsuae-run.sh        -t 400 build/cm/tests/crypto68k/crypto68k_ec_bench
 #   AMINETXDUO_RUN_TAG=ecb30 ./tools/fsuae-run.sh -c 68030 -t 400 build/cm/tests/crypto68k/crypto68k_ec_bench
+# The 25519 field arithmetic, checked ON THE MACHINE.
+#
+# host/test_c68k_25519.c cannot cover c68k_25519.S at all: it runs portable C
+# on the build host, and the assembly is m68k and is DIFFERENT code per part --
+# MULU.L on a 68020/68040, four MULU.W on a 68000/68060.  So the same class of
+# check has to execute on the guest, which is what this is.
+#
+# It compares every routine against the portable C the same file still
+# compiles, on random inputs INCLUDING the saturated ones, because that is the
+# check that found the original fe_fold bug: it dropped a carry out of the top
+# limb, lost exactly 38, and passed every published RFC vector, since with
+# lazy reduction 0 is routinely carried as 2^256-38.
+add_executable(crypto68k_25519_test c68k_25519_test.c)
+
 add_executable(crypto68k_ec_test  c68k_ec_test.c)
 add_executable(crypto68k_ec_bench c68k_ec_bench.c)
 
@@ -66,7 +80,8 @@ add_executable(crypto68k_ec_bench c68k_ec_bench.c)
 # scaled index, and on a machine that has neither there is nothing to measure.
 # The AES and SHA-256 correctness checks in the other four programs cover the
 # 68000; only this one is instruction-cost work.  docs/RESEARCH.md §45.
-set(CRYPTO68K_PROGS crypto68k_test crypto68k_bench crypto68k_ec_test
+set(CRYPTO68K_PROGS crypto68k_test crypto68k_bench crypto68k_25519_test
+    crypto68k_ec_test
                     crypto68k_ec_bench)
 if(NOT AMINETXDUO_CPU STREQUAL "68000")
     add_executable(crypto68k_bulk c68k_bulk_bench.c c68k_bulk_kernels.S)
