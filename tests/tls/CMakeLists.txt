@@ -119,3 +119,32 @@ if(AMIGA_NDK_INCLUDE)
     target_include_directories(tls_https PRIVATE "${AMIGA_NDK_INCLUDE}")
 endif()
 set_target_properties(tls_https PROPERTIES OUTPUT_NAME "tls_https")
+
+# Where tls_https points, as cache options rather than -DCMAKE_C_FLAGS.
+# Overriding CMAKE_C_FLAGS on the command line REPLACES the toolchain's
+# CMAKE_C_FLAGS_INIT, which is where -m68020 lives, so doing it that way
+# silently produced a 68000-codegen build and a profile in which the
+# four-mulu.w software multiply was 21.5% of a TLS handshake.
+set(AMINETXDUO_TLS_TEST_HOST "" CACHE STRING
+    "Host tests/tls/tls_https connects to (empty: the public default)")
+set(AMINETXDUO_TLS_TEST_PORT "" CACHE STRING
+    "Port tests/tls/tls_https connects to (empty: 443)")
+option(AMINETXDUO_TLS_TEST_LOCAL_ROOT
+       "Compile in tests/tls/tls_root_local.h instead of ISRG Root X1" OFF)
+
+if(AMINETXDUO_TLS_TEST_HOST)
+    target_compile_definitions(tls_https PRIVATE
+        "W_HOST=\"${AMINETXDUO_TLS_TEST_HOST}\"")
+endif()
+if(AMINETXDUO_TLS_TEST_PORT)
+    target_compile_definitions(tls_https PRIVATE
+        "W_PORT=${AMINETXDUO_TLS_TEST_PORT}")
+endif()
+if(AMINETXDUO_TLS_TEST_LOCAL_ROOT)
+    target_compile_definitions(tls_https PRIVATE W_ROOT_LOCAL)
+endif()
+
+# A link map so tools/profiler/profreport.py can recover file-static symbols;
+# without it every sample in a static lands on the preceding global.
+target_link_options(tls_https PRIVATE
+    "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/tls_https.map")

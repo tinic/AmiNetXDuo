@@ -140,9 +140,12 @@ declare -A CPU_BUILD=(
 )
 
 # 68000-minimal is the same stack with IPv6, mDNS, the packet filter, TLS and
-# IPv4 multicast compiled out, stripped: 222 KB against the 68000 drawer's
-# 326 KB.  On the 1 MB machine 81 measured, that is 104 KB back out of the
-# 371 KB the stack leaves free, a 28% increase in what is left for programs.
+# IPv4 multicast compiled out: 225 KB against the 68000 drawer's 308 KB, 83 KB
+# of options.  Both figures are stripped, which they were not when this drawer
+# was introduced -- it was the only one the release workflow stripped by hand,
+# so 40 KB of the gap it used to claim was symbol table the other drawers were
+# carrying and this one was not.  The free-memory figure §81 measured on the
+# 1 MB machine predates the strip and is now conservative by that much.
 #
 # Multicast is the cheapest of the five at 3,888 bytes (3,696 of code and the
 # 192-byte membership table) and is out for the same reason the others are:

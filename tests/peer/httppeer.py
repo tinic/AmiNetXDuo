@@ -572,7 +572,28 @@ class Listener(threading.Thread):
 
     def _one(self, raw, peer):
         try:
+            # The listener carries a 0.5 s timeout so run() can poll the stop
+            # flag, and whether an accepted socket inherits it has changed
+            # across CPython versions.  Set it here rather than depend on that:
+            # a 14 MHz 68020 needs tens of seconds for the public-key
+            # arithmetic in a handshake, so a server that gives up early
+            # measures its own patience instead of the client.
+            raw.settimeout(float(os.environ.get("AMINETXDUO_PEER_HS_TIMEOUT",
+                                                "300")))
             if self.tls is not None:
+                # MSG_PEEK, so the handshake below still sees these bytes.  A
+                # TLS record header is type[1] version[2] length[2], and a
+                # ClientHello is type 0x16 with 0x0301 on the record layer
+                # whatever version it really wants; an empty peek means the
+                # client connected and sent nothing at all, which is a very
+                # different failure from a rejected hello.
+                if os.environ.get("AMINETXDUO_PEER_PEEK") == "1":
+                    try:
+                        head = raw.recv(48, socket.MSG_PEEK)
+                        log(self.tag, "first %d bytes: %s"
+                            % (len(head), head[:48].hex()))
+                    except OSError as exc:
+                        log(self.tag, "peek failed: %s" % exc)
                 try:
                     raw = self.tls.wrap_socket(raw, server_side=True)
                 except (ssl.SSLError, OSError) as exc:
@@ -643,8 +664,15 @@ def raw_garbage(sock, tag, server, peer):
 
 def tls_context(certchain, key):
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    # Pinned to 1.2 by default so a host OpenSSL that prefers 1.3 cannot turn a
+    # stack test into a version negotiation.  AMINETXDUO_PEER_TLS13=1 raises the
+    # ceiling, which is the only way to exercise the TLS 1.3 path against a
+    # chain short enough to verify at 14 MHz.
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-    ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+    if os.environ.get("AMINETXDUO_PEER_TLS13") == "1":
+        ctx.maximum_version = ssl.TLSVersion.TLSv1_3
+    else:
+        ctx.maximum_version = ssl.TLSVersion.TLSv1_2
     # Every one of these is in src/tls/ami_tls_crypto.c's table.  Naming them
     # keeps a host OpenSSL upgrade from picking something the Amiga cannot do
     # and turning a stack test into a negotiation failure.

@@ -351,6 +351,21 @@ ULONG       start;
         return;
     }
 
+#if (NX_SECURE_TLS_TLS_1_3_ENABLED)
+    /*
+     * The server half stays on TLS 1.2.  A 1.3 server signs CertificateVerify
+     * with RSA-PSS (RFC 8446 4.4.3) and nx_crypto has _nx_crypto_rsa_pss_verify
+     * but no matching sign, so the server cannot produce one: it fails in
+     * nx_secure_tls_send_certificate_verify.c:213 with
+     * NX_SECURE_TLS_UNKNOWN_CERT_SIG_ALGORITHM and the client sees the alert.
+     * That is a server-side gap only.  The client half is left at 1.3, which is
+     * the direction that matters here, and a client never signs
+     * CertificateVerify unless it presents a client certificate.
+     */
+    (VOID) nx_secure_tls_session_protocol_version_override(&h_server_session,
+                                                    NX_SECURE_TLS_VERSION_TLS_1_2);
+#endif
+
     if (round -> h_server_fast)
     {
         status = nx_secure_tls_ecc_initialize(&h_server_session,

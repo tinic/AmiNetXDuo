@@ -123,19 +123,21 @@ UPDATE=0
 TRACE=0
 PROFILE=0
 STOCK25519=0
+KEEP_SYMBOLS=0
 LOCALOPTS=""
 PROGRAMS="dbclient"
 
-while getopts "ub:TpSO:P:" opt; do
+while getopts "ub:TpSkO:P:" opt; do
     case "$opt" in
         u) UPDATE=1 ;;
         b) BUILD="$OPTARG" ;;
         T) TRACE=1 ;;
         p) PROFILE=1 ;;
         S) STOCK25519=1 ;;
+        k) KEEP_SYMBOLS=1 ;;
         O) LOCALOPTS="$OPTARG" ;;
         P) PROGRAMS="$OPTARG" ;;
-        *) echo "usage: $0 [-u] [-b builddir] [-T] [-p] [-S] [-O localoptions.h] [-P \"prog ...\"]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-u] [-b builddir] [-T] [-p] [-S] [-k] [-O localoptions.h] [-P \"prog ...\"]" >&2; exit 2 ;;
     esac
 done
 
@@ -389,6 +391,9 @@ for p in $PROGRAMS; do
             break
         fi
     done
+    # -k against a tree whose binary this script already stripped: make has
+    # nothing to do and would hand back the stripped one, silently.
+    [ "$KEEP_SYMBOLS" = "1" ] && rm -f "$OUT/$p"
 done
 
 echo "==> building $PROGRAMS"
@@ -396,6 +401,17 @@ make -C "$OUT" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" \
      PROGRAMS="$PROGRAMS" \
      LDFLAGS="$AMIGA_CLIENT_LDFLAGS -Wl,--wrap=open,--wrap=read,--wrap=write,--wrap=close,--wrap=spawn_command,--wrap=getenv,--wrap=ioctl,--wrap=signal$FAST_WRAPS$PROF_WRAPS" \
      LIBS="${SHIM_OBJS[*]} $PROF_LIBS -Wl,--start-group -lamigaclient -lc -Wl,--end-group"
+
+# Symbols, before the sizes are reported so the numbers are the ones that ship.
+# Dropbear has a `strip` target but nothing invokes it, and STRIP= reaches only
+# `make install`, which this build never runs -- so dbclient carried 935 symbols
+# and 21,648 bytes into every release.  The Amiga reads none of them: a profile
+# of this binary is built on the host from the objects in $OUT.  -k keeps them.
+if [ "$KEEP_SYMBOLS" = "0" ]; then
+    for p in $PROGRAMS; do
+        [ -f "$OUT/$p" ] && "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-strip" "$OUT/$p"
+    done
+fi
 
 echo
 for p in $PROGRAMS; do

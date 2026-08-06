@@ -47,6 +47,17 @@ function(profile_binary name)
     if(AMIGA_NDK_INCLUDE)
         target_include_directories(${name} PRIVATE "${AMIGA_NDK_INCLUDE}")
     endif()
+    # Symbols, after the map is written and before the size is printed, as in
+    # src/tools/.  Both binaries ship in Developer/Profile/ and neither reads
+    # its own HUNK_SYMBOL: profspin takes its kernel ranges from link-time
+    # addresses the compiler put in the code, and the report is built on the
+    # host from the map beside this binary.
+    if(CMAKE_STRIP AND NOT AMINETXDUO_KEEP_SYMBOLS)
+        add_custom_command(TARGET ${name} POST_BUILD
+            COMMAND "${CMAKE_STRIP}" "$<TARGET_FILE:${name}>"
+            VERBATIM)
+    endif()
+
     if(AMIGA_SIZE)
         add_custom_command(TARGET ${name} POST_BUILD
             COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:${name}>"

@@ -216,6 +216,21 @@ struct TLSLibBase
     struct Library          tb_Lib;
     UWORD                   tb_Pad;
     APTR                    tb_SegList;
+
+    /*
+     * Five longwords that let tools/profiler find this library's seglist, so
+     * a profile of a program using tls.library names functions inside it
+     * rather than showing the whole library as one bar.  Exec publishes
+     * struct Library and nothing after it, so the seglist sits at an offset
+     * only this source knows; the profiler scans the base's positive half for
+     * the magic and checks tb_ProfLibBase against where it found the record.
+     * See tools/profiler/prof.h, "HOW A LIBRARY LETS ITS SEGLIST BE FOUND".
+     */
+    ULONG                   tb_ProfMagic;
+    ULONG                   tb_ProfSize;
+    ULONG                   tb_ProfLibBase;
+    ULONG                   tb_ProfSegList;
+    ULONG                   tb_ProfSum;
     struct ExecBase        *tb_SysBase;
 
     /*

@@ -89,6 +89,35 @@ target_link_libraries(nx_secure PUBLIC nx_crypto netxduo)
 # translation unit that includes nx_secure_tls.h agrees with this one.
 target_compile_definitions(nx_secure PUBLIC NX_SECURE_ENABLE_AEAD_CIPHER)
 
+# TLS 1.3.  Everything it needs is already here and was only ever compiled
+# out: nx_secure's seven nx_secure_tls_1_3_*.c files, _nx_crypto_rsa_pss_verify
+# for the CertificateVerify that RFC 8446 4.4.3 requires instead of PKCS#1
+# v1.5, crypto_method_hkdf for the key schedule, and the three
+# NX_SECURE_TLS_TLS_1_3_ENABLED rows plus the hkdf/hmac/ecdhe block in
+# ami_tls_crypto.c's table.  PUBLIC for the same reason as the line above: the
+# macro changes structure layouts in nx_secure_tls.h, so a translation unit
+# that disagrees gets a different NX_SECURE_TLS_SESSION.
+target_compile_definitions(nx_secure PUBLIC NX_SECURE_TLS_ENABLE_TLS_1_3)
+target_compile_definitions(nx_crypto PUBLIC NX_SECURE_TLS_ENABLE_TLS_1_3)
+
+# The schoolbook inner loop in _nx_crypto_huge_number_multiply is addmul_1, and
+# src/crypto68k has that in 68020 assembly over the same limb type.  Only on a
+# cross build: crypto68k_ref supplies a C fallback on a host, but the point of
+# the substitution is the assembly.
+if(CMAKE_CROSSCOMPILING)
+    target_compile_definitions(nx_crypto PRIVATE NX_CRYPTO_AMIGA_C68K_LIMBS)
+    # crypto68k is configured after this directory; naming a target that does
+    # not exist yet is fine, CMake resolves target names at generate time.
+    target_link_libraries(nx_crypto PUBLIC crypto68k)
+
+    # nx_crypto_gcm.c already has a longword path for its 16-byte XOR and only
+    # takes it when this is defined.  A 68020 handles a misaligned longword;
+    # a 68000 takes an address error, so this is 68020-and-up only.
+    if(NOT AMINETXDUO_CPU STREQUAL "68000")
+        target_compile_definitions(nx_crypto PRIVATE NX_CRYPTO_ENABLE_UNALIGNED_ACCESS)
+    endif()
+endif()
+
 # Wipe key material when it stops being needed.  174 sites across nx_secure
 # guard on this, and ami_tls_crypto.c has five of its own; without it the
 # handshake hashes, the decrypted signature blocks, the premaster secret and

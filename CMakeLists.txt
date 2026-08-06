@@ -161,9 +161,11 @@ endif()
 # reference for bsd_lib_expunge() to decline over.  Off in the floor tier,
 # where the programs that reach for a device rather than a socket are not
 # installed.
-# Symbols are stripped from the commands and the library.  -DAMINETXDUO_KEEP_SYMBOLS=ON
-# keeps them, which is what a debugging session wants; the profiler does not
-# need them, since it reads the linker map and the object files.
+# Symbols are stripped from every binary that ships: the commands, the three
+# libraries, and the profiler in Developer/.  -DAMINETXDUO_KEEP_SYMBOLS=ON keeps
+# them, which is what a debugging session wants; the profiler does not need them,
+# since it reads the linker map and the object files.  ssh comes from
+# clients/dropbear/build.sh, outside this tree, and strips there (-k keeps).
 option(AMINETXDUO_KEEP_SYMBOLS "Keep the symbol table in the built binaries" OFF)
 
 option(AMINETXDUO_TCPDEVICE "Build the TCP: AmigaDOS handler" ON)

@@ -21,11 +21,12 @@ TIMEOUT=300
 CPU=""
 BUILD="${AMINETXDUO_BUILD:-build/tls}"
 
-while getopts "m:t:c:b:" opt; do
+while getopts "m:t:c:b:k:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
+        k) CLOCK="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
         *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-b builddir]" >&2; exit 2 ;;
     esac
@@ -57,7 +58,20 @@ cp "$A2065" "$STAGE/devs/a2065.device"
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-tlshttps}"
 
 CPUARG=()
-[ -z "$CPU" ] || CPUARG=(-c "$CPU")
+[ -z "$CPU" ] || CPUARG+=(-c "$CPU")
+[ -z "${CLOCK:-}" ] || CPUARG+=(-k "$CLOCK")
+
+# AMINETXDUO_PROFILE=1 runs the same thing under tools/profiler/Profile, which
+# needs no recompilation of the target: the profile lands on the drive as
+# DH0:tls.prof for tools/profiler/profreport.py.
+if [ "${AMINETXDUO_PROFILE:-0}" = "1" ]; then
+    case "$BUILD" in /*) PROF="$BUILD/tools/profiler/Profile" ;;
+                      *) PROF="$ROOT/$BUILD/tools/profiler/Profile" ;; esac
+    [ -x "$PROF" ] || { echo "build the Profile target first" >&2; exit 2; }
+    exec "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
+         -a "OUT=DH0:tls.prof FOLDED=DH0:tls.folded tls_https" \
+         "$PROF" "$EXE" "$STAGE/devs"
+fi
 
 exec "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
      "$EXE" "$STAGE/devs"

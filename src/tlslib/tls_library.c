@@ -83,6 +83,15 @@ static struct TLSLibBase *tls_lib_init(
     base->tb_SegList = seglist;
     base->tb_SysBase = sysbase;
 
+    /* The profiler's segment tag; the sum is computed so that the magic
+       turning up by accident in somebody's data is not enough to pass. */
+    base->tb_ProfMagic   = 0x50534731UL;    /* 'PSG1' */
+    base->tb_ProfSize    = 5UL * sizeof(ULONG);
+    base->tb_ProfLibBase = (ULONG)base;
+    base->tb_ProfSegList = (ULONG)seglist;
+    base->tb_ProfSum     = 0UL - (base->tb_ProfMagic + base->tb_ProfSize +
+                                  base->tb_ProfLibBase + base->tb_ProfSegList);
+
     base->tb_Lib.lib_Node.ln_Type = NT_LIBRARY;
     base->tb_Lib.lib_Node.ln_Name = tls_lib_name;
     base->tb_Lib.lib_Flags        = LIBF_SUMUSED | LIBF_CHANGED;

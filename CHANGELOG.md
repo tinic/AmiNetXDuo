@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+- Everything the archive installs is stripped now. The three libraries in each drawer, `ssh` and the profiler in `Developer/` each carried a symbol table nothing on the Amiga reads: 13% of `ssh`, 11% of `bsdsocket.library`, 20% of `usergroup.library`, around 200 KB of files in all, and less than that off the download, which was already compressing them. The commands were stripped before this
+
 ## 0.17.4
 
 - `ssh` no longer installs on a 68000, where it could only crash. It is built for the 68020 and the whole `C:` drawer was copied to every machine, so a 68000 owner was given it, ran it, and took an illegal instruction. The page that explains why a 68000 gets no encrypted connections now names it too
