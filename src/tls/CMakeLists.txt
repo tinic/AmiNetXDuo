@@ -107,6 +107,17 @@ target_compile_definitions(nx_crypto PUBLIC NX_SECURE_TLS_ENABLE_TLS_1_3)
 option(AMINETXDUO_C68K_LIMBS
        "Route nx_crypto's huge-number limb loops through src/crypto68k" ON)
 
+# The yield hook, and it is not part of the limb substitution.  One scalar
+# multiplication runs for tens of seconds here and the AmigaOS ThreadX port
+# does not preempt a thread that makes no ThreadX call, so the vendored curve
+# arithmetic has to hand the machine back or the IP thread cannot answer the
+# network for the length of a P-384 or P-521 key generation.  Needed whether
+# or not the limb loops are substituted, so it is linked outside that test.
+if(CMAKE_CROSSCOMPILING)
+    target_compile_definitions(nx_crypto PRIVATE NX_CRYPTO_AMIGA_YIELD_HOOK)
+    target_link_libraries(nx_crypto PUBLIC crypto68k)
+endif()
+
 if(CMAKE_CROSSCOMPILING AND AMINETXDUO_C68K_LIMBS)
     target_compile_definitions(nx_crypto PRIVATE NX_CRYPTO_AMIGA_C68K_LIMBS)
     # crypto68k is configured after this directory; naming a target that does
