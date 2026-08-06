@@ -148,11 +148,11 @@ jobs:
       # not produce it and make-dist.sh would quietly ship an archive without
       # it. Built here so a release always carries it; dbclient defaults to the
       # 25519 rewritten for this machine.
-      # Twice, one per processor drawer.  dbclient is compiled for the 68020,
-      # and the 68060 dropped instructions that target uses, so the two are
-      # not interchangeable and the installer picks by CPU.  There is no 68000
-      # build: it would take an illegal instruction on a 68020 binary, and a
-      # curve25519 handshake at 7 MHz is not something anyone waits through.
+      # Once per processor drawer.  The three are not interchangeable: a 68020
+      # binary takes an illegal instruction on a 68000, and the 68060 dropped
+      # instructions the 68020 build uses, so the installer picks by CPU.
+      # The 68000 build is slower and ships anyway -- the archive carries one
+      # per processor and nothing is withheld for being slow.
       - name: Build the ported clients
         run: |
           AMIGA_CLIENT_ARCH=-m68000    clients/dropbear/build.sh -b build/ssh00
