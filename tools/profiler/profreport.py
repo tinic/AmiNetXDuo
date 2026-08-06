@@ -230,10 +230,31 @@ SEC_OF_TYPE = {"t": ".text", "T": ".text", "w": ".text", "W": ".text",
                "d": ".data", "D": ".data", "g": ".data", "G": ".data",
                "b": ".bss", "B": ".bss"}
 
-MAP_SEC = re.compile(r"^\s(\.(?:text|data|bss))\s+"
+MAP_SEC = re.compile(r"^\s(\.(?:text|data|bss)(?:\.[^\s]+)?)\s+"
                      r"0x([0-9a-fA-F]+)\s+0x([0-9a-fA-F]+)\s+(\S.*?)\s*$")
-MAP_SEC_SPLIT = re.compile(r"^\s(\.(?:text|data|bss))\s*$")
+MAP_SEC_SPLIT = re.compile(r"^\s(\.(?:text|data|bss)(?:\.[^\s]+)?)\s*$")
 MAP_SEC_TAIL = re.compile(r"^\s+0x([0-9a-fA-F]+)\s+0x([0-9a-fA-F]+)\s+(\S.*?)\s*$")
+
+
+def base_section(name):
+    """`.text.foo` -> `.text`, and the same for .data and .bss.
+
+    THE TREE COMPILES -ffunction-sections, so nearly every function lands in a
+    section of its own and the linker map records the contribution under that
+    name.  The two patterns above used to match only the bare `.text`, so none
+    of those lines were seen at all: this map has 791 of them against 517
+    plain ones, and the symbol table stopped dead at the address where the
+    `*(.text*)` catch-all begins.
+
+    Everything above that point -- 155 KB, most of NetX Duo -- was then
+    credited to the last symbol below it, which happened to be a twenty-byte
+    libc strlen.  It duly appeared to hold 27% of a file transfer, in seven
+    unrelated tasks at once.
+    """
+    for base in (".text", ".data", ".bss"):
+        if name == base or name.startswith(base + "."):
+            return base
+    return name
 
 
 def parse_map(path):
@@ -245,13 +266,13 @@ def parse_map(path):
             if pending is not None:
                 m = MAP_SEC_TAIL.match(line)
                 if m:
-                    out.append((pending, int(m.group(1), 16),
+                    out.append((base_section(pending), int(m.group(1), 16),
                                 int(m.group(2), 16), m.group(3)))
                 pending = None
                 continue
             m = MAP_SEC.match(line)
             if m:
-                out.append((m.group(1), int(m.group(2), 16),
+                out.append((base_section(m.group(1)), int(m.group(2), 16),
                             int(m.group(3), 16), m.group(4)))
                 continue
             m = MAP_SEC_SPLIT.match(line)
