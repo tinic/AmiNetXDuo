@@ -37,7 +37,7 @@ static const char *const c68k_prim_names[3] =
 {
     "portable C",
     "68020 assembly",
-    "68060 assembly, multiply-accumulate only"
+    "MULU.W assembly, multiply-accumulate only"
 };
 
 

@@ -148,6 +148,33 @@ EOF
     echo "AMINETXDUO_KICKSTART_EXT=$KICKSTART_EXT does not exist" >&2; exit 2
 }
 
+# A 68020+ machine's ROM uses 68020 instructions, so asking for a 68000 CPU on
+# one boots nothing: no guru, no serial output, just a run that reaches the
+# timeout.  That looks exactly like a slow test and has been misread as one
+# more than once.  Refuse it here instead, and name the model to use.
+case "$MODEL" in
+    A1200|A3000|A4000|A4000T|CD32)
+        case "$CPU" in
+            68000|68010)
+                echo "-m $MODEL -c $CPU cannot boot: the $MODEL Kickstart needs" >&2
+                echo "a 68020.  For a 68000 use -m A600 (or A500), which reads" >&2
+                echo "AMINETXDUO_KICKSTART_A600." >&2
+                exit 2 ;;
+        esac ;;
+esac
+
+# The other half of the same trap: a model with no AMINETXDUO_KICKSTART_<MODEL>
+# silently falls back to the generic one, which in the lab is an A1200 ROM.  On
+# a 68000-class model that is the mismatch above with nothing to point at it.
+if [ -z "${!_ks_var:-}" ]; then
+    case "$MODEL" in
+        A500|A500_|A600|A1000|A2000|CDTV)
+            echo "$_ks_var is not set; falling back to AMINETXDUO_KICKSTART" >&2
+            echo "($(basename "$KICKSTART")).  If that is an A1200 ROM this run" >&2
+            echo "will boot to a black screen.  Set $_ks_var." >&2 ;;
+    esac
+fi
+
 # ------------------------------------------------------------------- boards --
 #
 # The keys are WinUAE's, because Amiberry parses WinUAE's config file.  See

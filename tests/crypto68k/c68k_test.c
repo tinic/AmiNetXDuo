@@ -37,6 +37,7 @@
 #include <exec/types.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <string.h>
 
 #include "c68k_vectors.h"
 
@@ -44,7 +45,7 @@ static const char *const c68k_prim_names[3] =
 {
     "portable C",
     "68020 assembly",
-    "68060 assembly, multiply-accumulate only"
+    "MULU.W assembly, multiply-accumulate only"
 };
 
 
@@ -504,7 +505,10 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
 int main(VOID)
 {
 
-ULONG   start;
+ULONG           start;
+CONST_STRPTR    cmdline = (CONST_STRPTR)GetArgStr();
+BOOL            quick   = (cmdline != NULL) &&
+                          (strchr((const char *)cmdline, 'q') != NULL);
 
 
     ami_crash_set_reference((APTR)main, "crypto68k_test");
@@ -519,13 +523,20 @@ ULONG   start;
     c68k_log("AmiNetXDuo, crypto68k correctness gate");
     c68k_log("  limb primitives: %s",
              (LONG)c68k_prim_names[c68k_using_assembly() % 3u]);
+    if (quick)
+    {
+        c68k_log("  quick: skipping the RSA-2048 known answers");
+    }
 
     (VOID) c68k_timer_open();
     start = c68k_eclock();
 
     c68k_rng_seed(0x5A17C0DEUL);
 
-    t_known_answers();
+    if (!quick)
+    {
+        t_known_answers();
+    }
     t_primitive();
     t_mont_differential(400u);
     t_powm_differential(150u);

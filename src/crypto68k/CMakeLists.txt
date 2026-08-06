@@ -52,33 +52,35 @@ if(AMINETXDUO_CRYPTO68K_ASM AND NOT _crypto68k_asm_default AND CMAKE_CROSSCOMPIL
         "assemble them and a 68060 traps on every MULU.L. Leave it off.")
 endif()
 
-# The 68060 gets ONE of them back.  Only two instructions in c68k_prim.S are
+# The 68000 and the 68060 get ONE of them back.  Only two instructions in c68k_prim.S are
 # missing from that part, MULU.L's 32x32 -> 64 form and DIVU.L, but the file is
 # all or nothing, so the 68060 takes the portable C for the whole module -- and
 # then spends 64% of a TLS 1.3 transfer in c68k_addmul_1_c alone.
-# c68k_prim_060.S is that one function rewritten in the multiplies the 68060
-# does implement.  It is a separate option because it is a separate file with a
+# c68k_prim_mulw.S is that one function rewritten in MULU.W, which both parts
+# do implement -- the 68060 because only the 64-bit form was dropped, the
+# 68000 because MULU.W is the only multiply it ever had.  It is a separate option because it is a separate file with a
 # separate CPU rule, and because the two cannot both be on: they define the same
 # symbol.
-if(CMAKE_CROSSCOMPILING AND AMINETXDUO_CPU STREQUAL "68060")
-    set(_crypto68k_asm060_default ON)
+if(CMAKE_CROSSCOMPILING AND (AMINETXDUO_CPU STREQUAL "68060" OR
+                            AMINETXDUO_CPU STREQUAL "68000"))
+    set(_crypto68k_asm_mulw_default ON)
 else()
-    set(_crypto68k_asm060_default OFF)
+    set(_crypto68k_asm_mulw_default OFF)
 endif()
 
-option(AMINETXDUO_CRYPTO68K_ASM060
+option(AMINETXDUO_CRYPTO68K_ASM_MULW
        "Use the hand-written 68060 limb multiply-accumulate in crypto68k"
-       ${_crypto68k_asm060_default})
+       ${_crypto68k_asm_mulw_default})
 
-if(AMINETXDUO_CRYPTO68K_ASM060 AND AMINETXDUO_CRYPTO68K_ASM)
+if(AMINETXDUO_CRYPTO68K_ASM_MULW AND AMINETXDUO_CRYPTO68K_ASM)
     message(FATAL_ERROR
-        "AMINETXDUO_CRYPTO68K_ASM and AMINETXDUO_CRYPTO68K_ASM060 are both ON. "
+        "AMINETXDUO_CRYPTO68K_ASM and AMINETXDUO_CRYPTO68K_ASM_MULW are both ON. "
         "Both define c68k_addmul_1. Pick one.")
 endif()
 
-if(AMINETXDUO_CRYPTO68K_ASM060 AND NOT CMAKE_CROSSCOMPILING)
+if(AMINETXDUO_CRYPTO68K_ASM_MULW AND NOT CMAKE_CROSSCOMPILING)
     message(FATAL_ERROR
-        "AMINETXDUO_CRYPTO68K_ASM060=ON on a host build. The host cannot "
+        "AMINETXDUO_CRYPTO68K_ASM_MULW=ON on a host build. The host cannot "
         "assemble m68k.")
 endif()
 
@@ -180,8 +182,8 @@ if(AMINETXDUO_CRYPTO68K_ASM)
          c68k_prim.S c68k_p256.S c68k_aes.S c68k_chacha20.S c68k_poly1305.S)
 endif()
 
-if(AMINETXDUO_CRYPTO68K_ASM060)
-    list(APPEND CRYPTO68K_SOURCES c68k_prim_060.S)
+if(AMINETXDUO_CRYPTO68K_ASM_MULW)
+    list(APPEND CRYPTO68K_SOURCES c68k_prim_mulw.S)
 endif()
 
 add_library(crypto68k STATIC ${CRYPTO68K_SOURCES})
@@ -208,15 +210,15 @@ if(AMINETXDUO_CRYPTO68K_ASM)
         COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
 endif()
 
-if(AMINETXDUO_CRYPTO68K_ASM060)
+if(AMINETXDUO_CRYPTO68K_ASM_MULW)
     # Same two reasons as above: the .S is #ifdef'd end to end, and the
     # assembler does not see CMAKE_C_FLAGS_INIT, so without the arch flag it is
     # a plain 68000 and rejects nothing here but assembles for the wrong part.
-    target_compile_definitions(crypto68k PRIVATE C68K_ASM_060=1)
-    set_source_files_properties(c68k_prim_060.S PROPERTIES
-        COMPILE_DEFINITIONS C68K_ASM_060=1
+    target_compile_definitions(crypto68k PRIVATE C68K_ASM_MULW=1)
+    set_source_files_properties(c68k_prim_mulw.S PROPERTIES
+        COMPILE_DEFINITIONS C68K_ASM_MULW=1
         COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
 endif()
 
 message(STATUS "  crypto68k asm . ${AMINETXDUO_CRYPTO68K_ASM}")
-message(STATUS "  crypto68k asm060 . ${AMINETXDUO_CRYPTO68K_ASM060}")
+message(STATUS "  crypto68k mulw asm . ${AMINETXDUO_CRYPTO68K_ASM_MULW}")

@@ -193,7 +193,7 @@ INT c68k_cmp(const c68k_limb *a, const c68k_limb *b, UINT n);
  *
  *   0   the portable C
  *   1   c68k_prim.S, the 68020 set
- *   2   c68k_prim_060.S, the 68060 multiply-accumulate with the rest still C
+ *   2   c68k_prim_mulw.S, the 68060 multiply-accumulate with the rest still C
  */
 #define C68K_ASM_NONE   0u
 #define C68K_ASM_68020  1u

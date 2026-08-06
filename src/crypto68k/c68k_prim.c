@@ -36,12 +36,17 @@
  * there, and the whole thing inlines into the multiply-accumulate loop with
  * nothing spilled.
  *
- * A 68000 has no 32-bit multiply at all, so it keeps the out-of-line helper:
- * inlining four __mulsi3 calls per limb would be worse than one call.
+ * A 68000 has no 32-bit multiply, but it does have MULU.W, so it gets the
+ * same treatment with 16-bit operands: declaring the halves as USHORT is what
+ * makes GCC pick the widening 16x16 -> 32 pattern instead of promoting to int
+ * and calling __mulsi3.  That is the same reason ami_umul32_wide declares them
+ * that way; the difference here is that the four products are inline, so the
+ * multiply-accumulate loop does not pay a call per limb.
  */
+#define C68K_HAVE_INLINE_WIDE_MUL   1
+
 #if defined(__mc68020__) || defined(__mc68030__) || defined(__mc68040__) || \
     defined(__mc68060__)
-#define C68K_HAVE_INLINE_WIDE_MUL   1
 
 static HN_UBASE2 c68k_wide_mul(c68k_limb a, c68k_limb b)
 {
@@ -60,6 +65,27 @@ c68k_limb   mid  = (ll >> 16) + (lh & 0xFFFFUL) + (hl & 0xFFFFUL);
     return((((HN_UBASE2)(hh + (lh >> 16) + (hl >> 16) + (mid >> 16))) << 32) |
            (HN_UBASE2)((mid << 16) | (ll & 0xFFFFUL)));
 }
+
+#else   /* 68000: the same four products, through MULU.W */
+
+static HN_UBASE2 c68k_wide_mul(c68k_limb a, c68k_limb b)
+{
+
+unsigned short  a_lo = (unsigned short)a;
+unsigned short  a_hi = (unsigned short)(a >> 16);
+unsigned short  b_lo = (unsigned short)b;
+unsigned short  b_hi = (unsigned short)(b >> 16);
+c68k_limb       ll   = (c68k_limb)a_lo * (c68k_limb)b_lo;
+c68k_limb       lh   = (c68k_limb)a_lo * (c68k_limb)b_hi;
+c68k_limb       hl   = (c68k_limb)a_hi * (c68k_limb)b_lo;
+c68k_limb       hh   = (c68k_limb)a_hi * (c68k_limb)b_hi;
+c68k_limb       mid  = (ll >> 16) + (lh & 0xFFFFUL) + (hl & 0xFFFFUL);
+
+
+    return((((HN_UBASE2)(hh + (lh >> 16) + (hl >> 16) + (mid >> 16))) << 32) |
+           (HN_UBASE2)((mid << 16) | (ll & 0xFFFFUL)));
+}
+
 #endif
 
 c68k_limb c68k_addmul_1_c(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a)
@@ -170,11 +196,11 @@ HN_UBASE2   num;
 
 
 /*
- * C68K_ASM_060 is the 68060 build, where c68k_prim_060.S supplies this one
+ * C68K_ASM_MULW is the 68060 build, where c68k_prim_mulw.S supplies this one
  * function and everything else in this file stands.  See src/crypto68k/
  * CMakeLists.txt for why it is a separate option from C68K_ASM.
  */
-#ifndef C68K_ASM_060
+#ifndef C68K_ASM_MULW
 c68k_limb c68k_addmul_1(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a)
 {
 
@@ -297,7 +323,7 @@ UINT c68k_using_assembly(VOID)
 
 #if defined(C68K_ASM)
     return(C68K_ASM_68020);
-#elif defined(C68K_ASM_060)
+#elif defined(C68K_ASM_MULW)
     return(C68K_ASM_68060);
 #else
     return(C68K_ASM_NONE);

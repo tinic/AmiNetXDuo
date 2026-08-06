@@ -71,7 +71,7 @@
 |
 | SPDX-License-Identifier: MIT
 
-#ifdef C68K_ASM_060
+#ifdef C68K_ASM_MULW
 
         .text
         .align  2
@@ -168,4 +168,4 @@ Lam60_zero:
         movem.l (sp)+,d2-d7/a2
         rts
 
-#endif /* C68K_ASM_060 */
+#endif /* C68K_ASM_MULW */
