@@ -156,6 +156,9 @@ if(AMINETXDUO_BSDSOCKET_LINK)
         -Wl,--gc-sections
         "-Wl,-Map=$<TARGET_FILE_DIR:bsdsocket_library>/bsdsocket.library.map")
 
+    # 39,948 bytes, 11% of the library, and nothing on the Amiga reads them:
+    # profreport.py --lib works from the map above and the objects, not from
+    # HUNK_SYMBOL, which is why the map is written before the strip runs.
     if(CMAKE_STRIP AND NOT AMINETXDUO_KEEP_SYMBOLS)
         add_custom_command(TARGET bsdsocket_library POST_BUILD
             COMMAND "${CMAKE_STRIP}" "$<TARGET_FILE:bsdsocket_library>"

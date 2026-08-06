@@ -117,16 +117,20 @@ if(AMINETXDUO_TLSLIB_LINK)
     target_link_options(tls_library PRIVATE -nostartfiles -Wl,--gc-sections
                         ${TLSLIB_WRAP_OPTIONS})
 
-    if(AMIGA_SIZE)
-        add_custom_command(TARGET tls_library POST_BUILD
-            COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:tls_library>"
-            COMMENT "tls.library size")
-    endif()
-
+    # Before the size is printed, so the number reported is the number that
+    # ships.  Same reasoning as src/tools/: profreport.py reads the linker map
+    # and the objects rather than HUNK_SYMBOL, so the symbol table is 22 KB
+    # nothing on the Amiga reads.
     if(CMAKE_STRIP AND NOT AMINETXDUO_KEEP_SYMBOLS)
         add_custom_command(TARGET tls_library POST_BUILD
             COMMAND "${CMAKE_STRIP}" "$<TARGET_FILE:tls_library>"
             VERBATIM)
+    endif()
+
+    if(AMIGA_SIZE)
+        add_custom_command(TARGET tls_library POST_BUILD
+            COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:tls_library>"
+            COMMENT "tls.library size")
     endif()
 endif()
 

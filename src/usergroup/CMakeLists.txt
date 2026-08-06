@@ -54,16 +54,18 @@ if(AMINETXDUO_USERGROUP_LINK)
     # and until now had nothing here to collect it.
     target_link_options(usergroup_library PRIVATE -nostartfiles -Wl,--gc-sections)
 
-    if(AMIGA_SIZE)
-        add_custom_command(TARGET usergroup_library POST_BUILD
-            COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:usergroup_library>"
-            COMMENT "usergroup.library size")
-    endif()
-
+    # Before the size is printed, as in src/tools/.  2,236 bytes of a 11,352-byte
+    # library, the largest proportion anywhere in the archive.
     if(CMAKE_STRIP AND NOT AMINETXDUO_KEEP_SYMBOLS)
         add_custom_command(TARGET usergroup_library POST_BUILD
             COMMAND "${CMAKE_STRIP}" "$<TARGET_FILE:usergroup_library>"
             VERBATIM)
+    endif()
+
+    if(AMIGA_SIZE)
+        add_custom_command(TARGET usergroup_library POST_BUILD
+            COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:usergroup_library>"
+            COMMENT "usergroup.library size")
     endif()
 endif()
 
