@@ -441,6 +441,11 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
                     (LONG)tool_prefix_len(live->netmask));
         tool_printf("  broadcast   %s\n", (LONG)bcast);
         tool_printf("  hardware    %s\n", (LONG)mac);
+        /* What is running, not what the file asked for: an interface whose
+           responder refused to start reads "no" here. */
+        tool_printf("  mDNS        %s\n",
+                    (LONG)(live->mdns ? "yes, answering .local"
+                                      : "no"));
         tool_printf("  mtu         %lu bytes", live->mtu);
         if (live->bps != 0)
             tool_printf("        %lu bits/s", live->bps);

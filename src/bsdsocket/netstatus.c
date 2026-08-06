@@ -756,6 +756,11 @@ static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
             out->nsi_AllocFailures    = stats.alloc_failures;
         }
 
+        if (netstack_iface_mdns((UWORD)i))
+        {
+            out->nsi_Flags |= NETSTATUS_IF_MDNS;
+        }
+
         cfg = ns_config_for(i);
         if (cfg != NULL)
         {

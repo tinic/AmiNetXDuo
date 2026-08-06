@@ -175,6 +175,12 @@ struct AmiNetStack
     BOOL                ns_IpCreated;
 
     AmiSana2If         *ns_Iface[AMI_CFG_MAX_INTERFACES];
+
+    /* MDNS= for each interface, by NX interface index rather than by
+       config index: ns_Iface[] is filled in open order and an
+       interface that fails to open takes no slot, so the two are not
+       the same number. */
+    BOOL                ns_IfaceMdns[AMI_CFG_MAX_INTERFACES];
     UWORD               ns_IfaceCount;
 
     NX_DHCP             ns_Dhcp;

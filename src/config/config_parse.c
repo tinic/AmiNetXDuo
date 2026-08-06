@@ -50,7 +50,8 @@ typedef enum
     IF_KEY_STATE,
     IF_KEY_ADDRESS6,
     IF_KEY_GATEWAY6,
-    IF_KEY_CONFIGURE6
+    IF_KEY_CONFIGURE6,
+    IF_KEY_MDNS
 } IfKey;
 
 static const struct IfKeyword
@@ -64,6 +65,7 @@ ami_if_keywords[] =
     { "device",             IF_KEY_DEVICE    },
     { "id",                 IF_KEY_ID        },
     { "unit",               IF_KEY_UNIT      },
+    { "mdns",               IF_KEY_MDNS      },
     { "address",            IF_KEY_ADDRESS   },
     { "ipaddress",          IF_KEY_ADDRESS   },   /* AmiTCP spelling */
     { "netmask",            IF_KEY_NETMASK   },
@@ -628,6 +630,22 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                                      "IPTYPE is either a packet type number "
                                      "(2048 for Ethernet) or one of DHCP, "
                                      "STATIC and AUTO.");
+                }
+                break;
+
+            case IF_KEY_MDNS:
+                /*
+                 * Answering .local on this wire.  Off unless asked for: the
+                 * responder is per interface and so is its cost, and on a
+                 * 68000 it is enough to be felt by everything else.
+                 */
+                if (!ami_cfg_parse_bool(value, &out->mdns))
+                {
+                    AMI_WARN("config: %s: bad MDNS '%s'", out->name, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "MDNS",
+                                     value,
+                                     "MDNS is YES or NO.  NO was assumed.");
+                    out->mdns = FALSE;
                 }
                 break;
 

@@ -234,6 +234,7 @@ typedef struct NetStatusSystem
 #define NETSTATUS_IF_SANA2      0x0004  /* a SANA-II device is attached      */
 #define NETSTATUS_IF_ONLINE     0x0008  /* and that device reports online    */
 #define NETSTATUS_IF_NAMED      0x0010  /* nsi_Name came from the config     */
+#define NETSTATUS_IF_MDNS       0x0020  /* answering .local here             */
 
 typedef struct NetStatusInterface
 {

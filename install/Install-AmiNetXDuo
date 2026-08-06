@@ -122,6 +122,19 @@
        "\"eth0\" is a good name and is what the documentation uses.  The name "
        "may be at most 15 characters long."))
 
+(set H_MDNS
+  (cat "mDNS lets this Amiga be reached by a .local name, and lets "
+       "ShowNetServices list what else is on the network, with no name "
+       "server anywhere.\n\n"
+       "It is off unless you ask for it, and that is deliberate.  The "
+       "responder joins a multicast group on this interface, so every .local "
+       "query any machine on the network sends becomes work for this Amiga, "
+       "whether or not it was asking about this one.  On a 68000 that is "
+       "enough to be felt by everything else the machine is doing.  On a fast "
+       "accelerator it is not.\n\n"
+       "This is one line, MDNS=, in the file DEVS:NetInterfaces that this "
+       "installer writes, so it is easy to change later."))
+
 (set H_DHCP
   (cat "Almost every home network has a router that hands out addresses "
        "automatically, using DHCP.  Where other machines on the network "
@@ -633,6 +646,7 @@
 (set IFNAME  "eth0")
 (set DEVUNIT 0)
 (set USEDHCP 1)
+(set WANTMDNS 0)
 
 (if (= KEEP_OLD 0)
   (
@@ -743,6 +757,13 @@
       ))
 
     ; --- automatic or manual addressing --------------------------------
+
+    (set WANTMDNS
+      (askbool
+        (prompt "Answer .local names on the network?")
+        (help    H_MDNS)
+        (choices "No" "Yes")
+        (default 0)))
 
     (set USEDHCP
       (askbool
@@ -1062,6 +1083,12 @@
       (append ";            Roadshow IPTYPE is the SANA-II packet type, a\n")
       (append ";            number, and defaults to 2048.\n")
       (append ";\n")
+      (append "; MDNS=  YES -- answer .local queries on this interface\n")
+      (append ";        NO  -- do not, which is the default when the\n")
+      (append ";               keyword is absent.  The responder costs\n")
+      (append ";               real time on a slow machine whether or\n")
+      (append ";               not anything asks it anything.\n")
+      (append ";\n")
       (append "; An IPv6 build also understands CONFIGURE6 (OFF, LINKLOCAL,\n")
       (append "; AUTO or STATIC), ADDRESS6 and GATEWAY6.  A build without\n")
       (append "; IPv6 ignores them, so they are safe to leave in place.\n")
@@ -1069,6 +1096,7 @@
       (append "DEVICE=" DEV_WRITE "\n")
       (append ("UNIT=%ld\n" DEVUNIT))
       (append (if USEDHCP "CONFIGURE=DHCP\n" "CONFIGURE=STATIC\n"))
+      (append (if WANTMDNS "MDNS=YES\n" "MDNS=NO\n"))
       (append (if USEDHCP
                   (cat ";ADDRESS=192.168.1.10\n;NETMASK=255.255.255.0\n")
                   (cat "ADDRESS=" IPADDR "\n" "NETMASK=" IPMASK "\n")))
