@@ -438,7 +438,7 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
         return;
 
 #ifdef AMINETXDUO_RX_VERIFY
-    AMI_INFO("net68k rxverify: ip_ok %lu, transport_ok %lu, bad_ip %lu, "
+    AMI_ERROR("net68k rxverify: ip_ok %lu, transport_ok %lu, bad_ip %lu, "
              "bad_transport %lu; skip short %lu / ver %lu / len %lu / "
              "frag %lu / proto %lu / udp0 %lu",
              (unsigned long)n68k_rx_verify_stats.ip_ok,

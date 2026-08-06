@@ -334,7 +334,8 @@ VOID ami_sana2_rxprobe_report(const AmiSana2If *iface)
  * to queue work onto it (see nx_api.h and nx_ram_network_driver.c, which
  * dispatches by EtherType the same way).
  */
-VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet)
+VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
+                          const AmiRxSlot *slot)
 {
     UINT type;
 
@@ -383,7 +384,19 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet)
          */
         {
             UINT    drop =  NX_FALSE;
-            ULONG   caps =  n68k_rx_verify(packet, &drop);
+            ULONG   caps;
+
+            /*
+             * The copy hook already summed this frame out of the loads the
+             * copy was doing, so hand that over rather than walking it again.
+             * A slot that did not sum (misaligned, or no slot at all) passes
+             * zero and the verifier walks, exactly as before.
+             */
+            if ((slot != NULL) && (slot->summed != FALSE))
+                caps = n68k_rx_verify_sum(packet, slot->sum, slot->copied,
+                                          &drop);
+            else
+                caps = n68k_rx_verify(packet, &drop);
 
             if (drop != NX_FALSE)
             {
@@ -590,7 +603,7 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
     packet->nx_packet_append_ptr = packet->nx_packet_prepend_ptr + length;
 
     slot->packet = NULL;     /* ownership passes to NetX Duo */
-    ami_sana2_rx_deliver(iface, packet);
+    ami_sana2_rx_deliver(iface, packet, slot);
 }
 
 static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)

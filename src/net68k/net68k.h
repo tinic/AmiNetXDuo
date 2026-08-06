@@ -56,6 +56,14 @@ VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len);
 #endif
 
 
+/*
+ * Copy `count` longwords and return the ones-complement sum of what was
+ * copied, out of the loads the copy is already doing.  Both pointers must be
+ * longword aligned; the caller decides that, because it is a fact about the
+ * frame in front of it.
+ */
+ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count);
+
 #ifdef AMINETXDUO_RX_VERIFY
 
 /*
@@ -75,6 +83,7 @@ typedef struct N68kRxVerifyStats
     ULONG   skip_fragment;      /* MF or offset: the stack reassembles      */
     ULONG   skip_protocol;      /* nothing this file verifies               */
     ULONG   skip_udp_nosum;     /* UDP declining to carry one               */
+    ULONG   from_copy;          /* verified from the copy's own sum         */
 } N68kRxVerifyStats;
 
 extern N68kRxVerifyStats n68k_rx_verify_stats;
@@ -85,6 +94,14 @@ extern N68kRxVerifyStats n68k_rx_verify_stats;
  * *drop when the frame is corrupt and must not reach the stack.
  */
 ULONG n68k_rx_verify(NX_PACKET *packet, UINT *drop);
+
+/*
+ * The same, from the sum ami_sana2_copy_to_buff() produced while copying.
+ * `carried` covers `copied` bytes from the frame's start.  Anything the sum
+ * cannot be trusted to describe exactly falls through to n68k_rx_verify().
+ */
+ULONG n68k_rx_verify_sum(NX_PACKET *packet, ULONG carried, ULONG copied,
+                         UINT *drop);
 
 #endif /* AMINETXDUO_RX_VERIFY */
 

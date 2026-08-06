@@ -67,6 +67,60 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
     if (slot->packet == NULL || slot->dst == NULL || len > slot->capacity)
         return FALSE;
 
+#ifdef AMINETXDUO_RX_VERIFY
+    /*
+     * Sum while copying, when both ends are longword aligned.  The device has
+     * to be copied out of anyway, so the sum comes out of loads already being
+     * paid for; ami_sana2_rx_deliver() then verifies from it instead of
+     * walking the frame a second time.
+     *
+     * The answer goes in the SLOT, not in the packet: the drain holds the same
+     * slot when it delivers, and the slot is re-armed before it is reused, so
+     * there is no lifetime here that is not already the reader's.
+     */
+    slot->summed = FALSE;
+
+    if ((((ALIGN_TYPE)slot->dst | (ALIGN_TYPE)from) & 3) == 0)
+    {
+        ULONG   words =  len >> 2;
+        ULONG   tail  =  len & 3UL;
+
+        slot->sum = n68k_copy_sum_longwords((ULONG *)slot->dst,
+                                            (const ULONG *)from, words);
+
+        if (tail != 0UL)
+        {
+            const UCHAR    *s =  (const UCHAR *)from + (words << 2);
+            UCHAR          *d =  slot->dst + (words << 2);
+            ULONG           i;
+            union { ULONG l; UCHAR b[4]; } w;
+
+            /*
+             * Past `len` the device's buffer holds the previous frame, so the
+             * last longword is built from the bytes that arrived and padded
+             * with zeroes, which is what a walk does with a partial trailing
+             * longword.  Assembled through the byte array: what matters is
+             * where the bytes sit, not what they are worth.
+             */
+            w.l = 0UL;
+            for (i = 0UL; i < tail; i++)
+            {
+                d[i]   = s[i];
+                w.b[i] = s[i];
+            }
+
+            slot->sum += w.l;
+            if (slot->sum < w.l)
+                slot->sum++;                    /* end-around carry */
+        }
+
+        slot->summed = TRUE;
+        slot->copied = len;
+
+        return TRUE;
+    }
+#endif
+
     ami_sana2_copy_bytes(slot->dst, (const UCHAR *)from, len);
     slot->copied = len;
 

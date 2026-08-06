@@ -222,4 +222,136 @@ UINT        ok;
     return (flags);
 }
 
+
+/* Fold a 32-bit accumulator to 16 bits, carries wrapped around. */
+static ULONG n68k_rxv_fold(ULONG sum)
+{
+    while ((sum >> 16) != 0UL)
+        sum =  (sum & 0xFFFFUL) + (sum >> 16);
+
+    return (sum);
+}
+
+/*
+ * The same verification, from a sum the copy already produced.
+ *
+ * `carried` is the ones-complement sum of `copied` bytes starting where the
+ * copy hook wrote -- for a cooked frame, the IPv4 header onward, which is
+ * exactly what this function is looking at.  The transport's sum is then the
+ * carried sum less the header's, one subtraction instead of a second walk of
+ * the payload.  The header is still summed here, but that is twenty bytes
+ * against up to fifteen hundred.
+ *
+ * A frame carrying Ethernet padding is declined rather than corrected: the
+ * padding sits inside `copied` and outside the datagram, and it is only zero
+ * by convention.  Such frames are short by definition, so the walk costs
+ * nothing; the fast path is for the full-sized ones that matter.
+ */
+ULONG n68k_rx_verify_sum(NX_PACKET *packet, ULONG carried, ULONG copied,
+                         UINT *drop)
+{
+UCHAR  *ip;
+ULONG   flags;
+ULONG   total;
+ULONG   frag;
+ULONG   src;
+ULONG   dst;
+ULONG   head;
+ULONG   sum;
+UINT    ihl;
+UINT    protocol;
+UINT    payload;
+
+    *drop =  NX_FALSE;
+
+    ip =  packet -> nx_packet_prepend_ptr;
+
+    if (packet -> nx_packet_length < 20UL)
+    {
+        n68k_rx_verify_stats.skip_short++;
+        return (0UL);
+    }
+
+    if ((ip[0] >> 4) != 4U)
+    {
+        n68k_rx_verify_stats.skip_version++;
+        return (0UL);
+    }
+
+    ihl   =  (UINT)((ip[0] & 0x0FU) << 2);
+    total =  N68K_RD16(&ip[2]);
+
+    /* Anything the carried sum cannot be trusted to describe exactly goes to
+       the ordinary path, which re-derives everything from the frame. */
+    if ((ihl < 20U) || ((ULONG)ihl > packet -> nx_packet_length) ||
+        (total < (ULONG)ihl) || (total > packet -> nx_packet_length) ||
+        (copied != total))
+    {
+        return (n68k_rx_verify(packet, drop));
+    }
+
+    protocol =  (UINT)ip[9];
+    payload  =  (UINT)(total - (ULONG)ihl);
+    frag     =  N68K_RD16(&ip[6]);
+
+    /* Only TCP and UDP: the others carry no pseudo header, and they are rare
+       and short enough that the ordinary path is the right answer. */
+    if (((protocol != NX_PROTOCOL_TCP) && (protocol != NX_PROTOCOL_UDP)) ||
+        ((frag & 0x3FFFUL) != 0UL))
+    {
+        return (n68k_rx_verify(packet, drop));
+    }
+
+    if ((protocol == NX_PROTOCOL_UDP) && (payload >= 8U) &&
+        (N68K_RD16(&ip[ihl + 6]) == 0UL))
+    {
+        return (n68k_rx_verify(packet, drop));
+    }
+
+    /* ---- the IPv4 header ------------------------------------------------ */
+    head =  n68k_sum_longwords((const ULONG *)ip, (ULONG)ihl >> 2);
+
+    if (n68k_rxv_fold(head) != 0xFFFFUL)
+    {
+        n68k_rx_verify_stats.bad_ip++;
+        *drop =  NX_TRUE;
+        return (0UL);
+    }
+
+    flags =  NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM;
+    n68k_rx_verify_stats.ip_ok++;
+
+    /* ---- transport = carried - header, plus the pseudo header ----------- */
+    sum =  carried + (~head);
+    if (sum < carried)
+        sum++;                              /* end-around carry */
+
+    src =  N68K_RD32(&ip[12]);
+    dst =  N68K_RD32(&ip[16]);
+
+    sum =  n68k_rxv_fold(sum);
+    sum +=  (src >> 16) & 0xFFFFUL;
+    sum +=  src & 0xFFFFUL;
+    sum +=  (dst >> 16) & 0xFFFFUL;
+    sum +=  dst & 0xFFFFUL;
+    sum +=  (ULONG)protocol;
+    sum +=  (ULONG)payload;
+
+    if (n68k_rxv_fold(sum) != 0xFFFFUL)
+    {
+        n68k_rx_verify_stats.bad_transport++;
+        *drop =  NX_TRUE;
+        return (0UL);
+    }
+
+    flags |=  (protocol == NX_PROTOCOL_TCP)
+              ? NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM
+              : NX_INTERFACE_CAPABILITY_UDP_RX_CHECKSUM;
+
+    n68k_rx_verify_stats.transport_ok++;
+    n68k_rx_verify_stats.from_copy++;
+
+    return (flags);
+}
+
 #endif /* AMINETXDUO_RX_VERIFY */
