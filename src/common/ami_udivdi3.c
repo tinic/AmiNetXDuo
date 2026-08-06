@@ -71,9 +71,18 @@ typedef unsigned short      u16;
  * the quotient fits in 32 bits, i.e. when hi < divisor, every caller below
  * guarantees that before calling.
  */
-#if defined(__mc68020__) || defined(__mc68030__) || defined(__mc68040__) || \
-    defined(__mc68060__)
+/*
+ * NOT the 68060.  divu.l Dr:Dq is the 64/32 form, and the 68060 implements
+ * only the 32-bit forms of MULU.L and DIVU.L: the 64-bit-result ones trap to
+ * vector 61 and are emulated by 68060.library.  This routine exists to supply
+ * division for the bignum path, so emitting an instruction that traps in its
+ * inner loop defeats the point.  The same rule as the multiply above, and the
+ * same rule the crypto68k assembly follows.
+ */
+#if defined(__mc68020__) || defined(__mc68030__) || defined(__mc68040__)
+#if !defined(__mc68060__)
 #define AMI_HAVE_DIVUL  1
+#endif
 #endif
 
 static u32 ami_divu64_32(u32 hi, u32 lo, u32 divisor, u32 *remainder)
