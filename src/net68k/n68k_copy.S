@@ -68,12 +68,51 @@
 #define N68K_ODD_IS_FATAL 1
 #endif
 
+| MOVEM on a 68060, and why this file stops using it there.
+|
+| Everything measured in this file was measured on a 68020, where movem.l is
+| the cheapest way to move eight longwords because the fixed cost is paid once
+| for the whole list.  A 68060 is a different machine: movem is microcoded and
+| does not pipeline, while ordinary moves dual-issue, so the instruction that
+| wins on an 020 is the one Motorola's own 68060 optimisation guidance tells
+| you to avoid.
+|
+| THIS IS NOT MEASURED.  It cannot be, here: Amiberry and FS-UAE turn cycle
+| accounting off above the 68020, so a ns/B taken from an emulated 68060 is
+| not a number about a 68060 at all, and this lab has no such hardware.
+| docs/RESEARCH.md 87 reached the same conclusion independently about the
+| checksum's movem chain and left it open.  So this is a considered bet on
+| documented microarchitecture rather than a result, and it is written down as
+| one: if an 060 ever runs tests/perf/perf_test, that arm settles it, and the
+| answer may be to take this back out.
+|
+| The ODD-ADDRESS guard above deliberately does NOT extend here.  A 68060
+| fetches a longword from any address, so routing it to the byte loop the way
+| a 68000 must would put eight of the sixteen alignment pairs on a path that
+| measured 2638 ns/B against 990 on the part that has no choice.  Two separate
+| CPU questions, two separate answers.
+#if defined(__mc68060__)
+#define N68K_NO_MOVEM 1
+#endif
+
 | a0 = to, a1 = from, d0 = len
 _n68k_copy_bytes:
+| No callee-saved registers are touched on the path that does not use movem:
+| it works entirely in a0, a1, d0 and d1, all of which are the caller's to
+| lose.  Saving eight registers and restoring them is then pure overhead on
+| every call, and this routine is also the tree's memcpy(), so "every call"
+| includes a great many short ones where a 16-longword round trip to the
+| stack is a large fraction of the work.
+#ifdef N68K_NO_MOVEM
+        movea.l sp@(4),a0
+        movea.l sp@(8),a1
+        move.l  sp@(12),d0
+#else
         movem.l d2-d7/a2-a3,sp@-
         movea.l sp@(36),a0
         movea.l sp@(40),a1
         move.l  sp@(44),d0
+#endif
 
 #ifdef N68K_ODD_IS_FATAL
         move.l  a0,d1
@@ -132,6 +171,16 @@ _n68k_copy_bytes:
 | Aligning the source instead of the destination, moving the split from the
 | read to the write, measured 232.8 against 229.8.  Nothing in it.
 .Lbig:
+#ifdef N68K_NO_MOVEM
+        | Thirty-two longwords, one at a time.  (a0)+ does the pointer
+        | arithmetic movem needed a lea for, so the loop tail is two
+        | instructions rather than three.
+        .rept   32
+        move.l  a1@+,a0@+
+        .endr
+        subq.l  #1,d1
+        bne     .Lbig
+#else
         movem.l a1@+,d2-d7/a2-a3
         movem.l d2-d7/a2-a3,a0@
         movem.l a1@+,d2-d7/a2-a3
@@ -143,6 +192,7 @@ _n68k_copy_bytes:
         lea     a0@(128),a0
         subq.l  #1,d1
         bne     .Lbig
+#endif
 
 .Lblocks:
         move.l  d0,d1
@@ -151,11 +201,19 @@ _n68k_copy_bytes:
         andi.l  #31,d0
 
 .Lblock:
+#ifdef N68K_NO_MOVEM
+        .rept   8
+        move.l  a1@+,a0@+
+        .endr
+        subq.l  #1,d1
+        bne     .Lblock
+#else
         movem.l a1@+,d2-d7/a2-a3        | eight longwords in one instruction
         movem.l d2-d7/a2-a3,a0@
         lea     a0@(32),a0              | MOVEM to memory has no (An)+ mode
         subq.l  #1,d1
         bne     .Lblock
+#endif
 
 .Llongs:
         move.l  d0,d1
@@ -221,7 +279,9 @@ _n68k_copy_bytes:
         bne     .Lbyte
 
 .Ldone:
+#ifndef N68K_NO_MOVEM
         movem.l sp@+,d2-d7/a2-a3
+#endif
         rts
 
 #endif /* AMINETXDUO_NET68K_ASM */
