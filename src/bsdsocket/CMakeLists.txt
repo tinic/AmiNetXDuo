@@ -155,5 +155,11 @@ if(AMINETXDUO_BSDSOCKET_LINK)
     target_link_options(bsdsocket_library PRIVATE -nostartfiles
         -Wl,--gc-sections
         "-Wl,-Map=$<TARGET_FILE_DIR:bsdsocket_library>/bsdsocket.library.map")
+
+    if(CMAKE_STRIP AND NOT AMINETXDUO_KEEP_SYMBOLS)
+        add_custom_command(TARGET bsdsocket_library POST_BUILD
+            COMMAND "${CMAKE_STRIP}" "$<TARGET_FILE:bsdsocket_library>"
+            VERBATIM)
+    endif()
 endif()
 

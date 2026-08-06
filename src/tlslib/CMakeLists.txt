@@ -122,6 +122,12 @@ if(AMINETXDUO_TLSLIB_LINK)
             COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:tls_library>"
             COMMENT "tls.library size")
     endif()
+
+    if(CMAKE_STRIP AND NOT AMINETXDUO_KEEP_SYMBOLS)
+        add_custom_command(TARGET tls_library POST_BUILD
+            COMMAND "${CMAKE_STRIP}" "$<TARGET_FILE:tls_library>"
+            VERBATIM)
+    endif()
 endif()
 
 # ---------------------------------------------------------- trust store ---

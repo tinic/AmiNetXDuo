@@ -59,6 +59,12 @@ if(AMINETXDUO_USERGROUP_LINK)
             COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:usergroup_library>"
             COMMENT "usergroup.library size")
     endif()
+
+    if(CMAKE_STRIP AND NOT AMINETXDUO_KEEP_SYMBOLS)
+        add_custom_command(TARGET usergroup_library POST_BUILD
+            COMMAND "${CMAKE_STRIP}" "$<TARGET_FILE:usergroup_library>"
+            VERBATIM)
+    endif()
 endif()
 
 # ---------------------------------------------------------------- host test --
