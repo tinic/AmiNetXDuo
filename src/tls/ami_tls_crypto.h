@@ -95,6 +95,16 @@ extern const NX_CRYPTO_METHOD      *ami_crypto_ecc_curves[];
 extern const UINT                   ami_crypto_ecc_supported_groups_size;
 
 /*
+ * The subset the ClientHello offers.  nx_secure_tls_ecc_initialize() sets the
+ * TLS list and the X.509 list from one argument; a client wants them apart,
+ * because offering a group costs a key generation and recognising a curve in
+ * a certificate costs nothing.
+ */
+extern const USHORT                 ami_crypto_ecc_offered_groups[];
+extern const NX_CRYPTO_METHOD      *ami_crypto_ecc_offered_curves[];
+extern const UINT                   ami_crypto_ecc_offered_groups_size;
+
+/*
  * Build the private secp256r1 curve and, if AMINETXDUO_TLS_CRYPTO68K_SELFCHECK
  * is set, verify the generated comb table belongs to it.  Call once, before any
  * session is created; idempotent but not thread safe, matching

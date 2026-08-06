@@ -1644,3 +1644,25 @@ const NX_CRYPTO_METHOD *ami_crypto_ecc_curves[] =
 
 const UINT ami_crypto_ecc_supported_groups_size =
     sizeof(ami_crypto_ecc_supported_groups) / sizeof(USHORT);
+
+/*
+ * What the ClientHello offers, which is not the same list.  TLS 1.3 generates
+ * a key pair for EVERY group it offers before the ClientHello goes out, and a
+ * P-384 and a P-521 key pair together cost about four seconds here, spent
+ * before the first byte of the handshake reaches the server.  A server picking
+ * either of them would be slower still, so only P-256 is offered; the table
+ * above stays complete because certificate chains carry P-384 keys that still
+ * have to verify.
+ */
+const USHORT ami_crypto_ecc_offered_groups[] =
+{
+    (USHORT)NX_CRYPTO_EC_SECP256R1,
+};
+
+const NX_CRYPTO_METHOD *ami_crypto_ecc_offered_curves[] =
+{
+    &ami_crypto_method_ec_secp256,
+};
+
+const UINT ami_crypto_ecc_offered_groups_size =
+    sizeof(ami_crypto_ecc_offered_groups) / sizeof(USHORT);
