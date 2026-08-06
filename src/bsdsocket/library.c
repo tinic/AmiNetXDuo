@@ -262,6 +262,111 @@ static struct AmiSocketBase *bsd_lib_init(
 
 /* -------------------------------------------------------- child base life, */
 
+/* ------------------------------------------------- closed base poisoning, */
+
+/*
+ * A call through a base that was already closed lands here and does nothing.
+ * Freeing the block instead means such a call jumps into whatever allocated it
+ * next, which is a different guru every time and is what issue #2 looks like.
+ * Answering it harmlessly is what the stacks that survive this already do in
+ * effect, by not handing the memory back so promptly.
+ */
+
+/* How many closed bases keep their poisoned vectors.  Each costs
+   lib_NegSize + lib_PosSize, on the order of a kilobyte.  Past this the oldest
+   is freed for real and a stale call through it is a guru again. */
+#define BSD_DEAD_RING           8
+
+static APTR  bsd_dead_block[BSD_DEAD_RING];
+static ULONG bsd_dead_bytes[BSD_DEAD_RING];
+static UINT  bsd_dead_next;
+
+static ULONG bsd_dead_calls;
+
+/*
+ * Returns 0 and nothing else.  Zero rather than -1 because the vectors have
+ * assorted shapes and this one handler answers all of them: a caller that
+ * expects a pointer gets NULL, which it has to check anyway, where -1 would be
+ * an address it might dereference.  A caller expecting a count or a status
+ * gets 0, which is the harmless answer for a call that did nothing.
+ *
+ * The counter is not diagnostics for its own sake: it is the only evidence
+ * left that a program called through a base it had closed, now that doing so
+ * no longer announces itself.
+ */
+static LONG bsd_dead_base_call(VOID)
+{
+    bsd_dead_calls++;
+    return 0;
+}
+
+ULONG bsd_dead_base_calls(VOID)
+{
+    return bsd_dead_calls;
+}
+
+/*
+ * Overwrite the whole negative half with `JMP bsd_dead_base_call`.  Entry i
+ * sits at -(6 * (i + 1)), so the half is exactly lib_NegSize / 6 six-byte
+ * slots and filling it covers every vector without knowing how many are real.
+ *
+ * CacheClearU() for the same reason bsd_child_create() needs it: these are
+ * instructions written through the data cache, and on a 68030 and up the
+ * instruction cache may still hold the JMPs that used to be here.
+ */
+static VOID bsd_poison_vectors(UBYTE *block, ULONG neg)
+{
+    ULONG  target = (ULONG)bsd_dead_base_call;
+    ULONG  slots  = neg / 6UL;
+    ULONG  i;
+
+    for (i = 0; i < slots; i++)
+    {
+        UBYTE *v = block + (i * 6UL);
+
+        v[0] = 0x4EU;                    /* JMP xxx.L */
+        v[1] = 0xF9U;
+        v[2] = (UBYTE)(target >> 24);
+        v[3] = (UBYTE)(target >> 16);
+        v[4] = (UBYTE)(target >> 8);
+        v[5] = (UBYTE)(target);
+    }
+
+    CacheClearU();
+}
+
+/* Poison this block and retain it, freeing whatever it displaces. */
+static VOID bsd_retain_dead(UBYTE *block, ULONG neg, ULONG bytes)
+{
+    UINT slot = bsd_dead_next;
+
+    bsd_poison_vectors(block, neg);
+
+    if (bsd_dead_block[slot] != NULL)
+        FreeMem(bsd_dead_block[slot], bsd_dead_bytes[slot]);
+
+    bsd_dead_block[slot] = (APTR)block;
+    bsd_dead_bytes[slot] = bytes;
+    bsd_dead_next        = (UINT)((slot + 1U) % (UINT)BSD_DEAD_RING);
+}
+
+/* Called from the expunge: the segment is going away, so nothing may be left
+   pointing into it, poisoned or not. */
+static VOID bsd_dead_ring_flush(VOID)
+{
+    UINT i;
+
+    for (i = 0; i < (UINT)BSD_DEAD_RING; i++)
+    {
+        if (bsd_dead_block[i] != NULL)
+        {
+            FreeMem(bsd_dead_block[i], bsd_dead_bytes[i]);
+            bsd_dead_block[i] = NULL;
+            bsd_dead_bytes[i] = 0;
+        }
+    }
+}
+
 static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
 {
     struct AmiSocketBase *child;
@@ -425,7 +530,7 @@ static VOID bsd_child_destroy(struct AmiSocketBase *child)
 
     ami_mem_open_delta(-1);
 
-    FreeMem((UBYTE *)child - neg, neg + pos);
+    bsd_retain_dead((UBYTE *)child - neg, neg, neg + pos);
 }
 
 /* --------------------------------------------------- stack bring-up proc, */
@@ -751,6 +856,9 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
     ami_netdb_free();
 
     bsd_runtime_close();
+
+    /* Every retained child points into the segment about to unload. */
+    bsd_dead_ring_flush();
 
     Remove((struct Node *)base);
     FreeMem((UBYTE *)base - neg, neg + pos);
