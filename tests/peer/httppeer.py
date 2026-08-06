@@ -581,6 +581,19 @@ class Listener(threading.Thread):
             raw.settimeout(float(os.environ.get("AMINETXDUO_PEER_HS_TIMEOUT",
                                                 "300")))
             if self.tls is not None:
+                # MSG_PEEK, so the handshake below still sees these bytes.  A
+                # TLS record header is type[1] version[2] length[2], and a
+                # ClientHello is type 0x16 with 0x0301 on the record layer
+                # whatever version it really wants; an empty peek means the
+                # client connected and sent nothing at all, which is a very
+                # different failure from a rejected hello.
+                if os.environ.get("AMINETXDUO_PEER_PEEK") == "1":
+                    try:
+                        head = raw.recv(48, socket.MSG_PEEK)
+                        log(self.tag, "first %d bytes: %s"
+                            % (len(head), head[:48].hex()))
+                    except OSError as exc:
+                        log(self.tag, "peek failed: %s" % exc)
                 try:
                     raw = self.tls.wrap_socket(raw, server_side=True)
                 except (ssl.SSLError, OSError) as exc:

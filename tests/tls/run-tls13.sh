@@ -105,8 +105,8 @@ EC_PORT=$((BASE_PORT + 4))
 
 cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
-SYS:fetch https://rsa2.test:$RSA_PORT/bytes/16 TO DH0:rsa.bin >DH0:a-rsa.txt
-SYS:fetch https://ec2.test:$EC_PORT/bytes/16 TO DH0:ec.bin >DH0:b-ec.txt
+SYS:fetch https://rsa2.test:$RSA_PORT/bytes/16 TIMEOUT 25 TO DH0:rsa.bin >DH0:a-rsa.txt
+SYS:fetch https://ec2.test:$EC_PORT/bytes/16 TIMEOUT 25 TO DH0:ec.bin >DH0:b-ec.txt
 EOF
 
 # --------------------------------------------------------------- peer ---
