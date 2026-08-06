@@ -117,7 +117,12 @@ PORT="${AMINETXDUO_FITZ_PORT:-17712}"
 SLIRP=0
 ACCURATE=0
 ROADSHOW=""
-AMIBERRY=0
+# -a IS USE_AMIBERRY, NOT AMIBERRY.  tools/amiberry-run.sh reads $AMIBERRY as
+# the PATH to the emulator, and amiga-assets/env.sh exports it.  A plain
+# `AMIBERRY=1` here keeps that export attribute, so the flag arrives in the
+# child as a path of "1" and the run dies on "amiberry not found; set
+# AMIBERRY=<path>" with the emulator installed and working.
+USE_AMIBERRY=0
 IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
 BOARD=a2065
 LOSSCAP=0
@@ -140,8 +145,8 @@ while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:aB:N:wl:L:" opt; do
         s) SLIRP=1 ;;
         x) ACCURATE=1 ;;
         R) ROADSHOW="${OPTARG:-/tmp/rsdemo/Roadshow-Demo-1.15/Workbench}" ;;
-        a) AMIBERRY=1 ;;
-        B) AMIBERRY=1; IFACE="$OPTARG" ;;
+        a) USE_AMIBERRY=1 ;;
+        B) USE_AMIBERRY=1; IFACE="$OPTARG" ;;
         N) BOARD="$OPTARG" ;;
         w) LOSSCAP=1 ;;
         l) LOSSCAP=1; MAXLOSS="$OPTARG" ;;
@@ -154,8 +159,15 @@ while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:aB:N:wl:L:" opt; do
     esac
 done
 
-[ "$AMIBERRY" = "0" ] || [ "$SLIRP" = "0" ] || {
+[ "$USE_AMIBERRY" = "0" ] || [ "$SLIRP" = "0" ] || {
     echo "-a and -s are different emulators; pick one" >&2; exit 2; }
+
+# Resolve the emulator NOW, not after staging a drive and starting a server on
+# the peer: a bad environment must cost a second, not a boot and a timeout.
+if [ "$USE_AMIBERRY" = "1" ]; then
+    . "$ROOT/tools/amiberry-resolve.sh"
+    amiberry_resolve || exit 2
+fi
 
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
@@ -295,7 +307,7 @@ if [ "$SLIRP" = "1" ]; then
     "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
         "$STAGE/AddNetInterface" "$STAGE/NetStat" "$STAGE/fitz" "$STAGE/FitzBench"
-elif [ "$AMIBERRY" = "1" ]; then
+elif [ "$USE_AMIBERRY" = "1" ]; then
     # Amiberry is local, so this branch only works ON the machine it is
     # installed on, there is no ssh half the way winuae-run.sh has one.
     # amiberry-run.sh has no warp to drop, so -x has nothing to do here.
