@@ -42,12 +42,14 @@ TIMEOUT=""
 CPU=""
 GUEST_ARGS=""
 
-while getopts "nm:t:c:a:" opt; do
+CLOCK=""
+while getopts "nm:t:c:a:k:" opt; do
     case "$opt" in
         n) NETWORK=1 ;;
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
+        k) CLOCK="$OPTARG" ;;
         a) GUEST_ARGS="$OPTARG" ;;
         *) sed -n '3,30p' "$0" >&2; exit 2 ;;
     esac
@@ -68,6 +70,7 @@ case "$EMU" in
         [ -n "$MODEL" ]      && ARGS+=(-m "$MODEL")
         [ -n "$TIMEOUT" ]    && ARGS+=(-t "$TIMEOUT")
         [ -n "$CPU" ]        && ARGS+=(-c "$CPU")
+        [ -n "$CLOCK" ]      && ARGS+=(-k "$CLOCK")
         [ -n "$GUEST_ARGS" ] && ARGS+=(-a "$GUEST_ARGS")
 
         set +e

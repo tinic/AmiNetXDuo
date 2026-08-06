@@ -126,6 +126,7 @@ VOID ami_tls_crypto_counters_reset(VOID)
  * that from whichever curve they were given, so it holds for the copy too.
  */
 static NX_CRYPTO_EC     ami_p256_curve;
+UINT                            ami_p256_curve_get_count;   /* TEMP */
 static UINT             ami_p256_ready;
 
 static VOID ami_p256_ec_multiple(NX_CRYPTO_EC *curve,
@@ -249,6 +250,8 @@ static UINT ami_crypto_method_ec_secp256_operation(UINT op,
             return(NX_CRYPTO_NOT_SUCCESSFUL);
         }
     }
+
+    ami_p256_curve_get_count++;   /* TEMP: is our curve ever asked for? */
 
     *((NX_CRYPTO_EC **)output) = &ami_p256_curve;
 

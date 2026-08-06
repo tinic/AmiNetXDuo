@@ -36,13 +36,15 @@ BUILD="${AMINETXDUO_BUILD:-build/cm}"
 MODEL=A1200
 TIMEOUT=600
 CPU=""
+CLOCK=""
 BASE_PORT=7300
 
-while getopts "m:t:c:b:P:" opt; do
+while getopts "m:t:c:b:P:k:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
+        k) CLOCK="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
         P) BASE_PORT="$OPTARG" ;;
         *) sed -n '3,10p' "$0" >&2; exit 2 ;;
@@ -93,6 +95,18 @@ cp "$PKI/teststore" "$STAGE/devs/Internet/certificates"
 cp "$ADDIF"         "$STAGE/AddNetInterface"
 cp "$FETCH"         "$STAGE/fetch"
 
+# AMINETXDUO_PROFILE=1 samples ONLY the transfer.  AddNetInterface below brings
+# the stack up first, in its own command, so DHCP and the netstack coming up
+# are not in the profile: in tls_https, which starts its own stack, that was
+# 6.6 s of the run and swamped everything else.
+PROFARG=""
+if [ "${AMINETXDUO_PROFILE:-0}" = "1" ]; then
+    PROF="$BUILD/tools/profiler/Profile"
+    [ -x "$PROF" ] || { echo "build the Profile target first" >&2; exit 2; }
+    cp "$PROF" "$STAGE/Profile"
+    PROFARG="SYS:Profile OUT=DH0:tls.prof FOLDED=DH0:tls.folded "
+fi
+
 # fetch has no --resolve, so the names the certificates carry are pointed at
 # SLIRP's host address the way an Amiga has always done it.
 cat >> "$STAGE/devs/Internet/hosts" <<EOF
@@ -105,7 +119,7 @@ EC_PORT=$((BASE_PORT + 4))
 
 cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
-SYS:fetch https://rsa2.test:$RSA_PORT/bytes/16 TIMEOUT ${AMINETXDUO_TLS13_FETCH_TIMEOUT:-25} TO DH0:rsa.bin >DH0:a-rsa.txt
+${PROFARG}SYS:fetch https://rsa2.test:$RSA_PORT/bytes/16 TIMEOUT ${AMINETXDUO_TLS13_FETCH_TIMEOUT:-25} TO DH0:rsa.bin >DH0:a-rsa.txt
 SYS:fetch https://ec2.test:$EC_PORT/bytes/16 TIMEOUT ${AMINETXDUO_TLS13_FETCH_TIMEOUT:-25} TO DH0:ec.bin >DH0:b-ec.txt
 EOF
 
@@ -136,12 +150,13 @@ echo "==> httppeer.py, TLS 1.3 ceiling: rsa2.test on $RSA_PORT, ec2.test on $EC_
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-tls13}"
 
 CPUARG=()
-[ -z "$CPU" ] || CPUARG=(-c "$CPU")
+[ -z "$CPU" ] || CPUARG+=(-c "$CPU")
+[ -z "$CLOCK" ] || CPUARG+=(-k "$CLOCK")
 
 set +e
 "$ROOT/tools/emu-net-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
     "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/AddNetInterface" \
-    "$STAGE/fetch" "$STAGE/commands.txt"
+    "$STAGE/fetch" ${PROFARG:+"$STAGE/Profile"} "$STAGE/commands.txt"
 RC=$?
 set -e
 

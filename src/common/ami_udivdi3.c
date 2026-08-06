@@ -308,6 +308,28 @@ u64     remainder = 0;
  */
 static u64 ami_umul32_wide(u32 a, u32 b)
 {
+#if (defined(__mc68020__) || defined(__mc68030__) || defined(__mc68040__)) && \
+    !defined(__mc68060__)
+
+    /*
+     * One instruction on a 68020/030/040.  The four-mulu.w form below is what
+     * a 68000 needs and what a 68060 needs (it dropped the 64-bit-result form
+     * and traps to 68060.library), but it was being used on the 68020 too:
+     * a TLS 1.3 handshake profiled at 21.5% in this function and 8.3% in
+     * ___muldi3 above it, which is the bignum inner loop for every RSA and EC
+     * operation nx_crypto performs.
+     */
+u32     hi;
+u32     lo = a;
+
+
+    __asm__ ("mulu.l %2,%1:%0"
+             : "=d" (lo), "=d" (hi)
+             : "dmi" (b), "0" (lo));
+
+    return(((u64)hi << 32) | (u64)lo);
+
+#else
 
 u16     a_lo = (u16)a;
 u16     a_hi = (u16)(a >> 16);
@@ -325,6 +347,8 @@ u32     mid;
 
     return(((u64)(hh + (lh >> 16) + (hl >> 16) + (mid >> 16)) << 32) |
            (u64)((mid << 16) | (u32)(u16)ll));
+
+#endif
 }
 
 u64 __muldi3(u64 a, u64 b);

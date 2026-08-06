@@ -100,6 +100,17 @@ target_compile_definitions(nx_secure PUBLIC NX_SECURE_ENABLE_AEAD_CIPHER)
 target_compile_definitions(nx_secure PUBLIC NX_SECURE_TLS_ENABLE_TLS_1_3)
 target_compile_definitions(nx_crypto PUBLIC NX_SECURE_TLS_ENABLE_TLS_1_3)
 
+# The schoolbook inner loop in _nx_crypto_huge_number_multiply is addmul_1, and
+# src/crypto68k has that in 68020 assembly over the same limb type.  Only on a
+# cross build: crypto68k_ref supplies a C fallback on a host, but the point of
+# the substitution is the assembly.
+if(CMAKE_CROSSCOMPILING)
+    target_compile_definitions(nx_crypto PRIVATE NX_CRYPTO_AMIGA_C68K_LIMBS)
+    # crypto68k is configured after this directory; naming a target that does
+    # not exist yet is fine, CMake resolves target names at generate time.
+    target_link_libraries(nx_crypto PUBLIC crypto68k)
+endif()
+
 # Wipe key material when it stops being needed.  174 sites across nx_secure
 # guard on this, and ami_tls_crypto.c has five of its own; without it the
 # handshake hashes, the decrypted signature blocks, the premaster secret and

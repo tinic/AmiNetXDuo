@@ -114,7 +114,10 @@ if(AMINETXDUO_TLSLIB_LINK)
     # libraries linking the same way.  It composes with --wrap: the wrap target
     # is a reference like any other, so the wrapper is a root and the wrapped
     # symbol is reached through it.
+    # A link map so tools/profiler/profreport.py --lib can name functions
+    # INSIDE tls.library; without it the whole library is one bar.
     target_link_options(tls_library PRIVATE -nostartfiles -Wl,--gc-sections
+                        "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/tls.library.map"
                         ${TLSLIB_WRAP_OPTIONS})
 
     # Before the size is printed, so the number reported is the number that

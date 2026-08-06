@@ -330,6 +330,10 @@ char                        line[96];
           (ULONG)w_session.nx_secure_tls_session_ciphersuite ->
               nx_secure_tls_ciphersuite,
           (ULONG)w_session.nx_secure_tls_protocol_version);
+    {
+        extern UINT ami_p256_curve_get_count;   /* TEMP */
+        w_log("  our P-256 curve handed out x%lu", (LONG)ami_p256_curve_get_count);
+    }
     w_log("  handshake, connect to Finished  : %lu.%lu s",
           W_SEC(handshake_us), W_TENTH(handshake_us));
     w_log("  of which public-key arithmetic  : %lu.%lu s",
