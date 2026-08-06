@@ -51,7 +51,15 @@
 
 #include <stdarg.h>
 
+#ifdef W_ROOT_LOCAL
+#include "tls_root_local.h"
+#define W_ROOT_DER      w_root_local_der
+#define W_ROOT_DER_LEN  w_root_local_der_len
+#else
 #include "tls_root_isrg_x1.h"
+#define W_ROOT_DER      isrg_root_x1_der
+#define W_ROOT_DER_LEN  isrg_root_x1_der_len
+#endif
 
 
 /* ------------------------------------------------------------- logging --- */
@@ -140,8 +148,16 @@ static UINT w_check(UINT ok, const char *what, ULONG detail)
 
 /* -------------------------------------------------------------- the run --- */
 
+/* Overridable so this can be aimed at tests/peer/httppeer.py's local PKI,
+   where the chain is short enough to verify at 14 MHz and the step-by-step
+   output below is the only working view into a handshake: tls.library links
+   no logger and RawPutChar loses characters to the emulated serial. */
+#ifndef W_HOST
 #define W_HOST          "tls-v1-2.badssl.com"
+#endif
+#ifndef W_PORT
 #define W_PORT          443
+#endif
 #define W_DNS_TIMEOUT   (20UL * NX_IP_PERIODIC_RATE)
 
 #define W_METADATA_SIZE         32768
@@ -243,8 +259,8 @@ char                        line[96];
     (VOID) W_OK(status, "packet buffer set");
 
     status =  nx_secure_x509_certificate_initialize(&w_root,
-                                                    (UCHAR *)isrg_root_x1_der,
-                                                    isrg_root_x1_der_len,
+                                                    (UCHAR *)W_ROOT_DER,
+                                                    W_ROOT_DER_LEN,
                                                     NX_NULL, 0, NX_NULL, 0,
                                                     NX_SECURE_X509_KEY_TYPE_NONE);
     (VOID) W_OK(status, "ISRG Root X1 parsed");

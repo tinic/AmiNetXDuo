@@ -75,6 +75,18 @@ if(AMINETXDUO_TLSLIB_LINK)
     target_include_directories(tls_library PRIVATE ${TLSLIB_INCLUDES})
     target_compile_options(tls_library PRIVATE -Wall -Wextra ${TLSLIB_TRACE_DEFS})
 
+    # These have to match src/tls/CMakeLists.txt exactly.  They are set PUBLIC
+    # on nx_secure there, which carries them to anything that links the TARGET,
+    # but the archives below are linked by $<TARGET_FILE:...> path, and a raw
+    # path carries no usage requirements at all.  So tls_conn.c was compiling
+    # NX_SECURE_TLS_SESSION without the fields the 1.3 macro adds while
+    # nx_secure operated on the same object with them: the same struct, two
+    # layouts, one of them writing past where the other thinks it ends.
+    target_compile_definitions(tls_library PRIVATE
+        NX_SECURE_ENABLE_AEAD_CIPHER
+        NX_SECURE_KEY_CLEAR
+        NX_SECURE_TLS_ENABLE_TLS_1_3)
+
     add_dependencies(tls_library aminetxduo_tls nx_secure nx_crypto crypto68k)
 
     # Listed twice rather than wrapped in --start-group: nx_secure and

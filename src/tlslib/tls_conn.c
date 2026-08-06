@@ -46,16 +46,45 @@
 #    define RawPutChar(c) \
         LP1NR(0x204, RawPutChar, UBYTE, (c), d0, , EXEC_BASE_NAME)
 #  endif
-static VOID tls13_probe(const char *tag, ULONG v)
+#  ifndef RawIOInit
+#    define RawIOInit() \
+        LP0NR(0x1F8, RawIOInit, , EXEC_BASE_NAME)
+#  endif
+/* The emulated serial line drops anything written faster than it can clock
+   out, which is why an earlier run printed "start." for "start.in ".  This is
+   temporary diagnostic code, so a spin between characters is the cheapest
+   fix. */
+static VOID tls13_putc(UBYTE c)
+{
+    volatile ULONG spin;
+
+    RawPutChar(c);
+    for (spin = 0; spin < 3000UL; spin++)
+        ;
+}
+
+VOID tls13_probe(const char *tag, ULONG v);
+
+VOID tls13_probe(const char *tag, ULONG v)
 {
     static const char hex[] = "0123456789abcdef";
+    static INT        ready;
     INT               i;
 
+    /* Without RawIOInit the serial hardware is never set up and RawPutChar
+       drops most of what it is given, which is why an earlier run of this
+       probe printed "start." for "start.in " and never reached the value. */
+    if (!ready)
+    {
+        RawIOInit();
+        ready = 1;
+    }
+
     while (*tag != '\0')
-        RawPutChar((UBYTE)*tag++);
+        tls13_putc((UBYTE)*tag++);
     for (i = 28; i >= 0; i -= 4)
-        RawPutChar((UBYTE)hex[(v >> i) & 0xFUL]);
-    RawPutChar((UBYTE)'\n');
+        tls13_putc((UBYTE)hex[(v >> i) & 0xFUL]);
+    tls13_putc((UBYTE)'\n');
 }
 #  define TLS13_PROBE(tag, v)  tls13_probe((tag), (ULONG)(v))
 #else
