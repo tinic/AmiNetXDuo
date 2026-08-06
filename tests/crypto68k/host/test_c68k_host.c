@@ -638,7 +638,6 @@ UINT                n;
 UINT                i;
 UINT                mismatch = 0;
 unsigned long long  acc;
-c68k_limb           carry;
 c68k_limb           want;
 c68k_limb           got;
 
