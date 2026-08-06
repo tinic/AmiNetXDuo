@@ -11,6 +11,9 @@ version at the top when it merges.
 
 ## 0.18.0
 
+- `https:` works on a 68000. A TLS 1.3 handshake against an RSA-2048 server took 232 seconds at 13 MHz and now takes 60, because the limb multiply-accumulate the handshake spends half its time in is hand-written for the parts with no 32x32 into 64 multiply, which is the 68000 and the 68060 both
+- A 68060 TLS transfer costs a third less processor time, from the same multiply-accumulate: 7,473 samples down to 5,108 across two handshakes, with the function itself 4,853 down to 2,491
+- A program that closes `bsdsocket.library` and then keeps using it no longer takes the machine down. Each opener gets its own library base, and freeing it meant a later call jumped into whatever had claimed that memory since; the base is kept now and answers such a call with zero. AveNTP does this and could not run at all
 - `https:` reaches servers that require TLS 1.3. The record layer read the 1.3 inner content type, one byte, into a two-byte field: on a little-endian host that byte lands in the low half and is the content type, on a 68k it lands in the high half over whatever was in the low half, so every 1.3 handshake ended in an unexpected-message alert having decrypted the record correctly. RSA and ECDSA server certificates both verify
 - A TLS transfer costs 40% less processor time. Six loops in the vendored bignum, multiply, square, add, subtract and the modular reduction, were doing by hand what `src/crypto68k` already had in 68020 assembly over the same limb type, and the GCM authenticator ran a byte at a time where a longword does; measured across two handshakes at one clock, 6,557 down to 3,902 samples
 - A 68060 no longer traps on the 64-bit divisions in the crypto path. The helper that exists to supply that division was itself emitting `divu.l` in the 64/32 form, which a 68060 does not implement and 68060.library emulates one instruction at a time
