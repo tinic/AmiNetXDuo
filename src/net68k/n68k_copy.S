@@ -167,9 +167,54 @@ _n68k_copy_bytes:
         subq.l  #1,d1
         bne     .Llong
 
+| The byte loop, unrolled by eight.
+|
+| On a 68020 this is a tail: at most three bytes after the longword path, and
+| the loop overhead against it does not matter.  On a 68000 it is not a tail at
+| all, it is the WHOLE COPY whenever the two pointers disagree in bit 0,
+| because an odd word or longword access is an address error there and no
+| amount of aligning the destination fixes an odd source.  That is eight of the
+| sixteen alignment pairs.
+|
+| Measured on the A600 profile, 1460 bytes, before this unroll:
+|
+|             s0      s1      s2      s3
+|   d0       961    5427     961    5438
+|   d1      5449     995    5459     987
+|
+| 5.5x, and it was three instructions per byte with two of them loop overhead:
+| move.b memory to memory is 12 cycles on a 68000, subq.l is 8 and a taken bne
+| is 10, so 30 cycles a byte of which 18 bought nothing.  Eight moves to one
+| subq/bne is 14.25.
+|
+| Reading longwords from the even side and shifting bytes out to the odd one
+| was considered and is worse, not better: the load is two bus cycles on a
+| 16-bit bus and each byte then costs a move.b AND a shift, about 20 cycles a
+| byte against 12 for the memory-to-memory move that needs no register at all.
 .Lbytes:
         tst.l   d0
         beq     .Ldone
+
+        move.l  d0,d1
+        lsr.l   #3,d1                   | eight-byte runs
+        beq     .Lbyte
+        andi.l  #7,d0
+
+.Lbyte8:
+        move.b  a1@+,a0@+
+        move.b  a1@+,a0@+
+        move.b  a1@+,a0@+
+        move.b  a1@+,a0@+
+        move.b  a1@+,a0@+
+        move.b  a1@+,a0@+
+        move.b  a1@+,a0@+
+        move.b  a1@+,a0@+
+        subq.l  #1,d1
+        bne     .Lbyte8
+
+        tst.l   d0
+        beq     .Ldone
+
 .Lbyte:
         move.b  a1@+,a0@+
         subq.l  #1,d0
