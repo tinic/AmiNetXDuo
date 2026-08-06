@@ -82,6 +82,67 @@
         .even
         .globl  _n68k_sum_longwords
 
+| THREE PARTS, THREE ANSWERS.  The seven-longword step below is the whole
+| inner loop, and which form of it is fastest is a question about the machine
+| rather than about the arithmetic.
+|
+|   68020/68030   movem.l feeding an addx chain.  Measured, and it is why this
+|                 routine exists in this shape: 138 ns/B against 201 for the
+|                 add/addx form it replaced (docs/RESEARCH.md 87).  movem pays
+|                 because its fixed cost is amortised over seven registers.
+|
+|   68060         NOT movem.  It is microcoded there and does not pipeline,
+|                 while ordinary instructions dual-issue, so the thing that
+|                 wins on an 020 is the thing to avoid on an 060.  The
+|                 add/addx form also needs no register loads at all -- the
+|                 memory operand goes straight into the add -- so it is two
+|                 simple instructions per longword against movem plus seven.
+|                 UNMEASURED, and unmeasurable here: cycle accounting is off
+|                 above the 68020, so an emulated 060 ns/B is not a number
+|                 about an 060.  Same considered bet as n68k_copy.S.
+|
+|   68000         movem, and MEASURED rather than inherited.  Both forms were
+|                 built and run on an A600, ns/B:
+|
+|                                    1460 B    8192 B chain
+|                   movem             1001.6         921.8
+|                   add/addx          1191.8        1115.1
+|
+|                 movem wins by 19%, so the 020 answer happens to be right
+|                 here too -- but it is right by measurement now, and the
+|                 alternative is ruled out rather than untried.  A 68000 reads
+|                 a longword as two word cycles whichever instruction asks for
+|                 it, so movem's amortised fixed cost still pays.
+|
+| Nothing between two addx may disturb X.  movem, cmpa, lea, movea, adda, suba
+| and the add/addx pair itself all leave it alone; only the rest of the
+| add/subtract/shift group touches it.
+
+| An 060 takes the add/addx form; everything else takes movem.  Overridable
+| by hand for the A/B, which is how the 68000 row below was taken.
+#if defined(__mc68060__) && !defined(N68K_SUM_NO_MOVEM)
+#define N68K_SUM_NO_MOVEM 1
+#endif
+
+#ifdef N68K_SUM_NO_MOVEM
+        | d1 is the hard zero the addx sinks read; a0 walks the buffer.
+        .macro  N68K_SUM7
+        add.l   a0@+,d0
+        addx.l  d1,d0
+        add.l   a0@+,d0
+        addx.l  d1,d0
+        add.l   a0@+,d0
+        addx.l  d1,d0
+        add.l   a0@+,d0
+        addx.l  d1,d0
+        add.l   a0@+,d0
+        addx.l  d1,d0
+        add.l   a0@+,d0
+        addx.l  d1,d0
+        add.l   a0@+,d0
+        addx.l  d1,d0
+        .endm
+#else
         .macro  N68K_SUM7
         movem.l a0@+,d1-d7
         addx.l  d1,d0
@@ -92,6 +153,7 @@
         addx.l  d6,d0
         addx.l  d7,d0
         .endm
+#endif
 
 | The table has to reach at least as far as the deep block, or the do-while
 | below would read past the end of a buffer that never entered it.
@@ -132,6 +194,9 @@ _n68k_sum_longwords:
         movea.l a0,a1
         adda.l  d2,a1                   | one past the last longword
         moveq   #0,d0
+#ifdef N68K_SUM_NO_MOVEM
+        moveq   #0,d1                   | the hard zero the addx sinks read
+#endif
         add.l   d0,d0                   | from here to .Lfold nothing may
         |                                 touch X
 

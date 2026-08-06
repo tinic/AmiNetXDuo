@@ -77,6 +77,15 @@ if(CMAKE_CROSSCOMPILING)
     add_executable(fitzbench fitzbench.c)
     set_target_properties(fitzbench PROPERTIES OUTPUT_NAME "FitzBench")
 
+    # A linker map, because this is the program tests/perf/run-stackprof.sh
+    # points tools/profiler/Profile at, and profreport.py cannot name a
+    # file-static without one: the linker drops those from HUNK_SYMBOL and the
+    # only route back is where the map placed each object plus nm on it.
+    # Without it every sample in a static lands silently on the preceding
+    # global, and the ranking looks plausible and is wrong.
+    target_link_options(fitzbench PRIVATE
+        "-Wl,-Map=$<TARGET_FILE_DIR:fitzbench>/FitzBench.map")
+
     if(AMIGA_NDK_INCLUDE)
         target_include_directories(fitzbench PRIVATE "${AMIGA_NDK_INCLUDE}")
     endif()
