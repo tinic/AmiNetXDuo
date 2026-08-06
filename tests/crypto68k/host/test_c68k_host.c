@@ -73,6 +73,7 @@ static c68k_limb    t_tmp[T_MAX_LIMBS * 2 + 8];
 static VOID t_karatsuba(VOID);
 static VOID t_bulk(VOID);
 static VOID t_division(VOID);
+static void t_addsub(void);
 
 static unsigned long    t_failures;
 static unsigned long    t_checks;
@@ -417,6 +418,7 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
 
     t_karatsuba();
     t_division();
+    t_addsub();
 
     printf("\n4. c68k_mont_power_modulus vs "
            "_nx_crypto_huge_number_mont_power_modulus:\n");
@@ -609,6 +611,150 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
  * Also swept: an unnormalised divisor (top bit clear, so the shift path runs
  * with s != 0), a single-limb divisor, u shorter than m, and all ones.
  */
+/*
+ * c68k_add, c68k_sub and c68k_add_carry against straight-line models.
+ *
+ * These three had no coverage at all until a carry-in bug shipped.  They went
+ * into nx_crypto_huge_number.c's add_unsigned and subtract_unsigned, and
+ * c68k_add_carry's C fallback seeded the accumulator's LOW half with the
+ * incoming carry where the loop reads the HIGH half, so the carry-in was
+ * discarded on the first shift and n == 0 returned 0 where c68k_prim.S
+ * returns the carry untouched.  Nothing had ever passed a carry in, so the
+ * assembly and the C had never disagreed anywhere it showed: a 68020 build
+ * takes the assembly and was fine, a 68060 build takes the C and could not
+ * complete a TLS 1.3 handshake.
+ *
+ * The models below use a 64-bit accumulator so they cannot share a bug with
+ * either implementation.
+ */
+static void t_addsub(void)
+{
+static c68k_limb    a_r[T_MAX_LIMBS + 2];
+static c68k_limb    a_b[T_MAX_LIMBS + 2];
+static c68k_limb    a_orig[T_MAX_LIMBS + 2];
+static c68k_limb    a_model[T_MAX_LIMBS + 2];
+UINT                trial;
+UINT                n;
+UINT                i;
+UINT                mismatch = 0;
+unsigned long long  acc;
+c68k_limb           carry;
+c68k_limb           want;
+c68k_limb           got;
+
+    printf("\n3d. c68k_add / c68k_sub / c68k_add_carry against models:\n");
+
+    for (trial = 0; trial < 4000u; trial++)
+    {
+        n = (UINT)(t_rand() % 40u) + 1u;
+
+        for (i = 0; i < n; i++)
+        {
+            /* All-ones far more often than uniform noise would give: the
+               carry chain is the whole point and it only runs when limbs
+               saturate. */
+            a_r[i]     = ((trial & 1u) != 0u) ? 0xFFFFFFFFUL : t_rand();
+            a_b[i]     = ((trial & 2u) != 0u) ? 0xFFFFFFFFUL : t_rand();
+            a_orig[i]  = a_r[i];
+            a_model[i] = a_r[i];
+        }
+
+        /* ---- c68k_add: r += b, returns the carry out ---- */
+        acc = 0;
+        for (i = 0; i < n; i++)
+        {
+            acc = (unsigned long long)a_model[i] +
+                  (unsigned long long)a_b[i] + (acc >> 32);
+            a_model[i] = (c68k_limb)(acc & 0xFFFFFFFFUL);
+        }
+        want = (c68k_limb)(acc >> 32);
+        got  = c68k_add(a_r, a_b, n);
+
+        t_checks++;
+        if (got != want)
+        {
+            if (mismatch++ < 3u)
+                printf("   add carry %lu, want %lu, n %u\n",
+                       (unsigned long)got, (unsigned long)want, n);
+            t_failures++;
+        }
+
+        t_checks++;
+        for (i = 0; i < n; i++)
+        {
+            if (a_r[i] != a_model[i])
+            {
+                if (mismatch++ < 3u)
+                    printf("   add limb %u differs, n %u\n", i, n);
+                t_failures++;
+                break;
+            }
+        }
+
+        /* ---- c68k_sub undoes it exactly, borrow chain included ---- */
+        (void)c68k_sub(a_r, a_b, n);
+
+        t_checks++;
+        for (i = 0; i < n; i++)
+        {
+            if (a_r[i] != a_orig[i])
+            {
+                if (mismatch++ < 3u)
+                    printf("   add then sub not identity at %u, n %u\n", i, n);
+                t_failures++;
+                break;
+            }
+        }
+
+        /* ---- c68k_add_carry: dst[j] = src[j] + carry, carry propagating.
+               All-ones plus a carry-in of 1 is every limb zero and a carry
+               out, which is exactly what the broken version got wrong. ---- */
+        for (i = 0; i < n; i++)
+            a_b[i] = 0xFFFFFFFFUL;
+
+        got = c68k_add_carry(a_r, a_b, n, 1u);
+
+        t_checks++;
+        if (got != 1u)
+        {
+            if (mismatch++ < 3u)
+                printf("   add_carry out %lu, want 1, n %u\n",
+                       (unsigned long)got, n);
+            t_failures++;
+        }
+
+        t_checks++;
+        for (i = 0; i < n; i++)
+        {
+            if (a_r[i] != 0u)
+            {
+                if (mismatch++ < 3u)
+                    printf("   add_carry limb %u not zero, n %u\n", i, n);
+                t_failures++;
+                break;
+            }
+        }
+    }
+
+    /* n == 0 consumes nothing, so the carry comes straight back out.  This is
+       the case the C fallback returned 0 for. */
+    t_checks++;
+    if (c68k_add_carry(a_r, a_b, 0u, 1u) != 1u)
+    {
+        printf("   add_carry n=0 dropped the carry\n");
+        t_failures++;
+    }
+
+    t_checks++;
+    if (c68k_add_carry(a_r, a_b, 0u, 0u) != 0u)
+    {
+        printf("   add_carry n=0 invented a carry\n");
+        t_failures++;
+    }
+
+    printf("   4000 trials plus the n=0 pair, %u mismatch(es)\n", mismatch);
+}
+
 static VOID t_division(VOID)
 {
 

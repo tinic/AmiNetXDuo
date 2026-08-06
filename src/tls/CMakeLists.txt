@@ -104,7 +104,10 @@ target_compile_definitions(nx_crypto PUBLIC NX_SECURE_TLS_ENABLE_TLS_1_3)
 # src/crypto68k has that in 68020 assembly over the same limb type.  Only on a
 # cross build: crypto68k_ref supplies a C fallback on a host, but the point of
 # the substitution is the assembly.
-if(CMAKE_CROSSCOMPILING)
+option(AMINETXDUO_C68K_LIMBS
+       "Route nx_crypto's huge-number limb loops through src/crypto68k" ON)
+
+if(CMAKE_CROSSCOMPILING AND AMINETXDUO_C68K_LIMBS)
     target_compile_definitions(nx_crypto PRIVATE NX_CRYPTO_AMIGA_C68K_LIMBS)
     # crypto68k is configured after this directory; naming a target that does
     # not exist yet is fine, CMake resolves target names at generate time.
@@ -112,9 +115,14 @@ if(CMAKE_CROSSCOMPILING)
 
     # nx_crypto_gcm.c already has a longword path for its 16-byte XOR and only
     # takes it when this is defined.  A 68020 handles a misaligned longword;
-    # a 68000 takes an address error, so this is 68020-and-up only.
-    if(NOT AMINETXDUO_CPU STREQUAL "68000")
+    # a 68000 takes an address error, so this is 68020-and-up only.  Separately
+    # switchable from the limb loops so the two can be bisected against each
+    # other, which is how the 68060 TLS 1.3 failure was pinned down.
+    option(AMINETXDUO_C68K_GCM
+           "Longword GHASH and the longword GCM xor" ON)
+    if(NOT AMINETXDUO_CPU STREQUAL "68000" AND AMINETXDUO_C68K_GCM)
         target_compile_definitions(nx_crypto PRIVATE NX_CRYPTO_ENABLE_UNALIGNED_ACCESS)
+        target_compile_definitions(nx_crypto PRIVATE NX_CRYPTO_AMIGA_C68K_GCM)
     endif()
 endif()
 

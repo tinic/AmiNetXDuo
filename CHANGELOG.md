@@ -9,6 +9,12 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.18.0
+
+- `https:` reaches servers that require TLS 1.3. The record layer read the 1.3 inner content type, one byte, into a two-byte field: on a little-endian host that byte lands in the low half and is the content type, on a 68k it lands in the high half over whatever was in the low half, so every 1.3 handshake ended in an unexpected-message alert having decrypted the record correctly. RSA and ECDSA server certificates both verify
+- A TLS transfer costs 40% less processor time. Six loops in the vendored bignum, multiply, square, add, subtract and the modular reduction, were doing by hand what `src/crypto68k` already had in 68020 assembly over the same limb type, and the GCM authenticator ran a byte at a time where a longword does; measured across two handshakes at one clock, 6,557 down to 3,902 samples
+- A 68060 no longer traps on the 64-bit divisions in the crypto path. The helper that exists to supply that division was itself emitting `divu.l` in the 64/32 form, which a 68060 does not implement and 68060.library emulates one instruction at a time
+- A 68020, 68030 or 68040 multiplies 32x32 into 64 bits with one instruction. It was four 16-bit multiplies on every target, which is what a 68000 needs, and what a 68060 needs because it dropped that form
 - Everything the archive installs is stripped now. The three libraries in each drawer, `ssh` and the profiler in `Developer/` each carried a symbol table nothing on the Amiga reads: 13% of `ssh`, 11% of `bsdsocket.library`, 20% of `usergroup.library`, around 200 KB of files in all, and less than that off the download, which was already compressing them. The commands were stripped before this
 
 ## 0.17.4

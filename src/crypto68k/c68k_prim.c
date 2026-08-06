@@ -22,6 +22,46 @@
  * benchmark measures the two against each other in the same run, the only
  * comparison the emulator does not distort.
  */
+/*
+ * 32x32 -> 64 without a call and without __muldi3.
+ *
+ * Writing the product as (HN_UBASE2)a * (HN_UBASE2)b asks for a 64x64
+ * multiply, so GCC emits __muldi3, which does three partial products and then
+ * calls ami_umul32_wide for each.  On a 68060 that made the software multiply
+ * 77% of a TLS 1.3 transfer: 64.7% in ami_umul32_wide, 12.8% in __muldi3.
+ *
+ * Only 32x32 -> 64 is wanted, and it is four partial products of 16-bit
+ * halves.  The 68060 dropped the 64-bit-RESULT forms of MULU.L but implements
+ * the 32x32 -> 32 one, so each partial product below is a single instruction
+ * there, and the whole thing inlines into the multiply-accumulate loop with
+ * nothing spilled.
+ *
+ * A 68000 has no 32-bit multiply at all, so it keeps the out-of-line helper:
+ * inlining four __mulsi3 calls per limb would be worse than one call.
+ */
+#if defined(__mc68020__) || defined(__mc68030__) || defined(__mc68040__) || \
+    defined(__mc68060__)
+#define C68K_HAVE_INLINE_WIDE_MUL   1
+
+static HN_UBASE2 c68k_wide_mul(c68k_limb a, c68k_limb b)
+{
+
+c68k_limb   a_lo = a & 0xFFFFUL;
+c68k_limb   a_hi = a >> 16;
+c68k_limb   b_lo = b & 0xFFFFUL;
+c68k_limb   b_hi = b >> 16;
+c68k_limb   ll   = a_lo * b_lo;
+c68k_limb   lh   = a_lo * b_hi;
+c68k_limb   hl   = a_hi * b_lo;
+c68k_limb   hh   = a_hi * b_hi;
+c68k_limb   mid  = (ll >> 16) + (lh & 0xFFFFUL) + (hl & 0xFFFFUL);
+
+
+    return((((HN_UBASE2)(hh + (lh >> 16) + (hl >> 16) + (mid >> 16))) << 32) |
+           (HN_UBASE2)((mid << 16) | (ll & 0xFFFFUL)));
+}
+#endif
+
 c68k_limb c68k_addmul_1_c(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a)
 {
 
@@ -42,8 +82,12 @@ HN_UBASE2   product;
 
     for (j = 0; j < n; j++)
     {
+#ifdef C68K_HAVE_INLINE_WIDE_MUL
+        product = (product >> 32) + (HN_UBASE2)r[j] + c68k_wide_mul(a, b[j]);
+#else
         product = (product >> 32) + (HN_UBASE2)r[j] +
                   ((HN_UBASE2)a * (HN_UBASE2)b[j]);
+#endif
         r[j] = (c68k_limb)product;
     }
 
@@ -140,7 +184,16 @@ UINT        j;
 HN_UBASE2   sum;
 
 
-    sum = (HN_UBASE2)carry;
+    /*
+     * The carry lives in the HIGH half between iterations, which is what the
+     * shift at the top of the loop reads, so an incoming carry has to be
+     * seeded there.  Seeding it in the low half discarded it on the first
+     * shift and returned 0 for n == 0, where the answer is the carry itself:
+     * c68k_prim.S branches straight to its exit and returns d0 untouched.
+     * Nothing called this with a carry in until the huge-number add started
+     * to, so the two implementations had never disagreed anywhere it showed.
+     */
+    sum = ((HN_UBASE2)carry) << 32;
 
     for (j = 0; j < n; j++)
     {
