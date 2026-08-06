@@ -1954,6 +1954,40 @@ static VOID do_close(const char *args, const char *raw)
  * would assert the intervals too, and the intervals belong to another
  * workstream.  This checks only that the stack kept retrying and then stopped.
  */
+/*
+ * rxorder fifo|lifo
+ *
+ * Which queued CMD_READ the synthetic device completes when a frame arrives.
+ * fifo is the default and is what the drivers in the test matrix happen to do,
+ * so every existing script is unaffected.  lifo models a device whose firmware
+ * owns the RX slots and whose framer returns them out of the order the reads
+ * were posted -- ZZ9000Net is the case in hand.  SANA-II promises no order,
+ * so nothing in the stack may depend on one.
+ */
+static VOID do_rxorder(const char *args, const char *raw)
+{
+    char tok[16];
+
+    (VOID)raw;
+
+    (VOID)token(args, tok, sizeof(tok));
+
+    if (streq(tok, "lifo"))
+    {
+        tap_set_rx_lifo(TRUE);
+        say("   rxorder lifo: reads complete last-matching-first");
+    }
+    else if (streq(tok, "fifo"))
+    {
+        tap_set_rx_lifo(FALSE);
+        say("   rxorder fifo");
+    }
+    else
+    {
+        say("!! rxorder: expected fifo or lifo");
+    }
+}
+
 static VOID do_txcount(const char *args, const char *raw)
 {
     char  tok[24];
@@ -2225,6 +2259,7 @@ static VOID run_line(char *line)
     else if (streq(verb, "txcount")) do_txcount(args, raw);
     else if (streq(verb, "wirebytes")) do_wirebytes(raw);
     else if (streq(verb, "rx"))       do_rx(args, raw);
+    else if (streq(verb, "rxorder"))  do_rxorder(args, raw);
     else
         say("!! unknown directive: %s", raw);
 }

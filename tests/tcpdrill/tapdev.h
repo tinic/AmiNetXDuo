@@ -93,6 +93,10 @@ ULONG tap_tx_get(UBYTE *buf, ULONG max, ULONG *stamp);
  */
 LONG tap_rx_put(const UBYTE *frame, ULONG len);
 
+/* Complete queued reads last-matching-first instead of first-matching-first,
+   so nothing in the stack may assume a device completes them in order. */
+VOID tap_set_rx_lifo(BOOL on);
+
 /* How many reads are outstanding for one EtherType (0 = any). */
 ULONG tap_reads_for(UWORD ether_type);
 

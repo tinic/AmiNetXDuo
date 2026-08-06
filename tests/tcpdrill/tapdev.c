@@ -74,6 +74,7 @@ typedef struct TapDevice
     struct List     reads;              /* queued CMD_READs                */
     struct List     events;             /* queued S2_ONEVENTs              */
     BOOL            online;
+    BOOL            rx_lifo;            /* complete reads LIFO, see tap_rx_put */
     BOOL            configured;
     UBYTE           mac[ETH_ADDR];
     TapStats        stats;
@@ -610,6 +611,18 @@ ULONG tap_tx_get(UBYTE *buf, ULONG max, ULONG *stamp)
     return len;
 }
 
+/*
+ * Which queued CMD_READ a frame completes.  FALSE, the default, is the first
+ * matching one, which is what every driver in the test matrix happens to do.
+ * TRUE takes the last, modelling a device whose firmware owns the slots and
+ * whose framer hands them back out of order.
+ */
+VOID tap_set_rx_lifo(BOOL on)
+{
+    if (tap_dev != NULL)
+        tap_dev->rx_lifo = on;
+}
+
 LONG tap_rx_put(const UBYTE *frame, ULONG len)
 {
     TapDevice         *d = tap_dev;
@@ -631,7 +644,18 @@ LONG tap_rx_put(const UBYTE *frame, ULONG len)
         if (r->ios2_PacketType == (ULONG)type)
         {
             pick = r;
-            break;
+
+            /*
+             * FIFO is one device's habit, not a SANA-II guarantee, and the
+             * stack must not depend on it.  ZZ9000Net is the case in hand:
+             * its firmware owns the RX slots and a separate process drains
+             * them, so reads come back out of step with the order they were
+             * posted.  In LIFO mode this keeps walking and takes the LAST
+             * matching read, which is the cheapest way to make a reader that
+             * assumes order fail here rather than on somebody's Zorro card.
+             */
+            if (!d->rx_lifo)
+                break;
         }
     }
 

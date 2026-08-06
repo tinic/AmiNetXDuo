@@ -1,0 +1,94 @@
+# tcpdrill, a device that completes reads out of order.
+#
+# SANA-II promises nothing about WHICH outstanding CMD_READ a device completes
+# when a frame arrives.  Every driver this stack is tested against happens to
+# answer the oldest one first, because they queue reads and walk the queue from
+# the head, so an order dependency in the receive path would never show up.
+#
+# ZZ9000Net is the case that made this worth testing.  Its firmware owns the RX
+# slots, its ISR only masks and signals, and a separate process drains the
+# slots and returns them; the order reads come back in is the framer's, not the
+# order they were posted.  A stack that assumes otherwise fails on that card
+# and nowhere else, which is the worst place to find out.
+#
+# `rxorder lifo` makes the synthetic device complete the LAST matching read
+# instead of the first.  The stack keeps several reads in flight per EtherType
+# (src/sana2/sana2_rx.c), each pinning its own NX_PACKET, so under LIFO the
+# packets come back in the reverse of the order they were pinned.
+#
+# These are ordinary exchanges, deliberately: the point is not a new protocol
+# behaviour but that the ordinary ones are indifferent to completion order.  If
+# something in the receive path depends on it, a handshake or a data segment
+# arrives on the wrong packet and these fail the same way a corrupted frame
+# would.  s04 puts it back to fifo so the mode cannot leak into a later script
+# through a shared device.
+
+case s01_handshake_with_reads_completing_backwards
+rxorder lifo
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+
+case s02_data_arrives_intact_when_reads_complete_backwards
+rxorder lifo
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=1460
+tx A seq=1 ack=1461 within=400
+recv 1460 = 1460
+
+case s03_several_segments_still_arrive_in_sequence
+rxorder lifo
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=1460
+tx A seq=1 ack=1461 within=400
+recv 1460 = 1460
+rx PA seq=1461 ack=1 len=1460
+tx A seq=1 ack=2921 within=400
+recv 1460 = 1460
+rx PA seq=2921 ack=1 len=1460
+tx A seq=1 ack=4381 within=400
+recv 1460 = 1460
+
+case s04_back_to_fifo
+rxorder fifo
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=1460
+tx A seq=1 ack=1461 within=400
+recv 1460 = 1460
+
+# The control for s03: identical, in fifo.  It exists because the first version
+# of s03 asserted one recv() of 4380 and failed, and this control failed with
+# it -- recv() returns what is buffered at that moment, not everything that
+# will eventually arrive, so that assertion was about recv() and not about
+# completion order at all.  Each segment is now read as it lands, and the pair
+# only means something as a pair: s03 and s05 must agree.
+case s05_control_same_three_segments_in_fifo
+rxorder fifo
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=1460
+tx A seq=1 ack=1461 within=400
+recv 1460 = 1460
+rx PA seq=1461 ack=1 len=1460
+tx A seq=1 ack=2921 within=400
+recv 1460 = 1460
+rx PA seq=2921 ack=1 len=1460
+tx A seq=1 ack=4381 within=400
+recv 1460 = 1460
