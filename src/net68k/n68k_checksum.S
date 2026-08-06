@@ -253,8 +253,15 @@ _n68k_sum_longwords:
 |
 |   Copy `count` longwords and return the ones-complement accumulator of what
 |   was copied, carries folded end-around, out of the loads the copy is doing
-|   anyway.  Both pointers are longword aligned; ami_sana2_copy_to_buff()
-|   decides that, because it is a fact about the frame in front of it.
+|   anyway.
+|
+|   Both pointers are WORD aligned and need not agree beyond that, which is
+|   what ami_sana2_copy_to_buff() checks: on this receive path they are always
+|   two bytes out of phase.  A 68000 raises an address error on an odd
+|   address, not on a 4-misaligned one, and a longword move is two word cycles
+|   on its bus either way; 68020 and 68030 realign in hardware.  The 68040 and
+|   68060 take the arm below that issues no MOVEM at all, so no part is asked
+|   for a misaligned multi-register transfer.
 |
 | ONE INSTRUCTION PER LONGWORD TO SUM, and the loads through MOVEM.
 |
@@ -320,14 +327,14 @@ _n68k_copy_sum_longwords:
         add.l   d1,d1                   | X = 0; from here nothing may touch it
 
 .Lcs_block:
-#ifdef N68K_SUM_NO_MOVEM
-        | 68060: no MOVEM on either side.
+#if defined(N68K_SUM_NO_MOVEM) || defined(__mc68040__)
+        | 68060, and 68040: no MOVEM on either side.
         .rept   14
         move.l  a1@+,d1
         move.l  d1,a0@+
         addx.l  d1,d0
         .endr
-#elif defined(__mc68020__) || defined(__mc68030__) || defined(__mc68040__)
+#elif defined(__mc68020__) || defined(__mc68030__)
         | Post-incrementing stores, interleaved with the chain.
         movem.l a1@+,d1-d7
         move.l  d1,a0@+

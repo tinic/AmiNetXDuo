@@ -69,10 +69,28 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
 
 #ifdef AMINETXDUO_RX_VERIFY
     /*
-     * Sum while copying, when both ends are longword aligned.  The device has
-     * to be copied out of anyway, so the sum comes out of loads already being
+     * Sum while copying, when both ends are WORD aligned.  The device has to
+     * be copied out of anyway, so the sum comes out of loads already being
      * paid for; ami_sana2_rx_deliver() then verifies from it instead of
      * walking the frame a second time.
+     *
+     * WORD, not longword, and the difference is the whole path.  The two ends
+     * are permanently two bytes out of phase: ami_sana2_rx_arm() puts the
+     * destination at data_start + AMI_SANA2_RX_PAD + AMI_ETH_HEADER_SIZE,
+     * 2 + 14, which is longword aligned and is what the pad is for, while the
+     * device hands over its payload from behind a 14-byte header in an
+     * aligned ring entry, two off.  A gate of `& 3` therefore never passed in
+     * cooked mode: tools/profiler over an A600 fitz transfer, 2026-08-06, put
+     * n68k_copy_bytes() at 12.9% of the machine and n68k_copy_sum_longwords()
+     * at zero samples, with the frame walked again afterwards for a sum the
+     * copy could have produced.
+     *
+     * A 68000 raises an address error on an ODD word or longword access, not
+     * on a merely 4-misaligned one, and its bus is 16 bits wide, so a
+     * longword move is two word cycles whatever its alignment.  68020 and
+     * 68030 take misaligned accesses in hardware.  So `& 1` is the real
+     * requirement, and if a device ever hands over an odd pointer this still
+     * declines to the byte copy.
      *
      * The answer goes in the SLOT, not in the packet: the drain holds the same
      * slot when it delivers, and the slot is re-armed before it is reused, so
@@ -80,7 +98,7 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
      */
     slot->summed = FALSE;
 
-    if ((((ALIGN_TYPE)slot->dst | (ALIGN_TYPE)from) & 3) == 0)
+    if ((((ALIGN_TYPE)slot->dst | (ALIGN_TYPE)from) & 1) == 0)
     {
         ULONG   words =  len >> 2;
         ULONG   tail  =  len & 3UL;

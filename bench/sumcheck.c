@@ -7,6 +7,12 @@
  * and Amiberry's cycle accounting is off above the 68020, but the ANSWERS are
  * still the machine's, and a wrong answer is what matters here.
  *
+ * PHASE.  The receive path never has both ends longword aligned -- the
+ * destination is data_start + 2 + 14 and the device's payload sits two off --
+ * so the interesting case is a WORD aligned pair that disagree mod 4.  A
+ * 68000 raises an address error on an odd address only, so the run itself is
+ * the check that the relaxed gate is legal on the part that is strictest.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -37,10 +43,12 @@ static ULONG v_reference(ULONG *to, const ULONG *from, ULONG count)
 }
 
 #define BUFW    512
+#define GUARD   0xDEADBEEFUL
 
-static ULONG src[BUFW];
-static ULONG dst[BUFW + 1];
-static ULONG ref[BUFW + 1];
+/* Byte arrays, so a case can start the pair at any even offset. */
+static UBYTE src_raw[BUFW * 4 + 8];
+static UBYTE dst_raw[BUFW * 4 + 8];
+static UBYTE ref_raw[BUFW * 4 + 8];
 
 static ULONG rng = 0x2545f491UL;
 
@@ -52,24 +60,27 @@ static ULONG rnd(void)
     return rng;
 }
 
-int main(void)
+static ULONG failures;
+
+static void run(const char *what, ULONG doff, ULONG soff)
 {
     ULONG n;
-    ULONG failures = 0;
+    ULONG bad = 0;
 
-    /* 0 to 72 covers the block loop, its remainder and the boundary; the
-       guard longword past the end catches a block that writes one too many. */
     for (n = 0; n <= 72UL; n++)
     {
-        ULONG i, want, got;
+        ULONG *src = (ULONG *)(void *)(src_raw + soff);
+        ULONG *dst = (ULONG *)(void *)(dst_raw + doff);
+        ULONG *ref = (ULONG *)(void *)(ref_raw + doff);
+        ULONG  i, want, got;
 
         for (i = 0; i < n; i++)
             src[i] = (rnd() << 8) ^ rnd();
 
         for (i = 0; i <= n; i++)
         {
-            dst[i] = 0xDEADBEEFUL;
-            ref[i] = 0xDEADBEEFUL;
+            dst[i] = GUARD;
+            ref[i] = GUARD;
         }
 
         want = v_reference(ref, src, n);
@@ -77,10 +88,10 @@ int main(void)
 
         if (got != want)
         {
-            printf("FAIL n=%lu sum %08lx want %08lx\n",
+            printf("FAIL %s n=%lu sum %08lx want %08lx\n", what,
                    (unsigned long)n, (unsigned long)got,
                    (unsigned long)want);
-            failures++;
+            bad++;
             continue;
         }
 
@@ -88,22 +99,34 @@ int main(void)
         {
             if (dst[i] != ref[i])
             {
-                printf("FAIL n=%lu word %lu copied wrong\n",
+                printf("FAIL %s n=%lu word %lu copied wrong\n", what,
                        (unsigned long)n, (unsigned long)i);
-                failures++;
+                bad++;
                 break;
             }
         }
 
-        if (dst[n] != 0xDEADBEEFUL)
+        if (dst[n] != GUARD)
         {
-            printf("FAIL n=%lu wrote past the end\n", (unsigned long)n);
-            failures++;
+            printf("FAIL %s n=%lu wrote past the end\n", what,
+                   (unsigned long)n);
+            bad++;
         }
     }
 
-    printf("73 counts, %lu failed\n", (unsigned long)failures);
-    printf("%s\n", failures == 0UL ? "PASS" : "FAIL");
+    printf("  %-28s 73 counts, %lu failed\n", what, (unsigned long)bad);
+    failures += bad;
+}
 
+int main(void)
+{
+    /* dst is longword aligned on the real path and the source is two off,
+       which is the pair the gate now admits.  The others bracket it. */
+    run("both longword aligned", 0, 0);
+    run("dst aligned, src +2", 0, 2);
+    run("dst +2, src aligned", 2, 0);
+    run("both +2", 2, 2);
+
+    printf("%s\n", failures == 0UL ? "PASS" : "FAIL");
     return failures ? 20 : 0;
 }
