@@ -842,6 +842,17 @@ if(AMINETXDUO_UNITY)
         "${AMINETXDUO_NETXDUO}/common/src/nx_ip_address_change_notify.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_ip_interface_address_set.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_rarp_packet_receive.c"
+        # tx_initialize_high_level.c defines TX_INVOKE_INLINE_INITIALIZATION
+        # and THEN includes tx_thread.h, tx_event_flags.h and the rest, which
+        # is how tx_port.h's TX_INLINE_INITIALIZATION puts each component's
+        # data definitions in this one object.  It only works if this file is
+        # the first to reach those headers, and in a unity translation unit it
+        # is not: an earlier ThreadX file includes them plain, the guards then
+        # block the second include, the inline definitions never land, and the
+        # link comes apart with _tx_event_flags_initialize undefined and half
+        # of libthreadx.a pulled in on top of the copy already there.  The
+        # only file in either tree that does this.
+        "${AMINETXDUO_THREADX}/common/src/tx_initialize_high_level.c"
         # See the note below on the first code hunk.
         "${CMAKE_CURRENT_SOURCE_DIR}/src/bsdsocket/library.c")
     foreach(_x IN LISTS _unity_excluded)
