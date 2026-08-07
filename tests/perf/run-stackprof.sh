@@ -28,7 +28,10 @@
 #
 # OPTIONS
 #
-#   -s STACK    ours | roadshow | amitcpng            (required)
+#   -s STACK    ours | roadshow | amitcpng | none     (required)
+#               `none` stages no bsdsocket.library and brings nothing
+#               up: the baseline that says whether a gap between two
+#               stacks is either stack's doing.  Requires -c.
 #   -T TAG      run tag; results land in build/amiberry-testhd-<tag>/
 #   -p          PLAIN: no profiler, throughput only.  This is the control that
 #               says whether the sampler moved the figure it is explaining.
@@ -186,11 +189,25 @@ case "$STACK" in
         STATARGS=""
         NOTE="AmiTCP_NG from $NGDIR"
         ;;
+    none)
+        # The baseline: no bsdsocket.library at all, nothing brought up.  Only
+        # meaningful with -c, and it is what says whether a gap between two
+        # stacks is either stack's doing or the rig's.
+        [ "$CTLONLY" = 1 ] || {
+            echo "-s none measures a machine with no stack, so it only makes" >&2
+            echo "sense with -c; there is nothing to transfer over." >&2
+            exit 2; }
+        LIBBSD=""; LIBUG=""; CMD_ADDIF=""; CMD_STAT=""
+        STATARGS=""
+        NOTE="no stack at all (baseline)"
+        ;;
     *) echo "unknown stack '$STACK'" >&2; exit 2 ;;
 esac
 
-[ -f "$LIBBSD" ] || { echo "missing $LIBBSD" >&2; exit 2; }
-[ -f "$CMD_ADDIF" ] || { echo "missing $CMD_ADDIF" >&2; exit 2; }
+if [ "$STACK" != none ]; then
+    [ -f "$LIBBSD" ] || { echo "missing $LIBBSD" >&2; exit 2; }
+    [ -f "$CMD_ADDIF" ] || { echo "missing $CMD_ADDIF" >&2; exit 2; }
+fi
 
 FITZ="$ROOT/build/fitz/Fitz/fitz"
 BENCH="$BUILD/tests/perf/FitzBench"
@@ -286,19 +303,19 @@ cp "$A2065" "$STAGE/devs/a2065.device"
 mkdir -p "$STAGE/devs/Networks"
 cp "$A2065" "$STAGE/devs/Networks/a2065.device"
 
-cp "$LIBBSD" "$STAGE/libs/bsdsocket.library"
-if [ -f "$LIBUG" ]; then
+if [ -n "$LIBBSD" ]; then cp "$LIBBSD" "$STAGE/libs/bsdsocket.library"; fi
+if [ -n "$LIBUG" ] && [ -f "$LIBUG" ]; then
     cp "$LIBUG" "$STAGE/libs/usergroup.library"
 else
     echo "==> $STACK ships no usergroup.library; staging none"
 fi
 [ -z "$EXTRALIBS" ] || cp -R "$EXTRALIBS"/* "$STAGE/libs/"
 
-cp "$CMD_ADDIF" "$STAGE/AddNetInterface"
+if [ -n "$CMD_ADDIF" ]; then cp "$CMD_ADDIF" "$STAGE/AddNetInterface"; fi
 # Optional: a stack that ships no status tool is still measurable, and the
 # plan tests for NetStat before naming it.  As an && list this aborted the
 # whole run under set -e, with no message, for a file nothing needed.
-if [ -f "$CMD_STAT" ]; then cp "$CMD_STAT" "$STAGE/NetStat"; fi
+if [ -n "$CMD_STAT" ] && [ -f "$CMD_STAT" ]; then cp "$CMD_STAT" "$STAGE/NetStat"; fi
 cp "$FITZ"  "$STAGE/fitz"
 cp "$BENCH" "$STAGE/FitzBench"
 [ "$PROFILE" = 0 ] || cp "$PROF" "$STAGE/Profile"
@@ -316,8 +333,10 @@ fi
 # FitzBench rather than the mount, because the sampler records every task
 # anyway and a handler that never returns never writes a profile.
 {
-    echo "SYS:AddNetInterface DEVS:NetInterfaces/eth0"
-    echo "wait 6"
+    if [ "$STACK" != none ]; then
+        echo "SYS:AddNetInterface DEVS:NetInterfaces/eth0"
+        echo "wait 6"
+    fi
     # A `{ }` group is not a subshell, so an `exit` here would end the run
     # rather than the plan.  DIAG stops by writing nothing more.
     # AMINETXDUO_PROF_WATCH=<library>/<hexoff>/<hexlen> asks the sampler for a
@@ -363,7 +382,8 @@ sed 's/^/    /' "$STAGE/commands.txt"
 
 export AMINETXDUO_RUN_TAG="$TAG"
 STAGED=("$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs"
-        "$STAGE/AddNetInterface" "$STAGE/fitz" "$STAGE/FitzBench")
+        "$STAGE/fitz" "$STAGE/FitzBench")
+[ -f "$STAGE/AddNetInterface" ] && STAGED+=("$STAGE/AddNetInterface")
 [ -f "$STAGE/NetStat" ] && STAGED+=("$STAGE/NetStat")
 [ "$PROFILE" = 0 ] || STAGED+=("$STAGE/Profile")
 [ -d "$STAGE/AmiTCP" ] && STAGED+=("$STAGE/AmiTCP")
