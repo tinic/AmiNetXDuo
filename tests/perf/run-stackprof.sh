@@ -295,7 +295,10 @@ fi
 [ -z "$EXTRALIBS" ] || cp -R "$EXTRALIBS"/* "$STAGE/libs/"
 
 cp "$CMD_ADDIF" "$STAGE/AddNetInterface"
-[ -f "$CMD_STAT" ] && cp "$CMD_STAT" "$STAGE/NetStat"
+# Optional: a stack that ships no status tool is still measurable, and the
+# plan tests for NetStat before naming it.  As an && list this aborted the
+# whole run under set -e, with no message, for a file nothing needed.
+if [ -f "$CMD_STAT" ]; then cp "$CMD_STAT" "$STAGE/NetStat"; fi
 cp "$FITZ"  "$STAGE/fitz"
 cp "$BENCH" "$STAGE/FitzBench"
 [ "$PROFILE" = 0 ] || cp "$PROF" "$STAGE/Profile"
