@@ -55,6 +55,7 @@ import re
 import struct
 import subprocess
 import sys
+import time
 from collections import defaultdict
 
 HDR = struct.Struct(">28L")
@@ -1261,6 +1262,16 @@ def main():
     ap.add_argument("--ndk", help="NDK include dir, for lvo/*.i")
     ap.add_argument("--phase", help="only samples between this mark and the next")
     ap.add_argument("--top", type=int, default=25)
+    ap.add_argument("--symbol", metavar="NAME",
+                    help="report this symbol's sample count and nothing else. "
+                         "Distinguishes 'resolved, zero samples' from 'not in "
+                         "the symbol table', which a ranking cannot")
+    ap.add_argument("--max-age", type=float, default=60.0, metavar="MIN",
+                    help="refuse a profile older than this many minutes "
+                         "(0 disables)")
+    ap.add_argument("--allow-stale", action="store_true",
+                    help="read a profile older than --max-age, or one older "
+                         "than the binaries it is resolved against")
     ap.add_argument("--allow-unresolved", action="store_true",
                     help="report even though the map names objects that "
                          "could not be found; their statics stay unnamed")
@@ -1357,6 +1368,50 @@ def main():
     # twenty-byte strlen at 27% of a file transfer as a real result.
     #
     # So refuse. --allow-unresolved says the gap is understood and accepted.
+    # FRESHNESS.  Two questions, and the second is the one that bites: is this
+    # profile old enough that it probably answers a question nobody is asking
+    # any more, and was anything it is being resolved against rebuilt after it
+    # was taken?  A binary newer than the capture did not produce the capture,
+    # so every address in it is being named from the wrong symbol table -- the
+    # ranking still reads perfectly well, which is the whole problem.
+    stale = []
+    try:
+        prof_mtime = os.path.getmtime(args.profile)
+    except OSError:
+        prof_mtime = None
+
+    if prof_mtime is not None:
+        age_min = (time.time() - prof_mtime) / 60.0
+        if args.max_age > 0 and age_min > args.max_age:
+            stale.append("the profile is %.0f minutes old (--max-age %.0f)"
+                         % (age_min, args.max_age))
+
+        newer = []
+        for label, path in [("--exe", args.exe), ("--map", args.mapfile)] + \
+                           [("--lib %s" % s.get("name", "?"), s.get(p))
+                            for s in libspecs for p in ("exe", "map")]:
+            if not path:
+                continue
+            try:
+                # A second of slack: a build can finish inside the same tick.
+                if os.path.getmtime(path) > prof_mtime + 1.0:
+                    newer.append("%s %s" % (label, path))
+            except OSError:
+                continue
+        if newer:
+            stale.append("rebuilt after the profile was taken: "
+                         + ", ".join(newer[:4]))
+
+    if stale:
+        print()
+        for s in stale:
+            print("!! %s" % s)
+        print("!! A capture and the binaries it is named from have to be the "
+              "same build.")
+        if not args.allow_stale:
+            print("!! Refusing. Pass --allow-stale to read it anyway.")
+            return 2
+
     # The same gate for the profiled program itself.  --lib resolving cleanly
     # says nothing about the executable: a run can print a full library symbol
     # table beside "symbols 0 from (none)" and rank a workload whose hottest
@@ -1443,6 +1498,41 @@ def main():
 
     total = len(samples)
 
+    # ABSENCE.  A ranking answers "what is hot", never "is X hot", because a
+    # symbol below the cut and a symbol that was never resolved read the same
+    # from a list: they are both not on it.  Reading one as the other is how a
+    # real 2.4% was dismissed as noise.  This separates them.
+    if args.symbol:
+        want = args.symbol.lower()
+        hits = sorted(((n, fn, mod) for (fn, mod), n in by_fn.items()
+                       if want in fn.lower()), reverse=True)
+        # (address, name, object); the name is the middle field and the last
+        # one is the object it came out of, which is not what is being asked.
+        known = [row[1] for tbl in symtab.values() for row in tbl
+                 if want in row[1].lower()]
+        for lib in res.libsyms.values():
+            known += [row[1] for tbl in getattr(lib, "symtab", {}).values()
+                      for row in tbl if want in row[1].lower()]
+
+        print("symbol       %r" % args.symbol)
+        if hits:
+            for n, fn, mod in hits:
+                print("  %-38s %-26s %5d  %5.1f%%"
+                      % (fn, mod[:26], n, 100.0 * n / total))
+        elif known:
+            print("  0 samples, and the symbol IS in the table (%d match%s, "
+                  "e.g. %s)." % (len(known), "" if len(known) == 1 else "es",
+                                 sorted(set(known))[0]))
+            print("  Absent from this profile, not absent from the build.")
+        else:
+            print("  no such symbol in the table, and no samples.")
+            print("!! Nothing resolved under that name, so this says nothing "
+                  "about whether")
+            print("!! the code ran.  Check the spelling and that --map/--lib "
+                  "cover it.")
+            return 2
+        return 0
+
     print("context      %d%% task, %d%% supervisor/interrupt"
           % (100 * (total - supervisor) // total, 100 * supervisor // total))
     if len(by_task) > 1:
@@ -1502,6 +1592,17 @@ def main():
     print("-" * 80)
     print("%-63s %7d %6.1f%%" % ("top %d" % min(args.top, len(by_fn)),
                                  cum, 100.0 * cum / total))
+
+    # What is not on the list is not a finding.  Spelling out the size of the
+    # tail is the difference between "X is not hot" and "X is not in the part
+    # of the ranking I looked at", and only the second one is supported.
+    hidden = len(by_fn) - min(args.top, len(by_fn))
+    if hidden > 0:
+        print("%-63s %7d %6.1f%%"
+              % ("%d more below the cut" % hidden, total - cum,
+                 100.0 * (total - cum) / total))
+        print("Absence from this list is not absence from the profile; "
+              "ask --symbol NAME.")
 
     if getattr(prof, "calls", None):
         report_callers(prof, res)
