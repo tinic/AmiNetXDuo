@@ -571,8 +571,24 @@ static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
                           const ULONG *in_except, BsdFdSets *out)
 {
     LONG fd, count = 0;
+    LONG words = (nfds + BSD_FD_BITS - 1) / BSD_FD_BITS;
 
-    bsd_bzero(out, sizeof(*out));
+    /*
+     * Only the words the caller can name.  BsdFdSets is three arrays of
+     * BSD_FD_WORDS, 384 bytes, sized for the largest table SBTC_DTABLESIZE
+     * hands out; bsd_fdset_out() copies `words` of each back and the loop
+     * below writes no further.  A select on two descriptors was clearing all
+     * 384 bytes on every call, which is 87 samples of 9432 in bsd_bzero.
+     */
+    if (words > BSD_FD_WORDS)
+        words = BSD_FD_WORDS;
+
+    if (words > 0)
+    {
+        bsd_bzero(out->read,   (ULONG)words * sizeof(ULONG));
+        bsd_bzero(out->write,  (ULONG)words * sizeof(ULONG));
+        bsd_bzero(out->except, (ULONG)words * sizeof(ULONG));
+    }
 
     if (bsd_nx_enter(base) != 0)
         return -1;
@@ -852,8 +868,13 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
         WaitIO((struct IORequest *)&SocketBase->sb_TimerReq);
     }
 
-    if (count <= 0)
-        bsd_bzero(ready, sizeof(*ready));
+    if (count <= 0 && words > 0)
+    {
+        /* Same bound as bsd_poll_sets(): only what bsd_fdset_out() reads. */
+        bsd_bzero(ready->read,   (ULONG)words * sizeof(ULONG));
+        bsd_bzero(ready->write,  (ULONG)words * sizeof(ULONG));
+        bsd_bzero(ready->except, (ULONG)words * sizeof(ULONG));
+    }
 
     bsd_fdset_out(read_fds,   ready->read,   words);
     bsd_fdset_out(write_fds,  ready->write,  words);
