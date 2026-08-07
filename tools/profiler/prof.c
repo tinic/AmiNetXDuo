@@ -243,6 +243,18 @@ ULONG                       prof_ncalls;
    plus the exception frame, which grew a word on the 68010. */
 ULONG                       prof_frameadj;
 
+/* prof_vector.S reaches into struct Task with these as literals, because an
+   interrupt handler cannot call offsetof().  They are Exec ABI and have not
+   moved since 1985, but a wrong one here reads a stack bound out of the
+   wrong field and validates nothing, so they are checked at compile time. */
+_Static_assert(offsetof(struct Task, tc_SPLower) == 58,
+               "prof_vector.S has tc_SPLower at 58");
+_Static_assert(offsetof(struct Task, tc_SPUpper) == 62,
+               "prof_vector.S has tc_SPUpper at 62");
+
+/* Snapshots refused because the stack could not be shown to be one. */
+ULONG                       prof_call_refused;
+
 static struct ProfCall     *prof_calls;
 static ULONG                prof_maxcalls;
 
@@ -1095,6 +1107,12 @@ BOOL prof_watch(const char *libname, ULONG off, ULONG len, ULONG maxcalls)
         return(FALSE);
     }
 
+    if (prof_calls != NULL)
+    {
+        prof_err = "a caller window is already armed";
+        return(FALSE);
+    }
+
     prof_calls = (struct ProfCall *)AllocMem(maxcalls * (ULONG)sizeof(struct ProfCall),
                                              MEMF_ANY | MEMF_CLEAR);
     if (prof_calls == NULL)
@@ -1118,6 +1136,7 @@ BOOL prof_watch(const char *libname, ULONG off, ULONG len, ULONG maxcalls)
 }
 
 ULONG prof_call_count(VOID)   { return(prof_ncalls); }
+ULONG prof_call_refused_count(VOID) { return(prof_call_refused); }
 ULONG prof_watch_base(VOID)   { return(prof_watch_lo); }
 
 ULONG prof_hit_count(VOID)    { return(prof_hits); }
@@ -1321,6 +1340,21 @@ static VOID prof_free_tables(VOID)
     {
         FreeMem(prof_wins, PROF_MAX_WINS * (ULONG)sizeof(struct ProfWindow));
         prof_wins = NULL;
+    }
+
+    /* DISARM BEFORE FREEING.  prof_vector.S tests prof_watch_lo and then
+       writes through prof_call_next; freeing first would leave an interrupt
+       handler storing into memory Exec had handed to somebody else. */
+    prof_watch_lo   = 0UL;
+    prof_watch_hi   = 0UL;
+    prof_call_next  = 0UL;
+    prof_call_limit = 0UL;
+
+    if (prof_calls != NULL)
+    {
+        FreeMem(prof_calls, prof_maxcalls * (ULONG)sizeof(struct ProfCall));
+        prof_calls    = NULL;
+        prof_maxcalls = 0UL;
     }
 }
 

@@ -170,7 +170,12 @@ struct ProfSeg  { ULONG psg_Base; ULONG psg_Size; };
  * Amiga side copies longwords and says nothing about what they mean.  Stale
  * data below the live frame is expected and is the reader's problem.
  */
-#define PROF_CALL_WORDS 6
+/* Twelve, not six.  A callee's saved registers sit between the stack pointer
+   and its return address, so the window has to be deeper than the largest
+   prologue it is aimed at: movem.l d2-d7/a2-a5 is ten longwords.  Six found
+   the caller of the divide helper and reported saved data as callers for the
+   byte copy. */
+#define PROF_CALL_WORDS 12
 
 struct ProfCall
 {
@@ -370,6 +375,11 @@ BOOL prof_watch(const char *libname, ULONG off, ULONG len, ULONG maxcalls);
 /* Snapshots captured, and the window actually armed (zero if none). */
 ULONG prof_call_count(VOID);
 ULONG prof_watch_base(VOID);
+
+/* Snapshots the vector refused because it could not prove the stack was
+   one; a large number means the window covers code reached from contexts
+   where ThisTask does not own the stack in use. */
+ULONG prof_call_refused_count(VOID);
 const struct ProfMark   *prof_mark_table(ULONG *count);
 const struct ProfRange  *prof_range_table(ULONG *count);
 

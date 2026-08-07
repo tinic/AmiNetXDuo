@@ -599,7 +599,7 @@ int              i;
         char  wlib[32];
         ULONG woff = 0UL, wlen = 0UL;
         ULONG wmax = (opt[OPT_WATCHMAX] != 0L)
-            ? (ULONG)(*(LONG *)opt[OPT_WATCHMAX]) : 4096UL;
+            ? (ULONG)(*(LONG *)opt[OPT_WATCHMAX]) : 1024UL;
 
         if (!parse_watch((const char *)opt[OPT_WATCH], wlib, (ULONG)sizeof(wlib),
                          &woff, &wlen))
@@ -669,7 +669,8 @@ int              i;
 
     if (opt[OPT_WATCH] != 0L)
     {
-        say("Profile: %ld caller snapshots", (long)prof_call_count());
+        say("Profile: %ld caller snapshots, %ld refused (no provable stack)",
+            (long)prof_call_count(), (long)prof_call_refused_count());
     }
 
     if (opt[OPT_FOLDED] != 0L)

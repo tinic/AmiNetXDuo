@@ -236,6 +236,98 @@ def hunk_sizes(path):
     return sizes
 
 
+def hunk_code(path):
+    """{hunk index: bytes} for every HUNK_CODE, in load order.
+
+    hunk_sizes() reads the table and stops; this walks the hunks themselves,
+    because deciding whether an address is a return address means looking at
+    the instruction in front of it.
+    """
+    HUNK_CODE, HUNK_DATA, HUNK_BSS = 0x3E9, 0x3EA, 0x3EB
+    HUNK_RELOC32, HUNK_SYMBOL, HUNK_DEBUG = 0x3EC, 0x3F0, 0x3F1
+    HUNK_END, HUNK_HEADER = 0x3F2, 0x3F3
+
+    with open(path, "rb") as fh:
+        blob = fh.read()
+
+    if struct.unpack_from(">L", blob, 0)[0] != HUNK_HEADER:
+        return {}
+
+    off = 4
+    while True:
+        n = struct.unpack_from(">L", blob, off)[0]
+        off += 4
+        if n == 0:
+            break
+        off += n * 4
+
+    _table, first, last = struct.unpack_from(">3L", blob, off)
+    off += 12
+    for _ in range(last - first + 1):
+        raw = struct.unpack_from(">L", blob, off)[0]
+        off += 4
+        if (raw & 0xC0000000) == 0xC0000000:
+            off += 4
+
+    out = {}
+    idx = 0
+    while off + 4 <= len(blob):
+        kind = struct.unpack_from(">L", blob, off)[0] & 0x3FFFFFFF
+        off += 4
+        if kind in (HUNK_CODE, HUNK_DATA):
+            n = struct.unpack_from(">L", blob, off)[0] * 4
+            off += 4
+            if kind == HUNK_CODE:
+                out[idx] = blob[off:off + n]
+            off += n
+        elif kind == HUNK_BSS:
+            off += 4
+        elif kind == HUNK_RELOC32:
+            while True:
+                cnt = struct.unpack_from(">L", blob, off)[0]
+                off += 4
+                if cnt == 0:
+                    break
+                off += 4 + cnt * 4
+        elif kind in (HUNK_SYMBOL, HUNK_DEBUG):
+            if kind == HUNK_SYMBOL:
+                while True:
+                    ln = struct.unpack_from(">L", blob, off)[0]
+                    off += 4
+                    if ln == 0:
+                        break
+                    off += ln * 4 + 4
+            else:
+                n = struct.unpack_from(">L", blob, off)[0] * 4
+                off += 4 + n
+        elif kind == HUNK_END:
+            idx += 1
+        else:
+            break                               # not a shape we know; stop
+    return out
+
+
+def is_call_site(code, off, ret_off):
+    """Does a call at `off` in `code` return to `ret_off`?"""
+    if off < 0 or off + 2 > len(code):
+        return False
+    w = struct.unpack_from(">H", code, off)[0]
+    if w == 0x4EB9 and ret_off == off + 6:      # jsr abs.l
+        return True
+    if w == 0x4EBA and ret_off == off + 4:      # jsr d16(pc)
+        return True
+    if 0x4EA8 <= w <= 0x4EAF and ret_off == off + 4:
+        return True                             # jsr d16(An)
+    if 0x4E90 <= w <= 0x4E97 and ret_off == off + 2:
+        return True                             # jsr (An)
+    if w == 0x6100 and ret_off == off + 4:      # bsr.w
+        return True
+    if (w & 0xFF00) == 0x6100 and (w & 0x00FF) not in (0x00, 0xFF) \
+            and ret_off == off + 2:
+        return True                             # bsr.s
+    return False
+
+
 # -------------------------------------------------------------- symbols ----
 
 SEC_OF_TYPE = {"t": ".text", "T": ".text", "w": ".text", "W": ".text",
@@ -451,6 +543,7 @@ class LibSymbols:
 
     def __init__(self, name, spec, run_sizes, nm):
         self.name = name
+        self.exe = spec["exe"]
         self.ok = False
         self.nsyms = 0
 
@@ -525,6 +618,7 @@ class Resolver:
         self.symtab = symtab
 
         sizes = hunk_sizes(exe) if exe else []
+        self._exe_path = exe
         segs = prof.segs
 
         # The cross-check.  Every hunk's runtime allocation must match its
@@ -615,6 +709,59 @@ class Resolver:
             self.libnotes.append("%s: %s" % (name, syms.note))
             if syms.ok:
                 self.libsyms[libidx] = syms
+
+    def _code_for(self, libidx, hunk):
+        """The bytes of one hunk, or None if this reader has no file for it."""
+        if not hasattr(self, "_code_cache"):
+            self._code_cache = {}
+        key = (libidx, hunk)
+        if key in self._code_cache:
+            return self._code_cache[key]
+
+        path = None
+        if libidx is None:
+            path = getattr(self, "_exe_path", None)
+        elif libidx in self.libsyms:
+            path = self.libsyms[libidx].exe
+
+        code = None
+        if path:
+            if not hasattr(self, "_code_files"):
+                self._code_files = {}
+            if path not in self._code_files:
+                try:
+                    self._code_files[path] = hunk_code(path)
+                except Exception:
+                    self._code_files[path] = {}
+            code = self._code_files[path].get(hunk)
+
+        self._code_cache[key] = code
+        return code
+
+    def is_return_address(self, pc):
+        """Is a call instruction placed so that it returns exactly to pc?
+
+        Anything this cannot check -- a hunk with no file behind it -- is not
+        a return address as far as the caller report is concerned.  Saying
+        "maybe" there is how a saved data pointer became a caller.
+        """
+        got = self.lib_link_time(pc)
+        if got is not None:
+            libidx, hunk, off = got
+        else:
+            hunk, off = self.link_time(pc)
+            if hunk is None:
+                return False
+            libidx = None
+
+        code = self._code_for(libidx, hunk)
+        if not code:
+            return False
+
+        for back in (6, 4, 2):
+            if is_call_site(code, off - back, off):
+                return True
+        return False
 
     def lib_link_time(self, pc):
         """(library index, hunk, offset) for a PC inside a library's hunks."""
@@ -1010,6 +1157,8 @@ def report_callers(prof, res):
         for w in words:
             if w == 0 or (w & 1):       # odd is not a return address on m68k
                 continue
+            if not res.is_return_address(w):
+                continue                # a word that resolves is not a caller
             fn, mod = res.resolve(w)
             if fn is None or "unattributed" in str(mod):
                 continue
@@ -1027,15 +1176,16 @@ def report_callers(prof, res):
     print("callers of the watched range, %d snapshots" % len(prof.calls))
     print("-" * 80)
     if not first:
-        print("  nothing resolved; the window may cover code no linked "
-              "object calls")
+        print("  no stack word was preceded by a call that returns to it.")
+        print("  Either the window covers code nothing calls, or the files")
+        print("  behind those addresses were not given with --lib/--exe.")
     for (fn, mod), n in first.most_common(12):
         print("  %-38s %-20s %6d %5.1f%%  (seen %d)"
               % (fn[:38], str(mod)[:20], n, 100.0 * n / max(1, len(prof.calls)),
                  anywhere[(fn, mod)]))
     if unresolved:
         print("  %-38s %-20s %6d %5.1f%%"
-              % ("(no word resolved)", "", unresolved,
+              % ("(no call site found)", "", unresolved,
                  100.0 * unresolved / max(1, len(prof.calls))))
     print("-" * 80)
 
