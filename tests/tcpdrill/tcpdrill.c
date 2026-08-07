@@ -667,6 +667,8 @@ typedef struct Case
     ULONG   t_last;             /* E-Clock of the previous event */
     ULONG   fails;
     ULONG   line;
+    LONG    send_rc;            /* what the last send() returned */
+    ULONG   wire_bytes;         /* tx payload accepted since that send */
 } Case;
 
 static Case cs;
@@ -1255,9 +1257,48 @@ static VOID do_tx(const char *args, const char *raw)
         ULONG gap = ticks_to_ms(cs.t_last, got.stamp);
 
         cs.t_last = got.stamp;
+        cs.wire_bytes += (ULONG)got.dlen;
         n_pass++;
         say("  ok   %s   [+%ums]", raw, gap);
     }
+}
+
+/*
+ * `wirebytes` -- the last send() credited exactly the bytes that left.
+ *
+ * A short send has to report what it put on the wire and not what it was
+ * offered; the case names in tcp.drill are the specification.  Counted from
+ * the tx directives the script already matched, so it asserts nothing the
+ * script has not already accounted for.
+ */
+static VOID do_wirebytes(const char *args, const char *raw)
+{
+    char why[96];
+
+    (VOID)args;
+
+    if (cs.send_rc < 0)
+    {
+        fail(raw, "no send() to credit");
+        return;
+    }
+
+    if ((ULONG)cs.send_rc != cs.wire_bytes)
+    {
+        char       *w = why;
+        const char *t = "send() credited ";
+
+        while (*t != '\0') *w++ = *t++;
+        fmt_num(&w, (ULONG)cs.send_rc, 10, 0, TRUE);
+        t = " but "; while (*t != '\0') *w++ = *t++;
+        fmt_num(&w, cs.wire_bytes, 10, 0, TRUE);
+        t = " left"; while (*t != '\0') *w++ = *t++;
+        *w = '\0';
+        fail(raw, why);
+        return;
+    }
+
+    pass(raw);
 }
 
 static VOID do_notx(const char *args, const char *raw)
@@ -1450,6 +1491,7 @@ static VOID do_send(const char *args, const char *raw)
     LONG  rc;
     ULONG i;
     BOOL  want_again = FALSE;
+    BOOL  want_short = FALSE;
 
     args = token(args, tok, sizeof(tok));
     want = to_num(tok);
@@ -1457,12 +1499,16 @@ static VOID do_send(const char *args, const char *raw)
         want = (LONG)sizeof(payload);
 
     /* `send N = AGAIN` -- the send is expected to be refused, which is what a
-       non-blocking socket must do against a closed window. */
+       non-blocking socket must do against a closed window.
+       `send N = SHORT` -- it is expected to take some but not all, which is
+       what a window narrower than the request must produce.  `wirebytes` then
+       says the number it reported is the number that left. */
     args = token(args, tok, sizeof(tok));
     if (tok[0] == '=')
     {
         (VOID)token(args, tok, sizeof(tok));
         want_again = streq(tok, "AGAIN");
+        want_short = streq(tok, "SHORT");
     }
 
     for (i = 0; i < (ULONG)want; i++)
@@ -1471,9 +1517,22 @@ static VOID do_send(const char *args, const char *raw)
     cs.t_last = tap_eclock_now();
     rc = s_send(cs.sock, payload, want, 0);
 
+    /* Reset before the verdict, so `wirebytes` counts only what this send
+       put on the wire. */
+    cs.send_rc    = rc;
+    cs.wire_bytes = 0UL;
+
     if (want_again)
     {
         if (rc < 0 && s_errno() == E_WOULDBLOCK)
+        {
+            pass(raw);
+            return;
+        }
+    }
+    else if (want_short)
+    {
+        if (rc > 0 && rc < want)
         {
             pass(raw);
             return;
@@ -1937,6 +1996,8 @@ static VOID case_begin(const char *name)
 
     cs.sock       = -1;
     cs.lsock      = -1;
+    /* No send() yet, which `wirebytes` reports rather than crediting zero. */
+    cs.send_rc    = -1;
     cs.peer_port  = DEFAULT_PEER_PORT;
     cs.local_port = 0;
     /* A different ISN per case, so a stale segment from the previous one
@@ -2012,6 +2073,7 @@ static VOID run_line(char *line)
     else if (streq(verb, "tx"))       do_tx(args, raw);
     else if (streq(verb, "notx"))     do_notx(args, raw);
     else if (streq(verb, "txcount")) do_txcount(args, raw);
+    else if (streq(verb, "wirebytes")) do_wirebytes(args, raw);
     else if (streq(verb, "rx"))       do_rx(args, raw);
     else
         say("!! unknown directive: %s", raw);
