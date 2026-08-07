@@ -546,8 +546,32 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     ami_str_copy(iface->device, cfg->device, (ULONG)sizeof(iface->device));
     iface->unit = cfg->unit;
 
-    /* The buffer-management tag list is an input to OpenDevice and must
-       outlive the unit, so it lives in the interface, not on the stack. */
+    /*
+     * The buffer-management tag list is an input to OpenDevice and must
+     * outlive the unit, so it lives in the interface, not on the stack.
+     *
+     * WHY NOT S2_DMACopyToBuff32.  sana2.h defines S2_CopyToBuff32/FromBuff32
+     * (S2_Dummy + 6, + 7) and S2_DMACopyToBuff32/FromBuff32 (+ 8, + 9), and
+     * the DMA pair is the only thing that could remove the receive copy, which
+     * is 18.6% of an A1200 wire transfer with n68k_copy_bytes at 179.5 ns/B.
+     * Every SANA-II driver on hand was scanned for the tag constants it looks
+     * up, 2026-08-07:
+     *
+     *     a2060, eb920, eb920-i6, ppp-serial, rs485      base pair
+     *     a2065, ariadne, ariadne_ii, hydra, slip,       base pair + filter
+     *       x-surf, x-surf-100
+     *     cnet, cnet16                                   + DMA pair
+     *     ppp-ethernet                                   + DMA pair, FromBuff16
+     *
+     * Three of fifteen, none of them a card in general use, and not the a2065
+     * every measurement in this tree is taken on.  Nothing asks for the
+     * non-DMA 32 variants at all.  Offering the DMA pair means a packet pool in
+     * DMA-reachable memory with the alignment and coherency that implies, for
+     * cnet alone; the copy stays.
+     *
+     * A driver could compute the tag rather than carry the constant, so this
+     * is evidence rather than proof.  None of the fifteen appears to.
+     */
     iface->buffer_tags[tag].ti_Tag  = S2_CopyToBuff;
     iface->buffer_tags[tag].ti_Data = (ULONG)ami_sana2_copy_to_buff;
     tag++;

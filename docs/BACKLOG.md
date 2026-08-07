@@ -253,6 +253,35 @@ requirement. Measured 2026-08-02 as the third arm: read 1108 KB/s against our
 
 ## Decided against, do not "fix"
 
+### SANA-II DMA buffer management, scanned 2026-08-07
+
+The receive copy is 18.6% of an A1200 wire transfer, `n68k_copy_sum_longwords`
+and `n68k_copy_bytes` at 955 and 791 samples of 9376. Both copies are mandated:
+`S2_CopyToBuff` moves the frame out of the driver, `recv()` moves it into the
+caller's buffer. `S2_DMACopyToBuff32` / `S2_DMACopyFromBuff32` (`sana2.h`,
+`S2_Dummy + 8`, `+ 9`) are the only interface that could remove the first one.
+
+Every driver on hand, scanned for the tag constants it looks up:
+
+| Driver | Buffer tags asked for |
+|---|---|
+| a2060, eb920, eb920-i6, ppp-serial, rs485 | `CopyToBuff`, `CopyFromBuff` |
+| a2065, ariadne, ariadne_ii, hydra, slip, x-surf, x-surf-100 | + `PacketFilter` |
+| cnet, cnet16 | + `DMACopyToBuff32`, `DMACopyFromBuff32` |
+| ppp-ethernet | + `DMACopyToBuff32`, `DMACopyFromBuff32`, `CopyFromBuff16` |
+
+Three of fifteen, none in general use, and not the a2065 every figure in this
+tree is measured on. No driver asks for the non-DMA `CopyToBuff32` /
+`CopyFromBuff32` at all, and only `ppp-ethernet` wants `CopyFromBuff16` although
+`AMI_SANA2_OFFER_COPY16` offers the pair.
+
+Offering the DMA pair costs a packet pool in DMA-reachable memory, with the
+alignment and coherency that implies, to benefit cnet. Rationale sits beside the
+tag list in `src/sana2/sana2_device.c`. A driver could compute a tag rather than
+carry the constant, so this is evidence and not proof; none of the fifteen
+appears to.
+
+
 ### From the 2026-08-04 sweep
 
 **TCP**
