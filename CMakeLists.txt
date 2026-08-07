@@ -901,8 +901,18 @@ if(AMINETXDUO_UNITY)
         endif()
     endforeach()
     list(LENGTH _unity_owners _n_owners)
-    if(_n_owners EQUAL 0)
-        # It found six.  Zero means the idiom changed spelling, and the next
+    # Only the vendored trees use the idiom, so the assertion is only owed
+    # when vendored sources are in the set -- a bisection arm holding none of
+    # them legitimately finds zero.
+    set(_unity_has_vendored OFF)
+    foreach(_s IN LISTS _unity_sources)
+        if(_s MATCHES "/third_party/")
+            set(_unity_has_vendored ON)
+            break()
+        endif()
+    endforeach()
+    if(_unity_has_vendored AND _n_owners EQUAL 0)
+        # It finds seven.  Zero means the idiom changed spelling, and the next
         # symptom would be a link error naming the wrong thing.
         message(FATAL_ERROR
                 "unity: no component-data owners found, the scan is broken")
