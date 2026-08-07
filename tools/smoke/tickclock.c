@@ -105,7 +105,7 @@ static void report_ticks(const char *when)
 
     Printf((CONST_STRPTR)"  %s: delivered %lu, wakeups %lu, uptime %lu ms\n",
            (LONG)when, s.tx_amiga_tick_delivered, s.tx_amiga_tick_wakeups,
-           s.tx_amiga_tick_uptime_ms);
+           tx_amiga_uptime_ms(&s));
     Printf((CONST_STRPTR)"  %s: clipped %lu, lost %lu, over budget %lu, deferred %lu\n",
            (LONG)when, s.tx_amiga_tick_clipped, s.tx_amiga_tick_lost,
            s.tx_amiga_tick_over_budget, s.tx_amiga_tick_deferred);
@@ -201,7 +201,7 @@ int main(int argc, char **argv)
         check("delivered + lost accounts for the elapsed ticks",
               gap((s.tx_amiga_tick_delivered + s.tx_amiga_tick_lost) * 1000UL
                       / (ULONG)TX_TIMER_TICKS_PER_SECOND,
-                  s.tx_amiga_tick_uptime_ms) < 200UL,
+                  tx_amiga_uptime_ms(&s)) < 200UL,
               (LONG)(s.tx_amiga_tick_delivered + s.tx_amiga_tick_lost));
     }
 
