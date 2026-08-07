@@ -9,7 +9,13 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.19.0
+
 - A received TCP or UDP checksum is verified as the frame is copied rather than by walking the packet a second time. The SANA-II copy already reads every longword, so it returns the sum it saw; fragments, IPv6 and anything that is not plain TCP or UDP still take the ordinary path. Listed under 0.18.0 but built out of that release
+- Handing the stack between an application task and the network threads no longer wakes a scheduler task to do it. Every socket call crossed that boundary twice and paid two context switches each way for work the yielding task can do itself; a bulk transfer is about 2% shorter
+- `WaitSelect()` with a timeout no longer starts a timer it does not use. A call that finds a socket already readable never blocks, and was still opening, arming and cancelling a timer.device request every time: loopback throughput rises about 4%
+- `select()` clears only the descriptors the caller named rather than all 1024
+- Every binary now says which processor it was built for, so `Version full file LIBS:bsdsocket.library` answers it. The archive ships one of each and nothing on the file said which
 
 ## 0.18.0
 
