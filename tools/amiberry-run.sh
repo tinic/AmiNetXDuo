@@ -181,6 +181,48 @@ fi
 # NE2000 boards take the whole address.
 MAC="${AMINETXDUO_AMIBERRY_MAC:-02:41:4d:49:00:01}"
 
+# PCMCIA needs a 68020.  Rederived from scratch more than once, so it stops
+# here rather than in an hour of somebody's afternoon.
+#
+# `-N ne2000_pcmcia` with cnet.device bisects to cpu_type and nothing else:
+# 68000, 68010, cpu_compatible=false and cpu_multiplier=16 all answer
+# `Could not add interface "eth0" (Input/output error)`, while 68020 leases,
+# with or without address_space_24 or a slower multiplier.  ROM, chipset prefs,
+# memory and cnet16.device were ruled out.  The two CPUs diverge inside
+# card.resource's CIS walk; docs/BACKLOG.md carries the gayle.cpp detail.
+#
+# This is a CPU limit and NOT a model limit.  An A600 networks perfectly well
+# on -N a2065, which is the answer if what you wanted was a 68000.
+pcmcia_cpu_check() {
+    case "$1" in
+        ne2000_pcmcia) ;;
+        *) return 0 ;;
+    esac
+
+    # Empty CPU means the model's default, and every model whose default is a
+    # 68000 is one this refuses anyway.
+    case "${CPU:-}" in
+        68020|68030|68040|68060) return 0 ;;
+    esac
+    case "${CPU:-}$MODEL" in
+        A1200|A3000|A4000|CD32) return 0 ;;
+    esac
+
+    cat >&2 <<EOF
+ne2000_pcmcia needs a 68020 or better; this run is ${CPU:-the $MODEL default}.
+
+  card.resource cannot walk the card's CIS tuples on a 68000 or a 68010 under
+  Amiberry, and AddNetInterface answers
+  'Could not add interface "eth0" (Input/output error)'.  Bisected to cpu_type
+  alone -- see docs/BACKLOG.md, "PCMCIA is a CPU limit, not an A600 limit".
+
+  -N a2065        works on an A600 at 68000, and is what you want for a 68000
+  -c 68020        if the PCMCIA card itself is the thing under test
+EOF
+    exit 2
+}
+pcmcia_cpu_check "$BOARD"
+
 board_lines() {
     case "$1" in
         "")            : ;;

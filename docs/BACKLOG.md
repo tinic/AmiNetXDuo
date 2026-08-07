@@ -577,13 +577,39 @@ plausible reading of a real symptom, and the same reading will recur.
 | FS-UAE cannot boot headless | `FATAL: [GLAD] …`. Harnesses take `-A` for Amiberry and `-a ARGS` to pass arguments |
 | A pinned toolchain install can carry the argv bug in all eleven `crt0.o` | GCC 16.1.1b locally built reports `11 buggy`, has the compiler fix for the frame skew, not newlib's `120371e` for the argv declaration. Anything built there against `-lc` without `fix-toolchain-crt0.py` hands ported clients `&__argv` |
 
-**Amiberry's A600 PCMCIA emulation does not work, for any stack.** On an A1200
-with `-N ne2000_pcmcia` the emulated RTL8019 and `cnet.device` drive a full DHCP
-lease, ours reports `eth0: online, address 10.0.2.15` and the Roadshow 1.15
-demo reports the same address from the same card. Move identical staging to
-`-m A600` and both fail: ours cannot open the device, Roadshow says
-`Could not add interface "eth0" (Input/output error)`. **An A600 failure says
-nothing about the code**; PCMCIA tests must run on the A1200 profile.
+**A600 networking works. Use `-N a2065`.** Corrected 2026-08-07; the paragraph
+that stood here said A600 networking was impossible and was wrong twice over.
+Stock Amiberry (`0fd577e`, unpatched), `quickstart=A600,0`, default 68000,
+Kickstart 40.63, `~/amiga-assets/devs/a2065.device`, `slirp`. Nothing new is
+needed. Amiberry autoconfigs Zorro II on the A600 profile:
+
+    Card 5: Z2 0x00e90000   64K IO  7990 Ethernet
+    Interface "eth0" configured, address = 10.0.2.15 ... exit status 0 after 24s
+
+**The A600 has no Zorro slots physically; Amiberry's A600 profile has a Zorro II
+bus anyway.** Reasoning from the real machine's expansion is what produced the
+wrong answer, twice.
+
+**PCMCIA is a CPU limit, not an A600 limit.** `-N ne2000_pcmcia` with
+`cnet.device` bisects to `cpu_type` and nothing else — ROM, chipset prefs
+(`CP_A600` and `CP_A1200` set identical PCMCIA values, `cfgfile.cpp:10342` and
+`:10401`), memory, clock multiplier, 24-bit address space and `cnet16.device`
+all ruled out:
+
+| `cpu_type` on `-m A600 -N ne2000_pcmcia` | result |
+|---|---|
+| 68000 (default), 68010, `cpu_compatible=false`, `cpu_multiplier=16` | `Could not add interface "eth0" (Input/output error)` |
+| **68020**, and 68020 with `address_space_24=true` or `cpu_multiplier=1` | leases 10.0.2.15 |
+
+Both CPUs insert the card and walk ~196,000 attribute reads; they diverge inside
+card.resource's CIS tuple walk at `PC=00FC31C4`, attribute offset `0xe2`. The
+68000 emits an extra odd-byte read per register access — `GAYLE_READ 00DAA000`
+*and* `00DAA001` for the single instruction at `PC=00FC2B52` where the 68020
+emits only the first — which is `gayle_attr_wget` splitting into two
+`gayle_attr_bget`s (`gayle.cpp:1806-1807`) against `gayle_attr_read`'s halved
+indexing, `pcmcia_attrs[addr/2]` (`gayle.cpp:1164`). Whether that returns a
+wrong value is not yet proven. `tools/amiberry-run.sh` refuses the pairing and
+prints this table.
 
 Not a memory limit, which was the confound: the failing A600 run had 4.6 MB
 free, and an A1200 at `chipmem_size=2;bogomem_size=0;fastmem_size=0`, 1 MB of
