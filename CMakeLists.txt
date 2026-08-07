@@ -497,6 +497,30 @@ endforeach()
 # between two NetX Duo files, can be inlined at all -- and the tree is full of
 # one-line forwarders that cost a jsr and an rts with nothing in between.
 #
+# MEASURED, AND IT LOSES.  A1200, run-compare -w bench, arms alternated, each
+# run on its own port, loopback KB/s -- the arm with no wire and no peer in it,
+# and the one that reproduces:
+#
+#     archive, HOT_O2=ON     510 512 512 512      309,876 bytes
+#     archive, HOT_O2=OFF    511 512 511 511      306,320
+#     vendored unity         501 502 501 501      344,380
+#
+# -2.0% and +11% size.  The archive build never drops below 510 and the unity
+# build never reaches 503, so it is not noise, and the middle row is there
+# because AMINETXDUO_UNITY switches the per-file -O2 off: that costs nothing
+# here, so the 2% belongs to the unity build itself.  The likely mechanism is
+# the 68020's 256-byte instruction cache -- inlining trades a jsr and an rts
+# for code that no longer fits, and loopback is the most CPU-bound arm there
+# is.
+#
+# WHAT DOES NOT WORK AT ALL: merging our own sources with the vendored ones.
+# Each half boots on its own; together the guest dies before the netstack
+# reaches its first log line.  Not stacks (16 KB changes nothing), not macro
+# leakage (125 macros defined in our .c files, none of which appears in
+# vendored code), not static-name collisions (3 across 812 files, all handled),
+# and both post-link checks pass.  Unexplained, and the reason
+# AMINETXDUO_UNITY_TARGETS exists.
+#
 # OFF, and it EXCLUDES the -O2 path rather than layering on it: cmake drops any
 # source carrying COMPILE_OPTIONS or COMPILE_FLAGS out of the unity file and
 # compiles it alone (checked on 4.3.2), so setting both would leave the unity
