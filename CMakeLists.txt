@@ -718,6 +718,51 @@ function(aminetxduo_c_sources out tgt)
     set(${out} "${_result}" PARENT_SCOPE)
 endfunction()
 
+# Every source cmake would leave out of the unity file, named.  Source
+# properties are per directory, so each has to be asked for through the target
+# that compiles it.
+function(aminetxduo_check_unity_intact)
+    get_property(_srcs GLOBAL PROPERTY AMINETXDUO_UNITY_SOURCES)
+    get_target_property(_own bsdsocket_library SOURCES)
+    list(APPEND _srcs ${_own})
+
+    set(_excluded "")
+    foreach(_s IN LISTS _srcs)
+        if(NOT _s MATCHES "\\.c$")
+            continue()
+        endif()
+        set(_why "")
+        foreach(_prop COMPILE_OPTIONS COMPILE_FLAGS SKIP_UNITY_BUILD_INCLUSION)
+            get_property(_v SOURCE "${_s}"
+                         TARGET_DIRECTORY bsdsocket_library PROPERTY ${_prop})
+            if(_v)
+                list(APPEND _why ${_prop})
+            endif()
+        endforeach()
+        # The two deliberate ones carry SKIP_UNITY_BUILD_INCLUSION and nothing
+        # else; anything with COMPILE_OPTIONS is an accident.
+        if(_why AND NOT _why STREQUAL "SKIP_UNITY_BUILD_INCLUSION")
+            list(APPEND _excluded "${_s} (${_why})")
+        endif()
+    endforeach()
+
+    if(_excluded)
+        list(LENGTH _excluded _n)
+        string(REPLACE ";" "\n    " _shown "${_excluded}")
+        message(FATAL_ERROR
+            "AMINETXDUO_UNITY: ${_n} sources carry per-source compile flags "
+            "and cmake will compile each one on its own, outside the unity "
+            "translation unit.\n"
+            "Most likely CMAKE_PROJECT_INCLUDE=cmake/ci-warnings.cmake, which "
+            "sets -Wall -Wextra per SOURCE for everything outside "
+            "third_party/. Warnings-as-errors and one shared translation unit "
+            "cannot both apply: the vendored code is not warning-clean and it "
+            "is now in the same object as ours. Build the warning gate "
+            "without AMINETXDUO_UNITY.\n"
+            "    ${_shown}")
+    endif()
+endfunction()
+
 if(AMINETXDUO_UNITY)
     if(NOT TARGET bsdsocket_library)
         message(FATAL_ERROR
@@ -770,22 +815,29 @@ if(AMINETXDUO_UNITY)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/bsdsocket/library.c"
         PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
 
-    # NX_SOURCE_CODE and TX_SOURCE_CODE: 518 of the 522 NetX Duo core files
-    # and 184 of the 185 ThreadX ones open by defining these, and none of ours
-    # does.  In one translation unit the first file to include nx_api.h
-    # decides for everybody, so leaving it to file order would let a submodule
-    # bump silently change which API our call sites bind to.  Fixed here
-    # instead, deliberately.
+    # tx_api.h and nx_api.h, included first and with neither NX_SOURCE_CODE
+    # nor TX_SOURCE_CODE set.
     #
-    # WHAT IT COSTS: with NX_SOURCE_CODE set, our `nx_xxx()` calls bind to
-    # `_nx_xxx` rather than the `_nxe_xxx` error-checking wrapper, which is
-    # NX_DISABLE_ERROR_CHECKING for our call sites in all but name.  Measured
-    # neutral before this existed -- 580/216 KB/s against 584/216, and the
-    # reasoning is in port/netxduo-amiga/inc/nx_user.h -- but it is a
-    # behaviour change and not only a size one: a bad argument that used to
-    # come back as NX_PTR_ERROR now reaches the core.
-    target_compile_definitions(bsdsocket_library PRIVATE
-                               NX_SOURCE_CODE TX_SOURCE_CODE)
+    # 518 of the 522 NetX Duo core files and 184 of the 185 ThreadX ones open
+    # by defining their own SOURCE_CODE macro, and none of ours does.  Each
+    # header is include-guarded, so in one translation unit the FIRST file to
+    # reach it decides what everybody else sees, and the three groups want
+    # different answers:
+    #
+    #   ours          nx_xxx() must be the macro that reaches _nxe_xxx
+    #   NetX Duo core calls _nx_ directly, but calls tx_mutex_get(), so it
+    #                 needs ThreadX's macro layer present
+    #   ThreadX core  defines TX_SOURCE_CODE to remove that same layer, and
+    #                 calls _tx_ directly, so it does not care
+    #
+    # Establishing both headers up front with neither macro set gives each
+    # group what it already gets from separate compilation: NetX Duo reaches
+    # ThreadX through _txe_ today too.  Leaving it to file order would work by
+    # accident and change under a submodule bump, silently, since every one of
+    # these is a call that still compiles.
+    set_target_properties(bsdsocket_library PROPERTIES
+        UNITY_BUILD_CODE_BEFORE_INCLUDE
+        "#include \"tx_api.h\"\n#include \"nx_api.h\"")
 
     # -ffunction-sections is not optional here, where it is a measured cost on
     # our sources in the archive build: one translation unit is one object,
@@ -793,6 +845,23 @@ if(AMINETXDUO_UNITY)
     # and the binary keeps every function in the stack.
     target_compile_options(bsdsocket_library PRIVATE
                            -ffunction-sections -fno-optimize-sibling-calls)
+
+    # Then prove the translation unit actually holds what was just put in it.
+    #
+    # This is not paranoia, it is the first thing that happened: cmake drops
+    # any source carrying COMPILE_OPTIONS or COMPILE_FLAGS out of the unity
+    # file and compiles it alone, and cmake/ci-warnings.cmake sets -Wall
+    # -Wextra -Werror per SOURCE on everything outside third_party/.  So
+    # `cmake -DCMAKE_PROJECT_INCLUDE=cmake/ci-warnings.cmake -DAMINETXDUO_UNITY=ON`
+    # built the 710 vendored files as one unit and every one of ours on its
+    # own, which is most of the inlining this option exists for, gone, with a
+    # clean build log and a plausible binary at the end of it.
+    #
+    # Deferred because ci-warnings.cmake defers its own work to the end of
+    # this directory; DEFER order is FIFO and it registered first, at
+    # project().
+    set_property(GLOBAL PROPERTY AMINETXDUO_UNITY_SOURCES "${_unity_sources}")
+    cmake_language(DEFER CALL aminetxduo_check_unity_intact)
 endif()
 
 # ------------------------------------------------------------------ report --
