@@ -65,7 +65,19 @@ case "$EMU" in
         ARGS=()
         # -n is "attach the card"; on Amiberry that is the board and the
         # backend, and SLIRP is the backend every harness here assumes.
-        [ "$NETWORK" = "1" ] && ARGS+=(-N "${AMINETXDUO_EMU_BOARD:-a2065}"
+        # The board follows the model, as the Kickstart already does.  The
+        # A500 and A600 have no Zorro bus, so the a2065 never autoconfigs
+        # there and the guest waits for a DHCP lease that cannot arrive;
+        # amiberry-run.sh refuses the pair outright, and this keeps a caller
+        # who only said -m A600 from meeting that at all.
+        _board="${AMINETXDUO_EMU_BOARD:-}"
+        if [ -z "$_board" ]; then
+            case "$MODEL" in
+                A500|A500+|A600) _board=ne2000_pcmcia ;;
+                *)               _board=a2065 ;;
+            esac
+        fi
+        [ "$NETWORK" = "1" ] && ARGS+=(-N "$_board"
                                        -B "${AMINETXDUO_EMU_BACKEND:-slirp}")
         [ -n "$MODEL" ]      && ARGS+=(-m "$MODEL")
         [ -n "$TIMEOUT" ]    && ARGS+=(-t "$TIMEOUT")

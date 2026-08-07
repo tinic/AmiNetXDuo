@@ -181,6 +181,36 @@ fi
 # NE2000 boards take the whole address.
 MAC="${AMINETXDUO_AMIBERRY_MAC:-02:41:4d:49:00:01}"
 
+# A Zorro board on a machine with no Zorro bus.
+#
+# The A500 and A600 have no expansion bus Amiberry will autoconfig one on, so
+# `-N a2065 -m A600` produces a machine that boots, runs at full speed, and
+# never sees a card: AddNetInterface then waits for a DHCP lease that cannot
+# arrive, and the run reads as a slow test until the timeout.  Same shape as
+# the kickstart mismatch above, and the same answer -- say so and stop.
+#
+# A600 and A1200 have a Gayle, so ne2000_pcmcia is the board for them; the
+# A1200 also takes the Zorro boards, which is why only the two are named.
+board_model_check() {
+    case "$1" in
+        a2065|ariadne|ariadne2|hydra|eb920|xsurf|xsurf100z2|xsurf100z3)
+            case "$MODEL" in
+                A500|A500+|A600)
+                    cat >&2 <<EOF
+$1 is a Zorro card and $MODEL has no Zorro bus, so it will never autoconfig.
+The machine boots, the network never comes up, and the first plan step waits
+for a DHCP lease until the timeout.
+
+  -N ne2000_pcmcia    the PCMCIA card, which is what an A600 has
+EOF
+                    exit 2
+                    ;;
+            esac
+            ;;
+    esac
+}
+board_model_check "$BOARD"
+
 board_lines() {
     case "$1" in
         "")            : ;;

@@ -78,8 +78,13 @@
  * The date is the last commit's, not the clock's, so two builds of the same
  * source say the same thing.
  */
+/* The CPU the tree was built for, with a leading space, or empty on a host
+   build.  The archive ships one binary per processor and the file itself said
+   nothing about which; objdump does not answer it either. */
+#define AMINETXDUO_VERSION_CPU      "@AMINETXDUO_VERSION_CPU@"
+
 #define TOOL_VERSTAG(name_) \
     "$VER: " name_ " " AMINETXDUO_VERSION " (" AMINETXDUO_VERSION_DATE ") " \
-    "AmiNetXDuo " AMINETXDUO_VERSION_HASH
+    "AmiNetXDuo " AMINETXDUO_VERSION_HASH AMINETXDUO_VERSION_CPU
 
 #endif /* AMINETXDUO_VERSION_H */

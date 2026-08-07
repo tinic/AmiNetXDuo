@@ -66,9 +66,14 @@ static char bsd_lib_name[]  = BSD_LIB_NAME;
 #define BSD_STR(x)          BSD_STR2(x)
 #define BSD_LIB_ABI_TEXT    BSD_STR(BSD_LIB_VERSION) "." BSD_STR(BSD_LIB_REVISION)
 
+/* AMINETXDUO_VERSION_CPU carries its own leading space, and is empty on a host
+   build.  The archive ships one library per processor and the file said
+   nothing about which; this is the only place that answers it for a library
+   already installed in LIBS:. */
 static const char bsd_lib_ver[] __attribute__((used)) =
     "$VER: bsdsocket.library " AMINETXDUO_VERSION
-    " (" AMINETXDUO_VERSION_DATE ") AmiNetXDuo " AMINETXDUO_VERSION_HASH;
+    " (" AMINETXDUO_VERSION_DATE ") AmiNetXDuo " AMINETXDUO_VERSION_HASH
+    AMINETXDUO_VERSION_CPU;
 
 static char bsd_lib_id[] =
     "bsdsocket.library " AMINETXDUO_VERSION " (AmiNetXDuo, ABI "

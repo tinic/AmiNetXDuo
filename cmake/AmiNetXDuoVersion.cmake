@@ -170,6 +170,23 @@ if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
         ERROR_QUIET)
 endif()
 
+# --------------------------------------------------------------- CPU --------
+#
+# The processor the binary was built for, in $VER:.
+#
+# The archive ships one binary per CPU and nothing on the file said which:
+# `objdump -f` reports m68k:68000 for a tree compiled -m68020, so the obvious
+# check passes a 68020 build onto an A600, where it stops on an illegal
+# instruction before anything runs.  With this, `Version full file C:ping`
+# answers it, and so does a harness reading the same string.
+#
+# Empty for a host build, which has no Amiga CPU to name.
+if(DEFINED AMINETXDUO_CPU AND NOT AMINETXDUO_CPU STREQUAL "")
+    set(AMINETXDUO_VERSION_CPU " ${AMINETXDUO_CPU}")
+else()
+    set(AMINETXDUO_VERSION_CPU "")
+endif()
+
 # --------------------------------------------------------------- header -----
 
 configure_file(
