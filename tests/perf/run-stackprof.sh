@@ -131,6 +131,16 @@ done
 [ -n "$STACK" ] || { sed -n '3,50p' "$0" >&2; exit 2; }
 [ -n "$TAG" ] || TAG="sp-$STACK$([ "$PROFILE" = 1 ] || echo -plain)$([ "$DIAG" = 0 ] || echo -diag)"
 
+# The peer port, when nobody asked for one.  A run that shares a port with
+# another run does not fail: it reports a number measured against somebody
+# else's traffic, which is worse.  tools/amiberry-run.sh derives its own the
+# same way, and TAG is only known here.
+if [ -z "$PORT" ]; then
+    # TAG and the pid: two runs with the same tag -- both instances asking
+    # for -s ours with no -T -- would otherwise still share a port.
+    PORT=$((17000 + ($(printf %s "$TAG" | cksum | cut -d" " -f1) + $$) % 700))
+fi
+
 case "$BUILD" in /*) ;; *) BUILD="$ROOT/$BUILD" ;; esac
 
 case "$PEER" in
@@ -195,13 +205,32 @@ if [ -n "$PEER" ]; then
     PEERLOG="$ROOT/build/stackprof-$TAG-peer.log"
     # The bracket is not decoration: pkill -f matches the remote shell's own
     # command line, so an unbracketed pattern kills the connection issuing it.
-    ssh "$PEER" "pkill -f '[f]itz-serve' || true" >/dev/null 2>&1 || true
+    ssh "$PEER" "pkill -f '[f]itz-serve .* PORT $PORT\$' || true" >/dev/null 2>&1 || true
     ssh "$PEER" "rm -rf $PEER_DIR; mkdir -p $PEER_DIR;
                  nohup $PEER_BIN $PEER_DIR PORT $PORT > /tmp/fitzbench-peer.log 2>&1 &
                  sleep 1; ps -o args= -C fitz-serve" > "$PEERLOG" 2>&1
     cat "$PEERLOG"
-    cleanup() { ssh "$PEER" "pkill -f '[f]itz-serve' || true" >/dev/null 2>&1 || true; }
+    cleanup() { ssh "$PEER" "pkill -f '[f]itz-serve .* PORT $PORT\$' || true" >/dev/null 2>&1 || true; }
     trap cleanup EXIT INT TERM HUP
+
+    # A forked child outlives the TERM its parent took and keeps the port, so
+    # the server started just above may never have bound it.  Nothing later in
+    # the run distinguishes that from a stack that cannot transfer.
+    PEER_BOUND=0
+    for _try in 1 2 3 4 5 6 7 8 9 10; do
+        if ssh "$PEER" "ss -lnt 2>/dev/null | grep -q ':$PORT '" 2>/dev/null; then
+            PEER_BOUND=1
+            break
+        fi
+        sleep 1
+    done
+    [ "$PEER_BOUND" = "1" ] || {
+        echo "the peer is not listening on $PORT after ten seconds." >&2
+        echo "A fitz-serve child from an earlier run may still hold it:" >&2
+        ssh "$PEER" "pgrep -af fitz-serve | head -5" >&2 2>/dev/null || true
+        echo "Clear it with: ssh $PEER \"pkill -9 -f 'fitz-serve .* PORT $PORT\$'\"" >&2
+        exit 2
+    }
 fi
 echo "==> $NOTE"
 echo "==> fitz-serve on $PEER_ADDR:$PORT"
