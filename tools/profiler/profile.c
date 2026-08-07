@@ -73,9 +73,13 @@ enum { OPT_RATE, OPT_SAMPLES, OPT_CHANNEL, OPT_STACK, OPT_OUT, OPT_FOLDED,
  * WATCH=<library>/<hex offset>/<hex length>
  *
  * The offset is into the library's first hunk, which is what a link map
- * quotes, so a range comes straight off the map:
+ * quotes.  TAKE IT FROM THE MAP OF THE BUILD THAT IS ABOUT TO RUN, not from a
+ * number noted earlier: anything above the symbol changing size moves it, and
+ * the window then reports whatever now occupies the old address as if it were
+ * the thing asked for.  tools/profiler/watchoff.py does that:
  *
- *   WATCH=bsdsocket.library/1ed40/58
+ *   $(python3 tools/profiler/watchoff.py <map> n68k_copy_bytes)  -> 1e664 f0
+ *   WATCH=bsdsocket.library/1e664/f0
  *
  * A PC-only profile names the callee.  When the callee is a leaf that
  * everything calls, a divide helper or a memcpy, that is not the question
