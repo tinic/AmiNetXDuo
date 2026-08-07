@@ -366,7 +366,15 @@ if [ "$WANT_ENFORCER" = "1" ]; then
     WAITSECS="$ROOT/build/waitsecs"
     if [ ! -x "$WAITSECS" ] || [ "$ROOT/tools/enforcer/waitsecs.c" -nt "$WAITSECS" ]; then
         AMIGA_TOOLCHAIN_QUIET=1 . "$ROOT/tools/amiga-toolchain.sh"
-        "$AMIGA_GCC" -O2 -m68020 -I"$AMIGA_NDK" -o "$WAITSECS" \
+        # Built FOR the machine, not for the newest one.  A 68020 binary stops
+        # a 68000 with an illegal instruction before the thing under test runs,
+        # and the failure then looks like the thing under test.  Same case as
+        # ENVSETUP_ARCH in amiberry-run.sh and RUNNER_ARCH in run-fsuae.sh.
+        case "${CPU:-}${MODEL:-}" in
+            *68000*|*A500*|*A600*|*A2000*) _waitsecs_arch="-m68000" ;;
+            *)                             _waitsecs_arch="-m68020" ;;
+        esac
+        "$AMIGA_GCC" -O2 "$_waitsecs_arch" -I"$AMIGA_NDK" -o "$WAITSECS" \
             "$ROOT/tools/enforcer/waitsecs.c" \
             || { echo "failed to build waitsecs" >&2; exit 2; }
     fi
@@ -393,7 +401,11 @@ fi
 ENVSETUP="$ROOT/build/envsetup"
 if [ ! -x "$ENVSETUP" ] || [ "$ROOT/tools/envsetup/envsetup.c" -nt "$ENVSETUP" ]; then
     AMIGA_TOOLCHAIN_QUIET=1 . "$ROOT/tools/amiga-toolchain.sh"
-    "$AMIGA_GCC" -O2 -m68020 -I"$AMIGA_NDK" -o "$ENVSETUP" "$ROOT/tools/envsetup/envsetup.c" \
+    case "${CPU:-}${MODEL:-}" in
+        *68000*|*A500*|*A600*|*A2000*) _guest_arch="-m68000" ;;
+        *)                             _guest_arch="-m68020" ;;
+    esac
+    "$AMIGA_GCC" -O2 "$_guest_arch" -I"$AMIGA_NDK" -o "$ENVSETUP" "$ROOT/tools/envsetup/envsetup.c" \
         || { echo "failed to build envsetup" >&2; exit 2; }
 fi
 cp "$ENVSETUP" "$HD/c/envsetup"

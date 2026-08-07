@@ -142,7 +142,11 @@ DRIVER="$ROOT/build/compare/CheckRunner"
 mkdir -p "$ROOT/build/compare"
 if [ ! -x "$DRIVER" ] || [ "$ROOT/tests/compare/checkrunner.c" -nt "$DRIVER" ]; then
     echo "==> building CheckRunner"
-    "$AMIGA_GCC" -O2 -m68020 -fomit-frame-pointer -Wall -I"$AMIGA_NDK" \
+    case "${CPU:-}${MODEL:-}" in
+        *68000*|*A500*|*A600*|*A2000*) _guest_arch="-m68000" ;;
+        *)                             _guest_arch="-m68020" ;;
+    esac
+    "$AMIGA_GCC" -O2 "$_guest_arch" -fomit-frame-pointer -Wall -I"$AMIGA_NDK" \
                  -o "$DRIVER" "$ROOT/tests/compare/checkrunner.c"
 fi
 

@@ -447,6 +447,35 @@ EMU_PID=$AMIBERRY_PID
 cleanup
 wait "$EMU_PID" 2>/dev/null || true
 
+# ------------------------------------------- illegal instruction assertion --
+#
+# The emulator says so, and nothing else has to be believed.
+#
+# A guest binary built for a newer CPU than the machine stops in its own C
+# constructor before a line of the thing under test runs: no serial, no
+# stdout.txt, the machine idling at 50 fps.  It reads as "the stack does not
+# work on this processor" and costs a day.  It cost one on 2026-08-07, when
+# CheckRunner carried `tst.l a0` -- 68020 only -- into an A600, and the log had
+# said so from the first run:
+#
+#     Illegal instruction: 4a88 at 002186FA -> 00F80AD2
+#
+# ROM is excluded: Kickstart probes the CPU with MOVEC at boot on purpose and
+# takes the exception itself.  Anything outside ROM is ours.
+#
+# This is the artifact, not a grep of the source.  It catches a wrong-CPU
+# binary however it was built, including one somebody staged by hand.
+_illegal=$(grep -aE "Illegal instruction: [0-9a-f]+ at [0-9A-F]+" "$UAELOG" 2>/dev/null |
+           grep -avE "at 00F[0-9A-F]{5}" | head -3)
+if [ -n "$_illegal" ]; then
+    echo "!! ILLEGAL INSTRUCTION outside ROM -- a guest binary is built for a" >&2
+    echo "!! newer CPU than this machine ($MODEL${CPU:+, -c $CPU}):" >&2
+    printf '%s\n' "$_illegal" | sed 's/^/!!   /' >&2
+    echo "!! Nothing after this point ran.  Rebuild that binary for the" >&2
+    echo "!! machine; tools/lint-guest-arch.sh finds the build line." >&2
+    ILLEGAL_SEEN=1
+fi
+
 # ------------------------------------------------------- backend assertion --
 #
 # A bridged run that quietly came up on SLIRP passes every check and proves
@@ -509,5 +538,12 @@ if [ "$status" = "124" ]; then
     fi
 else
     echo "==> exit status $status after $(( $(date +%s) - WALL_START ))s of host wall clock"
+fi
+
+# An illegal instruction outside ROM means nothing under test ran, so the run's
+# own exit status describes nothing.  Exit 4, distinct from a timeout or a
+# genuine failure, so a caller can tell "wrong binary" from "wrong code".
+if [ "${ILLEGAL_SEEN:-0}" = "1" ]; then
+    exit 4
 fi
 exit "$status"

@@ -294,7 +294,11 @@ RUNNER="$ROOT/build/clients/ClientRun"
 mkdir -p "$ROOT/build/clients"
 if [ ! -x "$RUNNER" ] || [ "$ROOT/clients/dropbear/clientrun.c" -nt "$RUNNER" ]; then
     echo "==> building ClientRun"
-    "$AMIGA_GCC" -O2 -m68020 -fomit-frame-pointer -Wall -I"$AMIGA_NDK" \
+    case "${CPU:-}${MODEL:-}" in
+        *68000*|*A500*|*A600*|*A2000*) _guest_arch="-m68000" ;;
+        *)                             _guest_arch="-m68020" ;;
+    esac
+    "$AMIGA_GCC" -O2 "$_guest_arch" -fomit-frame-pointer -Wall -I"$AMIGA_NDK" \
                  -o "$RUNNER" "$ROOT/clients/dropbear/clientrun.c"
 fi
 

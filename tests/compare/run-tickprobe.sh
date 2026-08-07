@@ -76,7 +76,11 @@ if [ ! -x "$PROBE" ] ||
    [ "$ROOT/tests/compare/tickprobe.c" -nt "$PROBE" ] ||
    [ "$ROOT/tests/tcpdrill/tapdev.c" -nt "$PROBE" ]; then
     echo "==> building TickProbe"
-    "$AMIGA_GCC" -O2 -m68020 -fomit-frame-pointer -Wall -Wextra -noixemul \
+    case "${CPU:-}${MODEL:-}" in
+        *68000*|*A500*|*A600*|*A2000*) _guest_arch="-m68000" ;;
+        *)                             _guest_arch="-m68020" ;;
+    esac
+    "$AMIGA_GCC" -O2 "$_guest_arch" -fomit-frame-pointer -Wall -Wextra -noixemul \
         -I "$ROOT/tests/tcpdrill" -I "$ROOT/src/sana2" -I "$ROOT/include" \
         ${AMIGA_NDK:+-I "$AMIGA_NDK"} \
         -o "$PROBE" "$ROOT/tests/compare/tickprobe.c" \

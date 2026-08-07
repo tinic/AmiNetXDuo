@@ -22,16 +22,22 @@
 set -u
 
 BUILD=""; MODEL="A1200"; TAG=""; PORT=""; BYTES=524288; WORKLOAD=bench; PROF=0
-while getopts "b:m:T:P:B:w:p" o; do
+STACK=ours
+while getopts "b:m:T:P:B:w:s:p" o; do
     case "$o" in
         b) BUILD="$OPTARG" ;; m) MODEL="$OPTARG" ;; T) TAG="$OPTARG" ;;
         P) PORT="$OPTARG" ;;  B) BYTES="$OPTARG" ;; w) WORKLOAD="$OPTARG" ;;
+        s) STACK="$OPTARG" ;;
         p) PROF=1 ;;
         *) echo "RESULT=usage"; exit 2 ;;
     esac
 done
-[ -n "$BUILD" ] && [ -n "$TAG" ] && [ -n "$PORT" ] || {
+[ -n "$TAG" ] && [ -n "$PORT" ] || {
     echo "reason=missing_args"; echo "RESULT=refused"; exit 2; }
+# -b names OUR build; a foreign stack is located by run-compare.sh instead.
+if [ "$STACK" = ours ] && [ -z "$BUILD" ]; then
+    echo "reason=missing_build_for_ours"; echo "RESULT=refused"; exit 2
+fi
 
 cd ~/anxd-e2e || { echo "reason=no_checkout"; echo "RESULT=refused"; exit 2; }
 . ~/amiga-assets/env.sh 2>/dev/null
@@ -41,11 +47,13 @@ fail() { echo "reason=$1"; echo "RESULT=refused"; exit 2; }
 
 # ---- preflight -----------------------------------------------------------
 
+if [ "$STACK" = ours ]; then
 [ -d "$BUILD" ] || fail "no_build_dir:$BUILD"
 for f in src/bsdsocket/bsdsocket.library src/tools/NetTrace src/tools/AddNetInterface; do
     [ -f "$BUILD/$f" ] || fail "build_missing:$f"
 done
 [ "$PROF" = 0 ] || [ -f "$BUILD/tools/profiler/Profile" ] || fail "build_missing:Profile"
+fi
 
 # The ROM for this model, by the same rule amiberry-run.sh uses.
 _ks="AMINETXDUO_KICKSTART_$(printf '%s' "$MODEL" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_')"
@@ -69,10 +77,16 @@ _arch=$(sed -n 's/^AMINETXDUO_CPU:[^=]*=//p' "$BUILD/CMakeCache.txt" 2>/dev/null
 [ -n "$_arch" ] || _arch=$(grep -m1 -oE '\-m68[0-9]+' \
     "$BUILD/src/bsdsocket/CMakeFiles/bsdsocket_library.dir/flags.make" 2>/dev/null |
     tr -d '\-m')
-[ -n "$_arch" ] || fail "cpu_unknown:$BUILD"
+# Only meaningful for our own build; a foreign stack's binaries are whatever
+# its vendor shipped and we do not get to check them.
+if [ "$STACK" = ours ]; then
+    [ -n "$_arch" ] || fail "cpu_unknown:$BUILD"
+fi
+if [ "$STACK" = ours ]; then
 case "$MODEL" in
     A500|A500+|A600) [ "$_arch" = "68000" ] || fail "cpu_mismatch:${_arch}_on_$MODEL" ;;
 esac
+fi
 
 # A stale emulator holds the emulated network and poisons the next run.
 # pgrep -c prints 0 AND exits 1 when nothing matches, so `|| echo 0` appends a
@@ -118,6 +132,7 @@ if command -v ss >/dev/null 2>&1; then
     }
 fi
 
+echo "stack=$STACK"
 echo "model=$MODEL"
 echo "build=$BUILD"
 echo "arch=$_arch"
@@ -143,7 +158,8 @@ RUNNER=tests/compare/run-compare.sh
 PROGRESS_S="${AMINETXDUO_EMURUN_PROGRESS:-120}"
 HD="build/amiberry-testhd-$TAG"
 
-"$RUNNER" -s ours -w "$WORKLOAD" -b "$BUILD" -m "$MODEL" -T "$TAG" \
+_bopt=(); [ -z "$BUILD" ] || _bopt=(-b "$BUILD")
+"$RUNNER" -s "$STACK" -w "$WORKLOAD" "${_bopt[@]}" -m "$MODEL" -T "$TAG" \
           -P "$PORT" -B "$BYTES" -t 900 > "/tmp/emurun-$TAG.log" 2>&1 &
 _runner_pid=$!
 

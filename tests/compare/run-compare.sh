@@ -168,7 +168,20 @@ done
 
 # ------------------------------------------------------------- ingredients --
 
-DRIVER="$ROOT/build/compare/CheckRunner"
+# The driver runs ON the emulated machine, so it is built FOR it.  It was
+# -m68020 unconditionally, which put `tst.l a0` in its own constructor loop
+# (_callfuncs) and killed every A600 run with an illegal instruction before a
+# single plan step ran: no serial, no stdout.txt, the machine idling at 50 fps.
+# That read as "our stack does not work on a 68000" for as long as anyone
+# looked at it.
+#
+# Keyed by architecture so a driver built for one machine is never reused on
+# another.
+case "$MODEL" in
+    A500|A500+|A600) DRIVER_ARCH=68000 ;;
+    *)               DRIVER_ARCH=68020 ;;
+esac
+DRIVER="$ROOT/build/compare/CheckRunner.$DRIVER_ARCH"
 NETTRACE="${AMINETXDUO_CMP_NETTRACE:-$BUILD/src/tools/NetTrace}"
 SUITE="$ROOT/build/bsdsocktest/bsdsocktest"
 
@@ -176,7 +189,7 @@ SUITE="$ROOT/build/bsdsocktest/bsdsocktest"
 mkdir -p "$ROOT/build/compare"
 if [ ! -x "$DRIVER" ] || [ "$ROOT/tests/compare/checkrunner.c" -nt "$DRIVER" ]; then
     echo "==> building CheckRunner"
-    "$AMIGA_GCC" -O2 -m68020 -fomit-frame-pointer -Wall -I"$AMIGA_NDK" \
+    "$AMIGA_GCC" -O2 "-m$DRIVER_ARCH" -fomit-frame-pointer -Wall -I"$AMIGA_NDK" \
                  -o "$DRIVER" "$ROOT/tests/compare/checkrunner.c"
 fi
 
