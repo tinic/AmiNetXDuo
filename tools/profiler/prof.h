@@ -152,7 +152,8 @@ struct ProfHeader
     ULONG   ph_NumLibSegs;  /* version 3; zero in a version-2 file          */
     ULONG   ph_NumCalls;    /* caller snapshots; zero unless WATCH was armed */
     ULONG   ph_CallWords;   /* stack longwords per snapshot                  */
-    ULONG   ph_Reserved[2];
+    ULONG   ph_WatchLo;     /* the watched range, as it was at run time      */
+    ULONG   ph_WatchHi;
 };
 
 /* The profiled program's hunks, in load order, which is the order they appear

@@ -116,6 +116,8 @@ class Profile:
         # count is the count.
         self.ncalls = f[24]
         self.callwords = f[25]
+        self.watch_lo = f[26]
+        self.watch_hi = f[27]
 
         if self.magic != PROF_MAGIC:
             die("%s: bad magic $%08x, tests/perf/prof writes a different, "
@@ -307,25 +309,50 @@ def hunk_code(path):
     return out
 
 
-def is_call_site(code, off, ret_off):
-    """Does a call at `off` in `code` return to `ret_off`?"""
+def call_target(code, off, ret_off):
+    """Where a call at `off` goes, if a call there returns to `ret_off`.
+
+    Returns (True, target) when the target is computable, (True, None) when a
+    call is there but its target is in a register, and (False, None) when
+    there is no call that returns here.  Offsets are link-time, within the
+    hunk, which is also how an unrelocated jsr abs.l names its target.
+    """
     if off < 0 or off + 2 > len(code):
-        return False
+        return (False, None)
+
     w = struct.unpack_from(">H", code, off)[0]
-    if w == 0x4EB9 and ret_off == off + 6:      # jsr abs.l
-        return True
-    if w == 0x4EBA and ret_off == off + 4:      # jsr d16(pc)
-        return True
-    if 0x4EA8 <= w <= 0x4EAF and ret_off == off + 4:
-        return True                             # jsr d16(An)
-    if 0x4E90 <= w <= 0x4E97 and ret_off == off + 2:
-        return True                             # jsr (An)
-    if w == 0x6100 and ret_off == off + 4:      # bsr.w
-        return True
+
+    if w == 0x4EB9 and ret_off == off + 6:              # jsr abs.l
+        if off + 6 > len(code):
+            return (False, None)
+        return (True, struct.unpack_from(">L", code, off + 2)[0])
+
+    if w == 0x4EBA and ret_off == off + 4:              # jsr d16(pc)
+        if off + 4 > len(code):
+            return (False, None)
+        d = struct.unpack_from(">h", code, off + 2)[0]
+        return (True, off + 2 + d)
+
+    if w == 0x6100 and ret_off == off + 4:              # bsr.w
+        if off + 4 > len(code):
+            return (False, None)
+        d = struct.unpack_from(">h", code, off + 2)[0]
+        return (True, off + 2 + d)
+
     if (w & 0xFF00) == 0x6100 and (w & 0x00FF) not in (0x00, 0xFF) \
-            and ret_off == off + 2:
-        return True                             # bsr.s
-    return False
+            and ret_off == off + 2:                     # bsr.s
+        d = w & 0x00FF
+        if d > 127:
+            d -= 256
+        return (True, off + 2 + d)
+
+    if 0x4EA8 <= w <= 0x4EAF and ret_off == off + 4:    # jsr d16(An)
+        return (True, None)
+
+    if 0x4E90 <= w <= 0x4E97 and ret_off == off + 2:    # jsr (An)
+        return (True, None)
+
+    return (False, None)
 
 
 # -------------------------------------------------------------- symbols ----
@@ -738,12 +765,13 @@ class Resolver:
         self._code_cache[key] = code
         return code
 
-    def is_return_address(self, pc):
-        """Is a call instruction placed so that it returns exactly to pc?
+    def return_from_call(self, pc, want_lo=None, want_hi=None):
+        """Classify pc as a return address, and say whether the call went to
+        [want_lo, want_hi) expressed as link-time offsets.
 
-        Anything this cannot check -- a hunk with no file behind it -- is not
-        a return address as far as the caller report is concerned.  Saying
-        "maybe" there is how a saved data pointer became a caller.
+        "confirmed"  a call returns here and provably targets the window
+        "indirect"   a call returns here through a register, target unknowable
+        None         no call returns here, so pc is not a return address
         """
         got = self.lib_link_time(pc)
         if got is not None:
@@ -751,17 +779,23 @@ class Resolver:
         else:
             hunk, off = self.link_time(pc)
             if hunk is None:
-                return False
+                return None
             libidx = None
 
         code = self._code_for(libidx, hunk)
         if not code:
-            return False
+            return None
 
         for back in (6, 4, 2):
-            if is_call_site(code, off - back, off):
-                return True
-        return False
+            ok, target = call_target(code, off - back, off)
+            if not ok:
+                continue
+            if target is None:
+                return "indirect"
+            if want_lo is None:
+                return "confirmed"
+            return "confirmed" if want_lo <= target < want_hi else None
+        return None
 
     def lib_link_time(self, pc):
         """(library index, hunk, offset) for a PC inside a library's hunks."""
@@ -1146,47 +1180,72 @@ def report_callers(prof, res):
     """
     from collections import Counter
 
-    first = Counter()
-    anywhere = Counter()
+    confirmed = Counter()
+    indirect = Counter()
     unresolved = 0
+
+    # The window, in the link-time offsets a call instruction names.
+    want_lo = want_hi = None
+    got = res.lib_link_time(prof.watch_lo) if prof.watch_lo else None
+    if got is not None:
+        _libidx, _hunk, want_lo = got
+        want_hi = want_lo + (prof.watch_hi - prof.watch_lo)
 
     for row in prof.calls:
         words = row[1:]
-        got = None
-        seen = set()
+        hit = None
+        kind = None
         for w in words:
             if w == 0 or (w & 1):       # odd is not a return address on m68k
                 continue
-            if not res.is_return_address(w):
-                continue                # a word that resolves is not a caller
+            verdict = res.return_from_call(w, want_lo, want_hi)
+            if verdict is None:
+                continue
             fn, mod = res.resolve(w)
             if fn is None or "unattributed" in str(mod):
                 continue
-            if got is None:
-                got = (fn, mod)
-            if fn not in seen:
-                seen.add(fn)
-                anywhere[(fn, mod)] += 1
-        if got is None:
+            hit = (fn, mod)
+            kind = verdict
+            break                       # the innermost one that qualifies
+
+        if hit is None:
             unresolved += 1
+        elif kind == "confirmed":
+            confirmed[hit] += 1
         else:
-            first[got] += 1
+            indirect[hit] += 1
+
+    total = max(1, len(prof.calls))
 
     print()
     print("callers of the watched range, %d snapshots" % len(prof.calls))
+    if want_lo is None and prof.watch_lo:
+        print("  (the window is not inside a library this run has a file for,")
+        print("   so targets could not be checked -- these are calls, not")
+        print("   necessarily calls to it)")
     print("-" * 80)
-    if not first:
-        print("  no stack word was preceded by a call that returns to it.")
-        print("  Either the window covers code nothing calls, or the files")
-        print("  behind those addresses were not given with --lib/--exe.")
-    for (fn, mod), n in first.most_common(12):
-        print("  %-38s %-20s %6d %5.1f%%  (seen %d)"
-              % (fn[:38], str(mod)[:20], n, 100.0 * n / max(1, len(prof.calls)),
-                 anywhere[(fn, mod)]))
+
+    if confirmed:
+        print("  proved: a call at the return address targets the window")
+        for (fn, mod), n in confirmed.most_common(12):
+            print("    %-36s %-20s %6d %5.1f%%"
+                  % (fn[:36], str(mod)[:20], n, 100.0 * n / total))
+
+    if indirect:
+        print("  through a register, target not in the instruction:")
+        for (fn, mod), n in indirect.most_common(6):
+            print("    %-36s %-20s %6d %5.1f%%"
+                  % (fn[:36], str(mod)[:20], n, 100.0 * n / total))
+
+    if not confirmed and not indirect:
+        print("  nothing qualified.  Either the window covers code nothing")
+        print("  calls directly, or the files behind those addresses were not")
+        print("  given with --lib/--exe.")
+
     if unresolved:
-        print("  %-38s %-20s %6d %5.1f%%"
-              % ("(no call site found)", "", unresolved,
-                 100.0 * unresolved / max(1, len(prof.calls))))
+        print("  %-38s %6d %5.1f%%"
+              % ("(no qualifying call site)", unresolved,
+                 100.0 * unresolved / total))
     print("-" * 80)
 
 

@@ -1711,6 +1711,8 @@ BOOL              ok;
     hdr.ph_NumLibSegs  = prof_nlibsegs;
     hdr.ph_NumCalls    = prof_ncalls;
     hdr.ph_CallWords   = (ULONG)PROF_CALL_WORDS;
+    hdr.ph_WatchLo     = prof_watch_lo;
+    hdr.ph_WatchHi     = prof_watch_hi;
 
     if ((eb->AttnFlags & AFF_68010) != 0) { hdr.ph_Flags |= PROFF_FMTVALID; }
     if (prof_dropped != 0UL)              { hdr.ph_Flags |= PROFF_OVERFLOW; }
