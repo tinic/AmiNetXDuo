@@ -565,6 +565,7 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
         }
 
         ns->ns_IfaceMdns[opened] = cfg->mdns;
+        ns->ns_IfaceCfg[opened]  = i;
         ns->ns_Iface[opened] = ami_sana2_open(cfg, &status);
         if (ns->ns_Iface[opened] == NULL)
         {
@@ -1862,6 +1863,23 @@ VOID netstack_pool_sample(VOID)
     m->ms_PoolEmpty      = pool->nx_packet_pool_empty_requests;
     m->ms_PoolWaited     = pool->nx_packet_pool_empty_suspensions;
     m->ms_PoolBadRelease = pool->nx_packet_pool_invalid_releases;
+}
+
+const AmiIfConfig *netstack_iface_config(UWORD nx_index)
+{
+    const AmiNetStack *ns = ami_netstack_raw();
+    UWORD              slot;
+
+    if (ns == NULL || nx_index >= ns->ns_IfaceCount ||
+        nx_index >= (UWORD)AMI_CFG_MAX_INTERFACES)
+        return NULL;
+
+    slot = ns->ns_IfaceCfg[nx_index];
+    if (slot >= (UWORD)AMI_CFG_MAX_INTERFACES ||
+        !ns->ns_Config.interfaces[slot].configured)
+        return NULL;
+
+    return &ns->ns_Config.interfaces[slot];
 }
 
 BOOL netstack_iface_mdns(UWORD nx_index)
