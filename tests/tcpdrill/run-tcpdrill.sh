@@ -68,13 +68,14 @@ echo "==> script: $SCRIPT ($(grep -c '^case ' "$SCRIPT") cases)"
 
 export AMINETXDUO_RUN_TAG="$TAG"
 
-if [ "$RUNNER" = "amiberry" ]; then
-    RUN=("$ROOT/tools/amiberry-run.sh")
-    HD="$ROOT/build/amiberry-testhd-$TAG"
-else
-    RUN=("$ROOT/tools/amiberry-run.sh")
-    HD="$ROOT/build/testhd-$TAG"
-fi
+# Both arms run amiberry-run.sh -- fs-uae is gone -- so the guest directory is
+# the one amiberry-run.sh writes, whatever RUNNER says.  It did not used to be:
+# the default RUNNER is still "fsuae", so the else arm looked in
+# build/testhd-<tag>, found no tcpdrill.txt, printed "the run did not get that
+# far" and exited 1.  A drill that passed 28 cases and 227 checks reported as a
+# failure, which is worse than a drill that does not run.
+RUN=("$ROOT/tools/amiberry-run.sh")
+HD="$ROOT/build/amiberry-testhd-$TAG"
 
 set +e
 "${RUN[@]}" -m "$MODEL" -t "$TIMEOUT" \
