@@ -170,6 +170,18 @@ if(AMINETXDUO_LOG)
     add_compile_definitions(AMINETXDUO_LOG)
 endif()
 
+# AMINETXDUO_RXPROBE reports through AMI_ERROR, and compat.h compiles that to
+# `if (0)` without AMINETXDUO_LOG.  Alone it collects every counter, pays two
+# ReadEClock() calls a drain and prints nothing, which reads exactly like a
+# receive path that never ran.  Here rather than beside the option itself,
+# because AMINETXDUO_LOG is not defined yet at that point and the check would
+# fire on every build.
+if(AMINETXDUO_RXPROBE AND NOT AMINETXDUO_LOG)
+    message(FATAL_ERROR
+            "AMINETXDUO_RXPROBE needs AMINETXDUO_LOG=ON: the probe's report is "
+            "AMI_ERROR and is compiled out without it")
+endif()
+
 # The TCP: AmigaDOS handler, a socket opened as a file handle, so a program
 # that speaks DOS files speaks the network without knowing this library
 # exists, and `Type TCP:host/port` works from the Shell.  AmiTCP and Roadshow
@@ -798,12 +810,33 @@ if(AMINETXDUO_UNITY)
                           UNITY_BUILD ON
                           UNITY_BUILD_BATCH_SIZE 0)
 
-    # File scope becomes shared scope, and three names are defined twice
-    # across the 812 C files here.  Excluded rather than renamed: none is on a
-    # data path, and renaming vendored code is a merge conflict every time the
-    # submodule moves.
-    set_source_files_properties(
-        "${AMINETXDUO_NETXDUO}/addons/mdns/nxd_mdns.c"       # temp_string_buffer
+    # The files that cannot share a translation unit with the rest.  Excluded
+    # rather than patched: none is on a data path, and editing vendored code
+    # is a merge conflict every time the submodule moves.
+    #
+    # nxd_mdns.c        defines temp_string_buffer, and so does nxd_dns.c.
+    #                   Two of the three static-name collisions across all 812
+    #                   C files here; the third pair is in src/crypto68k,
+    #                   which this set does not reach.
+    #
+    # the other three   call NetX Duo's own address-change macro, which
+    #                   expands to `ip_ptr -> nx_ip_address_change_notify(...)`.
+    #                   With the API macro layer active -- and it has to be,
+    #                   src/netstack/netstack.c:1342 calls that function by its
+    #                   public name -- the member name is rewritten too and the
+    #                   struct has no such field.  A function-like macro
+    #                   expands after `->` like anywhere else.
+    set(_unity_excluded
+        "${AMINETXDUO_NETXDUO}/addons/mdns/nxd_mdns.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_address_change_notify.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_interface_address_set.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_rarp_packet_receive.c")
+    foreach(_x IN LISTS _unity_excluded)
+        if(NOT EXISTS "${_x}")
+            message(FATAL_ERROR "unity exclusion is stale: ${_x}")
+        endif()
+    endforeach()
+    set_source_files_properties(${_unity_excluded}
         PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
 
     # library.c holds the "moveq #-1,d0 / rts" that has to be at offset 0 of
@@ -835,9 +868,19 @@ if(AMINETXDUO_UNITY)
     # ThreadX through _txe_ today too.  Leaving it to file order would work by
     # accident and change under a submodule bump, silently, since every one of
     # these is a call that still compiles.
+    # The add-ons carry the same idiom one level down -- NX_DNS_SOURCE_CODE,
+    # NX_DHCP_SOURCE_CODE, NX_MDNS_SOURCE_CODE -- and src/netstack/ calls all
+    # three through their public names, so their headers go up here for the
+    # same reason.
+    set(_unity_preamble "#include \"tx_api.h\"\n#include \"nx_api.h\"")
+    string(APPEND _unity_preamble "\n#include \"nxd_dhcp_client.h\"")
+    string(APPEND _unity_preamble "\n#include \"nxd_dns.h\"")
+    string(APPEND _unity_preamble "\n#include \"nx_auto_ip.h\"")
+    if(AMINETXDUO_MDNS)
+        string(APPEND _unity_preamble "\n#include \"nxd_mdns.h\"")
+    endif()
     set_target_properties(bsdsocket_library PROPERTIES
-        UNITY_BUILD_CODE_BEFORE_INCLUDE
-        "#include \"tx_api.h\"\n#include \"nx_api.h\"")
+        UNITY_BUILD_CODE_BEFORE_INCLUDE "${_unity_preamble}")
 
     # -ffunction-sections is not optional here, where it is a measured cost on
     # our sources in the archive build: one translation unit is one object,
