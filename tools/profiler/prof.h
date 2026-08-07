@@ -150,13 +150,33 @@ struct ProfHeader
     ULONG   ph_Channel;     /* audio channel used, or ~0 for a CIA source   */
     ULONG   ph_WinFrames;   /* frames per window in the table below         */
     ULONG   ph_NumLibSegs;  /* version 3; zero in a version-2 file          */
-    ULONG   ph_Reserved[4];
+    ULONG   ph_NumCalls;    /* caller snapshots; zero unless WATCH was armed */
+    ULONG   ph_CallWords;   /* stack longwords per snapshot                  */
+    ULONG   ph_Reserved[2];
 };
 
 /* The profiled program's hunks, in load order, which is the order they appear
    in the executable.  The host cross-checks these against the file before it
    resolves a single address. */
 struct ProfSeg  { ULONG psg_Base; ULONG psg_Size; };
+
+/*
+ * A caller snapshot: the sampled PC, and the top of the stack the interrupted
+ * code was using.  Written last in the file, after the library segments, so a
+ * reader that does not know about them stops before them.
+ *
+ * THE STACK IS NOT PARSED HERE.  What a return address looks like is a
+ * question about the code that was linked, which is host-side knowledge; the
+ * Amiga side copies longwords and says nothing about what they mean.  Stale
+ * data below the live frame is expected and is the reader's problem.
+ */
+#define PROF_CALL_WORDS 6
+
+struct ProfCall
+{
+    ULONG   pc_PC;                          /* the sampled PC               */
+    ULONG   pc_Stack[PROF_CALL_WORDS];      /* from the interrupted SP up   */
+};
 
 struct ProfLib
 {
@@ -341,6 +361,15 @@ VOID        prof_note_range(ULONG lo, ULONG hi, const char *name);
 /* --------------------------------------------------------------- results --- */
 
 const struct ProfSample *prof_buffer(VOID);
+
+/* Arm the caller window over [base+off, base+off+len) of the first hunk of
+   the named library, which must already have registered its seglist.  Returns
+   FALSE if the library is not known or the buffer cannot be had. */
+BOOL prof_watch(const char *libname, ULONG off, ULONG len, ULONG maxcalls);
+
+/* Snapshots captured, and the window actually armed (zero if none). */
+ULONG prof_call_count(VOID);
+ULONG prof_watch_base(VOID);
 const struct ProfMark   *prof_mark_table(ULONG *count);
 const struct ProfRange  *prof_range_table(ULONG *count);
 

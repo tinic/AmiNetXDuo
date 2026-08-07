@@ -64,6 +64,49 @@ _prof_vector:
         move.l  d0,a0@+                 | ps_Task
         move.l  d1,a0@+                 | ps_Time
         move.l  a0,_prof_next
+
+| ---------------------------------------------------------------------------
+| The caller window.  Disarmed unless Profile was asked for one, and then it
+| is one compare against a PC already in a register.
+|
+| The stack to copy is the interrupted code's, not ours.  A task calling into
+| a shared library runs in USER mode, so the pointer is in USP and not on this
+| stack at all; supervisor code interrupted mid-flight left its SP where our
+| own registers and the exception frame now sit, which is prof_frameadj away.
+| Reading upward from a stack pointer reads the live frame, so 24 bytes is
+| always memory that exists.
+| ---------------------------------------------------------------------------
+        move.l  _prof_watch_lo,d0
+        beq     .Lprof_out              | not armed
+        move.l  sp@(18),d1              | the PC again
+        cmp.l   d0,d1
+        bcs     .Lprof_out
+        cmp.l   _prof_watch_hi,d1
+        bcc     .Lprof_out
+
+        move.l  _prof_call_next,a0
+        cmp.l   _prof_call_limit,a0
+        bcc     .Lprof_out
+
+        move.l  d1,a0@+                 | pc_PC
+        move.w  sp@(16),d1              | SR
+        btst    #13,d1                  | S: was it already supervisor?
+        bne     .Lprof_sup
+        move.l  usp,a1
+        bra     .Lprof_grab
+.Lprof_sup:
+        move.l  sp,a1
+        adda.l  _prof_frameadj,a1
+.Lprof_grab:
+        move.l  a1@+,a0@+               | pc_Stack[0..5]
+        move.l  a1@+,a0@+
+        move.l  a1@+,a0@+
+        move.l  a1@+,a0@+
+        move.l  a1@+,a0@+
+        move.l  a1@+,a0@+
+        move.l  a0,_prof_call_next
+        addq.l  #1,_prof_ncalls
+
         bra     .Lprof_out
 .Lprof_full:
         addq.l  #1,_prof_dropped

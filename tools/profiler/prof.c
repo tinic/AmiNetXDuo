@@ -226,6 +226,31 @@ static struct ProfRange    *prof_ranges;
 static ULONG                prof_nranges, prof_maxranges;
 static struct ProfLibSeg   *prof_libsegs;
 static ULONG                prof_nlibsegs, prof_maxlibsegs;
+
+/*
+ * The caller window.  prof_vector.S reads all five, so none of them is static
+ * and none may be renamed without changing the assembly too.  A zero
+ * prof_watch_lo disarms it, which is the state a run that never asked for one
+ * stays in, at the cost of one compare per sample.
+ */
+ULONG                       prof_watch_lo;
+ULONG                       prof_watch_hi;
+ULONG                       prof_call_next;
+ULONG                       prof_call_limit;
+ULONG                       prof_ncalls;
+/* Bytes from the vector's own SP to the SP the interrupted code was using,
+   when that code was already in supervisor mode: our 16 bytes of registers
+   plus the exception frame, which grew a word on the 68010. */
+ULONG                       prof_frameadj;
+
+static struct ProfCall     *prof_calls;
+static ULONG                prof_maxcalls;
+
+/* What was asked for, held until the library it names registers a seglist. */
+static char                 prof_watch_lib[32];
+static ULONG                prof_watch_off, prof_watch_len;
+
+static VOID prof_watch_try(VOID);
 static struct ProfTask     *prof_tasks;
 static ULONG                prof_ntasks, prof_maxtasks;
 static struct ProfWindow   *prof_wins;
@@ -485,6 +510,7 @@ BOOL                     lo_in = FALSE, hi_in = FALSE;
         prof_libsegs[prof_nlibsegs].pls_LibIdx = idx;
         prof_libsegs[prof_nlibsegs].pls_Hunk   = (UWORD)count;
         prof_nlibsegs++;
+        prof_watch_try();               /* the window may have been waiting */
 
         if (hull_lo >= base && hull_lo <  base + size) { lo_in = TRUE; }
         if (hull_hi >= base && hull_hi <  base + size) { hi_in = TRUE; }
@@ -1026,6 +1052,74 @@ ULONG total = 0UL, total_frames = 0UL;
 
 const char *prof_error(VOID)  { return(prof_err); }
 const char *prof_conflict(VOID) { return(prof_conf); }
+/*
+ * Find the library's hunk 0 and arm the window over it.  Called once when the
+ * request arrives, in case the library is already open, and again from
+ * prof_scan_lib_seglist() every time one registers.
+ */
+static VOID prof_watch_try(VOID)
+{
+ULONG i;
+
+    if (prof_watch_lib[0] == '\0' || prof_watch_lo != 0UL)
+    {
+        return;                         /* nothing asked for, or already armed */
+    }
+
+    for (i = 0UL; i < prof_nlibsegs; i++)
+    {
+        struct ProfLib *lib;
+
+        if (prof_libsegs[i].pls_Hunk != 0U)      /* hunk 0 is .text */
+        {
+            continue;
+        }
+        lib = &prof_libs[prof_libsegs[i].pls_LibIdx];
+        if (strcmp(lib->pl_Name, prof_watch_lib) != 0)
+        {
+            continue;
+        }
+
+        /* hi before lo: the vector tests lo, so it must be the last write. */
+        prof_watch_hi = prof_libsegs[i].pls_Base + prof_watch_off + prof_watch_len;
+        prof_watch_lo = prof_libsegs[i].pls_Base + prof_watch_off;
+        return;
+    }
+}
+
+BOOL prof_watch(const char *libname, ULONG off, ULONG len, ULONG maxcalls)
+{
+    if (libname == NULL || len == 0UL || maxcalls == 0UL)
+    {
+        prof_err = "watch needs a library, a length and a count";
+        return(FALSE);
+    }
+
+    prof_calls = (struct ProfCall *)AllocMem(maxcalls * (ULONG)sizeof(struct ProfCall),
+                                             MEMF_ANY | MEMF_CLEAR);
+    if (prof_calls == NULL)
+    {
+        prof_err = "no memory for the caller window";
+        return(FALSE);
+    }
+
+    prof_maxcalls   = maxcalls;
+    prof_ncalls     = 0UL;
+    prof_call_next  = (ULONG)prof_calls;
+    prof_call_limit = (ULONG)(prof_calls + maxcalls);
+
+    strncpy(prof_watch_lib, libname, sizeof(prof_watch_lib) - 1U);
+    prof_watch_lib[sizeof(prof_watch_lib) - 1U] = '\0';
+    prof_watch_off = off;
+    prof_watch_len = len;
+
+    prof_watch_try();                   /* it may already be open */
+    return(TRUE);
+}
+
+ULONG prof_call_count(VOID)   { return(prof_ncalls); }
+ULONG prof_watch_base(VOID)   { return(prof_watch_lo); }
+
 ULONG prof_hit_count(VOID)    { return(prof_hits); }
 ULONG prof_own_count(VOID)    { return(prof_ownticks); }
 ULONG prof_drop_count(VOID)   { return(prof_dropped); }
@@ -1286,6 +1380,14 @@ int              pass;
     prof_libsegs = (struct ProfLibSeg *)AllocMem(prof_maxlibsegs * (ULONG)sizeof(struct ProfLibSeg), MEMF_ANY | MEMF_CLEAR);
     prof_tasks  = (struct ProfTask *)AllocMem(prof_maxtasks * (ULONG)sizeof(struct ProfTask), MEMF_ANY | MEMF_CLEAR);
     prof_wins   = (struct ProfWindow *)AllocMem(PROF_MAX_WINS * (ULONG)sizeof(struct ProfWindow), MEMF_ANY | MEMF_CLEAR);
+
+    {
+        struct ExecBase *eb = (struct ExecBase *)SysBase;
+
+        /* 16 bytes of saved registers, then SR and PC, then the format word
+           the 68010 and up append. */
+        prof_frameadj = ((eb->AttnFlags & AFF_68010) != 0) ? 24UL : 22UL;
+    }
 
     if (prof_libs == NULL || prof_lvos == NULL || prof_ranges == NULL ||
         prof_libsegs == NULL || prof_tasks == NULL || prof_wins == NULL)
@@ -1573,6 +1675,8 @@ BOOL              ok;
     hdr.ph_Channel     = prof_ch;
     hdr.ph_WinFrames   = PROF_WIN_FRAMES;
     hdr.ph_NumLibSegs  = prof_nlibsegs;
+    hdr.ph_NumCalls    = prof_ncalls;
+    hdr.ph_CallWords   = (ULONG)PROF_CALL_WORDS;
 
     if ((eb->AttnFlags & AFF_68010) != 0) { hdr.ph_Flags |= PROFF_FMTVALID; }
     if (prof_dropped != 0UL)              { hdr.ph_Flags |= PROFF_OVERFLOW; }
@@ -1614,6 +1718,8 @@ BOOL              ok;
     /* Last, after the samples: see the version note in prof.h.  A version-2
        reader stops at the end of the sample array and never sees these. */
     ok &= prof_put(fh, prof_libsegs, prof_nlibsegs * (ULONG)sizeof(struct ProfLibSeg));
+    /* And the caller snapshots after those, for the same reason. */
+    ok &= prof_put(fh, prof_calls, prof_ncalls * (ULONG)sizeof(struct ProfCall));
 
     Close(fh);
 

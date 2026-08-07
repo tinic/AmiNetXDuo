@@ -111,6 +111,12 @@ class Profile:
         # version test: the count is the count.
         self.nlibsegs = f[23]
 
+        # Two more reserved longwords put to use, written as zero by anything
+        # that did not have a caller window.  Same reasoning as above: the
+        # count is the count.
+        self.ncalls = f[24]
+        self.callwords = f[25]
+
         if self.magic != PROF_MAGIC:
             die("%s: bad magic $%08x, tests/perf/prof writes a different, "
                 "older format ('APRF'); use tools/prof-report.py for those"
@@ -141,6 +147,12 @@ class Profile:
         # After the samples, so a version-3 file read by a version-2 reader is
         # a version-2 file with bytes after the end rather than a misparse.
         self.libsegs = take(LIBSEG, self.nlibsegs)
+        # Last in the file, after the library segments.
+        if self.ncalls and self.callwords:
+            CALL = struct.Struct(">%dL" % (1 + self.callwords))
+            self.calls = take(CALL, self.ncalls)
+        else:
+            self.calls = []
 
         # The one integrity check that costs nothing: every section is a fixed
         # record size times a count in the header, so the file has exactly one
@@ -970,6 +982,64 @@ def check_contain(prof, res, samples, path):
 
 # ------------------------------------------------------------------ main --
 
+def report_callers(prof, res):
+    """Rank what called the watched range.
+
+    The Amiga side copies longwords off the interrupted stack and says nothing
+    about what they mean.  Here each word is a candidate, and a candidate is a
+    return address if it resolves inside code that was linked.
+
+    THE FIRST RESOLVABLE WORD IS THE ANSWER, and the rest are printed as
+    context rather than folded in.  A leaf entered by JSR has its return
+    address just above whatever it pushed, so the first hit is usually it;
+    words further up are the caller's caller and stale frames below the live
+    one, which resolve just as well and mean something else.  Across hundreds
+    of snapshots a real caller dominates, and the context column is there so a
+    reading that depends on one snapshot is visibly that.
+    """
+    from collections import Counter
+
+    first = Counter()
+    anywhere = Counter()
+    unresolved = 0
+
+    for row in prof.calls:
+        words = row[1:]
+        got = None
+        seen = set()
+        for w in words:
+            if w == 0 or (w & 1):       # odd is not a return address on m68k
+                continue
+            fn, mod = res.resolve(w)
+            if fn is None or "unattributed" in str(mod):
+                continue
+            if got is None:
+                got = (fn, mod)
+            if fn not in seen:
+                seen.add(fn)
+                anywhere[(fn, mod)] += 1
+        if got is None:
+            unresolved += 1
+        else:
+            first[got] += 1
+
+    print()
+    print("callers of the watched range, %d snapshots" % len(prof.calls))
+    print("-" * 80)
+    if not first:
+        print("  nothing resolved; the window may cover code no linked "
+              "object calls")
+    for (fn, mod), n in first.most_common(12):
+        print("  %-38s %-20s %6d %5.1f%%  (seen %d)"
+              % (fn[:38], str(mod)[:20], n, 100.0 * n / max(1, len(prof.calls)),
+                 anywhere[(fn, mod)]))
+    if unresolved:
+        print("  %-38s %-20s %6d %5.1f%%"
+              % ("(no word resolved)", "", unresolved,
+                 100.0 * unresolved / max(1, len(prof.calls))))
+    print("-" * 80)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1203,6 +1273,9 @@ def main():
     print("-" * 80)
     print("%-63s %7d %6.1f%%" % ("top %d" % min(args.top, len(by_fn)),
                                  cum, 100.0 * cum / total))
+
+    if getattr(prof, "calls", None):
+        report_callers(prof, res)
 
     unattr = by_mod.get("unattributed", 0)
     if unattr:
