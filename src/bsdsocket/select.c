@@ -713,21 +713,6 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
 
     wait_mask = SocketBase->sb_EventSigMask | user_mask | break_mask;
 
-    if (timeout != NULL && !poll_only)
-    {
-        if (!bsd_timer_open(SocketBase))
-            return bsd_fail(SocketBase, AMI_ENOMEM);
-
-        SocketBase->sb_TimerReq.tr_node.io_Command = TR_ADDREQUEST;
-        SocketBase->sb_TimerReq.tr_time.tv_secs    = timeout->tv_secs;
-        SocketBase->sb_TimerReq.tr_time.tv_micro   = timeout->tv_micro;
-
-        SetSignal(0, SocketBase->sb_TimerSigMask);
-        SendIO((struct IORequest *)&SocketBase->sb_TimerReq);
-
-        timer_running = TRUE;
-        wait_mask    |= SocketBase->sb_TimerSigMask;
-    }
 
     for (;;)
     {
@@ -797,6 +782,35 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
 
         if (poll_only)
             break;
+
+        /*
+         * Arm the timeout here rather than before the first poll.  A select
+         * that finds a socket ready never blocks, and it was still paying
+         * SendIO, AbortIO and WaitIO to timer.device for a request it never
+         * waited on: 423 samples of 9376, 4.5% of an A1200 wire transfer,
+         * because a bulk reader selects once per recv and the data is
+         * normally already there.
+         *
+         * The timeout is what the call may BLOCK for, so starting it at the
+         * point of blocking is also the closer reading of select(2).  Guarded
+         * on timer_running: a Wait() that returns to a poll finding nothing
+         * comes back round, and the request is still counting.
+         */
+        if (timeout != NULL && !timer_running)
+        {
+            if (!bsd_timer_open(SocketBase))
+                return bsd_fail(SocketBase, AMI_ENOMEM);
+
+            SocketBase->sb_TimerReq.tr_node.io_Command = TR_ADDREQUEST;
+            SocketBase->sb_TimerReq.tr_time.tv_secs    = timeout->tv_secs;
+            SocketBase->sb_TimerReq.tr_time.tv_micro   = timeout->tv_micro;
+
+            SetSignal(0, SocketBase->sb_TimerSigMask);
+            SendIO((struct IORequest *)&SocketBase->sb_TimerReq);
+
+            timer_running = TRUE;
+            wait_mask    |= SocketBase->sb_TimerSigMask;
+        }
 
         received = Wait(wait_mask);
 
