@@ -231,6 +231,27 @@ if [ -n "$PEER" ]; then
         echo "Clear it with: ssh $PEER \"pkill -9 -f 'fitz-serve .* PORT $PORT\$'\"" >&2
         exit 2
     }
+else
+    # No -H and no AMINETXDUO_FITZ_PEER: nothing here starts a server, so the
+    # only thing that makes the run mean anything is one already listening.
+    #
+    # The check above is thorough and was unreachable without a peer, so the
+    # run booted the emulator, brought the interface up, mounted nothing and
+    # reported "RESULT read FAILED" -- a stack verdict for a missing server,
+    # indistinguishable from a stack that cannot transfer.
+    if ! timeout 4 bash -c "exec 3<>/dev/tcp/$PEER_ADDR/$PORT" 2>/dev/null; then
+        cat >&2 <<EOF
+Nothing is listening on $PEER_ADDR:$PORT, and no peer was given to start one.
+
+  -H user\@host                       start fitz-serve there over ssh
+  AMINETXDUO_FITZ_PEER=user\@host      the same, from the environment
+
+The peer must be a THIRD machine on real Ethernet; see the note at the top of
+this file for why it cannot be playhouse2 or the emulator's own host.
+EOF
+        exit 2
+    fi
+    echo "==> using the fitz-serve already on $PEER_ADDR:$PORT"
 fi
 echo "==> $NOTE"
 echo "==> fitz-serve on $PEER_ADDR:$PORT"

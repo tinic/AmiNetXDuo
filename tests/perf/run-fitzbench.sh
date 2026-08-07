@@ -117,6 +117,8 @@ PORT="${AMINETXDUO_FITZ_PORT:-17712}"
 SLIRP=0
 ACCURATE=0
 ROADSHOW=""
+NGDIR="${AMINETXDUO_CMP_AMITCPNG:-}"
+EXTRALIBS="${AMINETXDUO_FITZ_EXTRALIBS:-}"
 # -a IS USE_AMIBERRY, NOT AMIBERRY.  tools/amiberry-run.sh reads $AMIBERRY as
 # the PATH to the emulator, and amiga-assets/env.sh exports it.  A plain
 # `AMIBERRY=1` here keeps that export attribute, so the flag arrives in the
@@ -129,7 +131,7 @@ LOSSCAP=0
 MAXLOSS=""
 MAXEFF=""
 
-while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:aB:N:wl:L:" opt; do
+while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:aB:N:wl:L:G:E:" opt; do
     case "$opt" in
         H) PEER="$OPTARG" ;;
         A) PEER_ADDR="$OPTARG" ;;
@@ -145,6 +147,8 @@ while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:aB:N:wl:L:" opt; do
         s) SLIRP=1 ;;
         x) ACCURATE=1 ;;
         R) ROADSHOW="${OPTARG:-/tmp/rsdemo/Roadshow-Demo-1.15/Workbench}" ;;
+        G) NGDIR="$OPTARG" ;;
+        E) EXTRALIBS="$OPTARG" ;;
         a) USE_AMIBERRY=1 ;;
         B) USE_AMIBERRY=1; IFACE="$OPTARG" ;;
         N) BOARD="$OPTARG" ;;
@@ -241,7 +245,18 @@ cp "$A2065" "$STAGE/devs/a2065.device"
 # -R swaps the whole stack, library and starter both.  It is the discriminator
 # for "is this rig or is this us": a figure Roadshow also cannot beat on the
 # same emulator, the same bridge and the same peer is not ours to fix.
-if [ -n "$ROADSHOW" ]; then
+if [ -n "$NGDIR" ]; then
+    # AmiTCP_NG, the same swap the -R arm makes.  Two differences from
+    # Roadshow: it ships no usergroup.library, so ours goes in beside it, and
+    # its commands want mathieeedoubbas and rexxsyslib in LIBS:, which a bare
+    # boot shell does not have -- pass them with -L.
+    [ -f "$NGDIR/Libs/bsdsocket.library" ] || {
+        echo "no AmiTCP_NG at $NGDIR" >&2; exit 2; }
+    cp "$NGDIR/Libs/bsdsocket.library" "$STAGE/libs/bsdsocket.library"
+    [ -f "$UG" ] && cp "$UG" "$STAGE/libs/usergroup.library"
+    cp "$NGDIR/C/AddNetInterface" "$STAGE/AddNetInterface"
+    cp "$NGDIR/C/GetNetStatus"    "$STAGE/NetStat"
+elif [ -n "$ROADSHOW" ]; then
     [ -f "$ROADSHOW/Libs/bsdsocket.library" ] || {
         echo "no Roadshow at $ROADSHOW" >&2; exit 2; }
     cp "$ROADSHOW/Libs/bsdsocket.library" "$STAGE/libs/bsdsocket.library"
@@ -253,7 +268,13 @@ else
     [ -f "$UG" ] && cp "$UG" "$STAGE/libs/usergroup.library"
     cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
 fi
-[ -n "$ROADSHOW" ] || cp "$TOOLS/netstat" "$STAGE/NetStat"
+[ -n "$ROADSHOW$NGDIR" ] || cp "$TOOLS/netstat" "$STAGE/NetStat"
+# Libraries the stack under test needs and the boot shell has no LIBS: for.
+if [ -n "$EXTRALIBS" ]; then
+    for _l in "$EXTRALIBS"/*.library; do
+        [ -f "$_l" ] && cp "$_l" "$STAGE/libs/"
+    done
+fi
 cp "$FITZ"  "$STAGE/fitz"
 cp "$BENCH" "$STAGE/FitzBench"
 

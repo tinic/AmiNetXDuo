@@ -22,12 +22,14 @@
 set -u
 
 BUILD=""; MODEL="A1200"; TAG=""; PORT=""; BYTES=524288; WORKLOAD=bench; PROF=0
-STACK=ours
-while getopts "b:m:T:P:B:w:s:p" o; do
+STACK=ours; BORROW_UG=0; EXTRALIBS=""
+while getopts "b:m:T:P:B:w:s:L:pU" o; do
     case "$o" in
         b) BUILD="$OPTARG" ;; m) MODEL="$OPTARG" ;; T) TAG="$OPTARG" ;;
         P) PORT="$OPTARG" ;;  B) BYTES="$OPTARG" ;; w) WORKLOAD="$OPTARG" ;;
         s) STACK="$OPTARG" ;;
+        U) BORROW_UG=1 ;;
+        L) EXTRALIBS="$OPTARG" ;;
         p) PROF=1 ;;
         *) echo "RESULT=usage"; exit 2 ;;
     esac
@@ -158,7 +160,13 @@ RUNNER=tests/compare/run-compare.sh
 PROGRESS_S="${AMINETXDUO_EMURUN_PROGRESS:-120}"
 HD="build/amiberry-testhd-$TAG"
 
+# A foreign stack that ships no usergroup.library needs ours, or every
+# command that resolves a user or a service fails before it starts.
 _bopt=(); [ -z "$BUILD" ] || _bopt=(-b "$BUILD")
+[ "$BORROW_UG" = 0 ] || _bopt+=(-U)
+# A stack may need libraries the bare boot shell has no LIBS: for -- rexxsyslib
+# and the math ones are the usual pair.
+[ -z "$EXTRALIBS" ] || _bopt+=(-L "$EXTRALIBS")
 "$RUNNER" -s "$STACK" -w "$WORKLOAD" "${_bopt[@]}" -m "$MODEL" -T "$TAG" \
           -P "$PORT" -B "$BYTES" -t 900 > "/tmp/emurun-$TAG.log" 2>&1 &
 _runner_pid=$!
