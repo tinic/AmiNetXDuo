@@ -823,6 +823,29 @@ class Resolver:
                 return i, pc - base
         return None, None
 
+    # AmigaOS idles inside exec's dispatcher: `stop #$2000` halts the CPU until
+    # an interrupt, and the 68k stacks the PC of the instruction AFTER the
+    # STOP.  That address falls in the range following Dispatch's jump-table
+    # entry, so a machine that spent the run WAITING reports as time in
+    # Dispatch, and every other share in the ranking is quietly divided by
+    # however long it waited.  Measured once at 56.4% of a run, which made a
+    # network profile read as though scheduling dominated it.
+    #
+    # The stacked SR is the STOP operand exactly: $2000, supervisor and IPL 0.
+    # Dispatcher code proper cannot be sampled with that SR, because it runs at
+    # IPL 7 (`move.w #$2700,sr` a few instructions earlier), so exec.library
+    # plus $2000 is the halt and nothing else.  Keyed on the SR rather than the
+    # address because the address moves with the Kickstart revision.
+    def is_idle(self, pc, sr):
+        return sr == 0x2000 and self.resolve(pc)[1] == "exec.library"
+
+    def resolve_sample(self, pc, sr):
+        """(function, module, idle) for one sample."""
+        if self.is_idle(pc, sr):
+            return ("idle (STOP #$2000)", "exec.library", True)
+        name, module = self.resolve(pc)
+        return (name, module, False)
+
     def resolve(self, pc):
         """(function, module) for one PC."""
         hunk, off = self.link_time(pc)
@@ -992,7 +1015,7 @@ def folded_stacks(prof, res, samples):
     """
     out = defaultdict(int)
     for pc, sr, _fmt, task, _t in samples:
-        name, module = res.resolve(pc)
+        name, module, _halted = res.resolve_sample(pc, sr)
         stack = ";".join((
             prof.tasks.get(task, "$%08x" % task),
             "interrupt" if sr & 0x2000 else "task",
@@ -1037,7 +1060,7 @@ def write_trace(path, prof, res, samples, times):
 
     cur = None
     for i, (pc, sr, _fmt, task, _raw) in enumerate(samples):
-        name, module = res.resolve(pc)
+        name, module, _halted = res.resolve_sample(pc, sr)
         tid = tids.setdefault(task, len(tids) + 1)
         key = (tid, bool(sr & 0x2000), name)
         broke = cur is not None and (i > 0 and times[i] - times[i - 1] > gap)
@@ -1486,15 +1509,23 @@ def main():
     by_fn = defaultdict(int)
     by_mod = defaultdict(int)
     by_task = defaultdict(int)
+    by_task_busy = defaultdict(int)
     supervisor = 0
+    idle = 0
 
     for pc, sr, _fmt, task, _t in samples:
-        name, module = res.resolve(pc)
+        name, module, halted = res.resolve_sample(pc, sr)
         by_fn[(name, module)] += 1
         by_mod[module] += 1
         by_task[task] += 1
+        if halted:
+            idle += 1
+        else:
+            by_task_busy[task] += 1
         if sr & 0x2000:
             supervisor += 1
+
+    busy = len(samples) - idle
 
     total = len(samples)
 
@@ -1535,10 +1566,25 @@ def main():
 
     print("context      %d%% task, %d%% supervisor/interrupt"
           % (100 * (total - supervisor) // total, 100 * supervisor // total))
+    if idle:
+        print("idle         %d samples (%.1f%%), CPU halted in exec's idle "
+              "loop waiting for" % (idle, 100.0 * idle / total))
+        print("             an interrupt.  Every share below is also given "
+              "against the %d" % busy)
+        print("             samples that were RUNNING; a run that mostly "
+              "waited is not a")
+        print("             profile of the code, it is a profile of the wait.")
     if len(by_task) > 1:
         print("tasks        " + ", ".join(
             "%s %d%%" % (prof.tasks.get(t, "$%08x" % t), 100 * n // total)
             for t, n in sorted(by_task.items(), key=lambda kv: -kv[1])[:6]))
+        # Idle is charged to whichever task happened to be current when the
+        # CPU halted, so a task can look busy purely by being resident.
+        if idle and busy:
+            print("tasks (busy) " + ", ".join(
+                "%s %d%%" % (prof.tasks.get(t, "$%08x" % t), 100 * n // busy)
+                for t, n in sorted(by_task_busy.items(),
+                                   key=lambda kv: -kv[1])[:6]))
 
     gaps = gap_report(prof, times, res)
     if gaps and gaps["total"]:
@@ -1579,7 +1625,12 @@ def main():
             print("%-46s %8d %6.1f%%" % (module[:46], n, 100.0 * n / total))
         print()
 
-    print("%-38s %-24s %7s %7s" % ("function", "module", "samples", "share"))
+    if idle and busy:
+        print("%-38s %-24s %7s %7s %7s"
+              % ("function", "module", "samples", "share", "busy"))
+    else:
+        print("%-38s %-24s %7s %7s"
+              % ("function", "module", "samples", "share"))
     print("-" * 80)
     cum = 0
     for i, ((name, module), n) in enumerate(
@@ -1587,8 +1638,15 @@ def main():
         if i >= args.top:
             break
         cum += n
-        print("%-38s %-24s %7d %6.1f%%"
-              % (name[:38], module[:24], n, 100.0 * n / total))
+        if idle and busy:
+            # The idle row has no share of the running time by construction.
+            pct = "      -" if module == "exec.library" and "STOP" in name \
+                  else "%6.1f%%" % (100.0 * n / busy)
+            print("%-38s %-24s %7d %6.1f%% %s"
+                  % (name[:38], module[:24], n, 100.0 * n / total, pct))
+        else:
+            print("%-38s %-24s %7d %6.1f%%"
+                  % (name[:38], module[:24], n, 100.0 * n / total))
     print("-" * 80)
     print("%-63s %7d %6.1f%%" % ("top %d" % min(args.top, len(by_fn)),
                                  cum, 100.0 * cum / total))
