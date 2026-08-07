@@ -181,31 +181,32 @@ fi
 # NE2000 boards take the whole address.
 MAC="${AMINETXDUO_AMIBERRY_MAC:-02:41:4d:49:00:01}"
 
-# A Zorro board on a machine with no Zorro bus.
+# A networked run on a machine that cannot have one.
 #
-# The A500 and A600 have no expansion bus Amiberry will autoconfig one on, so
-# `-N a2065 -m A600` produces a machine that boots, runs at full speed, and
-# never sees a card: AddNetInterface then waits for a DHCP lease that cannot
-# arrive, and the run reads as a slow test until the timeout.  Same shape as
-# the kickstart mismatch above, and the same answer -- say so and stop.
+# The A500 and A600 have no Zorro bus, so a2065 and the other Zorro cards never
+# autoconfig; and docs/BACKLOG.md records that Amiberry's A600 PCMCIA emulation
+# does not work FOR ANY STACK -- identical staging that leases on an A1200
+# fails there, ours unable to open the device and Roadshow answering
+# `Could not add interface "eth0" (Input/output error)`.
 #
-# A600 and A1200 have a Gayle, so ne2000_pcmcia is the board for them; the
-# A1200 also takes the Zorro boards, which is why only the two are named.
+# So there is no board to suggest.  The machine boots, runs at 50 fps, and the
+# first plan step waits for a lease that cannot arrive, which reads as a slow
+# test until the timeout.  An A600 network failure says nothing about the code.
 board_model_check() {
-    case "$1" in
-        a2065|ariadne|ariadne2|hydra|eb920|xsurf|xsurf100z2|xsurf100z3)
-            case "$MODEL" in
-                A500|A500+|A600)
-                    cat >&2 <<EOF
-$1 is a Zorro card and $MODEL has no Zorro bus, so it will never autoconfig.
-The machine boots, the network never comes up, and the first plan step waits
-for a DHCP lease until the timeout.
+    [ -n "$1" ] || return 0
+    case "$MODEL" in
+        A500|A500+|A600)
+            cat >&2 <<EOF
+$MODEL cannot run a networked test under Amiberry.
 
-  -N ne2000_pcmcia    the PCMCIA card, which is what an A600 has
+  Zorro cards ($1 among them) have no bus to autoconfig on, and the PCMCIA
+  emulation does not work for any stack -- see docs/BACKLOG.md, "Amiberry's
+  A600 PCMCIA emulation does not work".
+
+  Use -m A1200 for anything that needs the network.  For 68000 CODE on a
+  working network, build -DAMINETXDUO_CPU=68000 and run it on the A1200.
 EOF
-                    exit 2
-                    ;;
-            esac
+            exit 2
             ;;
     esac
 }
