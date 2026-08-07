@@ -339,6 +339,13 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
 {
     UINT type;
 
+#ifndef AMINETXDUO_RX_VERIFY
+    /* The sum the copy carried is only consulted by the verify path, so
+       without it this is the one caller that takes a slot and reads nothing
+       from it. */
+    (VOID)slot;
+#endif
+
 #ifdef AMINETXDUO_BPF
     /*
      * The receive tap, where the cooked and raw paths converge and before the
