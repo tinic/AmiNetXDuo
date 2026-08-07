@@ -208,9 +208,10 @@ LONG ami_netstack_enter(AmiNetCaller *caller)
 
 VOID ami_netstack_leave(AmiNetCaller *caller)
 {
-    /* On the way out of every stack operation, so the packet-pool figures in
-       the health mark are as of the last thing the stack did. */
-    netstack_pool_sample();
+    /* On the way out of every stack operation, so the low-water mark in the
+       health mark is as of the last thing the stack did.  The rest of the
+       pool figures are read when asked; see netstack_pool_mark_low(). */
+    netstack_pool_mark_low();
 
     if (caller->nc_Adopted)
     {
@@ -329,7 +330,7 @@ LONG ami_netstack_enter_cached(AmiNetCaller *caller)
 
 VOID ami_netstack_leave_cached(AmiNetCaller *caller)
 {
-    netstack_pool_sample();             /* see ami_netstack_leave() */
+    netstack_pool_mark_low();           /* see ami_netstack_leave() */
 
     if (!caller->nc_Adopted)
         return;
@@ -1671,7 +1672,7 @@ static LONG ami_ns_bring_up(VOID)
     /* The stack exists from here on, address or not, so this releases anything
        waiting for `WaitForPort AMITCP`. */
     ami_ns_port_create();
-    ami_netstack_baton_set_sampler(netstack_pool_sample);
+    ami_netstack_baton_set_sampler(netstack_pool_mark_low);
     /* Once here, so the mark has the pool from the moment it is published
        rather than from whenever the stack is next used. */
     netstack_pool_sample();
@@ -1839,6 +1840,36 @@ NX_PACKET_POOL *netstack_pool(VOID)
  * it exists for, and the same reasoning as the tick and baton counters the
  * health mark already points at applies here.
  */
+/*
+ * The half that every stack operation has to pay for.
+ *
+ * ms_PoolLow is a running minimum and cannot be reconstructed after the fact,
+ * so it is sampled on the way out of each operation.  Everything else
+ * netstack_pool_sample() records is a CURRENT value, which is readable when
+ * somebody asks for it, and asking is a person running ShowNetStatus.
+ *
+ * It was one function doing both, at 72 samples of 9606 on an A1200 wire
+ * transfer, which is a low-water mark for a status display costing more than
+ * nx_tcp_packet_send_ack.
+ */
+VOID netstack_pool_mark_low(VOID)
+{
+    NX_PACKET_POOL *pool = netstack_pool();
+    AmiMemStats    *m;
+    ULONG           now;
+
+    if (pool == NULL)
+        return;
+
+    m   = ami_mem_stats();
+    now = pool->nx_packet_pool_available;
+
+    /* ms_PoolTotal is zero until the first full sample, which netstack_start()
+       takes, so a low of zero cannot be recorded before there is a pool. */
+    if (m->ms_PoolTotal == 0UL || now < m->ms_PoolLow)
+        m->ms_PoolLow = now;
+}
+
 VOID netstack_pool_sample(VOID)
 {
     NX_PACKET_POOL *pool = netstack_pool();

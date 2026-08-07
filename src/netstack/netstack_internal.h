@@ -325,6 +325,10 @@ VOID ami_netstack_health_unpublish(VOID);
  */
 VOID ami_netstack_baton_set_sampler(VOID (*fn)(VOID));
 
+/* The per-operation half of netstack_pool_sample(): the running minimum only,
+   which is the one figure that cannot be read back later. */
+VOID netstack_pool_mark_low(VOID);
+
 /* Wipe the slot table. Only valid once ThreadX has stopped; netstack_baton.c
    says what it is for. */
 VOID ami_netstack_baton_reset(VOID);
