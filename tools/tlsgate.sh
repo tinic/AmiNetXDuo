@@ -47,4 +47,17 @@ out=$(tests/tls/run-tls13.sh -b "$BUILD" $model -c "$CPU" $throttle \
         -t 1500 -P "$port" 2>&1)
 
 echo "$out" | grep -aE "TLS up:|handshakes:|PASS|FAIL:" | tail -5
-echo "$out" | grep -aqE "^  PASS" && echo "VERDICT: pass" || echo "VERDICT: fail"
+
+# Three outcomes, not two.  A run that was cut off reached neither verdict, and
+# calling that "fail" is how a killed control run got mistaken for a
+# regression.  The harness prints one of these lines whenever it finishes.
+if echo "$out" | grep -aqE "^  PASS"; then
+    echo "VERDICT: pass"
+elif echo "$out" | grep -aqE "^  FAIL|handshakes:"; then
+    echo "VERDICT: fail"
+else
+    echo "VERDICT: incomplete -- the run did not reach a verdict."
+    echo "  A 68000 gate needs ~60 s per handshake plus boot; if this was"
+    echo "  wrapped in a short 'timeout', that is what cut it off."
+    exit 3
+fi
