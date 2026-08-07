@@ -264,7 +264,10 @@ fi
         echo "wait 10"
         [ ! -f "$STAGE/NetStat" ] || echo "SYS:NetStat $STATARGS"
         if [ "$PROFILE" = 1 ]; then
+            # AMINETXDUO_PROF_WATCH=<library>/<hexoff>/<hexlen> asks the
+            # sampler for a caller window over that range; see prof.h.
             echo "SYS:Profile QUIET OUT=DH0:fitz.prof FOLDED=DH0:fitz.folded" \
+                 "${AMINETXDUO_PROF_WATCH:+WATCH=$AMINETXDUO_PROF_WATCH}" \
                  "SYS:FitzBench FITZ: KB=$KB CHUNK=$CHUNK REPS=$REPS"
         else
             echo "SYS:FitzBench FITZ: KB=$KB CHUNK=$CHUNK REPS=$REPS"

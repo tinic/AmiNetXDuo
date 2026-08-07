@@ -59,14 +59,54 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define TEMPLATE \
     "RATE/K/N,SAMPLES/K/N,CHANNEL/K/N,STACK/K/N,OUT/K,FOLDED/K,TOP/K/N," \
-    "QUIET/S,COMMAND/A/F"
+    "WATCH/K,WATCHMAX/K/N,QUIET/S,COMMAND/A/F"
 
 enum { OPT_RATE, OPT_SAMPLES, OPT_CHANNEL, OPT_STACK, OPT_OUT, OPT_FOLDED,
-       OPT_TOP, OPT_QUIET, OPT_COMMAND, OPT_COUNT };
+       OPT_TOP, OPT_WATCH, OPT_WATCHMAX, OPT_QUIET, OPT_COMMAND, OPT_COUNT };
+
+/*
+ * WATCH=<library>/<hex offset>/<hex length>
+ *
+ * The offset is into the library's first hunk, which is what a link map
+ * quotes, so a range comes straight off the map:
+ *
+ *   WATCH=bsdsocket.library/1ed40/58
+ *
+ * A PC-only profile names the callee.  When the callee is a leaf that
+ * everything calls, a divide helper or a memcpy, that is not the question
+ * anyone has; this records the top of the interrupted stack for samples
+ * inside the range, and profreport turns those into callers.
+ */
+static BOOL parse_watch(const char *spec, char *lib, ULONG liblen,
+                        ULONG *off, ULONG *len)
+{
+    const char *a = strchr(spec, '/');
+    const char *b = (a != NULL) ? strchr(a + 1, '/') : NULL;
+    ULONG       n;
+
+    if (a == NULL || b == NULL || a == spec)
+    {
+        return(FALSE);
+    }
+
+    n = (ULONG)(a - spec);
+    if (n >= liblen)
+    {
+        return(FALSE);
+    }
+    memcpy(lib, spec, n);
+    lib[n] = '\0';
+
+    *off = (ULONG)strtoul(a + 1, NULL, 16);
+    *len = (ULONG)strtoul(b + 1, NULL, 16);
+
+    return((BOOL)(*len != 0UL));
+}
 
 /*
  * 1000 Hz on anything with a 68010 or better, 250 on a plain 68000.
@@ -554,6 +594,32 @@ int              i;
         }
     }
 
+    if (opt[OPT_WATCH] != 0L)
+    {
+        char  wlib[32];
+        ULONG woff = 0UL, wlen = 0UL;
+        ULONG wmax = (opt[OPT_WATCHMAX] != 0L)
+            ? (ULONG)(*(LONG *)opt[OPT_WATCHMAX]) : 4096UL;
+
+        if (!parse_watch((const char *)opt[OPT_WATCH], wlib, (ULONG)sizeof(wlib),
+                         &woff, &wlen))
+        {
+            say("Profile: WATCH wants <library>/<hexoffset>/<hexlength>");
+            UnLoadSeg(seg);
+            FreeArgs(rd);
+            return(RETURN_FAIL);
+        }
+        if (!prof_watch(wlib, woff, wlen, wmax))
+        {
+            say("Profile: cannot watch: %s", prof_error());
+            UnLoadSeg(seg);
+            FreeArgs(rd);
+            return(RETURN_FAIL);
+        }
+        say("Profile: watching %s +$%lx for $%lx, %ld slots",
+            wlib, (unsigned long)woff, (unsigned long)wlen, (long)wmax);
+    }
+
     if (!prof_start(samples, rate, channel))
     {
         say("Profile: cannot sample: %s", prof_error());
@@ -564,6 +630,12 @@ int              i;
         UnLoadSeg(seg);
         FreeArgs(rd);
         return(RETURN_FAIL);
+    }
+
+    if (prof_watch_base() == 0UL && opt[OPT_WATCH] != 0L)
+    {
+        say("Profile: the watched library was not open at start; the window"
+            " arms when it registers");
     }
 
     say("Profile: %s at %ld Hz, %ld sample slots (%ld KB)",
@@ -593,6 +665,11 @@ int              i;
             say("Profile: could not write %s: %s", (const char *)opt[OPT_OUT],
                 prof_error());
         }
+    }
+
+    if (opt[OPT_WATCH] != 0L)
+    {
+        say("Profile: %ld caller snapshots", (long)prof_call_count());
     }
 
     if (opt[OPT_FOLDED] != 0L)
