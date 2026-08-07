@@ -1,63 +1,79 @@
 #!/bin/bash
-# One way to run a TLS gate. Everything that has bitten me is handled here
-# once instead of being retyped per run.
+# TLS gate runner.  Output is for a program, not a reader.
 #
-#   gate.sh <builddir> [68000|68020|68060] [slow]
+#   tools/tlsgate.sh <builddir> [cpu] [repeat] [slow]
 #
-#   - kills only real emulator processes, with a pattern that cannot match
-#     the shell running this script ([a]miberry, not amiberry)
-#   - picks a free port instead of a number I guessed
-#   - pairs the model with the CPU, which the harness now enforces anyway
-#   - full emulation speed unless "slow" is asked for: the throttle is for
-#     measuring speed, not for pass/fail, and it costs 5 minutes a run
-#   - prints ONLY the verdict, unbuffered
+# Emits one key=value line per run and one summary line, nothing else.
+# The verdict is the EXIT CODE; the text is a convenience, never the contract.
+#
+#   0  every run passed
+#   1  at least one run failed
+#   3  at least one run did not reach a verdict (truncated, killed, no boot)
+#   2  usage or environment error
+#
+# Fields: run, result, handshakes, fallbacks, cpu, speed, port, seconds, dir
+#
+# `repeat` matters: the 68000 gate is intermittent, so a single pass is not
+# evidence.  Repetition is the runner's job, not something a caller remembers.
 set -u
 
-BUILD="${1:?usage: gate.sh <builddir> [cpu] [slow]}"
+BUILD="${1:-}"
 CPU="${2:-68020}"
-SPEED="${3:-fast}"
+REPEAT="${3:-1}"
+SPEED="${4:-fast}"
 
-cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 2
+[ -n "$BUILD" ] || { echo "result=usage"; exit 2; }
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || { echo "result=environment"; exit 2; }
 . ~/amiga-assets/env.sh 2>/dev/null
 export AMINETXDUO_TLS13_FETCH_TIMEOUT=900
 
-pkill -f "[a]miberry" 2>/dev/null
-pkill -f "[h]ttppeer" 2>/dev/null
-pkill -f "[r]un-tls13" 2>/dev/null
-sleep 3
-
-# A port nothing is listening on, plus room for the peer's five sockets.
-port=11000
-while ss -ltn 2>/dev/null | grep -q ":$((port + 1))\b" ||
-      ss -ltn 2>/dev/null | grep -q ":$((port + 4))\b"; do
-    port=$((port + 20))
-done
+[ -d "$BUILD" ] || { echo "result=environment reason=nobuild dir=$BUILD"; exit 2; }
 
 case "$CPU" in
-    68000) model="-m A600" ;;          # an A1200 ROM will not boot a 68000
+    68000) model="-m A600" ;;   # an A1200 ROM cannot boot a 68000
     *)     model="" ;;
 esac
-
 throttle=""
 [ "$SPEED" = slow ] && throttle="-k 14"
 
-echo "== $BUILD  cpu $CPU  port $port  ${SPEED}"
-# shellcheck disable=SC2086
-out=$(tests/tls/run-tls13.sh -b "$BUILD" $model -c "$CPU" $throttle \
-        -t 1500 -P "$port" 2>&1)
+fails=0
+incomplete=0
 
-echo "$out" | grep -aE "TLS up:|handshakes:|PASS|FAIL:" | tail -5
+for run in $(seq 1 "$REPEAT"); do
+    pkill -f "[a]miberry"  2>/dev/null
+    pkill -f "[h]ttppeer"  2>/dev/null
+    pkill -f "[r]un-tls13" 2>/dev/null
+    sleep 3
 
-# Three outcomes, not two.  A run that was cut off reached neither verdict, and
-# calling that "fail" is how a killed control run got mistaken for a
-# regression.  The harness prints one of these lines whenever it finishes.
-if echo "$out" | grep -aqE "^  PASS"; then
-    echo "VERDICT: pass"
-elif echo "$out" | grep -aqE "^  FAIL|handshakes:"; then
-    echo "VERDICT: fail"
-else
-    echo "VERDICT: incomplete -- the run did not reach a verdict."
-    echo "  A 68000 gate needs ~60 s per handshake plus boot; if this was"
-    echo "  wrapped in a short 'timeout', that is what cut it off."
-    exit 3
-fi
+    port=11000
+    while ss -ltn 2>/dev/null | grep -qE ":($((port + 1))|$((port + 4)))\b"; do
+        port=$((port + 20))
+    done
+
+    t0=$(date +%s)
+    # shellcheck disable=SC2086
+    out=$(tests/tls/run-tls13.sh -b "$BUILD" $model -c "$CPU" $throttle \
+            -t 1500 -P "$port" 2>&1)
+    secs=$(( $(date +%s) - t0 ))
+
+    hs=$(printf '%s' "$out" | sed -n 's/.*TLS 1\.3 handshakes: *\([0-9]*\).*/\1/p' | tail -1)
+    fb=$(printf '%s' "$out" | sed -n 's/.*TLS 1\.2: *\([0-9]*\).*/\1/p' | tail -1)
+
+    if printf '%s' "$out" | grep -qE '^  PASS'; then
+        result=pass
+    elif [ -n "$hs" ]; then
+        result=fail; fails=$((fails + 1))
+    else
+        result=incomplete; incomplete=$((incomplete + 1))
+    fi
+
+    echo "run=$run result=$result handshakes=${hs:--} fallbacks=${fb:--}" \
+         "cpu=$CPU speed=$SPEED port=$port seconds=$secs dir=$BUILD"
+done
+
+echo "summary runs=$REPEAT failed=$fails incomplete=$incomplete"
+
+[ "$incomplete" -gt 0 ] && exit 3
+[ "$fails" -gt 0 ] && exit 1
+exit 0
