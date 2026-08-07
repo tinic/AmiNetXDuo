@@ -9,10 +9,11 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A received TCP or UDP checksum is verified as the frame is copied rather than by walking the packet a second time. The SANA-II copy already reads every longword, so it returns the sum it saw; fragments, IPv6 and anything that is not plain TCP or UDP still take the ordinary path. Listed under 0.18.0 but built out of that release
+
 ## 0.18.0
 
 - An `https:` handshake no longer stalls the whole stack while it does public-key arithmetic. The AmigaOS ThreadX port only reschedules at a ThreadX call, and a scalar multiplication makes none, so the IP thread could not answer the network for tens of seconds at a time and the far end gave up and reset the connection. The arithmetic hands the machine back between iterations now
-- A received TCP or UDP checksum is verified as the frame is copied rather than by walking the packet a second time. The SANA-II copy already reads every longword, so it returns the sum it saw; fragments, IPv6 and anything that is not plain TCP or UDP still take the ordinary path
 - Copying a received frame is faster on a 68000 when the source and destination disagree in their low address bit. A word or longword access to an odd address is an address error on that part, so the whole copy falls back to a byte loop -- which is eight of the sixteen alignment pairs, not a rare tail
 - The 50 Hz timer task stops doing a 32-iteration software divide every tick. It kept its uptime in milliseconds, and converting an E-Clock reading needed a divisor too large for a 68000's `DIVU`, in the highest-priority task on the machine
 - **mDNS is off unless an interface asks for it.** Answering `.local` is now `MDNS=YES` in that interface's file in `DEVS:NetInterfaces`, and an interface file that does not mention it gets no responder: on upgrade, a machine that answered `.local` stops until the keyword is added. The responder joins a multicast group on the interface, so every `.local` query any machine on that network sends became work for this Amiga whether or not it concerned this one, and on a 68000 that is felt by everything else. When no interface asks, it is not started at all. The installer asks, and `ShowNetStatus` says which interfaces are answering

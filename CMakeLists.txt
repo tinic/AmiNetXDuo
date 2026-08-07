@@ -396,16 +396,23 @@ if(AMINETXDUO_NET68K_CHECKSUM)
 endif()
 
 # Verify receive checksums in the driver glue and tell NetX Duo, through
-# NX_ENABLE_INTERFACE_CAPABILITY, not to walk them again.  It costs a second
-# parse of the IP header; it changes no structure, keeps no state between
-# packets and has nothing that can go stale, which is what the fused
-# copy-and-sum could not manage.  src/net68k/n68k_rx_verify.c.
+# NX_ENABLE_INTERFACE_CAPABILITY, not to walk them again.
+#
+# ami_sana2_copy_to_buff() reads every longword of the frame anyway, so it sums
+# as it copies and the slot carries an answer nothing paid a second pass for;
+# n68k_rx_verify_sum() checks the datagram against it.  A slot that could not
+# sum (odd on one side, or no slot) falls back to n68k_rx_verify(), which walks
+# and costs a second parse of the IP header.  src/net68k/n68k_rx_verify.c.
 #
 # It needs the fork's per-packet capability check: upstream NetX Duo consults
 # only the interface flag, which would leave the glue answerable for frames it
 # cannot verify.
+#
+# ON: this gates the fused copy-and-sum itself, not just the verify. Built OFF
+# from a0f0c3e until now, which compiled the fusion out of every default build
+# and left the receive path copying and then walking the same bytes again.
 option(AMINETXDUO_RX_VERIFY
-       "Verify receive checksums in the SANA-II glue" OFF)
+       "Verify receive checksums in the SANA-II glue" ON)
 
 if(AMINETXDUO_RX_VERIFY)
     add_compile_definitions(AMINETXDUO_RX_VERIFY)
