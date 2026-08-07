@@ -470,21 +470,70 @@ set(AMINETXDUO_HOT_SOURCES
 # the list would have to be applied below add_subdirectory(), not here.  That
 # is worth knowing if a future profile makes the case; this one did not.
 
-if(AMINETXDUO_HOT_O2)
+foreach(_hot IN LISTS AMINETXDUO_HOT_SOURCES)
+    if(NOT EXISTS "${_hot}")
+        # Fatal, not a warning.  A name that does not resolve builds the file
+        # at -Os and says so in a configure log, which is indistinguishable
+        # from the list working.
+        message(FATAL_ERROR "hot source not found, the list is stale: ${_hot}")
+    endif()
+endforeach()
+
+# The same list as one translation unit, which is the only inlining across
+# files this tree can have -- the toolchain gives us no -flto.
+#
+# OFF, and an alternative to the -O2 path rather than a layer on it: cmake
+# drops any source carrying COMPILE_OPTIONS or COMPILE_FLAGS out of the unity
+# file and compiles it alone (checked on 4.3.2), so setting both would leave
+# the unity translation unit holding nothing.  The list therefore moves to its
+# own object library, where -O2 arrives at target level and nothing is
+# excluded.
+#
+# What it can buy over -O2 alone is the calls between these files, mostly the
+# packet allocate/release and data_append pairs.  What it costs is the profile:
+# a function inlined into a neighbour stops appearing under its own name, and
+# the last two hot-list experiments both moved counts between names without
+# moving the total.
+option(AMINETXDUO_HOT_UNITY "Compile the hot list as one translation unit" OFF)
+
+if(AMINETXDUO_HOT_UNITY)
+    list(LENGTH NETXDUO_SOURCES _hot_before)
+    list(REMOVE_ITEM NETXDUO_SOURCES ${AMINETXDUO_HOT_SOURCES})
+    list(LENGTH NETXDUO_SOURCES _hot_after)
+    list(LENGTH AMINETXDUO_HOT_SOURCES _hot_count)
+    math(EXPR _hot_removed "${_hot_before} - ${_hot_after}")
+    if(NOT _hot_removed EQUAL _hot_count)
+        # A path that does not match the glob's spelling leaves the file in
+        # both targets, and the duplicate symbols only surface at link.
+        message(FATAL_ERROR
+                "hot list did not come out of NETXDUO_SOURCES: removed "
+                "${_hot_removed} of ${_hot_count}")
+    endif()
+
+    add_library(netxduo_hot OBJECT ${AMINETXDUO_HOT_SOURCES})
+    set_target_properties(netxduo_hot PROPERTIES
+                          UNITY_BUILD ON
+                          UNITY_BUILD_BATCH_SIZE 0)
+    target_link_libraries(netxduo_hot PRIVATE threadx)
+    target_include_directories(netxduo_hot PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+    # As the vendored archives below, and for the same reason: --gc-sections
+    # still collects per function inside a unity object.
+    target_compile_options(netxduo_hot PRIVATE
+                           -ffunction-sections -fno-optimize-sibling-calls)
+    if(AMINETXDUO_HOT_O2)
+        target_compile_options(netxduo_hot PRIVATE -O2)
+    endif()
+elseif(AMINETXDUO_HOT_O2)
     foreach(_hot IN LISTS AMINETXDUO_HOT_SOURCES)
-        if(EXISTS "${_hot}")
-            # After the -Os in CMAKE_C_FLAGS_RELEASE, and the last one wins.
-            set_source_files_properties("${_hot}" PROPERTIES COMPILE_OPTIONS "-O2")
-        else()
-            # Fatal, not a warning.  A name that does not resolve builds the
-            # file at -Os and says so in a configure log, which is indis-
-            # tinguishable from the list working.
-            message(FATAL_ERROR "hot source not found, the list is stale: ${_hot}")
-        endif()
+        # After the -Os in CMAKE_C_FLAGS_RELEASE, and the last one wins.
+        set_source_files_properties("${_hot}" PROPERTIES COMPILE_OPTIONS "-O2")
     endforeach()
 endif()
 
 add_library(netxduo STATIC ${NETXDUO_SOURCES})
+if(TARGET netxduo_hot)
+    target_sources(netxduo PRIVATE $<TARGET_OBJECTS:netxduo_hot>)
+endif()
 target_include_directories(netxduo PUBLIC
     ${AMINETXDUO_CORE_INCLUDES})
 target_link_libraries(netxduo PUBLIC threadx)
