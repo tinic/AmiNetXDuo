@@ -842,17 +842,6 @@ if(AMINETXDUO_UNITY)
         "${AMINETXDUO_NETXDUO}/common/src/nx_ip_address_change_notify.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_ip_interface_address_set.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_rarp_packet_receive.c"
-        # tx_initialize_high_level.c defines TX_INVOKE_INLINE_INITIALIZATION
-        # and THEN includes tx_thread.h, tx_event_flags.h and the rest, which
-        # is how tx_port.h's TX_INLINE_INITIALIZATION puts each component's
-        # data definitions in this one object.  It only works if this file is
-        # the first to reach those headers, and in a unity translation unit it
-        # is not: an earlier ThreadX file includes them plain, the guards then
-        # block the second include, the inline definitions never land, and the
-        # link comes apart with _tx_event_flags_initialize undefined and half
-        # of libthreadx.a pulled in on top of the copy already there.  The
-        # only file in either tree that does this.
-        "${AMINETXDUO_THREADX}/common/src/tx_initialize_high_level.c"
         # See the note below on the first code hunk.
         "${CMAKE_CURRENT_SOURCE_DIR}/src/bsdsocket/library.c")
     foreach(_x IN LISTS _unity_excluded)
@@ -860,6 +849,49 @@ if(AMINETXDUO_UNITY)
             message(FATAL_ERROR "unity exclusion is stale: ${_x}")
         endif()
     endforeach()
+
+    # Then the files that own a component's data, found rather than listed.
+    #
+    # Both trees use one idiom for this: the component's header declares its
+    # variables `extern` unless a macro is already defined, and exactly one
+    # source defines that macro before including the header, which is what
+    # puts the definitions in that object and nowhere else.
+    #
+    #     nx_ip_initialize.c:28   #define NX_IP_INIT
+    #     nx_ip.h:249             #ifdef NX_IP_INIT
+    #
+    # tx_initialize_high_level.c is the same shape through
+    # TX_INVOKE_INLINE_INITIALIZATION, which is how tx_port.h's
+    # TX_INLINE_INITIALIZATION collects every ThreadX component into that one
+    # object.
+    #
+    # In a unity translation unit an earlier file reaches the header first,
+    # the include guard blocks the second visit, and the definitions never
+    # land: the data comes out `extern` and undefined, the linker satisfies it
+    # from the archive, and that member arrives carrying a second copy of
+    # functions the unity object already has.  Six files, and the failure is
+    # `multiple definition of _nx_ip_initialize` -- which reads like the unity
+    # build duplicating work rather than a variable having gone missing.
+    #
+    # Scanned, not listed, because a list of vendored file names is wrong the
+    # next time the submodule moves and would fail the same obscure way.
+    set(_unity_owners "")
+    foreach(_s IN LISTS _unity_sources)
+        file(STRINGS "${_s}" _owns LIMIT_COUNT 1
+             REGEX "^#define[ \t]+(NX|TX)_[A-Z0-9_]*(_INIT|_INLINE_INITIALIZATION)[ \t]*$")
+        if(_owns)
+            list(APPEND _unity_owners "${_s}")
+        endif()
+    endforeach()
+    list(LENGTH _unity_owners _n_owners)
+    if(_n_owners EQUAL 0)
+        # It found six.  Zero means the idiom changed spelling, and the next
+        # symptom would be a link error naming the wrong thing.
+        message(FATAL_ERROR
+                "unity: no component-data owners found, the scan is broken")
+    endif()
+    list(APPEND _unity_excluded ${_unity_owners})
+    message(STATUS "  unity ......... ${_n_owners} component-data owners kept separate")
 
     # TARGET_DIRECTORY, and this is the whole reason the first attempt at
     # these exclusions did nothing: source file properties belong to the
