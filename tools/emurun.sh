@@ -130,9 +130,43 @@ RUNNER=tests/compare/run-compare.sh
 [ "$PROF" = 0 ] || RUNNER=tests/compare/run-compare-prof.sh
 [ -x "$RUNNER" ] || fail "no_runner:$RUNNER"
 
+# A watchdog on PROGRESS, not on total time.
+#
+# The guest writes stdout.txt as it works.  A run whose guest has written
+# nothing by the deadline is not slow, it is dead: the card is up, the machine
+# is at 50 fps, and nothing is coming.  Waiting out the 900 s timeout to learn
+# that costs fifteen minutes and produces the same empty file.  Roadshow leases
+# on the slowest machine here in 24 s.
+#
+# AMINETXDUO_EMURUN_PROGRESS overrides; 120 s is four times the slowest known
+# bring-up.
+PROGRESS_S="${AMINETXDUO_EMURUN_PROGRESS:-120}"
+HD="build/amiberry-testhd-$TAG"
+
 "$RUNNER" -s ours -w "$WORKLOAD" -b "$BUILD" -m "$MODEL" -T "$TAG" \
-          -P "$PORT" -B "$BYTES" -t 900 > "/tmp/emurun-$TAG.log" 2>&1
+          -P "$PORT" -B "$BYTES" -t 900 > "/tmp/emurun-$TAG.log" 2>&1 &
+_runner_pid=$!
+
+(
+    _waited=0
+    while kill -0 "$_runner_pid" 2>/dev/null; do
+        if [ -s "$HD/stdout.txt" ]; then
+            exit 0                      # the guest is alive; let it finish
+        fi
+        [ "$_waited" -ge "$PROGRESS_S" ] && break
+        sleep 5
+        _waited=$((_waited + 5))
+    done
+    kill -0 "$_runner_pid" 2>/dev/null || exit 0
+    echo "reason=no_guest_progress_in_${PROGRESS_S}s" >&2
+    pkill -9 -f "amiberry-$TAG[.]uae" 2>/dev/null
+    kill -9 "$_runner_pid" 2>/dev/null
+) &
+_watchdog=$!
+
+wait "$_runner_pid" 2>/dev/null
 rc=$?
+kill "$_watchdog" 2>/dev/null
 echo "runner_rc=$rc"
 
 # ---- postflight ----------------------------------------------------------
@@ -140,7 +174,6 @@ echo "runner_rc=$rc"
 # A run that reports success having produced nothing is the failure this file
 # exists for.  The artifacts decide, not the exit code.
 
-HD="build/amiberry-testhd-$TAG"
 guest=$( [ -s "$HD/stdout.txt" ] && echo yes || echo no )
 echo "guest_output=$guest"
 
