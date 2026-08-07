@@ -438,7 +438,6 @@ option(AMINETXDUO_HOT_O2 "Build the profiled hot paths at -O2" ON)
 
 set(AMINETXDUO_HOT_SOURCES
     "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_packet_process.c"
-    "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_data_trim_front.c"
     "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_send_internal.c"
     "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_ack_check.c"
     "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_packet_process.c"
@@ -447,13 +446,40 @@ set(AMINETXDUO_HOT_SOURCES
     "${AMINETXDUO_NETXDUO}/common/src/nx_packet_allocate.c"
     "${AMINETXDUO_NETXDUO}/common/src/nx_packet_release.c")
 
+# nx_tcp_socket_state_data_trim_front.c was in this list from 7fa4ad6 and does
+# not exist; the function lives in nx_tcp_socket_state_data_check.c, so the
+# entry warned into a configure log and built at -Os for as long as it was
+# here.  Naming the real file costs 484 bytes and measures worse -- that
+# function goes 49 samples to 59, wire 421/445 to 420/430 -- so the entry is
+# gone rather than corrected.  The warning is fatal now.
+#
+# MEASURED AND NOT TAKEN, 2026-08-07.  With the receive fusion on the ranking
+# is ours rather than NetX Duo's -- ami_sana2_rx_thread 3.8% against 1.8% for
+# the largest NetX Duo entry -- so the obvious move was to add our sana2,
+# transfer, select and rx_verify files, four ThreadX scheduler and mutex files,
+# and two more NetX Duo ones.  Eleven files, +7444 bytes, A1200 wire:
+#
+#     wire 422/446 against 421/445, total samples 2476 against 2486
+#
+# Nothing, for 2.4% of the library.  The per-function counts moved (recv_iov
+# +11, rx_verify_sum +12, mutex_put +18) with the total flat, which is code
+# being inlined from one name into another and not work going away.
+#
+# Our files compile in subdirectories, so adding them needs the source
+# property to carry a DIRECTORY, and that directory has to be added first --
+# the list would have to be applied below add_subdirectory(), not here.  That
+# is worth knowing if a future profile makes the case; this one did not.
+
 if(AMINETXDUO_HOT_O2)
     foreach(_hot IN LISTS AMINETXDUO_HOT_SOURCES)
         if(EXISTS "${_hot}")
             # After the -Os in CMAKE_C_FLAGS_RELEASE, and the last one wins.
             set_source_files_properties("${_hot}" PROPERTIES COMPILE_OPTIONS "-O2")
         else()
-            message(WARNING "hot source not found, the list is stale: ${_hot}")
+            # Fatal, not a warning.  A name that does not resolve builds the
+            # file at -Os and says so in a configure log, which is indis-
+            # tinguishable from the list working.
+            message(FATAL_ERROR "hot source not found, the list is stale: ${_hot}")
         endif()
     endforeach()
 endif()
