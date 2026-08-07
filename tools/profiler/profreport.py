@@ -1357,6 +1357,26 @@ def main():
     # twenty-byte strlen at 27% of a file transfer as a real result.
     #
     # So refuse. --allow-unresolved says the gap is understood and accepted.
+    # The same gate for the profiled program itself.  --lib resolving cleanly
+    # says nothing about the executable: a run can print a full library symbol
+    # table beside "symbols 0 from (none)" and rank a workload whose hottest
+    # task is the program.  Every sample in the program then lands on a module
+    # name, and a module that happens to be one small object reads as a hot
+    # function.  A map is not optional for the thing being measured.
+    if nsym == 0:
+        print()
+        print("!! No symbols for the profiled program: --map/--exe gave "
+              "nothing.")
+        print("!! Samples in it are named by MODULE, not by function, so a "
+              "small object")
+        print("!! reads as a hot leaf.  Link the program with -Wl,-Map and "
+              "pass --map,")
+        print("!! or pass --lib for whichever seglist actually holds the code "
+              "you mean.")
+        if not args.allow_unresolved:
+            print("!! Refusing. Pass --allow-unresolved to read it anyway.")
+            return 2
+
     thin = [lib for lib in res.libsyms.values()
             if getattr(lib, "coverage", 1.0) < 0.9]
     if thin:

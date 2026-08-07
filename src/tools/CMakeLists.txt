@@ -116,6 +116,14 @@ function(aminetxduo_add_tool target output)
         -ffunction-sections -fno-optimize-sibling-calls)
     target_link_options(${target} PRIVATE -Wl,--gc-sections)
 
+    # A map per tool, as the profiler targets already get.  Without one a
+    # profile of a tool resolves no symbols and ranks the tool by module, and
+    # a module that is one small library object then reads as a hot function.
+    # profreport refuses that case outright, so the map is what makes a tool
+    # profilable at all.
+    target_link_options(${target} PRIVATE
+        "-Wl,-Map=$<TARGET_FILE_DIR:${target}>/${output}.map")
+
     if(TOOL_DEFINES)
         target_compile_definitions(${target} PRIVATE ${TOOL_DEFINES})
     endif()
