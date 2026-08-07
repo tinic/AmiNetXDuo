@@ -1466,6 +1466,10 @@ static VOID do_listen(const char *raw)
 static VOID do_accept(const char *raw)
 {
     UWORD tries;
+    LONG  last = 0;
+    char  why[80];
+    char *w;
+    const char *t;
 
     for (tries = 0; tries < 50; tries++)
     {
@@ -1478,10 +1482,20 @@ static VOID do_accept(const char *raw)
             pass(raw);
             return;
         }
+        last = s_errno();
         pump();
         Delay(1);
     }
-    fail(raw, "accept() never produced a socket");
+
+    /* With the errno.  "never produced a socket" is the same sentence whether
+       the queue was empty, the listener was not listening, or the stack could
+       not park a spare, and those are three different faults. */
+    w = why;
+    t = "accept() never produced a socket, errno ";
+    while (*t != '\0') *w++ = *t++;
+    fmt_num(&w, (ULONG)last, 10, 0, TRUE);
+    *w = '\0';
+    fail(raw, why);
 }
 
 static VOID do_send(const char *args, const char *raw)
@@ -2049,6 +2063,17 @@ static VOID run_line(char *line)
         char tok[16];
         (VOID)token(args, tok, sizeof(tok));
         cs.peer_port = (UWORD)to_num(tok);
+
+        /*
+         * A different source port is a different connection, and a different
+         * connection has its own initial sequence number.  u_isn is latched
+         * from the first SYN of the case and every injected ack is computed
+         * from it, so without this the second connection's final ACK
+         * acknowledges the FIRST connection's SYN, the stack refuses it as it
+         * should, and the socket sits in SYN_RECEIVED for ever.  Forget it
+         * here and the next SYN-ACK observed re-latches it for this one.
+         */
+        cs.u_isn_known = FALSE;
     }
     else if (streq(verb, "localport"))
     {
