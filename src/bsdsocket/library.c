@@ -130,8 +130,38 @@ VOID bsd_strncpy(char *dst, const char *src, ULONG size)
 VOID bsd_bzero(APTR p, ULONG size)
 {
     UBYTE *q = (UBYTE *)p;
+    ULONG *l;
 
-    while (size-- > 0)
+    /* Up to the first aligned longword by bytes.  A word or longword access to
+       an odd address is an address error on a 68000, so this is required, not
+       an optimisation. */
+    while (size > 0u && (((ULONG)q) & 3u) != 0u)
+    {
+        *q++ = 0;
+        size--;
+    }
+
+    /* Four at a time: the callers that matter clear a whole BsdFdSets, which
+       is far larger than the loop overhead. */
+    l = (ULONG *)((APTR)q);
+    while (size >= 16u)
+    {
+        l[0] = 0UL;
+        l[1] = 0UL;
+        l[2] = 0UL;
+        l[3] = 0UL;
+        l    += 4;
+        size -= 16u;
+    }
+
+    while (size >= 4u)
+    {
+        *l++  = 0UL;
+        size -= 4u;
+    }
+
+    q = (UBYTE *)((APTR)l);
+    while (size-- > 0u)
         *q++ = 0;
 }
 
