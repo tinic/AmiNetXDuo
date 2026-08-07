@@ -195,13 +195,32 @@ if [ -n "$PEER" ]; then
     PEERLOG="$ROOT/build/stackprof-$TAG-peer.log"
     # The bracket is not decoration: pkill -f matches the remote shell's own
     # command line, so an unbracketed pattern kills the connection issuing it.
-    ssh "$PEER" "pkill -f '[f]itz-serve' || true" >/dev/null 2>&1 || true
+    ssh "$PEER" "pkill -f '[f]itz-serve .* PORT $PORT\$' || true" >/dev/null 2>&1 || true
     ssh "$PEER" "rm -rf $PEER_DIR; mkdir -p $PEER_DIR;
                  nohup $PEER_BIN $PEER_DIR PORT $PORT > /tmp/fitzbench-peer.log 2>&1 &
                  sleep 1; ps -o args= -C fitz-serve" > "$PEERLOG" 2>&1
     cat "$PEERLOG"
-    cleanup() { ssh "$PEER" "pkill -f '[f]itz-serve' || true" >/dev/null 2>&1 || true; }
+    cleanup() { ssh "$PEER" "pkill -f '[f]itz-serve .* PORT $PORT\$' || true" >/dev/null 2>&1 || true; }
     trap cleanup EXIT INT TERM HUP
+
+    # A forked child outlives the TERM its parent took and keeps the port, so
+    # the server started just above may never have bound it.  Nothing later in
+    # the run distinguishes that from a stack that cannot transfer.
+    PEER_BOUND=0
+    for _try in 1 2 3 4 5 6 7 8 9 10; do
+        if ssh "$PEER" "ss -lnt 2>/dev/null | grep -q ':$PORT '" 2>/dev/null; then
+            PEER_BOUND=1
+            break
+        fi
+        sleep 1
+    done
+    [ "$PEER_BOUND" = "1" ] || {
+        echo "the peer is not listening on $PORT after ten seconds." >&2
+        echo "A fitz-serve child from an earlier run may still hold it:" >&2
+        ssh "$PEER" "pgrep -af fitz-serve | head -5" >&2 2>/dev/null || true
+        echo "Clear it with: ssh $PEER \"pkill -9 -f 'fitz-serve .* PORT $PORT\$'\"" >&2
+        exit 2
+    }
 fi
 echo "==> $NOTE"
 echo "==> fitz-serve on $PEER_ADDR:$PORT"
