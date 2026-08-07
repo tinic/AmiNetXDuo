@@ -302,6 +302,7 @@ UINT        started;
         c68k_mont_sqr(acc, xm, m, m_len, n0inv, work);
         for (i = 1; i < table_size; i++)
         {
+            C68K_YIELD();
             c68k_mont_mul(&table[i * m_len], &table[(i - 1u) * m_len], acc,
                           m, m_len, n0inv, work);
         }
@@ -317,6 +318,8 @@ UINT        started;
 
     while (pos >= 0)
     {
+        C68K_YIELD();
+
         if (c68k_bit(e, (UINT)pos) == 0)
         {
             if (started != 0)
