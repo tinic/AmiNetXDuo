@@ -97,6 +97,37 @@
 
 | a0 = to, a1 = from, d0 = len
 _n68k_copy_bytes:
+#ifndef N68K_NO_MOVEM
+| SHORT COPIES TOUCH NO CALLEE-SAVED REGISTER.
+|
+| This routine is the tree's memcpy(), and the calls it gets are mostly small:
+| a 20-byte TCP header per received packet is one of the three callers Profile
+| WATCH proved over an A600 transfer.  Saving d2-d7/a2-a3 and putting them back
+| is sixteen longword accesses, about what twenty bytes of copying costs, and
+| the entry below paid it before it had looked at the length.
+|
+| The threshold is the one the bulk path already uses: under 32 bytes it would
+| have gone to the byte loop regardless, so nothing that used to take the movem
+| path stops taking it.  A byte loop needs no alignment or parity argument.
+        movea.l sp@(4),a0
+        movea.l sp@(8),a1
+        move.l  sp@(12),d0
+
+        moveq   #32,d1
+        cmp.l   d1,d0
+        bcc     .Lfull                  | 32 or more: the routine proper
+
+        tst.l   d0
+        beq     .Lshort_out
+.Lshort:
+        move.b  a1@+,a0@+
+        subq.l  #1,d0
+        bne     .Lshort
+.Lshort_out:
+        rts
+
+.Lfull:
+#endif
 | No callee-saved registers are touched on the path that does not use movem:
 | it works entirely in a0, a1, d0 and d1, all of which are the caller's to
 | lose.  Saving eight registers and restoring them is then pure overhead on
