@@ -31,6 +31,27 @@ project(AmiNetXDuo VERSION 0.18.0 LANGUAGES C ASM)
 set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG"
     CACHE STRING "C flags for Release builds" FORCE)
 
+# No CMAKE_BUILD_TYPE means no -O at all, and that is a 45% throughput cliff.
+#
+# CMake adds nothing to CMAKE_C_FLAGS when the build type is empty, so a
+# configure line that omits it compiles the whole tree at -O0 except the few
+# files AMINETXDUO_HOT_O2 marks.  bsdsocket.library comes out 504,904 bytes
+# instead of 308,248, and tests/compare/run-compare.sh -w bench on the A1200
+# profile reads 291 KB/s over the wire and 362 on loopback against 425 and 500
+# for the same commit built Release.  Roadshow, being a fixed binary, is
+# unaffected, so the arm that moves is ours and the run looks like a defect in
+# this stack.
+#
+# .github/workflows/{release,emulator}.yml and tools/ci.sh all pass Release, so
+# nothing shipped was ever built this way; what was built this way is every
+# measurement taken from a hand-configured tree.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release
+        CACHE STRING "Build type (Release, Debug, RelWithDebInfo, MinSizeRel)"
+        FORCE)
+    message(STATUS "No CMAKE_BUILD_TYPE given; using Release")
+endif()
+
 # ---------------------------------------------------------------- options ---
 
 option(AMINETXDUO_IPV6 "Build the IPv6 dual stack"                    ON)
