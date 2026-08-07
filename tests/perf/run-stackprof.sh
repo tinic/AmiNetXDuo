@@ -131,6 +131,16 @@ done
 [ -n "$STACK" ] || { sed -n '3,50p' "$0" >&2; exit 2; }
 [ -n "$TAG" ] || TAG="sp-$STACK$([ "$PROFILE" = 1 ] || echo -plain)$([ "$DIAG" = 0 ] || echo -diag)"
 
+# The peer port, when nobody asked for one.  A run that shares a port with
+# another run does not fail: it reports a number measured against somebody
+# else's traffic, which is worse.  tools/amiberry-run.sh derives its own the
+# same way, and TAG is only known here.
+if [ -z "$PORT" ]; then
+    # TAG and the pid: two runs with the same tag -- both instances asking
+    # for -s ours with no -T -- would otherwise still share a port.
+    PORT=$((17000 + ($(printf %s "$TAG" | cksum | cut -d" " -f1) + $$) % 700))
+fi
+
 case "$BUILD" in /*) ;; *) BUILD="$ROOT/$BUILD" ;; esac
 
 case "$PEER" in
