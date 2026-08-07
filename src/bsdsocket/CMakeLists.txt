@@ -164,5 +164,14 @@ if(AMINETXDUO_BSDSOCKET_LINK)
             COMMAND "${CMAKE_STRIP}" "$<TARGET_FILE:bsdsocket_library>"
             VERBATIM)
     endif()
+
+    # library.c's "moveq #-1,d0 / rts" has to stay at offset 0 of the first
+    # code hunk, and nothing but this object's position on the link line puts
+    # it there.  See cmake/check-library-entry.cmake.
+    add_custom_command(TARGET bsdsocket_library POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+                "-DLIBRARY_BINARY=$<TARGET_FILE:bsdsocket_library>"
+                -P "${CMAKE_SOURCE_DIR}/cmake/check-library-entry.cmake"
+        VERBATIM)
 endif()
 

@@ -479,51 +479,22 @@ foreach(_hot IN LISTS AMINETXDUO_HOT_SOURCES)
     endif()
 endforeach()
 
-# The same list as one translation unit, which is the only inlining across
-# files this tree can have -- the toolchain gives us no -flto.
+# bsdsocket.library as ONE translation unit: our sources, the NetX Duo core,
+# the add-ons and ThreadX all compiled together.  This toolchain has no -flto,
+# so a unity build is the only way a call from our code into NetX Duo, or
+# between two NetX Duo files, can be inlined at all -- and the tree is full of
+# one-line forwarders that cost a jsr and an rts with nothing in between.
 #
-# OFF, and an alternative to the -O2 path rather than a layer on it: cmake
-# drops any source carrying COMPILE_OPTIONS or COMPILE_FLAGS out of the unity
-# file and compiles it alone (checked on 4.3.2), so setting both would leave
-# the unity translation unit holding nothing.  The list therefore moves to its
-# own object library, where -O2 arrives at target level and nothing is
-# excluded.
+# OFF, and it EXCLUDES the -O2 path rather than layering on it: cmake drops any
+# source carrying COMPILE_OPTIONS or COMPILE_FLAGS out of the unity file and
+# compiles it alone (checked on 4.3.2), so setting both would leave the unity
+# translation unit holding everything except the files we care about most, and
+# nothing would say so.
 #
-# What it can buy over -O2 alone is the calls between these files, mostly the
-# packet allocate/release and data_append pairs.  What it costs is the profile:
-# a function inlined into a neighbour stops appearing under its own name, and
-# the last two hot-list experiments both moved counts between names without
-# moving the total.
-option(AMINETXDUO_HOT_UNITY "Compile the hot list as one translation unit" OFF)
+# Applied at the bottom of this file, where every target exists.
+option(AMINETXDUO_UNITY "Build bsdsocket.library as one translation unit" OFF)
 
-if(AMINETXDUO_HOT_UNITY)
-    list(LENGTH NETXDUO_SOURCES _hot_before)
-    list(REMOVE_ITEM NETXDUO_SOURCES ${AMINETXDUO_HOT_SOURCES})
-    list(LENGTH NETXDUO_SOURCES _hot_after)
-    list(LENGTH AMINETXDUO_HOT_SOURCES _hot_count)
-    math(EXPR _hot_removed "${_hot_before} - ${_hot_after}")
-    if(NOT _hot_removed EQUAL _hot_count)
-        # A path that does not match the glob's spelling leaves the file in
-        # both targets, and the duplicate symbols only surface at link.
-        message(FATAL_ERROR
-                "hot list did not come out of NETXDUO_SOURCES: removed "
-                "${_hot_removed} of ${_hot_count}")
-    endif()
-
-    add_library(netxduo_hot OBJECT ${AMINETXDUO_HOT_SOURCES})
-    set_target_properties(netxduo_hot PROPERTIES
-                          UNITY_BUILD ON
-                          UNITY_BUILD_BATCH_SIZE 0)
-    target_link_libraries(netxduo_hot PRIVATE threadx)
-    target_include_directories(netxduo_hot PRIVATE ${AMINETXDUO_CORE_INCLUDES})
-    # As the vendored archives below, and for the same reason: --gc-sections
-    # still collects per function inside a unity object.
-    target_compile_options(netxduo_hot PRIVATE
-                           -ffunction-sections -fno-optimize-sibling-calls)
-    if(AMINETXDUO_HOT_O2)
-        target_compile_options(netxduo_hot PRIVATE -O2)
-    endif()
-elseif(AMINETXDUO_HOT_O2)
+if(NOT AMINETXDUO_UNITY AND AMINETXDUO_HOT_O2)
     foreach(_hot IN LISTS AMINETXDUO_HOT_SOURCES)
         # After the -Os in CMAKE_C_FLAGS_RELEASE, and the last one wins.
         set_source_files_properties("${_hot}" PROPERTIES COMPILE_OPTIONS "-O2")
@@ -531,9 +502,6 @@ elseif(AMINETXDUO_HOT_O2)
 endif()
 
 add_library(netxduo STATIC ${NETXDUO_SOURCES})
-if(TARGET netxduo_hot)
-    target_sources(netxduo PRIVATE $<TARGET_OBJECTS:netxduo_hot>)
-endif()
 target_include_directories(netxduo PUBLIC
     ${AMINETXDUO_CORE_INCLUDES})
 target_link_libraries(netxduo PUBLIC threadx)
@@ -720,6 +688,111 @@ if(AMINETXDUO_TESTS)
     # Diagnostic probes, built, never auto-run.  Two of them crash on
     # purpose; see tools/smoke/CMakeLists.txt.
     add_subdirectory(tools/smoke)
+endif()
+
+# ------------------------------------------------------------------ unity --
+#
+# Everything bsdsocket.library is made of, in one translation unit.  See the
+# option's note further up for why this excludes AMINETXDUO_HOT_O2.
+#
+# Down here because it reads targets rather than variables: the source lists
+# live in the subdirectories, and a target's SOURCES property is the only
+# spelling of them that cannot go stale.
+
+# A target's C sources, absolute.  SOURCES is relative to the target's own
+# source directory, which is not this one for anything under src/.
+function(aminetxduo_c_sources out tgt)
+    get_target_property(_dir "${tgt}" SOURCE_DIR)
+    get_target_property(_srcs "${tgt}" SOURCES)
+    set(_result "")
+    foreach(_s IN LISTS _srcs)
+        if(NOT IS_ABSOLUTE "${_s}")
+            set(_s "${_dir}/${_s}")
+        endif()
+        # .S stays out: cmake's unity build is C and C++ only, and the
+        # assembly has nothing to inline into anyway.
+        if(_s MATCHES "\\.c$")
+            list(APPEND _result "${_s}")
+        endif()
+    endforeach()
+    set(${out} "${_result}" PARENT_SCOPE)
+endfunction()
+
+if(AMINETXDUO_UNITY)
+    if(NOT TARGET bsdsocket_library)
+        message(FATAL_ERROR
+                "AMINETXDUO_UNITY needs AMINETXDUO_BSDSOCKET_LINK, which is OFF")
+    endif()
+
+    # The libraries bsdsocket_library links, which is what decides the set:
+    # merging anything it does not link would put code in the binary that the
+    # archive form leaves out.
+    set(_unity_targets
+        threadx threadx_port netxduo netxduo_addons
+        aminetxduo_netstack aminetxduo_sana2 aminetxduo_config
+        aminetxduo_common)
+    if(AMINETXDUO_BPF)
+        list(APPEND _unity_targets aminetxduo_bpf)
+    endif()
+
+    set(_unity_sources "")
+    foreach(_t IN LISTS _unity_targets)
+        if(NOT TARGET ${_t})
+            message(FATAL_ERROR "unity: no such target, the list is stale: ${_t}")
+        endif()
+        aminetxduo_c_sources(_s ${_t})
+        list(APPEND _unity_sources ${_s})
+    endforeach()
+
+    # The archives stay on the link line for their .S members.  Their C
+    # members are simply never pulled: an archive member is only taken when it
+    # defines a symbol still undefined, and every one of these is now defined
+    # in the executable's own object.
+    target_sources(bsdsocket_library PRIVATE ${_unity_sources})
+    set_target_properties(bsdsocket_library PROPERTIES
+                          UNITY_BUILD ON
+                          UNITY_BUILD_BATCH_SIZE 0)
+
+    # File scope becomes shared scope, and three names are defined twice
+    # across the 812 C files here.  Excluded rather than renamed: none is on a
+    # data path, and renaming vendored code is a merge conflict every time the
+    # submodule moves.
+    set_source_files_properties(
+        "${AMINETXDUO_NETXDUO}/addons/mdns/nxd_mdns.c"       # temp_string_buffer
+        PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+
+    # library.c holds the "moveq #-1,d0 / rts" that has to be at offset 0 of
+    # the first code hunk, and inside a unity file GCC decides the emission
+    # order, not us.  Out of the group, so its object stays first on the link
+    # line as before.  cmake/check-library-entry.cmake proves it after the
+    # link, because this is not something to find out on an Amiga.
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/bsdsocket/library.c"
+        PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+
+    # NX_SOURCE_CODE and TX_SOURCE_CODE: 518 of the 522 NetX Duo core files
+    # and 184 of the 185 ThreadX ones open by defining these, and none of ours
+    # does.  In one translation unit the first file to include nx_api.h
+    # decides for everybody, so leaving it to file order would let a submodule
+    # bump silently change which API our call sites bind to.  Fixed here
+    # instead, deliberately.
+    #
+    # WHAT IT COSTS: with NX_SOURCE_CODE set, our `nx_xxx()` calls bind to
+    # `_nx_xxx` rather than the `_nxe_xxx` error-checking wrapper, which is
+    # NX_DISABLE_ERROR_CHECKING for our call sites in all but name.  Measured
+    # neutral before this existed -- 580/216 KB/s against 584/216, and the
+    # reasoning is in port/netxduo-amiga/inc/nx_user.h -- but it is a
+    # behaviour change and not only a size one: a bad argument that used to
+    # come back as NX_PTR_ERROR now reaches the core.
+    target_compile_definitions(bsdsocket_library PRIVATE
+                               NX_SOURCE_CODE TX_SOURCE_CODE)
+
+    # -ffunction-sections is not optional here, where it is a measured cost on
+    # our sources in the archive build: one translation unit is one object,
+    # and without per-function sections --gc-sections has nothing to collect
+    # and the binary keeps every function in the stack.
+    target_compile_options(bsdsocket_library PRIVATE
+                           -ffunction-sections -fno-optimize-sibling-calls)
 endif()
 
 # ------------------------------------------------------------------ report --
