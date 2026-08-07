@@ -53,6 +53,40 @@ VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
         memcpy(to, from, (size_t)len);
 }
 
+/* The contract from src/net68k/n68k_checksum.c, not a memcpy: the transmit
+   checksum is only correct if this is, and a stub that copied without summing
+   would make every checksum assertion in this file pass for free. */
+ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count)
+{
+    ULONG acc = 0;
+
+    while (count != 0UL)
+    {
+        ULONG w = *from++;
+
+        *to++ = w;
+
+        acc += w;
+        if (acc < w)
+            acc++;
+
+        count--;
+    }
+
+    return acc;
+}
+
+/* NetX Duo's deferred checksum path, which ami_sana2_copy_from_buff() hands a
+   packet the fusion declined.  Counted rather than performed: what the tests
+   below assert is WHICH packets end up here. */
+unsigned long h_deferred_checksums;
+
+VOID _nx_ip_packet_checksum_compute(NX_PACKET *packet_ptr)
+{
+    (VOID)packet_ptr;
+    h_deferred_checksums++;
+}
+
 
 /* ------------------------------------------------------------- the frame -- */
 
