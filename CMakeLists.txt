@@ -826,27 +826,45 @@ if(AMINETXDUO_UNITY)
     #                   public name -- the member name is rewritten too and the
     #                   struct has no such field.  A function-like macro
     #                   expands after `->` like anywhere else.
+    #
+    # the add-ons        nxd_dns.c, nxd_dhcp_client.c and nx_auto_ip.c declare
+    #                    their own internal _nx_ prototypes only under
+    #                    NX_DNS_SOURCE_CODE and friends, so each one needs the
+    #                    macro layer OFF while src/netstack/ needs it on.  That
+    #                    is a real conflict and not an ordering accident.  No
+    #                    loss: DHCP, DNS and AutoIP are control plane, and the
+    #                    data path never calls into them.
     set(_unity_excluded
         "${AMINETXDUO_NETXDUO}/addons/mdns/nxd_mdns.c"
+        "${AMINETXDUO_NETXDUO}/addons/dns/nxd_dns.c"
+        "${AMINETXDUO_NETXDUO}/addons/dhcp/nxd_dhcp_client.c"
+        "${AMINETXDUO_NETXDUO}/addons/auto_ip/nx_auto_ip.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_ip_address_change_notify.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_ip_interface_address_set.c"
-        "${AMINETXDUO_NETXDUO}/common/src/nx_rarp_packet_receive.c")
+        "${AMINETXDUO_NETXDUO}/common/src/nx_rarp_packet_receive.c"
+        # See the note below on the first code hunk.
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/bsdsocket/library.c")
     foreach(_x IN LISTS _unity_excluded)
         if(NOT EXISTS "${_x}")
             message(FATAL_ERROR "unity exclusion is stale: ${_x}")
         endif()
     endforeach()
-    set_source_files_properties(${_unity_excluded}
-        PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
 
-    # library.c holds the "moveq #-1,d0 / rts" that has to be at offset 0 of
-    # the first code hunk, and inside a unity file GCC decides the emission
-    # order, not us.  Out of the group, so its object stays first on the link
-    # line as before.  cmake/check-library-entry.cmake proves it after the
-    # link, because this is not something to find out on an Amiga.
-    set_source_files_properties(
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/bsdsocket/library.c"
-        PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+    # TARGET_DIRECTORY, and this is the whole reason the first attempt at
+    # these exclusions did nothing: source file properties belong to the
+    # DIRECTORY that sets them, bsdsocket_library is declared in
+    # src/bsdsocket/, and setting them here reached a different scope's copy
+    # of the same file.  Silently -- every exclusion above was ignored and the
+    # build simply failed somewhere else.
+    set_property(SOURCE ${_unity_excluded}
+                 TARGET_DIRECTORY bsdsocket_library
+                 PROPERTY SKIP_UNITY_BUILD_INCLUSION ON)
+
+    # library.c, excluded above, holds the "moveq #-1,d0 / rts" that has to be
+    # at offset 0 of the first code hunk, and inside a unity file GCC decides
+    # the emission order, not us.  Out of the group, so its object stays first
+    # on the link line as before.  cmake/check-library-entry.cmake proves it
+    # after the link, because this is not something to find out on an Amiga.
 
     # tx_api.h and nx_api.h, included first and with neither NX_SOURCE_CODE
     # nor TX_SOURCE_CODE set.
