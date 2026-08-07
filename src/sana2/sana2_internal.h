@@ -241,6 +241,18 @@ typedef struct AmiRxSlot
     UCHAR              *dst;        /* where S2_CopyToBuff must write      */
     ULONG               capacity;   /* bytes available at dst              */
     ULONG               copied;     /* set by the copy hook                */
+#ifdef AMINETXDUO_RX_VERIFY
+    /*
+     * The frame's ones-complement sum, computed out of the loads the copy is
+     * already doing.  Here rather than in NX_PACKET because this struct is
+     * ours and its lifetime is the slot's: it is written by the copy hook and
+     * read by the drain, one request apart, and re-armed before the next.
+     * Growing NX_PACKET to carry the same value wedged the stack, so it is
+     * not carried there.
+     */
+    ULONG               sum;
+    BOOL                summed;
+#endif
     BOOL                posted;
 } AmiRxSlot;
 
@@ -394,7 +406,13 @@ VOID ami_sana2_unbind(AmiSana2If *iface);
 /* sana2_rx.c */
 LONG ami_sana2_rx_start(AmiSana2If *iface);
 VOID ami_sana2_rx_stop(AmiSana2If *iface);
-VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet);
+/*
+ * `slot` is the request the frame arrived on, or NULL when there is none.  It
+ * carries the sum the copy hook computed, which is what lets the verification
+ * below avoid a second walk of the payload.
+ */
+VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
+                          const AmiRxSlot *slot);
 
 /* sana2_tx.c */
 VOID ami_sana2_tx_init(AmiSana2If *iface);

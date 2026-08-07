@@ -56,7 +56,8 @@ if(AMINETXDUO_NET68K_ASM)
     list(APPEND NET68K_SOURCES n68k_checksum.S n68k_copy.S)
 endif()
 
-add_library(aminetxduo_net68k STATIC ${NET68K_SOURCES})
+add_library(aminetxduo_net68k STATIC ${NET68K_SOURCES}
+    n68k_rx_verify.c)
 
 target_include_directories(aminetxduo_net68k PUBLIC
     ${AMINETXDUO_CORE_INCLUDES}

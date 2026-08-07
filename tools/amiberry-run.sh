@@ -106,15 +106,8 @@ EXE="$1"; shift
 [ -f "$EXE" ] || { echo "no such executable: $EXE" >&2; exit 2; }
 EXE_NAME=$(basename "$EXE")
 
-AMIBERRY="${AMIBERRY:-}"
-if [ -z "$AMIBERRY" ]; then
-    for candidate in "$(command -v amiberry || true)" "$HOME/amiberry/build/amiberry"; do
-        [ -n "$candidate" ] && [ -x "$candidate" ] && { AMIBERRY="$candidate"; break; }
-    done
-fi
-[ -n "$AMIBERRY" ] && [ -x "$AMIBERRY" ] || {
-    echo "amiberry not found; set AMIBERRY=<path>" >&2; exit 2
-}
+. "$ROOT/tools/amiberry-resolve.sh"
+amiberry_resolve || exit 2
 
 # ---------------------------------------------------------------- kickstart --
 
