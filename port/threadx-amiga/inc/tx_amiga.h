@@ -174,7 +174,14 @@ typedef struct TX_AMIGA_TICK_STATS_STRUCT
     ULONG   tx_amiga_tick_clipped;          /* catch-ups that hit the cap     */
     ULONG   tx_amiga_tick_lost;             /* ticks dropped by those clips   */
     ULONG   tx_amiga_tick_service_us;       /* total time IN the task, us     */
-    ULONG   tx_amiga_tick_uptime_ms;        /* E-Clock ms since the tick began*/
+    ULONG   tx_amiga_tick_uptime_ms;        /* WHOLE SECONDS of it, in ms     */
+    /* The rest of the current second, in E-Clock ticks.  The tick task keeps
+       this by subtraction because dividing by the E-Clock rate is a
+       32-iteration shift-subtract on a 68000 -- 709379 does not fit the 16-bit
+       divisor its DIVU takes -- and at 50 Hz that was 1.1% of an A600, found
+       by Profile WATCH over the divide helper.  tx_amiga_uptime_ms() below
+       puts the two together for whoever actually asks. */
+    ULONG   tx_amiga_tick_uptime_rem;
     /* The worst stall ever seen, kept because only the first few are logged
        and a machine that then freezes never flushes the log anyway. A priority
        20 task not dispatched for this long, next to a service cost in the
@@ -206,6 +213,28 @@ VOID    tx_amiga_tick_stats(TX_AMIGA_TICK_STATS *stats);
  * tx_amiga_tick_stats(), which returns one consistent snapshot.
  */
 TX_AMIGA_TICK_STATS *tx_amiga_tick_stats_live(VOID);
+
+
+/*
+ * Uptime in milliseconds: whole seconds the tick task counted, plus the part
+ * second it did not convert.
+ *
+ * THE DIVIDE IS HERE ON PURPOSE.  Callers are NetStat, the netstatus block and
+ * the tickclock smoke test, all of which ask when a human or a test does; the
+ * tick task runs fifty times a second at priority 20 and is the wrong place to
+ * spend a 32-iteration divide on a number nobody reads at that rate.
+ */
+static __inline ULONG tx_amiga_uptime_ms(const TX_AMIGA_TICK_STATS *t)
+{
+    ULONG hz = t -> tx_amiga_tick_eclock_hz;
+
+    if (hz == 0UL)
+    {
+        return(t -> tx_amiga_tick_uptime_ms);
+    }
+    return(t -> tx_amiga_tick_uptime_ms +
+           ((t -> tx_amiga_tick_uptime_rem * 1000UL) / hz));
+}
 
 
 /* ------------------------------------------------------------------------ */

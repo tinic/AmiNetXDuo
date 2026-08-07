@@ -19,6 +19,10 @@
 
 #include "net68k.h"
 
+/* _nx_ip_packet_checksum_compute(): the deferred path a declined fusion
+   hands the packet to. */
+#include "nx_ip.h"
+
 /*
  * The copy loop is not newlib's memcpy: this runs at interrupt level and a
  * shared library should not depend on the C library's implementation there.
@@ -156,6 +160,158 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
  * stands. For the common single-buffer, single-call frame both are no-ops and
  * this reduces to one copy from the prepend pointer.
  */
+/*
+ * Copy one whole TCP frame into `out`, summing as it goes, and write the
+ * checksum into the device's buffer.  TRUE if it did; FALSE leaves the packet
+ * untouched for the caller to hand to NetX Duo.
+ *
+ * The pseudo-header is the source and destination addresses, the protocol and
+ * the TCP length, which is what RFC 793 puts in front of the segment; the
+ * segment itself is summed with its checksum field still zero, which is the
+ * identity for a ones-complement sum and is what the send path left there.
+ */
+/*
+ * Copy `len` bytes and return the ones-complement accumulator of what was
+ * copied, in the convention n68k_copy_sum_longwords() uses: the caller folds,
+ * and a partial trailing longword is padded with zeroes exactly as a walk
+ * over the same bytes pads it.
+ */
+static ULONG ami_sana2_copy_sum(UCHAR *to, const UCHAR *from, ULONG len)
+{
+    union { ULONG l; UCHAR b[4]; } w;
+    ULONG words, tail, sum, i, k, n;
+
+    if ((((ALIGN_TYPE)to | (ALIGN_TYPE)from) & 1) != 0)
+    {
+        /* Odd on one side, where a 68000 permits no word access at all.  The
+           pools this driver copies between are longword aligned, so this is
+           unreachable today and exists so the answer does not depend on that
+           staying true. */
+        ami_sana2_copy_bytes(to, from, len);
+
+        sum = 0UL;
+        for (i = 0UL; i < len; i += 4UL)
+        {
+            n = len - i;
+            if (n > 4UL)
+                n = 4UL;
+
+            w.l = 0UL;
+            for (k = 0UL; k < n; k++)
+                w.b[k] = from[i + k];
+
+            sum += w.l;
+            if (sum < w.l)
+                sum++;
+        }
+        return sum;
+    }
+
+    words = len >> 2;
+    tail  = len & 3UL;
+
+    sum = n68k_copy_sum_longwords((ULONG *)(void *)to,
+                                  (const ULONG *)(const void *)from, words);
+
+    if (tail != 0UL)
+    {
+        const UCHAR *sp = from + (words << 2);
+        UCHAR       *dp = to + (words << 2);
+
+        w.l = 0UL;
+        for (i = 0UL; i < tail; i++)
+        {
+            dp[i]  = sp[i];
+            w.b[i] = sp[i];
+        }
+
+        sum += w.l;
+        if (sum < w.l)
+            sum++;
+    }
+
+    return sum;
+}
+
+static BOOL ami_sana2_tx_fuse_checksum(AmiTxSlot *slot, UCHAR *out, ULONG len)
+{
+    NX_PACKET *pkt = slot->packet;
+    const UCHAR *ip;
+    ULONG        ihl, total, tcp_len, sum;
+    UCHAR       *csum;
+
+    if (slot->iface == NULL || slot->iface->raw_mode)
+        return FALSE;                   /* the frame would start at Ethernet */
+
+    if (len != slot->total)
+        return FALSE;                   /* not the whole frame in one call   */
+
+#ifndef NX_DISABLE_PACKET_CHAIN
+    if (pkt->nx_packet_next != NX_NULL)
+        return FALSE;                   /* chained: one contiguous run only  */
+#endif
+
+    ip = (const UCHAR *)pkt->nx_packet_prepend_ptr;
+
+    if (len < 40 || (ip[0] & 0xF0) != 0x40)
+        return FALSE;                   /* not IPv4                          */
+
+    ihl = (ULONG)(ip[0] & 0x0F) * 4UL;
+    if (ihl < 20 || ihl + 20 > len)
+        return FALSE;
+
+    if (ip[9] != 6)                     /* not TCP                           */
+        return FALSE;
+
+    if ((((ULONG)ip[6] << 8) | ip[7]) & 0x3FFF)
+        return FALSE;                   /* a fragment has no whole segment   */
+
+    total = ((ULONG)ip[2] << 8) | ip[3];
+    if (total > len || total < ihl + 20)
+        return FALSE;                   /* padded or malformed               */
+
+    tcp_len = total - ihl;
+
+    /* Copy and sum in one pass; the IP header is copied but not summed. */
+    ami_sana2_copy_bytes(out, ip, ihl);
+    sum = ami_sana2_copy_sum(out + ihl, ip + ihl, tcp_len);
+
+    /* Anything past the datagram is padding the device wants but the
+       checksum does not cover. */
+    if (len > total)
+        ami_sana2_copy_bytes(out + total, ip + total, len - total);
+
+    /* Fold what the copy accumulated to sixteen bits before the
+       pseudo-header goes on top of it. */
+    while (sum >> 16)
+        sum = (sum & 0xFFFFUL) + (sum >> 16);
+
+    /* The pseudo-header: addresses, protocol, TCP length. */
+    sum += ((ULONG)ip[12] << 8) | ip[13];
+    sum += ((ULONG)ip[14] << 8) | ip[15];
+    sum += ((ULONG)ip[16] << 8) | ip[17];
+    sum += ((ULONG)ip[18] << 8) | ip[19];
+    sum += 6UL;
+    sum += tcp_len;
+
+    while (sum >> 16)
+        sum = (sum & 0xFFFFUL) + (sum >> 16);
+
+    sum = (~sum) & 0xFFFFUL;
+    if (sum == 0UL)
+        sum = 0xFFFFUL;                 /* TCP has no "no checksum" value    */
+
+    csum = out + ihl + 16;
+    csum[0] = (UCHAR)(sum >> 8);
+    csum[1] = (UCHAR)(sum & 0xFF);
+
+    slot->consumed   = len;
+    slot->cursor     = pkt;
+    slot->cursor_off = len;
+
+    return TRUE;
+}
+
 BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
                               register APTR from __asm("a1"),
                               register ULONG len __asm("d0"))
@@ -178,6 +334,34 @@ BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
         slot->cursor     = slot->packet;
         slot->cursor_off = 0;
         slot->consumed   = 0;
+    }
+
+    /*
+     * The transmit checksum, out of the loads the copy is about to do.
+     *
+     * Only at the start of a frame, and only when this one call takes all of
+     * it from one unchained packet: the answer has to be written into the
+     * device's buffer at a fixed offset, and a chunked or chained copy cannot
+     * promise that the chunk holding the field is still addressable when the
+     * last byte arrives.  Everything else is handed to NetX Duo's own
+     * deferred path, which fills the field into the packet BEFORE the copy
+     * reads it, so the slow case is correct by construction rather than by
+     * this function getting it right.
+     */
+    if (slot->consumed == 0 && slot->packet != NULL &&
+        (slot->packet->nx_packet_interface_capability_flag &
+         NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) != 0)
+    {
+        if (ami_sana2_tx_fuse_checksum(slot, out, len))
+        {
+            slot->packet->nx_packet_interface_capability_flag &=
+                (ULONG)(~NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM);
+        }
+        else
+        {
+            /* NetX Duo fills it into the packet and clears the flag. */
+            _nx_ip_packet_checksum_compute(slot->packet);
+        }
     }
 
     cur = slot->cursor;

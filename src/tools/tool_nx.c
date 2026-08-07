@@ -507,7 +507,7 @@ BOOL tool_health_mark(ToolStats *out)
     out->tick_clipped          = tick.tx_amiga_tick_clipped;
     out->tick_lost             = tick.tx_amiga_tick_lost;
     out->tick_service_us       = tick.tx_amiga_tick_service_us;
-    out->tick_uptime_ms        = tick.tx_amiga_tick_uptime_ms;
+    out->tick_uptime_ms        = tx_amiga_uptime_ms(&tick);
     out->tick_worst_stall_ms   = tick.tx_amiga_tick_worst_stall_ms;
     out->tick_worst_service_us = tick.tx_amiga_tick_worst_service_us;
     out->tick_over_budget      = tick.tx_amiga_tick_over_budget;

@@ -845,7 +845,7 @@ static VOID ns_fill_health(NetStatusHealth *out)
     out->nsl_TickClipped        = tick.tx_amiga_tick_clipped;
     out->nsl_TickLost           = tick.tx_amiga_tick_lost;
     out->nsl_TickServiceUs      = tick.tx_amiga_tick_service_us;
-    out->nsl_TickUptimeMs       = tick.tx_amiga_tick_uptime_ms;
+    out->nsl_TickUptimeMs       = tx_amiga_uptime_ms(&tick);
     out->nsl_TickWorstStallMs   = tick.tx_amiga_tick_worst_stall_ms;
     out->nsl_TickWorstServiceUs = tick.tx_amiga_tick_worst_service_us;
     out->nsl_TickOverBudget     = tick.tx_amiga_tick_over_budget;

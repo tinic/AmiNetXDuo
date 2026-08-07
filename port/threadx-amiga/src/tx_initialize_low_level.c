@@ -640,9 +640,6 @@ ULONG                advance;
 ULONG                last_lo;
 ULONG                up_lo;      /* last reading the uptime was advanced from */
 ULONG                up_rem;     /* E-Clock ticks not yet worth a millisecond */
-ULONG                up_gain;
-ULONG                up_carry;   /* thousandths of a tick */
-ULONG                up_num;
 ULONG                backlog;
 ULONG                measured;
 ULONG                delta;
@@ -901,7 +898,6 @@ UINT                 armed;
     last_lo =  now.ev_lo;
     up_lo    =  now.ev_lo;
     up_rem   =  0UL;
-    up_carry =  0UL;
 
     if (armed == TX_FALSE)
     {
@@ -952,16 +948,23 @@ UINT                 armed;
            0.05% fast, which reads as drift against an honest clock.  */
         up_rem  +=  (ULONG) (now.ev_lo - up_lo);
         up_lo    =  now.ev_lo;
-        if (up_rem >= eclock_hz)
+
+        /* WHILE, not IF: a wakeup more than two seconds late would otherwise
+           leave a second in the remainder for good, and a remainder above the
+           rate makes tx_amiga_uptime_ms() report past the next second. */
+        while (up_rem >= eclock_hz)
         {
             up_rem -=  eclock_hz;
             _tx_amiga_tick.tx_amiga_tick_uptime_ms +=  1000UL;
         }
-        up_gain  =  (up_rem * 1000UL) / eclock_hz;
-        _tx_amiga_tick.tx_amiga_tick_uptime_ms +=  up_gain;
-        up_num   =  up_gain * eclock_hz + up_carry;
-        up_rem  -=  up_num / 1000UL;
-        up_carry =  up_num % 1000UL;
+
+        /* The part second is published raw.  Converting it here cost a divide
+           by the E-Clock rate, which does not fit a 68000's 16-bit DIVU and so
+           ran the 32-iteration path fifty times a second; tx_amiga_uptime_ms()
+           does it for the diagnostics that ask.  The thousandths carry that
+           used to correct this remainder went with it: it existed only to take
+           back the milliseconds reported early, and none are now. */
+        _tx_amiga_tick.tx_amiga_tick_uptime_rem =  up_rem;
 
         delta    =  (ULONG) (now.ev_lo - last_lo); /* correct across one wrap */
         measured =  delta / eclock_per_tick;

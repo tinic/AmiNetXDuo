@@ -92,13 +92,42 @@ _prof_vector:
         move.w  sp@(16),d1              | SR
         btst    #13,d1                  | S: was it already supervisor?
         bne     .Lprof_sup
+
+| User mode: the stack is the task's, and USP is only a stack pointer if a
+| task owns it.  Exec knows the bounds; anything outside them is refused
+| rather than read, because a bad read here is a bus error at level 4.
         move.l  usp,a1
+        move.l  a1,d1                   | d1 = candidate SP
+        move.l  _prof_taskptr,a1
+        move.l  a1@,a1                  | SysBase->ThisTask
+        move.l  a1,d0
+        beq     .Lprof_refuse           | no task: cannot validate it
+        cmp.l   a1@(58),d1              | tc_SPLower
+        bcs     .Lprof_refuse
+        move.l  a1@(62),d0              | tc_SPUpper
+        sub.l   #48,d0                  | twelve longwords must fit below it
+        cmp.l   d0,d1
+        bhi     .Lprof_refuse
+        move.l  d1,a1
         bra     .Lprof_grab
+
+.Lprof_refuse:
+        addq.l  #1,_prof_call_refused
+        bra     .Lprof_out
+
 .Lprof_sup:
+| Supervisor: the interrupted SP is behind our own registers and the frame,
+| so it is this stack and needs no proving.
         move.l  sp,a1
         adda.l  _prof_frameadj,a1
 .Lprof_grab:
-        move.l  a1@+,a0@+               | pc_Stack[0..5]
+        move.l  a1@+,a0@+               | pc_Stack[0..11]
+        move.l  a1@+,a0@+
+        move.l  a1@+,a0@+
+        move.l  a1@+,a0@+
+        move.l  a1@+,a0@+
+        move.l  a1@+,a0@+
+        move.l  a1@+,a0@+
         move.l  a1@+,a0@+
         move.l  a1@+,a0@+
         move.l  a1@+,a0@+

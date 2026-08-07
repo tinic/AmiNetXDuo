@@ -228,7 +228,12 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
             NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM |
             NX_INTERFACE_CAPABILITY_UDP_RX_CHECKSUM |
             NX_INTERFACE_CAPABILITY_ICMPV4_RX_CHECKSUM |
-            NX_INTERFACE_CAPABILITY_IGMP_RX_CHECKSUM);
+            NX_INTERFACE_CAPABILITY_IGMP_RX_CHECKSUM |
+            /* Transmit: only TCP, and only because ami_sana2_copy_from_buff()
+               has a walk to fall back on.  UDP, ICMP and IGMP are left to
+               NetX Duo: they are a rounding error next to bulk TCP and each
+               one advertised is another way to put a bad checksum on a wire. */
+            NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM);
 #endif
         break;
 
