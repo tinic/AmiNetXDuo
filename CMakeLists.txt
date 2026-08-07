@@ -947,8 +947,23 @@ if(AMINETXDUO_UNITY)
     # our sources in the archive build: one translation unit is one object,
     # and without per-function sections --gc-sections has nothing to collect
     # and the binary keeps every function in the stack.
+    #
+    # -fno-ipa-icf travels with them, and this option is why it has to.
+    # Identical-code folding cannot merge two functions in different objects,
+    # so in the archive build it almost never fires; with the whole stack in
+    # one translation unit it fires across the whole stack.  What it leaves
+    # behind is a `bra.l` from the folded-away function to the survivor --
+    # cross-section, against a local symbol, which is precisely the
+    # relocation cmake/check-pcrel-branches.cmake exists to catch.  It caught
+    # it: ami_cfg_zero and ami_bpf_zero_bytes both branched to
+    # _bsd_ProcessIsServer+0x4, an address neither of them meant.
+    #
+    # Same rule as -fno-optimize-sibling-calls, arrived at from a different
+    # direction: nothing may create an intra-object cross-section jump.
     target_compile_options(bsdsocket_library PRIVATE
-                           -ffunction-sections -fno-optimize-sibling-calls)
+                           -ffunction-sections
+                           -fno-optimize-sibling-calls
+                           -fno-ipa-icf)
 
     # Then prove the translation unit actually holds what was just put in it.
     #
