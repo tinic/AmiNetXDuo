@@ -784,13 +784,28 @@ if(AMINETXDUO_UNITY)
     # The libraries bsdsocket_library links, which is what decides the set:
     # merging anything it does not link would put code in the binary that the
     # archive form leaves out.
-    set(_unity_targets
+    set(_unity_default
         threadx threadx_port netxduo netxduo_addons
         aminetxduo_netstack aminetxduo_sana2 aminetxduo_config
         aminetxduo_common)
     if(AMINETXDUO_BPF)
-        list(APPEND _unity_targets aminetxduo_bpf)
+        list(APPEND _unity_default aminetxduo_bpf)
     endif()
+
+    # Overridable so the set can be bisected.  One translation unit either
+    # works or fails somewhere with no line number, and the only cheap way to
+    # find out which half is at fault is to build halves:
+    #
+    #   -DAMINETXDUO_UNITY_TARGETS="threadx;threadx_port;netxduo;netxduo_addons"
+    #   -DAMINETXDUO_UNITY_OWN=OFF
+    #
+    # Not a knob anybody is meant to ship with; a name that is not a target is
+    # fatal below.
+    set(AMINETXDUO_UNITY_TARGETS "${_unity_default}" CACHE STRING
+        "Targets merged into the unity translation unit")
+    option(AMINETXDUO_UNITY_OWN
+           "Merge bsdsocket.library's own sources too" ON)
+    set(_unity_targets ${AMINETXDUO_UNITY_TARGETS})
 
     set(_unity_sources "")
     foreach(_t IN LISTS _unity_targets)
@@ -800,6 +815,10 @@ if(AMINETXDUO_UNITY)
         aminetxduo_c_sources(_s ${_t})
         list(APPEND _unity_sources ${_s})
     endforeach()
+
+    # bsdsocket.library's own sources, read before anything is added to the
+    # target, so AMINETXDUO_UNITY_OWN=OFF can push them back out again.
+    aminetxduo_c_sources(_unity_own bsdsocket_library)
 
     # The archives stay on the link line for their .S members.  Their C
     # members are simply never pulled: an archive member is only taken when it
@@ -890,6 +909,16 @@ if(AMINETXDUO_UNITY)
     endif()
     list(APPEND _unity_excluded ${_unity_owners})
     message(STATUS "  unity ......... ${_n_owners} component-data owners kept separate")
+
+    # Bisection: our own sources back out, EXCEPT library.c, which has to stay
+    # first inside the unity file or the first code hunk stops being the
+    # entry stub.  See the note on that below.
+    if(NOT AMINETXDUO_UNITY_OWN)
+        list(REMOVE_ITEM _unity_own
+             "${CMAKE_CURRENT_SOURCE_DIR}/src/bsdsocket/library.c")
+        list(APPEND _unity_excluded ${_unity_own})
+        message(STATUS "  unity ......... bsdsocket.library's own sources NOT merged")
+    endif()
 
     # TARGET_DIRECTORY, and this is the whole reason the first attempt at
     # these exclusions did nothing: source file properties belong to the
