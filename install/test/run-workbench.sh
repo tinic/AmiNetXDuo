@@ -51,6 +51,36 @@
 # defect that lives in the RELEASE build, a different compiler, a different
 # crt0, cannot show up.  Run it both ways before believing a release.
 #
+# WHY ftp.gnu.org AND NOT www.iana.org, which this used to fetch.
+#
+# A server puts a clock on the TLS handshake, started at accept() and stopped
+# when the client's Finished arrives, and a 68020 does not finish inside every
+# one of them.  Measured on this machine, seconds a server will hold a
+# connection with no ClientHello on it:
+#
+#   www.iana.org / www.rfc-editor.org (Cloudflare)   15.0
+#   www.google.com / dns.google                      10.0
+#   aminet.net, www.python.org, archive.org          ~60
+#   ftp.gnu.org, www.gnu.org, www.debian.org,
+#   www.openbsd.org, ftp.funet.fi                    no close at 240
+#
+# Against www.iana.org the A1200 in this harness took 20.1 s of handshake, so
+# Cloudflare sent FIN 15.0 s in, five seconds before the client Finished went
+# out, and the RST arrived before the request could be answered.  That is not
+# a defect in the stack, and no amount of work on our side fits a
+# three-certificate chain into 15 s at 14 MHz.
+#
+# Handshake cost measured here, A1200/68020, whole chain verified:
+#
+#   ftp.gnu.org        18.4 s   3 certificates, all RSA
+#   aminet.net         18.5 s   3 certificates, all RSA
+#   www.openbsd.org    25.2 s   3 certificates, RSA-4096 leaf
+#   www.debian.org     25.4 s   3 certificates, RSA-4096 leaf
+#
+# ftp.gnu.org is the cheapest of the hosts that impose no budget at all, its
+# index page is 9 kB, and gnu.org has been at that name longer than this
+# hardware has been out of production.
+#
 # INGREDIENTS, none of which are ours to ship:
 #
 #   Workbench 3.1 ADFs   ~/amigaos/adf/amiga-wb31_{workbench,extras,fonts,
@@ -696,8 +726,8 @@ Echo >>DH0:usercheck.txt "*N=== 2. fetch http://example.com/"
 C:fetch http://example.com/ TO DH0:http-body.txt >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT fetch-http rc=\$RC"
 
-Echo >>DH0:usercheck.txt "*N=== 3. fetch https://www.iana.org/"
-C:fetch https://www.iana.org/ TO DH0:https-body.txt >>DH0:usercheck.txt
+Echo >>DH0:usercheck.txt "*N=== 3. fetch https://ftp.gnu.org/"
+C:fetch https://ftp.gnu.org/ TO DH0:https-body.txt >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT fetch-https rc=\$RC"
 
 
@@ -775,7 +805,7 @@ report() {
 
 report "ShowNetStatus"                 network
 report "fetch http://example.com/"     fetch-http
-report "fetch https://www.iana.org/"       fetch-https \
+report "fetch https://ftp.gnu.org/"        fetch-https \
        "$([ "$HAS_TLS" = 1 ] && echo pass || echo fail)"
 report "arp"                           arp
 

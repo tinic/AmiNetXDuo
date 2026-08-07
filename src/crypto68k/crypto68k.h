@@ -359,6 +359,29 @@ VOID c68k_crt_power_modulus(NX_CRYPTO_HUGE_NUMBER *x,
                             HN_UBASE *scratch,
                             HN_UBASE *powm_scratch, UINT powm_scratch_limbs);
 
+/*
+ * One public-key operation runs for seconds on this hardware, and the AmigaOS
+ * ThreadX port does not preempt a thread that makes no ThreadX call
+ * (port/threadx-amiga/src/tx_thread_context_restore.c), so nothing else runs
+ * while one is in progress -- the IP thread included.  Measured on a 13 MHz
+ * 68000: 32 s of dead stack for the ClientHello key share and 12 s for the
+ * chain, long enough that the peer gives up retransmitting into the silence
+ * and resets the connection.
+ *
+ * A caller inside NetX Duo sets this to a routine that hands the machine
+ * back; the scalar multiplications and the modular exponentiation call it
+ * between iterations.  NULL, the default, is one test per iteration.
+ */
+extern VOID (*c68k_yield_hook)(VOID);
+
+#define C68K_YIELD()                                            \
+    do {                                                        \
+        if (c68k_yield_hook != (VOID (*)(VOID))0)               \
+        {                                                       \
+            c68k_yield_hook();                                  \
+        }                                                       \
+    } while (0)
+
 #ifdef __cplusplus
 }
 #endif

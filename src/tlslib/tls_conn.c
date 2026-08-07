@@ -558,10 +558,25 @@ struct TLSConnection *tls_TLSOpenA(
         goto fail;
     }
 
+    /*
+     * Two lists out of one call.  _nx_secure_tls_ecc_initialize() writes both
+     * the session's TLS list and the process-wide X.509 list, so it is called
+     * with the complete set for the sake of certificate chains, and the
+     * session's own list is then narrowed to what the ClientHello should
+     * offer.  Offering P-384 and P-521 costs a key generation each before the
+     * ClientHello is sent and buys nothing: P-256 is what these servers pick.
+     */
     (VOID)_nx_secure_tls_ecc_initialize(&conn->tc_Session,
                                          ami_crypto_ecc_supported_groups,
                                          (USHORT)ami_crypto_ecc_supported_groups_size,
                                          ami_crypto_ecc_curves);
+
+    conn->tc_Session.nx_secure_tls_ecc.nx_secure_tls_ecc_supported_groups =
+        ami_crypto_ecc_offered_groups;
+    conn->tc_Session.nx_secure_tls_ecc.nx_secure_tls_ecc_supported_groups_count =
+        (USHORT)ami_crypto_ecc_offered_groups_size;
+    conn->tc_Session.nx_secure_tls_ecc.nx_secure_tls_ecc_curves =
+        ami_crypto_ecc_offered_curves;
 
     (VOID)_nx_secure_tls_session_packet_buffer_set(&conn->tc_Session,
                                                     conn->tc_RecordBuffer,

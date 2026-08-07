@@ -723,6 +723,8 @@ UINT            row;
      */
     for (c = C68K_P256_COMB_E; c > 0u; c--)
     {
+        C68K_YIELD();
+
         c68k_p256_jac_double(&acc, &acc);
 
         digit = 0;
@@ -938,6 +940,8 @@ INT             d;
 
     for (i = len; i > 0u; i--)
     {
+        C68K_YIELD();
+
         c68k_p256_jac_double(&acc, &acc);
 
         d = (INT)work -> naf[i - 1u];
