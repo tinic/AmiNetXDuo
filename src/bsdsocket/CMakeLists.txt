@@ -164,5 +164,15 @@ if(AMINETXDUO_BSDSOCKET_LINK)
             COMMAND "${CMAKE_STRIP}" "$<TARGET_FILE:bsdsocket_library>"
             VERBATIM)
     endif()
+
+    # The "moveq #-1,d0 / rts" at the top of library.c has to land at offset 0
+    # of the first code hunk, and the only thing putting it there is this
+    # object's position on the link line -- the order of a source list nobody
+    # is looking at.  See cmake/check-library-entry.cmake.
+    add_custom_command(TARGET bsdsocket_library POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+                "-DLIBRARY_BINARY=$<TARGET_FILE:bsdsocket_library>"
+                -P "${CMAKE_SOURCE_DIR}/cmake/check-library-entry.cmake"
+        VERBATIM)
 endif()
 
