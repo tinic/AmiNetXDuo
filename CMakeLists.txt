@@ -394,6 +394,42 @@ add_library(threadx STATIC ${THREADX_SOURCES})
 target_include_directories(threadx PUBLIC
     ${AMINETXDUO_PORT_INCLUDES} "${AMINETXDUO_THREADX}/common/inc")
 
+# ---------------------------------------------------------------------------
+# The hot translation units, at -O2.
+#
+# Everything else stays -Os; see the note at the top of this file.  These were
+# picked from a ranked profile of an A600 fitz transfer and from Profile WATCH
+# over the copy routine, which named its callers.  -O2 mainly buys inlined
+# small copies here: at -Os GCC calls memcpy for a 20-byte struct assignment,
+# and nx_tcp_socket_packet_process does exactly that once per received packet.
+#
+# AMINETXDUO_HOT_O2=OFF puts them back at -Os, which is the comparison to make
+# when deciding whether the size is worth it.
+# ---------------------------------------------------------------------------
+option(AMINETXDUO_HOT_O2 "Build the profiled hot paths at -O2" ON)
+
+set(AMINETXDUO_HOT_SOURCES
+    "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_packet_process.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_data_trim_front.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_send_internal.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_ack_check.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_packet_process.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_packet_data_append.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_packet_data_extract_offset.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_packet_allocate.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_packet_release.c")
+
+if(AMINETXDUO_HOT_O2)
+    foreach(_hot IN LISTS AMINETXDUO_HOT_SOURCES)
+        if(EXISTS "${_hot}")
+            # After the -Os in CMAKE_C_FLAGS_RELEASE, and the last one wins.
+            set_source_files_properties("${_hot}" PROPERTIES COMPILE_OPTIONS "-O2")
+        else()
+            message(WARNING "hot source not found, the list is stale: ${_hot}")
+        endif()
+    endforeach()
+endif()
+
 add_library(netxduo STATIC ${NETXDUO_SOURCES})
 target_include_directories(netxduo PUBLIC
     ${AMINETXDUO_CORE_INCLUDES})
