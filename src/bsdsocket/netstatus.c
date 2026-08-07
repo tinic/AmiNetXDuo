@@ -375,19 +375,13 @@ static VOID ns_fill_dhcp(NsWriter *w)
  */
 static const AmiIfConfig *ns_config_for(UINT nx_index)
 {
-    const AmiConfig *cfg = netstack_config();
-
-    if (cfg == NULL)
-        return NULL;
-
-    if (nx_index >= cfg->interface_count ||
-        nx_index >= (UINT)AMI_CFG_MAX_INTERFACES)
-        return NULL;
-
-    if (!cfg->interfaces[nx_index].configured)
-        return NULL;
-
-    return &cfg->interfaces[nx_index];
+    /*
+     * Ask the netstack rather than subscripting the config array by the NX
+     * index.  ns_Iface[] is filled in open order, so an interface that failed
+     * to open advances the config index without advancing the NX one, and
+     * every interface after it would be reported under its neighbour's name.
+     */
+    return netstack_iface_config((UWORD)nx_index);
 }
 
 /*

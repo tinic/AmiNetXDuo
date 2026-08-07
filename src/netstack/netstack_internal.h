@@ -181,6 +181,12 @@ struct AmiNetStack
        interface that fails to open takes no slot, so the two are not
        the same number. */
     BOOL                ns_IfaceMdns[AMI_CFG_MAX_INTERFACES];
+
+    /* Which config slot each opened interface came from.  ns_Iface[]
+       is in open order, so this is the only mapping back: an
+       interface that failed to open advanced the config index and
+       not the NX one. */
+    UWORD               ns_IfaceCfg[AMI_CFG_MAX_INTERFACES];
     UWORD               ns_IfaceCount;
 
     NX_DHCP             ns_Dhcp;

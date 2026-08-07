@@ -196,6 +196,13 @@ const AmiConfig *netstack_config(VOID);
 BOOL netstack_iface_mdns(UWORD nx_index);
 
 /*
+ * The configuration of the interface at that NX index.  NOT
+ * cfg->interfaces[nx_index]: that subscript is the config order, and
+ * the two only agree while every configured interface opens.
+ */
+const AmiIfConfig *netstack_iface_config(UWORD nx_index);
+
+/*
  * Copy the packet pool's counters into AmiMemStats (aminetxduo/compat.h) and
  * carry the low-water mark of what is free.
  *
