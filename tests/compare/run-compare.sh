@@ -352,6 +352,17 @@ if [ -n "${EXTRA_PLAN:-}" ]; then
     cat "$EXTRA_PLAN" >> "$PLAN"
 fi
 
+# Bring the interface down as the last step.  ami_sana2_rx_stop() is the only
+# place AMINETXDUO_RXPROBE's report is emitted, and a run that powers off with
+# the interface up never reaches it -- the probe then collects a full set of
+# counters and prints none of them.  After every measurement, so it cannot
+# move a number.
+if [ -f "$BUILD/src/tools/NetShutdown" ]; then
+    cp "$BUILD/src/tools/NetShutdown" "$STAGE/NetShutdown"
+    STAGED+=("$STAGE/NetShutdown")
+    printf 'shutdown\tDH0:NetShutdown\n' >> "$PLAN"
+fi
+
 STAGED+=("$PLAN")
 [ ${#STAGED_CMDS[@]} -eq 0 ] || STAGED+=("${STAGED_CMDS[@]}")
 
