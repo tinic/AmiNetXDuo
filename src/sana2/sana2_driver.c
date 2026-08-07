@@ -219,8 +219,11 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
          * what it verified in nx_packet_interface_capability_flag; the fork
          * requires that per-packet flag as well as this one, so a frame the
          * glue declines -- a fragment, IPv6, a protocol it does not know -- is
-         * checked by the stack exactly as before.  Nothing is claimed for
-         * transmit: the stack still computes every outgoing checksum.
+         * checked by the stack exactly as before.
+         *
+         * Transmit claims TCP, and only TCP: ami_sana2_copy_from_buff() hands
+         * anything its fusion declines to _nx_ip_packet_checksum_compute()
+         * before a byte is copied, so the stack still answers for those.
          */
         nx_ip_interface_capability_set(
             ip_ptr, iface->index,
