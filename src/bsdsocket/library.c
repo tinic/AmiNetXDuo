@@ -127,6 +127,16 @@ VOID bsd_strncpy(char *dst, const char *src, ULONG size)
     dst[i] = '\0';
 }
 
+/*
+ * bsd_poll_sets() clears a whole BsdFdSets through this, so a select-driven
+ * reader pays it once per recv().  A1200 wire transfer, RATE=2000, one build
+ * either side of this function:
+ *
+ *     byte loop    62 samples of 2545    2.4%
+ *     longwords    16 samples of 2469    0.6%
+ *
+ * Throughput did not separate the two at two samples an arm.
+ */
 VOID bsd_bzero(APTR p, ULONG size)
 {
     UBYTE *q = (UBYTE *)p;
