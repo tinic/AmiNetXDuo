@@ -181,37 +181,6 @@ fi
 # NE2000 boards take the whole address.
 MAC="${AMINETXDUO_AMIBERRY_MAC:-02:41:4d:49:00:01}"
 
-# A networked run on a machine that cannot have one.
-#
-# The A500 and A600 have no Zorro bus, so a2065 and the other Zorro cards never
-# autoconfig; and docs/BACKLOG.md records that Amiberry's A600 PCMCIA emulation
-# does not work FOR ANY STACK -- identical staging that leases on an A1200
-# fails there, ours unable to open the device and Roadshow answering
-# `Could not add interface "eth0" (Input/output error)`.
-#
-# So there is no board to suggest.  The machine boots, runs at 50 fps, and the
-# first plan step waits for a lease that cannot arrive, which reads as a slow
-# test until the timeout.  An A600 network failure says nothing about the code.
-board_model_check() {
-    [ -n "$1" ] || return 0
-    case "$MODEL" in
-        A500|A500+|A600)
-            cat >&2 <<EOF
-$MODEL cannot run a networked test under Amiberry.
-
-  Zorro cards ($1 among them) have no bus to autoconfig on, and the PCMCIA
-  emulation does not work for any stack -- see docs/BACKLOG.md, "Amiberry's
-  A600 PCMCIA emulation does not work".
-
-  Use -m A1200 for anything that needs the network.  For 68000 CODE on a
-  working network, build -DAMINETXDUO_CPU=68000 and run it on the A1200.
-EOF
-            exit 2
-            ;;
-    esac
-}
-board_model_check "$BOARD"
-
 board_lines() {
     case "$1" in
         "")            : ;;
