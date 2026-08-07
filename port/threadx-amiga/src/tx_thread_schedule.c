@@ -391,3 +391,24 @@ void _tx_thread_reset_port_completion(TX_THREAD *thread_ptr, UINT tx_saved_postu
     _tx_amiga_reap(thread_ptr);
     TX_DISABLE
 }
+
+
+/*
+ * _tx_amiga_dispatch_inline() for callers outside this directory.
+ *
+ * The inline itself lives in tx_amiga_internal.h, which is PRIVATE to the port
+ * target, so the netstack's release/acquire bracket could not reach it and
+ * poked the scheduler Task unconditionally instead -- the three-context-switch
+ * handoff every path in here stopped doing (docs/RESEARCH.md 89).  Those two
+ * sites are the last ones outside the port, and they are the hottest: a wire
+ * transfer reacquires the baton about once per receive wake.
+ *
+ * Same contract as the inline.  The core lock is held, the baton is already
+ * released, and TX_FALSE means the caller must fall back to
+ * _tx_amiga_wake_scheduler().
+ */
+UINT _tx_amiga_dispatch_try(VOID)
+{
+
+    return(_tx_amiga_dispatch_inline());
+}

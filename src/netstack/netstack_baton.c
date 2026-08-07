@@ -46,6 +46,11 @@
 extern VOID _tx_amiga_wake_scheduler(VOID);
 extern UINT _tx_amiga_thread_park(TX_THREAD *thread_ptr);
 
+/* Dispatch the ready thread from this Task instead of waking the scheduler
+   Task to do it.  Core lock held, baton already released; TX_FALSE means it
+   would not, and the scheduler has to be poked after all. */
+extern UINT _tx_amiga_dispatch_try(VOID);
+
 /*
  * One entry per Exec Task currently inside a release/acquire bracket. The
  * hooks take no argument, so the thread pointer is stored in a table keyed by
@@ -243,6 +248,7 @@ VOID ami_netstack_baton_release(VOID)
     struct Task   *me = FindTask(NULL);
     TX_THREAD     *thread;
     AmiBatonSlot  *slot;
+    UINT           wake;
 
     Forbid();
 
@@ -315,10 +321,20 @@ VOID ami_netstack_baton_release(VOID)
 
     _tx_thread_system_state--;
 
+    /*
+     * Somebody else may run now.  Dispatch them from here: this Task is about
+     * to block in exec Wait(), so the scheduler Task would be woken only to
+     * run the same five stores and go back to sleep -- two Exec context
+     * switches for nothing.  Under the Forbid(), where the answer is valid.
+     */
+    wake =  (_tx_amiga_dispatch_try() == ((UINT) TX_FALSE)) &&
+            (_tx_thread_execute_ptr != TX_NULL)
+            ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
+
     Permit();
 
-    /* Somebody else may run now. */
-    _tx_amiga_wake_scheduler();
+    if (wake == (UINT) TX_TRUE)
+        _tx_amiga_wake_scheduler();
 }
 
 VOID ami_netstack_baton_acquire(VOID)
@@ -326,6 +342,7 @@ VOID ami_netstack_baton_acquire(VOID)
     struct Task   *me = FindTask(NULL);
     TX_THREAD     *thread;
     AmiBatonSlot  *slot;
+    UINT           wake;
 
     Forbid();
 
@@ -365,9 +382,25 @@ VOID ami_netstack_baton_acquire(VOID)
 
     _tx_thread_system_state--;
 
+    /*
+     * Hand the baton over from here rather than waking the scheduler Task to
+     * do it.  This is the thread that is about to run, so the usual case is
+     * that _tx_thread_execute_ptr is already this one and the dispatch is the
+     * five stores in _tx_amiga_dispatch_inline(): the park below then finds
+     * its run signal already set and returns without blocking.  Going through
+     * the scheduler costs two Exec context switches instead, which is what
+     * every other handoff in the port stopped paying (docs/RESEARCH.md 89).
+     *
+     * Under the Forbid(), because the answer is only good while it is held.
+     */
+    wake =  (_tx_amiga_dispatch_try() == ((UINT) TX_FALSE)) &&
+            (_tx_thread_execute_ptr != TX_NULL)
+            ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
+
     Permit();
 
-    _tx_amiga_wake_scheduler();
+    if (wake == (UINT) TX_TRUE)
+        _tx_amiga_wake_scheduler();
 
     /* Block until the scheduler makes us _tx_thread_current_ptr again. */
     (VOID)_tx_amiga_thread_park(thread);
