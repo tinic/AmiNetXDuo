@@ -36,6 +36,10 @@
 #               stop there.  A stack that will not come up is diagnosed in
 #               thirty seconds rather than inside a workload whose failure
 #               mode is a timeout.
+#   -c          CONTROL ONLY: the RAM: arm alone, stack up, no traffic.
+#               The only CPU-bound number here -- a wire transfer idles
+#               more than half the run and so prices the rig, not the
+#               code.  Needs no peer.
 #   -i FILE     use FILE as DEVS:NetInterfaces/eth0 instead of the tree's.  A
 #               stack should be measured with a configuration it agrees is
 #               well formed, because "the interface would not come up" has two
@@ -96,17 +100,19 @@ TIMEOUT=500
 EXTRALIBS=""
 MOUNTARGS=""
 DIAG=0
+CTLONLY=0
 IFCONFIG=""
 LOSSCAP=0
 MAXLOSS=""
 MAXEFF=""
 
-while getopts "s:T:pdi:A:P:k:C:r:b:R:G:B:m:t:L:M:wW:E:" opt; do
+while getopts "s:T:pdci:A:P:k:C:r:b:R:G:B:m:t:L:M:wW:E:" opt; do
     case "$opt" in
         s) STACK="$OPTARG" ;;
         T) TAG="$OPTARG" ;;
         p) PROFILE=0 ;;
         d) DIAG=1 ;;
+        c) CTLONLY=1 ;;
         i) IFCONFIG="$OPTARG" ;;
         A) PEER_ADDR="$OPTARG" ;;
         P) PORT="$OPTARG" ;;
@@ -201,7 +207,11 @@ A2065="${AMINETXDUO_A2065:-$ROOT/build/a2065.device}"
 
 # ------------------------------------------------------------- the server ---
 
-if [ -n "$PEER" ]; then
+if [ "$CTLONLY" = 1 ]; then
+    # -c transfers nothing over the wire, so there is no server to
+    # start and nothing to check.
+    echo "==> control only: RAM: arm, stack up, no traffic"
+elif [ -n "$PEER" ]; then
     PEERLOG="$ROOT/build/stackprof-$TAG-peer.log"
     # The bracket is not decoration: pkill -f matches the remote shell's own
     # command line, so an unbracketed pattern kills the connection issuing it.
@@ -307,22 +317,34 @@ fi
     echo "wait 6"
     # A `{ }` group is not a subshell, so an `exit` here would end the run
     # rather than the plan.  DIAG stops by writing nothing more.
+    # AMINETXDUO_PROF_WATCH=<library>/<hexoff>/<hexlen> asks the sampler for a
+    # caller window over that range; see prof.h.  AMINETXDUO_PROF_VERBOSE=1
+    # drops QUIET so Profile reports each stage, for diagnosing a run that
+    # produces no profile.
+    PROF_QUIET=QUIET
+    [ -z "${AMINETXDUO_PROF_VERBOSE:-}" ] || PROF_QUIET=
+    PROF_PREFIX="SYS:Profile $PROF_QUIET OUT=DH0:fitz.prof FOLDED=DH0:fitz.folded${AMINETXDUO_PROF_WATCH:+ WATCH=$AMINETXDUO_PROF_WATCH}"
+
     if [ "$DIAG" = 1 ]; then
         [ ! -f "$STAGE/NetStat" ] || echo "SYS:NetStat $STATARGS"
+    elif [ "$CTLONLY" = 1 ]; then
+        # The RAM: arm alone: the stack is up, its threads are running and no
+        # traffic passes.  This is the harness's only CPU-BOUND number.  A
+        # transfer over the wire idles more than half the run waiting on the
+        # link, so it prices the rig; what is left after this one is cycles.
+        # AddNetInterface still runs, because a library nobody opened costs
+        # nothing and measuring that would answer a different question.
+        if [ "$PROFILE" = 1 ]; then
+            echo "$PROF_PREFIX SYS:FitzBench RAM: KB=$KB CHUNK=$CHUNK REPS=$REPS"
+        else
+            echo "SYS:FitzBench RAM: KB=$KB CHUNK=$CHUNK REPS=$REPS"
+        fi
     else
         echo "&SYS:fitz mount $PEER_ADDR:$PORT FITZ:${MOUNTARGS:+ $MOUNTARGS}"
         echo "wait 10"
         [ ! -f "$STAGE/NetStat" ] || echo "SYS:NetStat $STATARGS"
         if [ "$PROFILE" = 1 ]; then
-            # AMINETXDUO_PROF_WATCH=<library>/<hexoff>/<hexlen> asks the
-            # sampler for a caller window over that range; see prof.h.
-            # AMINETXDUO_PROF_VERBOSE=1 drops QUIET so Profile reports each
-            # stage, for diagnosing a run that produces no profile.
-            PROF_QUIET=QUIET
-            [ -z "${AMINETXDUO_PROF_VERBOSE:-}" ] || PROF_QUIET=
-            echo "SYS:Profile $PROF_QUIET OUT=DH0:fitz.prof FOLDED=DH0:fitz.folded" \
-                 "${AMINETXDUO_PROF_WATCH:+WATCH=$AMINETXDUO_PROF_WATCH}" \
-                 "SYS:FitzBench FITZ: KB=$KB CHUNK=$CHUNK REPS=$REPS"
+            echo "$PROF_PREFIX SYS:FitzBench FITZ: KB=$KB CHUNK=$CHUNK REPS=$REPS"
         else
             echo "SYS:FitzBench FITZ: KB=$KB CHUNK=$CHUNK REPS=$REPS"
         fi
