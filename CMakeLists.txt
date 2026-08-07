@@ -841,9 +841,7 @@ if(AMINETXDUO_UNITY)
         "${AMINETXDUO_NETXDUO}/addons/auto_ip/nx_auto_ip.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_ip_address_change_notify.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_ip_interface_address_set.c"
-        "${AMINETXDUO_NETXDUO}/common/src/nx_rarp_packet_receive.c"
-        # See the note below on the first code hunk.
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/bsdsocket/library.c")
+        "${AMINETXDUO_NETXDUO}/common/src/nx_rarp_packet_receive.c")
     foreach(_x IN LISTS _unity_excluded)
         if(NOT EXISTS "${_x}")
             message(FATAL_ERROR "unity exclusion is stale: ${_x}")
@@ -903,11 +901,22 @@ if(AMINETXDUO_UNITY)
                  TARGET_DIRECTORY bsdsocket_library
                  PROPERTY SKIP_UNITY_BUILD_INCLUSION ON)
 
-    # library.c, excluded above, holds the "moveq #-1,d0 / rts" that has to be
-    # at offset 0 of the first code hunk, and inside a unity file GCC decides
-    # the emission order, not us.  Out of the group, so its object stays first
-    # on the link line as before.  cmake/check-library-entry.cmake proves it
-    # after the link, because this is not something to find out on an Amiga.
+    # library.c stays IN the group, and that is the opposite of what it looks
+    # like it should be.
+    #
+    # It holds the "moveq #-1,d0 / rts" that has to be at offset 0 of the
+    # first code hunk, and the obvious move is to keep it out so its object
+    # stays first on the link line as it is today.  That breaks it: cmake puts
+    # the unity object FIRST, ahead of every source it skipped, so excluding
+    # library.c is what pushes it out of first place.  Left in and first in
+    # BSDSOCKET_SOURCES, it is the first include in the unity file and gcc
+    # emits it first.
+    #
+    # That rests on gcc's emission order rather than on the link order, which
+    # is a weaker guarantee than the one it replaces, so
+    # cmake/check-library-entry.cmake parses the linked file on every build
+    # and fails if the first hunk does not start with those two instructions.
+    # It has already caught this once.
 
     # tx_api.h and nx_api.h, included first and with neither NX_SOURCE_CODE
     # nor TX_SOURCE_CODE set.
