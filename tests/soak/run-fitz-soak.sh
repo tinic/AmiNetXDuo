@@ -30,10 +30,10 @@
 #
 # WHAT COMES BACK
 #
-#   build/testhd-<tag>/soak-timeline.csv   pool, memory, sockets, TCP stats
-#   build/testhd-<tag>/soak-events.txt     every failure, with a full snapshot
-#   build/testhd-<tag>/soak-summary.txt    totals
-#   build/testhd-<tag>/soak-fitz.txt       what Fitz itself printed
+#   build/amiberry-testhd-<tag>/soak-timeline.csv   pool, memory, sockets, TCP stats
+#   build/amiberry-testhd-<tag>/soak-events.txt     every failure, with a full snapshot
+#   build/amiberry-testhd-<tag>/soak-summary.txt    totals
+#   build/amiberry-testhd-<tag>/soak-fitz.txt       what Fitz itself printed
 #   build/serial-<tag>.log                 Fitz's ADEBUG lines, and ours
 #   build/soak-<tag>-peer.log              what the host server saw
 #
@@ -183,7 +183,7 @@ DEADLINE=$((SECONDS_RUN + 600))
 
 echo "==> run:  $SECONDS_RUN s workload in ${PHASE}s phases, $DEADLINE s deadline"
 echo "==> fitz: $(basename "$AMIGA_FITZ"), wire $PORT, serve $SERVEPORT"
-echo "==> live: tail -f $ROOT/build/testhd-$TAG/soak-events.txt"
+echo "==> live: tail -f $ROOT/build/amiberry-testhd-$TAG/soak-events.txt"
 echo "==> if anyone needs to reap while this runs: tools/fsuae-reap.sh -a $((DEADLINE / 60 + 30))"
 
 set +e
@@ -195,7 +195,17 @@ set -e
 
 # ---- what came back ------------------------------------------------------
 
-HD="$ROOT/build/testhd-$TAG"
+# The guest writes into the drive tools/amiberry-run.sh staged, which is
+# build/amiberry-testhd-<tag>.  Reading build/testhd-<tag> instead found
+# nothing and said so as "(none written)" -- indistinguishable from a run that
+# produced nothing, which is what a 1800 s soak looks like when it is voided by
+# a path.  tests/tcpdrill/run-tcpdrill.sh:78 carries the same line for the same
+# reason.
+HD="$ROOT/build/amiberry-testhd-$TAG"
+if [ ! -d "$HD" ]; then
+    echo "no guest drive at $HD; the run wrote nowhere this can read" >&2
+    exit 2
+fi
 
 echo
 echo "=== summary ==="
