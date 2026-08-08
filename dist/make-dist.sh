@@ -91,7 +91,8 @@ LIBS=(bsdsocket usergroup)
 CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ShowNetServices
       ping netstat host
       nslookup arp fetch nc telnet NetTrace sntp traceroute tftp whois httpd
-      CheckNetConfig GetNetStatus NetShutdown AddNetRoute DeleteNetRoute)
+      CheckNetConfig GetNetStatus NetShutdown RemoveNetInterface
+      AddNetRoute DeleteNetRoute)
 
 # ---------------------------------------------------------- the CPU builds --
 #

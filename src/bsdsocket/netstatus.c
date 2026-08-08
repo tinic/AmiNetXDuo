@@ -1418,6 +1418,30 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
                        ? 0 : bsd_fail(SocketBase, AMI_ENXIO);
 
         /*
+         * Removal, which is the same call RemoveInterface() makes and for the
+         * same reason it is out here: half the work is NetX Duo's and half is
+         * the SANA-II device.
+         *
+         * The two refusals are told apart because they mean opposite things to
+         * whoever asked. EBUSY is a decision the caller can overrule with
+         * NETCTRL_F_FORCE; the other is a device that would not give its read
+         * requests back, where nothing was freed and trying again is all there
+         * is.
+         */
+        case NETCTRL_INTERFACE_REMOVE:
+        {
+            LONG err = netstack_interface_remove(
+                           ctl->nsc_Index,
+                           (ctl->nsc_Flags & NETCTRL_F_FORCE) ? TRUE : FALSE);
+
+            if (err == AMI_NET_OK)
+                return 0;
+
+            return bsd_fail(SocketBase,
+                            (err == AMI_NET_ERR_BUSY) ? AMI_EBUSY : AMI_ENXIO);
+        }
+
+        /*
          * The browse pair, outside the bracket for the same reason: both take
          * their own, and neither goes near an NX_IP, so neither needs the
          * netstack_ip() check the rest of this function opens with, and both

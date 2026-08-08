@@ -822,6 +822,7 @@
     NetSetup          write the configuration files for you
     CheckNetConfig    read them back and say what is wrong
     NetShutdown       stop the stack
+    RemoveNetInterface  take one interface out of it
     AddNetRoute       add a route by hand
     DeleteNetRoute    take one away
 

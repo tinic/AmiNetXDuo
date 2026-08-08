@@ -120,6 +120,7 @@ Configuration follows Roadshow's layout, `DEVS:NetInterfaces/<name>`,
 | `CheckNetConfig` | read the configuration and say what is wrong with it |
 | `AddNetRoute`, `DeleteNetRoute` | where packets go that are not for this network |
 | `GetNetStatus`, `NetShutdown` | status for scripts, and a clean shutdown |
+| `RemoveNetInterface` | take one interface out of the running network |
 
 The installer copies all of them into `C:`.
 
