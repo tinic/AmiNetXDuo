@@ -44,6 +44,12 @@ exempt() {
         # Installs a release archive on a real Workbench 3.1 image; the drive
         # level is the variable, not the CPU, and it builds -m68000 already.
         install/test/run-workbench.sh) return 0 ;;
+        # Never passes -m to tools/amiberry-run.sh, so it gets that script's
+        # default machine and the 020 build matches it.
+        install/test/run-all.sh) return 0 ;;
+        # Feeds the ported clients, where 68020 is the documented floor and
+        # AMIGA_CLIENT_ARCH is the override (clients/amiga-client.sh).
+        tests/clients/build.sh) return 0 ;;
     esac
     return 1
 }
@@ -54,8 +60,14 @@ found=0
 while IFS= read -r f; do
     exempt "$f" && continue
 
-    # Only scripts that choose a machine can get this wrong.
-    grep -qE '^[[:space:]]*(MODEL|CPU)=|-m[[:space:]]*MODEL|\bMODEL\b' "$f" || continue
+    # Scripts that choose a machine, AND scripts that only BUILD for one -- the
+    # model those binaries meet is chosen by whoever runs them, so a build
+    # script cannot be cleared by looking at itself.  tests/soak/build-fitz-soak.sh
+    # and tests/endurance/build.sh were both invisible to the first version of
+    # this check for exactly that reason, and both broke an A600 run.
+    grep -qE '^[[:space:]]*(MODEL|CPU)=|-m[[:space:]]*MODEL|\bMODEL\b' "$f" ||
+        grep -qE 'build\.sh$|build-.*\.sh$' <<<"$f" ||
+        case "$f" in */build*.sh) ;; *) continue ;; esac
 
     # A literal -m680x0 on a compiler line, not in a comment or a case arm.
     hits=$(grep -nE '^[^#]*\$\{?[A-Za-z_]*GCC[A-Za-z_]*\}?[^#]*-m68[0-9]{3}' "$f" || true)

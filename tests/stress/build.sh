@@ -27,6 +27,11 @@
 
 set -euo pipefail
 
+# The guest CPU.  run-fitzstress.sh takes -m MODEL, so these binaries have to
+# follow it: a 68020 build stops on its first 020 instruction on an A600,
+# before the thing under test runs.
+STRESS_ARCH="${STRESS_ARCH:--m68020}"
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 HERE="$ROOT/tests/stress"
 COMPAT="$ROOT/tests/conformance/compat"
@@ -40,7 +45,7 @@ mkdir -p "$OUT"
 # ---- the supervisor ------------------------------------------------------
 
 echo "  CC fitzstress.c"
-"$AMIGA_GCC" -O2 -Wall -Wextra -m68020 -fomit-frame-pointer \
+"$AMIGA_GCC" -O2 -Wall -Wextra $STRESS_ARCH -fomit-frame-pointer \
     -fno-strict-aliasing \
     -I"$ROOT/include" -I"$COMPAT" -I"$AMIGA_NDK" \
     -o "$OUT/FitzStress" "$HERE/fitzstress.c"
@@ -55,7 +60,7 @@ if [ ! -d "$FITZ/src" ]; then
 fi
 
 echo "  CC comparetree (m68k)"
-"$AMIGA_GCC" -std=c99 -O2 -m68020 -D__amigaos__ \
+"$AMIGA_GCC" -std=c99 -O2 $STRESS_ARCH -D__amigaos__ \
     -Wno-int-conversion \
     -I"$COMPAT" -I"$AMIGA_NDK" \
     -o "$OUT/comparetree" "$FITZ/src/amiga-comparetree.c"
@@ -84,7 +89,7 @@ FITZ_SRC="
     fitz-common.c fitz-common-server.c fitz-common-client.c
 "
 ( cd "$FITZ/src" && \
-  "$AMIGA_GCC" -std=c99 -Os -m68020 -D__amigaos__ \
+  "$AMIGA_GCC" -std=c99 -Os $STRESS_ARCH -D__amigaos__ \
       -DPARSETZ -DROADSHOW_SONDERLOCKE -DDEBUG -DADEBUG=5 \
       -Wno-int-conversion -include sys/types.h \
       -I"$COMPAT" -I"$AMIGA_NDK" \
