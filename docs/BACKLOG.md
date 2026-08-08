@@ -218,6 +218,29 @@ Killing the emulator directly leaves the host `fitz-serve` alive and the next
 run refuses with "something already listens on 17821". Stop the runner, not the
 emulator, or reap the peer.
 
+### Waking on every second VBlank, soaked 2026-08-08
+
+30 minutes on A1200, `build/div2`, against the divider 1 run of the same length:
+
+| | div 1 | div 2 |
+|---|---|---|
+| wire | 241 files / 62 MB | 242 / 62 |
+| local | 340 files / 87 MB | 345 / 88 |
+| io_errors, corrupt_bytes, failures | 0 | 0 |
+| query failures, either arm | 0 | 0 |
+| `uptime_ms` at 1800 s | 1799436 | 1799942 |
+| skew / skewpeak / lost | 0 / 2 / 0 | 0 / 3 / 0 |
+| `pool_free_end` | 220 | 220 |
+
+The clock is an order of magnitude closer at the divided rate, 0.003% against
+0.03% over half an hour, which is the E-Clock doing the work either way rather
+than anything the divider improved. `skewpeak` 2 -> 3 is delivering two ticks
+per wakeup and is the expected shape; `lost` stays 0, which is the number that
+would matter.
+
+Throughput inside the soak is unchanged, as it should be -- the gain is a CPU
+cost the `-c` control measures and a Fitz workload over SLIRP does not.
+
 ### The tick watchdog, exercised 2026-08-08
 
 The timer.device request kept beside the VERTB server is the fallback for a
