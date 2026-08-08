@@ -130,6 +130,27 @@ templates are the testable part and are worth a pass of their own.
 
 ### Performance, measured positions
 
+**Tickless on "the timer wheel is empty" cannot fire.** Tried 2026-08-07,
+reverted. `nx_ip_create.c:227-229` creates `nx_ip_periodic_timer` with
+`TX_AUTO_ACTIVATE` and a reschedule interval, so a slot is occupied for as long
+as an IP instance exists and the skip condition is never true. Cost with no
+benefit: A600 read 857 -> 845, -1.4%, ranges +/-0.4%, which is the 32-pointer
+wheel scan per frame.
+
+The reachable form is distance, not emptiness: scan forward from
+`_tx_timer_current_ptr` to the first occupied slot and skip that many frames,
+which is a safe lower bound on the next expiry because a timer further out than
+`TX_TIMER_ENTRIES` still occupies a nearer slot with
+`tx_timer_internal_remaining_ticks` set. The skipped ticks must still be
+delivered as backlog so `_tx_timer_current_ptr` stays aligned -- the win is one
+wakeup walking N empty slots instead of N wakeups walking one each, and the
+wakeup is what costs. `_tx_timer_list_end` is one past the end
+(`tx_timer_initialize.c:231-232`), so the wrap is `>=`, not `>`.
+
+Bounded by the NetX periodic timer at `NX_IP_PERIODIC_RATE`, so the ceiling is
+one wakeup per second against fifty.
+
+
 **The 50 Hz ThreadX tick costs 9% of an A600 and 1% of an A1200.** Measured
 2026-08-07, `tests/perf/run-stackprof.sh -c` (RAM: arm only, stack up, no
 traffic), 512 KB, 3 reps, against `-s none` on the same rig:
