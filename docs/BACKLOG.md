@@ -351,6 +351,46 @@ spite of read.
 
 Read is the standing gap, on both tests, against Roadshow specifically.
 
+### The A1200 wire path is CPU-bound, profiled 2026-08-08
+
+0.19.1, A1200 bridged to a real peer, 1 MB, 2 reps, 14702 busy samples. Wire
+read 391, write 421.
+
+**7.0% idle.** The A3000 wire run is 57% idle and prices the rig; this one does
+not. There is CPU to win here.
+
+Where it goes, by task:
+
+    Background CLI  52%      Fitz and the file side
+    AmiNetXDuo      24%      the IP thread
+    sana2 rx ip     17%      the receive thread
+    ThreadX + tick   2%
+
+So the application and DOS side is over half of it, and the whole stack is 41%.
+That bounds what stack-side work can return.
+
+Largest single entries, share of busy:
+
+| | |
+|---|---|
+| `_n68k_copy_sum_longwords` | 9.5% |
+| `_n68k_copy_bytes` | 7.3% |
+| `a2065.device` internals (LVO-18, LVO-36) | 7.3% |
+| `_ami_sana2_rx_thread` | 3.8% |
+| `exec.library/Signal` | 2.9% |
+| `_ami_sana2_copy_from_buff` | 2.6% |
+| `__nx_tcp_socket_send_internal` | 2.5% |
+
+Copy and checksum together are about 19%. `_n68k_copy_bytes` is not a byte loop
+despite the name: it aligns the destination then runs `movem.l`, and measures
+176.6 ns/B against libm020 memcpy's 216 (`sana2_copy.c:39-42`,
+`n68k_memcpy_hook.c:13`). Both copy routines are already tuned.
+
+The 7.3% in `a2065.device` is Commodore's driver, reachable only by making
+fewer or larger transactions, not by making our code faster. Avoiding the copy
+entirely via S2_DMACopy is already scanned and decided against, see "SANA-II DMA
+buffer management".
+
 ### Performance, measured positions
 
 **Tickless on "the timer wheel is empty" cannot fire.** Tried 2026-08-07,
