@@ -680,7 +680,27 @@
  * part of neighbour discovery that exercises solicited-node multicast on every
  * boot, the only routine test of the S2_ADDMULTICASTADDRESS path in
  * src/sana2/.
+ *
+ * Nobody waits for it.  An address is TENTATIVE while the solicitations go
+ * out, and the answer arrives through the notification below rather than on
+ * the thread that configured the address; see ami_ns6_address_changed().
  */
+
+/*
+ * Report what duplicate address detection decides, and what a router hands
+ * out, instead of polling for it.
+ *
+ * Without this the notify field is not in NX_IP at all and
+ * nxd_ipv6_address_change_notify() compiles to a stub returning
+ * NX_NOT_SUPPORTED, which leaves an address's fate readable only by watching
+ * nxd_ipv6_address_state change.  Watching it is what AddNetInterface used to
+ * do, for three seconds per address, on the Startup-Sequence's thread.
+ *
+ * It also covers what no watcher at bring-up could see: an address formed
+ * later from a router advertisement, which arrives long after the command that
+ * configured the interface has returned.
+ */
+#define NX_ENABLE_IPV6_ADDRESS_CHANGE_NOTIFY
 
 /*
  * Router solicitation stays on (NX_DISABLE_ICMPV6_ROUTER_SOLICITATION is not
