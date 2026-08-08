@@ -38,6 +38,11 @@
 
 set -euo pipefail
 
+# The guest CPU.  Fitz is what the soak and endurance harnesses drive, so a
+# 68020 build of it cannot be run on an A600 whatever the stack was built for.
+# Inherits SOAK_ARCH so one setting covers a whole run.
+FITZ_ARCH="${FITZ_ARCH:-${SOAK_ARCH:--m68020}}"
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 HERE="$ROOT/tests/endurance"
 COMPAT="$ROOT/tests/conformance/compat"
@@ -51,7 +56,7 @@ mkdir -p "$OUT"
 # ---- the harness ---------------------------------------------------------
 
 echo "  CC endurance.c"
-"$AMIGA_GCC" -O2 -Wall -Wextra -m68020 -fomit-frame-pointer \
+"$AMIGA_GCC" -O2 -Wall -Wextra $FITZ_ARCH -fomit-frame-pointer \
     -fno-strict-aliasing \
     -I"$ROOT/include" -I"$COMPAT" -I"$AMIGA_NDK" \
     -o "$OUT/Endurance" "$HERE/endurance.c"
@@ -80,6 +85,9 @@ chmod +w "$OUT/fitz-release"
 #
 # -DAUTHENTICATION is deliberately absent: it pulls in speck64be.asm, which is
 # vasm source this tree cannot assemble, and encryption is off in every run
+# --allow-multiple-definition: a 68000 build calls __divsi3, and that newlib
+# object also defines `div`, which collides with lib_a-div.o.  Harmless, and
+# only 68000 reaches it.
 # here anyway (Fitz's own readme calls it "prohibitively slow on a 7 MHz
 # 68000").  -DPARSETZ and -DROADSHOW_SONDERLOCKE match the shipped build.
 echo "  CC fitz (m68k, ADEBUG=5)"
@@ -88,10 +96,11 @@ FITZ_SRC="
     fitz-common.c fitz-common-server.c fitz-common-client.c
 "
 ( cd "$FITZ/src" && \
-  "$AMIGA_GCC" -std=c99 -Os -m68020 -D__amigaos__ \
+  "$AMIGA_GCC" -std=c99 -Os $FITZ_ARCH -D__amigaos__ \
       -DPARSETZ -DROADSHOW_SONDERLOCKE -DDEBUG -DADEBUG=5 \
       -Wno-int-conversion -include sys/types.h \
       -I"$COMPAT" -I"$AMIGA_NDK" \
+      -Wl,--allow-multiple-definition \
       -o "$OUT/fitz-debug" $FITZ_SRC "$HERE/fitz-kprintf.c" -lm )
 
 "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-size" "$OUT/fitz-debug" || true
