@@ -2700,8 +2700,10 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
      * addressing: the duplicate address detection this sends belongs inside
      * the trace.
      *
-     * The bracket is this function's third and last. Duplicate address
-     * detection is waited for inside, and that wait is a tx_thread_sleep().
+     * The bracket is this function's third and last. What happens inside it is
+     * configuration only: duplicate address detection runs afterwards, on the
+     * IP thread, and is reported by ami_ns6_address_changed() rather than
+     * waited for here.
      */
     caller = ami_netstack_enter_alloc();
     if (caller != NULL)
