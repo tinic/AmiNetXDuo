@@ -245,6 +245,10 @@ board_lines() {
 TAG="${AMINETXDUO_RUN_TAG:-amiberry}"
 HD="$ROOT/build/amiberry-testhd-$TAG"
 SERIAL="$ROOT/build/amiberry-serial-$TAG.log"
+# The same output with a host timestamp per line, written alongside rather than
+# into $SERIAL: everything that greps the serial log anchors to the start of a
+# line.  See tools/serial-timestamp.py.
+SERIALTS="$ROOT/build/amiberry-serial-$TAG.stamped.log"
 UAELOG="$ROOT/build/amiberry-$TAG.log"
 CFG="$ROOT/build/amiberry-$TAG.uae"
 
@@ -400,6 +404,14 @@ export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
 
 WALL_START=$(date +%s)
 
+# A host without python3 keeps the reader it always had, and loses only the
+# stamped copy.
+SERIAL_READER=""
+if command -v python3 > /dev/null 2>&1; then
+    SERIAL_READER="python3 -u $ROOT/tools/serial-timestamp.py"
+    : > "$SERIALTS"
+fi
+
 # SIGPIPE is ignored for the same reason tools/fsuae-run.sh ignores it: the
 # emulator writes guest payload to host sockets with plain send(), and a peer
 # that hangs up first otherwise takes the emulator down mid-instruction with no
@@ -419,7 +431,15 @@ AMIBERRY_PID=$!
 (
     for _ in $(seq 1 60); do
         kill -0 "$AMIBERRY_PID" 2>/dev/null || exit 0
-        nc 127.0.0.1 "$PORT" >> "$SERIAL" 2>/dev/null && exit 0
+        # Both readers append to $SERIAL identically; the python one also
+        # stamps.  It exits non-zero without writing when it cannot connect,
+        # so the retry above behaves as it did with nc alone.
+        if [ -n "$SERIAL_READER" ]; then
+            $SERIAL_READER 127.0.0.1 "$PORT" "$SERIAL" "$SERIALTS" \
+                2>/dev/null && exit 0
+        else
+            nc 127.0.0.1 "$PORT" >> "$SERIAL" 2>/dev/null && exit 0
+        fi
         sleep 0.5
     done
 ) &
@@ -505,6 +525,7 @@ fi
 echo "---- serial ($SERIAL) ----"
 if [ -s "$SERIAL" ]; then
     cat "$SERIAL"
+    [ ! -s "$SERIALTS" ] || echo "(same output, timestamped: $SERIALTS)"
 else
     echo "(empty, no ami_log output reached the serial port)"
 fi
