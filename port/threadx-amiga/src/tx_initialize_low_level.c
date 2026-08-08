@@ -550,6 +550,35 @@ static VOID _tx_amiga_timer_exit(VOID)
  * so NTSC does not run 20% fast and RTG does not matter.
  */
 static ULONG _tx_amiga_vblank_sigmask =  0UL;
+static ULONG _tx_amiga_vblank_frames  =  0UL;
+
+/*
+ * Frames per wakeup.  The E-Clock is the time base, not this, so dividing the
+ * wakeup rate does not divide the clock: the loop reads the E-Clock and
+ * delivers however many whole tick periods elapsed, two at a time instead of
+ * one.  What it halves is the per-wakeup cost -- the Wait, the ReadEClock, the
+ * scheduler poke and two context switches -- which the A600 profile put well
+ * above the tick work itself.
+ *
+ * It coarsens delivery to the divider times the frame -- at 2 a timer armed for
+ * one tick can arrive a frame late -- and does NOT change the tick count, so
+ * NX_IP_PERIODIC_RATE and every timeout expressed in ticks are untouched.
+ * AmiTCP_NG's fast timer runs at 25 Hz for the same trade.
+ *
+ * Measured with -c, profiler off, 3 reps, against a machine with no stack:
+ *
+ *              A600 read           A1200 read
+ *   no stack   1024                6271
+ *   every VBL   884  (-13.7%)      5926  (-5.5%)
+ *   every 2nd   926   (-9.6%)      6076  (-3.1%)
+ *   every 4th   944   (-7.8%)      -
+ *
+ * 4 buys another 1.9% on the A600 with the ranges overlapping, and costs twice
+ * the resolution, so 2 is where this stops.
+ */
+#ifndef TX_AMIGA_VBLANK_DIVIDER
+#define TX_AMIGA_VBLANK_DIVIDER                 2UL
+#endif
 
 static ULONG _tx_amiga_vblank_server(VOID)
 {
@@ -572,7 +601,13 @@ struct Task *task =  (struct Task *) _tx_amiga_timer_task;
        d0/d1/a0/a1/a5/a6 across a server, and the C ABI preserves the rest. */
     if ((task != (struct Task *) 0) && (_tx_amiga_vblank_sigmask != 0UL))
     {
-        Signal(task, _tx_amiga_vblank_sigmask);
+        _tx_amiga_vblank_frames++;
+
+        if (_tx_amiga_vblank_frames >= (ULONG) TX_AMIGA_VBLANK_DIVIDER)
+        {
+            _tx_amiga_vblank_frames =  0UL;
+            Signal(task, _tx_amiga_vblank_sigmask);
+        }
     }
 
     return(0UL);        /* 0: not exclusive, let the rest of the chain run */
