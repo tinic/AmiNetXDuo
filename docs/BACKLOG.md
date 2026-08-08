@@ -391,6 +391,52 @@ fewer or larger transactions, not by making our code faster. Avoiding the copy
 entirely via S2_DMACopy is already scanned and decided against, see "SANA-II DMA
 buffer management".
 
+### RFC 1323 window scaling, measured 2026-08-08
+
+**Section 2 is already implemented**; NetX Duo has it and `nx_user.h:357` wires
+it to `AMINETXDUO_TCP_WINDOW_SCALING`, off by default. The note above it says it
+"stays off until SACK exists, or a pool budget can offer one socket more than
+64 KB". `AMINETXDUO_TCP_SACK` has since become ON by default
+(`CMakeLists.txt:316`), so the first clause is met and nobody went back to it.
+
+**Sections 3 and 4 are not there.** No `NX_ENABLE_TCP_TIMESTAMP`, no timestamp
+option kind, nothing in the vendored tree. Timestamps, PAWS and RTTM would have
+to be written into NetX Duo's TCP path, which is a different order of work from
+the flag.
+
+Scaling only does something above a 65535 window, and `BSD_TCP_WINDOW_CEILING`
+is 33580 -- exactly the maximum a capture sees us advertise. So the measurement
+needs both.
+
+A1200 bridged to a real peer, 1 MB, 2 reps, profiler off, ceiling raised to
+98304 and `BSD_TCP_WINDOW_POOL_SHARE` to 4:
+
+| | shipping | scaling + 98 KB window |
+|---|---|---|
+| wire read | 389 (386-393) | **402** (402-403) |
+| wire write | 428 | 431 |
+| window field advertised | median 33540 | median 49132, shift 1 |
+| pure ACKs sent | 1707 | 1363 |
+| data segments per ACK | 1.58 | 1.92 |
+
+Read is +3.3% with no overlap, and 344 fewer ACKs come with it because the
+window-update trigger fires less often when the window is larger.
+
+**Scaling on its own is safe; the ceiling is what the drills encode.** With
+scaling ON and the ceiling unchanged, `tcp.drill` is 28 cases / 227 checks and
+`rwndupdate.drill` 3 / 61 -- identical to the shipping build. With the ceiling
+raised, two fail, and both are expectations carrying the old number:
+
+- `tcp.drill w01` asserts `winmax=33580` and sees 65535. That is correct RFC 1323
+  behaviour: a SYN carries an unscaled window, so 65535 is the protocol maximum
+  whatever the local ceiling is.
+- `rwndupdate.drill s03` expects `ack=18981 win=32120`, both derived from a 33580
+  window.
+
+So the remaining step before this can ship is the drills deriving their window
+bounds from the build rather than hardcoding them. `sack`, `dsack`, `rxorder`,
+`dupack` and `retransmit` are all clean on the raised-ceiling build.
+
 ### Performance, measured positions
 
 **Tickless on "the timer wheel is empty" cannot fire.** Tried 2026-08-07,
