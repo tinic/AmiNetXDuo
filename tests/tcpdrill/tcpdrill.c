@@ -1927,16 +1927,31 @@ static VOID do_idle(const char *args, const char *raw)
 {
     char  tok[24];
     ULONG ms;
-    ULONG spent = 0;
+    ULONG start;
 
     (VOID)token(args, tok, sizeof(tok));
     ms = (ULONG)to_num(tok);
 
-    while (spent < ms)
+    /*
+     * Measured, not counted.  `spent += 20` credited the Delay(1) and nothing
+     * else, so every iteration also spent however long pump() took and the
+     * loop ran past the interval it was asked for -- silently, because nothing
+     * compared the two.  `idle 600` overran the one second retransmission
+     * timeout, the stack retransmitted exactly as it should, and the case that
+     * asked for the idle then matched that frame against its next expectation
+     * and reported the stack for it.  rto01, rto04 and rto05 are the three
+     * cases in rto.drill that use `idle`, and were the three that failed.
+     *
+     * Delay(1) is one 50 Hz tick, so the interval is still granular to 20 ms
+     * plus one pump(); what changes is that the overshoot is bounded by one
+     * iteration instead of accumulating over all of them.
+     */
+    start = tap_eclock_now();
+
+    while (ticks_to_ms(start, tap_eclock_now()) < ms)
     {
         pump();
         Delay(1);
-        spent += 20;
     }
     pump();
     pass(raw);

@@ -128,35 +128,33 @@ rather than including them.
 Not started: the twenty-five commands other than httpd. Their `ReadArgs`
 templates are the testable part and are worth a pass of their own.
 
-### rto.drill fails 3 of 5 cases on main, measured 2026-08-07
+### rto.drill's `idle` measured nothing, fixed 2026-08-07
 
-Not a regression and not a configure artifact. Identical counts -- 5 cases, 3
-failed, 73 checks passed, 12 failed -- on `build/relnew` (configured in an
-earlier session), on a fresh configure with the same options (`diff` of the
-`AMINETXDUO_*` cache entries is empty), and with and without the VERTB tick
-source, so it predates all of it.
+`do_idle()` credited each iteration with a flat `spent += 20` for its `Delay(1)`
+and ignored what `pump()` cost in the same loop, so `idle MS` ran past the
+interval it was asked for by however long the pumping took. `idle 600` overran
+the one second retransmission timeout; the stack retransmitted exactly as it
+should; and the case that asked for the idle matched that frame against its
+next expectation and reported the stack for it.
 
-| case | check | wanted | got |
-|---|---|---|---|
-| `rto01_first_sample_sets_the_timeout` | `tx PA seq=101` | seq 101 | 1 |
-| | gap after 1400 ms | 1400 | 284 |
-| `rto04_backoff_doubles_the_measured_base` | gap after 1400 ms | 1400 | 323 |
-| | gap after 2800 ms | 2800 | 979 |
-| `rto0x` (sequence ladder) | `tx PA seq=201/301/401...` | n | n-100 |
+The correlation is the proof: `idle` appears in `rto01`, `rto04` and `rto05`,
+which were the three failing cases, and not in `rto02` or `rto03`, which passed.
+`rto02` also showed the retransmission arriving at +936 ms and an injected ACK
+being accepted in +1 ms, so the timeout and the ACK path were both correct all
+along.
 
-Two distinct symptoms. The sequence checks are off by exactly one segment, the
-drill matching the previous segment rather than the expected one. The interval
-checks come out 4-6x short: the drill's header derives ~1.9 s for the first
-timeout from `NX_ENABLE_TCP_RTT_ESTIMATOR` and a 600 ms induced round trip, and
-the stack produces ~284 ms, which is nearer the pre-estimator fixed base than
-the measured one. `AMINETXDUO_TCP_RTT` is ON in every build tested.
+Fixed by measuring against `tap_eclock_now()`, the clock every other timing in
+the harness already uses. 5 cases, 0 failed, 85 checks passed.
 
-`keepalive.drill`'s 2 failures in the same sweep are the documented false alarm,
-not this: it needs `-DAMINETXDUO_TCP_KEEPALIVE_INITIAL=5` and fails correctly
-against a default build (see the row below).
+Excluded on the way, each by measurement, so none is re-derived: the VERTB tick
+source (identical counts with and without), the RTT estimator (identical with
+`AMINETXDUO_TCP_RTT=OFF`), and every rate constant --
+`NX_IP_PERIODIC_RATE` and `TX_TIMER_TICKS_PER_SECOND` both compile to 50,
+`NX_TCP_TRANSMIT_TIMER_RATE` is 1 so the initial timeout is 50 ticks, and
+`send_internal.c:271-273` arms exactly that.
 
-Clean in the same sweep, same build: `tcp` (28/227), `retransmit` (3/24),
-`linger` (3/31), `dupack` (3/28), `sack` (12/112), `rxorder` (5/49).
+A harness whose timing directive is unmeasured reports the target for its own
+drift, and the report is specific and plausible enough to be believed.
 
 ### Performance, measured positions
 
