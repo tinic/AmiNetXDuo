@@ -149,7 +149,21 @@ static ULONG load_script(void)
    The argarray is cast to (APTR), not (CONST_APTR): NDK 3.2 and NDK 3.9 spell
    VFPrintf's third parameter differently and only APTR converts to both.  See
    the long note in src/tools/tool_util.c. */
-static void report(const char *fmt, LONG a, LONG b)
+/*
+ * Milliseconds between two DateStamps.  ds_Tick is fiftieths of a second, so
+ * the resolution is 20 ms, which is fine for a stage measured in seconds and
+ * is the only clock here that needs no device opened.
+ */
+static LONG elapsed_ms(const struct DateStamp *from, const struct DateStamp *to)
+{
+    LONG days  = to->ds_Days   - from->ds_Days;
+    LONG mins  = to->ds_Minute - from->ds_Minute;
+    LONG ticks = to->ds_Tick   - from->ds_Tick;
+
+    return ((days * 1440L + mins) * 60L * 50L + ticks) * 20L;
+}
+
+static void report(const char *fmt, LONG a, LONG b, LONG c)
 {
     BPTR fh = Open((CONST_STRPTR)REPORT, MODE_READWRITE);
 
@@ -158,10 +172,11 @@ static void report(const char *fmt, LONG a, LONG b)
 
     Seek(fh, 0, OFFSET_END);
     {
-        LONG args[2];
+        LONG args[3];
 
         args[0] = a;
         args[1] = b;
+        args[2] = c;
         VFPrintf(fh, (CONST_STRPTR)fmt, (APTR)args);
     }
     Close(fh);
@@ -198,9 +213,10 @@ int main(int argc, char **argv)
 
     for (i = 0; ; i++)
     {
-        char        line[MAX_LINE + 40];
-        const char *command;
-        LONG        rc;
+        char             line[MAX_LINE + 40];
+        const char      *command;
+        struct DateStamp started;
+        LONG             rc;
         int         n = 0;
         int         k;
         int         has_input = 0;
@@ -220,7 +236,7 @@ int main(int argc, char **argv)
             command = commands[i];
         }
 
-        report((const char *)"\n===== %s =====\n", (LONG)command, 0);
+        report((const char *)"\n===== %s =====\n", (LONG)command, 0, 0);
 
         /* "wait <seconds>", for letting a background listener settle. */
         if ((command[0] == 'w' || command[0] == 'W') &&
@@ -237,7 +253,7 @@ int main(int argc, char **argv)
             if (secs > 0)
                 Delay((ULONG)secs * 50UL);
 
-            report((const char *)"----- waited %ld s -----\n", secs, 0);
+            report((const char *)"----- waited %ld s -----\n", secs, 0, 0);
             continue;
         }
 
@@ -276,6 +292,8 @@ int main(int argc, char **argv)
 
         line[n] = '\0';
 
+        DateStamp(&started);
+
         if (async)
         {
             /*
@@ -311,13 +329,13 @@ int main(int argc, char **argv)
         if (rc == -1)
         {
             report((const char *)"----- could not run (IoErr %ld) -----\n",
-                   IoErr(), 0);
+                   IoErr(), 0, 0);
             failures++;
         }
         else if (async)
         {
             report((const char *)"----- started in the background -----\n",
-                   0, 0);
+                   0, 0, 0);
         }
         else
         {
@@ -330,20 +348,31 @@ int main(int argc, char **argv)
              * SystemTagList() above passes no NP_StackSize, so these run on
              * the Shell's own stack, which is what a 1 MB machine has.
              */
-            report((const char *)"----- rc %ld, free %ld -----\n", rc,
+            struct DateStamp finished;
+
+            DateStamp(&finished);
+
+            /*
+             * How long it took, which is the only way from out here to see
+             * that a command spent its time waiting rather than working.  A
+             * boot path is made of these, and without the number a stage that
+             * costs seconds is indistinguishable from one that costs none.
+             */
+            report((const char *)"----- rc %ld, %ld ms, free %ld -----\n", rc,
+                   elapsed_ms(&started, &finished),
                    (LONG)AvailMem(MEMF_ANY));
         }
 
         if (SetSignal(0L, 0L) & SIGBREAKF_CTRL_C)
         {
             SetSignal(0L, SIGBREAKF_CTRL_C);
-            report((const char *)"\n*** Break, stopping\n", 0, 0);
+            report((const char *)"\n*** Break, stopping\n", 0, 0, 0);
             break;
         }
     }
 
     report((const char *)"\n===== done, %ld command(s) would not run =====\n",
-           (LONG)failures, 0);
+           (LONG)failures, 0, 0);
 
     self->pr_WindowPtr = old_window;
 
