@@ -227,10 +227,16 @@ A2065="${AMINETXDUO_A2065:-$ROOT/build/a2065.device}"
 
 # ------------------------------------------------------------- the server ---
 
-if [ "$CTLONLY" = 1 ]; then
-    # -c transfers nothing over the wire, so there is no server to
-    # start and nothing to check.
-    echo "==> control only: RAM: arm, stack up, no traffic"
+if [ "$CTLONLY" = 1 ] || [ "$DIAG" = 1 ]; then
+    # Neither -c nor -d transfers anything over the wire, so there is no server
+    # to start and nothing to check.  -d in particular exists to bring an
+    # interface up and stop, which is exactly the run that wants no peer, and
+    # refusing it for the want of one made the diagnostic unusable.
+    if [ "$DIAG" = 1 ]; then
+        echo "==> diagnostic only: bring the interface up and report"
+    else
+        echo "==> control only: RAM: arm, stack up, no traffic"
+    fi
 elif [ -n "$PEER" ]; then
     PEERLOG="$ROOT/build/stackprof-$TAG-peer.log"
     # The bracket is not decoration: pkill -f matches the remote shell's own
@@ -273,8 +279,8 @@ else
         cat >&2 <<EOF
 Nothing is listening on $PEER_ADDR:$PORT, and no peer was given to start one.
 
-  -H user\@host                       start fitz-serve there over ssh
-  AMINETXDUO_FITZ_PEER=user\@host      the same, from the environment
+  -H user@host                        start fitz-serve there over ssh
+  AMINETXDUO_FITZ_PEER=user@host       the same, from the environment
 
 The peer must be a THIRD machine on real Ethernet; see the note at the top of
 this file for why it cannot be playhouse2 or the emulator's own host.
