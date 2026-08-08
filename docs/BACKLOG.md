@@ -128,6 +128,36 @@ rather than including them.
 Not started: the twenty-five commands other than httpd. Their `ReadArgs`
 templates are the testable part and are worth a pass of their own.
 
+### rto.drill fails 3 of 5 cases on main, measured 2026-08-07
+
+Not a regression and not a configure artifact. Identical counts -- 5 cases, 3
+failed, 73 checks passed, 12 failed -- on `build/relnew` (configured in an
+earlier session), on a fresh configure with the same options (`diff` of the
+`AMINETXDUO_*` cache entries is empty), and with and without the VERTB tick
+source, so it predates all of it.
+
+| case | check | wanted | got |
+|---|---|---|---|
+| `rto01_first_sample_sets_the_timeout` | `tx PA seq=101` | seq 101 | 1 |
+| | gap after 1400 ms | 1400 | 284 |
+| `rto04_backoff_doubles_the_measured_base` | gap after 1400 ms | 1400 | 323 |
+| | gap after 2800 ms | 2800 | 979 |
+| `rto0x` (sequence ladder) | `tx PA seq=201/301/401...` | n | n-100 |
+
+Two distinct symptoms. The sequence checks are off by exactly one segment, the
+drill matching the previous segment rather than the expected one. The interval
+checks come out 4-6x short: the drill's header derives ~1.9 s for the first
+timeout from `NX_ENABLE_TCP_RTT_ESTIMATOR` and a 600 ms induced round trip, and
+the stack produces ~284 ms, which is nearer the pre-estimator fixed base than
+the measured one. `AMINETXDUO_TCP_RTT` is ON in every build tested.
+
+`keepalive.drill`'s 2 failures in the same sweep are the documented false alarm,
+not this: it needs `-DAMINETXDUO_TCP_KEEPALIVE_INITIAL=5` and fails correctly
+against a default build (see the row below).
+
+Clean in the same sweep, same build: `tcp` (28/227), `retransmit` (3/24),
+`linger` (3/31), `dupack` (3/28), `sack` (12/112), `rxorder` (5/49).
+
 ### Performance, measured positions
 
 **Tickless on "the timer wheel is empty" cannot fire.** Tried 2026-08-07,
