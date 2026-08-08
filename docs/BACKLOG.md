@@ -130,6 +130,43 @@ templates are the testable part and are worth a pass of their own.
 
 ### Performance, measured positions
 
+**The 50 Hz ThreadX tick costs 9% of an A600 and 1% of an A1200.** Measured
+2026-08-07, `tests/perf/run-stackprof.sh -c` (RAM: arm only, stack up, no
+traffic), 512 KB, 3 reps, against `-s none` on the same rig:
+
+| model | arm | baseline | ours | cost |
+|---|---|---|---|---|
+| A1200/68020 | read | 5904 | 5670 | -4.0% |
+| A1200/68020 | write | 3455 | 3199 | -7.4% |
+| A600/68000 | read | 1002 | 820 | **-18.2%** |
+| A600/68000 | write | 623 | 502 | **-19.4%** |
+
+`tasks (busy)` on A600 is `ThreadX tick 9%` against 1% on A1200, and
+`timer.device/LVO-36` 5.5% against a 2.4% baseline. The tick's work is a fixed
+instruction count, so a 7 MHz 68000 with no cache pays roughly ten times the
+share an 020 does. `-DTX_TIMER_TICKS_PER_SECOND=5UL` confirms causation: A600
+read 820 -> 891, +8.7%, 39% of the deficit, ranges +/-0.5%.
+
+The same experiment on A1200 moves nothing (5670 -> 5703, inside the ~1%
+between-run spread), which is why measuring only on an 020 hides this.
+
+Not a fix: a fixed lower rate costs timer granularity everywhere, and
+`NX_IP_PERIODIC_RATE` follows `TX_TIMER_TICKS_PER_SECOND` into NetX Duo's TCP
+timing (`third_party/netxduo/common/inc/nx_api.h:153-158`). Tickless is the
+fix -- arm `timer.device` for the next expiry rather than a fixed interval. The
+catch-up arithmetic it needs already exists,
+`port/threadx-amiga/src/tx_initialize_low_level.c:436`.
+
+Residual after the tick: A600 read is still -11.1% at 5 Hz, unexplained.
+Excluded on A1200 by measurement: Chip RAM (`MEMF_FAST` first changed nothing,
+commit 3edcd6b), allocator fragmentation (AmiTCP_NG spends 19.6% in exec's
+allocator against our 15.6% and still wins the read), and total residency cost
+(both stacks run the same 1.28 s against a 1.20 s bare machine).
+
+AmiTCP_NG cannot be compared on A600: the 4.1.5-beta library builds 68020-only,
+365 68020 opcodes against 1 in our 68000 build.
+
+
 **Where transfer time goes.** Sampling profiler, `tools/profiler/`, 1 MB TCP,
 A1200/68020, 1000 Hz, 4411 samples, 0.2% unattributed:
 
