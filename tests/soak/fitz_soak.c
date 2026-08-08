@@ -291,6 +291,7 @@ typedef struct { NetStatusHeader hdr; NetStatusSystem    e;      } SoakSysBuf;
 typedef struct { NetStatusHeader hdr; NetStatusStats     e;      } SoakStatBuf;
 typedef struct { NetStatusHeader hdr; NetStatusInterface e[4];   } SoakIfBuf;
 typedef struct { NetStatusHeader hdr; NetStatusSocket    e[64];  } SoakSockBuf;
+typedef struct { NetStatusHeader hdr; NetStatusHealth    e;      } SoakHealthBuf;
 
 static LONG s_ask(struct Library *base, ULONG what, APTR buf, ULONG size)
 {
@@ -417,6 +418,39 @@ static VOID s_snapshot(struct Library *base, const char *why)
            "poolempty=%lu sockets=%lu retrans=%lu conn=%lu disc=%lu "
            "connDropped=%lu ipSendDrop=%lu ipRecvDrop=%lu sanaAlloc=%lu "
            "sanaErr=%lu\n", args);
+
+    /*
+     * The tick, every snapshot.  A soak on this stack exists to catch the
+     * clock drifting, and skew is the number that says so: what the wheel has
+     * yet to be given plus what was taken off it for good.  Reported here so a
+     * run can be compared end to end rather than inferred from "nothing
+     * crashed".
+     */
+    {
+        SoakHealthBuf *h = (APTR)AllocVec((ULONG)sizeof(*h), MEMF_ANY);
+
+        if (h != NULL)
+        {
+            if (s_ask(base, NETSTATUS_HEALTH, h, sizeof(*h)) >= 0)
+            {
+                LONG targs[8];
+
+                targs[0] = (LONG)s_secs();
+                targs[1] = (LONG)why;
+                targs[2] = (LONG)h->e.nsl_TickSkew;
+                targs[3] = (LONG)h->e.nsl_TickSkewPeak;
+                targs[4] = (LONG)h->e.nsl_TickLost;
+                targs[5] = (LONG)h->e.nsl_TickDeferred;
+                targs[6] = (LONG)h->e.nsl_TickUptimeMs;
+                targs[7] = (LONG)h->e.nsl_TickWorstServiceUs;
+
+                s_emit(F_EVENTS,
+                       "%lu TICK %s skew=%lu skewpeak=%lu lost=%lu deferred=%lu "
+                       "uptime_ms=%lu worst_service_us=%lu\n", targs);
+            }
+            FreeVec((APTR)h);
+        }
+    }
 
     FreeVec((APTR)b);
 

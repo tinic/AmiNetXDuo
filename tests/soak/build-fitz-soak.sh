@@ -22,6 +22,10 @@
 
 set -euo pipefail
 
+# The guest CPU this is built for.  A 68020 binary on an A600 dies on its
+# first 020 instruction, before any of the harness runs.
+SOAK_ARCH="${SOAK_ARCH:--m68020}"
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 HERE="$ROOT/tests/soak"
 COMPAT="$ROOT/tests/conformance/compat"
@@ -32,7 +36,7 @@ OUT="$ROOT/build/soak"
 mkdir -p "$OUT"
 
 echo "  CC fitz_soak.c"
-"$AMIGA_GCC" -O2 -Wall -Wextra -m68020 -fomit-frame-pointer \
+"$AMIGA_GCC" -O2 -Wall -Wextra $SOAK_ARCH -fomit-frame-pointer \
     -fno-strict-aliasing \
     -I"$ROOT/include" -I"$COMPAT" -I"$AMIGA_NDK" \
     -o "$OUT/FitzSoak" "$HERE/fitz_soak.c"
