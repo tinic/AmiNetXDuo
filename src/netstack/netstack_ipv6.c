@@ -150,6 +150,15 @@ static VOID ami_ns6_address_changed(NX_IP *ip_ptr, UINT status,
     prefix = (ULONG)ns->ns_Ip.nx_ipv6_address[address_index]
                         .nxd_ipv6_address_prefix_length;
 
+    /*
+     * A link-local address is configured with the /10 of RFC 4291 section
+     * 2.5.6, which is what makes fe80:: link-local at all, but the prefix that
+     * is on-link is the /64 that section 2.5.1 leaves for the interface
+     * identifier. /64 is what bring-up printed and what the address means.
+     */
+    if ((address[0] & 0xFFC00000UL) == 0xFE800000UL)
+        prefix = 64UL;
+
     switch (status)
     {
     case NX_IPV6_ADDRESS_DAD_SUCCESSFUL:
