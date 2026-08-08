@@ -597,22 +597,23 @@
 /* ------------------------------------------------------------------ DHCP, */
 
 /*
- * ARP-probe the offered address before using it, and DHCPDECLINE if somebody
+ * ARP-probe the address the server hands out, and DHCPDECLINE if somebody
  * answers (RFC 2131 4.4.1, RFC 5227 2.1).
  *
- * addons/dhcp ships the whole of this, the ADDRESS_PROBING state,
- * _nx_dhcp_ip_conflict() and _nx_dhcp_interface_decline(), behind the define,
- * and nxd_dhcp_client.h leaves it commented out, so without a line here no
- * probe and no DECLINE can leave the machine and a duplicate address is taken
- * silently.  AutoIP next door does probe (nx_auto_ip.c), so link-local was
- * compliant while DHCP was not.
+ * addons/dhcp ships the whole of this, _nx_dhcp_ip_conflict() and
+ * _nx_dhcp_interface_decline(), behind the define, and nxd_dhcp_client.h
+ * leaves it commented out, so without a line here no probe and no DECLINE can
+ * leave the machine and a duplicate address is taken silently.  AutoIP next
+ * door does probe (nx_auto_ip.c), so link-local was compliant while DHCP was
+ * not.
  *
- * Cost is NX_DHCP_ARP_PROBE_WAIT plus NX_DHCP_ARP_PROBE_NUM intervals of
- * NX_DHCP_ARP_PROBE_MIN..MAX, 1 s then 3 waits of 1-2 s, on every bring-up,
- * and bsdsocket.library brings the stack up on the first OpenLibrary().
- *
- * tests/netstack/dhcp3927_test.c phase I compiles in with it and drives the
- * conflict.
+ * The probes go out alongside the address rather than in front of it, so the
+ * boot cost is nothing: NetX Duo used to hold the address off the interface
+ * for NX_DHCP_ARP_PROBE_WAIT plus NX_DHCP_ARP_PROBE_NUM intervals of
+ * NX_DHCP_ARP_PROBE_MIN..MAX, which is 3 to 6 seconds charged to whoever
+ * brought the stack up -- AddNetInterface in the Startup-Sequence, since
+ * bsdsocket.library brings the stack up on the first OpenLibrary().  The
+ * timings below are unchanged and are still what goes on the wire.
  */
 #define NX_DHCP_CLIENT_SEND_ARP_PROBE
 
