@@ -9,6 +9,11 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.19.1
+
+- The stack's timer now wakes from the vertical blank, and on every second frame rather than every one, instead of issuing a timer.device request for each tick. The clock is still taken from the E-Clock so nothing about timing changes; what goes is the request round trip and half the wakeups, and other work on the machine while the stack is resident runs about 13% faster on a 68000 and 2.5% on a 68020
+- Memory the stack allocates asks for Fast RAM before anything else. A packet pool or a thread stack placed in Chip is contended with the chipset, and that cost is paid by everything else on the machine rather than by the stack
+
 ## 0.19.0
 
 - A received TCP or UDP checksum is verified as the frame is copied rather than by walking the packet a second time. The SANA-II copy already reads every longword, so it returns the sum it saw; fragments, IPv6 and anything that is not plain TCP or UDP still take the ordinary path. Listed under 0.18.0 but built out of that release
