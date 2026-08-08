@@ -59,6 +59,9 @@
 #   -m MODEL    emulator profile (default A3000)
 #   -t SECS     timeout (default 500)
 #   -L DIR      extra files staged into LIBS:
+#
+#   AMINETXDUO_NETSTAT_ARGS overrides the arguments NetStat is run with,
+#   which is how a specific query gets exercised against a live mount.
 #   -w          capture the peer's own egress and report the inbound loss
 #               rate from it with tests/perf/lossrate.py.  This is the
 #               comparison that survives a rig: throughput is downstream of
@@ -164,7 +167,7 @@ case "$STACK" in
         LIBUG="$BUILD/src/usergroup/usergroup.library"
         CMD_ADDIF="$BUILD/src/tools/AddNetInterface"
         CMD_STAT="$BUILD/src/tools/netstat"
-        STATARGS="-s"
+        STATARGS="${AMINETXDUO_NETSTAT_ARGS:--s}"
         NOTE="AmiNetXDuo from $BUILD"
         ;;
     roadshow)

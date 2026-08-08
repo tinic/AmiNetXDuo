@@ -181,30 +181,34 @@ struct read (`ami_sana2_get_stats`, `ami_sana2_get_bps`, `ami_sana2_is_online`,
 `NX_MAX_PHYSICAL_INTERFACES` being 2 against the caller's `e[4]`; and one
 `netstatus.h` serves both include paths so the entry size cannot disagree.
 
-It is contention, not the query. The same call placed BEFORE the mounts
-returns normally:
+It is the SEQUENCE of queries, and nothing else. Reduced to a reproducer that
+needs no soak, no mounts, no load and no time:
 
-    12 NOTE pre-mount-ask 0
-    12 NOTE pre-mount-ask-ret 2      two interfaces, on an idle stack
-    12 NOTE wire-mount-started 17821
-    12 NOTE local-mount-started 17822
-    (nothing further)
+| called | result |
+|---|---|
+| `NETSTATUS_INTERFACES` alone | returns, 2 interfaces |
+| `NETSTATUS_SYSTEM` four times in a row | all four return |
+| `SYSTEM` then `STATS` then `INTERFACES` | **hangs on the third** |
 
-`fitz serve` is already running at that point, so serving alone does not do it;
-the two `fitz mount` DOS handlers do. Within one run the identical query
-succeeds before them and never returns after.
+Excluded, each by a run that changed only that thing: both `fitz mount`
+handlers (skipped, still hangs), elapsed time and load (hangs at t=13 as
+readily as t=22), the VERTB tick source (identical on `build/fastm`), and a
+4 KB CLI stack against `s_snapshot()`'s multi-kilobyte frame
+(`ULONG __stack = 65536` changes nothing, though whether libnix's startup
+honours it here is unverified).
 
-That puts the block in the entry, not the fill: `bsd_nx_enter()`
+`NetStat -i` after a bridged `fitz mount` completes normally
+(`AMINETXDUO_NETSTAT_ARGS=-i`, `run-stackprof.sh`), so a single interfaces query
+against a live mount is fine. Whatever this is, it is reached only by asking two
+other queries first.
+
+The block itself is in the entry, not the fill: `bsd_nx_enter()`
 (`netstatus.c:1277`) -> `ami_netstack_enter_cached()` ->
-`tx_amiga_adopt_thread()` (`tx_amiga_adopt.c:212`), whose slow path is
-`_tx_amiga_wake_scheduler()` followed by `_tx_amiga_thread_park()`. A caller
-that is not granted the baton waits there forever. So the question is why the
-scheduler never dispatches a newly adopted caller while those handlers are live
--- a handler blocked in exec without leaving the stack would do it, and that is
-the failure mode `port/threadx-amiga`'s own notes describe.
+`tx_amiga_adopt_thread()` (`tx_amiga_adopt.c:212`), whose slow path parks on
+`_tx_amiga_thread_park()` for a baton it is never granted.
 
-Separate from the path bug fixed in `62c9e74`, which had been reporting this
-stall as "(none written)".
+Next test, and it is small: `STATS` then `INTERFACES` with no `SYSTEM`, and
+`SYSTEM` then `INTERFACES` with no `STATS`, to name which predecessor does it.
 
 Killing the emulator directly leaves the host `fitz-serve` alive and the next
 run refuses with "something already listens on 17821". Stop the runner, not the
