@@ -358,6 +358,23 @@
 #define NX_ENABLE_TCP_WINDOW_SCALING
 #endif
 
+/*
+ * RFC 1323 section 3, timestamps.
+ *
+ * Two things come with it and one bill.  RTTM samples every segment rather
+ * than one per window and survives a retransmission, which Karn's algorithm
+ * otherwise discards; and PAWS rejects a segment whose timestamp went
+ * backwards, which is what protects a sequence space that wraps.
+ *
+ * The bill is twelve bytes off every segment carrying data, so a 1500-byte
+ * link goes from a 1460 MSS to 1448, and both ends build and parse the option
+ * on every packet.  At Amiga link rates the sequence space takes tens of
+ * minutes to wrap, so PAWS is not what is being bought here; RTTM is.
+ */
+#ifdef AMINETXDUO_TCP_TIMESTAMP
+#define NX_ENABLE_TCP_TIMESTAMP
+#endif
+
 
 /* ----------------------------------------------------------------- SACK, */
 

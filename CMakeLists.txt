@@ -313,6 +313,15 @@ endif()
 # RFC 2018 selective acknowledgment on the receive side.  Also a layout change
 # to NX_TCP_SOCKET, so also whole-tree.  Both arms of a with/without
 # measurement come out of one tree the same way as the option above.
+# RFC 1323 section 3 timestamps, on every segment once both SYNs carry the
+# option.  Also a layout change to NX_TCP_SOCKET, so also whole-tree.  It costs
+# twelve bytes of every segment that carries data -- MSS 1460 becomes 1448 on a
+# 1500-byte link -- which is why it is a decision and not a default.
+option(AMINETXDUO_TCP_TIMESTAMP "Offer the RFC 1323 timestamps option" OFF)
+if(AMINETXDUO_TCP_TIMESTAMP)
+    add_compile_definitions(AMINETXDUO_TCP_TIMESTAMP)
+endif()
+
 option(AMINETXDUO_TCP_SACK "Report out-of-order data in RFC 2018 SACK blocks" ON)
 if(NOT AMINETXDUO_TCP_SACK)
     add_compile_definitions(AMINETXDUO_TCP_SACK_OFF)
