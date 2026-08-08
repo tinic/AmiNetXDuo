@@ -557,6 +557,17 @@ static ULONG _tx_amiga_vblank_server(VOID)
 struct Task *task =  (struct Task *) _tx_amiga_timer_task;
 
 
+#ifdef TX_AMIGA_TICK_TEST_DEAD_VERTB
+    /*
+     * A machine whose VERTB never fires, on demand.  The request kept beside
+     * this server is the watchdog for exactly that case, and it is otherwise
+     * unreachable: no configuration of a working Amiga declines to raise
+     * VERTB, so the fallback would ship having never run.  Test builds only;
+     * nothing defines this by default.
+     */
+    return(0UL);
+#endif
+
     /* Interrupt context: Signal() is the only thing this may do.  Exec saves
        d0/d1/a0/a1/a5/a6 across a server, and the C ABI preserves the rest. */
     if ((task != (struct Task *) 0) && (_tx_amiga_vblank_sigmask != 0UL))

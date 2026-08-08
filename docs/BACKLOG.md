@@ -218,6 +218,34 @@ Killing the emulator directly leaves the host `fitz-serve` alive and the next
 run refuses with "something already listens on 17821". Stop the runner, not the
 emulator, or reap the peer.
 
+### The tick watchdog, exercised 2026-08-08
+
+The timer.device request kept beside the VERTB server is the fallback for a
+machine whose VERTB never fires, and no working Amiga declines to raise it, so
+the path would otherwise ship having never run.
+`TX_AMIGA_TICK_TEST_DEAD_VERTB` makes the server return without signalling.
+
+A1200, `run-stackprof.sh -s ours -c -p`, VERTB dead:
+
+    eth0: online, address 192.168.1.133
+    fitzbench: RESULT write 3367   read 6172
+
+It comes up and transfers on the 1 Hz watchdog alone. Degraded: bring-up took
+about four minutes against about ninety seconds, which is what a 1 Hz ThreadX
+clock does to every timeout in the path. Not hung, and the clock stays honest
+because the E-Clock is the time base either way.
+
+Read 6172 against 5670-5720 with the tick live is the tick's own cost showing up
+from the other side, and agrees with the 1% measured on A1200.
+
+**Which stacks hook VERTB.** AmiTCP_NG does not: no `AddIntServer` and no
+`INTB_VERTB` in its source, it opens `timer.device` `UNIT_VBLANK` and uses
+IORequests (`amiga_api.c:503`, `amiga_time.c:174`). Roadshow is closed source
+and byte-scanning its library does NOT answer it -- raw disassembly of a HUNK
+file gets alignment and pc-relative targets wrong, and the apparent callsites
+resolve into string data. Deciding it needs a HUNK-aware disassembly; do not
+repeat the byte scan.
+
 ### The VERTB tick source, soaked 2026-08-08
 
 30 minutes on A1200 against `build/vb20`, `tests/soak/run-fitz-soak.sh -t 1800`,
