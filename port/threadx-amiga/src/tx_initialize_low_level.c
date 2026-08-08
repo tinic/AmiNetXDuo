@@ -580,7 +580,36 @@ static ULONG _tx_amiga_vblank_frames  =  0UL;
 #define TX_AMIGA_VBLANK_DIVIDER                 2UL
 #endif
 
-static ULONG _tx_amiga_vblank_server(VOID)
+/*
+ * The chain convention is carried in the Z FLAG, not in d0: Exec tests it
+ * rather than a return value because it is quicker, and "VERTB servers should
+ * always return with the Z flag set" (RKM Libraries, Exec Interrupts).  A
+ * server returning Z clear tells Exec the interrupt was its own and "the
+ * remaining servers on the chain will be skipped".
+ *
+ * A C function cannot promise that.  `return 0` compiled to `clr.l d0`
+ * followed by `move.l (sp)+,d2` restoring a saved register, and move.l sets the
+ * flags from the value it moved -- so the server returned with Z reflecting
+ * whatever the interrupted code had in d2, skipping every VERTB server below
+ * this one's priority whenever that happened to be non-zero.
+ *
+ * Hence the entry point is assembly whose last flag-affecting instruction is
+ * the moveq.  jsr and rts do not touch the flags, and Exec saves d0/d1/a0/a1
+ * across a server, so the C body underneath needs no wrapper of its own.
+ */
+__asm__(
+"       .text\n"
+"       .align  2\n"
+"       .globl  __tx_amiga_vblank_entry\n"
+"__tx_amiga_vblank_entry:\n"
+"       jsr     __tx_amiga_vblank_server\n"
+"       moveq   #0,%d0\n"
+"       rts\n");
+
+extern VOID _tx_amiga_vblank_entry(VOID);
+
+/* Not static: the assembly entry above refers to it by name. */
+ULONG _tx_amiga_vblank_server(VOID)
 {
 
 struct Task *task =  (struct Task *) _tx_amiga_timer_task;
@@ -1035,7 +1064,7 @@ UINT                 armed;
         _tx_amiga_vblank_int.is_Node.ln_Pri  =  -60;
         _tx_amiga_vblank_int.is_Node.ln_Name =  (char *) "ThreadX tick";
         _tx_amiga_vblank_int.is_Data         =  (APTR) 0;
-        _tx_amiga_vblank_int.is_Code         =  (VOID (*)()) _tx_amiga_vblank_server;
+        _tx_amiga_vblank_int.is_Code         =  (VOID (*)()) _tx_amiga_vblank_entry;
 
         AddIntServer((ULONG) INTB_VERTB, &_tx_amiga_vblank_int);
         wake_sig =  _tx_amiga_vblank_sigmask;
