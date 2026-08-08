@@ -321,6 +321,36 @@ and moves almost nothing there, so the soak is not the instrument for the model
 the tick change actually helps. The build no longer blocks it
 (`SOAK_ARCH`/`FITZ_ARCH`), the workload does.
 
+### Where 0.19.1 stands against Roadshow and AmiTCP_NG, 2026-08-08
+
+A1200, 3 reps, profiler off, one rig, the library the only variable. Wire is
+bridged on ens18 to a real peer; RAM: is `-c`, the CPU-bound arm, against a
+machine with no stack.
+
+| | wire read | wire write | RAM: read | RAM: write |
+|---|---|---|---|---|
+| no stack | - | - | 6279 | 3586 |
+| ours | 380 (379-381) | **420** (420-421) | 6041 (6000-6105) | **3307** (3304-3314) |
+| AmiTCP_NG | 303 (297-306) | 311 (308-315) | 6062 (6040-6087) | 3186 (3173-3199) |
+| Roadshow | 387 (376-399) | 298 (297-301) | **6140** (6094-6218) | 3213 (3202-3227) |
+
+**We do not beat them everywhere.** Write is ours on both tests, by 35% over
+AmiTCP_NG and 41% over Roadshow on the wire, and with the cheapest write
+residency of the three. Read is not: Roadshow's wire range overlaps ours, which
+is a tie and not a win, and on the CPU-bound arm Roadshow is ahead of us
+outright, 6140 against 6041 with no overlap. AmiTCP_NG is behind on all four.
+
+Residency cost against the bare machine, which is what the tick work moved:
+
+    read      ours -3.8%   AmiTCP_NG -3.5%   Roadshow -2.2%
+    write     ours -7.8%   AmiTCP_NG -11.2%  Roadshow -10.4%
+
+Summed over 1.5 MB each way ours is the cheapest of the three, 0.702 s against
+Roadshow's 0.711 and AmiTCP_NG's 0.718 -- carried entirely by write, and in
+spite of read.
+
+Read is the standing gap, on both tests, against Roadshow specifically.
+
 ### Performance, measured positions
 
 **Tickless on "the timer wheel is empty" cannot fire.** Tried 2026-08-07,
