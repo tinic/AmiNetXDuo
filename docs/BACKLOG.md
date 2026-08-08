@@ -156,34 +156,45 @@ source (identical counts with and without), the RTT estimator (identical with
 A harness whose timing directive is unmeasured reports the target for its own
 drift, and the report is specific and plausible enough to be believed.
 
-### The Fitz soak does not progress past its mounts, measured 2026-08-07
+### The Fitz soak stalls in NETSTATUS_INTERFACES, measured 2026-08-07
 
-Reproduced on two stack builds, so it is not the VERTB tick source: identical
-on `build/vb20` (with it) and `build/fastm` (without), at the same timestamps.
+Not a regression: `c606a4c` added this harness as "unfinished" on 2026-07-29 and
+nothing has ever claimed a green run. Identical on `build/vb20` and
+`build/fastm`, so the VERTB tick source is not involved.
 
-    0  NOTE start 300
-    6  NOTE online 167772687
-    6  NOTE serve-started 17822
-    11 NOTE wire-mount-started 17821
-    11 NOTE local-mount-started 17822
-    (nothing further, for the rest of the run)
+Bisected with probes around every call between the last event and the first
+sample:
 
-`soak-timeline.csv` keeps its header row and gains no samples,
-`soak-summary.txt` stays empty, and the run burns its whole deadline -- a 300 s
-workload was still going at 8 minutes, an 1800 s one at 40. The host peer log
-records the guest connecting and disconnecting once, and `soak-fitz.txt` ends
-mid-line inside `fitz serve`'s banner.
+    22 NOTE post-mount-delay 0     Delay(500) completed
+    22 NOTE ask-system 0           NETSTATUS_SYSTEM returned
+    22 NOTE ask-stats 0            NETSTATUS_STATS returned
+    22 NOTE ask-interfaces 0       <- last line, every run
 
-Not the same defect as the path bug fixed alongside it: that one made the
-runner read `build/testhd-<tag>` instead of `build/amiberry-testhd-<tag>` and
-so report every run as "(none written)". Fixing it is what made this visible,
-and is why a 1800 s soak had been reporting nothing rather than reporting a
-stall.
+`s_ask(base, NETSTATUS_INTERFACES, ...)` never returns, and a probe on its
+return value never fires. The sampler, the filers and the churner are all
+downstream of it, which is why `soak-timeline.csv` keeps its header and the run
+burns its whole deadline: 8 minutes for a 300 s workload, 40 for an 1800 s one.
 
-Untested: whether the workload ever ran under FS-UAE, which is what the header
-was written against, and whether the mounts complete at all or only announce
-themselves.
+Excluded by reading: every callee inside `ns_fill_interfaces()` is a plain
+struct read (`ami_sana2_get_stats`, `ami_sana2_get_bps`, `ami_sana2_is_online`,
+`netstack_iface_mdns`, `ns_config_for`); the writer bounds are correct,
+`NX_MAX_PHYSICAL_INTERFACES` being 2 against the caller's `e[4]`; and one
+`netstatus.h` serves both include paths so the entry size cannot disagree.
 
+What is left is the `bsd_nx_enter()` at `netstatus.c:1277` that all three
+queries share -- the first two enter and leave, the third does not come back,
+with two `fitz mount` DOS handlers and a `fitz serve` live on the stack.
+Confirming that needs instrumentation inside the library; the caller cannot see
+it.
+
+Separate from the path bug fixed in `62c9e74`, which had been reporting this
+stall as "(none written)".
+
+Killing the emulator directly leaves the host `fitz-serve` alive and the next
+run refuses with "something already listens on 17821". Stop the runner, not the
+emulator, or reap the peer.
+
+### Performance, measured positions
 
 **Tickless on "the timer wheel is empty" cannot fire.** Tried 2026-08-07,
 reverted. `nx_ip_create.c:227-229` creates `nx_ip_periodic_timer` with
