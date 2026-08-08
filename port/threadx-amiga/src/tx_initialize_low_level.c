@@ -82,6 +82,23 @@
 
 #include "aminetxduo/compat.h"      /* ami_log() + AMI_LOG_* only */
 
+/* Fast RAM first, then whatever is left.  MEMF_PUBLIC alone lets exec choose,
+   and it chooses by MemHeader priority, so a machine whose Fast RAM is gone
+   puts a thread stack or the kernel pool in Chip -- where every push and pop
+   is contended with the chipset.  Asking costs nothing when Fast is there and
+   changes nothing when it is not.  Freed with FreeMem and the same size, so
+   nothing downstream cares which arena answered.  */
+static APTR _tx_amiga_alloc(ULONG size, ULONG memf)
+{
+    APTR p =  AllocMem(size, memf | MEMF_FAST);
+
+    if (p == (APTR) 0)
+        p =  AllocMem(size, memf);
+
+    return(p);
+}
+
+
 
 /* ---------------------------------------------------------------- state, */
 
@@ -177,14 +194,14 @@ ULONG                    top;
        task that exits.  amiga.lib's CreateTask() keeps them apart for the same
        reason.  */
 
-    memlist =  (struct MemList *) AllocMem((ULONG) sizeof(struct MemList),
+    memlist =  (struct MemList *) _tx_amiga_alloc((ULONG) sizeof(struct MemList),
                                            MEMF_PUBLIC | MEMF_CLEAR);
     if (memlist == (struct MemList *) 0)
     {
         return((struct Task *) 0);
     }
 
-    ctrl =  (struct _tx_amiga_ctrl *) AllocMem((ULONG) sizeof(struct _tx_amiga_ctrl),
+    ctrl =  (struct _tx_amiga_ctrl *) _tx_amiga_alloc((ULONG) sizeof(struct _tx_amiga_ctrl),
                                                MEMF_PUBLIC | MEMF_CLEAR);
     if (ctrl == (struct _tx_amiga_ctrl *) 0)
     {
@@ -365,7 +382,7 @@ BYTE             sig;
     if (_tx_amiga_kernel_memory == (VOID *) 0)
     {
         _tx_amiga_kernel_memory_size =  (ULONG) TX_AMIGA_MEMORY_SIZE;
-        _tx_amiga_kernel_memory =  (VOID *) AllocMem(_tx_amiga_kernel_memory_size,
+        _tx_amiga_kernel_memory =  (VOID *) _tx_amiga_alloc(_tx_amiga_kernel_memory_size,
                                                      MEMF_PUBLIC | MEMF_CLEAR);
         if (_tx_amiga_kernel_memory == (VOID *) 0)
         {
@@ -385,7 +402,7 @@ BYTE             sig;
     /* Create the periodic tick task.  It parks on SIGF_SINGLE until
        _tx_amiga_start_interrupts() lets it go.  */
     _tx_amiga_timer_stop  =  TX_FALSE;
-    _tx_amiga_timer_stack =  AllocMem(_tx_amiga_timer_stack_size, MEMF_PUBLIC | MEMF_CLEAR);
+    _tx_amiga_timer_stack =  _tx_amiga_alloc(_tx_amiga_timer_stack_size, MEMF_PUBLIC | MEMF_CLEAR);
     if (_tx_amiga_timer_stack != (APTR) 0)
     {
         _tx_amiga_timer_task =  (VOID *) _tx_amiga_task_create("ThreadX tick",
@@ -1260,7 +1277,7 @@ ULONG        stack_size =  8192UL;
         return(TX_NO_MEMORY);
     }
 
-    stack =  AllocMem(stack_size, MEMF_PUBLIC | MEMF_CLEAR);
+    stack =  _tx_amiga_alloc(stack_size, MEMF_PUBLIC | MEMF_CLEAR);
     if (stack == (APTR) 0)
     {
         FreeSignal(sig);

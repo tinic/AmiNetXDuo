@@ -431,7 +431,11 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     UBYTE                *mem;
     BYTE                  sig;
 
-    mem = (UBYTE *)AllocMem(neg + pos, MEMF_PUBLIC);
+    /* Fast RAM first: this is a library base and its jump table, which
+       every call through this child dereferences. */
+    mem = (UBYTE *)AllocMem(neg + pos, MEMF_PUBLIC | MEMF_FAST);
+    if (mem == NULL)
+        mem = (UBYTE *)AllocMem(neg + pos, MEMF_PUBLIC);
     if (mem == NULL)
         return NULL;
 

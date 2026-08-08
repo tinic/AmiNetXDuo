@@ -37,7 +37,19 @@ APTR ami_alloc_flags(ULONG size, ULONG memf)
     if (size == 0)
         return NULL;
 
-    p = AllocVec(size, memf);
+    /* Fast RAM first, then whatever is left.  MEMF_PUBLIC alone lets exec pick,
+       and exec picks by MemHeader priority, so a machine whose Fast RAM is full
+       or fragmented quietly puts the packet pool in Chip.  Chip is contended
+       with the chipset, so the cost lands on everything else on the machine and
+       not on us -- we are asleep while it is paid.  Asking for Fast costs
+       nothing when it is there and changes nothing when it is not.
+
+       A caller that genuinely wants Chip says so, and must not be overridden. */
+    p = NULL;
+    if ((memf & MEMF_CHIP) == 0)
+        p = AllocVec(size, memf | MEMF_FAST);
+    if (p == NULL)
+        p = AllocVec(size, memf);
 
     Forbid();
     if (p != NULL)
