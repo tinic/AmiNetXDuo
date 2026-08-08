@@ -261,13 +261,34 @@ because the E-Clock is the time base either way.
 Read 6172 against 5670-5720 with the tick live is the tick's own cost showing up
 from the other side, and agrees with the 1% measured on A1200.
 
-**Which stacks hook VERTB.** AmiTCP_NG does not: no `AddIntServer` and no
-`INTB_VERTB` in its source, it opens `timer.device` `UNIT_VBLANK` and uses
-IORequests (`amiga_api.c:503`, `amiga_time.c:174`). Roadshow is closed source
-and byte-scanning its library does NOT answer it -- raw disassembly of a HUNK
-file gets alignment and pc-relative targets wrong, and the apparent callsites
-resolve into string data. Deciding it needs a HUNK-aware disassembly; do not
-repeat the byte scan.
+**Which stacks hook VERTB: neither of the others. We are alone in it.**
+Settled 2026-08-08 by a HUNK-aware disassembly, after two wrong answers.
+
+AmiTCP_NG, from source: no `AddIntServer`, no `INTB_VERTB`. It opens
+`timer.device` `UNIT_VBLANK` and uses IORequests (`amiga_api.c:503`,
+`amiga_time.c:174`).
+
+Roadshow, from its binary: `timer.device` is the ONLY device name in the whole
+library, code and data, five occurrences. Its exec traffic with SysBase in a6 is
+`OpenDevice` at eight sites, six of them resolvably `timer.device`, plus
+`SendIO`, `DoIO`, `WaitIO`, `AbortIO`, `CheckIO`. It installs no interrupt
+server at all.
+
+**`jsr -N(a6)` says nothing until you know which base is in a6.** Two answers
+were wrong before this one. Byte-scanning for `4eae ff58` finds the pattern in
+data. Hunk-aligned disassembly then showed fourteen apparent `AddIntServer`
+calls with plausible-looking interrupt numbers in d0 -- 4, 5, 6, 8, 10 -- and
+they are all `utility.library` `SMult64`: `0xc28` is
+`OpenLibrary("utility.library", 37)` cached at init, and utility's LVO -168 is a
+64-bit multiply. The d0 values were multiplier operands. `-174` and `-162`
+likewise resolve to `UMult64` and `UDivMod32`, not `RemIntServer` and
+`SetIntVector`.
+
+The consequence for us: Roadshow has no fallback for a failed VERTB install
+because it never installs one, and neither does AmiTCP_NG. The mechanism both of
+them use exclusively is the one we keep only as our watchdog. That makes the
+watchdog the thing that puts our approach on the same footing as theirs, not a
+belt-and-braces extra.
 
 ### The VERTB tick source, soaked 2026-08-08
 
