@@ -347,53 +347,68 @@ static VOID s_dump_sockets(struct Library *base, const char *why)
  * that reports "it dropped" without saying what the stack looked like then is
  * worth very little, so every error path in this file comes through here.
  */
+/* Defined below; s_snapshot() reports an allocation failure through it. */
+static VOID s_note(const char *what, LONG detail);
+
 static VOID s_snapshot(struct Library *base, const char *why)
 {
-    SoakSysBuf  sys;
-    SoakStatBuf st;
-    SoakIfBuf   ifb;
-    SoakSockBuf sk;
+    /*
+     * Heap, not stack.  These four are about 2.4 KB together, this runs on the
+     * 4 KB an AmigaDOS CLI hands a program, and s_dump_sockets() nests another
+     * buffer of its own below it.  As locals they overran the stack: the run
+     * reached this function, returned from NETSTATUS_SYSTEM and NETSTATUS_STATS,
+     * and never came back from the third call -- which read as the stack hanging
+     * and was this frame.
+     *
+     * Not `static`: s_fail() reaches here from the filers and s_churn_entry()
+     * from the churner, so one shared buffer would be two snapshots at once.
+     */
+    struct { SoakSysBuf sys; SoakStatBuf st; SoakIfBuf ifb; SoakSockBuf sk; } *b;
     LONG        args[16];
     ULONG       socks = 0UL;
     ULONG       alloc_fail = 0UL, overrun = 0UL, rxerr = 0UL, txerr = 0UL;
     UWORD       j;
 
-    s_zero(&sys, sizeof(sys));
-    s_zero(&st,  sizeof(st));
-
-    (VOID)s_ask(base, NETSTATUS_SYSTEM, &sys, sizeof(sys));
-    (VOID)s_ask(base, NETSTATUS_STATS,  &st,  sizeof(st));
-
-    if (s_ask(base, NETSTATUS_INTERFACES, &ifb, sizeof(ifb)) > 0)
+    b = (APTR)AllocVec((ULONG)sizeof(*b), MEMF_ANY);
+    if (b == NULL)
     {
-        UWORD n = ifb.hdr.nsh_Count;
+        s_note("snapshot-nomem", (LONG)sizeof(*b));
+        return;
+    }
+
+    (VOID)s_ask(base, NETSTATUS_SYSTEM, &b->sys, sizeof(b->sys));
+    (VOID)s_ask(base, NETSTATUS_STATS,  &b->st, sizeof(b->st));
+
+    if (s_ask(base, NETSTATUS_INTERFACES, &b->ifb, sizeof(b->ifb)) > 0)
+    {
+        UWORD n = b->ifb.hdr.nsh_Count;
 
         for (j = 0; j < n && j < 4; j++)
         {
-            alloc_fail += ifb.e[j].nsi_AllocFailures;
-            overrun    += ifb.e[j].nsi_Overruns;
-            rxerr      += ifb.e[j].nsi_RxErrors;
-            txerr      += ifb.e[j].nsi_TxErrors;
+            alloc_fail += b->ifb.e[j].nsi_AllocFailures;
+            overrun    += b->ifb.e[j].nsi_Overruns;
+            rxerr      += b->ifb.e[j].nsi_RxErrors;
+            txerr      += b->ifb.e[j].nsi_TxErrors;
         }
     }
 
-    if (s_ask(base, NETSTATUS_SOCKETS, &sk, sizeof(sk)) >= 0)
-        socks = (ULONG)sk.hdr.nsh_Available;
+    if (s_ask(base, NETSTATUS_SOCKETS, &b->sk, sizeof(b->sk)) >= 0)
+        socks = (ULONG)b->sk.hdr.nsh_Available;
 
     args[0]  = (LONG)s_secs();
     args[1]  = (LONG)why;
     args[2]  = (LONG)AvailMem(MEMF_PUBLIC);
     args[3]  = (LONG)AvailMem(MEMF_PUBLIC | MEMF_LARGEST);
-    args[4]  = (LONG)sys.e.nss_PoolFree;
-    args[5]  = (LONG)sys.e.nss_PoolTotal;
-    args[6]  = (LONG)sys.e.nss_PoolEmptyRequests;
+    args[4]  = (LONG)b->sys.e.nss_PoolFree;
+    args[5]  = (LONG)b->sys.e.nss_PoolTotal;
+    args[6]  = (LONG)b->sys.e.nss_PoolEmptyRequests;
     args[7]  = (LONG)socks;
-    args[8]  = (LONG)st.e.nsx_TcpRetransmits;
-    args[9]  = (LONG)st.e.nsx_TcpConnections;
-    args[10] = (LONG)st.e.nsx_TcpDisconnections;
-    args[11] = (LONG)st.e.nsx_TcpConnectionsDropped;
-    args[12] = (LONG)st.e.nsx_IpSendDropped;
-    args[13] = (LONG)st.e.nsx_IpReceiveDropped;
+    args[8]  = (LONG)b->st.e.nsx_TcpRetransmits;
+    args[9]  = (LONG)b->st.e.nsx_TcpConnections;
+    args[10] = (LONG)b->st.e.nsx_TcpDisconnections;
+    args[11] = (LONG)b->st.e.nsx_TcpConnectionsDropped;
+    args[12] = (LONG)b->st.e.nsx_IpSendDropped;
+    args[13] = (LONG)b->st.e.nsx_IpReceiveDropped;
     args[14] = (LONG)(alloc_fail + overrun);
     args[15] = (LONG)(rxerr + txerr);
 
@@ -402,6 +417,8 @@ static VOID s_snapshot(struct Library *base, const char *why)
            "poolempty=%lu sockets=%lu retrans=%lu conn=%lu disc=%lu "
            "connDropped=%lu ipSendDrop=%lu ipRecvDrop=%lu sanaAlloc=%lu "
            "sanaErr=%lu\n", args);
+
+    FreeVec((APTR)b);
 
     s_dump_sockets(base, why);
 }
