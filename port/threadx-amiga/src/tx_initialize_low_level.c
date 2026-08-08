@@ -59,6 +59,8 @@
 #include "tx_amiga_internal.h"
 
 #include <devices/timer.h>
+#include <exec/interrupts.h>
+#include <hardware/intbits.h>
 
 /* `struct timerequest`, not `struct TimeRequest`.  NDK 3.2 renamed the timer
    types to TimeVal/TimeRequest to stop `struct timeval` colliding with the
@@ -527,6 +529,46 @@ static VOID _tx_amiga_timer_exit(VOID)
 
 
 /* Arm one wakeup.  */
+/*
+ * VBlank wakeup source, TX_AMIGA_TICK_VBLANK_SERVER.
+ *
+ * The timer.device path pays a full IORequest round trip per tick -- SendIO,
+ * the device queueing the request, ReplyMsg, PutMsg, Signal -- and on an A600
+ * that is measurable: timer.device internals are 5.5% of a RAM: transfer with
+ * the stack resident against 2.4% on a bare machine, while _tx_timer_interrupt()
+ * itself is 0.2%.  The work is the plumbing, not the tick.
+ *
+ * A VERTB server runs on an interrupt the machine takes anyway and does one
+ * Signal().  It is also the only wakeup source that can be made to skip: a
+ * timer.device request cannot be aborted and re-armed (see
+ * _tx_amiga_timer_probe), so tickless is unreachable from the request path and
+ * reachable from this one.
+ *
+ * The rate is deliberately still not the time base.  This signals every frame,
+ * 50 Hz PAL and 60 Hz NTSC, and the loop reads the E-Clock and works out how
+ * many whole tick periods have elapsed exactly as it does for the request --
+ * so NTSC does not run 20% fast and RTG does not matter.
+ */
+static ULONG _tx_amiga_vblank_sigmask =  0UL;
+
+static ULONG _tx_amiga_vblank_server(VOID)
+{
+
+struct Task *task =  (struct Task *) _tx_amiga_timer_task;
+
+
+    /* Interrupt context: Signal() is the only thing this may do.  Exec saves
+       d0/d1/a0/a1/a5/a6 across a server, and the C ABI preserves the rest. */
+    if ((task != (struct Task *) 0) && (_tx_amiga_vblank_sigmask != 0UL))
+    {
+        Signal(task, _tx_amiga_vblank_sigmask);
+    }
+
+    return(0UL);        /* 0: not exclusive, let the rest of the chain run */
+}
+
+static struct Interrupt _tx_amiga_vblank_int;
+
 static VOID _tx_amiga_timer_arm(struct timerequest *tr, ULONG secs, ULONG micro)
 {
 
@@ -644,6 +686,11 @@ struct timerequest  *tr;
 struct timerequest  *guard;
 struct EClockVal     now;
 ULONG                port_sig;
+ULONG                wake_sig;
+ULONG                arm_secs;
+ULONG                arm_micro;
+BYTE                 vb_bit;
+UINT                 vb_mode;
 ULONG                guard_sig;
 ULONG                interval_secs;
 ULONG                interval_micro;
@@ -924,10 +971,38 @@ UINT                 armed;
         armed =  TX_TRUE;
     }
 
+    /* Wakeup source.  The request stays armed either way: under the server it
+       is simply never waited on, which keeps teardown identical and leaves a
+       machine whose VERTB never fires with the request as its floor. */
+    wake_sig  =  port_sig;
+    vb_mode   =  TX_FALSE;
+    vb_bit    =  -1;
+    arm_secs  =  interval_secs;
+    arm_micro =  interval_micro;
+#ifndef TX_AMIGA_TICK_NO_VBLANK_SERVER
+    vb_bit =  AllocSignal(-1L);
+    if (vb_bit != -1)
+    {
+        _tx_amiga_vblank_sigmask =  1UL << ((ULONG) vb_bit);
+
+        _tx_amiga_vblank_int.is_Node.ln_Type =  NT_INTERRUPT;
+        _tx_amiga_vblank_int.is_Node.ln_Pri  =  -60;
+        _tx_amiga_vblank_int.is_Node.ln_Name =  (char *) "ThreadX tick";
+        _tx_amiga_vblank_int.is_Data         =  (APTR) 0;
+        _tx_amiga_vblank_int.is_Code         =  (VOID (*)()) _tx_amiga_vblank_server;
+
+        AddIntServer((ULONG) INTB_VERTB, &_tx_amiga_vblank_int);
+        wake_sig =  _tx_amiga_vblank_sigmask;
+        vb_mode  =  TX_TRUE;
+        arm_secs =  1UL;        /* watchdog only; VERTB is the tick */
+        arm_micro =  0UL;
+    }
+#endif
+
     while (_tx_amiga_timer_stop == TX_FALSE)
     {
 
-        Wait(port_sig | SIGF_SINGLE);
+        Wait(wake_sig | port_sig | SIGF_SINGLE);
 
         /* Timestamp the wakeup before anything else: this is both the tick's
            time reference and the start of the service-cost window.  */
@@ -939,22 +1014,30 @@ UINT                 armed;
             break;
         }
 
-        if (CheckIO((struct IORequest *) tr) == (struct IORequest *) 0)
+        if (CheckIO((struct IORequest *) tr) != (struct IORequest *) 0)
+        {
+            /* Re-arm before doing the tick work.  On UNIT_VBLANK that reserves
+               the next frame up front, so a tick that overruns costs a late
+               delivery rather than a skipped frame, and the catch-up below then
+               makes even that invisible to the clock.
+
+               Under the server this request is the watchdog, armed a second at
+               a time, so this arrives once a second instead of every tick and
+               its cost stops mattering.  A machine whose VERTB never fires ticks
+               from it alone: 1 Hz is degraded, and the E-Clock catch-up keeps
+               tx_time_get() honest through it, but it is not a dead kernel. */
+            WaitIO((struct IORequest *) tr);
+            armed =  TX_FALSE;
+            _tx_amiga_timer_arm(tr, arm_secs, arm_micro);
+            armed =  TX_TRUE;
+        }
+        else if (vb_mode == TX_FALSE)
         {
             /* Woken by something that was not our request.  Do not abort it,
                an aborted timer request cannot be re-armed (see
                _tx_amiga_timer_probe), just go back to sleep.  */
             continue;
         }
-        WaitIO((struct IORequest *) tr);
-        armed =  TX_FALSE;
-
-        /* Re-arm before doing the tick work.  On UNIT_VBLANK that reserves the
-           next frame up front, so a tick that overruns costs a late delivery
-           rather than a skipped frame, and the catch-up below then makes even
-           that invisible to the clock.  */
-        _tx_amiga_timer_arm(tr, interval_secs, interval_micro);
-        armed =  TX_TRUE;
 
         _tx_amiga_tick.tx_amiga_tick_wakeups++;
 
@@ -1178,6 +1261,20 @@ UINT                 armed;
             (LONG) _tx_amiga_tick.tx_amiga_tick_wakeups);
 
     _tx_amiga_timer_base =  (struct Device *) 0;
+
+#ifndef TX_AMIGA_TICK_NO_VBLANK_SERVER
+    /* Before the signal it pokes is freed, or a frame landing in the gap
+       signals a bit this Task no longer owns. */
+    if (vb_mode != TX_FALSE)
+    {
+        RemIntServer((ULONG) INTB_VERTB, &_tx_amiga_vblank_int);
+        _tx_amiga_vblank_sigmask =  0UL;
+    }
+    if (vb_bit != -1)
+    {
+        FreeSignal((LONG) vb_bit);
+    }
+#endif
 
     if (armed != TX_FALSE)
     {
