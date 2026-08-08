@@ -181,11 +181,27 @@ struct read (`ami_sana2_get_stats`, `ami_sana2_get_bps`, `ami_sana2_is_online`,
 `NX_MAX_PHYSICAL_INTERFACES` being 2 against the caller's `e[4]`; and one
 `netstatus.h` serves both include paths so the entry size cannot disagree.
 
-What is left is the `bsd_nx_enter()` at `netstatus.c:1277` that all three
-queries share -- the first two enter and leave, the third does not come back,
-with two `fitz mount` DOS handlers and a `fitz serve` live on the stack.
-Confirming that needs instrumentation inside the library; the caller cannot see
-it.
+It is contention, not the query. The same call placed BEFORE the mounts
+returns normally:
+
+    12 NOTE pre-mount-ask 0
+    12 NOTE pre-mount-ask-ret 2      two interfaces, on an idle stack
+    12 NOTE wire-mount-started 17821
+    12 NOTE local-mount-started 17822
+    (nothing further)
+
+`fitz serve` is already running at that point, so serving alone does not do it;
+the two `fitz mount` DOS handlers do. Within one run the identical query
+succeeds before them and never returns after.
+
+That puts the block in the entry, not the fill: `bsd_nx_enter()`
+(`netstatus.c:1277`) -> `ami_netstack_enter_cached()` ->
+`tx_amiga_adopt_thread()` (`tx_amiga_adopt.c:212`), whose slow path is
+`_tx_amiga_wake_scheduler()` followed by `_tx_amiga_thread_park()`. A caller
+that is not granted the baton waits there forever. So the question is why the
+scheduler never dispatches a newly adopted caller while those handlers are live
+-- a handler blocked in exec without leaving the stack would do it, and that is
+the failure mode `port/threadx-amiga`'s own notes describe.
 
 Separate from the path bug fixed in `62c9e74`, which had been reporting this
 stall as "(none written)".
