@@ -181,34 +181,38 @@ struct read (`ami_sana2_get_stats`, `ami_sana2_get_bps`, `ami_sana2_is_online`,
 `NX_MAX_PHYSICAL_INTERFACES` being 2 against the caller's `e[4]`; and one
 `netstatus.h` serves both include paths so the entry size cannot disagree.
 
-It is the SEQUENCE of queries, and nothing else. Reduced to a reproducer that
-needs no soak, no mounts, no load and no time:
+It is `s_snapshot()` itself, not the library. The four queries it makes were
+run inline in the same process, at the same point in the same run, with the same
+buffer types in the frame -- and all four returned:
 
-| called | result |
+    13 NOTE C-triple-in 0
+    13 NOTE C-system-out 1
+    13 NOTE C-stats-out 1
+    13 NOTE C-if-out 2
+    13 NOTE C-sockets-out 7
+    ... and the post-mount s_snapshot() in that same run still hung
+
+So the query, the sequence and the library are all cleared. Everything below was
+excluded by a run that changed only that thing:
+
+| suspected | excluded by |
 |---|---|
-| `NETSTATUS_INTERFACES` alone | returns, 2 interfaces |
-| `NETSTATUS_SYSTEM` four times in a row | all four return |
-| `SYSTEM` then `STATS` then `INTERFACES` | **hangs on the third** |
+| the `fitz mount` handlers | both arms skipped, still hangs |
+| the loopback arm | wire arm alone, still hangs |
+| elapsed time / load | hangs at t=13 as readily as t=22 |
+| the VERTB tick source | identical on `build/fastm` |
+| `NETSTATUS_INTERFACES` | returns 2 on its own, and after `STATS`, and after `SYSTEM` |
+| the enter/leave cycle | `SYSTEM` four times returns four times |
+| the query sequence | `SYSTEM`,`STATS`,`INTERFACES`,`SOCKETS` inline all return |
+| a 4 KB CLI stack | the frame measures 2412 bytes, and `__stack` changes nothing |
 
-Excluded, each by a run that changed only that thing: both `fitz mount`
-handlers (skipped, still hangs), elapsed time and load (hangs at t=13 as
-readily as t=22), the VERTB tick source (identical on `build/fastm`), and a
-4 KB CLI stack against `s_snapshot()`'s multi-kilobyte frame
-(`ULONG __stack = 65536` changes nothing, though whether libnix's startup
-honours it here is unverified).
+`NetStat -i` against a live bridged mount also completes
+(`AMINETXDUO_NETSTAT_ARGS=-i`), so nothing here is user-visible.
 
-`NetStat -i` after a bridged `fitz mount` completes normally
-(`AMINETXDUO_NETSTAT_ARGS=-i`, `run-stackprof.sh`), so a single interfaces query
-against a live mount is fine. Whatever this is, it is reached only by asking two
-other queries first.
-
-The block itself is in the entry, not the fill: `bsd_nx_enter()`
-(`netstatus.c:1277`) -> `ami_netstack_enter_cached()` ->
-`tx_amiga_adopt_thread()` (`tx_amiga_adopt.c:212`), whose slow path parks on
-`_tx_amiga_thread_park()` for a baton it is never granted.
-
-Next test, and it is small: `STATS` then `INTERFACES` with no `SYSTEM`, and
-`SYSTEM` then `INTERFACES` with no `STATS`, to name which predecessor does it.
+What is left is what `s_snapshot()` does that the inline copy did not: it is a
+separate function taking `base` as a parameter, and after the queries it builds
+`args[16]` and calls `s_emit()`. The next step is to bisect inside it rather
+than around it -- the inline reproducer is the control, and it works.
 
 Killing the emulator directly leaves the host `fitz-serve` alive and the next
 run refuses with "something already listens on 17821". Stop the runner, not the
