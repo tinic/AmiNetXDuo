@@ -156,7 +156,34 @@ source (identical counts with and without), the RTT estimator (identical with
 A harness whose timing directive is unmeasured reports the target for its own
 drift, and the report is specific and plausible enough to be believed.
 
-### Performance, measured positions
+### The Fitz soak does not progress past its mounts, measured 2026-08-07
+
+Reproduced on two stack builds, so it is not the VERTB tick source: identical
+on `build/vb20` (with it) and `build/fastm` (without), at the same timestamps.
+
+    0  NOTE start 300
+    6  NOTE online 167772687
+    6  NOTE serve-started 17822
+    11 NOTE wire-mount-started 17821
+    11 NOTE local-mount-started 17822
+    (nothing further, for the rest of the run)
+
+`soak-timeline.csv` keeps its header row and gains no samples,
+`soak-summary.txt` stays empty, and the run burns its whole deadline -- a 300 s
+workload was still going at 8 minutes, an 1800 s one at 40. The host peer log
+records the guest connecting and disconnecting once, and `soak-fitz.txt` ends
+mid-line inside `fitz serve`'s banner.
+
+Not the same defect as the path bug fixed alongside it: that one made the
+runner read `build/testhd-<tag>` instead of `build/amiberry-testhd-<tag>` and
+so report every run as "(none written)". Fixing it is what made this visible,
+and is why a 1800 s soak had been reporting nothing rather than reporting a
+stall.
+
+Untested: whether the workload ever ran under FS-UAE, which is what the header
+was written against, and whether the mounts complete at all or only announce
+themselves.
+
 
 **Tickless on "the timer wheel is empty" cannot fire.** Tried 2026-08-07,
 reverted. `nx_ip_create.c:227-229` creates `nx_ip_periodic_timer` with
