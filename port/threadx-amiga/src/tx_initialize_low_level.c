@@ -1072,6 +1072,20 @@ UINT                 armed;
         arm_secs =  1UL;        /* watchdog only; VERTB is the tick */
         arm_micro =  0UL;
     }
+    else
+    {
+        /*
+         * AddIntServer() returns VOID and cannot fail, so there is nothing to
+         * report about it.  This is the one thing here that can: with no free
+         * signal the server has no way to reach the tick task, and the kernel
+         * falls back to waiting on the timer.device request at the tick period
+         * -- correct, and measurably slower, which is worth saying rather than
+         * leaving somebody to find it in a profile.
+         */
+        ami_log(AMI_LOG_WARN,
+                "tick: no free signal for the VBlank server; falling back to "
+                "timer.device requests");
+    }
 #endif
 
     while (_tx_amiga_timer_stop == TX_FALSE)
