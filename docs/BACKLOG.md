@@ -218,6 +218,37 @@ Killing the emulator directly leaves the host `fitz-serve` alive and the next
 run refuses with "something already listens on 17821". Stop the runner, not the
 emulator, or reap the peer.
 
+### The VERTB tick source, soaked 2026-08-08
+
+30 minutes on A1200 against `build/vb20`, `tests/soak/run-fitz-soak.sh -t 1800`,
+all six phases (WIRE, IDLE, LOCAL, IDLE, BOTH, CHURN):
+
+    seconds 1801   wire 241 files / 62 MB   local 340 files / 87 MB
+    wire_query_fail 0   local_query_fail 0
+    io_errors 0   corrupt_bytes 0   failures 0
+
+The tick, start and end, which is the number a change to the wakeup source has
+to answer for:
+
+      23 TICK skew=0 skewpeak=2 lost=0 deferred=0 uptime_ms=23309
+    1800 TICK skew=0 skewpeak=2 lost=0 deferred=0 uptime_ms=1799436
+
+`uptime_ms` 1799436 against 1800 s of wall clock is 0.03% over half an hour,
+with no tick ever lost and a peak backlog of 2. The E-Clock is the time base and
+VERTB only the wakeup, and this is that holding over 30 minutes rather than 3.
+
+Memory, first and last sample against the post-teardown totals: `avail` runs
+6201304 -> 4565544 while the mounts are up and returns to 6040688 once they are
+down, so most of the 1.6 MB is Fitz's own caches and the residual is about
+160 KB. `largest` ends 3583552 against 4064088, about 480 KB of fragmentation.
+`pool_free` is 220 at both ends and sockets 10 -> 12. Recorded as an
+observation; nothing here is chased yet.
+
+Still not covered: A600. Fitz is documented prohibitively slow on a 7 MHz 68000
+and moves almost nothing there, so the soak is not the instrument for the model
+the tick change actually helps. The build no longer blocks it
+(`SOAK_ARCH`/`FITZ_ARCH`), the workload does.
+
 ### Performance, measured positions
 
 **Tickless on "the timer wheel is empty" cannot fire.** Tried 2026-08-07,
