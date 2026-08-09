@@ -339,7 +339,8 @@ typedef struct
  * one whatever else was true.
  *
  * WHAT THAT NUMBER WAS MEASURED ON, kept because it is a request/response
- * workload and the figure below is a bulk one, and neither answers the other.
+ * workload and tests/perf/run-fitzbench.sh is a bulk one, and neither answers
+ * the other.
  * An early sweep read 32768, 33580 and 48180 as flat and kept 32768, with a
  * congestion window of 12 segments that bound the transfer before the receive
  * window did. SACK and D-SACK take it to 24 on a clean link, which puts the
