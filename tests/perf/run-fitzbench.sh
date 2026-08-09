@@ -89,20 +89,17 @@ cd "$ROOT"
 # looks like our defect and is not.  The peer must also be a THIRD machine:
 # a frame the emulator's own host sends to the guest's MAC never comes back to
 # that NIC's pcap capture (63).
+# Checked after getopts, not here: both tests used to run before the option
+# parse below, so -H was rejected before it was read and -H turo@playhouse2 went
+# straight past the guard the env var could not.
 PEER="${AMINETXDUO_FITZ_PEER:-}"
-case "$PEER" in
-    *playhouse2*)
-        echo "playhouse2 cannot serve this: VMs on one Proxmox host never cross" >&2
-        echo "a NIC, so its TX checksums are never computed and our stack rejects" >&2
-        echo "them, it reads as 6 bad packets and no transfer.  Use another." >&2
-        exit 2 ;;
-esac
-[ -n "$PEER" ] || {
-    echo "set AMINETXDUO_FITZ_PEER=<user@host>, a third machine on real" >&2
-    echo "hardware, not this emulator's host and not an LXC container" >&2
-    exit 2
-}
-PEER_ADDR="${AMINETXDUO_FITZ_PEER_ADDR:-192.168.1.184}"
+# ssh dials a name, the guest dials a number, and they are two spellings of one
+# machine.  Derived from $PEER rather than defaulted, because the two used to be
+# independent inputs with a validated name and an unvalidated address: the
+# default was 192.168.1.184, which is the playhouse2 the case above refuses.  A
+# run that staged the server on one machine and pointed the guest at another
+# still exited 0, printing RESULT read FAILED beside a healthy RAM: control.
+PEER_ADDR="${AMINETXDUO_FITZ_PEER_ADDR:-}"
 PEER_DIR="${AMINETXDUO_FITZ_PEER_DIR:-/tmp/fitzbench-share}"
 PEER_BIN="${AMINETXDUO_FITZ_PEER_BIN:-\$HOME/fitzsrc/fitz-serve}"
 MODEL=A3000
@@ -163,6 +160,26 @@ while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:aB:N:wl:L:G:E:" opt; do
     esac
 done
 
+# NOT playhouse2, whatever its convenience: it is an LXC container on a veth, so
+# its SYN-ACK carries an uncomputed TX-offload checksum that no NIC ever fixes
+# up.  Our stack rejects it, correctly, and the run reads as "1 connection made,
+# 6 bad packets, 6 checksum errors" and no transfer, which looks like our defect
+# and is not.  The peer must also be a THIRD machine: a frame the emulator's own
+# host sends to the guest's MAC never comes back to that NIC's pcap capture (63).
+case "$PEER" in
+    *playhouse2*)
+        echo "playhouse2 cannot serve this: VMs on one Proxmox host never cross" >&2
+        echo "a NIC, so its TX checksums are never computed and our stack rejects" >&2
+        echo "them, it reads as 6 bad packets and no transfer.  Use another." >&2
+        exit 2 ;;
+esac
+[ -n "$PEER" ] || [ -n "$PEER_ADDR" ] || {
+    echo "set AMINETXDUO_FITZ_PEER=<user@host> or pass -H, a third machine on" >&2
+    echo "real hardware, not this emulator's host and not an LXC container." >&2
+    echo "-A <addr> alone is enough if a fitz-serve is already listening." >&2
+    exit 2
+}
+
 [ "$USE_AMIBERRY" = "0" ] || [ "$SLIRP" = "0" ] || {
     echo "-a and -s are different emulators; pick one" >&2; exit 2; }
 
@@ -205,6 +222,9 @@ fi
 
 if [ -z "$PEER" ]; then
     # The server is somebody else's problem: it is already listening at -A.
+    [ -n "$PEER_ADDR" ] || {
+        echo "no peer: give -A <addr> for a server that is already listening," >&2
+        echo "or -H <user@host> to have this script start one" >&2; exit 2; }
     SERVER_ADDR="$PEER_ADDR"
     cleanup() { :; }
 elif [ "$SLIRP" = "1" ]; then
@@ -219,17 +239,46 @@ elif [ "$SLIRP" = "1" ]; then
     PEER_PID=$!
     cleanup() { kill -TERM "$PEER_PID" 2>/dev/null || true; }
 else
+    # Ask the peer for its own address rather than resolving the name here.
+    # Local resolution answers for whatever this host's resolver believes, which
+    # on a Mac is not the lab's DNS and on any host can be stale; the machine
+    # ssh actually landed on cannot be wrong about its own interfaces.
+    PEER_ADDRS=$(ssh "$PEER" \
+        "ip -4 -o addr show scope global 2>/dev/null | awk '{print \$4}' | cut -d/ -f1" \
+        2>/dev/null)
+    [ -n "$PEER_ADDRS" ] || {
+        echo "$PEER did not report an address of its own; pass -A <addr>" >&2
+        exit 2; }
+    if [ -z "$PEER_ADDR" ]; then
+        PEER_ADDR=$(printf '%s\n' "$PEER_ADDRS" | head -1)
+        [ "$(printf '%s\n' "$PEER_ADDRS" | wc -l)" -eq 1 ] || {
+            echo "note: $PEER holds more than one address, using $PEER_ADDR" >&2
+            echo "      pass -A to choose the one the guest's bridge reaches" >&2; }
+    else
+        # The guest cannot report reaching the wrong machine: it times out, and
+        # the RAM: control arm passes beside it, so the run reads as a partial
+        # success and exits 0.  Catch the mismatch here instead.
+        printf '%s\n' "$PEER_ADDRS" | grep -qx "$PEER_ADDR" || {
+            echo "$PEER does not hold $PEER_ADDR -- the server would be staged" >&2
+            echo "on one machine and the guest pointed at another.  It holds:" >&2
+            printf '%s\n' "$PEER_ADDRS" | sed 's/^/  /' >&2
+            exit 2; }
+    fi
+
     SERVER_ADDR="$PEER_ADDR"
     PEERLOG="$ROOT/build/fitzbench-$TAG-peer.log"
-    # The bracket in the pattern is not decoration: pkill -f matches the
-    # remote shell's own command line, which contains the pattern, so an
-    # unbracketed one kills the connection that issued it.
-    ssh "$PEER" "pkill -f '[f]itz-serve' || true" >/dev/null 2>&1 || true
+    # Matched on our own port, not on the binary: a bare fitz-serve pattern
+    # takes out every other run on the peer, and this is a shared machine.
+    # The bracket is not decoration either -- pkill -f matches the remote
+    # shell's own command line, so an unbracketed pattern kills the connection
+    # that issued it.
+    PEER_KILL="pkill -f '[f]itz-serve .* PORT $PORT' || true"
+    ssh "$PEER" "$PEER_KILL" >/dev/null 2>&1 || true
     ssh "$PEER" "rm -rf $PEER_DIR; mkdir -p $PEER_DIR;
                  nohup $PEER_BIN $PEER_DIR PORT $PORT > /tmp/fitzbench-peer.log 2>&1 &
                  sleep 1; ps -o args= -C fitz-serve" > "$PEERLOG" 2>&1
     cat "$PEERLOG"
-    cleanup() { ssh "$PEER" "pkill -f '[f]itz-serve' || true" >/dev/null 2>&1 || true; }
+    cleanup() { ssh "$PEER" "$PEER_KILL" >/dev/null 2>&1 || true; }
 fi
 trap cleanup EXIT INT TERM HUP
 
