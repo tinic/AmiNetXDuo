@@ -394,12 +394,15 @@ typedef struct
  * here, it is the architecture -- and nxe_tcp_socket_create.c:170 enforces it,
  * refusing a larger window with NX_OPTION_ERROR.
  *
- * That guard is why this arm exists at all. The pool budget at a quarter is
- * 100,352 bytes on any machine with about 4.2 MB of free public memory, which
- * every 8 MB machine has, so a tree built with
- * -DAMINETXDUO_TCP_WINDOW_SCALING=OFF and no ceiling of its own failed
- * socket() for every TCP socket on the lab's own A1200 profile. tcp.drill
- * w01 opened with "socket() failed, connect() failed errno 9".
+ * That guard is why this arm exists. At the share above the budget is 50,176
+ * and fits the field on its own, so nothing reaches it today -- but it was
+ * reached: with the share at a quarter the budget is 100,352 on any machine
+ * with about 4.2 MB of free public memory, and a tree built with
+ * -DAMINETXDUO_TCP_WINDOW_SCALING=OFF and no ceiling of its own failed socket()
+ * for every TCP socket on the lab's own A1200 profile. tcp.drill w01 opened
+ * with "socket() failed" and "connect() failed, errno 9" and every case after
+ * it followed. The two arms are what stop the share and the option being able
+ * to disagree at all.
  */
 #define BSD_TCP_WINDOW_CEILING  65535UL
 #endif
