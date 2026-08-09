@@ -420,6 +420,16 @@ HD="$ROOT/build/amiberry-testhd-$TAG"
 REPORT="$HD/tools.txt"
 [ -f "$REPORT" ] || { echo "FAIL: no $REPORT (rc=$RUN_RC)" >&2; exit 1; }
 
+# Same as tests/perf/run-fitzbench.sh: the backend assertion in
+# tools/amiberry-run.sh reports through the exit status and nothing else, so a
+# run that came up on SLIRP instead of the bridge otherwise prints a profile
+# and returns 0.
+if [ "$RUN_RC" != "0" ]; then
+    echo "FAIL: the emulator run failed (rc=$RUN_RC); the profile it left" >&2
+    echo "describes a run its own harness refused." >&2
+    exit "$RUN_RC"
+fi
+
 echo
 echo "===================== what the commands printed ====================="
 cat "$REPORT"

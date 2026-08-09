@@ -353,6 +353,20 @@ set -e
 REPORT="$HD/tools.txt"
 [ -f "$REPORT" ] || { echo "FAIL: the guest wrote no $REPORT (run rc=$RUN_RC)" >&2; exit 1; }
 
+# The emulator's exit status is the backend assertion's only way out, and this
+# read it into a variable it used in one error message.  A `-B ens99` run is
+# rejected by tools/amiberry-run.sh, comes up on SLIRP, reaches the peer
+# through NAT anyway -- SLIRP forwards to real addresses -- and produced
+# `read 230 write 348` with `!! ASKED FOR 'ens99' AND DID NOT GET IT` in the
+# same log and rc=0 out of this script.  A zero bandwidth-delay path has no
+# window, no RTT and no loss, so those are not throughput figures; stop before
+# printing any.
+if [ "$RUN_RC" != "0" ]; then
+    echo "FAIL: the emulator run failed (rc=$RUN_RC); no figure from it is" >&2
+    echo "usable.  Its own output above says which assertion refused it." >&2
+    exit "$RUN_RC"
+fi
+
 echo
 echo "===================== what the commands printed ====================="
 cat "$REPORT"
