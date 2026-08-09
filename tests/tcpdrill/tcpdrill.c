@@ -2757,6 +2757,14 @@ static LONG run_script(const char *path)
     }
 
     Close(fh);
+
+    if (rep_collecting)
+    {
+        say("!! `repeat` with no `end`, %u line(s) never ran", rep_n);
+        n_fail++;
+        rep_collecting = FALSE;
+    }
+
     case_end();
     return 0;
 }
