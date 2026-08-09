@@ -995,6 +995,11 @@ static VOID ami_ns_ip_conflict(NX_IP *ip_ptr, UINT interface_index,
               (unsigned long)sender_mac_msw, (unsigned long)sender_mac_lsw);
 }
 
+VOID ami_netstack_mark(const char *event)
+{
+    AMI_INFO("netstack: mark %s %lu ms", event, (unsigned long)ami_millis());
+}
+
 static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
 {
     AmiNetStack *ns      = ami_ns;
@@ -1050,6 +1055,9 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
         else
             ami_ns_log_address("address is now", i, addr);
 
+        if (addr != 0UL)
+            ami_netstack_mark("ipv4");
+
         /*
          * RFC 3927 1.9: a routable address supersedes a link-local one. The
          * AutoIP thread does not watch for this itself, it sits in an
@@ -1081,6 +1089,22 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
         ami_address_change_notify();
 }
 
+/* NX_DHCP_STATE_* in order, for the bring-up marks. */
+static const char *ami_ns_dhcp_state_name(UCHAR state)
+{
+    static const char *const names[] = {
+        "dhcp-notstarted", "dhcp-boot",       "dhcp-init",
+        "dhcp-selecting",  "dhcp-requesting", "dhcp-bound",
+        "dhcp-renewing",   "dhcp-rebinding",  "dhcp-forcerenew",
+        "dhcp-probing"
+    };
+
+    if ((UINT)state >= (UINT)(sizeof(names) / sizeof(names[0])))
+        return "dhcp-other";
+
+    return names[state];
+}
+
 /*
  * Called by NetX Duo's DHCP client on every state transition, per interface.
  *
@@ -1101,6 +1125,10 @@ static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
 
     previous = ns->ns_DhcpState[iface_index];
     ns->ns_DhcpState[iface_index] = (UBYTE)new_state;
+
+    /* Which state, and when. A lease that takes seconds rather than the four
+       packets it is made of is a retransmission, and this is what says so. */
+    ami_netstack_mark(ami_ns_dhcp_state_name((UCHAR)new_state));
 
     switch (new_state)
     {
@@ -1449,6 +1477,28 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
     if (ami_ns_wants(ns, AMI_IPTYPE_LINKLOCAL))
         ami_ns_start_autoip(ns);
 
+#ifdef AMINETXDUO_IPV6
+    /*
+     * BEFORE the wait below, not after it, and this is worth several seconds.
+     *
+     * Nothing here needs an IPv4 address: it configures the link-local
+     * address, arms the router solicitation and returns, and everything that
+     * takes time -- duplicate address detection, the solicitation, the address
+     * an advertisement brings and ITS duplicate address detection -- runs
+     * afterwards on the IP thread. Run after the wait, all of that started only
+     * once the lease had landed, so a boot paid for the DHCP exchange and the
+     * IPv6 tail one after the other; run here, the two overlap and bring-up
+     * costs the longer of them.
+     *
+     * `resolved` is about IPv4 and gates the AMI_NET_ERR_CONFIG return, so it
+     * is not touched: a machine with IPv6 and no IPv4 address still reports
+     * that no interface has an address, which is what every IPv4 caller will
+     * find. ami_ns6_address_changed() reports each IPv6 address as it lands,
+     * and netstack_ipv6_address_get() reports what has arrived so far.
+     */
+    ami_netstack_ipv6_configure(ns);
+#endif
+
     if (!resolved)
     {
         /* Block until some interface has an address, or DHCP gives up. */
@@ -1470,23 +1520,6 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
                          "either, is the cable in?");
         }
     }
-
-#ifdef AMINETXDUO_IPV6
-    /*
-     * IPv6 addressing runs after the IPv4 block and is never waited for. The
-     * link-local address is up before this returns (DAD is waited on inside),
-     * which is enough for every IPv6 socket call to have a source address. A
-     * global address from a router advertisement may take a second or two
-     * longer, and blocking startup on a router that may not exist would slow
-     * every IPv6 boot. netstack_ipv6_address_get() reports what has arrived.
-     *
-     * `resolved` is about IPv4 and gates the AMI_NET_ERR_CONFIG return, so it
-     * is not touched here: a machine with IPv6 and no IPv4 address still
-     * reports that no interface has an address, which is what every IPv4
-     * caller will find.
-     */
-    ami_netstack_ipv6_configure(ns);
-#endif
 
     {
         ULONG addr = 0UL;
@@ -1613,6 +1646,8 @@ static LONG ami_ns_bring_up(VOID)
                               ami_netstack_baton_acquire);
 
     /* ---- 4. ThreadX ----------------------------------------------------- */
+
+    ami_netstack_mark("start");
 
     AMI_INFO("netstack: starting ThreadX");
     txstatus = tx_amiga_kernel_start();

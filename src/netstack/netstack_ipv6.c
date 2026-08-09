@@ -111,18 +111,29 @@ static VOID ami_ns6_log(const char *what, const ULONG addr[4], ULONG prefix)
     AMI_INFO("netstack: %s %s/%lu", what, text, (unsigned long)prefix);
 }
 
+static VOID ami_ns6_log_tentative(const char *what, const ULONG addr[4],
+                                  ULONG prefix)
+{
+    char text[AMI_CFG_IP6_STRLEN];
+
+    ami_config_format_ip6(addr, text, sizeof(text));
+    AMI_INFO("netstack: %s %s/%lu (tentative)", what, text,
+             (unsigned long)prefix);
+}
+
 /*
  * An address finished duplicate address detection, one way or the other.
  *
  * RFC 4862 section 5.4 puts DAD ahead of an address being *used*, not ahead of
  * the caller who asked for it. An address is TENTATIVE for the seconds the
  * solicitations take, cannot be a source while it is, and needs nobody to sit
- * over it: NX_IPV6_DAD_TRANSMITS is 3 and they go out at one per second, so
- * waiting for the answer inside ami_ns6_configure_interface() charged three
- * seconds per address to the thread that called it, and a static IPv6 address
- * made it six. That thread is AddNetInterface, which is in the
- * Startup-Sequence, and which on a static-IPv4 interface has otherwise nothing
- * at all to wait for. The wait bought one log line.
+ * over it: a solicitation goes out on the IP thread's one-second periodic and
+ * RFC 4862 5.4.5 waits one more before the address is valid, so waiting for
+ * the answer inside ami_ns6_configure_interface() charged two seconds per
+ * address to the thread that called it, and four when NX_IPV6_DAD_TRANSMITS
+ * was 3. That thread is AddNetInterface, which is in the Startup-Sequence, and
+ * which on a static-IPv4 interface has otherwise nothing at all to wait for.
+ * The wait bought one log line.
  *
  * So the line is printed from here instead, on the IP thread, when NetX Duo
  * has the answer. This is also strictly more than the wait could see: an
@@ -136,6 +147,7 @@ static VOID ami_ns6_address_changed(NX_IP *ip_ptr, UINT status,
     AmiNetStack *ns = ami_netstack_raw();
     const char  *name;
     ULONG        prefix;
+    BOOL         linklocal;
 
     if (ns == NULL || ip_ptr != &ns->ns_Ip || address == NULL)
         return;
@@ -156,13 +168,15 @@ static VOID ami_ns6_address_changed(NX_IP *ip_ptr, UINT status,
      * is on-link is the /64 that section 2.5.1 leaves for the interface
      * identifier. /64 is what bring-up printed and what the address means.
      */
-    if ((address[0] & 0xFFC00000UL) == 0xFE800000UL)
+    linklocal = (BOOL)((address[0] & 0xFFC00000UL) == 0xFE800000UL);
+    if (linklocal)
         prefix = 64UL;
 
     switch (status)
     {
     case NX_IPV6_ADDRESS_DAD_SUCCESSFUL:
         ami_ns6_log(name, address, prefix);
+        ami_netstack_mark(linklocal ? "ip6-linklocal" : "ip6-global");
         break;
 
     case NX_IPV6_ADDRESS_DAD_FAILURE:
@@ -177,7 +191,16 @@ static VOID ami_ns6_address_changed(NX_IP *ip_ptr, UINT status,
         break;
 
     case NX_IPV6_ADDRESS_STATELESS_AUTO_CONFIG:
-        ami_ns6_log(name, address, prefix);
+        /*
+         * A router advertisement has just formed this address, and
+         * nx_icmpv6_process_ra.c leaves it TENTATIVE: nothing may use it until
+         * duplicate address detection finishes and the DAD_SUCCESSFUL arm
+         * above runs for the same address.  It used to print the same line as
+         * that arm, so a global address appeared in the log twice and the
+         * first one claimed it was ready seconds before it was.
+         */
+        ami_ns6_log_tentative(name, address, prefix);
+        ami_netstack_mark("ip6-slaac");
         break;
 
     default:

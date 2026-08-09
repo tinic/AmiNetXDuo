@@ -95,18 +95,37 @@ typedef uint64_t                                ULONG64;
 #endif
 
 
-/* The system timer thread.  Timer expiration is processed on a real ThreadX
-   thread (TX_TIMER_PROCESS_IN_ISR is not defined), so application timer
-   callbacks, including NetX Duo's periodic handlers, run at thread level
-   where they may take mutexes.  */
-
-#ifndef TX_TIMER_THREAD_STACK_SIZE
-#define TX_TIMER_THREAD_STACK_SIZE              4096
-#endif
-
-#ifndef TX_TIMER_THREAD_PRIORITY
-#define TX_TIMER_THREAD_PRIORITY                0
-#endif
+/*
+ * Timer expiration is processed where the tick is delivered, not handed to a
+ * system timer thread, and on this port that is a correctness matter rather
+ * than a size one.
+ *
+ * _tx_timer_interrupt() below advances _tx_timer_current_ptr only when the
+ * slot it points at is EMPTY.  When a timer is sitting there it sets
+ * _tx_timer_expired and leaves the pointer where it is, because in a stock port
+ * the timer thread runs at priority 0 out of the interrupt that just ran and
+ * has drained the slot before the next tick arrives.  Here the tick comes from
+ * an Exec Task and the timer thread is another one, so every tick in between
+ * finds the same non-empty slot and advances nothing.  Those ticks are gone:
+ * the tick task counts them delivered, tx_time_get() counts them as time, and
+ * the wheel never moved.  Every timeout on the wheel is long by the total, and
+ * nothing in tx_amiga_tick_stats() can see it -- delivered, clipped, lost and
+ * skew are all exactly what they should be.
+ *
+ * Measured with tools/smoke/timerdrift: a 50-tick periodic timer alone keeps 50
+ * (min 50, max 51).  The same timer beside three others at 7, 13 and 19 ticks
+ * kept 58 (min 56, max 61).  That is the 16 to 32 per cent overrun NetX Duo's
+ * DHCP Client showed on its own 50-tick NX_DHCP_TIME_INTERVAL, which skewed
+ * every retransmission backoff and both lease timers.
+ *
+ * The trade is that a timer callback now runs in the tick task under the
+ * Forbid() _tx_thread_context_save() holds, so it may not block or take a
+ * mutex.  Every callback in this tree is already an ISR-level one: NetX Duo's
+ * IP periodic, fast periodic, DHCP, mDNS and SNTP entries set an event flag or
+ * subtract from a counter and return, which is what NetX Duo documents them as
+ * doing, and _tx_thread_timeout() is ThreadX's own.
+ */
+#define TX_TIMER_PROCESS_IN_ISR
 
 
 /* Do not pre-fill thread stacks.  (1) Adopted threads (tx_amiga_adopt_thread)

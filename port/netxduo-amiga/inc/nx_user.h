@@ -675,17 +675,31 @@
 
 /*
  * Duplicate Address Detection stays on (NX_DISABLE_IPV6_DAD is not defined).
- * It costs three neighbour solicitations and roughly one second per address
- * before that address becomes usable.  Kept because the alternative is silently
- * sharing an address with another host on the link, and because it is the one
- * part of neighbour discovery that exercises solicited-node multicast on every
- * boot, the only routine test of the S2_ADDMULTICASTADDRESS path in
- * src/sana2/.
+ * Kept because the alternative is silently sharing an address with another host
+ * on the link, and because it is the one part of neighbour discovery that
+ * exercises solicited-node multicast on every boot, the only routine test of
+ * the S2_ADDMULTICASTADDRESS path in src/sana2/.
  *
  * Nobody waits for it.  An address is TENTATIVE while the solicitations go
  * out, and the answer arrives through the notification below rather than on
  * the thread that configured the address; see ami_ns6_address_changed().
+ *
+ * ONE solicitation, not NetX Duo's three.  RFC 4862 5.4.5 makes an address
+ * valid RetransTimer after its last solicitation goes unanswered, and
+ * _nx_icmpv6_perform_DAD() runs off the IP thread's one-second periodic, so
+ * each transmit is a second and the wait after the last one is a second more:
+ * three transmits is four seconds per address before anything may use it.  A
+ * machine gets two of them, the link-local and the address a router
+ * advertisement forms, so it was eight seconds of a bring-up.
+ *
+ * 1 is RFC 4862's own DupAddrDetectTransmits default, not a corner cut; three
+ * is NetX Duo's.  A duplicate answers the first solicitation as readily as the
+ * third -- the retransmissions are there for a lost packet, on a link where a
+ * neighbour's reply is a single unicast frame it did not have to ask for.
  */
+#ifndef NX_IPV6_DAD_TRANSMITS
+#define NX_IPV6_DAD_TRANSMITS                   1
+#endif
 
 /*
  * Report what duplicate address detection decides, and what a router hands
