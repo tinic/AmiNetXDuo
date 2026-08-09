@@ -1097,6 +1097,22 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
  * _nx_dhcp_interface_reinitialize() has taken the address and the gateway off
  * the interface. The response is RFC 3927 1.7, as when DHCP never answers.
  */
+/* NX_DHCP_STATE_* in order, for the bring-up marks. */
+static const char *ami_ns_dhcp_state_name(UCHAR state)
+{
+    static const char *const names[] = {
+        "dhcp-notstarted", "dhcp-boot",      "dhcp-init",
+        "dhcp-selecting",  "dhcp-requesting", "dhcp-bound",
+        "dhcp-renewing",   "dhcp-rebinding",  "dhcp-forcerenew",
+        "dhcp-probing"
+    };
+
+    if ((UINT)state >= (UINT)(sizeof(names) / sizeof(names[0])))
+        return "dhcp-other";
+
+    return names[state];
+}
+
 static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
                                       UCHAR new_state)
 {
@@ -1109,6 +1125,10 @@ static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
 
     previous = ns->ns_DhcpState[iface_index];
     ns->ns_DhcpState[iface_index] = (UBYTE)new_state;
+
+    /* Which state, and when. A lease that takes seconds rather than the four
+       packets it is made of is a retransmission, and this is what says so. */
+    ami_netstack_mark(ami_ns_dhcp_state_name((UCHAR)new_state));
 
     switch (new_state)
     {
