@@ -333,11 +333,34 @@ typedef struct
  * is not a free number and it is not a constant -- it moves with the pool
  * sizing in include/aminetxduo/netstack.h and with the share above.
  *
- * 33580 used to be here, chosen as 23 whole segments at the Ethernet MSS, and
- * measured against 32768 and 48180 with a congestion window that bound the
- * transfer before the receive window did. It stopped being a ceiling the day
- * the pool budget arrived and became a second, unrelated bound that happened
- * to be the tighter one on any machine with more than about 2.3 MB free.
+ * 33580 used to be here: 23 whole segments at the Ethernet MSS, which is what
+ * a 32 KB payload behind a header needs to arrive in one round trip. 32768 is
+ * twelve bytes short of that, so a 32,780-byte response could not complete in
+ * one whatever else was true.
+ *
+ * WHAT THAT NUMBER WAS MEASURED ON, kept because it is a request/response
+ * workload and the figure below is a bulk one, and neither answers the other.
+ * An early sweep read 32768, 33580 and 48180 as flat and kept 32768, with a
+ * congestion window of 12 segments that bound the transfer before the receive
+ * window did. SACK and D-SACK take it to 24 on a clean link, which puts the
+ * receive window back in charge: over 512 exchanges of a 32,780-byte response,
+ * 32768 -> 33580 moved round trips a chunk from 2.05 to 1.18 and the read from
+ * 985 to 1714 KB/s clean, and from 2.32 to 1.94 and 835 to 963 KB/s under 1%
+ * injected loss. 48180 measured no better than 33580 and was refused for that.
+ *
+ * It pays only where the guest is fast enough for the round trip to have been
+ * the cost. Across profiles, 2 boots an arm: 68020 moved round trips a chunk
+ * 2.00 -> 1.02 and the read did not move at all, because time per chunk stayed
+ * ~77 ms in both arms and the remaining gap widened to absorb what was saved.
+ * The peer went from 3-4% app-limited to 93-94%: at a 40 ms round trip the
+ * 68020 was never waiting on the network. Same signature on 68000, app-limited
+ * 2-4% -> 66-83%. On 68000 it costs a little: clean reads 179.2 -> 174.1 KB/s
+ * and 181.4 -> 178.7 for the minimal build, spreads under 1 KB/s.
+ *
+ * So a number above 33580 has been refused once on that workload. It stopped
+ * being a ceiling the day the pool budget arrived, and became a second,
+ * unrelated bound that happened to be the tighter one on any machine with more
+ * than about 2.3 MB free.
  *
  * Every byte of window is a byte of packet pool somebody else cannot have, and
  * this is the packet pool saying so in its own units.
