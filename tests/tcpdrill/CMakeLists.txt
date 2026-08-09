@@ -67,6 +67,12 @@ set(_anxd_maxpkt ${CMAKE_MATCH_1})
 
 math(EXPR _anxd_wincap "(${_anxd_maxpkt} / ${_anxd_share}) * ${_anxd_payload}")
 
+# Without the window scale option the sixteen-bit field is the ceiling, and
+# the header says so the same way.
+if(NOT AMINETXDUO_TCP_WINDOW_SCALING)
+    set(_anxd_wincap 65535)
+endif()
+
 # AMINETXDUO_TCP_WINDOW pins both, and the library sees it through
 # add_compile_definitions, so the drill has to follow it there too.
 if(NOT AMINETXDUO_TCP_WINDOW STREQUAL "")

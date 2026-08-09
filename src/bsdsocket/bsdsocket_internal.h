@@ -369,9 +369,26 @@ typedef struct
  * fixed window is measured against the derived one.
  */
 #ifndef BSD_TCP_WINDOW_CEILING
+#ifdef AMINETXDUO_TCP_WINDOW_SCALING
 #define BSD_TCP_WINDOW_CEILING                                                \
     (((ULONG)AMI_POOL_MAX_PACKETS / (ULONG)BSD_TCP_WINDOW_POOL_SHARE) *        \
      (ULONG)AMI_POOL_PAYLOAD)
+#else
+/*
+ * WITHOUT THE OPTION THE FIELD IS THE CEILING. The window goes on the wire in
+ * sixteen bits and there is nothing to scale it by, so 65535 is not a policy
+ * here, it is the architecture -- and nxe_tcp_socket_create.c:170 enforces it,
+ * refusing a larger window with NX_OPTION_ERROR.
+ *
+ * That guard is why this arm exists at all. The pool budget at a quarter is
+ * 100,352 bytes on any machine with about 4.2 MB of free public memory, which
+ * every 8 MB machine has, so a tree built with
+ * -DAMINETXDUO_TCP_WINDOW_SCALING=OFF and no ceiling of its own failed
+ * socket() for every TCP socket on the lab's own A1200 profile. tcp.drill
+ * w01 opened with "socket() failed, connect() failed errno 9".
+ */
+#define BSD_TCP_WINDOW_CEILING  65535UL
+#endif
 #endif
 
 /* Room for one dotted quad plus terminator, used by Inet_NtoA(). */
