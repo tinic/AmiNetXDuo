@@ -370,8 +370,21 @@
  * link goes from a 1460 MSS to 1448, and both ends build and parse the option
  * on every packet.  At Amiga link rates the sequence space takes tens of
  * minutes to wrap, so PAWS is not what is being bought here; RTTM is.
+ *
+ * MEASURED, A1200 bridged to a real peer, 1 MB, five reps a boot and three
+ * boots an arm, the arms alternating:
+ *
+ *     read    on 392.7 KB/s (390-396)   off 391.3 KB/s (387-402)
+ *     write   on 413.7 KB/s (413-415)   off 431.7 KB/s (430-433)
+ *
+ * Read is the figure, and it does not move.  The write arm loses about four
+ * per cent, which is where the twelve bytes and the per-segment option build
+ * show up: that arm leaves the CPU 22% idle against the read arm's 60%.
+ * bsdsocket.library goes 308,288 to 310,488 bytes.
+ *
+ * Build with -DAMINETXDUO_TCP_TIMESTAMP=OFF to take it out.
  */
-#ifdef AMINETXDUO_TCP_TIMESTAMP
+#ifndef AMINETXDUO_TCP_TIMESTAMP_OFF
 #define NX_ENABLE_TCP_TIMESTAMP
 #endif
 

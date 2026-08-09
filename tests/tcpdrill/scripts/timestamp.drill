@@ -1,7 +1,7 @@
 # tcpdrill, the RFC 7323 timestamps option.
 #
-# NEEDS A BUILD THAT HAS THE OPTION.  Every case here assumes
-# AMINETXDUO_TCP_TIMESTAMP=ON; against a library built without it the stack
+# NEEDS A BUILD THAT HAS THE OPTION, which is the default.  Every case here
+# assumes AMINETXDUO_TCP_TIMESTAMP=ON; against a library built without it the stack
 # never offers the option and q01 fails on its first line.  The other scripts
 # never offer it, so they say what a connection WITHOUT the option does and
 # this one says what one with it does.
