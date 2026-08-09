@@ -1157,11 +1157,13 @@ static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
  */
 static BOOL ami_ns_wait_for_address(AmiNetStack *ns, ULONG timeout_ticks)
 {
-    ULONG waited = 0UL;
+    ULONG start = tx_time_get();
 
     for (;;)
     {
         UWORD i;
+        ULONG spent;
+        ULONG remaining;
 
         for (i = 0; i < ns->ns_IfaceCount; i++)
         {
@@ -1173,33 +1175,53 @@ static BOOL ami_ns_wait_for_address(AmiNetStack *ns, ULONG timeout_ticks)
                 return TRUE;
         }
 
-        if (waited >= timeout_ticks)
+        spent = tx_time_get() - start;      /* unsigned: correct across a wrap */
+        if (spent >= timeout_ticks)
             return FALSE;
+        remaining = timeout_ticks - spent;
 
         /*
-         * Wait on the notification rather than polling. NetX Duo reports an
-         * arriving address through the registered ami_ns_address_changed(),
-         * whereas sleeping a tick at a time spent up to a whole tick asleep
-         * after the lease had landed, on the boot path where it is most
-         * visible (docs/RESEARCH.md 56).
+         * Wait out the whole remaining timeout on the notification, not a
+         * slice of it. NetX Duo reports an arriving address through the
+         * registered ami_ns_address_changed(), so there is nothing a shorter
+         * wait would find sooner; capping it at the poll interval instead woke
+         * this thread fifty times a second to re-walk every interface through
+         * nx_ip_interface_address_get(), taking the IP protection mutex each
+         * time and contending with the IP and DHCP threads it is waiting for.
+         * A thirty-second wait for a server that never answers was 1,500 of
+         * those passes and is now one.
          *
-         * The address is re-checked after every wake: the semaphore signals
-         * that something changed, which may be a different interface or an
-         * address going away. The poll interval remains the wait bound, so a
-         * missed notification costs a tick rather than the whole timeout.
+         * No wake is lost: ns_AddrArrived counts, so a post landing between
+         * the scan above and the get below is held and returns the get at
+         * once. A post for something other than an address arriving (a
+         * different interface, an address going away) returns it too, which is
+         * why the scan is at the top of the loop rather than after the wait,
+         * and the elapsed time rather than the slice is what bounds the loop.
          */
+        if (ns->ns_AddrArrivedReady)
+        {
+            UINT got = tx_semaphore_get(&ns->ns_AddrArrived, remaining);
+
+            /*
+             * TX_SUCCESS means something changed, so go and look. TX_NO_INSTANCE
+             * is the timeout, and the scan at the top runs once more before the
+             * elapsed check ends it. Anything else means the semaphore is gone,
+             * which only teardown does and it cannot run while startup holds
+             * ami_ns_lock, but a return that consumes no time would spin.
+             */
+            if (got != TX_SUCCESS && got != TX_NO_INSTANCE)
+                return FALSE;
+        }
+        else
         {
             ULONG slice = (ULONG)AMI_ADDRESS_POLL_TICKS;
 
-            if (slice > timeout_ticks - waited)
-                slice = timeout_ticks - waited;
+            if (slice == 0UL)
+                slice = 1UL;
+            if (slice > remaining)
+                slice = remaining;
 
-            if (ns->ns_AddrArrivedReady)
-                (VOID)tx_semaphore_get(&ns->ns_AddrArrived, slice);
-            else
-                tx_thread_sleep(slice);
-
-            waited += slice;
+            tx_thread_sleep(slice);
         }
     }
 }
