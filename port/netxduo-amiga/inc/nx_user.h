@@ -328,11 +328,11 @@
  * IT IS NOT INERT AT A ZERO EXPONENT.  The two directions scale independently
  * (RFC 7323 2.2): announcing the option is what lets the PEER announce one,
  * and what we may then have outstanding to it stops being capped at 65535.
- * Against Linux the peer's SYN-ACK carries `wscale 7` and `ss -tim` on it
- * reads rcv_wnd:339200 where the same connection without the option is held to
- * the field.  Nothing this stack currently does fills that -- the write arm
- * moved 409.2 to 411.0 KB/s, inside its own spread -- so what it buys is a cap
- * removed and not a rate.
+ * Against Linux the peer's SYN-ACK carries `wscale 7`, `ss -tim` on it settles
+ * at wscale:0,7, and the peer's own receive window reaches rcv_wnd:339200
+ * where the same rig with the option off is held to 65160.  Nothing this stack
+ * currently does fills that -- the write arm moved 409.2 to 411.0 KB/s, inside
+ * its own spread -- so what it buys is a cap removed and not a rate.
  *
  * WHY THE CONDITIONS WERE THERE.  Pinning AMINETXDUO_TCP_WINDOW at 65536 with
  * no SACK in the tree took the wire from 172 KB/s to 32 KB/s, with 15
