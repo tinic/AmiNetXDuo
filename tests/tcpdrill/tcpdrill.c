@@ -38,6 +38,10 @@
  *   txcount MIN MAX        discard everything queued, and assert how much of
  *                          it there was -- a retransmission series is a count
  *   rx FLAGS [key=value]   inject this frame into the stack
+ *   repeat N ... end       run the lines between them N times, $i counting
+ *                          from zero.  N may be an expression, which is how a
+ *                          case whose length follows the receive buffer is
+ *                          written once
  *
  * FLAGS is a string from FSRPAUEC, or `-` for none.  Keys:
  *
@@ -58,11 +62,30 @@
  *           value is this stack's own clock.
  *   tsecr=N the echo.  On tx it is what TS.Recent held, which is a TSval a
  *           previous rx line chose, so a script can name it; on rx it is sent.
+ *   wsok=1/0 the RFC 7323 window scale option must be present or absent (tx).
+ *   wscale=N its shift exactly (tx), or the shift offered by the peer (rx).
+ *   sackok=1/0 RFC 2018 SACK-Permitted must be present or absent (tx), or is
+ *           offered (rx).
+ *   sack=lo:hi[,lo:hi...]  the RFC 2018 blocks, in order, in the offsets
+ *           `ack=` counts in.  `sack=-` requires no option at all.
+ *   badopt=1 the injected frame carries an MSS option whose length byte says
+ *           3, which is not its length (rx).
+ *   dst=bcast|subnet|mcast  the injected frame goes to that destination, in
+ *           the IP header and in the Ethernet header both (rx).
+ *   hdrlen=N the data offset in bytes.  `hdrlen=auto` instead requires it to
+ *           account for exactly the options this line names, which is what the
+ *           assertion is for and does not go stale when the build gains one.
  *   within=MS / after=MS
  *           bounds on the gap between this frame and the previous event,
  *           measured from the E-Clock reading taken inside the device's
  *           BeginIO -- the instant the stack handed the frame over -- so the
  *           harness's own polling interval does not enter the measurement.
+ *
+ * A value may be an expression instead of a literal: $name, then any run of
+ * + - * / and further operands, evaluated left to right.  $winfloor, $wincap
+ * and $synwin come from the build's BSD_TCP_WINDOW/BSD_TCP_WINDOW_CEILING;
+ * $rwnd is the receive buffer read back off the wire; $i is the `repeat`
+ * iteration.  See var_value().
  *
  * Output goes to DH0:tcpdrill.txt: one line per directive that asserted
  * something, and a decoded expected/observed pair for every failure.  Flushed
@@ -82,10 +105,43 @@
 
 #include "tapdev.h"
 
+/* The window bounds come from the same header the library compiles against,
+   read by tests/tcpdrill/CMakeLists.txt.  Not defaulted here: a second copy of
+   33580 is exactly the thing this replaces. */
+#if !defined(DRILL_TCP_WINDOW) || !defined(DRILL_TCP_WINDOW_CEILING)
+#error "DRILL_TCP_WINDOW / DRILL_TCP_WINDOW_CEILING come from CMake"
+#endif
+
+/* Which options the library was built with.  add_compile_definitions puts
+   these on every target, so the drill reads the same switches the stack did
+   and `hdrlen=auto` needs no script to enumerate them. */
+#ifdef AMINETXDUO_TCP_WINDOW_SCALING
+#define DRILL_HAS_WSCALE    1
+#else
+#define DRILL_HAS_WSCALE    0
+#endif
+#ifdef AMINETXDUO_TCP_SACK_OFF
+#define DRILL_HAS_SACK      0
+#else
+#define DRILL_HAS_SACK      1
+#endif
+#ifdef AMINETXDUO_TCP_TIMESTAMP_OFF
+#define DRILL_HAS_TS        0
+#else
+#define DRILL_HAS_TS        1
+#endif
+
 /* ------------------------------------------------------------ the network - */
 
 #define LOCAL_IP        0x0A090901UL            /* 10.9.9.1, DEVS:NetInterfaces */
 #define PEER_IP         0x0A090902UL            /* 10.9.9.2, this harness       */
+
+/* `dst=`.  The subnet is the /24 DEVS:NetInterfaces/tap0 configures, and the
+   multicast address is the all-hosts group, which nothing here has joined. */
+#define DST_UNICAST     0
+#define DST_BCAST       1                       /* 255.255.255.255 */
+#define DST_SUBNET      2                       /* 10.9.9.255      */
+#define DST_MCAST       3                       /* 224.0.0.1       */
 #define DEFAULT_PEER_PORT   9000
 
 static const UBYTE local_mac[6] = { 0x02, 0x00, 0x44, 0x52, 0x4C, 0x01 };
@@ -533,6 +589,12 @@ typedef struct Seg
     BOOL    ts;                 /* RFC 7323 timestamps present  */
     ULONG   tsval;
     ULONG   tsecr;
+    LONG    wscale;             /* RFC 7323 shift, -1 when absent */
+    BOOL    sackok;             /* RFC 2018 SACK-Permitted present */
+    BOOL    has_sack;           /* an RFC 2018 SACK option was present */
+    UWORD   n_sack;             /* blocks in it */
+    ULONG   sack_lo[4];
+    ULONG   sack_hi[4];
     BOOL    ip_ok;              /* IP header checksum verified  */
     BOOL    tcp_ok;             /* TCP checksum verified        */
 
@@ -552,9 +614,10 @@ static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
     ULONG        iplen;
 
     zero((UBYTE *)s, (ULONG)sizeof(*s));
-    s->stamp = stamp;
-    s->ether = rd16(&f[12]);
-    s->mss   = -1;
+    s->stamp  = stamp;
+    s->ether  = rd16(&f[12]);
+    s->mss    = -1;
+    s->wscale = -1;
 
     s->frame_len = len;
     {
@@ -613,8 +676,14 @@ static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
         s->tcp_ok = ((UWORD)(~sum) == 0) ? TRUE : FALSE;
     }
 
-    /* Options: walk the area properly and pick out the two this harness
-       asserts on, the MSS and RFC 7323 timestamps. */
+    /* Options: walk the area properly and pick out the four this harness
+       asserts on -- the MSS, RFC 7323 timestamps, the RFC 7323 window scale
+       and RFC 2018 SACK-Permitted.
+       THE WALK STOPS AT AN END-OF-OPTION-LIST, which is what a conforming peer
+       does and is the whole reason the window scale option's own padding byte
+       matters: an option emitted after an EOL is not on the wire as far as
+       anything that parses properly is concerned.  wscale.drill x01 is that
+       case. */
     {
         const UBYTE *o   = tcp + 20;
         const UBYTE *end = tcp + thl;
@@ -628,6 +697,25 @@ static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
                 break;
             if (*o == 2 && o[1] == 4 && o + 4 <= end)
                 s->mss = (LONG)rd16(&o[2]);
+            if (*o == 3 && o[1] == 3 && o + 3 <= end)
+                s->wscale = (LONG)o[2];
+            if (*o == 4 && o[1] == 2)
+                s->sackok = TRUE;
+            if (*o == 5 && o[1] >= 10 && o + o[1] <= end)
+            {
+                UWORD n = (UWORD)((o[1] - 2) / 8);
+                UWORD b;
+
+                s->has_sack = TRUE;
+                if (n > 4)
+                    n = 4;
+                s->n_sack = n;
+                for (b = 0; b < n; b++)
+                {
+                    s->sack_lo[b] = rd32(&o[2 + (b * 8)]);
+                    s->sack_hi[b] = rd32(&o[6 + (b * 8)]);
+                }
+            }
             if (*o == 8 && o[1] == 10 && o + 10 <= end)
             {
                 s->ts    = TRUE;
@@ -687,6 +775,18 @@ typedef struct Case
     ULONG   line;
     LONG    send_rc;            /* what the last send() returned */
     ULONG   wire_bytes;         /* tx payload accepted since that send */
+    /*
+     * The receive buffer, read off the wire rather than configured: the window
+     * field of the first non-SYN frame the stack sends, shifted back up.  RFC
+     * 7323 2.2, the scale applies only when BOTH SYNs carried the option, so a
+     * case whose injected SYN-ACK offers none learns the 65535 the stack
+     * correctly falls back to.  $rwnd.
+     */
+    LONG    rwnd;
+    LONG    our_wscale;         /* shift our SYN offered, -1 if none   */
+    LONG    peer_wscale;        /* shift an injected SYN offered, -1   */
+    BOOL    peer_sackok;        /* an injected SYN offered SACK        */
+    BOOL    peer_ts;            /* an injected frame carried a timestamp */
 } Case;
 
 static Case cs;
@@ -843,9 +943,13 @@ typedef struct Inject
     BOOL    ts;                 /* carry an RFC 7323 timestamps option */
     ULONG   tsval;
     ULONG   tsecr;
+    LONG    wscale;             /* RFC 7323 window scale, -1 for none  */
+    BOOL    sackok;             /* RFC 2018 SACK-Permitted             */
     LONG    corrupt;            /* payload byte to flip after the checksum */
     ULONG   pad;                /* Ethernet padding past the datagram      */
     BOOL    unaligned;          /* hand the device an odd buffer           */
+    BOOL    badopt;             /* an MSS option whose length byte says 3  */
+    LONG    dst;                /* DST_UNICAST and the three below         */
 } Inject;
 
 /*
@@ -863,16 +967,41 @@ static VOID build_and_inject(const Inject *in)
     UBYTE *f   = ((UBYTE *)f_aligned) + (in->unaligned ? 0 : 2);
     UBYTE *ip  = &f[ETH_HDR];
     UBYTE *tcp;
-    UWORD  opt = (UWORD)(((in->mss >= 0) ? 4 : 0) + (in->ts ? 12 : 0));
+    UWORD  opt = (UWORD)(((in->mss >= 0) ? 4 : 0) + ((in->wscale >= 0) ? 4 : 0) +
+                         (in->sackok ? 4 : 0) + (in->ts ? 12 : 0));
     UWORD  thl = (UWORD)(20 + opt);
     ULONG  i;
     ULONG  iplen;
+    ULONG  dst_ip = LOCAL_IP;
 
     zero((UBYTE *)f_aligned, (ULONG)sizeof(f_aligned));
 
     cp(&f[0], local_mac, 6);
     cp(&f[6], peer_mac, 6);
     wr16(&f[12], ETYPE_IP);
+
+    /*
+     * A broadcast IP destination has to arrive in a broadcast Ethernet frame,
+     * or the stack sees a unicast frame that merely claims one and the case
+     * tests the wrong thing.  RFC 1122 4.2.3.10 MUST-57 is about the segment
+     * the wire actually delivered to everybody.
+     */
+    if (in->dst == DST_BCAST)
+    {
+        dst_ip = 0xFFFFFFFFUL;
+        f[0] = f[1] = f[2] = f[3] = f[4] = f[5] = 0xFF;
+    }
+    else if (in->dst == DST_SUBNET)
+    {
+        dst_ip = (LOCAL_IP | 0x000000FFUL);
+        f[0] = f[1] = f[2] = f[3] = f[4] = f[5] = 0xFF;
+    }
+    else if (in->dst == DST_MCAST)
+    {
+        dst_ip = 0xE0000001UL;
+        f[0] = 0x01; f[1] = 0x00; f[2] = 0x5E;
+        f[3] = 0x00; f[4] = 0x00; f[5] = 0x01;
+    }
 
     tcp   = ip + 20;
     iplen = 20UL + thl + in->dlen;
@@ -885,7 +1014,7 @@ static VOID build_and_inject(const Inject *in)
     ip[8] = 64;
     ip[9] = 6;
     wr32(&ip[12], PEER_IP);
-    wr32(&ip[16], LOCAL_IP);
+    wr32(&ip[16], dst_ip);
     wr16(&ip[10], ones_sum(ip, 20, 0));
 
     wr16(&tcp[0], cs.peer_port);
@@ -903,8 +1032,33 @@ static VOID build_and_inject(const Inject *in)
         if (in->mss >= 0)
         {
             tcp[at]     = 2;
-            tcp[at + 1] = 4;
+            /* `badopt=1`: the MSS option's length byte says 3, which is not
+               its length.  A walk that trusts it steps into the middle of the
+               next option and off the end of the area. */
+            tcp[at + 1] = in->badopt ? 3 : 4;
             wr16(&tcp[at + 2], (UWORD)in->mss);
+            at = (UWORD)(at + 4);
+        }
+
+        /* NOP, kind 3, length 3, shift.  The pad goes in FRONT: a zero behind
+           a three-byte option is an end-of-option-list and everything after it
+           is off the wire. */
+        if (in->wscale >= 0)
+        {
+            tcp[at]     = 1;
+            tcp[at + 1] = 3;
+            tcp[at + 2] = 3;
+            tcp[at + 3] = (UBYTE)in->wscale;
+            at = (UWORD)(at + 4);
+        }
+
+        /* kind 4, length 2, NOP, NOP. */
+        if (in->sackok)
+        {
+            tcp[at]     = 4;
+            tcp[at + 1] = 2;
+            tcp[at + 2] = 1;
+            tcp[at + 3] = 1;
             at = (UWORD)(at + 4);
         }
 
@@ -986,15 +1140,100 @@ static BOOL streq(const char *a, const char *b)
     return (*a == '\0' && *b == '\0') ? TRUE : FALSE;
 }
 
+/*
+ * Numbers a script does not have to know.
+ *
+ * The advertised window is not a constant of the protocol: it comes from
+ * BSD_TCP_WINDOW and BSD_TCP_WINDOW_CEILING, which the build sets, and above
+ * 65535 it is carried scaled.  A script that spells the number out is a
+ * snapshot of one build's configuration and fails on the next, which is what
+ * `winmax=33580` and `win=32120` were.
+ *
+ * $winfloor / $wincap / $synwin come from the same header the library compiles
+ * against, via tests/tcpdrill/CMakeLists.txt.  $rwnd is measured instead: it is
+ * the receive buffer read back off the wire, so it needs no configuration at
+ * all and is right even when the pool budget, not the ceiling, is what bounded
+ * the window.  $i is the iteration inside a `repeat`.
+ */
+static LONG cur_iter;
+
+static BOOL is_word(char c)
+{
+    return (((c >= 'a') && (c <= 'z')) || ((c >= 'A') && (c <= 'Z')) ||
+            ((c >= '0') && (c <= '9')) || (c == '_')) ? TRUE : FALSE;
+}
+
+static BOOL var_value(const char *name, LONG *out)
+{
+    if (streq(name, "i"))        { *out = cur_iter;                    return TRUE; }
+    if (streq(name, "winfloor")) { *out = (LONG)DRILL_TCP_WINDOW;      return TRUE; }
+    if (streq(name, "wincap"))   { *out = (LONG)DRILL_TCP_WINDOW_CEILING; return TRUE; }
+    if (streq(name, "synwin"))
+    {
+        /* RFC 7323 2.2: the window field of a SYN is never scaled, so 65535 is
+           the most one can carry however large the local buffer is. */
+        *out = ((LONG)DRILL_TCP_WINDOW_CEILING > 65535L)
+                   ? 65535L : (LONG)DRILL_TCP_WINDOW_CEILING;
+        return TRUE;
+    }
+    if (streq(name, "rwnd"))     { *out = cs.rwnd;                     return TRUE; }
+    return FALSE;
+}
+
+static LONG parse_operand(const char **pp)
+{
+    const char *s = *pp;
+    LONG        v = 0;
+
+    if (*s == '$')
+    {
+        char  name[24];
+        ULONG n = 0;
+
+        s++;
+        while (is_word(*s) && (n + 1 < sizeof(name)))
+            name[n++] = *s++;
+        name[n] = '\0';
+
+        if (!var_value(name, &v))
+            say("!! unknown variable $%s", name);
+    }
+    else
+    {
+        BOOL neg = FALSE;
+
+        if (*s == '-') { neg = TRUE; s++; }
+        while (*s >= '0' && *s <= '9')
+            v = v * 10 + (*s++ - '0');
+        if (neg)
+            v = -v;
+    }
+
+    *pp = s;
+    return v;
+}
+
+/* Left to right, no precedence.  `$rwnd/2/1460+2` says what it reads as, and
+   the alternative is a script whose arithmetic has to be worked out. */
 static LONG to_num(const char *s)
 {
-    LONG v    = 0;
-    BOOL neg  = FALSE;
+    LONG v = parse_operand(&s);
 
-    if (*s == '-') { neg = TRUE; s++; }
-    while (*s >= '0' && *s <= '9')
-        v = v * 10 + (*s++ - '0');
-    return neg ? -v : v;
+    while ((*s == '+') || (*s == '-') || (*s == '*') || (*s == '/'))
+    {
+        char op = *s++;
+        LONG r  = parse_operand(&s);
+
+        if (op == '+')
+            v += r;
+        else if (op == '-')
+            v -= r;
+        else if (op == '*')
+            v *= r;
+        else if (r != 0)
+            v /= r;
+    }
+    return v;
 }
 
 /* --------------------------------------------------- expectation records -- */
@@ -1013,6 +1252,13 @@ typedef struct Expect
     BOOL    have_ts;    LONG ts;
     BOOL    have_tsval; LONG tsval;
     BOOL    have_tsecr; LONG tsecr;
+    BOOL    have_wsok;  LONG wsok;
+    BOOL    have_wscale; LONG wscale;
+    BOOL    have_sackok; LONG sackok;
+    BOOL    have_sack;  UWORD n_sack; LONG sack_lo[4]; LONG sack_hi[4];
+    BOOL    have_hdrlen; LONG hdrlen; BOOL hdrlen_auto;
+    BOOL    have_badopt; LONG badopt;
+    LONG    dst;                /* DST_* below */
     BOOL    have_within; LONG within;
     BOOL    have_after;  LONG after;
     BOOL    have_corrupt; LONG corrupt;
@@ -1084,11 +1330,72 @@ static const char *parse_keys(const char *p, Expect *e)
             else if (streq(key, "ts"))    { e->have_ts = TRUE;     e->ts = to_num(eq + 1); }
             else if (streq(key, "tsval")) { e->have_tsval = TRUE;  e->tsval = to_num(eq + 1); }
             else if (streq(key, "tsecr")) { e->have_tsecr = TRUE;  e->tsecr = to_num(eq + 1); }
+            else if (streq(key, "wsok"))  { e->have_wsok = TRUE;   e->wsok = to_num(eq + 1); }
+            else if (streq(key, "wscale")){ e->have_wscale = TRUE; e->wscale = to_num(eq + 1); }
+            else if (streq(key, "sackok")){ e->have_sackok = TRUE; e->sackok = to_num(eq + 1); }
+            else if (streq(key, "sack"))
+            {
+                /* `sack=-` is no option at all; otherwise lo:hi pairs, comma
+                   separated, in the offsets `ack=` counts in. */
+                const char *v = eq + 1;
+
+                e->have_sack = TRUE;
+                e->n_sack    = 0;
+                while ((*v != '\0') && (*v != '-') && (e->n_sack < 4))
+                {
+                    e->sack_lo[e->n_sack] = to_num(v);
+                    while ((*v != '\0') && (*v != ':')) v++;
+                    if (*v == ':') v++;
+                    e->sack_hi[e->n_sack] = to_num(v);
+                    e->n_sack++;
+                    while ((*v != '\0') && (*v != ',')) v++;
+                    if (*v == ',') v++;
+                }
+            }
+            else if (streq(key, "hdrlen"))
+            {
+                e->have_hdrlen = TRUE;
+                /* `auto`: the data offset must account for exactly the options
+                   this line names and nothing else, which is the assertion
+                   worth making and the one that does not go stale when the
+                   build gains an option. */
+                if (streq(eq + 1, "auto"))
+                    e->hdrlen_auto = TRUE;
+                else
+                    e->hdrlen = to_num(eq + 1);
+            }
             else if (streq(key, "within")){ e->have_within = TRUE; e->within = to_num(eq + 1); }
             else if (streq(key, "after")) { e->have_after = TRUE;  e->after = to_num(eq + 1); }
             else if (streq(key, "corrupt")) { e->have_corrupt = TRUE; e->corrupt = to_num(eq + 1); }
             else if (streq(key, "pad"))   { e->have_pad = TRUE;   e->pad = to_num(eq + 1); }
             else if (streq(key, "unaligned")) { e->have_unaligned = (to_num(eq + 1) != 0) ? TRUE : FALSE; }
+            else if (streq(key, "badopt")) { e->have_badopt = TRUE; e->badopt = to_num(eq + 1); }
+            else if (streq(key, "dst"))
+            {
+                const char *v = eq + 1;
+
+                if (streq(v, "bcast"))       e->dst = DST_BCAST;
+                else if (streq(v, "subnet")) e->dst = DST_SUBNET;
+                else if (streq(v, "mcast"))  e->dst = DST_MCAST;
+                else
+                {
+                    say("!! unknown dst=%s", v);
+                    n_fail++;
+                }
+            }
+            else
+            {
+                /*
+                 * A key nobody reads is an assertion that does not run, and it
+                 * reads as a pass.  sack.drill and dsack.drill spent their
+                 * whole lives asserting `sack=` and `hdrlen=` at a parser that
+                 * dropped both on the floor: 41 lines of block expectations
+                 * between them, none of them checked, and a stack that emitted
+                 * no option at all would have passed every one.  Count it.
+                 */
+                say("!! unknown key %s=", key);
+                n_fail++;
+            }
         }
         p = next;
     }
@@ -1165,6 +1472,29 @@ static VOID describe(const Seg *s, char *out, ULONG max)
         t = " ecr="; while (*t != '\0') *o++ = *t++;
         fmt_num(&o, s->tsecr, 10, 0, FALSE);
     }
+    if (s->wscale >= 0)
+    {
+        const char *t = " wscale="; while (*t != '\0') *o++ = *t++;
+        fmt_num(&o, (ULONG)s->wscale, 10, 0, FALSE);
+    }
+    if (s->sackok)
+    {
+        const char *t = " sackOK"; while (*t != '\0') *o++ = *t++;
+    }
+    if (s->has_sack)
+    {
+        const char *t = " sack="; UWORD b;
+
+        while (*t != '\0') *o++ = *t++;
+        for (b = 0; b < s->n_sack; b++)
+        {
+            if (b != 0)
+                *o++ = ',';
+            fmt_num(&o, s->sack_lo[b] - cs.p_isn, 10, 0, FALSE);
+            *o++ = ':';
+            fmt_num(&o, s->sack_hi[b] - cs.p_isn, 10, 0, FALSE);
+        }
+    }
     if ((s->flags & TF_URG) != 0)
     {
         const char *t = " urg="; while (*t != '\0') *o++ = *t++;
@@ -1203,6 +1533,7 @@ static VOID do_tx(const char *args, const char *raw)
     Expect  e;
     Seg     got;
     ULONG   limit;
+    LONG    win_full = 0;
     char    desc[280];
     char    why[280];
     char   *w;
@@ -1236,6 +1567,33 @@ static VOID do_tx(const char *args, const char *raw)
     }
     if (cs.local_port == 0)
         cs.local_port = got.src_port;
+
+    /*
+     * The window, unscaled.  Our SYN names the shift; every later frame
+     * carries the window in units of it, and only when the peer's SYN offered
+     * the option as well (RFC 7323 2.2), which is what makes a case with a
+     * plain SYN-ACK read back the 65535 the stack correctly falls back to.
+     *
+     * $rwnd is RCV.BUFF and is latched from the first frame after the
+     * handshake, where nothing has been received yet and the window is the
+     * whole buffer.  win_full is this frame's window, which shrinks as data
+     * arrives; the two are the same thing only on that first frame.
+     */
+    if ((got.flags & TF_SYN) != 0)
+    {
+        if (got.wscale >= 0)
+            cs.our_wscale = got.wscale;
+        win_full = (LONG)got.win;
+    }
+    else
+    {
+        LONG shift = ((cs.our_wscale >= 0) && (cs.peer_wscale >= 0))
+                         ? cs.our_wscale : 0;
+
+        win_full = (LONG)((ULONG)got.win << shift);
+        if (cs.rwnd == 0)
+            cs.rwnd = win_full;
+    }
 
     describe(&got, desc, sizeof(desc));
     w = why;
@@ -1281,12 +1639,21 @@ static VOID do_tx(const char *args, const char *raw)
     if (e.have_ack)
         CHECK(got.ack == cs.p_isn + (ULONG)e.ack, "ack",
               e.ack, (LONG)(got.ack - cs.p_isn));
+    /*
+     * win/winmin/winmax are the receiver's window, not the sixteen bits that
+     * carry it: cs.rwnd above has already shifted the field back up by the
+     * scale the two SYNs settled on.  A script says what the receiver has room
+     * for and does not have to know whether the connection negotiated a shift.
+     * On a SYN the shift is zero by definition (RFC 7323 2.2), so nothing
+     * changes there.  Exact only while the shift divides the segment size,
+     * which holds for every window this pool can produce.
+     */
     if (e.have_win)
-        CHECK((LONG)got.win == e.win, "win", e.win, got.win);
+        CHECK(win_full == e.win, "win", e.win, win_full);
     if (e.have_winmin)
-        CHECK((LONG)got.win >= e.winmin, "win below minimum", e.winmin, got.win);
+        CHECK(win_full >= e.winmin, "win below minimum", e.winmin, win_full);
     if (e.have_winmax)
-        CHECK((LONG)got.win <= e.winmax, "win above maximum", e.winmax, got.win);
+        CHECK(win_full <= e.winmax, "win above maximum", e.winmax, win_full);
     if (e.have_len)
         CHECK((LONG)got.dlen == e.len, "len", e.len, got.dlen);
     if (e.have_urg)
@@ -1301,6 +1668,74 @@ static VOID do_tx(const char *args, const char *raw)
     if (e.have_tsecr)
         CHECK(got.ts && ((LONG)got.tsecr == e.tsecr), "TSecr",
               e.tsecr, got.ts ? (LONG)got.tsecr : -1);
+    if (e.have_wsok)
+        CHECK((LONG)((got.wscale >= 0) ? 1 : 0) == e.wsok,
+              "window scale option present", e.wsok, (got.wscale >= 0) ? 1 : 0);
+    if (e.have_wscale)
+        CHECK(got.wscale == e.wscale, "window scale shift",
+              e.wscale, got.wscale);
+    if (e.have_sackok)
+        CHECK((LONG)(got.sackok ? 1 : 0) == e.sackok, "SACK-Permitted present",
+              e.sackok, got.sackok ? 1 : 0);
+    if (e.have_sack)
+    {
+        UWORD b;
+
+        CHECK((LONG)got.n_sack == (LONG)e.n_sack, "SACK blocks",
+              e.n_sack, got.n_sack);
+        for (b = 0; b < e.n_sack; b++)
+        {
+            CHECK(got.sack_lo[b] == cs.p_isn + (ULONG)e.sack_lo[b],
+                  "SACK block start", e.sack_lo[b],
+                  (LONG)(got.sack_lo[b] - cs.p_isn));
+            CHECK(got.sack_hi[b] == cs.p_isn + (ULONG)e.sack_hi[b],
+                  "SACK block end", e.sack_hi[b],
+                  (LONG)(got.sack_hi[b] - cs.p_isn));
+        }
+    }
+    if (e.have_hdrlen)
+    {
+        LONG want = e.hdrlen;
+
+        if (e.hdrlen_auto)
+        {
+            /*
+             * The option area the build and the negotiation together imply,
+             * laid out the way _nx_tcp_packet_send_syn and
+             * _nx_tcp_sack_option_build lay it out.  A SYN carries the MSS
+             * word and a second option word whatever goes in it, padding
+             * included, and a third only when the window scale has taken the
+             * second and SACK-Permitted still needs a home.  Twelve for the
+             * timestamp, 4 + 8n for n SACK blocks.
+             *
+             * A SYN-ACK offers only what the peer's SYN offered, RFC 2018
+             * section 2 and RFC 7323 2.2/5.2, so what the harness injected is
+             * half of every term.
+             */
+            BOOL syn = ((e.flags & TF_SYN) != 0) ? TRUE : FALSE;
+            BOOL sa  = (syn && ((e.flags & TF_ACK) != 0)) ? TRUE : FALSE;
+            BOOL ws  = (DRILL_HAS_WSCALE && (!sa || (cs.peer_wscale >= 0)))
+                           ? TRUE : FALSE;
+            BOOL sk  = (DRILL_HAS_SACK && (!sa || cs.peer_sackok))
+                           ? TRUE : FALSE;
+            BOOL ts  = (DRILL_HAS_TS && ((syn && !sa) || cs.peer_ts))
+                           ? TRUE : FALSE;
+
+            want = 20;
+            if (syn)
+            {
+                want += 8;
+                if (ws && sk)
+                    want += 4;
+            }
+            if (ts)
+                want += 12;
+            if (e.have_sack && (e.n_sack != 0))
+                want += 4 + (LONG)(e.n_sack * 8);
+        }
+        CHECK((LONG)(got.doff * 4) == want, "data offset, bytes",
+              want, got.doff * 4);
+    }
 
     CHECK(got.tcp_ok, "TCP checksum (0 = valid)", 0, 1);
     CHECK(got.ip_ok,  "IP checksum (0 = valid)", 0, 1);
@@ -1401,11 +1836,29 @@ static VOID do_rx(const char *args, const char *raw)
     in.win   = (UWORD)(e.have_win ? e.win : 8192);
     in.urg   = (UWORD)(e.have_urg ? e.urg : 0);
     in.dlen  = (ULONG)(e.have_len ? e.len : 0);
-    in.mss   = e.have_mss ? e.mss : -1;
+    in.badopt = (e.have_badopt && (e.badopt != 0)) ? TRUE : FALSE;
+    in.dst    = e.dst;
+    /* `badopt=1` IS the option: the lines that use it name no mss=, so one is
+       supplied to carry the length byte that is the point of the case. */
+    in.mss   = e.have_mss ? e.mss : (in.badopt ? 1460 : -1);
     in.ts    = (e.have_tsval || e.have_tsecr || (e.have_ts && e.ts != 0)) ? TRUE : FALSE;
     in.tsval = (ULONG)(e.have_tsval ? e.tsval : 0);
     in.tsecr = (ULONG)(e.have_tsecr ? e.tsecr : 0);
+    in.wscale = e.have_wscale ? e.wscale : -1;
+    in.sackok = (e.have_sackok && (e.sackok != 0)) ? TRUE : FALSE;
     in.corrupt   = e.have_corrupt ? e.corrupt : -1;
+
+    /* What the peer offered is half of every negotiated option, and of the
+       header length `hdrlen=auto` expects. */
+    if ((in.flags & TF_SYN) != 0)
+    {
+        if (in.wscale >= 0)
+            cs.peer_wscale = in.wscale;
+        if (in.sackok)
+            cs.peer_sackok = TRUE;
+        if (in.ts)
+            cs.peer_ts = TRUE;
+    }
     in.pad       = (ULONG)(e.have_pad ? e.pad : 0);
     in.unaligned = e.have_unaligned;
 
@@ -2099,12 +2552,63 @@ static VOID case_begin(const char *name)
        cannot be mistaken for a live one. */
     cs.p_isn      = 0x50000000UL + (n_cases * 0x00010000UL);
     cs.t_last     = tap_eclock_now();
+    cs.our_wscale  = -1;
+    cs.peer_wscale = -1;
 
     n_cases++;
     say("---- %s", cs.name);
 }
 
 /* ------------------------------------------------------------------- run -- */
+
+/*
+ * `repeat N` ... `end`.
+ *
+ * Thirteen segments in and thirteen reads out is a shape, not thirteen facts,
+ * and how many of them there are is a function of the receive buffer -- which
+ * the build sets.  Writing the lines out once made rwndupdate.drill s03 a
+ * transcript of one configuration.  With a count that may be an expression the
+ * case says the shape and the harness counts, so `repeat $rwnd/2/1460+2`
+ * is thirteen segments on the shipping window and thirty-five on a bigger one
+ * without the script changing.
+ *
+ * $i is the iteration, from zero, which is what lets the body name a sequence
+ * number.  No nesting: one level says everything these scripts need to say.
+ */
+#define REPEAT_MAX_LINES    12
+
+static char  rep_body[REPEAT_MAX_LINES][160];
+static UWORD rep_n;
+static BOOL  rep_collecting;
+static LONG  rep_count;
+
+static VOID run_line(char *line);
+
+static VOID repeat_run(VOID)
+{
+    LONG  n = rep_count;
+    UWORD i;
+
+    rep_collecting = FALSE;
+
+    for (cur_iter = 0; cur_iter < n; cur_iter++)
+    {
+        for (i = 0; i < rep_n; i++)
+        {
+            char scratch_line[160];
+            ULONG k;
+
+            for (k = 0; k + 1 < sizeof(scratch_line) &&
+                        rep_body[i][k] != '\0'; k++)
+                scratch_line[k] = rep_body[i][k];
+            scratch_line[k] = '\0';
+
+            run_line(scratch_line);
+        }
+    }
+    cur_iter = 0;
+    rep_n    = 0;
+}
 
 static VOID run_line(char *line)
 {
@@ -2181,6 +2685,23 @@ static VOID run_line(char *line)
     else if (streq(verb, "txcount")) do_txcount(args, raw);
     else if (streq(verb, "wirebytes")) do_wirebytes(args, raw);
     else if (streq(verb, "rx"))       do_rx(args, raw);
+    else if (streq(verb, "repeat"))
+    {
+        char tok[32];
+
+        (VOID)token(args, tok, sizeof(tok));
+        if (rep_collecting)
+        {
+            say("!! nested `repeat`: %s", raw);
+            return;
+        }
+        rep_count      = to_num(tok);
+        rep_n          = 0;
+        rep_collecting = TRUE;
+        say("  -- repeat %d", rep_count);
+    }
+    else if (streq(verb, "end"))
+        say("!! `end` without `repeat`: %s", raw);
     else
         say("!! unknown directive: %s", raw);
 }
@@ -2204,10 +2725,44 @@ static LONG run_script(const char *path)
         while (n != 0 && (line[n - 1] == '\n' || line[n - 1] == '\r'))
             line[--n] = '\0';
 
+        if (rep_collecting)
+        {
+            char verb[24];
+
+            (VOID)token(line, verb, sizeof(verb));
+
+            if (streq(verb, "end"))
+            {
+                repeat_run();
+                continue;
+            }
+            if (verb[0] == '\0' || verb[0] == '#')
+                continue;
+            if (rep_n >= REPEAT_MAX_LINES)
+            {
+                say("!! `repeat` body over %d lines: %s", REPEAT_MAX_LINES,
+                    line);
+                continue;
+            }
+            for (n = 0; n + 1 < sizeof(rep_body[0]) && line[n] != '\0'; n++)
+                rep_body[rep_n][n] = line[n];
+            rep_body[rep_n][n] = '\0';
+            rep_n++;
+            continue;
+        }
+
         run_line(line);
     }
 
     Close(fh);
+
+    if (rep_collecting)
+    {
+        say("!! `repeat` with no `end`, %u line(s) never ran", rep_n);
+        n_fail++;
+        rep_collecting = FALSE;
+    }
+
     case_end();
     return 0;
 }

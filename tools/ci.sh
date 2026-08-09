@@ -87,12 +87,13 @@ CROSS_CONFIGS=(
     # here and not there.
     "nomcast:-DAMINETXDUO_MULTICAST=OFF"
     "noasm:-DAMINETXDUO_CRYPTO68K_ASM=OFF"
-    # The two TCP option flags that change the layout of NX_TCP_SOCKET and are
-    # in no arm above.  SACK=OFF did not compile at all until it was built
-    # here, and with timestamps on by default this pair is also the only place
-    # each of them is compiled without the other.
+    # The three TCP option flags that change the layout of NX_TCP_SOCKET and
+    # are in no arm above.  SACK=OFF did not compile at all until it was built
+    # here, and with all three on by default these arms are also the only place
+    # each of them is compiled without the others.
     "nosack:-DAMINETXDUO_TCP_SACK=OFF"
     "nots:-DAMINETXDUO_TCP_TIMESTAMP=OFF"
+    "nowscale:-DAMINETXDUO_TCP_WINDOW_SCALING=OFF"
     "m68000:-DAMINETXDUO_CPU=68000"
     "m68040:-DAMINETXDUO_CPU=68040"
     "m68060:-DAMINETXDUO_CPU=68060"

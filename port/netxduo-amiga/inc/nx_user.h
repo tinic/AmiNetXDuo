@@ -317,42 +317,53 @@
 #define NX_ENABLE_TCP_MSS_CHECK
 
 /*
- * RFC 1323 / 7323 window scaling is off, on a measurement (docs/RESEARCH.md
- * 28.2).  Build with -DAMINETXDUO_TCP_WINDOW_SCALING=ON to turn it on; measured
- * on the A1200 profile over 524,288 bytes, three arms out of one tree, loopback
- * stayed at 351 KB/s (the traces agree segment for segment: 128 segments, the
- * same 25088 and 16725 advertised windows, 8192 bytes in flight against 8533,
- * 315838 vs 315873 bytes/s) and the wire was unchanged, because the peer never
- * holds more than 2880 bytes outstanding against the window it is already
- * offered (16.5).
+ * RFC 1323 / 7323 section 2, window scaling.
  *
- * That is structural.  The scale factor NetX Duo computes is the smallest shift
- * bringing the receive window under 65536 (nx_tcp_packet_send_syn.c:292).
- * ami_bsd_tcp_window() draws every window from one eighth of the packet pool,
- * and the pool tops out at AMI_POOL_MAX_PACKETS (256), so the largest window
- * any socket can be given is 256/8 * 1568 = 50,176 bytes, under 65,536, so
- * the negotiated scale is always zero.  With this on, `tcpdump -r` reads
- * `options [mss 1460,wscale 0,eol]`.
+ * It used to be off until SACK existed, or until a pool budget could offer one
+ * socket more than 64 KB.  AMINETXDUO_TCP_SACK has been on by default since the
+ * receive side landed, so the first is met; the second was measured and
+ * refused, and the note on BSD_TCP_WINDOW_POOL_SHARE has the table.  Our own
+ * receive window is 50,176 at most, so the exponent WE announce is zero.
  *
- * The option is free (the scale replaces the `nop,nop,nop,eol` padding in a
- * fixed eight-byte option area, so the SYN is 24 bytes either way and no other
- * segment carries options).  Not free: 12 bytes per NX_TCP_SOCKET and a shift
- * on every segment sent, retransmitted and acknowledged, for a factor that is
- * always zero.
+ * IT IS NOT INERT AT A ZERO EXPONENT.  The two directions scale independently
+ * (RFC 7323 2.2): announcing the option is what lets the PEER announce one,
+ * and what we may then have outstanding to it stops being capped at 65535.
+ * Against Linux the peer's SYN-ACK carries `wscale 7`, `ss -tim` on it settles
+ * at wscale:0,7, and the peer's own receive window reaches rcv_wnd:339200
+ * where the same rig with the option off is held to 65160.  What it buys is a
+ * cap removed, not a rate: nothing this stack currently does fills that
+ * window.
+ *
+ * MEASURED against the shipping library, A1200 bridged to a real peer, 1 MB, 2
+ * reps, 5 boots an arm, the arms interleaved
+ * (tests/perf/run-fitzbench.sh -a -B ens18 -H <peer> -m A1200 -k 1024 -r 2):
+ *
+ *              read KB/s                    write KB/s
+ *   off   391.2  394 388 390 393 391   410.0  412 414 407 412 405
+ *   on    392.6  394 393 390 395 391   410.4  415 403 410 413 411
+ *
+ * Neither moves outside its own spread, and the read -- the figure this rig
+ * compares on -- does not go backwards.  The inbound loss rate does not move
+ * either: see the table on BSD_TCP_WINDOW_POOL_SHARE, where the arm that does
+ * move it is a larger window and not this option.
+ *
+ * WHY THE CONDITIONS WERE THERE.  Pinning AMINETXDUO_TCP_WINDOW at 65536 with
+ * no SACK in the tree took the wire from 172 KB/s to 32 KB/s, with 15
+ * retransmitted segments and a nine-deep duplicate-ACK run: a burst loss
+ * inside a big window cost a full go-back-N, and the receiver had no way to
+ * say which segment was missing.  It does now.
+ *
+ * The option is not free: 12 bytes per NX_TCP_SOCKET and a shift on every
+ * segment sent, retransmitted and acknowledged.  On the SYN it takes a word
+ * that was padding, and pushes SACK-Permitted into a third -- see
+ * NX_TCP_RWIN_OPTION, whose own padding byte used to end the option list and
+ * take SACK-Permitted and the timestamp off the wire with it.
  *
  * It also removes a guard: nxe_tcp_socket_create.c:170 rejects a window above
- * 65535 with NX_OPTION_ERROR while this is off, and accepts anything under 2^30
- * while it is on.  Pinning AMINETXDUO_TCP_WINDOW at 65536, the smallest value
- * that makes the scale non-zero, and the arm that shows the mechanism works,
- * `wscale 1` in the SYN, took the wire from 172 KB/s to 32 KB/s, with 15
- * retransmitted segments and a nine-deep duplicate-ACK run where the shipped
- * configuration has neither.  There is no SACK in the vendored tree (16.7), so
- * a burst loss inside a big window costs a full go-back-N, and 24.3's pool
- * budget is what stops that happening.  With scaling off, that
- * misconfiguration fails at socket() instead of running five times slower.
+ * 65535 with NX_OPTION_ERROR while this is off and accepts anything under 2^30
+ * while it is on, which is why BSD_TCP_WINDOW_CEILING has an arm for each.
  *
- * This stays off until SACK exists, or a pool budget can offer one socket more
- * than 64 KB.
+ * Build with -DAMINETXDUO_TCP_WINDOW_SCALING=OFF to take it out.
  */
 #ifdef AMINETXDUO_TCP_WINDOW_SCALING
 #define NX_ENABLE_TCP_WINDOW_SCALING

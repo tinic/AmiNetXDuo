@@ -1,0 +1,103 @@
+# tcpdrill, the RFC 7323 window scale option.
+#
+# NEEDS A BUILD THAT HAS THE OPTION, which is the default.  Against a library
+# built with -DAMINETXDUO_TCP_WINDOW_SCALING=OFF the stack offers nothing and
+# x01 fails on its first line.
+#
+# WHY THIS FILE EXISTS.  The option is three bytes and the word carrying it is
+# four, and the constant that fills that word put the pad byte BEHIND the
+# option: kind 3, length 3, shift, zero.  A zero byte in a TCP option area is
+# an end-of-option-list, so every option the SYN appends after the window
+# scale -- SACK-Permitted, the timestamp -- sat past the end of the list.  They
+# were on the wire and no conforming parser could reach them.  Nothing failed:
+# the connection came up, the window scaled, and the two options the peer never
+# saw simply did not happen.
+#
+# x01 IS THAT CASE.  The harness decoder stops at an EOL exactly as a peer
+# does, so asserting the three options together on one SYN is the assertion,
+# and `hdrlen=auto` adds that the data offset accounts for those options and
+# nothing else -- an option area with room for something unreachable in it
+# fails here too.
+#
+# Conventions are tcp.drill's.  Two more:
+#   * `win`, `winmin` and `winmax` are the receiver's window with the scale
+#     already taken out, so a case says what the receiver has room for and not
+#     what fits in sixteen bits.
+#   * `$rwnd` is that window measured on the first frame after the handshake,
+#     which is RCV.BUFF: no case here contains a window the build chose.
+#
+# SPDX-License-Identifier: MIT
+
+# The layout, all of it at once.  RFC 7323 2.2 for the scale, RFC 2018 section
+# 2 for SACK-Permitted, RFC 7323 3.2 for the timestamp: a SYN this stack sends
+# offers all three, so all three have to be readable by something that walks
+# the option area properly.
+case x01_syn_carries_scale_sack_and_timestamps
+socket
+connect
+tx S seq=0 mss=1460 wsok=1 sackok=1 ts=1 hdrlen=auto
+
+# RFC 7323 2.2: the window in a SYN is never scaled, so what leaves is the
+# buffer capped at 65535 whatever the build's ceiling is.  $synwin is that cap.
+case x02_the_syn_window_is_unscaled
+socket
+connect
+tx S seq=0 winmin=$winfloor winmax=$synwin
+
+# RFC 7323 2.2: a SYN-ACK offers the scale only when the peer's SYN did.  This
+# peer offered all three, so all three come back.
+case x03_passive_open_repeats_the_offer
+localport 4741
+listen
+rx S seq=0 win=8192 mss=1460 wscale=2 sackok=1 tsval=1000
+tx SA seq=0 ack=1 mss=1460 wsok=1 sackok=1 ts=1 tsecr=1000 hdrlen=auto
+rx A seq=1 ack=1 tsval=1001
+accept
+
+# The same, from a peer that said nothing.  Offering a scale to a peer that did
+# not ask for one leaves the two ends reading the same sixteen bits
+# differently, which is the failure RFC 7323 2.2 is written to prevent.
+case x04_passive_open_silent_when_the_peer_was
+localport 4742
+listen
+rx S seq=0 win=8192 mss=1460
+tx SA seq=0 ack=1 mss=1460 wsok=0 sackok=0 ts=0 hdrlen=auto
+rx A seq=1 ack=1
+accept
+
+# RFC 7323 2.2 again: our SYN offered, the peer's SYN-ACK did not, so the
+# option is off in BOTH directions and the window has to fit the field.  A
+# stack that kept scaling here would advertise a window sixteen times what it
+# has.
+case x05_a_declining_peer_takes_our_scale_with_it
+socket
+connect
+tx S seq=0 wsok=1
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1 winmax=65535
+send 20
+tx PA seq=1 ack=1 len=20 winmax=65535
+
+# The window update, on a connection that DID settle a scale.  Same shape as
+# rwndupdate.drill s03 and the same derivation -- the step is RCV.BUFF/2 and
+# the test is `>=`, so $rwnd/2-1/1460 reads may be silent and the next must
+# carry the update -- with the whole exchange running in scaled units.  This is
+# the arithmetic a shift breaks if the window is announced in the wrong one.
+case x06_the_window_update_is_carried_scaled
+socket
+connect
+tx S seq=0 wsok=1
+rx SA seq=0 ack=1 win=32768 mss=1460 wscale=0
+tx A seq=1 ack=1
+repeat $rwnd/2-1/1460+2
+rx PA seq=$i*1460+1 ack=1 len=1460
+tx A seq=1 ack=$i*1460+1461 within=400
+end
+repeat $rwnd/2-1/1460
+recv 1460 = 1460
+end
+notx 300
+recv 1460 = 1460
+tx A seq=1 ack=$rwnd/2-1/1460*1460+2921 win=$rwnd-1460 within=900
+recv 1460 = 1460
+notx 300

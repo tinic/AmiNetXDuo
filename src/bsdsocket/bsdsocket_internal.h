@@ -302,55 +302,110 @@ typedef struct
 #define BSD_UDP_POOL_SHARE      4       /* 1/N of the pool per socket       */
 
 /*
- * Ceiling. 65535 is the architectural cap: NX_ENABLE_TCP_WINDOW_SCALING is not
- * defined here, so the window is whatever fits in the 16-bit header field and
- * nothing negotiates past it in either direction, not offering the option
- * also stops the peer scaling. Every byte of window is a byte of packet pool
- * somebody else cannot have, and the pool budget above bounds it in practice.
- *
- * 33580 is 23 whole segments at the Ethernet MSS, and it is what a 32 KB
- * payload behind a header needs to arrive in one round trip. 32768 is twelve
- * bytes short of that, so a 32,780-byte response could not complete in one
- * whatever else was true.
- *
- * An earlier sweep read 32768, 33580 and 48180 as flat and kept 32768. That
- * sweep ran with a congestion window of 12 segments, which bound the transfer
- * before the receive window did. SACK and D-SACK take it to 24 on a clean
- * link, which puts the receive window back in charge: over 512 exchanges of a
- * 32,780-byte response, 32768 -> 33580 moved round trips a chunk from 2.05 to
- * 1.18 and the read from 985 to 1714 KB/s clean, and from 2.32 to 1.94 and 835
- * to 963 KB/s under 1% injected loss. The wider window is more data exposed to
- * a single loss, which is why the loss arm is measured and not assumed; it
- * gains there too, on a receiver that recovers selectively.
- *
- * Nothing above this. 48180 measured no better and widens that exposure for
- * nothing.
- *
- * It pays only where the guest is fast enough for the round trip to have been
- * the cost. Verified across profiles afterwards, 2 boots an arm: 68020 moved
- * round trips a chunk 2.00 -> 1.02, the cleanest instance of the mechanism
- * measured, and the read did not move at all, because time per chunk stayed
- * ~77 ms in both arms and the remaining gap widened to absorb what was saved.
- * The peer went from 3-4% app-limited to 93-94%: at a 40 ms round trip the
- * 68020 was never waiting on the network. Same signature on 68000, app-limited
- * 2-4% -> 66-83%.
- *
- * On 68000 it costs a little: clean reads 179.2 -> 174.1 KB/s and 181.4 ->
- * 178.7 for the minimal build, reproducible across boots whose own spread is
- * under 1 KB/s. Under loss that profile is indifferent. A couple of percent on
- * a CPU-bound machine against +74% on an 030 is the trade being made, and it
- * is deliberate.
- */
-#ifndef BSD_TCP_WINDOW_CEILING
-#define BSD_TCP_WINDOW_CEILING  33580
-#endif
-
-/*
  * One in this many pool packets is the budget the whole stack's TCP receive
  * windows may claim ABOVE the floor. See ami_bsd_tcp_window().
+ *
+ * 8, AND A QUARTER WAS TRIED AND REFUSED. (AMI_POOL_MAX_PACKETS / share) *
+ * AMI_POOL_PAYLOAD is 50,176 at 8 and 100,352 at 4, so a quarter is what it
+ * takes to give one socket a window the 16-bit field cannot hold and make RFC
+ * 1323's scale exponent non-zero. It was built and measured, A1200 bridged to
+ * a real peer, 1 MB, 2 reps, 3 boots an arm, arms interleaved
+ * (tests/perf/run-fitzbench.sh -a -B ens18 -H <peer> -m A1200 -k 1024 -r 2 -w):
+ *
+ *   window   scaling  raw loss   effective loss        read KB/s
+ *   33580    off      0.927 %    0.000 0.000 0.000     392 391 393
+ *   50176    on       0.801 %    0.000 0.000 0.000     391 395 390
+ *   100352   on, s=1  1.176 %    0.252 0.294 0.169     392 396 393
+ *
+ * The read does not move at any window -- the peer reports app_limited on
+ * every one of 2604 `ss -tim` samples and rwnd_limited on none, so the receive
+ * window was never what bound the transfer -- and the quarter is the only arm
+ * where retransmissions stop being spurious and start filling real holes.
+ * 0.000 to 0.25 % effective loss on all three pairs, for no throughput, is the
+ * trade refused. docs/RESEARCH.md's own rule is that the retransmission rate
+ * is the number to gate on and the throughput is downstream of it.
+ *
+ * At an eighth ami_bsd_tcp_window() divides the budget by the live socket
+ * count as before, so a lone socket may claim an eighth of the pool, all
+ * sockets together never more than one budget, and above five sockets the
+ * BSD_TCP_WINDOW floor governs instead.
  */
 #ifndef BSD_TCP_WINDOW_POOL_SHARE
 #define BSD_TCP_WINDOW_POOL_SHARE   8
+#endif
+
+/*
+ * Ceiling, derived rather than chosen.
+ *
+ * The largest window the pool can ever produce is the budget at the pool's own
+ * maximum size, which is what this is: a lone socket on a machine with enough
+ * free memory to reach AMI_POOL_MAX_PACKETS. Anything below it caps a window
+ * the pool was willing to give; anything above it can never be reached. So it
+ * is not a free number and it is not a constant -- it moves with the pool
+ * sizing in include/aminetxduo/netstack.h and with the share above.
+ *
+ * 33580 used to be here: 23 whole segments at the Ethernet MSS, which is what
+ * a 32 KB payload behind a header needs to arrive in one round trip. 32768 is
+ * twelve bytes short of that, so a 32,780-byte response could not complete in
+ * one whatever else was true.
+ *
+ * WHAT THAT NUMBER WAS MEASURED ON, kept because it is a request/response
+ * workload and tests/perf/run-fitzbench.sh is a bulk one, and neither answers
+ * the other.
+ * An early sweep read 32768, 33580 and 48180 as flat and kept 32768, with a
+ * congestion window of 12 segments that bound the transfer before the receive
+ * window did. SACK and D-SACK take it to 24 on a clean link, which puts the
+ * receive window back in charge: over 512 exchanges of a 32,780-byte response,
+ * 32768 -> 33580 moved round trips a chunk from 2.05 to 1.18 and the read from
+ * 985 to 1714 KB/s clean, and from 2.32 to 1.94 and 835 to 963 KB/s under 1%
+ * injected loss. 48180 measured no better than 33580 and was refused for that.
+ *
+ * It pays only where the guest is fast enough for the round trip to have been
+ * the cost. Across profiles, 2 boots an arm: 68020 moved round trips a chunk
+ * 2.00 -> 1.02 and the read did not move at all, because time per chunk stayed
+ * ~77 ms in both arms and the remaining gap widened to absorb what was saved.
+ * The peer went from 3-4% app-limited to 93-94%: at a 40 ms round trip the
+ * 68020 was never waiting on the network. Same signature on 68000, app-limited
+ * 2-4% -> 66-83%. On 68000 it costs a little: clean reads 179.2 -> 174.1 KB/s
+ * and 181.4 -> 178.7 for the minimal build, spreads under 1 KB/s.
+ *
+ * So a number above 33580 has been refused once on that workload. It stopped
+ * being a ceiling the day the pool budget arrived, and became a second,
+ * unrelated bound that happened to be the tighter one on any machine with more
+ * than about 2.3 MB free. Derived, it is 50,176 at the share above, and that
+ * window is the middle row of the table there: raw loss and effective loss and
+ * read all indistinguishable from the 33580 it replaces.
+ *
+ * Every byte of window is a byte of packet pool somebody else cannot have, and
+ * this is the packet pool saying so in its own units.
+ *
+ * AMINETXDUO_TCP_WINDOW overrides both this and the floor, which is how a
+ * fixed window is measured against the derived one.
+ */
+#ifndef BSD_TCP_WINDOW_CEILING
+#ifdef AMINETXDUO_TCP_WINDOW_SCALING
+#define BSD_TCP_WINDOW_CEILING                                                \
+    (((ULONG)AMI_POOL_MAX_PACKETS / (ULONG)BSD_TCP_WINDOW_POOL_SHARE) *        \
+     (ULONG)AMI_POOL_PAYLOAD)
+#else
+/*
+ * WITHOUT THE OPTION THE FIELD IS THE CEILING. The window goes on the wire in
+ * sixteen bits and there is nothing to scale it by, so 65535 is not a policy
+ * here, it is the architecture -- and nxe_tcp_socket_create.c:170 enforces it,
+ * refusing a larger window with NX_OPTION_ERROR.
+ *
+ * That guard is why this arm exists. At the share above the budget is 50,176
+ * and fits the field on its own, so nothing reaches it today -- but it was
+ * reached: with the share at a quarter the budget is 100,352 on any machine
+ * with about 4.2 MB of free public memory, and a tree built with
+ * -DAMINETXDUO_TCP_WINDOW_SCALING=OFF and no ceiling of its own failed socket()
+ * for every TCP socket on the lab's own A1200 profile. tcp.drill w01 opened
+ * with "socket() failed" and "connect() failed, errno 9" and every case after
+ * it followed. The two arms are what stop the share and the option being able
+ * to disagree at all.
+ */
+#define BSD_TCP_WINDOW_CEILING  65535UL
+#endif
 #endif
 
 /* Room for one dotted quad plus terminator, used by Inet_NtoA(). */

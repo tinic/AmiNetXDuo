@@ -295,17 +295,17 @@ if(NOT AMINETXDUO_TCP_KEEPALIVE_INITIAL STREQUAL "")
         NX_TCP_KEEPALIVE_INITIAL=${AMINETXDUO_TCP_KEEPALIVE_INITIAL})
 endif()
 
-# RFC 1323 window scaling.  OFF, and measured rather than assumed, the note
-# in port/netxduo-amiga/inc/nx_user.h says what it changes (nothing this stack
-# can reach) and what it costs (NetX Duo's own guard against a window larger
-# than this machine can carry).  docs/RESEARCH.md 28.2.
+# RFC 1323 window scaling.  The note in port/netxduo-amiga/inc/nx_user.h says
+# what it needed before it could be turned on and what turning it on measured.
+#
+# Build with -DAMINETXDUO_TCP_WINDOW_SCALING=OFF to take it out.
 #
 # It is an option for the same reason AMINETXDUO_TCP_WINDOW above is: "what
 # does it cost and what does it buy?" is answerable only by building libraries
 # out of ONE tree that differ in this alone, and this is how those arms were
 # taken.  It changes the layout of NX_TCP_SOCKET, so it cannot be a per-target
 # define.
-option(AMINETXDUO_TCP_WINDOW_SCALING "Offer the RFC 1323 window scale option" OFF)
+option(AMINETXDUO_TCP_WINDOW_SCALING "Offer the RFC 1323 window scale option" ON)
 if(AMINETXDUO_TCP_WINDOW_SCALING)
     add_compile_definitions(AMINETXDUO_TCP_WINDOW_SCALING)
 endif()

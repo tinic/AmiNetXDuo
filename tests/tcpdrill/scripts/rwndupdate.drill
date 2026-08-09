@@ -56,54 +56,44 @@ tx A seq=1 ack=201 within=400
 recv 100 = 100
 notx 500
 
-# Thirteen segments in, all of them read, in the 4096-byte bites the harness
-# buffer allows.  Window credit moves at packet granularity, not bytes: a
-# packet is credited when the read consumes into it, so three reads release
-# nine packets, 13140 bytes of room, under half of the 33580-byte buffer, and
-# nothing may leave.  The fourth read releases three more, 17520, over the
-# threshold, and the update must come, repeating the acknowledgement number
-# the data ACKs already carried and advertising exactly the twelve released
-# packets.  The tail read leaves one packet of credit, under the threshold
-# again, and nothing may follow.  The case pins the boundary from both sides.
+# Half the buffer in, all of it read one segment at a time.  Window credit
+# moves at packet granularity, not bytes, so a read of exactly one MSS releases
+# exactly one packet and the count of reads before the update is the count of
+# packets that first exceeds RCV.BUFF/2.
+#
+# NOTHING HERE IS A NUMBER FROM ONE BUILD.  $rwnd is the receive buffer read
+# back off the wire -- the window on the ACK completing the handshake, above,
+# shifted back up by whatever scale the two SYNs settled on.  The step is
+# RCV.BUFF/2 and the test is `>=`, so the last read that may be silent is
+# $rwnd/2-1/1460 of them, evaluated left to right, and the one after it must
+# carry the update.  On the 33580 window this file was written against that is
+# 11 and 12 and the case runs thirteen segments; the SYN-ACK above offers no
+# window scale, so on a build whose buffer is larger the stack correctly falls
+# back to 65535 and the same lines run 22, 23 and twenty-four segments.  It
+# used to spell 18981 and 32120, both of which are 33580 with arithmetic done
+# to them.
+#
+# The update repeats the acknowledgement number the data ACKs already carried
+# and advertises the buffer less the one packet still held.  The tail read
+# releases that packet, one packet of credit, under the threshold again, and
+# nothing may follow: the case pins the boundary from both sides.
 case s03_reading_half_the_buffer_is_the_update
 socket
 connect
 tx S seq=0
 rx SA seq=0 ack=1 win=32768 mss=1460
 tx A seq=1 ack=1
-rx PA seq=1 ack=1 len=1460
-tx A seq=1 ack=1461 within=400
-rx PA seq=1461 ack=1 len=1460
-tx A seq=1 ack=2921 within=400
-rx PA seq=2921 ack=1 len=1460
-tx A seq=1 ack=4381 within=400
-rx PA seq=4381 ack=1 len=1460
-tx A seq=1 ack=5841 within=400
-rx PA seq=5841 ack=1 len=1460
-tx A seq=1 ack=7301 within=400
-rx PA seq=7301 ack=1 len=1460
-tx A seq=1 ack=8761 within=400
-rx PA seq=8761 ack=1 len=1460
-tx A seq=1 ack=10221 within=400
-rx PA seq=10221 ack=1 len=1460
-tx A seq=1 ack=11681 within=400
-rx PA seq=11681 ack=1 len=1460
-tx A seq=1 ack=13141 within=400
-rx PA seq=13141 ack=1 len=1460
-tx A seq=1 ack=14601 within=400
-rx PA seq=14601 ack=1 len=1460
-tx A seq=1 ack=16061 within=400
-rx PA seq=16061 ack=1 len=1460
-tx A seq=1 ack=17521 within=400
-rx PA seq=17521 ack=1 len=1460
-tx A seq=1 ack=18981 within=400
-recv 4096 = 4096
-recv 4096 = 4096
-recv 4096 = 4096
+repeat $rwnd/2-1/1460+2
+rx PA seq=$i*1460+1 ack=1 len=1460
+tx A seq=1 ack=$i*1460+1461 within=400
+end
+repeat $rwnd/2-1/1460
+recv 1460 = 1460
+end
 notx 300
-recv 4096 = 4096
-tx A seq=1 ack=18981 win=32120 within=900
-recv 2596 = 2596
+recv 1460 = 1460
+tx A seq=1 ack=$rwnd/2-1/1460*1460+2921 win=$rwnd-1460 within=900
+recv 1460 = 1460
 notx 300
 
 

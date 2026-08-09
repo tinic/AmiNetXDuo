@@ -108,15 +108,22 @@ recv 100 = 0
 
 # A RESET the acceptability test rejects outright is still dropped in silence
 # the challenge is for segments INSIDE the window, and a segment far past
-# the right edge must not draw one.  40000 is beyond the widest window w01
-# allows.
+# the right edge must not draw one.
+#
+# PAST THE RIGHT EDGE IS A DERIVED PLACE, not a number.  RCV.NXT is 1 here and
+# the window is $rwnd, read off the ACK above, so anything beyond $rwnd+1 is
+# outside it and $rwnd+10000 is clear of it by any margin.  This line used to
+# say 40001, chosen as "beyond the widest window w01 allows" when that was
+# 33580: on a build whose window is 50176 the segment is INSIDE the window,
+# RFC 5961 4 says to challenge it, the stack correctly sent the challenge ACK,
+# and the case failed on the constant rather than on the behaviour.
 case n07_out_of_window_rst_draws_nothing
 socket
 connect
 tx S seq=0
 rx SA seq=0 ack=1 win=8192 mss=1460
 tx A seq=1 ack=1
-rx R seq=40001
+rx R seq=$rwnd+10000
 notx 400
 send 10
 tx PA seq=1 ack=1 len=10 within=400
