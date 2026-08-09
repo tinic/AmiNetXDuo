@@ -1389,8 +1389,8 @@ static const char *parse_keys(const char *p, Expect *e)
                  * A key nobody reads is an assertion that does not run, and it
                  * reads as a pass.  sack.drill and dsack.drill spent their
                  * whole lives asserting `sack=` and `hdrlen=` at a parser that
-                 * dropped both on the floor: 200 lines of SACK block
-                 * expectations, none of them checked, and a stack that emitted
+                 * dropped both on the floor: 41 lines of block expectations
+                 * between them, none of them checked, and a stack that emitted
                  * no option at all would have passed every one.  Count it.
                  */
                 say("!! unknown key %s=", key);
