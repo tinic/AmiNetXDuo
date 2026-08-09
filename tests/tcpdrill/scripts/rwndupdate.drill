@@ -66,10 +66,12 @@ notx 500
 # shifted back up by whatever scale the two SYNs settled on.  The step is
 # RCV.BUFF/2 and the test is `>=`, so the last read that may be silent is
 # $rwnd/2-1/1460 of them, evaluated left to right, and the one after it must
-# carry the update.  On the shipping window that is 11 and 12, and the case
-# runs thirteen segments; on a 98304 window it is 33 and 34 and runs
-# thirty-five, with this file unchanged.  It used to spell 18981 and 32120,
-# both of which are 33580 with arithmetic done to them.
+# carry the update.  On the 33580 window this file was written against that is
+# 11 and 12 and the case runs thirteen segments; the SYN-ACK above offers no
+# window scale, so on a build whose buffer is larger the stack correctly falls
+# back to 65535 and the same lines run 22, 23 and twenty-four segments.  It
+# used to spell 18981 and 32120, both of which are 33580 with arithmetic done
+# to them.
 #
 # The update repeats the acknowledgement number the data ACKs already carried
 # and advertises the buffer less the one packet still held.  The tail read
