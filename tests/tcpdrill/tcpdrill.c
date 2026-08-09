@@ -529,6 +529,7 @@ typedef struct Seg
     UWORD   urg;
     ULONG   dlen;
     LONG    mss;                /* -1 when the option is absent */
+    UWORD   doff;               /* data offset, in words        */
     BOOL    ts;                 /* RFC 7323 timestamps present  */
     ULONG   tsval;
     ULONG   tsecr;
@@ -582,6 +583,7 @@ static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
 
     tcp = ip + ihl;
     thl = (UWORD)(((tcp[12] >> 4) & 0x0F) * 4);
+    s->doff = (UWORD)((tcp[12] >> 4) & 0x0F);
     if (thl < 20 || iplen < ihl + (ULONG)thl)
         return FALSE;
 
@@ -1151,6 +1153,10 @@ static VOID describe(const Seg *s, char *out, ULONG max)
     {
         const char *t = " mss="; while (*t != '\0') *o++ = *t++;
         fmt_num(&o, (ULONG)s->mss, 10, 0, FALSE);
+    }
+    {
+        const char *t = " doff="; while (*t != '\0') *o++ = *t++;
+        fmt_num(&o, s->doff, 10, 0, FALSE);
     }
     if (s->ts)
     {
