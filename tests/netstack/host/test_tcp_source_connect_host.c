@@ -110,6 +110,13 @@ VOID _tx_thread_interrupt_restore(UINT previous_posture)
     (void)previous_posture;
 }
 
+/* The SYN's timestamps option carries a clock reading.  Nothing here asserts on
+   the value, only on the source address the SYN went out with. */
+ULONG _tx_time_get(VOID)
+{
+    return 0;
+}
+
 /* NX_ASSERT parks the calling thread here; nothing below should trip one. */
 UINT _tx_thread_sleep(ULONG timer_ticks)
 {
