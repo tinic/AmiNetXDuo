@@ -330,9 +330,22 @@
  * and what we may then have outstanding to it stops being capped at 65535.
  * Against Linux the peer's SYN-ACK carries `wscale 7`, `ss -tim` on it settles
  * at wscale:0,7, and the peer's own receive window reaches rcv_wnd:339200
- * where the same rig with the option off is held to 65160.  Nothing this stack
- * currently does fills that -- the write arm moved 409.2 to 411.0 KB/s, inside
- * its own spread -- so what it buys is a cap removed and not a rate.
+ * where the same rig with the option off is held to 65160.  What it buys is a
+ * cap removed, not a rate: nothing this stack currently does fills that
+ * window.
+ *
+ * MEASURED against the shipping library, A1200 bridged to a real peer, 1 MB, 2
+ * reps, 5 boots an arm, the arms interleaved
+ * (tests/perf/run-fitzbench.sh -a -B ens18 -H <peer> -m A1200 -k 1024 -r 2):
+ *
+ *              read KB/s                    write KB/s
+ *   off   391.2  394 388 390 393 391   410.0  412 414 407 412 405
+ *   on    392.6  394 393 390 395 391   410.4  415 403 410 413 411
+ *
+ * Neither moves outside its own spread, and the read -- the figure this rig
+ * compares on -- does not go backwards.  The inbound loss rate does not move
+ * either: see the table on BSD_TCP_WINDOW_POOL_SHARE, where the arm that does
+ * move it is a larger window and not this option.
  *
  * WHY THE CONDITIONS WERE THERE.  Pinning AMINETXDUO_TCP_WINDOW at 65536 with
  * no SACK in the tree took the wire from 172 KB/s to 32 KB/s, with 15
