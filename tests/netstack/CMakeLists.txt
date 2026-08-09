@@ -67,6 +67,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_retransmit.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_fast_periodic_processing.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_connection_reset.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_timestamp_option_get.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_block_cleanup.c")
 
     # Built without IPv6 whatever the tree default is.  This links six TCP
@@ -178,6 +179,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_cleanup.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_packet_allocate.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_packet_release.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_timestamp_option_get.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_packet_transmit_release.c")
 
     target_compile_options(test_tcp_source_connect PRIVATE -UAMINETXDUO_IPV6)
@@ -208,6 +210,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_ack_check.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_retransmit.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_transmit_configure.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_timestamp_option_get.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_block_cleanup.c")
 
     target_compile_options(test_tcp_rtt PRIVATE -UAMINETXDUO_IPV6)

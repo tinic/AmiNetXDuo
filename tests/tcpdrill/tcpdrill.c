@@ -52,6 +52,12 @@
  *   urg=N   urgent pointer.
  *   mss=N   the MSS option must be present with this value (tx) or is sent
  *           with it (rx).
+ *   ts=1/0  the RFC 7323 timestamps option must be present or absent (tx), or
+ *           is sent with TSval 0 (rx).
+ *   tsval=N the peer's TSval, injected (rx).  Never assertable on tx: that
+ *           value is this stack's own clock.
+ *   tsecr=N the echo.  On tx it is what TS.Recent held, which is a TSval a
+ *           previous rx line chose, so a script can name it; on rx it is sent.
  *   within=MS / after=MS
  *           bounds on the gap between this frame and the previous event,
  *           measured from the E-Clock reading taken inside the device's
@@ -523,6 +529,10 @@ typedef struct Seg
     UWORD   urg;
     ULONG   dlen;
     LONG    mss;                /* -1 when the option is absent */
+    UWORD   doff;               /* data offset, in words        */
+    BOOL    ts;                 /* RFC 7323 timestamps present  */
+    ULONG   tsval;
+    ULONG   tsecr;
     BOOL    ip_ok;              /* IP header checksum verified  */
     BOOL    tcp_ok;             /* TCP checksum verified        */
 
@@ -573,6 +583,7 @@ static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
 
     tcp = ip + ihl;
     thl = (UWORD)(((tcp[12] >> 4) & 0x0F) * 4);
+    s->doff = (UWORD)((tcp[12] >> 4) & 0x0F);
     if (thl < 20 || iplen < ihl + (ULONG)thl)
         return FALSE;
 
@@ -602,7 +613,8 @@ static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
         s->tcp_ok = ((UWORD)(~sum) == 0) ? TRUE : FALSE;
     }
 
-    /* Options: MSS is the only one this stack emits, but walk properly. */
+    /* Options: walk the area properly and pick out the two this harness
+       asserts on, the MSS and RFC 7323 timestamps. */
     {
         const UBYTE *o   = tcp + 20;
         const UBYTE *end = tcp + thl;
@@ -616,6 +628,12 @@ static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
                 break;
             if (*o == 2 && o[1] == 4 && o + 4 <= end)
                 s->mss = (LONG)rd16(&o[2]);
+            if (*o == 8 && o[1] == 10 && o + 10 <= end)
+            {
+                s->ts    = TRUE;
+                s->tsval = rd32(&o[2]);
+                s->tsecr = rd32(&o[6]);
+            }
             o += o[1];
         }
     }
@@ -822,6 +840,9 @@ typedef struct Inject
     UWORD   urg;
     ULONG   dlen;
     LONG    mss;
+    BOOL    ts;                 /* carry an RFC 7323 timestamps option */
+    ULONG   tsval;
+    ULONG   tsecr;
     LONG    corrupt;            /* payload byte to flip after the checksum */
     ULONG   pad;                /* Ethernet padding past the datagram      */
     BOOL    unaligned;          /* hand the device an odd buffer           */
@@ -842,7 +863,7 @@ static VOID build_and_inject(const Inject *in)
     UBYTE *f   = ((UBYTE *)f_aligned) + (in->unaligned ? 0 : 2);
     UBYTE *ip  = &f[ETH_HDR];
     UBYTE *tcp;
-    UWORD  opt = (in->mss >= 0) ? 4 : 0;
+    UWORD  opt = (UWORD)(((in->mss >= 0) ? 4 : 0) + (in->ts ? 12 : 0));
     UWORD  thl = (UWORD)(20 + opt);
     ULONG  i;
     ULONG  iplen;
@@ -876,11 +897,28 @@ static VOID build_and_inject(const Inject *in)
     wr16(&tcp[14], in->win);
     wr16(&tcp[18], in->urg);
 
-    if (opt != 0)
     {
-        tcp[20] = 2;
-        tcp[21] = 4;
-        wr16(&tcp[22], (UWORD)in->mss);
+        UWORD at = 20;
+
+        if (in->mss >= 0)
+        {
+            tcp[at]     = 2;
+            tcp[at + 1] = 4;
+            wr16(&tcp[at + 2], (UWORD)in->mss);
+            at = (UWORD)(at + 4);
+        }
+
+        /* NOP, NOP, kind 8, length 10: the layout every stack sends, and the
+           one _nx_tcp_timestamp_option_add writes. */
+        if (in->ts)
+        {
+            tcp[at]     = 1;
+            tcp[at + 1] = 1;
+            tcp[at + 2] = 8;
+            tcp[at + 3] = 10;
+            wr32(&tcp[at + 4], in->tsval);
+            wr32(&tcp[at + 8], in->tsecr);
+        }
     }
 
     for (i = 0; i < in->dlen; i++)
@@ -972,6 +1010,9 @@ typedef struct Expect
     BOOL    have_len;   LONG len;
     BOOL    have_urg;   LONG urg;
     BOOL    have_mss;   LONG mss;
+    BOOL    have_ts;    LONG ts;
+    BOOL    have_tsval; LONG tsval;
+    BOOL    have_tsecr; LONG tsecr;
     BOOL    have_within; LONG within;
     BOOL    have_after;  LONG after;
     BOOL    have_corrupt; LONG corrupt;
@@ -1040,6 +1081,9 @@ static const char *parse_keys(const char *p, Expect *e)
             else if (streq(key, "len"))   { e->have_len = TRUE;    e->len = to_num(eq + 1); }
             else if (streq(key, "urg"))   { e->have_urg = TRUE;    e->urg = to_num(eq + 1); }
             else if (streq(key, "mss"))   { e->have_mss = TRUE;    e->mss = to_num(eq + 1); }
+            else if (streq(key, "ts"))    { e->have_ts = TRUE;     e->ts = to_num(eq + 1); }
+            else if (streq(key, "tsval")) { e->have_tsval = TRUE;  e->tsval = to_num(eq + 1); }
+            else if (streq(key, "tsecr")) { e->have_tsecr = TRUE;  e->tsecr = to_num(eq + 1); }
             else if (streq(key, "within")){ e->have_within = TRUE; e->within = to_num(eq + 1); }
             else if (streq(key, "after")) { e->have_after = TRUE;  e->after = to_num(eq + 1); }
             else if (streq(key, "corrupt")) { e->have_corrupt = TRUE; e->corrupt = to_num(eq + 1); }
@@ -1109,6 +1153,17 @@ static VOID describe(const Seg *s, char *out, ULONG max)
     {
         const char *t = " mss="; while (*t != '\0') *o++ = *t++;
         fmt_num(&o, (ULONG)s->mss, 10, 0, FALSE);
+    }
+    {
+        const char *t = " doff="; while (*t != '\0') *o++ = *t++;
+        fmt_num(&o, s->doff, 10, 0, FALSE);
+    }
+    if (s->ts)
+    {
+        const char *t = " ts="; while (*t != '\0') *o++ = *t++;
+        fmt_num(&o, s->tsval, 10, 0, FALSE);
+        t = " ecr="; while (*t != '\0') *o++ = *t++;
+        fmt_num(&o, s->tsecr, 10, 0, FALSE);
     }
     if ((s->flags & TF_URG) != 0)
     {
@@ -1238,6 +1293,14 @@ static VOID do_tx(const char *args, const char *raw)
         CHECK((LONG)got.urg == e.urg, "urgent pointer", e.urg, got.urg);
     if (e.have_mss)
         CHECK(got.mss == e.mss, "mss option", e.mss, got.mss);
+    if (e.have_ts)
+        CHECK((LONG)(got.ts ? 1 : 0) == e.ts, "timestamps option present",
+              e.ts, got.ts ? 1 : 0);
+    /* TSecr is the peer's own TSval coming back, so a script may name it; TSval
+       is this stack's clock and nothing may assert a value for it. */
+    if (e.have_tsecr)
+        CHECK(got.ts && ((LONG)got.tsecr == e.tsecr), "TSecr",
+              e.tsecr, got.ts ? (LONG)got.tsecr : -1);
 
     CHECK(got.tcp_ok, "TCP checksum (0 = valid)", 0, 1);
     CHECK(got.ip_ok,  "IP checksum (0 = valid)", 0, 1);
@@ -1339,6 +1402,9 @@ static VOID do_rx(const char *args, const char *raw)
     in.urg   = (UWORD)(e.have_urg ? e.urg : 0);
     in.dlen  = (ULONG)(e.have_len ? e.len : 0);
     in.mss   = e.have_mss ? e.mss : -1;
+    in.ts    = (e.have_tsval || e.have_tsecr || (e.have_ts && e.ts != 0)) ? TRUE : FALSE;
+    in.tsval = (ULONG)(e.have_tsval ? e.tsval : 0);
+    in.tsecr = (ULONG)(e.have_tsecr ? e.tsecr : 0);
     in.corrupt   = e.have_corrupt ? e.corrupt : -1;
     in.pad       = (ULONG)(e.have_pad ? e.pad : 0);
     in.unaligned = e.have_unaligned;
