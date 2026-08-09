@@ -190,8 +190,7 @@ extern unsigned int ami_crypto_rbg(unsigned int bits, unsigned char *result);
    ThreadX globals from tx_api.h instead. */
 extern  UINT    tx_amiga_caller_is_thread(void);
 
-#define NX_CALLER_CHECKING_EXTERNS          extern  TX_THREAD           *_tx_thread_current_ptr; \
-                                            extern  volatile ULONG      _tx_thread_system_state;
+#define NX_CALLER_CHECKING_EXTERNS          extern  volatile ULONG      _tx_thread_system_state;
 
 #define NX_THREADS_ONLY_CALLER_CHECKING     if (tx_amiga_caller_is_thread() == ((UINT) 0)) \
                                                 return(NX_CALLER_ERROR);

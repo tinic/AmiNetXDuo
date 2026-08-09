@@ -127,12 +127,13 @@ static VOID ami_ns6_log_tentative(const char *what, const ULONG addr[4],
  * RFC 4862 section 5.4 puts DAD ahead of an address being *used*, not ahead of
  * the caller who asked for it. An address is TENTATIVE for the seconds the
  * solicitations take, cannot be a source while it is, and needs nobody to sit
- * over it: NX_IPV6_DAD_TRANSMITS is 3 and they go out at one per second, so
- * waiting for the answer inside ami_ns6_configure_interface() charged three
- * seconds per address to the thread that called it, and a static IPv6 address
- * made it six. That thread is AddNetInterface, which is in the
- * Startup-Sequence, and which on a static-IPv4 interface has otherwise nothing
- * at all to wait for. The wait bought one log line.
+ * over it: a solicitation goes out on the IP thread's one-second periodic and
+ * RFC 4862 5.4.5 waits one more before the address is valid, so waiting for
+ * the answer inside ami_ns6_configure_interface() charged two seconds per
+ * address to the thread that called it, and four when NX_IPV6_DAD_TRANSMITS
+ * was 3. That thread is AddNetInterface, which is in the Startup-Sequence, and
+ * which on a static-IPv4 interface has otherwise nothing at all to wait for.
+ * The wait bought one log line.
  *
  * So the line is printed from here instead, on the IP thread, when NetX Duo
  * has the answer. This is also strictly more than the wait could see: an

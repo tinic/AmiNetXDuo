@@ -1089,19 +1089,11 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
         ami_address_change_notify();
 }
 
-/*
- * Called by NetX Duo's DHCP client on every state transition, per interface.
- *
- * The transition of interest is into INIT from a state that held an address: a
- * NAK, or a lease that ran out with nothing answering, after which
- * _nx_dhcp_interface_reinitialize() has taken the address and the gateway off
- * the interface. The response is RFC 3927 1.7, as when DHCP never answers.
- */
 /* NX_DHCP_STATE_* in order, for the bring-up marks. */
 static const char *ami_ns_dhcp_state_name(UCHAR state)
 {
     static const char *const names[] = {
-        "dhcp-notstarted", "dhcp-boot",      "dhcp-init",
+        "dhcp-notstarted", "dhcp-boot",       "dhcp-init",
         "dhcp-selecting",  "dhcp-requesting", "dhcp-bound",
         "dhcp-renewing",   "dhcp-rebinding",  "dhcp-forcerenew",
         "dhcp-probing"
@@ -1113,6 +1105,14 @@ static const char *ami_ns_dhcp_state_name(UCHAR state)
     return names[state];
 }
 
+/*
+ * Called by NetX Duo's DHCP client on every state transition, per interface.
+ *
+ * The transition of interest is into INIT from a state that held an address: a
+ * NAK, or a lease that ran out with nothing answering, after which
+ * _nx_dhcp_interface_reinitialize() has taken the address and the gateway off
+ * the interface. The response is RFC 3927 1.7, as when DHCP never answers.
+ */
 static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
                                       UCHAR new_state)
 {
