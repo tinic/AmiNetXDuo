@@ -77,7 +77,8 @@ BSD="$BUILD/src/bsdsocket/bsdsocket.library"
 ADDIF="$BUILD/src/tools/AddNetInterface"
 SHOW="$BUILD/src/tools/ShowNetStatus"
 SMOKE="$BUILD/src/tools/ToolsSmoke"
-for f in "$BSD" "$ADDIF" "$SHOW" "$SMOKE"; do
+NETSTAT="$BUILD/src/tools/netstat"
+for f in "$BSD" "$ADDIF" "$SHOW" "$SMOKE" "$NETSTAT"; do
     [ -f "$f" ] || { echo "build $BUILD first: no $f" >&2; exit 2; }
 done
 
@@ -102,6 +103,7 @@ cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 cp "$A2065" "$STAGE/devs/a2065.device"
 cp "$ADDIF" "$STAGE/AddNetInterface"
 cp "$SHOW"  "$STAGE/ShowNetStatus"
+cp "$NETSTAT" "$STAGE/netstat"
 
 # What the installer writes, plus CONFIGURE6=AUTO.  AUTO is also what an
 # interface file with no CONFIGURE6 line gets; it is spelled out because this
@@ -121,6 +123,7 @@ cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface DEVS:NetInterfaces/eth0
 wait $SETTLE
 SYS:ShowNetStatus
+SYS:netstat -h
 EOF
 
 # ------------------------------------------------------------------ run ---
@@ -144,7 +147,8 @@ for rep in $(seq 1 "$REPS"); do
     AMINETXDUO_RUN_TAG="$TAG" "$ROOT/tools/amiberry-run.sh" \
         -N a2065 -B "$BACKEND" -m "$MODEL" -t "$TIMEOUT" \
         "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/AddNetInterface" \
-        "$STAGE/ShowNetStatus" "$STAGE/commands.txt" > "$ROOT/build/$TAG.out" 2>&1
+        "$STAGE/ShowNetStatus" "$STAGE/netstat" "$STAGE/commands.txt" \
+        > "$ROOT/build/$TAG.out" 2>&1
     rc=$?
     set -e
 
