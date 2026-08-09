@@ -94,7 +94,9 @@ static LONG find_index(struct Library *base, const char *name)
     if (n < 0)
         return -2;
 
-    for (i = 0; i < n; i++)
+    /* nsh_Count is the library's number, not ours: bound it by the table it
+       is being used to index, as shownetservices.c and tool_nx.c do. */
+    for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
     {
         if (!(rni_ifaces.e[i].nsi_Flags & NETSTATUS_IF_NAMED))
             continue;

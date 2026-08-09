@@ -80,7 +80,8 @@ static LONG count_up(struct Library *base)
     if (n < 0)
         return -1;
 
-    for (i = 0; i < n; i++)
+    /* nsh_Count is the library's number, not ours: bound it by the table. */
+    for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
     {
         /*
          * NETSTATUS_IF_LINKUP, not NETSTATUS_IF_ONLINE, for the reason onoff.c
@@ -167,7 +168,7 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    for (i = 0; i < n; i++)
+    for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
     {
         const NetStatusInterface *nsi = &nsd_ifaces.e[i];
         const char               *name;

@@ -210,7 +210,8 @@ static LONG live_index(struct Library *base, const char *name, BOOL *online)
     if (n <= 0)
         return -1;
 
-    for (i = 0; i < n; i++)
+    /* nsh_Count is the library's number, not ours: bound it by the table. */
+    for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
     {
         const NetStatusInterface *nsi = &onoff_ifaces.e[i];
 
@@ -353,7 +354,8 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
         {
             LONG n;
 
-            for (n = 0; n < (LONG)onoff_ifaces.hdr.nsh_Count; n++)
+            for (n = 0; n < (LONG)onoff_ifaces.hdr.nsh_Count &&
+                        n < (LONG)NX_MAX_PHYSICAL_INTERFACES; n++)
             {
                 if (onoff_ifaces.e[n].nsi_Index == (UWORD)index)
                 {
