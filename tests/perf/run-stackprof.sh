@@ -434,7 +434,10 @@ if [ "$LOSSCAP" = "1" ] && [ "$DIAG" = "0" ]; then
              "AMINETXDUO_FITZ_PEER" >&2
         exit 2
     fi
-    peercap_start "$PEER" "$PORT" "$CAPDIR" "$TAG" && CAPTURING=1
+    # Fatal, and before the boot: see tests/perf/run-fitzbench.sh.  A capture
+    # that never started leaves the -W/-E gate unrun and the script exiting 0.
+    peercap_start "$PEER" "$PORT" "$CAPDIR" "$TAG" || exit 2
+    CAPTURING=1
 fi
 
 set +e
@@ -443,7 +446,10 @@ set +e
 RUN_RC=$?
 set -e
 
-[ "$CAPTURING" = "1" ] && { peercap_stop "$PEER" "$CAPDIR" "$TAG" || CAPTURING=0; }
+CAPTURE_LOST=0
+if [ "$CAPTURING" = "1" ]; then
+    peercap_stop "$PEER" "$CAPDIR" "$TAG" || { CAPTURING=0; CAPTURE_LOST=1; }
+fi
 
 HD="$ROOT/build/amiberry-testhd-$TAG"
 REPORT="$HD/tools.txt"
@@ -477,6 +483,10 @@ if [ "$CAPTURING" = "1" ]; then
     peercap_report "$CAPDIR" "$TAG" "${LOSSARGS[@]}"
     LOSS_RC=$?
     set -e
+elif [ "$CAPTURE_LOST" = "1" ]; then
+    echo "the capture started and did not come back: no loss rate from this" >&2
+    echo "run, and any -W/-E asked for did not run." >&2
+    LOSS_RC=2
 fi
 
 exit "$LOSS_RC"
