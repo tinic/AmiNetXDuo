@@ -1,0 +1,162 @@
+# tcpdrill, the RFC 7323 timestamps option.
+#
+# NEEDS A BUILD THAT HAS THE OPTION.  Every case here assumes
+# AMINETXDUO_TCP_TIMESTAMP=ON; against a library built without it the stack
+# never offers the option and q01 fails on its first line.  The other scripts
+# never offer it, so they say what a connection WITHOUT the option does and
+# this one says what one with it does.
+#
+# Conventions are tcp.drill's.  One more of them: `tsval` is the peer's clock,
+# so a script chooses it; TSval on our own segments is this stack's clock and
+# nothing here names a value for it.  `tsecr` on a tx line is TS.Recent coming
+# back, which IS a number a previous rx line chose, so it is assertable.
+#
+# SPDX-License-Identifier: MIT
+
+# RFC 7323 5.2: the option is offered on our SYN, and once both SYNs carry it
+# every later segment carries it.  The ACK completing the handshake is the
+# first of those, and it echoes the TSval the peer's SYN-ACK sent.
+case q01_negotiation_and_first_echo
+socket
+connect
+tx S seq=0 mss=1460 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 tsval=1000
+tx A seq=1 ack=1 ts=1 tsecr=1000
+
+# RFC 7323 5.2 again, the other way: a peer that does not offer the option
+# gets none from us either, however willing this side was on its SYN.
+case q02_peer_declines_and_we_stop
+socket
+connect
+tx S seq=0 mss=1460 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1 ts=0
+send 50
+tx PA seq=1 ack=1 len=50 ts=0
+
+# A SYN-ACK carries the option only when the peer's SYN did, and its TSecr is
+# that SYN's TSval.
+case q03_passive_open_echoes_the_syn
+localport 4717
+listen
+rx S seq=0 win=8192 mss=1460 tsval=1500
+tx SA seq=0 ack=1 mss=1460 ts=1 tsecr=1500
+rx A seq=1 ack=1 tsval=1501
+accept
+
+# Data segments carry it, and the echo is TS.Recent.
+case q04_data_segments_carry_the_option
+socket
+connect
+tx S seq=0 mss=1460 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 tsval=2000
+tx A seq=1 ack=1 ts=1 tsecr=2000
+send 50
+tx PA seq=1 ack=1 len=50 ts=1 tsecr=2000
+
+# RFC 7323 5.3 R3: a segment that is not older than TS.Recent and whose
+# sequence covers Last.ACK.sent replaces TS.Recent, so the next thing we send
+# echoes the newer value.
+case q05_ts_recent_follows_the_stream
+socket
+connect
+tx S seq=0 mss=1460 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 tsval=3000
+tx A seq=1 ack=1 ts=1 tsecr=3000
+rx PA seq=1 ack=1 len=10 tsval=3100
+tx A seq=1 ack=11 ts=1 tsecr=3100 within=400
+rx PA seq=11 ack=1 len=10 tsval=3200
+tx A seq=1 ack=21 ts=1 tsecr=3200 within=400
+recv 100 = 20
+
+# RFC 7323 5.3 R3, the other half: a segment AHEAD of Last.ACK.sent is out of
+# order and must not become the timestamp echoed for data the peer has not had
+# acknowledged.  The hole leaves the acknowledgment where it was and the echo
+# with it.
+case q06_out_of_order_does_not_move_ts_recent
+socket
+connect
+tx S seq=0 mss=1460 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 tsval=4000
+tx A seq=1 ack=1 ts=1 tsecr=4000
+rx PA seq=1 ack=1 len=10 tsval=4100
+tx A seq=1 ack=11 ts=1 tsecr=4100 within=400
+rx PA seq=101 ack=1 len=10 tsval=4200
+tx A seq=1 ack=11 ts=1 tsecr=4100 within=400
+
+# PAWS, RFC 7323 5.3 R1.  A segment whose timestamp went backwards is not
+# acceptable however plausible its sequence number is: it is acknowledged so
+# the peer learns where the window is, and dropped, so nothing of it reaches
+# the application and the acknowledgment does not move.
+case q07_paws_rejects_an_old_timestamp
+socket
+connect
+tx S seq=0 mss=1460 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 tsval=5000
+tx A seq=1 ack=1 ts=1 tsecr=5000
+rx PA seq=1 ack=1 len=10 tsval=5100
+tx A seq=1 ack=11 ts=1 tsecr=5100 within=400
+rx PA seq=11 ack=1 len=10 tsval=4000
+tx A seq=1 ack=11 ts=1 tsecr=5100 within=400
+recv 100 = 10
+recv 100 = AGAIN
+
+# PAWS is never applied to a reset: a reset carries no useful timestamp on some
+# stacks, and dropping it would leave a connection the peer has already
+# forgotten alive until it timed out.  The reset here is at RCV.NXT, which is
+# the one RFC 5961 honours, and its timestamp is older than TS.Recent.
+case q08_paws_does_not_reject_a_reset
+socket
+connect
+tx S seq=0 mss=1460 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 tsval=6000
+tx A seq=1 ack=1 ts=1 tsecr=6000
+rx R seq=1 tsval=1
+notx 200
+recv 100 = 0
+
+# RFC 7323 5.2: every non-RST segment, so the FIN too.
+case q09_fin_carries_the_option
+socket
+connect
+tx S seq=0 mss=1460 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 tsval=7000
+tx A seq=1 ack=1 ts=1 tsecr=7000
+close
+tx FA seq=1 ack=1 ts=1 tsecr=7000
+rx A seq=1 ack=2 tsval=7100
+rx FA seq=1 ack=2 tsval=7200
+tx A seq=2 ack=2 ts=1 tsecr=7200
+
+# The MSS advertised is still the interface MTU less 40, because RFC 6691 says
+# the advertisement excludes options.  What comes out of a write is twelve
+# bytes less than that, because the option is twelve bytes of the segment.
+# 1460 offered, 1448 on the wire, and the twelve byte tail behind it is the
+# rest of the write rather than a second copy of anything.
+case q10_mss_is_1460_offered_and_1448_carried
+socket
+connect
+tx S seq=0 mss=1460 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 tsval=8000
+tx A seq=1 ack=1 ts=1 tsecr=8000
+send 1460
+tx PA seq=1 ack=1 len=1448 ts=1 tsecr=8000
+tx PA seq=1449 ack=1 len=12 ts=1 tsecr=8000 within=1000
+rx A seq=1 ack=1461 tsval=8100
+
+# RFC 5961 4: a SYN on an established connection draws a challenge and the
+# connection carries on.  It also arrives at the site that settles the option,
+# so a SYN without one must not un-negotiate a connection that has one: the
+# challenge itself still carries the option, and so does the data after it.
+# Clearing the flag here would change the header length of segments already on
+# the transmit queue.
+case q11_a_bare_syn_does_not_un_negotiate
+socket
+connect
+tx S seq=0 mss=1460 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 tsval=9000
+tx A seq=1 ack=1 ts=1 tsecr=9000
+rx S seq=51
+tx A seq=1 ack=1 ts=1 tsecr=9000 within=400
+send 10
+tx PA seq=1 ack=1 len=10 ts=1 tsecr=9000 within=400
