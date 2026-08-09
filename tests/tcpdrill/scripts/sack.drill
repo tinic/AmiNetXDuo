@@ -29,7 +29,7 @@
 case s01_syn_offers_sack_permitted
 socket
 connect
-tx S seq=0 mss=1460 sackok=1 hdrlen=28
+tx S seq=0 mss=1460 sackok=1 hdrlen=auto
 
 # RFC 2018 section 2: a SYN+ACK repeats the offer only when the peer's SYN
 # made one.  This is the half that must be conditional.
@@ -37,7 +37,7 @@ case s02_syn_ack_repeats_the_peers_offer
 localport 4714
 listen
 rx S seq=0 win=8192 mss=1460 sackok=1
-tx SA seq=0 ack=1 mss=1460 sackok=1 hdrlen=28
+tx SA seq=0 ack=1 mss=1460 sackok=1 hdrlen=auto
 rx A seq=1 ack=1
 accept
 
@@ -48,7 +48,7 @@ case s03_syn_ack_silent_when_the_peer_was
 localport 4715
 listen
 rx S seq=0 win=8192 mss=1460
-tx SA seq=0 ack=1 mss=1460 sackok=0 hdrlen=28
+tx SA seq=0 ack=1 mss=1460 sackok=0 hdrlen=auto
 rx A seq=1 ack=1
 accept
 
@@ -60,9 +60,9 @@ socket
 connect
 tx S seq=0 mss=1460 sackok=1
 rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
-tx A seq=1 ack=1 hdrlen=20
+tx A seq=1 ack=1 hdrlen=auto
 rx PA seq=1 ack=1 len=1460
-tx A seq=1 ack=1461 sack=- hdrlen=20 within=400
+tx A seq=1 ack=1461 sack=- hdrlen=auto within=400
 recv 2000 = 1460
 
 # RFC 2018 section 3, the whole point: one hole, one block.  The
@@ -76,9 +76,9 @@ tx S seq=0 mss=1460 sackok=1
 rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
 tx A seq=1 ack=1
 rx PA seq=101 ack=1 len=100
-tx A seq=1 ack=1 sack=101:201 hdrlen=32 within=400
+tx A seq=1 ack=1 sack=101:201 hdrlen=auto within=400
 rx PA seq=1 ack=1 len=100
-tx A seq=1 ack=201 sack=- hdrlen=20 within=400
+tx A seq=1 ack=201 sack=- hdrlen=auto within=400
 recv 400 = 200
 
 # NO PERMISSION, NO BLOCKS.  The same shape as s05 against a peer whose
@@ -92,7 +92,7 @@ tx S seq=0 mss=1460 sackok=1
 rx SA seq=0 ack=1 win=8192 mss=1460
 tx A seq=1 ack=1
 rx PA seq=101 ack=1 len=100
-tx A seq=1 ack=1 sack=- hdrlen=20 within=400
+tx A seq=1 ack=1 sack=- hdrlen=auto within=400
 rx PA seq=1 ack=1 len=100
 tx A seq=1 ack=201 within=400
 recv 400 = 200
@@ -106,9 +106,9 @@ tx S seq=0 mss=1460 sackok=1
 rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
 tx A seq=1 ack=1
 rx PA seq=101 ack=1 len=100
-tx A seq=1 ack=1 sack=101:201 hdrlen=32 within=400
+tx A seq=1 ack=1 sack=101:201 hdrlen=auto within=400
 rx PA seq=201 ack=1 len=100
-tx A seq=1 ack=1 sack=101:301 hdrlen=32 within=400
+tx A seq=1 ack=1 sack=101:301 hdrlen=auto within=400
 
 # RFC 2018 section 4: THE FIRST BLOCK IS THE ONE HOLDING THE SEGMENT THAT
 # TRIGGERED THIS ACKNOWLEDGEMENT.  Two holes, the second one higher, so the
@@ -123,11 +123,11 @@ tx A seq=1 ack=1
 rx PA seq=101 ack=1 len=100
 tx A seq=1 ack=1 sack=101:201 within=400
 rx PA seq=301 ack=1 len=100
-tx A seq=1 ack=1 sack=301:401,101:201 hdrlen=40 within=400
+tx A seq=1 ack=1 sack=301:401,101:201 hdrlen=auto within=400
 rx PA seq=1 ack=1 len=100
-tx A seq=1 ack=201 sack=301:401 hdrlen=32 within=400
+tx A seq=1 ack=201 sack=301:401 hdrlen=auto within=400
 rx PA seq=201 ack=1 len=100
-tx A seq=1 ack=401 sack=- hdrlen=20 within=400
+tx A seq=1 ack=401 sack=- hdrlen=auto within=400
 recv 500 = 400
 
 # THE SAME RULE WHERE SORTING BY SEQUENCE NUMBER GETS IT WRONG.  The higher
@@ -144,7 +144,7 @@ tx A seq=1 ack=1
 rx PA seq=401 ack=1 len=100
 tx A seq=1 ack=1 sack=401:501 within=400
 rx PA seq=101 ack=1 len=100
-tx A seq=1 ack=1 sack=101:201,401:501 hdrlen=40 within=400
+tx A seq=1 ack=1 sack=101:201,401:501 hdrlen=auto within=400
 
 # THE BOUND.  Four blocks is 36 of the 40 bytes an option area has, so a
 # fifth hole cannot be reported and something has to go.  The most recent
@@ -157,15 +157,15 @@ tx S seq=0 mss=1460 sackok=1
 rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
 tx A seq=1 ack=1
 rx PA seq=101 ack=1 len=100
-tx A seq=1 ack=1 sack=101:201 hdrlen=32 within=400
+tx A seq=1 ack=1 sack=101:201 hdrlen=auto within=400
 rx PA seq=301 ack=1 len=100
-tx A seq=1 ack=1 sack=301:401,101:201 hdrlen=40 within=400
+tx A seq=1 ack=1 sack=301:401,101:201 hdrlen=auto within=400
 rx PA seq=501 ack=1 len=100
-tx A seq=1 ack=1 sack=501:601,301:401,101:201 hdrlen=48 within=400
+tx A seq=1 ack=1 sack=501:601,301:401,101:201 hdrlen=auto within=400
 rx PA seq=701 ack=1 len=100
-tx A seq=1 ack=1 sack=701:801,501:601,301:401,101:201 hdrlen=56 within=400
+tx A seq=1 ack=1 sack=701:801,501:601,301:401,101:201 hdrlen=auto within=400
 rx PA seq=901 ack=1 len=100
-tx A seq=1 ack=1 sack=901:1001,701:801,501:601,301:401 hdrlen=56 within=400
+tx A seq=1 ack=1 sack=901:1001,701:801,501:601,301:401 hdrlen=auto within=400
 
 # A BLOCK CLOSED BY ARRIVING DATA STOPS BEING A BLOCK.  Filling the hole from
 # the left leaves the block whose data is now in sequence out of the option
@@ -179,11 +179,11 @@ tx S seq=0 mss=1460 sackok=1
 rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
 tx A seq=1 ack=1
 rx PA seq=201 ack=1 len=100
-tx A seq=1 ack=1 sack=201:301 hdrlen=32 within=400
+tx A seq=1 ack=1 sack=201:301 hdrlen=auto within=400
 rx PA seq=1 ack=1 len=100
-tx A seq=1 ack=101 sack=201:301 hdrlen=32 within=400
+tx A seq=1 ack=101 sack=201:301 hdrlen=auto within=400
 rx PA seq=101 ack=1 len=100
-tx A seq=1 ack=301 sack=- hdrlen=20 within=400
+tx A seq=1 ack=301 sack=- hdrlen=auto within=400
 recv 400 = 300
 
 # A DUPLICATE SEGMENT ARRIVING BEHIND A HOLE IS STILL ACKNOWLEDGED, AND THE
@@ -197,14 +197,14 @@ tx S seq=0 mss=1460 sackok=1
 rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
 tx A seq=1 ack=1
 rx PA seq=101 ack=1 len=100
-tx A seq=1 ack=1 sack=101:201 hdrlen=32 within=400
+tx A seq=1 ack=1 sack=101:201 hdrlen=auto within=400
 rx PA seq=101 ack=1 len=100
 # The second arrival of 101:201 is a duplicate of a range already reported,
 # which RFC 2883 section 4 says to lead with as a D-SACK block, so the hole
 # is reported twice over, once as the duplicate and once as the block still
 # covering it.  dsack.drill d03 is where that pairing is pinned down; what
 # this case still asserts is that the ordinary block does not go missing.
-tx A seq=1 ack=1 sack=101:201,101:201 hdrlen=40 within=400
+tx A seq=1 ack=1 sack=101:201,101:201 hdrlen=auto within=400
 rx PA seq=1 ack=1 len=100
 tx A seq=1 ack=201 sack=- within=400
 recv 400 = 200

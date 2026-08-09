@@ -20,11 +20,11 @@ tx S seq=0 mss=1460 sackok=1
 rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
 tx A seq=1 ack=1
 rx PA seq=1 ack=1 len=100
-tx A seq=1 ack=101 sack=- hdrlen=20 within=400
+tx A seq=1 ack=101 sack=- hdrlen=auto within=400
 rx PA seq=101 ack=1 len=100
-tx A seq=1 ack=201 sack=- hdrlen=20 within=400
+tx A seq=1 ack=201 sack=- hdrlen=auto within=400
 rx PA seq=101 ack=1 len=100
-tx A seq=1 ack=201 sack=101:201 hdrlen=32 within=400
+tx A seq=1 ack=201 sack=101:201 hdrlen=auto within=400
 recv 400 = 200
 
 # REPORTED ONCE.  A sender that saw the same D-SACK twice would count the
@@ -37,11 +37,11 @@ tx S seq=0 mss=1460 sackok=1
 rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
 tx A seq=1 ack=1
 rx PA seq=1 ack=1 len=100
-tx A seq=1 ack=101 sack=- hdrlen=20 within=400
+tx A seq=1 ack=101 sack=- hdrlen=auto within=400
 rx PA seq=1 ack=1 len=100
-tx A seq=1 ack=101 sack=1:101 hdrlen=32 within=400
+tx A seq=1 ack=101 sack=1:101 hdrlen=auto within=400
 rx PA seq=101 ack=1 len=100
-tx A seq=1 ack=201 sack=- hdrlen=20 within=400
+tx A seq=1 ack=201 sack=- hdrlen=auto within=400
 recv 400 = 200
 
 # RFC 2883 section 4, second example: the duplicate is a subset of a range
@@ -56,11 +56,11 @@ tx S seq=0 mss=1460 sackok=1
 rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
 tx A seq=1 ack=1
 rx PA seq=101 ack=1 len=100
-tx A seq=1 ack=1 sack=101:201 hdrlen=32 within=400
+tx A seq=1 ack=1 sack=101:201 hdrlen=auto within=400
 rx PA seq=101 ack=1 len=100
-tx A seq=1 ack=1 sack=101:201,101:201 hdrlen=40 within=400
+tx A seq=1 ack=1 sack=101:201,101:201 hdrlen=auto within=400
 rx PA seq=1 ack=1 len=100
-tx A seq=1 ack=201 sack=- hdrlen=20 within=400
+tx A seq=1 ack=201 sack=- hdrlen=auto within=400
 recv 400 = 200
 
 # A D-SACK AND A REAL HOLE AT ONCE, AND THE ORDER IS D-SACK FIRST.  The hole
@@ -75,13 +75,13 @@ tx S seq=0 mss=1460 sackok=1
 rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
 tx A seq=1 ack=1
 rx PA seq=1 ack=1 len=100
-tx A seq=1 ack=101 sack=- hdrlen=20 within=400
+tx A seq=1 ack=101 sack=- hdrlen=auto within=400
 rx PA seq=201 ack=1 len=100
-tx A seq=1 ack=101 sack=201:301 hdrlen=32 within=400
+tx A seq=1 ack=101 sack=201:301 hdrlen=auto within=400
 rx PA seq=1 ack=1 len=100
-tx A seq=1 ack=101 sack=1:101,201:301 hdrlen=40 within=400
+tx A seq=1 ack=101 sack=1:101,201:301 hdrlen=auto within=400
 rx PA seq=101 ack=1 len=100
-tx A seq=1 ack=301 sack=- hdrlen=20 within=400
+tx A seq=1 ack=301 sack=- hdrlen=auto within=400
 recv 400 = 300
 
 # PARTIAL OVERLAP REPORTS ONLY THE PART THAT REPEATED.  The segment carries
@@ -95,9 +95,9 @@ tx S seq=0 mss=1460 sackok=1
 rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
 tx A seq=1 ack=1
 rx PA seq=1 ack=1 len=100
-tx A seq=1 ack=101 sack=- hdrlen=20 within=400
+tx A seq=1 ack=101 sack=- hdrlen=auto within=400
 rx PA seq=1 ack=1 len=200
-tx A seq=1 ack=201 sack=1:101 hdrlen=32 within=400
+tx A seq=1 ack=201 sack=1:101 hdrlen=auto within=400
 recv 400 = 200
 
 # NO PERMISSION, NO D-SACK, BUT STILL AN ACKNOWLEDGEMENT.  RFC 2883 rides on
@@ -120,7 +120,7 @@ tx S seq=0 mss=1460 sackok=1
 rx SA seq=0 ack=1 win=8192 mss=1460
 tx A seq=1 ack=1
 rx PA seq=1 ack=1 len=100
-tx A seq=1 ack=101 sack=- hdrlen=20 within=400
+tx A seq=1 ack=101 sack=- hdrlen=auto within=400
 rx PA seq=1 ack=1 len=100
-tx A seq=1 ack=101 sack=- hdrlen=20 within=400
+tx A seq=1 ack=101 sack=- hdrlen=auto within=400
 recv 400 = 100

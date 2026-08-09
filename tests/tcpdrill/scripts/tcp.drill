@@ -20,10 +20,16 @@
 # The window first, before any case has left a socket behind.  RESEARCH 24.3:
 # a lone socket on the 8 MB profile gets the ceiling, and nothing may ever come
 # out below the floor.
+#
+# The bounds come from the build, not from this file.  $synwin is the ceiling
+# capped at 65535, because RFC 7323 2.2 says the window in a SYN is never
+# scaled: a build whose ceiling is 98304 correctly puts 65535 here, and the
+# 33580 this line used to carry failed on that behaviour rather than on a
+# defect.
 case w01_advertised_window_in_bounds
 socket
 connect
-tx S seq=0 winmin=8192 winmax=33580 mss=1460
+tx S seq=0 winmin=$winfloor winmax=$synwin mss=1460
 
 # RFC 793 3.4: three-way handshake, and our ACK carries the peer's ISN + 1.
 case c01_active_open
