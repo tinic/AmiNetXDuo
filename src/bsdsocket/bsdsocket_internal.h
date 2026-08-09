@@ -305,22 +305,33 @@ typedef struct
  * One in this many pool packets is the budget the whole stack's TCP receive
  * windows may claim ABOVE the floor. See ami_bsd_tcp_window().
  *
- * 4, not the 8 it was. RFC 1323 window scaling only does something above a
- * 65535-byte window, and the budget is what decides whether one can exist:
- * (AMI_POOL_MAX_PACKETS / share) * AMI_POOL_PAYLOAD is 50,176 at 8 and 100,352
- * at 4, so 8 put the largest window this stack could ever offer below the
- * field it fits in and made the negotiated scale zero on every machine.
+ * 8, AND A QUARTER WAS TRIED AND REFUSED. (AMI_POOL_MAX_PACKETS / share) *
+ * AMI_POOL_PAYLOAD is 50,176 at 8 and 100,352 at 4, so a quarter is what it
+ * takes to give one socket a window the 16-bit field cannot hold and make RFC
+ * 1323's scale exponent non-zero. It was built and measured, A1200 bridged to
+ * a real peer, 1 MB, 2 reps, 3 boots an arm, arms interleaved
+ * (tests/perf/run-fitzbench.sh -a -B ens18 -H <peer> -m A1200 -k 1024 -r 2 -w):
  *
- * What the change costs is a lone socket's claim on the pool going from an
- * eighth to a quarter, and nothing else: ami_bsd_tcp_window() divides the
- * budget by the live socket count, so what all sockets together may claim is
- * still one budget, and a third socket already brings the per-socket figure
- * back under the window this stack shipped with. Above eleven sockets the
- * BSD_TCP_WINDOW floor governs instead and the budget stops being the bound,
- * which is true at either share and is a property of the floor.
+ *   window   scaling  raw loss   effective loss        read KB/s
+ *   33580    off      0.927 %    0.000 0.000 0.000     392 391 393
+ *   50176    on       0.801 %    0.000 0.000 0.000     391 395 390
+ *   100352   on, s=1  1.176 %    0.252 0.294 0.169     392 396 393
+ *
+ * The read does not move at any window -- the peer reports app_limited on
+ * every one of 2604 `ss -tim` samples and rwnd_limited on none, so the receive
+ * window was never what bound the transfer -- and the quarter is the only arm
+ * where retransmissions stop being spurious and start filling real holes.
+ * 0.000 to 0.25 % effective loss on all three pairs, for no throughput, is the
+ * trade refused. docs/RESEARCH.md's own rule is that the retransmission rate
+ * is the number to gate on and the throughput is downstream of it.
+ *
+ * At an eighth ami_bsd_tcp_window() divides the budget by the live socket
+ * count as before, so a lone socket may claim an eighth of the pool, all
+ * sockets together never more than one budget, and above five sockets the
+ * BSD_TCP_WINDOW floor governs instead.
  */
 #ifndef BSD_TCP_WINDOW_POOL_SHARE
-#define BSD_TCP_WINDOW_POOL_SHARE   4
+#define BSD_TCP_WINDOW_POOL_SHARE   8
 #endif
 
 /*
@@ -361,7 +372,9 @@ typedef struct
  * So a number above 33580 has been refused once on that workload. It stopped
  * being a ceiling the day the pool budget arrived, and became a second,
  * unrelated bound that happened to be the tighter one on any machine with more
- * than about 2.3 MB free.
+ * than about 2.3 MB free. Derived, it is 50,176 at the share above, and that
+ * window is the middle row of the table there: raw loss and effective loss and
+ * read all indistinguishable from the 33580 it replaces.
  *
  * Every byte of window is a byte of packet pool somebody else cannot have, and
  * this is the packet pool saying so in its own units.

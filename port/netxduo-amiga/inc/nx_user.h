@@ -319,18 +319,23 @@
 /*
  * RFC 1323 / 7323 section 2, window scaling.
  *
- * It used to be off with two conditions on it: until SACK existed, or until a
- * pool budget could offer one socket more than 64 KB.  Both are met.
- * AMINETXDUO_TCP_SACK has been on by default since the receive side landed,
- * and BSD_TCP_WINDOW_POOL_SHARE is 4, which makes the largest window this
- * stack can produce (AMI_POOL_MAX_PACKETS / 4) * AMI_POOL_PAYLOAD = 100,352
- * bytes.  At the eighth it was, that number was 50,176 -- under the 65,535 the
- * header field holds -- so the negotiated scale was zero on every machine and
- * the option did nothing at all, which is what the earlier measurement of it
- * was measuring.
+ * It used to be off until SACK existed, or until a pool budget could offer one
+ * socket more than 64 KB.  AMINETXDUO_TCP_SACK has been on by default since the
+ * receive side landed, so the first is met; the second was measured and
+ * refused, and the note on BSD_TCP_WINDOW_POOL_SHARE has the table.  Our own
+ * receive window is 50,176 at most, so the exponent WE announce is zero.
  *
- * WHY THE TWO CONDITIONS WERE THERE.  Pinning AMINETXDUO_TCP_WINDOW at 65536
- * with no SACK in the tree took the wire from 172 KB/s to 32 KB/s, with 15
+ * IT IS NOT INERT AT A ZERO EXPONENT.  The two directions scale independently
+ * (RFC 7323 2.2): announcing the option is what lets the PEER announce one,
+ * and what we may then have outstanding to it stops being capped at 65535.
+ * Against Linux the peer's SYN-ACK carries `wscale 7` and `ss -tim` on it
+ * reads rcv_wnd:339200 where the same connection without the option is held to
+ * the field.  Nothing this stack currently does fills that -- the write arm
+ * moved 409.2 to 411.0 KB/s, inside its own spread -- so what it buys is a cap
+ * removed and not a rate.
+ *
+ * WHY THE CONDITIONS WERE THERE.  Pinning AMINETXDUO_TCP_WINDOW at 65536 with
+ * no SACK in the tree took the wire from 172 KB/s to 32 KB/s, with 15
  * retransmitted segments and a nine-deep duplicate-ACK run: a burst loss
  * inside a big window cost a full go-back-N, and the receiver had no way to
  * say which segment was missing.  It does now.
@@ -343,7 +348,7 @@
  *
  * It also removes a guard: nxe_tcp_socket_create.c:170 rejects a window above
  * 65535 with NX_OPTION_ERROR while this is off and accepts anything under 2^30
- * while it is on.  The pool budget is what bounds it now.
+ * while it is on, which is why BSD_TCP_WINDOW_CEILING has an arm for each.
  *
  * Build with -DAMINETXDUO_TCP_WINDOW_SCALING=OFF to take it out.
  */
