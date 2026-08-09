@@ -597,22 +597,23 @@
 /* ------------------------------------------------------------------ DHCP, */
 
 /*
- * ARP-probe the offered address before using it, and DHCPDECLINE if somebody
+ * ARP-probe the address the server hands out, and DHCPDECLINE if somebody
  * answers (RFC 2131 4.4.1, RFC 5227 2.1).
  *
- * addons/dhcp ships the whole of this, the ADDRESS_PROBING state,
- * _nx_dhcp_ip_conflict() and _nx_dhcp_interface_decline(), behind the define,
- * and nxd_dhcp_client.h leaves it commented out, so without a line here no
- * probe and no DECLINE can leave the machine and a duplicate address is taken
- * silently.  AutoIP next door does probe (nx_auto_ip.c), so link-local was
- * compliant while DHCP was not.
+ * addons/dhcp ships the whole of this, _nx_dhcp_ip_conflict() and
+ * _nx_dhcp_interface_decline(), behind the define, and nxd_dhcp_client.h
+ * leaves it commented out, so without a line here no probe and no DECLINE can
+ * leave the machine and a duplicate address is taken silently.  AutoIP next
+ * door does probe (nx_auto_ip.c), so link-local was compliant while DHCP was
+ * not.
  *
- * Cost is NX_DHCP_ARP_PROBE_WAIT plus NX_DHCP_ARP_PROBE_NUM intervals of
- * NX_DHCP_ARP_PROBE_MIN..MAX, 1 s then 3 waits of 1-2 s, on every bring-up,
- * and bsdsocket.library brings the stack up on the first OpenLibrary().
- *
- * tests/netstack/dhcp3927_test.c phase I compiles in with it and drives the
- * conflict.
+ * The probes go out alongside the address rather than in front of it, so the
+ * boot cost is nothing: NetX Duo used to hold the address off the interface
+ * for NX_DHCP_ARP_PROBE_WAIT plus NX_DHCP_ARP_PROBE_NUM intervals of
+ * NX_DHCP_ARP_PROBE_MIN..MAX, which is 3 to 6 seconds charged to whoever
+ * brought the stack up -- AddNetInterface in the Startup-Sequence, since
+ * bsdsocket.library brings the stack up on the first OpenLibrary().  The
+ * timings below are unchanged and are still what goes on the wire.
  */
 #define NX_DHCP_CLIENT_SEND_ARP_PROBE
 
@@ -674,13 +675,47 @@
 
 /*
  * Duplicate Address Detection stays on (NX_DISABLE_IPV6_DAD is not defined).
- * It costs three neighbour solicitations and roughly one second per address
- * before that address becomes usable.  Kept because the alternative is silently
- * sharing an address with another host on the link, and because it is the one
- * part of neighbour discovery that exercises solicited-node multicast on every
- * boot, the only routine test of the S2_ADDMULTICASTADDRESS path in
- * src/sana2/.
+ * Kept because the alternative is silently sharing an address with another host
+ * on the link, and because it is the one part of neighbour discovery that
+ * exercises solicited-node multicast on every boot, the only routine test of
+ * the S2_ADDMULTICASTADDRESS path in src/sana2/.
+ *
+ * Nobody waits for it.  An address is TENTATIVE while the solicitations go
+ * out, and the answer arrives through the notification below rather than on
+ * the thread that configured the address; see ami_ns6_address_changed().
+ *
+ * ONE solicitation, not NetX Duo's three.  RFC 4862 5.4.5 makes an address
+ * valid RetransTimer after its last solicitation goes unanswered, and
+ * _nx_icmpv6_perform_DAD() runs off the IP thread's one-second periodic, so
+ * each transmit is a second and the wait after the last one is a second more:
+ * three transmits is four seconds per address before anything may use it.  A
+ * machine gets two of them, the link-local and the address a router
+ * advertisement forms, so it was eight seconds of a bring-up.
+ *
+ * 1 is RFC 4862's own DupAddrDetectTransmits default, not a corner cut; three
+ * is NetX Duo's.  A duplicate answers the first solicitation as readily as the
+ * third -- the retransmissions are there for a lost packet, on a link where a
+ * neighbour's reply is a single unicast frame it did not have to ask for.
  */
+#ifndef NX_IPV6_DAD_TRANSMITS
+#define NX_IPV6_DAD_TRANSMITS                   1
+#endif
+
+/*
+ * Report what duplicate address detection decides, and what a router hands
+ * out, instead of polling for it.
+ *
+ * Without this the notify field is not in NX_IP at all and
+ * nxd_ipv6_address_change_notify() compiles to a stub returning
+ * NX_NOT_SUPPORTED, which leaves an address's fate readable only by watching
+ * nxd_ipv6_address_state change.  Watching it is what AddNetInterface used to
+ * do, for three seconds per address, on the Startup-Sequence's thread.
+ *
+ * It also covers what no watcher at bring-up could see: an address formed
+ * later from a router advertisement, which arrives long after the command that
+ * configured the interface has returned.
+ */
+#define NX_ENABLE_IPV6_ADDRESS_CHANGE_NOTIFY
 
 /*
  * Router solicitation stays on (NX_DISABLE_ICMPV6_ROUTER_SOLICITATION is not

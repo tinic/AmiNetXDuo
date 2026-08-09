@@ -40,10 +40,9 @@
 
 #include <proto/exec.h>
 
-/* How long to wait for duplicate address detection to finish, per address.
-   NX_IPV6_DAD_TRANSMITS solicitations at one per second, plus slack. */
-#define AMI_DAD_TIMEOUT_TICKS   ((ULONG)(NX_IPV6_DAD_TRANSMITS + 2) * \
-                                 (ULONG)NX_IP_PERIODIC_RATE)
+static VOID ami_ns6_address_changed(NX_IP *ip_ptr, UINT status,
+                                    UINT interface_index, UINT address_index,
+                                    ULONG *address);
 
 /* -------------------------------------------------------------- bring-up, */
 
@@ -91,6 +90,10 @@ LONG ami_netstack_ipv6_enable(AmiNetStack *ns)
      */
     ns->ns_Ip.nx_ipv6_rdnss_notify = ami_ns6_rdnss;
 
+    /* Every address this stack ever configures is reported through here, which
+       is what lets bring-up hand its addresses over and return. */
+    (VOID)nxd_ipv6_address_change_notify(&ns->ns_Ip, ami_ns6_address_changed);
+
     ns->ns_Ipv6Enabled = TRUE;
 
     AMI_INFO("netstack: IPv6 enabled (ICMPv6, neighbour discovery, ::1)");
@@ -108,38 +111,100 @@ static VOID ami_ns6_log(const char *what, const ULONG addr[4], ULONG prefix)
     AMI_INFO("netstack: %s %s/%lu", what, text, (unsigned long)prefix);
 }
 
-/*
- * Wait for duplicate address detection to move an address out of TENTATIVE.
- * A TENTATIVE address cannot be used as a source, so a connect() issued before
- * DAD completes either picks a different source or fails. The wait is bounded,
- * and costs about three seconds each time an interface is configured, once
- * per interface at startup, and once per AddInterfaceTagList(). With
- * NX_DISABLE_IPV6_DAD the address is PREFERRED immediately and this returns on
- * the first look.
- */
-static BOOL ami_ns6_wait_ready(AmiNetStack *ns, UINT index)
+static VOID ami_ns6_log_tentative(const char *what, const ULONG addr[4],
+                                  ULONG prefix)
 {
-    ULONG waited = 0;
+    char text[AMI_CFG_IP6_STRLEN];
 
-    for (;;)
+    ami_config_format_ip6(addr, text, sizeof(text));
+    AMI_INFO("netstack: %s %s/%lu (tentative)", what, text,
+             (unsigned long)prefix);
+}
+
+/*
+ * An address finished duplicate address detection, one way or the other.
+ *
+ * RFC 4862 section 5.4 puts DAD ahead of an address being *used*, not ahead of
+ * the caller who asked for it. An address is TENTATIVE for the seconds the
+ * solicitations take, cannot be a source while it is, and needs nobody to sit
+ * over it: a solicitation goes out on the IP thread's one-second periodic and
+ * RFC 4862 5.4.5 waits one more before the address is valid, so waiting for
+ * the answer inside ami_ns6_configure_interface() charged two seconds per
+ * address to the thread that called it, and four when NX_IPV6_DAD_TRANSMITS
+ * was 3. That thread is AddNetInterface, which is in the Startup-Sequence, and
+ * which on a static-IPv4 interface has otherwise nothing at all to wait for.
+ * The wait bought one log line.
+ *
+ * So the line is printed from here instead, on the IP thread, when NetX Duo
+ * has the answer. This is also strictly more than the wait could see: an
+ * address a router hands out through stateless autoconfiguration arrives long
+ * after bring-up has returned, and went unreported entirely.
+ */
+static VOID ami_ns6_address_changed(NX_IP *ip_ptr, UINT status,
+                                    UINT interface_index, UINT address_index,
+                                    ULONG *address)
+{
+    AmiNetStack *ns = ami_netstack_raw();
+    const char  *name;
+    ULONG        prefix;
+    BOOL         linklocal;
+
+    if (ns == NULL || ip_ptr != &ns->ns_Ip || address == NULL)
+        return;
+
+    if (address_index >= NX_MAX_IPV6_ADDRESSES)
+        return;
+
+    name = (interface_index < (UINT)ns->ns_IfaceCount)
+               ? ns->ns_Config.interfaces[interface_index].name
+               : "interface";
+
+    prefix = (ULONG)ns->ns_Ip.nx_ipv6_address[address_index]
+                        .nxd_ipv6_address_prefix_length;
+
+    /*
+     * A link-local address is configured with the /10 of RFC 4291 section
+     * 2.5.6, which is what makes fe80:: link-local at all, but the prefix that
+     * is on-link is the /64 that section 2.5.1 leaves for the interface
+     * identifier. /64 is what bring-up printed and what the address means.
+     */
+    linklocal = (BOOL)((address[0] & 0xFFC00000UL) == 0xFE800000UL);
+    if (linklocal)
+        prefix = 64UL;
+
+    switch (status)
     {
-        UCHAR state = ns->ns_Ip.nx_ipv6_address[index].nxd_ipv6_address_state;
+    case NX_IPV6_ADDRESS_DAD_SUCCESSFUL:
+        ami_ns6_log(name, address, prefix);
+        ami_netstack_mark(linklocal ? "ip6-linklocal" : "ip6-global");
+        break;
 
-        if (state == NX_IPV6_ADDR_STATE_PREFERRED ||
-            state == NX_IPV6_ADDR_STATE_VALID)
-            return TRUE;
+    case NX_IPV6_ADDRESS_DAD_FAILURE:
+        /*
+         * RFC 4862 section 5.4.5: a duplicate link-local is meant to stop IPv6
+         * on the interface, and NetX Duo has already withdrawn the address. It
+         * is worth saying plainly, because the symptom otherwise is IPv6 that
+         * silently does nothing.
+         */
+        AMI_WARN("netstack: %s: an IPv6 address is already in use on this "
+                 "link and has been given up", name);
+        break;
 
-        if (!ns->ns_Ip.nx_ipv6_address[index].nxd_ipv6_address_valid)
-        {
-            /* DAD found a duplicate and withdrew the address. */
-            return FALSE;
-        }
+    case NX_IPV6_ADDRESS_STATELESS_AUTO_CONFIG:
+        /*
+         * A router advertisement has just formed this address, and
+         * nx_icmpv6_process_ra.c leaves it TENTATIVE: nothing may use it until
+         * duplicate address detection finishes and the DAD_SUCCESSFUL arm
+         * above runs for the same address.  It used to print the same line as
+         * that arm, so a global address appeared in the log twice and the
+         * first one claimed it was ready seconds before it was.
+         */
+        ami_ns6_log_tentative(name, address, prefix);
+        ami_netstack_mark("ip6-slaac");
+        break;
 
-        if (waited >= AMI_DAD_TIMEOUT_TICKS)
-            return FALSE;
-
-        tx_thread_sleep(NX_IP_PERIODIC_RATE / 5);
-        waited += NX_IP_PERIODIC_RATE / 5;
+    default:
+        break;
     }
 }
 
@@ -237,16 +302,8 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
         return;
     }
 
-    if (!ami_ns6_wait_ready(ns, index))
-    {
-        AMI_WARN("netstack: %s: link-local address did not pass duplicate "
-                 "address detection", cfg->name);
-    }
-    else
-    {
-        ami_ns6_log(cfg->name,
-                    ns->ns_Ip.nx_ipv6_address[index].nxd_ipv6_address, 64);
-    }
+    /* Configured, and TENTATIVE until the solicitations are answered or are
+       not; ami_ns6_address_changed() has the answer and reports it. */
 
     if (cfg->ip6type == AMI_IP6TYPE_STATIC)
     {
@@ -265,15 +322,6 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
         {
             AMI_ERROR("netstack: %s: ADDRESS6 rejected (%ld)",
                       cfg->name, (long)status);
-        }
-        else if (ami_ns6_wait_ready(ns, gindex))
-        {
-            ami_ns6_log(cfg->name, cfg->address6, cfg->prefix6);
-        }
-        else
-        {
-            AMI_WARN("netstack: %s: ADDRESS6 is a duplicate on this link",
-                     cfg->name);
         }
     }
     if (cfg->ip6type == AMI_IP6TYPE_AUTO)

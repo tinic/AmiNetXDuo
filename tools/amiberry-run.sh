@@ -245,6 +245,10 @@ board_lines() {
 TAG="${AMINETXDUO_RUN_TAG:-amiberry}"
 HD="$ROOT/build/amiberry-testhd-$TAG"
 SERIAL="$ROOT/build/amiberry-serial-$TAG.log"
+# The same output with a host timestamp per line, written alongside rather than
+# into $SERIAL: everything that greps the serial log anchors to the start of a
+# line.  See tools/serial-timestamp.py.
+SERIALTS="$ROOT/build/amiberry-serial-$TAG.stamped.log"
 UAELOG="$ROOT/build/amiberry-$TAG.log"
 CFG="$ROOT/build/amiberry-$TAG.uae"
 
@@ -400,6 +404,14 @@ export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
 
 WALL_START=$(date +%s)
 
+# A host without python3 keeps the reader it always had, and loses only the
+# stamped copy.
+SERIAL_READER=""
+if command -v python3 > /dev/null 2>&1; then
+    SERIAL_READER="python3 -u $ROOT/tools/serial-timestamp.py"
+    : > "$SERIALTS"
+fi
+
 # SIGPIPE is ignored for the same reason tools/fsuae-run.sh ignores it: the
 # emulator writes guest payload to host sockets with plain send(), and a peer
 # that hangs up first otherwise takes the emulator down mid-instruction with no
@@ -419,7 +431,15 @@ AMIBERRY_PID=$!
 (
     for _ in $(seq 1 60); do
         kill -0 "$AMIBERRY_PID" 2>/dev/null || exit 0
-        nc 127.0.0.1 "$PORT" >> "$SERIAL" 2>/dev/null && exit 0
+        # Both readers append to $SERIAL identically; the python one also
+        # stamps.  It exits non-zero without writing when it cannot connect,
+        # so the retry above behaves as it did with nc alone.
+        if [ -n "$SERIAL_READER" ]; then
+            $SERIAL_READER 127.0.0.1 "$PORT" "$SERIAL" "$SERIALTS" \
+                2>/dev/null && exit 0
+        else
+            nc 127.0.0.1 "$PORT" >> "$SERIAL" 2>/dev/null && exit 0
+        fi
         sleep 0.5
     done
 ) &
@@ -465,8 +485,15 @@ wait "$EMU_PID" 2>/dev/null || true
 #
 # This is the artifact, not a grep of the source.  It catches a wrong-CPU
 # binary however it was built, including one somebody staged by hand.
-_illegal=$(grep -aE "Illegal instruction: [0-9a-f]+ at [0-9A-F]+" "$UAELOG" 2>/dev/null |
-           grep -avE "at 00F[0-9A-F]{5}" | head -3)
+# `|| true` because a clean run is the case where both greps match nothing:
+# under `set -o pipefail` the pipeline is then 1, an assignment carries its
+# command substitution's status, and `set -e` took the script out right here.
+# Everything below -- the backend assertion, the serial dump, the guest's own
+# exit status -- was unreachable on any run that did NOT crash, and the harness
+# returned 1 for it.  Callers that read the guest's report rather than the exit
+# status did not notice.
+_illegal=$( { grep -aE "Illegal instruction: [0-9a-f]+ at [0-9A-F]+" "$UAELOG" 2>/dev/null |
+              grep -avE "at 00F[0-9A-F]{5}" | head -3; } || true)
 if [ -n "$_illegal" ]; then
     echo "!! ILLEGAL INSTRUCTION outside ROM -- a guest binary is built for a" >&2
     echo "!! newer CPU than this machine ($MODEL${CPU:+, -c $CPU}):" >&2
@@ -505,6 +532,7 @@ fi
 echo "---- serial ($SERIAL) ----"
 if [ -s "$SERIAL" ]; then
     cat "$SERIAL"
+    [ ! -s "$SERIALTS" ] || echo "(same output, timestamped: $SERIALTS)"
 else
     echo "(empty, no ami_log output reached the serial port)"
 fi

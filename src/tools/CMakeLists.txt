@@ -200,6 +200,11 @@ aminetxduo_add_tool(tool_getnetstatus GetNetStatus NX SOURCES getnetstatus.c)
 # interfaces through NetStackControl(), exactly as Offline does.
 aminetxduo_add_tool(tool_netshutdown NetShutdown SOURCES netshutdown.c)
 
+# RemoveNetInterface takes one interface out, where NetShutdown stops them all
+# and keeps them.  Config-only for the same reason: NetStackControl() again.
+aminetxduo_add_tool(tool_removenetinterface RemoveNetInterface
+    SOURCES removenetinterface.c)
+
 aminetxduo_add_tool(tool_online  Online   SOURCES onoff.c ${TOOLS_DEVDIAG})
 aminetxduo_add_tool(tool_offline Offline  SOURCES onoff.c ${TOOLS_DEVDIAG}
     DEFINES TOOL_OFFLINE)
@@ -342,7 +347,7 @@ add_custom_target(tools ALL)
 add_dependencies(tools
     tool_addnetinterface tool_checknetconfig
     tool_addnetroute tool_deletenetroute
-    tool_getnetstatus tool_netshutdown
+    tool_getnetstatus tool_netshutdown tool_removenetinterface
     tool_netsetup tool_online tool_offline tool_host
     tool_fetch tool_nc tool_telnet tool_nettrace tool_traceroute tool_nslookup tool_arp
     tool_tftp tool_whois tool_httpd

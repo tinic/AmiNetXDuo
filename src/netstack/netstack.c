@@ -995,6 +995,11 @@ static VOID ami_ns_ip_conflict(NX_IP *ip_ptr, UINT interface_index,
               (unsigned long)sender_mac_msw, (unsigned long)sender_mac_lsw);
 }
 
+VOID ami_netstack_mark(const char *event)
+{
+    AMI_INFO("netstack: mark %s %lu ms", event, (unsigned long)ami_millis());
+}
+
 static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
 {
     AmiNetStack *ns      = ami_ns;
@@ -1050,6 +1055,9 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
         else
             ami_ns_log_address("address is now", i, addr);
 
+        if (addr != 0UL)
+            ami_netstack_mark("ipv4");
+
         /*
          * RFC 3927 1.9: a routable address supersedes a link-local one. The
          * AutoIP thread does not watch for this itself, it sits in an
@@ -1081,6 +1089,22 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
         ami_address_change_notify();
 }
 
+/* NX_DHCP_STATE_* in order, for the bring-up marks. */
+static const char *ami_ns_dhcp_state_name(UCHAR state)
+{
+    static const char *const names[] = {
+        "dhcp-notstarted", "dhcp-boot",       "dhcp-init",
+        "dhcp-selecting",  "dhcp-requesting", "dhcp-bound",
+        "dhcp-renewing",   "dhcp-rebinding",  "dhcp-forcerenew",
+        "dhcp-probing"
+    };
+
+    if ((UINT)state >= (UINT)(sizeof(names) / sizeof(names[0])))
+        return "dhcp-other";
+
+    return names[state];
+}
+
 /*
  * Called by NetX Duo's DHCP client on every state transition, per interface.
  *
@@ -1101,6 +1125,10 @@ static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
 
     previous = ns->ns_DhcpState[iface_index];
     ns->ns_DhcpState[iface_index] = (UBYTE)new_state;
+
+    /* Which state, and when. A lease that takes seconds rather than the four
+       packets it is made of is a retransmission, and this is what says so. */
+    ami_netstack_mark(ami_ns_dhcp_state_name((UCHAR)new_state));
 
     switch (new_state)
     {
@@ -1157,11 +1185,13 @@ static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
  */
 static BOOL ami_ns_wait_for_address(AmiNetStack *ns, ULONG timeout_ticks)
 {
-    ULONG waited = 0UL;
+    ULONG start = tx_time_get();
 
     for (;;)
     {
         UWORD i;
+        ULONG spent;
+        ULONG remaining;
 
         for (i = 0; i < ns->ns_IfaceCount; i++)
         {
@@ -1173,33 +1203,53 @@ static BOOL ami_ns_wait_for_address(AmiNetStack *ns, ULONG timeout_ticks)
                 return TRUE;
         }
 
-        if (waited >= timeout_ticks)
+        spent = tx_time_get() - start;      /* unsigned: correct across a wrap */
+        if (spent >= timeout_ticks)
             return FALSE;
+        remaining = timeout_ticks - spent;
 
         /*
-         * Wait on the notification rather than polling. NetX Duo reports an
-         * arriving address through the registered ami_ns_address_changed(),
-         * whereas sleeping a tick at a time spent up to a whole tick asleep
-         * after the lease had landed, on the boot path where it is most
-         * visible (docs/RESEARCH.md 56).
+         * Wait out the whole remaining timeout on the notification, not a
+         * slice of it. NetX Duo reports an arriving address through the
+         * registered ami_ns_address_changed(), so there is nothing a shorter
+         * wait would find sooner; capping it at the poll interval instead woke
+         * this thread fifty times a second to re-walk every interface through
+         * nx_ip_interface_address_get(), taking the IP protection mutex each
+         * time and contending with the IP and DHCP threads it is waiting for.
+         * A thirty-second wait for a server that never answers was 1,500 of
+         * those passes and is now one.
          *
-         * The address is re-checked after every wake: the semaphore signals
-         * that something changed, which may be a different interface or an
-         * address going away. The poll interval remains the wait bound, so a
-         * missed notification costs a tick rather than the whole timeout.
+         * No wake is lost: ns_AddrArrived counts, so a post landing between
+         * the scan above and the get below is held and returns the get at
+         * once. A post for something other than an address arriving (a
+         * different interface, an address going away) returns it too, which is
+         * why the scan is at the top of the loop rather than after the wait,
+         * and the elapsed time rather than the slice is what bounds the loop.
          */
+        if (ns->ns_AddrArrivedReady)
+        {
+            UINT got = tx_semaphore_get(&ns->ns_AddrArrived, remaining);
+
+            /*
+             * TX_SUCCESS means something changed, so go and look. TX_NO_INSTANCE
+             * is the timeout, and the scan at the top runs once more before the
+             * elapsed check ends it. Anything else means the semaphore is gone,
+             * which only teardown does and it cannot run while startup holds
+             * ami_ns_lock, but a return that consumes no time would spin.
+             */
+            if (got != TX_SUCCESS && got != TX_NO_INSTANCE)
+                return FALSE;
+        }
+        else
         {
             ULONG slice = (ULONG)AMI_ADDRESS_POLL_TICKS;
 
-            if (slice > timeout_ticks - waited)
-                slice = timeout_ticks - waited;
+            if (slice == 0UL)
+                slice = 1UL;
+            if (slice > remaining)
+                slice = remaining;
 
-            if (ns->ns_AddrArrivedReady)
-                (VOID)tx_semaphore_get(&ns->ns_AddrArrived, slice);
-            else
-                tx_thread_sleep(slice);
-
-            waited += slice;
+            tx_thread_sleep(slice);
         }
     }
 }
@@ -1427,6 +1477,28 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
     if (ami_ns_wants(ns, AMI_IPTYPE_LINKLOCAL))
         ami_ns_start_autoip(ns);
 
+#ifdef AMINETXDUO_IPV6
+    /*
+     * BEFORE the wait below, not after it, and this is worth several seconds.
+     *
+     * Nothing here needs an IPv4 address: it configures the link-local
+     * address, arms the router solicitation and returns, and everything that
+     * takes time -- duplicate address detection, the solicitation, the address
+     * an advertisement brings and ITS duplicate address detection -- runs
+     * afterwards on the IP thread. Run after the wait, all of that started only
+     * once the lease had landed, so a boot paid for the DHCP exchange and the
+     * IPv6 tail one after the other; run here, the two overlap and bring-up
+     * costs the longer of them.
+     *
+     * `resolved` is about IPv4 and gates the AMI_NET_ERR_CONFIG return, so it
+     * is not touched: a machine with IPv6 and no IPv4 address still reports
+     * that no interface has an address, which is what every IPv4 caller will
+     * find. ami_ns6_address_changed() reports each IPv6 address as it lands,
+     * and netstack_ipv6_address_get() reports what has arrived so far.
+     */
+    ami_netstack_ipv6_configure(ns);
+#endif
+
     if (!resolved)
     {
         /* Block until some interface has an address, or DHCP gives up. */
@@ -1448,23 +1520,6 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
                          "either, is the cable in?");
         }
     }
-
-#ifdef AMINETXDUO_IPV6
-    /*
-     * IPv6 addressing runs after the IPv4 block and is never waited for. The
-     * link-local address is up before this returns (DAD is waited on inside),
-     * which is enough for every IPv6 socket call to have a source address. A
-     * global address from a router advertisement may take a second or two
-     * longer, and blocking startup on a router that may not exist would slow
-     * every IPv6 boot. netstack_ipv6_address_get() reports what has arrived.
-     *
-     * `resolved` is about IPv4 and gates the AMI_NET_ERR_CONFIG return, so it
-     * is not touched here: a machine with IPv6 and no IPv4 address still
-     * reports that no interface has an address, which is what every IPv4
-     * caller will find.
-     */
-    ami_netstack_ipv6_configure(ns);
-#endif
 
     {
         ULONG addr = 0UL;
@@ -1591,6 +1646,8 @@ static LONG ami_ns_bring_up(VOID)
                               ami_netstack_baton_acquire);
 
     /* ---- 4. ThreadX ----------------------------------------------------- */
+
+    ami_netstack_mark("start");
 
     AMI_INFO("netstack: starting ThreadX");
     txstatus = tx_amiga_kernel_start();
@@ -2700,8 +2757,10 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
      * addressing: the duplicate address detection this sends belongs inside
      * the trace.
      *
-     * The bracket is this function's third and last. Duplicate address
-     * detection is waited for inside, and that wait is a tx_thread_sleep().
+     * The bracket is this function's third and last. What happens inside it is
+     * configuration only: duplicate address detection runs afterwards, on the
+     * IP thread, and is reported by ami_ns6_address_changed() rather than
+     * waited for here.
      */
     caller = ami_netstack_enter_alloc();
     if (caller != NULL)

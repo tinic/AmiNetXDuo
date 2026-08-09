@@ -148,13 +148,15 @@
 #define AMI_AUTOIP_TIMEOUT_TICKS    (15UL * (ULONG)NX_IP_PERIODIC_RATE)
 
 /*
- * Granularity of the address-arrival poll, and so how long a DHCP lease sits
- * unnoticed after it arrives. A tenth of a second cost 67 ms of a 980 ms
- * AddNetInterface once the client's startup delay had gone. One tick is the
- * floor; each poll is two loads and a compare per interface, so a full
- * thirty-second wait for a server that never answers costs 1,500 of them.
+ * Only for the case where the address-arrival semaphore could not be created:
+ * ami_ns_wait_for_address() then has nothing to be woken by and has to look.
+ * Each look walks every interface through nx_ip_interface_address_get(), which
+ * takes the IP protection mutex, so the interval is set well clear of the IP
+ * and DHCP threads it would otherwise contend with rather than at the one-tick
+ * floor. It bounds only how late the address is noticed on a path that is
+ * already degraded.
  */
-#define AMI_ADDRESS_POLL_TICKS      1UL
+#define AMI_ADDRESS_POLL_TICKS      ((ULONG)NX_IP_PERIODIC_RATE / 10UL)
 
 /* --------------------------------------------------------------- the state */
 
@@ -295,6 +297,26 @@ LONG ami_netstack_ipv6_enable(AmiNetStack *ns);
 VOID ami_netstack_ipv6_configure(AmiNetStack *ns);
 VOID ami_netstack_ipv6_configure_one(AmiNetStack *ns, UWORD index);
 #endif
+
+/* --------------------------------------------------------- bring-up marks */
+
+/*
+ * One line per bring-up milestone, stamped with ami_millis(), which is the
+ * guest's own E-Clock and so is not affected by how loaded the host running
+ * the emulator is.  The shape is
+ *
+ *     netstack: mark <event> <ms> ms
+ *
+ * and tests/ipv6/run-bringup.sh reads it; the event names are that script's
+ * keys.  An AMI_INFO, so a default build carries neither the strings nor the
+ * call.
+ *
+ * It exists because the interesting part of bring-up is what happens after the
+ * command returns: duplicate address detection, the router solicitation and
+ * the address a router advertisement brings all land on the IP thread, minutes
+ * of wall clock apart from nothing that a caller could time.
+ */
+VOID ami_netstack_mark(const char *event);
 
 /* ------------------------------------------------------------- baton hooks */
 

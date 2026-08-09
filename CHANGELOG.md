@@ -9,6 +9,15 @@ version at the top when it merges.
 
 ## Unreleased
 
+- Bringing the network up takes 2.5 seconds where it took 8, measured to the point where both an IPv4 and a global IPv6 address are usable rather than to the point where the command returns. IPv6 is now configured before the wait for a lease rather than after it, so the DHCP exchange and the IPv6 work overlap instead of running one after the other, and a boot pays for the longer of the two
+- A DHCP lease is taken as soon as the server acknowledges it, and the RFC 5227 probes for a duplicate run alongside it rather than in front of it. The same frames go out; an address in use elsewhere is now found seconds into use rather than ahead of it, and is still declined
+- Duplicate address detection sends one solicitation per address instead of three, which is the default RFC 4862 itself gives
+- The router solicitation goes out while the link-local address is still tentative, as RFC 4861 allows. Address autoconfiguration no longer waits for duplicate address detection to finish before it can start, and completes about two seconds earlier
+- Timer expiration is processed where the tick is delivered. A pending timer used to hold the timer wheel still until a separate task ran, and every tick in between was counted as time but did nothing, so DHCP retransmission backoff, the T1 and T2 lease timers and the stack's own one-second work all ran late under load
+- Waiting for an address waits on the notification the stack already had instead of looking fifty times a second. A wait for a DHCP server that never answers cost 1,500 passes over every interface, each one contending with the threads it was waiting for
+- `RemoveNetInterface` takes a single interface out of the running network, closing its SANA-II device so the hardware is free and releasing its configuration slot so the same name can be added again. An interface still carrying TCP connections is refused unless `FORCE` is given
+- The commands that list interfaces no longer read past the end of their own table when the library reports more interfaces than they have room for, which a half-installed pair of library and command could do
+
 ## 0.19.1
 
 - The stack's timer now wakes from the vertical blank, and on every second frame rather than every one, instead of issuing a timer.device request for each tick. The clock is still taken from the E-Clock so nothing about timing changes; what goes is the request round trip and half the wakeups, and other work on the machine while the stack is resident runs about 13% faster on a 68000 and 2.5% on a 68020

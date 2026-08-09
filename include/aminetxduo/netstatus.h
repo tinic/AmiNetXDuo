@@ -751,6 +751,21 @@ typedef struct NetStatusService
 #define NETCTRL_MDNS_BROWSE      14 /* nsc_Name, empty for the meta-query    */
 #define NETCTRL_MDNS_BROWSE_STOP 15 /* nsc_Name, the same one                */
 
+/*
+ * Take an interface out of the stack entirely: the SANA-II device is closed,
+ * the NetX Duo interface is detached and the configuration slot is released.
+ * NETCTRL_INTERFACE_DOWN stops the traffic and keeps all of that.
+ *
+ * Refused with EBUSY while anything is still using the interface, counted as
+ * TCP connections routed out of it; NETCTRL_F_FORCE overrides, and every such
+ * connection is reset. An index is a handle a caller may hold, so removing one
+ * interface does not renumber the others.
+ */
+#define NETCTRL_INTERFACE_REMOVE 16 /* nsc_Index, nsc_Flags                  */
+
+/* Flags for nsc_Flags. Zero unless an operation above says otherwise. */
+#define NETCTRL_F_FORCE         0x00000001
+
 typedef struct NetStatusControl
 {
     ULONG   nsc_Magic;                  /* in: AMI_NETSTATUS_MAGIC           */
@@ -765,7 +780,13 @@ typedef struct NetStatusControl
     ULONG   nsc_Gateway6[4];            /* all zero = no next hop            */
     ULONG   nsc_PrefixLength;
     char    nsc_Name[NETSTATUS_SVC_TYPE_LEN];
-    ULONG   nsc_Reserved[4];
+    /*
+     * Named out of what was reserved, which is what reserved was for: every
+     * caller had to zero it, so no caller that predates this asks for a flag
+     * by accident. The block is the size it always was.
+     */
+    ULONG   nsc_Flags;                  /* NETCTRL_F_*                       */
+    ULONG   nsc_Reserved[3];
 } NetStatusControl;
 
 #ifdef __cplusplus

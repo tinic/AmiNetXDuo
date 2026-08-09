@@ -177,9 +177,12 @@ extern unsigned int ami_crypto_rbg(unsigned int bits, unsigned char *result);
  * particular has to let a plain Exec Task through during bring-up.  They are
  * still exposed to the teardown window, on nx_*_socket_create() only.
  *
- * TX_TIMER_PROCESS_IN_ISR is never defined for this port (timer callbacks run on
- * _tx_timer_thread so they may take mutexes, see tx_port.h), so there is one
- * set of definitions rather than the vendor's two.
+ * There is no _tx_timer_thread to reject.  tx_port.h defines
+ * TX_TIMER_PROCESS_IN_ISR, so a timer callback runs in the tick task and
+ * arrives here as an ISR, which _tx_thread_system_state and
+ * tx_amiga_caller_is_thread() already refuse; ThreadX does not declare the
+ * thread at all in that configuration, and naming it here is what stopped the
+ * whole tree linking when the define went in.
  */
 
 /* At file scope, not only in NX_CALLER_CHECKING_EXTERNS: several addons expand
@@ -187,24 +190,19 @@ extern unsigned int ami_crypto_rbg(unsigned int bits, unsigned char *result);
    ThreadX globals from tx_api.h instead. */
 extern  UINT    tx_amiga_caller_is_thread(void);
 
-#define NX_CALLER_CHECKING_EXTERNS          extern  TX_THREAD           *_tx_thread_current_ptr; \
-                                            extern  TX_THREAD           _tx_timer_thread; \
-                                            extern  volatile ULONG      _tx_thread_system_state;
+#define NX_CALLER_CHECKING_EXTERNS          extern  volatile ULONG      _tx_thread_system_state;
 
-#define NX_THREADS_ONLY_CALLER_CHECKING     if ((tx_amiga_caller_is_thread() == ((UINT) 0)) || \
-                                                (_tx_thread_current_ptr == &_tx_timer_thread)) \
+#define NX_THREADS_ONLY_CALLER_CHECKING     if (tx_amiga_caller_is_thread() == ((UINT) 0)) \
                                                 return(NX_CALLER_ERROR);
 
-#define NX_INIT_AND_THREADS_CALLER_CHECKING if (((_tx_thread_system_state) && (_tx_thread_system_state < ((ULONG) 0xF0F0F0F0))) || \
-                                                (_tx_thread_current_ptr == &_tx_timer_thread)) \
+#define NX_INIT_AND_THREADS_CALLER_CHECKING if ((_tx_thread_system_state) && (_tx_thread_system_state < ((ULONG) 0xF0F0F0F0))) \
                                                 return(NX_CALLER_ERROR);
 
 #define NX_NOT_ISR_CALLER_CHECKING          if ((_tx_thread_system_state) && (_tx_thread_system_state < ((ULONG) 0xF0F0F0F0))) \
                                                 return(NX_CALLER_ERROR);
 
 #define NX_THREAD_WAIT_CALLER_CHECKING      if ((wait_option) && \
-                                               ((tx_amiga_caller_is_thread() == ((UINT) 0)) || \
-                                                (_tx_thread_current_ptr == &_tx_timer_thread))) \
+                                                (tx_amiga_caller_is_thread() == ((UINT) 0))) \
                                             return(NX_CALLER_ERROR);
 
 
