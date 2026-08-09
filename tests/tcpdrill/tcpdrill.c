@@ -682,7 +682,7 @@ static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
        THE WALK STOPS AT AN END-OF-OPTION-LIST, which is what a conforming peer
        does and is the whole reason the window scale option's own padding byte
        matters: an option emitted after an EOL is not on the wire as far as
-       anything that parses properly is concerned.  wscale.drill w03 is that
+       anything that parses properly is concerned.  wscale.drill x01 is that
        case. */
     {
         const UBYTE *o   = tcp + 20;
@@ -986,23 +986,21 @@ static VOID build_and_inject(const Inject *in)
      * tests the wrong thing.  RFC 1122 4.2.3.10 MUST-57 is about the segment
      * the wire actually delivered to everybody.
      */
+    if (in->dst == DST_BCAST)
     {
-        if (in->dst == DST_BCAST)
-        {
-            dst_ip = 0xFFFFFFFFUL;
-            f[0] = f[1] = f[2] = f[3] = f[4] = f[5] = 0xFF;
-        }
-        else if (in->dst == DST_SUBNET)
-        {
-            dst_ip = (LOCAL_IP | 0x000000FFUL);
-            f[0] = f[1] = f[2] = f[3] = f[4] = f[5] = 0xFF;
-        }
-        else if (in->dst == DST_MCAST)
-        {
-            dst_ip = 0xE0000001UL;
-            f[0] = 0x01; f[1] = 0x00; f[2] = 0x5E;
-            f[3] = 0x00; f[4] = 0x00; f[5] = 0x01;
-        }
+        dst_ip = 0xFFFFFFFFUL;
+        f[0] = f[1] = f[2] = f[3] = f[4] = f[5] = 0xFF;
+    }
+    else if (in->dst == DST_SUBNET)
+    {
+        dst_ip = (LOCAL_IP | 0x000000FFUL);
+        f[0] = f[1] = f[2] = f[3] = f[4] = f[5] = 0xFF;
+    }
+    else if (in->dst == DST_MCAST)
+    {
+        dst_ip = 0xE0000001UL;
+        f[0] = 0x01; f[1] = 0x00; f[2] = 0x5E;
+        f[3] = 0x00; f[4] = 0x00; f[5] = 0x01;
     }
 
     tcp   = ip + 20;
