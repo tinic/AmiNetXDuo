@@ -995,6 +995,11 @@ static VOID ami_ns_ip_conflict(NX_IP *ip_ptr, UINT interface_index,
               (unsigned long)sender_mac_msw, (unsigned long)sender_mac_lsw);
 }
 
+VOID ami_netstack_mark(const char *event)
+{
+    AMI_INFO("netstack: mark %s %lu ms", event, (unsigned long)ami_millis());
+}
+
 static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
 {
     AmiNetStack *ns      = ami_ns;
@@ -1049,6 +1054,9 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
             ami_ns_log_address("has the link-local address", i, addr);
         else
             ami_ns_log_address("address is now", i, addr);
+
+        if (addr != 0UL)
+            ami_netstack_mark("ipv4");
 
         /*
          * RFC 3927 1.9: a routable address supersedes a link-local one. The
@@ -1451,12 +1459,11 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
 
 #ifdef AMINETXDUO_IPV6
     /*
-     * IPv6 addressing runs after the IPv4 block and is never waited for. The
-     * link-local address is up before this returns (DAD is waited on inside),
-     * which is enough for every IPv6 socket call to have a source address. A
-     * global address from a router advertisement may take a second or two
-     * longer, and blocking startup on a router that may not exist would slow
-     * every IPv6 boot. netstack_ipv6_address_get() reports what has arrived.
+     * IPv6 addressing runs after the IPv4 block and is never waited for: this
+     * configures the addresses and returns, and duplicate address detection,
+     * the router solicitation and any address an advertisement brings all run
+     * afterwards on the IP thread. ami_ns6_address_changed() reports each as it
+     * lands, and netstack_ipv6_address_get() reports what has arrived so far.
      *
      * `resolved` is about IPv4 and gates the AMI_NET_ERR_CONFIG return, so it
      * is not touched here: a machine with IPv6 and no IPv4 address still
@@ -1591,6 +1598,8 @@ static LONG ami_ns_bring_up(VOID)
                               ami_netstack_baton_acquire);
 
     /* ---- 4. ThreadX ----------------------------------------------------- */
+
+    ami_netstack_mark("start");
 
     AMI_INFO("netstack: starting ThreadX");
     txstatus = tx_amiga_kernel_start();
