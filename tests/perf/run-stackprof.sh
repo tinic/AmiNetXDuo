@@ -89,7 +89,11 @@ cd "$ROOT"
 STACK=""
 TAG=""
 PROFILE=1
-PEER_ADDR="${AMINETXDUO_FITZ_PEER_ADDR:-192.168.1.160}"
+# No default: with -H it is asked of the peer below, and with neither it is the
+# one thing this script cannot guess.  A hardcoded address is a second, silently
+# unvalidated spelling of the machine -H already names -- run-fitzbench.sh's
+# default outlived a peer move and pointed at the host its own guard refuses.
+PEER_ADDR="${AMINETXDUO_FITZ_PEER_ADDR:-}"
 PEER="${AMINETXDUO_FITZ_PEER:-}"
 PEER_DIR="${AMINETXDUO_FITZ_PEER_DIR:-/tmp/fitzbench-share}"
 PEER_BIN="${AMINETXDUO_FITZ_PEER_BIN:-\$HOME/fitzsrc/fitz-serve}"
@@ -238,6 +242,28 @@ if [ "$CTLONLY" = 1 ] || [ "$DIAG" = 1 ]; then
         echo "==> control only: RAM: arm, stack up, no traffic"
     fi
 elif [ -n "$PEER" ]; then
+    # Ask the machine ssh landed on for its own address; it cannot be wrong
+    # about that, whereas this host's resolver can be stale and on a Mac does
+    # not answer for the lab's names at all.
+    PEER_ADDRS=$(ssh "$PEER" \
+        "ip -4 -o addr show scope global 2>/dev/null | awk '{print \$4}' | cut -d/ -f1" \
+        2>/dev/null)
+    [ -n "$PEER_ADDRS" ] || {
+        echo "$PEER did not report an address of its own; pass -A <addr>" >&2
+        exit 2; }
+    if [ -z "$PEER_ADDR" ]; then
+        PEER_ADDR=$(printf '%s\n' "$PEER_ADDRS" | head -1)
+        [ "$(printf '%s\n' "$PEER_ADDRS" | wc -l)" -eq 1 ] || {
+            echo "note: $PEER holds more than one address, using $PEER_ADDR" >&2
+            echo "      pass -A to choose the one the guest's bridge reaches" >&2; }
+    else
+        printf '%s\n' "$PEER_ADDRS" | grep -qx "$PEER_ADDR" || {
+            echo "$PEER does not hold $PEER_ADDR -- the server would be staged" >&2
+            echo "on one machine and the guest pointed at another.  It holds:" >&2
+            printf '%s\n' "$PEER_ADDRS" | sed 's/^/  /' >&2
+            exit 2; }
+    fi
+
     PEERLOG="$ROOT/build/stackprof-$TAG-peer.log"
     # The bracket is not decoration: pkill -f matches the remote shell's own
     # command line, so an unbracketed pattern kills the connection issuing it.
@@ -275,6 +301,9 @@ else
     # run booted the emulator, brought the interface up, mounted nothing and
     # reported "RESULT read FAILED" -- a stack verdict for a missing server,
     # indistinguishable from a stack that cannot transfer.
+    [ -n "$PEER_ADDR" ] || {
+        echo "no peer and no -A: give -A <addr> for a server already listening," >&2
+        echo "or -H <user@host> to have this script start one" >&2; exit 2; }
     if ! timeout 4 bash -c "exec 3<>/dev/tcp/$PEER_ADDR/$PORT" 2>/dev/null; then
         cat >&2 <<EOF
 Nothing is listening on $PEER_ADDR:$PORT, and no peer was given to start one.
@@ -419,6 +448,16 @@ set -e
 HD="$ROOT/build/amiberry-testhd-$TAG"
 REPORT="$HD/tools.txt"
 [ -f "$REPORT" ] || { echo "FAIL: no $REPORT (rc=$RUN_RC)" >&2; exit 1; }
+
+# Same as tests/perf/run-fitzbench.sh: the backend assertion in
+# tools/amiberry-run.sh reports through the exit status and nothing else, so a
+# run that came up on SLIRP instead of the bridge otherwise prints a profile
+# and returns 0.
+if [ "$RUN_RC" != "0" ]; then
+    echo "FAIL: the emulator run failed (rc=$RUN_RC); the profile it left" >&2
+    echo "describes a run its own harness refused." >&2
+    exit "$RUN_RC"
+fi
 
 echo
 echo "===================== what the commands printed ====================="
