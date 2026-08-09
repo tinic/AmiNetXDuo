@@ -21,6 +21,7 @@
 #   AMINETXDUO_RUN_TAG=kstop ./tools/fsuae-run.sh -t 120 build/cm/tools/smoke/KernelStop
 #   AMINETXDUO_RUN_TAG=rand1 ./tools/fsuae-run.sh -t 120 build/cm/tools/smoke/randtest
 #   AMINETXDUO_RUN_TAG=tick  ./tools/fsuae-run.sh -t 120 build/cm/tools/smoke/tickclock
+#   AMINETXDUO_RUN_TAG=drift ./tools/amiberry-run.sh -t 90 build/cm/tools/smoke/timerdrift
 #   AMINETXDUO_RUN_TAG=mem   ./tools/fsuae-run.sh -t 300 build/cm/tools/smoke/memprobe \
 #                                                        <staged libs/> <staged devs/>
 #
@@ -69,6 +70,10 @@
 #              compares how far tx_time_get() moved against the E-Clock, which
 #              says whether the ThreadX clock is derived or counted.  Does not
 #              crash anything; the machine does stop for 750 ms at a time.
+# timerdrift   measures the period a periodic ThreadX timer actually keeps,
+#              alone and beside other timers, because tx_time_get() moved 58 to
+#              66 ticks between DHCP's 50-tick timeouts and netstat -h reports
+#              nothing wrong.  Does not crash anything.
 set(SMOKE_PROBES
     smoke       smoke.c
     crashtest   crashtest.c
@@ -77,6 +82,7 @@ set(SMOKE_PROBES
     KernelStop  kernelstop.c
     randtest    randtest.c
     tickclock   tickclock.c
+    timerdrift  timerdrift.c
     memprobe    memprobe.c
     alignprobe  alignprobe.c)
 

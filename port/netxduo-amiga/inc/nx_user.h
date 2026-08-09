@@ -697,7 +697,9 @@
  * third -- the retransmissions are there for a lost packet, on a link where a
  * neighbour's reply is a single unicast frame it did not have to ask for.
  */
+#ifndef NX_IPV6_DAD_TRANSMITS
 #define NX_IPV6_DAD_TRANSMITS                   1
+#endif
 
 /*
  * Report what duplicate address detection decides, and what a router hands
