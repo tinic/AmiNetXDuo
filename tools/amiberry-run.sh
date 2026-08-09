@@ -485,8 +485,15 @@ wait "$EMU_PID" 2>/dev/null || true
 #
 # This is the artifact, not a grep of the source.  It catches a wrong-CPU
 # binary however it was built, including one somebody staged by hand.
-_illegal=$(grep -aE "Illegal instruction: [0-9a-f]+ at [0-9A-F]+" "$UAELOG" 2>/dev/null |
-           grep -avE "at 00F[0-9A-F]{5}" | head -3)
+# `|| true` because a clean run is the case where both greps match nothing:
+# under `set -o pipefail` the pipeline is then 1, an assignment carries its
+# command substitution's status, and `set -e` took the script out right here.
+# Everything below -- the backend assertion, the serial dump, the guest's own
+# exit status -- was unreachable on any run that did NOT crash, and the harness
+# returned 1 for it.  Callers that read the guest's report rather than the exit
+# status did not notice.
+_illegal=$( { grep -aE "Illegal instruction: [0-9a-f]+ at [0-9A-F]+" "$UAELOG" 2>/dev/null |
+              grep -avE "at 00F[0-9A-F]{5}" | head -3; } || true)
 if [ -n "$_illegal" ]; then
     echo "!! ILLEGAL INSTRUCTION outside ROM -- a guest binary is built for a" >&2
     echo "!! newer CPU than this machine ($MODEL${CPU:+, -c $CPU}):" >&2

@@ -1455,6 +1455,28 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
     if (ami_ns_wants(ns, AMI_IPTYPE_LINKLOCAL))
         ami_ns_start_autoip(ns);
 
+#ifdef AMINETXDUO_IPV6
+    /*
+     * BEFORE the wait below, not after it, and this is worth several seconds.
+     *
+     * Nothing here needs an IPv4 address: it configures the link-local
+     * address, arms the router solicitation and returns, and everything that
+     * takes time -- duplicate address detection, the solicitation, the address
+     * an advertisement brings and ITS duplicate address detection -- runs
+     * afterwards on the IP thread. Run after the wait, all of that started only
+     * once the lease had landed, so a boot paid for the DHCP exchange and the
+     * IPv6 tail one after the other; run here, the two overlap and bring-up
+     * costs the longer of them.
+     *
+     * `resolved` is about IPv4 and gates the AMI_NET_ERR_CONFIG return, so it
+     * is not touched: a machine with IPv6 and no IPv4 address still reports
+     * that no interface has an address, which is what every IPv4 caller will
+     * find. ami_ns6_address_changed() reports each IPv6 address as it lands,
+     * and netstack_ipv6_address_get() reports what has arrived so far.
+     */
+    ami_netstack_ipv6_configure(ns);
+#endif
+
     if (!resolved)
     {
         /* Block until some interface has an address, or DHCP gives up. */
@@ -1476,22 +1498,6 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
                          "either, is the cable in?");
         }
     }
-
-#ifdef AMINETXDUO_IPV6
-    /*
-     * IPv6 addressing runs after the IPv4 block and is never waited for: this
-     * configures the addresses and returns, and duplicate address detection,
-     * the router solicitation and any address an advertisement brings all run
-     * afterwards on the IP thread. ami_ns6_address_changed() reports each as it
-     * lands, and netstack_ipv6_address_get() reports what has arrived so far.
-     *
-     * `resolved` is about IPv4 and gates the AMI_NET_ERR_CONFIG return, so it
-     * is not touched here: a machine with IPv6 and no IPv4 address still
-     * reports that no interface has an address, which is what every IPv4
-     * caller will find.
-     */
-    ami_netstack_ipv6_configure(ns);
-#endif
 
     {
         ULONG addr = 0UL;
