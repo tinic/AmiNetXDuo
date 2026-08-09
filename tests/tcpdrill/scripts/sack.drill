@@ -8,15 +8,15 @@
 # hdrlen IS ASSERTED ON EVERY CASE THAT CHANGES IT.  The data offset field is
 # what tells the peer where the payload starts, and it is the one thing a
 # capture is worst at catching: a segment with a wrong offset still has a
-# valid checksum, still arrives, and is simply read from the wrong byte.  A
-# case can state it exactly, and each option layout below has its own number:
+# valid checksum, still arrives, and is simply read from the wrong byte.
 #
-#   20   no options
-#   28   the SYN, whose option area is a fixed eight bytes
-#   32   NOP NOP, kind, length, one block
-#   40   two blocks
-#   48   three
-#   56   four, the most that fits in the 40 bytes an option area has
+# `hdrlen=auto` and not a number.  The option area is what the build and the
+# negotiation between them produce, so the number is one too: 20 with no
+# options, 28 for a SYN whose area is the fixed two words, 32 for one SACK
+# block and 8 more for each after it -- and 12 more again on a connection that
+# settled the RFC 7323 timestamp, and 4 more on a SYN that also carried the
+# window scale.  Written out, every SYN line here said 28 and went on saying it
+# through the day timestamps started shipping and our SYN became 40 bytes.
 #
 # Sequence numbers in `sack=` are offsets from the ISN this harness chose,
 # the same space `ack=` counts in, because the blocks describe data the peer
