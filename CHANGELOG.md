@@ -9,6 +9,12 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `AddNetInterface` adds an interface to a network that is already running. It never did: against a running stack it opened the library, waited for any address the machine happened to have, and reported success without adding anything, so an interface taken out with `RemoveNetInterface` could not be put back until a reboot
+- `AddNetInterface` says when it did not work. It now fails when the interface was refused, naming the device, the file or the slot, and warns when the interface attached but has no address; success means an interface that is addressed, or one configured to stay down
+- An interface added back after a removal can transmit. Its reader threads were being given memory the library had already registered elsewhere, which ThreadX refused, leaving the interface attached and addressed with its link down
+- A program can add an interface through the library, `NETCTRL_INTERFACE_ADD` alongside the existing remove
+- TCP acknowledges once the receive window has moved rather than once every second segment. On a 68020 with a PIO card that is 291 fewer acknowledgements for every megabyte read, and each one was a frame the processor built, the driver sent and the other end handled: reads there are 14% faster
+
 ## 0.20.0
 
 - Bringing the network up takes 2.5 seconds where it took 8, measured to the point where both an IPv4 and a global IPv6 address are usable rather than to the point where the command returns. IPv6 is now configured before the wait for a lease rather than after it, so the DHCP exchange and the IPv6 work overlap instead of running one after the other, and a boot pays for the longer of the two
