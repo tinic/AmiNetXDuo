@@ -291,7 +291,11 @@ fi
 # ---- 3 + 4: the services, and the wire they went out on ------------------
 
 if [ ! -f "$FSLOG" ]; then
-    infra "no emulator log at $FSLOG, so the wire was never recorded"
+    # tests/trace/a2065pcap.py reads the A2065 frame dumps FS-UAE writes, and
+    # only FS-UAE writes them: the Amiberry log this script's own run produces
+    # has none, so sections 3 and 4 do not run at all under that runner.
+    infra "no FS-UAE frame log at $FSLOG, so the wire was never recorded and
+       the thirteen assertions on what left the card did not run"
 elif ! python3 "$ROOT/tests/trace/a2065pcap.py" "$FSLOG" -o "$HD/host.pcap" \
         > "$HD/a2065.txt" 2>&1; then
     infra "a2065pcap.py could not turn $FSLOG into a capture"
