@@ -478,6 +478,15 @@ struct AmiSocketBase
     struct MinList          sb_Children;
     ULONG                   sb_StackRefs;   /* netstack_startup() references */
 
+    /*
+     * The library's own reference to the stack it is running, taken once and
+     * never given back (bsd_stack_hold()).  It is what keeps the network up
+     * after the command that started it has exited, so that command does not
+     * have to leak a base to do the same job.  A flag and not a count: the
+     * point is that the second AddNetInterface costs nothing.
+     */
+    BOOL                    sb_StackHeld;
+
     /* Cross-base descriptor hand-off (handoff.c). Two tasks' sockets meet
      * only here, so it lives in the master base. */
     struct MinList          sb_Handoffs;
@@ -859,6 +868,11 @@ struct AmiSocketBase *bsd_lib_open(register ULONG version __asm("d0"),
 APTR  bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"));
 APTR  bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"));
 APTR  bsd_lib_reserved(VOID);
+
+/* library.c, NETCTRL_STACK_HOLD.  Make the library hold its own reference to
+   the running stack so the caller's open can be closed without taking the
+   network down with it.  Idempotent; 0 on success, -1 if there is no stack. */
+LONG  bsd_stack_hold(struct AmiSocketBase *base);
 
 /* errno.c */
 VOID  bsd_set_errno(struct AmiSocketBase *base, LONG code);

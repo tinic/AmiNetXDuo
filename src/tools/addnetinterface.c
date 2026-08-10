@@ -27,10 +27,10 @@
  * prints what is wrong, where, and what to type next; the terse version still
  * goes to the serial log.
  *
- * It does not shut the stack down again: the reference taken by
- * tool_stack_start() is what keeps the interface online after this command
- * exits, as in Roadshow, where the interface stays up until Offline or a
- * reboot.
+ * It does not shut the stack down again: tool_stack_start() asks the library to
+ * hold the stack itself, which is what keeps the interface online after this
+ * command exits, as in Roadshow, where the interface stays up until Offline or
+ * a reboot. This command's own open is closed like anybody else's.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -571,15 +571,10 @@ int main(int argc, char **argv)
             }
 
             /*
-             * Closed, unlike the success path below.
-             *
-             * tool_stack_start() leaks its reference on purpose, because that
-             * is what keeps OUR network up after this command exits. None of
-             * that applies to somebody else's stack: nothing here is going to
-             * use it, and holding a reference to a library we are about to
-             * complain about only stops its owner unloading it.
+             * Holding a reference to a library we are about to complain about
+             * would only stop its owner unloading it.
              */
-            CloseLibrary(base);
+            tool_stack_release(base);
             FreeArgs(rda);
             return RETURN_WARN;
         }
@@ -617,6 +612,7 @@ int main(int argc, char **argv)
                                "it has");
                     tool_explain_no_netstatus(base);
                 }
+                tool_stack_release(base);
                 FreeArgs(rda);
                 return RETURN_FAIL;
             }
@@ -687,13 +683,21 @@ int main(int argc, char **argv)
                 break;
         }
 
+        /*
+         * The network is up and the library is holding it, so this open has
+         * done its job. Before this was here, every AddNetInterface left one
+         * behind: a base on the library's child list naming a Task that is
+         * about to exit (tool_diag.c, tool_stack_start()).
+         */
         if (broken)
         {
             tool_fault(ERROR_BREAK);
+            tool_stack_release(base);
             FreeArgs(rda);
             return RETURN_WARN;
         }
 
+        tool_stack_release(base);
         FreeArgs(rda);
         return (int)rc;
     }
