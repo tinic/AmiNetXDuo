@@ -127,7 +127,19 @@ fi
 
 # The address the guest calls.  SLIRP's gateway is the emulator host itself.
 if [ "$SERVER_ARMS" = yes ]; then
-    PEERADDR="$PEERHOST"
+    # -P is an ssh destination and may carry a user, but the guest is given an
+    # ADDRESS: it has no DNS of its own here, and "turo@playhouse2" is not a
+    # host name to anybody.  Strip the user, then resolve on this side.
+    PEERNAME="${PEERHOST#*@}"
+    PEERADDR=$(getent ahostsv4 "$PEERNAME" 2>/dev/null | awk 'NR==1{print $1}')
+    if [ -z "$PEERADDR" ]; then
+        case "$PEERNAME" in
+            *[!0-9.]*) echo "cannot resolve $PEERNAME to an address for the" \
+                            "guest to call" >&2; exit 2 ;;
+            *) PEERADDR="$PEERNAME" ;;
+        esac
+    fi
+    echo "==> the peer is $PEERHOST, which the guest reaches at $PEERADDR"
 else
     PEERADDR=10.0.2.2
     ADDRESS=10.0.2.15
