@@ -467,6 +467,112 @@ response half that undoes the congestion window reduction, is unchecked; without
 it every spurious timeout halves a sender's window permanently. RFC 5682 F-RTO
 is the sender-side equivalent for a peer with no timestamps.
 
+### Test coverage, surveyed globally 2026-08-10
+
+`RemoveNetInterface` shipped in 0.20.0 unable to do the one thing its header
+promised, and reached a user. It was not found by the suite because the suite
+tests components one at a time: the defect lived in remove-then-add, and in
+state that outlives a single command. A global survey of the shipped surface --
+every tool template and header claim, all 150 `bsdsocket.library` vectors, the
+SANA-II command and tag surface both directions, every NETCTRL op, ARexx, mDNS,
+httpd, TLS, usergroup, every config key -- plus every interaction between them,
+against every test that exists.
+
+**59 `tests/**/run-*.sh` exist. `tools/ci.sh` runs 0 of them; `emulator.yml`
+runs 3.** The 14 `run-*.sh` mentions in `tests/*/CMakeLists.txt` are comments.
+The entire interaction surface is manual, which is the finding that explains all
+the others.
+
+Ranked by chance a user hits it times chance the suite stays silent.
+
+| Item | Effect | Cite |
+|---|---|---|
+| **A re-added interface can come back addressed with its link down** | `NX_LINK_ENABLE` -> `ami_sana2_rx_start()` -> `tx_thread_create()` returns `TX_PTR_ERROR` because a dead process's cached ThreadX adoption still claims the stack range. `run-ifremove.sh:256` asserts the address returned, not that the link is up or that traffic passes; no test creates the precondition (a process that opened `bsdsocket.library` and exited). Specified in commit `3d0f382`'s message and nowhere else | `sana2_rx.c:1310`, workaround `:1196`, `tx_amiga_adopt.c:676` |
+| **Every `AddNetInterface` leaks a base, and the leak is a use-after-free** | `tool_stack_start()` opens `bsdsocket.library` and never closes it, so each invocation leaks an `AmiSocketBase` clone, an `AllocSignal` and a cached thread registration; `bsd_child_destroy()` and `bsd_nx_release()` never run. `bsd_address_changed()` then walks every child base and `Signal(child->sb_Task)` -- a leaked base whose task exited signals freed memory, gated only on `SBTC_SIG_ADDRESS_CHANGE_MASK`. The single leak is documented as intentional at `tool_diag.c:712`; the accumulation and the signal are not | `tool_diag.c:726`, `addnetinterface.c:557`, `library.c:259`, `errno.c:405` |
+| **A runtime interface add reports mDNS it never enabled** | The add sets `ns_IfaceMdns[slot]` but never calls `nx_mdns_enable()` (only the startup path does); remove never disables nor clears it. `netstat` and `ShowNetStatus` set `NETSTATUS_IF_MDNS` from the flag, so an interface that does not answer `.local` reports that it does. `netstack.h:193` states the flag is the effective state, not the request -- the code contradicts the header | `netstack.c:2748`, `netstack_mdns.c:305`, `netstatus.c:759` |
+| **13 rc assertions are dead: the rc is parsed with its comma** | `ToolsSmoke` writes `rc %ld, %ld ms, free %ld`; three scripts take field 3 with `awk`, getting `"5,"`, so no comparison is ever true. The correct form is at `run-ifremove.sh:201` | `toolssmoke.c:361`; `run-checkconfig.sh:151`, `run-livetools.sh:326`, `run-tools-fsuae.sh:296` |
+| **The leak test has never executed its assertion** | The sed expects `", free"` where the line reads `", 380 ms,"`, so `FREE` is empty, the guard fails and the script exits 1 before the leak check. The same file's `grep -q 'rc 0,'` at `:204` uses the real format | `run-addifleak.sh:189` |
+| **`netshutdown` and `Offline` reset nothing that applications hold** | `NX_LINK_DISABLE` stops the readers and sends `S2_OFFLINE`; a blocked `recv()` sits until its own timeout. `netshutdown.c:23` says only that nothing is sent or received; the application-visible behaviour is specified nowhere, and no test opens a socket across a shutdown | `sana2_driver.c:270` |
+| **Removing the interface carrying the default gateway loses it except for static** | `nx_ip_interface_detach` drops the route; `netstack_interface_start()` restores it only for `AMI_IPTYPE_STATIC`, so a DHCP interface, or a second interface that could carry it, is left with no default route | `netstack.c:2201`, `:2847` |
+| **DHCP state across remove-then-add** | Cleared by `netstack_interface_dhcp_stop(index, TRUE)`; without it the interface is `AAMR_Busy` forever. The comment documents a bug found in the field and there is still no test | `netstack.c:2176`, `:2188` |
+| **A DHCP lease survives offline-then-online** | The client is not restarted and the lease timer keeps running, so a machine moved between networks keeps a stale address. Specified nowhere | -- |
+| **`netstack_shutdown()` frees an `NX_IP` an `AmiSana2If` still points into** | An orphaned SANA-II device makes `ami_sana2_close()` return early, leaving the interface allocated while `ami_free(ns)` frees the IP instance under it. The leak is logged; the dangling `interface_ptr` is not documented | `netstack.c:512`, `sana2_device.c:715` |
+| **The same orphan condition reports two different errnos** | `NETCTRL_INTERFACE_REMOVE` maps `AMI_NET_ERR_STATE` to `ENXIO`, `RemoveInterface()` maps it to `EBUSY`, and the tool prints its FORCE hint only on `EBUSY` -- so via NETCTRL the user is told it could not be removed, with no cause | `netstatus.c:1446`, `interfaces.c:1500`, `removenetinterface.c:205` |
+| **Two header shapes both claim `AMI_NETSTATUS_VERSION` 7** | `0e10341` has ops up to 16; HEAD adds op 17 `NETCTRL_INTERFACE_ADD` with no bump (`330fb9f`). Skew is exact equality both directions, so a v6 consumer is told the network is up but will not report on itself. The comment above the constant still says 6 | `netstatus.h:71` vs `:80`, `netstatus.c:1193`, `:1407` |
+| **Two interfaces may name the same device and unit** | The add compares names only; the second `OpenDevice` succeeds and `S2_CONFIGINTERFACE` returning `S2WERR_IS_CONFIGURED` is treated as success. `CheckNetConfig` promises the check at config time; runtime has none | `netstack.c:2630`, `sana2_device.c:250`, `checknetconfig.c:21` |
+| **Three loops touch `ns_Iface[]` without the NULL check the invariant requires** | `netstack_interface_up/down()` guard on the count only, so a removed slot below the count issues an NX driver command on a detached interface; ARexx `KILL` loops the same way. `netstack.c:2083` states that every loop checks the slot | `netstack.c:2004`, `:2026`, `netstack_rexx.c:163` |
+| **The cycledrill leak is real, not a harness defect** | The parse matches the guest's output; the failure is the assertion against a 1024-byte budget. Which phase overruns is not determinable statically | `run-cycledrill.sh:344`, `:350`, `cycledrill.c:1391` |
+
+**Keepalive is worse than "2 of 4 failing".** The drill needs
+`-DAMINETXDUO_TCP_KEEPALIVE_INITIAL=5`, defaulted to empty
+(`tests/CMakeLists.txt:291`). `k02`/`k03` time out; `k01`/`k04` assert `notx
+10000` and pass **because the timer is two hours**, so they would pass with the
+feature absent. The drill is unreachable anyway: `run-tcpdrill.sh:35` hardcodes
+`tcp.drill`.
+
+**Tests that cannot fail.** Fourteen scripts exit with the emulator's status and
+have no verdict, so a guest that runs zero checks and exits 0 is a pass -- the
+TLS four, the netstack four, `tests/ipv6/run-{fsuae,socket-fsuae}.sh`,
+`tests/libraries/`, `tests/sockopt/`, `tests/stack/`, `tests/leak/`;
+`run-socket-fsuae.sh` is one of the three in CI. `run-udpdrill.sh:56`, `:61` are
+`|| true` and `:72` is the last statement. `run-fsuae.sh:152` prints that
+conformance results are meaningless against a foreign `bsdsocket.library` and
+exits with the guest's status anyway. `run-cycledrill.sh:376` fails on orphaned
+reader stacks only under `AMINETXDUO_CYCLE_ORPHAN_FATAL=1`, which nothing sets.
+`run-mdns.sh:448` and `run-arexx.sh:344` are `note:` with no assertion, and
+`run-mdns.sh:427` reports a missing pcap as a product failure. Verdicts that
+grep prose: `run-checkconfig.sh:158`, `run-livetools.sh:284`,
+`run-cycledrill.sh:329`, `run-arexx.sh:267`, and `run-mdns.sh:304`, which
+asserts on **tcpdump's** rendering, so a tcpdump bump fails the product.
+
+**Gates that hide regressions.** `tools/ci.sh:226` compares a test count to a
+target (45 vs 36), so nine tests can vanish silently; `:272` does it correctly.
+`AMINETXDUO_CI_CROSS=<typo>` skips all 14 cross configs and reports green
+(`:305`, `:570`). The fuzz directory unregisters entirely without ASan,
+including the one regression it exists for (`tests/fuzz/CMakeLists.txt:40`).
+`src/tls/CMakeLists.txt:100` enables TLS 1.3 under a comment at `:84` saying it
+is off, and `tests/fuzz/CMakeLists.txt:277` repeats the wrong claim.
+
+**Only failure mode is the ceiling.** `tools/amiberry-run.sh:449` polls `$HD/.done`
+with a bare `sleep 1` and no liveness check, so a guest that never boots and one
+that hangs on its last assertion are both `124` after the full timeout with no
+artifact. `run-tls13.sh:140` gives the local TLS peer one second before the
+guest connects and runs in GitHub CI, so a slow runner surfaces a fixture race
+as a handshake error. Bare sleeps that are the only synchronisation:
+`run-nettools.sh:282` (25 s), `run-bebbossh.sh:455` (22 s),
+`run-fitzstress.sh:333` (30 s), `run-mdns.sh:189`, `run-tcphandler.sh:183`,
+`run-httpd.sh:185`, `run-trace.sh:123`.
+
+**Shared fixtures.** `AMINETXDUO_RUN_TAG` is exported by `tools/ci.sh:503`, so an
+outer setting collapses several scripts onto one `build/amiberry-testhd-$TAG`,
+which `amiberry-run.sh:259` deletes. The serial port is `12000 +
+cksum(TAG)%900`, and a collision yields an empty serial log indistinguishable
+from a guest crash. `tests/tcpdrill/tapdev.c` is linked into three suites, so one
+tapdev regression fails all three and reads as a stack defect. Four suites
+`pkill -f "fitz-serve"`, killing a concurrent run's peer.
+
+**Shipped with no test at all.** `NetSetup`; `ShowNetServices`; `TLSRandom`;
+`TLSBuffered`; `tls.library` load and ABI; all 39 `usergroup.library` LVOs
+against the shipped image; `ug_db.c`; `Dup2Socket`; `SetErrnoPtr`; the
+`ObtainSocket` half of the hand-off; the 8 `bpf_*` LVOs; every `NETCTRL_ARP_*`,
+`ROUTE6_*`, `ND_*` and `MDNS_BROWSE*` op; the netstatus magic and version
+rejection paths; `DEVS:Internet/{protocols,services,networks}` as shipped; and
+the installer, whose own checker lives outside `tests/` and outside `ci.yml`.
+`RemoveNetInterface` is absent from `test_argtemplates.c:76`, so its template
+and enum can drift unchecked. `stack_test.c:845` calls `getaddrinfo`,
+`getnameinfo` and `gethostbyaddr` and asserts `st_check(1, ...)`.
+
+**Interactions specified nowhere.** Add twice under one name; remove an
+interface that is already offline; two tasks adding concurrently; add or remove
+racing `netstack_shutdown()`; `NetShutdown` then `AddNetInterface` with the
+interface still registered; `Online` on a name with no stack running (which
+starts the whole network, `onoff.c:33`); ARP entries surviving offline with
+nothing aging them out; IPv6 link-local re-creation on a runtime add;
+`netstack_iface_config()` answering for a removed slot; a `SocketBase` used from
+a second task; `SocketBaseTagList`'s failing-index semantics; break-signal EINTR
+on `recv`/`send`/`accept`/`connect`/`WaitSelect`, tested only for the resolver.
+`errno.c:387` says `SBTC_FDCALLBACK` is never called; `socket.c:437` calls it.
+
 ### Performance, measured positions
 
 **Tickless on "the timer wheel is empty" cannot fire.** Tried 2026-08-07,
