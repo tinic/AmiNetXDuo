@@ -161,83 +161,85 @@ EOF"
     fi
     cat <<EOF
 # ------------------------------------------------------------ cold ------
-# The stack was NEVER started.  Nothing below opens bsdsocket.library.
-cold|CheckNetConfig|reads-config|5|rc!=-1|-|SYS:CheckNetConfig
-cold|CheckNetConfig|verbose|5|rc!=-1|-|SYS:CheckNetConfig VERBOSE
-cold|GetNetStatus|no-stack|5|rc!=-1|-|SYS:GetNetStatus
-cold|ShowNetStatus|no-stack|5|rc!=-1|-|SYS:ShowNetStatus
-cold|netstat|no-stack|5|rc!=-1|-|SYS:netstat -i
-cold|arp|no-stack|5|rc!=-1|-|SYS:arp
-cold|AddNetRoute|no-stack|5|rc!=-1|-|SYS:AddNetRoute DST=192.0.2.0 VIA=10.0.2.2
-cold|DeleteNetRoute|no-stack|5|rc!=-1|-|SYS:DeleteNetRoute DST=198.51.100.0
-cold|NetShutdown|no-stack|5|rc!=-1|-|SYS:NetShutdown
-cold|RemoveNetInterface|unknown-name|5|rc!=-1|-|SYS:RemoveNetInterface nosuchif
-cold|AddNetInterface|unknown-name|5|rc!=-1|-|SYS:AddNetInterface nosuchinterface
-cold|NetSetup|bad-address|5|rc!=-1|-|SYS:NetSetup eth9 DEVICE=a2065.device UNIT=0 ADDRESS=notanaddress NOONLINE
-cold|NetSetup|writes-config|5|rc!=-1|-|SYS:NetSetup ethz DEVICE=a2065.device UNIT=0 DHCP NOONLINE FORCE
+# The stack was NEVER started.  Nothing here opens bsdsocket.library, which is
+# what would start it, so every row is the "the network is not running" arm.
+cold|CheckNetConfig|reads-config|5|re:nothing wrong with it|-|SYS:CheckNetConfig
+cold|CheckNetConfig|verbose|5|re:Reading the configuration|-|SYS:CheckNetConfig VERBOSE
+cold|GetNetStatus|no-stack|5|re:The network is not running|-|SYS:GetNetStatus
+cold|ShowNetStatus|no-stack|5|re:Network stack: +not started|-|SYS:ShowNetStatus
+cold|netstat|no-stack|5|re:netstat: network not started|-|SYS:netstat -i
+cold|arp|no-stack|5|re:arp: network not started|-|SYS:arp
+cold|AddNetRoute|no-stack|5|re:not running, so it has no routes|-|SYS:AddNetRoute DST=192.0.2.0 VIA=10.0.2.2
+cold|DeleteNetRoute|no-stack|5|re:not running, so it has no routes|-|SYS:DeleteNetRoute DST=198.51.100.0
+cold|NetShutdown|no-stack|5|re:nothing to stop|-|SYS:NetShutdown
+cold|RemoveNetInterface|unknown-name|5|re:nothing to remove|-|SYS:RemoveNetInterface nosuchif
+cold|AddNetInterface|unknown-name|5|re:there is no interface called|-|SYS:AddNetInterface nosuchinterface
+cold|NetSetup|bad-address|5|re:is not an address|-|SYS:NetSetup eth9 DEVICE=a2065.device UNIT=0 ADDRESS=notanaddress NOONLINE
+cold|NetSetup|writes-config|5|re:set up a network interface|-|SYS:NetSetup ethz DEVICE=a2065.device UNIT=0 DHCP NOONLINE FORCE
 # ------------------------------------------------------------ live ------
-live|CheckNetConfig|stack-up|5|rc!=-1|-|SYS:CheckNetConfig
-live|GetNetStatus|stack-up|5|rc!=-1|-|SYS:GetNetStatus
-live|ShowNetStatus|all|5|rc!=-1|-|SYS:ShowNetStatus ALL
-live|netstat|all|5|rc!=-1|-|SYS:netstat -a
-live|netstat|routes|5|rc!=-1|-|SYS:netstat -r
-live|arp|cache|5|rc!=-1|-|SYS:arp
-live|arp|delete-miss|5|rc!=-1|-|SYS:arp 192.0.2.99 DELETE
-live|ping|reply|5|rc!=-1|-|SYS:ping 10.0.2.2 -c 1 -t 5
-live|ping|no-reply|4|rc!=-1|-|SYS:ping 192.0.2.1 -c 1 -t 3
-live|host|resolves|5|rc!=-1|-|SYS:host www.example.com
-live|host|nxdomain|5|rc!=-1|-|SYS:host no.such.host.invalid TIMEOUT 5
-live|nslookup|resolves|5|rc!=-1|-|SYS:nslookup www.example.com TYPE=A TIMEOUT 5
-live|nslookup|nxdomain|5|rc!=-1|-|SYS:nslookup no.such.host.invalid TIMEOUT 5
-live|fetch|http-200|5|rc!=-1|-|SYS:fetch http://10.0.2.2:${HTTP_PORT}/hello.txt TO DH0:fetched.bin TIMEOUT 10
-live|fetch|unresolvable|5|rc!=-1|-|SYS:fetch http://no.such.host.invalid/ TIMEOUT 5
-live|fetch|refused|5|rc!=-1|-|SYS:fetch http://10.0.2.2:${DEAD_PORT}/x TIMEOUT 5
-live|nc|scan-open|5|rc!=-1|-|SYS:nc -z 10.0.2.2 ${ECHO_PORT} -v -w 5
-live|nc|scan-closed|5|rc!=-1|-|SYS:nc -z 10.0.2.2 ${DEAD_PORT} -v -w 5
-live|telnet|negotiates|5|rc!=-1|-|SYS:telnet 10.0.2.2 ${TELNET_PORT} -d <DH0:telnetin.txt >DH0:telnet.txt
-live|telnet|refused|5|rc!=-1|-|SYS:telnet 10.0.2.2 ${DEAD_PORT}
-live|tftp|get|5|rc!=-1|-|SYS:tftp 10.0.2.2 PORT ${TFTP_PORT} GET hello.txt AS DH0:tftp.txt
-live|tftp|not-found|5|rc!=-1|-|SYS:tftp 10.0.2.2 PORT ${TFTP_PORT} GET no.such.file
-live|whois|answers|5|rc!=-1|-|SYS:whois plain.test SERVER 10.0.2.2 PORT ${WHOIS_PORT}
-live|whois|refused|5|rc!=-1|-|SYS:whois plain.test SERVER 10.0.2.2 PORT ${DEAD_PORT}
-live|traceroute|reaches|4|rc!=-1|-|SYS:traceroute 10.0.2.2 -m 2 -q 1 -w 3 -n
-live|traceroute|unresolvable|5|rc!=-1|-|SYS:traceroute no.such.host.invalid -m 1 -q 1 -w 2 -n
-live|sntp|no-server|4|rc!=-1|-|SYS:sntp 10.0.2.2 TIMEOUT 3
-live|sntp|shows-time|4|rc!=-1|-|SYS:sntp pool.ntp.org SHOW TIMEOUT 5
-live|NetTrace|loopback|4|rc!=-1|-|SYS:NetTrace LOOPBACK BYTES 4096 OUT DH0:nettrace.pcap
-live|NetTrace|wire|4|rc!=-1|-|SYS:NetTrace WIRE HOST 10.0.2.2 PORT ${HTTP_PORT} PATH /hello.txt OUT DH0:ntwire.pcap
-live|NetTrace|unresolvable|5|rc!=-1|-|SYS:NetTrace WIRE HOST no.such.host.invalid
-live|ShowNetServices|browse|4|rc!=-1|-|SYS:ShowNetServices SECONDS=1
-live|ShowNetServices|bad-type|5|rc!=-1|-|SYS:ShowNetServices http
-live|httpd|no-root|5|rc!=-1|-|SYS:httpd
-live|httpd|bad-root|5|rc!=-1|-|SYS:httpd DH0:nosuchdirectory 8099
-live|AddNetRoute|no-gateway|5|rc!=-1|-|SYS:AddNetRoute DST=192.0.2.0
-live|DeleteNetRoute|no-such-route|5|rc!=-1|-|SYS:DeleteNetRoute DST=198.51.100.0
-live|AddNetRoute|added|5|rc!=-1|SYS:DeleteNetRoute DST=192.0.2.0|SYS:AddNetRoute DST=192.0.2.0 VIA=10.0.2.2
-live|DeleteNetRoute|deleted|5|rc!=-1|SYS:AddNetRoute DST=192.0.2.0 VIA=10.0.2.2|SYS:DeleteNetRoute DST=192.0.2.0
-live|RemoveNetInterface|unknown-name|5|rc!=-1|-|SYS:RemoveNetInterface nosuchif
-live|AddNetInterface|already-up|5|rc!=-1|-|SYS:AddNetInterface eth0
-live|AddNetInterface|unknown-name|5|rc!=-1|-|SYS:AddNetInterface nosuchinterface
-live|Online|unknown-name|5|rc!=-1|-|SYS:Online nosuch0
-live|Offline|unknown-name|5|rc!=-1|-|SYS:Offline nosuch0
+live|CheckNetConfig|stack-up|5|re:nothing wrong with it|-|SYS:CheckNetConfig
+live|GetNetStatus|stack-up|5|re:The network is running|-|SYS:GetNetStatus
+live|ShowNetStatus|all|5|re:Network stack: +running|-|SYS:ShowNetStatus ALL
+live|netstat|all|5|re:Active connections|-|SYS:netstat -a
+live|netstat|routes|5|re:Routing table|-|SYS:netstat -r
+live|arp|cache|5|re:Hardware address|-|SYS:arp
+live|arp|delete-miss|5|re:was not removed from the cache|-|SYS:arp 192.0.2.99 DELETE
+live|ping|reply|5|re:0% packet loss|-|SYS:ping 10.0.2.2 -c 1 -t 5
+live|ping|no-reply|4|re:100% packet loss|-|SYS:ping 192.0.2.1 -c 1 -t 3
+live|host|resolves|5|re:has address|-|SYS:host www.example.com
+live|host|nxdomain|5|re:cannot resolve|-|SYS:host no.such.host.invalid TIMEOUT 5
+live|nslookup|resolves|5|re:www.example.com from|-|SYS:nslookup www.example.com TYPE=A TIMEOUT 5
+live|nslookup|nxdomain|5|re:there is no such name|-|SYS:nslookup no.such.host.invalid TIMEOUT 5
+live|fetch|http-200|5|re:HTTP/1.0 200 OK|-|SYS:fetch http://10.0.2.2:${HTTP_PORT}/hello.txt TO DH0:fetched.bin TIMEOUT 10
+live|fetch|unresolvable|5|re:cannot resolve|-|SYS:fetch http://no.such.host.invalid/ TIMEOUT 5
+live|fetch|refused|5|re:cannot connect to 10.0.2.2 port ${DEAD_PORT}|-|SYS:fetch http://10.0.2.2:${DEAD_PORT}/x TIMEOUT 5
+live|nc|scan-open|5|re:port ${ECHO_PORT} open|-|SYS:nc -z 10.0.2.2 ${ECHO_PORT} -v -w 5
+live|nc|scan-closed|5|re:port ${DEAD_PORT} connection refused|-|SYS:nc -z 10.0.2.2 ${DEAD_PORT} -v -w 5
+live|telnet|session|5|re:Trying 10.0.2.2 port ${TELNET_PORT}|-|SYS:telnet 10.0.2.2 ${TELNET_PORT} -d <DH0:telnetin.txt
+live|telnet|refused|5|re:Trying 10.0.2.2 port ${DEAD_PORT}|-|SYS:telnet 10.0.2.2 ${DEAD_PORT}
+live|tftp|get|5|re:49 bytes|-|SYS:tftp 10.0.2.2 PORT ${TFTP_PORT} GET hello.txt AS DH0:tftp.txt
+live|tftp|not-found|5|re:there is no such file on the server|-|SYS:tftp 10.0.2.2 PORT ${TFTP_PORT} GET no.such.file
+live|whois|answers|5|re:PLAIN.TEST|-|SYS:whois plain.test SERVER 10.0.2.2 PORT ${WHOIS_PORT}
+live|whois|refused|5|re:cannot reach 10.0.2.2 port ${DEAD_PORT}|-|SYS:whois plain.test SERVER 10.0.2.2 PORT ${DEAD_PORT}
+live|traceroute|reaches|4|re:hops max|-|SYS:traceroute 10.0.2.2 -m 2 -q 1 -w 3 -n
+live|traceroute|unresolvable|5|re:cannot resolve|-|SYS:traceroute no.such.host.invalid -m 1 -q 1 -w 2 -n
+live|sntp|no-server|4|re:the time server did not answer|-|SYS:sntp 10.0.2.2 TIMEOUT 3
+live|sntp|shows-time|4|re:stratum|-|SYS:sntp pool.ntp.org SHOW TIMEOUT 5
+live|NetTrace|loopback|4|re:records written|-|SYS:NetTrace LOOPBACK BYTES 4096 OUT DH0:nettrace.pcap
+live|NetTrace|wire|4|re:records written|-|SYS:NetTrace WIRE HOST 10.0.2.2 PORT ${HTTP_PORT} PATH /hello.txt OUT DH0:ntwire.pcap
+live|NetTrace|unresolvable|5|re:cannot resolve|-|SYS:NetTrace WIRE HOST no.such.host.invalid
+live|ShowNetServices|mdns-off|4|re:mDNS is not enabled|-|SYS:ShowNetServices SECONDS=1
+live|ShowNetServices|bad-type|5|re:is not a service type|-|SYS:ShowNetServices http
+live|httpd|no-root|5|re:required argument missing|-|SYS:httpd
+live|httpd|bad-root|5|re:there is no .DH0:nosuchdirectory. to serve|-|SYS:httpd DH0:nosuchdirectory 8099
+live|AddNetRoute|no-gateway|5|re:no GATEWAY was given|-|SYS:AddNetRoute DST=192.0.2.0
+live|DeleteNetRoute|no-such-route|5|re:no route to 198.51.100.0|-|SYS:DeleteNetRoute DST=198.51.100.0
+live|AddNetRoute|added|5|re:now go through 10.0.2.2|SYS:DeleteNetRoute DST=192.0.2.0|SYS:AddNetRoute DST=192.0.2.0 VIA=10.0.2.2
+live|DeleteNetRoute|deleted|5|re:The route to 192.0.2.0/24 is gone|SYS:AddNetRoute DST=192.0.2.0 VIA=10.0.2.2|SYS:DeleteNetRoute DST=192.0.2.0
+live|RemoveNetInterface|unknown-name|5|re:there is no interface called|-|SYS:RemoveNetInterface nosuchif
+live|AddNetInterface|already-up|5|re:online, address 10.0.2.15|-|SYS:AddNetInterface eth0
+live|AddNetInterface|unknown-name|5|re:there is no interface called|-|SYS:AddNetInterface nosuchinterface
+live|Online|unknown-name|5|re:nothing here is called|-|SYS:Online nosuch0
+live|Offline|unknown-name|5|re:nothing here is called|-|SYS:Offline nosuch0
 # ------------------------------------------------------------ cycle -----
 # The commands that take the stack apart, each paired with the one that puts
 # it back.  Fewer runs: every repetition here costs a DHCP lease.
-cycle|Offline|takes-down|4|rc!=-1|SYS:Online eth0|SYS:Offline eth0
-cycle|Online|brings-up|4|rc!=-1|SYS:Offline eth0|SYS:Online eth0
-cycle|RemoveNetInterface|removes|4|rc!=-1|SYS:AddNetInterface eth0|SYS:RemoveNetInterface eth0 FORCE
-cycle|AddNetInterface|adds|4|rc!=-1|SYS:RemoveNetInterface eth0 FORCE|SYS:AddNetInterface eth0
-cycle|NetShutdown|stops-all|4|rc!=-1|SYS:AddNetInterface eth0|SYS:NetShutdown
+cycle|Offline|takes-down|4|re:eth0 is offline|SYS:Online eth0|SYS:Offline eth0
+cycle|Online|brings-up|4|re:eth0 is.*online|SYS:Offline eth0|SYS:Online eth0
+cycle|RemoveNetInterface|removes|4|re:eth0: removed|SYS:AddNetInterface eth0|SYS:RemoveNetInterface eth0 FORCE
+cycle|AddNetInterface|adds|4|re:online, address 10.0.2.15|SYS:RemoveNetInterface eth0 FORCE|SYS:AddNetInterface eth0
+cycle|NetShutdown|stops-all|4|re:The network is stopped|SYS:AddNetInterface eth0|SYS:NetShutdown
 # ------------------------------------------------------------ server ----
-# nc as a listener.  It blocks until -w expires, so it gets a boot of its own
-# rather than sitting in the middle of somebody else's transcript.
-server|nc|listen-timeout|4|rc!=-1|-|SYS:nc -l 7099 -v -w 3
+# nc as a listener.  It blocks until its own -w expires, so it gets a boot of
+# its own rather than sitting in the middle of somebody else's transcript.
+server|nc|listen-timeout|4|re:nobody connected within 3 seconds|-|SYS:nc -l 7099 -v -w 3
 # ---------------------------------------------------- and what cannot -----
 # A row that could not be measured says so.  It is neither a pass nor a
 # failure, and it is here so that the absence is a line in the table rather
 # than a command nobody noticed was missing.
 live|httpd|serves|0|na:httpd runs until it is killed; a server with no request budget never reaches a second invocation in one transcript|-|SYS:httpd DH0: 8080
 live|telnet|interactive|0|na:a terminal session ends when a person ends it; the scripted arm above is the measurable half|-|SYS:telnet <host>
+live|ShowNetServices|browse|0|na:a browse that finds something needs MDNS=YES on the interface and a responder on the LAN; SLIRP carries neither|-|SYS:ShowNetServices SECONDS=1
 EOF
 }
 
@@ -551,42 +553,39 @@ run_group() {
     local chunks="$chunk"
     echo "==> $group: $(wc -l < "$rows" | tr -d ' ') rows in $chunks boot(s)"
 
-    # --------------------------------- boot each chunk ---------------------
+    # --------------- boot each chunk, and read it back before the next -----
+    #
+    # Read back immediately rather than after the last boot: the milliseconds
+    # this chunk measured are what sizes the NEXT chunk's ceiling, and a group
+    # that boots three times would otherwise guess three times over.
     local c tag hd rc
     for ((c = 1; c <= chunks; c++)); do
         tag="toolleak-$group-$c"
         hd="$ROOT/build/amiberry-testhd-$tag"
-        if [ "$VERDICT_ONLY" = 1 ]; then
+        if [ "$VERDICT_ONLY" = 0 ]; then
+            stage_group "$group" "$stage"
+            cp "$WORK/$group-$c.commands.txt" "$stage/commands.txt"
+
+            local extras=()
+            while IFS= read -r e; do extras+=("$e"); done \
+                < <(find "$stage" -mindepth 1 -maxdepth 1)
+
+            local t="$TIMEOUT"
+            [ "$t" != 0 ] || t=$(chunk_timeout "$WORK/$group-$c.commands.txt")
+
+            echo "==> $tag: $(wc -l < "$stage/commands.txt" | tr -d ' ') commands," \
+                 "ceiling ${t}s"
+            AMINETXDUO_RUN_TAG="$tag" \
+            "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$t" \
+                "$TOOLS/ToolsSmoke" "${extras[@]}" \
+                > "$WORK/$tag.out" 2>&1 && rc=0 || rc=$?
+            echo "    emulator exit $rc, $(wc -l < "$WORK/$tag.out" | tr -d ' ') lines of log"
+            printf '%s\n' "$rc" > "$WORK/$tag.rc"
+        else
             echo "==> $tag: reusing $hd/tools.txt"
-            continue
         fi
-
-        stage_group "$group" "$stage"
-        cp "$WORK/$group-$c.commands.txt" "$stage/commands.txt"
-
-        local extras=()
-        while IFS= read -r e; do extras+=("$e"); done \
-            < <(find "$stage" -mindepth 1 -maxdepth 1)
-
-        local t="$TIMEOUT"
-        [ "$t" != 0 ] || t=$(chunk_timeout "$WORK/$group-$c.commands.txt")
-
-        echo "==> $tag: $(wc -l < "$stage/commands.txt" | tr -d ' ') commands," \
-             "ceiling ${t}s"
-        AMINETXDUO_RUN_TAG="$tag" \
-        "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$t" \
-            "$TOOLS/ToolsSmoke" "${extras[@]}" \
-            > "$WORK/$tag.out" 2>&1 && rc=0 || rc=$?
-        echo "    emulator exit $rc, $(wc -l < "$WORK/$tag.out" | tr -d ' ') lines of log"
-        printf '%s\n' "$rc" > "$WORK/$tag.rc"
-    done
-
-    # --------------------------------- read each chunk back ----------------
-    for ((c = 1; c <= chunks; c++)); do
-        tag="toolleak-$group-$c"
-        hd="$ROOT/build/amiberry-testhd-$tag"
         rc=$(cat "$WORK/$tag.rc" 2>/dev/null || echo "?")
-        read_chunk "$group" "$c" "$tag" "$hd" "$rc"
+        read_chunk "$group" "$c" "$tag" "$hd" "$rc" || true
     done
 }
 
