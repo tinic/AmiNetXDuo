@@ -320,11 +320,13 @@ fi
 # RETURNED, and the two have to agree.
 
 # The return code of one command in the transcript, by its command line.
+# "----- rc 0, 12 ms, free 1234 -----": field 3 is "0," and never compares
+# equal to a number, so pull the digits out of the line.
 rc_of() {
     awk -v want="===== $1 =====" '
         $0 == want { on = 1; next }
-        on && /^----- rc / { print $3; exit }
-    ' "$REPORT"
+        on && /^----- rc / { print; exit }
+    ' "$REPORT" | sed -n 's/^----- rc \([0-9-]*\),.*/\1/p'
 }
 
 check_rc() {
