@@ -68,9 +68,9 @@ extern "C" {
 
 #define AMI_NETSTATUS_MAGIC         0x414E5351UL    /* 'ANSQ' */
 /*
- * 8 since NETCTRL_INTERFACE_CONFIGURE. A caller and a library that disagree
- * fail every call rather than half of them, which is why the commands and the
- * library ship together.
+ * 8 since NETCTRL_INTERFACE_CONFIGURE and the DHCP three. A caller and a
+ * library that disagree fail every call rather than half of them, which is why
+ * the commands and the library ship together.
  *
  * This is the compatibility mechanism for a record that grows. The size check in
  * bsd_NetStackQuery() is not: it rejects a buffer too small for the record, and
@@ -336,6 +336,30 @@ typedef struct NetStatusAddress6
 /* nsd_LeaseSeconds when the server said the lease never expires. */
 #define NETSTATUS_DHCP_FOREVER  0xFFFFFFFFUL
 
+/*
+ * nsd_RawState, NX_DHCP_STATE_* verbatim, spelled out so a caller need not
+ * include nxd_dhcp_client.h. nsd_State collapses six of these into
+ * NETSTATUS_DHCP_WORKING and three into NETSTATUS_DHCP_BOUND, which is what a
+ * caller waiting for an address wants and is not enough for a caller watching a
+ * renewal: BOUND, RENEWING and REBINDING are all NETSTATUS_DHCP_BOUND, so a
+ * lease being extended and a lease sitting still read the same.
+ *
+ * Named out of what was nsd_Pad, which every library has always zeroed, so the
+ * record is the size it always was and nsd_State means exactly what it did.
+ * Zero is NX_DHCP_STATE_NOT_STARTED and is also what a library predating the
+ * field answers, and the two mean the same thing here.
+ */
+#define NETSTATUS_DHCPRAW_NOT_STARTED   0
+#define NETSTATUS_DHCPRAW_BOOT          1
+#define NETSTATUS_DHCPRAW_INIT          2
+#define NETSTATUS_DHCPRAW_SELECTING     3
+#define NETSTATUS_DHCPRAW_REQUESTING    4
+#define NETSTATUS_DHCPRAW_BOUND         5
+#define NETSTATUS_DHCPRAW_RENEWING      6
+#define NETSTATUS_DHCPRAW_REBINDING     7
+#define NETSTATUS_DHCPRAW_FORCERENEW    8
+#define NETSTATUS_DHCPRAW_PROBING       9
+
 typedef struct NetStatusDhcp
 {
     UWORD   nsd_Index;                  /* NX_IP interface index             */
@@ -353,7 +377,7 @@ typedef struct NetStatusDhcp
     UWORD   nsd_DnsCount;
     ULONG   nsd_StaticRoute[NETSTATUS_DHCP_ADDRS];
     UWORD   nsd_StaticRouteCount;
-    UWORD   nsd_Pad;
+    UWORD   nsd_RawState;               /* NETSTATUS_DHCPRAW_*               */
 
     char    nsd_HostName[NETSTATUS_NAME_LEN];
     char    nsd_DomainName[NETSTATUS_NAME_LEN];
@@ -853,6 +877,46 @@ typedef struct NetStatusService
  * the half that was asked for first and the half a caller can see.
  */
 #define NETCTRL_INTERFACE_CONFIGURE 19 /* nsc_Index/Destination/NetMask/Gateway */
+
+/*
+ * The DHCP client on one interface, aimed at one interface rather than at the
+ * machine. Before these, the only way to make a lease happen again was
+ * Offline/Online or NetShutdown, which restarts every interface there is.
+ *
+ * All three take nsc_Index; START also reads nsc_Destination.
+ *
+ *   START    ask for a lease on an interface that has none. This is what
+ *            follows a RELEASE, and what a machine moved to another network
+ *            needs. EBUSY while an allocation is already in progress on that
+ *            interface; already bound is NOT busy and starts again.
+ *
+ *            NETCTRL_F_ADDRESS makes nsc_Destination the address to ask the
+ *            server for. It is a wish rather than a demand: DISCOVER is still
+ *            sent, so a server that will not give that address offers a
+ *            different one instead of answering NAK.
+ *
+ *   RENEW    extend the lease this interface already has, without giving up
+ *            the address: a DHCPREQUEST to the server that granted it, which
+ *            is RFC 2131 4.4.5's renewing state entered early. The address does
+ *            not change unless the server says it does. ENOTCONN when the
+ *            interface has no lease to extend, which is a different thing from
+ *            failing and is why it is not silently turned into a START -- the
+ *            caller asked to keep an address it does not have.
+ *
+ *   RELEASE  DHCPRELEASE to the server and stop the client. The interface
+ *            keeps the address it was given until something takes it away:
+ *            NetX Duo's client does not unconfigure the interface, and this
+ *            does not either, because an interface that loses its address the
+ *            instant a lease is dropped also loses the route the reply would
+ *            have come back on. ENOTCONN when there is no lease.
+ *
+ * None of them waits. A lease takes seconds and the caller is the one with a
+ * Process to wait in, the same division NETCTRL_INTERFACE_ADD draws: poll
+ * NETSTATUS_DHCP's nsd_State until it is NETSTATUS_DHCP_BOUND, or give up.
+ */
+#define NETCTRL_DHCP_START      20  /* nsc_Index                             */
+#define NETCTRL_DHCP_RENEW      21  /* nsc_Index                             */
+#define NETCTRL_DHCP_RELEASE    22  /* nsc_Index                             */
 
 /* Flags for nsc_Flags. Zero unless an operation above says otherwise. */
 #define NETCTRL_F_FORCE         0x00000001

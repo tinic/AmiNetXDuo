@@ -3,6 +3,7 @@
  *
  *     C:ConfigureNetInterface eth0 [QUIET] [ADDRESS <a>[/<bits>]]
  *                                  [NETMASK <m>] [GATEWAY <g>|NONE]
+ *                                  [CONFIGURE DHCP] [RELEASE] [TIMEOUT <secs>]
  *
  * Until now the only way to change what a live interface is addressed with was
  * RemoveNetInterface followed by AddNetInterface, which closes the SANA-II
@@ -55,9 +56,70 @@
  *                      static route file, and this stack reads all of
  *                      DEVS:NetInterfaces and DEVS:Internet at startup and
  *                      defers nothing, so there is no first time left to cause.
- *   CONFIGURE, LEASE   the DHCP half. Not omitted -- deferred, see the DHCP
- *   RELEASE, ID        section added to this command separately.
- *   TIMEOUT, DHCPUNICAST
+ *   LEASE, ID          LEASE asks the server for a lease of a stated length
+ *   DHCPUNICAST        and ID names the client to it; both are things to put in
+ *                      the request, and NetX Duo's client builds the request
+ *                      from its own configuration rather than per call.
+ *                      DHCPUNICAST is for servers that must answer by unicast,
+ *                      which is a property of a network and belongs in
+ *                      DEVS:NetInterfaces beside CONFIGURE=DHCP, not in a
+ *                      command run by hand.
+ *
+ * CONFIGURE, RELEASE and TIMEOUT ARE TAKEN, and are the DHCP half of this
+ * command. That is Roadshow's answer to "where does releasing a lease live",
+ * and it is the right one: a lease is a property of an interface, this is the
+ * command that changes an interface's properties, and a DHCP command of its own
+ * would be a second place to name an interface and a second thing to keep
+ * agreeing with this one.
+ *
+ *   CONFIGURE=DHCP     make this interface have a current lease. On an
+ *                      interface that has none -- because it is static, or
+ *                      because RELEASE dropped it -- that is a fresh
+ *                      allocation. On one that is already bound it is a
+ *                      renewal: RFC 2131 4.4.5's renewing state entered before
+ *                      the timer would have entered it, which keeps the
+ *                      address and asks the server that granted it for more
+ *                      time. Both are waited for, up to TIMEOUT.
+ *
+ *                      Roadshow has no renewal at all -- its client extends
+ *                      leases by itself and its documentation says the way to
+ *                      stop it is to change the address or mark the interface
+ *                      down -- so the renewal half is ours. It is on this
+ *                      keyword rather than on a new one because "make this
+ *                      interface have a current lease" is one thing to ask
+ *                      for, and which of the two it takes is a fact about the
+ *                      interface rather than about the request. The command
+ *                      says which one it did.
+ *
+ *                      AUTO and FASTAUTO, Roadshow's other two values, are
+ *                      link-local ZeroConf. DEVS:NetInterfaces takes
+ *                      CONFIGURE=LINKLOCAL and this command does not, because
+ *                      a link-local address is what a machine falls back to
+ *                      rather than something to ask for by hand.
+ *
+ *   RELEASE            DHCPRELEASE to the server: the address is free again as
+ *   RELEASEADDRESS     far as it is concerned. Both spellings, as Roadshow has
+ *                      them. "you can only release what was previously
+ *                      allocated", so an interface with no lease is refused
+ *                      rather than quietly doing nothing.
+ *
+ *                      The interface KEEPS the address until something takes
+ *                      it away. NetX Duo's client does not unconfigure the
+ *                      interface on release and this does not either: an
+ *                      interface that lost its address the instant the lease
+ *                      was dropped would lose the route the DHCPRELEASE itself
+ *                      goes out on. `ConfigureNetInterface eth0 ADDRESS ...`
+ *                      is how the address is then changed, which is the whole
+ *                      reason the two halves are one command.
+ *
+ *   TIMEOUT            seconds to wait for CONFIGURE=DHCP. Roadshow's default
+ *                      is 60 and its floor is 10; both are kept.
+ *
+ * A KNOWN DEFECT NEXT DOOR, which this does not fix and does not depend on: a
+ * lease survives Offline followed by Online with its timer still running, so a
+ * machine carried to another network keeps an address that network never gave
+ * it. RELEASE followed by CONFIGURE=DHCP is the way round it by hand, which is
+ * part of why these are worth having, but the two are separate pieces of work.
  *
  * WHAT IT CHANGES, AND WHAT IT DOES NOT
  *
@@ -112,7 +174,8 @@ const char *const tool_name = "ConfigureNetInterface";
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("ConfigureNetInterface");
 
-#define TEMPLATE    "INTERFACE/A,QUIET/S,ADDRESS/K,NETMASK/K,GATEWAY/K"
+#define TEMPLATE    "INTERFACE/A,QUIET/S,ADDRESS/K,NETMASK/K,GATEWAY/K,"     \
+                    "CONFIGURE/K,RELEASE=RELEASEADDRESS/S,TIMEOUT/K/N"
 
 enum
 {
@@ -121,8 +184,21 @@ enum
     ARG_ADDRESS,
     ARG_NETMASK,
     ARG_GATEWAY,
+    ARG_CONFIGURE,
+    ARG_RELEASE,
+    ARG_TIMEOUT,
     ARG_COUNT
 };
+
+/*
+ * Roadshow's TIMEOUT default is 60 seconds and "the timeout cannot be shorter
+ * than ten seconds", which is the same floor for the same reason: a DISCOVER
+ * that has not been answered in ten seconds has usually not been answered
+ * because nothing is listening, and a caller who asks for three gets a failure
+ * that says nothing about the network.
+ */
+#define CNI_DHCP_TIMEOUT    60
+#define CNI_DHCP_TIMEOUT_MIN 10
 
 /*
  * The errno numbers this command names, as bsdsocket.library reports them
@@ -134,6 +210,7 @@ enum
  */
 #define CNI_EINVAL          22
 #define CNI_EADDRNOTAVAIL   49
+#define CNI_ENOTCONN        57
 
 static BOOL cni_quiet;
 
@@ -225,8 +302,8 @@ static const NetStatusInterface *iface_row(LONG index)
     return NULL;
 }
 
-/* TRUE when the DHCP client is running on this interface, bound or trying. */
-static BOOL on_dhcp(struct Library *base, LONG index)
+/* The DHCP row for `index` in a freshly taken snapshot, or NULL. */
+static const NetStatusDhcp *dhcp_row(struct Library *base, LONG index)
 {
     LONG n;
     LONG i;
@@ -234,14 +311,56 @@ static BOOL on_dhcp(struct Library *base, LONG index)
     n = tool_netstatus_query(base, NETSTATUS_DHCP, &cni_dhcp,
                              sizeof(cni_dhcp), sizeof(NetStatusDhcp));
     if (n < 0)
-        return FALSE;
+        return NULL;
 
     for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
     {
-        if ((LONG)cni_dhcp.e[i].nsd_Index != index)
-            continue;
+        if ((LONG)cni_dhcp.e[i].nsd_Index == index)
+            return &cni_dhcp.e[i];
+    }
 
-        return (BOOL)(cni_dhcp.e[i].nsd_State != NETSTATUS_DHCP_OFF);
+    return NULL;
+}
+
+/* TRUE when the DHCP client is running on this interface, bound or trying. */
+static BOOL on_dhcp(struct Library *base, LONG index)
+{
+    const NetStatusDhcp *d = dhcp_row(base, index);
+
+    return (BOOL)(d != NULL && d->nsd_State != NETSTATUS_DHCP_OFF);
+}
+
+/* TRUE when this interface holds a lease right now. */
+static BOOL dhcp_bound(struct Library *base, LONG index)
+{
+    const NetStatusDhcp *d = dhcp_row(base, index);
+
+    return (BOOL)(d != NULL && d->nsd_State == NETSTATUS_DHCP_BOUND);
+}
+
+/*
+ * Wait for the DHCP client on `index` to settle, up to `seconds`. TRUE if it
+ * reached NETSTATUS_DHCPRAW_BOUND, FALSE on the deadline or a break.
+ *
+ * The RAW state is what is watched, not nsd_State: BOUND, RENEWING and
+ * REBINDING are all NETSTATUS_DHCP_BOUND, so a renewal asked for on a bound
+ * interface would be "finished" before the request had left the machine. Here
+ * the wait ends when the client is back at plain BOUND, which is the state it
+ * only re-enters on an ACK.
+ */
+static BOOL wait_for_lease(struct Library *base, LONG index, ULONG seconds)
+{
+    ULONG waited;
+
+    for (waited = 0; waited <= seconds * 2UL; waited++)
+    {
+        const NetStatusDhcp *d = dhcp_row(base, index);
+
+        if (d != NULL && d->nsd_RawState == NETSTATUS_DHCPRAW_BOUND)
+            return TRUE;
+
+        if (tool_delay_ticks(25))       /* half a second; Ctrl-C ends it */
+            return FALSE;
     }
 
     return FALSE;
@@ -305,6 +424,27 @@ static BOOL mask_is_contiguous(ULONG mask)
     return (BOOL)((inverted & (inverted + 1UL)) == 0UL);
 }
 
+/* One NETCTRL call on `index`, with the block filled the same way every time. */
+static LONG control(struct Library *base, ULONG op, LONG index, ULONG dest,
+                    ULONG mask, ULONG gw, ULONG flags, LONG *err)
+{
+    NetStatusControl ctl;
+    ULONG            w;
+
+    for (w = 0; w < (ULONG)(sizeof(ctl) / sizeof(ULONG)); w++)
+        ((ULONG *)&ctl)[w] = 0;
+
+    ctl.nsc_Magic       = AMI_NETSTATUS_MAGIC;
+    ctl.nsc_Version     = (UWORD)AMI_NETSTATUS_VERSION;
+    ctl.nsc_Index       = (UWORD)index;
+    ctl.nsc_Destination = dest;
+    ctl.nsc_NetMask     = mask;
+    ctl.nsc_Gateway     = gw;
+    ctl.nsc_Flags       = flags;
+
+    return tool_netstatus_control(base, op, &ctl, err);
+}
+
 int main(int argc, char **argv)
 {
     LONG             args[ARG_COUNT];
@@ -317,10 +457,11 @@ int main(int argc, char **argv)
     BOOL             have_address = FALSE;
     BOOL             have_netmask = FALSE;
     BOOL             have_gateway = FALSE;
+    BOOL             want_dhcp    = FALSE;
+    BOOL             want_release = FALSE;
+    ULONG            timeout      = CNI_DHCP_TIMEOUT;
     LONG             index;
     LONG             err = 0;
-    NetStatusControl ctl;
-    ULONG            w;
     char             text[16];
     const NetStatusInterface *row;
 
@@ -336,13 +477,17 @@ int main(int argc, char **argv)
     args[ARG_ADDRESS]   = 0;
     args[ARG_NETMASK]   = 0;
     args[ARG_GATEWAY]   = 0;
+    args[ARG_CONFIGURE] = 0;
+    args[ARG_RELEASE]   = 0;
+    args[ARG_TIMEOUT]   = 0;
 
     rda = ReadArgs((CONST_STRPTR)TEMPLATE, args, NULL);
     if (rda == NULL)
     {
         tool_fault(IoErr());
         tool_usage("<interface> [QUIET] [ADDRESS <a>[/<bits>]] [NETMASK <m>] "
-                   "[GATEWAY <g>|NONE]",
+                   "[GATEWAY <g>|NONE] [CONFIGURE DHCP] [RELEASE] "
+                   "[TIMEOUT <secs>]",
                    "Change what a running interface is addressed with.");
         return RETURN_ERROR;
     }
@@ -417,9 +562,63 @@ int main(int argc, char **argv)
         }
     }
 
-    if (!have_address && !have_netmask && !have_gateway)
+    want_release = (args[ARG_RELEASE] != 0) ? TRUE : FALSE;
+
+    if (args[ARG_CONFIGURE] != 0)
     {
-        tool_error("nothing to change: give ADDRESS, NETMASK or GATEWAY");
+        const char *c = (const char *)args[ARG_CONFIGURE];
+
+        /* Roadshow's other two values are AUTO and FASTAUTO, which are
+           link-local ZeroConf. Named in the refusal so that somebody who typed
+           one is told what this stack calls it rather than "bad argument". */
+        if (tool_stricmp(c, "DHCP") != 0)
+        {
+            tool_error("CONFIGURE takes DHCP and nothing else; a link-local "
+                       "address is CONFIGURE=LINKLOCAL in "
+                       "DEVS:NetInterfaces/%s", (LONG)name);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+
+        want_dhcp = TRUE;
+
+        /* The server decides both of these, so accepting them would be
+           accepting something that is then written over. */
+        if (have_netmask || have_gateway)
+        {
+            tool_error("CONFIGURE=DHCP takes its netmask and gateway from the "
+                       "server, so NETMASK and GATEWAY cannot be given with it");
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+    }
+
+    if (args[ARG_TIMEOUT] != 0)
+    {
+        timeout = (ULONG)(*(LONG *)args[ARG_TIMEOUT]);
+
+        if (!want_dhcp)
+        {
+            tool_error("TIMEOUT is how long to wait for a lease, so it needs "
+                       "CONFIGURE=DHCP");
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+        if (timeout < (ULONG)CNI_DHCP_TIMEOUT_MIN)
+        {
+            tool_error("a TIMEOUT under %ld seconds says more about the "
+                       "deadline than about the network",
+                       (LONG)CNI_DHCP_TIMEOUT_MIN);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+    }
+
+    if (!have_address && !have_netmask && !have_gateway && !want_dhcp &&
+        !want_release)
+    {
+        tool_error("nothing to change: give ADDRESS, NETMASK, GATEWAY, "
+                   "CONFIGURE or RELEASE");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
@@ -462,21 +661,113 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    for (w = 0; w < (ULONG)(sizeof(ctl) / sizeof(ULONG)); w++)
-        ((ULONG *)&ctl)[w] = 0;
+    /*
+     * RELEASE first, so `RELEASE CONFIGURE=DHCP` is a lease given back and a
+     * new one asked for -- which is what a machine carried to another network
+     * wants -- and `RELEASE ADDRESS=...` gives the lease back over the route
+     * the address below is about to replace.
+     */
+    if (want_release)
+    {
+        if (control(base, NETCTRL_DHCP_RELEASE, index, 0, 0, 0, 0, &err) != 0)
+        {
+            if (!cni_quiet)
+            {
+                if (err == CNI_ENOTCONN)
+                    tool_error("%s has no lease to release", (LONG)name);
+                else
+                    tool_error("%s would not release its lease", (LONG)name);
+            }
+            tool_netstatus_close(base);
+            FreeArgs(rda);
+            return RETURN_FAIL;
+        }
 
-    ctl.nsc_Magic       = AMI_NETSTATUS_MAGIC;
-    ctl.nsc_Version     = (UWORD)AMI_NETSTATUS_VERSION;
-    ctl.nsc_Index       = (UWORD)index;
-    ctl.nsc_Destination = address;
-    ctl.nsc_NetMask     = netmask;
-    ctl.nsc_Gateway     = gateway;
-    ctl.nsc_Flags       = (have_address ? NETCTRL_F_ADDRESS : 0UL) |
-                          (have_netmask ? NETCTRL_F_NETMASK : 0UL) |
-                          (have_gateway ? NETCTRL_F_GATEWAY : 0UL);
+        say("%s: the lease is released; the address stays until something "
+            "else changes it\n", (LONG)name);
+    }
 
-    if (tool_netstatus_control(base, NETCTRL_INTERFACE_CONFIGURE, &ctl,
-                               &err) != 0)
+    /*
+     * Then the lease. Which of the two operations it is, is a fact about the
+     * interface: one that holds a lease is asking to keep its address for
+     * longer, one that does not is asking for an address.
+     */
+    if (want_dhcp)
+    {
+        BOOL  renewing = dhcp_bound(base, index);
+        ULONG op       = renewing ? NETCTRL_DHCP_RENEW : NETCTRL_DHCP_START;
+
+        /*
+         * "Combine CONFIGURE=DHCP with ADDRESS=x.x.x.x to request a specific
+         * address", which is Roadshow's own wording. A wish and not a demand:
+         * DISCOVER is still sent, so a server that disagrees offers something
+         * else rather than answering NAK.
+         */
+        if (control(base, op, index, address, 0, 0,
+                    (have_address && !renewing) ? NETCTRL_F_ADDRESS : 0UL,
+                    &err) != 0)
+        {
+            if (!cni_quiet)
+            {
+                if (err == CNI_ENOTCONN)
+                    tool_error("%s has no lease to renew", (LONG)name);
+                else
+                    tool_error("%s has no DHCP client to ask", (LONG)name);
+            }
+            tool_netstatus_close(base);
+            FreeArgs(rda);
+            return RETURN_FAIL;
+        }
+
+        if (!wait_for_lease(base, index, timeout))
+        {
+            if (!cni_quiet)
+            {
+                tool_error("%s: no answer from a DHCP server within %lu "
+                           "seconds", (LONG)name, timeout);
+                tool_explain_dhcp(name);
+            }
+            tool_netstatus_close(base);
+            FreeArgs(rda);
+            return RETURN_FAIL;
+        }
+
+        if (find_index(base, name) >= 0 && (row = iface_row(index)) != NULL)
+        {
+            const NetStatusDhcp *d = dhcp_row(base, index);
+            char                 server[16];
+
+            ami_config_format_ip(row->nsi_Address, text, sizeof(text));
+            ami_config_format_ip((d != NULL) ? d->nsd_Server : 0UL,
+                                 server, sizeof(server));
+
+            /* Which of the two it was is said, because "renewed" on a machine
+               that had no lease and "allocated" on one that did are both
+               reports of something other than what happened. */
+            say("%s: %s %s, from %s\n", (LONG)name,
+                (LONG)(renewing ? "lease renewed," : "lease taken,"),
+                (LONG)text, (LONG)server);
+        }
+    }
+
+    /*
+     * With CONFIGURE=DHCP an ADDRESS is the address that was ASKED FOR, and it
+     * has already been asked for above; writing it on the interface here would
+     * overwrite whatever the server actually granted with what this machine
+     * would have preferred.
+     */
+    if (want_dhcp || (!have_address && !have_netmask && !have_gateway))
+    {
+        tool_netstatus_close(base);
+        FreeArgs(rda);
+        return RETURN_OK;
+    }
+
+    if (control(base, NETCTRL_INTERFACE_CONFIGURE, index, address, netmask,
+                gateway,
+                (have_address ? NETCTRL_F_ADDRESS : 0UL) |
+                (have_netmask ? NETCTRL_F_NETMASK : 0UL) |
+                (have_gateway ? NETCTRL_F_GATEWAY : 0UL), &err) != 0)
     {
         if (!cni_quiet)
         {

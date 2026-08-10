@@ -23,6 +23,10 @@
 
 #include "netstack_internal.h"
 
+/* NETSTATUS_DHCPRAW_*, which is published as NX_DHCP_STATE_* and is held to it
+   by the _Static_asserts beside netstack_interface_dhcp_raw_state(). */
+#include "aminetxduo/netstatus.h"
+
 #include "tx_amiga.h"
 
 #ifdef AMINETXDUO_RX_VERIFY
@@ -2531,6 +2535,90 @@ LONG netstack_interface_dhcp_lease(UWORD index, AmiDhcpLease *out)
                      out->adl_DomainName, sizeof(out->adl_DomainName));
 
     ami_netstack_leave_free(caller);
+
+    return AMI_NET_OK;
+}
+
+/*
+ * NETSTATUS_DHCPRAW_* is published as NX_DHCP_STATE_* verbatim, and this is the
+ * only file that can see both. If a NetX Duo update renumbers them the build
+ * stops here rather than at a user reading "renewing" off a lease that is
+ * being requested for the first time. Same rule and same reason as the
+ * NX_TCP_* asserts at the head of src/bsdsocket/netstatus.c.
+ */
+_Static_assert(NETSTATUS_DHCPRAW_NOT_STARTED == NX_DHCP_STATE_NOT_STARTED,
+               "DHCP state ABI");
+_Static_assert(NETSTATUS_DHCPRAW_BOOT        == NX_DHCP_STATE_BOOT,
+               "DHCP state ABI");
+_Static_assert(NETSTATUS_DHCPRAW_INIT        == NX_DHCP_STATE_INIT,
+               "DHCP state ABI");
+_Static_assert(NETSTATUS_DHCPRAW_SELECTING   == NX_DHCP_STATE_SELECTING,
+               "DHCP state ABI");
+_Static_assert(NETSTATUS_DHCPRAW_REQUESTING  == NX_DHCP_STATE_REQUESTING,
+               "DHCP state ABI");
+_Static_assert(NETSTATUS_DHCPRAW_BOUND       == NX_DHCP_STATE_BOUND,
+               "DHCP state ABI");
+_Static_assert(NETSTATUS_DHCPRAW_RENEWING    == NX_DHCP_STATE_RENEWING,
+               "DHCP state ABI");
+_Static_assert(NETSTATUS_DHCPRAW_REBINDING   == NX_DHCP_STATE_REBINDING,
+               "DHCP state ABI");
+_Static_assert(NETSTATUS_DHCPRAW_FORCERENEW  == NX_DHCP_STATE_FORCERENEW,
+               "DHCP state ABI");
+_Static_assert(NETSTATUS_DHCPRAW_PROBING     == NX_DHCP_STATE_ADDRESS_PROBING,
+               "DHCP state ABI");
+
+/*
+ * The uncollapsed state, from the same ns_DhcpState[] the callback maintains,
+ * so no bracket is needed to read a byte the callback wrote.
+ */
+UWORD netstack_interface_dhcp_raw_state(UWORD index)
+{
+    AmiNetStack *ns = ami_ns;
+
+    if (ns == NULL || !ns->ns_DhcpCreated ||
+        index >= (UWORD)AMI_CFG_MAX_INTERFACES)
+        return (UWORD)NX_DHCP_STATE_NOT_STARTED;
+
+    return (UWORD)ns->ns_DhcpState[index];
+}
+
+LONG netstack_interface_dhcp_renew(UWORD index)
+{
+    AmiNetStack  *ns = ami_ns;
+    AmiNetCaller *caller;
+    UINT          status;
+
+    if (ns == NULL || !ns->ns_IpCreated || !ns->ns_DhcpCreated ||
+        index >= (UWORD)AMI_CFG_MAX_INTERFACES)
+        return AMI_NET_ERR_STATE;
+
+    /*
+     * Checked here as well as inside NetX Duo, because
+     * nx_dhcp_interface_force_renew() answers NX_DHCP_NOT_BOUND for an
+     * interface that has no lease AND for one the client has never heard of,
+     * and the two want the same answer from up here but arrive by different
+     * routes: ns_DhcpState[] is the record kept for every interface, and
+     * _nx_dhcp_interface_record_find() only knows the ones that were enabled.
+     */
+    if (netstack_interface_dhcp_state(index) != AMI_DHCP_BOUND)
+        return AMI_NET_ERR_STATE;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return AMI_NET_ERR_KERNEL;
+
+    status = nx_dhcp_interface_force_renew(&ns->ns_Dhcp, (UINT)index);
+
+    ami_netstack_leave_free(caller);
+
+    if (status != NX_SUCCESS)
+    {
+        AMI_WARN("netstack: DHCP would not renew interface %ld (%ld)",
+                 (long)index, (long)status);
+        return AMI_NET_ERR_STATE;
+    }
+
+    AMI_INFO("netstack: DHCP renewal asked for on interface %ld", (long)index);
 
     return AMI_NET_OK;
 }

@@ -175,6 +175,7 @@ cold|NetShutdown|no-stack|5|re:nothing to stop|-|SYS:NetShutdown
 cold|RemoveNetInterface|unknown-name|5|re:nothing to remove|-|SYS:RemoveNetInterface nosuchif
 cold|ConfigureNetInterface|no-stack|5|re:no interface to configure|-|SYS:ConfigureNetInterface eth0 ADDRESS 10.0.2.20
 cold|ConfigureNetInterface|bad-address|5|re:is not an address|-|SYS:ConfigureNetInterface eth0 ADDRESS notanaddress
+cold|ConfigureNetInterface|bad-configure|5|re:CONFIGURE takes DHCP and nothing else|-|SYS:ConfigureNetInterface eth0 CONFIGURE=AUTO
 cold|AddNetInterface|unknown-name|5|re:there is no interface called|-|SYS:AddNetInterface nosuchinterface
 cold|NetSetup|bad-address|5|re:is not an address|-|SYS:NetSetup eth9 DEVICE=a2065.device UNIT=0 ADDRESS=notanaddress NOONLINE
 cold|NetSetup|writes-config|5|re:set up a network interface|-|SYS:NetSetup ethz DEVICE=a2065.device UNIT=0 DHCP NOONLINE FORCE
@@ -232,6 +233,14 @@ live|Offline|unknown-name|5|re:nothing here is called|-|SYS:Offline nosuch0
 # ------------------------------------------------------------ cycle -----
 # The commands that take the stack apart, each paired with the one that puts
 # it back.  Fewer runs: every repetition here costs a DHCP lease.
+# The DHCP half of ConfigureNetInterface.  Both rows are prepped into a bound
+# interface, so the measured call is always the same operation on every
+# repetition -- CONFIGURE=DHCP on an interface with no lease says "lease taken"
+# and on one that has a lease says "lease renewed", and a premise that has to
+# hold on every run cannot straddle the two.  The pair ends bound, which is
+# what the rows below expect.
+cycle|ConfigureNetInterface|dhcp-release|4|re:the lease is released|SYS:ConfigureNetInterface eth0 QUIET CONFIGURE=DHCP TIMEOUT 20|SYS:ConfigureNetInterface eth0 RELEASE
+cycle|ConfigureNetInterface|dhcp-renew|4|re:lease renewed|SYS:ConfigureNetInterface eth0 QUIET CONFIGURE=DHCP TIMEOUT 20|SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 20
 cycle|Offline|takes-down|4|re:eth0 is offline|SYS:Online eth0|SYS:Offline eth0
 cycle|Online|brings-up|4|re:eth0 is.*online|SYS:Offline eth0|SYS:Online eth0
 cycle|RemoveNetInterface|removes|4|re:eth0: removed|SYS:AddNetInterface eth0|SYS:RemoveNetInterface eth0 FORCE

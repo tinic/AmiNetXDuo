@@ -317,6 +317,11 @@ static VOID ns_fill_dhcp(NsWriter *w)
 
         state = netstack_interface_dhcp_state(index);
 
+        /* Before the `continue` below, because a caller watching a renewal
+           wants it on an interface that is not reporting a lease this instant
+           as much as on one that is. */
+        out->nsd_RawState = netstack_interface_dhcp_raw_state(index);
+
         if (state == AMI_DHCP_BOUND)
             out->nsd_State = NETSTATUS_DHCP_BOUND;
         else if (state == AMI_DHCP_WORKING)
@@ -1538,6 +1543,62 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
             bsd_nx_leave(SocketBase);
 
             return rc2;
+        }
+
+        /*
+         * The DHCP three, aimed at one interface. Out here with the rest of
+         * the src/netstack calls: each takes the ThreadX bracket itself, and
+         * the one NX_DHCP is the netstack's, not NetX Duo's to reach from
+         * inside ours.
+         *
+         * None of them waits for a lease. The caller has the Process.
+         */
+        case NETCTRL_DHCP_START:
+        case NETCTRL_DHCP_RENEW:
+        case NETCTRL_DHCP_RELEASE:
+        {
+            LONG err;
+
+            if (ctl->nsc_Index >= (UWORD)NX_MAX_PHYSICAL_INTERFACES)
+                return bsd_fail(SocketBase, AMI_ENXIO);
+
+            if (op == NETCTRL_DHCP_START)
+            {
+                /* NETCTRL_F_ADDRESS makes nsc_Destination the address to ask
+                   the server for. A wish, not a demand: DISCOVER is still
+                   sent, so a server that disagrees offers something else. */
+                err = netstack_interface_dhcp_start(
+                          ctl->nsc_Index,
+                          (ctl->nsc_Flags & NETCTRL_F_ADDRESS)
+                              ? ctl->nsc_Destination : 0UL);
+
+                if (err == AMI_NET_ERR_BUSY)
+                    return bsd_fail(SocketBase, AMI_EBUSY);
+            }
+            else
+            {
+                /*
+                 * Both of these act on a lease, so both refuse an interface
+                 * that has none rather than doing something else that might
+                 * have been meant. ENOTCONN is the one errno that says "there
+                 * is nothing here to act on" without implying the interface or
+                 * the operation is wrong.
+                 */
+                if (netstack_interface_dhcp_state(ctl->nsc_Index) !=
+                        AMI_DHCP_BOUND)
+                    return bsd_fail(SocketBase, AMI_ENOTCONN);
+
+                err = (op == NETCTRL_DHCP_RENEW)
+                          ? netstack_interface_dhcp_renew(ctl->nsc_Index)
+                          : netstack_interface_dhcp_stop(ctl->nsc_Index, TRUE);
+            }
+
+            if (err == AMI_NET_OK)
+                return 0;
+
+            /* No stack, no client, or an interface the client was never
+               enabled on: all of them are "there is no DHCP here". */
+            return bsd_fail(SocketBase, AMI_ENETDOWN);
         }
 
         /*
