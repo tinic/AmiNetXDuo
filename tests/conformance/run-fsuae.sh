@@ -146,13 +146,33 @@ fi
 status=$?
 set -e
 
+# ---- which library actually answered -------------------------------------
+#
+# A run against somebody else's bsdsocket.library says nothing about ours,
+# whatever its TAP output claims.  This used to print "results are meaningless"
+# and then exit with the guest's status, so a green run against a foreign
+# library was a pass.  A run that cannot be attributed is not a result: 3, its
+# own status, distinct from the suite failing.
 echo "---- stack under test ----"
 ident=$(grep -m1 "^# bsdsocket.library:" \
         "$ROOT/build/amiberry-testhd-$TAG/bsdsocktest.log" 2>/dev/null || true)
 case "$ident" in
-    *AmiNetXDuo*) echo "$ident  (ours)" ;;
-    "")           echo "!! no stack identification in the TAP log" ;;
-    *)            echo "!! $ident, NOT our library, results are meaningless" ;;
+    *AmiNetXDuo*)
+        echo "$ident  (ours)"
+        ;;
+    "")
+        echo "!! no stack identification in the TAP log, so nothing says which" >&2
+        echo "!! library answered and the results cannot be attributed." >&2
+        echo "conformance: NOT MEASURED (no stack identification)" >&2
+        exit 3
+        ;;
+    *)
+        echo "!! $ident" >&2
+        echo "!! That is NOT our library. Whatever the suite reported, it" >&2
+        echo "!! reported it about somebody else's stack." >&2
+        echo "conformance: NOT MEASURED (a foreign bsdsocket.library answered)" >&2
+        exit 3
+        ;;
 esac
 
 exit "$status"

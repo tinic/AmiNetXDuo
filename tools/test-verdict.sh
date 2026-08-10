@@ -44,9 +44,18 @@ verdict_serial_amiberry() { echo "$ROOT/build/amiberry-serial-${AMINETXDUO_RUN_T
 # it appears.  tests/stack prints `stack: N checks, M failures`, and
 # tests/netstack prints a second one after teardown; the last is the whole run
 # in both cases.
+# The serial log arrives with CRLF and the summary can be the first thing on
+# its line, so neither a trailing \r nor a missing leading character may stop
+# this matching.
 verdict_summary() {
-    sed -n 's/.*[^0-9]\([0-9]\{1,\}\) checks, \([0-9]\{1,\}\) failures.*/\1 \2/p' "$1" |
-        tail -1
+    tr -d '\r' < "$1" 2>/dev/null |
+    awk 'match($0, /[0-9]+ checks, [0-9]+ failures/) {
+             s = substr($0, RSTART, RLENGTH)
+             gsub(/[^0-9]/, " ", s)
+             n = split(s, f, " ")
+             if (n >= 2) last = f[1] " " f[2]
+         }
+         END { if (last != "") print last }'
 }
 
 # verdict_guest NAME MIN_CHECKS RUN_RC TRANSCRIPT [TRANSCRIPT...]

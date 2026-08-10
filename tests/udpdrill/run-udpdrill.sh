@@ -49,17 +49,24 @@ cp "$BSD" "$STAGE/libs/bsdsocket.library"
 
 export AMINETXDUO_RUN_TAG="$TAG"
 
+# `|| true` on both runs and no assertion after them: this script printed the
+# guest's output and exited 0 whatever the output said, including when there
+# was none.  The status is kept now, and the verdict is the guest's own
+# counters.
+HD="$ROOT/build/amiberry-testhd-$TAG"
+
+set +e
 if [ "$RUNNER" = "amiberry" ]; then
-    HD="$ROOT/build/amiberry-testhd-$TAG"
     "$ROOT/tools/amiberry-run.sh" -N a2065 -B slirp -m "$MODEL" -t "$TIMEOUT" \
         "$EXE" "$STAGE/devs" "$STAGE/libs" \
-        > "$ROOT/build/udpdrill-$TAG.log" 2>&1 || true
+        > "$ROOT/build/udpdrill-$TAG.log" 2>&1
 else
-    HD="$ROOT/build/amiberry-testhd-$TAG"
     "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
         "$EXE" "$STAGE/devs" "$STAGE/libs" \
-        > "$ROOT/build/udpdrill-$TAG.log" 2>&1 || true
+        > "$ROOT/build/udpdrill-$TAG.log" 2>&1
 fi
+RUN_RC=$?
+set -e
 
 echo
 echo "================ udpdrill ================"
@@ -70,3 +77,9 @@ else
 fi
 echo
 echo "emulator log: build/udpdrill-$TAG.log"
+echo
+
+. "$ROOT/tools/test-verdict.sh"
+verdict_guest "udpdrill" 16 "$RUN_RC" \
+    "$HD/stdout.txt" "$ROOT/build/amiberry-serial-$TAG.log" && exit 0
+exit $?

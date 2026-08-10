@@ -352,8 +352,14 @@ for phase in expunge cold; do
         else
             fail "a $phase cycle lost $LEAK bytes, over the $LEAK_BUDGET budget"
         fi
-    elif [ "$GUEST_EXPUNGES" -ge 2 ]; then
-        fail "the drill did not report a per-cycle $phase leak figure"
+    else
+        # A missing figure used to be accepted whenever the guest had run
+        # fewer than two expunges, so a drill that stopped printing the line
+        # at all passed as long as it also cycled less.  A number that is not
+        # there is not a zero: say so and fail.
+        fail "the drill printed no per-cycle $phase leak figure (the guest ran
+       $GUEST_EXPUNGES expunge(s)), so nothing measured whether a $phase cycle
+       gives its memory back"
     fi
 done
 
@@ -372,9 +378,13 @@ else
 fi
 if [ "$ORPHANS" -gt 0 ]; then
     echo "     (src/sana2/sana2_rx.c's last-resort path: a driver ignored AbortIO()."
-    echo "      32 KB leaked per occurrence.  Known, not a regression.)"
-    if [ "${AMINETXDUO_CYCLE_ORPHAN_FATAL:-0}" = 1 ]; then
-        fail "a SANA-II reader was orphaned and ORPHAN_FATAL is set"
+    echo "      32 KB leaked per occurrence.)"
+    # FATAL BY DEFAULT.  It used to need AMINETXDUO_CYCLE_ORPHAN_FATAL=1, which
+    # nothing in the tree ever set, so 32 KB a time went out as a note nobody
+    # read.  AMINETXDUO_CYCLE_ORPHAN_FATAL=0 is the way to run against a driver
+    # known to ignore AbortIO() without the run going red.
+    if [ "${AMINETXDUO_CYCLE_ORPHAN_FATAL:-1}" = 1 ]; then
+        fail "$ORPHANS SANA-II reader stack(s) orphaned, 32 KB each, never freed"
     fi
 fi
 
