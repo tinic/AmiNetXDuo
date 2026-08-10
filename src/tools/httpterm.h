@@ -130,8 +130,11 @@ VOID  http_term_break(VOID);
 /* End the session and reclaim the runner.  Safe to call more than once. */
 VOID  http_term_stop(VOID);
 
-/* What the Shell exited with, once it has.  -1 while it is still running. */
+/* What the Shell exited with, once it has.  -1 while it is still running,
+   and -1 again when no Shell would start -- http_term_err() tells the two
+   apart, and is 0 unless the second happened. */
 LONG  http_term_rc(VOID);
+LONG  http_term_err(VOID);
 
 /* ------------------------------------------------- the socket, once it is --
  *                                                     no longer HTTP

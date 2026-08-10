@@ -6470,6 +6470,10 @@ static VOID httpd_serve(LONG lsock)
                         httpd_log(c, "terminal ended: %s, Shell rc %ld",
                                   (LONG)http_ws_close_reason(c->ws.why),
                                   http_term_rc());
+                    if ((httpd_verbose || httpd_trace) &&
+                        http_term_err() != 0)
+                        httpd_log(c, "terminal: IoErr was %ld",
+                                  http_term_err(), 0);
                     httpd_close(c);
                 }
 

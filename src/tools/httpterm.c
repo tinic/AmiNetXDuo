@@ -316,8 +316,18 @@ VOID http_term_service(VOID)
 
         if (failed)
         {
-            tool_error("no Shell would start for the terminal (IoErr %ld)",
-                       (LONG)term_runner.rn_Err);
+            /*
+             * tool_printf() and not tool_error(), which is the tree's
+             * convention everywhere else and is wrong HERE.  tool_error()
+             * writes to pr_CES, and a server started from a Startup-Sequence
+             * with `>DH0:stdout.txt` has a pr_CES that is the boot console and
+             * not the redirected stream -- so this line, the one that says why
+             * the terminal did not work, was the one line missing from the
+             * transcript that was supposed to explain it.  Cost a guest run.
+             */
+            tool_printf("httpd: no Shell would start for the terminal "
+                        "(IoErr %ld)\n", (LONG)term_runner.rn_Err);
+            (VOID)Flush(Output());
             term_rc     = -1;
             term_reaped = 1;
         }
@@ -626,7 +636,7 @@ BOOL http_term_running(VOID)
 
 BOOL http_term_start(VOID)
 {
-    struct TagItem  tags[4];
+    struct TagItem  tags[5];
     struct Process *proc;
     BPTR            sh_in  = (BPTR)0;
     BPTR            sh_out = (BPTR)0;
@@ -665,10 +675,23 @@ BOOL http_term_start(VOID)
     term_runner.rn_Err    = 0;
     term_runner.rn_Done   = 0;
 
+    /*
+     * NP_Cli, and it is not decoration.  Execute() asks the calling process
+     * for its CLI -- that is where the Shell it creates inherits its command
+     * paths and its idea of what a command is from -- and CreateNewProc()
+     * makes a process with pr_CLI NULL unless told otherwise.  Without it
+     * Execute() returned FALSE with nothing else wrong, which reads from
+     * outside as a session that opens and closes.
+     *
+     * SystemTagList() did not need it because it builds the CLI itself, which
+     * is exactly why the first version of this file appeared to get further
+     * than it did.
+     */
     tags[0].ti_Tag = NP_Entry;     tags[0].ti_Data = (ULONG)term_runner_main;
     tags[1].ti_Tag = NP_Name;      tags[1].ti_Data = (ULONG)"httpd terminal runner";
     tags[2].ti_Tag = NP_StackSize; tags[2].ti_Data = TERM_RUNNER_STACK;
-    tags[3].ti_Tag = TAG_END;      tags[3].ti_Data = 0;
+    tags[3].ti_Tag = NP_Cli;       tags[3].ti_Data = TRUE;
+    tags[4].ti_Tag = TAG_END;      tags[4].ti_Data = 0;
 
     proc = CreateNewProc(tags);
     if (proc == NULL)
@@ -755,6 +778,11 @@ VOID http_term_break(VOID)
 LONG http_term_rc(VOID)
 {
     return term_rc;
+}
+
+LONG http_term_err(VOID)
+{
+    return term_runner.rn_Err;
 }
 
 /*
