@@ -312,6 +312,12 @@ EOF
 FASTMEM=8
 [ "$BOARD" = ne2000_pcmcia ] && FASTMEM=4
 
+# AMINETXDUO_FASTMEM=<MB> takes it away again, 0 included.  The pool and the
+# receive window come off AvailMem(), so the 1 MB machine in
+# src/sana2/sana2_internal.h is a configuration and not a hypothesis, and it
+# is only reachable from here: Z3MEM only ever adds.
+FASTMEM="${AMINETXDUO_FASTMEM:-$FASTMEM}"
+
 # AMINETXDUO_Z3MEM=<MB> adds Zorro III fast RAM.  The stack sizes its packet
 # pool and its receive window off AvailMem(), so "how much memory does the
 # machine have" is a real variable in its behaviour, and an accelerated Amiga
