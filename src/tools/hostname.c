@@ -128,23 +128,10 @@ static BOOL configured_name(char *out, ULONG outlen, UWORD *source)
     out[0]  = '\0';
 
     if (ami_config_load(&cfg) != AMI_CFG_OK || cfg.hostname[0] == '\0')
-    {
-        ami_netdb_free();
         return FALSE;
-    }
 
     tool_copy_string(out, outlen, cfg.hostname);
     *source = cfg.hostname_source;
-
-    /*
-     * ami_config_load() loads the netdb behind it (src/config/config_file.c)
-     * and ami_alloc() is AllocVec(), which AmigaOS does not reclaim when a
-     * process exits: 12,616 bytes a run on a stock DEVS:Internet, gone until
-     * the machine is switched off. Freed here rather than at the end of main()
-     * because everything wanted out of the load has been copied out by this
-     * line, and this function is reached from several places.
-     */
-    ami_netdb_free();
 
     return TRUE;
 }

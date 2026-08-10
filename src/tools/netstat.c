@@ -428,23 +428,7 @@ static VOID show_connections(const ToolSnapshot *snap)
         tool_printf("(list truncated at %ld sockets)\n", (LONG)TOOL_MAX_SOCK);
 }
 
-/*
- * The body, so that ami_netdb_free() has one place to run.  atexit() is not
- * free here: libnix satisfies it out of an object that also references malloc
- * and __errno, which pulls in the C++ AVL allocator and the stdio FILE
- * machinery, about 7.7 KB nothing in this command calls.
- */
-static int netstat_main(int argc, char **argv);
-
 int main(int argc, char **argv)
-{
-    int rc = netstat_main(argc, argv);
-
-    ami_netdb_free();
-    return rc;
-}
-
-static int netstat_main(int argc, char **argv)
 {
     LONG             args[ARG_COUNT];
     struct RDArgs   *rda;
@@ -538,14 +522,6 @@ static int netstat_main(int argc, char **argv)
     cfg = (ami_config_load(&netstat_config) == AMI_CFG_OK) ? &netstat_config
                                                            : NULL;
     tool_config_unwatch();
-
-    /*
-     * ami_config_load() loads the netdb (src/config/config_file.c) and
-     * ami_alloc() is AllocVec(), which AmigaOS does not reclaim when a process
-     * exits, 12,616 bytes per run on a stock DEVS:Internet, gone until
-     * reboot.  main() frees it on the way out, which is one place however
-     * many ways this command leaves its body.
-     */
 
     if (want_if)
         show_interfaces(cfg, &snap);

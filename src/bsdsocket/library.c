@@ -933,9 +933,11 @@ struct AmiSocketBase *bsd_lib_open(
      * The DEVS:Internet netdb backs get{serv,proto,net}by*() (netdb.c).
      * ami_netdb_load() is idempotent but not re-entrant, so it happens here,
      * inside the master semaphore and on a Process (it reads files), never
-     * from a lookup. netstack_startup() below reaches it too via
-     * ami_config_load(); calling it explicitly keeps the netdb up even if that
-     * path changes.
+     * from a lookup: the netstack's own threads resolve names, and they are
+     * not Processes, so the lazy load in netdb_table() would open a file from
+     * a context that cannot. This is the ONLY thing that loads it for the
+     * library -- ami_config_load() used to as a side effect and no longer
+     * does -- and bsd_lib_expunge() below is the matching free.
      */
     (VOID)ami_netdb_load();
 
