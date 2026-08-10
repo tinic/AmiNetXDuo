@@ -302,8 +302,54 @@ static void test_format(void)
     CHECK(buf[5] == '\0' || buf[strlen(buf)] == '\0');
 }
 
+/* --------------------------------------------------------------- limits --- */
+
+static void test_limits(void)
+{
+    printf("bounded runs\n");
+
+    /* The ordinary shapes are accepted. */
+    CHECK(iperf_limits_check(10, 0, 4096, 5001) == NULL);
+    CHECK(iperf_limits_check(0, 1024, 1470, 5001) == NULL);
+    CHECK(iperf_limits_check(IPERF_MAX_SECONDS, 0, 64, 1) == NULL);
+
+    /*
+     * The gate.  A run with neither a duration nor a size would go until
+     * something stopped it, printing progress the whole time, and a caller
+     * that redirected that to a file would have an unbounded writer.  That is
+     * not hypothetical: a wedged iperf 2.2.1 wrote 72 GB of interval reports
+     * into a shell redirect on the test host while this was being written.
+     * Ours cannot be asked to.
+     */
+    CHECK(iperf_limits_check(0, 0, 4096, 5001) != NULL);
+    CHECK(iperf_limits_check(IPERF_MAX_SECONDS + 1, 0, 4096, 5001) != NULL);
+    CHECK(iperf_limits_check(0x7fffffffUL, 0, 4096, 5001) != NULL);
+
+    /* And the two ways of saying when to stop are exclusive, so neither can
+       be quietly ignored in favour of the other. */
+    CHECK(iperf_limits_check(10, 1024, 4096, 5001) != NULL);
+
+    /* A byte target is bounded too. */
+    CHECK(iperf_limits_check(0, 4UL * 1024UL * 1024UL, 4096, 5001) == NULL);
+    CHECK(iperf_limits_check(0, 4UL * 1024UL * 1024UL + 1, 4096, 5001) != NULL);
+
+    /* Ports, and buffers this will not send. */
+    CHECK(iperf_limits_check(10, 0, 4096, 0) != NULL);
+    CHECK(iperf_limits_check(10, 0, 4096, 65536) != NULL);
+    CHECK(iperf_limits_check(10, 0, IPERF_BUF_MIN - 1, 5001) != NULL);
+    CHECK(iperf_limits_check(10, 0, IPERF_BUF_MAX + 1, 5001) != NULL);
+
+    /*
+     * The output budget follows from the ceiling: one progress line a second
+     * for at most an hour.  If the ceiling ever moves, this says so.
+     */
+    CHECK(IPERF_MAX_LINES == IPERF_MAX_SECONDS);
+    CHECK(IPERF_MAX_SECONDS <= 3600UL);
+}
+
 int main(void)
 {
+    test_limits();
     test_pattern();
     test_datagram();
     test_report_roundtrip();

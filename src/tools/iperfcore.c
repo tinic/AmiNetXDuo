@@ -54,25 +54,18 @@ VOID iperf_plan_init(IperfPlan *plan)
 
 const char *iperf_plan_check(const IperfPlan *plan)
 {
+    const char *why;
+
     if (plan->dir > IPERF_UDP_RX)
         return "no such direction";
 
-    if (plan->port == 0)
-        return "port 0 is not a port";
-
-    if (plan->seconds == 0 && plan->kbytes == 0)
-        return "a test needs either a duration or a size";
-
-    if (plan->seconds != 0 && plan->kbytes != 0)
-        return "a duration and a size cannot both decide when to stop";
-
-    /* An hour.  Longer than any measurement anybody wants from a Shell, and
-       short enough that the millisecond clock cannot wrap inside one. */
-    if (plan->seconds > 3600UL)
-        return "a duration over an hour is not a measurement";
-
-    if (plan->buflen < (ULONG)IPERF_BUF_MIN || plan->buflen > (ULONG)IPERF_BUF_MAX)
-        return "the buffer size is outside what this will send";
+    /* Every bound a run has is decided in one place, and it is host-tested.
+       See the comment on iperf_limits_check() for why an unbounded run is
+       refused rather than merely discouraged. */
+    why = iperf_limits_check(plan->seconds, plan->kbytes, plan->buflen,
+                             (ULONG)plan->port);
+    if (why != NULL)
+        return why;
 
     /* A UDP datagram has to hold the header the far end parses. */
     if ((plan->dir == IPERF_UDP_TX) && plan->buflen < (ULONG)IPERF_DG_TOTAL)

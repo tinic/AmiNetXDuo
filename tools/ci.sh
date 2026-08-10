@@ -138,7 +138,7 @@ esac
 # number of targets: test_crypto68k and friends register several each.  Raise
 # it when tests are added; the gate is there so that tests DISAPPEARING is
 # noticed, which comparing against the target count never could.
-HOST_TESTS_EXPECTED=46
+HOST_TESTS_EXPECTED=47
 case "$(uname -m)" in
     x86_64|amd64) ;;
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 1)) ;;   # no test_inet

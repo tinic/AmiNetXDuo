@@ -139,6 +139,36 @@ void iperf_format_bytes(char *buf, unsigned long buflen,
 /* Add `add` to a 64-bit count held as two 32-bit halves. */
 void iperf_add64(unsigned long *hi, unsigned long *lo, unsigned long add);
 
+/* ---------------------------------------------------------------- limits - */
+
+/*
+ * A measurement is bounded or it is not a measurement.  Every run states
+ * either how long it may take or how much it may move, and neither may be
+ * open-ended: iperf_limits_check() is the only place that decides, and both
+ * the command and httpd go through it before a socket is opened.
+ *
+ * This is not tidiness.  A server told to run until somebody stops it prints
+ * progress for as long as it lives, and a caller that redirected that to a
+ * file has an unbounded writer -- which is exactly how a wedged iperf 2.2.1
+ * on the test host wrote 72 GB of interval reports into a shell redirect
+ * while this was being developed.  The tool cannot be asked to do that.
+ *
+ * An hour is the ceiling.  Longer than any measurement anybody wants from a
+ * Shell, short enough that the millisecond clock cannot wrap inside one, and
+ * it puts a hard bound on the output: one progress line a second is at most
+ * IPERF_MAX_LINES of them.
+ */
+#define IPERF_MAX_SECONDS   3600UL
+#define IPERF_MAX_LINES     IPERF_MAX_SECONDS
+
+/*
+ * NULL when the run is bounded and the sizes make sense, otherwise a sentence
+ * fragment saying what is wrong.  `seconds` and `kbytes` are the two ways to
+ * say when to stop and exactly one of them must be given.
+ */
+const char *iperf_limits_check(unsigned long seconds, unsigned long kbytes,
+                               unsigned long buflen, unsigned long port);
+
 #ifdef __cplusplus
 }
 #endif

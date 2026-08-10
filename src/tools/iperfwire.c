@@ -7,6 +7,8 @@
 
 #include "iperfwire.h"
 
+#include <stddef.h>
+
 /*
  * unsigned long is 32 bits on the m68k and 64 on the host that runs the tests,
  * and this file is compiled both ways.  Anything that depends on a value
@@ -130,6 +132,33 @@ void iperf_add64(unsigned long *hi, unsigned long *lo, unsigned long add)
         *hi = U32(*hi + 1UL);
 
     *lo = sum;
+}
+
+const char *iperf_limits_check(unsigned long seconds, unsigned long kbytes,
+                               unsigned long buflen, unsigned long port)
+{
+    if (port == 0 || port > 65535UL)
+        return "that is not a port";
+
+    if (seconds == 0 && kbytes == 0)
+        return "a test needs either a duration or a size";
+
+    if (seconds != 0 && kbytes != 0)
+        return "a duration and a size cannot both decide when to stop";
+
+    if (seconds > IPERF_MAX_SECONDS)
+        return "a run longer than an hour is not a measurement";
+
+    /* A byte target is bounded too: at the rate the fastest Amiga card
+       reaches, 4 GB is already several hours. */
+    if (kbytes > (4UL * 1024UL * 1024UL))
+        return "a transfer over 4 GB is not a measurement";
+
+    if (buflen < (unsigned long)IPERF_BUF_MIN
+        || buflen > (unsigned long)IPERF_BUF_MAX)
+        return "the buffer size is outside what this will send";
+
+    return NULL;
 }
 
 unsigned long iperf_bits_per_sec(unsigned long bytes_hi, unsigned long bytes_lo,
