@@ -110,7 +110,7 @@ Configuration follows Roadshow's layout, `DEVS:NetInterfaces/<name>`,
 | `arp` | which machines on this network have answered, and what they are |
 | `sntp` | set the clock from a time server |
 | `fetch` | retrieve an `http://` or `https://` URL |
-| `httpd` | share a drawer, so other machines can mount it as a drive |
+| `httpd` | share a drawer, so other machines can mount it as a drive; `-T` also serves a Shell in a browser |
 | `nc` | connect or listen, TCP and UDP, port ranges, timeouts |
 | `telnet` | with enough option negotiation not to confuse a real server |
 | `ssh` | Dropbear's dbclient, public-key auth; see the ReadMe for keys |
@@ -121,6 +121,9 @@ Configuration follows Roadshow's layout, `DEVS:NetInterfaces/<name>`,
 | `AddNetRoute`, `DeleteNetRoute` | where packets go that are not for this network |
 | `GetNetStatus`, `NetShutdown` | status for scripts, and a clean shutdown |
 | `RemoveNetInterface` | take one interface out of the running network |
+| `ConfigureNetInterface` | change a running interface's address, or renew and release its DHCP lease |
+| `NetSetup` | write the configuration files |
+| `hostname` | what this machine is called, and where the name came from |
 
 The installer copies all of them into `C:`.
 

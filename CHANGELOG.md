@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `httpd -T <page.html>` serves an AmigaDOS Shell in a browser at `/terminal`, over a WebSocket. It is 44 ms to the prompt and about 23 ms from pressing Enter to seeing the output on an A1200, which is not far off a Shell on the machine itself. **Anyone who can reach the port gets that Shell**; there is no password, as there is none on the drawer `httpd` already shares
+
 - `ConfigureNetInterface` changes a running interface's address, netmask and gateway where it stands, instead of the interface having to be taken out and put back
 - `ConfigureNetInterface CONFIGURE=DHCP` renews one interface's lease, and `RELEASE` gives it up, without restarting the network
 - `hostname` reports the machine's name and which of the four places it came from, and sets it
