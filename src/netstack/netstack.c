@@ -2740,6 +2740,13 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
     if ((UWORD)slot >= ns->ns_IfaceCount)
         ns->ns_IfaceCount = (UWORD)(slot + 1);
 
+    /* The two per-slot tables ami_ns_open_devices() fills at start-up.
+       netstack_iface_config() reads ns_IfaceCfg[] to answer what this
+       interface was configured from, and answered for whatever was in the
+       slot before without it. */
+    ns->ns_IfaceCfg[slot]  = (UWORD)slot;
+    ns->ns_IfaceMdns[slot] = slot_cfg->mdns;
+
 #ifdef AMINETXDUO_BPF
     ami_netstack_capture_attach_one(ns, (UWORD)slot);
 #endif
@@ -2798,4 +2805,81 @@ LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
     ReleaseSemaphore(&ami_ns_lock);
 
     return rc;
+}
+
+/*
+ * The same add, plus everything start-up does to an interface it finds in
+ * DEVS:NetInterfaces: the address, the gateway, the address allocation the
+ * file asks for and STATE=down.
+ *
+ * netstack_interface_add() deliberately stops short of all of it, because
+ * AddInterfaceTagList() promises a bare interface its caller addresses with
+ * ConfigureInterfaceTagList(). AddNetInterface has a file rather than a tag
+ * list, so its interface has to arrive the way a booted one does.
+ */
+LONG netstack_interface_start(const AmiIfConfig *cfg, UWORD *index_out)
+{
+    AmiNetStack  *ns = ami_ns;
+    AmiNetCaller *caller;
+    UWORD         index   = 0;
+    ULONG         gateway = 0UL;
+    LONG          rc;
+
+    if (ns == NULL || !ns->ns_IpCreated || cfg == NULL)
+        return AMI_NET_ERR_STATE;
+
+    rc = netstack_interface_add(cfg, &index);
+    if (rc != AMI_NET_OK)
+        return rc;
+
+    if (index_out != NULL)
+        *index_out = index;
+
+    /*
+     * The static address arrived with the attach, which is given it; the
+     * gateway did not. nx_ip_interface_detach() takes the default gateway with
+     * the interface that carried it, so a removed and re-added interface comes
+     * back with a subnet and no way off it. The file's own GATEWAY first, then
+     * the machine's, which is where that line ends up when there is one
+     * interface. A leased address brings its own gateway, so DHCP is left to
+     * put its own back.
+     */
+    if (cfg->iptype == AMI_IPTYPE_STATIC)
+        gateway = (cfg->gateway != 0UL) ? cfg->gateway
+                                        : ns->ns_Config.default_gateway;
+
+    if (gateway != 0UL)
+    {
+        caller = ami_netstack_enter_alloc();
+        if (caller != NULL)
+        {
+            UINT status = nx_ip_gateway_address_set(&ns->ns_Ip, gateway);
+
+            if (status != NX_SUCCESS)
+                AMI_WARN("netstack: gateway set failed (%ld)", (long)status);
+
+            ami_netstack_leave_free(caller);
+        }
+    }
+
+    if (cfg->iptype == AMI_IPTYPE_DHCP)
+    {
+        (VOID)netstack_interface_dhcp_start(index, 0UL);
+    }
+    else if (cfg->iptype == AMI_IPTYPE_LINKLOCAL)
+    {
+        caller = ami_netstack_enter_alloc();
+        if (caller != NULL)
+        {
+            ami_ns_start_autoip(ns);
+            ami_netstack_leave_free(caller);
+        }
+    }
+
+    /* STATE=down, honoured after the attach and the same way start-up honours
+       it: the attach is what brought the link up. */
+    if (!cfg->up)
+        (VOID)ami_ns_interface_disable(index, AMI_LINK_STACK_DISABLE);
+
+    return AMI_NET_OK;
 }

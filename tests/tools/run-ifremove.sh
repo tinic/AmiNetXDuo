@@ -108,6 +108,24 @@ NETMASK=255.255.255.0
 GATEWAY=10.0.2.2
 IFEOF
 
+# The board's own driver, when -A named one that is not the A2065. Staged the
+# way tests/netstack/run-amiberry.sh stages it, DEVS:Networks with DEVICE= left
+# as the bare name, so that -N xsurf100z2 runs against x-surf-100.device rather
+# than against a card with nothing able to open it.
+if [ "$RUNNER" = amiberry ]; then
+    . "$ROOT/tools/sana2-stage.sh"
+
+    if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
+        _want=$(sana2_driver_for "$BOARD")
+        _have=$(sana2_local_driver "$_want")
+        [ -n "$_have" ] && [ -f "$_have" ] &&
+            export AMINETXDUO_SANA2_DRIVER="$_have"
+    fi
+
+    sana2_stage "$BOARD" "$STAGE/devs"
+    echo "==> $BOARD: $SANA2_DRIVER, opened as '$SANA2_DEVICE'"
+fi
+
 cp "$BSD"                      "$STAGE/libs/bsdsocket.library"
 cp "$TOOLS/AddNetInterface"    "$STAGE/AddNetInterface"
 cp "$TOOLS/RemoveNetInterface" "$STAGE/RemoveNetInterface"

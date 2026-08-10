@@ -217,12 +217,133 @@ static VOID sort_names(STRPTR *names, ULONG count)
     }
 }
 
-/*
- * Wait up to `seconds` for this machine to be given an address. `addr_out` is
- * where the answer lands; FALSE means the time ran out or Ctrl-C was pressed.
- * Returns at once when there is already an address, as on a static interface.
+/* ------------------------------------------- the stack inside the library,
+ *
+ * Which is every shipped build. Opening bsdsocket.library starts the network
+ * and brings up everything in DEVS:NetInterfaces, so a first add needs nothing
+ * else; an add against a stack that is ALREADY running is a different job, and
+ * one this command did not do at all until 0.20.1. It opened the library,
+ * found it open, waited for an address the machine already had or never got,
+ * and returned RETURN_OK having attached nothing. That is what a user saw
+ * after RemoveNetInterface: the same name added back, success reported, no
+ * interface. NETCTRL_INTERFACE_ADD is the call that does the work.
  */
-static BOOL wait_for_address(ULONG seconds, ULONG *addr_out, BOOL *broken)
+
+/* Static: this table is most of a Shell command's 4 KB stack on its own. */
+static struct
+{
+    NetStatusHeader     hdr;
+    NetStatusInterface  e[NX_MAX_PHYSICAL_INTERFACES];
+} addif_ifaces;
+
+/*
+ * What the running stack has by that name: its index, or -1 when there is no
+ * such interface and -2 when the stack would not answer. `addr_out` receives
+ * the address it holds, which is 0 until one arrives.
+ */
+static LONG running_index(struct Library *base, const char *name,
+                          ULONG *addr_out)
+{
+    LONG n;
+    LONG i;
+
+    if (addr_out != NULL)
+        *addr_out = 0;
+
+    n = tool_netstatus_query(base, NETSTATUS_INTERFACES, &addif_ifaces,
+                             sizeof(addif_ifaces), sizeof(NetStatusInterface));
+    if (n < 0)
+        return -2;
+
+    /* nsh_Count is the library's number, not ours: bound it by the table it is
+       being used to index, as removenetinterface.c and tool_nx.c do. */
+    for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        if (!(addif_ifaces.e[i].nsi_Flags & NETSTATUS_IF_NAMED))
+            continue;
+
+        if (tool_stricmp(addif_ifaces.e[i].nsi_Name, name) != 0)
+            continue;
+
+        if (addr_out != NULL)
+            *addr_out = addif_ifaces.e[i].nsi_Address;
+
+        return (LONG)addif_ifaces.e[i].nsi_Index;
+    }
+
+    return -1;
+}
+
+/*
+ * Hand the name to the running stack. The library reads
+ * DEVS:NetInterfaces/<name> itself and brings the interface up as a boot
+ * would, so there is nothing to pass but the name. Returns 0, or the library's
+ * errno.
+ */
+static LONG add_to_running_stack(struct Library *base, const char *name)
+{
+    NetStatusControl ctl;
+    LONG             err = 0;
+    ULONG            w;
+    ULONG            i;
+
+    for (w = 0; w < (ULONG)(sizeof(ctl) / sizeof(ULONG)); w++)
+        ((ULONG *)&ctl)[w] = 0;
+
+    for (i = 0; i + 1 < (ULONG)sizeof(ctl.nsc_Name) && name[i] != '\0'; i++)
+        ctl.nsc_Name[i] = name[i];
+
+    if (tool_netstatus_control(base, NETCTRL_INTERFACE_ADD, &ctl, &err) == 0)
+        return 0;
+
+    return (err != 0) ? err : EIO;
+}
+
+/* Why the add was refused, in the words the rest of this command uses. */
+static VOID explain_add_failure(LONG err, const char *name,
+                                const AmiIfConfig *ifc)
+{
+    switch (err)
+    {
+        case ENOENT:
+            tool_explain_interface_file(name);
+            break;
+
+        case ENXIO:
+            tool_explain_device(ifc->device, ifc->unit);
+            break;
+
+        case EIO:
+            tool_explain_device_refused(ifc->device, ifc->unit);
+            break;
+
+        case EEXIST:
+            tool_printf("  %s is already part of the running network.\n",
+                        (LONG)name);
+            break;
+
+        case ENOSPC:
+            tool_printf("  this stack holds %ld interfaces and they are all "
+                        "in use; RemoveNetInterface frees one.\n",
+                        (LONG)NX_MAX_PHYSICAL_INTERFACES);
+            break;
+
+        case ENOBUFS:
+            advise_out_of_memory(AvailMem(MEMF_PUBLIC));
+            break;
+
+        default:
+            break;
+    }
+}
+
+/*
+ * Wait up to `seconds` for that interface to be given an address. FALSE means
+ * the time ran out, the interface went away, or Ctrl-C was pressed.
+ */
+static BOOL wait_for_running_address(struct Library *base, const char *name,
+                                     ULONG seconds, ULONG *addr_out,
+                                     BOOL *broken)
 {
     ULONG waited = 0;
 
@@ -230,7 +351,10 @@ static BOOL wait_for_address(ULONG seconds, ULONG *addr_out, BOOL *broken)
     {
         ULONG addr = 0;
 
-        if (tool_stack_query(&addr, NULL, 0) && addr != 0)
+        if (running_index(base, name, &addr) < 0)
+            return FALSE;
+
+        if (addr != 0)
         {
             *addr_out = addr;
             return TRUE;
@@ -419,13 +543,15 @@ int main(int argc, char **argv)
     if (err == AMI_NET_ERR_STATE)
     {
         struct Library *base;
+        BOOL            was_running = tool_stack_library_running();
 
         /*
          * Starting the network blocks until an address arrives or DHCP gives
          * up, up to half a minute. Say so first, or the pause looks like a
-         * hung machine.
+         * hung machine. Nothing is started when the stack is already up, so
+         * the line is not printed then either.
          */
-        if (!quiet)
+        if (!quiet && !was_running)
             tool_printf("%s: starting the network...\n", (LONG)name);
 
         base = tool_stack_start();
@@ -464,58 +590,106 @@ int main(int argc, char **argv)
         }
 
         /*
-         * Up, and every configured interface with it: the library reads them
-         * all once, so a list of names amounts to a single start here.
+         * The first open brought up every interface in DEVS:NetInterfaces at
+         * once, so a name that was in there is already attached and this only
+         * reads it back. A name that is not attached is the interesting case:
+         * an interface added to the directory since the stack started, or one
+         * taken out by RemoveNetInterface, and it is added here.
          *
-         * The stack is inside the library, so the address it was given has to
-         * be asked for rather than read out of our own memory. This is where
-         * TIMEOUT is spent: tool_stack_start() has already waited for the DHCP
-         * exchange it starts, and this waits out the rest of the allowance
-         * before deciding that nothing answered.
+         * Every name is checked, whether or not the stack was already running,
+         * because the answer is the same question either way and a start that
+         * came up without one of them is a failure this used to report as
+         * success. This is also where TIMEOUT is spent: tool_stack_start() has
+         * already waited for the DHCP exchange it starts, and the wait below
+         * spends the rest of the allowance before deciding nothing answered.
          */
+        for (n = 0; n < count; n++)
         {
             ULONG addr = 0;
-            BOOL  have = wait_for_address(allowance, &addr, &broken);
+            char  text[16];
+            LONG  where;
 
-            if (!quiet)
+            name = tool_basename((const char *)names[n]);
+            (VOID)load_interface(name, &ifc, TRUE);
+
+            where = running_index(base, name, &addr);
+
+            if (where == -2)
             {
-                char text[16];
+                if (!quiet)
+                {
+                    tool_error("the network would not say which interfaces "
+                               "it has");
+                    tool_explain_no_netstatus(base);
+                }
+                FreeArgs(rda);
+                return RETURN_FAIL;
+            }
 
-                if (have)
+            if (where < 0)
+            {
+                LONG add_err = add_to_running_stack(base, name);
+
+                if (add_err != 0)
+                {
+                    if (!quiet)
+                    {
+                        tool_error("%s could not be added to the running "
+                                   "network", (LONG)name);
+                        explain_add_failure(add_err, name, &ifc);
+                    }
+                    rc = RETURN_FAIL;
+                    continue;
+                }
+            }
+
+            if (addr == 0)
+                (VOID)wait_for_running_address(base, name, allowance, &addr,
+                                               &broken);
+
+            if (addr != 0)
+            {
+                if (!quiet)
                 {
                     ami_config_format_ip(addr, text, sizeof(text));
                     tool_printf("%s: online, address %s\n", (LONG)name,
                                 (LONG)text);
                 }
-                else
+            }
+            else if (!ifc.up)
+            {
+                /*
+                 * The file says STATE=down, so there is no address because
+                 * none was asked for. Sending someone to check a cable they
+                 * deliberately left unplugged is the same mistake as blaming a
+                 * driver for a card that opened.
+                 */
+                if (!quiet)
+                    tool_printf("%s: the network is running, and %s is "
+                                "configured down\n", (LONG)name, (LONG)name);
+            }
+            else
+            {
+                /*
+                 * Attached, and nothing gave it an address. WARN and not OK:
+                 * a script that reads the return code is the reason this
+                 * command exists in User-Startup.
+                 */
+                if (!quiet)
                 {
-                    if (!ifc.up)
-                    {
-                        /*
-                         * The file says STATE=down, so there is no address
-                         * because none was asked for. Sending someone to check
-                         * a cable they deliberately left unplugged is the same
-                         * mistake as blaming a driver for a card that opened.
-                         */
-                        tool_printf("%s: the network is running, and %s is "
-                                    "configured down\n", (LONG)name, (LONG)name);
-                        tool_printf("  is up and every command works; run  Online %s  to\n",
-                                    (LONG)name);
-                    }
-                    else
-                    {
-                        tool_printf("%s: the network is running, but this machine "
-                                    "has no address yet\n", (LONG)name);
+                    tool_printf("%s: the network is running, but this machine "
+                                "has no address yet\n", (LONG)name);
 
-                        if (ifc.iptype == AMI_IPTYPE_DHCP)
-                            tool_explain_dhcp(name);
-                    }
+                    if (ifc.iptype == AMI_IPTYPE_DHCP)
+                        tool_explain_dhcp(name);
                 }
 
-                for (n = 1; n < count; n++)
-                    tool_printf("%s: up, with the others\n",
-                                (LONG)tool_basename((const char *)names[n]));
+                if (rc == RETURN_OK)
+                    rc = RETURN_WARN;
             }
+
+            if (broken)
+                break;
         }
 
         if (broken)
@@ -526,7 +700,7 @@ int main(int argc, char **argv)
         }
 
         FreeArgs(rda);
-        return RETURN_OK;
+        return (int)rc;
     }
 
     if (err != AMI_NET_OK)
@@ -551,13 +725,26 @@ int main(int argc, char **argv)
         {
             /*
              * The file parses but the running stack does not know the name:
-             * the stack was already up when this interface file was added.
+             * the stack was already up when this interface file was written,
+             * or the name was removed from it. Add it, which is the same work
+             * NETCTRL_INTERFACE_ADD does for the library build above.
              */
-            if (!quiet)
+            UWORD slot = 0;
+
+            err = netstack_interface_start(&ifc, &slot);
+            if (err != AMI_NET_OK)
             {
+                if (!quiet)
+                {
+                    tool_error("%s could not be added to the running network: "
+                               "%s", (LONG)name, (LONG)tool_net_error(err));
+                    explain_startup_failure(err, &ifc);
+                }
+                FreeArgs(rda);
+                return RETURN_FAIL;
             }
-            FreeArgs(rda);
-            return RETURN_FAIL;
+
+            index = (LONG)slot;
         }
 
         if (!netstack_interface_is_up((UWORD)index))
@@ -600,6 +787,11 @@ int main(int argc, char **argv)
             if (ip != NULL)
                 live_mask =
                     ip->nx_ip_interface[index].nx_interface_ip_network_mask;
+
+            /* Online with nothing on it is not a success; the library build
+               above answers the same case the same way. */
+            if (live_addr == 0 && ifc.up && rc == RETURN_OK)
+                rc = RETURN_WARN;
 
             if (quiet)
             {

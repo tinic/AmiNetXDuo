@@ -31,6 +31,9 @@
 
 #include "sana2_internal.h"
 
+/* tx_amiga_stack_in_use(), for the reader stacks. */
+#include "tx_amiga.h"
+
 #ifdef AMINETXDUO_RX_VERIFY
 #include "net68k.h"
 #endif
@@ -1176,10 +1179,58 @@ static UWORD ami_sana2_rx_ipv4_depth(NX_PACKET_POOL *pool)
     return (UWORD)depth;
 }
 
+/*
+ * A stack ThreadX will accept.
+ *
+ * tx_thread_create() refuses a stack that lies inside one it still has on its
+ * created list, and a dead Task's adopted thread stays on that list holding a
+ * range the allocator has since given back (tx_amiga_stack_in_use()). The
+ * command that starts the network keeps bsdsocket.library open on purpose and
+ * then exits, so there is always at least one, and an interface added at run
+ * time is the first thing to allocate a stack afterwards: readers refused this
+ * way left the interface attached with its link down, addressed and unable to
+ * send anything.
+ *
+ * Refused blocks are held rather than freed, so the next attempt is somewhere
+ * else, and given back once one lands clear.
+ */
+#define AMI_SANA2_STACK_TRIES   8
+
+static APTR ami_sana2_alloc_stack(ULONG size)
+{
+    APTR  held[AMI_SANA2_STACK_TRIES];
+    APTR  stack = NULL;
+    UWORD n     = 0;
+    UWORD i;
+
+    while (n < (UWORD)AMI_SANA2_STACK_TRIES)
+    {
+        stack = ami_alloc_flags(size, MEMF_PUBLIC);
+        if (stack == NULL)
+            break;
+
+        if (tx_amiga_stack_in_use(stack, size) != (UINT)TX_TRUE)
+            break;
+
+        held[n++] = stack;
+        stack     = NULL;
+    }
+
+    for (i = 0; i < n; i++)
+        ami_free(held[i]);
+
+    if (stack == NULL && n != 0)
+        AMI_ERROR("sana2: no reader stack clear of a dead task's registration "
+                  "in %ld tries", (long)n);
+
+    return stack;
+}
+
 LONG ami_sana2_rx_start(AmiSana2If *iface)
 {
     UWORD i;
     UWORD ipv4_depth;
+    UINT  txstatus;
 
     if (iface->rx_running)
         return 0;
@@ -1227,7 +1278,7 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
         if (rx->depth > AMI_SANA2_RX_MAX_DEPTH)
             rx->depth = AMI_SANA2_RX_MAX_DEPTH;
 
-        rx->stack = ami_alloc_flags(AMI_SANA2_RX_STACK_SIZE, MEMF_PUBLIC);
+        rx->stack = ami_sana2_alloc_stack((ULONG)AMI_SANA2_RX_STACK_SIZE);
         if (rx->stack == NULL)
         {
             AMI_ERROR("sana2: no memory for reader stack");
@@ -1256,13 +1307,16 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
             return -1;
         }
 
-        if (tx_thread_create(&rx->thread, (CHAR *)ami_sana2_rx_names[i],
-                             ami_sana2_rx_thread, (ULONG)rx,
-                             rx->stack, AMI_SANA2_RX_STACK_SIZE,
-                             AMI_SANA2_RX_PRIORITY, AMI_SANA2_RX_PRIORITY,
-                             TX_NO_TIME_SLICE, TX_AUTO_START) != TX_SUCCESS)
+        txstatus = tx_thread_create(&rx->thread, (CHAR *)ami_sana2_rx_names[i],
+                                    ami_sana2_rx_thread, (ULONG)rx,
+                                    rx->stack, AMI_SANA2_RX_STACK_SIZE,
+                                    AMI_SANA2_RX_PRIORITY,
+                                    AMI_SANA2_RX_PRIORITY,
+                                    TX_NO_TIME_SLICE, TX_AUTO_START);
+        if (txstatus != TX_SUCCESS)
         {
-            AMI_ERROR("sana2: cannot create reader thread");
+            AMI_ERROR("sana2: cannot create reader %ld (%ld), stack %lx",
+                      (long)i, (long)txstatus, (unsigned long)rx->stack);
             tx_semaphore_delete(&rx->ready);
             tx_semaphore_delete(&rx->exited);
             ami_sana2_rx_stop(iface);

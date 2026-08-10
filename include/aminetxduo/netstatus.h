@@ -771,6 +771,24 @@ typedef struct NetStatusService
  */
 #define NETCTRL_INTERFACE_REMOVE 16 /* nsc_Index, nsc_Flags                  */
 
+/*
+ * Put one back, or bring a new one up: nsc_Name is a file in
+ * DEVS:NetInterfaces, and the interface arrives configured the way that file
+ * says, as it would have on a boot. That includes the address or the DHCP
+ * exchange that fetches one, and the default gateway, which
+ * NETCTRL_INTERFACE_REMOVE took away with the interface that carried it.
+ *
+ * This reads a file, so it must be called from a Process. ENOENT when there is
+ * no such file or it cannot be parsed, EEXIST when the stack already has an
+ * interface of that name, ENOSPC when every interface slot is taken, ENXIO or
+ * EIO when the SANA-II device would not open or would not answer.
+ *
+ * The address is not waited for. A lease takes seconds to arrive and the
+ * caller is the one with a Process to wait in; read NETSTATUS_INTERFACES until
+ * nsi_Address is set, or give up, as AddNetInterface does with its TIMEOUT.
+ */
+#define NETCTRL_INTERFACE_ADD   17  /* nsc_Name                              */
+
 /* Flags for nsc_Flags. Zero unless an operation above says otherwise. */
 #define NETCTRL_F_FORCE         0x00000001
 
