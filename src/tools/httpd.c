@@ -923,6 +923,9 @@ static const char *httpd_reason(ULONG status)
     switch (status)
     {
         case 100: return "Continue";
+        /* The upgrade writes its own status line, so this is for the LOG,
+           which said "101 Unknown" for every terminal that ever started. */
+        case 101: return "Switching Protocols";
         case 200: return "OK";
         case 201: return "Created";
         case 204: return "No Content";
@@ -6231,6 +6234,10 @@ static BOOL httpd_ws_writable(HttpConn *c)
          */
         if (c->ws_owner && !http_term_running())
         {
+            if (httpd_verbose || httpd_trace)
+                httpd_log(c, "terminal: the Shell ended, rc %ld",
+                          http_term_rc(), 0);
+
             httpd_ws_close(c, HTTP_WS_CLOSE_NORMAL);
             continue;
         }

@@ -135,6 +135,7 @@ typedef struct
     BPTR          rn_In;            /* the Shell's stdin                    */
     BPTR          rn_Out;           /* the Shell's stdout                   */
     LONG          rn_Rc;
+    LONG          rn_Err;           /* IoErr(), when no shell would start   */
     volatile LONG rn_Done;
 } TermRunner;
 
@@ -257,6 +258,10 @@ VOID http_term_service(VOID)
     {
         term_rc     = term_runner.rn_Rc;
         term_reaped = 1;
+
+        if (term_rc == -1)
+            tool_error("no Shell would start for the terminal (IoErr %ld)",
+                       (LONG)term_runner.rn_Err);
 
         /* Not `term_active = 0` yet: output the Shell wrote before it exited
            is still in the ring and is the answer to the last command.
@@ -416,12 +421,26 @@ static VOID term_runner_main(VOID)
      */
     tags[nt].ti_Tag = SYS_Input;     tags[nt++].ti_Data = (ULONG)r->rn_In;
     tags[nt].ti_Tag = SYS_Output;    tags[nt++].ti_Data = (ULONG)r->rn_Out;
-    tags[nt].ti_Tag = SYS_UserShell; tags[nt++].ti_Data = TRUE;
     tags[nt].ti_Tag = NP_StackSize;  tags[nt++].ti_Data = TERM_SHELL_STACK;
     tags[nt].ti_Tag = NP_Name;       tags[nt++].ti_Data = (ULONG)term_shell_name;
     tags[nt].ti_Tag = TAG_END;       tags[nt].ti_Data   = 0;
 
+    /*
+     * NOT SYS_UserShell.  That tag tells System() to find the USER's shell --
+     * ENV:Shell, or C:Shell -- rather than the one Kickstart 2.0 and later
+     * carry in ROM, and a machine that has neither gets nothing at all.
+     * Measured, and it is why this was silent the first time it ran: the
+     * upgrade completed, the runner returned -1 within milliseconds, and the
+     * browser saw a session that opened and closed with not one byte in it.
+     * The built-in shell is on every machine this server runs on.
+     */
     r->rn_Rc = SystemTagList((CONST_STRPTR)"", tags);
+
+    /* Which of the two failures it was, so the caller can say.  System()
+       returns -1 when it could not start a shell AT ALL, and the shell's own
+       return code otherwise; -1 is the one a person can act on. */
+    if (r->rn_Rc == -1)
+        r->rn_Err = IoErr();
 
     /* System() does not close the handles it was given, and here that is the
        point: these two closes are the Shell's end of file in both directions,
@@ -529,6 +548,7 @@ BOOL http_term_start(VOID)
     term_runner.rn_In     = sh_in;
     term_runner.rn_Out    = sh_out;
     term_runner.rn_Rc     = 0;
+    term_runner.rn_Err    = 0;
     term_runner.rn_Done   = 0;
 
     tags[0].ti_Tag = NP_Entry;     tags[0].ti_Data = (ULONG)term_runner_main;
