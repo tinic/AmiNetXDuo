@@ -341,7 +341,10 @@ cp "$BENCH" "$STAGE/FitzBench"
 # AmigaDOS and the emulator's current mood with no network under any of it, and
 # a network figure is only worth reading beside it.
 STATARGS="-s"
-[ -z "$ROADSHOW" ] || STATARGS=""
+# Neither foreign stack ships our NetStat, so -s is ours to ask for only when
+# the arm is ours.  NG was missed here and logged "wrong number of arguments"
+# and rc 10 on every run, losing the packet-rate block.
+[ -z "$ROADSHOW$NGDIR" ] || STATARGS=""
 
 # NetStat runs on BOTH sides of the network arm.  Its counters are cumulative,
 # so bytes/sec can be had from FitzBench alone but the PACKET rate cannot: only
@@ -438,8 +441,17 @@ cat "$REPORT"
 echo "====================================================================="
 echo
 
-if ! grep -q "fitzbench: RESULT" "$REPORT"; then
-    echo "FAIL: no RESULT line, the benchmark did not finish" >&2
+# The RESULT has to come from the NETWORK arm.  A bare "fitzbench: RESULT"
+# anywhere is satisfied by the RAM: arm alone, which runs with no network under
+# it and therefore reports a figure even when the card never carried a byte:
+# the ariadne and ariadne_ii arms of the 2026-08-10 driver sweep exited 0 with
+# read_kbs=0 that way.  Look only between the FITZ: command header and the next
+# one.
+if ! awk '/^===== .*FitzBench FITZ:/ { infitz = 1; next }
+          /^===== /                  { infitz = 0 }
+          infitz && /fitzbench: RESULT/ { found = 1 }
+          END { exit(found ? 0 : 1) }' "$REPORT"; then
+    echo "FAIL: no RESULT line in the FITZ: arm, the network transfer did not finish" >&2
     exit 1
 fi
 
