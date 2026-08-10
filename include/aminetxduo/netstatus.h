@@ -68,16 +68,23 @@ extern "C" {
 
 #define AMI_NETSTATUS_MAGIC         0x414E5351UL    /* 'ANSQ' */
 /*
- * 6 since NetStatusControl grew nsc_Name for the mDNS browse. A caller and a
- * library that disagree fail every call rather than half of them, which is why
- * the commands and the library ship together.
+ * 8 since NETCTRL_INTERFACE_CONFIGURE. A caller and a library that disagree
+ * fail every call rather than half of them, which is why the commands and the
+ * library ship together.
  *
  * This is the compatibility mechanism for a record that grows. The size check in
  * bsd_NetStackQuery() is not: it rejects a buffer too small for the record, and
  * a caller that agrees on the version agrees on the record, so a matched caller
  * never meets it. It is there for the arrival that agreed on nothing.
+ *
+ * THE NUMBER AND THE SENTENCE ABOVE IT MOVE TOGETHER. Adding an operation
+ * without moving this leaves two different header shapes both claiming the same
+ * version, and the checks at src/bsdsocket/netstatus.c:1193 and :1407 are exact
+ * equality in both directions, so they cannot tell them apart. That has already
+ * happened once: NETCTRL_INTERFACE_ADD and NETCTRL_STACK_HOLD were both added
+ * under 7, and the comment here still said 6 while the constant said 7.
  */
-#define AMI_NETSTATUS_VERSION       7
+#define AMI_NETSTATUS_VERSION       8
 
 /* Fixed widths every record shares.  Up here rather than beside the first
    record that uses one, because NetStatusSystem needs NETSTATUS_NAME_LEN and
@@ -119,9 +126,15 @@ extern "C" {
  *
  * Bump this when a *caller of this interface* needs a newer library: when a
  * netstatus vector is added, or when AMI_NETSTATUS_VERSION moves. Not merely
- * because BSD_LIB_REVISION did, revision 3 added the RFC 3493 if_* vectors,
- * which no netstatus caller touches, so a revision-2 library still answers
- * everything here and refusing it would be a wrong diagnosis.
+ * because BSD_LIB_REVISION did: a revision that adds vectors no netstatus
+ * caller touches still answers everything here, and refusing it would be a
+ * wrong diagnosis.
+ *
+ * 4 because AMI_NETSTATUS_VERSION is 8 and revision 4 is the first library
+ * that speaks it. A revision-3 library answers 7, which the exact-equality
+ * check below refuses on every call; without this the refusal arrives as
+ * EINVAL from whichever call happened to be first, and reads like the feature
+ * being absent rather than like half an install.
  *
  * The version check inside the library catches a mismatched pair too, but only
  * after the call, where it is indistinguishable from the feature being absent
@@ -129,7 +142,7 @@ extern "C" {
  * to stop looking. This check runs before any call and says the true thing:
  * finish the install.
  */
-#define AMI_NETSTATUS_MIN_REVISION  2
+#define AMI_NETSTATUS_MIN_REVISION  4
 
 /* ------------------------------------------------------------ selectors,
  *
@@ -810,8 +823,43 @@ typedef struct NetStatusService
  */
 #define NETCTRL_STACK_HOLD      18  /*,                                    */
 
+/*
+ * Re-address a running interface: what ConfigureNetInterface does, and the
+ * thing that until now needed NETCTRL_INTERFACE_REMOVE and _ADD in a pair.
+ *
+ * nsc_Index names the interface. nsc_Destination is the new address,
+ * nsc_NetMask the new mask and nsc_Gateway the new default gateway, and each is
+ * applied only when its NETCTRL_F_ bit is set in nsc_Flags: 0.0.0.0 is a thing
+ * a caller may legitimately ask for, so it cannot double as "leave this one
+ * alone".
+ *
+ * The address and the mask are set together in one NetX Duo call even when only
+ * one of them was given, because nx_ip_interface_address_set() takes both and
+ * an interface must never be seen carrying a new address with its old mask. A
+ * mask of zero on an interface that has none becomes the classful default, the
+ * same rule ConfigureInterfaceTagList() applies to an address given without
+ * one, and the same code.
+ *
+ * The gateway is the machine's, not the interface's: NetX Duo keeps one
+ * nx_ip_gateway_address for the whole NX_IP. It is set last, after the address,
+ * because nx_ip_gateway_address_set() refuses a next hop that is not on some
+ * interface's subnet, and the subnet it has to be on is usually the one this
+ * call has just changed. A gateway of 0.0.0.0 clears it.
+ *
+ * EADDRNOTAVAIL for an address NetX Duo would not take, EINVAL for a gateway it
+ * would not take, ENXIO for an interface index that is not attached. Nothing is
+ * applied by a call that fails on the address; a call that sets the address and
+ * then fails on the gateway reports the gateway and keeps the address, which is
+ * the half that was asked for first and the half a caller can see.
+ */
+#define NETCTRL_INTERFACE_CONFIGURE 19 /* nsc_Index/Destination/NetMask/Gateway */
+
 /* Flags for nsc_Flags. Zero unless an operation above says otherwise. */
 #define NETCTRL_F_FORCE         0x00000001
+/* Which of NETCTRL_INTERFACE_CONFIGURE's three fields were given at all. */
+#define NETCTRL_F_ADDRESS       0x00000002
+#define NETCTRL_F_NETMASK       0x00000004
+#define NETCTRL_F_GATEWAY       0x00000008
 
 typedef struct NetStatusControl
 {

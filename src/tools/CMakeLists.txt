@@ -205,6 +205,13 @@ aminetxduo_add_tool(tool_netshutdown NetShutdown SOURCES netshutdown.c)
 aminetxduo_add_tool(tool_removenetinterface RemoveNetInterface
     SOURCES removenetinterface.c)
 
+# ConfigureNetInterface changes the three numbers on an interface that is
+# already there, where the pair above take it out and put it back.  Config-only:
+# NETCTRL_INTERFACE_CONFIGURE through NetStackControl(), and the library shares
+# the address half with ConfigureInterfaceTagList() so the two cannot disagree.
+aminetxduo_add_tool(tool_configurenetinterface ConfigureNetInterface
+    SOURCES configurenetinterface.c)
+
 aminetxduo_add_tool(tool_online  Online   SOURCES onoff.c ${TOOLS_DEVDIAG})
 aminetxduo_add_tool(tool_offline Offline  SOURCES onoff.c ${TOOLS_DEVDIAG}
     DEFINES TOOL_OFFLINE)
@@ -358,6 +365,7 @@ add_dependencies(tools
     tool_addnetinterface tool_checknetconfig
     tool_addnetroute tool_deletenetroute
     tool_getnetstatus tool_netshutdown tool_removenetinterface
+    tool_configurenetinterface
     tool_netsetup tool_online tool_offline tool_host
     tool_fetch tool_nc tool_telnet tool_nettrace tool_traceroute tool_nslookup tool_arp
     tool_tftp tool_whois tool_httpd

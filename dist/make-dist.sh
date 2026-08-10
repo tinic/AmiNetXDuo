@@ -92,6 +92,7 @@ CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ShowNetServices
       ping netstat host
       nslookup arp fetch nc telnet NetTrace sntp traceroute tftp whois httpd
       CheckNetConfig GetNetStatus NetShutdown RemoveNetInterface
+      ConfigureNetInterface
       AddNetRoute DeleteNetRoute)
 
 # ---------------------------------------------------------- the CPU builds --

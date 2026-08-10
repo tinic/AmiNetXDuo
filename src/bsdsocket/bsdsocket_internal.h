@@ -237,9 +237,14 @@
  *   1  NetStackQuery/NetStackControl at -0x366/-0x36c
  *   2  NetStatusControl grew nsc_Name (AMI_NETSTATUS_VERSION 6)
  *   3  RFC 3493 if_nametoindex/if_indextoname/if_nameindex/if_freenameindex
- *      at -0x372..-0x384, the first slots past the end of the NDK's table
+ *      at -0x372..-0x384, the first slots past the end of the NDK's table.
+ *      AMI_NETSTATUS_VERSION also went 6 -> 7 here (NETCTRL_INTERFACE_ADD,
+ *      NETCTRL_STACK_HOLD) and this list was not told, which is how a command
+ *      built against 7 could meet a revision-3 library that answers 6 and be
+ *      told nothing useful.
+ *   4  AMI_NETSTATUS_VERSION 8, NETCTRL_INTERFACE_CONFIGURE
  */
-#define BSD_LIB_REVISION    3
+#define BSD_LIB_REVISION    4
 
 /* SBTC_LOGFACILITY's documented default. The NDK's <sys/syslog.h> ships the
    priority codes only, so the BSD facility value is spelled out here. */

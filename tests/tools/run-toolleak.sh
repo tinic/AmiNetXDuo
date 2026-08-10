@@ -173,6 +173,8 @@ cold|AddNetRoute|no-stack|5|re:not running, so it has no routes|-|SYS:AddNetRout
 cold|DeleteNetRoute|no-stack|5|re:not running, so it has no routes|-|SYS:DeleteNetRoute DST=198.51.100.0
 cold|NetShutdown|no-stack|5|re:nothing to stop|-|SYS:NetShutdown
 cold|RemoveNetInterface|unknown-name|5|re:nothing to remove|-|SYS:RemoveNetInterface nosuchif
+cold|ConfigureNetInterface|no-stack|5|re:no interface to configure|-|SYS:ConfigureNetInterface eth0 ADDRESS 10.0.2.20
+cold|ConfigureNetInterface|bad-address|5|re:is not an address|-|SYS:ConfigureNetInterface eth0 ADDRESS notanaddress
 cold|AddNetInterface|unknown-name|5|re:there is no interface called|-|SYS:AddNetInterface nosuchinterface
 cold|NetSetup|bad-address|5|re:is not an address|-|SYS:NetSetup eth9 DEVICE=a2065.device UNIT=0 ADDRESS=notanaddress NOONLINE
 cold|NetSetup|writes-config|5|re:set up a network interface|-|SYS:NetSetup ethz DEVICE=a2065.device UNIT=0 DHCP NOONLINE FORCE
@@ -217,6 +219,12 @@ live|DeleteNetRoute|no-such-route|5|re:no route to 198.51.100.0|-|SYS:DeleteNetR
 live|AddNetRoute|added|5|re:now go through 10.0.2.2|SYS:DeleteNetRoute DST=192.0.2.0|SYS:AddNetRoute DST=192.0.2.0 VIA=10.0.2.2
 live|DeleteNetRoute|deleted|5|re:The route to 192.0.2.0/24 is gone|SYS:AddNetRoute DST=192.0.2.0 VIA=10.0.2.2|SYS:DeleteNetRoute DST=192.0.2.0
 live|RemoveNetInterface|unknown-name|5|re:there is no interface called|-|SYS:RemoveNetInterface nosuchif
+# Both arms of ConfigureNetInterface against a running stack.  The prep moves
+# the address away and the MEASURED call puts it back, that way round on
+# purpose: every row below this one expects eth0 on 10.0.2.15, and a pair whose
+# last step left it somewhere else would fail them and not itself.
+live|ConfigureNetInterface|unknown-name|5|re:there is no interface called|-|SYS:ConfigureNetInterface nosuchif ADDRESS 10.0.2.20
+live|ConfigureNetInterface|reconfigures|5|re:eth0: 10.0.2.15 netmask 255.255.255.0|SYS:ConfigureNetInterface eth0 QUIET ADDRESS 10.0.2.20/24|SYS:ConfigureNetInterface eth0 ADDRESS 10.0.2.15/24
 live|AddNetInterface|already-up|5|re:online, address 10.0.2.15|-|SYS:AddNetInterface eth0
 live|AddNetInterface|unknown-name|5|re:there is no interface called|-|SYS:AddNetInterface nosuchinterface
 live|Online|unknown-name|5|re:nothing here is called|-|SYS:Online nosuch0

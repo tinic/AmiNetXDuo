@@ -38,6 +38,8 @@
  */
 
 #include "bsdsocket_vectors.h"
+/* bsd_if_set_address(), shared with ConfigureInterfaceTagList(). */
+#include "interfaces.h"
 
 #include "aminetxduo/netstatus.h"
 #include "aminetxduo/sana2.h"
@@ -1483,6 +1485,59 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
                 case AMI_NET_ERR_CONFIG: return bsd_fail(SocketBase, AMI_EEXIST);
                 default:                 return bsd_fail(SocketBase, AMI_ENOSPC);
             }
+        }
+
+        /*
+         * Re-address a running interface, which used to need a removal and an
+         * add in a pair and so a device close, a device open and every
+         * connection on the interface reset.
+         *
+         * Out here rather than in the bracketed switch below because
+         * bsd_if_set_address() takes the bracket itself. That is the same
+         * function ConfigureInterfaceTagList() calls, deliberately: the rule
+         * for a mask that was not given lives in one place, and
+         * tests/tools/run-ifreadd.sh is what says it is the right rule.
+         */
+        case NETCTRL_INTERFACE_CONFIGURE:
+        {
+            NX_IP *cip = netstack_ip();
+            LONG   rc2;
+
+            if (cip == NULL)
+                return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+            if (ctl->nsc_Index >= (UWORD)NX_MAX_PHYSICAL_INTERFACES ||
+                cip->nx_ip_interface[ctl->nsc_Index].nx_interface_valid == 0)
+                return bsd_fail(SocketBase, AMI_ENXIO);
+
+            if ((ctl->nsc_Flags & (NETCTRL_F_ADDRESS | NETCTRL_F_NETMASK)) != 0 &&
+                bsd_if_set_address(
+                    SocketBase, (LONG)ctl->nsc_Index,
+                    (ctl->nsc_Flags & NETCTRL_F_ADDRESS) ? TRUE : FALSE,
+                    ctl->nsc_Destination,
+                    (ctl->nsc_Flags & NETCTRL_F_NETMASK) ? TRUE : FALSE,
+                    ctl->nsc_NetMask) != 0)
+                return -1;
+
+            if ((ctl->nsc_Flags & NETCTRL_F_GATEWAY) == 0)
+                return 0;
+
+            /*
+             * Last, and in its own bracket. nx_ip_gateway_address_set()
+             * refuses a next hop that is not on some interface's subnet, and
+             * the subnet it needs is usually the one just written above.
+             */
+            if (bsd_nx_enter(SocketBase) != 0)
+                return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+            status = (ctl->nsc_Gateway != 0)
+                         ? nx_ip_gateway_address_set(cip, ctl->nsc_Gateway)
+                         : nx_ip_gateway_address_clear(cip);
+            rc2 = ns_map_status(SocketBase, status);
+
+            bsd_nx_leave(SocketBase);
+
+            return rc2;
         }
 
         /*
