@@ -363,6 +363,13 @@ BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
         {
             slot->packet->nx_packet_interface_capability_flag &=
                 (ULONG)(~NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM);
+
+            /* It copied the whole frame and moved the cursor to the end of it.
+               Falling through to the walk below would find nothing left to
+               copy, exhaust the chain with `len` still unsatisfied and report
+               a failed copy for a frame that is sitting complete in the
+               device's buffer. */
+            return TRUE;
         }
         else
         {
