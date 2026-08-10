@@ -1,0 +1,890 @@
+#!/usr/bin/env bash
+#
+# THE LEAK SWEEP FOR THE WHOLE COMMAND SET.
+#
+#   tests/tools/run-toolleak.sh [-b BUILDDIR] [-g GROUP] [-n RUNS] [-t SECONDS]
+#                               [-V] [-I ROWID]
+#
+# WHAT IT PROVES
+#
+#   Every command gives back everything it took.  Each row of the table below
+#   is run N times inside ONE boot, and free memory after the last run has to
+#   match free memory after the second.  The first run pays whatever a first
+#   open costs on this machine -- the library, the pool, the resolver's cache --
+#   and every run after it has to cost nothing.  AmigaOS reclaims nothing when
+#   a process exits, so a per-invocation cost of any size is memory that is
+#   gone until the machine is switched off.
+#
+#   That is tests/tools/run-addifleak.sh's shape, generalised: one table, one
+#   row per (command, arm), rather than one script per command.  Adding a tool
+#   means adding a row.
+#
+# BOTH ARMS
+#
+#   A command that leaks only when it refuses is the common case, because the
+#   refusal path is the one nobody walks.  Every command that has a meaningful
+#   failure gets a row for it: an interface that is not there, a host that does
+#   not resolve, a route with no gateway.  `template` rows are the third arm
+#   every command has: ReadArgs' own "?", which allocates an RDArgs and an
+#   argument buffer and returns before anything else happens.
+#
+# THE PREMISE COLUMN IS NOT DECORATION
+#
+#   A row whose command silently stopped reaching the path it names would read
+#   flat and pass.  Every row therefore states what has to be true of its own
+#   output -- an exit code, or a phrase -- and the row FAILS if it is not,
+#   before the arithmetic is even looked at.  A row with `?` in that column has
+#   no premise and fails as such: nothing here may pass vacuously.
+#
+# BOOTS, AND WHY THERE ARE FOUR
+#
+#   cold    the stack was never started.  Config-only commands and every
+#           command's `?`.  Nothing here may open bsdsocket.library, because
+#           opening it STARTS the stack and the rest of the boot would no
+#           longer be cold.
+#   live    one `AddNetInterface eth0` and then everything that reads or uses
+#           a running stack without disturbing it.
+#   cycle   the commands that take the stack apart: Online/Offline,
+#           AddNetInterface/RemoveNetInterface, NetShutdown.  Each is paired
+#           with the command that puts back what it took, so the pair repeats.
+#   server  `nc -l`, which blocks until its own -w expires and so cannot share
+#           a transcript position with anything.
+#
+#   A boot's command list is CHUNKED to ToolsSmoke's MAX_COMMANDS, which is
+#   read out of the source rather than assumed: past it the driver stops
+#   reading and the run looks like a list nobody wrote.
+#
+# PROVING THE ASSERTION FIRES
+#
+#   -I ROWID subtracts 1024 bytes per run from that row's readings after the
+#   real transcript has been parsed, so the assertion is exercised against the
+#   real artifact rather than a fabricated one:
+#
+#       tests/tools/run-toolleak.sh -g live -V -I netstat/all
+#
+#   -V re-reads the last run's transcripts without booting anything, so the
+#   demonstration costs no emulator time.
+#
+# A TIMEOUT IS A DEFECT
+#
+#   A run that burns its ceiling produces a partial transcript and proves
+#   nothing.  The verdict names the command the transcript stops at, which is
+#   the one that hung, and exits 2 -- infrastructure, not a result.  Raising
+#   -t is never the fix.
+#
+# WHAT IT NEEDS
+#
+#   a2065.device (AMINETXDUO_A2065, or build/a2065.device), a Kickstart, and a
+#   68020 Release build:
+#
+#     cmake -S . -B build/cm -DCMAKE_BUILD_TYPE=Release \
+#           -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake
+#     cmake --build build/cm --parallel
+#     tests/tools/run-toolleak.sh
+#
+# SPDX-License-Identifier: MIT
+
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+cd "$ROOT"
+
+# shellcheck source=tools/test-verdict.sh
+. "$ROOT/tools/test-verdict.sh"
+
+BUILD="${AMINETXDUO_BUILD:-build/cm}"
+SWEEP_GROUPS="cold live cycle server"
+TIMEOUT=0
+RUNS_OVERRIDE=0
+VERDICT_ONLY=0
+INJECT=""
+MODEL=A1200
+
+# Host-side peers.  Above 1024 and out of the way of anything real on the box.
+ECHO_PORT="${AMINETXDUO_ECHO_PORT:-7301}"
+TELNET_PORT="${AMINETXDUO_TELNET_PORT:-7323}"
+TFTP_PORT="${AMINETXDUO_TFTP_PORT:-7369}"
+WHOIS_PORT="${AMINETXDUO_WHOIS_PORT:-7343}"
+HTTP_PORT="${AMINETXDUO_HTTP_PORT:-7380}"
+# Nothing ever listens here.  It is the refusal arm's other end.
+DEAD_PORT="${AMINETXDUO_DEAD_PORT:-7399}"
+
+while getopts "b:g:n:t:m:VI:" opt; do
+    case "$opt" in
+        b) BUILD="$OPTARG" ;;
+        g) SWEEP_GROUPS="$OPTARG" ;;
+        n) RUNS_OVERRIDE="$OPTARG" ;;
+        t) TIMEOUT="$OPTARG" ;;
+        m) MODEL="$OPTARG" ;;
+        V) VERDICT_ONLY=1 ;;
+        I) INJECT="$OPTARG" ;;
+        *) echo "usage: $0 [-b builddir] [-g groups] [-n runs] [-t seconds]" \
+                "[-m model] [-V] [-I rowid]" >&2; exit 2 ;;
+    esac
+done
+
+# ======================================================================= #
+#                              THE TABLE                                  #
+# ======================================================================= #
+#
+#   boot | command | arm | runs | premise | prep | command line
+#
+# premise:  rc=N        the command must have exited N
+#           rc!=N       ... must not have exited N
+#           re:ERE      ERE must appear in the command's own output
+#           ?           nothing stated; the row FAILS.  There is no way to
+#                       write a row that passes without saying what it reached.
+#
+# prep:     `-`, or a command line run before every repetition.  A pair whose
+#           two halves undo each other is measured as a pair: if the prep
+#           leaks, BOTH rows of the pair go red, which is the truth about a
+#           pair and not a defect in the arithmetic.
+#
+# runs:     at least 4, and 5 unless every run costs seconds.  The first pays
+#           the one-off cost; the rest have to be flat.  Four is the floor
+#           because the arithmetic reads a two-run window at each end.
+#
+# The `?` arm exists for every command in the tree.  It is generated rather
+# than written out: see template_rows().  Its premise is a distinctive piece
+# of that command's own ReadArgs template, read out of the source, so a
+# command that stops printing its template cannot pass the row.
+
+table_static() {
+    # A table of one's own, for probing a single command without editing this
+    # file.  Same seven columns; run-nettools.sh takes its command list the
+    # same way.
+    if [ -n "${AMINETXDUO_TOOLLEAK_TABLE:-}" ]; then
+        eval "cat <<EOF
+$(cat "$AMINETXDUO_TOOLLEAK_TABLE")
+EOF"
+        return
+    fi
+    cat <<EOF
+# ------------------------------------------------------------ cold ------
+# The stack was NEVER started.  Nothing below opens bsdsocket.library.
+cold|CheckNetConfig|reads-config|5|rc!=-1|-|SYS:CheckNetConfig
+cold|CheckNetConfig|verbose|5|rc!=-1|-|SYS:CheckNetConfig VERBOSE
+cold|GetNetStatus|no-stack|5|rc!=-1|-|SYS:GetNetStatus
+cold|ShowNetStatus|no-stack|5|rc!=-1|-|SYS:ShowNetStatus
+cold|netstat|no-stack|5|rc!=-1|-|SYS:netstat -i
+cold|arp|no-stack|5|rc!=-1|-|SYS:arp
+cold|AddNetRoute|no-stack|5|rc!=-1|-|SYS:AddNetRoute DST=192.0.2.0 VIA=10.0.2.2
+cold|DeleteNetRoute|no-stack|5|rc!=-1|-|SYS:DeleteNetRoute DST=198.51.100.0
+cold|NetShutdown|no-stack|5|rc!=-1|-|SYS:NetShutdown
+cold|RemoveNetInterface|unknown-name|5|rc!=-1|-|SYS:RemoveNetInterface nosuchif
+cold|AddNetInterface|unknown-name|5|rc!=-1|-|SYS:AddNetInterface nosuchinterface
+cold|NetSetup|bad-address|5|rc!=-1|-|SYS:NetSetup eth9 DEVICE=a2065.device UNIT=0 ADDRESS=notanaddress NOONLINE
+cold|NetSetup|writes-config|5|rc!=-1|-|SYS:NetSetup ethz DEVICE=a2065.device UNIT=0 DHCP NOONLINE FORCE
+# ------------------------------------------------------------ live ------
+live|CheckNetConfig|stack-up|5|rc!=-1|-|SYS:CheckNetConfig
+live|GetNetStatus|stack-up|5|rc!=-1|-|SYS:GetNetStatus
+live|ShowNetStatus|all|5|rc!=-1|-|SYS:ShowNetStatus ALL
+live|netstat|all|5|rc!=-1|-|SYS:netstat -a
+live|netstat|routes|5|rc!=-1|-|SYS:netstat -r
+live|arp|cache|5|rc!=-1|-|SYS:arp
+live|arp|delete-miss|5|rc!=-1|-|SYS:arp 192.0.2.99 DELETE
+live|ping|reply|5|rc!=-1|-|SYS:ping 10.0.2.2 -c 1 -t 5
+live|ping|no-reply|4|rc!=-1|-|SYS:ping 192.0.2.1 -c 1 -t 3
+live|host|resolves|5|rc!=-1|-|SYS:host www.example.com
+live|host|nxdomain|5|rc!=-1|-|SYS:host no.such.host.invalid TIMEOUT 5
+live|nslookup|resolves|5|rc!=-1|-|SYS:nslookup www.example.com TYPE=A TIMEOUT 5
+live|nslookup|nxdomain|5|rc!=-1|-|SYS:nslookup no.such.host.invalid TIMEOUT 5
+live|fetch|http-200|5|rc!=-1|-|SYS:fetch http://10.0.2.2:${HTTP_PORT}/hello.txt TO DH0:fetched.bin TIMEOUT 10
+live|fetch|unresolvable|5|rc!=-1|-|SYS:fetch http://no.such.host.invalid/ TIMEOUT 5
+live|fetch|refused|5|rc!=-1|-|SYS:fetch http://10.0.2.2:${DEAD_PORT}/x TIMEOUT 5
+live|nc|scan-open|5|rc!=-1|-|SYS:nc -z 10.0.2.2 ${ECHO_PORT} -v -w 5
+live|nc|scan-closed|5|rc!=-1|-|SYS:nc -z 10.0.2.2 ${DEAD_PORT} -v -w 5
+live|telnet|negotiates|5|rc!=-1|-|SYS:telnet 10.0.2.2 ${TELNET_PORT} -d <DH0:telnetin.txt >DH0:telnet.txt
+live|telnet|refused|5|rc!=-1|-|SYS:telnet 10.0.2.2 ${DEAD_PORT}
+live|tftp|get|5|rc!=-1|-|SYS:tftp 10.0.2.2 PORT ${TFTP_PORT} GET hello.txt AS DH0:tftp.txt
+live|tftp|not-found|5|rc!=-1|-|SYS:tftp 10.0.2.2 PORT ${TFTP_PORT} GET no.such.file
+live|whois|answers|5|rc!=-1|-|SYS:whois plain.test SERVER 10.0.2.2 PORT ${WHOIS_PORT}
+live|whois|refused|5|rc!=-1|-|SYS:whois plain.test SERVER 10.0.2.2 PORT ${DEAD_PORT}
+live|traceroute|reaches|4|rc!=-1|-|SYS:traceroute 10.0.2.2 -m 2 -q 1 -w 3 -n
+live|traceroute|unresolvable|5|rc!=-1|-|SYS:traceroute no.such.host.invalid -m 1 -q 1 -w 2 -n
+live|sntp|no-server|4|rc!=-1|-|SYS:sntp 10.0.2.2 TIMEOUT 3
+live|sntp|shows-time|4|rc!=-1|-|SYS:sntp pool.ntp.org SHOW TIMEOUT 5
+live|NetTrace|loopback|4|rc!=-1|-|SYS:NetTrace LOOPBACK BYTES 4096 OUT DH0:nettrace.pcap
+live|NetTrace|wire|4|rc!=-1|-|SYS:NetTrace WIRE HOST 10.0.2.2 PORT ${HTTP_PORT} PATH /hello.txt OUT DH0:ntwire.pcap
+live|NetTrace|unresolvable|5|rc!=-1|-|SYS:NetTrace WIRE HOST no.such.host.invalid
+live|ShowNetServices|browse|4|rc!=-1|-|SYS:ShowNetServices SECONDS=1
+live|ShowNetServices|bad-type|5|rc!=-1|-|SYS:ShowNetServices http
+live|httpd|no-root|5|rc!=-1|-|SYS:httpd
+live|httpd|bad-root|5|rc!=-1|-|SYS:httpd DH0:nosuchdirectory 8099
+live|AddNetRoute|no-gateway|5|rc!=-1|-|SYS:AddNetRoute DST=192.0.2.0
+live|DeleteNetRoute|no-such-route|5|rc!=-1|-|SYS:DeleteNetRoute DST=198.51.100.0
+live|AddNetRoute|added|5|rc!=-1|SYS:DeleteNetRoute DST=192.0.2.0|SYS:AddNetRoute DST=192.0.2.0 VIA=10.0.2.2
+live|DeleteNetRoute|deleted|5|rc!=-1|SYS:AddNetRoute DST=192.0.2.0 VIA=10.0.2.2|SYS:DeleteNetRoute DST=192.0.2.0
+live|RemoveNetInterface|unknown-name|5|rc!=-1|-|SYS:RemoveNetInterface nosuchif
+live|AddNetInterface|already-up|5|rc!=-1|-|SYS:AddNetInterface eth0
+live|AddNetInterface|unknown-name|5|rc!=-1|-|SYS:AddNetInterface nosuchinterface
+live|Online|unknown-name|5|rc!=-1|-|SYS:Online nosuch0
+live|Offline|unknown-name|5|rc!=-1|-|SYS:Offline nosuch0
+# ------------------------------------------------------------ cycle -----
+# The commands that take the stack apart, each paired with the one that puts
+# it back.  Fewer runs: every repetition here costs a DHCP lease.
+cycle|Offline|takes-down|4|rc!=-1|SYS:Online eth0|SYS:Offline eth0
+cycle|Online|brings-up|4|rc!=-1|SYS:Offline eth0|SYS:Online eth0
+cycle|RemoveNetInterface|removes|4|rc!=-1|SYS:AddNetInterface eth0|SYS:RemoveNetInterface eth0 FORCE
+cycle|AddNetInterface|adds|4|rc!=-1|SYS:RemoveNetInterface eth0 FORCE|SYS:AddNetInterface eth0
+cycle|NetShutdown|stops-all|4|rc!=-1|SYS:AddNetInterface eth0|SYS:NetShutdown
+# ------------------------------------------------------------ server ----
+# nc as a listener.  It blocks until -w expires, so it gets a boot of its own
+# rather than sitting in the middle of somebody else's transcript.
+server|nc|listen-timeout|4|rc!=-1|-|SYS:nc -l 7099 -v -w 3
+# ---------------------------------------------------- and what cannot -----
+# A row that could not be measured says so.  It is neither a pass nor a
+# failure, and it is here so that the absence is a line in the table rather
+# than a command nobody noticed was missing.
+live|httpd|serves|0|na:httpd runs until it is killed; a server with no request budget never reaches a second invocation in one transcript|-|SYS:httpd DH0: 8080
+live|telnet|interactive|0|na:a terminal session ends when a person ends it; the scripted arm above is the measurable half|-|SYS:telnet <host>
+EOF
+}
+
+# The commands, from src/tools/CMakeLists.txt rather than from a list somebody
+# maintained by hand: a tool added there and not here would otherwise be swept
+# by nothing at all.
+tool_names() {
+    sed -n 's/^aminetxduo_add_tool(\([A-Za-z_0-9]*\)[[:space:]]\{1,\}\([A-Za-z_0-9]*\).*/\2/p' \
+        "$ROOT/src/tools/CMakeLists.txt" | sort -u
+}
+
+# `<command> ?`: ReadArgs prints the template and reads EOF from NIL:.  The
+# premise is a piece of the command's OWN template, taken out of the source it
+# was compiled from, so the row cannot pass on a command that printed nothing.
+template_premise() {
+    local tool="$1" src pat
+    src=$(grep -l "TOOL_VERSTAG(\"$tool\")" "$ROOT"/src/tools/*.c 2>/dev/null | head -1)
+    [ -n "$src" ] || { echo '?'; return; }
+    # The first quoted run of template text on the #define TEMPLATE line(s).
+    pat=$(sed -n '/^#define TEMPLATE/,/^$/p' "$src" |
+          tr -d '\\\n' | sed -n 's/.*"\([^"]*\)".*/\1/p' | head -1)
+    # Anything with a shell or ERE metacharacter in it is no use as a pattern,
+    # and `|` cannot travel through this table at all.  Take the first field.
+    pat=${pat%%,*}
+    case "$pat" in
+        ''|*'|'*|*'('*) echo '?' ;;
+        *) echo "re:$pat" ;;
+    esac
+}
+
+template_rows() {
+    local tool premise
+    for tool in $(tool_names); do
+        premise=$(template_premise "$tool")
+        echo "cold|$tool|template|5|$premise|-|SYS:$tool ?"
+    done
+}
+
+table() {
+    table_static | grep -v '^#'
+    template_rows
+}
+
+# ======================================================================= #
+#                            the verdict half                             #
+# ======================================================================= #
+
+WORK="$ROOT/build/toolleak"
+FAILED=0
+INFRA=0
+REPORT_ROWS=""
+
+note_fail()  { echo "FAIL: $*" >&2; FAILED=$((FAILED + 1)); }
+note_infra() { echo "INFRA: $*" >&2; INFRA=$((INFRA + 1)); }
+
+# Split a ToolsSmoke transcript into one file per command, and print an index
+# of `idx|banner|kind|rc|free`.  Written against the format toolssmoke.c
+# actually prints -- `----- rc N, M ms, free K -----` -- and a line that does
+# not match becomes `badformat` rather than vanishing, because a pattern that
+# silently matches nothing is how tests/tools/run-addifleak.sh spent months
+# measuring an empty array.
+split_transcript() {
+    local transcript="$1" dir="$2"
+    rm -rf "$dir"; mkdir -p "$dir"
+    awk -v dir="$dir" '
+        /^===== .+ =====$/ {
+            if (rec != "") close(rec)
+            idx++
+            banner = $0
+            sub(/^===== /, "", banner)
+            sub(/ =====$/, "", banner)
+            rec = sprintf("%s/rec-%04d.txt", dir, idx)
+            printf "" > rec
+            next
+        }
+        idx == 0 { next }
+        { print $0 >> rec }
+        /^----- rc / {
+            if (match($0, /rc -?[0-9]+, [0-9]+ ms, free [0-9]+/)) {
+                s = substr($0, RSTART, RLENGTH)
+                gsub(/[^0-9-]/, " ", s)
+                split(s, f, " ")
+                printf "%d|%s|ok|%s|%s|%s\n", idx, banner, f[1], f[3], f[2]
+            } else {
+                printf "%d|%s|badformat|0|0|0\n", idx, banner
+            }
+        }
+        /^----- could not run/          { printf "%d|%s|norun|0|0|0\n", idx, banner }
+        /^----- started in the back/    { printf "%d|%s|async|0|0|0\n", idx, banner }
+        /^----- waited/                 { printf "%d|%s|wait|0|0\n",  idx, banner }
+        END { if (rec != "") close(rec) }
+    ' "$transcript"
+}
+
+# premise_holds PREMISE RC RECFILE
+premise_holds() {
+    local premise="$1" rc="$2" rec="$3"
+    case "$premise" in
+        '?')      return 2 ;;
+        rc=*)     [ "$rc" = "${premise#rc=}" ] ;;
+        'rc!='*)  [ "$rc" != "${premise#rc!=}" ] ;;
+        re:*)     grep -Eq -- "${premise#re:}" "$rec" ;;
+        *)        return 2 ;;
+    esac
+}
+
+# ======================================================================= #
+#                               staging                                   #
+# ======================================================================= #
+
+TOOLS="$ROOT/$BUILD/src/tools"
+BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
+
+require_binaries() {
+    local t missing=0
+    [ -f "$TOOLS/ToolsSmoke" ] || { echo "missing $TOOLS/ToolsSmoke" >&2; missing=1; }
+    [ -f "$BSD" ] || { echo "missing $BSD" >&2; missing=1; }
+    for t in $(tool_names); do
+        [ -f "$TOOLS/$t" ] || { echo "missing $TOOLS/$t" >&2; missing=1; }
+    done
+    [ "$missing" = 0 ] || { echo "build $BUILD first" >&2; exit 2; }
+}
+
+find_a2065() {
+    local candidate
+    if [ -n "${AMINETXDUO_A2065:-}" ] && [ -f "${AMINETXDUO_A2065}" ]; then
+        echo "$AMINETXDUO_A2065"; return 0
+    fi
+    for candidate in \
+        "$ROOT/build/a2065.device" \
+        "$HOME/amiga-assets/devs/a2065.device" \
+        "$HOME/amiga-os-src/os-source/other_networking/sana2/bin/devs/a2065.device"
+    do
+        [ -f "$candidate" ] && { echo "$candidate"; return 0; }
+    done
+    return 1
+}
+
+stage_group() {
+    local group="$1" stage="$2" t a2065
+    a2065=$(find_a2065) || {
+        echo "No a2065.device.  Set AMINETXDUO_A2065=<path>." >&2; exit 2; }
+
+    rm -rf "$stage"
+    mkdir -p "$stage/libs"
+    cp -R "$ROOT/tests/netstack/devs" "$stage/devs"
+    cp "$a2065" "$stage/devs/a2065.device"
+    cp "$BSD"   "$stage/libs/bsdsocket.library"
+    for t in $(tool_names); do
+        cp "$TOOLS/$t" "$stage/$t"
+    done
+    printf 'amiga\r\nquit\r\n' > "$stage/telnetin.txt"
+    printf 'hello from the amiga\n' > "$stage/greeting.txt"
+    : > "$stage/.group-$group"
+}
+
+# ======================================================================= #
+#                             host-side peers                             #
+# ======================================================================= #
+
+PEER_PID=""
+HTTP_PID=""
+HTTPROOT="$WORK/httproot"
+
+# Reached through the EXIT trap below, not by name.
+# shellcheck disable=SC2329
+# Reached through the EXIT trap below, not by name.
+# shellcheck disable=SC2329
+stop_peers() {
+    [ -z "$PEER_PID" ] || kill -TERM "$PEER_PID" 2>/dev/null || true
+    [ -z "$HTTP_PID" ] || kill -TERM "$HTTP_PID" 2>/dev/null || true
+    PEER_PID=""
+    HTTP_PID=""
+}
+trap stop_peers EXIT INT TERM HUP
+
+start_peers() {
+    local lifetime="$1"
+    mkdir -p "$HTTPROOT"
+    printf 'hello from the host\n' > "$HTTPROOT/hello.txt"
+
+    python3 "$ROOT/tests/tools/netpeer.py" \
+        --echo-port "$ECHO_PORT" --telnet-port "$TELNET_PORT" \
+        --tftp-port "$TFTP_PORT" --whois-port "$WHOIS_PORT" \
+        --advertise 10.0.2.2 --log "$WORK/netpeer.log" \
+        --seconds "$lifetime" > "$WORK/netpeer.out" 2>&1 &
+    PEER_PID=$!
+
+    ( cd "$HTTPROOT" && exec python3 -m http.server "$HTTP_PORT" --bind 0.0.0.0 ) \
+        > "$WORK/httpd-host.log" 2>&1 &
+    HTTP_PID=$!
+
+    sleep 1
+    kill -0 "$PEER_PID" 2>/dev/null || {
+        echo "netpeer.py did not start:" >&2; cat "$WORK/netpeer.out" >&2; exit 2; }
+    kill -0 "$HTTP_PID" 2>/dev/null || {
+        echo "python3 -m http.server did not start:" >&2
+        cat "$WORK/httpd-host.log" >&2; exit 2; }
+    echo "==> peers: echo $ECHO_PORT, telnet $TELNET_PORT, tftp $TFTP_PORT," \
+         "whois $WHOIS_PORT, http $HTTP_PORT"
+}
+
+# ======================================================================= #
+#                                chunking                                 #
+# ======================================================================= #
+
+# ToolsSmoke stops reading at MAX_COMMANDS and says nothing, so a list past it
+# is a list whose tail was never run.  Read the ceiling out of the source.
+smoke_max() {
+    local n
+    n=$(sed -n 's/^#define MAX_COMMANDS[[:space:]]*\([0-9]*\).*/\1/p' \
+        "$ROOT/src/tools/toolssmoke.c" | head -1)
+    [ -n "$n" ] || {
+        echo "cannot read MAX_COMMANDS out of src/tools/toolssmoke.c" >&2
+        exit 2; }
+    echo "$n"
+}
+
+group_prologue() {
+    case "$1" in
+        live|cycle|server) echo "SYS:AddNetInterface eth0" ;;
+        *) ;;
+    esac
+}
+
+# ======================================================================= #
+#                                the run                                  #
+# ======================================================================= #
+
+mkdir -p "$WORK"
+
+SMOKE_MAX=$(smoke_max)
+echo "==> ToolsSmoke reads at most $SMOKE_MAX commands a boot"
+
+if [ "$VERDICT_ONLY" = 0 ]; then
+    require_binaries
+fi
+
+# The whole run's rows, one file, so the report can be assembled across boots.
+ALLROWS="$WORK/rows.psv"
+table > "$ALLROWS"
+
+TOTAL_ROWS=$(wc -l < "$ALLROWS" | tr -d ' ')
+echo "==> $TOTAL_ROWS rows over $(tool_names | wc -l | tr -d ' ') commands"
+
+run_group() {
+    local group="$1"
+    local stage="$WORK/stage-$group"
+    local rows="$WORK/rows-$group.psv"
+    local prologue chunk cost limit
+    local cmdfile expectfile
+
+    # One report file per group: two groups swept at once must not write over
+    # each other, and the combined table is assembled from all of them.
+    REPORT_ROWS="$WORK/report-$group.psv"
+    : > "$REPORT_ROWS"
+
+    awk -F'|' -v g="$group" '$1 == g' "$ALLROWS" > "$rows"
+    if [ ! -s "$rows" ]; then
+        echo "==> $group: no rows"
+        return 0
+    fi
+
+    prologue=$(group_prologue "$group")
+    limit=$((SMOKE_MAX - 2))
+
+    # --- pack the rows into as few boots as the driver's ceiling allows ---
+    chunk=1
+    cost=0
+    cmdfile="$WORK/$group-1.commands.txt"
+    expectfile="$WORK/$group-1.expect.psv"
+    : > "$cmdfile"; : > "$expectfile"
+    [ -z "$prologue" ] || printf '%s\n' "$prologue" >> "$cmdfile"
+    [ -z "$prologue" ] || printf '0|-prologue-|prep|%s\n' "$prologue" >> "$expectfile"
+
+    local boot command arm runs premise prep cmdline rowcost i
+    while IFS='|' read -r boot command arm runs premise prep cmdline; do
+        [ -n "$boot" ] || continue
+        # A row that states it cannot be measured is reported, not run.
+        if [ "${premise#na:}" != "$premise" ]; then
+            printf '%s|%s/%s|not-measurable|-|-|-|%s\n' \
+                "$group" "$command" "$arm" "${premise#na:}" >> "$REPORT_ROWS"
+            continue
+        fi
+        [ "$runs" -ge 4 ] || {
+            note_infra "$command/$arm asks for $runs runs; 4 is the floor"
+            continue
+        }
+        rowcost=$runs
+        [ "$prep" = "-" ] || rowcost=$((runs * 2))
+        if [ $((cost + rowcost)) -gt "$limit" ]; then
+            chunk=$((chunk + 1))
+            cost=0
+            cmdfile="$WORK/$group-$chunk.commands.txt"
+            expectfile="$WORK/$group-$chunk.expect.psv"
+            : > "$cmdfile"; : > "$expectfile"
+            [ -z "$prologue" ] || printf '%s\n' "$prologue" >> "$cmdfile"
+            [ -z "$prologue" ] || printf '0|-prologue-|prep|%s\n' "$prologue" >> "$expectfile"
+        fi
+        for ((i = 0; i < runs; i++)); do
+            if [ "$prep" != "-" ]; then
+                printf '%s\n' "$prep" >> "$cmdfile"
+                printf '%s/%s|%s|prep|%s\n' "$command" "$arm" "$chunk" "$prep" >> "$expectfile"
+            fi
+            printf '%s\n' "$cmdline" >> "$cmdfile"
+            printf '%s/%s|%s|measure|%s\n' "$command" "$arm" "$chunk" "$cmdline" >> "$expectfile"
+        done
+        cost=$((cost + rowcost))
+    done < "$rows"
+
+    local chunks="$chunk"
+    echo "==> $group: $(wc -l < "$rows" | tr -d ' ') rows in $chunks boot(s)"
+
+    # --------------------------------- boot each chunk ---------------------
+    local c tag hd rc
+    for ((c = 1; c <= chunks; c++)); do
+        tag="toolleak-$group-$c"
+        hd="$ROOT/build/amiberry-testhd-$tag"
+        if [ "$VERDICT_ONLY" = 1 ]; then
+            echo "==> $tag: reusing $hd/tools.txt"
+            continue
+        fi
+
+        stage_group "$group" "$stage"
+        cp "$WORK/$group-$c.commands.txt" "$stage/commands.txt"
+
+        local extras=()
+        while IFS= read -r e; do extras+=("$e"); done \
+            < <(find "$stage" -mindepth 1 -maxdepth 1)
+
+        local t="$TIMEOUT"
+        [ "$t" != 0 ] || t=$(chunk_timeout "$WORK/$group-$c.commands.txt")
+
+        echo "==> $tag: $(wc -l < "$stage/commands.txt" | tr -d ' ') commands," \
+             "ceiling ${t}s"
+        AMINETXDUO_RUN_TAG="$tag" \
+        "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$t" \
+            "$TOOLS/ToolsSmoke" "${extras[@]}" \
+            > "$WORK/$tag.out" 2>&1 && rc=0 || rc=$?
+        echo "    emulator exit $rc, $(wc -l < "$WORK/$tag.out" | tr -d ' ') lines of log"
+        printf '%s\n' "$rc" > "$WORK/$tag.rc"
+    done
+
+    # --------------------------------- read each chunk back ----------------
+    for ((c = 1; c <= chunks; c++)); do
+        tag="toolleak-$group-$c"
+        hd="$ROOT/build/amiberry-testhd-$tag"
+        rc=$(cat "$WORK/$tag.rc" 2>/dev/null || echo "?")
+        read_chunk "$group" "$c" "$tag" "$hd" "$rc"
+    done
+}
+
+# A ceiling taken from what the list ACTUALLY COST last time, not from a round
+# number.  ToolsSmoke prints the milliseconds every command took, so the good
+# case is an artifact rather than an estimate: build/toolleak/costs.psv carries
+# the worst time each command line has ever taken on this machine, and the
+# ceiling is a boot plus twice the sum.
+#
+# A line nobody has timed yet falls back to the arithmetic below, which reads
+# the command's own TIMEOUT out of it.  The first run of a new row is
+# therefore the only one working from a guess, and it writes down what it
+# learned.
+COSTS="$WORK/costs.psv"
+
+chunk_timeout() {
+    local file="$1" secs measured unknown
+    # No cost file yet means nothing has been timed, and the estimate below is
+    # all there is.  An EMPTY one would otherwise make awk read the command
+    # list as its own costs and answer 0, which is a ceiling every run walks
+    # through in its first second.
+    if [ -s "$COSTS" ]; then
+        measured=$(awk -F'\t' '
+            NR == FNR { cost[$1] = $2; next }
+            { if ($0 in cost) total += cost[$0]; else unknown++ }
+            END { printf "%d %d\n", (total + 999) / 1000, unknown + 0 }' \
+            "$COSTS" "$file")
+    else
+        measured="0 $(wc -l < "$file" | tr -d ' ')"
+    fi
+    unknown=${measured##* }
+    measured=${measured%% *}
+
+    secs=$(awk '
+        {
+            t = 1
+            if (match($0, /-w [0-9]+/))         { t = substr($0, RSTART + 3, RLENGTH - 3) + 1 }
+            if (match($0, /TIMEOUT[= ][0-9]+/)) { t = substr($0, RSTART + 8, RLENGTH - 8) + 1 }
+            if (match($0, /-t [0-9]+/))         { t = substr($0, RSTART + 3, RLENGTH - 3) + 1 }
+            if ($0 ~ /AddNetInterface eth0/)    { t = 12 }
+            if ($0 ~ /NetTrace/)                { t = 8 }
+            if ($0 ~ /SECONDS=/)                { t = 3 }
+            total += t
+        }
+        END { print total + 0 }' "$file")
+
+    # 60s for the boot, then twice whichever arithmetic knows more.
+    local budget=$secs
+    [ "$measured" -le "$secs" ] || budget=$measured
+    [ "$unknown" -gt 0 ] || budget=$measured
+    echo "==> good case: ${measured}s measured over $(( $(wc -l < "$file") - unknown ))" \
+         "of $(wc -l < "$file" | tr -d ' ') commands, ${secs}s estimated for the rest" >&2
+    echo $((60 + budget * 2))
+}
+
+# Every command line's worst measured time, so the next ceiling is an artifact
+# and not a guess.  Worst rather than mean: a ceiling sized to the average is
+# one the slowest run walks straight through.
+record_costs() {
+    local index="$1"
+    [ -s "$index" ] || return 0
+    { [ ! -f "$COSTS" ] || cat "$COSTS"
+      awk -F'|' -v OFS='\t' '$3 == "ok" { print $2, $6 }' "$index"
+    } | awk -F'\t' -v OFS='\t' '
+        { if (!($1 in worst) || $2 + 0 > worst[$1]) worst[$1] = $2 + 0 }
+        END { for (c in worst) print c, worst[c] }' > "$COSTS.tmp"
+    mv -f "$COSTS.tmp" "$COSTS"
+}
+
+read_chunk() {
+    local group="$1" chunk="$2" tag="$3" hd="$4" runrc="$5"
+    local transcript index dir
+    transcript="$hd/tools.txt"
+
+    verdict_find "$tag" "$runrc" '===== ' "$transcript" > /dev/null || {
+        note_infra "$tag produced no transcript; nothing in this boot was measured"
+        awk -F'|' -v c="$chunk" '$2 == c && $3 == "measure" {print $1}' \
+            "$WORK/$group-$chunk.expect.psv" | sort -u |
+            while read -r rid; do
+                printf '%s|%s|no-transcript|0|0|0|-\n' "$group" "$rid" >> "$REPORT_ROWS"
+            done
+        return 1
+    }
+
+    dir="$WORK/$tag.rec"
+    index="$WORK/$tag.index.psv"
+    split_transcript "$transcript" "$dir" > "$index"
+    record_costs "$index"
+    : > "$WORK/$tag.readings.psv"
+
+    # ---- alignment.  The transcript's Nth command must be the Nth command
+    # the list asked for; anything else means the driver ran something other
+    # than what was staged, and no arithmetic on it means anything.
+    local expected="$WORK/$group-$chunk.expect.psv"
+    local nexp nrec
+    nexp=$(wc -l < "$expected" | tr -d ' ')
+    nrec=$(wc -l < "$index" | tr -d ' ')
+
+    local i=0 mismatch=0
+    local rid _ck role want idx banner kind rc free ms
+    exec 3< "$expected"
+    exec 4< "$index"
+    while IFS='|' read -r rid _ck role want <&3; do
+        i=$((i + 1))
+        if ! IFS='|' read -r idx banner kind rc free ms <&4; then
+            note_infra "$tag: the transcript stops after $((i - 1)) of $nexp" \
+                       "commands; the one it never finished is: $want"
+            mismatch=1
+            break
+        fi
+        if [ "$banner" != "$want" ]; then
+            note_infra "$tag: command $i is '$banner', the list asked for '$want'"
+            mismatch=1
+            break
+        fi
+        case "$kind" in
+            ok) ;;
+            norun) note_infra "$tag: '$want' could not be started at all" ;;
+            badformat)
+                note_infra "$tag: '$want' reported in a format this script cannot" \
+                           "read; toolssmoke.c's report line has changed" ;;
+            *) note_infra "$tag: '$want' reported '$kind'" ;;
+        esac
+        [ "$role" = "measure" ] || continue
+        printf '%s|%s|%s|%s|%s\n' "$rid" "$rc" "$free" \
+            "$dir/rec-$(printf '%04d' "$idx").txt" "$ms" \
+            >> "$WORK/$tag.readings.psv"
+    done
+    exec 3<&-
+    exec 4<&-
+
+    if [ "$mismatch" = 0 ] && [ "$nrec" -gt "$nexp" ]; then
+        note_infra "$tag: $nrec commands ran and only $nexp were staged"
+    fi
+
+    verdict_chunk "$group" "$chunk" "$tag"
+}
+
+verdict_chunk() {
+    local group="$1" chunk="$2" tag="$3"
+    local readings="$WORK/$tag.readings.psv"
+    local expected="$WORK/$group-$chunk.expect.psv"
+
+    local rid
+    while read -r rid; do
+        verdict_row "$group" "$rid" "$readings"
+    done < <(awk -F'|' -v c="$chunk" '$2 == c && $3 == "measure" {print $1}' \
+             "$expected" | awk '!seen[$0]++')
+}
+
+verdict_row() {
+    local group="$1" rid="$2" readings="$3"
+    local want_runs premise cmdline
+    want_runs=$(awk -F'|' -v r="$rid" '$2 "/" $3 == r {print $4; exit}' "$ALLROWS")
+    premise=$(awk -F'|' -v r="$rid" '$2 "/" $3 == r {print $5; exit}' "$ALLROWS")
+    cmdline=$(awk -F'|' -v r="$rid" '$2 "/" $3 == r {print $7; exit}' "$ALLROWS")
+
+    local frees=() rcs=() recs=()
+    local f_rid rc free rec ms
+    local mss=()
+    while IFS='|' read -r f_rid rc free rec ms; do
+        [ "$f_rid" = "$rid" ] || continue
+        rcs+=("$rc"); frees+=("$free"); recs+=("$rec"); mss+=("$ms")
+    done < "$readings"
+
+    local slowest=0 m
+    for m in "${mss[@]:-0}"; do [ "$m" -le "$slowest" ] || slowest=$m; done
+
+    local n=${#frees[@]}
+    if [ "$n" -ne "$want_runs" ]; then
+        note_infra "$rid: $n of $want_runs runs reported free memory"
+        printf '%s|%s|not-measured|0|0|0|%s\n' "$group" "$rid" "$cmdline" >> "$REPORT_ROWS"
+        return
+    fi
+
+    # ---- the premise, on every run, before any arithmetic ----------------
+    local k st bad_premise=""
+    for ((k = 0; k < n; k++)); do
+        st=0
+        premise_holds "$premise" "${rcs[$k]}" "${recs[$k]}" || st=$?
+        if [ "$st" = 0 ]; then
+            continue
+        fi
+        if [ "$st" = 2 ]; then
+            bad_premise="no premise stated ('$premise')"
+        else
+            bad_premise="run $((k + 1)) did not satisfy '$premise' (rc ${rcs[$k]})"
+        fi
+        break
+    done
+    if [ -n "$bad_premise" ]; then
+        note_fail "$rid: $bad_premise"
+        printf '%s|%s|no-premise|0|%s|%s|%s\n' "$group" "$rid" "${rcs[0]}" \
+            "$slowest" "$cmdline" >> "$REPORT_ROWS"
+        return
+    fi
+
+    # ---- the injection, for proving this assertion fires -----------------
+    if [ -n "$INJECT" ] && [ "$INJECT" = "$rid" ]; then
+        for ((k = 0; k < n; k++)); do
+            frees[k]=$(( frees[k] - 1024 * k ))
+        done
+        echo "  (-I $rid: 1024 bytes a run subtracted from the real readings)"
+    fi
+
+    # ---- the arithmetic -------------------------------------------------
+    #
+    # NOT a plain r[1] - r[n-1].  Once a stack is running, AvailMem() jitters:
+    # a DHCP or ARP timer thread holds a buffer at the instant of the sample
+    # and gives it back afterwards, which is a reading 3-4 KB BELOW the true
+    # level and never above it.  Measured on this rig: `AddNetInterface
+    # nosuchinterface` read 9236232, 9232576, 9236232, 9236232, and a plain
+    # difference calls that a 1828-byte leak in a command that leaks nothing.
+    #
+    # Jitter only ever subtracts, so the MAXIMUM of a two-run window is the
+    # true level at the window's first run.  A leak is monotone, so the max of
+    # a window is its first element, and
+    #
+    #     EARLY = max(r[1], r[2])      the level after run 2
+    #     LATE  = max(r[n-2], r[n-1])  the level after run n-2
+    #
+    # are exactly (n - 3) invocations apart.  Both windows have to be hit by
+    # jitter in the same run for this to read wrong.
+    local first last delta per
+    first=${frees[1]}
+    [ "${frees[2]}" -le "$first" ] || first=${frees[2]}
+    last=${frees[$((n - 2))]}
+    [ "${frees[$((n - 1))]}" -le "$last" ] || last=${frees[$((n - 1))]}
+    delta=$((first - last))
+    per=$((delta / (n - 3)))
+
+    # Free memory that went UP is not a leak: something else on the machine
+    # gave memory back between the two windows.  Reported as the number it is
+    # rather than hidden, and not counted against the row.
+    if [ "$delta" -lt 0 ]; then
+        printf '%s|%s|ok|%s|%s|%s|%s\n' "$group" "$rid" "$per" "${rcs[0]}" \
+            "$slowest" "$cmdline" >> "$REPORT_ROWS"
+        return
+    fi
+
+    if [ "$delta" -eq 0 ]; then
+        printf '%s|%s|ok|0|%s|%s|%s\n' "$group" "$rid" "${rcs[0]}" "$slowest" \
+            "$cmdline" >> "$REPORT_ROWS"
+    else
+        note_fail "$rid: $per bytes lost per invocation, and never returned" \
+                  "(free after run 2 $first, after run $n $last)"
+        printf '%s|%s|LEAK|%s|%s|%s|%s\n' "$group" "$rid" "$per" "${rcs[0]}" \
+            "$slowest" "$cmdline" >> "$REPORT_ROWS"
+    fi
+}
+
+# ======================================================================= #
+#                                 drive                                   #
+# ======================================================================= #
+
+if [ "$RUNS_OVERRIDE" != 0 ]; then
+    awk -F'|' -v OFS='|' -v n="$RUNS_OVERRIDE" '{$4 = n; print}' "$ALLROWS" \
+        > "$ALLROWS.tmp" && mv "$ALLROWS.tmp" "$ALLROWS"
+fi
+
+if [ "$VERDICT_ONLY" = 0 ]; then
+    # The peers have to outlive the whole sweep, not one boot.
+    start_peers 5400
+fi
+
+for g in $SWEEP_GROUPS; do
+    run_group "$g"
+done
+
+# ======================================================================= #
+#                                 report                                  #
+# ======================================================================= #
+
+echo
+echo "=================== bytes lost per invocation ======================"
+printf '%-20s %-16s %10s %5s %8s  %s\n' COMMAND ARM BYTES/RUN RC MS VERDICT
+for g in $SWEEP_GROUPS; do cat "$WORK/report-$g.psv" 2>/dev/null || true; done |
+sort -t'|' -k1,1 -k2,2 |
+while IFS='|' read -r _g rid verdictword bytes rc ms _cmd; do
+    printf '%-20s %-16s %10s %5s %8s  %s\n' \
+        "${rid%%/*}" "${rid#*/}" "$bytes" "$rc" "$ms" "$verdictword"
+done
+echo "===================================================================="
+
+ALLREPORT="$WORK/report-all.psv"
+: > "$ALLREPORT"
+for g in $SWEEP_GROUPS; do cat "$WORK/report-$g.psv" >> "$ALLREPORT" 2>/dev/null || true; done
+MEASURED=$(grep -c '|ok|' "$ALLREPORT" 2>/dev/null || true)
+LEAKS=$(grep -c '|LEAK|' "$ALLREPORT" 2>/dev/null || true)
+echo "$MEASURED rows flat, $LEAKS leaking, $FAILED failures, $INFRA infrastructure faults"
+
+if [ "$INFRA" -ne 0 ]; then
+    echo "toolleak: INFRASTRUCTURE FAILURE -- these rows measured nothing" >&2
+    exit 2
+fi
+if [ "$FAILED" -ne 0 ]; then
+    echo "toolleak: FAILED" >&2
+    exit 1
+fi
+echo "toolleak: PASSED"
+exit 0
