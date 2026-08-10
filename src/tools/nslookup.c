@@ -771,14 +771,6 @@ static BOOL nsl_default_server(ToolAddr *out)
         }
     }
 
-    /*
-     * ami_config_load() loads the netdb (src/config/config_file.c) and
-     * ami_alloc() is AllocVec(), which AmigaOS does not reclaim when a process
-     * exits, 12,616 bytes per run on a stock DEVS:Internet, gone until
-     * reboot. Registered before the call because the && below short-circuits
-     * after it, so the load happens either way.
-     */
-
     if (ami_config_load(&nsl_config) == AMI_CFG_OK &&
         nsl_config.resolver.nameserver_count > 0)
     {
@@ -805,23 +797,7 @@ static const char *nsl_rcode_text(UWORD rcode)
 
 /* ------------------------------------------------------------------ main, */
 
-/*
- * The body, so that ami_netdb_free() has one place to run.  atexit() is not
- * free here: libnix satisfies it out of an object that also references malloc
- * and __errno, which pulls in the C++ AVL allocator and the stdio FILE
- * machinery, about 7.7 KB nothing in this command calls.
- */
-static int nslookup_main(int argc, char **argv);
-
 int main(int argc, char **argv)
-{
-    int rc = nslookup_main(argc, argv);
-
-    ami_netdb_free();
-    return rc;
-}
-
-static int nslookup_main(int argc, char **argv)
 {
     LONG            args[ARG_COUNT];
     struct RDArgs  *rda;

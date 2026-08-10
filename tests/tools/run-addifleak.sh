@@ -38,10 +38,13 @@
 #   difference between the LAST two is the per-invocation leak, and it has to
 #   be 0.  It was 2568 -- one cloned AmiSocketBase -- until 0.20.1.
 #
-#   The serial log is worth reading when this fails.  `pool = ` in it means the
-#   packet pool was created before the failure, so the stack was built and
-#   stranded rather than never started, which is the difference between the
-#   two things this test can catch.
+#   The premise is AddNetInterface's own line, "the network is running, and
+#   eth0 is configured down", which it reaches only once the library opened and
+#   the pool, the NX_IP and the ThreadX threads were built.  That is the
+#   difference between the two things this test can catch, and it is in the
+#   transcript on every build.  Do not move it back to the serial log: that
+#   line is AMI_INFO() and a default build has neither the string nor the log
+#   level for it.
 #
 # WHAT IT NEEDS
 #
@@ -157,7 +160,6 @@ MEM="chipmem_size=2;bogomem_size=0;fastmem_size=0"
 export AMINETXDUO_AMIBERRY_EXTRA="${AMINETXDUO_AMIBERRY_EXTRA:+$AMINETXDUO_AMIBERRY_EXTRA;}$MEM"
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-addifleak}"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
-SER="$ROOT/build/amiberry-serial-$AMINETXDUO_RUN_TAG.log"
 
 echo "==> booting an A1200 with cnet.device on the PCMCIA slot"
 set +e
@@ -203,16 +205,34 @@ pass "all $RUNS runs reported"
 # never opens allocates nothing, so the arithmetic below would read 0 whatever
 # the library does, and the test would pass on a broken build.
 #
-# `pool = ` in the serial log is that premise: the packet pool, and with it the
-# NX_IP and the ThreadX threads, were built before bring-up stopped. It is the
-# state that strands a stack, and it is what this file measures.
+# The premise is the COMMAND'S OWN OUTPUT, once per run.  AddNetInterface
+# reaches "the network is running, and eth0 is configured down"
+# (src/tools/addnetinterface.c) only after bsd_lib_open() returned a base,
+# which is after the packet pool, the NX_IP and the ThreadX threads were all
+# built -- the state that strands a stack, and the one this file measures.  A
+# device that never opened cannot print it: the open fails and the command says
+# so instead.
+#
+# It used to be `pool = ` in the serial log, and that premise could not hold on
+# any build anybody makes.  The line is AMI_INFO() in src/netstack/netstack.c,
+# and it needs BOTH -DAMINETXDUO_LOG=ON, without which the format string is not
+# in the library at all, AND a log level above the release default of WARN,
+# without which ami_log() drops it at run time.  With either missing the serial
+# log has no such line, the premise failed, and the script printed
+# "addifleak: FAILED" on a tree with nothing wrong with it -- a product verdict
+# for two build options.  Both were missing by default, so it was every default
+# build.  The transcript is read by this script already and needs neither.
 #
 # The rc is NOT the premise. STATE=down returns 0 now, by design -- an
 # interface configured down is not a failed one -- while still taking the whole
 # allocation path. Asserting on the rc tested the wording of a decision, not
 # the state this test is about.
-if ! grep -q 'pool = ' "$SER" 2>/dev/null; then
-    fail "no packet pool was ever built, so nothing was allocated to leak"
+REACHED=$(grep -c 'the network is running, and eth0 is configured down' "$REPORT" || true)
+if [ "$REACHED" -lt "$RUNS" ]; then
+    fail "the stack was built on only $REACHED of $RUNS runs, so there was" \
+         "nothing allocated to leak on the rest"
+else
+    pass "all $RUNS runs built a stack and stranded it, which is the state measured"
 fi
 
 FIRST="${FREE[1]}"

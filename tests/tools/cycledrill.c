@@ -463,21 +463,35 @@ static ULONG own_signals(VOID)
  * explanation for a fixed amount of memory going missing every cycle, since a
  * Process is its control block plus its stack.
  *
- * Forbid() rather than Disable(): the lists are only walked, and the running
- * task is not on either of them, so the count is one short of the truth and
- * consistently so.
+ * Disable(), not Forbid().  Forbid() was here, on the premise that "the lists
+ * are only walked" -- which is exactly the case it does not cover.  Forbid()
+ * stops the scheduler; it does not stop interrupts, and Signal() called from
+ * one takes a task off TaskWait and Enqueue()s it onto TaskReady there and
+ * then.  A2065's receive interrupt and the timer do that continuously while
+ * the stack is up, so a node can move from the list still to be walked into
+ * the list already walked (missed) or the other way (counted twice), and this
+ * loop reports a number that was never true of the machine at any instant.
+ *
+ * Measured, on a build with no leak in it: 20, 17, 20, 20 over four cycles,
+ * with AvailMem and the library's own allocation count byte-identical
+ * throughout.  Three of the stack's threads happened to be in flight at cycle
+ * 1's sample.  The check downstream is `later <= earlier`, so an undercount
+ * anywhere but the last sample fails the run, and it did.
+ *
+ * Interrupts stay off for a walk of about twenty nodes.  The running task is
+ * on neither list, so the count is one short of the truth and consistently so.
  */
 static ULONG count_tasks(VOID)
 {
     struct Node *n;
     ULONG        total = 0;
 
-    Forbid();
+    Disable();
     for (n = SysBase->TaskReady.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
         total++;
     for (n = SysBase->TaskWait.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
         total++;
-    Permit();
+    Enable();
 
     return total;
 }

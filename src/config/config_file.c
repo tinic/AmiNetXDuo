@@ -424,6 +424,25 @@ static VOID load_hostname(AmiConfig *cfg)
 
 /* -------------------------------------------------------------------- API */
 
+/*
+ * Fills cfg from DEVS: and allocates nothing the caller has to give back.
+ *
+ * It used to call ami_netdb_load() here as well, which was the whole cost of
+ * the call and no part of its name: 12,616 bytes of hosts/networks/protocols/
+ * services tables charged to whoever asked for the interface list, held in
+ * file-scope statics in netdb.c, and never reclaimed by AmigaOS when the
+ * process exited. Nothing this function parses reads the netdb, and a lookup
+ * loads it on its own (netdb_table()), so the eager load bought only the
+ * surprise. `hostname` acquired the debt in its first week by asking for the
+ * interface list, and has no netdb lookup in it at all.
+ *
+ * Whoever needs the tables asks for them: bsd_lib_open() does, explicitly and
+ * on a Process, because the netstack's own threads then look up names from a
+ * context that cannot open a file; four commands do; the rest do not and now
+ * allocate nothing here. tools/check-netdb-free.sh holds the other half of
+ * the bargain, that anything reaching ami_netdb_load() also links
+ * ami_netdb_free().
+ */
 LONG ami_config_load(AmiConfig *cfg)
 {
     if (cfg == NULL)
@@ -440,7 +459,6 @@ LONG ami_config_load(AmiConfig *cfg)
     load_dnssd(cfg);
 #endif
 
-    ami_netdb_load();
     load_hostname(cfg);
 
     {

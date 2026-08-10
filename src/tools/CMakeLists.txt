@@ -380,6 +380,26 @@ if(CMAKE_CROSSCOMPILING)
     add_dependencies(tools tool_lvo_stub_check)
 endif()
 
+# ------------------------------------------------- the netdb free check ---
+#
+# ami_netdb_load() puts 12,616 bytes into statics that outlive the process, and
+# AmigaOS reclaims nothing at exit, so a command that can reach it and does not
+# link ami_netdb_free() costs the machine that much every time it is run.  The
+# rule was held by hand in eight places and `hostname` broke it inside a week,
+# by ADDING a caller rather than by removing a free.
+#
+# After all the tools, because it reads their linker maps: --gc-sections means
+# a map names ami_netdb_load only when something in that command can actually
+# get there, so this asks what was linked rather than what was written.
+if(CMAKE_CROSSCOMPILING)
+    add_custom_target(tool_netdb_free_check ALL
+        COMMAND "${CMAKE_SOURCE_DIR}/tools/check-netdb-free.sh"
+                "${CMAKE_BINARY_DIR}"
+        COMMENT "every command that can load the netdb also frees it"
+        VERBATIM)
+    add_dependencies(tool_netdb_free_check tools)
+endif()
+
 # --------------------------------------------------------------- host tests --
 #
 # Host only: httppath.c, httpif.c and fetchurl.c are the files here free of
