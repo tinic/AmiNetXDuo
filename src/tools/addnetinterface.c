@@ -122,6 +122,8 @@ static VOID explain_library_failure(const AmiIfConfig *ifc)
 {
     if (!tool_stack_installed())
     {
+        /* Same sentence Online prints for the same machine, onoff.c. */
+        tool_printf("  LIBS:bsdsocket.library is not installed.\n");
         return;
     }
 
