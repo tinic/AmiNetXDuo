@@ -200,6 +200,11 @@ typedef struct Regs
 
 typedef ULONG (*ThunkFn)(struct Library *base, const Regs *r);
 
+/* Struct assignment rather than a byte loop, for the reason cycledrill.c
+   records: -fanalyzer does not follow zero() through a struct and reports
+   every field the callee then reads as uninitialised. */
+static const Regs regs_zero;
+
 /*
  * `jsr a6@(-N:W)` needs a literal, so there is one of these per LVO and the
  * table names the one it wants.  Every argument register is declared both as
@@ -470,7 +475,7 @@ static LONG do_socket(LONG dom, LONG type, LONG proto)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.d0 = (ULONG)dom;
     r.d1 = (ULONG)type;
     r.d2 = (ULONG)proto;
@@ -481,7 +486,7 @@ static LONG do_close(LONG s)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.d0 = (ULONG)s;
     return (LONG)t_120(ctx.base, &r);
 }
@@ -490,7 +495,7 @@ static LONG do_ioctl(LONG s, ULONG req, APTR arg)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.d0 = (ULONG)s;
     r.d1 = req;
     r.a0 = arg;
@@ -501,7 +506,7 @@ static LONG do_release(LONG s, LONG id)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.d0 = (ULONG)s;
     r.d1 = (ULONG)id;
     return (LONG)t_150(ctx.base, &r);
@@ -511,7 +516,7 @@ static LONG do_obtain(LONG id, LONG dom, LONG type, LONG proto)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.d0 = (ULONG)id;
     r.d1 = (ULONG)dom;
     r.d2 = (ULONG)type;
@@ -523,7 +528,7 @@ static APTR do_getrouteinfo(LONG af, LONG flags)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.d0 = (ULONG)af;
     r.d1 = (ULONG)flags;
     return (APTR)t_438(ctx.base, &r);
@@ -533,7 +538,7 @@ static VOID do_freerouteinfo(APTR p)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.a0 = p;
     (VOID)t_432(ctx.base, &r);
 }
@@ -542,7 +547,7 @@ static APTR do_obtainiflist(VOID)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     return (APTR)t_462(ctx.base, &r);
 }
 
@@ -550,7 +555,7 @@ static VOID do_releaseiflist(APTR p)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.a0 = p;
     (VOID)t_456(ctx.base, &r);
 }
@@ -559,7 +564,7 @@ static APTR do_obtaindnslist(VOID)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     return (APTR)t_534(ctx.base, &r);
 }
 
@@ -567,7 +572,7 @@ static VOID do_releasednslist(APTR p)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.a0 = p;
     (VOID)t_528(ctx.base, &r);
 }
@@ -576,7 +581,7 @@ static LONG do_adddns(const char *addr)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.a0 = (APTR)addr;
     return (LONG)t_516(ctx.base, &r);
 }
@@ -585,7 +590,7 @@ static LONG do_removedns(const char *addr)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.a0 = (APTR)addr;
     return (LONG)t_522(ctx.base, &r);
 }
@@ -601,7 +606,7 @@ static LONG do_addroute(VOID)
     tags[2].ti_Tag  = TAG_DONE;
     tags[2].ti_Data = 0;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.a0 = (APTR)tags;
     return (LONG)t_414(ctx.base, &r);
 }
@@ -615,7 +620,7 @@ static LONG do_delroute(VOID)
     tags[5].ti_Tag  = TAG_DONE;
     tags[5].ti_Data = 0;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.a0 = (APTR)&tags[4];
     return (LONG)t_420(ctx.base, &r);
 }
@@ -632,7 +637,7 @@ static LONG do_createaam(LONG version, APTR *out)
 
     *out = NULL;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.d0 = (ULONG)version;
     r.d1 = (ULONG)AAMP_BOOTP;
     r.a0 = (APTR)ctx.iface;
@@ -645,7 +650,7 @@ static VOID do_deleteaam(APTR m)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.a0 = m;
     (VOID)t_480(ctx.base, &r);
 }
@@ -654,7 +659,7 @@ static LONG do_addmonhook(VOID)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.d0 = MHT_Bind;
     r.a0 = (APTR)&monhook;
     r.a1 = NULL;
@@ -665,7 +670,7 @@ static VOID do_removemonhook(VOID)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.a0 = (APTR)&monhook;
     (VOID)t_504(ctx.base, &r);
 }
@@ -682,7 +687,7 @@ static LONG do_getaddrinfo(const char *host, APTR *out)
 
     *out = NULL;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.a0 = (APTR)host;
     r.a1 = NULL;
     r.a2 = (APTR)&hints;
@@ -694,7 +699,7 @@ static VOID do_freeaddrinfo(APTR p)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.a0 = p;
     (VOID)t_804(ctx.base, &r);
 }
@@ -703,7 +708,7 @@ static APTR do_nameindex(VOID)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     return (APTR)t_894(ctx.base, &r);
 }
 
@@ -711,7 +716,7 @@ static VOID do_freenameindex(APTR p)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.a0 = p;
     (VOID)t_900(ctx.base, &r);
 }
@@ -720,7 +725,7 @@ static LONG do_bpfopen(LONG chan)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.d0 = (ULONG)chan;
     return (LONG)t_366(ctx.base, &r);
 }
@@ -729,7 +734,7 @@ static LONG do_bpfclose(LONG chan)
 {
     Regs r;
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.d0 = (ULONG)chan;
     return (LONG)t_372(ctx.base, &r);
 }
@@ -1180,7 +1185,7 @@ static VOID po_seterrnoptr(LONG v, ULONG res)
 
     (VOID)v;
     (VOID)res;
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.a0 = NULL;
     r.d0 = 4;
     (VOID)t_168(ctx.base, &r);
@@ -1945,7 +1950,7 @@ static VOID po_setdomain(LONG v, ULONG res)
 
     (VOID)v;
     (VOID)res;
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.a0 = (APTR)saved_domain;
     (VOID)t_708(ctx.base, &r);
 }
@@ -2490,7 +2495,7 @@ static VOID run_variant(const VecRow *v, LONG idx, LONG variant)
     flushout();
 
     /* The one-off: a cache built on first use is not a leak. */
-    zero(&r, sizeof(r));
+    r = regs_zero;
     if (v->prep != NULL && v->prep(variant, &r) == PREP_NA)
     {
         say("V %ld %s v%ld it0 NOTAPPLICABLE\n",
@@ -2509,7 +2514,7 @@ static VOID run_variant(const VecRow *v, LONG idx, LONG variant)
 
     for (i = 0; i < iters; i++)
     {
-        zero(&r, sizeof(r));
+        r = regs_zero;
         if (v->prep != NULL)
             (VOID)v->prep(variant, &r);
         res = v->thunk(ctx.base, &r);
@@ -2627,7 +2632,7 @@ static VOID find_interface(const char *want)
         ctx.iface[i] = want[i];
     ctx.iface[i] = '\0';
 
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.a0 = (APTR)ctx.iface;
     idx = t_882(ctx.base, &r);          /* if_nametoindex */
     ctx.ifindex = idx;
@@ -2653,7 +2658,7 @@ static BOOL bring_up(const char *want_iface)
     (VOID)do_ioctl(ctx.udp, P_FIONBIO, &nb);
 
     fill_peer();
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.d0 = (ULONG)ctx.udp;
     r.a0 = (APTR)&sa_peer;
     r.d1 = (ULONG)sizeof(sa_peer);
@@ -2673,7 +2678,7 @@ static BOOL bring_up(const char *want_iface)
     /* Remember the domain name so the SetDefaultDomainName row can put it
        back; an empty answer is a legal one and is restored as empty. */
     zero(saved_domain, sizeof(saved_domain));
-    zero(&r, sizeof(r));
+    r = regs_zero;
     r.a0 = (APTR)saved_domain;
     r.d0 = (ULONG)sizeof(saved_domain) - 1;
     (VOID)t_702(ctx.base, &r);          /* GetDefaultDomainName */
