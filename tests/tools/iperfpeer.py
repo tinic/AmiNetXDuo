@@ -120,15 +120,38 @@ def serve_tcp(args):
     ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     ls.bind((args.bind, args.port))
     ls.listen(4)
-    ls.settimeout(args.seconds)
 
+    if args.keep:
+        # One line per caller, until the lifetime runs out.  The leak sweep
+        # runs the same command several times against one peer, and a peer
+        # that served once and exited would make every repetition after the
+        # first fail as "connection refused".
+        deadline = time.time() + args.seconds
+        served = 0
+        while time.time() < deadline:
+            ls.settimeout(max(0.5, deadline - time.time()))
+            try:
+                conn, _ = ls.accept()
+            except socket.timeout:
+                break
+            if serve_tcp_conn(conn, args) == 0:
+                served += 1
+        ls.close()
+        return 0 if served else 1
+
+    ls.settimeout(args.seconds)
     try:
         conn, _ = ls.accept()
     except socket.timeout:
         print("iperfpeer: nobody connected to tcp/%d within %d seconds"
               % (args.port, args.seconds), file=sys.stderr)
         return 1
+    rc = serve_tcp_conn(conn, args)
+    ls.close()
+    return rc
 
+
+def serve_tcp_conn(conn, args):
     conn.settimeout(args.idle)
     total = 0
     packets = 0
@@ -147,7 +170,6 @@ def serve_tcp(args):
         packets += 1
         last = time.time()
     conn.close()
-    ls.close()
 
     if t0 is None:
         print("iperfpeer: the connection carried no bytes", file=sys.stderr)
@@ -161,7 +183,27 @@ def serve_udp(args):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.bind((args.bind, args.port))
-    s.settimeout(args.seconds)
+
+    if args.keep:
+        # The socket is bound once and the run state is reset after each end
+        # marker, so caller after caller is served on the same port.
+        deadline = time.time() + args.seconds
+        served = 0
+        while time.time() < deadline:
+            if serve_udp_once(s, args, max(0.5, deadline - time.time())) == 0:
+                served += 1
+            else:
+                break
+        s.close()
+        return 0 if served else 1
+
+    rc = serve_udp_once(s, args, args.seconds)
+    s.close()
+    return rc
+
+
+def serve_udp_once(s, args, wait):
+    s.settimeout(wait)
 
     total = 0
     packets = 0
@@ -193,7 +235,6 @@ def serve_udp(args):
             for _ in range(10):
                 s.sendto(ack, peer)
                 time.sleep(0.02)
-            s.close()
             emit("serve", "udp", total, ms, packets - 1, lost, outoforder)
             return 0
         if ident == expect:
@@ -204,7 +245,6 @@ def serve_udp(args):
         else:
             outoforder += 1
 
-    s.close()
     # No end marker.  Still a measurement, and saying so is better than
     # failing: a sender that was killed still moved these bytes.
     emit("serve", "udp", total, int((time.time() - t0) * 1000), packets,
@@ -303,6 +343,8 @@ def main():
     ap.add_argument("--kbit", type=int, default=0)
     ap.add_argument("--idle", type=float, default=5.0,
                     help="give up after this long with nothing arriving")
+    ap.add_argument("--keep", action="store_true",
+                    help="serve caller after caller until --seconds runs out")
     args = ap.parse_args()
 
     if args.length == 0:

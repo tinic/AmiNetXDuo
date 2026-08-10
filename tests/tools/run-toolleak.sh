@@ -106,6 +106,7 @@ TELNET_PORT="${AMINETXDUO_TELNET_PORT:-7323}"
 TFTP_PORT="${AMINETXDUO_TFTP_PORT:-7369}"
 WHOIS_PORT="${AMINETXDUO_WHOIS_PORT:-7343}"
 HTTP_PORT="${AMINETXDUO_HTTP_PORT:-7380}"
+IPERF_PORT="${AMINETXDUO_IPERF_PORT:-7385}"
 # Nothing ever listens here.  It is the refusal arm's other end.
 DEAD_PORT="${AMINETXDUO_DEAD_PORT:-7399}"
 
@@ -198,6 +199,8 @@ live|nc|scan-closed|5|re:port ${DEAD_PORT} connection refused|-|SYS:nc -z 10.0.2
 live|telnet|session|5|re:Trying 10.0.2.2 port ${TELNET_PORT}|-|SYS:telnet 10.0.2.2 ${TELNET_PORT} -d <DH0:telnetin.txt
 live|telnet|refused|5|re:Trying 10.0.2.2 port ${DEAD_PORT}|-|SYS:telnet 10.0.2.2 ${DEAD_PORT}
 live|tftp|get|5|re:49 bytes|-|SYS:tftp 10.0.2.2 PORT ${TFTP_PORT} GET hello.txt AS DH0:tftp.txt
+live|iperf|measures|5|re:dir=tcp-tx|-|SYS:iperf 10.0.2.2 -p ${IPERF_PORT} -n 32 -q
+live|iperf|refused|5|re:nothing is listening|-|SYS:iperf 10.0.2.2 -p ${DEAD_PORT} -t 3 -q
 live|tftp|not-found|5|re:there is no such file on the server|-|SYS:tftp 10.0.2.2 PORT ${TFTP_PORT} GET no.such.file
 live|whois|answers|5|re:PLAIN.TEST|-|SYS:whois plain.test SERVER 10.0.2.2 PORT ${WHOIS_PORT}
 live|whois|refused|5|re:cannot reach 10.0.2.2 port ${DEAD_PORT}|-|SYS:whois plain.test SERVER 10.0.2.2 PORT ${DEAD_PORT}
@@ -401,6 +404,7 @@ stage_group() {
 
 PEER_PID=""
 HTTP_PID=""
+IPERF_PID=""
 HTTPROOT="$WORK/httproot"
 
 # Reached through the EXIT trap below, not by name.
@@ -408,8 +412,10 @@ HTTPROOT="$WORK/httproot"
 stop_peers() {
     [ -z "$PEER_PID" ] || kill -TERM "$PEER_PID" 2>/dev/null || true
     [ -z "$HTTP_PID" ] || kill -TERM "$HTTP_PID" 2>/dev/null || true
+    [ -z "$IPERF_PID" ] || kill -TERM "$IPERF_PID" 2>/dev/null || true
     PEER_PID=""
     HTTP_PID=""
+    IPERF_PID=""
 }
 trap stop_peers EXIT INT TERM HUP
 
@@ -429,14 +435,25 @@ start_peers() {
         > "$WORK/httpd-host.log" 2>&1 &
     HTTP_PID=$!
 
+    # --keep, because the sweep runs each row several times against one peer
+    # and a peer that served once would make every repetition after the first
+    # fail as "connection refused" and blame the tool for it.
+    python3 "$ROOT/tests/tools/iperfpeer.py" serve tcp \
+        --port "$IPERF_PORT" --seconds "$lifetime" --idle 6 --keep \
+        > "$WORK/iperfpeer.out" 2>&1 &
+    IPERF_PID=$!
+
     sleep 1
     kill -0 "$PEER_PID" 2>/dev/null || {
         echo "netpeer.py did not start:" >&2; cat "$WORK/netpeer.out" >&2; exit 2; }
     kill -0 "$HTTP_PID" 2>/dev/null || {
         echo "python3 -m http.server did not start:" >&2
         cat "$WORK/httpd-host.log" >&2; exit 2; }
+    kill -0 "$IPERF_PID" 2>/dev/null || {
+        echo "iperfpeer.py did not start:" >&2
+        cat "$WORK/iperfpeer.out" >&2; exit 2; }
     echo "==> peers: echo $ECHO_PORT, telnet $TELNET_PORT, tftp $TFTP_PORT," \
-         "whois $WHOIS_PORT, http $HTTP_PORT"
+         "whois $WHOIS_PORT, http $HTTP_PORT, iperf $IPERF_PORT"
 }
 
 # ======================================================================= #
