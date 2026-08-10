@@ -156,10 +156,40 @@
  * which every request/response exchange pays (HTTP, DNS, each leg of a TLS
  * handshake).
  *
+ * Eight rather than two, because on a SANA-II card an acknowledgment is not
+ * free.  Every one is a CMD_WRITE: a BeginIO, a programmed-I/O push to the
+ * card, a board interrupt and a ReplyMsg.  Peer-side captures of the same
+ * 1 MiB fitz read on an X-Surf-100 (A1200, 68020) count 780 data segments per
+ * MiB either way, and acknowledgments back:
+ *
+ *     N     ACKs/MiB   frames/MiB   read KB/s
+ *     2       423.0      1428.5       382
+ *     4       225.5      1241.1       391
+ *     8       132.5      1170.3       433
+ *    16        82.0      1092.1       383 (262/445/444, unstable)
+ *
+ * Roadshow 1.15 on the same card and transfer: 36.8 ACKs/MiB, 1104.6
+ * frames/MiB, 445 KB/s.  Driver CPU over the three arms is a fixed 0.42 to
+ * 0.53 ms per frame plus a per-byte term, and any two of them predict the
+ * third's driver time within 5%, so the frame count is the whole of the
+ * difference and at N=2 seven acknowledgments in eight are ours to withdraw.
+ * Write is unaffected (376 -> 381 KB/s); this counter only governs
+ * acknowledgments for data received.
+ *
+ * Eight is the largest value that cannot leave a sender in slow start waiting,
+ * because RFC 6928's initial window is ten segments: the peer can always put
+ * more on the wire than it takes to force the next acknowledgment.  Sixteen
+ * exceeds it and measures as one stalled repetition in three.  Loss recovery
+ * does not depend on the counter either way, since an out-of-sequence segment
+ * forces an immediate acknowledgment on its own
+ * (nx_tcp_socket_state_data_check.c:611, 671), so the duplicates that drive
+ * fast retransmit are still one per segment.  The 200 ms delayed-ACK timer
+ * remains the RFC 1122 4.2.3.2 backstop for everything below the threshold.
+ *
  * Cost: one ULONG per NX_TCP_SOCKET (already in the struct, already initialised
  * by nx_tcp_socket_create.c:154) and one comparison per received data segment.
  */
-#define NX_TCP_ACK_EVERY_N_PACKETS              2
+#define NX_TCP_ACK_EVERY_N_PACKETS              8
 
 /*
  * Retransmit with exponential backoff (RFC 6298 5.5).
