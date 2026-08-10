@@ -892,6 +892,25 @@ class WsConn(Conn):
         return text, control
 
 
+def ws_wait_free(seconds=20.0):
+    """Wait for the terminal to come back, and say how long it took.
+
+    Slept-for rather than measured is how a release that takes twenty seconds
+    passes as one that takes two: the number is the point, so it is returned
+    and printed rather than hidden in a sleep."""
+    began = time.time()
+    while time.time() - began < seconds:
+        c = WsConn()
+        status = c.status
+        c.close()
+        if status == 101:
+            # Give it straight back; this was a probe.
+            time.sleep(0.3)
+            return time.time() - began
+        time.sleep(0.5)
+    return None
+
+
 def test_ws_handshake():
     """RFC 6455 4.2.2, against the specification's own key and accept."""
     print("the upgrade handshake")
@@ -913,7 +932,7 @@ def test_ws_handshake():
 
     # And a second key, so the accept cannot be a constant.
     c.close()
-    time.sleep(0.5)
+    ws_wait_free()
 
     other = base64.b64encode(b"0123456789abcdef").decode("ascii")
     c = WsConn(key=other)
@@ -921,7 +940,7 @@ def test_ws_handshake():
     check(c.headers.get("sec-websocket-accept") == ws_accept_of(other),
           "and its accept is that key's, not the last one's")
     c.close()
-    time.sleep(0.5)
+    ws_wait_free()
 
 
 def test_ws_refusals():
@@ -957,7 +976,7 @@ def test_ws_refusals():
     check(c.status == 101,
           "the terminal is still free after the refusals (got %s)" % c.status)
     c.close()
-    time.sleep(1.0)
+    ws_wait_free()
 
 
 def test_ws_page():
@@ -1036,7 +1055,8 @@ def test_ws_shell():
     check(code == 1000, "a close is answered with its own code (got %r)" % code)
     check(c.closed(), "and the server lets go of the socket")
     c.close()
-    time.sleep(2.0)
+    check(ws_wait_free() is not None,
+          "and the Shell is free again after a clean close")
 
 
 def test_ws_one_session():
@@ -1054,15 +1074,15 @@ def test_ws_one_session():
     second.close()
 
     first.close()
-    time.sleep(2.0)
 
     # And with the first gone, the terminal is free again.  This is the check
-    # that a browser closing its tab does not cost the machine its shell.
-    third = WsConn()
-    check(third.status == 101,
-          "closing the first frees it again (got %s)" % third.status)
-    third.close()
-    time.sleep(2.0)
+    # that a browser closing its tab does not cost the machine its shell -- and
+    # the SECOND time it was run it was the check that found it did.
+    took = ws_wait_free()
+    check(took is not None,
+          "closing the first frees it again, within %.0fs" % WS_WAIT)
+    if took is not None:
+        print("  (the Shell came back in %.1fs)" % took)
 
 
 def test_ws_unmasked():
@@ -1088,13 +1108,9 @@ def test_ws_unmasked():
     check(code == 1002,
           "an unmasked frame is closed 1002 (got %r)" % code)
     c.close()
-    time.sleep(2.0)
 
-    c = WsConn()
-    check(c.status == 101,
-          "and the Shell is given back afterwards (got %s)" % c.status)
-    c.close()
-    time.sleep(2.0)
+    check(ws_wait_free() is not None,
+          "and the Shell is given back afterwards")
 
 
 def main():
@@ -1116,10 +1132,15 @@ def main():
         test_depth0_collection_lock()
 
         if WANT_TERMINAL:
+            # The Shell FIRST.  It is the feature; everything else here is
+            # about the door in front of it.  Run in any other order, a
+            # terminal that never came back from the first session reported
+            # itself as six failures about 503 and said nothing at all about
+            # whether a command works, which is what happened.
+            test_ws_shell()
             test_ws_page()
             test_ws_handshake()
             test_ws_refusals()
-            test_ws_shell()
             test_ws_one_session()
             test_ws_unmasked()
     finally:

@@ -47,6 +47,17 @@
    what happens when it runs out, which is deliberately not "free it anyway". */
 #define TERM_STOP_TICKS     500     /* of 1/50 s                            */
 
+/*
+ * How many passes of the server's loop a Shell gets to act on `endcli` before
+ * this side stops being polite and closes the pipes under it.
+ *
+ * It is passes and not seconds because that is what this file can count: the
+ * loop ticks at least four times a second and oftener when anything is
+ * happening, so twenty is a few seconds of a Shell that is not listening.
+ * See http_term_stop() for why asking first is the right order.
+ */
+#define TERM_STOP_PASSES    20
+
 /* ------------------------------------------------------------- the rings --- */
 
 typedef struct TermPipe
@@ -141,6 +152,8 @@ typedef struct
 static TermRunner term_runner;
 static UBYTE      term_active;      /* a Shell has been started             */
 static UBYTE      term_reaped;      /* and its exit code has been collected */
+static UBYTE      term_stopping;    /* it has been asked to go              */
+static UWORD      term_stop_passes;
 static LONG       term_rc = -1;
 
 /*
@@ -271,6 +284,30 @@ VOID http_term_service(VOID)
      *   and a false one means no Shell was started at all.  Then nothing will
      *   ever send an ACTION_END and the session has to end on the flag.
      */
+    if (term_stopping && !term_reaped)
+    {
+        term_stop_passes++;
+
+        if (term_stop_passes > TERM_STOP_PASSES)
+        {
+            /* It did not take the hint.  End of file and errors in both
+               directions, which is the strongest thing this side has. */
+            term_in.closed  = 1;
+            term_out.closed = 1;
+            term_retry(&term_in);
+            term_retry(&term_out);
+        }
+
+        /* And keep the ring empty, so a Shell blocked in Write() can move. */
+        if (ring_used(&term_out) > 0UL)
+        {
+            term_out.count = 0;
+            term_out.rd    = 0;
+            term_out.wr    = 0;
+            term_retry(&term_out);
+        }
+    }
+
     if (term_active && !term_reaped)
     {
         BOOL failed = (term_runner.rn_Done != 0 && term_runner.rn_Rc == 0)
@@ -645,9 +682,11 @@ BOOL http_term_start(VOID)
     proc->pr_Task.tc_UserData = (APTR)&term_runner;
     Signal((struct Task *)proc, SIGF_SINGLE);
 
-    term_active = 1;
-    term_reaped = 0;
-    term_rc     = -1;
+    term_active      = 1;
+    term_reaped      = 0;
+    term_stopping    = 0;
+    term_stop_passes = 0;
+    term_rc          = -1;
 
     return TRUE;
 }
@@ -718,25 +757,53 @@ LONG http_term_rc(VOID)
     return term_rc;
 }
 
+/*
+ * End the session.
+ *
+ * ASKING FIRST, AND WHY CLOSING THE PIPES IS NOT ENOUGH
+ *
+ *   The Shell on the far end is INTERACTIVE -- ACTION_IS_FILESYSTEM answered
+ *   DOSFALSE is what IsInteractive() asks, and answering it that way is what
+ *   makes it print a prompt.  dos.library's own autodoc says what that costs:
+ *   a Shell made this way "can only be terminated by using the EndCLI
+ *   command".  Measured exactly so: closing both pipes left the Shell sitting
+ *   there, no ACTION_END ever arrived, and every upgrade after the first was
+ *   answered 503 for a session whose browser had gone.
+ *
+ *   So the session is ended the way a person would end it.  Ctrl-C first,
+ *   because `endcli` typed while a command is running goes to the COMMAND's
+ *   stdin and not to the Shell; then the word itself.
+ *
+ *   And then, if it did not take the hint, the pipes are closed under it after
+ *   TERM_STOP_PASSES.  That is a fallback and not the mechanism: a Shell that
+ *   ignores both is one this program cannot reason about, and refusing the
+ *   next session for ever is worse than a Read() that fails.
+ */
 VOID http_term_stop(VOID)
 {
-    if (!term_active)
+    static const UBYTE endcli[] = "endcli\n";
+
+    if (!term_active || term_stopping)
         return;
 
-    /* End of file in both directions.  The Shell exits, the runner closes the
-       two handles, and this side learns both through ACTION_END. */
-    term_in.closed  = 1;
-    term_out.closed = 1;
+    term_stopping    = 1;
+    term_stop_passes = 0;
 
+    if (term_shell_task != NULL)
+        Signal(term_shell_task, SIGBREAKF_CTRL_C);
+
+    (VOID)ring_put(&term_in, endcli, (ULONG)(sizeof(endcli) - 1));
     term_retry(&term_in);
-    term_retry(&term_out);
 
-    /* Whatever the Shell had left to say is not going anywhere now, so the
-       ring is emptied rather than held: it is what http_term_service() waits
-       on before it lets the next session start. */
+    /*
+     * Whatever the Shell had left to say has nobody to say it to.  Discarding
+     * it rather than holding it also unblocks a Shell parked in Write(), which
+     * is a Shell that cannot get as far as reading the word above.
+     */
     term_out.count = 0;
     term_out.rd    = 0;
     term_out.wr    = 0;
+    term_retry(&term_out);
 
     http_term_service();
 }
@@ -751,6 +818,10 @@ VOID http_term_shutdown(VOID)
     if (term_active)
     {
         http_term_stop();
+
+        /* The bounded wait below is the last chance the Shell gets, so the
+           polite path is skipped: this program is going away. */
+        term_stop_passes = TERM_STOP_PASSES;
 
         /*
          * The runner still holds two FileHandles that name this process's
