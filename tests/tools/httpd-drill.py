@@ -39,7 +39,15 @@ import sys
 import time
 
 argv = [a for a in sys.argv[1:] if not a.startswith("--")]
-WANT_TERMINAL = "--terminal" in sys.argv
+WANT_TERMINAL = "--terminal" in sys.argv or "--ws-only" in sys.argv
+
+# --ws-only skips the WebDAV half and its setup.  It exists so the WebSocket
+# assertions can be pointed at something that is NOT this server: every one of
+# them was watched to fail against a stand-in that is deliberately wrong in one
+# named way, and that stand-in answers no PROPFIND, so setup() would exit(2)
+# before a single WebSocket check ran.  run-wsterm.sh does not use it -- it
+# passes --terminal, which runs both halves.
+WS_ONLY = "--ws-only" in sys.argv
 
 ADDR = argv[0] if len(argv) > 0 else "127.0.0.1"
 PORT = int(argv[1]) if len(argv) > 1 else 8080
@@ -1116,8 +1124,21 @@ def test_ws_unmasked():
 def main():
     print("httpd-drill against http://%s:%d/\n" % (ADDR, PORT))
 
-    setup()
+    if not WS_ONLY:
+        setup()
     try:
+        if WS_ONLY:
+            test_ws_shell()
+            test_ws_page()
+            test_ws_handshake()
+            test_ws_refusals()
+            test_ws_one_session()
+            test_ws_unmasked()
+            print("\n%d checks, %d failure(s)" % (checks, len(failures)))
+            for f in failures:
+                print("  %s" % f)
+            return 0 if not failures else 1
+
         test_desync()
         test_refusal_keeps_the_connection()
         test_unframed_refusal_closes()
@@ -1144,7 +1165,8 @@ def main():
             test_ws_one_session()
             test_ws_unmasked()
     finally:
-        teardown()
+        if not WS_ONLY:
+            teardown()
 
     print("\n%d checks, %d failure(s)" % (checks, len(failures)))
     for f in failures:
