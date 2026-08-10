@@ -242,6 +242,15 @@ fi
 echo "================================================================"
 echo
 
+# The emulator's own log is 195 MB for a five-minute run and playhouse3 is a
+# shared box that has been full.  Everything this script asserts on has been
+# read by now -- the backend, the boot, the guest's stdout -- so what is kept
+# is the tail, which is what a person reads when something went wrong.
+EMULOG="$ROOT/build/amiberry-$AMINETXDUO_RUN_TAG.log"
+if [ -f "$EMULOG" ]; then
+    tail -400 "$EMULOG" > "$EMULOG.tail" && mv "$EMULOG.tail" "$EMULOG"
+fi
+
 echo "drill_seconds=$DRILL_SECS"
 echo "checks=${CHECKS:-0}"
 echo "failures=${FAILS:-0}"
