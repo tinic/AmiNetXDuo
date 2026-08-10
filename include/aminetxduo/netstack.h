@@ -188,6 +188,24 @@ NX_IP          *netstack_ip(VOID);
 NX_PACKET_POOL *netstack_pool(VOID);
 const AmiConfig *netstack_config(VOID);
 
+/*
+ * Offer a name to the running configuration, at `source`
+ * (AmiHostnameSource). The only way anything changes cfg->hostname after
+ * start-up, and it goes through ami_config_hostname_offer(), so a source
+ * weaker than the one that named the machine is refused rather than applied:
+ * the ranking is the same one a boot uses and this cannot invent a different
+ * one.
+ *
+ * AMI_NET_ERR_STATE with the stack down, AMI_NET_ERR_CONFIG when the offer was
+ * refused, either because a stronger source holds or because the name is not
+ * one that source is allowed to supply.
+ *
+ * What reads cfg->hostname afterwards: gethostname(), and DHCP option 12 --
+ * NX_DHCP keeps the pointer rather than a copy, so the next request carries the
+ * new name. The mDNS responder does NOT: it claimed its label at start-up and
+ * nothing here re-claims it.
+ */
+LONG netstack_hostname_offer(UWORD source, const char *name);
 
 /*
  * Is this machine answering .local on that interface?  By NX interface

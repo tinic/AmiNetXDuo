@@ -1048,8 +1048,19 @@ static LONG bsd_if_parse_config(struct AmiSocketBase *SocketBase,
              *   IFC_AssociatedRoute     these mark an interface so that going
              *   IFC_AssociatedDNS       down tears something else down with it.
              *                           A mark nothing reads is not the mark.
-             *   IFC_ReleaseAddress      the DHCP client has no release path;
-             *                           accepting would leave the lease held.
+             *   IFC_ReleaseAddress      STILL REFUSED, and the reason has
+             *                           changed. It used to be that the DHCP
+             *                           client had no release path at all, so
+             *                           accepting would have left the lease
+             *                           held. There is one now
+             *                           (NETCTRL_DHCP_RELEASE, over
+             *                           netstack_interface_dhcp_stop(index,
+             *                           TRUE)), and wiring this tag to it is a
+             *                           change to a published vector's
+             *                           behaviour that nothing yet asks for.
+             *                           Left as it was on purpose rather than
+             *                           by oversight; ConfigureNetInterface
+             *                           RELEASE is the way to reach it.
              */
             case IFC_SetDebugMode:
             case IFC_GetPeerAddress:

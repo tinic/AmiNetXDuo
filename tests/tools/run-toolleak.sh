@@ -177,6 +177,12 @@ cold|ConfigureNetInterface|no-stack|5|re:no interface to configure|-|SYS:Configu
 cold|ConfigureNetInterface|bad-address|5|re:is not an address|-|SYS:ConfigureNetInterface eth0 ADDRESS notanaddress
 cold|ConfigureNetInterface|bad-configure|5|re:CONFIGURE takes DHCP and nothing else|-|SYS:ConfigureNetInterface eth0 CONFIGURE=AUTO
 cold|AddNetInterface|unknown-name|5|re:there is no interface called|-|SYS:AddNetInterface nosuchinterface
+# hostname reads the whole configuration into a static AmiConfig to answer with
+# the stack down, and ami_config_load() loads the netdb behind it, which is
+# where addnetroute.c found 12,616 bytes a run going missing.  The refusal arm
+# is the one that returns before any of that, so the pair brackets it.
+cold|hostname|no-name|5|re:This machine has no name|-|SYS:hostname
+cold|hostname|bad-name|5|re:is not a host name|-|SYS:hostname not_a_name
 cold|NetSetup|bad-address|5|re:is not an address|-|SYS:NetSetup eth9 DEVICE=a2065.device UNIT=0 ADDRESS=notanaddress NOONLINE
 cold|NetSetup|writes-config|5|re:set up a network interface|-|SYS:NetSetup ethz DEVICE=a2065.device UNIT=0 DHCP NOONLINE FORCE
 # ------------------------------------------------------------ live ------
@@ -228,6 +234,11 @@ live|ConfigureNetInterface|unknown-name|5|re:there is no interface called|-|SYS:
 live|ConfigureNetInterface|reconfigures|5|re:eth0: 10.0.2.15 netmask 255.255.255.0|SYS:ConfigureNetInterface eth0 QUIET ADDRESS 10.0.2.20/24|SYS:ConfigureNetInterface eth0 ADDRESS 10.0.2.15/24
 live|AddNetInterface|already-up|5|re:online, address 10.0.2.15|-|SYS:AddNetInterface eth0
 live|AddNetInterface|unknown-name|5|re:there is no interface called|-|SYS:AddNetInterface nosuchinterface
+# Setting a name on a RUNNING stack: the ENV: and ENVARC: writes and the
+# NETCTRL_HOSTNAME_SET call, which is the arm that has something to give back.
+# Repeating it is not a no-op -- the offer is at ENV:HOSTNAME rank and the
+# machine is already named at that rank, so every run takes the name again.
+live|hostname|sets|5|re:written to ENV:HOSTNAME|-|SYS:hostname beast
 live|Online|unknown-name|5|re:nothing here is called|-|SYS:Online nosuch0
 live|Offline|unknown-name|5|re:nothing here is called|-|SYS:Offline nosuch0
 # ------------------------------------------------------------ cycle -----

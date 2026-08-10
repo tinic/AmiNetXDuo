@@ -984,7 +984,11 @@
   (prompt "Installing the network commands into C:")
   (help   "AddNetInterface, Online and Offline bring an interface up and "
           "take it down, and NetSetup writes or edits the interface file "
-          "instead.  ShowNetStatus and netstat report what it is "
+          "instead.  ConfigureNetInterface changes the address, netmask and "
+          "gateway of an interface that is already running, and releases or "
+          "renews its DHCP lease.  hostname says what this machine calls "
+          "itself and which of the four places that can name it did so, and "
+          "sets the name.  ShowNetStatus and netstat report what it is "
           "doing, and ShowNetServices lists what else on the local network "
           "is offering something.  ping, host and traceroute are the usual diagnostics, and "
           "nslookup asks the DNS for one kind of record -- an MX, a TXT, an "

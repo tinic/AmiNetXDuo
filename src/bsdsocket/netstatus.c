@@ -1602,6 +1602,39 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
         }
 
         /*
+         * The machine's name. Out here for the reason the rest of these are:
+         * netstack_hostname_offer() takes the bracket itself, and it needs to,
+         * because the DHCP thread reads the buffer it writes.
+         *
+         * It answers on a stack with no interfaces up, which is deliberate: a
+         * machine is named before it is addressed, and the name is what the
+         * first DHCP request will announce.
+         */
+        case NETCTRL_HOSTNAME_SET:
+        {
+            LONG err;
+
+            if (ctl->nsc_HostName[0] == '\0')
+                return bsd_fail(SocketBase, AMI_EINVAL);
+
+            err = netstack_hostname_offer((UWORD)AMI_HOSTNAME_ENV,
+                                          ctl->nsc_HostName);
+
+            if (err == AMI_NET_OK)
+                return 0;
+
+            /*
+             * EPERM and not EINVAL: the name is fine and the caller is not
+             * allowed to use it, because something that outranks ENV:HOSTNAME
+             * named this machine already. The caller reads NETSTATUS_SYSTEM's
+             * nss_HostSource to say which.
+             */
+            return bsd_fail(SocketBase,
+                            (err == AMI_NET_ERR_CONFIG) ? AMI_EPERM
+                                                        : AMI_ENETDOWN);
+        }
+
+        /*
          * Out here because it touches nothing but the master base's own
          * counters, and because it has to answer on a stack whose interfaces
          * are all still coming up: it is the first thing AddNetInterface asks

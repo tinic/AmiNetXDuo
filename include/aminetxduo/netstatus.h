@@ -68,9 +68,10 @@ extern "C" {
 
 #define AMI_NETSTATUS_MAGIC         0x414E5351UL    /* 'ANSQ' */
 /*
- * 8 since NETCTRL_INTERFACE_CONFIGURE and the DHCP three. A caller and a
- * library that disagree fail every call rather than half of them, which is why
- * the commands and the library ship together.
+ * 8 since NETCTRL_INTERFACE_CONFIGURE, the DHCP three and
+ * NETCTRL_HOSTNAME_SET, which also grew the control block by nsc_HostName. A
+ * caller and a library that disagree fail every call rather than half of them,
+ * which is why the commands and the library ship together.
  *
  * This is the compatibility mechanism for a record that grows. The size check in
  * bsd_NetStackQuery() is not: it rejects a buffer too small for the record, and
@@ -92,6 +93,9 @@ extern "C" {
 #define NETSTATUS_NAME_LEN      32
 #define NETSTATUS_DEVICE_LEN    32
 #define NETSTATUS_MAC_SIZE      6
+/* A host name, RFC 1123 2.1's 63-character label and a NUL, which is also what
+   AMI_CFG_NAME_LEN (aminetxduo/config.h) sizes cfg->hostname at. */
+#define NETSTATUS_HOSTNAME_LEN  64
 
 /*
  * The DNS-SD widths, from RFC 6763 and the mDNS module's own limits: a service
@@ -918,6 +922,38 @@ typedef struct NetStatusService
 #define NETCTRL_DHCP_RENEW      21  /* nsc_Index                             */
 #define NETCTRL_DHCP_RELEASE    22  /* nsc_Index                             */
 
+/*
+ * Offer nsc_HostName to the running stack as this machine's name, at the rank
+ * of ENV:HOSTNAME.
+ *
+ * An OFFER and not an assignment, and that word is the whole design. The name
+ * comes from four places, ranked (AmiHostnameSource in aminetxduo/config.h):
+ * an interface file's ID=, then ENV:HOSTNAME, then DHCP option 12, then
+ * DEVS:Internet/name_resolution. ami_config_hostname_offer() takes a name only
+ * from a source at least as strong as the one that named the machine already,
+ * and this goes through it, so a machine named by its DHCP server keeps that
+ * name and this call is refused with EPERM. The caller then has something true
+ * to say -- "DHCP named this machine, and it outranks ENV:HOSTNAME" -- rather
+ * than a name that appears to have been set and is not the one gethostname()
+ * answers.
+ *
+ * The rank is fixed at ENV:HOSTNAME because that is the file the caller writes.
+ * A caller that could pick its own rank could name the machine at
+ * name_resolution rank without anything in DEVS:Internet saying so, and the
+ * next boot would undo it with no record of what had happened.
+ *
+ * This changes the RUNNING stack only. Nothing here writes a file; the command
+ * that calls it writes ENV:HOSTNAME and ENVARC:HOSTNAME itself, and the two
+ * halves are separate because one of them works with the stack down.
+ *
+ * EINVAL for an empty name, EPERM when a stronger source holds, ENETDOWN when
+ * there is no stack. The name is NOT validated here beyond being non-empty:
+ * ami_config_hostname_offer() checks only the sources that were never required
+ * to be host names, and the caller is the one that can say which rule a name
+ * broke.
+ */
+#define NETCTRL_HOSTNAME_SET    23  /* nsc_HostName                          */
+
 /* Flags for nsc_Flags. Zero unless an operation above says otherwise. */
 #define NETCTRL_F_FORCE         0x00000001
 /* Which of NETCTRL_INTERFACE_CONFIGURE's three fields were given at all. */
@@ -942,10 +978,24 @@ typedef struct NetStatusControl
     /*
      * Named out of what was reserved, which is what reserved was for: every
      * caller had to zero it, so no caller that predates this asks for a flag
-     * by accident. The block is the size it always was.
+     * by accident.
      */
     ULONG   nsc_Flags;                  /* NETCTRL_F_*                       */
     ULONG   nsc_Reserved[3];
+    /*
+     * A host name, for NETCTRL_HOSTNAME_SET, and a field of its own rather than
+     * nsc_Name above: that one is 24 bytes because a DNS-SD service type is
+     * "<sn>._tcp" with <sn> up to 15 characters, and a host name is up to 63
+     * (RFC 1123 2.1, one label), so putting one in the other would cap a host
+     * name at a width that has nothing to do with host names.
+     *
+     * At the END of the block, and the block therefore grows. That is why
+     * AMI_NETSTATUS_VERSION moved: the library refuses any version but its own
+     * and checks the caller's size against its own sizeof, so a caller built
+     * against the shorter block cannot reach this and cannot be misread as
+     * having filled it.
+     */
+    char    nsc_HostName[NETSTATUS_HOSTNAME_LEN];
 } NetStatusControl;
 
 #ifdef __cplusplus

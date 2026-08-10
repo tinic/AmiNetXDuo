@@ -1998,6 +1998,43 @@ const AmiConfig *netstack_config(VOID)
     return (ns != NULL) ? &ns->ns_Config : NULL;
 }
 
+LONG netstack_hostname_offer(UWORD source, const char *name)
+{
+    AmiNetStack  *ns = ami_ns;
+    AmiNetCaller *caller;
+    BOOL          taken;
+
+    if (ns == NULL)
+        return AMI_NET_ERR_STATE;
+
+    if (name == NULL || name[0] == '\0')
+        return AMI_NET_ERR_CONFIG;
+
+    /*
+     * Inside the bracket, not because ami_config_hostname_offer() touches NetX
+     * Duo -- it does not -- but because of who else reads what it writes.
+     * NX_DHCP was handed ns_Config.hostname as a POINTER at create time
+     * (nx_dhcp_create above), so the DHCP thread reads this buffer while
+     * building a request. Holding the baton across the copy means that thread
+     * is not running during it, and no request can carry half of one name and
+     * half of another.
+     */
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return AMI_NET_ERR_KERNEL;
+
+    taken = ami_config_hostname_offer(&ns->ns_Config, source, name);
+
+    ami_netstack_leave_free(caller);
+
+    if (!taken)
+        return AMI_NET_ERR_CONFIG;
+
+    AMI_INFO("netstack: host name is now \"%s\"", name);
+
+    return AMI_NET_OK;
+}
+
 UWORD netstack_interface_count(VOID)
 {
     AmiNetStack *ns = ami_ns;
