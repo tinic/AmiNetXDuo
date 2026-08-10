@@ -649,3 +649,70 @@ UINT         wake;
 
     return(TX_SUCCESS);
 }
+
+
+/**************************************************************************/
+/*                                                                        */
+/*    tx_amiga_stack_in_use                             AmigaOS/m68k       */
+/*                                                                        */
+/*    Whether a block of memory falls inside the stack of a thread that is */
+/*    still on ThreadX's created list.  _txe_thread_create() refuses such  */
+/*    a block with TX_PTR_ERROR, so a caller that allocates a stack can    */
+/*    ask first and take another block instead of failing.                 */
+/*                                                                        */
+/*    It is not a hypothetical.  An adopted thread's stack is its Exec     */
+/*    Task's own, and a Task that exits without orphaning leaves the       */
+/*    TX_THREAD registered (see tx_amiga_adopt_resume() above): the memory */
+/*    goes back to the system and the allocator hands it out again, while  */
+/*    ThreadX still reads it as somebody's stack.  bsdsocket.library is    */
+/*    kept open on purpose by the command that starts the network, so its  */
+/*    cached adoption outlives the command every time.                     */
+/*                                                                        */
+/*    The comparison is _txe_thread_create()'s, so an answer of TX_FALSE   */
+/*    is the same answer that call will give.                              */
+/*                                                                        */
+/**************************************************************************/
+
+UINT tx_amiga_stack_in_use(const VOID *start, ULONG size)
+{
+
+UBYTE       *stack_start;
+UBYTE       *stack_end;
+TX_THREAD   *thread;
+ULONG        remaining;
+UINT         result =  (UINT) TX_FALSE;
+
+
+    if ((start == TX_NULL) || (size == ((ULONG) 0)))
+    {
+        return(result);
+    }
+
+    stack_start =  (UBYTE *) start;
+    stack_end   =  stack_start + size - ((ULONG) 1);
+
+    Forbid();
+
+    thread    =  _tx_thread_created_ptr;
+    remaining =  _tx_thread_created_count;
+
+    while ((thread != TX_NULL) && (remaining != ((ULONG) 0)))
+    {
+        UBYTE   *other_start =  (UBYTE *) thread -> tx_thread_stack_start;
+        UBYTE   *other_end   =  (UBYTE *) thread -> tx_thread_stack_end;
+
+        if (((stack_start >= other_start) && (stack_start < other_end)) ||
+            ((stack_end   >= other_start) && (stack_end   < other_end)))
+        {
+            result =  (UINT) TX_TRUE;
+            break;
+        }
+
+        thread =  thread -> tx_thread_created_next;
+        remaining--;
+    }
+
+    Permit();
+
+    return(result);
+}
