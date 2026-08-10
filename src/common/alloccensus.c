@@ -135,6 +135,7 @@ VOID ami_census_drop(APTR ptr)
 {
     ULONG i;
     ULONG j;
+    ULONG n;
 
     if (ptr == NULL)
         return;
@@ -160,18 +161,23 @@ VOID ami_census_drop(APTR ptr)
     /*
      * Close the hole.  Everything after it in this probe run has to be lifted
      * back, or a lookup that walks to the first empty slot stops short of it.
+     *
+     * Bounded by the table size as well as by the first empty slot: on a table
+     * with no empty slot at all the walk would have nothing to stop it, and an
+     * instrument that can hang the machine it is instrumenting is worse than
+     * no instrument.
      */
     j = (i + 1) & CENSUS_MASK;
-    while (census_slot[j].cs_Ptr != NULL)
+    for (n = 0; n < (ULONG)CENSUS_SLOTS && census_slot[j].cs_Ptr != NULL; n++)
     {
         CensusSlot moved = census_slot[j];
         ULONG      k;
-        ULONG      n;
+        ULONG      m;
 
         census_slot[j].cs_Ptr = NULL;
 
         k = census_hash(moved.cs_Ptr);
-        for (n = 0; n < (ULONG)CENSUS_SLOTS; n++)
+        for (m = 0; m < (ULONG)CENSUS_SLOTS; m++)
         {
             if (census_slot[k].cs_Ptr == NULL)
             {
