@@ -652,11 +652,8 @@ static VOID explain(LONG err, ULONG gateway)
             if (gateway != 0)
             {
                 ami_config_format_ip(gateway, addr, sizeof(addr));
-                tool_printf("  %s is not on any of this machine's own\n",
-                            (LONG)addr);
-            }
-            else
-            {
+                tool_printf("  %s is not on any of this machine's own "
+                            "networks.\n", (LONG)addr);
             }
             break;
 
@@ -678,10 +675,6 @@ static BOOL stack_has_ipv6(struct Library *base)
     }
 
     return (nr_answer.system.e.nss_Flags & NETSTATUS_SYS_IPV6) ? TRUE : FALSE;
-}
-
-static VOID explain_no_ipv6(VOID)
-{
 }
 
 #ifndef TOOL_DELETE
@@ -872,13 +865,8 @@ static VOID explain6(LONG err, const char *gateway_text)
 
         case ROUTE_EINVAL:
             if (gateway_text != NULL)
-            {
-                tool_printf("  %s is not on any network this machine has an\n",
-                            (LONG)gateway_text);
-            }
-            else
-            {
-            }
+                tool_printf("  %s is not on any network this machine has an "
+                            "interface on.\n", (LONG)gateway_text);
             break;
 
         default:
@@ -939,7 +927,6 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
     if (!stack_has_ipv6(base))
     {
         tool_error("the running stack has no IPv6");
-        explain_no_ipv6();
         tool_netstatus_close(base);
         return RETURN_FAIL;
     }
@@ -1535,13 +1522,10 @@ static int addnetroute_main(int argc, char **argv)
     {
         tool_error("the route to %s was not added", (LONG)text);
 
-        if (err == 0 && find_route(base, dest, NULL) >= 0)
-        {
-        }
-        else
-        {
+        /* A refusal with no error number, and the route already there, is the
+           table saying so; anything else needs explain(). */
+        if (err != 0 || find_route(base, dest, NULL) < 0)
             explain(err, gateway);
-        }
 
         tool_netstatus_close(base);
         FreeArgs(rda);

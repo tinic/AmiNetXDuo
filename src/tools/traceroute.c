@@ -563,11 +563,6 @@ int main(int argc, char **argv)
         tool_error("cannot open a raw socket: %s",
                    (LONG)tool_sock_errstr(err));
 
-        if (err == TOOL_EPROTONOSUPPORT || err == TOOL_ESOCKTNOSUPPORT ||
-            err == TOOL_EOPNOTSUPP || err == TOOL_EAFNOSUPPORT)
-        {
-        }
-
         CloseLibrary(sb);
         FreeArgs(rda);
         return RETURN_FAIL;

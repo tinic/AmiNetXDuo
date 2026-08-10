@@ -304,16 +304,14 @@ static BOOL type_already_shown(UWORD upto, const char *type)
  * started per type. They are collected from the instances as well as from the
  * bare rows, for the reason type_already_shown() gives.
  *
- * Returns how many were taken; *capped says the network offered more than
- * SVC_TYPES_MAX and the rest were left alone.
+ * Returns how many were taken; a network offering more than SVC_TYPES_MAX
+ * leaves the rest alone.
  */
-static UWORD collect_types(UWORD count, BOOL *capped)
+static UWORD collect_types(UWORD count)
 {
     UWORD taken = 0;
     UWORD i;
     UWORD j;
-
-    *capped = FALSE;
 
     for (i = 0; i < count; i++)
     {
@@ -336,10 +334,7 @@ static UWORD collect_types(UWORD count, BOOL *capped)
             continue;
 
         if (taken == (UWORD)SVC_TYPES_MAX)
-        {
-            *capped = TRUE;
             break;
-        }
 
         for (j = 0; j + 1 < (UWORD)NETSTATUS_SVC_TYPE_LEN && type[j] != '\0';
              j++)
@@ -492,7 +487,6 @@ int main(int argc, char **argv)
     BOOL              want_txt;
     BOOL              quiet;
     BOOL              all;
-    BOOL              capped  = FALSE;
     BOOL              broke   = FALSE;
     LONG              err     = 0;
     LONG              count;
@@ -621,7 +615,7 @@ int main(int argc, char **argv)
     {
         browse_stop(base, NULL);
 
-        ntypes = collect_types((UWORD)count, &capped);
+        ntypes = collect_types((UWORD)count);
 
         for (i = 0; i < ntypes; i++)
             (VOID)browse_start(base, svc_types[i], NULL);
@@ -712,36 +706,10 @@ int main(int argc, char **argv)
             tool_printf("Nothing answered in %lu second%s.\n",
                         (LONG)seconds, (LONG)plural(seconds));
 
-        if (!quiet)
-        {
-
-            if (type != NULL)
-            {
-            }
-            else if (all && ntypes != 0)
-            {
-            }
-        }
-
         rc = RETURN_WARN;
     }
     else if (!quiet)
     {
-        /*
-         * Said every time, not only when the list looks short. mDNS has no
-         * complete answer to give and a list that did not say so would be read
-         * as one.
-         *
-         * "heard recently" rather than "answered just now": the collect walks
-         * the whole peer cache, so a second browse inside the TTL still lists a
-         * machine that did not answer it. Claiming the window would be true
-         * only on a cold cache.
-         */
-
-        if (type == NULL && !all)
-        {
-        }
-
         /*
          * A type the meta-query turned up and no instance answered for. The
          * machine behind it did not reply inside the window, so naming the
@@ -768,15 +736,12 @@ int main(int argc, char **argv)
 
             if (!first)
                 tool_printf("\n");
-
-            if (capped)
-            {
-            }
         }
 
+        /* SVC_MAX is what the library was asked for; nsh_Available is what it
+           had. Saying nothing here would present a cut list as the whole one. */
         if (svc_answer.hdr.nsh_Available > svc_answer.hdr.nsh_Count)
-        {
-        }
+            tool_printf("More answered than are shown here.\n");
     }
 
     if (broke)

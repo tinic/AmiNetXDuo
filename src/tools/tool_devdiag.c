@@ -297,23 +297,20 @@ VOID tool_explain_device(const char *device, ULONG unit)
 VOID tool_explain_no_interfaces(VOID)
 {
     ULONG n;
+    ULONG i;
 
+    /* On a machine with no drivers this is the only line printed. Without it
+       ShowNetStatus put its "What to look at" heading over nothing at all. */
+    tool_printf("  No network interfaces are configured in "
+                "DEVS:NetInterfaces.\n");
 
     n = tool_scan_devices();
 
-    if (n > 0)
+    for (i = 0; i < n; i++)
     {
-        ULONG i;
+        const ToolDevice *dev = tool_scan_device(i);
 
-        for (i = 0; i < n; i++)
-        {
-            const ToolDevice *dev = tool_scan_device(i);
-
-            tool_printf("      %-24s (%s)\n", (LONG)dev->name, (LONG)dev->where);
-        }
-    }
-    else
-    {
+        tool_printf("      %-24s (%s)\n", (LONG)dev->name, (LONG)dev->where);
     }
 }
 
