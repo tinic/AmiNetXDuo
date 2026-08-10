@@ -116,6 +116,32 @@ jobs:
         if: env.AMINETXDUO_A2065 != ''
         run: tests/tools/run-addifup.sh -b build/ci/default
 
+      # The commands that change the machine's network configuration, each
+      # over its own whole surface: the interface switched down and up and
+      # asserted with a ping in every state, the configuration file written
+      # and read back off the drive, the mDNS browse and its window. All four
+      # are SLIRP, so they need the driver and no peer, and none takes longer
+      # than half a minute.
+      #
+      # RemoveNetInterface shipped in 0.20.0 broken in the one thing its own
+      # header promised, because a compile was all that ever ran over it.
+      # These are here so the same cannot happen quietly again.
+      - name: RemoveNetInterface frees its slot
+        if: env.AMINETXDUO_A2065 != ''
+        run: tests/tools/run-ifremove.sh -b build/ci/default
+
+      - name: Online and Offline
+        if: env.AMINETXDUO_A2065 != ''
+        run: tests/tools/run-onoff.sh -b build/ci/default
+
+      - name: NetSetup writes a usable configuration
+        if: env.AMINETXDUO_A2065 != ''
+        run: tests/tools/run-netsetup.sh -b build/ci/default
+
+      - name: ShowNetServices and its window
+        if: env.AMINETXDUO_A2065 != ''
+        run: tests/tools/run-shownetservices.sh -b build/ci/default
+
       # A TLS 1.3 handshake end to end, against a peer that will not fall
       # back to 1.2, on both tiers -- and the second one is not redundant.
       # A 68020 takes the hand-written limb primitives in c68k_prim.S; a
