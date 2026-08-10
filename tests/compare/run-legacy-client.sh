@@ -10,7 +10,7 @@
 #   -a DIR   extracted AmiSSL-v5-OS3 AmiSSL/ directory
 #   -P PORT  base port for tests/peer/httppeer.py (default 7600)
 #   -B N     bulk transfer size in bytes (default 307200)
-#   -T TAG   run tag; results land in build/testhd-<tag>/
+#   -T TAG   run tag; results land in build/amiberry-testhd-<tag>/
 #   -t SECS  timeout
 #   -m MODEL emulator profile (default A1200, the only timing profile)
 #   -E       run under Enforcer instead of plain FS-UAE (68030, no timings)
@@ -303,7 +303,7 @@ PEER_PID=""
 if [ "$WINUAE" = "1" ]; then
     HD="$ROOT/build/winuae-testhd-$TAG"
 else
-    HD="$ROOT/build/testhd-$TAG"
+    HD="$ROOT/build/amiberry-testhd-$TAG"
 fi
 
 echo

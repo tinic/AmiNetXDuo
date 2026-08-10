@@ -190,7 +190,7 @@ kill -0 "$PEER_PID" 2>/dev/null || {
 # ------------------------------------------------------------------- run ---
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-tcph}"
-HD="$ROOT/build/testhd-$AMINETXDUO_RUN_TAG"
+HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 SERIAL="$ROOT/build/serial-$AMINETXDUO_RUN_TAG.log"
 
 echo "==> booting $MODEL with the A2065 on SLIRP"

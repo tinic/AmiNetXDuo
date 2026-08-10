@@ -138,7 +138,7 @@ CPUARG=()
 # that one file.
 carry_sessions() {
     local tag="$1"
-    local src="$ROOT/build/testhd-$tag/devs/Internet/tlssessions"
+    local src="$ROOT/build/amiberry-testhd-$tag/devs/Internet/tlssessions"
 
     if [ -f "$src" ]; then
         cp "$src" "$STAGE/devs/Internet/tlssessions"

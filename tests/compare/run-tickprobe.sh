@@ -31,7 +31,7 @@
 #   -R DIR             Roadshow Workbench/ directory
 #   -m MODEL           emulator profile (default A1200, the only timing one)
 #   -t SECS            timeout (default 300)
-#   -T TAG             run tag; results land in build/testhd-<tag>/
+#   -T TAG             run tag; results land in build/amiberry-testhd-<tag>/
 #
 # SPDX-License-Identifier: MIT
 
@@ -145,7 +145,7 @@ set +e
 RC=$?
 set -e
 
-HD="$ROOT/build/testhd-$TAG"
+HD="$ROOT/build/amiberry-testhd-$TAG"
 OUT="$ROOT/build/tickprobe-$TAG.txt"
 
 if [ -f "$HD/tickprobe.txt" ]; then

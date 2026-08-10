@@ -242,7 +242,7 @@ fi
 # ------------------------------------------------------------------- run ---
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-${TAG}tools}"
-HD="$ROOT/build/testhd-$AMINETXDUO_RUN_TAG"
+HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 
 echo "==> $BUILD ($MODE) on $MODEL, A2065 on SLIRP, eth0 with ADDRESS6=fd00::10/64"
 set +e

@@ -148,7 +148,7 @@ set -e
 
 echo "---- stack under test ----"
 ident=$(grep -m1 "^# bsdsocket.library:" \
-        "$ROOT/build/testhd-$TAG/bsdsocktest.log" 2>/dev/null || true)
+        "$ROOT/build/amiberry-testhd-$TAG/bsdsocktest.log" 2>/dev/null || true)
 case "$ident" in
     *AmiNetXDuo*) echo "$ident  (ours)" ;;
     "")           echo "!! no stack identification in the TAP log" ;;
