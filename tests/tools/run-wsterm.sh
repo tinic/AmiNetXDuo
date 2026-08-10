@@ -188,8 +188,28 @@ BOOT_AT=0
 FORWARD=failed
 STARTED=$(date +%s)
 
+# The emulator's own log grows at roughly a megabyte a second and playhouse3
+# is shared; a five-minute run left 313 MB of it and filled the disk twice,
+# which reads as "cat: write error" and "unpack-objects failed" rather than as
+# anything about this feature.  Truncated in place while the run is going, and
+# what is kept is the tail, which is what a person reads when something went
+# wrong.  The backend assertion inside amiberry-run.sh has already read the
+# line it needs by the time the first poll happens.
+EMULOG="$ROOT/build/amiberry-$AMINETXDUO_RUN_TAG.log"
+EMULOG_MAX=${AMINETXDUO_WSTERM_LOGMAX:-33554432}
+
+trim_emulog() {
+    [ -f "$EMULOG" ] || return 0
+    local size
+    size=$(wc -c < "$EMULOG" 2>/dev/null || echo 0)
+    [ "$size" -gt "$EMULOG_MAX" ] || return 0
+    tail -c 4194304 "$EMULOG" > "$EMULOG.tail" 2>/dev/null || return 0
+    mv "$EMULOG.tail" "$EMULOG"
+}
+
 for _ in $(seq 1 "$BOOT_MAX"); do
     sleep 1
+    trim_emulog
     kill -0 "$RUNNER" 2>/dev/null || break
     code=$(curl -s -m 3 -o /dev/null -w '%{http_code}' \
            "http://127.0.0.1:${HOSTPORT}/" 2>/dev/null || true)
@@ -219,7 +239,13 @@ fi
 DRILL_AT=$(date +%s)
 set +e
 python3 "$ROOT/tests/tools/httpd-drill.py" --terminal 127.0.0.1 "$HOSTPORT" \
-    > "$ROOT/build/wsterm-drill.txt" 2>&1
+    > "$ROOT/build/wsterm-drill.txt" 2>&1 &
+DRILL=$!
+while kill -0 "$DRILL" 2>/dev/null; do
+    sleep 5
+    trim_emulog
+done
+wait "$DRILL"
 DRILL_RC=$?
 set -e
 DRILL_SECS=$(( $(date +%s) - DRILL_AT ))
@@ -242,11 +268,7 @@ fi
 echo "================================================================"
 echo
 
-# The emulator's own log is 195 MB for a five-minute run and playhouse3 is a
-# shared box that has been full.  Everything this script asserts on has been
-# read by now -- the backend, the boot, the guest's stdout -- so what is kept
-# is the tail, which is what a person reads when something went wrong.
-EMULOG="$ROOT/build/amiberry-$AMINETXDUO_RUN_TAG.log"
+# And the last of it, once nothing is writing any more.
 if [ -f "$EMULOG" ]; then
     tail -400 "$EMULOG" > "$EMULOG.tail" && mv "$EMULOG.tail" "$EMULOG"
 fi
