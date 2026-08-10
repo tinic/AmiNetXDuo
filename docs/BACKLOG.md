@@ -437,6 +437,36 @@ So the remaining step before this can ship is the drills deriving their window
 bounds from the build rather than hardcoding them. `sack`, `dsack`, `rxorder`,
 `dupack` and `retransmit` are all clean on the raised-ceiling build.
 
+### The receive path has no budget and no backpressure, 2026-08-10
+
+The symptom is that read throughput falls as the machine gets busier and each
+local fix moves the loss somewhere else. That failure has a name and a
+literature: receive livelock, Mogul and Ramakrishnan, USENIX 1996. Their result
+is that the four mitigations only work together, and that any one of them alone
+relocates the collapse. Measured against what this stack does:
+
+| their mitigation | here |
+|---|---|
+| poll on interrupt, interrupts off while polling | partly: the reader Task wakes on `ReplyMsg` and drains in a loop |
+| a quota per poll | absent, `ami_sana2_rx_drain()` (`sana2_rx.c`) pops every ready reply, so work per wake is unbounded |
+| drop early, finish what is already paid for | inverted: a frame is pinned to an NX_PACKET, copied and summed by the driver hook, and only then verified and possibly dropped |
+| feedback from protocol processing back to receive | absent, the reader reposts each CMD_READ whatever the IP thread's backlog is |
+
+The two absent rows are the ones to close, and the cheap early drop already
+exists: SANA-II drops a frame that has no CMD_READ outstanding, at the device,
+for nothing. Read depth is therefore already the throttle -- it is just fixed at
+startup from the pool size (`AMI_SANA2_RX_DEPTH_IPV4`, `sana2_internal.h`)
+rather than a function of how far behind protocol processing is.
+
+Related, on the acknowledgement side, where a tap over a real-latency path found
+270 of 270 retransmissions spurious: RFC 2883 DSACK ships and is drilled, which
+is what lets a sender learn a retransmission was unnecessary. RFC 3522 Eifel
+detection needs the timestamp echo, and RFC 1323 timestamps shipped in 0.20.0,
+so the prerequisite is now present. Whether NetX Duo implements RFC 4015, the
+response half that undoes the congestion window reduction, is unchecked; without
+it every spurious timeout halves a sender's window permanently. RFC 5682 F-RTO
+is the sender-side equivalent for a peer with no timestamps.
+
 ### Performance, measured positions
 
 **Tickless on "the timer wheel is empty" cannot fire.** Tried 2026-08-07,
