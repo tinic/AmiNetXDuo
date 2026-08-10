@@ -157,6 +157,7 @@ LONG  http_term_rc(VOID);
  */
 
 #include "httpws.h"
+#include "toolsock.h"
 
 /*
  * What a client may have typed that the Shell has not taken yet.  The socket
