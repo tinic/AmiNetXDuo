@@ -102,6 +102,11 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
      */
     slot->summed = FALSE;
 
+    /* The slot knows its reader and the reader knows the interface, which is
+       where a counter a user can read has to live. */
+    if (slot->owner != NULL && slot->owner->iface != NULL)
+        slot->owner->iface->stats.rx_copy_hook++;
+
     if ((((ALIGN_TYPE)slot->dst | (ALIGN_TYPE)from) & 1) == 0)
     {
         ULONG   words =  len >> 2;
@@ -137,6 +142,8 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
         }
 
         slot->summed = TRUE;
+        if (slot->owner != NULL && slot->owner->iface != NULL)
+            slot->owner->iface->stats.rx_copy_summed++;
         slot->copied = len;
 
         return TRUE;
