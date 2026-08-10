@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 #
-# THE REGRESSION TEST FOR "AddNetInterface failed and kept the machine's memory".
+# THE REGRESSION TEST FOR "AddNetInterface kept the machine's memory".
 #
 #   tests/tools/run-addifleak.sh [-t SECONDS] [-b BUILDDIR] [-n RUNS]
 #
 # WHAT IT PROVES
 #
-#   A failed AddNetInterface gives everything back.  The command runs several
-#   times against a card that is not going to work, and free memory after the
-#   last one has to match free memory after the first: whatever the failure
-#   costs, it has to cost it once and then stop.  AmigaOS reclaims nothing when
-#   a process exits, so anything the library allocated and did not hand back is
-#   gone until the machine is switched off.
+#   AddNetInterface gives everything back.  The command runs several times
+#   against a card that builds a stack and then does not bring the interface
+#   up, and free memory after the last run has to match free memory after the
+#   first: whatever the attempt costs, it has to cost it once and then stop.
+#   AmigaOS reclaims nothing when a process exits, so anything the library
+#   allocated and did not hand back is gone until the machine is switched off.
 #
 # THE MACHINE, AND WHY THIS ONE
 #
@@ -35,7 +35,8 @@
 #
 #   ToolsSmoke prints `rc N, free M` after every command (src/tools/toolssmoke.c).
 #   The first run pays for whatever a first open costs on this machine; the
-#   difference between the LAST two is the per-failure leak, and it has to be 0.
+#   difference between the LAST two is the per-invocation leak, and it has to
+#   be 0.  It was 2568 -- one cloned AmiSocketBase -- until 0.20.1.
 #
 #   The serial log is worth reading when this fails.  `pool = ` in it means the
 #   packet pool was created before the failure, so the stack was built and
@@ -122,7 +123,7 @@ mkdir -p "$STAGE/libs" "$STAGE/devs/NetInterfaces"
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 cp "$CNET"  "$STAGE/devs/cnet.device"
 cp "$ADDIF" "$STAGE/AddNetInterface"
-# STATE=down is what makes this test the RIGHT failure.
+# STATE=down is what makes this test reach the RIGHT state.
 #
 # The card works on this machine, so a plain configuration comes up and there
 # is no failure to measure. Configured down, the device still OPENS, the
@@ -198,14 +199,20 @@ if [ "${#FREE[@]}" -lt "$RUNS" ]; then
 fi
 pass "all $RUNS runs reported"
 
-# The command has to have FAILED; a leak test against a run that worked proves
-# nothing, and a card that unexpectedly comes up would do exactly that.
-# Without the fix, run 1 fails and runs 2 and 3 report SUCCESS: the stranded
-# stack is still standing, so the next OpenLibrary() finds it and hands back a
-# working base for a network that never came up. That is a sharper signal than
-# the memory arithmetic and needs no subtraction, so it is checked first.
-if grep -q 'rc 0,' "$REPORT"; then
-    fail "a run returned 0, a failed AddNetInterface left a stack running"
+# The run has to have got far enough to have something to leak. A card that
+# never opens allocates nothing, so the arithmetic below would read 0 whatever
+# the library does, and the test would pass on a broken build.
+#
+# `pool = ` in the serial log is that premise: the packet pool, and with it the
+# NX_IP and the ThreadX threads, were built before bring-up stopped. It is the
+# state that strands a stack, and it is what this file measures.
+#
+# The rc is NOT the premise. STATE=down returns 0 now, by design -- an
+# interface configured down is not a failed one -- while still taking the whole
+# allocation path. Asserting on the rc tested the wording of a decision, not
+# the state this test is about.
+if ! grep -q 'pool = ' "$SER" 2>/dev/null; then
+    fail "no packet pool was ever built, so nothing was allocated to leak"
 fi
 
 FIRST="${FREE[1]}"
@@ -222,12 +229,7 @@ echo
 if [ "$DELTA" -eq 0 ]; then
     pass "a failed AddNetInterface costs nothing the second time onward"
 else
-    fail "$PER bytes lost per failed AddNetInterface, and never returned"
-fi
-
-if grep -q 'pool = ' "$SER" 2>/dev/null; then
-    echo "  note: the packet pool was created before the failure, so the stack"
-    echo "        was built and then abandoned rather than never started."
+    fail "$PER bytes lost per AddNetInterface, and never returned"
 fi
 
 echo
