@@ -505,6 +505,27 @@ static BOOL iface_online(const ToolIfInfo *live)
     return live->link_up;
 }
 
+/*
+ * Whether a responder is actually running somewhere.  The system flag beside
+ * it only says the library was built with mDNS; MDNS= is per interface and
+ * defaults to off, so a stack with no interface asking for it has no name to
+ * report and is not in the middle of claiming one either.  Reading the system
+ * flag alone printed "still claiming a name" for ever on every machine that
+ * had simply not turned it on.
+ */
+static BOOL mdns_answering(const ToolSnapshot *snap)
+{
+    UWORD i;
+
+    for (i = 0; i < snap->iface_count; i++)
+    {
+        if (snap->iface[i].mdns)
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
 static VOID list_addresses6(const ToolSnapshot *snap, const ToolIfInfo *live)
 {
     UWORD i;
@@ -1229,7 +1250,7 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
          * Without it a user hands out the address instead, which DHCP will
          * change.
          */
-        if (have_live && snap.have_mdns)
+        if (have_live && snap.have_mdns && mdns_answering(&snap))
         {
             if (snap.mdns_name[0] != '\0')
                 tool_printf("Known here as:  %s (to other machines on this "

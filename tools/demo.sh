@@ -2,7 +2,8 @@
 #
 # A LIVE AMIGA ON THE LAN, IN ONE COMMAND.
 #
-#   tools/demo.sh [-b BUILDDIR] [-B BACKEND] [-m MODEL] [-p PORT] [-t SECONDS]
+#   tools/demo.sh [-b BUILDDIR] [-B BACKEND] [-m MODEL] [-n NAME] [-p PORT]
+#                 [-t SECONDS]
 #
 # Boots an emulated Amiga bridged onto the real network, running httpd with the
 # WebSocket terminal, and prints the address it leased.  For showing somebody
@@ -10,6 +11,11 @@
 #
 #   http://<address>/           the Public drawer, WebDAV-writable
 #   http://<address>/terminal   an AmigaDOS Shell in a browser, NO PASSWORD
+#   http://amiga.local/         the same machine by name, -n renames it
+#
+# The interface is staged with MDNS=YES and the drive with a hostname, because
+# neither is a default: a demo reached only by its DHCP lease is one somebody
+# has to be told the address of again tomorrow.
 #
 # WHY BRIDGED AND NOT SLIRP
 #
@@ -36,15 +42,18 @@ BACKEND="${AMINETXDUO_DEMO_BACKEND:-ens18}"
 MODEL=A1200
 PORT=80
 WINDOW=28800
+NAME="${AMINETXDUO_DEMO_NAME:-amiga}"
 
-while getopts "b:B:m:p:t:" opt; do
+while getopts "b:B:m:n:p:t:" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         B) BACKEND="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
+        n) NAME="$OPTARG" ;;
         p) PORT="$OPTARG" ;;
         t) WINDOW="$OPTARG" ;;
-        *) echo "usage: $0 [-b builddir] [-B backend] [-m model] [-p port] [-t seconds]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-b builddir] [-B backend] [-m model] [-n name]" \
+                "[-p port] [-t seconds]" >&2; exit 2 ;;
     esac
 done
 
@@ -82,11 +91,21 @@ mkdir -p "$STAGE/devs/Internet"
     cp "$ROOT/third_party/cacert/cacert.pem" "$STAGE/devs/Internet/certificates"
 cp "$PAGE"  "$STAGE/terminal.html"
 
+# MDNS=YES so the machine is reachable by name.  A demo whose address is a
+# DHCP lease is a demo somebody has to be told the address of again tomorrow.
+# MDNS= is per interface and defaults to off, so this line is the whole of
+# turning it on.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
 DEVICE=a2065.device
 UNIT=0
 CONFIGURE=DHCP
+MDNS=YES
 EOF
+
+# And a name to answer to.  The staged name_resolution has none, so without
+# this the responder claims whatever DHCP or the interface ID produced and the
+# address printed below is the only way anyone reaches it.
+echo "hostname $NAME" >> "$STAGE/devs/Internet/name_resolution"
 
 echo "Hello from an Amiga." > "$STAGE/Public/readme.txt"
 echo "<html><body><h1>Amiga</h1><p>httpd is serving this drawer.</p></body></html>" > "$STAGE/Public/index.html"
@@ -132,10 +151,19 @@ if [ -z "$ADDR" ]; then
     exit 1
 fi
 
+# -p left the address right and the URL wrong until 2026-08-10: a demo on any
+# port but 80 printed one nothing answers on.
+HOSTPART="$ADDR"
+[ "$PORT" = 80 ] || HOSTPART="$ADDR:$PORT"
+NAMEPART="$NAME.local"
+[ "$PORT" = 80 ] || NAMEPART="$NAME.local:$PORT"
+
 cat <<EOF
 
-  the drawer    http://$ADDR/
-  the terminal  http://$ADDR/terminal      no password, anyone who can reach it
+  the drawer    http://$HOSTPART/
+  the terminal  http://$HOSTPART/terminal      no password, anyone who can reach it
+
+  by name       http://$NAMEPART/terminal      mDNS, once the responder has claimed it
 
   emulator pid $RUNNER, log $EMU
 EOF
