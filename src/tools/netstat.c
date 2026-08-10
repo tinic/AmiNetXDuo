@@ -321,6 +321,21 @@ static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
                     st->unknown_types, st->reconfigurations);
         tool_printf("  buffer failures   %10lu\n", st->alloc_failures);
 
+        /* A card whose driver never calls the copy hook has its frames walked
+           a second time for a checksum the copy could have produced. */
+        if (st->packets_received != 0)
+            tool_printf("  copy hook         %10lu    summed while copying %7lu\n",
+                        st->rx_copy_hook, st->rx_copy_summed);
+
+        /* Only when there are any: the four causes behind receive errors are
+           nothing alike, and the total on its own has twice sent someone
+           building a probe to find out which one it was. */
+        if (st->rx_errors != 0)
+            tool_printf("  of the receive errors: %lu checksum, %lu runt, "
+                        "%lu length, %lu device\n",
+                        st->rx_err_verify, st->rx_err_runt,
+                        st->rx_err_length, st->rx_err_io);
+
         if (st->packets_received == 0 && st->packets_sent == 0)
         {
             tool_printf("  Nothing has gone in or out of this interface at all.\n");

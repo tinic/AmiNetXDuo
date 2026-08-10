@@ -77,7 +77,7 @@ extern "C" {
  * a caller that agrees on the version agrees on the record, so a matched caller
  * never meets it. It is there for the arrival that agreed on nothing.
  */
-#define AMI_NETSTATUS_VERSION       6
+#define AMI_NETSTATUS_VERSION       7
 
 /* Fixed widths every record shares.  Up here rather than beside the first
    record that uses one, because NetStatusSystem needs NETSTATUS_NAME_LEN and
@@ -260,6 +260,14 @@ typedef struct NetStatusInterface
     ULONG   nsi_TxErrors;
     ULONG   nsi_RxErrors;
     ULONG   nsi_AllocFailures;
+    /* The four causes behind nsi_RxErrors, which sum to it. */
+    ULONG   nsi_RxErrRunt;
+    ULONG   nsi_RxErrVerify;
+    ULONG   nsi_RxErrLength;
+    ULONG   nsi_RxErrIo;
+    /* Whether the driver uses our copy hook, and whether it could sum. */
+    ULONG   nsi_RxCopyHook;
+    ULONG   nsi_RxCopySummed;
 } NetStatusInterface;
 
 /* ----------------------------------------------- NETSTATUS_ADDRESSES6 --- */

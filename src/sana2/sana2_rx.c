@@ -431,6 +431,7 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
     {
         nx_packet_release(packet);
         iface->stats.rx_errors++;
+        iface->stats.rx_err_runt++;
         return;
     }
 
@@ -477,6 +478,7 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
 #endif
                 nx_packet_release(packet);
                 iface->stats.rx_errors++;
+                iface->stats.rx_err_verify++;
                 return;
             }
 
@@ -546,6 +548,13 @@ static VOID ami_sana2_rx_arm(AmiSana2If *iface, AmiRxSlot *slot)
 
     slot->capacity = (ULONG)(packet->nx_packet_data_end - slot->dst);
     slot->copied   = 0;
+    /* And the sum with it.  ami_sana2_copy_to_buff() clears this on entry and
+       sets it only on the aligned path, so a driver that never calls the copy
+       hook -- it is optional in SANA-II, a device may hand the frame over
+       another way -- would otherwise leave the previous frame's verdict here
+       and have ami_sana2_rx_deliver() verify these bytes against that frame's
+       accumulator. */
+    slot->summed   = FALSE;
 }
 
 /* Post every idle slot that has, or can get, a packet. Returns how many reads
@@ -632,6 +641,7 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
     {
         /* Keep the packet: rearming is cheaper than a pool round trip. */
         iface->stats.rx_errors++;
+        iface->stats.rx_err_length++;
         return;
     }
 
@@ -793,6 +803,7 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
         else
         {
             rx->iface->stats.rx_errors++;
+            rx->iface->stats.rx_err_io++;
         }
     }
 }
