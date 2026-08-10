@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.20.0
+
 - Bringing the network up takes 2.5 seconds where it took 8, measured to the point where both an IPv4 and a global IPv6 address are usable rather than to the point where the command returns. IPv6 is now configured before the wait for a lease rather than after it, so the DHCP exchange and the IPv6 work overlap instead of running one after the other, and a boot pays for the longer of the two
 - A DHCP lease is taken as soon as the server acknowledges it, and the RFC 5227 probes for a duplicate run alongside it rather than in front of it. The same frames go out; an address in use elsewhere is now found seconds into use rather than ahead of it, and is still declined
 - Duplicate address detection sends one solicitation per address instead of three, which is the default RFC 4862 itself gives
@@ -17,6 +19,9 @@ version at the top when it merges.
 - Waiting for an address waits on the notification the stack already had instead of looking fifty times a second. A wait for a DHCP server that never answers cost 1,500 passes over every interface, each one contending with the threads it was waiting for
 - `RemoveNetInterface` takes a single interface out of the running network, closing its SANA-II device so the hardware is free and releasing its configuration slot so the same name can be added again. An interface still carrying TCP connections is refused unless `FORCE` is given
 - The commands that list interfaces no longer read past the end of their own table when the library reports more interfaces than they have room for, which a half-installed pair of library and command could do
+- TCP carries the RFC 1323 timestamps option. Round trip times are now measured from the timestamp the other end echoes rather than inferred from which segment an acknowledgement covers, so a retransmitted segment still yields a sample and the retransmission timeout follows the real path instead of drifting; PAWS rejects a segment whose timestamp has gone backwards. It costs the write direction about 5%, which buys the read direction nothing and loses it nothing, and reads are what a file transfer spends its time on
+- TCP offers the RFC 1323 window scale option, so a receive window is no longer capped at the 65535 the field holds. On a local network this changes nothing measurable, because the window was never what limited a transfer there; it is the long or fast path, where a window that small cannot keep the wire busy, that this is for
+- A connection that negotiates window scaling now also carries the timestamp and selective-acknowledgement options it agreed to. The scale option ended in a byte that reads as end-of-option-list, so anything written after it was invisible to the other end
 
 ## 0.19.1
 
