@@ -14,6 +14,10 @@ version at the top when it merges.
 - An interface added back after a removal can transmit. Its reader threads were being given memory the library had already registered elsewhere, which ThreadX refused, leaving the interface attached and addressed with its link down
 - A program can add an interface through the library, `NETCTRL_INTERFACE_ADD` alongside the existing remove
 - The commands that read the network's state say "network not started" once rather than twice
+- `ShowNetStatus` on a machine with no interfaces configured and no drivers installed said what to look at and then listed nothing, which is the machine that heading is for
+- `AddNetInterface` says when `LIBS:bsdsocket.library` is missing rather than only that the network would not start
+- `ShowNetServices` says when more services answered than it had room to show, and `fetch` on a 68000 says there is no `tls.library` for one rather than that none is installed
+- `AddNetRoute` finishes two sentences that stopped mid-clause
 - TCP acknowledges by how much data is outstanding rather than by counting segments, with the threshold taken from the receive buffer and ramped up from two full segments as a connection opens. On a 68020 with a PIO card that is 387 fewer acknowledgements for every megabyte read, each one a frame the processor built, the driver sent and the other end handled; reads there are 24% faster than 0.20.0 and now ahead of Roadshow. A small machine is unaffected either way, because free memory sizes the window there long before this does
 - A receive window that had drained less than it had filled was advertised as though four gigabytes had come free, on every such read. That is most reads on a machine slower than the other end
 
