@@ -393,13 +393,34 @@ LONG tool_sock_close(struct Library *base, LONG s)
 LONG tool_sock_select(struct Library *base, LONG nfds, ToolFdSet *readfds,
                       ToolFdSet *writefds, ToolTimeval *tv)
 {
+    return tool_sock_select_sigs(base, nfds, readfds, writefds, tv, NULL);
+}
+
+/*
+ * The same vector with WaitSelect()'s signal mask, which is what the ABI has
+ * always taken in d1 and what tool_sock_select() passes NULL for.
+ *
+ * A caller that has to watch a MsgPort as well as its sockets needs this and
+ * nothing else does: WaitSelect() knows nothing about DOS handles, so the
+ * port's signal has to go into the same wait or the two are polled against
+ * each other.  src/tools/httpd.c waits on the terminal's pipe this way.
+ *
+ * The mask is in and out: on return it holds the signals that were received,
+ * and those have been CLEARED from the task.  So a caller may pass only the
+ * signals it is prepared to consume -- SIGBREAKF_CTRL_C is deliberately not
+ * among httpd's, because tool_break() is what reads that one.
+ */
+LONG tool_sock_select_sigs(struct Library *base, LONG nfds, ToolFdSet *readfds,
+                           ToolFdSet *writefds, ToolTimeval *tv,
+                           ULONG *sigmask)
+{
     register struct Library *a6  __asm("a6") = base;
     register LONG            d0  __asm("d0") = nfds;
     register APTR            a0  __asm("a0") = (APTR)readfds;
     register APTR            a1  __asm("a1") = (APTR)writefds;
     register APTR            a2  __asm("a2") = NULL;
     register APTR            a3  __asm("a3") = (APTR)tv;
-    register ULONG          *d1  __asm("d1") = NULL;
+    register ULONG          *d1  __asm("d1") = sigmask;
     register LONG            res __asm("d0");
     register LONG _clob_d1 __asm("d1");
     register LONG _clob_a0 __asm("a0");

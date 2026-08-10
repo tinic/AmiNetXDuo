@@ -1,0 +1,708 @@
+/*
+ * httpterm, an AmigaDOS Shell on the other end of a pipe.  See httpterm.h for
+ * what this is, why it needs a second Process, and why anyone who can reach
+ * the port gets a shell.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "httpterm.h"
+
+#include <dos/dostags.h>
+#include <dos/dosasl.h>
+
+/*
+ * The rings.
+ *
+ * The Shell's output is the bigger of the two because a command's answer
+ * arrives faster than a LAN takes it away -- `list` of a full drawer is
+ * kilobytes in one go -- and a ring smaller than one Write() turns it into
+ * several packet round trips.  Typing is the other way round: a person
+ * produces bytes far slower than anything drains them, and a whole pasted
+ * line is still under a kilobyte.
+ *
+ * Neither is a limit on what can pass, only on what may be in flight.  A full
+ * ring parks the Shell's ACTION_WRITE rather than dropping it, which is the
+ * back pressure that stops a runaway command from costing memory: `type
+ * S:Startup-Sequence` on a link that is not draining stops the command, not
+ * the server.
+ */
+#define TERM_OUT_BUF    4096UL
+#define TERM_IN_BUF     1024UL
+
+/*
+ * 64 KB for the runner, and see httpterm.h for why that is a floor and not a
+ * measurement of what it does today.
+ *
+ * 256 KB for the Shell, which is the number the archived branch gave a spawned
+ * command and the number install/Install-AmiNetXDuo already gives ssh.  It is
+ * the Shell's stack AND every command run from it, so it is sized for the
+ * deepest of them rather than for `Echo`.
+ */
+#define TERM_RUNNER_STACK   (64UL * 1024UL)
+#define TERM_SHELL_STACK    (256UL * 1024UL)
+
+/* How long http_term_shutdown() will wait for a Shell to notice end of file.
+   Ten seconds is far longer than the exit path takes and short enough that a
+   Ctrl-C on the server does not look like a hang.  See where it is used for
+   what happens when it runs out, which is deliberately not "free it anyway". */
+#define TERM_STOP_TICKS     500     /* of 1/50 s                            */
+
+/* ------------------------------------------------------------- the rings --- */
+
+typedef struct TermPipe
+{
+    UBYTE            *buf;
+    ULONG             size;
+    ULONG             count;
+    ULONG             rd;
+    ULONG             wr;
+
+    struct DosPacket *held;         /* one this pipe cannot answer yet      */
+
+    UBYTE             dosread;      /* the Shell reads it (its stdin)       */
+    UBYTE             doswrite;     /* the Shell writes it (its stdout)     */
+    UBYTE             dosend;       /* ACTION_END has arrived on it         */
+    UBYTE             closed;       /* this side is finished with it        */
+} TermPipe;
+
+static TermPipe term_in;            /* what the person types                */
+static TermPipe term_out;           /* what the Shell prints                */
+
+static ULONG ring_used(const TermPipe *p) { return p->count; }
+static ULONG ring_free(const TermPipe *p) { return p->size - p->count; }
+
+static ULONG ring_put(TermPipe *p, const UBYTE *src, ULONG n)
+{
+    ULONG done = 0;
+
+    if (n > ring_free(p))
+        n = ring_free(p);
+
+    while (done < n)
+    {
+        ULONG run = p->size - p->wr;
+
+        if (run > n - done)
+            run = n - done;
+
+        CopyMem((APTR)(src + done), p->buf + p->wr, run);
+        p->wr = (p->wr + run) % p->size;
+        done += run;
+    }
+    p->count += done;
+
+    return done;
+}
+
+static ULONG ring_get(TermPipe *p, UBYTE *dst, ULONG n)
+{
+    ULONG done = 0;
+
+    if (n > ring_used(p))
+        n = ring_used(p);
+
+    while (done < n)
+    {
+        ULONG run = p->size - p->rd;
+
+        if (run > n - done)
+            run = n - done;
+
+        CopyMem(p->buf + p->rd, (APTR)(dst + done), run);
+        p->rd = (p->rd + run) % p->size;
+        done += run;
+    }
+    p->count -= done;
+
+    return done;
+}
+
+/*
+ * The record is handed over through the child's tc_UserData with SIGF_SINGLE
+ * as the handshake, because the child starts running the moment
+ * CreateNewProc() returns and a plain global would race it.  The child waits
+ * before it looks.
+ *
+ * Static rather than allocated: nothing is ever freed while the runner might
+ * still be reading it, and a record that cannot be freed is one that should
+ * not have been taken from the heap.  The archived branch allocated one per
+ * command and missing the free cost 576 bytes a command.
+ */
+typedef struct
+{
+    struct Task  *rn_Parent;
+    BPTR          rn_In;            /* the Shell's stdin                    */
+    BPTR          rn_Out;           /* the Shell's stdout                   */
+    LONG          rn_Rc;
+    volatile LONG rn_Done;
+} TermRunner;
+
+static TermRunner term_runner;
+static UBYTE      term_active;      /* a Shell has been started             */
+static UBYTE      term_reaped;      /* and its exit code has been collected */
+static LONG       term_rc = -1;
+
+/* The Shell's own process name, so http_term_break() can find it.  System()
+   passes NP_ tags it does not recognise straight to CreateNewProc(), which is
+   what makes the Shell findable at all. */
+static const char term_shell_name[] = "httpd terminal";
+
+/* ---------------------------------------------------------- the DOS side --- */
+
+static struct MsgPort *term_port;
+
+/*
+ * The index a FileHandle carries in fh_Arg1, so a packet can be routed back to
+ * one of the two pipes.  There is one port for both, which is all that is
+ * needed here: only READ, WRITE and END carry fh_Arg1 at all, and nothing else
+ * this answers needs to know which handle it was asked about.
+ * src/bsdsocket/tcp_handler.c gives a port to each of its sessions because its
+ * other packets do.
+ */
+#define TERM_ID_IN      1
+#define TERM_ID_OUT     2
+
+static TermPipe *term_pipe_of(LONG id)
+{
+    if (id == TERM_ID_IN)  return &term_in;
+    if (id == TERM_ID_OUT) return &term_out;
+    return NULL;
+}
+
+/*
+ * Reply a packet.  Not ReplyPkt(): dp_Port has to name the port the packet
+ * comes back to us on, which is ours, and ReplyPkt() stamps it with the
+ * current process's pr_MsgPort.  The same reason tcp_handler.c has its own.
+ */
+static VOID term_reply(struct DosPacket *pkt, LONG res1, LONG res2)
+{
+    struct MsgPort *reply = pkt->dp_Port;
+
+    pkt->dp_Res1 = res1;
+    pkt->dp_Res2 = res2;
+    pkt->dp_Port = term_port;
+    PutMsg(reply, pkt->dp_Link);
+}
+
+/* Try to answer whatever this pipe has parked.  Called after either side
+   moves bytes or closes, and from the service loop. */
+static VOID term_retry(TermPipe *p)
+{
+    struct DosPacket *pkt = p->held;
+    LONG              n;
+
+    if (pkt == NULL)
+        return;
+
+    if (pkt->dp_Type == ACTION_READ)
+    {
+        if (ring_used(p) > 0UL)
+        {
+            n = (LONG)ring_get(p, (UBYTE *)pkt->dp_Arg2, (ULONG)pkt->dp_Arg3);
+        }
+        else if (p->closed)
+        {
+            n = 0;                  /* end of file: the person stopped      */
+        }
+        else
+        {
+            return;                 /* still nothing; keep waiting          */
+        }
+    }
+    else                            /* ACTION_WRITE                         */
+    {
+        if (ring_free(p) > 0UL)
+        {
+            n = (LONG)ring_put(p, (const UBYTE *)pkt->dp_Arg2,
+                               (ULONG)pkt->dp_Arg3);
+        }
+        else if (p->closed)
+        {
+            /* Nobody will ever read it.  -1 with a real error, so a command
+               writing into a channel that has gone fails rather than looping
+               on a short write for ever. */
+            p->held = NULL;
+            term_reply(pkt, -1, ERROR_INVALID_LOCK);
+            return;
+        }
+        else
+        {
+            return;
+        }
+    }
+
+    p->held = NULL;
+    term_reply(pkt, n, 0);
+}
+
+VOID http_term_service(VOID)
+{
+    struct Message *msg;
+
+    if (term_port == NULL)
+        return;
+
+    /*
+     * Notice a Shell that has gone, before the packets are looked at.  This is
+     * the only place a session is reaped, and it is here rather than in
+     * http_term_stop() because a session usually ends the other way round: the
+     * person types EndCLI, the runner publishes its return code some passes of
+     * the event loop later, and nothing would ask again.
+     *
+     * The runner reads nothing after rn_Done, so past this point the record is
+     * ours and a new session may take it.
+     */
+    if (term_active && term_runner.rn_Done != 0 && !term_reaped)
+    {
+        term_rc     = term_runner.rn_Rc;
+        term_reaped = 1;
+
+        /* Not `term_active = 0` yet: output the Shell wrote before it exited
+           is still in the ring and is the answer to the last command.
+           http_term_running() is what tells the two apart. */
+    }
+
+    if (term_active && term_reaped && ring_used(&term_out) == 0UL)
+        term_active = 0;
+
+    while ((msg = GetMsg(term_port)) != NULL)
+    {
+        struct DosPacket *pkt = (struct DosPacket *)msg->mn_Node.ln_Name;
+        TermPipe         *p;
+
+        switch (pkt->dp_Type)
+        {
+            case ACTION_READ:
+            case ACTION_WRITE:
+            case ACTION_END:
+                break;
+
+            /*
+             * A pipe is not a filesystem, and dos.library's IsInteractive()
+             * asks exactly this: a handler that says it is NOT a filesystem is
+             * an interactive stream.  That answer is what makes the Shell on
+             * the far end print a prompt, so it is the difference between a
+             * terminal and a batch script reader.
+             */
+            case ACTION_IS_FILESYSTEM:
+                term_reply(pkt, DOSFALSE, 0);
+                continue;
+
+            case ACTION_SEEK:
+                term_reply(pkt, -1, ERROR_SEEK_ERROR);
+                continue;
+
+            /* One port serves both handles, so this cannot say WHICH one is
+               being asked about.  "No character waiting" makes the caller come
+               back with a Read(), which is answered properly. */
+            case ACTION_WAIT_CHAR:
+                term_reply(pkt, DOSFALSE, 0);
+                continue;
+
+            case ACTION_FLUSH:
+            case ACTION_SET_FILE_SIZE:
+                term_reply(pkt, DOSTRUE, 0);
+                continue;
+
+            default:
+                term_reply(pkt, DOSFALSE, ERROR_ACTION_NOT_KNOWN);
+                continue;
+        }
+
+        p = term_pipe_of(pkt->dp_Arg1);
+        if (p == NULL)
+        {
+            term_reply(pkt, DOSFALSE, ERROR_INVALID_LOCK);
+            continue;
+        }
+
+        switch (pkt->dp_Type)
+        {
+            case ACTION_READ:
+            case ACTION_WRITE:
+                /* One held packet per pipe is enough: the Shell is one
+                   process and is inside one Read() at a time.  A second is a
+                   protocol error on its side and is refused rather than
+                   overwriting the first. */
+                if (p->held != NULL)
+                {
+                    term_reply(pkt, -1, ERROR_OBJECT_IN_USE);
+                    break;
+                }
+                p->held = pkt;
+                term_retry(p);
+                break;
+
+            case ACTION_END:
+                p->dosend = 1;
+                if (p->held != NULL)
+                {
+                    struct DosPacket *held = p->held;
+
+                    p->held = NULL;
+                    term_reply(held, -1, ERROR_INVALID_LOCK);
+                }
+                term_reply(pkt, DOSTRUE, 0);
+                break;
+
+            default:                /* unreachable: filtered above          */
+                term_reply(pkt, DOSFALSE, ERROR_ACTION_NOT_KNOWN);
+                break;
+        }
+    }
+}
+
+ULONG http_term_sigmask(VOID)
+{
+    if (term_port == NULL)
+        return 0;
+
+    return 1UL << (ULONG)term_port->mp_SigBit;
+}
+
+/*
+ * A DOS file handle on one end of a pipe.  fh_Arg1 is the pipe's id and
+ * fh_Type this process's port, which is all http_term_service() needs to route
+ * a packet.  DOS frees the handle when it is closed, so this must not free it.
+ */
+static BPTR term_handle(TermPipe *p, LONG id, BOOL shell_reads)
+{
+    struct FileHandle *fh;
+
+    if (term_port == NULL)
+        return (BPTR)0;
+
+    fh = (struct FileHandle *)AllocDosObject(DOS_FILEHANDLE, NULL);
+    if (fh == NULL)
+        return (BPTR)0;
+
+    fh->fh_Type = term_port;
+    fh->fh_Arg1 = id;
+
+    if (shell_reads)
+        p->dosread = 1;
+    else
+        p->doswrite = 1;
+
+    return MKBADDR(fh);
+}
+
+/* ---------------------------------------------------------- the runner --- */
+
+static VOID term_runner_main(VOID)
+{
+    struct Process *me = (struct Process *)FindTask(NULL);
+    TermRunner     *r;
+    struct Task    *parent;
+    struct TagItem  tags[6];
+    int             nt = 0;
+
+    /* The parent is filling tc_UserData; it signals when it is done. */
+    (VOID)Wait(SIGF_SINGLE);
+
+    r = (TermRunner *)me->pr_Task.tc_UserData;
+    if (r == NULL)
+        return;
+
+    /*
+     * An EMPTY command string with SYS_Input set is a Shell that reads its
+     * commands from that stream: that is the terminal.  The handles are passed
+     * rather than redirected on a command line so that the SHELL's own output
+     * -- its prompt, and "Unknown command" -- goes to the channel too.  A
+     * redirection applies to the command and not to the Shell around it, and
+     * the archived branch records what that cost: an empty transfer, a return
+     * code of 10, and the explanation printed on the server's console.
+     */
+    tags[nt].ti_Tag = SYS_Input;     tags[nt++].ti_Data = (ULONG)r->rn_In;
+    tags[nt].ti_Tag = SYS_Output;    tags[nt++].ti_Data = (ULONG)r->rn_Out;
+    tags[nt].ti_Tag = SYS_UserShell; tags[nt++].ti_Data = TRUE;
+    tags[nt].ti_Tag = NP_StackSize;  tags[nt++].ti_Data = TERM_SHELL_STACK;
+    tags[nt].ti_Tag = NP_Name;       tags[nt++].ti_Data = (ULONG)term_shell_name;
+    tags[nt].ti_Tag = TAG_END;       tags[nt].ti_Data   = 0;
+
+    r->rn_Rc = SystemTagList((CONST_STRPTR)"", tags);
+
+    /* System() does not close the handles it was given, and here that is the
+       point: these two closes are the Shell's end of file in both directions,
+       and they are what tells the other side it has stopped. */
+    Close(r->rn_In);
+    Close(r->rn_Out);
+
+    /* rn_Done is published last and nothing in the record is read after it. */
+    parent = r->rn_Parent;
+    r->rn_Done = 1;
+    Signal(parent, SIGBREAKF_CTRL_E);
+}
+
+/* ------------------------------------------------------------- the shell --- */
+
+BOOL http_term_init(VOID)
+{
+    if (term_port != NULL)
+        return TRUE;
+
+    term_in.buf  = (UBYTE *)ami_alloc(TERM_IN_BUF);
+    term_out.buf = (UBYTE *)ami_alloc(TERM_OUT_BUF);
+
+    if (term_in.buf == NULL || term_out.buf == NULL)
+    {
+        ami_free(term_in.buf);
+        ami_free(term_out.buf);
+        term_in.buf  = NULL;
+        term_out.buf = NULL;
+        tool_error("not enough memory for a terminal");
+        return FALSE;
+    }
+
+    term_in.size  = TERM_IN_BUF;
+    term_out.size = TERM_OUT_BUF;
+
+    term_port = CreateMsgPort();
+    if (term_port == NULL)
+    {
+        ami_free(term_in.buf);
+        ami_free(term_out.buf);
+        term_in.buf  = NULL;
+        term_out.buf = NULL;
+        tool_error("cannot make a port for a terminal");
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+BOOL http_term_available(VOID)
+{
+    return (term_port != NULL && !term_active) ? TRUE : FALSE;
+}
+
+BOOL http_term_running(VOID)
+{
+    if (!term_active)
+        return FALSE;
+
+    /* Still running, or finished with output nobody has read yet.  A session
+       that ends with the last line of `list` still in the ring must not be
+       reported as over: that line is the answer. */
+    if (term_runner.rn_Done == 0)
+        return TRUE;
+
+    return (ring_used(&term_out) > 0UL) ? TRUE : FALSE;
+}
+
+BOOL http_term_start(VOID)
+{
+    struct TagItem  tags[4];
+    struct Process *proc;
+    BPTR            sh_in  = (BPTR)0;
+    BPTR            sh_out = (BPTR)0;
+
+    if (!http_term_available())
+        return FALSE;
+
+    term_in.count   = 0;
+    term_in.rd      = 0;
+    term_in.wr      = 0;
+    term_in.held    = NULL;
+    term_in.dosend  = 0;
+    term_in.closed  = 0;
+
+    term_out.count  = 0;
+    term_out.rd     = 0;
+    term_out.wr     = 0;
+    term_out.held   = NULL;
+    term_out.dosend = 0;
+    term_out.closed = 0;
+
+    sh_in  = term_handle(&term_in,  TERM_ID_IN,  TRUE);
+    sh_out = term_handle(&term_out, TERM_ID_OUT, FALSE);
+
+    if (sh_in == (BPTR)0 || sh_out == (BPTR)0)
+    {
+        if (sh_in  != (BPTR)0) Close(sh_in);
+        if (sh_out != (BPTR)0) Close(sh_out);
+        return FALSE;
+    }
+
+    term_runner.rn_Parent = FindTask(NULL);
+    term_runner.rn_In     = sh_in;
+    term_runner.rn_Out    = sh_out;
+    term_runner.rn_Rc     = 0;
+    term_runner.rn_Done   = 0;
+
+    tags[0].ti_Tag = NP_Entry;     tags[0].ti_Data = (ULONG)term_runner_main;
+    tags[1].ti_Tag = NP_Name;      tags[1].ti_Data = (ULONG)"httpd terminal runner";
+    tags[2].ti_Tag = NP_StackSize; tags[2].ti_Data = TERM_RUNNER_STACK;
+    tags[3].ti_Tag = TAG_END;      tags[3].ti_Data = 0;
+
+    proc = CreateNewProc(tags);
+    if (proc == NULL)
+    {
+        Close(sh_in);
+        Close(sh_out);
+        return FALSE;
+    }
+
+    /* The runner is parked in Wait(SIGF_SINGLE) until this pair happens. */
+    proc->pr_Task.tc_UserData = (APTR)&term_runner;
+    Signal((struct Task *)proc, SIGF_SINGLE);
+
+    term_active = 1;
+    term_reaped = 0;
+    term_rc     = -1;
+
+    return TRUE;
+}
+
+LONG http_term_write(const UBYTE *data, LONG len)
+{
+    LONG n;
+
+    if (!term_active || len <= 0 || term_in.closed)
+        return 0;
+
+    /* The Shell has closed its stdin: it is on its way out and nothing more
+       will be read.  Report the bytes taken rather than stalling; a session
+       with data pending for ever never closes. */
+    if (term_in.dosend)
+        return len;
+
+    n = (LONG)ring_put(&term_in, data, (ULONG)len);
+
+    if (n > 0)
+        term_retry(&term_in);       /* a Shell blocked in Read() can go     */
+
+    return n;
+}
+
+ULONG http_term_pending(VOID)
+{
+    return term_active ? ring_used(&term_out) : 0UL;
+}
+
+LONG http_term_read(UBYTE *buf, LONG len)
+{
+    LONG n;
+
+    if (!term_active || len <= 0)
+        return 0;
+
+    n = (LONG)ring_get(&term_out, buf, (ULONG)len);
+
+    if (n > 0)
+        term_retry(&term_out);      /* room appeared for a blocked Write()  */
+
+    return n;
+}
+
+VOID http_term_eof(VOID)
+{
+    if (!term_active)
+        return;
+
+    term_in.closed = 1;
+
+    /* A Shell asleep on this pipe has to be woken, or it waits for a reply
+       that is never coming and the runner never returns. */
+    term_retry(&term_in);
+}
+
+VOID http_term_break(VOID)
+{
+    struct Task *shell;
+
+    if (!term_active)
+        return;
+
+    Forbid();
+    shell = FindTask((CONST_STRPTR)term_shell_name);
+    if (shell != NULL)
+        Signal(shell, SIGBREAKF_CTRL_C);
+    Permit();
+}
+
+LONG http_term_rc(VOID)
+{
+    return term_rc;
+}
+
+VOID http_term_stop(VOID)
+{
+    if (!term_active)
+        return;
+
+    /* End of file in both directions.  The Shell exits, the runner closes the
+       two handles, and this side learns both through ACTION_END. */
+    term_in.closed  = 1;
+    term_out.closed = 1;
+
+    term_retry(&term_in);
+    term_retry(&term_out);
+
+    /* Whatever the Shell had left to say is not going anywhere now, so the
+       ring is emptied rather than held: it is what http_term_service() waits
+       on before it lets the next session start. */
+    term_out.count = 0;
+    term_out.rd    = 0;
+    term_out.wr    = 0;
+
+    http_term_service();
+}
+
+VOID http_term_shutdown(VOID)
+{
+    LONG waited = 0;
+
+    if (term_port == NULL)
+        return;
+
+    if (term_active)
+    {
+        http_term_stop();
+
+        /*
+         * The runner still holds two FileHandles that name this process's
+         * port, and the Shell may still be inside a command.  Keep answering
+         * packets until it has gone, and keep draining the output ring: a
+         * Shell blocked in Write() cannot notice that its input has ended.
+         */
+        while (term_runner.rn_Done == 0 && waited < TERM_STOP_TICKS)
+        {
+            UBYTE scratch[256];
+
+            http_term_service();
+
+            while (http_term_read(scratch, (LONG)sizeof(scratch)) > 0)
+                ;
+
+            Delay(1);
+            waited++;
+        }
+
+        if (term_runner.rn_Done == 0)
+        {
+            /*
+             * Deliberately not freed.  The runner's Process is still alive and
+             * both FileHandles still name term_port, so giving any of it back
+             * would hand a live pointer to whatever allocates next.  On
+             * AmigaOS a process that exits reclaims nothing anyway, so the
+             * choice is between a leak this program is about to end with and a
+             * write into somebody else's memory.
+             */
+            tool_error("the terminal's Shell is still running; its memory is "
+                       "not being given back");
+            return;
+        }
+
+        term_active = 0;
+    }
+
+    DeleteMsgPort(term_port);
+    term_port = NULL;
+
+    ami_free(term_in.buf);
+    ami_free(term_out.buf);
+    term_in.buf  = NULL;
+    term_out.buf = NULL;
+}

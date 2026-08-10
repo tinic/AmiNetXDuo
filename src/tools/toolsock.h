@@ -218,6 +218,16 @@ LONG  tool_sock_errno(struct Library *base);
 LONG  tool_sock_select(struct Library *base, LONG nfds, ToolFdSet *readfds,
                        ToolFdSet *writefds, ToolTimeval *tv);
 
+/*
+ * The same, with WaitSelect()'s signal mask -- in and out, and the signals it
+ * reports have been cleared from the task.  For a caller that has to watch a
+ * MsgPort as well as its sockets: the port's signal belongs in the same wait,
+ * or the two end up polled against each other.
+ */
+LONG  tool_sock_select_sigs(struct Library *base, LONG nfds, ToolFdSet *readfds,
+                            ToolFdSet *writefds, ToolTimeval *tv,
+                            ULONG *sigmask);
+
 ToolHostEnt *tool_sock_gethostbyname(struct Library *base, const char *name);
 ToolServEnt *tool_sock_getservbyname(struct Library *base, const char *name,
                                      const char *proto);

@@ -6,7 +6,7 @@
  * anything else an Amiga can serve without a client on the other machine.
  *
  *     httpd ROOT/A,PORT/N,ADDRESS=-a/K,CONNECTIONS=-m/N/K,TIMEOUT=-w/N/K,
- *           VERBOSE=-v/S,TRACE/S
+ *           VERBOSE=-v/S,TRACE/S,TERMINAL=-T/K
  *
  *   httpd Work:Public            serve that drawer on port 80
  *   httpd DH0:Docs 8080 -v       another port, one log line per request
@@ -17,6 +17,23 @@
  *   OPTIONS, PROPFIND (Depth 0 and 1), GET, HEAD, PUT, DELETE, MKCOL, COPY,
  *   MOVE, PROPPATCH, LOCK and UNLOCK, WebDAV class 2, which is the class
  *   that has locking.
+ *
+ * AND, WHEN ASKED FOR, A SHELL
+ *
+ *   TERMINAL names an HTML file.  With it, /terminal serves that file, and a
+ *   WebSocket upgrade to the same address gets an AmigaDOS Shell: RFC 6455 in
+ *   src/tools/httpws.c, the Shell itself in src/tools/httpterm.c.
+ *
+ *   ANYONE WHO CAN REACH THE PORT GETS THAT SHELL.  There is no credential and
+ *   nothing to configure, which is the same shape as the write methods above:
+ *   this server has never had authentication and does not pretend to.  The
+ *   endpoint is off unless TERMINAL was given, so the decision is the person
+ *   starting the server's and is made once, on the command line.
+ *
+ *   /terminal is reserved while it is on, and shadows an entry of that name in
+ *   the served drawer.  The banner says so when there is one, because a file
+ *   that stops being reachable without a word is the kind of thing that gets
+ *   diagnosed as a network fault.
  *
  *   The class matters more than the verbs do.  Finder mounts a `DAV: 1`
  *   server READ-ONLY however many write methods it answers, so a server that
@@ -69,6 +86,8 @@
 #include "httplock.h"
 #include "httpif.h"
 #include "httpframe.h"
+#include "httpws.h"
+#include "httpterm.h"
 #include "aminetxduo/version.h"
 
 #include <libraries/locale.h>
@@ -85,7 +104,7 @@ static const char version_tag[] __attribute__((used)) =
 
 #define TEMPLATE                                                        \
     "ROOT/A,PORT/N,ADDRESS=-a/K,CONNECTIONS=-m/N/K,TIMEOUT=-w/N/K,"     \
-    "VERBOSE=-v/S,TRACE/S"
+    "VERBOSE=-v/S,TRACE/S,TERMINAL=-T/K"
 
 enum
 {
@@ -96,6 +115,7 @@ enum
     ARG_TIMEOUT,
     ARG_VERBOSE,
     ARG_TRACE,
+    ARG_TERMINAL,
     ARG_COUNT
 };
 
@@ -215,6 +235,38 @@ enum
 /* 1978-01-01 to 1970-01-01, the same constant src/tlslib/tls_time.c uses. */
 #define HTTPD_AMIGA_EPOCH  252460800UL
 
+/* ------------------------------------------------------------- terminal --- */
+
+/*
+ * The one address the terminal answers on.  Checked before the path is
+ * resolved, so it never reaches the served drawer and cannot be escaped from
+ * with an encoding trick: there is no path to escape.
+ */
+#define HTTPD_TERM_URL      "/terminal"
+
+/* The version of RFC 6455 there is.  A client asking for another gets 426 and
+   this number back, which is what 4.4 says to do rather than refusing flat. */
+#define HTTPD_WS_VERSION    13
+
+/* Sec-WebSocket-Key is 24 characters and the accept it produces is 28. */
+#define HTTPD_WS_KEY_MAX    32
+#define HTTPD_WS_ACC_MAX    32
+
+/*
+ * What a client may have typed that the Shell has not taken yet.  The socket
+ * is not read at all while any of it is left, which is the back pressure a
+ * frame decoder cannot express on its own: the sink is handed bytes and has
+ * nowhere to refuse them to.
+ *
+ * 512 is the read size below, and one read is the most the decoder can turn
+ * into payload, so this cannot overflow however the frames are shaped.
+ */
+#define HTTPD_WS_READ       512
+#define HTTPD_WS_PEND       HTTPD_WS_READ
+
+/* A control frame to send back: 10 bytes of header and 125 of payload. */
+#define HTTPD_WS_CTL        136
+
 /* --------------------------------------------------------------- methods --- */
 
 enum
@@ -270,7 +322,8 @@ enum
     CONN_BODY,          /* reading the body through the sink               */
     CONN_WALK,          /* a slice of a tree walk per pass; no socket work */
     CONN_SEND,          /* pushing out[], refilled by the producer         */
-    CONN_DRAIN          /* reading away a refused request's body           */
+    CONN_DRAIN,         /* reading away a refused request's body           */
+    CONN_WS             /* the 101 has gone; this is frames from here on   */
 };
 
 /*
@@ -432,6 +485,35 @@ struct HttpConn
     BPTR    dirlock;
     struct FileInfoBlock *fib;
     UBYTE   dir_stage;
+
+    /*
+     * The terminal.  Present on every connection because the WebSocket is a
+     * state a connection ENTERS, not a second kind of connection: the same
+     * slot, the same buffers and the same event loop carry it, and only the
+     * state says which of the two it is now.
+     *
+     * It costs HTTPD_CONN_MAX slots' worth whether the terminal was asked for
+     * or not, which is about 700 bytes on the default eight.  The rings and
+     * the Shell's Process are the part that is taken only when TERMINAL was
+     * given, and they are the part that has size to them; see httpterm.c.
+     */
+    UBYTE   is_term;                /* this request is for /terminal       */
+    UBYTE   ws_upgrade;             /* Upgrade: websocket was there        */
+    UBYTE   ws_connection;          /* and Connection: listed upgrade      */
+    UBYTE   ws_owner;               /* this connection holds the Shell     */
+    UBYTE   ws_pinged;              /* a ping is out and unanswered        */
+    UBYTE   ws_closing;             /* a close has been sent               */
+    UWORD   ws_version;
+    char    ws_key[HTTPD_WS_KEY_MAX];
+    HttpWsIn ws_in;
+    UBYTE   ws_pend[HTTPD_WS_PEND]; /* typed, and not yet taken by the Shell */
+    UWORD   ws_pend_n;
+    UWORD   ws_pend_at;
+    UBYTE   ws_ctl[HTTPD_WS_CTL];   /* a pong or a close, waiting to go out  */
+    UWORD   ws_ctl_n;
+    UWORD   ws_ctl_at;
+    char    ws_word[16];            /* a text frame: "break" or "eof"        */
+    UBYTE   ws_word_n;
 };
 
 /*
@@ -490,6 +572,10 @@ static ULONG  httpd_conns   = HTTPD_CONN_DEFAULT;
 static ULONG  httpd_timeout = HTTPD_TIMEOUT_DEF;
 static BOOL   httpd_verbose = FALSE;
 static BOOL   httpd_trace   = FALSE;
+/* The HTML file TERMINAL named, and "" when it was not given.  One string
+   answers both questions -- where the page is, and whether there is a
+   terminal at all -- because there is no third state. */
+static char   httpd_term_page[HTTP_PATH_MAX];
 static LONG   httpd_gmt_west = 0;       /* minutes west of GMT, from locale */
 static struct Library *httpd_sb = NULL;
 
@@ -1091,6 +1177,16 @@ static VOID httpd_close(HttpConn *c)
     httpd_walk_release(c);
     httpd_put_abandon(c);
 
+    /* The browser has gone, so the Shell it was typing into has nobody.
+       Ending it here rather than leaving it is what makes the NEXT visitor
+       able to start one; a Shell with no reader would otherwise hold the one
+       session for as long as it took to notice. */
+    if (c->ws_owner)
+    {
+        http_term_stop();
+        c->ws_owner = 0;
+    }
+
     if (c->sock >= 0)
     {
         (VOID)tool_sock_close(httpd_sb, c->sock);
@@ -1185,6 +1281,15 @@ static VOID httpd_reset(HttpConn *c)
     c->nsdecls    = 0;
     c->have_date  = 0;
     c->owner[0]   = '\0';
+
+    c->is_term       = 0;
+    c->ws_upgrade    = 0;
+    c->ws_connection = 0;
+    c->ws_version    = 0;
+    c->ws_key[0]     = '\0';
+    /* NOT ws_owner: a connection that holds the Shell never comes back
+       through here, it is in CONN_WS until it closes.  Clearing it would say
+       the Shell is free while this connection is still typing into it. */
 }
 
 /* ------------------------------------------------------------ the volume --- */
@@ -3577,6 +3682,187 @@ static VOID httpd_do_get(HttpConn *c)
     c->producer  = PROD_FILE;
 }
 
+/* -------------------------------------------------------------- terminal --- */
+
+/*
+ * The page.  Served through the ordinary file producer -- opened, measured,
+ * and handed to PROD_FILE -- rather than being held anywhere, because it is a
+ * file on disk like any other and the only thing special about it is which
+ * address it answers on.
+ *
+ * It is measured with Seek() rather than Examine(): the path comes from the
+ * command line and not from a resolved HttpPath, so there is no FileInfoBlock
+ * already filled in for it, and opening it is what has to succeed anyway.
+ */
+static VOID httpd_term_page_get(HttpConn *c)
+{
+    LONG size;
+
+    c->file = Open((CONST_STRPTR)httpd_term_page, MODE_OLDFILE);
+    if (c->file == (BPTR)0)
+    {
+        /* The command line named it and it was there when the server started,
+           so this is the file having gone since.  503 and not 404: the
+           address is right and the server is the one that cannot answer. */
+        httpd_error(c, 503, "the terminal's page will not open");
+        return;
+    }
+
+    if (Seek(c->file, 0, OFFSET_END) < 0 ||
+        (size = Seek(c->file, 0, OFFSET_BEGINNING)) < 0)
+    {
+        (VOID)Close(c->file);
+        c->file = (BPTR)0;
+        httpd_error(c, 503, "the terminal's page will not seek");
+        return;
+    }
+
+    httpd_begin(c, 200);
+    httpd_header(c, "Content-Type", "text/html; charset=iso-8859-1");
+    httpd_header_num(c, "Content-Length", (ULONG)size);
+    /* The page is the client half of this server's own protocol, so a stale
+       copy in a browser cache is a mismatch nobody can see.  It is one file
+       on a LAN; asking for it every time costs nothing worth keeping. */
+    httpd_header(c, "Cache-Control", "no-cache");
+
+    httpd_finish_head(c);
+
+    if (c->head_only || c->overflow || size == 0)
+    {
+        (VOID)Close(c->file);
+        c->file     = (BPTR)0;
+        c->producer = PROD_NONE;
+        return;
+    }
+
+    c->file_left = (ULONG)size;
+    c->producer  = PROD_FILE;
+}
+
+/*
+ * The upgrade.  Everything RFC 6455 4.2.1 requires of the request is checked
+ * here and each failure has its own answer, because "400" for all of them
+ * tells a client nothing it can act on and this is the one exchange in the
+ * protocol a person debugs by hand.
+ */
+static VOID httpd_do_terminal(HttpConn *c)
+{
+    char accept[HTTPD_WS_ACC_MAX];
+
+    /* The page and the socket share an address, so the verb has to be the one
+       both of them use. */
+    if (c->method->id != HTTPD_M_GET && c->method->id != HTTPD_M_HEAD)
+    {
+        httpd_begin(c, 405);
+        httpd_header(c, "Allow", "GET, HEAD");
+        httpd_body_text(c, "text/plain; charset=iso-8859-1",
+                        "The terminal answers GET.\r\n");
+        return;
+    }
+
+    /* No upgrade asked for: this is a browser fetching the page. */
+    if (!c->ws_upgrade)
+    {
+        httpd_term_page_get(c);
+        return;
+    }
+
+    /* RFC 6455 4.1: the Upgrade header alone is not the request.  A client
+       that sends one without the Connection token is talking to a proxy that
+       will not forward it, so answering 101 would leave both ends holding a
+       connection the middle does not know has changed protocol. */
+    if (!c->ws_connection)
+    {
+        httpd_error(c, 400, "an upgrade needs Connection: Upgrade too");
+        return;
+    }
+
+    /* RFC 6455 4.4.  The version goes back so the client can retry, which is
+       what distinguishes this from a flat refusal. */
+    if (c->ws_version != HTTPD_WS_VERSION)
+    {
+        httpd_begin(c, 426);
+        httpd_header(c, "Sec-WebSocket-Version", "13");
+        httpd_body_text(c, "text/plain; charset=iso-8859-1",
+                        "This server speaks WebSocket version 13.\r\n");
+        return;
+    }
+
+    /* The key is a nonce and not a credential: what it proves is that the
+       answer was computed and not replayed from a cache.  A missing or
+       malformed one is refused before anything is started -- nothing is
+       spawned on the strength of a request this server could not read. */
+    if (!http_ws_accept(c->ws_key, accept, sizeof(accept)))
+    {
+        httpd_error(c, 400, "that is not a Sec-WebSocket-Key");
+        return;
+    }
+
+    if (!http_term_available())
+    {
+        /* One Shell at a time; see httpterm.h.  503 rather than 409 because
+           it is a resource this server has one of, and a client that waits
+           and asks again is doing the right thing. */
+        httpd_begin(c, 503);
+        httpd_header(c, "Retry-After", "5");
+        httpd_body_text(c, "text/plain; charset=iso-8859-1",
+                        "Somebody else has the terminal.\r\n");
+        return;
+    }
+
+    if (!http_term_start())
+    {
+        httpd_error(c, 503, "the terminal's Shell would not start");
+        return;
+    }
+
+    /*
+     * The 101, by hand.  httpd_begin() is not used: it carries Date and
+     * Server, which are harmless, and httpd_finish_head() then decides about
+     * Content-Length and Connection, and BOTH of those are wrong on a 101 --
+     * there is no body whose length could be stated and the connection is not
+     * being kept alive, it is becoming something else.
+     */
+    c->out_len  = 0;
+    c->out_sent = 0;
+    c->overflow = 0;
+    c->status   = 101;
+
+    httpd_out(c, "HTTP/1.1 101 Switching Protocols\r\n"
+                 "Upgrade: websocket\r\n"
+                 "Connection: Upgrade\r\n"
+                 "Sec-WebSocket-Accept: ");
+    httpd_out(c, accept);
+    httpd_out(c, "\r\n\r\n");
+
+    if (c->overflow)
+    {
+        http_term_stop();
+        httpd_error(c, 500, "the answer did not fit");
+        return;
+    }
+
+    http_ws_reset(&c->ws_in);
+    c->ws_owner   = 1;
+    c->ws_pend_n  = 0;
+    c->ws_pend_at = 0;
+    c->ws_ctl_n   = 0;
+    c->ws_ctl_at  = 0;
+    c->ws_word_n  = 0;
+    c->ws_pinged  = 0;
+    c->ws_closing = 0;
+    c->keepalive  = 0;              /* there is no next request on this one */
+    c->producer   = PROD_NONE;
+
+    /*
+     * Anything the client pipelined behind the head is the first frames.  It
+     * is already in c->in and must not be thrown away: a browser that opens
+     * the socket and sends a frame in the same segment is ordinary, and
+     * losing it loses the first thing typed.
+     */
+    c->state = CONN_SEND;
+}
+
 /* --------------------------------------------------------------- writing --- */
 
 /*
@@ -4860,6 +5146,61 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
                 c->keepalive = 0;
             else if (hs_nicmp(httpd_value, "keep-alive", 10) == 0)
                 c->keepalive = 1;
+
+            /*
+             * And, separately, whether "upgrade" is in the list.  It is a LIST
+             * (RFC 6455 4.1 requires the token, not the whole value, and every
+             * browser sends "keep-alive, Upgrade"), so this looks through it
+             * rather than at the front of it, which is what the two tests
+             * above do and why they are not enough.
+             */
+            {
+                const char *p = httpd_value;
+
+                while (*p != '\0')
+                {
+                    if (hs_nicmp(p, "upgrade", 7) == 0)
+                    {
+                        char after = p[7];
+
+                        if (after == '\0' || after == ',' || after == ' ' ||
+                            after == '\t')
+                        {
+                            c->ws_connection = 1;
+                            break;
+                        }
+                    }
+
+                    while (*p != '\0' && *p != ',')
+                        p++;
+                    while (*p == ',' || *p == ' ' || *p == '\t')
+                        p++;
+                }
+            }
+        }
+        else if (hs_equal(name, "Upgrade"))
+        {
+            c->ws_upgrade = (hs_nicmp(httpd_value, "websocket", 9) == 0)
+                                ? 1 : 0;
+        }
+        else if (hs_equal(name, "Sec-WebSocket-Key"))
+        {
+            /* A key that did not fit is not a shorter key.  Copied whole or
+               left empty, and httpws.c refuses an empty one. */
+            if (!cut && hs_len(httpd_value) + 1UL < sizeof(c->ws_key))
+                hs_copy(c->ws_key, sizeof(c->ws_key), httpd_value);
+        }
+        else if (hs_equal(name, "Sec-WebSocket-Version"))
+        {
+            const char *p = httpd_value;
+            ULONG       v = 0;
+
+            while (*p == ' ')
+                p++;
+            while (*p >= '0' && *p <= '9' && v < 1000UL)
+                v = (v * 10UL) + (ULONG)(*p++ - '0');
+
+            c->ws_version = (UWORD)v;
         }
         else if (hs_equal(name, "Range"))
         {
@@ -5050,6 +5391,34 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         return TRUE;
     }
 
+    /*
+     * The terminal's own address, decided before the path is resolved.  It
+     * names no file, so there is nothing under the document root for a
+     * relative segment or an encoding to reach: the request either IS this
+     * address or is an ordinary one.
+     *
+     * A query string is allowed and ignored, because a browser reloading the
+     * page may append one and refusing it would look like the endpoint had
+     * gone.
+     */
+    if (httpd_term_page[0] != '\0')
+    {
+        ULONG n = 0;
+
+        while (httpd_target[n] != '\0' && httpd_target[n] != '?')
+            n++;
+
+        if (n == hs_len(HTTPD_TERM_URL) &&
+            hs_nicmp(httpd_target, HTTPD_TERM_URL, n) == 0)
+        {
+            c->is_term = 1;
+            hs_copy(c->path.url, sizeof(c->path.url), HTTPD_TERM_URL);
+            c->path.path[0] = '\0';
+            c->path.name[0] = '\0';
+            return TRUE;
+        }
+    }
+
     why = http_path_resolve(httpd_root, httpd_target, &c->path);
     if (why != HTTP_PATH_OK)
     {
@@ -5217,6 +5586,19 @@ static VOID httpd_dispatch(HttpConn *c)
 {
     if (httpd_verbose && !httpd_trace)
         httpd_log(c, "%s %s", (LONG)c->method->name, (LONG)c->path.url);
+
+    /*
+     * The terminal, before anything WebDAV.  It is not a resource: there is no
+     * entity tag to compare, nothing to lock, and an If: header naming it
+     * names something that does not exist.  Evaluating those first would
+     * answer 412 for a condition about a file this address does not have.
+     */
+    if (c->is_term)
+    {
+        httpd_do_terminal(c);
+        httpd_log_status(c);
+        return;
+    }
 
     /*
      * RFC 4918 10.4.  The header used to be skimmed for tokens and never
@@ -5565,6 +5947,333 @@ static VOID httpd_after_head(HttpConn *c, ULONG headlen)
     httpd_dispatch(c);
 }
 
+/* ------------------------------------------------------- the terminal's --- */
+
+/* Queue one control frame.  There is room for exactly one: a pong and a close
+   never both need to be in flight, and a client that pings faster than the
+   LAN drains is answered on the ping it sent last, which is the only one it
+   is still waiting for. */
+static VOID httpd_ws_control(HttpConn *c, HttpWsEvent ev,
+                             const UBYTE *payload, ULONG len)
+{
+    unsigned long head;
+
+    if (len > (unsigned long)HTTP_WS_CTL_MAX)
+        len = (unsigned long)HTTP_WS_CTL_MAX;
+
+    head = http_ws_head(c->ws_ctl, sizeof(c->ws_ctl), ev, len, 1);
+    if (head == 0UL)
+        return;
+
+    {
+        ULONG i;
+
+        for (i = 0; i < len; i++)
+            c->ws_ctl[head + i] = payload[i];
+    }
+
+    c->ws_ctl_n  = (UWORD)(head + len);
+    c->ws_ctl_at = 0;
+}
+
+static VOID httpd_ws_close(HttpConn *c, UWORD code)
+{
+    unsigned long n;
+
+    if (c->ws_closing)
+        return;
+
+    n = http_ws_close_frame(c->ws_ctl, sizeof(c->ws_ctl), code,
+                            http_ws_close_reason(code));
+
+    c->ws_ctl_n   = (UWORD)n;
+    c->ws_ctl_at  = 0;
+    c->ws_closing = 1;
+
+    if (httpd_verbose || httpd_trace)
+        httpd_log(c, "terminal closing: %s",
+                  (LONG)http_ws_close_reason(code), 0);
+}
+
+/*
+ * What arrived.  Text and binary are the same thing here -- keystrokes -- and
+ * are held rather than written straight to the Shell, because the Shell may
+ * not be reading and a decoder's sink has nowhere to refuse bytes to.  The
+ * socket is not read again until the hold is empty, which is what turns "the
+ * Shell is busy" into TCP back pressure instead of lost input.
+ */
+static VOID httpd_ws_sink(void *ctx, HttpWsEvent ev, const UBYTE *data,
+                          long len, int final)
+{
+    HttpConn *c = (HttpConn *)ctx;
+    long      i;
+
+    switch (ev)
+    {
+        case HTTP_WS_EV_BINARY:
+            for (i = 0; i < len; i++)
+            {
+                if (c->ws_pend_n < (UWORD)sizeof(c->ws_pend))
+                    c->ws_pend[c->ws_pend_n++] = data[i];
+            }
+            break;
+
+        /*
+         * Text is the OTHER channel: one word, and what it asks for is
+         * something that is not a keystroke.
+         *
+         * Ctrl-C on an Amiga is a signal and not a byte -- a console handler
+         * turns the key into SIGBREAKF_CTRL_C and the command polls for it --
+         * so there is no in-band way to send one down a pipe.  Stealing 0x03
+         * out of the input stream would have worked and would have made that
+         * byte untypeable for ever; a second opcode costs nothing and takes
+         * nothing away.  The page sends keystrokes as binary and never as
+         * text, so the two cannot be confused.
+         */
+        case HTTP_WS_EV_TEXT:
+            for (i = 0; i < len; i++)
+            {
+                if (c->ws_word_n < (UBYTE)sizeof(c->ws_word) - 1)
+                    c->ws_word[c->ws_word_n++] = (char)data[i];
+            }
+
+            if (final)
+            {
+                c->ws_word[c->ws_word_n] = '\0';
+
+                if (hs_equal(c->ws_word, "break"))
+                    http_term_break();
+                else if (hs_equal(c->ws_word, "eof"))
+                    http_term_eof();
+                else if (httpd_verbose || httpd_trace)
+                    httpd_log(c, "terminal: \"%s\" is not something to ask for",
+                              (LONG)c->ws_word, 0);
+
+                c->ws_word_n = 0;
+            }
+            break;
+
+        case HTTP_WS_EV_PING:
+            /* RFC 6455 5.5.3: a pong carries the ping's payload back. */
+            httpd_ws_control(c, HTTP_WS_EV_PONG, data, (ULONG)len);
+            break;
+
+        case HTTP_WS_EV_PONG:
+            c->ws_pinged = 0;
+            break;
+
+        case HTTP_WS_EV_CLOSE:
+            /* RFC 6455 5.5.1: answer with a close of our own and then stop.
+               The code is echoed, which is what a client that sent 1000
+               expects to see before it lets go of the socket. */
+            if (!c->ws_closing)
+            {
+                UWORD code = HTTP_WS_CLOSE_NORMAL;
+
+                if (len >= 2)
+                    code = (UWORD)(((UWORD)data[0] << 8) | (UWORD)data[1]);
+
+                httpd_ws_close(c, code);
+            }
+            break;
+
+        default:
+            break;
+    }
+}
+
+/* Move what was typed into the Shell.  Short writes are normal: the Shell's
+   ring is small and a paste is bigger than one command line. */
+static VOID httpd_ws_feed_shell(HttpConn *c)
+{
+    while (c->ws_pend_at < c->ws_pend_n)
+    {
+        LONG took = http_term_write(&c->ws_pend[c->ws_pend_at],
+                                    (LONG)(c->ws_pend_n - c->ws_pend_at));
+
+        if (took <= 0)
+            return;
+
+        c->ws_pend_at = (UWORD)(c->ws_pend_at + took);
+    }
+
+    c->ws_pend_n  = 0;
+    c->ws_pend_at = 0;
+}
+
+/* One readable WebSocket.  FALSE when the connection is finished with. */
+static BOOL httpd_ws_readable(HttpConn *c)
+{
+    UBYTE scratch[HTTPD_WS_READ];
+    LONG  got;
+
+    httpd_ws_feed_shell(c);
+
+    /* Not read at all while the Shell has not taken what came last.  This is
+       the whole of the flow control in this direction and it is deliberate:
+       the alternative is a buffer that grows with whatever a browser pastes. */
+    if (c->ws_pend_at < c->ws_pend_n)
+        return TRUE;
+
+    got = tool_sock_recv(httpd_sb, c->sock, scratch, (LONG)sizeof(scratch));
+
+    if (got == 0)
+        return FALSE;               /* the browser hung up                 */
+
+    if (got < 0)
+    {
+        LONG err = tool_sock_errno(httpd_sb);
+
+        return (err == TOOL_EWOULDBLOCK || err == TOOL_EINTR) ? TRUE : FALSE;
+    }
+
+    c->progress = httpd_now();
+    c->ws_pinged = 0;               /* anything at all is a live peer      */
+
+    (VOID)http_ws_feed(&c->ws_in, scratch, got, httpd_ws_sink, c);
+
+    if (c->ws_in.failed != 0)
+    {
+        /* The framing is lost and cannot be resynchronised.  Say why in a
+           close frame and stop reading; anything after it is not a frame. */
+        httpd_ws_close(c, (UWORD)c->ws_in.failed);
+        c->ws_pend_n  = 0;
+        c->ws_pend_at = 0;
+        return TRUE;
+    }
+
+    httpd_ws_feed_shell(c);
+
+    return TRUE;
+}
+
+/* One writable WebSocket.  FALSE when the connection is finished with. */
+static BOOL httpd_ws_writable(HttpConn *c)
+{
+    for (;;)
+    {
+        /* Whatever is already framed goes first. */
+        if (c->out_sent < c->out_len)
+        {
+            LONG sent = tool_sock_send(httpd_sb, c->sock,
+                                       &c->out[c->out_sent],
+                                       (LONG)(c->out_len - c->out_sent));
+
+            if (sent < 0)
+            {
+                LONG err = tool_sock_errno(httpd_sb);
+
+                return (err == TOOL_EWOULDBLOCK || err == TOOL_EINTR)
+                           ? TRUE : FALSE;
+            }
+
+            c->out_sent += (ULONG)sent;
+            c->progress  = httpd_now();
+
+            if (c->out_sent < c->out_len)
+                return TRUE;        /* the socket is full for now          */
+        }
+
+        c->out_len  = 0;
+        c->out_sent = 0;
+
+        /* A pong or a close does not wait behind the Shell's output. */
+        if (c->ws_ctl_at < c->ws_ctl_n)
+        {
+            ULONG i;
+
+            for (i = 0; i + c->ws_ctl_at < c->ws_ctl_n; i++)
+                c->out[i] = c->ws_ctl[c->ws_ctl_at + i];
+
+            c->out_len   = i;
+            c->out_sent  = 0;
+            c->ws_ctl_at = c->ws_ctl_n;
+            continue;
+        }
+
+        /* The close has gone out.  RFC 6455 7.1.1 lets the server be the one
+           that shuts the socket once it has both sent and received one, and
+           this server is always the one that sent last. */
+        if (c->ws_closing)
+            return FALSE;
+
+        /*
+         * The Shell's output, framed in place.  Read into out[] past the
+         * longest header there is and then write the header BACKWARDS from
+         * there, so the frame is contiguous and nothing is copied twice: the
+         * send cursor simply starts wherever the header turned out to begin.
+         */
+        {
+            LONG n = http_term_read(&c->out[10],
+                                    (LONG)(sizeof(c->out) - 10UL));
+
+            if (n > 0)
+            {
+                UBYTE         head[10];
+                unsigned long hn = http_ws_head(head, sizeof(head),
+                                                HTTP_WS_EV_BINARY,
+                                                (unsigned long)n, 1);
+                unsigned long i;
+
+                for (i = 0; i < hn; i++)
+                    c->out[10 - hn + i] = head[i];
+
+                c->out_sent = 10UL - hn;
+                c->out_len  = 10UL + (ULONG)n;
+                continue;
+            }
+        }
+
+        /*
+         * Nothing left to send.  If the Shell has gone too, so has the
+         * session: the close is sent here rather than when it exited, so the
+         * last line it printed is on the wire ahead of it.
+         */
+        if (c->ws_owner && !http_term_running())
+        {
+            httpd_ws_close(c, HTTP_WS_CLOSE_NORMAL);
+            continue;
+        }
+
+        return TRUE;
+    }
+}
+
+/*
+ * A WebSocket has no request to be timed out, so the no-progress rule that
+ * governs every other connection would end a session because nobody typed.
+ * The question it should be asking is whether the far end is still there, and
+ * a ping is how RFC 6455 5.5.2 asks it: one after TIMEOUT seconds of silence,
+ * and the connection goes if the next TIMEOUT passes without an answer.
+ *
+ * TRUE while the connection should live.
+ */
+static BOOL httpd_ws_tick(HttpConn *c, ULONG now)
+{
+    if (httpd_timeout == 0UL || now < c->progress)
+        return TRUE;
+
+    if (now - c->progress < httpd_timeout)
+        return TRUE;
+
+    if (c->ws_pinged)
+    {
+        if (httpd_verbose || httpd_trace)
+            httpd_log(c, "terminal: no answer to a ping in %lu seconds",
+                      (LONG)httpd_timeout, 0);
+        return FALSE;
+    }
+
+    if (c->ws_ctl_at >= c->ws_ctl_n)
+    {
+        httpd_ws_control(c, HTTP_WS_EV_PING, (const UBYTE *)"", 0);
+        c->ws_pinged = 1;
+        c->progress  = now;
+    }
+
+    return TRUE;
+}
+
 /* One readable connection.  FALSE when it is finished with. */
 static BOOL httpd_readable(HttpConn *c)
 {
@@ -5791,6 +6500,29 @@ static BOOL httpd_writable(HttpConn *c)
             httpd_log(c, "send() accepted %lu bytes for this answer",
                       (LONG)c->wrote, 0);
 
+        /*
+         * The 101 has gone.  From here the socket carries frames, and the
+         * bytes the client pipelined behind the head are the first of them --
+         * a browser that opens the socket and types in the same segment is
+         * ordinary, and dropping that would drop the first thing said.
+         */
+        if (c->ws_owner && c->state == CONN_SEND)
+        {
+            c->state    = CONN_WS;
+            c->out_len  = 0;
+            c->out_sent = 0;
+            c->progress = httpd_now();
+
+            if (c->in_len > 0UL)
+            {
+                (VOID)http_ws_feed(&c->ws_in, c->in, (LONG)c->in_len,
+                                   httpd_ws_sink, c);
+                c->in_len = 0;
+            }
+
+            return TRUE;
+        }
+
         if (!c->keepalive)
             return FALSE;
 
@@ -5931,12 +6663,18 @@ static VOID httpd_serve(LONG lsock)
         ULONG       live = 0;
         ULONG       walking = 0;
         ULONG       now;
+        ULONG       sigs;
 
         if (tool_break())
         {
             tool_fault(ERROR_BREAK);
             return;
         }
+
+        /* Answer whatever the Shell asked for since the last pass, so the
+           frames built below carry what it printed rather than what it had
+           printed a pass ago. */
+        http_term_service();
 
         tool_fd_zero(&readfds);
         tool_fd_zero(&writefds);
@@ -5954,12 +6692,33 @@ static VOID httpd_serve(LONG lsock)
                busy with the filesystem, and the answer is not built until the
                walk ends. */
             if (c->state == CONN_WALK)
+            {
                 walking++;
+            }
+            else if (c->state == CONN_WS)
+            {
+                /*
+                 * The one state that wants BOTH halves.  Every other
+                 * connection is either reading a request or writing an
+                 * answer; a terminal is doing both at once, and a session
+                 * where the person types while a command prints is the
+                 * ordinary case rather than an edge one.
+                 */
+                tool_fd_add(&readfds, c->sock);
+
+                if (c->out_sent < c->out_len || c->ws_ctl_at < c->ws_ctl_n ||
+                    c->ws_closing || !http_term_running())
+                    tool_fd_add(&writefds, c->sock);
+            }
             else if (c->state == CONN_REQUEST || c->state == CONN_BODY ||
                      c->state == CONN_DRAIN)
+            {
                 tool_fd_add(&readfds, c->sock);
+            }
             else
+            {
                 tool_fd_add(&writefds, c->sock);
+            }
 
             if (c->sock + 1 > nfds)
                 nfds = c->sock + 1;
@@ -5990,7 +6749,22 @@ static VOID httpd_serve(LONG lsock)
          */
         tv.tv_micro = (walking > 0UL) ? HTTPD_WALK_MICROS : HTTPD_TICK_MICROS;
 
-        ready = tool_sock_select(httpd_sb, nfds, &readfds, &writefds, &tv);
+        /*
+         * The terminal's pipe is a MsgPort and WaitSelect() knows nothing
+         * about DOS handles, so its signal goes into the same wait as the
+         * sockets.  Without it a keystroke would be echoed on the next 250 ms
+         * tick, which is what a terminal feels like when it is polled.
+         *
+         * The Shell's own runner adds CTRL_E when it publishes its return
+         * code.  CTRL_C is deliberately NOT here: tool_break() is what reads
+         * that one, and a signal WaitSelect() reports has been cleared from
+         * the task, so asking for it would consume the Ctrl-C that stops the
+         * server.
+         */
+        sigs = http_term_sigmask() | SIGBREAKF_CTRL_E;
+
+        ready = tool_sock_select_sigs(httpd_sb, nfds, &readfds, &writefds, &tv,
+                                      &sigs);
 
         if (ready < 0)
         {
@@ -6006,6 +6780,10 @@ static VOID httpd_serve(LONG lsock)
 
         now = httpd_now();
 
+        /* Again after the wait: the signal above is what woke us, and what it
+           says is that a packet is on the port now. */
+        http_term_service();
+
         if (ready > 0 && live < httpd_conns && tool_fd_isset(&readfds, lsock))
             httpd_accept(lsock);
 
@@ -6020,6 +6798,34 @@ static VOID httpd_serve(LONG lsock)
             if (c->state == CONN_WALK)
             {
                 httpd_walk_slice(c);
+                continue;
+            }
+
+            if (c->state == CONN_WS)
+            {
+                /*
+                 * Both halves, in that order.  Reading first is what makes a
+                 * Ctrl-C typed while a command is printing get through: the
+                 * writer below would otherwise keep the pass to itself for as
+                 * long as the command had output.
+                 */
+                if (ready > 0 && tool_fd_isset(&readfds, c->sock))
+                    keep = httpd_ws_readable(c);
+
+                if (keep)
+                    keep = httpd_ws_writable(c);
+
+                if (keep)
+                    keep = httpd_ws_tick(c, now);
+
+                if (!keep)
+                {
+                    if (httpd_verbose || httpd_trace)
+                        httpd_log(c, "terminal closed after %lu request(s)",
+                                  (LONG)c->requests, 0);
+                    httpd_close(c);
+                }
+
                 continue;
             }
 
@@ -6098,9 +6904,11 @@ int main(int argc, char **argv)
     if (rda == NULL)
     {
         tool_fault(IoErr());
-        tool_usage("<drawer> [<port>] [-v] [TRACE]",
+        tool_usage("<drawer> [<port>] [-v] [TRACE] [-T <page.html>]",
                    "Serves a drawer over HTTP and WebDAV, so this machine can "
-                   "be mounted as a writable drive.");
+                   "be mounted as a writable drive.  -T adds /terminal, an "
+                   "AmigaDOS Shell in a browser, open to anyone who can reach "
+                   "the port.");
         return RETURN_ERROR;
     }
 
@@ -6170,6 +6978,30 @@ int main(int argc, char **argv)
             return RETURN_ERROR;
         }
         UnLock(lock);
+    }
+
+    /*
+     * The terminal's page, if there is to be one.  Checked here rather than on
+     * the first request for the same reason the document root is: a server
+     * that starts on a misspelled path answers 503 to the one address the
+     * person is going to try and looks like a network fault.
+     */
+    if (args[ARG_TERMINAL] != 0)
+    {
+        BPTR page = Open((CONST_STRPTR)args[ARG_TERMINAL], MODE_OLDFILE);
+
+        if (page == (BPTR)0)
+        {
+            tool_error("there is no \"%s\" to serve the terminal from",
+                       (LONG)args[ARG_TERMINAL]);
+            tool_fault(IoErr());
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+        (VOID)Close(page);
+
+        hs_copy(httpd_term_page, sizeof(httpd_term_page),
+                (const char *)args[ARG_TERMINAL]);
     }
 
     httpd_read_gmt_offset();
@@ -6277,9 +7109,63 @@ int main(int argc, char **argv)
     tool_addr_text(httpd_sb, &address, dotted, sizeof(dotted));
     tool_printf("Serving %s read-write on http://%s:%ld/  (Ctrl-C to stop)\n",
                 (LONG)httpd_root, (LONG)dotted, (LONG)port);
+
+    if (httpd_term_page[0] != '\0')
+    {
+        if (!http_term_init())
+        {
+            (VOID)tool_sock_close(httpd_sb, lsock);
+            ami_free(httpd_info);
+            ami_free(httpd_fib2);
+            for (i = 0; i < httpd_conns; i++)
+                ami_free(httpd_conn[i].fib);
+            ami_free(httpd_conn);
+            CloseLibrary(httpd_sb);
+            FreeArgs(rda);
+            return RETURN_FAIL;
+        }
+
+        tool_printf("A Shell, with no password, at http://%s:%ld%s\n",
+                    (LONG)dotted, (LONG)port, (LONG)HTTPD_TERM_URL);
+
+        /*
+         * And whether that address has taken something over.  The terminal is
+         * decided before the path is resolved, so an entry of that name in the
+         * served drawer becomes unreachable; a file that stops answering
+         * without a word gets diagnosed as a network fault.
+         */
+        {
+            char probe[HTTP_PATH_MAX];
+            BPTR lock;
+
+            hs_copy(probe, sizeof(probe), httpd_root);
+            {
+                ULONG used = hs_len(probe);
+
+                /* "DH0:" already ends in its separator; "DH0:Work" does
+                   not.  http_path_root() has taken any trailing slash off, so
+                   these are the only two shapes there are. */
+                if (used > 0UL && probe[used - 1] != ':')
+                    (VOID)hs_append(probe, sizeof(probe), &used, "/");
+
+                (VOID)hs_append(probe, sizeof(probe), &used,
+                                HTTPD_TERM_URL + 1);
+            }
+
+            lock = Lock((CONST_STRPTR)probe, ACCESS_READ);
+            if (lock != (BPTR)0)
+            {
+                UnLock(lock);
+                tool_printf("  (that address now shadows %s)\n", (LONG)probe);
+            }
+        }
+    }
+
     (VOID)Flush(Output());
 
     httpd_serve(lsock);
+
+    http_term_shutdown();
 
     for (i = 0; i < httpd_conns; i++)
     {
