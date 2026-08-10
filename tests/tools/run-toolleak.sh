@@ -8,12 +8,12 @@
 # WHAT IT PROVES
 #
 #   Every command gives back everything it took.  Each row of the table below
-#   is run N times inside ONE boot, and free memory after the last run has to
-#   match free memory after the second.  The first run pays whatever a first
-#   open costs on this machine -- the library, the pool, the resolver's cache --
-#   and every run after it has to cost nothing.  AmigaOS reclaims nothing when
-#   a process exits, so a per-invocation cost of any size is memory that is
-#   gone until the machine is switched off.
+#   is run N times inside ONE boot, and by the end of the run an invocation has
+#   to cost nothing at all.  The first runs pay whatever a first open costs on
+#   this machine -- the library, the pool, the resolver's cache -- and the
+#   figure reported is the cost of one more call once that has settled.
+#   AmigaOS reclaims nothing when a process exits, so a per-invocation cost of
+#   any size is memory that is gone until the machine is switched off.
 #
 #   That is tests/tools/run-addifleak.sh's shape, generalised: one table, one
 #   row per (command, arm), rather than one script per command.  Adding a tool
