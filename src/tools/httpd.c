@@ -6763,6 +6763,8 @@ int main(int argc, char **argv)
 
     if (httpd_term_page[0] != '\0')
     {
+        http_term_trace(httpd_trace);
+
         if (!http_term_init())
         {
             (VOID)tool_sock_close(httpd_sb, lsock);

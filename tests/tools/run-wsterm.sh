@@ -163,7 +163,7 @@ echo "==> httpd on the guest at :${GUESTPORT}, forwarded to 127.0.0.1:${HOSTPORT
 set +e
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B slirp -m "$MODEL" "${CPUARG[@]}" \
     -t "$WINDOW" \
-    -a "DH0:Public $GUESTPORT TERMINAL=DH0:terminal.html -v" \
+    -a "DH0:Public $GUESTPORT TERMINAL=DH0:terminal.html TRACE" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
     "$STAGE/terminal.html" > "$ROOT/build/wsterm-emu.log" 2>&1 &
 RUNNER=$!

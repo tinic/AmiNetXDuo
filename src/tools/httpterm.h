@@ -79,6 +79,14 @@ VOID  http_term_shutdown(VOID);
 VOID  http_term_announce(const char *root, const char *dotted, UWORD port,
                          const char *url);
 
+/*
+ * Say what the Shell is doing: Execute()'s answer, and the first packets of a
+ * session by name.  It is here because "the Shell started and then did
+ * nothing" and "the Shell never started" look identical from the far end of a
+ * socket, and the difference between them is exactly which packets arrive.
+ */
+VOID  http_term_trace(BOOL on);
+
 /* TRUE when a session may be started: init happened and none is in flight. */
 BOOL  http_term_available(VOID);
 

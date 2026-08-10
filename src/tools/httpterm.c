@@ -153,6 +153,9 @@ static TermRunner term_runner;
 static UBYTE      term_active;      /* a Shell has been started             */
 static UBYTE      term_reaped;      /* and its exit code has been collected */
 static UBYTE      term_stopping;    /* it has been asked to go              */
+static UBYTE      term_trace;       /* say what the Shell is doing          */
+static UWORD      term_traced;      /* how many packets have been reported  */
+static UBYTE      term_said_rc;     /* Execute()'s answer has been printed   */
 static UWORD      term_stop_passes;
 static LONG       term_rc = -1;
 
@@ -261,12 +264,52 @@ static VOID term_retry(TermPipe *p)
     term_reply(pkt, n, 0);
 }
 
+VOID http_term_trace(BOOL on)
+{
+    term_trace = on ? 1 : 0;
+}
+
+/* What a packet is called, for the trace.  Only the ones a Shell on a pipe
+   actually sends; anything else is printed as its number, which is the thing
+   a person would then look up. */
+static const char *term_action(LONG type)
+{
+    switch (type)
+    {
+        case ACTION_READ:           return "READ";
+        case ACTION_WRITE:          return "WRITE";
+        case ACTION_END:            return "END";
+        case ACTION_IS_FILESYSTEM:  return "IS_FILESYSTEM";
+        case ACTION_SEEK:           return "SEEK";
+        case ACTION_WAIT_CHAR:      return "WAIT_CHAR";
+        case ACTION_FLUSH:          return "FLUSH";
+        case ACTION_SET_FILE_SIZE:  return "SET_FILE_SIZE";
+        default:                    return NULL;
+    }
+}
+
 VOID http_term_service(VOID)
 {
     struct Message *msg;
 
     if (term_port == NULL)
         return;
+
+    /*
+     * What Execute() said, printed from HERE and not from the runner: the
+     * runner is another Process and its Output() is the NIL: CreateNewProc
+     * gave it, so anything it printed would go nowhere.  That is the same
+     * mistake pr_CES made one round trip earlier and it is worth only making
+     * once.
+     */
+    if (term_trace && term_active && !term_said_rc &&
+        term_runner.rn_Done != 0)
+    {
+        term_said_rc = 1;
+        tool_printf("httpd: terminal: Execute() returned %ld (IoErr %ld)\n",
+                    term_runner.rn_Rc, (LONG)term_runner.rn_Err);
+        (VOID)Flush(Output());
+    }
 
     /*
      * Notice a Shell that has gone, before the packets are looked at.
@@ -352,6 +395,30 @@ VOID http_term_service(VOID)
     {
         struct DosPacket *pkt = (struct DosPacket *)msg->mn_Node.ln_Name;
         TermPipe         *p;
+
+        /*
+         * The first packets of a session, under TRACE.  Bounded, because a
+         * live session is a packet per keystroke and per line printed, and an
+         * unbounded trace of that is a log nobody reads.
+         *
+         * It exists because "the Shell started and then did nothing" and "the
+         * Shell never started" look identical from the far end of a socket,
+         * and the difference between them is exactly which packets arrive
+         * here.
+         */
+        if (term_trace && term_traced < 24)
+        {
+            const char *name = term_action(pkt->dp_Type);
+
+            term_traced++;
+            if (name != NULL)
+                tool_printf("httpd: terminal: %s on %ld\n", (LONG)name,
+                            pkt->dp_Arg1);
+            else
+                tool_printf("httpd: terminal: packet %ld\n",
+                            (LONG)pkt->dp_Type);
+            (VOID)Flush(Output());
+        }
 
         switch (pkt->dp_Type)
         {
@@ -709,6 +776,8 @@ BOOL http_term_start(VOID)
     term_reaped      = 0;
     term_stopping    = 0;
     term_stop_passes = 0;
+    term_traced      = 0;
+    term_said_rc     = 0;
     term_rc          = -1;
 
     return TRUE;
