@@ -227,6 +227,71 @@ VOID ami_sana2_rxprobe_deliver(AmiSana2If *iface, const UCHAR *frame,
     }
 }
 
+#ifdef AMINETXDUO_RX_VERIFY
+
+/*
+ * One line per frame the receive verifier rejected, with the three facts that
+ * attribute the rejection.  `rewalk` is a fresh walk of the same bytes: 0 with
+ * a summed lane is a carried-sum fault in the copy hook, 1 means the bytes in
+ * the packet fail on their own.  `partial` flags a checksum field holding
+ * exactly the transport pseudo-header sum (or its complement): the frame left
+ * a CHECKSUM_PARTIAL offload path with the hardware step never applied, so the
+ * fault is the sender's or a bridge's, not this stack's or the driver's.  The
+ * 2026-08 read-collapse rig was attributed with this line: every rejected
+ * segment was a burst first-transmission carrying the pseudo-header sum.
+ */
+static VOID ami_sana2_rxprobe_drop(NX_PACKET *packet, const AmiRxSlot *slot)
+{
+    const UCHAR *ip     = packet->nx_packet_prepend_ptr;
+    UINT         rewalk = NX_FALSE;
+    ULONG        seq    = 0;
+    ULONG        stored = 0;
+    ULONG        pseudo = 0;
+    UWORD        part   = 0;
+
+    (VOID)n68k_rx_verify(packet, &rewalk);
+
+    if (packet->nx_packet_length >= 40 && (ip[0] >> 4) == 4)
+    {
+        UWORD ihl   = (UWORD)((ip[0] & 0x0F) * 4);
+        ULONG total = (ULONG)ami_rxprobe_be16(&ip[2]);
+
+        if (ihl >= 20 && total >= (ULONG)ihl + 20 &&
+            total <= packet->nx_packet_length &&
+            (ip[9] == 6 || ip[9] == 17))
+        {
+            const UCHAR *tr    = ip + ihl;
+            ULONG        trlen = total - ihl;
+            UWORD        coff  = (ip[9] == 6) ? 16 : 6;
+
+            if (ip[9] == 6)
+                seq = ami_rxprobe_be32(&tr[4]);
+            stored = (ULONG)ami_rxprobe_be16(&tr[coff]);
+
+            pseudo  = (ULONG)ami_rxprobe_be16(&ip[12]);
+            pseudo += (ULONG)ami_rxprobe_be16(&ip[14]);
+            pseudo += (ULONG)ami_rxprobe_be16(&ip[16]);
+            pseudo += (ULONG)ami_rxprobe_be16(&ip[18]);
+            pseudo += (ULONG)ip[9] + trlen;
+            while ((pseudo >> 16) != 0UL)
+                pseudo = (pseudo & 0xFFFFUL) + (pseudo >> 16);
+
+            part = (stored == pseudo ||
+                    stored == ((~pseudo) & 0xFFFFUL)) ? 1 : 0;
+        }
+    }
+
+    AMI_ERROR("rxprobe drop: seq %08lx lane %s rewalk %ld partial %ld "
+              "stored %04lx pseudo %04lx len %ld",
+              (unsigned long)seq,
+              (slot != NULL && slot->summed != FALSE) ? "sum" : "walk",
+              (long)rewalk, (long)part,
+              (unsigned long)stored, (unsigned long)pseudo,
+              (long)packet->nx_packet_length);
+}
+
+#endif /* AMINETXDUO_RX_VERIFY */
+
 VOID ami_sana2_rxprobe_report(const AmiSana2If *iface)
 {
     const AmiRxSeqProbe *sp = &iface->seq;
@@ -407,6 +472,9 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
 
             if (drop != NX_FALSE)
             {
+#ifdef AMINETXDUO_RXPROBE
+                ami_sana2_rxprobe_drop(packet, slot);
+#endif
                 nx_packet_release(packet);
                 iface->stats.rx_errors++;
                 return;
