@@ -9,6 +9,9 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A program that sends to a closed port is told so. 0.17.0 said this and it was not true: the stack learned the ICMP error, but nothing in the library handed it to the socket that caused it, so a UDP send still waited out its timeout and a TCP connect reported "connection refused" whatever the router had actually said
+- The commands stop losing 2568 bytes every time `host` runs. It was the only client command that never closed the library it opened
+
 ## 0.20.1
 
 - `AddNetInterface` adds an interface to a network that is already running. It never did: against a running stack it opened the library, waited for any address the machine happened to have, and reported success without adding anything, so an interface taken out with `RemoveNetInterface` could not be put back until a reboot
