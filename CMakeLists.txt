@@ -621,6 +621,14 @@ if(NOT CMAKE_CROSSCOMPILING)
         add_test(NAME shadowed_sources
                  COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tools/check-shadowed-sources.sh"
                          "${CMAKE_CURRENT_SOURCE_DIR}")
+
+        # A forward-declared struct in bsdsocket_vectors.h makes GCC drop the
+        # __asm() register annotations of every vector that names it, with no
+        # diagnostic at any warning level. if_freenameindex() read its argument
+        # off the stack for as long as one was there.
+        add_test(NAME vector_abi
+                 COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tools/check-vector-abi.sh"
+                         "${CMAKE_CURRENT_SOURCE_DIR}")
     endif()
 endif()
 

@@ -21,6 +21,19 @@
 #include <sys/mbuf.h>
 #include <net/route.h>
 
+/*
+ * struct if_nameindex, for the four RFC 3493 vectors at the bottom of this
+ * file.  The whole type, not `struct if_nameindex;`: a tag left incomplete
+ * here and completed in the .c that defines the vector makes GCC compose the
+ * two function types on redeclaration, and the composite does not carry the
+ * __asm("a0") / __asm("a6") register annotations.  The vector then reads its
+ * arguments off the stack while its callers still pass them in registers, with
+ * no diagnostic at any warning level.  if_freenameindex() freed whatever was
+ * at sp+4 that way.  tools/check-vector-abi.sh keeps every type named here
+ * complete.
+ */
+#include "aminetxduo/ifindex.h"
+
 /* Used by the private vector below. */
 #ifdef AMINETXDUO_TLS_CONTEXT
 #include "aminetxduo/nxcontext.h"
@@ -561,8 +574,8 @@ LONG bsd_NetStackControl(
         register struct AmiSocketBase *SocketBase __asm("a6"));
 
 /* -0x372..-0x384, RFC 3493 section 4, PUBLIC. The first LVO extension past
-   the end of the NDK's table; revision 3 and up. aminetxduo/ifindex.h. */
-struct if_nameindex;
+   the end of the NDK's table; revision 3 and up. aminetxduo/ifindex.h, which
+   is included at the top of this file so struct if_nameindex is complete. */
 
 ULONG bsd_if_nametoindex(
         register const char           *ifname     __asm("a0"),
