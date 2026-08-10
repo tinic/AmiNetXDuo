@@ -511,6 +511,48 @@ static VOID bsd_dead_ring_reap(VOID)
     }
 }
 
+/*
+ * One retained base per owner, the most recently closed.
+ *
+ * A base belongs to one task, so this task is the only one that can call
+ * through either of them, and what it is about to do is close a second base
+ * having already closed a first.  The block held for the first is either still
+ * its own, in which case the newer close is the one worth protecting, or the
+ * pointer has been handed to a different task since, in which case the first
+ * owner is gone and there was nobody left to protect at all.  Both readings
+ * give the same answer.
+ *
+ * This is what a command run repeatedly costs.  Exec hands a freed process
+ * block straight back to the next process of the same size, so a command run
+ * ten times at boot is usually ten bases with the same sb_Task, and the ring
+ * would otherwise hold the first BSD_DEAD_RING of them.  Being alive is not
+ * the test that catches it: the pointer is live again, it is just somebody
+ * else's.
+ *
+ * The narrowing is real and worth stating: a program that closes two bases
+ * keeps the poisoned vectors of the newer only.  The ring it replaces was a
+ * machine-wide window of eight closes, so an unrelated burst of opens could
+ * already evict a program's own entry; per owner, that cannot happen.
+ */
+static VOID bsd_dead_ring_drop_owner(struct Task *owner)
+{
+    UINT i;
+
+    if (owner == NULL)
+        return;
+
+    for (i = 0; i < (UINT)BSD_DEAD_RING; i++)
+    {
+        if (bsd_dead_block[i] == NULL || bsd_dead_owner[i] != owner)
+            continue;
+
+        FreeMem(bsd_dead_block[i], bsd_dead_bytes[i]);
+        bsd_dead_block[i] = NULL;
+        bsd_dead_bytes[i] = 0;
+        bsd_dead_owner[i] = NULL;
+    }
+}
+
 /* Poison this block and retain it, freeing whatever it displaces. */
 static VOID bsd_retain_dead(UBYTE *block, ULONG neg, ULONG bytes,
                             struct Task *owner)
@@ -519,12 +561,28 @@ static VOID bsd_retain_dead(UBYTE *block, ULONG neg, ULONG bytes,
 
     bsd_poison_vectors(block, neg);
 
-    /* Before choosing a slot, not after: the reap usually empties one, and a
+    /* Before choosing a slot, not after: both of these usually empty one, and a
        ring with a free slot does not have to displace a base whose owner is
        still running and could still call through it. */
+    bsd_dead_ring_drop_owner(owner);
     bsd_dead_ring_reap();
 
     slot = bsd_dead_next;
+
+    {
+        UINT i;
+
+        for (i = 0; i < (UINT)BSD_DEAD_RING; i++)
+        {
+            UINT s = (UINT)((bsd_dead_next + i) % (UINT)BSD_DEAD_RING);
+
+            if (bsd_dead_block[s] == NULL)
+            {
+                slot = s;
+                break;
+            }
+        }
+    }
 
     if (bsd_dead_block[slot] != NULL)
         FreeMem(bsd_dead_block[slot], bsd_dead_bytes[slot]);
