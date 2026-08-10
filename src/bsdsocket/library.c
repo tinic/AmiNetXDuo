@@ -504,6 +504,7 @@ static VOID bsd_dead_ring_reap(VOID)
         if (bsd_task_alive(bsd_dead_owner[i]))
             continue;
 
+        AMI_CENSUS_DROP(bsd_dead_block[i]);
         FreeMem(bsd_dead_block[i], bsd_dead_bytes[i]);
         bsd_dead_block[i] = NULL;
         bsd_dead_bytes[i] = 0;
@@ -546,6 +547,7 @@ static VOID bsd_dead_ring_drop_owner(struct Task *owner)
         if (bsd_dead_block[i] == NULL || bsd_dead_owner[i] != owner)
             continue;
 
+        AMI_CENSUS_DROP(bsd_dead_block[i]);
         FreeMem(bsd_dead_block[i], bsd_dead_bytes[i]);
         bsd_dead_block[i] = NULL;
         bsd_dead_bytes[i] = 0;
@@ -585,7 +587,10 @@ static VOID bsd_retain_dead(UBYTE *block, ULONG neg, ULONG bytes,
     }
 
     if (bsd_dead_block[slot] != NULL)
+    {
+        AMI_CENSUS_DROP(bsd_dead_block[slot]);
         FreeMem(bsd_dead_block[slot], bsd_dead_bytes[slot]);
+    }
 
     bsd_dead_block[slot] = (APTR)block;
     bsd_dead_bytes[slot] = bytes;
@@ -603,6 +608,7 @@ static VOID bsd_dead_ring_flush(VOID)
     {
         if (bsd_dead_block[i] != NULL)
         {
+            AMI_CENSUS_DROP(bsd_dead_block[i]);
             FreeMem(bsd_dead_block[i], bsd_dead_bytes[i]);
             bsd_dead_block[i] = NULL;
             bsd_dead_bytes[i] = 0;
@@ -622,6 +628,12 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     mem = (UBYTE *)AllocMem(neg + pos, MEMF_PUBLIC);
     if (mem == NULL)
         return NULL;
+
+    /* Not an ami_alloc(), so the census does not see it on its own -- and this
+       is the block of the three leaks of 2026-08-09 that the census exists for:
+       one base per opener, freed by neither the opener nor this function but by
+       the dead ring, later, on somebody else's close. */
+    AMI_CENSUS_ADD(mem, neg + pos);
 
     /* Clone the jump table as well as the data: the child *is* a library. */
     CopyMem((UBYTE *)master - neg, mem, neg + pos);
@@ -712,6 +724,7 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     sig = ami_signal_alloc();
     if (sig < 0)
     {
+        AMI_CENSUS_DROP(mem);
         FreeMem(mem, neg + pos);
         return NULL;
     }
@@ -979,6 +992,7 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     struct AmiSocketBase *base   = SocketBase;
     struct AmiSocketBase *master = base;
+    BOOL                  stack_went_down = FALSE;
 
     if (base->sb_Master != NULL)
     {
@@ -1007,8 +1021,23 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
          */
         ObtainSemaphore(&master->sb_Lock);
         if (master->sb_StackRefs > 0 && --master->sb_StackRefs == 0)
+        {
             netstack_shutdown();
+            stack_went_down = TRUE;
+        }
         ReleaseSemaphore(&master->sb_Lock);
+
+        /*
+         * Outside the lock: the report writes to the serial port, which is not
+         * something to do while holding a semaphore every opener waits on.
+         *
+         * The stack is down but the library is still loaded, so this is the
+         * count for one run of one program, which is the granularity a leak
+         * shows up at.  The netdb tables are deliberately still held here and
+         * are freed by the expunge; that is why there are two scopes.
+         */
+        if (stack_went_down)
+            AMI_CENSUS_REPORT("bsd-stack-down");
     }
 
     if (master->sb_Lib.lib_OpenCnt > 0)
@@ -1169,6 +1198,15 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
 
     /* Every retained child points into the segment about to unload. */
     bsd_dead_ring_flush();
+
+    /*
+     * The last moment anything of ours exists.  Everything the library ever
+     * allocated has now been given back -- the netdb tables above, the runtime,
+     * the retained bases -- so anything the census still holds is memory that
+     * survives the segment, which on AmigaOS means until the machine is
+     * rebooted.  tools/alloc-census.sh gates on this line.
+     */
+    AMI_CENSUS_REPORT("bsd-expunge");
 
     Remove((struct Node *)base);
     FreeMem((UBYTE *)base - neg, neg + pos);

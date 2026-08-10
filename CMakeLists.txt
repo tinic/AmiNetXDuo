@@ -241,6 +241,29 @@ if(AMINETXDUO_NXCENSUS)
     add_compile_definitions(AMINETXDUO_NXCENSUS)
 endif()
 
+# Tag every ami_alloc() with the file and line it came from, and print what is
+# still held when the stack tears down.  OFF, and byte-identical when off: the
+# tags are string literals, and on this target string literals live in plain
+# .text (the note at the head of src/tools/tool_devdiag.c), so a shipping
+# binary would carry every one of them.
+#
+# ms_Live in aminetxduo/compat.h already says HOW MANY blocks are outstanding.
+# This says WHICH, which is the question every leak found so far turned on.
+# include/aminetxduo/alloccensus.h; the report is read by tools/alloc-census.sh.
+option(AMINETXDUO_ALLOCCENSUS "Tag allocations and report the outstanding set" OFF)
+if(AMINETXDUO_ALLOCCENSUS)
+    add_compile_definitions(AMINETXDUO_ALLOCCENSUS)
+endif()
+
+# How many live allocations the census table holds.  Only meaningful with
+# AMINETXDUO_ALLOCCENSUS; the report says `lost=` when it was not enough.
+set(AMINETXDUO_ALLOCCENSUS_SLOTS "2048" CACHE STRING
+    "Allocation census table size, a power of two")
+if(AMINETXDUO_ALLOCCENSUS)
+    add_compile_definitions(
+        AMINETXDUO_ALLOCCENSUS_SLOTS=${AMINETXDUO_ALLOCCENSUS_SLOTS})
+endif()
+
 # Count how often the scheduling primitives are entered.  The PC sampler says
 # where samples land; this says how many calls they landed in, and the two
 # together give a cost per call.  OFF, and free when off, see the counter

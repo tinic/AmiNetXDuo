@@ -258,6 +258,16 @@ aminetxduo_add_tool(tool_traceroute traceroute SOURCES traceroute.c toolsock.c)
 aminetxduo_add_tool(tool_tftp    tftp     SOURCES tftp.c  toolsock.c)
 aminetxduo_add_tool(tool_whois   whois    SOURCES whois.c toolsock.c)
 
+# CensusProbe is the guest half of the allocation census, and exists only when
+# the census does.  It is not a command anybody installs: it walks the sites an
+# ordinary command walks and then provokes the library expunge, which is the
+# only moment at which "nothing is outstanding" is a meaningful claim and which
+# nothing else in the tree reaches.  src/tools/censusprobe.c says why.
+if(AMINETXDUO_ALLOCCENSUS)
+    aminetxduo_add_tool(tool_censusprobe CensusProbe
+        SOURCES censusprobe.c toolsock.c)
+endif()
+
 # httpd is the first SERVER here, and config-only in the same sense as the
 # clients: bsdsocket.library through its published vectors, and no part of the
 # stack linked in.  It is the only thing in the tree that holds several

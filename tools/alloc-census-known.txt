@@ -1,0 +1,44 @@
+# The allocation census known set, read by tools/alloc-census.sh.
+#
+#   scope  site  bytes  count
+#
+# Both numbers are ceilings: a listed site that grows fails the run, and so
+# does any site that is not listed at all.
+#
+# ---------------------------------------------------------------- bsd-expunge
+#
+# EMPTY, AND IT MUST STAY EMPTY.  This is the segment being unloaded: nothing
+# of ours exists afterwards, so anything outstanding here is memory that
+# survives until the machine is rebooted.  A line added to this scope is a leak
+# somebody has to own, never a cost to be accepted, and it is reported with its
+# site and byte count on the day it appears.
+#
+# (no entries)
+#
+# ------------------------------------------------------------- bsd-stack-down
+#
+# The LAST CLOSE, when the stack comes down and the library is still loaded.
+# These four are not leaks: they are what the library is entitled to hold
+# between one program and the next, and bsd_lib_expunge() frees every one of
+# them, which is why the scope above is empty.  They are listed so that GROWTH
+# is a failure -- this is the scope every existing on-Amiga harness reaches
+# without having to provoke an expunge, so it is the cheap gate.
+#
+# Measured on A1200/SLIRP with tests/netstack/devs, identical after 1, 2 and 3
+# rounds of CensusProbe and again under tests/stack/run-stack.sh, whose
+# workload is unrelated.  Four blocks each because the file-backed tables are
+# services, protocols, networks and hosts.
+#
+#   config_file.c:63   the parsed DEVS:Internet files, held so the next
+#                      program does not re-read them
+#   netdb.c:177/179    the tables built from them, ditto
+#   library.c:636      ONE retained child base, poisoned, kept for as long as
+#                      the task that closed it is still running so that a call
+#                      through a stale base lands somewhere diagnosable rather
+#                      than in somebody else's memory.  2568 bytes per live
+#                      owner, and it is a deliberate trade.
+#
+bsd-stack-down config_file.c:63 5291 4
+bsd-stack-down netdb.c:179 4052 4
+bsd-stack-down netdb.c:177 3280 4
+bsd-stack-down library.c:636 2568 1

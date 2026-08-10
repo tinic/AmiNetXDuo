@@ -34,6 +34,19 @@ VOID  ami_free(APTR ptr);
 ULONG ami_alloc_count(VOID);          /* outstanding allocations */
 
 /*
+ * The census, when it is built, takes over the two allocating names so that
+ * every caller records where it called from.  The functions keep existing, and
+ * src/common/compat.c undefines these to define them; nothing else should.
+ */
+#include "aminetxduo/alloccensus.h"
+
+#ifdef AMINETXDUO_ALLOCCENSUS
+#  define ami_alloc(size)               ami_alloc_tagged((size), AMI_CENSUS_SITE)
+#  define ami_alloc_flags(size, memf)   ami_alloc_flags_tagged((size), (memf), \
+                                                               AMI_CENSUS_SITE)
+#endif
+
+/*
  * What the stack currently owns, and the most it has ever owned.  A suspected
  * leak is answerable only against a number that belongs to us: AvailMem falls
  * for every program on the machine, and a user watching it cannot say whose.
