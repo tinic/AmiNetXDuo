@@ -293,6 +293,7 @@ if [ -n "${CMDDIR:-}" ]; then
 fi
 
 [ -f "$CMD_ADDIF" ] && cp "$CMD_ADDIF" "$STAGE/AddNetInterface"
+[ -z "${AMINETXDUO_EXTRA_DRIVER:-}" ] || cp "$AMINETXDUO_EXTRA_DRIVER" "$STAGE/devs/$(basename "$AMINETXDUO_EXTRA_DRIVER")"
 [ -f "$CMD_PING" ]  && cp "$CMD_PING"  "$STAGE/ping"
 
 # AmiTCP_NG's configuration, staged where SYS:AmiTCP finds it.

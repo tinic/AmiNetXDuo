@@ -372,9 +372,17 @@ typedef struct
  * So a number above 33580 has been refused once on that workload. It stopped
  * being a ceiling the day the pool budget arrived, and became a second,
  * unrelated bound that happened to be the tighter one on any machine with more
- * than about 2.3 MB free. Derived, it is 50,176 at the share above, and that
+ * than about 2.3 MB free. Derived, it was 50,176 at the share above, and that
  * window is the middle row of the table there: raw loss and effective loss and
  * read all indistinguishable from the 33580 it replaces.
+ *
+ * It is 100,352 now, because AMI_POOL_MAX_PACKETS went to 512 and this is a
+ * share of it. That is the same number of packets pinned as the quarter share
+ * refused in the table above, out of twice the pool, so the fraction that
+ * measurement was about is unchanged at an eighth and the packets left over
+ * for everybody else double. It is also out of reach below about 13.6 MB free,
+ * where AvailMem()/16 is what sizes the pool: the lab's 8 MB A1200 gets 368
+ * packets and a 72,128-byte window, and the ceiling never applies.
  *
  * Every byte of window is a byte of packet pool somebody else cannot have, and
  * this is the packet pool saying so in its own units.

@@ -339,6 +339,13 @@ fi
 cp "$A2065" "$STAGE/devs/a2065.device"
 mkdir -p "$STAGE/devs/Networks"
 cp "$A2065" "$STAGE/devs/Networks/a2065.device"
+[ -z "${AMINETXDUO_EXTRA_DRIVER:-}" ] || {
+    cp "$AMINETXDUO_EXTRA_DRIVER" "$STAGE/devs/$(basename "$AMINETXDUO_EXTRA_DRIVER")"
+    mkdir -p "$STAGE/devs/Networks"
+    cp "$AMINETXDUO_EXTRA_DRIVER" "$STAGE/devs/Networks/$(basename "$AMINETXDUO_EXTRA_DRIVER")"
+}
+[ -z "${AMINETXDUO_IFCONFIG:-}" ] || \
+    cp "$AMINETXDUO_IFCONFIG" "$STAGE/devs/NetInterfaces/eth0"
 
 if [ -n "$LIBBSD" ]; then cp "$LIBBSD" "$STAGE/libs/bsdsocket.library"; fi
 if [ -n "$LIBUG" ] && [ -f "$LIBUG" ]; then
@@ -440,7 +447,7 @@ if [ "$LOSSCAP" = "1" ] && [ "$DIAG" = "0" ]; then
 fi
 
 set +e
-"$ROOT/tools/amiberry-run.sh" -N a2065 -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" \
+"$ROOT/tools/amiberry-run.sh" -N "${AMINETXDUO_BOARD:-a2065}" -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" \
     "$SMOKE" "${STAGED[@]}"
 RUN_RC=$?
 set -e

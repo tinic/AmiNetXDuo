@@ -134,62 +134,59 @@
 #define NX_ENABLE_EXTENDED_NOTIFY_SUPPORT
 
 /*
- * ACK every second full-sized segment (RFC 1122, 4.2.3.2).
+ * NOT DEFINED, and the else arm is the policy.
  *
- * NX_TCP_ACK_EVERY_N_PACKETS is not defined anywhere in the vendored tree, so
- * by default the `need_ack` block in nx_tcp_socket_state_data_check.c is
- * compiled out.  Two triggers remain, neither per-segment: a window-update ACK
- * once the receive window has re-opened by half of
- * nx_tcp_socket_rx_window_default (nx_tcp_socket_state_data_check.c:1135,
- * nx_tcp_socket_receive.c:212), and the 200 ms delayed-ACK timer.  ACK interval
- * is therefore proportional to the window, and the timer paces it whenever the
- * application cannot consume half a window inside 200 ms, so raising the
- * window alone is harmful.  tests/trace/, A1200 profile, 524288 bytes over the
- * wire, 8 KB -> 32 KB receive window and nothing else changed: 161 -> 89 KB/s,
- * ACK delay p50 6.7 -> 71.4 ms, p90 8.7 -> 187.4 ms, 26 of 59 ACKs in the
- * 200 ms delayed bucket, a 14-deep duplicate-ACK run, one 1361 ms gap between
- * data segments, and no retransmissions.  With this defined the same 32 KB
- * build returns to 179 KB/s and p50 2.0 ms, 148 of 208 ACKs inside 2 ms.
- *
- * At the current 8 KB window throughput is unchanged, half of 8192 is already
- * about three segments, but ACK latency drops from a 6.7 ms median to 2.0 ms,
- * which every request/response exchange pays (HTTP, DNS, each leg of a TLS
- * handshake).
- *
- * Eight rather than two, because on a SANA-II card an acknowledgment is not
- * free.  Every one is a CMD_WRITE: a BeginIO, a programmed-I/O push to the
- * card, a board interrupt and a ReplyMsg.  Peer-side captures of the same
- * 1 MiB fitz read on an X-Surf-100 (A1200, 68020) count 780 data segments per
- * MiB either way, and acknowledgments back:
+ * NX_TCP_ACK_EVERY_N_PACKETS acknowledges every Nth segment.  N is a constant
+ * and the receive buffer is not, so the acknowledgment rate stops tracking the
+ * thing it stands in for the moment the window moves.  Its own sweep says so:
+ * on an X-Surf-100 (A1200, 68020) over a 1 MiB fitz read, 780 data segments
+ * per MiB at every N, and
  *
  *     N     ACKs/MiB   frames/MiB   read KB/s
  *     2       423.0      1428.5       382
  *     4       225.5      1241.1       391
- *     8       132.5      1170.3       433
+ *     8       132.5      1170.3       437
  *    16        82.0      1092.1       383 (262/445/444, unstable)
  *
- * Roadshow 1.15 on the same card and transfer: 36.8 ACKs/MiB, 1104.6
- * frames/MiB, 445 KB/s.  Driver CPU over the three arms is a fixed 0.42 to
- * 0.53 ms per frame plus a per-byte term, and any two of them predict the
- * third's driver time within 5%, so the frame count is the whole of the
- * difference and at N=2 seven acknowledgments in eight are ours to withdraw.
- * Write is unaffected (376 -> 381 KB/s); this counter only governs
- * acknowledgments for data received.
+ * Sixteen is where it breaks, because RFC 6928's initial window is ten
+ * segments and a threshold above it leaves a sender in slow start with nothing
+ * to send until the delayed-ACK timer fires.  Eight was the largest value that
+ * could not, which made the whole scale a search between a floor set by the
+ * peer's initial window and a ceiling set by nothing in particular.
  *
- * Eight is the largest value that cannot leave a sender in slow start waiting,
- * because RFC 6928's initial window is ten segments: the peer can always put
- * more on the wire than it takes to force the next acknowledgment.  Sixteen
- * exceeds it and measures as one stalled repetition in three.  Loss recovery
- * does not depend on the counter either way, since an out-of-sequence segment
- * forces an immediate acknowledgment on its own
- * (nx_tcp_socket_state_data_check.c:611, 671), so the duplicates that drive
- * fast retransmit are still one per segment.  The 200 ms delayed-ACK timer
- * remains the RFC 1122 4.2.3.2 backstop for everything below the threshold.
+ * Undefining it alone is worse, not better, and that was measured before this:
+ * with no per-segment trigger at all the only ones left are the window-update
+ * ACK and the 200 ms delayed-ACK timer, and the timer paces the connection
+ * whenever the application cannot consume half a window inside 200 ms.
+ * tests/trace/, A1200, 524288 bytes, 8 KB -> 32 KB window and nothing else:
+ * 161 -> 89 KB/s, ACK delay p50 6.7 -> 71.4 ms, 26 of 59 ACKs in the 200 ms
+ * bucket.  A stack still needs a data-driven acknowledgment clock; what it
+ * does not need is one denominated in segments.
  *
- * Cost: one ULONG per NX_TCP_SOCKET (already in the struct, already initialised
- * by nx_tcp_socket_create.c:154) and one comparison per received data segment.
+ * So the else arm in nx_tcp_socket_state_data_check.c acknowledges when half
+ * the receive buffer is outstanding -- the same number
+ * _nx_tcp_socket_window_update_step() uses for the window update, applied to
+ * rx_sequence - rx_sequence_acked.  One threshold, two places, and it moves
+ * with BSD_TCP_WINDOW_CEILING and with the packet pool underneath it.  On a
+ * small machine the pool gives a small window, half of it is a few segments,
+ * and acknowledgments stay frequent, which is what a small window needs; the
+ * fixed eight had the opposite property and could sit below a window it had
+ * already filled.
+ *
+ * Same card and transfer, against the N=8 row above: 3.1 pure ACKs/MiB, 906
+ * frames/MiB, 476 KB/s, effective loss 0.000% either way.  Roadshow 1.15 is
+ * 36.8 ACKs/MiB, 1104.6 frames/MiB, 445 KB/s.  Acknowledgments per MiB are not
+ * all of it -- most of ours now ride out on the request the client sends for
+ * the next chunk -- and the frame count is: driver CPU is 0.42 to 0.53 ms a
+ * frame plus a per-byte term, so on this machine a frame withdrawn is CPU
+ * returned.
+ *
+ * Out-of-sequence data still forces an immediate acknowledgment on its own
+ * (nx_tcp_socket_state_data_check.c:611, 671), so fast retransmit sees the
+ * same one duplicate per segment it always did, and the 200 ms delayed-ACK
+ * timer is still the RFC 1122 4.2.3.2 backstop underneath everything.
  */
-#define NX_TCP_ACK_EVERY_N_PACKETS              8
+/* #define NX_TCP_ACK_EVERY_N_PACKETS -- see above, deliberately NOT defined. */
 
 /*
  * Retransmit with exponential backoff (RFC 6298 5.5).
