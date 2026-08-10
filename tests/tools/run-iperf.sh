@@ -229,6 +229,26 @@ EXPECTED_BLOCKS=$(wc -l < "$STAGE/commands.txt" | tr -d ' ')
 rm -rf "$PEERLOG"
 mkdir -p "$PEERLOG"
 
+# Where the peers run.  On the bridged arm they must be on the third machine:
+# a frame the emulator host sends to its own bridged guest never comes back to
+# that NIC's pcap, so a peer here would be unreachable from the guest while
+# being reachable from everywhere else.  Locally otherwise, where SLIRP's
+# gateway IS this machine.
+PEER_PY="$ROOT/tests/tools/iperfpeer.py"
+if [ "$SERVER_ARMS" = yes ]; then
+    REMOTE_PY="/tmp/iperfpeer-$AMINETXDUO_RUN_TAG.py"
+    scp -q "$PEER_PY" "$PEERHOST:$REMOTE_PY" || {
+        echo "cannot copy the peer to $PEERHOST" >&2; exit 2; }
+    ssh -o ConnectTimeout=10 "$PEERHOST" "python3 $REMOTE_PY --help" \
+        >/dev/null 2>&1 || {
+        echo "$PEERHOST cannot run the peer; it needs python3" >&2; exit 2; }
+    peer_cmd() { ssh -o ConnectTimeout=10 "$PEERHOST" \
+                     "python3 $REMOTE_PY $*"; }
+    echo "==> peers run on $PEERHOST, the guest is $ADDRESS"
+else
+    peer_cmd() { python3 "$PEER_PY" "$@"; }
+fi
+
 PEER_PIDS=()
 stop_peers() {
     local p
@@ -242,8 +262,7 @@ PEER_LIFE=$((TIMEOUT + 120))
 
 start_peer() { # logname args...
     local name="$1"; shift
-    python3 "$ROOT/tests/tools/iperfpeer.py" "$@" \
-        > "$PEERLOG/$name.out" 2> "$PEERLOG/$name.err" &
+    peer_cmd "$@" > "$PEERLOG/$name.out" 2> "$PEERLOG/$name.err" &
     PEER_PIDS+=("$!")
 }
 
@@ -258,9 +277,9 @@ start_sender() { # logname proto port
     (
         deadline=$(( $(date +%s) + PEER_LIFE ))
         while [ "$(date +%s)" -lt "$deadline" ]; do
-            if out=$(python3 "$ROOT/tests/tools/iperfpeer.py" send "$proto" \
-                        "$ADDRESS" --port "$port" --seconds "$SECS" \
-                        --kbit 2000 2>>"$PEERLOG/$name.err"); then
+            if out=$(peer_cmd send "$proto" "$ADDRESS" --port "$port" \
+                        --seconds "$SECS" --kbit 2000 \
+                        2>>"$PEERLOG/$name.err"); then
                 case "$proto" in
                     udp) case "$out" in *peer_report=1*) echo "$out"; exit 0 ;; esac ;;
                     *)   echo "$out"; exit 0 ;;
