@@ -161,6 +161,36 @@ const char *iperf_limits_check(unsigned long seconds, unsigned long kbytes,
     return NULL;
 }
 
+unsigned long iperf_slice_budget(unsigned long seconds, unsigned long kbytes,
+                                 unsigned long buflen)
+{
+    /*
+     * A slice either does up to 64 sends or waits up to 20 ms, so a second of
+     * a real run is a few hundred slices at the very most.  10,000 a second is
+     * more than an order of magnitude of headroom, and an hour's run is then
+     * 36 million, which still cannot be reached by anything but a stopped
+     * clock.
+     */
+    unsigned long budget;
+
+    if (seconds != 0)
+        budget = seconds * 10000UL;
+    else
+    {
+        /* A byte target: one slice per send, plus the same headroom. */
+        unsigned long sends = (buflen != 0)
+                                  ? ((kbytes * 1024UL) / buflen) + 1UL : 1UL;
+        budget = sends * 100UL;
+    }
+
+    /* A floor, so that a one-second run still has room for a handshake and a
+       peer that takes its time. */
+    if (budget < 20000UL)
+        budget = 20000UL;
+
+    return budget;
+}
+
 unsigned long iperf_bits_per_sec(unsigned long bytes_hi, unsigned long bytes_lo,
                                  unsigned long ms)
 {

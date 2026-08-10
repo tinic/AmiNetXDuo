@@ -169,6 +169,23 @@ void iperf_add64(unsigned long *hi, unsigned long *lo, unsigned long add);
 const char *iperf_limits_check(unsigned long seconds, unsigned long kbytes,
                                unsigned long buflen, unsigned long port);
 
+/*
+ * How many slices a run of this shape may take before it is declared stuck.
+ *
+ * The deadline is a clock comparison, so a clock that stops advancing means a
+ * deadline that never arrives and a transfer that never ends.  That is not a
+ * hypothetical: the host-side iperf 2.2.1 used to pin this protocol down
+ * wedged on a failed clock_nanosleep() and spun for seventeen hours, filling a
+ * disk with interval reports.  A timing call that fails has to end the run
+ * with a diagnosis, not become a busy loop, so there is a second bound that
+ * does not consult the clock at all.
+ *
+ * Generous on purpose: this is a backstop, not a schedule.  It must never fire
+ * on a slow machine, only on one whose clock has stopped.
+ */
+unsigned long iperf_slice_budget(unsigned long seconds, unsigned long kbytes,
+                                 unsigned long buflen);
+
 #ifdef __cplusplus
 }
 #endif

@@ -347,9 +347,45 @@ static void test_limits(void)
     CHECK(IPERF_MAX_SECONDS <= 3600UL);
 }
 
+static void test_slice_budget(void)
+{
+    printf("the bound that does not consult the clock\n");
+
+    /*
+     * Everything else here decides it has finished by comparing two clock
+     * readings, so a clock that stops advancing is a run that never ends.
+     * That is the failure the host-side iperf 2.2.1 had: a timing call failed
+     * and it spun for seventeen hours.  This is the second bound, and it
+     * counts slices instead of milliseconds.
+     */
+    CHECK(iperf_slice_budget(10, 0, 4096) == 100000UL);
+    CHECK(iperf_slice_budget(1, 0, 4096) == 20000UL);   /* the floor */
+
+    /* Monotonic in the duration, so a longer run never gets a smaller
+       budget. */
+    CHECK(iperf_slice_budget(60, 0, 4096) > iperf_slice_budget(10, 0, 4096));
+    CHECK(iperf_slice_budget(IPERF_MAX_SECONDS, 0, 4096)
+          > iperf_slice_budget(600, 0, 4096));
+
+    /* Generous by a wide margin: a slice does at most 64 sends or waits 20 ms,
+       so a real second is a few hundred slices.  This must never fire on a
+       slow machine, only on a stopped clock. */
+    CHECK(iperf_slice_budget(10, 0, 4096) > 10UL * 1000UL);
+
+    /* A byte target is bounded by sends rather than by seconds, and still
+       gets a budget rather than none. */
+    CHECK(iperf_slice_budget(0, 64, 4096) >= 20000UL);
+    CHECK(iperf_slice_budget(0, 4UL * 1024UL * 1024UL, 4096) > 100000UL);
+
+    /* Never zero, whatever it is asked, because zero would fire at once. */
+    CHECK(iperf_slice_budget(0, 0, 0) > 0);
+    CHECK(iperf_slice_budget(0, 1, 64) > 0);
+}
+
 int main(void)
 {
     test_limits();
+    test_slice_budget();
     test_pattern();
     test_datagram();
     test_report_roundtrip();

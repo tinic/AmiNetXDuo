@@ -97,13 +97,23 @@ static BOOL iperf_udp(const IperfRun *run)
                ? TRUE : FALSE;
 }
 
-/* The clock starts when the first byte moves, not when the socket opened: a
-   connect() on a slow link would otherwise be charged to the transfer. */
+/*
+ * The clock starts when the first byte moves, not when the socket opened: a
+ * connect() on a slow link would otherwise be charged to the transfer.
+ *
+ * clock_on rather than `t_begin == 0`, because 0 is a reading the clock
+ * really returns -- ami_millis() accumulates from the previous call and so
+ * answers 0 the first time it is asked.  With 0 meaning "not started" the
+ * first slice ran its whole burst before any target check could pass, and a
+ * `-n 64` run moved 256 KB instead of 64.  The same conflation is what would
+ * turn a timer that never starts into a transfer that never ends.
+ */
 static VOID iperf_clock_start(IperfRun *run)
 {
-    if (run->t_begin == 0)
+    if (!run->clock_on)
     {
-        run->t_begin  = ami_millis();
+        run->clock_on  = 1;
+        run->t_begin   = ami_millis();
         run->t_lastact = run->t_begin;
 
         if (run->plan.seconds != 0)
@@ -114,7 +124,7 @@ static VOID iperf_clock_start(IperfRun *run)
 /* TRUE once the run has moved everything it was asked to move. */
 static BOOL iperf_target_met(const IperfRun *run, ULONG now)
 {
-    if (run->t_begin == 0)
+    if (!run->clock_on)
         return FALSE;
 
     if (run->t_deadline != 0 && (LONG)(now - run->t_deadline) >= 0)
@@ -265,6 +275,30 @@ LONG iperf_begin(IperfRun *run, struct Library *sb, const IperfPlan *plan,
     run->res.dir = plan->dir;
 
     iperf_buf = buf;
+
+    run->slice_max = iperf_slice_budget(plan->seconds, plan->kbytes,
+                                        plan->buflen);
+
+    /*
+     * Force timer.device open before anything is timed, as ping.c does, and
+     * then check the clock actually moves.  ami_millis() answers 0 when it
+     * cannot open the timer, and a measurement without a clock is not one:
+     * better to say so here than to run to a deadline that never arrives.
+     */
+    (VOID)ami_millis();
+    {
+        ULONG a = ami_millis();
+        ULONG b;
+
+        (VOID)tool_delay_ticks(2);
+        b = ami_millis();
+
+        if (a == b)
+        {
+            iperf_fail(run, "the system timer is not running", 0);
+            return -1;
+        }
+    }
 
     if (plan->kbytes != 0)
     {
@@ -504,7 +538,7 @@ static VOID iperf_slice_recv(IperfRun *run)
     ULONG now = ami_millis();
     LONG  burst;
 
-    if (run->t_begin != 0 && iperf_target_met(run, now))
+    if (run->clock_on && iperf_target_met(run, now))
     {
         run->res.ms = now - run->t_begin;
         run->state  = ST_DONE;
@@ -589,7 +623,7 @@ static VOID iperf_slice_recv(IperfRun *run)
         {
             /* The sender closed.  That is the end of a TCP test, and the
                normal way `iperf -c` finishes. */
-            run->res.ms = (run->t_begin != 0)
+            run->res.ms = run->clock_on
                               ? (ami_millis() - run->t_begin) : 0;
             run->state  = ST_DONE;
             return;
@@ -600,7 +634,7 @@ static VOID iperf_slice_recv(IperfRun *run)
 
             if (n < 0 && e != TOOL_EWOULDBLOCK && e != TOOL_EINTR)
             {
-                if (e == TOOL_ECONNRESET && run->t_begin != 0)
+                if (e == TOOL_ECONNRESET && run->clock_on)
                 {
                     /* A peer that resets after sending is still a completed
                        measurement; a reset before any byte is a failure. */
@@ -619,7 +653,7 @@ static VOID iperf_slice_recv(IperfRun *run)
 
         now = ami_millis();
 
-        if (run->t_begin != 0 && (now - run->t_lastact) >= IPERF_IDLE_MS)
+        if (run->clock_on && (now - run->t_lastact) >= IPERF_IDLE_MS)
         {
             run->res.ms = run->t_lastact - run->t_begin;
             run->state  = ST_DONE;
@@ -726,6 +760,20 @@ static VOID iperf_slice_report(IperfRun *run)
 
 LONG iperf_slice(IperfRun *run)
 {
+    /*
+     * The bound that does not consult the clock.  Everything else here decides
+     * it has finished by comparing two readings, so a clock that stops
+     * advancing means a run that never ends: it would send until something
+     * killed it, and a caller with its output redirected would have an
+     * unbounded writer.  Counting slices cannot be fooled that way.
+     */
+    if (run->state != ST_DONE && run->state != ST_FAILED
+        && ++run->slices > run->slice_max)
+    {
+        iperf_fail(run, "the clock stopped advancing", 0);
+        return IPERF_FAILED;
+    }
+
     switch (run->state)
     {
     case ST_CONNECT: iperf_slice_connect(run); break;
@@ -750,7 +798,7 @@ VOID iperf_abort(IperfRun *run)
     if (run->state == ST_DONE || run->state == ST_FAILED)
         return;
 
-    if (run->t_begin != 0 && run->res.ms == 0)
+    if (run->clock_on && run->res.ms == 0)
         run->res.ms = ami_millis() - run->t_begin;
 
     run->state = ST_DONE;
@@ -777,7 +825,7 @@ VOID iperf_end(IperfRun *run, IperfResult *out)
         run->lsock = -1;
     }
 
-    if (run->res.ms == 0 && run->t_begin != 0)
+    if (run->res.ms == 0 && run->clock_on)
         run->res.ms = ami_millis() - run->t_begin;
 
     run->res.bits = iperf_bits_per_sec(run->res.bytes_hi, run->res.bytes_lo,

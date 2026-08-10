@@ -92,7 +92,19 @@ typedef struct IperfRun
 
     UBYTE           state;
     UBYTE           fin_tries;
-    UWORD           pad;
+    UBYTE           clock_on;       /* t_begin is a reading, not "unset"    */
+    UBYTE           pad;
+
+    /*
+     * How many slices this run may take before it is declared stuck.  A
+     * measurement whose clock stops advancing would otherwise never reach its
+     * deadline and would send for ever -- which is not hypothetical: the
+     * host-side iperf 2.2.1 used to pin this protocol down wedged on a failed
+     * clock_nanosleep() and spun for seventeen hours.  A timing call that
+     * fails has to end the run with a diagnosis, not become a busy loop.
+     */
+    ULONG           slices;
+    ULONG           slice_max;
 
     LONG            lsock;          /* listening socket, server directions  */
     LONG            sock;
