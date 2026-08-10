@@ -76,6 +76,14 @@ TOOL_WEAK BOOL netstack_interface_is_up(UWORD index)
     return FALSE;
 }
 
+TOOL_WEAK LONG netstack_interface_start(const AmiIfConfig *cfg,
+                                        UWORD *index_out)
+{
+    (VOID)cfg;
+    (VOID)index_out;
+    return AMI_NET_ERR_STATE;
+}
+
 TOOL_WEAK LONG netstack_resolve(const char *name, ULONG *addr_out,
                                 ULONG timeout_ticks)
 {
