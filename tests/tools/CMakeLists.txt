@@ -219,6 +219,21 @@ endif()
 target_compile_options(test_cycledrill PRIVATE -Wall -Wextra)
 set_target_properties(test_cycledrill PROPERTIES OUTPUT_NAME "CycleDrill")
 
+# ApiDrill calls every one of the 150 LVOs in a loop and asserts the machine is
+# where it started: AvailMem, NETSTATUS_HEALTH's allocations and sockets, and
+# the three things that live on the CALLER and not in the library, tc_SigAlloc,
+# SysBase->PortList and SysBase->SemaphoreList.  The commands reach about
+# thirty entry points; the rest is what nothing has ever watched.  The table is
+# checked for being dense and in LVO order, so a vector nobody wrote a row for
+# shifts every later row and fails rather than going quietly uncovered.
+add_executable(test_apidrill apidrill.c)
+target_include_directories(test_apidrill PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_apidrill PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_apidrill PRIVATE -Wall -Wextra)
+set_target_properties(test_apidrill PROPERTIES OUTPUT_NAME "ApiDrill")
+
 # ResolveBreak times a name lookup against a name server on a network nothing
 # routes (RFC 5737 TEST-NET-1), with and without the break signal arriving in
 # the middle.  A build cannot show either half and neither can a lookup against
