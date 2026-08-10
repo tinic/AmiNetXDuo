@@ -1,0 +1,588 @@
+/*
+ * The tests for src/tools/httpws.c, RFC 6455 on the wire.
+ *
+ * WHY THIS IS A TEST AND NOT A REVIEW
+ *
+ *   Everything here fails silently.  An accept computed over the key without
+ *   the GUID is 28 characters of base64 and every browser refuses the
+ *   connection with no diagnostic the server can see.  A mask applied from the
+ *   wrong offset when a frame is split across two reads produces a payload
+ *   that is not an error, it is different bytes -- so a shell behind it runs a
+ *   command nobody typed.  A control frame accepted while fragmented, or a
+ *   64-bit length whose top word was not checked, is a length the decoder and
+ *   the client disagree about, and after that the two are reading different
+ *   frames on the same socket for ever.
+ *
+ *   So the vectors are written down.  The handshake pair is RFC 6455 1.3's
+ *   own, digit for digit; the frames are 5.7's; the rest are the cases the
+ *   specification says a server MUST fail, each fed BOTH whole and one byte at
+ *   a time, because a state machine that is right on a whole buffer and wrong
+ *   across a split is the failure this decoder exists to avoid.
+ *
+ *   cc -std=c11 -Wall -Wextra -Isrc/tools -DNX_CRYPTO_STANDALONE_ENABLE \
+ *      -Ithird_party/netxduo/crypto_libraries/inc \
+ *      src/tools/test/test_httpws.c src/tools/httpws.c src/tools/httpsha1.c \
+ *      third_party/netxduo/crypto_libraries/src/nx_crypto_sha1.c -o test_httpws
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "httpws.h"
+
+#include <stdio.h>
+#include <string.h>
+
+static int failures;
+static int checks;
+
+#define CHECK(cond)                                                          \
+    do {                                                                     \
+        checks++;                                                            \
+        if (!(cond)) {                                                       \
+            failures++;                                                      \
+            printf("  FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);         \
+        }                                                                    \
+    } while (0)
+
+/* ------------------------------------------------------------ the sink --- */
+
+/*
+ * What the decoder said, flattened.  A message's pieces are concatenated and
+ * the count of calls is kept, because "one message in three pieces" and "three
+ * messages" are the difference a fragmentation test is about.
+ */
+typedef struct
+{
+    int             calls;
+    int             finals;
+    HttpWsEvent     last_ev;
+    /*
+     * TWO buffers, and that is a finding rather than a convenience.  RFC 6455
+     * 5.4 lets a control frame arrive between the fragments of a data message,
+     * so a reader with one accumulator concatenates a ping's payload onto the
+     * half-finished message and delivers both as one.  A single buffer here
+     * reported "Helhi" and "lo" for a Hello split around a ping, which is
+     * exactly what a terminal with one buffer would type into the shell.
+     */
+    unsigned long   len;
+    unsigned char   buf[4096];
+    unsigned long   ctl_len;
+    unsigned char   ctl[256];
+    /* Every completed message, in order, as "<ev>:<text>". */
+    char            log[1024];
+    unsigned long   log_n;
+} Heard;
+
+static int ev_is_control(HttpWsEvent ev)
+{
+    return (ev == HTTP_WS_EV_CLOSE || ev == HTTP_WS_EV_PING ||
+            ev == HTTP_WS_EV_PONG) ? 1 : 0;
+}
+
+static Heard heard;
+
+static void log_put(const char *s)
+{
+    while (*s != '\0' && heard.log_n + 1UL < sizeof(heard.log))
+        heard.log[heard.log_n++] = *s++;
+    heard.log[heard.log_n] = '\0';
+}
+
+static void sink(void *ctx, HttpWsEvent ev, const unsigned char *data,
+                 long len, int final)
+{
+    Heard          *h    = (Heard *)ctx;
+    int             ctl  = ev_is_control(ev);
+    unsigned char  *buf  = ctl ? h->ctl : h->buf;
+    unsigned long   cap  = ctl ? sizeof(h->ctl) : sizeof(h->buf);
+    unsigned long  *used = ctl ? &h->ctl_len : &h->len;
+    long            i;
+
+    h->calls++;
+    h->last_ev = ev;
+
+    for (i = 0; i < len; i++)
+    {
+        if (*used + 1UL < cap)
+            buf[(*used)++] = data[i];
+    }
+
+    if (final)
+    {
+        char          one[2];
+        unsigned long j;
+
+        h->finals++;
+
+        one[0] = (char)('0' + (int)ev);
+        one[1] = '\0';
+        log_put(one);
+        log_put(":");
+
+        for (j = 0; j < *used && j < 64UL; j++)
+        {
+            char c[2];
+
+            c[0] = (char)((buf[j] >= 0x20 && buf[j] < 0x7f) ? buf[j] : '.');
+            c[1] = '\0';
+            log_put(c);
+        }
+
+        log_put(" ");
+        *used = 0;
+    }
+}
+
+static void heard_clear(void)
+{
+    memset(&heard, 0, sizeof(heard));
+}
+
+/*
+ * Feed the same bytes two ways: in one call, and one byte at a time.  The log
+ * both produce has to be identical, and the failure code too.  A decoder is
+ * only correct if the split does not matter, and every real split is the
+ * network's choice.
+ */
+static void feed_both(const unsigned char *frame, long len,
+                      char *log_whole, unsigned short *fail_whole,
+                      char *log_split, unsigned short *fail_split)
+{
+    HttpWsIn in;
+    long     i;
+
+    heard_clear();
+    http_ws_reset(&in);
+    (void)http_ws_feed(&in, frame, len, sink, &heard);
+    strcpy(log_whole, heard.log);
+    *fail_whole = in.failed;
+
+    heard_clear();
+    http_ws_reset(&in);
+    for (i = 0; i < len; i++)
+        (void)http_ws_feed(&in, &frame[i], 1, sink, &heard);
+    strcpy(log_split, heard.log);
+    *fail_split = in.failed;
+}
+
+/* ONE call for both shapes, so no test can accidentally check only one. */
+static void expect(const char *what, const unsigned char *frame, long len,
+                   const char *want_log, unsigned short want_fail)
+{
+    char           lw[1024];
+    char           ls[1024];
+    unsigned short fw;
+    unsigned short fs;
+
+    feed_both(frame, len, lw, &fw, ls, &fs);
+
+    checks++;
+    if (strcmp(lw, want_log) != 0 || fw != want_fail)
+    {
+        failures++;
+        printf("  FAIL %s: whole buffer gave \"%s\" fail %u, wanted \"%s\" "
+               "fail %u\n", what, lw, (unsigned)fw, want_log,
+               (unsigned)want_fail);
+    }
+
+    checks++;
+    if (strcmp(ls, want_log) != 0 || fs != want_fail)
+    {
+        failures++;
+        printf("  FAIL %s: byte at a time gave \"%s\" fail %u, wanted \"%s\" "
+               "fail %u\n", what, ls, (unsigned)fs, want_log,
+               (unsigned)want_fail);
+    }
+}
+
+/* ---------------------------------------------------------- the base64 --- */
+
+static void test_base64(void)
+{
+    char          text[64];
+    unsigned char raw[32];
+
+    printf("base64\n");
+
+    /* RFC 4648 10, so the table and the padding are checked against
+       something other than this file's own encoder. */
+    CHECK(http_ws_b64_encode((const unsigned char *)"", 0, text,
+                             sizeof(text)) == 0 && strcmp(text, "") == 0);
+    CHECK(http_ws_b64_encode((const unsigned char *)"f", 1, text,
+                             sizeof(text)) == 4 && strcmp(text, "Zg==") == 0);
+    CHECK(http_ws_b64_encode((const unsigned char *)"fo", 2, text,
+                             sizeof(text)) == 4 && strcmp(text, "Zm8=") == 0);
+    CHECK(http_ws_b64_encode((const unsigned char *)"foo", 3, text,
+                             sizeof(text)) == 4 && strcmp(text, "Zm9v") == 0);
+    CHECK(http_ws_b64_encode((const unsigned char *)"foobar", 6, text,
+                             sizeof(text)) == 8 &&
+          strcmp(text, "Zm9vYmFy") == 0);
+
+    CHECK(http_ws_b64_decode("Zm9vYmFy", raw, sizeof(raw)) == 6 &&
+          memcmp(raw, "foobar", 6) == 0);
+    CHECK(http_ws_b64_decode("Zg==", raw, sizeof(raw)) == 1 && raw[0] == 'f');
+
+    /* Not base64, and each for its own reason. */
+    CHECK(http_ws_b64_decode("Zm9v*mFy", raw, sizeof(raw)) == -1);
+    CHECK(http_ws_b64_decode("Zm9vYmF", raw, sizeof(raw)) == -1);
+    CHECK(http_ws_b64_decode("Zg==Zg==", raw, sizeof(raw)) == -1);
+    /* Padding bits that are not zero: two texts for one value. */
+    CHECK(http_ws_b64_decode("Zh==", raw, sizeof(raw)) == -1);
+    /* Longer than the caller's buffer is refused, not truncated. */
+    CHECK(http_ws_b64_decode("Zm9vYmFy", raw, 3) == -1);
+
+    /* The encoder refuses rather than writing a short answer. */
+    CHECK(http_ws_b64_encode((const unsigned char *)"foobar", 6, text, 8) == 0);
+}
+
+/* -------------------------------------------------------- the handshake --- */
+
+static void test_handshake(void)
+{
+    char accept[32];
+
+    printf("the upgrade handshake\n");
+
+    /*
+     * RFC 6455 1.3, verbatim.  This pair is the whole reason the GUID is in
+     * the source: the key alone hashes to something else entirely, and a
+     * server that got it wrong would look identical from the outside up to
+     * the moment every browser refused it.
+     */
+    CHECK(http_ws_accept("dGhlIHNhbXBsZSBub25jZQ==", accept,
+                         sizeof(accept)) == 1);
+    CHECK(strcmp(accept, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=") == 0);
+
+    /* RFC 6455 4.2.2 spells the header value with the surrounding space that
+       a header parser may or may not have taken off. */
+    CHECK(http_ws_accept("  dGhlIHNhbXBsZSBub25jZQ==  ", accept,
+                         sizeof(accept)) == 1 &&
+          strcmp(accept, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=") == 0);
+
+    /* A key is 16 bytes of base64 and nothing else is one. */
+    CHECK(http_ws_accept("", accept, sizeof(accept)) == 0);
+    CHECK(http_ws_accept("dGhlIHNhbXBsZSBub25j", accept, sizeof(accept)) == 0);
+    CHECK(http_ws_accept("dGhlIHNhbXBsZSBub25jZQ==extra", accept,
+                         sizeof(accept)) == 0);
+    CHECK(http_ws_accept("dGhlIHNhbXBsZSBub25j!!==", accept,
+                         sizeof(accept)) == 0);
+    /* 24 unpadded characters decode to EIGHTEEN bytes, not sixteen, so a
+       length check on the text alone would let this through and a nonce of
+       the wrong size would be hashed.  The padded form of the same length is
+       the one that is a key. */
+    CHECK(http_ws_accept("AAAAAAAAAAAAAAAAAAAAAAAA", accept,
+                         sizeof(accept)) == 0);
+    CHECK(http_ws_accept("AAAAAAAAAAAAAAAAAAAAAA==", accept,
+                         sizeof(accept)) == 1);
+
+    /* A buffer that cannot hold the answer gets no answer. */
+    CHECK(http_ws_accept("dGhlIHNhbXBsZSBub25jZQ==", accept, 20) == 0);
+}
+
+/* ------------------------------------------------------------ the frames --- */
+
+static void test_frames(void)
+{
+    printf("frames the client sends\n");
+
+    /* RFC 6455 5.7's masked "Hello": the specification's own bytes. */
+    {
+        static const unsigned char hello[] = {
+            0x81, 0x85, 0x37, 0xfa, 0x21, 0x3d,
+            0x7f, 0x9f, 0x4d, 0x51, 0x58
+        };
+
+        expect("a masked text Hello", hello, (long)sizeof(hello),
+               "1:Hello ", 0);
+    }
+
+    /* And 5.7's fragmented "Hel" + "lo", which is the same message in two
+       frames and must read as ONE. */
+    {
+        static const unsigned char frag[] = {
+            0x01, 0x83, 0x00, 0x00, 0x00, 0x00, 'H', 'e', 'l',
+            0x80, 0x82, 0x00, 0x00, 0x00, 0x00, 'l', 'o'
+        };
+
+        expect("a fragmented message is one message", frag, (long)sizeof(frag),
+               "1:Hello ", 0);
+    }
+
+    /* A control frame between the fragments, which RFC 6455 5.4 allows and
+       which is the interleaving a keep-alive ping actually produces. */
+    {
+        static const unsigned char mixed[] = {
+            0x01, 0x83, 0x00, 0x00, 0x00, 0x00, 'H', 'e', 'l',
+            0x89, 0x82, 0x00, 0x00, 0x00, 0x00, 'h', 'i',
+            0x80, 0x82, 0x00, 0x00, 0x00, 0x00, 'l', 'o'
+        };
+
+        expect("a ping between fragments interrupts nothing", mixed,
+               (long)sizeof(mixed), "4:hi 1:Hello ", 0);
+    }
+
+    /* An empty ping, whose whole frame is its header.  Nothing follows it, so
+       a decoder that only delivered from the payload loop would hold it for
+       ever. */
+    {
+        static const unsigned char ping[] = {
+            0x89, 0x80, 0x01, 0x02, 0x03, 0x04
+        };
+
+        expect("an empty ping is delivered on its header alone", ping,
+               (long)sizeof(ping), "4: ", 0);
+    }
+
+    /* A close with a code and a reason, and an empty one. */
+    {
+        static const unsigned char bye[] = {
+            0x88, 0x87, 0x00, 0x00, 0x00, 0x00,
+            0x03, 0xe8, 'd', 'o', 'n', 'e', '!'
+        };
+
+        expect("a close carries its code", bye, (long)sizeof(bye),
+               "3:..done! ", 0);
+    }
+    {
+        static const unsigned char bye0[] = { 0x88, 0x80, 9, 9, 9, 9 };
+
+        expect("an empty close is a close", bye0, (long)sizeof(bye0),
+               "3: ", 0);
+    }
+
+    /* 126 bytes, so the two-byte extended length is exercised.  The payload
+       is 'x' repeated, masked with a mask that is not zero, which is what
+       catches an offset that resets at a buffer boundary. */
+    {
+        static const unsigned char mask[4] = { 0x11, 0x22, 0x33, 0x44 };
+        unsigned char frame[8 + 126];
+        char          want[80];
+        long          i;
+
+        frame[0] = 0x82;
+        frame[1] = (unsigned char)(0x80 | 126);
+        frame[2] = 0x00;
+        frame[3] = 126;
+        for (i = 0; i < 4; i++)
+            frame[4 + i] = mask[i];
+        for (i = 0; i < 126; i++)
+            frame[8 + i] = (unsigned char)('x' ^ mask[i & 3]);
+
+        /* The log truncates a message at 64 characters. */
+        want[0] = '2';
+        want[1] = ':';
+        for (i = 0; i < 64; i++)
+            want[2 + i] = 'x';
+        want[66] = ' ';
+        want[67] = '\0';
+
+        expect("a 126-byte payload and its extended length", frame,
+               8 + 126, want, 0);
+    }
+
+    printf("frames the client may not send\n");
+
+    /* RFC 6455 5.1: unmasked, from a client, is 1002 and the end of it. */
+    {
+        static const unsigned char bare[] = {
+            0x81, 0x05, 'H', 'e', 'l', 'l', 'o'
+        };
+
+        expect("an unmasked frame is refused", bare, (long)sizeof(bare), "",
+               HTTP_WS_CLOSE_PROTOCOL);
+    }
+
+    /* RFC 6455 5.2: a reserved bit describes a transformation nothing here
+       negotiated. */
+    {
+        static const unsigned char rsv[] = {
+            0xc1, 0x80, 0, 0, 0, 0
+        };
+
+        expect("a reserved bit is refused", rsv, (long)sizeof(rsv), "",
+               HTTP_WS_CLOSE_PROTOCOL);
+    }
+
+    /* An opcode that is not one of the six. */
+    {
+        static const unsigned char op[] = { 0x83, 0x80, 0, 0, 0, 0 };
+
+        expect("an unknown opcode is refused", op, (long)sizeof(op), "",
+               HTTP_WS_CLOSE_PROTOCOL);
+    }
+
+    /* RFC 6455 5.5: a control frame is never fragmented... */
+    {
+        static const unsigned char split_ping[] = { 0x09, 0x80, 0, 0, 0, 0 };
+
+        expect("a fragmented control frame is refused", split_ping,
+               (long)sizeof(split_ping), "", HTTP_WS_CLOSE_PROTOCOL);
+    }
+
+    /* ...and never longer than 125 bytes. */
+    {
+        static const unsigned char fat_ping[] = {
+            0x89, (unsigned char)(0x80 | 126), 0x00, 0x7e, 0, 0, 0, 0
+        };
+
+        expect("an over-long control frame is refused", fat_ping,
+               (long)sizeof(fat_ping), "", HTTP_WS_CLOSE_PROTOCOL);
+    }
+
+    /* RFC 6455 5.5.1: one byte is not a close code. */
+    {
+        static const unsigned char stub[] = {
+            0x88, 0x81, 0, 0, 0, 0, 0x03
+        };
+
+        expect("a one-byte close payload is refused", stub,
+               (long)sizeof(stub), "", HTTP_WS_CLOSE_PROTOCOL);
+    }
+
+    /* A continuation with nothing to continue. */
+    {
+        static const unsigned char orphan[] = {
+            0x80, 0x81, 0, 0, 0, 0, 'x'
+        };
+
+        expect("a continuation of nothing is refused", orphan,
+               (long)sizeof(orphan), "", HTTP_WS_CLOSE_PROTOCOL);
+    }
+
+    /* A second data frame while the first message is still open. */
+    {
+        static const unsigned char both[] = {
+            0x01, 0x81, 0, 0, 0, 0, 'a',
+            0x81, 0x81, 0, 0, 0, 0, 'b'
+        };
+
+        expect("a data frame inside a fragmented message is refused", both,
+               (long)sizeof(both), "", HTTP_WS_CLOSE_PROTOCOL);
+    }
+
+    /* A 64-bit length whose top word is set is not a length this machine can
+       hold, and the answer is 1009 rather than 1002: the frame is well
+       formed. */
+    {
+        static const unsigned char huge[] = {
+            0x82, (unsigned char)(0x80 | 127),
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+            0, 0, 0, 0
+        };
+
+        expect("a length past 32 bits is too big, not malformed", huge,
+               (long)sizeof(huge), "", HTTP_WS_CLOSE_TOOBIG);
+    }
+
+    /* And one inside 32 bits but past what this server will assemble. */
+    {
+        static const unsigned char big[] = {
+            0x82, (unsigned char)(0x80 | 127),
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x01,
+            0, 0, 0, 0
+        };
+
+        expect("a message past the ceiling is 1009", big, (long)sizeof(big),
+               "", HTTP_WS_CLOSE_TOOBIG);
+    }
+}
+
+/* ---------------------------------------------------------- the encoder --- */
+
+static void test_encoder(void)
+{
+    unsigned char out[64];
+    unsigned long n;
+
+    printf("frames this server sends\n");
+
+    /* A server frame is never masked, so the mask bit is clear and the header
+       is two bytes for anything under 126. */
+    n = http_ws_head(out, sizeof(out), HTTP_WS_EV_BINARY, 5, 1);
+    CHECK(n == 2 && out[0] == 0x82 && out[1] == 0x05);
+
+    n = http_ws_head(out, sizeof(out), HTTP_WS_EV_TEXT, 0, 1);
+    CHECK(n == 2 && out[0] == 0x81 && out[1] == 0x00);
+
+    /* Not final: the same opcode without the FIN bit. */
+    n = http_ws_head(out, sizeof(out), HTTP_WS_EV_BINARY, 5, 0);
+    CHECK(n == 2 && out[0] == 0x02);
+
+    /* 125 is the last two-byte header; 126 is the first four-byte one. */
+    n = http_ws_head(out, sizeof(out), HTTP_WS_EV_BINARY, 125, 1);
+    CHECK(n == 2 && out[1] == 125);
+
+    n = http_ws_head(out, sizeof(out), HTTP_WS_EV_BINARY, 126, 1);
+    CHECK(n == 4 && out[1] == 126 && out[2] == 0x00 && out[3] == 126);
+
+    n = http_ws_head(out, sizeof(out), HTTP_WS_EV_BINARY, 65535, 1);
+    CHECK(n == 4 && out[1] == 126 && out[2] == 0xff && out[3] == 0xff);
+
+    n = http_ws_head(out, sizeof(out), HTTP_WS_EV_BINARY, 65536, 1);
+    CHECK(n == 10 && out[1] == 127 && out[2] == 0 && out[6] == 0x00 &&
+          out[7] == 0x01 && out[8] == 0x00 && out[9] == 0x00);
+
+    n = http_ws_head(out, sizeof(out), HTTP_WS_EV_PONG, 3, 1);
+    CHECK(n == 2 && out[0] == 0x8a);
+
+    /* A buffer too small gets nothing, not a truncated header. */
+    CHECK(http_ws_head(out, 1, HTTP_WS_EV_BINARY, 5, 1) == 0);
+    CHECK(http_ws_head(out, 3, HTTP_WS_EV_BINARY, 200, 1) == 0);
+
+    /* A close frame carries its code big-endian, ahead of the reason. */
+    n = http_ws_close_frame(out, sizeof(out), HTTP_WS_CLOSE_PROTOCOL, "no");
+    CHECK(n == 2 + 4 && out[0] == 0x88 && out[1] == 4 &&
+          out[2] == 0x03 && out[3] == 0xea && out[4] == 'n' && out[5] == 'o');
+
+    n = http_ws_close_frame(out, sizeof(out), HTTP_WS_CLOSE_NORMAL, 0);
+    CHECK(n == 4 && out[1] == 2 && out[2] == 0x03 && out[3] == 0xe8);
+
+    /*
+     * What this server sends must be what it can read back, minus the mask
+     * that only a client applies.  Composed here rather than asserted by eye:
+     * an encoder and a decoder that agree with each other and not with the
+     * specification is the failure a single-sided test cannot see, which is
+     * why every case above is the RFC's bytes and this one is the round trip.
+     */
+    {
+        HttpWsIn      in;
+        unsigned char frame[16];
+        unsigned long head;
+        long          i;
+
+        head = http_ws_head(frame, sizeof(frame), HTTP_WS_EV_BINARY, 5, 1);
+        for (i = 0; i < 5; i++)
+            frame[head + (unsigned long)i] = (unsigned char)("Hello"[i]);
+
+        /* The decoder is a server's, so it refuses what it just wrote: a
+           server frame is unmasked and only a client's may be read. */
+        heard_clear();
+        http_ws_reset(&in);
+        (void)http_ws_feed(&in, frame, (long)(head + 5), sink, &heard);
+        CHECK(in.failed == HTTP_WS_CLOSE_PROTOCOL);
+        CHECK(heard.finals == 0);
+    }
+}
+
+/* ---------------------------------------------------------------- close --- */
+
+static void test_reasons(void)
+{
+    printf("what a close code is called\n");
+
+    CHECK(http_ws_close_reason(HTTP_WS_CLOSE_PROTOCOL) != 0);
+    CHECK(http_ws_close_reason(HTTP_WS_CLOSE_TOOBIG) != 0);
+    CHECK(http_ws_close_reason(4999) != 0);
+}
+
+int main(void)
+{
+    test_base64();
+    test_handshake();
+    test_frames();
+    test_encoder();
+    test_reasons();
+
+    printf("\n%d checks, %d failure(s)\n", checks, failures);
+    return failures ? 1 : 0;
+}
