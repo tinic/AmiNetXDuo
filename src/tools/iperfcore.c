@@ -648,10 +648,27 @@ static VOID iperf_slice_fin(IperfRun *run)
 
     if (run->fin_tries == 0 || (now - run->t_lastact) >= IPERF_FIN_WAIT_MS)
     {
+        LONG sent;
+
         iperf_dg_put(iperf_buf, -run->seq, now / 1000UL,
                      (now % 1000UL) * 1000UL);
-        (VOID)tool_sock_send(run->sb, run->sock, iperf_buf,
-                             (LONG)run->plan.buflen);
+        sent = tool_sock_send(run->sb, run->sock, iperf_buf,
+                              (LONG)run->plan.buflen);
+
+        /*
+         * The end marker is one of the test's datagrams, and iperf 2 counts
+         * it on both sides: its receiver adds it to the total it reports
+         * back, so a sender that left it out disagrees with every peer by
+         * exactly one datagram.  Only the first attempt counts -- a retry is
+         * recovery traffic, and the far end still only ever sees one marker,
+         * so the two totals agree whether or not one was lost.
+         */
+        if (sent > 0 && run->fin_tries == 0)
+        {
+            iperf_add64(&run->res.bytes_hi, &run->res.bytes_lo, (ULONG)sent);
+            run->res.packets++;
+        }
+
         run->fin_tries++;
         run->t_lastact = now;
     }

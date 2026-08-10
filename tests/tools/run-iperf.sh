@@ -445,10 +445,23 @@ fi
 
 U_BYTES=$(guest_val "$UDPCMD" 1 bytes)
 UP_BYTES=$(peer_val udp peer_bytes)
+UP_LOST=$(peer_val udp peer_lost)
+UP_OOO=$(peer_val udp peer_outoforder)
+
+# With nothing lost the two totals must agree EXACTLY, end marker included.
+# iperf 2's receiver counts that marker into the total it reports back, so a
+# sender that leaves it out disagrees with every peer by one datagram -- which
+# is what this caught on the first run.
 if [ -z "${U_BYTES:-}" ] || [ -z "${UP_BYTES:-}" ]; then
     fail "no UDP byte count to compare: guest '${U_BYTES:-}' peer '${UP_BYTES:-}'"
 elif [ "$UP_BYTES" -gt "$U_BYTES" ]; then
     fail "the peer received $UP_BYTES bytes and the guest only sent $U_BYTES"
+elif [ "${UP_LOST:-0}" = "0" ] && [ "$UP_BYTES" = "$U_BYTES" ]; then
+    pass "nothing was lost and both ends counted $U_BYTES bytes, end marker" \
+         "included"
+elif [ "${UP_LOST:-0}" = "0" ]; then
+    fail "nothing was lost, yet the guest counted $U_BYTES bytes and the" \
+         "peer $UP_BYTES.  A difference of one datagram is the end marker."
 elif [ "$UP_BYTES" -ge $(( U_BYTES - U_BYTES / 20 )) ]; then
     pass "the peer received $UP_BYTES of $U_BYTES bytes sent, within 5%"
 else
@@ -458,8 +471,6 @@ fi
 
 # The datagram accounting has to be self-consistent: the peer counts what the
 # ids said, and a sender that never restarts its sequence loses nothing here.
-UP_LOST=$(peer_val udp peer_lost)
-UP_OOO=$(peer_val udp peer_outoforder)
 if [ "${UP_LOST:-0}" = "0" ] && [ "${UP_OOO:-0}" = "0" ]; then
     pass "the peer saw no gap and no reordering in the datagram ids"
 else
