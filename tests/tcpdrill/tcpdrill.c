@@ -42,6 +42,9 @@
  *                          from zero.  N may be an expression, which is how a
  *                          case whose length follows the receive buffer is
  *                          written once
+ *   icmp TYPE CODE [seq=N] inject an ICMP error quoting a segment this stack
+ *                          sent at seq=N -- the four-tuple and sequence number
+ *                          are what a receiver demultiplexes it on
  *
  * FLAGS is a string from FSRPAUEC, or `-` for none.  Keys:
  *
@@ -1110,6 +1113,65 @@ static VOID build_and_inject(const Inject *in)
     }
 }
 
+/*
+ * An ICMP error quoting a TCP segment this stack sent.
+ *
+ * RFC 792: the message carries the offending IP header and the first 64 bits
+ * of its data, which for TCP is the two ports and the sequence number -- all
+ * three of which a receiver has to match before it may act on the message
+ * (RFC 5927 4.1).  The quoted header is built here rather than captured
+ * because a case wants to name a segment whether or not it is still on the
+ * queue, including one with a sequence number the stack never sent.
+ */
+static VOID inject_icmp(UBYTE type, UBYTE code, ULONG seq)
+{
+    static UBYTE f[TAP_FRAME_MAX];
+    UBYTE *ip   = &f[ETH_HDR];
+    UBYTE *icmp = ip + 20;
+    UBYTE *q    = icmp + 8;
+    ULONG  iplen = 20UL + 8UL + 20UL + 8UL;
+
+    zero(f, (ULONG)sizeof(f));
+
+    cp(&f[0], local_mac, 6);
+    cp(&f[6], peer_mac, 6);
+    wr16(&f[12], ETYPE_IP);
+
+    ip[0] = 0x45;
+    wr16(&ip[2], (UWORD)iplen);
+    wr16(&ip[4], 0x4100);
+    ip[8] = 64;
+    ip[9] = 1;                          /* ICMP */
+    wr32(&ip[12], PEER_IP);
+    wr32(&ip[16], LOCAL_IP);
+    wr16(&ip[10], ones_sum(ip, 20, 0));
+
+    icmp[0] = type;
+    icmp[1] = code;
+
+    /* The offending datagram, as this stack would have sent it. */
+    q[0] = 0x45;
+    wr16(&q[2], (UWORD)(20 + 20));
+    wr16(&q[4], 0x4200);
+    q[8] = 64;
+    q[9] = 6;                           /* TCP */
+    wr32(&q[12], LOCAL_IP);
+    wr32(&q[16], PEER_IP);
+    wr16(&q[10], ones_sum(q, 20, 0));
+
+    wr16(&q[20], cs.local_port);
+    wr16(&q[22], cs.peer_port);
+    wr32(&q[24], seq);
+
+    wr16(&icmp[2], ones_sum(icmp, 8 + 20 + 8, 0));
+
+    if (tap_rx_put(f, ETH_HDR + iplen) != 0)
+    {
+        say("  !! injection dropped -- no CMD_READ outstanding for 0x0800");
+        cs.fails++;
+    }
+}
+
 /* ---------------------------------------------------------- the parser ---- */
 
 static BOOL is_space(char c) { return (c == ' ' || c == '\t' || c == '\r') ? TRUE : FALSE; }
@@ -1879,6 +1941,32 @@ static VOID do_rx(const char *args, const char *raw)
 
     /* One tick, so the reader thread has run before the next directive
        asserts on what the injection caused. */
+    Delay(1);
+    pump();
+
+    pass(raw);
+}
+
+static VOID do_icmp(const char *args, const char *raw)
+{
+    char   tok[48];
+    Expect e;
+    LONG   type;
+    LONG   code;
+
+    args = token(args, tok, sizeof(tok));
+    type = to_num(tok);
+    args = token(args, tok, sizeof(tok));
+    code = to_num(tok);
+
+    zero((UBYTE *)&e, (ULONG)sizeof(e));
+    (VOID)parse_keys(args, &e);
+
+    pump();
+    cs.t_last = tap_eclock_now();
+    inject_icmp((UBYTE)type, (UBYTE)code,
+                cs.u_isn + (ULONG)(e.have_seq ? e.seq : 0));
+
     Delay(1);
     pump();
 
@@ -2702,6 +2790,7 @@ static VOID run_line(char *line)
     }
     else if (streq(verb, "end"))
         say("!! `end` without `repeat`: %s", raw);
+    else if (streq(verb, "icmp"))     do_icmp(args, raw);
     else
         say("!! unknown directive: %s", raw);
 }

@@ -1,0 +1,140 @@
+# tcpdrill -- what a TCP connection does with an ICMP error.
+#
+# RFC 1122 3.2.2.1: "A Destination Unreachable message that is received MUST be
+# reported to the transport layer."  4.2.3.9 then says what the transport does
+# with it, and the answer is not "abort":
+#
+#   codes 0, 1 and 5 are soft errors -- TCP MUST NOT abort the connection;
+#   codes 2 and 3 are hard errors  -- TCP SHOULD abort it.
+#
+# RFC 5927 section 7.2 narrows the second half, and this is what is implemented:
+# a hard error aborts a connection that is not yet synchronized, and is demoted
+# to a soft error on one that is.  An ICMP message carries no authentication
+# and needs no position on the path; anything that can name a four-tuple could
+# otherwise close a working connection with one datagram.  Against a SYN there
+# is nothing to protect and a port unreachable is the peer saying so, which is
+# what turns a connect() to a closed port from a full retransmit ladder into an
+# immediate failure.
+#
+# WHAT THE HARNESS SENDS.  `icmp TYPE CODE seq=N` builds a Destination
+# Unreachable quoting an IP header and eight bytes of TCP -- the two ports and
+# the sequence number, which is everything RFC 792 puts in the message and
+# everything a receiver may match on.  seq= counts from the stack's own initial
+# sequence number, like `ack=` does everywhere else in these scripts.
+#
+# THE CONTROL COMES FIRST.  i01 is the same connect with no ICMP at all, so a
+# later case that sees no retransmission is an abandoned connection rather than
+# a stack that never retried.
+#
+# NO `localport` HERE.  `connect` does not bind, so the port a case's socket
+# actually uses is the ephemeral one the stack picked, and the harness learns
+# it from the SYN it sees.  Naming one would put the wrong source port in every
+# injected frame and in the ICMP's quoted header, which is a four-tuple that
+# matches nothing.
+#
+# SPDX-License-Identifier: MIT
+
+# The control.  Nothing interferes, so the SYN ladder runs.
+case i01_syn_is_retransmitted_when_nothing_answers
+socket
+connect
+tx S seq=0 within=200
+tx S seq=0 after=700 within=1500
+
+# RFC 1122 4.2.3.9 hard error, RFC 5927 7.2: in SYN_SENT there is no connection
+# to protect, so the port unreachable ends the attempt.  Against i01, the SYN
+# that was due at about one second never comes.
+case i02_port_unreachable_in_syn_sent_ends_the_attempt
+socket
+connect
+tx S seq=0 within=200
+icmp 3 3 seq=0
+notx 2500
+
+# The same, one code along: protocol unreachable is the other hard error.
+case i03_protocol_unreachable_in_syn_sent_ends_the_attempt
+socket
+connect
+tx S seq=0 within=200
+icmp 3 2 seq=0
+notx 2500
+
+# RFC 1122 4.2.3.9 soft error: host unreachable MUST NOT abort anything.  The
+# SYN ladder carries on exactly as in i01.
+case i04_host_unreachable_in_syn_sent_is_advisory
+socket
+connect
+tx S seq=0 within=200
+icmp 3 1 seq=0
+tx S seq=0 after=700 within=1500
+
+# RFC 5927 4.1: the quoted sequence number must lie in the send window.  This
+# one names a segment a thousand bytes past anything sent, so the message is
+# about nothing this connection did and is ignored -- the ladder runs on.
+case i05_a_sequence_number_outside_the_window_is_ignored
+socket
+connect
+tx S seq=0 within=200
+icmp 3 3 seq=1000
+tx S seq=0 after=700 within=1500
+
+# RFC 5927 7.2, the case the whole demotion exists for: an established
+# connection survives a hard error.  A router on the path can emit one, and
+# so can anything that guesses the four-tuple.
+#
+# WHAT SURVIVAL LOOKS LIKE HERE.  An abort is local -- nothing is sent -- so
+# `notx` would not see it.  What sees it is the traffic afterwards: the
+# acknowledgment is taken, another send goes out, and the peer's data is read.
+# On an aborted socket the send fails with ENOTCONN and the read returns
+# nothing.
+case i06_port_unreachable_does_not_kill_an_established_connection
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+send 100
+tx PA seq=1 ack=1 len=100 within=200
+icmp 3 3 seq=1
+rx A seq=1 ack=101 win=8192
+send 100
+tx PA seq=101 ack=1 len=100 within=200
+rx PA seq=1 ack=201 win=8192 len=10
+recv 100 = 10
+rx R seq=11 ack=201
+
+# And the soft error on an established connection, which was never allowed to
+# abort one under RFC 1122 either.
+case i07_host_unreachable_does_not_kill_an_established_connection
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+send 100
+tx PA seq=1 ack=1 len=100 within=200
+icmp 3 1 seq=1
+rx A seq=1 ack=101 win=8192
+send 100
+tx PA seq=101 ack=1 len=100 within=200
+rx PA seq=1 ack=201 win=8192 len=10
+recv 100 = 10
+rx R seq=11 ack=201
+
+# A Time Exceeded is handled the same way as a soft Destination Unreachable,
+# RFC 1122 4.2.3.9.  A traceroute through us must not take the connection down.
+case i08_time_exceeded_does_not_kill_an_established_connection
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+send 100
+tx PA seq=1 ack=1 len=100 within=200
+icmp 11 0 seq=1
+rx A seq=1 ack=101 win=8192
+send 100
+tx PA seq=101 ack=1 len=100 within=200
+rx PA seq=1 ack=201 win=8192 len=10
+recv 100 = 10
+rx R seq=11 ack=201

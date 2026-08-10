@@ -161,7 +161,16 @@ static const BsdStatusMap bsd_status_map[] =
     { NX_INVALID_INTERFACE, AMI_ENETDOWN         },
     { NX_INVALID_PARAMETERS, AMI_EINVAL          },
     { NX_NOT_FOUND,         AMI_ENOENT           },
-    { NX_NO_INTERFACE_ADDRESS, AMI_EADDRNOTAVAIL }
+    { NX_NO_INTERFACE_ADDRESS, AMI_EADDRNOTAVAIL },
+
+    /* What an ICMP Destination Unreachable or Time Exceeded reported. BSD
+       answers ECONNREFUSED for both protocol and port unreachable: a peer that
+       runs neither the protocol nor a listener on the port has refused the
+       same way as far as the caller is concerned. */
+    { NX_NET_UNREACHABLE,      AMI_ENETUNREACH   },
+    { NX_HOST_UNREACHABLE,     AMI_EHOSTUNREACH  },
+    { NX_PROTOCOL_UNREACHABLE, AMI_ECONNREFUSED  },
+    { NX_PORT_UNREACHABLE,     AMI_ECONNREFUSED  }
 };
 
 LONG bsd_errno_from_nx(UINT status)
