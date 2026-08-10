@@ -3,7 +3,8 @@
 # iperf on a real guest, against a peer that counts what actually arrived.
 #
 #   tests/tools/run-iperf.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
-#                            [-B IFACE] [-P PEERHOST] [-N BOARD] [-r TRANSCRIPT]
+#                            [-B IFACE] [-P PEERHOST] [-a ADDR] [-g GATEWAY]
+#                            [-N BOARD] [-r TRANSCRIPT]
 #
 # WHAT IT PROVES
 #
@@ -64,6 +65,18 @@ IFACE=""
 PEERHOST=""
 REPLAY=""
 
+# The bridged arm needs the guest at a known address before it boots: the peer
+# has to call IN, and a DHCP lease is not knowable until after.  run-httpd.sh
+# takes the same view for the same reason.
+ADDRESS="${AMINETXDUO_IPERF_ADDRESS:-192.168.1.240}"
+GATEWAY="${AMINETXDUO_IPERF_GATEWAY:-192.168.1.1}"
+NETMASK=255.255.255.0
+
+# Where the guest listens when it is the server, and how long it waits.
+PORT_SRV_TCP="${AMINETXDUO_IPERF_PORT_SRVTCP:-7404}"
+PORT_SRV_UDP="${AMINETXDUO_IPERF_PORT_SRVUDP:-7405}"
+SRV_WINDOW=20
+
 # Above 1024, in a private block, one per arm so a peer that is still finishing
 # cannot be mistaken for the next one.  DEAD is where nothing ever listens.
 PORT_TCP="${AMINETXDUO_IPERF_PORT_TCP:-7401}"
@@ -75,16 +88,18 @@ PORT_DEAD="${AMINETXDUO_IPERF_PORT_DEAD:-7409}"
 SECS=3
 SIZE_KB=64
 
-while getopts "m:t:b:B:P:N:r:" opt; do
+while getopts "m:t:b:B:P:a:g:N:r:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
         B) IFACE="$OPTARG" ;;
         P) PEERHOST="$OPTARG" ;;
+        a) ADDRESS="$OPTARG" ;;
+        g) GATEWAY="$OPTARG" ;;
         N) BOARD="$OPTARG" ;;
         r) REPLAY="$OPTARG" ;;
-        *) sed -n '3,6p' "$0" >&2; exit 2 ;;
+        *) sed -n '3,7p' "$0" >&2; exit 2 ;;
     esac
 done
 
@@ -113,10 +128,10 @@ fi
 # The address the guest calls.  SLIRP's gateway is the emulator host itself.
 if [ "$SERVER_ARMS" = yes ]; then
     PEERADDR="$PEERHOST"
-    GUESTCFG=dhcp
 else
     PEERADDR=10.0.2.2
-    GUESTCFG=static
+    ADDRESS=10.0.2.15
+    GATEWAY=10.0.2.2
 fi
 
 PEERLOG="$ROOT/build/iperf-peers"
@@ -158,22 +173,14 @@ mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
 
-if [ "$GUESTCFG" = static ]; then
-    cat > "$STAGE/devs/NetInterfaces/eth0" <<'IFEOF'
+cat > "$STAGE/devs/NetInterfaces/eth0" <<IFEOF
 DEVICE=a2065.device
 UNIT=0
 CONFIGURE=STATIC
-ADDRESS=10.0.2.15
-NETMASK=255.255.255.0
-GATEWAY=10.0.2.2
+ADDRESS=$ADDRESS
+NETMASK=$NETMASK
+GATEWAY=$GATEWAY
 IFEOF
-else
-    cat > "$STAGE/devs/NetInterfaces/eth0" <<'IFEOF'
-DEVICE=a2065.device
-UNIT=0
-CONFIGURE=DHCP
-IFEOF
-fi
 
 if [ -n "$IFACE" ]; then
     . "$ROOT/tools/sana2-stage.sh"
@@ -204,6 +211,10 @@ cp "$TOOLS/iperf"           "$STAGE/iperf"
     echo "SYS:iperf $PEERADDR -t 0"
     echo "SYS:iperf"
     echo "SYS:iperf -s $PEERADDR"
+    if [ "$SERVER_ARMS" = yes ]; then
+        echo "SYS:iperf -s -p $PORT_SRV_TCP -t $SRV_WINDOW"
+        echo "SYS:iperf -s -u -p $PORT_SRV_UDP -t $SRV_WINDOW"
+    fi
 } > "$STAGE/commands.txt"
 
 EXPECTED_BLOCKS=$(wc -l < "$STAGE/commands.txt" | tr -d ' ')
@@ -236,9 +247,40 @@ start_peer() { # logname args...
     PEER_PIDS+=("$!")
 }
 
+# The senders for the guest-as-server arms.  A retry loop, not a sleep: the
+# guest reaches its `iperf -s` somewhere inside the run and the host cannot
+# know when, so it keeps offering until one attempt gets through.  For TCP that
+# is a connect that stops being refused; for UDP it is an attempt that comes
+# back with the guest's end-of-test report, since a datagram sent at a guest
+# that is not listening yet is simply lost and looks like success.
+start_sender() { # logname proto port
+    local name="$1" proto="$2" port="$3"
+    (
+        deadline=$(( $(date +%s) + PEER_LIFE ))
+        while [ "$(date +%s)" -lt "$deadline" ]; do
+            if out=$(python3 "$ROOT/tests/tools/iperfpeer.py" send "$proto" \
+                        "$ADDRESS" --port "$port" --seconds "$SECS" \
+                        --kbit 2000 2>>"$PEERLOG/$name.err"); then
+                case "$proto" in
+                    udp) case "$out" in *peer_report=1*) echo "$out"; exit 0 ;; esac ;;
+                    *)   echo "$out"; exit 0 ;;
+                esac
+            fi
+            sleep 1
+        done
+        exit 1
+    ) > "$PEERLOG/$name.out" 2>>"$PEERLOG/$name.err" &
+    PEER_PIDS+=("$!")
+}
+
 start_peer tcp  serve tcp --port "$PORT_TCP"  --seconds "$PEER_LIFE" --idle 8
 start_peer udp  serve udp --port "$PORT_UDP"  --seconds "$PEER_LIFE" --idle 8
 start_peer size serve tcp --port "$PORT_SIZE" --seconds "$PEER_LIFE" --idle 8
+
+if [ "$SERVER_ARMS" = yes ]; then
+    start_sender srvtcp tcp "$PORT_SRV_TCP"
+    start_sender srvudp udp "$PORT_SRV_UDP"
+fi
 
 sleep 1
 for p in "${PEER_PIDS[@]}"; do
@@ -507,7 +549,43 @@ says "SYS:iperf -s $PEERADDR" 1 "takes no host" "and says why"
 # ---- the guest as the server --------------------------------------------
 
 if [ "$SERVER_ARMS" = yes ]; then
-    pass "bridged: the server directions ran (see the transcript above)"
+    # The mirror of the client arms: the guest counted what it received, the
+    # host counted what it sent, and on TCP with a clean close those are the
+    # same number.  This is the only coverage of accept() and of the guest
+    # generating the UDP end-of-test report rather than parsing one.
+    SRVTCP="SYS:iperf -s -p $PORT_SRV_TCP -t $SRV_WINDOW"
+    want_rc "$SRVTCP" 1 0 "the guest served a TCP receive"
+    says "$SRVTCP" 1 "dir=tcp-rx" "and reports the direction it ran"
+
+    R_BYTES=$(guest_val "$SRVTCP" 1 bytes)
+    RP_BYTES=$(peer_val srvtcp peer_bytes)
+    if [ -z "${R_BYTES:-}" ] || [ -z "${RP_BYTES:-}" ]; then
+        fail "no TCP receive count to compare: guest '${R_BYTES:-}'" \
+             "peer '${RP_BYTES:-}'"
+    elif [ "$R_BYTES" = "$RP_BYTES" ]; then
+        pass "the guest received every byte the peer sent: $R_BYTES"
+    else
+        fail "the peer sent $RP_BYTES bytes and the guest counted $R_BYTES"
+    fi
+
+    SRVUDP="SYS:iperf -s -u -p $PORT_SRV_UDP -t $SRV_WINDOW"
+    want_rc "$SRVUDP" 1 0 "the guest served a UDP receive"
+    says "$SRVUDP" 1 "dir=udp-rx" "and reports the direction it ran"
+
+    # The peer only exits 0 on peer_report=1, so reaching here at all means
+    # the guest built a report the peer could parse.  Assert the numbers in it
+    # rather than merely that one arrived.
+    U_FAR=$(peer_val srvudp peer_far_bytes)
+    UR_BYTES=$(guest_val "$SRVUDP" 1 bytes)
+    if [ -z "${U_FAR:-}" ]; then
+        fail "the guest sent no end-of-test report the peer could read, so" \
+             "nothing on the far end would print a Server Report for it"
+    elif [ "$U_FAR" = "$UR_BYTES" ]; then
+        pass "the report the guest sent says $U_FAR bytes, which is what it" \
+             "counted"
+    else
+        fail "the guest counted $UR_BYTES bytes and told the peer $U_FAR"
+    fi
 else
     skip "the two directions with the guest as the server: a SLIRP guest" \
          "cannot be called in to.  Re-run with -B <iface> -P <third-machine>."
