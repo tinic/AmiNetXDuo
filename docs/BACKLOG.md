@@ -27,7 +27,7 @@ git log; what it declined is under *Decided against*; what it disproved is under
 | Item | Why it is here rather than under *Decided against* | Cite |
 |---|---|---|
 | **A TLS 1.3 handshake dies inside certificate verification** | The client sends its ClientHello, takes the whole server flight, and never sends its Finished. **Traced on the wire** with a logging proxy in the path (`tcpdump` needs sudo; the peer is on 127.0.0.1 for a slirp run, so a relay sees the same bytes): `client->server: handshake(206) msg1` and nothing else, `server->client: msg2 CCS appdata(23) appdata(939) appdata(96) appdata(53)`, then our own FIN 6 s later, which is `fetch` cleaning up after the failure rather than the cause. Sampling the socket state per handshake message gives `msg.types 08 0b 0f 14` against `msg.states 5 1 1 1`: **ESTABLISHED while EncryptedExtensions is processed, CLOSED from Certificate onward**, with no server segment in between -- so it is closed locally, not by the peer. `NOVERIFY` completes the handshake and sends the request, which puts it in verification. **Ruled out by measurement**: slirp (fails bridged), the packet pool (220 free, 0 empty requests), thread priorities (SANA-II 1 > IP 2 > callers 16), CPU speed, connection order, crypto68k's limb substitutions (A/B with `AMINETXDUO_C68K_LIMBS=OFF` fails identically), the trust-store disk read (already bracketed by `nxc_BatonRelease`/`Acquire`, `tls_store.c:407`), and the record buffer (10240, above nx_secure's 4000 minimum). Intermittent: a connection sometimes completes. Next: find what writes `nx_tcp_socket_state` during `_nx_secure_tls_process_remote_certificate` | `nx_secure_tls_1_3_client_handshake.c`, `tests/tls/run-tls13.sh` |
-| **TLS 1.3 client** | On branch `tls13`, and it is a compile switch: nx_secure's seven `nx_secure_tls_1_3_*.c`, `_nx_crypto_rsa_pss_verify`, `crypto_method_hkdf` and the `NX_SECURE_TLS_TLS_1_3_ENABLED` rows in `ami_tls_crypto.c` were all present and only compiled out. Fixed on the way: `tls_library` links nx_secure by `$<TARGET_FILE:...>`, which carries no usage requirements, so `tls_conn.c` compiled a different `NX_SECURE_TLS_SESSION` than nx_secure operated on. Still failing: `tests/tls/run-tls13.sh` is red at `nx_secure_tls_process_record.c:558`, a content type that is not 20/21/22/23, so the key schedule derives wrong keys. The hash method is implicated -- our rows carry `AMI_BULK_SHA256` where stock carries `crypto_method_sha256`, and swapping them moves the failure to `NX_CRYPTO_PTR_ERROR`, so they are not interchangeable. Server-side 1.3 is impossible regardless: nx_crypto has PSS verify and no PSS sign | RFC 8446 |
+| **TLS 1.3 client** | **On `main` and in every shipped build** (`src/tls/CMakeLists.txt:99-100`, unconditional), not on a branch -- the `tls13` branch is merged and deleted. It was a compile switch: nx_secure's seven `nx_secure_tls_1_3_*.c`, `_nx_crypto_rsa_pss_verify`, `crypto_method_hkdf` and the `NX_SECURE_TLS_TLS_1_3_ENABLED` rows in `ami_tls_crypto.c` were all present and only compiled out. Fixed on the way: `tls_library` links nx_secure by `$<TARGET_FILE:...>`, which carries no usage requirements, so `tls_conn.c` compiled a different `NX_SECURE_TLS_SESSION` than nx_secure operated on. Still failing: `tests/tls/run-tls13.sh` is red at `nx_secure_tls_process_record.c:558`, a content type that is not 20/21/22/23, so the key schedule derives wrong keys. The hash method is implicated -- our rows carry `AMI_BULK_SHA256` where stock carries `crypto_method_sha256`, and swapping them moves the failure to `NX_CRYPTO_PTR_ERROR`, so they are not interchangeable. Server-side 1.3 is impossible regardless: nx_crypto has PSS verify and no PSS sign | RFC 8446 |
 | **Encrypt-then-MAC, RFC 7366** | The answer to the CBC padding-timing row, which is declined on its own terms below. EtM fails the MAC before padding is examined, at no per-record cost; constant-time padding costs ~10 ms per record at 7 MHz |, |
 | **Extended master secret, RFC 7627** | Without it, resumption is exposed to the triple-handshake attack. A change to nx_secure's key schedule, not a table entry; every cached session becomes non-resumable |, |
 | **SACK send side** | Written on fork branch `amiga-tcp-sack-transmit` (`d8af79c5`), never landed. Adds `nx_tcp_sack_option_get.c` and the retransmit skip. **Needs a transmit-side drill case before it can land**: merged onto the pinned commit 2026-08-05 it builds clean (+652 bytes) and breaks nothing, 59 cases and 568 checks green across `tcp`, `sack`, `dsack`, `retransmit`, `dupack`, `rto` and `rwndupdate`, but the same drills give byte-identical results with the change reverted, so none of them reaches the new code. All twelve `sack.drill` cases are receive side, asserting the blocks we emit for our own holes; nothing asserts that a peer's blocks make a retransmission skip a segment. Two conflicts on merge, both additive against the D-SACK members added since | `nx_tcp.h:93`, `tests/tcpdrill/scripts/sack.drill` |
@@ -716,14 +716,19 @@ census gives 0 mod 4 (application buffers, packet prepend pointers) and 2 mod 4
 question: does any real driver hand over an odd buffer.
 
 **Foreign stacks do not fold the checksum into the copy**, measured with
-`tests/tapprobe/`. Roadshow reads the source exactly once (scribbling `0xEE` over
+`tests/tapprobe/`, on the deleted branch `tapprobe` (`2a8440d`, `7af6754`).
+Roadshow reads the source exactly once (scribbling `0xEE` over
 it the instant the hook returned left every reply intact at all four alignments)
 and its hook costs 133 ns/B at best alignment against 158 for a plain `movem.l`
 copy of the same data, no budget for per-longword arithmetic. AmiTCP_NG settled
 from its GPL source.
 
-**PARKED: melded copy-and-checksum.** Branches `meld` and `wiring` (`bfa9937`);
-nothing on `main`, default build unaffected. `n68k_copy_sum_longwords()` measured
+**PARKED: melded copy-and-checksum.** `n68k_copy_sum_longwords()` IS on `main`
+(`n68k_checksum.S:305`, `n68k_checksum.c:101`, `net68k.h:65`, wired at
+`sana2_copy.c:115` and `:220`); what is parked is turning it on. This entry used
+to say "nothing on `main`", which was wrong and which it then contradicted six
+lines later by describing the wiring. Branches `meld` (`99f2763`) and `wiring`
+(`bfa9937`) are deleted; cite the commits. `n68k_copy_sum_longwords()` measured
 256.00 ns/B against 378.56 for the separate pair, 32.4% on a 68020. Both halves
 have since improved and the melded routine has not (copy 159, checksum 149.8), so
 the margin is now 17%. Wired into receive behind `AMINETXDUO_RX_COPY_SUM`
@@ -866,7 +871,7 @@ TCP state machine still owns and counts in its sequence space, to hide a byte
 the caller is about to see again (`oob.c:52-62`, RESEARCH 17).
 
 **Host-side cycle counting: Moira and Musashi both rejected**, 2026-08-01,
-branch `agent/moira-eval`.
+deleted branch `agent/moira-eval` (`b3f2490`, `92a67b0`).
 
 - Moira's 68000 timing is exact only in a configuration it does not ship.
   `MOIRA_PRECISE_TIMING` defaults false, making `SYNC(x)` a no-op, so

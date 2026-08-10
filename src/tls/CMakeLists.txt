@@ -82,15 +82,19 @@ add_library(nx_secure STATIC ${NX_SECURE_SOURCES})
 target_include_directories(nx_secure PUBLIC ${AMINETXDUO_TLS_INCLUDES})
 target_link_libraries(nx_secure PUBLIC nx_crypto netxduo)
 
-# The AEAD record path is compiled out by default: nx_secure_tls.h only defines
-# this when TLS 1.3 or EC-JPAKE is on, and both are off here.  It is what makes
+# The AEAD record path.  nx_secure_tls.h defines this itself when TLS 1.3 or
+# EC-JPAKE is on, and the block below turns TLS 1.3 on, so this is stated
+# rather than inherited: the macro has to be identical in every translation
+# unit and inheriting it through another header is how they drift.  (This
+# comment used to say both were off, which stopped being true when the block
+# below was added.)  It is what makes
 # the AEAD branches in the two files above, and the 0xCCA8/0xCCA9 rows in
 # ami_tls_crypto.c's ciphersuite table, exist at all.  PUBLIC so that every
 # translation unit that includes nx_secure_tls.h agrees with this one.
 target_compile_definitions(nx_secure PUBLIC NX_SECURE_ENABLE_AEAD_CIPHER)
 
-# TLS 1.3.  Everything it needs is already here and was only ever compiled
-# out: nx_secure's seven nx_secure_tls_1_3_*.c files, _nx_crypto_rsa_pss_verify
+# TLS 1.3, ON in every build including what ships.  Everything it needs was
+# already here and only ever compiled out: nx_secure's seven nx_secure_tls_1_3_*.c files, _nx_crypto_rsa_pss_verify
 # for the CertificateVerify that RFC 8446 4.4.3 requires instead of PKCS#1
 # v1.5, crypto_method_hkdf for the key schedule, and the three
 # NX_SECURE_TLS_TLS_1_3_ENABLED rows plus the hkdf/hmac/ecdhe block in
