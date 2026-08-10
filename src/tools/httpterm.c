@@ -353,7 +353,16 @@ VOID http_term_service(VOID)
     {
         BOOL failed = (term_runner.rn_Done != 0 && term_runner.rn_Rc == 0)
                           ? TRUE : FALSE;
-        BOOL ended  = (term_in.dosend && term_out.dosend) ? TRUE : FALSE;
+        /*
+         * The runner publishes rn_Done only after Execute() has returned AND
+         * both handles have been closed, and Execute() returns only when the
+         * Shell has exited.  So one flag says the whole thing; dosend is kept
+         * beside it because it is the same news arriving by the other road and
+         * a session that ended without the runner noticing would otherwise be
+         * a session nobody reaps.
+         */
+        BOOL ended  = (term_runner.rn_Done != 0 ||
+                       (term_in.dosend && term_out.dosend)) ? TRUE : FALSE;
 
         if (failed)
         {
@@ -598,20 +607,30 @@ static VOID term_runner_main(VOID)
     r->rn_Rc = (LONG)Execute((CONST_STRPTR)"", r->rn_In, r->rn_Out);
 
     if (r->rn_Rc == 0)
-    {
-        /*
-         * Nothing took the handles, so they are still ours to give back.  On
-         * the success path they are NOT closed here: the Shell owns them from
-         * that moment, and this side learns it has finished with them from the
-         * ACTION_END it sends when it closes them -- which works whether
-         * Execute() returned at once (an interactive Shell, like NewShell) or
-         * held until the Shell exited.  Closing them here on success would
-         * take them out from under a Shell that is still using them.
-         */
         r->rn_Err = IoErr();
-        Close(r->rn_In);
-        Close(r->rn_Out);
-    }
+
+    /*
+     * BOTH handles, always, and this is where the archived branch was right
+     * and a rewrite of it was wrong.
+     *
+     * The autodoc leaves it open -- Execute() "may also be used to create a
+     * new interactive Shell process just like those created with the NewShell
+     * command", which would return at once and leave the handles to the
+     * Shell -- so the first version of this waited for the Shell to close them
+     * and never closed them here.  Measured, on the guest, with the packet
+     * trace: Execute() returns only when the Shell has EXITED, and that Shell
+     * does not close the handles it was given.  No ACTION_END ever arrived,
+     * the session was never reaped, and every upgrade after the first was
+     * answered 503 -- 196 of them in one run.
+     *
+     * These two closes are the session's end of file in both directions, and
+     * they are answered by the SERVER's process: Close() on a handle whose
+     * fh_Type is our port sends ACTION_END there and waits, the event loop
+     * services it, and this Process wakes.  That is the shape the archived
+     * amiga_dropbear.c had and the reason it had it.
+     */
+    Close(r->rn_In);
+    Close(r->rn_Out);
 
     /* rn_Done is published last and nothing in the record is read after it. */
     parent = r->rn_Parent;
