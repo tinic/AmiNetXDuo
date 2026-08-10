@@ -13,7 +13,9 @@ version at the top when it merges.
 - `AddNetInterface` says when it did not work. It now fails when the interface was refused, naming the device, the file or the slot, and warns when the interface attached but has no address; success means an interface that is addressed, or one configured to stay down
 - An interface added back after a removal can transmit. Its reader threads were being given memory the library had already registered elsewhere, which ThreadX refused, leaving the interface attached and addressed with its link down
 - A program can add an interface through the library, `NETCTRL_INTERFACE_ADD` alongside the existing remove
-- TCP acknowledges once the receive window has moved rather than once every second segment. On a 68020 with a PIO card that is 291 fewer acknowledgements for every megabyte read, and each one was a frame the processor built, the driver sent and the other end handled: reads there are 14% faster
+- The commands that read the network's state say "network not started" once rather than twice
+- TCP acknowledges by how much data is outstanding rather than by counting segments, with the threshold taken from the receive buffer and ramped up from two full segments as a connection opens. On a 68020 with a PIO card that is 387 fewer acknowledgements for every megabyte read, each one a frame the processor built, the driver sent and the other end handled; reads there are 24% faster than 0.20.0 and now ahead of Roadshow. A small machine is unaffected either way, because free memory sizes the window there long before this does
+- A receive window that had drained less than it had filled was advertised as though four gigabytes had come free, on every such read. That is most reads on a machine slower than the other end
 
 ## 0.20.0
 
