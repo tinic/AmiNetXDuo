@@ -9,10 +9,14 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.20.1
+
 - `AddNetInterface` adds an interface to a network that is already running. It never did: against a running stack it opened the library, waited for any address the machine happened to have, and reported success without adding anything, so an interface taken out with `RemoveNetInterface` could not be put back until a reboot
 - `AddNetInterface` says when it did not work. It now fails when the interface was refused, naming the device, the file or the slot, and warns when the interface attached but has no address; success means an interface that is addressed, or one configured to stay down
 - An interface added back after a removal can transmit. Its reader threads were being given memory the library had already registered elsewhere, which ThreadX refused, leaving the interface attached and addressed with its link down
 - A program can add an interface through the library, `NETCTRL_INTERFACE_ADD` alongside the existing remove
+- An address change no longer signals a program that has exited. A program that asks for `SBTC_SIG_ADDRESS_CHANGE_MASK` and then quits without closing the library used to leave a base behind that the stack still signalled, writing into memory the machine had given to something else; it is now skipped, and named on the serial log
+- The commands stop losing 2568 bytes of memory every time they run. Starting the network means keeping the library open, or the stack would go down again with the command; the library holds that reference itself now, so a command closes its own base like any other program. Ten `AddNetInterface` runs cost what one does
 - The commands that read the network's state say "network not started" once rather than twice
 - `ShowNetStatus` on a machine with no interfaces configured and no drivers installed said what to look at and then listed nothing, which is the machine that heading is for
 - `AddNetInterface` says when `LIBS:bsdsocket.library` is missing rather than only that the network would not start
