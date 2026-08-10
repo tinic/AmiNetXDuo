@@ -84,20 +84,11 @@
 
 #include "aminetxduo/compat.h"      /* ami_log() + AMI_LOG_* only */
 
-/* Fast RAM first, then whatever is left.  MEMF_PUBLIC alone lets exec choose,
-   and it chooses by MemHeader priority, so a machine whose Fast RAM is gone
-   puts a thread stack or the kernel pool in Chip -- where every push and pop
-   is contended with the chipset.  Asking costs nothing when Fast is there and
-   changes nothing when it is not.  Freed with FreeMem and the same size, so
-   nothing downstream cares which arena answered.  */
+/* Freed with FreeMem and the same size, so nothing downstream cares which
+   arena answered.  */
 static APTR _tx_amiga_alloc(ULONG size, ULONG memf)
 {
-    APTR p =  AllocMem(size, memf | MEMF_FAST);
-
-    if (p == (APTR) 0)
-        p =  AllocMem(size, memf);
-
-    return(p);
+    return(AllocMem(size, memf));
 }
 
 
