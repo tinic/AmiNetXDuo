@@ -226,10 +226,25 @@ VOID netstack_pool_sample(VOID);
  * Packet pool sizing. NetX Duo's embedded defaults do not suit the 1 MB floor
  * (docs/RESEARCH.md §81), so these are computed from AvailMem() at startup and
  * clamped to the range below.
+ *
+ * The maximum was 256, which is a sixteenth of AvailMem() on a machine with
+ * 6.8 MB free and every byte of AvailMem()/16 above that.  It also set
+ * BSD_TCP_WINDOW_CEILING, which is a share of it
+ * (src/bsdsocket/bsdsocket_internal.h), and through the ceiling it set the
+ * acknowledgment threshold, which is half the window: 256 packets meant a
+ * 50176-byte window, a 25088-byte threshold and 41.8 acknowledgments per MiB
+ * against Roadshow's 36.8.  512 leaves AvailMem()/16 as the bound on every
+ * machine below 13.6 MB free -- the lab's 8 MB A1200 lands at 368 packets, a
+ * 72128-byte window and 3.1 pure acknowledgments per MiB -- and raises what
+ * one socket may pin only in step with the pool it is a share of, so the
+ * fraction that was measured safe at an eighth stays an eighth.
+ *
+ * Below about 6.8 MB free nothing here changes at all: AvailMem() is what
+ * binds, both before and after.
  */
 #define AMI_POOL_PAYLOAD        1568        /* 1500 MTU + 14 eth + slack, 4-aligned */
 #define AMI_POOL_MIN_PACKETS    16
-#define AMI_POOL_MAX_PACKETS    256
+#define AMI_POOL_MAX_PACKETS    512
 
 /*
  * Interface handles. Index 0..count-1 in config order; the loopback interface
