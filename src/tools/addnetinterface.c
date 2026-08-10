@@ -128,8 +128,8 @@ static VOID explain_library_failure(const AmiIfConfig *ifc)
     /*
      * Before blaming the interface. A 512 KB machine fails here: the stack
      * logs its refusal to the serial port and puts nothing on screen, and the
-     * cable branch below would then send someone with no free memory to go and
-     * look at their wiring. tests/tools/run-oommsg.sh is the run that proves
+     * device probe below would then send someone with no free memory to go and
+     * look at their card. tests/tools/run-oommsg.sh is the run that proves
      * this branch is reached.
      */
     {
@@ -145,13 +145,6 @@ static VOID explain_library_failure(const AmiIfConfig *ifc)
 
     /* Probe the hardware rather than guess at it. */
     tool_explain_device(ifc->device, ifc->unit);
-
-    /* Only when the card is fine: a missing driver is not a cable fault. */
-    if (ifc->iptype == AMI_IPTYPE_DHCP &&
-        tool_device_where(ifc->device) != NULL &&
-        tool_device_probe(ifc->device, ifc->unit) == 0)
-    {
-    }
 }
 
 /*

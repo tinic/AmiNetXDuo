@@ -159,20 +159,14 @@ static VOID explain_unknown_name(const char *given, ULONG unit, BOOL had_unit)
         if (!load_interface(names[i], &ifc, FALSE))
             continue;
 
-        if (listed++ == 0)
-        {
-        }
+        listed++;
 
         tool_printf("      %-15s %s unit %ld\n", (LONG)names[i],
                     (LONG)ifc.device, (LONG)ifc.unit);
     }
 
     if (listed == 0)
-    {
         tool_explain_interface_file(given);
-        return;
-    }
-
 }
 
 /* ------------------------------------------------- the running stack -----
@@ -549,13 +543,12 @@ int main(int argc, char **argv)
             {
                 tool_error("%s would not come online", (LONG)name);
 
-                if (!tool_stack_installed())
-                {
-                }
-                else
-                {
+                /* The card is only worth probing when the library that would
+                   drive it is on the machine at all. */
+                if (tool_stack_installed())
                     tool_explain_device(ifc.device, ifc.unit);
-                }
+                else
+                    tool_printf("  LIBS:bsdsocket.library is not installed.\n");
 
                 FreeArgs(rda);
                 return RETURN_FAIL;

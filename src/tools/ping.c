@@ -393,11 +393,6 @@ static int ping_main(int argc, char **argv)
 
         tool_error("cannot open a raw socket: %s", (LONG)tool_sock_errstr(err));
 
-        if (err == TOOL_EPROTONOSUPPORT || err == TOOL_ESOCKTNOSUPPORT ||
-            err == TOOL_EOPNOTSUPP || err == TOOL_EAFNOSUPPORT)
-        {
-        }
-
         CloseLibrary(sb);
         FreeArgs(rda);
         return RETURN_FAIL;
@@ -499,10 +494,6 @@ static int ping_main(int argc, char **argv)
 
             tool_error("could not send the request: %s",
                        (LONG)tool_sock_errstr(err));
-
-            if (err == TOOL_ENETUNREACH || err == TOOL_EHOSTUNREACH)
-            {
-            }
 
             rc = RETURN_ERROR;
             break;
