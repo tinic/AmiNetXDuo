@@ -69,6 +69,7 @@
 #include "httplock.h"
 #include "httpif.h"
 #include "httpframe.h"
+#include "iperfcore.h"
 #include "aminetxduo/version.h"
 
 #include <libraries/locale.h>
@@ -270,7 +271,8 @@ enum
     CONN_BODY,          /* reading the body through the sink               */
     CONN_WALK,          /* a slice of a tree walk per pass; no socket work */
     CONN_SEND,          /* pushing out[], refilled by the producer         */
-    CONN_DRAIN          /* reading away a refused request's body           */
+    CONN_DRAIN,         /* reading away a refused request's body           */
+    CONN_IPERF          /* a slice of a throughput run per pass, as WALK   */
 };
 
 /*
@@ -1052,6 +1054,7 @@ static VOID httpd_error(HttpConn *c, ULONG status, const char *detail)
    be able to end one, the same way the Allow header is declared above the
    table it is generated from. */
 static VOID httpd_walk_release(HttpConn *c);
+static VOID httpd_iperf_release(HttpConn *c);
 
 /*
  * A PUT that never finished.  The temporary is deleted rather than left, so an
@@ -1090,6 +1093,7 @@ static VOID httpd_close(HttpConn *c)
 
     httpd_walk_release(c);
     httpd_put_abandon(c);
+    httpd_iperf_release(c);
 
     if (c->sock >= 0)
     {
@@ -5213,6 +5217,332 @@ static BOOL httpd_preconditions(HttpConn *c)
     return TRUE;
 }
 
+/* ---------------------------------------------------------------- iperf ----
+ *
+ * The same measurement the `iperf` command runs, driven from here so that a
+ * user with a browser and no Shell can produce a figure.  src/tools/iperfcore.c
+ * is the whole of it; this is the presentation.
+ *
+ * It is iperf 2, on port 5001 by default, and the far end has to be `iperf`
+ * 2.x.  The page says so, because the first thing somebody does otherwise is
+ * point it at the iperf3 their distribution ships and read the silence as us
+ * being broken.
+ *
+ * No query string: http_path_resolve() throws one away and httpd_target is
+ * shared between connections, so the parameters are path segments instead --
+ * /iperf/<direction>/<seconds>[/<host>].  That also keeps this out of the
+ * method table, so OPTIONS still advertises exactly what it did before.
+ *
+ * ONE AT A TIME, in a file-scope run rather than per connection: the machine
+ * has one network path and two measurements would be measuring each other.
+ * A second request while one is in flight is refused rather than queued.
+ *
+ * A slice per pass of the loop, never a blocking call, for the reason
+ * CONN_WALK exists: a handler that sat inside a ten-second measurement would
+ * stop the server answering anybody, and its own connection timeouts would
+ * then drop the clients that were waiting.
+ */
+
+static IperfRun  httpd_iperf;
+static UBYTE     httpd_iperf_buf[IPERF_BUF_MAX];
+static HttpConn *httpd_iperf_owner;      /* NULL when nothing is running    */
+
+/* Compiled in, and small enough for httpd_body_text()'s 2 KB of out[].  No
+   CDN, no font, no remote script: the Amiga serves every byte of it. */
+static const char httpd_iperf_page[] =
+"<!doctype html><title>AmiNetXDuo throughput</title><meta name=viewport "
+"content=\"width=device-width,initial-scale=1\"><style>"
+"body{font:15px/1.5 sans-serif;margin:2em auto;max-width:34em;padding:0 1em}"
+"button{font:inherit;padding:.4em .7em;margin:.15em}"
+"input{font:inherit;width:5em}"
+"pre{background:#eee;padding:.8em;white-space:pre-wrap;word-break:break-all}"
+"</style><h1>Throughput</h1>"
+"<p>iperf 2, port 5001. The other end needs <b>iperf 2.x</b>, not iperf3."
+"<p><label>seconds <input id=t value=10></label> "
+"<label>peer <input id=h placeholder=optional></label>"
+"<p><button onclick=\"r('tcp-rx')\">TCP in</button>"
+"<button onclick=\"r('udp-rx')\">UDP in</button>"
+"<button onclick=\"r('tcp-tx')\">TCP out</button>"
+"<button onclick=\"r('udp-tx')\">UDP out</button>"
+"<pre id=o>Pick a direction. \"in\" waits for a sender; \"out\" needs a peer.</pre>"
+"<script>function r(d){var u='/iperf/'+d+'/'+t.value;"
+"if(d.slice(-2)=='tx'){if(!h.value){o.textContent='\"out\" needs a peer address.';return}"
+"u+='/'+h.value}o.textContent='running '+d+'...';"
+"fetch(u).then(function(x){return x.text()}).then(function(s){o.textContent=s},"
+"function(e){o.textContent='failed: '+e})}</script>";
+
+/* One decimal path segment, or -1. */
+static LONG httpd_iperf_num(const char *s, ULONG len)
+{
+    ULONG i;
+    ULONG v = 0;
+
+    if (len == 0 || len > 9)
+        return -1;
+
+    for (i = 0; i < len; i++)
+    {
+        if (s[i] < '0' || s[i] > '9')
+            return -1;
+        v = v * 10UL + (ULONG)(s[i] - '0');
+    }
+
+    return (LONG)v;
+}
+
+/*
+ * A dotted quad, and nothing else.  Deliberately not tool_sock_resolve():
+ * that may reach the resolver, and a resolver call inside this loop stops the
+ * server answering anybody for as long as it takes.  The Shell command has a
+ * process of its own to wait in and does resolve names; this does not.
+ */
+static BOOL httpd_iperf_dotted(const char *s, ULONG *out)
+{
+    ULONG addr = 0;
+    ULONG i;
+
+    for (i = 0; i < 4; i++)
+    {
+        ULONG v = 0;
+        ULONG d = 0;
+
+        while (*s >= '0' && *s <= '9' && d < 3)
+        {
+            v = v * 10UL + (ULONG)(*s++ - '0');
+            d++;
+        }
+
+        if (d == 0 || v > 255UL)
+            return FALSE;
+
+        addr = (addr << 8) | v;
+
+        if (i < 3)
+        {
+            if (*s != '.')
+                return FALSE;
+            s++;
+        }
+    }
+
+    if (*s != '\0')
+        return FALSE;
+
+    *out = addr;
+    return TRUE;
+}
+
+static VOID httpd_iperf_release(HttpConn *c)
+{
+    if (httpd_iperf_owner == c)
+    {
+        iperf_end(&httpd_iperf, NULL);
+        httpd_iperf_owner = NULL;
+    }
+}
+
+/* The answer, as JSON.  Built with the same hs_append the rest of this file
+   builds its bodies with; there is no JSON helper in the tree and one number
+   per key needs none. */
+static VOID httpd_iperf_answer(HttpConn *c, const IperfResult *res)
+{
+    char  addr[TOOL_ADDR_STRLEN];
+    ULONG used = 0;
+    BOOL  ok   = TRUE;
+
+    tool_addr_text(httpd_sb, &res->peer, addr, sizeof(addr));
+
+    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, "{\"protocol\":\"iperf2\",\"dir\":\"");
+    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, iperf_dir_name(res->dir));
+    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, "\",\"bytes\":");
+    ok = ok && hs_append_num(httpd_page, sizeof(httpd_page), &used, res->bytes_lo);
+    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, ",\"bytes_high\":");
+    ok = ok && hs_append_num(httpd_page, sizeof(httpd_page), &used, res->bytes_hi);
+    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, ",\"ms\":");
+    ok = ok && hs_append_num(httpd_page, sizeof(httpd_page), &used, res->ms);
+    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, ",\"bits_per_sec\":");
+    ok = ok && hs_append_num(httpd_page, sizeof(httpd_page), &used, res->bits);
+    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, ",\"packets\":");
+    ok = ok && hs_append_num(httpd_page, sizeof(httpd_page), &used, res->packets);
+    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, ",\"lost\":");
+    ok = ok && hs_append_num(httpd_page, sizeof(httpd_page), &used, res->lost);
+    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, ",\"outoforder\":");
+    ok = ok && hs_append_num(httpd_page, sizeof(httpd_page), &used, res->outoforder);
+    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, ",\"peer_report\":");
+    ok = ok && hs_append_num(httpd_page, sizeof(httpd_page), &used, (ULONG)res->got_report);
+    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, ",\"peer\":\"");
+    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, addr);
+    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, "\",\"port\":");
+    ok = ok && hs_append_num(httpd_page, sizeof(httpd_page), &used, (ULONG)res->peer_port);
+    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, "}");
+
+    if (!ok)
+    {
+        httpd_error(c, 500, "the result did not fit");
+        return;
+    }
+
+    httpd_begin(c, 200);
+    httpd_header(c, "Cache-Control", "no-store");
+    httpd_body_text(c, "application/json", httpd_page);
+}
+
+/*
+ * /iperf, or /iperf/<dir>/<seconds>[/<host>].  TRUE when this answered or
+ * took the connection over, FALSE to let the ordinary handler have it.
+ */
+static BOOL httpd_iperf_hook(HttpConn *c)
+{
+    const char *u = c->path.url;
+    const char *dir;
+    const char *secs;
+    const char *host;
+    ULONG       dirlen;
+    ULONG       secslen;
+    LONG        n;
+    IperfPlan   plan;
+    const char *why;
+
+    if (!hs_equal(u, "/iperf") && hs_nicmp(u, "/iperf/", 7) != 0)
+        return FALSE;
+
+    /* GET and HEAD only.  Anything else is a client that found the name by
+       walking the tree, and the honest answer is that it is not a file. */
+    if (c->method->id != HTTPD_M_GET && c->method->id != HTTPD_M_HEAD)
+    {
+        httpd_error(c, 405, "/iperf is a measurement, not a file");
+        return TRUE;
+    }
+
+    if (hs_equal(u, "/iperf") || hs_equal(u, "/iperf/"))
+    {
+        httpd_begin(c, 200);
+        httpd_body_text(c, "text/html; charset=utf-8", httpd_iperf_page);
+        return TRUE;
+    }
+
+    dir = u + 7;
+    for (dirlen = 0; dir[dirlen] != '\0' && dir[dirlen] != '/'; dirlen++)
+        ;
+
+    secs = (dir[dirlen] == '/') ? dir + dirlen + 1 : NULL;
+    if (secs == NULL)
+    {
+        httpd_error(c, 400, "say how many seconds: /iperf/<direction>/<seconds>");
+        return TRUE;
+    }
+
+    for (secslen = 0; secs[secslen] != '\0' && secs[secslen] != '/'; secslen++)
+        ;
+
+    host = (secs[secslen] == '/') ? secs + secslen + 1 : NULL;
+
+    iperf_plan_init(&plan);
+
+    if (dirlen == 5 && hs_nicmp(dir, "tcp-t", 5) == 0)
+        plan.dir = IPERF_TCP_TX;
+    else if (dirlen == 5 && hs_nicmp(dir, "tcp-r", 5) == 0)
+        plan.dir = IPERF_TCP_RX;
+    else if (dirlen == 5 && hs_nicmp(dir, "udp-t", 5) == 0)
+        plan.dir = IPERF_UDP_TX;
+    else if (dirlen == 5 && hs_nicmp(dir, "udp-r", 5) == 0)
+        plan.dir = IPERF_UDP_RX;
+    else
+    {
+        httpd_error(c, 404, "the directions are tcp-tx, tcp-rx, udp-tx, udp-rx");
+        return TRUE;
+    }
+
+    n = httpd_iperf_num(secs, secslen);
+    if (n < 1)
+    {
+        httpd_error(c, 400, "a run needs a whole number of seconds");
+        return TRUE;
+    }
+    plan.seconds = (ULONG)n;
+
+    plan.buflen = (plan.dir == IPERF_UDP_TX || plan.dir == IPERF_UDP_RX)
+                      ? (ULONG)IPERF_UDP_DEFAULT : 4096UL;
+
+    if (plan.dir == IPERF_UDP_TX)
+        plan.rate_kbit = 1000UL;
+
+    /* Checked before anything is opened, and it is the same check the command
+       makes: a run that is not bounded is refused here too. */
+    why = iperf_plan_check(&plan);
+    if (why != NULL)
+    {
+        httpd_error(c, 400, why);
+        return TRUE;
+    }
+
+    if (plan.dir == IPERF_TCP_TX || plan.dir == IPERF_UDP_TX)
+    {
+        ULONG v4;
+
+        if (host == NULL || host[0] == '\0')
+        {
+            httpd_error(c, 400, "a sending direction needs a peer: "
+                                "/iperf/tcp-tx/<seconds>/<host>");
+            return TRUE;
+        }
+
+        if (!httpd_iperf_dotted(host, &v4))
+        {
+            httpd_error(c, 400, "the peer has to be a dotted address, not a "
+                                "name: nothing here may wait on a resolver");
+            return TRUE;
+        }
+
+        tool_addr_v4(&plan.peer, v4);
+    }
+    else
+    {
+        tool_addr_v4(&plan.peer, 0);
+    }
+
+    if (httpd_iperf_owner != NULL)
+    {
+        /* One network path, so one measurement.  409 rather than a queue:
+           a second run would be measuring the first. */
+        httpd_error(c, 409, "a measurement is already running");
+        return TRUE;
+    }
+
+    if (iperf_begin(&httpd_iperf, httpd_sb, &plan, httpd_iperf_buf) != 0)
+    {
+        IperfResult res;
+
+        iperf_end(&httpd_iperf, &res);
+        httpd_error(c, 503, (res.stage != NULL) ? res.stage : "it would not start");
+        return TRUE;
+    }
+
+    httpd_iperf_owner = c;
+    c->state = CONN_IPERF;
+    return TRUE;
+}
+
+/* One slice, once per pass of the loop, for the connection that owns the run. */
+static VOID httpd_iperf_slice(HttpConn *c)
+{
+    IperfResult res;
+    LONG        state = iperf_slice(&httpd_iperf);
+
+    if (state == IPERF_RUNNING)
+        return;
+
+    iperf_end(&httpd_iperf, &res);
+    httpd_iperf_owner = NULL;
+
+    if (state == IPERF_FAILED)
+        httpd_error(c, 502, (res.stage != NULL) ? res.stage : "it failed");
+    else
+        httpd_iperf_answer(c, &res);
+
+    httpd_log_status(c);
+}
+
 static VOID httpd_dispatch(HttpConn *c)
 {
     if (httpd_verbose && !httpd_trace)
@@ -5234,6 +5564,16 @@ static VOID httpd_dispatch(HttpConn *c)
     if (!httpd_preconditions(c))
     {
         httpd_log_status(c);
+        return;
+    }
+
+    /* /iperf is answered here rather than from the filesystem.  It either
+       answers outright or takes the connection over as CONN_IPERF, which
+       logs its own status when the measurement ends, as a walk does. */
+    if (httpd_iperf_hook(c))
+    {
+        if (c->state != CONN_IPERF)
+            httpd_log_status(c);
         return;
     }
 
@@ -5953,7 +6293,7 @@ static VOID httpd_serve(LONG lsock)
             /* A walking connection wants neither half of the socket: it is
                busy with the filesystem, and the answer is not built until the
                walk ends. */
-            if (c->state == CONN_WALK)
+            if (c->state == CONN_WALK || c->state == CONN_IPERF)
                 walking++;
             else if (c->state == CONN_REQUEST || c->state == CONN_BODY ||
                      c->state == CONN_DRAIN)
@@ -6020,6 +6360,12 @@ static VOID httpd_serve(LONG lsock)
             if (c->state == CONN_WALK)
             {
                 httpd_walk_slice(c);
+                continue;
+            }
+
+            if (c->state == CONN_IPERF)
+            {
+                httpd_iperf_slice(c);
                 continue;
             }
 

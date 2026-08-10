@@ -282,8 +282,12 @@ endif()
 # on a host.  One decides which file a request reaches, the second whether it
 # may write to it, the third where one request ends and the next begins, the
 # fourth who may write to a name somebody else has locked.
+# iperfcore.c and iperfwire.c are the same measurement the `iperf` command
+# runs, driven from httpd's own loop a slice at a time so that a user with a
+# browser and no Shell can produce a figure.  See the iperf block in httpd.c.
 aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httppath.c httpif.c
-                                          httpframe.c httplock.c toolsock.c)
+                                          httpframe.c httplock.c toolsock.c
+                                          iperfcore.c iperfwire.c)
 
 # iperf measures throughput, and is config-only in the same sense as the other
 # clients here: bsdsocket.library through its published vectors and no part of
