@@ -88,10 +88,32 @@ printf '%s' "$MODE" > "$STAGE/env/DHCP3927MODE"
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-dhcp3927}"
 
+# ---------------------------------------------------------- the verdict ---
+#
+# This used to end in `exec <runner>`, so the script's exit status was the
+# guest's own return code: a guest that opened nothing, ran no checks and
+# returned 0 was a pass, and so was one whose transcript never arrived.
+# tools/test-verdict.sh reads the guest's own counters instead, puts a floor
+# under the number of checks, and fails loudly and by name when there is no
+# transcript at all.
+. "$ROOT/tools/test-verdict.sh"
+
+verdict() {
+    # 0 pass, 1 fail, 77 the guest skipped: all three are carried out.
+    verdict_guest "dhcp3927" 1 "$1" \
+        "$(verdict_hd_amiberry)/stdout.txt" \
+        "$(verdict_serial_amiberry)" && exit 0
+    exit $?
+}
+
 CPUARG=()
 [ -z "$CPU" ] || CPUARG=(-c "$CPU")
 
 echo "==> CONFIGURE=$CONFIGURE, DHCP3927MODE=$MODE"
 
-exec "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
+set +e
+"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
      "$EXE" "$STAGE/devs" "$STAGE/env"
+RUN_RC=$?
+set -e
+verdict "$RUN_RC"

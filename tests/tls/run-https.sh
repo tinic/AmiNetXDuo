@@ -57,6 +57,24 @@ cp "$A2065" "$STAGE/devs/a2065.device"
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-tlshttps}"
 
+# ---------------------------------------------------------- the verdict ---
+#
+# This used to end in `exec <runner>`, so the script's exit status was the
+# guest's own return code: a guest that opened nothing, ran no checks and
+# returned 0 was a pass, and so was one whose transcript never arrived.
+# tools/test-verdict.sh reads the guest's own counters instead, puts a floor
+# under the number of checks, and fails loudly and by name when there is no
+# transcript at all.
+. "$ROOT/tools/test-verdict.sh"
+
+verdict() {
+    # 0 pass, 1 fail, 77 the guest skipped: all three are carried out.
+    verdict_guest "tls-https" 1 "$1" \
+        "$(verdict_hd_amiberry)/stdout.txt" \
+        "$(verdict_serial_amiberry)" && exit 0
+    exit $?
+}
+
 CPUARG=()
 [ -z "$CPU" ] || CPUARG+=(-c "$CPU")
 [ -z "${CLOCK:-}" ] || CPUARG+=(-k "$CLOCK")
@@ -68,10 +86,18 @@ if [ "${AMINETXDUO_PROFILE:-0}" = "1" ]; then
     case "$BUILD" in /*) PROF="$BUILD/tools/profiler/Profile" ;;
                       *) PROF="$ROOT/$BUILD/tools/profiler/Profile" ;; esac
     [ -x "$PROF" ] || { echo "build the Profile target first" >&2; exit 2; }
-    exec "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
+    set +e
+    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
          -a "OUT=DH0:tls.prof FOLDED=DH0:tls.folded tls_https" \
          "$PROF" "$EXE" "$STAGE/devs"
+    RUN_RC=$?
+    set -e
+    verdict "$RUN_RC"
 fi
 
-exec "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
+set +e
+"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
      "$EXE" "$STAGE/devs"
+RUN_RC=$?
+set -e
+verdict "$RUN_RC"
