@@ -4,6 +4,8 @@
 1	port/threadx-amiga/src/tx_thread_stack_build.c	-Wanalyzer-null-dereference	dereference of NULL 'ctrl'
 1	src/common/compat.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value 'ev'
 1	src/common/compat.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value 'ev.ev_lo'
+1	src/tools/httpd.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '*ds.ds_Days'
+1	src/tools/httpd.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value 'ds.ds_Days'
 1	tests/perf/bracket_test.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value 'ev.ev_lo'
 1	tests/perf/cpucal.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value 'ev.ev_lo'
 1	tests/perf/perf_test.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value 'ev.ev_lo'

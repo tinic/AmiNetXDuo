@@ -208,21 +208,54 @@ cat "$WORK"/log.* |
     awk -F'\t' '{ n[$0]++ } END { for (k in n) printf "%d\t%s\n", n[k], k }' |
     sort > "$WORK/found"
 
+grep -v '^#' "$BASELINE" | grep -v '^$' | sort > "$WORK/base" || true
+
+# A unit that gave up was NOT checked, so nothing about it can be compared:
+# its findings are whatever the analyser managed before it stopped, and its
+# baseline entries were never looked for.  Set both aside.
+#
+# Which units bail is not a property of the tree.  src/tools/httpd.c bailed on
+# the CI runner and was analysed in full on another host, same commit and the
+# same pinned GCC, and the two -Wanalyzer-use-of-uninitialized-value findings it
+# then produced (DateStamp() fills the struct through a library call the
+# analyser cannot see) would have failed the build as NEW on one host while the
+# same entries failed as GONE on the other.  A coverage difference is not a code
+# change and must not read as one.
+bailed_filter() {
+    if [ -s "$WORK/bailed" ]; then
+        awk -F'\t' 'NR==FNR { bail[$0]=1; next } !($2 in bail)' \
+            "$WORK/bailed" "$1"
+    else
+        cat "$1"
+    fi
+}
+bailed_only() {
+    if [ -s "$WORK/bailed" ]; then
+        awk -F'\t' 'NR==FNR { bail[$0]=1; next } ($2 in bail)' \
+            "$WORK/bailed" "$1"
+    fi
+}
+
 if [ "$UPDATE" = 1 ]; then
+    # Carry forward the baseline entries for units that bailed on THIS run.
+    # Dropping them would make the next host that manages to analyse one fail
+    # on findings that were triaged long ago.
     {
         echo "# GCC -fanalyzer findings that have been triaged and are not defects."
         echo "# Regenerate with tools/analyze.sh --update.  See the script header."
         echo "# count<TAB>file<TAB>warning<TAB>message"
-        cat "$WORK/found"
+        { bailed_filter "$WORK/found"; bailed_only "$WORK/base"; } | sort
     } > "$BASELINE"
-    echo "baseline updated: $(wc -l < "$WORK/found" | tr -d ' ') entries"
+    echo "baseline updated: $(grep -vc '^#' "$BASELINE" | tr -d ' ') entries"
     exit 0
 fi
 
-grep -v '^#' "$BASELINE" | grep -v '^$' | sort > "$WORK/base" || true
+bailed_filter "$WORK/found" > "$WORK/found.cmp"
+bailed_filter "$WORK/base"  > "$WORK/base.cmp"
+SETASIDE=$(bailed_only "$WORK/base")
 
-NEW=$(comm -23 "$WORK/found" "$WORK/base" || true)
-GONE=$(comm -13 "$WORK/found" "$WORK/base" || true)
+NEW=$(comm -23 "$WORK/found.cmp" "$WORK/base.cmp" || true)
+GONE=$(comm -13 "$WORK/found.cmp" "$WORK/base.cmp" || true)
 
 status=0
 if [ -n "$NEW" ]; then
@@ -233,5 +266,8 @@ if [ -n "$GONE" ]; then
     printf '\033[33mbaseline entries that no longer occur -- rerun with --update:\033[0m\n%s\n' "$GONE"
     status=1
 fi
-[ "$status" = 0 ] && echo "-fanalyzer: $(wc -l < "$WORK/base" | tr -d ' ') known findings, no new ones"
+if [ -n "$SETASIDE" ]; then
+    printf 'set aside, their unit was not analysed this run:\n%s\n' "$SETASIDE"
+fi
+[ "$status" = 0 ] && echo "-fanalyzer: $(wc -l < "$WORK/base.cmp" | tr -d ' ') known findings, no new ones"
 exit "$status"
