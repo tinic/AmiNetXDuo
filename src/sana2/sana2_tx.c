@@ -201,7 +201,19 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
         LONG       err  = (LONG)(BYTE)slot->req.ios2_Req.io_Error;
 
         if (err != 0)
+        {
             iface->stats.tx_errors++;
+            AMI_ERROR("sana2: CMD_WRITE failed err=%ld wire=%ld type=%lx "
+                      "len=%ld dst=%lx%lx",
+                      (LONG)err, (LONG)slot->req.ios2_WireError,
+                      (LONG)slot->req.ios2_PacketType, (LONG)slot->total,
+                      (LONG)(((ULONG)slot->req.ios2_DstAddr[0] << 8) |
+                             slot->req.ios2_DstAddr[1]),
+                      (LONG)(((ULONG)slot->req.ios2_DstAddr[2] << 24) |
+                             ((ULONG)slot->req.ios2_DstAddr[3] << 16) |
+                             ((ULONG)slot->req.ios2_DstAddr[4] << 8) |
+                             slot->req.ios2_DstAddr[5]));
+        }
         else
             iface->stats.packets_sent++;
 

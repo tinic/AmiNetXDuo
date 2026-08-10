@@ -448,6 +448,87 @@ static void test_from_buff_short_chain(void)
 }
 
 
+/*
+ * The transmit checksum fusion, which is the one path through this hook that
+ * copies the frame somewhere other than the walk at the bottom.
+ *
+ * ami_sana2_tx_fuse_checksum() copies the whole frame itself and leaves the
+ * cursor at the end of it, so the hook has to answer TRUE there and not fall
+ * into a walk that would find the packet already exhausted.  It did fall into
+ * it, and answered FALSE for every TCP frame; drivers that test the return
+ * value refused to transmit any of them.
+ */
+static void test_from_buff_fused_checksum(void)
+{
+    static AmiSana2If iface;
+    static UCHAR      dgram[60];
+    AmiTxSlot         slot;
+    NX_PACKET         pkt;
+    UCHAR             out[sizeof(dgram)];
+    ULONG             i;
+    ULONG             deferred_before = h_deferred_checksums;
+
+    printf("sana2: S2_CopyFromBuff, TCP checksum fused into the copy\n");
+
+    /* 20 bytes of IPv4 header, 20 of TCP, 20 of payload. */
+    memset(dgram, 0, sizeof(dgram));
+    dgram[0]  = 0x45;                       /* version 4, ihl 5             */
+    dgram[2]  = 0;
+    dgram[3]  = (UCHAR)sizeof(dgram);       /* total length                 */
+    dgram[9]  = 6;                          /* TCP                          */
+    dgram[12] = 10;  dgram[13] = 0; dgram[14] = 0; dgram[15] = 1;
+    dgram[16] = 10;  dgram[17] = 0; dgram[18] = 0; dgram[19] = 2;
+    dgram[20] = 0x30; dgram[21] = 0x39;     /* source port                  */
+    dgram[22] = 0x00; dgram[23] = 0x50;     /* destination port             */
+    dgram[32] = 0x50;                       /* data offset 5                */
+    for (i = 40; i < sizeof(dgram); i++)
+        dgram[i] = (UCHAR)((i * 11 + 3) & 0xFF);
+
+    memset(&iface, 0, sizeof(iface));
+    iface.raw_mode = FALSE;
+
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.nx_packet_prepend_ptr = dgram;
+    pkt.nx_packet_append_ptr  = dgram + sizeof(dgram);
+    pkt.nx_packet_next        = NX_NULL;
+    pkt.nx_packet_interface_capability_flag =
+        NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM;
+
+    tx_slot_init(&slot, &pkt, (ULONG)sizeof(dgram));
+    slot.iface = &iface;
+
+    memset(out, 0, sizeof(out));
+    h_check(ami_sana2_copy_from_buff(out, &slot, (ULONG)sizeof(dgram)) == TRUE,
+            "a fused frame is handed over, not reported as a failed copy");
+    h_check(slot.consumed == (ULONG)sizeof(dgram),
+            "and the whole frame is consumed");
+    h_check(h_deferred_checksums == deferred_before,
+            "and NetX Duo was not asked to do it again");
+
+    /* Everything but the checksum field is the datagram. */
+    h_check(memcmp(out, dgram, 36) == 0 &&
+            memcmp(out + 38, dgram + 38, sizeof(dgram) - 38) == 0,
+            "and the bytes are the datagram");
+    h_check(out[36] != 0 || out[37] != 0, "and the checksum field was filled");
+
+    /*
+     * What the field is worth is not asserted here.  The sum comes out of
+     * n68k_copy_sum_longwords(), which reads the frame a longword at a time,
+     * so on a little-endian host it accumulates byte-swapped and folds its
+     * carries in a different order; the value is only the wire's value on the
+     * 68000.  tests/tcpdrill checks it where that holds.  What this test is
+     * for is the answer the hook gives the device about a copy it has already
+     * done.
+     */
+
+    /* The capability flag is cleared, so a retransmission of the same packet
+       is not summed a second time over a segment that now carries one. */
+    h_check((pkt.nx_packet_interface_capability_flag &
+             NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) == 0,
+            "and the packet no longer claims the checksum is owed");
+}
+
+
 /* ------------------------------------------------------------------ main -- */
 
 int main(void)
@@ -462,6 +543,7 @@ int main(void)
     test_from_buff_chain_chunked();
     test_from_buff_restart();
     test_from_buff_short_chain();
+    test_from_buff_fused_checksum();
 
     printf("%lu checks, %lu failures, %s\n", h_checks, h_failures,
            (h_failures == 0) ? "PASS" : "FAIL");
