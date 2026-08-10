@@ -104,12 +104,6 @@ static BOOL iperf_udp(const IperfRun *run)
                ? TRUE : FALSE;
 }
 
-static BOOL iperf_sender(const IperfRun *run)
-{
-    return (run->plan.dir == IPERF_TCP_TX || run->plan.dir == IPERF_UDP_TX)
-               ? TRUE : FALSE;
-}
-
 /* The clock starts when the first byte moves, not when the socket opened: a
    connect() on a slow link would otherwise be charged to the transfer. */
 static VOID iperf_clock_start(IperfRun *run)
