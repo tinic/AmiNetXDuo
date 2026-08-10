@@ -428,11 +428,10 @@ VOID http_term_service(VOID)
                 break;
 
             /*
-             * A pipe is not a filesystem, and dos.library's IsInteractive()
-             * asks exactly this: a handler that says it is NOT a filesystem is
-             * an interactive stream.  That answer is what makes the Shell on
-             * the far end print a prompt, so it is the difference between a
-             * terminal and a batch script reader.
+             * A pipe is not a filesystem.  Answered, and never asked: this is
+             * how 1.3 decided whether a stream was interactive, and V37 and
+             * later read fh_Port instead -- see term_handle(), which is where
+             * the prompt actually comes from.
              */
             case ACTION_IS_FILESYSTEM:
                 term_reply(pkt, DOSFALSE, 0);
@@ -532,6 +531,23 @@ static BPTR term_handle(TermPipe *p, LONG id, BOOL shell_reads)
 
     fh->fh_Type = term_port;
     fh->fh_Arg1 = id;
+
+    /*
+     * fh_Port is dos.library's "interactive" flag, and setting it is what
+     * makes the Shell on the far end print a prompt.
+     *
+     * IsInteractive() in V37 and later reads THIS FIELD.  It does not send
+     * ACTION_IS_FILESYSTEM -- that is the 1.3 way, and the case for it below
+     * is answered but never asked.  Measured: with fh_Port left at zero the
+     * Shell started, decided its input was a script, and read four times
+     * without ever writing a byte.  Four READs and no WRITE in the packet
+     * trace is exactly what "no prompt" looks like from this side.
+     *
+     * src/bsdsocket/tcp_handler.c sets it on a TCP: handle for the same
+     * reason and says the same thing: a stream with no length and no seek is
+     * what interactive means to DOS.
+     */
+    fh->fh_Port = term_port;
 
     if (shell_reads)
         p->dosread = 1;
