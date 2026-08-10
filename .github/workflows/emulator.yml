@@ -142,6 +142,17 @@ jobs:
         if: env.AMINETXDUO_A2065 != ''
         run: tests/tools/run-shownetservices.sh -b build/ci/default
 
+      # iperf, against a peer that counts what actually arrived.  What this
+      # arm proves is the BYTE COUNTS, which are exact on any link: SLIRP has
+      # no delay term and the emulator runs in warp mode, so no throughput
+      # figure it produces means anything and the script says so.  The two
+      # directions with the guest as the server need a peer that can call in,
+      # which a SLIRP guest has none of; they run under -B on a rig with a
+      # third machine, the same reason run-httpd.sh is not here.
+      - name: iperf measures what crossed the wire
+        if: env.AMINETXDUO_A2065 != ''
+        run: tests/tools/run-iperf.sh -b build/ci/default
+
       # A TLS 1.3 handshake end to end, against a peer that will not fall
       # back to 1.2, on both tiers -- and the second one is not redundant.
       # A 68020 takes the hand-written limb primitives in c68k_prim.S; a
