@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `if_freenameindex()` freed whatever happened to lie above its own return address instead of the pointer it was given, which lost a block of memory each call at best and corrupted the machine's memory list at worst. `if_nameindex()` wrote its error code through the same wrong place. Both had silently been compiled to take their arguments on the stack while every caller passes them in registers
+
 - A program that sends to a closed port is told so. 0.17.0 said this and it was not true: the stack learned the ICMP error, but nothing in the library handed it to the socket that caused it, so a UDP send still waited out its timeout and a TCP connect reported "connection refused" whatever the router had actually said
 - The commands stop losing 2568 bytes every time `host` runs. It was the only client command that never closed the library it opened
 
