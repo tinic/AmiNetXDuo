@@ -285,6 +285,26 @@ endif()
 aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httppath.c httpif.c
                                           httpframe.c httplock.c toolsock.c)
 
+# iperf measures throughput, and is config-only in the same sense as the other
+# clients here: bsdsocket.library through its published vectors and no part of
+# the stack linked in.  That is the point rather than a convenience -- the
+# figure it prints is the one an application gets, and the same binary runs on
+# Roadshow and AmiTCP, so a user who says we are slower than another stack can
+# measure both with one tool on their own card.
+#
+# It does NOT link third_party/netxduo/utility/iperf/nx_iperf.c, for the reason
+# sntp.c gives about the vendored SNTP add-on and two more: that file will not
+# compile without nx_web_http_server.h and FileX, which this tree does not
+# ship, and it binds its sockets on an NX_IP a Shell command's own linked copy
+# of NetX Duo does not have.  iperfwire.c reimplements the wire format it
+# speaks, which was read off iperf 2.2.1 rather than out of that source.
+#
+# iperfwire.c is a source of its own for the same reason httppath.c is: it is
+# the part that must not be wrong, and keeping it free of AmigaDOS lets the
+# host test below compile it.
+aminetxduo_add_tool(tool_iperf   iperf    SOURCES iperf.c iperfcore.c
+                                          iperfwire.c toolsock.c)
+
 # sntp is config-only in the same sense as fetch: it reaches bsdsocket.library
 # through its published vectors and sets the machine's clock through
 # timer.device and battclock.resource.  It does NOT link the vendored NetX Duo
@@ -360,7 +380,7 @@ add_dependencies(tools
     tool_getnetstatus tool_netshutdown tool_removenetinterface
     tool_netsetup tool_online tool_offline tool_host
     tool_fetch tool_nc tool_telnet tool_nettrace tool_traceroute tool_nslookup tool_arp
-    tool_tftp tool_whois tool_httpd
+    tool_tftp tool_whois tool_httpd tool_iperf
     tool_sntp
     tool_shownetstatus tool_netstat tool_ping tool_smoke)
 if(CMAKE_CROSSCOMPILING)
@@ -442,6 +462,21 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_fetchurl PRIVATE -Wall -Wextra)
     set_target_properties(test_fetchurl PROPERTIES C_STANDARD 11)
 
+    # The iperf 2 wire format.  Host-side because that is where the numbers
+    # captured off iperf 2.2.1 can be asserted against the encoder, and
+    # because unsigned long is 64 bits here and 32 on the target: the sign of
+    # a datagram id and the carry out of the byte counter were both wrong
+    # until this compiled them the other way.
+    add_executable(test_iperfwire
+        test/test_iperfwire.c
+        iperfwire.c)
+
+    target_include_directories(test_iperfwire PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    target_compile_options(test_iperfwire PRIVATE -Wall -Wextra)
+    set_target_properties(test_iperfwire PROPERTIES C_STANDARD 11)
+
     add_executable(test_httpframe
         test/test_httpframe.c
         httpframe.c)
@@ -458,5 +493,6 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME fetchurl_rfc3986 COMMAND test_fetchurl)
     add_test(NAME httpframe_bodies COMMAND test_httpframe)
     add_test(NAME httplock_rfc4918 COMMAND test_httplock)
+    add_test(NAME iperf_wire_format COMMAND test_iperfwire)
     add_test(NAME tools_arg_templates COMMAND test_argtemplates)
 endif()
