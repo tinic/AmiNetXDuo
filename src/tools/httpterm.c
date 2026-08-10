@@ -34,13 +34,12 @@
  * 64 KB for the runner, and see httpterm.h for why that is a floor and not a
  * measurement of what it does today.
  *
- * 256 KB for the Shell, which is the number the archived branch gave a spawned
- * command and the number install/Install-AmiNetXDuo already gives ssh.  It is
- * the Shell's stack AND every command run from it, so it is sized for the
- * deepest of them rather than for `Echo`.
+ * There is no number here for the SHELL, and that is Execute()'s doing: it
+ * creates the Shell process itself and takes no tags, so the stack its
+ * commands get is the system default and `stack 65536` typed into the session
+ * is what changes it -- the same as in any other Shell on the machine.
  */
 #define TERM_RUNNER_STACK   (64UL * 1024UL)
-#define TERM_SHELL_STACK    (256UL * 1024UL)
 
 /* How long http_term_shutdown() will wait for a Shell to notice end of file.
    Ten seconds is far longer than the exit path takes and short enough that a
@@ -144,10 +143,18 @@ static UBYTE      term_active;      /* a Shell has been started             */
 static UBYTE      term_reaped;      /* and its exit code has been collected */
 static LONG       term_rc = -1;
 
-/* The Shell's own process name, so http_term_break() can find it.  System()
-   passes NP_ tags it does not recognise straight to CreateNewProc(), which is
-   what makes the Shell findable at all. */
-static const char term_shell_name[] = "httpd terminal";
+/*
+ * Whoever is reading or writing our pipes, so http_term_break() has something
+ * to signal.  Learned from the packets rather than from a name: a DosPacket
+ * arrives with dp_Port naming the SENDER's reply port, and a Process's port
+ * has that Process in mp_SigTask, so this is exact where FindTask() on a name
+ * dos.library chose would be a guess.
+ *
+ * It is also the RIGHT target rather than merely a findable one.  A Shell runs
+ * each command in its own process, so the task that is inside Read() at any
+ * moment is the one a person pressing Ctrl-C means.
+ */
+static struct Task *term_shell_task;
 
 /* ---------------------------------------------------------- the DOS side --- */
 
@@ -213,12 +220,11 @@ static VOID term_retry(TermPipe *p)
     }
     else                            /* ACTION_WRITE                         */
     {
-        if (ring_free(p) > 0UL)
-        {
-            n = (LONG)ring_put(p, (const UBYTE *)pkt->dp_Arg2,
-                               (ULONG)pkt->dp_Arg3);
-        }
-        else if (p->closed)
+        /* Closed FIRST, and not "closed once the ring is full".  This side
+           gives up on a session by closing both pipes, and a Shell that then
+           went on writing successfully into 4 KB nobody will read takes that
+           much longer to notice it should stop. */
+        if (p->closed)
         {
             /* Nobody will ever read it.  -1 with a real error, so a command
                writing into a channel that has gone fails rather than looping
@@ -226,6 +232,11 @@ static VOID term_retry(TermPipe *p)
             p->held = NULL;
             term_reply(pkt, -1, ERROR_INVALID_LOCK);
             return;
+        }
+        else if (ring_free(p) > 0UL)
+        {
+            n = (LONG)ring_put(p, (const UBYTE *)pkt->dp_Arg2,
+                               (ULONG)pkt->dp_Arg3);
         }
         else
         {
@@ -245,23 +256,39 @@ VOID http_term_service(VOID)
         return;
 
     /*
-     * Notice a Shell that has gone, before the packets are looked at.  This is
-     * the only place a session is reaped, and it is here rather than in
-     * http_term_stop() because a session usually ends the other way round: the
-     * person types EndCLI, the runner publishes its return code some passes of
-     * the event loop later, and nothing would ask again.
+     * Notice a Shell that has gone, before the packets are looked at.
      *
-     * The runner reads nothing after rn_Done, so past this point the record is
-     * ours and a new session may take it.
+     * WHAT "GONE" IS, AND WHY IT IS NOT THE RUNNER RETURNING
+     *
+     *   Execute() may create the Shell and return at once -- the autodoc says
+     *   it makes "a new interactive Shell process just like those created with
+     *   the NewShell command" -- so the runner publishing rn_Done says nothing
+     *   about whether the Shell is still there.  What does say it is the Shell
+     *   CLOSING the two handles, which arrives here as ACTION_END on each, and
+     *   that answer is the same whichever way Execute() behaved.
+     *
+     *   The one case rn_Done decides is failure: Execute() returns a BOOLEAN,
+     *   and a false one means no Shell was started at all.  Then nothing will
+     *   ever send an ACTION_END and the session has to end on the flag.
      */
-    if (term_active && term_runner.rn_Done != 0 && !term_reaped)
+    if (term_active && !term_reaped)
     {
-        term_rc     = term_runner.rn_Rc;
-        term_reaped = 1;
+        BOOL failed = (term_runner.rn_Done != 0 && term_runner.rn_Rc == 0)
+                          ? TRUE : FALSE;
+        BOOL ended  = (term_in.dosend && term_out.dosend) ? TRUE : FALSE;
 
-        if (term_rc == -1)
+        if (failed)
+        {
             tool_error("no Shell would start for the terminal (IoErr %ld)",
                        (LONG)term_runner.rn_Err);
+            term_rc     = -1;
+            term_reaped = 1;
+        }
+        else if (ended)
+        {
+            term_rc     = 0;
+            term_reaped = 1;
+        }
 
         /* Not `term_active = 0` yet: output the Shell wrote before it exited
            is still in the ring and is the answer to the last command.
@@ -269,7 +296,10 @@ VOID http_term_service(VOID)
     }
 
     if (term_active && term_reaped && ring_used(&term_out) == 0UL)
-        term_active = 0;
+    {
+        term_active     = 0;
+        term_shell_task = NULL;
+    }
 
     while ((msg = GetMsg(term_port)) != NULL)
     {
@@ -321,6 +351,10 @@ VOID http_term_service(VOID)
             term_reply(pkt, DOSFALSE, ERROR_INVALID_LOCK);
             continue;
         }
+
+        /* Read BEFORE term_reply() overwrites dp_Port with ours. */
+        if (pkt->dp_Port != NULL)
+            term_shell_task = pkt->dp_Port->mp_SigTask;
 
         switch (pkt->dp_Type)
         {
@@ -400,8 +434,6 @@ static VOID term_runner_main(VOID)
     struct Process *me = (struct Process *)FindTask(NULL);
     TermRunner     *r;
     struct Task    *parent;
-    struct TagItem  tags[6];
-    int             nt = 0;
 
     /* The parent is filling tc_UserData; it signals when it is done. */
     (VOID)Wait(SIGF_SINGLE);
@@ -411,42 +443,47 @@ static VOID term_runner_main(VOID)
         return;
 
     /*
-     * An EMPTY command string with SYS_Input set is a Shell that reads its
-     * commands from that stream: that is the terminal.  The handles are passed
-     * rather than redirected on a command line so that the SHELL's own output
-     * -- its prompt, and "Unknown command" -- goes to the channel too.  A
-     * redirection applies to the command and not to the Shell around it, and
-     * the archived branch records what that cost: an empty transfer, a return
-     * code of 10, and the explanation printed on the server's console.
+     * Execute() and NOT SystemTagList(), and that is the whole of this file's
+     * one real discovery.  dos.library's own autodoc for SystemTagList says
+     * it in a single line -- "Similar to Execute(), but does not read commands
+     * from the input filehandle" -- so System() with an empty command line has
+     * nothing to do and returns 0 at once.  Measured exactly that way: the
+     * upgrade completed, the runner published rc 0 within milliseconds, and
+     * the browser saw a session that opened and closed with not one byte in
+     * it.
+     *
+     * Execute()'s contract is the one this needs: "If the input file handle is
+     * nonzero then after the (possibly empty) commandString is performed
+     * subsequent input is read from the specified input file handle until end
+     * of that file is reached."  An empty string and a live input handle is
+     * the documented way to put a Shell on a serial port, and this is the same
+     * thing with a pipe where the port would be.
+     *
+     * What it costs is the tags: Execute() creates the Shell process itself,
+     * so there is no NP_StackSize to give it and no NP_Name to find it by.
+     * The stack the Shell gives its commands is the system default and a
+     * person who needs more types `stack 65536`, exactly as they would in any
+     * other Shell.  The name is not needed either -- see term_shell_task,
+     * which learns the Shell's Task from the packets it sends rather than by
+     * guessing what dos.library called it.
      */
-    tags[nt].ti_Tag = SYS_Input;     tags[nt++].ti_Data = (ULONG)r->rn_In;
-    tags[nt].ti_Tag = SYS_Output;    tags[nt++].ti_Data = (ULONG)r->rn_Out;
-    tags[nt].ti_Tag = NP_StackSize;  tags[nt++].ti_Data = TERM_SHELL_STACK;
-    tags[nt].ti_Tag = NP_Name;       tags[nt++].ti_Data = (ULONG)term_shell_name;
-    tags[nt].ti_Tag = TAG_END;       tags[nt].ti_Data   = 0;
+    r->rn_Rc = (LONG)Execute((CONST_STRPTR)"", r->rn_In, r->rn_Out);
 
-    /*
-     * NOT SYS_UserShell.  That tag tells System() to find the USER's shell --
-     * ENV:Shell, or C:Shell -- rather than the one Kickstart 2.0 and later
-     * carry in ROM, and a machine that has neither gets nothing at all.
-     * Measured, and it is why this was silent the first time it ran: the
-     * upgrade completed, the runner returned -1 within milliseconds, and the
-     * browser saw a session that opened and closed with not one byte in it.
-     * The built-in shell is on every machine this server runs on.
-     */
-    r->rn_Rc = SystemTagList((CONST_STRPTR)"", tags);
-
-    /* Which of the two failures it was, so the caller can say.  System()
-       returns -1 when it could not start a shell AT ALL, and the shell's own
-       return code otherwise; -1 is the one a person can act on. */
-    if (r->rn_Rc == -1)
+    if (r->rn_Rc == 0)
+    {
+        /*
+         * Nothing took the handles, so they are still ours to give back.  On
+         * the success path they are NOT closed here: the Shell owns them from
+         * that moment, and this side learns it has finished with them from the
+         * ACTION_END it sends when it closes them -- which works whether
+         * Execute() returned at once (an interactive Shell, like NewShell) or
+         * held until the Shell exited.  Closing them here on success would
+         * take them out from under a Shell that is still using them.
+         */
         r->rn_Err = IoErr();
-
-    /* System() does not close the handles it was given, and here that is the
-       point: these two closes are the Shell's end of file in both directions,
-       and they are what tells the other side it has stopped. */
-    Close(r->rn_In);
-    Close(r->rn_Out);
+        Close(r->rn_In);
+        Close(r->rn_Out);
+    }
 
     /* rn_Done is published last and nothing in the record is read after it. */
     parent = r->rn_Parent;
@@ -491,6 +528,46 @@ BOOL http_term_init(VOID)
     return TRUE;
 }
 
+VOID http_term_announce(const char *root, const char *dotted, UWORD port,
+                        const char *url)
+{
+    char  probe[256];
+    ULONG n = 0;
+    BPTR  lock;
+
+    tool_printf("A Shell, with no password, at http://%s:%ld%s\n",
+                (LONG)dotted, (LONG)port, (LONG)url);
+
+    while (root[n] != '\0' && n + 1UL < sizeof(probe))
+    {
+        probe[n] = root[n];
+        n++;
+    }
+
+    /* "DH0:" already ends in its separator; "DH0:Work" does not, and the
+       caller has taken any trailing slash off already. */
+    if (n > 0UL && probe[n - 1] != ':' && n + 1UL < sizeof(probe))
+        probe[n++] = '/';
+
+    {
+        const char *leaf = url;
+
+        if (*leaf == '/')
+            leaf++;
+
+        while (*leaf != '\0' && n + 1UL < sizeof(probe))
+            probe[n++] = *leaf++;
+    }
+    probe[n] = '\0';
+
+    lock = Lock((CONST_STRPTR)probe, ACCESS_READ);
+    if (lock != (BPTR)0)
+    {
+        UnLock(lock);
+        tool_printf("  (that address now shadows %s)\n", (LONG)probe);
+    }
+}
+
 BOOL http_term_available(VOID)
 {
     return (term_port != NULL && !term_active) ? TRUE : FALSE;
@@ -504,7 +581,7 @@ BOOL http_term_running(VOID)
     /* Still running, or finished with output nobody has read yet.  A session
        that ends with the last line of `list` still in the ring must not be
        reported as over: that line is the answer. */
-    if (term_runner.rn_Done == 0)
+    if (!term_reaped)
         return TRUE;
 
     return (ring_used(&term_out) > 0UL) ? TRUE : FALSE;
@@ -630,16 +707,10 @@ VOID http_term_eof(VOID)
 
 VOID http_term_break(VOID)
 {
-    struct Task *shell;
-
-    if (!term_active)
+    if (!term_active || term_shell_task == NULL)
         return;
 
-    Forbid();
-    shell = FindTask((CONST_STRPTR)term_shell_name);
-    if (shell != NULL)
-        Signal(shell, SIGBREAKF_CTRL_C);
-    Permit();
+    Signal(term_shell_task, SIGBREAKF_CTRL_C);
 }
 
 LONG http_term_rc(VOID)
@@ -687,7 +758,7 @@ VOID http_term_shutdown(VOID)
          * packets until it has gone, and keep draining the output ring: a
          * Shell blocked in Write() cannot notice that its input has ended.
          */
-        while (term_runner.rn_Done == 0 && waited < TERM_STOP_TICKS)
+        while (!term_reaped && waited < TERM_STOP_TICKS)
         {
             UBYTE scratch[256];
 
@@ -700,7 +771,7 @@ VOID http_term_shutdown(VOID)
             waited++;
         }
 
-        if (term_runner.rn_Done == 0)
+        if (!term_reaped)
         {
             /*
              * Deliberately not freed.  The runner's Process is still alive and
@@ -725,4 +796,349 @@ VOID http_term_shutdown(VOID)
     ami_free(term_out.buf);
     term_in.buf  = NULL;
     term_out.buf = NULL;
+}
+
+/* ------------------------------------------------- the socket, once it is --
+ *                                                     no longer HTTP
+ *
+ * See httpterm.h for why this is here and not in httpd.c.  Everything in this
+ * section is about ONE upgraded socket; the Shell above it is the module's
+ * own and is shared, because there is one of it.
+ */
+
+/*
+ * Queue one control frame.  There is room for exactly one: a pong and a close
+ * never both need to be in flight, and a client that pings faster than the LAN
+ * drains is answered on the ping it sent last, which is the only one it is
+ * still waiting for.
+ */
+static VOID sock_control(HttpTermSock *t, HttpWsEvent ev,
+                         const UBYTE *payload, ULONG len)
+{
+    unsigned long head;
+    ULONG         i;
+
+    if (len > (unsigned long)HTTP_WS_CTL_MAX)
+        len = (unsigned long)HTTP_WS_CTL_MAX;
+
+    head = http_ws_head(t->ctl, sizeof(t->ctl), ev, len, 1);
+    if (head == 0UL)
+        return;
+
+    for (i = 0; i < len; i++)
+        t->ctl[head + i] = payload[i];
+
+    t->ctl_n  = (UWORD)(head + len);
+    t->ctl_at = 0;
+}
+
+static VOID sock_close(HttpTermSock *t, UWORD code)
+{
+    if (t->closing)
+        return;
+
+    t->ctl_n   = (UWORD)http_ws_close_frame(t->ctl, sizeof(t->ctl), code,
+                                            http_ws_close_reason(code));
+    t->ctl_at  = 0;
+    t->closing = 1;
+    t->why     = code;
+}
+
+/*
+ * What arrived.  Keystrokes are HELD rather than written straight to the
+ * Shell, because the Shell may not be reading and a decoder's sink has nowhere
+ * to refuse bytes to.  The socket is not read again until the hold is empty,
+ * which is what turns "the Shell is busy" into TCP back pressure instead of
+ * lost input.
+ */
+static VOID sock_sink(void *ctx, HttpWsEvent ev, const UBYTE *data,
+                      long len, int final)
+{
+    HttpTermSock *t = (HttpTermSock *)ctx;
+    long          i;
+
+    switch (ev)
+    {
+        case HTTP_WS_EV_BINARY:
+            for (i = 0; i < len; i++)
+            {
+                if (t->pend_n < (UWORD)sizeof(t->pend))
+                    t->pend[t->pend_n++] = data[i];
+            }
+            break;
+
+        /*
+         * Text is the OTHER channel: one word, and what it asks for is
+         * something that is not a keystroke.
+         *
+         * Ctrl-C on an Amiga is a signal and not a byte -- a console handler
+         * turns the key into SIGBREAKF_CTRL_C and the command polls for it --
+         * so there is no in-band way to send one down a pipe.  Stealing 0x03
+         * out of the input stream would have worked and would have made that
+         * byte untypeable for ever; a second opcode costs nothing and takes
+         * nothing away.  The page sends keystrokes as binary and never as
+         * text, so the two cannot be confused.
+         */
+        case HTTP_WS_EV_TEXT:
+            for (i = 0; i < len; i++)
+            {
+                if (t->word_n < (UBYTE)sizeof(t->word) - 1)
+                    t->word[t->word_n++] = (char)data[i];
+            }
+
+            if (final)
+            {
+                t->word[t->word_n] = '\0';
+
+                if (t->word[0] == 'b' && t->word[1] == 'r' &&
+                    t->word[2] == 'e' && t->word[3] == 'a' &&
+                    t->word[4] == 'k' && t->word[5] == '\0')
+                    http_term_break();
+                else if (t->word[0] == 'e' && t->word[1] == 'o' &&
+                         t->word[2] == 'f' && t->word[3] == '\0')
+                    http_term_eof();
+
+                t->word_n = 0;
+            }
+            break;
+
+        case HTTP_WS_EV_PING:
+            /* RFC 6455 5.5.3: a pong carries the ping's payload back. */
+            sock_control(t, HTTP_WS_EV_PONG, data, (ULONG)len);
+            break;
+
+        case HTTP_WS_EV_PONG:
+            t->pinged = 0;
+            break;
+
+        case HTTP_WS_EV_CLOSE:
+            /* RFC 6455 5.5.1: answer with a close of our own and then stop.
+               The code is echoed, which is what a client that sent 1000
+               expects to see before it lets go of the socket. */
+            if (!t->closing)
+            {
+                UWORD code = HTTP_WS_CLOSE_NORMAL;
+
+                if (len >= 2)
+                    code = (UWORD)(((UWORD)data[0] << 8) | (UWORD)data[1]);
+
+                sock_close(t, code);
+            }
+            break;
+
+        default:
+            break;
+    }
+}
+
+/* Move what was typed into the Shell.  Short writes are normal: the Shell's
+   ring is small and a paste is bigger than one command line. */
+static VOID sock_feed_shell(HttpTermSock *t)
+{
+    while (t->pend_at < t->pend_n)
+    {
+        LONG took = http_term_write(&t->pend[t->pend_at],
+                                    (LONG)(t->pend_n - t->pend_at));
+
+        if (took <= 0)
+            return;
+
+        t->pend_at = (UWORD)(t->pend_at + took);
+    }
+
+    t->pend_n  = 0;
+    t->pend_at = 0;
+}
+
+VOID http_term_sock_begin(HttpTermSock *t, struct Library *sb, LONG sock,
+                          UBYTE *out, ULONG out_size,
+                          const UBYTE *first, ULONG first_len, ULONG now)
+{
+    t->sb       = sb;
+    t->sock     = sock;
+    t->out      = out;
+    t->out_size = out_size;
+    t->out_len  = 0;
+    t->out_sent = 0;
+    t->pend_n   = 0;
+    t->pend_at  = 0;
+    t->ctl_n    = 0;
+    t->ctl_at   = 0;
+    t->word_n   = 0;
+    t->pinged   = 0;
+    t->closing  = 0;
+    t->why      = 0;
+    t->progress = now;
+
+    http_ws_reset(&t->in);
+
+    if (first_len > 0UL)
+        (VOID)http_ws_feed(&t->in, first, (long)first_len, sock_sink, t);
+}
+
+BOOL http_term_sock_wants_write(const HttpTermSock *t)
+{
+    if (t->out_sent < t->out_len || t->ctl_at < t->ctl_n || t->closing)
+        return TRUE;
+
+    if (http_term_pending() > 0UL)
+        return TRUE;
+
+    /* The Shell has gone and the close has not been sent yet. */
+    return http_term_running() ? FALSE : TRUE;
+}
+
+BOOL http_term_sock_read(HttpTermSock *t, ULONG now)
+{
+    UBYTE scratch[HTTP_TERM_READ];
+    LONG  got;
+
+    sock_feed_shell(t);
+
+    /* Not read at all while the Shell has not taken what came last.  This is
+       the whole of the flow control in this direction and it is deliberate:
+       the alternative is a buffer that grows with whatever a browser pastes. */
+    if (t->pend_at < t->pend_n)
+        return TRUE;
+
+    got = tool_sock_recv(t->sb, t->sock, scratch, (LONG)sizeof(scratch));
+
+    if (got == 0)
+        return FALSE;               /* the browser hung up                 */
+
+    if (got < 0)
+    {
+        LONG err = tool_sock_errno(t->sb);
+
+        return (err == TOOL_EWOULDBLOCK || err == TOOL_EINTR) ? TRUE : FALSE;
+    }
+
+    t->progress = now;
+    t->pinged   = 0;                /* anything at all is a live peer      */
+
+    (VOID)http_ws_feed(&t->in, scratch, got, sock_sink, t);
+
+    if (t->in.failed != 0)
+    {
+        /* The framing is lost and cannot be resynchronised.  Say why in a
+           close frame and stop reading; anything after it is not a frame. */
+        sock_close(t, (UWORD)t->in.failed);
+        t->pend_n  = 0;
+        t->pend_at = 0;
+        return TRUE;
+    }
+
+    sock_feed_shell(t);
+
+    return TRUE;
+}
+
+BOOL http_term_sock_write(HttpTermSock *t, ULONG now)
+{
+    for (;;)
+    {
+        /* Whatever is already framed goes first. */
+        if (t->out_sent < t->out_len)
+        {
+            LONG sent = tool_sock_send(t->sb, t->sock, &t->out[t->out_sent],
+                                       (LONG)(t->out_len - t->out_sent));
+
+            if (sent < 0)
+            {
+                LONG err = tool_sock_errno(t->sb);
+
+                return (err == TOOL_EWOULDBLOCK || err == TOOL_EINTR)
+                           ? TRUE : FALSE;
+            }
+
+            t->out_sent += (ULONG)sent;
+            t->progress  = now;
+
+            if (t->out_sent < t->out_len)
+                return TRUE;        /* the socket is full for now          */
+        }
+
+        t->out_len  = 0;
+        t->out_sent = 0;
+
+        /* A pong or a close does not wait behind the Shell's output. */
+        if (t->ctl_at < t->ctl_n)
+        {
+            ULONG i;
+
+            for (i = 0; i + t->ctl_at < t->ctl_n; i++)
+                t->out[i] = t->ctl[t->ctl_at + i];
+
+            t->out_len  = i;
+            t->out_sent = 0;
+            t->ctl_at   = t->ctl_n;
+            continue;
+        }
+
+        /* The close has gone out.  RFC 6455 7.1.1 lets the server be the one
+           that shuts the socket once it has both sent and received one, and
+           this server is always the one that sent last. */
+        if (t->closing)
+            return FALSE;
+
+        /*
+         * The Shell's output, framed IN PLACE.  Read into the buffer past the
+         * longest header there is and then write the header BACKWARDS from
+         * there, so the frame is contiguous and nothing is copied twice: the
+         * send cursor simply starts wherever the header turned out to begin.
+         */
+        {
+            LONG n = http_term_read(&t->out[10], (LONG)(t->out_size - 10UL));
+
+            if (n > 0)
+            {
+                UBYTE         head[10];
+                unsigned long hn = http_ws_head(head, sizeof(head),
+                                                HTTP_WS_EV_BINARY,
+                                                (unsigned long)n, 1);
+                unsigned long i;
+
+                for (i = 0; i < hn; i++)
+                    t->out[10 - hn + i] = head[i];
+
+                t->out_sent = 10UL - hn;
+                t->out_len  = 10UL + (ULONG)n;
+                continue;
+            }
+        }
+
+        /*
+         * Nothing left to send.  If the Shell has gone too, so has the
+         * session: the close is sent here rather than when it exited, so the
+         * last line it printed is on the wire ahead of it.
+         */
+        if (!http_term_running())
+        {
+            sock_close(t, HTTP_WS_CLOSE_NORMAL);
+            continue;
+        }
+
+        return TRUE;
+    }
+}
+
+BOOL http_term_sock_idle(HttpTermSock *t, ULONG now, ULONG timeout)
+{
+    if (timeout == 0UL || now < t->progress)
+        return TRUE;
+
+    if (now - t->progress < timeout)
+        return TRUE;
+
+    if (t->pinged)
+        return FALSE;               /* no answer to the last one            */
+
+    if (t->ctl_at >= t->ctl_n)
+    {
+        sock_control(t, HTTP_WS_EV_PING, (const UBYTE *)"", 0);
+        t->pinged   = 1;
+        t->progress = now;
+    }
+
+    return TRUE;
 }

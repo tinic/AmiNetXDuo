@@ -69,6 +69,16 @@ BOOL  http_term_init(VOID);
 /* Give them back.  Waits, bounded, for a Shell that is still running. */
 VOID  http_term_shutdown(VOID);
 
+/*
+ * Say what has just been turned on, at startup, in the two sentences a person
+ * needs: where the terminal is, and that it has no password.  Also whether the
+ * address has taken something over -- it is decided before a path is resolved,
+ * so an entry of that name in the served drawer becomes unreachable, and a
+ * file that stops answering without a word gets diagnosed as a network fault.
+ */
+VOID  http_term_announce(const char *root, const char *dotted, UWORD port,
+                         const char *url);
+
 /* TRUE when a session may be started: init happened and none is in flight. */
 BOOL  http_term_available(VOID);
 
@@ -122,5 +132,106 @@ VOID  http_term_stop(VOID);
 
 /* What the Shell exited with, once it has.  -1 while it is still running. */
 LONG  http_term_rc(VOID);
+
+/* ------------------------------------------------- the socket, once it is --
+ *                                                     no longer HTTP
+ *
+ * Everything above is the Shell.  This is the other half of the same subject:
+ * a socket that has been upgraded, and what one pass of the server's event
+ * loop does with it.
+ *
+ * IT LIVES HERE AND NOT IN httpd.c ON PURPOSE
+ *
+ *   httpd.c is 6300 lines and routes twelve methods, and more than one thing
+ *   is being added to it at once.  A feature whose logic sits in that file is
+ *   a feature that collides with the next one; a feature whose logic sits in
+ *   its own translation unit is a routing entry.  So httpd.c keeps what is
+ *   genuinely HTTP -- the headers it reads, the refusals it writes, and the
+ *   101 -- and everything after the 101 is here, where nothing else is being
+ *   edited.
+ *
+ *   The cost of that is this header: the session has to be told the socket,
+ *   the library to call it through, and a buffer to build frames in.  The
+ *   buffer is BORROWED from the caller's connection rather than owned, so
+ *   nothing here adds memory to a server that has no terminal.
+ */
+
+#include "httpws.h"
+
+/*
+ * What a client may have typed that the Shell has not taken yet.  The socket
+ * is not read at all while any of it is left, which is the back pressure a
+ * frame decoder cannot express on its own: its sink is handed bytes and has
+ * nowhere to refuse them to.
+ *
+ * The read size below is the same number, and one read is the most the decoder
+ * can turn into payload, so this cannot overflow however the frames are
+ * shaped.
+ */
+#define HTTP_TERM_READ      512
+#define HTTP_TERM_PEND      HTTP_TERM_READ
+
+/* A control frame to send back: ten bytes of header and 125 of payload. */
+#define HTTP_TERM_CTL       136
+
+typedef struct HttpTermSock
+{
+    struct Library *sb;             /* bsdsocket.library                    */
+    LONG            sock;
+
+    HttpWsIn        in;
+
+    UBYTE           pend[HTTP_TERM_PEND];
+    UWORD           pend_n;
+    UWORD           pend_at;
+
+    UBYTE           ctl[HTTP_TERM_CTL];
+    UWORD           ctl_n;
+    UWORD           ctl_at;
+
+    char            word[16];       /* a text frame: "break" or "eof"       */
+    UBYTE           word_n;
+
+    UBYTE           pinged;         /* a ping is out and unanswered         */
+    UBYTE           closing;        /* a close has been sent                */
+    UWORD           why;            /* the code it was closed with, for a log */
+
+    /* Borrowed: the caller's own send buffer, and where in it we are. */
+    UBYTE          *out;
+    ULONG           out_size;
+    ULONG           out_len;
+    ULONG           out_sent;
+
+    ULONG           progress;       /* seconds, when anything last arrived  */
+} HttpTermSock;
+
+/*
+ * Begin.  `first` is whatever the client pipelined behind the request head,
+ * which is already the first frames: a browser that opens the socket and
+ * types in the same segment is ordinary, and dropping that would drop the
+ * first thing said.
+ */
+VOID http_term_sock_begin(HttpTermSock *t, struct Library *sb, LONG sock,
+                          UBYTE *out, ULONG out_size,
+                          const UBYTE *first, ULONG first_len, ULONG now);
+
+/* Whether this socket wants to be offered as writable.  Asked rather than
+   assumed: a socket offered with nothing to write turns the server's wait
+   into a spin. */
+BOOL http_term_sock_wants_write(const HttpTermSock *t);
+
+/* One pass.  Each returns FALSE when the connection is finished with. */
+BOOL http_term_sock_read(HttpTermSock *t, ULONG now);
+BOOL http_term_sock_write(HttpTermSock *t, ULONG now);
+
+/*
+ * The idle rule.  A WebSocket has no request to be timed out, so the
+ * no-progress rule that governs every other connection would end a session
+ * because nobody typed.  The question it should be asking is whether the far
+ * end is still there, and a ping is how RFC 6455 5.5.2 asks it: one after
+ * `timeout` seconds of silence, and the connection goes if the next `timeout`
+ * passes with no answer.
+ */
+BOOL http_term_sock_idle(HttpTermSock *t, ULONG now, ULONG timeout);
 
 #endif /* AMINETXDUO_HTTPTERM_H */
