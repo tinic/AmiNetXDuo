@@ -94,6 +94,12 @@ CROSS_CONFIGS=(
     "nosack:-DAMINETXDUO_TCP_SACK=OFF"
     "nots:-DAMINETXDUO_TCP_TIMESTAMP=OFF"
     "nowscale:-DAMINETXDUO_TCP_WINDOW_SCALING=OFF"
+    # The allocation census. Off in every other arm, so this is the only place
+    # its side table, its redirect of ami_alloc and the reports it hangs off
+    # bsd_lib_expunge are compiled at all. It is the instrument that finds a
+    # leak nobody wrote a test for, and an instrument that stops building is
+    # the one nobody notices.
+    "census:-DAMINETXDUO_ALLOCCENSUS=ON"
     "m68000:-DAMINETXDUO_CPU=68000"
     "m68040:-DAMINETXDUO_CPU=68040"
     "m68060:-DAMINETXDUO_CPU=68060"
