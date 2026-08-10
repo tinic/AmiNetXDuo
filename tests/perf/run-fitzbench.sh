@@ -368,7 +368,12 @@ if [ "$LOSSCAP" = "1" ]; then
         echo "-w needs an ssh-able peer (-H): the capture is taken there" >&2
         exit 2
     fi
-    peercap_start "$PEER" "$PORT" "$CAPDIR" "$TAG" && CAPTURING=1
+    # Fatal, and fatal HERE, before an emulator boot: -w was asked for, and a
+    # run that captures nothing reports no loss rate, skips the -l/-L gate and
+    # exits 0.  That is a green gate over an empty capture, which is worse than
+    # no gate at all.  peercap_start says why.
+    peercap_start "$PEER" "$PORT" "$CAPDIR" "$TAG" || exit 2
+    CAPTURING=1
 fi
 
 set +e
@@ -397,7 +402,10 @@ fi
 RUN_RC=$?
 set -e
 
-[ "$CAPTURING" = "1" ] && { peercap_stop "$PEER" "$CAPDIR" "$TAG" || CAPTURING=0; }
+CAPTURE_LOST=0
+if [ "$CAPTURING" = "1" ]; then
+    peercap_stop "$PEER" "$CAPDIR" "$TAG" || { CAPTURING=0; CAPTURE_LOST=1; }
+fi
 
 REPORT="$HD/tools.txt"
 [ -f "$REPORT" ] || { echo "FAIL: the guest wrote no $REPORT (run rc=$RUN_RC)" >&2; exit 1; }
@@ -509,6 +517,10 @@ if [ "$CAPTURING" = "1" ]; then
     peercap_report "$CAPDIR" "$TAG" "${LOSSARGS[@]}"
     LOSS_RC=$?
     set -e
+elif [ "$CAPTURE_LOST" = "1" ]; then
+    echo "the capture started and did not come back: this run has a throughput" >&2
+    echo "figure and no loss rate, and any -l/-L asked for did not run." >&2
+    LOSS_RC=2
 fi
 
 exit "$LOSS_RC"

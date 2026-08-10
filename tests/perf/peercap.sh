@@ -49,6 +49,11 @@ peercap_start() {
     local peer="$1" port="$2" outdir="$3" tag="$4"
     [ -n "$peer" ] || { echo "peercap: no peer, not capturing" >&2; return 1; }
     mkdir -p "$outdir"
+    # The port the capture filter was set to, so peercap_report can tell
+    # lossrate.py which connection to read.  Without it the report defaults to
+    # 17712 and a run on any other port gets "no TCP on port 17712" -- a full
+    # capture of the right traffic, read with the wrong filter.
+    PEERCAP_PORT="$port"
     # The poll interval is 50 ms.  It is not a sampling rate for anything
     # timed, the capture carries the timing, it just has to be short
     # enough that the read phases contain samples at all.
@@ -66,6 +71,33 @@ peercap_start() {
         echo \$! > $PEERCAP_TMP/peercap-$tag.ss.pid
         sleep 1
     " >/dev/null 2>&1 || { echo "peercap: could not start on $peer" >&2; return 1; }
+    # tcpdump is nohup'd, so ssh returns 0 whatever became of it, and the one
+    # thing it fails on here is the one thing that is not visible from the exit
+    # status: opening the device needs CAP_NET_RAW and an unprivileged tcpdump
+    # exits immediately with "You don't have permission to perform this capture
+    # on that device".  Left unchecked the run captures nothing, peercap_stop
+    # finds no file, the loss gate is skipped and the whole thing exits 0 --
+    # a green -l 1.5 over an empty capture.  Ask the peer whether the process
+    # is still there and what it said.
+    local why
+    why=$(ssh "$peer" "
+        p=\$(cat $PEERCAP_TMP/peercap-$tag.tcpdump.pid 2>/dev/null)
+        if [ -n \"\$p\" ] && kill -0 \$p 2>/dev/null &&
+           [ -f $PEERCAP_TMP/peercap-$tag.pcap ]; then
+            echo OK
+        else
+            cat $PEERCAP_TMP/peercap-$tag.tcpdump.log 2>/dev/null |
+                grep -v '^tcpdump: listening' | head -3
+        fi" 2>/dev/null)
+    if [ "$why" != OK ]; then
+        echo "peercap: tcpdump did not start on $peer:" >&2
+        printf '%s\n' "${why:-no output from it at all}" | sed 's/^/  /' >&2
+        echo "  tcpdump needs CAP_NET_RAW.  Where sudo is not available, set" >&2
+        echo "  the capability on a COPY and point AMINETXDUO_PEER_TCPDUMP at" >&2
+        echo "  it: cp \$(command -v tcpdump) ~/tcpdump-cap && sudo setcap" >&2
+        echo "  cap_net_raw,cap_net_admin+eip ~/tcpdump-cap" >&2
+        return 1
+    fi
     echo "==> capturing at the peer into $PEERCAP_TMP/peercap-$tag.{pcap,ss}"
     return 0
 }
@@ -95,8 +127,11 @@ peercap_report() {
     local outdir="$1" tag="$2"
     shift 2
     local pcap="$outdir/$tag.pcap"
-    [ -f "$pcap" ] || { echo "peercap: no $pcap to read" >&2; return 0; }
+    # Nonzero, not zero.  A missing capture used to report itself and return
+    # success, so a gate asked for with -l or -L passed by not running.
+    [ -f "$pcap" ] || { echo "peercap: no $pcap to read" >&2; return 1; }
     local args=("$pcap")
+    [ -z "${PEERCAP_PORT:-}" ] || args+=(--port "$PEERCAP_PORT")
     [ -f "$outdir/$tag.ss" ] && args+=(--ss "$outdir/$tag.ss")
     # shellcheck disable=SC2206
     [ -z "${AMINETXDUO_LOSSRATE_ARGS:-}" ] || args+=(${AMINETXDUO_LOSSRATE_ARGS})
