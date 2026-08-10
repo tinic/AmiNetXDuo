@@ -121,7 +121,7 @@ HOST_TEST_TARGETS=(test_config test_usergroup test_mbuf test_bpf test_httppath t
                    test_tcp_retries test_bcast_loopback test_tcp_source_connect test_tcp_rtt
                    test_dns_retry test_dns_status
                    test_sockopt_numbers test_tls_expiry test_sana2_copy test_ipv6_ra test_ipv6_ptb
-                   test_httpframe test_httpws test_tls_x509 test_ipv6_frag
+                   test_httpframe test_httpws test_tls_x509 test_ipv6_frag test_iperfwire
                    fuzz_config fuzz_bpf fuzz_dns fuzz_usergroup
                    fuzz_dhcp fuzz_tls_record fuzz_tls_x509 fuzz_httpframe)
 
@@ -138,7 +138,7 @@ esac
 # number of targets: test_crypto68k and friends register several each.  Raise
 # it when tests are added; the gate is there so that tests DISAPPEARING is
 # noticed, which comparing against the target count never could.
-HOST_TESTS_EXPECTED=45
+HOST_TESTS_EXPECTED=47
 case "$(uname -m)" in
     x86_64|amd64) ;;
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 1)) ;;   # no test_inet

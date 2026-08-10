@@ -76,7 +76,7 @@ static int checks;
 static const char *const commands[] = {
     "addnetinterface", "addnetroute", "arp", "checknetconfig",
     "configurenetinterface", "fetch",
-    "getnetstatus", "host", "hostname", "httpd", "nc", "netsetup",
+    "getnetstatus", "host", "hostname", "httpd", "iperf", "nc", "netsetup",
     "netshutdown",
     "netstat", "nettrace", "nslookup", "onoff", "ping", "removenetinterface",
     "shownetservices",
