@@ -173,7 +173,16 @@ cold|AddNetRoute|no-stack|5|re:not running, so it has no routes|-|SYS:AddNetRout
 cold|DeleteNetRoute|no-stack|5|re:not running, so it has no routes|-|SYS:DeleteNetRoute DST=198.51.100.0
 cold|NetShutdown|no-stack|5|re:nothing to stop|-|SYS:NetShutdown
 cold|RemoveNetInterface|unknown-name|5|re:nothing to remove|-|SYS:RemoveNetInterface nosuchif
+cold|ConfigureNetInterface|no-stack|5|re:no interface to configure|-|SYS:ConfigureNetInterface eth0 ADDRESS 10.0.2.20
+cold|ConfigureNetInterface|bad-address|5|re:is not an address|-|SYS:ConfigureNetInterface eth0 ADDRESS notanaddress
+cold|ConfigureNetInterface|bad-configure|5|re:CONFIGURE takes DHCP and nothing else|-|SYS:ConfigureNetInterface eth0 CONFIGURE=AUTO
 cold|AddNetInterface|unknown-name|5|re:there is no interface called|-|SYS:AddNetInterface nosuchinterface
+# hostname reads the whole configuration into a static AmiConfig to answer with
+# the stack down, and ami_config_load() loads the netdb behind it, which is
+# where addnetroute.c found 12,616 bytes a run going missing.  The refusal arm
+# is the one that returns before any of that, so the pair brackets it.
+cold|hostname|no-name|5|re:This machine has no name|-|SYS:hostname
+cold|hostname|bad-name|5|re:is not a host name|-|SYS:hostname not_a_name
 cold|NetSetup|bad-address|5|re:is not an address|-|SYS:NetSetup eth9 DEVICE=a2065.device UNIT=0 ADDRESS=notanaddress NOONLINE
 cold|NetSetup|writes-config|5|re:set up a network interface|-|SYS:NetSetup ethz DEVICE=a2065.device UNIT=0 DHCP NOONLINE FORCE
 # ------------------------------------------------------------ live ------
@@ -217,13 +226,32 @@ live|DeleteNetRoute|no-such-route|5|re:no route to 198.51.100.0|-|SYS:DeleteNetR
 live|AddNetRoute|added|5|re:now go through 10.0.2.2|SYS:DeleteNetRoute DST=192.0.2.0|SYS:AddNetRoute DST=192.0.2.0 VIA=10.0.2.2
 live|DeleteNetRoute|deleted|5|re:The route to 192.0.2.0/24 is gone|SYS:AddNetRoute DST=192.0.2.0 VIA=10.0.2.2|SYS:DeleteNetRoute DST=192.0.2.0
 live|RemoveNetInterface|unknown-name|5|re:there is no interface called|-|SYS:RemoveNetInterface nosuchif
+# Both arms of ConfigureNetInterface against a running stack.  The prep moves
+# the address away and the MEASURED call puts it back, that way round on
+# purpose: every row below this one expects eth0 on 10.0.2.15, and a pair whose
+# last step left it somewhere else would fail them and not itself.
+live|ConfigureNetInterface|unknown-name|5|re:there is no interface called|-|SYS:ConfigureNetInterface nosuchif ADDRESS 10.0.2.20
+live|ConfigureNetInterface|reconfigures|5|re:eth0: 10.0.2.15 netmask 255.255.255.0|SYS:ConfigureNetInterface eth0 QUIET ADDRESS 10.0.2.20/24|SYS:ConfigureNetInterface eth0 ADDRESS 10.0.2.15/24
 live|AddNetInterface|already-up|5|re:online, address 10.0.2.15|-|SYS:AddNetInterface eth0
 live|AddNetInterface|unknown-name|5|re:there is no interface called|-|SYS:AddNetInterface nosuchinterface
+# Setting a name on a RUNNING stack: the ENV: and ENVARC: writes and the
+# NETCTRL_HOSTNAME_SET call, which is the arm that has something to give back.
+# Repeating it is not a no-op -- the offer is at ENV:HOSTNAME rank and the
+# machine is already named at that rank, so every run takes the name again.
+live|hostname|sets|5|re:written to ENV:HOSTNAME|-|SYS:hostname beast
 live|Online|unknown-name|5|re:nothing here is called|-|SYS:Online nosuch0
 live|Offline|unknown-name|5|re:nothing here is called|-|SYS:Offline nosuch0
 # ------------------------------------------------------------ cycle -----
 # The commands that take the stack apart, each paired with the one that puts
 # it back.  Fewer runs: every repetition here costs a DHCP lease.
+# The DHCP half of ConfigureNetInterface.  Both rows are prepped into a bound
+# interface, so the measured call is always the same operation on every
+# repetition -- CONFIGURE=DHCP on an interface with no lease says "lease taken"
+# and on one that has a lease says "lease renewed", and a premise that has to
+# hold on every run cannot straddle the two.  The pair ends bound, which is
+# what the rows below expect.
+cycle|ConfigureNetInterface|dhcp-release|4|re:the lease is released|SYS:ConfigureNetInterface eth0 QUIET CONFIGURE=DHCP TIMEOUT 20|SYS:ConfigureNetInterface eth0 RELEASE
+cycle|ConfigureNetInterface|dhcp-renew|4|re:lease renewed|SYS:ConfigureNetInterface eth0 QUIET CONFIGURE=DHCP TIMEOUT 20|SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 20
 cycle|Offline|takes-down|4|re:eth0 is offline|SYS:Online eth0|SYS:Offline eth0
 cycle|Online|brings-up|4|re:eth0 is.*online|SYS:Offline eth0|SYS:Online eth0
 cycle|RemoveNetInterface|removes|4|re:eth0: removed|SYS:AddNetInterface eth0|SYS:RemoveNetInterface eth0 FORCE

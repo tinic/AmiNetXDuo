@@ -34,6 +34,18 @@ LONG bsd_if_index_of(NX_IP *ip, const char *name);
 BOOL bsd_if_name_by_index(NX_IP *ip, ULONG index, char *out, ULONG outlen);
 
 /*
+ * Address and mask on one physical slot, the half of
+ * ConfigureInterfaceTagList() that NETCTRL_INTERFACE_CONFIGURE needs too.
+ * Either may be left as it stands by passing FALSE for it; a mask of zero on
+ * an interface that has none becomes the classful default. Returns 0, or -1
+ * with errno set. Takes the ThreadX bracket itself, so it must not be called
+ * from inside one.
+ */
+LONG bsd_if_set_address(struct AmiSocketBase *SocketBase, LONG index,
+                        BOOL have_address, ULONG address,
+                        BOOL have_netmask, ULONG netmask);
+
+/*
  * SIOCGIFCONF and the SIOCGIF* family, for options.c's IoctlSocket().
  * Implemented in interfaces.c because answering them needs the naming rule and
  * the interface gather. Returns 0, or -1 with errno set.

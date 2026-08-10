@@ -68,16 +68,24 @@ extern "C" {
 
 #define AMI_NETSTATUS_MAGIC         0x414E5351UL    /* 'ANSQ' */
 /*
- * 6 since NetStatusControl grew nsc_Name for the mDNS browse. A caller and a
- * library that disagree fail every call rather than half of them, which is why
- * the commands and the library ship together.
+ * 8 since NETCTRL_INTERFACE_CONFIGURE, the DHCP three and
+ * NETCTRL_HOSTNAME_SET, which also grew the control block by nsc_HostName. A
+ * caller and a library that disagree fail every call rather than half of them,
+ * which is why the commands and the library ship together.
  *
  * This is the compatibility mechanism for a record that grows. The size check in
  * bsd_NetStackQuery() is not: it rejects a buffer too small for the record, and
  * a caller that agrees on the version agrees on the record, so a matched caller
  * never meets it. It is there for the arrival that agreed on nothing.
+ *
+ * THE NUMBER AND THE SENTENCE ABOVE IT MOVE TOGETHER. Adding an operation
+ * without moving this leaves two different header shapes both claiming the same
+ * version, and the checks at src/bsdsocket/netstatus.c:1193 and :1407 are exact
+ * equality in both directions, so they cannot tell them apart. That has already
+ * happened once: NETCTRL_INTERFACE_ADD and NETCTRL_STACK_HOLD were both added
+ * under 7, and the comment here still said 6 while the constant said 7.
  */
-#define AMI_NETSTATUS_VERSION       7
+#define AMI_NETSTATUS_VERSION       8
 
 /* Fixed widths every record shares.  Up here rather than beside the first
    record that uses one, because NetStatusSystem needs NETSTATUS_NAME_LEN and
@@ -85,6 +93,9 @@ extern "C" {
 #define NETSTATUS_NAME_LEN      32
 #define NETSTATUS_DEVICE_LEN    32
 #define NETSTATUS_MAC_SIZE      6
+/* A host name, RFC 1123 2.1's 63-character label and a NUL, which is also what
+   AMI_CFG_NAME_LEN (aminetxduo/config.h) sizes cfg->hostname at. */
+#define NETSTATUS_HOSTNAME_LEN  64
 
 /*
  * The DNS-SD widths, from RFC 6763 and the mDNS module's own limits: a service
@@ -119,9 +130,15 @@ extern "C" {
  *
  * Bump this when a *caller of this interface* needs a newer library: when a
  * netstatus vector is added, or when AMI_NETSTATUS_VERSION moves. Not merely
- * because BSD_LIB_REVISION did, revision 3 added the RFC 3493 if_* vectors,
- * which no netstatus caller touches, so a revision-2 library still answers
- * everything here and refusing it would be a wrong diagnosis.
+ * because BSD_LIB_REVISION did: a revision that adds vectors no netstatus
+ * caller touches still answers everything here, and refusing it would be a
+ * wrong diagnosis.
+ *
+ * 4 because AMI_NETSTATUS_VERSION is 8 and revision 4 is the first library
+ * that speaks it. A revision-3 library answers 7, which the exact-equality
+ * check below refuses on every call; without this the refusal arrives as
+ * EINVAL from whichever call happened to be first, and reads like the feature
+ * being absent rather than like half an install.
  *
  * The version check inside the library catches a mismatched pair too, but only
  * after the call, where it is indistinguishable from the feature being absent
@@ -129,7 +146,7 @@ extern "C" {
  * to stop looking. This check runs before any call and says the true thing:
  * finish the install.
  */
-#define AMI_NETSTATUS_MIN_REVISION  2
+#define AMI_NETSTATUS_MIN_REVISION  4
 
 /* ------------------------------------------------------------ selectors,
  *
@@ -323,6 +340,30 @@ typedef struct NetStatusAddress6
 /* nsd_LeaseSeconds when the server said the lease never expires. */
 #define NETSTATUS_DHCP_FOREVER  0xFFFFFFFFUL
 
+/*
+ * nsd_RawState, NX_DHCP_STATE_* verbatim, spelled out so a caller need not
+ * include nxd_dhcp_client.h. nsd_State collapses six of these into
+ * NETSTATUS_DHCP_WORKING and three into NETSTATUS_DHCP_BOUND, which is what a
+ * caller waiting for an address wants and is not enough for a caller watching a
+ * renewal: BOUND, RENEWING and REBINDING are all NETSTATUS_DHCP_BOUND, so a
+ * lease being extended and a lease sitting still read the same.
+ *
+ * Named out of what was nsd_Pad, which every library has always zeroed, so the
+ * record is the size it always was and nsd_State means exactly what it did.
+ * Zero is NX_DHCP_STATE_NOT_STARTED and is also what a library predating the
+ * field answers, and the two mean the same thing here.
+ */
+#define NETSTATUS_DHCPRAW_NOT_STARTED   0
+#define NETSTATUS_DHCPRAW_BOOT          1
+#define NETSTATUS_DHCPRAW_INIT          2
+#define NETSTATUS_DHCPRAW_SELECTING     3
+#define NETSTATUS_DHCPRAW_REQUESTING    4
+#define NETSTATUS_DHCPRAW_BOUND         5
+#define NETSTATUS_DHCPRAW_RENEWING      6
+#define NETSTATUS_DHCPRAW_REBINDING     7
+#define NETSTATUS_DHCPRAW_FORCERENEW    8
+#define NETSTATUS_DHCPRAW_PROBING       9
+
 typedef struct NetStatusDhcp
 {
     UWORD   nsd_Index;                  /* NX_IP interface index             */
@@ -340,7 +381,7 @@ typedef struct NetStatusDhcp
     UWORD   nsd_DnsCount;
     ULONG   nsd_StaticRoute[NETSTATUS_DHCP_ADDRS];
     UWORD   nsd_StaticRouteCount;
-    UWORD   nsd_Pad;
+    UWORD   nsd_RawState;               /* NETSTATUS_DHCPRAW_*               */
 
     char    nsd_HostName[NETSTATUS_NAME_LEN];
     char    nsd_DomainName[NETSTATUS_NAME_LEN];
@@ -810,8 +851,115 @@ typedef struct NetStatusService
  */
 #define NETCTRL_STACK_HOLD      18  /*,                                    */
 
+/*
+ * Re-address a running interface: what ConfigureNetInterface does, and the
+ * thing that until now needed NETCTRL_INTERFACE_REMOVE and _ADD in a pair.
+ *
+ * nsc_Index names the interface. nsc_Destination is the new address,
+ * nsc_NetMask the new mask and nsc_Gateway the new default gateway, and each is
+ * applied only when its NETCTRL_F_ bit is set in nsc_Flags: 0.0.0.0 is a thing
+ * a caller may legitimately ask for, so it cannot double as "leave this one
+ * alone".
+ *
+ * The address and the mask are set together in one NetX Duo call even when only
+ * one of them was given, because nx_ip_interface_address_set() takes both and
+ * an interface must never be seen carrying a new address with its old mask. A
+ * mask of zero on an interface that has none becomes the classful default, the
+ * same rule ConfigureInterfaceTagList() applies to an address given without
+ * one, and the same code.
+ *
+ * The gateway is the machine's, not the interface's: NetX Duo keeps one
+ * nx_ip_gateway_address for the whole NX_IP. It is set last, after the address,
+ * because nx_ip_gateway_address_set() refuses a next hop that is not on some
+ * interface's subnet, and the subnet it has to be on is usually the one this
+ * call has just changed. A gateway of 0.0.0.0 clears it.
+ *
+ * EADDRNOTAVAIL for an address NetX Duo would not take, EINVAL for a gateway it
+ * would not take, ENXIO for an interface index that is not attached. Nothing is
+ * applied by a call that fails on the address; a call that sets the address and
+ * then fails on the gateway reports the gateway and keeps the address, which is
+ * the half that was asked for first and the half a caller can see.
+ */
+#define NETCTRL_INTERFACE_CONFIGURE 19 /* nsc_Index/Destination/NetMask/Gateway */
+
+/*
+ * The DHCP client on one interface, aimed at one interface rather than at the
+ * machine. Before these, the only way to make a lease happen again was
+ * Offline/Online or NetShutdown, which restarts every interface there is.
+ *
+ * All three take nsc_Index; START also reads nsc_Destination.
+ *
+ *   START    ask for a lease on an interface that has none. This is what
+ *            follows a RELEASE, and what a machine moved to another network
+ *            needs. EBUSY while an allocation is already in progress on that
+ *            interface; already bound is NOT busy and starts again.
+ *
+ *            NETCTRL_F_ADDRESS makes nsc_Destination the address to ask the
+ *            server for. It is a wish rather than a demand: DISCOVER is still
+ *            sent, so a server that will not give that address offers a
+ *            different one instead of answering NAK.
+ *
+ *   RENEW    extend the lease this interface already has, without giving up
+ *            the address: a DHCPREQUEST to the server that granted it, which
+ *            is RFC 2131 4.4.5's renewing state entered early. The address does
+ *            not change unless the server says it does. ENOTCONN when the
+ *            interface has no lease to extend, which is a different thing from
+ *            failing and is why it is not silently turned into a START -- the
+ *            caller asked to keep an address it does not have.
+ *
+ *   RELEASE  DHCPRELEASE to the server and stop the client. The interface
+ *            keeps the address it was given until something takes it away:
+ *            NetX Duo's client does not unconfigure the interface, and this
+ *            does not either, because an interface that loses its address the
+ *            instant a lease is dropped also loses the route the reply would
+ *            have come back on. ENOTCONN when there is no lease.
+ *
+ * None of them waits. A lease takes seconds and the caller is the one with a
+ * Process to wait in, the same division NETCTRL_INTERFACE_ADD draws: poll
+ * NETSTATUS_DHCP's nsd_State until it is NETSTATUS_DHCP_BOUND, or give up.
+ */
+#define NETCTRL_DHCP_START      20  /* nsc_Index                             */
+#define NETCTRL_DHCP_RENEW      21  /* nsc_Index                             */
+#define NETCTRL_DHCP_RELEASE    22  /* nsc_Index                             */
+
+/*
+ * Offer nsc_HostName to the running stack as this machine's name, at the rank
+ * of ENV:HOSTNAME.
+ *
+ * An OFFER and not an assignment, and that word is the whole design. The name
+ * comes from four places, ranked (AmiHostnameSource in aminetxduo/config.h):
+ * an interface file's ID=, then ENV:HOSTNAME, then DHCP option 12, then
+ * DEVS:Internet/name_resolution. ami_config_hostname_offer() takes a name only
+ * from a source at least as strong as the one that named the machine already,
+ * and this goes through it, so a machine named by its DHCP server keeps that
+ * name and this call is refused with EPERM. The caller then has something true
+ * to say -- "DHCP named this machine, and it outranks ENV:HOSTNAME" -- rather
+ * than a name that appears to have been set and is not the one gethostname()
+ * answers.
+ *
+ * The rank is fixed at ENV:HOSTNAME because that is the file the caller writes.
+ * A caller that could pick its own rank could name the machine at
+ * name_resolution rank without anything in DEVS:Internet saying so, and the
+ * next boot would undo it with no record of what had happened.
+ *
+ * This changes the RUNNING stack only. Nothing here writes a file; the command
+ * that calls it writes ENV:HOSTNAME and ENVARC:HOSTNAME itself, and the two
+ * halves are separate because one of them works with the stack down.
+ *
+ * EINVAL for an empty name, EPERM when a stronger source holds, ENETDOWN when
+ * there is no stack. The name is NOT validated here beyond being non-empty:
+ * ami_config_hostname_offer() checks only the sources that were never required
+ * to be host names, and the caller is the one that can say which rule a name
+ * broke.
+ */
+#define NETCTRL_HOSTNAME_SET    23  /* nsc_HostName                          */
+
 /* Flags for nsc_Flags. Zero unless an operation above says otherwise. */
 #define NETCTRL_F_FORCE         0x00000001
+/* Which of NETCTRL_INTERFACE_CONFIGURE's three fields were given at all. */
+#define NETCTRL_F_ADDRESS       0x00000002
+#define NETCTRL_F_NETMASK       0x00000004
+#define NETCTRL_F_GATEWAY       0x00000008
 
 typedef struct NetStatusControl
 {
@@ -830,10 +978,24 @@ typedef struct NetStatusControl
     /*
      * Named out of what was reserved, which is what reserved was for: every
      * caller had to zero it, so no caller that predates this asks for a flag
-     * by accident. The block is the size it always was.
+     * by accident.
      */
     ULONG   nsc_Flags;                  /* NETCTRL_F_*                       */
     ULONG   nsc_Reserved[3];
+    /*
+     * A host name, for NETCTRL_HOSTNAME_SET, and a field of its own rather than
+     * nsc_Name above: that one is 24 bytes because a DNS-SD service type is
+     * "<sn>._tcp" with <sn> up to 15 characters, and a host name is up to 63
+     * (RFC 1123 2.1, one label), so putting one in the other would cap a host
+     * name at a width that has nothing to do with host names.
+     *
+     * At the END of the block, and the block therefore grows. That is why
+     * AMI_NETSTATUS_VERSION moved: the library refuses any version but its own
+     * and checks the caller's size against its own sizeof, so a caller built
+     * against the shorter block cannot reach this and cannot be misread as
+     * having filled it.
+     */
+    char    nsc_HostName[NETSTATUS_HOSTNAME_LEN];
 } NetStatusControl;
 
 #ifdef __cplusplus

@@ -917,6 +917,54 @@ static ULONG bsd_if_classful_mask(ULONG addr)
 }
 
 /*
+ * The address half of pass two, on its own so that NETCTRL_INTERFACE_CONFIGURE
+ * and ConfigureNetInterface reach it as well.
+ *
+ * Both halves belong in one bracket: one of the pair given leaves the other as
+ * it stands, so this is a read-modify-write, and a DHCP bind landing between
+ * the read and the write would be reverted by the write.
+ *
+ * The classful fallback is here rather than at either caller for the reason
+ * tests/tools/run-ifreadd.sh exists: a mask guessed from the class of the
+ * address where the caller supplied one is a silently wrong /8 on a machine
+ * that had a /24, and two copies of this rule would be two chances to make
+ * that mistake again.
+ */
+LONG bsd_if_set_address(struct AmiSocketBase *SocketBase, LONG index,
+                        BOOL have_address, ULONG address,
+                        BOOL have_netmask, ULONG netmask)
+{
+    NX_IP        *ip = netstack_ip();
+    NX_INTERFACE *nxif;
+    UINT          status;
+
+    if (ip == NULL)
+        return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+    if (bsd_nx_enter(SocketBase) != 0)
+        return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+    nxif = &ip->nx_ip_interface[index];
+
+    if (!have_address)
+        address = nxif->nx_interface_ip_address;
+    if (!have_netmask)
+        netmask = nxif->nx_interface_ip_network_mask;
+
+    if (netmask == 0)
+        netmask = bsd_if_classful_mask(address);
+
+    status = nx_ip_interface_address_set(ip, (UINT)index, address, netmask);
+
+    bsd_nx_leave(SocketBase);
+
+    if (status != NX_SUCCESS)
+        return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
+
+    return 0;
+}
+
+/*
  * Pass one. Returns 0, or -1 with errno set; nothing has been applied to the
  * interface either way.
  */
@@ -1000,8 +1048,19 @@ static LONG bsd_if_parse_config(struct AmiSocketBase *SocketBase,
              *   IFC_AssociatedRoute     these mark an interface so that going
              *   IFC_AssociatedDNS       down tears something else down with it.
              *                           A mark nothing reads is not the mark.
-             *   IFC_ReleaseAddress      the DHCP client has no release path;
-             *                           accepting would leave the lease held.
+             *   IFC_ReleaseAddress      STILL REFUSED, and the reason has
+             *                           changed. It used to be that the DHCP
+             *                           client had no release path at all, so
+             *                           accepting would have left the lease
+             *                           held. There is one now
+             *                           (NETCTRL_DHCP_RELEASE, over
+             *                           netstack_interface_dhcp_stop(index,
+             *                           TRUE)), and wiring this tag to it is a
+             *                           change to a published vector's
+             *                           behaviour that nothing yet asks for.
+             *                           Left as it was on purpose rather than
+             *                           by oversight; ConfigureNetInterface
+             *                           RELEASE is the way to reach it.
              */
             case IFC_SetDebugMode:
             case IFC_GetPeerAddress:
@@ -1144,29 +1203,10 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
 
     if (req.bcr_HaveAddress || req.bcr_HaveNetMask)
     {
-        ULONG address;
-        ULONG mask;
-
-        /* One tag of the pair leaves the other as it stands, so this is a
-           read-modify-write and both halves belong in one bracket: a DHCP bind
-           landing between them would be reverted by the write. */
-        if (bsd_nx_enter(SocketBase) != 0)
-            return bsd_fail(SocketBase, AMI_ENETDOWN);
-
-        address = req.bcr_HaveAddress ? req.bcr_Address
-                                      : nxif->nx_interface_ip_address;
-        mask    = req.bcr_HaveNetMask ? req.bcr_NetMask
-                                      : nxif->nx_interface_ip_network_mask;
-
-        if (mask == 0)
-            mask = bsd_if_classful_mask(address);
-
-        status = nx_ip_interface_address_set(ip, (UINT)index, address, mask);
-
-        bsd_nx_leave(SocketBase);
-
-        if (status != NX_SUCCESS)
-            return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
+        if (bsd_if_set_address(SocketBase, index,
+                               req.bcr_HaveAddress, req.bcr_Address,
+                               req.bcr_HaveNetMask, req.bcr_NetMask) != 0)
+            return -1;
     }
 
     if (req.bcr_HaveState && req.bcr_State != SM_Online)

@@ -38,6 +38,8 @@
  */
 
 #include "bsdsocket_vectors.h"
+/* bsd_if_set_address(), shared with ConfigureInterfaceTagList(). */
+#include "interfaces.h"
 
 #include "aminetxduo/netstatus.h"
 #include "aminetxduo/sana2.h"
@@ -314,6 +316,11 @@ static VOID ns_fill_dhcp(NsWriter *w)
         out->nsd_Index = index;
 
         state = netstack_interface_dhcp_state(index);
+
+        /* Before the `continue` below, because a caller watching a renewal
+           wants it on an interface that is not reporting a lease this instant
+           as much as on one that is. */
+        out->nsd_RawState = netstack_interface_dhcp_raw_state(index);
 
         if (state == AMI_DHCP_BOUND)
             out->nsd_State = NETSTATUS_DHCP_BOUND;
@@ -1483,6 +1490,148 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
                 case AMI_NET_ERR_CONFIG: return bsd_fail(SocketBase, AMI_EEXIST);
                 default:                 return bsd_fail(SocketBase, AMI_ENOSPC);
             }
+        }
+
+        /*
+         * Re-address a running interface, which used to need a removal and an
+         * add in a pair and so a device close, a device open and every
+         * connection on the interface reset.
+         *
+         * Out here rather than in the bracketed switch below because
+         * bsd_if_set_address() takes the bracket itself. That is the same
+         * function ConfigureInterfaceTagList() calls, deliberately: the rule
+         * for a mask that was not given lives in one place, and
+         * tests/tools/run-ifreadd.sh is what says it is the right rule.
+         */
+        case NETCTRL_INTERFACE_CONFIGURE:
+        {
+            NX_IP *cip = netstack_ip();
+            LONG   rc2;
+
+            if (cip == NULL)
+                return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+            if (ctl->nsc_Index >= (UWORD)NX_MAX_PHYSICAL_INTERFACES ||
+                cip->nx_ip_interface[ctl->nsc_Index].nx_interface_valid == 0)
+                return bsd_fail(SocketBase, AMI_ENXIO);
+
+            if ((ctl->nsc_Flags & (NETCTRL_F_ADDRESS | NETCTRL_F_NETMASK)) != 0 &&
+                bsd_if_set_address(
+                    SocketBase, (LONG)ctl->nsc_Index,
+                    (ctl->nsc_Flags & NETCTRL_F_ADDRESS) ? TRUE : FALSE,
+                    ctl->nsc_Destination,
+                    (ctl->nsc_Flags & NETCTRL_F_NETMASK) ? TRUE : FALSE,
+                    ctl->nsc_NetMask) != 0)
+                return -1;
+
+            if ((ctl->nsc_Flags & NETCTRL_F_GATEWAY) == 0)
+                return 0;
+
+            /*
+             * Last, and in its own bracket. nx_ip_gateway_address_set()
+             * refuses a next hop that is not on some interface's subnet, and
+             * the subnet it needs is usually the one just written above.
+             */
+            if (bsd_nx_enter(SocketBase) != 0)
+                return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+            status = (ctl->nsc_Gateway != 0)
+                         ? nx_ip_gateway_address_set(cip, ctl->nsc_Gateway)
+                         : nx_ip_gateway_address_clear(cip);
+            rc2 = ns_map_status(SocketBase, status);
+
+            bsd_nx_leave(SocketBase);
+
+            return rc2;
+        }
+
+        /*
+         * The DHCP three, aimed at one interface. Out here with the rest of
+         * the src/netstack calls: each takes the ThreadX bracket itself, and
+         * the one NX_DHCP is the netstack's, not NetX Duo's to reach from
+         * inside ours.
+         *
+         * None of them waits for a lease. The caller has the Process.
+         */
+        case NETCTRL_DHCP_START:
+        case NETCTRL_DHCP_RENEW:
+        case NETCTRL_DHCP_RELEASE:
+        {
+            LONG err;
+
+            if (ctl->nsc_Index >= (UWORD)NX_MAX_PHYSICAL_INTERFACES)
+                return bsd_fail(SocketBase, AMI_ENXIO);
+
+            if (op == NETCTRL_DHCP_START)
+            {
+                /* NETCTRL_F_ADDRESS makes nsc_Destination the address to ask
+                   the server for. A wish, not a demand: DISCOVER is still
+                   sent, so a server that disagrees offers something else. */
+                err = netstack_interface_dhcp_start(
+                          ctl->nsc_Index,
+                          (ctl->nsc_Flags & NETCTRL_F_ADDRESS)
+                              ? ctl->nsc_Destination : 0UL);
+
+                if (err == AMI_NET_ERR_BUSY)
+                    return bsd_fail(SocketBase, AMI_EBUSY);
+            }
+            else
+            {
+                /*
+                 * Both of these act on a lease, so both refuse an interface
+                 * that has none rather than doing something else that might
+                 * have been meant. ENOTCONN is the one errno that says "there
+                 * is nothing here to act on" without implying the interface or
+                 * the operation is wrong.
+                 */
+                if (netstack_interface_dhcp_state(ctl->nsc_Index) !=
+                        AMI_DHCP_BOUND)
+                    return bsd_fail(SocketBase, AMI_ENOTCONN);
+
+                err = (op == NETCTRL_DHCP_RENEW)
+                          ? netstack_interface_dhcp_renew(ctl->nsc_Index)
+                          : netstack_interface_dhcp_stop(ctl->nsc_Index, TRUE);
+            }
+
+            if (err == AMI_NET_OK)
+                return 0;
+
+            /* No stack, no client, or an interface the client was never
+               enabled on: all of them are "there is no DHCP here". */
+            return bsd_fail(SocketBase, AMI_ENETDOWN);
+        }
+
+        /*
+         * The machine's name. Out here for the reason the rest of these are:
+         * netstack_hostname_offer() takes the bracket itself, and it needs to,
+         * because the DHCP thread reads the buffer it writes.
+         *
+         * It answers on a stack with no interfaces up, which is deliberate: a
+         * machine is named before it is addressed, and the name is what the
+         * first DHCP request will announce.
+         */
+        case NETCTRL_HOSTNAME_SET:
+        {
+            LONG err;
+
+            if (ctl->nsc_HostName[0] == '\0')
+                return bsd_fail(SocketBase, AMI_EINVAL);
+
+            err = netstack_hostname_offer((UWORD)AMI_HOSTNAME_ENV,
+                                          ctl->nsc_HostName);
+
+            if (err == AMI_NET_OK)
+                return 0;
+
+            /*
+             * EPERM and not EINVAL: the name is fine and the caller is not
+             * allowed to use it, because something that outranks ENV:HOSTNAME
+             * named this machine already. The caller reads NETSTATUS_SYSTEM's
+             * nss_HostSource to say which.
+             */
+            return bsd_fail(SocketBase,
+                            (err == AMI_NET_ERR_CONFIG) ? AMI_EPERM
+                                                        : AMI_ENETDOWN);
         }
 
         /*

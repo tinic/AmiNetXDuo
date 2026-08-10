@@ -134,6 +134,30 @@ jobs:
         if: env.AMINETXDUO_A2065 != ''
         run: tests/tools/run-onoff.sh -b build/ci/default
 
+      # ConfigureNetInterface changes the three numbers on an interface that
+      # stays where it is.  The counter assertion is the one that matters: a
+      # command that quietly fell back to a remove and an add would pass every
+      # assertion about the address and fail that one.
+      - name: ConfigureNetInterface changes an interface in place
+        if: env.AMINETXDUO_A2065 != ''
+        run: tests/tools/run-ifconfigure.sh -b build/ci/default
+
+      # The DHCP half of the same command, which needs a server and so an
+      # interface with a second writer.  A separate file for that reason, not
+      # because it is a separate command.
+      - name: ConfigureNetInterface releases and renews a lease
+        if: env.AMINETXDUO_A2065 != ''
+        run: tests/tools/run-ifdhcp.sh -b build/ci/default
+
+      # Two boots: one where ENV:HOSTNAME is the strongest source that has
+      # named the machine, and one where DEVS:Internet/name_resolution
+      # outranks it and the same command has to refuse.  ENVARC: is read off
+      # the host afterwards, which is the only witness there is for the half
+      # that survives a reboot.
+      - name: hostname reports its source and respects the ranking
+        if: env.AMINETXDUO_A2065 != ''
+        run: tests/tools/run-hostname.sh -b build/ci/default
+
       - name: NetSetup writes a usable configuration
         if: env.AMINETXDUO_A2065 != ''
         run: tests/tools/run-netsetup.sh -b build/ci/default

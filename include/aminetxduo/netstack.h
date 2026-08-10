@@ -189,6 +189,25 @@ NX_PACKET_POOL *netstack_pool(VOID);
 const AmiConfig *netstack_config(VOID);
 
 /*
+ * Offer a name to the running configuration, at `source`
+ * (AmiHostnameSource). The only way anything changes cfg->hostname after
+ * start-up, and it goes through ami_config_hostname_offer(), so a source
+ * weaker than the one that named the machine is refused rather than applied:
+ * the ranking is the same one a boot uses and this cannot invent a different
+ * one.
+ *
+ * AMI_NET_ERR_STATE with the stack down, AMI_NET_ERR_CONFIG when the offer was
+ * refused, either because a stronger source holds or because the name is not
+ * one that source is allowed to supply.
+ *
+ * What reads cfg->hostname afterwards: gethostname(), and DHCP option 12 --
+ * NX_DHCP keeps the pointer rather than a copy, so the next request carries the
+ * new name. The mDNS responder does NOT: it claimed its label at start-up and
+ * nothing here re-claims it.
+ */
+LONG netstack_hostname_offer(UWORD source, const char *name);
+
+/*
  * Is this machine answering .local on that interface?  By NX interface
  * index.  This is the effective state, not the MDNS= request: an
  * interface the responder refused reads FALSE.
@@ -308,6 +327,7 @@ LONG    netstack_interface_remove(UWORD index, BOOL force);
  *                                     if the machine booted without one.
  *   netstack_interface_dhcp_state()   AMI_DHCP_*, poll it.
  *   netstack_interface_dhcp_lease()   what the server said. BOUND only.
+ *   netstack_interface_dhcp_renew()   extend the lease already held.
  *   netstack_interface_dhcp_stop()    give up, or let go of the lease.
  */
 #define AMI_DHCP_IDLE       0       /* not started, or stopped              */
@@ -338,6 +358,26 @@ typedef struct AmiDhcpLease {
 LONG    netstack_interface_dhcp_start(UWORD index, ULONG requested_address);
 LONG    netstack_interface_dhcp_state(UWORD index);
 LONG    netstack_interface_dhcp_lease(UWORD index, AmiDhcpLease *out);
+/*
+ * Extend the lease this interface already holds: a DHCPREQUEST to the server
+ * that granted it, which is RFC 2131 4.4.5's renewing state entered before the
+ * timer would have entered it. The address stays unless the server changes it.
+ *
+ * AMI_NET_ERR_STATE when the interface has no lease to extend. That is not
+ * turned into an allocation here: giving up an address and asking for one is a
+ * different thing from keeping the one you have, and only the caller knows
+ * which it meant.
+ */
+LONG    netstack_interface_dhcp_renew(UWORD index);
+
+/*
+ * NetX Duo's own state number for this interface, NX_DHCP_STATE_*, which the
+ * three AMI_DHCP_* values above collapse. BOUND, RENEWING and REBINDING are all
+ * AMI_DHCP_BOUND, so a caller watching a renewal happen needs this one and a
+ * caller waiting for an address does not. Zero (NOT_STARTED) with the stack
+ * down or no client created.
+ */
+UWORD   netstack_interface_dhcp_raw_state(UWORD index);
 LONG    netstack_interface_dhcp_stop(UWORD index, BOOL release);
 
 /* ------------------------------------------------------------------ IPv6,
