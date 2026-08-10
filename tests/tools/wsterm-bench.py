@@ -23,8 +23,18 @@
 #                   the median and the worst.  This is the number that decides
 #                   whether typing feels like typing.
 #   out_bytes_per_s the Shell printing as fast as it can, through the frame
-#                   encoder and the socket.  What `list` of a big drawer will
-#                   feel like.
+#                   encoder and the socket.
+#
+#                   READ THIS ONE CAREFULLY.  It is bounded by the Shell
+#                   EXECUTING COMMANDS and not by the link: forty Echos of 200
+#                   characters measured 2.88 s on an emulated A1200, which is
+#                   72 ms a command against a 23 ms round trip for one, so most
+#                   of it is the Shell parsing a line and not bytes moving.  A
+#                   pure output figure would need a command that prints a lot
+#                   in one go, and the only commands guaranteed to be on the
+#                   machine are the Shell's own built-ins.  So this is the
+#                   number for "a screenful of command output", which is what a
+#                   session actually does, and not a throughput ceiling.
 #
 #   Echo is used throughout because it is a Shell BUILT-IN: nothing is loaded
 #   from disk, so what is measured is the pipe, the frames and the socket
