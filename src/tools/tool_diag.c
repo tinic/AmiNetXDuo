@@ -1090,7 +1090,8 @@ struct Library *tool_netstatus_open(BOOL quiet)
     {
         if (!quiet)
         {
-            tool_error("network not started");
+            /* tool_explain_no_stack() prints this same sentence itself when
+               the library is not running, and something better when it is. */
             tool_explain_no_stack();
         }
         return NULL;

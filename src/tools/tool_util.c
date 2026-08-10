@@ -180,14 +180,9 @@ AmiNetStack *tool_require_stack(VOID)
         /*
          * "not running" would be wrong when another program has the stack up
          * inside bsdsocket.library and we cannot see in. The two cases need
-         * different action from the user, so they get different messages;
-         * tool_explain_no_stack() prints the rest.
+         * different action from the user, and tool_explain_no_stack() is where
+         * that split lives -- saying it here too printed it twice.
          */
-        if (tool_stack_library_running())
-            tool_error("cannot read the running stack");
-        else
-            tool_error("network not started");
-
         tool_explain_no_stack();
     }
 
