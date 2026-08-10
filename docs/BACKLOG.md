@@ -573,6 +573,70 @@ a second task; `SocketBaseTagList`'s failing-index semantics; break-signal EINTR
 on `recv`/`send`/`accept`/`connect`/`WaitSelect`, tested only for the resolver.
 `errno.c:387` says `SBTC_FDCALLBACK` is never called; `socket.c:437` calls it.
 
+### Every SANA-II driver we can run, measured 2026-08-10
+
+A1200, Kickstart 3.1 40.68, `AMINETXDUO_FASTMEM=4`, bridged `-B ens18`, peer
+playhouse4, 1 MiB, n=5 interleaved boots x 3 reps, AmiNetXDuo 0.20.1
+(`31e72c8`). **4 MB numbers; not comparable to the 8 MB three-stack table
+below.**
+
+| Driver | Board | read KB/s | write KB/s | Note |
+|---|---|---|---|---|
+| `a2065` | a2065 | **494.4** | 467.8 | bus-master DMA into Amiga RAM (Am7990) |
+| `hydra` | hydra | 480.0 | 442.2 | shared memory |
+| `cnet` | ne2000_pcmcia | 458.4 | 405.2 | PIO through Gayle |
+| `x-surf` | xsurf | 454.6 | 384.0 | PIO |
+| `x-surf-100` | xsurf100z2 | 374.4 | 382.8 | bimodal, stalls -- see below |
+| `ariadne` | ariadne | -- | -- | **comes up, leases, no TCP at all** |
+| `ariadne_ii` | ariadne2 | -- | -- | same |
+| `eb920` | eb920 | -- | -- | burns the ceiling **under Roadshow too**, so not ours |
+| `eb920-i6` | eb920 irq=6 | -- | -- | "the network would not start" |
+| `cnet16` | ne2000_pcmcia | -- | -- | hangs in bring-up where `cnet` reaches 458 |
+| `a2060` | -- | -- | -- | ARCnet; no ARCnet board exists in Amiberry |
+| `slip`, `rs485` | -- | -- | -- | serial, out of scope |
+
+**The spread is the card's data path, not our glue.** Every driver that ran took
+our copy hook for 100% of received frames and the fused copy-and-sum path for
+100% of them -- `copy hook` == `packets received` == `summed while copying` in
+every run, including the three that came up and never transferred -- and
+`sana2_copy.c:103`'s alignment gate never declined once. A rescan of all 13
+binaries for the tag constants reproduces `sana2_device.c:553` exactly, so the
+buffer-management tags explain none of it.
+
+**Ariadne is ours and it costs us the fastest card here.** Both boards lease,
+then no TCP flows: `packets sent 12`, `transmit errors 4` on both, `tcp: 0
+packets sent, 0 received, 1 connections made`. Roadshow 1.15 on the identical
+rig reads **516 KB/s** on `ariadne` and 415 on `ariadne2` -- 516 is the highest
+figure measured anywhere in this sweep, above a2065. Broadcast writes (DHCP,
+~300-byte frames) succeed and small unicast writes fail, and four failures is a
+SYN plus three retransmits. `grep` over `src/sana2/` finds no minimum-frame
+constant on the transmit path, so the hypothesis is that we never pad to
+Ethernet's 60-byte minimum and the other four drivers pad for us. Not yet
+established.
+
+### Where 0.20.1 stands against Roadshow and AmiTCP_NG on X-Surf-100, 2026-08-10
+
+Same rig, 8 MB Fast, 1 MiB, n=5 boots x 3 reps, interleaved.
+
+| Stack | read mean | read median | write mean |
+|---|---|---|---|
+| AmiNetXDuo 0.20.1 | **433.8** | **474** | **382.8** |
+| Roadshow 1.15 | **438.0** | 445 | 270.2 |
+| AmiTCP_NG 4.1.5-beta | 376.6 | 381 | 309.2 |
+
+**Our read is bimodal and it loses us the comparison.** 10 of 15 reps sit at
+458-480, five at 305-437. The median rep, 474, reproduces the ack-window
+figure; the mean, 433.8, is below Roadshow's 438.0. Roadshow is flat -- 14 of 15
+at 442-446 -- and NG is flat at 380. The RAM control was flat for all three, so
+the rig did not drift. Write is ours by a wide margin.
+
+The stall is **specific to us on this board**: under the same stack a2065,
+hydra, cnet and plain x-surf are flat to +/-2 KB/s, and X-Surf-100's good mode
+matches plain X-Surf exactly. Not yet captured; the next step is
+`run-stackprof.sh -w` with `AMINETXDUO_PEER_IFACE=ens18` (the default `any`
+yields a link-type-276 capture `lossrate.py` rejects and `pcapstat.py`
+miscounts).
+
 ### Performance, measured positions
 
 **Tickless on "the timer wheel is empty" cannot fire.** Tried 2026-08-07,
