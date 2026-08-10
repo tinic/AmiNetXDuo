@@ -5439,13 +5439,17 @@ static BOOL httpd_iperf_hook(HttpConn *c)
 
     iperf_plan_init(&plan);
 
-    if (dirlen == 5 && hs_nicmp(dir, "tcp-t", 5) == 0)
+    /* Six characters, not five.  "tcp-rx" is six, and asking for dirlen == 5
+       while comparing five made every direction fall through to the 404 --
+       so the run endpoint never worked at all until a request from another
+       machine said so. */
+    if (dirlen == 6 && hs_nicmp(dir, "tcp-tx", 6) == 0)
         plan.dir = IPERF_TCP_TX;
-    else if (dirlen == 5 && hs_nicmp(dir, "tcp-r", 5) == 0)
+    else if (dirlen == 6 && hs_nicmp(dir, "tcp-rx", 6) == 0)
         plan.dir = IPERF_TCP_RX;
-    else if (dirlen == 5 && hs_nicmp(dir, "udp-t", 5) == 0)
+    else if (dirlen == 6 && hs_nicmp(dir, "udp-tx", 6) == 0)
         plan.dir = IPERF_UDP_TX;
-    else if (dirlen == 5 && hs_nicmp(dir, "udp-r", 5) == 0)
+    else if (dirlen == 6 && hs_nicmp(dir, "udp-rx", 6) == 0)
         plan.dir = IPERF_UDP_RX;
     else
     {
