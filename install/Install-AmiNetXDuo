@@ -60,6 +60,7 @@
 (set S_DEVS  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Devs")     "Devs"))
 (set S_DOCS  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Docs")     "Docs"))
 (set S_EXAM  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Examples") "Examples"))
+(set S_TERM  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Terminal") "Terminal"))
 
 ; --------------------------------------------------------------------------
 ; Help texts.  Every ask.../copy... statement is required by the Installer to
@@ -1252,6 +1253,23 @@
               "by hand where that is the preferred way to configure it.")
       (source S_EXAM)
       (dest   (tackon DOCDIR "Examples"))
+      (all)
+      (optional "nofail")))
+
+; httpd's terminal page.  It goes beside the examples rather than into C: or
+; DEVS: because it is neither a command nor configuration: it is a file the
+; server reads and hands to a browser, and the person who wants one names it
+; on httpd's command line, which is also the switch that turns the endpoint on
+; at all.  A drawer here is somewhere they can find it, read it and edit it.
+
+(if (exists S_TERM (noreq))
+    (copyfiles
+      (prompt "Installing the terminal page for httpd")
+      (help   "httpd can serve an AmigaDOS Shell to a web browser. This is the page it hands that browser: one self-contained HTML file, with nothing to fetch from anywhere else. "
+              "Nothing reads it where it is until you ask for it. httpd Work:Public 8080 TERMINAL=<this file> is what turns the endpoint on, and without that switch there is no terminal at all. "
+              "Note what it is when it is on: anyone who can reach that port gets a Shell on this machine, with no password, exactly as the WebDAV write methods on the same port have none.")
+      (source S_TERM)
+      (dest   (tackon DOCDIR "Terminal"))
       (all)
       (optional "nofail")))
 

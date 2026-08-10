@@ -221,6 +221,8 @@ live|ShowNetServices|mdns-off|4|re:mDNS is not enabled|-|SYS:ShowNetServices SEC
 live|ShowNetServices|bad-type|5|re:is not a service type|-|SYS:ShowNetServices http
 live|httpd|no-root|5|re:required argument missing|-|SYS:httpd
 live|httpd|bad-root|5|re:there is no .DH0:nosuchdirectory. to serve|-|SYS:httpd DH0:nosuchdirectory 8099
+live|httpd|term-no-page|5|re:to serve the terminal from|-|SYS:httpd DH0: 8099 TERMINAL=DH0:nosuchpage.html
+live|httpd|term-page-checked|5|re:there is no .DH0:nosuchdirectory. to serve|-|SYS:httpd DH0:nosuchdirectory 8099 TERMINAL=DH0:terminal.html
 live|AddNetRoute|no-gateway|5|re:no GATEWAY was given|-|SYS:AddNetRoute DST=192.0.2.0
 live|DeleteNetRoute|no-such-route|5|re:no route to 198.51.100.0|-|SYS:DeleteNetRoute DST=198.51.100.0
 live|AddNetRoute|added|5|re:now go through 10.0.2.2|SYS:DeleteNetRoute DST=192.0.2.0|SYS:AddNetRoute DST=192.0.2.0 VIA=10.0.2.2
@@ -266,6 +268,7 @@ server|nc|listen-timeout|4|re:nobody connected within 3 seconds|-|SYS:nc -l 7099
 # failure, and it is here so that the absence is a line in the table rather
 # than a command nobody noticed was missing.
 live|httpd|serves|0|na:httpd runs until it is killed; a server with no request budget never reaches a second invocation in one transcript|-|SYS:httpd DH0: 8080
+live|httpd|terminal-session|0|na:the terminal's success arm is the same server that cannot be measured above, plus a browser; what a session costs is measured in tests/tools/run-wsterm.sh, where the Shell is started and stopped repeatedly inside ONE httpd and the figure is httpd's own free memory, not a per-invocation one|-|SYS:httpd DH0: 8080 TERMINAL=DH0:terminal.html
 live|telnet|interactive|0|na:a terminal session ends when a person ends it; the scripted arm above is the measurable half|-|SYS:telnet <host>
 live|ShowNetServices|browse|0|na:a browse that finds something needs MDNS=YES on the interface and a responder on the LAN; SLIRP carries neither|-|SYS:ShowNetServices SECONDS=1
 EOF

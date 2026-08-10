@@ -36,6 +36,7 @@
 #       Devs/Internet/               protocols, services, networks
 #       Docs/  Docs.info             the manual, from docs/user/
 #       Examples/  Examples.info     commented configuration files
+#       Terminal/  Terminal.info     httpd's terminal page, one HTML file
 #       Developer/  Developer.info   headers and glue for the vectors past
 #                                    the end of the NDK's SFD
 #
@@ -203,7 +204,7 @@ python3 "$INSTALL/tools/makeicon.py" "$INSTALL" >/dev/null
 
 rm -rf "$TREE" "$OUTDIR/AmiNetXDuo.info"
 mkdir -p "$TREE/C" "$TREE/Libs" "$TREE/Devs/Internet" "$TREE/Docs" \
-         "$TREE/Examples"
+         "$TREE/Examples" "$TREE/Terminal"
 
 for cpu in "${CPU_DIRS[@]}"; do
     mkdir -p "$TREE/Libs/$cpu"
@@ -336,10 +337,20 @@ chmod 755 "$TREE/Installer"
 cp -R "$INSTALL/devs/Internet/." "$TREE/Devs/Internet/"
 cp -R "$INSTALL/examples/."      "$TREE/Examples/"
 
+# httpd's terminal page.  It ships from src/tools/web because it is the CLIENT
+# half of httpd's own protocol and has to change in the same commit the server
+# does; an archive that carried a page from a different version would fail in
+# the browser with nothing on the Amiga to see.  `need` it rather than glob it:
+# a release that quietly shipped no page would leave -T naming a file that is
+# not there.
+need "$ROOT/src/tools/web/terminal.html"
+cp "$ROOT/src/tools/web/terminal.html" "$TREE/Terminal/terminal.html"
+
 cp "$ROOT/dist/ReadMe" "$TREE/ReadMe"
 cp "$INSTALL/Document.info" "$TREE/ReadMe.info"
 cp "$INSTALL/Drawer.info"   "$TREE/Docs.info"
 cp "$INSTALL/Drawer.info"   "$TREE/Examples.info"
+cp "$INSTALL/Drawer.info"   "$TREE/Terminal.info"
 
 # ----------------------------------------------------------- the Developer --
 #

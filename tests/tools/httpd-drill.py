@@ -2,7 +2,7 @@
 #
 # httpd-drill, the WebDAV assertions that need a socket rather than a client.
 #
-#   tests/tools/httpd-drill.py ADDRESS [PORT]
+#   tests/tools/httpd-drill.py [--terminal] ADDRESS [PORT]
 #
 # WHY THIS IS NOT curl
 #
@@ -22,16 +22,44 @@
 #   A writable document root.  Everything it makes it removes, under a drawer
 #   of its own, so it can be run against a share somebody is using.
 #
+#   --terminal adds the WebSocket half, which needs a server started with
+#   TERMINAL.  It is a flag rather than a probe because "the terminal is off"
+#   and "the terminal is broken" look the same from out here, and a suite that
+#   skips itself when the thing it tests is missing is a suite that passes on a
+#   server with nothing in it.  tests/tools/run-wsterm.sh passes it.
+#
 # SPDX-License-Identifier: MIT
 
+import base64
+import hashlib
+import os
 import socket
+import struct
 import sys
 import time
 
-ADDR = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
-PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8080
+argv = [a for a in sys.argv[1:] if not a.startswith("--")]
+WANT_TERMINAL = "--terminal" in sys.argv or "--ws-only" in sys.argv
+
+# --ws-only skips the WebDAV half and its setup.  It exists so the WebSocket
+# assertions can be pointed at something that is NOT this server: every one of
+# them was watched to fail against a stand-in that is deliberately wrong in one
+# named way, and that stand-in answers no PROPFIND, so setup() would exit(2)
+# before a single WebSocket check ran.  run-wsterm.sh does not use it -- it
+# passes --terminal, which runs both halves.
+WS_ONLY = "--ws-only" in sys.argv
+
+ADDR = argv[0] if len(argv) > 0 else "127.0.0.1"
+PORT = int(argv[1]) if len(argv) > 1 else 8080
 
 BASE = "/httpd-drill"
+TERM = "/terminal"
+
+# How long one exchange with the guest may take.  Measured rather than
+# guessed: see tests/tools/run-wsterm.sh for the figures a 68020 produced and
+# the multiple applied to them.  A run that burns one of these has found a
+# defect and says which exchange it was; raising it is never the fix.
+WS_WAIT = float(os.environ.get("AMINETXDUO_WS_WAIT", "20"))
 
 checks = 0
 failures = []
@@ -724,11 +752,393 @@ def test_depth0_collection_lock():
     once(req("DELETE", BASE + "/locked"))
 
 
+# ================================================================= WebSocket ==
+#
+# The terminal, at the level of bytes.  A library client would hide exactly the
+# things that have to be checked here -- the accept value, the mask, where a
+# fragment ends -- so the frames are built and read by hand.
+
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+# RFC 6455 1.3's own pair.  Written out rather than computed, so a server that
+# agreed with this file's arithmetic and not with the specification would still
+# be caught.
+RFC_KEY    = "dGhlIHNhbXBsZSBub25jZQ=="
+RFC_ACCEPT = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+
+
+def ws_accept_of(key):
+    return base64.b64encode(
+        hashlib.sha1((key + WS_GUID).encode("ascii")).digest()).decode("ascii")
+
+
+def ws_frame(opcode, payload, fin=True, mask=b"\x37\xfa\x21\x3d", masked=True):
+    """One frame, exactly as a client puts it on the wire."""
+    if isinstance(payload, str):
+        payload = payload.encode("latin-1")
+
+    b0 = (0x80 if fin else 0x00) | opcode
+    n = len(payload)
+
+    if n < 126:
+        head = struct.pack("!BB", b0, (0x80 if masked else 0) | n)
+    elif n < 65536:
+        head = struct.pack("!BBH", b0, (0x80 if masked else 0) | 126, n)
+    else:
+        head = struct.pack("!BBQ", b0, (0x80 if masked else 0) | 127, n)
+
+    if not masked:
+        return head + payload
+
+    body = bytes(payload[i] ^ mask[i % 4] for i in range(n))
+    return head + mask + body
+
+
+class WsConn(Conn):
+    """A connection that has been upgraded, and the frame reader for it."""
+
+    def __init__(self, key=RFC_KEY, timeout=None, path=TERM, headers=None):
+        Conn.__init__(self, timeout=(timeout or WS_WAIT))
+        lines = ["GET %s HTTP/1.1" % path,
+                 "Host: %s:%d" % (ADDR, PORT)]
+        h = {"Upgrade": "websocket",
+             "Connection": "Upgrade",
+             "Sec-WebSocket-Key": key,
+             "Sec-WebSocket-Version": "13"}
+        if headers is not None:
+            h.update(headers)
+        for k, v in h.items():
+            if v is not None:
+                lines.append("%s: %s" % (k, v))
+        self.send("\r\n".join(lines).encode("latin-1") + b"\r\n\r\n")
+
+        self.status = None
+        self.headers = {}
+        while b"\r\n\r\n" not in self.buf:
+            if not self.fill():
+                return
+        head, self.buf = self.buf.split(b"\r\n\r\n", 1)
+        lines = head.decode("latin-1").split("\r\n")
+        self.status = int(lines[0].split()[1])
+        for line in lines[1:]:
+            if ":" in line:
+                k, v = line.split(":", 1)
+                self.headers[k.strip().lower()] = v.strip()
+
+    def frame(self, deadline=None):
+        """The next frame: (fin, opcode, payload).  None on hang-up or on the
+        deadline passing, and the caller says which of the two it wanted."""
+        if deadline is None:
+            deadline = time.time() + WS_WAIT
+
+        def need(n):
+            while len(self.buf) < n:
+                if time.time() > deadline:
+                    return False
+                self.s.settimeout(max(0.2, deadline - time.time()))
+                try:
+                    more = self.s.recv(4096)
+                except socket.timeout:
+                    continue
+                except OSError:
+                    return False
+                if not more:
+                    return False
+                self.buf += more
+            return True
+
+        if not need(2):
+            return None
+
+        b0, b1 = self.buf[0], self.buf[1]
+        n = b1 & 0x7f
+        at = 2
+        if n == 126:
+            if not need(4):
+                return None
+            n = struct.unpack("!H", self.buf[2:4])[0]
+            at = 4
+        elif n == 127:
+            if not need(10):
+                return None
+            n = struct.unpack("!Q", self.buf[2:10])[0]
+            at = 10
+
+        # A server frame is never masked, and that is itself an assertion.
+        masked = (b1 & 0x80) != 0
+        if masked:
+            at += 4
+
+        if not need(at + n):
+            return None
+
+        payload = self.buf[at:at + n]
+        self.buf = self.buf[at + n:]
+
+        return ((b0 & 0x80) != 0, b0 & 0x0f, payload, masked)
+
+    def gather(self, seconds, want=None):
+        """Everything the server says for `seconds`, or until `want` appears in
+        what it has said.  Data frames only; control frames are returned
+        separately so a test can assert on both."""
+        text = b""
+        control = []
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            f = self.frame(deadline=deadline)
+            if f is None:
+                break
+            fin, op, payload, masked = f
+            if op in (0x1, 0x2, 0x0):
+                text += payload
+                if want is not None and want.encode("latin-1") in text:
+                    break
+            else:
+                control.append((op, payload))
+                if op == 0x8:
+                    break
+        return text, control
+
+
+def ws_wait_free(seconds=20.0):
+    """Wait for the terminal to come back, and say how long it took.
+
+    Slept-for rather than measured is how a release that takes twenty seconds
+    passes as one that takes two: the number is the point, so it is returned
+    and printed rather than hidden in a sleep."""
+    began = time.time()
+    while time.time() - began < seconds:
+        c = WsConn()
+        status = c.status
+        c.close()
+        if status == 101:
+            # Give it straight back; this was a probe.
+            time.sleep(0.3)
+            return time.time() - began
+        time.sleep(0.5)
+    return None
+
+
+def test_ws_handshake():
+    """RFC 6455 4.2.2, against the specification's own key and accept."""
+    print("the upgrade handshake")
+
+    c = WsConn(key=RFC_KEY)
+    check(c.status == 101, "the upgrade is 101, not %s" % c.status)
+    check(c.headers.get("upgrade", "").lower() == "websocket",
+          "and says Upgrade: websocket (got %r)" % c.headers.get("upgrade"))
+    check(c.headers.get("connection", "").lower() == "upgrade",
+          "and Connection: Upgrade (got %r)" % c.headers.get("connection"))
+    check(c.headers.get("sec-websocket-accept") == RFC_ACCEPT,
+          "and the accept RFC 6455 1.3 prints, %s (got %r)"
+          % (RFC_ACCEPT, c.headers.get("sec-websocket-accept")))
+    # A 101 must not claim a body length: there is no body, there is a
+    # protocol.
+    check("content-length" not in c.headers,
+          "a 101 carries no Content-Length (got %r)"
+          % c.headers.get("content-length"))
+
+    # And a second key, so the accept cannot be a constant.
+    c.close()
+    ws_wait_free()
+
+    other = base64.b64encode(b"0123456789abcdef").decode("ascii")
+    c = WsConn(key=other)
+    check(c.status == 101, "a second key upgrades too")
+    check(c.headers.get("sec-websocket-accept") == ws_accept_of(other),
+          "and its accept is that key's, not the last one's")
+    c.close()
+    ws_wait_free()
+
+
+def test_ws_refusals():
+    """A request that is not an upgrade must be refused cleanly, and nothing
+    may be spawned on the strength of one."""
+    print("upgrades this server will not complete")
+
+    cases = [
+        ({"Sec-WebSocket-Key": None}, (400,), "no key at all"),
+        ({"Sec-WebSocket-Key": "short"}, (400,), "a key that is not 16 bytes"),
+        ({"Sec-WebSocket-Key": "AAAAAAAAAAAAAAAAAAAAAAAA"}, (400,),
+         "24 characters that decode to 18 bytes"),
+        ({"Upgrade": None}, (200,), "no Upgrade header: that is the page"),
+        ({"Connection": "keep-alive"}, (400,),
+         "Upgrade without the Connection token"),
+        ({"Sec-WebSocket-Version": "8"}, (426,), "an older version"),
+    ]
+
+    for headers, want, why in cases:
+        c = WsConn(headers=headers)
+        check(c.status in want,
+              "%s is %s, not %s" % (why, "/".join(str(w) for w in want),
+                                    c.status))
+        if c.status == 426:
+            check(c.headers.get("sec-websocket-version") == "13",
+                  "and 426 names the version there is")
+        c.close()
+        time.sleep(0.5)
+
+    # Whatever those did, the terminal must still be free: a refused upgrade
+    # that had already started a Shell would show up here as a 503.
+    c = WsConn()
+    check(c.status == 101,
+          "the terminal is still free after the refusals (got %s)" % c.status)
+    c.close()
+    ws_wait_free()
+
+
+def test_ws_page():
+    """The same address, without an upgrade, is the page."""
+    print("the terminal's page")
+
+    a = once(req("GET", TERM))
+    check(a is not None and a[0] == 200, "GET /terminal is 200")
+    if a is not None:
+        check("text/html" in a[1].get("content-type", ""),
+              "and is HTML (got %r)" % a[1].get("content-type"))
+        check(b"WebSocket" in a[2],
+              "and is the terminal's page rather than something else")
+
+    a = once(req("PUT", TERM, body="x"))
+    check(a is not None and a[0] == 405,
+          "PUT /terminal is 405, not a write into the drawer (got %s)"
+          % (a[0] if a else "nothing"))
+
+
+def test_ws_shell():
+    """A command, typed, and its output.  This is the whole feature."""
+    print("a command through the Shell")
+
+    c = WsConn()
+    if c.status != 101:
+        check(False, "cannot upgrade to run a command (got %s)" % c.status)
+        c.close()
+        return
+
+    # The prompt.  A Shell that thought its input was a file would print none,
+    # so this is the ACTION_IS_FILESYSTEM answer being checked from outside.
+    banner, _ = c.gather(WS_WAIT, want=">")
+    check(b">" in banner,
+          "the Shell prints a prompt (got %r)" % banner[-80:])
+
+    c.send(ws_frame(0x2, "Echo AMIGADOSLIVES\n"))
+    said, _ = c.gather(WS_WAIT, want="AMIGADOSLIVES")
+    check(b"AMIGADOSLIVES" in said,
+          "Echo's output comes back (got %r)" % said[-120:])
+
+    # Two frames, one message: RFC 6455 5.4 fragmentation, and the Shell must
+    # see one command and not two.
+    c.send(ws_frame(0x2, "Echo FRAG", fin=False))
+    time.sleep(0.5)
+    c.send(ws_frame(0x0, "MENTED\n", fin=True))
+    said, _ = c.gather(WS_WAIT, want="FRAGMENTED")
+    check(b"FRAGMENTED" in said,
+          "a fragmented command is one command (got %r)" % said[-120:])
+
+    # A ping, answered with a pong carrying the same payload.
+    c.send(ws_frame(0x9, "areyouthere"))
+    got = None
+    deadline = time.time() + WS_WAIT
+    while time.time() < deadline:
+        f = c.frame(deadline=deadline)
+        if f is None:
+            break
+        if f[1] == 0xa:
+            got = f[2]
+            break
+    check(got == b"areyouthere",
+          "a ping is answered with its own payload (got %r)" % got)
+
+    # The close handshake: the server echoes the code and then lets go.
+    c.send(ws_frame(0x8, struct.pack("!H", 1000) + b"bye"))
+    code = None
+    deadline = time.time() + WS_WAIT
+    while time.time() < deadline:
+        f = c.frame(deadline=deadline)
+        if f is None:
+            break
+        if f[1] == 0x8:
+            code = struct.unpack("!H", f[2][:2])[0] if len(f[2]) >= 2 else 0
+            break
+    check(code == 1000, "a close is answered with its own code (got %r)" % code)
+    check(c.closed(), "and the server lets go of the socket")
+    c.close()
+    check(ws_wait_free() is not None,
+          "and the Shell is free again after a clean close")
+
+
+def test_ws_one_session():
+    """One Shell at a time, and the second asker is told so rather than
+    getting a second Shell or a hung socket."""
+    print("one session at a time")
+
+    first = WsConn()
+    check(first.status == 101, "the first upgrade succeeds")
+    first.gather(WS_WAIT, want=">")
+
+    second = WsConn()
+    check(second.status == 503,
+          "the second is 503, not %s" % second.status)
+    second.close()
+
+    first.close()
+
+    # And with the first gone, the terminal is free again.  This is the check
+    # that a browser closing its tab does not cost the machine its shell -- and
+    # the SECOND time it was run it was the check that found it did.
+    took = ws_wait_free()
+    check(took is not None,
+          "closing the first frees it again, within %.0fs" % WS_WAIT)
+    if took is not None:
+        print("  (the Shell came back in %.1fs)" % took)
+
+
+def test_ws_unmasked():
+    """RFC 6455 5.1.  A client frame that is not masked ends the connection,
+    with 1002, and the Shell must be given back."""
+    print("an unmasked frame from a client")
+
+    c = WsConn()
+    check(c.status == 101, "upgraded")
+    c.gather(WS_WAIT, want=">")
+
+    c.send(ws_frame(0x2, "Echo NEVER\n", masked=False))
+
+    code = None
+    deadline = time.time() + WS_WAIT
+    while time.time() < deadline:
+        f = c.frame(deadline=deadline)
+        if f is None:
+            break
+        if f[1] == 0x8:
+            code = struct.unpack("!H", f[2][:2])[0] if len(f[2]) >= 2 else 0
+            break
+    check(code == 1002,
+          "an unmasked frame is closed 1002 (got %r)" % code)
+    c.close()
+
+    check(ws_wait_free() is not None,
+          "and the Shell is given back afterwards")
+
+
 def main():
     print("httpd-drill against http://%s:%d/\n" % (ADDR, PORT))
 
-    setup()
+    if not WS_ONLY:
+        setup()
     try:
+        if WS_ONLY:
+            test_ws_shell()
+            test_ws_page()
+            test_ws_handshake()
+            test_ws_refusals()
+            test_ws_one_session()
+            test_ws_unmasked()
+            print("\n%d checks, %d failure(s)" % (checks, len(failures)))
+            for f in failures:
+                print("  %s" % f)
+            return 0 if not failures else 1
+
         test_desync()
         test_refusal_keeps_the_connection()
         test_unframed_refusal_closes()
@@ -741,8 +1151,22 @@ def main():
         test_name_truncation()
         test_propfind_body()
         test_depth0_collection_lock()
+
+        if WANT_TERMINAL:
+            # The Shell FIRST.  It is the feature; everything else here is
+            # about the door in front of it.  Run in any other order, a
+            # terminal that never came back from the first session reported
+            # itself as six failures about 503 and said nothing at all about
+            # whether a command works, which is what happened.
+            test_ws_shell()
+            test_ws_page()
+            test_ws_handshake()
+            test_ws_refusals()
+            test_ws_one_session()
+            test_ws_unmasked()
     finally:
-        teardown()
+        if not WS_ONLY:
+            teardown()
 
     print("\n%d checks, %d failure(s)" % (checks, len(failures)))
     for f in failures:

@@ -294,8 +294,36 @@ endif()
 # on a host.  One decides which file a request reaches, the second whether it
 # may write to it, the third where one request ends and the next begins, the
 # fourth who may write to a name somebody else has locked.
+#
+# httpws.c and httpsha1.c are the WebSocket half, and they are split from each
+# other for the reason the four above are split from httpd.c: httpws.c has to
+# compile on a host so the frame codec can be tested, and the SHA-1 behind the
+# handshake reaches NetX Duo's crypto headers.  httpterm.c is the Shell, which
+# is AmigaOS through and through -- DOS packets and a spawned Process -- and is
+# tested on the guest.
 aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httppath.c httpif.c
-                                          httpframe.c httplock.c toolsock.c)
+                                          httpframe.c httplock.c httpws.c
+                                          httpsha1.c httpterm.c toolsock.c
+                                          "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha1.c")
+
+# The crypto library in the mode that does not need nx_api.h; see
+# src/tools/nx_crypto_port.h for what that mode wants and why the port header
+# is ours.  Set on the target rather than globally: NX_CRYPTO_STANDALONE_ENABLE
+# is exactly what the TLS build must NOT have.
+target_compile_definitions(tool_httpd PRIVATE NX_CRYPTO_STANDALONE_ENABLE)
+target_include_directories(tool_httpd PRIVATE
+    "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
+
+# One warning is silenced on the vendored SHA-1 and only on it.  Two lines of
+# it cast a pointer to ULONG to check its alignment, in the NX_CRYPTO_METHOD
+# entry points nothing here calls; that is exact on m68k, where both are 32
+# bits, and is a warning on a 64-bit host.  It is not ours to change -- see
+# the HARD RULE about never upstreaming into the NetX Duo fork for what the
+# alternative would be -- and the warning must not be turned off for our own
+# sources, where the same cast would be a real defect.
+set_source_files_properties(
+    "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha1.c"
+    PROPERTIES COMPILE_OPTIONS "-Wno-pointer-to-int-cast")
 
 # sntp is config-only in the same sense as fetch: it reaches bsdsocket.library
 # through its published vectors and sets the machine's clock through
@@ -485,7 +513,30 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_httpframe PRIVATE -Wall -Wextra)
     set_target_properties(test_httpframe PROPERTIES C_STANDARD 11)
 
+    # RFC 6455's own handshake pair and frames.  The vendored SHA-1 is
+    # compiled in here too rather than stubbed: an accept computed over a
+    # different hash is 28 characters of base64 and looks exactly like a
+    # correct one until a browser refuses it.
+    add_executable(test_httpws
+        test/test_httpws.c
+        httpws.c
+        httpsha1.c
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha1.c")
+
+    target_include_directories(test_httpws PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
+
+    target_compile_definitions(test_httpws PRIVATE NX_CRYPTO_STANDALONE_ENABLE)
+    target_compile_options(test_httpws PRIVATE -Wall -Wextra)
+    set_target_properties(test_httpws PROPERTIES C_STANDARD 11)
+
+    set_source_files_properties(
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha1.c"
+        PROPERTIES COMPILE_OPTIONS "")
+
     include(CTest)
+    add_test(NAME httpws_rfc6455 COMMAND test_httpws)
     add_test(NAME httppath_escapes COMMAND test_httppath)
     add_test(NAME httpif_conditions COMMAND test_httpif)
     add_test(NAME fetchurl_rfc3986 COMMAND test_fetchurl)

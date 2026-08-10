@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<!--
+  The client half of httpd's terminal.  See src/tools/httpterm.h for the server
+  half and what it deliberately does not protect.
+
+  ENTIRELY SELF-CONTAINED, AND THAT IS THE REQUIREMENT
+
+    An Amiga serves this file over a LAN, so there is no CDN to reach, no font
+    to fetch and no script to load: one file, no requests after it, and it
+    still works on a machine with no route off the network.  It is under 10 KB
+    because that is one packet burst off a 68020 rather than a download.
+
+  LINE AT A TIME, AND WHY NOT CHARACTER AT A TIME
+
+    A DOS pipe is not a console handler, so nothing on the far side echoes
+    what is typed and nothing edits the line.  Both jobs are done here, which
+    is also the right answer for the link: a keystroke sent one at a time is a
+    round trip to a 7 MHz machine per letter, and backspace would be three.
+
+  TWO OPCODES
+
+    Binary frames are keystrokes.  Text frames are the words "break" and
+    "eof", because Ctrl-C on an Amiga is a signal and not a byte and there is
+    no way to put one in the stream.
+
+  LATIN-1, NOT UTF-8
+
+    AmigaDOS output is Latin-1.  The bytes are decoded one for one rather than
+    handed to a UTF-8 decoder, which would turn every accented character in a
+    filename into a replacement glyph.
+
+  SPDX-License-Identifier: MIT
+-->
+<html lang="en">
+<head>
+<meta charset="iso-8859-1">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AmigaDOS</title>
+<style>
+:root { color-scheme: dark; }
+html, body {
+  margin: 0; padding: 0; height: 100%;
+  background: #0a0a2a; color: #d8d8ff;
+  font-family: monospace;
+}
+body { display: flex; flex-direction: column; }
+header {
+  display: flex; align-items: center; gap: .6em;
+  padding: .3em .6em; background: #1a1a4a; font-size: .85rem;
+}
+#state { font-weight: bold; }
+#state.up   { color: #6f6; }
+#state.down { color: #f66; }
+header button {
+  font: inherit; background: #2a2a6a; color: inherit;
+  border: 1px solid #5a5aaa; border-radius: 3px; padding: .1em .6em;
+  cursor: pointer;
+}
+header button:hover { background: #3a3a8a; }
+#out {
+  flex: 1; overflow-y: auto; margin: 0; padding: .4em .6em;
+  white-space: pre-wrap; word-break: break-word;
+  font-size: .95rem; line-height: 1.25;
+}
+#bar { display: flex; padding: .3em .6em .6em; gap: .4em; }
+#bar span { opacity: .7; }
+#in {
+  flex: 1; font: inherit; background: transparent; color: inherit;
+  border: none; outline: none;
+}
+</style>
+</head>
+<body>
+<header>
+  <span id="state" class="down">connecting</span>
+  <button id="brk" type="button" title="Ctrl-C to the Shell">Break</button>
+  <button id="again" type="button">Reconnect</button>
+</header>
+<pre id="out"></pre>
+<div id="bar"><span>&gt;</span><input id="in" autocomplete="off"
+  autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+<script>
+(function () {
+  "use strict";
+
+  var out   = document.getElementById("out");
+  var input = document.getElementById("in");
+  var state = document.getElementById("state");
+  var ws    = null;
+
+  /* Bounded, because a session that runs for an afternoon must not grow
+     without limit in a tab nobody is watching.  Trimmed by lines rather than
+     by characters so a trim never lands in the middle of one. */
+  var LINES = 2000;
+
+  function say(text) {
+    out.appendChild(document.createTextNode(text));
+
+    if (out.childNodes.length > 64) {
+      out.textContent = out.textContent;   /* one node, cheap to trim */
+      var all = out.textContent.split("\n");
+      if (all.length > LINES) {
+        out.textContent = all.slice(all.length - LINES).join("\n");
+      }
+    }
+
+    out.scrollTop = out.scrollHeight;
+  }
+
+  /* Latin-1 both ways.  A byte is a character and a character above 255 is
+     not something an AmigaDOS Shell has a code for, so it is dropped rather
+     than sent as a pair the far side would read as two characters. */
+  function fromBytes(buf) {
+    var b = new Uint8Array(buf), s = "", i;
+    for (i = 0; i < b.length; i++) { s += String.fromCharCode(b[i]); }
+    return s;
+  }
+
+  function toBytes(text) {
+    var b = [], i, c;
+    for (i = 0; i < text.length; i++) {
+      c = text.charCodeAt(i);
+      if (c < 256) { b.push(c); }
+    }
+    return new Uint8Array(b);
+  }
+
+  function setState(word, up) {
+    state.textContent = word;
+    state.className = up ? "up" : "down";
+  }
+
+  function connect() {
+    if (ws && ws.readyState <= 1) { return; }
+
+    var scheme = (location.protocol === "https:") ? "wss://" : "ws://";
+    ws = new WebSocket(scheme + location.host + location.pathname);
+    ws.binaryType = "arraybuffer";
+
+    setState("connecting", false);
+
+    ws.onopen = function () {
+      setState("connected", true);
+      input.focus();
+    };
+
+    ws.onmessage = function (e) {
+      say(typeof e.data === "string" ? e.data : fromBytes(e.data));
+    };
+
+    ws.onclose = function (e) {
+      setState("closed (" + e.code + ")", false);
+      say("\n[" + (e.reason || "the session ended") + "]\n");
+    };
+
+    ws.onerror = function () { setState("failed", false); };
+  }
+
+  function send(line) {
+    if (!ws || ws.readyState !== 1) { return; }
+    ws.send(toBytes(line));
+  }
+
+  function word(w) {
+    if (ws && ws.readyState === 1) { ws.send(w); }
+  }
+
+  input.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+      var line = input.value;
+      input.value = "";
+      /* The echo is local: nothing on the far side is going to send it
+         back, so a line that is not shown here is a line nobody ever sees. */
+      say(line + "\n");
+      send(line + "\n");
+      e.preventDefault();
+    } else if (e.key === "c" && e.ctrlKey) {
+      /* Only when nothing is selected, so copy still works. */
+      if (window.getSelection().toString() === "") {
+        word("break");
+        say("^C\n");
+        e.preventDefault();
+      }
+    } else if (e.key === "d" && e.ctrlKey) {
+      word("eof");
+      e.preventDefault();
+    }
+  });
+
+  document.getElementById("brk").addEventListener("click", function () {
+    word("break");
+    say("^C\n");
+    input.focus();
+  });
+
+  document.getElementById("again").addEventListener("click", function () {
+    if (ws) { try { ws.close(); } catch (ignored) {} }
+    ws = null;
+    connect();
+  });
+
+  connect();
+})();
+</script>
+</body>
+</html>
