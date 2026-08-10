@@ -224,6 +224,20 @@ stage_toolchain() {
 stage_host() {
     hr "host tests"
 
+    # The verdict the fourteen on-Amiga harnesses share, against ten fixtures
+    # including a missing transcript and a check count under the floor.  It
+    # needs no emulator, so it runs here: an assertion that stopped firing in
+    # verdict_guest() would stop firing in all fourteen at once, and every one
+    # of those needs a ROM to notice.
+    if tools/test-verdict-selftest.sh > "$BUILD/verdict-selftest.log" 2>&1; then
+        note "test-verdict selftest: $(sed -n 's/^verdict-selftest: //p' \
+              "$BUILD/verdict-selftest.log")"
+    else
+        cat "$BUILD/verdict-selftest.log"
+        fail "tools/test-verdict.sh selftest"
+        return 1
+    fi
+
     cmake -S . -B "$BUILD/host" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_PROJECT_INCLUDE="$ROOT/cmake/ci-warnings.cmake" \
