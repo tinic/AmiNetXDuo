@@ -228,7 +228,7 @@ cycle|Offline|takes-down|4|re:eth0 is offline|SYS:Online eth0|SYS:Offline eth0
 cycle|Online|brings-up|4|re:eth0 is.*online|SYS:Offline eth0|SYS:Online eth0
 cycle|RemoveNetInterface|removes|4|re:eth0: removed|SYS:AddNetInterface eth0|SYS:RemoveNetInterface eth0 FORCE
 cycle|AddNetInterface|adds|4|re:online, address 10.0.2.15|SYS:RemoveNetInterface eth0 FORCE|SYS:AddNetInterface eth0
-cycle|NetShutdown|stops-all|4|re:The network is stopped|SYS:AddNetInterface eth0|SYS:NetShutdown
+cycle|NetShutdown|stops-all|4|re:eth0: stopped|SYS:Online eth0|SYS:NetShutdown
 # ------------------------------------------------------------ server ----
 # nc as a listener.  It blocks until its own -w expires, so it gets a boot of
 # its own rather than sitting in the middle of somebody else's transcript.
@@ -379,7 +379,7 @@ find_a2065() {
 }
 
 stage_group() {
-    local group="$1" stage="$2" t a2065
+    local stage="$1" t a2065
     a2065=$(find_a2065) || {
         echo "No a2065.device.  Set AMINETXDUO_A2065=<path>." >&2; exit 2; }
 
@@ -393,7 +393,6 @@ stage_group() {
     done
     printf 'amiga\r\nquit\r\n' > "$stage/telnetin.txt"
     printf 'hello from the amiga\n' > "$stage/greeting.txt"
-    : > "$stage/.group-$group"
 }
 
 # ======================================================================= #
@@ -482,6 +481,16 @@ fi
 ALLROWS="$WORK/rows.psv"
 table > "$ALLROWS"
 
+# A row is addressed by boot, command and arm, so two rows that share all
+# three are one row as far as every lookup below is concerned, and the second
+# would silently take the first's premise.  That happened.
+DUPES=$(awk -F'|' '{print $1 "|" $2 "|" $3}' "$ALLROWS" | sort | uniq -d)
+if [ -n "$DUPES" ]; then
+    echo "INFRA: two rows share a boot, a command and an arm:" >&2
+    printf '  %s\n' "$DUPES" >&2
+    exit 2
+fi
+
 TOTAL_ROWS=$(wc -l < "$ALLROWS" | tr -d ' ')
 echo "==> $TOTAL_ROWS rows over $(tool_names | wc -l | tr -d ' ') commands"
 
@@ -563,7 +572,7 @@ run_group() {
         tag="toolleak-$group-$c"
         hd="$ROOT/build/amiberry-testhd-$tag"
         if [ "$VERDICT_ONLY" = 0 ]; then
-            stage_group "$group" "$stage"
+            stage_group "$stage"
             cp "$WORK/$group-$c.commands.txt" "$stage/commands.txt"
 
             local extras=()
@@ -602,25 +611,16 @@ run_group() {
 COSTS="$WORK/costs.psv"
 
 chunk_timeout() {
-    local file="$1" secs measured unknown
-    # No cost file yet means nothing has been timed, and the estimate below is
-    # all there is.  An EMPTY one would otherwise make awk read the command
-    # list as its own costs and answer 0, which is a ceiling every run walks
-    # through in its first second.
-    if [ -s "$COSTS" ]; then
-        measured=$(awk -F'\t' '
-            NR == FNR { cost[$1] = $2; next }
-            { if ($0 in cost) total += cost[$0]; else unknown++ }
-            END { printf "%d %d\n", (total + 999) / 1000, unknown + 0 }' \
-            "$COSTS" "$file")
-    else
-        measured="0 $(wc -l < "$file" | tr -d ' ')"
-    fi
-    unknown=${measured##* }
-    measured=${measured%% *}
-
-    secs=$(awk '
+    local file="$1" line
+    # One pass: measured milliseconds for the lines that have been timed here
+    # before, and the command's own TIMEOUT for the ones that have not.  The
+    # estimate covers ONLY the unknown lines, so a chunk in which one command
+    # line changed does not fall back to estimating all ninety-five.
+    line=$(awk -F'\t' -v have="$([ -s "$COSTS" ] && echo 1 || echo 0)" '
+        NR == FNR && have == 1 { cost[$1] = $2; next }
         {
+            if ($0 in cost) { known++; ms += cost[$0]; next }
+            unknown++
             t = 1
             if (match($0, /-w [0-9]+/))         { t = substr($0, RSTART + 3, RLENGTH - 3) + 1 }
             if (match($0, /TIMEOUT[= ][0-9]+/)) { t = substr($0, RSTART + 8, RLENGTH - 8) + 1 }
@@ -628,17 +628,20 @@ chunk_timeout() {
             if ($0 ~ /AddNetInterface eth0/)    { t = 12 }
             if ($0 ~ /NetTrace/)                { t = 8 }
             if ($0 ~ /SECONDS=/)                { t = 3 }
-            total += t
+            est += t
         }
-        END { print total + 0 }' "$file")
+        END { printf "%d %d %d %d\n", (ms + 999) / 1000, est + 0, known + 0, unknown + 0 }' \
+        "$COSTS" "$file" 2>/dev/null || echo "0 0 0 0")
 
-    # 60s for the boot, then twice whichever arithmetic knows more.
-    local budget=$secs
-    [ "$measured" -le "$secs" ] || budget=$measured
-    [ "$unknown" -gt 0 ] || budget=$measured
-    echo "==> good case: ${measured}s measured over $(( $(wc -l < "$file") - unknown ))" \
-         "of $(wc -l < "$file" | tr -d ' ') commands, ${secs}s estimated for the rest" >&2
-    echo $((60 + budget * 2))
+    local measured estimated known unknown
+    read -r measured estimated known unknown <<< "$line"
+
+    # A boot of its own, then twice the work: an emulator that costs more than
+    # double what it has already been seen to cost is hung, and the ceiling is
+    # what says so rather than something to raise.
+    echo "==> good case: ${measured}s measured over $known command(s)," \
+         "${estimated}s estimated over $unknown never timed here" >&2
+    echo $((60 + (measured + estimated) * 2))
 }
 
 # Every command line's worst measured time, so the next ceiling is an artifact
@@ -739,9 +742,12 @@ verdict_chunk() {
 verdict_row() {
     local group="$1" rid="$2" readings="$3"
     local want_runs premise cmdline
-    want_runs=$(awk -F'|' -v r="$rid" '$2 "/" $3 == r {print $4; exit}' "$ALLROWS")
-    premise=$(awk -F'|' -v r="$rid" '$2 "/" $3 == r {print $5; exit}' "$ALLROWS")
-    cmdline=$(awk -F'|' -v r="$rid" '$2 "/" $3 == r {print $7; exit}' "$ALLROWS")
+    want_runs=$(awk -F'|' -v g="$group" -v r="$rid" \
+                    '$1 == g && $2 "/" $3 == r {print $4; exit}' "$ALLROWS")
+    premise=$(awk -F'|' -v g="$group" -v r="$rid" \
+                  '$1 == g && $2 "/" $3 == r {print $5; exit}' "$ALLROWS")
+    cmdline=$(awk -F'|' -v g="$group" -v r="$rid" \
+                  '$1 == g && $2 "/" $3 == r {print $7; exit}' "$ALLROWS")
 
     local frees=() rcs=() recs=()
     local f_rid rc free rec ms
