@@ -308,8 +308,7 @@ else
         cat >&2 <<EOF
 Nothing is listening on $PEER_ADDR:$PORT, and no peer was given to start one.
 
-  -H user@host                        start fitz-serve there over ssh
-  AMINETXDUO_FITZ_PEER=user@host       the same, from the environment
+  AMINETXDUO_FITZ_PEER=user@host       who to start fitz-serve on, over ssh
 
 The peer must be a THIRD machine on real Ethernet; see the note at the top of
 this file for why it cannot be playhouse2 or the emulator's own host.
