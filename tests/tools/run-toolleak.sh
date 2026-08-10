@@ -405,8 +405,6 @@ HTTPROOT="$WORK/httproot"
 
 # Reached through the EXIT trap below, not by name.
 # shellcheck disable=SC2329
-# Reached through the EXIT trap below, not by name.
-# shellcheck disable=SC2329
 stop_peers() {
     [ -z "$PEER_PID" ] || kill -TERM "$PEER_PID" 2>/dev/null || true
     [ -z "$HTTP_PID" ] || kill -TERM "$HTTP_PID" 2>/dev/null || true
@@ -799,29 +797,40 @@ verdict_row() {
 
     # ---- the arithmetic -------------------------------------------------
     #
-    # NOT a plain r[1] - r[n-1].  Once a stack is running, AvailMem() jitters:
-    # a DHCP or ARP timer thread holds a buffer at the instant of the sample
-    # and gives it back afterwards, which is a reading 3-4 KB BELOW the true
-    # level and never above it.  Measured on this rig: `AddNetInterface
-    # nosuchinterface` read 9236232, 9232576, 9236232, 9236232, and a plain
-    # difference calls that a 1828-byte leak in a command that leaks nothing.
+    # A leak is a cost paid on EVERY invocation, so the question is whether it
+    # is still being paid at the end of the run, and the answer is in the last
+    # three readings:
     #
-    # Jitter only ever subtracts, so the MAXIMUM of a two-run window is the
-    # true level at the window's first run.  A leak is monotone, so the max of
-    # a window is its first element, and
+    #     EARLY = max(r[n-3], r[n-2])
+    #     LATE  = max(r[n-2], r[n-1])
     #
-    #     EARLY = max(r[1], r[2])      the level after run 2
-    #     LATE  = max(r[n-2], r[n-1])  the level after run n-2
+    # one invocation apart, so their difference is the cost of one call.
     #
-    # are exactly (n - 3) invocations apart.  Both windows have to be hit by
-    # jitter in the same run for this to read wrong.
-    local first last delta per
-    first=${frees[1]}
-    [ "${frees[2]}" -le "$first" ] || first=${frees[2]}
-    last=${frees[$((n - 2))]}
-    [ "${frees[$((n - 1))]}" -le "$last" ] || last=${frees[$((n - 1))]}
-    delta=$((first - last))
-    per=$((delta / (n - 3)))
+    # NOT r[1] - r[n-1] over the whole run.  Two things break that.  Free
+    # memory JITTERS once a stack is running: a timer thread holds a buffer at
+    # the instant of the sample and gives it back afterwards, which is a
+    # reading 3-4 KB below the true level and never above it -- measured, and a
+    # plain difference called that a 1828-byte leak in a command that leaks
+    # nothing.  Jitter only ever subtracts, so the maximum of a two-run window
+    # is the true level.  And some one-off costs are not paid in one run:
+    # `NetTrace ?` reads 9989504, 9989480, 9989456, 9989456, 9989456 -- it
+    # settles after three and is flat forever after, which a window anchored at
+    # run 2 reports as 12 bytes a call and this reports as the 0 it is.
+    local early late delta per
+    early=${frees[$((n - 3))]}
+    [ "${frees[$((n - 2))]}" -le "$early" ] || early=${frees[$((n - 2))]}
+    late=${frees[$((n - 2))]}
+    [ "${frees[$((n - 1))]}" -le "$late" ] || late=${frees[$((n - 1))]}
+    delta=$((early - late))
+    per=$delta
+
+    # What the whole run cost, so a one-off that takes three runs to settle is
+    # SAID rather than merely not failed.
+    local settle=$(( frees[1] - frees[n - 1] ))
+    if [ "$delta" -eq 0 ] && [ "$settle" -gt 0 ]; then
+        echo "  note: $rid settled after the first runs" \
+             "($settle bytes between run 2 and run $n, then flat)"
+    fi
 
     # Free memory that went UP is not a leak: something else on the machine
     # gave memory back between the two windows.  Reported as the number it is
@@ -837,7 +846,7 @@ verdict_row() {
             "$cmdline" >> "$REPORT_ROWS"
     else
         note_fail "$rid: $per bytes lost per invocation, and never returned" \
-                  "(free after run 2 $first, after run $n $last)"
+                  "(free after run $((n - 2)) $early, after run $n $late)"
         printf '%s|%s|LEAK|%s|%s|%s|%s\n' "$group" "$rid" "$per" "${rcs[0]}" \
             "$slowest" "$cmdline" >> "$REPORT_ROWS"
     fi
