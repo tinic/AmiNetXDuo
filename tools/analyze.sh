@@ -90,15 +90,44 @@ cmake -S . -B "$BUILD" \
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
-# compile_commands.json, one command per line, ours only, deduplicated.  CMake
-# writes no backslash escapes into it for this project (the whole file is
-# checked below), so sed is enough and this script needs no JSON parser.
-if grep -q '\\' "$BUILD/compile_commands.json"; then
-    echo "compile_commands.json contains escapes, this parser is too naive" >&2
+# compile_commands.json, one command per line, ours only, deduplicated.
+#
+# run_one() eval()s these, and CMake has already shell-quoted what it put in
+# the JSON string, so the only layer to undo here is the JSON one.  Two
+# escapes come out of CMake and both are decoded below, backslash first, the
+# order JSON defines:
+#
+#   \\  ->  \    a backslash the shell wants, which eval then consumes
+#   \"  ->  "    likewise part of the shell quoting, not of the argument
+#
+# A quoted -D is what produces them.  -DATF_PROGNAME="tcp_socket" arrives as
+# -DATF_PROGNAME=\\\"tcp_socket\\\", decodes to -DATF_PROGNAME=\"tcp_socket\",
+# and eval hands the compiler -DATF_PROGNAME="tcp_socket", so the macro is
+# still a string literal.  Checked end to end, not reasoned about.
+#
+# Anything else -- \n, \t, \/, \uXXXX -- is still refused, because decoding it
+# properly means a real JSON parser.  What changed is that the refusal now
+# names the argument that caused it: the old message said only "this parser is
+# too naive", which named the file and not the cause, and cost a CI run on
+# 2026-08-10 when tests/atf/CMakeLists.txt first added a quoted -D.
+#
+# The two handled escapes are removed BEFORE looking for a leftover backslash.
+# Searching for \<other> directly reports the second half of every \\ as a
+# finding that is not there.
+if sed -e 's/\\\\//g' -e 's/\\"//g' "$BUILD/compile_commands.json" |
+       grep -q '\\'; then
+    echo "compile_commands.json: a JSON escape this parser does not decode" >&2
+    echo "  handled: \\\\ and \\\" -- anything else needs a real JSON parser" >&2
+    echo "  the argument(s) that produced it:" >&2
+    sed -e 's/\\\\/\x01/g' -e 's/\\"/\x02/g' "$BUILD/compile_commands.json" |
+        grep -o '[^ ]*\\[^ ]*' | sort -u | head -20 |
+        sed -e 's/\x01/\\\\/g' -e 's/\x02/\\"/g' -e 's/^/    /' >&2
+    echo "  in $BUILD/compile_commands.json" >&2
     exit 1
 fi
 grep '"command":' "$BUILD/compile_commands.json" |
-    sed -e 's/^ *"command": "//' -e 's/",$//' -e 's|-o [^ ]*|-o /dev/null|' |
+    sed -e 's/^ *"command": "//' -e 's/",$//' -e 's|-o [^ ]*|-o /dev/null|' \
+        -e 's/\\\\/\\/g' -e 's/\\"/"/g' |
     grep -v -- '-c .*/third_party/' |
     sort -u > "$WORK/cmds"
 
