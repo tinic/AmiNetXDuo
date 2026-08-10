@@ -220,6 +220,15 @@ fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
 note() { echo "  --: $*"; }
 
+# An instrument that did not work is not a defect in the thing it was pointed
+# at.  The capture was converted with `|| true` and a missing pcap then fired
+# `fail`, so a tcpdump that is not installed, or an emulator log the converter
+# could not read, was reported as a broken mDNS responder.  Those get their own
+# counter and their own exit status, 3, so a caller and CI can tell "could not
+# measure" from "measured and wrong".
+BROKEN=0
+infra() { echo "INFRA: $*" >&2; BROKEN=$((BROKEN + 1)); }
+
 STARTS=$(grep -c "SYS:AddNetInterface eth0 =====" "$REPORT" || true)
 if [ "$STARTS" -eq 1 ]; then
     pass "the machine booted exactly once (no reset)"
@@ -281,14 +290,25 @@ fi
 
 # ---- 3 + 4: the services, and the wire they went out on ------------------
 
-if [ -f "$FSLOG" ]; then
-    python3 "$ROOT/tests/trace/a2065pcap.py" "$FSLOG" -o "$HD/host.pcap" \
-        > "$HD/a2065.txt" 2>&1 || true
+if [ ! -f "$FSLOG" ]; then
+    # tests/trace/a2065pcap.py reads the A2065 frame dumps FS-UAE writes, and
+    # only FS-UAE writes them: the Amiberry log this script's own run produces
+    # has none, so sections 3 and 4 do not run at all under that runner.
+    infra "no FS-UAE frame log at $FSLOG, so the wire was never recorded and
+       the thirteen assertions on what left the card did not run"
+elif ! python3 "$ROOT/tests/trace/a2065pcap.py" "$FSLOG" -o "$HD/host.pcap" \
+        > "$HD/a2065.txt" 2>&1; then
+    infra "a2065pcap.py could not turn $FSLOG into a capture"
+    tail -5 "$HD/a2065.txt" | sed 's/^/       /' >&2
+elif [ ! -s "$HD/host.pcap" ]; then
+    infra "a2065pcap.py wrote an empty $HD/host.pcap"
 fi
 
 if [ -s "$HD/host.pcap" ]; then
-    tcpdump -r "$HD/host.pcap" -n -e "udp port 5353" 2>/dev/null \
-        > "$HD/mdns.txt" || true
+    if ! tcpdump -r "$HD/host.pcap" -n -e "udp port 5353" 2>/dev/null \
+            > "$HD/mdns.txt"; then
+        infra "tcpdump could not read $HD/host.pcap (is tcpdump installed?)"
+    fi
     MDNS_FRAMES=$(wc -l < "$HD/mdns.txt" | tr -d ' ')
 
     echo
@@ -424,7 +444,10 @@ if [ -s "$HD/host.pcap" ]; then
         pass "the malformed line was skipped and the good ones still went out"
     fi
 else
-    fail "no host-side capture at $HD/host.pcap, the wire was not observed"
+    # Not a fail(): with no capture nothing was observed, so nothing can be
+    # concluded about the responder either way.  infra() already named the
+    # reason above.
+    infra "no host-side capture at $HD/host.pcap, sections 3 and 4 did not run"
 fi
 
 # ---- the SLIRP question, reported and not asserted ----------------------
@@ -446,9 +469,11 @@ echo "====================================================================="
 # because this script kills it; the calibration is read from the body instead.
 #
 if [ ! -f "$WATCHLOG" ] || grep -q "INSTRUMENT UNAVAILABLE" "$WATCHLOG"; then
-    note "the host watcher could not bind UDP 5353; nothing can be concluded"
+    infra "the host watcher could not bind UDP 5353, so this whole section was
+       not measured"
 elif ! grep -q "mdnswatch.local" "$WATCHLOG"; then
-    note "the watcher never saw its own calibration query, inconclusive"
+    infra "the watcher never saw its own calibration query, so it was not
+       listening and its silence means nothing"
 else
     HEARD=$(grep -c "^\[" "$WATCHLOG" || true)
     note "instrument calibrated: it saw its own multicast, and $HEARD message(s)"
@@ -494,8 +519,12 @@ else
         note "          dropped, and the module drops them.  Conformance, not"
         note "          a defect: SLIRP forges the source address."
     elif [ "$IN" -gt 0 ]; then
-        note "INBOUND:  $IN frame(s) reached the card and were not accepted --"
-        note "          and NOT for the off-link reason.  Worth investigating."
+        # The one outcome in this section that IS a defect: the reply arrived
+        # at the card, RFC 6762 11 does not apply to it, and the responder
+        # dropped it anyway.  It used to be a note.
+        fail "INBOUND: $IN mDNS frame(s) reached the card from an ON-LINK
+       source and none was accepted, so the responder dropped a reply RFC 6762
+       11 does not let it drop"
     elif grep -q "and unicast to" "$WATCHLOG"; then
         note "INBOUND:  the host answered by multicast AND by unicast to the"
         note "          rewritten source port, and neither reached the card"
@@ -508,6 +537,15 @@ echo
 if [ "$FAILED" -ne 0 ]; then
     echo "mdns: FAILED" >&2
     exit 1
+fi
+
+# After the product verdict, and with its own status: a run that could not
+# observe the wire has not shown the responder to be right, and 3 says so
+# without claiming the responder is wrong.
+if [ "$BROKEN" -ne 0 ]; then
+    echo "mdns: NOT MEASURED ($BROKEN instrument failure(s)), no verdict on the" >&2
+    echo "      responder either way" >&2
+    exit 3
 fi
 
 echo "mdns: PASSED"

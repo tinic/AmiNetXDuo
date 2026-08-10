@@ -290,12 +290,16 @@ block() {
 
 # And the return code ToolsSmoke printed below it.  "?" when the command never
 # ran, which must not read as a pass.
+# Field 3 of "----- rc 0, 12 ms, free 1234 -----" is "0," with the comma
+# attached, so it never equals "0": worked() could never pass and failed()
+# could never fail.  Take the digits out of the line.
 code() {
-    awk -v want="===== $1 =====" '
+    local rc
+    rc=$(awk -v want="===== $1 =====" '
         index($0, want) == 1 { inb = 1; next }
-        inb && /^----- rc /   { print $3; found = 1; exit }
-        END { if (!found) print "?" }
-    ' "$REPORT"
+        inb && /^----- rc /   { print; exit }
+    ' "$REPORT" | sed -n 's/^----- rc \([0-9-]*\),.*/\1/p')
+    echo "${rc:-?}"
 }
 
 have()    { block "$1" | grep -qiF -- "$2"; }

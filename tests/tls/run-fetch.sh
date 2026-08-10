@@ -143,6 +143,120 @@ CPUARG=()
 [ -z "$CPU" ]   || CPUARG+=(-c "$CPU")
 [ -z "$CLOCK" ] || CPUARG+=(-k "$CLOCK")
 
-exec "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
+set +e
+"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
      "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/fetch" \
      "$STAGE/AddNetInterface" "$STAGE/commands.txt"
+RUN_RC=$?
+set -e
+
+# ---------------------------------------------------------- the verdict ---
+#
+# This used to end in `exec <runner>`, so the script's exit status was
+# ToolsSmoke's, which is 0 whenever the last command in the list returned 0.
+# A `fetch` that refused everything, or a boot that never reached the network,
+# was a pass.  The transcript is read instead, and the assertions are the ones
+# the command list above was written for: a name that must resolve, a chain
+# that must be REFUSED, and a scheme that must be turned down.
+#
+# Only asserted for the default command list: AMINETXDUO_FETCH_COMMANDS is a
+# different run and nothing here knows what it asked for.
+HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
+REPORT="$HD/tools.txt"
+
+if [ ! -s "$REPORT" ]; then
+    echo "FAIL: the guest wrote no transcript at $REPORT (emulator rc=$RUN_RC)." >&2
+    echo "      Nothing ran, so nothing about fetch was tested." >&2
+    echo "fetch: FAILED (no transcript)" >&2
+    exit 1
+fi
+
+echo
+echo "===================== what the commands printed ====================="
+cat "$REPORT"
+echo "====================================================================="
+echo
+
+if [ -n "${AMINETXDUO_FETCH_COMMANDS:-}" ]; then
+    echo "==> AMINETXDUO_FETCH_COMMANDS was set, so only the transcript and the"
+    echo "    emulator's status are checked."
+    [ "$RUN_RC" = "0" ] || { echo "fetch: FAILED, emulator rc=$RUN_RC" >&2; exit 1; }
+    echo "fetch: PASSED (custom command list)"
+    exit 0
+fi
+
+FAILED=0
+fail() { echo "FAIL: $*" >&2; FAILED=$((FAILED + 1)); }
+pass() { echo "  ok: $*"; }
+
+block() {
+    awk -v want="===== $1 =====" '
+        $0 == want { on = 1; next }
+        on && /^----- rc / { print; exit }
+        on { print }
+    ' "$REPORT"
+}
+rc_of() { block "$1" | sed -n 's/^----- rc \([0-9-]*\),.*/\1/p'; }
+
+want_rc() { # command expected description
+    local got; got=$(rc_of "$1")
+    if [ "$got" = "$2" ]; then pass "$3 (rc $got)"
+    else fail "$3: '$1' returned '${got:-nothing}', not $2"
+         block "$1" | sed 's/^/       /' >&2
+    fi
+}
+
+# Every command in the list has to have run: ToolsSmoke says so itself.
+if grep -q "^===== done, 0 command(s) would not run" "$REPORT"; then
+    pass "every command in the list ran"
+else
+    fail "the run did not reach the end of the command list"
+    grep -n "^===== done" "$REPORT" | sed 's/^/       /' >&2
+fi
+
+want_rc "SYS:AddNetInterface eth0" 0 "the interface came up"
+want_rc "SYS:fetch http://example.com/" 0 "http://example.com/ was fetched"
+
+# A chain that is valid for somebody else must be refused, not fetched.  This
+# is the assertion the whole file exists for: a verifier that accepts it is
+# worse than no TLS at all, and it returns 0 for every other line in the list.
+if [ "$HAVE_TLS" = "1" ]; then
+    want_rc "SYS:fetch https://ecc256.badssl.com/ TO DH0:ecdsa.txt" 0 \
+            "an ECDSA leaf verified"
+    if [ "$(rc_of 'SYS:fetch https://wrong.host.badssl.com/ TO DH0:refused.txt')" = "0" ]; then
+        fail "wrong.host.badssl.com was ACCEPTED: a chain issued for another
+       name verified, which is the whole failure this file is against"
+        block "SYS:fetch https://wrong.host.badssl.com/ TO DH0:refused.txt" |
+            sed 's/^/       /' >&2
+    else
+        pass "wrong.host.badssl.com was refused"
+    fi
+else
+    # No tls.library: the https: lines must fail legibly rather than crash.
+    if [ "$(rc_of 'SYS:fetch https://ecc256.badssl.com/ TO DH0:ecdsa.txt')" = "0" ]; then
+        fail "an https: URL succeeded with no tls.library staged"
+    else
+        pass "https: failed legibly with no tls.library"
+    fi
+fi
+
+# A scheme this command does not do, and a name that does not exist: both must
+# be turned down rather than reported as a fetch.
+if [ "$(rc_of 'SYS:fetch ftp://example.com/')" = "0" ]; then
+    fail "ftp:// was accepted by a command that does not do ftp"
+else
+    pass "ftp:// was turned down"
+fi
+if [ "$(rc_of 'SYS:fetch http://example.invalid/')" = "0" ]; then
+    fail "http://example.invalid/ 'succeeded', a name that cannot resolve"
+else
+    pass "a name that does not exist was reported as a failure"
+fi
+
+echo
+if [ "$FAILED" -ne 0 ]; then
+    echo "fetch: FAILED ($FAILED)" >&2
+    exit 1
+fi
+echo "fetch: PASSED"
+exit 0

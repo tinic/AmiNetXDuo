@@ -145,11 +145,14 @@ block() {
     ' "$REPORT"
 }
 
+# The rc line is "----- rc 5, 12 ms, free 1234 -----", so field 3 is "5,"
+# with the comma still on it and never equal to any number compared against.
+# Take the digits out of the line instead.
 rc_of() {
     awk -v want="===== $1 =====" '
         $0 == want { on = 1; next }
-        on && /^----- rc / { print $3; exit }
-    ' "$REPORT"
+        on && /^----- rc / { print; exit }
+    ' "$REPORT" | sed -n 's/^----- rc \([0-9-]*\),.*/\1/p'
 }
 
 expect() {

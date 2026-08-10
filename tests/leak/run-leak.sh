@@ -20,6 +20,10 @@ MODEL=A1200
 TIMEOUT=180
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 
+# refused_leak_test says "7 arms" in its own banner and marks each with
+# `-- arm X`; the count is the evidence that the run did the work.
+LEAK_ARMS=7
+
 while getopts "m:t:b:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
@@ -74,5 +78,61 @@ EOF
 
 export AMINETXDUO_RUN_TAG="$TAG"
 
-exec "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
+set +e
+"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
      "$EXE" "$STAGE/devs" "$STAGE/libs"
+RUN_RC=$?
+set -e
+
+# ---------------------------------------------------------- the verdict ---
+#
+# This used to end in `exec <runner>`, so the script's exit status was the
+# guest's own return code and a run that never reached the drive was a pass.
+# refused_leak_test prints no check counter; it prints `-- arm X` per arm and
+# one verdict line, so the arms are the evidence of work done and the verdict
+# line is the result.  Both are required, and an absent transcript is named as
+# an infrastructure failure rather than reported as clean.
+. "$ROOT/tools/test-verdict.sh"
+
+REPORT=$(verdict_find "leak" "$RUN_RC" 'refused_leak: (clean|LEAKED)' \
+                      "$(verdict_hd_amiberry)/stdout.txt" \
+                      "$(verdict_serial_amiberry)") || exit 1
+
+echo "==> verdict from $REPORT"
+
+FAILED=0
+fail() { echo "FAIL: $*" >&2; FAILED=1; }
+pass() { echo "  ok: $*"; }
+
+ARMS=$(grep -c '^-- arm ' "$REPORT" || true)
+if [ "$ARMS" -ge "$LEAK_ARMS" ]; then
+    pass "all $ARMS arms ran"
+else
+    fail "only $ARMS of $LEAK_ARMS arms ran, the guest stopped early"
+fi
+
+if grep -q 'refused_leak: LEAKED' "$REPORT"; then
+    fail "sockets were leaked"
+    grep -n 'refused_leak: LEAKED' "$REPORT" | sed 's/^/       /' >&2
+elif grep -q 'refused_leak: clean' "$REPORT"; then
+    pass "no arm leaked"
+else
+    fail "the guest never printed its verdict, so it did not finish"
+    tail -20 "$REPORT" | sed 's/^/       /' >&2
+fi
+
+if [ "$RUN_RC" != "0" ]; then
+    case "$RUN_RC" in
+        124) fail "the run TIMED OUT, the transcript above is a partial run" ;;
+        4)   fail "illegal instruction: the guest is built for the wrong CPU" ;;
+        *)   fail "the guest exited $RUN_RC" ;;
+    esac
+fi
+
+echo
+if [ "$FAILED" -ne 0 ]; then
+    echo "leak: FAILED" >&2
+    exit 1
+fi
+echo "leak: PASSED, $ARMS arms, nothing leaked"
+exit 0

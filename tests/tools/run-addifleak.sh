@@ -186,7 +186,10 @@ pass() { echo "  ok: $*"; }
 fail() { echo "FAIL: $*" >&2; FAILED=$((FAILED + 1)); }
 
 # Every free reading, in order.
-mapfile -t FREE < <(sed -n 's/.*rc -\{0,1\}[0-9]\{1,\}, free \([0-9]\{1,\}\).*/\1/p' "$REPORT")
+# "----- rc 20, 12 ms, free 1234 -----".  The pattern used to expect ", free"
+# directly after the rc number, matched nothing, and left FREE empty, so the
+# arithmetic below exited before the leak was ever measured.
+mapfile -t FREE < <(sed -n 's/^----- rc -\{0,1\}[0-9]\{1,\},.*, free \([0-9]\{1,\}\) .*/\1/p' "$REPORT")
 
 if [ "${#FREE[@]}" -lt "$RUNS" ]; then
     fail "only ${#FREE[@]} of $RUNS runs reported free memory, the guest stopped early"

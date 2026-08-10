@@ -97,10 +97,39 @@ EOF
 
 export AMINETXDUO_RUN_TAG="$TAG"
 
+# ---------------------------------------------------------- the verdict ---
+#
+# This used to end in `exec <runner>`, so the script's exit status was the
+# guest's own return code: a guest that measured nothing and returned 0 was a
+# pass, and so was one whose transcript never arrived.  stack_test prints
+# `stack: N checks, M failures`, which is what is read instead.
+#
+# enforcer-run.sh stages under build/testhd-$TAG, amiberry-run.sh under
+# build/amiberry-testhd-$TAG, so both are offered and the first one with a
+# summary in it wins.
+. "$ROOT/tools/test-verdict.sh"
+
+verdict() {
+    # 0 pass, 1 fail, 77 the guest skipped: all three are carried out.
+    verdict_guest "stack" 12 "$1" \
+        "$(verdict_hd_amiberry)/stdout.txt" \
+        "$ROOT/build/testhd-$TAG/stdout.txt" \
+        "$(verdict_serial_amiberry)" && exit 0
+    exit $?
+}
+
 if [ "$ENFORCE" = "1" ]; then
-    exec "$ROOT/tools/enforcer-run.sh" -m -n -t "$TIMEOUT" \
+    set +e
+    "$ROOT/tools/enforcer-run.sh" -m -n -t "$TIMEOUT" \
          "$EXE" "$STAGE/devs" "$STAGE/libs"
+    RUN_RC=$?
+    set -e
+    verdict "$RUN_RC"
 fi
 
-exec "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
+set +e
+"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
      "$EXE" "$STAGE/devs" "$STAGE/libs"
+RUN_RC=$?
+set -e
+verdict "$RUN_RC"

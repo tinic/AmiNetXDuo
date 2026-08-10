@@ -136,26 +136,81 @@ CPUARG=()
 # forward is therefore an explicit copy, and it is also exactly what makes the
 # boot phase a proof rather than an assertion: the only thing that crosses is
 # that one file.
+# ---------------------------------------------------------- the verdict ---
+#
+# Every phase used to end with the emulator's exit status and nothing else.
+# The deliverable in the header -- that a resumed handshake happens and is
+# cheaper than a cold one -- was never asserted anywhere, so a build in which
+# resumption silently stopped working passed all three phases: `fetch` still
+# fetches, tls_resume still returns 0 for the checks it does run, and a boot
+# phase whose seeding run died was already carrying an empty cache forward.
+. "$ROOT/tools/test-verdict.sh"
+
+FAILED=0
+fail() { echo "FAIL: $*" >&2; FAILED=$((FAILED + 1)); }
+pass() { echo "  ok: $*"; }
+
+hd_of() { echo "$ROOT/build/amiberry-testhd-$1"; }
+
+# `fetch` prints " (resumed session)" on the handshake line when the session
+# came out of the cache, and nothing there when it did not (src/tools/fetch.c).
+# That string is the only direct evidence a resume happened.
+resumes_in() { grep -c "(resumed session)" "$1" 2>/dev/null || true; }
+
 carry_sessions() {
     local tag="$1"
-    local src="$ROOT/build/amiberry-testhd-$tag/devs/Internet/tlssessions"
+    local src bytes
+    src="$(hd_of "$tag")/devs/Internet/tlssessions"
 
-    if [ -f "$src" ]; then
-        cp "$src" "$STAGE/devs/Internet/tlssessions"
-        echo "==> carried $(wc -c < "$src" | tr -d ' ') bytes of session cache forward"
-        return 0
+    if [ ! -f "$src" ]; then
+        fail "the $tag run wrote no session cache, so nothing can be resumed"
+        return 1
     fi
-
-    echo "==> no session cache was written by the $tag run"
-    return 1
+    bytes=$(wc -c < "$src" | tr -d ' ')
+    # A zero-byte file is not a cache. It used to be carried forward and the
+    # warm run then did a second cold handshake, which nothing noticed.
+    if [ "$bytes" -eq 0 ]; then
+        fail "the $tag run wrote a 0-byte session cache, which holds no session"
+        return 1
+    fi
+    cp "$src" "$STAGE/devs/Internet/tlssessions"
+    pass "carried $bytes bytes of session cache forward"
+    return 0
 }
 
 run_api() {
     echo
     echo "======================================================== phase: api"
+    set +e
     AMINETXDUO_RUN_TAG=resume-api \
     "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
         "$RESUME" "$STAGE/devs" "$STAGE/libs"
+    local rc=$?
+    set -e
+
+    local out="$ROOT/build/amiberry-testhd-resume-api/stdout.txt"
+    AMINETXDUO_RUN_TAG=resume-api verdict_guest "resume-api" 8 "$rc" \
+        "$out" "$ROOT/build/amiberry-serial-resume-api.log" || FAILED=$((FAILED + 1))
+
+    # THE DELIVERABLE (see the header): a resumed handshake, and one that costs
+    # less than the cold one it followed.  Without this the phase passes on a
+    # library that quietly does two full handshakes.
+    if ! grep -q "DELTA " "$out" 2>/dev/null; then
+        fail "no DELTA line: tls_resume never completed a cold/resumed pair"
+        return
+    fi
+    local seen=0 slower=0
+    while read -r host cold warm; do
+        seen=$((seen + 1))
+        if [ "$warm" -lt "$cold" ]; then
+            pass "$host resumed in $warm ms against a cold $cold ms"
+        else
+            slower=$((slower + 1))
+            fail "$host resumed in $warm ms, no cheaper than the cold $cold ms"
+        fi
+    done < <(sed -n 's/.*DELTA \([^:]*\): cold \([0-9]*\) ms -> resumed \([0-9]*\) ms.*/\1 \2 \3/p' "$out")
+    [ "$seen" -gt 0 ] || fail "a DELTA line was printed but none could be read"
+    [ "$slower" -eq 0 ] || true
 }
 
 run_cross() {
@@ -171,10 +226,31 @@ SYS:fetch https://ecc256.badssl.com/ TO DH0:cross3.txt
 SYS:fetch https://ecc256.badssl.com/ TO DH0:cross4.txt
 EOF
 
+    set +e
     AMINETXDUO_RUN_TAG=resume-cross \
     "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
         "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/fetch" \
         "$STAGE/AddNetInterface" "$STAGE/commands.txt"
+    local rc=$?
+    set -e
+
+    local rep; rep="$(hd_of resume-cross)/tools.txt"
+    if [ ! -s "$rep" ]; then
+        fail "the cross phase wrote no transcript at $rep (emulator rc=$rc)"
+        return
+    fi
+    cat "$rep"
+
+    # Four fetches, two hosts: the second call to each host is a different
+    # PROCESS and must still find the session the first one left behind.  Two
+    # resumes is the whole point of the phase.
+    local n; n=$(resumes_in "$rep")
+    if [ "$n" -ge 2 ]; then
+        pass "$n resumed handshakes across processes"
+    else
+        fail "only $n resumed handshakes: the cache did not outlive the process"
+    fi
+    [ "$rc" = "0" ] || fail "the cross phase's emulator exited $rc"
 }
 
 run_boot() {
@@ -189,22 +265,53 @@ SYS:AddNetInterface eth0
 SYS:fetch https://www.iana.org/ TO DH0:seed.txt
 EOF
 
+    # The seeding run's status used to be thrown away with `|| true`, so a boot
+    # that never reached the network still went on to "carry" a cache that was
+    # not there and the phase reported whatever the second run felt like.
+    set +e
     AMINETXDUO_RUN_TAG=resume-seed \
     "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" -k "$SEED_CLOCK" \
         "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/fetch" \
-        "$STAGE/AddNetInterface" "$STAGE/commands.txt" || true
+        "$STAGE/AddNetInterface" "$STAGE/commands.txt"
+    local seed_rc=$?
+    set -e
+    if [ "$seed_rc" != "0" ]; then
+        fail "the seeding boot exited $seed_rc, so there is no cache to resume from"
+        return
+    fi
+    pass "the seeding boot completed"
 
-    carry_sessions resume-seed || return 1
+    carry_sessions resume-seed || return
 
     cat > "$STAGE/commands.txt" <<'EOF'
 SYS:AddNetInterface eth0
 SYS:fetch https://www.iana.org/ TO DH0:warm.txt
 EOF
 
+    set +e
     AMINETXDUO_RUN_TAG=resume-warm \
     "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
         "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/fetch" \
         "$STAGE/AddNetInterface" "$STAGE/commands.txt"
+    local warm_rc=$?
+    set -e
+
+    local rep; rep="$(hd_of resume-warm)/tools.txt"
+    if [ ! -s "$rep" ]; then
+        fail "the warm boot wrote no transcript at $rep (emulator rc=$warm_rc)"
+        return
+    fi
+    cat "$rep"
+
+    # The claim the phase exists for: the cache survived a power cycle, so the
+    # handshake on the second boot is a resume and not a second cold one.
+    local n; n=$(resumes_in "$rep")
+    if [ "$n" -ge 1 ]; then
+        pass "the handshake after the reboot was resumed from the carried cache"
+    else
+        fail "the warm boot did a COLD handshake: the disk mirror did not work"
+    fi
+    [ "$warm_rc" = "0" ] || fail "the warm boot's emulator exited $warm_rc"
 }
 
 case "$PHASE" in
@@ -214,3 +321,11 @@ case "$PHASE" in
     all)   run_api; run_cross; run_boot ;;
     *)     echo "unknown phase: $PHASE" >&2; exit 2 ;;
 esac
+
+echo
+if [ "$FAILED" -ne 0 ]; then
+    echo "resume: FAILED ($FAILED)" >&2
+    exit 1
+fi
+echo "resume: PASSED"
+exit 0

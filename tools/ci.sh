@@ -128,6 +128,16 @@ case "$(uname -m)" in
     x86_64|amd64) HOST_TEST_TARGETS+=(test_inet) ;;
 esac
 
+# How many ctest cases those targets register between them.  It is not the
+# number of targets: test_crypto68k and friends register several each.  Raise
+# it when tests are added; the gate is there so that tests DISAPPEARING is
+# noticed, which comparing against the target count never could.
+HOST_TESTS_EXPECTED=45
+case "$(uname -m)" in
+    x86_64|amd64) ;;
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 1)) ;;   # no test_inet
+esac
+
 # The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against
 # Kickstart 3.1, identical check counts on both.  Deliberately NOT here:
 #   netstack_test, and the bsdsocktest conformance suite, both of which need
@@ -153,10 +163,17 @@ EMULATOR_TESTS=(
 
 FAILED=()
 STAGES_RUN=()
+# Work this run did NOT do.  A `note "... skipped"` in the middle of a hundred
+# lines of build output is not a recorded status: it scrolls past and the
+# summary still says "all green", so a runner missing gcc-multilib or cppcheck
+# reported the same result as one that ran everything.  These are collected and
+# listed under their own heading at the end.
+SKIPPED=()
 
 hr()   { printf '\n\033[1m======== %s\033[0m\n' "$*"; }
 note() { printf '  %s\n' "$*"; }
 fail() { FAILED+=("$1"); printf '\033[31m!! FAILED: %s\033[0m\n' "$1" >&2; }
+skip() { SKIPPED+=("$1"); printf '\033[33m-- SKIPPED: %s\033[0m\n' "$1" >&2; }
 
 # ------------------------------------------------------------ submodules ----
 
@@ -207,6 +224,20 @@ stage_toolchain() {
 stage_host() {
     hr "host tests"
 
+    # The verdict the fourteen on-Amiga harnesses share, against ten fixtures
+    # including a missing transcript and a check count under the floor.  It
+    # needs no emulator, so it runs here: an assertion that stopped firing in
+    # verdict_guest() would stop firing in all fourteen at once, and every one
+    # of those needs a ROM to notice.
+    if tools/test-verdict-selftest.sh > "$BUILD/verdict-selftest.log" 2>&1; then
+        note "test-verdict selftest: $(sed -n 's/^verdict-selftest: //p' \
+              "$BUILD/verdict-selftest.log")"
+    else
+        cat "$BUILD/verdict-selftest.log"
+        fail "tools/test-verdict.sh selftest"
+        return 1
+    fi
+
     cmake -S . -B "$BUILD/host" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_PROJECT_INCLUDE="$ROOT/cmake/ci-warnings.cmake" \
@@ -220,11 +251,16 @@ stage_host() {
 
     ( cd "$BUILD/host" && ctest --output-on-failure ) || { fail "ctest"; return 1; }
 
-    local n
+    # Against the number of TESTS, not the number of BUILD TARGETS.  Several
+    # targets register more than one ctest case, so comparing 45 registered
+    # tests against 36 targets left nine of them free to disappear without the
+    # gate noticing.  Same shape as the host32 stage below.
+    local n want
+    want="$HOST_TESTS_EXPECTED"
     n=$( (cd "$BUILD/host" && ctest -N 2>/dev/null | sed -n 's/^Total Tests: //p') )
-    note "$n tests registered"
-    if [ "${n:-0}" -lt "${#HOST_TEST_TARGETS[@]}" ]; then
-        fail "only $n tests registered, expected at least ${#HOST_TEST_TARGETS[@]}"
+    note "$n tests registered (expected $want)"
+    if [ "${n:-0}" -lt "$want" ]; then
+        fail "only $n tests registered, expected $want: tests have gone missing"
         return 1
     fi
 }
@@ -250,7 +286,8 @@ stage_host32() {
 
     if ! (echo 'int main(void){return 0;}' > "$BUILD/m32probe.c" &&
           "${CC:-cc}" -m32 "$BUILD/m32probe.c" -o "$BUILD/m32probe") 2>/dev/null; then
-        note "no -m32 on this host (needs gcc-multilib on Debian/Ubuntu), skipped"
+        skip "host32: no -m32 on this host (needs gcc-multilib on Debian/Ubuntu),\
+ the mDNS and TLS-crypto fuzz drivers did not run"
         return 0
     fi
 
@@ -293,15 +330,37 @@ stage_cross() {
             fail "Developer drawer headers are stale (tools/gen-developer.sh)"
         fi
     else
-        note "no sfdc, Developer drawer headers NOT checked against their SFD"
+        skip "cross: no sfdc, the Developer drawer headers were NOT checked\
+ against developer/sfd/aminetxduo_lib.sfd"
+    fi
+
+    # AMINETXDUO_CI_CROSS=default builds just one, what the emulator tier
+    # needs, and what you want when bisecting.  A NAME THAT MATCHES NOTHING IS
+    # AN ERROR: it used to skip all fourteen configurations and report green,
+    # so `AMINETXDUO_CI_CROSS=deafult tools/ci.sh cross` compiled nothing at
+    # all and said so nowhere.
+    if [ -n "${AMINETXDUO_CI_CROSS:-}" ]; then
+        local want unknown=""
+        for want in $AMINETXDUO_CI_CROSS; do
+            case " ${CROSS_CONFIGS[*]%%:*} " in
+                *" $want "*) ;;
+                *) unknown="$unknown $want" ;;
+            esac
+        done
+        if [ -n "$unknown" ]; then
+            hr "cross builds"
+            echo "AMINETXDUO_CI_CROSS names no such configuration:$unknown" >&2
+            echo "known:  ${CROSS_CONFIGS[*]%%:*}" >&2
+            fail "AMINETXDUO_CI_CROSS=$AMINETXDUO_CI_CROSS matched nothing;\
+ nothing was built"
+            return 1
+        fi
     fi
 
     for entry in "${CROSS_CONFIGS[@]}"; do
         name="${entry%%:*}"
         opts="${entry#*:}"
 
-        # AMINETXDUO_CI_CROSS=default builds just one, what the emulator
-        # tier needs, and what you want when bisecting.
         if [ -n "${AMINETXDUO_CI_CROSS:-}" ]; then
             case " $AMINETXDUO_CI_CROSS " in
                 *" $name "*) ;;
@@ -343,7 +402,8 @@ stage_conformance() {
     # It is a submodule and it compiles for m68k, so it belongs in the build
     # tier even though running it needs an emulator AND a2065.device.
     if [ ! -e third_party/bsdsocktest/.git ]; then
-        note "third_party/bsdsocktest not checked out, skipping"
+        skip "conformance: third_party/bsdsocktest is not checked out, the suite\
+ was not built"
         return 0
     fi
     tests/conformance/build.sh > "$BUILD/conformance.log" 2>&1 || {
@@ -364,7 +424,8 @@ stage_analyze() {
     #
     if [ "${AMINETXDUO_ANALYZE:-0}" != "1" ]; then
         hr "static analysis (cross)"
-        note "SKIPPED, set AMINETXDUO_ANALYZE=1 to run it (the release does)"
+        skip "analyze: off by default, AMINETXDUO_ANALYZE=1 runs it (the release\
+ workflow does)"
         return 0
     fi
 
@@ -386,7 +447,8 @@ stage_analyze() {
     # Say so out loud rather than passing quietly: a stage that skips without
     # a word reads as coverage it is not providing.
     if ! command -v cppcheck > /dev/null; then
-        note "cppcheck NOT INSTALLED, that half of this stage did not run"
+        skip "analyze: cppcheck is not installed, that half of the stage did not\
+ run"
         return 0
     fi
     if tools/cppcheck.sh > "$BUILD/cppcheck.log" 2>&1; then
@@ -566,8 +628,18 @@ case " ${STAGES_RUN[*]} " in
     *" analyze "*) ;;
     *) note "analyze NOT RUN, AMINETXDUO_ANALYZE=1 tools/ci.sh analyze" ;;
 esac
+if [ ${#SKIPPED[@]} -ne 0 ]; then
+    printf '\033[33m%d skipped:\033[0m\n' "${#SKIPPED[@]}"
+    printf '  - %s\n' "${SKIPPED[@]}"
+fi
+
 if [ ${#FAILED[@]} -eq 0 ]; then
-    printf '\033[32mall green\033[0m\n'
+    if [ ${#SKIPPED[@]} -eq 0 ]; then
+        printf '\033[32mall green\033[0m\n'
+    else
+        printf '\033[32mgreen\033[0m, with %d thing(s) NOT tested (above)\n' \
+               "${#SKIPPED[@]}"
+    fi
     exit 0
 fi
 printf '\033[31m%d failure(s):\033[0m\n' "${#FAILED[@]}"
