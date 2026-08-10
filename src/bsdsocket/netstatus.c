@@ -1442,6 +1442,44 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
         }
 
         /*
+         * The other direction, and the one AddNetInterface makes: an interface
+         * named by its file in DEVS:NetInterfaces, brought up the way a boot
+         * brings it up. The file is read here rather than passed in because
+         * this argument block has no room for a parsed interface, and because
+         * a re-add reading the same file the first add read is what makes the
+         * two the same interface.
+         *
+         * Out here with the rest of them: it opens a SANA-II device and reads
+         * a file, neither of which may happen inside the bracket.
+         */
+        case NETCTRL_INTERFACE_ADD:
+        {
+            AmiIfConfig cfg;
+            LONG        err;
+
+            if (ctl->nsc_Name[0] == '\0')
+                return bsd_fail(SocketBase, AMI_EINVAL);
+
+            if (ami_config_load_interface(ctl->nsc_Name, &cfg) != AMI_CFG_OK)
+                return bsd_fail(SocketBase, AMI_ENOENT);
+
+            err = netstack_interface_start(&cfg, NULL);
+
+            switch (err)
+            {
+                case AMI_NET_OK:         return 0;
+                case AMI_NET_ERR_NODEV:  return bsd_fail(SocketBase, AMI_ENXIO);
+                case AMI_NET_ERR_DEVBAD: return bsd_fail(SocketBase, AMI_EIO);
+                case AMI_NET_ERR_NOMEM:  return bsd_fail(SocketBase, AMI_ENOBUFS);
+                /* A name the stack already has, as against no slot left to put
+                   it in: NX_MAX_PHYSICAL_INTERFACES is 2, so a user can reach
+                   the second without there being a bug. */
+                case AMI_NET_ERR_CONFIG: return bsd_fail(SocketBase, AMI_EEXIST);
+                default:                 return bsd_fail(SocketBase, AMI_ENOSPC);
+            }
+        }
+
+        /*
          * The browse pair, outside the bracket for the same reason: both take
          * their own, and neither goes near an NX_IP, so neither needs the
          * netstack_ip() check the rest of this function opens with, and both

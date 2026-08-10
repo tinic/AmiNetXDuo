@@ -264,8 +264,16 @@ BOOL    netstack_interface_is_up(UWORD index);
  * requests back. In that case nothing is freed and the slot stays occupied: a
  * device holding pointers into freed memory is worse than an interface that
  * will not go away until the next NetShutdown.
+ *
+ * netstack_interface_start() is the add plus what start-up does to an interface
+ * it reads out of DEVS:NetInterfaces: the gateway, which the detach took away
+ * with the interface, the DHCP or link-local allocation the file asks for, and
+ * STATE=down. AddInterfaceTagList() wants the bare interface above, since its
+ * caller addresses it with ConfigureInterfaceTagList(); AddNetInterface has a
+ * file and wants the interface a boot would have given it.
  */
 LONG    netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out);
+LONG    netstack_interface_start(const AmiIfConfig *cfg, UWORD *index_out);
 LONG    netstack_interface_remove(UWORD index, BOOL force);
 
 /* ------------------------------------------- DHCP on one interface --------
