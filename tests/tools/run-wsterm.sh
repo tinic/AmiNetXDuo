@@ -255,9 +255,6 @@ cat "$ROOT/build/wsterm-drill.txt"
 CHECKS=$(sed -n 's/^\([0-9]\{1,\}\) checks.*/\1/p' "$ROOT/build/wsterm-drill.txt" | tail -1)
 FAILS=$(sed -n 's/^[0-9]\{1,\} checks, \([0-9]\{1,\}\) failure.*/\1/p' "$ROOT/build/wsterm-drill.txt" | tail -1)
 
-cleanup
-trap - EXIT
-
 echo
 echo "===================== the guest's own log ======================="
 if [ -f "$HD/stdout.txt" ]; then
@@ -267,6 +264,30 @@ else
 fi
 echo "================================================================"
 echo
+
+# ------------------------------------------------------------ the numbers --
+#
+# What the session actually costs, once the assertions have held.  It runs
+# after the drill and not instead of it: this measures and does not assert,
+# because "0.4 seconds to echo a line" is neither right nor wrong -- it is the
+# answer to whether the thing is pleasant to use, and a person reads it.
+#
+# Skipped when the drill failed, since a number taken from a broken session is
+# a number about nothing.
+if [ "$DRILL_RC" -eq 0 ] && [ "${FAILS:-1}" -eq 0 ]; then
+    set +e
+    python3 "$ROOT/tests/tools/wsterm-bench.py" 127.0.0.1 "$HOSTPORT" \
+        > "$ROOT/build/wsterm-bench.txt" 2>&1
+    set -e
+    trim_emulog
+    echo
+    echo "===================== what the session costs ===================="
+    cat "$ROOT/build/wsterm-bench.txt"
+    echo "================================================================"
+fi
+
+cleanup
+trap - EXIT
 
 # And the last of it, once nothing is writing any more.
 if [ -f "$EMULOG" ]; then
