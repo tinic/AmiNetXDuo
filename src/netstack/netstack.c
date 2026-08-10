@@ -230,8 +230,14 @@ AmiNetCaller *ami_netstack_enter_alloc(VOID)
     if (caller == NULL)
         return NULL;
 
+    /* Direct AllocMem(), so the census has to be told: this record belongs to
+       a caller that may be a Task which exits without unwinding, which is the
+       shape of every leak the census exists to name. */
+    AMI_CENSUS_ADD(caller, sizeof(AmiNetCaller));
+
     if (ami_netstack_enter(caller) != AMI_NET_OK)
     {
+        AMI_CENSUS_DROP(caller);
         FreeMem(caller, sizeof(AmiNetCaller));
         return NULL;
     }
@@ -245,6 +251,7 @@ VOID ami_netstack_leave_free(AmiNetCaller *caller)
         return;
 
     ami_netstack_leave(caller);
+    AMI_CENSUS_DROP(caller);
     FreeMem(caller, sizeof(AmiNetCaller));
 }
 

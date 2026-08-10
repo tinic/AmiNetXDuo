@@ -1,0 +1,8 @@
+# The allocation census known set: sites that are still outstanding at
+# bsdsocket.library expunge, with the bytes and the block count they hold.
+#
+# EVERY LINE HERE IS A REPORTED FINDING, NOT AN ACCEPTED COST.  It exists so
+# that a NEW leak is visible against a background that is not yet zero.  A
+# line removed because the leak was fixed is the outcome each of them wants.
+#
+# scope  site  bytes  count

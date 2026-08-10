@@ -27,6 +27,11 @@
 
 /* ------------------------------------------------------------------ memory */
 
+/* In a census build compat.h has pointed both names at the tagging wrappers
+   in alloccensus.c; these are the functions those wrappers call. */
+#undef ami_alloc
+#undef ami_alloc_flags
+
 /* The record the health mark points at; aminetxduo/compat.h. */
 static AmiMemStats ami_mem;
 
@@ -68,6 +73,10 @@ VOID ami_free(APTR ptr)
 {
     if (ptr == NULL)
         return;
+
+    /* Before the block goes: the census keeps its size, and reading it off a
+       freed pointer is the one thing this instrument must never do. */
+    AMI_CENSUS_DROP(ptr);
 
     FreeVec(ptr);
 
