@@ -707,6 +707,13 @@ static BOOL tool_call_default_domain(struct Library *base, char *buf, LONG len)
     return (BOOL)(res != 0);
 }
 
+/*
+ * Whether the library was asked, and agreed, to hold the stack itself. File
+ * scope because a command starts one network; tool_stack_release() is the only
+ * reader.
+ */
+static BOOL tool_stack_held;
+
 struct Library *tool_stack_start(VOID)
 {
     /*
@@ -719,11 +726,65 @@ struct Library *tool_stack_start(VOID)
      * inside bsdsocket.library, which brings it up on its first OpenLibrary()
      * (docs/RESEARCH.md 3.3, "self-starting").
      *
-     * Opening it starts the network; not closing it is how it stays up. The
-     * leaked reference is intentional, the same one AddNetInterface's comment
-     * describes.
+     * Opening it starts the network. Keeping it up used to be a matter of not
+     * closing again, and that cost a base per invocation: a leaked base sits on
+     * the library's child list for good, naming a struct Task that has exited,
+     * an Exec signal bit that belonged to it, and a ThreadX registration over
+     * that task's stack, which is the range a later tx_thread_create() then
+     * refuses to overlap (the interface that comes back listed and addressed
+     * with its link down, src/sana2/sana2_rx.c).
+     *
+     * NETCTRL_STACK_HOLD says the same thing to the library directly, and it
+     * costs nothing and is idempotent, so the tenth AddNetInterface of a
+     * session costs what the first did. After it the caller closes this base
+     * like any other opener, through tool_stack_release().
      */
-    return OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    struct Library  *base;
+    NetStatusControl ctl;
+    ULONG            w;
+
+    tool_stack_held = FALSE;
+
+    base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    if (base == NULL)
+        return NULL;
+
+    /* Not ours: nothing here knows what its private LVOs do, so do not call
+       one. The caller reports the foreign stack and closes. */
+    if (!tool_stack_is_ours(base))
+        return base;
+
+    for (w = 0; w < (ULONG)(sizeof(ctl) / sizeof(ULONG)); w++)
+        ((ULONG *)&ctl)[w] = 0;
+
+    if (tool_netstatus_control(base, NETCTRL_STACK_HOLD, &ctl, NULL) == 0)
+        tool_stack_held = TRUE;
+
+    return base;
+}
+
+VOID tool_stack_release(struct Library *base)
+{
+    if (base == NULL)
+        return;
+
+    /*
+     * Ours and holding its own reference, or not ours at all: either way this
+     * open has no job left and closing it changes nothing about the network.
+     */
+    if (tool_stack_held || !tool_stack_is_ours(base))
+    {
+        CloseLibrary(base);
+        return;
+    }
+
+    /*
+     * Ours, and it did not take the request: an older bsdsocket.library in
+     * LIBS: than the command in C:. Then this open is still the only thing
+     * keeping the network up and closing it would take the interface down with
+     * the command, so it is kept, exactly as every release before this one
+     * kept it. One base, and only on a mismatched install.
+     */
 }
 
 /*

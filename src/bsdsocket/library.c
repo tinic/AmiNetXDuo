@@ -23,6 +23,7 @@
 
 #include <stddef.h>
 
+#include <exec/execbase.h>   /* ThisTask, TaskReady, TaskWait: bsd_task_alive */
 #include <dos/dostags.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -245,6 +246,69 @@ static VOID bsd_new_list(struct MinList *list)
  */
 static struct AmiSocketBase *bsd_master_base;
 
+/* Is this pointer still one of Exec's tasks?  The running one, plus the two
+   scheduler lists, is the whole set.  Disable() and not Forbid(): an interrupt
+   moves a task between TaskWait and TaskReady, so Forbid() does not make the
+   walk safe. */
+static BOOL bsd_task_on_list(struct List *list, struct Task *task)
+{
+    struct Node *node;
+
+    for (node = list->lh_Head; node->ln_Succ != NULL; node = node->ln_Succ)
+    {
+        if ((struct Task *)node == task)
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+static ULONG bsd_dead_task_signals;
+
+/*
+ * Signal() a task only if it is still there.
+ *
+ * sb_Task is the Task that opened the base, and a base can outlive it: a
+ * program that exits without CloseLibrary() leaves its child base on the list
+ * for good, with a pointer to a struct Task Exec has since freed and probably
+ * handed to somebody else.  Signal() on that is not a read, it is a
+ * read-modify-write of tc_SigRecvd plus, if the bits it sets are waited for, an
+ * AddHead() onto the ready list, so it corrupts whatever is there now.
+ *
+ * The test and the Signal() are inside one Disable() so the task cannot leave
+ * between them.  Nothing here dereferences the candidate pointer: the answer
+ * comes from the lists, not from the block.
+ *
+ * What this cannot catch is a struct Task freed and reallocated as another
+ * struct Task, which is on the list and is not the one meant.  That needs a
+ * generation stamp Exec does not have.  A wrong task getting a spurious signal
+ * is a different order of wrong from writing into a freed block.
+ */
+static VOID bsd_signal_if_alive(struct Task *task, ULONG mask)
+{
+    BOOL alive;
+
+    Disable();
+
+    alive = (SysBase->ThisTask == task ||
+             bsd_task_on_list(&SysBase->TaskReady, task) ||
+             bsd_task_on_list(&SysBase->TaskWait, task));
+
+    if (alive)
+        Signal(task, mask);
+
+    Enable();
+
+    /* Said once: a program that does this does it for the rest of the session,
+       and the log is the only place the fact can appear at all. */
+    if (!alive && bsd_dead_task_signals++ == 0UL)
+    {
+        AMI_WARN("bsdsocket: an address change was not delivered to task %lx: "
+                 "it asked for SBTC_SIG_ADDRESS_CHANGE_MASK and then exited "
+                 "without closing the library", (unsigned long)task);
+    }
+}
+
 static VOID bsd_address_changed(VOID)
 {
     struct AmiSocketBase *master = bsd_master_base;
@@ -265,7 +329,7 @@ static VOID bsd_address_changed(VOID)
                                      offsetof(struct AmiSocketBase, sb_Node));
 
         if (child->sb_SigAddressChangeMask != 0UL && child->sb_Task != NULL)
-            Signal(child->sb_Task, child->sb_SigAddressChangeMask);
+            bsd_signal_if_alive(child->sb_Task, child->sb_SigAddressChangeMask);
     }
     ReleaseSemaphore(&master->sb_Lock);
 }
@@ -297,6 +361,7 @@ static struct AmiSocketBase *bsd_lib_init(
     InitSemaphore(&base->sb_Lock);
     bsd_new_list(&base->sb_Children);
     base->sb_StackRefs = 0;
+    base->sb_StackHeld = FALSE;
     bsd_handoff_init(base);
 
     bsd_master_base = base;
@@ -470,6 +535,7 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     bsd_bzero(&child->sb_Children, sizeof(child->sb_Children));
     bsd_bzero(&child->sb_Handoffs, sizeof(child->sb_Handoffs));
     child->sb_StackRefs      = 0;
+    child->sb_StackHeld      = FALSE;
     child->sb_NextHandoffId  = 0;
 
     /* Clear the inherited ThreadX bracket state rather than depend on the
@@ -830,6 +896,71 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
         return bsd_lib_expunge(master);
 
     return NULL;
+}
+
+/*
+ * NETCTRL_STACK_HOLD: the library takes its own reference to the stack it is
+ * running, so the command that started the network can close its base like any
+ * other opener and the network still stands afterwards.
+ *
+ * That used to be a leaked OpenLibrary(): AddNetInterface opened, never closed,
+ * and the reference it did not give back was what kept the interface up.  One
+ * per invocation, and each one left a child base on the list for good, holding
+ * a struct Task that had exited, an Exec signal bit belonging to that task, and
+ * a ThreadX registration naming that task's stack, which is the range
+ * tx_thread_create() then refuses to overlap (src/sana2/sana2_rx.c).
+ *
+ * The reference taken here is exactly the pair the leak used to hold, a
+ * netstack reference so the last close does not call netstack_shutdown(), and
+ * an open count so an expunge is declined while ThreadX threads are running out
+ * of this segment, and nothing else.  It costs no memory and it is taken ONCE:
+ * the flag is the whole point, since the second AddNetInterface of a session
+ * must not cost what the first did.
+ *
+ * There is no release.  That is not an oversight: it is the same permanence the
+ * leak had, and NetShutdown's header says so in as many words.  Giving it back
+ * would need an operation that decides the network is finished with, which is a
+ * different feature from this one.
+ */
+LONG bsd_stack_hold(struct AmiSocketBase *base)
+{
+    struct AmiSocketBase *master = base;
+    LONG                  rc     = 0;
+
+    if (master == NULL)
+        return -1;
+
+    if (master->sb_Master != NULL)
+        master = master->sb_Master;
+
+    ObtainSemaphore(&master->sb_Lock);
+
+    if (!master->sb_StackHeld)
+    {
+        /* Nothing to hold. The caller has a base open, so this cannot happen
+           from a live opener; it is here so a wrong caller gets an error
+           rather than a reference to a stack that is not running. */
+        if (master->sb_StackRefs == 0)
+        {
+            rc = -1;
+        }
+        else
+        {
+            /* Forbid() as well as the semaphore: every other lib_OpenCnt
+               update happens inside bsd_lib_open()/bsd_lib_close(), which Exec
+               calls with the task switcher off, and those take no semaphore.
+               This is the one that arrives through a vector. */
+            Forbid();
+            master->sb_StackRefs++;
+            master->sb_Lib.lib_OpenCnt++;
+            master->sb_StackHeld = TRUE;
+            Permit();
+        }
+    }
+
+    ReleaseSemaphore(&master->sb_Lock);
+
+    return rc;
 }
 
 APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))

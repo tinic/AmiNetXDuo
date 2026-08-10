@@ -1486,6 +1486,16 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
         }
 
         /*
+         * Out here because it touches nothing but the master base's own
+         * counters, and because it has to answer on a stack whose interfaces
+         * are all still coming up: it is the first thing AddNetInterface asks
+         * for, before it has waited for an address.
+         */
+        case NETCTRL_STACK_HOLD:
+            return (bsd_stack_hold(SocketBase) == 0)
+                       ? 0 : bsd_fail(SocketBase, AMI_ENETDOWN);
+
+        /*
          * The browse pair, outside the bracket for the same reason: both take
          * their own, and neither goes near an NX_IP, so neither needs the
          * netstack_ip() check the rest of this function opens with, and both

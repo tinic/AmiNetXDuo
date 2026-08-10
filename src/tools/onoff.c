@@ -520,10 +520,10 @@ int main(int argc, char **argv)
     {
         /*
          * No stack in this command: it lives in bsdsocket.library and comes
-         * up on first open (tool_stack_start()). That brings every configured
-         * interface up at once, which is what Online was asked for, but it
-         * also means a single interface cannot be toggled once the stack is
-         * already running.
+         * up on first open (tool_stack_start(), which then asks the library to
+         * hold it). That brings every configured interface up at once, which is
+         * what Online was asked for, but it also means a single interface
+         * cannot be toggled once the stack is already running.
          */
         if (tool_stack_library_running())
         {
@@ -558,9 +558,14 @@ int main(int argc, char **argv)
             {
                 tool_error("another TCP/IP stack is installed on this machine");
                 tool_explain_foreign_stack(base);
+                tool_stack_release(base);
                 FreeArgs(rda);
                 return RETURN_WARN;
             }
+
+            /* The library is holding the stack now (tool_stack_start()), so
+               this open has done its job and goes back like any other. */
+            tool_stack_release(base);
         }
 
         {

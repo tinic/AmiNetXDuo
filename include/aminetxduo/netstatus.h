@@ -789,6 +789,27 @@ typedef struct NetStatusService
  */
 #define NETCTRL_INTERFACE_ADD   17  /* nsc_Name                              */
 
+/*
+ * Ask the library to hold the running stack itself.
+ *
+ * The stack is a singleton inside bsdsocket.library: it comes up on the first
+ * OpenLibrary() and goes down when the last opener closes. A command that
+ * starts the network and then exits therefore has a problem, since its own
+ * close is the last one. AddNetInterface used to solve it by never closing,
+ * which kept the network up and left a base behind on every invocation.
+ *
+ * This says the same thing without the base: after it returns, the library
+ * holds a reference of its own and the caller may CloseLibrary() normally. It
+ * is idempotent and costs nothing on the second call, so a command may ask
+ * every time without accumulating anything.
+ *
+ * There is no matching release. The reference is permanent for the life of the
+ * library, which is what a machine whose interfaces came up at boot wants; an
+ * expunge is declined while it is held, as it was while the old open was
+ * leaked. ENETDOWN if there is no stack to hold.
+ */
+#define NETCTRL_STACK_HOLD      18  /*,                                    */
+
 /* Flags for nsc_Flags. Zero unless an operation above says otherwise. */
 #define NETCTRL_F_FORCE         0x00000001
 

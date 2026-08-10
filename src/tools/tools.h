@@ -180,11 +180,16 @@ BOOL tool_stack_installed(VOID);
 
 /*
  * Start the network by opening bsdsocket.library, which brings the stack up on
- * its first open. The caller must not close the returned base: that open
- * reference is what keeps the network up after the command exits. NULL means
- * the library is missing or the stack refused to start.
+ * its first open, and ask the library to hold that stack itself so the network
+ * outlives this command. NULL means the library is missing or the stack refused
+ * to start.
+ *
+ * Hand the base back to tool_stack_release() on EVERY exit path, including the
+ * failing ones. It closes when closing is safe and keeps the open when it is
+ * not, which is the one case a command must not decide for itself.
  */
 struct Library *tool_stack_start(VOID);
+VOID tool_stack_release(struct Library *base);
 
 /*
  * Is that library AmiNetXDuo's? Every Amiga TCP/IP stack answers to the name
