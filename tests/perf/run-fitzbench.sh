@@ -291,6 +291,14 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
+# A board other than the a2065 needs ITS driver on the disk and an interface
+# file naming it. AMINETXDUO_EXTRA_DRIVER=<path> stages one; AMINETXDUO_IFCONFIG
+# replaces DEVS:NetInterfaces/eth0. The a2065 copy above stays: harmless, and
+# the ARP/loopback paths in some plans still reference it.
+[ -z "${AMINETXDUO_EXTRA_DRIVER:-}" ] || \
+    cp "$AMINETXDUO_EXTRA_DRIVER" "$STAGE/devs/$(basename "$AMINETXDUO_EXTRA_DRIVER")"
+[ -z "${AMINETXDUO_IFCONFIG:-}" ] || \
+    cp "$AMINETXDUO_IFCONFIG" "$STAGE/devs/NetInterfaces/eth0"
 # -R swaps the whole stack, library and starter both.  It is the discriminator
 # for "is this rig or is this us": a figure Roadshow also cannot beat on the
 # same emulator, the same bridge and the same peer is not ours to fix.
