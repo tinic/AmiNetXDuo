@@ -431,6 +431,7 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
     {
         nx_packet_release(packet);
         iface->stats.rx_errors++;
+        iface->stats.rx_err_runt++;
         return;
     }
 
@@ -477,6 +478,7 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
 #endif
                 nx_packet_release(packet);
                 iface->stats.rx_errors++;
+                iface->stats.rx_err_verify++;
                 return;
             }
 
@@ -632,6 +634,7 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
     {
         /* Keep the packet: rearming is cheaper than a pool round trip. */
         iface->stats.rx_errors++;
+        iface->stats.rx_err_length++;
         return;
     }
 
@@ -793,6 +796,7 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
         else
         {
             rx->iface->stats.rx_errors++;
+            rx->iface->stats.rx_err_io++;
         }
     }
 }

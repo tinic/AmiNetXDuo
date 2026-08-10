@@ -747,6 +747,10 @@ static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
             out->nsi_Reconfigurations = stats.reconfigurations;
             out->nsi_TxErrors         = stats.tx_errors;
             out->nsi_RxErrors         = stats.rx_errors;
+            out->nsi_RxErrRunt        = stats.rx_err_runt;
+            out->nsi_RxErrVerify      = stats.rx_err_verify;
+            out->nsi_RxErrLength      = stats.rx_err_length;
+            out->nsi_RxErrIo          = stats.rx_err_io;
             out->nsi_AllocFailures    = stats.alloc_failures;
         }
 

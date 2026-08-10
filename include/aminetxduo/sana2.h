@@ -120,6 +120,19 @@ typedef struct AmiSana2Stats {
     ULONG   tx_errors;
     ULONG   rx_errors;
     ULONG   alloc_failures;     /* NX_PACKET allocation failed on RX */
+    /*
+     * rx_errors is the sum of these four, and they are what it is worth
+     * knowing. A frame the checksum rejected and a frame the driver refused
+     * to hand over are the same number to a caller counting rx_errors, and
+     * telling them apart twice needed a purpose-built probe build: an
+     * emulator delivering unfilled offload checksums and one delivering
+     * oversized coalesced frames both read as "receive errors" and are
+     * nothing alike.
+     */
+    ULONG   rx_err_runt;        /* shorter than the link header             */
+    ULONG   rx_err_verify;      /* IP/TCP/UDP checksum rejected it          */
+    ULONG   rx_err_length;      /* driver reported 0 or over slot capacity  */
+    ULONG   rx_err_io;          /* CMD_READ completed with io_Error         */
 } AmiSana2Stats;
 
 VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out);

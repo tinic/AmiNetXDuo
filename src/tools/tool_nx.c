@@ -157,6 +157,10 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
             info->stats.reconfigurations = src->nsi_Reconfigurations;
             info->stats.tx_errors        = src->nsi_TxErrors;
             info->stats.rx_errors        = src->nsi_RxErrors;
+            info->stats.rx_err_runt      = src->nsi_RxErrRunt;
+            info->stats.rx_err_verify    = src->nsi_RxErrVerify;
+            info->stats.rx_err_length    = src->nsi_RxErrLength;
+            info->stats.rx_err_io        = src->nsi_RxErrIo;
             info->stats.alloc_failures   = src->nsi_AllocFailures;
         }
     }
