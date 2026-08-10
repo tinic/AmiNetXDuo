@@ -115,9 +115,9 @@ int main(int argc, char **argv)
     }
 
     /*
-     * Starts the stack if nothing else has. The base is not closed: that open
-     * reference keeps the network up afterwards, as in every other client
-     * command.
+     * Starts the stack if nothing else has, and is closed again below like
+     * every other client command closes its own. Leaving it open cost one
+     * cloned AmiSocketBase, 2568 bytes, on every single run.
      */
     sbase = tool_socket_open();
     if (sbase == NULL)
@@ -199,10 +199,12 @@ int main(int argc, char **argv)
     if (tool_break())
     {
         tool_fault(ERROR_BREAK);
+        CloseLibrary(sbase);
         FreeArgs(rda);
         return RETURN_WARN;
     }
 
+    CloseLibrary(sbase);
     FreeArgs(rda);
     return ok ? RETURN_OK : RETURN_ERROR;
 }
