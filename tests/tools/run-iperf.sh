@@ -254,8 +254,15 @@ if [ "$SERVER_ARMS" = yes ]; then
     ssh -o ConnectTimeout=10 "$PEERHOST" "python3 $REMOTE_PY --help" \
         >/dev/null 2>&1 || {
         echo "$PEERHOST cannot run the peer; it needs python3" >&2; exit 2; }
+    # Under `timeout`, and with any leftover from an earlier run killed first.
+    # Killing the local ssh does not kill what it started on the far side, so
+    # without a ceiling of its own a peer outlives its run, holds the port, and
+    # the next run dies on "address already in use" -- which is how this was
+    # found.  The ceiling is the peer's own lifetime and a little slack.
+    ssh -o ConnectTimeout=10 "$PEERHOST" \
+        "pkill -f '[i]perfpeer-$AMINETXDUO_RUN_TAG' 2>/dev/null; exit 0" || true
     peer_cmd() { ssh -o ConnectTimeout=10 "$PEERHOST" \
-                     "python3 $REMOTE_PY $*"; }
+                     "timeout $((TIMEOUT + 150)) python3 $REMOTE_PY $*"; }
     echo "==> peers run on $PEERHOST, the guest is $ADDRESS"
 else
     peer_cmd() { python3 "$PEER_PY" "$@"; }
