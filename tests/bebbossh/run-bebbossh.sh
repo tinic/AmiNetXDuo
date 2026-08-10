@@ -557,7 +557,7 @@ fi
 RC=$?
 set -e
 
-HD="$ROOT/build/testhd-$TAG"
+HD="$ROOT/build/amiberry-testhd-$TAG"
 echo ""
 echo "==> DH0:client.txt"
 cat "$HD/client.txt" 2>/dev/null || echo "(none)"

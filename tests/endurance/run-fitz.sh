@@ -198,7 +198,7 @@ set -e
 
 # ---- what came back ------------------------------------------------------
 
-HD="$ROOT/build/testhd-$TAG"
+HD="$ROOT/build/amiberry-testhd-$TAG"
 
 echo
 echo "=== summary ==="

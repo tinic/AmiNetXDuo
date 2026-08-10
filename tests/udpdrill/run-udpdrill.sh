@@ -55,7 +55,7 @@ if [ "$RUNNER" = "amiberry" ]; then
         "$EXE" "$STAGE/devs" "$STAGE/libs" \
         > "$ROOT/build/udpdrill-$TAG.log" 2>&1 || true
 else
-    HD="$ROOT/build/testhd-$TAG"
+    HD="$ROOT/build/amiberry-testhd-$TAG"
     "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
         "$EXE" "$STAGE/devs" "$STAGE/libs" \
         > "$ROOT/build/udpdrill-$TAG.log" 2>&1 || true

@@ -117,7 +117,7 @@ if [ "$RUNNER" = "amiberry" ]; then
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
         "$STAGE/AddNetInterface" "$STAGE/SrcProbe"
 else
-    HD="$ROOT/build/testhd-$AMINETXDUO_RUN_TAG"
+    HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
     echo "==> booting $MODEL with the A2065 on SLIRP"
     "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \

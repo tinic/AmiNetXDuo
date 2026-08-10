@@ -196,7 +196,7 @@ kill -0 "$WATCH_PID" 2>/dev/null || {
 # ------------------------------------------------------------------ run ---
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-mdns}"
-HD="$ROOT/build/testhd-$AMINETXDUO_RUN_TAG"
+HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 FSLOG="$ROOT/build/fsuae-base-$AMINETXDUO_RUN_TAG/Cache/Logs/fs-uae.log.txt"
 
 echo "==> booting $MODEL with the A2065 on SLIRP"
