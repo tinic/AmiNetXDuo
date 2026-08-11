@@ -235,15 +235,11 @@ int main(int argc, char **argv)
     quiet  = (args[ARG_QUIET]  != 0) ? TRUE : FALSE;
     host   = (const char *)args[ARG_HOST];
 
-    if (args[ARG_IPV4] != 0 && args[ARG_IPV6] != 0)
+    if (!tool_arg_family(args[ARG_IPV4], args[ARG_IPV6], &family))
     {
-        tool_error("-4 and -6 cannot both be given");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
-    family = (args[ARG_IPV4] != 0) ? TOOL_AF_INET
-           : (args[ARG_IPV6] != 0) ? TOOL_AF_INET6
-                                   : TOOL_AF_UNSPEC;
 
     if (!server && host == NULL)
     {

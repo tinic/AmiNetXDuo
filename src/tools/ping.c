@@ -18,6 +18,9 @@
  *   SIZE      payload bytes. Default 56, matching other implementations.
  *   TIMEOUT   give up after this many seconds. 0, the default, means no limit.
  *   BELL      ring the console bell for each reply.
+ *   -4 / -6   pin the family the name resolves to.  Without either, the
+ *             library answers AF_UNSPEC and the selection rules pick, so on a
+ *             dual stack there is otherwise no way to ask for the other one.
  *
  * TIMEOUT limits the whole run, not one reply: the wait for an individual
  * reply is fixed at PING_REPLY_WAIT below and is not exposed.
@@ -64,7 +67,8 @@ static const char version_tag[] __attribute__((used)) =
 
 #define TEMPLATE    "-c=COUNT/K/N,-i=INTERVAL/K/N,-l=LOAD/K/N," \
                     "-n=NUMERICONLY=NUMERIC/S,-o=ONEREPLY/S,-q=QUIET/S," \
-                    "-s=SIZE/K/N,-t=TIMEOUT/K/N,BELL/S,HOST/A"
+                    "-s=SIZE/K/N,-t=TIMEOUT/K/N,BELL/S,HOST/A," \
+                    "IPV4=-4/S,IPV6=-6/S"
 
 enum
 {
@@ -78,6 +82,8 @@ enum
     ARG_TIMEOUT,
     ARG_BELL,
     ARG_HOST,
+    ARG_IPV4,
+    ARG_IPV6,
     ARG_ARGCOUNT
 };
 
@@ -266,6 +272,7 @@ static int ping_main(int argc, char **argv)
     const char     *shown;
     ToolSockAddrAny to;
     LONG            sock = -1;
+    LONG            family;
     ToolAddr        target;
     ULONG           count;
     ULONG           interval;
@@ -327,6 +334,12 @@ static int ping_main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
+    if (!tool_arg_family(args[ARG_IPV4], args[ARG_IPV6], &family))
+    {
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
     /*
      * tool_socket_open(), not tool_require_stack(): opening bsdsocket.library
      * brings the stack up, which is right here and wrong for a status command.
@@ -341,7 +354,7 @@ static int ping_main(int argc, char **argv)
     shown       = host;
     hostname[0] = '\0';
 
-    if (!tool_sock_resolve(sb, host, &target))
+    if (!tool_sock_resolve_af(sb, host, family, &target))
     {
         CloseLibrary(sb);
         FreeArgs(rda);

@@ -384,6 +384,68 @@ static void check_command(const char *name)
     free(src);
 }
 
+/* --------------------------------------------------------- the -4/-6 pair --- */
+
+/*
+ * Every command that resolves a name and then opens a socket carries
+ * `IPV4=-4/S,IPV6=-6/S`, spelled the same way in all of them, and calls
+ * tool_arg_family() to read it.  Listed rather than inferred, for the reason
+ * `commands` above is listed: a new client command has to be added here
+ * deliberately.
+ *
+ * httpd and ShowNetServices are deliberately absent.  Neither resolves a name
+ * to connect to -- for httpd the flag would say which family to BIND, for
+ * ShowNetServices which family to report a discovered service in -- so the
+ * pair would mean a third and fourth thing under the same spelling.  arp is
+ * IPv4 by definition.
+ */
+static const char *const family_commands[] = {
+    "fetch", "host", "iperf", "nc", "ping", "sntp", "telnet", "tftp",
+    "traceroute", "whois",
+};
+
+#define FAMILY_COUNT ((int)(sizeof(family_commands) / \
+                            sizeof(family_commands[0])))
+
+static void check_family(const char *name)
+{
+    char  path[512];
+    char *src;
+    char  tmpl[1024];
+    const char *p;
+
+    snprintf(path, sizeof(path), "%s/src/tools/%s.c",
+             AMINETXDUO_SOURCE_DIR, name);
+
+    src = slurp(path);
+    CHECK(src != NULL, "%s: cannot read %s", name, path);
+    if (src == NULL)
+        return;
+
+    p = strstr(src, "#define TEMPLATE");
+    tmpl[0] = '\0';
+    if (p != NULL)
+        (void)read_template(p, tmpl, sizeof(tmpl));
+
+    /*
+     * The exact spelling, not "somewhere there is a -4".  nc and iperf set it
+     * and the rest match them; a command that wrote `-4=IPV4` would parse the
+     * same and read differently in every `?` line and every piece of
+     * documentation.
+     */
+    CHECK(strstr(tmpl, "IPV4=-4/S,IPV6=-6/S") != NULL,
+          "%s: template has no IPV4=-4/S,IPV6=-6/S: \"%s\"", name, tmpl);
+
+    CHECK(strstr(src, "ARG_IPV4") != NULL && strstr(src, "ARG_IPV6") != NULL,
+          "%s: template carries the pair but the enum does not", name);
+
+    /* One refusal for "both given", worded in toolsock.c and nowhere else. */
+    CHECK(strstr(src, "tool_arg_family(") != NULL,
+          "%s: does not read the pair through tool_arg_family()", name);
+
+    free(src);
+}
+
 int main(void)
 {
     int i;
@@ -392,6 +454,9 @@ int main(void)
 
     for (i = 0; i < COMMAND_COUNT; i++)
         check_command(commands[i]);
+
+    for (i = 0; i < FAMILY_COUNT; i++)
+        check_family(family_commands[i]);
 
     printf("\n%d commands, %d checks, %d failure(s)\n",
            COMMAND_COUNT, checks, failures);

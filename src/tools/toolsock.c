@@ -800,47 +800,30 @@ static BOOL tool_resolve_old(struct Library *base, const char *host,
     return TRUE;
 }
 
-BOOL tool_sock_resolve_af(struct Library *base, const char *host, LONG want,
-                          ToolAddr *out)
+/* "IPv4"/"IPv6" and "-4"/"-6" for a pinned family, for the messages below. */
+static const char *tool_family_name(LONG want)
 {
-    char          unbracketed[TOOL_ADDR_STRLEN];
+    return (want == TOOL_AF_INET6) ? "IPv6" : "IPv4";
+}
+
+static const char *tool_family_flag(LONG want)
+{
+    return (want == TOOL_AF_INET6) ? "-6" : "-4";
+}
+
+/*
+ * One getaddrinfo(), no output.  Returns 0 with *out filled, or the EAI_ code.
+ * An answer with nothing usable in it counts as EAI_NONAME: the caller only
+ * distinguishes "not found" from "try again".
+ */
+static LONG tool_gai_try(struct Library *base, const char *host, LONG want,
+                         BOOL literal, ToolAddr *out)
+{
     ToolAddrInfo  hints;
     ToolAddrInfo *list = NULL;
     ToolAddrInfo *ai;
-    ULONG         address = 0;
-    BOOL          literal;
+    LONG          rc;
     BOOL          got = FALSE;
-
-    host = tool_host_unbracket(host, unbracketed, sizeof(unbracketed));
-
-    if (want != TOOL_AF_INET6 && ami_config_parse_ip(host, &address))
-    {
-        tool_addr_v4(out, address);
-        return TRUE;
-    }
-
-    literal = tool_looks_v6(host);
-
-    if (!tool_sock_have_lvo(base, 0x330UL))
-    {
-        /*
-         * No getaddrinfo in this library's table.  A name can still be looked
-         * up the old way; an IPv6 literal cannot be used at all.
-         */
-        if (!literal && want != TOOL_AF_INET6 &&
-            tool_resolve_old(base, host, out))
-            return TRUE;
-
-        if (literal)
-            tool_no_ipv6(base, host);
-        else
-        {
-            tool_error("cannot resolve \"%s\"", (LONG)host);
-            tool_explain_resolve(host, AMI_NET_ERR_NONAME);
-        }
-
-        return FALSE;
-    }
 
     hints.ai_flags     = literal ? TOOL_AI_NUMERICHOST : 0;
     hints.ai_family    = want;
@@ -851,7 +834,8 @@ BOOL tool_sock_resolve_af(struct Library *base, const char *host, LONG want,
     hints.ai_canonname = NULL;
     hints.ai_next      = NULL;
 
-    if (tool_sock_getaddrinfo(base, host, NULL, &hints, &list) == 0)
+    rc = tool_sock_getaddrinfo(base, host, NULL, &hints, &list);
+    if (rc == 0)
     {
         /* The library orders IPv6 first, so the first usable answer wins. */
         for (ai = list; ai != NULL && !got; ai = ai->ai_next)
@@ -865,7 +849,96 @@ BOOL tool_sock_resolve_af(struct Library *base, const char *host, LONG want,
         tool_sock_freeaddrinfo(base, list);
     }
 
-    if (got)
+    return (rc == 0 && !got) ? (LONG)TOOL_EAI_NONAME : rc;
+}
+
+BOOL tool_sock_family_absent(struct Library *base, const char *host, LONG want)
+{
+    ToolAddr other;
+    LONG     alt;
+
+    if (want == TOOL_AF_UNSPEC)
+        return FALSE;
+
+    alt = (want == TOOL_AF_INET) ? TOOL_AF_INET6 : TOOL_AF_INET;
+
+    return (BOOL)(tool_gai_try(base, host, alt, FALSE, &other) == 0);
+}
+
+VOID tool_sock_say_no_family(const char *host, LONG want)
+{
+    tool_error("%s has no %s address, and %s was given",
+               (LONG)host, (LONG)tool_family_name(want),
+               (LONG)tool_family_flag(want));
+}
+
+BOOL tool_sock_resolve_af(struct Library *base, const char *host, LONG want,
+                          ToolAddr *out)
+{
+    char          unbracketed[TOOL_ADDR_STRLEN];
+    ULONG         address = 0;
+    BOOL          literal;
+    LONG          rc;
+
+    host = tool_host_unbracket(host, unbracketed, sizeof(unbracketed));
+
+    literal = tool_looks_v6(host);
+
+    if (ami_config_parse_ip(host, &address))
+    {
+        if (want == TOOL_AF_INET6)
+        {
+            tool_error("%s is an IPv4 address, and -6 was given",
+                       (LONG)host);
+            return FALSE;
+        }
+
+        tool_addr_v4(out, address);
+        return TRUE;
+    }
+
+    if (literal && want == TOOL_AF_INET)
+    {
+        tool_error("%s is an IPv6 address, and -4 was given", (LONG)host);
+        return FALSE;
+    }
+
+    if (!tool_sock_have_lvo(base, 0x330UL))
+    {
+        /*
+         * No getaddrinfo in this library's table.  A name can still be looked
+         * up the old way; an IPv6 literal cannot be used at all, and neither
+         * can -6, because gethostbyname() only ever answers with an A.
+         */
+        if (!literal && want != TOOL_AF_INET6 &&
+            tool_resolve_old(base, host, out))
+            return TRUE;
+
+        if (literal || want == TOOL_AF_INET6)
+            tool_no_ipv6(base, host);
+        else
+        {
+            tool_error("cannot resolve \"%s\"", (LONG)host);
+            tool_explain_resolve(host, AMI_NET_ERR_NONAME);
+        }
+
+        return FALSE;
+    }
+
+    /*
+     * -6 on a machine whose stack has no IPv6 has one answer and it is not
+     * about the name.  Asked first, because otherwise every such run reports
+     * the name as having no AAAA, which sends the user to their DNS over a
+     * fact about their own machine.
+     */
+    if (want == TOOL_AF_INET6 && !tool_sock_have_ipv6(base))
+    {
+        tool_error("%s: no IPv6 on this machine", (LONG)host);
+        return FALSE;
+    }
+
+    rc = tool_gai_try(base, host, want, literal, out);
+    if (rc == 0)
         return TRUE;
 
     if (literal)
@@ -874,8 +947,20 @@ BOOL tool_sock_resolve_af(struct Library *base, const char *host, LONG want,
         return FALSE;
     }
 
+    /* The probe costs a second lookup, so it is only made when the first one
+       came back with a verdict.  EAI_AGAIN means nobody answered, and asking a
+       silent name server twice doubles the wait to say the same thing. */
+    if (rc == (LONG)TOOL_EAI_NONAME &&
+        tool_sock_family_absent(base, host, want))
+    {
+        tool_sock_say_no_family(host, want);
+        return FALSE;
+    }
+
     tool_error("cannot resolve \"%s\"", (LONG)host);
-    tool_explain_resolve(host, AMI_NET_ERR_NONAME);
+    tool_explain_resolve(host,
+                         (rc == (LONG)TOOL_EAI_AGAIN) ? AMI_NET_ERR_TIMEOUT
+                                                      : AMI_NET_ERR_NONAME);
 
     return FALSE;
 }
@@ -883,6 +968,21 @@ BOOL tool_sock_resolve_af(struct Library *base, const char *host, LONG want,
 BOOL tool_sock_resolve(struct Library *base, const char *host, ToolAddr *out)
 {
     return tool_sock_resolve_af(base, host, TOOL_AF_UNSPEC, out);
+}
+
+BOOL tool_arg_family(LONG four, LONG six, LONG *want)
+{
+    if (four != 0 && six != 0)
+    {
+        tool_error("-4 and -6 cannot both be given");
+        return FALSE;
+    }
+
+    *want = (four != 0) ? TOOL_AF_INET
+          : (six  != 0) ? TOOL_AF_INET6
+                        : TOOL_AF_UNSPEC;
+
+    return TRUE;
 }
 
 UWORD tool_sock_port(struct Library *base, const char *text, const char *proto)

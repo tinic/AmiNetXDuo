@@ -106,6 +106,15 @@ typedef struct ToolAddrInfo
 
 #define TOOL_AI_NUMERICHOST 4
 
+/*
+ * The two getaddrinfo() verdicts this file acts on, from netdb.h:189.  A
+ * lookup that came back "no such name" is worth a second question; one that
+ * came back "try again" was never answered and asking twice only doubles the
+ * wait.
+ */
+#define TOOL_EAI_NONAME    -2
+#define TOOL_EAI_AGAIN     -3
+
 #define TOOL_AF_UNSPEC      0
 #define TOOL_AF_INET        2
 #define TOOL_AF_INET6      23
@@ -305,11 +314,32 @@ VOID tool_sock_addr_text(struct Library *base, const ToolSockAddrAny *sa,
  * machine has IPv6 and the name has an AAAA.  Prints the failure and returns
  * FALSE; on success nothing is printed.
  *
- * `want` is TOOL_AF_UNSPEC, or one family to insist on.
+ * `want` is TOOL_AF_UNSPEC, or one family to insist on.  Insisting says which
+ * of the two failures happened: "has no IPv6 address" when the name resolves
+ * in the other family, "cannot resolve" when it resolves in neither.  That
+ * costs a second lookup, made only on the failure path.
  */
 BOOL tool_sock_resolve_af(struct Library *base, const char *host, LONG want,
                           ToolAddr *out);
 BOOL tool_sock_resolve(struct Library *base, const char *host, ToolAddr *out);
+
+/*
+ * `IPV4=-4/S,IPV6=-6/S` out of a ReadArgs array and into a `want`.  Every
+ * client command carries the pair, so the refusal when both are given is
+ * worded once here rather than ten times.  FALSE after printing it.
+ */
+BOOL tool_arg_family(LONG four, LONG six, LONG *want);
+
+/*
+ * TRUE when `host` has no address of `want` but does have one of the other
+ * family, so a caller that did its own getaddrinfo() can tell "no AAAA" from
+ * "no such name".  Costs a lookup; ask only after one has already failed, and
+ * only when it failed with a verdict rather than a timeout.
+ */
+BOOL tool_sock_family_absent(struct Library *base, const char *host, LONG want);
+
+/* "<host> has no IPv6 address, and -6 was given", worded once. */
+VOID tool_sock_say_no_family(const char *host, LONG want);
 
 /*
  * Strip one layer of brackets from an IPv6 literal written the URL way.

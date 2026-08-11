@@ -1,11 +1,16 @@
 /*
  * whois, ask a registry what it knows about a name or an address.
  *
- *     whois QUERY/A,SERVER/K,PORT/N/K,FOLLOW/S
+ *     whois QUERY/A,SERVER/K,PORT/N/K,FOLLOW/S,IPV4=-4/S,IPV6=-6/S
  *
  *   SERVER   ask this one instead of whois.iana.org.
  *   PORT     its port. Default 43.
  *   FOLLOW   chase the referral automatically instead of printing it.
+ *   -4 / -6  pin the family the SERVER resolves to, and with FOLLOW every
+ *            server in the chain, not only the first. The query itself is a
+ *            string the registry parses and is untouched by this: `whois -6
+ *            192.0.2.1` asks over IPv6 about an IPv4 address, which is a
+ *            reasonable thing to want.
  *
  * The protocol is one line long: connect, send the query, read until the other
  * end hangs up, print what came back. RFC 3912 specifies no request format, no
@@ -29,7 +34,7 @@ const char *const tool_name = "whois";
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("whois");
 
-#define TEMPLATE    "QUERY/A,SERVER/K,PORT/N/K,FOLLOW/S"
+#define TEMPLATE    "QUERY/A,SERVER/K,PORT/N/K,FOLLOW/S,IPV4=-4/S,IPV6=-6/S"
 
 enum
 {
@@ -37,6 +42,8 @@ enum
     ARG_SERVER,
     ARG_PORT,
     ARG_FOLLOW,
+    ARG_IPV4,
+    ARG_IPV6,
     ARG_COUNT
 };
 
@@ -166,7 +173,7 @@ static BOOL whois_referral_from(const char *line, char *out, ULONG outlen)
  * left in whois_referral. RETURN_OK, or a code after printing why not.
  */
 static LONG whois_ask(struct Library *sb, const char *server, UWORD port,
-                      const char *query, BOOL *referred)
+                      LONG family, const char *query, BOOL *referred)
 {
     ToolSockAddrAny sa;
     ToolAddr        address;
@@ -179,7 +186,7 @@ static LONG whois_ask(struct Library *sb, const char *server, UWORD port,
     *referred = FALSE;
     whois_referral[0] = '\0';
 
-    if (!tool_sock_resolve(sb, server, &address))
+    if (!tool_sock_resolve_af(sb, server, family, &address))
         return RETURN_ERROR;
 
     sock = tool_sock_socket(sb, (LONG)address.ta_Family, TOOL_SOCK_STREAM, 0);
@@ -293,6 +300,7 @@ int main(int argc, char **argv)
     const char     *server;
     UWORD           port;
     BOOL            follow;
+    LONG            family;
     BOOL            referred = FALSE;
     LONG            rc;
     ULONG           hops = 0;
@@ -313,7 +321,7 @@ int main(int argc, char **argv)
     if (rda == NULL)
     {
         tool_fault(IoErr());
-        tool_usage("<name or address>",
+        tool_usage("[-4|-6] <name or address>",
                    "Asks a registry what it knows about a name or an address.");
         return RETURN_ERROR;
     }
@@ -332,6 +340,12 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
+    if (!tool_arg_family(args[ARG_IPV4], args[ARG_IPV6], &family))
+    {
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
     sb = tool_socket_open();
     if (sb == NULL)
     {
@@ -341,7 +355,7 @@ int main(int argc, char **argv)
 
     for (;;)
     {
-        rc = whois_ask(sb, server, port, query, &referred);
+        rc = whois_ask(sb, server, port, family, query, &referred);
 
         if (rc != RETURN_OK || !referred)
             break;
@@ -362,7 +376,12 @@ int main(int argc, char **argv)
         {
             tool_printf("\n");
             tool_printf("%s has the detail:\n", (LONG)next);
-            tool_printf("  whois %s SERVER %s\n", (LONG)query, (LONG)next);
+            /* The line to type next carries -4/-6 forward: a chain asked for
+               over one family is meant to stay on it. */
+            tool_printf("  whois %s%s SERVER %s\n",
+                        (LONG)((family == TOOL_AF_INET)  ? "-4 " :
+                               (family == TOOL_AF_INET6) ? "-6 " : ""),
+                        (LONG)query, (LONG)next);
             break;
         }
 

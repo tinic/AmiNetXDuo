@@ -1,7 +1,11 @@
 /*
  * sntp, set the system clock from a time server.
  *
- *     sntp SERVER/A,TIMEOUT/N/K,SHOW/S,QUIET/S
+ *     sntp SERVER/A,TIMEOUT/N/K,SHOW/S,QUIET/S,IPV4=-4/S,IPV6=-6/S
+ *
+ * -4 and -6 pin the family the server name resolves to.  Without either, the
+ * library answers AF_UNSPEC and the selection rules pick, so on a dual stack
+ * there is otherwise no way to ask a pool name for the other one.
  *
  * tls.library skips a certificate's notBefore/notAfter entirely when the
  * machine's clock is outside a plausible window (src/tlslib/tls_time.c), so an
@@ -84,7 +88,7 @@ struct LocaleBase *LocaleBase;
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("sntp");
 
-#define TEMPLATE    "SERVER/A,TIMEOUT/N/K,SHOW/S,QUIET/S"
+#define TEMPLATE    "SERVER/A,TIMEOUT/N/K,SHOW/S,QUIET/S,IPV4=-4/S,IPV6=-6/S"
 
 enum
 {
@@ -92,6 +96,8 @@ enum
     ARG_TIMEOUT,
     ARG_SHOW,
     ARG_QUIET,
+    ARG_IPV4,
+    ARG_IPV6,
     ARG_COUNT
 };
 
@@ -653,6 +659,7 @@ int main(int argc, char **argv)
     ULONG           timeout;
     BOOL            show;
     BOOL            quiet;
+    LONG            family;
     ToolAddr        target;
     LONG            sock = -1;
     SntpReply       reply;
@@ -678,12 +685,14 @@ int main(int argc, char **argv)
     args[ARG_TIMEOUT] = 0;
     args[ARG_SHOW]    = 0;
     args[ARG_QUIET]   = 0;
+    args[ARG_IPV4]    = 0;
+    args[ARG_IPV6]    = 0;
 
     rda = ReadArgs((CONST_STRPTR)TEMPLATE, args, NULL);
     if (rda == NULL)
     {
         tool_fault(IoErr());
-        tool_usage("<time server>",
+        tool_usage("[-4|-6] <time server>",
                    "The name or address of an SNTP server, e.g. pool.ntp.org.");
         return RETURN_ERROR;
     }
@@ -695,6 +704,12 @@ int main(int argc, char **argv)
 
     if (timeout == 0)
         timeout = SNTP_DEFAULT_TIMEOUT;
+
+    if (!tool_arg_family(args[ARG_IPV4], args[ARG_IPV6], &family))
+    {
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
 
     /*
      * Opening bsdsocket.library starts the network on a machine where nothing
@@ -718,7 +733,7 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    if (!tool_sock_resolve(sbase, server, &target))
+    if (!tool_sock_resolve_af(sbase, server, family, &target))
     {
         rc = RETURN_ERROR;
         goto done;
