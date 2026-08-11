@@ -624,7 +624,10 @@ int main(int argc, char **argv)
     tool_printf("traceroute to %s (%s), %lu hops max, %lu byte packets\n",
                 (LONG)host, (LONG)dotted, maxttl, packetsize);
 
-    for (ttl = 1; ttl <= maxttl && !done; ttl++)
+    /* !interrupted as well as !done: the inner loops set it and tool_break()
+       has already eaten the signal, so a ttl loop that only re-polls would
+       see nothing and carry on -- one Ctrl-C ending one hop. */
+    for (ttl = 1; ttl <= maxttl && !done && !interrupted; ttl++)
     {
         ToolAddr last_shown;            /* the address already printed      */
         BOOL  shown = FALSE;
