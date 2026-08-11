@@ -504,17 +504,34 @@ chmod 755 "$SS"
 
 # -------------------------------------------------------- the peer's server --
 #
-# Under a `timeout` on the far side: killing the local ssh does not kill what
-# it started there, and a server that outlives its run holds the port, so the
-# next run mounts the previous run's process.
+# BY PID, FROM A FILE THE PEER WRITES, and never `pkill -f`.  `pkill -f
+# smb2-testserver-<tag>` matches the command line of the very shell that is
+# about to start the server, because that name is in it: the first version of
+# this killed its own remote shell before python ran, left an empty log and a
+# port nothing was listening on, and read as a server that would not start.
+# tests/perf/peercap.sh:108-111 says the same thing about the same mistake.
+#
+# The `timeout` on the far side is the other half: killing the local ssh does
+# not kill what it started there, so a server with no ceiling of its own
+# outlives its run, holds the port, and the next run mounts it.
 
 SRV_PID=""
 REMOTE_PY=""
+REMOTE_PID="/tmp/smb2-testserver-$TAG.pid"
+REMOTE_LOG="/tmp/smb2-testserver-$TAG.log"
 stop_server() {
     [ -n "$SRV_PID" ] && kill -TERM "$SRV_PID" 2>/dev/null
-    [ -n "$REMOTE_PY" ] && ssh -o ConnectTimeout=10 "$PEERHOST" \
-        "pkill -f '[s]mb2-testserver-$TAG' 2>/dev/null; rm -f $REMOTE_PY" \
-        >/dev/null 2>&1
+    if [ -n "$REMOTE_PY" ]; then
+        # What the server thought, brought back before it is deleted: when a
+        # mount fails it is the other half of the transcript, and libsmb2's
+        # complaint is usually in it.
+        scp -q "$PEERHOST:$REMOTE_LOG" "$ROOT/build/smb-$TAG-server.log" \
+            2>/dev/null || true
+        ssh -o ConnectTimeout=10 "$PEERHOST" \
+            "[ -f $REMOTE_PID ] && kill \$(cat $REMOTE_PID) 2>/dev/null; \
+             rm -f $REMOTE_PY $REMOTE_PID $REMOTE_LOG; exit 0" \
+            >/dev/null 2>&1
+    fi
     SRV_PID=""; REMOTE_PY=""
     return 0
 }
@@ -524,7 +541,7 @@ if [ -n "$PEERHOST" ]; then
     scp -q "$ROOT/tests/tools/smb2-testserver.py" "$PEERHOST:$REMOTE_PY" || {
         echo "cannot copy the server to $PEERHOST" >&2; exit 2; }
     # impacket is what it is written against, and a peer without it fails at
-    # import time inside a background ssh, which would read here as a share
+    # import time inside a detached process, which would read here as a share
     # that refused the mount.  Ask first.
     ssh -o ConnectTimeout=10 "$PEERHOST" \
         "PYTHONPATH=\${AMINETXDUO_PYTHONPATH:-\$HOME/py-impacket} \
@@ -533,24 +550,19 @@ if [ -n "$PEERHOST" ]; then
              "impacket for its python3.  Install it, or point" \
              "AMINETXDUO_PYTHONPATH there at a tree that has it." >&2
         stop_server; exit 2; }
-    ssh -o ConnectTimeout=10 "$PEERHOST" \
-        "pkill -f '[s]mb2-testserver-$TAG' 2>/dev/null; \
-         PYTHONPATH=\${AMINETXDUO_PYTHONPATH:-\$HOME/py-impacket} \
-         timeout $((TIMEOUT + 120)) python3 $REMOTE_PY $PEERPORT" \
-        > "$ROOT/build/smb-$TAG-server.log" 2>&1 &
-    SRV_PID=$!
     trap stop_server EXIT INT TERM HUP
-    for _ in $(seq 1 20); do
-        if ssh -o ConnectTimeout=10 "$PEERHOST" \
-               "exec 3<>/dev/tcp/127.0.0.1/$PEERPORT" >/dev/null 2>&1; then
-            break
-        fi
-        sleep 1
-    done
     ssh -o ConnectTimeout=10 "$PEERHOST" \
-        "exec 3<>/dev/tcp/127.0.0.1/$PEERPORT" >/dev/null 2>&1 || {
+        "nohup env PYTHONPATH=\${AMINETXDUO_PYTHONPATH:-\$HOME/py-impacket} \
+             timeout $((TIMEOUT + 120)) python3 $REMOTE_PY $PEERPORT \
+             > $REMOTE_LOG 2>&1 & \
+         echo \$! > $REMOTE_PID" >/dev/null 2>&1 || {
+        echo "cannot start the server on $PEERHOST" >&2; exit 2; }
+    srv_up() { ssh -o ConnectTimeout=10 "$PEERHOST" \
+                   "exec 3<>/dev/tcp/127.0.0.1/$PEERPORT" >/dev/null 2>&1; }
+    for _ in $(seq 1 20); do srv_up && break; sleep 1; done
+    srv_up || {
         echo "the server never came up on $PEERHOST:$PEERPORT:" >&2
-        cat "$ROOT/build/smb-$TAG-server.log" >&2
+        ssh -o ConnectTimeout=10 "$PEERHOST" "cat $REMOTE_LOG" >&2 2>/dev/null
         exit 2; }
     echo "==> serving RETRO from $PEERHOST on $PEERADDR:$PEERPORT"
 fi
