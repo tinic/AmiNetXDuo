@@ -233,6 +233,61 @@ UWORD   slot;
     return(TX_FALSE);
 }
 
+/*
+ * The same, waited for.
+ *
+ * Configuring an address does not finish it.  RFC 4862 5.4 has the address
+ * TENTATIVE while duplicate address detection runs, and NetX Duo runs it off
+ * the IP thread: _nx_icmpv6_perform_DAD() sends the probes on the one-second
+ * periodic and promotes the address one periodic after the last of them.
+ * AddInterfaceTagList() deliberately does not sit over that -- waiting for it
+ * charged the Startup-Sequence two seconds an address and bought a log line --
+ * so it returns with the link-local still TENTATIVE and DAD still running.
+ *
+ * A caller that reads the state the instant configuration returns therefore
+ * sees TENTATIVE whatever the stack does, which is not a finding about the
+ * stack.  What is a finding is whether DAD ever finishes, so the wait is
+ * bounded by what the RFC costs and not by an arbitrary patience: one periodic
+ * per DupAddrDetectTransmits probe, one more for 5.4.5's RetransTimer after
+ * the last, and one of slack for a periodic that has just been missed.
+ */
+#define T_DAD_BUDGET_TICKS \
+    (((ULONG)NX_IPV6_DAD_TRANSMITS + 2UL) * (ULONG)NX_IP_PERIODIC_RATE)
+
+static UINT t_await_linklocal(UWORD index, ULONG *ticks_out)
+{
+
+ULONG   waited =  0;
+
+    while (!t_has_linklocal(index))
+    {
+        if (waited >= T_DAD_BUDGET_TICKS)
+        {
+            t_log("  duplicate address detection did not finish in %ld ticks",
+                  T_DAD_BUDGET_TICKS);
+
+            if (ticks_out != NULL)
+            {
+                *ticks_out =  waited;
+            }
+
+            return(TX_FALSE);
+        }
+
+        tx_thread_sleep(1);
+        waited++;
+    }
+
+    t_log("  duplicate address detection finished in %ld ticks", waited);
+
+    if (ticks_out != NULL)
+    {
+        *ticks_out =  waited;
+    }
+
+    return(TX_TRUE);
+}
+
 static VOID t_setstr(char *dst, ULONG size, const char *src)
 {
 
@@ -297,9 +352,13 @@ LONG            rc;
         return;
     }
 
-    (VOID)t_check(t_has_linklocal(0),
-                  "the re-added interface has a usable fe80::/64 address",
-                  0UL);
+    {
+        ULONG waited =  0;
+
+        (VOID)t_check(t_await_linklocal(0, &waited),
+                      "the re-added interface reaches a usable fe80::/64 "
+                      "address", waited);
+    }
 
     (VOID)netstack_interface_up(0);
 }
@@ -312,6 +371,7 @@ ULONG            addr[4];
 ULONG            prefix =  0;
 ULONG            state  =  0;
 ULONG            linklocal[4];
+ULONG            dad_ticks =  0;
 UINT             have_linklocal =  TX_FALSE;
 UINT             status;
 UWORD            slot;
@@ -333,6 +393,16 @@ UWORD            slot;
     }
 
     /* ---- what address configuration produced ---------------------------- */
+
+    /*
+     * Ahead of the listing, or the listing reports a race.  Bring-up hands the
+     * link-local over TENTATIVE and lets duplicate address detection run on
+     * the IP thread, so how far along it is when this test gets its first
+     * cycle depends on how long everything before it took: on a bridged link
+     * DHCP and a router advertisement cover the second DAD needs, on SLIRP
+     * they are answered instantly and do not.
+     */
+    (VOID)t_await_linklocal(0, &dad_ticks);
 
     t_log("interface 0 IPv6 addresses:");
 
@@ -358,6 +428,18 @@ UWORD            slot;
             linklocal[2] =  addr[2];
             linklocal[3] =  addr[3];
             have_linklocal =  TX_TRUE;
+
+            /*
+             * RFC 4291 2.5.1: the low 64 bits are the interface identifier, so
+             * an interface's link-local is a /64.  nxd_ipv6_address_set() is
+             * asked for one by being passed a prefix length of 10 and keeps
+             * that 10, which is fe80::/10, the 2.5.6 allocation the address
+             * comes out of and not the address's own prefix.  Reporting the
+             * stored value put /10 on the ShowNetStatus line while the global
+             * address above it read /64 correctly.
+             */
+            (VOID)t_check((UINT)(prefix == 64UL),
+                          "the link-local is reported as a /64", prefix);
         }
         else if ((addr[0] & 0xE0000000UL) == 0x20000000UL)
         {
@@ -369,7 +451,7 @@ UWORD            slot;
     }
 
     (VOID)t_check(have_linklocal,
-                  "interface 0 has a usable fe80::/64 address", 0UL);
+                  "interface 0 has a usable fe80::/64 address", dad_ticks);
 
     /* ---- the two legs that need nothing but us -------------------------- */
 
