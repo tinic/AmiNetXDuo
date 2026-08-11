@@ -70,17 +70,28 @@ export function csiTo7Bit(s: string): string {
 }
 
 /*
- * The mirror of it does not exist yet, and this is the note for when it does.
+ * And the mirror of it, which now has a reader.
  *
- * Nothing is rewritten on the way OUT: a DOS pipe reads bytes and a Shell
- * reads lines, so what leaves here is exactly what was typed.  A real console
- * handler on the far side would want the other half -- an AmigaOS CON:
- * expects its cursor keys as 0x9B A, the 8-bit form, and a browser produces
- * ESC [ A -- so char-at-a-time against a console will need ESC [ turned back
- * into 0x9B before it is sent.  That is the exact inverse of the function
- * above and belongs beside it.  It is absent rather than written and unused
- * because nothing on the far side reads a cursor key today.
+ * An AmigaOS program in RAW mode expects its cursor keys as 0x9B 'A', the
+ * 8-bit form: Ed reads a keystroke and compares it against 0x9B before it
+ * looks at anything else, and the standard keymap is what produces that byte.
+ * A browser produces ESC '['.  So in RAW mode -- and ONLY in raw mode -- the
+ * two-byte introducer is folded back into the one the far side is written
+ * against.
+ *
+ * ONLY IN RAW MODE, because in cooked mode nothing on the far side reads an
+ * escape sequence at all and a lone 0x9B typed into a Shell command line is a
+ * character it would have to quote.
+ *
+ * A bare ESC with nothing after it is left alone: it is Escape, the key, and
+ * it is not an introducer.  This runs over what one keystroke produced, so
+ * the '[' is either in the same string or was never coming.
  */
+const CSI7 = /\u001B\[/g;
+
+export function csiTo8Bit(s: string): string {
+  return s.indexOf("\u001B[") < 0 ? s : s.replace(CSI7, "\u009B");
+}
 
 export type WireState =
   | "connecting"
@@ -90,6 +101,8 @@ export type WireState =
 
 export interface WireHandlers {
   onText: (s: string) => void;
+  /* A word from the server: see the vocabulary in src/tools/httpterm.h. */
+  onWord: (w: string) => void;
   onState: (state: WireState, detail: string) => void;
 }
 
@@ -105,14 +118,23 @@ export class Wire {
     return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
   }
 
-  /* The endpoint is the page's own path, upgraded in place: whatever address
-     the terminal was served from is the address the socket goes to, so there
-     is nothing to configure and nothing to get wrong when the lease changes. */
-  connect(): void {
+  /*
+   * The endpoint is the page's own path, upgraded in place: whatever address
+   * the terminal was served from is the address the socket goes to, so there
+   * is nothing to configure and nothing to get wrong when the lease changes.
+   *
+   * `take` appends ?take=1, which is the server's word for "give me the
+   * terminal even though somebody has it".  A query parameter rather than a
+   * header because a browser cannot put a header on a WebSocket handshake,
+   * and rather than a subprotocol because a subprotocol has to be echoed in
+   * the 101 and this is a request, not a dialect.
+   */
+  connect(take = false): void {
     if (this.ws !== null && this.ws.readyState <= WebSocket.OPEN) return;
 
     const scheme = location.protocol === "https:" ? "wss://" : "ws://";
-    const ws = new WebSocket(scheme + location.host + location.pathname);
+    const ws = new WebSocket(scheme + location.host + location.pathname +
+                             (take ? "?take=1" : ""));
     ws.binaryType = "arraybuffer";
     this.ws = ws;
 
@@ -122,11 +144,22 @@ export class Wire {
 
     ws.onopen = () => { opened = true; this.h.onState("open", ""); };
 
+    /*
+     * WHICH FRAME IS WHICH, AND WHY THE OPCODE IS ENOUGH
+     *
+     *   Binary is the Shell's output and always was.  Text is the word channel
+     *   -- and the server sent NO text frames at all before this existed, so
+     *   there is no ambiguity to resolve and no sentinel to prefix: a text
+     *   frame from the server is a word, by construction.  The reverse
+     *   direction has always been the same shape (`break`, `eof`), so both
+     *   ends now read the same rule.
+     */
     ws.onmessage = (e: MessageEvent) => {
-      const s = typeof e.data === "string"
-        ? e.data
-        : fromLatin1(e.data as ArrayBuffer);
-      this.h.onText(csiTo7Bit(s));
+      if (typeof e.data === "string") {
+        this.h.onWord(e.data);
+        return;
+      }
+      this.h.onText(csiTo7Bit(fromLatin1(e.data as ArrayBuffer)));
     };
 
     /*
@@ -158,19 +191,31 @@ export class Wire {
     }
   }
 
-  /* Keystrokes.  Binary, always. */
-  keys(text: string): void {
-    if (this.open) this.ws!.send(toLatin1(text));
+  /*
+   * Keystrokes.  Binary, always.
+   *
+   * `raw` says which introducer the far side is expecting -- see csiTo8Bit()
+   * above.  It is passed in rather than kept here because the mode belongs to
+   * the session and this class owns the socket, not the session.
+   */
+  keys(text: string, raw = false): void {
+    if (this.open) this.ws!.send(toLatin1(raw ? csiTo8Bit(text) : text));
   }
 
   /*
    * The other channel.  Ctrl-C on an Amiga is a signal and not a byte -- a
    * console handler turns the key into SIGBREAKF_CTRL_C -- so there is no
-   * in-band way to send one down a pipe.  The server reads exactly two words
-   * out of a text frame, and keystrokes never go as text, so the two cannot
-   * be confused.
+   * in-band way to send one.  Keystrokes never go as text, so the two cannot
+   * be confused.  The vocabulary, both directions, is in src/tools/httpterm.h.
    */
-  word(w: "break" | "eof"): void {
+  word(w: string): void {
     if (this.open) this.ws!.send(w);
+  }
+
+  /* How big this window is.  A word rather than a header because it changes
+     while the session is up, and the far side has a program in it that may
+     ask at any moment. */
+  size(cols: number, rows: number): void {
+    if (cols > 0 && rows > 0) this.word("size " + cols + " " + rows);
   }
 }

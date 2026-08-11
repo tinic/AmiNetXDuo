@@ -24,31 +24,39 @@ const $ = (id: string) => document.getElementById(id)!;
 /* ------------------------------------------------------------ the input -- */
 
 /*
- * WHICH SIDE EDITS THE LINE.  A MODE, NOT AN ASSUMPTION.
+ * WHICH SIDE EDITS THE LINE.  THE SERVER SAYS.
  *
- *   line   readline and local echo here; one binary frame per LINE.  This is
- *          the only mode that works against what the server is TODAY: the far
- *          side is a DOS pipe, nothing on it echoes and nothing edits, so a
- *          client that did neither would show you an empty screen while you
- *          typed.
+ *   line   readline and local echo here; one binary frame per LINE.  What a
+ *          COOKED console would be doing on the far side, done here instead
+ *          because the far side is across a LAN and an echoed byte would
+ *          cross it twice before the letter appeared.
  *
  *   char   nothing here echoes, edits or interprets: every keystroke the
  *          terminal component produces goes down the same binary frames as
- *          the bytes it already is.  This is what a real AmigaOS console
- *          handler on the far side needs -- raw mode, its own echo, cursor
- *          keys, Ed and More -- and it needs no change to the protocol,
- *          because the protocol was always bytes.
+ *          the bytes it already is.  This is RAW, and it is what ssh's
+ *          password prompt, Ed and More ask the console for.
  *
- * ?input=char selects it.  It is a real switch and not a note in a comment,
- * so the day the far side grows a console the client is already there; today
- * it is also the honest way to see what the pipe does with a keystroke.
+ * IT USED TO BE ?input=char AND A NOTE SAYING "ONE DAY".  IT IS NOW NEGOTIATED
+ *
+ *   The far side is a console handler and answers ACTION_SCREEN_MODE, so it
+ *   KNOWS which mode it is in and says so: `mode raw` / `mode cooked` on the
+ *   word channel, once when the session opens and then on every change.  A
+ *   query parameter could never have fixed the password prompt, because the
+ *   program that wants the echo off is chosen after the page has loaded.
+ *
+ *   ?input= is kept as an OVERRIDE and nothing else: it pins the mode and
+ *   ignores the server, which is how you look at what one side is doing
+ *   without the other side moving.  Absent, which is the normal case, the
+ *   server drives.
  */
 type InputMode = "line" | "char";
 
-const INPUT: InputMode =
-  new URLSearchParams(location.search).get("input") === "char"
-    ? "char"
-    : "line";
+const PINNED: InputMode | null = (() => {
+  const q = new URLSearchParams(location.search).get("input");
+  return q === "char" ? "char" : q === "line" ? "line" : null;
+})();
+
+let input: InputMode = PINNED ?? "line";
 
 const term = new Terminal({
   theme: THEME,
@@ -88,19 +96,45 @@ const line = new LineEditor(term, {
 
 const wire = new Wire({
   onText: (s) => line.write(s),
+  onWord: (w) => heard(w),
   onState: (state, detail) => setState(state, detail),
 });
 
 /*
  * The one fork.  In char mode the keystroke goes to the socket as the bytes
  * xterm.js already made of it -- arrows, function keys, Del, Help, Ctrl-
- * anything -- with nothing here reading it first.  Ctrl-C is the exception
- * and is described below.
+ * anything -- with nothing here reading it first, except that ESC [ becomes
+ * the 8-bit CSI the far side's programs are written against.  Ctrl-C is the
+ * other exception and is described below.
  */
 term.onData((d: string) => {
-  if (INPUT === "line") line.input(d);
-  else wire.keys(d);
+  if (input === "line") line.input(d);
+  else wire.keys(d, true);
 });
+
+/*
+ * A word from the server.  The vocabulary is in src/tools/httpterm.h and the
+ * rule for one that is not below is to ignore it: that is what lets either
+ * side learn a new word without the other having to.
+ */
+function heard(w: string): void {
+  if (w === "mode raw" || w === "mode cooked") {
+    if (PINNED !== null) return;      /* ?input= wins, deliberately */
+    setInput(w === "mode raw" ? "char" : "line");
+  }
+}
+
+/*
+ * Switch modes.  The editor is stood down or up as part of it: it is what
+ * draws the input line, and a line left drawn while the far side has started
+ * reading keystrokes one at a time is a line on the screen that nothing will
+ * ever submit.
+ */
+function setInput(next: InputMode): void {
+  if (next === input) return;
+  input = next;
+  line.setEnabled(wire.open && input === "line");
+}
 
 /*
  * What the browser keeps, and it is only what the browser has to keep.
@@ -120,7 +154,7 @@ term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
   if (e.key === "c" && term.hasSelection()) return false;
   if (e.key === "v") return false;
   if (e.key === "a" && e.metaKey) return false;      /* macOS select all */
-  if (e.key === "c" && INPUT === "char") { wire.word("break"); return false; }
+  if (e.key === "c" && input === "char") { wire.word("break"); return false; }
   return true;
 });
 
@@ -145,6 +179,28 @@ const WORDS: Record<WireState, string> = {
 const REFUSED =
   "no session -- the terminal takes one at a time, and something else has it";
 
+const REFUSED_AGAIN =
+  REFUSED + ".  Take it: the button, or add ?take=1";
+
+/*
+ * ONE AUTOMATIC RETRY AFTER A REFUSAL, AND WHY EXACTLY ONE.
+ *
+ * A session whose browser vanished with the network -- no close frame, no
+ * FIN -- used to hold the terminal for ever, and the only cure was restarting
+ * the machine.  The server now lets go of a session that has stopped
+ * answering its pings, but it lets go DURING the refusal: the Shell is on its
+ * way out when the 503 is written, so the answer to the next ask is the one
+ * that works.  Retrying once turns that into "the page just connects".
+ *
+ * Once, and not a loop: a terminal genuinely held by somebody else refuses
+ * every time, and a page that kept asking would be a page hammering a 14 MHz
+ * machine on behalf of a person who has gone to lunch.  The second refusal is
+ * shown, with the way to insist.
+ */
+const RETRY_MS = 1500;
+let retried = false;
+let retryTimer = 0;
+
 function setState(state: WireState, detail: string): void {
   const live = state === "open";
 
@@ -158,13 +214,41 @@ function setState(state: WireState, detail: string): void {
 
   /* In char mode the editor never draws, so it is never enabled: the far
      side owns the cursor from the first keystroke. */
-  line.setEnabled(live && INPUT === "line");
+  line.setEnabled(live && input === "line");
+
+  /*
+   * A new session starts COOKED unless the query pinned it, and the server
+   * says so as its first word.  Resetting here as well is what covers a
+   * RECONNECT into a session that was left in raw mode: the word arrives
+   * either way, but between the socket opening and it arriving the page
+   * would otherwise still be in the last session's mode.
+   */
+  if (!live && PINNED === null) input = "line";
+
+  /* And the size, first thing, so a program that asks before anybody types
+     gets the real answer rather than the 80x25 default. */
+  if (live) wire.size(size.cols, size.rows);
+
+  if (live) retried = false;
+
+  /*
+   * The retry, before anything is drawn about it.  A refusal that the server
+   * answered by releasing a dead session is a refusal that will not happen
+   * again, and telling somebody about it and then succeeding is worse than
+   * not telling them.
+   */
+  if (state === "refused" && !retried) {
+    retried = true;
+    clearTimeout(retryTimer);
+    retryTimer = setTimeout(() => wire.connect(), RETRY_MS);
+    return;
+  }
 
   if (state === "closed" || state === "refused") {
     /* Said in the terminal and not only in the bar, because the bar is at the
        top and the eye is at the bottom.  Enter is the fastest way back. */
     line.notice("\u001B[38;5;244m[" +
-                (state === "refused" ? REFUSED
+                (state === "refused" ? REFUSED_AGAIN
                                      : detail || "the session ended") +
                 " -- Enter or Reconnect to try again]\u001B[0m\r\n");
   }
@@ -172,20 +256,34 @@ function setState(state: WireState, detail: string): void {
   if (live) term.focus();
 }
 
-function connect(): void {
+function connect(take = false): void {
   term.focus();
-  wire.connect();
+  retried = false;
+  wire.connect(take);
 }
 
 brkEl.onclick = () => {
   term.focus();
   /* Through the editor in line mode, so the half-typed line goes with it
      and the ^C is drawn; straight to the wire when there is no editor. */
-  if (INPUT === "line") line.input("\u0003");
+  if (input === "line") line.input("\u0003");
   else wire.word("break");
 };
 eofEl.onclick = () => { term.focus(); wire.word("eof"); };
-againEl.onclick = () => { wire.disconnect(); connect(); };
+/*
+ * Reconnect, and TAKE IT when the last answer was a refusal.
+ *
+ * One button rather than two.  A person pressing Reconnect after being told
+ * somebody else has the terminal is asking for the terminal, and offering
+ * them a second button to mean it is a distinction that exists only in the
+ * server.  After a plain close it is an ordinary reconnect and takes nothing.
+ */
+againEl.onclick = () => {
+  const take = wordEl.textContent !== null &&
+               wordEl.textContent.indexOf("refused") === 0;
+  wire.disconnect();
+  connect(take);
+};
 ($("clear") as HTMLButtonElement).onclick = () => { term.focus(); line.clear(); };
 
 /* ------------------------------------------------------------- the size -- */
@@ -200,22 +298,23 @@ function refit(): void {
 }
 
 /*
- * How big the window is, kept where somebody can reach it.
+ * How big the window is, and the far side is told.
  *
- * A DOS pipe has no window size, so nothing is sent today: the far side
- * formats for whatever it always formats for, and the columns here are only
- * how much of that fits without wrapping.  A console handler DOES have one --
- * it is what makes More paginate and Ed use the whole screen -- so this is
- * the one place that learns the new size, and the one place a frame carrying
- * it would be sent from.  Reading it back off the component at the time
- * would work; having it arrive as an event is what makes the send a line
- * rather than a search.
+ * A console has a size and programs ask it for one -- it is what makes Ed use
+ * the whole screen -- so every change goes down the wire as it happens.  Sent
+ * from HERE, off the component's own event, rather than read back at the
+ * moment somebody wants it: the event is the only thing that knows the
+ * browser's font finished loading and the box reflowed.
+ *
+ * Not throttled.  Dragging a window edge produces a handful of these, each
+ * one under twenty bytes, on a socket that carries a Shell's output.
  */
 let size = { cols: term.cols, rows: term.rows };
 
 term.onResize((s) => {
   size = { cols: s.cols, rows: s.rows };
   $("size").textContent = size.cols + "x" + size.rows;
+  wire.size(size.cols, size.rows);
 });
 
 new ResizeObserver(refit).observe($("term"));
