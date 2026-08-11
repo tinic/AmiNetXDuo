@@ -200,13 +200,27 @@ fi
 # problem; the disk ones are.
 WBLIBS="${AMINETXDUO_WBLIBS:-}"
 if [ -n "$WBLIBS" ] && [ -d "$WBLIBS" ]; then
-    for lib in "$WBLIBS"/*.library; do
-        [ -f "$lib" ] || continue
-        # Never over ours: bsdsocket.library is the whole point of the run.
-        [ -f "$STAGE/libs/$(basename "$lib")" ] && continue
-        cp -f "$lib" "$STAGE/libs/"
-    done
+    # -n so ours are never overwritten; bsdsocket.library is the point of the
+    # run.  All of them rather than a chosen few: tools/demo.sh records why,
+    # which is that picking them out one at a time is how an evening goes.
+    cp -n "$WBLIBS"/*.library "$STAGE/libs/" 2>/dev/null || true
     chmod -R u+rw "$STAGE/libs"
+fi
+
+# vim, if the asset store has it: the most demanding thing the console runs.
+# Staged exactly as tools/demo.sh stages it, including ENV:VIM -- with that
+# unset vim derives its path from the binary name, AmigaDOS reads "vim" as a
+# volume, and the machine asks you to insert volume vim: in any drive.
+EXTRA_DRAWERS=()
+VIMBIN="${AMINETXDUO_WSCONSOLE_VIM:-$HOME/amiga-assets/apps/vim-9.1/vim}"
+HAVE_VIM=no
+if [ -f "$VIMBIN" ]; then
+    cp -f "$VIMBIN" "$STAGE/c/vim"
+    chmod u+rwx "$STAGE/c/vim"
+    mkdir -p "$STAGE/s/vim" "$STAGE/env"
+    printf 'S:vim' > "$STAGE/env/VIM"
+    EXTRA_DRAWERS=("$STAGE/s" "$STAGE/env")
+    HAVE_VIM=yes
 fi
 
 # An ssh identity, so the drill can actually LOG IN.
@@ -263,7 +277,7 @@ set +e
     -t "$WINDOW" \
     -a "DH0:Public $GUESTPORT TERMINAL=DH0:terminal.html TRACE" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
-    "$STAGE/terminal.html" "$STAGE/c" \
+    "$STAGE/terminal.html" "$STAGE/c" "${EXTRA_DRAWERS[@]}" \
     ${HAVE_SSHKEY:+$([ "$HAVE_SSHKEY" = yes ] && echo "$STAGE/sshkey")} \
     > "$ROOT/build/wsconsole-emu.log" 2>&1 &
 RUNNER=$!
@@ -453,6 +467,7 @@ AMINETXDUO_WSCONSOLE_MORE="$HAVE_MORE" \
 AMINETXDUO_WSCONSOLE_SSH="$([ "$SSHD" = ok ] && echo yes || echo no)" \
 AMINETXDUO_WSCONSOLE_SSHD_PORT="$SSHD_PORT" \
 AMINETXDUO_WSCONSOLE_SSHKEY="$HAVE_SSHKEY" \
+AMINETXDUO_WSCONSOLE_VIM="$HAVE_VIM" \
 AMINETXDUO_WSCONSOLE_HOST="$([ "$BACKEND" = slirp ] && echo 10.0.2.2 || \
     ip -4 -o addr show "$BACKEND" 2>/dev/null | awk '{print $4}' | cut -d/ -f1)" \
 python3 -u "$ROOT/tests/tools/wsterm-console.py" "$TARGET_ADDR" "$TARGET_PORT" \

@@ -176,6 +176,18 @@ BOOL  http_term_raw(VOID);
 const char *http_term_mode_word(VOID);
 VOID        http_term_mode_sent(VOID);
 
+/*
+ * The write/frame counters, when the page has asked for them with `stats`.
+ *
+ * They answer the one question the far end cannot: how many ACTION_WRITE
+ * packets a program sent to produce the frames that arrived.  That ratio is
+ * what says whether slowness is structural -- a frame and a round trip per
+ * `move the cursor, print three characters` -- or is the guest simply being a
+ * 68020.  Same peek-then-take pair as the mode word.
+ */
+const char *http_term_stats_word(VOID);
+VOID        http_term_stats_sent(VOID);
+
 /* How big the page says its window is.  Zero in either is ignored: a terminal
    component mid-layout reports it, and a program told it has no columns
    divides by it. */
