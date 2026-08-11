@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<!--
+  TEMPLATE.  The file that ships is src/tools/web/terminal.html, which is this
+  with the stylesheets and the script inlined into it by tools/web/build.mjs.
+  Editing the built file is editing something that will be overwritten.
+
+  iso-8859-1 is declared and meant: AmigaDOS output is Latin-1, and while the
+  page's own text is ASCII, the charset is what the browser also applies to
+  anything typed into it before we get our hands on it.
+
+  SPDX-License-Identifier: MIT
+-->
+<html lang="en">
+<head>
+<meta charset="iso-8859-1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>AmigaDOS</title>
+<!--
+  Inline, because a browser asks for /favicon.ico whether or not anybody
+  wanted one, and the machine it would ask is a 68020 that has to answer 404
+  to it.  One data: URI and the request never happens.
+-->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230d1017'/%3E%3Cpath d='M3 4.5 6.5 8 3 11.5' stroke='%235f8fd6' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M8.5 11.5h4.5' stroke='%23f0a423' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>/*STYLE*/</style>
+</head>
+<body>
+<div id="bar">
+  <span id="who"><b>AmigaDOS</b><span id="host"></span></span>
+  <span id="keys">
+    <button id="brk"   type="button" title="Ctrl-C, as a signal to the Shell">Break</button>
+    <button id="eof"   type="button" title="Ctrl-D, end of input">EOF</button>
+    <button id="clear" type="button" title="Ctrl-L">Clear</button>
+    <button id="again" type="button">Reconnect</button>
+  </span>
+  <span id="state"><i id="dot"></i><span id="word">connecting</span></span>
+</div>
+<div id="term"></div>
+<script type="module">/*SCRIPT*/</script>
+</body>
+</html>
