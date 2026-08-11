@@ -1,0 +1,135 @@
+# Where every on-Amiga harness runs, and what runs it.
+#
+# tools/check-harnesses.sh reads this and fails when a harness under tests/ or
+# install/test/ is missing from it, when a row names a file that is gone, when
+# a row claims a runner that does not invoke it, or when a row says `manual`
+# for something a runner does invoke.  tools/ci.sh runs that check in the host
+# stage, so it costs no emulator and no ROM.
+#
+# It exists because tests/tools/httpd-drill.py held twelve real WebDAV
+# assertions that no script and no CI stage ever called, and nothing in the
+# tree could tell that from a test that runs.  dist/make-dist.sh already
+# refuses to pack a command that is built and listed nowhere; this is the same
+# rule for harnesses.
+#
+# FORMAT
+#
+#   <path> : <runner> : <note>
+#
+# <runner> is one of
+#
+#   a file path      that file invokes it.  Checked: the path must appear in
+#                    that file on a line that is not a comment.
+#   chained:<path>   another harness invokes it.  That harness must itself
+#                    have a row, and the chain must end at a runner.
+#   manual           nothing invokes it.  <note> must say why, and the check
+#                    fails if a runner does invoke it after all, so a row
+#                    cannot go stale in the quiet direction.
+#
+# A `manual` row is a coverage hole with a reason, not a resolved question.
+# The reason codes are:
+#
+#   peer      needs a second machine that can open a connection INTO the guest
+#   bridged   needs the runner to be on a LAN it may bridge onto
+#   bench     a measurement, not a pass/fail gate; there is nothing to go red
+#   asset     needs something not ours to ship: a third-party client, a
+#             licensed Workbench, another vendor's stack
+#   windows   WinUAE, so a Windows host
+#   UNWIRED   nothing prevents it running where the rest of tier 2 runs.
+#             It simply has no home.  This is the list that should shrink.
+
+# ---------------------------------------------------------------- tier 1 --
+
+# Nothing here yet: every harness below needs an emulator.
+
+# --------------------------------------------------- invoked by a runner --
+
+install/test/run-workbench.sh      : .github/workflows/emulator.yml : the release archive on a real Workbench 3.1
+tests/conformance/run-fsuae.sh     : .github/workflows/emulator.yml : the bsdsocktest conformance suite
+tests/ipv6/run-socket-fsuae.sh     : .github/workflows/emulator.yml : the AF_INET6 socket surface, RFC 3542
+tests/tls/run-tls13.sh             : .github/workflows/emulator.yml : a TLS 1.3 handshake, on both CPU arms
+tests/tools/run-addifup.sh         : .github/workflows/emulator.yml : AddNetInterface comes back
+tests/tools/run-hostname-mac.sh    : .github/workflows/emulator.yml : two unnamed machines take two names
+tests/tools/run-hostname.sh        : .github/workflows/emulator.yml : hostname across its whole surface
+tests/tools/run-ifconfigure.sh     : .github/workflows/emulator.yml : ConfigureNetInterface, static half
+tests/tools/run-ifdhcp.sh          : .github/workflows/emulator.yml : ConfigureNetInterface, DHCP half
+tests/tools/run-ifremove.sh        : .github/workflows/emulator.yml : RemoveNetInterface across its surface
+tests/tools/run-iperf.sh           : .github/workflows/emulator.yml : iperf, byte counts against a peer
+tests/tools/run-mdnsctl.sh         : .github/workflows/emulator.yml : the responder switched on and off
+tests/tools/run-netsetup.sh        : .github/workflows/emulator.yml : NetSetup writes a usable configuration
+tests/tools/run-onoff.sh           : .github/workflows/emulator.yml : Online and Offline
+tests/tools/run-quiet.sh           : .github/workflows/emulator.yml : what QUIET means, everywhere
+tests/tools/run-shownetservices.sh : .github/workflows/emulator.yml : ShowNetServices and its window
+install/test/run-all.sh            : tools/lint-guest-arch.sh       : every installer scenario in order
+tests/compare/run-compare.sh       : tools/emurun.sh                : the same workload on another stack
+
+# ------------------------------------------------- nothing invokes these --
+#
+# UNWIRED first: these need a ROM and a2065.device and nothing else, which is
+# exactly what the emulator tier already has.  Twenty of them call themselves
+# the regression test for a named defect that shipped.
+
+tests/tools/run-livetools.sh       : manual : UNWIRED. the regression test for "the command says the network is down while it is up" (v0.2.0 shipped ping, netstat and ShowNetStatus with their live paths dead)
+tests/tools/run-checkconfig.sh     : manual : UNWIRED. the regression test for "the configuration is wrong and nothing says so"
+tests/tools/run-dnscache.sh        : manual : UNWIRED. the regression test for the DNS answer cache
+tests/tools/run-dnssearch.sh       : manual : UNWIRED. the regression test for short names and the search list
+tests/tools/run-arexx.sh           : manual : UNWIRED. the AmiTCP ARexx host
+tests/tools/run-routes.sh          : manual : UNWIRED. the regression test for the IPv4 routing table; AddNetRoute and DeleteNetRoute have no other home
+tests/tools/run-ifquery.sh         : manual : UNWIRED. the Roadshow interface and statistics APIs
+tests/tools/run-ifreadd.sh         : manual : UNWIRED. AddInterfaceTagList() gives back an interface that works
+tests/tools/run-cycledrill.sh      : manual : UNWIRED. open/expunge/reopen and online/offline
+tests/tools/run-srcsel.sh          : manual : UNWIRED. outbound source selection
+tests/tools/run-oommsg.sh          : manual : UNWIRED. out of memory, and which message blames what
+tests/tools/run-resolvebreak.sh    : manual : UNWIRED. how long a name lookup blocks, and whether Ctrl-C gets it back
+tests/tools/run-mcastrace.sh       : manual : UNWIRED. two openers racing for one row of the multicast table
+tests/tools/run-evpost.sh          : manual : UNWIRED. a socket event signalled at a Task that has exited
+tests/tools/run-apidrill.sh        : manual : UNWIRED. the whole-vector-surface leak drill
+tests/tools/run-addifleak.sh       : manual : UNWIRED. AddNetInterface kept the machine's memory
+tests/tools/run-dns.sh             : manual : UNWIRED. the resolver API
+tests/tools/run-tcphandler.sh      : manual : UNWIRED. the TCP: handler
+tests/clients/run-fsuae.sh         : manual : UNWIRED. the client access-pattern test
+tests/concurrent/run-concurrent.sh : manual : UNWIRED. eight applications, each with its own library open
+tests/libraries/run-fsuae.sh       : manual : UNWIRED. the shared-library load test
+tests/stack/run-stack.sh           : manual : UNWIRED. the API called from the stack a Shell command has
+tests/leak/run-leak.sh             : manual : UNWIRED. the refused-connect leak
+tests/netstack/run-fsuae.sh        : manual : UNWIRED. netstack bring-up
+tests/netstack/run-amiberry.sh     : manual : UNWIRED. netstack bring-up, Amiberry
+tests/netstack/run-dhcp3927.sh     : manual : UNWIRED. the DHCP lifecycle and the RFC 3927 fallback
+tests/netstack/run-fitzquery.sh    : manual : UNWIRED. the regression test for "the machine cannot see its own share"
+tests/tcpdrill/run-tcpdrill.sh     : manual : UNWIRED. the tcpdrill scripts
+tests/udpdrill/run-udpdrill.sh     : manual : UNWIRED. the UDP receive path
+tests/sockopt/run-fsuae.sh         : manual : UNWIRED. the socket-option test
+tests/ipv6/run-fsuae.sh            : manual : UNWIRED. the IPv6 link test
+tests/ipv6/run-tools-fsuae.sh      : manual : UNWIRED. the shipped commands over IPv6; nslookup, NetTrace, traceroute and whois have no other home at all
+tests/ipv6/run-bringup.sh          : manual : UNWIRED. how long the network takes to become usable, IPv6 included
+tests/tls/run-api.sh               : manual : UNWIRED. a real HTTPS URL through tls.library
+tests/tls/run-fetch.sh             : manual : UNWIRED. the fetch command against real URLs
+tests/tls/run-https.sh             : manual : UNWIRED. the real-HTTPS handshake
+tests/tls/run-hangup.sh            : manual : UNWIRED. can a rude peer take the machine down
+
+# Reasons other than "no home".
+
+tests/tools/run-nettools.sh        : manual : peer. nc, telnet, tftp and whois against tests/tools/netpeer.py, with a port forwarded back in
+tests/tools/run-family.sh          : manual : peer, bridged. -4 and -6 on a guest that really has both; SLIRP carries no IPv6
+tests/tools/run-mdns.sh            : manual : peer, bridged. the responder watched from another machine
+tests/tools/run-sntp.sh            : manual : peer. sntp, and what setting the clock does to certificate checking
+tests/tools/run-toolleak.sh        : manual : peer, bridged. the leak sweep for the whole command set
+tests/tools/run-httpd.sh           : manual : peer, bridged. httpd on the LAN for real WebDAV clients; a transcript, not a verdict
+tests/tools/run-wsterm.sh          : manual : peer, bridged. the websocket terminal and the WebDAV drill
+tests/tools/run-wsconsole.sh       : manual : peer, bridged. the console as opposed to the pipe
+tests/ipv6/run-rdnss.sh            : manual : bridged. a router advertisement's resolver reaching the resolver
+tests/trace/run-trace.sh           : manual : peer, bridged. packet-trace from both ends at once
+tests/bebboget/run-bebboget.sh     : manual : asset, peer. bebboget, a third-party client
+tests/bebbossh/run-bebbossh.sh     : manual : asset, peer. BebboSSH; the only harness that runs an ssh client at all
+tests/compare/run-legacy-client.sh : manual : asset, bridged. an unmodified third-party Amiga client
+tests/compare/run-tickprobe.sh     : manual : asset, bench. another stack's periodic-timer rate
+tests/conformance/run-winuae.sh    : manual : windows. the conformance suite under WinUAE
+tests/ipv6/run-tools-winuae.sh     : manual : windows. ping and traceroute over IPv6 under WinUAE
+tests/netstack/run-winuae.sh       : manual : windows. netstack bring-up under WinUAE
+tests/perf/run-fitzbench.sh        : manual : bench, bridged. bulk throughput on a link with latency
+tests/perf/run-stackprof.sh        : manual : bench, bridged. the same transfer against another stack
+tests/endurance/run-endurance.sh   : manual : bench. hours of synthetic socket traffic
+tests/endurance/run-fitz.sh        : manual : bench. hours of Fitz traffic
+tests/soak/run-fitz-soak.sh        : manual : bench. hours of Fitz, Amiga on both ends
+tests/stress/run-fitzstress.sh     : manual : bench, bridged. four-process Fitz stress against a real server
+tests/tls/run-resume.sh            : manual : bench. TLS session resumption, measured

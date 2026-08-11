@@ -256,13 +256,27 @@ stage_host() {
     # an assertion of its that stopped firing would be invisible here; these
     # selftests drive the graders against transcripts that stand for runs
     # nobody can produce on demand.
-    local st
-    for st in tests/tools/addifup-verdict-selftest.sh; do
-        if "$st" > "$BUILD/$(basename "$st" .sh).log" 2>&1; then
-            note "$(basename "$st"): $(sed -n 's/^.*selftest: //p' \
-                  "$BUILD/$(basename "$st" .sh).log")"
+    # And that every harness has a home, and that the home is real.  A test
+    # nothing invokes reads exactly like a test that passes.
+    if tools/check-harnesses.sh > "$BUILD/check-harnesses.log" 2>&1; then
+        note "harnesses: $(sed -n 's/^harnesses_wired=/wired /p' \
+              "$BUILD/check-harnesses.log")$(sed -n 's/^harnesses_manual=/, manual /p' \
+              "$BUILD/check-harnesses.log")$(sed -n 's/^harnesses_unwired=/, of those unwired /p' \
+              "$BUILD/check-harnesses.log")"
+    else
+        cat "$BUILD/check-harnesses.log"
+        fail "tests/HARNESSES does not match the tree (tools/check-harnesses.sh)"
+        return 1
+    fi
+
+    local st log
+    for st in tests/tools/*-verdict-selftest.sh; do
+        [ -x "$st" ] || continue
+        log="$BUILD/$(basename "$st" .sh).log"
+        if "$st" > "$log" 2>&1; then
+            note "$(basename "$st"): $(sed -n 's/^.*selftest: //p' "$log")"
         else
-            cat "$BUILD/$(basename "$st" .sh).log"
+            cat "$log"
             fail "$st"
             return 1
         fi
