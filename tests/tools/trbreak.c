@@ -40,7 +40,9 @@
  *   key=value, one per line, and an exit code:
  *
  *     0  the command exited within CEILING of the break
- *     5  it did not
+ *     5  it did not, OR it had already finished when the break was sent, which
+ *        is `result=vacuous` and means the command line was too short to
+ *        interrupt -- not a pass, because nothing was put to the question
  *    10  it could not be run at all
  *
  * SPDX-License-Identifier: MIT
@@ -216,6 +218,24 @@ int main(int argc, char **argv)
 
     sent = tb_ticks();
     Printf((CONST_STRPTR)"break_sent_at=%ld\n", (LONG)((sent - start) / 50UL));
+
+    /*
+     * Was there anything to interrupt?  A command that had already finished
+     * would be reported as having honoured a break it never saw, which is the
+     * one way this probe could pass while proving nothing.  It is a property
+     * of the command line -- too few hops, too short a timeout -- so it is
+     * reported as such and not as a pass.
+     */
+    if ((SetSignal(0UL, 0UL) & TB_CHILD_GONE) != 0)
+    {
+        Printf((CONST_STRPTR)"alive_at_break=no\n");
+        Printf((CONST_STRPTR)"result=vacuous\n");
+        UnLoadSeg(seg);
+        FreeArgs(rda);
+        return RETURN_WARN;
+    }
+
+    Printf((CONST_STRPTR)"alive_at_break=yes\n");
 
     Signal((struct Task *)child, SIGBREAKF_CTRL_C);
 
