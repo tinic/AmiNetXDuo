@@ -271,6 +271,11 @@ arms() {
 # line instead of leaving twelve failures to be interpreted.
 dns/aaaa|0|SYS:nslookup $DUAL TYPE=AAAA TIMEOUT 15|+$V6RE
 dns/a|0|SYS:nslookup $DUAL TYPE=A TIMEOUT 15|+$V4RE
+# The interface again, tens of seconds after bring-up.  A router advertisement
+# arrives on its own schedule and duplicate-address detection takes a moment
+# after it, so this is where a global IPv6 address is expected to be visible if
+# this wire is going to produce one at all.
+net/settled|0|SYS:ShowNetStatus ALL|+address6
 # The picture first: without either flag, whatever selection chooses.  Recorded
 # and not asserted -- which family wins there is a separate question, and this
 # file is about what happens when the user has said which one they want.
@@ -437,14 +442,18 @@ CHECKS=0
 FAILURES=0
 BLOCKED=0
 
-# The guest's own global IPv6 address, out of the ShowNetStatus block.  Not a
-# link-local, and not one still finishing duplicate-address detection: nothing
-# may be sent from a tentative address, so a command that answers over IPv4
-# from one is right to.
+# The guest's own global IPv6 address.  Not a link-local, and not one still
+# finishing duplicate-address detection: nothing may be sent from a tentative
+# address, so a command that answers over IPv4 from one is right to.
+#
+# The WHOLE transcript, not one block.  A global address arrives when a router
+# advertisement does, which is after bring-up and not during it, and the
+# command list therefore samples the interface a second time further down.
+# Reading only the first sample called a guest address-less that had one twenty
+# seconds later.
 guest_global_v6() {
-    block "SYS:ShowNetStatus ALL" |
-        awk '$1 == "address6" && $2 !~ /^fe80:/ && $0 !~ /\(tentative\)/ \
-             { print $2; exit }'
+    awk '$1 == "address6" && $2 !~ /^fe80:/ && $0 !~ /\(tentative\)/ \
+         { print $2; exit }' "$REPORT"
 }
 
 # An arm that cannot mean anything without that address.
