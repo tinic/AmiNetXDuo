@@ -51,7 +51,10 @@ typedef enum
     IF_KEY_ADDRESS6,
     IF_KEY_GATEWAY6,
     IF_KEY_CONFIGURE6,
-    IF_KEY_MDNS
+    IF_KEY_MDNS,
+    IF_KEY_DOWNGOESOFFLINE,
+    IF_KEY_REQUIRESINITDELAY,
+    IF_KEY_HARDWAREADDRESS
 } IfKey;
 
 static const struct IfKeyword
@@ -75,6 +78,9 @@ ami_if_keywords[] =
     { "configure",          IF_KEY_CONFIGURE },
     { "iptype",             IF_KEY_IPTYPE    },
     { "state",              IF_KEY_STATE     },
+    { "downgoesoffline",    IF_KEY_DOWNGOESOFFLINE   },
+    { "requiresinitdelay",  IF_KEY_REQUIRESINITDELAY },
+    { "hardwareaddress",    IF_KEY_HARDWAREADDRESS   },
 
     /*
      * IPv6. Roadshow has no IPv6 keywords, no Amiga stack has ever had IPv6
@@ -113,15 +119,20 @@ ami_if_keywords[] =
     { "debug",              IF_KEY_IGNORED   },
     { "pointtopoint",       IF_KEY_IGNORED   },
     { "multicast",          IF_KEY_IGNORED   },
-    { "downgoesoffline",    IF_KEY_IGNORED   },
     { "reportoffline",      IF_KEY_IGNORED   },
-    { "requiresinitdelay",  IF_KEY_IGNORED   },
     { "copymode",           IF_KEY_IGNORED   },
     { "filter",             IF_KEY_IGNORED   },
-    { "hardwareaddress",    IF_KEY_IGNORED   },
     { "alias",              IF_KEY_IGNORED   },
     { "destination",        IF_KEY_IGNORED   },
     { "destinationaddr",    IF_KEY_IGNORED   },
+    /* Roadshow's own AddNetInterface template spells the alias
+       DESTINATION=DESTINATIONADDRESS and its ConfigureNetInterface spells it
+       DESTINATION=DESTINATIONADDR, so both are here.  These three were
+       missing entirely, which made a stock Roadshow interface file report
+       three unknown keywords -- the opposite of what this list is for. */
+    { "destinationaddress", IF_KEY_IGNORED   },
+    { "hardwaretype",       IF_KEY_IGNORED   },
+    { "broadcastaddress",   IF_KEY_IGNORED   },
     { "metric",             IF_KEY_IGNORED   },
     { "lease",              IF_KEY_IGNORED   },
     { "dhcpunicast",        IF_KEY_IGNORED   },
@@ -277,6 +288,73 @@ static VOID report_unknown_keyword(ULONG line, const char *key,
 }
 
 /* "bad ADDRESS '10.0.0.300'" + whatever the keyword's own advice is. */
+
+/*
+ * A Roadshow keyword we read and do nothing with.
+ *
+ * Silence was the old behaviour and it was the wrong one: a user who wrote
+ * ALIAS= or METRIC= got no error, no effect and nothing to read, which is
+ * indistinguishable from a keyword that worked.  Saying so needs a reporter
+ * installed, so the stack at boot still says nothing and CheckNetConfig --
+ * whose whole job is to read the files and say what is wrong with them --
+ * prints one line per keyword with the reason it is inert.
+ *
+ * The reason is per keyword because "unsupported" is not actionable and
+ * "your card cannot do this" is.
+ */
+static const struct { const char *key; const char *why; } cfg_inert_keys[] =
+{
+    { "alias",             "a second address on one interface is not supported" },
+    { "arptype",           "this stack is Ethernet only, and ARPTYPE names another link type" },
+    { "hardwaretype",      "this stack is Ethernet only, and HARDWARETYPE names another link type" },
+    { "broadcastaddress",  "the broadcast address is derived from ADDRESS and NETMASK" },
+    { "destinationaddress","point-to-point links are not supported" },
+    { "copymode",          "the copy mode is taken from what the driver reports it can do" },
+    { "debug",             "the driver's own debug output is not switched from here" },
+    { "destination",       "point-to-point links are not supported" },
+    { "destinationaddr",   "point-to-point links are not supported" },
+    { "dhcpunicast",       "DHCP renewal is always broadcast here" },
+    { "filter",            "there is no packet filter to give rules to" },
+    { "iprequests",        "the number of queued requests is fixed" },
+    { "arprequests",       "the number of queued requests is fixed" },
+    { "writerequests",     "the number of queued requests is fixed" },
+    { "lease",             "the lease time asked for is the server's to choose" },
+    { "linkstatuscommand", "nothing is run when the link changes" },
+    { "metric",            "routes have no metric here, so interfaces cannot be ordered by one" },
+    { "multicast",         "multicast is asked for when something joins a group, not from here" },
+    { "pointtopoint",      "point-to-point links are not supported" },
+    { "pri",               "routes have no metric here, so interfaces cannot be ordered by one" },
+    { "priority",          "routes have no metric here, so interfaces cannot be ordered by one" },
+    { "reportoffline",     "an interface going offline is always reported" },
+    { NULL, NULL }
+};
+
+static VOID report_inert_keyword(ULONG line, const char *key)
+{
+    char text[160];
+    LONG i;
+
+    if (!ami_cfg_problems_wanted())
+        return;
+
+    for (i = 0; cfg_inert_keys[i].key != NULL; i++)
+    {
+        if (ami_cfg_stricmp(key, cfg_inert_keys[i].key) == 0)
+        {
+            ami_cfg_join3(text, sizeof(text), key,
+                          " is read and does nothing: ",
+                          cfg_inert_keys[i].why);
+            ami_cfg_problem(line, AMI_CFG_PROBLEM_WARN, text,
+                            "Roadshow acts on it; this stack does not.  The "
+                            "line is harmless and can stay.");
+            return;
+        }
+    }
+
+    /* NAMESERVER and DOMAIN in an interface file: handled elsewhere, not
+       inert, and saying they do nothing would be wrong. */
+}
+
 static VOID report_bad_value(ULONG line, UWORD severity, const char *keyword,
                              const char *value, const char *hint)
 {
@@ -649,6 +727,64 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 }
                 break;
 
+            /*
+             * Roadshow's DOWNGOESOFFLINE. The field it sets has existed since
+             * the interface API landed and is set by IFA_DownGoesOffline, but
+             * the config-file keyword that is supposed to set it was on the
+             * ignored list, so `Offline eth0` sent S2_OFFLINE when a program
+             * asked and never when the file did.
+             */
+            case IF_KEY_DOWNGOESOFFLINE:
+                if (!ami_cfg_parse_bool(value, &out->down_goes_offline))
+                {
+                    AMI_WARN("config: %s: bad DOWNGOESOFFLINE '%s'",
+                             out->name, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
+                                     "DOWNGOESOFFLINE", value,
+                                     "DOWNGOESOFFLINE is YES or NO.  NO was "
+                                     "assumed.");
+                    out->down_goes_offline = FALSE;
+                }
+                break;
+
+            /*
+             * A second between opening the device and the first packet.
+             * Roadshow defaults this to YES and names the original Ariadne;
+             * ours defaults to NO, because a second at every bring-up is a
+             * high price on every card for the sake of the one that needs it.
+             */
+            case IF_KEY_REQUIRESINITDELAY:
+                if (!ami_cfg_parse_bool(value, &out->requires_init_delay))
+                {
+                    AMI_WARN("config: %s: bad REQUIRESINITDELAY '%s'",
+                             out->name, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
+                                     "REQUIRESINITDELAY", value,
+                                     "REQUIRESINITDELAY is YES or NO.  NO was "
+                                     "assumed.");
+                    out->requires_init_delay = FALSE;
+                }
+                break;
+
+            /* The address to configure the card with, "xx:xx:xx:xx:xx:xx". */
+            case IF_KEY_HARDWAREADDRESS:
+                if (ami_cfg_parse_mac(value, out->hw_address))
+                {
+                    out->have_hw_address = TRUE;
+                }
+                else
+                {
+                    AMI_WARN("config: %s: bad HARDWAREADDRESS '%s'",
+                             out->name, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
+                                     "HARDWAREADDRESS", value,
+                                     "HARDWAREADDRESS is six hexadecimal "
+                                     "bytes, as in 02:00:00:12:34:56.  The "
+                                     "card's own address was kept.");
+                    out->have_hw_address = FALSE;
+                }
+                break;
+
             case IF_KEY_STATE:
                 if (ami_cfg_stricmp(value, "up") == 0 ||
                     ami_cfg_stricmp(value, "online") == 0)
@@ -735,6 +871,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
 
             case IF_KEY_IGNORED:
                 AMI_DEBUG("config: %s: ignoring %s=%s", out->name, key, value);
+                report_inert_keyword(lineno, key);
                 break;
 
             case IF_KEY_UNKNOWN:

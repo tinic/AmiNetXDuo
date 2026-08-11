@@ -447,6 +447,49 @@ BOOL ami_cfg_parse_ulong(const char *s, ULONG *out)
     return TRUE;
 }
 
+/*
+ * Six hexadecimal bytes, for HARDWAREADDRESS.
+ *
+ * Colons, hyphens or nothing between them, because all three are written in
+ * the wild and refusing two of them would be refusing a correct address on a
+ * technicality. Exactly six: a short one is a typo, and a long one is not an
+ * Ethernet address.
+ */
+BOOL ami_cfg_parse_mac(const char *s, UBYTE *out)
+{
+    ULONG i;
+
+    if (s == NULL || out == NULL)
+        return FALSE;
+
+    for (i = 0; i < AMI_CFG_MAC_SIZE; i++)
+    {
+        ULONG byte = 0;
+        int   digits;
+
+        if (i > 0 && (*s == ':' || *s == '-'))
+            s++;
+
+        for (digits = 0; digits < 2; digits++)
+        {
+            char c = *s;
+            ULONG nibble;
+
+            if (c >= '0' && c <= '9')       nibble = (ULONG)(c - '0');
+            else if (c >= 'a' && c <= 'f')  nibble = (ULONG)(c - 'a' + 10);
+            else if (c >= 'A' && c <= 'F')  nibble = (ULONG)(c - 'A' + 10);
+            else                            return FALSE;
+
+            byte = (byte << 4) | nibble;
+            s++;
+        }
+
+        out[i] = (UBYTE)byte;
+    }
+
+    return (*s == '\0') ? TRUE : FALSE;
+}
+
 BOOL ami_cfg_parse_bool(const char *s, BOOL *out)
 {
     static const char *const yes[] = { "yes", "true", "on",  "1", NULL };

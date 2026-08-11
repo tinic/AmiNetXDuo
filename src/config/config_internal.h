@@ -147,6 +147,8 @@ BOOL ami_cfg_parse_ulong(const char *s, ULONG *out);
 
 /* YES/NO/TRUE/FALSE/ON/OFF/1/0. */
 BOOL ami_cfg_parse_bool(const char *s, BOOL *out);
+/* Six hex bytes, colon- or hyphen-separated or run together (HARDWAREADDRESS). */
+BOOL ami_cfg_parse_mac(const char *s, UBYTE *out);
 
 /*
  * Network number in /etc/networks shorthand: 1..4 dot-separated parts, the
