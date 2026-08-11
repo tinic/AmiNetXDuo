@@ -54,6 +54,9 @@
 #     0   every arm passed
 #     1   an arm failed
 #     2   infrastructure: no build, no ROM, no IPv6 on this wire, a timeout
+#     3   the GUEST came up without a usable global IPv6 address.  Its own
+#         status because it is neither of the other two: nothing is broken and
+#         nothing was proved.  See the next section.
 #
 # PROVING THE ASSERTIONS FIRE
 #
@@ -64,11 +67,37 @@
 #
 #   -V re-reads the last run's transcript without booting anything.
 #
+# THE GUEST NEEDS A GLOBAL IPv6 ADDRESS, AND IT IS NOT A GIVEN
+#
+#   Every -6 arm is asserted against the address the command printed, and that
+#   only means anything on a guest that has a global IPv6 address of its own.
+#   With nothing but a link-local, a command that answers over IPv4 is
+#   OBEYING RFC 6724 rather than ignoring the flag, so the same red row would
+#   mean the opposite thing.
+#
+#   The lab has lost its IPv6 delegation for hours at a time -- WAN_DHCP6 with
+#   no gateway, 100% loss -- and a run that straddled that reported the
+#   product as broken.  So the guest's own address is a PRECONDITION, checked
+#   out of `ShowNetStatus ALL` in the transcript before any -6 arm is judged.
+#   Without it those arms are reported `blocked`, which is neither a pass nor a
+#   failure, and the run exits 3.  A tentative address does not count: it is
+#   one duplicate-address probe short of being usable and nothing may be sent
+#   from it.
+#
+#   This is not a precaution for one bad afternoon.  That link is unreliable
+#   for IPv6, so every -6 assertion in this tree is written this way.
+#
 # A TIMEOUT IS A DEFECT
 #
 #   A run that burns its ceiling produces a partial transcript and proves
 #   nothing.  It exits 2 and names the command the transcript stops at.
 #   Raising -t is never the fix.
+#
+#   That cuts both ways for the rehearsal above: a build with the flag broken
+#   on purpose is the case most likely to hang rather than fail, because an
+#   ignored flag leaves each command doing what it was asked to do.  Every row
+#   carries a deadline for that reason, and the first rehearsal that did not
+#   sat on one command until the ceiling and reported nothing at all.
 #
 # WHAT IT NEEDS
 #
@@ -91,6 +120,7 @@ MODEL="${AMINETXDUO_FAMILY_MODEL:-A1200}"
 TIMEOUT="${AMINETXDUO_FAMILY_TIMEOUT:-420}"
 VERDICT_ONLY=0
 INJECT=""
+GUEST_V6=""
 
 # A name with an A and an AAAA, and a service on port 80 answering over both.
 DUAL="${AMINETXDUO_FAMILY_DUAL:-example.com}"
@@ -405,6 +435,25 @@ rc_of() {
 
 CHECKS=0
 FAILURES=0
+BLOCKED=0
+
+# The guest's own global IPv6 address, out of the ShowNetStatus block.  Not a
+# link-local, and not one still finishing duplicate-address detection: nothing
+# may be sent from a tentative address, so a command that answers over IPv4
+# from one is right to.
+guest_global_v6() {
+    block "SYS:ShowNetStatus ALL" |
+        awk '$1 == "address6" && $2 !~ /^fe80:/ && $0 !~ /\(tentative\)/ \
+             { print $2; exit }'
+}
+
+# An arm that cannot mean anything without that address.
+v6_dependent() {
+    case "$1" in
+        */v6|literal/v6-ping) return 0 ;;
+        *)                    return 1 ;;
+    esac
+}
 
 verdict() {
     local id="$1" verdict="$2" why="$3"
@@ -419,6 +468,9 @@ verdict() {
     CHECKS=$((CHECKS + 1))
     if [ "$verdict" = pass ]; then
         echo "$id=pass"
+    elif [ "$verdict" = blocked ]; then
+        BLOCKED=$((BLOCKED + 1))
+        echo "$id=blocked why=$why"
     else
         FAILURES=$((FAILURES + 1))
         echo "$id=fail why=$why"
@@ -429,6 +481,14 @@ judge() {
     local line id want cmd rest got body ok why field
 
     [ -f "$REPORT" ] || infra "the guest wrote no $REPORT"
+
+    GUEST_V6=$(guest_global_v6)
+    if [ -n "$GUEST_V6" ]; then
+        echo "guest/global6=$GUEST_V6"
+    else
+        echo "guest/global6=none"
+        block "SYS:ShowNetStatus ALL" | sed -n 's/^ *address6/guest\/address6=/p'
+    fi
 
     # A transcript that stops early is a timeout, not a set of failures.
     while IFS= read -r line; do
@@ -452,6 +512,14 @@ judge() {
         got=$(rc_of "$cmd")
         ok=pass
         why=""
+
+        # The precondition, ahead of the assertion rather than after it: with
+        # no global address of its own the guest answering over IPv4 is
+        # correct, so this row has nothing to say either way.
+        if [ -z "$GUEST_V6" ] && v6_dependent "$id"; then
+            verdict "$id" blocked "guest has no global IPv6 address"
+            continue
+        fi
 
         if [ "$want" != '*' ] && [ "$got" != "$want" ]; then
             ok=fail; why="rc=$got want=$want"
@@ -491,6 +559,11 @@ judge_files() {
     elif ! grep -Eq "^$V4RE" "$four"; then ok=fail; fi
     verdict "fetch/v4-body" "$ok" "$(head -c 64 "$four" 2>/dev/null | tr -d '\r\n')"
 
+    if [ -z "$GUEST_V6" ]; then
+        verdict "fetch/v6-body" blocked "guest has no global IPv6 address"
+        return
+    fi
+
     ok=pass
     if [ ! -s "$six" ]; then ok=fail
     elif ! grep -Eq "^$V6RE" "$six"; then ok=fail; fi
@@ -515,9 +588,19 @@ judge_files
 
 echo "checks=$CHECKS"
 echo "failures=$FAILURES"
-if [ "$FAILURES" -eq 0 ]; then
-    echo "result=pass"
-    exit 0
+echo "blocked=$BLOCKED"
+
+if [ "$FAILURES" -ne 0 ]; then
+    echo "result=fail"
+    exit 1
 fi
-echo "result=fail"
-exit 1
+
+if [ "$BLOCKED" -ne 0 ]; then
+    # Nothing failed, but the -6 arms were never put to the question.  Not a
+    # pass: a pass here would be read as "IPv6 works".
+    echo "result=infra-no-guest-ipv6"
+    exit 3
+fi
+
+echo "result=pass"
+exit 0
