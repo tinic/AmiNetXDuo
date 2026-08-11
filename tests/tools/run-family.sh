@@ -150,6 +150,11 @@ DUAL_V6=""
 # arms are told apart: the far end reports which family the request arrived
 # over, which is a stronger statement than anything the client could print.
 ECHO="${AMINETXDUO_FAMILY_ECHO:-icanhazip.com}"
+# A dual-stack name behind anycast whose network drops ICMPv6 time-exceeded in
+# the middle of the path.  Named rather than folded into DUAL because that is
+# the shape the "never finishes" report had, and a target that answers every
+# hop would not reproduce it.
+GOOG="${AMINETXDUO_FAMILY_GOOG:-www.google.com}"
 # The time server for the sntp arms.  2.pool.ntp.org is the pool's IPv6 half.
 NTP="${AMINETXDUO_FAMILY_NTP:-2.pool.ntp.org}"
 # A name with an A and no AAAA.  Written into the guest's DEVS:Internet/hosts,
@@ -235,6 +240,10 @@ host_preflight() {
         awk 'NR==1 && $1 !~ /^::ffff:/ {print $1}' | grep -q . ||
         infra "$ECHO has no AAAA record from this host"
 
+    getent ahostsv6 "$GOOG" 2>/dev/null |
+        awk 'NR==1 && $1 !~ /^::ffff:/ {print $1}' | grep -q . ||
+        infra "$GOOG has no AAAA record from this host"
+
     DUAL_V6="$aaaa"
 
     # Written down, because the judge has to build the same command strings the
@@ -247,6 +256,7 @@ host_preflight() {
         printf 'DUAL_V6=%s\n'     "$DUAL_V6"
         printf 'ECHO=%s\n'        "$ECHO"
         printf 'NTP=%s\n'         "$NTP"
+        printf 'GOOG=%s\n'        "$GOOG"
         printf 'V4ONLY_ADDR=%s\n' "$V4ONLY_ADDR"
     } > "$PARAMS"
 
@@ -254,6 +264,7 @@ host_preflight() {
     echo "host/v4only=$V4ONLY_NAME addr=$V4ONLY_ADDR"
     echo "host/ntp=$NTP"
     echo "host/echo=$ECHO"
+    echo "host/goog=$GOOG"
 }
 
 find_a2065() {
@@ -340,6 +351,15 @@ traceroute/v6|*|SYS:traceroute $DUAL -m 1 -q 1 -w 5 -n -6|+traceroute to $DUAL \
 # the router's ICMP time-exceeded came back to the socket.
 traceroute/v4-hop|*|SYS:traceroute $DUAL -m 3 -q 1 -w 5 -n -4|+^ 1 .*$V4RE
 traceroute/v6-hop|*|SYS:traceroute $DUAL -m 3 -q 1 -w 5 -n -6|+^ 1 .*$V6RE
+# AND IT HAS TO STOP.  rc 0 is the whole assertion: traceroute returns 0 only
+# when a hop was the destination, and 5 when it used up MAXTTL without
+# arriving.  This is the row for the report that -6 "never finishes" against
+# Google.  Measured 2026-08-10: hops 1-7 answer, 8-12 are stars because that
+# network does not send ICMPv6 time-exceeded, and hop 13 is the destination --
+# 20 s at -q 2 -w 2, about 75 s at the defaults, which is what "never
+# finishes" was.  The stars are not ours to fix; stopping at the destination
+# is, and that is what this measures.
+traceroute/v6-arrives|0|SYS:traceroute $GOOG -m 30 -q 2 -w 2 -n -6|+^ 1 .*$V6RE
 traceroute/no-aaaa|10|SYS:traceroute $V4ONLY_NAME -m 1 -q 1 -w 5 -n -6|+has no IPv6 address, and -6 was given
 traceroute/both|10|SYS:traceroute $DUAL -m 1 -q 1 -w 5 -n -4 -6|+-4 and -6 cannot both be given
 # CTRL-C HAS TO STOP IT.  Over IPv4 on purpose: the break has nothing to do
