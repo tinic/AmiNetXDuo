@@ -2,8 +2,8 @@
 #
 # A LIVE AMIGA ON THE LAN, IN ONE COMMAND.
 #
-#   tools/demo.sh [-b BUILDDIR] [-B BACKEND] [-m MODEL] [-n NAME] [-p PORT]
-#                 [-t SECONDS]
+#   tools/demo.sh [-b BUILDDIR] [-B BACKEND] [-C CMDDIR] [-m MODEL] [-n NAME]
+#                 [-p PORT] [-t SECONDS]
 #
 # Boots an emulated Amiga bridged onto the real network, running httpd with the
 # WebSocket terminal, and prints the address it leased.  For showing somebody
@@ -16,6 +16,21 @@
 # The interface is staged with MDNS=YES and the drive with a hostname, because
 # neither is a default: a demo reached only by its DHCP lease is one somebody
 # has to be told the address of again tomorrow.
+#
+# A SHELL WITH NO COMMANDS IN IT
+#
+#   The drive amiberry-run.sh builds carries httpd and nothing else, so the
+#   Shell on the far end of the terminal answers `Dir` with "Unknown command"
+#   and there is nothing to show anybody.  -C stages a commands drawer into
+#   C:, and AMINETXDUO_DEMO_C is the same thing from the environment.  Where
+#   they come from is a licensed Workbench and not ours to ship; the lab store
+#   has the ADFs and amitools' xdftool unpacks one:
+#
+#     xdftool ~/amiga-assets/adf-wb31/amiga-wb31_workbench.adf unpack /tmp/wb
+#     tools/demo.sh -C /tmp/wb/Workbench/C
+#
+#   Without it the demo still runs and the terminal still works.  It is a
+#   Shell with 0 commands instead of 81.
 #
 # BRIDGED, OR SLIRP WITH A FORWARDED PORT
 #
@@ -52,17 +67,19 @@ MODEL=A1200
 PORT=80
 WINDOW=28800
 NAME="${AMINETXDUO_DEMO_NAME:-amiga}"
+CMDS="${AMINETXDUO_DEMO_C:-}"
 
-while getopts "b:B:m:n:p:t:" opt; do
+while getopts "b:B:C:m:n:p:t:" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         B) BACKEND="$OPTARG" ;;
+        C) CMDS="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
         n) NAME="$OPTARG" ;;
         p) PORT="$OPTARG" ;;
         t) WINDOW="$OPTARG" ;;
-        *) echo "usage: $0 [-b builddir] [-B backend] [-m model] [-n name]" \
-                "[-p port] [-t seconds]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-b builddir] [-B backend] [-C cmddir]" \
+                "[-m model] [-n name] [-p port] [-t seconds]" >&2; exit 2 ;;
     esac
 done
 
@@ -116,6 +133,22 @@ EOF
 # address printed below is the only way anyone reaches it.
 echo "hostname $NAME" >> "$STAGE/devs/Internet/name_resolution"
 
+# C:, if there is one to stage.  amiberry-run.sh copies each extra argument
+# into the root of the drive it builds, and it makes C: itself for the tool
+# under test, so this goes in as a drawer of its own and is merged there.
+EXTRA_C=()
+if [ -n "$CMDS" ]; then
+    [ -d "$CMDS" ] || { echo "no such commands drawer: $CMDS" >&2; exit 2; }
+    rm -rf "$STAGE/c"
+    cp -R "$CMDS" "$STAGE/c"
+    chmod -R u+rw "$STAGE/c"
+    EXTRA_C=("$STAGE/c")
+    echo "==> staging $(ls "$STAGE/c" | wc -l | tr -d ' ') commands into C:"
+else
+    echo "==> no commands drawer (-C), the Shell will have only what httpd" \
+         "puts in C:" >&2
+fi
+
 echo "Hello from an Amiga." > "$STAGE/Public/readme.txt"
 echo "<html><body><h1>Amiga</h1><p>httpd is serving this drawer.</p></body></html>" > "$STAGE/Public/index.html"
 echo "in a drawer" > "$STAGE/Public/Docs/notes.txt"
@@ -144,7 +177,8 @@ echo "==> booting $MODEL on '$BACKEND', httpd :$PORT, window ${WINDOW}s"
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$BACKEND" -m "$MODEL" -t "$WINDOW" \
     -a "DH0:Public $PORT TERMINAL=DH0:terminal.html" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
-    "$STAGE/terminal.html" > "$ROOT/build/demo-run-$AMINETXDUO_RUN_TAG.log" 2>&1 &
+    "$STAGE/terminal.html" "${EXTRA_C[@]}" \
+    > "$ROOT/build/demo-run-$AMINETXDUO_RUN_TAG.log" 2>&1 &
 RUNNER=$!
 
 # WHERE IT ENDED UP.  Two backends, two ways of finding out.
