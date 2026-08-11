@@ -291,7 +291,7 @@
        "stops -- like 192.168.1.10.  Please try again."))
 
 (set F_OLDLIB
-  (cat "LIBS:bsdsocket.library already exists (version %ld).\n\n"
+  (cat "LIBS:bsdsocket.library already exists (version %ld.%ld).\n\n"
        "AmiNetXDuo has to replace it.  The old one will be renamed to "
        "bsdsocket.library.old, not deleted."))
 
@@ -527,8 +527,23 @@
 (set OLD_UG  (if (exists "LIBS:usergroup.library"  (noreq)) 1 0))
 (set OLD_TLS (if (exists "LIBS:tls.library"        (noreq)) 1 0))
 
+; VERSION AND REVISION, NOT VERSION ALONE.  getversion returns
+; (version << 16) | revision, and our $VER: string is "bsdsocket.library
+; 0.21.0", so the version half is 0 and dividing by 65536 printed
+; "already exists (version 0)" -- which a user reported, reasonably, as the
+; installer failing to see the version that was installed.  Roadshow and
+; AmiTCP both carry a non-zero major, so this only ever misread ours.
+;
+; Note this is NOT lib_Version, which is 4 for every AmiTCP-ABI library and
+; would tell the reader nothing about which one is on the machine.
 (set OLD_BSD_VER 0)
-(if OLD_BSD (set OLD_BSD_VER (/ (getversion "LIBS:bsdsocket.library") 65536)))
+(set OLD_BSD_REV 0)
+(if OLD_BSD
+  (
+    (set OLD_BSD_RAW (getversion "LIBS:bsdsocket.library"))
+    (set OLD_BSD_VER (/ OLD_BSD_RAW 65536))
+    (set OLD_BSD_REV (- OLD_BSD_RAW (* OLD_BSD_VER 65536)))
+  ))
 
 ; --- which driver is on this machine already? ----------------------------
 ;
@@ -884,7 +899,7 @@
 (if OLD_BSD
     (set REPLACE_LIB
       (askbool
-        (prompt (F_OLDLIB OLD_BSD_VER))
+        (prompt (F_OLDLIB OLD_BSD_VER OLD_BSD_REV))
         (help    H_REPLACELIB)
         (choices "Replace it" "Leave it alone")
         (default 1))))
