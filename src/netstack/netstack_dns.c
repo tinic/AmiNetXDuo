@@ -153,64 +153,58 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
 
     if (ns->ns_RdnssPending)
     {
+        char text[AMI_CFG_IP6_STRLEN];
+
         ns->ns_RdnssPending = FALSE;
 
-        /* Out: in the configuration, not in the advertisement. */
-        for (i = 0; i < r->nameserver6_count; )
+        /* Out: in the configuration, not in the advertisement.  Backwards, so
+           the compaction inside the withdraw does not skip an entry. */
+        for (i = r->nameserver6_count; i-- != 0; )
         {
+            ULONG gone[AMI_CFG_IP6_WORDS];
+
             for (j = 0; j < ns->ns_RdnssCount; j++)
                 if (ami_ns6_same(r->nameserver6[i],
                                  ns->ns_Rdnss[j].nxd_ip_address.v6))
                     break;
 
             if (j != ns->ns_RdnssCount)
-            {
-                i++;
                 continue;
-            }
+
+            gone[0] = r->nameserver6[i][0];
+            gone[1] = r->nameserver6[i][1];
+            gone[2] = r->nameserver6[i][2];
+            gone[3] = r->nameserver6[i][3];
+
+            if (!ami_config_nameserver6_withdraw(r, gone))
+                continue;
 
             {
-                NXD_ADDRESS gone;
-                char        text[AMI_CFG_IP6_STRLEN];
+                NXD_ADDRESS address;
 
-                gone.nxd_ip_version       = NX_IP_VERSION_V6;
-                gone.nxd_ip_address.v6[0] = r->nameserver6[i][0];
-                gone.nxd_ip_address.v6[1] = r->nameserver6[i][1];
-                gone.nxd_ip_address.v6[2] = r->nameserver6[i][2];
-                gone.nxd_ip_address.v6[3] = r->nameserver6[i][3];
+                address.nxd_ip_version       = NX_IP_VERSION_V6;
+                address.nxd_ip_address.v6[0] = gone[0];
+                address.nxd_ip_address.v6[1] = gone[1];
+                address.nxd_ip_address.v6[2] = gone[2];
+                address.nxd_ip_address.v6[3] = gone[3];
 
-                (VOID)nxd_dns_server_remove(&ns->ns_Dns, &gone);
-
-                ami_config_format_ip6(r->nameserver6[i], text, sizeof(text));
-                AMI_INFO("netstack: advertised name server %s withdrawn", text);
+                (VOID)nxd_dns_server_remove(&ns->ns_Dns, &address);
             }
 
-            for (j = (UWORD)(i + 1); j < r->nameserver6_count; j++)
-            {
-                r->nameserver6[j - 1][0] = r->nameserver6[j][0];
-                r->nameserver6[j - 1][1] = r->nameserver6[j][1];
-                r->nameserver6[j - 1][2] = r->nameserver6[j][2];
-                r->nameserver6[j - 1][3] = r->nameserver6[j][3];
-            }
-
-            r->nameserver6_count--;
+            ami_config_format_ip6(gone, text, sizeof(text));
+            AMI_INFO("netstack: advertised name server %s withdrawn", text);
         }
 
-        /* In: in the advertisement, not in the configuration. */
+        /*
+         * In: the DNS client first, and the configuration only if that worked.
+         * ShowNetStatus, ObtainDomainNameServerList() and CheckNetConfig all
+         * report from the configuration, so the two must not disagree; the
+         * DHCP path records its servers for the same reason, and this one
+         * recorded none at all, which is the visible half of this defect.
+         */
         for (i = 0; i < ns->ns_RdnssCount; i++)
         {
-            UINT status;
-            char text[AMI_CFG_IP6_STRLEN];
-
-            for (j = 0; j < r->nameserver6_count; j++)
-                if (ami_ns6_same(r->nameserver6[j],
-                                 ns->ns_Rdnss[i].nxd_ip_address.v6))
-                    break;
-
-            if (j != r->nameserver6_count)
-                continue;
-
-            status = nxd_dns_server_add(&ns->ns_Dns, &ns->ns_Rdnss[i]);
+            UINT status = nxd_dns_server_add(&ns->ns_Dns, &ns->ns_Rdnss[i]);
 
             ami_config_format_ip6(ns->ns_Rdnss[i].nxd_ip_address.v6, text,
                                   sizeof(text));
@@ -222,29 +216,8 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
                 continue;
             }
 
-            /*
-             * Record it in the configuration as well as in the DNS client, for
-             * the reason the DHCP path records its servers: ShowNetStatus and
-             * ObtainDomainNameServerList() report from the configuration, so
-             * without this the machine resolves through a server no report
-             * names, which is the whole visible half of this defect.
-             */
-            if (r->nameserver6_count >= (UWORD)AMI_CFG_MAX_NAMESERVERS)
-            {
-                AMI_WARN("netstack: no room to report name server %s", text);
-                continue;
-            }
-
-            j = r->nameserver6_count;
-
-            r->nameserver6[j][0] = ns->ns_Rdnss[i].nxd_ip_address.v6[0];
-            r->nameserver6[j][1] = ns->ns_Rdnss[i].nxd_ip_address.v6[1];
-            r->nameserver6[j][2] = ns->ns_Rdnss[i].nxd_ip_address.v6[2];
-            r->nameserver6[j][3] = ns->ns_Rdnss[i].nxd_ip_address.v6[3];
-
-            r->nameserver6_count = (UWORD)(j + 1);
-
-            AMI_INFO("netstack: advertised name server %s", text);
+            if (ami_config_nameserver6_offer(r, ns->ns_Rdnss[i].nxd_ip_address.v6))
+                AMI_INFO("netstack: advertised name server %s", text);
         }
     }
 

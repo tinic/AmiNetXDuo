@@ -997,6 +997,81 @@ BOOL ami_config_search_offer(AmiResolverConfig *res, const char *domain)
     return TRUE;
 }
 
+static BOOL cfg_ip6_same(const ULONG a[AMI_CFG_IP6_WORDS],
+                         const ULONG b[AMI_CFG_IP6_WORDS])
+{
+    return (BOOL)(a[0] == b[0] && a[1] == b[1] &&
+                  a[2] == b[2] && a[3] == b[3]);
+}
+
+BOOL ami_config_nameserver6_offer(AmiResolverConfig *res,
+                                  const ULONG addr[AMI_CFG_IP6_WORDS])
+{
+    UWORD i;
+
+    if (res == NULL || addr == NULL)
+        return FALSE;
+
+    /* :: is not a name server; NetX Duo refuses it and so does this. */
+    if (addr[0] == 0UL && addr[1] == 0UL && addr[2] == 0UL && addr[3] == 0UL)
+        return FALSE;
+
+    for (i = 0; i < res->nameserver6_count; i++)
+        if (cfg_ip6_same(res->nameserver6[i], addr))
+            return FALSE;
+
+    if (res->nameserver6_count >= (UWORD)AMI_CFG_MAX_NAMESERVERS)
+        return FALSE;
+
+    i = res->nameserver6_count;
+
+    res->nameserver6[i][0] = addr[0];
+    res->nameserver6[i][1] = addr[1];
+    res->nameserver6[i][2] = addr[2];
+    res->nameserver6[i][3] = addr[3];
+
+    res->nameserver6_count = (UWORD)(i + 1);
+
+    return TRUE;
+}
+
+BOOL ami_config_nameserver6_withdraw(AmiResolverConfig *res,
+                                     const ULONG addr[AMI_CFG_IP6_WORDS])
+{
+    UWORD i;
+    UWORD j;
+
+    if (res == NULL || addr == NULL)
+        return FALSE;
+
+    for (i = 0; i < res->nameserver6_count; i++)
+    {
+        if (!cfg_ip6_same(res->nameserver6[i], addr))
+            continue;
+
+        /* Close the gap: the order of what is left is the order the resolver
+           still asks them in. */
+        for (j = (UWORD)(i + 1); j < res->nameserver6_count; j++)
+        {
+            res->nameserver6[j - 1][0] = res->nameserver6[j][0];
+            res->nameserver6[j - 1][1] = res->nameserver6[j][1];
+            res->nameserver6[j - 1][2] = res->nameserver6[j][2];
+            res->nameserver6[j - 1][3] = res->nameserver6[j][3];
+        }
+
+        res->nameserver6_count--;
+
+        res->nameserver6[res->nameserver6_count][0] = 0UL;
+        res->nameserver6[res->nameserver6_count][1] = 0UL;
+        res->nameserver6[res->nameserver6_count][2] = 0UL;
+        res->nameserver6[res->nameserver6_count][3] = 0UL;
+
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 BOOL ami_config_search_withdraw(AmiResolverConfig *res, const char *domain)
 {
     UWORD i;

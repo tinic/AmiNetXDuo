@@ -1544,6 +1544,98 @@ static void test_ra_search_option(void)
     }
 }
 
+/*
+ * RFC 8106 5.1, the servers. This is the arithmetic the absorb step in
+ * src/netstack/netstack_dns.c performs against the DNS client: what the router
+ * names joins the reported list, what it stops naming leaves it, and a router
+ * naming more than the list holds does not cost the machine the servers that
+ * are already answering.
+ */
+static void test_ra_nameserver6(void)
+{
+    AmiResolverConfig res;
+    ULONG             a[4] = { 0x2607F598UL, 0xE1A84C00UL, 0xE63A6EFFUL,
+                               0xFE03D5BAUL };
+    ULONG             b[4] = { 0x20010DB8UL, 0, 0, 0x00000053UL };
+    ULONG             s[6][4];
+    int               i;
+
+    printf("RFC 8106 name servers\n");
+
+    memset(&res, 0, sizeof(res));
+
+    CHECK(ami_config_nameserver6_offer(&res, a) == TRUE);
+    CHECK(res.nameserver6_count == 1);
+    CHECK(res.nameserver6[0][0] == 0x2607F598UL);
+    CHECK(res.nameserver6[0][3] == 0xFE03D5BAUL);
+
+    /* Every advertisement repeats the option: the second is not a change. */
+    CHECK(ami_config_nameserver6_offer(&res, a) == FALSE);
+    CHECK(res.nameserver6_count == 1);
+
+    CHECK(ami_config_nameserver6_offer(&res, b) == TRUE);
+    CHECK(res.nameserver6_count == 2);
+
+    /* Withdrawing the first leaves the second, and its order. */
+    CHECK(ami_config_nameserver6_withdraw(&res, a) == TRUE);
+    CHECK(res.nameserver6_count == 1);
+    CHECK(res.nameserver6[0][0] == 0x20010DB8UL);
+    CHECK(res.nameserver6[0][3] == 0x00000053UL);
+
+    /* And a second withdrawal of the same address changes nothing. */
+    CHECK(ami_config_nameserver6_withdraw(&res, a) == FALSE);
+    CHECK(res.nameserver6_count == 1);
+
+    /* Four is what the list holds; the fifth is refused and the four that are
+       answering are untouched, rather than one being evicted for it. */
+    memset(&res, 0, sizeof(res));
+    for (i = 0; i < 6; i++)
+    {
+        s[i][0] = 0x20010DB8UL;
+        s[i][1] = 0UL;
+        s[i][2] = 0UL;
+        s[i][3] = (ULONG)(i + 1);
+    }
+
+    for (i = 0; i < AMI_CFG_MAX_NAMESERVERS; i++)
+        CHECK(ami_config_nameserver6_offer(&res, s[i]) == TRUE);
+
+    CHECK(res.nameserver6_count == AMI_CFG_MAX_NAMESERVERS);
+    CHECK(ami_config_nameserver6_offer(&res, s[AMI_CFG_MAX_NAMESERVERS])
+              == FALSE);
+    CHECK(res.nameserver6_count == AMI_CFG_MAX_NAMESERVERS);
+
+    for (i = 0; i < AMI_CFG_MAX_NAMESERVERS; i++)
+        CHECK(res.nameserver6[i][3] == (ULONG)(i + 1));
+
+    /* The refused one is not in the list under any reading. */
+    CHECK(ami_config_nameserver6_withdraw(&res, s[AMI_CFG_MAX_NAMESERVERS])
+              == FALSE);
+    CHECK(res.nameserver6_count == AMI_CFG_MAX_NAMESERVERS);
+
+    /* Withdrawing from the middle keeps the rest in the order the resolver
+       still asks them in, and clears the slot that fell off the end. */
+    CHECK(ami_config_nameserver6_withdraw(&res, s[1]) == TRUE);
+    CHECK(res.nameserver6_count == (UWORD)(AMI_CFG_MAX_NAMESERVERS - 1));
+    CHECK(res.nameserver6[0][3] == 1);
+    CHECK(res.nameserver6[1][3] == 3);
+    CHECK(res.nameserver6[2][3] == 4);
+    CHECK(res.nameserver6[AMI_CFG_MAX_NAMESERVERS - 1][3] == 0);
+
+    /* :: is not a name server, and neither argument may be NULL. */
+    {
+        ULONG zero[4] = { 0, 0, 0, 0 };
+
+        memset(&res, 0, sizeof(res));
+        CHECK(ami_config_nameserver6_offer(&res, zero) == FALSE);
+        CHECK(ami_config_nameserver6_offer(&res, NULL) == FALSE);
+        CHECK(ami_config_nameserver6_offer(NULL, a) == FALSE);
+        CHECK(ami_config_nameserver6_withdraw(&res, NULL) == FALSE);
+        CHECK(ami_config_nameserver6_withdraw(NULL, a) == FALSE);
+        CHECK(res.nameserver6_count == 0);
+    }
+}
+
 static void test_gateway(void)
 {
     ULONG gw;
@@ -1969,6 +2061,7 @@ int main(int argc, char **argv)
     test_search_domains();
     test_dhcp_search_option();
     test_ra_search_option();
+    test_ra_nameserver6();
     test_gateway();
     test_tcp_handler();
     test_netdb();

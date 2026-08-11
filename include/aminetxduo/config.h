@@ -344,6 +344,20 @@ BOOL ami_config_search_offer(AmiResolverConfig *res, const char *domain);
 BOOL ami_config_search_withdraw(AmiResolverConfig *res, const char *domain);
 
 /*
+ * The same pair for nameserver6[], the servers a router advertisement's RFC
+ * 8106 5.1 option names. TRUE when the list changed.
+ *
+ * Offering one already there changes nothing and returns FALSE, because every
+ * advertisement repeats the option; offering one past AMI_CFG_MAX_NAMESERVERS
+ * is refused and leaves the servers that are answering alone, rather than
+ * evicting one for a new arrival the router listed last.
+ */
+BOOL ami_config_nameserver6_offer(AmiResolverConfig *res,
+                                  const ULONG addr[AMI_CFG_IP6_WORDS]);
+BOOL ami_config_nameserver6_withdraw(AmiResolverConfig *res,
+                                     const ULONG addr[AMI_CFG_IP6_WORDS]);
+
+/*
  * RFC 3397 option 119: a run of RFC 1035 4.1.4 encoded names, root label
  * ending each one, with compression pointers taken from the start of the
  * option data. Each name decoded is handed to ami_config_search_offer().
