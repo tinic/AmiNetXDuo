@@ -268,7 +268,7 @@ jobs:
       #
       # Both were written, both went green by hand, and nothing ran either of
       # them again.  The TCP: half is skipped, loudly, where there is no peer.
-      - name: NetShutdown and the TCP: handler
+      - name: "NetShutdown and the TCP: handler"
         if: env.AMINETXDUO_A2065 != ''
         run: tools/ci.sh bridged
 
