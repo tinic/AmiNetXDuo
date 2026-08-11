@@ -9,6 +9,12 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A name with both an IPv4 and an IPv6 address is reached over IPv6 on a machine that has a working IPv6 address. The lookup for the IPv6 address was refused inside the resolver before a question ever went out, so every name came back IPv4 however the network was set up
+- `ShowNetStatus` prints a link-local address as `/64`, which is what it is, rather than `/10`
+- `AddNetInterface QUIET` in `S:User-Startup` says why a boot came up with no network. It used to swallow the missing interface file, the stack that would not start and the interface that would not come online along with the running commentary
+- `QUIET` prints errors in every command that takes it. `ConfigureNetInterface`, `RemoveNetInterface`, `NetShutdown`, `AddNetRoute`, `DeleteNetRoute`, `GetNetStatus`, `CheckNetConfig`, `hostname`, `arp` and `ShowNetServices` all used to silence their own failures with it
+- `ShowNetStatus QUIET` is gone. It suppressed two error messages and printed the whole report regardless; `GetNetStatus` answers the same questions with a return code
+
 - `httpd`'s terminal is a real AmigaOS console rather than a pipe wearing its hat. `ssh` asked it to stop echoing for a password prompt and it could not, so the password was drawn on the screen as it was typed. It stops now, `Ed WINDOW=* <file>` and `More` work, and a program that asks how big its window is gets an answer
 - The terminal can be got back. A browser that vanished with the network held it for ever and the machine had to be restarted; a session that stops answering is released for the next visitor, Reconnect takes one that is still answering, and a Shell that will not stop is let go of after five seconds
 
