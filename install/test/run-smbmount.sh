@@ -49,6 +49,8 @@
 #   a2065.device         AMINETXDUO_A2065
 #   smb2-handler         AMINETXDUO_SMB2FS, the smb2fs archive unpacked
 #   filesysbox.library   AMINETXDUO_FILESYSBOX
+#   a share to mount     -u, and tests/tools/smb2-testserver.py will serve one
+#                        from any machine on the LAN that is not this one
 #
 # Exit status: 0 the share mounted and listed, 1 it did not, 2 an ingredient
 # is missing.  A `List` that never returned is exit 1, not a timeout: the
@@ -73,8 +75,9 @@ ACTIVATE=0
 CAPTURE=0
 KEEP=0
 STACK=ours
+EXTRA=""
 
-while getopts "m:o:u:B:M:T:t:w:s:ACk" opt; do
+while getopts "m:o:u:B:M:T:t:w:s:x:ACk" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         o) OSVER="$OPTARG" ;;
@@ -87,6 +90,7 @@ while getopts "m:o:u:B:M:T:t:w:s:ACk" opt; do
         A) ACTIVATE=1 ;;
         C) CAPTURE=1 ;;
         s) STACK="$OPTARG" ;;
+        x) EXTRA="$OPTARG" ;;
         k) KEEP=1 ;;
         *) sed -n '5,9p' "$0" >&2; exit 2 ;;
     esac
@@ -248,7 +252,9 @@ fi
 # AmigaDOS 2.0 and later, not files, so only the disk commands are looked
 # for here.  The 3.1 Workbench floppy carries 50 of them and Run is not
 # among them; requiring C/Run made this exit 2 on a perfectly good tree.
-for want in C/Mount C/List C/Execute C/Wait C/Info C/Assign; do
+# `Execute` is a disk command on 3.1 and a built-in on 3.2, so it is called
+# without a C: prefix below and is not required here either.
+for want in C/Mount C/List C/Wait C/Info C/Assign; do
     [ -e "$WB/$want" ] || { echo "!! the assembled SYS: has no $want" >&2; exit 2; }
 done
 
@@ -314,7 +320,7 @@ EOF
     echo "Priority  = 5"
     echo "GlobVec   = -1"
     [ "$ACTIVATE" = 1 ] && echo "ACTIVATE  = 1"
-    echo "Startup   = \"$URL\""
+    echo "Startup   = \"$URL${EXTRA:+ $EXTRA}\""
 } > "$HD/Storage/DOSDrivers/SMB2"
 
 # ------------------------------------------------------------ the scripts --
@@ -368,7 +374,7 @@ Echo >>DH0:smbcheck.txt "*N=== 3. connections before the mount"
 $NETSTATLINE
 
 Echo >>DH0:smbcheck.txt "*N=== 4. Mount, List and Info, detached"
-Run >NIL: <NIL: C:Execute S:SMB-Work
+Run >NIL: <NIL: Execute S:SMB-Work
 Echo >>DH0:smbcheck.txt "RESULT run rc=\$RC"
 EOF
 
@@ -562,6 +568,7 @@ echo "list_produced_output=$LISTED"
 echo "smb_socket_seen=$ESTAB"
 echo "stopped_at=$STOPPED"
 echo "activate=$ACTIVATE"
+echo "startup_extra=${EXTRA:-none}"
 echo "os=3.$([ "$OSVER" = 32 ] && echo 2 || echo 1)"
 echo "model=$MODEL"
 echo "stack=$STACK"
