@@ -67,6 +67,20 @@
 #
 #   -V re-reads the last run's transcript without booting anything.
 #
+# THE NAME SERVER IS REACHED OVER IPv4, AND THAT IS NOT A FAILURE
+#
+#   Nothing here asserts that a lookup TRAVELLED over IPv6.  -4 and -6 choose
+#   which record is asked for and which family the command then connects over;
+#   the query itself goes to whatever name server the machine has, and on this
+#   wire that is the IPv4 one the DHCPv4 lease supplies.  The router does
+#   advertise RDNSS, and our side not acting on it is a separate defect owned
+#   elsewhere.
+#
+#   So `dns/aaaa` asking 192.168.1.1 for an AAAA and getting one is the
+#   correct shape of a passing -6 lookup, not a half-measure.  Do not rewrite
+#   these rows to require an IPv6 name server: no arm here needs one, and one
+#   that did could not pass on this network at all.
+#
 # THE GUEST NEEDS A GLOBAL IPv6 ADDRESS, AND IT IS NOT A GIVEN
 #
 #   Every -6 arm is asserted against the address the command printed, and that
