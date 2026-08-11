@@ -82,13 +82,28 @@ TIMEOUT=300
 ONLY=""
 LIST=0
 
-while getopts "P:B:b:t:c:l" opt; do
+# TEN PORTS PER CARD ON THE PEER, AND NOT ONE SET SHARED.
+#
+# tests/tools/run-iperf.sh binds five fixed ports on the peer and clears
+# leftovers with a pkill scoped to its OWN run tag (:262), which is right --
+# a broad pattern takes out other people's runs on a shared machine.  The
+# consequence is that consecutive tagged runs cannot free each other, and its
+# peers outlive their run by design (:264, timeout $TIMEOUT + 150) while a card
+# here takes about thirty seconds.  Cards two onward then met "[Errno 98]
+# Address already in use" and a guest whose peer never answered.
+#
+# Distinct ports rather than a wider kill: nothing has to die on time, and two
+# sweeps on one LAN stay out of each other's way by moving the base.
+PORTBASE="${AMINETXDUO_CARDSWEEP_PORTBASE:-7400}"
+
+while getopts "P:B:b:t:c:p:l" opt; do
     case "$opt" in
         P) PEERHOST="$OPTARG" ;;
         B) IFACE="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         c) ONLY="$OPTARG" ;;
+        p) PORTBASE="$OPTARG" ;;
         l) LIST=1 ;;
         *) sed -n '3,6p' "$0" >&2; exit 2 ;;
     esac
@@ -232,9 +247,10 @@ LOGDIR="$ROOT/build/cardsweep-logs"
 rm -rf "$LOGDIR"; mkdir -p "$LOGDIR"
 
 SWEEP_START=$(date +%s)
-NPASS=0; NFAIL=0; NSKIP=0
+NPASS=0; NFAIL=0; NSKIP=0; NCARRIED=0; IDX=0
 
-echo "==> peer $PEERHOST, bridge $IFACE, build $BUILD, ${TIMEOUT}s per card"
+echo "==> peer $PEERHOST, bridge $IFACE, build $BUILD, ${TIMEOUT}s per card," \
+     "peer ports from $PORTBASE"
 
 # The card list arrives on fd 3, not on stdin: everything in the loop body is
 # free to have a stdin of its own, and nothing in it can eat the list.
@@ -257,9 +273,11 @@ while read -r -u 3 board model addr mac; do
 
     tag="cardsweep-$board"
     t0=$(date +%s)
+    base=$((PORTBASE + IDX * 10))
+    IDX=$((IDX + 1))
 
     echo
-    echo "===================== $board ($drv, $model, $addr) ====================="
+    echo "===================== $board ($drv, $model, $addr, ports $base+) ====================="
 
     # < /dev/null is load-bearing.  run-iperf.sh starts its peers as
     # backgrounded ssh, and an ssh with a readable stdin reads it: given this
@@ -270,6 +288,12 @@ while read -r -u 3 board model addr mac; do
     env AMINETXDUO_RUN_TAG="$tag" \
         AMINETXDUO_AMIBERRY_MAC="02:41:4d:49:$mac" \
         AMINETXDUO_SANA2_DRIVER="$drvpath" \
+        AMINETXDUO_IPERF_PORT_TCP="$((base + 1))" \
+        AMINETXDUO_IPERF_PORT_UDP="$((base + 2))" \
+        AMINETXDUO_IPERF_PORT_SIZE="$((base + 3))" \
+        AMINETXDUO_IPERF_PORT_SRVTCP="$((base + 4))" \
+        AMINETXDUO_IPERF_PORT_SRVUDP="$((base + 5))" \
+        AMINETXDUO_IPERF_PORT_DEAD="$((base + 9))" \
         "$ROOT/tests/tools/run-iperf.sh" \
             -N "$board" -B "$IFACE" -P "$PEERHOST" -m "$model" \
             -a "$addr" -b "$BUILD" -t "$TIMEOUT" \
@@ -279,6 +303,15 @@ while read -r -u 3 board model addr mac; do
 
     t1=$(date +%s)
     wall=$((t1 - t0))
+
+    # This card's own peers, and nothing else's.  The bracket is what stops
+    # pkill matching the shell that carries the pattern, and the tag is what
+    # stops it matching another agent's run on a shared machine -- the same
+    # two precautions tests/tools/run-iperf.sh:258-263 takes.  Best effort:
+    # the ports are already unique, so this only keeps nine idle peers from
+    # sitting on the peer's memory for the rest of the sweep.
+    ssh -o ConnectTimeout=10 -n "$PEERHOST" \
+        "pkill -f '[i]perfpeer-$tag' 2>/dev/null; exit 0" >/dev/null 2>&1 || true
 
     tail -40 "$LOGDIR/$board.log"
 
@@ -304,11 +337,26 @@ while read -r -u 3 board model addr mac; do
     # more than this and its rc carries all of it; what is added here is that
     # BOTH directions are non-zero and both agree with the machine off the box,
     # which is the one claim a card has to support to count as covered.
+    # Does the CARD's own claim hold: online, and bytes both ways, each total
+    # agreeing with the machine off the box.
+    carried=no
+    if [ "${iface_rc:-1}" = 0 ] && [ "$tx" -gt 0 ] && [ "$rx" -gt 0 ] &&
+       [ "$tx" = "$peer_rx" ] && [ "$rx" = "$peer_tx" ]; then
+        carried=yes
+    fi
+
     status=fail
     why=""
-    if [ "$rc" = 0 ] && [ "$tx" -gt 0 ] && [ "$rx" -gt 0 ] &&
-       [ "$tx" = "$peer_rx" ] && [ "$rx" = "$peer_tx" ]; then
+    if [ "$rc" = 0 ] && [ "$carried" = yes ]; then
         status=pass
+    elif [ "$carried" = yes ]; then
+        # The card carried traffic in both directions and the arm still failed.
+        # Its own status, because "the card does not work" and "something in
+        # this arm does not work on this card" are different claims and the
+        # second one has been read as the first.  Both are failures; only this
+        # one has byte counts behind it.
+        status=fail_assert
+        why=" reason=\"bytes moved both ways and agreed off-box; another assertion in the arm failed -- read the log\""
     elif [ "$rc" = 2 ]; then
         # run-iperf.sh spends 2 on "this rig cannot run this arm" -- a binary
         # that was not built, a peer that cannot be reached, a peer process
@@ -334,9 +382,10 @@ while read -r -u 3 board model addr mac; do
     fi
 
     case "$status" in
-        pass)       NPASS=$((NPASS + 1)) ;;
-        skip_setup) NSKIP=$((NSKIP + 1)) ;;
-        *)          NFAIL=$((NFAIL + 1)) ;;
+        pass)        NPASS=$((NPASS + 1)) ;;
+        skip_setup)  NSKIP=$((NSKIP + 1)) ;;
+        fail_assert) NFAIL=$((NFAIL + 1)); NCARRIED=$((NCARRIED + 1)) ;;
+        *)           NFAIL=$((NFAIL + 1)) ;;
     esac
 
     printf 'card=%s board=%s model=%s driver=%s status=%s rc=%s iface_rc=%s tx_bytes=%s peer_rx_bytes=%s rx_bytes=%s peer_tx_bytes=%s udp_tx_bytes=%s peer_udp_rx_bytes=%s wall_s=%s log=%s%s\n' \
@@ -359,9 +408,24 @@ printf '%s\n' "$UNTESTABLE" | while read -r drv reason; do
     printf 'driver=%s status=untestable reason="%s"\n' "$drv" "$reason"
 done
 echo "======================================================================"
-printf 'cardsweep: cards=%d pass=%d fail=%d skip=%d wall_s=%d\n' \
-       "$((NPASS + NFAIL + NSKIP))" "$NPASS" "$NFAIL" "$NSKIP" "$WALL"
+printf 'cardsweep: cards=%d pass=%d fail=%d fail_assert=%d skip=%d carried_both_ways=%d wall_s=%d\n' \
+       "$((NPASS + NFAIL + NSKIP))" "$NPASS" "$((NFAIL - NCARRIED))" \
+       "$NCARRIED" "$NSKIP" "$((NPASS + NCARRIED))" "$WALL"
 
-[ "$NFAIL" = 0 ] || exit 1
-[ "$NSKIP" = 0 ] || exit 3
+# THREE OUTCOMES, AND THE MIDDLE ONE IS THE POINT.
+#
+#   0  every card carried bytes both ways and every arm was clean
+#   1  A CARD DID NOT CARRY BYTES BOTH WAYS.  This is the gate.
+#   3  every card carried bytes both ways, and something else failed or was
+#      not measured -- read the table.
+#
+# 1 is reserved for the card claim because that claim is stable and the arm
+# around it is not.  Two full sweeps twelve minutes apart, 2026-08-11, agreed
+# exactly on which cards carried traffic -- eight of nine, eb920 the one that
+# carried none -- and disagreed on which of them failed the three-second TCP
+# send: a2065, hydra and ariadne_ii failed it in one run and passed it in the
+# other, ariadne and cnet the other way round.  A gate built on that is red on
+# a coin toss, and a nightly that is red on a coin toss stops being read.
+[ "$((NFAIL - NCARRIED))" = 0 ] || exit 1
+[ "$NCARRIED" = 0 ] && [ "$NSKIP" = 0 ] || exit 3
 exit 0

@@ -736,13 +736,20 @@ stage_cards() {
 
     "$ROOT/tests/tools/run-cardsweep.sh" -b "$BUILD/default" || rc=$?
 
+    # 1 is the CARD claim -- online, and bytes both ways agreeing with a
+    # machine off this box -- and it is the only one that turns this red.
+    # 3 is every card carrying traffic with something else wrong, which is
+    # loud here and in the table and is not a build break: the arm around the
+    # claim is flaky in a way the claim is not, and a nightly that goes red on
+    # a coin toss stops being read.  run-cardsweep.sh says why at length.
     case "$rc" in
         0) note "PASS  every card came online and carried bytes both ways" ;;
         1) fail "card sweep: a card did not carry traffic -- the table above" \
                 "names it and says which direction failed" ;;
         2) fail "card sweep: the rig refused it before any card was measured" ;;
-        3) skip "card sweep: a card was NOT measured -- the table above says" \
-                "which and why.  The rest passed." ;;
+        3) skip "card sweep: every card carried bytes both ways, and an arm" \
+                "failed or a card was not measured -- the table above says" \
+                "which and why" ;;
         *) fail "card sweep: exit $rc" ;;
     esac
     return "$rc"
