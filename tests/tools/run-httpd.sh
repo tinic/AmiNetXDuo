@@ -145,8 +145,14 @@ cp "$BSD" "$STAGE/libs/bsdsocket.library"
 
 # The extra driver goes beside the a2065's, which stays: harmless, and some
 # paths still reference it.
-[ -z "${AMINETXDUO_EXTRA_DRIVER:-}" ] || \
+# Both places.  run-fitzbench.sh stages a driver at DEVS: root and this
+# harness puts the a2065 under DEVS:Networks; which one a given driver is
+# found in is not worth discovering from a stack that will only say the
+# network would not start.
+[ -z "${AMINETXDUO_EXTRA_DRIVER:-}" ] || {
     cp "$AMINETXDUO_EXTRA_DRIVER" "$STAGE/devs/Networks/$(basename "$AMINETXDUO_EXTRA_DRIVER")"
+    cp "$AMINETXDUO_EXTRA_DRIVER" "$STAGE/devs/$(basename "$AMINETXDUO_EXTRA_DRIVER")"
+}
 
 cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
 DEVICE=$IFDEVICE
