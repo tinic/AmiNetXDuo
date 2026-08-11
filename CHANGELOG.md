@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The Shell in the browser shows the directory you are in, and gives a command 16 KB of stack instead of 4 KB, so something that reaches the network runs without typing `stack` first
+
 - A name with both an IPv4 and an IPv6 address is reached over IPv6 on a machine that has a working IPv6 address. The lookup for the IPv6 address was refused inside the resolver before a question ever went out, so every name came back IPv4 however the network was set up
 - `ShowNetStatus` prints a link-local address as `/64`, which is what it is, rather than `/10`
 - `AddNetInterface QUIET` in `S:User-Startup` says why a boot came up with no network. It used to swallow the missing interface file, the stack that would not start and the interface that would not come online along with the running commentary
