@@ -515,12 +515,10 @@ chmod 755 "$SS"
 # not kill what it started there, so a server with no ceiling of its own
 # outlives its run, holds the port, and the next run mounts it.
 
-SRV_PID=""
 REMOTE_PY=""
 REMOTE_PID="/tmp/smb2-testserver-$TAG.pid"
 REMOTE_LOG="/tmp/smb2-testserver-$TAG.log"
 stop_server() {
-    [ -n "$SRV_PID" ] && kill -TERM "$SRV_PID" 2>/dev/null
     if [ -n "$REMOTE_PY" ]; then
         # What the server thought, brought back before it is deleted: when a
         # mount fails it is the other half of the transcript, and libsmb2's
@@ -532,7 +530,7 @@ stop_server() {
              rm -f $REMOTE_PY $REMOTE_PID $REMOTE_LOG; exit 0" \
             >/dev/null 2>&1
     fi
-    SRV_PID=""; REMOTE_PY=""
+    REMOTE_PY=""
     return 0
 }
 
