@@ -71,6 +71,67 @@ BOOL ami_config_hostname_valid(const char *name)
     return TRUE;
 }
 
+/*
+ * The name a machine nobody named answers to.
+ *
+ * "amiga" alone was it, so every unconfigured machine on a segment claimed
+ * amiga.local and the loser of the probe took the winner's name off the air.
+ * The last three octets of the hardware address are the part a card maker
+ * varies, so "amiga-490007" for 00:80:10:49:00:07: it is a valid RFC 1123
+ * label, it is the same on every boot of the same card, and it stays short
+ * enough to type. Lower case because mDNS compares without case (RFC 6762 16)
+ * and a name that reads back differently from how it was claimed invites the
+ * question of which one is real.
+ *
+ * Three octets, not six: the first three are the OUI, identical across every
+ * card of one make, so they cost nine characters and separate nothing on the
+ * lab bench where this collides. Two cards of different makes can still share
+ * a tail; RFC 6762 9 probing is what settles that, here and before.
+ *
+ * FALSE when there is no address to derive from, which leaves the caller its
+ * old fallback rather than inventing a suffix; a name that moves between
+ * boots is worse than one that collides.
+ */
+BOOL ami_config_hostname_from_hwaddr(const UBYTE *hw, ULONG hwlen,
+                                     char *out, ULONG size)
+{
+    static const char digits[] = "0123456789abcdef";
+    static const char prefix[] = "amiga-";
+    const ULONG       taken    = 3;
+    ULONG             i;
+    ULONG             at;
+    BOOL              any = FALSE;
+
+    if (out == NULL || size < sizeof(prefix) + taken * 2)
+        return FALSE;
+    if (hw == NULL || hwlen < taken)
+        return FALSE;
+
+    /* An all-zero address is what a device that has none reports, and what
+       ami_sana2_get_mac() writes for an interface that is not there. */
+    for (i = 0; i < hwlen; i++)
+    {
+        if (hw[i] != 0)
+            any = TRUE;
+    }
+
+    if (!any)
+        return FALSE;
+
+    for (at = 0; at < sizeof(prefix) - 1; at++)
+        out[at] = prefix[at];
+
+    for (i = hwlen - taken; i < hwlen; i++)
+    {
+        out[at++] = digits[(hw[i] >> 4) & 0x0F];
+        out[at++] = digits[hw[i] & 0x0F];
+    }
+
+    out[at] = '\0';
+
+    return TRUE;
+}
+
 const char *ami_config_hostname_source_text(UWORD source)
 {
     static const struct

@@ -13,8 +13,11 @@
  * interface currently has. HOSTNAME is the same string DHCP option 12 sends
  * (docs/RESEARCH.md 27), resolved from the ranked sources in
  * aminetxduo/config.h. That is the single source of truth for the name, not
- * this file. It can be empty, nothing named the machine, and a label is
- * still needed, so "amiga" is the fallback here, as it is for option 12.
+ * this file. Nothing named the machine and it is still not empty:
+ * ami_ns_name_after_card() has put "amiga-490007" there, from the card's
+ * hardware address, so that two unnamed machines do not both claim
+ * amiga.local. "amiga" is what is left below for the machine whose cards
+ * report no address at all, as it is for option 12.
  *
  * <label>.local is not this machine's fully-qualified name and must never be
  * shown as one: RFC 6762 3 scopes it to the link and says it is not globally
