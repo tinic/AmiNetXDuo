@@ -382,14 +382,20 @@ def test_ssh_interactive():
         time.sleep(0.02)
     s.keys("\n")
 
-    got = s.pump(45.0, want=MARK)
     # Twice: once as the far end's echo of what was typed, once as the output
-    # of running it.  One occurrence is an echo and no shell.
-    ran = s.out[before:].count(MARK.encode("latin-1")) >= 2
-    check(ran,
+    # of running it.  One occurrence is an echo and no shell, so the wait is
+    # for the SECOND -- `want` would stop at the first, which is the keystrokes
+    # coming back and proves only that the line reached the far end.
+    deadline = time.time() + 45.0
+    while time.time() < deadline:
+        s.pump(3.0)
+        if s.out[before:].count(MARK.encode("latin-1")) >= 2:
+            break
+    seen = s.out[before:].count(MARK.encode("latin-1"))
+    check(seen >= 2,
           "the command runs on the far end and its output comes back "
           "(saw %d occurrence(s) of the marker in %r)"
-          % (s.out[before:].count(MARK.encode("latin-1")), got[-200:]))
+          % (seen, s.out[before:][-200:]))
 
     # And out again, cleanly: the remote shell exits, ssh exits, the console
     # goes back to cooked, and the Amiga's own Shell prompts.
