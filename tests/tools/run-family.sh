@@ -131,7 +131,13 @@ BUILD="${AMINETXDUO_BUILD:-build/cm}"
 IFACE="${AMINETXDUO_FAMILY_IFACE:-ens18}"
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 MODEL="${AMINETXDUO_FAMILY_MODEL:-A1200}"
-TIMEOUT="${AMINETXDUO_FAMILY_TIMEOUT:-420}"
+# Measured, not guessed.  The slowest row is telnet's -6 arm on a guest with no
+# usable IPv6 source address: telnet has no timeout of its own, so the connect
+# runs to the stack's own ceiling, 191 s on the run of 2026-08-10.  That figure
+# is worth its own look -- nc reached the same host and gave up in the 20 s its
+# -w asked for -- but it is a connect timeout and not a hang, and the whole
+# list has to fit inside this one.
+TIMEOUT="${AMINETXDUO_FAMILY_TIMEOUT:-900}"
 VERDICT_ONLY=0
 INJECT=""
 GUEST_V6=""
