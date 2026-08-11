@@ -68,17 +68,20 @@ PORT=80
 WINDOW=28800
 NAME="${AMINETXDUO_DEMO_NAME:-}"
 CMDS="${AMINETXDUO_DEMO_C:-}"
+WBLIBS="${AMINETXDUO_DEMO_WBLIBS:-}"
 # Workbench's own commands, unpacked once from the ADF in the asset store and
 # kept in ~/wbc.  Without them the Shell answers "Unknown command" to Dir and
 # List, which is not a demo.  /tmp is swept, so it does not live there.
 if [ -z "$CMDS" ]; then
     _wb="$HOME/wbc/Workbench3.1/C"
+    _wblibs="$HOME/wbc/Workbench3.1/Libs"
     _adf="$HOME/amiga-assets/adf-wb31/amiga-wb31_workbench.adf"
     _xdf="$HOME/venv-amitools/bin/xdftool"
     if [ ! -d "$_wb" ] && [ -f "$_adf" ] && [ -x "$_xdf" ]; then
         mkdir -p "$HOME/wbc" && "$_xdf" "$_adf" unpack "$HOME/wbc" >/dev/null 2>&1 || true
     fi
     [ -d "$_wb" ] && CMDS="$_wb"
+    [ -d "$_wblibs" ] && WBLIBS="$_wblibs"
 fi
 
 while getopts "b:B:C:m:n:p:t:" opt; do
@@ -227,6 +230,15 @@ fi
 # The runtime files are not in the package, so syntax highlighting will not
 # work; plain editing does.
 EXTRA_DRAWERS=()
+# Workbench's own libraries, all of them, beside ours.  Picking them out one
+# at a time is how an evening goes: vim wants locale.library, something
+# else will want diskfont or iffparse, and each one is discovered by a
+# program failing to load in front of somebody.  They are small and they
+# are on the disk we already unpack.  -n so ours are never overwritten.
+if [ -d "$WBLIBS" ]; then
+    cp -n "$WBLIBS"/*.library "$STAGE/libs/" 2>/dev/null || true
+fi
+
 VIM="${AMINETXDUO_DEMO_VIM:-$HOME/amiga-assets/apps/vim-9.1/vim}"
 if [ -f "$VIM" ]; then
     cp -f "$VIM" "$STAGE/c/vim"
