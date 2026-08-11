@@ -253,7 +253,10 @@ EMU="$ROOT/build/amiberry-$AMINETXDUO_RUN_TAG.log"
 # reports itself happily, so it reads as stuck rather than as unplugged.
 # Stacked instances cost four restarts before anyone noticed tonight.
 pkill -f "amiberry --log -f $ROOT/build/amiberry-$AMINETXDUO_RUN_TAG.uae" 2>/dev/null || true
-pkill -f "$ROOT/tools/amiberry-run.sh -N a2065 -B $BACKEND" 2>/dev/null || true
+# Tag-scoped, both patterns.  Without the tag this matched every demo on the
+# box, so starting a second one killed the first -- which is not "one demo
+# at a time", it is "only ever the newest".
+pkill -f "amiberry-run.sh .*amiberry-testhd-$AMINETXDUO_RUN_TAG" 2>/dev/null || true
 for _ in $(seq 1 15); do
     pgrep -f "amiberry --log -f $ROOT/build/amiberry-$AMINETXDUO_RUN_TAG.uae" >/dev/null || break
     sleep 1
