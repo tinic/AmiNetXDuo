@@ -49,6 +49,7 @@ WS_WAIT = d.WS_WAIT
 WANT_ED = os.environ.get("AMINETXDUO_WSCONSOLE_ED") == "yes"
 WANT_MORE = os.environ.get("AMINETXDUO_WSCONSOLE_MORE") == "yes"
 WANT_SSH = os.environ.get("AMINETXDUO_WSCONSOLE_SSH") == "yes"
+WANT_VIM = os.environ.get("AMINETXDUO_WSCONSOLE_VIM") == "yes"
 SSHD_PORT = os.environ.get("AMINETXDUO_WSCONSOLE_SSHD_PORT", "2224")
 
 # Where the guest reaches the build host.  Behind NAT that is always 10.0.2.2;
@@ -92,22 +93,41 @@ class Session:
 
         self.out = b""          # everything the Shell has printed
         self.words = []         # (seconds, word) from the server
+        self.frames = 0         # binary frames seen, which is the perf number
         self.closed = False
 
     @property
     def status(self):
         return self.c.status
 
-    def pump(self, seconds, want=None):
-        """Read for `seconds`, or until `want` is in the binary stream."""
+    def pump(self, seconds, want=None, quiet=None):
+        """Read for `seconds`, or until `want` appears, or until `quiet`
+        seconds pass with nothing arriving.
+
+        `quiet` is how you time something whose END you cannot name.  A
+        redraw has no sentinel -- you cannot wait for a string, because what
+        it paints is whatever was on the screen -- so the way to know it
+        finished is that the far side stopped talking.  Without it a timing
+        arm reports the length of its own deadline, which is what the first
+        version of this did: every redraw took exactly 30.00s."""
         deadline = time.time() + seconds
         start = len(self.out)
+        last = time.time()
         while time.time() < deadline:
-            f = self.c.frame(deadline=deadline)
+            if quiet is not None and time.time() - last > quiet:
+                break
+            stop = deadline
+            if quiet is not None:
+                stop = min(stop, last + quiet)
+            f = self.c.frame(deadline=stop)
             if f is None:
+                if quiet is not None:
+                    continue
                 break
             fin, op, payload, masked = f
+            last = time.time()
             if op in (0x2, 0x0):
+                self.frames += 1
                 self.out += payload
             elif op == 0x1:
                 self.words.append((time.time(), payload.decode("latin-1")))
@@ -511,15 +531,120 @@ def test_takeover():
     free()
 
 
+def test_short_command_is_cheap():
+    """THE WORKLOAD, AND THE THING NOT TO REGRESS.
+
+    This terminal is for `Dir`, `lha x`, `Copy`, checking something -- short
+    commands -- with WebDAV doing the file moving.  That path is good: 44 ms
+    to upgrade, 33 ms to a prompt, 23 ms echo round trip, and `Echo HELLO`
+    costs TWO WebSocket frames and fifteen bytes.
+
+    Asserted in FRAMES as well as seconds, because frames is the number that
+    catches the regression this is guarding against.  A change that sends a
+    frame per byte instead of a frame per write would still be fast enough to
+    pass a wall-clock bound on an idle machine, and would be ruinous on a
+    busy one; sixty frames for `Echo HELLO` is wrong no matter how quickly
+    they arrive."""
+    print("a short command stays cheap")
+
+    s = Session()
+    if s.status != 101:
+        check(False, "cannot upgrade (got %s)" % s.status)
+        return
+    s.pump(WS_WAIT, want=">")
+
+    began = time.time()
+    s.keys("Echo HELLO\n")
+    got = s.pump(WS_WAIT, want="HELLO")
+    took = time.time() - began
+
+    check(b"HELLO" in got, "the command answers (got %r)" % got[-80:])
+    check(s.frames <= 6,
+          "and costs a handful of frames, not one per byte (took %d)"
+          % s.frames)
+    check(took < 5.0,
+          "and comes back promptly (%.2fs)" % took)
+    print("  (%d frames, %d bytes, %.2fs)" % (s.frames, len(got), took))
+
+    s.close()
+    check(free() is not None, "and the Shell is free again")
+
+
+def test_vim():
+    """vim: the most demanding thing this console runs.
+
+    Not because anyone will edit over it -- the workload is short commands --
+    but because a full-screen editor exercises raw mode, cursor addressing,
+    the window size and a redraw all at once.  What is asserted is that a
+    redraw COMPLETES and stays small; the wall clock is reported rather than
+    asserted tightly, because the cost is vim thinking on a 68020 and that is
+    a floor, not a defect."""
+    print("vim")
+
+    if not WANT_VIM:
+        print("  SKIPPED: no vim staged (AMINETXDUO_WSCONSOLE_VIM)")
+        return
+
+    s = Session()
+    if s.status != 101:
+        check(False, "cannot upgrade (got %s)" % s.status)
+        return
+    s.pump(WS_WAIT, want=">")
+    s.word("size 80 25")
+
+    # -u NONE, which is not a way of avoiding a hard case.  The vim package
+    # in the asset store has no runtime files, so vim stops on
+    # "E1187: Failed to source defaults.vim -- Press ENTER" before it paints
+    # anything, and an arm that waited for the file would be measuring a
+    # missing tarball.  Skipping the startup scripts gets to the screen this
+    # is about, and is what a person hitting that prompt would do next.
+    s.keys("vim -u NONE DH0:Public/pagefile.txt\n")
+    got = s.pump(120.0, want="quick brown fox")
+    check(b"quick brown fox" in got,
+          "vim opens the file and paints (got %r)" % got[-160:])
+    if b"quick brown fox" not in got:
+        s.keys(":q!\r")
+        s.close()
+        free()
+        return
+
+    check(s.said("mode raw"), "and puts the console in raw mode (heard %r)"
+          % [w for _, w in s.words])
+
+    # A redraw: jump to the end of the file, which repaints the window.
+    before = s.frames
+    began = time.time()
+    s.keys("G")
+    got = s.pump(30.0, quiet=1.5)
+    took = time.time() - began
+    frames = s.frames - before
+
+    check(len(got) > 0, "a keystroke redraws (got %d bytes)" % len(got))
+    check(took < 20.0, "and the redraw completes (%.2fs)" % took)
+    check(len(got) < 8192,
+          "and a redraw is under 8 KB, so nothing is repainting the world "
+          "(was %d bytes in %d frames)" % (len(got), frames))
+    print("  (redraw: %d frames, %d bytes, %.2fs)" % (frames, len(got), took))
+
+    s.keys(":q!\r")
+    s.pump(30.0, want=">")
+    check(s.said("mode cooked"), "and vim gives the console back cooked")
+
+    s.close()
+    free()
+
+
 def main():
     print("wsterm-console against ws://%s:%d/shell\n" % (d.ADDR, d.PORT))
 
     test_mode_is_announced()
+    test_short_command_is_cheap()
     test_size_is_taken()
     test_takeover()
     test_ssh_password()
     test_ed()
     test_more()
+    test_vim()
     # Last, because it is the slow one and because it deliberately leaves the
     # terminal quiet for over a minute.
     test_dead_client_is_reclaimed()

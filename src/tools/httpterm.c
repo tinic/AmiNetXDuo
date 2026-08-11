@@ -200,6 +200,30 @@ static UWORD term_rows = 25;
  */
 static UBYTE term_in_urgent;
 
+/* ------------------------------------------------------------- counting --- */
+
+/*
+ * WHAT THE OUTSIDE CANNOT SEE, COUNTED HERE.
+ *
+ * A drill on the far end of the socket can count frames, their sizes and the
+ * bytes on the wire perfectly well.  What it cannot see is how many
+ * ACTION_WRITE packets the program on this side sent to produce them, and
+ * that ratio is the whole question when something is slow: one frame per
+ * write means every `position the cursor, emit three characters` costs a
+ * packet, a wake, a frame and a round trip, and coalescing is worth doing.
+ * Frames far fewer than writes means the coalescing already happens and the
+ * time is going somewhere else.
+ *
+ * Free when nobody asks: four counters incremented on paths that were already
+ * running, and a word to read them back.  No printing -- a tool_printf() per
+ * packet is what the TRACE does and it changes the thing it measures.
+ */
+static ULONG term_st_writes;        /* ACTION_WRITE packets answered        */
+static ULONG term_st_wbytes;        /* bytes taken from them                */
+static ULONG term_st_frames;        /* binary frames handed to the socket   */
+static ULONG term_st_fbytes;        /* payload bytes in them                */
+static UBYTE term_st_pending;       /* a `stats` reply is owed to the page  */
+
 static ULONG ring_put(TermPipe *p, const UBYTE *src, ULONG n)
 {
     ULONG done = 0;
@@ -813,6 +837,12 @@ static VOID term_retry(TermPipe *p)
 
             if (n == 0)
                 return;
+
+            if (p == &term_out)
+            {
+                term_st_writes++;
+                term_st_wbytes += (ULONG)n;
+            }
         }
         else
         {
@@ -1883,6 +1913,45 @@ VOID http_term_mode_sent(VOID)
 }
 
 /*
+ * The counters, as a word, when somebody has asked for them.
+ *
+ * Same peek-then-take shape as the mode word and for the same reason: the
+ * caller decides whether to want the socket writable before it has anywhere
+ * to put the frame.
+ */
+static char term_st_buf[96];
+
+static ULONG term_st_put(ULONG at, const char *label, ULONG v)
+{
+    while (*label != '\0')
+        term_st_buf[at++] = *label++;
+
+    at += term_num((UBYTE *)&term_st_buf[at], v);
+    return at;
+}
+
+const char *http_term_stats_word(VOID)
+{
+    ULONG at = 0;
+
+    if (!term_st_pending)
+        return NULL;
+
+    at = term_st_put(at, "stats writes=", term_st_writes);
+    at = term_st_put(at, " wbytes=",      term_st_wbytes);
+    at = term_st_put(at, " frames=",      term_st_frames);
+    at = term_st_put(at, " fbytes=",      term_st_fbytes);
+    term_st_buf[at] = '\0';
+
+    return term_st_buf;
+}
+
+VOID http_term_stats_sent(VOID)
+{
+    term_st_pending = 0;
+}
+
+/*
  * The page's window, as the page measures it.  Kept rather than acted on:
  * nothing on this side has a window, and the only thing that ever reads these
  * is a program that asks -- see term_write_scan().
@@ -2217,6 +2286,25 @@ static VOID sock_word(const char *w)
         return;
     }
 
+    /*
+     * `stats` and `stats reset`.  Instrumentation, and it stays because the
+     * question it answers -- how many ACTION_WRITEs became how many frames --
+     * cannot be answered from the far end of the socket, and is the first
+     * question to ask whenever this feels slow.
+     */
+    if (sock_after(w, "stats") != NULL)
+    {
+        if (sock_after(w, "stats reset") != NULL)
+        {
+            term_st_writes = 0;
+            term_st_wbytes = 0;
+            term_st_frames = 0;
+            term_st_fbytes = 0;
+        }
+        term_st_pending = 1;
+        return;
+    }
+
     rest = sock_after(w, "size");
     if (rest != NULL)
     {
@@ -2371,7 +2459,7 @@ BOOL http_term_sock_wants_write(const HttpTermSock *t)
     if (t->out_sent < t->out_len || t->ctl_at < t->ctl_n || t->closing)
         return TRUE;
 
-    if (http_term_mode_word() != NULL)
+    if (http_term_mode_word() != NULL || http_term_stats_word() != NULL)
         return TRUE;
 
     if (http_term_pending() > 0UL)
@@ -2487,6 +2575,13 @@ BOOL http_term_sock_write(HttpTermSock *t, ULONG now)
          */
         {
             const char *word = http_term_mode_word();
+            BOOL        ismode = TRUE;
+
+            if (word == NULL)
+            {
+                word   = http_term_stats_word();
+                ismode = FALSE;
+            }
 
             if (word != NULL)
             {
@@ -2509,7 +2604,10 @@ BOOL http_term_sock_write(HttpTermSock *t, ULONG now)
                 t->out_sent = 10UL - hn;
                 t->out_len  = 10UL + n;
 
-                http_term_mode_sent();
+                if (ismode)
+                    http_term_mode_sent();
+                else
+                    http_term_stats_sent();
                 continue;
             }
         }
@@ -2530,6 +2628,9 @@ BOOL http_term_sock_write(HttpTermSock *t, ULONG now)
                                                 HTTP_WS_EV_BINARY,
                                                 (unsigned long)n, 1);
                 unsigned long i;
+
+                term_st_frames++;
+                term_st_fbytes += (ULONG)n;
 
                 for (i = 0; i < hn; i++)
                     t->out[10 - hn + i] = head[i];
