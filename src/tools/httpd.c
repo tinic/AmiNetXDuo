@@ -6,11 +6,12 @@
  * anything else an Amiga can serve without a client on the other machine.
  *
  *     httpd ROOT/A,PORT/N,ADDRESS=-a/K,CONNECTIONS=-m/N/K,TIMEOUT=-w/N/K,
- *           VERBOSE=-v/S,TRACE/S,TERMINAL=-T/K
+ *           VERBOSE=-v/S,TRACE/S,TERMINAL=-T/S,PAGE/K
  *
  *   httpd Work:Public            serve that drawer on port 80
  *   httpd DH0:Docs 8080 -v       another port, one log line per request
  *   httpd RAM: 8080 TRACE        every header, in the order it arrived
+ *   httpd Work:Public 80 -T      and a Shell in a browser, on the same port
  *
  * WHAT IT ANSWERS
  *
@@ -20,14 +21,19 @@
  *
  * AND, WHEN ASKED FOR, A SHELL
  *
- *   TERMINAL names an HTML file.  With it, /shell serves that file, and a
- *   WebSocket upgrade to the same address gets an AmigaDOS Shell: RFC 6455 in
- *   src/tools/httpws.c, the Shell itself in src/tools/httpterm.c.
+ *   -T turns on /shell, which serves an HTML page, and a WebSocket upgrade to
+ *   the same address gets an AmigaDOS Shell: RFC 6455 in src/tools/httpws.c,
+ *   the Shell itself in src/tools/httpterm.c.
+ *
+ *   -T takes no value.  The page is looked for in httpd_term_places[] below,
+ *   and PAGE= names one somewhere else.  It used to be TERMINAL=<file>, which
+ *   meant nobody could turn the terminal on without knowing where the
+ *   installer had put a 400 KB HTML file.
  *
  *   ANYONE WHO CAN REACH THE PORT GETS THAT SHELL.  There is no credential and
  *   nothing to configure, which is the same shape as the write methods above:
  *   this server has never had authentication and does not pretend to.  The
- *   endpoint is off unless TERMINAL was given, so the decision is the person
+ *   endpoint is off unless -T was given, so the decision is the person
  *   starting the server's and is made once, on the command line.
  *
  *   /shell is reserved while it is on, and shadows an entry of that name in
@@ -105,7 +111,7 @@ static const char version_tag[] __attribute__((used)) =
 
 #define TEMPLATE                                                        \
     "ROOT/A,PORT/N,ADDRESS=-a/K,CONNECTIONS=-m/N/K,TIMEOUT=-w/N/K,"     \
-    "VERBOSE=-v/S,TRACE/S,TERMINAL=-T/K"
+    "VERBOSE=-v/S,TRACE/S,TERMINAL=-T/S,PAGE/K"
 
 enum
 {
@@ -117,8 +123,32 @@ enum
     ARG_VERBOSE,
     ARG_TRACE,
     ARG_TERMINAL,
+    ARG_PAGE,
     ARG_COUNT
 };
+
+/*
+ * Where a bare -T looks for its page, in order.  Short on purpose: a long list
+ * is a long failure message, and PAGE= is the answer for anywhere else.
+ *
+ *   AmiNetXDuo:  the assign Install-AmiNetXDuo writes into S:User-Startup
+ *                beside the httpd line, pointing at the drawer it put the
+ *                documentation and the page in.  The drawer is the user's
+ *                choice, so the assign is the only stable name for it.
+ *   PROGDIR:     httpd and the page unpacked into the same drawer, and the
+ *                Terminal subdrawer the archive carries.
+ *
+ * The page is 400 KB of HTML.  Compiling it in would remove the search and
+ * five-fold the binary, which is not a trade for a 4 MB machine.
+ */
+static const char *const httpd_term_places[] = {
+    "AmiNetXDuo:Terminal/terminal.html",
+    "PROGDIR:Terminal/terminal.html",
+    "PROGDIR:terminal.html"
+};
+
+#define HTTPD_TERM_PLACES                                               \
+    ((ULONG)(sizeof(httpd_term_places) / sizeof(httpd_term_places[0])))
 
 /* --------------------------------------------------------------- limits --- */
 
@@ -553,7 +583,7 @@ static ULONG  httpd_conns   = HTTPD_CONN_DEFAULT;
 static ULONG  httpd_timeout = HTTPD_TIMEOUT_DEF;
 static BOOL   httpd_verbose = FALSE;
 static BOOL   httpd_trace   = FALSE;
-/* The HTML file TERMINAL named, and "" when it was not given.  One string
+/* The HTML file -T resolved to, and "" when -T was not given.  One string
    answers both questions -- where the page is, and whether there is a
    terminal at all -- because there is no third state. */
 static char   httpd_term_page[HTTP_PATH_MAX];
@@ -7017,7 +7047,7 @@ int main(int argc, char **argv)
     if (rda == NULL)
     {
         tool_fault(IoErr());
-        tool_usage("<drawer> [<port>] [-v] [TRACE] [-T <page.html>]",
+        tool_usage("<drawer> [<port>] [-v] [TRACE] [-T [PAGE <file>]]",
                    "Serves a drawer over HTTP and WebDAV, so this machine can "
                    "be mounted as a writable drive.  -T adds /shell, an "
                    "AmigaDOS Shell in a browser, open to anyone who can reach "
@@ -7093,28 +7123,91 @@ int main(int argc, char **argv)
         UnLock(lock);
     }
 
+    /* PAGE without -T is a request for a terminal that will not exist, and
+       ignoring it would look like the terminal is on. */
+    if (args[ARG_PAGE] != 0 && args[ARG_TERMINAL] == 0)
+    {
+        tool_error("PAGE names the terminal's page, and -T is what turns the "
+                   "terminal on");
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
     /*
      * The terminal's page, if there is to be one.  Checked here rather than on
      * the first request for the same reason the document root is: a server
      * that starts on a misspelled path answers 503 to the one address the
      * person is going to try and looks like a network fault.
+     *
+     * A -T with nowhere to serve from REFUSES TO START rather than starting
+     * without the endpoint.  A terminal that silently is not there is the one
+     * outcome worse than not starting, so every place that was looked in gets
+     * named.
      */
     if (args[ARG_TERMINAL] != 0)
     {
-        BPTR page = Open((CONST_STRPTR)args[ARG_TERMINAL], MODE_OLDFILE);
+        const char *named = (args[ARG_PAGE] != 0)
+                                ? (const char *)args[ARG_PAGE] : NULL;
+        BPTR        page  = (BPTR)0;
 
-        if (page == (BPTR)0)
+        if (named != NULL)
         {
-            tool_error("there is no \"%s\" to serve the terminal from",
-                       (LONG)args[ARG_TERMINAL]);
-            tool_fault(IoErr());
-            FreeArgs(rda);
-            return RETURN_ERROR;
-        }
-        (VOID)Close(page);
+            page = Open((CONST_STRPTR)named, MODE_OLDFILE);
 
-        hs_copy(httpd_term_page, sizeof(httpd_term_page),
-                (const char *)args[ARG_TERMINAL]);
+            if (page == (BPTR)0)
+            {
+                tool_error("there is no \"%s\" to serve the terminal from",
+                           (LONG)named);
+                tool_fault(IoErr());
+                FreeArgs(rda);
+                return RETURN_ERROR;
+            }
+        }
+        else
+        {
+            for (i = 0; i < HTTPD_TERM_PLACES; i++)
+            {
+                page = Open((CONST_STRPTR)httpd_term_places[i], MODE_OLDFILE);
+
+                if (page != (BPTR)0)
+                {
+                    named = httpd_term_places[i];
+                    break;
+                }
+            }
+
+            if (named == NULL)
+            {
+                static char where[320];
+                ULONG       used = 0;
+                BOOL        ok   = TRUE;
+
+                for (i = 0; i < HTTPD_TERM_PLACES; i++)
+                {
+                    ok = ok && hs_append(where, sizeof(where), &used,
+                                         "\n    ");
+                    ok = ok && hs_append(where, sizeof(where), &used,
+                                         httpd_term_places[i]);
+                }
+
+                if (!ok)
+                    where[0] = '\0';    /* cannot happen; not worth a lie */
+
+                tool_error("-T was given and there is no page to serve the "
+                           "terminal from.  Looked for:%s\n"
+                           "  PAGE=<file> names one somewhere else.",
+                           (LONG)where);
+                FreeArgs(rda);
+                return RETURN_ERROR;
+            }
+        }
+
+        (VOID)Close(page);
+        hs_copy(httpd_term_page, sizeof(httpd_term_page), named);
+
+        /* Said before the serving banner rather than in it: this is the one
+           thing about the run the command line does not state. */
+        tool_printf("Terminal page: %s\n", (LONG)httpd_term_page);
     }
 
     httpd_read_gmt_offset();

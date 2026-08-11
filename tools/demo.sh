@@ -347,7 +347,7 @@ if [ -n "$missing" ]; then
 fi
 
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$BACKEND" -m "$MODEL" -t "$WINDOW" \
-    -a "DH0:Public $PORT TERMINAL=DH0:terminal.html" \
+    -a "DH0:Public $PORT -T PAGE=DH0:terminal.html" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
     "$STAGE/terminal.html" "${EXTRA_C[@]}" "${EXTRA_DRAWERS[@]}" \
     > "$ROOT/build/demo-run-$AMINETXDUO_RUN_TAG.log" 2>&1 &

@@ -279,8 +279,24 @@ live|ShowNetServices|mdns-off|4|re:mDNS is not enabled|-|SYS:ShowNetServices SEC
 live|ShowNetServices|bad-type|5|re:is not a service type|-|SYS:ShowNetServices http
 live|httpd|no-root|5|re:required argument missing|-|SYS:httpd
 live|httpd|bad-root|5|re:there is no .DH0:nosuchdirectory. to serve|-|SYS:httpd DH0:nosuchdirectory 8099
-live|httpd|term-no-page|5|re:to serve the terminal from|-|SYS:httpd DH0: 8099 TERMINAL=DH0:nosuchpage.html
-live|httpd|term-page-checked|5|re:there is no .DH0:nosuchdirectory. to serve|-|SYS:httpd DH0:nosuchdirectory 8099 TERMINAL=DH0:terminal.html
+live|httpd|term-no-page|5|re:to serve the terminal from|-|SYS:httpd DH0: 8099 -T PAGE=DH0:nosuchpage.html
+live|httpd|term-page-checked|5|re:there is no .DH0:nosuchdirectory. to serve|-|SYS:httpd DH0:nosuchdirectory 8099 -T PAGE=DH0:terminal.html
+# Bare -T, both ways.
+#
+# FOUND: httpd is at SYS:, so PROGDIR: is the stage root and the page staged
+# beside it in Terminal/ is the second place the search looks.  The run then
+# has to end, and a server that started would not, so -a names something that
+# does not resolve: the address is resolved AFTER the page is, which makes the
+# "Terminal page:" line the proof that the search ran and found it.
+#
+# NOT FOUND: the same binary from a drawer with no Terminal beside it and no
+# AmiNetXDuo: assign anywhere, which is every place the search looks.  The
+# premise is that the refusal NAMES them, because a -T that quietly serves no
+# terminal is worse than one that will not start.
+live|httpd|term-found|5|re:Terminal page: PROGDIR:Terminal/terminal.html|-|SYS:httpd DH0: 8099 -T -a no.such.host.invalid
+live|httpd|term-not-found|5|re:Looked for:|-|SYS:nopage/httpd DH0: 8099 -T
+live|httpd|term-not-found-names-them|5|re:AmiNetXDuo:Terminal/terminal.html|-|SYS:nopage/httpd DH0: 8099 -T
+live|httpd|page-without-t|5|re:-T is what turns the terminal on|-|SYS:httpd DH0: 8099 PAGE=DH0:terminal.html
 live|AddNetRoute|no-gateway|5|re:no GATEWAY was given|-|SYS:AddNetRoute DST=192.0.2.0
 live|DeleteNetRoute|no-such-route|5|re:no route to 198.51.100.0|-|SYS:DeleteNetRoute DST=198.51.100.0
 live|AddNetRoute|added|5|re:now go through 10.0.2.2|SYS:DeleteNetRoute DST=192.0.2.0|SYS:AddNetRoute DST=192.0.2.0 VIA=10.0.2.2
@@ -498,6 +514,14 @@ stage_group() {
     printf '10.0.2.2 v4only.test\n' >> "$stage/devs/Internet/hosts"
     printf 'amiga\r\nquit\r\n' > "$stage/telnetin.txt"
     printf 'hello from the amiga\n' > "$stage/greeting.txt"
+    # httpd's bare -T searches PROGDIR:Terminal/terminal.html, and PROGDIR: for
+    # SYS:httpd is the stage root.  A stub, not the real 400 KB page: nothing
+    # here ever serves it, the search only opens it.  The second copy of httpd
+    # is the other arm -- a drawer with no Terminal beside it, so the search
+    # runs out and has to say where it looked.
+    mkdir -p "$stage/Terminal" "$stage/nopage"
+    printf '<html><body>stub</body></html>\n' > "$stage/Terminal/terminal.html"
+    cp "$TOOLS/httpd" "$stage/nopage/httpd"
 }
 
 # ======================================================================= #

@@ -261,7 +261,7 @@ CPUARG=()
 set +e
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$BACKEND" -m "$MODEL" "${CPUARG[@]}" \
     -t "$WINDOW" \
-    -a "DH0:Public $GUESTPORT TERMINAL=DH0:terminal.html TRACE" \
+    -a "DH0:Public $GUESTPORT -T PAGE=DH0:terminal.html TRACE" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
     "$STAGE/terminal.html" "$STAGE/c" \
     ${HAVE_SSHKEY:+$([ "$HAVE_SSHKEY" = yes ] && echo "$STAGE/sshkey")} \
