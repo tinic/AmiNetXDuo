@@ -101,6 +101,9 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
         slot->req.ios2_Req.io_Message.mn_Length =
             (UWORD)sizeof(struct IOSana2Req);
         slot->req.ios2_Data = slot;
+
+        slot->hdr_len = 0;
+        slot->pad_len = 0;
     }
 }
 
@@ -228,6 +231,13 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
                 slot->hdr_len = 0;
             }
 
+            if (slot->pad_len != 0)
+            {
+                slot->packet->nx_packet_append_ptr -= slot->pad_len;
+                slot->packet->nx_packet_length     -= slot->pad_len;
+                slot->pad_len = 0;
+            }
+
             nx_packet_transmit_release(slot->packet);
             slot->packet = NULL;
         }
@@ -288,6 +298,91 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
                   "interface rather than freeing memory it writes into",
                   (long)busy);
     }
+}
+
+/*
+ * Ethernet's minimum frame, and who owes it.
+ *
+ * A frame shorter than 60 bytes before the FCS is a runt and the wire cannot
+ * carry one. Nothing in the SANA-II spec says whether the stack or the driver
+ * pads, and the drivers disagree: ariadne_ii zero-fills a short CMD_WRITE,
+ * a2065 raises its LANCE descriptor to 64 without supplying the bytes, and
+ * ariadne 1.50 does neither, handing the chip exactly what it was given and
+ * relying on the Am79C960's own APAD_XMT to fill the rest.
+ *
+ * Eight frames a boot are short enough to need this, all of them 28-byte ARP,
+ * so all three of those answers are load-bearing today and none of them is
+ * ours. Every one is a driver's private decision about a frame we built: the
+ * one that supplies no bytes transmits the tail of its own ring buffer, and
+ * the one that defers to APAD_XMT is one CSR4 bit away from a transmitter
+ * that shuts down on the first ARP, because an Am79C960 with that bit clear
+ * answers a short buffer with TX_BUFF|TX_UFLO and drops CSR0_TXON until the
+ * chip is reinitialised.
+ *
+ * The arithmetic is the part worth writing down, because it is not 60 on both
+ * arms. Cooked mode hands SANA-II the IP datagram and the driver builds the
+ * 14-byte Ethernet header itself, so nx_packet_length is the PAYLOAD and the
+ * minimum is 46. Raw mode has already prepended those 14 bytes above, so
+ * nx_packet_length is the whole frame and the minimum is 60. One expression
+ * covers both: what goes on the wire is the packet plus the header the driver
+ * will add, and the pad is 60 less that.
+ *
+ * The zeroes are written into the packet. Raising ios2_DataLength on its own
+ * would be shorter and would put whatever the pool block held last on the
+ * wire, which is a2065.device's own descriptor clamp: it lifts the byte count
+ * to 64 and copies nothing more, so the tail of its ring buffer is
+ * transmitted. Padding here keeps that clamp from ever engaging on a frame of
+ * ours, bar the four bytes between 60 and its 64.
+ *
+ * Both callers of ami_sana2_tx_send() come through here: the driver entry's
+ * NX_LINK_PACKET_SEND, PACKET_BROADCAST, ARP_SEND, ARP_RESPONSE_SEND and
+ * RARP_SEND (sana2_driver.c), and ami_sana2_inject() for bpf_write().
+ *
+ * ami_sana2_tx_reap() takes the zeroes back off before releasing the packet,
+ * exactly as it does the raw-mode header, because a queued TCP segment is
+ * handed back for retransmission and must carry its own length.
+ */
+static VOID ami_sana2_tx_pad(AmiSana2If *iface, AmiTxSlot *slot,
+                             NX_PACKET *packet)
+{
+    ULONG on_wire;
+    ULONG pad;
+    ULONG room;
+    ULONG i;
+
+    slot->pad_len = 0;
+
+    if (iface->hw_type != S2WireType_Ethernet)
+        return;
+
+#ifndef NX_DISABLE_PACKET_CHAIN
+    /* A chain is never this short, and the zeroes would belong on its tail
+       link rather than this one. */
+    if (packet->nx_packet_next != NX_NULL)
+        return;
+#endif
+
+    on_wire = packet->nx_packet_length +
+              (iface->raw_mode ? 0UL : (ULONG)AMI_ETH_HEADER_SIZE);
+
+    if (on_wire >= (ULONG)AMI_ETH_MIN_FRAME)
+        return;
+
+    pad  = (ULONG)AMI_ETH_MIN_FRAME - on_wire;
+    room = (ULONG)(packet->nx_packet_data_end - packet->nx_packet_append_ptr);
+
+    /* A pool block holds far more than 60 bytes and the frames this fires on
+       are shorter than that, so the room is always there. If it ever is not,
+       a runt is better than a write past the packet. */
+    if (room < pad)
+        return;
+
+    for (i = 0; i < pad; i++)
+        packet->nx_packet_append_ptr[i] = 0;
+
+    packet->nx_packet_append_ptr += pad;
+    packet->nx_packet_length     += pad;
+    slot->pad_len                 = (UWORD)pad;
 }
 
 static AmiTxSlot *ami_sana2_tx_claim(AmiSana2If *iface)
@@ -430,6 +525,11 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
         eth[12] = (UCHAR)(ether_type >> 8);
         eth[13] = (UCHAR)(ether_type);
     }
+
+    /* After the raw block, so the header it may have prepended is already in
+       nx_packet_length, and before the tap, so a capture shows the frame the
+       wire sees. */
+    ami_sana2_tx_pad(iface, slot, packet);
 
 #ifdef AMINETXDUO_BPF
     /*
