@@ -215,6 +215,34 @@ LONG netstack_hostname_offer(UWORD source, const char *name);
 BOOL netstack_iface_mdns(UWORD nx_index);
 
 /*
+ * Start or stop answering .local on that interface, now.
+ *
+ * The responder supports it: nx_mdns_enable() and nx_mdns_disable() are per
+ * interface index and both are written to be called on a running module --
+ * RFC 6762 8 requires a responder to re-probe on a link change, which is the
+ * same operation.  What was missing was any caller but start-up, so MDNS= was
+ * only ever read once.
+ *
+ * TRUE creates the responder if nothing had asked for one yet, joins
+ * 224.0.0.251 on the interface and probes there.  The services from
+ * DEVS:Internet/service_discovery are registered on an interface the first
+ * time it is enabled and not again, so an off/on pair re-announces rather than
+ * duplicating.  FALSE sends the RFC 6762 10.1 goodbye and leaves the group,
+ * and keeps the module: the goodbye is sent by its thread over the following
+ * 750 ms and deleting it here would throw the goodbye away.
+ *
+ * Neither direction waits for probing.  netstack_iface_mdns() is true from the
+ * moment the responder is enabled; netstack_mdns_hostname() is what answers
+ * once a name has been claimed.
+ *
+ * AMI_NET_OK, and turning on what is on is OK.  AMI_NET_ERR_STATE with no
+ * stack or no such interface, AMI_NET_ERR_NOMEM when the responder could not
+ * be created, AMI_NET_ERR_KERNEL when the module refused, AMI_NET_ERR_NODEV in
+ * a build without AMINETXDUO_MDNS.
+ */
+LONG netstack_iface_mdns_set(UWORD nx_index, BOOL enable);
+
+/*
  * The configuration of the interface at that NX index.  NOT
  * cfg->interfaces[nx_index]: that subscript is the config order, and
  * the two only agree while every configured interface opens.

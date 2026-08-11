@@ -177,6 +177,7 @@ cold|RemoveNetInterface|unknown-name|5|re:nothing to remove|-|SYS:RemoveNetInter
 cold|ConfigureNetInterface|no-stack|5|re:no interface to configure|-|SYS:ConfigureNetInterface eth0 ADDRESS 10.0.2.20
 cold|ConfigureNetInterface|bad-address|5|re:is not an address|-|SYS:ConfigureNetInterface eth0 ADDRESS notanaddress
 cold|ConfigureNetInterface|bad-configure|5|re:CONFIGURE takes DHCP and nothing else|-|SYS:ConfigureNetInterface eth0 CONFIGURE=AUTO
+cold|ConfigureNetInterface|bad-mdns|5|re:MDNS is YES or NO|-|SYS:ConfigureNetInterface eth0 MDNS=MAYBE
 cold|AddNetInterface|unknown-name|5|re:there is no interface called|-|SYS:AddNetInterface nosuchinterface
 # hostname reads the whole configuration into a static AmiConfig to answer with
 # the stack down, and ami_config_load() loads the netdb behind it, which is
@@ -237,6 +238,14 @@ live|RemoveNetInterface|unknown-name|5|re:there is no interface called|-|SYS:Rem
 # last step left it somewhere else would fail them and not itself.
 live|ConfigureNetInterface|unknown-name|5|re:there is no interface called|-|SYS:ConfigureNetInterface nosuchif ADDRESS 10.0.2.20
 live|ConfigureNetInterface|reconfigures|5|re:eth0: 10.0.2.15 netmask 255.255.255.0|SYS:ConfigureNetInterface eth0 QUIET ADDRESS 10.0.2.20/24|SYS:ConfigureNetInterface eth0 ADDRESS 10.0.2.15/24
+# The mDNS pair.  The first repetition of the ON row pays for the responder --
+# a 4 KB thread stack and the module, which are created the first time any
+# interface asks and kept afterwards -- and the flat runs after it are the
+# claim: an off/on cycle costs nothing, and in particular does not register the
+# services a second time.  eth0's file says nothing about MDNS, so the pair is
+# ordered to leave it off, which is where the boot left it.
+live|ConfigureNetInterface|mdns-on|5|re:eth0: answering .local here|SYS:ConfigureNetInterface eth0 QUIET MDNS=NO|SYS:ConfigureNetInterface eth0 MDNS=YES
+live|ConfigureNetInterface|mdns-off|5|re:eth0: no longer answering .local here|SYS:ConfigureNetInterface eth0 QUIET MDNS=YES|SYS:ConfigureNetInterface eth0 MDNS=NO
 live|AddNetInterface|already-up|5|re:online, address 10.0.2.15|-|SYS:AddNetInterface eth0
 live|AddNetInterface|unknown-name|5|re:there is no interface called|-|SYS:AddNetInterface nosuchinterface
 # Setting a name on a RUNNING stack: the ENV: and ENVARC: writes and the

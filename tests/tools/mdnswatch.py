@@ -111,16 +111,21 @@ def summarise(data):
 
     # Answers, authority and additional all share the resource-record layout,
     # so one walk covers them; rdata is skipped by its own length.
+    #
+    # The TTL is printed because it is what tells an announcement from a
+    # goodbye: RFC 6762 10.1 says a responder that stops answering re-sends the
+    # same records with a TTL of zero, so "A=amiga.local ttl=0" and
+    # "A=amiga.local ttl=120" are opposite events and were the same line.
     for _ in range(min(an + ns + ar, 16)):
         labels, offset = parse_name(data, offset)
         if offset + 10 > len(data):
             break
-        rrtype, _cls, _ttl, rdlen = struct.unpack(">HHIH",
-                                                  data[offset:offset + 10])
+        rrtype, _cls, ttl, rdlen = struct.unpack(">HHIH",
+                                                 data[offset:offset + 10])
         offset += 10 + rdlen
         if offset > len(data):
             break
-        names.append("%s=%s" % (rrname(rrtype), ".".join(labels)))
+        names.append("%s=%s ttl=%d" % (rrname(rrtype), ".".join(labels), ttl))
 
     return "%s id=0x%04x qd=%d an=%d ns=%d ar=%d %s" % (
         kind, xid, qd, an, ns, ar, " ".join(names))

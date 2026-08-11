@@ -3,6 +3,7 @@
  *
  *     C:ConfigureNetInterface eth0 [QUIET] [ADDRESS <a>[/<bits>]]
  *                                  [NETMASK <m>] [GATEWAY <g>|NONE]
+ *                                  [MDNS YES|NO]
  *                                  [CONFIGURE DHCP] [RELEASE] [TIMEOUT <secs>]
  *
  * Until now the only way to change what a live interface is addressed with was
@@ -31,6 +32,15 @@
  *                      not on an interface's own subnet -- which is exactly
  *                      what the ADDRESS in the same call has just decided, so
  *                      the two belong in one call and in this order.
+ *
+ *   MDNS/K             OURS, Roadshow has no such keyword and no mDNS at all.
+ *                      MDNS= is what DEVS:NetInterfaces/<name> is written with,
+ *                      so it is the same word here, taking the same YES and NO.
+ *                      It is on this command because answering .local is a
+ *                      property of one interface that this is the command for
+ *                      changing while the machine runs, and because it was
+ *                      until now the one thing in an interface file that could
+ *                      be asked for only at boot.
  *
  *   BROADCASTADDR      NetX Duo derives the broadcast address from the address
  *                      and the mask and has no separate one to set;
@@ -136,6 +146,18 @@
  * which is exactly what the ADDRESS in the same call has just decided.
  * GATEWAY NONE clears it.
  *
+ * MDNS IS THE ONE THING HERE THAT IS NOT AN ADDRESS. MDNS=YES makes this
+ * interface join 224.0.0.251 and probe for <HOSTNAME>.local on it, which takes
+ * about a second and is not waited for; MDNS=NO sends the RFC 6762 10.1
+ * goodbye, so every cache on the link drops the name at once rather than in two
+ * minutes, and leaves the group. ShowNetStatus reports which of the two an
+ * interface is in, and reports what is running rather than what was asked for.
+ *
+ * It combines with the rest: `ADDRESS 192.168.1.5/24 MDNS=YES` re-addresses the
+ * machine and announces the new address under the same name, in that order,
+ * because the responder takes the address the interface has when it is enabled
+ * and follows it afterwards.
+ *
  * NOTHING HERE IS PERSISTENT. This is the live interface, as Online, Offline
  * and AddNetRoute are. DEVS:NetInterfaces/<name> is not rewritten, so the next
  * boot brings the interface up the way that file says; NetSetup is what edits
@@ -175,7 +197,7 @@ static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("ConfigureNetInterface");
 
 #define TEMPLATE    "INTERFACE/A,QUIET/S,ADDRESS/K,NETMASK/K,GATEWAY/K,"     \
-                    "CONFIGURE/K,RELEASE=RELEASEADDRESS/S,TIMEOUT/K/N"
+                    "MDNS/K,CONFIGURE/K,RELEASE=RELEASEADDRESS/S,TIMEOUT/K/N"
 
 enum
 {
@@ -184,6 +206,7 @@ enum
     ARG_ADDRESS,
     ARG_NETMASK,
     ARG_GATEWAY,
+    ARG_MDNS,
     ARG_CONFIGURE,
     ARG_RELEASE,
     ARG_TIMEOUT,
@@ -208,9 +231,12 @@ enum
  * here and something else there, so naming the macro would compare against the
  * wrong number and print the wrong explanation.
  */
+#define CNI_EIO             5
+#define CNI_ENXIO           6
 #define CNI_EINVAL          22
 #define CNI_EADDRNOTAVAIL   49
 #define CNI_ENOTCONN        57
+#define CNI_ENOSYS          78
 
 static BOOL cni_quiet;
 
@@ -457,6 +483,8 @@ int main(int argc, char **argv)
     BOOL             have_address = FALSE;
     BOOL             have_netmask = FALSE;
     BOOL             have_gateway = FALSE;
+    BOOL             have_mdns    = FALSE;
+    BOOL             mdns_on      = FALSE;
     BOOL             want_dhcp    = FALSE;
     BOOL             want_release = FALSE;
     ULONG            timeout      = CNI_DHCP_TIMEOUT;
@@ -477,6 +505,7 @@ int main(int argc, char **argv)
     args[ARG_ADDRESS]   = 0;
     args[ARG_NETMASK]   = 0;
     args[ARG_GATEWAY]   = 0;
+    args[ARG_MDNS]      = 0;
     args[ARG_CONFIGURE] = 0;
     args[ARG_RELEASE]   = 0;
     args[ARG_TIMEOUT]   = 0;
@@ -486,8 +515,8 @@ int main(int argc, char **argv)
     {
         tool_fault(IoErr());
         tool_usage("<interface> [QUIET] [ADDRESS <a>[/<bits>]] [NETMASK <m>] "
-                   "[GATEWAY <g>|NONE] [CONFIGURE DHCP] [RELEASE] "
-                   "[TIMEOUT <secs>]",
+                   "[GATEWAY <g>|NONE] [MDNS YES|NO] [CONFIGURE DHCP] "
+                   "[RELEASE] [TIMEOUT <secs>]",
                    "Change what a running interface is addressed with.");
         return RETURN_ERROR;
     }
@@ -562,6 +591,30 @@ int main(int argc, char **argv)
         }
     }
 
+    /*
+     * The same two words DEVS:NetInterfaces takes, and no others: the file's
+     * parser accepts a wider set of spellings for a boolean and a command that
+     * accepted one the file did not would teach a spelling that fails at the
+     * next boot.
+     */
+    if (args[ARG_MDNS] != 0)
+    {
+        const char *m = (const char *)args[ARG_MDNS];
+
+        have_mdns = TRUE;
+
+        if (tool_stricmp(m, "YES") == 0)
+            mdns_on = TRUE;
+        else if (tool_stricmp(m, "NO") == 0)
+            mdns_on = FALSE;
+        else
+        {
+            tool_error("MDNS is YES or NO, not \"%s\"", (LONG)m);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+    }
+
     want_release = (args[ARG_RELEASE] != 0) ? TRUE : FALSE;
 
     if (args[ARG_CONFIGURE] != 0)
@@ -614,10 +667,10 @@ int main(int argc, char **argv)
         }
     }
 
-    if (!have_address && !have_netmask && !have_gateway && !want_dhcp &&
-        !want_release)
+    if (!have_address && !have_netmask && !have_gateway && !have_mdns &&
+        !want_dhcp && !want_release)
     {
-        tool_error("nothing to change: give ADDRESS, NETMASK, GATEWAY, "
+        tool_error("nothing to change: give ADDRESS, NETMASK, GATEWAY, MDNS, "
                    "CONFIGURE or RELEASE");
         FreeArgs(rda);
         return RETURN_ERROR;
@@ -756,71 +809,109 @@ int main(int argc, char **argv)
      * overwrite whatever the server actually granted with what this machine
      * would have preferred.
      */
-    if (want_dhcp || (!have_address && !have_netmask && !have_gateway))
+    if (!want_dhcp && (have_address || have_netmask || have_gateway))
     {
-        tool_netstatus_close(base);
-        FreeArgs(rda);
-        return RETURN_OK;
-    }
-
-    if (control(base, NETCTRL_INTERFACE_CONFIGURE, index, address, netmask,
-                gateway,
-                (have_address ? NETCTRL_F_ADDRESS : 0UL) |
-                (have_netmask ? NETCTRL_F_NETMASK : 0UL) |
-                (have_gateway ? NETCTRL_F_GATEWAY : 0UL), &err) != 0)
-    {
-        if (!cni_quiet)
+        if (control(base, NETCTRL_INTERFACE_CONFIGURE, index, address, netmask,
+                    gateway,
+                    (have_address ? NETCTRL_F_ADDRESS : 0UL) |
+                    (have_netmask ? NETCTRL_F_NETMASK : 0UL) |
+                    (have_gateway ? NETCTRL_F_GATEWAY : 0UL), &err) != 0)
         {
-            if (err == CNI_EADDRNOTAVAIL)
+            if (!cni_quiet)
             {
-                ami_config_format_ip(address, text, sizeof(text));
-                tool_error("%s would not take %s", (LONG)name, (LONG)text);
+                if (err == CNI_EADDRNOTAVAIL)
+                {
+                    ami_config_format_ip(address, text, sizeof(text));
+                    tool_error("%s would not take %s", (LONG)name, (LONG)text);
+                }
+                else if (err == CNI_EINVAL && have_gateway && gateway != 0)
+                {
+                    ami_config_format_ip(gateway, text, sizeof(text));
+                    tool_error("%s is not on any of this machine's own "
+                               "subnets, so nothing here can reach it",
+                               (LONG)text);
+                }
+                else
+                {
+                    tool_error("%s could not be reconfigured", (LONG)name);
+                }
             }
-            else if (err == CNI_EINVAL && have_gateway && gateway != 0)
+            tool_netstatus_close(base);
+            FreeArgs(rda);
+            return RETURN_FAIL;
+        }
+
+        /*
+         * Report what the interface now has rather than what was asked for.
+         * The two differ whenever only one of the pair was given, and the
+         * interface is the thing the next command will see.
+         */
+        if (find_index(base, name) >= 0 && (row = iface_row(index)) != NULL)
+        {
+            char maskbuf[16];
+
+            ami_config_format_ip(row->nsi_Address, text, sizeof(text));
+            ami_config_format_ip(row->nsi_NetMask, maskbuf, sizeof(maskbuf));
+            say("%s: %s netmask %s\n", (LONG)name, (LONG)text, (LONG)maskbuf);
+        }
+
+        if (have_gateway)
+        {
+            if (gateway == 0)
             {
-                ami_config_format_ip(gateway, text, sizeof(text));
-                tool_error("%s is not on any of this machine's own subnets, "
-                           "so nothing here can reach it", (LONG)text);
+                say("%s: the default gateway is cleared\n", (LONG)name);
             }
             else
             {
-                tool_error("%s could not be reconfigured", (LONG)name);
+                ami_config_format_ip(gateway, text, sizeof(text));
+                say("%s: the default gateway is %s\n", (LONG)name, (LONG)text);
             }
         }
-        tool_netstatus_close(base);
-        FreeArgs(rda);
-        return RETURN_FAIL;
     }
 
     /*
-     * Report what the interface now has rather than what was asked for. The
-     * two differ whenever only one of the pair was given, and the interface is
-     * the thing the next command will see.
+     * After the address, because the A record the responder claims is whatever
+     * the interface holds when it is enabled, and a machine that is being
+     * re-addressed and made findable in one call means the new address.
      */
-    if (find_index(base, name) >= 0 && (row = iface_row(index)) != NULL)
+    if (have_mdns)
     {
-        char maskbuf[16];
-
-        ami_config_format_ip(row->nsi_Address, text, sizeof(text));
-        ami_config_format_ip(row->nsi_NetMask, maskbuf, sizeof(maskbuf));
-        say("%s: %s netmask %s\n", (LONG)name, (LONG)text, (LONG)maskbuf);
-    }
-
-    if (have_gateway)
-    {
-        if (gateway == 0)
+        if (control(base, NETCTRL_INTERFACE_MDNS, index, 0, 0, 0,
+                    mdns_on ? (ULONG)NETCTRL_F_MDNS : 0UL, &err) != 0)
         {
-            say("%s: the default gateway is cleared\n", (LONG)name);
+            if (!cni_quiet)
+            {
+                if (err == CNI_ENOSYS)
+                    tool_error("this bsdsocket.library was built without "
+                               "mDNS, so there is nothing to switch");
+                else if (err == CNI_EIO)
+                    tool_error("%s would not %s answering .local", (LONG)name,
+                               (LONG)(mdns_on ? "start" : "stop"));
+                else if (err == CNI_ENXIO)
+                    tool_error("%s is no longer attached", (LONG)name);
+                else
+                    tool_error("%s: MDNS=%s was refused", (LONG)name,
+                               (LONG)(mdns_on ? "YES" : "NO"));
+            }
+            tool_netstatus_close(base);
+            FreeArgs(rda);
+            return RETURN_FAIL;
         }
+
+        /* Probing is three packets 250 ms apart and this does not wait for it,
+           so the line says what was started rather than what was claimed;
+           ShowNetStatus is where the name appears once it is this machine's. */
+        if (mdns_on)
+            say("%s: answering .local here, claiming the name now\n",
+                (LONG)name);
         else
-        {
-            ami_config_format_ip(gateway, text, sizeof(text));
-            say("%s: the default gateway is %s\n", (LONG)name, (LONG)text);
-        }
+            say("%s: no longer answering .local here, and the network has "
+                "been told to forget the name\n", (LONG)name);
     }
 
     /* Said last, so it is the line left on the screen. */
-    if (on_dhcp(base, index))
+    if (!want_dhcp && (have_address || have_netmask || have_gateway) &&
+        on_dhcp(base, index))
     {
         say("%s takes its address by DHCP, so the next lease writes over "
             "this.\n", (LONG)name);

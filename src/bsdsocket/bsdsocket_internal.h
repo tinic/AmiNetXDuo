@@ -243,8 +243,9 @@
  *      built against 7 could meet a revision-3 library that answers 6 and be
  *      told nothing useful.
  *   4  AMI_NETSTATUS_VERSION 8, NETCTRL_INTERFACE_CONFIGURE
+ *   5  AMI_NETSTATUS_VERSION 9, NETCTRL_INTERFACE_MDNS
  */
-#define BSD_LIB_REVISION    4
+#define BSD_LIB_REVISION    5
 
 /* SBTC_LOGFACILITY's documented default. The NDK's <sys/syslog.h> ships the
    priority codes only, so the BSD facility value is spelled out here. */

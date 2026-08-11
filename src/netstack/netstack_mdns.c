@@ -210,38 +210,19 @@ static VOID ami_ns_mdns_services(AmiNetStack *ns, UINT index)
 
 /* ------------------------------------------------------------- lifecycle */
 
-LONG ami_netstack_mdns_start(AmiNetStack *ns)
+/*
+ * The module, once. Separate from the enable loop because an interface can ask
+ * for mDNS at any time -- MDNS=YES on an interface added by hand, or
+ * ConfigureNetInterface MDNS=YES -- and on a machine whose interface files all
+ * said MDNS=NO there is nothing to enable it on yet.
+ *
+ * The instance is not created until something wants it, which is where the
+ * option's saving is: no thread, no group membership on 224.0.0.251, and no
+ * multicast query on any of these wires becomes work for this machine.
+ */
+static LONG ami_ns_mdns_create(AmiNetStack *ns)
 {
-    UINT  status;
-    UWORD i;
-    UWORD enabled = 0;
-
-    /*
-     * Nothing to do, and this is the point of the option: without a responder
-     * there is no thread, no group membership on 224.0.0.251, and no multicast
-     * query on any of these wires becomes work for this machine.  Enabling it
-     * per interface but always creating the instance would keep most of the
-     * cost.
-     */
-    {
-        UWORD n;
-        BOOL  wanted = FALSE;
-
-        for (n = 0; n < ns->ns_IfaceCount; n++)
-        {
-            if (ns->ns_IfaceMdns[n])
-            {
-                wanted = TRUE;
-                break;
-            }
-        }
-
-        if (!wanted)
-        {
-            AMI_INFO("netstack: mDNS off, no interface asked for it");
-            return AMI_NET_OK;
-        }
-    }
+    UINT status;
 
     if (ns == NULL || !ns->ns_IpCreated)
         return AMI_NET_ERR_STATE;
@@ -285,40 +266,93 @@ LONG ami_netstack_mdns_start(AmiNetStack *ns)
 
     ns->ns_MdnsCreated = TRUE;
 
+    return AMI_NET_OK;
+}
+
+/*
+ * One interface on.
+ *
+ * nx_mdns_enable() joins 224.0.0.251 on that interface and starts probing
+ * there; the module keeps a separate record set per interface index, so a
+ * machine with two interfaces answers on both.
+ *
+ * An interface with no address yet is still enabled: the module registers for
+ * address changes (nx_ip_address_change_notify_internal) and fills the A
+ * record in when one arrives, which is the DHCP-then-AutoIP sequence this
+ * stack's startup performs, and also what a hand-added DHCP interface does.
+ *
+ * NX_MDNS_ALREADY_ENABLED is success. It is reachable whenever the caller and
+ * ns_IfaceMdns[] disagree, which the failure path below deliberately arranges.
+ */
+static LONG ami_ns_mdns_enable_one(AmiNetStack *ns, UWORD index)
+{
+    UINT status = nx_mdns_enable(&ns->ns_Mdns, (UINT)index);
+
+    if (status != NX_MDNS_SUCCESS && status != NX_MDNS_ALREADY_ENABLED)
+    {
+        AMI_WARN("netstack: mDNS not enabled on interface %ld (%ld)",
+                 (long)index, (long)status);
+        /* So that what the status call reports is what is running. */
+        ns->ns_IfaceMdns[index] = FALSE;
+        return AMI_NET_ERR_KERNEL;
+    }
+
+    ns->ns_IfaceMdns[index] = TRUE;
+
     /*
-     * Per interface. nx_mdns_enable() joins 224.0.0.251 on that interface and
-     * starts probing there; the module keeps a separate record set per
-     * interface index, so a machine with two interfaces answers on both.
-     *
-     * An interface with no address yet is still enabled: the module registers
-     * for address changes (nx_ip_address_change_notify_internal) and fills the
-     * A record in when one arrives, which is the DHCP-then-AutoIP sequence
-     * this stack's startup performs.
+     * After nx_mdns_enable(), because the module keeps a record set per
+     * interface index and a service added to an interface that is not enabled
+     * would never be announced. Once per interface: a disable suspends these
+     * records rather than deleting them, and the enable above has already put
+     * them back on the wire.
      */
+    if (!ns->ns_IfaceMdnsSvc[index])
+    {
+        ami_ns_mdns_services(ns, (UINT)index);
+        ns->ns_IfaceMdnsSvc[index] = TRUE;
+    }
+
+    return AMI_NET_OK;
+}
+
+LONG ami_netstack_mdns_start(AmiNetStack *ns)
+{
+    UWORD i;
+    UWORD enabled = 0;
+    UWORD wanted  = 0;
+    LONG  err;
+
+    if (ns == NULL || !ns->ns_IpCreated)
+        return AMI_NET_ERR_STATE;
+
+    for (i = 0; i < ns->ns_IfaceCount; i++)
+    {
+        if (ns->ns_IfaceMdns[i])
+            wanted++;
+    }
+
+    if (wanted == 0)
+    {
+        AMI_INFO("netstack: mDNS off, no interface asked for it");
+        return AMI_NET_OK;
+    }
+
+    err = ami_ns_mdns_create(ns);
+    if (err != AMI_NET_OK)
+    {
+        /* Nothing is answering, so nothing may claim to be. */
+        for (i = 0; i < ns->ns_IfaceCount; i++)
+            ns->ns_IfaceMdns[i] = FALSE;
+        return err;
+    }
+
     for (i = 0; i < ns->ns_IfaceCount; i++)
     {
         if (!ns->ns_IfaceMdns[i])
-        {
             continue;
-        }
 
-        status = nx_mdns_enable(&ns->ns_Mdns, (UINT)i);
-        if (status != NX_SUCCESS)
-        {
-            AMI_WARN("netstack: mDNS not enabled on interface %ld (%ld)",
-                     (long)i, (long)status);
-            /* So that what the status call reports is what is running. */
-            ns->ns_IfaceMdns[i] = FALSE;
-            continue;
-        }
-        enabled++;
-
-        /*
-         * After nx_mdns_enable(), because the module keeps a record set per
-         * interface index and a service added to an interface that is not
-         * enabled would never be announced.
-         */
-        ami_ns_mdns_services(ns, (UINT)i);
+        if (ami_ns_mdns_enable_one(ns, i) == AMI_NET_OK)
+            enabled++;
     }
 
     if (enabled == 0)
@@ -335,13 +369,95 @@ LONG ami_netstack_mdns_start(AmiNetStack *ns)
     return AMI_NET_OK;
 }
 
+/*
+ * One interface, either way, at any time. netstack_iface_mdns_set() is the
+ * published entry point and this is the whole of it; the interface add and
+ * remove paths in netstack.c call it too, so there is one place that decides
+ * what MDNS= means and one place that keeps ns_IfaceMdns[] honest.
+ *
+ * OFF does not delete the module even when it was the last interface. The
+ * disable queues the RFC 6762 10.1 goodbye, the same records re-announced with
+ * a TTL of zero so every cache on the link drops the name at once, and the
+ * responder's own thread sends it over the following 750 ms; deleting the
+ * instance here is the one way to make sure it never went out. What is left
+ * running is a thread that has left every multicast group and receives
+ * nothing, so the per-packet cost the option exists to avoid is gone either
+ * way, and the interface can be turned back on without re-probing from a cold
+ * cache.
+ */
+LONG ami_netstack_mdns_iface_set(AmiNetStack *ns, UWORD index, BOOL enable)
+{
+    AmiNetCaller *caller;
+    LONG          err;
+    UINT          status;
+
+    if (ns == NULL || !ns->ns_IpCreated ||
+        index >= (UWORD)AMI_CFG_MAX_INTERFACES ||
+        index >= (UWORD)NX_MAX_PHYSICAL_INTERFACES)
+        return AMI_NET_ERR_STATE;
+
+    if (!enable && !ns->ns_MdnsCreated)
+    {
+        /* Never started, so there is nothing to stop and nothing to correct. */
+        ns->ns_IfaceMdns[index] = FALSE;
+        return AMI_NET_OK;
+    }
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return AMI_NET_ERR_STATE;
+
+    if (enable)
+    {
+        err = ami_ns_mdns_create(ns);
+        if (err == AMI_NET_OK)
+        {
+            err = ami_ns_mdns_enable_one(ns, index);
+            if (err == AMI_NET_OK)
+            {
+                if ((UWORD)(index + 1) > ns->ns_IfaceCount)
+                    ns->ns_IfaceCount = (UWORD)(index + 1);
+
+                AMI_INFO("netstack: mDNS on, interface %ld is probing for "
+                         "'%s.local'", (long)index, ns->ns_MdnsLabel);
+            }
+        }
+    }
+    else
+    {
+        status = nx_mdns_disable(&ns->ns_Mdns, (UINT)index);
+
+        /* NX_MDNS_NOT_ENABLED is the answer for an interface that was already
+           off, which is what was asked for. */
+        err = (status == NX_MDNS_SUCCESS || status == NX_MDNS_NOT_ENABLED)
+                  ? AMI_NET_OK : AMI_NET_ERR_KERNEL;
+
+        /* Cleared either way. A module that would not disable an interface is
+           not answering on it in any sense a caller can use, and leaving the
+           flag set is the defect this whole call exists to remove. */
+        ns->ns_IfaceMdns[index] = FALSE;
+
+        if (err == AMI_NET_OK && status == NX_MDNS_SUCCESS)
+            AMI_INFO("netstack: mDNS off on interface %ld, goodbye sent",
+                     (long)index);
+        else if (err != AMI_NET_OK)
+            AMI_WARN("netstack: mDNS would not stop on interface %ld (%ld)",
+                     (long)index, (long)status);
+    }
+
+    ami_netstack_leave_free(caller);
+
+    return err;
+}
+
 VOID ami_netstack_mdns_stop(AmiNetStack *ns)
 {
     UWORD n;
 
     for (n = 0; n < (UWORD)AMI_CFG_MAX_INTERFACES; n++)
     {
-        ns->ns_IfaceMdns[n] = FALSE;
+        ns->ns_IfaceMdns[n]    = FALSE;
+        ns->ns_IfaceMdnsSvc[n] = FALSE;
     }
 
     UWORD i;

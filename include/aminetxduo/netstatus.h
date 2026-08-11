@@ -68,10 +68,10 @@ extern "C" {
 
 #define AMI_NETSTATUS_MAGIC         0x414E5351UL    /* 'ANSQ' */
 /*
- * 8 since NETCTRL_INTERFACE_CONFIGURE, the DHCP three and
- * NETCTRL_HOSTNAME_SET, which also grew the control block by nsc_HostName. A
- * caller and a library that disagree fail every call rather than half of them,
- * which is why the commands and the library ship together.
+ * 9 since NETCTRL_INTERFACE_MDNS. 8 was NETCTRL_INTERFACE_CONFIGURE, the DHCP
+ * three and NETCTRL_HOSTNAME_SET, which also grew the control block by
+ * nsc_HostName. A caller and a library that disagree fail every call rather
+ * than half of them, which is why the commands and the library ship together.
  *
  * This is the compatibility mechanism for a record that grows. The size check in
  * bsd_NetStackQuery() is not: it rejects a buffer too small for the record, and
@@ -82,10 +82,13 @@ extern "C" {
  * without moving this leaves two different header shapes both claiming the same
  * version, and the checks at src/bsdsocket/netstatus.c:1193 and :1407 are exact
  * equality in both directions, so they cannot tell them apart. That has already
- * happened once: NETCTRL_INTERFACE_ADD and NETCTRL_STACK_HOLD were both added
- * under 7, and the comment here still said 6 while the constant said 7.
+ * happened twice. NETCTRL_INTERFACE_ADD and NETCTRL_STACK_HOLD were both added
+ * under 7 while the comment still said 6. Then the DHCP three (b40dc23) and
+ * NETCTRL_HOSTNAME_SET (f629b38) were added with this constant left at 8, and
+ * the sentence above was rewritten afterwards to cover them, which makes the
+ * two agree now and did not make the libraries in between distinguishable.
  */
-#define AMI_NETSTATUS_VERSION       8
+#define AMI_NETSTATUS_VERSION       9
 
 /* Fixed widths every record shares.  Up here rather than beside the first
    record that uses one, because NetStatusSystem needs NETSTATUS_NAME_LEN and
@@ -134,8 +137,8 @@ extern "C" {
  * caller touches still answers everything here, and refusing it would be a
  * wrong diagnosis.
  *
- * 4 because AMI_NETSTATUS_VERSION is 8 and revision 4 is the first library
- * that speaks it. A revision-3 library answers 7, which the exact-equality
+ * 5 because AMI_NETSTATUS_VERSION is 9 and revision 5 is the first library
+ * that speaks it. A revision-4 library answers 8, which the exact-equality
  * check below refuses on every call; without this the refusal arrives as
  * EINVAL from whichever call happened to be first, and reads like the feature
  * being absent rather than like half an install.
@@ -146,7 +149,7 @@ extern "C" {
  * to stop looking. This check runs before any call and says the true thing:
  * finish the install.
  */
-#define AMI_NETSTATUS_MIN_REVISION  4
+#define AMI_NETSTATUS_MIN_REVISION  5
 
 /* ------------------------------------------------------------ selectors,
  *
@@ -954,12 +957,52 @@ typedef struct NetStatusService
  */
 #define NETCTRL_HOSTNAME_SET    23  /* nsc_HostName                          */
 
+/*
+ * Answer .local on one interface, or stop. nsc_Index names it and
+ * NETCTRL_F_MDNS in nsc_Flags is the direction: set turns the responder on,
+ * clear turns it off. A switch and not a field, so there is no third state to
+ * mean "leave it".
+ *
+ * This is what MDNS= in DEVS:NetInterfaces asked for at boot, asked for again
+ * while the machine is running. Until this existed the flag NETSTATUS_IF_MDNS
+ * reports was set by a runtime interface add and never acted on, so an
+ * interface joined no group, probed for no name and answered nothing while
+ * saying it did.
+ *
+ * ON creates the responder if no interface had asked for one yet -- the module
+ * is not created at boot when nothing wants it, which is where its saving is --
+ * then joins 224.0.0.251 on that interface and probes for <HOSTNAME>.local
+ * there (RFC 6762 8). The services in DEVS:Internet/service_discovery are
+ * registered on the interface the first time it is enabled and not again, so
+ * an off/on pair re-announces them rather than duplicating them.
+ *
+ * OFF sends the RFC 6762 10.1 goodbye, the records re-announced with a TTL of
+ * zero so every cache on the link drops the name at once, then leaves the
+ * group. The responder object stays: the goodbye is transmitted by its own
+ * thread over the following 750 ms, and deleting it here would be the one way
+ * to guarantee the goodbye never left.
+ *
+ * Neither direction waits. Probing is three packets 250 ms apart, so a name is
+ * claimed about a second after ON returns; NETSTATUS_INTERFACES' MDNS flag is
+ * true from the moment the responder is enabled, which is what "answering
+ * .local here" means, and NETSTATUS_SYSTEM's nss_MdnsName is what says the
+ * probe finished.
+ *
+ * ENXIO for an interface index that is not attached, ENETDOWN with no stack,
+ * EIO when the module refused, ENOMEM when the responder could not be created,
+ * ENOSYS on a build without AMINETXDUO_MDNS. Turning on what is already on and
+ * off what is already off both succeed.
+ */
+#define NETCTRL_INTERFACE_MDNS  24  /* nsc_Index, NETCTRL_F_MDNS             */
+
 /* Flags for nsc_Flags. Zero unless an operation above says otherwise. */
 #define NETCTRL_F_FORCE         0x00000001
 /* Which of NETCTRL_INTERFACE_CONFIGURE's three fields were given at all. */
 #define NETCTRL_F_ADDRESS       0x00000002
 #define NETCTRL_F_NETMASK       0x00000004
 #define NETCTRL_F_GATEWAY       0x00000008
+/* NETCTRL_INTERFACE_MDNS: set is on, clear is off. */
+#define NETCTRL_F_MDNS          0x00000010
 
 typedef struct NetStatusControl
 {
