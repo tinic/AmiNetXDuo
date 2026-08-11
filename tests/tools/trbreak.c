@@ -39,6 +39,8 @@
  *
  *   key=value, one per line, and an exit code:
  *
+ * `child_rc` is what the command itself returned.  A break is RETURN_WARN, 5.
+ *
  *     0  the command exited within CEILING of the break
  *     5  it did not, OR it had already finished when the break was sent, which
  *        is `result=vacuous` and means the command line was too short to
@@ -62,10 +64,21 @@
    NP_Cli the process is named by dos.library and FindTask() is no answer. */
 #define TB_CHILD_GONE       SIGBREAKF_CTRL_F
 
-static struct Task *tb_parent;
+static struct Task   *tb_parent;
+static volatile LONG  tb_child_rc;
 
-static VOID tb_child_exit(VOID)
+/*
+ * dos.library calls NP_ExitCode with the return code in d0 and NP_ExitData in
+ * d1, in the CHILD's context.  Taking d0 is the only way to see what the
+ * command returned: a break is supposed to come back as RETURN_WARN, and a
+ * command that exits promptly with the wrong code has still got it wrong.
+ */
+static VOID tb_child_exit(register LONG rc   __asm("d0"),
+                          register APTR data __asm("d1"))
 {
+    (VOID)data;
+
+    tb_child_rc = rc;
     Signal(tb_parent, TB_CHILD_GONE);
 }
 
@@ -260,6 +273,7 @@ int main(int argc, char **argv)
     }
 
     Printf((CONST_STRPTR)"exit_after_break=%ld\n", (LONG)after);
+    Printf((CONST_STRPTR)"child_rc=%ld\n", (LONG)tb_child_rc);
 
     if ((SetSignal(0UL, 0UL) & TB_CHILD_GONE) == 0)
     {

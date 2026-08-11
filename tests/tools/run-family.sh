@@ -350,7 +350,7 @@ traceroute/both|10|SYS:traceroute $DUAL -m 1 -q 1 -w 5 -n -4 -6|+-4 and -6 canno
 # still running when the break lands.  The second assertion is the other half
 # of the same defect: after an ignored break every remaining hop printed as its
 # own number and an empty line.
-traceroute/break|0|SYS:TrBreak SECONDS 8 CEILING 3 SYS:traceroute 192.0.2.1 -m 30 -q 3 -w 2 -n -4|+alive_at_break=yes|+result=broke|-^ *[0-9]+ *$
+traceroute/break|0|SYS:TrBreak SECONDS 8 CEILING 3 SYS:traceroute 192.0.2.1 -m 30 -q 3 -w 2 -n -4|+alive_at_break=yes|+result=broke|+child_rc=5|-^ *[0-9]+ *$
 fetch/v4|0|SYS:fetch http://$ECHO/ TIMEOUT 40 TO DH0:f4.txt -4|+HTTP/1.[01] 200
 fetch/v6|0|SYS:fetch http://$ECHO/ TIMEOUT 40 TO DH0:f6.txt -6|+HTTP/1.[01] 200
 fetch/no-aaaa|10|SYS:fetch http://$V4ONLY_NAME/ TIMEOUT 10 -6|+has no IPv6 address, and -6 was given
