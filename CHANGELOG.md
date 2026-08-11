@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `ConfigureNetInterface eth0 MDNS=YES` starts answering to `<name>.local` on an interface that is already running, and `MDNS=NO` stops. An interface brought up after the machine started said it was answering and was not: the setting was recorded and the responder was never told, and an interface removed and added back inherited whatever the last one had
+
 - `httpd`'s terminal is a real terminal. AmigaDOS ends a line with a single character where a terminal expects two, so every directory listing used to walk off the right of the screen a step at a time, and colour came out as the codes that were meant to produce it. It also has the editing a Shell should have: history on the cursor keys, a line you can move around in, and a window that resizes
 
 - Ariadne and Ariadne II carry traffic. Both cards took an address and then no connection would open: we told the driver that copying each frame out had failed, for every TCP frame, while the frame sat complete in the card's buffer. Most drivers never ask, so it went unseen on every other card; Ariadne's asks and refused the frame. An Ariadne now reads faster than any other card we have measured
