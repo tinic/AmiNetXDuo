@@ -41,9 +41,11 @@ fails=0
 incomplete=0
 
 for run in $(seq 1 "$REPEAT"); do
-    pkill -f "[a]miberry"  2>/dev/null
-    pkill -f "[h]ttppeer"  2>/dev/null
-    pkill -f "[r]un-tls13" 2>/dev/null
+    # Scoped to this checkout by the config path the emulator was started with.
+    # A bare `pkill -f amiberry` on the lab machine kills whatever else is
+    # booted there -- another agent's run, the demo instance -- and the run
+    # that did it looks fine afterwards.
+    pkill -f "$PWD/build/amiberry-" 2>/dev/null
     sleep 3
 
     port=11000

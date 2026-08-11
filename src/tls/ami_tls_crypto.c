@@ -1477,6 +1477,13 @@ static NX_CRYPTO_METHOD ami_crypto_method_hmac_sha256 =
  * Not a fallback and not a supported configuration; the fallback for a
  * suspected bug in the assembly is AMINETXDUO_CRYPTO68K_ASM=OFF, which keeps
  * these methods and swaps the primitives underneath them.
+ *
+ * All or nothing: swapping one row by hand answers NX_CRYPTO_PTR_ERROR.
+ * _nx_secure_tls_session_create_ext() partitions the metadata area once from
+ * the sizes in these tables, and the two SHA-256 contexts differ -- 108 bytes
+ * against 360, the vendored one keeping the 64-word message schedule that
+ * c68k_sha256 builds on the stack.  A half-swapped table gets a region sized
+ * from one and an init checking against the other.
  */
 #ifdef AMINETXDUO_TLS_STOCK_BULK
 #define AMI_BULK_AES128     crypto_method_aes_cbc_128
