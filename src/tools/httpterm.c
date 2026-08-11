@@ -1398,6 +1398,20 @@ VOID http_term_service(VOID)
         {
             case ACTION_READ:
             case ACTION_WRITE:
+                /* Nothing asked for is nothing to wait for.  A filesystem
+                   answers a zero-length read or write with zero at once, and
+                   parking one instead blocks the caller for ever: term_retry()
+                   below has no way to make progress on it, because "took no
+                   bytes" is how it recognises a full ring.  Dropbear's
+                   writechannel_fallback() does exactly this write on every
+                   pass where the channel buffer is empty, which is what hung
+                   an interactive ssh session the instant the far end spoke. */
+                if (pkt->dp_Arg3 <= 0)
+                {
+                    term_reply(pkt, 0, 0);
+                    break;
+                }
+
                 /* One held packet per pipe is enough: the Shell is one
                    process and is inside one Read() at a time.  A second is a
                    protocol error on its side and is refused rather than
