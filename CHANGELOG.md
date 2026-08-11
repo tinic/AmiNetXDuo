@@ -9,6 +9,10 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A name looked up once could answer a different, shorter name afterwards. The cache compared only as far as the name being asked for, so a lookup of `bank.example.com.evil.net` would answer every later lookup of `bank.example.com` from it, for as long as that record lived
+- A short name resolves. `ssh playhouse2` failed where `ssh playhouse2.local.tinic.net` worked: the domain the DHCP server hands out was thrown away whenever the configuration named one of its own, the newer option carrying a list of domains was never asked for, and the `SEARCH` line in `DEVS:Internet/name_resolution` was read, reported by `ShowNetStatus`, and never used for anything
+- `ShowNetStatus` says which domains a short name will be tried under
+
 - `ConfigureNetInterface eth0 MDNS=YES` starts answering to `<name>.local` on an interface that is already running, and `MDNS=NO` stops. An interface brought up after the machine started said it was answering and was not: the setting was recorded and the responder was never told, and an interface removed and added back inherited whatever the last one had
 
 - `httpd`'s terminal is a real terminal. AmigaDOS ends a line with a single character where a terminal expects two, so every directory listing used to walk off the right of the screen a step at a time, and colour came out as the codes that were meant to produce it. It also has the editing a Shell should have: history on the cursor keys, a line you can move around in, and a window that resizes
