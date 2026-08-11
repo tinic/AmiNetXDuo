@@ -24,6 +24,13 @@
  *   WebSocket upgrade to the same address gets an AmigaDOS Shell: RFC 6455 in
  *   src/tools/httpws.c, the Shell itself in src/tools/httpterm.c.
  *
+ *   If a file of the same name with `.gz` on the end sits beside it, that is
+ *   served instead to a browser that offered `Accept-Encoding: gzip`.  It is
+ *   read and sent, never made: there is no compressor here and there is not
+ *   going to be one.  The page we ship has such a sibling, built by
+ *   tools/web/build.mjs and committed with it; a page somebody wrote
+ *   themselves has none and is served as it always was.
+ *
  *   ANYONE WHO CAN REACH THE PORT GETS THAT SHELL.  There is no credential and
  *   nothing to configure, which is the same shape as the write methods above:
  *   this server has never had authentication and does not pretend to.  The
@@ -397,6 +404,7 @@ struct HttpConn
     UBYTE   framed;                 /* the whole head was read, so the     */
                                     /* body's length is known              */
     UBYTE   drain;                  /* a refused body still to be read away */
+    UBYTE   gzip_ok;                /* Accept-Encoding offered gzip         */
     HttpChunk chunk;                /* HTTP_CHUNK_OFF unless it is chunked  */
     ULONG   body_start;             /* seconds, when the body began         */
     ULONG   body_got;               /* bytes of it that have arrived        */
@@ -557,6 +565,9 @@ static BOOL   httpd_trace   = FALSE;
    answers both questions -- where the page is, and whether there is a
    terminal at all -- because there is no third state. */
 static char   httpd_term_page[HTTP_PATH_MAX];
+/* The same name with .gz on the end.  A name only -- whether a file of it
+   exists is asked per request, not here -- and "" when it would not fit. */
+static char   httpd_term_gz[HTTP_PATH_MAX];
 static LONG   httpd_gmt_west = 0;       /* minutes west of GMT, from locale */
 static struct Library *httpd_sb = NULL;
 
@@ -1232,6 +1243,7 @@ static VOID httpd_reset(HttpConn *c)
     c->had_body    = 0;
     c->framed      = 0;
     c->drain       = 0;
+    c->gzip_ok     = 0;
     http_chunk_off(&c->chunk);
     c->body_start  = 0;
     c->body_got    = 0;
@@ -1469,6 +1481,10 @@ static VOID httpd_etag(ULONG size, const struct DateStamp *ds,
     if (!ok)
         out[0] = '\0';
 }
+
+/* Is this entity tag one of the ones an If-None-Match listed?  Defined with
+   the rest of the precondition machinery, used up here by the terminal. */
+static BOOL httpd_etag_listed(const char *list, const char *etag);
 
 /* The same, for a path nothing has looked at yet.  "" when there is nothing
    there, or when it is a drawer. */
@@ -3680,12 +3696,57 @@ static VOID httpd_do_get(HttpConn *c)
  * It is measured with Seek() rather than Examine(): the path comes from the
  * command line and not from a resolved HttpPath, so there is no FileInfoBlock
  * already filled in for it, and opening it is what has to succeed anyway.
+ *
+ * TWO FILES, ONE ADDRESS
+ *
+ *   The page is 400 KB, and an A1200 spends over three seconds putting it on
+ *   the wire.  Nothing here compresses it: a deflate on a 68020 would spend
+ *   the time it saved, and worse, would spend it on every request.  What is
+ *   served instead is a file that was compressed on the machine that built it
+ *   -- terminal.html.gz beside terminal.html -- chosen by nothing more than
+ *   the request saying `Accept-Encoding: gzip`.
+ *
+ *   The sibling is looked for by SPELLING, and looked for HERE rather than
+ *   once at startup.  One extra Open() that fails, on a fetch that happens
+ *   when somebody opens a browser tab, is not a cost worth avoiding, and what
+ *   it buys is that there is no remembered answer to be wrong: -T pointing at
+ *   somebody's own page finds nothing beside it and is served exactly as it
+ *   was, and a compressed copy that is deleted, renamed or unreadable is the
+ *   same case and not a 503.
+ *
+ * WHAT IS NOT WEAKENED
+ *
+ *   Cache-Control stays no-cache.  The page is the client half of this
+ *   server's own protocol and a stale copy in a browser is a version mismatch
+ *   nobody can see.  The ETag does not change that: no-cache means "ask me
+ *   every time", not "do not keep it", so the browser still asks -- and what
+ *   it gets back when nothing has changed is 304 and no body, which is the
+ *   same guarantee for a few hundred bytes instead of a few hundred thousand.
  */
 static VOID httpd_term_page_get(HttpConn *c)
 {
-    LONG size;
+    const char *path = httpd_term_page;
+    BOOL        gzipped = FALSE;
+    char        etag[HTTPD_ETAG_MAX];
+    LONG        size;
 
-    c->file = Open((CONST_STRPTR)httpd_term_page, MODE_OLDFILE);
+    c->file = (BPTR)0;
+
+    if (c->gzip_ok && httpd_term_gz[0] != '\0')
+    {
+        c->file = Open((CONST_STRPTR)httpd_term_gz, MODE_OLDFILE);
+        if (c->file != (BPTR)0)
+        {
+            path    = httpd_term_gz;
+            gzipped = TRUE;
+        }
+    }
+
+    /* `path` is still the plain page unless the line above moved it, so this
+       is both the ordinary open and the fallback. */
+    if (c->file == (BPTR)0)
+        c->file = Open((CONST_STRPTR)path, MODE_OLDFILE);
+
     if (c->file == (BPTR)0)
     {
         /* The command line named it and it was there when the server started,
@@ -3704,13 +3765,39 @@ static VOID httpd_term_page_get(HttpConn *c)
         return;
     }
 
+    /* Of the file being served, so the two forms of the page never share a
+       validator: they are different bytes and a client that was handed one
+       must not be told the other is what it already has. */
+    httpd_etag_of(path, etag, sizeof(etag));
+
+    if (etag[0] != '\0' && c->ifnone[0] != '\0' &&
+        httpd_etag_listed(c->ifnone, etag))
+    {
+        (VOID)Close(c->file);
+        c->file = (BPTR)0;
+
+        /* RFC 7232 4.1: a 304 carries the validator and no body, and no
+           Content-Length either -- the status is what ends it. */
+        httpd_begin(c, 304);
+        httpd_header(c, "ETag", etag);
+        httpd_header(c, "Cache-Control", "no-cache");
+        httpd_header(c, "Vary", "Accept-Encoding");
+        httpd_finish_head(c);
+        c->producer = PROD_NONE;
+        return;
+    }
+
     httpd_begin(c, 200);
     httpd_header(c, "Content-Type", "text/html; charset=iso-8859-1");
+    if (gzipped)
+        httpd_header(c, "Content-Encoding", "gzip");
+    /* Two answers on one address, and which one arrived depends on a request
+       header: anything between here and the browser has to key on it too. */
+    httpd_header(c, "Vary", "Accept-Encoding");
     httpd_header_num(c, "Content-Length", (ULONG)size);
-    /* The page is the client half of this server's own protocol, so a stale
-       copy in a browser cache is a mismatch nobody can see.  It is one file
-       on a LAN; asking for it every time costs nothing worth keeping. */
     httpd_header(c, "Cache-Control", "no-cache");
+    if (etag[0] != '\0')
+        httpd_header(c, "ETag", etag);
 
     httpd_finish_head(c);
 
@@ -5028,6 +5115,64 @@ static ULONG httpd_parse_timeout(const char *value)
 }
 
 /*
+ * Does this Accept-Encoding offer gzip?  RFC 7231 5.3.4: a comma list of
+ * codings, each optionally with a quality, and `q=0` means "do not send me
+ * this one" rather than "I would rather not".
+ *
+ * `*` is deliberately not honoured.  It says "anything", and the only thing
+ * this server has is a file somebody compressed at build time; a client that
+ * sent `*` without naming gzip is one whose idea of "anything" is untested,
+ * and the plain page always works.
+ */
+static BOOL httpd_offers_gzip(const char *v)
+{
+    while (*v != '\0')
+    {
+        BOOL is_gzip;
+        BOOL refused = FALSE;
+
+        while (*v == ' ' || *v == '\t' || *v == ',')
+            v++;
+
+        is_gzip = (hs_nicmp(v, "gzip", 4) == 0 &&
+                   (v[4] == '\0' || v[4] == ',' || v[4] == ';' ||
+                    v[4] == ' '  || v[4] == '\t')) ? TRUE : FALSE;
+
+        /* To the end of this coding, reading any q= on the way past.  A
+           quality of zero is a refusal and 0.000 is still zero, so what is
+           looked for is a nonzero digit after the point. */
+        while (*v != '\0' && *v != ',')
+        {
+            if (*v == ';')
+            {
+                const char *q = v + 1;
+
+                while (*q == ' ' || *q == '\t')
+                    q++;
+
+                if ((*q == 'q' || *q == 'Q') && q[1] == '=')
+                {
+                    BOOL zero = TRUE;
+
+                    for (q += 2; *q != '\0' && *q != ',' && *q != ';'; q++)
+                        if (*q >= '1' && *q <= '9')
+                            zero = FALSE;
+
+                    if (zero)
+                        refused = TRUE;
+                }
+            }
+            v++;
+        }
+
+        if (is_gzip)
+            return refused ? FALSE : TRUE;
+    }
+
+    return FALSE;
+}
+
+/*
  * The request head, from the first byte to the blank line.  Returns FALSE
  * having already answered.
  *
@@ -5302,6 +5447,15 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
                second for the answer; the Windows redirector waits. */
             if (hs_nicmp(httpd_value, "100-continue", 12) == 0)
                 c->expect = 1;
+        }
+        else if (hs_equal(name, "Accept-Encoding"))
+        {
+            /* Read for the terminal's page and nothing else: that is the one
+               thing here with a compressed copy beside it, made at build time
+               on a machine that has a compressor.  A value too long to fit
+               was cut, and a cut list may have lost the coding that was
+               refused, so it is read as no offer at all. */
+            c->gzip_ok = (!cut && httpd_offers_gzip(httpd_value)) ? 1 : 0;
         }
         else if (hs_equal(name, "If-None-Match"))
         {
@@ -7115,6 +7269,28 @@ int main(int argc, char **argv)
 
         hs_copy(httpd_term_page, sizeof(httpd_term_page),
                 (const char *)args[ARG_TERMINAL]);
+
+        /*
+         * The name of the compressed copy, which is the page's own with .gz
+         * on the end.  A NAME and not a decision: whether there is a file of
+         * that name is asked when a browser asks for one, not here.  Built
+         * once because the spelling cannot change; left empty when it would
+         * not fit, which is the only way this can fail.
+         */
+        {
+            ULONG used = 0;
+            BOOL  fits;
+
+            httpd_term_gz[0] = '\0';
+
+            fits = hs_append(httpd_term_gz, sizeof(httpd_term_gz), &used,
+                             httpd_term_page);
+            fits = fits && hs_append(httpd_term_gz, sizeof(httpd_term_gz),
+                                     &used, ".gz");
+
+            if (!fits)
+                httpd_term_gz[0] = '\0';
+        }
     }
 
     httpd_read_gmt_offset();

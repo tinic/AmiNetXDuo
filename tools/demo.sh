@@ -106,9 +106,12 @@ done
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 PAGE="$ROOT/src/tools/web/terminal.html"
+# The compressed copy httpd hands to a browser that asked for gzip.  Beside
+# the page, found by spelling, and committed with it.
+PAGEGZ="$PAGE.gz"
 A2065="${AMINETXDUO_A2065:-$HOME/amiga-assets/devs/a2065.device}"
 
-for f in "$TOOLS/httpd" "$BSD" "$PAGE" "$A2065"; do
+for f in "$TOOLS/httpd" "$BSD" "$PAGE" "$PAGEGZ" "$A2065"; do
     [ -f "$f" ] || { echo "missing $f -- build the tree first, or set AMINETXDUO_A2065" >&2; exit 2; }
 done
 
@@ -156,7 +159,8 @@ done
 mkdir -p "$STAGE/devs/Internet"
 [ -f "$ROOT/$BUILD/certificates" ] &&
     cp "$ROOT/$BUILD/certificates" "$STAGE/devs/Internet/certificates"
-cp "$PAGE"  "$STAGE/terminal.html"
+cp "$PAGE"   "$STAGE/terminal.html"
+cp "$PAGEGZ" "$STAGE/terminal.html.gz"
 
 # MDNS=YES so the machine is reachable by name.  A demo whose address is a
 # DHCP lease is a demo somebody has to be told the address of again tomorrow.
@@ -330,6 +334,7 @@ for f in "$STAGE/libs/bsdsocket.library" \
          "$STAGE/devs/Internet/certificates" \
          "$STAGE/devs/NetInterfaces/eth0" \
          "$STAGE/terminal.html" \
+         "$STAGE/terminal.html.gz" \
          "$STAGE/c/httpd"; do
     [ -f "$f" ] || missing="$missing ${f#"$STAGE/"}"
 done
@@ -349,7 +354,8 @@ fi
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$BACKEND" -m "$MODEL" -t "$WINDOW" \
     -a "DH0:Public $PORT TERMINAL=DH0:terminal.html" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
-    "$STAGE/terminal.html" "${EXTRA_C[@]}" "${EXTRA_DRAWERS[@]}" \
+    "$STAGE/terminal.html" "$STAGE/terminal.html.gz" "${EXTRA_C[@]}" \
+    "${EXTRA_DRAWERS[@]}" \
     > "$ROOT/build/demo-run-$AMINETXDUO_RUN_TAG.log" 2>&1 &
 RUNNER=$!
 
@@ -384,9 +390,14 @@ else
     MAC=""
     for _ in $(seq 1 60); do
         sleep 2
-        MAC=$(grep -oE "7990: '[^']*' ([0-9a-f]{2}:){5}[0-9a-f]{2}" "$EMU" \
+        # Case-insensitive: the emulator logs the address in UPPER case, and
+        # a lowercase-only class matched it anyway for as long as every guest
+        # here happened to have a MAC of nothing but digits.  The first one
+        # with a letter in it was never found and the run died saying the
+        # emulator had reported no MAC, with the MAC in the log.
+        MAC=$(grep -oEi "7990: '[^']*' ([0-9a-f]{2}:){5}[0-9a-f]{2}" "$EMU" \
               2>/dev/null | tail -1 |
-              grep -oE "([0-9a-f]{2}:){5}[0-9a-f]{2}" || true)
+              grep -oEi "([0-9a-f]{2}:){5}[0-9a-f]{2}" || true)
         [ -n "$MAC" ] && break
     done
     [ -n "$MAC" ] || {

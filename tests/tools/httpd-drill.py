@@ -28,9 +28,17 @@
 #   skips itself when the thing it tests is missing is a suite that passes on a
 #   server with nothing in it.  tests/tools/run-wsterm.sh passes it.
 #
+#   --gz-url=<path> says where the -T page's compressed sibling can be reached
+#   in the SERVED drawer, e.g. /terminal.html.gz.  With it, that file is moved
+#   out of the way over WebDAV and put back, which is how the state of a -T
+#   page nobody compressed is produced from out here.  It needs a harness that
+#   put the page inside the document root; tests/tools/run-wsterm.sh does.
+#   Without it that one check is skipped and says so.
+#
 # SPDX-License-Identifier: MIT
 
 import base64
+import gzip
 import hashlib
 import os
 import socket
@@ -40,6 +48,13 @@ import time
 
 argv = [a for a in sys.argv[1:] if not a.startswith("--")]
 WANT_TERMINAL = "--terminal" in sys.argv or "--ws-only" in sys.argv
+
+# Where the -T page's .gz can be reached in the served drawer, for the one
+# check that has to change what is on the guest's disk.  "" when nobody said.
+GZ_URL = ""
+for _a in sys.argv[1:]:
+    if _a.startswith("--gz-url="):
+        GZ_URL = _a[len("--gz-url="):]
 
 # --ws-only skips the WebDAV half and its setup.  It exists so the WebSocket
 # assertions can be pointed at something that is NOT this server: every one of
@@ -987,22 +1002,172 @@ def test_ws_refusals():
     ws_wait_free()
 
 
+def term_page(headers=None):
+    """GET /shell, and nothing about what came back taken on trust: the
+    length is checked against the bytes, because a Content-Length that
+    disagrees with the body is the failure that looks like a hang."""
+    a = once(req("GET", TERM, headers=headers))
+    if a is None:
+        return None
+    said = a[1].get("content-length")
+    check(said is not None and int(said) == len(a[2]),
+          "Content-Length %s is the %d bytes that arrived" % (said, len(a[2])))
+    return a
+
+
 def test_ws_page():
     """The same address, without an upgrade, is the page."""
     print("the terminal's page")
 
-    a = once(req("GET", TERM))
+    a = term_page()
     check(a is not None and a[0] == 200, "GET /shell is 200")
     if a is not None:
         check("text/html" in a[1].get("content-type", ""),
               "and is HTML (got %r)" % a[1].get("content-type"))
         check(b"WebSocket" in a[2],
               "and is the terminal's page rather than something else")
+        # A client that said nothing about encodings gets bytes it can read.
+        # This is the half of the feature that has to keep working, and the
+        # half a compressed sibling could quietly break.
+        check("content-encoding" not in a[1],
+              "a request that did not ask for gzip gets no Content-Encoding "
+              "(got %r)" % a[1].get("content-encoding"))
+        check(a[1].get("cache-control") == "no-cache",
+              "and Cache-Control is still no-cache (got %r)"
+              % a[1].get("cache-control"))
 
     a = once(req("PUT", TERM, body="x"))
     check(a is not None and a[0] == 405,
           "PUT /shell is 405, not a write into the drawer (got %s)"
           % (a[0] if a else "nothing"))
+
+
+def test_term_gzip():
+    """The page, compressed at build time and served as it lies.
+
+    The assertion that matters is not that a header was set: it is that what
+    a browser receives, once it has been through the browser's own inflater,
+    is the SAME PAGE.  So the plain one is fetched too and the two are
+    compared byte for byte.  A server that gzipped the wrong file, truncated
+    it, or sent it with a length off by one would pass every header check and
+    fail this."""
+    print("the terminal's page, gzipped")
+
+    plain = term_page()
+    if plain is None or plain[0] != 200:
+        check(False, "cannot fetch the plain page to compare against")
+        return
+
+    a = term_page({"Accept-Encoding": "gzip"})
+    if a is None or a[0] != 200:
+        check(False, "GET /shell with Accept-Encoding: gzip is 200 (got %s)"
+              % (a[0] if a else "nothing"))
+        return
+
+    check(a[1].get("content-encoding") == "gzip",
+          "Content-Encoding is gzip (got %r)" % a[1].get("content-encoding"))
+    check("text/html" in a[1].get("content-type", ""),
+          "and the type is still the page's own, not the container's (got %r)"
+          % a[1].get("content-type"))
+    check("accept-encoding" in a[1].get("vary", "").lower(),
+          "and Vary names Accept-Encoding (got %r)" % a[1].get("vary"))
+    check(a[1].get("cache-control") == "no-cache",
+          "and Cache-Control is still no-cache (got %r)"
+          % a[1].get("cache-control"))
+
+    check(len(a[2]) < len(plain[2]),
+          "the compressed page is smaller: %d against %d"
+          % (len(a[2]), len(plain[2])))
+
+    try:
+        same = gzip.decompress(a[2])
+    except Exception as e:                        # noqa: BLE001
+        same = None
+        check(False, "what came back is gzip at all (%s)" % e)
+
+    if same is not None:
+        check(same == plain[2],
+              "and it inflates to the plain page exactly: %d bytes against "
+              "%d, %s" % (len(same), len(plain[2]),
+                          "same bytes" if same == plain[2] else "DIFFERENT"))
+
+    # `q=0` is a refusal, not a preference, and a server that read it as one
+    # more way of saying gzip would send a body the client will not inflate.
+    a = term_page({"Accept-Encoding": "gzip;q=0"})
+    check(a is not None and "content-encoding" not in a[1],
+          "gzip;q=0 is a refusal and gets the plain page (got %r)"
+          % (a[1].get("content-encoding") if a else "nothing"))
+
+    # The shape a browser really sends.
+    a = term_page({"Accept-Encoding": "deflate, gzip;q=1.0, *;q=0.5"})
+    check(a is not None and a[1].get("content-encoding") == "gzip",
+          "a real browser's list is read (got %r)"
+          % (a[1].get("content-encoding") if a else "nothing"))
+
+    # And one that offers something else entirely.
+    a = term_page({"Accept-Encoding": "br, deflate"})
+    check(a is not None and "content-encoding" not in a[1],
+          "a client offering only codings we do not have gets the page plain "
+          "(got %r)" % (a[1].get("content-encoding") if a else "nothing"))
+
+
+def test_term_etag():
+    """A reload asks, and is told nothing has changed.
+
+    This is what keeps `Cache-Control: no-cache` from costing what it used to.
+    no-cache means "ask me every time", not "do not keep it", so the browser
+    still comes back -- and 304 with no body is the same freshness guarantee
+    for a few hundred bytes."""
+    print("the terminal's page, revalidated")
+
+    tags = {}
+
+    for label, headers in (("plain", None), ("gzip", {"Accept-Encoding": "gzip"})):
+        a = term_page(headers)
+        if a is None or a[0] != 200:
+            check(False, "cannot fetch the %s page" % label)
+            continue
+
+        etag = a[1].get("etag")
+        check(etag is not None and etag.startswith('"'),
+              "the %s page carries an ETag (got %r)" % (label, etag))
+        if etag is None:
+            continue
+        tags[label] = etag
+
+        h = dict(headers or {})
+        h["If-None-Match"] = etag
+        b = once(req("GET", TERM, headers=h))
+
+        check(b is not None and b[0] == 304,
+              "asking again with it gets 304 for the %s page (got %s)"
+              % (label, b[0] if b else "nothing"))
+        if b is None:
+            continue
+        check(b[2] == b"",
+              "and no body at all (got %d bytes)" % len(b[2]))
+        check("content-length" not in b[1],
+              "and no Content-Length either (got %r)"
+              % b[1].get("content-length"))
+        check(b[1].get("etag") == etag,
+              "and the 304 names the version (got %r)" % b[1].get("etag"))
+        check(b[1].get("cache-control") == "no-cache",
+              "and no-cache survives the 304 (got %r)"
+              % b[1].get("cache-control"))
+
+        # A validator that is not the one there must not be believed.
+        h["If-None-Match"] = '"0-0-0-0"'
+        b = once(req("GET", TERM, headers=h))
+        check(b is not None and b[0] == 200 and len(b[2]) > 0,
+              "a stale validator gets the %s page and not a 304 (got %s)"
+              % (label, b[0] if b else "nothing"))
+
+    # The two forms are different bytes.  A shared validator would let a
+    # browser holding the plain page be told the gzipped one is what it has.
+    if "plain" in tags and "gzip" in tags:
+        check(tags["plain"] != tags["gzip"],
+              "the two forms do not share a validator (both %r)"
+              % tags["plain"])
 
 
 def test_ws_shell():
@@ -1121,6 +1286,60 @@ def test_ws_unmasked():
           "and the Shell is given back afterwards")
 
 
+def test_term_no_gz():
+    """A -T page with no compressed copy beside it is served, uncompressed.
+
+    MADE, not found.  httpd looks for the sibling when a browser asks and
+    remembers no answer between requests, so "nobody ever compressed this
+    page" and "the compressed one is not there any more" are one state, and
+    moving it out of the way is how this reaches that state without a second
+    server.  WebDAV does the moving, which is why the harness puts the -T page
+    inside the document root: a MOVE is instant and needs nothing on the guest
+    that the drill has not already used.
+
+    Put back afterwards, and the putting back is CHECKED -- a restore that
+    silently failed would leave a later run measuring the wrong thing and
+    calling it a pass."""
+    if not GZ_URL:
+        print("the terminal's page with no .gz beside it: SKIPPED, "
+              "no --gz-url=<served path> was given")
+        return
+
+    print("the terminal's page with no .gz beside it")
+
+    away = GZ_URL + "away"
+    dest = {"Destination": "http://%s:%d%s" % (ADDR, PORT, away)}
+
+    a = once(req("MOVE", GZ_URL, dest))
+    moved = a is not None and a[0] in (201, 204)
+    check(moved, "the compressed sibling moves out of the way (got %s)"
+                 % (a[0] if a else "nothing"))
+    if not moved:
+        return
+
+    try:
+        a = term_page({"Accept-Encoding": "gzip"})
+        check(a is not None and a[0] == 200,
+              "the page is still served with no .gz beside it (got %s)"
+              % (a[0] if a else "nothing"))
+        if a is not None:
+            check("content-encoding" not in a[1],
+                  "and comes back uncompressed (got %r)"
+                  % a[1].get("content-encoding"))
+            check(b"WebSocket" in a[2],
+                  "and is the page itself, %d bytes" % len(a[2]))
+    finally:
+        back = {"Destination": "http://%s:%d%s" % (ADDR, PORT, GZ_URL)}
+        b = once(req("MOVE", away, back))
+        check(b is not None and b[0] in (201, 204),
+              "and it is put back (got %s)" % (b[0] if b else "nothing"))
+
+    a = term_page({"Accept-Encoding": "gzip"})
+    check(a is not None and a[1].get("content-encoding") == "gzip",
+          "with it back, gzip is served again -- nothing was remembered "
+          "(got %r)" % (a[1].get("content-encoding") if a else "nothing"))
+
+
 def main():
     print("httpd-drill against http://%s:%d/\n" % (ADDR, PORT))
 
@@ -1130,10 +1349,13 @@ def main():
         if WS_ONLY:
             test_ws_shell()
             test_ws_page()
+            test_term_gzip()
+            test_term_etag()
             test_ws_handshake()
             test_ws_refusals()
             test_ws_one_session()
             test_ws_unmasked()
+            test_term_no_gz()
             print("\n%d checks, %d failure(s)" % (checks, len(failures)))
             for f in failures:
                 print("  %s" % f)
@@ -1160,10 +1382,17 @@ def main():
             # whether a command works, which is what happened.
             test_ws_shell()
             test_ws_page()
+            test_term_gzip()
+            test_term_etag()
             test_ws_handshake()
             test_ws_refusals()
             test_ws_one_session()
             test_ws_unmasked()
+            # Last, because it is the only one that changes the guest's disk.
+            # A run that dies before it puts the sibling back leaves a state
+            # every later check here would read as a defect, so nothing later
+            # reads it.
+            test_term_no_gz()
     finally:
         if not WS_ONLY:
             teardown()

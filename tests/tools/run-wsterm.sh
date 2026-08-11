@@ -99,8 +99,10 @@ done
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 PAGE="$ROOT/src/tools/web/terminal.html"
+# Staged too, so what the drill measures is the pair httpd chooses between.
+PAGEGZ="$PAGE.gz"
 
-for f in "$TOOLS/httpd" "$BSD" "$PAGE"; do
+for f in "$TOOLS/httpd" "$BSD" "$PAGE" "$PAGEGZ"; do
     [ -f "$f" ] || { echo "result=infra"; echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
@@ -130,7 +132,16 @@ cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 mkdir -p "$STAGE/devs/Networks"
 cp "$A2065" "$STAGE/devs/Networks/a2065.device"
 cp "$BSD" "$STAGE/libs/bsdsocket.library"
-cp "$PAGE" "$STAGE/terminal.html"
+# INSIDE the served drawer, and not beside it at DH0:.
+#
+# -T names a path and does not care whether it is under the document root, and
+# tools/demo.sh and the installer both put it outside.  Here it goes inside on
+# purpose: it is the only way this harness can make the compressed sibling go
+# away and come back, over WebDAV, with no Workbench C: and no Rename.  What
+# that buys is the one state a user with their own page is in -- a -T page with
+# no .gz next to it -- asserted rather than assumed.
+cp "$PAGE"   "$STAGE/Public/terminal.html"
+cp "$PAGEGZ" "$STAGE/Public/terminal.html.gz"
 
 cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
 DEVICE=a2065.device
@@ -163,9 +174,9 @@ echo "==> httpd on the guest at :${GUESTPORT}, forwarded to 127.0.0.1:${HOSTPORT
 set +e
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B slirp -m "$MODEL" "${CPUARG[@]}" \
     -t "$WINDOW" \
-    -a "DH0:Public $GUESTPORT TERMINAL=DH0:terminal.html TRACE" \
+    -a "DH0:Public $GUESTPORT TERMINAL=DH0:Public/terminal.html TRACE" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
-    "$STAGE/terminal.html" > "$ROOT/build/wsterm-emu.log" 2>&1 &
+    > "$ROOT/build/wsterm-emu.log" 2>&1 &
 RUNNER=$!
 set -e
 
@@ -238,7 +249,8 @@ fi
 
 DRILL_AT=$(date +%s)
 set +e
-python3 "$ROOT/tests/tools/httpd-drill.py" --terminal 127.0.0.1 "$HOSTPORT" \
+python3 "$ROOT/tests/tools/httpd-drill.py" --terminal \
+    --gz-url=/terminal.html.gz 127.0.0.1 "$HOSTPORT" \
     > "$ROOT/build/wsterm-drill.txt" 2>&1 &
 DRILL=$!
 while kill -0 "$DRILL" 2>/dev/null; do

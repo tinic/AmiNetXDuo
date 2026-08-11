@@ -370,8 +370,16 @@ cp -R "$INSTALL/examples/."      "$TREE/Examples/"
 # the browser with nothing on the Amiga to see.  `need` it rather than glob it:
 # a release that quietly shipped no page would leave -T naming a file that is
 # not there.
+#
+# terminal.html.gz goes with it, and is `need`ed for the same reason: httpd
+# picks it up by spelling, so an archive that shipped only the plain page
+# would work and would spend three seconds handing 400 KB to every browser
+# instead of a fraction of a second handing over 120 KB.  A missing one is
+# silent, which is exactly why it is checked here.
 need "$ROOT/src/tools/web/terminal.html"
-cp "$ROOT/src/tools/web/terminal.html" "$TREE/Terminal/terminal.html"
+need "$ROOT/src/tools/web/terminal.html.gz"
+cp "$ROOT/src/tools/web/terminal.html"    "$TREE/Terminal/terminal.html"
+cp "$ROOT/src/tools/web/terminal.html.gz" "$TREE/Terminal/terminal.html.gz"
 
 cp "$ROOT/dist/ReadMe" "$TREE/ReadMe"
 cp "$INSTALL/Document.info" "$TREE/ReadMe.info"

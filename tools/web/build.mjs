@@ -11,6 +11,15 @@
  *   when a source under src/tools/web/client/ changes, and --check is how
  *   tools/ci.sh notices that somebody edited a source and forgot to run it.
  *
+ * AND terminal.html.gz BESIDE IT
+ *
+ *   The page is 400 KB and an A1200 spends 3.3 seconds handing it over.  It
+ *   gzips to under a quarter of that, and the compressor runs HERE: there is
+ *   no deflate on the Amiga and adding one would put the cost back on the
+ *   68020 that is the whole problem.  httpd serves this file verbatim when the
+ *   request says `Accept-Encoding: gzip` and the plain one when it does not,
+ *   so the sibling is an optimisation and never a requirement.
+ *
  * WHY esbuild AND NOT vite
  *
  *   The whole job is "TypeScript in, one minified script out" with no dev
@@ -32,6 +41,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gunzipSync, gzipSync } from "node:zlib";
 
 import * as esbuild from "esbuild";
 
@@ -41,6 +51,7 @@ const WEB = join(ROOT, "src", "tools", "web");
 const VENDOR = join(WEB, "vendor", "xterm");
 const HACK = join(WEB, "vendor", "hack");
 const OUT = join(WEB, "terminal.html");
+const OUT_GZ = OUT + ".gz";
 
 const check = process.argv.includes("--check");
 
@@ -202,6 +213,21 @@ if (problems.length > 0) {
 
 const sha = (s) => createHash("sha256").update(s).digest("hex").slice(0, 12);
 
+/*
+ * The gzip container carries the compressing machine in byte 9, and zlib
+ * fills it in from whatever it was compiled for -- 0x13 from the node on a
+ * Mac, 0x03 from the one on Linux.  Two people running this would otherwise
+ * produce two different files for the same page and each would see the
+ * other's as a change.  Byte 9 is stamped Unix and the modification time in
+ * bytes 4..7 is already zero, so what is committed depends on the page and
+ * not on who built it.
+ */
+const pack = (s) => {
+  const gz = gzipSync(Buffer.from(s, "latin1"), { level: 9 });
+  gz[9] = 0x03;
+  return gz;
+};
+
 let existing = null;
 try {
   existing = readFileSync(OUT, "utf8");
@@ -209,15 +235,40 @@ try {
   /* first build */
 }
 
+/*
+ * What is asked of the committed .gz is that it IS the page, not that it is
+ * byte-for-byte what this machine's zlib would emit today: a newer zlib that
+ * packs the same bytes two per cent smaller is not a drift anybody needs to
+ * be told about, and treating it as one would fail CI on a node upgrade.  So
+ * the check unpacks it and compares THAT -- which is the whole of what can go
+ * wrong here, a compressed copy of a page that is no longer the page.
+ */
+let packed = null;
+try {
+  const raw = readFileSync(OUT_GZ);
+  packed = gunzipSync(raw).toString("latin1") === html ? raw : null;
+} catch {
+  /* absent, or not gzip at all */
+}
+
 if (check) {
-  if (existing === html) {
+  if (existing === html && packed !== null) {
     console.log("web: terminal.html matches its sources (%d bytes, sha %s)",
                 Buffer.byteLength(html), sha(html));
+    console.log("web: terminal.html.gz unpacks to it (%d bytes, %d%%)",
+                packed.length,
+                Math.round((packed.length * 100) / Buffer.byteLength(html)));
     process.exit(0);
   }
-  console.error("web: terminal.html does NOT match its sources.");
-  console.error("web: committed %s, sources build to %s",
-                existing === null ? "nothing" : sha(existing), sha(html));
+  if (existing !== html) {
+    console.error("web: terminal.html does NOT match its sources.");
+    console.error("web: committed %s, sources build to %s",
+                  existing === null ? "nothing" : sha(existing), sha(html));
+  }
+  if (packed === null) {
+    console.error("web: terminal.html.gz is missing, or does not unpack to "
+                  + "the page beside it.");
+  }
   console.error("web: run  node tools/web/build.mjs  and commit the result.");
   process.exit(1);
 }
@@ -228,4 +279,13 @@ if (existing === html) {
   writeFileSync(OUT, html);
   console.log("web: terminal.html written, %d bytes, sha %s",
               Buffer.byteLength(html), sha(html));
+}
+
+if (packed !== null) {
+  console.log("web: terminal.html.gz unchanged (%d bytes)", packed.length);
+} else {
+  const gz = pack(html);
+  writeFileSync(OUT_GZ, gz);
+  console.log("web: terminal.html.gz written, %d bytes, %d%% of the page",
+              gz.length, Math.round((gz.length * 100) / Buffer.byteLength(html)));
 }
