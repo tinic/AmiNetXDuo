@@ -208,3 +208,88 @@ tx A seq=1 ack=1 sack=101:201,101:201 hdrlen=auto within=400
 rx PA seq=1 ack=1 len=100
 tx A seq=1 ack=201 sack=- within=400
 recv 400 = 200
+
+# ---------------------------------------------------------------------------
+# THE SEND SIDE.  Everything above this line is about the blocks that LEAVE.
+#
+# The twelve cases above assert what we tell a peer about our own holes, and
+# they pass whether or not a block a peer sends is ever read -- which it was
+# not, for the whole life of this file.  The SACK-Permitted option went out on
+# every SYN and nothing honoured what came back, so a receive recovered from a
+# hole in one round trip while a send still did one segment per round trip
+# with the peer believing it had said where the holes were.
+#
+# These two need the harness to SEND blocks, which it could not do until the
+# same change added it: `sack=` on an `rx` line is an injection, and the
+# blocks count in the space our own `seq=` counts in, because they describe
+# data this side sent.
+#
+# MSS 100 ON THE PEER'S SYN+ACK is what makes each `send 100` exactly one
+# segment, so "which segment was skipped" is a question the capture can
+# answer.
+
+# RFC 2018 section 4: data a block covers is not retransmitted.  Four segments
+# go out, the peer acknowledges none of them and says it holds the second and
+# the fourth, so the retransmission carries the first and the third and steps
+# over the two it named.
+#
+# Both holes are below the highest byte any block reports, which is what makes
+# the case discriminate.  A hole above it is not known to be lost -- RFC 6675
+# IsLost() wants SACKed data above a sequence number before it will call that
+# number lost -- so a segment past the last block is left to the retransmission
+# timer, and asserting on one would fail against a correct stack.  That was the
+# defect in the first draft of this case.
+#
+# Red without the send side: fast recovery there resends one packet and stops
+# (nx_tcp_socket_retransmit.c, "During fast recovery, only one packet is
+# retransmitted at once"), so `tx PA seq=201` times out.  Green with fork
+# branch amiga-tcp-sack-transmit-merged.
+case s13_a_block_makes_the_retransmission_skip_that_segment
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=100 sackok=1
+tx A seq=1 ack=1
+send 100
+tx PA seq=1 ack=1 len=100
+send 100
+tx PA seq=101 ack=1 len=100
+send 100
+tx PA seq=201 ack=1 len=100
+send 100
+tx PA seq=301 ack=1 len=100
+# Three duplicate acknowledgements, each carrying the same two blocks: the peer
+# has 101:201 and 301:401 and is missing 1:101 and 201:301.  RFC 5681 section
+# 3.2 counts these.
+rx A seq=1 ack=1 win=8192 sack=101:201,301:401
+rx A seq=1 ack=1 win=8192 sack=101:201,301:401
+rx A seq=1 ack=1 win=8192 sack=101:201,301:401
+# The first hole, then straight past the block to the second, in the same
+# round rather than one per round trip.
+tx PA seq=1 ack=1 len=100 within=4000
+tx PA seq=201 ack=1 len=100 within=300
+# And nothing else: neither block is resent, and 301:401 is not walked past.
+notx 600
+rx R seq=1 ack=1
+
+# AND THE SKIP IS CONDITIONAL.  The same three segments and the same three
+# duplicate acknowledgements with no blocks on them: nothing says which
+# segment the peer holds, so the stack may only retransmit the first and must
+# not walk the queue.  Without this case the change could retransmit
+# everything every time and s13 would still pass.
+case s14_no_blocks_still_retransmits_only_the_first
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=100 sackok=1
+tx A seq=1 ack=1
+send 100
+tx PA seq=1 ack=1 len=100
+send 100
+tx PA seq=101 ack=1 len=100
+rx A seq=1 ack=1 win=8192
+rx A seq=1 ack=1 win=8192
+rx A seq=1 ack=1 win=8192
+tx PA seq=1 ack=1 len=100 within=4000
+notx 600
+rx R seq=1 ack=1
