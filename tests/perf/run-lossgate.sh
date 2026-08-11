@@ -249,9 +249,16 @@ if [ "$RECORD" = "1" ]; then
         echo "# Recorded with ${LOSS}% peer-to-guest loss, $KB KB, $REPS reps."
         echo "# Read and write are separate on purpose: the 0.16.6 regression"
         echo "# moved them in opposite directions."
-        echo "# The tolerance is twice the spread seen while recording, floor 5%."
-        while read -r name med spread _n; do
-            tol=$(awk -v s="$spread" 'BEGIN { t = s * 2; if (t < 5) t = 5; printf "%.1f", t }')
+        echo "# Tolerance: twice the spread over root(reps), floor 5%."
+        # OVER ROOT(REPS), and that is not a refinement.  The gate compares
+        # MEDIANS, so the tolerance has to describe how far a median moves,
+        # not how far one sample does -- and the range of samples GROWS with
+        # the number of them, so the old `spread * 2` made -r 9 a looser gate
+        # than -r 3.  More arms must tighten it.
+        while read -r name med spread n; do
+            tol=$(awk -v s="$spread" -v n="$n" 'BEGIN {
+                    if (n + 0 < 1) n = 1
+                    t = 2 * s / sqrt(n); if (t < 5) t = 5; printf "%.1f", t }')
             dir=higher
             case "$name" in retransmitted|dropped_rx) dir=lower ;; esac
             printf '%-14s %-7s %10s %6s\n' "$name" "$dir" "$med" "$tol"
