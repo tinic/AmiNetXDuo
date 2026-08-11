@@ -78,9 +78,12 @@ export class LineEditor {
      completion callback is what makes the anchor arithmetic true. */
   private chain: Promise<void> = Promise.resolve();
 
+  private readonly table: [string, () => void | Promise<void>][];
+
   constructor(term: Terminal, h: LineHandlers) {
     this.term = term;
     this.h = h;
+    this.table = this.buildTable();
   }
 
   setEnabled(on: boolean): void {
@@ -240,6 +243,23 @@ export class LineEditor {
       const c = data.charCodeAt(i);
       if (c === 13 || c === 10) { i += 1; await this.submit(); continue; }
 
+      /*
+       * Tab, expanded here rather than passed on.  Every other character in
+       * the buffer is one cell wide and the redraw arithmetic depends on it;
+       * a tab is as many cells as the column it lands on says.  Expanding to
+       * the next multiple of eight keeps the two the same thing, and the far
+       * side cannot tell: AmigaDOS separates command arguments on whitespace
+       * and does not care which.  Dropping it, which is what happened before,
+       * lost characters out of the middle of a pasted line.
+       */
+      if (c === 9) {
+        const to = 8 - ((this.anchorX + this.cur) % 8);
+        this.insert(" ".repeat(to));
+        i += 1;
+        await this.redraw();
+        continue;
+      }
+
       const seq = this.match(rest);
       if (seq !== null) {
         i += seq.len;
@@ -266,15 +286,38 @@ export class LineEditor {
     }
   }
 
-  /*
-   * One table rather than a ladder of ifs: the CSI forms and the control
-   * characters are the same twenty editing verbs under two spellings, and a
-   * table is the only shape in which that stays obvious.  Longest match first,
-   * because ESC [ 1 ; 5 C has ESC [ C as a prefix of nothing but would collide
-   * with a looser test.
-   */
   private match(rest: string): { len: number; run: () => Promise<void> } | null {
-    const table: [string, () => void | Promise<void>][] = [
+    for (const [key, fn] of this.table) {
+      if (rest.startsWith(key)) {
+        return { len: key.length, run: async () => { await fn(); } };
+      }
+    }
+
+    /* An escape sequence we have no verb for -- a mouse report, a key with a
+       modifier nobody bound.  Swallowed rather than let its letters land in
+       the line as text.  A LINE-mode decision: char mode forwards it. */
+    if (rest.charCodeAt(0) === 27) {
+      const m = /^\u001B(\[[0-9;?]*[ -/]*[@-~]|O.|.)/.exec(rest);
+      if (m !== null) {
+        const len = m[0].length;
+        return { len, run: async () => { /* dropped */ } };
+      }
+    }
+
+    return null;
+  }
+
+  /*
+   * The verbs, longest spelling first so ESC [ 1 ; 5 C is not matched by a
+   * looser entry above it.  One table rather than a ladder of ifs: the CSI
+   * forms and the control characters are the same twenty editing verbs under
+   * two spellings, and a table is the only shape in which that stays obvious.
+   *
+   * Built once, in the constructor.  It was rebuilt on every keystroke, which
+   * allocated thirty closures per character typed.
+   */
+  private buildTable(): [string, () => void | Promise<void>][] {
+    return [
       [ESC + "[1;5C", () => this.wordRight()],
       [ESC + "[1;5D", () => this.wordLeft()],
       [ESC + "[3~",   () => this.deleteRight()],
@@ -306,25 +349,6 @@ export class LineEditor {
       ["\u0017",      () => this.killWordLeft()],  /* Ctrl-W */
       ["\u007F",      () => this.deleteLeft()],    /* Backspace */
     ];
-
-    for (const [key, fn] of table) {
-      if (rest.startsWith(key)) {
-        return { len: key.length, run: async () => { await fn(); } };
-      }
-    }
-
-    /* An escape sequence we have no verb for -- a mouse report, a key with a
-       modifier nobody bound.  Swallow the whole thing rather than let its
-       letters land in the line as text. */
-    if (rest.charCodeAt(0) === 27) {
-      const m = /^\u001B(\[[0-9;?]*[ -/]*[@-~]|O.|.)/.exec(rest);
-      if (m !== null) {
-        const len = m[0].length;
-        return { len, run: async () => { /* dropped */ } };
-      }
-    }
-
-    return null;
   }
 
   // ---------------------------------------------------------------- verbs --

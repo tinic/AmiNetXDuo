@@ -17,11 +17,20 @@
 # neither is a default: a demo reached only by its DHCP lease is one somebody
 # has to be told the address of again tomorrow.
 #
-# WHY BRIDGED AND NOT SLIRP
+# BRIDGED, OR SLIRP WITH A FORWARDED PORT
 #
-#   A demo has to be reachable from the person's own machine.  tests/tools/
-#   run-wsterm.sh forwards a port out of slirp instead, which is right for a
-#   test and useless for showing anyone.
+#   Bridged is the default and is what a demo is for: the machine appears on
+#   the real network with a lease of its own and anyone can reach it.
+#
+#   `-B slirp` is the other one.  It needs no bridge, no root and no address
+#   on the LAN -- the guest is behind NAT and one port is forwarded out to
+#   127.0.0.1 -- which is what to use when the LAN is somebody else's, or when
+#   a demo is ALREADY RUNNING on it.
+#
+#   Two bridged guests are not two machines.  The a2065's LANCE derives its
+#   address from the unit, so both are 00:80:10:49:00:01 and the network sees
+#   one host answering from two places: leases fight, ARP caches flap, and the
+#   demo that was already up stops answering.  Second instance, -B slirp.
 #
 # THE MAC IS NOT THE ONE YOU ASK FOR
 #
@@ -115,6 +124,15 @@ echo "in a drawer" > "$STAGE/Public/Docs/notes.txt"
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-demo}"
 
+# Behind NAT the guest is always 10.0.2.15 and the port has to be forwarded
+# out; the same line tests/tools/run-wsterm.sh uses.  HOSTPORT is the port on
+# THIS machine, and defaults to the guest's so the printed URL is the one
+# asked for whenever it is free to be.
+if [ "$BACKEND" = slirp ]; then
+    HOSTPORT="${AMINETXDUO_DEMO_HOSTPORT:-$PORT}"
+    export AMINETXDUO_AMIBERRY_EXTRA="slirp_redir=tcp:${HOSTPORT}:${PORT}:10.0.2.15"
+fi
+
 # Named after the tag, because amiberry-run.sh names its log after the tag.
 # This said build/amiberry-demo.log outright, so a second demo started with
 # AMINETXDUO_RUN_TAG set watched a file its own emulator was not writing and
@@ -129,46 +147,84 @@ echo "==> booting $MODEL on '$BACKEND', httpd :$PORT, window ${WINDOW}s"
     "$STAGE/terminal.html" > "$ROOT/build/demo-run-$AMINETXDUO_RUN_TAG.log" 2>&1 &
 RUNNER=$!
 
-# The address, from the wire.  The guest announces itself by ARP as soon as it
-# has a lease; the MAC to watch for is the one the emulator logged, not the one
-# we asked for.  A release build says nothing on the serial line, so this is
-# the only place the address appears.
-MAC=""
-for _ in $(seq 1 60); do
-    sleep 2
-    MAC=$(grep -oE "7990: '[^']*' ([0-9a-f]{2}:){5}[0-9a-f]{2}" "$EMU" 2>/dev/null |
-          tail -1 | grep -oE "([0-9a-f]{2}:){5}[0-9a-f]{2}" || true)
-    [ -n "$MAC" ] && break
-done
-[ -n "$MAC" ] || { echo "the emulator never reported a MAC; see $EMU" >&2; exit 1; }
+# WHERE IT ENDED UP.  Two backends, two ways of finding out.
 
-echo "==> guest MAC $MAC, waiting for a lease"
-ADDR=""
-for _ in $(seq 1 40); do
-    ADDR=$(timeout 10 tcpdump -i "$BACKEND" -n -c 1 "ether host $MAC and arp" 2>/dev/null |
-           grep -oE "ARP, Reply [0-9.]+" | grep -oE "[0-9.]+$" || true)
-    [ -n "$ADDR" ] && break
-done
+if [ "$BACKEND" = slirp ]; then
+    # Behind NAT there is nothing on the wire to sniff and no lease to wait
+    # for.  Poll the forwarded port, which is the same question asked where
+    # the answer is.
+    ADDR="127.0.0.1"
+    PORT="$HOSTPORT"
+    NAME=""
 
-if [ -z "$ADDR" ]; then
-    echo "no lease seen for $MAC on $BACKEND after 400s" >&2
-    echo "the emulator is still running as pid $RUNNER; see $EMU" >&2
-    exit 1
+    UP=no
+    for _ in $(seq 1 90); do
+        sleep 2
+        if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:${HOSTPORT}/"
+        then
+            UP=yes
+            break
+        fi
+    done
+    [ "$UP" = yes ] || {
+        echo "nothing answered on 127.0.0.1:${HOSTPORT} after 180s; see $EMU" >&2
+        exit 1
+    }
+else
+    # Bridged: the address comes off the wire.  The guest announces itself by
+    # ARP as soon as it has a lease, and the MAC to watch for is the one the
+    # emulator logged, not the one we asked for.  A release build says nothing
+    # on the serial line, so this is the only place the address appears.
+    MAC=""
+    for _ in $(seq 1 60); do
+        sleep 2
+        MAC=$(grep -oE "7990: '[^']*' ([0-9a-f]{2}:){5}[0-9a-f]{2}" "$EMU" \
+              2>/dev/null | tail -1 |
+              grep -oE "([0-9a-f]{2}:){5}[0-9a-f]{2}" || true)
+        [ -n "$MAC" ] && break
+    done
+    [ -n "$MAC" ] || {
+        echo "the emulator never reported a MAC; see $EMU" >&2
+        exit 1
+    }
+
+    echo "==> guest MAC $MAC, waiting for a lease"
+    ADDR=""
+    for _ in $(seq 1 40); do
+        ADDR=$(timeout 10 tcpdump -i "$BACKEND" -n -c 1 \
+                   "ether host $MAC and arp" 2>/dev/null |
+               grep -oE "ARP, Reply [0-9.]+" | grep -oE "[0-9.]+$" || true)
+        [ -n "$ADDR" ] && break
+    done
+
+    [ -n "$ADDR" ] || {
+        echo "no lease seen for $MAC on $BACKEND after 400s" >&2
+        echo "the emulator is still running as pid $RUNNER; see $EMU" >&2
+        exit 1
+    }
 fi
+
 
 # -p left the address right and the URL wrong until 2026-08-10: a demo on any
 # port but 80 printed one nothing answers on.
 HOSTPART="$ADDR"
 [ "$PORT" = 80 ] || HOSTPART="$ADDR:$PORT"
-NAMEPART="$NAME.local"
-[ "$PORT" = 80 ] || NAMEPART="$NAME.local:$PORT"
-
 cat <<EOF
 
   the drawer    http://$HOSTPART/
   the terminal  http://$HOSTPART/terminal      no password, anyone who can reach it
+EOF
 
-  by name       http://$NAMEPART/terminal      mDNS, once the responder has claimed it
+# Only when there is a network for a name to mean anything on.  Behind NAT the
+# responder is answering a network of one.
+if [ -n "$NAME" ]; then
+    NAMEPART="$NAME.local"
+    [ "$PORT" = 80 ] || NAMEPART="$NAME.local:$PORT"
+    echo
+    echo "  by name       http://$NAMEPART/terminal      mDNS, once the responder has claimed it"
+fi
+
+cat <<EOF
 
   emulator pid $RUNNER, log $EMU
 EOF
