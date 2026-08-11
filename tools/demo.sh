@@ -73,6 +73,13 @@ cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 mkdir -p "$STAGE/devs/Networks"
 cp "$A2065" "$STAGE/devs/Networks/a2065.device"
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
+# fetch needs tls.library for https, and tls.library needs a trust store, or
+# every https URL fails with something that reads like a broken download.
+[ -f "$ROOT/$BUILD/src/tlslib/tls.library" ] &&
+    cp "$ROOT/$BUILD/src/tlslib/tls.library" "$STAGE/libs/"
+mkdir -p "$STAGE/devs/Internet"
+[ -f "$ROOT/third_party/cacert/cacert.pem" ] &&
+    cp "$ROOT/third_party/cacert/cacert.pem" "$STAGE/devs/Internet/certificates"
 cp "$PAGE"  "$STAGE/terminal.html"
 
 cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF

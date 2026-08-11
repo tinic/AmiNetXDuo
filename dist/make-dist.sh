@@ -92,6 +92,7 @@ LIBS=(bsdsocket usergroup)
 CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ShowNetServices
       ping netstat host hostname
       nslookup arp fetch nc telnet NetTrace sntp traceroute tftp whois httpd
+      iperf
       CheckNetConfig GetNetStatus NetShutdown RemoveNetInterface
       ConfigureNetInterface
       AddNetRoute DeleteNetRoute)
@@ -192,6 +193,32 @@ CMD_BUILD="${CPU_BUILD[68000]:-$BUILD}"
 [ -d "$CMD_BUILD" ] || CMD_BUILD="$BUILD"
 
 for cmd in "${CMDS[@]}"; do need "$CMD_BUILD/src/tools/$cmd"; done
+
+# A command that is BUILT and not listed above ships nowhere, and nothing
+# notices: `need` above catches a name in the list with no binary, which is the
+# easy direction.  iperf was merged and left out of CMDS, and the archive would
+# have gone out without it.
+#
+# Anything deliberately not shipped goes here with its reason.  ToolsSmoke is a
+# test driver -- it runs the real commands through SystemTagList() and records
+# rc, milliseconds and free memory per command, which is what the leak sweep
+# and the tool tests read -- and has no use on a user's machine.
+NOT_SHIPPED=(ToolsSmoke CensusProbe UafProbe HangProbe)
+missing_from_cmds=()
+for path in "$CMD_BUILD"/src/tools/*; do
+    [ -f "$path" ] && [ -x "$path" ] || continue
+    name=$(basename "$path")
+    case "$name" in *.map|*.cmake|Makefile|*.o) continue ;; esac
+    for known in "${CMDS[@]}" "${NOT_SHIPPED[@]}"; do
+        [ "$name" = "$known" ] && continue 2
+    done
+    missing_from_cmds+=("$name")
+done
+if [ ${#missing_from_cmds[@]} -ne 0 ]; then
+    echo "these commands are built but ship nowhere: ${missing_from_cmds[*]}" >&2
+    echo "add them to CMDS, or to NOT_SHIPPED with the reason." >&2
+    exit 1
+fi
 
 # -------------------------------------------------------------- the icons --
 #
