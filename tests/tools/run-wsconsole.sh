@@ -4,7 +4,22 @@
 #
 #   tests/tools/run-wsconsole.sh [-t SECONDS] [-p HOSTPORT] [-P GUESTPORT]
 #                                [-b BUILDDIR] [-m MODEL] [-c CPU] [-S PORT]
-#                                [-K]
+#                                [-B BACKEND] [-K]
+#
+# BRIDGED BY DEFAULT, AND WHY THAT IS NOT A PREFERENCE
+#
+#   `-B slirp` puts the guest behind NAT and forwards one port, which is what
+#   this used to do and is convenient.  It is also a different network: the
+#   guest reaches the build host at 10.0.2.2 through a userspace TCP stack
+#   that is not the one a real machine talks to, and a defect that needs a
+#   bridge to appear cannot appear there.  So the default is an interface
+#   name, the guest takes a lease of its own, and the drill talks to it over
+#   the LAN exactly as a browser would.
+#
+#   TWO BRIDGED GUESTS ARE NOT TWO MACHINES UNLESS THEY SAY SO.  The MAC is
+#   set explicitly and defaults to one this harness owns; a run that leaves it
+#   alone would collide with whatever else is on the wire, both would flap,
+#   and the machine that was already up would stop answering.
 #
 #   -K stages and boots and then HOLDS the guest, without drilling it.  That
 #   is how tests/tools/wsconsole-page.mjs is run: the page test needs a
@@ -80,8 +95,15 @@ BUILD="${AMINETXDUO_BUILD:-build/cm}"
 GUEST_IP=10.0.2.15
 SSHD_PORT="${AMINETXDUO_WSCONSOLE_SSHD:-2224}"
 KEEP=no
+BACKEND="${AMINETXDUO_WSCONSOLE_BACKEND:-ens18}"
 
-while getopts "t:p:P:b:m:c:S:K" opt; do
+# This harness's own address and name, distinct from tools/demo.sh's and from
+# every other guest on the wire.  The A2065 keeps only the last three bytes --
+# amiberry-run.sh says so and a2065.cpp is why -- so those are what differ.
+export AMINETXDUO_AMIBERRY_MAC="${AMINETXDUO_AMIBERRY_MAC:-02:41:4d:49:00:c7}"
+HOSTNAME_="${AMINETXDUO_WSCONSOLE_NAME:-anxdcon}"
+
+while getopts "t:p:P:b:m:c:S:B:K" opt; do
     case "$opt" in
         t) WINDOW="$OPTARG" ;;
         p) HOSTPORT="$OPTARG" ;;
@@ -90,9 +112,11 @@ while getopts "t:p:P:b:m:c:S:K" opt; do
         m) MODEL="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
         S) SSHD_PORT="$OPTARG" ;;
+        B) BACKEND="$OPTARG" ;;
         K) KEEP=yes ;;
         *) echo "usage: $0 [-t seconds] [-p hostport] [-P guestport]" \
-                "[-b builddir] [-m model] [-c cpu] [-S sshdport] [-K]" >&2; exit 2 ;;
+                "[-b builddir] [-m model] [-c cpu] [-S sshdport]" \
+                "[-B backend] [-K]" >&2; exit 2 ;;
     esac
 done
 
@@ -136,7 +160,13 @@ cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
 DEVICE=a2065.device
 UNIT=0
 CONFIGURE=DHCP
+MDNS=YES
 EOF
+
+# A name to answer to, so a guest on the LAN is identifiable as this harness's
+# rather than as one more lease.
+mkdir -p "$STAGE/devs/Internet"
+echo "hostname $HOSTNAME_" >> "$STAGE/devs/Internet/name_resolution"
 
 echo "Hello from an Amiga." > "$STAGE/Public/readme.txt"
 echo "<html><body><h1>Amiga</h1></body></html>" > "$STAGE/Public/index.html"
@@ -202,15 +232,19 @@ fi
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-wsconsole}"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 
-export AMINETXDUO_AMIBERRY_EXTRA="slirp_redir=tcp:${HOSTPORT}:${GUESTPORT}:${GUEST_IP}"
+if [ "$BACKEND" = slirp ]; then
+    export AMINETXDUO_AMIBERRY_EXTRA="slirp_redir=tcp:${HOSTPORT}:${GUESTPORT}:${GUEST_IP}"
+    echo "==> httpd on the guest at :${GUESTPORT}, forwarded to 127.0.0.1:${HOSTPORT}"
+else
+    echo "==> httpd on the guest at :${GUESTPORT}, bridged on ${BACKEND}" \
+         "as ${HOSTNAME_} (${AMINETXDUO_AMIBERRY_MAC})"
+fi
 
 CPUARG=()
 [ -z "$CPU" ] || CPUARG=(-c "$CPU")
 
-echo "==> httpd on the guest at :${GUESTPORT}, forwarded to 127.0.0.1:${HOSTPORT}"
-
 set +e
-"$ROOT/tools/amiberry-run.sh" -N a2065 -B slirp -m "$MODEL" "${CPUARG[@]}" \
+"$ROOT/tools/amiberry-run.sh" -N a2065 -B "$BACKEND" -m "$MODEL" "${CPUARG[@]}" \
     -t "$WINDOW" \
     -a "DH0:Public $GUESTPORT TERMINAL=DH0:terminal.html TRACE" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
@@ -245,27 +279,121 @@ trim_emulog() {
     mv "$EMULOG.tail" "$EMULOG"
 }
 
-for _ in $(seq 1 "$BOOT_MAX"); do
-    sleep 1
-    trim_emulog
-    kill -0 "$RUNNER" 2>/dev/null || break
-    code=$(curl -s -m 3 -o /dev/null -w '%{http_code}' \
-           "http://127.0.0.1:${HOSTPORT}/" 2>/dev/null || true)
-    if [ "$code" = "200" ]; then
-        FORWARD=ok
-        BOOT_AT=$(( $(date +%s) - STARTED ))
-        break
+# Where to talk to it.  Behind NAT that is the forwarded port on this machine;
+# bridged it is a lease, and the lease is READ OFF THE WIRE rather than
+# guessed -- the guest announces itself by ARP as soon as it has one, and the
+# MAC to watch for is the one the emulator logged, not the one we asked for.
+if [ "$BACKEND" = slirp ]; then
+    TARGET_ADDR=127.0.0.1
+    TARGET_PORT="$HOSTPORT"
+else
+    TARGET_ADDR=""
+    TARGET_PORT="$GUESTPORT"
+
+    WIREMAC=""
+    for _ in $(seq 1 60); do
+        sleep 2
+        kill -0 "$RUNNER" 2>/dev/null || break
+        # Case-insensitively, and with nothing assumed about what precedes it.
+        # tools/demo.sh looks for a quoted board name before the address; this
+        # emulator build logs the LANCE line unquoted and in upper case, so
+        # that pattern silently matches nothing and the run dies as "no lease"
+        # with a guest that booted perfectly.  Cost one run.
+        WIREMAC=$(grep -i "7990:" "$EMULOG" 2>/dev/null |
+                  grep -oiE "([0-9a-f]{2}:){5}[0-9a-f]{2}" | tail -1 || true)
+        [ -n "$WIREMAC" ] && break
+    done
+
+    # ANY IPv4 packet FROM that MAC, and take its source.
+    #
+    # tools/demo.sh waits for an "ARP, Reply", and this guest never sends one:
+    # it emits DHCP, duplicate-address ARP *Requests*, mDNS and IPv6 discovery,
+    # and answers ARP only when something on the LAN asks -- which nothing here
+    # does, because this machine cannot reach it at all (see the note below).
+    # Waiting for a reply is waiting for something that is not coming; the
+    # mDNS announcement carries the address and arrives unprompted.
+    if [ -n "$WIREMAC" ]; then
+        echo "wire_mac=$WIREMAC"
+        for _ in $(seq 1 20); do
+            TARGET_ADDR=$(timeout 15 tcpdump -i "$BACKEND" -n -c 4 \
+                              "ether src $WIREMAC and ip" 2>/dev/null |
+                          awk '{print $2}' |
+                          grep -oE "^([0-9]{1,3}\.){3}[0-9]{1,3}" |
+                          grep -v "^0\.0\.0\.0$" | head -1 || true)
+            [ -n "$TARGET_ADDR" ] && break
+            kill -0 "$RUNNER" 2>/dev/null || break
+        done
     fi
-done
+
+    if [ -z "$TARGET_ADDR" ] && [ "$KEEP" != yes ]; then
+        echo "forward=failed"
+        echo "boot_seconds=0"
+        echo "checks=0"
+        echo "failures=0"
+        echo "result=infra"
+        echo "!! no lease seen for the guest on $BACKEND" >&2
+        exit 2
+    fi
+
+    if [ -z "$TARGET_ADDR" ]; then
+        # Held, and the address was not caught.  The guest is running; killing
+        # it because a sniff missed would throw away the thing being held.
+        TARGET_ADDR="(unknown -- watch: tcpdump -i $BACKEND -n ether src $WIREMAC)"
+    fi
+    echo "guest_address=$TARGET_ADDR"
+fi
+
+# Bridged and held: there is nothing to poll FROM here, because this is the
+# machine emulating it and a guest bridged onto a host's own port cannot talk
+# to that host (the long note further down says why).  Holding is the whole
+# job in that case; whoever drives it from elsewhere finds out whether it
+# answers, and finds out sooner than a poll here would.
+if [ "$KEEP" = yes ] && [ "$BACKEND" != slirp ]; then
+    FORWARD=unpolled
+    BOOT_AT=$(( $(date +%s) - STARTED ))
+else
+    for _ in $(seq 1 "$BOOT_MAX"); do
+        sleep 1
+        trim_emulog
+        kill -0 "$RUNNER" 2>/dev/null || break
+        code=$(curl -s -m 3 -o /dev/null -w '%{http_code}' \
+               "http://${TARGET_ADDR}:${TARGET_PORT}/" 2>/dev/null || true)
+        if [ "$code" = "200" ]; then
+            FORWARD=ok
+            BOOT_AT=$(( $(date +%s) - STARTED ))
+            break
+        fi
+    done
+fi
 
 echo "forward=$FORWARD"
 echo "boot_seconds=$BOOT_AT"
 
-if [ "$FORWARD" != ok ]; then
+if [ "$FORWARD" != ok ] && [ "$FORWARD" != unpolled ]; then
     echo "checks=0"
     echo "failures=0"
     echo "result=infra"
-    echo "!! nothing answered on 127.0.0.1:${HOSTPORT} within ${BOOT_MAX}s." >&2
+    echo "!! nothing answered on ${TARGET_ADDR}:${TARGET_PORT} within ${BOOT_MAX}s." >&2
+    if [ "$BACKEND" != slirp ]; then
+        cat >&2 <<'WHY'
+!!
+!! BRIDGED, AND THIS IS THE MACHINE RUNNING THE EMULATOR.
+!!
+!! A guest bridged onto a host's own physical port cannot exchange traffic
+!! with that host.  The guest's frame leaves the port, and the switch does not
+!! send it back out the port it arrived on -- so ARP never resolves in either
+!! direction.  Measured both ways: the host cannot ping the guest, and `ssh`
+!! from the guest to the host is silent for as long as you care to wait.
+!!
+!! It is not a fault in the guest and not a fault in the server.  Drive a
+!! bridged guest from ANOTHER machine on the LAN:
+!!
+!!     on this machine:   tests/tools/run-wsconsole.sh -B <iface> -K
+!!     on another:        tests/tools/wsterm-console.py <guest address> <port>
+!!
+!! -K boots it and holds it, and prints the address to aim at.
+WHY
+    fi
     sed -n '1,40p' "$HD/stdout.txt" 2>/dev/null >&2 || true
     exit 2
 fi
@@ -274,7 +402,7 @@ fi
 # emulator's own window runs out or somebody stops this script.
 if [ "$KEEP" = yes ]; then
     echo "ready=1"
-    echo "url=http://127.0.0.1:${HOSTPORT}/terminal"
+    echo "url=http://${TARGET_ADDR}:${TARGET_PORT}/terminal"
     echo "sshd_port=${SSHD_PORT}"
     echo "==> holding the guest; Ctrl-C to stop it"
     while kill -0 "$RUNNER" 2>/dev/null; do
@@ -307,7 +435,9 @@ AMINETXDUO_WSCONSOLE_ED="$HAVE_ED" \
 AMINETXDUO_WSCONSOLE_MORE="$HAVE_MORE" \
 AMINETXDUO_WSCONSOLE_SSH="$([ "$SSHD" = ok ] && echo yes || echo no)" \
 AMINETXDUO_WSCONSOLE_SSHD_PORT="$SSHD_PORT" \
-python3 "$ROOT/tests/tools/wsterm-console.py" 127.0.0.1 "$HOSTPORT" \
+AMINETXDUO_WSCONSOLE_HOST="$([ "$BACKEND" = slirp ] && echo 10.0.2.2 || \
+    ip -4 -o addr show "$BACKEND" 2>/dev/null | awk '{print $4}' | cut -d/ -f1)" \
+python3 -u "$ROOT/tests/tools/wsterm-console.py" "$TARGET_ADDR" "$TARGET_PORT" \
     > "$ROOT/build/wsconsole-drill.txt" 2>&1 &
 DRILL=$!
 while kill -0 "$DRILL" 2>/dev/null; do

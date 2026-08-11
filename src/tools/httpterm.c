@@ -49,6 +49,37 @@
  */
 #define TERM_RUNNER_STACK   (64UL * 1024UL)
 
+/*
+ * And the stack the SHELL gives the commands a person types, which is a
+ * different number for a different reason.  See term_runner_main(), where it
+ * is set and where the arithmetic and the cost are written down.
+ */
+#define TERM_SHELL_STACK    (16UL * 1024UL)
+
+/*
+ * What the Shell is told before it starts reading.
+ *
+ * `%S` is the current directory and `%N` is the process number.  The Shell's
+ * own default is `%N> ` alone, which tells a person in a browser nothing they
+ * can use: the thing they cannot otherwise discover is where they are.
+ *
+ * The number is KEPT rather than dropped, though there is only ever one
+ * session.  It increments per Shell, so it is how a person sees that a
+ * reconnect actually got them a new one rather than reattaching to the old --
+ * which matters here more than in an ordinary Shell, because a session can be
+ * taken over or abandoned underneath them and the number is the only visible
+ * difference.
+ *
+ * Sent as Execute()'s command string rather than set on the CLI, because
+ * cli_Prompt is a BSTR in a buffer of a size this file does not own, while
+ * `Prompt` is a Shell built-in (kickstart/shell/prompt.c) and setting it is
+ * what the built-in is for.  Execute() runs the string before it starts
+ * reading the handle -- "after the (possibly empty) commandString is
+ * performed, subsequent input is read from the specified input file handle"
+ * -- so it is in force from the first prompt the person sees.
+ */
+#define TERM_SHELL_SETUP    "prompt \"%N.%S> \""
+
 /* How long http_term_shutdown() will wait for a Shell to notice end of file.
    Ten seconds is far longer than the exit path takes and short enough that a
    Ctrl-C on the server does not look like a hang.  See where it is used for
@@ -1442,6 +1473,52 @@ static VOID term_runner_main(VOID)
         return;
 
     /*
+     * THE STACK THE SHELL WILL GIVE ITS COMMANDS, AND THE PROMPT IT WILL PRINT.
+     *
+     * Both are set on THIS process's CLI and inherited, because that is how a
+     * Shell gets them.  cli_init.c, building the new CLI:
+     *
+     *     prompt = (char *) BADDR(oclip->cli_Prompt);
+     *     if (defstk == 0) defstk = oclip->cli_DefaultStack;
+     *
+     * where oclip is the CLI of whoever asked for the Shell -- this process,
+     * which is exactly what NP_Cli below buys.  There is no packet for either
+     * and no tag on Execute(); the caller's CLI is the channel.
+     *
+     * SIXTEEN KILOBYTES, AND WHAT IT COSTS
+     *
+     *   CLI_INITIAL_STACK is 4096 bytes and that is what a Shell hands a
+     *   command by default.  It is not enough for anything that reaches the
+     *   network: a bsdsocket LVO runs NetX Duo on the CALLER's stack --
+     *   ami_netstack_enter() takes the baton and descends from there -- so a
+     *   command that opens a socket carries the whole TCP/IP call depth on
+     *   whatever the Shell gave it.  A person should not have to know that,
+     *   and typing `stack` before every command is knowing it.
+     *
+     *   The field is in LONGWORDS, not bytes.  cli_init.h says so:
+     *   `#define CLI_INITIAL_STACK (4096 >> 2)`.  Writing 16384 here would
+     *   ask for 64 KB.
+     *
+     *   The cost is per COMMAND and not per session: the Shell allocates this
+     *   when it runs one and gives it back afterwards, and it runs one at a
+     *   time.  So on the 1 MB machine this project cares about it is 16 KB --
+     *   1.6% -- held only while a command is actually running, against 4 KB
+     *   before.  A session sitting at a prompt costs nothing extra at all.
+     *
+     *   It is a floor and not a guarantee.  TCP_SESSION_STACK is 16 KB and
+     *   BSD_STARTUP_STACK is 64 KB for the same reason, and a command that
+     *   needs more can still say `stack`.  Notably it does NOT size ssh:
+     *   dbclient swaps onto a stack of its own at __wrap_main
+     *   (clients/compat/amiga_argv.c) and leaves this one behind.
+     */
+    {
+        struct CommandLineInterface *cli = Cli();
+
+        if (cli != NULL)
+            cli->cli_DefaultStack = TERM_SHELL_STACK / 4UL;
+    }
+
+    /*
      * Execute() and NOT SystemTagList(), and that is the whole of this file's
      * one real discovery.  dos.library's own autodoc for SystemTagList says
      * it in a single line -- "Similar to Execute(), but does not read commands
@@ -1454,9 +1531,15 @@ static VOID term_runner_main(VOID)
      * Execute()'s contract is the one this needs: "If the input file handle is
      * nonzero then after the (possibly empty) commandString is performed
      * subsequent input is read from the specified input file handle until end
-     * of that file is reached."  An empty string and a live input handle is
-     * the documented way to put a Shell on a serial port, and this is the same
-     * thing with a pipe where the port would be.
+     * of that file is reached."  A live input handle is the documented way to
+     * put a Shell on a serial port, and this is the same thing with a handler
+     * where the port would be.
+     *
+     * The string is no longer empty -- it is TERM_SHELL_SETUP, which sets the
+     * prompt -- and the same sentence is what says that is safe: the command
+     * is performed FIRST and the handle is read afterwards, so the Shell is
+     * still the interactive one and the person still gets every line they
+     * type.  "(possibly empty)" is the parenthesis that makes it a choice.
      *
      * What it costs is the tags: Execute() creates the Shell process itself,
      * so there is no NP_StackSize to give it and no NP_Name to find it by.
@@ -1466,7 +1549,8 @@ static VOID term_runner_main(VOID)
      * which learns the Shell's Task from the packets it sends rather than by
      * guessing what dos.library called it.
      */
-    r->rn_Rc = (LONG)Execute((CONST_STRPTR)"", r->rn_In, r->rn_Out);
+    r->rn_Rc = (LONG)Execute((CONST_STRPTR)TERM_SHELL_SETUP,
+                             r->rn_In, r->rn_Out);
 
     if (r->rn_Rc == 0)
         r->rn_Err = IoErr();

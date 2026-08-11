@@ -56,6 +56,12 @@ static char *argv_vec[AMIGA_ARGV_MAX + 1];
  * 5,008 bytes, a full key exchange no deeper than `dbclient -V`, because
  * Dropbear targets routers and libtommath keeps bignum digits on the heap.
  *
+ * Re-measured after httpd grew a console handler, on the suspicion that
+ * console I/O through DOS packets would deepen it: 4,940 bytes, over a bridge
+ * to a real sshd, full key exchange and six password prompts, read out of a
+ * browser terminal.  It did not -- the packets are answered in the SERVER's
+ * process and cost this one a Wait() -- so 8 KB stands with 3.2 KB spare.
+ *
  * It was 256 KB, sized by a comment that named curl first.  Nothing here has
  * ever built curl; clients/ holds dropbear and this directory.  Our own fetch
  * is a command in src/tools, allocates its own 64 KB and never comes through

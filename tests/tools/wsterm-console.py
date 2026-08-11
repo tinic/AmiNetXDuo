@@ -51,8 +51,10 @@ WANT_MORE = os.environ.get("AMINETXDUO_WSCONSOLE_MORE") == "yes"
 WANT_SSH = os.environ.get("AMINETXDUO_WSCONSOLE_SSH") == "yes"
 SSHD_PORT = os.environ.get("AMINETXDUO_WSCONSOLE_SSHD_PORT", "2224")
 
-# SLIRP puts the build host at 10.0.2.2, always.
-HOST_FROM_GUEST = "10.0.2.2"
+# Where the guest reaches the build host.  Behind NAT that is always 10.0.2.2;
+# bridged it is this machine's own address on the LAN, and the runner passes
+# it.  Not guessable from in here, so it is given rather than assumed.
+HOST_FROM_GUEST = os.environ.get("AMINETXDUO_WSCONSOLE_HOST", "10.0.2.2")
 
 # A string that exists nowhere else in this run.  If it comes back from the
 # server, something echoed it.
