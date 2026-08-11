@@ -506,8 +506,20 @@ guest_global_v6() {
 }
 
 # An arm that cannot mean anything without that address.
+#
+# The traceroute -hop arms are deliberately NOT in this list.  They were
+# measured working on a guest that had only a link-local: three IPv6 hops
+# answered against example.com in under 20 ms, so a link-local source is
+# enough to send a probe and receive the router's time-exceeded, and gating
+# them would throw away the one -6 arm that can be exercised on a wire like
+# this one.  Where a globally routable source really is needed -- fetch, nc,
+# telnet, whois, sntp, iperf reaching a host on the internet -- the arm is
+# gated, and against a destination our routes do not cover traceroute says
+# "cannot send: network unreachable" and returns 10 rather than reporting a
+# row of stars.
 v6_dependent() {
     case "$1" in
+        */v6-hop)             return 1 ;;
         */v6|literal/v6-ping) return 0 ;;
         *)                    return 1 ;;
     esac
