@@ -75,7 +75,7 @@ done
 # The shape tests/tools/run-wsterm.sh stages, which is the shape
 # tests/tools/run-httpd.sh stages before it.  Never hand-assemble one.
 
-STAGE="$ROOT/build/demo-stage"
+STAGE="$ROOT/build/demo-stage-${AMINETXDUO_RUN_TAG:-demo}"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs" "$STAGE/Public/Docs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
@@ -114,14 +114,19 @@ echo "in a drawer" > "$STAGE/Public/Docs/notes.txt"
 # ------------------------------------------------------------------ run ---
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-demo}"
-EMU="$ROOT/build/amiberry-demo.log"
+
+# Named after the tag, because amiberry-run.sh names its log after the tag.
+# This said build/amiberry-demo.log outright, so a second demo started with
+# AMINETXDUO_RUN_TAG set watched a file its own emulator was not writing and
+# sat in the MAC loop until the timeout with nothing wrong anywhere else.
+EMU="$ROOT/build/amiberry-$AMINETXDUO_RUN_TAG.log"
 
 echo "==> booting $MODEL on '$BACKEND', httpd :$PORT, window ${WINDOW}s"
 
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$BACKEND" -m "$MODEL" -t "$WINDOW" \
     -a "DH0:Public $PORT TERMINAL=DH0:terminal.html" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
-    "$STAGE/terminal.html" > "$ROOT/build/demo-run.log" 2>&1 &
+    "$STAGE/terminal.html" > "$ROOT/build/demo-run-$AMINETXDUO_RUN_TAG.log" 2>&1 &
 RUNNER=$!
 
 # The address, from the wire.  The guest announces itself by ARP as soon as it
