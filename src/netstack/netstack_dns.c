@@ -14,6 +14,7 @@
 #include "netstack_retry.h"
 
 #include <proto/exec.h>
+#include <stddef.h>
 
 /* RFC 1035 2.3.4: 255 octets of domain name, plus the NUL. */
 #define AMI_DNS_NAME_MAX    256
@@ -774,15 +775,41 @@ LONG netstack_resolve_reverse(ULONG addr, char *name_out, ULONG name_len,
 }
 
 #ifdef AMINETXDUO_IPV6
+/*
+ * answer is aligned by hand, and the attribute is the mechanism rather than a
+ * hint.
+ *
+ * nxd_dns.h says of the record buffer: "The return_buffer must be 4-byte
+ * aligned", and _nxde_dns_ipv6_address_by_name_get() enforces it -- an address
+ * 2 mod 4 is refused with NX_PTR_ERROR before a query is built, let alone
+ * sent.  On m68k nothing in the language reaches 4: __alignof__(ULONG) is 2,
+ * so this struct's alignment is 2 and an instance of it on the stack lands
+ * 2 mod 4 whenever the frame does.
+ *
+ * That is what it did.  getaddrinfo() asks AAAA first and appends it ahead of
+ * the A record, so the ordering was never the problem; the AAAA lookup was
+ * refused by argument checking, the caller could not tell that apart from "the
+ * name has no AAAA", and every name resolved IPv4 on a machine with a working
+ * global IPv6 address.  nslookup builds its own query and never came through
+ * here, which is why it could report the AAAA the resolver said did not exist.
+ *
+ * docs/ALIGNMENT.md has the same defect twice before, in CMSG_BUFFER() and in
+ * bsd_hostent_pack().
+ */
 typedef struct
 {
     AmiNetStack        *ns;
     const char         *name;
-    NX_DNS_IPV6_ADDRESS answer[1];
+    NX_DNS_IPV6_ADDRESS answer[1] __attribute__((aligned(4)));
     UINT                count;
     UINT                status;
     BOOL                nocaller;
 } AmiNsName6Ask;
+
+_Static_assert(__alignof__(AmiNsName6Ask) >= 4,
+               "the DNS record buffer must be 4-byte aligned");
+_Static_assert((offsetof(AmiNsName6Ask, answer) & 3U) == 0,
+               "the DNS record buffer must be 4-byte aligned");
 
 static AmiNetAskResult ami_ns_ask_name6(VOID *arg, ULONG wait)
 {

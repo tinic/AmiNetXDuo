@@ -437,6 +437,19 @@ BOOL netstack_ipv6_address_get(UWORD interface_index, UWORD slot,
                                ULONG *state_out);
 
 /*
+ * TRUE when some interface holds a global unicast address (2000::/3, RFC 4291
+ * 2.5.4) that has finished duplicate address detection: that is, when this
+ * machine can be a source for a destination out on the IPv6 internet.
+ *
+ * netstack_ipv6_enabled() is a weaker thing and is not a substitute. Every
+ * interface gets a link-local whether or not any router has ever spoken to it,
+ * so "IPv6 is running" is true on a machine that cannot reach a single global
+ * address. getaddrinfo() is the caller that has to tell the two apart -- see
+ * the AI_ADDRCONFIG note at the top of src/bsdsocket/addrinfo.c.
+ */
+BOOL netstack_ipv6_have_global(VOID);
+
+/*
  * The best source address for talking to `dest`, which is what an AF_INET6
  * socket bound to in6addr_any reports from getsockname(). Returns FALSE when
  * the interface has no usable (non-tentative) address of the right scope.

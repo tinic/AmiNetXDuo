@@ -16,9 +16,14 @@
  *
  *   1. IPv6 results come first, then IPv4, so a caller that walks the list in
  *      order and connects to the first address that works prefers IPv6.
- *   2. AI_ADDRCONFIG is implied and cannot be turned off: AAAA is only looked
- *      up when the stack has IPv6 running (netstack_ipv6_enabled()), and A is
- *      only looked up when it has an IPv4 address.
+ *   2. AI_ADDRCONFIG is implied for AF_UNSPEC and cannot be turned off: AAAA
+ *      is only looked up when this machine holds a global unicast address that
+ *      has finished duplicate address detection (netstack_ipv6_have_global()).
+ *      "IPv6 is running" is not that test and was the one used here: every
+ *      interface gets a link-local unasked, so a machine that has never seen a
+ *      router passed it, preferred the AAAA, and connected nowhere.  A caller
+ *      that names AF_INET6 has said what it wants and is not second-guessed;
+ *      it gets the AAAA lookup whenever IPv6 is running at all.
  *   3. AI_V4MAPPED is not implied and not available.  An AF_INET6 query
  *      returns AAAA records only; it never synthesises ::ffff:a.b.c.d from an
  *      A record.  A caller that wants both asks for AF_UNSPEC.
@@ -526,7 +531,16 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     verdict = EAI_NONAME;
 
 #ifdef AMINETXDUO_IPV6
-    if ((family == AF_UNSPEC || family == AF_INET6) && netstack_ipv6_enabled())
+    /*
+     * AF_INET6 was asked for by name, so it is asked for whatever this machine
+     * can reach; AF_UNSPEC is a preference, and preferring an address the
+     * machine has no source for is worse than not preferring it. Every
+     * interface carries a link-local whether or not a router has ever spoken
+     * to it, so netstack_ipv6_enabled() cannot tell those apart and
+     * netstack_ipv6_have_global() is the test.
+     */
+    if ((family == AF_INET6 && netstack_ipv6_enabled()) ||
+        (family == AF_UNSPEC && netstack_ipv6_have_global()))
     {
         ULONG words[4];
 
