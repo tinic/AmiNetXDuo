@@ -114,12 +114,11 @@ VOID ami_ns6_dnssl(NX_IP *ip_ptr, UINT interface_index, UCHAR *domains,
 
     /* A list longer than this can hold is one no search list could hold
        either; taking the front of it would be taking an arbitrary prefix of
-       somebody's domain list, so it is refused whole. */
+       somebody's domain list, so it is refused whole.  Whatever was already
+       recorded stands: an option this cannot read is not a reason to forget
+       the one that came before it. */
     if (length > (UINT)AMI_DNSSL_MAX)
-    {
-        ns->ns_DnsslPending = FALSE;
         return;
-    }
 
     for (i = 0; i < (UWORD)length; i++)
         ns->ns_Dnssl[i] = (UBYTE)domains[i];
