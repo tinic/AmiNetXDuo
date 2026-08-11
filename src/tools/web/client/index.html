@@ -17,6 +17,20 @@
 <meta name="color-scheme" content="dark">
 <title>AmigaDOS</title>
 <!--
+  The typeface in this page is Hack, subset to Latin-1 and box drawing and
+  embedded as a data: URI.  Both of its licences require this notice to travel
+  with every copy of the font, and a copy of the font is exactly what this
+  file is, so it is not tidy-up-able:
+
+    Hack: Copyright 2018 Source Foundry Authors, MIT License
+    Bitstream Vera Sans Mono: Copyright 2003 Bitstream Inc., Bitstream Vera
+    License, with Reserved Font Names "Bitstream" and "Vera"
+    DejaVu changes: public domain
+
+  Full text: src/tools/web/vendor/hack/LICENSE.  tools/web/build.mjs fails the
+  build if these lines are not here.
+-->
+<!--
   Inline, because a browser asks for /favicon.ico whether or not anybody
   wanted one, and the machine it would ask is a 68020 that has to answer 404
   to it.  One data: URI and the request never happens.

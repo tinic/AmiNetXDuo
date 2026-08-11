@@ -1,0 +1,56 @@
+# Hack, vendored, subset to what a terminal serving AmigaDOS needs.
+#
+# https://github.com/source-foundry/Hack at a737c12 (2020-11-21), v3.003.
+# LICENSE beside this file is that repo's LICENSE.md, verbatim.
+#
+# THE LICENCE, HAVING READ IT
+#
+#   Three, and all three permit this.  Hack's own work is MIT (Source Foundry
+#   Authors 2018).  The DejaVu work in it was placed in the public domain.
+#   The Bitstream Vera part is the Bitstream Vera License, which grants the
+#   right to reproduce and distribute, allows the Font Software to be sold as
+#   part of a larger software package, and permits modification -- which
+#   subsetting is -- on ONE condition that bites: a modified font may not
+#   carry a name containing "Bitstream" or "Vera".  This one is called Hack,
+#   so it does not.
+#
+#   Vera also requires that "the above copyright and trademark notices and
+#   this permission notice shall be included in all copies of one or more of
+#   the Font Software typefaces", and MIT asks the same.  The page IS a copy
+#   of the typeface, so src/tools/web/client/index.html carries the notice in
+#   its head and tools/web/build.mjs refuses to write a page without it.
+#
+# WHAT WAS DONE TO IT
+#
+#   Two weights, not four.  Regular and Bold; no italic, because AmigaDOS
+#   output has almost none and a browser's synthetic oblique is enough for
+#   what there is.
+#
+#   Subset from the upstream TTFs with fontTools 4.63.0:
+#
+#     pyftsubset build/ttf/Hack-Regular.ttf \
+#         --unicodes=U+0020-007E,U+00A0-00FF,U+2500-259F \
+#         --layout-features= --no-hinting --desubroutinize \
+#         --drop-tables+=DSIG --flavor=woff2 \
+#         --output-file=hack-regular.woff2
+#
+#   and the same for Hack-Bold.ttf.  The upstream files that went in:
+#
+#     15f55cc0c85a2988d2b4b3a8cdb5d77fdfbaf319e1bb5309d725db9818fb7125  Hack-Regular.ttf
+#     5bbf531eff7f8a0c2559c9a0656718e2828a012a9b1f60b5f54006d59a4de8d4  Hack-Bold.ttf
+#
+#   A different fontTools may not produce these bytes to the byte; the hashes
+#   below are what CI checks, and they are here to catch an edit in this tree,
+#   not to promise a reproducible build of the subsetter.
+#
+# WHAT THE RANGE IS FOR
+#
+#   U+0020-007E and U+00A0-00FF is printable Latin-1, which is what AmigaDOS
+#   emits and the whole reason the page decodes byte-for-byte rather than as
+#   UTF-8.  U+2500-259F is box drawing and block elements, checked present:
+#   128 of 128 and 32 of 32.  Everything outside that falls through to the
+#   system monospace named after Hack in client/theme.ts.
+
+1c2be46dc0216bdd6aebfbace6995595d67b46b773ead1775227a11c89a80ff6  hack-regular.woff2
+87bf9a67eea3d0af0d9744db21e8ecde5e05e2206c3c54cb7457a01e77db075a  hack-bold.woff2
+1f61bb7c790c59b4b0ecdf304628b94e42ae4c8020094a8c3da73381ab212623  LICENSE
