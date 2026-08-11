@@ -120,7 +120,7 @@ CROSS_CONFIGS=(
 HOST_TEST_TARGETS=(test_config test_usergroup test_mbuf test_bpf test_httppath test_httpif test_httplock test_argtemplates test_fetchurl test_crypto68k test_crypto68k_25519 test_net68k_checksum test_net68k_rxverify
                    test_tcp_retries test_bcast_loopback test_tcp_source_connect test_tcp_rtt
                    test_dns_retry test_dns_status
-                   test_sockopt_numbers test_tls_expiry test_sana2_copy test_ipv6_ra test_ipv6_ptb
+                   test_sockopt_numbers test_tls_expiry test_sana2_copy test_sana2_tx test_ipv6_ra test_ipv6_ptb
                    test_httpframe test_httpws test_tls_x509 test_ipv6_frag test_iperfwire
                    fuzz_config fuzz_bpf fuzz_dns fuzz_usergroup
                    fuzz_dhcp fuzz_tls_record fuzz_tls_x509 fuzz_httpframe)

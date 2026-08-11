@@ -43,6 +43,9 @@ typedef struct AmiSana2If AmiSana2If;
 /* Ethernet framing constants shared with the shim's users. */
 #define AMI_ETH_HEADER_SIZE     14
 #define AMI_ETH_ADDR_SIZE       6
+/* The minimum Ethernet frame, header and payload, without the FCS the
+   hardware appends.  46 bytes of payload behind a 14-byte header. */
+#define AMI_ETH_MIN_FRAME       60
 #define AMI_ETHERTYPE_IPV4      0x0800
 #define AMI_ETHERTYPE_ARP       0x0806
 #define AMI_ETHERTYPE_IPV6      0x86DD

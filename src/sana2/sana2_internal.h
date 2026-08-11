@@ -311,6 +311,7 @@ typedef struct AmiTxSlot
     ULONG               consumed;
     ULONG               total;
     UWORD               hdr_len;    /* Ethernet bytes prepended in raw mode*/
+    UWORD               pad_len;    /* zero bytes appended to reach 60     */
     volatile BOOL       busy;
 } AmiTxSlot;
 
