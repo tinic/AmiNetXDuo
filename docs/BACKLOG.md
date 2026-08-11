@@ -39,7 +39,6 @@ git log; what it declined is under *Decided against*; what it disproved is under
 | **`src/sana2` has one test, added 2026-08-04**, covering `sana2_copy.c` alone out of 3,704 lines | The driver-facing code runs at interrupt time, which is where a mistake takes the machine down rather than failing a check | `src/sana2/` |
 | **A command is mostly C runtime.** `ping` is 16,196 bytes in 0.17.3, of which its own code is about 2,050 | libnix's crt0 chain pulls in stdio and the C++ AVL allocator through `__stdiowin.o` and `__initcpp.o`; `atexit()` was the other route and is gone. `tool_printf` goes through dos.library `VPrintf` and `ami_alloc` through `AllocVec`, so nothing we wrote calls what remains. `src/tools/CMakeLists.txt:62-76` records why the link line was left alone once before | link map of `tool_ping` |
 | **Parameterise `run-tcphandler.sh`'s peer address** | Seven connections in it name 10.0.2.2 outright. It runs under Amiberry now, whose SLIRP puts the gateway at the same address, so it passes; the address being written down seven times is what stops it moving to a bridged backend or a real peer | `tests/tools/run-tcphandler.sh` |
-| **`HOST_TEST_TARGETS` count guard does not catch an unbuilt target** | It compares registered tests against targets, and a test registers whether or not its target was built, so five went to `main` reporting Not Run | `tools/ci.sh:207-211` |
 | **EKU, nameConstraints and critical-extension rejection, together** | Accepting a certificate that marks nameConstraints critical while not enforcing it is exactly the failure the critical bit exists to prevent, so doing one without the others is worse than doing none. The known-critical set must be `{basicConstraints, keyUsage, subjectAltName, extendedKeyUsage}`, Let's Encrypt intermediates mark EKU critical. Untestable without hardware | `nx_secure_x509_extension_find.c:191` |
 
 ### The release gate, and what is left of the emulators
@@ -839,6 +838,24 @@ math libraries are in `LIBS:`. The earlier `errno 43` `EPROTONOSUPPORT` from
 `AddNetInterface` was not a protocol-domain fault and not an OS-version
 requirement. Measured 2026-08-02 as the third arm: read 1108 KB/s against our
 983 and Roadshow's 1824.
+
+### The host-test count guard, closed 2026-08-11
+
+The row said the guard "does not catch an unbuilt target". Half right, and the
+half it named is no longer true: `ctest --show-only=json-v1` on a configured
+host tree shows every one of the 48 registered tests running a binary that is
+in `HOST_TEST_TARGETS`, so there is no test left that registers without being
+built.
+
+The guard had rotted a different way. It was `-lt`, *fewer* than expected is a
+failure, so every test added without touching `HOST_TESTS_EXPECTED` left one
+more test's worth of slack: **the bar was 47 against 49 real tests**, and two
+could have gone missing with the gate green. Measured, not inferred: 49 on
+x86_64, 48 on arm64 (no `test_inet`).
+
+Now exact in both directions, so adding a test turns CI red until the number
+is raised. `tools/ci.sh host` on x86_64: `49 tests registered (expected 49)`,
+all green.
 
 ## Decided against, do not "fix"
 

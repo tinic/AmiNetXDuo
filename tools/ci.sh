@@ -145,10 +145,18 @@ case "$(uname -m)" in
 esac
 
 # How many ctest cases those targets register between them.  It is not the
-# number of targets: test_crypto68k and friends register several each.  Raise
-# it when tests are added; the gate is there so that tests DISAPPEARING is
-# noticed, which comparing against the target count never could.
-HOST_TESTS_EXPECTED=47
+# number of targets: test_crypto68k and friends register several each.
+#
+# THE NUMBER AND THE SUITE MOVE TOGETHER, and the check below is exact for
+# that reason.  It used to be "fewer than this is a failure", which sounds
+# safer and is not: every test added without touching this line left one more
+# test's worth of slack, so by 2026-08-11 the bar was 47 against 49 real
+# tests and two could have gone missing unnoticed.  A gate that drifts below
+# what it guards is a gate that has already failed.
+#
+# Adding a test therefore turns CI red until this is raised.  That is the
+# maintenance the gate is made of, and it is one line.
+HOST_TESTS_EXPECTED=49
 case "$(uname -m)" in
     x86_64|amd64) ;;
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 1)) ;;   # no test_inet
@@ -277,6 +285,12 @@ stage_host() {
     note "$n tests registered (expected $want)"
     if [ "${n:-0}" -lt "$want" ]; then
         fail "only $n tests registered, expected $want: tests have gone missing"
+        return 1
+    fi
+    if [ "${n:-0}" -gt "$want" ]; then
+        fail "$n tests registered, expected $want: tests were added without" \
+             "raising HOST_TESTS_EXPECTED in tools/ci.sh, and every one of" \
+             "them is slack the next removal can hide in"
         return 1
     fi
 }
