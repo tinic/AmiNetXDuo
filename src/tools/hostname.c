@@ -268,7 +268,9 @@ int main(int argc, char **argv)
 
     if (tool_stack_library_running())
     {
-        struct Library  *base = tool_netstatus_open(hn_quiet);
+        /* FALSE: QUIET is the name and nothing else, and a stack that would
+           not take the name is not the name. */
+        struct Library  *base = tool_netstatus_open(FALSE);
         NetStatusControl ctl;
         ULONG            w;
         ULONG            i;

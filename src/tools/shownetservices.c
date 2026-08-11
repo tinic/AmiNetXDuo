@@ -546,7 +546,9 @@ int main(int argc, char **argv)
 
     /* Never starts the stack: a machine with no network has nothing to
        discover, and starting one to say so would be a surprise. */
-    base = tool_netstatus_open(quiet);
+    /* FALSE: QUIET drops the progress lines, never the reason nothing can be
+       discovered. */
+    base = tool_netstatus_open(FALSE);
     if (base == NULL)
     {
         FreeArgs(rda);

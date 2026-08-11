@@ -147,7 +147,8 @@ int main(int argc, char **argv)
         return RETURN_WARN;
     }
 
-    base = tool_netstatus_open(nsd_quiet);
+    /* FALSE: QUIET drops what was stopped, never why it could not be. */
+    base = tool_netstatus_open(FALSE);
     if (base == NULL)
     {
         FreeArgs(rda);
@@ -158,11 +159,8 @@ int main(int argc, char **argv)
                              sizeof(nsd_ifaces), sizeof(NetStatusInterface));
     if (n < 0)
     {
-        if (!nsd_quiet)
-        {
-            tool_error("the network would not say which interfaces it has");
-            tool_explain_no_netstatus(base);
-        }
+        tool_error("the network would not say which interfaces it has");
+        tool_explain_no_netstatus(base);
         tool_netstatus_close(base);
         FreeArgs(rda);
         return RETURN_FAIL;
@@ -188,8 +186,7 @@ int main(int argc, char **argv)
         if (tool_netstatus_control(base, NETCTRL_INTERFACE_DOWN, &ctl,
                                    &err) != 0)
         {
-            if (!nsd_quiet)
-                tool_error("%s would not go down", (LONG)name);
+            tool_error("%s would not go down", (LONG)name);
             failed++;
             continue;
         }
@@ -220,11 +217,8 @@ int main(int argc, char **argv)
 
         if (waited >= timeout)
         {
-            if (!nsd_quiet)
-            {
-                tool_error("%ld interface(s) were still up %lu seconds after "
-                           "being told to stop", still_up, timeout);
-            }
+            tool_error("%ld interface(s) were still up %lu seconds after "
+                       "being told to stop", still_up, timeout);
             tool_netstatus_close(base);
             FreeArgs(rda);
             return RETURN_WARN;

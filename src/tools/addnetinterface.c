@@ -27,6 +27,11 @@
  * prints what is wrong, where, and what to type next; the terse version still
  * goes to the serial log.
  *
+ * QUIET drops that running commentary and nothing else. A boot that says
+ * nothing when it works and still says why it did not is what User-Startup
+ * wants; a boot that swallows "there is no interface called eth0" is a
+ * machine with no network and no reason given.
+ *
  * It does not shut the stack down again: tool_stack_start() asks the library to
  * hold the stack itself, which is what keeps the interface online after this
  * command exits, as in Roadshow, where the interface stays up until Offline or
@@ -154,7 +159,7 @@ static VOID explain_library_failure(const AmiIfConfig *ifc)
  * is. tool_config_watch() puts the parser's complaints, with line numbers, on
  * the screen instead of only on the serial port.
  */
-static BOOL load_interface(const char *name, AmiIfConfig *ifc, BOOL quiet)
+static BOOL load_interface(const char *name, AmiIfConfig *ifc, BOOL again)
 {
     LONG err;
 
@@ -165,7 +170,10 @@ static BOOL load_interface(const char *name, AmiIfConfig *ifc, BOOL quiet)
     if (err == AMI_CFG_OK)
         return TRUE;
 
-    if (quiet)
+    /* A re-read of a file that already parsed once; the first read is what
+       reports on it. Not QUIET: the message is an error and QUIET keeps
+       those. */
+    if (again)
         return FALSE;
 
     if (err == AMI_CFG_ERR_IO)
@@ -456,12 +464,9 @@ int main(int argc, char **argv)
 
     if (count == 0)
     {
-        if (!quiet)
-        {
-            tool_error("which interface?");
-            tool_usage("<interface name> [<interface name>...]",
-                       "The name of a file in DEVS:NetInterfaces, e.g. eth0.");
-        }
+        tool_error("which interface?");
+        tool_usage("<interface name> [<interface name>...]",
+                   "The name of a file in DEVS:NetInterfaces, e.g. eth0.");
 
         FreeArgs(rda);
         return RETURN_ERROR;
@@ -469,9 +474,8 @@ int main(int argc, char **argv)
 
     if (count > (ULONG)AMI_CFG_MAX_INTERFACES)
     {
-        if (!quiet)
-            tool_error("this stack holds %ld interfaces, and %lu were named",
-                       (LONG)AMI_CFG_MAX_INTERFACES, count);
+        tool_error("this stack holds %ld interfaces, and %lu were named",
+                   (LONG)AMI_CFG_MAX_INTERFACES, count);
 
         FreeArgs(rda);
         return RETURN_ERROR;
@@ -489,7 +493,7 @@ int main(int argc, char **argv)
     {
         name = tool_basename((const char *)names[n]);
 
-        if (!load_interface(name, &ifc, quiet))
+        if (!load_interface(name, &ifc, FALSE))
         {
             FreeArgs(rda);
             return RETURN_FAIL;
@@ -553,22 +557,16 @@ int main(int argc, char **argv)
 
         if (base == NULL)
         {
-            if (!quiet)
-            {
-                tool_error("the network would not start");
-                explain_library_failure(&ifc);
-            }
+            tool_error("the network would not start");
+            explain_library_failure(&ifc);
             FreeArgs(rda);
             return RETURN_FAIL;
         }
 
         if (!tool_stack_is_ours(base))
         {
-            if (!quiet)
-            {
-                tool_error("another TCP/IP stack is installed on this machine");
-                tool_explain_foreign_stack(base);
-            }
+            tool_error("another TCP/IP stack is installed on this machine");
+            tool_explain_foreign_stack(base);
 
             /*
              * Holding a reference to a library we are about to complain about
@@ -606,12 +604,9 @@ int main(int argc, char **argv)
 
             if (where == -2)
             {
-                if (!quiet)
-                {
-                    tool_error("the network would not say which interfaces "
-                               "it has");
-                    tool_explain_no_netstatus(base);
-                }
+                tool_error("the network would not say which interfaces it "
+                           "has");
+                tool_explain_no_netstatus(base);
                 tool_stack_release(base);
                 FreeArgs(rda);
                 return RETURN_FAIL;
@@ -623,12 +618,9 @@ int main(int argc, char **argv)
 
                 if (add_err != 0)
                 {
-                    if (!quiet)
-                    {
-                        tool_error("%s could not be added to the running "
-                                   "network", (LONG)name);
-                        explain_add_failure(add_err, name, &ifc);
-                    }
+                    tool_error("%s could not be added to the running network",
+                               (LONG)name);
+                    explain_add_failure(add_err, name, &ifc);
                     rc = RETURN_FAIL;
                     continue;
                 }
@@ -704,12 +696,9 @@ int main(int argc, char **argv)
 
     if (err != AMI_NET_OK)
     {
-        if (!quiet)
-        {
-            tool_error("the network would not start: %s",
-                       (LONG)tool_net_error(err));
-            explain_startup_failure(err, &ifc);
-        }
+        tool_error("the network would not start: %s",
+                   (LONG)tool_net_error(err));
+        explain_startup_failure(err, &ifc);
         FreeArgs(rda);
         return RETURN_FAIL;
     }
@@ -733,12 +722,9 @@ int main(int argc, char **argv)
             err = netstack_interface_start(&ifc, &slot);
             if (err != AMI_NET_OK)
             {
-                if (!quiet)
-                {
-                    tool_error("%s could not be added to the running network: "
-                               "%s", (LONG)name, (LONG)tool_net_error(err));
-                    explain_startup_failure(err, &ifc);
-                }
+                tool_error("%s could not be added to the running network: %s",
+                           (LONG)name, (LONG)tool_net_error(err));
+                explain_startup_failure(err, &ifc);
                 FreeArgs(rda);
                 return RETURN_FAIL;
             }
@@ -751,12 +737,9 @@ int main(int argc, char **argv)
             err = netstack_interface_up((UWORD)index);
             if (err != AMI_NET_OK)
             {
-                if (!quiet)
-                {
-                    tool_error("%s would not come online: %s", (LONG)name,
-                               (LONG)tool_net_error(err));
-                    tool_explain_device(ifc.device, ifc.unit);
-                }
+                tool_error("%s would not come online: %s", (LONG)name,
+                           (LONG)tool_net_error(err));
+                tool_explain_device(ifc.device, ifc.unit);
                 FreeArgs(rda);
                 return RETURN_FAIL;
             }

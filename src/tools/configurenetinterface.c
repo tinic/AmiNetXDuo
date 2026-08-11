@@ -686,7 +686,9 @@ int main(int argc, char **argv)
         return RETURN_WARN;
     }
 
-    base = tool_netstatus_open(cni_quiet);
+    /* FALSE: QUIET drops the report of what changed, never the reason it
+       could not. */
+    base = tool_netstatus_open(FALSE);
     if (base == NULL)
     {
         FreeArgs(rda);
@@ -696,19 +698,15 @@ int main(int argc, char **argv)
     index = find_index(base, name);
     if (index == -2)
     {
-        if (!cni_quiet)
-        {
-            tool_error("the network would not say which interfaces it has");
-            tool_explain_no_netstatus(base);
-        }
+        tool_error("the network would not say which interfaces it has");
+        tool_explain_no_netstatus(base);
         tool_netstatus_close(base);
         FreeArgs(rda);
         return RETURN_FAIL;
     }
     if (index < 0)
     {
-        if (!cni_quiet)
-            tool_error("there is no interface called \"%s\"", (LONG)name);
+        tool_error("there is no interface called \"%s\"", (LONG)name);
         tool_netstatus_close(base);
         FreeArgs(rda);
         return RETURN_FAIL;
@@ -724,13 +722,11 @@ int main(int argc, char **argv)
     {
         if (control(base, NETCTRL_DHCP_RELEASE, index, 0, 0, 0, 0, &err) != 0)
         {
-            if (!cni_quiet)
-            {
-                if (err == CNI_ENOTCONN)
-                    tool_error("%s has no lease to release", (LONG)name);
-                else
-                    tool_error("%s would not release its lease", (LONG)name);
-            }
+            if (err == CNI_ENOTCONN)
+                tool_error("%s has no lease to release", (LONG)name);
+            else
+                tool_error("%s would not release its lease", (LONG)name);
+
             tool_netstatus_close(base);
             FreeArgs(rda);
             return RETURN_FAIL;
@@ -760,13 +756,11 @@ int main(int argc, char **argv)
                     (have_address && !renewing) ? NETCTRL_F_ADDRESS : 0UL,
                     &err) != 0)
         {
-            if (!cni_quiet)
-            {
-                if (err == CNI_ENOTCONN)
-                    tool_error("%s has no lease to renew", (LONG)name);
-                else
-                    tool_error("%s has no DHCP client to ask", (LONG)name);
-            }
+            if (err == CNI_ENOTCONN)
+                tool_error("%s has no lease to renew", (LONG)name);
+            else
+                tool_error("%s has no DHCP client to ask", (LONG)name);
+
             tool_netstatus_close(base);
             FreeArgs(rda);
             return RETURN_FAIL;
@@ -774,12 +768,9 @@ int main(int argc, char **argv)
 
         if (!wait_for_lease(base, index, timeout))
         {
-            if (!cni_quiet)
-            {
-                tool_error("%s: no answer from a DHCP server within %lu "
-                           "seconds", (LONG)name, timeout);
-                tool_explain_dhcp(name);
-            }
+            tool_error("%s: no answer from a DHCP server within %lu seconds",
+                       (LONG)name, timeout);
+            tool_explain_dhcp(name);
             tool_netstatus_close(base);
             FreeArgs(rda);
             return RETURN_FAIL;
@@ -817,25 +808,22 @@ int main(int argc, char **argv)
                     (have_netmask ? NETCTRL_F_NETMASK : 0UL) |
                     (have_gateway ? NETCTRL_F_GATEWAY : 0UL), &err) != 0)
         {
-            if (!cni_quiet)
+            if (err == CNI_EADDRNOTAVAIL)
             {
-                if (err == CNI_EADDRNOTAVAIL)
-                {
-                    ami_config_format_ip(address, text, sizeof(text));
-                    tool_error("%s would not take %s", (LONG)name, (LONG)text);
-                }
-                else if (err == CNI_EINVAL && have_gateway && gateway != 0)
-                {
-                    ami_config_format_ip(gateway, text, sizeof(text));
-                    tool_error("%s is not on any of this machine's own "
-                               "subnets, so nothing here can reach it",
-                               (LONG)text);
-                }
-                else
-                {
-                    tool_error("%s could not be reconfigured", (LONG)name);
-                }
+                ami_config_format_ip(address, text, sizeof(text));
+                tool_error("%s would not take %s", (LONG)name, (LONG)text);
             }
+            else if (err == CNI_EINVAL && have_gateway && gateway != 0)
+            {
+                ami_config_format_ip(gateway, text, sizeof(text));
+                tool_error("%s is not on any of this machine's own subnets, "
+                           "so nothing here can reach it", (LONG)text);
+            }
+            else
+            {
+                tool_error("%s could not be reconfigured", (LONG)name);
+            }
+
             tool_netstatus_close(base);
             FreeArgs(rda);
             return RETURN_FAIL;
@@ -879,20 +867,18 @@ int main(int argc, char **argv)
         if (control(base, NETCTRL_INTERFACE_MDNS, index, 0, 0, 0,
                     mdns_on ? (ULONG)NETCTRL_F_MDNS : 0UL, &err) != 0)
         {
-            if (!cni_quiet)
-            {
-                if (err == CNI_ENOSYS)
-                    tool_error("this bsdsocket.library was built without "
-                               "mDNS, so there is nothing to switch");
-                else if (err == CNI_EIO)
-                    tool_error("%s would not %s answering .local", (LONG)name,
-                               (LONG)(mdns_on ? "start" : "stop"));
-                else if (err == CNI_ENXIO)
-                    tool_error("%s is no longer attached", (LONG)name);
-                else
-                    tool_error("%s: MDNS=%s was refused", (LONG)name,
-                               (LONG)(mdns_on ? "YES" : "NO"));
-            }
+            if (err == CNI_ENOSYS)
+                tool_error("this bsdsocket.library was built without mDNS, "
+                           "so there is nothing to switch");
+            else if (err == CNI_EIO)
+                tool_error("%s would not %s answering .local", (LONG)name,
+                           (LONG)(mdns_on ? "start" : "stop"));
+            else if (err == CNI_ENXIO)
+                tool_error("%s is no longer attached", (LONG)name);
+            else
+                tool_error("%s: MDNS=%s was refused", (LONG)name,
+                           (LONG)(mdns_on ? "YES" : "NO"));
+
             tool_netstatus_close(base);
             FreeArgs(rda);
             return RETURN_FAIL;

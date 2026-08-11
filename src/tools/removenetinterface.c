@@ -152,7 +152,8 @@ int main(int argc, char **argv)
         return RETURN_WARN;
     }
 
-    base = tool_netstatus_open(rni_quiet);
+    /* FALSE: QUIET drops what was removed, never why it could not be. */
+    base = tool_netstatus_open(FALSE);
     if (base == NULL)
     {
         FreeArgs(rda);
@@ -172,19 +173,15 @@ int main(int argc, char **argv)
         index = find_index(base, name);
         if (index == -2)
         {
-            if (!rni_quiet)
-            {
-                tool_error("the network would not say which interfaces it has");
-                tool_explain_no_netstatus(base);
-            }
+            tool_error("the network would not say which interfaces it has");
+            tool_explain_no_netstatus(base);
             tool_netstatus_close(base);
             FreeArgs(rda);
             return RETURN_FAIL;
         }
         if (index < 0)
         {
-            if (!rni_quiet)
-                tool_error("there is no interface called \"%s\"", (LONG)name);
+            tool_error("there is no interface called \"%s\"", (LONG)name);
             failed++;
             continue;
         }
@@ -200,18 +197,16 @@ int main(int argc, char **argv)
         if (tool_netstatus_control(base, NETCTRL_INTERFACE_REMOVE, &ctl,
                                    &err) != 0)
         {
-            if (!rni_quiet)
+            if (err == EBUSY)
             {
-                if (err == EBUSY)
-                {
-                    tool_error("%s still has connections open; FORCE removes "
-                               "it anyway and resets them", (LONG)name);
-                }
-                else
-                {
-                    tool_error("%s could not be removed", (LONG)name);
-                }
+                tool_error("%s still has connections open; FORCE removes it "
+                           "anyway and resets them", (LONG)name);
             }
+            else
+            {
+                tool_error("%s could not be removed", (LONG)name);
+            }
+
             failed++;
             continue;
         }

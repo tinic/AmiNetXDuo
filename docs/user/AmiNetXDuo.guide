@@ -709,9 +709,10 @@
 
   replacing eth0 with the name of your interface file. That reads the
   configuration, starts the stack, brings the interface online, and
-  keeps it up until you reboot. QUIET stops it printing anything during
-  the boot; leave QUIET off while you are still setting things up so
-  you can see what it says.
+  keeps it up until you reboot. QUIET stops it reporting what came up,
+  so a boot that works says nothing; a boot that does not still says
+  why. Leave QUIET off while you are still setting things up so you can
+  see what it says when it works.
 
   @{b}By itself, when a program asks for it@{ub}
 
@@ -907,7 +908,9 @@
              any of them is used, and the files are all read and
              checked before anything is started.
 
-  @{b}QUIET@{ub}      Print nothing. For S:User-Startup.
+  @{b}QUIET@{ub}      Say nothing about what worked. For S:User-Startup.
+             Errors are still printed, and the return code is
+             unchanged, so a boot that fails still says why.
   @{b}TIMEOUT@{ub}    Seconds to wait for an interface that asks for its
              address to be given one. Default 10, which is also the
              smallest value accepted -- a DHCP exchange given less time
@@ -1061,7 +1064,7 @@
       ShowNetStatus INTERFACE/M,INTERFACES/S,ARPCACHE=ARP/S,ROUTES/S,
                     DNS=DOMAINNAMESERVERS/S,ICMP/S,IP/S,MB=MEMORY/S,
                     TCP/S,UDP/S,TCPSOCKETS/S,UDPSOCKETS/S,NAMES/S,
-                    ALL/S,REPEAT/S,QUIET/S
+                    ALL/S,REPEAT/S
 
   The one command to reach for first. With no options at all it shows
   what the stack thinks the network looks like: the intent from your
@@ -1091,7 +1094,10 @@
               that are only bound here and not talking to anything.
   @{b}REPEAT@{ub}      Print it again every second, clearing the screen
               first, until Ctrl-C.
-  @{b}QUIET@{ub}       Print no error messages.
+
+  There is no QUIET. The report is the whole of what this command
+  does, so there would be nothing left. GetNetStatus answers the same
+  questions with a return code and prints nothing.
 
   @{b}Example@{ub}
 

@@ -894,11 +894,8 @@ int main(int argc, char **argv)
     {
         cnc_errors++;
 
-        if (!cnc_quiet)
-        {
-            tool_error("this machine has no network configuration at all");
-            tool_explain_no_interfaces();
-        }
+        tool_error("this machine has no network configuration at all");
+        tool_explain_no_interfaces();
 
         verdict("The network has never been set up on this machine.\n");
 
