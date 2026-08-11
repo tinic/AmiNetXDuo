@@ -24,15 +24,22 @@
 # precondition and exits 4 for the same reason.  Only ns6_reported and
 # short_resolved exit 1.
 #
-# THE GUEST HAS NO IPv4 AND NO name_resolution FILE
+# THE GUEST HAS NO DHCP AND NO name_resolution FILE
 #
-#   CONFIGURE=NONE with no ADDRESS, so there is no lease, no option 6 name
-#   server and no option 15 or 119 search domain; and nothing in DEVS:Internet,
-#   so no NAMESERVER, DOMAIN or SEARCH line either.  Every name server and every
-#   suffix the guest ends up with came out of the advertisement, which is what
-#   makes "a short name resolved" mean what it says.  It is also the machine the
-#   router describes: it sets managed+other-stateful, this stack builds no
-#   DHCPv6, and RFC 8106 is all that is left.
+#   A static IPv4 address on a subnet nothing on this link uses, so there is no
+#   lease, no option 6 name server and no option 15 or 119 search domain; and
+#   nothing in DEVS:Internet, so no NAMESERVER, DOMAIN or SEARCH line either.
+#   Every name server and every suffix the guest ends up with came out of the
+#   advertisement, which is what makes "a short name resolved" mean what it says.
+#
+#   An address rather than none at all because AddNetInterface refuses an
+#   interface with no IPv4 address ("the interface has no address: there is no
+#   ADDRESS line and CONFIGURE does not say DHCP"), so the IPv6-only machine the
+#   router describes -- it sets managed+other-stateful, this stack builds no
+#   DHCPv6, and RFC 8106 is all that is left -- cannot be configured yet.  The
+#   subnet is deliberately one nobody answers on: nothing in this test travels
+#   over IPv4, and a real address on the lab LAN would be a second machine
+#   claiming one.
 #
 # BRIDGED, OR IT MEASURES NOTHING
 #
@@ -70,6 +77,7 @@ TIMEOUT=180
 SETTLE=30
 NAME=playhouse2
 MAC="${AMINETXDUO_RDNSS_MAC:-02:41:4d:49:52:44}"
+V4ADDR="${AMINETXDUO_RDNSS_V4:-10.99.99.2}"
 
 while getopts "B:b:m:t:n:w:M:" opt; do
     case "$opt" in
@@ -127,13 +135,14 @@ cp "$ADDIF" "$STAGE/AddNetInterface"
 cp "$SHOW"  "$STAGE/ShowNetStatus"
 cp "$HOSTC" "$STAGE/host"
 
-# No IPv4 at all, and no DEVS:Internet: see the note at the top.  CONFIGURE6 is
-# spelled out although AUTO is also the default, because this test is about
-# that path and a default is a bad thing to leave implicit here.
-cat > "$STAGE/devs/NetInterfaces/eth0" <<'EOF'
+# No DHCP and no DEVS:Internet: see the note at the top.  CONFIGURE6 is spelled
+# out although AUTO is also the default, because this test is about that path
+# and a default is a bad thing to leave implicit here.
+cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
 DEVICE=a2065.device
 UNIT=0
-CONFIGURE=NONE
+ADDRESS=$V4ADDR
+NETMASK=255.255.255.0
 CONFIGURE6=AUTO
 EOF
 
@@ -200,8 +209,13 @@ ra_rdnss=$(sed -n 's/.*rdnss option (25).*addr: \([0-9A-Fa-f:]*\).*/\1/p' "$CAP"
            | head -1)
 ra_dnssl=$(sed -n 's/.*dnssl option (31).*domain(s): \([^ ,]*\)\.$/\1/p' "$CAP" \
            | head -1)
+# "2607:f598:e1a8:4c00::/64" -> "2607:f598:e1a8:4c00:", the stem every address
+# formed from this advertisement begins with.
+ra_prefix=$(sed -n 's|.*prefix info option (3).*: \([0-9A-Fa-f:]*\)::/64.*|\1:|p' \
+            "$CAP" | head -1)
 
 echo "ra_count=$ra_count ra_rdnss=${ra_rdnss:-none} ra_dnssl=${ra_dnssl:-none}"
+echo "ra_prefix=${ra_prefix:-none}"
 
 if [ "$ra_count" -eq 0 ]; then
     echo "result=nolink reason=no_ra_during_run run_rc=$run_rc"
@@ -222,9 +236,17 @@ fi
 # has no source for a DNS query and every result below is the same shape as the
 # defects being tested for.
 
-# ami_netstack_mark("ip6-global"), which fires when an address a router
-# advertisement formed passes duplicate address detection.
+# An address of the advertised prefix that is not the advertised name server,
+# read out of what the guest itself printed. ami_netstack_mark("ip6-global") on
+# the serial port says the same thing and is the second reading, but a build
+# without AMINETXDUO_LOG has no serial port to say it on.
 guest_global=no
+if [ -n "$ra_prefix" ] &&
+   grep -oiE "${ra_prefix}[0-9A-Fa-f:]+" "$OUT" 2>/dev/null \
+       | grep -viF "$ra_rdnss" | grep -q .
+then
+    guest_global=yes
+fi
 grep -qE "netstack: mark ip6-global " "$SERIAL" 2>/dev/null && guest_global=yes
 
 echo "guest_global=$guest_global run_rc=$run_rc serial=$SERIAL out=$OUT"
