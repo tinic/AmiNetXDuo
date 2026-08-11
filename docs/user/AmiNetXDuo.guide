@@ -844,7 +844,7 @@
     @{"Offline         " link OFFLINE}  take an interface off the network
     NetSetup          write the configuration files for you
     CheckNetConfig    read them back and say what is wrong
-    NetShutdown       stop the stack
+    NetShutdown       stop the network and the programs using it
     RemoveNetInterface  take one interface out of it
     AddNetRoute       add a route by hand
     DeleteNetRoute    take one away
@@ -1086,8 +1086,8 @@
 
       ShowNetStatus INTERFACE/M,INTERFACES/S,ARPCACHE=ARP/S,ROUTES/S,
                     DNS=DOMAINNAMESERVERS/S,ICMP/S,IP/S,MB=MEMORY/S,
-                    TCP/S,UDP/S,TCPSOCKETS/S,UDPSOCKETS/S,NAMES/S,
-                    ALL/S,REPEAT/S
+                    TCP/S,UDP/S,TCPSOCKETS/S,UDPSOCKETS/S,USERS/S,
+                    NAMES/S,ALL/S,REPEAT/S
 
   The one command to reach for first. With no options at all it shows
   what the stack thinks the network looks like: the intent from your
@@ -1111,6 +1111,10 @@
               are free, and how often one was wanted and not there.
   @{b}TCPSOCKETS@{ub}  The TCP sockets in use.
   @{b}UDPSOCKETS@{ub}  The UDP sockets in use.
+  @{b}USERS@{ub}       The programs using the network, and how many sockets
+              each of them has open. This is the list NetShutdown
+              waits on: a program here is one that has to let go
+              before the network can be stopped.
   @{b}NAMES@{ub}       Put names to the addresses and ports printed, from
               DEVS:Internet and then from the name servers.
   @{b}ALL@{ub}         With TCPSOCKETS or UDPSOCKETS, include the sockets
