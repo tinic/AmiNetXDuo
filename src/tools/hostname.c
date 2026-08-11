@@ -145,16 +145,20 @@ static VOID say_source(UWORD source)
         return;
 
     /*
-     * No source means nothing configured one, so gethostname() worked the name
-     * out from the interface address (bsdsocket.doc NOTES) or fell back to
-     * "localhost". ShowNetStatus prints "(derived)" for the same case and this
-     * says the same thing in more words, because here it is the answer rather
-     * than a footnote.
+     * No source means nothing configured one, so the stack named the machine
+     * after its card's hardware address (ami_ns_name_after_card()). A card
+     * that reports no address leaves the name to gethostname()'s own chain,
+     * the interface address reverse-resolved or "localhost" (bsdsocket.doc
+     * NOTES), and then this line is only approximately right; no SANA-II
+     * Ethernet driver refuses S2_GETSTATIONADDRESS, so it is not worth a
+     * second sentence. ShowNetStatus prints "(derived)" for the same case and
+     * this says more, because here it is the answer rather than a footnote.
      */
     if (from != NULL)
         tool_printf("  named by %s\n", (LONG)from);
     else
-        tool_printf("  not named by anything; derived from the address\n");
+        tool_printf("  not named by anything; derived from the card's "
+                    "hardware address\n");
 }
 
 int main(int argc, char **argv)

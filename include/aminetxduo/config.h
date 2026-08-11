@@ -266,6 +266,19 @@ BOOL ami_config_hostname_offer(AmiConfig *cfg, UWORD source, const char *name);
    no label empty or beginning or ending with one. */
 BOOL ami_config_hostname_valid(const char *name);
 
+/*
+ * "amiga-490007" from 00:80:10:49:00:07: the name a machine none of the four
+ * sources named answers to, so that two unconfigured machines on one segment
+ * do not both claim amiga.local. The last three octets in lower-case hex,
+ * which is stable for as long as the card is.
+ *
+ * FALSE, and *out untouched, when hw is NULL, shorter than three bytes, all
+ * zero, or `size` cannot hold the twelve characters and the terminator. The
+ * caller keeps whatever fallback it had; nothing here invents a suffix.
+ */
+BOOL ami_config_hostname_from_hwaddr(const UBYTE *hw, ULONG hwlen,
+                                     char *out, ULONG size);
+
 /* Short name for a source, for a report that says where the name came from.
    NULL for AMI_HOSTNAME_NONE, which is not a source. */
 const char *ami_config_hostname_source_text(UWORD source);

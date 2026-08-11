@@ -968,6 +968,109 @@ static void test_hostname_precedence(void)
     CHECK(cfg.hostname_source == AMI_HOSTNAME_NONE);
 }
 
+/*
+ * The default name, and that it stays a default.
+ *
+ * Reported from this lab: seventy machines with nothing in their config all
+ * claimed amiga.local at once and took a working machine's name off the air
+ * while its address kept answering.
+ */
+static void test_hostname_from_hwaddr(void)
+{
+    /* 00:80:10:49:00:07, a real a2065; and 00:80:10:00:00:00, whose tail is
+       zero but whose address is not. */
+    static const UBYTE a2065[6] = { 0x00, 0x80, 0x10, 0x49, 0x00, 0x07 };
+    static const UBYTE tail0[6] = { 0x00, 0x80, 0x10, 0x00, 0x00, 0x00 };
+    static const UBYTE hexy[6]  = { 0x02, 0x11, 0x22, 0xAB, 0xCD, 0xEF };
+    static const UBYTE none[6]  = { 0, 0, 0, 0, 0, 0 };
+    char      out[AMI_CFG_NAME_LEN];
+    AmiConfig cfg;
+    UWORD     rank;
+
+    printf("host name: derived from the hardware address\n");
+
+    memset(out, '?', sizeof(out));
+    CHECK(ami_config_hostname_from_hwaddr(a2065, sizeof(a2065), out,
+                                          sizeof(out)));
+    CHECK_STR(out, "amiga-490007");
+    CHECK(ami_config_hostname_valid(out));
+
+    /* Lower case, and both nibbles of every octet. Upper case would claim the
+       same mDNS name (RFC 6762 16) and read back as a different string. */
+    CHECK(ami_config_hostname_from_hwaddr(hexy, sizeof(hexy), out,
+                                          sizeof(out)));
+    CHECK_STR(out, "amiga-abcdef");
+    CHECK(ami_config_hostname_valid(out));
+
+    /* Three zero octets are still three octets: this card has an address. */
+    CHECK(ami_config_hostname_from_hwaddr(tail0, sizeof(tail0), out,
+                                          sizeof(out)));
+    CHECK_STR(out, "amiga-000000");
+
+    /* The same card twice: the name does not move between boots. */
+    {
+        char again[AMI_CFG_NAME_LEN];
+
+        CHECK(ami_config_hostname_from_hwaddr(a2065, sizeof(a2065), again,
+                                              sizeof(again)));
+        CHECK_STR(again, "amiga-490007");
+    }
+
+    /* Two cards, two names; the whole point of the change. */
+    {
+        static const UBYTE other[6] = { 0x00, 0x80, 0x10, 0x49, 0x00, 0x08 };
+        char               b[AMI_CFG_NAME_LEN];
+
+        CHECK(ami_config_hostname_from_hwaddr(a2065, sizeof(a2065), out,
+                                              sizeof(out)));
+        CHECK(ami_config_hostname_from_hwaddr(other, sizeof(other), b,
+                                              sizeof(b)));
+        CHECK(strcmp(out, b) != 0);
+    }
+
+    /* No usable address: refused, and the caller keeps "amiga". Never a
+       random suffix, which would rename the machine every boot. */
+    out[0] = '\0';
+    CHECK(!ami_config_hostname_from_hwaddr(none, sizeof(none), out,
+                                           sizeof(out)));
+    CHECK_STR(out, "");
+    CHECK(!ami_config_hostname_from_hwaddr(NULL, 6, out, sizeof(out)));
+    CHECK(!ami_config_hostname_from_hwaddr(a2065, 2, out, sizeof(out)));
+    CHECK(!ami_config_hostname_from_hwaddr(a2065, sizeof(a2065), NULL,
+                                           sizeof(out)));
+    CHECK(!ami_config_hostname_from_hwaddr(a2065, sizeof(a2065), out, 12));
+    CHECK(ami_config_hostname_from_hwaddr(a2065, sizeof(a2065), out, 13));
+
+    /*
+     * What the stack does with it: fill hostname only when the four sources
+     * found nothing, and leave hostname_source at NONE so it is a default and
+     * not a fifth source. Every real source still outranks it.
+     */
+    for (rank = (UWORD)AMI_HOSTNAME_INTERFACE;
+         rank <= (UWORD)AMI_HOSTNAME_NAMERES; rank++)
+    {
+        memset(&cfg, 0, sizeof(cfg));
+
+        CHECK(ami_config_hostname_from_hwaddr(a2065, sizeof(a2065),
+                                              cfg.hostname,
+                                              sizeof(cfg.hostname)));
+        CHECK(cfg.hostname_source == AMI_HOSTNAME_NONE);
+
+        CHECK(ami_config_hostname_offer(&cfg, rank, "workshop"));
+        CHECK_STR(cfg.hostname, "workshop");
+        CHECK(cfg.hostname_source == rank);
+    }
+
+    /* And the other way round: a name from the files is there already, so
+       nothing derives over it. */
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.interface_count = 1;
+    strcpy(cfg.interfaces[0].id, "a1200");
+    ami_cfg_hostname_from_files(&cfg, NULL);
+    CHECK_STR(cfg.hostname, "a1200");
+    CHECK(cfg.hostname[0] != '\0');     /* the test the stack makes */
+}
+
 static void test_hostname_offer(void)
 {
     AmiConfig cfg;
@@ -1766,6 +1869,7 @@ int main(int argc, char **argv)
     test_problem_reporter();
     test_hostname_syntax();
     test_hostname_precedence();
+    test_hostname_from_hwaddr();
     test_hostname_offer();
     test_resolver();
     test_search_domains();

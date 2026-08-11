@@ -628,6 +628,61 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
     return (opened > 0) ? AMI_NET_OK : err;
 }
 
+/*
+ * Nothing named this machine, so name it after its card.
+ *
+ * Runs once, after the devices are open (ami_sana2_get_mac() has an address
+ * only then) and before anything reads ns_Config.hostname: option 12, the
+ * mDNS label, gethostname(), ShowNetStatus and the ARexx HOSTNAME variable
+ * all take it from there, so filling it here is what keeps them saying the
+ * same thing.
+ *
+ * hostname_source stays AMI_HOSTNAME_NONE. This is not a fifth source and it
+ * does not outrank one: it fires only when the four found nothing, and NONE
+ * is below every real source, so a DHCP option 12 or an ENV:HOSTNAME arriving
+ * later still replaces it through ami_config_hostname_offer(). What a user
+ * configured is untouched, and the report keeps saying "derived".
+ *
+ * The first interface with an address, in the same order ID= is taken in, so
+ * a two-card machine picks the same one every boot.
+ */
+static VOID ami_ns_name_after_card(AmiNetStack *ns)
+{
+    UCHAR mac[AMI_ETH_ADDR_SIZE];
+    char  derived[AMI_CFG_NAME_LEN];
+    UWORD i;
+
+    if (ns->ns_Config.hostname[0] != '\0')
+        return;
+
+    for (i = 0; i < ns->ns_IfaceCount; i++)
+    {
+        ami_sana2_get_mac(ns->ns_Iface[i], mac);
+
+        if (!ami_config_hostname_from_hwaddr(mac, (ULONG)sizeof(mac),
+                                             derived, (ULONG)sizeof(derived)))
+            continue;
+
+        ami_ns_copy_name(ns->ns_Config.hostname, derived,
+                         (ULONG)sizeof(ns->ns_Config.hostname));
+
+        AMI_INFO("netstack: nothing named this machine; calling it \"%s\" "
+                 "after %s", ns->ns_Config.hostname,
+                 ns->ns_Config.interfaces[i].name);
+        return;
+    }
+
+    /*
+     * No card would say what its address is. "amiga" then, the fallback each
+     * of those callers still carries, and the collision this exists to avoid
+     * is back: better that than a name that is different after every reboot.
+     */
+    AMI_WARN("netstack: nothing named this machine and no card would give a "
+             "hardware address, so it answers to \"amiga\" and may collide "
+             "with another machine doing the same. Set one with `hostname "
+             "<name>`");
+}
+
 /* ---------------------------------------------------------- NetX Duo build */
 
 static LONG ami_ns_create_ip(AmiNetStack *ns)
@@ -1436,7 +1491,9 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
          * The name here is DHCP option 12, the host name the client announces:
          * what the router's client list shows and what many routers put in
          * their local DNS. It comes from the configured HOSTNAME so that two
-         * AmiNetXDuo machines on one network are distinguishable.
+         * AmiNetXDuo machines on one network are distinguishable, and failing
+         * that from ami_ns_name_after_card(); the literal below is left for
+         * the machine whose cards report no hardware address.
          *
          * Into ns_DhcpName, whose comment says why the client gets a copy
          * rather than a pointer into ns_Config.
@@ -1632,6 +1689,10 @@ static LONG ami_ns_bring_up(VOID)
         ami_ns_destroy(ns);
         return status;
     }
+
+    /* The cards are open, so their addresses can be read; every consumer of
+       ns_Config.hostname is still ahead of this point. */
+    ami_ns_name_after_card(ns);
 
     /* ---- 3. memory ------------------------------------------------------ */
 
@@ -2356,7 +2417,8 @@ static LONG ami_ns_dhcp_ensure(AmiNetStack *ns)
 
     /* NetX Duo keeps the host name pointer rather than a copy, so it must be
        storage that outlives the NX_DHCP, the same reason start-up hands it
-       ns_Config. */
+       ns_Config. The literal is reached only when no card gave
+       ami_ns_name_after_card() a hardware address to work from. */
     status = nx_dhcp_create(&ns->ns_Dhcp, &ns->ns_Ip,
                             (ns->ns_Config.hostname[0] != '\0')
                                 ? (CHAR *)ns->ns_Config.hostname
