@@ -3,9 +3,9 @@
 # MOUNT AN SMB SHARE THE WAY A USER DOES: a real Workbench, a real Shell, a
 # DOSDriver, `Mount` and `List`, over our stack.
 #
-#   install/test/run-smbmount.sh [-m MODEL] [-o 31|32] [-u URL] [-B backend]
-#                                [-M mac] [-T tag] [-t seconds] [-w seconds]
-#                                [-A] [-C] [-k]
+#   install/test/run-smbmount.sh [-m MODEL] [-o 31|32] [-u URL] [-P PEERHOST]
+#                                [-B backend] [-M mac] [-T tag] [-t seconds]
+#                                [-w seconds] [-A] [-C] [-k]
 #
 # THE REPORTS THIS EXISTS FOR.  GitHub #4, "Mounting SMB freezes system", an
 # A500 with a PiStorm on OS 3.2.2, no error printed, and the same DOSDriver
@@ -49,8 +49,18 @@
 #   a2065.device         AMINETXDUO_A2065
 #   smb2-handler         AMINETXDUO_SMB2FS, the smb2fs archive unpacked
 #   filesysbox.library   AMINETXDUO_FILESYSBOX
-#   a share to mount     -u, and tests/tools/smb2-testserver.py will serve one
-#                        from any machine on the LAN that is not this one
+#   a share to mount     -P, which puts tests/tools/smb2-testserver.py on a
+#                        named machine and mounts that.  -u names one that is
+#                        already there instead.
+#
+# -P IS THE ONE TO USE IN A RUNNER.  A share that happens to be up on the LAN
+# is not coverage: the day it is off, or its password changes, this test fails
+# for a reason that has nothing to do with the stack, and the day it is on,
+# nothing records what it was.  With -P the harness brings its own server, on a
+# machine it is told about, and takes it away afterwards.  It has to be a THIRD
+# machine for the reason tests/tools/smb2-testserver.py:20-23 gives: a frame
+# the guest sends to the emulating host's own MAC does not come back round to
+# that NIC's pcap.
 #
 # Exit status: 0 the share mounted and listed, 1 it did not, 2 an ingredient
 # is missing.  A `List` that never returned is exit 1, not a timeout: the
@@ -78,11 +88,16 @@ STACK=ours
 EXTRA=""
 CLIENT=smb2
 
-while getopts "m:o:u:B:M:T:t:w:s:x:H:ACk" opt; do
+PEERHOST=""
+PEERPORT="${AMINETXDUO_SMB_PEER_PORT:-4445}"
+URL_GIVEN=0
+
+while getopts "m:o:u:P:B:M:T:t:w:s:x:H:ACk" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         o) OSVER="$OPTARG" ;;
-        u) URL="$OPTARG" ;;
+        u) URL="$OPTARG"; URL_GIVEN=1 ;;
+        P) PEERHOST="$OPTARG" ;;
         B) BACKEND="$OPTARG" ;;
         M) MAC="$OPTARG" ;;
         T) TAG="$OPTARG" ;;
@@ -107,6 +122,29 @@ case "$CLIENT" in smb2|smbfs) ;; *) echo "-H takes smb2 or smbfs" >&2; exit 2 ;;
 case "$BUILD" in /*) ;; *) BUILD="$ROOT/$BUILD" ;; esac
 
 HD="$ROOT/build/smbhd-$TAG"
+
+# ------------------------------------------------------------- the server --
+#
+# -P names a machine to run the server ON, and the guest is then given an
+# ADDRESS: it has no resolver pointed at anything that knows "playhouse4", and
+# an ssh destination may carry a user besides.  Resolved here, once, and the
+# URL is built from the answer.
+if [ -n "$PEERHOST" ]; then
+    [ "$URL_GIVEN" = 0 ] || {
+        echo "-P and -u are two different servers; pick one" >&2; exit 2; }
+    PEERNAME="${PEERHOST#*@}"
+    PEERADDR=$(getent ahostsv4 "$PEERNAME" 2>/dev/null | awk 'NR==1{print $1}')
+    if [ -z "$PEERADDR" ]; then
+        case "$PEERNAME" in
+            *[!0-9.]*) echo "cannot resolve $PEERNAME to an address for the" \
+                            "guest to mount" >&2; exit 2 ;;
+            *) PEERADDR="$PEERNAME" ;;
+        esac
+    fi
+    # The share, the user and the password are smb2-testserver.py's, which
+    # serves ~/smbshare as RETRO to amiga/bantha.
+    URL="smb://amiga:bantha@$PEERADDR:$PEERPORT/RETRO"
+fi
 
 # The host the URL names, for ping and for the tcpdump filter.  Not parsed out
 # of a general URL grammar: the part between the last @ and the next / .
@@ -464,6 +502,59 @@ EOF
 mv "$SS.new" "$SS"
 chmod 755 "$SS"
 
+# -------------------------------------------------------- the peer's server --
+#
+# Under a `timeout` on the far side: killing the local ssh does not kill what
+# it started there, and a server that outlives its run holds the port, so the
+# next run mounts the previous run's process.
+
+SRV_PID=""
+REMOTE_PY=""
+stop_server() {
+    [ -n "$SRV_PID" ] && kill -TERM "$SRV_PID" 2>/dev/null
+    [ -n "$REMOTE_PY" ] && ssh -o ConnectTimeout=10 "$PEERHOST" \
+        "pkill -f '[s]mb2-testserver-$TAG' 2>/dev/null; rm -f $REMOTE_PY" \
+        >/dev/null 2>&1
+    SRV_PID=""; REMOTE_PY=""
+    return 0
+}
+
+if [ -n "$PEERHOST" ]; then
+    REMOTE_PY="/tmp/smb2-testserver-$TAG.py"
+    scp -q "$ROOT/tests/tools/smb2-testserver.py" "$PEERHOST:$REMOTE_PY" || {
+        echo "cannot copy the server to $PEERHOST" >&2; exit 2; }
+    # impacket is what it is written against, and a peer without it fails at
+    # import time inside a background ssh, which would read here as a share
+    # that refused the mount.  Ask first.
+    ssh -o ConnectTimeout=10 "$PEERHOST" \
+        "PYTHONPATH=\${AMINETXDUO_PYTHONPATH:-\$HOME/py-impacket} \
+         python3 -c 'import impacket'" >/dev/null 2>&1 || {
+        echo "$PEERHOST cannot run tests/tools/smb2-testserver.py: no" \
+             "impacket for its python3.  Install it, or point" \
+             "AMINETXDUO_PYTHONPATH there at a tree that has it." >&2
+        stop_server; exit 2; }
+    ssh -o ConnectTimeout=10 "$PEERHOST" \
+        "pkill -f '[s]mb2-testserver-$TAG' 2>/dev/null; \
+         PYTHONPATH=\${AMINETXDUO_PYTHONPATH:-\$HOME/py-impacket} \
+         timeout $((TIMEOUT + 120)) python3 $REMOTE_PY $PEERPORT" \
+        > "$ROOT/build/smb-$TAG-server.log" 2>&1 &
+    SRV_PID=$!
+    trap stop_server EXIT INT TERM HUP
+    for _ in $(seq 1 20); do
+        if ssh -o ConnectTimeout=10 "$PEERHOST" \
+               "exec 3<>/dev/tcp/127.0.0.1/$PEERPORT" >/dev/null 2>&1; then
+            break
+        fi
+        sleep 1
+    done
+    ssh -o ConnectTimeout=10 "$PEERHOST" \
+        "exec 3<>/dev/tcp/127.0.0.1/$PEERPORT" >/dev/null 2>&1 || {
+        echo "the server never came up on $PEERHOST:$PEERPORT:" >&2
+        cat "$ROOT/build/smb-$TAG-server.log" >&2
+        exit 2; }
+    echo "==> serving RETRO from $PEERHOST on $PEERADDR:$PEERPORT"
+fi
+
 # ------------------------------------------------------------- the capture --
 
 CAPFILE="$ROOT/build/smb-$TAG.pcap"
@@ -512,6 +603,7 @@ EOF
 
 EMU_PID=""; SERIAL_PID=""
 cleanup() {
+    stop_server
     [ -n "$EMU_PID" ] && { kill -TERM "$EMU_PID" 2>/dev/null || true; sleep 1
                            kill -KILL "$EMU_PID" 2>/dev/null || true; }
     [ -n "$SERIAL_PID" ] && kill -TERM "$SERIAL_PID" 2>/dev/null || true
@@ -611,6 +703,7 @@ echo "list_produced_output=$LISTED"
 echo "smb_socket_seen=$ESTAB"
 echo "stopped_at=$STOPPED"
 echo "client=$CLIENT"
+echo "smb_server=${PEERHOST:-external}"
 echo "activate=$ACTIVATE"
 echo "startup_extra=${EXTRA:-none}"
 echo "os=3.$([ "$OSVER" = 32 ] && echo 2 || echo 1)"

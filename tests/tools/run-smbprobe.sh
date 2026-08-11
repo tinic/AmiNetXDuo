@@ -1,51 +1,25 @@
 #!/usr/bin/env bash
 #
-# THE REGRESSION TEST FOR NetShutdown, AND FOR WHAT IT DOES TO THE PROGRAMS
-# THAT ARE USING THE NETWORK.
+# HOW FAR A SOCKET GETS TOWARDS AN SMB SERVER, from a booted guest.
 #
-#   tests/tools/run-netshutdown.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
-#                                  [-N board] [-B backend] [-a address]
-#                                  [-r TRANSCRIPT]
+#   tests/tools/run-smbprobe.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
+#                               [-N board] [-B backend] [-a address]
+#                               [-s SMBHOST] [-r TRANSCRIPT]
 #
-# A user reported it: "the other TCP/IP stacks send a CTRL_C signal to the
-# processes that have the bsdsocket.library open.  This allows these
-# applications to shutdown or close the library.  Of course this involves some
-# grace period. [...] it doesn't really require a 'force' argument either.
-# It's always 'force', but with the attempt to notify the applications."
+# GitHub #3 says opening SMB2 to the LAN never responds; #4 says mounting SMB
+# freezes the machine.  This is the bottom half of both questions and only the
+# bottom half: ping, then `nc` to 445 and to 139, then the connection table.
+# It shows that a socket to the server opens, which is as far as anything that
+# is not a real Workbench can go -- whatever fails in those reports happens
+# ABOVE the handshake, inside smb2-handler, and install/test/run-smbmount.sh is
+# the gate for that.
 #
-# Ours took the interfaces down and stopped, so `httpd` serving a drawer, `nc`
-# holding a listener, and anything sitting in WaitSelect() were all still there
-# afterwards, holding a library whose network had been taken away underneath
-# them.  Nothing tested it because nothing here had ever run a command while a
-# service was live.
+# IT ASSERTS NOTHING.  The transcript is the result and the exit status is 0
+# whatever the guest printed, which is why tests/HARNESSES files it as a bench
+# rather than as coverage: there is nothing here that can go red.  Read it when
+# run-smbmount.sh fails and the question is whether the packets got out at all.
 #
-# What is asserted, and why each one needs a live machine:
-#
-#   1  two services are started and left running, httpd and nc.  Both hold
-#      bsdsocket.library open, both are listening, and netstat -a says so
-#      before anything is shut down.  This is the state the report is about.
-#   2  ShutProbe (tests/tools/shutprobe.c) adds two holders of its own, one
-#      blocked inside the library in WaitSelect() and one waiting on its own
-#      signals outside it, reads bsdsocket.library's open count off the master
-#      base, runs the command, and watches for the grace period.
-#   3  the open count is the verdict.  Every OpenLibrary() adds one and the
-#      stack goes down when the last is given back, so "the applications were
-#      notified and closed" and "nothing happened" are two different numbers
-#      rather than two readings of the same prose.
-#   4  the interfaces are down afterwards, which is what NetShutdown did
-#      before any of this and must keep doing.
-#
-# THE OPEN COUNT IS THE POINT.  A service that prints "shutting down" and stays
-# resident holding a socket is the failure being tested for; only the count, or
-# a later run of the same test, can tell that apart from one that left.
-#
-# BRIDGED, always.  The services here are real ones and the whole subject is
-# what happens to live connections; a peerless backend would test a stack
-# talking to itself.
-#
-# GOOD CASE: about 60 s wall, boot to verdict.  A run that reaches -t is a
-# defect to diagnose, not a number to raise: the first assertion names the
-# command that was still running when the emulator was killed.
+# BRIDGED, always: the server is a machine on the LAN.
 #
 # SPDX-License-Identifier: MIT
 
@@ -64,12 +38,9 @@ ADDRESS=192.168.1.241
 SMBHOST="${AMINETXDUO_SMB_HOST:-192.168.1.72}"
 NETMASK=255.255.255.0
 GATEWAY=192.168.1.1
-HTTPD_PORT=8080
-NC_PORT=7099
-GRACE=10
 REPLAY=""
 
-while getopts "m:t:b:N:B:a:g:r:" opt; do
+while getopts "m:t:b:N:B:a:g:s:r:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
@@ -78,51 +49,22 @@ while getopts "m:t:b:N:B:a:g:r:" opt; do
         B) BACKEND="$OPTARG" ;;
         a) ADDRESS="$OPTARG" ;;
         g) GATEWAY="$OPTARG" ;;
-        # Assert a transcript that already exists instead of booting, for
-        # developing the assertions and for showing they fail on a transcript
-        # broken on purpose.  It proves nothing about the product, which is
-        # why it prints that it did not run.
+        s) SMBHOST="$OPTARG" ;;
+        # Print a transcript that already exists instead of booting.
         r) REPLAY="$OPTARG" ;;
-        *) sed -n '3,8p' "$0" >&2; exit 2 ;;
+        *) sed -n '5,7p' "$0" >&2; exit 2 ;;
     esac
 done
 
 case "$BUILD" in /*) ;; *) BUILD="${BUILD#./}" ;; esac
 
-# Two arms, two boots, because the first one ends with the stack gone and the
-# second needs it there.
-#
-#   letgo     every program handles the signal and closes the library, which
-#             is what the shutdown is for
-#   stubborn  one of them does not, which Roadshow's manual says cannot be
-#             prevented: "it is not possible for an Amiga program to be forced
-#             to give up its network resources".  The interfaces must still go
-#             down, the command must say which program held on, and it must
-#             not pretend to have succeeded
-#
-# A suite that only ran the first arm could not tell a shutdown that reports
-# the straggler from one that never noticed.
-if false; then
-    rc=0
-    for arm in letgo stubborn; do
-        echo
-        echo "######################## arm: $arm ########################"
-        AMINETXDUO_NETSHUT_ARM="$arm" \
-        AMINETXDUO_RUN_TAG="netshut-$arm" \
-            bash "$0" "$@" || rc=1
-    done
-    echo
-    [ "$rc" = 0 ] && echo "PASS: both arms" || echo "FAIL: see the arm above" >&2
-    exit "$rc"
-fi
-
-ARM="${AMINETXDUO_NETSHUT_ARM:-letgo}"
-
 TOOLS="$ROOT/$BUILD/src/tools"
-PROBES="$ROOT/$BUILD/tests/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
-export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-netshut}"
+# Its own tag, and its own staging directory.  Both were run-netshutdown.sh's
+# when this file was cut from it, so the two clobbered each other's drive and
+# stage the moment anything ran them together.
+export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-smbprobe}"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 REPORT="$HD/tools.txt"
 RUN_RC=0
@@ -130,12 +72,11 @@ RUN_RC=0
 if [ -n "$REPLAY" ]; then
     [ -f "$REPLAY" ] || { echo "no such transcript: $REPLAY" >&2; exit 2; }
     REPORT="$REPLAY"
-    echo "==> REPLAY of $REPORT: nothing was run, this only checks the checks"
+    echo "==> REPLAY of $REPORT: nothing was run"
 else
 
-for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$TOOLS/NetShutdown" \
-         "$TOOLS/netstat" "$TOOLS/httpd" "$TOOLS/nc" \
-         "$PROBES/ShutProbe" "$BSD"; do
+for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$TOOLS/netstat" \
+         "$TOOLS/ping" "$TOOLS/nc" "$BSD"; do
     [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
@@ -153,16 +94,14 @@ fi
 
 # ------------------------------------------------------------- staging ---
 
-STAGE="$ROOT/build/netshut-stage"
+STAGE="$ROOT/build/smbprobe-stage"
 rm -rf "$STAGE"
-mkdir -p "$STAGE/libs" "$STAGE/Public"
+mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 mkdir -p "$STAGE/devs/Networks"
 cp "$A2065" "$STAGE/devs/Networks/a2065.device"
 cp "$A2065" "$STAGE/devs/a2065.device"
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
-
-echo "Hello from an Amiga." > "$STAGE/Public/readme.txt"
 
 # A board other than the a2065, the way run-httpd.sh takes one.
 . "$ROOT/tools/sana2-stage.sh"
@@ -178,9 +117,8 @@ if [ "$BOARD" != a2065 ]; then
     echo "==> $BOARD: $SANA2_DRIVER, opened as '$SANA2_DEVICE'"
 fi
 
-# Static: this test asserts against the address it was given, and a lease that
-# arrives late would make "the interface is up" a question about the lab's DHCP
-# server rather than about the shutdown.
+# Static: a lease that arrives late would make "the interface is up" a question
+# about the lab's DHCP server rather than about the server being probed.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
 DEVICE=$IFDEVICE
 UNIT=0
@@ -190,18 +128,10 @@ NETMASK=$NETMASK
 GATEWAY=$GATEWAY
 EOF
 
-for t in AddNetInterface NetShutdown netstat ShowNetStatus httpd nc; do
+for t in AddNetInterface netstat ShowNetStatus ping nc; do
     cp "$TOOLS/$t" "$STAGE/$t"
 done
-cp "$PROBES/ShutProbe" "$STAGE/ShutProbe"
 
-# ShutProbe's third argument adds the holder that ignores the signal.
-PROBE_ARGS="SYS:NetShutdown $GRACE"
-if [ "$ARM" = stubborn ]; then PROBE_ARGS="$PROBE_ARGS deaf"; fi
-
-# The two services are started detached and left running, which is the state
-# the whole test is about; `wait` is ToolsSmoke's Delay(), long enough for both
-# to reach their listen().
 cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
 SYS:netstat -i
@@ -214,13 +144,13 @@ EOF
 # ------------------------------------------------------------------ run ---
 
 echo "==> booting $MODEL under Amiberry, $BOARD bridged on $BACKEND"
+echo "==> probing $SMBHOST"
 set +e
 "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$BACKEND" -m "$MODEL" \
     -t "$TIMEOUT" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-    "$STAGE/AddNetInterface" "$STAGE/NetShutdown" "$STAGE/netstat" \
-    "$STAGE/ShowNetStatus" "$STAGE/httpd" "$STAGE/nc" "$STAGE/ShutProbe" \
-    "$STAGE/Public"
+    "$STAGE/AddNetInterface" "$STAGE/netstat" "$STAGE/ShowNetStatus" \
+    "$STAGE/ping" "$STAGE/nc"
 RUN_RC=$?
 set -e
 

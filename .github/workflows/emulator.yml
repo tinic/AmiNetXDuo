@@ -71,6 +71,21 @@ jobs:
       # it.  Two variables because the two harnesses were wired separately.
       AMINETXDUO_PEER: ${{ vars.AMINETXDUO_PEER }}
       AMINETXDUO_CARDSWEEP_PEER: ${{ vars.AMINETXDUO_CARDSWEEP_PEER }}
+      # Which NIC the bridged arms put a guest on.  Empty is fine: every
+      # harness spells its default with :- and lands on ens18.
+      AMINETXDUO_AMIBERRY_BACKEND: ${{ vars.AMINETXDUO_AMIBERRY_BACKEND }}
+      # tests/tools/run-tcphandler.sh: Commodore's own `type` and `copy`, which
+      # are the whole point of that harness and are not ours to ship.
+      AMINETXDUO_AMIGA_C: ${{ vars.AMINETXDUO_AMIGA_C }}
+      # tests/perf/run-lossgate.sh: the peer that induces loss, and its address
+      # as the GUEST sees it.  It needs `tc` with CAP_NET_ADMIN there, which is
+      # why it is a separate variable from AMINETXDUO_PEER even where it is the
+      # same machine -- a peer without it is not a loss rig.
+      AMINETXDUO_FITZ_PEER: ${{ vars.AMINETXDUO_FITZ_PEER }}
+      AMINETXDUO_FITZ_PEER_ADDR: ${{ vars.AMINETXDUO_FITZ_PEER_ADDR }}
+      # install/test/run-smbmount.sh: smb2-handler and filesysbox, neither ours.
+      AMINETXDUO_SMB2FS: ${{ vars.AMINETXDUO_SMB2FS }}
+      AMINETXDUO_FILESYSBOX: ${{ vars.AMINETXDUO_FILESYSBOX }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -242,6 +257,57 @@ jobs:
         if: env.AMINETXDUO_A2065 != '' && env.AMINETXDUO_CARDSWEEP_PEER != ''
         run: tools/ci.sh cards
 
+      # THE TWO REGRESSION TESTS THAT NEEDED A REAL LINK AND SO HAD NO HOME.
+      #
+      # NetShutdown against live services -- httpd serving, nc listening, two
+      # holders inside and outside WaitSelect() -- is the regression test for a
+      # defect a USER reported: our shutdown took the interfaces down and left
+      # every program holding a library whose network had gone.  The TCP: half
+      # runs Commodore's own Type and Copy over a socket, which is the only
+      # place in the tree that a stock command touches the stack at all.
+      #
+      # Both were written, both went green by hand, and nothing ran either of
+      # them again.  The TCP: half is skipped, loudly, where there is no peer.
+      - name: NetShutdown and the TCP: handler
+        if: env.AMINETXDUO_A2065 != ''
+        run: tools/ci.sh bridged
+
+      # THE ONLY RIG THAT CAN PRICE AN ACK OR RETRANSMIT CHANGE.
+      #
+      # Every other arm here measures a link that loses nothing, so a change to
+      # acknowledgement or retransmission behaviour is free on all of them --
+      # and 0.16.6 shipped two, with the read direction down 18% on real
+      # hardware while every arm we ran said the opposite.  netem on the peer is
+      # what gives such a change a price, and the medians are gated against
+      # tests/perf/lossgate-baseline.txt.
+      #
+      # It changes the PEER's root qdisc for the duration, so the peer must be
+      # idle; the harness refuses to start otherwise.
+      - name: Throughput on a link that loses packets
+        if: >
+          env.AMINETXDUO_A2065 != '' && env.AMINETXDUO_FITZ_PEER != '' &&
+          env.AMINETXDUO_FITZ_PEER_ADDR != ''
+        run: tools/ci.sh lossgate
+
+      # SMB, WHICH HAD NO COVERAGE AT ALL.
+      #
+      # GitHub #3 ("opening SMB2 to the LAN never responds") and #4 ("mounting
+      # SMB freezes system") were both unreproducible for a day, because
+      # nothing here had ever mounted a share over this stack.  Neither is
+      # reachable from a socket test: `nc` connects to 445 from a booted A1200
+      # perfectly well, so whatever fails happens above the handshake, inside
+      # smb2-handler, and only a machine that can Mount can show it.
+      #
+      # A real Workbench, Commodore's Mount, and a share the harness stands up
+      # itself on the peer -- not one that happens to be running on the LAN,
+      # which is a test whose result depends on somebody else's uptime.
+      - name: Mount an SMB share on a real Workbench
+        if: >
+          env.AMINETXDUO_A2065 != '' && env.AMINETXDUO_ADF_DIR != '' &&
+          env.AMINETXDUO_SMB2FS != '' && env.AMINETXDUO_FILESYSBOX != '' &&
+          env.AMINETXDUO_PEER != ''
+        run: tools/ci.sh smb
+
       # THE ONE THAT WOULD HAVE STOPPED 0.17.0 AND 0.17.1 SHIPPING.
       #
       # Everything above runs a test program on a bare directory drive.  This
@@ -318,6 +384,10 @@ jobs:
             build/amiberry-testhd-*/conf-out.txt
             build/cardsweep-results.txt
             build/cardsweep-logs/*.log
+            build/lossgate-*/median.txt
+            build/lossgate-*/samples.txt
+            build/smb-*-serial.log
+            build/smbhd-*/smbcheck.txt
           if-no-files-found: ignore
           retention-days: 14
 
