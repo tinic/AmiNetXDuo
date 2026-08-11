@@ -144,9 +144,15 @@ for m in mathieeedoubbas mathieeedoubtrans; do
     done
 done
 
+# The trust store is the BUILT one, "$BUILD/certificates" -- an 'ACS1'
+# binary with a magic header, not the PEM it is generated from.  Staging
+# third_party/cacert/cacert.pem gives a file of the right name that
+# tls_store.c:262 rejects at the magic check, and every https fetch then
+# says "cannot read DEVS:Internet/certificates" about a file sitting there
+# readable at 186 KB.  That cost an evening.
 mkdir -p "$STAGE/devs/Internet"
-[ -f "$ROOT/third_party/cacert/cacert.pem" ] &&
-    cp "$ROOT/third_party/cacert/cacert.pem" "$STAGE/devs/Internet/certificates"
+[ -f "$ROOT/$BUILD/certificates" ] &&
+    cp "$ROOT/$BUILD/certificates" "$STAGE/devs/Internet/certificates"
 cp "$PAGE"  "$STAGE/terminal.html"
 
 # MDNS=YES so the machine is reachable by name.  A demo whose address is a
@@ -255,6 +261,32 @@ done
 sleep 2
 
 echo "==> booting $MODEL on '$BACKEND', httpd :$PORT, window ${WINDOW}s"
+
+# Everything the demo needs, asserted on the STAGE before the drive is built.
+# A file that is staged late, or under a name amiberry-run.sh does not copy,
+# turns into an error the person at the terminal hits half an hour later --
+# "cannot read DEVS:Internet/certificates" for a trust store that was sitting
+# in the staging directory the whole time.  Fail here instead.
+missing=""
+for f in "$STAGE/libs/bsdsocket.library" \
+         "$STAGE/devs/Internet/certificates" \
+         "$STAGE/devs/NetInterfaces/eth0" \
+         "$STAGE/terminal.html" \
+         "$STAGE/c/httpd"; do
+    [ -f "$f" ] || missing="$missing ${f#"$STAGE/"}"
+done
+# These three are wanted but not fatal: tls.library and the maths pair only
+# matter for https and ssh, and a tree that has not built them is a legitimate
+# state to run a demo from.  Say so rather than leaving it to be discovered.
+for f in "$STAGE/libs/tls.library" \
+         "$STAGE/libs/mathieeedoubbas.library" \
+         "$STAGE/c/ssh"; do
+    [ -f "$f" ] || echo "==> without ${f#"$STAGE/"}: expect that half not to work" >&2
+done
+if [ -n "$missing" ]; then
+    echo "==> refusing to boot, these are missing from the staging:$missing" >&2
+    exit 1
+fi
 
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$BACKEND" -m "$MODEL" -t "$WINDOW" \
     -a "DH0:Public $PORT TERMINAL=DH0:terminal.html" \
