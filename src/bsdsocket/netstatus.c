@@ -1645,6 +1645,47 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
                        ? 0 : bsd_fail(SocketBase, AMI_ENETDOWN);
 
         /*
+         * The responder on one interface. Out here with the rest of the
+         * src/netstack calls: netstack_iface_mdns_set() takes the bracket
+         * itself, and it has to, because turning the responder on may create
+         * it and the module registers an address-change notifier on the NX_IP
+         * while doing so.
+         *
+         * It does not wait for probing. A name is claimed about a second
+         * later; the flag NETSTATUS_INTERFACES reports is true from the moment
+         * the interface is enabled, and NETSTATUS_SYSTEM's nss_MdnsName is
+         * what says the claim went through.
+         */
+        case NETCTRL_INTERFACE_MDNS:
+        {
+#ifdef AMINETXDUO_MDNS
+            LONG st;
+
+            if (ctl->nsc_Index >= (UWORD)NX_MAX_PHYSICAL_INTERFACES)
+                return bsd_fail(SocketBase, AMI_ENXIO);
+
+            st = netstack_iface_mdns_set(
+                     ctl->nsc_Index,
+                     (ctl->nsc_Flags & NETCTRL_F_MDNS) ? TRUE : FALSE);
+
+            if (st == AMI_NET_OK)
+                return 0;
+
+            if (st == AMI_NET_ERR_NOMEM)
+                return bsd_fail(SocketBase, AMI_ENOMEM);
+
+            /* ENXIO rather than ENETDOWN for AMI_NET_ERR_STATE: this call
+               reaches src/netstack only through an interface, so "no such
+               interface" is the reading a caller can act on, and a stack that
+               is down has no interfaces either. */
+            return bsd_fail(SocketBase,
+                            (st == AMI_NET_ERR_KERNEL) ? AMI_EIO : AMI_ENXIO);
+#else
+            return bsd_fail(SocketBase, AMI_ENOSYS);
+#endif
+        }
+
+        /*
          * The browse pair, outside the bracket for the same reason: both take
          * their own, and neither goes near an NX_IP, so neither needs the
          * netstack_ip() check the rest of this function opens with, and both

@@ -1991,6 +1991,25 @@ BOOL netstack_iface_mdns(UWORD nx_index)
     return ns->ns_IfaceMdns[nx_index];
 }
 
+LONG netstack_iface_mdns_set(UWORD nx_index, BOOL enable)
+{
+#ifdef AMINETXDUO_MDNS
+    AmiNetStack *ns = ami_netstack_raw();
+
+    if (ns == NULL || !ns->ns_IpCreated ||
+        nx_index >= (UWORD)AMI_CFG_MAX_INTERFACES ||
+        ns->ns_Iface[nx_index] == NULL)
+        return AMI_NET_ERR_STATE;
+
+    return ami_netstack_mdns_iface_set(ns, nx_index, enable);
+#else
+    (VOID)nx_index;
+    (VOID)enable;
+
+    return AMI_NET_ERR_NODEV;
+#endif
+}
+
 const AmiConfig *netstack_config(VOID)
 {
     AmiNetStack *ns = ami_ns;
@@ -2197,6 +2216,22 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
                  ns->ns_Config.interfaces[index].name, (long)users);
         return AMI_NET_ERR_BUSY;
     }
+
+#ifdef AMINETXDUO_MDNS
+    /*
+     * Stop answering .local here first. nx_mdns_disable() leaves 224.0.0.251
+     * on this interface and queues the RFC 6762 10.1 goodbye, and both need an
+     * NX_INTERFACE that still exists: nx_ip_interface_detach() zeroes it.
+     *
+     * The goodbye will not reach the wire -- it is sent 250 ms later by the
+     * responder's own thread and the interface is gone by then -- which is the
+     * same thing that happens to any host's records when its cable is pulled,
+     * and is why RFC 6762 10 gives them a TTL. What matters here is the flag:
+     * an interface that has been removed must not still report that it answers
+     * .local, which is what it did.
+     */
+    (VOID)ami_netstack_mdns_iface_set(ns, index, FALSE);
+#endif
 
     /*
      * Stop the readers before anything is detached. NX_LINK_DISABLE takes the
@@ -2877,7 +2912,19 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
        interface was configured from, and answered for whatever was in the
        slot before without it. */
     ns->ns_IfaceCfg[slot]  = (UWORD)slot;
-    ns->ns_IfaceMdns[slot] = slot_cfg->mdns;
+
+    /*
+     * MDNS= is acted on and not merely recorded. Setting the flag alone left an
+     * interface reporting NETSTATUS_IF_MDNS while it had joined no group,
+     * probed for no name and answered nothing, because nx_mdns_enable() had one
+     * caller and it was start-up. Cleared first, because a slot re-used by a
+     * different interface must not inherit the last one's answer.
+     */
+    ns->ns_IfaceMdns[slot] = FALSE;
+#ifdef AMINETXDUO_MDNS
+    if (slot_cfg->mdns)
+        (VOID)ami_netstack_mdns_iface_set(ns, (UWORD)slot, TRUE);
+#endif
 
 #ifdef AMINETXDUO_BPF
     ami_netstack_capture_attach_one(ns, (UWORD)slot);

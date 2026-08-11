@@ -128,6 +128,14 @@ for t in AddNetInterface host ping; do
     cp "$TOOLS/$t" "$STAGE/$t"
 done
 
+# MDNS=YES, which is what asks for the responder at all.  It is off unless an
+# interface file asks (2026-08-06), and this harness predates that: it was
+# written when the responder started on every interface, the default flipped
+# underneath it, and the four "amigatest.local did not resolve" failures it has
+# been reporting ever since were this line missing rather than anything in the
+# responder.
+echo "MDNS=YES" >> "$STAGE/devs/NetInterfaces/eth0"
+
 # The one configuration change.  A fully-qualified name, so that a responder
 # that used it verbatim would claim "amigatest.home.lan.local" and fail the
 # assertion below rather than passing by accident.

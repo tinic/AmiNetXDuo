@@ -184,6 +184,13 @@ struct AmiNetStack
        the same number. */
     BOOL                ns_IfaceMdns[AMI_CFG_MAX_INTERFACES];
 
+    /* Whether service_discovery's services have been registered on that
+       interface.  nx_mdns_disable() leaves the local records suspended rather
+       than deleting them and nx_mdns_enable() re-announces what it finds, so
+       adding them a second time on an off/on pair would announce each service
+       twice. */
+    BOOL                ns_IfaceMdnsSvc[AMI_CFG_MAX_INTERFACES];
+
     /* Which config slot each opened interface came from.  ns_Iface[]
        is in open order, so this is the only mapping back: an
        interface that failed to open advanced the config index and
@@ -397,6 +404,10 @@ VOID ami_ns_dhcp_text(AmiNetStack *ns, UWORD index, UINT option,
    netstack_resolve() takes before it reaches the unicast DNS client. */
 LONG ami_netstack_mdns_start(AmiNetStack *ns);
 VOID ami_netstack_mdns_stop(AmiNetStack *ns);
+/* One interface, either way, while the stack runs.  netstack_iface_mdns_set()
+   in <aminetxduo/netstack.h> is the published spelling; the interface add and
+   remove paths call this one directly, having the AmiNetStack already. */
+LONG ami_netstack_mdns_iface_set(AmiNetStack *ns, UWORD index, BOOL enable);
 LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
                                ULONG timeout_ticks);
 /* The browse is public to bsdsocket.library; see <aminetxduo/netstack.h>. */
