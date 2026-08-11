@@ -66,7 +66,7 @@ BACKEND="${AMINETXDUO_DEMO_BACKEND:-ens18}"
 MODEL=A1200
 PORT=80
 WINDOW=28800
-NAME="${AMINETXDUO_DEMO_NAME:-amiga}"
+NAME="${AMINETXDUO_DEMO_NAME:-}"
 CMDS="${AMINETXDUO_DEMO_C:-}"
 
 while getopts "b:B:C:m:n:p:t:" opt; do
@@ -148,10 +148,17 @@ CONFIGURE=DHCP
 MDNS=YES
 EOF
 
-# And a name to answer to.  The staged name_resolution has none, so without
-# this the responder claims whatever DHCP or the interface ID produced and the
-# address printed below is the only way anyone reaches it.
-echo "hostname $NAME" >> "$STAGE/devs/Internet/name_resolution"
+# Our own name_resolution, never the one under tests/netstack: that file is
+# written for a SLIRP guest and carries "nameserver 10.0.2.3" and "domain
+# localdomain", neither of which exists on a real network.  A demo that
+# inherits it reports a name server it cannot reach and calls itself
+# amiga.localdomain while answering to amiga.local.
+#
+# Empty by default, deliberately.  DHCP supplies the name servers and the
+# domain, and an unnamed machine names itself after its card -- which is the
+# behaviour worth showing.  -n forces a name and outranks that.
+: > "$STAGE/devs/Internet/name_resolution"
+[ -z "$NAME" ] || echo "hostname $NAME" >> "$STAGE/devs/Internet/name_resolution"
 
 # Workbench's own commands, ADDED to the drawer our tools are already in.
 #
