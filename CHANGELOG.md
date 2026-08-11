@@ -9,6 +9,10 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The name servers a router advertises are listed by `ShowNetStatus` and handed to a program that asks, instead of only being used behind the scenes. The configuration had nowhere to keep an IPv6 address, so every report showed none while lookups went through one
+- The search domains a router advertises are used, so a short name resolves on a network with no DHCP server
+- A name server a router withdraws stops being used, instead of answering for the rest of the session
+
 - `-4` and `-6` on every command that resolves a name: `ping`, `traceroute`, `host`, `fetch`, `telnet`, `tftp`, `whois` and `sntp`, beside `nc` and `iperf` which already had them. On `host` they choose which records to ask for; everywhere else they pin the family the connection goes over. Giving both is an argument error, and a name that has no address of the family asked for says so instead of saying it cannot be resolved
 
 - The Shell in the browser shows the directory you are in, and gives a command 16 KB of stack instead of 4 KB, so something that reaches the network runs without typing `stack` first
