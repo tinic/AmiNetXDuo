@@ -2,7 +2,8 @@
 #
 # A LIVE AMIGA ON THE LAN, IN ONE COMMAND.
 #
-#   tools/demo.sh [-b BUILDDIR] [-B BACKEND] [-m MODEL] [-p PORT] [-t SECONDS]
+#   tools/demo.sh [-b BUILDDIR] [-B BACKEND] [-C CMDDIR] [-m MODEL] [-n NAME]
+#                 [-p PORT] [-t SECONDS]
 #
 # Boots an emulated Amiga bridged onto the real network, running httpd with the
 # WebSocket terminal, and prints the address it leased.  For showing somebody
@@ -10,12 +11,41 @@
 #
 #   http://<address>/           the Public drawer, WebDAV-writable
 #   http://<address>/terminal   an AmigaDOS Shell in a browser, NO PASSWORD
+#   http://amiga.local/         the same machine by name, -n renames it
 #
-# WHY BRIDGED AND NOT SLIRP
+# The interface is staged with MDNS=YES and the drive with a hostname, because
+# neither is a default: a demo reached only by its DHCP lease is one somebody
+# has to be told the address of again tomorrow.
 #
-#   A demo has to be reachable from the person's own machine.  tests/tools/
-#   run-wsterm.sh forwards a port out of slirp instead, which is right for a
-#   test and useless for showing anyone.
+# A SHELL WITH NO COMMANDS IN IT
+#
+#   The drive amiberry-run.sh builds carries httpd and nothing else, so the
+#   Shell on the far end of the terminal answers `Dir` with "Unknown command"
+#   and there is nothing to show anybody.  -C stages a commands drawer into
+#   C:, and AMINETXDUO_DEMO_C is the same thing from the environment.  Where
+#   they come from is a licensed Workbench and not ours to ship; the lab store
+#   has the ADFs and amitools' xdftool unpacks one:
+#
+#     xdftool ~/amiga-assets/adf-wb31/amiga-wb31_workbench.adf unpack /tmp/wb
+#     tools/demo.sh -C /tmp/wb/Workbench/C
+#
+#   Without it the demo still runs and the terminal still works.  It is a
+#   Shell with 0 commands instead of 81.
+#
+# BRIDGED, OR SLIRP WITH A FORWARDED PORT
+#
+#   Bridged is the default and is what a demo is for: the machine appears on
+#   the real network with a lease of its own and anyone can reach it.
+#
+#   `-B slirp` is the other one.  It needs no bridge, no root and no address
+#   on the LAN -- the guest is behind NAT and one port is forwarded out to
+#   127.0.0.1 -- which is what to use when the LAN is somebody else's, or when
+#   a demo is ALREADY RUNNING on it.
+#
+#   Two bridged guests are not two machines.  The a2065's LANCE derives its
+#   address from the unit, so both are 00:80:10:49:00:01 and the network sees
+#   one host answering from two places: leases fight, ARP caches flap, and the
+#   demo that was already up stops answering.  Second instance, -B slirp.
 #
 # THE MAC IS NOT THE ONE YOU ASK FOR
 #
@@ -36,15 +66,20 @@ BACKEND="${AMINETXDUO_DEMO_BACKEND:-ens18}"
 MODEL=A1200
 PORT=80
 WINDOW=28800
+NAME="${AMINETXDUO_DEMO_NAME:-amiga}"
+CMDS="${AMINETXDUO_DEMO_C:-}"
 
-while getopts "b:B:m:p:t:" opt; do
+while getopts "b:B:C:m:n:p:t:" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         B) BACKEND="$OPTARG" ;;
+        C) CMDS="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
+        n) NAME="$OPTARG" ;;
         p) PORT="$OPTARG" ;;
         t) WINDOW="$OPTARG" ;;
-        *) echo "usage: $0 [-b builddir] [-B backend] [-m model] [-p port] [-t seconds]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-b builddir] [-B backend] [-C cmddir]" \
+                "[-m model] [-n name] [-p port] [-t seconds]" >&2; exit 2 ;;
     esac
 done
 
@@ -66,7 +101,7 @@ done
 # The shape tests/tools/run-wsterm.sh stages, which is the shape
 # tests/tools/run-httpd.sh stages before it.  Never hand-assemble one.
 
-STAGE="$ROOT/build/demo-stage"
+STAGE="$ROOT/build/demo-stage-${AMINETXDUO_RUN_TAG:-demo}"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs" "$STAGE/Public/Docs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
@@ -82,11 +117,37 @@ mkdir -p "$STAGE/devs/Internet"
     cp "$ROOT/third_party/cacert/cacert.pem" "$STAGE/devs/Internet/certificates"
 cp "$PAGE"  "$STAGE/terminal.html"
 
+# MDNS=YES so the machine is reachable by name.  A demo whose address is a
+# DHCP lease is a demo somebody has to be told the address of again tomorrow.
+# MDNS= is per interface and defaults to off, so this line is the whole of
+# turning it on.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
 DEVICE=a2065.device
 UNIT=0
 CONFIGURE=DHCP
+MDNS=YES
 EOF
+
+# And a name to answer to.  The staged name_resolution has none, so without
+# this the responder claims whatever DHCP or the interface ID produced and the
+# address printed below is the only way anyone reaches it.
+echo "hostname $NAME" >> "$STAGE/devs/Internet/name_resolution"
+
+# C:, if there is one to stage.  amiberry-run.sh copies each extra argument
+# into the root of the drive it builds, and it makes C: itself for the tool
+# under test, so this goes in as a drawer of its own and is merged there.
+EXTRA_C=()
+if [ -n "$CMDS" ]; then
+    [ -d "$CMDS" ] || { echo "no such commands drawer: $CMDS" >&2; exit 2; }
+    rm -rf "$STAGE/c"
+    cp -R "$CMDS" "$STAGE/c"
+    chmod -R u+rw "$STAGE/c"
+    EXTRA_C=("$STAGE/c")
+    echo "==> staging $(ls "$STAGE/c" | wc -l | tr -d ' ') commands into C:"
+else
+    echo "==> no commands drawer (-C), the Shell will have only what httpd" \
+         "puts in C:" >&2
+fi
 
 echo "Hello from an Amiga." > "$STAGE/Public/readme.txt"
 echo "<html><body><h1>Amiga</h1><p>httpd is serving this drawer.</p></body></html>" > "$STAGE/Public/index.html"
@@ -95,47 +156,109 @@ echo "in a drawer" > "$STAGE/Public/Docs/notes.txt"
 # ------------------------------------------------------------------ run ---
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-demo}"
-EMU="$ROOT/build/amiberry-demo.log"
+
+# Behind NAT the guest is always 10.0.2.15 and the port has to be forwarded
+# out; the same line tests/tools/run-wsterm.sh uses.  HOSTPORT is the port on
+# THIS machine, and defaults to the guest's so the printed URL is the one
+# asked for whenever it is free to be.
+if [ "$BACKEND" = slirp ]; then
+    HOSTPORT="${AMINETXDUO_DEMO_HOSTPORT:-$PORT}"
+    export AMINETXDUO_AMIBERRY_EXTRA="slirp_redir=tcp:${HOSTPORT}:${PORT}:10.0.2.15"
+fi
+
+# Named after the tag, because amiberry-run.sh names its log after the tag.
+# This said build/amiberry-demo.log outright, so a second demo started with
+# AMINETXDUO_RUN_TAG set watched a file its own emulator was not writing and
+# sat in the MAC loop until the timeout with nothing wrong anywhere else.
+EMU="$ROOT/build/amiberry-$AMINETXDUO_RUN_TAG.log"
 
 echo "==> booting $MODEL on '$BACKEND', httpd :$PORT, window ${WINDOW}s"
 
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$BACKEND" -m "$MODEL" -t "$WINDOW" \
     -a "DH0:Public $PORT TERMINAL=DH0:terminal.html" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
-    "$STAGE/terminal.html" > "$ROOT/build/demo-run.log" 2>&1 &
+    "$STAGE/terminal.html" "${EXTRA_C[@]}" \
+    > "$ROOT/build/demo-run-$AMINETXDUO_RUN_TAG.log" 2>&1 &
 RUNNER=$!
 
-# The address, from the wire.  The guest announces itself by ARP as soon as it
-# has a lease; the MAC to watch for is the one the emulator logged, not the one
-# we asked for.  A release build says nothing on the serial line, so this is
-# the only place the address appears.
-MAC=""
-for _ in $(seq 1 60); do
-    sleep 2
-    MAC=$(grep -oE "7990: '[^']*' ([0-9a-f]{2}:){5}[0-9a-f]{2}" "$EMU" 2>/dev/null |
-          tail -1 | grep -oE "([0-9a-f]{2}:){5}[0-9a-f]{2}" || true)
-    [ -n "$MAC" ] && break
-done
-[ -n "$MAC" ] || { echo "the emulator never reported a MAC; see $EMU" >&2; exit 1; }
+# WHERE IT ENDED UP.  Two backends, two ways of finding out.
 
-echo "==> guest MAC $MAC, waiting for a lease"
-ADDR=""
-for _ in $(seq 1 40); do
-    ADDR=$(timeout 10 tcpdump -i "$BACKEND" -n -c 1 "ether host $MAC and arp" 2>/dev/null |
-           grep -oE "ARP, Reply [0-9.]+" | grep -oE "[0-9.]+$" || true)
-    [ -n "$ADDR" ] && break
-done
+if [ "$BACKEND" = slirp ]; then
+    # Behind NAT there is nothing on the wire to sniff and no lease to wait
+    # for.  Poll the forwarded port, which is the same question asked where
+    # the answer is.
+    ADDR="127.0.0.1"
+    PORT="$HOSTPORT"
+    NAME=""
 
-if [ -z "$ADDR" ]; then
-    echo "no lease seen for $MAC on $BACKEND after 400s" >&2
-    echo "the emulator is still running as pid $RUNNER; see $EMU" >&2
-    exit 1
+    UP=no
+    for _ in $(seq 1 90); do
+        sleep 2
+        if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:${HOSTPORT}/"
+        then
+            UP=yes
+            break
+        fi
+    done
+    [ "$UP" = yes ] || {
+        echo "nothing answered on 127.0.0.1:${HOSTPORT} after 180s; see $EMU" >&2
+        exit 1
+    }
+else
+    # Bridged: the address comes off the wire.  The guest announces itself by
+    # ARP as soon as it has a lease, and the MAC to watch for is the one the
+    # emulator logged, not the one we asked for.  A release build says nothing
+    # on the serial line, so this is the only place the address appears.
+    MAC=""
+    for _ in $(seq 1 60); do
+        sleep 2
+        MAC=$(grep -oE "7990: '[^']*' ([0-9a-f]{2}:){5}[0-9a-f]{2}" "$EMU" \
+              2>/dev/null | tail -1 |
+              grep -oE "([0-9a-f]{2}:){5}[0-9a-f]{2}" || true)
+        [ -n "$MAC" ] && break
+    done
+    [ -n "$MAC" ] || {
+        echo "the emulator never reported a MAC; see $EMU" >&2
+        exit 1
+    }
+
+    echo "==> guest MAC $MAC, waiting for a lease"
+    ADDR=""
+    for _ in $(seq 1 40); do
+        ADDR=$(timeout 10 tcpdump -i "$BACKEND" -n -c 1 \
+                   "ether host $MAC and arp" 2>/dev/null |
+               grep -oE "ARP, Reply [0-9.]+" | grep -oE "[0-9.]+$" || true)
+        [ -n "$ADDR" ] && break
+    done
+
+    [ -n "$ADDR" ] || {
+        echo "no lease seen for $MAC on $BACKEND after 400s" >&2
+        echo "the emulator is still running as pid $RUNNER; see $EMU" >&2
+        exit 1
+    }
+fi
+
+
+# -p left the address right and the URL wrong until 2026-08-10: a demo on any
+# port but 80 printed one nothing answers on.
+HOSTPART="$ADDR"
+[ "$PORT" = 80 ] || HOSTPART="$ADDR:$PORT"
+cat <<EOF
+
+  the drawer    http://$HOSTPART/
+  the terminal  http://$HOSTPART/terminal      no password, anyone who can reach it
+EOF
+
+# Only when there is a network for a name to mean anything on.  Behind NAT the
+# responder is answering a network of one.
+if [ -n "$NAME" ]; then
+    NAMEPART="$NAME.local"
+    [ "$PORT" = 80 ] || NAMEPART="$NAME.local:$PORT"
+    echo
+    echo "  by name       http://$NAMEPART/terminal      mDNS, once the responder has claimed it"
 fi
 
 cat <<EOF
-
-  the drawer    http://$ADDR/
-  the terminal  http://$ADDR/terminal      no password, anyone who can reach it
 
   emulator pid $RUNNER, log $EMU
 EOF

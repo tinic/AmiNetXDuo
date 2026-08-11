@@ -262,8 +262,18 @@ mkdir -p "$HD/s" "$HD/c" "$HD/env" "$HD/envarc" "$HD/t" "$HD/clips" "$ROOT/build
 
 cp "$EXE" "$HD/$EXE_NAME"
 cp "$EXE" "$HD/c/$EXE_NAME"
+# Extra files, into the root of the drive.  A DRAWER whose name is already
+# there is MERGED and not nested: c/ exists because the tool under test goes
+# in it, so `cp -R c "$HD/"` would have made DH0:C/C and left the Shell with
+# no commands and no error.  A caller staging a Workbench C: means the one
+# that is there.
 for extra in "$@"; do
-    cp -R "$extra" "$HD/"
+    dest="$HD/$(basename "$extra")"
+    if [ -d "$extra" ] && [ -d "$dest" ]; then
+        cp -R "$extra/." "$dest/"
+    else
+        cp -R "$extra" "$HD/"
+    fi
 done
 
 # A bare directory hard drive has none of the assigns a Workbench boot makes,

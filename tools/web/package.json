@@ -1,0 +1,16 @@
+{
+  "name": "aminetxduo-web",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Bundler for src/tools/web/terminal.html.  xterm.js is NOT a dependency here -- it is vendored under src/tools/web/vendor/xterm, so the only thing npm supplies is the bundler itself.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node build.mjs --check",
+    "typecheck": "tsc -p ../../src/tools/web/tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3"
+  }
+}

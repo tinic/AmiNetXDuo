@@ -106,7 +106,7 @@ jobs:
       # built clean is not a release, and this is the same script a developer
       # runs locally.
       - name: tools/ci.sh
-        run: AMINETXDUO_ANALYZE=1 tools/ci.sh host cross analyze conformance
+        run: AMINETXDUO_ANALYZE=1 tools/ci.sh host cross web analyze conformance
 
       # TLS is on by default, and the archive ships tls.library and the trust
       # store.  make-dist.sh refuses to pack a missing or host-scavenged store,

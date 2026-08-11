@@ -1,0 +1,161 @@
+/*
+ * The page around the terminal.  xterm's own stylesheet is inlined ahead of
+ * this one and owns everything inside .xterm; this owns the window, the bar
+ * across the top and how the two share the height.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+:root {
+  color-scheme: dark;
+
+  --ground:  #0d1017;
+  --panel:   #171c26;
+  --panel-2: #1f2632;
+  --edge:    #2c3444;
+  --ink:     #c8cede;
+  --ink-dim: #7e879c;
+  --live:    #5fb37a;
+  --dead:    #d4553f;
+  --busy:    #f0a423;
+
+  /* Kept in one place because the terminal's own font is set from
+     TypeScript and the two must be the same list. */
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+          "Cascadia Mono", "DejaVu Sans Mono", "Liberation Mono", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--mono);
+  overscroll-behavior: none;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ------------------------------------------------------------- the bar -- */
+
+#bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: none;
+  padding: 0.35rem 0.6rem;
+  background: linear-gradient(var(--panel-2), var(--panel));
+  border-bottom: 1px solid var(--edge);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  user-select: none;
+}
+
+#who {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+#who b {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+#host {
+  color: var(--ink-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The window size.  A console handler on the far side will care what it is,
+   and until then it is the one number a person resizing the window wants. */
+#size {
+  margin-left: auto;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+#state {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+/* A dot rather than a coloured word: the word is the sentence, the colour is
+   the glance, and a colour-blind reader still has the word. */
+#dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--busy);
+  box-shadow: 0 0 0.4rem currentColor;
+  color: var(--busy);
+}
+#state.up   #dot { background: var(--live); color: var(--live); }
+#state.down #dot { background: var(--dead); color: var(--dead); box-shadow: none; }
+
+#keys { display: flex; gap: 0.3rem; }
+
+button {
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--ink);
+  background: var(--panel-2);
+  /* The Workbench bevel, at one pixel: light above, dark below.  Any more of
+     it and the page is a costume. */
+  border: 1px solid var(--edge);
+  border-top-color: #3a4457;
+  border-bottom-color: #10141c;
+  border-radius: 3px;
+  padding: 0.15rem 0.6rem;
+  cursor: pointer;
+}
+button:hover:enabled  { background: #28313f; }
+button:active:enabled { background: #131922; border-top-color: #10141c; }
+button:disabled       { opacity: 0.45; cursor: default; }
+button:focus-visible  { outline: 2px solid var(--blue, #5f8fd6); outline-offset: 1px; }
+
+/* -------------------------------------------------------- the terminal -- */
+
+#term {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0.35rem 0.15rem 0.35rem 0.5rem;
+}
+
+/* xterm draws its own scrollbar area; this is only to stop the default one
+   looking like a 2009 desktop widget on the browsers that still ship it. */
+.xterm-viewport::-webkit-scrollbar { width: 0.7rem; }
+.xterm-viewport::-webkit-scrollbar-track { background: var(--ground); }
+.xterm-viewport::-webkit-scrollbar-thumb {
+  background: #2f3849;
+  border-radius: 0.35rem;
+  border: 2px solid var(--ground);
+}
+.xterm-viewport::-webkit-scrollbar-thumb:hover { background: #3d485d; }
+.xterm-viewport { scrollbar-color: #2f3849 var(--ground); scrollbar-width: thin; }
+
+/* Narrow windows: the buttons matter more than the address. */
+@media (max-width: 44rem) {
+  #host { display: none; }
+  #size { display: none; }
+  #bar  { gap: 0.5rem; }
+}
+
+/* With the size gone the state has to take the space back, or the bar's
+   right-hand end drifts inwards with nothing in it. */
+@media (max-width: 44rem) {
+  #state { margin-left: auto; }
+}

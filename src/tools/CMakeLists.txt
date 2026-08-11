@@ -311,6 +311,28 @@ aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httppath.c httpif.c
                                           iperfcore.c iperfwire.c
                                           "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha1.c")
 
+# httpd's terminal page, beside the binary that serves it.
+#
+# COPIED, NOT BUILT.  web/terminal.html is a COMMITTED artifact: the sources
+# it is generated from are TypeScript under web/client/ and the generator is
+# tools/web/build.mjs, which needs node.  Nothing in an m68k build may need
+# node, so the build takes the committed file as it stands and tools/ci.sh's
+# web stage is what proves the two still agree.  Putting it here means a
+# staging script can take the page out of the build tree next to httpd rather
+# than reaching back into the sources for it.
+add_custom_command(
+    OUTPUT  "${CMAKE_CURRENT_BINARY_DIR}/terminal.html"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/web/terminal.html"
+            "${CMAKE_CURRENT_BINARY_DIR}/terminal.html"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web/terminal.html"
+    COMMENT "Staging httpd's terminal page")
+
+add_custom_target(tool_httpd_page ALL
+    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/terminal.html")
+
+add_dependencies(tool_httpd tool_httpd_page)
+
 # The crypto library in the mode that does not need nx_api.h; see
 # src/tools/nx_crypto_port.h for what that mode wants and why the port header
 # is ours.  Set on the target rather than globally: NX_CRYPTO_STANDALONE_ENABLE

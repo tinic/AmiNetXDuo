@@ -18,12 +18,14 @@
 #   host         the parser / mbuf / BPF VM / crypto68k vector tests, ctest
 #   host32       the mDNS and TLS-crypto fuzz drivers, which need a 32-bit build
 #   cross        every build configuration, warnings fatal
+#   web          httpd's terminal page still matches the TypeScript it is
+#                generated from, and the vendored xterm.js is untouched
 #   analyze      GCC -fanalyzer over our own sources vs a triaged baseline
 #   conformance  build the bsdsocktest suite for m68k (running it needs tier 2)
 #   emulator     tier 2, boots FS-UAE, needs a ROM
 #
-# `tools/ci.sh` with no arguments runs toolchain, host, host32, cross, analyze
-# and conformance: everything that needs neither an emulator nor a licensed ROM.
+# `tools/ci.sh` with no arguments runs toolchain, host, host32, cross, web and
+# conformance: everything that needs neither an emulator nor a licensed ROM.
 #
 # ENVIRONMENT
 #
@@ -418,6 +420,69 @@ stage_conformance() {
     note "build/bsdsocktest/bsdsocktest"
 }
 
+# -------------------------------------------------------------- the web ----
+
+stage_web() {
+    hr "httpd's terminal page"
+
+    #
+    # src/tools/web/terminal.html is COMMITTED and the m68k build only copies
+    # it, so nothing about `cmake --build` needs node.  The price of that is
+    # that the file can drift from the TypeScript it was generated from, and a
+    # page a commit behind its sources is a page whose bug is already fixed in
+    # a source nobody rebuilt.  This is the check that catches it.
+    #
+    # esbuild comes from npm and this may be a runner with no network, so a
+    # missing node_modules is a SKIP with the command to fix it -- but a node
+    # that is present and a page that does not match is a FAILURE.
+    #
+    if ! command -v node > /dev/null; then
+        skip "web: node is not installed, terminal.html was not checked against\
+ its sources (node tools/web/build.mjs --check)"
+        return 0
+    fi
+
+    if [ ! -d tools/web/node_modules/esbuild ]; then
+        if ! (cd tools/web && npm ci --silent --no-audit --no-fund) \
+                > "$BUILD/web-npm.log" 2>&1; then
+            tail -5 "$BUILD/web-npm.log"
+            skip "web: npm could not install the bundler, terminal.html was not\
+ checked (cd tools/web && npm ci)"
+            return 0
+        fi
+    fi
+
+    if node tools/web/build.mjs --check > "$BUILD/web.log" 2>&1; then
+        note "$(cat "$BUILD/web.log")"
+    else
+        cat "$BUILD/web.log"
+        fail "web (terminal.html does not match src/tools/web/client)"
+        return 1
+    fi
+
+    # The typings are the half esbuild does not do: it strips the types and
+    # never reads them.
+    if (cd tools/web && ./node_modules/.bin/tsc \
+            -p ../../src/tools/web/tsconfig.json --noEmit) \
+            > "$BUILD/web-tsc.log" 2>&1; then
+        note "TypeScript clean"
+    else
+        cat "$BUILD/web-tsc.log"
+        fail "web (tsc)"
+        return 1
+    fi
+
+    # And the vendored dist is meant to be upstream's, byte for byte.
+    if (cd src/tools/web/vendor/xterm && \
+            grep -v '^#' PROVENANCE | grep . | sha256sum --check --status) \
+            2> /dev/null; then
+        note "vendored xterm.js matches its recorded hashes"
+    else
+        fail "web (src/tools/web/vendor/xterm has been edited, see PROVENANCE)"
+        return 1
+    fi
+}
+
 # -------------------------------------------------------------- analyse ----
 
 stage_analyze() {
@@ -589,14 +654,14 @@ mkdir -p "$BUILD"
 # build break does, the baseline has sat at 13 for weeks. Naming it runs it:
 #
 #     tools/ci.sh analyze                  just it
-#     tools/ci.sh host host32 cross analyze conformance    the release set
+#     tools/ci.sh host host32 cross web analyze conformance    the release set
 #
 # The release workflow names it, so nothing ships unanalysed. A default run
 # says out loud that it skipped, because a stage that goes quiet reads as
 # coverage it is not providing.
 #
 WANT=("$@")
-[ ${#WANT[@]} -gt 0 ] || WANT=(host host32 cross conformance)
+[ ${#WANT[@]} -gt 0 ] || WANT=(host host32 cross web conformance)
 
 stage_submodules
 
@@ -616,6 +681,7 @@ for s in "${WANT[@]}"; do
         # inside a function called that way, which is what keeps one unguarded
         # command in a stage from taking the summary down with it.
         cross)       stage_cross || true ;;
+        web)         stage_web || true ;;
         analyze)     stage_analyze || true ;;
         conformance) stage_conformance || true ;;
         emulator)    stage_emulator || true ;;
