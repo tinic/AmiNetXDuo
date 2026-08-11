@@ -153,21 +153,33 @@ EOF
 # address printed below is the only way anyone reaches it.
 echo "hostname $NAME" >> "$STAGE/devs/Internet/name_resolution"
 
-# C:, if there is one to stage.  amiberry-run.sh copies each extra argument
-# into the root of the drive it builds, and it makes C: itself for the tool
-# under test, so this goes in as a drawer of its own and is merged there.
-EXTRA_C=()
+# Workbench's own commands, ADDED to the drawer our tools are already in.
+#
+# Not replacing it.  This block used to `rm -rf "$STAGE/c"` before copying,
+# from when the drawer held nothing else; the loop above now puts every tool
+# we build there, and deleting it took all of them with it.  Ours are copied
+# again afterwards so that a name in both drawers resolves to ours -- Version
+# and Which exist on both sides and the interesting one is not Commodore's.
+#
+# amiberry-run.sh merges an extra drawer into one of that name on the drive,
+# so the whole thing arrives as C:.
 if [ -n "$CMDS" ]; then
     [ -d "$CMDS" ] || { echo "no such commands drawer: $CMDS" >&2; exit 2; }
-    rm -rf "$STAGE/c"
-    cp -R "$CMDS" "$STAGE/c"
+    cp -R "$CMDS"/. "$STAGE/c/"
     chmod -R u+rw "$STAGE/c"
-    EXTRA_C=("$STAGE/c")
-    echo "==> staging $(ls "$STAGE/c" | wc -l | tr -d ' ') commands into C:"
+    for t in "$TOOLS"/*; do
+        [ -f "$t" ] && [ -x "$t" ] || continue
+        case "$(basename "$t")" in
+            *.map|*.cmake|Makefile|ToolsSmoke|*Probe) continue ;;
+        esac
+        cp -f "$t" "$STAGE/c/" 2>/dev/null || true
+    done
 else
-    echo "==> no commands drawer (-C), the Shell will have only what httpd" \
-         "puts in C:" >&2
+    echo "==> no Workbench commands (-C); C: has our tools and nothing else" >&2
 fi
+
+EXTRA_C=("$STAGE/c")
+echo "==> C: has $(ls "$STAGE/c" | wc -l | tr -d ' ') commands in it"
 
 echo "Hello from an Amiga." > "$STAGE/Public/readme.txt"
 echo "<html><body><h1>Amiga</h1><p>httpd is serving this drawer.</p></body></html>" > "$STAGE/Public/index.html"
