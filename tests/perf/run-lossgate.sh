@@ -149,11 +149,19 @@ AMINETXDUO_RUN_TAG="$TAG-warm" \
         $FBFLAGS -k "$KB" -r 1 -T "$TAG-warm" > "$OUT/warm.txt" 2>&1 || true
 
 GUEST=$(sed -n 's/.*address \([0-9][0-9.]*\).*/\1/p' "$OUT/warm.txt" | head -1)
+# `|| true` on the fallback, and it is not decoration.  Under `set -e` a grep
+# that matches nothing makes the whole `[ -n ... ] || GUEST=$(...)` list fail,
+# so the script exited 1 with NOTHING PRINTED -- and the two lines below, which
+# exist for exactly this case, could never run.  The first thing that went
+# wrong here (build/fitz not fetched, so the warm-up arm never booted) was
+# reported as a silent exit.
 [ -n "$GUEST" ] || GUEST=$(grep -oE '192\.168\.[0-9]+\.[0-9]+' "$OUT/warm.txt" \
-                           | grep -v "^$PEER_ADDR$" | head -1)
+                           | grep -v "^$PEER_ADDR$" | head -1 || true)
 [ -n "$GUEST" ] || {
     echo "could not learn the guest's address from $OUT/warm.txt" >&2
-    echo "the warm-up arm probably never got a DHCP lease -- read it" >&2
+    echo "the warm-up arm probably never got a DHCP lease -- read it." >&2
+    echo "--- the last 15 lines of it ---" >&2
+    tail -15 "$OUT/warm.txt" >&2
     exit 1; }
 echo "==> guest is $GUEST"
 
