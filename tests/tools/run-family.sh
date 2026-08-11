@@ -133,6 +133,7 @@ BSD="$BUILD/src/bsdsocket/bsdsocket.library"
 STAGE="$ROOT/build/family-stage"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 REPORT="$HD/tools.txt"
+PARAMS="$ROOT/build/family-params-$AMINETXDUO_RUN_TAG.env"
 
 infra() { echo "error=$*"; echo "result=infra"; exit 2; }
 
@@ -180,6 +181,20 @@ host_preflight() {
         infra "no IPv4 default gateway to point $V4ONLY_NAME at"
 
     DUAL_V6="$aaaa"
+
+    # Written down, because the judge has to build the same command strings the
+    # boot did and these are not stable between two lookups: a name behind a
+    # round robin answers with a different AAAA a minute later, and -V then
+    # looks for a command line that was never run.
+    mkdir -p "$ROOT/build"
+    {
+        printf 'DUAL=%s\n'        "$DUAL"
+        printf 'DUAL_V6=%s\n'     "$DUAL_V6"
+        printf 'ECHO=%s\n'        "$ECHO"
+        printf 'NTP=%s\n'         "$NTP"
+        printf 'V4ONLY_ADDR=%s\n' "$V4ONLY_ADDR"
+    } > "$PARAMS"
+
     echo "host/dual=$DUAL a=$a aaaa=$aaaa"
     echo "host/v4only=$V4ONLY_NAME addr=$V4ONLY_ADDR"
     echo "host/ntp=$NTP"
@@ -483,8 +498,12 @@ judge_files() {
 if [ "$VERDICT_ONLY" = 0 ]; then
     host_preflight
     stage_and_boot
+elif [ -f "$PARAMS" ]; then
+    # The names the last boot actually used, not what they resolve to now.
+    # shellcheck source=/dev/null
+    . "$PARAMS"
 else
-    host_preflight >/dev/null
+    infra "no $PARAMS; -V needs a run to re-read"
 fi
 
 judge
