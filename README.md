@@ -26,9 +26,10 @@ drives the SANA-II network cards you already have.
 
 Claude (Anthropic's Opus 5) wrote the code, under human direction and testing.
 Every commit says so in its `Co-Authored-By` line, and
-[docs/RESEARCH.md](docs/RESEARCH.md) is the engineering record kept as the work
-happened, what was measured, what was tried and abandoned, and the conclusions
-that later turned out to be wrong.
+[docs/RESEARCH.md](docs/RESEARCH.md) indexes the engineering record: one line per
+finding, saying whether the tree still agrees with it. The full record, what was
+measured, what was tried and abandoned, and the conclusions that later turned out
+to be wrong, is in git history.
 
 Whether that is worth trusting is a question about evidence rather than about
 authorship, so the evidence is the part worth checking: an independent
@@ -202,8 +203,8 @@ about. [lwip-amiga](https://github.com/rondoval/lwip-amiga) combines lwIP with
 `bsdsocket.library`, but uses a custom `netdev` driver ABI rather than SANA-II,
 which restricts it to PiStorm and Emu68.
 [AmiTCP_NG](https://github.com/MW0MWZ/AmiTCP_NG) is a GPL fork of AmiTCP 3.0b2
-with a clean-room Roadshow ABI. There is a fuller survey in
-[docs/RESEARCH.md §2](docs/RESEARCH.md#2-prior-art).
+with a clean-room Roadshow ABI. Neither is MIT-licensed and neither drives
+SANA-II, which is why this one exists.
 
 ## Building it yourself
 
@@ -231,7 +232,8 @@ freely distributable Roadshow SDK headers and autodocs, the NDK's
 AmiTCP and Roadshow publish, `usergroup.library`'s 39 vectors, for instance,
 were settled by reading AmiTCP's `fd/usergroup_lib.fd` against Roadshow's
 `sfd/usergroup_lib.sfd` and the NDK pragma, all three agreeing.
-[docs/RESEARCH.md](docs/RESEARCH.md) names the source behind each vector table.
+`tools/gen_vectors.py` regenerates the vector tables from those sources and names
+each one.
 
 MIT. ThreadX and NetX Duo are MIT-licensed as well (© Microsoft and the Eclipse
 ThreadX contributors). ThreadX is an unmodified submodule. **NetX Duo is not**,

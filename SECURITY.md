@@ -47,7 +47,7 @@ Trusted, and worth knowing that it is:
 | Inside the boundary | Why that matters |
 |---|---|
 | `DEVS:NetInterfaces/`, `DEVS:Internet/`, `ENV:` | whoever writes those configures the machine, and is assumed to be its owner |
-| The SANA-II driver | third-party code the stack hands buffers and callbacks to, and it can write wherever it likes. Not theoretical: `x-surf-100.device` 1.16 stops calling the buffer-management callbacks it was given and walks `ios2_Data` as an AmiTCP mbuf chain whenever it finds an `AMITCP` public port. A driver is inside the boundary whether or not it deserves to be |
+| The SANA-II driver | third-party code the stack hands buffers and callbacks to, and it can write wherever it likes. Not theoretical: `x-surf-100.device` 1.16 stops calling the buffer-management callbacks it was given and walks `ios2_Data` as an AmiTCP mbuf chain whenever it finds an `AMITCP` public port, which meant copying received frame bytes to an address read out of a structure that is not an mbuf. `src/netstack/netstack_rexx.c` removes that port across `OpenDevice()`. A driver is inside the boundary whether or not it deserves to be |
 | BPF filter programs | `bpf_*` compiles and runs filters from a local process. The VM bounds-checks, but the interface is local, not remote |
 
 ## What is tested
@@ -80,4 +80,6 @@ Stated because a security policy that lists only its strengths is not much use.
 
 The code was written by Claude (Anthropic's Opus 5) under human direction, which
 [README.md](README.md) states and every commit records in `Co-Authored-By`.
-Nothing about that changes what the tests show, in either direction.
+Nothing about that changes what the tests show, in either direction. Weigh the
+evidence and the gaps above on the same terms as for any other implementation.
+`docs/RESEARCH.md` indexes what was found and whether it still holds.
