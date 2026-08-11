@@ -241,6 +241,14 @@ set_target_properties(test_apidrill PROPERTIES OUTPUT_NAME "ApiDrill")
 # long after Ctrl-C it comes back.  Published LVOs only, so the same binary
 # measures any bsdsocket.library, which is how a before and an after are
 # comparable.
+add_executable(test_trbreak trbreak.c)
+target_include_directories(test_trbreak PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_trbreak PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_trbreak PRIVATE -Wall -Wextra)
+set_target_properties(test_trbreak PROPERTIES OUTPUT_NAME "TrBreak")
+
 add_executable(test_resolvebreak resolvebreak.c)
 target_include_directories(test_resolvebreak PRIVATE ${AMINETXDUO_CORE_INCLUDES})
 if(AMIGA_NDK_INCLUDE)

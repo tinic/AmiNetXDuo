@@ -186,6 +186,7 @@ while getopts "b:B:m:t:N:d:p:I:V" opt; do
 done
 
 TOOLS="$BUILD/src/tools"
+PROBES="$BUILD/tests/tools"
 BSD="$BUILD/src/bsdsocket/bsdsocket.library"
 STAGE="$ROOT/build/family-stage"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
@@ -316,8 +317,25 @@ ping/no-aaaa|10|SYS:ping $V4ONLY_NAME -c 1 -t 10 -6|+$V4ONLY_NAME has no IPv6 ad
 ping/both|10|SYS:ping $DUAL -c 1 -t 10 -4 -6|+-4 and -6 cannot both be given
 traceroute/v4|*|SYS:traceroute $DUAL -m 1 -q 1 -w 5 -n -4|+traceroute to $DUAL \\($V4RE\\)
 traceroute/v6|*|SYS:traceroute $DUAL -m 1 -q 1 -w 5 -n -6|+traceroute to $DUAL \\($V6RE\\)
+# A HOP HAS TO ANSWER.  The two rows above assert the header line, which
+# traceroute prints from the resolved address before it sends anything, so they
+# pass on a trace where every single probe times out -- which is exactly the
+# state -6 shipped in, and these rows are why nobody noticed.  Asserting the
+# first hop is asserting that the probe left with a hop limit on it and that
+# the router's ICMP time-exceeded came back to the socket.
+traceroute/v4-hop|*|SYS:traceroute $DUAL -m 3 -q 1 -w 5 -n -4|+^ 1 .*$V4RE
+traceroute/v6-hop|*|SYS:traceroute $DUAL -m 3 -q 1 -w 5 -n -6|+^ 1 .*$V6RE
 traceroute/no-aaaa|10|SYS:traceroute $V4ONLY_NAME -m 1 -q 1 -w 5 -n -6|+has no IPv6 address, and -6 was given
 traceroute/both|10|SYS:traceroute $DUAL -m 1 -q 1 -w 5 -n -4 -6|+-4 and -6 cannot both be given
+# CTRL-C HAS TO STOP IT.  Over IPv4 on purpose: the break has nothing to do
+# with the address family, and running it over IPv4 means it is exercised on
+# every wire rather than only on one that has IPv6 -- which is how it went
+# unnoticed, since the -6 arms were blocked and nothing else ever interrupted
+# this command.  192.0.2.1 is TEST-NET-1 and answers nothing, so the trace is
+# still running when the break lands.  The second assertion is the other half
+# of the same defect: after an ignored break every remaining hop printed as its
+# own number and an empty line.
+traceroute/break|0|SYS:TrBreak SECONDS 5 CEILING 3 SYS:traceroute 192.0.2.1 -m 6 -q 3 -w 2 -n -4|+result=broke|-^ *[0-9]+ *$
 fetch/v4|0|SYS:fetch http://$ECHO/ TIMEOUT 40 TO DH0:f4.txt -4|+HTTP/1.[01] 200
 fetch/v6|0|SYS:fetch http://$ECHO/ TIMEOUT 40 TO DH0:f6.txt -6|+HTTP/1.[01] 200
 fetch/no-aaaa|10|SYS:fetch http://$V4ONLY_NAME/ TIMEOUT 10 -6|+has no IPv6 address, and -6 was given
@@ -360,6 +378,7 @@ stage_and_boot() {
              traceroute fetch nc telnet tftp whois sntp iperf; do
         [ -x "$TOOLS/$t" ] || infra "no $TOOLS/$t; build $BUILD first"
     done
+    [ -x "$PROBES/TrBreak" ] || infra "no $PROBES/TrBreak; build $BUILD first"
     [ -f "$BSD" ] || infra "no $BSD; build $BUILD first"
 
     a2065=$(find_a2065) || infra "no a2065.device; set AMINETXDUO_A2065"
@@ -373,6 +392,7 @@ stage_and_boot() {
              fetch nc telnet tftp whois sntp iperf; do
         cp "$TOOLS/$t" "$STAGE/$t"
     done
+    cp "$PROBES/TrBreak" "$STAGE/TrBreak"
 
     # DHCP for IPv4 and, by default, CONFIGURE6=AUTO for IPv6: link-local
     # always, and a global address from the router advertisement this wire
@@ -424,7 +444,7 @@ EOF
         "$STAGE/host" \
         "$STAGE/ping" "$STAGE/traceroute" "$STAGE/fetch" "$STAGE/nc" \
         "$STAGE/telnet" "$STAGE/tftp" "$STAGE/whois" "$STAGE/sntp" \
-        "$STAGE/iperf" \
+        "$STAGE/iperf" "$STAGE/TrBreak" \
         > "$ROOT/build/family-run.log" 2>&1
     RUN_RC=$?
     set -e
