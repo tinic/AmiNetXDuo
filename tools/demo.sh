@@ -175,6 +175,14 @@ echo "in a drawer" > "$STAGE/Public/Docs/notes.txt"
 
 # ------------------------------------------------------------------ run ---
 
+# A MAC of our own, set here because ~/amiga-assets/env.sh exports the lab's
+# AMINETXDUO_AMIBERRY_MAC and sourcing it above would otherwise win.  Every
+# default-configured a2065 on the segment comes up as 00:80:10:49:00:01, so a
+# demo and a benchmark bridged on one wire collide and the demo never reaches
+# it -- httpd binds 0.0.0.0 and reports itself happily, which is why that reads
+# as stuck rather than as unplugged.  Cost three restarts on 2026-08-10.
+export AMINETXDUO_AMIBERRY_MAC="${AMINETXDUO_DEMO_MAC:-02:41:4d:49:00:77}"
+
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-demo}"
 
 # Behind NAT the guest is always 10.0.2.15 and the port has to be forwarded
