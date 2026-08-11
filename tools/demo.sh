@@ -68,6 +68,18 @@ PORT=80
 WINDOW=28800
 NAME="${AMINETXDUO_DEMO_NAME:-}"
 CMDS="${AMINETXDUO_DEMO_C:-}"
+# Workbench's own commands, unpacked once from the ADF in the asset store and
+# kept in ~/wbc.  Without them the Shell answers "Unknown command" to Dir and
+# List, which is not a demo.  /tmp is swept, so it does not live there.
+if [ -z "$CMDS" ]; then
+    _wb="$HOME/wbc/Workbench3.1/C"
+    _adf="$HOME/amiga-assets/adf-wb31/amiga-wb31_workbench.adf"
+    _xdf="$HOME/venv-amitools/bin/xdftool"
+    if [ ! -d "$_wb" ] && [ -f "$_adf" ] && [ -x "$_xdf" ]; then
+        mkdir -p "$HOME/wbc" && "$_xdf" "$_adf" unpack "$HOME/wbc" >/dev/null 2>&1 || true
+    fi
+    [ -d "$_wb" ] && CMDS="$_wb"
+fi
 
 while getopts "b:B:C:m:n:p:t:" opt; do
     case "$opt" in
