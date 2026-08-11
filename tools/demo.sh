@@ -331,9 +331,14 @@ else
     MAC=""
     for _ in $(seq 1 60); do
         sleep 2
-        MAC=$(grep -oE "7990: '[^']*' ([0-9a-f]{2}:){5}[0-9a-f]{2}" "$EMU" \
+        # Case-insensitive: the emulator logs the address in UPPER case, and
+        # a lowercase-only class matched it anyway for as long as every guest
+        # here happened to have a MAC of nothing but digits.  The first one
+        # with a letter in it was never found and the run died saying the
+        # emulator had reported no MAC, with the MAC in the log.
+        MAC=$(grep -oEi "7990: '[^']*' ([0-9a-f]{2}:){5}[0-9a-f]{2}" "$EMU" \
               2>/dev/null | tail -1 |
-              grep -oE "([0-9a-f]{2}:){5}[0-9a-f]{2}" || true)
+              grep -oEi "([0-9a-f]{2}:){5}[0-9a-f]{2}" || true)
         [ -n "$MAC" ] && break
     done
     [ -n "$MAC" ] || {
