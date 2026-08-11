@@ -50,8 +50,8 @@ this document names its untested parts rather than only its tested ones.
   given and walks `ios2_Data` as an AmiTCP mbuf chain when it finds an `AMITCP`
   public port, which for this stack meant copying received frame bytes to an
   address read out of a structure that is not an mbuf. Fixed in 0.12.2 by
-  removing the port across `OpenDevice()`; `docs/RESEARCH.md` §71 has the
-  disassembly. A driver is inside the boundary whether or not it deserves to be.
+  removing the port across `OpenDevice()`, in `src/netstack/netstack_rexx.c`. A
+  driver is inside the boundary whether or not it deserves to be.
 - BPF filter programs. `bpf_*` compiles and runs filters from a local process;
   the VM bounds-checks, but the interface is local, not remote.
 
@@ -117,7 +117,8 @@ Nothing about that changes what the tests show, in either direction. Anyone
 weighing whether to trust this stack should weigh the evidence above, and the
 gaps above, on the same terms as for any other implementation.
 
-`docs/RESEARCH.md` is a contemporaneous record rather than a summary written
+`docs/RESEARCH.md` indexes what was found and whether it still holds. Behind it,
+in git history, is a contemporaneous record rather than a summary written
 afterwards: it includes measurements that were wrong, conclusions that were
 withdrawn, and approaches that were tried and abandoned. For a reader trying to
 judge how carefully something was built, that is more informative than a
