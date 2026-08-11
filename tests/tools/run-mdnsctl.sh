@@ -205,13 +205,10 @@ EOF
 # makes the module drop it), so answering would put packets on somebody's
 # network for no measurement.
 WATCHLOG="$ROOT/build/mdnsctl-watch.log"
-WATCH_PID=""
-if python3 "$ROOT/tests/tools/mdnswatch.py" \
-       --log "$WATCHLOG" --seconds "$((TIMEOUT + 3600))" --selftest \
-       > "$ROOT/build/mdnsctl-watch.out" 2>&1 &
-then
-    WATCH_PID=$!
-fi
+python3 "$ROOT/tests/tools/mdnswatch.py" \
+    --log "$WATCHLOG" --seconds "$((TIMEOUT + 3600))" --selftest \
+    > "$ROOT/build/mdnsctl-watch.out" 2>&1 &
+WATCH_PID=$!
 cleanup_watch() {
     [ -n "$WATCH_PID" ] && kill -TERM "$WATCH_PID" 2>/dev/null || true
 }
@@ -257,12 +254,16 @@ infra() { echo "INFRA: $*" >&2; BROKEN=$((BROKEN + 1)); }
 
 # A TIMEOUT IS A DEFECT, NOT A RESULT.  A partial transcript makes every
 # assertion below read the wrong block, and the first few would still pass.
+#
+# A `wait` gets a banner of its own in the transcript, so the two counts are
+# directly comparable and the shortfall names the line the run stopped at.
 WANTED=$(grep -c . "$STAGE/commands.txt")
 RAN=$(grep -c '^===== ' "$REPORT" || true)
-WAITS=$(grep -c '^wait ' "$STAGE/commands.txt" || true)
-if [ "$RAN" -lt "$((WANTED - WAITS))" ]; then
-    echo "INFRA: the guest ran $RAN of $((WANTED - WAITS)) commands in ${ELAPSED}s" \
-         "against a ${TIMEOUT}s ceiling." >&2
+if [ "$RAN" -lt "$WANTED" ]; then
+    STUCK=$(sed -n "$((RAN + 1))p" "$STAGE/commands.txt")
+    echo "INFRA: the guest ran $RAN of $WANTED lines in ${ELAPSED}s against a" \
+         "${TIMEOUT}s ceiling." >&2
+    echo "       It stopped at: ${STUCK:-<past the end of the list>}" >&2
     echo "       That command hung.  Raising -t is not the fix; the run above" \
          "measured nothing." >&2
     exit 2
