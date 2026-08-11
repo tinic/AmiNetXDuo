@@ -112,6 +112,26 @@ cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 # every https URL fails with something that reads like a broken download.
 [ -f "$ROOT/$BUILD/src/tlslib/tls.library" ] &&
     cp "$ROOT/$BUILD/src/tlslib/tls.library" "$STAGE/libs/"
+# Every tool we build, so the terminal can drive the stack it is running on.
+# The -C drawer is Workbench's commands; these are ours, and without them a
+# Shell can list a directory and do nothing else with the network.
+for t in "$TOOLS"/*; do
+    [ -f "$t" ] && [ -x "$t" ] || continue
+    case "$(basename "$t")" in
+        *.map|*.cmake|Makefile|ToolsSmoke|*Probe) continue ;;
+    esac
+    cp -f "$t" "$STAGE/c/" 2>/dev/null || true
+done
+
+# dbclient needs the IEEE double libraries, which a real Workbench has in LIBS:
+# and a staged drive does not.  Without them ssh loads and dies with
+# "mathieeedoubbas.library failed to load", which reads like a broken binary.
+for m in mathieeedoubbas mathieeedoubtrans; do
+    for src in "$HOME/amiga-assets/nglibs/$m.library" "$HOME/amiga-assets/libs/$m.library"; do
+        [ -f "$src" ] && { cp -f "$src" "$STAGE/libs/"; break; }
+    done
+done
+
 mkdir -p "$STAGE/devs/Internet"
 [ -f "$ROOT/third_party/cacert/cacert.pem" ] &&
     cp "$ROOT/third_party/cacert/cacert.pem" "$STAGE/devs/Internet/certificates"
