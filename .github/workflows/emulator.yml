@@ -62,6 +62,12 @@ jobs:
       # Installer, neither of which is ours to ship.
       AMINETXDUO_ADF_DIR: ${{ vars.AMINETXDUO_ADF_DIR }}
       AMINETXDUO_INSTALLER: ${{ vars.AMINETXDUO_INSTALLER }}
+      # tests/tools/run-cardsweep.sh: a THIRD machine on the same LAN,
+      # as user@host.  The emulator's own host cannot be it -- a frame it
+      # sends to its own bridged guest never comes back to that NIC's
+      # pcap -- so without this the card sweep has nowhere to count from
+      # and says every card is unproven rather than passing them.
+      AMINETXDUO_CARDSWEEP_PEER: ${{ vars.AMINETXDUO_CARDSWEEP_PEER }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -218,6 +224,21 @@ jobs:
         if: env.AMINETXDUO_A2065 != ''
         run: tests/tls/run-tls13.sh -b build/ci/default -c 68060
 
+      # EVERY NETWORK CARD, ONE BOOT EACH.
+      #
+      # Everything above this line, and install/test/run-workbench.sh below it,
+      # boots ONE card: the a2065.  The other eight drivers this project
+      # supports had only ever been run by hand, in a throwaway tree, and
+      # x-surf-100 reached a user broken because of it.
+      #
+      # Nine guests, so it is the longest step in the file -- see the wall_s
+      # column it prints.  It is here rather than in ci.yml for that reason and
+      # because it needs a bridged NIC and a peer, neither of which a hosted
+      # runner has.  Skipped, loudly and per card, where the peer is not set.
+      - name: Every network card carries bytes both ways
+        if: env.AMINETXDUO_A2065 != '' && env.AMINETXDUO_CARDSWEEP_PEER != ''
+        run: tools/ci.sh cards
+
       # THE ONE THAT WOULD HAVE STOPPED 0.17.0 AND 0.17.1 SHIPPING.
       #
       # Everything above runs a test program on a bare directory drive.  This
@@ -259,6 +280,8 @@ jobs:
             build/ci/emu-*.log
             build/serial*.log
             build/testhd-conformance/bsdsocktest.log
+            build/cardsweep-results.txt
+            build/cardsweep-logs/*.log
           if-no-files-found: ignore
           retention-days: 14
 
