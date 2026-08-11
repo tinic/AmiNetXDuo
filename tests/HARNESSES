@@ -60,7 +60,7 @@ tests/tools/run-netsetup.sh        : .github/workflows/emulator.yml : NetSetup w
 tests/tools/run-onoff.sh           : .github/workflows/emulator.yml : Online and Offline
 tests/tools/run-quiet.sh           : .github/workflows/emulator.yml : what QUIET means, everywhere
 tests/tools/run-shownetservices.sh : .github/workflows/emulator.yml : ShowNetServices and its window
-install/test/run-all.sh            : tools/lint-guest-arch.sh       : every installer scenario in order
+install/test/run-all.sh            : manual : BROKEN. it runs install/test/run-installer-fsuae.sh once per scenario and that file is gone; `set -uo pipefail` with no -e means all five score 127 and it exits 5. NOVICE, AVERAGE, EXPERT, STATIC and RERUN have no runner. tools/lint-guest-arch.sh:49 only exempts it from a lint, which is not an invocation
 tests/compare/run-compare.sh       : tools/emurun.sh                : the same workload on another stack
 
 # ------------------------------------------------- nothing invokes these --

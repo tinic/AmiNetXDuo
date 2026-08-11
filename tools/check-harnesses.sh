@@ -39,9 +39,11 @@ MANIFEST=tests/HARNESSES
 # What executes things.  ci.yml is deliberately absent: the only harness paths
 # in it are arguments to shellcheck, which does not run them, and counting
 # those as coverage is the mistake this script exists to catch.
+# tools/lint-guest-arch.sh is NOT one: it names harnesses to exempt them from
+# a lint, which is a mention and not an invocation, and counting it as a
+# runner reported install/test/run-all.sh as covered.
 RUNNERS=(.github/workflows/emulator.yml .github/workflows/release.yml
-         tools/ci.sh tools/lint-guest-arch.sh tools/emurun.sh
-         tools/tlsgate.sh tools/demo.sh)
+         tools/ci.sh tools/emurun.sh tools/tlsgate.sh tools/demo.sh)
 
 bad=0
 say()  { printf '%s=%s\n' "$1" "$2"; }
@@ -132,6 +134,54 @@ done
 say harnesses_wired "$wired"
 say harnesses_manual "$manual"
 say harnesses_unwired "$(grep -c ': manual : UNWIRED' "$MANIFEST" || true)"
+
+# --------------------------------------------------- references that dangle --
+#
+# A harness that runs a script which is not there is not a harness, and the
+# manifest cannot see it: install/test/run-all.sh names five installer
+# scenarios and calls install/test/run-installer-fsuae.sh for each, which was
+# deleted with the rest of the fs-uae harnesses.  It runs `set -uo pipefail`
+# with no -e, so all five score 127 and it exits 5.  Nothing invoked it, so
+# nothing ever saw that.
+# An INVOCATION is separated from a MENTION, because both exist and they are
+# not the same defect.  A mention is a stale sentence in an error message,
+# worth fixing and not worth failing a build over; an invocation is a script
+# that cannot run.
+tmp=$(mktemp)
+while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    while IFS= read -r line; do
+        case "${line#"${line%%[![:space:]]*}"}" in '#'*) continue ;; esac
+        printf '%s\n' "$line" |
+        grep -oE '(\$(HERE|ROOT|SELFDIR)/)?((tests|install)/[a-z0-9/_-]*)?run-[a-z0-9-]+\.sh' |
+        while IFS= read -r ref; do
+            case "$ref" in
+                '$HERE/'*)  target="$(dirname "$f")/${ref#\$HERE/}" ;;
+                '$ROOT/'*)  target="${ref#\$ROOT/}" ;;
+                tests/*|install/*) target="$ref" ;;
+                *)          target="$(dirname "$f")/$ref" ;;
+            esac
+            [ -f "$target" ] && continue
+            # Executed, as opposed to printed: the reference opens a command,
+            # or follows one of the words that introduce one.
+            case "$line" in
+                *'echo '*|*'printf '*|*'>&2'*)
+                    printf 'dangling_mention=%s->%s\n' "$f" "$target" ;;
+                *"exec $ref"*|*"bash $ref"*|*"sh $ref"*|*"\"$ref\""*|*"if $ref"*|\
+                *"RUNNER=$ref"*|*"= $ref"*)
+                    printf 'dangling_invocation=%s->%s\n' "$f" "$target" ;;
+                *)  printf 'dangling_invocation=%s->%s\n' "$f" "$target" ;;
+            esac
+        done
+    done < "$f"
+done < <(find tests install/test -name 'run-*.sh'
+         printf '%s\n' "${RUNNERS[@]}") | sort -u > "$tmp"
+cat "$tmp"
+dangle=$(grep -c '^dangling_invocation=' "$tmp" || true)
+say dangling_invocations "$dangle"
+say dangling_mentions "$(grep -c '^dangling_mention=' "$tmp" || true)"
+bad=$((bad + dangle))
+rm -f "$tmp"
 
 say harness_errors "$bad"
 if [ "$bad" -eq 0 ]; then say check_harnesses PASS; exit 0; fi

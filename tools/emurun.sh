@@ -144,8 +144,15 @@ echo "tag=$TAG"
 # ---- run -----------------------------------------------------------------
 
 RUNNER=tests/compare/run-compare.sh
-[ "$PROF" = 0 ] || RUNNER=tests/compare/run-compare-prof.sh
 [ -x "$RUNNER" ] || fail "no_runner:$RUNNER"
+
+# -p pointed at tests/compare/run-compare-prof.sh, which has never existed in
+# this repository's history: the option was written against a script that was
+# never committed, so every -p run has always died on the `[ -x ]` above.  The
+# profiling comparison that does exist is tests/perf/run-stackprof.sh.  Said
+# here rather than left as a path that fails to resolve, because a missing
+# file reads as a tree that has lost something.
+[ "$PROF" = 0 ] || fail "prof_runner_never_existed:see the note above"
 
 # A watchdog on PROGRESS, not on total time.
 #
