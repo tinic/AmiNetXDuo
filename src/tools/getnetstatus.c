@@ -280,9 +280,8 @@ int main(int argc, char **argv)
             return RETURN_OK;
         }
 
-        if (!gns_quiet)
-            tool_error("the network library is not loaded, so it has no "
-                       "version to report");
+        tool_error("the network library is not loaded, so it has no version "
+                   "to report");
 
         FreeArgs(rda);
         return RETURN_WARN;
@@ -314,7 +313,9 @@ int main(int argc, char **argv)
      */
     if (running)
     {
-        struct Library *base = tool_netstatus_open(gns_quiet);
+        /* FALSE: the return code says ready or not ready, and this path is
+           neither. QUIET drops the report, not the reason there is none. */
+        struct Library *base = tool_netstatus_open(FALSE);
 
         if (base == NULL)
         {

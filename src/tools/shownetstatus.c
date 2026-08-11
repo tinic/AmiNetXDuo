@@ -53,7 +53,7 @@ static const char version_tag[] __attribute__((used)) =
 #define TEMPLATE    "INTERFACE/M,INTERFACES/S,ARPCACHE=ARP/S,ROUTES/S," \
                     "DNS=DOMAINNAMESERVERS/S,ICMP/S,IP/S,MB=MEMORY/S," \
                     "TCP/S,UDP/S,TCPSOCKETS/S,UDPSOCKETS/S,NAMES/S,ALL/S," \
-                    "REPEAT/S,QUIET/S"
+                    "REPEAT/S"
 
 enum
 {
@@ -72,7 +72,6 @@ enum
     ARG_NAMES,
     ARG_ALL,
     ARG_REPEAT,
-    ARG_QUIET,
     ARG_COUNT
 };
 
@@ -96,7 +95,6 @@ typedef struct Wanted
     BOOL    udpsockets;
     BOOL    names;
     BOOL    all;
-    BOOL    quiet;
     BOOL    summary;                /* no category was asked for            */
 } Wanted;
 
@@ -1344,17 +1342,13 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
 
         if (shown == 0 && detailed)
         {
-            if (!w->quiet)
-            {
-                tool_error("there is no interface called \"%s\"",
-                           (LONG)tool_basename((const char *)w->interface[0]));
+            tool_error("there is no interface called \"%s\"",
+                       (LONG)tool_basename((const char *)w->interface[0]));
 
-                if (cfg->interface_count > 0)
-                {
-                    for (i = 0; i < cfg->interface_count; i++)
-                        tool_printf("      %s\n",
-                                    (LONG)cfg->interfaces[i].name);
-                }
+            if (cfg->interface_count > 0)
+            {
+                for (i = 0; i < cfg->interface_count; i++)
+                    tool_printf("      %s\n", (LONG)cfg->interfaces[i].name);
             }
 
             return RETURN_ERROR;
@@ -1543,7 +1537,6 @@ static int shownetstatus_main(int argc, char **argv)
     w.udpsockets = (args[ARG_UDPSOCKETS] != 0) ? TRUE : FALSE;
     w.names      = (args[ARG_NAMES]      != 0) ? TRUE : FALSE;
     w.all        = (args[ARG_ALL]        != 0) ? TRUE : FALSE;
-    w.quiet      = (args[ARG_QUIET]      != 0) ? TRUE : FALSE;
     repeat       = (args[ARG_REPEAT]     != 0) ? TRUE : FALSE;
 
     /*
@@ -1575,8 +1568,7 @@ static int shownetstatus_main(int argc, char **argv)
         from_disk = (AmiConfig *)ami_alloc((ULONG)sizeof(AmiConfig));
         if (from_disk == NULL)
         {
-            if (!w.quiet)
-                tool_error("out of memory");
+            tool_error("out of memory");
             FreeArgs(rda);
             return RETURN_FAIL;
         }

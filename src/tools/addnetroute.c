@@ -920,7 +920,8 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
         return RETURN_ERROR;
     }
 
-    base = tool_netstatus_open(nr_quiet);
+    /* FALSE: QUIET drops the route that was set, never why it was not. */
+    base = tool_netstatus_open(FALSE);
     if (base == NULL)
         return RETURN_FAIL;
 
@@ -1351,7 +1352,8 @@ static int addnetroute_main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    base = tool_netstatus_open(nr_quiet);
+    /* FALSE: QUIET drops the route that was set, never why it was not. */
+    base = tool_netstatus_open(FALSE);
     if (base == NULL)
     {
         FreeArgs(rda);

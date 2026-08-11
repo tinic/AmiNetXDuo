@@ -577,7 +577,8 @@ int main(int argc, char **argv)
          * Opening never starts the stack, and arp has nothing to say about
          * one that is not running.
          */
-        pb = tool_netstatus_open(quiet);
+        /* FALSE: QUIET drops the listing, never the reason there is none. */
+        pb = tool_netstatus_open(FALSE);
         if (pb == NULL)
         {
             FreeArgs(rda);
@@ -641,7 +642,9 @@ int main(int argc, char **argv)
 
         /* Changing the cache needs the library, but still must not start it:
            there is no cache to change until something is running. */
-        base = tool_netstatus_open(quiet);
+        /* FALSE: QUIET drops the confirmation, never the reason there is
+           nothing to confirm. */
+        base = tool_netstatus_open(FALSE);
         if (base == NULL)
         {
             FreeArgs(rda);
@@ -797,8 +800,10 @@ int main(int argc, char **argv)
             explain_absence(want, have_snapshot);
             rc = RETURN_WARN;
         }
-        else if (!quiet)
+        else
         {
+            /* The answer, not commentary: an empty cache is what the run
+               found. QUIET drops the headings above it, not this. */
             tool_printf("The address cache is empty.\n");
         }
     }
