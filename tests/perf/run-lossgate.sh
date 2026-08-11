@@ -66,6 +66,8 @@ TAG="${AMINETXDUO_RUN_TAG:-lossgate}"
 RECORD=0
 BASELINE="$ROOT/tests/perf/lossgate-baseline.txt"
 KB=512
+# The widest tolerance -B will write.  See the refusal below.
+MAXTOL="${AMINETXDUO_LOSSGATE_MAXTOL:-25}"
 
 usage() {
     cat <<'EOF'
@@ -178,6 +180,23 @@ for rep in $(seq 1 "$REPS"); do
     # Only the FITZ: arm, not the RAM: control that follows it in the same
     # boot -- and the read figure first, because the write one is buffer
     # acceptance.
+    #
+    # ONE SAMPLE PER REP PER METRIC.  run-fitzbench.sh prints the guest's
+    # transcript and then prints it again in its summary, so every RESULT line
+    # is in the file three times; without the `seen` guard one rep contributed
+    # nine samples and the `n` this reports was three times the number of runs
+    # behind it.
+    #
+    # AND THE NETSTAT COUNTER IS $1, NOT $3.  The line is
+    # "0 retransmitted, 18 dropped on receipt": the old expression found the
+    # field matching /^retransmit/ and printed the one AFTER it, which is the
+    # dropped count, under the name `retransmits`.  It was also unguarded by
+    # arm, so it took the snapshot printed BEFORE the transfer as a second
+    # sample of the same metric and the median sat between two numbers that
+    # measure different things.  Both are recorded now, each named what it is.
+    # dropped-on-receipt is the one that moves: on the read direction the guest
+    # is the receiver, so its own retransmit counter stays at zero and the
+    # peer's retransmissions show up here as duplicates arriving.
     awk -v rep="$rep" '
         # fitzbench names the arm as "fitzbench: file=FITZ:fitzbench.dat".
         # It used to say "FitzBench FITZ:", which this matched on and which
@@ -185,10 +204,13 @@ for rep in $(seq 1 "$REPS"); do
         # the gate would have reported no data rather than a regression.
         /file=FITZ:/ { infitz = 1 }
         /file=RAM:/  { infitz = 0 }
-        infitz && /RESULT read kbs_mean=/  { sub(/.*kbs_mean=/, ""); print rep, "read_kbs",  $1 }
-        infitz && /RESULT write kbs_mean=/ { sub(/.*kbs_mean=/, ""); print rep, "write_kbs", $1 }
-        /retransmit/ { for (i = 1; i <= NF; i++)
-                           if ($i ~ /^retransmit/) print rep, "retransmits", $(i+1) }
+        infitz && /RESULT read kbs_mean=/ && !seen["r"]++ {
+            sub(/.*kbs_mean=/, ""); print rep, "read_kbs",  $1 }
+        infitz && /RESULT write kbs_mean=/ && !seen["w"]++ {
+            sub(/.*kbs_mean=/, ""); print rep, "write_kbs", $1 }
+        infitz && /^[ \t]*[0-9]+ retransmitted, [0-9]+ dropped/ && !seen["d"]++ {
+            print rep, "retransmitted", $1
+            print rep, "dropped_rx",    $3 }
     ' "$OUT/arm-$rep.txt" >> "$OUT/samples.txt"
 done
 
@@ -209,19 +231,46 @@ awk '{ v[$2] = v[$2] " " $3 }
      }' "$OUT/samples.txt" | sort > "$OUT/median.txt"
 
 if [ "$RECORD" = "1" ]; then
+    # A TOLERANCE WIDE ENOUGH IS NOT A GATE.  The tolerance is twice the
+    # observed spread, so a noisy run records a number no regression can
+    # breach and the file still looks like a baseline: the first one recorded
+    # here gave read_kbs +-282% and retransmits +-1450%, on 512 KB at 1% loss,
+    # where a handful of loss events is the whole population and one RTO
+    # halves the figure.  That is a gate that has already failed, in the
+    # quiet direction, on the day it was written.
+    #
+    # So the recorder refuses.  The fix is more data per arm and more arms --
+    # -k is nearly free because almost all of an arm is the boot, not the
+    # transfer -- and the refusal says so.
+    noisy=""
     {
         echo "# tests/perf/run-lossgate.sh baseline."
         echo "# NAME  DIRECTION  VALUE  TOLERANCE_PERCENT"
         echo "# Recorded with ${LOSS}% peer-to-guest loss, $KB KB, $REPS reps."
         echo "# Read and write are separate on purpose: the 0.16.6 regression"
         echo "# moved them in opposite directions."
+        echo "# The tolerance is twice the spread seen while recording, floor 5%."
         while read -r name med spread _n; do
             tol=$(awk -v s="$spread" 'BEGIN { t = s * 2; if (t < 5) t = 5; printf "%.1f", t }')
             dir=higher
-            [ "$name" != "retransmits" ] || dir=lower
+            case "$name" in retransmitted|dropped_rx) dir=lower ;; esac
             printf '%-14s %-7s %10s %6s\n' "$name" "$dir" "$med" "$tol"
+            awk -v t="$tol" -v m="$MAXTOL" 'BEGIN { exit !(t + 0 > m + 0) }' &&
+                noisy="$noisy $name(+-$tol%)"
         done < "$OUT/median.txt"
-    } > "$BASELINE"
+    } > "$BASELINE.new"
+
+    if [ -n "$noisy" ]; then
+        echo "==> NOT recorded.  These came out too noisy to gate anything:" >&2
+        echo "   $noisy" >&2
+        echo "    against a ceiling of ${MAXTOL}%.  Raise -k (a bigger" >&2
+        echo "    transfer costs almost nothing: an arm is mostly its boot)" >&2
+        echo "    and -r, and run it on a machine with nothing else on it." >&2
+        echo "    What it would have written is in $BASELINE.new" >&2
+        exit 1
+    fi
+
+    mv "$BASELINE.new" "$BASELINE"
     echo "==> baseline written to $BASELINE"
     cat "$BASELINE"
     exit 0
