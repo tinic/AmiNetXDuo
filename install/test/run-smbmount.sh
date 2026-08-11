@@ -72,8 +72,9 @@ TAG="${AMINETXDUO_RUN_TAG:-smbmount}"
 ACTIVATE=0
 CAPTURE=0
 KEEP=0
+STACK=ours
 
-while getopts "m:o:u:B:M:T:t:w:ACk" opt; do
+while getopts "m:o:u:B:M:T:t:w:s:ACk" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         o) OSVER="$OPTARG" ;;
@@ -85,6 +86,7 @@ while getopts "m:o:u:B:M:T:t:w:ACk" opt; do
         w) LISTWAIT="$OPTARG" ;;
         A) ACTIVATE=1 ;;
         C) CAPTURE=1 ;;
+        s) STACK="$OPTARG" ;;
         k) KEEP=1 ;;
         *) sed -n '5,9p' "$0" >&2; exit 2 ;;
     esac
@@ -97,20 +99,48 @@ HD="$ROOT/build/smbhd-$TAG"
 
 # The host the URL names, for ping and for the tcpdump filter.  Not parsed out
 # of a general URL grammar: the part between the last @ and the next / .
-SMBHOST=$(printf '%s' "$URL" | sed -e 's|^smb://||' -e 's|^[^@]*@||' -e 's|/.*$||' -e 's|:.*$||')
+SMBAUTH=$(printf '%s' "$URL" | sed -e 's|^smb://||' -e 's|^[^@]*@||' -e 's|/.*$||')
+SMBHOST=${SMBAUTH%%:*}
+SMBPORT=445
+case "$SMBAUTH" in *:*) SMBPORT=${SMBAUTH##*:} ;; esac
 [ -n "$SMBHOST" ] || { echo "cannot read a host out of $URL" >&2; exit 2; }
 
 # ------------------------------------------------------------ ingredients --
 
 need() { [ -e "$1" ] || { echo "missing $1${2:+ -- $2}" >&2; exit 2; }; }
 
-for f in "$BUILD/src/bsdsocket/bsdsocket.library" \
-         "$BUILD/src/usergroup/usergroup.library" \
-         "$BUILD/src/tools/AddNetInterface" "$BUILD/src/tools/netstat" \
-         "$BUILD/src/tools/ShowNetStatus" "$BUILD/src/tools/ping" \
-         "$BUILD/src/tools/nc" "$BUILD/src/tools/host"; do
-    need "$f" "build the tree first"
-done
+# WHICH STACK IS UNDERNEATH.  Both reporters say the same DOSDriver works over
+# AmiTCP, so "does it work over another stack on this same machine" is the
+# question that decides whether the defect is ours, and it is one flag.  Each
+# stack brings its own AddNetInterface and its own ping: a stack that needed
+# somebody else's command to start would not be the stack under test.
+case "$STACK" in
+    ours)
+        for f in "$BUILD/src/bsdsocket/bsdsocket.library" \
+                 "$BUILD/src/usergroup/usergroup.library" \
+                 "$BUILD/src/tools/AddNetInterface" "$BUILD/src/tools/netstat" \
+                 "$BUILD/src/tools/ShowNetStatus" "$BUILD/src/tools/ping" \
+                 "$BUILD/src/tools/nc" "$BUILD/src/tools/host"; do
+            need "$f" "build the tree first"
+        done
+        STACKDIR="$BUILD/src"
+        LIBBSD="$BUILD/src/bsdsocket/bsdsocket.library"
+        LIBUG="$BUILD/src/usergroup/usergroup.library"
+        CMDDIR="$BUILD/src/tools"
+        STACK_TOOLS="AddNetInterface ShowNetStatus netstat ping nc host NetTrace"
+        ;;
+    roadshow)
+        RSDIR="${AMINETXDUO_CMP_ROADSHOW:-$HOME/amiga-assets/stacks/Roadshow-Demo-1.15/Workbench}"
+        need "$RSDIR/Libs/bsdsocket.library" "set AMINETXDUO_CMP_ROADSHOW"
+        LIBBSD="$RSDIR/Libs/bsdsocket.library"
+        LIBUG="$RSDIR/Libs/usergroup.library"
+        CMDDIR="$RSDIR/C"
+        # No netstat and no nc in the Roadshow demo; the samples that need
+        # them say so rather than disappearing.
+        STACK_TOOLS="AddNetInterface ShowNetStatus ping"
+        ;;
+    *) echo "-s takes ours or roadshow" >&2; exit 2 ;;
+esac
 
 A2065="${AMINETXDUO_A2065:-}"
 if [ -z "$A2065" ]; then
@@ -157,6 +187,7 @@ done
 [ -n "$AMIBERRY" ] || { echo "amiberry not found; set AMIBERRY=<path>" >&2; exit 2; }
 
 echo "==> $MODEL, OS 3.$([ "$OSVER" = 32 ] && echo 2 || echo 1), $(basename "$KICKSTART")"
+echo "==> stack $STACK"
 echo "==> share $URL (host $SMBHOST), handler smb2-handler.$CPUSFX"
 
 # --------------------------------------------------------------- the SYS: --
@@ -227,15 +258,31 @@ rm -rf "$HD"; mkdir -p "$HD"
 cp -R "$WB/." "$HD/"
 mkdir -p "$HD/L" "$HD/Libs" "$HD/C" "$HD/S" \
          "$HD/Devs/NetInterfaces" "$HD/Devs/Internet" \
-         "$HD/Devs/DOSDrivers" "$HD/Devs/Networks"
+         "$HD/Storage/DOSDrivers" "$HD/Devs/Networks"
 
 cp "$A2065" "$HD/Devs/a2065.device"
 cp "$A2065" "$HD/Devs/Networks/a2065.device"
-cp "$BUILD/src/bsdsocket/bsdsocket.library" "$HD/Libs/bsdsocket.library"
-cp "$BUILD/src/usergroup/usergroup.library" "$HD/Libs/usergroup.library"
-for t in AddNetInterface ShowNetStatus netstat ping nc host NetTrace nslookup; do
-    [ -f "$BUILD/src/tools/$t" ] && cp "$BUILD/src/tools/$t" "$HD/C/$t"
+cp "$LIBBSD" "$HD/Libs/bsdsocket.library"
+[ -f "$LIBUG" ] && cp "$LIBUG" "$HD/Libs/usergroup.library"
+HAVE_NETSTAT=no; HAVE_NC=no
+for t in $STACK_TOOLS; do
+    if [ -f "$CMDDIR/$t" ]; then
+        cp "$CMDDIR/$t" "$HD/C/$t"
+        [ "$t" = netstat ] && HAVE_NETSTAT=yes
+        [ "$t" = nc ] && HAVE_NC=yes
+    fi
 done
+true
+
+# SMBProbe, built here rather than shipped: it is a test instrument, and the
+# only way to tell a device that answered with an error from one that put up
+# an invisible requester and waited.
+GCC="${AMIGA_GCC:-$HOME/amigaos/tools/m68k-amigaos-gcc/bin/m68k-amigaos-gcc}"
+NDK="${AMIGA_NDK:-$HOME/amigaos/tools/m68k-amigaos-gcc/m68k-amigaos/ndk-include}"
+[ -x "$GCC" ] || { echo "no m68k gcc at $GCC; set AMIGA_GCC" >&2; exit 2; }
+"$GCC" -O2 -m68000 -Wall -Wextra -I"$NDK" \
+       -o "$ROOT/build/SMBProbe-$TAG" "$ROOT/install/test/smbprobe.c" || exit 2
+cp "$ROOT/build/SMBProbe-$TAG" "$HD/C/SMBProbe"
 
 cp "$FSBOX/Libs/filesysbox.library.$CPUSFX" "$HD/Libs/filesysbox.library"
 cp "$SMB2FS/L/smb2-handler.$CPUSFX"         "$HD/L/smb2-handler"
@@ -253,7 +300,12 @@ cat > "$HD/Devs/Internet/name_resolution" <<EOF
 hostname amiga-smb
 EOF
 
-# THE DOSDRIVER, verbatim from smb2fs's own README.  ACTIVATE decides which
+# THE DOSDRIVER, verbatim from smb2fs's own README, and in
+# SYS:Storage/DOSDrivers rather than DEVS:DOSDrivers: the stock
+# Startup-Sequence mounts everything in DEVS:DOSDrivers on the way up, before
+# the network exists, so a driver left there is already mounted by the time
+# this script runs (Mount then says "already mounted", rc 20) and with
+# ACTIVATE=1 the handler would start with no stack under it.  ACTIVATE decides which
 # process does the connecting: without it Mount only builds the device node
 # and the first access starts the handler; with it, Mount does.
 {
@@ -263,7 +315,7 @@ EOF
     echo "GlobVec   = -1"
     [ "$ACTIVATE" = 1 ] && echo "ACTIVATE  = 1"
     echo "Startup   = \"$URL\""
-} > "$HD/Devs/DOSDrivers/SMB2"
+} > "$HD/Storage/DOSDrivers/SMB2"
 
 # ------------------------------------------------------------ the scripts --
 #
@@ -277,14 +329,24 @@ FailAt 9999
 Echo >DH0:w1-mount-start.txt "mounting"
 C:Mount SMB2: >DH0:w2-mount-out.txt
 Echo >DH0:w3-mount-rc.txt "$RC"
-Echo >DH0:w4-list-start.txt "listing"
-C:List SMB2: >DH0:w5-list-out.txt
-Echo >DH0:w6-list-rc.txt "$RC"
-Echo >DH0:w7-info-start.txt "info"
+C:SMBProbe LOCK DEVICE=SMB2: LOG=DH0:w4-probe.txt >DH0:w4-probe-console.txt
+Echo >DH0:w5-probe-rc.txt "$RC"
+C:List SMB2: >DH0:w6-list-out.txt
+Echo >DH0:w7-list-rc.txt "$RC"
 C:Info SMB2: >DH0:w8-info-out.txt
 Echo >DH0:w9-info-rc.txt "$RC"
 Echo >DH0:wA-end.txt "done"
 EOF
+
+NCLINE="Echo >>DH0:smbcheck.txt \"RESULT nc445 rc=skipped\""
+NETSTATLINE="Echo >>DH0:smbcheck.txt \"(this stack ships no netstat)\""
+if [ "$HAVE_NC" = yes ]; then
+    NCLINE="C:nc -v -w 5 $SMBHOST $SMBPORT >>DH0:smbcheck.txt
+Echo >>DH0:smbcheck.txt \"RESULT nc445 rc=\$RC\""
+fi
+if [ "$HAVE_NETSTAT" = yes ]; then
+    NETSTATLINE="C:netstat -a >>DH0:smbcheck.txt"
+fi
 
 # The boot shell's half.  It brings the network up, says what it sees, starts
 # the detached half, and then samples the connection table while that half is
@@ -301,11 +363,9 @@ C:ShowNetStatus >>DH0:smbcheck.txt
 Echo >>DH0:smbcheck.txt "*N=== 2. the server, from this machine"
 C:ping $SMBHOST -c 2 -t 10 >>DH0:smbcheck.txt
 Echo >>DH0:smbcheck.txt "RESULT ping rc=\$RC"
-C:nc -v -w 5 $SMBHOST 445 >>DH0:smbcheck.txt
-Echo >>DH0:smbcheck.txt "RESULT nc445 rc=\$RC"
-
+$NCLINE
 Echo >>DH0:smbcheck.txt "*N=== 3. connections before the mount"
-C:netstat -a >>DH0:smbcheck.txt
+$NETSTATLINE
 
 Echo >>DH0:smbcheck.txt "*N=== 4. Mount, List and Info, detached"
 Run >NIL: <NIL: C:Execute S:SMB-Work
@@ -322,13 +382,19 @@ while [ "$_t" -lt "$LISTWAIT" ]; do
     {
         echo "C:Wait $_step"
         echo "Echo >>DH0:smbcheck.txt \"*N=== connections ${_t}s into the mount\""
-        echo "C:netstat -a >>DH0:smbcheck.txt"
+        echo "$NETSTATLINE"
     } >> "$HD/S/SMB-Check"
 done
 
 cat >> "$HD/S/SMB-Check" <<'EOF'
 
-Echo >>DH0:smbcheck.txt "*N=== 5. what the volume looks like now"
+Echo >>DH0:smbcheck.txt "*N=== 5. what is on the screen right now"
+C:SMBProbe WINDOWS LOG=DH0:windows.txt >>DH0:smbcheck.txt
+Echo >>DH0:smbcheck.txt "RESULT windows rc=$RC"
+C:SMBProbe TASKS LOG=DH0:tasks.txt >>DH0:smbcheck.txt
+Echo >>DH0:smbcheck.txt "RESULT tasks rc=$RC"
+
+Echo >>DH0:smbcheck.txt "*N=== 6. what the volume looks like now"
 C:Assign >>DH0:smbcheck.txt
 Echo >>DH0:smbcheck.txt "*N=== done"
 EOF
@@ -356,7 +422,7 @@ CAP_PID=""
 if [ "$CAPTURE" = 1 ]; then
     rm -f "$CAPFILE"
     tcpdump -i "$BACKEND" -s 0 -U -w "$CAPFILE" \
-        "host $SMBHOST and (port 445 or port 139)" \
+        "host $SMBHOST and (port $SMBPORT or port 139)" \
         > "$ROOT/build/smb-$TAG-tcpdump.log" 2>&1 &
     CAP_PID=$!
     sleep 2
@@ -439,13 +505,21 @@ cat "$HD/smbcheck.txt" 2>/dev/null || echo "(DH0:smbcheck.txt was never written)
 
 echo
 echo "================= the detached mount ==================="
-for f in w1-mount-start w2-mount-out w3-mount-rc w4-list-start w5-list-out \
-         w6-list-rc w7-info-start w8-info-out w9-info-rc wA-end; do
+for f in w1-mount-start w2-mount-out w3-mount-rc w4-probe w4-probe-console \
+         w5-probe-rc w6-list-out w7-list-rc w8-info-out w9-info-rc wA-end; do
     if [ -e "$HD/$f.txt" ]; then
         printf -- '---- %s ----\n' "$f"
         cat "$HD/$f.txt"
     else
         printf -- '---- %s ---- NEVER WRITTEN\n' "$f"
+    fi
+done
+
+for extra in windows tasks; do
+    if [ -s "$HD/$extra.txt" ]; then
+        echo
+        printf -- '---- %s ----\n' "$extra.txt"
+        cat "$HD/$extra.txt"
     fi
 done
 
@@ -460,15 +534,17 @@ fi
 rcof() { [ -e "$HD/$1.txt" ] || return 0
          tr -dc '0-9-' < "$HD/$1.txt" | head -c 6; }
 
-MOUNT_RC=$(rcof w3-mount-rc); LIST_RC=$(rcof w6-list-rc); INFO_RC=$(rcof w9-info-rc)
+MOUNT_RC=$(rcof w3-mount-rc); PROBE_RC=$(rcof w5-probe-rc)
+LIST_RC=$(rcof w7-list-rc); INFO_RC=$(rcof w9-info-rc)
 STOPPED=none
-for step in "mount:w3-mount-rc" "list:w6-list-rc" "info:w9-info-rc" "end:wA-end"; do
+for step in "mount:w3-mount-rc" "probe:w5-probe-rc" "list:w7-list-rc" \
+            "info:w9-info-rc" "end:wA-end"; do
     [ -e "$HD/${step##*:}.txt" ] || { STOPPED="${step%%:*}"; break; }
 done
 ESTAB=no
-grep -qE "[.:]445([^0-9]|$)" "$HD/smbcheck.txt" 2>/dev/null && ESTAB=yes
+grep -qE "[.:]$SMBPORT([^0-9]|$)" "$HD/smbcheck.txt" 2>/dev/null && ESTAB=yes
 LISTED=no
-[ -s "$HD/w5-list-out.txt" ] && LISTED=yes
+[ -s "$HD/w6-list-out.txt" ] && LISTED=yes
 
 echo
 echo "boot_status=$STATUS"
@@ -476,6 +552,10 @@ echo "addnet_rc=$(sed -n 's/^RESULT addnet rc=//p' "$HD/smbcheck.txt" 2>/dev/nul
 echo "ping_rc=$(sed -n 's/^RESULT ping rc=//p' "$HD/smbcheck.txt" 2>/dev/null | head -1)"
 echo "nc445_rc=$(sed -n 's/^RESULT nc445 rc=//p' "$HD/smbcheck.txt" 2>/dev/null | head -1)"
 echo "mount_rc=${MOUNT_RC:-NEVER_RETURNED}"
+echo "probe_rc=${PROBE_RC:-NEVER_RETURNED}"
+echo "probe_lock=$(sed -n 's/^RESULT lock=//p' "$HD/w4-probe.txt" 2>/dev/null | head -1)"
+echo "windows_open=$(sed -n 's/^RESULT windows=//p' "$HD/windows.txt" 2>/dev/null | head -1)"
+echo "tasks_seen=$(sed -n 's/^RESULT tasks=//p' "$HD/tasks.txt" 2>/dev/null | head -1)"
 echo "list_rc=${LIST_RC:-NEVER_RETURNED}"
 echo "info_rc=${INFO_RC:-NEVER_RETURNED}"
 echo "list_produced_output=$LISTED"
@@ -484,6 +564,7 @@ echo "stopped_at=$STOPPED"
 echo "activate=$ACTIVATE"
 echo "os=3.$([ "$OSVER" = 32 ] && echo 2 || echo 1)"
 echo "model=$MODEL"
+echo "stack=$STACK"
 echo "drive=$HD"
 [ -s "$CAPFILE" ] && echo "capture=$CAPFILE"
 
