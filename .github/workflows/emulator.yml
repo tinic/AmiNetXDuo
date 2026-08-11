@@ -62,6 +62,10 @@ jobs:
       # Installer, neither of which is ours to ship.
       AMINETXDUO_ADF_DIR: ${{ vars.AMINETXDUO_ADF_DIR }}
       AMINETXDUO_INSTALLER: ${{ vars.AMINETXDUO_INSTALLER }}
+      # The second machine.  run-workbench.sh -H needs one: the host running
+      # amiberry cannot reach its own guest, so with no peer there is nothing
+      # that can drive WebDAV or the browser terminal at the installed Amiga.
+      AMINETXDUO_PEER: ${{ vars.AMINETXDUO_PEER }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -248,7 +252,35 @@ jobs:
                 -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF
           cmake --build build/cm-68000-minimal --parallel
           dist/make-dist.sh
-          install/test/run-workbench.sh -a "$PWD/$(ls -t build/dist/*.lha | head -1)"
+
+          # -H IS THE HALF THIS STEP CLAIMS TO DO.  Without it TERMINAL stays 0
+          # (install/test/run-workbench.sh:144) and the whole block at :1000
+          # to :1223 is skipped: no peer is contacted, tests/tools/httpd-drill.py's
+          # twelve WebDAV assertions do not run, wsterm-console.py does not run,
+          # the PUT/GET round trip does not run, `lha x` on the Amiga does not
+          # run, and the second and third installs -- install-over-existing, and
+          # answering the terminal question no -- do not happen at all.  What
+          # ran instead was one install, a boot, and a check that some files
+          # exist.  tools/ci.sh's e2e stage passes -H and no workflow invokes
+          # that stage, so those assertions have never run in CI.
+          #
+          # It needs a second machine: the host running amiberry cannot reach
+          # its own guest.  Where AMINETXDUO_PEER is not configured the step
+          # runs without -H and SAYS SO, rather than reporting a quarter of
+          # the test as the whole of it.
+          archive="$PWD/$(ls -t build/dist/*.lha | head -1)"
+          if [ -n "${AMINETXDUO_PEER:-}" ]; then
+            echo "e2e_terminal=on peer=$AMINETXDUO_PEER"
+            install/test/run-workbench.sh -H -a "$archive"
+          else
+            echo "e2e_terminal=off"
+            echo "::warning::AMINETXDUO_PEER is not set on this runner, so the" \
+                 "release e2e ran WITHOUT -H: the WebDAV drill, the browser" \
+                 "terminal, lha x on the Amiga and the two reinstall passes" \
+                 "were all skipped. Set the AMINETXDUO_PEER repository" \
+                 "variable to an ssh target that can reach the guest."
+            install/test/run-workbench.sh -a "$archive"
+          fi
 
       - name: Upload emulator logs
         if: always()
