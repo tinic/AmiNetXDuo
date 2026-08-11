@@ -169,7 +169,9 @@ check() {
         fail "guest $tag: \`hostname\` did not print $want"
     fi
 
-    # It came from nowhere configured, which is the whole premise.
+    # The premise, not the claim: nothing configured a name, so what follows
+    # is about the fallback.  It holds whether or not the fallback works, and
+    # is here to catch a fixture that starts naming the machine.
     if grep -q "not named by anything" "$report"; then
         echo "guest_${tag}_source=derived"
     else
@@ -195,12 +197,17 @@ check() {
         fail "guest $tag: $want.local did not resolve"
     fi
 
-    # The name it must NOT have.
-    if grep -qx "amiga" "$report"; then
-        echo "guest_${tag}_bare_amiga=yes"
-        fail "guest $tag: still calls itself \"amiga\""
+    # The name it must NOT have, read off the line that says what the
+    # RESPONDER claimed.  Not off `hostname`: with the derivation removed the
+    # machine printed "localhost" there and "amiga.local" here, which is the
+    # divergence that made the fault hard to see from outside and is why this
+    # assertion is on the mDNS line rather than on the command.
+    if grep -q "^Known here as: *amiga.local" "$report"; then
+        echo "guest_${tag}_claimed=amiga.local"
+        fail "guest $tag: the responder still claimed amiga.local"
     else
-        echo "guest_${tag}_bare_amiga=no"
+        echo "guest_${tag}_claimed=$(sed -n 's/^Known here as: *\([^ ]*\).*/\1/p' \
+                                     "$report" | head -1)"
     fi
 }
 

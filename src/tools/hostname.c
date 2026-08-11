@@ -137,7 +137,7 @@ static BOOL configured_name(char *out, ULONG outlen, UWORD *source)
 }
 
 /* "ENV:HOSTNAME", or the phrase for a machine nothing named. */
-static VOID say_source(UWORD source)
+static VOID say_source(UWORD source, const char *name)
 {
     const char *from = ami_config_hostname_source_text(source);
 
@@ -146,19 +146,24 @@ static VOID say_source(UWORD source)
 
     /*
      * No source means nothing configured one, so the stack named the machine
-     * after its card's hardware address (ami_ns_name_after_card()). A card
-     * that reports no address leaves the name to gethostname()'s own chain,
-     * the interface address reverse-resolved or "localhost" (bsdsocket.doc
-     * NOTES), and then this line is only approximately right; no SANA-II
-     * Ethernet driver refuses S2_GETSTATIONADDRESS, so it is not worth a
-     * second sentence. ShowNetStatus prints "(derived)" for the same case and
-     * this says more, because here it is the answer rather than a footnote.
+     * after its card's hardware address (ami_ns_name_after_card()), and the
+     * bare "amiga" is what that falls back to when no card would give one.
+     * The two are worth separating: the first is a name of this machine's
+     * own, the second is the name every other unnamed machine also has, and
+     * the reader needs to know which they are looking at.
+     *
+     * ShowNetStatus prints "(derived)" for the same case and this says more,
+     * because here it is the answer rather than a footnote.
      */
     if (from != NULL)
         tool_printf("  named by %s\n", (LONG)from);
+    else if (tool_stricmp(name, "amiga") == 0)
+        tool_printf("  not named by anything, and no card would give a "
+                    "hardware address to name it after, so it shares this "
+                    "name with every other machine in the same state\n");
     else
-        tool_printf("  not named by anything; derived from the card's "
-                    "hardware address\n");
+        tool_printf("  not named by anything; taken from the card's hardware "
+                    "address\n");
 }
 
 int main(int argc, char **argv)
@@ -209,7 +214,7 @@ int main(int argc, char **argv)
         }
 
         tool_printf("%s\n", (LONG)name);
-        say_source(source);
+        say_source(source, name);
 
         /* The files say one thing and the stack another: a DHCP lease or a
            name set since start-up. Worth a line, because the file is what the
@@ -304,7 +309,7 @@ int main(int argc, char **argv)
             if (running_name(name, sizeof(name), &source))
             {
                 tool_printf("%s\n", (LONG)name);
-                say_source(source);
+                say_source(source, name);
             }
             if (!hn_quiet)
                 tool_printf("  %s is in ENV:HOSTNAME and ENVARC:HOSTNAME, and "
@@ -327,7 +332,7 @@ int main(int argc, char **argv)
     }
 
     tool_printf("%s\n", (LONG)name);
-    say_source(source);
+    say_source(source, name);
 
     if (!hn_quiet)
     {

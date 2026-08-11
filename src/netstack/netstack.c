@@ -673,10 +673,21 @@ static VOID ami_ns_name_after_card(AmiNetStack *ns)
     }
 
     /*
-     * No card would say what its address is. "amiga" then, the fallback each
-     * of those callers still carries, and the collision this exists to avoid
-     * is back: better that than a name that is different after every reboot.
+     * No card would say what its address is, so "amiga", and the collision
+     * this exists to avoid is back. Better that than a name that is different
+     * after every reboot.
+     *
+     * Written into ns_Config rather than left to the fallback each caller
+     * carries, because those cover only two of them: with the field empty,
+     * mDNS claims amiga.local and option 12 announces "amiga" while
+     * gethostname() takes its own path, the interface address reverse-resolved
+     * or "localhost", and ShowNetStatus then reports "Host name: localhost"
+     * over "Known here as: amiga.local". A machine calling itself one thing to
+     * the network and another to a program is worse than either name.
      */
+    ami_ns_copy_name(ns->ns_Config.hostname, "amiga",
+                     (ULONG)sizeof(ns->ns_Config.hostname));
+
     AMI_WARN("netstack: nothing named this machine and no card would give a "
              "hardware address, so it answers to \"amiga\" and may collide "
              "with another machine doing the same. Set one with `hostname "
@@ -1492,8 +1503,9 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
          * what the router's client list shows and what many routers put in
          * their local DNS. It comes from the configured HOSTNAME so that two
          * AmiNetXDuo machines on one network are distinguishable, and failing
-         * that from ami_ns_name_after_card(); the literal below is left for
-         * the machine whose cards report no hardware address.
+         * that from ami_ns_name_after_card(), which leaves it non-empty
+         * either way. The literal guards nx_dhcp_create() against a
+         * zero-length name, which it has no defence of its own against.
          *
          * Into ns_DhcpName, whose comment says why the client gets a copy
          * rather than a pointer into ns_Config.

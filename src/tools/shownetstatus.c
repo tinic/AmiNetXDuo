@@ -1130,9 +1130,9 @@ static VOID show_host_name(const char *host, UWORD source,
         tool_printf(".%s", (LONG)domain);
 
     /* No source means nothing configured one, so the stack named the machine
-       after its card's hardware address, "amiga-490007"; a card that reports
-       none leaves gethostname() to work it out from the interface address
-       (bsdsocket.doc NOTES) or fall back to "localhost". */
+       after its card's hardware address, "amiga-490007", or "amiga" if no
+       card would give one. `hostname` tells the two apart in words; here it
+       is a footnote to a line the reader can already see. */
     if (from != NULL)
         tool_printf(" (from %s)\n", (LONG)from);
     else
