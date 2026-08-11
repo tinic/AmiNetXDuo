@@ -41,12 +41,23 @@ export function toLatin1(text: string): Uint8Array {
 }
 
 /*
- * AmigaDOS writes CSI as ONE byte, 0x9B, and not as ESC [.
+ * AmigaOS writes CSI as ONE byte, 0x9B, where the rest of the world writes
+ * ESC [.  It is the 8-bit C1 control the standard allows and almost nothing
+ * else still emits; xterm.js parses only the 7-bit form, so the byte is
+ * rewritten into it here, before the parser sees it.
  *
- * That is the 8-bit C1 control the standard allows and almost nothing else
- * still emits, and it is why the old page showed the Shell's cursor and
- * colour sequences as garbage.  xterm.js parses the 7-bit form, so the byte
- * is rewritten into it here, before the parser ever sees it.
+ * MEASURED, SO THAT THE CLAIM IS THE RIGHT SIZE
+ *
+ *   A Shell on a PIPE does not send it.  871 bytes of Dir, List, Version and
+ *   Type off a WB3.1 A1200 contained no 0x9B at all, and `Echo "*e[33m"`
+ *   sends ESC [ because *e is ESC and the [ was typed.  What the old page
+ *   actually got wrong was those ESC [ sequences -- a <pre> renders the ESC
+ *   as nothing and leaves `[33mYELLOW[0m` on the screen as text.
+ *
+ *   0x9B is what the console.device writes, and a console handler on the far
+ *   side is the next thing being built.  This is here so that arrives working
+ *   rather than as a bug report, and it costs one indexOf on a string that
+ *   almost never contains it.
  *
  * Safe to do a frame at a time: 0x9B is a single byte, so unlike a multi-byte
  * sequence it can never be split across two arrivals.  And nothing is lost --
