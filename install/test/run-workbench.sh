@@ -21,8 +21,30 @@
 #      both lines away again and leave AddNetInterface and the other
 #      application's lines exactly where they were.
 #
+# WHAT THE OTHER MACHINE DOES, in step 2, and it is the product's main path:
+# GET /terminal and compare Content-Length against the page on the drive; PUT
+# a file and GET it back and compare the bytes; PUT our own release .lha and
+# have the Amiga `lha x` it, then compare the extracted files against this
+# host's copies; and run tests/tools/httpd-drill.py --terminal and
+# tests/tools/wsterm-console.py, which is a Shell answering through the
+# WebSocket.  Nothing here scores "the command completed".
+#
+# AMINETXDUO_PEER is that machine and there is no default.  The host running
+# amiberry cannot be it: with uaenet_pcap on a shared NIC a frame this host
+# sends to the guest's MAC does not come back round to that NIC's pcap, so
+# every connection from here is refused.  Without a peer the -H run exits 3
+# rather than passing.
+#
+# lha is LhA 2.15 from ~/amiga-assets/apps/lha-2.15, which is licensed
+# third-party software: it is staged onto the test drive here and is in
+# nothing this repository ships.  Absent, that one step says so and fails,
+# rather than disappearing.
+#
 # It needs -l AVERAGE or -l EXPERT: at NOVICE the Installer draws no questions
 # at all and there is nothing to answer.
+#
+# Exit status: 0 pass, 1 something under test failed, 2 an ingredient is
+# missing on this machine, 3 nothing could reach the Amiga from outside.
 #
 # WHY THIS EXISTS, given that install/test/run-installer.sh already installs and
 # boots.  That harness stages the machine itself: it makes an empty LIBS:, a
@@ -284,6 +306,21 @@ command -v lha >/dev/null 2>&1 || {
 
 ADFDIR="${AMINETXDUO_ADF_DIR:-$HOME/amigaos/adf}"
 
+# WHERE THE OTHER MACHINE IS.
+#
+# Everything -H asserts about the running server is asserted from somewhere
+# else, because "reachable" means reachable from another machine and because
+# THE HOST RUNNING AMIBERRY IS NOT ANOTHER MACHINE: with uaenet_pcap on a
+# shared NIC, a frame this host sends to the guest's MAC does not come back
+# round to that NIC's pcap, so every connection from here is refused and the
+# refusal says nothing about the server.  Measured on playhouse3: from the
+# emulating host, connection refused every time; from a third machine on the
+# same LAN, HTTP/1.1 200 with the right Content-Length.
+#
+# An ssh target, and the drills are copied to it.  Without one the -H stage
+# reports infrastructure and fails; it never passes for want of a peer.
+PEER="${AMINETXDUO_PEER:-}"
+
 echo "==> model $MODEL on $(basename "$KICKSTART")"
 
 # ------------------------------------------------------ Workbench 3.1 SYS: --
@@ -506,6 +543,29 @@ mkdir -p "$HD/Unpacked"
 }
 cp "$INSTALLER" "$HD/Unpacked/AmiNetXDuo/Installer"
 chmod -R a+rx "$HD/Unpacked"
+
+# LhA 2.15, from the asset store, and NOT from this repository: it is
+# third-party and licensed, so it is staged onto the test drive here and goes
+# into nothing dist/make-dist.sh packs.  Workbench 3.1 has no archiver, and
+# "a PC puts an archive on the Amiga and the Amiga unpacks it" is the path
+# this product is mostly for, so the -H run below needs one.  The package
+# carries a build per CPU the same way we do and lha_68020 traps on a 68000,
+# so the model picks -- the rule is tools/demo.sh's, not a second one.
+LHADIR="${AMINETXDUO_DEMO_LHA:-$HOME/amiga-assets/apps/lha-2.15}"
+case "$MODEL" in
+    A4000*) LHABIN=lha_68040 ;;
+    A500*|A600*|A1000*|A2000*) LHABIN=lha_68k ;;
+    *) LHABIN=lha_68020 ;;
+esac
+HAVE_LHA=0
+if [ -f "$LHADIR/$LHABIN" ]; then
+    cp -f "$LHADIR/$LHABIN" "$HD/C/lha"
+    chmod 755 "$HD/C/lha"
+    HAVE_LHA=1
+    echo "==> lha staged, $LHABIN for $MODEL"
+else
+    echo "==> no lha at $LHADIR/$LHABIN" >&2
+fi
 
 # WHAT IS IN THE ARCHIVE, said out loud BEFORE anything is installed.  The
 # https: check below cannot pass if the archive has no tls.library, and an
@@ -846,6 +906,35 @@ if [ "$(shasum "$HD/S/Startup-Sequence" | cut -d' ' -f1)" != "$STARTUP_SUM" ]; t
     echo "      the stock 3.1 one is worth reading before the reboot"
 fi
 
+# -H adds a fifth step, and it is the one the machine is for: wait for the
+# other machine to have finished putting files here over WebDAV, unpack the
+# archive it put, and copy what arrived out of RAM: onto DH0: so the host can
+# compare the bytes against what it sent.
+#
+# Waited rather than handshaken.  DH0: is a directory on the host, so a
+# handshake file would work, but AmigaDOS's Lab/Skip loop is a worse thing to
+# get wrong than a fixed window is to spend, and the window is bounded by
+# BOOT_TIMEOUT either way.  The peer writes its results long before it ends.
+CHECK_TAIL=""
+if [ "$TERMINAL" = "1" ]; then
+    CHECK_TAIL=$(cat <<'EOF'
+
+Echo >>DH0:usercheck.txt "*N=== 5. what the other machine put here over WebDAV"
+C:Wait 240
+C:List RAM: >>DH0:usercheck.txt
+Echo >>DH0:usercheck.txt "RESULT davlist rc=$RC"
+C:MakeDir RAM:Unpack
+C:lha -q x RAM:payload.lha RAM:Unpack/ >>DH0:usercheck.txt
+Echo >>DH0:usercheck.txt "RESULT lha-x rc=$RC"
+C:MakeDir DH0:DavOut
+C:Copy RAM:payload.txt DH0:DavOut QUIET
+Echo >>DH0:usercheck.txt "RESULT davcopy rc=$RC"
+C:Copy RAM:Unpack DH0:DavOut/Unpack ALL QUIET
+Echo >>DH0:usercheck.txt "RESULT unpackcopy rc=$RC"
+EOF
+)
+fi
+
 # An ordinary Shell script, doing ordinary things, with every command's return
 # code written down beside its output.  `Stack 200000` is the Shell's internal
 # stack command.  It is NOT needed any more, clients/compat/amiga_argv.c
@@ -875,7 +964,7 @@ Echo >>DH0:usercheck.txt "RESULT fetch-https rc=\$RC"
 Echo >>DH0:usercheck.txt "*N=== 4. arp, what answered on this network"
 C:arp >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT arp rc=\$RC"
-
+$CHECK_TAIL
 Echo >>DH0:usercheck.txt "*N=== done"
 EOF
 chmod 755 "$HD/S/AmiNetXDuo-Check"
@@ -897,43 +986,48 @@ rm -f "$HD/usercheck.txt" "$HD/http-body.txt" "$HD/https-body.txt"
 #
 # Runs beside the boot rather than after it: httpd is gone the moment the
 # emulator is killed.
-TERM_PROBE="$ROOT/build/wb31-terminal-probe.txt"
+TERM_PROBE="$ROOT/build/wb31-peer-drill.txt"
 PROBE_PID=""
+PAYLOAD_TXT="$ROOT/build/wb31-payload.txt"
+PAYLOAD_LHA="$ARCHIVE"
+
 if [ "$TERMINAL" = "1" ]; then
     : > "$TERM_PROBE"
-    (
-        guest=""
-        for _ in $(seq 1 "$BOOT_TIMEOUT"); do
-            sleep 1
-            [ -f "$HD/usercheck.txt" ] || continue
-            guest=$(sed -n 's/^  *address  *\([0-9][0-9.]*\).*/\1/p' \
-                    "$HD/usercheck.txt" 2>/dev/null | head -1)
-            [ -n "$guest" ] && break
-        done
-        if [ -z "$guest" ]; then
-            echo "terminal_probe=no-address" >> "$TERM_PROBE"
-            exit 0
-        fi
-        echo "terminal_guest_address=$guest" >> "$TERM_PROBE"
-        for _ in $(seq 1 60); do
-            code=$(curl -s -m 5 -o "$ROOT/build/wb31-terminal-body.html" \
-                   -w '%{http_code}' "http://$guest/terminal" 2>/dev/null || true)
-            if [ "$code" = "200" ]; then
-                echo "terminal_http_code=200" >> "$TERM_PROBE"
-                echo "terminal_bytes=$(wc -c < "$ROOT/build/wb31-terminal-body.html" \
-                     | tr -d ' ')" >> "$TERM_PROBE"
-                # The WebDAV half answers on the same port, and a 200 on / with
-                # no /terminal would be a server that started without -T.
-                echo "terminal_root_code=$(curl -s -m 5 -o /dev/null \
-                     -w '%{http_code}' "http://$guest/" 2>/dev/null || echo 000)" \
-                     >> "$TERM_PROBE"
+    printf 'put over WebDAV by %s at %s\n' "$(hostname)" "$(date -u +%FT%TZ)" \
+        > "$PAYLOAD_TXT"
+
+    if [ -z "$PEER" ]; then
+        echo "peer=none" >> "$TERM_PROBE"
+    else
+        scp -q -o BatchMode=yes \
+            "$ROOT/tests/tools/httpd-drill.py" \
+            "$ROOT/tests/tools/wsterm-console.py" \
+            "$ROOT/install/test/peer-drill.sh" \
+            "$PAYLOAD_TXT" "$PAYLOAD_LHA" "$PEER:/tmp/" \
+            || { echo "peer=unreachable" >> "$TERM_PROBE"; PEER=""; }
+    fi
+
+    if [ -n "$PEER" ]; then
+        (
+            guest=""
+            for _ in $(seq 1 "$BOOT_TIMEOUT"); do
+                sleep 1
+                [ -f "$HD/usercheck.txt" ] || continue
+                guest=$(sed -n 's/^  *address  *\([0-9][0-9.]*\).*/\1/p' \
+                        "$HD/usercheck.txt" 2>/dev/null | head -1)
+                [ -n "$guest" ] && break
+            done
+            if [ -z "$guest" ]; then
+                echo "peer=no-guest-address" >> "$TERM_PROBE"
                 exit 0
             fi
-            sleep 2
-        done
-        echo "terminal_http_code=${code:-none}" >> "$TERM_PROBE"
-    ) &
-    PROBE_PID=$!
+            echo "guest_address=$guest" >> "$TERM_PROBE"
+            ssh -o BatchMode=yes "$PEER" \
+                "sh /tmp/peer-drill.sh $guest /tmp/$(basename "$PAYLOAD_TXT") \
+                 /tmp/$(basename "$PAYLOAD_LHA")" >> "$TERM_PROBE" 2>&1
+        ) &
+        PROBE_PID=$!
+    fi
 fi
 
 boot boot "$BOOT_TIMEOUT" net
@@ -941,9 +1035,11 @@ boot boot "$BOOT_TIMEOUT" net
 if [ -n "$PROBE_PID" ]; then
     kill -TERM "$PROBE_PID" 2>/dev/null || true
     wait "$PROBE_PID" 2>/dev/null || true
+fi
+if [ "$TERMINAL" = "1" ]; then
     echo
-    echo "---- the terminal, fetched from this host ----"
-    cat "$TERM_PROBE" 2>/dev/null || echo "(the probe wrote nothing)"
+    echo "---- what the other machine did to the Amiga ----"
+    cat "$TERM_PROBE" 2>/dev/null || echo "(the peer wrote nothing)"
 fi
 
 echo
@@ -1010,18 +1106,103 @@ report "fetch https://ftp.gnu.org/"        fetch-https \
 report "arp"                           arp
 
 if [ "$TERMINAL" = "1" ]; then
-    probe_code=$(sed -n 's/^terminal_http_code=//p' "$TERM_PROBE" 2>/dev/null \
-                 | head -1)
-    probe_bytes=$(sed -n 's/^terminal_bytes=//p' "$TERM_PROBE" 2>/dev/null | head -1)
-    if [ "$probe_code" = "200" ] && [ "${probe_bytes:-0}" -gt 10000 ]; then
-        printf '  %-34s %s bytes over the LAN\n' \
-               "GET /terminal from this host" "$probe_bytes"
+    key() { sed -n "s/^$1=//p" "$TERM_PROBE" 2>/dev/null | head -1; }
+
+    # No peer is INFRASTRUCTURE, and it gets its own exit status.  A run that
+    # could not reach the machine from anywhere else has not tested the server
+    # and must not read as one that did.
+    case "$(key peer)" in
+        none)
+            echo
+            echo "!! AMINETXDUO_PEER is not set, so nothing could talk to the"
+            echo "   Amiga from another machine.  The host running amiberry"
+            echo "   cannot: with uaenet_pcap on a shared NIC its own frames"
+            echo "   do not reach the guest.  Set AMINETXDUO_PEER=<ssh target>."
+            exit 3 ;;
+        unreachable|no-guest-address)
+            echo
+            echo "!! the peer could not be prepared, or the Amiga never"
+            echo "   reported an address: $(key peer)"
+            exit 3 ;;
+    esac
+
+    # The terminal.  Content-Length is the assertion: it is the server saying
+    # how big the page -T found, and the page the installer put on this drive
+    # is the size to expect.
+    want=$(wc -c < "$HD/AmiNetXDuo/Terminal/terminal.html" 2>/dev/null | tr -d ' ')
+    got_len=$(key terminal_content_length)
+    if [ "$(key terminal_status)" = "200" ] && [ -n "$want" ] &&
+       [ "$got_len" = "$want" ]; then
+        printf '  %-34s 200, Content-Length %s\n' \
+               "GET /terminal, from the peer" "$got_len"
     else
-        printf '  %-34s http_code=%s bytes=%s\n' \
-               "GET /terminal from this host" "${probe_code:-none}" \
-               "${probe_bytes:-0}"
+        printf '  %-34s status=%s length=%s wanted=%s\n' \
+               "GET /terminal, from the peer" "$(key terminal_status)" \
+               "${got_len:-none}" "${want:-?}"
         bad=1
     fi
+
+    if [ "$(key dav_roundtrip_identical)" = "yes" ]; then
+        printf '  %-34s bytes identical\n' "WebDAV PUT then GET"
+    else
+        printf '  %-34s put=%s get=%s identical=%s\n' "WebDAV PUT then GET" \
+               "$(key dav_put_status)" "$(key dav_get_status)" \
+               "$(key dav_roundtrip_identical)"
+        bad=1
+    fi
+
+    # ON THE AMIGA'S DISK, not just back out of the server.  The guest copied
+    # what arrived in the served drawer onto DH0:, which is a directory on this
+    # host, so the bytes the peer sent are compared against the bytes an
+    # AmigaDOS Copy wrote.
+    if [ -f "$HD/DavOut/payload.txt" ] &&
+       cmp -s "$PAYLOAD_TXT" "$HD/DavOut/payload.txt"; then
+        printf '  %-34s bytes identical\n' "the file, on the Amiga's disk"
+    else
+        printf '  %-34s NOT THERE OR DIFFERENT\n' "the file, on the Amiga's disk"
+        bad=1
+    fi
+
+    # lha x of the archive the peer put there.  Skipped LOUDLY, with its own
+    # line, when the asset store has no lha: a step that did not run must not
+    # be an absent line.
+    if [ "$HAVE_LHA" = "0" ]; then
+        printf '  %-34s NOT RUN, no %s in %s\n' \
+               "lha x of the archive" "$LHABIN" "$LHADIR"
+        bad=1
+    else
+        lha_rc=$(sed -n 's/^RESULT lha-x rc=//p' "$HD/usercheck.txt" 2>/dev/null \
+                 | head -1)
+        # Two files out of our own archive, compared against the copies this
+        # host has: one text, one binary, both from drawers deep enough that a
+        # truncated unpack cannot produce them by accident.
+        unpack_ok=1
+        for rel in AmiNetXDuo/Terminal/terminal.html AmiNetXDuo/ReadMe; do
+            here="$HD/Unpacked/$rel"
+            there="$HD/DavOut/Unpack/$rel"
+            [ -f "$here" ] || continue
+            cmp -s "$here" "$there" || unpack_ok=0
+        done
+        if [ "${lha_rc:-x}" = "0" ] && [ "$unpack_ok" = "1" ]; then
+            printf '  %-34s rc=0, extracted bytes identical\n' \
+                   "lha x of the archive"
+        else
+            printf '  %-34s rc=%s extracted-identical=%s\n' \
+                   "lha x of the archive" "${lha_rc:-NEVER RAN}" "$unpack_ok"
+            bad=1
+        fi
+    fi
+
+    for drill in httpd_drill wsterm_console; do
+        rc=$(key "${drill}_rc")
+        if [ "$rc" = "0" ]; then
+            printf '  %-34s rc=0\n' "$drill, from the peer"
+        else
+            printf '  %-34s rc=%s\n' "$drill, from the peer" \
+                   "${rc:-$(key "$drill")}"
+            bad=1
+        fi
+    done
 fi
 
 # The one that shipped.  0.17.0 and 0.17.1 deadlocked in bsd_address_changed()

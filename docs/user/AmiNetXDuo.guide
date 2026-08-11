@@ -730,7 +730,7 @@
   The Installer offers this and it defaults to no. Say yes and two more
   lines go into the same block of S:User-Startup:
 
-    Assign AmiNetXDuo: Work:AmiNetXDuo
+    Assign AmiNetXDuo: "Work:AmiNetXDuo"
     Run >NIL: <NIL: C:httpd "RAM:" 80 -T
 
   with the drawer and the port you were asked for. httpd then serves
