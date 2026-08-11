@@ -681,6 +681,16 @@ int __wrap_read(int fd, void *buf, size_t len)
 
 int __wrap_write(int fd, const void *buf, size_t len)
 {
+    /* Nothing to write is not a packet.  common-channel.c's
+       writechannel_fallback(), which is the one built here because this newlib
+       has no writev(), calls write(fd, p, 0) on every pass where the channel
+       buffer is empty -- and it is empty on the first call of the pair that
+       upstream's own comment describes.  A DOS handler is then asked to answer
+       a zero-length ACTION_WRITE, and one that waits for room instead waits
+       for ever. */
+    if (len == 0)
+        return 0;
+
     if (IS_SOCK(fd))
         return (int)nx_send(SOCKOF(fd), (APTR)buf, (LONG)len, 0);
 
