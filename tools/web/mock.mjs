@@ -158,7 +158,10 @@ function latin1(s) {
 }
 
 const server = createServer((req, res) => {
-  if (req.url !== "/terminal" && req.url !== "/") {
+  /* Without the query dropped, /terminal?input=char is a 404 and the page
+     never loads at all, which reads as the page having crashed. */
+  const path = (req.url || "/").split("?")[0];
+  if (path !== "/terminal" && path !== "/") {
     res.writeHead(404).end("no");
     return;
   }

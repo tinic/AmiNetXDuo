@@ -76,11 +76,19 @@ body {
   white-space: nowrap;
 }
 
+/* The window size.  A console handler on the far side will care what it is,
+   and until then it is the one number a person resizing the window wants. */
+#size {
+  margin-left: auto;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 #state {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  margin-left: auto;
   color: var(--ink-dim);
   white-space: nowrap;
 }
@@ -142,5 +150,12 @@ button:focus-visible  { outline: 2px solid var(--blue, #5f8fd6); outline-offset:
 /* Narrow windows: the buttons matter more than the address. */
 @media (max-width: 44rem) {
   #host { display: none; }
+  #size { display: none; }
   #bar  { gap: 0.5rem; }
+}
+
+/* With the size gone the state has to take the space back, or the bar's
+   right-hand end drifts inwards with nothing in it. */
+@media (max-width: 44rem) {
+  #state { margin-left: auto; }
 }

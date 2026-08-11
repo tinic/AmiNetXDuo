@@ -58,6 +58,19 @@ export function csiTo7Bit(s: string): string {
   return s.indexOf("\u009B") < 0 ? s : s.replace(CSI8, "\u001B[");
 }
 
+/*
+ * The mirror of it does not exist yet, and this is the note for when it does.
+ *
+ * Nothing is rewritten on the way OUT: a DOS pipe reads bytes and a Shell
+ * reads lines, so what leaves here is exactly what was typed.  A real console
+ * handler on the far side would want the other half -- an AmigaOS CON:
+ * expects its cursor keys as 0x9B A, the 8-bit form, and a browser produces
+ * ESC [ A -- so char-at-a-time against a console will need ESC [ turned back
+ * into 0x9B before it is sent.  That is the exact inverse of the function
+ * above and belongs beside it.  It is absent rather than written and unused
+ * because nothing on the far side reads a cursor key today.
+ */
+
 export type WireState = "connecting" | "open" | "closed" | "failed";
 
 export interface WireHandlers {
