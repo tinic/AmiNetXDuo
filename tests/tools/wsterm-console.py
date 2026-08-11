@@ -60,9 +60,19 @@ HOST_FROM_GUEST = os.environ.get("AMINETXDUO_WSCONSOLE_HOST", "10.0.2.2")
 # server, something echoed it.
 SECRET = "Zx9Qv-notthepassword-Kw3"
 
-# The user the guest tries to log in as.  Not authenticated -- the point is
-# the PROMPT, and a wrong password reaches it exactly as a right one would.
-USER = os.environ.get("USER", "nobody")
+# The user the guest logs in as.  The runner resolves it, because $USER here
+# is whoever is driving the page and that is not always whoever owns the
+# account on the server.
+USER = os.environ.get("AMINETXDUO_WSCONSOLE_SSHD_USER",
+                      os.environ.get("USER", "nobody"))
+
+# An identity is staged at DH0:sshkey, so the interactive arm can log in.
+HAVE_KEY = os.environ.get("AMINETXDUO_WSCONSOLE_SSHKEY") == "yes"
+
+# A string that exists nowhere else, echoed by the REMOTE shell.  It is in two
+# halves in the source so that the command line, which comes back from the
+# far end as its own echo, is not mistaken for the output of running it.
+MARK = "AMIGA-" + "REMOTE-7QF2"
 
 
 class Session:
@@ -204,11 +214,16 @@ def test_size_is_taken():
 
 
 def test_ssh_password():
-    """THE ACCEPTANCE TEST.
+    """The prompt-and-read phase: raw mode arrives before a secret can be typed.
 
     ssh's getpass() calls SetMode(Input(), 1).  Two things must follow: the
     server must tell the page it is now in raw mode BEFORE the password can be
-    typed, and nothing of what is typed may come back."""
+    typed, and nothing of what is typed may come back.
+
+    This is NOT the interactive session; see test_ssh_interactive() below,
+    which is.  A password prompt that does not echo is a program still in its
+    own prompt-and-read loop, and it passed for as long as the session after
+    it hung."""
     print("ssh, and the password")
 
     if not WANT_SSH:
@@ -232,6 +247,17 @@ def test_ssh_password():
     # The prompt.  Generous, because this is a key exchange on a 68020.
     got = s.pump(120.0, want="assword")
     reached = b"assword" in got
+
+    # A server with PasswordAuthentication off never offers one, and
+    # clients/dropbear/sshd-testserver.sh is such a server on purpose.  That is
+    # a server this arm cannot ask its question of, not a failure of the
+    # console, and it is said rather than scored.
+    if not reached and b"No auth methods" in s.out[-400:]:
+        print("  SKIPPED: the server offers no password authentication")
+        s.close()
+        free()
+        return
+
     check(reached, "ssh reaches a password prompt (last 200 bytes: %r)"
           % s.out[-200:])
     if not reached:
@@ -276,6 +302,105 @@ def test_ssh_password():
           any(t for t, w in s.words if w == "mode cooked" and t > raw_at[0]),
           "the server says `mode cooked` again afterwards (heard %r)"
           % [w for _, w in s.words])
+
+    s.close()
+    check(free() is not None, "and the Shell is free again after ssh")
+
+
+def test_ssh_interactive():
+    """THE ACCEPTANCE TEST: a shell on the far end, driven from the page.
+
+    Log in with a key, get the REMOTE shell's prompt, run a command there, read
+    its output, leave, and be back at the Amiga's own prompt with the console
+    cooked again.  Every one of those is a different direction through the
+    console handler and the shim, and the ones after the prompt are the ones
+    nothing tested: `ssh -t` hung the moment the far end spoke, because
+    Dropbear writes zero bytes when its channel buffer is empty and the handler
+    parked the packet.
+
+    Each step has its own bounded wait and its own message.  A step that does
+    not happen says which one it was and what the last bytes on the screen
+    were; it does not sit until the runner's ceiling, which would be an
+    infrastructure verdict for a defect in the thing under test."""
+    print("ssh, and an interactive session")
+
+    if not WANT_SSH:
+        print("  SKIPPED: no ssh client staged, or no sshd to point it at")
+        return
+    if not HAVE_KEY:
+        print("  SKIPPED: no identity staged (AMINETXDUO_WSCONSOLE_SSHKEY)")
+        return
+
+    s = Session()
+    if s.status != 101:
+        check(False, "cannot upgrade (got %s)" % s.status)
+        return
+    s.pump(WS_WAIT, want=">")
+
+    s.keys("stack 65536\n")
+    s.pump(5.0)
+
+    # -t forces the pty even though the console already earns one, so the arm
+    # asserts the pty path and not whatever IsInteractive() happens to answer.
+    # -y -y accepts the host key and does not write it down; there is no home
+    # directory here to write it to.
+    s.keys("ssh -t -y -y -i DH0:sshkey -p %s %s@%s\n"
+           % (SSHD_PORT, USER, HOST_FROM_GUEST))
+
+    # The far end's prompt.  Generous: a key exchange and an ed25519 signature
+    # on a 14 MHz 68020 is most of this.  '$' is the sh/bash prompt and '%' is
+    # csh/zsh; a login shell of some other kind is a server this cannot drive
+    # and it says so rather than guessing.
+    deadline = time.time() + 150.0
+    while time.time() < deadline:
+        s.pump(5.0)
+        if b"$ " in s.out[-400:] or b"% " in s.out[-400:] or b"# " in s.out[-400:]:
+            break
+    got_prompt = (b"$ " in s.out[-400:] or b"% " in s.out[-400:]
+                  or b"# " in s.out[-400:])
+    check(got_prompt,
+          "the remote shell prints a prompt (last 200 bytes: %r)"
+          % s.out[-200:])
+    check(s.said("mode raw"),
+          "and the page was told the console went raw for it (heard %r)"
+          % [w for _, w in s.words])
+    if not got_prompt:
+        # Leave nothing running on the far end, then let the runner say the
+        # arm failed rather than time out.
+        s.keys("\003")
+        s.pump(5.0)
+        s.close()
+        free()
+        return
+
+    # A command on the FAR end, and its output back.  Typed one keystroke at a
+    # time, because that is how a person types into a raw console and because
+    # a handler holding reads until a Return would deliver none of it.
+    before = len(s.out)
+    for ch in "echo " + MARK:
+        s.keys(ch)
+        time.sleep(0.02)
+    s.keys("\n")
+
+    got = s.pump(45.0, want=MARK)
+    # Twice: once as the far end's echo of what was typed, once as the output
+    # of running it.  One occurrence is an echo and no shell.
+    ran = s.out[before:].count(MARK.encode("latin-1")) >= 2
+    check(ran,
+          "the command runs on the far end and its output comes back "
+          "(saw %d occurrence(s) of the marker in %r)"
+          % (s.out[before:].count(MARK.encode("latin-1")), got[-200:]))
+
+    # And out again, cleanly: the remote shell exits, ssh exits, the console
+    # goes back to cooked, and the Amiga's own Shell prompts.
+    s.keys("exit\n")
+    got = s.pump(45.0, want="DH0:")
+    check(b"DH0:" in got,
+          "the Amiga Shell prompts again after the session (got %r)"
+          % got[-200:])
+    check(s.last_word() == "mode cooked",
+          "and the console is cooked again (last word was %r)"
+          % s.last_word())
 
     s.close()
     check(free() is not None, "and the Shell is free again after ssh")
@@ -518,6 +643,7 @@ def main():
     test_size_is_taken()
     test_takeover()
     test_ssh_password()
+    test_ssh_interactive()
     test_ed()
     test_more()
     # Last, because it is the slow one and because it deliberately leaves the

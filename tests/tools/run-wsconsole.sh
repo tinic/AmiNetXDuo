@@ -65,6 +65,33 @@
 #   Absent either, the arms that need it are SKIPPED and said to be skipped --
 #   never quietly passed.
 #
+# THE SSH SERVER, AND WHY BRIDGED NEEDS TO BE TOLD WHERE IT IS
+#
+#   Behind SLIRP the guest reaches this machine at 10.0.2.2, so
+#   clients/dropbear/sshd-testserver.sh here is the whole arrangement and
+#   nothing has to be configured.
+#
+#   Bridged it cannot: a guest on this host's own port cannot exchange a frame
+#   with this host (the long note further down measures it both ways), so an
+#   sshd here is not a server the guest can see.  It has to be a DIFFERENT
+#   machine on the LAN, and this harness cannot guess which:
+#
+#     AMINETXDUO_WSCONSOLE_SSHD_HOST=<addr>   where the guest finds an sshd
+#     AMINETXDUO_WSCONSOLE_SSHD_USER=<name>   who to log in as ($USER)
+#     AMINETXDUO_WSCONSOLE_SSHD=<port>        which port (2224)
+#
+#   Unset and bridged, the ssh arms print sshd=skipped and say why.  They are
+#   never quietly passed and never pointed at an address that cannot answer.
+#
+#     AMINETXDUO_WSCONSOLE_SSHKEY=<file>   the identity, staged as DH0:sshkey
+#
+#   It must be in DROPBEAR's format, which is not OpenSSH's: dbclient answers
+#   an OpenSSH private key with "String too long" and stops.  Default is
+#   build/sshd-test/id_amiga, which clients/dropbear/sshd-testserver.sh makes
+#   with a natively built dropbearkey and authorises on the server it starts.
+#   A key in the other format is converted here with dropbearconvert when one
+#   can be built, and the arm is skipped with the reason when it cannot.
+#
 # A TIMEOUT IS A DEFECT
 #
 #   Same two ceilings as run-wsterm.sh, reported as what they cost.  A run
@@ -94,6 +121,8 @@ CPU=""
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 GUEST_IP=10.0.2.15
 SSHD_PORT="${AMINETXDUO_WSCONSOLE_SSHD:-2224}"
+SSHD_HOST="${AMINETXDUO_WSCONSOLE_SSHD_HOST:-}"
+SSHD_USER="${AMINETXDUO_WSCONSOLE_SSHD_USER:-$(id -un)}"
 KEEP=no
 BACKEND="${AMINETXDUO_WSCONSOLE_BACKEND:-ens18}"
 
@@ -216,13 +245,53 @@ fi
 # feature.  A password prompt that does not echo is a program still in its
 # prompt-and-read phase; the interactive session that comes after it is a
 # different path through the console and has to be driven to be tested.
-SSHKEY="${AMINETXDUO_WSCONSOLE_SSHKEY:-}"
+#
+# The format is Dropbear's, not OpenSSH's.  dbclient reads an OpenSSH private
+# key as a length-prefixed blob, finds a four-byte length where the base64 is,
+# and stops with "String too long" -- which reads like a corrupt file and is
+# not.  So the format is checked here rather than discovered on the guest, and
+# converted when it can be.
+SSHKEY="${AMINETXDUO_WSCONSOLE_SSHKEY:-$ROOT/build/sshd-test/id_amiga}"
 HAVE_SSHKEY=no
-if [ -n "$SSHKEY" ] && [ -f "$SSHKEY" ]; then
+SSHKEY_WHY=""
+
+db_convert()
+{
+    # dropbearconvert, built natively from the pinned submodule, the same
+    # recipe and the same build directory clients/dropbear/sshd-testserver.sh
+    # uses for dropbearkey.
+    local out="$ROOT/build/dropbear-host"
+
+    if [ ! -x "$out/dropbearconvert" ]; then
+        mkdir -p "$out"
+        (
+            cd "$out"
+            [ -f localoptions.h ] || printf '#define DROPBEAR_SVR_DROP_PRIVS 0\n' > localoptions.h
+            [ -f Makefile ] || "$ROOT/third_party/dropbear/configure" \
+                --disable-zlib --disable-harden >configure.log 2>&1
+            make PROGRAMS=dropbearconvert -j4 >convert.log 2>&1
+        ) >/dev/null 2>&1 || return 1
+    fi
+    [ -x "$out/dropbearconvert" ] || return 1
+    "$out/dropbearconvert" openssh dropbear "$1" "$2" >/dev/null 2>&1
+}
+
+if [ ! -f "$SSHKEY" ]; then
+    SSHKEY_WHY="no identity at $SSHKEY (clients/dropbear/sshd-testserver.sh start makes one)"
+elif head -c 11 "$SSHKEY" | grep -q -- "-----BEGIN"; then
+    if db_convert "$SSHKEY" "$STAGE/sshkey"; then
+        chmod u+rw "$STAGE/sshkey"
+        HAVE_SSHKEY=yes
+        echo "==> converted $SSHKEY from OpenSSH format with dropbearconvert"
+    else
+        SSHKEY_WHY="$SSHKEY is an OpenSSH key and dropbearconvert could not be built"
+    fi
+else
     cp -f "$SSHKEY" "$STAGE/sshkey"
     chmod u+rw "$STAGE/sshkey"
     HAVE_SSHKEY=yes
 fi
+[ -z "$SSHKEY_WHY" ] || echo "!! no ssh identity staged: $SSHKEY_WHY" >&2
 
 SSHBIN="${AMINETXDUO_SSH:-}"
 HAVE_SSH=no
@@ -421,6 +490,7 @@ if [ "$KEEP" = yes ]; then
     echo "ready=1"
     echo "url=http://${TARGET_ADDR}:${TARGET_PORT}/terminal"
     echo "sshd_port=${SSHD_PORT}"
+    echo "sshd_host=${SSHD_HOST:-(unset)}"
     echo "==> holding the guest; Ctrl-C to stop it"
     while kill -0 "$RUNNER" 2>/dev/null; do
         sleep 5
@@ -431,20 +501,39 @@ fi
 
 # ---------------------------------------------------------------- the drill --
 #
-# SLIRP's guest reaches the build host at 10.0.2.2, so an sshd here is the
-# shortest path to a password prompt.  Asserted, not assumed: an ssh arm run
-# against a port nothing is listening on fails the same way a broken console
-# does, and the two must not be confusable.
+# WHERE THE GUEST FINDS AN sshd, AND THE ONE ADDRESS THAT IS NEVER IT
+#
+# Behind SLIRP the guest reaches this machine at 10.0.2.2 and this machine is
+# the server; the port is probed on 127.0.0.1, which is the same listener.
+#
+# Bridged, this machine is the ONE machine on the LAN the guest cannot reach,
+# so pointing the arm at this host's own address is pointing it at silence --
+# and it was, which is how an ssh arm stayed green while ssh was broken.  The
+# address has to be given, it is probed from here before the arm runs, and the
+# arm is skipped and said to be skipped when it is not.
 
 SSHD=skipped
-if [ "$HAVE_SSH" = yes ]; then
-    if (exec 3<>/dev/tcp/127.0.0.1/"$SSHD_PORT") 2>/dev/null; then
-        SSHD=ok
-    else
-        SSHD=absent
-    fi
+SSHD_WHY=""
+if [ "$BACKEND" = slirp ]; then
+    GUEST_SSHD_HOST="${SSHD_HOST:-10.0.2.2}"
+    PROBE_HOST=127.0.0.1
+else
+    GUEST_SSHD_HOST="$SSHD_HOST"
+    PROBE_HOST="$SSHD_HOST"
+fi
+
+if [ "$HAVE_SSH" != yes ]; then
+    SSHD_WHY="no ssh client staged (AMINETXDUO_SSH)"
+elif [ -z "$GUEST_SSHD_HOST" ]; then
+    SSHD_WHY="bridged, and AMINETXDUO_WSCONSOLE_SSHD_HOST names no server the guest can reach"
+elif ! (exec 3<>/dev/tcp/"$PROBE_HOST"/"$SSHD_PORT") 2>/dev/null; then
+    SSHD_WHY="nothing listening on ${PROBE_HOST}:${SSHD_PORT}"
+    SSHD=absent
+else
+    SSHD=ok
 fi
 echo "sshd=$SSHD"
+[ -z "$SSHD_WHY" ] || echo "==> ssh arms skipped: $SSHD_WHY"
 
 DRILL_AT=$(date +%s)
 set +e
@@ -452,9 +541,9 @@ AMINETXDUO_WSCONSOLE_ED="$HAVE_ED" \
 AMINETXDUO_WSCONSOLE_MORE="$HAVE_MORE" \
 AMINETXDUO_WSCONSOLE_SSH="$([ "$SSHD" = ok ] && echo yes || echo no)" \
 AMINETXDUO_WSCONSOLE_SSHD_PORT="$SSHD_PORT" \
+AMINETXDUO_WSCONSOLE_SSHD_USER="$SSHD_USER" \
 AMINETXDUO_WSCONSOLE_SSHKEY="$HAVE_SSHKEY" \
-AMINETXDUO_WSCONSOLE_HOST="$([ "$BACKEND" = slirp ] && echo 10.0.2.2 || \
-    ip -4 -o addr show "$BACKEND" 2>/dev/null | awk '{print $4}' | cut -d/ -f1)" \
+AMINETXDUO_WSCONSOLE_HOST="$GUEST_SSHD_HOST" \
 python3 -u "$ROOT/tests/tools/wsterm-console.py" "$TARGET_ADDR" "$TARGET_PORT" \
     > "$ROOT/build/wsconsole-drill.txt" 2>&1 &
 DRILL=$!
