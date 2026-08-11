@@ -1,7 +1,11 @@
 /*
  * telnet, the TELNET protocol, RFC 854.
  *
- *     telnet HOST/A,PORT,DEBUG=-d/S,QUIET/S
+ *     telnet HOST/A,PORT,DEBUG=-d/S,QUIET/S,IPV4=-4/S,IPV6=-6/S
+ *
+ *   -4 / -6   pin the family the name resolves to.  Without either, the
+ *             library answers AF_UNSPEC and the selection rules pick, so on a
+ *             dual stack there is otherwise no way to ask for the other one.
  *
  * Most of the stream is data; 0xFF (IAC) introduces two- and three-byte
  * commands that must be stripped and answered before the user sees them.
@@ -34,7 +38,7 @@ const char *const tool_name = "telnet";
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("telnet");
 
-#define TEMPLATE    "HOST/A,PORT,DEBUG=-d/S,QUIET/S"
+#define TEMPLATE    "HOST/A,PORT,DEBUG=-d/S,QUIET/S,IPV4=-4/S,IPV6=-6/S"
 
 enum
 {
@@ -42,6 +46,8 @@ enum
     ARG_PORT,
     ARG_DEBUG,
     ARG_QUIET,
+    ARG_IPV4,
+    ARG_IPV6,
     ARG_COUNT
 };
 
@@ -496,6 +502,7 @@ int main(int argc, char **argv)
     const char     *host;
     ToolAddr        address;
     UWORD           port;
+    LONG            family;
     BOOL            quiet;
     LONG            rc = RETURN_OK;
     ULONG           i;
@@ -515,13 +522,19 @@ int main(int argc, char **argv)
     if (rda == NULL)
     {
         tool_fault(IoErr());
-        tool_usage("<host> [<port>]",
+        tool_usage("[-4|-6] <host> [<port>]",
                    "Opens a TELNET session.  Ctrl-] closes it.");
         return RETURN_ERROR;
     }
 
     host  = (const char *)args[ARG_HOST];
     quiet = (args[ARG_QUIET] != 0) ? TRUE : FALSE;
+
+    if (!tool_arg_family(args[ARG_IPV4], args[ARG_IPV6], &family))
+    {
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
 
     for (i = 0; i < 256UL; i++)
     {
@@ -557,7 +570,7 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    if (!tool_sock_resolve(sb, host, &address))
+    if (!tool_sock_resolve_af(sb, host, family, &address))
     {
         CloseLibrary(sb);
         FreeArgs(rda);

@@ -743,15 +743,11 @@ int main(int argc, char **argv)
     /* -4 and -6 pin the family the name resolves to; without either, the
        library's getaddrinfo() answers AF_UNSPEC and prefers IPv6 where the
        machine has it and the name has an AAAA. */
-    if (args[ARG_IPV4] != 0 && args[ARG_IPV6] != 0)
+    if (!tool_arg_family(args[ARG_IPV4], args[ARG_IPV6], &opt.family))
     {
-        tool_error("-4 and -6 cannot both be given");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
-    opt.family    = (args[ARG_IPV4] != 0) ? TOOL_AF_INET
-                  : (args[ARG_IPV6] != 0) ? TOOL_AF_INET6
-                                          : TOOL_AF_UNSPEC;
 
     opt.timeout   = (args[ARG_TIMEOUT] != 0)
                         ? (ULONG)(*(LONG *)args[ARG_TIMEOUT]) : 0UL;

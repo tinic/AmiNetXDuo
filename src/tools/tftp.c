@@ -1,13 +1,17 @@
 /*
  * tftp, the trivial file transfer protocol, client half.
  *
- *     tftp HOST/A,GET/K,PUT/K,AS/K,PORT/N/K,TIMEOUT/N/K,QUIET/S
+ *     tftp HOST/A,GET/K,PUT/K,AS/K,PORT/N/K,TIMEOUT/N/K,QUIET/S,
+ *          IPV4=-4/S,IPV6=-6/S
  *
  *   GET      fetch this file from the server.
  *   PUT      send this file to the server.
  *   AS       call it something else at the other end.
  *   PORT     the server's port. Default 69.
  *   TIMEOUT  seconds to wait for a block before asking again. Default 5.
+ *   -4 / -6  pin the family the name resolves to. Without either, the library
+ *            answers AF_UNSPEC and the selection rules pick, so on a dual
+ *            stack there is otherwise no way to ask for the other one.
  *
  * One transfer per command: no interactive prompt and no `mget`, so it can be
  * driven from a script.
@@ -38,7 +42,8 @@ const char *const tool_name = "tftp";
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("tftp");
 
-#define TEMPLATE    "HOST/A,GET/K,PUT/K,AS/K,PORT/N/K,TIMEOUT/N/K,QUIET/S"
+#define TEMPLATE    "HOST/A,GET/K,PUT/K,AS/K,PORT/N/K,TIMEOUT/N/K,QUIET/S," \
+                    "IPV4=-4/S,IPV6=-6/S"
 
 enum
 {
@@ -49,6 +54,8 @@ enum
     ARG_PORT,
     ARG_TIMEOUT,
     ARG_QUIET,
+    ARG_IPV4,
+    ARG_IPV6,
     ARG_COUNT
 };
 
@@ -590,6 +597,7 @@ int main(int argc, char **argv)
     ULONG           t0;
     ULONG           elapsed;
     LONG            sock = -1;
+    LONG            family;
     LONG            rc;
     ULONG           i;
     char            dotted[TOOL_ADDR_STRLEN];
@@ -608,7 +616,7 @@ int main(int argc, char **argv)
     if (rda == NULL)
     {
         tool_fault(IoErr());
-        tool_usage("<host> GET <file>  |  <host> PUT <file>",
+        tool_usage("[-4|-6] <host> GET <file>  |  <host> PUT <file>",
                    "Fetches a file from a TFTP server, or sends one to it.");
         return RETURN_ERROR;
     }
@@ -644,6 +652,12 @@ int main(int argc, char **argv)
     if (x.timeout == 0)
         x.timeout = TFTP_DEFAULT_TIMEOUT;
 
+    if (!tool_arg_family(args[ARG_IPV4], args[ARG_IPV6], &family))
+    {
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
     x.quiet     = (args[ARG_QUIET] != 0) ? TRUE : FALSE;
     x.have_peer = FALSE;
     x.total     = 0;
@@ -674,7 +688,7 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    if (!tool_sock_resolve(sb, host, &address))
+    if (!tool_sock_resolve_af(sb, host, family, &address))
     {
         CloseLibrary(sb);
         FreeArgs(rda);

@@ -1,7 +1,7 @@
 /*
  * host, resolve a name the way this machine's own programs would.
  *
- *     host NAME/A,TIMEOUT/N/K
+ *     host NAME/A,TIMEOUT/N/K,IPV4=-4/S,IPV6=-6/S
  *
  * Asks the machine's resolver through bsdsocket.library's gethostbyname() /
  * gethostbyaddr(), so the answer comes from the whole chain, in the order the
@@ -22,6 +22,18 @@
  * A forward lookup goes through getaddrinfo() with AF_UNSPEC, so a name with
  * an AAAA record reports it. gethostbyname() cannot: its hostent carries one
  * address family and this library only ever fills it with IPv4.
+ *
+ * -4 and -6 mean something different here than in the commands that open a
+ * socket. Those pin the family they will CONNECT over; this command connects
+ * to nothing, so the pair asks for one kind of record and not the other: -4
+ * reports the A records, -6 the AAAA. It is what nslookup already does through
+ * TYPE=A / TYPE=AAAA, which host has no equivalent of. Both together is an
+ * argument error rather than a silent AF_UNSPEC, since asking for exactly one
+ * of two things twice cannot be meant.
+ *
+ * Neither applies to a numeric argument: an address is looked up backwards and
+ * already declares its own family. -6 on a dotted quad contradicts the
+ * argument and is refused as such.
  *
  * nslookup differs in that it bypasses the resolver: it builds a DNS query and
  * sends it to a name server itself, so it reports what that server said, no
@@ -51,12 +63,14 @@ const char *const tool_name = "host";
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("host");
 
-#define TEMPLATE    "NAME/A,TIMEOUT/N/K"
+#define TEMPLATE    "NAME/A,TIMEOUT/N/K,IPV4=-4/S,IPV6=-6/S"
 
 enum
 {
     ARG_NAME = 0,
     ARG_TIMEOUT,
+    ARG_IPV4,
+    ARG_IPV6,
     ARG_COUNT
 };
 
@@ -70,7 +84,9 @@ int main(int argc, char **argv)
     struct Library *sbase;
     const char     *name;
     ULONG           addr = 0;
+    LONG            family;
     BOOL            ok;
+    BOOL            no_family = FALSE;
     char            text[HOST_NAME_MAX];
     ToolAddrInfo    hints;
     ToolAddrInfo   *list = NULL;
@@ -85,6 +101,8 @@ int main(int argc, char **argv)
 
     args[ARG_NAME]    = 0;
     args[ARG_TIMEOUT] = 0;
+    args[ARG_IPV4]    = 0;
+    args[ARG_IPV6]    = 0;
 
     rda = ReadArgs((CONST_STRPTR)TEMPLATE, args, NULL);
     if (rda == NULL)
@@ -94,6 +112,12 @@ int main(int argc, char **argv)
     }
 
     name = (const char *)args[ARG_NAME];
+
+    if (!tool_arg_family(args[ARG_IPV4], args[ARG_IPV6], &family))
+    {
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
 
     /*
      * An IPv6 literal, in either build. host answers through the machine's
@@ -114,6 +138,15 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
+    /* A dotted quad is looked up backwards, and an address already says which
+       family it is; -6 over one contradicts the argument. */
+    if (family == TOOL_AF_INET6 && ami_config_parse_ip(name, &addr))
+    {
+        tool_error("%s is an IPv4 address, and -6 was given", (LONG)name);
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
     /*
      * Starts the stack if nothing else has, and is closed again below like
      * every other client command closes its own. Leaving it open cost one
@@ -124,6 +157,16 @@ int main(int argc, char **argv)
     {
         FreeArgs(rda);
         return RETURN_FAIL;
+    }
+
+    /* Same as tool_sock_resolve_af(): -6 on a machine with no IPv6 is a fact
+       about the machine, not about the name. */
+    if (family == TOOL_AF_INET6 && !tool_sock_have_ipv6(sbase))
+    {
+        tool_error("%s: no IPv6 on this machine", (LONG)name);
+        CloseLibrary(sbase);
+        FreeArgs(rda);
+        return RETURN_ERROR;
     }
 
     if (ami_config_parse_ip(name, &addr))
@@ -137,7 +180,7 @@ int main(int argc, char **argv)
     else if (tool_sock_have_lvo(sbase, 0x330UL))
     {
         hints.ai_flags     = 0;
-        hints.ai_family    = TOOL_AF_UNSPEC;
+        hints.ai_family    = family;
         hints.ai_socktype  = TOOL_SOCK_STREAM;
         hints.ai_protocol  = 0;
         hints.ai_addrlen   = 0;
@@ -169,8 +212,24 @@ int main(int argc, char **argv)
             tool_sock_freeaddrinfo(sbase, list);
         }
 
-        if (!ok)
+        if (!ok && tool_sock_family_absent(sbase, name, family))
+        {
+            tool_sock_say_no_family(name, family);
+            no_family = TRUE;
+        }
+        else if (!ok)
+        {
             tool_error("cannot resolve \"%s\"", (LONG)name);
+        }
+    }
+    else if (family == TOOL_AF_INET6)
+    {
+        /* gethostbyname() answers with an A and nothing else, so there is no
+           way to ask this library for the AAAA. */
+        ok = FALSE;
+        tool_error("this bsdsocket.library has no getaddrinfo, so -6 cannot "
+                   "be answered");
+        no_family = TRUE;
     }
     else
     {
@@ -186,7 +245,7 @@ int main(int argc, char **argv)
         }
     }
 
-    if (!ok)
+    if (!ok && !no_family)
     {
         /*
          * gethostbyname() fails without a reason a command can read, and the

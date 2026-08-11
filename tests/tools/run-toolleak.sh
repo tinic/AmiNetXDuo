@@ -187,6 +187,28 @@ cold|hostname|no-name|5|re:This machine has no name|-|SYS:hostname
 cold|hostname|bad-name|5|re:is not a host name|-|SYS:hostname not_a_name
 cold|NetSetup|bad-address|5|re:is not an address|-|SYS:NetSetup eth9 DEVICE=a2065.device UNIT=0 ADDRESS=notanaddress NOONLINE
 cold|NetSetup|writes-config|5|re:set up a network interface|-|SYS:NetSetup ethz DEVICE=a2065.device UNIT=0 DHCP NOONLINE FORCE
+# -4 and -6 together, for every command that carries the pair.  A cold row
+# because each one refuses BEFORE tool_socket_open(), which is the whole point
+# of parsing the pair where it is parsed: an argument error must not start the
+# network to say so.  Any of these appearing in the `live` transcript instead
+# would mean the check moved below the open.
+#
+# Each carries a short deadline it never reaches, because a regression here
+# would not refuse: it would open bsdsocket.library, start the stack this boot
+# is supposed to be without, and then run the command for its default lifetime
+# -- thirty hops of traceroute, five TFTP retries -- five times over.  The row
+# has to come back red, and a boot that burnt its ceiling is not red, it is
+# infrastructure.
+cold|ping|family-both|5|re:-4 and -6 cannot both be given|-|SYS:ping 10.0.2.2 -c 1 -t 3 -4 -6
+cold|traceroute|family-both|5|re:-4 and -6 cannot both be given|-|SYS:traceroute 10.0.2.2 -m 1 -q 1 -w 2 -n -4 -6
+cold|fetch|family-both|5|re:-4 and -6 cannot both be given|-|SYS:fetch http://10.0.2.2/ TIMEOUT 5 -4 -6
+cold|telnet|family-both|5|re:-4 and -6 cannot both be given|-|SYS:telnet 10.0.2.2 23 -4 -6
+cold|tftp|family-both|5|re:-4 and -6 cannot both be given|-|SYS:tftp 10.0.2.2 GET x TIMEOUT 1 -4 -6
+cold|whois|family-both|5|re:-4 and -6 cannot both be given|-|SYS:whois plain.test -4 -6
+cold|sntp|family-both|5|re:-4 and -6 cannot both be given|-|SYS:sntp 10.0.2.2 TIMEOUT 2 -4 -6
+cold|host|family-both|5|re:-4 and -6 cannot both be given|-|SYS:host v4only.test -4 -6
+cold|nc|family-both|5|re:-4 and -6 cannot both be given|-|SYS:nc -z 10.0.2.2 7301 -w 3 -4 -6
+cold|iperf|family-both|5|re:-4 and -6 cannot both be given|-|SYS:iperf 10.0.2.2 -p 7385 -t 2 -q -4 -6
 # ------------------------------------------------------------ live ------
 live|CheckNetConfig|stack-up|5|re:nothing wrong with it|-|SYS:CheckNetConfig
 live|GetNetStatus|stack-up|5|re:The network is running|-|SYS:GetNetStatus
@@ -218,6 +240,38 @@ live|traceroute|reaches|4|re:hops max|-|SYS:traceroute 10.0.2.2 -m 2 -q 1 -w 3 -
 live|traceroute|unresolvable|5|re:cannot resolve|-|SYS:traceroute no.such.host.invalid -m 1 -q 1 -w 2 -n
 live|sntp|no-server|4|re:the time server did not answer|-|SYS:sntp 10.0.2.2 TIMEOUT 3
 live|sntp|shows-time|4|re:stratum|-|SYS:sntp pool.ntp.org SHOW TIMEOUT 5
+# ---------------------------------------------------------- -4 and -6 ---
+# Three of the four arms.  The fourth -- -6 reaching a host that really has an
+# AAAA -- cannot be here: SLIRP carries no IPv6, so it is asserted on the
+# bridged guest by tests/tools/run-family.sh, and a row that pretended to do it
+# from here would be measuring the failure path and calling it the success one.
+#
+# The -6 rows are the leak arm that matters: a lookup that comes back empty
+# under a pinned family makes a SECOND getaddrinfo() to find out whether the
+# name exists at all (tool_sock_family_absent), so these are the only rows in
+# the table where one invocation allocates and frees two addrinfo lists.
+live|ping|family-4|5|re:0% packet loss|-|SYS:ping 10.0.2.2 -c 1 -t 5 -4
+live|ping|family-6-no-aaaa|5|re:v4only.test has no IPv6 address|-|SYS:ping v4only.test -c 1 -t 5 -6
+live|ping|family-6-v4-literal|5|re:10.0.2.2 is an IPv4 address|-|SYS:ping 10.0.2.2 -c 1 -t 5 -6
+live|host|family-4|5|re:v4only.test has address 10.0.2.2|-|SYS:host v4only.test -4
+live|host|family-6-no-aaaa|5|re:v4only.test has no IPv6 address|-|SYS:host v4only.test -6
+live|host|family-6-v4-literal|5|re:10.0.2.2 is an IPv4 address|-|SYS:host 10.0.2.2 -6
+live|fetch|family-4|5|re:HTTP/1.0 200 OK|-|SYS:fetch http://10.0.2.2:${HTTP_PORT}/hello.txt TO DH0:fetch4.bin TIMEOUT 10 -4
+live|fetch|family-6-no-aaaa|5|re:v4only.test has no IPv6 address|-|SYS:fetch http://v4only.test/ TIMEOUT 5 -6
+live|telnet|family-4|5|re:Trying 10.0.2.2 port ${TELNET_PORT}|-|SYS:telnet 10.0.2.2 ${TELNET_PORT} -d -4 <DH0:telnetin.txt
+live|telnet|family-6-no-aaaa|5|re:v4only.test has no IPv6 address|-|SYS:telnet v4only.test ${TELNET_PORT} -6
+live|tftp|family-4|5|re:49 bytes|-|SYS:tftp 10.0.2.2 PORT ${TFTP_PORT} GET hello.txt AS DH0:tftp4.txt -4
+live|tftp|family-6-no-aaaa|5|re:v4only.test has no IPv6 address|-|SYS:tftp v4only.test PORT ${TFTP_PORT} GET hello.txt AS DH0:tftp6.txt -6
+live|whois|family-4|5|re:PLAIN.TEST|-|SYS:whois plain.test SERVER 10.0.2.2 PORT ${WHOIS_PORT} -4
+live|whois|family-6-no-aaaa|5|re:v4only.test has no IPv6 address|-|SYS:whois plain.test SERVER v4only.test PORT ${WHOIS_PORT} -6
+live|traceroute|family-4|4|re:hops max|-|SYS:traceroute 10.0.2.2 -m 2 -q 1 -w 3 -n -4
+live|traceroute|family-6-no-aaaa|5|re:v4only.test has no IPv6 address|-|SYS:traceroute v4only.test -m 1 -q 1 -w 2 -n -6
+live|sntp|family-4|4|re:the time server did not answer|-|SYS:sntp 10.0.2.2 TIMEOUT 3 -4
+live|sntp|family-6-no-aaaa|5|re:v4only.test has no IPv6 address|-|SYS:sntp v4only.test TIMEOUT 3 -6
+live|nc|family-4|5|re:port ${ECHO_PORT} open|-|SYS:nc -z 10.0.2.2 ${ECHO_PORT} -v -w 5 -4
+live|nc|family-6-no-aaaa|5|re:v4only.test has no IPv6 address|-|SYS:nc -z v4only.test ${ECHO_PORT} -v -w 5 -6
+live|iperf|family-4|5|re:dir=tcp-tx|-|SYS:iperf 10.0.2.2 -p ${IPERF_PORT} -n 32 -q -4
+live|iperf|family-6-no-aaaa|5|re:v4only.test has no IPv6 address|-|SYS:iperf v4only.test -p ${IPERF_PORT} -t 3 -q -6
 live|NetTrace|loopback|4|re:records written|-|SYS:NetTrace LOOPBACK BYTES 4096 OUT DH0:nettrace.pcap
 live|NetTrace|wire|4|re:records written|-|SYS:NetTrace WIRE HOST 10.0.2.2 PORT ${HTTP_PORT} PATH /hello.txt OUT DH0:ntwire.pcap
 live|NetTrace|unresolvable|5|re:cannot resolve|-|SYS:NetTrace WIRE HOST no.such.host.invalid
@@ -434,6 +488,14 @@ stage_group() {
     for t in $(tool_names); do
         cp "$TOOLS/$t" "$stage/$t"
     done
+    # A name with an A record and no AAAA anywhere, for the -6 arms.  The
+    # resolver reads DEVS:Internet/hosts on the IPv4 side and never on the
+    # IPv6 side (src/netstack/netstack_dns.c:826, the netdb schema has no
+    # family), so this name resolves under -4, does not resolve under -6, and
+    # naming which of those happened is what the -6 arms assert.  .test is
+    # reserved (RFC 6761), so the AAAA query is an immediate NXDOMAIN rather
+    # than a wait.
+    printf '10.0.2.2 v4only.test\n' >> "$stage/devs/Internet/hosts"
     printf 'amiga\r\nquit\r\n' > "$stage/telnetin.txt"
     printf 'hello from the amiga\n' > "$stage/greeting.txt"
 }

@@ -2,7 +2,8 @@
  * traceroute, report the routers between here and a host.
  *
  *     traceroute MAXTTL=-m/N/K,NUMERIC=-n/S,QUERIES=-q/N/K,TOS=-t/N/K,
- *                WAIT=-w/N/K,VERBOSE=-v/S,HOST/A,PACKETSIZE/N/K
+ *                WAIT=-w/N/K,VERBOSE=-v/S,HOST/A,PACKETSIZE/N/K,
+ *                IPV4=-4/S,IPV6=-6/S
  *
  *   MAXTTL      how far to go before giving up. Default 30.
  *   NUMERIC     addresses only; skip the reverse lookup for each hop.
@@ -11,6 +12,9 @@
  *   WAIT        seconds to wait for each probe. Default 5.
  *   VERBOSE     also report ICMP that arrives and is not an answer.
  *   PACKETSIZE  the whole datagram, headers included. Default 60.
+ *   -4 / -6     pin the family the name resolves to. Without either, the
+ *               library answers AF_UNSPEC and the selection rules pick, so on
+ *               a dual stack there is otherwise no way to ask for the other.
  *
  * Names and short forms are Roadshow's. Three of Roadshow's options are
  * absent; they are listed with reasons above the argument template below.
@@ -66,7 +70,7 @@ static const char version_tag[] __attribute__((used)) =
  */
 #define TEMPLATE                                                        \
     "MAXTTL=-m/N/K,NUMERIC=-n/S,QUERIES=-q/N/K,TOS=-t/N/K,WAIT=-w/N/K," \
-    "VERBOSE=-v/S,HOST/A,PACKETSIZE/N/K"
+    "VERBOSE=-v/S,HOST/A,PACKETSIZE/N/K,IPV4=-4/S,IPV6=-6/S"
 
 enum
 {
@@ -78,6 +82,8 @@ enum
     ARG_VERBOSE,
     ARG_HOST,
     ARG_PACKETSIZE,
+    ARG_IPV4,
+    ARG_IPV6,
     ARG_COUNT
 };
 
@@ -461,6 +467,7 @@ int main(int argc, char **argv)
     BOOL            numeric;
     BOOL            verbose;
     LONG            sock = -1;
+    LONG            family;
     UWORD           ident;
     UWORD           seq = 0;
     ULONG           ttl;
@@ -520,6 +527,12 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
+    if (!tool_arg_family(args[ARG_IPV4], args[ARG_IPV6], &family))
+    {
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
     sb = tool_socket_open();
     if (sb == NULL)
     {
@@ -527,7 +540,7 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    if (!tool_sock_resolve(sb, host, &address))
+    if (!tool_sock_resolve_af(sb, host, family, &address))
     {
         CloseLibrary(sb);
         FreeArgs(rda);

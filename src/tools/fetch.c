@@ -1,7 +1,13 @@
 /*
  * fetch, retrieve an http:// or https:// URL.
  *
- *     fetch URL/A,TO/K,HEADERS/S,QUIET/S,NOVERIFY/S,TIMEOUT/N/K
+ *     fetch URL/A,TO/K,HEADERS/S,QUIET/S,NOVERIFY/S,TIMEOUT/N/K,
+ *           IPV4=-4/S,IPV6=-6/S
+ *
+ * -4 and -6 pin the family the URL's host resolves to, and they hold across a
+ * redirect: a transfer asked for over one family stays on it even when the
+ * Location: names a different host.  Without either, the library answers
+ * AF_UNSPEC and the selection rules pick.
  *
  * The scheme decides at run time whether LIBS:tls.library is opened at all, so
  * a build made with -DAMINETXDUO_TLS=OFF still fetches http: URLs and reports
@@ -54,7 +60,8 @@ const char *const tool_name = "fetch";
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("fetch");
 
-#define TEMPLATE    "URL/A,TO/K,HEADERS/S,QUIET/S,NOVERIFY/S,TIMEOUT/N/K"
+#define TEMPLATE    "URL/A,TO/K,HEADERS/S,QUIET/S,NOVERIFY/S,TIMEOUT/N/K," \
+                    "IPV4=-4/S,IPV6=-6/S"
 
 enum
 {
@@ -64,6 +71,8 @@ enum
     ARG_QUIET,
     ARG_NOVERIFY,
     ARG_TIMEOUT,
+    ARG_IPV4,
+    ARG_IPV6,
     ARG_COUNT
 };
 
@@ -365,6 +374,7 @@ struct FetchState
     BOOL        headers;
     BOOL        quiet;
     BOOL        noverify;
+    LONG        family;             /* -4/-6, else TOOL_AF_UNSPEC         */
     ULONG       total;              /* body bytes written                 */
     BOOL        failed;
 };
@@ -502,7 +512,7 @@ static LONG fetch_run(VOID)
 
         /* ---- resolve ----------------------------------------------------- */
 
-        if (!tool_sock_resolve(sbase, u.host, &address))
+        if (!tool_sock_resolve_af(sbase, u.host, st.family, &address))
         {
             rc = RETURN_ERROR;
             break;
@@ -1020,12 +1030,14 @@ int main(int argc, char **argv)
     args[ARG_QUIET]    = 0;
     args[ARG_NOVERIFY] = 0;
     args[ARG_TIMEOUT]  = 0;
+    args[ARG_IPV4]     = 0;
+    args[ARG_IPV6]     = 0;
 
     rda = ReadArgs((CONST_STRPTR)TEMPLATE, args, NULL);
     if (rda == NULL)
     {
         tool_fault(IoErr());
-        tool_usage("<url> [TO <file>]",
+        tool_usage("[-4|-6] <url> [TO <file>]",
                    "An http: or https: URL.  Without TO the body goes to "
                    "standard output.");
         return RETURN_ERROR;
@@ -1038,6 +1050,13 @@ int main(int argc, char **argv)
     fetch_init_state.noverify = (args[ARG_NOVERIFY] != 0) ? TRUE : FALSE;
     fetch_init_state.total    = 0;
     fetch_init_state.failed   = FALSE;
+
+    if (!tool_arg_family(args[ARG_IPV4], args[ARG_IPV6],
+                         &fetch_init_state.family))
+    {
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
 
     /*
      * Without TO the body goes to standard output, so a progress line would
