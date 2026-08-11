@@ -90,8 +90,17 @@ MODEL=A1200
 BACKEND=ens18
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 
-while getopts "t:a:p:b:B:m:g:" opt; do
+# A board other than the a2065, for driving a card this harness was not
+# written around.  Same three knobs run-fitzbench.sh already documents:
+# -N names the emulated board, AMINETXDUO_EXTRA_DRIVER stages its driver and
+# AMINETXDUO_IFDEVICE is what DEVS:NetInterfaces/eth0 opens.  Default is the
+# a2065 and nothing changes for a caller that does not ask.
+BOARD="${AMINETXDUO_HTTPD_BOARD:-a2065}"
+IFDEVICE="${AMINETXDUO_IFDEVICE:-a2065.device}"
+
+while getopts "t:a:p:b:B:m:g:N:" opt; do
     case "$opt" in
+        N) BOARD="$OPTARG" ;;
         t) WINDOW="$OPTARG" ;;
         a) ADDRESS="$OPTARG" ;;
         p) PORT="$OPTARG" ;;
@@ -134,8 +143,13 @@ cp "$A2065" "$STAGE/devs/Networks/a2065.device" 2>/dev/null || {
 }
 cp "$BSD" "$STAGE/libs/bsdsocket.library"
 
+# The extra driver goes beside the a2065's, which stays: harmless, and some
+# paths still reference it.
+[ -z "${AMINETXDUO_EXTRA_DRIVER:-}" ] || \
+    cp "$AMINETXDUO_EXTRA_DRIVER" "$STAGE/devs/Networks/$(basename "$AMINETXDUO_EXTRA_DRIVER")"
+
 cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
-DEVICE=a2065.device
+DEVICE=$IFDEVICE
 UNIT=0
 CONFIGURE=STATIC
 ADDRESS=$ADDRESS
@@ -168,7 +182,7 @@ HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 # an AddNetInterface before it.  The server never exits, so the run ends on
 # the harness timeout and 124 is the expected status.
 set +e
-"$ROOT/tools/amiberry-run.sh" -N a2065 -B "$BACKEND" -m "$MODEL" -t "$WINDOW" \
+"$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$BACKEND" -m "$MODEL" -t "$WINDOW" \
     -a "DH0:Public $PORT TRACE" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" &
 RUNNER=$!
