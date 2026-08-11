@@ -102,11 +102,26 @@ jobs:
           echo "AMIGA_TOOLCHAIN_ROOT=$AMIGA_TOOLCHAIN_ROOT" >> "$GITHUB_ENV"
           "$AMIGA_GCC" --version | head -1
 
+      # host32 needs -m32, which on the runner means gcc-multilib.  Without it
+      # tools/ci.sh's host32 stage skips itself, so the two drivers below go
+      # unrun and the stage still reports green.
+      - name: 32-bit host libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-multilib
+
       # Tier 1 in full before packaging anything.  A release that was never
       # built clean is not a release, and this is the same script a developer
       # runs locally.
+      #
+      # host32 was not in this list and is in ci.yml's, so "tier 1 in full" was
+      # not what a release got: fuzz_mdns and fuzz_tls_crypto were the two
+      # stages a release skipped.  Both read bytes chosen by somebody else --
+      # unauthenticated multicast, and a TLS server's handshake before any key
+      # exists to check it against -- and both need sizeof(void*) == 4, which
+      # is why they are a separate build and why they are easy to leave out.
       - name: tools/ci.sh
-        run: AMINETXDUO_ANALYZE=1 tools/ci.sh host cross web analyze conformance
+        run: AMINETXDUO_ANALYZE=1 tools/ci.sh host host32 cross web analyze conformance
 
       # TLS is on by default, and the archive ships tls.library and the trust
       # store.  make-dist.sh refuses to pack a missing or host-scavenged store,
