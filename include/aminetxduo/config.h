@@ -26,6 +26,11 @@ extern "C" {
 #define AMI_CFG_MAX_INTERFACES      2
 #define AMI_CFG_MAX_NAMESERVERS     4
 #define AMI_CFG_MAX_SEARCH          6
+
+/* What ami_config_search_list() can return: every search[] entry, plus the
+   DOMAIN line for a file that has no SEARCH line. */
+#define AMI_CFG_SEARCH_LIST_MAX     (AMI_CFG_MAX_SEARCH + 1)
+
 #define AMI_CFG_NAME_LEN            64
 #define AMI_CFG_PATH_LEN            128
 
@@ -145,6 +150,15 @@ typedef struct AmiIfConfig {
  * A slot in use is never 0, so a zeroed AmiResolverConfig with a non-zero
  * nameserver_count would be malformed; every writer of nameserver[] sets this
  * alongside it.
+ *
+ * search[] holds the file's SEARCH line first and the DHCP lease's domains
+ * after it, and search_static says where the join is: entries below it came
+ * from DEVS:Internet/name_resolution, entries from it up came from the lease
+ * (option 119's list in its own order, then option 15). That is the order a
+ * name with no dot is tried in, see ami_ns_search_list() in
+ * src/netstack/netstack_dns.c, and it is the AmiHostnameSource ranking applied
+ * to a list: name_resolution outranks DHCP, so it goes first rather than
+ * making the lease's domains go away.
  */
 typedef struct AmiResolverConfig {
     ULONG   nameserver[AMI_CFG_MAX_NAMESERVERS];
@@ -153,6 +167,7 @@ typedef struct AmiResolverConfig {
     char    domain[AMI_CFG_DOMAIN_LEN];
     char    search[AMI_CFG_MAX_SEARCH][AMI_CFG_NAME_LEN];
     UWORD   search_count;
+    UWORD   search_static;
 } AmiResolverConfig;
 
 /*
@@ -254,6 +269,54 @@ BOOL ami_config_hostname_valid(const char *name);
 /* Short name for a source, for a report that says where the name came from.
    NULL for AMI_HOSTNAME_NONE, which is not a source. */
 const char *ami_config_hostname_source_text(UWORD source);
+
+/*
+ * The suffixes a name with no dot is tried under, in the order they are tried,
+ * as pointers into `res`. Returns how many were written, never more than
+ * AMI_CFG_SEARCH_LIST_MAX.
+ *
+ *   1. SEARCH from DEVS:Internet/name_resolution, as written;
+ *   2. DOMAIN from that file, when the file has no SEARCH line;
+ *   3. what the DHCP lease supplied.
+ *
+ * That is the AmiHostnameSource ranking -- name_resolution above DHCP -- with
+ * one difference, stated because it is a difference: a host name is one string
+ * so the losing source is dropped, a suffix list is a list so the losing
+ * source goes after rather than away. Nothing here decides which domain a
+ * machine is on; every suffix is a guess, and the cheapest correct thing is to
+ * try the administrator's guesses first.
+ *
+ * Duplicates are dropped case-insensitively (RFC 4343): a DHCP machine whose
+ * file names no domain has the lease's domain in both DOMAIN and search[], and
+ * must not pay two queries for it.
+ */
+UWORD ami_config_search_list(const AmiResolverConfig *res, const char *out[],
+                             UWORD max);
+
+/*
+ * Offer one search domain on behalf of the DHCP lease. It is appended after
+ * whatever DEVS:Internet/name_resolution put in search[], never before it, and
+ * a name already in the list at any rank is dropped rather than repeated,
+ * case-insensitively (RFC 4343) -- a lease that names the domain the file
+ * already names must not cost a second query. Returns TRUE if it was stored.
+ *
+ * Anything that is not an RFC 1123 2.1 name is refused: this text arrives off
+ * the network, and a suffix is pasted onto a name that is then queried.
+ */
+BOOL ami_config_search_offer(AmiResolverConfig *res, const char *domain);
+
+/*
+ * RFC 3397 option 119: a run of RFC 1035 4.1.4 encoded names, root label
+ * ending each one, with compression pointers taken from the start of the
+ * option data. Each name decoded is handed to ami_config_search_offer().
+ * Returns how many were stored.
+ *
+ * `data` is off the network and is not trusted: a pointer that does not go
+ * strictly backwards, a label that runs past the end, or a name longer than
+ * the list can hold ends the walk, and what was decoded before it stands.
+ */
+UWORD ami_config_search_from_rfc3397(AmiResolverConfig *res,
+                                     const UBYTE *data, ULONG len);
 
 /* ------------------------------------------------------------- diagnostics
  *

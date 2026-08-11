@@ -1123,6 +1123,230 @@ static void test_resolver(void)
     }
 }
 
+/* Clears the array first, so an assertion about entry N of a shorter list
+   reports "(null)" rather than reading whatever was in the slot. */
+static UWORD search_of(const AmiResolverConfig *res, const char *out[])
+{
+    UWORD i;
+
+    for (i = 0; i < (UWORD)AMI_CFG_SEARCH_LIST_MAX; i++)
+        out[i] = NULL;
+
+    return ami_config_search_list(res, out, (UWORD)AMI_CFG_SEARCH_LIST_MAX);
+}
+
+/*
+ * The suffixes a name with no dot is tried under, and where they came from.
+ *
+ * The case this exists for is the one that was reported: a file that says
+ * `domain localdomain` on a network whose lease says local.tinic.net. Both
+ * have to be tried, and the file's has to be tried first.
+ */
+static void test_search_domains(void)
+{
+    AmiResolverConfig res;
+    const char       *list[AMI_CFG_SEARCH_LIST_MAX];
+    char             *buf;
+    UWORD             n;
+
+    printf("search domains\n");
+
+    /* ---- nothing configured: no suffix, so a short name is asked once. */
+    memset(&res, 0, sizeof(res));
+    CHECK(search_of(&res, list) == 0);
+
+    /* ---- DOMAIN alone is the one suffix. */
+    memset(&res, 0, sizeof(res));
+    buf = dup_text("domain localdomain\n");
+    ami_cfg_parse_resolver(buf, &res, NULL, 0);
+    free(buf);
+
+    CHECK(res.search_static == 0);
+    n = search_of(&res, list);
+    CHECK(n == 1);
+    CHECK_STR(list[0], "localdomain");
+
+    /* ---- THE REPORTED CASE. The lease's domain arrives after the file's and
+       does not replace it, so both are tried and the file's goes first. */
+    CHECK(ami_config_search_offer(&res, "local.tinic.net") == TRUE);
+    CHECK(res.search_static == 0);
+    CHECK(res.search_count == 1);
+
+    n = search_of(&res, list);
+    CHECK(n == 2);
+    CHECK_STR(list[0], "localdomain");
+    CHECK_STR(list[1], "local.tinic.net");
+
+    /* DOMAIN is still what GetDefaultDomainName() reports: the lease adds a
+       place to look, it does not rename the machine's domain. */
+    CHECK_STR(res.domain, "localdomain");
+
+    /* ---- SEARCH replaces DOMAIN, as resolv.conf has it, and the lease still
+       lands after everything the file wrote. */
+    memset(&res, 0, sizeof(res));
+    buf = dup_text("domain unused.test\nsearch one.test two.test\n");
+    ami_cfg_parse_resolver(buf, &res, NULL, 0);
+    free(buf);
+
+    CHECK(res.search_static == 2);
+    CHECK(ami_config_search_offer(&res, "three.test") == TRUE);
+
+    n = search_of(&res, list);
+    CHECK(n == 3);
+    CHECK_STR(list[0], "one.test");
+    CHECK_STR(list[1], "two.test");
+    CHECK_STR(list[2], "three.test");
+
+    /* ---- A lease that repeats what the file said costs no second query,
+       whatever case it spells it in (RFC 4343). */
+    memset(&res, 0, sizeof(res));
+    buf = dup_text("domain Home.Lan\n");
+    ami_cfg_parse_resolver(buf, &res, NULL, 0);
+    free(buf);
+
+    CHECK(ami_config_search_offer(&res, "home.lan") == TRUE);
+    n = search_of(&res, list);
+    CHECK(n == 1);
+    CHECK_STR(list[0], "Home.Lan");
+
+    /* ---- Twice from the lease is once in the list. */
+    CHECK(ami_config_search_offer(&res, "other.test") == TRUE);
+    CHECK(ami_config_search_offer(&res, "OTHER.TEST") == FALSE);
+    CHECK(res.search_count == 2);
+
+    /* ---- Off the network and not a domain name: refused, not queried. */
+    memset(&res, 0, sizeof(res));
+    CHECK(ami_config_search_offer(&res, "not a domain") == FALSE);
+    CHECK(ami_config_search_offer(&res, "-leading.hyphen") == FALSE);
+    CHECK(ami_config_search_offer(&res, "double..dot") == FALSE);
+    CHECK(ami_config_search_offer(&res, "") == FALSE);
+    CHECK(res.search_count == 0);
+
+    /* ---- More than the list holds: the first ones stand, no overrun. */
+    memset(&res, 0, sizeof(res));
+    {
+        char name[16];
+        int  i;
+
+        for (i = 0; i < AMI_CFG_MAX_SEARCH + 3; i++)
+        {
+            sprintf(name, "d%d.test", i);
+            (void)ami_config_search_offer(&res, name);
+        }
+    }
+    CHECK(res.search_count == AMI_CFG_MAX_SEARCH);
+    CHECK_STR(res.search[0], "d0.test");
+    n = search_of(&res, list);
+    CHECK(n == AMI_CFG_MAX_SEARCH);
+}
+
+/* DHCP option 119, RFC 3397: a run of RFC 1035 4.1.4 names off the network. */
+static void test_dhcp_search_option(void)
+{
+    AmiResolverConfig res;
+    const char       *list[AMI_CFG_SEARCH_LIST_MAX];
+
+    printf("DHCP option 119\n");
+
+    /* "eng.example.com", then "sales.example.com" written with a compression
+       pointer back to "example.com" -- RFC 3397 2's own example. */
+    {
+        static const UBYTE wire[] = {
+            3, 'e', 'n', 'g', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e',
+            3, 'c', 'o', 'm', 0,
+            5, 's', 'a', 'l', 'e', 's', 0xC0, 4
+        };
+
+        memset(&res, 0, sizeof(res));
+        CHECK(ami_config_search_from_rfc3397(&res, wire, sizeof(wire)) == 2);
+        CHECK(res.search_count == 2);
+        CHECK_STR(res.search[0], "eng.example.com");
+        CHECK_STR(res.search[1], "sales.example.com");
+
+        /* Nothing from the file, so the lease's list is the whole list, in
+           the order the option wrote it. */
+        CHECK(search_of(&res, list) == 2);
+        CHECK_STR(list[0], "eng.example.com");
+    }
+
+    /* The file's SEARCH line still goes first. */
+    {
+        static const UBYTE wire[] = { 5, 'l', 'e', 'a', 's', 'e', 0 };
+        char              *buf;
+        UWORD              n;
+
+        memset(&res, 0, sizeof(res));
+        buf = dup_text("search file.test\n");
+        ami_cfg_parse_resolver(buf, &res, NULL, 0);
+        free(buf);
+
+        CHECK(ami_config_search_from_rfc3397(&res, wire, sizeof(wire)) == 1);
+        n = search_of(&res, list);
+        CHECK(n == 2);
+        CHECK_STR(list[0], "file.test");
+        CHECK_STR(list[1], "lease");
+    }
+
+    /* A pointer to itself, and one that points forwards: RFC 1035 4.1.4 allows
+       neither, and either would be a loop. Nothing is stored and nothing
+       hangs -- reaching the next line is the assertion. */
+    {
+        static const UBYTE self[]    = { 0xC0, 0 };
+        static const UBYTE forward[] = { 0xC0, 4, 0, 0, 2, 'h', 'i', 0 };
+
+        memset(&res, 0, sizeof(res));
+        CHECK(ami_config_search_from_rfc3397(&res, self, sizeof(self)) == 0);
+        CHECK(ami_config_search_from_rfc3397(&res, forward,
+                                             sizeof(forward)) == 0);
+        CHECK(res.search_count == 0);
+    }
+
+    /* A label that runs off the end, and a name with no root label: the walk
+       stops and keeps what it had. */
+    {
+        static const UBYTE overrun[] = { 9, 'a', 'b', 'c' };
+        static const UBYTE unterminated[] = { 2, 'h', 'i' };
+        static const UBYTE trailing[] = { 2, 'o', 'k', 0, 9, 'a' };
+
+        memset(&res, 0, sizeof(res));
+        CHECK(ami_config_search_from_rfc3397(&res, overrun,
+                                             sizeof(overrun)) == 0);
+        CHECK(ami_config_search_from_rfc3397(&res, unterminated,
+                                             sizeof(unterminated)) == 0);
+        CHECK(ami_config_search_from_rfc3397(&res, trailing,
+                                             sizeof(trailing)) == 1);
+        CHECK(res.search_count == 1);
+        CHECK_STR(res.search[0], "ok");
+    }
+
+    /* An empty option, and a lone root label, name nothing. */
+    {
+        static const UBYTE root[] = { 0 };
+
+        memset(&res, 0, sizeof(res));
+        CHECK(ami_config_search_from_rfc3397(&res, root, sizeof(root)) == 0);
+        CHECK(ami_config_search_from_rfc3397(&res, root, 0) == 0);
+        CHECK(res.search_count == 0);
+    }
+
+    /* A name longer than a search slot can hold is dropped, not truncated: a
+       truncated suffix is a different domain. */
+    {
+        UBYTE big[AMI_CFG_NAME_LEN + 8];
+        ULONG i;
+
+        big[0] = (UBYTE)(AMI_CFG_NAME_LEN + 2);
+        for (i = 1; i <= (ULONG)AMI_CFG_NAME_LEN + 2; i++)
+            big[i] = (UBYTE)'a';
+        big[AMI_CFG_NAME_LEN + 3] = 0;
+
+        memset(&res, 0, sizeof(res));
+        CHECK(ami_config_search_from_rfc3397(&res, big,
+                                             AMI_CFG_NAME_LEN + 4) == 0);
+        CHECK(res.search_count == 0);
+    }
+}
+
 static void test_gateway(void)
 {
     ULONG gw;
@@ -1544,6 +1768,8 @@ int main(int argc, char **argv)
     test_hostname_precedence();
     test_hostname_offer();
     test_resolver();
+    test_search_domains();
+    test_dhcp_search_option();
     test_gateway();
     test_tcp_handler();
     test_netdb();

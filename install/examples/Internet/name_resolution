@@ -27,10 +27,15 @@ nameserver 192.168.1.1
 # domain -- appended to a name that has no dots in it, so that "fileserver"
 # is looked up as "fileserver.localdomain".
 #
-domain localdomain
+# LEAVE IT OUT ON DHCP.  The lease names the domain and the resolver uses it;
+# a domain written here is tried FIRST and the lease's after it, so a made-up
+# name like "localdomain" costs a wasted query on every short name.
+#
+#domain localdomain
 
 # search -- several domains to try, in order, instead of the single "domain"
-# above.  One line, separated by spaces.
+# above.  One line, separated by spaces.  Anything the lease supplies is tried
+# after these, not instead of them.
 #
 #search localdomain example.com
 

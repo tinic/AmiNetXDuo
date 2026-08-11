@@ -876,6 +876,9 @@ VOID ami_cfg_parse_resolver(char *buf, AmiResolverConfig *out,
                 ami_cfg_copy_string(out->search[out->search_count++],
                                     AMI_CFG_NAME_LEN, tokens[i]);
             }
+
+            /* Everything up to here is the file's; a lease appends after it. */
+            out->search_static = out->search_count;
             continue;   /* the rest of the line has been consumed */
         }
         else if (ami_cfg_stricmp(key, "prefer") == 0)
@@ -929,6 +932,174 @@ VOID ami_cfg_parse_resolver(char *buf, AmiResolverConfig *out,
                             "lines.  The line was ignored.");
         }
     }
+}
+
+UWORD ami_config_search_list(const AmiResolverConfig *res, const char *out[],
+                             UWORD max)
+{
+    UWORD n = 0;
+    UWORD i;
+    UWORD j;
+
+    if (res == NULL || out == NULL)
+        return 0;
+
+    for (i = 0; i < res->search_static && n < max; i++)
+        out[n++] = res->search[i];
+
+    /* resolv.conf has SEARCH replace DOMAIN, and the shipped example file says
+       so, so DOMAIN is a suffix only when the file has no SEARCH line. */
+    if (res->search_static == 0 && res->domain[0] != '\0' && n < max)
+        out[n++] = res->domain;
+
+    for (i = res->search_static; i < res->search_count && n < max; i++)
+    {
+        for (j = 0; j < n; j++)
+            if (ami_cfg_stricmp(out[j], res->search[i]) == 0)
+                break;
+
+        if (j == n)
+            out[n++] = res->search[i];
+    }
+
+    return n;
+}
+
+BOOL ami_config_search_offer(AmiResolverConfig *res, const char *domain)
+{
+    UWORD i;
+
+    if (res == NULL || domain == NULL || *domain == '\0')
+        return FALSE;
+
+    /* Off the network, and about to be pasted onto a name and queried. */
+    if (!ami_config_hostname_valid(domain))
+    {
+        AMI_WARN("config: DHCP offered '%s' as a search domain; that is not a "
+                 "domain name, ignoring it", domain);
+        return FALSE;
+    }
+
+    for (i = 0; i < res->search_count; i++)
+        if (ami_cfg_stricmp(res->search[i], domain) == 0)
+            return FALSE;
+
+    if (res->search_count >= AMI_CFG_MAX_SEARCH)
+    {
+        AMI_WARN("config: more than %ld search domains, ignoring '%s'",
+                 (long)AMI_CFG_MAX_SEARCH, domain);
+        return FALSE;
+    }
+
+    ami_cfg_copy_string(res->search[res->search_count++], AMI_CFG_NAME_LEN,
+                        domain);
+
+    return TRUE;
+}
+
+/*
+ * One RFC 1035 4.1.4 name out of an option 119 payload, starting at *pos.
+ *
+ * *pos is advanced past the name as it is written in the option, which is not
+ * where the decoding ended: a name that is a pointer occupies two bytes there
+ * and expands from somewhere earlier, so the walk continues after the pointer.
+ */
+#define AMI_CFG_RFC3397_JUMPS   8
+
+static BOOL cfg_rfc3397_name(const UBYTE *data, ULONG len, ULONG *pos,
+                             char *out, ULONG outlen)
+{
+    ULONG at    = *pos;
+    ULONG n     = 0;
+    UWORD jumps = 0;
+    BOOL  moved = FALSE;
+
+    for (;;)
+    {
+        UWORD label;
+
+        if (at >= len)
+            return FALSE;
+
+        label = (UWORD)data[at];
+
+        if ((label & 0xC0) == 0xC0)
+        {
+            ULONG target;
+
+            if (at + 1 >= len || jumps++ >= AMI_CFG_RFC3397_JUMPS)
+                return FALSE;
+
+            target = (ULONG)(((label & 0x3F) << 8) | data[at + 1]);
+
+            /* Strictly backwards. A pointer to itself or forwards is how a
+               hostile option makes this walk run forever. */
+            if (target >= at)
+                return FALSE;
+
+            if (!moved)
+            {
+                *pos  = at + 2;
+                moved = TRUE;
+            }
+
+            at = target;
+            continue;
+        }
+
+        if ((label & 0xC0) != 0)
+            return FALSE;       /* reserved label type */
+
+        at++;
+
+        if (label == 0)
+        {
+            if (!moved)
+                *pos = at;
+
+            out[n] = '\0';
+
+            return (BOOL)(n != 0);
+        }
+
+        if (at + label > len)
+            return FALSE;
+
+        if (n != 0)
+        {
+            if (n + 1 >= outlen)
+                return FALSE;
+            out[n++] = '.';
+        }
+
+        if (n + label >= outlen)
+            return FALSE;
+
+        while (label-- != 0)
+            out[n++] = (char)data[at++];
+    }
+}
+
+UWORD ami_config_search_from_rfc3397(AmiResolverConfig *res,
+                                     const UBYTE *data, ULONG len)
+{
+    char  name[AMI_CFG_NAME_LEN];
+    ULONG pos   = 0;
+    UWORD added = 0;
+
+    if (res == NULL || data == NULL)
+        return 0;
+
+    while (pos < len)
+    {
+        if (!cfg_rfc3397_name(data, len, &pos, name, (ULONG)sizeof(name)))
+            break;
+
+        if (ami_config_search_offer(res, name))
+            added++;
+    }
+
+    return added;
 }
 
 /* -------------------------------------------------- default_gateway/routes */
