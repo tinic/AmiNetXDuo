@@ -996,15 +996,24 @@ if [ "$TERMINAL" = "1" ]; then
     printf 'put over WebDAV by %s at %s\n' "$(hostname)" "$(date -u +%FT%TZ)" \
         > "$PAYLOAD_TXT"
 
+    # Under $HOME on the peer, not /tmp: /tmp there is a 2 GB tmpfs shared
+    # with everything else on the box and it was 100% full the first time this
+    # ran, which reads as "the peer is unreachable" and is not.
+    PEERDIR=".aminetxduo-e2e"
     if [ -z "$PEER" ]; then
         echo "peer=none" >> "$TERM_PROBE"
     else
-        scp -q -o BatchMode=yes \
-            "$ROOT/tests/tools/httpd-drill.py" \
-            "$ROOT/tests/tools/wsterm-console.py" \
-            "$ROOT/install/test/peer-drill.sh" \
-            "$PAYLOAD_TXT" "$PAYLOAD_LHA" "$PEER:/tmp/" \
-            || { echo "peer=unreachable" >> "$TERM_PROBE"; PEER=""; }
+        if ssh -o BatchMode=yes "$PEER" "rm -rf $PEERDIR && mkdir -p $PEERDIR" &&
+           scp -q -o BatchMode=yes \
+                "$ROOT/tests/tools/httpd-drill.py" \
+                "$ROOT/tests/tools/wsterm-console.py" \
+                "$ROOT/install/test/peer-drill.sh" \
+                "$PAYLOAD_TXT" "$PAYLOAD_LHA" "$PEER:$PEERDIR/"; then
+            :
+        else
+            echo "peer=unreachable" >> "$TERM_PROBE"
+            PEER=""
+        fi
     fi
 
     if [ -n "$PEER" ]; then
@@ -1023,8 +1032,9 @@ if [ "$TERMINAL" = "1" ]; then
             fi
             echo "guest_address=$guest" >> "$TERM_PROBE"
             ssh -o BatchMode=yes "$PEER" \
-                "sh /tmp/peer-drill.sh $guest /tmp/$(basename "$PAYLOAD_TXT") \
-                 /tmp/$(basename "$PAYLOAD_LHA")" >> "$TERM_PROBE" 2>&1
+                "sh $PEERDIR/peer-drill.sh $guest $PEERDIR/$(basename "$PAYLOAD_TXT") \
+                 $PEERDIR/$(basename "$PAYLOAD_LHA") $PEERDIR" \
+                >> "$TERM_PROBE" 2>&1
         ) &
         PROBE_PID=$!
     fi

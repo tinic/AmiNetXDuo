@@ -2,7 +2,7 @@
 #
 # What another machine does to the Amiga, run ON that other machine.
 #
-#   peer-drill.sh <address> <payload.txt> <payload.lha>
+#   peer-drill.sh <address> <payload.txt> <payload.lha> <drilldir>
 #
 # install/test/run-workbench.sh copies this, the two drills and both payloads
 # to AMINETXDUO_PEER and runs it there.  It is a separate file, and /bin/sh
@@ -20,15 +20,17 @@
 ADDR="$1"
 TXT="$2"
 LHA="$3"
+DIR="${4:-$(dirname "$0")}"
 PORT=80
 
-python3 - "$ADDR" "$PORT" "$TXT" "$LHA" <<'PY'
+python3 - "$ADDR" "$PORT" "$TXT" "$LHA" "$DIR" <<'PY'
 import hashlib
 import http.client
 import os
 import sys
 
-addr, port, txt, lha = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+addr, port = sys.argv[1], int(sys.argv[2])
+txt, lha, drilldir = sys.argv[3], sys.argv[4], sys.argv[5]
 
 
 def say(k, v):
@@ -111,11 +113,11 @@ except Exception as exc:                                  # noqa: BLE001
 # console ones, against the installed machine.  Reused rather than rewritten:
 # they are the ones that need a socket rather than a client, and having two of
 # them would be two things to keep right.
-here = os.path.dirname(os.path.abspath(sys.argv[0])) if sys.argv[0] else "/tmp"
-for name, script, args in (
-        ("httpd_drill", "/tmp/httpd-drill.py", ["--terminal"]),
-        ("wsterm_console", "/tmp/wsterm-console.py", []),
+for name, leaf, args in (
+        ("httpd_drill", "httpd-drill.py", ["--terminal"]),
+        ("wsterm_console", "wsterm-console.py", []),
 ):
+    script = os.path.join(drilldir, leaf)
     if not os.path.exists(script):
         say(name, "absent")
         continue
