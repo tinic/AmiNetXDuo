@@ -184,7 +184,14 @@ jobs:
       # the wrong directory and said so in a note nobody read.
       - name: ssh, the Installer and the manual really are in the archive
         run: |
-          for f in C/ssh.020 C/ssh.060 Installer \
+          # ssh.000 is in this list because it was not, and its absence is
+          # silent at every step: dist/make-dist.sh's SSH_BUILD loop skips a
+          # binary that is not executable rather than failing, and
+          # install/Install-AmiNetXDuo:1138 copies it only `(if (exists ...))`,
+          # so a 68000 machine would install with no C:ssh and no message.
+          # The installer resolves 68000 to ssh.000 at :1133; all three names
+          # it can ask for are checked here.
+          for f in C/ssh.000 C/ssh.020 C/ssh.060 Installer \
                    Docs/AmiNetXDuo.guide Docs/AmiNetXDuo.guide.info; do
               [ -f "build/dist/AmiNetXDuo/$f" ] || {
                   echo "::error::$f is missing from the archive"; exit 1; }
