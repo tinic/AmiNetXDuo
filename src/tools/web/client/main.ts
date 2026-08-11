@@ -136,8 +136,14 @@ const WORDS: Record<WireState, string> = {
   connecting: "connecting",
   open: "connected",
   closed: "closed",
-  failed: "no answer",
+  refused: "refused",
 };
+
+/* What the server will not say over a WebSocket, said here.  Its only
+   refusal of a correct client is that the Shell is taken: one session at a
+   time, and the second upgrade gets a 503 the browser does not pass on. */
+const REFUSED =
+  "no session -- the terminal takes one at a time, and something else has it";
 
 function setState(state: WireState, detail: string): void {
   const live = state === "open";
@@ -154,12 +160,13 @@ function setState(state: WireState, detail: string): void {
      side owns the cursor from the first keystroke. */
   line.setEnabled(live && INPUT === "line");
 
-  if (state === "closed" || state === "failed") {
+  if (state === "closed" || state === "refused") {
     /* Said in the terminal and not only in the bar, because the bar is at the
        top and the eye is at the bottom.  Enter is the fastest way back. */
     line.notice("\u001B[38;5;244m[" +
-                (detail || "the session ended") +
-                " -- Enter or Reconnect to start another]\u001B[0m\r\n");
+                (state === "refused" ? REFUSED
+                                     : detail || "the session ended") +
+                " -- Enter or Reconnect to try again]\u001B[0m\r\n");
   }
 
   if (live) term.focus();

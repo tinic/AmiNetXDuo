@@ -82,7 +82,11 @@ export function csiTo7Bit(s: string): string {
  * because nothing on the far side reads a cursor key today.
  */
 
-export type WireState = "connecting" | "open" | "closed" | "failed";
+export type WireState =
+  | "connecting"
+  | "open"
+  | "closed"     /* it was open and then it was not */
+  | "refused";   /* it never opened at all */
 
 export interface WireHandlers {
   onText: (s: string) => void;
@@ -114,7 +118,9 @@ export class Wire {
 
     this.h.onState("connecting", "");
 
-    ws.onopen = () => this.h.onState("open", "");
+    let opened = false;
+
+    ws.onopen = () => { opened = true; this.h.onState("open", ""); };
 
     ws.onmessage = (e: MessageEvent) => {
       const s = typeof e.data === "string"
@@ -123,12 +129,25 @@ export class Wire {
       this.h.onText(csiTo7Bit(s));
     };
 
+    /*
+     * A socket that never opened is a DIFFERENT thing from one that closed,
+     * and the browser reports both as 1006 with no reason on it: the HTTP
+     * status behind a refused upgrade is not exposed to script at all.  So
+     * the two are told apart here, by whether onopen ever ran.
+     *
+     * Worth the four lines because the server's one refusal a working client
+     * can provoke is "somebody else has the Shell" -- it takes one session at
+     * a time -- and "closed (1006)" sends that person looking at the network.
+     */
     ws.onclose = (e: CloseEvent) => {
       this.ws = null;
-      this.h.onState("closed", e.reason || String(e.code));
+      if (opened) this.h.onState("closed", e.reason || String(e.code));
+      else this.h.onState("refused", "");
     };
 
-    ws.onerror = () => this.h.onState("failed", "");
+    /* onerror carries nothing a person can act on and is always followed by
+       onclose, which does.  Left to it. */
+    ws.onerror = () => { /* onclose says what happened */ };
   }
 
   disconnect(): void {
