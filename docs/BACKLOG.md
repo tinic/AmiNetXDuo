@@ -30,7 +30,6 @@ git log; what it declined is under *Decided against*; what it disproved is under
 | **TLS 1.3 client** | **On `main` and in every shipped build** (`src/tls/CMakeLists.txt:99-100`, unconditional), not on a branch -- the `tls13` branch is merged and deleted. It was a compile switch: nx_secure's seven `nx_secure_tls_1_3_*.c`, `_nx_crypto_rsa_pss_verify`, `crypto_method_hkdf` and the `NX_SECURE_TLS_TLS_1_3_ENABLED` rows in `ami_tls_crypto.c` were all present and only compiled out. Fixed on the way: `tls_library` links nx_secure by `$<TARGET_FILE:...>`, which carries no usage requirements, so `tls_conn.c` compiled a different `NX_SECURE_TLS_SESSION` than nx_secure operated on. Still failing: `tests/tls/run-tls13.sh` is red at `nx_secure_tls_process_record.c:558`, a content type that is not 20/21/22/23, so the key schedule derives wrong keys. The hash method is implicated -- our rows carry `AMI_BULK_SHA256` where stock carries `crypto_method_sha256`, and swapping them moves the failure to `NX_CRYPTO_PTR_ERROR`, so they are not interchangeable. Server-side 1.3 is impossible regardless: nx_crypto has PSS verify and no PSS sign | RFC 8446 |
 | **Encrypt-then-MAC, RFC 7366** | The answer to the CBC padding-timing row, which is declined on its own terms below. EtM fails the MAC before padding is examined, at no per-record cost; constant-time padding costs ~10 ms per record at 7 MHz |, |
 | **Extended master secret, RFC 7627** | Without it, resumption is exposed to the triple-handshake attack. A change to nx_secure's key schedule, not a table entry; every cached session becomes non-resumable |, |
-| **SACK send side** | Written on fork branch `amiga-tcp-sack-transmit`, merged and pushed as `amiga-tcp-sack-transmit-merged` (`netxduo ec4fd9cc`, four additive conflicts resolved). **Still does not land, and now for a measured reason rather than a missing test.** tcpdrill could not inject a peer's blocks at all -- `sack=` was an assertion on what leaves -- so the twelve receive-side cases passed either way; that is fixed, `sack=` on an `rx` line now sends RFC 2018 blocks. The two cases it enables say the branch does not work: `s13` sends three segments, takes three duplicate acknowledgments each carrying a block for the middle one, and requires the retransmission to skip it. **It fails identically without the branch and with it** -- the stack retransmits 1:101 and stops, never reaching 201:301 -- with `_nx_tcp_sack_option_get` confirmed present in `libnetxduo.a` on the second run. `s14`, the control, passes: no blocks, only the first segment goes out. What is NOT established is which side is wrong, the branch or `s13`'s assumption that three duplicate acknowledgments at MSS 100 enter fast recovery at all; telling them apart needs guest instrumentation, and a `RawPutChar` probe produced an empty serial log under the tcpdrill runner | `tests/tcpdrill/scripts/sack.drill` s13/s14 |
 | **RFC 2308 §5 negative cache.** A name that does not exist is looked up again on every call | The SOA MINIMUM has to be held against a name with no record to attach it to, which means a synthetic entry type and storage for a name with no data. `NX_DNS_NAME_ERROR` now exists and reaches `ami_ns_dns_error()`, so nothing outside this row is in the way | `nxd_dns.c:3587`, `netstack_dns_status.c` |
 | **Bailiwick check on cached records, with CNAME chain following** | One item, not two: `NX_DNS_ENABLE_EXTENDED_RR_TYPES` is undefined, so the A record after a CNAME has the CNAME target as its owner and is accepted only because no owner-name check exists. Adding the check alone fails every CNAME-hosted name | `nxd_dns.c` |
 | **`src/bsdsocket` has one host test**, `test_inet`, reaching 7 of 29 files | The other 22 are blocked on 253 Amiga constants and on structures the host cannot shape, and their ABI is already held by 80 `_Static_assert`s on the cross build. What is left un-held is behaviour needing the real ABI: `bsd_route_mtu()`, `bsd_udp_from_peer()`, the 4-tuple filter. That is guest-suite work, so this row is about `bsdsocktest` coverage, not host coverage | `src/bsdsocket/`, measured under *Host-testing* below |
@@ -504,7 +503,6 @@ Ranked by chance a user hits it times chance the suite stays silent.
 | Item | Effect | Cite |
 |---|---|---|
 | **A re-added interface can come back addressed with its link down** | `NX_LINK_ENABLE` -> `ami_sana2_rx_start()` -> `tx_thread_create()` returns `TX_PTR_ERROR` because a dead process's cached ThreadX adoption still claims the stack range. `run-ifremove.sh:256` asserts the address returned, not that the link is up or that traffic passes; no test creates the precondition (a process that opened `bsdsocket.library` and exited). Specified in commit `3d0f382`'s message and nowhere else | `sana2_rx.c:1310`, workaround `:1196`, `tx_amiga_adopt.c:676` |
-| **Every `AddNetInterface` leaks a base, and the leak is a use-after-free** | `tool_stack_start()` opens `bsdsocket.library` and never closes it, so each invocation leaks an `AmiSocketBase` clone, an `AllocSignal` and a cached thread registration; `bsd_child_destroy()` and `bsd_nx_release()` never run. `bsd_address_changed()` then walks every child base and `Signal(child->sb_Task)` -- a leaked base whose task exited signals freed memory, gated only on `SBTC_SIG_ADDRESS_CHANGE_MASK`. The single leak is documented as intentional at `tool_diag.c:712`; the accumulation and the signal are not | `tool_diag.c:726`, `addnetinterface.c:557`, `library.c:259`, `errno.c:405` |
 | **A runtime interface add reports mDNS it never enabled** | The add sets `ns_IfaceMdns[slot]` but never calls `nx_mdns_enable()` (only the startup path does); remove never disables nor clears it. `netstat` and `ShowNetStatus` set `NETSTATUS_IF_MDNS` from the flag, so an interface that does not answer `.local` reports that it does. `netstack.h:193` states the flag is the effective state, not the request -- the code contradicts the header | `netstack.c:2748`, `netstack_mdns.c:305`, `netstatus.c:759` |
 | **13 rc assertions are dead: the rc is parsed with its comma** | `ToolsSmoke` writes `rc %ld, %ld ms, free %ld`; three scripts take field 3 with `awk`, getting `"5,"`, so no comparison is ever true. The correct form is at `run-ifremove.sh:201` | `toolssmoke.c:361`; `run-checkconfig.sh:151`, `run-livetools.sh:326`, `run-tools-fsuae.sh:296` |
 | **The leak test has never executed its assertion** | The sed expects `", free"` where the line reads `", 380 ms,"`, so `FREE` is empty, the guard fails and the script exits 1 before the leak check. The same file's `grep -q 'rc 0,'` at `:204` uses the real format | `run-addifleak.sh:189` |
@@ -838,6 +836,76 @@ math libraries are in `LIBS:`. The earlier `errno 43` `EPROTONOSUPPORT` from
 `AddNetInterface` was not a protocol-domain fault and not an OS-version
 requirement. Measured 2026-08-02 as the third arm: read 1108 KB/s against our
 983 and Roadshow's 1824.
+
+### AddNetInterface base leak, closed in 0.20.1
+
+| | |
+|---|---|
+| Was | `tool_stack_start()` opened `bsdsocket.library` and never closed it: a leaked base, an `AllocSignal` and a thread registration per invocation, and `bsd_address_changed()` signalling an exited task |
+| Fix | `NETCTRL_STACK_HOLD` — the library holds its own reference. `tool_diag.c:779`, `library.c:1185`. Shipped 0.20.1 (`a50ceff4`, `484e0a67`, `6d2c5772`) |
+| Counterpart | `NETCTRL_STACK_RELEASE`, 2026-08-11, gives it back — what lets `NetShutdown` and ARexx `KILL` take the stack down |
+
+### RFC 2018 SACK send side, landed 2026-08-11
+
+In `main`, `netxduo ec4fd9cc`. A peer's blocks are now read and acted on.
+
+| | |
+|---|---|
+| Gate | A transmit-side drill case. tcpdrill could not inject blocks — `sack=` asserted on what LEAVES — so all twelve receive-side cases passed either way. `sack=` on an `rx` line now sends them |
+| My error | The first case was red on both builds; I read that as the branch. `d03` is that case's shape and passes with **no send side at all** — it could never discriminate |
+| Why | Walk breaks at `queued_begin >= sack_high` = RFC 6675 `IsLost()`: a segment starting at the highest right edge is not known lost, so it waits for the RTO |
+| Proof | `f4ccb59a`: 14 cases, 1 failed (`tx PA seq=201`, nothing sent). `ec4fd9cc`: 14 cases, 0 failed |
+| Also | Fast recovery *is* entered at MSS 100 — retransmit +2 ms after the third dup ACK |
+| Not done | RFC 6675 §5 rescue retransmission. RFC 3708 still gated on a per-segment retransmit record |
+
+### SMB, issues #3 and #4, 2026-08-11
+
+Neither is a defect here. `smbfs`/`smb2fs` appeared nowhere in this repo until today, which is why neither reproduced for a day.
+
+| Finding | Evidence |
+|---|---|
+| Our stack mounts SMB, WB 3.1 and 3.2 | `RESULT lock=ok entries=3`, `List` and `Info` from the guest |
+| TCP is not the problem | `nc -v` connects to 445 and 139; full SMB2 dialogue in ~250 ms |
+| #3 does not reproduce | negotiate / NTLM / tree connect / create all complete |
+| **#4 is smb2fs's bug** | OS3 `request_error()` calls `EasyRequestArgs` with no timeout from `smb2fs_init()`, after `FbxSetupFS` replied DOSTRUE. `Mount` returns 0, handler never services a packet. **Reproduced over Roadshow 1.15.** The freeze is an unseen requester titled `smb2-handler 53.10` |
+| NAS at 192.168.1.72 | Samba 4.15.13. Signing **enabled, not required**; guest **not** refused. Both earlier claims were wrong |
+| Guest works at | 2.0.2, 2.1, 3.0, 3.0.2. **3.1.1 alone** refuses `IS_GUEST` at TREE_CONNECT, `0xC0000022`, from the guest's pcap |
+| So | libsmb2 takes the highest dialect; 53.10 has no dialect knob; smb2fs cannot reach that share as guest |
+| What does work | obarthel's **smbfs 2.22** (SMB1), guest, no credential. Shipped binary is `-m68020-60`; a 68000 needs a rebuild |
+| Upstream, not ours | smb2fs's blocking requester; its `?vers=` argument dies before any socket opens |
+
+Assets: `apps/smb2fs-53.10`, `apps/filesysbox-54.9`, `apps/smbfs-2.22`, with
+`AMINETXDUO_SMB2FS` / `_FILESYSBOX` / `_SMBFS`. Harness on `smb-mount-e2e` and
+`smb-mount-smbfs`, **not merged**.
+
+### A throughput figure without its card is not a figure, 2026-08-11
+
+| | |
+|---|---|
+| What happened | Measured `main` on the **a2065** at read 544 KB/s and compared it to 398 (2026-08-09) and 436.4 → 475.2 (`ack-window`), both of which were **X-Surf-100** |
+| Cause of the difference | The card. Not the code |
+| Today's delta | 3 KB/s against a 32 KB/s spread — nothing, correctly, since nothing touched a data path |
+| Rule | State card, model, transfer size and build with every rate. Measure the card the figure you are comparing to used |
+
+### The lossy-link gate is back, 2026-08-11
+
+`tests/perf/run-lossgate.sh`, written 2026-08-02, left on an unmerged branch, in no working tree. Now in `main`.
+
+| Adapted | Why |
+|---|---|
+| `-a -B ens18` via `AMINETXDUO_LOSSGATE_FBFLAGS` | Rig moved to bridged Amiberry |
+| awk keys on `fitzbench: file=FITZ:` | It matched `FitzBench FITZ:`, which nothing has printed for weeks — every sample came back empty |
+| retransmit grep | Predates `-w`/`lossrate.py` |
+
+Induces loss with netem on the peer; read and write reported separately.
+Stops at `no baseline ... record one with -B`. `~/tc-cap` on the peer still has
+`cap_net_admin`.
+
+**The only rig that can price an ack or retransmit change.** The clean lab
+measures zero retransmissions, so such a change is free on it: 0.16.6 shipped
+two and read fell 18% on real hardware while every arm we ran said the
+opposite. `-w/-l/-L` only measure loss a run met; they induce none.
+The Amiberry `AMIBERRY_UAENET_MBIT` pacer is a dead end — it never worked.
 
 ### The host-test count guard, closed 2026-08-11
 
