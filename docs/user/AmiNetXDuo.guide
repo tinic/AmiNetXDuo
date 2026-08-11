@@ -725,6 +725,28 @@
   the lease is thrown away and re-acquired each time. Run
   AddNetInterface at boot and the stack is up once, waiting.
 
+  @{b}A drawer, and a Shell in a browser, at boot@{ub}
+
+  The Installer offers this and it defaults to no. Say yes and two more
+  lines go into the same block of S:User-Startup:
+
+    Assign AmiNetXDuo: "Work:AmiNetXDuo"
+    Run >NIL: <NIL: C:httpd "RAM:" 80 -T
+
+  with the drawer and the port you were asked for. httpd then serves
+  that drawer over HTTP and WebDAV, so it mounts as a drive on a
+  desktop machine, and -T adds an AmigaDOS Shell in a web browser at
+  http://<this machine>/shell.
+
+  Neither has a password and there is no setting that adds one. Anyone
+  who can reach the port can read and write the drawer, and anyone who
+  can reach the port gets a Shell on this machine. That is the whole of
+  what you are choosing.
+
+  The assign is how -T finds the page it serves; the Installer put it
+  in the AmiNetXDuo drawer with the documentation. Running the
+  Installer again and answering no takes both lines away.
+
   @{b}Stopping@{ub}
 
   There is no command that shuts the stack down. @{"Offline" link OFFLINE}
@@ -852,7 +874,8 @@
     telnet            log in to another machine
     ssh               the same, encrypted
     tftp              the small file transfer protocol
-    httpd             serve a drawer, over HTTP and WebDAV
+    httpd             serve a drawer, over HTTP and WebDAV, and with
+                      -T a Shell in a browser
 
   Only the linked commands have a page here. The rest answer "?" with
   their template, which is usually enough, and behave the way the same

@@ -5,7 +5,46 @@
 #
 #   install/test/run-workbench.sh [-b BUILDDIR] [-a ARCHIVE.lha]
 #                                       [-l NOVICE|AVERAGE|EXPERT]
-#                                       [-t SECONDS] [-T SECONDS] [-k]
+#                                       [-t SECONDS] [-T SECONDS] [-k] [-H]
+#
+# -H IS THE TERMINAL ARM, and it makes the run three installs instead of one:
+#
+#   1. a pre-existing S:User-Startup with another application's lines in it is
+#      written BEFORE anything is installed, then the Installer runs twice,
+#      both times answering "Yes, serve them" to the question about serving a
+#      drawer and a Shell at boot.  Two runs, one httpd line and one assign
+#      line, or the managed block was appended to rather than replaced;
+#   2. the power cycle, and while the machine is up this host fetches
+#      http://<the Amiga>/shell over the bridge, which is what "reachable"
+#      means;
+#   3. a third install answering the question the other way, which has to take
+#      both lines away again and leave AddNetInterface and the other
+#      application's lines exactly where they were.
+#
+# WHAT THE OTHER MACHINE DOES, in step 2, and it is the product's main path:
+# GET /shell and compare Content-Length against the page on the drive; PUT
+# a file and GET it back and compare the bytes; PUT our own release .lha and
+# have the Amiga `lha x` it, then compare the extracted files against this
+# host's copies; and run tests/tools/httpd-drill.py --terminal and
+# tests/tools/wsterm-console.py, which is a Shell answering through the
+# WebSocket.  Nothing here scores "the command completed".
+#
+# AMINETXDUO_PEER is that machine and there is no default.  The host running
+# amiberry cannot be it: with uaenet_pcap on a shared NIC a frame this host
+# sends to the guest's MAC does not come back round to that NIC's pcap, so
+# every connection from here is refused.  Without a peer the -H run exits 3
+# rather than passing.
+#
+# lha is LhA 2.15 from ~/amiga-assets/apps/lha-2.15, which is licensed
+# third-party software: it is staged onto the test drive here and is in
+# nothing this repository ships.  Absent, that one step says so and fails,
+# rather than disappearing.
+#
+# It needs -l AVERAGE or -l EXPERT: at NOVICE the Installer draws no questions
+# at all and there is nothing to answer.
+#
+# Exit status: 0 pass, 1 something under test failed, 2 an ingredient is
+# missing on this machine, 3 nothing could reach the Amiga from outside.
 #
 # WHY THIS EXISTS, given that install/test/run-installer.sh already installs and
 # boots.  That harness stages the machine itself: it makes an empty LIBS:, a
@@ -102,8 +141,9 @@ LEVEL=NOVICE
 INSTALL_TIMEOUT=420
 BOOT_TIMEOUT=720
 KEEP=0
+TERMINAL=0
 
-while getopts "b:a:l:t:T:k" opt; do
+while getopts "b:a:l:t:T:kH" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -111,11 +151,23 @@ while getopts "b:a:l:t:T:k" opt; do
         t) INSTALL_TIMEOUT="$OPTARG" ;;
         T) BOOT_TIMEOUT="$OPTARG" ;;
         k) KEEP=1 ;;
+        H) TERMINAL=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
-                "[-l NOVICE|AVERAGE|EXPERT] [-t seconds] [-T seconds] [-k]" >&2
+                "[-l NOVICE|AVERAGE|EXPERT] [-t seconds] [-T seconds] [-k] [-H]" >&2
            exit 2 ;;
     esac
 done
+
+# -H needs a level where the questions are drawn at all.  At NOVICE every
+# ask... returns its default without showing anything, so a run that asked for
+# the terminal and got NOVICE would install without it and pass every check
+# below that does not look for it -- which is the vacuous pass this whole
+# script exists not to produce.
+if [ "$TERMINAL" = "1" ] && [ "$LEVEL" = "NOVICE" ]; then
+    echo "-H needs -l AVERAGE or -l EXPERT: at NOVICE the Installer draws no" >&2
+    echo "questions and the terminal one cannot be answered." >&2
+    exit 2
+fi
 
 case "$LEVEL" in
     NOVICE|AVERAGE|EXPERT) ;;
@@ -254,6 +306,21 @@ command -v lha >/dev/null 2>&1 || {
 
 ADFDIR="${AMINETXDUO_ADF_DIR:-$HOME/amigaos/adf}"
 
+# WHERE THE OTHER MACHINE IS.
+#
+# Everything -H asserts about the running server is asserted from somewhere
+# else, because "reachable" means reachable from another machine and because
+# THE HOST RUNNING AMIBERRY IS NOT ANOTHER MACHINE: with uaenet_pcap on a
+# shared NIC, a frame this host sends to the guest's MAC does not come back
+# round to that NIC's pcap, so every connection from here is refused and the
+# refusal says nothing about the server.  Measured on playhouse3: from the
+# emulating host, connection refused every time; from a third machine on the
+# same LAN, HTTP/1.1 200 with the right Content-Length.
+#
+# An ssh target, and the drills are copied to it.  Without one the -H stage
+# reports infrastructure and fails; it never passes for want of a peer.
+PEER="${AMINETXDUO_PEER:-}"
+
 echo "==> model $MODEL on $(basename "$KICKSTART")"
 
 # ------------------------------------------------------ Workbench 3.1 SYS: --
@@ -365,16 +432,37 @@ echo "==> archive $(basename "$ARCHIVE") ($(wc -c < "$ARCHIVE" | tr -d ' ') byte
 
 # ------------------------------------------------------------ the machine --
 
-echo "==> building installdrive ($LEVEL)"
-DRIVER="$ROOT/build/installdrive-wb-$LEVEL"
 # -m68000, not -m68020: this runs INSIDE the guest, and the guest is whatever
 # MODEL says.  Built for a 68020 it executed TST.L A0 on the A600 and took an
 # illegal instruction before the Installer ever started, so the boot never
 # finished, INSTALL_TIMEOUT fired, and the drive was left empty -- which reads
 # as a clean pass to every "this file is absent" check below.  Nothing here
 # needs 68020 codegen.
-"$GCC" -O2 -m68000 -Wall -Wextra -DDRIVE_LEVEL="\"$LEVEL\"" -I"$NDK" \
-       -o "$DRIVER" "$ROOT/install/test/installdrive.c" || exit 2
+#
+# $1 names the binary, $2 is how many times it runs the Installer, $3 is the
+# label of the yes/no button to press instead of the first one (empty: press
+# the first, which is every question's default).
+build_driver() {
+    local out="$1" runs="$2" label="$3"
+    "$GCC" -O2 -m68000 -Wall -Wextra -DDRIVE_LEVEL="\"$LEVEL\"" \
+           -DDRIVE_RUNS="$runs" -DDRIVE_YES_LABEL="\"$label\"" -I"$NDK" \
+           -o "$out" "$ROOT/install/test/installdrive.c" || exit 2
+}
+
+# -H installs TWICE in the first boot, both times saying yes to the terminal.
+# One run proves the lines get written; two prove the block is rewritten and
+# not appended to, which is the property a user with an existing S:User-Startup
+# is relying on.
+YES_LABEL=""
+DRIVE_RUNS=1
+if [ "$TERMINAL" = "1" ]; then
+    YES_LABEL="Yes, serve them"
+    DRIVE_RUNS=2
+fi
+
+echo "==> building installdrive ($LEVEL, $DRIVE_RUNS run(s)${YES_LABEL:+, \"$YES_LABEL\"})"
+DRIVER="$ROOT/build/installdrive-wb-$LEVEL"
+build_driver "$DRIVER" "$DRIVE_RUNS" "$YES_LABEL"
 
 rm -rf "$HD"
 mkdir -p "$HD"
@@ -382,6 +470,65 @@ cp -R "$WB/." "$HD/"
 cp "$A2065" "$HD/Devs/a2065.device"
 cp "$DRIVER" "$HD/C/installdrive"
 chmod 755 "$HD/Devs/a2065.device" "$HD/C/installdrive"
+
+# SOMEBODY ELSE'S S:User-Startup, written before the installer ever runs.
+#
+# The installer's stated contract is that it replaces its own marked block and
+# leaves every other application's lines alone, and that is the thing most
+# worth not breaking: this file is where every Amiga application on the machine
+# has put its line.  So the file exists, with lines in it that are nothing to
+# do with us, and each phase below checks they are all still there, in order,
+# byte for byte.
+FOREIGN_LINES=(
+    "; -- SomeOtherApp 2.4 --"
+    "Assign OTHERAPP: DH0:OtherApp"
+    "C:SetPatch QUIET"
+    "; -- end SomeOtherApp --"
+)
+mkdir -p "$HD/S"
+printf '%s\n' "${FOREIGN_LINES[@]}" > "$HD/S/User-Startup"
+chmod 644 "$HD/S/User-Startup"
+
+# AmigaDOS does not care about case and this host does, so a file the guest
+# wrote as `s/user-startup` is not `S/User-Startup` to `[ -f ]`.  Every name
+# below is resolved the way the guest would, one component at a time; without
+# this the installer looks like it skipped the one file it did write.
+amiga_path() {
+    local cur="$HD" part next
+    local -a parts
+    IFS=/ read -ra parts <<< "$1"
+    for part in "${parts[@]}"; do
+        next=$(ls -1 "$cur" 2>/dev/null |
+               awk -v p="$part" 'tolower($0) == tolower(p) { print; exit }')
+        [ -n "$next" ] || return 1
+        cur="$cur/$next"
+    done
+    printf '%s\n' "$cur"
+}
+
+user_startup() { amiga_path S/User-Startup 2>/dev/null || true; }
+
+foreign_intact() {
+    local f line
+    f=$(user_startup)
+    [ -n "$f" ] && [ -f "$f" ] || return 1
+    for line in "${FOREIGN_LINES[@]}"; do
+        grep -Fqx -- "$line" "$f" || return 1
+    done
+    return 0
+}
+
+# How many times a pattern appears in S:User-Startup.  Duplicates are the
+# failure mode a second install has, so this counts rather than tests.
+startup_count() {
+    local f n
+    f=$(user_startup)
+    [ -n "$f" ] && [ -f "$f" ] || { echo 0; return; }
+    # grep -c prints 0 AND exits 1 when it matches nothing, so `|| echo 0`
+    # would print it twice and every arithmetic test downstream reads "0\n0".
+    n=$(grep -c -- "$1" "$f" 2>/dev/null) || n=0
+    echo "${n:-0}"
+}
 
 # The download, where a download would be: its own drawer, not the one the
 # installer is going to create.
@@ -396,6 +543,29 @@ mkdir -p "$HD/Unpacked"
 }
 cp "$INSTALLER" "$HD/Unpacked/AmiNetXDuo/Installer"
 chmod -R a+rx "$HD/Unpacked"
+
+# LhA 2.15, from the asset store, and NOT from this repository: it is
+# third-party and licensed, so it is staged onto the test drive here and goes
+# into nothing dist/make-dist.sh packs.  Workbench 3.1 has no archiver, and
+# "a PC puts an archive on the Amiga and the Amiga unpacks it" is the path
+# this product is mostly for, so the -H run below needs one.  The package
+# carries a build per CPU the same way we do and lha_68020 traps on a 68000,
+# so the model picks -- the rule is tools/demo.sh's, not a second one.
+LHADIR="${AMINETXDUO_DEMO_LHA:-$HOME/amiga-assets/apps/lha-2.15}"
+case "$MODEL" in
+    A4000*) LHABIN=lha_68040 ;;
+    A500*|A600*|A1000*|A2000*) LHABIN=lha_68k ;;
+    *) LHABIN=lha_68020 ;;
+esac
+HAVE_LHA=0
+if [ -f "$LHADIR/$LHABIN" ]; then
+    cp -f "$LHADIR/$LHABIN" "$HD/C/lha"
+    chmod 755 "$HD/C/lha"
+    HAVE_LHA=1
+    echo "==> lha staged, $LHABIN for $MODEL"
+else
+    echo "==> no lha at $LHADIR/$LHABIN" >&2
+fi
 
 # WHAT IS IN THE ARCHIVE, said out loud BEFORE anything is installed.  The
 # https: check below cannot pass if the archive has no tls.library, and an
@@ -586,10 +756,22 @@ EOF
 # The stock 3.1 Startup-Sequence, with the tail replaced.  LoadWB stays --
 # the Installer draws on the Workbench screen and a user has one, and only
 # `EndCLI`, which would take the boot shell away before our line runs, goes.
+#
+# $2 = "nouserstartup" also drops `Execute S:User-Startup`, which is what a
+# boot into the Installer has to be once the machine has already been
+# installed once.  A running stack holds LIBS:bsdsocket.library open and the
+# copy then fails -- the script says so itself, in @special-msg: "the network
+# is already running.  Reboot and run this installer again before doing
+# anything else."  This is that reboot.
 STARTUP_SUM=""
 startup_with() {
-    local tail_cmds="$1"
-    sed -e '/^EndCLI/d' "$WB/S/Startup-Sequence" > "$HD/S/Startup-Sequence"
+    local tail_cmds="$1" mode="${2:-}"
+    if [ "$mode" = "nouserstartup" ]; then
+        sed -e '/^EndCLI/d' -e '/Execute S:User-Startup/d' \
+            "$WB/S/Startup-Sequence" > "$HD/S/Startup-Sequence"
+    else
+        sed -e '/^EndCLI/d' "$WB/S/Startup-Sequence" > "$HD/S/Startup-Sequence"
+    fi
     printf '\n%s\n' "$tail_cmds" >> "$HD/S/Startup-Sequence"
     chmod 755 "$HD/S/Startup-Sequence"
     STARTUP_SUM=$(shasum "$HD/S/Startup-Sequence" | cut -d' ' -f1)
@@ -627,24 +809,6 @@ echo "============================================================"
 
 fail=0
 
-# AmigaDOS does not care about case and this host does, so a file the guest
-# wrote as `s/user-startup` is not `S/User-Startup` to `[ -f ]`.  Every name
-# below is checked the way the guest would resolve it, one component at a
-# time; without this the installer looks like it skipped the one file it did
-# write, and the run stops before the half that matters.
-amiga_path() {
-    local cur="$HD" part next
-    local -a parts
-    IFS=/ read -ra parts <<< "$1"
-    for part in "${parts[@]}"; do
-        next=$(ls -1 "$cur" 2>/dev/null |
-               awk -v p="$part" 'tolower($0) == tolower(p) { print; exit }')
-        [ -n "$next" ] || return 1
-        cur="$cur/$next"
-    done
-    printf '%s\n' "$cur"
-}
-
 check_file() {
     local real
     if real=$(amiga_path "$1") && [ -f "$real" ]; then
@@ -681,6 +845,43 @@ cat "$(amiga_path S/User-Startup 2>/dev/null)" 2>/dev/null || echo "(none)"
 echo "---- DEVS:NetInterfaces/eth0 ----"
 cat "$(amiga_path Devs/NetInterfaces/eth0 2>/dev/null)" 2>/dev/null || echo "(none)"
 
+# Machine-readable, one key per line, so nothing downstream has to read prose.
+TERM_LINES=0
+TERM_ASSIGNS=0
+FOREIGN=no
+foreign_intact && FOREIGN=yes
+TERM_LINES=$(startup_count 'httpd')
+TERM_ASSIGNS=$(startup_count 'Assign AmiNetXDuo:')
+
+echo
+echo "startup_foreign_lines_intact=$FOREIGN"
+echo "startup_httpd_lines=$TERM_LINES"
+echo "startup_assign_lines=$TERM_ASSIGNS"
+echo "startup_installer_runs=$DRIVE_RUNS"
+
+if [ "$FOREIGN" != "yes" ]; then
+    echo
+    echo "!! S:User-Startup lost lines that were not ours.  The installer's"
+    echo "   contract is that it touches only its own marked block."
+    fail=1
+fi
+
+if [ "$TERMINAL" = "1" ]; then
+    # Two installs, both answering yes: exactly one of each line, or the block
+    # was appended to rather than replaced.
+    if [ "$TERM_LINES" != "1" ] || [ "$TERM_ASSIGNS" != "1" ]; then
+        echo
+        echo "!! after $DRIVE_RUNS installs answering yes, S:User-Startup has"
+        echo "   $TERM_LINES httpd line(s) and $TERM_ASSIGNS assign line(s); one of each"
+        echo "   is the only right answer."
+        fail=1
+    fi
+elif [ "$TERM_LINES" != "0" ]; then
+    echo
+    echo "!! nobody asked for httpd and S:User-Startup has $TERM_LINES httpd line(s)"
+    fail=1
+fi
+
 if [ "$INSTALL_STATUS" != "0" ] || [ "$fail" != "0" ]; then
     echo
     echo "!! the install run did not complete cleanly (status $INSTALL_STATUS)"
@@ -703,6 +904,41 @@ echo "============================================================"
 if [ "$(shasum "$HD/S/Startup-Sequence" | cut -d' ' -f1)" != "$STARTUP_SUM" ]; then
     echo "note: the installer also changed S:Startup-Sequence, diff against"
     echo "      the stock 3.1 one is worth reading before the reboot"
+fi
+
+# -H adds a fifth step, and it is the one the machine is for: wait for the
+# other machine to have finished putting files here over WebDAV, unpack the
+# archive it put, and copy what arrived out of RAM: onto DH0: so the host can
+# compare the bytes against what it sent.
+#
+# Waited rather than handshaken.  DH0: is a directory on the host, so a
+# handshake file would work, but AmigaDOS's Lab/Skip loop is a worse thing to
+# get wrong than a fixed window is to spend, and the window is bounded by
+# BOOT_TIMEOUT either way.  The peer writes its results long before it ends.
+CHECK_TAIL=""
+if [ "$TERMINAL" = "1" ]; then
+    CHECK_TAIL=$(cat <<'EOF'
+
+Echo >>DH0:usercheck.txt "*N=== 5. what the other machine put here over WebDAV"
+C:Wait 240
+C:List RAM: >>DH0:usercheck.txt
+Echo >>DH0:usercheck.txt "RESULT davlist rc=$RC"
+; A DRAWER THAT DID NOT EXIST A MOMENT AGO.  LhA asks
+; "already exists, overwrite? (Y/N/A/S/Q):" on a second
+; extraction and waits for a keystroke there is nobody to
+; type, and a wait with nothing to end it is a run that
+; times out rather than a run that fails.
+C:Delete RAM:Unpack ALL QUIET FORCE
+C:MakeDir RAM:Unpack
+C:lha -q x RAM:payload.lha RAM:Unpack/ >>DH0:usercheck.txt
+Echo >>DH0:usercheck.txt "RESULT lha-x rc=$RC"
+C:MakeDir DH0:DavOut
+C:Copy RAM:payload.txt DH0:DavOut QUIET
+Echo >>DH0:usercheck.txt "RESULT davcopy rc=$RC"
+C:Copy RAM:Unpack DH0:DavOut/Unpack ALL QUIET
+Echo >>DH0:usercheck.txt "RESULT unpackcopy rc=$RC"
+EOF
+)
 fi
 
 # An ordinary Shell script, doing ordinary things, with every command's return
@@ -734,7 +970,7 @@ Echo >>DH0:usercheck.txt "RESULT fetch-https rc=\$RC"
 Echo >>DH0:usercheck.txt "*N=== 4. arp, what answered on this network"
 C:arp >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT arp rc=\$RC"
-
+$CHECK_TAIL
 Echo >>DH0:usercheck.txt "*N=== done"
 EOF
 chmod 755 "$HD/S/AmiNetXDuo-Check"
@@ -744,7 +980,83 @@ Execute S:AmiNetXDuo-Check >DH0:check-console.txt
 Echo >DH0:.done "$RC"'
 
 rm -f "$HD/usercheck.txt" "$HD/http-body.txt" "$HD/https-body.txt"
+
+# ---- the terminal, from another machine, while the Amiga is still up -------
+#
+# Not from inside the guest.  "Reachable" means reachable from somewhere else,
+# and this backend is a bridge, so the host is somewhere else with its own
+# address on the same LAN.  The guest's address is not known in advance
+# (DHCP), and it does not have to be: ShowNetStatus writes it to DH0: as step
+# 1 of the check script, and DH0: is a directory on this host, so it can be
+# read while the machine is still running.
+#
+# Runs beside the boot rather than after it: httpd is gone the moment the
+# emulator is killed.
+TERM_PROBE="$ROOT/build/wb31-peer-drill.txt"
+PROBE_PID=""
+PAYLOAD_TXT="$ROOT/build/wb31-payload.txt"
+PAYLOAD_LHA="$ARCHIVE"
+
+if [ "$TERMINAL" = "1" ]; then
+    : > "$TERM_PROBE"
+    printf 'put over WebDAV by %s at %s\n' "$(hostname)" "$(date -u +%FT%TZ)" \
+        > "$PAYLOAD_TXT"
+
+    # Under $HOME on the peer, not /tmp: /tmp there is a 2 GB tmpfs shared
+    # with everything else on the box and it was 100% full the first time this
+    # ran, which reads as "the peer is unreachable" and is not.
+    PEERDIR=".aminetxduo-e2e"
+    if [ -z "$PEER" ]; then
+        echo "peer=none" >> "$TERM_PROBE"
+    else
+        if ssh -o BatchMode=yes "$PEER" "rm -rf $PEERDIR && mkdir -p $PEERDIR" &&
+           scp -q -o BatchMode=yes \
+                "$ROOT/tests/tools/httpd-drill.py" \
+                "$ROOT/tests/tools/wsterm-console.py" \
+                "$ROOT/install/test/peer-drill.sh" \
+                "$PAYLOAD_TXT" "$PAYLOAD_LHA" "$PEER:$PEERDIR/"; then
+            :
+        else
+            echo "peer=unreachable" >> "$TERM_PROBE"
+            PEER=""
+        fi
+    fi
+
+    if [ -n "$PEER" ]; then
+        (
+            guest=""
+            for _ in $(seq 1 "$BOOT_TIMEOUT"); do
+                sleep 1
+                [ -f "$HD/usercheck.txt" ] || continue
+                guest=$(sed -n 's/^  *address  *\([0-9][0-9.]*\).*/\1/p' \
+                        "$HD/usercheck.txt" 2>/dev/null | head -1)
+                [ -n "$guest" ] && break
+            done
+            if [ -z "$guest" ]; then
+                echo "peer=no-guest-address" >> "$TERM_PROBE"
+                exit 0
+            fi
+            echo "guest_address=$guest" >> "$TERM_PROBE"
+            ssh -o BatchMode=yes "$PEER" \
+                "sh $PEERDIR/peer-drill.sh $guest $PEERDIR/$(basename "$PAYLOAD_TXT") \
+                 $PEERDIR/$(basename "$PAYLOAD_LHA") $PEERDIR" \
+                >> "$TERM_PROBE" 2>&1
+        ) &
+        PROBE_PID=$!
+    fi
+fi
+
 boot boot "$BOOT_TIMEOUT" net
+
+if [ -n "$PROBE_PID" ]; then
+    kill -TERM "$PROBE_PID" 2>/dev/null || true
+    wait "$PROBE_PID" 2>/dev/null || true
+fi
+if [ "$TERMINAL" = "1" ]; then
+    echo
+    echo "---- what the other machine did to the Amiga ----"
+    cat "$TERM_PROBE" 2>/dev/null || echo "(the peer wrote nothing)"
+fi
 
 echo
 echo "---- what the machine did ----"
@@ -809,6 +1121,106 @@ report "fetch https://ftp.gnu.org/"        fetch-https \
        "$([ "$HAS_TLS" = 1 ] && echo pass || echo fail)"
 report "arp"                           arp
 
+if [ "$TERMINAL" = "1" ]; then
+    key() { sed -n "s/^$1=//p" "$TERM_PROBE" 2>/dev/null | head -1; }
+
+    # No peer is INFRASTRUCTURE, and it gets its own exit status.  A run that
+    # could not reach the machine from anywhere else has not tested the server
+    # and must not read as one that did.
+    case "$(key peer)" in
+        none)
+            echo
+            echo "!! AMINETXDUO_PEER is not set, so nothing could talk to the"
+            echo "   Amiga from another machine.  The host running amiberry"
+            echo "   cannot: with uaenet_pcap on a shared NIC its own frames"
+            echo "   do not reach the guest.  Set AMINETXDUO_PEER=<ssh target>."
+            exit 3 ;;
+        unreachable|no-guest-address)
+            echo
+            echo "!! the peer could not be prepared, or the Amiga never"
+            echo "   reported an address: $(key peer)"
+            exit 3 ;;
+    esac
+
+    # The terminal.  Content-Length is the assertion: it is the server saying
+    # how big the page -T found, and the page the installer put on this drive
+    # is the size to expect.
+    want=$(wc -c < "$HD/AmiNetXDuo/Terminal/terminal.html" 2>/dev/null | tr -d ' ')
+    got_len=$(key terminal_content_length)
+    if [ "$(key terminal_status)" = "200" ] && [ -n "$want" ] &&
+       [ "$got_len" = "$want" ]; then
+        printf '  %-34s 200, Content-Length %s\n' \
+               "GET /shell, from the peer" "$got_len"
+    else
+        printf '  %-34s status=%s length=%s wanted=%s\n' \
+               "GET /shell, from the peer" "$(key terminal_status)" \
+               "${got_len:-none}" "${want:-?}"
+        bad=1
+    fi
+
+    if [ "$(key dav_roundtrip_identical)" = "yes" ]; then
+        printf '  %-34s bytes identical\n' "WebDAV PUT then GET"
+    else
+        printf '  %-34s put=%s get=%s identical=%s\n' "WebDAV PUT then GET" \
+               "$(key dav_put_status)" "$(key dav_get_status)" \
+               "$(key dav_roundtrip_identical)"
+        bad=1
+    fi
+
+    # ON THE AMIGA'S DISK, not just back out of the server.  The guest copied
+    # what arrived in the served drawer onto DH0:, which is a directory on this
+    # host, so the bytes the peer sent are compared against the bytes an
+    # AmigaDOS Copy wrote.
+    if [ -f "$HD/DavOut/payload.txt" ] &&
+       cmp -s "$PAYLOAD_TXT" "$HD/DavOut/payload.txt"; then
+        printf '  %-34s bytes identical\n' "the file, on the Amiga's disk"
+    else
+        printf '  %-34s NOT THERE OR DIFFERENT\n' "the file, on the Amiga's disk"
+        bad=1
+    fi
+
+    # lha x of the archive the peer put there.  Skipped LOUDLY, with its own
+    # line, when the asset store has no lha: a step that did not run must not
+    # be an absent line.
+    if [ "$HAVE_LHA" = "0" ]; then
+        printf '  %-34s NOT RUN, no %s in %s\n' \
+               "lha x of the archive" "$LHABIN" "$LHADIR"
+        bad=1
+    else
+        lha_rc=$(sed -n 's/^RESULT lha-x rc=//p' "$HD/usercheck.txt" 2>/dev/null \
+                 | head -1)
+        # Two files out of our own archive, compared against the copies this
+        # host has: one text, one binary, both from drawers deep enough that a
+        # truncated unpack cannot produce them by accident.
+        unpack_ok=1
+        for rel in AmiNetXDuo/Terminal/terminal.html AmiNetXDuo/ReadMe; do
+            here="$HD/Unpacked/$rel"
+            there="$HD/DavOut/Unpack/$rel"
+            [ -f "$here" ] || continue
+            cmp -s "$here" "$there" || unpack_ok=0
+        done
+        if [ "${lha_rc:-x}" = "0" ] && [ "$unpack_ok" = "1" ]; then
+            printf '  %-34s rc=0, extracted bytes identical\n' \
+                   "lha x of the archive"
+        else
+            printf '  %-34s rc=%s extracted-identical=%s\n' \
+                   "lha x of the archive" "${lha_rc:-NEVER RAN}" "$unpack_ok"
+            bad=1
+        fi
+    fi
+
+    for drill in httpd_drill wsterm_console; do
+        rc=$(key "${drill}_rc")
+        if [ "$rc" = "0" ]; then
+            printf '  %-34s rc=0\n' "$drill, from the peer"
+        else
+            printf '  %-34s rc=%s\n' "$drill, from the peer" \
+                   "${rc:-$(key "$drill")}"
+            bad=1
+        fi
+    done
+fi
+
 # The one that shipped.  0.17.0 and 0.17.1 deadlocked in bsd_address_changed()
 # the moment a DHCP lease arrived, so AddNetInterface never returned from its
 # OpenLibrary(), S:User-Startup never finished, and the machine stopped part
@@ -818,6 +1230,7 @@ report "arp"                           arp
 # Said separately from the four above because "the machine did not finish
 # booting" and "a command returned nonzero" are different failures, and the
 # table alone reads as four things that merely did not run.
+USER_BOOT_STATUS=$BOOT_STATUS
 if [ "$BOOT_STATUS" = "124" ]; then
     echo
     echo "  !! the machine did not finish booting: no DH0:.done after ${BOOT_TIMEOUT}s."
@@ -827,8 +1240,73 @@ if [ "$BOOT_STATUS" = "124" ]; then
     echo "     apart from the driver and the library open."
 fi
 
+# ------------------------------------------------------------------ run 3 ---
+#
+# THE OTHER DIRECTION.  An installer that adds a line and cannot take it away
+# again is not idempotent, it is cumulative, and the only way to find out is to
+# install a third time on this same machine and answer the question the other
+# way.  Nothing is re-staged: this is the drive the user already has, with
+# everything the first two runs put on it.
+
+if [ "$TERMINAL" = "1" ]; then
+    echo
+    echo "============================================================"
+    echo "  3/3  installing again, answering the terminal question no"
+    echo "============================================================"
+
+    build_driver "$ROOT/build/installdrive-wb-$LEVEL-no" 1 ""
+    cp "$ROOT/build/installdrive-wb-$LEVEL-no" "$HD/C/installdrive"
+    chmod 755 "$HD/C/installdrive"
+
+    startup_with 'FailAt 9999
+C:installdrive >DH0:install-console.txt
+Echo >DH0:.done "$RC"' nouserstartup
+
+    boot uninstall "$INSTALL_TIMEOUT"
+    if [ "$BOOT_STATUS" != "0" ]; then
+        echo "!! the third install did not finish (status $BOOT_STATUS)"
+        bad=1
+    fi
+
+    AFTER_HTTPD=$(startup_count 'httpd')
+    AFTER_ASSIGN=$(startup_count 'Assign AmiNetXDuo:')
+    AFTER_IFACE=$(startup_count 'AddNetInterface')
+    AFTER_FOREIGN=no
+    foreign_intact && AFTER_FOREIGN=yes
+
+    echo
+    echo "---- S:User-Startup after answering no ----"
+    cat "$(user_startup)" 2>/dev/null || echo "(none)"
+    echo
+    echo "startup_httpd_lines=$AFTER_HTTPD"
+    echo "startup_assign_lines=$AFTER_ASSIGN"
+    echo "startup_addnetinterface_lines=$AFTER_IFACE"
+    echo "startup_foreign_lines_intact=$AFTER_FOREIGN"
+
+    if [ "$AFTER_HTTPD" != "0" ] || [ "$AFTER_ASSIGN" != "0" ]; then
+        printf '  %-34s httpd=%s assign=%s\n' \
+               "answering no removes both lines" "$AFTER_HTTPD" "$AFTER_ASSIGN"
+        bad=1
+    else
+        printf '  %-34s both gone\n' "answering no removes both lines"
+    fi
+    if [ "$AFTER_IFACE" != "1" ]; then
+        printf '  %-34s %s\n' \
+               "AddNetInterface still there, once" "$AFTER_IFACE"
+        bad=1
+    else
+        printf '  %-34s yes\n' "AddNetInterface still there, once"
+    fi
+    if [ "$AFTER_FOREIGN" != "yes" ]; then
+        printf '  %-34s NO\n' "somebody else's lines intact"
+        bad=1
+    else
+        printf '  %-34s yes\n' "somebody else's lines intact"
+    fi
+fi
+
 echo
-if [ "$bad" = "0" ] && [ "$BOOT_STATUS" != "124" ]; then
+if [ "$bad" = "0" ] && [ "$USER_BOOT_STATUS" != "124" ]; then
     echo "==> PASS: a real Workbench 3.1, installed from the archive, does all four"
     [ "$KEEP" = "1" ] && echo "    (the drive is at $HD)"
     exit 0

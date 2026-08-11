@@ -112,6 +112,7 @@ Configuration follows Roadshow's layout, `DEVS:NetInterfaces/<name>`,
 | `fetch` | retrieve an `http://` or `https://` URL |
 | `httpd` | share a drawer, so other machines can mount it as a drive; `-T` also serves a Shell in a browser |
 | `nc` | connect or listen, TCP and UDP, port ranges, timeouts |
+| `iperf` | measure throughput against an `iperf` server, or be one |
 | `telnet` | with enough option negotiation not to confuse a real server |
 | `ssh` | Dropbear's dbclient, public-key auth; see the ReadMe for keys |
 | `NetTrace` | capture packets to a `.pcap` file Wireshark can open |

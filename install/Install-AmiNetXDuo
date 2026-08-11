@@ -209,6 +209,48 @@
        "S:User-Startup is left alone, so it is safe to run this installer "
        "again."))
 
+(set H_HTTPD
+  (cat "httpd serves one drawer to the other machines on the network, over "
+       "HTTP and WebDAV, so it appears as a drive in Finder, in Explorer and "
+       "on Linux with nothing installed at the far end.  With the terminal "
+       "switched on it also answers at /shell with an AmigaDOS Shell that "
+       "runs in a web browser.\n\n"
+       "There is no password on either half of that, and there is no setting "
+       "that adds one.  Anyone who can reach the port can read and write the "
+       "drawer, and anyone who can reach the port gets a Shell on this "
+       "machine.  Behind a home router that is a convenience; on a network "
+       "with people you do not know on it, it is not, and that is the whole "
+       "of the decision being made here.\n\n"
+       "Answering yes adds two lines to S:User-Startup next to the one that "
+       "starts the network: an assign, so httpd can find the page the "
+       "terminal is served from, and httpd itself.  Answering no on a later "
+       "run takes them away again.\n\n"
+       "The drawer and the port are asked for next."))
+
+(set H_HTTPDROOT
+  (cat "httpd has to be given a drawer, and everything in it can be read, "
+       "changed and deleted by anyone who reaches the port.\n\n"
+       "RAM: is offered because it is on every Amiga, it is empty at boot and "
+       "nothing in it survives one, so it is the answer that cannot expose "
+       "something that was not put there deliberately.  It makes a serviceable "
+       "drop box between this machine and a desktop one.\n\n"
+       "Name a real drawer instead to have its contents there at every boot.  "
+       "A whole volume works and is a poor idea: SYS: is the system, and "
+       "serving it means serving S:User-Startup and LIBS: as well.\n\n"
+       "The terminal does not depend on this.  It is served from the same "
+       "port whatever the drawer is."))
+
+(set H_HTTPDPORT
+  (cat "80 is offered because it is the port a browser uses when the address "
+       "does not name one, so the terminal is at http://<this machine>/"
+       "terminal rather than at an address with a number in it.  Nothing in a "
+       "stock Workbench listens there, and AmigaOS has no notion of a port "
+       "being privileged, so nothing is gained by moving it.\n\n"
+       "Change it if something else on this machine is already using 80, or "
+       "to keep the server away from a browser that would find it by "
+       "accident.  8080 is the usual second choice, and the address is then "
+       "http://<this machine>:8080/shell."))
+
 (set H_REPLACELIB
   (cat "There is already a bsdsocket.library on this machine.  It belongs to "
        "whichever TCP/IP stack was installed before -- AmiTCP, Miami, "
@@ -265,6 +307,10 @@
 (set F_START_NO
   (cat "It will not start by itself.  To start it:\n\n"
        "    C:AddNetInterface DEVS:NetInterfaces/%s\n"))
+
+(set F_HTTPD
+  (cat "\nhttpd serves %s on port %ld from the next reboot, and a Shell in a "
+       "browser at /shell.  Neither asks for a password.\n"))
 
 (set H_DOCDIR
   (cat "The documentation, the example configuration files and the "
@@ -759,12 +805,18 @@
 
     ; --- automatic or manual addressing --------------------------------
 
+    ; Inverted for the reason spelled out at DO_HTTPD below: askbool returns 1
+    ; for the first (choices) string.  Written as "No" first with (default 0)
+    ; this said MDNS=YES to everyone who clicked "No" and MDNS=NO to everyone
+    ; who clicked "Yes"; only a NOVICE run, which takes the (default) and never
+    ; draws the page, came out right.
     (set WANTMDNS
-      (askbool
-        (prompt "Answer .local names on the network?")
-        (help    H_MDNS)
-        (choices "No" "Yes")
-        (default 0)))
+      (if (askbool
+            (prompt "Answer .local names on the network?")
+            (help    H_MDNS)
+            (choices "No" "Yes")
+            (default 1))
+          0 1))
 
     (set USEDHCP
       (askbool
@@ -850,6 +902,63 @@
     (help    H_STARTUP)
     (choices "Yes, at boot" "No, I will do it")
     (default 1)))
+
+; --- serve a drawer, and a Shell in a browser, at boot? ------------------
+;
+; DEFAULTS TO NO, and that is not timidity.  Every other question here has an
+; answer that is right for almost everybody, which is what makes NOVICE mode
+; work; this one does not.  A drawer served read-write and a Shell with no
+; password are a fine thing to switch on deliberately and not a thing to hand
+; to somebody who pressed Return through an installer, so the default is the
+; answer that changes nothing.
+;
+; Only asked when the network starts at boot.  The lines go into the same
+; managed block, immediately after AddNetInterface, and a server started at
+; boot on a machine that was told not to bring the network up at boot is a
+; contradiction rather than a configuration.  Answering no to the question
+; above therefore also takes these lines away, because the whole block is
+; rewritten either way.
+
+(set DO_HTTPD   0)
+(set HTTPD_ROOT "RAM:")
+(set HTTPD_PORT 80)
+
+(if DO_STARTUP
+  (
+    ; askbool returns 1 for the FIRST (choices) string and 0 for the second,
+    ; whatever the two say.  A question whose answer is no by default
+    ; therefore puts "No" first, defaults to 1, and inverts here -- which also
+    ; keeps the property the whole script has and install/test/installdrive.c
+    ; relies on: the first button on a page IS that page's default.
+    (set DO_HTTPD
+      (if (askbool
+            (prompt "Serve a drawer, and an AmigaDOS Shell in a web browser, "
+                    "when this Amiga boots?\n\n"
+                    "Neither has a password: whoever can reach the port gets "
+                    "both.")
+            (help    H_HTTPD)
+            (choices "No" "Yes, serve them")
+            (default 1))
+          0 1))
+
+    (if DO_HTTPD
+      (
+        (set HTTPD_ROOT
+          (askdir
+            (prompt "Which drawer should be served?\n\n"
+                    "Everything in it can be read, changed and deleted from "
+                    "the network.")
+            (help    H_HTTPDROOT)
+            (default "RAM:")))
+
+        (set HTTPD_PORT
+          (asknumber
+            (prompt "Which port should it listen on?")
+            (help    H_HTTPDPORT)
+            (range   1 65535)
+            (default 80)))
+      ))
+  ))
 
 (complete 10)
 
@@ -1258,15 +1367,16 @@
 
 ; httpd's terminal page.  It goes beside the examples rather than into C: or
 ; DEVS: because it is neither a command nor configuration: it is a file the
-; server reads and hands to a browser, and the person who wants one names it
-; on httpd's command line, which is also the switch that turns the endpoint on
-; at all.  A drawer here is somewhere they can find it, read it and edit it.
+; server reads and hands to a browser.  A drawer here is somewhere they can
+; find it, read it and edit it -- and it is where the AmiNetXDuo: assign
+; points, which is how a bare `httpd <drawer> 80 -T' finds it without being
+; told.
 
 (if (exists S_TERM (noreq))
     (copyfiles
       (prompt "Installing the terminal page for httpd")
       (help   "httpd can serve an AmigaDOS Shell to a web browser. This is the page it hands that browser: one self-contained HTML file, with nothing to fetch from anywhere else. "
-              "Nothing reads it where it is until you ask for it. httpd Work:Public 8080 TERMINAL=<this file> is what turns the endpoint on, and without that switch there is no terminal at all. "
+              "Nothing reads it where it is until you ask for it. httpd Work:Public 80 -T is what turns the endpoint on, and without -T there is no terminal at all. "
               "Note what it is when it is on: anyone who can reach that port gets a Shell on this machine, with no password, exactly as the WebDAV write methods on the same port have none.")
       (source S_TERM)
       (dest   (tackon DOCDIR "Terminal"))
@@ -1286,12 +1396,36 @@
 
 (set START_IF (if KEEP_OLD OLD_IF IFNAME))
 
+; One string, however many lines are in it.  (startup) replaces everything
+; between its two markers, so the block is always written whole and there is
+; no case where a second run leaves a line from the first one behind: an httpd
+; line appears because DO_HTTPD is true on THIS run, and goes away because it
+; is not.
+;
+; `Run >NIL: <NIL:' and not a bare command: httpd does not return, and a boot
+; that reaches it without Run stops there. The redirections detach it from the
+; startup Shell's console, which would otherwise keep that Shell alive.
+;
+; The assign is what lets the httpd line be short enough to be worth reading.
+; httpd looks for its page in AmiNetXDuo:Terminal/terminal.html, among two
+; other places (src/tools/httpd.c httpd_term_places[]), and the drawer this
+; installer put the page in is wherever the user said, so the assign is the
+; only stable name for it.
+
+(set BOOT_CMD ("C:AddNetInterface DEVS:NetInterfaces/%s QUIET\n" START_IF))
+
+(if DO_HTTPD
+    (set BOOT_CMD
+      (cat BOOT_CMD
+           ("Assign AmiNetXDuo: \"%s\"\n" DOCDIR)
+           ("Run >NIL: <NIL: C:httpd \"%s\" %ld -T\n" HTTPD_ROOT HTTPD_PORT))))
+
 (if DO_STARTUP
     (startup APPNAME
       (prompt "Adding AmiNetXDuo to S:User-Startup, so that the network "
               "starts when the Amiga boots.")
       (help   H_STARTUP)
-      (command ("C:AddNetInterface DEVS:NetInterfaces/%s QUIET\n" START_IF)))
+      (command BOOT_CMD))
     (startup APPNAME
       (prompt "Removing AmiNetXDuo's lines from S:User-Startup, so that the "
               "network does not start by itself.")
@@ -1307,6 +1441,14 @@
     (set FINAL_START (F_START_YES START_IF))
     (set FINAL_START (F_START_NO  START_IF)))
 
+; Said again on the last page, and deliberately.  The question that turned it
+; on was one of a dozen; this is the sentence somebody reads after the fact and
+; realises what is now running.
+(set FINAL_HTTPD "")
+
+(if DO_HTTPD
+    (set FINAL_HTTPD (F_HTTPD HTTPD_ROOT HTTPD_PORT)))
+
 ; The 68000 https:// notice used to be here, and it is not any more.  A user
 ; who never types an https: URL was being warned about something that would
 ; never affect them, on the one page they read once; and the user who DOES
@@ -1319,6 +1461,7 @@
 (exit
   "AmiNetXDuo " VERSION_STR " is installed.\n\n"
   FINAL_START
+  FINAL_HTTPD
   "\nShowNetStatus reports whether it came up.  The ReadMe in the "
   "AmiNetXDuo drawer covers the rest.  Version, on any of the installed "
   "files, reports " VERSION_STR " as well.\n")

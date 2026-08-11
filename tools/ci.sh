@@ -23,6 +23,10 @@
 #   analyze      GCC -fanalyzer over our own sources vs a triaged baseline
 #   conformance  build the bsdsocktest suite for m68k (running it needs tier 2)
 #   emulator     tier 2, boots FS-UAE, needs a ROM
+#   e2e          tier 2, installs the SHIPPED ARCHIVE on a real
+#                Workbench 3.1, reboots, and drives it from another
+#                machine: WebDAV, `lha x`, the browser terminal.
+#                Needs a licensed Workbench, LhA, and a peer.
 #
 # `tools/ci.sh` with no arguments runs toolchain, host, host32, cross, web and
 # conformance: everything that needs neither an emulator nor a licensed ROM.
@@ -649,6 +653,53 @@ stage_emulator() {
     done
 }
 
+# ------------------------------------------------------------ release e2e ----
+#
+# The one stage that tests the SHIPPED ARCHIVE rather than a build tree, on a
+# genuine Workbench 3.1, and then uses the machine the way its owner does:
+# WebDAV from another machine, `lha x` on the Amiga, a Shell through the
+# browser terminal.  A defect in what dist/make-dist.sh packs is invisible
+# everywhere else in this script.
+#
+# NOT in the default set, and not in `emulator` either.  It needs a licensed
+# Workbench 3.1 floppy set, Commodore's Installer, LhA from the asset store
+# and a SECOND MACHINE that can reach the guest -- the host running amiberry
+# cannot, see install/test/run-workbench.sh.  Naming it runs it.
+#
+# The ingredient list is not repeated here.  run-workbench.sh already owns it
+# and exits 2 when something is missing, 3 when it could not talk to the
+# machine from anywhere else, and those two are different things: the first is
+# "this box cannot run this test", the second is "the test could not observe
+# what it exists to observe".  Neither is a pass.
+stage_e2e() {
+    hr "release end-to-end (tier 2, needs a licensed Workbench and a peer)"
+
+    local archive="${AMINETXDUO_E2E_ARCHIVE:-}"
+    local rc=0
+
+    if [ -z "$archive" ]; then
+        local version
+        version=$("$ROOT/tools/version.sh" --product)
+        archive="$ROOT/build/dist/AmiNetXDuo-$version.lha"
+    fi
+    if [ ! -f "$archive" ]; then
+        fail "no release archive at $archive; run dist/make-dist.sh first," \
+             "or set AMINETXDUO_E2E_ARCHIVE"
+        return 1
+    fi
+    note "archive: $archive"
+
+    "$ROOT/install/test/run-workbench.sh" -l AVERAGE -H -a "$archive" || rc=$?
+
+    case "$rc" in
+        0) note "PASS  the shipped archive installs, boots, serves and unpacks" ;;
+        2) fail "release e2e: an ingredient is missing on this machine" ;;
+        3) fail "release e2e: no second machine could reach the Amiga" ;;
+        *) fail "release e2e: exit $rc" ;;
+    esac
+    return "$rc"
+}
+
 # ------------------------------------------------------------------ main ----
 
 mkdir -p "$BUILD"
@@ -673,7 +724,7 @@ stage_submodules
 # Anything but a pure host run needs the cross compiler.
 for s in "${WANT[@]}"; do
     case "$s" in
-        cross|analyze|conformance|emulator) stage_toolchain; break ;;
+        cross|analyze|conformance|emulator|e2e) stage_toolchain; break ;;
     esac
 done
 
@@ -690,6 +741,7 @@ for s in "${WANT[@]}"; do
         analyze)     stage_analyze || true ;;
         conformance) stage_conformance || true ;;
         emulator)    stage_emulator || true ;;
+        e2e)         stage_e2e || true ;;
         *) echo "unknown stage: $s" >&2; exit 2 ;;
     esac
     STAGES_RUN+=("$s")
