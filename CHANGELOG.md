@@ -9,6 +9,9 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A machine that nothing has named calls itself `amiga-490007`, after the last three octets of its card's hardware address, instead of `amiga`. Every unnamed machine used to claim `amiga.local`, so on a network with more than one of them each new arrival took a working machine's name away while its address carried on answering
+- `hostname`, `ShowNetStatus`, `gethostname()`, the name given to the DHCP server and the `.local` name agree on a machine nothing has named. It used to call itself `localhost` to a program and `amiga.local` to the network
+
 - A name looked up once could answer a different, shorter name afterwards. The cache compared only as far as the name being asked for, so a lookup of `bank.example.com.evil.net` would answer every later lookup of `bank.example.com` from it, for as long as that record lived
 - A short name resolves. `ssh playhouse2` failed where `ssh playhouse2.local.tinic.net` worked: the domain the DHCP server hands out was thrown away whenever the configuration named one of its own, the newer option carrying a list of domains was never asked for, and the `SEARCH` line in `DEVS:Internet/name_resolution` was read, reported by `ShowNetStatus`, and never used for anything
 - `ShowNetStatus` says which domains a short name will be tried under
