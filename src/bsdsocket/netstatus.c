@@ -1245,6 +1245,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         case NETSTATUS_NEIGHBOURS:  need = 0;                        break;
         case NETSTATUS_HEALTH:      need = sizeof(NetStatusHealth);  break;
         case NETSTATUS_SERVICES:    need = 0;                        break;
+        case NETSTATUS_OPENERS:     need = 0;                        break;
         default:                    return bsd_fail(SocketBase, AMI_EINVAL);
     }
 
@@ -1283,6 +1284,28 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         return (LONG)hdr->nsh_Count;
     }
 
+    /*
+     * Outside the bracket as well, and outside the stack check below: who has
+     * the library open is a fact about the library and not about NetX Duo, and
+     * the caller most likely to ask is one deciding whether the stack can be
+     * taken down. The walk belongs to library.c, which owns the list and its
+     * semaphore, so the writer is filled from the outside here.
+     */
+    if (what == NETSTATUS_OPENERS)
+    {
+        LONG avail = 0;
+        LONG n;
+
+        ns_writer_init(&w, hdr, size, NETSTATUS_OPENERS,
+                       sizeof(NetStatusOpener));
+        n = bsd_openers_list(SocketBase, (NetStatusOpener *)w.entries,
+                             (LONG)w.room, &avail);
+        w.written   = (n > 0) ? (ULONG)n : 0;
+        w.available = (avail > 0) ? (ULONG)avail : 0;
+        ns_writer_finish(&w);
+        return (LONG)hdr->nsh_Count;
+    }
+
     ip = netstack_ip();
     if (ip == NULL)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
@@ -1294,11 +1317,24 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
     switch (what)
     {
         case NETSTATUS_SYSTEM:
+        {
+            NetStatusSystem *sys;
+            LONG             openers = 0;
+
             ns_writer_init(&w, hdr, size, NETSTATUS_SYSTEM,
                            sizeof(NetStatusSystem));
-            ns_fill_system(ip, (NetStatusSystem *)ns_writer_next(&w));
+            sys = (NetStatusSystem *)ns_writer_next(&w);
+            ns_fill_system(ip, sys);
+
+            /* Counted rather than listed: a NULL table with no room asks
+               bsd_openers_list() for the number and nothing else. */
+            (VOID)bsd_openers_list(SocketBase, NULL, 0, &openers);
+            sys->nss_Openers = (openers > 0) ? (ULONG)openers : 0;
+            sys->nss_OpenCnt = bsd_open_count(SocketBase);
+
             ns_writer_finish(&w);
             break;
+        }
 
         case NETSTATUS_INTERFACES:
             ns_writer_init(&w, hdr, size, NETSTATUS_INTERFACES,
@@ -1643,6 +1679,29 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
         case NETCTRL_STACK_HOLD:
             return (bsd_stack_hold(SocketBase) == 0)
                        ? 0 : bsd_fail(SocketBase, AMI_ENETDOWN);
+
+        /*
+         * The shutdown pair, out here with it and for the same reason: both
+         * touch the master base's own list and counters and nothing below
+         * them, and both have to answer on a stack whose interfaces are
+         * already down, which is the state NetShutdown asks in.
+         */
+        case NETCTRL_STACK_NOTIFY:
+        {
+            ULONG signalled = 0;
+
+            if (bsd_stack_notify(SocketBase, &signalled) != 0)
+                return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+            ctl->nsc_Count = signalled;
+            return 0;
+        }
+
+        /* EBUSY and not ENETDOWN: the stack is up, and the refusal is that
+           this caller is the last thing holding it up. */
+        case NETCTRL_STACK_RELEASE:
+            return (bsd_stack_unhold(SocketBase) == 0)
+                       ? 0 : bsd_fail(SocketBase, AMI_EBUSY);
 
         /*
          * The responder on one interface. Out here with the rest of the

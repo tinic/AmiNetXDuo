@@ -1209,6 +1209,272 @@ LONG bsd_stack_hold(struct AmiSocketBase *base)
     return rc;
 }
 
+/*
+ * NETCTRL_STACK_RELEASE: give the hold back.
+ *
+ * The paragraph above says there is no release and that giving it back needs
+ * an operation that decides the network is finished with. NetShutdown is that
+ * operation, so this is that release.
+ *
+ * It refuses when the caller is the only reference left, which is the one case
+ * that would run netstack_shutdown() from inside this call with the caller's
+ * base still live and its next vector call landing in a stack being taken
+ * apart. Two references means the hold and the caller, and dropping the hold
+ * then leaves the teardown where it belongs, in the caller's CloseLibrary().
+ */
+LONG bsd_stack_unhold(struct AmiSocketBase *base)
+{
+    struct AmiSocketBase *master = base;
+    LONG                  rc     = 0;
+
+    if (master == NULL)
+        return -1;
+
+    if (master->sb_Master != NULL)
+        master = master->sb_Master;
+
+    ObtainSemaphore(&master->sb_Lock);
+
+    if (master->sb_StackHeld)
+    {
+        if (master->sb_StackRefs < 2)
+        {
+            rc = -1;
+        }
+        else
+        {
+            Forbid();                      /* bsd_stack_hold()'s reason */
+            master->sb_StackRefs--;
+            if (master->sb_Lib.lib_OpenCnt > 0)
+                master->sb_Lib.lib_OpenCnt--;
+            master->sb_StackHeld = FALSE;
+            Permit();
+        }
+    }
+
+    ReleaseSemaphore(&master->sb_Lock);
+
+    return rc;
+}
+
+/*
+ * NETCTRL_STACK_NOTIFY: tell every program using the network that it is going
+ * away, by sending it the signal it already listens for.
+ *
+ * SIGBREAKF_CTRL_C always, which is what AmiTCP's api_sendbreaktotasks() sent
+ * to every task on its socketBaseList and what AmiTCP_NG still sends. It is
+ * the signal an Amiga program already means "stop" by, so a program written
+ * for either of those stacks needs no change to work with this one.
+ *
+ * The base's own sb_BreakMask goes with it when it is something else.
+ * SBTC_BREAKMASK is "the signal to send to the process which owns the socket
+ * in order to abort a blocking operation", so a program that moved it off
+ * Ctrl-C is asking to be woken on that bit instead, and a notification it
+ * cannot be woken by is not one. Neither reference implementation reads the
+ * mask here; sending both covers the program that set one without missing the
+ * program that expects the standard bit.
+ *
+ * Skips the caller: NetShutdown breaking itself in the middle of its own grace
+ * period is not a notification. Skips a base whose task has exited, through
+ * bsd_signal_if_alive() and for the reason written there.
+ */
+LONG bsd_stack_notify(struct AmiSocketBase *base, ULONG *signalled)
+{
+    struct AmiSocketBase *master = base;
+    struct MinNode       *node;
+    ULONG                 n = 0;
+
+    if (master == NULL)
+        return -1;
+
+    if (master->sb_Master != NULL)
+        master = master->sb_Master;
+
+    ObtainSemaphore(&master->sb_Lock);
+
+    for (node = master->sb_Children.mlh_Head;
+         node->mln_Succ != NULL;
+         node = node->mln_Succ)
+    {
+        struct AmiSocketBase *child =
+            (struct AmiSocketBase *)((UBYTE *)node -
+                                     offsetof(struct AmiSocketBase, sb_Node));
+
+        if (child == base || child->sb_Task == NULL)
+            continue;
+
+        bsd_signal_if_alive(child->sb_Task,
+                            SIGBREAKF_CTRL_C | child->sb_BreakMask);
+        n++;
+    }
+
+    ReleaseSemaphore(&master->sb_Lock);
+
+    if (signalled != NULL)
+        *signalled = n;
+
+    return 0;
+}
+
+/* How many sockets a base has open, for the report: the descriptor table with
+   the empty slots taken out. */
+static UWORD bsd_base_sockets(const struct AmiSocketBase *child)
+{
+    ULONG i;
+    UWORD n = 0;
+
+    if (child->sb_Table == NULL)
+        return 0;
+
+    for (i = 0; i < (ULONG)child->sb_TableSize; i++)
+    {
+        if (child->sb_Table[i] != NULL)
+            n++;
+    }
+
+    return n;
+}
+
+/*
+ * What to call an opener in a report.
+ *
+ * tc_Node.ln_Name is "Background CLI" for anything a script started with Run
+ * or System(), which is how a service is normally started and is no use to a
+ * reader being told which program will not let go. A Process started from a
+ * Shell carries the command's own name in cli_CommandName, which is what the
+ * Status command prints, so that comes first and the task name is the
+ * fallback for a bare Task or a Process with no CLI.
+ *
+ * Only for a task that is still there: pr_CLI on a freed Task is a wild read.
+ */
+static VOID bsd_opener_name(const struct Task *task, char *out, LONG size)
+{
+    const char *name = task->tc_Node.ln_Name;
+    LONG        i;
+
+    if (task->tc_Node.ln_Type == NT_PROCESS)
+    {
+        const struct Process *pr = (const struct Process *)task;
+
+        if (pr->pr_CLI != 0)
+        {
+            const struct CommandLineInterface *cli = BADDR(pr->pr_CLI);
+
+            if (cli != NULL && cli->cli_CommandName != 0)
+            {
+                const UBYTE *bstr = BADDR(cli->cli_CommandName);
+
+                /* A BSTR: length byte, then the characters. Empty means the
+                   Shell has not got a command in hand, so keep the task. */
+                if (bstr != NULL && bstr[0] != 0)
+                {
+                    LONG len   = (LONG)bstr[0];
+                    LONG start = 0;
+                    LONG j;
+
+                    /* The command as typed, so "SYS:httpd" or
+                       "Work:net/httpd". The drawer is not what identifies the
+                       program to somebody deciding which one to close. */
+                    for (j = 0; j < len; j++)
+                    {
+                        if (bstr[j + 1] == '/' || bstr[j + 1] == ':')
+                            start = j + 1;
+                    }
+
+                    len -= start;
+                    if (len > size - 1)
+                        len = size - 1;
+
+                    for (i = 0; i < len; i++)
+                        out[i] = (char)bstr[start + i + 1];
+                    out[len] = '\0';
+                    return;
+                }
+            }
+        }
+    }
+
+    for (i = 0; name != NULL && name[i] != '\0' && i < size - 1; i++)
+        out[i] = name[i];
+    out[i] = '\0';
+}
+
+/*
+ * NETSTATUS_OPENERS: the same list, as a table a command can print.
+ *
+ * Copied under the semaphore because a task that exits takes its name with it.
+ */
+LONG bsd_openers_list(struct AmiSocketBase *base, NetStatusOpener *out,
+                      LONG max, LONG *available)
+{
+    struct AmiSocketBase *master = base;
+    struct MinNode       *node;
+    LONG                  n     = 0;
+    LONG                  total = 0;
+
+    if (master == NULL)
+        return -1;
+
+    if (master->sb_Master != NULL)
+        master = master->sb_Master;
+
+    ObtainSemaphore(&master->sb_Lock);
+
+    for (node = master->sb_Children.mlh_Head;
+         node->mln_Succ != NULL;
+         node = node->mln_Succ)
+    {
+        struct AmiSocketBase *child =
+            (struct AmiSocketBase *)((UBYTE *)node -
+                                     offsetof(struct AmiSocketBase, sb_Node));
+
+        total++;
+
+        if (n < max)
+        {
+            NetStatusOpener *o = &out[n++];
+
+            bsd_bzero(o, sizeof(*o));
+
+            o->nso_Task      = (ULONG)child->sb_Task;
+            o->nso_BreakMask = child->sb_BreakMask;
+            o->nso_Sockets   = bsd_base_sockets(child);
+
+            if (child == base)
+                o->nso_Flags |= NETSTATUS_OPENER_SELF;
+
+            /* bsd_task_sweep() clears sb_Task on a base whose task left, and
+               a task that has gone since the last sweep is the same fact. */
+            if (child->sb_Task == NULL || !bsd_task_alive(child->sb_Task))
+                o->nso_Flags |= NETSTATUS_OPENER_GONE;
+            else
+                bsd_opener_name(child->sb_Task, o->nso_Name,
+                                (LONG)sizeof(o->nso_Name));
+        }
+    }
+
+    ReleaseSemaphore(&master->sb_Lock);
+
+    if (available != NULL)
+        *available = total;
+
+    return n;
+}
+
+/* The library's own count, for NETSTATUS_SYSTEM. */
+ULONG bsd_open_count(struct AmiSocketBase *base)
+{
+    struct AmiSocketBase *master = base;
+
+    if (master == NULL)
+        return 0;
+
+    if (master->sb_Master != NULL)
+        master = master->sb_Master;
+
+    return (ULONG)master->sb_Lib.lib_OpenCnt;
+}
+
 APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     struct AmiSocketBase *base = SocketBase;

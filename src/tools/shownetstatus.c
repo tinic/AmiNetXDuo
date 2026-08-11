@@ -4,7 +4,8 @@
  *
  *     ShowNetStatus INTERFACE/M,INTERFACES/S,ARPCACHE=ARP/S,ROUTES/S,
  *                   DNS=DOMAINNAMESERVERS/S,ICMP/S,IP/S,MB=MEMORY/S,TCP/S,
- *                   UDP/S,TCPSOCKETS/S,UDPSOCKETS/S,NAMES/S,ALL/S,REPEAT/S,
+ *                   UDP/S,TCPSOCKETS/S,UDPSOCKETS/S,USERS/S,NAMES/S,ALL/S,
+ *                   REPEAT/S
  *
  * One category switch per subject; with no category it prints a general
  * summary.
@@ -52,8 +53,8 @@ static const char version_tag[] __attribute__((used)) =
 
 #define TEMPLATE    "INTERFACE/M,INTERFACES/S,ARPCACHE=ARP/S,ROUTES/S," \
                     "DNS=DOMAINNAMESERVERS/S,ICMP/S,IP/S,MB=MEMORY/S," \
-                    "TCP/S,UDP/S,TCPSOCKETS/S,UDPSOCKETS/S,NAMES/S,ALL/S," \
-                    "REPEAT/S"
+                    "TCP/S,UDP/S,TCPSOCKETS/S,UDPSOCKETS/S,USERS/S," \
+                    "NAMES/S,ALL/S,REPEAT/S"
 
 enum
 {
@@ -69,6 +70,7 @@ enum
     ARG_UDP,
     ARG_TCPSOCKETS,
     ARG_UDPSOCKETS,
+    ARG_USERS,
     ARG_NAMES,
     ARG_ALL,
     ARG_REPEAT,
@@ -93,6 +95,7 @@ typedef struct Wanted
     BOOL    udp;
     BOOL    tcpsockets;
     BOOL    udpsockets;
+    BOOL    users;
     BOOL    names;
     BOOL    all;
     BOOL    summary;                /* no category was asked for            */
@@ -1175,6 +1178,82 @@ static BOOL interface_selected(STRPTR *list, const char *name)
 }
 
 /*
+ * The programs using the network.
+ *
+ * Nothing else on the Amiga reports this. Roadshow's ShowNetStatus lists
+ * sockets and not the programs that own them, and AmiTCP kept its
+ * socketBaseList private, so "which program do I have to close before the
+ * network will shut down" has always been guesswork. NetShutdown answers it
+ * for the programs that would not let go; this answers it beforehand.
+ *
+ * Static: 16 rows is most of a Shell command's stack on its own.
+ */
+static struct
+{
+    NetStatusHeader hdr;
+    NetStatusOpener e[16];
+} sns_users;
+
+static VOID show_users(BOOL stack_running)
+{
+    struct Library *base;
+    LONG            n;
+    LONG            i;
+
+    tool_printf("\nPrograms using the network\n");
+
+    if (!stack_running)
+    {
+        tool_printf("(the network is not running, so nothing is)\n");
+        return;
+    }
+
+    base = tool_netstatus_open(TRUE);
+    if (base == NULL)
+        return;
+
+    n = tool_netstatus_query(base, NETSTATUS_OPENERS, &sns_users,
+                             sizeof(sns_users), sizeof(NetStatusOpener));
+    if (n < 0)
+    {
+        tool_printf("(this bsdsocket.library does not report them)\n");
+        tool_netstatus_close(base);
+        return;
+    }
+
+    tool_printf("Name                             Sockets\n");
+
+    for (i = 0; i < n && i < 16; i++)
+    {
+        const NetStatusOpener *o = &sns_users.e[i];
+        const char            *name;
+
+        /* This command opened the library to ask, so it is on its own list. */
+        if (o->nso_Flags & NETSTATUS_OPENER_SELF)
+            name = "ShowNetStatus (this command)";
+        else if (o->nso_Name[0] != '\0')
+            name = o->nso_Name;
+        else
+            name = "(unnamed)";
+
+        tool_printf("%-32s %ld", (LONG)name, (LONG)o->nso_Sockets);
+
+        if (o->nso_Flags & NETSTATUS_OPENER_GONE)
+            tool_printf("   exited without closing the library");
+
+        tool_printf("\n");
+    }
+
+    if (n == 0)
+        tool_printf("(none)\n");
+    if ((LONG)sns_users.hdr.nsh_Available > n)
+        tool_printf("(list truncated at %ld of %ld)\n", (LONG)n,
+                    (LONG)sns_users.hdr.nsh_Available);
+
+    tool_netstatus_close(base);
+}
+
+/*
  * One pass of the whole report. REPEAT calls it again every second, so nothing
  * here allocates and everything it needs is passed in.
  */
@@ -1394,6 +1473,8 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
         show_tcp_sockets(&snap, w->all);
     if (w->udpsockets)
         show_udp_sockets(&snap, w->all);
+    if (w->users)
+        show_users(stack_running);
 
     /* ---- the diagnosis --------------------------------------------------
      *
@@ -1552,6 +1633,7 @@ static int shownetstatus_main(int argc, char **argv)
     w.udp        = (args[ARG_UDP]        != 0) ? TRUE : FALSE;
     w.tcpsockets = (args[ARG_TCPSOCKETS] != 0) ? TRUE : FALSE;
     w.udpsockets = (args[ARG_UDPSOCKETS] != 0) ? TRUE : FALSE;
+    w.users      = (args[ARG_USERS]      != 0) ? TRUE : FALSE;
     w.names      = (args[ARG_NAMES]      != 0) ? TRUE : FALSE;
     w.all        = (args[ARG_ALL]        != 0) ? TRUE : FALSE;
     repeat       = (args[ARG_REPEAT]     != 0) ? TRUE : FALSE;
@@ -1562,7 +1644,7 @@ static int shownetstatus_main(int argc, char **argv)
      */
     w.summary = (BOOL)!(w.interfaces || w.arp || w.routes || w.dns ||
                         w.icmp || w.ip || w.memory || w.tcp || w.udp ||
-                        w.tcpsockets || w.udpsockets ||
+                        w.tcpsockets || w.udpsockets || w.users ||
                         (w.interface != NULL && w.interface[0] != NULL));
 
     names_prepare(w.names);

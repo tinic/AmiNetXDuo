@@ -68,7 +68,10 @@ extern "C" {
 
 #define AMI_NETSTATUS_MAGIC         0x414E5351UL    /* 'ANSQ' */
 /*
- * 9 since NETCTRL_INTERFACE_MDNS. 8 was NETCTRL_INTERFACE_CONFIGURE, the DHCP
+ * 10 since NETCTRL_STACK_NOTIFY, NETCTRL_STACK_RELEASE and NETSTATUS_OPENERS,
+ * which also named nsc_Count out of the reserved words.
+ *
+ * 9 was NETCTRL_INTERFACE_MDNS. 8 was NETCTRL_INTERFACE_CONFIGURE, the DHCP
  * three and NETCTRL_HOSTNAME_SET, which also grew the control block by
  * nsc_HostName. A caller and a library that disagree fail every call rather
  * than half of them, which is why the commands and the library ship together.
@@ -88,7 +91,7 @@ extern "C" {
  * the sentence above was rewritten afterwards to cover them, which makes the
  * two agree now and did not make the libraries in between distinguishable.
  */
-#define AMI_NETSTATUS_VERSION       9
+#define AMI_NETSTATUS_VERSION       10
 
 /* Fixed widths every record shares.  Up here rather than beside the first
    record that uses one, because NetStatusSystem needs NETSTATUS_NAME_LEN and
@@ -137,8 +140,8 @@ extern "C" {
  * caller touches still answers everything here, and refusing it would be a
  * wrong diagnosis.
  *
- * 5 because AMI_NETSTATUS_VERSION is 9 and revision 5 is the first library
- * that speaks it. A revision-4 library answers 8, which the exact-equality
+ * 6 because AMI_NETSTATUS_VERSION is 10 and revision 6 is the first library
+ * that speaks it. A revision-5 library answers 9, which the exact-equality
  * check below refuses on every call; without this the refusal arrives as
  * EINVAL from whichever call happened to be first, and reads like the feature
  * being absent rather than like half an install.
@@ -149,7 +152,7 @@ extern "C" {
  * to stop looking. This check runs before any call and says the true thing:
  * finish the install.
  */
-#define AMI_NETSTATUS_MIN_REVISION  5
+#define AMI_NETSTATUS_MIN_REVISION  6
 
 /* ------------------------------------------------------------ selectors,
  *
@@ -167,6 +170,7 @@ extern "C" {
 #define NETSTATUS_NEIGHBOURS   10   /* NetStatusNeighbour[]                  */
 #define NETSTATUS_HEALTH       11   /* one NetStatusHealth                   */
 #define NETSTATUS_SERVICES     12   /* NetStatusService[]                    */
+#define NETSTATUS_OPENERS      13   /* NetStatusOpener[]                     */
 
 /*
  * Every buffer starts with this. The caller fills nsh_Magic and nsh_Version;
@@ -243,7 +247,14 @@ typedef struct NetStatusSystem
      * revision move for it.
      */
     ULONG   nss_HostSource;
-    ULONG   nss_Reserved[2];
+    /*
+     * How many programs have the library open, and what the library's own
+     * open count is. They differ by the reference NETCTRL_STACK_HOLD took,
+     * which belongs to no program and is what keeps the network standing
+     * after the command that started it has exited. Both out of nss_Reserved.
+     */
+    ULONG   nss_Openers;
+    ULONG   nss_OpenCnt;
 } NetStatusSystem;
 
 /* ----------------------------------------------- NETSTATUS_INTERFACES --- */
@@ -729,6 +740,39 @@ typedef struct NetStatusService
     char    nsv_Text[NETSTATUS_SVC_TXT_LEN];    /* "key=value;key=value"     */
 } NetStatusService;
 
+/* --------------------------------------------------- NETSTATUS_OPENERS,
+ *
+ * The programs using the network: one row per OpenLibrary() of
+ * bsdsocket.library that has not been given back, which is the number the
+ * stack goes down at when it reaches zero.
+ *
+ * It is here so a shutdown can say WHO did not let go. "1 program is still
+ * using the network" is a sentence the user cannot act on; "httpd is" is.
+ *
+ * The reference NETCTRL_STACK_HOLD takes belongs to no program and is not a
+ * row here. NETSTATUS_SYSTEM's nss_Openers is the row count and nss_OpenCnt
+ * the library's own, so a caller that wants the difference can have it without
+ * reading the table.
+ */
+
+/* nso_Flags */
+#define NETSTATUS_OPENER_SELF   0x0001  /* the base this query came through  */
+/*
+ * Opened the library and exited without closing it. The base is on the list
+ * for good and its task is gone, so nothing will ever be delivered to it and
+ * a shutdown will never see it leave. nso_Task is what it used to be.
+ */
+#define NETSTATUS_OPENER_GONE   0x0002
+
+typedef struct NetStatusOpener
+{
+    UWORD   nso_Flags;
+    UWORD   nso_Sockets;                /* how many it has open              */
+    ULONG   nso_Task;                   /* struct Task, a number to print    */
+    ULONG   nso_BreakMask;              /* SBTC_BREAKMASK, what to signal it */
+    char    nso_Name[NETSTATUS_NAME_LEN];   /* the task's, empty if unnamed  */
+} NetStatusOpener;
+
 /* ------------------------------------------------------------- control,
  *
  * NetStackControl() is the mutating half, on a separate LVO from the reading
@@ -995,6 +1039,45 @@ typedef struct NetStatusService
  */
 #define NETCTRL_INTERFACE_MDNS  24  /* nsc_Index, NETCTRL_F_MDNS             */
 
+/*
+ * Tell every program using the network that it is stopping, and give back the
+ * reference that keeps the network standing. The pair NetShutdown is made of.
+ *
+ * NOTIFY sends each opener SIGBREAKF_CTRL_C, and its SBTC_BREAKMASK bit as
+ * well when it moved that off Ctrl-C. This is the existing convention rather
+ * than a new one: AmiTCP's api_sendbreaktotasks() signalled SIGBREAKF_CTRL_C
+ * to every task holding a SocketBase, AmiTCP_NG still does, and Roadshow's
+ * manual describes NetShutdown as telling "every network program currently
+ * running to let go of the network resources and exit". A program blocked in
+ * recv() or WaitSelect() comes back with EINTR and one waiting on its own
+ * signals wakes up, which is what both already do when the user presses
+ * Ctrl-C. nsc_Count comes back with how many were signalled.
+ *
+ * It does NOT close anybody's sockets, unblock the library, or touch a task
+ * beyond that one signal. A program that ignores it keeps its sockets and
+ * keeps the library open, which is exactly what every program did before this
+ * existed; the caller learns that from NETSTATUS_OPENERS afterwards and can
+ * say which program it was.
+ *
+ * The caller's own base is skipped, and so is an opener whose task has since
+ * exited (its base is on the list for good, and Signal() on a freed Task is a
+ * write into whatever holds that memory now).
+ *
+ * RELEASE gives back the reference NETCTRL_STACK_HOLD took, so the last
+ * CloseLibrary() shuts the stack down instead of finding the library holding
+ * itself up. Until this existed there was no way to give it back and
+ * "NetShutdown, then a reboot" was the documented sequence. It is idempotent,
+ * a stack that is not held is not an error, and it refuses when the caller is
+ * the only opener left: dropping it there would tear the stack down inside the
+ * call rather than at the close, with the caller's own base still live.
+ *
+ * Neither waits. The grace period belongs to the caller, which is the only one
+ * that knows how long it is prepared to wait and is the one that has to report
+ * what did not let go.
+ */
+#define NETCTRL_STACK_NOTIFY    25  /* out: nsc_Count                        */
+#define NETCTRL_STACK_RELEASE   26  /*,                                     */
+
 /* Flags for nsc_Flags. Zero unless an operation above says otherwise. */
 #define NETCTRL_F_FORCE         0x00000001
 /* Which of NETCTRL_INTERFACE_CONFIGURE's three fields were given at all. */
@@ -1024,7 +1107,10 @@ typedef struct NetStatusControl
      * by accident.
      */
     ULONG   nsc_Flags;                  /* NETCTRL_F_*                       */
-    ULONG   nsc_Reserved[3];
+    /* out: how many the operation acted on. NETCTRL_STACK_NOTIFY's number of
+       programs signalled, and named out of the same reserved words. */
+    ULONG   nsc_Count;
+    ULONG   nsc_Reserved[2];
     /*
      * A host name, for NETCTRL_HOSTNAME_SET, and a field of its own rather than
      * nsc_Name above: that one is 24 bytes because a DNS-SD service type is

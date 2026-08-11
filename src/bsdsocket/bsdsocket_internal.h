@@ -63,6 +63,8 @@
 #include "aminetxduo/compat.h"
 #include "aminetxduo/netstack.h"
 #include "aminetxduo/cmsg.h"
+/* NetStatusOpener, for the openers walk library.c owns. */
+#include "aminetxduo/netstatus.h"
 
 /*
  * The AF_INET6 names the NDK lacks. Published, it ships in the archive's
@@ -244,8 +246,10 @@
  *      told nothing useful.
  *   4  AMI_NETSTATUS_VERSION 8, NETCTRL_INTERFACE_CONFIGURE
  *   5  AMI_NETSTATUS_VERSION 9, NETCTRL_INTERFACE_MDNS
+ *   6  AMI_NETSTATUS_VERSION 10, NETCTRL_STACK_NOTIFY/_RELEASE,
+ *      NETSTATUS_OPENERS
  */
-#define BSD_LIB_REVISION    5
+#define BSD_LIB_REVISION    6
 
 /* SBTC_LOGFACILITY's documented default. The NDK's <sys/syslog.h> ships the
    priority codes only, so the BSD facility value is spelled out here. */
@@ -879,6 +883,18 @@ APTR  bsd_lib_reserved(VOID);
    the running stack so the caller's open can be closed without taking the
    network down with it.  Idempotent; 0 on success, -1 if there is no stack. */
 LONG  bsd_stack_hold(struct AmiSocketBase *base);
+
+/* library.c, the shutdown pair.  bsd_stack_unhold() gives that reference back;
+   0 on success, -1 when the caller is the only one left holding the stack up.
+   bsd_stack_notify() signals every other opener and reports how many. */
+LONG  bsd_stack_unhold(struct AmiSocketBase *base);
+LONG  bsd_stack_notify(struct AmiSocketBase *base, ULONG *signalled);
+
+/* library.c, NETSTATUS_OPENERS.  Fills up to max rows, sets *available to how
+   many there were, returns how many were written. */
+LONG  bsd_openers_list(struct AmiSocketBase *base, NetStatusOpener *out,
+                       LONG max, LONG *available);
+ULONG bsd_open_count(struct AmiSocketBase *base);
 
 /* errno.c */
 VOID  bsd_set_errno(struct AmiSocketBase *base, LONG code);
