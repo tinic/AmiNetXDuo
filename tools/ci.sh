@@ -472,15 +472,20 @@ stage_web() {
         return 1
     fi
 
-    # And the vendored dist is meant to be upstream's, byte for byte.
-    if (cd src/tools/web/vendor/xterm && \
-            grep -v '^#' PROVENANCE | grep . | sha256sum --check --status) \
-            2> /dev/null; then
-        note "vendored xterm.js matches its recorded hashes"
-    else
-        fail "web (src/tools/web/vendor/xterm has been edited, see PROVENANCE)"
-        return 1
-    fi
+    # And every vendored drawer is meant to be upstream's, byte for byte.
+    # Each carries its own PROVENANCE: a comment block and then a plain
+    # sha256sum list, which is why the comments are stripped and the rest is
+    # handed to sha256sum as it stands.
+    for v in src/tools/web/vendor/*/; do
+        [ -f "$v/PROVENANCE" ] || continue
+        if (cd "$v" && grep -v '^#' PROVENANCE | grep . |
+                sha256sum --check --status) 2> /dev/null; then
+            note "vendored $(basename "$v") matches its recorded hashes"
+        else
+            fail "web ($v has been edited, see its PROVENANCE)"
+            return 1
+        fi
+    done
 }
 
 # -------------------------------------------------------------- analyse ----

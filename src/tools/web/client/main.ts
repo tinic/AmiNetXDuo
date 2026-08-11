@@ -54,10 +54,22 @@ const term = new Terminal({
   theme: THEME,
   fontFamily: FONT,
   fontSize: 14,
-  lineHeight: 1.15,
+  lineHeight: 1.2,
   letterSpacing: 0,
   cursorBlink: true,
   cursorStyle: "block",
+
+  /*
+   * Bold is bold, and it is a real face rather than a smear: xterm.js would
+   * otherwise render bold text in the bright half of the palette, which on an
+   * Amiga does not exist.  A Workbench screen has eight pens, and bold there
+   * is a heavier glyph and never a change of colour.
+   */
+  drawBoldTextInBrightColors: false,
+
+  /* No contrast correction: the palette is the machine's and is not ours to
+     nudge.  Pen 0 on pen 0 is invisible here exactly as it is there. */
+  minimumContrastRatio: 1,
   /* A session left open all afternoon has to stop growing somewhere, and five
      thousand lines is more than anyone scrolls back through by hand. */
   scrollback: 5000,

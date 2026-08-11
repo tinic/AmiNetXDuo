@@ -1,27 +1,43 @@
 /*
- * The page around the terminal.  xterm's own stylesheet is inlined ahead of
- * this one and owns everything inside .xterm; this owns the window, the bar
- * across the top and how the two share the height.
+ * The page around the terminal, in Workbench 2.x/3.x.
+ *
+ * xterm's own stylesheet is inlined ahead of this one and owns everything
+ * inside .xterm; this owns the window, the bar across the top and how the two
+ * share the height.
+ *
+ * THE PALETTE IS THE ROM'S
+ *
+ *   Every colour below is one of the eight default Workbench screen pens,
+ *   read out of Kickstart 2.04 and 3.1 -- see client/theme.ts for the dump
+ *   and the offsets.  Nothing here is a shade somebody liked; if a value is
+ *   not a pen it is not on this page.
+ *
+ * THE BEVEL
+ *
+ *   Workbench 2.0 introduced the 3-D look and the Style Guide states the rule
+ *   it follows: light from the upper left, shadow to the lower right.  So a
+ *   raised edge is pen 2 (white) top and left, pen 1 (black) bottom and
+ *   right, and a pressed one is the same two swapped.  One pixel, never two:
+ *   the Amiga drew it in one and anything thicker reads as a costume.
  *
  * SPDX-License-Identifier: MIT
  */
 
 :root {
-  color-scheme: dark;
+  /* Light, and declared, so a browser in dark mode does not invert form
+     controls underneath an interface that is deliberately grey. */
+  color-scheme: light;
 
-  --ground:  #0d1017;
-  --panel:   #171c26;
-  --panel-2: #1f2632;
-  --edge:    #2c3444;
-  --ink:     #c8cede;
-  --ink-dim: #7e879c;
-  --live:    #5fb37a;
-  --dead:    #d4553f;
-  --busy:    #f0a423;
+  --pen0: #aaaaaa;   /* grey   -- background */
+  --pen1: #000000;   /* black  -- text */
+  --pen2: #ffffff;   /* white  -- shine */
+  --pen3: #6688bb;   /* blue   -- fill, title bars, selection */
+  --pen4: #ee4444;   /* red    -- the 8-colour Workbench's extras */
+  --pen5: #55dd55;   /* green  */
 
-  /* Kept in one place because the terminal's own font is set from
-     TypeScript and the two must be the same list. */
-  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+  /* Kept in one place because the terminal's own font is set from TypeScript
+     and the two must be the same list. */
+  --mono: Hack, ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
           "Cascadia Mono", "DejaVu Sans Mono", "Liberation Mono", monospace;
 }
 
@@ -31,8 +47,8 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: var(--ground);
-  color: var(--ink);
+  background: var(--pen0);
+  color: var(--pen1);
   font-family: var(--mono);
   overscroll-behavior: none;
 }
@@ -44,16 +60,22 @@ body {
 
 /* ------------------------------------------------------------- the bar -- */
 
+/*
+ * A Workbench window's title bar: pen 0, a white line along the top, a black
+ * line under it.  Not the blue one -- blue is what a bar goes when its window
+ * is ACTIVE, and this bar is furniture rather than a window of its own.
+ */
 #bar {
   display: flex;
   align-items: center;
   gap: 0.75rem;
   flex: none;
-  padding: 0.35rem 0.6rem;
-  background: linear-gradient(var(--panel-2), var(--panel));
-  border-bottom: 1px solid var(--edge);
-  font-size: 0.8125rem;
-  line-height: 1.4;
+  padding: 0.25rem 0.5rem;
+  background: var(--pen0);
+  border-top: 1px solid var(--pen2);
+  border-bottom: 1px solid var(--pen1);
+  font-size: 13px;
+  line-height: 16px;
   user-select: none;
 }
 
@@ -64,23 +86,19 @@ body {
   min-width: 0;
 }
 
-#who b {
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
+#who b { font-weight: bold; }
 
 #host {
-  color: var(--ink-dim);
+  color: var(--pen1);
+  opacity: 0.7;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* The window size.  A console handler on the far side will care what it is,
-   and until then it is the one number a person resizing the window wants. */
 #size {
   margin-left: auto;
-  color: var(--ink-dim);
+  opacity: 0.7;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -89,73 +107,93 @@ body {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  color: var(--ink-dim);
   white-space: nowrap;
 }
 
-/* A dot rather than a coloured word: the word is the sentence, the colour is
-   the glance, and a colour-blind reader still has the word. */
+/*
+ * A square and not a circle, and one of the pens.  Workbench had no rounded
+ * anything, and the word beside it carries the meaning for anyone who cannot
+ * tell the two colours apart.
+ */
 #dot {
-  width: 0.55rem;
-  height: 0.55rem;
-  border-radius: 50%;
-  background: var(--busy);
-  box-shadow: 0 0 0.4rem currentColor;
-  color: var(--busy);
+  width: 8px;
+  height: 8px;
+  background: var(--pen3);
+  border: 1px solid var(--pen1);
 }
-#state.up   #dot { background: var(--live); color: var(--live); }
-#state.down #dot { background: var(--dead); color: var(--dead); box-shadow: none; }
+#state.up   #dot { background: var(--pen5); }
+#state.down #dot { background: var(--pen4); }
 
-#keys { display: flex; gap: 0.3rem; }
+#keys { display: flex; gap: 0.4rem; }
 
+/*
+ * A Workbench gadget.  Raised until it is pressed, and then the same bevel
+ * the other way up with the label moved a pixel down and right, which is what
+ * the OS did and is most of why it felt physical.
+ */
 button {
   font: inherit;
-  font-size: 0.8125rem;
-  color: var(--ink);
-  background: var(--panel-2);
-  /* The Workbench bevel, at one pixel: light above, dark below.  Any more of
-     it and the page is a costume. */
-  border: 1px solid var(--edge);
-  border-top-color: #3a4457;
-  border-bottom-color: #10141c;
-  border-radius: 3px;
-  padding: 0.15rem 0.6rem;
+  font-size: 13px;
+  color: var(--pen1);
+  background: var(--pen0);
+  border: 1px solid var(--pen1);
+  border-top-color: var(--pen2);
+  border-left-color: var(--pen2);
+  border-radius: 0;
+  padding: 1px 8px;
   cursor: pointer;
 }
-button:hover:enabled  { background: #28313f; }
-button:active:enabled { background: #131922; border-top-color: #10141c; }
-button:disabled       { opacity: 0.45; cursor: default; }
-button:focus-visible  { outline: 2px solid var(--blue, #5f8fd6); outline-offset: 1px; }
+
+button:hover:enabled { background: #b8b8b8; }
+
+button:active:enabled {
+  border-top-color: var(--pen1);
+  border-left-color: var(--pen1);
+  border-right-color: var(--pen2);
+  border-bottom-color: var(--pen2);
+  padding: 2px 7px 0 9px;
+}
+
+/* Ghosted, the way Workbench ghosted a gadget: the label goes half-tone
+   rather than the gadget losing its edges. */
+button:disabled { opacity: 0.4; cursor: default; }
+
+button:focus-visible { outline: 1px dotted var(--pen1); outline-offset: 1px; }
 
 /* -------------------------------------------------------- the terminal -- */
 
 #term {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 0.35rem 0.15rem 0.35rem 0.5rem;
+  padding: 2px 2px 2px 4px;
+  background: var(--pen0);
 }
 
-/* xterm draws its own scrollbar area; this is only to stop the default one
-   looking like a 2009 desktop widget on the browsers that still ship it. */
-.xterm-viewport::-webkit-scrollbar { width: 0.7rem; }
-.xterm-viewport::-webkit-scrollbar-track { background: var(--ground); }
-.xterm-viewport::-webkit-scrollbar-thumb {
-  background: #2f3849;
-  border-radius: 0.35rem;
-  border: 2px solid var(--ground);
+/*
+ * The scroll bar, as a Workbench proportional gadget: a recessed trough in
+ * pen 0 with a raised knob in it.  Firefox gets the two-colour version, which
+ * is all its scrollbar-color takes.
+ */
+.xterm-viewport::-webkit-scrollbar { width: 14px; }
+.xterm-viewport::-webkit-scrollbar-track {
+  background: #999999;
+  border-left: 1px solid var(--pen1);
 }
-.xterm-viewport::-webkit-scrollbar-thumb:hover { background: #3d485d; }
-.xterm-viewport { scrollbar-color: #2f3849 var(--ground); scrollbar-width: thin; }
+.xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--pen0);
+  border: 1px solid var(--pen1);
+  border-top-color: var(--pen2);
+  border-left-color: var(--pen2);
+}
+.xterm-viewport {
+  scrollbar-color: var(--pen0) #999999;
+  scrollbar-width: auto;
+}
 
 /* Narrow windows: the buttons matter more than the address. */
 @media (max-width: 44rem) {
   #host { display: none; }
   #size { display: none; }
   #bar  { gap: 0.5rem; }
-}
-
-/* With the size gone the state has to take the space back, or the bar's
-   right-hand end drifts inwards with nothing in it. */
-@media (max-width: 44rem) {
   #state { margin-left: auto; }
 }
