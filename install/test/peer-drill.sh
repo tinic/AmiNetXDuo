@@ -61,7 +61,7 @@ def request(method, path, body=None, headers=None):
 # a transport that cannot carry 400 KB shows up as a number rather than as a
 # failure of the endpoint.
 try:
-    st, hdr, body = request("GET", "/terminal")
+    st, hdr, body = request("GET", "/shell")
     say("terminal_status", st)
     say("terminal_content_length", hdr.get("Content-Length", "none"))
     say("terminal_body_bytes", len(body))

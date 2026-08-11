@@ -213,7 +213,7 @@
   (cat "httpd serves one drawer to the other machines on the network, over "
        "HTTP and WebDAV, so it appears as a drive in Finder, in Explorer and "
        "on Linux with nothing installed at the far end.  With the terminal "
-       "switched on it also answers at /terminal with an AmigaDOS Shell that "
+       "switched on it also answers at /shell with an AmigaDOS Shell that "
        "runs in a web browser.\n\n"
        "There is no password on either half of that, and there is no setting "
        "that adds one.  Anyone who can reach the port can read and write the "
@@ -249,7 +249,7 @@
        "Change it if something else on this machine is already using 80, or "
        "to keep the server away from a browser that would find it by "
        "accident.  8080 is the usual second choice, and the address is then "
-       "http://<this machine>:8080/terminal."))
+       "http://<this machine>:8080/shell."))
 
 (set H_REPLACELIB
   (cat "There is already a bsdsocket.library on this machine.  It belongs to "
@@ -310,7 +310,7 @@
 
 (set F_HTTPD
   (cat "\nhttpd serves %s on port %ld from the next reboot, and a Shell in a "
-       "browser at /terminal.  Neither asks for a password.\n"))
+       "browser at /shell.  Neither asks for a password.\n"))
 
 (set H_DOCDIR
   (cat "The documentation, the example configuration files and the "

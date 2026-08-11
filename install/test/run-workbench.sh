@@ -15,14 +15,14 @@
 #      drawer and a Shell at boot.  Two runs, one httpd line and one assign
 #      line, or the managed block was appended to rather than replaced;
 #   2. the power cycle, and while the machine is up this host fetches
-#      http://<the Amiga>/terminal over the bridge, which is what "reachable"
+#      http://<the Amiga>/shell over the bridge, which is what "reachable"
 #      means;
 #   3. a third install answering the question the other way, which has to take
 #      both lines away again and leave AddNetInterface and the other
 #      application's lines exactly where they were.
 #
 # WHAT THE OTHER MACHINE DOES, in step 2, and it is the product's main path:
-# GET /terminal and compare Content-Length against the page on the drive; PUT
+# GET /shell and compare Content-Length against the page on the drive; PUT
 # a file and GET it back and compare the bytes; PUT our own release .lha and
 # have the Amiga `lha x` it, then compare the extracted files against this
 # host's copies; and run tests/tools/httpd-drill.py --terminal and
@@ -923,6 +923,12 @@ Echo >>DH0:usercheck.txt "*N=== 5. what the other machine put here over WebDAV"
 C:Wait 240
 C:List RAM: >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT davlist rc=$RC"
+; A DRAWER THAT DID NOT EXIST A MOMENT AGO.  LhA asks
+; "already exists, overwrite? (Y/N/A/S/Q):" on a second
+; extraction and waits for a keystroke there is nobody to
+; type, and a wait with nothing to end it is a run that
+; times out rather than a run that fails.
+C:Delete RAM:Unpack ALL QUIET FORCE
 C:MakeDir RAM:Unpack
 C:lha -q x RAM:payload.lha RAM:Unpack/ >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT lha-x rc=$RC"
@@ -1144,10 +1150,10 @@ if [ "$TERMINAL" = "1" ]; then
     if [ "$(key terminal_status)" = "200" ] && [ -n "$want" ] &&
        [ "$got_len" = "$want" ]; then
         printf '  %-34s 200, Content-Length %s\n' \
-               "GET /terminal, from the peer" "$got_len"
+               "GET /shell, from the peer" "$got_len"
     else
         printf '  %-34s status=%s length=%s wanted=%s\n' \
-               "GET /terminal, from the peer" "$(key terminal_status)" \
+               "GET /shell, from the peer" "$(key terminal_status)" \
                "${got_len:-none}" "${want:-?}"
         bad=1
     fi

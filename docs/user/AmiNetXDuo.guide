@@ -736,7 +736,7 @@
   with the drawer and the port you were asked for. httpd then serves
   that drawer over HTTP and WebDAV, so it mounts as a drive on a
   desktop machine, and -T adds an AmigaDOS Shell in a web browser at
-  http://<this machine>/terminal.
+  http://<this machine>/shell.
 
   Neither has a password and there is no setting that adds one. Anyone
   who can reach the port can read and write the drawer, and anyone who
