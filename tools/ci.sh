@@ -250,6 +250,24 @@ stage_host() {
         return 1
     fi
 
+    # The same argument one level down, for the harnesses that grade a
+    # transcript rather than a check count.  run-addifup.sh is the gate for
+    # "AddNetInterface never came back" and runs on one self-hosted runner, so
+    # an assertion of its that stopped firing would be invisible here; these
+    # selftests drive the graders against transcripts that stand for runs
+    # nobody can produce on demand.
+    local st
+    for st in tests/tools/addifup-verdict-selftest.sh; do
+        if "$st" > "$BUILD/$(basename "$st" .sh).log" 2>&1; then
+            note "$(basename "$st"): $(sed -n 's/^.*selftest: //p' \
+                  "$BUILD/$(basename "$st" .sh).log")"
+        else
+            cat "$BUILD/$(basename "$st" .sh).log"
+            fail "$st"
+            return 1
+        fi
+    done
+
     cmake -S . -B "$BUILD/host" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_PROJECT_INCLUDE="$ROOT/cmake/ci-warnings.cmake" \
