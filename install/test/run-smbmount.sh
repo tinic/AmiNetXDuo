@@ -76,8 +76,9 @@ CAPTURE=0
 KEEP=0
 STACK=ours
 EXTRA=""
+CLIENT=smb2
 
-while getopts "m:o:u:B:M:T:t:w:s:x:ACk" opt; do
+while getopts "m:o:u:B:M:T:t:w:s:x:H:ACk" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         o) OSVER="$OPTARG" ;;
@@ -91,12 +92,18 @@ while getopts "m:o:u:B:M:T:t:w:s:x:ACk" opt; do
         C) CAPTURE=1 ;;
         s) STACK="$OPTARG" ;;
         x) EXTRA="$OPTARG" ;;
+        H) CLIENT="$OPTARG" ;;
         k) KEEP=1 ;;
         *) sed -n '5,9p' "$0" >&2; exit 2 ;;
     esac
 done
 
 case "$OSVER" in 31|32) ;; *) echo "-o takes 31 or 32" >&2; exit 2 ;; esac
+# WHICH CLIENT.  Two programs, two protocols, one share: smb2-handler speaks
+# SMB2/3 through filesysbox and is reached with Mount, smbfs speaks SMB1/CIFS
+# straight over bsdsocket and is reached by running it.  A share that one
+# refuses and the other takes says the wall is the protocol, not the stack.
+case "$CLIENT" in smb2|smbfs) ;; *) echo "-H takes smb2 or smbfs" >&2; exit 2 ;; esac
 case "$BUILD" in /*) ;; *) BUILD="$ROOT/$BUILD" ;; esac
 
 HD="$ROOT/build/smbhd-$TAG"
@@ -108,6 +115,10 @@ SMBHOST=${SMBAUTH%%:*}
 SMBPORT=445
 case "$SMBAUTH" in *:*) SMBPORT=${SMBAUTH##*:} ;; esac
 [ -n "$SMBHOST" ] || { echo "cannot read a host out of $URL" >&2; exit 2; }
+# smbfs takes //host/share rather than a URL, so the share is wanted on its
+# own as well: the first path component after the authority.
+SMBSHARE=$(printf '%s' "$URL" | sed -e 's|^smb://||' -e 's|^[^/]*/||' -e 's|/.*$||')
+[ -n "$SMBSHARE" ] || { echo "cannot read a share out of $URL" >&2; exit 2; }
 
 # ------------------------------------------------------------ ingredients --
 
@@ -165,8 +176,13 @@ case "$MODEL" in
     A4000*)                    CPUSFX=060 ;;
     *)                         CPUSFX=020 ;;
 esac
-need "$SMB2FS/L/smb2-handler.$CPUSFX" "set AMINETXDUO_SMB2FS"
-need "$FSBOX/Libs/filesysbox.library.$CPUSFX" "set AMINETXDUO_FILESYSBOX"
+SMBFS="${AMINETXDUO_SMBFS:-$HOME/amiga-assets/apps/smbfs-2.22}"
+if [ "$CLIENT" = smbfs ]; then
+    need "$SMBFS/smbfs" "set AMINETXDUO_SMBFS"
+else
+    need "$SMB2FS/L/smb2-handler.$CPUSFX" "set AMINETXDUO_SMB2FS"
+    need "$FSBOX/Libs/filesysbox.library.$CPUSFX" "set AMINETXDUO_FILESYSBOX"
+fi
 
 # THE ROM AND THE MODEL ARE A PAIR, and so are the ROM and the Workbench: a
 # 3.2 tree on a 3.1 ROM boots but is not what either reporter is running.
@@ -192,7 +208,11 @@ done
 
 echo "==> $MODEL, OS 3.$([ "$OSVER" = 32 ] && echo 2 || echo 1), $(basename "$KICKSTART")"
 echo "==> stack $STACK"
-echo "==> share $URL (host $SMBHOST), handler smb2-handler.$CPUSFX"
+if [ "$CLIENT" = smbfs ]; then
+    echo "==> share $URL (host $SMBHOST), client smbfs (SMB1/CIFS)"
+else
+    echo "==> share $URL (host $SMBHOST), client smb2-handler.$CPUSFX (SMB2/3)"
+fi
 
 # --------------------------------------------------------------- the SYS: --
 
@@ -290,10 +310,15 @@ NDK="${AMIGA_NDK:-$HOME/amigaos/tools/m68k-amigaos-gcc/m68k-amigaos/ndk-include}
        -o "$ROOT/build/SMBProbe-$TAG" "$ROOT/install/test/smbprobe.c" || exit 2
 cp "$ROOT/build/SMBProbe-$TAG" "$HD/C/SMBProbe"
 
-cp "$FSBOX/Libs/filesysbox.library.$CPUSFX" "$HD/Libs/filesysbox.library"
-cp "$SMB2FS/L/smb2-handler.$CPUSFX"         "$HD/L/smb2-handler"
-chmod 755 "$HD/L/smb2-handler" "$HD/Libs/filesysbox.library" \
-          "$HD/Devs/a2065.device" "$HD/Devs/Networks/a2065.device"
+if [ "$CLIENT" = smbfs ]; then
+    cp "$SMBFS/smbfs" "$HD/C/smbfs"
+    chmod 755 "$HD/C/smbfs"
+else
+    cp "$FSBOX/Libs/filesysbox.library.$CPUSFX" "$HD/Libs/filesysbox.library"
+    cp "$SMB2FS/L/smb2-handler.$CPUSFX"         "$HD/L/smb2-handler"
+    chmod 755 "$HD/L/smb2-handler" "$HD/Libs/filesysbox.library"
+fi
+chmod 755 "$HD/Devs/a2065.device" "$HD/Devs/Networks/a2065.device"
 chmod 755 "$HD/C/"* 2>/dev/null || true
 
 cat > "$HD/Devs/NetInterfaces/eth0" <<EOF
@@ -314,6 +339,7 @@ EOF
 # ACTIVATE=1 the handler would start with no stack under it.  ACTIVATE decides which
 # process does the connecting: without it Mount only builds the device node
 # and the first access starts the handler; with it, Mount does.
+if [ "$CLIENT" = smb2 ]; then
 {
     echo "Handler   = L:smb2-handler"
     echo "StackSize = 65536"
@@ -322,6 +348,7 @@ EOF
     [ "$ACTIVATE" = 1 ] && echo "ACTIVATE  = 1"
     echo "Startup   = \"$URL${EXTRA:+ $EXTRA}\""
 } > "$HD/Storage/DOSDrivers/SMB2"
+fi
 
 # ------------------------------------------------------------ the scripts --
 #
@@ -330,11 +357,27 @@ EOF
 # a file that is not there rather than output stuck in a buffer nobody
 # flushed.
 
+if [ "$CLIENT" = smbfs ]; then
+# smbfs is not mounted, it is run: it puts SMB2: up itself and stays resident
+# for as long as the share is there, so it goes in the background and the
+# steps after it get a moment before they look.  Its console output is the
+# only place its errors appear, so that is a file and not NIL:.
+cat > "$HD/S/SMB-Work" <<EOF
+FailAt 9999
+Echo >DH0:w1-mount-start.txt "starting smbfs"
+Run >DH0:w2-mount-out.txt <NIL: C:smbfs DEVICE=SMB2 //$SMBHOST:$SMBPORT/$SMBSHARE${EXTRA:+ $EXTRA}
+Echo >DH0:w3-mount-rc.txt "\$RC"
+C:Wait 20
+EOF
+else
 cat > "$HD/S/SMB-Work" <<'EOF'
 FailAt 9999
 Echo >DH0:w1-mount-start.txt "mounting"
 C:Mount SMB2: >DH0:w2-mount-out.txt
 Echo >DH0:w3-mount-rc.txt "$RC"
+EOF
+fi
+cat >> "$HD/S/SMB-Work" <<'EOF'
 C:SMBProbe LOCK DEVICE=SMB2: LOG=DH0:w4-probe.txt >DH0:w4-probe-console.txt
 Echo >DH0:w5-probe-rc.txt "$RC"
 C:List SMB2: >DH0:w6-list-out.txt
@@ -567,6 +610,7 @@ echo "info_rc=${INFO_RC:-NEVER_RETURNED}"
 echo "list_produced_output=$LISTED"
 echo "smb_socket_seen=$ESTAB"
 echo "stopped_at=$STOPPED"
+echo "client=$CLIENT"
 echo "activate=$ACTIVATE"
 echo "startup_extra=${EXTRA:-none}"
 echo "os=3.$([ "$OSVER" = 32 ] && echo 2 || echo 1)"
