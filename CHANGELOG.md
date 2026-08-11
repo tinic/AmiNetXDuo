@@ -9,6 +9,9 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `httpd`'s terminal is a real AmigaOS console rather than a pipe wearing its hat. `ssh` asked it to stop echoing for a password prompt and it could not, so the password was drawn on the screen as it was typed. It stops now, `Ed WINDOW=* <file>` and `More` work, and a program that asks how big its window is gets an answer
+- The terminal can be got back. A browser that vanished with the network held it for ever and the machine had to be restarted; a session that stops answering is released for the next visitor, Reconnect takes one that is still answering, and a Shell that will not stop is let go of after five seconds
+
 - A machine that nothing has named calls itself `amiga-490007`, after the last three octets of its card's hardware address, instead of `amiga`. Every unnamed machine used to claim `amiga.local`, so on a network with more than one of them each new arrival took a working machine's name away while its address carried on answering
 - `hostname`, `ShowNetStatus`, `gethostname()`, the name given to the DHCP server and the `.local` name agree on a machine nothing has named. It used to call itself `localhost` to a program and `amiga.local` to the network
 
