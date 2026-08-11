@@ -708,10 +708,11 @@ static VOID show_resolver(const AmiResolverConfig *r, BOOL from_files)
 
     for (i = 0; i < r->search_count; i++)
     {
-        tool_printf("%s%s\n",
+        tool_printf("%s%s%s\n",
                     (LONG)(i == 0 ? "Search:         " :
                                      "                "),
-                    (LONG)r->search[i]);
+                    (LONG)r->search[i],
+                    (LONG)(i >= r->search_static ? " (DHCP)" : ""));
     }
 
     /*

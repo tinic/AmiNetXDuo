@@ -1378,6 +1378,7 @@ static VOID ami_ns_dhcp_configure(AmiNetStack *ns)
     (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, NX_DHCP_OPTION_DNS_SVR);
     (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, NX_DHCP_OPTION_HOST_NAME);
     (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, AMI_DHCP_OPTION_DOMAIN);
+    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, AMI_DHCP_OPTION_SEARCH);
     (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, AMI_DHCP_OPTION_STATIC_ROUTE);
 }
 

@@ -416,9 +416,9 @@ BOOL netstack_ipv6_address_get(UWORD interface_index, UWORD slot,
 BOOL netstack_ipv6_source_for(const ULONG dest[4], ULONG addr_out[4]);
 
 /*
- * AAAA lookup. Same semantics as netstack_resolve(), with one difference:
- * DEVS:Internet/hosts is not consulted, because the netdb store has no way to
- * hold an IPv6 address. See the comment in netstack_dns.c.
+ * AAAA lookup. Same semantics as netstack_resolve(), search list included,
+ * with one difference: DEVS:Internet/hosts is not consulted, because the netdb
+ * store has no way to hold an IPv6 address. See the comment in netstack_dns.c.
  */
 LONG netstack_resolve6(const char *name, ULONG addr_out[4],
                        ULONG timeout_ticks);
@@ -460,6 +460,10 @@ UINT netstack_ipv6_route_delete(const ULONG dest[4], ULONG prefix_len,
  * Adding a server that is already present succeeds and changes nothing.
  * netstack_set_domain_name(NULL) or "" clears the domain; a name too long to
  * store is refused rather than truncated.
+ *
+ * netstack_set_domain_name() sets the default domain and nothing else: it does
+ * not clear or reorder the search list, so a program that calls it does not
+ * silently take a DHCP machine off the domains its lease named.
  */
 LONG netstack_dns_server_add(ULONG address);
 LONG netstack_dns_server_remove(ULONG address);
@@ -471,6 +475,26 @@ LONG netstack_set_domain_name(const char *name);
  *
  * timeout_ticks is the whole lookup, not one query: the retransmission ladder
  * runs inside and stops when the budget is gone.
+ *
+ * A NAME WITH NO DOT IN IT is looked up as given first and then under each
+ * search domain in turn, in this order:
+ *
+ *   1. SEARCH from DEVS:Internet/name_resolution, as written;
+ *   2. DOMAIN from that file, when the file has no SEARCH line;
+ *   3. what the DHCP lease supplied: option 119's list in its own order,
+ *      then option 15.
+ *
+ * name_resolution outranks DHCP, the same way it does for the host name (see
+ * AmiHostnameSource), but a suffix list is a list, so the lease's domains go
+ * after the file's rather than being discarded. Duplicates are dropped
+ * case-insensitively.
+ *
+ * A name that already has a dot is looked up exactly as given, never with a
+ * suffix. A suffix is only ever tried after a definite "no such name", so a
+ * search list costs one round trip per entry against a server that answers and
+ * costs nothing at all against one that does not: a name server that is silent
+ * ends the whole lookup at the first attempt, as it did before there was a
+ * list.
  *
  * In an AMINETXDUO_MDNS build a name ending in ".local" is sent to the RFC
  * 6762 responder instead of to the unicast name servers, and never to both.

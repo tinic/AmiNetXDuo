@@ -52,6 +52,9 @@ add_executable(fuzz_config
     "${CMAKE_SOURCE_DIR}/src/config/config_text.c"
     "${CMAKE_SOURCE_DIR}/src/config/config_text6.c"
     "${CMAKE_SOURCE_DIR}/src/config/config_parse.c"
+    # ami_config_search_offer() validates what DHCP option 119 decodes to
+    # before it can become a query suffix, and that check lives here.
+    "${CMAKE_SOURCE_DIR}/src/config/config_hostname.c"
     "${CMAKE_SOURCE_DIR}/src/config/netdb.c")
 
 target_include_directories(fuzz_config PRIVATE

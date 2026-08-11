@@ -128,13 +128,14 @@
 #endif
 
 /*
- * Two DHCP options NetX Duo does not name. It retrieves any option code the
- * server sent, so a number suffices: RFC 2132 3.17 for the domain name and
- * 3.12 for the classful static route list that the published API's
- * aam_StaticRouteTable carries.
+ * Three DHCP options NetX Duo does not name. It retrieves any option code the
+ * server sent, so a number suffices: RFC 2132 3.17 for the domain name, 3.12
+ * for the classful static route list that the published API's
+ * aam_StaticRouteTable carries, and RFC 3397 for the domain search list.
  */
 #define AMI_DHCP_OPTION_DOMAIN          15
 #define AMI_DHCP_OPTION_STATIC_ROUTE    33
+#define AMI_DHCP_OPTION_SEARCH         119
 
 /* How long netstack_startup() blocks waiting for the first address. */
 #define AMI_DHCP_TIMEOUT_TICKS      (30UL * (ULONG)NX_IP_PERIODIC_RATE)

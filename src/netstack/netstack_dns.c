@@ -121,8 +121,15 @@ VOID ami_ns_copy_name(char *dst, const char *src, ULONG size)
  *
  * The name is offered rather than assigned: a HOSTNAME in name_resolution
  * outranks it, and an option 12 that is not a host name is refused (see
- * AmiHostnameSource). The domain only fills a gap, a DOMAIN= somebody wrote
- * is the one they meant.
+ * AmiHostnameSource).
+ *
+ * The lease's domains are appended to the search list rather than weighed
+ * against the file's. A DOMAIN= somebody wrote is still the default domain
+ * GetDefaultDomainName() reports and still the first suffix tried, but it no
+ * longer stops the lease being used: the machine this was reported from had
+ * `domain localdomain` in its file and local.tinic.net in its lease, and only
+ * the file's was ever tried, so `ssh playhouse2` did not resolve on the
+ * network the lease describes.
  *
  * From the first interface holding a lease, not always interface 0: a machine
  * with a static interface 0 and a DHCP interface 1 has its lease on the one
@@ -131,6 +138,8 @@ VOID ami_ns_copy_name(char *dst, const char *src, ULONG size)
 static VOID ami_ns_dhcp_naming(AmiNetStack *ns)
 {
     char  text[AMI_CFG_NAME_LEN];
+    UCHAR raw[256];
+    UINT  size;
     UWORD index;
 
     for (index = 0; index < ns->ns_IfaceCount; index++)
@@ -145,17 +154,37 @@ static VOID ami_ns_dhcp_naming(AmiNetStack *ns)
             AMI_INFO("netstack: DHCP names this machine '%s'",
                      ns->ns_Config.hostname);
 
-        if (ns->ns_Config.resolver.domain[0] == '\0')
+        /* Option 119 first: RFC 3397 1 calls it the list to search, and
+           option 15 the single domain to fall back on. */
+        size = (UINT)sizeof(raw);
+        if (nx_dhcp_interface_user_option_retrieve(&ns->ns_Dhcp, (UINT)index,
+                                                   AMI_DHCP_OPTION_SEARCH, raw,
+                                                   &size) == NX_SUCCESS)
         {
-            ami_ns_dhcp_text(ns, index, AMI_DHCP_OPTION_DOMAIN, text,
-                             sizeof(text));
-            if (text[0] != '\0')
-            {
+            UWORD added = ami_config_search_from_rfc3397(
+                &ns->ns_Config.resolver, (const UBYTE *)raw, (ULONG)size);
+
+            if (added != 0)
+                AMI_INFO("netstack: DHCP search list, %ld domain(s), first "
+                         "'%s'", (long)added,
+                         ns->ns_Config.resolver
+                             .search[ns->ns_Config.resolver.search_count -
+                                     added]);
+        }
+
+        ami_ns_dhcp_text(ns, index, AMI_DHCP_OPTION_DOMAIN, text,
+                         sizeof(text));
+        if (text[0] != '\0')
+        {
+            if (ami_config_search_offer(&ns->ns_Config.resolver, text))
+                AMI_INFO("netstack: DHCP domain '%s'", text);
+
+            /* Still the default domain when the file named none, which is what
+               GetDefaultDomainName() reports and what SetDefaultDomainName()
+               would replace. */
+            if (ns->ns_Config.resolver.domain[0] == '\0')
                 ami_ns_copy_name(ns->ns_Config.resolver.domain, text,
                                  sizeof(ns->ns_Config.resolver.domain));
-                AMI_INFO("netstack: DHCP domain '%s'",
-                         ns->ns_Config.resolver.domain);
-            }
         }
 
         break;
@@ -613,8 +642,11 @@ LONG netstack_resolve_until(const char *name, ULONG *addr_out,
                             VOID *give_up_arg)
 {
     AmiNetStack *ns = ami_netstack_raw();
+    const char  *suffix[AMI_CFG_SEARCH_LIST_MAX];
     char         qualified[AMI_DNS_NAME_MAX];
     LONG         err;
+    UWORD        count;
+    UWORD        i;
 
     if (name == NULL || *name == '\0' || addr_out == NULL)
         return AMI_NET_ERR_CONFIG;
@@ -638,20 +670,35 @@ LONG netstack_resolve_until(const char *name, ULONG *addr_out,
     if (err != AMI_NET_ERR_NONAME && err != AMI_NET_ERR_STATE)
         return err;
 
-    if (ns == NULL || ns->ns_Config.resolver.domain[0] == '\0')
-        return err;
-    if (!ami_ns_unqualified(name))
-        return err;
-    if (!ami_ns_join_domain(qualified, (ULONG)sizeof(qualified), name,
-                            ns->ns_Config.resolver.domain))
+    if (ns == NULL || !ami_ns_unqualified(name))
         return err;
 
-    if (ami_ns_resolve_once(qualified, addr_out, timeout_ticks, give_up,
-                            give_up_arg) == AMI_NET_OK)
-        return AMI_NET_OK;
+    count = ami_config_search_list(&ns->ns_Config.resolver, suffix,
+                                  (UWORD)AMI_CFG_SEARCH_LIST_MAX);
 
-    /* The caller asked about the bare name. Whatever the speculative retry ran
-       into is not an answer about that name, so report the first failure. */
+    for (i = 0; i < count; i++)
+    {
+        LONG next;
+
+        if (!ami_ns_join_domain(qualified, (ULONG)sizeof(qualified), name,
+                                suffix[i]))
+            continue;
+
+        next = ami_ns_resolve_once(qualified, addr_out, timeout_ticks, give_up,
+                                   give_up_arg);
+        if (next == AMI_NET_OK)
+            return AMI_NET_OK;
+
+        /* Same rule that let the first suffix be tried at all, applied to the
+           next one: only a definite no is worth spending another query on, so
+           a search list costs one round trip per entry against a server that
+           answers and nothing at all against one that does not. */
+        if (next != AMI_NET_ERR_NONAME && next != AMI_NET_ERR_STATE)
+            break;
+    }
+
+    /* The caller asked about the bare name. Whatever the speculative retries
+       ran into is not an answer about that name, so report the first failure. */
     return err;
 }
 
@@ -767,16 +814,13 @@ static AmiNetAskResult ami_ns_ask_name6(VOID *arg, ULONG wait)
                                          : AMI_NET_ASK_REFUSED;
 }
 
-LONG netstack_resolve6_until(const char *name, ULONG addr_out[4],
-                             ULONG timeout_ticks, AmiNetGiveUpFn give_up,
-                             VOID *give_up_arg)
+static LONG ami_ns_resolve6_once(const char *name, ULONG addr_out[4],
+                                 ULONG timeout_ticks, AmiNetGiveUpFn give_up,
+                                 VOID *give_up_arg)
 {
     AmiNetStack       *ns = ami_netstack_raw();
     AmiNsName6Ask      ask;
     AmiNetLadderResult done;
-
-    if (name == NULL || *name == '\0' || addr_out == NULL)
-        return AMI_NET_ERR_CONFIG;
 
     /*
      * DEVS:Internet/hosts is not consulted here: src/config/netdb.c parses a
@@ -824,6 +868,57 @@ LONG netstack_resolve6_until(const char *name, ULONG addr_out[4],
     addr_out[3] = ask.answer[0].ipv6_address[3];
 
     return AMI_NET_OK;
+}
+
+/* The same search list as the IPv4 side, for the same reason: getaddrinfo()
+   asks this first, and a short name that resolves to an AAAA record and not an
+   A record was unreachable while only the IPv4 half qualified it. */
+LONG netstack_resolve6_until(const char *name, ULONG addr_out[4],
+                             ULONG timeout_ticks, AmiNetGiveUpFn give_up,
+                             VOID *give_up_arg)
+{
+    AmiNetStack *ns = ami_netstack_raw();
+    const char  *suffix[AMI_CFG_SEARCH_LIST_MAX];
+    char         qualified[AMI_DNS_NAME_MAX];
+    LONG         err;
+    UWORD        count;
+    UWORD        i;
+
+    if (name == NULL || *name == '\0' || addr_out == NULL)
+        return AMI_NET_ERR_CONFIG;
+
+    err = ami_ns_resolve6_once(name, addr_out, timeout_ticks, give_up,
+                               give_up_arg);
+    if (err == AMI_NET_OK)
+        return err;
+
+    if (err != AMI_NET_ERR_NONAME && err != AMI_NET_ERR_STATE)
+        return err;
+
+    if (ns == NULL || !ami_ns_unqualified(name))
+        return err;
+
+    count = ami_config_search_list(&ns->ns_Config.resolver, suffix,
+                                  (UWORD)AMI_CFG_SEARCH_LIST_MAX);
+
+    for (i = 0; i < count; i++)
+    {
+        LONG next;
+
+        if (!ami_ns_join_domain(qualified, (ULONG)sizeof(qualified), name,
+                                suffix[i]))
+            continue;
+
+        next = ami_ns_resolve6_once(qualified, addr_out, timeout_ticks, give_up,
+                                    give_up_arg);
+        if (next == AMI_NET_OK)
+            return AMI_NET_OK;
+
+        if (next != AMI_NET_ERR_NONAME && next != AMI_NET_ERR_STATE)
+            break;
+    }
+
+    return err;
 }
 
 LONG netstack_resolve6(const char *name, ULONG addr_out[4], ULONG timeout_ticks)
