@@ -269,6 +269,19 @@ stage_host() {
         return 1
     fi
 
+    # Every drawer in the archive is a configuration this script compiles.
+    # The minimal drawer is not, and says so with its reason.
+    if tools/check-shipping-config.sh > "$BUILD/shipping-config.log" 2>&1; then
+        note "shipping config: $(grep -c '=matches_ci_arm_' \
+              "$BUILD/shipping-config.log") of 4 drawers match their cross arm"
+        grep '=KNOWN_DIVERGENCE' "$BUILD/shipping-config.log" |
+            while read -r l; do note "$l"; done
+    else
+        cat "$BUILD/shipping-config.log"
+        fail "a shipped drawer is built in a configuration no cross arm compiles"
+        return 1
+    fi
+
     local st log
     for st in tests/tools/*-verdict-selftest.sh; do
         [ -x "$st" ] || continue
