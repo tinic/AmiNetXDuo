@@ -467,6 +467,23 @@ response half that undoes the congestion window reduction, is unchecked; without
 it every spurious timeout halves a sender's window permanently. RFC 5682 F-RTO
 is the sender-side equivalent for a peer with no timestamps.
 
+### Open after the 2026-08-10 sweep
+
+Found while fixing something else, or deliberately left. Each has been seen, not
+inferred.
+
+| Item | Effect | Cite |
+|---|---|---|
+| **X-Surf-100 read is bimodal, and the obvious fix makes `main` worse** | Root-caused on `31e72c8`: every stall is exactly 200 ms, Linux's `TCP_RTO_MIN`, because the guest sends **two** duplicate ACKs where three would trigger fast retransmit, so the sender waits out its minimum RTO. The frames die in the driver for want of an outstanding `CMD_READ` -- `ami_sana2_rx_drain()` reposted nothing until a whole drain finished, so a wake ran its length with the receive window at zero. Current `main` does not exhibit it: 27 boots, 81 reps, all 473-479, 0.000% loss. Reposting per reply plus a per-wake quota fixes the tree that reproduces (311 -> 449 KB/s) and **regresses `main`** (475 -> as low as 209). Branch `sana2-rx-repost` (`fb23254`) carries it marked DO NOT MERGE; the next shape to try is batching -- pop and repost every slot first, then deliver, so no `SendIO` sits between deliveries | `sana2_rx.c`, `docs/BACKLOG.md` receive-livelock section |
+| **`AddNetInterface` refuses an interface with no IPv4 address** | `CONFIGURE=NONE` with no `ADDRESS` gives rc 20, "the interface has no address". That is exactly the machine a managed+other-stateful router describes when we do not speak DHCPv6, so an IPv6-only Amiga cannot be configured at all | found by the RDNSS work, 2026-08-10 |
+| **`nc -l` with no host binds the IPv4 wildcard whatever `-6` says** | Pre-existing, and the same "which family to *bind*" question deliberately deferred for `httpd` and `ShowNetServices` when `-4`/`-6` went in. A listening tool needs a different answer from a connecting one | `nc.c` |
+| **Five RDNSS cases are not proved on the wire** | Several servers at once, a fifth beyond the four the array holds, and a zero-lifetime withdrawal cannot be produced against a router we do not own, and playhouse3 has **no unprivileged packet-injection path**: no passwordless sudo, `TUNSETIFF` returns `EPERM`, and the capability-carrying binaries capture but do not send. The arithmetic is host-tested instead; the five lines that turn a withdrawal into `nxd_dns_server_remove()` are the only part not exercised end to end. The ask is `setcap cap_net_raw+ep` on a sender there | `tests/ipv6/run-rdnss.sh` |
+| **Two agents disagree about DAD** | One measured duplicate address detection completing in 22 ticks at bring-up and 13 on re-add, against a 150-tick budget, and fixed the test that read the state too early. Another, the same night, saw a guest whose link-local never left `(tentative)` across two samples 30 s apart in a six-minute boot, so no global address ever formed and 12 `-6` arms reported `blocked`. The live demo has a global address throughout. Probably the second rig, but unresolved, and no `-6` result should be trusted until it is | `tests/ipv6/run-fsuae.sh`, `tests/tools/run-family.sh` |
+| **`run-wsconsole.sh` is not wired into CI** | It needs an emulator plus a licensed Workbench `C:`/`LIBS:` and an ssh client, so it belongs where `run-wsterm.sh` is invoked rather than in the default stage list. Until it is, the console handler -- raw mode, echo suppression, window size -- is covered by nothing that runs automatically | |
+| **`Ed` reads `((Window *)0)->Flags`** | Absolute address `0x14`, unguarded. 40.68 does not have bit 6 set there so `Ed` runs under the browser console; supplying a fake `Window` is **worse**, because it enables Ed's mouse path, which dereferences `window->RPort->Font` on bytes the browser controls | `httpterm.c`, `ACTION_DISK_INFO` comment |
+| **`arp/cache` fails its premise on run 1** | Passed before the `-4`/`-6` rebase, fails twice after, and fails with a one-row table in a boot of its own -- so not chunking and not the new rows | `tests/tools/run-toolleak.sh` |
+| **The terminal page is 398 KB, uncompressed, on every load** | 1.6 s off an A1200 at ~242 KB/s. `httpd` sends `Cache-Control: no-cache` and does not compress; gzip would be 94 KB. Also: a line longer than one screenful mis-redraws because cursor-up clamps at the viewport top (unreachable by typing -- the server's 512-byte pend buffer stops a paste first), and Tab is expanded to spaces rather than sent | `src/tools/web/`, `httpd.c` |
+
 ### Test coverage, surveyed globally 2026-08-10
 
 `RemoveNetInterface` shipped in 0.20.0 unable to do the one thing its header
