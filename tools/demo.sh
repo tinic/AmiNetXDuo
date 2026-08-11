@@ -231,6 +231,18 @@ fi
 # sat in the MAC loop until the timeout with nothing wrong anywhere else.
 EMU="$ROOT/build/amiberry-$AMINETXDUO_RUN_TAG.log"
 
+# One demo at a time.  Two guests on one wire derive the same MAC from the
+# a2065 unit and neither reaches the network -- httpd serves on 0.0.0.0 and
+# reports itself happily, so it reads as stuck rather than as unplugged.
+# Stacked instances cost four restarts before anyone noticed tonight.
+pkill -f "amiberry --log -f $ROOT/build/amiberry-$AMINETXDUO_RUN_TAG.uae" 2>/dev/null || true
+pkill -f "$ROOT/tools/amiberry-run.sh -N a2065 -B $BACKEND" 2>/dev/null || true
+for _ in $(seq 1 15); do
+    pgrep -f "amiberry --log -f $ROOT/build/amiberry-$AMINETXDUO_RUN_TAG.uae" >/dev/null || break
+    sleep 1
+done
+sleep 2
+
 echo "==> booting $MODEL on '$BACKEND', httpd :$PORT, window ${WINDOW}s"
 
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$BACKEND" -m "$MODEL" -t "$WINDOW" \
