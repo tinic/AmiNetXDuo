@@ -7,7 +7,7 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
-## Unreleased
+## 0.21.0
 
 - The name servers a router advertises are listed by `ShowNetStatus` and handed to a program that asks, instead of only being used behind the scenes. The configuration had nowhere to keep an IPv6 address, so every report showed none while lookups went through one
 - The search domains a router advertises are used, so a short name resolves on a network with no DHCP server
@@ -23,6 +23,7 @@ version at the top when it merges.
 - `QUIET` prints errors in every command that takes it. `ConfigureNetInterface`, `RemoveNetInterface`, `NetShutdown`, `AddNetRoute`, `DeleteNetRoute`, `GetNetStatus`, `CheckNetConfig`, `hostname`, `arp` and `ShowNetServices` all used to silence their own failures with it
 - `ShowNetStatus QUIET` is gone. It suppressed two error messages and printed the whole report regardless; `GetNetStatus` answers the same questions with a return code
 
+- An interactive `ssh` session works from the Shell in the browser. `ssh host command` had always worked and `ssh -t` hung for ever: the terminal was asked to write nothing at all, and it held that request waiting for room it did not need
 - The installer offers to serve a drawer and a Shell in a browser when the machine boots. It defaults to no
 - The installer's yes/no answers were inverted: clicking "No" to answering `.local` turned it on
 - `httpd -T` needs no file name. It finds the page itself and says which one it took; `PAGE=<file>` names another, and a `-T` that can find no page refuses to start rather than serving a terminal that is not there
