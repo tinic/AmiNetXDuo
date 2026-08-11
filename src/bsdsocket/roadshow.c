@@ -100,7 +100,7 @@ BOOL bsd_GetDefaultDomainName(register STRPTR buffer   __asm("a0"),
                               register LONG buffer_size __asm("d0"),
                               register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    const AmiConfig *cfg = netstack_config();
+    const AmiConfig *cfg;
 
     (VOID)SocketBase;
 
@@ -108,6 +108,15 @@ BOOL bsd_GetDefaultDomainName(register STRPTR buffer   __asm("a0"),
         return FALSE;
 
     buffer[0] = '\0';
+
+#ifdef AMINETXDUO_IPV6
+    /* An advertisement's search list names the default domain when nothing
+       else did, and it reaches the configuration only when a caller task
+       absorbs it. */
+    netstack_dns_absorb_ra();
+#endif
+
+    cfg = netstack_config();
 
     if (cfg == NULL || cfg->resolver.domain[0] == '\0')
         return FALSE;
@@ -153,10 +162,19 @@ typedef struct BsdDnsList
 struct List *bsd_ObtainDomainNameServerList(
     register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    const AmiConfig *cfg   = netstack_config();
+    const AmiConfig *cfg;
     BsdDnsList      *out;
     UWORD            count = 0;
     UWORD            i;
+
+#ifdef AMINETXDUO_IPV6
+    /* Before the configuration is read: a router advertisement's servers are
+       recorded on the IP thread and only reach the configuration when a caller
+       task absorbs them, and this is one. */
+    netstack_dns_absorb_ra();
+#endif
+
+    cfg = netstack_config();
 
     if (cfg == NULL)
     {

@@ -257,13 +257,18 @@ if [ "$guest_global" = no ]; then
 fi
 
 # ShowNetStatus and host both print to the guest's stdout, which the harness
-# copies into $OUT; the serial log carries the stack's own account of the same
-# events and is the second reading when the first disagrees.
+# copies into $OUT -- ALONG WITH the serial log, so the address has to be found
+# in the report itself and not merely somewhere in the file. ShowNetStatus
+# writes "Name servers:   <address>" and then one indented address per line.
+#
+# No trailing-anchor on any of these: the guest's lines end CR LF.
 ns6_reported=no
-grep -qiF "$ra_rdnss" "$OUT" 2>/dev/null && ns6_reported=yes
+sed -n '/^===== SYS:ShowNetStatus/,/^----- rc/p' "$OUT" 2>/dev/null \
+    | grep -qiE "^(Name servers: +| +)${ra_rdnss}[[:space:]]*$" &&
+    ns6_reported=yes
 
 ns6_absorbed=no
-grep -qiE "netstack: advertised name server ${ra_rdnss}\$" "$SERIAL" 2>/dev/null &&
+grep -qiE "netstack: advertised name server ${ra_rdnss}" "$SERIAL" 2>/dev/null &&
     ns6_absorbed=yes
 
 dnssl_absorbed=no
@@ -272,7 +277,8 @@ grep -qiF "advertised search list" "$SERIAL" 2>/dev/null && dnssl_absorbed=yes
 # The only route from "playhouse2" to an address is the advertised suffix:
 # there is no hosts file, no DOMAIN and no SEARCH on this guest.
 short_resolved=no
-grep -qE "^$NAME (has address|is) " "$OUT" 2>/dev/null && short_resolved=yes
+sed -n "/^===== SYS:host $NAME/,/^----- rc/p" "$OUT" 2>/dev/null \
+    | grep -qE "^$NAME (has address|is) " && short_resolved=yes
 
 echo "ns6_reported=$ns6_reported ns6_absorbed=$ns6_absorbed"
 echo "dnssl_absorbed=$dnssl_absorbed short_resolved=$short_resolved"

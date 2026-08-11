@@ -257,6 +257,44 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
     }
 }
 
+/*
+ * The same, for a caller that is about to REPORT the resolver rather than use
+ * it.
+ *
+ * Absorbing only on the way into a lookup left a machine that had not resolved
+ * anything yet describing a resolver it did not have: the advertisement had
+ * arrived, the servers and the search list were recorded, and ShowNetStatus
+ * printed "Name servers: none configured" beside a lookup that would have
+ * worked. That is the reported symptom, one step further along than the
+ * resolver itself.
+ *
+ * A caller task, not the IP thread, so the DNS client may be called from here
+ * for the same reason a lookup may. The bracket is taken here rather than by
+ * the caller because the published calls this serves are shared-library entry
+ * points with no bracket of their own.
+ */
+VOID netstack_dns_absorb_ra(VOID)
+{
+    AmiNetStack  *ns = ami_netstack_raw();
+    AmiNetCaller *caller;
+
+    if (ns == NULL || !ns->ns_DnsCreated)
+        return;
+
+    /* Nothing pending is the ordinary case, and it must not cost a report a
+       trip into ThreadX. */
+    if (!ns->ns_RdnssPending && !ns->ns_DnsslPending)
+        return;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return;
+
+    ami_ns_dns_absorb_rdnss(ns);
+
+    ami_netstack_leave_free(caller);
+}
+
 #endif /* AMINETXDUO_IPV6 */
 
 VOID ami_ns_copy_name(char *dst, const char *src, ULONG size)
