@@ -123,8 +123,11 @@ done
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 PAGE="$ROOT/src/tools/web/terminal.html"
+# Both forms, so the browser this run drives is fetching the gzipped one --
+# which is what a real browser will get and the only place that is proved.
+PAGEGZ="$PAGE.gz"
 
-for f in "$TOOLS/httpd" "$BSD" "$PAGE"; do
+for f in "$TOOLS/httpd" "$BSD" "$PAGE" "$PAGEGZ"; do
     [ -f "$f" ] || { echo "result=infra"; echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
@@ -154,7 +157,8 @@ cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 mkdir -p "$STAGE/devs/Networks"
 cp "$A2065" "$STAGE/devs/Networks/a2065.device"
 cp "$BSD" "$STAGE/libs/bsdsocket.library"
-cp "$PAGE" "$STAGE/terminal.html"
+cp "$PAGE"   "$STAGE/terminal.html"
+cp "$PAGEGZ" "$STAGE/terminal.html.gz"
 
 cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
 DEVICE=a2065.device
@@ -248,7 +252,8 @@ set +e
     -t "$WINDOW" \
     -a "DH0:Public $GUESTPORT TERMINAL=DH0:terminal.html TRACE" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
-    "$STAGE/terminal.html" "$STAGE/c" > "$ROOT/build/wsconsole-emu.log" 2>&1 &
+    "$STAGE/terminal.html" "$STAGE/terminal.html.gz" "$STAGE/c" \
+    > "$ROOT/build/wsconsole-emu.log" 2>&1 &
 RUNNER=$!
 set -e
 

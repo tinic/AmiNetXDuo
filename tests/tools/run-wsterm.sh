@@ -99,8 +99,10 @@ done
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 PAGE="$ROOT/src/tools/web/terminal.html"
+# Staged too, so what the drill measures is the pair httpd chooses between.
+PAGEGZ="$PAGE.gz"
 
-for f in "$TOOLS/httpd" "$BSD" "$PAGE"; do
+for f in "$TOOLS/httpd" "$BSD" "$PAGE" "$PAGEGZ"; do
     [ -f "$f" ] || { echo "result=infra"; echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
@@ -130,7 +132,8 @@ cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 mkdir -p "$STAGE/devs/Networks"
 cp "$A2065" "$STAGE/devs/Networks/a2065.device"
 cp "$BSD" "$STAGE/libs/bsdsocket.library"
-cp "$PAGE" "$STAGE/terminal.html"
+cp "$PAGE"   "$STAGE/terminal.html"
+cp "$PAGEGZ" "$STAGE/terminal.html.gz"
 
 cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
 DEVICE=a2065.device
@@ -165,7 +168,8 @@ set +e
     -t "$WINDOW" \
     -a "DH0:Public $GUESTPORT TERMINAL=DH0:terminal.html TRACE" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
-    "$STAGE/terminal.html" > "$ROOT/build/wsterm-emu.log" 2>&1 &
+    "$STAGE/terminal.html" "$STAGE/terminal.html.gz" \
+    > "$ROOT/build/wsterm-emu.log" 2>&1 &
 RUNNER=$!
 set -e
 
@@ -238,7 +242,8 @@ fi
 
 DRILL_AT=$(date +%s)
 set +e
-python3 "$ROOT/tests/tools/httpd-drill.py" --terminal 127.0.0.1 "$HOSTPORT" \
+python3 "$ROOT/tests/tools/httpd-drill.py" --terminal \
+    --page=DH0:terminal.html 127.0.0.1 "$HOSTPORT" \
     > "$ROOT/build/wsterm-drill.txt" 2>&1 &
 DRILL=$!
 while kill -0 "$DRILL" 2>/dev/null; do

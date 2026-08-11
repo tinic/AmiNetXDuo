@@ -320,16 +320,29 @@ aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httppath.c httpif.c
 # web stage is what proves the two still agree.  Putting it here means a
 # staging script can take the page out of the build tree next to httpd rather
 # than reaching back into the sources for it.
+#
+# The .gz beside it is the same artifact and travels the same way: made by
+# tools/web/build.mjs on a machine with a compressor, committed, copied.  httpd
+# serves it to a browser that asked for gzip and the plain one to a browser
+# that did not, so a staging script that took only one of the two would still
+# work and would simply be slow.  Both are copied so that neither can be the
+# one somebody forgot.
 add_custom_command(
     OUTPUT  "${CMAKE_CURRENT_BINARY_DIR}/terminal.html"
+            "${CMAKE_CURRENT_BINARY_DIR}/terminal.html.gz"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/web/terminal.html"
             "${CMAKE_CURRENT_BINARY_DIR}/terminal.html"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/web/terminal.html.gz"
+            "${CMAKE_CURRENT_BINARY_DIR}/terminal.html.gz"
     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web/terminal.html"
+            "${CMAKE_CURRENT_SOURCE_DIR}/web/terminal.html.gz"
     COMMENT "Staging httpd's terminal page")
 
 add_custom_target(tool_httpd_page ALL
-    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/terminal.html")
+    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/terminal.html"
+            "${CMAKE_CURRENT_BINARY_DIR}/terminal.html.gz")
 
 add_dependencies(tool_httpd tool_httpd_page)
 
