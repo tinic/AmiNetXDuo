@@ -218,6 +218,13 @@ netem_off
 
 [ -s "$OUT/samples.txt" ] || { echo "FAIL: no arm produced a RESULT line" >&2; exit 1; }
 
+# THE SPREAD IS THE INTERQUARTILE RANGE, not the full range.  The gate
+# compares MEDIANS, and a median is robust: one arm that lands at half the
+# others -- which is what a busy emulator host produces, and this one is shared
+# -- barely moves it.  Measuring the dispersion with max-minus-min is not
+# robust at all, so that same single arm tripled the tolerance and turned a
+# usable gate into one nothing could ever breach.  Quartiles ignore the tails
+# the median already ignores.
 awk '{ v[$2] = v[$2] " " $3 }
      END {
         for (k in v) {
@@ -225,8 +232,10 @@ awk '{ v[$2] = v[$2] " " $3 }
             for (i = 1; i <= n; i++) for (j = i + 1; j <= n; j++)
                 if (a[j] + 0 < a[i] + 0) { t = a[i]; a[i] = a[j]; a[j] = t }
             med = (n % 2) ? a[(n + 1) / 2] : (a[n / 2] + a[n / 2 + 1]) / 2
-            spread = (med + 0 > 0) ? (a[n] - a[1]) * 100.0 / med : 0
-            printf "%s %.1f %.1f %d\n", k, med, spread, n
+            lo = int(n / 4) + 1; hi = n - int(n / 4)
+            spread = (med + 0 > 0) ? (a[hi] - a[lo]) * 100.0 / med : 0
+            range  = (med + 0 > 0) ? (a[n] - a[1]) * 100.0 / med : 0
+            printf "%s %.1f %.1f %d %.1f\n", k, med, spread, n, range
         }
      }' "$OUT/samples.txt" | sort > "$OUT/median.txt"
 
@@ -249,13 +258,13 @@ if [ "$RECORD" = "1" ]; then
         echo "# Recorded with ${LOSS}% peer-to-guest loss, $KB KB, $REPS reps."
         echo "# Read and write are separate on purpose: the 0.16.6 regression"
         echo "# moved them in opposite directions."
-        echo "# Tolerance: twice the spread over root(reps), floor 5%."
+        echo "# Tolerance: twice the interquartile spread over root(reps), floor 5%."
         # OVER ROOT(REPS), and that is not a refinement.  The gate compares
         # MEDIANS, so the tolerance has to describe how far a median moves,
         # not how far one sample does -- and the range of samples GROWS with
         # the number of them, so the old `spread * 2` made -r 9 a looser gate
         # than -r 3.  More arms must tighten it.
-        while read -r name med spread n; do
+        while read -r name med spread n _range; do
             tol=$(awk -v s="$spread" -v n="$n" 'BEGIN {
                     if (n + 0 < 1) n = 1
                     t = 2 * s / sqrt(n); if (t < 5) t = 5; printf "%.1f", t }')
@@ -306,7 +315,8 @@ EOF
 done < "$BASELINE"
 
 echo
-awk '{ printf "    %-14s median %8s  spread %s%% over %s rep(s)\n", $1, $2, $3, $4 }' \
+awk '{ printf "    %-14s median %8s  iqr %s%%  range %s%%  over %s rep(s)\n", \
+                   $1, $2, $3, $5, $4 }' \
     "$OUT/median.txt"
 
 echo
