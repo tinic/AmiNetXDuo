@@ -272,7 +272,14 @@ else
     # The bracket is not decoration either -- pkill -f matches the remote
     # shell's own command line, so an unbracketed pattern kills the connection
     # that issued it.
-    PEER_KILL="pkill -f '[f]itz-serve .* PORT $PORT' || true"
+    # TERM, THEN KILL.  fitz-serve does not exit on SIGTERM, so `pkill -f`
+    # alone left one behind on every run: four arms of a loss gate left three
+    # servers, and tests/perf/run-lossgate.sh:106 then refused to start --
+    # "the peer already has 3 fitz-serve process(es) running" -- which is the
+    # right refusal about the wrong machine's state, and it blocks the only
+    # rig that can price an ack or retransmit change from running twice.
+    PEER_KILL="pkill -f '[f]itz-serve .* PORT $PORT'; sleep 1;
+               pkill -9 -f '[f]itz-serve .* PORT $PORT'; true"
     ssh "$PEER" "$PEER_KILL" >/dev/null 2>&1 || true
     ssh "$PEER" "rm -rf $PEER_DIR; mkdir -p $PEER_DIR;
                  nohup $PEER_BIN $PEER_DIR PORT $PORT > /tmp/fitzbench-peer.log 2>&1 &
