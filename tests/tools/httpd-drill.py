@@ -28,11 +28,12 @@
 #   skips itself when the thing it tests is missing is a suite that passes on a
 #   server with nothing in it.  tests/tools/run-wsterm.sh passes it.
 #
-#   --page=<amigapath> says where on the GUEST the -T page is, e.g.
-#   DH0:terminal.html.  With it, the compressed sibling is moved out of the way
-#   through the terminal's own Shell and put back, which is the only way from
-#   out here to produce the state of a -T page nobody compressed.  Without it
-#   that one check is skipped and says so.
+#   --gz-url=<path> says where the -T page's compressed sibling can be reached
+#   in the SERVED drawer, e.g. /terminal.html.gz.  With it, that file is moved
+#   out of the way over WebDAV and put back, which is how the state of a -T
+#   page nobody compressed is produced from out here.  It needs a harness that
+#   put the page inside the document root; tests/tools/run-wsterm.sh does.
+#   Without it that one check is skipped and says so.
 #
 # SPDX-License-Identifier: MIT
 
@@ -48,12 +49,12 @@ import time
 argv = [a for a in sys.argv[1:] if not a.startswith("--")]
 WANT_TERMINAL = "--terminal" in sys.argv or "--ws-only" in sys.argv
 
-# Where the -T page lives on the guest, for the one check that has to change
-# what is on its disk.  "" when nobody said.
-TERM_PAGE = ""
+# Where the -T page's .gz can be reached in the served drawer, for the one
+# check that has to change what is on the guest's disk.  "" when nobody said.
+GZ_URL = ""
 for _a in sys.argv[1:]:
-    if _a.startswith("--page="):
-        TERM_PAGE = _a[len("--page="):]
+    if _a.startswith("--gz-url="):
+        GZ_URL = _a[len("--gz-url="):]
 
 # --ws-only skips the WebDAV half and its setup.  It exists so the WebSocket
 # assertions can be pointed at something that is NOT this server: every one of
@@ -1169,75 +1170,6 @@ def test_term_etag():
               % tags["plain"])
 
 
-def term_shell(commands, want):
-    """Run AmigaDOS commands through the terminal and wait for a marker in the
-    output.  The Shell is the only writable thing this drill has on the guest's
-    boot drive, and the check below needs the guest's disk changed."""
-    c = WsConn()
-    if c.status != 101:
-        c.close()
-        return False
-
-    c.gather(WS_WAIT, want=">")
-    for line in commands:
-        c.send(ws_frame(0x2, line + "\n"))
-        time.sleep(0.3)
-    said, _ = c.gather(WS_WAIT, want=want)
-    c.send(ws_frame(0x8, struct.pack("!H", 1000) + b"bye"))
-    c.close()
-    ws_wait_free()
-    return want.encode("latin-1") in said
-
-
-def test_term_no_gz():
-    """A -T page with no compressed copy beside it is served, uncompressed.
-
-    MADE, not found.  httpd looks for the sibling when a browser asks and
-    remembers no answer between requests, so "nobody ever compressed this
-    page" and "the compressed one is not there any more" are one state, and
-    moving it out of the way through the guest's own Shell produces it.  Put
-    back afterwards, and the putting back is itself checked -- a restore that
-    silently failed would leave every later run measuring the wrong thing."""
-    if not TERM_PAGE:
-        print("the terminal's page with no .gz beside it: SKIPPED, "
-              "no --page=<guest path> was given")
-        return
-
-    print("the terminal's page with no .gz beside it")
-
-    gz = TERM_PAGE + ".gz"
-    away = TERM_PAGE + ".gzaway"
-
-    # `Echo "GZ" "MOVED"` prints `GZ MOVED`, which is not what was typed: the
-    # marker cannot be matched by an echo of the command itself.
-    moved = term_shell(["Rename %s %s" % (gz, away), 'Echo "GZ" "MOVED"'],
-                       "GZ MOVED")
-    check(moved, "the Shell moved %s out of the way" % gz)
-    if not moved:
-        return
-
-    try:
-        a = term_page({"Accept-Encoding": "gzip"})
-        check(a is not None and a[0] == 200,
-              "the page is still served with no .gz beside it (got %s)"
-              % (a[0] if a else "nothing"))
-        if a is not None:
-            check("content-encoding" not in a[1],
-                  "and comes back uncompressed (got %r)"
-                  % a[1].get("content-encoding"))
-            check(b"WebSocket" in a[2],
-                  "and is the page itself, %d bytes" % len(a[2]))
-    finally:
-        back = term_shell(["Rename %s %s" % (away, gz), 'Echo "GZ" "BACK"'],
-                          "GZ BACK")
-        check(back, "and %s is put back" % gz)
-
-    a = term_page({"Accept-Encoding": "gzip"})
-    check(a is not None and a[1].get("content-encoding") == "gzip",
-          "with it back, gzip is served again -- nothing was remembered "
-          "(got %r)" % (a[1].get("content-encoding") if a else "nothing"))
-
-
 def test_ws_shell():
     """A command, typed, and its output.  This is the whole feature."""
     print("a command through the Shell")
@@ -1352,6 +1284,60 @@ def test_ws_unmasked():
 
     check(ws_wait_free() is not None,
           "and the Shell is given back afterwards")
+
+
+def test_term_no_gz():
+    """A -T page with no compressed copy beside it is served, uncompressed.
+
+    MADE, not found.  httpd looks for the sibling when a browser asks and
+    remembers no answer between requests, so "nobody ever compressed this
+    page" and "the compressed one is not there any more" are one state, and
+    moving it out of the way is how this reaches that state without a second
+    server.  WebDAV does the moving, which is why the harness puts the -T page
+    inside the document root: a MOVE is instant and needs nothing on the guest
+    that the drill has not already used.
+
+    Put back afterwards, and the putting back is CHECKED -- a restore that
+    silently failed would leave a later run measuring the wrong thing and
+    calling it a pass."""
+    if not GZ_URL:
+        print("the terminal's page with no .gz beside it: SKIPPED, "
+              "no --gz-url=<served path> was given")
+        return
+
+    print("the terminal's page with no .gz beside it")
+
+    away = GZ_URL + "away"
+    dest = {"Destination": "http://%s:%d%s" % (ADDR, PORT, away)}
+
+    a = once(req("MOVE", GZ_URL, dest))
+    moved = a is not None and a[0] in (201, 204)
+    check(moved, "the compressed sibling moves out of the way (got %s)"
+                 % (a[0] if a else "nothing"))
+    if not moved:
+        return
+
+    try:
+        a = term_page({"Accept-Encoding": "gzip"})
+        check(a is not None and a[0] == 200,
+              "the page is still served with no .gz beside it (got %s)"
+              % (a[0] if a else "nothing"))
+        if a is not None:
+            check("content-encoding" not in a[1],
+                  "and comes back uncompressed (got %r)"
+                  % a[1].get("content-encoding"))
+            check(b"WebSocket" in a[2],
+                  "and is the page itself, %d bytes" % len(a[2]))
+    finally:
+        back = {"Destination": "http://%s:%d%s" % (ADDR, PORT, GZ_URL)}
+        b = once(req("MOVE", away, back))
+        check(b is not None and b[0] in (201, 204),
+              "and it is put back (got %s)" % (b[0] if b else "nothing"))
+
+    a = term_page({"Accept-Encoding": "gzip"})
+    check(a is not None and a[1].get("content-encoding") == "gzip",
+          "with it back, gzip is served again -- nothing was remembered "
+          "(got %r)" % (a[1].get("content-encoding") if a else "nothing"))
 
 
 def main():
