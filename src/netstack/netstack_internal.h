@@ -247,6 +247,14 @@ struct AmiNetStack
     TX_SEMAPHORE        ns_AddrArrived;
     BOOL                ns_AddrArrivedReady;
 
+    /*
+     * The one-second heartbeat ami_second_notify() rides on.  The flag is not
+     * decoration: ami_ns_destroy() has seven call sites, four of which run
+     * before ThreadX exists, so the delete cannot be inferred from position.
+     */
+    TX_TIMER            ns_Second;
+    BOOL                ns_SecondCreated;
+
     NX_AUTO_IP          ns_AutoIp;
     APTR                ns_AutoIpStack;
     BOOL                ns_AutoIpCreated;

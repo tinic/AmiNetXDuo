@@ -183,6 +183,25 @@ VOID ami_sana2_set_open_hooks(VOID (*quiesce)(VOID), VOID (*restore)(VOID));
 VOID ami_set_address_change_hook(VOID (*hook)(VOID));
 VOID ami_address_change_notify(VOID);
 
+/*
+ * A once-a-second heartbeat, for housekeeping that has to happen whether or
+ * not anything is being asked of the stack.  Registered the same way and for
+ * the same reason as the address-change hook above.  It exists while the
+ * netstack does: the netstack owns the timer, so no heartbeat arrives before
+ * bringup or after teardown.
+ *
+ * The contract is STRICTER than the address-change one.  This runs on the
+ * ThreadX tick task, inside the Forbid() that _tx_thread_context_save() holds
+ * (port/threadx-amiga/inc/tx_port.h, TX_TIMER_PROCESS_IN_ISR), so ThreadX and
+ * NetX Duo both count it as interrupt level.  A hook may not block, may not
+ * wait on a semaphore or mutex, and may not call into NetX Duo at all
+ * (port/netxduo-amiga/inc/nx_port.h).  AttemptSemaphore, Disable()/Enable(),
+ * Signal() and AMI_WARN -- which is RawPutChar and nothing else -- are all
+ * fine.
+ */
+VOID ami_set_second_hook(VOID (*hook)(VOID));
+VOID ami_second_notify(VOID);
+
 #ifdef __cplusplus
 }
 #endif
