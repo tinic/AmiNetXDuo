@@ -109,8 +109,22 @@ done
 # ---- the two Commodore commands, located and never committed -------------
 
 AMIGA_C="${AMINETXDUO_AMIGA_C:-$HOME/amiga-os-src/os-source/c}"
+
+# AmigaDOS does not care about case and two real sources of these commands
+# disagree: the OS source tree spells them `type` and `copy`, a Workbench
+# unpacked off its floppy spells them `Type` and `Copy`.  Requiring one
+# spelling made a perfectly good C: drawer read as no C: drawer at all.
+amiga_cmd() {
+    local want="$1" f
+    for f in "$AMIGA_C/$want" "$AMIGA_C/$(printf '%s' "$want" |
+             sed 's/^./\U&/')"; do
+        [ -f "$f" ] && { printf '%s' "$f"; return 0; }
+    done
+    return 1
+}
+
 for cmd in type copy; do
-    [ -f "$AMIGA_C/$cmd" ] || {
+    amiga_cmd "$cmd" >/dev/null || {
         cat >&2 <<EOF
 No AmigaOS C: commands found.  This run's whole point is that STOCK commands
 work, so it will not substitute anything of ours for them.
@@ -179,8 +193,8 @@ cp "$A2065" "$STAGE/devs/a2065.device"
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 cp "$TOOLS/AddNetInterface"   "$STAGE/AddNetInterface"
 cp "$TESTTOOLS/TcpHandoff"    "$STAGE/TcpHandoff"
-cp "$AMIGA_C/type"            "$STAGE/Type"
-cp "$AMIGA_C/copy"            "$STAGE/Copy"
+cp "$(amiga_cmd type)"        "$STAGE/Type"
+cp "$(amiga_cmd copy)"        "$STAGE/Copy"
 
 # tests/netstack/devs ships a DHCP eth0, which is right on SLIRP and wrong on a
 # bridge: see -a above.
