@@ -230,8 +230,17 @@ def main():
         text = summarise(data)
         log.write("[%8.2f] %s:%d  %s\n"
                   % (time.time() % 100000, peer[0], peer[1], text))
-        if "mdnswatch.local" in text:
+        if "mdnswatch.local" in text and not selftest_ok:
             selftest_ok = True
+            # Written HERE, not at the end.  The caller runs this with
+            # --seconds TIMEOUT+3600 and SIGTERMs it the moment the guest
+            # finishes (tests/tools/run-mdnsctl.sh:359), so the loop never
+            # reaches its deadline and the summary below never runs.  The
+            # calibration verdict has to survive that, because it is the only
+            # thing that separates "the responder said nothing" from "the
+            # instrument was deaf".
+            log.write("selftest: the instrument SAW its own multicast\n")
+            log.flush()
 
         if respond_name and len(data) >= 12:
             flags = struct.unpack(">H", data[2:4])[0]
@@ -264,9 +273,10 @@ def main():
 
     log.write("--- %d mDNS message(s) seen in %.0f s ---\n"
               % (seen, args.seconds))
-    if args.selftest:
-        log.write("selftest: the instrument %s its own multicast\n"
-                  % ("SAW" if selftest_ok else "DID NOT SEE"))
+    if args.selftest and not selftest_ok:
+        # The SAW line is written the moment the probe comes back, above; this
+        # is only the negative, and only on a run that reached its deadline.
+        log.write("selftest: the instrument DID NOT SEE its own multicast\n")
     log.flush()
     return 0
 

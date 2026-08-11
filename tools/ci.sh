@@ -283,7 +283,7 @@ stage_host() {
     fi
 
     local st log
-    for st in tests/tools/*-verdict-selftest.sh; do
+    for st in tests/*/*-verdict-selftest.sh; do
         [ -x "$st" ] || continue
         log="$BUILD/$(basename "$st" .sh).log"
         if "$st" > "$log" 2>&1; then

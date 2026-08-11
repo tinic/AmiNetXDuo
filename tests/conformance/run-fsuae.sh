@@ -175,4 +175,21 @@ case "$ident" in
         ;;
 esac
 
-exit "$status"
+# ---- the TAP log is the result -------------------------------------------
+#
+# `exit "$status"` alone was a pass on every run that reached the end.  $status
+# is the emulator's, which is the guest's, which is conf_launcher.c:134 --
+# `return RETURN_OK;` unconditional, with the comment "hand the harness a
+# success so the run is scored from the TAP log".  Nothing scored the TAP log.
+# The only read of it above greps one line for attribution.  So the whole
+# bsdsocktest conformance suite, at .github/workflows/emulator.yml:91, was
+# green however many conformance tests failed.
+#
+# The scorer is in tests/conformance/tap-verdict.sh so that
+# tests/conformance/tap-verdict-selftest.sh can prove it goes red without a
+# ROM, a driver or the submodule.  It returns 3 for "not measured", which is
+# the same distinction the attribution check above makes.
+. "$ROOT/tests/conformance/tap-verdict.sh"
+
+tap_verdict "$ROOT/build/amiberry-testhd-$TAG/bsdsocktest.log" "$status"
+exit $?

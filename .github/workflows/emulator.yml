@@ -290,7 +290,12 @@ jobs:
           path: |
             build/ci/emu-*.log
             build/serial*.log
-            build/testhd-conformance/bsdsocktest.log
+            # amiberry-run.sh writes build/amiberry-testhd-<tag>/, not
+            # build/testhd-<tag>/, so the conformance TAP log was never
+            # collected -- which mattered while run-fsuae.sh exited 0 on every
+            # run and grading it by hand was the only way to see a failure.
+            build/amiberry-testhd-*/bsdsocktest.log
+            build/amiberry-testhd-*/conf-out.txt
           if-no-files-found: ignore
           retention-days: 14
 
