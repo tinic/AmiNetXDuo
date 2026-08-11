@@ -192,16 +192,23 @@ cold|NetSetup|writes-config|5|re:set up a network interface|-|SYS:NetSetup ethz 
 # of parsing the pair where it is parsed: an argument error must not start the
 # network to say so.  Any of these appearing in the `live` transcript instead
 # would mean the check moved below the open.
-cold|ping|family-both|5|re:-4 and -6 cannot both be given|-|SYS:ping 10.0.2.2 -4 -6
-cold|traceroute|family-both|5|re:-4 and -6 cannot both be given|-|SYS:traceroute 10.0.2.2 -4 -6
-cold|fetch|family-both|5|re:-4 and -6 cannot both be given|-|SYS:fetch http://10.0.2.2/ -4 -6
-cold|telnet|family-both|5|re:-4 and -6 cannot both be given|-|SYS:telnet 10.0.2.2 -4 -6
-cold|tftp|family-both|5|re:-4 and -6 cannot both be given|-|SYS:tftp 10.0.2.2 GET x -4 -6
+#
+# Each carries a short deadline it never reaches, because a regression here
+# would not refuse: it would open bsdsocket.library, start the stack this boot
+# is supposed to be without, and then run the command for its default lifetime
+# -- thirty hops of traceroute, five TFTP retries -- five times over.  The row
+# has to come back red, and a boot that burnt its ceiling is not red, it is
+# infrastructure.
+cold|ping|family-both|5|re:-4 and -6 cannot both be given|-|SYS:ping 10.0.2.2 -c 1 -t 3 -4 -6
+cold|traceroute|family-both|5|re:-4 and -6 cannot both be given|-|SYS:traceroute 10.0.2.2 -m 1 -q 1 -w 2 -n -4 -6
+cold|fetch|family-both|5|re:-4 and -6 cannot both be given|-|SYS:fetch http://10.0.2.2/ TIMEOUT 5 -4 -6
+cold|telnet|family-both|5|re:-4 and -6 cannot both be given|-|SYS:telnet 10.0.2.2 23 -4 -6
+cold|tftp|family-both|5|re:-4 and -6 cannot both be given|-|SYS:tftp 10.0.2.2 GET x TIMEOUT 1 -4 -6
 cold|whois|family-both|5|re:-4 and -6 cannot both be given|-|SYS:whois plain.test -4 -6
-cold|sntp|family-both|5|re:-4 and -6 cannot both be given|-|SYS:sntp 10.0.2.2 -4 -6
+cold|sntp|family-both|5|re:-4 and -6 cannot both be given|-|SYS:sntp 10.0.2.2 TIMEOUT 2 -4 -6
 cold|host|family-both|5|re:-4 and -6 cannot both be given|-|SYS:host v4only.test -4 -6
-cold|nc|family-both|5|re:-4 and -6 cannot both be given|-|SYS:nc 10.0.2.2 7301 -4 -6
-cold|iperf|family-both|5|re:-4 and -6 cannot both be given|-|SYS:iperf 10.0.2.2 -4 -6
+cold|nc|family-both|5|re:-4 and -6 cannot both be given|-|SYS:nc -z 10.0.2.2 7301 -w 3 -4 -6
+cold|iperf|family-both|5|re:-4 and -6 cannot both be given|-|SYS:iperf 10.0.2.2 -p 7385 -t 2 -q -4 -6
 # ------------------------------------------------------------ live ------
 live|CheckNetConfig|stack-up|5|re:nothing wrong with it|-|SYS:CheckNetConfig
 live|GetNetStatus|stack-up|5|re:The network is running|-|SYS:GetNetStatus

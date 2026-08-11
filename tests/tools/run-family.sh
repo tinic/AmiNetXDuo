@@ -17,6 +17,11 @@
 #                 somewhere else
 #     -4 -6       is an argument error, not a silent preference
 #
+#   Every row is written so that IGNORING the flag ends quickly.  That is the
+#   regression each -6 and each -4 -6 row exists to catch, and a command that
+#   would sit there instead turns the regression into a timeout, which this
+#   file reports as infrastructure rather than as a failure.
+#
 #   The third and fourth arms are also swept under SLIRP by
 #   tests/tools/run-toolleak.sh, which measures what they cost.  The second one
 #   cannot be: SLIRP carries no IPv6 at all, so it is here and only here, and
@@ -102,8 +107,16 @@ NTP="${AMINETXDUO_FAMILY_NTP:-2.pool.ntp.org}"
 # never on the IPv6 side (src/netstack/netstack_dns.c:826, the netdb schema has
 # no family field), which is exactly the shape the -6 arm has to report.  .test
 # is reserved by RFC 6761, so the AAAA query is an immediate NXDOMAIN.
+#
+# It points at the guest's own loopback, which is not laziness.  Every -6 row
+# below has to end quickly WHEN THE FLAG IS IGNORED, because that is the
+# regression the row exists to catch and a row that hangs instead reports a
+# timeout, which is infrastructure and not a failure: the broken-build
+# rehearsal of this file hung for eight minutes on `whois SERVER v4only.test`
+# reaching a router that dropped port 43.  Loopback refuses instantly, so a
+# regression is a red row and not a dead boot.
 V4ONLY_NAME="v4only.test"
-V4ONLY_ADDR="${AMINETXDUO_FAMILY_V4ONLY_ADDR:-}"
+V4ONLY_ADDR="${AMINETXDUO_FAMILY_V4ONLY_ADDR:-127.0.0.1}"
 
 # Distinct from tools/demo.sh (…:77) and from the default (…:01).  The a2065's
 # LANCE overwrites the first three octets, so only the last three are the
@@ -170,15 +183,6 @@ host_preflight() {
     getent ahostsv6 "$ECHO" 2>/dev/null |
         awk 'NR==1 && $1 !~ /^::ffff:/ {print $1}' | grep -q . ||
         infra "$ECHO has no AAAA record from this host"
-
-    # v4only.test points at something on this wire that answers, so the -4 arm
-    # against it is a reachability test and not only a parse test.
-    if [ -z "$V4ONLY_ADDR" ]; then
-        V4ONLY_ADDR=$(ip -4 route show default 2>/dev/null |
-                      awk 'NR==1{print $3}')
-    fi
-    [ -n "$V4ONLY_ADDR" ] ||
-        infra "no IPv4 default gateway to point $V4ONLY_NAME at"
 
     DUAL_V6="$aaaa"
 
@@ -252,47 +256,47 @@ host/both|10|SYS:host $DUAL -4 -6|+-4 and -6 cannot both be given
 # reach no resolver at all, which is why they belong here: they stay green on a
 # wire with no DNS and they are the only rows that isolate the tool half of
 # -4/-6 from everything underneath it.
-literal/v4-under-6|10|SYS:ping $V4ONLY_ADDR -c 1 -6|+$V4ONLY_ADDR is an IPv4 address, and -6 was given
-literal/v6-under-4|10|SYS:ping $DUAL_V6 -c 1 -4|+$DUAL_V6 is an IPv6 address, and -4 was given
+literal/v4-under-6|10|SYS:ping $V4ONLY_ADDR -c 1 -t 10 -6|+$V4ONLY_ADDR is an IPv4 address, and -6 was given
+literal/v6-under-4|10|SYS:ping $DUAL_V6 -c 1 -t 10 -4|+$DUAL_V6 is an IPv6 address, and -4 was given
 # And the IPv6 datapath itself, by literal, so a -6 arm that fails above can be
 # told apart from a machine that cannot send an IPv6 packet at all.
 literal/v6-ping|0|SYS:ping $DUAL_V6 -c 2 -t 20|+bytes from|+0% packet loss
 ping/v4|0|SYS:ping $DUAL -c 2 -t 25 -4|+bytes from $V4RE:|+0% packet loss
 ping/v6|0|SYS:ping $DUAL -c 2 -t 25 -6|+bytes from $V6RE|+0% packet loss
 ping/no-aaaa|10|SYS:ping $V4ONLY_NAME -c 1 -t 10 -6|+$V4ONLY_NAME has no IPv6 address, and -6 was given
-ping/both|10|SYS:ping $DUAL -4 -6|+-4 and -6 cannot both be given
+ping/both|10|SYS:ping $DUAL -c 1 -t 10 -4 -6|+-4 and -6 cannot both be given
 traceroute/v4|*|SYS:traceroute $DUAL -m 1 -q 1 -w 5 -n -4|+traceroute to $DUAL \\($V4RE\\)
 traceroute/v6|*|SYS:traceroute $DUAL -m 1 -q 1 -w 5 -n -6|+traceroute to $DUAL \\($V6RE\\)
 traceroute/no-aaaa|10|SYS:traceroute $V4ONLY_NAME -m 1 -q 1 -w 5 -n -6|+has no IPv6 address, and -6 was given
-traceroute/both|10|SYS:traceroute $DUAL -4 -6|+-4 and -6 cannot both be given
+traceroute/both|10|SYS:traceroute $DUAL -m 1 -q 1 -w 5 -n -4 -6|+-4 and -6 cannot both be given
 fetch/v4|0|SYS:fetch http://$ECHO/ TIMEOUT 40 TO DH0:f4.txt -4|+HTTP/1.[01] 200
 fetch/v6|0|SYS:fetch http://$ECHO/ TIMEOUT 40 TO DH0:f6.txt -6|+HTTP/1.[01] 200
 fetch/no-aaaa|10|SYS:fetch http://$V4ONLY_NAME/ TIMEOUT 10 -6|+has no IPv6 address, and -6 was given
-fetch/both|10|SYS:fetch http://$ECHO/ -4 -6|+-4 and -6 cannot both be given
+fetch/both|10|SYS:fetch http://$ECHO/ TIMEOUT 10 -4 -6|+-4 and -6 cannot both be given
 nc/v4|0|SYS:nc -z $DUAL 80 -v -w 20 -4|+$V4RE port 80 open
 nc/v6|0|SYS:nc -z $DUAL 80 -v -w 20 -6|+$V6RE.* port 80 open
 nc/no-aaaa|10|SYS:nc -z $V4ONLY_NAME 80 -v -w 5 -6|+has no IPv6 address, and -6 was given
-nc/both|10|SYS:nc $DUAL 80 -4 -6|+-4 and -6 cannot both be given
+nc/both|10|SYS:nc -z $DUAL 80 -v -w 10 -4 -6|+-4 and -6 cannot both be given
 telnet/v4|*|SYS:telnet $DUAL 80 -4 <DH0:telnetin.txt|+Trying $V4RE port 80
 telnet/v6|*|SYS:telnet $DUAL 80 -6 <DH0:telnetin.txt|+Trying $V6RE.* port 80
 telnet/no-aaaa|10|SYS:telnet $V4ONLY_NAME 80 -6|+has no IPv6 address, and -6 was given
-telnet/both|10|SYS:telnet $DUAL 80 -4 -6|+-4 and -6 cannot both be given
+telnet/both|10|SYS:telnet $DUAL 80 -4 -6 <DH0:telnetin.txt|+-4 and -6 cannot both be given
 tftp/v4|*|SYS:tftp $DUAL GET nosuchfile TIMEOUT 2 -4|+getting nosuchfile from $V4RE
 tftp/v6|*|SYS:tftp $DUAL GET nosuchfile TIMEOUT 2 -6|+getting nosuchfile from $V6RE
 tftp/no-aaaa|10|SYS:tftp $V4ONLY_NAME GET nosuchfile TIMEOUT 2 -6|+has no IPv6 address, and -6 was given
-tftp/both|10|SYS:tftp $DUAL GET nosuchfile -4 -6|+-4 and -6 cannot both be given
+tftp/both|10|SYS:tftp $DUAL GET nosuchfile TIMEOUT 2 -4 -6|+-4 and -6 cannot both be given
 whois/v4|0|SYS:whois example.com -4|+IANA WHOIS server|+domain: *EXAMPLE.COM
 whois/v6|0|SYS:whois example.com -6|+IANA WHOIS server|+domain: *EXAMPLE.COM
-whois/no-aaaa|10|SYS:whois example.com SERVER $V4ONLY_NAME -6|+has no IPv6 address, and -6 was given
+whois/no-aaaa|10|SYS:whois example.com SERVER $V4ONLY_NAME PORT 43 -6|+has no IPv6 address, and -6 was given
 whois/both|10|SYS:whois example.com -4 -6|+-4 and -6 cannot both be given
 sntp/v4|0|SYS:sntp $NTP SHOW TIMEOUT 20 -4|+\\($V4RE\\): stratum
 sntp/v6|0|SYS:sntp $NTP SHOW TIMEOUT 20 -6|+\\($V6RE.*\\): stratum
 sntp/no-aaaa|10|SYS:sntp $V4ONLY_NAME TIMEOUT 5 -6|+has no IPv6 address, and -6 was given
-sntp/both|10|SYS:sntp $NTP -4 -6|+-4 and -6 cannot both be given
+sntp/both|10|SYS:sntp $NTP SHOW TIMEOUT 10 -4 -6|+-4 and -6 cannot both be given
 iperf/v4|*|SYS:iperf $DUAL -p 80 -n 32 -4|+TCP to $V4RE port 80
 iperf/v6|*|SYS:iperf $DUAL -p 80 -n 32 -6|+TCP to $V6RE.* port 80
 iperf/no-aaaa|10|SYS:iperf $V4ONLY_NAME -p 80 -n 32 -6|+has no IPv6 address, and -6 was given
-iperf/both|10|SYS:iperf $DUAL -4 -6|+-4 and -6 cannot both be given
+iperf/both|10|SYS:iperf $DUAL -p 80 -n 32 -4 -6|+-4 and -6 cannot both be given
 EOF
 }
 
