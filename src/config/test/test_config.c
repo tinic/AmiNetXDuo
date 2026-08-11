@@ -1450,6 +1450,100 @@ static void test_dhcp_search_option(void)
     }
 }
 
+/*
+ * RFC 8106 5.2, the router advertisement's list. The same encoding as option
+ * 119 and the same decoder, so what is tested here is the withdrawal a zero
+ * lifetime means and the padding an advertisement has that a lease does not.
+ */
+static void test_ra_search_option(void)
+{
+    AmiResolverConfig res;
+    const char       *list[AMI_CFG_SEARCH_LIST_MAX];
+    char             *buf;
+
+    printf("RFC 8106 search list\n");
+
+    /* What the lab router advertises, padded to the option's 8-byte unit with
+       zero octets. A zero octet is a root label with nothing in front of it,
+       which ends the walk rather than naming the root. */
+    {
+        static const UBYTE padded[] = {
+            5, 'l', 'o', 'c', 'a', 'l', 5, 't', 'i', 'n', 'i', 'c',
+            3, 'n', 'e', 't', 0,
+            0, 0, 0, 0, 0, 0, 0
+        };
+
+        memset(&res, 0, sizeof(res));
+        CHECK(ami_config_search_from_rfc3397(&res, padded,
+                                             sizeof(padded)) == 1);
+        CHECK(res.search_count == 1);
+        CHECK_STR(res.search[0], "local.tinic.net");
+
+        /* And it is the suffix a name with no dot is tried under. */
+        CHECK(search_of(&res, list) == 1);
+        CHECK_STR(list[0], "local.tinic.net");
+
+        /* The zero lifetime takes it back out. */
+        CHECK(ami_config_search_withdraw_rfc3397(&res, padded,
+                                                 sizeof(padded)) == 1);
+        CHECK(res.search_count == 0);
+        CHECK(search_of(&res, list) == 0);
+
+        /* And a second withdrawal of the same name changes nothing. */
+        CHECK(ami_config_search_withdraw_rfc3397(&res, padded,
+                                                 sizeof(padded)) == 0);
+        CHECK(res.search_count == 0);
+    }
+
+    /* Withdrawing one of several leaves the rest in the order they are still
+       tried in. */
+    {
+        memset(&res, 0, sizeof(res));
+        CHECK(ami_config_search_offer(&res, "one.test") == TRUE);
+        CHECK(ami_config_search_offer(&res, "two.test") == TRUE);
+        CHECK(ami_config_search_offer(&res, "three.test") == TRUE);
+
+        CHECK(ami_config_search_withdraw(&res, "two.test") == TRUE);
+        CHECK(res.search_count == 2);
+        CHECK_STR(res.search[0], "one.test");
+        CHECK_STR(res.search[1], "three.test");
+
+        /* Case-insensitively, as every other comparison here is (RFC 4343). */
+        CHECK(ami_config_search_withdraw(&res, "ONE.TEST") == TRUE);
+        CHECK(res.search_count == 1);
+        CHECK_STR(res.search[0], "three.test");
+    }
+
+    /* No router may retract what the administrator wrote: an entry below
+       search_static came from DEVS:Internet/name_resolution. */
+    {
+        memset(&res, 0, sizeof(res));
+        buf = dup_text("search file.test\n");
+        ami_cfg_parse_resolver(buf, &res, NULL, 0);
+        free(buf);
+
+        CHECK(res.search_static == 1);
+        CHECK(ami_config_search_withdraw(&res, "file.test") == FALSE);
+        CHECK(res.search_count == 1);
+        CHECK_STR(res.search[0], "file.test");
+
+        /* The network's own entry above it still goes. */
+        CHECK(ami_config_search_offer(&res, "ra.test") == TRUE);
+        CHECK(ami_config_search_withdraw(&res, "ra.test") == TRUE);
+        CHECK(res.search_count == 1);
+        CHECK(res.search_static == 1);
+    }
+
+    /* Nothing, and a name that was never there. */
+    {
+        memset(&res, 0, sizeof(res));
+        CHECK(ami_config_search_withdraw(&res, "absent.test") == FALSE);
+        CHECK(ami_config_search_withdraw(&res, "") == FALSE);
+        CHECK(ami_config_search_withdraw(&res, NULL) == FALSE);
+        CHECK(ami_config_search_withdraw(NULL, "x.test") == FALSE);
+    }
+}
+
 static void test_gateway(void)
 {
     ULONG gw;
@@ -1874,6 +1968,7 @@ int main(int argc, char **argv)
     test_resolver();
     test_search_domains();
     test_dhcp_search_option();
+    test_ra_search_option();
     test_gateway();
     test_tcp_handler();
     test_netdb();

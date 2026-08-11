@@ -208,7 +208,8 @@ BOOL tool_stack_query(ULONG *addr_out, char *host, ULONG hostlen);
 
 /*
  * The running stack's default domain, through GetDefaultDomainName(). This is
- * where a DHCP option 15 ends up, so it can be set on a machine whose
+ * where a DHCP option 15 ends up, and a router advertisement's RFC 8106 5.2
+ * list when nothing else named a domain, so it can be set on a machine whose
  * DEVS:Internet says nothing. FALSE when nothing is running or no domain is
  * known; never starts the stack.
  */
@@ -225,11 +226,16 @@ BOOL tool_stack_lookup(const char *name, ULONG *addr_out);
 BOOL tool_stack_lookup_addr(ULONG addr, char *name_out, ULONG name_len);
 
 /*
- * The name servers the running stack is really using, as dotted quads,
- * including DHCP-supplied ones that no file on disk mentions. Returns how many
+ * The name servers the running stack is really using, as text, including ones
+ * no file on disk mentions: a DHCP lease's, and a router advertisement's, which
+ * are IPv6 literals and are why the strings are this wide. Returns how many
  * were written; 0 when nothing is running.
+ *
+ * TOOL_NAME_SERVERS_MAX is what the stack can hold of both families at once.
  */
-ULONG tool_stack_name_servers(char out[][16], ULONG max);
+#define TOOL_NAME_SERVERS_MAX   (2 * AMI_CFG_MAX_NAMESERVERS)
+
+ULONG tool_stack_name_servers(char out[][AMI_CFG_IP6_STRLEN], ULONG max);
 
 /* --------------------------------------------------- the running stack,
  *

@@ -975,8 +975,8 @@ BOOL ami_config_search_offer(AmiResolverConfig *res, const char *domain)
     /* Off the network, and about to be pasted onto a name and queried. */
     if (!ami_config_hostname_valid(domain))
     {
-        AMI_WARN("config: DHCP offered '%s' as a search domain; that is not a "
-                 "domain name, ignoring it", domain);
+        AMI_WARN("config: the network offered '%s' as a search domain; that is "
+                 "not a domain name, ignoring it", domain);
         return FALSE;
     }
 
@@ -995,6 +995,34 @@ BOOL ami_config_search_offer(AmiResolverConfig *res, const char *domain)
                         domain);
 
     return TRUE;
+}
+
+BOOL ami_config_search_withdraw(AmiResolverConfig *res, const char *domain)
+{
+    UWORD i;
+    UWORD j;
+
+    if (res == NULL || domain == NULL || *domain == '\0')
+        return FALSE;
+
+    for (i = res->search_static; i < res->search_count; i++)
+    {
+        if (ami_cfg_stricmp(res->search[i], domain) != 0)
+            continue;
+
+        /* Close the gap: the order of what is left is the order they are
+           still tried in. */
+        for (j = (UWORD)(i + 1); j < res->search_count; j++)
+            ami_cfg_copy_string(res->search[j - 1], AMI_CFG_NAME_LEN,
+                                res->search[j]);
+
+        res->search_count--;
+        res->search[res->search_count][0] = '\0';
+
+        return TRUE;
+    }
+
+    return FALSE;
 }
 
 /*
@@ -1100,6 +1128,28 @@ UWORD ami_config_search_from_rfc3397(AmiResolverConfig *res,
     }
 
     return added;
+}
+
+UWORD ami_config_search_withdraw_rfc3397(AmiResolverConfig *res,
+                                         const UBYTE *data, ULONG len)
+{
+    char  name[AMI_CFG_NAME_LEN];
+    ULONG pos     = 0;
+    UWORD removed = 0;
+
+    if (res == NULL || data == NULL)
+        return 0;
+
+    while (pos < len)
+    {
+        if (!cfg_rfc3397_name(data, len, &pos, name, (ULONG)sizeof(name)))
+            break;
+
+        if (ami_config_search_withdraw(res, name))
+            removed++;
+    }
+
+    return removed;
 }
 
 /* -------------------------------------------------- default_gateway/routes */

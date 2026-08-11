@@ -114,6 +114,12 @@ static UINT  h_prefix_add_full;       /* make the next add fail */
 static UINT  h_rdnss_count;
 static ULONG h_rdnss_address[H_RDNSS_MAX][4];
 static ULONG h_rdnss_lifetime[H_RDNSS_MAX];
+
+/* What the RFC 8106 5.2 callback was handed, from the last call. */
+static UINT  h_dnssl_calls;
+static UINT  h_dnssl_length;
+static ULONG h_dnssl_lifetime;
+static UCHAR h_dnssl_payload[64];
 static ULONG h_prefix_added_onlink;
 
 UINT _nx_ipv6_prefix_list_add_entry(NX_IP *ip_ptr, ULONG *prefix,
@@ -325,6 +331,10 @@ static VOID h_reset(VOID)
     h_rdnss_count = 0;
     memset(h_rdnss_address, 0, sizeof(h_rdnss_address));
     memset(h_rdnss_lifetime, 0, sizeof(h_rdnss_lifetime));
+    h_dnssl_calls = 0;
+    h_dnssl_length = 0;
+    h_dnssl_lifetime = 0;
+    memset(h_dnssl_payload, 0, sizeof(h_dnssl_payload));
     h_send_count = 0;
     h_send_fails = 0;
     h_now = 0;
@@ -490,6 +500,64 @@ static VOID h_rdnss_notify(NX_IP *ip_ptr, UINT interface_index,
     }
 
     h_rdnss_count++;
+}
+
+/*
+ * The RFC 8106 5.2 option: the header, then RFC 1035 label sequences copied in
+ * as given, then zero octets out to the 8-byte unit the length is counted in.
+ */
+static VOID h_add_dnssl_option(UCHAR *message, UINT *length,
+                               const UCHAR *payload, UINT payload_length,
+                               ULONG lifetime, UCHAR option_length_override)
+{
+NX_ICMPV6_OPTION_DNSSL *option = (NX_ICMPV6_OPTION_DNSSL *)(message + *length);
+UCHAR                  *body;
+UINT                    units;
+UINT                    i;
+
+    units = (UINT)((sizeof(NX_ICMPV6_OPTION_DNSSL) + payload_length + 7) >> 3);
+
+    option -> nx_icmpv6_option_dnssl_type     = ICMPV6_OPTION_TYPE_DNSSL;
+    option -> nx_icmpv6_option_dnssl_length   = option_length_override
+                                                    ? option_length_override
+                                                    : (UCHAR)units;
+    option -> nx_icmpv6_option_dnssl_reserved = 0;
+
+    option -> nx_icmpv6_option_dnssl_lifetime = lifetime;
+    NX_CHANGE_ULONG_ENDIAN(option -> nx_icmpv6_option_dnssl_lifetime);
+
+    body = message + *length + sizeof(NX_ICMPV6_OPTION_DNSSL);
+
+    for (i = 0; i < payload_length; i++)
+    {
+        body[i] = payload[i];
+    }
+
+    for (; i < (UINT)((option -> nx_icmpv6_option_dnssl_length << 3) -
+                      sizeof(NX_ICMPV6_OPTION_DNSSL)); i++)
+    {
+        body[i] = 0;
+    }
+
+    *length += (UINT)(option -> nx_icmpv6_option_dnssl_length << 3);
+}
+
+static VOID h_dnssl_notify(NX_IP *ip_ptr, UINT interface_index,
+                           UCHAR *domains, UINT length, ULONG lifetime)
+{
+UINT i;
+
+    (VOID)ip_ptr;
+    (VOID)interface_index;
+
+    h_dnssl_calls++;
+    h_dnssl_length   = length;
+    h_dnssl_lifetime = lifetime;
+
+    for (i = 0; (i < length) && (i < sizeof(h_dnssl_payload)); i++)
+    {
+        h_dnssl_payload[i] = domains[i];
+    }
 }
 
 static VOID h_deliver(UCHAR *message, UINT length)
@@ -922,6 +990,114 @@ char  what[128];
         h_deliver(h_message, length);
 
         h_check(h_rdnss_count == 0, "with no callback nothing is reported");
+        h_check(h_is_expected_address(h_formed_address()),
+                "and the rest of the advertisement is processed anyway");
+    }
+
+    /* --- (5) the DNS search list option, RFC 8106 5.2 --- */
+
+    /*
+     * The other half of the same problem: a resolver with a name server and no
+     * suffix answers a fully qualified name and nothing else, and a link with
+     * no DHCPv4 on it has no option 119 to supply one.
+     */
+    {
+    /* "local.tinic.net", the encoding pfSense advertises. */
+    static const UCHAR one[] = { 5, 'l','o','c','a','l',
+                                 5, 't','i','n','i','c',
+                                 3, 'n','e','t', 0 };
+    /* The same, then "example.com": one option may carry several. */
+    static const UCHAR two[] = { 5, 'l','o','c','a','l',
+                                 5, 't','i','n','i','c',
+                                 3, 'n','e','t', 0,
+                                 7, 'e','x','a','m','p','l','e',
+                                 3, 'c','o','m', 0 };
+    UINT length;
+    UINT i;
+    int  same;
+
+        /* One domain alongside a prefix and an RDNSS option, which is the
+           advertisement the lab router sends. */
+        h_reset();
+        h_ip.nx_ipv6_dnssl_notify = h_dnssl_notify;
+        h_ip.nx_ipv6_rdnss_notify = h_rdnss_notify;
+        h_build_ra(h_message, &length, 1800);
+        h_add_prefix_option(h_message, &length, H_ONLINK | H_AUTONOMOUS,
+                            3600, 3600, 64);
+        h_add_rdnss_option(h_message, &length, 1, 1800, 0);
+        h_add_dnssl_option(h_message, &length, one, (UINT)sizeof(one), 1800, 0);
+        h_deliver(h_message, length);
+
+        h_check(h_dnssl_calls == 1, "the advertised search list is reported");
+        h_check(h_dnssl_lifetime == 1800, "with the option's lifetime");
+
+        same = (h_dnssl_length >= (UINT)sizeof(one));
+        for (i = 0; same && (i < (UINT)sizeof(one)); i++)
+        {
+            same = (h_dnssl_payload[i] == one[i]);
+        }
+        h_check(same, "as the bytes the option carried, undecoded");
+
+        h_check(h_rdnss_count == 1,
+                "and the RDNSS option in the same advertisement still is");
+        h_check(h_is_expected_address(h_formed_address()),
+                "and the prefix still forms an address");
+
+        /* Two domains in one option, RFC 8106 5.2. */
+        h_reset();
+        h_ip.nx_ipv6_dnssl_notify = h_dnssl_notify;
+        h_build_ra(h_message, &length, 1800);
+        h_add_dnssl_option(h_message, &length, two, (UINT)sizeof(two), 1800, 0);
+        h_deliver(h_message, length);
+
+        h_check(h_dnssl_calls == 1, "several domains are one call");
+        h_check(h_dnssl_length >= (UINT)sizeof(two),
+                "carrying the whole payload");
+
+        /* A lifetime of zero is a withdrawal and is reported as one. */
+        h_reset();
+        h_ip.nx_ipv6_dnssl_notify = h_dnssl_notify;
+        h_build_ra(h_message, &length, 1800);
+        h_add_dnssl_option(h_message, &length, one, (UINT)sizeof(one), 0, 0);
+        h_deliver(h_message, length);
+
+        h_check(h_dnssl_calls == 1, "a zero lifetime is reported, not skipped");
+        h_check(h_dnssl_lifetime == 0, "with the lifetime it carried");
+
+        /* An option that is nothing but its header carries no domain. */
+        h_reset();
+        h_ip.nx_ipv6_dnssl_notify = h_dnssl_notify;
+        h_build_ra(h_message, &length, 1800);
+        h_add_dnssl_option(h_message, &length, one, 0, 1800, 1);
+        h_add_prefix_option(h_message, &length, H_ONLINK | H_AUTONOMOUS,
+                            3600, 3600, 64);
+        h_deliver(h_message, length);
+
+        h_check(h_dnssl_calls == 0, "an option with no payload reports none");
+        h_check(h_is_expected_address(h_formed_address()),
+                "and does not stop the option after it being processed");
+
+        /* The length field bounds the payload, not the bytes that follow it:
+           2 units is the header and 8 bytes, whatever was written after. */
+        h_reset();
+        h_ip.nx_ipv6_dnssl_notify = h_dnssl_notify;
+        h_build_ra(h_message, &length, 1800);
+        h_add_dnssl_option(h_message, &length, two, (UINT)sizeof(two), 1800, 2);
+        h_deliver(h_message, length);
+
+        h_check(h_dnssl_calls == 1, "a short length is still one call");
+        h_check(h_dnssl_length == 8,
+                "reporting only what the option length covers");
+
+        /* No callback installed: the option is skipped and nothing crashes. */
+        h_reset();
+        h_build_ra(h_message, &length, 1800);
+        h_add_dnssl_option(h_message, &length, one, (UINT)sizeof(one), 1800, 0);
+        h_add_prefix_option(h_message, &length, H_ONLINK | H_AUTONOMOUS,
+                            3600, 3600, 64);
+        h_deliver(h_message, length);
+
+        h_check(h_dnssl_calls == 0, "with no callback nothing is reported");
         h_check(h_is_expected_address(h_formed_address()),
                 "and the rest of the advertisement is processed anyway");
     }

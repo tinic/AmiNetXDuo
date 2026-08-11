@@ -910,6 +910,22 @@
 #define NX_ENABLE_IPV6_RDNSS
 
 /*
+ * The search domains out of the same advertisement, RFC 8106 section 5.2.
+ *
+ * The other half of the same problem.  A resolver with a name server and no
+ * suffix answers `ssh playhouse2.local.tinic.net` and not `ssh playhouse2`,
+ * which is the failure DHCP option 119 was wired up for, and a link with no
+ * DHCPv4 on it has no option 119.  The router already advertises the list --
+ * pfSense does by default -- and it was walked past.
+ *
+ * The option costs another else-if in nx_icmpv6_process_ra.c and a second
+ * callback field on NX_IP.  The RFC 1035 label sequences it carries are not
+ * decoded there: they are the encoding DHCP option 119 uses, and
+ * ami_config_search_from_rfc3397() already reads it.
+ */
+#define NX_ENABLE_IPV6_DNSSL
+
+/*
  * Not set, and why:
  *
  *   NX_IPSEC_ENABLE, out of scope; §9 decision 4 lists the four

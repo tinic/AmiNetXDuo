@@ -757,16 +757,39 @@ static VOID nsl_print_types(VOID)
  */
 static BOOL nsl_default_server(ToolAddr *out)
 {
-    char  servers[4][16];
+    char  servers[TOOL_NAME_SERVERS_MAX][AMI_CFG_IP6_STRLEN];
     ULONG address = 0;
-    ULONG count = tool_stack_name_servers(servers, 4UL);
+    ULONG count = tool_stack_name_servers(servers,
+                                          (ULONG)TOOL_NAME_SERVERS_MAX);
     ULONG i;
 
     for (i = 0; i < count; i++)
     {
+        ULONG words[4];
+
         if (ami_config_parse_ip(servers[i], &address))
         {
             tool_addr_v4(out, address);
+            return TRUE;
+        }
+
+        /* An advertised server is an IPv6 literal, and on a link with no
+           DHCPv4 on it there is no other kind in this list. */
+        if (tool_parse_ip6(servers[i], words))
+        {
+            ULONG w;
+
+            tool_addr_v4(out, 0);
+            out->ta_Family = (UWORD)TOOL_AF_INET6;
+
+            for (w = 0; w < 4UL; w++)
+            {
+                out->ta_V6[w * 4UL + 0] = (UBYTE)((words[w] >> 24) & 0xffUL);
+                out->ta_V6[w * 4UL + 1] = (UBYTE)((words[w] >> 16) & 0xffUL);
+                out->ta_V6[w * 4UL + 2] = (UBYTE)((words[w] >>  8) & 0xffUL);
+                out->ta_V6[w * 4UL + 3] = (UBYTE)(words[w] & 0xffUL);
+            }
+
             return TRUE;
         }
     }

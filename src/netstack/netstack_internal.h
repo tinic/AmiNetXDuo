@@ -54,6 +54,15 @@
 #ifdef AMINETXDUO_IPV6
 /* Recursive DNS servers held from router advertisements; see ns_Rdnss. */
 #define AMI_RDNSS_MAX               4
+
+/*
+ * One advertisement's worth of RFC 8106 5.2 search domains, as they arrive:
+ * the encoded label sequences, not the names.  AMI_CFG_MAX_SEARCH is 6 and
+ * AMI_CFG_NAME_LEN is 64, so a list this buffer cannot hold is longer than the
+ * list it feeds, and the decoder stops at the first name it cannot store
+ * either way.
+ */
+#define AMI_DNSSL_MAX               256
 #endif
 
 /*
@@ -253,6 +262,12 @@ struct AmiNetStack
      * client holds its mutex across a query, and a query needs the IP thread
      * so it only writes here, and the next lookup takes what it finds.
      *
+     * This is the set the router last described, not a log of what it has ever
+     * said: a lifetime of zero takes an entry back out (RFC 8106 5.1), and the
+     * absorb step reconciles the DNS client and the reported configuration
+     * against it rather than only adding.  Without that a withdrawn server
+     * stays in the resolver for the life of the machine.
+     *
      * Four is what RFC 8106 section 5.1 expects a router to advertise (it
      * recommends no more than three) and is the same order as
      * NX_DNS_MAX_SERVERS.  A fifth is dropped rather than replacing one that
@@ -261,6 +276,17 @@ struct AmiNetStack
     NXD_ADDRESS         ns_Rdnss[AMI_RDNSS_MAX];
     UWORD               ns_RdnssCount;
     volatile BOOL       ns_RdnssPending;    /* written by the IP thread */
+
+    /*
+     * The search domains from the same advertisement, still encoded, for the
+     * same reason: ami_ns6_dnssl() runs on the IP thread and the list it feeds
+     * is read by every resolver call.  ns_DnsslLifetime is the option's, so
+     * the absorb step knows whether to add the names or take them back.
+     */
+    UBYTE               ns_Dnssl[AMI_DNSSL_MAX];
+    UWORD               ns_DnsslLen;
+    ULONG               ns_DnsslLifetime;
+    volatile BOOL       ns_DnsslPending;    /* written by the IP thread */
 #endif
 #ifdef NX_DNS_CACHE_ENABLE
     /* Inline rather than separately allocated: small, same lifetime as the
@@ -393,6 +419,10 @@ VOID ami_ns_copy_name(char *dst, const char *src, ULONG size);
 /* nx_ipv6_rdnss_notify, on the IP thread. netstack_dns.c. */
 VOID ami_ns6_rdnss(NX_IP *ip_ptr, UINT interface_index, ULONG *dns_address,
                    ULONG lifetime);
+
+/* nx_ipv6_dnssl_notify, on the IP thread. netstack_dns.c. */
+VOID ami_ns6_dnssl(NX_IP *ip_ptr, UINT interface_index, UCHAR *domains,
+                   UINT length, ULONG lifetime);
 #endif
 
 /* One DHCP option that is text, from one interface's lease. Not

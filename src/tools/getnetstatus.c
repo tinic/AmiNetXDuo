@@ -110,7 +110,7 @@ static ToolRoutes   gns_routes;
 
 static VOID measure(BOOL satisfied[COND_COUNT])
 {
-    char  servers[AMI_CFG_MAX_NAMESERVERS][16];
+    char  servers[TOOL_NAME_SERVERS_MAX][AMI_CFG_IP6_STRLEN];
     UWORD i;
 
     for (i = 0; i < (UWORD)COND_COUNT; i++)
@@ -153,7 +153,7 @@ static VOID measure(BOOL satisfied[COND_COUNT])
     else if (satisfied[COND_INTERFACES] || satisfied[COND_DEFAULTROUTE])
         satisfied[COND_ROUTES] = TRUE;
 
-    if (tool_stack_name_servers(servers, (ULONG)AMI_CFG_MAX_NAMESERVERS) > 0)
+    if (tool_stack_name_servers(servers, (ULONG)TOOL_NAME_SERVERS_MAX) > 0)
         satisfied[COND_RESOLVER] = TRUE;
 }
 

@@ -151,19 +151,35 @@ typedef struct AmiIfConfig {
  * nameserver_count would be malformed; every writer of nameserver[] sets this
  * alongside it.
  *
- * search[] holds the file's SEARCH line first and the DHCP lease's domains
- * after it, and search_static says where the join is: entries below it came
- * from DEVS:Internet/name_resolution, entries from it up came from the lease
- * (option 119's list in its own order, then option 15). That is the order a
- * name with no dot is tried in, see ami_ns_search_list() in
- * src/netstack/netstack_dns.c, and it is the AmiHostnameSource ranking applied
- * to a list: name_resolution outranks DHCP, so it goes first rather than
- * making the lease's domains go away.
+ * nameserver6[] is the same list for IPv6 servers, which the file cannot hold:
+ * name_resolution's NAMESERVER line is a dotted quad. Everything in it arrived
+ * in a router advertisement's RFC 8106 option, so every use count is positive,
+ * and it is a separate array rather than a family tag on the first because
+ * every existing reader of nameserver[] takes a ULONG and would have had to
+ * change to ignore entries it cannot represent.
+ *
+ * search[] holds the file's SEARCH line first and the network's domains after
+ * it, and search_static says where the join is: entries below it came from
+ * DEVS:Internet/name_resolution, entries from it up came off the network (the
+ * DHCP lease's option 119 list in its own order, then its option 15, then a
+ * router advertisement's RFC 8106 5.2 list). That is the order a name with no
+ * dot is tried in, see ami_ns_search_list() in src/netstack/netstack_dns.c,
+ * and it is the AmiHostnameSource ranking applied to a list: name_resolution
+ * outranks the network, so it goes first rather than making the network's
+ * domains go away.
+ *
+ * Between the two network sources there is no ranking to make -- neither is
+ * more authoritative than the other -- so they are in arrival order, which is
+ * the lease's and then the advertisement's: the lease is drained once at
+ * ami_netstack_dns_start() and an advertisement is drained on the resolver
+ * path, which is always later.
  */
 typedef struct AmiResolverConfig {
     ULONG   nameserver[AMI_CFG_MAX_NAMESERVERS];
     LONG    nameserver_use[AMI_CFG_MAX_NAMESERVERS];
     UWORD   nameserver_count;
+    ULONG   nameserver6[AMI_CFG_MAX_NAMESERVERS][AMI_CFG_IP6_WORDS];
+    UWORD   nameserver6_count;
     char    domain[AMI_CFG_DOMAIN_LEN];
     char    search[AMI_CFG_MAX_SEARCH][AMI_CFG_NAME_LEN];
     UWORD   search_count;
@@ -307,10 +323,11 @@ UWORD ami_config_search_list(const AmiResolverConfig *res, const char *out[],
                              UWORD max);
 
 /*
- * Offer one search domain on behalf of the DHCP lease. It is appended after
- * whatever DEVS:Internet/name_resolution put in search[], never before it, and
- * a name already in the list at any rank is dropped rather than repeated,
- * case-insensitively (RFC 4343) -- a lease that names the domain the file
+ * Offer one search domain on behalf of the network -- a DHCP lease, or a router
+ * advertisement's RFC 8106 5.2 option. It is appended after whatever
+ * DEVS:Internet/name_resolution put in search[], never before it, and a name
+ * already in the list at any rank is dropped rather than repeated,
+ * case-insensitively (RFC 4343) -- a source that names the domain another
  * already names must not cost a second query. Returns TRUE if it was stored.
  *
  * Anything that is not an RFC 1123 2.1 name is refused: this text arrives off
@@ -319,10 +336,23 @@ UWORD ami_config_search_list(const AmiResolverConfig *res, const char *out[],
 BOOL ami_config_search_offer(AmiResolverConfig *res, const char *domain);
 
 /*
+ * Take one search domain back, for a lifetime of zero (RFC 8106 5.2). Only a
+ * domain the network put there is removed; an entry below search_static came
+ * from DEVS:Internet/name_resolution and no router may retract what the
+ * administrator wrote. Returns TRUE if one was removed.
+ */
+BOOL ami_config_search_withdraw(AmiResolverConfig *res, const char *domain);
+
+/*
  * RFC 3397 option 119: a run of RFC 1035 4.1.4 encoded names, root label
  * ending each one, with compression pointers taken from the start of the
  * option data. Each name decoded is handed to ami_config_search_offer().
  * Returns how many were stored.
+ *
+ * RFC 8106 5.2's DNSSL option carries the same encoding, minus compression,
+ * and is decoded by the same function: the payload is padded to an 8-byte
+ * boundary with zero octets, and a zero octet is a root label with no labels
+ * in front of it, which ends the walk exactly as a truncated name would.
  *
  * `data` is off the network and is not trusted: a pointer that does not go
  * strictly backwards, a label that runs past the end, or a name longer than
@@ -330,6 +360,13 @@ BOOL ami_config_search_offer(AmiResolverConfig *res, const char *domain);
  */
 UWORD ami_config_search_from_rfc3397(AmiResolverConfig *res,
                                      const UBYTE *data, ULONG len);
+
+/*
+ * The same walk, taking each name decoded back out of the list rather than
+ * putting it in. Returns how many were removed.
+ */
+UWORD ami_config_search_withdraw_rfc3397(AmiResolverConfig *res,
+                                         const UBYTE *data, ULONG len);
 
 /* ------------------------------------------------------------- diagnostics
  *
