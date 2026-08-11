@@ -805,12 +805,18 @@
 
     ; --- automatic or manual addressing --------------------------------
 
+    ; Inverted for the reason spelled out at DO_HTTPD below: askbool returns 1
+    ; for the first (choices) string.  Written as "No" first with (default 0)
+    ; this said MDNS=YES to everyone who clicked "No" and MDNS=NO to everyone
+    ; who clicked "Yes"; only a NOVICE run, which takes the (default) and never
+    ; draws the page, came out right.
     (set WANTMDNS
-      (askbool
-        (prompt "Answer .local names on the network?")
-        (help    H_MDNS)
-        (choices "No" "Yes")
-        (default 0)))
+      (if (askbool
+            (prompt "Answer .local names on the network?")
+            (help    H_MDNS)
+            (choices "No" "Yes")
+            (default 1))
+          0 1))
 
     (set USEDHCP
       (askbool
@@ -919,15 +925,21 @@
 
 (if DO_STARTUP
   (
+    ; askbool returns 1 for the FIRST (choices) string and 0 for the second,
+    ; whatever the two say.  A question whose answer is no by default
+    ; therefore puts "No" first, defaults to 1, and inverts here -- which also
+    ; keeps the property the whole script has and install/test/installdrive.c
+    ; relies on: the first button on a page IS that page's default.
     (set DO_HTTPD
-      (askbool
-        (prompt "Serve a drawer, and an AmigaDOS Shell in a web browser, "
-                "when this Amiga boots?\n\n"
-                "Neither has a password: whoever can reach the port gets "
-                "both.")
-        (help    H_HTTPD)
-        (choices "No" "Yes, serve them")
-        (default 0)))
+      (if (askbool
+            (prompt "Serve a drawer, and an AmigaDOS Shell in a web browser, "
+                    "when this Amiga boots?\n\n"
+                    "Neither has a password: whoever can reach the port gets "
+                    "both.")
+            (help    H_HTTPD)
+            (choices "No" "Yes, serve them")
+            (default 1))
+          0 1))
 
     (if DO_HTTPD
       (

@@ -484,10 +484,13 @@ foreign_intact() {
 # How many times a pattern appears in S:User-Startup.  Duplicates are the
 # failure mode a second install has, so this counts rather than tests.
 startup_count() {
-    local f
+    local f n
     f=$(user_startup)
     [ -n "$f" ] && [ -f "$f" ] || { echo 0; return; }
-    grep -c -- "$1" "$f" 2>/dev/null || echo 0
+    # grep -c prints 0 AND exits 1 when it matches nothing, so `|| echo 0`
+    # would print it twice and every arithmetic test downstream reads "0\n0".
+    n=$(grep -c -- "$1" "$f" 2>/dev/null) || n=0
+    echo "${n:-0}"
 }
 
 # The download, where a download would be: its own drawer, not the one the
