@@ -173,4 +173,5 @@ jobs:
             tools/enforcer-run.sh \
             tests/conformance/build.sh \
             tests/conformance/run-fsuae.sh \
-            tests/tools/run-iperf.sh
+            tests/tools/run-iperf.sh \
+            tests/tools/run-cardsweep.sh

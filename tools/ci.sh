@@ -6,6 +6,7 @@
 #   tools/ci.sh host                 # just the host tests
 #   tools/ci.sh cross                # just the cross builds
 #   tools/ci.sh emulator             # tier 2: FS-UAE, needs a boot ROM
+#   tools/ci.sh cards                # tier 2: every network card, one boot each
 #   tools/ci.sh host cross emulator  # pick and choose
 #
 # .github/workflows/ci.yml and emulator.yml call THIS, they add caching,
@@ -23,6 +24,9 @@
 #   analyze      GCC -fanalyzer over our own sources vs a triaged baseline
 #   conformance  build the bsdsocktest suite for m68k (running it needs tier 2)
 #   emulator     tier 2, boots FS-UAE, needs a ROM
+#   cards        tier 2, boots EVERY network card this project supports,
+#                one guest each, and proves each one carries bytes in
+#                both directions.  Needs a bridge and a peer.
 #   e2e          tier 2, installs the SHIPPED ARCHIVE on a real
 #                Workbench 3.1, reboots, and drives it from another
 #                machine: WebDAV, `lha x`, the browser terminal.
@@ -700,6 +704,50 @@ stage_e2e() {
     return "$rc"
 }
 
+# ----------------------------------------------------------------- cards ----
+#
+# EVERY network card, one boot each, and each one asserted the same way: the
+# interface comes online and bytes move in both directions, counted by a
+# machine that is not this one.
+#
+# NOT in the default set, and not in `emulator` either, for the same two
+# reasons `e2e` is not: it needs a BRIDGE, which means a host NIC and
+# CAP_NET_RAW on the emulator binary, and it needs a THIRD MACHINE, because a
+# frame the emulator's host sends to its own bridged guest never comes back to
+# that NIC's pcap.  Naming it runs it.
+#
+# It is also the longest thing in this file -- nine guests, boot to verdict --
+# so it belongs to the nightly and not to a push.
+#
+# Until this existed, ONE card was ever booted by CI, the a2065 in
+# install/test/run-workbench.sh, and the other eight were hand-run in a
+# throwaway tree.  x-surf-100 reached a user broken.
+stage_cards() {
+    hr "network cards (tier 2, needs a bridge and a peer)"
+
+    local rc=0
+
+    if [ -z "${AMINETXDUO_CARDSWEEP_PEER:-}" ]; then
+        skip "card sweep: AMINETXDUO_CARDSWEEP_PEER is not set, so there is no" \
+             "machine off this box to count the bytes.  Every card is unproven" \
+             "on this runner."
+        return 0
+    fi
+
+    "$ROOT/tests/tools/run-cardsweep.sh" -b "$BUILD/default" || rc=$?
+
+    case "$rc" in
+        0) note "PASS  every card came online and carried bytes both ways" ;;
+        1) fail "card sweep: a card did not carry traffic -- the table above" \
+                "names it and says which direction failed" ;;
+        2) fail "card sweep: the rig refused it before any card was measured" ;;
+        3) skip "card sweep: a card was NOT measured -- the table above says" \
+                "which and why.  The rest passed." ;;
+        *) fail "card sweep: exit $rc" ;;
+    esac
+    return "$rc"
+}
+
 # ------------------------------------------------------------------ main ----
 
 mkdir -p "$BUILD"
@@ -724,7 +772,7 @@ stage_submodules
 # Anything but a pure host run needs the cross compiler.
 for s in "${WANT[@]}"; do
     case "$s" in
-        cross|analyze|conformance|emulator|e2e) stage_toolchain; break ;;
+        cross|analyze|conformance|emulator|e2e|cards) stage_toolchain; break ;;
     esac
 done
 
@@ -741,6 +789,7 @@ for s in "${WANT[@]}"; do
         analyze)     stage_analyze || true ;;
         conformance) stage_conformance || true ;;
         emulator)    stage_emulator || true ;;
+        cards)       stage_cards || true ;;
         e2e)         stage_e2e || true ;;
         *) echo "unknown stage: $s" >&2; exit 2 ;;
     esac

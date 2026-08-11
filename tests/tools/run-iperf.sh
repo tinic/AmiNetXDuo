@@ -146,7 +146,10 @@ else
     GATEWAY=10.0.2.2
 fi
 
-PEERLOG="$ROOT/build/iperf-peers"
+# Tagged, the way tools/amiberry-run.sh:245-251 tags the drive and the
+# serial log.  tests/tools/run-cardsweep.sh runs this script nine times
+# over, and a shared peer log is one card reading another card's bytes.
+PEERLOG="$ROOT/build/iperf-peers-$AMINETXDUO_RUN_TAG"
 
 # --------------------------------------------------------------- preflight ---
 
@@ -179,7 +182,7 @@ fi
 
 # ----------------------------------------------------------------- staging ---
 
-STAGE="$ROOT/build/iperf-stage"
+STAGE="$ROOT/build/iperf-stage-$AMINETXDUO_RUN_TAG"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
