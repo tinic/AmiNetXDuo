@@ -103,6 +103,31 @@ LONG ami_netstack_ipv6_enable(AmiNetStack *ns)
 
 /* ------------------------------------------------------------- addressing, */
 
+/*
+ * The prefix length to report for an address, which for a link-local is not
+ * the one NetX Duo stored.
+ *
+ * nxd_ipv6_address_set() is asked for a link-local by being passed a NULL
+ * address and a prefix length of 10, and it keeps that 10 in
+ * nxd_ipv6_address_prefix_length. 10 is fe80::/10, the RFC 4291 2.5.6
+ * allocation the address is carved out of, and NetX Duo wants it there:
+ * _nxd_ipv6_interface_find() and _nxd_ipv6_search_onlink() compare a
+ * destination against this field, and at /64 our link-local would only be a
+ * source for destinations sharing our own interface identifier. So the stored
+ * value stays as it is and the reported one is corrected here.
+ *
+ * What the interface has is a /64: RFC 4291 2.5.1 leaves the low 64 bits to
+ * the interface identifier, and that is the prefix bring-up logs and the
+ * prefix Roadshow shows.
+ */
+static ULONG ami_ns6_reported_prefix(const ULONG addr[4], ULONG stored)
+{
+    if ((addr[0] & 0xFFC00000UL) == 0xFE800000UL)
+        return 64UL;
+
+    return stored;
+}
+
 static VOID ami_ns6_log(const char *what, const ULONG addr[4], ULONG prefix)
 {
     char text[AMI_CFG_IP6_STRLEN];
@@ -159,18 +184,11 @@ static VOID ami_ns6_address_changed(NX_IP *ip_ptr, UINT status,
                ? ns->ns_Config.interfaces[interface_index].name
                : "interface";
 
-    prefix = (ULONG)ns->ns_Ip.nx_ipv6_address[address_index]
-                        .nxd_ipv6_address_prefix_length;
+    prefix = ami_ns6_reported_prefix(address,
+                 (ULONG)ns->ns_Ip.nx_ipv6_address[address_index]
+                            .nxd_ipv6_address_prefix_length);
 
-    /*
-     * A link-local address is configured with the /10 of RFC 4291 section
-     * 2.5.6, which is what makes fe80:: link-local at all, but the prefix that
-     * is on-link is the /64 that section 2.5.1 leaves for the interface
-     * identifier. /64 is what bring-up printed and what the address means.
-     */
     linklocal = (BOOL)((address[0] & 0xFFC00000UL) == 0xFE800000UL);
-    if (linklocal)
-        prefix = 64UL;
 
     switch (status)
     {
@@ -436,7 +454,9 @@ BOOL netstack_ipv6_address_get(UWORD interface_index, UWORD slot,
                     addr_out[3] = entry->nxd_ipv6_address[3];
                 }
                 if (prefix_out != NULL)
-                    *prefix_out = (ULONG)entry->nxd_ipv6_address_prefix_length;
+                    *prefix_out = ami_ns6_reported_prefix(
+                        entry->nxd_ipv6_address,
+                        (ULONG)entry->nxd_ipv6_address_prefix_length);
                 if (state_out != NULL)
                     *state_out = (ULONG)entry->nxd_ipv6_address_state;
 
