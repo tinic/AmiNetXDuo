@@ -491,6 +491,17 @@ if [ "$KEEP" = yes ]; then
     echo "url=http://${TARGET_ADDR}:${TARGET_PORT}/terminal"
     echo "sshd_port=${SSHD_PORT}"
     echo "sshd_host=${SSHD_HOST:-(unset)}"
+    # The drill has to run somewhere that can reach the guest, which is any
+    # machine on the LAN except this one.  Printed with its environment
+    # already filled in, because the ssh arms are silently skipped without it
+    # and a skipped arm read as a passing one for a whole release.
+    echo "==> drive it from another machine on the LAN:"
+    echo "      AMINETXDUO_WSCONSOLE_SSH=$([ "$HAVE_SSH" = yes ] && echo yes || echo no) \\"
+    echo "      AMINETXDUO_WSCONSOLE_SSHKEY=$HAVE_SSHKEY \\"
+    echo "      AMINETXDUO_WSCONSOLE_SSHD_PORT=$SSHD_PORT \\"
+    echo "      AMINETXDUO_WSCONSOLE_SSHD_USER=$SSHD_USER \\"
+    echo "      AMINETXDUO_WSCONSOLE_HOST=${SSHD_HOST:-<addr of an sshd>} \\"
+    echo "      tests/tools/wsterm-console.py $TARGET_ADDR $TARGET_PORT"
     echo "==> holding the guest; Ctrl-C to stop it"
     while kill -0 "$RUNNER" 2>/dev/null; do
         sleep 5
