@@ -30,7 +30,7 @@ git log; what it declined is under *Decided against*; what it disproved is under
 | **TLS 1.3 client** | **On `main` and in every shipped build** (`src/tls/CMakeLists.txt:99-100`, unconditional), not on a branch -- the `tls13` branch is merged and deleted. It was a compile switch: nx_secure's seven `nx_secure_tls_1_3_*.c`, `_nx_crypto_rsa_pss_verify`, `crypto_method_hkdf` and the `NX_SECURE_TLS_TLS_1_3_ENABLED` rows in `ami_tls_crypto.c` were all present and only compiled out. Fixed on the way: `tls_library` links nx_secure by `$<TARGET_FILE:...>`, which carries no usage requirements, so `tls_conn.c` compiled a different `NX_SECURE_TLS_SESSION` than nx_secure operated on. Still failing: `tests/tls/run-tls13.sh` is red at `nx_secure_tls_process_record.c:558`, a content type that is not 20/21/22/23, so the key schedule derives wrong keys. The hash method is implicated -- our rows carry `AMI_BULK_SHA256` where stock carries `crypto_method_sha256`, and swapping them moves the failure to `NX_CRYPTO_PTR_ERROR`, so they are not interchangeable. Server-side 1.3 is impossible regardless: nx_crypto has PSS verify and no PSS sign | RFC 8446 |
 | **Encrypt-then-MAC, RFC 7366** | The answer to the CBC padding-timing row, which is declined on its own terms below. EtM fails the MAC before padding is examined, at no per-record cost; constant-time padding costs ~10 ms per record at 7 MHz |, |
 | **Extended master secret, RFC 7627** | Without it, resumption is exposed to the triple-handshake attack. A change to nx_secure's key schedule, not a table entry; every cached session becomes non-resumable |, |
-| **SACK send side** | Written on fork branch `amiga-tcp-sack-transmit` (`d8af79c5`), never landed. Adds `nx_tcp_sack_option_get.c` and the retransmit skip. **Needs a transmit-side drill case before it can land**: merged onto the pinned commit 2026-08-05 it builds clean (+652 bytes) and breaks nothing, 59 cases and 568 checks green across `tcp`, `sack`, `dsack`, `retransmit`, `dupack`, `rto` and `rwndupdate`, but the same drills give byte-identical results with the change reverted, so none of them reaches the new code. All twelve `sack.drill` cases are receive side, asserting the blocks we emit for our own holes; nothing asserts that a peer's blocks make a retransmission skip a segment. Two conflicts on merge, both additive against the D-SACK members added since | `nx_tcp.h:93`, `tests/tcpdrill/scripts/sack.drill` |
+| **SACK send side** | Written on fork branch `amiga-tcp-sack-transmit`, merged and pushed as `amiga-tcp-sack-transmit-merged` (`netxduo ec4fd9cc`, four additive conflicts resolved). **Still does not land, and now for a measured reason rather than a missing test.** tcpdrill could not inject a peer's blocks at all -- `sack=` was an assertion on what leaves -- so the twelve receive-side cases passed either way; that is fixed, `sack=` on an `rx` line now sends RFC 2018 blocks. The two cases it enables say the branch does not work: `s13` sends three segments, takes three duplicate acknowledgments each carrying a block for the middle one, and requires the retransmission to skip it. **It fails identically without the branch and with it** -- the stack retransmits 1:101 and stops, never reaching 201:301 -- with `_nx_tcp_sack_option_get` confirmed present in `libnetxduo.a` on the second run. `s14`, the control, passes: no blocks, only the first segment goes out. What is NOT established is which side is wrong, the branch or `s13`'s assumption that three duplicate acknowledgments at MSS 100 enter fast recovery at all; telling them apart needs guest instrumentation, and a `RawPutChar` probe produced an empty serial log under the tcpdrill runner | `tests/tcpdrill/scripts/sack.drill` s13/s14 |
 | **RFC 2308 §5 negative cache.** A name that does not exist is looked up again on every call | The SOA MINIMUM has to be held against a name with no record to attach it to, which means a synthetic entry type and storage for a name with no data. `NX_DNS_NAME_ERROR` now exists and reaches `ami_ns_dns_error()`, so nothing outside this row is in the way | `nxd_dns.c:3587`, `netstack_dns_status.c` |
 | **Bailiwick check on cached records, with CNAME chain following** | One item, not two: `NX_DNS_ENABLE_EXTENDED_RR_TYPES` is undefined, so the A record after a CNAME has the CNAME target as its owner and is accepted only because no owner-name check exists. Adding the check alone fails every CNAME-hosted name | `nxd_dns.c` |
 | **`src/bsdsocket` has one host test**, `test_inet`, reaching 7 of 29 files | The other 22 are blocked on 253 Amiga constants and on structures the host cannot shape, and their ABI is already held by 80 `_Static_assert`s on the cross build. What is left un-held is behaviour needing the real ABI: `bsd_route_mtu()`, `bsd_udp_from_peer()`, the 4-tuple filter. That is guest-suite work, so this row is about `bsdsocktest` coverage, not host coverage | `src/bsdsocket/`, measured under *Host-testing* below |
@@ -39,7 +39,6 @@ git log; what it declined is under *Decided against*; what it disproved is under
 | **`src/sana2` has one test, added 2026-08-04**, covering `sana2_copy.c` alone out of 3,704 lines | The driver-facing code runs at interrupt time, which is where a mistake takes the machine down rather than failing a check | `src/sana2/` |
 | **A command is mostly C runtime.** `ping` is 16,196 bytes in 0.17.3, of which its own code is about 2,050 | libnix's crt0 chain pulls in stdio and the C++ AVL allocator through `__stdiowin.o` and `__initcpp.o`; `atexit()` was the other route and is gone. `tool_printf` goes through dos.library `VPrintf` and `ami_alloc` through `AllocVec`, so nothing we wrote calls what remains. `src/tools/CMakeLists.txt:62-76` records why the link line was left alone once before | link map of `tool_ping` |
 | **Parameterise `run-tcphandler.sh`'s peer address** | Seven connections in it name 10.0.2.2 outright. It runs under Amiberry now, whose SLIRP puts the gateway at the same address, so it passes; the address being written down seven times is what stops it moving to a bridged backend or a real peer | `tests/tools/run-tcphandler.sh` |
-| **`HOST_TEST_TARGETS` count guard does not catch an unbuilt target** | It compares registered tests against targets, and a test registers whether or not its target was built, so five went to `main` reporting Not Run | `tools/ci.sh:207-211` |
 | **EKU, nameConstraints and critical-extension rejection, together** | Accepting a certificate that marks nameConstraints critical while not enforcing it is exactly the failure the critical bit exists to prevent, so doing one without the others is worse than doing none. The known-critical set must be `{basicConstraints, keyUsage, subjectAltName, extendedKeyUsage}`, Let's Encrypt intermediates mark EKU critical. Untestable without hardware | `nx_secure_x509_extension_find.c:191` |
 
 ### The release gate, and what is left of the emulators
@@ -839,6 +838,24 @@ math libraries are in `LIBS:`. The earlier `errno 43` `EPROTONOSUPPORT` from
 `AddNetInterface` was not a protocol-domain fault and not an OS-version
 requirement. Measured 2026-08-02 as the third arm: read 1108 KB/s against our
 983 and Roadshow's 1824.
+
+### The host-test count guard, closed 2026-08-11
+
+The row said the guard "does not catch an unbuilt target". Half right, and the
+half it named is no longer true: `ctest --show-only=json-v1` on a configured
+host tree shows every one of the 48 registered tests running a binary that is
+in `HOST_TEST_TARGETS`, so there is no test left that registers without being
+built.
+
+The guard had rotted a different way. It was `-lt`, *fewer* than expected is a
+failure, so every test added without touching `HOST_TESTS_EXPECTED` left one
+more test's worth of slack: **the bar was 47 against 49 real tests**, and two
+could have gone missing with the gate green. Measured, not inferred: 49 on
+x86_64, 48 on arm64 (no `test_inet`).
+
+Now exact in both directions, so adding a test turns CI red until the number
+is raised. `tools/ci.sh host` on x86_64: `49 tests registered (expected 49)`,
+all green.
 
 ## Decided against, do not "fix"
 

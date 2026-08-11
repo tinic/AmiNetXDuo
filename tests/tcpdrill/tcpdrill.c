@@ -948,6 +948,19 @@ typedef struct Inject
     ULONG   tsecr;
     LONG    wscale;             /* RFC 7323 window scale, -1 for none  */
     BOOL    sackok;             /* RFC 2018 SACK-Permitted             */
+    /*
+     * RFC 2018 SACK BLOCKS TO SEND, which is the half of this option the
+     * harness could not do.  `sack=` was an assertion on what LEAVES, so
+     * every case in sack.drill was receive side and nothing could put a
+     * peer's blocks in front of the stack -- which is why the send-side
+     * change sat on a fork branch for nine days with no case that reached it.
+     *
+     * Absolute sequence numbers, already offset by the ISN, because that is
+     * what goes on the wire.
+     */
+    UWORD   n_sack;
+    ULONG   sack_lo[4];
+    ULONG   sack_hi[4];
     LONG    corrupt;            /* payload byte to flip after the checksum */
     ULONG   pad;                /* Ethernet padding past the datagram      */
     BOOL    unaligned;          /* hand the device an odd buffer           */
@@ -970,8 +983,11 @@ static VOID build_and_inject(const Inject *in)
     UBYTE *f   = ((UBYTE *)f_aligned) + (in->unaligned ? 0 : 2);
     UBYTE *ip  = &f[ETH_HDR];
     UBYTE *tcp;
+    /* NOP, NOP, kind 5, length, then 8 bytes a block: 4 + 8n, which is
+       already a multiple of four and needs no padding. */
     UWORD  opt = (UWORD)(((in->mss >= 0) ? 4 : 0) + ((in->wscale >= 0) ? 4 : 0) +
-                         (in->sackok ? 4 : 0) + (in->ts ? 12 : 0));
+                         (in->sackok ? 4 : 0) + (in->ts ? 12 : 0) +
+                         ((in->n_sack > 0) ? (4 + (in->n_sack * 8)) : 0));
     UWORD  thl = (UWORD)(20 + opt);
     ULONG  i;
     ULONG  iplen;
@@ -1063,6 +1079,30 @@ static VOID build_and_inject(const Inject *in)
             tcp[at + 2] = 1;
             tcp[at + 3] = 1;
             at = (UWORD)(at + 4);
+        }
+
+        /*
+         * NOP, NOP, kind 5, length 2 + 8n, then each block as two network
+         * order longwords: RFC 2018 section 3, the layout every stack that
+         * sends blocks uses.  The two NOPs put the blocks on a longword
+         * boundary, which is what makes reading them a plain 32-bit load.
+         */
+        if (in->n_sack > 0)
+        {
+            UWORD b;
+
+            tcp[at]     = 1;
+            tcp[at + 1] = 1;
+            tcp[at + 2] = 5;
+            tcp[at + 3] = (UBYTE)(2 + (in->n_sack * 8));
+            at = (UWORD)(at + 4);
+
+            for (b = 0; b < in->n_sack; b++)
+            {
+                wr32(&tcp[at],     in->sack_lo[b]);
+                wr32(&tcp[at + 4], in->sack_hi[b]);
+                at = (UWORD)(at + 8);
+            }
         }
 
         /* NOP, NOP, kind 8, length 10: the layout every stack sends, and the
@@ -1909,6 +1949,25 @@ static VOID do_rx(const char *args, const char *raw)
     in.wscale = e.have_wscale ? e.wscale : -1;
     in.sackok = (e.have_sackok && (e.sackok != 0)) ? TRUE : FALSE;
     in.corrupt   = e.have_corrupt ? e.corrupt : -1;
+
+    /*
+     * On an `rx` line, `sack=` is no longer only an assertion: the blocks are
+     * SENT.  They describe data THIS side sent, so they count in the space
+     * `seq=` on our own segments counts in, which is cs.u_isn -- the opposite
+     * space from the one sack.drill's receive-side cases use, and the reason
+     * that is spelled out here rather than left to the reader.
+     */
+    if (e.have_sack && (e.n_sack > 0))
+    {
+        UWORD b;
+
+        in.n_sack = e.n_sack;
+        for (b = 0; b < e.n_sack; b++)
+        {
+            in.sack_lo[b] = cs.u_isn + (ULONG)e.sack_lo[b];
+            in.sack_hi[b] = cs.u_isn + (ULONG)e.sack_hi[b];
+        }
+    }
 
     /* What the peer offered is half of every negotiated option, and of the
        header length `hdrlen=auto` expects. */
