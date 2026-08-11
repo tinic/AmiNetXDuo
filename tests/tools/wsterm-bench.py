@@ -74,7 +74,7 @@ class Term:
         began = time.time()
         self.s = socket.create_connection((ADDR, PORT), timeout=WAIT)
         key = base64.b64encode(b"0123456789abcdef").decode()
-        self.s.sendall(("GET /terminal HTTP/1.1\r\nHost: %s:%d\r\n"
+        self.s.sendall(("GET /shell HTTP/1.1\r\nHost: %s:%d\r\n"
                         "Upgrade: websocket\r\nConnection: Upgrade\r\n"
                         "Sec-WebSocket-Key: %s\r\n"
                         "Sec-WebSocket-Version: 13\r\n\r\n"

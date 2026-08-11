@@ -40,7 +40,7 @@ version at the top when it merges.
 - Ariadne and Ariadne II carry traffic. Both cards took an address and then no connection would open: we told the driver that copying each frame out had failed, for every TCP frame, while the frame sat complete in the card's buffer. Most drivers never ask, so it went unseen on every other card; Ariadne's asks and refused the frame. An Ariadne now reads faster than any other card we have measured
 - A card that refuses a frame says why, naming what the driver reported
 
-- `httpd -T <page.html>` serves an AmigaDOS Shell in a browser at `/terminal`, over a WebSocket. It is 44 ms to the prompt and about 23 ms from pressing Enter to seeing the output on an A1200, which is not far off a Shell on the machine itself. **Anyone who can reach the port gets that Shell**; there is no password, as there is none on the drawer `httpd` already shares
+- `httpd -T <page.html>` serves an AmigaDOS Shell in a browser at `/shell`, over a WebSocket. It is 44 ms to the prompt and about 23 ms from pressing Enter to seeing the output on an A1200, which is not far off a Shell on the machine itself. **Anyone who can reach the port gets that Shell**; there is no password, as there is none on the drawer `httpd` already shares
 
 - `ConfigureNetInterface` changes a running interface's address, netmask and gateway where it stands, instead of the interface having to be taken out and put back
 - `ConfigureNetInterface CONFIGURE=DHCP` renews one interface's lease, and `RELEASE` gives it up, without restarting the network

@@ -53,7 +53,7 @@ ADDR = argv[0] if len(argv) > 0 else "127.0.0.1"
 PORT = int(argv[1]) if len(argv) > 1 else 8080
 
 BASE = "/httpd-drill"
-TERM = "/terminal"
+TERM = "/shell"
 
 # How long one exchange with the guest may take.  Measured rather than
 # guessed: see tests/tools/run-wsterm.sh for the figures a 68020 produced and
@@ -992,7 +992,7 @@ def test_ws_page():
     print("the terminal's page")
 
     a = once(req("GET", TERM))
-    check(a is not None and a[0] == 200, "GET /terminal is 200")
+    check(a is not None and a[0] == 200, "GET /shell is 200")
     if a is not None:
         check("text/html" in a[1].get("content-type", ""),
               "and is HTML (got %r)" % a[1].get("content-type"))
@@ -1001,7 +1001,7 @@ def test_ws_page():
 
     a = once(req("PUT", TERM, body="x"))
     check(a is not None and a[0] == 405,
-          "PUT /terminal is 405, not a write into the drawer (got %s)"
+          "PUT /shell is 405, not a write into the drawer (got %s)"
           % (a[0] if a else "nothing"))
 
 

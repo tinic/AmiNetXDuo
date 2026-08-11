@@ -10,7 +10,7 @@
 # the thing rather than testing it: nothing here asserts anything.
 #
 #   http://<address>/           the Public drawer, WebDAV-writable
-#   http://<address>/terminal   an AmigaDOS Shell in a browser, NO PASSWORD
+#   http://<address>/shell   an AmigaDOS Shell in a browser, NO PASSWORD
 #   http://amiga.local/         the same machine by name, -n renames it
 #
 # The interface is staged with MDNS=YES and the drive with a hostname, because
@@ -418,7 +418,7 @@ HOSTPART="$ADDR"
 cat <<EOF
 
   the drawer    http://$HOSTPART/
-  the terminal  http://$HOSTPART/terminal      no password, anyone who can reach it
+  the terminal  http://$HOSTPART/shell      no password, anyone who can reach it
 EOF
 
 # Only when there is a network for a name to mean anything on.  Behind NAT the
@@ -427,7 +427,7 @@ if [ -n "$NAME" ]; then
     NAMEPART="$NAME.local"
     [ "$PORT" = 80 ] || NAMEPART="$NAME.local:$PORT"
     echo
-    echo "  by name       http://$NAMEPART/terminal      mDNS, once the responder has claimed it"
+    echo "  by name       http://$NAMEPART/shell      mDNS, once the responder has claimed it"
 fi
 
 cat <<EOF

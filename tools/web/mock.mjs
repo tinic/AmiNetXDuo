@@ -1,7 +1,7 @@
 /*
  * An AmigaDOS Shell that is not an Amiga.
  *
- *   node tools/web/mock.mjs [PORT]        default 8099, then open /terminal
+ *   node tools/web/mock.mjs [PORT]        default 8099, then open /shell
  *
  * WHY THIS EXISTS
  *
@@ -161,10 +161,10 @@ function latin1(s) {
 }
 
 const server = createServer((req, res) => {
-  /* Without the query dropped, /terminal?input=char is a 404 and the page
+  /* Without the query dropped, /shell?input=char is a 404 and the page
      never loads at all, which reads as the page having crashed. */
   const path = (req.url || "/").split("?")[0];
-  if (path !== "/terminal" && path !== "/") {
+  if (path !== "/shell" && path !== "/") {
     res.writeHead(404).end("no");
     return;
   }
@@ -224,6 +224,6 @@ server.on("upgrade", (req, sock) => {
 });
 
 server.listen(PORT, () => {
-  console.log("mock AmigaDOS on http://127.0.0.1:%d/terminal", PORT);
+  console.log("mock AmigaDOS on http://127.0.0.1:%d/shell", PORT);
   console.log("commands: Dir List Type Echo Cd Version Colours Clear Ping Wide EndCLI");
 });

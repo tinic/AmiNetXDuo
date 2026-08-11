@@ -7,7 +7,7 @@
 #
 # WHAT IT PROVES
 #
-#   An emulated Amiga serves /terminal, upgrades a real WebSocket, and runs a
+#   An emulated Amiga serves /shell, upgrades a real WebSocket, and runs a
 #   command in an AmigaDOS Shell whose output comes back through the socket.
 #   Every check is tests/tools/httpd-drill.py's, at the level of bytes, because
 #   a library client would hide exactly the things that must be right: the

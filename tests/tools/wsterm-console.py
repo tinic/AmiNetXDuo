@@ -512,7 +512,7 @@ def test_takeover():
 
 
 def main():
-    print("wsterm-console against ws://%s:%d/terminal\n" % (d.ADDR, d.PORT))
+    print("wsterm-console against ws://%s:%d/shell\n" % (d.ADDR, d.PORT))
 
     test_mode_is_announced()
     test_size_is_taken()

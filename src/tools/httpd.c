@@ -20,7 +20,7 @@
  *
  * AND, WHEN ASKED FOR, A SHELL
  *
- *   TERMINAL names an HTML file.  With it, /terminal serves that file, and a
+ *   TERMINAL names an HTML file.  With it, /shell serves that file, and a
  *   WebSocket upgrade to the same address gets an AmigaDOS Shell: RFC 6455 in
  *   src/tools/httpws.c, the Shell itself in src/tools/httpterm.c.
  *
@@ -30,7 +30,7 @@
  *   endpoint is off unless TERMINAL was given, so the decision is the person
  *   starting the server's and is made once, on the command line.
  *
- *   /terminal is reserved while it is on, and shadows an entry of that name in
+ *   /shell is reserved while it is on, and shadows an entry of that name in
  *   the served drawer.  The banner says so when there is one, because a file
  *   that stops being reachable without a word is the kind of thing that gets
  *   diagnosed as a network fault.
@@ -243,7 +243,7 @@ enum
  * resolved, so it never reaches the served drawer and cannot be escaped from
  * with an encoding trick: there is no path to escape.
  */
-#define HTTPD_TERM_URL      "/terminal"
+#define HTTPD_TERM_URL      "/shell"
 
 /* The version of RFC 6455 there is.  A client asking for another gets 426 and
    this number back, which is what 4.4 says to do rather than refusing flat. */
@@ -484,7 +484,7 @@ struct HttpConn
      * the Shell's Process are the part that is taken only when TERMINAL was
      * given, and they are the part that has size to them; see httpterm.c.
      */
-    UBYTE   is_term;                /* this request is for /terminal       */
+    UBYTE   is_term;                /* this request is for /shell          */
     UBYTE   ws_upgrade;             /* Upgrade: websocket was there        */
     UBYTE   ws_connection;          /* and Connection: listed upgrade      */
     UBYTE   ws_owner;               /* this connection holds the Shell     */
@@ -7019,7 +7019,7 @@ int main(int argc, char **argv)
         tool_fault(IoErr());
         tool_usage("<drawer> [<port>] [-v] [TRACE] [-T <page.html>]",
                    "Serves a drawer over HTTP and WebDAV, so this machine can "
-                   "be mounted as a writable drive.  -T adds /terminal, an "
+                   "be mounted as a writable drive.  -T adds /shell, an "
                    "AmigaDOS Shell in a browser, open to anyone who can reach "
                    "the port.");
         return RETURN_ERROR;

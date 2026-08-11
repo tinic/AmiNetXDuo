@@ -39,7 +39,7 @@ const arg = (name, fallback) => {
   return i >= 0 && i + 1 < process.argv.length ? process.argv[i + 1] : fallback;
 };
 
-const URL_ = arg("url", "http://127.0.0.1:18081/terminal");
+const URL_ = arg("url", "http://127.0.0.1:18081/shell");
 const SSHD = arg("sshd", "2224");
 const USER = arg("user", process.env.USER ?? "nobody");
 const HOST_FROM_GUEST = "10.0.2.2";

@@ -419,7 +419,7 @@ fi
 # emulator's own window runs out or somebody stops this script.
 if [ "$KEEP" = yes ]; then
     echo "ready=1"
-    echo "url=http://${TARGET_ADDR}:${TARGET_PORT}/terminal"
+    echo "url=http://${TARGET_ADDR}:${TARGET_PORT}/shell"
     echo "sshd_port=${SSHD_PORT}"
     echo "==> holding the guest; Ctrl-C to stop it"
     while kill -0 "$RUNNER" 2>/dev/null; do
