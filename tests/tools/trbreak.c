@@ -16,6 +16,14 @@
  *   in tests/tools/resolvebreak.c, the other way round: there the child does
  *   the signalling, here it does the waiting.
  *
+ *   NP_Cli is TRUE, and that is not decoration.  A CreateNewProc() child
+ *   without it is a Workbench-style process: it gets no CLI, argc arrives as
+ *   0, every command in this tree answers "this is a Shell command" through
+ *   tool_from_workbench(), and the C startup then sits on pr_MsgPort waiting
+ *   for a WBStartup message that nobody will ever send.  The first version of
+ *   this probe did exactly that and reported the command as having ignored the
+ *   break, when the command had never started.
+ *
  * WHY IT IS NOT ENOUGH TO SET THE BREAK BEFOREHAND
  *
  *   A command that reads the break at the top of its outer loop passes that
@@ -47,6 +55,17 @@
 
 #define TR_DEFAULT_WAIT     6UL     /* seconds before the break        */
 #define TR_DEFAULT_CEILING  3UL     /* seconds it may take to notice   */
+
+/* The child tells us it has gone, rather than us watching for its name: with
+   NP_Cli the process is named by dos.library and FindTask() is no answer. */
+#define TB_CHILD_GONE       SIGBREAKF_CTRL_F
+
+static struct Task *tb_parent;
+
+static VOID tb_child_exit(VOID)
+{
+    Signal(tb_parent, TB_CHILD_GONE);
+}
 
 /* DateStamp(), for the same reason resolvebreak.c uses it: ds_Tick is 1/50 s
    and it reads the same on every model. */
@@ -90,7 +109,6 @@ int main(int argc, char **argv)
     char           *rest;
     BPTR            seg;
     struct Process *child;
-    struct MsgPort *port;
     ULONG           seconds;
     ULONG           ceiling;
     ULONG           start;
@@ -151,27 +169,27 @@ int main(int argc, char **argv)
      * NP_FreeSeglist is FALSE: the child would free a seglist this process
      * still holds a handle on, and UnLoadSeg() below is the only owner.
      */
-    port = CreateMsgPort();
+    tb_parent = FindTask(NULL);
+    (VOID)SetSignal(0UL, TB_CHILD_GONE);
 
     child = CreateNewProcTags(
                 NP_Seglist,     (Tag)seg,
                 NP_FreeSeglist, (Tag)FALSE,
-                NP_Name,        (Tag)"TrBreak child",
+                NP_Cli,         (Tag)TRUE,
+                NP_Name,        (Tag)line,
                 NP_Arguments,   (Tag)arguments,
                 NP_StackSize,   (Tag)16384,
                 NP_Input,       (Tag)Input(),
                 NP_Output,      (Tag)Output(),
                 NP_CloseInput,  (Tag)FALSE,
                 NP_CloseOutput, (Tag)FALSE,
-                NP_ExitCode,    (Tag)NULL,
+                NP_ExitCode,    (Tag)tb_child_exit,
                 TAG_END);
 
     if (child == NULL)
     {
         Printf((CONST_STRPTR)"error=cannot start %s\n", (LONG)line);
         Printf((CONST_STRPTR)"result=infra\n");
-        if (port != NULL)
-            DeleteMsgPort(port);
         UnLoadSeg(seg);
         FreeArgs(rda);
         return RETURN_FAIL;
@@ -202,22 +220,16 @@ int main(int argc, char **argv)
     Signal((struct Task *)child, SIGBREAKF_CTRL_C);
 
     /*
-     * How long the command takes to go away.  Polled rather than waited on: a
-     * child that never exits must be reported, not waited for, and this is the
-     * only place that can tell the difference.
-     *
-     * pr_Task.tc_State is not safe to read once the process has gone, so the
-     * end is detected by the child clearing its own pr_CLI... which it does
-     * not do either.  The reliable signal is the exit handshake: NP_ExitCode
-     * is NULL here, so instead the loop watches a ceiling and reports what it
-     * saw, and the transcript's own ordering says whether the command's output
-     * stopped.
+     * How long the command takes to go away.  The child's NP_ExitCode signals
+     * us, so this is a bounded wait on a signal rather than a guess: a command
+     * that never exits has to be REPORTED, which means the wait must end.
      */
     {
-        ULONG limit = (ceiling + 2UL) * 50UL;
+        ULONG limit  = (ceiling + 2UL) * 50UL;
         ULONG waited = 0UL;
 
-        while (waited < limit && FindTask((CONST_STRPTR)"TrBreak child") != NULL)
+        while (waited < limit &&
+               (SetSignal(0UL, 0UL) & TB_CHILD_GONE) == 0)
         {
             Delay(5);
             waited += 5UL;
@@ -229,16 +241,27 @@ int main(int argc, char **argv)
 
     Printf((CONST_STRPTR)"exit_after_break=%ld\n", (LONG)after);
 
-    if (FindTask((CONST_STRPTR)"TrBreak child") != NULL)
+    if ((SetSignal(0UL, 0UL) & TB_CHILD_GONE) == 0)
     {
         Printf((CONST_STRPTR)"still_running=yes\n");
         Printf((CONST_STRPTR)"result=ignored-break\n");
         rc = RETURN_WARN;
 
         /* Leaving a process running would poison every command after this one
-           in the same boot, so it is signalled again and given a moment. */
+           in the same boot, so it is signalled again and waited for.  Waited
+           for, not merely nudged: its output goes to the same stream as the
+           next command's and the two must not interleave. */
         Signal((struct Task *)child, SIGBREAKF_CTRL_C);
-        Delay(100);
+        {
+            ULONG waited = 0UL;
+
+            while (waited < 60UL * 50UL &&
+                   (SetSignal(0UL, 0UL) & TB_CHILD_GONE) == 0)
+            {
+                Delay(10);
+                waited += 10UL;
+            }
+        }
     }
     else if (after > ceiling)
     {
@@ -251,9 +274,6 @@ int main(int argc, char **argv)
         Printf((CONST_STRPTR)"still_running=no\n");
         Printf((CONST_STRPTR)"result=broke\n");
     }
-
-    if (port != NULL)
-        DeleteMsgPort(port);
 
     /* The child may still hold the seglist if it ignored the break; the extra
        Delay above is the whole of the grace it gets. */
