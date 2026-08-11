@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `httpd`'s terminal is a real terminal. AmigaDOS ends a line with a single character where a terminal expects two, so every directory listing used to walk off the right of the screen a step at a time, and colour came out as the codes that were meant to produce it. It also has the editing a Shell should have: history on the cursor keys, a line you can move around in, and a window that resizes
+
 - Ariadne and Ariadne II carry traffic. Both cards took an address and then no connection would open: we told the driver that copying each frame out had failed, for every TCP frame, while the frame sat complete in the card's buffer. Most drivers never ask, so it went unseen on every other card; Ariadne's asks and refused the frame. An Ariadne now reads faster than any other card we have measured
 - A card that refuses a frame says why, naming what the driver reported
 
