@@ -89,6 +89,7 @@ INJECT=""
 
 # A name with an A and an AAAA, and a service on port 80 answering over both.
 DUAL="${AMINETXDUO_FAMILY_DUAL:-example.com}"
+DUAL_V6=""
 # A dual-stack HTTP service whose body is the CLIENT's own address.  fetch
 # prints no address of its own on a successful transfer, so this is how its two
 # arms are told apart: the far end reports which family the request arrived
@@ -178,6 +179,7 @@ host_preflight() {
     [ -n "$V4ONLY_ADDR" ] ||
         infra "no IPv4 default gateway to point $V4ONLY_NAME at"
 
+    DUAL_V6="$aaaa"
     echo "host/dual=$DUAL a=$a aaaa=$aaaa"
     echo "host/v4only=$V4ONLY_NAME addr=$V4ONLY_ADDR"
     echo "host/ntp=$NTP"
@@ -213,6 +215,13 @@ V6RE='[0-9a-fA-F]*:[0-9a-fA-F]*:'
 
 arms() {
     cat <<EOF
+# Can this stack answer a AAAA query at all?  nslookup builds the query itself
+# and sends it to a name server, so it reaches no part of the -4/-6 code.  It
+# is the first row on purpose: if it is red, every -6 row below it is red for a
+# reason that has nothing to do with the flag, and the report says so in one
+# line instead of leaving twelve failures to be interpreted.
+dns/aaaa|0|SYS:nslookup $DUAL TYPE=AAAA TIMEOUT 15|+$V6RE
+dns/a|0|SYS:nslookup $DUAL TYPE=A TIMEOUT 15|+$V4RE
 # The picture first: without either flag, whatever selection chooses.  Recorded
 # and not asserted -- which family wins there is a separate question, and this
 # file is about what happens when the user has said which one they want.
@@ -223,6 +232,16 @@ host/v4-only-name|0|SYS:host $V4ONLY_NAME -4|+has address $V4ONLY_ADDR
 host/no-aaaa|10|SYS:host $V4ONLY_NAME -6|+$V4ONLY_NAME has no IPv6 address, and -6 was given
 host/nxdomain|10|SYS:host no.such.host.invalid -6|+cannot resolve|-has no IPv6 address
 host/both|10|SYS:host $DUAL -4 -6|+-4 and -6 cannot both be given
+# A literal already declares its own family, so a flag that contradicts it is
+# an error about the argument and not about any name server.  These two rows
+# reach no resolver at all, which is why they belong here: they stay green on a
+# wire with no DNS and they are the only rows that isolate the tool half of
+# -4/-6 from everything underneath it.
+literal/v4-under-6|10|SYS:ping $V4ONLY_ADDR -c 1 -6|+$V4ONLY_ADDR is an IPv4 address, and -6 was given
+literal/v6-under-4|10|SYS:ping $DUAL_V6 -c 1 -4|+$DUAL_V6 is an IPv6 address, and -4 was given
+# And the IPv6 datapath itself, by literal, so a -6 arm that fails above can be
+# told apart from a machine that cannot send an IPv6 packet at all.
+literal/v6-ping|0|SYS:ping $DUAL_V6 -c 2 -t 20|+bytes from|+0% packet loss
 ping/v4|0|SYS:ping $DUAL -c 2 -t 25 -4|+bytes from $V4RE:|+0% packet loss
 ping/v6|0|SYS:ping $DUAL -c 2 -t 25 -6|+bytes from $V6RE|+0% packet loss
 ping/no-aaaa|10|SYS:ping $V4ONLY_NAME -c 1 -t 10 -6|+$V4ONLY_NAME has no IPv6 address, and -6 was given
@@ -247,8 +266,8 @@ tftp/v4|*|SYS:tftp $DUAL GET nosuchfile TIMEOUT 2 -4|+getting nosuchfile from $V
 tftp/v6|*|SYS:tftp $DUAL GET nosuchfile TIMEOUT 2 -6|+getting nosuchfile from $V6RE
 tftp/no-aaaa|10|SYS:tftp $V4ONLY_NAME GET nosuchfile TIMEOUT 2 -6|+has no IPv6 address, and -6 was given
 tftp/both|10|SYS:tftp $DUAL GET nosuchfile -4 -6|+-4 and -6 cannot both be given
-whois/v4|0|SYS:whois example.com -4|+refer:
-whois/v6|0|SYS:whois example.com -6|+refer:
+whois/v4|0|SYS:whois example.com -4|+IANA WHOIS server|+domain: *EXAMPLE.COM
+whois/v6|0|SYS:whois example.com -6|+IANA WHOIS server|+domain: *EXAMPLE.COM
 whois/no-aaaa|10|SYS:whois example.com SERVER $V4ONLY_NAME -6|+has no IPv6 address, and -6 was given
 whois/both|10|SYS:whois example.com -4 -6|+-4 and -6 cannot both be given
 sntp/v4|0|SYS:sntp $NTP SHOW TIMEOUT 20 -4|+\\($V4RE\\): stratum
@@ -269,8 +288,8 @@ EOF
 stage_and_boot() {
     local a2065 t
 
-    for t in ToolsSmoke AddNetInterface ShowNetStatus host ping traceroute \
-             fetch nc telnet tftp whois sntp iperf; do
+    for t in ToolsSmoke AddNetInterface ShowNetStatus nslookup host ping \
+             traceroute fetch nc telnet tftp whois sntp iperf; do
         [ -x "$TOOLS/$t" ] || infra "no $TOOLS/$t; build $BUILD first"
     done
     [ -f "$BSD" ] || infra "no $BSD; build $BUILD first"
@@ -282,8 +301,8 @@ stage_and_boot() {
     cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
     cp "$a2065" "$STAGE/devs/a2065.device"
     cp "$BSD"   "$STAGE/libs/bsdsocket.library"
-    for t in AddNetInterface ShowNetStatus host ping traceroute fetch nc \
-             telnet tftp whois sntp iperf; do
+    for t in AddNetInterface ShowNetStatus nslookup host ping traceroute \
+             fetch nc telnet tftp whois sntp iperf; do
         cp "$TOOLS/$t" "$STAGE/$t"
     done
 
@@ -301,8 +320,15 @@ EOF
 
     printf '%s %s\n' "$V4ONLY_ADDR" "$V4ONLY_NAME" \
         >> "$STAGE/devs/Internet/hosts"
-    printf '\nhostname %s\n' "$GUEST_NAME" \
-        >> "$STAGE/devs/Internet/name_resolution"
+
+    # Written, not appended to.  The shared file names SLIRP's forwarder,
+    # 10.0.2.3, which does not exist on a bridged wire: it goes to the head of
+    # the server list ahead of the one DHCP supplies and every lookup pays for
+    # it before falling back.  The lease carries a name server; this file only
+    # has to carry the host name, which must not be `amiga` while another guest
+    # is up.
+    printf 'hostname %s\n' "$GUEST_NAME" \
+        > "$STAGE/devs/Internet/name_resolution"
 
     # telnet talks to an HTTP server: two junk lines are a bad request, the
     # server answers 400 and closes, and the session ends by itself.  A telnet
@@ -326,7 +352,8 @@ EOF
         -t "$TIMEOUT" \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" \
         "$STAGE/libs" "$STAGE/telnetin.txt" \
-        "$STAGE/AddNetInterface" "$STAGE/ShowNetStatus" "$STAGE/host" \
+        "$STAGE/AddNetInterface" "$STAGE/ShowNetStatus" "$STAGE/nslookup" \
+        "$STAGE/host" \
         "$STAGE/ping" "$STAGE/traceroute" "$STAGE/fetch" "$STAGE/nc" \
         "$STAGE/telnet" "$STAGE/tftp" "$STAGE/whois" "$STAGE/sntp" \
         "$STAGE/iperf" \
