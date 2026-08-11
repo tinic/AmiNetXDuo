@@ -215,6 +215,32 @@ else
     echo "==> no ssh: run clients/dropbear/build.sh to get one" >&2
 fi
 
+# vim, from the asset store.  It is the demanding console test this demo
+# exists to make possible: 2.2 MB, full-screen redraw, cursor addressing,
+# raw keys and a resize, all of it through the WebSocket.
+#
+# $VIM has to be set.  The port's own notes record why: with it unset, vim
+# derives the path from the binary name, "vim" is read by AmigaDOS as a
+# volume reference, and the machine asks you to insert volume vim: in any
+# drive.  S:vim/ is the path its pathdef.c was generated with.
+#
+# The runtime files are not in the package, so syntax highlighting will not
+# work; plain editing does.
+EXTRA_DRAWERS=()
+VIM="${AMINETXDUO_DEMO_VIM:-$HOME/amiga-assets/apps/vim-9.1/vim}"
+if [ -f "$VIM" ]; then
+    cp -f "$VIM" "$STAGE/c/vim"
+    mkdir -p "$STAGE/s/vim" "$STAGE/env"
+    # ENV:VIM is what GetVar() reads.  amiberry-run.sh makes the drive's
+    # env/ drawer itself, and an extra drawer whose name already exists is
+    # merged rather than nested, so this lands beside whatever is there.
+    printf 'S:vim' > "$STAGE/env/VIM"
+    EXTRA_DRAWERS=("$STAGE/s" "$STAGE/env")
+    echo "==> vim staged, ENV:VIM is S:vim"
+else
+    echo "==> no vim at $VIM: the console has no full-screen editor to try" >&2
+fi
+
 echo "==> C: has $(ls "$STAGE/c" | wc -l | tr -d ' ') commands in it"
 
 echo "Hello from an Amiga." > "$STAGE/Public/readme.txt"
@@ -294,7 +320,7 @@ fi
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$BACKEND" -m "$MODEL" -t "$WINDOW" \
     -a "DH0:Public $PORT TERMINAL=DH0:terminal.html" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
-    "$STAGE/terminal.html" "${EXTRA_C[@]}" \
+    "$STAGE/terminal.html" "${EXTRA_C[@]}" "${EXTRA_DRAWERS[@]}" \
     > "$ROOT/build/demo-run-$AMINETXDUO_RUN_TAG.log" 2>&1 &
 RUNNER=$!
 
