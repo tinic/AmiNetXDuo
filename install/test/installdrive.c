@@ -104,6 +104,24 @@
 #define DRIVE_NO_ON_YESNO 0
 #endif
 
+/*
+ * The other way to answer a yes/no page, and the one to prefer: name the
+ * BUTTON rather than count the pages.
+ *
+ * A page number is wrong the moment a question is added, or the moment a
+ * question that only appears on a machine in some state does appear -- the
+ * "keep the existing settings" page shows up on the second run of a
+ * DRIVE_RUNS=2 install and shifts every index after it by one.  A label
+ * cannot drift like that, and it says in the transcript which question was
+ * answered rather than which position it was in.
+ *
+ * A yes/no page whose SECOND button's text contains this string is answered
+ * with that button.  Empty means no page is, which is the default.
+ */
+#ifndef DRIVE_YES_LABEL
+#define DRIVE_YES_LABEL ""
+#endif
+
 #define POLL_TICKS      50      /* Delay() counts 1/50 s, so: one second */
 
 /*
@@ -143,6 +161,53 @@ static VOID say(const char *fmt, LONG a)
            timeout, the report so far is still on the host's disk. */
         Flush(report);
     }
+}
+
+/*
+ * The Installer's buttons are struct Button { struct Gadget Gadget; char
+ * *Text; ... } (window.h), so the label is one pointer past the end of the
+ * Gadget.  describe() below prints it; wants_label() answers with it.
+ */
+struct InstButton
+{
+    struct Gadget  Gadget;
+    char          *Text;
+};
+
+/* An odd pointer is not one: the guard describe() has always had. */
+static const char *button_text(struct Gadget *gad)
+{
+    char *text = ((struct InstButton *)gad)->Text;
+
+    return (text != NULL && ((ULONG)text & 1) == 0) ? text : NULL;
+}
+
+/* TRUE when this button's label contains DRIVE_YES_LABEL.  An empty label
+   matches nothing, which is what makes it off by default. */
+static BOOL wants_label(struct Gadget *gad)
+{
+    const char *want = DRIVE_YES_LABEL;
+    const char *text = button_text(gad);
+    const char *at;
+
+    if (want[0] == '\0' || text == NULL)
+        return FALSE;
+
+    for (at = text; *at != '\0'; at++)
+    {
+        const char *a = at;
+        const char *b = want;
+
+        while (*b != '\0' && *a == *b)
+        {
+            a++;
+            b++;
+        }
+        if (*b == '\0')
+            return TRUE;
+    }
+
+    return FALSE;
 }
 
 /*
@@ -200,6 +265,8 @@ static struct Window *find_installer_window(struct Gadget **click_out)
                 yesno_pages++;
                 choice = (yesno_pages == DRIVE_NO_ON_YESNO && no != NULL)
                              ? no : yes;
+                if (no != NULL && wants_label(no))
+                    choice = no;
             }
             if (choice == NULL)
                 choice = single;
@@ -214,18 +281,10 @@ static struct Window *find_installer_window(struct Gadget **click_out)
 }
 
 /*
- * Say which page we are looking at.  The Installer's buttons are
- * struct Button { struct Gadget Gadget; char *Text; ... } (window.h), so the
- * label is one pointer past the end of the Gadget, which makes it possible
- * to log what a page actually offers rather than guessing from the order
- * things happen in.
+ * Say which page we are looking at, which makes it possible to read what a
+ * page actually offered rather than guessing from the order things happened
+ * in.  It is also where a run that answered the wrong question shows up.
  */
-struct InstButton
-{
-    struct Gadget  Gadget;
-    char          *Text;
-};
-
 static VOID describe(struct Window *window)
 {
     struct Gadget *gad;
@@ -236,12 +295,12 @@ static VOID describe(struct Window *window)
 
     for (gad = window->FirstGadget; gad != NULL && n < 12; gad = gad->NextGadget)
     {
-        char *text = ((struct InstButton *)gad)->Text;
+        const char *text = button_text(gad);
 
         if (gad->GadgetID < 87)                 /* FIRSTRESV_ID: not a button */
             continue;
         n++;
-        if (text != NULL && ((ULONG)text & 1) == 0)
+        if (text != NULL)
             say("installdrive:   button \"%s\"\n", (LONG)text);
     }
 }
@@ -380,6 +439,14 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
             gone = 0;
             say("installdrive: poll %ld: clicking\n", polls);
             say("installdrive:   gadget id %ld\n", (LONG)target->GadgetID);
+            /* Which button, by name.  A run that answered the wrong question
+               is otherwise a page number in a log nobody can check. */
+            {
+                const char *hit = button_text(target);
+
+                if (hit != NULL)
+                    say("installdrive:   clicked \"%s\"\n", (LONG)hit);
+            }
             describe(window);
             click(window, target);
         }
