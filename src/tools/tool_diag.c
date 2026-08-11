@@ -872,7 +872,7 @@ typedef struct ToolDnsNode
 {
     struct MinNode  dnsn_MinNode;
     LONG            dnsn_Size;
-    char           *dnsn_Address;       /* dotted quad, as text */
+    char           *dnsn_Address;       /* an address, as text, either family */
     LONG            dnsn_UseCount;
 } ToolDnsNode;
 
@@ -900,7 +900,7 @@ static VOID tool_call_release_dns(struct Library *base, struct List *list)
                       : "d0", "d1", "a1", "cc", "memory");
 }
 
-ULONG tool_stack_name_servers(char out[][16], ULONG max)
+ULONG tool_stack_name_servers(char out[][AMI_CFG_IP6_STRLEN], ULONG max)
 {
     struct Library *base;
     struct List    *list;
@@ -923,7 +923,8 @@ ULONG tool_stack_name_servers(char out[][16], ULONG max)
             const ToolDnsNode *dns = (const ToolDnsNode *)node;
 
             if (dns->dnsn_Address != NULL)
-                tool_copy_string(out[count++], 16, dns->dnsn_Address);
+                tool_copy_string(out[count++], AMI_CFG_IP6_STRLEN,
+                                 dns->dnsn_Address);
 
             node = node->mln_Succ;
         }

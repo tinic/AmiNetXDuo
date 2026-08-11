@@ -682,10 +682,11 @@ static VOID show_routes(const AmiConfig *cfg, BOOL have_live)
 
 static VOID show_resolver(const AmiResolverConfig *r, BOOL from_files)
 {
-    char  addr[16];
+    char  addr[AMI_CFG_IP6_STRLEN];
+    UWORD shown = 0;
     UWORD i;
 
-    if (r->nameserver_count == 0)
+    if (r->nameserver_count == 0 && r->nameserver6_count == 0)
     {
         tool_printf("\nName servers:   none configured\n");
     }
@@ -695,8 +696,19 @@ static VOID show_resolver(const AmiResolverConfig *r, BOOL from_files)
         {
             ami_config_format_ip(r->nameserver[i], addr, sizeof(addr));
             tool_printf("%s%s\n",
-                        (LONG)(i == 0 ? "\nName servers:   " :
-                                          "                "),
+                        (LONG)(shown++ == 0 ? "\nName servers:   " :
+                                              "                "),
+                        (LONG)addr);
+        }
+
+        /* A router advertisement's, RFC 8106.  Nothing on disk can name one:
+           name_resolution's NAMESERVER line takes a dotted quad. */
+        for (i = 0; i < r->nameserver6_count; i++)
+        {
+            ami_config_format_ip6(r->nameserver6[i], addr, sizeof(addr));
+            tool_printf("%s%s\n",
+                        (LONG)(shown++ == 0 ? "\nName servers:   " :
+                                              "                "),
                         (LONG)addr);
         }
     }
@@ -718,16 +730,21 @@ static VOID show_resolver(const AmiResolverConfig *r, BOOL from_files)
  * its domain nor its search list, and the one question this report exists to
  * answer -- why does `ssh shortname` not resolve -- could not be asked of it.
  *
- * From the file, and it says so, because the file is all a tool can read: a
- * lease's option 15 and option 119 join the list inside the stack and there
- * is no call that hands them back. Adding one is a NETSTATUS query and an
- * AMI_NETSTATUS_VERSION bump, and this line is worth having before that.
+ * The domain comes from the running stack when there is one, through
+ * GetDefaultDomainName(): a lease's option 15 and a router advertisement's RFC
+ * 8106 5.2 list both name one, neither is on disk, and on an IPv6-only link the
+ * advertisement is the only source there is. The search list below it is still
+ * the file's, and says so; handing that back needs a NETSTATUS query and an
+ * AMI_NETSTATUS_VERSION bump.
  */
 static VOID show_search(const AmiResolverConfig *r)
 {
+    char  live[AMI_CFG_DOMAIN_LEN];
     UWORD i;
 
-    if (r->domain[0] != '\0')
+    if (tool_stack_domain(live, sizeof(live)) && live[0] != '\0')
+        tool_printf("Domain:         %s\n", (LONG)live);
+    else if (r->domain[0] != '\0')
         tool_printf("Domain:         %s (DEVS:Internet)\n", (LONG)r->domain);
 
     for (i = 0; i < r->search_count; i++)
@@ -763,9 +780,9 @@ static BOOL show_dns(const AmiConfig *cfg, BOOL elsewhere, BOOL from_disk)
      * configured to use.
      */
     {
-        char  live_ns[AMI_CFG_MAX_NAMESERVERS][16];
+        char  live_ns[TOOL_NAME_SERVERS_MAX][AMI_CFG_IP6_STRLEN];
         ULONG live_count =
-            tool_stack_name_servers(live_ns, (ULONG)AMI_CFG_MAX_NAMESERVERS);
+            tool_stack_name_servers(live_ns, (ULONG)TOOL_NAME_SERVERS_MAX);
 
         if (live_count > 0)
         {

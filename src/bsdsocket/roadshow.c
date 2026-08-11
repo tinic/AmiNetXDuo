@@ -100,7 +100,7 @@ BOOL bsd_GetDefaultDomainName(register STRPTR buffer   __asm("a0"),
                               register LONG buffer_size __asm("d0"),
                               register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    const AmiConfig *cfg = netstack_config();
+    const AmiConfig *cfg;
 
     (VOID)SocketBase;
 
@@ -108,6 +108,15 @@ BOOL bsd_GetDefaultDomainName(register STRPTR buffer   __asm("a0"),
         return FALSE;
 
     buffer[0] = '\0';
+
+#ifdef AMINETXDUO_IPV6
+    /* An advertisement's search list names the default domain when nothing
+       else did, and it reaches the configuration only when a caller task
+       absorbs it. */
+    netstack_dns_absorb_ra();
+#endif
+
+    cfg = netstack_config();
 
     if (cfg == NULL || cfg->resolver.domain[0] == '\0')
         return FALSE;
@@ -124,7 +133,7 @@ BOOL bsd_GetDefaultDomainName(register STRPTR buffer   __asm("a0"),
 /* ------------------------------------------------------- name servers --- */
 
 /*
- * One allocation holds the List, the nodes and the dotted-quad strings, so
+ * One allocation holds the List, the nodes and the address strings, so
  * ReleaseDomainNameServerList() is a single FreeVec of the block the list
  * header sits at the top of.
  *
@@ -133,20 +142,39 @@ BOOL bsd_GetDefaultDomainName(register STRPTR buffer   __asm("a0"),
  * for AddTail/traversal, lh_Head and mlh_Head are at the same offset, so
  * the list header is a struct List and the nodes are MinNodes, which is the
  * only reading that satisfies both halves of the published interface.
+ *
+ * Twice the slots and IPv6-wide strings: dnsn_Address is a STRPTR and Roadshow
+ * never had a server this call could not spell, but this stack can be handed
+ * one in a router advertisement, and a resolver reporting only half the
+ * servers it queries is what the report exists to prevent. A caller written
+ * for Roadshow passes the text to inet_addr() and gets INADDR_NONE for an IPv6
+ * entry, which is the same answer it gets for any address it cannot use; there
+ * is no dotted quad to give it instead.
  */
 typedef struct BsdDnsList
 {
     struct List                 bdl_List;
-    struct DomainNameServerNode bdl_Node[AMI_CFG_MAX_NAMESERVERS];
-    char                        bdl_Text[AMI_CFG_MAX_NAMESERVERS][16];
+    struct DomainNameServerNode bdl_Node[2 * AMI_CFG_MAX_NAMESERVERS];
+    char                        bdl_Text[2 * AMI_CFG_MAX_NAMESERVERS]
+                                        [AMI_CFG_IP6_STRLEN];
 } BsdDnsList;
 
 struct List *bsd_ObtainDomainNameServerList(
     register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    const AmiConfig *cfg = netstack_config();
+    const AmiConfig *cfg;
     BsdDnsList      *out;
+    UWORD            count = 0;
     UWORD            i;
+
+#ifdef AMINETXDUO_IPV6
+    /* Before the configuration is read: a router advertisement's servers are
+       recorded on the IP thread and only reach the configuration when a caller
+       task absorbs them, and this is one. */
+    netstack_dns_absorb_ra();
+#endif
+
+    cfg = netstack_config();
 
     if (cfg == NULL)
     {
@@ -170,13 +198,13 @@ struct List *bsd_ObtainDomainNameServerList(
     for (i = 0; i < cfg->resolver.nameserver_count &&
                 i < (UWORD)AMI_CFG_MAX_NAMESERVERS; i++)
     {
-        struct DomainNameServerNode *node = &out->bdl_Node[i];
+        struct DomainNameServerNode *node = &out->bdl_Node[count];
 
-        ami_config_format_ip(cfg->resolver.nameserver[i], out->bdl_Text[i],
-                             sizeof(out->bdl_Text[i]));
+        ami_config_format_ip(cfg->resolver.nameserver[i], out->bdl_Text[count],
+                             sizeof(out->bdl_Text[count]));
 
         node->dnsn_Size    = (LONG)sizeof(*node);
-        node->dnsn_Address = (STRPTR)out->bdl_Text[i];
+        node->dnsn_Address = (STRPTR)out->bdl_Text[count];
 
         /*
          * "How many times this server address has been added to the list so
@@ -192,6 +220,30 @@ struct List *bsd_ObtainDomainNameServerList(
                                   : -1;
 
         AddTail((struct List *)&out->bdl_List, (struct Node *)&node->dnsn_MinNode);
+        count++;
+    }
+
+    /* After the IPv4 ones, in the order the resolver tries them: NetX Duo's
+       DNS client asks its servers in the order they were added, and the file's
+       and the lease's are added before an advertisement can arrive. */
+    for (i = 0; i < cfg->resolver.nameserver6_count &&
+                i < (UWORD)AMI_CFG_MAX_NAMESERVERS; i++)
+    {
+        struct DomainNameServerNode *node = &out->bdl_Node[count];
+
+        ami_config_format_ip6(cfg->resolver.nameserver6[i],
+                              out->bdl_Text[count],
+                              sizeof(out->bdl_Text[count]));
+
+        node->dnsn_Size    = (LONG)sizeof(*node);
+        node->dnsn_Address = (STRPTR)out->bdl_Text[count];
+
+        /* Positive: nothing writes this list but a router advertisement, and
+           the file the negative sign means cannot hold an IPv6 address. */
+        node->dnsn_UseCount = 1;
+
+        AddTail((struct List *)&out->bdl_List, (struct Node *)&node->dnsn_MinNode);
+        count++;
     }
 
     return &out->bdl_List;

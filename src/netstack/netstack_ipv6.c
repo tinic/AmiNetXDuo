@@ -89,6 +89,7 @@ LONG ami_netstack_ipv6_enable(AmiNetStack *ns)
      * from the IP thread's own advertisement processing.
      */
     ns->ns_Ip.nx_ipv6_rdnss_notify = ami_ns6_rdnss;
+    ns->ns_Ip.nx_ipv6_dnssl_notify = ami_ns6_dnssl;
 
     /* Every address this stack ever configures is reported through here, which
        is what lets bring-up hand its addresses over and return. */

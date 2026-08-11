@@ -490,6 +490,23 @@ UINT netstack_ipv6_route_add(const ULONG dest[4], ULONG prefix_len,
 UINT netstack_ipv6_route_delete(const ULONG dest[4], ULONG prefix_len,
                                 const ULONG next_hop[4]);
 
+/*
+ * Take whatever a router advertisement's RFC 8106 options recorded and put it
+ * into the DNS client and the reported configuration now, rather than on the
+ * next lookup.
+ *
+ * The advertisement arrives on the IP thread, which may not call the DNS
+ * client -- that client holds its mutex across a query and the query is
+ * waiting on the IP thread -- so the callbacks only record. Every lookup
+ * absorbs on the way in; a call that only READS the resolver has to ask, or a
+ * machine that has not resolved anything yet reports no name server beside a
+ * lookup that would have worked.
+ *
+ * Must be called from a caller task, never from the IP thread. Cheap and safe
+ * when there is nothing pending, which is the ordinary case.
+ */
+VOID netstack_dns_absorb_ra(VOID);
+
 #endif /* AMINETXDUO_IPV6 */
 
 /*
