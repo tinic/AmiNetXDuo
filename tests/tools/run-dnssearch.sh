@@ -223,8 +223,11 @@ if [ -n "$REPORT" ]; then
         fail "the short name '$SHORT' did not resolve: the list was not walked past $DEAD"
     fi
 
-    if grep -q "^Search: *$DEAD" "$REPORT" && grep -q "$DOMAIN" "$REPORT"; then
-        pass "ShowNetStatus reports the list it is going to use"
+    # A running machine used to report its name servers and stop, so the one
+    # question this report exists to answer could not be asked of it.
+    if grep -q "^Search: *$DEAD" "$REPORT" &&
+       grep -q "^ *$DOMAIN\$" "$REPORT"; then
+        pass "ShowNetStatus on a RUNNING machine reports both search domains"
     else
         fail "ShowNetStatus did not report the search list"
     fi

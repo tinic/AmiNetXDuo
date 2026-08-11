@@ -703,18 +703,6 @@ static VOID show_resolver(const AmiResolverConfig *r, BOOL from_files)
         }
     }
 
-    if (r->domain[0] != '\0')
-        tool_printf("Domain:         %s\n", (LONG)r->domain);
-
-    for (i = 0; i < r->search_count; i++)
-    {
-        tool_printf("%s%s%s\n",
-                    (LONG)(i == 0 ? "Search:         " :
-                                     "                "),
-                    (LONG)r->search[i],
-                    (LONG)(i >= r->search_static ? " (DHCP)" : ""));
-    }
-
     /*
      * Say where the list came from: a DHCP lease supplies name servers that
      * replace the file's, so a list read off disk can name a server the
@@ -723,6 +711,34 @@ static VOID show_resolver(const AmiResolverConfig *r, BOOL from_files)
     if (from_files && r->nameserver_count > 0)
         tool_printf("                (from DEVS:Internet; a DHCP interface is\n"
                     "                given its own, which replace these)\n");
+}
+
+/*
+ * What a name with no dot in it will be looked up under, which used to be
+ * printed only when the stack was NOT running: the live branch below returns
+ * as soon as it has the name servers, so a working machine reported neither
+ * its domain nor its search list, and the one question this report exists to
+ * answer -- why does `ssh shortname` not resolve -- could not be asked of it.
+ *
+ * From the file, and it says so, because the file is all a tool can read: a
+ * lease's option 15 and option 119 join the list inside the stack and there
+ * is no call that hands them back. Adding one is a NETSTATUS query and an
+ * AMI_NETSTATUS_VERSION bump, and this line is worth having before that.
+ */
+static VOID show_search(const AmiResolverConfig *r)
+{
+    UWORD i;
+
+    if (r->domain[0] != '\0')
+        tool_printf("Domain:         %s (DEVS:Internet)\n", (LONG)r->domain);
+
+    for (i = 0; i < r->search_count; i++)
+    {
+        tool_printf("%s%s\n",
+                    (LONG)(i == 0 ? "Search:         " :
+                                     "                "),
+                    (LONG)r->search[i]);
+    }
 }
 
 /*
@@ -762,11 +778,15 @@ static BOOL show_dns(const AmiConfig *cfg, BOOL elsewhere, BOOL from_disk)
                             (LONG)(n == 0 ? "\nName servers:   "
                                           : "                "),
                             (LONG)live_ns[n]);
+
+            show_search(&cfg->resolver);
+
             return TRUE;
         }
     }
 
     show_resolver(&cfg->resolver, from_disk);
+    show_search(&cfg->resolver);
 
     return (BOOL)(cfg->resolver.nameserver_count > 0);
 }

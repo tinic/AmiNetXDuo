@@ -674,7 +674,7 @@ LONG netstack_resolve_until(const char *name, ULONG *addr_out,
         return err;
 
     count = ami_config_search_list(&ns->ns_Config.resolver, suffix,
-                                  (UWORD)AMI_CFG_SEARCH_LIST_MAX);
+                                   (UWORD)AMI_CFG_SEARCH_LIST_MAX);
 
     for (i = 0; i < count; i++)
     {
@@ -899,7 +899,7 @@ LONG netstack_resolve6_until(const char *name, ULONG addr_out[4],
         return err;
 
     count = ami_config_search_list(&ns->ns_Config.resolver, suffix,
-                                  (UWORD)AMI_CFG_SEARCH_LIST_MAX);
+                                   (UWORD)AMI_CFG_SEARCH_LIST_MAX);
 
     for (i = 0; i < count; i++)
     {
