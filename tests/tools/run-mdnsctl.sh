@@ -76,13 +76,13 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
 MODEL=A1200
-# THE GOOD CASE IS 48 SECONDS, measured on playhouse3 (Amiberry 68020 A1200 on
-# SLIRP): boot, seventeen commands and thirteen seconds of deliberate waiting
-# for probing.  The ceiling is twice it, the same arithmetic
+# THE GOOD CASE IS 28 SECONDS, measured on playhouse3 (Amiberry 68020 A1200 on
+# SLIRP): boot, nineteen commands and thirteen seconds of deliberate waiting for
+# probing.  The ceiling is a little over twice it, the same arithmetic
 # tests/tools/run-ifconfigure.sh uses, because an emulator that costs more than
 # double what it has been seen to cost is hung.  The run prints what it really
 # took, so the number stays checkable.
-TIMEOUT=96
+TIMEOUT=60
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 
 while getopts "m:t:b:" opt; do
@@ -393,6 +393,22 @@ else
         else
             note "no TTL-zero record reached the host LAN; the goodbye is sent
        250 ms after MDNS=NO and the relay may simply not have carried it"
+        fi
+
+        # The off/on pair must not have registered the one declared service a
+        # second time.  nx_mdns_disable() suspends the local records rather
+        # than deleting them and nx_mdns_enable() re-announces what it finds,
+        # so a second nx_mdns_service_add() would put two SRVs for the same
+        # instance in one announcement.  Read off the wire, because the count
+        # in the cache is not something the guest reports.
+        DUPE=$(grep -c "SRV=$LABEL\._http\._tcp\.local.*SRV=$LABEL\._http\._tcp\.local" \
+               "$WATCHLOG" || true)
+        if [ "$DUPE" -eq 0 ]; then
+            pass "and never two SRVs for one service: an off/on pair does not
+      register what service_discovery declared a second time"
+        else
+            fail "$DUPE announcement(s) carry the same SRV twice; the off/on
+       pair registered the service again"
         fi
     fi
 fi
