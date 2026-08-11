@@ -253,6 +253,23 @@ else
     echo "==> no vim at $VIM: the console has no full-screen editor to try" >&2
 fi
 
+# LhA 2.15, from the asset store.  Workbench 3.1 does not ship one, and
+# "lha x" of something fetched over WebDAV is what this machine is mostly
+# for.  The package carries a build per CPU the same way we do; lha_68020
+# traps on a 68000, so the model picks.
+LHADIR="${AMINETXDUO_DEMO_LHA:-$HOME/amiga-assets/apps/lha-2.15}"
+case "$MODEL" in
+    A4000*) LHABIN=lha_68040 ;;
+    A500*|A600*|A1000*|A2000*) LHABIN=lha_68k ;;
+    *) LHABIN=lha_68020 ;;
+esac
+if [ -f "$LHADIR/$LHABIN" ]; then
+    cp -f "$LHADIR/$LHABIN" "$STAGE/c/lha"
+    echo "==> lha staged, $LHABIN for $MODEL"
+else
+    echo "==> no lha at $LHADIR/$LHABIN: nothing on the drive unpacks archives" >&2
+fi
+
 echo "==> C: has $(ls "$STAGE/c" | wc -l | tr -d ' ') commands in it"
 
 echo "Hello from an Amiga." > "$STAGE/Public/readme.txt"
