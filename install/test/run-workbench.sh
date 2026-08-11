@@ -693,10 +693,22 @@ EOF
 # The stock 3.1 Startup-Sequence, with the tail replaced.  LoadWB stays --
 # the Installer draws on the Workbench screen and a user has one, and only
 # `EndCLI`, which would take the boot shell away before our line runs, goes.
+#
+# $2 = "nouserstartup" also drops `Execute S:User-Startup`, which is what a
+# boot into the Installer has to be once the machine has already been
+# installed once.  A running stack holds LIBS:bsdsocket.library open and the
+# copy then fails -- the script says so itself, in @special-msg: "the network
+# is already running.  Reboot and run this installer again before doing
+# anything else."  This is that reboot.
 STARTUP_SUM=""
 startup_with() {
-    local tail_cmds="$1"
-    sed -e '/^EndCLI/d' "$WB/S/Startup-Sequence" > "$HD/S/Startup-Sequence"
+    local tail_cmds="$1" mode="${2:-}"
+    if [ "$mode" = "nouserstartup" ]; then
+        sed -e '/^EndCLI/d' -e '/Execute S:User-Startup/d' \
+            "$WB/S/Startup-Sequence" > "$HD/S/Startup-Sequence"
+    else
+        sed -e '/^EndCLI/d' "$WB/S/Startup-Sequence" > "$HD/S/Startup-Sequence"
+    fi
     printf '\n%s\n' "$tail_cmds" >> "$HD/S/Startup-Sequence"
     chmod 755 "$HD/S/Startup-Sequence"
     STARTUP_SUM=$(shasum "$HD/S/Startup-Sequence" | cut -d' ' -f1)
@@ -1048,7 +1060,7 @@ if [ "$TERMINAL" = "1" ]; then
 
     startup_with 'FailAt 9999
 C:installdrive >DH0:install-console.txt
-Echo >DH0:.done "$RC"'
+Echo >DH0:.done "$RC"' nouserstartup
 
     boot uninstall "$INSTALL_TIMEOUT"
     if [ "$BOOT_STATUS" != "0" ]; then
