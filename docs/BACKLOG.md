@@ -842,6 +842,27 @@ requirement. Measured 2026-08-02 as the third arm: read 1108 KB/s against our
 
 ## Decided against, do not "fix"
 
+### `ftp`, `ftpd`, `telnetd`, `rsh`, an ssh server, 2026-08-11
+
+**No `ftp`, ever — in either direction.** Roadshow ships an `ftp` client and so
+does AmiTCP_NG, and that is not an argument. The user has now said so three
+times, the last after a survey of the two other stacks listed the *client* as
+a gap on exactly the "both references ship one" reasoning this entry exists to
+kill.
+
+| Thing | Why not | What covers it |
+|---|---|---|
+| `ftp` client | Decided against 2026-08-10, restated 2026-08-11 | `fetch` for `http:`/`https:`; WebDAV for the rest |
+| `ftpd` | Obsolete | WebDAV over `httpd` |
+| `telnetd` | Obsolete; modern replacements exist | — (`telnet` the *client* stays) |
+| `rsh` | Obsolete | `ssh` |
+| An ssh server of ours | bebbo's is the path | see the ssh entry |
+
+A comparison against another stack that turns one of these up does not get a
+row, not even "listed for completeness". Same rule as PPP, PPPoE, SLIP and
+anything with a modem in it.
+
+
 ### SANA-II DMA buffer management, scanned 2026-08-07
 
 The receive copy is 18.6% of an A1200 wire transfer, `n68k_copy_sum_longwords`

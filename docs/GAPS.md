@@ -112,6 +112,13 @@ is refused — and "accepted, ignored, silent" is neither.
 
 ## Missing commands
 
+`ftp`, `ftpd`, `telnetd`, `rsh` and an ssh server are **not** in this table
+and are not gaps. They are decided against, in both directions, and "the other
+stacks ship one" is not an argument for any of them: WebDAV over `httpd`
+covers moving files, `telnet` and `ssh` the clients cover the rest, and
+`docs/BACKLOG.md` records the decision. Nor is anything here about PPP, PPPoE,
+SLIP or a modem.
+
 | Command | Theirs | What a user loses |
 |---|---|---|
 | `RoadshowControl` | Roadshow | Reading and setting the tunables above, and `ENV:Roadshow/<group>/<name>` so they survive a reboot. Needs the RoadshowData vectors first |
@@ -119,8 +126,6 @@ is refused — and "accepted, ignored, silent" is neither.
 | `SampleNetSpeed` | Roadshow | A window showing throughput per interface |
 | `NetLogViewer` | Roadshow | A commodity that catches what the stack and its clients log |
 | `ipf` `ipfstat` `ipnat` `ipmon` | Roadshow | Packet filtering and NAT |
-| `ftp` | Roadshow, AmiTCP_NG | An FTP **client**. Both references ship one and we have none; `fetch` does `http:`/`https:` only |
-| `rsh` | Roadshow | Obsolete, listed for completeness |
 | `CheckRoadshowConfig` | Roadshow | We have `CheckNetConfig`, which is the same idea under our name |
 | `wget`, `tcpdump` | Roadshow | We have `fetch` and `NetTrace` |
 
