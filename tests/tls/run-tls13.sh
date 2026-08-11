@@ -3,7 +3,25 @@
 # Does the client actually complete a TLS 1.3 handshake?
 #
 #   tests/tls/run-tls13.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
-#                          [-P BASE_PORT]
+#                          [-P BASE_PORT] [-B IFACE] [-H user@host]
+#
+# The guest is bridged onto a host NIC and the server runs on a THIRD machine.
+# Both are required, and the reason is the whole history of this test.  Served
+# from this machine over the emulator's SLIRP, this test failed the way a
+# broken client fails: the flight after ServerHello decrypted, its four
+# messages were all recognised, and then the socket was CLOSED from Certificate
+# onward with no server segment to account for it, intermittently, and only
+# with certificate verification on.  Bridged against a peer on another machine,
+# the same binaries complete the handshake against both leaves, on both CPU
+# arms, run after run.  Whatever closed that socket was between the guest and
+# this host's loopback, and SLIRP is a TCP implementation inside the emulator,
+# so a close it originates is invisible to any capture taken here, which is
+# what "closed locally" meant.
+#
+# A third machine and not this one: Amiberry's bridge injects with libpcap, so
+# a frame the guest addresses to its own host leaves on the wire and the switch
+# does not hand it back to the port it came from.  The server is unreachable
+# and nothing is logged at all.
 #
 # tls_handshake.c cannot answer this any more.  A 1.3 server has to sign
 # CertificateVerify with RSA-PSS and nx_crypto has _nx_crypto_rsa_pss_verify
@@ -38,8 +56,10 @@ TIMEOUT=600
 CPU=""
 CLOCK=""
 BASE_PORT=7300
+BRIDGE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
+PEER_HOST="${AMINETXDUO_TLS13_PEER:-}"
 
-while getopts "m:t:c:b:P:k:" opt; do
+while getopts "m:t:c:b:P:k:B:H:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
@@ -47,10 +67,32 @@ while getopts "m:t:c:b:P:k:" opt; do
         k) CLOCK="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
         P) BASE_PORT="$OPTARG" ;;
+        B) BRIDGE="$OPTARG" ;;
+        H) PEER_HOST="$OPTARG" ;;
         *) sed -n '3,10p' "$0" >&2; exit 2 ;;
     esac
 done
 case "$BUILD" in /*) ;; *) BUILD="$ROOT/$BUILD" ;; esac
+
+[ -n "$PEER_HOST" ] || {
+    echo "no peer: -H <user@host>, or AMINETXDUO_TLS13_PEER." >&2
+    echo "This test does not run over SLIRP; see the header for what that" >&2
+    echo "arrangement measured instead of the client." >&2
+    exit 2; }
+[ -n "$BRIDGE" ] || { echo "-B <iface> names the NIC to bridge onto" >&2; exit 2; }
+
+export AMINETXDUO_EMU_BACKEND="$BRIDGE"
+
+# Ask the peer for its own address rather than resolving the name here: the
+# machine ssh landed on cannot be wrong about its own interfaces, and a stale
+# answer points the guest at something that is not serving, which reads as a
+# handshake failure.
+SERVER_ADDR=$(ssh "$PEER_HOST" \
+    "ip -4 -o addr show scope global 2>/dev/null | awk '{print \$4}'" \
+    2>/dev/null | cut -d/ -f1 | head -1)
+[ -n "$SERVER_ADDR" ] || {
+    echo "$PEER_HOST reported no global IPv4 address of its own" >&2; exit 2; }
+BIND=0.0.0.0
 
 SMOKE="$BUILD/src/tools/ToolsSmoke"
 FETCH="$BUILD/src/tools/fetch"
@@ -108,10 +150,14 @@ if [ "${AMINETXDUO_PROFILE:-0}" = "1" ]; then
 fi
 
 # fetch has no --resolve, so the names the certificates carry are pointed at
-# SLIRP's host address the way an Amiga has always done it.
+# the server's address the way an Amiga has always done it.  Rewritten rather
+# than appended to: tests/netstack/devs carries its own rsa2.test line and the
+# resolver takes the first match, so an appended one never wins.
+grep -v -e ' rsa2\.test$' -e ' ec2\.test$' \
+    "$ROOT/tests/netstack/devs/Internet/hosts" > "$STAGE/devs/Internet/hosts"
 cat >> "$STAGE/devs/Internet/hosts" <<EOF
-10.0.2.2 rsa2.test
-10.0.2.2 ec2.test
+$SERVER_ADDR rsa2.test
+$SERVER_ADDR ec2.test
 EOF
 
 RSA_PORT=$((BASE_PORT + 1))
@@ -128,22 +174,38 @@ EOF
 PEERLOG="$ROOT/build/tls13-peer.log"
 rm -f "$PEERLOG"
 
-AMINETXDUO_PEER_TLS13=1 \
-python3 "$ROOT/tests/peer/httppeer.py" --base-port "$BASE_PORT" --pki "$PKI" \
-    --advertise 10.0.2.2 --log "$PEERLOG" --seconds 7200 \
-    > "$ROOT/build/tls13-peer.out" 2>&1 &
+# httppeer.py finds netpeer.py at ../tools relative to itself, so the two
+# directories keep their shape on the far side.  The remote log comes back over
+# the ssh channel: one file to grep, wherever the server ran.
+RDIR="/tmp/tls13-peer-$BASE_PORT"
+ssh "$PEER_HOST" "rm -rf $RDIR && mkdir -p $RDIR" >/dev/null
+rsync -a "$ROOT/tests/peer" "$ROOT/tests/tools" "$PKI" \
+      "$PEER_HOST:$RDIR/" >/dev/null
+ssh -n "$PEER_HOST" \
+    "cd $RDIR && AMINETXDUO_PEER_TLS13=1 exec python3 peer/httppeer.py \
+         --base-port $BASE_PORT --pki $RDIR/$(basename "$PKI") \
+         --bind $BIND --advertise $SERVER_ADDR --seconds $((TIMEOUT + 120))" \
+    > "$PEERLOG" 2>&1 &
 PEER_PID=$!
+cleanup_peer() {
+    kill -TERM "$PEER_PID" 2>/dev/null || true
+    ssh -n "$PEER_HOST" "pkill -f 'httppeer.py --base-port $BASE_PORT'" \
+        >/dev/null 2>&1 || true
+}
 
-cleanup_peer() { kill -TERM "$PEER_PID" 2>/dev/null || true; }
 trap cleanup_peer EXIT INT TERM HUP
 
-sleep 1
+sleep 3
 kill -0 "$PEER_PID" 2>/dev/null || {
-    echo "httppeer.py did not start:" >&2
-    cat "$ROOT/build/tls13-peer.out" >&2
+    echo "the peer did not start:" >&2
+    cat "$PEERLOG" 2>/dev/null >&2
     exit 2
 }
-echo "==> httppeer.py, TLS 1.3 ceiling: rsa2.test on $RSA_PORT, ec2.test on $EC_PORT"
+grep -q "listeners" "$PEERLOG" 2>/dev/null || {
+    echo "the peer has not opened its listeners:" >&2
+    cat "$PEERLOG" 2>/dev/null >&2; exit 2; }
+echo "==> httppeer.py on $PEER_HOST ($SERVER_ADDR), TLS 1.3 ceiling:" \
+     "rsa2.test on $RSA_PORT, ec2.test on $EC_PORT"
 
 # ---------------------------------------------------------------- run ---
 
