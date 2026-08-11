@@ -440,6 +440,31 @@ static ULONG ami_ns_pool_packets(VOID)
     return packets;
 }
 
+/* --------------------------------------------------------------- heartbeat */
+
+/*
+ * One expiration a second, for housekeeping nobody asks for.
+ *
+ * It exists because bsdsocket.library needs to notice that a task has exited,
+ * and AmigaOS never says so: the only way to know is to look, and the one
+ * place that must not look is the per-packet path.  A second here is the
+ * cheapest clock the stack already has, so the answer is computed off the
+ * packet path and both of the library's Signal() sites keep the NULL test
+ * they already had.
+ *
+ * TX_TIMER_PROCESS_IN_ISR is defined for this port, so this runs on the tick
+ * task inside a Forbid() and counts as interrupt level to both ThreadX and
+ * NetX Duo.  Nothing here may block or call NetX; the contract is spelled out
+ * over ami_set_second_hook() in include/aminetxduo/compat.h, and the whole
+ * body is the notify precisely so that this file cannot quietly grow work
+ * that breaks it.
+ */
+static VOID ami_ns_second_expired(ULONG id)
+{
+    (VOID)id;
+    ami_second_notify();
+}
+
 /* ---------------------------------------------------------------- teardown */
 
 static VOID ami_ns_destroy(AmiNetStack *ns)
@@ -481,6 +506,19 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
 #endif
 
     ami_netstack_dns_stop(ns);
+
+    /*
+     * The heartbeat first: it reaches into bsdsocket.library's child-base
+     * list, and everything below here is the stack coming apart underneath
+     * it.  Deactivate before delete, so an expiration already on the tick
+     * task's wheel cannot be dispatched into a deleted timer.
+     */
+    if (ns->ns_SecondCreated)
+    {
+        ns->ns_SecondCreated = FALSE;
+        (VOID)tx_timer_deactivate(&ns->ns_Second);
+        (VOID)tx_timer_delete(&ns->ns_Second);
+    }
 
     /*
      * Stop the callback posting before the semaphore goes away.
@@ -1808,6 +1846,24 @@ static LONG ami_ns_bring_up(VOID)
     AMI_INFO("netstack: starting mDNS");
     (VOID)ami_netstack_mdns_start(ns);
 #endif
+
+    /*
+     * The heartbeat, last thing inside the bracket: ThreadX exists from step
+     * 4 and the timer must be created before the caller stops being a TX
+     * thread.  Not fatal if it cannot be made -- the stack works without a
+     * heartbeat, it just stops noticing tasks that exited without closing the
+     * library -- but say so, because that is not a state anybody would guess
+     * from the outside.
+     */
+    if (tx_timer_create(&ns->ns_Second, (CHAR *)"anxd second",
+                        ami_ns_second_expired, 0UL,
+                        (ULONG)NX_IP_PERIODIC_RATE,
+                        (ULONG)NX_IP_PERIODIC_RATE,
+                        TX_AUTO_ACTIVATE) == TX_SUCCESS)
+        ns->ns_SecondCreated = TRUE;
+    else
+        AMI_WARN("netstack: no one-second heartbeat; a task that exits "
+                 "without closing bsdsocket.library will not be noticed");
 
     ami_netstack_leave(&caller);
 

@@ -248,3 +248,18 @@ if(AMIGA_NDK_INCLUDE)
 endif()
 target_compile_options(test_resolvebreak PRIVATE -Wall -Wextra)
 set_target_properties(test_resolvebreak PROPERTIES OUTPUT_NAME "ResolveBreak")
+
+# EvPost asks whether a socket event can Signal() a Task that has exited.  It
+# spawns a child that opens the library, binds a socket and dies without
+# closing either, then AllocAbs()es the freed Task so the block it reads is one
+# it owns, and sends a datagram.  A second child does the same correctly and
+# stays alive: it is what tells a latched pointer apart from a stimulus that
+# never arrived.  Published LVOs only, so the same binary measures a build with
+# the fix and one without.
+add_executable(test_evpost evpost.c)
+target_include_directories(test_evpost PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_evpost PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_evpost PRIVATE -Wall -Wextra)
+set_target_properties(test_evpost PROPERTIES OUTPUT_NAME "EvPost")

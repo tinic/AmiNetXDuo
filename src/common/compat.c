@@ -420,6 +420,26 @@ VOID ami_address_change_notify(VOID)
         hook();
 }
 
+/* Same arrangement again, for the one-second heartbeat: see compat.h for the
+   interrupt-level contract this one carries and the address-change hook does
+   not. */
+static VOID (*ami_second_hook)(VOID);
+
+VOID ami_set_second_hook(VOID (*hook)(VOID))
+{
+    ami_second_hook = hook;
+}
+
+VOID ami_second_notify(VOID)
+{
+    VOID (*hook)(VOID) = ami_second_hook;
+
+    /* Read once, for the reason given above ami_address_change_notify(): the
+       library can deregister from another task while the tick is here. */
+    if (hook != NULL)
+        hook();
+}
+
 static LONG ami_sana2_open_once(const char *name, ULONG unit,
                                 struct IORequest *req)
 {

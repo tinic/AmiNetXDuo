@@ -327,6 +327,97 @@ static VOID bsd_signal_if_alive(struct Task *task, ULONG mask)
     }
 }
 
+/*
+ * Once a second, forget the tasks that are gone.
+ *
+ * bsd_event_post() (select.c) ends in Signal(base->sb_Task, signals) and runs
+ * from NetX Duo's receive, transmit and out-of-band callbacks, which is to say
+ * on every packet.  It has the same exposure bsd_address_changed() had, and
+ * more of it: sb_EventSigMask is allocated before the base joins this list and
+ * is never cleared, so its `signals != 0` test is always true and EVERY event
+ * on ANY socket of an orphaned base performs that write.  The client does not
+ * have to have asked for a single signal mask.
+ *
+ * The liveness scan bsd_signal_if_alive() makes cannot go there.  An address
+ * change happens when a lease arrives; a packet happens hundreds of times a
+ * second, and a walk of Exec's task lists with interrupts off is not something
+ * to do on the receive path.  So the answer is computed here instead, on the
+ * netstack's one-second heartbeat, and the two call sites keep the cheap NULL
+ * test they already have.  One latch covers both.
+ *
+ * THIS MAY LATCH THE POINTER AND MUST DO NOTHING ELSE.  In particular it must
+ * not destroy the base: bsd_child_destroy() is only correct on the owning
+ * task.  bsd_nx_release() copes with a foreign caller, ami_signal_free() does
+ * not -- it would hand the bit back out of the CALLING task's tc_SigAlloc,
+ * which on this sweeper is the ThreadX tick task.  So the base stays exactly
+ * where it is, leaked, holding its stack reference and its open count.  What
+ * changes is that nothing writes through the dead pointer any more.
+ *
+ * A FALSE NEGATIVE HERE IS WORSE THAN THE DEFECT.  Clearing sb_Task on a task
+ * that is alive kills that client's wakeups for the rest of the session, and
+ * it would look like the network hanging.  bsd_task_alive() answers from
+ * ThisTask plus the two scheduler lists, and that is the whole set for a live
+ * task on this system: every blocking point in the ThreadX port is an Exec
+ * Wait(), including a caller suspended inside NetX Duo
+ * (port/threadx-amiga/src/tx_thread_system_return.c) and including the "park
+ * forever" cases, and Wait() leaves the task on TaskWait.  The port never
+ * touches TaskReady or TaskWait itself.  The two states that really are off
+ * all three lists are a task between allocation and AddTask(), which nobody
+ * can yet hold a pointer to, and a task after RemTask(), which is the thing
+ * being looked for.
+ *
+ * What it does NOT close is the second between an exit and the next
+ * heartbeat.  A packet arriving in that window still signals the freed block.
+ * The window was the whole session; it is now bounded by the period above.
+ *
+ * Runs on the ThreadX tick task inside a Forbid(), so AttemptSemaphore and
+ * never ObtainSemaphore, and nothing that can block.  AMI_WARN is RawPutChar.
+ */
+static ULONG bsd_latched_tasks;
+
+static VOID bsd_task_sweep(VOID)
+{
+    struct AmiSocketBase *master = bsd_master_base;
+    struct MinNode       *node;
+
+    if (master == NULL)
+        return;
+
+    /*
+     * ATTEMPT, NEVER OBTAIN, for the reason given at the top of this file and
+     * one more: this runs at interrupt level and ObtainSemaphore() would
+     * block the tick task.  A second missed costs nothing -- the next
+     * heartbeat sweeps the same list.
+     */
+    if (!AttemptSemaphore(&master->sb_Lock))
+        return;
+
+    for (node = master->sb_Children.mlh_Head;
+         node->mln_Succ != NULL;
+         node = node->mln_Succ)
+    {
+        struct AmiSocketBase *child =
+            (struct AmiSocketBase *)((UBYTE *)node -
+                                     offsetof(struct AmiSocketBase, sb_Node));
+
+        if (child->sb_Task == NULL || bsd_task_alive(child->sb_Task))
+            continue;
+
+        /* Once per base, not once per second: the latch below is what stops
+           it repeating, and a program that does this does it for the rest of
+           the session. */
+        bsd_latched_tasks++;
+        AMI_WARN("bsdsocket: task %lx exited without closing the library; "
+                 "its base will no longer be signalled (%lu so far)",
+                 (unsigned long)child->sb_Task,
+                 (unsigned long)bsd_latched_tasks);
+
+        child->sb_Task = NULL;
+    }
+
+    ReleaseSemaphore(&master->sb_Lock);
+}
+
 static VOID bsd_address_changed(VOID)
 {
     struct AmiSocketBase *master = bsd_master_base;
@@ -384,6 +475,7 @@ static struct AmiSocketBase *bsd_lib_init(
 
     bsd_master_base = base;
     ami_set_address_change_hook(bsd_address_changed);
+    ami_set_second_hook(bsd_task_sweep);
 
     return base;
 }
@@ -1180,6 +1272,7 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
      * unloaded memory the moment an address changes afterwards.
      */
     ami_set_address_change_hook(NULL);
+    ami_set_second_hook(NULL);
     bsd_master_base = NULL;
 
     seglist = base->sb_SegList;
