@@ -209,6 +209,21 @@ if [ -n "$WBLIBS" ] && [ -d "$WBLIBS" ]; then
     chmod -R u+rw "$STAGE/libs"
 fi
 
+# An ssh identity, so the drill can actually LOG IN.
+#
+# Without one the ssh arm can only reach the password prompt and assert that
+# the password is not echoed -- which is worth asserting and is NOT the
+# feature.  A password prompt that does not echo is a program still in its
+# prompt-and-read phase; the interactive session that comes after it is a
+# different path through the console and has to be driven to be tested.
+SSHKEY="${AMINETXDUO_WSCONSOLE_SSHKEY:-}"
+HAVE_SSHKEY=no
+if [ -n "$SSHKEY" ] && [ -f "$SSHKEY" ]; then
+    cp -f "$SSHKEY" "$STAGE/sshkey"
+    chmod u+rw "$STAGE/sshkey"
+    HAVE_SSHKEY=yes
+fi
+
 SSHBIN="${AMINETXDUO_SSH:-}"
 HAVE_SSH=no
 if [ -n "$SSHBIN" ] && [ -f "$SSHBIN" ]; then
@@ -248,7 +263,9 @@ set +e
     -t "$WINDOW" \
     -a "DH0:Public $GUESTPORT TERMINAL=DH0:terminal.html TRACE" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
-    "$STAGE/terminal.html" "$STAGE/c" > "$ROOT/build/wsconsole-emu.log" 2>&1 &
+    "$STAGE/terminal.html" "$STAGE/c" \
+    ${HAVE_SSHKEY:+$([ "$HAVE_SSHKEY" = yes ] && echo "$STAGE/sshkey")} \
+    > "$ROOT/build/wsconsole-emu.log" 2>&1 &
 RUNNER=$!
 set -e
 
@@ -435,6 +452,7 @@ AMINETXDUO_WSCONSOLE_ED="$HAVE_ED" \
 AMINETXDUO_WSCONSOLE_MORE="$HAVE_MORE" \
 AMINETXDUO_WSCONSOLE_SSH="$([ "$SSHD" = ok ] && echo yes || echo no)" \
 AMINETXDUO_WSCONSOLE_SSHD_PORT="$SSHD_PORT" \
+AMINETXDUO_WSCONSOLE_SSHKEY="$HAVE_SSHKEY" \
 AMINETXDUO_WSCONSOLE_HOST="$([ "$BACKEND" = slirp ] && echo 10.0.2.2 || \
     ip -4 -o addr show "$BACKEND" 2>/dev/null | awk '{print $4}' | cut -d/ -f1)" \
 python3 -u "$ROOT/tests/tools/wsterm-console.py" "$TARGET_ADDR" "$TARGET_PORT" \
