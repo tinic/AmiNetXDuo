@@ -97,11 +97,25 @@ SSHD_PORT="${AMINETXDUO_WSCONSOLE_SSHD:-2224}"
 KEEP=no
 BACKEND="${AMINETXDUO_WSCONSOLE_BACKEND:-ens18}"
 
-# This harness's own address and name, distinct from tools/demo.sh's and from
-# every other guest on the wire.  The A2065 keeps only the last three bytes --
-# amiberry-run.sh says so and a2065.cpp is why -- so those are what differ.
-export AMINETXDUO_AMIBERRY_MAC="${AMINETXDUO_AMIBERRY_MAC:-02:41:4d:49:00:c7}"
-HOSTNAME_="${AMINETXDUO_WSCONSOLE_NAME:-anxdcon}"
+# An address and a name of this RUN's own, derived from the tag.
+#
+# tools/demo.sh can have one fixed address because there is one demo.  A test
+# harness cannot: two agents running this script at the same time is the
+# normal case, and a fixed default would give both guests the same address.
+# Two a2065s with one address on one wire is the failure demo.sh already
+# records -- leases fight, ARP caches flap, and the machine that was already
+# up stops answering while httpd goes on binding 0.0.0.0 and reporting itself
+# happily, which reads as stuck rather than as unplugged.
+#
+# So the last byte comes from the run tag.  The A2065 keeps only the last
+# three bytes -- amiberry-run.sh says so and a2065.cpp is why -- so that is
+# the byte that has to differ.  0x01 is every default-configured a2065 and
+# 0x77 is the demo; both are stepped over rather than hashed into.
+_tag="${AMINETXDUO_RUN_TAG:-wsconsole}"
+_byte=$(printf '%s' "$_tag" | cksum | awk '{printf "%d", ($1 % 200) + 16}')
+[ "$_byte" -eq 119 ] && _byte=120          # 0x77, tools/demo.sh
+export AMINETXDUO_AMIBERRY_MAC="${AMINETXDUO_AMIBERRY_MAC:-$(printf '02:41:4d:49:00:%02x' "$_byte")}"
+HOSTNAME_="${AMINETXDUO_WSCONSOLE_NAME:-anxd-$_tag}"
 
 while getopts "t:p:P:b:m:c:S:B:K" opt; do
     case "$opt" in
