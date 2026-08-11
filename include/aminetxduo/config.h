@@ -32,6 +32,9 @@ extern "C" {
 #define AMI_CFG_SEARCH_LIST_MAX     (AMI_CFG_MAX_SEARCH + 1)
 
 #define AMI_CFG_NAME_LEN            64
+/* An Ethernet address, for HARDWAREADDRESS.  Every SANA-II device this runs
+   on is 6 bytes; a driver with a wider one keeps its own. */
+#define AMI_CFG_MAC_SIZE            6
 #define AMI_CFG_PATH_LEN            128
 
 /* The default domain gets its own cap: SetDefaultDomainName()'s autodoc says
@@ -109,6 +112,24 @@ typedef struct AmiIfConfig {
     BOOL        up;                          /* bring online at startup          */
     BOOL        configured;                  /* slot in use                      */
     BOOL        down_goes_offline;           /* IFA_DownGoesOffline; default FALSE */
+
+    /*
+     * REQUIRESINITDELAY. A second between opening the device and the first
+     * packet, for a card that needs it. Roadshow's manual introduces the
+     * option with "the original Ariadne is one such device", and its default
+     * is YES; ours is NO, because a second at every bring-up on every card is
+     * a high price for the one that needs it, and the cards we can test do
+     * not.  A user with such a card can say so.
+     */
+    BOOL        requires_init_delay;
+
+    /*
+     * HARDWAREADDRESS. The address to configure the card with, instead of the
+     * one it came with. Two emulated guests on one bridge ship the same
+     * factory address and collide; so do two of some cards.
+     */
+    BOOL        have_hw_address;
+    UBYTE       hw_address[AMI_CFG_MAC_SIZE];
 
     /*
      * Answer .local queries on this interface.  MDNS=YES in the interface

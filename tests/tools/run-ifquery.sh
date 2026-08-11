@@ -116,6 +116,21 @@ mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
 
+# HARDWAREADDRESS.  Staged unconditionally, because the keyword was on the
+# ignored list for the whole life of the project and nothing here would have
+# noticed: the address S2_CONFIGINTERFACE commits is the one the assertion at
+# the end reads back out of S2_DEVICEQUERY, so a keyword that is dropped and a
+# keyword that is honoured print different lines.
+#
+# Locally administered (bit 1 of the first octet) and not a real vendor
+# prefix, so a run of this cannot collide with hardware on the lab network.
+HWADDR="${AMINETXDUO_IFQUERY_MAC:-02:41:4d:49:71:01}"
+for cfg in "$STAGE"/devs/NetInterfaces/*; do
+    [ -f "$cfg" ] || continue
+    printf 'HARDWAREADDRESS=%s\n' "$HWADDR" >> "$cfg"
+done
+echo "==> staged HARDWAREADDRESS=$HWADDR"
+
 if [ "$STATE_DOWN" = "1" ]; then
     # Roadshow's default is up, so the line has to be added rather than changed.
     for cfg in "$STAGE"/devs/NetInterfaces/*; do
@@ -517,6 +532,24 @@ if grep -q "^add eth0 twice: .*, refused, correctly" "$REPORT"; then
     pass "a second interface of the same name is refused"
 else
     fail "two interfaces were allowed to share a name"
+fi
+
+# HARDWAREADDRESS reached the card.
+#
+# The address IFQ_HardwareAddress reports comes from S2_DEVICEQUERY, which is
+# the card answering, not the configuration being read back -- so this is the
+# assertion that separates a keyword acted on from a keyword parsed and
+# dropped, which is what it was until 2026-08-11.
+#
+# A driver that refuses a configured address is a real possibility and is why
+# the failure below says which of the two happened.
+if grep -qi "^  IFQ_HardwareAddress *$HWADDR " "$REPORT"; then
+    pass "HARDWAREADDRESS=$HWADDR was committed to the card"
+else
+    GOT=$(grep -m1 "^  IFQ_HardwareAddress" "$REPORT" | awk '{print $2}')
+    fail "HARDWAREADDRESS=$HWADDR did not reach the card: it reports ${GOT:-nothing}." \
+         "Either the keyword is being dropped again, or this driver ignores" \
+         "the address S2_CONFIGINTERFACE commits."
 fi
 
 # THE EVIDENCE.  The hardware address is read from the card by S2_DEVICEQUERY

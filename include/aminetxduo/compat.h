@@ -202,6 +202,25 @@ VOID ami_address_change_notify(VOID);
 VOID ami_set_second_hook(VOID (*hook)(VOID));
 VOID ami_second_notify(VOID);
 
+/*
+ * The network is being shut down: tell every program that has the library
+ * open, and give back the reference that keeps the stack standing.
+ *
+ * Registered the same way and for the same reason as the two above -- the
+ * openers and the stack hold belong to bsdsocket.library, and the ARexx port
+ * that has to reach them belongs to the netstack, which is the layer below.
+ *
+ * The hook does NOT wait for anybody. AmiTCP's KILL was one Signal() and a
+ * return, and Roadshow's manual says a shutdown "once given, cannot be
+ * recalled" and "may conclude at a later time"; a grace period would block
+ * the ARexx port for the length of it. The caller polls if it cares.
+ *
+ * Runs on whatever task asked for the shutdown, not on the tick task, so it
+ * may take a semaphore.
+ */
+VOID ami_set_shutdown_hook(VOID (*hook)(VOID));
+VOID ami_shutdown_notify(VOID);
+
 #ifdef __cplusplus
 }
 #endif

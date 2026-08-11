@@ -12,6 +12,12 @@ version at the top when it merges.
 - `NetShutdown` tells every program using the network to stop, the same `SIGBREAKF_CTRL_C` AmiTCP and Roadshow send, waits `TIMEOUT` seconds for them to close the library, and then shuts the stack down and gives its memory back. It used to take the interfaces down and leave `httpd`, `nc` and everything else running against a network that had gone, with the library resident until a reboot
 - `NetShutdown` names the programs that did not let go, and returns `WARN` rather than `OK` when there are any
 - `ShowNetStatus USERS` lists the programs that have the network open and how many sockets each holds
+- The ARexx `KILL` command tells the programs using the network to stop and gives the stack back, the same as `NetShutdown`. It used to take the interfaces down and leave them running against a network that had gone
+- `HARDWAREADDRESS` in `DEVS:NetInterfaces/<name>` sets the card's address, so two machines that shipped with the same one can both be on the network
+- `DOWNGOESOFFLINE` in the interface file is acted on. The setting worked when a program asked for it and was dropped when the file did
+- `REQUIRESINITDELAY=YES` waits a second between opening a card and using it, for a card that needs it. The original Ariadne is the one Roadshow names
+- Every other Roadshow interface-file keyword this stack does not act on is reported by `CheckNetConfig`, one line each, with the reason. They used to be accepted and silently ignored, which reads the same as working
+- `HARDWARETYPE`, `BROADCASTADDRESS` and `DESTINATIONADDRESS` no longer report as unknown keywords in a Roadshow configuration file
 
 ## 0.21.0
 

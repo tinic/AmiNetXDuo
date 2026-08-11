@@ -440,6 +440,23 @@ VOID ami_second_notify(VOID)
         hook();
 }
 
+/* And again for the shutdown request; see compat.h.  This one runs on an
+   ordinary task, so it carries neither of the other two contracts. */
+static VOID (*ami_shutdown_hook)(VOID);
+
+VOID ami_set_shutdown_hook(VOID (*hook)(VOID))
+{
+    ami_shutdown_hook = hook;
+}
+
+VOID ami_shutdown_notify(VOID)
+{
+    VOID (*hook)(VOID) = ami_shutdown_hook;
+
+    if (hook != NULL)
+        hook();
+}
+
 static LONG ami_sana2_open_once(const char *name, ULONG unit,
                                 struct IORequest *req)
 {

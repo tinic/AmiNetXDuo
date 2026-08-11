@@ -132,6 +132,15 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE/libs" "$STAGE/rexxc"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
+
+# QUERY SERVICES browses mDNS, and the responder is per interface and off
+# unless the interface asks for it.  Without this the two SERVICES cases below
+# have no responder to reach, return RETURN_ERROR, and have been failing for
+# as long as this file has existed -- unnoticed, because nothing runs it.
+for cfg in "$STAGE"/devs/NetInterfaces/*; do
+    [ -f "$cfg" ] || continue
+    printf 'MDNS=YES\n' >> "$cfg"
+done
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 cp "$REXXDIR/rexxsyslib.library" "$STAGE/libs/rexxsyslib.library"
 # ARexx is a floating-point language: RexxMast opens mathieeedoubbas and
@@ -146,6 +155,12 @@ cp "$REXXDIR/RexxMast"    "$STAGE/RexxMast"
 cp "$REXXDIR/RX"          "$STAGE/RX"
 cp "$REXXDIR/WaitForPort" "$STAGE/WaitForPort"
 cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
+# A live service and the command that lists it: KILL used to take the
+# interfaces down and leave every program holding a library whose network had
+# gone, and "KILL returned 0" could not tell that apart from a KILL that tells
+# them.  ShowNetStatus USERS can.
+cp "$TOOLS/nc"            "$STAGE/nc"
+cp "$TOOLS/ShowNetStatus" "$STAGE/ShowNetStatus"
 
 # The script. `OPTIONS RESULTS` is what makes rm_Result2 be asked for, so the
 # RXFF_RESULT branch in ami_rx_service() is exercised rather than skipped.
@@ -200,6 +215,12 @@ REXX
     echo "SYS:AddNetInterface eth0"
     echo "wait 2"
 
+    # Something for KILL to tell.  Detached and listening, which is the shape
+    # of every service a user leaves running.
+    echo "&SYS:nc -l 7099 -v -w 90 >DH0:nc.txt"
+    echo "wait 3"
+    echo "SYS:ShowNetStatus USERS"
+
     # The barrier, with Commodore's own command. If the port were gone this
     # would never return and the run would time out.
     echo "SYS:WaitForPort AMITCP"
@@ -209,7 +230,8 @@ REXX
     echo "wait 3"
 
     echo "SYS:RX >DH0:arexx.txt DH0:amitcptest.rexx"
-    echo "wait 2"
+    echo "wait 3"
+    echo "SYS:ShowNetStatus USERS"
     echo "SYS:c/envsetup"
 } > "$STAGE/commands.txt"
 
@@ -223,7 +245,8 @@ set +e
 "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
     "$STAGE/AddNetInterface" "$STAGE/RexxMast" "$STAGE/RX" \
-    "$STAGE/WaitForPort" "$STAGE/amitcptest.rexx"
+    "$STAGE/WaitForPort" "$STAGE/amitcptest.rexx" \
+    "$STAGE/nc" "$STAGE/ShowNetStatus"
 RUN_RC=$?
 set -e
 
@@ -337,6 +360,37 @@ if grep -qE "case kill:.*rc= *0" "$SCRIPTOUT"; then
 else
     note "FAIL: KILL was refused"
     fails=$((fails + 1))
+fi
+
+# AND IT TOLD THE PROGRAMS USING THE NETWORK.
+#
+# ShowNetStatus USERS lists one row per program holding bsdsocket.library
+# open, name first.  nc is listening before KILL and must be gone after it:
+# KILL sends every opener SIGBREAKF_CTRL_C and gives back the stack hold, the
+# same pair NetShutdown uses.  Until 2026-08-11 it did neither and only took
+# the interfaces down, which this pair of readings cannot mistake for success.
+users_block() {
+    awk -v want="$1" '
+        index($0, "===== SYS:ShowNetStatus USERS =====") == 1 { n++; if (n == want) { on = 1; next } }
+        on && /^----- rc / { exit }
+        on { print }
+    ' "$REPORT"
+}
+
+if users_block 1 | grep -qE "^nc +[0-9]"; then
+    note "PASS: nc is listed as using the network before KILL"
+else
+    note "FAIL: nc was not listed before KILL, so this proves nothing"
+    users_block 1 | sed 's/^/       /' >&2
+    fails=$((fails + 1))
+fi
+
+if users_block 2 | grep -qE "^nc +[0-9]"; then
+    note "FAIL: nc is STILL using the network after KILL: it was never told"
+    users_block 2 | sed 's/^/       /' >&2
+    fails=$((fails + 1))
+else
+    note "PASS: KILL told nc to stop and it let go of bsdsocket.library"
 fi
 
 # WaitForPort ran before any of this and the run did not time out, so the

@@ -211,7 +211,7 @@ static LONG ami_sana2_query(AmiSana2If *iface)
  * address and may only be run once per unit; a device already configured by
  * another opener answers S2WERR_IS_CONFIGURED, treated here as success.
  */
-static LONG ami_sana2_configure(AmiSana2If *iface)
+static LONG ami_sana2_configure(AmiSana2If *iface, const AmiIfConfig *cfg)
 {
     struct IOSana2Req req;
     LONG              err;
@@ -242,6 +242,29 @@ static LONG ami_sana2_configure(AmiSana2If *iface)
     {
         for (i = 0; i < SANA2_MAX_ADDR_BYTES; i++)
             req.ios2_SrcAddr[i] = req.ios2_DstAddr[i];
+    }
+
+    /*
+     * HARDWAREADDRESS overrides both. S2_CONFIGINTERFACE commits whatever is
+     * in ios2_SrcAddr, so the override goes in after the factory address has
+     * been read and before it is committed -- and only for as many bytes as
+     * this device's addresses have, so a 6-byte value cannot overwrite the
+     * end of a wider one.
+     *
+     * Two emulated guests on one bridge carry the same factory address and
+     * answer each other's ARP; so do two of some real cards. Roadshow has had
+     * this since 1.0 and ours dropped the keyword on the floor.
+     */
+    if (cfg != NULL && cfg->have_hw_address && iface->addr_bytes > 0)
+    {
+        UWORD n = (iface->addr_bytes < (UWORD)AMI_CFG_MAC_SIZE)
+                      ? iface->addr_bytes : (UWORD)AMI_CFG_MAC_SIZE;
+
+        for (i = 0; i < n; i++)
+            req.ios2_SrcAddr[i] = cfg->hw_address[i];
+
+        AMI_INFO("sana2: %s unit %lu: address set from HARDWAREADDRESS",
+                 iface->device, (unsigned long)iface->unit);
     }
 
     err = ami_sana2_command(iface, &req, S2_CONFIGINTERFACE);
@@ -658,12 +681,32 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
         }
     }
 
-    if (ami_sana2_configure(iface) != 0)
+    if (ami_sana2_configure(iface, cfg) != 0)
     {
         ami_sana2_close(iface);
         if (err != NULL)
             *err = AMI_NET_ERR_DEVBAD;
         return NULL;
+    }
+
+    /*
+     * REQUIRESINITDELAY. Some cards hiccup and lose data if the first packet
+     * follows the configure too closely; Roadshow's manual names the original
+     * Ariadne. After the configure and before anything is sent or the readers
+     * are started, which is the window the option is about.
+     *
+     * A second, as Roadshow specifies, and only when asked for: it is paid at
+     * every bring-up, and the cards we can test do not need it.
+     */
+    if (cfg != NULL && cfg->requires_init_delay)
+    {
+        AMI_INFO("sana2: %s unit %lu: REQUIRESINITDELAY, settling for a second",
+                 iface->device, (unsigned long)iface->unit);
+
+        /* tx_thread_sleep() and not dos.library's Delay(): this runs inside
+           the ThreadX bracket, the same way the readers in sana2_rx.c wait,
+           and it needs no library base of its own. */
+        tx_thread_sleep((ULONG)NX_IP_PERIODIC_RATE);
     }
 
 #if AMI_SANA2_PROBE_RAW
