@@ -418,6 +418,38 @@ static VOID bsd_task_sweep(VOID)
     ReleaseSemaphore(&master->sb_Lock);
 }
 
+/*
+ * The ARexx port's KILL, and anything else in the netstack that decides the
+ * network is finished with.
+ *
+ * The same two steps NetShutdown takes, minus the grace period: signal every
+ * opener, then give the stack hold back so the last CloseLibrary() takes the
+ * stack with it. Without this, KILL took the interfaces down and left every
+ * program holding a library whose network had gone -- the state NetShutdown
+ * was in until 2026-08-11, reachable through the other door.
+ *
+ * bsd_master_base and not a caller's base: there is no caller here, so
+ * nothing is skipped and every opener is told.
+ */
+static VOID bsd_shutdown_requested(VOID)
+{
+    struct AmiSocketBase *master = bsd_master_base;
+    ULONG                 signalled = 0;
+
+    if (master == NULL)
+        return;
+
+    (VOID)bsd_stack_notify(master, &signalled);
+
+    if (signalled != 0)
+        AMI_INFO("bsdsocket: shutdown, %lu program(s) told to stop",
+                 (unsigned long)signalled);
+
+    /* Declined when this is the last reference, which is the one case where
+       dropping it would leave the stack running with nobody to close it. */
+    (VOID)bsd_stack_unhold(master);
+}
+
 static VOID bsd_address_changed(VOID)
 {
     struct AmiSocketBase *master = bsd_master_base;
@@ -476,6 +508,7 @@ static struct AmiSocketBase *bsd_lib_init(
     bsd_master_base = base;
     ami_set_address_change_hook(bsd_address_changed);
     ami_set_second_hook(bsd_task_sweep);
+    ami_set_shutdown_hook(bsd_shutdown_requested);
 
     return base;
 }
@@ -1539,6 +1572,7 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
      */
     ami_set_address_change_hook(NULL);
     ami_set_second_hook(NULL);
+    ami_set_shutdown_hook(NULL);
     bsd_master_base = NULL;
 
     seglist = base->sb_SegList;

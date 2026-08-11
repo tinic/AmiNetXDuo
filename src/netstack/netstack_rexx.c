@@ -139,16 +139,25 @@ static ULONG ami_rx_strlen(const char *s)
 }
 
 /*
- * KILL. AmiTCP's was Signal(AmiTCP_Task, SIGBREAKF_CTRL_C), the stack task
- * exited and the library went with it. Ours cannot: bsdsocket.library is a
- * singleton that lives until reboot once anything has opened it, which
- * src/tools/netshutdown.c documents at length. What is stoppable is the
- * traffic, so KILL does what NetShutdown does and takes every interface down
- * through the same netstack_interface_down() that Offline calls.
+ * KILL. AmiTCP's was Signal(AmiTCP_Task, SIGBREAKF_CTRL_C): the stack task
+ * exited and the library went with it. Ours does the same thing by the route
+ * a singleton library allows -- ami_shutdown_notify() sends every opener that
+ * same SIGBREAKF_CTRL_C and gives back the reference that keeps the stack
+ * standing, so the last CloseLibrary() takes the stack with it.
  *
- * The port stays. `stopnet`'s optional FLUSH branch tests Show(ports, AMITCP)
- * before flushing memory, so it correctly declines to flush, the stack really
- * is still resident.
+ * Then the interfaces go down, which is all this used to do. Doing only that
+ * left `httpd` and everything else running against a network that had gone --
+ * the defect NetShutdown was fixed for, reachable through the other door,
+ * because the two shared a description and not an implementation. They still
+ * do not share one: NetShutdown waits out a grace period and reports who did
+ * not let go, and this cannot, because an ARexx handler that blocks for five
+ * seconds blocks the port. What they share is the pair of operations, which
+ * is where the behaviour actually lives.
+ *
+ * The port stays, and so does the library until its last opener leaves.
+ * `stopnet`'s optional FLUSH branch tests Show(ports, AMITCP) before flushing
+ * memory; while an opener remains it correctly declines, because the stack
+ * really is still resident.
  */
 static LONG ami_rx_kill(void)
 {
@@ -159,7 +168,15 @@ static LONG ami_rx_kill(void)
     if (ns == NULL)
         return RETURN_ERROR;
 
-    AMI_INFO("AMITCP: KILL, taking every interface down");
+    AMI_INFO("AMITCP: KILL, telling the programs using the network and "
+             "taking every interface down");
+
+    /*
+     * Before the interfaces, so a program that wants to close a connection
+     * tidily still has a network to do it over, and because this is the half
+     * that cannot be undone by an Online afterwards.
+     */
+    ami_shutdown_notify();
 
     for (i = 0; i < ns->ns_IfaceCount; i++)
     {
