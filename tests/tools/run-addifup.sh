@@ -145,27 +145,19 @@ echo "===================================================================="
 echo
 
 # ---------------------------------------------------------- the verdict ---
+#
+# In tests/tools/addifup-verdict.sh, so that
+# tests/tools/addifup-verdict-selftest.sh can prove it goes red without a ROM.
+# The two assertions that used to be here could not: both matched
+# ShowNetStatus's own column header.  That note is on the function.
 
-FAILED=0
-pass() { echo "  ok: $*"; }
-fail() { echo "  FAIL: $*"; FAILED=1; }
+. "$ROOT/tests/tools/addifup-verdict.sh"
 
-if grep -qiE "online|address" "$REPORT"; then
-    pass "AddNetInterface returned and the interface reports a state"
-else
-    fail "AddNetInterface returned but the interface never came up"
-fi
-
-if grep -qE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" "$REPORT"; then
-    pass "an address arrived"
-else
-    fail "no address in the report, the lease never completed"
-fi
-
-echo
-if [ "$FAILED" = "0" ]; then
+if addifup_verdict "$REPORT" eth0; then
+    echo
     echo "PASS: AddNetInterface comes back, and the interface is up"
     exit 0
 fi
+echo
 echo "FAIL: see above; the drive is at $HD"
 exit 1

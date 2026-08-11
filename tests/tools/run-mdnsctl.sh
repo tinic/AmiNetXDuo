@@ -369,7 +369,19 @@ if [ -z "${WATCHLOG:-}" ] || [ ! -f "$WATCHLOG" ] ||
    grep -q "INSTRUMENT UNAVAILABLE" "$WATCHLOG"; then
     infra "the host watcher could not bind UDP 5353, so nothing off this
        machine was measured"
-elif ! grep -q "mdnswatch.local" "$WATCHLOG"; then
+elif ! grep -q "the instrument SAW its own multicast" "$WATCHLOG"; then
+    # This tested `grep -q "mdnswatch.local"`, and tests/tools/mdnswatch.py:212
+    # writes "selftest: sent a query for mdnswatch.local" unconditionally, at
+    # SEND time, before anything has been received.  So the calibration check
+    # was satisfied by the calibration attempt: it passed on a watcher that
+    # heard nothing at all, which is the one case it exists to catch, and the
+    # assertions below then graded a deaf instrument's silence as the
+    # responder's.
+    #
+    # mdnswatch.py:242 writes the line grepped for here the moment the probe
+    # comes back.  It has to be written there rather than in the summary,
+    # because the watcher is SIGTERMed at :359 long before its deadline, so
+    # the summary that used to carry the verdict never ran.
     infra "the watcher never saw its own calibration query, so it was not
        listening and its silence means nothing"
 else

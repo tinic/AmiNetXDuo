@@ -219,8 +219,22 @@ ident=$(grep -m1 "^# bsdsocket.library:" \
         "$ROOT/build/winuae-testhd-$TAG/bsdsocktest.log" 2>/dev/null || true)
 case "$ident" in
     *AmiNetXDuo*) echo "$ident  (ours)" ;;
-    "")           echo "!! no stack identification in the TAP log" ;;
-    *)            echo "!! $ident, NOT our library, results are meaningless" ;;
+    # Not a warning: a run that cannot be attributed, or one a foreign library
+    # answered, is not a result.  3, the same code run-fsuae.sh uses, and
+    # distinct from the suite failing.
+    "")           echo "!! no stack identification in the TAP log" >&2
+                  echo "conformance: NOT MEASURED (no stack identification)" >&2
+                  exit 3 ;;
+    *)            echo "!! $ident, NOT our library" >&2
+                  echo "conformance: NOT MEASURED (a foreign library answered)" >&2
+                  exit 3 ;;
 esac
 
-exit "$status"
+# The TAP log, not the guest's status: conf_launcher.c:134 returns RETURN_OK
+# whatever the suite reported, so `exit "$status"` was a pass on every run that
+# finished.  Same scorer as run-fsuae.sh, proved by
+# tests/conformance/tap-verdict-selftest.sh.
+. "$ROOT/tests/conformance/tap-verdict.sh"
+
+tap_verdict "$ROOT/build/winuae-testhd-$TAG/bsdsocktest.log" "$status"
+exit $?

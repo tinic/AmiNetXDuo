@@ -62,11 +62,14 @@ jobs:
       # Installer, neither of which is ours to ship.
       AMINETXDUO_ADF_DIR: ${{ vars.AMINETXDUO_ADF_DIR }}
       AMINETXDUO_INSTALLER: ${{ vars.AMINETXDUO_INSTALLER }}
-      # tests/tools/run-cardsweep.sh: a THIRD machine on the same LAN,
-      # as user@host.  The emulator's own host cannot be it -- a frame it
-      # sends to its own bridged guest never comes back to that NIC's
-      # pcap -- so without this the card sweep has nowhere to count from
-      # and says every card is unproven rather than passing them.
+      # A THIRD machine on the same LAN, as user@host, for both of the
+      # harnesses that need one: the host running amiberry cannot reach its
+      # own bridged guest -- a frame it sends there never comes back to that
+      # NIC's pcap -- so with no peer run-workbench.sh -H has nothing to drive
+      # WebDAV or the browser terminal from, and run-cardsweep.sh has nowhere
+      # to count bytes from and calls every card unproven rather than passing
+      # it.  Two variables because the two harnesses were wired separately.
+      AMINETXDUO_PEER: ${{ vars.AMINETXDUO_PEER }}
       AMINETXDUO_CARDSWEEP_PEER: ${{ vars.AMINETXDUO_CARDSWEEP_PEER }}
     steps:
       - uses: actions/checkout@v4
@@ -269,17 +272,50 @@ jobs:
                 -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF
           cmake --build build/cm-68000-minimal --parallel
           dist/make-dist.sh
-          install/test/run-workbench.sh -a "$PWD/$(ls -t build/dist/*.lha | head -1)"
+
+          # -H IS THE HALF THIS STEP CLAIMS TO DO.  Without it TERMINAL stays 0
+          # (install/test/run-workbench.sh:144) and the whole block at :1000
+          # to :1223 is skipped: no peer is contacted, tests/tools/httpd-drill.py's
+          # twelve WebDAV assertions do not run, wsterm-console.py does not run,
+          # the PUT/GET round trip does not run, `lha x` on the Amiga does not
+          # run, and the second and third installs -- install-over-existing, and
+          # answering the terminal question no -- do not happen at all.  What
+          # ran instead was one install, a boot, and a check that some files
+          # exist.  tools/ci.sh's e2e stage passes -H and no workflow invokes
+          # that stage, so those assertions have never run in CI.
+          #
+          # It needs a second machine: the host running amiberry cannot reach
+          # its own guest.  Where AMINETXDUO_PEER is not configured the step
+          # runs without -H and SAYS SO, rather than reporting a quarter of
+          # the test as the whole of it.
+          archive="$PWD/$(ls -t build/dist/*.lha | head -1)"
+          if [ -n "${AMINETXDUO_PEER:-}" ]; then
+            echo "e2e_terminal=on peer=$AMINETXDUO_PEER"
+            install/test/run-workbench.sh -H -a "$archive"
+          else
+            echo "e2e_terminal=off"
+            echo "::warning::AMINETXDUO_PEER is not set on this runner, so the" \
+                 "release e2e ran WITHOUT -H: the WebDAV drill, the browser" \
+                 "terminal, lha x on the Amiga and the two reinstall passes" \
+                 "were all skipped. Set the AMINETXDUO_PEER repository" \
+                 "variable to an ssh target that can reach the guest."
+            install/test/run-workbench.sh -a "$archive"
+          fi
 
       - name: Upload emulator logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
+          # amiberry-run.sh writes build/amiberry-testhd-<tag>/, not
+          # build/testhd-<tag>/, so the conformance TAP log was never
+          # collected -- which mattered while run-fsuae.sh exited 0 on every
+          # run and grading it by hand was the only way to see a failure.
           name: emulator-logs-kickstart
           path: |
             build/ci/emu-*.log
             build/serial*.log
-            build/testhd-conformance/bsdsocktest.log
+            build/amiberry-testhd-*/bsdsocktest.log
+            build/amiberry-testhd-*/conf-out.txt
             build/cardsweep-results.txt
             build/cardsweep-logs/*.log
           if-no-files-found: ignore

@@ -262,6 +262,51 @@ stage_host() {
         return 1
     fi
 
+    # The same argument one level down, for the harnesses that grade a
+    # transcript rather than a check count.  run-addifup.sh is the gate for
+    # "AddNetInterface never came back" and runs on one self-hosted runner, so
+    # an assertion of its that stopped firing would be invisible here; these
+    # selftests drive the graders against transcripts that stand for runs
+    # nobody can produce on demand.
+    # And that every harness has a home, and that the home is real.  A test
+    # nothing invokes reads exactly like a test that passes.
+    if tools/check-harnesses.sh > "$BUILD/check-harnesses.log" 2>&1; then
+        note "harnesses: $(sed -n 's/^harnesses_wired=/wired /p' \
+              "$BUILD/check-harnesses.log")$(sed -n 's/^harnesses_manual=/, manual /p' \
+              "$BUILD/check-harnesses.log")$(sed -n 's/^harnesses_unwired=/, of those unwired /p' \
+              "$BUILD/check-harnesses.log")"
+    else
+        cat "$BUILD/check-harnesses.log"
+        fail "tests/HARNESSES does not match the tree (tools/check-harnesses.sh)"
+        return 1
+    fi
+
+    # Every drawer in the archive is a configuration this script compiles.
+    # The minimal drawer is not, and says so with its reason.
+    if tools/check-shipping-config.sh > "$BUILD/shipping-config.log" 2>&1; then
+        note "shipping config: $(grep -c '=matches_ci_arm_' \
+              "$BUILD/shipping-config.log") of 4 drawers match their cross arm"
+        grep '=KNOWN_DIVERGENCE' "$BUILD/shipping-config.log" |
+            while read -r l; do note "$l"; done
+    else
+        cat "$BUILD/shipping-config.log"
+        fail "a shipped drawer is built in a configuration no cross arm compiles"
+        return 1
+    fi
+
+    local st log
+    for st in tests/*/*-verdict-selftest.sh; do
+        [ -x "$st" ] || continue
+        log="$BUILD/$(basename "$st" .sh).log"
+        if "$st" > "$log" 2>&1; then
+            note "$(basename "$st"): $(sed -n 's/^.*selftest: //p' "$log")"
+        else
+            cat "$log"
+            fail "$st"
+            return 1
+        fi
+    done
+
     cmake -S . -B "$BUILD/host" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_PROJECT_INCLUDE="$ROOT/cmake/ci-warnings.cmake" \
