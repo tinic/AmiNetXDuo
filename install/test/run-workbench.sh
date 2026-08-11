@@ -1145,7 +1145,7 @@ if [ "$TERMINAL" = "1" ]; then
     # The terminal.  Content-Length is the assertion: it is the server saying
     # how big the page -T found, and the page the installer put on this drive
     # is the size to expect.
-    want=$(wc -c < "$HD/AmiNetXDuo/Terminal/terminal.html" 2>/dev/null | tr -d ' ')
+    want=$(wc -c < "$HD/AmiNetXDuo/Terminal/shell.html" 2>/dev/null | tr -d ' ')
     got_len=$(key terminal_content_length)
     if [ "$(key terminal_status)" = "200" ] && [ -n "$want" ] &&
        [ "$got_len" = "$want" ]; then
@@ -1193,7 +1193,7 @@ if [ "$TERMINAL" = "1" ]; then
         # host has: one text, one binary, both from drawers deep enough that a
         # truncated unpack cannot produce them by accident.
         unpack_ok=1
-        for rel in AmiNetXDuo/Terminal/terminal.html AmiNetXDuo/ReadMe; do
+        for rel in AmiNetXDuo/Terminal/shell.html AmiNetXDuo/ReadMe; do
             here="$HD/Unpacked/$rel"
             there="$HD/DavOut/Unpack/$rel"
             [ -f "$here" ] || continue

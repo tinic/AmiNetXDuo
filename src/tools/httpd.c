@@ -149,9 +149,9 @@ enum
  * five-fold the binary, which is not a trade for a 4 MB machine.
  */
 static const char *const httpd_term_places[] = {
-    "AmiNetXDuo:Terminal/terminal.html",
-    "PROGDIR:Terminal/terminal.html",
-    "PROGDIR:terminal.html"
+    "AmiNetXDuo:Terminal/shell.html",
+    "PROGDIR:Terminal/shell.html",
+    "PROGDIR:shell.html"
 };
 
 #define HTTPD_TERM_PLACES                                               \
@@ -3733,7 +3733,7 @@ static VOID httpd_do_get(HttpConn *c)
  *   the wire.  Nothing here compresses it: a deflate on a 68020 would spend
  *   the time it saved, and worse, would spend it on every request.  What is
  *   served instead is a file that was compressed on the machine that built it
- *   -- terminal.html.gz beside terminal.html -- chosen by nothing more than
+ *   -- shell.html.gz beside shell.html -- chosen by nothing more than
  *   the request saying `Accept-Encoding: gzip`.
  *
  *   The sibling is looked for by SPELLING, and looked for HERE rather than

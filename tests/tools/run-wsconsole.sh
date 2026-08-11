@@ -47,7 +47,7 @@
 #   is on the SERVER's contract -- `mode raw` arrives before the prompt can be
 #   answered, and nothing of what is typed comes back -- and the page's half
 #   is proved by tests/tools/wsconsole-page.mjs, which drives the real built
-#   terminal.html in a real browser and reads the characters off the screen.
+#   shell.html in a real browser and reads the characters off the screen.
 #
 # WHAT IT NEEDS
 #
@@ -136,7 +136,7 @@ done
 
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
-PAGE="$ROOT/src/tools/web/terminal.html"
+PAGE="$ROOT/src/tools/web/shell.html"
 # Both forms, so the browser this run drives is fetching the gzipped one --
 # which is what a real browser will get and the only place that is proved.
 PAGEGZ="$PAGE.gz"
@@ -171,8 +171,8 @@ cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 mkdir -p "$STAGE/devs/Networks"
 cp "$A2065" "$STAGE/devs/Networks/a2065.device"
 cp "$BSD" "$STAGE/libs/bsdsocket.library"
-cp "$PAGE"   "$STAGE/terminal.html"
-cp "$PAGEGZ" "$STAGE/terminal.html.gz"
+cp "$PAGE"   "$STAGE/shell.html"
+cp "$PAGEGZ" "$STAGE/shell.html.gz"
 
 cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
 DEVICE=a2065.device
@@ -293,9 +293,9 @@ CPUARG=()
 set +e
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$BACKEND" -m "$MODEL" "${CPUARG[@]}" \
     -t "$WINDOW" \
-    -a "DH0:Public $GUESTPORT -T PAGE=DH0:terminal.html TRACE" \
+    -a "DH0:Public $GUESTPORT -T PAGE=DH0:shell.html TRACE" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
-    "$STAGE/terminal.html" "$STAGE/terminal.html.gz" "$STAGE/c" \
+    "$STAGE/shell.html" "$STAGE/shell.html.gz" "$STAGE/c" \
     "${EXTRA_DRAWERS[@]}" \
     ${HAVE_SSHKEY:+$([ "$HAVE_SSHKEY" = yes ] && echo "$STAGE/sshkey")} \
     > "$ROOT/build/wsconsole-emu.log" 2>&1 &

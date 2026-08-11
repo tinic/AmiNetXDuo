@@ -9,7 +9,7 @@
  *   echo proves the server's half -- `mode raw` arrives, nothing typed comes
  *   back -- and cannot prove the thing anybody actually cares about, which is
  *   that the characters are not drawn.  So this drives the real built
- *   terminal.html in a real browser and reads the letters off the screen.
+ *   shell.html in a real browser and reads the letters off the screen.
  *
  *   And it proves the test can SEE typing before it claims not to: a command
  *   typed in cooked mode must appear, in the same buffer, read the same way.

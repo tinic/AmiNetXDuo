@@ -29,7 +29,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 /* AMINETXDUO_MOCK_PAGE serves a different file, which is how the page it
    replaced was put side by side with it. */
 const PAGE = process.env.AMINETXDUO_MOCK_PAGE ||
-  join(HERE, "..", "..", "src", "tools", "web", "terminal.html");
+  join(HERE, "..", "..", "src", "tools", "web", "shell.html");
 const PORT = Number(process.argv[2] || 8099);
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 

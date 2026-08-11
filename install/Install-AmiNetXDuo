@@ -1407,7 +1407,7 @@
 ; startup Shell's console, which would otherwise keep that Shell alive.
 ;
 ; The assign is what lets the httpd line be short enough to be worth reading.
-; httpd looks for its page in AmiNetXDuo:Terminal/terminal.html, among two
+; httpd looks for its page in AmiNetXDuo:Terminal/shell.html, among two
 ; other places (src/tools/httpd.c httpd_term_places[]), and the drawer this
 ; installer put the page in is wherever the user said, so the assign is the
 ; only stable name for it.

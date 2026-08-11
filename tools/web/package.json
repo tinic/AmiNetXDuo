@@ -2,7 +2,7 @@
   "name": "aminetxduo-web",
   "private": true,
   "version": "0.0.0",
-  "description": "Bundler for src/tools/web/terminal.html.  xterm.js is NOT a dependency here -- it is vendored under src/tools/web/vendor/xterm, so the only thing npm supplies is the bundler itself.",
+  "description": "Bundler for src/tools/web/shell.html.  xterm.js is NOT a dependency here -- it is vendored under src/tools/web/vendor/xterm, so the only thing npm supplies is the bundler itself.",
   "type": "module",
   "scripts": {
     "build": "node build.mjs",

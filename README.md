@@ -128,6 +128,21 @@ Configuration follows Roadshow's layout, `DEVS:NetInterfaces/<name>`,
 
 The installer copies all of them into `C:`.
 
+## A Shell in a web browser
+
+`httpd -T` serves an AmigaDOS Shell at **`http://<address>/shell`**, alongside
+the drawer it is already sharing. The installer offers to start both when the
+machine boots.
+
+It is a real console, not a pipe: `Ed` and `More` work, the cursor keys and
+history work, a password typed at `ssh`'s prompt is not drawn on the screen,
+and a program that asks how big the window is gets an answer. On an A1200 the
+prompt appears in 44 ms and pressing Return shows the output about 23 ms
+later, which is not far off a Shell on the machine itself.
+
+**There is no password.** Whoever can reach the port gets the Shell, exactly
+as they get the drawer.
+
 ## Finding the machine by name
 
 The Amiga answers to **`<hostname>.local`** on the local network, so another
@@ -136,9 +151,14 @@ machine can reach it by name without any DNS server or configuration, and
 most when there is no DHCP server at all: the machine gives itself an address
 and is still reachable.
 
-It needs no separate command. `ping`, `host`, `fetch` and any older program
-that resolves a name all get it, because the lookup happens inside the resolver
-everything already uses.
+Answering it is per interface and off unless asked for, because the responder
+costs time on a slow machine. The installer asks; otherwise it is `MDNS=YES`
+in `DEVS:NetInterfaces/<name>`, or `ConfigureNetInterface <name> MDNS=YES` on
+an interface that is already up.
+
+Looking names up needs no separate command. `ping`, `host`, `fetch` and any
+older program that resolves a name all get it, because the lookup happens
+inside the resolver everything already uses.
 
 The same machinery finds what everything else is offering. `ShowNetServices`
 with nothing after it lists the kinds of service answering on the network,

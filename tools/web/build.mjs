@@ -1,5 +1,5 @@
 /*
- * Build src/tools/web/terminal.html: TypeScript in, one HTML file out.
+ * Build src/tools/web/shell.html: TypeScript in, one HTML file out.
  *
  *   node tools/web/build.mjs            write the file
  *   node tools/web/build.mjs --check    fail if what is committed differs
@@ -11,7 +11,7 @@
  *   when a source under src/tools/web/client/ changes, and --check is how
  *   tools/ci.sh notices that somebody edited a source and forgot to run it.
  *
- * AND terminal.html.gz BESIDE IT
+ * AND shell.html.gz BESIDE IT
  *
  *   The page is 400 KB and an A1200 spends 3.3 seconds handing it over.  It
  *   gzips to under a quarter of that, and the compressor runs HERE: there is
@@ -50,7 +50,7 @@ const ROOT = join(HERE, "..", "..");
 const WEB = join(ROOT, "src", "tools", "web");
 const VENDOR = join(WEB, "vendor", "xterm");
 const HACK = join(WEB, "vendor", "hack");
-const OUT = join(WEB, "terminal.html");
+const OUT = join(WEB, "shell.html");
 const OUT_GZ = OUT + ".gz";
 
 const check = process.argv.includes("--check");
@@ -144,7 +144,7 @@ const html = template
   .replace("/*STYLE*/", () => style)
   .replace("/*SCRIPT*/", () => script)
   .replace(
-    "  TEMPLATE.  The file that ships is src/tools/web/terminal.html, which is this\n" +
+    "  TEMPLATE.  The file that ships is src/tools/web/shell.html, which is this\n" +
       "  with the stylesheets and the script inlined into it by tools/web/build.mjs.\n" +
       "  Editing the built file is editing something that will be overwritten.",
     "  GENERATED.  Edit src/tools/web/client/ and run tools/web/build.mjs; an edit\n" +
@@ -253,20 +253,20 @@ try {
 
 if (check) {
   if (existing === html && packed !== null) {
-    console.log("web: terminal.html matches its sources (%d bytes, sha %s)",
+    console.log("web: shell.html matches its sources (%d bytes, sha %s)",
                 Buffer.byteLength(html), sha(html));
-    console.log("web: terminal.html.gz unpacks to it (%d bytes, %d%%)",
+    console.log("web: shell.html.gz unpacks to it (%d bytes, %d%%)",
                 packed.length,
                 Math.round((packed.length * 100) / Buffer.byteLength(html)));
     process.exit(0);
   }
   if (existing !== html) {
-    console.error("web: terminal.html does NOT match its sources.");
+    console.error("web: shell.html does NOT match its sources.");
     console.error("web: committed %s, sources build to %s",
                   existing === null ? "nothing" : sha(existing), sha(html));
   }
   if (packed === null) {
-    console.error("web: terminal.html.gz is missing, or does not unpack to "
+    console.error("web: shell.html.gz is missing, or does not unpack to "
                   + "the page beside it.");
   }
   console.error("web: run  node tools/web/build.mjs  and commit the result.");
@@ -274,18 +274,18 @@ if (check) {
 }
 
 if (existing === html) {
-  console.log("web: terminal.html unchanged (%d bytes)", Buffer.byteLength(html));
+  console.log("web: shell.html unchanged (%d bytes)", Buffer.byteLength(html));
 } else {
   writeFileSync(OUT, html);
-  console.log("web: terminal.html written, %d bytes, sha %s",
+  console.log("web: shell.html written, %d bytes, sha %s",
               Buffer.byteLength(html), sha(html));
 }
 
 if (packed !== null) {
-  console.log("web: terminal.html.gz unchanged (%d bytes)", packed.length);
+  console.log("web: shell.html.gz unchanged (%d bytes)", packed.length);
 } else {
   const gz = pack(html);
   writeFileSync(OUT_GZ, gz);
-  console.log("web: terminal.html.gz written, %d bytes, %d%% of the page",
+  console.log("web: shell.html.gz written, %d bytes, %d%% of the page",
               gz.length, Math.round((gz.length * 100) / Buffer.byteLength(html)));
 }

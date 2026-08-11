@@ -313,7 +313,7 @@ aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httppath.c httpif.c
 
 # httpd's terminal page, beside the binary that serves it.
 #
-# COPIED, NOT BUILT.  web/terminal.html is a COMMITTED artifact: the sources
+# COPIED, NOT BUILT.  web/shell.html is a COMMITTED artifact: the sources
 # it is generated from are TypeScript under web/client/ and the generator is
 # tools/web/build.mjs, which needs node.  Nothing in an m68k build may need
 # node, so the build takes the committed file as it stands and tools/ci.sh's
@@ -328,21 +328,21 @@ aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httppath.c httpif.c
 # work and would simply be slow.  Both are copied so that neither can be the
 # one somebody forgot.
 add_custom_command(
-    OUTPUT  "${CMAKE_CURRENT_BINARY_DIR}/terminal.html"
-            "${CMAKE_CURRENT_BINARY_DIR}/terminal.html.gz"
+    OUTPUT  "${CMAKE_CURRENT_BINARY_DIR}/shell.html"
+            "${CMAKE_CURRENT_BINARY_DIR}/shell.html.gz"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/web/terminal.html"
-            "${CMAKE_CURRENT_BINARY_DIR}/terminal.html"
+            "${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html"
+            "${CMAKE_CURRENT_BINARY_DIR}/shell.html"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/web/terminal.html.gz"
-            "${CMAKE_CURRENT_BINARY_DIR}/terminal.html.gz"
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web/terminal.html"
-            "${CMAKE_CURRENT_SOURCE_DIR}/web/terminal.html.gz"
+            "${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html.gz"
+            "${CMAKE_CURRENT_BINARY_DIR}/shell.html.gz"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html"
+            "${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html.gz"
     COMMENT "Staging httpd's terminal page")
 
 add_custom_target(tool_httpd_page ALL
-    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/terminal.html"
-            "${CMAKE_CURRENT_BINARY_DIR}/terminal.html.gz")
+    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/shell.html"
+            "${CMAKE_CURRENT_BINARY_DIR}/shell.html.gz")
 
 add_dependencies(tool_httpd tool_httpd_page)
 

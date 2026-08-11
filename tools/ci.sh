@@ -430,7 +430,7 @@ stage_web() {
     hr "httpd's terminal page"
 
     #
-    # src/tools/web/terminal.html is COMMITTED and the m68k build only copies
+    # src/tools/web/shell.html is COMMITTED and the m68k build only copies
     # it, so nothing about `cmake --build` needs node.  The price of that is
     # that the file can drift from the TypeScript it was generated from, and a
     # page a commit behind its sources is a page whose bug is already fixed in
@@ -441,7 +441,7 @@ stage_web() {
     # that is present and a page that does not match is a FAILURE.
     #
     if ! command -v node > /dev/null; then
-        skip "web: node is not installed, terminal.html was not checked against\
+        skip "web: node is not installed, shell.html was not checked against\
  its sources (node tools/web/build.mjs --check)"
         return 0
     fi
@@ -450,7 +450,7 @@ stage_web() {
         if ! (cd tools/web && npm ci --silent --no-audit --no-fund) \
                 > "$BUILD/web-npm.log" 2>&1; then
             tail -5 "$BUILD/web-npm.log"
-            skip "web: npm could not install the bundler, terminal.html was not\
+            skip "web: npm could not install the bundler, shell.html was not\
  checked (cd tools/web && npm ci)"
             return 0
         fi
@@ -460,7 +460,7 @@ stage_web() {
         note "$(cat "$BUILD/web.log")"
     else
         cat "$BUILD/web.log"
-        fail "web (terminal.html does not match src/tools/web/client)"
+        fail "web (shell.html does not match src/tools/web/client)"
         return 1
     fi
 

@@ -105,7 +105,7 @@ done
 
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
-PAGE="$ROOT/src/tools/web/terminal.html"
+PAGE="$ROOT/src/tools/web/shell.html"
 # The compressed copy httpd hands to a browser that asked for gzip.  Beside
 # the page, found by spelling, and committed with it.
 PAGEGZ="$PAGE.gz"
@@ -159,8 +159,8 @@ done
 mkdir -p "$STAGE/devs/Internet"
 [ -f "$ROOT/$BUILD/certificates" ] &&
     cp "$ROOT/$BUILD/certificates" "$STAGE/devs/Internet/certificates"
-cp "$PAGE"   "$STAGE/terminal.html"
-cp "$PAGEGZ" "$STAGE/terminal.html.gz"
+cp "$PAGE"   "$STAGE/shell.html"
+cp "$PAGEGZ" "$STAGE/shell.html.gz"
 
 # MDNS=YES so the machine is reachable by name.  A demo whose address is a
 # DHCP lease is a demo somebody has to be told the address of again tomorrow.
@@ -333,8 +333,8 @@ missing=""
 for f in "$STAGE/libs/bsdsocket.library" \
          "$STAGE/devs/Internet/certificates" \
          "$STAGE/devs/NetInterfaces/eth0" \
-         "$STAGE/terminal.html" \
-         "$STAGE/terminal.html.gz" \
+         "$STAGE/shell.html" \
+         "$STAGE/shell.html.gz" \
          "$STAGE/c/httpd"; do
     [ -f "$f" ] || missing="$missing ${f#"$STAGE/"}"
 done
@@ -352,9 +352,9 @@ if [ -n "$missing" ]; then
 fi
 
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$BACKEND" -m "$MODEL" -t "$WINDOW" \
-    -a "DH0:Public $PORT -T PAGE=DH0:terminal.html" \
+    -a "DH0:Public $PORT -T PAGE=DH0:shell.html" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
-    "$STAGE/terminal.html" "$STAGE/terminal.html.gz" "${EXTRA_C[@]}" \
+    "$STAGE/shell.html" "$STAGE/shell.html.gz" "${EXTRA_C[@]}" \
     "${EXTRA_DRAWERS[@]}" \
     > "$ROOT/build/demo-run-$AMINETXDUO_RUN_TAG.log" 2>&1 &
 RUNNER=$!

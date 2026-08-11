@@ -23,6 +23,9 @@ version at the top when it merges.
 - `QUIET` prints errors in every command that takes it. `ConfigureNetInterface`, `RemoveNetInterface`, `NetShutdown`, `AddNetRoute`, `DeleteNetRoute`, `GetNetStatus`, `CheckNetConfig`, `hostname`, `arp` and `ShowNetServices` all used to silence their own failures with it
 - `ShowNetStatus QUIET` is gone. It suppressed two error messages and printed the whole report regardless; `GetNetStatus` answers the same questions with a return code
 
+- The installer offers to serve a drawer and a Shell in a browser when the machine boots. It defaults to no
+- The installer's yes/no answers were inverted: clicking "No" to answering `.local` turned it on
+- `httpd -T` needs no file name. It finds the page itself and says which one it took; `PAGE=<file>` names another, and a `-T` that can find no page refuses to start rather than serving a terminal that is not there
 - `httpd` serves its terminal page compressed to a browser that asks for it: 121 KB instead of 400 KB, and 1.1 seconds off an A1200 instead of 3.6
 - Reopening the terminal costs 0.05 seconds instead of a fresh copy of the page: the browser still asks every time and is told nothing has changed
 - `traceroute` stops when you press Ctrl-C, instead of abandoning the hop it was on and carrying on to the next one

@@ -29,7 +29,7 @@
 #   server with nothing in it.  tests/tools/run-wsterm.sh passes it.
 #
 #   --gz-url=<path> says where the -T page's compressed sibling can be reached
-#   in the SERVED drawer, e.g. /terminal.html.gz.  With it, that file is moved
+#   in the SERVED drawer, e.g. /shell.html.gz.  With it, that file is moved
 #   out of the way over WebDAV and put back, which is how the state of a -T
 #   page nobody compressed is produced from out here.  It needs a harness that
 #   put the page inside the document root; tests/tools/run-wsterm.sh does.

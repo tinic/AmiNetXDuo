@@ -98,7 +98,7 @@ done
 
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
-PAGE="$ROOT/src/tools/web/terminal.html"
+PAGE="$ROOT/src/tools/web/shell.html"
 # Staged too, so what the drill measures is the pair httpd chooses between.
 PAGEGZ="$PAGE.gz"
 
@@ -140,8 +140,8 @@ cp "$BSD" "$STAGE/libs/bsdsocket.library"
 # away and come back, over WebDAV, with no Workbench C: and no Rename.  What
 # that buys is the one state a user with their own page is in -- a -T page with
 # no .gz next to it -- asserted rather than assumed.
-cp "$PAGE"   "$STAGE/Public/terminal.html"
-cp "$PAGEGZ" "$STAGE/Public/terminal.html.gz"
+cp "$PAGE"   "$STAGE/Public/shell.html"
+cp "$PAGEGZ" "$STAGE/Public/shell.html.gz"
 
 cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
 DEVICE=a2065.device
@@ -174,7 +174,7 @@ echo "==> httpd on the guest at :${GUESTPORT}, forwarded to 127.0.0.1:${HOSTPORT
 set +e
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B slirp -m "$MODEL" "${CPUARG[@]}" \
     -t "$WINDOW" \
-    -a "DH0:Public $GUESTPORT -T PAGE=DH0:Public/terminal.html TRACE" \
+    -a "DH0:Public $GUESTPORT -T PAGE=DH0:Public/shell.html TRACE" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
     > "$ROOT/build/wsterm-emu.log" 2>&1 &
 RUNNER=$!
@@ -250,7 +250,7 @@ fi
 DRILL_AT=$(date +%s)
 set +e
 python3 "$ROOT/tests/tools/httpd-drill.py" --terminal \
-    --gz-url=/terminal.html.gz 127.0.0.1 "$HOSTPORT" \
+    --gz-url=/shell.html.gz 127.0.0.1 "$HOSTPORT" \
     > "$ROOT/build/wsterm-drill.txt" 2>&1 &
 DRILL=$!
 while kill -0 "$DRILL" 2>/dev/null; do
