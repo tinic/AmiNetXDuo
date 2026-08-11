@@ -373,6 +373,7 @@ ULONG            state  =  0;
 ULONG            linklocal[4];
 ULONG            dad_ticks =  0;
 UINT             have_linklocal =  TX_FALSE;
+UINT             have_global =  TX_FALSE;
 UINT             status;
 UWORD            slot;
 
@@ -448,7 +449,30 @@ UWORD            slot;
             t_finding("global address from stateless autoconfiguration",
                       TX_TRUE);
         }
+
+        if ((addr[0] & 0xE0000000UL) == 0x20000000UL &&
+            state != NX_IPV6_ADDR_STATE_TENTATIVE &&
+            state != NX_IPV6_ADDR_STATE_UNKNOWN)
+        {
+            have_global =  TX_TRUE;
+        }
     }
+
+    /*
+     * What getaddrinfo() consults before it prefers an AAAA record.
+     *
+     * The question is not "is IPv6 running" -- every interface gets a
+     * link-local unasked, so that is true on a machine no router has ever
+     * spoken to, and preferring an AAAA there resolves a name to an address
+     * with no source to send from.  This asserts the two agree: the answer
+     * must be exactly whether the listing above found a global unicast address
+     * past duplicate address detection.  True on this link, false on one with
+     * no router, and a check either way.
+     */
+    (VOID)t_check((UINT)((netstack_ipv6_have_global() != FALSE) ==
+                         (have_global != TX_FALSE)),
+                  "netstack_ipv6_have_global() agrees with the address list",
+                  (ULONG)have_global);
 
     (VOID)t_check(have_linklocal,
                   "interface 0 has a usable fe80::/64 address", dad_ticks);

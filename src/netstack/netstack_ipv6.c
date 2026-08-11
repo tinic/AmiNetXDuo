@@ -417,6 +417,43 @@ BOOL netstack_ipv6_enabled(VOID)
     return (ns != NULL && ns->ns_IpCreated && ns->ns_Ipv6Enabled) ? TRUE : FALSE;
 }
 
+BOOL netstack_ipv6_have_global(VOID)
+{
+    UWORD i;
+    UWORD slot;
+
+    if (!netstack_ipv6_enabled())
+        return FALSE;
+
+    for (i = 0; i < (UWORD)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        for (slot = 0; ; slot++)
+        {
+            ULONG addr[4];
+            ULONG state = 0;
+
+            if (!netstack_ipv6_address_get(i, slot, addr, NULL, &state))
+                break;
+
+            /* 2000::/3.  A link-local is not a source for the internet, and
+               neither is fc00::/7: nobody routes a unique-local address off
+               the site that made it up. */
+            if ((addr[0] & 0xE0000000UL) != 0x20000000UL)
+                continue;
+
+            /* RFC 4862 5.4: TENTATIVE is still under duplicate address
+               detection and may not be a source. */
+            if (state == (ULONG)NX_IPV6_ADDR_STATE_TENTATIVE ||
+                state == (ULONG)NX_IPV6_ADDR_STATE_UNKNOWN)
+                continue;
+
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
 BOOL netstack_ipv6_address_get(UWORD interface_index, UWORD slot,
                                ULONG addr_out[4], ULONG *prefix_out,
                                ULONG *state_out)
