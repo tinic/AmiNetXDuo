@@ -3730,6 +3730,8 @@ static VOID httpd_term_page_get(HttpConn *c)
     char        etag[HTTPD_ETAG_MAX];
     LONG        size;
 
+    c->file = (BPTR)0;
+
     if (c->gzip_ok && httpd_term_gz[0] != '\0')
     {
         c->file = Open((CONST_STRPTR)httpd_term_gz, MODE_OLDFILE);
@@ -3739,11 +3741,9 @@ static VOID httpd_term_page_get(HttpConn *c)
             gzipped = TRUE;
         }
     }
-    else
-    {
-        c->file = (BPTR)0;
-    }
 
+    /* `path` is still the plain page unless the line above moved it, so this
+       is both the ordinary open and the fallback. */
     if (c->file == (BPTR)0)
         c->file = Open((CONST_STRPTR)path, MODE_OLDFILE);
 
