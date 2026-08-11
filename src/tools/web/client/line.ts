@@ -3,22 +3,25 @@
  *
  * THIS FILE IS ONE INPUT MODE, NOT THE INPUT PATH
  *
- *   It is everything the client does INSTEAD of a console handler, kept in
- *   one place so that it can be switched off in one place.  With it off, the
- *   terminal component's keystrokes go to the socket as they are typed and
- *   nothing here runs -- see INPUT in client/main.ts.  Nothing outside this
- *   file echoes, edits, or decides what a key means.
+ *   It is everything the client does INSTEAD of the far side's COOKED mode,
+ *   kept in one place so that it can be switched off in one place.  With it
+ *   off, the terminal component's keystrokes go to the socket as they are
+ *   typed and nothing here runs -- see `input` in client/main.ts.  Nothing
+ *   outside this file echoes, edits, or decides what a key means.
  *
- * WHY IT IS ON TODAY
+ * WHEN IT IS ON, AND WHO DECIDES
  *
- *   The far side is a DOS pipe, not a console handler.  Nothing on it echoes
- *   what is typed and nothing edits the line -- there is no line discipline
- *   to ask for, because there is no console.  So every character you see as
- *   you type it was drawn here, and Ctrl-W has to know what a word is here.
+ *   The far side IS a console handler now, and it says which mode it is in:
+ *   `mode cooked` turns this on, `mode raw` turns it off.  In raw mode the
+ *   handler does not echo, so neither does this, which is what stops a
+ *   password appearing on the screen.
  *
- *   NOT because the link is slow.  An echo round trip measures 23 ms on an
- *   A1200, which is fine for a keystroke at a time; when the far side grows a
- *   real console handler, the reason this file is on goes away with it.
+ *   In cooked mode the echo stays HERE rather than moving to the handler, and
+ *   that is a deliberate choice about distance rather than an absence of the
+ *   feature.  A real console echoes because the keyboard and the handler are
+ *   the same machine; here they are a LAN apart, and every echoed byte would
+ *   cross it twice before the letter appeared.  So every character you see as
+ *   you type it is drawn here, and Ctrl-W has to know what a word is here.
  *
  * WHAT IT SWALLOWS, WHICH A CONSOLE WOULD NOT
  *

@@ -488,6 +488,7 @@ struct HttpConn
     UBYTE   ws_upgrade;             /* Upgrade: websocket was there        */
     UBYTE   ws_connection;          /* and Connection: listed upgrade      */
     UBYTE   ws_owner;               /* this connection holds the Shell     */
+    UBYTE   ws_take;                /* ?take=1: claim it from whoever has  */
     UWORD   ws_version;
     char    ws_key[HTTPD_WS_KEY_MAX];
 
@@ -1268,6 +1269,7 @@ static VOID httpd_reset(HttpConn *c)
     c->owner[0]   = '\0';
 
     c->is_term       = 0;
+    c->ws_take       = 0;
     c->ws_upgrade    = 0;
     c->ws_connection = 0;
     c->ws_version    = 0;
@@ -3725,6 +3727,77 @@ static VOID httpd_term_page_get(HttpConn *c)
 }
 
 /*
+ * TAKE THE TERMINAL OFF WHOEVER HAS IT.  TRUE when somebody was let go of.
+ *
+ * WHY THIS EXISTS
+ *
+ *   "One session at a time" is right -- there is one Shell -- but it was a
+ *   rule with no exit.  A browser that goes away CLEANLY is fine: the tab
+ *   sends a close frame, or at worst the socket sends a FIN, and httpd_close()
+ *   ends the Shell.  A browser that goes away because the network did sends
+ *   NEITHER, and nothing downstream of a silent socket ever concludes
+ *   anything.  Measured on a live machine: every later visitor got "somebody
+ *   else has the terminal", indefinitely, and it took a restart.
+ *
+ * STALE IS AUTOMATIC.  LIVE NEEDS ASKING.
+ *
+ *   A session that has been pinged and did not answer is not somebody, and
+ *   taking it needs no permission: this is the case the bug was, and it now
+ *   costs the next visitor one retry and nothing else.
+ *
+ *   A session that IS answering is a person, and the newest asker is not
+ *   automatically more entitled than they are -- and, more practically, two
+ *   tabs both reconnecting would evict each other for ever.  So a live one is
+ *   taken only when the request asked, `?take=1`, which the refused page
+ *   offers as a button.  There is nothing to protect by refusing outright:
+ *   this server has no credential of any kind, and whoever can reach the port
+ *   already has the machine.
+ *
+ * WHAT THE CALLER STILL HAS TO DO
+ *
+ *   Nothing here starts a Shell.  Ending the old session is not instant --
+ *   the Shell has to notice its end of file, and if it is inside a command
+ *   that takes a Ctrl-C and a moment -- so the answer is still 503, with a
+ *   Retry-After of one second instead of five.  Blocking the whole server in
+ *   a wait loop to be able to answer 101 on the first try was the alternative
+ *   and it is worse: httpd is one process and every other connection would
+ *   stop with it.
+ */
+static BOOL httpd_term_reclaim(HttpConn *asking, ULONG now)
+{
+    ULONG i;
+
+    for (i = 0; i < httpd_conns; i++)
+    {
+        HttpConn *h = &httpd_conn[i];
+
+        if (h == asking || h->state == CONN_FREE || !h->ws_owner)
+            continue;
+
+        if (!asking->ws_take &&
+            !http_term_sock_stale(&h->ws, now, httpd_timeout))
+            return FALSE;
+
+        if (httpd_verbose || httpd_trace)
+            httpd_log(h, "terminal taken over (%s)",
+                      (LONG)(asking->ws_take ? "asked for" : "stopped answering"),
+                      0);
+
+        http_term_sock_evict(&h->ws, HTTP_WS_CLOSE_GOING);
+        httpd_close(h);
+        return TRUE;
+    }
+
+    /*
+     * Nobody holds it and it is still not available: the last Shell is on its
+     * way out and has not finished.  Not a takeover, and the caller says
+     * "come back" rather than "released", because the difference is whether
+     * one more second will help.
+     */
+    return FALSE;
+}
+
+/*
  * The upgrade.  Everything RFC 6455 4.2.1 requires of the request is checked
  * here and each failure has its own answer, because "400" for all of them
  * tells a client nothing it can act on and this is the one exchange in the
@@ -3785,13 +3858,24 @@ static VOID httpd_do_terminal(HttpConn *c)
 
     if (!http_term_available())
     {
-        /* One Shell at a time; see httpterm.h.  503 rather than 409 because
-           it is a resource this server has one of, and a client that waits
-           and asks again is doing the right thing. */
+        /*
+         * One Shell at a time; see httpterm.h.  503 rather than 409 because
+         * it is a resource this server has one of, and a client that waits
+         * and asks again is doing the right thing.
+         *
+         * But "somebody else has it" was, until this, a sentence with no way
+         * out of it.  A tab that goes away when the NETWORK does sends no FIN
+         * and no close frame, so the session it held stayed held; every later
+         * visitor was refused, for ever, and the machine had to be restarted
+         * to get a Shell back.
+         */
+        BOOL took = httpd_term_reclaim(c, httpd_now());
+
         httpd_begin(c, 503);
-        httpd_header(c, "Retry-After", "5");
+        httpd_header(c, "Retry-After", took ? "1" : "5");
         httpd_body_text(c, "text/plain; charset=iso-8859-1",
-                        "Somebody else has the terminal.\r\n");
+                        took ? "The terminal has been released; ask again.\r\n"
+                             : "Somebody else has the terminal.\r\n");
         return;
     }
 
@@ -5392,6 +5476,33 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
             hs_copy(c->path.url, sizeof(c->path.url), HTTPD_TERM_URL);
             c->path.path[0] = '\0';
             c->path.name[0] = '\0';
+
+            /*
+             * ...with the one exception: `?take=1` is a request to take the
+             * terminal off whoever has it.  Read HERE, where the query
+             * already has to be found and skipped, rather than by parsing it
+             * again somewhere else.
+             *
+             * A whole query parser would be four functions for one flag; this
+             * looks for the parameter anywhere in the string, which cannot be
+             * wrong about anything else because no other parameter is read.
+             */
+            if (httpd_target[n] == '?')
+            {
+                ULONG i;
+
+                for (i = n + 1UL; httpd_target[i] != '\0'; i++)
+                {
+                    if (hs_nicmp(&httpd_target[i], "take=1", 6) == 0 &&
+                        (i == n + 1UL || httpd_target[i - 1] == '?' ||
+                         httpd_target[i - 1] == '&'))
+                    {
+                        c->ws_take = 1;
+                        break;
+                    }
+                }
+            }
+
             return TRUE;
         }
     }
