@@ -228,26 +228,22 @@ recv 400 = 200
 # segment, so "which segment was skipped" is a question the capture can
 # answer.
 
-# RFC 2018 section 4: data a block covers is not retransmitted.  Three
-# segments go out, the peer acknowledges none of them and says it holds the
-# middle one, and the retransmission must therefore carry the first and the
-# third and not the second.
+# RFC 2018 section 4: data a block covers is not retransmitted.  Four segments
+# go out, the peer acknowledges none of them and says it holds the second and
+# the fourth, so the retransmission carries the first and the third and steps
+# over the two it named.
 #
-# THIS CASE IS RED, DELIBERATELY, AND IT IS THE POINT OF THE FILE'S SECOND
-# HALF.  The stack retransmits 1:101 and stops: it never sends 201:301, so
-# `tx PA seq=201` times out.  Measured on 2026-08-11 both without the send
-# side and with fork branch amiga-tcp-sack-transmit-merged
-# (netxduo ec4fd9cc) built in, byte for byte the same both times, with
-# _nx_tcp_sack_option_get present in libnetxduo.a on the second.
+# Both holes are below the highest byte any block reports, which is what makes
+# the case discriminate.  A hole above it is not known to be lost -- RFC 6675
+# IsLost() wants SACKed data above a sequence number before it will call that
+# number lost -- so a segment past the last block is left to the retransmission
+# timer, and asserting on one would fail against a correct stack.  That was the
+# defect in the first draft of this case.
 #
-# So the branch does not do what it says on the case that matters, and this
-# is the case docs/BACKLOG.md asked for before it could land.  What has NOT
-# been established is which of the two is wrong -- the branch, or this case's
-# assumption that three duplicate acknowledgments at MSS 100 put the socket
-# into fast recovery at all.  Instrumenting the guest to tell them apart
-# needs serial output the tcpdrill runs do not currently produce.
-#
-# Do not delete this case to make the file green.  Its failure is the finding.
+# Red without the send side: fast recovery there resends one packet and stops
+# (nx_tcp_socket_retransmit.c, "During fast recovery, only one packet is
+# retransmitted at once"), so `tx PA seq=201` times out.  Green with fork
+# branch amiga-tcp-sack-transmit-merged.
 case s13_a_block_makes_the_retransmission_skip_that_segment
 socket
 connect
@@ -260,14 +256,20 @@ send 100
 tx PA seq=101 ack=1 len=100
 send 100
 tx PA seq=201 ack=1 len=100
-# Three duplicate acknowledgements, each carrying the same block: the peer has
-# 101:201 and is missing 1:101.  RFC 5681 section 3.2 counts these.
-rx A seq=1 ack=1 win=8192 sack=101:201
-rx A seq=1 ack=1 win=8192 sack=101:201
-rx A seq=1 ack=1 win=8192 sack=101:201
-# The hole first, then past it to the segment the peer never mentioned.
+send 100
+tx PA seq=301 ack=1 len=100
+# Three duplicate acknowledgements, each carrying the same two blocks: the peer
+# has 101:201 and 301:401 and is missing 1:101 and 201:301.  RFC 5681 section
+# 3.2 counts these.
+rx A seq=1 ack=1 win=8192 sack=101:201,301:401
+rx A seq=1 ack=1 win=8192 sack=101:201,301:401
+rx A seq=1 ack=1 win=8192 sack=101:201,301:401
+# The first hole, then straight past the block to the second, in the same
+# round rather than one per round trip.
 tx PA seq=1 ack=1 len=100 within=4000
-tx PA seq=201 ack=1 len=100 within=4000
+tx PA seq=201 ack=1 len=100 within=300
+# And nothing else: neither block is resent, and 301:401 is not walked past.
+notx 600
 rx R seq=1 ack=1
 
 # AND THE SKIP IS CONDITIONAL.  The same three segments and the same three
