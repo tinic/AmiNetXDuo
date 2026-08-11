@@ -271,3 +271,17 @@ if(AMIGA_NDK_INCLUDE)
 endif()
 target_compile_options(test_evpost PRIVATE -Wall -Wextra)
 set_target_properties(test_evpost PROPERTIES OUTPUT_NAME "EvPost")
+
+# ShutProbe asks what a shutdown does to the programs using the network: two
+# holder processes, one blocked inside the library in WaitSelect() and one
+# waiting on its own signals outside it, then the command, then the grace
+# period.  It reads bsdsocket.library's open count off the master base in
+# SysBase->LibList rather than through a base of its own, because opening the
+# library to look at it would restart a stack that had just gone down.
+add_executable(test_shutprobe shutprobe.c)
+target_include_directories(test_shutprobe PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_shutprobe PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_shutprobe PRIVATE -Wall -Wextra)
+set_target_properties(test_shutprobe PROPERTIES OUTPUT_NAME "ShutProbe")

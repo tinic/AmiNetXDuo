@@ -7,6 +7,12 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
+## Unreleased
+
+- `NetShutdown` tells every program using the network to stop, the same `SIGBREAKF_CTRL_C` AmiTCP and Roadshow send, waits `TIMEOUT` seconds for them to close the library, and then shuts the stack down and gives its memory back. It used to take the interfaces down and leave `httpd`, `nc` and everything else running against a network that had gone, with the library resident until a reboot
+- `NetShutdown` names the programs that did not let go, and returns `WARN` rather than `OK` when there are any
+- `ShowNetStatus USERS` lists the programs that have the network open and how many sockets each holds
+
 ## 0.21.0
 
 - The name servers a router advertises are listed by `ShowNetStatus` and handed to a program that asks, instead of only being used behind the scenes. The configuration had nowhere to keep an IPv6 address, so every report showed none while lookups went through one

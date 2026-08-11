@@ -479,7 +479,26 @@ VOID tool_explain_no_stack(VOID)
         return;
     }
 
+    /*
+     * And where the reason is.
+     *
+     * This one line is every command's whole account of a network that did not
+     * come up, and "not started" is the symptom rather than the cause: a
+     * driver that is not installed, a card on a different unit, and one that
+     * opens and then refuses S2_CONFIGINTERFACE all reach it identically.
+     * AddNetInterface does diagnose all three, through tool_explain_device(),
+     * and CheckNetConfig reads the files -- but nothing said so, so the reader
+     * of this line had nowhere to go.
+     *
+     * A pointer and not a second diagnosis: tool_explain_device() lives in
+     * tool_devdiag.c precisely so its driver table and its prose stay out of
+     * the commands that cannot reach them, and calling it from here, in
+     * TOOLS_COMMON_SOURCES, would put 3.8 KB back into every binary to say
+     * something one command already says better.
+     */
     tool_printf("%s: network not started\n", (LONG)tool_name);
+    tool_printf("  AddNetInterface <interface> starts it and says why it will\n");
+    tool_printf("  not start; CheckNetConfig reads the configuration files.\n");
 }
 
 /* ------------------------------------------------------------ stack state, */

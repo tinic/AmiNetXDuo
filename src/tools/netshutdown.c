@@ -1,26 +1,45 @@
 /*
- * NetShutdown, take every network interface down.
+ * NetShutdown, stop the network and the programs using it.
  *
  *     NetShutdown TIMEOUT/N,QUIET/S
  *
- * The counterpart of AddNetInterface. TIMEOUT is how many seconds to wait for
- * the interfaces to reach the down state, five by default; the transition is
- * synchronous so it is normally instant, and running out of the wait is
- * reported rather than hidden.
+ * The counterpart of AddNetInterface. It does three things, in this order:
  *
- * It does not unload the stack, despite the name. The stack is a singleton
- * inside bsdsocket.library, coming up on that library's first OpenLibrary() and
- * going down when the last opener closes (src/bsdsocket/library.c).
- * AddNetInterface starts the network by opening the library and never closing
- * it, and that leaked reference keeps the interface up after the command exits.
- * No other command holds that reference, so no other command can drop it:
- * bsdsocket.library stays in memory with its ThreadX kernel running until a
- * reboot.
+ *   1  tells every program that has bsdsocket.library open that the network is
+ *      stopping, by sending it SIGBREAKF_CTRL_C (NETCTRL_STACK_NOTIFY), and
+ *      waits up to TIMEOUT seconds, five by default, for them to close it.
+ *   2  takes every interface down, the same NETCTRL_INTERFACE_DOWN Offline
+ *      makes, so nothing is sent and nothing is received afterwards.
+ *   3  gives back the reference AddNetInterface left behind
+ *      (NETCTRL_STACK_RELEASE), so the last CloseLibrary() shuts the stack
+ *      down and hands its memory back rather than finding the library holding
+ *      itself up until a reboot.
  *
- * What is stoppable is the traffic. Every interface is taken down through
- * NETCTRL_INTERFACE_DOWN, the same call Offline makes, reaching
- * nx_ip_driver_interface_direct_command(NX_LINK_DISABLE) and stopping the
- * SANA-II readers with it. Afterwards nothing is sent and nothing is received.
+ * STEP 1 IS NOT NEW BEHAVIOUR, IT IS THE EXISTING CONVENTION. AmiTCP's
+ * api_sendbreaktotasks() signalled SIGBREAKF_CTRL_C to every task on its
+ * socketBaseList, AmiTCP_NG still does, and Roadshow's manual describes this
+ * command as telling "every network program currently running to let go of the
+ * network resources and exit". A program written for any of those already
+ * handles it, because it is the same signal the user sends with Ctrl-C.
+ *
+ * AND IT CANNOT BE MADE TO WORK. Roadshow's own documentation says why: "Unlike
+ * on a Unix system, it is not possible for an Amiga program to be forced to
+ * give up its network resources." A program that ignores the signal keeps its
+ * sockets and keeps the library open, and the only honest thing to do is take
+ * the traffic away, say which program it was, and let the shutdown finish when
+ * that program eventually exits. Nothing here kills a task.
+ *
+ * STEP 2 IS OURS AND NOT ROADSHOW'S. Roadshow deactivates the interfaces only
+ * once every program has let go, so a shutdown that times out there leaves the
+ * network running. This one stops the traffic either way: "NetShutdown" that
+ * leaves the machine on the network is the wrong answer to the question that
+ * was asked, and a program that ignored the request is not a reason to keep
+ * carrying its packets.
+ *
+ * Before this existed the command did step 2 alone, which meant `httpd`
+ * serving a drawer and `nc` holding a listener were still there afterwards,
+ * holding a library whose network had been taken out from under them, and the
+ * stack could not be shut down at all short of a reboot.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -41,8 +60,14 @@ enum
     ARG_COUNT
 };
 
-/* Seconds. Roadshow's default, and generous for a synchronous transition. */
+/* Seconds. Roadshow's default, and the whole budget: the programs' grace
+   period and the wait for the interfaces come out of the same figure. */
 #define NSD_TIMEOUT     5UL
+
+/* How many holders to name. Past this the count is printed and the names are
+   not; a machine with more than this many network programs on it has a reader
+   who wants the number. */
+#define NSD_MAX_OPENERS 12
 
 static BOOL nsd_quiet;
 
@@ -58,12 +83,18 @@ static VOID say(const char *fmt, ...)
     va_end(args);
 }
 
-/* Static: this is most of a Shell command's 4 KB stack on its own. */
+/* Static: these are most of a Shell command's 4 KB stack on their own. */
 static struct
 {
     NetStatusHeader     hdr;
     NetStatusInterface  e[NX_MAX_PHYSICAL_INTERFACES];
 } nsd_ifaces;
+
+static struct
+{
+    NetStatusHeader     hdr;
+    NetStatusOpener     e[NSD_MAX_OPENERS];
+} nsd_openers;
 
 /*
  * How many interfaces are up right now. The whole table is re-read each time
@@ -96,6 +127,67 @@ static LONG count_up(struct Library *base)
     return up;
 }
 
+/*
+ * The programs holding the library open, this one excluded. Fills the table
+ * and returns how many there are, which may be more than it could list.
+ *
+ * A base whose task has exited is counted: it is holding a reference that will
+ * never be given back, and a shutdown that waits for it waits forever, so the
+ * wait below has to be able to see it and give up.
+ */
+static LONG others_holding(struct Library *base, LONG *listed)
+{
+    LONG n;
+    LONG i;
+    LONG others = 0;
+
+    if (listed != NULL)
+        *listed = 0;
+
+    n = tool_netstatus_query(base, NETSTATUS_OPENERS, &nsd_openers,
+                             sizeof(nsd_openers), sizeof(NetStatusOpener));
+    if (n < 0)
+        return -1;
+
+    for (i = 0; i < n && i < NSD_MAX_OPENERS; i++)
+    {
+        if (nsd_openers.e[i].nso_Flags & NETSTATUS_OPENER_SELF)
+            continue;
+
+        if (listed != NULL)
+            nsd_openers.e[(*listed)++] = nsd_openers.e[i];
+    }
+
+    /* nsh_Available is the true count; the table may hold fewer. */
+    others = (LONG)nsd_openers.hdr.nsh_Available - 1;
+
+    return (others > 0) ? others : 0;
+}
+
+/* "httpd, nc and 2 more", from whatever the last others_holding() listed. */
+static VOID name_them(LONG listed, LONG total)
+{
+    LONG i;
+
+    for (i = 0; i < listed; i++)
+    {
+        const NetStatusOpener *o = &nsd_openers.e[i];
+        const char            *name;
+
+        name = (o->nso_Name[0] != '\0') ? o->nso_Name : "an unnamed program";
+
+        if (o->nso_Flags & NETSTATUS_OPENER_GONE)
+            say("  %s (exited without closing the library)\n", (LONG)name);
+        else if (o->nso_Sockets != 0)
+            say("  %s, %ld socket(s)\n", (LONG)name, (LONG)o->nso_Sockets);
+        else
+            say("  %s\n", (LONG)name);
+    }
+
+    if (total > listed)
+        say("  and %ld more\n", (LONG)(total - listed));
+}
+
 int main(int argc, char **argv)
 {
     LONG             args[ARG_COUNT];
@@ -103,9 +195,12 @@ int main(int argc, char **argv)
     struct Library  *base;
     NetStatusControl ctl;
     ULONG            timeout;
-    ULONG            waited  = 0;
-    LONG             stopped = 0;
-    LONG             failed  = 0;
+    ULONG            waited   = 0;
+    LONG             stopped  = 0;
+    LONG             failed   = 0;
+    LONG             holding;
+    LONG             listed   = 0;
+    BOOL             stopped_waiting = FALSE;
     LONG             n;
     LONG             i;
     ULONG            w;
@@ -125,7 +220,7 @@ int main(int argc, char **argv)
     {
         tool_fault(IoErr());
         tool_usage("[TIMEOUT <secs>] [QUIET]",
-                   "Take every network interface down.");
+                   "Stop the network and the programs using it.");
         return RETURN_ERROR;
     }
 
@@ -154,6 +249,54 @@ int main(int argc, char **argv)
         FreeArgs(rda);
         return RETURN_FAIL;
     }
+
+    /* ---- 1: tell the programs using it -------------------------------- */
+
+    holding = others_holding(base, &listed);
+
+    if (holding > 0)
+    {
+        LONG err = 0;
+
+        say("%ld program(s) are using the network:\n", holding);
+        name_them(listed, holding);
+
+        for (w = 0; w < (ULONG)(sizeof(ctl) / sizeof(ULONG)); w++)
+            ((ULONG *)&ctl)[w] = 0;
+
+        if (tool_netstatus_control(base, NETCTRL_STACK_NOTIFY, &ctl,
+                                   &err) != 0)
+        {
+            /* An older library has no such operation. Everything below it
+               still works, and this is the half that needs the pair to match,
+               so say which half is missing rather than failing the command. */
+            tool_error("this bsdsocket.library cannot tell them to stop, so "
+                       "they will not be asked");
+            holding = 0;
+        }
+        else
+        {
+            say("Asked them to stop, waiting up to %lu second(s).\n", timeout);
+
+            while ((holding = others_holding(base, &listed)) > 0)
+            {
+                if (waited >= timeout)
+                    break;
+
+                if (tool_delay_ticks((ULONG)TICKS_PER_SECOND))
+                {
+                    /* Roadshow's third outcome, and the same words: the
+                       shutdown was already asked for and cannot be recalled. */
+                    stopped_waiting = TRUE;
+                    break;
+                }
+
+                waited++;
+            }
+        }
+    }
+
+    /* ---- 2: take the traffic away ------------------------------------- */
 
     n = tool_netstatus_query(base, NETSTATUS_INTERFACES, &nsd_ifaces,
                              sizeof(nsd_ifaces), sizeof(NetStatusInterface));
@@ -195,20 +338,12 @@ int main(int argc, char **argv)
         stopped++;
     }
 
-    if (stopped == 0 && failed == 0)
-    {
-        say("Every interface was already down.\n");
-        tool_netstatus_close(base);
-        FreeArgs(rda);
-        return RETURN_OK;
-    }
-
     /*
      * Wait for the table to agree. The transition is synchronous, so the first
      * look normally finds nothing left to wait for; the loop covers the case
-     * TIMEOUT is about.
+     * TIMEOUT is about, out of whatever is left of it.
      */
-    for (;;)
+    while (!stopped_waiting && (stopped != 0 || failed != 0))
     {
         LONG still_up = count_up(base);
 
@@ -219,23 +354,59 @@ int main(int argc, char **argv)
         {
             tool_error("%ld interface(s) were still up %lu seconds after "
                        "being told to stop", still_up, timeout);
-            tool_netstatus_close(base);
-            FreeArgs(rda);
-            return RETURN_WARN;
+            failed++;
+            break;
         }
 
         if (tool_delay_ticks((ULONG)TICKS_PER_SECOND))
         {
-            tool_netstatus_close(base);
-            FreeArgs(rda);
-            tool_fault(ERROR_BREAK);
-            return RETURN_WARN;
+            stopped_waiting = TRUE;
+            break;
         }
 
         waited++;
     }
 
+    /* ---- 3: give the network's own reference back --------------------- */
+
+    /*
+     * After the interfaces, not before: while it is held the stack cannot go
+     * down under us, and once it is given back the last CloseLibrary() takes
+     * the stack with it -- which may be the one at the bottom of this
+     * function.
+     *
+     * A refusal is not reported. The only one is "the caller is the last
+     * reference", which means this command is about to shut the stack down by
+     * closing its own base, which is the outcome asked for.
+     */
+    for (w = 0; w < (ULONG)(sizeof(ctl) / sizeof(ULONG)); w++)
+        ((ULONG *)&ctl)[w] = 0;
+
+    (VOID)tool_netstatus_control(base, NETCTRL_STACK_RELEASE, &ctl, NULL);
+
+    /* ---- and what happened -------------------------------------------- */
+
+    holding = others_holding(base, &listed);
+
     tool_netstatus_close(base);
+
+    if (stopped_waiting)
+    {
+        say("\nStopped waiting. The network is stopped either way, and it\n"
+            "will finish shutting down when the programs below let go.\n");
+    }
+
+    if (holding > 0)
+    {
+        say("\n%ld program(s) did not let go of the network:\n", holding);
+        name_them(listed, holding);
+        say("Nothing is sent or received now. bsdsocket.library stays in\n"
+            "memory until they close it, and the stack goes with the last\n"
+            "one.\n");
+
+        FreeArgs(rda);
+        return RETURN_WARN;
+    }
 
     if (failed > 0)
     {
@@ -243,12 +414,14 @@ int main(int argc, char **argv)
         return RETURN_WARN;
     }
 
-    say("\nThe network is stopped: nothing is sent and nothing is received.\n");
-    say("bsdsocket.library stays in memory with the stack inside it. The\n");
-    say("reference that keeps it there belongs to whatever started the\n");
-    say("network, and only a reboot drops it. Online <interface> starts a\n");
-    say("stopped interface again.\n");
+    if (stopped == 0)
+        say("Every interface was already down.\n");
+
+    say("\nThe network is stopped and nothing is left using it, so\n"
+        "bsdsocket.library and the stack inside it have gone with the last\n"
+        "program that closed it. Online <interface> or AddNetInterface\n"
+        "starts the network again.\n");
 
     FreeArgs(rda);
-    return RETURN_OK;
+    return (stopped_waiting) ? RETURN_WARN : RETURN_OK;
 }
