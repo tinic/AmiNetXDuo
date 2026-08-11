@@ -5,124 +5,79 @@
 Use [GitHub's private vulnerability reporting](https://github.com/tinic/AmiNetXDuo/security/advisories/new).
 It is enabled on this repository, so a report stays private until there is a fix
 to publish alongside it. A public issue is fine for anything already public, or
-for a crash whose cause is not yet known to be reachable from the network.
+for a crash not yet known to be reachable from the network.
 
 There is no bounty and no guaranteed response time. This is a hobby project.
 
 A useful report says which build (`--version` on any command prints it), which
 SANA-II driver and card, and what the machine received or was asked to do. A
-serial log from a debug build (`-DAMINETXDUO_LOG_LEVEL=2`) is worth more than a
-description of the symptom.
+serial log from a build configured with `-DAMINETXDUO_LOG=ON` is worth more than
+a description of the symptom — a shipped build compiles the log away entirely,
+so silence on the serial port from one is not evidence.
 
-## What an attacker gets if this stack has a bug
+## Supported versions
 
-AmigaOS has no memory protection and no privilege separation. `bsdsocket.library`
-runs in the same address space as every other program on the machine, and
-`sana2.device` receive callbacks run at interrupt level. A buffer overrun here is
-not contained by anything: it is arbitrary memory corruption on a machine where
-the debugger, the file system and the user's data share one flat address space.
+The latest release. This is a 0.x project and fixes go forward, not backward.
 
-That is a property of the platform in 1985 and cannot be engineered away. It is
-the reason the parsers matter more than they would on a modern OS, and the reason
-this document names its untested parts rather than only its tested ones.
+## What a bug here costs
+
+AmigaOS has no memory protection and no privilege separation.
+`bsdsocket.library` runs in the same address space as every other program on the
+machine, and `sana2.device` receive callbacks run at interrupt level. A buffer
+overrun is not contained by anything: it is arbitrary memory corruption on a
+machine where the debugger, the file system and the user's data share one flat
+address space. That is a property of the platform and cannot be engineered away.
 
 ## The trust boundary
 
-**Untrusted, anything reachable from the network:**
+Untrusted — anything reachable from the network:
 
-| what | parsed by |
+| Input | Parsed by |
 |---|---|
 | IPv4/IPv6, TCP, UDP, ICMP, ICMPv6, ARP, neighbour discovery | NetX Duo |
 | DHCP and DHCPv6 responses, router advertisements | NetX Duo |
 | DNS responses, including compression pointers | `src/netstack/netstack_dns.c` |
-| mDNS queries and responses, unauthenticated multicast from any host on the segment | `src/netstack/netstack_mdns.c` |
+| mDNS queries and responses — unauthenticated multicast from any host on the segment | `src/netstack/netstack_mdns.c` |
 | TLS records and X.509 certificate chains | NX Secure, in `tls.library` |
-| SSH protocol | Dropbear's `dbclient`, vendored in `clients/` |
-| HTTP requests, chunked bodies and WebDAV XML, from any client that reaches the port, with no authentication anywhere in the server | `src/tools/httpd.c` |
+| SSH protocol | Dropbear's `dbclient`, `clients/dropbear/` |
+| HTTP requests, chunked bodies and WebDAV XML, from any client that reaches the port, **with no authentication anywhere in the server** | `src/tools/httpd.c` |
 
-**Trusted, and worth knowing that it is:**
+Trusted, and worth knowing that it is:
 
-- `DEVS:NetInterfaces/`, `DEVS:Internet/` and `ENV:`, whoever writes those
-  configures the machine, and is assumed to be its owner.
-- The SANA-II driver. It is third-party code the stack hands buffers and
-  callbacks to, and it can write wherever it likes. This is not theoretical:
-  `x-surf-100.device` 1.16 stops calling the buffer-management callbacks it was
-  given and walks `ios2_Data` as an AmiTCP mbuf chain when it finds an `AMITCP`
-  public port, which for this stack meant copying received frame bytes to an
-  address read out of a structure that is not an mbuf. Fixed in 0.12.2 by
-  removing the port across `OpenDevice()`; `docs/RESEARCH.md` §71 has the
-  disassembly. A driver is inside the boundary whether or not it deserves to be.
-- BPF filter programs. `bpf_*` compiles and runs filters from a local process;
-  the VM bounds-checks, but the interface is local, not remote.
+| Inside the boundary | Why that matters |
+|---|---|
+| `DEVS:NetInterfaces/`, `DEVS:Internet/`, `ENV:` | whoever writes those configures the machine, and is assumed to be its owner |
+| The SANA-II driver | third-party code the stack hands buffers and callbacks to, and it can write wherever it likes. Not theoretical: `x-surf-100.device` 1.16 stops calling the buffer-management callbacks it was given and walks `ios2_Data` as an AmiTCP mbuf chain whenever it finds an `AMITCP` public port. A driver is inside the boundary whether or not it deserves to be |
+| BPF filter programs | `bpf_*` compiles and runs filters from a local process. The VM bounds-checks, but the interface is local, not remote |
 
-## What is tested, and how
+## What is tested
 
-- **`bsdsocktest`**, an independent conformance suite written for this ABI by
-  someone else. 142/142 on a bridged real network; 130/142 with 12 skipped on
-  loopback, where the skipped tests need a second machine. Roadshow scores 138.
-- **Fuzzing**, `fuzz_config` over the configuration parsers, `fuzz_bpf` over the
-  filter VM, `fuzz_dns` over DNS responses and `fuzz_mdns` over mDNS, all under
-  ASan and UBSan on the host and all in `ctest`. Every parser that reads a file
-  out of `DEVS:` is in `fuzz_config`, including
-  `DEVS:Internet/service_discovery`, which additionally
-  gets its own sweep on its own seed so a failure names the parser.
-  `fuzz_dns` drives the real client through
-  `_nx_dns_response_receive()`, the name unencoder and the resource walk, with
-  compression pointers that point at themselves, cycle, or run past the
-  datagram: 250,128 datagrams across two seeds, no undefined behaviour. The one
-  UB found during that work was in the harness, a packet pool aligned to the
-  target's 4 bytes on a host needing 8, not in a parser.
-  `fuzz_mdns` enters at `_nx_mdns_thread_entry()`, so the module's own receive
-  loop, interface lookup and `_nx_mdns_packet_process()` run for real: queries,
-  answers, cache-flush records, conflicts and goodbyes, 500,250 datagrams across
-  five seeds, clean. It needs a 32-bit build, because NetX Duo's mDNS cache
-  stores pointers in single `ULONG` slots and spins inside `nx_mdns_enable()`
-  where they are 8 bytes wide; `tools/ci.sh host32` is that build, and it counts
-  the tests it ran so a 64-bit configuration cannot report a green stage that
-  registered none. This one can fail: reverting netxduo `6baec373`, which fixed a
-  signed shift on the first byte of every A record, makes `fuzz_mdns -s` abort
-  on its own seed corpus with the UB that patch removed.
-- **Static analysis**, GCC `-fanalyzer` over the whole tree against a triaged
-  baseline of 13 findings, in CI, warnings fatal. cppcheck against a separate
-  baseline of 18, run locally rather than in CI because its output moves between
-  its own releases.
-- **Seven build configurations** in CI, including 68000, 68040 and 68060, and the
-  builds with IPv6 and with TLS turned off.
-- **Enforcer and MungWall** runs under emulation, which is how illegal accesses
-  and freed-memory writes surface on a machine with no MMU.
-- **Real hardware**, an A3000/060 with an X-Surf-100, by a user, which is where
-  two bugs were found that emulation had not.
+| | |
+|---|---|
+| Conformance | `bsdsocktest`, an independent suite written for this ABI by someone else. `tests/conformance/run-fsuae.sh` |
+| Fuzzing, host, ASan + UBSan, in `ctest` | `fuzz_config` (every parser that reads a file out of `DEVS:`), `fuzz_bpf`, `fuzz_dns`, `fuzz_usergroup`, `fuzz_dhcp`, `fuzz_tls_record`, `fuzz_tls_x509`, `fuzz_httpframe` |
+| Fuzzing needing a 32-bit build (`tools/ci.sh host32`) | `fuzz_mdns` and `fuzz_tls_crypto`. NetX Duo's mDNS cache keeps pointers in `ULONG` slots, and the TLS crypto paths cast a pointer to a 32-bit `ULONG` in the signature bounds check itself. The stage counts the tests it ran, so a 64-bit configuration cannot report green having registered none |
+| Fuzz depth | `fuzz_dns` drives the real client through `_nx_dns_response_receive()`, the name unencoder and the resource walk. `fuzz_mdns` enters at `_nx_mdns_thread_entry()`, so the module's own receive loop, interface lookup and packet processing run for real |
+| Static analysis | GCC `-fanalyzer` over the whole tree against a triaged baseline, in CI, warnings fatal. cppcheck against a separate baseline, run locally rather than in CI because its output moves between its own releases |
+| Build configurations | every arm in `CROSS_CONFIGS` (`tools/ci.sh`), including 68000, 68040 and 68060 and the builds with IPv6, TLS, mDNS, multicast, BPF and each TCP option turned off |
+| Emulation | Enforcer and MungWall, which is how illegal accesses and freed-memory writes surface on a machine with no MMU; and every supported network card, one guest each (`tools/ci.sh cards`) |
+| Real hardware | an A3000/060 with an X-Surf-100, by a user, which is where two bugs were found that emulation had not |
 
 ## What is not tested
 
 Stated because a security policy that lists only its strengths is not much use.
 
-- **No audit against published Eclipse ThreadX advisories.** The vendored
-  NetX Duo and ThreadX are 6.5.1, plus eight local patches; whether any known
+- **No audit against published Eclipse ThreadX advisories.** Whether any known
   advisory touches the paths compiled here has not been checked.
-- **`SO_BROADCAST` is permissive.** It is recorded on the socket and read by
-  nothing, so a broadcast `sendto()` without it succeeds where 4.4BSD returns
-  `EACCES`. A divergence, not a memory-safety issue.
-- **TLS certificate validation** has not been tested against a suite of
+- **TLS certificate validation** has not been run against a suite of
   deliberately malformed or hostile chains.
-- The stack has been driven by its own tests, an independent conformance suite
-  and a handful of real clients. It has not been through an adversarial review
-  by anyone.
+- **`SO_BROADCAST` is permissive**: recorded on the socket and read by nothing,
+  so a broadcast `sendto()` without it succeeds where 4.4BSD returns `EACCES`.
+  A divergence, not a memory-safety issue.
+- The stack has not been through an adversarial review by anyone.
 
 ## Provenance
 
 The code was written by Claude (Anthropic's Opus 5) under human direction, which
 [README.md](README.md) states and every commit records in `Co-Authored-By`.
-Nothing about that changes what the tests show, in either direction. Anyone
-weighing whether to trust this stack should weigh the evidence above, and the
-gaps above, on the same terms as for any other implementation.
-
-`docs/RESEARCH.md` is a contemporaneous record rather than a summary written
-afterwards: it includes measurements that were wrong, conclusions that were
-withdrawn, and approaches that were tried and abandoned. For a reader trying to
-judge how carefully something was built, that is more informative than a
-changelog.
-
-## Supported versions
-
-The latest release. This is a 0.x project and fixes go forward, not backward.
+Nothing about that changes what the tests show, in either direction.

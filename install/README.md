@@ -1,93 +1,110 @@
 # install/
 
-The Installer script, the example configuration files, and the tooling that
-proves both of them work.
+The Installer script, the configuration files the archive ships, and the
+tooling that proves both work. `dist/make-dist.sh` assembles all of it into the
+distribution archive.
 
 ```
 Install-AmiNetXDuo          the Installer script
 Install-AmiNetXDuo.info     its icon: project, default tool "Installer"
+Installer                   Commodore's Installer, bundled so an install
+                            needs nothing else on the machine
 AmiNetXDuo.info             drawer icon
 Drawer.info Document.info   generic icons for Docs/, Examples/, ReadMe
 Guide.info                  icon for AmiNetXDuo.guide, default tool "MultiView"
 
 devs/Internet/              protocols, services, networks, shipped as-is
 examples/NetInterfaces/     one commented interface file per card
-examples/Internet/          routes, name_resolution, hosts
+examples/Internet/          routes, name_resolution, hosts, service_discovery
 
 tools/makeicon.py           writes the .info files
 tools/showicon.py           reads one back and draws it, independently
 tools/checkscript.py        static checks on the Installer script
 
-test/installdrive.c         drives the Installer under FS-UAE
+test/run-workbench.sh       installs the archive on a real Workbench 3.1
+test/installdrive.c         drives the Installer inside the guest
 test/bootcheck.c            boots the installed machine and checks it works
-test/run-installer-fsuae.sh one scenario
-test/run-all.sh             all five
+test/icontest.c             hands the generated .info files to icon.library
+test/smbprobe.c             SMB mount probe, driven by test/run-smbmount.sh
+test/peer-drill.sh          what the second machine does to the Amiga
 ```
 
-`dist/make-dist.sh` assembles all of it into the distribution archive.
+The user-facing text in the archive is `dist/ReadMe` and `docs/user/`; this file
+is not shipped.
 
 ## The script
 
 Written for Commodore's Installer, whose language is documented in
 `installer.doc` (Commodore, 9 February 1993) and implemented in the Installer
-2.17 sources.  Where the two disagree, the sources win, `compile.c`'s
-symbol tables are the authority for which keywords exist and which parameters
-are legal in which statement.
+2.17 sources. Where the two disagree the sources win: `compile.c`'s symbol
+tables are the authority for which keywords exist and which parameters are legal
+in which statement.
 
-Three properties of the tool shape the whole script and are worth knowing
-before editing it:
+Three properties of the tool shape the whole script.
 
 **At NOVICE level every `ask...` returns its `(default)` without drawing
-anything, and `(message ...)` prints nothing.**  Novice mode therefore only
-works if every default is independently correct, which is why the network
-card is auto-detected by looking for known drivers in `DEVS:` and
-`DEVS:Networks` and why the address mode defaults to DHCP.  It is also why no
-validation loop may depend on a `(message)` to make progress: at level 0 the
-loop would spin forever behind a blank screen.  Each one is satisfied
-unconditionally when `@user-level` is 0.
+anything, and `(message ...)` prints nothing.** Novice mode therefore only works
+if every default is independently correct, which is why the network card is
+auto-detected from known drivers in `DEVS:` and `DEVS:Networks` and why the
+address mode defaults to DHCP. It is also why no validation loop may depend on a
+`(message)` to make progress — at level 0 that loop spins forever behind a blank
+screen. Each one is satisfied unconditionally when `@user-level` is 0.
 
 **`(startup)` replaces the `;BEGIN AmiNetXDuo` .. `;END AmiNetXDuo` block in
-`S:User-Startup` and leaves every other application's lines alone.**  That is
+`S:User-Startup` and leaves every other application's lines alone.** That is
 what makes re-running the installer safe.
 
-**Two things in the language look like C and are not.**  Both were found by
-running the thing, not by reading about it, and `tools/checkscript.py` now
+**Two things in the language look like C and are not.** `install/tools/checkscript.py`
 tests for both:
 
-* `("fmt" a b)` takes only the *first* element as the format string.
-  Adjacent string literals are not concatenated, so a format spelled as
-  several literals formats the second literal's address through the first
-  one's `%s` and silently drops the rest.  Build long formats with `(cat ...)`
-  and pass the variable.
+* `("fmt" a b)` takes only the *first* element as the format string. Adjacent
+  string literals are not concatenated, so a format spelled as several literals
+  formats the second literal's address through the first one's `%s` and silently
+  drops the rest. Build long formats with `(cat ...)` and pass the variable.
 * A `(choices ...)` list that does not fit on a page is silently truncated:
   `layout_box_gads()` creates fewer gadgets than there are choices,
   `default_radio()` then marks one that does not exist, and the installation
-  dies on "askchoice: No choices selected" with no hint that the labels were
-  too long.  Keep radio labels under about 22 characters and put the detail
-  in the help text.
+  dies on "askchoice: No choices selected" with no hint that the labels were too
+  long. Keep radio labels under 22 characters and put the detail in the help
+  text.
 
 ## Testing
 
 ```sh
-install/test/run-all.sh
+install/test/run-workbench.sh -l AVERAGE -a build/dist/AmiNetXDuo-<version>.lha
+install/test/run-workbench.sh -l AVERAGE -H -a <archive>   # the terminal arm
 ```
 
-Needs, besides the usual FS-UAE setup:
+This is what `tools/ci.sh e2e` runs, and what `.github/workflows/emulator.yml`
+calls in the release job. It stages a bare machine with a real Workbench 3.1,
+runs the real Installer on the unpacked release archive, power-cycles, and
+requires the stock Startup-Sequence to reach `S:User-Startup` and bring the
+network up on its own.
 
-* `build/Installer` or `AMINETXDUO_INSTALLER=<path>`, Commodore's Installer,
-  which is in the root of the Workbench 3.1 Install disk.  Not ours to ship.
-* `build/a2065.device` or `AMINETXDUO_A2065=<path>`.
+`-l` is `NOVICE`, `AVERAGE` or `EXPERT`. `-H` makes the run three installs and
+adds a second machine: it checks that a pre-existing `S:User-Startup` survives,
+that the managed block is replaced rather than appended to, that the third
+install takes the added lines away again, and — while the machine is up — that
+the peer can fetch `/shell`, PUT and GET a file byte-for-byte, and have the
+Amiga `lha x` our own release archive. `AMINETXDUO_PEER` names that machine and
+has no default; the host running the emulator cannot be it, and without one the
+run exits 3 rather than passing.
 
-Each scenario stages a bare machine, an empty `LIBS:`, a `DEVS:` holding
-only the card driver, an empty `S:`, plus the unpacked distribution
-archive, and runs the real Installer on it.  FS-UAE mounts the staging
-directory as a hard drive, so everything the Installer writes lands on the
-host and is checked there.  Then, for every scenario that produces a
-DHCP configuration, the machine is booted again with an emulated A2065 on
-SLIRP and `bootcheck` runs whatever the installer put in `S:User-Startup`
-and requires an address to arrive.
+Ingredients, none of which are ours to ship:
 
-The Installer has no batch mode and its buttons have no keyboard shortcuts,
-so `installdrive` finds the Proceed gadget by its gadget ID and posts the
-window the GADGETUP that Intuition would have posted.  See the comment at the
-top of `test/installdrive.c`.
+| | |
+|---|---|
+| Workbench 3.1 ADFs | `~/amigaos/adf/amiga-wb31_{workbench,extras,fonts,locale,storage}.adf`, or `AMINETXDUO_ADF_DIR` |
+| Kickstart 3.1 | `AMINETXDUO_KICKSTART`, else the A1200 40.68 image |
+| Commodore Installer | `build/Installer`, or `AMINETXDUO_INSTALLER` |
+| `a2065.device` | `build/a2065.device`, or `AMINETXDUO_A2065` |
+| amitools' `xdftool` | `AMINETXDUO_XDFTOOL`, or on `$PATH` (`pip install amitools`) |
+| `lha` | to unpack the archive on the host; Lhasa will do |
+
+`tests/HARNESSES` records the state of every harness here, including the ones
+nothing invokes.
+
+The Installer has no batch mode and its buttons have no keyboard shortcuts, so
+`installdrive` finds the Proceed gadget by its gadget ID and posts the window the
+GADGETUP that Intuition would have posted. See the comment at the top of
+`test/installdrive.c`.

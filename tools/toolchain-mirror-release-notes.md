@@ -29,17 +29,9 @@ tar xJf m68k-amigaos-gcc-15.2.0-ndk3.9-linux-x86_64.tar.xz
 `tools/fetch-toolchain.sh` in this repository does all of that for you, and
 falls back to the upstream registry if this release is unreachable.
 
-## Why it exists
-
-CI needs one specific m68k cross compiler and there is no upstream tarball of
-it, it is published only inside a Docker image. Fetching it meant depending on
-a third-party registry continuing to serve one particular blob digest forever.
-This mirror is a copy we control; the registry remains the fallback, not the
-only path.
-
-Note that the upstream tag says `gcc10` and contains **GCC 15.2.0**. AmigaPorts
-repointed that branch at the `amiga15.2` GCC in October 2025 and did not rename
-the tag. This asset is named for what it actually contains.
+The upstream tag says `gcc10` and contains **GCC 15.2.0**: AmigaPorts repointed
+that branch at the `amiga15.2` GCC in October 2025 and did not rename the tag.
+This asset is named for what it actually contains.
 
 ## Provenance
 
