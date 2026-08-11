@@ -527,6 +527,15 @@ guest_global_v6() {
 
 # An arm that cannot mean anything without that address.
 #
+traceroute/v6-arrives IS in this list, and the -hop arms are not, which looks
+# inconsistent until you look at what each one needs.  A -hop arm needs one
+# router on this link to answer, and a link-local source is enough for that.
+# Arriving needs a globally routable source: on two runs of the same image an
+# hour apart the same command gave hops 1-13 and rc 0, then "cannot send:
+# network unreachable" and rc 10, and the difference was whether the guest had
+# a global address at that moment.  Gating it says so instead of blaming
+# traceroute for the wire.
+#
 # The traceroute -hop arms are deliberately NOT in this list.  They were
 # measured working on a guest that had only a link-local: three IPv6 hops
 # answered against example.com in under 20 ms, so a link-local source is
@@ -539,9 +548,9 @@ guest_global_v6() {
 # row of stars.
 v6_dependent() {
     case "$1" in
-        */v6-hop)             return 1 ;;
-        */v6|literal/v6-ping) return 0 ;;
-        *)                    return 1 ;;
+        */v6-hop)                          return 1 ;;
+        */v6|*/v6-arrives|literal/v6-ping) return 0 ;;
+        *)                                 return 1 ;;
     esac
 }
 
