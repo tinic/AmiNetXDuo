@@ -278,6 +278,15 @@ V4RE='[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+'
 V6RE='[0-9a-fA-F]*:[0-9a-fA-F]*:'
 
 arms() {
+    # A table of one's own, for putting a single arm to the question without
+    # booting the other fifty.  Same seven-and-more fields, same $-expansion;
+    # tests/tools/run-toolleak.sh takes its table the same way.
+    if [ -n "${AMINETXDUO_FAMILY_TABLE:-}" ]; then
+        eval "cat <<EOF
+$(cat "$AMINETXDUO_FAMILY_TABLE")
+EOF"
+        return
+    fi
     cat <<EOF
 # Can this stack answer a AAAA query at all?  nslookup builds the query itself
 # and sends it to a name server, so it reaches no part of the -4/-6 code.  It
