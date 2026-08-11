@@ -198,6 +198,17 @@ else
 fi
 
 EXTRA_C=("$STAGE/c")
+# ssh.  dbclient is built by clients/dropbear/build.sh, NOT by the CMake tree,
+# so a plain `cmake --build` does not produce it and it lands in
+# build/dropbear/dbclient rather than anywhere under clients/.  Staging it
+# from the wrong path is a silent omission -- the Shell simply has no ssh --
+# so say so loudly when it is absent.
+if [ -f "$ROOT/build/dropbear/dbclient" ]; then
+    cp -f "$ROOT/build/dropbear/dbclient" "$STAGE/c/ssh"
+else
+    echo "==> no ssh: run clients/dropbear/build.sh to get one" >&2
+fi
+
 echo "==> C: has $(ls "$STAGE/c" | wc -l | tr -d ' ') commands in it"
 
 echo "Hello from an Amiga." > "$STAGE/Public/readme.txt"
