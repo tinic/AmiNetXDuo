@@ -1895,7 +1895,10 @@ static BOOL bsd_listen_park_one(struct AmiSocketBase *base, AmiSocket *sock)
     }
 
     /* Newest at the head, so bsd_listen_callback() finds the freshest reserve
-       first and a wait suspends on the socket nearest the port. */
+       first. A refused relisten still parks it: the reserves exist precisely
+       to be relistened from the callback, which cannot allocate one. They sit
+       in NX_TCP_CLOSED until then, which is why bsd_accept_once() looks for
+       the socket that is on the port rather than taking this one. */
     spare->as_IncomingNext = sock->as_Incoming;
     sock->as_Incoming      = spare;
     sock->as_IncomingCount++;
@@ -2133,6 +2136,32 @@ AmiSocket *bsd_incoming_first_ready(const AmiSocket *listener)
     return ready;
 }
 
+/*
+ * Which parked socket is the one on the port.
+ *
+ * Not the head of the list. bsd_listen() pre-allocates the rest of the backlog
+ * as reserves and parks them newest-first, and a reserve sits in NX_TCP_CLOSED
+ * until bsd_listen_callback() relistens it, so on a listener nobody has
+ * connected to yet every entry above the first is CLOSED. Only one socket can
+ * hold the port's single listen slot; it is the first entry that has left
+ * CLOSED, which is LISTEN before a SYN and SYN_RECEIVED while one is being
+ * answered.
+ */
+static AmiSocket *bsd_incoming_on_port(const AmiSocket *listener)
+{
+    AmiSocket *p;
+
+    for (p = listener->as_Incoming; p != NULL; p = p->as_IncomingNext)
+    {
+        UINT state = p->as_Nx.tcp.nx_tcp_socket_state;
+
+        if (state == NX_TCP_LISTEN_STATE || state == NX_TCP_SYN_RECEIVED)
+            return p;
+    }
+
+    return NULL;
+}
+
 typedef struct
 {
     AmiSocket *listener;
@@ -2142,6 +2171,7 @@ typedef struct
 UINT bsd_accept_once(VOID *arg, ULONG wait)
 {
     BsdAcceptArgs *a = (BsdAcceptArgs *)arg;
+    AmiSocket     *listening;
     UINT           status;
 
     /* nx_tcp_server_socket_accept() answers NX_NOT_LISTEN_STATE for anything
@@ -2157,13 +2187,23 @@ UINT bsd_accept_once(VOID *arg, ULONG wait)
         return NX_NOT_CONNECTED;
 
     /*
-     * Suspend on the head, which is the socket in LISTEN state and so the one
-     * the next connection lands on. bsd_wait_sliced() calls this again every
+     * Suspend on the socket that is on the port, so the next connection lands
+     * on the one being waited for. bsd_wait_sliced() calls this again every
      * slice, and the sweep above then sees a connection that finished on any
      * of the others, a half-open one at the tail cannot hold the call up.
+     *
+     * This used to take the head unconditionally, and the head of an idle
+     * listener with a backlog is the newest reserve, in NX_TCP_CLOSED.
+     * nx_tcp_server_socket_accept() answers NX_NOT_LISTEN_STATE for that,
+     * which is EINVAL, so a non-blocking accept() on a healthy listener
+     * reported EINVAL where BSD reports EWOULDBLOCK -- bsdsocktest 15. The
+     * suite's other accept() cases connect first and never reach this line.
      */
-    status = nx_tcp_server_socket_accept(&a->listener->as_Incoming->as_Nx.tcp,
-                                         wait);
+    listening = bsd_incoming_on_port(a->listener);
+    if (listening == NULL)
+        return NX_NOT_CONNECTED;
+
+    status = nx_tcp_server_socket_accept(&listening->as_Nx.tcp, wait);
 
     /* "Not connected yet" and "still handshaking" both mean keep waiting, so
        fold them onto NX_NO_PACKET, the status bsd_wait_sliced() slices on. */

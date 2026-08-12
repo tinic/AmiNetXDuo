@@ -117,6 +117,15 @@ done
 # first three bytes with Commodore's OUI (tools/amiberry-run.sh:178-181), so
 # two cards that differ only in the head reach the wire as one machine.  These
 # differ in the last byte and none of them is the demo's :77.
+#
+# eb920 NEEDS AMIBERRY ef28da7e OR LATER.  Before it, `toariadne2()` decoded the
+# LAN Rover's buffer window as `(addr & 0xc000) == 0x8000` with
+# `maddr = addr & 16383`, so only the first 16K of the card's 32K was visible.
+# eb920.device programs PSTART=0x06 PSTOP=0x80, and the moment the receive ring
+# crossed page 0x40 the driver read zeroes where the packet header was, stopped
+# clearing ENISR_RX, and receive died with `bnry=7f curr=4b isr=01`: online, a
+# DHCP lease, one ARP request out, and then the 300 s ceiling with zero bytes
+# either way.  Run with AMIBERRY_NE2000_STATS=1 to get those registers back.
 CARDS="
 a2065          A1200  192.168.1.241  0c:01
 ariadne        A1200  192.168.1.242  0c:02

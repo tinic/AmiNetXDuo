@@ -318,6 +318,25 @@ static VOID probe_audit_fixes(VOID)
     p("accept(addr, addrlen=NULL)   [EFAULT 14]", rc);
     CloseSocket(lst);
 
+    /* bsdsocktest 15, by hand: a non-blocking listener with nothing pending.
+       The suite reports pass/fail only, so a wrong errno and an accept that
+       unexpectedly succeeds look the same there. rc and errno separate them. */
+    lst = socket(AF_INET, SOCK_STREAM, 0);
+    addr_in(&sa, INADDR_LOOPBACK, PORT + 5);
+    rc = bind(lst, (struct sockaddr *)&sa, sizeof(sa));
+    p("bind(127.0.0.1:7705)", rc);
+    rc = listen(lst, 5);
+    p("listen(5)", rc);
+    mask = 1;
+    rc = IoctlSocket(lst, FIONBIO, (APTR)&mask);
+    p("IoctlSocket(FIONBIO,1) listener", rc);
+    sl = sizeof(sa);
+    rc = accept(lst, (struct sockaddr *)&sa, &sl);
+    p("accept(nonblock, none pending) [EWOULDBLOCK 35]", rc);
+    if (rc >= 0)
+        CloseSocket(rc);
+    CloseSocket(lst);
+
     /* "The 'nfds' parameter may be truncated if it covers more sockets than
        are currently in use.", clamped, not EINVAL. */
     tv.tv_secs = 0; tv.tv_micro = 0;
