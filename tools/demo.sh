@@ -358,6 +358,34 @@ if [ -n "$missing" ]; then
     exit 1
 fi
 
+# The wire, from before the guest is on it.
+#
+# A booted guest talks unprompted exactly twice: the gratuitous ARP that
+# claims its lease and the mDNS announcement that claims its name.  Both are
+# over within a second of the stack coming up and neither is a reply, so a
+# sniffer started afterwards -- once the emulator has logged its MAC, which is
+# the same moment -- catches them only by luck.  Start it first and read it
+# later; the filter is by protocol here and by MAC below, because the MAC is
+# not known yet.
+#
+# Not `ether host $MAC and arp`, which was the whole defect: that is an ARP
+# REPLY, and nothing replies unless something asked.  A healthy guest nobody
+# happened to talk to sat undetected for the full 400 s while it was serving.
+if [ "$BACKEND" != slirp ]; then
+    WIRE="$ROOT/build/demo-wire-$AMINETXDUO_RUN_TAG.txt"
+    : > "$WIRE"
+    tcpdump -i "$BACKEND" -n -l -e \
+        "arp or (udp port 67 or udp port 68) or (udp port 5353)" \
+        >> "$WIRE" 2>/dev/null &
+    SNIFFER=$!
+    # INT and TERM, never EXIT: bash runs an EXIT trap in the subshell a
+    # command substitution forks, and the first `MAC=$(grep ...)` below then
+    # killed the sniffer one second after it started.
+    trap 'kill "$SNIFFER" 2>/dev/null || true' INT TERM
+    # tcpdump needs a moment to attach before the guest's first frame.
+    sleep 1
+fi
+
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$BACKEND" -m "$MODEL" -t "$WINDOW" \
     -a "DH0:Public $PORT -T PAGE=DH0:shell.html" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
@@ -413,19 +441,50 @@ else
     }
 
     echo "==> guest MAC $MAC, waiting for a lease"
+    # Three things in the capture carry the address, and the guest sends all
+    # three on its own: the mDNS announcement (an IPv4 source address next to
+    # its MAC), the gratuitous ARP (who-has X tell X, same X), and an ARP
+    # reply if anything did ask.  0.0.0.0 is skipped, which is what the guest
+    # sources its DHCP discover and request from.
+    #
+    # Only lines the guest SENT, so the address taken off one is its own: the
+    # capture also holds the DHCP server answering it, and reading the first
+    # address on one of those lines names the server.
     ADDR=""
-    for _ in $(seq 1 40); do
-        ADDR=$(timeout 10 tcpdump -i "$BACKEND" -n -c 1 \
-                   "ether host $MAC and arp" 2>/dev/null |
-               grep -oE "ARP, Reply [0-9.]+" | grep -oE "[0-9.]+$" || true)
+    for _ in $(seq 1 200); do
+        ADDR=$(grep -iE "^[0-9:.]+ $MAC > " "$WIRE" 2>/dev/null | awk '
+            /ethertype IPv4/ {
+                for (i = 1; i <= NF; i++)
+                    if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
+                        split($i, a, ".")
+                        ip = a[1] "." a[2] "." a[3] "." a[4]
+                        if (ip != "0.0.0.0") { print ip; exit }
+                    }
+            }
+            /Reply [0-9.]+ is-at/ {
+                for (i = 1; i <= NF; i++)
+                    if ($i == "Reply") { print $(i + 1); exit }
+            }
+            /who-has [0-9.]+ tell/ {
+                for (i = 1; i <= NF; i++)
+                    if ($i == "tell") {
+                        ip = $(i + 1); sub(/,$/, "", ip)
+                        if (ip != "0.0.0.0") { print ip; exit }
+                    }
+            }' | head -1 || true)
         [ -n "$ADDR" ] && break
+        sleep 2
     done
 
     [ -n "$ADDR" ] || {
+        kill "$SNIFFER" 2>/dev/null || true
         echo "no lease seen for $MAC on $BACKEND after 400s" >&2
         echo "the emulator is still running as pid $RUNNER; see $EMU" >&2
+        echo "what was on the wire is in $WIRE" >&2
         exit 1
     }
+    kill "$SNIFFER" 2>/dev/null || true
+    trap - INT TERM
 fi
 
 
