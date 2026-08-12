@@ -573,7 +573,21 @@ int main(void)
     h_run_timer(600, 0);
     h_print_ladder("idle socket");
 
+#ifdef NX_ENABLE_TCP_LOSS_PROBE
+    /*
+     * Seven datagrams, and the first of them is not a retry.  RFC 8985 section
+     * 7.2's tail loss probe goes out a fraction of a second in and leaves
+     * nx_tcp_socket_timeout_retries where it found it, so the six rungs after
+     * it are the same six and the connection is still abandoned at 127 s.  One
+     * probe per transmit high water mark, so a socket that stays silent gets
+     * exactly the one.
+     */
+    h_check(h_r.sent == 7, "wrong number of retransmissions before giving up");
+    h_check(h_r.sent_at[0] == 0,
+            "the tail loss probe did not come before the first rung");
+#else
     h_check(h_r.sent == 6, "wrong number of retransmissions before giving up");
+#endif
     h_check(h_r.reset == 1, "the retransmission limit never reset the connection");
     h_check(h_r.reset_at == 127, "the connection was not abandoned at 127 s");
     h_check(h_sock.nx_tcp_socket_state == NX_TCP_CLOSED,
@@ -628,7 +642,11 @@ int main(void)
     h_run_timer(600, H_APP_WRITES);
     h_print_ladder("caller retrying its write");
 
+#ifdef NX_ENABLE_TCP_LOSS_PROBE
+    h_check(h_r.sent == 7, "a blocked caller changed the retransmission budget");
+#else
     h_check(h_r.sent == 6, "a blocked caller changed the retransmission budget");
+#endif
     h_check(h_r.reset == 1, "a blocked caller stopped the connection giving up");
     h_check(h_r.reset_at == 127,
             "a blocked caller moved when the connection was abandoned");
