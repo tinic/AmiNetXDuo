@@ -26,8 +26,8 @@
  * DHCPv6 is not used. NetX Duo ships a client (addons/dhcp/nxd_dhcpv6_client.c)
  * but it is 40 KB of code before its own IANA/IAID option handling, needs its
  * own thread and UDP socket, and answers what SLAAC already answers on the
- * networks an Amiga is likely to be on; the floor target is a 68020 with 4 MB
- * (docs/RESEARCH.md §9). For a stateful-only network, the addon would be
+ * networks an Amiga is likely to be on; the floor target is a 68000 with 1 MB
+ * (docs/RESEARCH.md §81). For a stateful-only network, the addon would be
  * wired up here.
  *
  * SPDX-License-Identifier: MIT

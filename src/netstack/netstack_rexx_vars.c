@@ -12,8 +12,7 @@
  * so there was nothing to copy.
  *
  * Two programs in the corpus read the variable space rather than just sending
- * KILL (docs/DEVELOPMENT.md has the whole tally). AmiTCP's own `netstat` asks
- * for, in this order:
+ * KILL. AmiTCP's own `netstat` asks for, in this order:
  *
  *     QUERY CONNECTIONS
  *     Q ICMP CHksum ICMP COde ...              8 names

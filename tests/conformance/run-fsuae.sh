@@ -182,7 +182,7 @@ esac
 # `return RETURN_OK;` unconditional, with the comment "hand the harness a
 # success so the run is scored from the TAP log".  Nothing scored the TAP log.
 # The only read of it above greps one line for attribution.  So the whole
-# bsdsocktest conformance suite, at .github/workflows/emulator.yml:91, was
+# bsdsocktest conformance suite, at .github/workflows/emulator.yml:117, was
 # green however many conformance tests failed.
 #
 # The scorer is in tests/conformance/tap-verdict.sh so that

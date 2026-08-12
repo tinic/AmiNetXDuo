@@ -1,7 +1,7 @@
 /*
  * AmiNetXDuo, NetX Duo tuning for the AmigaOS floor target.
  *
- * Target (docs/RESEARCH.md 9, decision 1): 68020, OS 3.1, 4 MB.  NetX Duo's
+ * Target (docs/RESEARCH.md 81): 68000, OS 2.04, 1 MB.  NetX Duo's
  * defaults assume an embedded target with a static memory budget; on an Amiga
  * the stack shares memory with everything else on the machine.  Every value
  * here departs from the default; if a value is not listed, the default stands.
@@ -193,7 +193,7 @@
  *
  *     timeout = nx_tcp_socket_timeout_rate << (retries * NX_TCP_RETRY_SHIFT)
  *
- * (nx_tcp_socket_retransmit.c:188, nx_tcp_fast_periodic_processing.c:150).
+ * (nx_tcp_socket_retransmit.c:245, nx_tcp_fast_periodic_processing.c:188).
  * NX_TCP_RETRY_SHIFT defaults to 0, so the shift is a no-op and the interval is
  * NX_IP_PERIODIC_RATE / NX_TCP_TRANSMIT_TIMER_RATE, one second, forever.
  * tests/tcpdrill measured SYN retransmissions at 890 ms and then 1002 ms.
@@ -290,12 +290,12 @@
  *
  * With this, an ESTABLISHED socket idle for NX_TCP_KEEPALIVE_INITIAL seconds
  * sends a probe, an ACK carrying tx_sequence - 1, a backward sequence number
- * the peer must answer (nx_tcp_periodic_processing.c:125), and after
+ * the peer must answer (nx_tcp_periodic_processing.c:133), and after
  * NX_TCP_KEEPALIVE_RETRIES unanswered probes at NX_TCP_KEEPALIVE_RETRY seconds
  * the socket is reset.  BSD's defaults are kept: 7200 s initial, 75 s retry,
  * 10 retries.
  *
- * nx_tcp_socket_create.c:166 sets nx_tcp_socket_keepalive_enabled = NX_TRUE
+ * nx_tcp_socket_create.c:180 sets nx_tcp_socket_keepalive_enabled = NX_TRUE
  * unconditionally under this define, which would put every socket on keepalive
  * whether the application asked or not.  src/bsdsocket/socket.c therefore
  * clears it at create and options.c sets it, so the default is off and
@@ -312,9 +312,8 @@
  * RFC 1122 3.2.1.3: a source of the subnet broadcast, of the network address,
  * or in class D is invalid, and nx_ipv4_packet_receive.c:344-371 tests exactly
  * those three, behind this define, which nothing in this port set. The check
- * was dead code in every build we have ever shipped, while
- * docs/CONFORMANCE.md listed martian-source filtering as verified conformant.
- * The claim is now true.
+ * was dead code in every build we have ever shipped, while martian-source
+ * filtering was claimed as conformant.  The claim is now true.
  *
  * It is guarded on nx_interface_address_mapping_needed, so it applies to the
  * Ethernet interfaces and not to loopback, which is where a source of our own
@@ -519,7 +518,7 @@
  * as a zombie to port-scan a third party.
  *
  * The define fixes both and costs 5% of loopback.  Measured, two arms out of
- * one tree (docs/RESEARCH.md 29.4), A1200, 524288 bytes:
+ * one tree (docs/RESEARCH.md 33.4), A1200, 524288 bytes:
  *
  *                       counter      randomised
  *      loopback          347 KB/s     329 KB/s      -5.2%
@@ -561,7 +560,7 @@
  * without this, which reads as though routes existed.  Without the enable:
  *
  *   * NX_IP has no nx_ip_routing_table[] and no
- *     nx_ip_routing_table_entry_count (nx_api.h:2972);
+ *     nx_ip_routing_table_entry_count (nx_api.h:3193, :3196);
  *   * nx_ip_static_route_add()/delete() compile to stubs returning
  *     NX_NOT_SUPPORTED (nx_ip_static_route_{add,delete}.c);
  *   * _nx_ip_route_find() skips the table lookup entirely
@@ -672,7 +671,7 @@
 /* ---------------------------------------------------------------- IPv6 ---- */
 
 /*
- * IPv6 is a build option, not a default (docs/RESEARCH.md 9).  The root
+ * IPv6 is a build option and ships ON (CMakeLists.txt:57).  The root
  * CMakeLists keeps the nx_icmpv6/nx_ipv6/nx_nd objects out of the floor build;
  * disabling it here as well keeps the dual-stack code paths out of the IPv4
  * objects.  Define AMINETXDUO_IPV6 to build the dual stack.
@@ -682,7 +681,7 @@
 #else
 
 /*
- * The dual stack, sized for the same 68020/4 MB floor as everything else.
+ * The dual stack, sized for the same 68000/1 MB floor as everything else.
  * Every table below is a fixed array inside the single NX_IP, so these are the
  * difference between an NX_IP that costs ~3 KB extra and one that costs ~9 KB.
  * Measured with sizeof(NX_IP) at build time.
@@ -1048,10 +1047,10 @@
 
 
 /*
- * Five more surveyed and rejected; docs/RESEARCH.md 29.3 has the working.
+ * Five more surveyed and rejected, with the working.
  *
  *   NX_DISABLE_ARP_AUTO_ENTRY
- *       Every ARP we see creates a cache entry (nx_arp_packet_receive.c:490),
+ *       Every ARP we see creates a cache entry (nx_arp_packet_receive.c:499),
  *       the classic poisoning surface, but disabling that does not close it:
  *       nx_arp_packet_receive.c updates an existing entry from any ARP it sees
  *       whether this is defined or not, and this define does not touch that
@@ -1068,18 +1067,19 @@
  *   NX_ENABLE_ARP_MAC_CHANGE_NOTIFICATION
  *       Adds a callback when a cached entry's MAC changes, a gateway being
  *       replaced, or impersonated.  It is a notification only:
- *       nx_arp_packet_receive.c:418 calls it after writing the new address, so
- *       nothing it does can refuse the change, and no handler in this tree
- *       would act on it.  It would add a function pointer to NX_IP and a branch
- *       per received ARP for a callback that logs.  Revisit when something can
+ *       nx_arp_packet_receive.c:444 calls it and then returns at :447 without
+ *       touching the entry, so the handler cannot steer what happens next and
+ *       no handler in this tree would act on it.  It would add a function
+ *       pointer to NX_IP and a branch per received ARP for a callback that
+ *       logs.  Revisit when something can
  *       act, a static-ARP pin for the gateway, or a warning in ShowNetStatus.
  *
  *   NX_ENABLE_PACKET_DEBUG_INFO
  *       Records the file and line each packet was allocated at, in the
  *       NX_PACKET itself.  Relevant to the packet-ownership defects this
  *       project keeps finding, but rejected as a permanent setting: two
- *       pointers in every one of up to 256 pool packets, on a pool sized from
- *       AvailMem on a 4 MB machine.  It belongs behind a build option next to
+ *       pointers in every one of up to 512 pool packets, on a pool sized from
+ *       AvailMem.  It belongs behind a build option next to
  *       the debug log level, and that option does not exist yet.
  *
  *   NX_ENABLE_DUAL_PACKET_POOL
@@ -1087,7 +1087,7 @@
  *       from a second, smaller pool so a full data pool cannot stop the stack
  *       acknowledging.  docs/RESEARCH.md 24.8 established that there is one
  *       pool here for a reason, and a second takes memory permanently away from
- *       the 4 MB floor to protect against an exhaustion that 24.3's arithmetic
+ *       the 1 MB floor to protect against an exhaustion that 24.3's arithmetic
  *       already prevents.  An ACK that cannot be allocated is also a symptom of
  *       a data pool already empty, and the data is what was lost.
  *

@@ -4,7 +4,9 @@
  * The on-disk format is Roadshow's (see docs/RESEARCH.md §6.6):
  *   DEVS:NetInterfaces/<name>      one file per interface
  *   DEVS:Internet/name_resolution  NAMESERVER / DOMAIN / SEARCH
- *   DEVS:Internet/default_gateway  DEVICE / UNIT / GATEWAY
+ *   DEVS:Internet/routes           where Roadshow 1.15 keeps the default route
+ *   DEVS:Internet/default_gateway  DEVICE / UNIT / GATEWAY, not Roadshow's but
+ *                                  read first, see src/config/config_parse.c:25
  *   DEVS:Internet/{hosts,networks,protocols,services}   netdb
  *
  * SPDX-License-Identifier: MIT

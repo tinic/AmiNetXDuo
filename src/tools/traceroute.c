@@ -23,7 +23,7 @@
  * as a limitation, a UDP probe left with the TTL nx_udp_socket_create() was
  * given, NX_IP_TIME_TO_LIVE, whatever setsockopt(IPPROTO_IP, IP_TTL) said, so
  * every hop reported as the destination (measured on the wire;
- * docs/RESEARCH.md 19 has the capture). It is not one any more: IP_TTL,
+ * docs/RESEARCH.md 20.1 has the capture). It is not one any more: IP_TTL,
  * IPV6_UNICAST_HOPS and an RFC 3542 IPV6_HOPLIMIT all reach a UDP send now.
  * The probe stays ICMP because a raw socket sees the TIME_EXCEEDED for its own
  * probes without a second socket and without the port-unreachable convention.

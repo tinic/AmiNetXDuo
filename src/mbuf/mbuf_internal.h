@@ -20,7 +20,7 @@
 /*
  * Ceilings, not reservations: slabs are carved on demand and the cluster pool
  * grows one cluster at a time. 256 mbufs is 32 KB and 16 clusters is 32 KB, so
- * the worst case is 64 KB of the 4 MB floor (docs/RESEARCH.md 9), and only
+ * the worst case is 64 KB of the 1 MB floor (docs/RESEARCH.md 81), and only
  * if something actually uses them, which on a normal system nothing does.
  */
 #ifndef AMI_MBUF_DEFAULT_MBUFS

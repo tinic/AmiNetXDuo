@@ -85,7 +85,7 @@ target_compile_options(test_tls_x509 PRIVATE -Wall -Wextra -UAMINETXDUO_IPV6)
 
 # The ECDSA section only, and for the reason fuzz_tls_crypto is 32-bit only:
 # nx_crypto_ec.c does pointer arithmetic through ULONG, `(ULONG)ptr -
-# (ULONG)naf_data` at :2606, and a loop bound compared the same way at :2713 --
+# (ULONG)naf_data` at :2624, and a loop bound compared the same way at :2731 --
 # and ULONG is the target's 32 bits everywhere in this tree, so on an LP64 host
 # every one of those truncates a pointer. It is correct on m68k, where ULONG
 # and a pointer are the same width.

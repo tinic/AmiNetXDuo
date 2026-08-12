@@ -21,7 +21,6 @@
 #   which is what the write figure pricing buffer acceptance rather than
 #   throughput looks like from the CPU's side.  Of the busy CPU on a read,
 #   bsdsocket.library is 79%, Exec 9%, the driver 6% and Fitz itself 4%.
-#   docs/BACKLOG.md has the split and the read-ahead sweep that came out of it.
 #
 # WHY A BRIDGED EMULATOR AND NOT FS-UAE
 #
@@ -274,7 +273,7 @@ else
     # that issued it.
     # TERM, THEN KILL.  fitz-serve does not exit on SIGTERM, so `pkill -f`
     # alone left one behind on every run: four arms of a loss gate left three
-    # servers, and tests/perf/run-lossgate.sh:106 then refused to start --
+    # servers, and tests/perf/run-lossgate.sh:163 then refused to start --
     # "the peer already has 3 fitz-serve process(es) running" -- which is the
     # right refusal about the wrong machine's state, and it blocks the only
     # rig that can price an ack or retransmit change from running twice.

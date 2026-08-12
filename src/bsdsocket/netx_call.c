@@ -34,10 +34,10 @@
  * _tx_thread_terminate(), a _tx_thread_delete() and a scheduler poke.
  * tests/perf/bracket_test.c prices that pair at ~790 us on a 14 MHz 68020, of
  * which AllocSignal()/FreeSignal() is 17 us. It is a per-call constant, so it
- * scales with how a client reads rather than with how much it reads, the
- * shape of docs/RESEARCH.md §29.3, where this stack beat Roadshow on connect
- * and on time-to-first-byte and lost the body, on a client that reads small and
- * selects between reads.
+ * scales with how a client reads rather than with how much it reads. It is
+ * worth taking for a client that reads small, and it is not what decides a
+ * bulk transfer: a 1.2 MB fetch by a third-party curl takes 108 brackets,
+ * 11 kB a call, and the cached and uncached arms both measured 825 ticks.
  *
  * A base belongs to one task (library.c records it in sb_Task) and that task
  * gets the same TX_THREAD every time, so ami_netstack_enter_cached() builds it

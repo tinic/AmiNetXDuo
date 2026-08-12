@@ -1,4 +1,4 @@
-# The ThreadX/Exec adoption layer on its own, docs/RESEARCH.md 79's defect,
+# The ThreadX/Exec adoption layer on its own, docs/RESEARCH.md 77.6's defect,
 # reduced to the layer it lived in.
 #
 # Links threadx_port and nothing else of the stack: no NetX Duo, no

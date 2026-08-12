@@ -159,7 +159,7 @@ GOOG="${AMINETXDUO_FAMILY_GOOG:-www.google.com}"
 NTP="${AMINETXDUO_FAMILY_NTP:-2.pool.ntp.org}"
 # A name with an A and no AAAA.  Written into the guest's DEVS:Internet/hosts,
 # so it needs no DNS at all: the resolver reads that file on the IPv4 side and
-# never on the IPv6 side (src/netstack/netstack_dns.c:826, the netdb schema has
+# never on the IPv6 side (src/netstack/netstack_dns.c:1051, the netdb schema has
 # no family field), which is exactly the shape the -6 arm has to report.  .test
 # is reserved by RFC 6761, so the AAAA query is an immediate NXDOMAIN.
 #

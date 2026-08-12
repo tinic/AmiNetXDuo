@@ -17,7 +17,7 @@
  *
  *   A packet handed to an interface with no binding.  The driver still has to
  *   fail, and it has to release the packet first; a leak here is a packet the
- *   pool never gets back, on a machine with 4 MB and no way to notice.
+ *   pool never gets back, on a machine with 1 MB and no way to notice.
  *
  *   The EtherType.  ARP and RARP come from the COMMAND, everything else from
  *   the packet's IP version.  Getting it from the packet for an ARP request

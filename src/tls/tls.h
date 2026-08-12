@@ -1,9 +1,8 @@
 /*
  * AmiNetXDuo, nx_secure glue.
  *
- * docs/RESEARCH.md 9 gates the TLS work on a 68020 benchmark
- * (tests/tls/tls_bench), so nothing here promises an API shape.  Only the
- * platform glue nx_secure needs whatever shape the eventual library takes.
+ * The platform glue nx_secure needs, and nothing else.  The published API is
+ * include/aminetxduo/tlslib.h, which src/tlslib/ builds into tls.library.
  *
  * SPDX-License-Identifier: MIT
  */

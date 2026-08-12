@@ -1,4 +1,4 @@
-# Eight applications inside the stack at once, the gap docs/RESEARCH.md 78's
+# Eight applications inside the stack at once, the gap docs/RESEARCH.md 77.6's
 # baton defect went through.
 #
 # Produces an AmigaOS executable; it needs the library it is testing staged

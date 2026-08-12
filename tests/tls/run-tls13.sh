@@ -28,7 +28,7 @@
 # with no matching sign, so the loopback test's server half is pinned to 1.2
 # and the round it runs is a 1.2 round.  The public hosts cannot answer it
 # either: they serve three-certificate chains that do not finish verifying at
-# 14 MHz before the far end gives up (docs/BACKLOG.md).
+# 14 MHz before the far end gives up.
 #
 # So the server here is tests/peer/httppeer.py with mkpki.sh's local PKI, with
 # its version ceiling raised, serving a two-certificate chain whose root is in

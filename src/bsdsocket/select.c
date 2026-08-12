@@ -311,9 +311,9 @@ VOID bsd_events_attach(AmiSocket *sock)
  * NX_NO_PACKET -> EWOULDBLOCK mappings correct: with a non-zero wait option
  * NetX Duo has no path that returns NX_NO_PACKET, it suspends instead.
  *
- *   nx_tcp_socket_receive.c:231       suspends; NX_NO_PACKET at :263 is the else
- *   nx_tcp_socket_send_internal.c:1006  suspends; NX_WINDOW_OVERFLOW (:1086)
- *                                     and NX_TX_QUEUE_DEPTH (:1098) are the else
+ *   nx_tcp_socket_receive.c:257       suspends; NX_NO_PACKET at :276 is the else
+ *   nx_tcp_socket_send_internal.c:1217  suspends; NX_WINDOW_OVERFLOW (:1250)
+ *                                     and NX_TX_QUEUE_DEPTH (:1262) are the else
  *   nx_packet_allocate.c:178          suspends on `if (wait_option)`;
  *                                     NX_NO_PACKET at :268 is the else
  *

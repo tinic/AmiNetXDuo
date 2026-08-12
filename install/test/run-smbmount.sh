@@ -511,7 +511,7 @@ chmod 755 "$SS"
 # about to start the server, because that name is in it: the first version of
 # this killed its own remote shell before python ran, left an empty log and a
 # port nothing was listening on, and read as a server that would not start.
-# tests/perf/peercap.sh:108-111 says the same thing about the same mistake.
+# tests/perf/peercap.sh:119-121 says the same thing about the same mistake.
 #
 # The `timeout` on the far side is the other half: killing the local ssh does
 # not kill what it started there, so a server with no ceiling of its own

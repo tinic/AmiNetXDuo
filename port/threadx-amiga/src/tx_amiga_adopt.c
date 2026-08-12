@@ -84,7 +84,7 @@
 /*    blocking call, so N bounds the number of concurrently blocked       */
 /*    sockets in the machine; WaitSelect() over M sockets becomes an      */
 /*    M-worker problem or needs a second, callback-driven mechanism; and  */
-/*    a 4 KB stack per worker as a standing cost on a 4 MB machine, where */
+/*    a 4 KB stack per worker as a standing cost on a 1 MB machine, where */
 /*    adoption borrows the caller's existing stack for free.              */
 /*                                                                        */
 /*    Adoption is the better trade provided the "never block outside      */

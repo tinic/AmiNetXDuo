@@ -14,7 +14,7 @@
 # -- `return RETURN_OK;` unconditional, carrying the comment "hand the harness
 # a success so the run is scored from the TAP log".  Nothing scored the TAP
 # log; the only read of it grepped one line for attribution.  The suite at
-# .github/workflows/emulator.yml:91 was green however many of its tests failed.
+# .github/workflows/emulator.yml:117 was green however many of its tests failed.
 #
 # The grammar is third_party/bsdsocktest/src/tap.c:
 #

@@ -147,7 +147,7 @@ fi
 [ -n "$LOCALE" ] && [ -f "$LOCALE" ] || {
     echo "No locale.library found, and bebboget hangs without one." >&2
     echo "  Set AMINETXDUO_LOCALE_LIBRARY=<path>, or unpack a Workbench 3.1 set" >&2
-    echo "  with install/test/run-workbench-fsuae.sh, which writes build/wb31-sys." >&2
+    echo "  with install/test/run-workbench.sh, which writes build/wb31-sys." >&2
     exit 2
 }
 

@@ -82,7 +82,7 @@ AMIGA_CLIENT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 . "$AMIGA_CLIENT_ROOT/tools/amiga-toolchain.sh"
 
-# -m68020 is the project floor (docs/RESEARCH.md §9).  -O2 rather than the
+# -m68020 by default, overridden through AMIGA_CLIENT_ARCH.  -O2 rather than the
 # -O0 curl's own CI uses: that CI is checking the build works, and this is
 # building something somebody has to wait for on a 14 MHz machine.
 #

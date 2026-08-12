@@ -143,7 +143,7 @@ typedef uint64_t                                ULONG64;
    own across the terminate with _tx_thread_system_state raised.  A registered
    callback that blocked would break both at once.  Nothing in NetX Duo or this
    stack registers one, so the call sites go rather than the hazard staying
-   latent.  docs/FORBID.md.  */
+   latent.  */
 
 #define TX_DISABLE_NOTIFY_CALLBACKS
 

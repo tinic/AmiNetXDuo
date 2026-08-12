@@ -1123,8 +1123,8 @@ ULONG   total;
 }
 
 /*
- * Session memory.  The 4 MB floor already spends up to 256 x 1568 bytes on the
- * packet pool (docs/RESEARCH.md 9), so what matters is what a TLS session adds
+ * Session memory.  The 1 MB floor already spends 17 x 1568 bytes on the
+ * packet pool (docs/RESEARCH.md 81), so what matters is what a TLS session adds
  * on top of a socket, per connection.
  */
 static VOID b_memory(VOID)

@@ -37,10 +37,10 @@ KNOWN = {
         "release.yml vs ci.sh",
         "release.yml gives five OFF flags and ci.sh's minimal68000 arm gives "
         "seven; AMINETXDUO_AREXX and AMINETXDUO_TCPDEVICE default ON "
-        "(CMakeLists.txt:150,190), so the drawer that ships carries the ARexx "
+        "(CMakeLists.txt:151,191), so the drawer that ships carries the ARexx "
         "host and the TCP: handler and the arm that compiles it does not. "
         "make-dist.sh's own note names five options and its 225 KB figure was "
-        "measured on five. emulator.yml:243 builds the archive its e2e "
+        "measured on five. emulator.yml:348 builds the archive its e2e "
         "installs with seven, so the drawer tested on a real Workbench is not "
         "the drawer that ships. Pick one.",
     ),

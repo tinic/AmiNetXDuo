@@ -76,7 +76,8 @@ endif()
 #   * too slow, a handshake was 185 s.  That figure was a loopback total
 #     dominated by the SERVER half, which a client never performs; the client
 #     cost is ~7 s and resumption makes a repeat connection ~0.6 s.
-#   * too big, the pair is ~520 KB.  Not a constraint on a 4 MB machine.
+#   * too big, the pair is 413 KB (installdrive.c:133).  True on the 1 MB
+#     floor: dist/ ships a 68000-minimal drawer with TLS compiled out.
 #   * nothing uses it, `fetch` does.
 #   * a chain of three or more crashes the machine.  THIS WAS WRONG and is
 #     the one worth remembering: fs-uae was being killed by SIGPIPE on the
@@ -103,7 +104,7 @@ endif()
 # 60 s is slow.  It is not our decision to make for somebody: the archive
 # carries a binary for every processor and the installer picks the one this
 # machine can run, and nothing is withheld for being slow.  The P-256 leg is
-# a separate open defect, see docs/BACKLOG.md.
+# a separate open defect.
 set(_aminetxduo_tls_default ON)
 option(AMINETXDUO_TLS  "Build tls.library and its trust store"        ${_aminetxduo_tls_default})
 option(AMINETXDUO_BPF  "Build the bpf_* raw path and filter VM"       ON)
@@ -299,7 +300,7 @@ endif()
 # NetX Duo draws it from NX_RAND once per transmitted datagram, NX_RAND here is
 # a SHA-256 DRBG, and that is 5% of loopback throughput on the floor target.
 # port/netxduo-amiga/inc/nx_user.h has the arms and says what ships instead.
-# docs/RESEARCH.md 29.4.
+# docs/RESEARCH.md 33.4.
 option(AMINETXDUO_IP_ID_RANDOMIZATION "Randomise the IPv4 ID field" OFF)
 if(AMINETXDUO_IP_ID_RANDOMIZATION)
     add_compile_definitions(AMINETXDUO_IP_ID_RANDOMIZATION)
@@ -308,7 +309,7 @@ endif()
 # TCP keepalive's idle timer, in SECONDS.  Empty keeps NetX Duo's default of
 # 7200, two hours, which is BSD's and is what ships.  It exists because a
 # two-hour timer cannot be observed inside an emulator run: the keepalive arm
-# in docs/RESEARCH.md 29 is built with 5 so that tests/tcpdrill can watch the
+# in docs/RESEARCH.md 33.1 is built with 5 so that tests/tcpdrill can watch the
 # probe leave.  nx_tcp.h guards the macro with #ifndef, so this reaches it
 # without nx_user.h having to hold a number nobody ships.
 set(AMINETXDUO_TCP_KEEPALIVE_INITIAL "" CACHE STRING

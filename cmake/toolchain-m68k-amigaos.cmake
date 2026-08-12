@@ -186,8 +186,9 @@ set(CMAKE_C_FLAGS_INIT "${AMIGA_ARCH_FLAGS_STR} -fomit-frame-pointer -fno-strict
 # the checksum and copy primitives, the AES and ChaCha20 kernels are hand
 # written 68020 assembly, chosen and measured against C alternatives
 # (tests/crypto68k/crypto68k_bulk prints both).  So the optimiser is being
-# asked to make the OTHER 95% small, which is what it is good at, and anything
-# that turns out to matter gets hand written rather than a bigger -O.
+# asked to make the OTHER 95% small, which is what it is good at.  The one
+# exception is AMINETXDUO_HOT_O2 (CMakeLists.txt:474): eight profiled NetX Duo
+# files build at -O2.
 set(CMAKE_C_FLAGS_RELEASE_INIT "-Os -DNDEBUG")
 set(CMAKE_C_FLAGS_DEBUG_INIT "-O1 -g -DAMINETXDUO_DEBUG=1")
 

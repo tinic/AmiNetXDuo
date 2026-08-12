@@ -128,7 +128,7 @@ BEBVER=$(cat "$BEB/VERSION" 2>/dev/null || echo unknown)
 #
 # locale.library is Commodore's and is not in Kickstart ROM, so it is located
 # here and never committed, the same arrangement as the ROM itself and
-# a2065.device.  install/test/run-workbench-fsuae.sh unpacks a Workbench 3.1
+# a2065.device.  install/test/run-workbench.sh unpacks a Workbench 3.1
 # set into build/wb31-sys, which is the first place looked.
 LOCALE="${AMINETXDUO_LOCALE_LIBRARY:-}"
 if [ -z "$LOCALE" ]; then
@@ -144,7 +144,7 @@ fi
 [ -n "$LOCALE" ] && [ -f "$LOCALE" ] || {
     echo "No locale.library found, and BebboSSH hangs without one." >&2
     echo "  Set AMINETXDUO_LOCALE_LIBRARY=<path>, or unpack a Workbench 3.1 set" >&2
-    echo "  with install/test/run-workbench-fsuae.sh, which writes build/wb31-sys." >&2
+    echo "  with install/test/run-workbench.sh, which writes build/wb31-sys." >&2
     exit 2
 }
 

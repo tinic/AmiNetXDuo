@@ -280,8 +280,7 @@ target_link_options(fuzz_mdns PRIVATE ${_fuzz_san})
 #   NX_SECURE_TLS_TLS_1_3_ENABLED, which is off; the TLS 1.2 ticket is read by
 #   tls_resume_take_ticket() in src/tlslib/tls_resume.c, which takes a
 #   TLSConnection * and so needs tls_internal.h, the whole AmigaOS library
-#   ABI, on a host. docs/BACKLOG.md has the reasoning and the by-inspection
-#   result.
+#   ABI, on a host.  Covered by inspection instead.
 #
 #   tls_store.c's issuer-name walk, for the same reason. It calls the same
 #   vendored TLV parser fuzz_tls_x509 drives, so the parser underneath it is

@@ -31,8 +31,7 @@
  * looks at nothing else, and nx_icmpv4.h:191 says the identifier "is not used
  * as a host". A vector wrapping it would inherit that. The raw socket path
  * (src/bsdsocket/raw.c) lets the command choose its own matching rule, is
- * already published ABI, and is what src/tools/ping.c uses. See
- * docs/RESEARCH.md 21.3.
+ * already published ABI, and is what src/tools/ping.c uses.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -372,8 +371,8 @@ static VOID ns_fill_dhcp(NsWriter *w)
 
 /*
  * The NX physical interface index is the config index. src/netstack attaches
- * the configured interfaces in config order from slot 0 (netstack.c:376 for
- * the primary, :451 for the rest), and NetX Duo puts the loopback at
+ * the configured interfaces in config order from slot 0 (netstack.c:771 for
+ * the primary, :860 for the rest), and NetX Duo puts the loopback at
  * NX_LOOPBACK_INTERFACE == NX_MAX_PHYSICAL_INTERFACES, past the physical range
  * this walks, so there is no off-by-one to correct for.
  *
