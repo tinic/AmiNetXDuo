@@ -1,0 +1,10 @@
+# tests/perf/run-lossgate.sh baseline.
+# NAME  DIRECTION  VALUE  TOLERANCE_PERCENT
+# Recorded with 5% peer-to-guest loss, 4096 KB, 9 reps.
+# Read and write are separate on purpose: the 0.16.6 regression
+# moved them in opposite directions.
+# Tolerance: twice the interquartile spread over root(reps), floor 15%.
+dropped_rx     lower         19.0   17.5
+read_kbs       higher        66.0   15.0
+retransmitted  lower          0.0   15.0
+write_kbs      higher      2139.0   15.0

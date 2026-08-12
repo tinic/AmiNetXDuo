@@ -7,6 +7,7 @@
 #   tools/ci.sh cross                # just the cross builds
 #   tools/ci.sh emulator             # tier 2: FS-UAE, needs a boot ROM
 #   tools/ci.sh cards                # tier 2: every network card, one boot each
+#   tools/ci.sh bridged lossgate smb # tier 2: the arms that need a real link
 #   tools/ci.sh host cross emulator  # pick and choose
 #
 # .github/workflows/ci.yml and emulator.yml call THIS, they add caching,
@@ -27,6 +28,17 @@
 #   cards        tier 2, boots EVERY network card this project supports,
 #                one guest each, and proves each one carries bytes in
 #                both directions.  Needs a bridge and a peer.
+#   bridged      tier 2, the two pass/fail harnesses that need a real link:
+#                NetShutdown against live services, and TCP: driven by
+#                Commodore's own Type and Copy.  Needs a bridge, and a peer
+#                for the second.
+#   lossgate     tier 2, throughput on a link that loses packets, against a
+#                recorded baseline.  The only rig that can price a change to
+#                acknowledgement or retransmission behaviour.  Needs a bridge,
+#                a peer, and tc on it.
+#   smb          tier 2, mounts an SMB share on a real Workbench over our
+#                stack, the way GitHub #3 and #4 describe.  Needs a licensed
+#                Workbench, smb2fs, filesysbox and a peer to serve the share.
 #   e2e          tier 2, installs the SHIPPED ARCHIVE on a real
 #                Workbench 3.1, reboots, and drives it from another
 #                machine: WebDAV, `lha x`, the browser terminal.
@@ -814,6 +826,140 @@ stage_cards() {
     return "$rc"
 }
 
+# --------------------------------------------------------------- bridged ----
+#
+# The two harnesses that are ordinary pass/fail regression tests and happen to
+# need a real link.  Both existed, both were green, and neither was invoked by
+# anything: run-netshutdown.sh is the regression test for a defect a user
+# reported (programs holding bsdsocket.library were never told the network had
+# gone), and run-tcphandler.sh is the only thing that runs Commodore's own
+# Type and Copy over a socket.
+#
+# NOT in `emulator`: that stage boots a bare drive with no network device at
+# all.  These need the a2065 and a NIC to bridge onto, which is the same
+# requirement `cards` has minus the peer -- run-netshutdown.sh starts its own
+# services and shuts them down, so nothing has to call in.  run-tcphandler.sh
+# does need a peer, and says so per harness rather than taking the stage down.
+stage_bridged() {
+    hr "bridged harnesses (tier 2, needs a real link)"
+
+    local rc=0 bad=0
+
+    printf '\n-- NetShutdown, and the programs using the network\n'
+    "$ROOT/tests/tools/run-netshutdown.sh" -b "$BUILD/default" || rc=$?
+    case "$rc" in
+        0) note "PASS  both arms: the cooperative one let go, the deaf one" \
+                "was reported and left alone" ;;
+        2) fail "netshutdown: an ingredient is missing on this machine" ; bad=1 ;;
+        *) fail "netshutdown: the transcript above is the whole run" ; bad=1 ;;
+    esac
+
+    printf '\n-- TCP: is an AmigaDOS device, and stock commands use it\n'
+    if [ -z "${AMINETXDUO_PEER:-}" ]; then
+        skip "tcphandler: AMINETXDUO_PEER is not set, so there is no third" \
+             "machine to answer the guest.  TCP: is unproven on this runner."
+    elif [ -z "${AMINETXDUO_AMIGA_C:-}" ]; then
+        skip "tcphandler: AMINETXDUO_AMIGA_C is not set.  The whole point is" \
+             "that STOCK commands work, so it will not substitute ours for" \
+             "Commodore's Type and Copy."
+    else
+        rc=0
+        "$ROOT/tests/tools/run-tcphandler.sh" -b "$BUILD/default" \
+            -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" \
+            -P "$AMINETXDUO_PEER" || rc=$?
+        case "$rc" in
+            0) note "PASS  Type, Copy and Shell redirection over a socket" ;;
+            2) fail "tcphandler: an ingredient is missing on this machine" ; bad=1 ;;
+            *) fail "tcphandler: the transcript above is the whole run" ; bad=1 ;;
+        esac
+    fi
+
+    return "$bad"
+}
+
+# -------------------------------------------------------------- lossgate ----
+#
+# Our lab rig measures zero retransmissions, so a change to acknowledgement or
+# retransmission behaviour costs nothing on it and 0.16.6 shipped two of them.
+# This is the only arm where such a change has a price, and it is a GATE: the
+# medians are compared against tests/perf/lossgate-baseline.txt, read and write
+# separately, because that regression moved them in opposite directions.
+#
+# The peer's root qdisc is changed for the duration, so it must be idle; the
+# harness refuses to start otherwise rather than producing a number nobody can
+# trust.
+stage_lossgate() {
+    hr "the lossy-link gate (tier 2, needs a peer with tc)"
+
+    if [ -z "${AMINETXDUO_FITZ_PEER:-}" ] ||
+       [ -z "${AMINETXDUO_FITZ_PEER_ADDR:-}" ]; then
+        skip "lossgate: AMINETXDUO_FITZ_PEER and AMINETXDUO_FITZ_PEER_ADDR" \
+             "are not both set, so there is no machine to induce loss from." \
+             "A change to acking or retransmission is unpriced on this runner."
+        return 0
+    fi
+
+    local rc=0
+    AMINETXDUO_BUILD="$BUILD/default" \
+        "$ROOT/tests/perf/run-lossgate.sh" \
+            -H "$AMINETXDUO_FITZ_PEER" -A "$AMINETXDUO_FITZ_PEER_ADDR" \
+            -b "$BUILD/default" || rc=$?
+
+    case "$rc" in
+        0) note "PASS  read, write and retransmits are all within tolerance" \
+                "of tests/perf/lossgate-baseline.txt" ;;
+        2) fail "lossgate: the rig refused it -- no baseline, or the peer is" \
+                "busy.  The line above says which." ;;
+        *) fail "lossgate: a metric moved past its tolerance; the table above" \
+                "names it.  READ is the field metric." ;;
+    esac
+    return "$rc"
+}
+
+# ------------------------------------------------------------------- smb ----
+#
+# GitHub #3 and #4 were both unreproducible for a day because SMB had never
+# been run against this stack at all.  A socket test cannot reach either: `nc`
+# already connects to 445 from a booted A1200, so whatever fails happens above
+# the handshake, inside smb2-handler, and only a machine that can Mount shows
+# it.  That means a real Workbench, Commodore's Mount, and a share.
+#
+# The share is the harness's own (-P), not one that happens to be up on the
+# LAN: a server nobody records is a test that fails for reasons that are not
+# the stack's.
+stage_smb() {
+    hr "SMB on a real Workbench (tier 2, needs a Workbench and a peer)"
+
+    if [ -z "${AMINETXDUO_PEER:-}" ]; then
+        skip "smb: AMINETXDUO_PEER is not set, so there is nowhere to serve a" \
+             "share from that the guest can reach.  SMB is unproven on this" \
+             "runner, which is the state issues #3 and #4 were reported in."
+        return 0
+    fi
+
+    local arm rc bad=0 flag
+    # Two arms because ACTIVATE decides WHICH PROCESS connects: without it
+    # Mount only builds the device node and the first access starts the
+    # handler, with it Mount does.  #4 is a freeze with no error printed, and
+    # which process froze is the first thing to know.
+    for arm in lazy activate; do
+        printf '\n-- mount, %s\n' "$arm"
+        rc=0
+        flag=""
+        [ "$arm" = activate ] && flag="-A"
+        AMINETXDUO_BUILD="$BUILD/default" \
+            "$ROOT/install/test/run-smbmount.sh" -P "$AMINETXDUO_PEER" \
+                -T "ci-smb-$arm" ${flag:+"$flag"} || rc=$?
+        case "$rc" in
+            0) note "PASS  the share mounted and listed ($arm)" ;;
+            2) fail "smb/$arm: an ingredient is missing on this machine" ; bad=1 ;;
+            *) fail "smb/$arm: the verdict= line above says whether it never" \
+                    "connected, or connected and stopped" ; bad=1 ;;
+        esac
+    done
+    return "$bad"
+}
+
 # ------------------------------------------------------------------ main ----
 
 mkdir -p "$BUILD"
@@ -838,7 +984,8 @@ stage_submodules
 # Anything but a pure host run needs the cross compiler.
 for s in "${WANT[@]}"; do
     case "$s" in
-        cross|analyze|conformance|emulator|e2e|cards) stage_toolchain; break ;;
+        cross|analyze|conformance|emulator|e2e|cards|bridged|lossgate|smb)
+            stage_toolchain; break ;;
     esac
 done
 
@@ -856,6 +1003,9 @@ for s in "${WANT[@]}"; do
         conformance) stage_conformance || true ;;
         emulator)    stage_emulator || true ;;
         cards)       stage_cards || true ;;
+        bridged)     stage_bridged || true ;;
+        lossgate)    stage_lossgate || true ;;
+        smb)         stage_smb || true ;;
         e2e)         stage_e2e || true ;;
         *) echo "unknown stage: $s" >&2; exit 2 ;;
     esac

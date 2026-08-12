@@ -59,13 +59,33 @@ PEER="${AMINETXDUO_FITZ_PEER:-}"
 PEER_ADDR="${AMINETXDUO_FITZ_PEER_ADDR:-}"
 PEER_IF="${AMINETXDUO_PEER_IFACE:-ens18}"
 PEER_TC="${AMINETXDUO_PEER_TC:-\$HOME/tc-cap}"
-LOSS=1
+# 5%, AND MORE LOSS IS LESS NOISE.  At 1% a 4 MB transfer sees about thirty
+# loss events, so which of them lands where -- in slow start, or as a tail loss
+# needing an RTO -- is the whole measurement: nine arms on an idle box came
+# back 456, 435, 384, 236, 197, 277 KB/s, and no honest tolerance over that
+# could catch the 18% regression this exists for.  At 5% there are five times
+# as many events, the law of large numbers applies, and consecutive arms agree
+# to within a few percent.  The link is harsher and the figure is lower; the
+# figure was never a prediction of anything, only a thing to compare.
+LOSS=5
 REPS=3
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 TAG="${AMINETXDUO_RUN_TAG:-lossgate}"
 RECORD=0
+REPS_GIVEN=0
 BASELINE="$ROOT/tests/perf/lossgate-baseline.txt"
-KB=512
+KB=4096
+# The widest tolerance -B will write.  See the refusal below.
+MAXTOL="${AMINETXDUO_LOSSGATE_MAXTOL:-25}"
+# THE NARROWEST, AND IT IS NOT A STATISTIC.  A recording measures how far the
+# arms of ONE run scatter; what the gate has to survive is how far the MEDIAN
+# moves between runs, on a different netem seed and a different guest, and no
+# single run can see that.  The floor is the place to put it, and 5% was a
+# guess: a five-arm recording said read was repeatable to 4.3%, and the very
+# next three-arm run came in 7.1% low and failed on nothing at all.  15% is
+# above the drift this rig has been seen to have and below the 18% regression
+# the gate exists to catch, which is the whole window there is.
+FLOOR="${AMINETXDUO_LOSSGATE_FLOOR:-15}"
 
 usage() {
     cat <<'EOF'
@@ -75,9 +95,9 @@ usage: tests/perf/run-lossgate.sh -H user@host -A addr [-l PERCENT] [-r REPS]
   -H  the peer, over ssh.  A THIRD machine: not this one and not the host the
       emulator runs on.
   -A  the peer's address as the guest sees it
-  -l  packet loss percent applied to peer -> guest frames (default 1)
+  -l  packet loss percent applied to peer -> guest frames (default 5)
   -r  repetitions; the median is compared (default 3)
-  -k  transfer size in KB (default 512)
+  -k  transfer size in KB (default 4096)
   -B  record the current run as the new baseline
   -f  baseline file (default tests/perf/lossgate-baseline.txt)
 EOF
@@ -88,7 +108,7 @@ while getopts "H:A:l:r:b:k:T:Bf:h" opt; do
         H) PEER="$OPTARG" ;;
         A) PEER_ADDR="$OPTARG" ;;
         l) LOSS="$OPTARG" ;;
-        r) REPS="$OPTARG" ;;
+        r) REPS="$OPTARG"; REPS_GIVEN=1 ;;
         b) BUILD="$OPTARG" ;;
         k) KB="$OPTARG" ;;
         T) TAG="$OPTARG" ;;
@@ -100,6 +120,41 @@ while getopts "H:A:l:r:b:k:T:Bf:h" opt; do
 done
 
 [ -n "$PEER" ] && [ -n "$PEER_ADDR" ] || { usage >&2; exit 2; }
+
+# THE SAME LINK AND THE SAME NUMBER OF ARMS, OR IT IS NOT A COMPARISON.
+#
+# Throughput under loss is a function of the loss rate and the transfer size,
+# so a 1% run read against a 5% baseline reports the difference between two
+# rigs as a regression in the stack.
+#
+# The ARM COUNT belongs here for a less obvious reason: the read figure is
+# bimodal, so the median of three arms and the median of nine are different
+# estimators of the same thing.  A baseline recorded over nine, compared
+# against a run of three, went red at -16.7% on a build with nothing wrong
+# with it.  If the caller did not ask for a rep count, take the baseline's.
+#
+# Read here, before the arms run, because it decides how many of them there
+# are.  Recording skips all of it: -B is where a baseline comes from.
+if [ "$RECORD" = 0 ]; then
+    [ -f "$BASELINE" ] ||
+        { echo "no baseline at $BASELINE -- record one with -B" >&2; exit 2; }
+    WANT=$(sed -n 's/^# Recorded with \([0-9.]*\)% peer-to-guest loss, \([0-9]*\) KB, \([0-9]*\) reps.*/\1 \2 \3/p' \
+           "$BASELINE" | head -1)
+    if [ -n "$WANT" ]; then
+        set -- $WANT
+        if [ "$1" != "$LOSS" ] || [ "$2" != "$KB" ]; then
+            echo "$BASELINE was recorded at $1% loss over $2 KB and this run" >&2
+            echo "is ${LOSS}% over $KB KB.  Those are different links; the" >&2
+            echo "comparison would report the rig as a regression.  Match it" >&2
+            echo "with -l and -k, or record a new baseline with -B." >&2
+            exit 2
+        fi
+        if [ "$REPS_GIVEN" = 0 ] && [ -n "${3:-}" ]; then
+            REPS="$3"
+            echo "==> $REPS arms, which is what $BASELINE was recorded over"
+        fi
+    fi
+fi
 
 # The peer's qdisc is machine-wide, so two of these running at once measure
 # each other.  Refuse rather than produce a number nobody can trust.
@@ -120,11 +175,27 @@ netem_off() {
     peer_tc "qdisc del dev $PEER_IF root" >/dev/null 2>&1 || true
 }
 
+# THE SAME LOSS PATTERN EVERY RUN, or the gate measures the pattern.  netem
+# seeds itself from the clock, so which segments are dropped -- and above all
+# whether any of them land close enough together to cost a retransmission
+# timeout -- is different every time.  Arms inside one run share a qdisc and
+# agreed to about 7%; consecutive runs, each with a fresh seed, came back 70,
+# 65 and 57 KB/s on an idle rig, which is a fifth of the figure and more than
+# the regression this exists to catch.  A fixed seed makes the two builds being
+# compared meet the same link.
+SEED="${AMINETXDUO_LOSSGATE_SEED:-20260811}"
+
 netem_on() {
     local guest="$1"
     netem_off
     peer_tc "qdisc add dev $PEER_IF root handle 1: prio bands 3"
-    peer_tc "qdisc add dev $PEER_IF parent 1:3 handle 30: netem loss ${LOSS}%"
+    # iproute2 grew `seed` in 6.x.  Where it is older the run still works and
+    # says that its numbers are not comparable with anybody else's.
+    peer_tc "qdisc add dev $PEER_IF parent 1:3 handle 30: netem loss ${LOSS}% \
+             seed $SEED" 2>/dev/null || {
+        echo "==> this peer's tc has no netem 'seed': the loss pattern is" \
+             "random per run, and run-to-run drift will swamp the gate"
+        peer_tc "qdisc add dev $PEER_IF parent 1:3 handle 30: netem loss ${LOSS}%"; }
     peer_tc "filter add dev $PEER_IF protocol ip parent 1: prio 1 u32 \
              match ip dst $guest/32 flowid 1:3"
     echo "==> peer $PEER_IF: ${LOSS}% loss towards $guest, everything else clean"
@@ -149,11 +220,19 @@ AMINETXDUO_RUN_TAG="$TAG-warm" \
         $FBFLAGS -k "$KB" -r 1 -T "$TAG-warm" > "$OUT/warm.txt" 2>&1 || true
 
 GUEST=$(sed -n 's/.*address \([0-9][0-9.]*\).*/\1/p' "$OUT/warm.txt" | head -1)
+# `|| true` on the fallback, and it is not decoration.  Under `set -e` a grep
+# that matches nothing makes the whole `[ -n ... ] || GUEST=$(...)` list fail,
+# so the script exited 1 with NOTHING PRINTED -- and the two lines below, which
+# exist for exactly this case, could never run.  The first thing that went
+# wrong here (build/fitz not fetched, so the warm-up arm never booted) was
+# reported as a silent exit.
 [ -n "$GUEST" ] || GUEST=$(grep -oE '192\.168\.[0-9]+\.[0-9]+' "$OUT/warm.txt" \
-                           | grep -v "^$PEER_ADDR$" | head -1)
+                           | grep -v "^$PEER_ADDR$" | head -1 || true)
 [ -n "$GUEST" ] || {
     echo "could not learn the guest's address from $OUT/warm.txt" >&2
-    echo "the warm-up arm probably never got a DHCP lease -- read it" >&2
+    echo "the warm-up arm probably never got a DHCP lease -- read it." >&2
+    echo "--- the last 15 lines of it ---" >&2
+    tail -15 "$OUT/warm.txt" >&2
     exit 1; }
 echo "==> guest is $GUEST"
 
@@ -170,6 +249,23 @@ for rep in $(seq 1 "$REPS"); do
     # Only the FITZ: arm, not the RAM: control that follows it in the same
     # boot -- and the read figure first, because the write one is buffer
     # acceptance.
+    #
+    # ONE SAMPLE PER REP PER METRIC.  run-fitzbench.sh prints the guest's
+    # transcript and then prints it again in its summary, so every RESULT line
+    # is in the file three times; without the `seen` guard one rep contributed
+    # nine samples and the `n` this reports was three times the number of runs
+    # behind it.
+    #
+    # AND THE NETSTAT COUNTER IS $1, NOT $3.  The line is
+    # "0 retransmitted, 18 dropped on receipt": the old expression found the
+    # field matching /^retransmit/ and printed the one AFTER it, which is the
+    # dropped count, under the name `retransmits`.  It was also unguarded by
+    # arm, so it took the snapshot printed BEFORE the transfer as a second
+    # sample of the same metric and the median sat between two numbers that
+    # measure different things.  Both are recorded now, each named what it is.
+    # dropped-on-receipt is the one that moves: on the read direction the guest
+    # is the receiver, so its own retransmit counter stays at zero and the
+    # peer's retransmissions show up here as duplicates arriving.
     awk -v rep="$rep" '
         # fitzbench names the arm as "fitzbench: file=FITZ:fitzbench.dat".
         # It used to say "FitzBench FITZ:", which this matched on and which
@@ -177,10 +273,13 @@ for rep in $(seq 1 "$REPS"); do
         # the gate would have reported no data rather than a regression.
         /file=FITZ:/ { infitz = 1 }
         /file=RAM:/  { infitz = 0 }
-        infitz && /RESULT read kbs_mean=/  { sub(/.*kbs_mean=/, ""); print rep, "read_kbs",  $1 }
-        infitz && /RESULT write kbs_mean=/ { sub(/.*kbs_mean=/, ""); print rep, "write_kbs", $1 }
-        /retransmit/ { for (i = 1; i <= NF; i++)
-                           if ($i ~ /^retransmit/) print rep, "retransmits", $(i+1) }
+        infitz && /RESULT read kbs_mean=/ && !seen["r"]++ {
+            sub(/.*kbs_mean=/, ""); print rep, "read_kbs",  $1 }
+        infitz && /RESULT write kbs_mean=/ && !seen["w"]++ {
+            sub(/.*kbs_mean=/, ""); print rep, "write_kbs", $1 }
+        infitz && /^[ \t]*[0-9]+ retransmitted, [0-9]+ dropped/ && !seen["d"]++ {
+            print rep, "retransmitted", $1
+            print rep, "dropped_rx",    $3 }
     ' "$OUT/arm-$rep.txt" >> "$OUT/samples.txt"
 done
 
@@ -188,6 +287,13 @@ netem_off
 
 [ -s "$OUT/samples.txt" ] || { echo "FAIL: no arm produced a RESULT line" >&2; exit 1; }
 
+# THE SPREAD IS THE INTERQUARTILE RANGE, not the full range.  The gate
+# compares MEDIANS, and a median is robust: one arm that lands at half the
+# others -- which is what a busy emulator host produces, and this one is shared
+# -- barely moves it.  Measuring the dispersion with max-minus-min is not
+# robust at all, so that same single arm tripled the tolerance and turned a
+# usable gate into one nothing could ever breach.  Quartiles ignore the tails
+# the median already ignores.
 awk '{ v[$2] = v[$2] " " $3 }
      END {
         for (k in v) {
@@ -195,31 +301,75 @@ awk '{ v[$2] = v[$2] " " $3 }
             for (i = 1; i <= n; i++) for (j = i + 1; j <= n; j++)
                 if (a[j] + 0 < a[i] + 0) { t = a[i]; a[i] = a[j]; a[j] = t }
             med = (n % 2) ? a[(n + 1) / 2] : (a[n / 2] + a[n / 2 + 1]) / 2
-            spread = (med + 0 > 0) ? (a[n] - a[1]) * 100.0 / med : 0
-            printf "%s %.1f %.1f %d\n", k, med, spread, n
+            lo = int(n / 4) + 1; hi = n - int(n / 4)
+            spread = (med + 0 > 0) ? (a[hi] - a[lo]) * 100.0 / med : 0
+            range  = (med + 0 > 0) ? (a[n] - a[1]) * 100.0 / med : 0
+            printf "%s %.1f %.1f %d %.1f\n", k, med, spread, n, range
         }
      }' "$OUT/samples.txt" | sort > "$OUT/median.txt"
 
 if [ "$RECORD" = "1" ]; then
+    # A TOLERANCE WIDE ENOUGH IS NOT A GATE.  The tolerance is twice the
+    # observed spread, so a noisy run records a number no regression can
+    # breach and the file still looks like a baseline: the first one recorded
+    # here gave read_kbs +-282% and retransmits +-1450%, on 512 KB at 1% loss,
+    # where a handful of loss events is the whole population and one RTO
+    # halves the figure.  That is a gate that has already failed, in the
+    # quiet direction, on the day it was written.
+    #
+    # So the recorder refuses.  The fix is more data per arm and more arms --
+    # -k is nearly free because almost all of an arm is the boot, not the
+    # transfer -- and the refusal says so.
+    noisy=""
     {
         echo "# tests/perf/run-lossgate.sh baseline."
         echo "# NAME  DIRECTION  VALUE  TOLERANCE_PERCENT"
         echo "# Recorded with ${LOSS}% peer-to-guest loss, $KB KB, $REPS reps."
         echo "# Read and write are separate on purpose: the 0.16.6 regression"
         echo "# moved them in opposite directions."
-        while read -r name med spread _n; do
-            tol=$(awk -v s="$spread" 'BEGIN { t = s * 2; if (t < 5) t = 5; printf "%.1f", t }')
+        echo "# Tolerance: twice the interquartile spread over root(reps), floor ${FLOOR}%."
+        # OVER ROOT(REPS), and that is not a refinement.  The gate compares
+        # MEDIANS, so the tolerance has to describe how far a median moves,
+        # not how far one sample does -- and the range of samples GROWS with
+        # the number of them, so the old `spread * 2` made -r 9 a looser gate
+        # than -r 3.  More arms must tighten it.
+        while read -r name med spread n _range; do
+            tol=$(awk -v s="$spread" -v n="$n" -v f="$FLOOR" 'BEGIN {
+                    if (n + 0 < 1) n = 1
+                    t = 2 * s / sqrt(n); if (t < f) t = f; printf "%.1f", t }')
             dir=higher
-            [ "$name" != "retransmits" ] || dir=lower
+            case "$name" in retransmitted|dropped_rx) dir=lower ;; esac
             printf '%-14s %-7s %10s %6s\n' "$name" "$dir" "$med" "$tol"
+            # The ceiling is for the RATES, which are what this exists to
+            # gate.  The counters beside them are small integers -- nineteen
+            # dropped segments in a run -- and the square root of nineteen is
+            # four, so their relative spread cannot be small however long the
+            # run is.  Holding a count to a rate's ceiling refuses every
+            # baseline forever.  They are recorded, they are compared, and
+            # they are not the verdict.
+            case "$name" in
+                *_kbs) awk -v t="$tol" -v m="$MAXTOL" \
+                           'BEGIN { exit !(t + 0 > m + 0) }' &&
+                           noisy="$noisy $name(+-$tol%)" ;;
+            esac
         done < "$OUT/median.txt"
-    } > "$BASELINE"
+    } > "$BASELINE.new"
+
+    if [ -n "$noisy" ]; then
+        echo "==> NOT recorded.  These came out too noisy to gate anything:" >&2
+        echo "   $noisy" >&2
+        echo "    against a ceiling of ${MAXTOL}%.  Raise -k (a bigger" >&2
+        echo "    transfer costs almost nothing: an arm is mostly its boot)" >&2
+        echo "    and -r, and run it on a machine with nothing else on it." >&2
+        echo "    What it would have written is in $BASELINE.new" >&2
+        exit 1
+    fi
+
+    mv "$BASELINE.new" "$BASELINE"
     echo "==> baseline written to $BASELINE"
     cat "$BASELINE"
     exit 0
 fi
-
-[ -f "$BASELINE" ] || { echo "no baseline at $BASELINE -- record one with -B" >&2; exit 2; }
 
 echo
 printf '%-14s %10s %10s %9s %8s\n' METRIC BASELINE NOW CHANGE VERDICT
@@ -237,12 +387,22 @@ $(awk -v b="$base" -v n="$now" -v d="$dir" -v t="$tol" 'BEGIN {
         printf "%+.1f %s\n", p, bad ? "FAIL" : "ok"
      }')
 EOF
-    [ "$verdict" != "FAIL" ] || RC=1
+    # ONLY THE RATES VOTE.  The counters beside them are small integers --
+    # nineteen dropped segments against twenty-three is four events -- and the
+    # recorder already refuses to hold them to the rates' ceiling for that
+    # reason.  Letting them decide the verdict anyway put a clean run, read
+    # and write both inside 10%, on the floor over a count.  They are printed,
+    # and they are not the verdict.
+    case "$name" in
+        *_kbs) [ "$verdict" != "FAIL" ] || RC=1 ;;
+        *)     [ "$verdict" != "FAIL" ] || verdict="high" ;;
+    esac
     printf '%-14s %10s %10s %8s%% %8s\n' "$name" "$base" "$now" "$pct" "$verdict"
 done < "$BASELINE"
 
 echo
-awk '{ printf "    %-14s median %8s  spread %s%% over %s rep(s)\n", $1, $2, $3, $4 }' \
+awk '{ printf "    %-14s median %8s  iqr %s%%  range %s%%  over %s rep(s)\n", \
+                   $1, $2, $3, $5, $4 }' \
     "$OUT/median.txt"
 
 echo

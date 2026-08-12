@@ -35,6 +35,7 @@
 #   AMINETXDUO_PEER_SS        ss on the peer               (default ss)
 #   AMINETXDUO_PEER_IFACE     interface to capture         (default any)
 #   AMINETXDUO_PEER_TMP       scratch directory on the peer (default /tmp)
+#   AMINETXDUO_PEERCAP_MAX    seconds either collector may live (default 1800)
 #   AMINETXDUO_LOSSRATE_ARGS  extra arguments for lossrate.py, so a gate it
 #                             grows later needs no new letter here
 #
@@ -44,6 +45,16 @@ PEERCAP_TCPDUMP="${AMINETXDUO_PEER_TCPDUMP:-tcpdump}"
 PEERCAP_SS="${AMINETXDUO_PEER_SS:-ss}"
 PEERCAP_IFACE="${AMINETXDUO_PEER_IFACE:-any}"
 PEERCAP_TMP="${AMINETXDUO_PEER_TMP:-/tmp}"
+
+# A CEILING OF THEIR OWN.  peercap_stop kills both collectors by PID, which is
+# right and only runs when the harness reaches it: a run that is interrupted --
+# a timeout, a Ctrl-C, an agent killed -- leaves them behind, and killing the
+# ssh that started them does not touch them.  Found 2026-08-11 on playhouse4:
+# FIVE `ss -tim` loops, the oldest five days old, each waking twenty times a
+# second and appending to a file on a 2 GB tmpfs that was 100% full.  Two
+# separate costs, and the second is the bad one: scp to that peer failed, and
+# every throughput figure taken against it since had those loops running.
+PEERCAP_MAX="${AMINETXDUO_PEERCAP_MAX:-1800}"
 
 peercap_start() {
     local peer="$1" port="$2" outdir="$3" tag="$4"
@@ -59,11 +70,11 @@ peercap_start() {
     # enough that the read phases contain samples at all.
     ssh "$peer" "
         rm -f $PEERCAP_TMP/peercap-$tag.pcap $PEERCAP_TMP/peercap-$tag.ss
-        nohup $PEERCAP_TCPDUMP -i $PEERCAP_IFACE -s 96 -w \
+        nohup timeout $PEERCAP_MAX $PEERCAP_TCPDUMP -i $PEERCAP_IFACE -s 96 -w \
             $PEERCAP_TMP/peercap-$tag.pcap 'tcp port $port' \
             > $PEERCAP_TMP/peercap-$tag.tcpdump.log 2>&1 &
         echo \$! > $PEERCAP_TMP/peercap-$tag.tcpdump.pid
-        nohup sh -c 'while :; do
+        nohup timeout $PEERCAP_MAX sh -c 'while :; do
                          date +\"T %s.%N\"
                          $PEERCAP_SS -tim \"sport = :$port\"
                          sleep 0.05
