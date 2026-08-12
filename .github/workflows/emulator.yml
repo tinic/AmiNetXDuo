@@ -370,8 +370,9 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: >-
           tools/ci-arm.sh -n "Throughput on a link that loses packets"
-          -r AMINETXDUO_A2065 -r AMINETXDUO_FITZ_PEER -r AMINETXDUO_FITZ_PEER_ADDR --
-          tools/ci.sh lossgate
+          -r AMINETXDUO_A2065 -r AMINETXDUO_FITZ_PEER -r AMINETXDUO_FITZ_PEER_ADDR
+          -- sh -c
+          'tests/endurance/fetch-fitz.sh && tools/ci.sh lossgate'
 
       # SMB, WHICH HAD NO COVERAGE AT ALL.
       #

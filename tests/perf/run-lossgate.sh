@@ -156,6 +156,22 @@ if [ "$RECORD" = 0 ]; then
     fi
 fi
 
+# Fitz is fetched, not vendored, so on a fresh checkout it is not there.  It
+# has to be named HERE rather than discovered by the warm-up arm failing to
+# boot: without it the arm produces no address, the script says "the warm-up
+# arm probably never got a DHCP lease" and exits 1, and tools/ci.sh:918 turns
+# a 1 into "a metric moved past its tolerance".  That is a false report of a
+# regression on a rig that never measured anything.  Exit 2 is what the rest
+# of this file uses for "this box cannot run this test", and ci.sh already
+# reads it as the rig refusing.  Found the first time the emulator workflow
+# ran the arm, 2026-08-12.
+[ -x "$ROOT/build/fitz/Fitz/fitz" ] || {
+    echo "no $ROOT/build/fitz/Fitz/fitz -- run tests/endurance/fetch-fitz.sh" >&2
+    echo "This measures throughput against Fitz, which is fetched rather than" >&2
+    echo "vendored, so a fresh checkout does not have it." >&2
+    exit 2
+}
+
 # The peer's qdisc is machine-wide, so two of these running at once measure
 # each other.  Refuse rather than produce a number nobody can trust.
 BUSY=$(ssh "$PEER" "ps -eo args= | grep '[f]itz-serve' | wc -l" 2>/dev/null || echo 0)
