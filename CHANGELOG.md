@@ -7,6 +7,10 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
+## Unreleased
+
+- A machine answers queries for its own `<name>.local`. It announced the name when it booted and then answered nothing, for as long as this stack has had mDNS, so no machine was ever reachable by name
+
 ## 0.21.1
 
 - `tftp` writes what it downloaded. Every file it fetched was written from the wrong address and was garbage
