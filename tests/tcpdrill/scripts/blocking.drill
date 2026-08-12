@@ -1,0 +1,209 @@
+# What a wire script cannot reach: the calls whose behaviour IS the blocking.
+#
+# Every other file here runs its socket non-blocking, because the script engine
+# is also the peer: a directive that waits stops the only thing that could
+# answer it.  Four decisions in bsdsocket.library are invisible from there, and
+# each one of them is a decision about what to do while waiting.  `wire` puts
+# the peer in a Process of its own so the script's own task can block; see the
+# "the wire" section of tests/tcpdrill/tcpdrill.c.
+#
+# SPDX-License-Identifier: MIT
+
+# ---------------------------------------------------------------------------
+# bsd_send_consumed(), src/bsdsocket/transfer.c.
+#
+# nx_tcp_socket_send() segments the caller's packet ITSELF, to
+# min(peer window, congestion window, MSS), in a loop: each pass copies that
+# many bytes into a segment, puts it on the wire, and trims those bytes off the
+# caller's packet before looking at the window again.  When the wait runs out
+# with bytes still in the packet it returns an error, and the segments it
+# already sent are gone.  What send() has to credit is therefore what LEFT, and
+# the only way to know that is to measure the packet that came back.
+#
+# tcp.drill z02 and z03 credit a short send already, but neither drives the
+# loop round more than once: the window is closed when the first segment is
+# cut, and one segment out of one pass is not the shape the trim exists for.
+# Going round twice needs the window to REOPEN in the middle of one
+# nx_tcp_socket_send(), and that only happens when the call is allowed to
+# suspend -- which a non-blocking socket never does.
+#
+# So: MSS 1000, a peer window of 300, and two grants.  The blocked send()
+# suspends three times inside one 1000-byte packet, three 300-byte segments go
+# out, the peer stops answering, SO_SNDTIMEO expires, and the packet comes back
+# holding 100 bytes.  900 is what left and 900 is what send() must say.
+#
+# THE ASSERTION IS THE PEER'S COPY OF THE STREAM, NOT A COUNT.  Under-crediting
+# does not change how many bytes leave -- the application offers the remainder
+# it was told about, so every count agrees with every other -- it puts the SAME
+# APPLICATION BYTES on the wire twice under two different sequence numbers.
+# docs/RESEARCH.md has the field report: a 512 KB file that arrived 3888 bytes
+# longer than it was.  Only the bytes show it.
+case b01_multi_segment_partial_send_credits_what_left
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=300 mss=1000
+tx A seq=1 ack=1
+blocking
+wire grant win=300 grants=2 open=8192 stall=1500
+bstream 2000 timeout=500
+join
+wiregrants 2
+bshort 900
+wirestream 2000
+
+# The same mechanism with the window narrower than the segment from the start,
+# so there is no full segment anywhere in the transfer and every byte that
+# leaves is part of a cut one.  120 into a 1000-byte packet is eight passes and
+# a remainder, which is the trim loop doing all the work there is.
+case b02_partial_send_below_one_segment
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=120 mss=1000
+tx A seq=1 ack=1
+blocking
+wire grant win=120 grants=4 open=8192 stall=1500
+bstream 1200 timeout=500
+join
+wiregrants 4
+bshort 600
+wirestream 1200
+
+# ---------------------------------------------------------------------------
+# MSG_WAITALL, src/bsdsocket/transfer.c.
+#
+# A stream receive returns what the socket buffer holds; MSG_WAITALL says keep
+# waiting until the caller's buffer is full.  Only the first read of a call may
+# block without it, so against a peer delivering the stream in pieces the
+# difference is 100 bytes against 800.  The flag had no case anywhere in the
+# tree and no caller either, so nothing said which of the two it did.
+case b03_waitall_fills_the_buffer
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+blocking
+wire dribble bytes=800 chunk=100 gap=80
+brecv 800 waitall = 800
+join
+
+# The same peer without the flag, which is the other half of the statement: a
+# plain blocking recv() must come back with the first piece rather than wait
+# for the rest.  Without this line "800" above is consistent with a receive
+# that always waits, and the flag would be asserting nothing.
+case b04_without_waitall_the_first_piece_returns
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+blocking
+wire dribble bytes=800 chunk=100 gap=80
+brecv 800 = 100
+join
+
+# ---------------------------------------------------------------------------
+# SO_LINGER {l_onoff=1, l_linger>0}, src/bsdsocket/socket.c.
+#
+# Both abortive closes are covered in tcp.drill -- c09 for unread data and c10
+# for l_linger==0 -- and the blocking arm was not covered at all.  It is the
+# one place where CloseSocket() must WAIT, which is the opposite of what
+# `close within=` asserts everywhere else, so an upper bound on its own would
+# be satisfied by the close that returns at once.
+#
+# The peer answers the FIN 700 ms late.  The close has to be still waiting when
+# the answer comes and has to return on it, not on its own three-second limit.
+case b05_linger_close_waits_for_the_peer
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+opt linger 3
+blocking
+wire finack after=700
+bclose min=400 max=2500
+join
+
+# And a peer that never answers.  The close must give the linger time up and
+# then return: not at once, which would make the option a no-op, and not for
+# ever, which would hang a program on its way out.
+case b06_linger_close_gives_up_at_the_limit
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+opt linger 2
+blocking
+wire silent
+bclose min=1200 max=4000
+join
+
+# ---------------------------------------------------------------------------
+# bsd_wait_errno(), src/bsdsocket/errno.c -- and what it says about a socket
+# that meant to wait.
+#
+# The function answers ENOBUFS for NX_NO_PACKET / NX_TX_QUEUE_DEPTH /
+# NX_WINDOW_OVERFLOW when the wait was NX_WAIT_FOREVER, and EWOULDBLOCK when it
+# was not.  The EWOULDBLOCK arm is what a socket with SO_SNDTIMEO gets and it
+# is asserted here.  The ENOBUFS arm cannot be reached from anywhere, and the
+# reason is structural rather than a matter of pressure: with wait_option
+# non-zero NetX Duo SUSPENDS instead of returning any of those three
+# (nx_packet_allocate.c "if (wait_option)", nx_tcp_socket_send_internal.c's
+# suspend arm), and the cleanup routines that resume a suspended thread with
+# one of them run on the TIMEOUT -- which NX_WAIT_FOREVER has not got.  So the
+# three statuses and NX_WAIT_FOREVER cannot both be true, and `impatient` is
+# true whenever the switch is entered with one of them.  bsd_wait_sliced()
+# closes the last gap from the other side: it RETRIES those exact three, so a
+# blocking send with no timeout never even sees one.
+#
+# The window is closed and stays closed, the socket has a 400 ms send timeout,
+# and the answer must be EWOULDBLOCK.
+#
+# No `notx` after the refusal, which z01 has: the blocking send spends its
+# whole 400 ms inside the library, and the zero-window probe is due while it
+# is there.  A silence assertion would be measuring the send timeout against
+# the persist timer.  The probe itself is asserted instead, which is the same
+# statement about the same frame from the side that is not a race.
+case b07_impatient_send_on_a_closed_window_is_ewouldblock
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=200 mss=1000
+tx A seq=1 ack=1
+blocking
+opt sndtimeo 400
+send 200
+tx PA seq=1 ack=1 len=200
+rx A seq=1 ack=201 win=0
+send 200 = AGAIN
+tx A seq=201 ack=1 len=1 within=6000
+
+# The other half, from the guest rather than from the source: a socket that
+# meant to wait DOES wait, so the arm that would answer it ENOBUFS is never
+# entered.
+#
+# No SO_SNDTIMEO, so bsd_wait_option() hands NX_WAIT_FOREVER down.  The peer
+# gives no grant at all and says nothing for a second and a half.  The write
+# loop must still be inside send() when the window finally opens, and must then
+# finish the transfer -- 1200 ms of waiting is the assertion, and any errno at
+# all, ENOBUFS included, would end the loop short of 600 bytes instead.
+#
+# This is also the case that goes red if bsd_wait_sliced() stops retrying
+# NX_WINDOW_OVERFLOW, which is the one change that would make the ENOBUFS arm
+# reachable.  So it is not a statement about today's timing, it is the
+# unreachability itself, asserted.
+case b08_a_socket_that_meant_to_wait_waits
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=200 mss=1000
+tx A seq=1 ack=1
+blocking
+wire grant win=200 grants=0 open=8192 stall=1500
+bstream 600 short=0 min=1200 max=6000
+join
+wirestream 600
