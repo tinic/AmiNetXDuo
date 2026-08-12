@@ -76,6 +76,15 @@ BASELINE="$ROOT/tests/perf/lossgate-baseline.txt"
 KB=4096
 # The widest tolerance -B will write.  See the refusal below.
 MAXTOL="${AMINETXDUO_LOSSGATE_MAXTOL:-25}"
+# THE NARROWEST, AND IT IS NOT A STATISTIC.  A recording measures how far the
+# arms of ONE run scatter; what the gate has to survive is how far the MEDIAN
+# moves between runs, on a different netem seed and a different guest, and no
+# single run can see that.  The floor is the place to put it, and 5% was a
+# guess: a five-arm recording said read was repeatable to 4.3%, and the very
+# next three-arm run came in 7.1% low and failed on nothing at all.  15% is
+# above the drift this rig has been seen to have and below the 18% regression
+# the gate exists to catch, which is the whole window there is.
+FLOOR="${AMINETXDUO_LOSSGATE_FLOOR:-15}"
 
 usage() {
     cat <<'EOF'
@@ -266,16 +275,16 @@ if [ "$RECORD" = "1" ]; then
         echo "# Recorded with ${LOSS}% peer-to-guest loss, $KB KB, $REPS reps."
         echo "# Read and write are separate on purpose: the 0.16.6 regression"
         echo "# moved them in opposite directions."
-        echo "# Tolerance: twice the interquartile spread over root(reps), floor 5%."
+        echo "# Tolerance: twice the interquartile spread over root(reps), floor ${FLOOR}%."
         # OVER ROOT(REPS), and that is not a refinement.  The gate compares
         # MEDIANS, so the tolerance has to describe how far a median moves,
         # not how far one sample does -- and the range of samples GROWS with
         # the number of them, so the old `spread * 2` made -r 9 a looser gate
         # than -r 3.  More arms must tighten it.
         while read -r name med spread n _range; do
-            tol=$(awk -v s="$spread" -v n="$n" 'BEGIN {
+            tol=$(awk -v s="$spread" -v n="$n" -v f="$FLOOR" 'BEGIN {
                     if (n + 0 < 1) n = 1
-                    t = 2 * s / sqrt(n); if (t < 5) t = 5; printf "%.1f", t }')
+                    t = 2 * s / sqrt(n); if (t < f) t = f; printf "%.1f", t }')
             dir=higher
             case "$name" in retransmitted|dropped_rx) dir=lower ;; esac
             printf '%-14s %-7s %10s %6s\n' "$name" "$dir" "$med" "$tol"
