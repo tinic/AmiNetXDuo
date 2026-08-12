@@ -401,6 +401,18 @@ NX_ICMPV6_RA *ra = (NX_ICMPV6_RA *)message;
     *length = (UINT)sizeof(NX_ICMPV6_RA);
 }
 
+/* RFC 4861 4.2: ReachableTime and RetransTimer are milliseconds, and are on
+   the wire in network order like the rest of the message. */
+static VOID h_set_nd_timers(UCHAR *message, ULONG reachable, ULONG retrans)
+{
+NX_ICMPV6_RA *ra = (NX_ICMPV6_RA *)message;
+
+    ra -> nx_icmpv6_ra_reachable_time = reachable;
+    NX_CHANGE_ULONG_ENDIAN(ra -> nx_icmpv6_ra_reachable_time);
+    ra -> nx_icmpv6_ra_retrans_time   = retrans;
+    NX_CHANGE_ULONG_ENDIAN(ra -> nx_icmpv6_ra_retrans_time);
+}
+
 static VOID h_add_prefix_option(UCHAR *message, UINT *length, UCHAR flags,
                                 ULONG valid_lifetime, ULONG preferred_lifetime,
                                 UCHAR prefix_length)
@@ -1100,6 +1112,59 @@ char  what[128];
         h_check(h_dnssl_calls == 0, "with no callback nothing is reported");
         h_check(h_is_expected_address(h_formed_address()),
                 "and the rest of the advertisement is processed anyway");
+    }
+
+    /* --- (6) the neighbour discovery timers a router may advertise --- */
+
+    /*
+     * Both fields are milliseconds and both are stored in a coarser unit: the
+     * retransmit timer in NX_IP_FAST_TIMER_RATE ticks of 100 ms, the reachable
+     * time in whole seconds.  Anything below one unit truncates to zero, and a
+     * zero is what nx_nd_cache_fast_periodic_update and nx_ipv6_packet_send
+     * would then re-arm a cache entry to.  A router advertising a sub-unit
+     * value is the only way to reach it, which is why it is driven here and
+     * not from a link.
+     *
+     * It does not happen: _nx_icmpv6_process_ra floors each to 1 where it
+     * writes it.  This is the case that holds it there.
+     */
+    {
+    UINT length;
+
+        h_reset();
+        h_build_ra(h_message, &length, 1800);
+        h_set_nd_timers(h_message, 500, 50);
+        h_deliver(h_message, length);
+
+        h_check(h_ip.nx_ipv6_retrans_timer_ticks == 1,
+                "a 50 ms RetransTimer arms one fast tick, not none");
+        h_check(h_ip.nx_ipv6_reachable_timer == 1,
+                "a 500 ms ReachableTime arms one second, not none");
+
+        /* The values a router usually carries, so the floor is not the only
+           thing this covers. */
+        h_reset();
+        h_build_ra(h_message, &length, 1800);
+        h_set_nd_timers(h_message, 30000, 1000);
+        h_deliver(h_message, length);
+
+        h_check(h_ip.nx_ipv6_retrans_timer_ticks == NX_IP_FAST_TIMER_RATE,
+                "a 1 s RetransTimer arms a second of fast ticks");
+        h_check(h_ip.nx_ipv6_reachable_timer == 30,
+                "a 30 s ReachableTime arms thirty seconds");
+
+        /* A field left at zero is "unspecified", RFC 4861 4.2, and leaves what
+           nxd_ipv6_enable set. */
+        h_reset();
+        h_ip.nx_ipv6_retrans_timer_ticks = 7;
+        h_ip.nx_ipv6_reachable_timer     = 7;
+        h_build_ra(h_message, &length, 1800);
+        h_set_nd_timers(h_message, 0, 0);
+        h_deliver(h_message, length);
+
+        h_check(h_ip.nx_ipv6_retrans_timer_ticks == 7 &&
+                h_ip.nx_ipv6_reachable_timer == 7,
+                "an unspecified timer changes nothing");
     }
 
     printf("%lu checks, %lu failures\n", h_checks, h_failures);
