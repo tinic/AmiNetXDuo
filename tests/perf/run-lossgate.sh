@@ -279,8 +279,18 @@ if [ "$RECORD" = "1" ]; then
             dir=higher
             case "$name" in retransmitted|dropped_rx) dir=lower ;; esac
             printf '%-14s %-7s %10s %6s\n' "$name" "$dir" "$med" "$tol"
-            awk -v t="$tol" -v m="$MAXTOL" 'BEGIN { exit !(t + 0 > m + 0) }' &&
-                noisy="$noisy $name(+-$tol%)"
+            # The ceiling is for the RATES, which are what this exists to
+            # gate.  The counters beside them are small integers -- nineteen
+            # dropped segments in a run -- and the square root of nineteen is
+            # four, so their relative spread cannot be small however long the
+            # run is.  Holding a count to a rate's ceiling refuses every
+            # baseline forever.  They are recorded, they are compared, and
+            # they are not the verdict.
+            case "$name" in
+                *_kbs) awk -v t="$tol" -v m="$MAXTOL" \
+                           'BEGIN { exit !(t + 0 > m + 0) }' &&
+                           noisy="$noisy $name(+-$tol%)" ;;
+            esac
         done < "$OUT/median.txt"
     } > "$BASELINE.new"
 
