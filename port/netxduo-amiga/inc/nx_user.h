@@ -193,7 +193,7 @@
  *
  *     timeout = nx_tcp_socket_timeout_rate << (retries * NX_TCP_RETRY_SHIFT)
  *
- * (nx_tcp_socket_retransmit.c:188, nx_tcp_fast_periodic_processing.c:150).
+ * (nx_tcp_socket_retransmit.c:245, nx_tcp_fast_periodic_processing.c:188).
  * NX_TCP_RETRY_SHIFT defaults to 0, so the shift is a no-op and the interval is
  * NX_IP_PERIODIC_RATE / NX_TCP_TRANSMIT_TIMER_RATE, one second, forever.
  * tests/tcpdrill measured SYN retransmissions at 890 ms and then 1002 ms.
@@ -290,12 +290,12 @@
  *
  * With this, an ESTABLISHED socket idle for NX_TCP_KEEPALIVE_INITIAL seconds
  * sends a probe, an ACK carrying tx_sequence - 1, a backward sequence number
- * the peer must answer (nx_tcp_periodic_processing.c:125), and after
+ * the peer must answer (nx_tcp_periodic_processing.c:133), and after
  * NX_TCP_KEEPALIVE_RETRIES unanswered probes at NX_TCP_KEEPALIVE_RETRY seconds
  * the socket is reset.  BSD's defaults are kept: 7200 s initial, 75 s retry,
  * 10 retries.
  *
- * nx_tcp_socket_create.c:166 sets nx_tcp_socket_keepalive_enabled = NX_TRUE
+ * nx_tcp_socket_create.c:180 sets nx_tcp_socket_keepalive_enabled = NX_TRUE
  * unconditionally under this define, which would put every socket on keepalive
  * whether the application asked or not.  src/bsdsocket/socket.c therefore
  * clears it at create and options.c sets it, so the default is off and
@@ -560,7 +560,7 @@
  * without this, which reads as though routes existed.  Without the enable:
  *
  *   * NX_IP has no nx_ip_routing_table[] and no
- *     nx_ip_routing_table_entry_count (nx_api.h:2972);
+ *     nx_ip_routing_table_entry_count (nx_api.h:3193, :3196);
  *   * nx_ip_static_route_add()/delete() compile to stubs returning
  *     NX_NOT_SUPPORTED (nx_ip_static_route_{add,delete}.c);
  *   * _nx_ip_route_find() skips the table lookup entirely
@@ -1050,7 +1050,7 @@
  * Five more surveyed and rejected, with the working.
  *
  *   NX_DISABLE_ARP_AUTO_ENTRY
- *       Every ARP we see creates a cache entry (nx_arp_packet_receive.c:490),
+ *       Every ARP we see creates a cache entry (nx_arp_packet_receive.c:499),
  *       the classic poisoning surface, but disabling that does not close it:
  *       nx_arp_packet_receive.c updates an existing entry from any ARP it sees
  *       whether this is defined or not, and this define does not touch that
@@ -1067,10 +1067,11 @@
  *   NX_ENABLE_ARP_MAC_CHANGE_NOTIFICATION
  *       Adds a callback when a cached entry's MAC changes, a gateway being
  *       replaced, or impersonated.  It is a notification only:
- *       nx_arp_packet_receive.c:418 calls it after writing the new address, so
- *       nothing it does can refuse the change, and no handler in this tree
- *       would act on it.  It would add a function pointer to NX_IP and a branch
- *       per received ARP for a callback that logs.  Revisit when something can
+ *       nx_arp_packet_receive.c:444 calls it and then returns at :447 without
+ *       touching the entry, so the handler cannot steer what happens next and
+ *       no handler in this tree would act on it.  It would add a function
+ *       pointer to NX_IP and a branch per received ARP for a callback that
+ *       logs.  Revisit when something can
  *       act, a static-ARP pin for the gateway, or a warning in ShowNetStatus.
  *
  *   NX_ENABLE_PACKET_DEBUG_INFO

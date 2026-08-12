@@ -227,8 +227,8 @@ ULONG ami_bsd_tcp_window(VOID)
 /*
  * NetX Duo's ISN is randomised but biased, and the bias is worth 9 bits.
  *
- * The code is nxd_tcp_client_socket_connect.c:411 and
- * nx_tcp_server_socket_accept.c:106, and both read:
+ * The code is nxd_tcp_client_socket_connect.c:524 and
+ * nx_tcp_server_socket_accept.c:115, and both used to read:
  *
  *     if (socket -> nx_tcp_socket_tx_sequence == 0)
  *     {
@@ -265,11 +265,12 @@ ULONG ami_bsd_tcp_window(VOID)
  * bits is not by itself a break, but predictable sequence numbers are the
  * ingredient every off-path TCP attack since Morris has needed.
  *
- * The fix avoids patching third_party/.  The `else` branch above is what every
- * reused socket takes, so seeding tx_sequence at create time makes a fresh
- * socket take it too, and that branch adds rather than ORs: with a full 32-bit
- * seed the result is uniform over the whole space.  No vendored file changes,
- * no symbol override, no linker wrapper.
+ * The fix here avoids patching third_party/.  The `else` branch above is what
+ * every reused socket takes, so seeding tx_sequence at create time makes a
+ * fresh socket take it too, and that branch adds rather than ORs: with a full
+ * 32-bit seed the result is uniform over the whole space.  No symbol override,
+ * no linker wrapper.  The fork has since made the `if` branch add as well
+ * (netxduo f829a5cb), so this seeding is now the second of two.
  *
  * This is not RFC 6528.  6528 computes
  * M + F(local addr, local port, remote addr, remote port, secret); the
@@ -285,7 +286,7 @@ ULONG ami_bsd_tcp_window(VOID)
 /*
  * SO_KEEPALIVE must default off, and NetX Duo defaults it on.
  *
- * nx_tcp_socket_create.c:166 sets nx_tcp_socket_keepalive_enabled = NX_TRUE
+ * nx_tcp_socket_create.c:180 sets nx_tcp_socket_keepalive_enabled = NX_TRUE
  * unconditionally when NX_ENABLE_TCP_KEEPALIVE is defined, so defining that
  * alone would put every socket in the machine on a two-hour keepalive timer.
  * 4.4BSD, POSIX and every stack since default SO_KEEPALIVE off.
@@ -1804,7 +1805,7 @@ static VOID bsd_listen_unlink(AmiSocket *sock, AmiSocket *victim)
  * down would throw away the spare and any queued connection with it.
  *
  * The trigger is not known. 37.4 published a root cause for that
- * NX_INVALID_RELISTEN and then retracted it: nx_tcp_packet_process.c:650
+ * NX_INVALID_RELISTEN and then retracted it: nx_tcp_packet_process.c:752
  * clears the listen request's socket slot itself when the SYN arrives, so the
  * obvious "the slot is still occupied" explanation predicts a structural
  * failure while the measured one is intermittent. Nothing here depends on

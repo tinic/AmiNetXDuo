@@ -132,7 +132,7 @@ static void h_print_ladder(const char *what)
 /*
  * NetX Duo's timer rates.  nx_tcp_enable.c computes them from
  * NX_IP_PERIODIC_RATE and would drag the whole IP enable path in with it, so
- * the three lines that matter are reproduced here (nx_tcp_enable.c:111-116).
+ * the three lines that matter are reproduced here (nx_tcp_enable.c:116-121).
  */
 ULONG _nx_tcp_fast_timer_rate;
 ULONG _nx_tcp_ack_timer_rate;
@@ -220,8 +220,8 @@ USHORT _nx_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
 
 /*
  * A retransmission clears nx_packet_queue_next before sending
- * (nx_tcp_socket_retransmit.c:386) and only sends again once the driver has
- * put NX_DRIVER_TX_DONE back, so this stub does what the SANA-II transmit
+ * (nx_tcp_socket_retransmit.c:619) and only sends again once the driver has
+ * put NX_DRIVER_TX_DONE back (:326), so this stub does what the SANA-II transmit
  * completion does.  Without it the ladder stops after one rung for a reason
  * that has nothing to do with the retry limit.
  */
@@ -416,7 +416,7 @@ static void h_fixture(void)
      * condition.  The only reason a further send cannot proceed is that one
      * segment is already in flight and the congestion window is one segment,
      * which is where a retransmit timeout leaves it
-     * (nx_tcp_socket_retransmit.c:182).
+     * (nx_tcp_socket_retransmit.c:227).
      */
     h_sock.nx_tcp_socket_tx_window_advertised = 8192;
     h_sock.nx_tcp_socket_tx_window_congestion = H_SEG_BYTES;
@@ -452,7 +452,7 @@ static void h_fixture(void)
      */
     h_sock.nx_tcp_socket_transmit_queue_maximum = 1;
 
-    /* Armed, as nx_tcp_socket_send_internal.c:877 arms it. */
+    /* Armed, as nx_tcp_socket_send_internal.c:1054 arms it. */
     h_sock.nx_tcp_socket_timeout         = h_sock.nx_tcp_socket_timeout_rate;
     h_sock.nx_tcp_socket_timeout_retries = 0;
 }
@@ -516,7 +516,7 @@ static void h_run_timer(ULONG seconds, UINT behaviour)
             (VOID)_nx_tcp_socket_send_internal(&h_sock, h_app_packet(), 0);
         }
 
-        /* nx_tcp_socket_state_ack_check.c:555: an ACK that covers the probe
+        /* nx_tcp_socket_state_ack_check.c:616: an ACK that covers the probe
            sequence clears the probe failure count.  A peer that is still
            there does this; one that has gone does not. */
         if ((behaviour & H_PEER_ACKS_PROBES) != 0)
@@ -533,7 +533,7 @@ int main(void)
 {
     UINT status;
 
-    /* nx_tcp_enable.c:111-116, without the IP instance. */
+    /* nx_tcp_enable.c:116-121, without the IP instance. */
     _nx_tcp_fast_timer_rate     = (NX_IP_PERIODIC_RATE + (NX_TCP_FAST_TIMER_RATE - 1)) / NX_TCP_FAST_TIMER_RATE;
     _nx_tcp_ack_timer_rate      = (NX_IP_PERIODIC_RATE + (NX_TCP_ACK_TIMER_RATE - 1)) / NX_TCP_ACK_TIMER_RATE;
     _nx_tcp_transmit_timer_rate = (NX_IP_PERIODIC_RATE + (NX_TCP_TRANSMIT_TIMER_RATE - 1)) / NX_TCP_TRANSMIT_TIMER_RATE;
@@ -594,7 +594,7 @@ int main(void)
      *
      * That path also used to declare the socket to be probing a zero window,
      * which it is not: the peer is advertising 8 KB and has never asked us to
-     * stop.  The flag is what nx_tcp_fast_periodic_processing.c:129 uses to
+     * stop.  The flag is what nx_tcp_fast_periodic_processing.c:155 uses to
      * decide which counter the retry limit is tested against, so setting it
      * here aimed the test at nx_tcp_socket_zero_window_probe_failure, which
      * the ordinary data path never advances.  The neighbouring arm of the

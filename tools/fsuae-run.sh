@@ -21,8 +21,7 @@
 # accounting, so "what would this do at 25 MHz?" has a defensible answer even
 # though "what would this do on an A3000?" does not. See the block below it.
 #
-# tests/perf/cpucal measures all of the above rather than assuming it; the
-# calibration section of docs/RESEARCH.md is the write-up.
+# tests/perf/cpucal measures all of the above rather than assuming it.
 #
 # -n attaches an emulated Commodore A2065 Ethernet card wired to FS-UAE's
 # SLIRP user-mode NAT (10.0.2.0/24, gateway and DHCP/DNS server 10.0.2.2).

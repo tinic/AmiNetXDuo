@@ -149,8 +149,7 @@ SYS:nc 10.0.2.2 1 -v -w 5
 SYS:nc no.such.host.invalid 80
 # ---- nc as a server, guest to guest -----------------------------------
 # The only listen/accept this emulator can actually drive end to end: SLIRP
-# forwards nothing inward (see the section in docs/RESEARCH.md), so the
-# Amiga has to be both ends.  This is a full conversation, half-close
+# forwards nothing inward, so the Amiga has to be both ends.  This is a full conversation, half-close
 # included, over 127.0.0.1.
 &SYS:nc -l 7099 -v -w 10 -N >DH0:nc-loopback.txt
 wait 4
@@ -214,8 +213,7 @@ fi
 # The same-machine case is NOT in that list, and the reason is a library bug
 # rather than a gap in the commands: shutdown(SHUT_WR) on a connection whose
 # two ends are on this machine hangs the caller in WaitSelect() forever.
-# tests/tools/commands-samehost.txt reproduces it on its own; see the "nc,
-# telnet" section of docs/RESEARCH.md.
+# tests/tools/commands-samehost.txt reproduces it on its own.
 
 # --------------------------------------------------------------- peers ---
 

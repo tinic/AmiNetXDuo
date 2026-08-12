@@ -110,18 +110,11 @@ extern unsigned int ami_crypto_rbg(unsigned int bits, unsigned char *result);
  * Every little-endian port defines these as `a = ((a >> 8) | (a << 8))` and so
  * on: an assignment expression, legal in statement position and in the middle
  * of a larger expression, requiring `a` to be an lvalue.  An empty definition
- * is legal only in the first position.  One caller uses the second:
- *
- *     addons/mdns/nxd_mdns.c:8489
- *       *(USHORT *)(... + NX_MDNS_FLAGS_OFFSET) |= NX_CHANGE_USHORT_ENDIAN(tc_bit);
- *
- * which expanded to `x |= ;` and would not compile.  It is the only such use in
- * the vendored tree, six others exist, all in nx_icmpv6_*, all in statement
- * position, so no big-endian NetX Duo port has hit it, the mDNS add-on
- * apparently never having been built on one.  Fixing it here rather than in
- * third_party/ keeps the rule that vendored source is not modified, and this
- * definition evaluates to the value and requires an lvalue exactly as the
- * little-endian one does.
+ * is legal only in the first position.  The mDNS add-on once used the second,
+ * `x |= NX_CHANGE_USHORT_ENDIAN(tc_bit)`, which expanded to `x |= ;` and would
+ * not compile; nxd_mdns.c:8489 is in statement position now.  Defining these
+ * to evaluate to the value keeps both positions legal whatever the vendored
+ * tree does next, without modifying it.
  *
  * `((a) = (a))` and not the shorter `(a)`: the plain form makes every statement
  * use a bare expression with no effect, and two of those are in our own code
