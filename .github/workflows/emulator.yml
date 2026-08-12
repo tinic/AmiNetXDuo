@@ -102,23 +102,31 @@ jobs:
           if [ ! -f "$AMINETXDUO_KICKSTART" ]; then
             echo "::error::AMINETXDUO_KICKSTART is set to '$AMINETXDUO_KICKSTART'," \
                  "which does not exist on this runner. Refusing to fall back to" \
-                 "happened."
+                 "an AROS ROM: this tier exists to say what a real Kickstart 3.1" \
+                 "does, and a run on a substitute would answer a different" \
+                 "question under the same name."
             exit 1
           fi
 
       - name: Build the default and 68000 configurations
+        id: build
         run: AMINETXDUO_CI_CROSS="default m68000" tools/ci.sh cross
 
       - name: Run the on-Amiga harnesses
-        run: tools/ci.sh emulator
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "On-Amiga harnesses, 68020 and 68000" --
+          tools/ci.sh emulator
 
       # a2065.device is what the network and conformance tiers need, and it
       # exists only here.
       - name: Conformance suite
-        if: env.AMINETXDUO_A2065 != ''
-        run: |
-          tests/conformance/build.sh
-          tests/conformance/run-fsuae.sh -b build/ci/default -a "LOOPBACK NOPAGE"
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "bsdsocktest conformance suite"
+          -r AMINETXDUO_A2065 -- sh -c
+          'tests/conformance/build.sh &&
+          tests/conformance/run-fsuae.sh -b build/ci/default -a "LOOPBACK NOPAGE"'
 
       # 129 checks over the whole RFC 3542 surface -- IPV6_RECVPKTINFO and
       # IP_PKTINFO arriving together on one datagram, both hop-limit paths read
@@ -135,7 +143,10 @@ jobs:
       # guest boots. The results are on the SERIAL log, not the guest's
       # stdout.txt -- the harness prints the verdict either way.
       - name: IPv6 socket surface
-        run: tests/ipv6/run-socket-fsuae.sh -A -b build/ci/default
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "IPv6 socket surface (RFC 3542)" --
+          tests/ipv6/run-socket-fsuae.sh -A -b build/ci/default
 
       # The same regression, one tier down and in a minute rather than ten.
       # A bare drive shows it as an interface that comes up with no address,
@@ -143,8 +154,11 @@ jobs:
       # cause is one thing, the IP thread blocked on sb_Lock so the lease never
       # completes.  Needs a driver, hence the A2065 gate.
       - name: AddNetInterface comes back
-        if: env.AMINETXDUO_A2065 != ''
-        run: tests/tools/run-addifup.sh -b build/ci/default
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "AddNetInterface comes back"
+          -r AMINETXDUO_A2065 --
+          tests/tools/run-addifup.sh -b build/ci/default
 
       # The commands that change the machine's network configuration, each
       # over its own whole surface: the interface switched down and up and
@@ -157,27 +171,39 @@ jobs:
       # header promised, because a compile was all that ever ran over it.
       # These are here so the same cannot happen quietly again.
       - name: RemoveNetInterface frees its slot
-        if: env.AMINETXDUO_A2065 != ''
-        run: tests/tools/run-ifremove.sh -b build/ci/default
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "RemoveNetInterface frees its slot"
+          -r AMINETXDUO_A2065 --
+          tests/tools/run-ifremove.sh -b build/ci/default
 
       - name: Online and Offline
-        if: env.AMINETXDUO_A2065 != ''
-        run: tests/tools/run-onoff.sh -b build/ci/default
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "Online and Offline"
+          -r AMINETXDUO_A2065 --
+          tests/tools/run-onoff.sh -b build/ci/default
 
       # ConfigureNetInterface changes the three numbers on an interface that
       # stays where it is.  The counter assertion is the one that matters: a
       # command that quietly fell back to a remove and an add would pass every
       # assertion about the address and fail that one.
       - name: ConfigureNetInterface changes an interface in place
-        if: env.AMINETXDUO_A2065 != ''
-        run: tests/tools/run-ifconfigure.sh -b build/ci/default
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "ConfigureNetInterface changes an interface in place"
+          -r AMINETXDUO_A2065 --
+          tests/tools/run-ifconfigure.sh -b build/ci/default
 
       # The DHCP half of the same command, which needs a server and so an
       # interface with a second writer.  A separate file for that reason, not
       # because it is a separate command.
       - name: ConfigureNetInterface releases and renews a lease
-        if: env.AMINETXDUO_A2065 != ''
-        run: tests/tools/run-ifdhcp.sh -b build/ci/default
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "ConfigureNetInterface releases and renews a lease"
+          -r AMINETXDUO_A2065 --
+          tests/tools/run-ifdhcp.sh -b build/ci/default
 
       # Two boots: one where ENV:HOSTNAME is the strongest source that has
       # named the machine, and one where DEVS:Internet/name_resolution
@@ -185,16 +211,25 @@ jobs:
       # the host afterwards, which is the only witness there is for the half
       # that survives a reboot.
       - name: hostname reports its source and respects the ranking
-        if: env.AMINETXDUO_A2065 != ''
-        run: tests/tools/run-hostname.sh -b build/ci/default
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "hostname reports its source and respects the ranking"
+          -r AMINETXDUO_A2065 --
+          tests/tools/run-hostname.sh -b build/ci/default
 
       - name: NetSetup writes a usable configuration
-        if: env.AMINETXDUO_A2065 != ''
-        run: tests/tools/run-netsetup.sh -b build/ci/default
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "NetSetup writes a usable configuration"
+          -r AMINETXDUO_A2065 --
+          tests/tools/run-netsetup.sh -b build/ci/default
 
       - name: ShowNetServices and its window
-        if: env.AMINETXDUO_A2065 != ''
-        run: tests/tools/run-shownetservices.sh -b build/ci/default
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "ShowNetServices and its window"
+          -r AMINETXDUO_A2065 --
+          tests/tools/run-shownetservices.sh -b build/ci/default
 
       # Every QUIET in the tree, each command run twice and the two outputs
       # compared.  Eleven of them gated their own error messages behind the
@@ -202,8 +237,11 @@ jobs:
       # said nothing at all; a compile could not see it and no test ever ran a
       # command twice.
       - name: QUIET means the same thing everywhere
-        if: env.AMINETXDUO_A2065 != ''
-        run: tests/tools/run-quiet.sh -b build/ci/default
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "QUIET means the same thing everywhere"
+          -r AMINETXDUO_A2065 --
+          tests/tools/run-quiet.sh -b build/ci/default
 
       # MDNS= as a switch rather than a boot-time reading: on, off, on again,
       # and an interface removed and re-added that must not claim it.  The two
@@ -211,16 +249,22 @@ jobs:
       # set and never acted on passes anyway.  Exit 3 is "the host-side half was
       # not measured", which SLIRP decides, so it is not a failure.
       - name: mDNS switched on and off at runtime
-        if: env.AMINETXDUO_A2065 != ''
-        run: tests/tools/run-mdnsctl.sh -b build/ci/default || [ $? = 3 ]
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "mDNS switched on and off at runtime"
+          -r AMINETXDUO_A2065 -x 3 -m "3 = the host-side half was not measured"
+          -- tests/tools/run-mdnsctl.sh -b build/ci/default
 
       # Two boots with two hardware addresses and nothing naming either
       # machine: they must take two different names.  A constant fallback
       # passes a one-machine test, which is how every unconfigured machine
       # came to claim amiga.local.
       - name: two unnamed machines take two names
-        if: env.AMINETXDUO_A2065 != ''
-        run: tests/tools/run-hostname-mac.sh -b build/ci/default
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "two unnamed machines take two names"
+          -r AMINETXDUO_A2065 --
+          tests/tools/run-hostname-mac.sh -b build/ci/default
 
       # iperf, against a peer that counts what actually arrived.  What this
       # arm proves is the BYTE COUNTS, which are exact on any link: SLIRP has
@@ -230,8 +274,11 @@ jobs:
       # which a SLIRP guest has none of; they run under -B on a rig with a
       # third machine, the same reason run-httpd.sh is not here.
       - name: iperf measures what crossed the wire
-        if: env.AMINETXDUO_A2065 != ''
-        run: tests/tools/run-iperf.sh -b build/ci/default
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "iperf measures what crossed the wire"
+          -r AMINETXDUO_A2065 --
+          tests/tools/run-iperf.sh -b build/ci/default
 
       # A TLS 1.3 handshake end to end, against a peer that will not fall
       # back to 1.2, on both tiers -- and the second one is not redundant.
@@ -241,12 +288,18 @@ jobs:
       # stopped 68060 TLS 1.3 was in that C and a green 68020 run said
       # nothing about it. Two arms, two code paths.
       - name: TLS 1.3 handshake, 68020
-        if: env.AMINETXDUO_A2065 != '' && env.AMINETXDUO_TLS13_PEER != ''
-        run: tests/tls/run-tls13.sh -b build/ci/default -c 68020
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "TLS 1.3 handshake, 68020"
+          -r AMINETXDUO_A2065 -r AMINETXDUO_TLS13_PEER --
+          tests/tls/run-tls13.sh -b build/ci/default -c 68020
 
       - name: TLS 1.3 handshake, 68060
-        if: env.AMINETXDUO_A2065 != '' && env.AMINETXDUO_TLS13_PEER != ''
-        run: tests/tls/run-tls13.sh -b build/ci/default -c 68060
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "TLS 1.3 handshake, 68060"
+          -r AMINETXDUO_A2065 -r AMINETXDUO_TLS13_PEER --
+          tests/tls/run-tls13.sh -b build/ci/default -c 68060
 
       # The other half of the record layer: TLS 1.2 with a CBC suite, where
       # RFC 7366 and RFC 7627 apply and TLS 1.3 has nothing to say.  The
@@ -254,8 +307,11 @@ jobs:
       # it saw and which it answered, and the guest's own account of that is
       # what is under test.
       - name: TLS 1.2 encrypt-then-MAC and extended master secret
-        if: env.AMINETXDUO_A2065 != '' && env.AMINETXDUO_TLS13_PEER != ''
-        run: tests/tls/run-tls12ext.sh -b build/ci/default -c 68020
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "TLS 1.2 encrypt-then-MAC and extended master secret"
+          -r AMINETXDUO_A2065 -r AMINETXDUO_TLS13_PEER --
+          tests/tls/run-tls12ext.sh -b build/ci/default -c 68020
 
       # EVERY NETWORK CARD, ONE BOOT EACH.
       #
@@ -269,8 +325,11 @@ jobs:
       # because it needs a bridged NIC and a peer, neither of which a hosted
       # runner has.  Skipped, loudly and per card, where the peer is not set.
       - name: Every network card carries bytes both ways
-        if: env.AMINETXDUO_A2065 != '' && env.AMINETXDUO_CARDSWEEP_PEER != ''
-        run: tools/ci.sh cards
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "Every network card carries bytes both ways"
+          -r AMINETXDUO_A2065 -r AMINETXDUO_CARDSWEEP_PEER --
+          tools/ci.sh cards
 
       # THE TWO REGRESSION TESTS THAT NEEDED A REAL LINK AND SO HAD NO HOME.
       #
@@ -284,8 +343,11 @@ jobs:
       # Both were written, both went green by hand, and nothing ran either of
       # them again.  The TCP: half is skipped, loudly, where there is no peer.
       - name: "NetShutdown and the TCP: handler"
-        if: env.AMINETXDUO_A2065 != ''
-        run: tools/ci.sh bridged
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "NetShutdown and the TCP: handler"
+          -r AMINETXDUO_A2065 --
+          tools/ci.sh bridged
 
       # THE ONLY RIG THAT CAN PRICE AN ACK OR RETRANSMIT CHANGE.
       #
@@ -299,10 +361,11 @@ jobs:
       # It changes the PEER's root qdisc for the duration, so the peer must be
       # idle; the harness refuses to start otherwise.
       - name: Throughput on a link that loses packets
-        if: >
-          env.AMINETXDUO_A2065 != '' && env.AMINETXDUO_FITZ_PEER != '' &&
-          env.AMINETXDUO_FITZ_PEER_ADDR != ''
-        run: tools/ci.sh lossgate
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "Throughput on a link that loses packets"
+          -r AMINETXDUO_A2065 -r AMINETXDUO_FITZ_PEER -r AMINETXDUO_FITZ_PEER_ADDR --
+          tools/ci.sh lossgate
 
       # SMB, WHICH HAD NO COVERAGE AT ALL.
       #
@@ -317,11 +380,12 @@ jobs:
       # itself on the peer -- not one that happens to be running on the LAN,
       # which is a test whose result depends on somebody else's uptime.
       - name: Mount an SMB share on a real Workbench
-        if: >
-          env.AMINETXDUO_A2065 != '' && env.AMINETXDUO_ADF_DIR != '' &&
-          env.AMINETXDUO_SMB2FS != '' && env.AMINETXDUO_FILESYSBOX != '' &&
-          env.AMINETXDUO_PEER != ''
-        run: tools/ci.sh smb
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "Mount an SMB share on a real Workbench"
+          -r AMINETXDUO_A2065 -r AMINETXDUO_ADF_DIR -r AMINETXDUO_SMB2FS
+          -r AMINETXDUO_FILESYSBOX -r AMINETXDUO_PEER --
+          tools/ci.sh smb
 
       # THE ONE THAT WOULD HAVE STOPPED 0.17.0 AND 0.17.1 SHIPPING.
       #
@@ -335,9 +399,16 @@ jobs:
       #
       # Runs on tags, where a release is being cut, and on demand.  Needs the
       # ADFs and the Installer, so it is skipped rather than failed where they
-      # are not configured; the tier report below says which tiers ran.
-      - name: Release archive on a real Workbench 3.1
-        if: env.AMINETXDUO_ADF_DIR != '' && env.AMINETXDUO_INSTALLER != ''
+      # are not configured; the arm table says so per arm.
+      #
+      # The four configurations are built here rather than inside the arm
+      # because building them is worth doing on its own: they are what
+      # .github/workflows/release.yml packs, so a break in one of them is a
+      # break in something a user downloads, whether or not this machine has
+      # the floppies to install it on.
+      - name: Build the release archive
+        id: dist
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           for d in cm:68020 cm-68000:68000 cm-68060:68060; do
             cmake -S . -B "build/${d%%:*}" \
@@ -354,34 +425,29 @@ jobs:
           cmake --build build/cm-68000-minimal --parallel
           dist/make-dist.sh
 
-          # -H IS THE HALF THIS STEP CLAIMS TO DO.  Without it TERMINAL stays 0
-          # (install/test/run-workbench.sh:144) and the whole block at :1000
-          # to :1223 is skipped: no peer is contacted, tests/tools/httpd-drill.py's
-          # twelve WebDAV assertions do not run, wsterm-console.py does not run,
-          # the PUT/GET round trip does not run, `lha x` on the Amiga does not
-          # run, and the second and third installs -- install-over-existing, and
-          # answering the terminal question no -- do not happen at all.  What
-          # ran instead was one install, a boot, and a check that some files
-          # exist.  tools/ci.sh's e2e stage passes -H and no workflow invokes
-          # that stage, so those assertions have never run in CI.
-          #
-          # It needs a second machine: the host running amiberry cannot reach
-          # its own guest.  Where AMINETXDUO_PEER is not configured the step
-          # runs without -H and SAYS SO, rather than reporting a quarter of
-          # the test as the whole of it.
-          archive="$PWD/$(ls -t build/dist/*.lha | head -1)"
-          if [ -n "${AMINETXDUO_PEER:-}" ]; then
-            echo "e2e_terminal=on peer=$AMINETXDUO_PEER"
-            install/test/run-workbench.sh -H -a "$archive"
-          else
-            echo "e2e_terminal=off"
-            echo "::warning::AMINETXDUO_PEER is not set on this runner, so the" \
-                 "release e2e ran WITHOUT -H: the WebDAV drill, the browser" \
-                 "terminal, lha x on the Amiga and the two reinstall passes" \
-                 "were all skipped. Set the AMINETXDUO_PEER repository" \
-                 "variable to an ssh target that can reach the guest."
-            install/test/run-workbench.sh -a "$archive"
-          fi
+      # -H IS THE HALF THIS ARM CLAIMS TO DO, and it is why the arm goes
+      # through tools/ci.sh rather than calling run-workbench.sh here.  Without
+      # -H, TERMINAL stays 0 (install/test/run-workbench.sh:144) and the whole
+      # block at :1000 to :1223 is skipped: no peer is contacted,
+      # tests/tools/httpd-drill.py's twelve WebDAV assertions do not run,
+      # wsterm-console.py does not run, the PUT/GET round trip does not run,
+      # `lha x` on the Amiga does not run, and the second and third installs --
+      # install-over-existing, and answering the terminal question no -- do not
+      # happen at all.  What ran instead was one install, a boot, and a check
+      # that some files exist.
+      #
+      # This file used to spell that fallback out itself and take it when
+      # AMINETXDUO_PEER was unset: a quarter of the test, reported as the whole
+      # of it with a warning beside it.  A peer is now a REQUIREMENT of the
+      # arm, so a runner without one gets a SKIPPED row and no result at all,
+      # which is the true statement.  tools/ci.sh's e2e stage is the same
+      # invocation a person runs by hand.
+      - name: Release archive on a real Workbench 3.1
+        if: ${{ !cancelled() && steps.dist.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "Release archive on a real Workbench 3.1"
+          -r AMINETXDUO_ADF_DIR -r AMINETXDUO_INSTALLER -r AMINETXDUO_PEER --
+          tools/ci.sh e2e
 
       - name: Upload emulator logs
         if: always()
@@ -407,36 +473,61 @@ jobs:
           retention-days: 14
 
   # ------------------------------------------------------------------------
-  # Say, in the run summary, which tiers actually ran.  A tier that silently
-  # does not run is worse than one that fails.
+  # Say, in the run summary, which tiers actually ran -- and FAIL where one
+  # that was supposed to run did not.
+  #
+  # This job used to print a warning and exit 0.  Between 2026-08-05 and
+  # 2026-08-12 that is exactly what it did, every night: AMINETXDUO_KICKSTART_RUNNER
+  # was never set, so `kickstart` was skipped and the whole workflow finished
+  # green in six to fourteen seconds having booted nothing.  Twenty-two wired
+  # harnesses -- the card sweep, the release e2e, SMB, the loss gate, TLS, DNS
+  # -- reported success by not running.  A warning is not a result; a green
+  # tick that means "we did not look" is worse than a red one.
+  #
+  # A workflow_dispatch that did not ask for the tier is the one case where not
+  # running is the intended outcome, and it is the only one excused.
   # ------------------------------------------------------------------------
   gate:
     name: tier report
     runs-on: ubuntu-latest
     needs: [kickstart]
     if: always()
+    env:
+      RESULT: ${{ needs.kickstart.result }}
+      # true when the tier was asked for: nightly, a tag, or a dispatch that
+      # ticked the box.
+      EXPECTED: ${{ github.event_name != 'workflow_dispatch' || inputs.run_kickstart }}
     steps:
       - name: Report
         run: |
           {
             echo "## Emulator tiers"
             echo
-            echo "| tier | ROM | result |"
-            echo "|---|---|---|"
-            echo "| Kickstart 3.1 | self-hosted only | ${{ needs.kickstart.result }} |"
+            echo "| tier | ROM | expected | result |"
+            echo "|---|---|---|---|"
+            echo "| Kickstart 3.1 | self-hosted only | $EXPECTED | $RESULT |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ "${{ needs.kickstart.result }}" = "skipped" ]; then
-            echo "::warning::The Kickstart 3.1 tier did NOT run. The SANA-II" \
-                 "network tests and the bsdsocktest conformance suite are" \
-                 "therefore unverified for this commit. Set the repository" \
-                 "variable AMINETXDUO_KICKSTART_RUNNER to a self-hosted runner" \
-                 "label to enable it."
-            {
-              echo
-              echo "> **The Kickstart tier did not run.** The SANA-II network"
-              echo "> tests and the conformance suite are unverified for this"
-              echo "> commit."
-            } >> "$GITHUB_STEP_SUMMARY"
+          [ "$RESULT" = "skipped" ] || exit 0
+
+          {
+            echo
+            echo "> **The Kickstart tier did not run.** The SANA-II network"
+            echo "> tests, the card sweep, SMB, the loss gate, TLS and the"
+            echo "> release end-to-end are unverified for this commit."
+            echo ">"
+            echo "> \`vars.AMINETXDUO_KICKSTART_RUNNER\` names the self-hosted"
+            echo "> runner label this tier runs on. With it unset there is no"
+            echo "> machine with a ROM on it and the job cannot start."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$EXPECTED" = "true" ]; then
+            echo "::error::The Kickstart 3.1 tier did NOT run, on a run that" \
+                 "expected it. Set the repository variable" \
+                 "AMINETXDUO_KICKSTART_RUNNER to a self-hosted runner label." \
+                 "Nothing on an Amiga was tested by this run."
+            exit 1
           fi
+          echo "::notice::The Kickstart 3.1 tier was not requested by this" \
+               "dispatch, so it did not run."
 

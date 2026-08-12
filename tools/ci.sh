@@ -1030,6 +1030,20 @@ esac
 if [ ${#SKIPPED[@]} -ne 0 ]; then
     printf '\033[33m%d skipped:\033[0m\n' "${#SKIPPED[@]}"
     printf '  - %s\n' "${SKIPPED[@]}"
+    # And into the run summary, where a person looks.  A stage that skipped
+    # half of itself -- tcphandler with no peer, the card sweep with nowhere to
+    # count from -- exits 0 and scrolls past in a step that reads as a tick.
+    # tools/ci-arm.sh records the arms; this records the halves inside them.
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+        {
+            echo
+            echo "<details><summary><strong>${#SKIPPED[@]} thing(s) tools/ci.sh ${STAGES_RUN[*]} did NOT test</strong></summary>"
+            echo
+            printf -- '- %s\n' "${SKIPPED[@]}"
+            echo
+            echo "</details>"
+        } >> "$GITHUB_STEP_SUMMARY"
+    fi
 fi
 
 if [ ${#FAILED[@]} -eq 0 ]; then

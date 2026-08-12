@@ -171,6 +171,7 @@ jobs:
             tools/amiga-toolchain.sh \
             tools/fsuae-run.sh \
             tools/enforcer-run.sh \
+            tools/ci-arm.sh \
             tests/conformance/build.sh \
             tests/conformance/run-fsuae.sh \
             tests/tools/run-iperf.sh \
