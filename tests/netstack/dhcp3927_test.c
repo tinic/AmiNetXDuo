@@ -868,7 +868,7 @@ UINT            status;
  * So the peer is synthesised: a correctly formed ARP frame, byte for byte
  * what another host would put on the wire, handed to
  * _nx_arp_packet_deferred_receive(), the same function the SANA-II reader
- * calls for every ARP frame that arrives from the a2065 (sana2_rx.c:95).
+ * calls for every ARP frame that arrives from the a2065 (sana2_rx.c:503).
  * Everything downstream of that, nx_arp_packet_receive.c's conflict
  * detection, the defence it sends, the AutoIP thread's response, is real.
  */

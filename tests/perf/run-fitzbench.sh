@@ -274,7 +274,7 @@ else
     # that issued it.
     # TERM, THEN KILL.  fitz-serve does not exit on SIGTERM, so `pkill -f`
     # alone left one behind on every run: four arms of a loss gate left three
-    # servers, and tests/perf/run-lossgate.sh:106 then refused to start --
+    # servers, and tests/perf/run-lossgate.sh:163 then refused to start --
     # "the peer already has 3 fitz-serve process(es) running" -- which is the
     # right refusal about the wrong machine's state, and it blocks the only
     # rig that can price an ack or retransmit change from running twice.

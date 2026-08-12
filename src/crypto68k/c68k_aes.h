@@ -26,7 +26,7 @@
  *   table and three rotates over four tables, the 3 KB it saves in a cache
  *   that would otherwise hold the state, does not apply, and the rotates are
  *   pure loss.  Measured, not assumed; see c68k_aes_variant below and
- *   docs/RESEARCH.md 16.
+ *   docs/RESEARCH.md 18.2.
  *
  *   AES on this machine is also not memory bound.  160 table reads per block
  *   at ~140 ns is 22 us against a measured 83 us per block, so three quarters

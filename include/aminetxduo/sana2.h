@@ -1,16 +1,17 @@
 /*
  * AmiNetXDuo, SANA-II <-> NetX Duo driver shim.
  *
- * NetX Duo expects an Ethernet-shaped driver: on TX it hands the driver a
- * packet with a 14-byte Ethernet header already prepended, and on RX the driver
- * must present the same shape before calling _nx_ip_packet_receive().
+ * NetX Duo does not prepend the Ethernet header: it reserves headroom and
+ * leaves the link header to the driver. On RX the driver must present an
+ * Ethernet-shaped packet before calling _nx_ip_packet_receive().
  *
  * SANA-II is "cooked": the device owns the link header. On CMD_WRITE we supply
  * ios2_PacketType + ios2_DstAddr + payload; on CMD_READ we get back
  * ios2_PacketType + ios2_SrcAddr + ios2_DstAddr + payload. The shim therefore
- * strips the Ethernet header on TX and synthesises one on RX.
+ * builds no Ethernet header on TX and synthesises one on RX. Only the
+ * default-off raw path builds one; see src/sana2/sana2_tx.c.
  *
- * See docs/RESEARCH.md §3.4 and §6.5.
+ * See docs/RESEARCH.md §3.4.
  *
  * SPDX-License-Identifier: MIT
  */

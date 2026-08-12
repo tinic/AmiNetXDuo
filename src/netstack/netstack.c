@@ -805,7 +805,7 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
      *
      * One DRBG draw moves the starting point. This is not
      * NX_ENABLE_IP_ID_RANDOMIZATION, which redraws per packet and costs 5% of
-     * loopback throughput on this machine (nx_user.h, docs/RESEARCH.md 29.4).
+     * loopback throughput on this machine (nx_user.h, docs/RESEARCH.md 33.4).
      * It does not defeat RFC 6274's idle scan, which reads the delta between
      * two observations rather than the value; the note in nx_user.h says so.
      *

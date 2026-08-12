@@ -146,7 +146,7 @@ enum
  *                Terminal subdrawer the archive carries.
  *
  * The page is 400 KB of HTML.  Compiling it in would remove the search and
- * five-fold the binary, which is not a trade for a 4 MB machine.
+ * five-fold the binary, which is not a trade for a 1 MB machine.
  */
 static const char *const httpd_term_places[] = {
     "AmiNetXDuo:Terminal/shell.html",

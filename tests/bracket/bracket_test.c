@@ -3,7 +3,7 @@
  *
  * WHY THIS EXISTS
  *
- * The defect of docs/RESEARCH.md 79 was one pointer read: ami_netstack_enter()
+ * The defect of docs/RESEARCH.md 77.6 was one pointer read: ami_netstack_enter()
  * asked tx_thread_identify() whether the caller was already inside, and that
  * returns _tx_thread_current_ptr, which on this port is the GLOBAL baton holder
  * rather than an answer about the caller. A second Task arriving while the

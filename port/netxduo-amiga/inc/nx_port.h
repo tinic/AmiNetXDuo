@@ -14,7 +14,7 @@
  *     must not drag newlib's stdio along; the core needs memset/memcpy/memcmp
  *     only, which we supply.
  *   - nx_user.h is included unconditionally rather than behind
- *     NX_INCLUDE_USER_DEFINE_FILE, so the 4 MB tuning always applies whatever
+ *     NX_INCLUDE_USER_DEFINE_FILE, so the floor tuning always applies whatever
  *     the build system passes.
  *
  * This program and the accompanying materials are made available under the

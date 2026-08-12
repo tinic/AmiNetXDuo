@@ -369,7 +369,7 @@ static VOID h_disconnect_callback(NX_TCP_SOCKET *socket_ptr)
  * src/bsdsocket/select.c:141 installs bsd_tcp_disconnect_complete_notify()
  * here through nx_tcp_socket_disconnect_complete_notify(), and that callback
  * is the only thing that sets ASF_EOF on a socket nobody has FIN'd:
- * bsd_writable() (select.c:430) answers FALSE for every state but
+ * bsd_writable() (select.c:504) answers FALSE for every state but
  * NX_TCP_ESTABLISHED, so without this a reset socket is neither readable nor
  * writable and WaitSelect() never returns.  Whether it fires for a reset that
  * came from the retransmit timer rather than from a peer's FIN or RST was
@@ -476,7 +476,7 @@ static NX_PACKET *h_app_packet(void)
 
 /*
  * H_APP_WRITES models a caller stuck in send().  bsd_wait_sliced()
- * (src/bsdsocket/select.c:300) re-enters nx_tcp_socket_send() every
+ * (src/bsdsocket/select.c:374) re-enters nx_tcp_socket_send() every
  * BSD_BREAK_SLICE_TICKS, 200 ms, for as long as the status is
  * NX_WINDOW_OVERFLOW or NX_TX_QUEUE_DEPTH, so that Ctrl-C still works; a
  * non-blocking caller such as curl comes back on its select loop just as

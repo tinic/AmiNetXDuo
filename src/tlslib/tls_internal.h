@@ -70,7 +70,7 @@
 #define TLS_DEFAULT_TIMEOUT_MS      120000UL
 
 /* One TLSWrite() turns into records of at most this many plaintext bytes.
-   The protocol allows 16 KB; a 4 MB machine allocating 16 KB of packets for
+   The protocol allows 16 KB; a 1 MB machine allocating 16 KB of packets for
    an HTTP GET does not want it. */
 #define TLS_WRITE_CHUNK             2048
 

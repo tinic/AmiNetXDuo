@@ -31,7 +31,7 @@
 # THE RE-ADD IS CHECKED FOR USABILITY, NOT ONLY FOR BEING LISTED.  The failure
 # this test was written for leaves the interface in netstat -i with its address
 # on it and the link DOWN: NX_LINK_ENABLE calls ami_sana2_rx_start(), whose
-# tx_thread_create() returns TX_PTR_ERROR (src/sana2/sana2_rx.c:1310, the
+# tx_thread_create() returns TX_PTR_ERROR (src/sana2/sana2_rx.c:1317, the
 # workaround at :1196-1240), so an assertion on the address alone passes
 # through it.  Hence the Link column and a ping that has to get its replies
 # back, once on the first add as a control and once after the re-add.

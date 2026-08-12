@@ -540,7 +540,7 @@ full:
 /*
  * Only what an Amiga is likely to be serving, and text/plain rather than
  * application/octet-stream for the ones a browser can show.  A table because
- * the alternative is a ladder of strcmp; see docs/DEVELOPMENT.md.
+ * the alternative is a ladder of strcmp.
  */
 typedef struct HttpMimeEntry
 {

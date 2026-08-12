@@ -796,7 +796,7 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
              * keeps queueing, and every send fails in the shim with no way for
              * the layer above to know why.
              *
-             * `Online` recovers it: netstack.c:1393 issues NX_LINK_ENABLE,
+             * `Online` recovers it: netstack.c:2208 issues NX_LINK_ENABLE,
              * whose driver case sets nx_interface_link_up back to NX_TRUE.
              * There is no automatic retry here: this runs on the reader, and a
              * driver that has gone out of service should not be hammered with

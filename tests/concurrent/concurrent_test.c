@@ -3,7 +3,7 @@
  *
  * WHY THIS EXISTS
  *
- * The baton defect of docs/RESEARCH.md 78 was a second Task entering NetX Duo
+ * The baton defect of docs/RESEARCH.md 77.6 was a second Task entering NetX Duo
  * without the baton, and it survived every automated harness in this tree. Not
  * for want of concurrency tests, for want of one that is concurrent through
  * bsdsocket.library:

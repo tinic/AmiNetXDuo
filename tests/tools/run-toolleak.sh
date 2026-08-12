@@ -506,7 +506,7 @@ stage_group() {
     done
     # A name with an A record and no AAAA anywhere, for the -6 arms.  The
     # resolver reads DEVS:Internet/hosts on the IPv4 side and never on the
-    # IPv6 side (src/netstack/netstack_dns.c:826, the netdb schema has no
+    # IPv6 side (src/netstack/netstack_dns.c:1051, the netdb schema has no
     # family), so this name resolves under -4, does not resolve under -6, and
     # naming which of those happened is what the -6 arms assert.  .test is
     # reserved (RFC 6761), so the AAAA query is an immediate NXDOMAIN rather

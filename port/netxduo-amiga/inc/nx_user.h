@@ -1,7 +1,7 @@
 /*
  * AmiNetXDuo, NetX Duo tuning for the AmigaOS floor target.
  *
- * Target (docs/RESEARCH.md 9, decision 1): 68020, OS 3.1, 4 MB.  NetX Duo's
+ * Target (docs/RESEARCH.md 81): 68000, OS 2.04, 1 MB.  NetX Duo's
  * defaults assume an embedded target with a static memory budget; on an Amiga
  * the stack shares memory with everything else on the machine.  Every value
  * here departs from the default; if a value is not listed, the default stands.
@@ -519,7 +519,7 @@
  * as a zombie to port-scan a third party.
  *
  * The define fixes both and costs 5% of loopback.  Measured, two arms out of
- * one tree (docs/RESEARCH.md 29.4), A1200, 524288 bytes:
+ * one tree (docs/RESEARCH.md 33.4), A1200, 524288 bytes:
  *
  *                       counter      randomised
  *      loopback          347 KB/s     329 KB/s      -5.2%
@@ -682,7 +682,7 @@
 #else
 
 /*
- * The dual stack, sized for the same 68020/4 MB floor as everything else.
+ * The dual stack, sized for the same 68000/1 MB floor as everything else.
  * Every table below is a fixed array inside the single NX_IP, so these are the
  * difference between an NX_IP that costs ~3 KB extra and one that costs ~9 KB.
  * Measured with sizeof(NX_IP) at build time.
@@ -1048,7 +1048,7 @@
 
 
 /*
- * Five more surveyed and rejected; docs/RESEARCH.md 29.3 has the working.
+ * Five more surveyed and rejected, with the working.
  *
  *   NX_DISABLE_ARP_AUTO_ENTRY
  *       Every ARP we see creates a cache entry (nx_arp_packet_receive.c:490),
@@ -1078,8 +1078,8 @@
  *       Records the file and line each packet was allocated at, in the
  *       NX_PACKET itself.  Relevant to the packet-ownership defects this
  *       project keeps finding, but rejected as a permanent setting: two
- *       pointers in every one of up to 256 pool packets, on a pool sized from
- *       AvailMem on a 4 MB machine.  It belongs behind a build option next to
+ *       pointers in every one of up to 512 pool packets, on a pool sized from
+ *       AvailMem.  It belongs behind a build option next to
  *       the debug log level, and that option does not exist yet.
  *
  *   NX_ENABLE_DUAL_PACKET_POOL
@@ -1087,7 +1087,7 @@
  *       from a second, smaller pool so a full data pool cannot stop the stack
  *       acknowledging.  docs/RESEARCH.md 24.8 established that there is one
  *       pool here for a reason, and a second takes memory permanently away from
- *       the 4 MB floor to protect against an exhaustion that 24.3's arithmetic
+ *       the 1 MB floor to protect against an exhaustion that 24.3's arithmetic
  *       already prevents.  An ACK that cannot be allocated is also a symptom of
  *       a data pool already empty, and the data is what was lost.
  *

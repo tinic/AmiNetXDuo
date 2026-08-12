@@ -41,7 +41,7 @@ eth0            online   up       10.0.2.15
 EOF
 
 # AddNetInterface returned, no server answered.  shownetstatus.c:456 is the
-# placeholder, :547 the "-" in the table.  This is the run the old assertions
+# placeholder, :573 the "-" in the table.  This is the run the old assertions
 # graded PASS: the header carries "Address" and the placeholder carries
 # "address".
 cat > "$T/nolease" <<'EOF'

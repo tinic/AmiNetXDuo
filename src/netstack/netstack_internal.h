@@ -44,7 +44,7 @@
  * exec DoIO/SendIO calls, which run on whatever stack is current and are not
  * in that 704.  1,344 bytes of headroom for an Exec device call, on a machine
  * with no guard page and no fault, is not a margin worth defending; the other
- * 2 KB is.  docs/ALIGNMENT.md has the measurements.
+ * 2 KB is.
  */
 #define AMI_AUTOIP_STACK_SIZE       4096
 
@@ -82,7 +82,7 @@
  *
  * Undersizing costs only a DNS query, since NetX Duo replaces the least
  * recently used record rather than failing; oversizing costs resident memory
- * forever.  2048 bytes is 0.05% of the 4 MB floor target, and a fifth of the
+ * forever.  2048 bytes is 0.2% of the 1 MB floor target, and a fifth of the
  * 9,792-byte packet pool the DNS client already carries inside the same
  * NX_DNS (10,112 bytes) for its own queries, measured on this toolchain.
  */

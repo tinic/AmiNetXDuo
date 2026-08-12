@@ -83,7 +83,7 @@ extern "C" {
  *
  * THE NUMBER AND THE SENTENCE ABOVE IT MOVE TOGETHER. Adding an operation
  * without moving this leaves two different header shapes both claiming the same
- * version, and the checks at src/bsdsocket/netstatus.c:1193 and :1407 are exact
+ * version, and the checks at src/bsdsocket/netstatus.c:1200 and :1448 are exact
  * equality in both directions, so they cannot tell them apart. That has already
  * happened twice. NETCTRL_INTERFACE_ADD and NETCTRL_STACK_HOLD were both added
  * under 7 while the comment still said 6. Then the DHCP three (b40dc23) and

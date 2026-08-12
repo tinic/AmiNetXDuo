@@ -35,7 +35,7 @@
  * How many datagrams a UDP socket may hold un-read.
  *
  * A queued datagram pins a whole NX_PACKET from the shared pool until the
- * application reads it, and the pool is the stack's only buffer: 16..256
+ * application reads it, and the pool is the stack's only buffer: 16..512
  * packets of 1568 bytes, sized from AvailMem() at startup (netstack.h). Other
  * packet consumers are budgeted the same way, the SANA-II readers keep up
  * to 8 outstanding CMD_READs, and NX_TCP_MAXIMUM_TX_QUEUE caps a TCP socket
@@ -47,7 +47,7 @@
  * thread cannot allocate to receive or transmit at all.
  *
  * So: a quarter of the pool, never fewer than 8, never more than 64. On the
- * 4 MB floor (16 packets) that is 8, as before; on a full 256-packet pool it
+ * 1 MB floor (17 packets) that is 8, as before; at 256 packets and above it
  * is 64. Three sockets asleep on full queues still leave a quarter of the
  * pool for the stack.
  */
@@ -597,7 +597,7 @@ static VOID bsd_socket_dispose(AmiSocket *sock)
  * and nx_tcp_client_socket_unbind() collapses the state on the way out, which
  * is what NetX Duo itself does whenever an application unbinds. Four minutes
  * of an AmiSocket and an ephemeral port per closed connection is not
- * affordable on the 4 MB floor, and the exposure, an old duplicate landing
+ * affordable on the 1 MB floor, and the exposure, an old duplicate landing
  * on a reused port, is bounded by NetX Duo allocating ephemeral ports in
  * ascending order.
  */
@@ -693,7 +693,8 @@ static VOID bsd_closing_park(AmiSocket *sock)
  * FIN_WAIT_1, FIN_WAIT_2, CLOSING, TIMED_WAIT, LAST_ACK, so the sweep's
  * "resetting" below was a no-op for the case it was written for, and the
  * socket then failed nx_tcp_socket_delete()'s "state must be CLOSED" test and
- * was leaked. docs/RESEARCH.md 40 measures 33 of them in 66 seconds.
+ * was leaked. tests/leak measured 33 of them in 66 seconds
+ * (docs/RESEARCH.md 37.5).
  *
  * Presenting the socket as ESTABLISHED makes NetX Duo run its own abort: one
  * RST built from the socket's real sequence numbers, then

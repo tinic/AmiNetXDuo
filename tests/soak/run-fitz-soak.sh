@@ -199,7 +199,7 @@ set -e
 # build/amiberry-testhd-<tag>.  Reading build/testhd-<tag> instead found
 # nothing and said so as "(none written)" -- indistinguishable from a run that
 # produced nothing, which is what a 1800 s soak looks like when it is voided by
-# a path.  tests/tcpdrill/run-tcpdrill.sh:78 carries the same line for the same
+# a path.  tests/tcpdrill/run-tcpdrill.sh:112 carries the same line for the same
 # reason.
 HD="$ROOT/build/amiberry-testhd-$TAG"
 if [ ! -d "$HD" ]; then

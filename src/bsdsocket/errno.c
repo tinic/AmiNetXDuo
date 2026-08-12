@@ -195,7 +195,7 @@ LONG bsd_errno_from_nx(UINT status)
  * On a socket prepared to block for ever it tells the application to retry a
  * call that cannot succeed, the failure English Amiga Board thread 122501
  * reports against AmiTCP and Roadshow (docs/RESEARCH.md 37). ENOBUFS is used
- * instead, and it is reachable: the pool is a fixed 16..256 packets and
+ * instead, and it is reachable: the pool is a fixed 16..512 packets and
  * docs/RESEARCH.md 37.5 measured it at 1 free of 256 for 316 consecutive
  * seconds.
  *

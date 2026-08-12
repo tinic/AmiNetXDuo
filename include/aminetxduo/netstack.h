@@ -133,10 +133,9 @@ VOID          ami_netstack_leave_free(AmiNetCaller *caller);
  * caller whose AmiNetCaller lives on the stack and wrong for one that makes
  * thousands of calls: measured on a 14 MHz 68020 (tests/perf/bracket_test.c) an
  * adopt/orphan pair costs ~600 us and the same handoff over a TX_THREAD that is
- * merely dormant costs ~270 us. That difference is per call, not per byte,
- * which is why it showed up as this stack losing a bulk transfer to Roadshow
- * while winning the connect and the first byte (docs/RESEARCH.md §29.3,
- * §32.11).
+ * merely dormant costs ~270 us. That difference is per call, not per byte, and
+ * it does not explain bulk transfer: a 1.2 MB fetch by a third-party curl takes
+ * 108 brackets, 11 kB a call, and the two arms measured 825 ticks each.
  *
  * The pair below keeps the TX_THREAD across brackets. Three requirements come
  * with it:

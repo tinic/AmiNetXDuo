@@ -10,7 +10,7 @@
 # string as AMINETXDUO_GUEST_ARGS, which tools/winuae-run.sh already read; the
 # flag wins when both are set.
 #
-# -m selects the machine profile. A1200 (the default) is the project floor:
+# -m selects the machine profile. A1200 (the default) is the timing profile:
 # 68EC020 at 14 MHz with a 16-bit path to memory, and it is the ONLY profile
 # whose timings mean anything, FS-UAE turns cycle accounting off for every
 # CPU above a 68020. A3000 gives a 68030 with 32-bit motherboard RAM, for
@@ -501,7 +501,7 @@ EOF
     echo "==> extended ROM: $(basename "$KICKSTART_EXT")"
 fi
 
-# -c 68030 etc. The project floor is a 68020 (A1200), but a full 68030 has an
+# -c 68030 etc. The timing profile is a 68020 (A1200), but a full 68030 has an
 # MMU, which is what Enforcer needs, and different cache behaviour, so the
 # same binaries must be exercised on both.
 if [ -n "$CPU" ]; then

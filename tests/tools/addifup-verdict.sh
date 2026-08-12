@@ -77,7 +77,7 @@ addifup_verdict() {
 
     case "$addr" in
         # "-" is the literal the command prints for an interface that never
-        # attached (src/tools/shownetstatus.c:547).
+        # attached (src/tools/shownetstatus.c:573).
         -|"")            _av_fail no_address ;;
         0.0.0.0)         _av_fail address_unset ;;
         169.254.*)

@@ -109,7 +109,7 @@ ami_if_keywords[] =
 
     /*
      * Roadshow keywords we parse but have nowhere to put: they belong to the
-     * SANA-II shim (§6.5) rather than to the IP configuration. Listed so that
+     * SANA-II shim rather than to the IP configuration. Listed so that
      * a stock config file produces no warnings.
      */
     { "arptype",            IF_KEY_IGNORED   },
