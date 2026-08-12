@@ -93,7 +93,6 @@ a list here — a list here would go stale and nothing would catch it.
 | Runner | Host | Use |
 |---|---|---|
 | `tools/amiberry-run.sh` | Linux | the one that reaches a real network. `-N <board>` takes WinUAE's board keys, `-B <interface>` bridges through libpcap so the guest leases from the real DHCP server. Needs `setcap cap_net_admin,cap_net_raw=eip` on the binary, reapplied after every relink, on a mount that is not `nosuid`. Genuinely headless |
-| `tools/fsuae-run.sh` | any | FS-UAE. Needs an X server on Linux. Only the A2065 |
 | `tools/winuae-run.sh` | Windows | WinUAE |
 | `tools/emurun.sh` | Linux | one gated run: preflight refuses (exit 2) before starting, postflight refuses (exit 3) when the guest wrote nothing. Output is key=value with a final `RESULT=` |
 | `tools/tlsgate.sh` | Linux | the TLS gate. `<builddir> [cpu] [repeat] [slow]`, key=value out, **the verdict is the exit code** |
