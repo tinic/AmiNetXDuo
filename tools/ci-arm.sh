@@ -97,10 +97,13 @@ cell() { printf '%s' "$1" | sed 's/|/\\|/g'; }
 if [ "${#REQUIRED[@]}" -gt 0 ]; then
     for var in "${REQUIRED[@]}"; do
         [ -n "${!var:-}" ] && continue
+        # Both on stdout: GitHub reads workflow commands off the step's own
+        # output, and an annotation is the half of this a person sees without
+        # opening the log.
         printf 'arm="%s" status=skipped reason="%s is not set"\n' "$NAME" "$var"
-        printf '::warning::%s did NOT run: %s is not set on this runner, so\n' \
-               "$NAME" "$var" >&2
-        printf '::warning::that part of tier 2 is unverified for this commit.\n' >&2
+        printf '::warning::%s did NOT run: %s is not set on this runner, so' \
+               "$NAME" "$var"
+        printf ' that part of tier 2 is unverified for this commit.\n'
         row 'SKIPPED' "\`$(cell "$var")\` is not set"
         exit 0
     done
