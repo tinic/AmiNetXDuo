@@ -126,23 +126,37 @@
 # the client Finished went out, and the RST arrived before the request could
 # be answered.  Handshake cost, A1200/68020, whole chain verified:
 #
-#   www.pouet.net       17.4 s   3 certificates, RSA-2048 leaf
-#   www.amiga-news.de   17.5 s   3 certificates, RSA-2048 leaf
-#   www.gnu.org         22.1 s   3 certificates, RSA-2048 leaf
-#   ftp.tugraz.at       24.4 s   3 certificates, ECDSA P-256 leaf
-#   www.openbsd.org     25.2 s   3 certificates, RSA-4096 leaf
-#   www.debian.org      25.4 s   3 certificates, RSA-4096 leaf
+#   www.pouet.net       17.4 s   3 certificates, RSA-2048 leaf   IPv4
+#   www.amiga-news.de   17.5 s   3 certificates, RSA-2048 leaf   IPv4
+#   www.gnu.org         22.1 s   3 certificates, RSA-2048 leaf   IPv6
+#   ftp.tugraz.at       24.4 s   3 certificates, ECDSA P-256     IPv4
+#   www.openbsd.org     25.2 s   3 certificates, RSA-4096 leaf   IPv4
+#   www.debian.org      25.4 s   3 certificates, RSA-4096 leaf   IPv4
+#   os4depot.net        34.4 s   4 certificates, ECDSA P-256     IPv4
 #
-# None of the three has an AAAA record, and that is deliberate.  fetch
-# resolves once and connects once -- src/tools/toolsock.c:840 takes the first
-# usable answer and the library orders IPv6 first -- and does not fall back to
-# the other family.  From the guest on 2026-08-12 an IPv6 connect to
-# www.openbsd.org, www.debian.org, ftp.funet.fi, ftp.lysator.liu.se and
-# ftp.snt.utwente.nl each failed after 191 s, while this host reached the same
-# addresses in under 2 s from an address in the guest's own /64.  A dual-stack
-# host therefore costs 191 s and a failure whenever that path is down, and a
-# list made only of them fails together.  IPv6 is tested in tests/ipv6, where
-# a fault in it is a finding rather than a flake.
+# The family is not chosen here.  fetch resolves once and connects once --
+# src/tools/toolsock.c:840 takes the first usable answer and the library
+# orders IPv6 first -- and does not fall back to the other address, so a name
+# with an AAAA is fetched over IPv6 and a name without one over IPv4.
+# www.gnu.org is first because it has both and this is the only place an
+# https transfer over IPv6 happens end to end; the two behind it have no AAAA,
+# so an IPv6 outage cannot take the whole list with it.
+#
+# On this rig it takes that outage every run, and it is the rig.  Amiberry's
+# ethernet_fix_partial_csum (src/ethernet.cpp:172) returns at :181 for
+# anything that is not ethertype 0x0800, so an off-LAN IPv6 segment reaches
+# the guest carrying the pseudo-header sum rather than a finished checksum and
+# the stack is right to drop it -- 560 of 560 inbound IPv6 frames on
+# 2026-08-12, against 6351 of 6351 correct for a Linux client on the same
+# server.  Measured from the guest the same day: 1 MB in 4.1 s over IPv4 and
+# 11.3 to 64.3 s over IPv6, and an IPv6 connect to www.openbsd.org,
+# www.debian.org, ftp.funet.fi, ftp.lysator.liu.se or ftp.snt.utwente.nl
+# failing after 191 s while this host reached those addresses in under 2 s
+# from the guest's own /64.  So the first host costs 191 s and then the second
+# answers.  A repair for the other ethertypes is being written; when it lands
+# the first host answers in 22 s and this step gets three minutes shorter.
+# Every attempt is printed, so the day that line stops appearing is visible in
+# the artifact.
 #
 # INGREDIENTS, none of which are ours to ship:
 #
@@ -989,7 +1003,7 @@ fi
 # nesting is what makes the second host cost nothing on a run where the first
 # one answered: 17 s, not 35.  `Set fhrc $RC` first, since the Echo that
 # records the return code is itself a command and clears the condition flags.
-HTTPS_HOSTS=(www.amiga-news.de www.pouet.net ftp.tugraz.at)
+HTTPS_HOSTS=(www.gnu.org www.amiga-news.de www.pouet.net)
 
 https_steps() {
     local i=1 pad="" h
