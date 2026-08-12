@@ -811,19 +811,34 @@ static const char *tool_family_flag(LONG want)
     return (want == TOOL_AF_INET6) ? "-6" : "-4";
 }
 
+/* One address in the list already. */
+static BOOL tool_list_has(const ToolAddrList *list, const ToolAddr *addr)
+{
+    ULONG i;
+
+    for (i = 0; i < list->count; i++)
+    {
+        if (tool_addr_same(&list->addr[i], addr))
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
 /*
  * One getaddrinfo(), no output.  Returns 0 with *out filled, or the EAI_ code.
  * An answer with nothing usable in it counts as EAI_NONAME: the caller only
  * distinguishes "not found" from "try again".
  */
-static LONG tool_gai_try(struct Library *base, const char *host, LONG want,
-                         BOOL literal, ToolAddr *out)
+static LONG tool_gai_list(struct Library *base, const char *host, LONG want,
+                          BOOL literal, ToolAddrList *out)
 {
     ToolAddrInfo  hints;
     ToolAddrInfo *list = NULL;
     ToolAddrInfo *ai;
     LONG          rc;
-    BOOL          got = FALSE;
+
+    out->count = 0;
 
     hints.ai_flags     = literal ? TOOL_AI_NUMERICHOST : 0;
     hints.ai_family    = want;
@@ -837,19 +852,39 @@ static LONG tool_gai_try(struct Library *base, const char *host, LONG want,
     rc = tool_sock_getaddrinfo(base, host, NULL, &hints, &list);
     if (rc == 0)
     {
-        /* The library orders IPv6 first, so the first usable answer wins. */
-        for (ai = list; ai != NULL && !got; ai = ai->ai_next)
+        /* The library's order is kept: IPv6 first, so a dual-stack name still
+           prefers the AAAA and the A is what it falls back to. */
+        for (ai = list; ai != NULL && out->count < TOOL_ADDR_TRIES;
+             ai = ai->ai_next)
         {
+            ToolAddr one;
+
             if (ai->ai_addr == NULL)
                 continue;
+            if (!tool_sock_addr_get(ai->ai_addr, &one))
+                continue;
+            if (tool_list_has(out, &one))
+                continue;
 
-            got = tool_sock_addr_get(ai->ai_addr, out);
+            out->addr[out->count++] = one;
         }
 
         tool_sock_freeaddrinfo(base, list);
     }
 
-    return (rc == 0 && !got) ? (LONG)TOOL_EAI_NONAME : rc;
+    return (rc == 0 && out->count == 0) ? (LONG)TOOL_EAI_NONAME : rc;
+}
+
+static LONG tool_gai_try(struct Library *base, const char *host, LONG want,
+                         BOOL literal, ToolAddr *out)
+{
+    ToolAddrList list;
+    LONG         rc = tool_gai_list(base, host, want, literal, &list);
+
+    if (rc == 0)
+        *out = list.addr[0];
+
+    return rc;
 }
 
 BOOL tool_sock_family_absent(struct Library *base, const char *host, LONG want)
@@ -872,13 +907,15 @@ VOID tool_sock_say_no_family(const char *host, LONG want)
                (LONG)tool_family_flag(want));
 }
 
-BOOL tool_sock_resolve_af(struct Library *base, const char *host, LONG want,
-                          ToolAddr *out)
+BOOL tool_sock_resolve_list(struct Library *base, const char *host, LONG want,
+                            ToolAddrList *out)
 {
     char          unbracketed[TOOL_ADDR_STRLEN];
     ULONG         address = 0;
     BOOL          literal;
     LONG          rc;
+
+    out->count = 0;
 
     host = tool_host_unbracket(host, unbracketed, sizeof(unbracketed));
 
@@ -893,7 +930,8 @@ BOOL tool_sock_resolve_af(struct Library *base, const char *host, LONG want,
             return FALSE;
         }
 
-        tool_addr_v4(out, address);
+        tool_addr_v4(&out->addr[0], address);
+        out->count = 1;
         return TRUE;
     }
 
@@ -911,8 +949,11 @@ BOOL tool_sock_resolve_af(struct Library *base, const char *host, LONG want,
          * can -6, because gethostbyname() only ever answers with an A.
          */
         if (!literal && want != TOOL_AF_INET6 &&
-            tool_resolve_old(base, host, out))
+            tool_resolve_old(base, host, &out->addr[0]))
+        {
+            out->count = 1;
             return TRUE;
+        }
 
         if (literal || want == TOOL_AF_INET6)
             tool_no_ipv6(base, host);
@@ -937,7 +978,7 @@ BOOL tool_sock_resolve_af(struct Library *base, const char *host, LONG want,
         return FALSE;
     }
 
-    rc = tool_gai_try(base, host, want, literal, out);
+    rc = tool_gai_list(base, host, want, literal, out);
     if (rc == 0)
         return TRUE;
 
@@ -965,9 +1006,221 @@ BOOL tool_sock_resolve_af(struct Library *base, const char *host, LONG want,
     return FALSE;
 }
 
+BOOL tool_sock_resolve_af(struct Library *base, const char *host, LONG want,
+                          ToolAddr *out)
+{
+    ToolAddrList list;
+
+    if (!tool_sock_resolve_list(base, host, want, &list))
+        return FALSE;
+
+    *out = list.addr[0];
+
+    return TRUE;
+}
+
 BOOL tool_sock_resolve(struct Library *base, const char *host, ToolAddr *out)
 {
     return tool_sock_resolve_af(base, host, TOOL_AF_UNSPEC, out);
+}
+
+/* ------------------------------------------------------------ connecting */
+
+LONG tool_sock_connect_timed(struct Library *base, LONG s,
+                             const ToolSockAddrAny *sa, ULONG timeout,
+                             LONG *why)
+{
+    ToolFdSet   writefds;
+    ToolTimeval tv;
+    LONG        nonblock = 1;
+    LONG        err = 0;
+    LONG        errlen = (LONG)sizeof(err);
+    LONG        ready;
+
+    *why = 0;
+
+    if (timeout == 0)
+    {
+        if (tool_sock_connect(base, s, sa) == 0)
+            return 0;
+
+        *why = tool_sock_errno(base);
+        return -1;
+    }
+
+    if (tool_sock_ioctl(base, s, TOOL_FIONBIO, &nonblock) != 0)
+    {
+        /* No non-blocking mode: the blocking call is still correct, it just
+           cannot be cut short. */
+        if (tool_sock_connect(base, s, sa) == 0)
+            return 0;
+
+        *why = tool_sock_errno(base);
+        return -1;
+    }
+
+    if (tool_sock_connect(base, s, sa) != 0)
+    {
+        LONG e = tool_sock_errno(base);
+
+        if (e != TOOL_EINPROGRESS && e != TOOL_EWOULDBLOCK)
+        {
+            *why = e;
+            return -1;
+        }
+
+        tool_fd_zero(&writefds);
+        tool_fd_add(&writefds, s);
+
+        tv.tv_secs  = (LONG)timeout;
+        tv.tv_micro = 0;
+
+        ready = tool_sock_select(base, s + 1, NULL, &writefds, &tv);
+        if (ready == 0)
+            return TOOL_CONNECT_TIMEDOUT;
+        if (ready < 0)
+        {
+            *why = tool_sock_errno(base);
+            return -1;
+        }
+
+        if (tool_sock_getsockopt(base, s, TOOL_SOL_SOCKET, TOOL_SO_ERROR,
+                                 &err, &errlen) != 0)
+        {
+            /*
+             * No SO_ERROR to read.  A second connect() reports EISCONN if the
+             * socket is already through, and the real reason if it failed.
+             */
+            err = (tool_sock_connect(base, s, sa) == 0)
+                      ? 0 : tool_sock_errno(base);
+            if (err == TOOL_EISCONN)
+                err = 0;
+        }
+
+        if (err != 0)
+        {
+            *why = err;
+            return -1;
+        }
+    }
+
+    nonblock = 0;
+    (VOID)tool_sock_ioctl(base, s, TOOL_FIONBIO, &nonblock);
+
+    return 0;
+}
+
+/*
+ * How long one address gets while another is still untried.
+ *
+ * Ten seconds spans four SYNs on this stack -- 0, 1, 3 and 7 s -- so three
+ * lost in a row are ridden out before the next address is tried, which is
+ * well past what a slow link costs a handshake.  The number is deliberately
+ * not a race delay: a path that needs longer than this is not abandoned, it
+ * is retried at the end of the list with the caller's whole timeout.
+ */
+#define TOOL_CONNECT_TRY_SECS   10UL
+
+/* -p on nc: the wildcard of the family being connected to, plus a port. */
+static BOOL tool_bind_local(struct Library *base, LONG sock,
+                            const ToolAddr *peer, UWORD localport)
+{
+    ToolSockAddrAny local;
+    ToolAddr        any = *peer;
+    LONG            one = 1;
+    ULONG           b;
+
+    (VOID)tool_sock_setsockopt(base, sock, TOOL_SOL_SOCKET, TOOL_SO_REUSEADDR,
+                               &one, (LONG)sizeof(one));
+
+    any.ta_V4 = 0;
+    for (b = 0; b < 16UL; b++)
+        any.ta_V6[b] = 0;
+
+    (VOID)tool_sock_addr(&local, &any, localport);
+
+    return (BOOL)(tool_sock_bind(base, sock, &local) == 0);
+}
+
+LONG tool_sock_connect_host(struct Library *base, const char *host,
+                            const ToolConnect *how, ToolAddr *chosen,
+                            LONG *why)
+{
+    ToolAddrList    list;
+    ToolSockAddrAny sa;
+    ULONG           i;
+    LONG            rc = TOOL_CONNECT_FAILED;
+
+    *why = 0;
+    tool_addr_v4(chosen, 0);            /* printable even if nothing resolved */
+
+    if (!tool_sock_resolve_list(base, host, how->family, &list))
+        return TOOL_CONNECT_NORESOLVE;
+
+    for (i = 0; i < list.count; i++)
+    {
+        ULONG budget;
+        LONG  sock;
+        LONG  result;
+
+        *chosen = list.addr[i];
+
+        if (how->announce)
+        {
+            char dotted[TOOL_ADDR_STRLEN];
+
+            tool_addr_text(base, &list.addr[i], dotted, sizeof(dotted));
+            tool_printf("Trying %s port %ld...\n", (LONG)dotted,
+                        (LONG)how->port);
+        }
+
+        sock = tool_sock_socket(base, (LONG)list.addr[i].ta_Family,
+                                how->socktype, 0);
+        if (sock < 0)
+        {
+            /* A machine with no IPv6 fails here on the AAAA and reaches the
+               A on the next pass, rather than reporting the name as dead. */
+            *why = tool_sock_errno(base);
+            rc   = TOOL_CONNECT_NOSOCKET;
+            continue;
+        }
+
+        if (how->localport != 0 &&
+            !tool_bind_local(base, sock, &list.addr[i], how->localport))
+        {
+            /* A local port that is already taken is not the address's fault
+               and the next one would fail the same way. */
+            *why = tool_sock_errno(base);
+            (VOID)tool_sock_close(base, sock);
+            return TOOL_CONNECT_NOBIND;
+        }
+
+        (VOID)tool_sock_addr(&sa, &list.addr[i], how->port);
+
+        budget = (i + 1 < list.count) ? TOOL_CONNECT_TRY_SECS : how->timeout;
+        if (how->timeout != 0 && budget > how->timeout)
+            budget = how->timeout;
+
+        result = tool_sock_connect_timed(base, sock, &sa, budget, why);
+        if (result == 0)
+            return sock;
+
+        (VOID)tool_sock_close(base, sock);
+
+        if (result == TOOL_CONNECT_TIMEDOUT)
+        {
+            /* So a caller that prints only the errno still says something
+               true; the code is what a caller with its own wording reads. */
+            *why = TOOL_ETIMEDOUT;
+            rc   = TOOL_CONNECT_TIMEDOUT;
+        }
+        else
+        {
+            rc = TOOL_CONNECT_FAILED;
+        }
+    }
+
+    return rc;
 }
 
 BOOL tool_arg_family(LONG four, LONG six, LONG *want)
@@ -1096,16 +1349,21 @@ const char *tool_sock_errstr(LONG err)
     }
 }
 
-VOID tool_sock_fail(struct Library *base, const char *what,
-                    const ToolAddr *addr, UWORD port)
+VOID tool_sock_fail_why(struct Library *base, const char *what,
+                        const ToolAddr *addr, UWORD port, LONG err)
 {
-    LONG err = tool_sock_errno(base);
     char text[TOOL_ADDR_STRLEN];
 
     tool_addr_text(base, addr, text, sizeof(text));
 
     tool_error("cannot %s %s port %ld: %s", (LONG)what, (LONG)text,
                (LONG)port, (LONG)tool_sock_errstr(err));
+}
+
+VOID tool_sock_fail(struct Library *base, const char *what,
+                    const ToolAddr *addr, UWORD port)
+{
+    tool_sock_fail_why(base, what, addr, port, tool_sock_errno(base));
 }
 
 /* ------------------------------------------------------------- console ---- */

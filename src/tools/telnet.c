@@ -496,17 +496,17 @@ int main(int argc, char **argv)
     LONG            args[ARG_COUNT];
     struct RDArgs  *rda;
     struct Library *sb;
-    ToolSockAddrAny sa;
+    ToolConnect     how;
     ToolInput       in;
     TnState         st;
     const char     *host;
     ToolAddr        address;
+    LONG            why = 0;
     UWORD           port;
     LONG            family;
     BOOL            quiet;
     LONG            rc = RETURN_OK;
     ULONG           i;
-    char            dotted[TOOL_ADDR_STRLEN];
 
     (VOID)argv;
 
@@ -570,35 +570,27 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    if (!tool_sock_resolve_af(sb, host, family, &address))
-    {
-        CloseLibrary(sb);
-        FreeArgs(rda);
-        return RETURN_ERROR;
-    }
+    how.family    = family;
+    how.socktype  = TOOL_SOCK_STREAM;
+    how.port      = port;
+    how.localport = 0;
+    how.timeout   = 0;
+    how.announce  = (BOOL)(!quiet);
 
-    tool_addr_text(sb, &address, dotted, sizeof(dotted));
-
-    if (!quiet)
-        tool_printf("Trying %s port %ld...\n", (LONG)dotted, (LONG)port);
-
-    st.sock = tool_sock_socket(sb, (LONG)address.ta_Family,
-                               TOOL_SOCK_STREAM, 0);
+    st.sock = tool_sock_connect_host(sb, host, &how, &address, &why);
     if (st.sock < 0)
     {
-        tool_error("no socket: %s",
-                   (LONG)tool_sock_errstr(tool_sock_errno(sb)));
-        CloseLibrary(sb);
-        FreeArgs(rda);
-        return RETURN_FAIL;
-    }
+        if (st.sock == TOOL_CONNECT_NOSOCKET)
+        {
+            tool_error("no socket: %s", (LONG)tool_sock_errstr(why));
+            CloseLibrary(sb);
+            FreeArgs(rda);
+            return RETURN_FAIL;
+        }
 
-    (VOID)tool_sock_addr(&sa, &address, port);
+        if (st.sock != TOOL_CONNECT_NORESOLVE)
+            tool_sock_fail_why(sb, "connect to", &address, port, why);
 
-    if (tool_sock_connect(sb, st.sock, &sa) != 0)
-    {
-        tool_sock_fail(sb, "connect to", &address, port);
-        (VOID)tool_sock_close(sb, st.sock);
         CloseLibrary(sb);
         FreeArgs(rda);
         return RETURN_ERROR;
