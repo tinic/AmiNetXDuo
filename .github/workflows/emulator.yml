@@ -449,6 +449,28 @@ jobs:
           -r AMINETXDUO_ADF_DIR -r AMINETXDUO_INSTALLER -r AMINETXDUO_PEER --
           tools/ci.sh e2e
 
+      # A CANCELLED RUN LEAVES ITS GUESTS BEHIND.
+      #
+      # `concurrency: cancel-in-progress` cancels this workflow the moment
+      # another run of it starts.  On a hosted runner the whole VM goes with
+      # it; here the machine stays, and an amiberry from the cancelled run
+      # keeps running with its tag, its serial port and its testhd directory.
+      # The next run takes the same three and shares them with a guest nobody
+      # is reading -- which produces a corrupted artifact rather than a failed
+      # one, and those are much harder to notice.  Seen for real on 2026-08-12.
+      #
+      # Scoped to this job's workspace through the config path amiberry was
+      # started with, so it cannot reach the demo guest or any other checkout
+      # on the same machine.
+      - name: Leave no guests behind
+        if: always()
+        run: |
+          pat="amiberry .*$GITHUB_WORKSPACE/build/"
+          pkill -f "$pat" || true
+          sleep 2
+          pkill -KILL -f "$pat" || true
+          echo "leftover_guests=$(pgrep -cf "$pat" || true)"
+
       - name: Upload emulator logs
         if: always()
         uses: actions/upload-artifact@v4
