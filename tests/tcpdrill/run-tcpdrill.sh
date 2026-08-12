@@ -68,6 +68,17 @@ if [ "$SCRIPT" = all ]; then
         name=$(basename "$s" .drill)
         out="$ROOT/build/tcpdrill-$TAG-$name.out"
 
+        # keepalive.drill is written against a build whose idle timer is five
+        # seconds; against the shipping 7200 every probe case times out and is
+        # right to.  Named rather than silently dropped, so the line below is
+        # not read as a suite that covers it.
+        if [ "$name" = keepalive ] &&
+           ! grep -q '^AMINETXDUO_TCP_KEEPALIVE_INITIAL:STRING=[0-9]' \
+                 "$ROOT/$BUILD/CMakeCache.txt" 2>/dev/null; then
+            echo "$name: SKIP, needs -DAMINETXDUO_TCP_KEEPALIVE_INITIAL=5"
+            continue
+        fi
+
         arm=0
         "$0" -m "$MODEL" -t "$TIMEOUT" -b "$BUILD" -T "$TAG-$name" -s "$s" \
             "${ARM_A[@]+"${ARM_A[@]}"}" > "$out" 2>&1 || arm=$?
