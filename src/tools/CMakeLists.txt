@@ -483,7 +483,7 @@ add_dependencies(tools
     tool_netsetup tool_online tool_offline tool_host tool_hostname
     tool_fetch tool_nc tool_telnet tool_nettrace tool_traceroute tool_nslookup tool_arp
     tool_tftp tool_whois tool_httpd tool_iperf
-    tool_sntp
+    tool_sntp tool_shownetservices
     tool_shownetstatus tool_netstat tool_ping tool_smoke)
 if(CMAKE_CROSSCOMPILING)
     add_dependencies(tools tool_lvo_stub_check)
