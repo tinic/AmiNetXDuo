@@ -326,13 +326,52 @@ static LONG io_write(FetchIO *io, const char *buf, LONG len)
  */
 #define FETCH_TIMED_OUT (-2)
 
+/*
+ * What went wrong on this connection.  TLSRead() and TLSWrite() answer -1 and
+ * leave the reason on the connection, so a caller that invents one is telling
+ * the user something it never looked up: an alert the server sent, a record
+ * that would not decrypt and a read that ran out of time all used to print
+ * "the network connection failed".  TLS_ERR_IO stays the answer when the
+ * library will not say, which is the one case that sentence ever fitted.
+ */
+static LONG io_tls_error(FetchIO *io)
+{
+    struct TLSInfo ti;
+
+    if (io->tls == NULL)
+        return TLS_ERR_IO;
+
+    memset(&ti, 0, sizeof(ti));
+    ti.ti_Size = sizeof(ti);
+
+    if (TLSInfo(io->tbase, io->tls, &ti) != TLS_OK)
+        return TLS_ERR_IO;
+
+    return ti.ti_Error;
+}
+
 static LONG io_read(FetchIO *io, UBYTE *buf, LONG len)
 {
     struct FetchTimeval tv;
     LONG                ready;
+    LONG                got;
 
     if (io->tls != NULL)
-        return TLSRead(io->tbase, io->tls, (APTR)buf, len);
+    {
+        got = TLSRead(io->tbase, io->tls, (APTR)buf, len);
+
+        /*
+         * tls.library applies TLSA_Timeout inside TLSRead and reports running
+         * out of it as an error like any other, so the -2 below was reachable
+         * only on a plain socket: a TLS transfer that stopped being answered
+         * came out as a failed connection instead of a server that went
+         * quiet.  Same timeout, same sentence, either scheme.
+         */
+        if (got < 0 && io_tls_error(io) == TLS_ERR_TIMEOUT)
+            return FETCH_TIMED_OUT;
+
+        return got;
+    }
 
     if (io->timeout > 0)
     {
@@ -664,21 +703,14 @@ static LONG fetch_run(VOID)
             {
                 if (io.tls != NULL)
                 {
-                    struct TLSInfo  wi;
+                    LONG err = io_tls_error(&io);
 
-                    memset(&wi, 0, sizeof(wi));
-                    wi.ti_Size = sizeof(wi);
-                    if (TLSInfo(io.tbase, io.tls, &wi) == TLS_OK)
-                    {
-                        tool_error("the request could not be sent: %s"
-                                   " (%ld), %ld of %ld bytes",
-                                   (LONG)TLSErrorString(io.tbase,
-                                                        wi.ti_Error),
-                                   (LONG)wi.ti_Error, (LONG)n,
-                                   (LONG)used);
-                        rc = RETURN_ERROR;
-                        goto hop_done;
-                    }
+                    tool_error("the request could not be sent: %s"
+                               " (%ld), %ld of %ld bytes",
+                               (LONG)TLSErrorString(io.tbase, err),
+                               (LONG)err, (LONG)n, (LONG)used);
+                    rc = RETURN_ERROR;
+                    goto hop_done;
                 }
                 tool_error("the request could not be sent");
                 rc = RETURN_ERROR;
@@ -828,8 +860,12 @@ static LONG fetch_run(VOID)
         if (n < 0)
         {
             if (io.tls != NULL)
-                tool_error("the connection failed: %s",
-                           (LONG)TLSErrorString(tbase, TLS_ERR_IO));
+            {
+                LONG err = io_tls_error(&io);
+
+                tool_error("the connection failed: %s (%ld)",
+                           (LONG)TLSErrorString(tbase, err), (LONG)err);
+            }
             else
                 tool_error("the connection failed (errno %ld)",
                            (LONG)sock_errno(sbase));
