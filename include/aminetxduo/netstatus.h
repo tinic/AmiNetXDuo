@@ -171,6 +171,18 @@ extern "C" {
 #define NETSTATUS_HEALTH       11   /* one NetStatusHealth                   */
 #define NETSTATUS_SERVICES     12   /* NetStatusService[]                    */
 #define NETSTATUS_OPENERS      13   /* NetStatusOpener[]                     */
+/*
+ * 14 arrived without moving AMI_NETSTATUS_VERSION, and that is the one kind of
+ * addition where leaving it alone is right. The rule above is about record
+ * shapes: a control block that grows, or a table whose entry grows, gives two
+ * libraries the same version number and different bytes, and the exact-equality
+ * check cannot tell them apart. A new selector returning a record no older
+ * library ever wrote changes no shape. A version-10 library that predates it
+ * answers EINVAL, which is a clean refusal a caller can act on -- and
+ * src/tools/netstat.c does, by leaving the column out. Bumping instead would
+ * have forced every command to ship with the library for a column.
+ */
+#define NETSTATUS_TCPSTALL     14   /* NetStatusTcpStall[]                   */
 
 /*
  * Every buffer starts with this. The caller fills nsh_Magic and nsh_Version;
@@ -691,6 +703,31 @@ typedef struct NetStatusSocket
 #define NETSTATUS_TCP_CLOSING       9
 #define NETSTATUS_TCP_TIMED_WAIT    10
 #define NETSTATUS_TCP_LAST_ACK      11
+
+/* ------------------------------------------------- NETSTATUS_TCPSTALL ---
+ *
+ * One row per TCP socket, in the same order NETSTATUS_SOCKETS walks them, but
+ * a separate table rather than four more fields on NetStatusSocket: that
+ * record is 16 fixed bytes and every consumer checks nsh_EntrySize for exact
+ * equality, so growing it is an ABI break for a diagnostic.
+ *
+ * The identifying tuple is repeated here so the two tables can be joined
+ * without trusting the order, which two calls a moment apart do not promise.
+ *
+ * This is what a stalled connection looks like from outside: nst_Stalled
+ * climbing while nst_Retransmits climbs with it and nst_Rto doubles. An
+ * established socket with nothing outstanding reads zero in all three.
+ */
+typedef struct NetStatusTcpStall
+{
+    UWORD   nst_LocalPort;
+    UWORD   nst_PeerPort;
+    ULONG   nst_PeerAddress;            /* host byte order                   */
+    ULONG   nst_Stalled;                /* ms since the peer last ACKed      */
+    ULONG   nst_Retransmits;            /* consecutive, 0 after any progress */
+    ULONG   nst_Rto;                    /* ms left on the retransmit timer   */
+    ULONG   nst_UserTimeout;            /* ms, TCP_USER_TIMEOUT; 0 = unset   */
+} NetStatusTcpStall;
 
 /* ------------------------------------------------- NETSTATUS_SERVICES,
  *

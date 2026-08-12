@@ -16,6 +16,9 @@
 #include <proto/exec.h>
 #include <netinet/tcp.h>
 
+/* TCP_USER_TIMEOUT, TCP_STALLINFO, struct TcpStallInfo. */
+#include "aminetxduo/tcp.h"
+
 /* NX_TCP_MAXIMUM_RX_QUEUE, SO_RCVBUF's ceiling in a low-watermark build. */
 #include "nx_tcp.h"
 
@@ -136,6 +139,26 @@ static ULONG bsd_timeval_ticks(const struct timeval *tv)
         ticks = 1;
 
     return ticks;
+}
+
+/*
+ * Milliseconds -> ThreadX ticks, rounded up. Rounding up matters here: at 50
+ * ticks a second anything under 20 ms truncates to zero, and zero is the
+ * value that means "no deadline", so a caller asking for the shortest
+ * deadline it can name would get no deadline at all.
+ *
+ * The caller's ceiling keeps the multiply inside a ULONG.
+ */
+#define BSD_OPT_MAX_MS      86400000UL      /* a day */
+
+static ULONG bsd_ms_ticks(ULONG ms)
+{
+    return (ms * (ULONG)NX_IP_PERIODIC_RATE + 999UL) / 1000UL;
+}
+
+static ULONG bsd_ticks_ms(ULONG ticks)
+{
+    return (ticks * 1000UL) / (ULONG)NX_IP_PERIODIC_RATE;
 }
 
 static VOID bsd_ticks_timeval(ULONG ticks, struct timeval *tv)
@@ -446,6 +469,31 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 return 0;
             }
 
+            /*
+             * The deadline that replaces "wait out the ladder". Written to the
+             * NX socket rather than kept here and polled, so it holds whether
+             * or not a thread is in a call on this socket -- a connection dead
+             * for longer than the caller asked for is dead even if nobody is
+             * currently reading it, and select() has to say so.
+             */
+            case TCP_USER_TIMEOUT:
+                if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) != ASF_TCP)
+                    return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
+                if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
+                    return -1;
+                if (value < 0 || (ULONG)value > BSD_OPT_MAX_MS)
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+
+                if (bsd_nx_enter(SocketBase) != 0)
+                    return bsd_fail(SocketBase, AMI_ENETDOWN);
+                sock->as_UserTimeout = (ULONG)value;
+                sock->as_Nx.tcp.nx_tcp_socket_user_timeout =
+                    bsd_ms_ticks((ULONG)value);
+                bsd_nx_leave(SocketBase);
+                return 0;
+
+            /* TCP_STALLINFO is read-only and falls through to the default,
+               which is where every optname this level does not set goes. */
             default:
                 return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
         }
@@ -666,6 +714,44 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
                 nx_tcp_socket_mss_get(&sock->as_Nx.tcp, &mss);
                 bsd_nx_leave(SocketBase);
                 return bsd_opt_get_long(SocketBase, optval, optlen, (LONG)mss);
+
+            case TCP_USER_TIMEOUT:
+                if ((sock->as_Flags & ASF_TCP) == 0)
+                    return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
+                return bsd_opt_get_long(SocketBase, optval, optlen,
+                                        (LONG)sock->as_UserTimeout);
+
+            /*
+             * The four numbers that make a stall visible while it is running.
+             * Read under the NX lock because the fast periodic timer writes
+             * three of them.
+             */
+            case TCP_STALLINFO:
+            {
+                struct TcpStallInfo info;
+
+                if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) != ASF_TCP)
+                    return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
+                if (optval == NULL || optlen == NULL ||
+                    *optlen < (socklen_t)sizeof(struct TcpStallInfo))
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+
+                if (bsd_nx_enter(SocketBase) != 0)
+                    return bsd_fail(SocketBase, AMI_ENETDOWN);
+                info.tsi_Stalled =
+                    bsd_ticks_ms(sock->as_Nx.tcp.nx_tcp_socket_stall_ticks);
+                info.tsi_Retransmits =
+                    sock->as_Nx.tcp.nx_tcp_socket_timeout_retries;
+                info.tsi_Rto =
+                    bsd_ticks_ms(sock->as_Nx.tcp.nx_tcp_socket_timeout);
+                bsd_nx_leave(SocketBase);
+
+                info.tsi_UserTimeout = sock->as_UserTimeout;
+
+                *(struct TcpStallInfo *)optval = info;
+                *optlen = (socklen_t)sizeof(struct TcpStallInfo);
+                return 0;
+            }
 
             default:
                 return bsd_fail(SocketBase, AMI_ENOPROTOOPT);

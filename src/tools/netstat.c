@@ -373,6 +373,27 @@ static VOID show_routes(const AmiConfig *cfg)
         tool_print_routes6(&routes6, cfg);
 }
 
+/*
+ * Ends the connection line, and says so if the connection is going nowhere.
+ *
+ * Gated on a retransmission having already fired rather than on the stall
+ * clock, because that clock is running on every healthy connection with a
+ * segment in flight; one retransmit with no acknowledgement in between is the
+ * first moment there is anything to tell anyone. A machine with nothing wrong
+ * prints exactly what it printed before.
+ */
+static VOID show_stall(const ToolSockInfo *s)
+{
+    if (s->retransmits == 0)
+    {
+        tool_printf("\n");
+        return;
+    }
+
+    tool_printf("  stalled %lus, %lu retx\n",
+                (LONG)(s->stalled_ms / 1000UL), (LONG)s->retransmits);
+}
+
 static VOID show_connections(const ToolSnapshot *snap)
 {
     char  peer[16];
@@ -405,16 +426,18 @@ static VOID show_connections(const ToolSnapshot *snap)
                 joined[o++] = ':';
                 joined[o]   = '\0';
 
-                tool_printf("tcp    %-6lu %s%-6lu        %s\n",
+                tool_printf("tcp    %-6lu %s%-6lu        %s",
                             (LONG)s->local_port, (LONG)joined,
                             (LONG)s->peer_port,
                             (LONG)tool_tcp_state_name(s->state));
+                show_stall(s);
             }
             else
             {
-                tool_printf("tcp    %-6lu %-21s %s\n",
+                tool_printf("tcp    %-6lu %-21s %s",
                             (LONG)s->local_port, (LONG)"*",
                             (LONG)tool_tcp_state_name(s->state));
+                show_stall(s);
             }
         }
         else

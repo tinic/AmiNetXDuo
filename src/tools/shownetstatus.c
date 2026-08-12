@@ -956,7 +956,15 @@ static VOID show_tcp_sockets(const ToolSnapshot *snap, BOOL all)
             tool_printf("%-31s ", (LONG)"*");
         }
 
-        tool_printf("%s\n", (LONG)tool_tcp_state_name(s->state));
+        tool_printf("%s", (LONG)tool_tcp_state_name(s->state));
+
+        /* Only when a retransmission has already fired with nothing coming
+           back; see netstat.c's show_stall() for why that is the gate. */
+        if (s->retransmits != 0)
+            tool_printf("  stalled %lus, %lu retx",
+                        (LONG)(s->stalled_ms / 1000UL), (LONG)s->retransmits);
+
+        tool_printf("\n");
         shown++;
     }
 

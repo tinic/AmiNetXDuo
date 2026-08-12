@@ -916,6 +916,27 @@ stage_bridged() {
         esac
     fi
 
+    # The stall arm is here rather than in the emulator stage because the
+    # question is a retransmission ladder against a real peer.  It costs its
+    # own two minutes: the socket that asked for nothing has to be watched all
+    # the way to 127 s, or "the default is unchanged" is not being tested.
+    printf '\n-- a peer that stops answering, and who can tell\n'
+    if [ -z "${AMINETXDUO_PEER:-}" ]; then
+        skip "tcpstall: AMINETXDUO_PEER is not set, so there is no peer to" \
+             "stall against.  A stalled connection is unproven on this runner."
+    else
+        rc=0
+        "$ROOT/tests/tcpstall/run-tcpstall.sh" -b "$BUILD/default" \
+            -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" \
+            -P "$AMINETXDUO_PEER" || rc=$?
+        case "$rc" in
+            0) note "PASS  the stall was readable while it ran, the deadline" \
+                    "was served, and the default socket still took 127 s" ;;
+            2) fail "tcpstall: an ingredient is missing on this machine" ; bad=1 ;;
+            *) fail "tcpstall: the transcript above is the whole run" ; bad=1 ;;
+        esac
+    fi
+
     return "$bad"
 }
 

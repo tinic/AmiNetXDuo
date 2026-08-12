@@ -733,6 +733,90 @@ int main(void)
                 "a SYN retransmission interval ran past the shift cap");
     }
 
+    /* ---- 9. the stall clock, while the stall is running ---------------- */
+    /*
+     * Everything above answers "does it give up", which is only useful once it
+     * has.  This is the other half of the complaint: for 127 seconds a socket
+     * says nothing at all, so an application cannot tell a connection in
+     * trouble from a peer with nothing to say.
+     *
+     * Ten seconds in, three retransmissions have gone out (+1, +3, +7) and the
+     * fourth interval is running.  Both numbers are readable from the socket
+     * the whole time, which is what TCP_STALLINFO and NETSTATUS_TCPSTALL hand
+     * out.
+     */
+    h_fixture();
+
+    h_check(h_sock.nx_tcp_socket_user_timeout == 0,
+            "socket_create left a deadline on a socket that asked for none");
+    h_check(h_sock.nx_tcp_socket_stall_ticks == 0,
+            "socket_create left the stall clock running");
+
+    h_run_timer(10, 0);
+
+    printf("  10 s into a stall   stall=%lus retries=%lu rto_left=%lus\n",
+           (unsigned long)H_SECONDS(h_sock.nx_tcp_socket_stall_ticks),
+           (unsigned long)h_sock.nx_tcp_socket_timeout_retries,
+           (unsigned long)H_SECONDS(h_sock.nx_tcp_socket_timeout));
+
+    h_check(h_r.reset == 0, "the ladder gave up early");
+    h_check(H_SECONDS(h_sock.nx_tcp_socket_stall_ticks) == 10,
+            "the stall clock does not read the time since the peer last ACKed");
+    h_check(h_sock.nx_tcp_socket_timeout_retries == 3,
+            "the retransmit count is not readable part-way through the ladder");
+
+    /* And it stops the moment there is nothing outstanding, so a healthy
+       connection reads zero rather than its age. */
+    h_sock.nx_tcp_socket_transmit_sent_head = NX_NULL;
+    h_sock.nx_tcp_socket_transmit_sent_tail = NX_NULL;
+    h_sock.nx_tcp_socket_timeout            = 0;
+
+    h_now += _nx_tcp_fast_timer_rate;
+    _nx_tcp_fast_periodic_processing(&h_ip);
+
+    h_check(h_sock.nx_tcp_socket_stall_ticks == 0,
+            "the stall clock kept running with nothing outstanding");
+
+    /* ---- 10. a deadline on data --------------------------------------- */
+    /*
+     * Twenty seconds, asked for by the application, instead of 127.  It is
+     * served at 20 and not at the next rung of the ladder, 31, which is the
+     * whole point of checking it every tick.
+     */
+    h_fixture();
+    h_sock.nx_tcp_socket_user_timeout = 20UL * NX_IP_PERIODIC_RATE;
+
+    h_run_timer(600, H_APP_WRITES);
+    h_print_ladder("20 s deadline, data");
+
+    h_check(h_r.reset == 1, "a socket with a deadline never gave up");
+    h_check(h_r.reset_at == 20,
+            "a 20 s deadline was not served at 20 s");
+    h_check(h_r.disconnect_complete == 1,
+            "a deadline expiry did not tell the application");
+    h_check(h_sock.nx_tcp_socket_state == NX_TCP_CLOSED,
+            "a deadline expiry left the socket open");
+
+    /* ---- 11. and on a connection request ------------------------------ */
+    /*
+     * The 191 s case, which is the one a user meets as "it hangs, then
+     * restarts".  A deadline set before connect() bounds it too.
+     */
+    h_fixture();
+    h_sock.nx_tcp_socket_state = NX_TCP_SYN_SENT;
+    h_sock.nx_tcp_socket_transmit_sent_head  = NX_NULL;
+    h_sock.nx_tcp_socket_transmit_sent_tail  = NX_NULL;
+    h_sock.nx_tcp_socket_transmit_sent_count = 0;
+    h_sock.nx_tcp_socket_tx_outstanding_bytes = 0;
+    h_sock.nx_tcp_socket_user_timeout = 15UL * NX_IP_PERIODIC_RATE;
+
+    h_run_timer(600, 0);
+    h_print_ladder("15 s deadline, connect");
+
+    h_check(h_r.reset == 1, "a connection request with a deadline never gave up");
+    h_check(h_r.reset_at == 15,
+            "a 15 s deadline did not bound the 191 s connect ladder");
+
     printf("%lu checks, %lu failures, %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");
 

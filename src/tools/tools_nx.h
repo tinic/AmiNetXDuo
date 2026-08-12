@@ -107,6 +107,17 @@ typedef struct ToolSockInfo
     ULONG   peer_address;
     UINT    state;                   /* TCP only */
     ULONG   queued;                  /* UDP receive queue depth */
+
+    /*
+     * NETSTATUS_TCPSTALL, joined on the tuple above. All zero on a library too
+     * old to know the selector, which is also what a connection with nothing
+     * outstanding reads, so the two are deliberately indistinguishable: there
+     * is nothing to report either way.
+     */
+    ULONG   stalled_ms;
+    ULONG   retransmits;
+    ULONG   rto_ms;
+    ULONG   user_timeout_ms;
 } ToolSockInfo;
 
 typedef struct ToolSnapshot
