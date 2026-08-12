@@ -1210,8 +1210,11 @@
   @{b}-s@{ub} or @{b}STATS@{ub}        per-protocol statistics, IP, ICMP, TCP, UDP
                       and the packet pool -- followed by the SANA-II
                       driver counters for each interface.
+  @{b}-h@{ub} or @{b}HEALTH@{ub}       whether the stack is answering, and what it is
+                      waiting on if it is not.
 
-  With no switches at all, netstat prints all three.
+  With no switches at all, netstat prints the interfaces, the routes and the
+  connections.
 
   @{b}Example@{ub}
 

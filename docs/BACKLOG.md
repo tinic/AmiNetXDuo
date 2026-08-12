@@ -11,7 +11,5 @@ comment beside the code, not an entry here.
 | Extended master secret, RFC 7627 | Without it resumption is open to the triple-handshake attack. Key-schedule change; invalidates every cached session | RFC 7627 |
 | EKU, nameConstraints and critical-extension rejection | Must land together: honouring the critical bit without enforcing nameConstraints is worse than neither. Untestable without hardware | `nx_secure_x509_extension_find.c:191` |
 | `src/bsdsocket` has one host test | `test_inet` reaches 7 of 29 files. 80 `_Static_assert`s hold the ABI; what is unheld is behaviour needing the real ABI, so it is guest-suite work | `src/bsdsocket/` |
-| `src/tools`: 32,412 lines behind five host tests | All five are httpd's. The other twenty-five commands have none, and the 2026-08-04 diagnostics rewrite touched every one | `src/tools/` |
 | `src/tlslib`: 4,628 lines behind three | No test of the handshake, of the record layer beyond the fuzzers, or of ticket and session-ID resumption | `src/tlslib/` |
 | `src/sana2` has one test | `sana2_copy.c` alone of 3,704 lines. The rest runs at interrupt time, where a mistake takes the machine down | `src/sana2/` |
-| A command is mostly C runtime | `ping` is 16,196 bytes, about 2,050 of it ours. libnix's crt0 pulls in stdio and the C++ AVL allocator | `src/tools/CMakeLists.txt` |
