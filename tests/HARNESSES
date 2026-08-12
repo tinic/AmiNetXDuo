@@ -45,7 +45,7 @@
 # --------------------------------------------------- invoked by a runner --
 
 install/test/run-smbmount.sh       : tools/ci.sh                    : an SMB share mounted on a real Workbench, which is what GitHub #3 and #4 are about
-install/test/run-workbench.sh      : .github/workflows/emulator.yml : the release archive on a real Workbench 3.1
+install/test/run-workbench.sh      : tools/ci.sh                    : the release archive on a real Workbench 3.1
 tests/perf/run-lossgate.sh         : tools/ci.sh                    : throughput on a link that loses packets, gated on tests/perf/lossgate-baseline.txt
 tests/tools/run-cardsweep.sh       : tools/ci.sh                    : every network card, one boot each
 tests/tools/run-netshutdown.sh     : tools/ci.sh                    : NetShutdown, and what it does to the programs using the network
