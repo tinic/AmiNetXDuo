@@ -49,6 +49,29 @@
    which asserts where it sits. Stack sizes are not ladder members. */
 #define AMI_MDNS_STACK_SIZE         4096
 
+/*
+ * Every one of these is a tick count nxd_mdns.h derives as
+ * milliseconds * NX_IP_PERIODIC_RATE / 1000, and this port's tick is 50 Hz, so
+ * anything under 20 ms integer-divides to zero. _nx_mdns_timer_set() returns
+ * without scheduling when it is handed zero, which loses the work silently:
+ * NX_MDNS_RESPONSE_UNIQUE_DELAY was 10 ms, came out zero, and the machine
+ * announced <name>.local at boot and then answered no query for it, for as
+ * long as mDNS has been in the tree. nx_user.h pins that one; these hold the
+ * rest to the same rule.
+ */
+_Static_assert(NX_MDNS_RESPONSE_UNIQUE_DELAY > 0,
+               "a unique record's response would never be scheduled");
+_Static_assert(NX_MDNS_RESPONSE_SHARED_DELAY_MIN > 0,
+               "a shared record's response would never be scheduled");
+_Static_assert(NX_MDNS_RESPONSE_TC_DELAY_MIN > 0,
+               "a truncated query's response would never be scheduled");
+_Static_assert(NX_MDNS_QUERY_DELAY_MIN > 0,
+               "a query would never be sent");
+_Static_assert(NX_MDNS_PROBING_TIMER_COUNT > 0 &&
+               NX_MDNS_ANNOUNCING_TIMER_COUNT > 0 &&
+               NX_MDNS_GOODBYE_TIMER_COUNT > 0,
+               "probing, announcing or the goodbye would never be scheduled");
+
 /* --------------------------------------------------------- the host label */
 
 /*

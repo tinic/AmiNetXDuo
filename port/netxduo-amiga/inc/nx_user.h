@@ -1022,6 +1022,24 @@
 
 
 /*
+ * How long the mDNS responder waits before answering a query for a unique
+ * record, in ticks.
+ *
+ * nxd_mdns.h computes this one as 10 * NX_IP_PERIODIC_RATE / 1000, which is 0
+ * at this port's 50 Hz tick, and _nx_mdns_timer_set() does nothing at all when
+ * it is handed 0.  The answer is then scheduled for never: the machine
+ * announces <name>.local at boot and afterwards answers no query for it, since
+ * a host's A record is unique (RFC 6762 6) and every query takes this branch.
+ * Shared records escape it, their 20-120 ms rounds to 1-5 ticks, which is why
+ * the client half and the announcements looked healthy throughout.
+ *
+ * One tick is 20 ms, the shortest this tick can express, and RFC 6762 6 lets a
+ * unique record be answered immediately.
+ */
+#define NX_MDNS_RESPONSE_UNIQUE_DELAY           1
+
+
+/*
  * Not set, and why:
  *
  *   NX_DISABLE_ERROR_CHECKING, saves code, and the _nxe_ wrappers are 30%
