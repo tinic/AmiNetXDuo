@@ -311,6 +311,57 @@ rx PAU seq=1 ack=1 len=4 urg=4
 tx A seq=1 ack=5 within=400
 recv 100 = 4
 
+# THE URGENT SEND, WHICH IS A CHECKSUM PATCHED IN PLACE.
+#
+# NetX Duo has no urgent-data transmit path, so src/bsdsocket/oob.c installs an
+# NX_IP_PACKET_OUT filter, finds the one segment by four-tuple and sequence
+# number, and rewrites two words of a header that is already summed: the flags
+# word gains URG and the urgent pointer goes from 0 to 1.  It then repairs the
+# checksum incrementally, RFC 1624 equation 3, rather than summing the segment
+# again.
+#
+# That makes it the most checksum-fragile code in the tree, and u01 above is
+# the receive direction, which exercises none of it.  A wrong incremental
+# update is silently accepted by nothing and dropped by everything, so it does
+# not show up as a wrong flag or a wrong pointer -- it shows up as a segment
+# every receiver discards.  This harness verifies the TCP checksum of every
+# frame the stack sends (decode(), tcpdrill.c), so the assertion is here as
+# soon as the frame is.
+case u02_urgent_outbound
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+oob 65
+tx PAU seq=1 ack=1 len=1 urg=1
+rx A seq=1 ack=2
+
+# THE RETRANSMISSION LOSES THE URGENCY, AND THIS SAYS SO.
+#
+# The patch above is written into the queued packet, so the obvious reading is
+# that a retransmission carries it.  It does not: _nx_tcp_socket_retransmit.c
+# builds nx_tcp_header_word_3 fresh out of the socket -- header size, ACK, PSH
+# and the window -- rather than resending the word that was queued, then zeroes
+# the checksum field and recomputes.  So the resent segment is a valid PA
+# carrying the same byte, and the urgent signal is delivered once or not at all.
+#
+# The data is never at risk; only the urgency is, and only when the first copy
+# is lost.  It is asserted rather than left unsaid because the alternative
+# reading -- a second in-place patch over an already-summed header -- is the
+# one that would corrupt a segment, and the URG test in bsd_oob_ip_filter()
+# reads as if that were the case it guards.
+case u03_retransmission_is_a_plain_segment
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+oob 66
+tx PAU seq=1 ack=1 len=1 urg=1
+tx PA seq=1 ack=1 len=1 after=700 within=1600
+rx A seq=1 ack=2
+
 # RFC 793 3.4: a RESET on an established connection tears it down, and the
 # stack must not answer a RESET with anything at all.
 case r03_reset_tears_down
