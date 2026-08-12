@@ -7,9 +7,7 @@ comment beside the code, not an entry here.
 
 | Item | Why it is open | Cite |
 |---|---|---|
-| Encrypt-then-MAC, RFC 7366 | Answers the CBC padding-timing risk at no per-record cost; constant-time padding costs ~10 ms per record at 7 MHz | RFC 7366 |
-| Extended master secret, RFC 7627 | Without it resumption is open to the triple-handshake attack. Key-schedule change; invalidates every cached session | RFC 7627 |
-| EKU, nameConstraints and critical-extension rejection | Must land together: honouring the critical bit without enforcing nameConstraints is worse than neither. Untestable without hardware | `nx_secure_x509_extension_find.c:191` |
-| `src/bsdsocket` has one host test | `test_inet` reaches 7 of 29 files. 80 `_Static_assert`s hold the ABI; what is unheld is behaviour needing the real ABI, so it is guest-suite work | `src/bsdsocket/` |
-| `src/tlslib`: 4,628 lines behind three | No test of the handshake, of the record layer beyond the fuzzers, or of ticket and session-ID resumption | `src/tlslib/` |
-| `src/sana2` has one test | `sana2_copy.c` alone of 3,704 lines. The rest runs at interrupt time, where a mistake takes the machine down | `src/sana2/` |
+| `bsd_send_consumed()` on a multi-segment partial send | The one place in the library where a wrong answer duplicates stream bytes. `tcpdrill z02/z03` credit a short send but never drive the trim loop | `transfer.c:375` |
+| `MSG_WAITALL`, `SO_LINGER{1,n>0}`, `bsd_wait_errno()` under pool exhaustion | Zero coverage. A wire script cannot block, so tcpdrill cannot reach them; they need a guest program | `transfer.c:969`, `socket.c:854`, `errno.c:224` |
+| The URG transmit checksum patch, RFC 1624 eq. 3 | The most checksum-fragile code in the tree; `tcpdrill u01` covers receive only | `oob.c:179` |
+| `bsd_accept()` EMFILE arm stored into a freed socket | Fixed by inspection, not by a test — it needs fd-table exhaustion coinciding with a refused relisten, and its symptom is corruption, not a wire event | `socket.c` |
