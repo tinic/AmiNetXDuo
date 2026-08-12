@@ -86,16 +86,32 @@ MAXTOL="${AMINETXDUO_LOSSGATE_MAXTOL:-25}"
 # above the drift this rig has been seen to have and below the 18% regression
 # the gate exists to catch, which is the whole window there is.
 FLOOR="${AMINETXDUO_LOSSGATE_FLOOR:-15}"
+# Which direction loses.  rx is peer -> guest and is what every read curve in
+# this tree was measured on, so it stays the default: changing it would make
+# every recorded baseline the measurement of a different link.  tx is
+# guest -> peer, the direction that makes this stack the SENDER, and until it
+# existed no run here had ever retransmitted anything outbound.
+DIR=rx
+# tx cannot be netem: netem only shapes egress, and the guest's frames reach
+# the peer on ingress.  tc's gact action can drop on the ingress hook, and its
+# `determ' mode drops every Nth packet, which gives the tx direction the same
+# repeatability the netem seed gives rx -- the two builds being compared meet
+# the same losses in the same places.  netrand is the random shape, for when
+# the periodicity is the thing in question.
+TXRAND="${AMINETXDUO_LOSSGATE_TXRAND:-determ}"
 
 usage() {
     cat <<'EOF'
 usage: tests/perf/run-lossgate.sh -H user@host -A addr [-l PERCENT] [-r REPS]
                                   [-b BUILDDIR] [-k KB] [-T TAG] [-B] [-f FILE]
+                                  [-D rx|tx|both]
 
   -H  the peer, over ssh.  A THIRD machine: not this one and not the host the
       emulator runs on.
   -A  the peer's address as the guest sees it
-  -l  packet loss percent applied to peer -> guest frames (default 5)
+  -l  packet loss percent (default 5)
+  -D  which direction loses: rx = peer -> guest (default, and what every
+      recorded baseline was measured on), tx = guest -> peer, both
   -r  repetitions; the median is compared (default 3)
   -k  transfer size in KB (default 4096)
   -B  record the current run as the new baseline
@@ -103,11 +119,12 @@ usage: tests/perf/run-lossgate.sh -H user@host -A addr [-l PERCENT] [-r REPS]
 EOF
 }
 
-while getopts "H:A:l:r:b:k:T:Bf:h" opt; do
+while getopts "H:A:l:r:b:k:T:Bf:D:h" opt; do
     case "$opt" in
         H) PEER="$OPTARG" ;;
         A) PEER_ADDR="$OPTARG" ;;
         l) LOSS="$OPTARG" ;;
+        D) DIR="$OPTARG" ;;
         r) REPS="$OPTARG"; REPS_GIVEN=1 ;;
         b) BUILD="$OPTARG" ;;
         k) KB="$OPTARG" ;;
@@ -120,6 +137,8 @@ while getopts "H:A:l:r:b:k:T:Bf:h" opt; do
 done
 
 [ -n "$PEER" ] && [ -n "$PEER_ADDR" ] || { usage >&2; exit 2; }
+
+case "$DIR" in rx|tx|both) ;; *) echo "-D takes rx, tx or both" >&2; exit 2 ;; esac
 
 # THE SAME LINK AND THE SAME NUMBER OF ARMS, OR IT IS NOT A COMPARISON.
 #
@@ -153,6 +172,15 @@ if [ "$RECORD" = 0 ]; then
             REPS="$3"
             echo "==> $REPS arms, which is what $BASELINE was recorded over"
         fi
+    fi
+    # A baseline written before -D existed carries no direction line and was
+    # recorded on rx, which is what the default still is.
+    WANTDIR=$(sed -n 's/^# Direction: \([a-z]*\).*/\1/p' "$BASELINE" | head -1)
+    if [ "${WANTDIR:-rx}" != "$DIR" ]; then
+        echo "$BASELINE was recorded with -D ${WANTDIR:-rx} and this run is" >&2
+        echo "-D $DIR.  Losing the other direction is a different link, not a" >&2
+        echo "different build.  Match it, or record with -B." >&2
+        exit 2
     fi
 fi
 
@@ -191,6 +219,7 @@ peer_tc() { ssh "$PEER" "$PEER_TC $*"; }
 
 netem_off() {
     peer_tc "qdisc del dev $PEER_IF root" >/dev/null 2>&1 || true
+    peer_tc "qdisc del dev $PEER_IF ingress" >/dev/null 2>&1 || true
 }
 
 # THE SAME LOSS PATTERN EVERY RUN, or the gate measures the pattern.  netem
@@ -203,9 +232,39 @@ netem_off() {
 # compared meet the same link.
 SEED="${AMINETXDUO_LOSSGATE_SEED:-20260811}"
 
+# The guest -> peer direction, which netem cannot reach: it shapes egress, and
+# these frames arrive.  An `ingress' qdisc is not the root one, so this leaves
+# whatever the peer already had in place alone, and a u32 filter on the source
+# address means nothing but the guest's own frames meet the action.  gact's
+# `determ N' drops every Nth packet -- exactly LOSS percent, in the same places
+# every run, which is the tx counterpart of the netem seed.
+tx_loss_on() {
+    local guest="$1" nth
+    nth=$(awk -v l="$LOSS" 'BEGIN { printf "%d", (l + 0 > 0) ? (100.0 / l) + 0.5 : 0 }')
+    [ "$nth" -ge 2 ] || {
+        echo "==> ${LOSS}% is not a drop tc gact can express; tx loss is off" >&2
+        return; }
+    peer_tc "qdisc add dev $PEER_IF handle ffff: ingress"
+    peer_tc "filter add dev $PEER_IF parent ffff: protocol ip prio 1 u32 \
+             match ip src $guest/32 action pass random $TXRAND drop $nth"
+    echo "==> peer $PEER_IF: 1 in $nth of $guest -> peer dropped on ingress ($TXRAND)"
+}
+
+# What the tx side actually dropped.  netem prints its own count in the qdisc
+# dump above; the ingress action keeps its in the filter's statistics, and a
+# run that says the send side was exercised should be able to show the number.
+tx_loss_report() {
+    case "$DIR" in rx) return ;; esac
+    echo "==> guest -> peer drops:"
+    peer_tc "-s filter show dev $PEER_IF parent ffff:" 2>/dev/null |
+        sed -n 's/^[ \t]*Sent \(.*\)/    \1/p'
+}
+
 netem_on() {
     local guest="$1"
     netem_off
+    case "$DIR" in tx|both) tx_loss_on "$guest" ;; esac
+    case "$DIR" in tx) return ;; esac
     peer_tc "qdisc add dev $PEER_IF root handle 1: prio bands 3"
     # iproute2 grew `seed` in 6.x.  Where it is older the run still works and
     # says that its numbers are not comparable with anybody else's.
@@ -310,6 +369,7 @@ for rep in $(seq 1 "$REPS"); do
     ' "$OUT/arm-$rep.txt" >> "$OUT/samples.txt"
 done
 
+tx_loss_report
 netem_off
 
 [ -s "$OUT/samples.txt" ] || { echo "FAIL: no arm produced a RESULT line" >&2; exit 1; }
@@ -352,6 +412,7 @@ if [ "$RECORD" = "1" ]; then
         echo "# tests/perf/run-lossgate.sh baseline."
         echo "# NAME  DIRECTION  VALUE  TOLERANCE_PERCENT"
         echo "# Recorded with ${LOSS}% peer-to-guest loss, $KB KB, $REPS reps."
+        echo "# Direction: $DIR"
         echo "# Read and write are separate on purpose: the 0.16.6 regression"
         echo "# moved them in opposite directions."
         echo "# Tolerance: twice the interquartile spread over root(reps), floor ${FLOOR}%."

@@ -136,6 +136,7 @@ tests/ipv6/run-tools-winuae.sh     : manual : windows. ping and traceroute over 
 tests/netstack/run-winuae.sh       : manual : windows. netstack bring-up under WinUAE
 tests/perf/run-fitzbench.sh        : manual : bench, bridged. bulk throughput on a link with latency
 tests/perf/run-stackprof.sh        : manual : bench, bridged. the same transfer against another stack
+tests/perf/run-reqresp.sh          : manual : bench, bridged. request and response latency on a link that loses packets, which is the flight fast retransmit cannot reach
 tests/endurance/run-endurance.sh   : manual : bench. hours of synthetic socket traffic
 tests/endurance/run-fitz.sh        : manual : bench. hours of Fitz traffic
 tests/soak/run-fitz-soak.sh        : manual : bench. hours of Fitz, Amiga on both ends
