@@ -101,8 +101,8 @@ tests/netstack/run-fsuae.sh        : manual : UNWIRED. netstack bring-up
 tests/netstack/run-amiberry.sh     : manual : UNWIRED. netstack bring-up, Amiberry
 tests/netstack/run-dhcp3927.sh     : manual : UNWIRED. the DHCP lifecycle and the RFC 3927 fallback
 tests/netstack/run-fitzquery.sh    : manual : UNWIRED. the regression test for "the machine cannot see its own share"
-tests/tcpdrill/run-tcpdrill.sh     : manual : UNWIRED. the tcpdrill scripts
-tests/udpdrill/run-udpdrill.sh     : manual : UNWIRED. the UDP receive path
+tests/tcpdrill/run-tcpdrill.sh     : manual : UNWIRED. the tcpdrill scripts; `-s all` runs every one of them, one boot each
+tests/udpdrill/run-udpdrill.sh     : manual : UNWIRED. the UDP receive path, the bind-address filter, and the largest datagram a route takes
 tests/sockopt/run-fsuae.sh         : manual : UNWIRED. the socket-option test
 tests/ipv6/run-fsuae.sh            : manual : UNWIRED. the IPv6 link test
 tests/ipv6/run-tools-fsuae.sh      : manual : UNWIRED. the shipped commands over IPv6; nslookup, NetTrace, traceroute and whois have no other home at all

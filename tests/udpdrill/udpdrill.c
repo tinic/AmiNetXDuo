@@ -45,6 +45,7 @@
 #define LOCAL_IP        0x0A090901UL
 #define PEER_IP         0x0A090902UL
 #define OTHER_IP        0x0A090903UL
+#define LOOPBACK_IP     0x7F000001UL
 
 #define PEER_PORT       9000
 #define OTHER_PORT      9001
@@ -781,6 +782,7 @@ LONG        n;
 
 #define T_ECONNREFUSED  61
 #define T_EWOULDBLOCK   35
+#define T_EMSGSIZE      40
 
 typedef struct { LONG tv_secs; LONG tv_micro; } TTimeval;
 
@@ -1014,6 +1016,239 @@ LONG         n;
 }
 
 
+/*
+ * u06.  Which datagrams a socket that named a LOCAL address may receive.
+ *
+ * The four-tuple filter above is about who sent the datagram; this is about
+ * where it arrived.  NetX Duo binds a UDP socket to a port and has nowhere to
+ * record a local address, so a socket bound to one address is handed every
+ * datagram that reaches the port, whichever interface carried it, unless
+ * bsd_recv_udp() declines it -- and declining it means releasing the packet
+ * and going back to waiting, not failing the call, because someone else's
+ * traffic is not this caller's error.
+ *
+ * 127.0.0.1 is the address to bind for this: the machine has it, the wire
+ * cannot reach it, and nothing about the datagram itself changes.  The two
+ * arms differ in one argument to bind() and in nothing else.
+ */
+static VOID t_case_bind_address(VOID)
+{
+LONG        fd;
+SockAddrIn  a;
+UBYTE       tag = 0;
+
+    /* The address the wire carries.  This datagram is for it. */
+    fd = bsd_socket(AF_INET, SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(fd >= 0), "socket(SOCK_DGRAM)", bsd_Errno()))
+        return;
+
+    t_addr(&a, LOCAL_IP, (UWORD)LOCAL_PORT);
+    if (!t_check((BOOL)(bsd_bind(fd, &a, (LONG)sizeof(a)) == 0),
+                 "bind(10.9.9.1:4801)", bsd_Errno()))
+    {
+        (VOID)bsd_CloseSocket(fd);
+        return;
+    }
+    t_rcvtimeo(fd, 1);
+
+    t_settle();
+    (VOID)t_check((BOOL)t_inject(OTHER_IP, OTHER_PORT, 0xF0, 8UL),
+                  "inject a datagram addressed to 10.9.9.1", 0);
+    t_settle();
+
+    (VOID)t_check((BOOL)(t_drain(fd, &tag) == 8),
+                  "the socket bound to the wire's address took it", bsd_Errno());
+    (VOID)t_check((BOOL)(tag == 0xF0), "and it is the datagram that was sent",
+                  (LONG)tag);
+
+    (VOID)bsd_CloseSocket(fd);
+
+    /* 127.0.0.1.  The same datagram, on an interface the bind did not name. */
+    fd = bsd_socket(AF_INET, SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(fd >= 0), "socket(SOCK_DGRAM)", bsd_Errno()))
+        return;
+
+    t_addr(&a, LOOPBACK_IP, (UWORD)LOCAL_PORT);
+    if (!t_check((BOOL)(bsd_bind(fd, &a, (LONG)sizeof(a)) == 0),
+                 "bind(127.0.0.1:4801)", bsd_Errno()))
+    {
+        (VOID)bsd_CloseSocket(fd);
+        return;
+    }
+    t_rcvtimeo(fd, 1);
+
+    t_settle();
+    (VOID)t_check((BOOL)t_inject(OTHER_IP, OTHER_PORT, 0xF1, 8UL),
+                  "inject the same datagram again", 0);
+    t_settle();
+
+    {
+        LONG n = t_drain(fd, &tag);
+
+        (VOID)t_check((BOOL)(n < 0 && bsd_Errno() == T_EWOULDBLOCK),
+                      "a socket bound to 127.0.0.1 does not take it",
+                      (n < 0) ? bsd_Errno() : n);
+    }
+
+    (VOID)bsd_CloseSocket(fd);
+}
+
+/*
+ * u07.  The largest datagram that may leave, per destination.
+ *
+ * RFC 1122 / POSIX: a message too long to pass atomically through the
+ * underlying protocol is EMSGSIZE and is NOT transmitted.  Transmit
+ * fragmentation is deliberately not used, so the ceiling is the egress
+ * interface's IP MTU less 28 bytes of IPv4 and UDP header: 1472 here.
+ *
+ * The third arm is what makes this a test of bsd_route_mtu() rather than of a
+ * constant.  The same 1473 bytes to 127.0.0.1 must be accepted, because the
+ * loopback interface carries 65535 -- so a routing lookup that always answered
+ * 1500, or always answered the first interface, fails one of the two.
+ *
+ * "Not transmitted" is asserted on the wire, not inferred from the return
+ * value: the failure this replaces was a datagram that was assembled, handed
+ * to the driver and dropped there with success already reported.
+ */
+static VOID t_case_maxdgram(VOID)
+{
+static UBYTE big[1473];
+static UBYTE frame[TAP_FRAME_MAX];
+LONG         fd;
+SockAddrIn   a;
+ULONG        len;
+
+    fd = bsd_socket(AF_INET, SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(fd >= 0), "socket(SOCK_DGRAM)", bsd_Errno()))
+        return;
+
+    t_addr(&a, 0UL, (UWORD)LOCAL_PORT);
+    if (!t_check((BOOL)(bsd_bind(fd, &a, (LONG)sizeof(a)) == 0), "bind",
+                 bsd_Errno()))
+    {
+        (VOID)bsd_CloseSocket(fd);
+        return;
+    }
+
+    t_addr(&a, PEER_IP, (UWORD)PEER_PORT);
+    if (!t_check((BOOL)(bsd_connect(fd, &a, (LONG)sizeof(a)) == 0),
+                 "connect() to 10.9.9.2:9000", bsd_Errno()))
+    {
+        (VOID)bsd_CloseSocket(fd);
+        return;
+    }
+
+    /* 1500 - 20 - 8.  The first ARP is answered inside t_wait_tx(). */
+    (VOID)t_check((BOOL)(bsd_send(fd, big, 1472, 0) == 1472),
+                  "send(1472) to the 1500-byte interface is accepted",
+                  bsd_Errno());
+
+    len = t_wait_tx(frame, (ULONG)sizeof(frame), 2000UL);
+    (VOID)t_check((BOOL)(len == (ULONG)(ETH_HDR + 20 + 8 + 1472)),
+                  "and one whole frame carried it", (LONG)len);
+
+    /* One byte more than the path takes. */
+    {
+        LONG n = bsd_send(fd, big, 1473, 0);
+
+        (VOID)t_check((BOOL)(n < 0 && bsd_Errno() == T_EMSGSIZE),
+                      "send(1473) is EMSGSIZE", (n < 0) ? bsd_Errno() : n);
+    }
+
+    len = t_wait_tx(frame, (ULONG)sizeof(frame), 300UL);
+    (VOID)t_check((BOOL)(len == 0UL),
+                  "and the refused datagram reached no wire", (LONG)len);
+
+    /* The same length to a route whose MTU is 65535. */
+    t_addr(&a, LOOPBACK_IP, (UWORD)PEER_PORT);
+    {
+        LONG n = bsd_sendto(fd, big, 1473, 0, &a, (LONG)sizeof(a));
+
+        (VOID)t_check((BOOL)(n == 1473),
+                      "sendto(1473) to 127.0.0.1 is not EMSGSIZE",
+                      (n < 0) ? bsd_Errno() : n);
+    }
+
+    (VOID)bsd_CloseSocket(fd);
+}
+
+/*
+ * u08.  A datagram is a record: what a short read discards, and what a peek
+ * leaves behind.
+ *
+ * Two decisions, and the same wire cannot tell them apart from the correct
+ * behaviour without asking for the NEXT datagram.  A read shorter than the
+ * datagram takes what fits and the rest is gone -- if the remainder were
+ * queued instead, the following read would hand back the tail of a datagram
+ * the caller has already been told it finished, and every record boundary
+ * after that is off by one.  MSG_PEEK is the opposite: the datagram stays, and
+ * the read after it must be the same one and not the one behind it.
+ *
+ * Each datagram carries a different first byte, which is the only way to say
+ * which one came back rather than merely that one did.
+ */
+#define T_MSG_PEEK      0x02
+
+static VOID t_case_datagram_boundary(VOID)
+{
+static UBYTE buf[256];
+LONG         fd;
+SockAddrIn   a;
+LONG         n;
+
+    fd = bsd_socket(AF_INET, SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(fd >= 0), "socket(SOCK_DGRAM)", bsd_Errno()))
+        return;
+
+    t_addr(&a, 0UL, (UWORD)LOCAL_PORT);
+    if (!t_check((BOOL)(bsd_bind(fd, &a, (LONG)sizeof(a)) == 0), "bind",
+                 bsd_Errno()))
+    {
+        (VOID)bsd_CloseSocket(fd);
+        return;
+    }
+    t_rcvtimeo(fd, 1);
+
+    /* 200 bytes, then 8, so a read that keeps the remainder of the first has
+       something visibly wrong to hand back. */
+    t_settle();
+    (VOID)t_check((BOOL)t_inject(PEER_IP, PEER_PORT, 0xA5, 200UL),
+                  "inject a 200-byte datagram", 0);
+    (VOID)t_check((BOOL)t_inject(PEER_IP, PEER_PORT, 0x5A, 8UL),
+                  "inject an 8-byte one behind it", 0);
+    t_settle();
+
+    n = bsd_recvfrom(fd, buf, 50, 0, NULL, NULL);
+    (VOID)t_check((BOOL)(n == 50), "a 50-byte read of the 200 returns 50", n);
+    (VOID)t_check((BOOL)(buf[0] == 0xA5), "and it is the first datagram",
+                  (LONG)buf[0]);
+
+    n = bsd_recvfrom(fd, buf, (LONG)sizeof(buf), 0, NULL, NULL);
+    (VOID)t_check((BOOL)(n == 8), "the next read is the NEXT datagram, not the "
+                                  "other 150 bytes", n);
+    (VOID)t_check((BOOL)(buf[0] == 0x5A), "and it is the one behind it",
+                  (LONG)buf[0]);
+
+    /* MSG_PEEK: the same datagram twice, and nothing after it. */
+    t_settle();
+    (VOID)t_check((BOOL)t_inject(PEER_IP, PEER_PORT, 0xC3, 16UL),
+                  "inject a 16-byte datagram", 0);
+    t_settle();
+
+    n = bsd_recvfrom(fd, buf, (LONG)sizeof(buf), T_MSG_PEEK, NULL, NULL);
+    (VOID)t_check((BOOL)(n == 16 && buf[0] == 0xC3), "MSG_PEEK reads it", n);
+
+    n = bsd_recvfrom(fd, buf, (LONG)sizeof(buf), 0, NULL, NULL);
+    (VOID)t_check((BOOL)(n == 16 && buf[0] == 0xC3),
+                  "and the read after it is the same datagram", n);
+
+    n = bsd_recvfrom(fd, buf, (LONG)sizeof(buf), 0, NULL, NULL);
+    (VOID)t_check((BOOL)(n < 0 && bsd_Errno() == T_EWOULDBLOCK),
+                  "which the peek did not duplicate", (n < 0) ? bsd_Errno() : n);
+
+    (VOID)bsd_CloseSocket(fd);
+}
+
 /* ------------------------------------------------------------------ main -- */
 
 int main(void)
@@ -1040,6 +1275,9 @@ int main(void)
     t_case_icmp_refused();
     t_case_icmp_other_peer();
     t_case_icmp_unconnected();
+    t_case_bind_address();
+    t_case_maxdgram();
+    t_case_datagram_boundary();
 
     CloseLibrary(SocketBase);
     SocketBase = NULL;

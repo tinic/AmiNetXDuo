@@ -1,0 +1,129 @@
+# tcpdrill, what a half-closed socket reports as readable, and what data
+# arriving after CloseSocket() earns.
+#
+# Two decisions bsdsocket.library makes that no static assert can hold and no
+# packet on its own reveals: both are about the state the socket is in when the
+# application asks, and NetX Duo numbers those states so that the wrong test is
+# an ordering accident rather than a typo.  CLOSE_WAIT is 6, FIN_WAIT_1 is 7,
+# FIN_WAIT_2 is 8 (nx_api.h), so `state >= NX_TCP_CLOSE_WAIT` -- the obvious
+# way to write "the peer has finished" -- also catches the two states in which
+# WE finished and the peer has not.
+#
+# THE CONSEQUENCE IS A SPIN, NOT AN ERROR.  `nc -N` half-closes and then
+# selects for the rest of the answer.  A socket that reports readable in
+# FIN_WAIT_2 makes WaitSelect() return at once and recv() answer EWOULDBLOCK,
+# for ever, at full speed.  Nothing on the wire changes, so the only observer
+# is the pair of calls, which is what h01..h04 are.
+#
+# h05 and h06 are the other side of the same question: once the application has
+# closed the descriptor there is nobody left to read, so acknowledging data
+# would tell the peer it was delivered when it will be discarded.  4.4BSD's
+# tcp_input resets (SS_NOFDREF, t_state > TCPS_CLOSE_WAIT, tlen), and c03 in
+# tcp.drill only ever sends the FIN.
+#
+# h06 asserts that the orderly close still finishes, and NOT that the library's
+# `receive_queue_count == 0` guard is what makes it finish.  Removing that guard
+# changes nothing on this wire, because a data-less FIN never reaches the
+# receive callback in the first place: NetX Duo calls it only when the segment
+# moved rx_sequence forward inside _nx_tcp_socket_state_data_check, and the FIN
+# consumes its sequence number in the state handler above it.  The guard is
+# defensive, and this file does not pretend to cover it.
+#
+# SPDX-License-Identifier: MIT
+
+# FIN_WAIT_1: our FIN is on the wire and unacknowledged.  Nothing has arrived
+# and nothing has been closed by the peer, so there is nothing to read.
+case h01_fin_wait_1_is_not_readable
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+shutdown wr
+tx FA seq=1 ack=1
+readable 0
+recv 100 = AGAIN
+
+# FIN_WAIT_2: the peer acknowledged our FIN and has said nothing since.  This
+# is where `nc -N` waits, and where it spun.  Asked twice, with time in
+# between, because one poll cannot tell a spin from a race.
+case h02_fin_wait_2_is_not_readable
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+shutdown wr
+tx FA seq=1 ack=1
+rx A seq=1 ack=2
+readable 0
+recv 100 = AGAIN
+idle 200
+readable 0
+recv 100 = AGAIN
+
+# The control: the exclusion is about the two states we reach on our own, not
+# about half-closed sockets in general.  The peer's FIN arrives and the socket
+# becomes readable at once, with EOF to read.
+case h03_peer_fin_after_our_own_is_readable
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+shutdown wr
+tx FA seq=1 ack=1
+rx A seq=1 ack=2
+readable 0
+rx FA seq=1 ack=2
+tx A seq=2 ack=2
+readable 1
+recv 100 = EOF
+
+# The other control: data in FIN_WAIT_2 is still data.  Shutting the write half
+# says nothing about the read half, so the queue arm has to keep working while
+# the state arm is refusing.
+case h04_data_in_fin_wait_2_is_readable
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+shutdown wr
+tx FA seq=1 ack=1
+rx A seq=1 ack=2
+readable 0
+rx PA seq=1 ack=2 len=20
+tx A seq=2 ack=21
+readable 1
+recv 100 = 20
+
+# CloseSocket() and then the peer writes.  There is no descriptor left, so the
+# segment is reset rather than acknowledged; a peer told "delivered" about
+# bytes that are discarded never finds out its writes stopped arriving.
+case h05_data_after_close_is_reset
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+close
+tx FA seq=1 ack=1
+rx A seq=1 ack=2
+rx PA seq=1 ack=2 len=50
+tx R
+
+# And the bare FIN is not.  It queues no data, so the orderly close has to
+# finish the way it always did -- an acknowledgement, and no reset after it.
+case h06_bare_fin_after_close_is_not_reset
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+close
+tx FA seq=1 ack=1
+rx A seq=1 ack=2
+rx FA seq=1 ack=2
+tx A seq=2 ack=2
+notx 400
