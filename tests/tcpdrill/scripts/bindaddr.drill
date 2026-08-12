@@ -1,0 +1,97 @@
+# tcpdrill, which connections a listener that named a local address takes.
+#
+# NetX Duo registers a listen against a PORT.  There is no
+# nx_tcp_server_socket_listen() that takes an address, so by the time anything
+# in bsdsocket.library can object to a SYN the three-way handshake is already
+# finished down in the TCP state machine.  Whether `bind(127.0.0.1)` means what
+# it says is therefore a decision this library makes on its own, at accept()
+# time, and nothing above it can tell a working filter from an absent one --
+# both leave a listening socket on the port.
+#
+# The observation that separates them is the application's: with the filter,
+# accept() never hands the connection over, and the peer that opened it is torn
+# down.  Without it, the connection is served.  That is the difference between
+# `nc -l 127.0.0.1` meaning what it says and quietly serving the whole segment.
+#
+# THE CONTROLS COME FIRST.  a01 and a02 are the same segment on the same wire
+# with a local address that must take it -- the wildcard, and the address this
+# interface actually carries.  Without them a refusal is indistinguishable from
+# a listener that never worked.
+#
+# `localaddr` is the only new directive: it sets what `listen` binds to.
+# `listen = EADDRNOTAVAIL` and `accept = none` are the negative forms of two
+# directives that could previously only succeed.
+#
+# EVERY CASE TEARS ITS OWN CONNECTION DOWN.  a01 and a02 close, and a close is
+# not instantaneous, so without the FIN exchange written out the frame lands in
+# the next case's queue and a03's `notx` reads it as a second teardown of a
+# connection it never made.  It cost an hour here.
+#
+# SPDX-License-Identifier: MIT
+
+# The wildcard takes everything, which is what it is for.
+case a01_wildcard_takes_the_wire
+localport 4781
+localaddr any
+listen
+rx S seq=0 win=8192 mss=1460
+tx SA seq=0 ack=1 mss=1460
+rx A seq=1 ack=1
+accept
+close
+tx FA seq=1 ack=1
+rx A seq=1 ack=2
+
+# The address the wire carries takes it too.  10.9.9.1 is the only addressed
+# interface, so this is the bind a server on this machine would really make.
+case a02_interface_address_takes_the_wire
+localport 4782
+localaddr iface
+listen
+rx S seq=0 win=8192 mss=1460
+tx SA seq=0 ack=1 mss=1460
+rx A seq=1 ack=1
+accept
+close
+tx FA seq=1 ack=1
+rx A seq=1 ack=2
+
+# The case the filter exists for.  The handshake completes -- it has to, the
+# state machine finished it before this library was consulted -- and then the
+# connection is refused: accept() never produces it, and the peer is taken
+# down rather than left half-open believing it has a server.
+case a03_loopback_bound_listener_refuses_the_wire
+localport 4783
+localaddr loopback
+listen
+rx S seq=0 win=8192 mss=1460
+tx SA seq=0 ack=1 mss=1460
+rx A seq=1 ack=1
+accept = none
+tx R seq=1
+notx 500
+
+# A second SYN on the same port after the refusal.  The listen has to still be
+# there: refusing a connection may not cost the listener, or one stray SYN from
+# the wire disarms a service for good.
+case a04_refusal_leaves_the_listener_armed
+localport 4784
+localaddr loopback
+listen
+rx S seq=0 win=8192 mss=1460
+tx SA seq=0 ack=1 mss=1460
+rx A seq=1 ack=1
+accept = none
+tx R seq=1
+notx 500
+peerport 9002
+rx S seq=0 win=8192 mss=1460
+tx SA seq=0 ack=1 mss=1460
+
+# An address this machine has not got is refused at bind(), before any of the
+# above is reached.  10.9.9.77 is on this subnet and belongs to nobody, so the
+# refusal is bsd_bind_kind()'s and not a routing accident.
+case a05_foreign_address_is_refused_at_bind
+localport 4785
+localaddr foreign
+listen = EADDRNOTAVAIL

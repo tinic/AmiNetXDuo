@@ -3,7 +3,10 @@
 # Run the tcpdrill scripts under an emulator.
 #
 #   tests/tcpdrill/run-tcpdrill.sh [-m MODEL] [-t SECS] [-b BUILD] [-T TAG]
-#                                  [-s SCRIPT] [-A]
+#                                  [-s SCRIPT|all] [-A]
+#
+# -s all runs every script under scripts/, one boot each, and prints one line
+# per file plus tcpdrill_all=PASS|FAIL.
 #
 # -A PICKS AMIBERRY.  FS-UAE needs an X server and dies in GLAD without one,
 # so on a headless box, which the Amiga lab machine is, the run ends with
@@ -50,6 +53,33 @@ done
 
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 DRILL="$ROOT/$BUILD/tests/tcpdrill/TcpDrill"
+
+# -s all runs every script, one boot each, and reports a table.  Not one boot
+# for a concatenation of them: the scripts were written one file per boot and
+# two of them reuse a local port, so joining them would test a listener state
+# nothing else does.  Recursion rather than a loop around the body below, so
+# each arm gets its own stage directory and its own guest files.
+if [ "$SCRIPT" = all ]; then
+    rc=0
+    ARM_A=()
+    [ "$RUNNER" = amiberry ] && ARM_A=(-A)
+
+    for s in "$ROOT"/tests/tcpdrill/scripts/*.drill; do
+        name=$(basename "$s" .drill)
+        out="$ROOT/build/tcpdrill-$TAG-$name.out"
+
+        arm=0
+        "$0" -m "$MODEL" -t "$TIMEOUT" -b "$BUILD" -T "$TAG-$name" -s "$s" \
+            "${ARM_A[@]+"${ARM_A[@]}"}" > "$out" 2>&1 || arm=$?
+
+        verdict=$(grep -E 'case\(s\)' "$out" | tail -1)
+        echo "$name: ${verdict:-no verdict} rc=$arm"
+        [ "$arm" -eq 0 ] || rc=1
+    done
+
+    [ "$rc" -eq 0 ] && echo "tcpdrill_all=PASS" || echo "tcpdrill_all=FAIL"
+    exit "$rc"
+fi
 
 for f in "$BSD" "$DRILL" "$SCRIPT"; do
     [ -f "$f" ] || { echo "missing $f, build it first" >&2; exit 2; }

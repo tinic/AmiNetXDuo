@@ -1926,6 +1926,8 @@ static BOOL bsd_listen_rearm(struct AmiSocketBase *base, AmiSocket *sock)
  * a socket left in the list that nothing will ever connect is a slot of the
  * backlog gone for good, so a refusal destroys it and the list is topped up
  * instead.
+ *
+ * A refusal frees `incoming`, so no caller may touch it after this returns.
  */
 static VOID bsd_listen_return(struct AmiSocketBase *base, AmiSocket *sock,
                               AmiSocket *incoming)
@@ -2594,14 +2596,19 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
     fd = bsd_fd_alloc(SocketBase, incoming);
     if (fd < 0)
     {
-        /* Put the socket back on the port rather than losing the listener. */
+        /* Put the socket back on the port rather than losing the listener.
+           The flags go back first: bsd_listen_return() destroys and frees the
+           socket when the relisten is refused, and these three stores used to
+           come after it, so the one accept() that runs out of descriptors on a
+           listener whose relisten is refused wrote into freed memory. */
         nx_tcp_socket_disconnect(&incoming->as_Nx.tcp, NX_NO_WAIT);
         nx_tcp_server_socket_unaccept(&incoming->as_Nx.tcp);
-        bsd_listen_return(SocketBase, sock, incoming);
 
         incoming->as_Flags &= ~ASF_CONNECTED;
         incoming->as_Flags |= ASF_INCOMING;
         incoming->as_Parent = sock;
+
+        bsd_listen_return(SocketBase, sock, incoming);
 
         bsd_nx_leave(SocketBase);
 

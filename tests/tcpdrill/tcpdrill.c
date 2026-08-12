@@ -20,8 +20,18 @@
  *   opt NAME VALUE         setsockopt: nodelay rcvbuf sndbuf oobinline
  *                          reuseaddr linger
  *   connect                connect(); EINPROGRESS is the expected answer
- *   listen                 bind localport, listen(4)
- *   accept                 accept(); the accepted socket becomes the subject
+ *   localaddr WHICH        the local address `listen` binds to: `any`, the
+ *                          default; `iface`, the address the wire carries;
+ *                          `loopback`; or `foreign`, one this machine has not
+ *                          got.  NetX registers a listen against a port and
+ *                          not an address, so which of these the stack honours
+ *                          is a decision bsdsocket.library makes on its own.
+ *   listen [= ERRNO]       bind localport, listen(4).  With `= ERRNO` the
+ *                          bind must instead fail with that errno.
+ *   accept [= none]        accept(); the accepted socket becomes the subject.
+ *                          `= none` requires the listener never to hand one
+ *                          over, which is how a refused connection reads to
+ *                          the application.
  *   send N [= AGAIN]       send N bytes of a known pattern; AGAIN requires
  *                          the send to be refused, as a closed window must
  *   oob N                  send one byte, value N, with MSG_OOB
@@ -139,6 +149,12 @@
 #define LOCAL_IP        0x0A090901UL            /* 10.9.9.1, DEVS:NetInterfaces */
 #define PEER_IP         0x0A090902UL            /* 10.9.9.2, this harness       */
 
+/* `localaddr`.  The loopback address is one the machine has and the wire
+   cannot reach; the foreign one is on this subnet and belongs to nobody, so
+   bind() has to refuse it without any interface being consulted. */
+#define LOOPBACK_IP     0x7F000001UL            /* 127.0.0.1 */
+#define FOREIGN_IP      0x0A09094DUL            /* 10.9.9.77 */
+
 /* `dst=`.  The subnet is the /24 DEVS:NetInterfaces/tap0 configures, and the
    multicast address is the all-hosts group, which nothing here has joined. */
 #define DST_UNICAST     0
@@ -175,6 +191,7 @@ static const UBYTE peer_mac[6]  = { 0x02, 0x00, 0x44, 0x52, 0x4C, 0x02 };
 
 #define E_WOULDBLOCK    35
 #define E_INPROGRESS    36
+#define E_ADDRNOTAVAIL  49
 
 typedef struct SockAddrIn
 {
@@ -790,6 +807,7 @@ typedef struct Case
     LONG    peer_wscale;        /* shift an injected SYN offered, -1   */
     BOOL    peer_sackok;        /* an injected SYN offered SACK        */
     BOOL    peer_ts;            /* an injected frame carried a timestamp */
+    ULONG   local_addr;         /* what `listen` binds to, 0 = wildcard */
 } Case;
 
 static Case cs;
@@ -2089,10 +2107,23 @@ static VOID do_connect(const char *raw)
     }
 }
 
-static VOID do_listen(const char *raw)
+static VOID do_listen(const char *args, const char *raw)
 {
     SockAddrIn a;
     LONG       one = 1;
+    LONG       want_errno = 0;
+
+    {
+        char tok[24];
+
+        args = token(args, tok, sizeof(tok));       /* '=' or nothing */
+        if (tok[0] == '=')
+        {
+            (VOID)token(args, tok, sizeof(tok));
+            want_errno = streq(tok, "EADDRNOTAVAIL") ? E_ADDRNOTAVAIL
+                                                     : to_num(tok);
+        }
+    }
 
     cs.lsock = s_socket(AF_INET_, SOCK_STREAM_, 0);
     if (cs.lsock < 0)
@@ -2107,7 +2138,29 @@ static VOID do_listen(const char *raw)
     a.sin_len    = (UBYTE)sizeof(a);
     a.sin_family = AF_INET_;
     a.sin_port   = cs.local_port;
-    a.sin_addr   = 0;
+    a.sin_addr   = cs.local_addr;
+
+    if (want_errno != 0)
+    {
+        LONG rc = s_bind(cs.lsock, &a);
+
+        if (rc != 0 && s_errno() == want_errno)
+            pass(raw);
+        else
+        {
+            char  why[80];
+            char *w = why;
+            const char *t = "bind() returned ";
+
+            while (*t) *w++ = *t++;
+            fmt_num(&w, (ULONG)rc, 10, 0, TRUE);
+            t = ", errno "; while (*t) *w++ = *t++;
+            fmt_num(&w, (ULONG)s_errno(), 10, 0, TRUE);
+            *w = '\0';
+            fail(raw, why);
+        }
+        return;
+    }
 
     if (s_bind(cs.lsock, &a) != 0)
     {
@@ -2129,13 +2182,25 @@ static VOID do_listen(const char *raw)
     pass(raw);
 }
 
-static VOID do_accept(const char *raw)
+static VOID do_accept(const char *args, const char *raw)
 {
     UWORD tries;
     LONG  last = 0;
     char  why[80];
     char *w;
     const char *t;
+    BOOL  want_none = FALSE;
+
+    {
+        char tok[16];
+
+        args = token(args, tok, sizeof(tok));       /* '=' or nothing */
+        if (tok[0] == '=')
+        {
+            (VOID)token(args, tok, sizeof(tok));
+            want_none = streq(tok, "none");
+        }
+    }
 
     for (tries = 0; tries < 50; tries++)
     {
@@ -2143,6 +2208,12 @@ static VOID do_accept(const char *raw)
 
         if (s >= 0)
         {
+            if (want_none)
+            {
+                s_close(s);
+                fail(raw, "accept() handed over a connection it had to refuse");
+                return;
+            }
             cs.sock = s;
             sock_nonblocking(s);
             pass(raw);
@@ -2151,6 +2222,12 @@ static VOID do_accept(const char *raw)
         last = s_errno();
         pump();
         Delay(1);
+    }
+
+    if (want_none)
+    {
+        pass(raw);
+        return;
     }
 
     /* With the errno.  "never produced a socket" is the same sentence whether
@@ -2813,10 +2890,21 @@ static VOID run_line(char *line)
         (VOID)token(args, tok, sizeof(tok));
         cs.local_port = (UWORD)to_num(tok);
     }
+    else if (streq(verb, "localaddr"))
+    {
+        char tok[16];
+
+        (VOID)token(args, tok, sizeof(tok));
+        if (streq(tok, "any"))           cs.local_addr = 0UL;
+        else if (streq(tok, "iface"))    cs.local_addr = LOCAL_IP;
+        else if (streq(tok, "loopback")) cs.local_addr = LOOPBACK_IP;
+        else if (streq(tok, "foreign"))  cs.local_addr = FOREIGN_IP;
+        else say("!! unknown localaddr: %s", raw);
+    }
     else if (streq(verb, "socket"))   do_socket(raw);
     else if (streq(verb, "connect"))  do_connect(raw);
-    else if (streq(verb, "listen"))   do_listen(raw);
-    else if (streq(verb, "accept"))   do_accept(raw);
+    else if (streq(verb, "listen"))   do_listen(args, raw);
+    else if (streq(verb, "accept"))   do_accept(args, raw);
     else if (streq(verb, "send"))     do_send(args, raw);
     else if (streq(verb, "oob"))      do_oob(args, raw);
     else if (streq(verb, "recv"))     do_recv(args, raw);
