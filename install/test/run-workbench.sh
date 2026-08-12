@@ -90,35 +90,59 @@
 # defect that lives in the RELEASE build, a different compiler, a different
 # crt0, cannot show up.  Run it both ways before believing a release.
 #
-# WHY ftp.gnu.org AND NOT www.iana.org, which this used to fetch.
+# The https step fetches a list of hosts and passes on the first one that
+# answers.  What it asserts is that the trust store the installer just wrote
+# verifies a real public CA chain, so the certificate has to come off the
+# internet and not out of our own peer, and that makes the step depend on
+# somebody else's server.  One server is a single point of failure:
+# ftp.gnu.org, which this used to fetch, rate-limits this lab and then refuses
+# both families for minutes -- 0 of 10 curl fetches, connect timeouts, at the
+# same moment www.gnu.org answered 10 of 10.  A red run then said nothing
+# about this stack.  Three hosts, and it goes red only when all three fail,
+# which no single operator's policy can produce.
 #
-# A server puts a clock on the TLS handshake, started at accept() and stopped
+# A server also puts a clock on the handshake, started at accept() and stopped
 # when the client's Finished arrives, and a 68020 does not finish inside every
-# one of them.  Measured on this machine, seconds a server will hold a
-# connection with no ClientHello on it:
+# one of them.  Seconds a server holds a connection with no ClientHello on it,
+# measured from this lab 2026-08-12:
 #
-#   www.iana.org / www.rfc-editor.org (Cloudflare)   15.0
-#   www.google.com / dns.google                      10.0
-#   aminet.net, www.python.org, archive.org          ~60
-#   ftp.gnu.org, www.gnu.org, www.debian.org,
-#   www.openbsd.org, ftp.funet.fi                    no close at 240
+#   www.google.com, dns.google                       10
+#   www.7-zip.org                                    11
+#   www.iana.org, www.rfc-editor.org (Cloudflare)    15
+#   ftp.heanet.ie                                    30
+#   ftp.acc.umu.se                                   43
+#   aminet.net, www.kernel.org, ftp.nluug.nl,
+#   mirror.leaseweb.com, mirrors.mit.edu,
+#   eab.abime.net, mirror.init7.net                  60
+#   ftp.tu-chemnitz.de, ftp.riken.jp                 92
+#   www.zlib.net                                     152
+#   www.amiga-news.de, www.pouet.net, ftp.tugraz.at,
+#   os4depot.net, www.gnu.org, www.openbsd.org,
+#   www.debian.org, ftp.funet.fi, ftp.fau.de,
+#   ftp.lysator.liu.se, ftp.snt.utwente.nl           no close at 250
 #
-# Against www.iana.org the A1200 in this harness took 20.1 s of handshake, so
-# Cloudflare sent FIN 15.0 s in, five seconds before the client Finished went
-# out, and the RST arrived before the request could be answered.  That is not
-# a defect in the stack, and no amount of work on our side fits a
-# three-certificate chain into 15 s at 14 MHz.
+# Only the last group can be used.  Against www.iana.org the A1200 here took
+# 20.1 s of handshake, so Cloudflare sent FIN 15.0 s in, five seconds before
+# the client Finished went out, and the RST arrived before the request could
+# be answered.  Handshake cost, A1200/68020, whole chain verified:
 #
-# Handshake cost measured here, A1200/68020, whole chain verified:
+#   www.pouet.net       17.4 s   3 certificates, RSA-2048 leaf
+#   www.amiga-news.de   17.5 s   3 certificates, RSA-2048 leaf
+#   www.gnu.org         22.1 s   3 certificates, RSA-2048 leaf
+#   ftp.tugraz.at       24.4 s   3 certificates, ECDSA P-256 leaf
+#   www.openbsd.org     25.2 s   3 certificates, RSA-4096 leaf
+#   www.debian.org      25.4 s   3 certificates, RSA-4096 leaf
 #
-#   ftp.gnu.org        18.4 s   3 certificates, all RSA
-#   aminet.net         18.5 s   3 certificates, all RSA
-#   www.openbsd.org    25.2 s   3 certificates, RSA-4096 leaf
-#   www.debian.org     25.4 s   3 certificates, RSA-4096 leaf
-#
-# ftp.gnu.org is the cheapest of the hosts that impose no budget at all, its
-# index page is 9 kB, and gnu.org has been at that name longer than this
-# hardware has been out of production.
+# None of the three has an AAAA record, and that is deliberate.  fetch
+# resolves once and connects once -- src/tools/toolsock.c:840 takes the first
+# usable answer and the library orders IPv6 first -- and does not fall back to
+# the other family.  From the guest on 2026-08-12 an IPv6 connect to
+# www.openbsd.org, www.debian.org, ftp.funet.fi, ftp.lysator.liu.se and
+# ftp.snt.utwente.nl each failed after 191 s, while this host reached the same
+# addresses in under 2 s from an address in the guest's own /64.  A dual-stack
+# host therefore costs 191 s and a failure whenever that path is down, and a
+# list made only of them fails together.  IPv6 is tested in tests/ipv6, where
+# a fault in it is a finding rather than a flake.
 #
 # INGREDIENTS, none of which are ours to ship:
 #
@@ -960,6 +984,36 @@ EOF
 )
 fi
 
+# The hosts the https step tries, in order, and the AmigaDOS that tries them.
+# Nested IF rather than a loop, because the Shell has no loop and because the
+# nesting is what makes the second host cost nothing on a run where the first
+# one answered: 17 s, not 35.  `Set fhrc $RC` first, since the Echo that
+# records the return code is itself a command and clears the condition flags.
+HTTPS_HOSTS=(www.amiga-news.de www.pouet.net ftp.tugraz.at)
+
+https_steps() {
+    local i=1 pad="" h
+
+    for h in "${HTTPS_HOSTS[@]}"; do
+        printf '%sC:fetch https://%s/ TO DH0:https-body.txt >>DH0:usercheck.txt\n' \
+               "$pad" "$h"
+        printf '%sSet fhrc $RC\n' "$pad"
+        printf '%sEcho >>DH0:usercheck.txt "RESULT fetch-https-%d rc=$fhrc"\n' \
+               "$pad" "$i"
+        if [ "$i" -lt "${#HTTPS_HOSTS[@]}" ]; then
+            printf '%sIF NOT "$fhrc" EQ "0"\n' "$pad"
+            pad="$pad  "
+        fi
+        i=$((i + 1))
+    done
+
+    while [ -n "$pad" ]; do
+        pad="${pad#  }"
+        printf '%sENDIF\n' "$pad"
+    done
+}
+HTTPS_STEPS=$(https_steps)
+
 # An ordinary Shell script, doing ordinary things, with every command's return
 # code written down beside its output.  `Stack 200000` is the Shell's internal
 # stack command.  It is NOT needed any more, clients/compat/amiga_argv.c
@@ -981,9 +1035,8 @@ Echo >>DH0:usercheck.txt "*N=== 2. fetch http://example.com/"
 C:fetch http://example.com/ TO DH0:http-body.txt >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT fetch-http rc=\$RC"
 
-Echo >>DH0:usercheck.txt "*N=== 3. fetch https://ftp.gnu.org/"
-C:fetch https://ftp.gnu.org/ TO DH0:https-body.txt >>DH0:usercheck.txt
-Echo >>DH0:usercheck.txt "RESULT fetch-https rc=\$RC"
+Echo >>DH0:usercheck.txt "*N=== 3. fetch https://, first host that answers"
+$HTTPS_STEPS
 
 
 Echo >>DH0:usercheck.txt "*N=== 4. arp, what answered on this network"
@@ -1112,20 +1165,12 @@ HAS_TLS=1
 [ -f "$HD/Libs/tls.library" ] || HAS_TLS=0
 
 report() {
-    local label="$1" name="$2" expect="${3:-pass}" rc
+    local label="$1" name="$2" rc
     rc=$(sed -n "s/^RESULT $name rc=\(.*\)/\1/p" "$HD/usercheck.txt" 2>/dev/null \
          | head -1)
     if [ -z "$rc" ]; then
         printf '  %-34s NEVER RAN\n' "$label"
         bad=1
-    elif [ "$expect" = "fail" ]; then
-        if [ "$rc" = "0" ]; then
-            printf '  %-34s rc=0  !! expected to fail, no tls.library\n' "$label"
-            bad=1
-        else
-            printf '  %-34s rc=%s  (expected: no tls.library on this machine)\n' \
-                   "$label" "$rc"
-        fi
     elif [ "$rc" = "0" ]; then
         printf '  %-34s rc=0\n' "$label"
     else
@@ -1134,10 +1179,81 @@ report() {
     fi
 }
 
+# The return code of one https attempt, and the last thing fetch said before
+# it, which since 279327c4 names the fault -- an alert, a record that would
+# not decrypt, a read that ran out of time -- instead of one sentence for all
+# three.  Printing it is the difference between a red run that says which host
+# failed how and one that says the step failed.
+https_attempt() {
+    awk -v want="RESULT fetch-https-$1 rc=" '
+        index($0, want) == 1 {
+            print substr($0, length(want) + 1) "\t" err
+            found = 1
+            exit
+        }
+        /^RESULT fetch-https-/ { err = ""; next }
+        /^fetch: / { err = $0 }
+        END { if (!found) print "\t" }
+    ' "$HD/usercheck.txt" 2>/dev/null
+}
+
+https_ok=0
+https_via=""
+https_tried=""
+https_i=0
+for https_host in "${HTTPS_HOSTS[@]}"; do
+    https_i=$((https_i + 1))
+    https_line=$(https_attempt "$https_i")
+    https_rc=${https_line%%$'\t'*}
+    https_err=${https_line#*$'\t'}
+
+    if [ -z "$https_rc" ]; then
+        # A host after the one that answered was never meant to run.
+        if [ "$https_ok" = "0" ]; then
+            https_tried="$https_tried$(printf '\n      %-22s NEVER RAN' \
+                                       "$https_host")"
+        fi
+    elif [ "$https_rc" = "0" ]; then
+        https_ok=1
+        [ -n "$https_via" ] || https_via="$https_host"
+    else
+        https_tried="$https_tried$(printf '\n      %-22s rc=%s  %s' \
+                                   "$https_host" "$https_rc" "$https_err")"
+    fi
+done
+
+# fetch writes the output file only once it has a response, so on a run where
+# every host failed there is none, and `wc -c <` on it fails the whole script
+# under set -e at the exact moment the verdict is being printed.
+https_bytes=0
+if [ -f "$HD/https-body.txt" ]; then
+    https_bytes=$(wc -c < "$HD/https-body.txt" | tr -d ' ')
+fi
+
 report "ShowNetStatus"                 network
 report "fetch http://example.com/"     fetch-http
-report "fetch https://ftp.gnu.org/"        fetch-https \
-       "$([ "$HAS_TLS" = 1 ] && echo pass || echo fail)"
+
+# A 68000 install carries no tls.library, so every host has to fail there.
+if [ "$HAS_TLS" = "0" ]; then
+    if [ "$https_ok" = "1" ]; then
+        printf '  %-34s rc=0 from %s  !! no tls.library here\n' \
+               "fetch https://" "$https_via"
+        bad=1
+    else
+        printf '  %-34s no host answered (expected: no tls.library)\n' \
+               "fetch https://"
+    fi
+elif [ "$https_ok" = "1" ] && [ "${https_bytes:-0}" -gt 0 ]; then
+    printf '  %-34s rc=0 from %s, %s bytes%s\n' "fetch https://" \
+           "$https_via" "$https_bytes" "$https_tried"
+else
+    # Empty body with rc=0 is its own fault and not a refusal: the chain
+    # verified and nothing arrived, which is what the 0.21.1 run hit.
+    printf '  %-34s NO HOST ANSWERED, %s body bytes%s\n' "fetch https://" \
+           "${https_bytes:-0}" "$https_tried"
+    bad=1
+fi
+
 report "arp"                           arp
 
 if [ "$TERMINAL" = "1" ]; then
