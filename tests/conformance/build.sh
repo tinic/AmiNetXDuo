@@ -2,7 +2,7 @@
 #
 # Build the tbdye/bsdsocktest conformance suite with our toolchain.
 #
-#   tests/conformance/build.sh [-u]
+#   tests/conformance/build.sh [-u] [-b BUILDDIR]
 #
 # -u  fetch/update the checkout before building
 #
@@ -44,11 +44,17 @@ HERE="$ROOT/tests/conformance"
 SRC="$ROOT/third_party/bsdsocktest"
 UPSTREAM="https://github.com/tbdye/bsdsocktest.git"
 UPDATE=0
+# Where conf_launcher finds the crash guard.  build/cm is what dist/make-dist.sh
+# and a developer's own build produce; CI builds build/ci/default long before
+# it builds build/cm, so -b lets the caller name the tree it actually has.
+BUILDDIR="$ROOT/build/cm"
 
-while getopts "u" opt; do
+while getopts "ub:" opt; do
     case "$opt" in
         u) UPDATE=1 ;;
-        *) echo "usage: $0 [-u]" >&2; exit 2 ;;
+        b) case "$OPTARG" in /*) BUILDDIR="$OPTARG" ;;
+                             *)  BUILDDIR="$ROOT/$OPTARG" ;; esac ;;
+        *) echo "usage: $0 [-u] [-b BUILDDIR]" >&2; exit 2 ;;
     esac
 done
 
@@ -109,14 +115,14 @@ echo "  LD $(basename "$OUT")"
 # The launcher and the triage probe are ours, built against the same compat
 # headers.  The launcher links the crash guard out of the CMake build, so it
 # needs that to have run first; skip it rather than fail if it has not.
-COMMON="$ROOT/build/cm/src/common/libaminetxduo_common.a"
+COMMON="$BUILDDIR/src/common/libaminetxduo_common.a"
 if [ -f "$COMMON" ]; then
     echo "  CC conf_launcher.c"
     "$CC" -O2 -m68020 -fomit-frame-pointer -I"$ROOT/include" -I"$NDK" \
           -o "$ROOT/build/bsdsocktest/conf_launcher" \
           "$HERE/conf_launcher.c" "$COMMON"
 else
-    echo " , skipping conf_launcher: build build/cm first" >&2
+    echo " , skipping conf_launcher: no $COMMON, build it or pass -b" >&2
 fi
 
 echo "  CC conf_probe.c"

@@ -131,7 +131,7 @@ jobs:
         run: >-
           tools/ci-arm.sh -n "bsdsocktest conformance suite"
           -r AMINETXDUO_A2065 -- sh -c
-          'tests/conformance/build.sh &&
+          'tests/conformance/build.sh -b build/ci/default &&
           tests/conformance/run-fsuae.sh -b build/ci/default -a "LOOPBACK NOPAGE"'
 
       # 129 checks over the whole RFC 3542 surface -- IPV6_RECVPKTINFO and
