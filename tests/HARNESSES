@@ -118,6 +118,7 @@ tests/tls/run-hangup.sh            : manual : UNWIRED. can a rude peer take the 
 
 tests/tools/run-nettools.sh        : manual : peer. nc, telnet, tftp and whois against tests/tools/netpeer.py, with a port forwarded back in
 tests/tools/run-family.sh          : manual : peer, bridged. -4 and -6 on a guest that really has both; SLIRP carries no IPv6
+tests/tools/run-multiaddr.sh       : manual : bridged. a dual-stack name whose IPv6 is a blackhole is still fetched, and how long each case takes
 tests/tools/run-mdns.sh            : manual : peer, bridged. the responder watched from another machine
 tests/tools/run-dnsguard.sh        : manual : peer, bridged. negative caching and the owner name on an answer, against a name server that lies
 tests/tools/run-sntp.sh            : manual : peer. sntp, and what setting the clock does to certificate checking
