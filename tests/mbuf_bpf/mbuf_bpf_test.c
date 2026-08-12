@@ -1183,7 +1183,25 @@ TX_THREAD   main_thread;
     t_test_packet_bridge();
     t_test_bpf_tap_tx();
 
+    /* Still adopted: nx_packet_pool_delete() is a NetX Duo call and wants a
+       ThreadX thread to run on.  The pool is the only ThreadX-side object this
+       test makes -- there is no NX_IP here and no thread of its own -- so it is
+       the whole of the teardown tx_amiga_kernel_stop() insists on. */
+    if (t_pool_ok)
+        CHECK(nx_packet_pool_delete(&t_pool) == NX_SUCCESS,
+              "packet pool deleted");
+
     (VOID) tx_amiga_orphan_thread(&main_thread);
+
+    /*
+     * The kernel comes down before the program does.  tx_amiga_kernel_start()
+     * leaves a VERTB interrupt server whose struct Interrupt, and whose
+     * is_Code, are in this hunk, and AmigaDOS frees the hunk the instant main()
+     * returns; the next VBlank 20 ms later calls into it.  Nothing above can
+     * see that happen: the checks have passed and the exit status is decided by
+     * then, which is what tools/smoke/unloadprobe.c exists to catch.
+     */
+    CHECK(tx_amiga_kernel_stop() == TX_SUCCESS, "ThreadX kernel stopped");
 
     ami_bpf_cleanup();
     ami_mbuf_cleanup();

@@ -774,6 +774,17 @@ int main(int argc, char **argv)
 
     bt_reap(&bt_probe);
 
+    /*
+     * The kernel comes down before the program does. tx_amiga_kernel_start()
+     * leaves a VERTB interrupt server whose struct Interrupt, and whose
+     * is_Code, are in this program's hunk, and AmigaDOS frees that hunk the
+     * instant main() returns; the next VBlank then calls into it. Nothing
+     * above needs deleting first: every TX_THREAD here belongs to an Exec Task
+     * that adopted itself and orphaned itself again, which is the whole point
+     * of this test, so the kernel owns no application thread by now.
+     */
+    t_check(tx_amiga_kernel_stop() == TX_SUCCESS, "ThreadX kernel stopped", 0);
+
     t_log("%ld checks, %ld failures, ", (LONG)t_checks, (LONG)t_failures);
     t_log("%s\n", (LONG)((t_failures == 0UL) ? "PASS" : "FAIL"), 0);
 

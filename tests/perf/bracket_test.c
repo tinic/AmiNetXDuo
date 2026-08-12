@@ -881,6 +881,76 @@ UINT    status;
 }
 
 
+/* -------------------------------------------------------------- shutdown -- */
+
+/*
+ * Everything tx_application_define() created, given back, and then the kernel.
+ *
+ * tx_amiga_kernel_stop() refuses while any application TX_THREAD is still
+ * alive, and an NX_IP is one of those: nx_ip_create() runs an IP thread of its
+ * own.  The order is creation reversed, and the pool goes last because
+ * nx_ip_delete() hands packets back to it on the way out.
+ */
+static VOID b_shutdown(VOID)
+{
+
+UINT    status;
+UINT    adopted;
+
+
+    /* Every measurement above ended orphaned, so adopt once more: these are
+       NetX Duo calls and want a ThreadX thread to run on.  Stop orphans the
+       caller itself once it has decided to go ahead. */
+    status  = tx_amiga_adopt_thread(&b_caller, (CHAR *)"bracket caller", 16);
+    adopted = b_check((UINT)(status == TX_SUCCESS), "adopt for shutdown",
+                      status);
+
+    if (adopted)
+    {
+        /* It suspended itself at the end of its entry rather than returning,
+           and a suspended ThreadX thread is one the port can reclaim. */
+        (VOID)tx_thread_terminate(&b_srv_thread);
+        (VOID)b_check((UINT)(tx_thread_delete(&b_srv_thread) == TX_SUCCESS),
+                      "shutdown: server thread deleted", 0);
+
+        /* b_client is unbound and deleted only on the path where the transfer
+           actually ran.  A socket the IP instance still counts as created
+           makes nx_ip_delete() refuse, and all three of these are harmless on
+           a socket that was never created or is already gone. */
+        (VOID)nx_tcp_socket_disconnect(&b_client, 2UL * NX_IP_PERIODIC_RATE);
+        (VOID)nx_tcp_client_socket_unbind(&b_client);
+        (VOID)nx_tcp_socket_delete(&b_client);
+
+        (VOID)tx_semaphore_delete(&b_srv_done);
+        (VOID)tx_semaphore_delete(&b_srv_go);
+        (VOID)tx_semaphore_delete(&b_srv_accepted);
+        (VOID)tx_semaphore_delete(&b_srv_ready);
+
+        (VOID)b_check((UINT)(nx_ip_delete(&b_ip) == NX_SUCCESS),
+                      "shutdown: ip deleted", 0);
+        (VOID)b_check((UINT)(nx_ip_delete(&b_ip2) == NX_SUCCESS),
+                      "shutdown: ip2 deleted", 0);
+        (VOID)b_check((UINT)(nx_packet_pool_delete(&b_pool) == NX_SUCCESS),
+                      "shutdown: packet pool deleted", 0);
+    }
+
+    /*
+     * The kernel comes down before the program does.  tx_amiga_kernel_start()
+     * leaves a VERTB interrupt server whose struct Interrupt, and whose
+     * is_Code, are in this hunk, and AmigaDOS frees the hunk the instant main()
+     * returns; the next VBlank 20 ms later calls into it.  That is invisible
+     * from here -- the checks have passed and the exit status is decided by
+     * then -- so tools/smoke/unloadprobe.c is what sees it.
+     *
+     * Called even when the adoption above failed: stop then refuses, and a
+     * refusal reported as a failed check is the point.  Passing over it
+     * silently is how this went unnoticed in the first place.
+     */
+    (VOID)b_check((UINT)(tx_amiga_kernel_stop() == TX_SUCCESS),
+                  "ThreadX kernel stopped", 0);
+}
+
+
 /* ------------------------------------------------------------------ main -- */
 
 static const ULONG  b_read_sizes[] = { 512UL, 1460UL, 4096UL, 16384UL };
@@ -969,6 +1039,8 @@ ULONG   i;
     b_log("");
     b_log("-- one bracket ------------------------------------------------");
     b_bench_bracket();
+
+    b_shutdown();
 
     b_log("");
     b_log("%ld checks, %ld failures, %s",

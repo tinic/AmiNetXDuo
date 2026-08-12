@@ -24,6 +24,8 @@
 #   AMINETXDUO_RUN_TAG=drift ./tools/amiberry-run.sh -t 90 build/cm/tools/smoke/timerdrift
 #   AMINETXDUO_RUN_TAG=mem   ./tools/amiberry-run.sh -t 300 build/cm/tools/smoke/memprobe \
 #                                                        <staged libs/> <staged devs/>
+#   AMINETXDUO_RUN_TAG=unl   ./tools/amiberry-run.sh -t 240 -a 'DH0:ram_driver_test' \
+#       build/cm/tools/smoke/unloadprobe build/cm/tests/ram_driver/ram_driver_test
 #
 # SPDX-License-Identifier: MIT
 
@@ -59,6 +61,12 @@
 #              bsdsocket.library in LIBS: and a driver in DEVS:.  DOES NOT
 #              REACH ITS LAST TWO REPORTS: the final CloseLibrary() hangs
 #              (§81.5), which is the bug rather than the probe.
+# unloadprobe  runs a program it is HANDED and then asks whether the machine
+#              survived it: walks the VERTB server chain for a node sitting in
+#              freed memory, which is exact, and fills free memory with ILLEGAL
+#              so a stale server calls into it visibly, which is not.  KernelStop
+#              asks the same question about itself; this one asks it about a
+#              binary that was not written as a parent/child pair.
 # alignprobe   prints this machine's alignment rules, alignof for a long and
 #              for struct cmsghdr, what CMSG_BUFFER() delivers on the stack and
 #              in static storage, what AllocVec() and AllocMem() return, and
@@ -84,7 +92,8 @@ set(SMOKE_PROBES
     tickclock   tickclock.c
     timerdrift  timerdrift.c
     memprobe    memprobe.c
-    alignprobe  alignprobe.c)
+    alignprobe  alignprobe.c
+    unloadprobe unloadprobe.c)
 
 add_custom_target(smoke_probes)
 

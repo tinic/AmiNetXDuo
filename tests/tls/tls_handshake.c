@@ -837,6 +837,47 @@ UINT    i;
 }
 
 
+/* -------------------------------------------------------------- shutdown -- */
+
+/*
+ * Everything tx_application_define() created, given back, so the kernel can be
+ * stopped before AmigaDOS unloads this hunk.
+ *
+ * tx_amiga_kernel_stop() refuses while any application TX_THREAD is still
+ * alive, and an NX_IP is one of those: nx_ip_create() runs an IP thread of its
+ * own.  The order is creation reversed.  The TLS sessions and their sockets are
+ * already gone -- each round ends by deleting its own -- so what is left is the
+ * server thread, the two semaphores, the two IP instances and the pool.
+ */
+static VOID h_shutdown(VOID)
+{
+
+UINT    status;
+
+
+    /* Its entry function has returned by here, having run every round; this is
+       what covers the run where it did not. */
+    (VOID) tx_thread_terminate(&h_server_thread);
+    status =  tx_thread_delete(&h_server_thread);
+    (VOID) H_TX_OK(status, "shutdown: server thread deleted");
+
+    status =  tx_semaphore_delete(&h_server_ready);
+    (VOID) H_TX_OK(status, "shutdown: ready semaphore deleted");
+
+    status =  tx_semaphore_delete(&h_server_done);
+    (VOID) H_TX_OK(status, "shutdown: done semaphore deleted");
+
+    status =  nx_ip_delete(&h_ip0);
+    (VOID) H_OK(status, "shutdown: ip0 deleted");
+
+    status =  nx_ip_delete(&h_ip1);
+    (VOID) H_OK(status, "shutdown: ip1 deleted");
+
+    status =  nx_packet_pool_delete(&h_pool);
+    (VOID) H_OK(status, "shutdown: packet pool deleted");
+}
+
+
 /* ------------------------------------------------------------------ main -- */
 
 int main(VOID)
@@ -901,7 +942,22 @@ UINT    status;
 
     (VOID) h_client_run();
 
+    /* Still adopted: nx_ip_delete() and the rest are NetX Duo calls and want a
+       ThreadX thread to run on. */
+    h_shutdown();
+
     (VOID) tx_amiga_orphan_thread(&h_main_thread);
+
+    /*
+     * The kernel comes down before the program does.  tx_amiga_kernel_start()
+     * leaves a VERTB interrupt server whose struct Interrupt, and whose
+     * is_Code, are in this hunk, and AmigaDOS frees the hunk the instant main()
+     * returns; the next VBlank 20 ms later calls into it.  That is invisible
+     * from here -- the checks above have already passed and the exit status has
+     * already been decided -- so tools/smoke/unloadprobe.c is what sees it.
+     */
+    status =  tx_amiga_kernel_stop();
+    (VOID) H_TX_OK(status, "main: ThreadX kernel stopped");
 
     h_report();
 
