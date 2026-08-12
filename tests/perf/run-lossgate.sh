@@ -139,11 +139,27 @@ netem_off() {
     peer_tc "qdisc del dev $PEER_IF root" >/dev/null 2>&1 || true
 }
 
+# THE SAME LOSS PATTERN EVERY RUN, or the gate measures the pattern.  netem
+# seeds itself from the clock, so which segments are dropped -- and above all
+# whether any of them land close enough together to cost a retransmission
+# timeout -- is different every time.  Arms inside one run share a qdisc and
+# agreed to about 7%; consecutive runs, each with a fresh seed, came back 70,
+# 65 and 57 KB/s on an idle rig, which is a fifth of the figure and more than
+# the regression this exists to catch.  A fixed seed makes the two builds being
+# compared meet the same link.
+SEED="${AMINETXDUO_LOSSGATE_SEED:-20260811}"
+
 netem_on() {
     local guest="$1"
     netem_off
     peer_tc "qdisc add dev $PEER_IF root handle 1: prio bands 3"
-    peer_tc "qdisc add dev $PEER_IF parent 1:3 handle 30: netem loss ${LOSS}%"
+    # iproute2 grew `seed` in 6.x.  Where it is older the run still works and
+    # says that its numbers are not comparable with anybody else's.
+    peer_tc "qdisc add dev $PEER_IF parent 1:3 handle 30: netem loss ${LOSS}% \
+             seed $SEED" 2>/dev/null || {
+        echo "==> this peer's tc has no netem 'seed': the loss pattern is" \
+             "random per run, and run-to-run drift will swamp the gate"
+        peer_tc "qdisc add dev $PEER_IF parent 1:3 handle 30: netem loss ${LOSS}%"; }
     peer_tc "filter add dev $PEER_IF protocol ip parent 1: prio 1 u32 \
              match ip dst $guest/32 flowid 1:3"
     echo "==> peer $PEER_IF: ${LOSS}% loss towards $guest, everything else clean"
