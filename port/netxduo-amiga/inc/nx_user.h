@@ -79,8 +79,24 @@
 #define NX_ARP_MAX_QUEUE_DEPTH                  2
 
 /*
- * Retry an unanswered ARP 8 times rather than 18.  At the default one-second
- * update rate that is 8 s before giving up instead of 18 s.
+ * Retransmit an unanswered ARP request once a second, not once every ten.
+ * NetX Duo's default of 10 is longer than anything waits: iperf gives a
+ * connect plan.seconds + IPERF_IDLE_MS, which is 5 s on the arm
+ * tests/tools/run-cardsweep.sh runs, so one lost ARP broadcast failed the
+ * connection outright rather than delaying it.  One per second is the maximum
+ * rate RFC 1122 2.3.2.1 recommends and what BSD retries at.
+ *
+ * It costs nothing at steady state because NX_ARP_EXPIRATION_RATE is 0 here: a
+ * resolved entry carries nx_arp_entry_next_update 0 and nx_arp_periodic_update
+ * skips it, so this rate governs only unresolved entries.  Bring-up is
+ * unmoved, measured with tests/ipv6/run-bringup.sh.  The case is
+ * tests/tools/run-arpretry.sh, which loses the first ARP on purpose.
+ */
+#define NX_ARP_UPDATE_RATE                      1
+
+/*
+ * Retry an unanswered ARP 8 times rather than 18, which at the rate above is
+ * 8 s before the queued packets are dropped and the entry freed.
  */
 #define NX_ARP_MAXIMUM_RETRIES                  8
 

@@ -874,6 +874,28 @@ stage_bridged() {
         *) fail "netshutdown: the transcript above is the whole run" ; bad=1 ;;
     esac
 
+    # The peer that carries tc and tcpdump with capabilities, which is the
+    # same one tests/perf/run-lossgate.sh needs and not AMINETXDUO_PEER: this
+    # drill loses the guest's first ARP on purpose and cannot do it from here.
+    printf '\n-- one lost ARP must not fail a TCP arm\n'
+    if [ -z "${AMINETXDUO_FITZ_PEER:-}" ]; then
+        skip "arpretry: AMINETXDUO_FITZ_PEER is not set, so there is no peer" \
+             "that can drop the guest's first ARP.  A lost ARP is untested" \
+             "on this runner."
+    else
+        rc=0
+        "$ROOT/tests/tools/run-arpretry.sh" -b "$BUILD/default" \
+            -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" \
+            -P "$AMINETXDUO_FITZ_PEER" || rc=$?
+        case "$rc" in
+            0) note "PASS  the first ARP was lost and the connect still" \
+                    "completed inside the window the application waits" ;;
+            2) fail "arpretry: an ingredient is missing, or the drill" \
+                    "measured nothing -- read arp_reqs and netem_dropped" ; bad=1 ;;
+            *) fail "arpretry: the transcript above is the whole run" ; bad=1 ;;
+        esac
+    fi
+
     printf '\n-- TCP: is an AmigaDOS device, and stock commands use it\n'
     if [ -z "${AMINETXDUO_PEER:-}" ]; then
         skip "tcphandler: AMINETXDUO_PEER is not set, so there is no third" \
