@@ -258,4 +258,67 @@ if(NOT CMAKE_CROSSCOMPILING)
     set_target_properties(test_tls_expiry PROPERTIES C_STANDARD 11)
 
     add_test(NAME tls_session_expiry COMMAND test_tls_expiry)
+
+    # ---------------------------------------------------------------------
+    # Session resumption, the rest of it.
+    #
+    # tls_resume.c is 1,582 lines and until now had no test of any kind.  What
+    # it decides is which cached master secret may be offered to whom, and
+    # every way of getting that wrong is silent: a resumption that does not
+    # happen looks like the server declining one, and a resumption that should
+    # not have happened looks like a fast connection.
+    #
+    # It is not free of AmigaOS calls the way tls_expiry.c is, so this needs
+    # more than -I: test/shim carries <proto/dos.h>, <proto/exec.h> and the two
+    # dos headers, and the test defines them.  Open/Read/Write/Close land on
+    # stdio and a real file, because the on-disk format is the part a different
+    # build of this same library has to agree with.  tls_runtime.c comes along
+    # so tls_alloc(), tls_bzero() and tls_strncpy() are the shipping ones.
+    #
+    # The defines have to match the tls_library target above EXACTLY, and
+    # NX_SECURE_TLS_ENABLE_TLS_1_3 above all: tls_resume_secret_bound() has a
+    # live #if on it, and it changes the layout of NX_SECURE_TLS_SESSION.  The
+    # comment on that target says what happens when the two disagree.
+    #
+    # TLSLIB_NO_INLINE_STUBS is why <aminetxduo/tlslib.h> has that guard:
+    # tls_internal.h includes the public header, and its inline stubs are m68k
+    # assembly a host compiler cannot parse.  Nothing else in the tree defines
+    # it, so the shipping library sees the header unchanged.
+    add_executable(test_tls_resume
+        test/test_tls_resume.c
+        tls_resume.c
+        tls_runtime.c
+        tls_expiry.c)
+
+    target_include_directories(test_tls_resume PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"         # proto/, dos/, exec/
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"      # the rest of exec/
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/tls"                   # tls.h
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_NETXDUO}/nx_secure/inc"
+        "${AMINETXDUO_NETXDUO}/nx_secure/ports"
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
+
+    target_compile_definitions(test_tls_resume PRIVATE
+        NX_PACKET_ALIGNMENT=8
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h"
+        NX_SECURE_ENABLE_AEAD_CIPHER
+        NX_SECURE_KEY_CLEAR
+        NX_SECURE_TLS_ENABLE_TLS_1_3
+        TLSLIB_NO_INLINE_STUBS)
+
+    # -UAMINETXDUO_IPV6 for the reason tests/netstack/host's targets carry it:
+    # it changes the layout of NX_PACKET, and the vendored headers here are the
+    # linux port's.
+    target_compile_options(test_tls_resume PRIVATE -Wall -Wextra -UAMINETXDUO_IPV6)
+    set_target_properties(test_tls_resume PROPERTIES C_STANDARD 11)
+
+    add_test(NAME tls_session_resume COMMAND test_tls_resume)
 endif()
