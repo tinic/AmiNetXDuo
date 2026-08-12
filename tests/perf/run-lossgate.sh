@@ -59,13 +59,21 @@ PEER="${AMINETXDUO_FITZ_PEER:-}"
 PEER_ADDR="${AMINETXDUO_FITZ_PEER_ADDR:-}"
 PEER_IF="${AMINETXDUO_PEER_IFACE:-ens18}"
 PEER_TC="${AMINETXDUO_PEER_TC:-\$HOME/tc-cap}"
-LOSS=1
+# 5%, AND MORE LOSS IS LESS NOISE.  At 1% a 4 MB transfer sees about thirty
+# loss events, so which of them lands where -- in slow start, or as a tail loss
+# needing an RTO -- is the whole measurement: nine arms on an idle box came
+# back 456, 435, 384, 236, 197, 277 KB/s, and no honest tolerance over that
+# could catch the 18% regression this exists for.  At 5% there are five times
+# as many events, the law of large numbers applies, and consecutive arms agree
+# to within a few percent.  The link is harsher and the figure is lower; the
+# figure was never a prediction of anything, only a thing to compare.
+LOSS=5
 REPS=3
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 TAG="${AMINETXDUO_RUN_TAG:-lossgate}"
 RECORD=0
 BASELINE="$ROOT/tests/perf/lossgate-baseline.txt"
-KB=512
+KB=4096
 # The widest tolerance -B will write.  See the refusal below.
 MAXTOL="${AMINETXDUO_LOSSGATE_MAXTOL:-25}"
 
@@ -77,9 +85,9 @@ usage: tests/perf/run-lossgate.sh -H user@host -A addr [-l PERCENT] [-r REPS]
   -H  the peer, over ssh.  A THIRD machine: not this one and not the host the
       emulator runs on.
   -A  the peer's address as the guest sees it
-  -l  packet loss percent applied to peer -> guest frames (default 1)
+  -l  packet loss percent applied to peer -> guest frames (default 5)
   -r  repetitions; the median is compared (default 3)
-  -k  transfer size in KB (default 512)
+  -k  transfer size in KB (default 4096)
   -B  record the current run as the new baseline
   -f  baseline file (default tests/perf/lossgate-baseline.txt)
 EOF
@@ -293,6 +301,23 @@ if [ "$RECORD" = "1" ]; then
 fi
 
 [ -f "$BASELINE" ] || { echo "no baseline at $BASELINE -- record one with -B" >&2; exit 2; }
+
+# THE SAME LINK, OR IT IS NOT A COMPARISON.  Throughput under loss is a
+# function of the loss rate and the transfer size, so a 1% run read against a
+# 5% baseline reports the difference between two rigs as a regression in the
+# stack.  The recorder writes both into the header; this reads them back.
+WANT=$(sed -n 's/^# Recorded with \([0-9.]*\)% peer-to-guest loss, \([0-9]*\) KB.*/\1 \2/p' \
+       "$BASELINE" | head -1)
+if [ -n "$WANT" ]; then
+    set -- $WANT
+    if [ "$1" != "$LOSS" ] || [ "$2" != "$KB" ]; then
+        echo "$BASELINE was recorded at $1% loss over $2 KB and this run is" >&2
+        echo "${LOSS}% over $KB KB.  Those are different links; the comparison" >&2
+        echo "would report the rig as a regression.  Match it with -l and -k," >&2
+        echo "or record a new baseline with -B." >&2
+        exit 2
+    fi
+fi
 
 echo
 printf '%-14s %10s %10s %9s %8s\n' METRIC BASELINE NOW CHANGE VERDICT
