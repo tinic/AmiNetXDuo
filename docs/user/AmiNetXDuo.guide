@@ -111,15 +111,19 @@
 
   @{b}A machine@{ub}
 
-    o  68020 processor or better
-    o  AmigaOS 3.0 or 3.1 (Kickstart 40 is what has been tested)
-    o  About 4 MB of Fast RAM
+    o  Any 68000 or better
+    o  AmigaOS 2.04 or newer
+    o  1 MB of RAM
 
   Memory matters more than processor speed. At startup AmiNetXDuo
   claims one sixteenth of the free memory for its packet buffers, at
-  least 16 buffers and at most 256, each 1568 bytes. On a machine with
-  8 MB free that is the full 256 buffers, about 400 KB. On a 4 MB
-  machine it takes proportionally less and still works.
+  least 16 buffers and at most 512, each 1568 bytes. On a machine with
+  8 MB free that is 512 buffers, about 800 KB. On a 1 MB machine it
+  takes the floor of 16 and still works.
+
+  Encrypted (https:) connections need a 68020 or better. On a 68000
+  the cryptography takes longer than the other end will wait, so it is
+  left out and everything else works as normal.
 
   @{b}A network card and its driver@{ub}
 
