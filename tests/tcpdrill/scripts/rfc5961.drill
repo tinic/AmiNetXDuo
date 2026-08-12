@@ -127,3 +127,65 @@ rx R seq=$rwnd+10000
 notx 400
 send 10
 tx PA seq=1 ack=1 len=10 within=400
+
+# THE SEGMENT CHANGES NOTHING, and the options it carries are part of that.
+# A SYN is the segment that settles the MSS, the window scale and SACK
+# permission, so it is the one segment whose option area a connection reads.
+# n03 above proves the state machine left the connection alone; it does not
+# prove the negotiation did, and those are two different pieces of code -- the
+# options are read in _nx_tcp_packet_process before the challenge in
+# _nx_tcp_socket_packet_process ever runs.
+#
+# A BARE SYN IS WHAT MAKES IT VISIBLE.  No options at all means the defaults
+# a connection request without them would get: MSS 536, no window scale, no
+# SACK permission.  The stray SYN sits at seq=51 in all three cases, where n03
+# puts it, so none of this depends on guessing a sequence number -- the
+# four-tuple is the whole cost to an off-path sender.
+
+# RFC 1122 4.2.2.6: the MSS option is an offer made when a connection opens.
+# 2048 bytes leave as 1460 + 588.  On a connection whose MSS was rewritten the
+# first segment is 536 bytes.
+case n08_a_challenged_syn_does_not_shrink_the_mss
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx S seq=51
+tx A seq=1 ack=1 within=400
+send 2048
+tx PA seq=1 ack=1 len=1460
+tx PA seq=1461 ack=1 len=588
+
+# RFC 2018 section 2: both SYNs carried the option, so the blocks keep coming.
+# s05 in sack.drill is this exchange with nothing injected into the middle of
+# it, and asserts the same acknowledgement.
+case n09_a_challenged_syn_does_not_withdraw_sack
+socket
+connect
+tx S seq=0 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
+tx A seq=1 ack=1
+rx S seq=51
+tx A seq=1 ack=1 within=400
+rx PA seq=101 ack=1 len=100
+tx A seq=1 ack=1 sack=101:201 hdrlen=auto within=400
+
+# RFC 7323 2.2: the scale is settled once and applies to every window the peer
+# sends after it.  Losing it does not shrink the send window, it closes it: the
+# shift count reverts to the 0xFF that means "the peer offered nothing", and
+# the window update at the end of this case leaves nothing to send into.
+case n10_a_challenged_syn_does_not_lose_the_window_scale
+socket
+connect
+tx S seq=0 wsok=1
+rx SA seq=0 ack=1 win=8192 mss=1460 wscale=0
+tx A seq=1 ack=1
+rx S seq=51
+tx A seq=1 ack=1 within=400
+send 2048
+tx PA seq=1 ack=1 len=1460
+tx PA seq=1461 ack=1 len=588
+rx A seq=1 ack=2049 win=8192
+send 1000
+tx PA seq=2049 ack=1 len=1000 within=400

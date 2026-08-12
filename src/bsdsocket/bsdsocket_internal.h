@@ -745,6 +745,11 @@ typedef struct AmiSocket
     LONG                    as_Ttl;
     LONG                    as_Tos;
 
+    /* TCP_USER_TIMEOUT in milliseconds, as the caller set it; the NX socket
+       holds the same deadline in ticks. Kept so getsockopt answers what went
+       in rather than what rounding made of it. 0 == not asked for. */
+    ULONG                   as_UserTimeout;
+
     /*
      * IP_HDRINCL. The caller supplies its own IP header ahead of the payload
      * on a raw socket; traceroute is the only user. See bsd_raw_hdrincl() in

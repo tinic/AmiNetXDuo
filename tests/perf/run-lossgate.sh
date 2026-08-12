@@ -4,6 +4,7 @@
 # packets.
 #
 #   tests/perf/run-lossgate.sh -H user@host -A addr [-l PERCENT] [-r REPS]
+#                              [-d MS] [-j MS] [-o PERCENT]
 #                              [-b BUILDDIR] [-T TAG] [-B] [-f BASELINE] [-h]
 #
 # WHY
@@ -28,6 +29,17 @@
 #   peer sends is untouched.  It is still a change to the peer's root qdisc,
 #   so the peer must be idle -- the script refuses to start if anything else
 #   is serving on it.
+#
+#   -d PUTS DELAY ON THE SAME BAND, and it is the impairment a user actually
+#   has: the lab link is 0.2 ms, where a retransmission costs nothing and a
+#   delayed ACK held for a tick is invisible.  20 ms is a LAN-to-LAN hop and
+#   100 ms is a continent.  Only peer->guest frames are delayed, so the delay
+#   IS the round trip as both ends measure it.
+#
+#   -j adds jitter and -o adds reordering.  netem's queue is sorted by send
+#   time, so jitter reorders on its own; -o is the explicit knob for when
+#   that is the thing being varied rather than a side effect.  Reordering
+#   needs a delay to be reordered around and the script refuses -o without -d.
 #
 #   `tc' needs CAP_NET_ADMIN.  Copy it and give the copy the capability rather
 #   than modifying anything packaged:
@@ -68,6 +80,12 @@ PEER_TC="${AMINETXDUO_PEER_TC:-\$HOME/tc-cap}"
 # to within a few percent.  The link is harsher and the figure is lower; the
 # figure was never a prediction of anything, only a thing to compare.
 LOSS=5
+# One-way delay peer->guest, in milliseconds, and its jitter; and the
+# percentage of frames netem lets past the delay immediately, which is what
+# reordering is.  All zero is the link this gate was recorded on.
+DELAY="${AMINETXDUO_LOSSGATE_DELAY:-0}"
+JITTER="${AMINETXDUO_LOSSGATE_JITTER:-0}"
+REORDER="${AMINETXDUO_LOSSGATE_REORDER:-0}"
 REPS=3
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 TAG="${AMINETXDUO_RUN_TAG:-lossgate}"
@@ -112,6 +130,9 @@ usage: tests/perf/run-lossgate.sh -H user@host -A addr [-l PERCENT] [-r REPS]
   -l  packet loss percent (default 5)
   -D  which direction loses: rx = peer -> guest (default, and what every
       recorded baseline was measured on), tx = guest -> peer, both
+  -d  one-way delay peer -> guest in ms; this is the round trip (default 0)
+  -j  jitter on -d in ms (default 0).  netem reorders around it.
+  -o  reorder percent; needs -d (default 0)
   -r  repetitions; the median is compared (default 3)
   -k  transfer size in KB (default 4096)
   -B  record the current run as the new baseline
@@ -119,12 +140,15 @@ usage: tests/perf/run-lossgate.sh -H user@host -A addr [-l PERCENT] [-r REPS]
 EOF
 }
 
-while getopts "H:A:l:r:b:k:T:Bf:D:h" opt; do
+while getopts "H:A:l:d:j:o:r:b:k:T:Bf:D:h" opt; do
     case "$opt" in
         H) PEER="$OPTARG" ;;
         A) PEER_ADDR="$OPTARG" ;;
         l) LOSS="$OPTARG" ;;
         D) DIR="$OPTARG" ;;
+        d) DELAY="$OPTARG" ;;
+        j) JITTER="$OPTARG" ;;
+        o) REORDER="$OPTARG" ;;
         r) REPS="$OPTARG"; REPS_GIVEN=1 ;;
         b) BUILD="$OPTARG" ;;
         k) KB="$OPTARG" ;;
@@ -139,6 +163,32 @@ done
 [ -n "$PEER" ] && [ -n "$PEER_ADDR" ] || { usage >&2; exit 2; }
 
 case "$DIR" in rx|tx|both) ;; *) echo "-D takes rx, tx or both" >&2; exit 2 ;; esac
+
+# netem reorders by letting some frames past the delay; with no delay there is
+# nothing to overtake and it silently does nothing.  Refuse rather than run an
+# arm whose name says reordering and whose link has none.
+if [ "$REORDER" != "0" ] && [ "$DELAY" = "0" ]; then
+    echo "-o $REORDER needs -d: netem reorders by releasing a frame early," >&2
+    echo "and with no delay there is nothing for it to be released ahead of." >&2
+    exit 2
+fi
+
+# The impairment in one string, for the netem line, the baseline header and
+# the guard that compares them.  Every arm the delay knob exists for is a
+# different link, and a 20 ms baseline read against a 0 ms run reports the rig
+# as a regression exactly the way a 1% run against a 5% baseline does.
+IMPAIR="delay ${DELAY}ms jitter ${JITTER}ms reorder ${REORDER}%"
+
+# Delay, jitter and reordering are netem's, and netem is on the peer's egress,
+# which is the rx direction only.  -D tx takes the root qdisc out of the run
+# entirely, so asking for both is asking for a link this cannot build -- and
+# the arm would run, and report a figure, on a link with no delay in it.
+if [ "$DIR" = "tx" ] && [ "$IMPAIR" != "delay 0ms jitter 0ms reorder 0%" ]; then
+    echo "-D tx impairs the guest -> peer direction, which netem does not" >&2
+    echo "reach, so -d/-j/-o have nothing to act on.  Use -D both to keep" >&2
+    echo "them, or drop them." >&2
+    exit 2
+fi
 
 # THE SAME LINK AND THE SAME NUMBER OF ARMS, OR IT IS NOT A COMPARISON.
 #
@@ -166,6 +216,17 @@ if [ "$RECORD" = 0 ]; then
             echo "is ${LOSS}% over $KB KB.  Those are different links; the" >&2
             echo "comparison would report the rig as a regression.  Match it" >&2
             echo "with -l and -k, or record a new baseline with -B." >&2
+            exit 2
+        fi
+        # The delay and reorder half of the same guard.  A baseline written
+        # before this line existed has no Impairment line, and the link it was
+        # recorded on had none either, so its absence means all zero.
+        WANTIMP=$(sed -n 's/^# Impairment: //p' "$BASELINE" | head -1)
+        WANTIMP="${WANTIMP:-delay 0ms jitter 0ms reorder 0%}"
+        if [ "$WANTIMP" != "$IMPAIR" ]; then
+            echo "$BASELINE was recorded with '$WANTIMP' and this run is" >&2
+            echo "'$IMPAIR'.  Those are different links; match them with" >&2
+            echo "-d/-j/-o, or record a new baseline with -B." >&2
             exit 2
         fi
         if [ "$REPS_GIVEN" = 0 ] && [ -n "${3:-}" ]; then
@@ -260,6 +321,19 @@ tx_loss_report() {
         sed -n 's/^[ \t]*Sent \(.*\)/    \1/p'
 }
 
+# DELAY BEFORE LOSS on the netem line, because `reorder' is parsed as a
+# modifier of the delay that precedes it and tc rejects the line otherwise.
+# A netem queue holds delay*rate frames, so the default limit of 1000 is
+# 1000 frames of headroom: at 100 ms and the A2065's rate it is never near it,
+# and a limit that overflowed would add loss this run did not ask for.
+NETEM_SPEC="loss ${LOSS}%"
+if [ "$DELAY" != "0" ]; then
+    NETEM_SPEC="delay ${DELAY}ms"
+    [ "$JITTER" = "0" ] || NETEM_SPEC="$NETEM_SPEC ${JITTER}ms"
+    [ "$REORDER" = "0" ] || NETEM_SPEC="$NETEM_SPEC reorder ${REORDER}%"
+    NETEM_SPEC="$NETEM_SPEC loss ${LOSS}%"
+fi
+
 netem_on() {
     local guest="$1"
     netem_off
@@ -268,14 +342,21 @@ netem_on() {
     peer_tc "qdisc add dev $PEER_IF root handle 1: prio bands 3"
     # iproute2 grew `seed` in 6.x.  Where it is older the run still works and
     # says that its numbers are not comparable with anybody else's.
-    peer_tc "qdisc add dev $PEER_IF parent 1:3 handle 30: netem loss ${LOSS}% \
+    peer_tc "qdisc add dev $PEER_IF parent 1:3 handle 30: netem $NETEM_SPEC \
              seed $SEED" 2>/dev/null || {
         echo "==> this peer's tc has no netem 'seed': the loss pattern is" \
              "random per run, and run-to-run drift will swamp the gate"
-        peer_tc "qdisc add dev $PEER_IF parent 1:3 handle 30: netem loss ${LOSS}%"; }
+        peer_tc "qdisc add dev $PEER_IF parent 1:3 handle 30: netem $NETEM_SPEC"; }
     peer_tc "filter add dev $PEER_IF protocol ip parent 1: prio 1 u32 \
              match ip dst $guest/32 flowid 1:3"
-    echo "==> peer $PEER_IF: ${LOSS}% loss towards $guest, everything else clean"
+    # tc takes a bad netem line and leaves the prio qdisc standing, so the arm
+    # runs on a clean link and reports a throughput figure under a name that
+    # says impaired.  Read the qdisc back and refuse if netem is not on band 3.
+    peer_tc "qdisc show dev $PEER_IF" | grep -q "netem" || {
+        echo "netem is not on $PEER_IF after asking for: $NETEM_SPEC" >&2
+        echo "the arm would measure a clean link under an impaired name." >&2
+        exit 2; }
+    echo "==> peer $PEER_IF: netem $NETEM_SPEC towards $guest, everything else clean"
     peer_tc "-s qdisc show dev $PEER_IF" | sed 's/^/    /'
 }
 
@@ -413,6 +494,7 @@ if [ "$RECORD" = "1" ]; then
         echo "# NAME  DIRECTION  VALUE  TOLERANCE_PERCENT"
         echo "# Recorded with ${LOSS}% peer-to-guest loss, $KB KB, $REPS reps."
         echo "# Direction: $DIR"
+        echo "# Impairment: $IMPAIR"
         echo "# Read and write are separate on purpose: the 0.16.6 regression"
         echo "# moved them in opposite directions."
         echo "# Tolerance: twice the interquartile spread over root(reps), floor ${FLOOR}%."
