@@ -11,11 +11,18 @@
 #
 #   http://<address>/           the Public drawer, WebDAV-writable
 #   http://<address>/shell   an AmigaDOS Shell in a browser, NO PASSWORD
-#   http://amiga.local/         the same machine by name, -n renames it
+#   http://amiga-demo.local/    the same machine by name, -n renames it
 #
 # The interface is staged with MDNS=YES and the drive with a hostname, because
 # neither is a default: a demo reached only by its DHCP lease is one somebody
 # has to be told the address of again tomorrow.
+#
+# THE NAME AND THE MAC ARE FIXED ON PURPOSE
+#
+#   `amiga-demo` and 02:41:4d:49:00:77 are this machine's identity and do not
+#   change between runs, so a bookmark and a DHCP reservation both keep
+#   working.  -n and AMINETXDUO_DEMO_MAC still override for a second instance,
+#   which then needs both: two guests sharing either one collide.
 #
 # A SHELL WITH NO COMMANDS IN IT
 #
@@ -66,7 +73,7 @@ BACKEND="${AMINETXDUO_DEMO_BACKEND:-ens18}"
 MODEL=A1200
 PORT=80
 WINDOW=28800
-NAME="${AMINETXDUO_DEMO_NAME:-}"
+NAME="${AMINETXDUO_DEMO_NAME:-amiga-demo}"
 CMDS="${AMINETXDUO_DEMO_C:-}"
 WBLIBS="${AMINETXDUO_DEMO_WBLIBS:-}"
 # Workbench's own commands, unpacked once from the ADF in the asset store and
@@ -179,9 +186,9 @@ EOF
 # inherits it reports a name server it cannot reach and calls itself
 # amiga.localdomain while answering to amiga.local.
 #
-# Empty by default, deliberately.  DHCP supplies the name servers and the
-# domain, and an unnamed machine names itself after its card -- which is the
-# behaviour worth showing.  -n forces a name and outranks that.
+# No name servers and no domain: DHCP supplies both.  The hostname is the one
+# line we do write, because this machine has a fixed identity people bookmark.
+# Unset the name and it falls back to naming itself after its card.
 : > "$STAGE/devs/Internet/name_resolution"
 [ -z "$NAME" ] || echo "hostname $NAME" >> "$STAGE/devs/Internet/name_resolution"
 
