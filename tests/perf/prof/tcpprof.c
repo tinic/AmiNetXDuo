@@ -400,6 +400,48 @@ VOID tx_application_define(VOID *first_unused_memory)
 }
 
 
+/* TX_SUCCESS and NX_SUCCESS are both 0, so one of these covers both halves of
+   the teardown.  This file counts failures rather than checks. */
+static VOID t_shut_ok(UINT status, const char *what)
+{
+    if (status != TX_SUCCESS)
+    {
+        prof_log("  shutdown: %s = %ld", what, (long)status);
+        t_failures++;
+    }
+}
+
+/*
+ * Everything tx_application_define() created, given back, so the kernel can be
+ * stopped before AmigaDOS unloads this hunk.
+ *
+ * tx_amiga_kernel_stop() refuses while any application TX_THREAD is still
+ * alive, and an NX_IP is one of those: nx_ip_create() runs an IP thread of its
+ * own.  The order is creation reversed, and the pool goes last because
+ * nx_ip_delete() hands packets back to it on the way out.
+ */
+static VOID t_shutdown(VOID)
+{
+    /*
+     * The server thread never returns on its own: it parks in
+     * tx_semaphore_get(&t_srv_ready, TX_WAIT_FOREVER) waiting for a case that
+     * is not coming.  That is a ThreadX wait and not an Exec one, so the port
+     * can wake it and reclaim its Task rather than leaving a zombie behind,
+     * and a zombie is the one thing stop cannot be made to accept.
+     */
+    (VOID)tx_thread_terminate(&t_srv_thread);
+    t_shut_ok(tx_thread_delete(&t_srv_thread), "server thread delete");
+
+    t_shut_ok(tx_semaphore_delete(&t_srv_done),   "srv done delete");
+    t_shut_ok(tx_semaphore_delete(&t_srv_gotall), "srv gotall delete");
+    t_shut_ok(tx_semaphore_delete(&t_srv_ready),  "srv ready delete");
+
+    t_shut_ok(nx_ip_delete(&t_ip0), "ip0 delete");
+    t_shut_ok(nx_ip_delete(&t_ip1), "ip1 delete");
+    t_shut_ok(nx_packet_pool_delete(&t_pool), "packet pool delete");
+}
+
+
 int main(void)
 {
 UINT status;
@@ -427,7 +469,21 @@ UINT status;
     t_case("wire",     "profile-wire.bin", &t_ip0, &t_ip1,
            T_IP1_ADDRESS, T_PORT_WIRE);
 
+    /* Still adopted: nx_ip_delete() and the rest are NetX Duo calls and want a
+       ThreadX thread to run on. */
+    t_shutdown();
+
     (VOID)tx_amiga_orphan_thread(&t_main_thread);
+
+    /*
+     * The kernel comes down before the program does.  tx_amiga_kernel_start()
+     * leaves a VERTB interrupt server whose struct Interrupt, and whose
+     * is_Code, are in this hunk, and AmigaDOS frees the hunk the instant main()
+     * returns; the next VBlank 20 ms later calls into it.  That is invisible
+     * from here -- the report below has already been decided -- so
+     * tools/smoke/unloadprobe.c is what sees it.
+     */
+    t_shut_ok(tx_amiga_kernel_stop(), "ThreadX kernel stop");
 
     prof_log("%ld failures, %s", (long)t_failures,
              t_failures == 0UL ? "PASS" : "FAIL");
