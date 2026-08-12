@@ -77,8 +77,14 @@ jobs:
       # inside the emulator, which no capture on this host can show.  Bridged
       # against a real peer the same binaries complete the handshake.
       AMINETXDUO_TLS13_PEER: ${{ vars.AMINETXDUO_TLS13_PEER }}
-      # Which NIC the bridged arms put a guest on.  Empty is fine: every
-      # harness spells its default with :- and lands on ens18.
+      # Which NIC the bridged arms put a guest on.  LEAVE IT UNSET unless the
+      # bridge is not ens18: this one name means two things.  Every harness
+      # that wants a NIC reads it as `${...:-ens18}`, but tools/amiberry-run.sh
+      # reads it as the BACKEND, `${...:-slirp}`, so a value here moves every
+      # arm onto the bridge -- including the eight that are on SLIRP because
+      # they assert against the fixed 10.0.2.15 and 10.0.2.2 that SLIRP hands
+      # out.  Set to ens18 on 2026-08-12 and those eight went red together:
+      # "eth0 is on '192.168.1.133', not the 10.0.2.15 SLIRP hands out".
       AMINETXDUO_AMIBERRY_BACKEND: ${{ vars.AMINETXDUO_AMIBERRY_BACKEND }}
       # tests/tools/run-tcphandler.sh: Commodore's own `type` and `copy`, which
       # are the whole point of that harness and are not ours to ship.
