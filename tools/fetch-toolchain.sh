@@ -6,6 +6,7 @@
 #   eval "$(tools/fetch-toolchain.sh --export)"   # ... and export it
 #   tools/fetch-toolchain.sh --print-root # just say where it would be
 #   tools/fetch-toolchain.sh --print-sha  # the mirror asset's sha256
+#   tools/fetch-toolchain.sh --check-inlines  # NDK inline register ABI
 #   tools/fetch-toolchain.sh --force      # re-fetch even if cached
 #
 # WHAT IS PINNED, AND WHY THIS PARTICULAR THING
@@ -139,9 +140,10 @@ while [ $# -gt 0 ]; do
         --print-root) MODE="print" ;;
         --print-sha)  MODE="printsha" ;;
         --check-crt0) MODE="checkcrt0" ;;
+        --check-inlines) MODE="checkinlines" ;;
         --force)      FORCE=1 ;;
         -h|--help)    sed -n '2,97p' "$0"; exit 0 ;;
-        *) echo "usage: $0 [--export|--print-root|--print-sha|--check-crt0] [--force]" >&2; exit 2 ;;
+        *) echo "usage: $0 [--export|--print-root|--print-sha|--check-crt0|--check-inlines] [--force]" >&2; exit 2 ;;
     esac
     shift
 done
@@ -178,6 +180,18 @@ if [ "$MODE" = "checkcrt0" ]; then
     [ -d "$CHECK_ROOT" ] || { echo "no toolchain at $CHECK_ROOT" >&2; exit 2; }
     echo "==> $CHECK_ROOT"
     exec python3 "$(dirname "$0")/fix-toolchain-crt0.py" "$CHECK_ROOT" --check
+fi
+
+# Answers "does this toolchain still hand Write(), CopyMem() and forty-odd
+# other inlines their argument in a register the library does not read".
+# tools/fix-toolchain-inline-const.py says what the bug is.  Exits non-zero
+# if any top-level const is left on an LPn parameter.
+if [ "$MODE" = "checkinlines" ]; then
+    CHECK_ROOT="${AMIGA_TOOLCHAIN_ROOT:-$ROOT}"
+    [ -d "$CHECK_ROOT" ] || { echo "no toolchain at $CHECK_ROOT" >&2; exit 2; }
+    echo "==> $CHECK_ROOT"
+    exec python3 "$(dirname "$0")/fix-toolchain-inline-const.py" \
+         "$CHECK_ROOT" --check
 fi
 
 emit_root() {
@@ -354,6 +368,20 @@ say "==> repairing the newlib crt0 frame skew"
 if ! python3 "$(dirname "$0")/fix-toolchain-crt0.py" "$TMP/x/$TC_PREFIX_IN_TAR"; then
     echo "!! crt0 repair failed, refusing to install a toolchain that" >&2
     echo "!! builds commands which crash on return to the Shell." >&2
+    exit 1
+fi
+
+# The NDK inline headers const-qualify 46 register parameters, and GCC drops
+# the register binding on a const one whose value is a link-time constant, so
+# Write() reads its buffer pointer out of d2 while the caller left the address
+# in d0.  Repaired HERE for the same reason as the crt0 above: it is the
+# toolchain's defect, no call site can work around it reliably, and there is
+# no diagnostic.  Idempotent, and it leaves a clean tree alone.
+say "==> repairing the NDK inline register ABI"
+if ! python3 "$(dirname "$0")/fix-toolchain-inline-const.py" \
+     "$TMP/x/$TC_PREFIX_IN_TAR"; then
+    echo "!! inline repair failed, refusing to install a toolchain whose" >&2
+    echo "!! library calls pass arguments in the wrong registers." >&2
     exit 1
 fi
 

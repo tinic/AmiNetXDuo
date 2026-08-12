@@ -108,6 +108,25 @@ if(NOT EXISTS "${AMIGA_NDK_INCLUDE}/exec/types.h")
         "if yours keeps them elsewhere, pass -DAMIGA_NDK_INCLUDE=<path>.")
 endif()
 
+# The NDK inline headers const-qualify 46 of their register parameters, and
+# GCC drops the register binding on a const one whose value is a link-time
+# constant: Write(fh, static_buffer, len) then puts the address in d0 and the
+# library reads d2, which nobody wrote.  There is no diagnostic and the wrong
+# code links, so this is checked here rather than left to be discovered.
+# tools/fetch-toolchain.sh repairs a toolchain as it installs it; a cache from
+# before that repair existed is still on disk on every machine that had one.
+file(READ "${AMIGA_NDK_INCLUDE}/inline/dos.h" _amiga_dos_inline LIMIT 65536)
+if(_amiga_dos_inline MATCHES "LP3\\(0x30, LONG, Write[^\n]*const APTR")
+    message(FATAL_ERROR
+        "${AMIGA_NDK_INCLUDE}/inline/dos.h still declares Write()'s buffer "
+        "const APTR, so every call passing a static buffer puts the address "
+        "in the wrong register and the file written is whatever d2 held.\n"
+        "Repair the toolchain in place:\n"
+        "  tools/fix-toolchain-inline-const.py ${AMIGA_TOOLCHAIN_ROOT}\n"
+        "tools/fetch-toolchain.sh does this for a tree it installs.")
+endif()
+unset(_amiga_dos_inline)
+
 # -noixemul is NOT usable with this newlib-based toolchain: it breaks sys/reent.h.
 # See docs/RESEARCH.md §5.4.
 

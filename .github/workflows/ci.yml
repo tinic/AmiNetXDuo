@@ -71,7 +71,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/aminetxduo/toolchain
-          key: m68k-amigaos-gcc-15.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py') }}
+          key: m68k-amigaos-gcc-15.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
 
       # On a warm cache this does not run at all, so the mirror is touched
       # once per pin change rather than once per build.
@@ -87,6 +87,12 @@ jobs:
       # place; this catches the case where it is restored anyway.
       - name: The toolchain's crt0 is repaired
         run: tools/fetch-toolchain.sh --check-crt0
+
+      # Same reasoning for the NDK inlines: a warm cache from before the
+      # repair builds a Write() that reads its buffer pointer out of a
+      # register nobody wrote, and nothing else notices.
+      - name: The toolchain's inline register ABI is repaired
+        run: tools/fetch-toolchain.sh --check-inlines
 
       - name: Report the toolchain
         run: |
