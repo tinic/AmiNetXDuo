@@ -26,9 +26,9 @@
  *      claim as unpredictable; see the source dump below for which individual
  *      sources moved and which did not.
  *
- *   AMINETXDUO_RUN_TAG=rand1 ./tools/fsuae-run.sh -t 120 \
+ *   AMINETXDUO_RUN_TAG=rand1 ./tools/amiberry-run.sh -t 120 \
  *       build/cm/tools/smoke/randtest
- *   AMINETXDUO_RUN_TAG=rand2 ./tools/fsuae-run.sh -t 120 \
+ *   AMINETXDUO_RUN_TAG=rand2 ./tools/amiberry-run.sh -t 120 \
  *       build/cm/tools/smoke/randtest
  *   diff build/testhd-rand1/randtest.txt build/testhd-rand2/randtest.txt
  *

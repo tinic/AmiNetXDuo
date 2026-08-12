@@ -206,7 +206,7 @@ extern volatile UINT    _tx_amiga_timer_stop;
 /*
  * Release builds compile ami_log() down to level AMI_LOG_WARN, so progress
  * lines go out at WARN and failures at ERROR.  Output lands on the serial
- * debug port, which tools/fsuae-run.sh captures into build/serial.log.
+ * debug port, which tools/amiberry-run.sh captures into build/serial.log.
  */
 #define S_LOG(...)      ami_log(AMI_LOG_WARN,  __VA_ARGS__)
 #define S_ERR(...)      ami_log(AMI_LOG_ERROR, __VA_ARGS__)

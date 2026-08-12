@@ -136,7 +136,7 @@ const struct ProfMark   *prof_mark_table(ULONG *count);
    always zero on a 68000, where there is no format word to read. */
 ULONG       prof_odd_formats(VOID);
 
-/* RawDoFmt-free logging to the serial port, which is where fsuae-run.sh
+/* RawDoFmt-free logging to the serial port, which is where amiberry-run.sh
    captures output from.  Both profiler binaries need it. */
 VOID        prof_log(const char *fmt, ...);
 VOID        prof_log_flush(VOID);

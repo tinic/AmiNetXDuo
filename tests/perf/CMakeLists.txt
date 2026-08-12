@@ -4,7 +4,7 @@
 #         -DCMAKE_BUILD_TYPE=Release
 #   cmake --build build/cm --parallel --target perf_test
 #
-#   AMINETXDUO_RUN_TAG=perf20 ./tools/fsuae-run.sh -t 900 build/cm/tests/perf/perf_test
+#   AMINETXDUO_RUN_TAG=perf20 ./tools/amiberry-run.sh -t 900 build/cm/tests/perf/perf_test
 #
 # To price the C library's memcpy rather than net68k's, configure a second tree
 # with -DAMINETXDUO_NET68K_MEMCPY=OFF: with the hook on, memcpy() resolves to
@@ -16,7 +16,7 @@
 # docs/RESEARCH.md writes it up.  To ask what a faster machine would do, move
 # the 68020 model's clock instead:
 #
-#   AMINETXDUO_RUN_TAG=perf25 ./tools/fsuae-run.sh -t 1200 -k 25 \
+#   AMINETXDUO_RUN_TAG=perf25 ./tools/amiberry-run.sh -t 1200 -k 25 \
 #       build/cm/tests/perf/perf_test
 #
 # SPDX-License-Identifier: MIT
@@ -100,7 +100,7 @@ endif()
 # nothing of net68k's checksum hook, so it builds on every profile.
 #
 #   cmake --build build/cm --parallel --target bracket_test
-#   AMINETXDUO_RUN_TAG=brk ./tools/fsuae-run.sh -x -t 900 -m A1200 \
+#   AMINETXDUO_RUN_TAG=brk ./tools/amiberry-run.sh -t 900 -m A1200 \
 #       build/cm/tests/perf/bracket_test
 #
 # Read the header of bracket_test.c before quoting anything it prints, and
@@ -133,8 +133,8 @@ endif()
 # including on a profile where perf_test above is switched off.
 #
 #   cmake --build build/cm --parallel --target cpucal
-#   AMINETXDUO_RUN_TAG=cal ./tools/fsuae-run.sh -t 300 -m A1200 build/cm/tests/perf/cpucal
-#   AMINETXDUO_RUN_TAG=cal ./tools/fsuae-run.sh -t 300 -m A3000 build/cm/tests/perf/cpucal
+#   AMINETXDUO_RUN_TAG=cal ./tools/amiberry-run.sh -t 300 -m A1200 build/cm/tests/perf/cpucal
+#   AMINETXDUO_RUN_TAG=cal ./tools/amiberry-run.sh -t 300 -m A3000 build/cm/tests/perf/cpucal
 #
 # Read the header of cpucal.c before quoting anything it prints.
 

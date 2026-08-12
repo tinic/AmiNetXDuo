@@ -13,11 +13,10 @@
  *   3. UDP,      TTL 1      4. UDP,      TTL 5
  *
  * Its own output proves nothing: getsockopt reads back whatever setsockopt
- * stored, on both.  The answer is in the frame dump the emulated A2065 writes:
- *
- *   tests/trace/a2065pcap.py build/fsuae-base-<tag>/Cache/Logs/fs-uae.log.txt \
- *       -o ttl.pcap
- *   tcpdump -nr ttl.pcap -v        # or open it in Wireshark
+ * stored, on both.  The answer is on the wire, and Amiberry writes no frame
+ * dump: take the capture from a bridged run watched on another machine, or
+ * from tools/winuae-run.sh with -a2065log2 through
+ * tests/trace/a2065pcap.py --winuae, and read the IP TTL field.
  *
  * A one-off probe rather than a command or a test, so it has no CMake entry.
  * Compile it by hand and stage it like any other executable:

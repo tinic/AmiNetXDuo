@@ -131,7 +131,6 @@ EOF
 # ------------------------------------------------------------------ run ---
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-routes}"
-FSLOG="$ROOT/build/fsuae-base-$AMINETXDUO_RUN_TAG/Cache/Logs/fs-uae.log.txt"
 
 set +e
 if [ "$RUNNER" = "amiberry" ]; then
@@ -246,11 +245,6 @@ fi
 # The whole point.  The emulator's own frame log, converted, must contain an
 # ARP request for the route's next hop, an address nothing in this test ever
 # named to the stack except through AddNetRoute.
-if [ -f "$FSLOG" ]; then
-    python3 "$ROOT/tests/trace/a2065pcap.py" "$FSLOG" -o "$HD/host.pcap" \
-        > "$HD/a2065.txt" 2>&1 || true
-fi
-
 if [ -s "$HD/host.pcap" ]; then
     ARP=$(tcpdump -r "$HD/host.pcap" -n 2>/dev/null |
           grep -c "who-has 10.0.2.99" || true)
@@ -272,12 +266,15 @@ if [ -s "$HD/host.pcap" ]; then
     else
         fail "$LEAKED packet(s) for 192.168.77.5 left the machine unrouted"
     fi
-elif [ "$RUNNER" = "amiberry" ]; then
-    # a2065pcap.py decodes the capture out of FS-UAE's own log. Amiberry writes
-    # no equivalent, so under -A the two wire assertions above have nothing to
-    # read. Skipped rather than passed: they are the only checks here that see
-    # what actually left the machine, and a silent pass would hide that.
-    skip "no wire capture under Amiberry, run without -A to check the wire"
+else
+    # a2065pcap.py decoded the capture out of FS-UAE's own log, and FS-UAE is
+    # gone: Amiberry writes no equivalent, on either branch.  So the two wire
+    # assertions above have nothing to read and there is no flag that gets them
+    # back.  Skipped rather than passed -- they are the only checks here that
+    # see what actually left the machine, and this used to be reported only on
+    # the -A branch, so the default branch dropped them in silence.
+    skip "no host-side wire capture under Amiberry: the two assertions on what
+       left the card did not run"
 fi
 
 # ---- THE PUBLISHED ROUTING API -------------------------------------------

@@ -160,7 +160,7 @@ def main():
         if args.winuae:
             print("           (did the run set AMINETXDUO_WINUAE_ARGS=-a2065log2 ?)")
         else:
-            print("           (was the run made with tools/fsuae-run.sh -n ?)")
+            print("           (was the run made with tools/amiberry-run.sh -N a2065 ?)")
         return 1
 
     # The MAC the A2065 announces has zeroes where the initialisation block

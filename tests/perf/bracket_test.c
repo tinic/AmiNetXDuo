@@ -38,7 +38,7 @@
  * FS-UAE charges no cycles at all above a 68020.  Run under -m A1200.
  *
  *   cmake --build build/cm --parallel --target bracket_test
- *   AMINETXDUO_RUN_TAG=brk ./tools/fsuae-run.sh -x -t 900 -m A1200 \
+ *   AMINETXDUO_RUN_TAG=brk ./tools/amiberry-run.sh -t 900 -m A1200 \
  *       build/cm/tests/perf/bracket_test
  *
  * SPDX-License-Identifier: MIT

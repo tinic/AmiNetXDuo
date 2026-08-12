@@ -1,6 +1,6 @@
 #
 # DEVS:Internet/services -- standard /etc format, staged onto the test drive
-# by tests/conformance/run-fsuae.sh and tools/fsuae-run.sh.
+# by tests/conformance/run-fsuae.sh and tools/amiberry-run.sh.
 #
 #   <name>  <port>/<proto>  [alias...]
 #

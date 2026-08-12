@@ -217,8 +217,8 @@ fi
 
 # --------------------------------------------------------------- peers ---
 
-# The peer has to outlive the QUEUE, not just the run.  Emulator runs
-# serialise on build/.fsuae.lock and several may be ahead of this one, so the
+# The peer has to outlive the WAIT, not just the run.  Nothing serialises
+# emulator runs any more and several may be sharing the host, so the
 # wait before a single byte is exchanged can be half an hour, and a peer
 # sized to the run's own timeout exits while the run is still waiting its
 # turn, whereupon every local-server case fails with "connection refused" or
@@ -272,7 +272,7 @@ CPUARG=()
     # still queued proves nothing.
     waited=0
     while [ "$waited" -lt 600 ]; do
-        pgrep -f "test-${AMINETXDUO_RUN_TAG:-nettools}.fs-uae" >/dev/null 2>&1 \
+        pgrep -f "amiberry-${AMINETXDUO_RUN_TAG:-nettools}.uae" >/dev/null 2>&1 \
             && break
         sleep 2
         waited=$((waited + 2))

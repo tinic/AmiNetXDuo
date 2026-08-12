@@ -20,7 +20,7 @@
  * dos.library stays usable for output throughout.
  *
  *   cmake --build build/cm --parallel --target mbuf_bpf_test
- *   AMINETXDUO_RUN_TAG=mbufbpf ./tools/fsuae-run.sh -t 120 \
+ *   AMINETXDUO_RUN_TAG=mbufbpf ./tools/amiberry-run.sh -t 120 \
  *       build/cm/tests/mbuf_bpf/mbuf_bpf_test
  *
  * SPDX-License-Identifier: MIT

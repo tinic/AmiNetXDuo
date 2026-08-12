@@ -22,14 +22,15 @@
  * a value it will not honour.
  *
  * Step 5 needs something on the LAN that answers SSDP, a router, a printer,
- * a TV.  Steps 1-4 and 6 do not, and are the ones that test this stack; the
- * wire side is in the frame dump:
+ * a TV.  Steps 1-4 and 6 do not, and are the ones that test this stack.
  *
- *   tests/trace/a2065pcap.py build/fsuae-base-<tag>/Cache/Logs/fs-uae.log.txt \
- *       -o mcast.pcap
- *   tcpdump -nr mcast.pcap -v      # IGMP v2 report for 239.255.255.250
+ * The wire side used to be read out of FS-UAE's A2065 frame dump through
+ * tests/trace/a2065pcap.py, and there is no such dump under Amiberry.  What is
+ * left is a bridged run watched from another machine, or tools/winuae-run.sh
+ * with -a2065log2 and a2065pcap.py --winuae.  What to look for either way is
+ * an IGMP v2 report for 239.255.255.250.
  *
- * There is no MLD report to look for in that dump.  The v6 join reaches the
+ * There is no MLD report to look for.  The v6 join reaches the
  * driver as S2_ADDMULTICASTADDRESS and puts nothing on the wire; the stack
  * has no MLD.
  *

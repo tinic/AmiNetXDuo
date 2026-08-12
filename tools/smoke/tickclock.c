@@ -18,7 +18,7 @@
  * with ThreadX, which is the point, and it keeps working inside the Forbid(),
  * because ReadEClock() reads a CIA and never waits.
  *
- *   AMINETXDUO_RUN_TAG=tick ./tools/fsuae-run.sh   -t 120 build/cm/tools/smoke/tickclock
+ *   AMINETXDUO_RUN_TAG=tick ./tools/amiberry-run.sh   -t 120 build/cm/tools/smoke/tickclock
  *   AMINETXDUO_RUN_TAG=tick ./tools/amiberry-run.sh -t 120 build/cm/tools/smoke/tickclock
  *
  * SPDX-License-Identifier: MIT

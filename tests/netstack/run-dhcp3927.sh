@@ -82,7 +82,7 @@ UNIT=0
 CONFIGURE=$CONFIGURE
 EOF
 
-# fsuae-run.sh backs ENV: with the staged env/ directory, so this reaches
+# amiberry-run.sh backs ENV: with the staged env/ directory, so this reaches
 # GetVar() on the Amiga.
 printf '%s' "$MODE" > "$STAGE/env/DHCP3927MODE"
 

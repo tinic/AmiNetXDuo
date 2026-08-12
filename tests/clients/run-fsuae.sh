@@ -71,15 +71,6 @@ cp "$A2065" "$STAGE/devs/a2065.device"
 cp "$BSD" "$STAGE/libs/bsdsocket.library"
 cp "$UG"  "$STAGE/libs/usergroup.library"
 
-BASEDIR="$ROOT/build/fsuae-base-$TAG"
-mkdir -p "$BASEDIR/Configurations"
-cat > "$BASEDIR/Configurations/Host.fs-uae" <<'EOF'
-[fs-uae]
-floppy_drive_volume = 0
-floppy_drive_volume_empty = 0
-bsdsocket_library = 0
-EOF
-
 export AMINETXDUO_RUN_TAG="$TAG"
 
 exec "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" ${CPU:+-c "$CPU"} -t "$TIMEOUT" \

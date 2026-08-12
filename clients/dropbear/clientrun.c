@@ -1,8 +1,8 @@
 /*
- * ClientRun, run a ported Unix client under tools/fsuae-run.sh.
+ * ClientRun, run a ported Unix client under tools/amiberry-run.sh.
  *
- * tools/fsuae-run.sh starts one executable with no arguments, so anything that
- * takes a command line needs a driver in the middle.  src/tools/toolssmoke.c
+ * tools/amiberry-run.sh starts one executable with no arguments, so anything
+ * that takes a command line needs a driver in the middle.  src/tools/toolssmoke.c
  * is that driver for our own commands; this is a separate one because of the
  * stack.
  *

@@ -40,9 +40,8 @@
 # Those land on the host as the run goes, not at the end, so a run killed at
 # hour three is still worth reading.
 #
-# A RUN OF HOURS HOLDS AN EMULATOR SLOT FOR HOURS.  tools/fsuae-reap.sh kills
-# any fs-uae older than 15 minutes by default and cannot tell a long tenant
-# from an orphan; this script prints the reap-safe invocation.
+# A RUN OF HOURS HOLDS AN EMULATOR SLOT FOR HOURS, and nothing on the machine
+# can tell a long tenant from an orphan.  Say so before starting one.
 #
 # SPDX-License-Identifier: MIT
 
@@ -184,7 +183,6 @@ DEADLINE=$((SECONDS_RUN + 600))
 echo "==> run:  $SECONDS_RUN s workload in ${PHASE}s phases, $DEADLINE s deadline"
 echo "==> fitz: $(basename "$AMIGA_FITZ"), wire $PORT, serve $SERVEPORT"
 echo "==> live: tail -f $ROOT/build/amiberry-testhd-$TAG/soak-events.txt"
-echo "==> if anyone needs to reap while this runs: tools/fsuae-reap.sh -a $((DEADLINE / 60 + 30))"
 
 set +e
 "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$DEADLINE" \

@@ -10,17 +10,19 @@
 # string as AMINETXDUO_GUEST_ARGS, which tools/winuae-run.sh already read; the
 # flag wins when both are set.
 #
-# The Linux counterpart of tools/fsuae-run.sh and tools/winuae-run.sh.  Amiberry
-# is WinUAE's core, so -N takes WinUAE's board keys unchanged and the board
-# table below is tools/winuae-run.sh's.
+# The Linux counterpart of tools/winuae-run.sh.  Amiberry is WinUAE's core, so
+# -N takes WinUAE's board keys unchanged and the board table below is
+# tools/winuae-run.sh's.
 #
-# WHY THIS EXISTS ALONGSIDE fsuae-run.sh
+# WHY THIS REPLACED FS-UAE
 #
 #   Amiberry runs genuinely headless, `headless=true` and SDL is never asked
 #   for a video device, where FS-UAE needs an X server on a Linux runner.  It
 #   emulates all nine ethernet boards rather than only the A2065.  And it has
 #   backends that reach the real network: -B <interface> puts the guest on the
 #   host's LAN with its own MAC, which is the thing SLIRP cannot do.
+#   tools/enforcer-run.sh is the one runner left on FS-UAE, because Enforcer
+#   needs a real MMU.
 #
 # -B PICKS THE BACKEND, AND IT IS CHECKED
 #
@@ -353,8 +355,7 @@ EOF
 
 # ------------------------------------------------------------- -k CLOCK MHz --
 #
-# Move the CPU clock and keep the cycle accounting, the same thing
-# tools/fsuae-run.sh -k did through uae_cpu_multiplier.  Amiberry is WinUAE's
+# Move the CPU clock and keep the cycle accounting.  Amiberry is WinUAE's
 # core and spells it cpu_multiplier; measured here with tests/perf/cpucal on
 # 2026-08-04, because neither documents the unit:
 #
@@ -428,7 +429,7 @@ if command -v python3 > /dev/null 2>&1; then
     : > "$SERIALTS"
 fi
 
-# SIGPIPE is ignored for the same reason tools/fsuae-run.sh ignores it: the
+# SIGPIPE is ignored: the
 # emulator writes guest payload to host sockets with plain send(), and a peer
 # that hangs up first otherwise takes the emulator down mid-instruction with no
 # guru and a truncated log, which reads exactly like the Amiga crashed.

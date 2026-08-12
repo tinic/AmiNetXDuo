@@ -29,7 +29,7 @@
 #     * EAGAIN
 #     * recv error err=-1 len=<n> errno=<e>
 #
-# through kprintf() to the serial port, which tools/fsuae-run.sh captures into
+# through kprintf() to the serial port, which tools/amiberry-run.sh captures into
 # build/serial*.log.  Both binaries are produced; run-fitz.sh takes the debug
 # one by default and -r switches to the released one, so "did our own build
 # change the answer?" is one flag rather than an argument.

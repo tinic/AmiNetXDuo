@@ -5,12 +5,11 @@
 
 WHY THIS EXISTS
 
-    The guest's own frames are recoverable without any help: the emulated A2065
-    dumps every frame it handles into fs-uae.log.txt and tests/trace/a2065pcap.py
-    turns that into a pcap (docs/RESEARCH.md 16.3).  That proves what LEFT the
-    Amiga.  It cannot prove what FS-UAE's SLIRP then did with it, because SLIRP
-    is a user-mode NAT inside the emulator process and its output goes straight
-    to the host's sockets without crossing an interface anything can watch.
+    Nothing on the host can see what the guest sent.  SLIRP is a user-mode NAT
+    inside the emulator process, so its output goes straight to the host's
+    sockets without crossing an interface anything can watch, and the one
+    emulator that dumped every A2065 frame into its own log was FS-UAE, which
+    is gone.
 
     So the only way to find out whether a multicast datagram from the guest
     reaches the host's real network is to sit on the host's real network and

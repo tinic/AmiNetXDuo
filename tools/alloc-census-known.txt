@@ -5,6 +5,10 @@
 # Both numbers are ceilings: a listed site that grows fails the run, and so
 # does any site that is not listed at all.
 #
+# The site is __FILE__:__LINE__ stamped at the allocation, so moving one of
+# these calls moves its key here.  library.c:636 sat below for as long as the
+# child base was one of the leaks it was written for, matching nothing.
+#
 # ---------------------------------------------------------------- bsd-expunge
 #
 # EMPTY, AND IT MUST STAY EMPTY.  This is the segment being unloaded: nothing
@@ -32,7 +36,7 @@
 #   config_file.c:63   the parsed DEVS:Internet files, held so the next
 #                      program does not re-read them
 #   netdb.c:177/179    the tables built from them, ditto
-#   library.c:636      ONE retained child base, poisoned, kept for as long as
+#   library.c:761      ONE retained child base, poisoned, kept for as long as
 #                      the task that closed it is still running so that a call
 #                      through a stale base lands somewhere diagnosable rather
 #                      than in somebody else's memory.  2568 bytes per live
@@ -41,4 +45,4 @@
 bsd-stack-down config_file.c:63 5291 4
 bsd-stack-down netdb.c:179 4052 4
 bsd-stack-down netdb.c:177 3280 4
-bsd-stack-down library.c:636 2568 1
+bsd-stack-down library.c:761 2568 1

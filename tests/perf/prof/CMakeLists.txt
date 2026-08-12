@@ -8,13 +8,13 @@
 # Establish the sampler before believing it, on more than one CPU, because the
 # exception frame is what is in question:
 #
-#   ./tools/fsuae-run.sh -x -t 600 -m A500  build/p00/tests/perf/prof/profverify
-#   ./tools/fsuae-run.sh -x -t 600 -m A1200 build/p20/tests/perf/prof/profverify
+#   ./tools/amiberry-run.sh -t 600 -m A500  build/p00/tests/perf/prof/profverify
+#   ./tools/amiberry-run.sh -t 600 -m A1200 build/p20/tests/perf/prof/profverify
 #
 # Then the transfer, and the ranking:
 #
-#   ./tools/fsuae-run.sh -x -t 1200 -m A1200 build/p20/tests/perf/prof/tcpprof
-#   tools/prof-report.py build/testhd/profile-loop.bin \
+#   ./tools/amiberry-run.sh -t 1200 -m A1200 build/p20/tests/perf/prof/tcpprof
+#   tools/prof-report.py build/amiberry-testhd-amiberry/profile-loop.bin \
 #       --exe build/p20/tests/perf/prof/tcpprof \
 #       --map build/p20/tests/perf/prof/tcpprof.map \
 #       --objdir build/p20/tests/perf/prof --phase transfer

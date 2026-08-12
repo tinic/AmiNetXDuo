@@ -263,8 +263,11 @@ kill -0 "$PEER_PID" 2>/dev/null || {
 
 export AMINETXDUO_RUN_TAG="$TAG"
 
-# FS-UAE's own bsdsocket.library emulation would otherwise answer for the
-# library under test.  It is only switchable from the base directory.
+# For the -e lane only.  tools/enforcer-run.sh is the one runner left that
+# drives fs-uae (Enforcer needs a real MMU), and its base_dir is this
+# directory, so this is where its bsdsocket.library emulation is switched off
+# before it can answer for the library under test.  The Amiberry lane never
+# reads it.
 BASEDIR="$ROOT/build/fsuae-base-$TAG"
 mkdir -p "$BASEDIR/Configurations"
 cat > "$BASEDIR/Configurations/Host.fs-uae" <<'EOF'

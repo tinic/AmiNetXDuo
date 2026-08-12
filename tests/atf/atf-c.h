@@ -14,7 +14,7 @@
  * no fork() here, so this runs them in sequence in one process and reports the
  * way every other guest test in this tree does: one line per assertion and a
  * "N checks, M failures -- PASS/FAIL" trailer, the shape
- * tests/sockopt/sockopt_test.c established and tools/fsuae-run.sh greps for.
+ * tests/sockopt/sockopt_test.c established and tools/amiberry-run.sh greps for.
  *
  * ------------------------------------------------------------------ macros --
  *

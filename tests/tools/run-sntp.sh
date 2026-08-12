@@ -193,8 +193,8 @@ EOF
 PEERLOG="$ROOT/build/sntp-peer.log"
 
 # The peer's own lifetime has to cover the WAIT for the emulator as well as the
-# run, and build/.fsuae.lock queues runs behind each other for as long as it
-# takes.  Sizing it from TIMEOUT alone let the peer expire while this run was
+# run, and a contended host makes that wait as long as it likes: nothing
+# serialises emulator runs any more, the lock lived in the FS-UAE runner.  Sizing it from TIMEOUT alone let the peer expire while this run was
 # still in the queue, and the whole thing then failed as four refused
 # connections.  The trap below is what actually ends it; the number is only a
 # backstop for a script that dies without running it.

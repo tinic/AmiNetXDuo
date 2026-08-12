@@ -83,18 +83,6 @@ cp "$BSD" "$STAGE/libs/bsdsocket.library"
 UG="$ROOT/$BUILD/src/usergroup/usergroup.library"
 [ -f "$UG" ] && cp "$UG" "$STAGE/libs/usergroup.library"
 
-# FS-UAE's own bsdsocket emulation off, as every other harness here does it, so
-# a result cannot be the host-socket shim answering instead of ours, which
-# would be a particularly bad way to pass a test about our own bracket.
-BASEDIR="$ROOT/build/fsuae-base-$TAG"
-mkdir -p "$BASEDIR/Configurations"
-cat > "$BASEDIR/Configurations/Host.fs-uae" <<'EOF'
-[fs-uae]
-floppy_drive_volume = 0
-floppy_drive_volume_empty = 0
-bsdsocket_library = 0
-EOF
-
 export AMINETXDUO_RUN_TAG="$TAG"
 
 # SCORED FROM THE VERDICT LINE, NOT FROM THE EXIT STATUS
@@ -105,7 +93,7 @@ export AMINETXDUO_RUN_TAG="$TAG"
 # returns. tests/libraries/library_test.c hit the same wall and documents it.
 #
 # So the harness never returns, s/Startup-Sequence never writes DH0:.done, and
-# fsuae-run.sh reports a timeout no matter how the test went. The harness
+# the runner reports a timeout no matter how the test went. The harness
 # prints its verdict BEFORE closing for exactly this reason; that line is the
 # result, and a timeout with a verdict above it is the expected shape of a
 # passing run rather than a failure.

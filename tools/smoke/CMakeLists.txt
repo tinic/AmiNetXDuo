@@ -14,15 +14,15 @@
 #
 # Run them (each is an AmigaOS executable; none runs on the build host):
 #
-#   AMINETXDUO_RUN_TAG=smoke ./tools/fsuae-run.sh -t 90  build/cm/tools/smoke/smoke
-#   AMINETXDUO_RUN_TAG=crash ./tools/fsuae-run.sh -t 90  build/cm/tools/smoke/crashtest
-#   AMINETXDUO_RUN_TAG=guru  ./tools/fsuae-run.sh -t 90  build/cm/tools/smoke/gurutest
-#   AMINETXDUO_RUN_TAG=life  ./tools/fsuae-run.sh -t 120 build/cm/tools/smoke/lifecycle
-#   AMINETXDUO_RUN_TAG=kstop ./tools/fsuae-run.sh -t 120 build/cm/tools/smoke/KernelStop
-#   AMINETXDUO_RUN_TAG=rand1 ./tools/fsuae-run.sh -t 120 build/cm/tools/smoke/randtest
-#   AMINETXDUO_RUN_TAG=tick  ./tools/fsuae-run.sh -t 120 build/cm/tools/smoke/tickclock
+#   AMINETXDUO_RUN_TAG=smoke ./tools/amiberry-run.sh -t 90  build/cm/tools/smoke/smoke
+#   AMINETXDUO_RUN_TAG=crash ./tools/amiberry-run.sh -t 90  build/cm/tools/smoke/crashtest
+#   AMINETXDUO_RUN_TAG=guru  ./tools/amiberry-run.sh -t 90  build/cm/tools/smoke/gurutest
+#   AMINETXDUO_RUN_TAG=life  ./tools/amiberry-run.sh -t 120 build/cm/tools/smoke/lifecycle
+#   AMINETXDUO_RUN_TAG=kstop ./tools/amiberry-run.sh -t 120 build/cm/tools/smoke/KernelStop
+#   AMINETXDUO_RUN_TAG=rand1 ./tools/amiberry-run.sh -t 120 build/cm/tools/smoke/randtest
+#   AMINETXDUO_RUN_TAG=tick  ./tools/amiberry-run.sh -t 120 build/cm/tools/smoke/tickclock
 #   AMINETXDUO_RUN_TAG=drift ./tools/amiberry-run.sh -t 90 build/cm/tools/smoke/timerdrift
-#   AMINETXDUO_RUN_TAG=mem   ./tools/fsuae-run.sh -t 300 build/cm/tools/smoke/memprobe \
+#   AMINETXDUO_RUN_TAG=mem   ./tools/amiberry-run.sh -t 300 build/cm/tools/smoke/memprobe \
 #                                                        <staged libs/> <staged devs/>
 #
 # SPDX-License-Identifier: MIT

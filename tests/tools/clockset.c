@@ -13,7 +13,7 @@
  * wrong, and FS-UAE hands its guest the host's wall clock, so under the
  * emulator every test would otherwise start with the clock already right.
  *
- * There is no C:Date on the harness disk: tools/fsuae-run.sh stages one
+ * There is no C:Date on the harness disk: tools/amiberry-run.sh stages one
  * executable and nothing else, so this is that executable's companion.
  * tests/tls/tls_api.c does the same thing inline; this is the version a
  * scripted run can call.

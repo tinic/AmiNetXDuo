@@ -6,9 +6,9 @@
 #
 # WHY THIS IS NOT AN EMULATOR RUN
 #
-#   tools/fsuae-run.sh's measurement lane takes the machine alone and the queue
-#   is deep, so a slot is worth spending only on something a 68020 can answer
-#   and a Mac cannot.  An operation count is not that: 2^255-19 arithmetic
+#   A timing run has to take the machine alone and the queue is deep, so a
+#   slot is worth spending only on something a 68020 can answer and a Mac
+#   cannot.  An operation count is not that: 2^255-19 arithmetic
 #   executes the same multiplies everywhere.  The guest supplies milliseconds
 #   per primitive, this supplies multiplies per primitive, and the quotient --
 #   the cost of one field multiply on this part, is what every proposal to

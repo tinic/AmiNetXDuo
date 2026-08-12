@@ -42,7 +42,7 @@
  *
  * Run:
  *
- *   AMINETXDUO_RUN_TAG=kstop ./tools/fsuae-run.sh -t 120 \
+ *   AMINETXDUO_RUN_TAG=kstop ./tools/amiberry-run.sh -t 120 \
  *       build/cm/tools/smoke/KernelStop
  *
  * SPDX-License-Identifier: MIT

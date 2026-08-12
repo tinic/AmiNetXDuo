@@ -1,29 +1,28 @@
 #!/usr/bin/env bash
 #
-# Packet-trace the stack, from both ends at once.
+# Packet-trace the stack, through its own bpf_* LVOs.
 #
 #   tests/trace/run-trace.sh [-m MODEL] [-k MHZ] [-t SECS] [-b BUILD]
 #                            [-T TAG] [-P BASEPORT] [-B BYTES] [-s SNAP]
 #                            [-N]        do NOT capture (the control arm)
 #
-# TWO INDEPENDENT VIEWS OF THE SAME TRAFFIC
+# THE VIEWS, AND THE ONE THAT IS GONE
 #
 #   guest  NetTrace drives a workload and captures it through the eight
 #          published bpf_* LVOs of bsdsocket.library, writing a classic pcap
 #          straight to DH0:.  Real microsecond timestamps from GetSysTime().
 #
-#   host   FS-UAE's emulated A2065 writes every frame it handles, both
-#          directions, as hex into its own log, unconditionally, with no
-#          option to ask for it and none to turn it off.  That is a capture
-#          taken inside the emulated hardware, below every line of our code,
-#          so where it disagrees with the guest pcap the disagreement is
-#          located between the two by construction.  tests/trace/a2065pcap.py
-#          converts it.  It has NO timestamps, which is the one thing the
-#          guest view has and it does not.
-#
-#   The host side cannot be tcpdump: SLIRP is user-mode NAT inside the
-#   emulator, so nothing of the guest's own framing reaches a host interface,
-#   and /dev/bpf on this machine needs a password anyway.
+#   host   GONE.  FS-UAE's emulated A2065 wrote every frame it handled, both
+#          directions, as hex into its own log, and tests/trace/a2065pcap.py
+#          converted it: a capture taken inside the emulated hardware, below
+#          every line of our code, so a disagreement with the guest pcap was
+#          located between the two by construction.  Amiberry's log carries no
+#          frames and FS-UAE is not coming back, so this run has the guest view
+#          only.  It cannot be replaced by tcpdump either: SLIRP is user-mode
+#          NAT inside the emulator, so nothing of the guest's own framing
+#          reaches a host interface.  tools/winuae-run.sh with -a2065log2 is
+#          the one path left to a host-side capture, and it is a different
+#          harness.
 #
 # The peer is tests/peer/httppeer.py, unchanged and reused: it already serves
 # /bytes/N out of one seeded buffer and is what the curl suite is scored
@@ -96,7 +95,7 @@ CAPARG=""
 [ "$CAPTURE" = "1" ] || CAPARG=" NOCAPTURE"
 
 # ToolsSmoke is the only way this harness can run a command WITH ARGUMENTS:
-# tools/fsuae-run.sh starts one executable and passes it nothing, and
+# tools/amiberry-run.sh starts one executable and passes it nothing, and
 # ToolsSmoke reads this file and runs each line through SystemTagList().
 #
 # The order is the experiment.  Loopback FIRST, on a stack that has just come
@@ -147,24 +146,14 @@ RC=$?
 set -e
 
 HD="$ROOT/build/testhd-$TAG"
-FSLOG="$ROOT/build/fsuae-base-$TAG/Cache/Logs/fs-uae.log.txt"
 
 echo
 echo "================ what the Amiga said ================"
 [ -f "$HD/tools.txt" ] && cat "$HD/tools.txt" || echo "(no tools.txt)"
 
-# --------------------------------------------------------- the host view --
-
-if [ -f "$FSLOG" ]; then
-    echo
-    echo "================ host-side capture ================"
-    python3 "$ROOT/tests/trace/a2065pcap.py" "$FSLOG" \
-            -o "$HD/host.pcap" || true
-fi
-
 echo
 echo "================ analysis ================"
-for f in "$HD"/lo.pcap "$HD"/wire.pcap "$HD"/host.pcap; do
+for f in "$HD"/lo.pcap "$HD"/wire.pcap; do
     [ -s "$f" ] || continue
     echo
     python3 "$ROOT/tests/trace/tcpaudit.py" "$f" || true
@@ -175,6 +164,5 @@ echo "emulator log:  build/trace-$TAG.log"
 echo "serial log:    build/serial-$TAG.log"
 echo "peer log:      $PEERLOG"
 echo "guest files:   $HD"
-echo "fs-uae log:    $FSLOG"
 
 exit "$RC"

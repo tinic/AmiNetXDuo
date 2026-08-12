@@ -4,10 +4,10 @@
 #         -DCMAKE_BUILD_TYPE=Release
 #   cmake --build build/cm --parallel --target crypto68k_test crypto68k_bench
 #
-#   AMINETXDUO_RUN_TAG=rsa20 ./tools/fsuae-run.sh        -t 300 build/cm/tests/crypto68k/crypto68k_test
-#   AMINETXDUO_RUN_TAG=rsa30 ./tools/fsuae-run.sh -c 68030 -t 300 build/cm/tests/crypto68k/crypto68k_test
-#   AMINETXDUO_RUN_TAG=rsb20 ./tools/fsuae-run.sh        -t 600 build/cm/tests/crypto68k/crypto68k_bench
-#   AMINETXDUO_RUN_TAG=rsb30 ./tools/fsuae-run.sh -c 68030 -t 600 build/cm/tests/crypto68k/crypto68k_bench
+#   AMINETXDUO_RUN_TAG=rsa20 ./tools/amiberry-run.sh        -t 300 build/cm/tests/crypto68k/crypto68k_test
+#   AMINETXDUO_RUN_TAG=rsa30 ./tools/amiberry-run.sh -c 68030 -t 300 build/cm/tests/crypto68k/crypto68k_test
+#   AMINETXDUO_RUN_TAG=rsb20 ./tools/amiberry-run.sh        -t 600 build/cm/tests/crypto68k/crypto68k_bench
+#   AMINETXDUO_RUN_TAG=rsb30 ./tools/amiberry-run.sh -c 68030 -t 600 build/cm/tests/crypto68k/crypto68k_bench
 #
 # Two executables, not one, because they have very different run times: the
 # correctness pass fits the harness's usual timeout, while the benchmark has to
@@ -43,9 +43,9 @@ add_executable(crypto68k_bench c68k_bench.c)
 # short run, and the benchmark has to run REFERENCE elliptic curve operations
 # that take seconds each on the floor target.
 #
-#   AMINETXDUO_RUN_TAG=ec20  ./tools/fsuae-run.sh        -t 400 build/cm/tests/crypto68k/crypto68k_ec_test
-#   AMINETXDUO_RUN_TAG=ecb20 ./tools/fsuae-run.sh        -t 400 build/cm/tests/crypto68k/crypto68k_ec_bench
-#   AMINETXDUO_RUN_TAG=ecb30 ./tools/fsuae-run.sh -c 68030 -t 400 build/cm/tests/crypto68k/crypto68k_ec_bench
+#   AMINETXDUO_RUN_TAG=ec20  ./tools/amiberry-run.sh        -t 400 build/cm/tests/crypto68k/crypto68k_ec_test
+#   AMINETXDUO_RUN_TAG=ecb20 ./tools/amiberry-run.sh        -t 400 build/cm/tests/crypto68k/crypto68k_ec_bench
+#   AMINETXDUO_RUN_TAG=ecb30 ./tools/amiberry-run.sh -c 68030 -t 400 build/cm/tests/crypto68k/crypto68k_ec_bench
 # The 25519 field arithmetic, checked ON THE MACHINE.
 #
 # host/test_c68k_25519.c cannot cover c68k_25519.S at all: it runs portable C
@@ -66,7 +66,7 @@ add_executable(crypto68k_ec_bench c68k_ec_bench.c)
 # The bulk path: AES-128-CBC and SHA-256, every variant timed and checked in
 # one run, with the instruction-cost kernels the design decisions rest on.
 #
-#   AMINETXDUO_RUN_TAG=bulk ./tools/fsuae-run.sh -t 600 -k 56 \
+#   AMINETXDUO_RUN_TAG=bulk ./tools/amiberry-run.sh -t 600 -k 56 \
 #       build/cm/tests/crypto68k/crypto68k_bulk
 #
 # c68k_bulk_kernels.S is compiled here rather than in src/crypto68k because it
@@ -125,7 +125,7 @@ endforeach()
 #   mkdir -p build/amissl-libs/AmiSSL
 #   cp <os3>/AmiSSL/Libs/AmigaOS3/amisslmaster.library            build/amissl-libs/
 #   cp <os3>/AmiSSL/Libs/AmigaOS3/AmiSSL/68020-40/amissl_v362.library build/amissl-libs/AmiSSL/
-#   AMINETXDUO_RUN_TAG=am ./tools/fsuae-run.sh -t 900 \
+#   AMINETXDUO_RUN_TAG=am ./tools/amiberry-run.sh -t 900 \
 #       build/cm-tls/tests/crypto68k/crypto68k_amissl build/amissl-libs
 #
 # ...with build/amissl-libs renamed to `libs` on the way in, because the

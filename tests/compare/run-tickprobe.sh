@@ -22,10 +22,10 @@
 # is tcpdrill.device, so SLIRP, the host's routing and the emulator's own
 # scheduling are all out of the measurement.
 #
-# MEASUREMENT RUN.  fsuae-run.sh is invoked with -x, which takes the emulator
-# queue alone (tools/amiberry-run.sh, commit 81b8f8d).  A quantisation histogram
-# taken while another agent's boot shares the machine is a histogram of that
-# agent.
+# MEASUREMENT RUN, AND NOTHING ENFORCES IT.  The exclusive lane lived in the
+# FS-UAE runner's slot lock and went with it; tools/amiberry-run.sh has none.
+# A quantisation histogram taken while another agent's boot shares the machine
+# is a histogram of that agent, so idle the machine by hand first.
 #
 # OPTIONS
 #   -s ours|roadshow   which stack (required)
@@ -141,7 +141,7 @@ echo "==> stack: $NOTE"
 export AMINETXDUO_RUN_TAG="$TAG"
 
 set +e
-"$ROOT/tools/amiberry-run.sh" -x -m "$MODEL" -t "$TIMEOUT" \
+"$ROOT/tools/amiberry-run.sh" -m "$MODEL" -t "$TIMEOUT" \
     "$PROBE" "${STAGED[@]}" \
     > "$ROOT/build/tickprobe-$TAG.log" 2>&1
 RC=$?

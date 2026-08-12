@@ -36,7 +36,7 @@
  * a 68020.  Run this under `-m A3000` as a correctness check and do not quote
  * the numbers.
  *
- * `tools/fsuae-run.sh -k MHZ` moves the 68020 model's clock without losing the
+ * `tools/amiberry-run.sh -k MHZ` moves the 68020 model's clock without losing the
  * cycle accounting, so "what would this do at 25 MHz?" has an answer here even
  * though "what would this do on an A3000?" does not.
  *
@@ -193,7 +193,7 @@ static ULONG p_ms(ULONG ticks)
  *
  * The per-iteration form quantises to one E-Clock tick per rep, 1.409 us,
  * and at 14 MHz a 1460-byte copy is ~180 ticks, so the granularity is half a
- * percent and invisible.  At 24.5 MHz with `fsuae-run.sh -k 25` it is ~105
+ * percent and invisible.  At 24.5 MHz with `amiberry-run.sh -k 25` it is ~105
  * ticks, and three copy routines that differ by 4% all printed the same
  * 102.29 ns/B.  Dividing once, at the end, by the total byte count removes it.
  *

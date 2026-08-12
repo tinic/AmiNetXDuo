@@ -614,8 +614,8 @@ fi
 # tools/amiberry-run.sh cannot drive these runs: it wipes the staging drive and
 # writes its own Startup-Sequence, and the whole point here is a machine that
 # boots Commodore's.  So the emulator is started directly, with the same
-# config that harness generates, and with its lock, in its measurement lane,
-# so a run here does not share the host with anything else.
+# config that harness generates, and behind a lock of its own -- the only one
+# left in the tree -- so a run here does not share the host with anything else.
 
 LOCKDIR="$ROOT/build/.emu.lock"
 SLOTDIR="$ROOT/build/.emu.slots"

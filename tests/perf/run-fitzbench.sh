@@ -402,7 +402,6 @@ if [ "$SLIRP" = "1" ]; then
 elif [ "$USE_AMIBERRY" = "1" ]; then
     # Amiberry is local, so this branch only works ON the machine it is
     # installed on, there is no ssh half the way winuae-run.sh has one.
-    # amiberry-run.sh has no warp to drop, so -x has nothing to do here.
     HD="$ROOT/build/amiberry-testhd-$TAG"
     "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
         -t "$TIMEOUT" ${CPU:+-c "$CPU"} \

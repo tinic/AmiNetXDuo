@@ -39,9 +39,6 @@
 # A RUN OF HOURS HOLDS AN EMULATOR SLOT FOR HOURS.  Two things follow, and
 # both have bitten:
 #
-#   * tools/fsuae-reap.sh kills any fs-uae older than 15 minutes by default
-#     and cannot tell a long tenant from an orphan.  Anyone running it during
-#     this takes it down.  This script prints the reap-safe invocation.
 #   * AMINETXDUO_SLOTS defaults to 3; a multi-hour tenant leaves the others
 #     sharing.  Set it deliberately rather than by accident.
 #
@@ -164,7 +161,7 @@ probes 0
 seed 20260726
 EOF
 
-# ToolsSmoke is how a command gets ARGUMENTS: fsuae-run.sh starts exactly one
+# ToolsSmoke is how a command gets ARGUMENTS: amiberry-run.sh starts exactly one
 # executable and passes it nothing.  '&' is SYS_Asynch, which is what a mount
 # needs, Fitz's mount stays resident as a DOS handler and never returns.
 {
@@ -184,7 +181,6 @@ DEADLINE=$((SECONDS_RUN + 300))
 
 echo "==> run:  $SECONDS_RUN s workload, $DEADLINE s emulator deadline"
 echo "==> fitz: $(basename "$AMIGA_FITZ")"
-echo "==> if anyone needs to reap while this runs: tools/fsuae-reap.sh -a $((DEADLINE / 60 + 30))"
 
 CLOCKARG=()
 [ -z "$CLOCK" ] || CLOCKARG=(-k "$CLOCK")

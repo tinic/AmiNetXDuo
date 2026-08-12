@@ -420,7 +420,7 @@ ULONG       prof_worst_window(VOID);
 VOID        prof_gap_summary(ULONG *total_cck, ULONG *sampled_cck,
                              ULONG *worst_gap_cck, ULONG *worst_gap_index);
 
-/* RawDoFmt-free logging to the serial port, which is where fsuae-run.sh
+/* RawDoFmt-free logging to the serial port, which is where amiberry-run.sh
    captures output from.  prof_log_console() sends it to stdout as well, which
    is what somebody sitting at a real machine wants. */
 VOID        prof_log(const char *fmt, ...);

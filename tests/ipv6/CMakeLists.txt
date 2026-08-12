@@ -3,7 +3,7 @@
 # Only built with -DAMINETXDUO_IPV6=ON (tests/CMakeLists.txt gates it), because
 # the whole test is IPv6.  Run it with
 #
-#   AMINETXDUO_RUN_TAG=v6 ./tools/fsuae-run.sh -t 300 build/v6/tests/ipv6/ipv6_test
+#   AMINETXDUO_RUN_TAG=v6 ./tools/amiberry-run.sh -t 300 build/v6/tests/ipv6/ipv6_test
 #
 # It needs no network at all: the two NX_IP instances on the simulated wire are
 # both ends, which makes this the one IPv6 test that cannot be affected by what

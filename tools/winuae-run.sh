@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Run an AmigaOS executable under WinUAE on a remote Windows host and capture
-# its output.  The WinUAE counterpart of tools/fsuae-run.sh.
+# its output.  The WinUAE counterpart of tools/amiberry-run.sh.
 #
 #   tools/winuae-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-a ARGS] [-n] [-x]
 #                       [-K] <executable> [extra files...]
@@ -32,7 +32,7 @@
 #
 # HOW IT WORKS
 #
-#   The Amiga side is deliberately identical to tools/fsuae-run.sh: the
+#   The Amiga side is deliberately identical to tools/amiberry-run.sh: the
 #   executable and any extra files are staged into a directory that the guest
 #   mounts as DH0:, s/Startup-Sequence runs the binary and writes DH0:.done
 #   with its return code, ami_log() output goes out of the serial port, and the

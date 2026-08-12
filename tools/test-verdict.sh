@@ -33,11 +33,6 @@
 # exported before starting the run.
 verdict_hd_amiberry() { echo "$ROOT/build/amiberry-testhd-${AMINETXDUO_RUN_TAG:-amiberry}"; }
 verdict_hd_winuae()   { echo "$ROOT/build/winuae-testhd-${AMINETXDUO_RUN_TAG:-winuae}"; }
-verdict_hd_fsuae()    {
-    local tag="${AMINETXDUO_RUN_TAG:-}"
-    [ -z "$tag" ] || tag="-$tag"
-    echo "$ROOT/build/testhd$tag"
-}
 verdict_serial_amiberry() { echo "$ROOT/build/amiberry-serial-${AMINETXDUO_RUN_TAG:-amiberry}.log"; }
 
 # The guest's summary, `N checks, M failures[, PASS|FAIL]`, from the last place

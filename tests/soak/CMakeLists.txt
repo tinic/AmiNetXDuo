@@ -3,7 +3,7 @@
 # Produces an AmigaOS executable to be run under FS-UAE/WinUAE (or on real
 # hardware); it is not runnable on the build host.  Run it with
 #
-#   AMINETXDUO_RUN_TAG=soak ./tools/fsuae-run.sh -t 220 build/cm/tests/soak/soak_test
+#   AMINETXDUO_RUN_TAG=soak ./tools/amiberry-run.sh -t 220 build/cm/tests/soak/soak_test
 #
 # and, for the "clean under Enforcer" half of the criterion, with
 #

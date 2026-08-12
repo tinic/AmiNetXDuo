@@ -68,14 +68,6 @@ vcpkg_installed/
 Testing/
 .cache/
 
-# FS-UAE test harness artefacts
-build/testhd/
-build/serial.log
-build/fsuae.log
-build/test.fs-uae
-build/cm/
-
-
 # Python bytecode from the host-side test servers (tests/tools, tests/tls).
 __pycache__/
 *.pyc

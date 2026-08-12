@@ -84,8 +84,11 @@ cp "$BSD" "$STAGE/libs/bsdsocket.library"
 UG="$ROOT/$BUILD/src/usergroup/usergroup.library"
 [ -f "$UG" ] && cp "$UG" "$STAGE/libs/usergroup.library"
 
-# FS-UAE's own bsdsocket emulation off, as every other harness here does it, so
-# a result cannot be the host-socket shim answering instead of ours.
+# For the -e lane only.  tools/enforcer-run.sh is the one runner left that
+# drives fs-uae (Enforcer needs a real MMU), and its base_dir is this
+# directory, so this is where its bsdsocket.library emulation is switched off
+# before it can answer for the library under test.  The Amiberry lane never
+# reads it.
 BASEDIR="$ROOT/build/fsuae-base-$TAG"
 mkdir -p "$BASEDIR/Configurations"
 cat > "$BASEDIR/Configurations/Host.fs-uae" <<'EOF'

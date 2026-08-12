@@ -436,12 +436,12 @@ aminetxduo_add_tool(tool_ping          ping          SOURCES ping.c toolsock.c)
 
 # ---------------------------------------------------------------- smoke ---
 #
-# Driver for tools/fsuae-run.sh, which runs exactly one executable with no
+# Driver for tools/amiberry-run.sh, which runs exactly one executable with no
 # arguments.  ToolsSmoke runs the real tools through SystemTagList() and
 # leaves their output in DH0:tools.txt, which the harness prints back.
 #
 #   cmake --build build/cm --parallel --target tools_smoke
-#   ./tools/fsuae-run.sh -t 120 build/cm/src/tools/ToolsSmoke \
+#   ./tools/amiberry-run.sh -t 120 build/cm/src/tools/ToolsSmoke \
 #       build/cm/src/tools/AddNetInterface build/cm/src/tools/Online \
 #       build/cm/src/tools/Offline build/cm/src/tools/ShowNetStatus \
 #       build/cm/src/tools/ping build/cm/src/tools/netstat \

@@ -180,10 +180,11 @@ EOF
 
 # ------------------------------------------------------- the host watcher ---
 #
-# Sized against the LOCK QUEUE and not against the run: build/.fsuae.lock
-# serialises every emulator run in the tree and the queue can be deep, so a
-# watcher that lived for TIMEOUT seconds would routinely be dead before the
-# guest booted, and its silence would then be read as "SLIRP dropped it".
+# Sized against the WAIT and not against the run: nothing serialises emulator
+# runs any more -- the lock lived in the FS-UAE runner -- so this one may sit
+# behind, or alongside, somebody else's for a long time.  A watcher that lived
+# for TIMEOUT seconds would routinely be dead before the guest booted, and its
+# silence would then be read as "SLIRP dropped it".
 # Same lesson as tests/tools/run-nettools.sh and run-sntp.sh.
 
 WATCHLOG="$ROOT/build/mdnswatch.log"
@@ -205,7 +206,6 @@ kill -0 "$WATCH_PID" 2>/dev/null || {
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-mdns}"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
-FSLOG="$ROOT/build/fsuae-base-$AMINETXDUO_RUN_TAG/Cache/Logs/fs-uae.log.txt"
 
 echo "==> booting $MODEL with the A2065 on SLIRP"
 set +e
@@ -298,20 +298,9 @@ fi
 
 # ---- 3 + 4: the services, and the wire they went out on ------------------
 
-if [ ! -f "$FSLOG" ]; then
-    # tests/trace/a2065pcap.py reads the A2065 frame dumps FS-UAE writes, and
-    # only FS-UAE writes them: the Amiberry log this script's own run produces
-    # has none, so sections 3 and 4 do not run at all under that runner.
-    infra "no FS-UAE frame log at $FSLOG, so the wire was never recorded and
-       the thirteen assertions on what left the card did not run"
-elif ! python3 "$ROOT/tests/trace/a2065pcap.py" "$FSLOG" -o "$HD/host.pcap" \
-        > "$HD/a2065.txt" 2>&1; then
-    infra "a2065pcap.py could not turn $FSLOG into a capture"
-    tail -5 "$HD/a2065.txt" | sed 's/^/       /' >&2
-elif [ ! -s "$HD/host.pcap" ]; then
-    infra "a2065pcap.py wrote an empty $HD/host.pcap"
-fi
-
+# tests/trace/a2065pcap.py read the A2065 frame dumps out of FS-UAE's own log,
+# and only FS-UAE wrote them.  FS-UAE is gone and Amiberry's log has none, so
+# nothing produces $HD/host.pcap on this path and the else below is what runs.
 if [ -s "$HD/host.pcap" ]; then
     if ! tcpdump -r "$HD/host.pcap" -n -e "udp port 5353" 2>/dev/null \
             > "$HD/mdns.txt"; then
@@ -453,9 +442,9 @@ if [ -s "$HD/host.pcap" ]; then
     fi
 else
     # Not a fail(): with no capture nothing was observed, so nothing can be
-    # concluded about the responder either way.  infra() already named the
-    # reason above.
-    infra "no host-side capture at $HD/host.pcap, sections 3 and 4 did not run"
+    # concluded about the responder either way.
+    infra "no host-side frame log under Amiberry, so the wire was never
+       recorded and the thirteen assertions on what left the card did not run"
 fi
 
 # ---- the SLIRP question, reported and not asserted ----------------------

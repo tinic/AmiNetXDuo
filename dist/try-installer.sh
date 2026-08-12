@@ -48,7 +48,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
 
 ARCHIVE="${AMINETXDUO_TRY_ARCHIVE:-$ROOT/build/dist/AmiNetXDuo}"
-EMU="${AMINETXDUO_TRY_EMU:-fs-uae}"
+EMU="${AMINETXDUO_TRY_EMU:-amiberry}"
 MODEL="A1200"
 ROM="${AMINETXDUO_KICKSTART:-}"
 WB="${AMINETXDUO_WB_ADF:-}"

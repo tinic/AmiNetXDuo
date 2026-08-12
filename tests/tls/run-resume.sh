@@ -131,7 +131,7 @@ CPUARG=()
 [ -z "$CPU" ]   || CPUARG+=(-c "$CPU")
 [ -z "$CLOCK" ] || CPUARG+=(-k "$CLOCK")
 
-# fsuae-run.sh wipes build/testhd<tag> at the start of every run, so anything
+# amiberry-run.sh wipes build/amiberry-testhd-<tag> at the start of every run, so anything
 # the Amiga wrote to DEVS: is gone by the next one.  Carrying the session cache
 # forward is therefore an explicit copy, and it is also exactly what makes the
 # boot phase a proof rather than an assertion: the only thing that crosses is

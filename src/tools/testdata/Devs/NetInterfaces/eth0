@@ -1,5 +1,5 @@
 # AmiNetXDuo tools smoke test, a plausible Roadshow interface file.
-# Staged as DH0:Devs/NetInterfaces/eth0 by tools/fsuae-run.sh so that
+# Staged as DH0:Devs/NetInterfaces/eth0 by tools/amiberry-run.sh so that
 # AddNetInterface has something real to parse before it discovers that no
 # stack is running.
 

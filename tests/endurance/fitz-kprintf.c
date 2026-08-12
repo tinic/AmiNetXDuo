@@ -8,7 +8,7 @@
  *     * EAGAIN
  *     * recv error err=-1 len=... errno=...
  *
- * on the serial port, which tools/fsuae-run.sh already captures.  Those two
+ * on the serial port, which tools/amiberry-run.sh already captures.  Those two
  * lines are the direct evidence for the defect this harness hunts; without
  * them a lost connection is only ever an inference.
  *

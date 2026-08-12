@@ -15,8 +15,7 @@
 # the same flag.
 #
 # ONE BOOT PER SCRIPT FILE.  Every case in the file runs inside a single
-# emulator run, because build/.fsuae.lock serialises runs and the queue is
-# deep.  Cases are independent, each opens its own socket and each uses a
+# emulator run, because a boot is the expensive part and the host is shared.  Cases are independent, each opens its own socket and each uses a
 # different peer ISN, so the only thing they share is the stack, which is
 # the point.
 #

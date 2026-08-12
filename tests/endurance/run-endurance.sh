@@ -128,7 +128,6 @@ CLOCKARG=()
 [ -z "$CLOCK" ] || CLOCKARG=(-k "$CLOCK")
 
 echo "==> $SECONDS_RUN s, mode $MODE, $CONNS connection(s), probes=$PROBES"
-echo "==> if anyone needs to reap while this runs: tools/fsuae-reap.sh -a $((DEADLINE / 60 + 30))"
 
 set +e
 "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$DEADLINE" "${CLOCKARG[@]}" \

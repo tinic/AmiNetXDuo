@@ -4,7 +4,7 @@
 #
 #   tools/profiler/selftest.sh [-b BUILDDIR] [-m MODEL] [-c CPU] [-t SECONDS]
 #
-# Runs Profile against profspin under FS-UAE and then asks
+# Runs Profile against profspin under Amiberry and then asks
 # tools/profiler/profreport.py whether the samples landed where the program
 # says it was.  Two questions, and a sampling profiler that gets either wrong
 # still produces a ranking that reads perfectly well:
@@ -74,15 +74,16 @@ AMIGA_TOOLCHAIN_QUIET=1 . "$ROOT/tools/amiga-toolchain.sh"
 
 echo "==> Profile $BIN/profspin under $MODEL${CPU:+ (CPU $CPU)}"
 
-# xvfb-run because FS-UAE wants a real GL context and exits in a second
-# without one, and -x because a shared run exits early in a way that looks
-# exactly like a crash in the code under test.
-xvfb-run -a "$ROOT/tools/amiberry-run.sh" -x -t "$TIMEOUT" -m "$MODEL" \
+# There is no exclusive lane left: it lived in the FS-UAE runner's slot lock,
+# and Amiberry has none.  Keep the machine idle by hand before believing a
+# number taken here -- a contended host has already corrupted one set of
+# figures in this project.
+"$ROOT/tools/amiberry-run.sh" -t "$TIMEOUT" -m "$MODEL" \
     ${CPU:+-c "$CPU"} \
     -a "OUT=DH0:spin.prof FOLDED=DH0:spin.folded profspin RANGES=DH0:spin.ranges" \
     "$BIN/Profile" "$BIN/profspin"
 
-HD="$ROOT/build/testhd"
+HD="$ROOT/build/amiberry-testhd-${AMINETXDUO_RUN_TAG:-amiberry}"
 for f in spin.prof spin.ranges; do
     [ -f "$HD/$f" ] || { echo "the run produced no $f" >&2; exit 1; }
 done

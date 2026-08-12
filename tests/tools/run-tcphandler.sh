@@ -254,9 +254,9 @@ printf '\n%s\t%d/tcp\n' "$SERVICE_NAME" "$DAYTIME_PORT" \
 
 # ------------------------------------------------------- the host servers ---
 #
-# Sized against the LOCK QUEUE, not the run: build/.fsuae.lock serialises every
-# emulator run in the tree, so a server that lived for TIMEOUT seconds would
-# routinely be dead before the guest booted.
+# Sized against the WAIT, not the run: a contended host can hold this one off
+# for a long time, so a server that lived for TIMEOUT seconds would routinely
+# be dead before the guest booted.
 
 PEERLOG="$ROOT/build/tcphandler-peer.log"
 REMOTE_LOG=""

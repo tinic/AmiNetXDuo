@@ -410,19 +410,6 @@ fi
 
 export AMINETXDUO_RUN_TAG="$TAG"
 
-# FS-UAE's own bsdsocket.library emulation would otherwise be a fourth stack
-# in the room.  It cannot be turned off from the configuration
-# tools/fsuae-run.sh writes, so it goes into the run's private base directory,
-# exactly as tests/conformance/run-fsuae.sh does it.
-BASEDIR="$ROOT/build/fsuae-base-$TAG"
-mkdir -p "$BASEDIR/Configurations"
-cat > "$BASEDIR/Configurations/Host.fs-uae" <<'EOF'
-[fs-uae]
-floppy_drive_volume = 0
-floppy_drive_volume_empty = 0
-bsdsocket_library = 0
-EOF
-
 echo "==> stack:    $STACK  ($STACK_NOTE)"
 echo "==> workload: $WORKLOAD on $MODEL, peer 127.0.0.1:$BASE_PORT"
 echo "==> plan:"

@@ -23,16 +23,12 @@
 # program the Startup-Sequence runs.  See conf_launcher.c for why there is a
 # launcher at all.
 #
-# FS-UAE ships its own bsdsocket.library emulation.  If it answered
-# OpenLibrary() the whole run would be measuring WinUAE's host-socket shim
-# instead of our stack, so this script sets bsdsocket_library = 0 via a host
-# configuration dropped into the run's private base directory (FS-UAE reads
-# it after resolving base_dir; the config tools/amiberry-run.sh writes cannot
-# carry the option).
-#
-# The emulator log still says "bsdsocket.library installed" either way, that
-# line is printed when the emulation is *built*, not when it is registered.
-# It is not the proof.  The proof is threefold and checked below / visible in
+# The emulator ships its own bsdsocket.library emulation, and if it answered
+# OpenLibrary() the whole run would be measuring a host-socket shim instead of
+# our stack.  Turning it off in the config is not how that is settled here: the
+# emulator log says "bsdsocket.library installed" either way, that line is
+# printed when the emulation is *built*, not when it is registered, so a config
+# key is not the proof.  The proof is threefold and checked below / visible in
 # the output:
 #   1. Removing build/cm/.../bsdsocket.library from the staged LIBS: makes the
 #      suite bail with "bsdsocket.library not available", so nothing else on
@@ -116,17 +112,6 @@ cp "$BSD" "$STAGE/libs/bsdsocket.library"
 cp "$UG"  "$STAGE/libs/usergroup.library"
 cp "$SUITE" "$STAGE/bsdsocktest"
 printf '%s\n' "$ARGS" > "$STAGE/conf-args"
-
-# Turn off FS-UAE's own bsdsocket.library emulation.  fsuae-run.sh only
-# mkdir -p's the base directory, so a file placed here survives.
-BASEDIR="$ROOT/build/fsuae-base-$TAG"
-mkdir -p "$BASEDIR/Configurations"
-cat > "$BASEDIR/Configurations/Host.fs-uae" <<'EOF'
-[fs-uae]
-floppy_drive_volume = 0
-floppy_drive_volume_empty = 0
-bsdsocket_library = 0
-EOF
 
 export AMINETXDUO_RUN_TAG="$TAG"
 

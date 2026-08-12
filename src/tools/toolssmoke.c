@@ -2,14 +2,14 @@
  * ToolsSmoke, run every command-line tool under the emulator and record
  * what it printed.
  *
- * tools/fsuae-run.sh boots a real Kickstart 3.1 A1200, runs one executable
+ * tools/amiberry-run.sh boots a real Kickstart 3.1 A1200, runs one executable
  * from s/Startup-Sequence with no arguments, and prints back anything the
  * Amiga left in DH0:*.txt.  The tools take arguments and write to stdout, so
  * this driver runs each of them through SystemTagList() with the Shell's own
  * redirection, appends the return code, and leaves the lot in DH0:tools.txt
  * for the host to read.
  *
- *   ./tools/fsuae-run.sh -t 120 build/cm/src/tools/ToolsSmoke \
+ *   ./tools/amiberry-run.sh -t 120 build/cm/src/tools/ToolsSmoke \
  *       build/cm/src/tools/AddNetInterface build/cm/src/tools/Online ... \
  *       src/tools/testdata/Devs
  *

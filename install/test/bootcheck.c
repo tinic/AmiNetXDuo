@@ -47,7 +47,7 @@
 
 /*
  * FS-UAE's SLIRP network is 10.0.2.0/24 with the gateway, the DHCP server
- * and the DNS forwarder all at 10.0.2.2, see tools/fsuae-run.sh.
+ * and the DNS forwarder all at 10.0.2.2, see tools/amiberry-run.sh.
  */
 #define GATEWAY         "10.0.2.2"
 

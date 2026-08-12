@@ -24,8 +24,8 @@
  * Everything is seeded from a constant.  A failure is reproducible.
  *
  * Run:
- *   AMINETXDUO_RUN_TAG=rsa20 ./tools/fsuae-run.sh        -t 300 build/cm/tests/crypto68k/crypto68k_test
- *   AMINETXDUO_RUN_TAG=rsa30 ./tools/fsuae-run.sh -c 68030 -t 300 build/cm/tests/crypto68k/crypto68k_test
+ *   AMINETXDUO_RUN_TAG=rsa20 ./tools/amiberry-run.sh        -t 300 build/cm/tests/crypto68k/crypto68k_test
+ *   AMINETXDUO_RUN_TAG=rsa30 ./tools/amiberry-run.sh -c 68030 -t 300 build/cm/tests/crypto68k/crypto68k_test
  *
  * SPDX-License-Identifier: MIT
  */

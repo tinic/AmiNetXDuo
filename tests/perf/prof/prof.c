@@ -58,7 +58,7 @@
 /* ------------------------------------------------------------- logging --- */
 
 /*
- * Straight to the serial port, which is what tools/fsuae-run.sh captures.
+ * Straight to the serial port, which is what tools/amiberry-run.sh captures.
  * Same route perf_test.c uses and for the same reason: stdout goes to the
  * emulated screen and nowhere the host can read it.
  */

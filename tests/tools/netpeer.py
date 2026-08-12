@@ -2,9 +2,9 @@
 """
 netpeer, the other end, on the host, for the nc / telnet runs.
 
-tools/fsuae-run.sh attaches FS-UAE's SLIRP user-mode NAT.  From inside the
-guest the host is 10.0.2.2, so a server bound to 127.0.0.1 here is reachable
-from the Amiga at 10.0.2.2:<port>.  That is how the client half of all three
+tools/amiberry-run.sh attaches the emulator's SLIRP user-mode NAT.  From
+inside the guest the host is 10.0.2.2, so a server bound to 127.0.0.1 here is
+reachable from the Amiga at 10.0.2.2:<port>.  That is how the client half of all three
 commands is tested against something that is not a mock.
 
 Three servers, one process, one log:

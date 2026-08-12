@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
 #
-# Run the ported dbclient under FS-UAE, on SLIRP, against a real SSH server.
+# Run the ported dbclient under Amiberry, against a real SSH server.
 #
 #   clients/dropbear/run-fsuae.sh [-m MODEL] [-t SECONDS] [-c CPU] [-k MHZ]
 #                                 [-b STACKBUILD] [-D DBBUILD] [-i KEYFILE]
-#                                 [-x] [-C COMMANDS] [-A] [-X FILE]...
+#                                 [-C COMMANDS] [-A [-N BOARD] [-B BACKEND]]
+#                                 [-X FILE]...
 #
-#   -A  Amiberry instead of FS-UAE, which is what a headless box needs: FS-UAE
-#       wants an X server and dies in GLAD before the guest boots.  Its slirp
-#       is the same 10.0.2.0/24 with the host at 10.0.2.2, so the target does
-#       not move.  NOT a timing lane, -x is FS-UAE's.
+#   -A  name the board and the backend (-N, -B) instead of taking the A2065 on
+#       SLIRP.  Both go through tools/amiberry-run.sh either way; SLIRP puts
+#       the host at 10.0.2.2, so the default command list's target does not
+#       move.
 #
-#   -x  take the emulator alone (tools/amiberry-run.sh's measurement lane).  EVERY
-#       timing here needs it: a handshake measured while two other FS-UAE
-#       instances share the host is fiction, and this project has already had
-#       one set of figures corrupted that way.
+#   EVERY timing here needs the machine to itself -- a handshake measured while
+#   two other emulators share the host is fiction, and this project has already
+#   had one set of figures corrupted that way.  Nothing enforces it: the
+#   exclusive lane lived in the FS-UAE runner's slot lock and went with it.
 #   -C  a command list to stage instead of the default four connections
 #   -X  stage one more file into DH0:, repeatable.  It exists for
 #       tools/profiler/Profile, which has to sit beside dbclient in order
@@ -85,17 +86,16 @@ DB_BUILD2=""
 DB_SERVER=""
 KEYFILE="${AMINETXDUO_DBCLIENT_KEY:-$ROOT/build/sshd-test/id_amiga}"
 
-PERF=0
 COMMANDS="${AMINETXDUO_DB_COMMANDS:-}"
-# FS-UAE needs an X server and dies in GLAD on a headless box, so -A picks
-# Amiberry.  Its slirp puts the host at 10.0.2.2 as well, so DBHOST is the
-# same either way and the default command list needs no change.
-RUNNER_KIND="${AMINETXDUO_RUNNER:-fsuae}"
+# -A names a board and a backend; without it the A2065 goes on SLIRP.  Both
+# branches are tools/amiberry-run.sh, and SLIRP puts the host at 10.0.2.2
+# either way, so DBHOST needs no change.
+RUNNER_KIND="${AMINETXDUO_RUNNER:-slirp}"
 BOARD=a2065
 EXTRA=()
 BACKEND="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
 
-while getopts "m:t:c:k:b:D:E:i:xC:S:AN:B:X:" opt; do
+while getopts "m:t:c:k:b:D:E:i:C:S:AN:B:X:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
@@ -105,14 +105,13 @@ while getopts "m:t:c:k:b:D:E:i:xC:S:AN:B:X:" opt; do
         D) DB_BUILD="$OPTARG" ;;
         E) DB_BUILD2="$OPTARG" ;;
         i) KEYFILE="$OPTARG" ;;
-        x) PERF=1 ;;
         C) COMMANDS="$OPTARG" ;;
         S) DB_SERVER="$OPTARG" ;;
         A) RUNNER_KIND=amiberry ;;
         N) BOARD="$OPTARG" ;;
         B) BACKEND="$OPTARG" ;;
         X) EXTRA+=("$OPTARG") ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-k MHz] [-b stackbuild] [-D dbbuild] [-i key] [-x] [-C commands] [-E dbbuild2] [-S srvbuild] [-A [-N board] [-B backend]] [-X file]..." >&2; exit 2 ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-k MHz] [-b stackbuild] [-D dbbuild] [-i key] [-C commands] [-E dbbuild2] [-S srvbuild] [-A [-N board] [-B backend]] [-X file]..." >&2; exit 2 ;;
     esac
 done
 
@@ -364,7 +363,6 @@ export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-dropbear}"
 CPUARG=()
 [ -z "$CPU" ]   || CPUARG+=(-c "$CPU")
 [ -z "$CLOCK" ] || CPUARG+=(-k "$CLOCK")
-if [ "$PERF" = "1" ]; then CPUARG+=(-x); fi
 
 STAGED=("$STAGE/devs" "$STAGE/libs" "$STAGE/dbclient")
 [ -z "$DB_BUILD2" ] || STAGED+=("$STAGE/dbclient2")

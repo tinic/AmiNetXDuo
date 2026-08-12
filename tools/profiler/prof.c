@@ -63,7 +63,7 @@
 /* ------------------------------------------------------------- logging --- */
 
 /*
- * Straight to the serial port, which is what tools/fsuae-run.sh captures, and
+ * Straight to the serial port, which is what tools/amiberry-run.sh captures, and
  * optionally to stdout as well, which is what somebody sitting at a real
  * machine wants.  Both, because the tool has to be usable in an emulator
  * harness and on a desk.

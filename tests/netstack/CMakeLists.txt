@@ -1,7 +1,7 @@
 # Milestone 3 bring-up test: the whole stack against a real SANA-II device.
 #
 # Needs a machine (or an emulator) with an Ethernet card and a
-# DEVS:NetInterfaces/<name> file, see tools/fsuae-run.sh -n, which wires an
+# DEVS:NetInterfaces/<name> file, see tools/amiberry-run.sh -N a2065, which wires an
 # FS-UAE A2065 up to SLIRP.
 
 add_executable(netstack_test netstack_test.c)

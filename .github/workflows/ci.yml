@@ -169,7 +169,7 @@ jobs:
             tools/fetch-toolchain.sh \
             tools/package-toolchain-mirror.sh \
             tools/amiga-toolchain.sh \
-            tools/fsuae-run.sh \
+            tools/amiberry-run.sh \
             tools/enforcer-run.sh \
             tools/ci-arm.sh \
             tests/conformance/build.sh \

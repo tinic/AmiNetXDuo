@@ -1,4 +1,4 @@
-/* Harness smoke test: proves fsuae-run.sh boots, logs to serial, can write a
+/* Harness smoke test: proves amiberry-run.sh boots, logs to serial, can write a
    result file back to the host, and that ENV:/T: assigns exist.
    SPDX-License-Identifier: MIT */
 #include <proto/exec.h>

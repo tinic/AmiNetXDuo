@@ -3,8 +3,7 @@
  * handshake costs, counted on the build host.
  *
  * The emulator queue is deep and every timing run has to hold the machine
- * alone (tools/fsuae-run.sh -x), so anything that does not need a 68020 should
- * not take a slot.  An operation count does not: 2^255-19 arithmetic executes
+ * alone, so anything that does not need a 68020 should not take a slot.  An operation count does not: 2^255-19 arithmetic executes
  * the same number of multiplies on any machine, and the count is the half of
  * the cost model a wall clock cannot give.  The guest measures milliseconds
  * per primitive, this measures multiplies per primitive, and dividing one by

@@ -14,7 +14,7 @@ reaches when it gives up on a slow client, which is what a 14 MHz 68020
 looks like to anything on the modern internet, without waiting for a real
 server to time out, and to do it deterministically.
 
-Binds 127.0.0.1 on purpose: fs-uae's SLIRP maps the guest's 10.0.2.2 to the
+Binds 127.0.0.1 on purpose: the emulator's SLIRP maps the guest's 10.0.2.2 to the
 host loopback, so that is the whole reachable surface, and it keeps macOS from
 asking about incoming connections.
 

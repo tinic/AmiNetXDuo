@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """httppeer, the host end every guest-side network test is pointed at.
 
-tools/fsuae-run.sh attaches FS-UAE's SLIRP user-mode NAT, so a server bound to
-127.0.0.1 here is what the guest reaches at 10.0.2.2:<port>.  Same arrangement
+tools/amiberry-run.sh attaches the emulator's SLIRP user-mode NAT, so a server
+bound to 127.0.0.1 here is what the guest reaches at 10.0.2.2:<port>.  Same arrangement
 as tests/tools/netpeer.py, which this imports rather than reimplements for the
 FTP half.
 
