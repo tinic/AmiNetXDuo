@@ -77,7 +77,9 @@ MODEL=A1200
 OSVER=31
 TIMEOUT=420
 LISTWAIT=90
-URL="${AMINETXDUO_SMB_URL:-smb://turo:r2d23028@storage.local.tinic.net/retro}"
+# No default: this took a real NAS credential, in a public repository. -P
+# stands a test server up and is what CI uses; -u names a share explicitly.
+URL="${AMINETXDUO_SMB_URL:-}"
 BACKEND="${AMINETXDUO_EMU_BACKEND:-ens18}"
 MAC="${AMINETXDUO_EMU_MAC:-52:54:00:5b:2f:11}"
 TAG="${AMINETXDUO_RUN_TAG:-smbmount}"
