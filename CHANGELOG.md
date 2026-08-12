@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A program can put a deadline on a connection with `TCP_USER_TIMEOUT`, instead of waiting out a retransmit ladder that takes 127 seconds to give up. Measured from the last acknowledgement that moved the connection forward, so a slow transfer that is still making progress is never cut off
+- `netstat` and `ShowNetStatus TCPSOCKETS` mark a connection whose peer has stopped acknowledging, with how long it has been stalled and how many times it has retransmitted. A machine with nothing wrong prints exactly what it printed before
 - A SYN arriving on a connection that is already up no longer renegotiates it. Anyone who knew the four addresses and ports could drop the segment size to 536, turn SACK off, or stop the connection sending altogether, without guessing a sequence number
 - `fetch` says what went wrong on an encrypted connection. An alert from the server, a record that would not decrypt and a transfer that stopped being answered all printed "the connection failed: the network connection failed"
 - A one-shot resolver gets an answer for `<name>.local`, so `dig` and anything using a plain socket can resolve a machine, not only `dns-sd` and Avahi
