@@ -165,7 +165,9 @@ fi
 # of this file uses for "this box cannot run this test", and ci.sh already
 # reads it as the rig refusing.  Found the first time the emulator workflow
 # ran the arm, 2026-08-12.
-[ -x "$ROOT/build/fitz/Fitz/fitz" ] || {
+# -f, not -x: it is an m68k binary the emulator reads as a file, and lha
+# unpacks it 0600.  Nothing on this host ever executes it.
+[ -f "$ROOT/build/fitz/Fitz/fitz" ] || {
     echo "no $ROOT/build/fitz/Fitz/fitz -- run tests/endurance/fetch-fitz.sh" >&2
     echo "This measures throughput against Fitz, which is fetched rather than" >&2
     echo "vendored, so a fresh checkout does not have it." >&2
