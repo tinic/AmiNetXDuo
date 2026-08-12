@@ -1172,6 +1172,83 @@ ULONG        len;
     (VOID)bsd_CloseSocket(fd);
 }
 
+/*
+ * u08.  A datagram is a record: what a short read discards, and what a peek
+ * leaves behind.
+ *
+ * Two decisions, and the same wire cannot tell them apart from the correct
+ * behaviour without asking for the NEXT datagram.  A read shorter than the
+ * datagram takes what fits and the rest is gone -- if the remainder were
+ * queued instead, the following read would hand back the tail of a datagram
+ * the caller has already been told it finished, and every record boundary
+ * after that is off by one.  MSG_PEEK is the opposite: the datagram stays, and
+ * the read after it must be the same one and not the one behind it.
+ *
+ * Each datagram carries a different first byte, which is the only way to say
+ * which one came back rather than merely that one did.
+ */
+#define T_MSG_PEEK      0x02
+
+static VOID t_case_datagram_boundary(VOID)
+{
+static UBYTE buf[256];
+LONG         fd;
+SockAddrIn   a;
+LONG         n;
+
+    fd = bsd_socket(AF_INET, SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(fd >= 0), "socket(SOCK_DGRAM)", bsd_Errno()))
+        return;
+
+    t_addr(&a, 0UL, (UWORD)LOCAL_PORT);
+    if (!t_check((BOOL)(bsd_bind(fd, &a, (LONG)sizeof(a)) == 0), "bind",
+                 bsd_Errno()))
+    {
+        (VOID)bsd_CloseSocket(fd);
+        return;
+    }
+    t_rcvtimeo(fd, 1);
+
+    /* 200 bytes, then 8, so a read that keeps the remainder of the first has
+       something visibly wrong to hand back. */
+    t_settle();
+    (VOID)t_check((BOOL)t_inject(PEER_IP, PEER_PORT, 0xA5, 200UL),
+                  "inject a 200-byte datagram", 0);
+    (VOID)t_check((BOOL)t_inject(PEER_IP, PEER_PORT, 0x5A, 8UL),
+                  "inject an 8-byte one behind it", 0);
+    t_settle();
+
+    n = bsd_recvfrom(fd, buf, 50, 0, NULL, NULL);
+    (VOID)t_check((BOOL)(n == 50), "a 50-byte read of the 200 returns 50", n);
+    (VOID)t_check((BOOL)(buf[0] == 0xA5), "and it is the first datagram",
+                  (LONG)buf[0]);
+
+    n = bsd_recvfrom(fd, buf, (LONG)sizeof(buf), 0, NULL, NULL);
+    (VOID)t_check((BOOL)(n == 8), "the next read is the NEXT datagram, not the "
+                                  "other 150 bytes", n);
+    (VOID)t_check((BOOL)(buf[0] == 0x5A), "and it is the one behind it",
+                  (LONG)buf[0]);
+
+    /* MSG_PEEK: the same datagram twice, and nothing after it. */
+    t_settle();
+    (VOID)t_check((BOOL)t_inject(PEER_IP, PEER_PORT, 0xC3, 16UL),
+                  "inject a 16-byte datagram", 0);
+    t_settle();
+
+    n = bsd_recvfrom(fd, buf, (LONG)sizeof(buf), T_MSG_PEEK, NULL, NULL);
+    (VOID)t_check((BOOL)(n == 16 && buf[0] == 0xC3), "MSG_PEEK reads it", n);
+
+    n = bsd_recvfrom(fd, buf, (LONG)sizeof(buf), 0, NULL, NULL);
+    (VOID)t_check((BOOL)(n == 16 && buf[0] == 0xC3),
+                  "and the read after it is the same datagram", n);
+
+    n = bsd_recvfrom(fd, buf, (LONG)sizeof(buf), 0, NULL, NULL);
+    (VOID)t_check((BOOL)(n < 0 && bsd_Errno() == T_EWOULDBLOCK),
+                  "which the peek did not duplicate", (n < 0) ? bsd_Errno() : n);
+
+    (VOID)bsd_CloseSocket(fd);
+}
+
 /* ------------------------------------------------------------------ main -- */
 
 int main(void)
@@ -1200,6 +1277,7 @@ int main(void)
     t_case_icmp_unconnected();
     t_case_bind_address();
     t_case_maxdgram();
+    t_case_datagram_boundary();
 
     CloseLibrary(SocketBase);
     SocketBase = NULL;
