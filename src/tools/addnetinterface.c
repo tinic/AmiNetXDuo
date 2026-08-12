@@ -2,6 +2,8 @@
  * AddNetInterface, bring up the interface described by
  * DEVS:NetInterfaces/<name>.
  *
+ *     AddNetInterface INTERFACE/M,QUIET/S,TIMEOUT/K/N
+ *
  * This is the command S:User-Startup invokes, so it is the one that starts the
  * network:
  *

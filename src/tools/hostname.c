@@ -1,7 +1,7 @@
 /*
  * hostname, what this machine calls itself, and where that came from.
  *
- *     C:hostname [<name>] [QUIET]
+ *     hostname NAME,QUIET/S
  *
  * WHY THE SOURCE IS PRINTED AND NOT JUST THE NAME
  *

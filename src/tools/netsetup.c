@@ -1,8 +1,8 @@
 /*
  * NetSetup, set up a network interface by answering questions.
  *
- *     NetSetup [NAME] [DEVICE=..] [UNIT=n] [DHCP] [ADDRESS=..] [NETMASK=..]
- *              [GATEWAY=..] [DNS=..] [ONLINE] [NOONLINE] [FORCE] [QUIET]
+ *     NetSetup NAME,DEVICE/K,UNIT/K/N,DHCP/S,ADDRESS/K,NETMASK/K,GATEWAY/K,
+ *              DNS/K,ONLINE/S,NOONLINE/S,FORCE/S,QUIET/S
  *
  * Writes the DEVS:NetInterfaces/<name> keyword file from a few questions,
  * instead of requiring the SANA-II driver details to be known up front.

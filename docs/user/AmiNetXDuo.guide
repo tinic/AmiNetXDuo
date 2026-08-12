@@ -899,7 +899,7 @@
   to type the arguments, exactly as with any AmigaDOS command:
 
       1> netstat ?
-      INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S:
+      INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S,HEALTH=-h/S:
 
   These are Shell commands. Started from Workbench they will only tell
   you so.
@@ -1197,7 +1197,8 @@
 
                               @{b}netstat@{ub}
 
-      netstat INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S
+      netstat INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S,
+              HEALTH=-h/S
 
   Interfaces, routes and connections, in the layout Unix users expect.
   Every switch has both spellings, the Unix one and the AmigaDOS one
@@ -1263,7 +1264,8 @@
 
       ping -c=COUNT/K/N,-i=INTERVAL/K/N,-l=LOAD/K/N,
            -n=NUMERICONLY=NUMERIC/S,-o=ONEREPLY/S,-q=QUIET/S,
-           -s=SIZE/K/N,-t=TIMEOUT/K/N,BELL/S,HOST/A
+           -s=SIZE/K/N,-t=TIMEOUT/K/N,BELL/S,HOST/A,
+           IPV4=-4/S,IPV6=-6/S
 
   Sends ICMP echo requests and reports what comes back. The single best
   test of whether two machines can see each other.
@@ -1354,7 +1356,7 @@
 
                                 @{b}host@{ub}
 
-      host NAME/A,TIMEOUT/N/K
+      host NAME/A,TIMEOUT/N/K,IPV4=-4/S,IPV6=-6/S
 
   Looks a name up, or an address back. A dotted address is looked up
   backwards; anything else forwards.

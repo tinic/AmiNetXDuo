@@ -2,8 +2,10 @@
  * NetTrace, capture the stack's own traffic to a pcap file while running a
  * workload underneath it.
  *
- *     NetTrace [WIRE|LOOPBACK] [HOST=..] [PORT=n] [PATH=..] [BYTES=n]
- *              [OUT=file] [SNAP=n] [NOCAPTURE/S] [BLEN=n]
+ *     NetTrace LOOPBACK/S,WIRE/S,HOST/K,PORT/N/K,PATH/K,BYTES/N/K,OUT/K,
+ *              SNAP/N/K,BLEN/N/K,NOCAPTURE/S,IFACE/K
+ *
+ *   LOOPBACK and WIRE are alternatives; HOST implies WIRE.
  *
  *   Capture and workload share one process so the throughput number and the
  *   trace come out of the same run.  Draining the capture between socket
@@ -941,6 +943,14 @@ int main(int argc, char **argv)
 
     wire    = (args[ARG_WIRE] != 0) || (args[ARG_HOST] != 0);
     capture = (args[ARG_NOCAPTURE] == 0);
+
+    /* LOOPBACK is the default, so it only ever has to say no to the other. */
+    if (args[ARG_LOOPBACK] != 0 && wire)
+    {
+        tool_error("LOOPBACK and WIRE are alternatives, and HOST means WIRE");
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
 
     path  = (args[ARG_PATH] != 0) ? (const char *)args[ARG_PATH] : "/";
     out   = (args[ARG_OUT] != 0) ? (const char *)args[ARG_OUT]

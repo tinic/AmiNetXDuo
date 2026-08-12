@@ -1,7 +1,7 @@
 /*
  * RemoveNetInterface, take one interface out of the running stack.
  *
- *     C:RemoveNetInterface eth0 [FORCE] [QUIET]
+ *     RemoveNetInterface INTERFACE/M/A,FORCE/S,QUIET/S
  *
  * The counterpart of AddNetInterface, and a narrower thing than NetShutdown:
  * that one stops every interface there is and leaves them all configured,

@@ -1,10 +1,9 @@
 /*
  * ConfigureNetInterface, re-address a running interface in place.
  *
- *     C:ConfigureNetInterface eth0 [QUIET] [ADDRESS <a>[/<bits>]]
- *                                  [NETMASK <m>] [GATEWAY <g>|NONE]
- *                                  [MDNS YES|NO]
- *                                  [CONFIGURE DHCP] [RELEASE] [TIMEOUT <secs>]
+ *     ConfigureNetInterface INTERFACE/A,QUIET/S,ADDRESS/K,NETMASK/K,
+ *                           GATEWAY/K,MDNS/K,CONFIGURE/K,
+ *                           RELEASE=RELEASEADDRESS/S,TIMEOUT/K/N
  *
  * Until now the only way to change what a live interface is addressed with was
  * RemoveNetInterface followed by AddNetInterface, which closes the SANA-II

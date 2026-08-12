@@ -1,7 +1,7 @@
 /*
  * ShowNetServices, what else on this network is offering something.
  *
- *     ShowNetServices [TYPE] [ALL] [SECONDS=<n>] [TXT/S] [QUIET/S]
+ *     ShowNetServices TYPE,ALL/S,SECONDS/K/N,TXT/S,QUIET/S
  *
  * The other half of mDNS. netstack_mdns.c makes this machine findable by name
  * and advertises whatever DEVS:Internet/service_discovery declares; this asks

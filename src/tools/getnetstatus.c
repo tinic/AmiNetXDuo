@@ -1,7 +1,7 @@
 /*
  * GetNetStatus, report network readiness as a return code, for scripts.
  *
- *     GetNetStatus CHECK/K,QUIET/S
+ *     GetNetStatus CHECK/K,QUIET/S,VERSION/S
  *
  *     C:GetNetStatus CHECK=INTERFACES,DEFAULTROUTE QUIET
  *     IF WARN

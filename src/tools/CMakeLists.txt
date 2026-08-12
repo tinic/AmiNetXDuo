@@ -529,9 +529,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     set_target_properties(test_httpif PROPERTIES C_STANDARD 11)
 
     # The ReadArgs templates of every command, against the enums that index
-    # them.  Parses the sources rather than compiling them: they reach
-    # proto/dos.h, and the failure it catches is a template and an enum drifting
-    # apart, which no compiler sees.
+    # them, against what the code does with each slot, and against the two
+    # places the template is written out again for a reader.  Parses the
+    # sources rather than compiling them: they reach proto/dos.h, and none of
+    # what it catches is anything a compiler sees.
+    #
+    # Four groups, one ctest case each, selected by argv[1].
     add_executable(test_argtemplates
         test/test_argtemplates.c)
 
@@ -618,5 +621,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME httpframe_bodies COMMAND test_httpframe)
     add_test(NAME httplock_rfc4918 COMMAND test_httplock)
     add_test(NAME iperf_wire_format COMMAND test_iperfwire)
-    add_test(NAME tools_arg_templates COMMAND test_argtemplates)
+    add_test(NAME tools_arg_templates COMMAND test_argtemplates enums)
+    add_test(NAME tools_arg_contract  COMMAND test_argtemplates contract)
+    add_test(NAME tools_arg_usage     COMMAND test_argtemplates usage)
+    add_test(NAME tools_arg_docs      COMMAND test_argtemplates docs)
 endif()

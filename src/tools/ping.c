@@ -2,7 +2,8 @@
  * ping, ICMP echo, over a raw socket.
  *
  *     ping -c=COUNT/K/N,-i=INTERVAL/K/N,-l=LOAD/K/N,-n=NUMERICONLY=NUMERIC/S,
- *          -o=ONEREPLY/S,-q=QUIET/S,-s=SIZE/K/N,-t=TIMEOUT/K/N,BELL/S,HOST/A
+ *          -o=ONEREPLY/S,-q=QUIET/S,-s=SIZE/K/N,-t=TIMEOUT/K/N,BELL/S,HOST/A,
+ *          IPV4=-4/S,IPV6=-6/S
  *
  * Every option carries both spellings, short flag and keyword, as netstat does
  * for its switches.

@@ -1,7 +1,7 @@
 /*
  * arp, the address resolution cache: what is at each address on this network.
  *
- *     arp [ADDRESS] [DELETE] [SET=<hardware address>] [UNIT=<n>] [STATS]
+ *     arp ADDRESS,DELETE/S,SET/K,UNIT/K/N,STATS/S,QUIET/S
  *
  * Every packet leaving this machine for the local network needs the ethernet
  * address of its destination, and ARP is how that is found and remembered. The
