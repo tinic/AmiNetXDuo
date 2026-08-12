@@ -72,6 +72,7 @@ REPS=3
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 TAG="${AMINETXDUO_RUN_TAG:-lossgate}"
 RECORD=0
+REPS_GIVEN=0
 BASELINE="$ROOT/tests/perf/lossgate-baseline.txt"
 KB=4096
 # The widest tolerance -B will write.  See the refusal below.
@@ -107,7 +108,7 @@ while getopts "H:A:l:r:b:k:T:Bf:h" opt; do
         H) PEER="$OPTARG" ;;
         A) PEER_ADDR="$OPTARG" ;;
         l) LOSS="$OPTARG" ;;
-        r) REPS="$OPTARG" ;;
+        r) REPS="$OPTARG"; REPS_GIVEN=1 ;;
         b) BUILD="$OPTARG" ;;
         k) KB="$OPTARG" ;;
         T) TAG="$OPTARG" ;;
@@ -119,6 +120,41 @@ while getopts "H:A:l:r:b:k:T:Bf:h" opt; do
 done
 
 [ -n "$PEER" ] && [ -n "$PEER_ADDR" ] || { usage >&2; exit 2; }
+
+# THE SAME LINK AND THE SAME NUMBER OF ARMS, OR IT IS NOT A COMPARISON.
+#
+# Throughput under loss is a function of the loss rate and the transfer size,
+# so a 1% run read against a 5% baseline reports the difference between two
+# rigs as a regression in the stack.
+#
+# The ARM COUNT belongs here for a less obvious reason: the read figure is
+# bimodal, so the median of three arms and the median of nine are different
+# estimators of the same thing.  A baseline recorded over nine, compared
+# against a run of three, went red at -16.7% on a build with nothing wrong
+# with it.  If the caller did not ask for a rep count, take the baseline's.
+#
+# Read here, before the arms run, because it decides how many of them there
+# are.  Recording skips all of it: -B is where a baseline comes from.
+if [ "$RECORD" = 0 ]; then
+    [ -f "$BASELINE" ] ||
+        { echo "no baseline at $BASELINE -- record one with -B" >&2; exit 2; }
+    WANT=$(sed -n 's/^# Recorded with \([0-9.]*\)% peer-to-guest loss, \([0-9]*\) KB, \([0-9]*\) reps.*/\1 \2 \3/p' \
+           "$BASELINE" | head -1)
+    if [ -n "$WANT" ]; then
+        set -- $WANT
+        if [ "$1" != "$LOSS" ] || [ "$2" != "$KB" ]; then
+            echo "$BASELINE was recorded at $1% loss over $2 KB and this run" >&2
+            echo "is ${LOSS}% over $KB KB.  Those are different links; the" >&2
+            echo "comparison would report the rig as a regression.  Match it" >&2
+            echo "with -l and -k, or record a new baseline with -B." >&2
+            exit 2
+        fi
+        if [ "$REPS_GIVEN" = 0 ] && [ -n "${3:-}" ]; then
+            REPS="$3"
+            echo "==> $REPS arms, which is what $BASELINE was recorded over"
+        fi
+    fi
+fi
 
 # The peer's qdisc is machine-wide, so two of these running at once measure
 # each other.  Refuse rather than produce a number nobody can trust.
@@ -333,25 +369,6 @@ if [ "$RECORD" = "1" ]; then
     echo "==> baseline written to $BASELINE"
     cat "$BASELINE"
     exit 0
-fi
-
-[ -f "$BASELINE" ] || { echo "no baseline at $BASELINE -- record one with -B" >&2; exit 2; }
-
-# THE SAME LINK, OR IT IS NOT A COMPARISON.  Throughput under loss is a
-# function of the loss rate and the transfer size, so a 1% run read against a
-# 5% baseline reports the difference between two rigs as a regression in the
-# stack.  The recorder writes both into the header; this reads them back.
-WANT=$(sed -n 's/^# Recorded with \([0-9.]*\)% peer-to-guest loss, \([0-9]*\) KB.*/\1 \2/p' \
-       "$BASELINE" | head -1)
-if [ -n "$WANT" ]; then
-    set -- $WANT
-    if [ "$1" != "$LOSS" ] || [ "$2" != "$KB" ]; then
-        echo "$BASELINE was recorded at $1% loss over $2 KB and this run is" >&2
-        echo "${LOSS}% over $KB KB.  Those are different links; the comparison" >&2
-        echo "would report the rig as a regression.  Match it with -l and -k," >&2
-        echo "or record a new baseline with -B." >&2
-        exit 2
-    fi
 fi
 
 echo
