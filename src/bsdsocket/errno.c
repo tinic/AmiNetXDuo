@@ -194,10 +194,25 @@ LONG bsd_errno_from_nx(UINT status)
  * EWOULDBLOCK is right for all three only when the caller asked not to wait.
  * On a socket prepared to block for ever it tells the application to retry a
  * call that cannot succeed, the failure English Amiga Board thread 122501
- * reports against AmiTCP and Roadshow (docs/RESEARCH.md 37). ENOBUFS is used
- * instead, and it is reachable: the pool is a fixed 16..512 packets and
- * docs/RESEARCH.md 37.5 measured it at 1 free of 256 for 316 consecutive
- * seconds.
+ * reports against AmiTCP and Roadshow (docs/RESEARCH.md 37). ENOBUFS is what
+ * that socket gets instead.
+ *
+ * THAT ARM CANNOT BE ENTERED, and the reason is structural rather than a
+ * question of how hard the pool is pushed. The three statuses are what NetX
+ * Duo returns when it MAY NOT WAIT: with a non-zero wait option it suspends
+ * (nx_packet_allocate.c's `if (wait_option)`, nx_tcp_socket_send_internal.c's
+ * suspension arm), and the cleanup routines that resume a suspended thread
+ * with one of the three -- _nx_packet_pool_cleanup, _nx_tcp_transmit_cleanup
+ * -- run on the TIMEOUT, which NX_WAIT_FOREVER has not got. So a caller
+ * holding NX_WAIT_FOREVER never sees any of the three, and `impatient` is true
+ * at every entry that reaches the case below. bsd_wait_sliced() (select.c)
+ * closes it from the other side as well: those are the exact three statuses it
+ * retries on, so a blocking call with no timeout does not even return from
+ * there with one. tests/tcpdrill/scripts/blocking.drill b07 asserts the
+ * reachable half, on a booted guest, and says the same thing about this half.
+ *
+ * The arm stays rather than becoming an assertion: `wait` is a parameter, the
+ * statuses come from a third party, and an errno is cheaper than a mistake.
  *
  * NX_WAIT_ABORTED and NX_POOL_DELETED are handled here because the table alone
  * would turn a signalled thread and a stack shutting down into "try again".

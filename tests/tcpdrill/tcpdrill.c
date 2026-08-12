@@ -43,6 +43,28 @@
  *                          not wait for a peer that has stopped answering
  *   idle MS                let MS pass; frames that arrive are queued
  *
+ * The blocking half.  Everything above runs the socket non-blocking, because
+ * the script engine is the peer and a call that waits stops the only thing
+ * that could answer it.  `wire` moves the peer into a Process of its own for
+ * the duration of one blocking call, which is the only way anything below is
+ * reachable at all; see "the wire" further down for what each mode does.
+ *
+ *   blocking               take FIONBIO back off the socket
+ *   wire MODE [key=value]  start the peer task: `grant`, `dribble`, `finack`
+ *                          or `silent`
+ *   join                   stop it and report what it saw
+ *   bstream N [timeout=MS] [short=0|1] [min=MS] [max=MS]
+ *                          the application write loop, blocking, N bytes.
+ *                          `timeout` is SO_SNDTIMEO; a short send is required
+ *                          unless `short=0`, because a case whose send never
+ *                          went short reached nothing; min/max bound the whole
+ *                          loop, which is how a case says it WAITED
+ *   bshort N               the first short send credited exactly N
+ *   brecv N [waitall] = N  one blocking recv(), bytes checked as well as count
+ *   bclose min=MS max=MS   CloseSocket() that must wait, bounded both ways
+ *   wirestream N           the peer received the stream byte for byte, once
+ *   wiregrants N           the peer really did close the window N times
+ *
  *   tx FLAGS [key=value]   the next frame the stack sends must be this
  *   notx MS                the stack must send nothing for MS
  *   txcount MIN MAX        discard everything queued, and assert how much of
@@ -113,6 +135,7 @@
 #include <exec/types.h>
 #include <exec/memory.h>
 #include <dos/dos.h>
+#include <dos/dostags.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 
@@ -186,8 +209,12 @@ static const UBYTE peer_mac[6]  = { 0x02, 0x00, 0x44, 0x52, 0x4C, 0x02 };
 #define IPPROTO_TCP_    6
 #define TCP_NODELAY_    1
 
+#define SO_SNDTIMEO_    0x1005
+#define SO_RCVTIMEO_    0x1006
+
 #define FIONBIO_        0x8004667EUL
 #define MSG_OOB_        1
+#define MSG_WAITALL_    0x40
 
 #define E_WOULDBLOCK    35
 #define E_INPROGRESS    36
@@ -980,6 +1007,14 @@ typedef struct Inject
     ULONG   sack_lo[4];
     ULONG   sack_hi[4];
     LONG    corrupt;            /* payload byte to flip after the checksum */
+    /*
+     * Where in the STREAM this segment's payload starts, for the pattern the
+     * bytes are generated from.  A one-segment case wants 0 and gets it from
+     * the zeroed record; a peer that dribbles a stream over several segments
+     * needs each one to carry the bytes belonging to its own offset, or the
+     * receiver cannot tell a correct stream from a shuffled one.
+     */
+    ULONG   dofs;
     ULONG   pad;                /* Ethernet padding past the datagram      */
     BOOL    unaligned;          /* hand the device an odd buffer           */
     BOOL    badopt;             /* an MSS option whose length byte says 3  */
@@ -995,6 +1030,10 @@ typedef struct Inject
  * offset 0 is the other one, which SANA-II equally allows.
  */
 static ULONG f_aligned[(TAP_FRAME_MAX / 4) + 2];
+
+/* Set while the wire task owns the wire; see build_and_inject's tail. */
+static BOOL  inject_quiet;
+static ULONG n_inject_dropped;
 
 static VOID build_and_inject(const Inject *in)
 {
@@ -1137,7 +1176,7 @@ static VOID build_and_inject(const Inject *in)
     }
 
     for (i = 0; i < in->dlen; i++)
-        tcp[thl + i] = (UBYTE)('a' + (i % 26));
+        tcp[thl + i] = (UBYTE)('a' + ((in->dofs + i) % 26));
 
     {
         ULONG sum = 0;
@@ -1166,8 +1205,16 @@ static VOID build_and_inject(const Inject *in)
 
     if (tap_rx_put(f, ETH_HDR + iplen + in->pad) != 0)
     {
-        say("  !! injection dropped -- no CMD_READ outstanding for 0x0800");
-        cs.fails++;
+        /* The wire task (below) injects from a Process of its own, which has
+           no Output() and must not reach say(); it counts instead and the
+           main task reports the count at `join`. */
+        if (inject_quiet)
+            n_inject_dropped++;
+        else
+        {
+            say("  !! injection dropped -- no CMD_READ outstanding for 0x0800");
+            cs.fails++;
+        }
     }
 }
 
@@ -1919,6 +1966,551 @@ static VOID do_wirebytes(const char *args, const char *raw)
     pass(raw);
 }
 
+/* ------------------------------------------------------------- the wire -- */
+/*
+ * A SECOND TASK, BECAUSE A WIRE SCRIPT CANNOT BLOCK.
+ *
+ * Every socket above is non-blocking, and has to be: this program is both the
+ * application and the peer, so a call that waits stops the only thing that
+ * could answer it and waits for ever.  That put four decisions in
+ * bsdsocket.library out of reach of every script here, and in each of them THE
+ * BLOCKING IS THE BEHAVIOUR:
+ *
+ *   transfer.c bsd_send_consumed()  what a send() credits when the peer's
+ *                                   window closes part-way through the packet
+ *                                   NetX Duo is segmenting.  A wrong answer
+ *                                   duplicates stream bytes.
+ *   transfer.c MSG_WAITALL          keep waiting until the caller's buffer is
+ *                                   full.  On a non-blocking socket the flag
+ *                                   has nothing to change.
+ *   socket.c   SO_LINGER {1, n>0}   a close that waits for the peer.
+ *   errno.c    bsd_wait_errno()     ENOBUFS on a socket that meant to wait,
+ *                                   EWOULDBLOCK on one that did not.
+ *
+ * So the peer moves into a Process of its own and the script's task keeps the
+ * socket.  Only the peer half moves: the wire task calls tap_tx_get(),
+ * tap_rx_put() and build_and_inject() and never touches bsdsocket.library, so
+ * there is no socket shared across tasks and no ObtainSocket() in the picture.
+ * The two are exclusive by construction -- `wire` starts the task, the
+ * blocking directive that follows is the only thing the main task does while
+ * it runs, and `join` stops it -- so the frame builder and the tap ring have
+ * one user at a time even though they are global.
+ *
+ * The peer is a fixed rule rather than a script.  A blocked application cannot
+ * step a script, and the four behaviours above each need one rule applied to
+ * whatever arrives:
+ *
+ *   grant win=W grants=K [open=O] [stall=MS]
+ *       Acknowledge each data segment and re-advertise W, K times.  Then say
+ *       nothing for MS -- which is the window closing mid-packet, and what
+ *       makes the blocked send() give up and report -- and after that
+ *       acknowledge with O so the rest of the transfer completes.
+ *   dribble bytes=N chunk=C gap=MS
+ *       Deliver N bytes of the stream C at a time, MS apart.  A receive that
+ *       returns early returns one chunk.
+ *   finack after=MS
+ *       Absorb everything; MS after a FIN arrives, answer it.
+ *   silent
+ *       Absorb everything and answer nothing at all.
+ *
+ * WHAT IT RECORDS IS THE STREAM, NOT A COUNT.  Every data segment is checked
+ * byte for byte against the pattern its sequence number says it should carry.
+ * The fault bsd_send_consumed() exists to prevent does not change how many
+ * bytes leave -- the application sends the credited remainder, so the count is
+ * self-consistent at every step -- it puts the same application bytes on the
+ * wire twice under two different sequence numbers.  Only the bytes show it.
+ */
+
+#define WIRE_GRANT      1
+#define WIRE_DRIBBLE    2
+#define WIRE_FINACK     3
+#define WIRE_SILENT     4
+
+typedef struct Wire
+{
+    UWORD           w_Mode;
+    ULONG           w_Win;      /* grant: the window each grant re-opens  */
+    ULONG           w_Grants;   /* grant: how many, before the stall      */
+    ULONG           w_Open;     /* grant: the window after the stall      */
+    ULONG           w_Stall;    /* grant: ms of silence in between        */
+    ULONG           w_Bytes;    /* dribble: payload to deliver            */
+    ULONG           w_Chunk;    /* dribble: payload per segment           */
+    ULONG           w_Gap;      /* dribble: ms between segments           */
+    ULONG           w_After;    /* finack: ms to hold a FIN               */
+
+    volatile BOOL   w_Run;      /* main -> wire: keep going               */
+    volatile BOOL   w_Done;     /* wire -> main: left its own code        */
+
+    /* Results.  Read after w_Done, so they need no volatile. */
+    ULONG           w_Given;    /* grants issued                          */
+    ULONG           w_Segs;     /* data segments seen                     */
+    ULONG           w_Next;     /* contiguous stream bytes received       */
+    ULONG           w_High;     /* highest stream offset seen             */
+    LONG            w_BadAt;    /* first byte that was not the pattern    */
+    LONG            w_GapAt;    /* first segment that came after a hole   */
+    ULONG           w_Sent;     /* payload this peer injected             */
+    LONG            w_FinAt;    /* ms from `wire` to the FIN, -1 = none   */
+    ULONG           w_BadSum;   /* frames with a wrong TCP checksum       */
+    ULONG           w_Other;    /* frames that were not ours              */
+    BOOL            w_Opened;   /* grant: the stall is over               */
+    BOOL            w_Answered; /* finack: the FIN has been answered      */
+    ULONG           w_StallEnd; /* grant: ms at which it is               */
+    ULONG           w_NextAt;   /* dribble: ms of the next segment        */
+    LONG            w_FinDue;   /* finack: ms at which to answer, -1 none */
+} Wire;
+
+static Wire  wire;
+static BOOL  wire_live;         /* a task exists and has not been joined  */
+static ULONG wire_t0;
+static UBYTE wire_scratch[TAP_FRAME_MAX];
+
+/* Everything this peer puts on the wire.  `ackx` is what to add to the
+   contiguous byte count for the acknowledgement, which is 1 for a FIN. */
+static VOID wire_put(UWORD flags, ULONG win, ULONG dlen, ULONG ackx)
+{
+    Inject in;
+
+    zero((UBYTE *)&in, (ULONG)sizeof(in));
+    in.flags   = flags;
+    in.seq     = cs.p_isn + 1UL + wire.w_Sent;
+    in.ack     = cs.u_isn + 1UL + wire.w_Next + ackx;
+    in.win     = (UWORD)win;
+    in.dlen    = dlen;
+    in.dofs    = wire.w_Sent;
+    in.mss     = -1;
+    in.wscale  = -1;
+    in.corrupt = -1;
+
+    build_and_inject(&in);
+    wire.w_Sent += dlen;
+}
+
+static VOID wire_saw(const UBYTE *f, const Seg *s)
+{
+    ULONG        ihl, thl, o, i;
+    const UBYTE *d;
+
+    if (!s->tcp_ok)
+        wire.w_BadSum++;
+
+    if (s->dlen == 0)
+        return;
+
+    ihl = (ULONG)(f[ETH_HDR] & 0x0F) * 4UL;
+    thl = (ULONG)((f[ETH_HDR + ihl + 12] >> 4) & 0x0F) * 4UL;
+    d   = &f[ETH_HDR + ihl + thl];
+    o   = s->seq - (cs.u_isn + 1UL);
+
+    wire.w_Segs++;
+
+    for (i = 0; i < s->dlen; i++)
+    {
+        if (d[i] != (UBYTE)('A' + ((o + i) % 26)))
+        {
+            if (wire.w_BadAt < 0)
+                wire.w_BadAt = (LONG)(o + i);
+            break;
+        }
+    }
+
+    /* A hole.  A retransmission (o below the water mark) is not one: it is
+       what a peer that stopped acknowledging is supposed to provoke. */
+    if (o > wire.w_Next && wire.w_GapAt < 0)
+        wire.w_GapAt = (LONG)o;
+
+    if (o <= wire.w_Next && o + s->dlen > wire.w_Next)
+        wire.w_Next = o + s->dlen;
+    if (o + s->dlen > wire.w_High)
+        wire.w_High = o + s->dlen;
+}
+
+static VOID wire_react(const Seg *s, ULONG now)
+{
+    switch (wire.w_Mode)
+    {
+    case WIRE_GRANT:
+        if (s->dlen == 0)
+            break;
+        if (wire.w_Given < wire.w_Grants)
+        {
+            wire.w_Given++;
+            wire_put(TF_ACK, wire.w_Win, 0UL, 0UL);
+        }
+        else if (wire.w_Opened)
+            wire_put(TF_ACK, wire.w_Open, 0UL, 0UL);
+        else if (wire.w_StallEnd == 0)
+            wire.w_StallEnd = now + wire.w_Stall;
+        break;
+
+    case WIRE_DRIBBLE:
+        break;                          /* driven by the clock, below */
+
+    case WIRE_FINACK:
+        if ((s->flags & TF_FIN) != 0 && wire.w_FinDue < 0)
+            wire.w_FinDue = (LONG)(now + wire.w_After);
+        else if (s->dlen != 0)
+            wire_put(TF_ACK, 8192UL, 0UL, 0UL);
+        break;
+
+    default:
+        break;
+    }
+}
+
+static VOID wire_body(VOID)
+{
+    /*
+     * `join` stops this task the instant the blocking call returns, and the
+     * segments that call produced are still in the tap ring when it does.
+     * Leaving on w_Run alone lost them: b01 credited 2000 bytes, the peer had
+     * counted 900, and the missing 1100 were two frames sitting in the ring at
+     * the moment the loop exited -- which reads exactly like the data-loss
+     * defect the case is looking for.  So the stop is followed by a fixed
+     * settling period with the drain still running.
+     */
+    UWORD settle = 0;
+
+    for (;;)
+    {
+        ULONG len, stamp, now;
+
+        while ((len = tap_tx_get(wire_scratch, (ULONG)sizeof(wire_scratch),
+                                 &stamp)) != 0)
+        {
+            Seg s;
+
+            if (rd16(&wire_scratch[12]) == ETYPE_ARP)
+            {
+                if (len >= 42 && rd16(&wire_scratch[20]) == 1 &&
+                    rd32(&wire_scratch[38]) == PEER_IP)
+                    arp_reply(wire_scratch);
+                continue;
+            }
+
+            if (!decode(&s, wire_scratch, len, stamp) || !s.is_tcp ||
+                s.dst_ip != PEER_IP)
+            {
+                wire.w_Other++;
+                continue;
+            }
+
+            if (wire.w_FinAt < 0 && (s.flags & TF_FIN) != 0)
+                wire.w_FinAt = (LONG)ticks_to_ms(wire_t0, s.stamp);
+
+            wire_saw(wire_scratch, &s);
+            wire_react(&s, ticks_to_ms(wire_t0, tap_eclock_now()));
+        }
+
+        now = ticks_to_ms(wire_t0, tap_eclock_now());
+
+        if (wire.w_Mode == WIRE_GRANT && !wire.w_Opened &&
+            wire.w_StallEnd != 0 && now >= wire.w_StallEnd)
+        {
+            /* The stall is what the blocked send() times out inside.  Opening
+               on the clock rather than on the next retransmission keeps the
+               case off the retransmission timer's schedule. */
+            wire.w_Opened = TRUE;
+            wire_put(TF_ACK, wire.w_Open, 0UL, 0UL);
+        }
+
+        if (wire.w_Mode == WIRE_DRIBBLE && wire.w_Sent < wire.w_Bytes &&
+            now >= wire.w_NextAt)
+        {
+            ULONG n = wire.w_Bytes - wire.w_Sent;
+
+            if (n > wire.w_Chunk)
+                n = wire.w_Chunk;
+            wire_put((UWORD)(TF_ACK | TF_PSH), 8192UL, n, 0UL);
+            wire.w_NextAt = now + wire.w_Gap;
+        }
+
+        if (wire.w_Mode == WIRE_FINACK && !wire.w_Answered &&
+            wire.w_FinDue >= 0 && now >= (ULONG)wire.w_FinDue)
+        {
+            wire.w_Answered = TRUE;
+            wire_put((UWORD)(TF_FIN | TF_ACK), 8192UL, 0UL, 1UL);
+        }
+
+        if (!wire.w_Run)
+        {
+            if (settle >= 8)            /* 8 ticks, 160 ms */
+                break;
+            settle++;
+        }
+
+        Delay(1);
+    }
+
+    wire.w_Done = TRUE;
+}
+
+static VOID wire_entry(VOID)
+{
+    wire_body();
+}
+
+static VOID do_wire(const char *args, const char *raw)
+{
+    struct TagItem  tags[6];
+    struct Process *proc;
+    char            tok[40];
+
+    if (wire_live)
+    {
+        fail(raw, "a wire task is already running; `join` it first");
+        return;
+    }
+
+    zero((UBYTE *)&wire, (ULONG)sizeof(wire));
+    wire.w_BadAt  = -1;
+    wire.w_GapAt  = -1;
+    wire.w_FinAt  = -1;
+    wire.w_FinDue = -1;
+    wire.w_Open   = 8192UL;
+    wire.w_Stall  = 1200UL;
+    wire.w_Chunk  = 100UL;
+    wire.w_Gap    = 60UL;
+
+    args = token(args, tok, sizeof(tok));
+    if (streq(tok, "grant"))        wire.w_Mode = WIRE_GRANT;
+    else if (streq(tok, "dribble")) wire.w_Mode = WIRE_DRIBBLE;
+    else if (streq(tok, "finack"))  wire.w_Mode = WIRE_FINACK;
+    else if (streq(tok, "silent"))  wire.w_Mode = WIRE_SILENT;
+    else
+    {
+        fail(raw, "unknown wire mode");
+        return;
+    }
+
+    for (;;)
+    {
+        const char *next = token(args, tok, sizeof(tok));
+        char       *eq   = tok;
+        LONG        v;
+
+        if (tok[0] == '\0' || tok[0] == '#')
+            break;
+
+        while (*eq != '\0' && *eq != '=')
+            eq++;
+        if (*eq != '=')
+        {
+            args = next;
+            continue;
+        }
+        *eq = '\0';
+        v = to_num(eq + 1);
+
+        if (streq(tok, "win"))          wire.w_Win    = (ULONG)v;
+        else if (streq(tok, "grants"))  wire.w_Grants = (ULONG)v;
+        else if (streq(tok, "open"))    wire.w_Open   = (ULONG)v;
+        else if (streq(tok, "stall"))   wire.w_Stall  = (ULONG)v;
+        else if (streq(tok, "bytes"))   wire.w_Bytes  = (ULONG)v;
+        else if (streq(tok, "chunk"))   wire.w_Chunk  = (ULONG)v;
+        else if (streq(tok, "gap"))     wire.w_Gap    = (ULONG)v;
+        else if (streq(tok, "after"))   wire.w_After  = (ULONG)v;
+        else
+        {
+            say("!! unknown wire key %s=", tok);
+            n_fail++;
+        }
+        args = next;
+    }
+
+    /* Nothing the main task queued may be left for the wire task to trip
+       over, and nothing the wire task collects goes back in the queue. */
+    pump();
+    while (pend_count != 0)
+    {
+        Seg junk;
+        (VOID)pend_pop(&junk);
+    }
+
+    wire_t0          = tap_eclock_now();
+    wire.w_NextAt    = wire.w_Gap;
+    wire.w_Run       = TRUE;
+    wire.w_Done      = FALSE;
+    inject_quiet     = TRUE;
+    n_inject_dropped = 0;
+
+    tags[0].ti_Tag = NP_Entry;     tags[0].ti_Data = (ULONG)wire_entry;
+    tags[1].ti_Tag = NP_Name;      tags[1].ti_Data = (ULONG)"tcpdrill wire";
+    tags[2].ti_Tag = NP_StackSize; tags[2].ti_Data = 16384UL;
+    tags[3].ti_Tag = NP_Cli;       tags[3].ti_Data = (ULONG)FALSE;
+    tags[4].ti_Tag = NP_Priority;  tags[4].ti_Data = (ULONG)1;
+    tags[5].ti_Tag = TAG_DONE;     tags[5].ti_Data = 0;
+
+    proc = CreateNewProc(tags);
+    if (proc == NULL)
+    {
+        inject_quiet = FALSE;
+        wire.w_Run   = FALSE;
+        fail(raw, "CreateNewProc() for the wire task failed");
+        return;
+    }
+
+    wire_live = TRUE;
+    pass(raw);
+}
+
+/* Stop the wire task.  Safe to call when none is running. */
+static BOOL wire_stop(void)
+{
+    ULONG spent = 0;
+
+    if (!wire_live)
+        return TRUE;
+
+    wire.w_Run = FALSE;
+    while (!wire.w_Done && spent < 6000UL)
+    {
+        Delay(1);
+        spent += 20UL;
+    }
+
+    /* Two ticks past w_Done: the task sets it as the last statement of
+       wire_body() and still has to unwind out of this program's code. */
+    Delay(2);
+    wire_live    = FALSE;
+    inject_quiet = FALSE;
+
+    return wire.w_Done;
+}
+
+static VOID do_join(const char *args, const char *raw)
+{
+    (VOID)args;
+
+    if (!wire_live)
+    {
+        fail(raw, "no wire task to join");
+        return;
+    }
+
+    if (!wire_stop())
+    {
+        fail(raw, "the wire task never stopped");
+        return;
+    }
+
+    say("       wire: %u seg(s), %u byte(s) contiguous, %u seen, "
+        "%u grant(s), %u injected", wire.w_Segs, wire.w_Next, wire.w_High,
+        wire.w_Given, wire.w_Sent);
+    if (wire.w_FinAt >= 0)
+        say("       wire: the FIN arrived %ums in", (ULONG)wire.w_FinAt);
+    if (wire.w_BadSum != 0 || wire.w_Other != 0 || n_inject_dropped != 0)
+        say("       wire: %u bad checksum(s), %u foreign frame(s), "
+            "%u injection(s) dropped", wire.w_BadSum, wire.w_Other,
+            n_inject_dropped);
+
+    if (wire.w_BadSum != 0)
+    {
+        fail(raw, "the peer received a segment with a wrong TCP checksum");
+        return;
+    }
+    pass(raw);
+}
+
+/*
+ * `wirestream N` -- the peer received the stream, byte for byte, exactly once.
+ *
+ * Four separate ways for it to be wrong, because they are four different
+ * faults:  a byte that is not the one its sequence number calls for (a send()
+ * that under-credited, so the application sent bytes the stack had already
+ * sent, under new sequence numbers); a hole; short; and long.
+ */
+static VOID do_wirestream(const char *args, const char *raw)
+{
+    char  tok[24];
+    ULONG want;
+    char  why[120];
+    char *w;
+
+    (VOID)token(args, tok, sizeof(tok));
+    want = (ULONG)to_num(tok);
+
+    if (wire_live)
+    {
+        fail(raw, "`join` the wire task before reading what it saw");
+        return;
+    }
+
+    if (wire.w_BadAt >= 0)
+    {
+        const char *t = "stream byte ";
+
+        w = why;
+        while (*t != '\0') *w++ = *t++;
+        fmt_num(&w, (ULONG)wire.w_BadAt, 10, 0, FALSE);
+        t = " is not the byte that offset carries -- the application's bytes "
+            "went out twice"; while (*t != '\0') *w++ = *t++;
+        *w = '\0';
+        fail(raw, why);
+        return;
+    }
+
+    if (wire.w_GapAt >= 0)
+    {
+        const char *t = "a hole in the stream at ";
+
+        w = why;
+        while (*t != '\0') *w++ = *t++;
+        fmt_num(&w, (ULONG)wire.w_GapAt, 10, 0, FALSE);
+        *w = '\0';
+        fail(raw, why);
+        return;
+    }
+
+    if (wire.w_Next != want || wire.w_High != want)
+    {
+        const char *t = "the peer got ";
+
+        w = why;
+        while (*t != '\0') *w++ = *t++;
+        fmt_num(&w, wire.w_Next, 10, 0, FALSE);
+        t = " contiguous and "; while (*t != '\0') *w++ = *t++;
+        fmt_num(&w, wire.w_High, 10, 0, FALSE);
+        t = " in all, wanted "; while (*t != '\0') *w++ = *t++;
+        fmt_num(&w, want, 10, 0, FALSE);
+        *w = '\0';
+        fail(raw, why);
+        return;
+    }
+
+    pass(raw);
+}
+
+/*
+ * `wiregrants N` -- the peer really did close the window mid-packet N times.
+ *
+ * Without it a case where the window never closed passes everything else and
+ * asserts nothing about the code it names.
+ */
+static VOID do_wiregrants(const char *args, const char *raw)
+{
+    char  tok[24];
+    ULONG want;
+    char  why[80];
+    char *w;
+
+    (VOID)token(args, tok, sizeof(tok));
+    want = (ULONG)to_num(tok);
+
+    if (wire.w_Given == want)
+    {
+        pass(raw);
+        return;
+    }
+
+    w = why;
+    { const char *t = "the peer issued "; while (*t != '\0') *w++ = *t++; }
+    fmt_num(&w, wire.w_Given, 10, 0, FALSE);
+    { const char *t = " grant(s), wanted "; while (*t != '\0') *w++ = *t++; }
+    fmt_num(&w, want, 10, 0, FALSE);
+    *w = '\0';
+    fail(raw, why);
+}
+
 static VOID do_notx(const char *args, const char *raw)
 {
     char  tok[24];
@@ -2339,6 +2931,387 @@ static VOID do_oob(const char *args, const char *raw)
     pass(raw);
 }
 
+/* --------------------------------------------------- the blocking verbs -- */
+
+/*
+ * `blocking` -- take FIONBIO back off the subject socket.
+ *
+ * Everything else in this harness runs non-blocking, so this is spelled out on
+ * the case rather than implied by the directive that follows it: a case whose
+ * socket blocks is a case that needs a `wire` task, and the two lines belong
+ * next to each other where a reader can see the pairing.
+ */
+static VOID do_blocking(const char *raw)
+{
+    LONG zero_ = 0;
+
+    if (s_ioctl(cs.sock, FIONBIO_, &zero_) != 0)
+    {
+        fail(raw, "ioctl(FIONBIO, 0) failed");
+        return;
+    }
+    pass(raw);
+}
+
+/*
+ * `bstream N [timeout=MS]` -- the write loop an application really has.
+ *
+ * Not one send().  The fault this is here for -- bsd_send_consumed(),
+ * transfer.c -- is invisible to a single call: whatever a short send() credits
+ * is a number, and a number on its own is consistent with itself.  It shows up
+ * one call later, when the application does the correct thing and offers the
+ * REMAINDER, because the bytes the stack already put on the wire and did not
+ * admit to then go out a second time under new sequence numbers.  So the loop
+ * is the test, and the peer's copy of the stream is the assertion.
+ *
+ * The timeout is SO_SNDTIMEO and it is what makes a partial send observable at
+ * all: with none, bsd_wait_sliced() keeps re-entering nx_tcp_socket_send() on
+ * the same, already partly-consumed packet until it goes, and the short return
+ * never happens.
+ */
+static LONG bstream_short = -1;         /* what the first short send credited */
+
+static VOID do_bstream(const char *args, const char *raw)
+{
+    char   tok[32];
+    ULONG  want;
+    ULONG  total  = 0;
+    ULONG  calls  = 0;
+    ULONG  shorts = 0;
+    ULONG  start, ms;
+    ULONG  lo = 0, hi = 0;
+    BOOL   need_short = TRUE;
+    char   why[120];
+    char  *w;
+
+    bstream_short = -1;
+
+    args = token(args, tok, sizeof(tok));
+    want = (ULONG)to_num(tok);
+
+    for (;;)
+    {
+        const char *next = token(args, tok, sizeof(tok));
+        char       *eq   = tok;
+
+        if (tok[0] == '\0' || tok[0] == '#')
+            break;
+        while (*eq != '\0' && *eq != '=')
+            eq++;
+        if (*eq == '=')
+        {
+            *eq = '\0';
+            if (streq(tok, "timeout"))
+            {
+                LONG tv[2];
+
+                tv[0] = to_num(eq + 1) / 1000;
+                tv[1] = (to_num(eq + 1) % 1000) * 1000;
+                if (s_setsockopt(cs.sock, SOL_SOCKET_, SO_SNDTIMEO_, tv,
+                                 (LONG)sizeof(tv)) != 0)
+                {
+                    fail(raw, "setsockopt(SO_SNDTIMEO) failed");
+                    return;
+                }
+            }
+            else if (streq(tok, "short"))
+                need_short = (to_num(eq + 1) != 0) ? TRUE : FALSE;
+            else if (streq(tok, "min"))
+                lo = (ULONG)to_num(eq + 1);
+            else if (streq(tok, "max"))
+                hi = (ULONG)to_num(eq + 1);
+            else
+            {
+                say("!! unknown bstream key %s=", tok);
+                n_fail++;
+            }
+        }
+        args = next;
+    }
+
+    start     = tap_eclock_now();
+    cs.t_last = start;
+
+    while (total < want)
+    {
+        ULONG chunk = want - total;
+        ULONG i;
+        LONG  rc;
+
+        if (chunk > (ULONG)sizeof(payload))
+            chunk = (ULONG)sizeof(payload);
+
+        /* The pattern is the STREAM's, not the buffer's: byte k of the
+           transfer is the same character wherever it is offered from. */
+        for (i = 0; i < chunk; i++)
+            payload[i] = (UBYTE)('A' + ((total + i) % 26));
+
+        rc = s_send(cs.sock, payload, (LONG)chunk, 0);
+        calls++;
+
+        if (rc > 0)
+        {
+            if ((ULONG)rc < chunk)
+            {
+                if (shorts == 0)
+                    bstream_short = rc;
+                shorts++;
+            }
+            total += (ULONG)rc;
+            continue;
+        }
+
+        if (rc < 0 && s_errno() == E_WOULDBLOCK)
+        {
+            /* A bound, not a retry limit: past this the case has stopped
+               making progress and saying so beats waiting out the harness
+               timeout with no line in the report. */
+            if (ticks_to_ms(start, tap_eclock_now()) > 20000UL)
+                break;
+            Delay(1);
+            continue;
+        }
+        break;
+    }
+
+    ms = ticks_to_ms(start, tap_eclock_now());
+
+    say("       bstream: %u byte(s) in %u call(s), %u short, %ums",
+        total, calls, shorts, ms);
+
+    if (total != want)
+    {
+        w = why;
+        { const char *t = "the write loop placed "; while (*t) *w++ = *t++; }
+        fmt_num(&w, total, 10, 0, FALSE);
+        { const char *t = " of "; while (*t) *w++ = *t++; }
+        fmt_num(&w, want, 10, 0, FALSE);
+        { const char *t = ", errno "; while (*t) *w++ = *t++; }
+        fmt_num(&w, (ULONG)s_errno(), 10, 0, TRUE);
+        *w = '\0';
+        fail(raw, why);
+        return;
+    }
+
+    if (need_short && shorts == 0)
+    {
+        fail(raw, "no send() went short, so nothing here reached "
+                  "bsd_send_consumed()");
+        return;
+    }
+
+    /*
+     * `min=` is what says the loop WAITED.  A socket with no SO_SNDTIMEO that
+     * meant to block has no other observable: it does not fail, it does not
+     * come back early, and a transfer that completed says nothing about
+     * whether it sat still for the peer or spun.
+     */
+    if (ms < lo || (hi != 0 && ms > hi))
+    {
+        w = why;
+        { const char *t = "the write loop took "; while (*t) *w++ = *t++; }
+        fmt_num(&w, ms, 10, 0, FALSE);
+        { const char *t = " ms, wanted "; while (*t) *w++ = *t++; }
+        fmt_num(&w, lo, 10, 0, FALSE);
+        { const char *t = ".."; while (*t) *w++ = *t++; }
+        fmt_num(&w, hi, 10, 0, FALSE);
+        *w = '\0';
+        fail(raw, why);
+        return;
+    }
+
+    pass(raw);
+}
+
+/*
+ * `bshort N` -- the first short send credited exactly N.
+ *
+ * `wirestream` says the transfer came out right; this says WHY it did.  N is
+ * the number of bytes the peer's grants let through before the window shut,
+ * which the script fixes: win * (grants + 1).  Nothing else in the harness
+ * pins the arithmetic bsd_send_consumed() does, and a stream that happens to
+ * come out right through a compensating pair of errors would pass the other
+ * two lines.
+ */
+static VOID do_bshort(const char *args, const char *raw)
+{
+    char  tok[24];
+    LONG  want;
+    char  why[90];
+    char *w;
+
+    (VOID)token(args, tok, sizeof(tok));
+    want = to_num(tok);
+
+    if (bstream_short == want)
+    {
+        pass(raw);
+        return;
+    }
+
+    w = why;
+    { const char *t = "the first short send credited "; while (*t) *w++ = *t++; }
+    fmt_num(&w, (ULONG)bstream_short, 10, 0, TRUE);
+    { const char *t = ", wanted "; while (*t) *w++ = *t++; }
+    fmt_num(&w, (ULONG)want, 10, 0, TRUE);
+    *w = '\0';
+    fail(raw, why);
+}
+
+/*
+ * `brecv N [waitall] = WHAT` -- one blocking recv().
+ *
+ * `waitall` is MSG_WAITALL and the whole point of the directive: without it a
+ * stream receive returns whatever the socket buffer holds, which against a
+ * peer delivering the stream in pieces is the first piece.  The bytes are
+ * checked as well as the count -- a receive that filled the buffer with the
+ * right number of the wrong bytes is not the behaviour the flag names.
+ */
+static VOID do_brecv(const char *args, const char *raw)
+{
+    char  tok[24];
+    LONG  max;
+    LONG  want;
+    LONG  flags = 0;
+    LONG  rc;
+    ULONG i;
+    char  why[110];
+    char *w;
+
+    args = token(args, tok, sizeof(tok));
+    max  = to_num(tok);
+    if (max > (LONG)sizeof(payload))
+        max = (LONG)sizeof(payload);
+
+    for (;;)
+    {
+        const char *next = token(args, tok, sizeof(tok));
+
+        if (tok[0] == '\0' || tok[0] == '#')
+        {
+            want = max;
+            break;
+        }
+        if (streq(tok, "waitall"))
+        {
+            flags |= MSG_WAITALL_;
+            args = next;
+            continue;
+        }
+        if (tok[0] == '=')
+        {
+            (VOID)token(next, tok, sizeof(tok));
+            want = to_num(tok);
+            break;
+        }
+        args = next;
+    }
+
+    zero(payload, (ULONG)max);
+    cs.t_last = tap_eclock_now();
+    rc = s_recv(cs.sock, payload, max, flags);
+
+    if (rc != want)
+    {
+        w = why;
+        { const char *t = "recv() returned "; while (*t) *w++ = *t++; }
+        fmt_num(&w, (ULONG)rc, 10, 0, TRUE);
+        { const char *t = " of "; while (*t) *w++ = *t++; }
+        fmt_num(&w, (ULONG)want, 10, 0, TRUE);
+        { const char *t = ", errno "; while (*t) *w++ = *t++; }
+        fmt_num(&w, (ULONG)s_errno(), 10, 0, TRUE);
+        *w = '\0';
+        fail(raw, why);
+        return;
+    }
+
+    for (i = 0; i < (ULONG)rc; i++)
+    {
+        if (payload[i] != (UBYTE)('a' + (i % 26)))
+        {
+            w = why;
+            { const char *t = "byte "; while (*t) *w++ = *t++; }
+            fmt_num(&w, i, 10, 0, FALSE);
+            { const char *t = " of the receive is not the byte the peer sent "
+                              "at that offset"; while (*t) *w++ = *t++; }
+            *w = '\0';
+            fail(raw, why);
+            return;
+        }
+    }
+
+    pass(raw);
+}
+
+/*
+ * `bclose min=MS max=MS` -- CloseSocket() on a socket that must wait.
+ *
+ * The bound is two-sided on purpose.  `close within=MS` above asserts that a
+ * close never waits for a peer that stopped answering; SO_LINGER {1, n>0} is
+ * the one case where it MUST wait, and an upper bound alone would be satisfied
+ * by the close that returns at once -- which is exactly the behaviour the
+ * option is there to change.
+ */
+static VOID do_bclose(const char *args, const char *raw)
+{
+    char  tok[32];
+    ULONG lo = 0, hi = 0;
+    ULONG before, ms;
+    char  why[110];
+    char *w;
+
+    for (;;)
+    {
+        const char *next = token(args, tok, sizeof(tok));
+        char       *eq   = tok;
+
+        if (tok[0] == '\0' || tok[0] == '#')
+            break;
+        while (*eq != '\0' && *eq != '=')
+            eq++;
+        if (*eq == '=')
+        {
+            *eq = '\0';
+            if (streq(tok, "min"))      lo = (ULONG)to_num(eq + 1);
+            else if (streq(tok, "max")) hi = (ULONG)to_num(eq + 1);
+            else
+            {
+                say("!! unknown bclose key %s=", tok);
+                n_fail++;
+            }
+        }
+        args = next;
+    }
+
+    before    = tap_eclock_now();
+    cs.t_last = before;
+
+    if (cs.sock >= 0)
+    {
+        (VOID)s_close(cs.sock);
+        cs.sock = -1;
+    }
+
+    ms = ticks_to_ms(before, tap_eclock_now());
+
+    if (ms < lo || (hi != 0 && ms > hi))
+    {
+        w = why;
+        { const char *t = "CloseSocket() took "; while (*t) *w++ = *t++; }
+        fmt_num(&w, ms, 10, 0, FALSE);
+        { const char *t = " ms, wanted "; while (*t) *w++ = *t++; }
+        fmt_num(&w, lo, 10, 0, FALSE);
+        { const char *t = ".."; while (*t) *w++ = *t++; }
+        fmt_num(&w, hi, 10, 0, FALSE);
+        *w = '\0';
+        fail(raw, why);
+        return;
+    }
+
+    n_pass++;
+    say("  ok   %s   [%ums]", raw, ms);
+}
+
 static VOID do_recv(const char *args, const char *raw)
 {
     char  tok[24];
@@ -2553,6 +3526,18 @@ static VOID do_opt(const char *args, const char *raw)
         lin[1] = (v >= 0) ? v : 0;
         rc = s_setsockopt(cs.sock, SOL_SOCKET_, SO_LINGER_, lin, (LONG)sizeof(lin));
     }
+    /* Milliseconds in the script, a struct timeval on the wire to the
+       library, because that is what SO_{SND,RCV}TIMEO takes. */
+    else if (streq(tok, "sndtimeo") || streq(tok, "rcvtimeo"))
+    {
+        LONG tv[2];
+        tv[0] = v / 1000;
+        tv[1] = (v % 1000) * 1000;
+        rc = s_setsockopt(cs.sock, SOL_SOCKET_,
+                          streq(tok, "sndtimeo") ? SO_SNDTIMEO_
+                                                 : SO_RCVTIMEO_,
+                          tv, (LONG)sizeof(tv));
+    }
     else
     {
         fail(raw, "unknown option name");
@@ -2731,6 +3716,16 @@ static VOID case_end(VOID)
     if (cs.name[0] == '\0')
         return;
 
+    /* A case that forgot its `join` leaves a task holding the tap ring, and
+       the next case's first `tx` then reports a stack that is behaving. */
+    if (wire_live)
+    {
+        (VOID)wire_stop();
+        say("  !! the wire task was still running at the end of the case");
+        n_fail++;
+        cs.fails++;
+    }
+
     case_abort(cs.sock);
     cs.sock = -1;
     case_abort(cs.lsock);
@@ -2908,6 +3903,15 @@ static VOID run_line(char *line)
     else if (streq(verb, "send"))     do_send(args, raw);
     else if (streq(verb, "oob"))      do_oob(args, raw);
     else if (streq(verb, "recv"))     do_recv(args, raw);
+    else if (streq(verb, "blocking")) do_blocking(raw);
+    else if (streq(verb, "bstream"))  do_bstream(args, raw);
+    else if (streq(verb, "bshort"))   do_bshort(args, raw);
+    else if (streq(verb, "brecv"))    do_brecv(args, raw);
+    else if (streq(verb, "bclose"))   do_bclose(args, raw);
+    else if (streq(verb, "wire"))     do_wire(args, raw);
+    else if (streq(verb, "join"))     do_join(args, raw);
+    else if (streq(verb, "wirestream")) do_wirestream(args, raw);
+    else if (streq(verb, "wiregrants")) do_wiregrants(args, raw);
     else if (streq(verb, "recvpat"))  do_recvpat(args, raw);
     else if (streq(verb, "readable")) do_select(args, raw, FALSE);
     else if (streq(verb, "writable")) do_select(args, raw, TRUE);

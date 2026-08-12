@@ -125,6 +125,23 @@ static struct
     UINT  om_LocalPort;
     UINT  om_PeerPort;
     ULONG om_Sequence;
+    /*
+     * Whether the checksum field is the driver's to fill.
+     *
+     * WITHOUT THIS THE URGENT SEGMENT WENT OUT UNUSABLE, on every default
+     * build. _nx_tcp_socket_send_internal.c:918 asks the outgoing interface
+     * for NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM and, when it has it, leaves
+     * the field zero and marks the packet (:944) for the driver to sum later;
+     * src/sana2/sana2_copy.c does that inside its copy, which is well after
+     * nx_ip_packet_filter has run. So the incremental repair below was
+     * operating on a checksum that was not there yet, and the value it wrote
+     * was then summed as part of the segment by the driver -- a segment with
+     * the right flags, the right pointer, and a checksum nothing accepts.
+     *
+     * The interface is read here with the same expression the stack uses to
+     * decide, so the two cannot disagree about which packet is whose.
+     */
+    BOOL  om_Offload;
 } bsd_oob_mark;
 
 static UINT bsd_oob_ip_filter(VOID *ip_header_ptr, UINT direction)
@@ -168,19 +185,14 @@ static UINT bsd_oob_ip_filter(VOID *ip_header_ptr, UINT direction)
     flags = (UWORD)(((UWORD)tcp[BSD_TCP_OFF_FLAGS] << 8) |
                     tcp[BSD_TCP_OFF_FLAGS + 1]);
 
-    /* Already marked: a retransmission of the segment patched on its first
-       pass. Patching it twice would corrupt the checksum. */
+    /* Already marked. Not reachable through a retransmission, whatever it
+       looks like: _nx_tcp_socket_retransmit.c:493 rebuilds word_3 from the
+       socket rather than resending the bytes that were queued, so a resent
+       segment arrives here with no URG bit and is patched afresh -- or would
+       be, if the mark were still armed, which it is not. It stands for the
+       case the record cannot rule out on its own. */
     if ((flags & BSD_TCP_FLAGS_URG) != 0)
         return NX_SUCCESS;
-
-    checksum = (UWORD)(((UWORD)tcp[BSD_TCP_OFF_CHECKSUM] << 8) |
-                       tcp[BSD_TCP_OFF_CHECKSUM + 1]);
-
-    checksum = bsd_oob_csum_update(checksum, flags,
-                                   (UWORD)(flags | BSD_TCP_FLAGS_URG));
-    /* The urgent pointer was zero: NetX Duo writes word_4 as the checksum
-       shifted up, so its low half is always clear before we get here. */
-    checksum = bsd_oob_csum_update(checksum, 0, BSD_TCP_URGENT_PTR);
 
     flags = (UWORD)(flags | BSD_TCP_FLAGS_URG);
 
@@ -188,6 +200,22 @@ static UINT bsd_oob_ip_filter(VOID *ip_header_ptr, UINT direction)
     tcp[BSD_TCP_OFF_FLAGS + 1]     = (UBYTE)flags;
     tcp[BSD_TCP_OFF_URGENT]        = (UBYTE)(BSD_TCP_URGENT_PTR >> 8);
     tcp[BSD_TCP_OFF_URGENT + 1]    = (UBYTE)BSD_TCP_URGENT_PTR;
+
+    /* The driver sums the segment as it stands, so the two words above are
+       already in it and the field has to be left at the zero the offload
+       contract puts there. */
+    if (bsd_oob_mark.om_Offload)
+        return NX_SUCCESS;
+
+    checksum = (UWORD)(((UWORD)tcp[BSD_TCP_OFF_CHECKSUM] << 8) |
+                       tcp[BSD_TCP_OFF_CHECKSUM + 1]);
+
+    checksum = bsd_oob_csum_update(checksum,
+                                   (UWORD)(flags & ~BSD_TCP_FLAGS_URG), flags);
+    /* The urgent pointer was zero: NetX Duo writes word_4 as the checksum
+       shifted up, so its low half is always clear before we get here. */
+    checksum = bsd_oob_csum_update(checksum, 0, BSD_TCP_URGENT_PTR);
+
     tcp[BSD_TCP_OFF_CHECKSUM]      = (UBYTE)(checksum >> 8);
     tcp[BSD_TCP_OFF_CHECKSUM + 1]  = (UBYTE)checksum;
 
@@ -236,6 +264,14 @@ LONG bsd_oob_send(struct AmiSocketBase *base, AmiSocket *sock, UBYTE byte)
         bsd_oob_mark.om_LocalPort = tcp->nx_tcp_socket_port;
         bsd_oob_mark.om_PeerPort  = tcp->nx_tcp_socket_connect_port;
         bsd_oob_mark.om_Sequence  = tcp->nx_tcp_socket_tx_sequence;
+#ifdef NX_ENABLE_INTERFACE_CAPABILITY
+        bsd_oob_mark.om_Offload   =
+            (tcp->nx_tcp_socket_connect_interface != NX_NULL &&
+             (tcp->nx_tcp_socket_connect_interface->nx_interface_capability_flag
+              & NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) != 0) ? TRUE : FALSE;
+#else
+        bsd_oob_mark.om_Offload   = FALSE;
+#endif
         bsd_oob_mark.om_Active    = TRUE;
 
         saved_filter            = ip->nx_ip_packet_filter;
