@@ -260,6 +260,7 @@ printf '\n%s\t%d/tcp\n' "$SERVICE_NAME" "$DAYTIME_PORT" \
 
 PEERLOG="$ROOT/build/tcphandler-peer.log"
 REMOTE_LOG=""
+REMOTE_PID=""
 rm -f "$PEERLOG"
 
 if [ -n "$IFACE" ]; then
@@ -267,23 +268,33 @@ if [ -n "$IFACE" ]; then
     # does not kill what it started on the far side, so a peer with no ceiling
     # outlives its run, holds the port, and the next run dies on "address
     # already in use" (tests/tools/run-iperf.sh:260-266).
+    # DETACHED THERE, KILLED BY PID.  Killing the local ssh does not kill what
+    # it started on the far side, so a peer left running holds 7001 and 7013
+    # and the NEXT run dies on "[Errno 98] Address already in use" -- which
+    # this script reports as a missing ingredient, naming the wrong machine.
+    # A pidfile rather than `pkill -f netpeer`, because that pattern matches
+    # the remote shell issuing it (tests/perf/peercap.sh:108-111).
     REMOTE_PY="/tmp/netpeer-$$.py"
     REMOTE_LOG="/tmp/netpeer-$$.log"
+    REMOTE_PID="/tmp/netpeer-$$.pid"
     scp -q "$ROOT/tests/tools/netpeer.py" "$PEERHOST:$REMOTE_PY" || {
         echo "cannot copy the peer to $PEERHOST" >&2; exit 2; }
     ssh -o ConnectTimeout=10 "$PEERHOST" "python3 $REMOTE_PY --help" \
         >/dev/null 2>&1 || {
         echo "$PEERHOST cannot run the peer; it needs python3" >&2; exit 2; }
     ssh -o ConnectTimeout=10 "$PEERHOST" \
-        "timeout $((TIMEOUT + 300)) python3 $REMOTE_PY \
+        "nohup timeout $((TIMEOUT + 300)) python3 $REMOTE_PY \
              --daytime-port $DAYTIME_PORT --echo-port $ECHO_PORT \
-             --log $REMOTE_LOG --seconds $((TIMEOUT + 240))" \
-        > "$ROOT/build/tcphandler-peer.out" 2>&1 &
-    PEER_PID=$!
+             --log $REMOTE_LOG --seconds $((TIMEOUT + 240)) \
+             > /dev/null 2>&1 & \
+         echo \$! > $REMOTE_PID" > "$ROOT/build/tcphandler-peer.out" 2>&1 || {
+        echo "cannot start the peer on $PEERHOST" >&2; exit 2; }
+    PEER_PID=""
     cleanup_peer() {
-        kill -TERM "$PEER_PID" 2>/dev/null || true
         ssh -o ConnectTimeout=10 "$PEERHOST" \
-            "rm -f $REMOTE_PY $REMOTE_LOG" >/dev/null 2>&1 || true
+            "[ -f $REMOTE_PID ] && kill \$(cat $REMOTE_PID) 2>/dev/null; \
+             rm -f $REMOTE_PY $REMOTE_LOG $REMOTE_PID; exit 0" \
+            >/dev/null 2>&1 || true
     }
 else
     python3 "$ROOT/tests/tools/netpeer.py" \
@@ -295,9 +306,20 @@ else
 fi
 trap cleanup_peer EXIT INT TERM HUP
 sleep 2
-kill -0 "$PEER_PID" 2>/dev/null || {
+peer_alive() {
+    if [ -n "$REMOTE_LOG" ]; then
+        ssh -o ConnectTimeout=10 "$PEERHOST" \
+            "[ -f $REMOTE_PID ] && kill -0 \$(cat $REMOTE_PID) 2>/dev/null" \
+            >/dev/null 2>&1
+    else
+        kill -0 "$PEER_PID" 2>/dev/null
+    fi
+}
+peer_alive || {
     echo "the host peer did not start:" >&2
     cat "$ROOT/build/tcphandler-peer.out" >&2
+    [ -z "$REMOTE_LOG" ] || ssh -o ConnectTimeout=10 "$PEERHOST" \
+        "cat $REMOTE_LOG" >&2 2>/dev/null
     exit 2
 }
 
