@@ -49,6 +49,7 @@
 
 #include "tls_root_isrg_x1.h"
 #include "x509_test_vectors.h"
+#include "x509_ext_vectors.h"
 
 /* The vendored code takes this around anything that can suspend. Nothing
    suspends here, so the object only has to exist. */
@@ -481,6 +482,114 @@ UINT                                    status;
     check(status == NX_SECURE_X509_CHAIN_TOO_LONG, "a cross-signed cycle terminates");
 }
 
+/* --------------------------------------------------------- extensions ----- */
+
+/*
+ * What the chain walk does with the extensions it used to skip:
+ * extendedKeyUsage, nameConstraints, and the critical bit.
+ *
+ * Each case is a chain against the same root, so the only difference between a
+ * pass and a failure is the extension under test. The two positive cases are
+ * not decoration: an extendedKeyUsage check that rejects a serverAuth leaf, or
+ * a critical sweep that rejects the critical extendedKeyUsage Let's Encrypt
+ * puts on its intermediates, is a regression and not a hardening, and it would
+ * take out the whole web rather than one certificate.
+ */
+static NX_SECURE_X509_CERT              ext_root;
+static NX_SECURE_X509_CERT              ext_int;
+static NX_SECURE_X509_CERT              ext_leaf;
+static NX_SECURE_X509_CERTIFICATE_STORE ext_store;
+
+static UINT ext_verify(const unsigned char *leaf, unsigned leaf_len,
+                       const unsigned char *intermediate, unsigned int_len)
+{
+UINT status;
+
+    memset(&ext_root,  0, sizeof(ext_root));
+    memset(&ext_int,   0, sizeof(ext_int));
+    memset(&ext_leaf,  0, sizeof(ext_leaf));
+    memset(&ext_store, 0, sizeof(ext_store));
+
+    status = _nx_secure_x509_certificate_initialize(&ext_root,
+                                                    (UCHAR *)x509_ext_root, (USHORT)x509_ext_root_len,
+                                                    NX_CRYPTO_NULL, 0, NX_CRYPTO_NULL, 0,
+                                                    NX_SECURE_X509_KEY_TYPE_NONE);
+    if (status != NX_SECURE_X509_SUCCESS)
+    {
+        return(status);
+    }
+
+    status = _nx_secure_x509_certificate_initialize(&ext_leaf,
+                                                    (UCHAR *)leaf, (USHORT)leaf_len,
+                                                    NX_CRYPTO_NULL, 0, NX_CRYPTO_NULL, 0,
+                                                    NX_SECURE_X509_KEY_TYPE_NONE);
+    if (status != NX_SECURE_X509_SUCCESS)
+    {
+        return(status);
+    }
+
+    chain_arm(&ext_root);
+    chain_arm(&ext_leaf);
+
+    (void)_nx_secure_x509_store_certificate_add(&ext_root, &ext_store,
+                                                NX_SECURE_X509_CERT_LOCATION_TRUSTED);
+    (void)_nx_secure_x509_store_certificate_add(&ext_leaf, &ext_store,
+                                                NX_SECURE_X509_CERT_LOCATION_REMOTE);
+
+    if (intermediate != NX_CRYPTO_NULL)
+    {
+        status = _nx_secure_x509_certificate_initialize(&ext_int,
+                                                        (UCHAR *)intermediate, (USHORT)int_len,
+                                                        NX_CRYPTO_NULL, 0, NX_CRYPTO_NULL, 0,
+                                                        NX_SECURE_X509_KEY_TYPE_NONE);
+        if (status != NX_SECURE_X509_SUCCESS)
+        {
+            return(status);
+        }
+
+        chain_arm(&ext_int);
+        (void)_nx_secure_x509_store_certificate_add(&ext_int, &ext_store,
+                                                    NX_SECURE_X509_CERT_LOCATION_REMOTE);
+    }
+
+    /* current_time 0: expiry is not what is under test here. */
+    return(_nx_secure_x509_certificate_chain_verify(&ext_store, &ext_leaf, 0));
+}
+
+static void test_extensions(void)
+{
+UINT status;
+
+    printf("extensions\n");
+
+    status = ext_verify(x509_ext_leaf_ok, x509_ext_leaf_ok_len, NX_CRYPTO_NULL, 0);
+    check(status == NX_SECURE_X509_SUCCESS,
+          "a serverAuth leaf still verifies");
+
+    status = ext_verify(x509_ext_leaf_clientauth, x509_ext_leaf_clientauth_len, NX_CRYPTO_NULL, 0);
+    check(status == NX_SECURE_X509_EXT_KEY_USAGE_NOT_FOUND,
+          "a clientAuth-only leaf is refused");
+
+    status = ext_verify(x509_ext_leaf_critical, x509_ext_leaf_critical_len, NX_CRYPTO_NULL, 0);
+    check(status == NX_SECURE_X509_UNSUPPORTED_CRITICAL_EXTENSION,
+          "an unhandled critical extension is refused");
+
+    status = ext_verify(x509_ext_leaf_inside, x509_ext_leaf_inside_len,
+                        x509_ext_int, x509_ext_int_len);
+    check(status == NX_SECURE_X509_SUCCESS,
+          "critical extKeyUsage on a CA is accepted");
+
+    status = ext_verify(x509_ext_leaf_outside, x509_ext_leaf_outside_len,
+                        x509_ext_int, x509_ext_int_len);
+    check(status == NX_SECURE_X509_NAME_CONSTRAINT_VIOLATION,
+          "a name outside permittedSubtrees is refused");
+
+    status = ext_verify(x509_ext_leaf_excluded, x509_ext_leaf_excluded_len,
+                        x509_ext_int, x509_ext_int_len);
+    check(status == NX_SECURE_X509_NAME_CONSTRAINT_VIOLATION,
+          "a name inside excludedSubtrees is refused");
+}
+
 /* -------------------------------------------------------------- main ------ */
 
 int main(void)
@@ -492,6 +601,7 @@ int main(void)
     test_sigalg();
     test_modulus();
     test_chain();
+    test_extensions();
 
     if (failures != 0)
     {

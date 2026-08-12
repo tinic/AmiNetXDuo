@@ -248,6 +248,15 @@ jobs:
         if: env.AMINETXDUO_A2065 != '' && env.AMINETXDUO_TLS13_PEER != ''
         run: tests/tls/run-tls13.sh -b build/ci/default -c 68060
 
+      # The other half of the record layer: TLS 1.2 with a CBC suite, where
+      # RFC 7366 and RFC 7627 apply and TLS 1.3 has nothing to say.  The
+      # server is openssl s_server, because it will report which extensions
+      # it saw and which it answered, and the guest's own account of that is
+      # what is under test.
+      - name: TLS 1.2 encrypt-then-MAC and extended master secret
+        if: env.AMINETXDUO_A2065 != '' && env.AMINETXDUO_TLS13_PEER != ''
+        run: tests/tls/run-tls12ext.sh -b build/ci/default -c 68020
+
       # EVERY NETWORK CARD, ONE BOOT EACH.
       #
       # Everything above this line, and install/test/run-workbench.sh below it,
