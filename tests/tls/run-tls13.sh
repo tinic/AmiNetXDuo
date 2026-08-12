@@ -179,8 +179,14 @@ rm -f "$PEERLOG"
 # the ssh channel: one file to grep, wherever the server ran.
 RDIR="/tmp/tls13-peer-$BASE_PORT"
 ssh "$PEER_HOST" "rm -rf $RDIR && mkdir -p $RDIR" >/dev/null
-rsync -a "$ROOT/tests/peer" "$ROOT/tests/tools" "$PKI" \
-      "$PEER_HOST:$RDIR/" >/dev/null
+# tar over ssh and not rsync: the peer only has to be a machine with ssh and
+# python3, and rsync is not installed on every one of them.  It was, on the
+# machine this was written against, and the run against one without it fails
+# in three seconds with `rsync: command not found` -- which the gate reports
+# as `result=incomplete`, indistinguishable from a guest that never booted.
+tar -C "$ROOT/tests" -cf - peer tools | ssh "$PEER_HOST" "tar -C $RDIR -xf -"
+tar -C "$(dirname "$PKI")" -cf - "$(basename "$PKI")" |
+    ssh "$PEER_HOST" "tar -C $RDIR -xf -"
 ssh -n "$PEER_HOST" \
     "cd $RDIR && AMINETXDUO_PEER_TLS13=1 exec python3 peer/httppeer.py \
          --base-port $BASE_PORT --pki $RDIR/$(basename "$PKI") \

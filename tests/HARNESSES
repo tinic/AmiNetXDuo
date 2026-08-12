@@ -53,6 +53,7 @@ tests/tools/run-tcphandler.sh      : tools/ci.sh                    : the TCP: h
 tests/conformance/run-fsuae.sh     : .github/workflows/emulator.yml : the bsdsocktest conformance suite
 tests/ipv6/run-socket-fsuae.sh     : .github/workflows/emulator.yml : the AF_INET6 socket surface, RFC 3542
 tests/tls/run-tls13.sh             : .github/workflows/emulator.yml : a TLS 1.3 handshake, on both CPU arms
+tests/tls/run-tls12ext.sh          : .github/workflows/emulator.yml : RFC 7366 and RFC 7627, negotiated and used, against openssl s_server
 tests/tools/run-addifup.sh         : .github/workflows/emulator.yml : AddNetInterface comes back
 tests/tools/run-hostname-mac.sh    : .github/workflows/emulator.yml : two unnamed machines take two names
 tests/tools/run-hostname.sh        : .github/workflows/emulator.yml : hostname across its whole surface

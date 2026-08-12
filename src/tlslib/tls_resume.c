@@ -43,11 +43,14 @@
  *   two iana hits come from, and it makes resumption work against an intranet
  *   server that has never heard of tickets.
  *
- *   One risk was checked before building: RFC 7627's extended_master_secret
- *   extension.  nx_secure does not implement it, so every session this library
- *   creates is a non-EMS session, and RFC 7627 5.3 says a server SHOULD refuse
- *   to resume one abbreviated.  Measured with `openssl s_client -no_ems`: 5/5
- *   resumed on all four hosts.  Nobody enforces the SHOULD.
+ *   RFC 7627's extended_master_secret is now negotiated, and it decides what
+ *   may be cached at all.  Only a session that used it is stored, and a
+ *   ServerHello that resumes one without it is refused: RFC 7627 5.3 makes
+ *   that a MUST on the client, and a session whose master secret is not bound
+ *   to the handshake that authenticated it is the triple handshake.  The
+ *   earlier note here said nx_secure did not implement the extension and that
+ *   no server enforced the SHOULD, which was measured and true and is no
+ *   longer either.
  *
  * Built without touching third_party/
  *
@@ -171,14 +174,20 @@ VOID tls_trace(const char *fmt, ...)
 
 /* The on-disk mirror; see the disk-mirror section below. */
 /*
- * 'ATS2'.  The magic is the format version, and it moved when the record
- * gained the trust key, an 'ATS1' file holds sessions keyed only on whether
- * verification happened, the defect this format fixes, and reading one with
- * the new layout would misread every field after the master secret.  An
- * unrecognised magic is not an error: the file is ignored, every connection is
- * a full handshake, and the next session written replaces it.
+ * 'ATS3'.  The magic is the format version.  It moved to 'ATS2' when the
+ * record gained the trust key, and to 'ATS3' when RFC 7627 arrived: an 'ATS2'
+ * file holds sessions negotiated without the extended master secret, which are
+ * exactly the sessions this library now refuses to resume, and offering one
+ * would produce a ServerHello mismatch on every connection instead of a
+ * resumption.  The layout is unchanged; the magic moved because the CONTENTS
+ * no longer mean what they meant.
+ *
+ * An unrecognised magic is not an error and not corruption: the file is
+ * ignored, every connection is a full handshake, and the next session written
+ * replaces it.  An installed machine's DEVS:Internet/tlssessions therefore
+ * goes quiet for one connection per host and then works as before.
  */
-#define TLS_SESSIONS_MAGIC          0x41545332UL    /* 'ATS2' */
+#define TLS_SESSIONS_MAGIC          0x41545333UL    /* 'ATS3' */
 #define TLS_SESSIONS_HEADER         16UL
 #define TLS_SESSIONS_RECORD         424UL   /* 168 + TLS_RESUME_TICKET_MAX */
 
@@ -886,6 +895,24 @@ VOID tls_resume_evict(TLSConnection *conn)
     ReleaseSemaphore(&base->tb_Lock);
 }
 
+/*
+ * Is this session's master secret bound to the handshake that produced it?
+ *
+ * In TLS 1.2 that is RFC 7627's extended master secret and nothing else: the
+ * classic derivation uses the two randoms, so the same secret can be made to
+ * appear on two connections and resumption then carries the authentication of
+ * neither.  TLS 1.3 derives everything through the transcript already, so
+ * there is nothing to negotiate and nothing to refuse.
+ */
+static BOOL tls_resume_secret_bound(const NX_SECURE_TLS_SESSION *s)
+{
+#if (NX_SECURE_TLS_TLS_1_3_ENABLED)
+    if (s->nx_secure_tls_1_3 == NX_TRUE)
+        return TRUE;
+#endif
+    return (BOOL)(s->nx_secure_tls_extended_master_secret == NX_TRUE);
+}
+
 VOID tls_resume_record(TLSConnection *conn)
 {
     struct TLSLibBase     *base;
@@ -947,9 +974,17 @@ VOID tls_resume_record(TLSConnection *conn)
                                    s->nx_secure_tls_session_id_length <=
                                        TLS_RESUME_SID_MAX) ? TRUE : FALSE);
 
-        /* Nothing to remember: some servers offer neither, and that is a
-           server that will never resume us.  Do not keep a useless entry. */
-        if (have_ticket || have_sid)
+        /*
+         * RFC 7627 5.4: a session that was not negotiated with the extended
+         * master secret is not cached.  Without it the master secret is a
+         * function of two random values the attacker also controls, so the
+         * same secret can be made to appear on two connections and a resumed
+         * handshake carries the authentication of neither -- the triple
+         * handshake.  Refusing to remember it is the client-side half; the
+         * other half is in tls_resume_accept, which will not use a resumption
+         * the server did not confirm.
+         */
+        if ((have_ticket || have_sid) && tls_resume_secret_bound(s))
         {
             entry = tls_resume_slot(table, (const char *)conn->tc_HostName,
                                     conn->tc_Port, tls_resume_flags(conn),
@@ -1197,6 +1232,19 @@ static UINT tls_resume_accept(TLSConnection *conn, NX_SECURE_TLS_SESSION *s)
         (ULONG)ciphersuite->nx_secure_tls_ciphersuite != conn->tc_CipherSuite)
     {
         return NX_SECURE_TLS_UNKNOWN_CIPHERSUITE;
+    }
+
+    /*
+     * RFC 7627 5.3: the cached session used the extended master secret, since
+     * nothing else is ever cached, so a ServerHello that resumes it without
+     * the extension is either a downgrade or a different session, and the
+     * client MUST abort.  TLSOpenA drops the entry on failure, so the retry
+     * is a full handshake.
+     */
+    if (!tls_resume_secret_bound(s))
+    {
+        tls_trace("[resume] serverhello resumed without RFC 7627, refused");
+        return NX_SECURE_TLS_DOWNGRADE_DETECTED;
     }
 
     tls_r_copy(s->nx_secure_tls_key_material.nx_secure_tls_master_secret,
