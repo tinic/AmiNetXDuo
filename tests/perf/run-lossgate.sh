@@ -244,12 +244,21 @@ GUEST=$(sed -n 's/.*address \([0-9][0-9.]*\).*/\1/p' "$OUT/warm.txt" | head -1)
 # reported as a silent exit.
 [ -n "$GUEST" ] || GUEST=$(grep -oE '192\.168\.[0-9]+\.[0-9]+' "$OUT/warm.txt" \
                            | grep -v "^$PEER_ADDR$" | head -1 || true)
+# Exit 2, not 1.  A warm-up arm that produced no address measured nothing, so
+# whatever went wrong is the rig and not the stack -- and tools/ci.sh:918 turns
+# a 1 here into "a metric moved past its tolerance", which is a report of a
+# throughput regression on a run that never moved a byte.  Both of the real
+# causes seen on 2026-08-12 are ingredients: build/fitz not fetched, and
+# AMINETXDUO_A2065 unset ("No a2065.device found").  2 is what the rest of this
+# file uses for "this box cannot run this test".
 [ -n "$GUEST" ] || {
     echo "could not learn the guest's address from $OUT/warm.txt" >&2
-    echo "the warm-up arm probably never got a DHCP lease -- read it." >&2
+    echo "the warm-up arm measured nothing, so this is the rig and not a" >&2
+    echo "result.  The usual causes are a missing ingredient -- no ROM, no" >&2
+    echo "a2065.device, no build/fitz -- or a guest that never got a lease." >&2
     echo "--- the last 15 lines of it ---" >&2
     tail -15 "$OUT/warm.txt" >&2
-    exit 1; }
+    exit 2; }
 echo "==> guest is $GUEST"
 
 netem_on "$GUEST"
