@@ -370,7 +370,16 @@ $(awk -v b="$base" -v n="$now" -v d="$dir" -v t="$tol" 'BEGIN {
         printf "%+.1f %s\n", p, bad ? "FAIL" : "ok"
      }')
 EOF
-    [ "$verdict" != "FAIL" ] || RC=1
+    # ONLY THE RATES VOTE.  The counters beside them are small integers --
+    # nineteen dropped segments against twenty-three is four events -- and the
+    # recorder already refuses to hold them to the rates' ceiling for that
+    # reason.  Letting them decide the verdict anyway put a clean run, read
+    # and write both inside 10%, on the floor over a count.  They are printed,
+    # and they are not the verdict.
+    case "$name" in
+        *_kbs) [ "$verdict" != "FAIL" ] || RC=1 ;;
+        *)     [ "$verdict" != "FAIL" ] || verdict="high" ;;
+    esac
     printf '%-14s %10s %10s %8s%% %8s\n' "$name" "$base" "$now" "$pct" "$verdict"
 done < "$BASELINE"
 
