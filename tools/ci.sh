@@ -109,6 +109,11 @@ CROSS_CONFIGS=(
     # here and not there.
     "nomcast:-DAMINETXDUO_MULTICAST=OFF"
     "noasm:-DAMINETXDUO_CRYPTO68K_ASM=OFF"
+    # Same class as the three below, and it went the same way: it changes the
+    # layout of AmiRxSlot, and sana2_rx.c wrote a member the option compiles
+    # out.  -DAMINETXDUO_RX_VERIFY=OFF did not build at all, and nothing said
+    # so, because no arm turned it off.
+    "norxverify:-DAMINETXDUO_RX_VERIFY=OFF"
     # The three TCP option flags that change the layout of NX_TCP_SOCKET and
     # are in no arm above.  SACK=OFF did not compile at all until it was built
     # here, and with all three on by default these arms are also the only place
@@ -142,7 +147,7 @@ CROSS_CONFIGS=(
 HOST_TEST_TARGETS=(test_config test_usergroup test_mbuf test_bpf test_httppath test_httpif test_httplock test_argtemplates test_fetchurl test_crypto68k test_crypto68k_25519 test_net68k_checksum test_net68k_rxverify
                    test_tcp_retries test_bcast_loopback test_tcp_source_connect test_tcp_rtt
                    test_dns_retry test_dns_status
-                   test_sockopt_numbers test_tls_expiry test_sana2_copy test_sana2_tx test_ipv6_ra test_ipv6_ptb
+                   test_sockopt_numbers test_tls_expiry test_tls_resume test_sana2_copy test_sana2_tx test_sana2_rx test_sana2_driver test_ipv6_ra test_ipv6_ptb
                    test_httpframe test_httpws test_tls_x509 test_ipv6_frag test_iperfwire
                    fuzz_config fuzz_bpf fuzz_dns fuzz_usergroup
                    fuzz_dhcp fuzz_tls_record fuzz_tls_x509 fuzz_httpframe)
@@ -168,7 +173,7 @@ esac
 #
 # Adding a test therefore turns CI red until this is raised.  That is the
 # maintenance the gate is made of, and it is one line.
-HOST_TESTS_EXPECTED=52
+HOST_TESTS_EXPECTED=55
 case "$(uname -m)" in
     x86_64|amd64) ;;
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 1)) ;;   # no test_inet

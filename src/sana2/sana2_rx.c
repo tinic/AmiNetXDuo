@@ -551,13 +551,20 @@ static VOID ami_sana2_rx_arm(AmiSana2If *iface, AmiRxSlot *slot)
 
     slot->capacity = (ULONG)(packet->nx_packet_data_end - slot->dst);
     slot->copied   = 0;
+#ifdef AMINETXDUO_RX_VERIFY
     /* And the sum with it.  ami_sana2_copy_to_buff() clears this on entry and
        sets it only on the aligned path, so a driver that never calls the copy
        hook -- it is optional in SANA-II, a device may hand the frame over
        another way -- would otherwise leave the previous frame's verdict here
        and have ami_sana2_rx_deliver() verify these bytes against that frame's
-       accumulator. */
+       accumulator.
+
+       The guard is the member's: AmiRxSlot.summed only exists in an
+       AMINETXDUO_RX_VERIFY build, so without it this line did not compile and
+       -DAMINETXDUO_RX_VERIFY=OFF, which CMakeLists.txt offers, built nothing.
+       No CI arm turned it off, so nothing said so. */
     slot->summed   = FALSE;
+#endif
 }
 
 /* Post every idle slot that has, or can get, a packet. Returns how many reads

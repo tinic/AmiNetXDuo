@@ -396,6 +396,18 @@ struct TLSSelect
 #define TLS_LVO_LAST            TLS_LVO_TLSBuffered
 
 /*
+ * Everything below is m68k assembly against the library's jump table, so a
+ * host compiler cannot parse it: "a6" is not a register name it knows.  Define
+ * TLSLIB_NO_INLINE_STUBS to get the tags, the error codes and the LVOs without
+ * it.  src/tlslib/test/test_tls_resume.c is the only thing that does, and it
+ * does so because tls_internal.h includes this header and a host test of
+ * tls_resume.c needs the rest of it.  Nothing that runs on the Amiga defines
+ * it, so the shipping library and every program that links against it see this
+ * header exactly as they did.
+ */
+#ifndef TLSLIB_NO_INLINE_STUBS
+
+/*
  * Inline stubs.  Hand-written rather than generated from an .fd because there
  * is no .fd to generate them from yet, and because a caller should be able to
  * use this library with nothing but this header.  Every one takes the library
@@ -607,6 +619,8 @@ static __inline LONG TLSRandom(struct Library *base, APTR buffer, LONG length)
                       : "d1", "a1", "cc", "memory");
     return res;
 }
+
+#endif /* TLSLIB_NO_INLINE_STUBS */
 
 #ifdef __cplusplus
 }
