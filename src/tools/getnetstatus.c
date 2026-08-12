@@ -28,10 +28,10 @@
  *   PPP; every interface this stack attaches is a SANA-II Ethernet device with
  *   a hardware address.
  *
- *   ROUTES is satisfied by the routes that exist rather than by a routing
- *   table: without NX_ENABLE_IP_STATIC_ROUTING the routes a machine has are
- *   the directly-attached prefix of each interface and the default gateway.
- *   docs/RESEARCH.md 22.5.
+ *   ROUTES asks the routing table first and falls back to the routes that
+ *   exist without one: the directly-attached prefix of each interface and the
+ *   default gateway.  NX_ENABLE_IP_STATIC_ROUTING is on
+ *   (port/netxduo-amiga/inc/nx_user.h:592), so the table is normally there.
  *
  * SPDX-License-Identifier: MIT
  */

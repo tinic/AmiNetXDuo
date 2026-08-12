@@ -11,7 +11,7 @@
  *     m68k is 2 and not 4, and which is why CMSG_BUFFER() needs an attribute;
  *   - the alignment CMSG_BUFFER() delivers, on the stack and in static
  *     storage, which is the thing that was wrong;
- *   - what AllocVec() and AllocMem() return, which docs/ALLOCATIONS.md and
+ *   - what AllocVec() and AllocMem() return, which docs/ALIGNMENT.md and
  *     addralloc.c both rely on without ever having measured it;
  *   - that a longword load from an address 2 mod 4 completes, since half of
  *     every m68k object lands there and the library used to refuse those.

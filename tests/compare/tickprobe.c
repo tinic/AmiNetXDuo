@@ -8,11 +8,14 @@
  *
  *   * Roadshow runs a faster periodic timer than our 50 Hz (16.6), so
  *     everything it does on a timer happens on a finer grid; or
- *   * Roadshow's per-packet receive path is simply cheaper, which is the same
- *     direction 29.3's curl result points in.
+ *   * Roadshow's per-packet receive path is simply cheaper.
  *
  * The two are distinguishable on the wire and nowhere else, so this program
- * is a wire.
+ * is a wire.  Both came back no.  Our timer-driven frames resolve to a
+ * 20.031 ms grid, R = 0.992; Roadshow's to 220.32 ms, eleven times coarser.
+ * And through this device our echo turnaround is 1.79 ms against their 2.22
+ * at 56 bytes, 2.57 against 4.21 at 1400.  The 2.7 ms on the real wire is
+ * not above SANA-II.
  *
  * A packet a stack sends because a timer fired leaves at the instant that
  * timer fires.  Sample enough of them and their timestamps lie on a grid whose

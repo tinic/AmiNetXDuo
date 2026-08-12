@@ -14,12 +14,12 @@
  *   the same mathematics over eight 32-bit limbs, the layout
  *   src/crypto68k/c68k_p256.c already uses for P-256.
  *
- *   Not a wrapper around a reference implementation, and not assembly.  §18
- *   established that this toolchain's GCC leaves nothing on the table for
- *   SHA-256 on this part, and the same applies to a limb loop whose whole
- *   content is MULU.L and ADDX: the win here is the representation, not the
- *   instruction selection.  Assembly is a separate question, to be asked
- *   against a measurement of this.
+ *   Not a wrapper around a reference implementation.  §18 established that
+ *   this toolchain's GCC leaves nothing on the table for SHA-256 on this part,
+ *   and the win here is the representation before it is the instruction
+ *   selection.  Assembly was the separate question and it was measured:
+ *   c68k_25519.S carries fe_mul, fe_sqr, fe_add and fe_sub, and the C above
+ *   defers to them under C68K_ASM.
  *
  *   Ed25519 is defined over SHA-512 and this file does not contain one.  Every
  *   program that wants Ed25519 here already has one, Dropbear has

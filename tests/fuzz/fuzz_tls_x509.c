@@ -94,8 +94,8 @@ TX_MUTEX _nx_secure_tls_protection;
  * data with nothing left over-reads by one byte. It is reachable from the wire
  * a two-byte certificate through _nx_secure_x509_certificate_parse() gets
  * there, and from tls_store.c's issuer walk, which calls the same function
- * with whatever is left. Found by this driver at FX_KNOWN_SLOP 0, and fixed on the fork; recorded in
- * docs/BACKLOG.md; the fix is to move the test above the read, in nx_secure.
+ * with whatever is left. Found by this driver at FX_KNOWN_SLOP 0, and fixed on
+ * the fork by moving the test above the read, in nx_secure.
  *
  * One byte of slop keeps the sweep on the bugs nobody has found yet. It costs
  * the driver the ability to see any other one-byte over-read at the end of a

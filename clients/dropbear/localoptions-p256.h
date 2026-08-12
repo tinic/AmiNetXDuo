@@ -3,7 +3,8 @@
  * of its algorithm set: P-256 and RSA instead of curve25519 and ed25519.
  *
  * docs/RESEARCH.md 31.6 asked whether P-256 is faster on this machine than
- * curve25519 and could not answer it.  Dropbear's curve25519 and ed25519 are
+ * curve25519.  This build answered no, at 149.62 s.  Dropbear's curve25519
+ * and ed25519 are
  * TweetNaCl: a field element is sixteen 16-bit limbs stored in an i64[16], and
  * a field multiply is 256 software 64x64 multiplies on a machine that has a
  * 32x32->64 in hardware.  Dropbear's P-256 is libtomcrypt over libtommath,

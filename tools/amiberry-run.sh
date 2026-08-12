@@ -189,7 +189,7 @@ MAC="${AMINETXDUO_AMIBERRY_MAC:-02:41:4d:49:00:01}"
 # `Could not add interface "eth0" (Input/output error)`, while 68020 leases,
 # with or without address_space_24 or a slower multiplier.  ROM, chipset prefs,
 # memory and cnet16.device were ruled out.  The two CPUs diverge inside
-# card.resource's CIS walk; docs/BACKLOG.md carries the gayle.cpp detail.
+# card.resource's CIS walk, in gayle.cpp.
 #
 # This is a CPU limit and NOT a model limit.  An A600 networks perfectly well
 # on -N a2065, which is the answer if what you wanted was a 68000.
@@ -214,7 +214,7 @@ ne2000_pcmcia needs a 68020 or better; this run is ${CPU:-the $MODEL default}.
   card.resource cannot walk the card's CIS tuples on a 68000 or a 68010 under
   Amiberry, and AddNetInterface answers
   'Could not add interface "eth0" (Input/output error)'.  Bisected to cpu_type
-  alone -- see docs/BACKLOG.md, "PCMCIA is a CPU limit, not an A600 limit".
+  alone: this is a CPU limit, not an A600 limit.
 
   -N a2065        works on an A600 at 68000, and is what you want for a 68000
   -c 68020        if the PCMCIA card itself is the thing under test

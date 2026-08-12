@@ -104,7 +104,7 @@ endif()
 # 60 s is slow.  It is not our decision to make for somebody: the archive
 # carries a binary for every processor and the installer picks the one this
 # machine can run, and nothing is withheld for being slow.  The P-256 leg is
-# a separate open defect, see docs/BACKLOG.md.
+# a separate open defect.
 set(_aminetxduo_tls_default ON)
 option(AMINETXDUO_TLS  "Build tls.library and its trust store"        ${_aminetxduo_tls_default})
 option(AMINETXDUO_BPF  "Build the bpf_* raw path and filter VM"       ON)

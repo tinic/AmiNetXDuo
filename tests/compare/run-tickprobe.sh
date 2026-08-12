@@ -7,11 +7,13 @@
 #
 # WHY
 #
-#   docs/RESEARCH.md 29.5 has Roadshow answering ICMP in 4.32 ms where we take
+#   docs/RESEARCH.md 29.5 had Roadshow answering ICMP in 4.32 ms where we took
 #   7, and two explanations fit: a faster periodic timer, or a cheaper receive
 #   path.  tests/compare/tickprobe.c distinguishes them by putting a SANA-II
 #   device underneath whichever stack is being measured and timestamping every
-#   frame it hands over, inside BeginIO, from the E-Clock.
+#   frame it hands over, inside BeginIO, from the E-Clock.  It answered
+#   neither: our tick is the finer of the two and our turnaround through this
+#   device is the shorter, so the 2.7 ms is below SANA-II.  See tickprobe.c.
 #
 #   Nothing of the foreign stack is read, disassembled or copied.  It is
 #   located at run time, staged, given an interface, and watched.

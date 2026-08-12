@@ -38,8 +38,8 @@
  *                     arithmetic and no state machine, and the two must agree
  *                     on all three of: is this body well formed, where does it
  *                     end, and what are its bytes. The structural checks above
- *                     pass on a decoder that is merely memory-safe, the
- *                     framing faults in docs/BACKLOG.md all were, so without
+ *                     pass on a decoder that is merely memory-safe, and every
+ *                     framing fault found here was, so without
  *                     an oracle the sweep says "clean" about a decoder that
  *                     reads 0x100000000 as the end of the body.
  *
@@ -653,9 +653,9 @@ static int fz_headers(void)
 /* --------------------------------------------------------------- the seeds */
 
 /*
- * The cases docs/BACKLOG.md named, so they run on every ctest whatever the
- * sweep happens to generate.  Each of these was a way to end a body early and
- * have the rest of it parsed as a request.
+ * The named cases, so they run on every ctest whatever the sweep happens to
+ * generate.  Each of these was a way to end a body early and have the rest of
+ * it parsed as a request.
  */
 static int fz_seeds(void)
 {

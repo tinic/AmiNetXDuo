@@ -312,9 +312,8 @@
  * RFC 1122 3.2.1.3: a source of the subnet broadcast, of the network address,
  * or in class D is invalid, and nx_ipv4_packet_receive.c:344-371 tests exactly
  * those three, behind this define, which nothing in this port set. The check
- * was dead code in every build we have ever shipped, while
- * docs/CONFORMANCE.md listed martian-source filtering as verified conformant.
- * The claim is now true.
+ * was dead code in every build we have ever shipped, while martian-source
+ * filtering was claimed as conformant.  The claim is now true.
  *
  * It is guarded on nx_interface_address_mapping_needed, so it applies to the
  * Ethernet interfaces and not to loopback, which is where a source of our own
@@ -672,7 +671,7 @@
 /* ---------------------------------------------------------------- IPv6 ---- */
 
 /*
- * IPv6 is a build option, not a default (docs/RESEARCH.md 9).  The root
+ * IPv6 is a build option and ships ON (CMakeLists.txt:57).  The root
  * CMakeLists keeps the nx_icmpv6/nx_ipv6/nx_nd objects out of the floor build;
  * disabling it here as well keeps the dual-stack code paths out of the IPv4
  * objects.  Define AMINETXDUO_IPV6 to build the dual stack.

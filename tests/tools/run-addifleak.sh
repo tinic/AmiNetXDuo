@@ -20,7 +20,7 @@
 #   Roadshow 1.15 demo fails there with "Input/output error" on the same card
 #   that it and we both drive to a DHCP lease on an A1200.  An A600 run would
 #   fail for a reason that has nothing to do with this code, which is the worst
-#   kind of green.  docs/BACKLOG.md records the measurements.
+#   kind of green.
 #
 #   The card is cnet.device on the emulated PCMCIA slot, because THE FAILURE
 #   MODE IS THE POINT.  A device that does not exist fails at OpenDevice(),

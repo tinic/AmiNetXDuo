@@ -3,9 +3,10 @@
  *
  *   docs/RESEARCH.md 15 measured the bulk path against AmiSSL and found a dead
  *   heat, 85.3 ms against 84.2 ms for 16 KiB of AES-128-CBC, for the same
- *   reason on both sides: neither tree has any m68k assembly for it.  That row
- *   decides `https://` throughput, being paid on every byte of every transfer
- *   rather than once per connection.
+ *   reason on both sides: neither tree had any m68k assembly for it then.
+ *   c68k_aes.S was written afterwards and is the default variant on a 68020.
+ *   That row decides `https://` throughput, being paid on every byte of every
+ *   transfer rather than once per connection.
  *
  *   This and c68k_sha256.c are the record path for 0xC027 and 0xC023, both
  *   AES-128-CBC with HMAC-SHA256, which is what a server negotiates when it

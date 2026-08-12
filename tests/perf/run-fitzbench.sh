@@ -21,7 +21,6 @@
 #   which is what the write figure pricing buffer acceptance rather than
 #   throughput looks like from the CPU's side.  Of the busy CPU on a read,
 #   bsdsocket.library is 79%, Exec 9%, the driver 6% and Fitz itself 4%.
-#   docs/BACKLOG.md has the split and the read-ahead sweep that came out of it.
 #
 # WHY A BRIDGED EMULATOR AND NOT FS-UAE
 #
