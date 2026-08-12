@@ -201,8 +201,13 @@ EOF
         > "$STAGE/devs/Internet/name_resolution"
 
     arms | grep -v '^#' | cut -d'|' -f3 > "$STAGE/cmds.raw"
+    # Duplicate address detection has to finish before the static address is
+    # anything but tentative, and nothing may be sent from a tentative one:
+    # without the wait every IPv6 arm fails instantly with EADDRNOTAVAIL,
+    # which looks like a blackhole and is not one.
     {
         echo "SYS:AddNetInterface eth0"
+        echo "wait 15"
         cat "$STAGE/cmds.raw"
     } > "$STAGE/commands.txt"
 
