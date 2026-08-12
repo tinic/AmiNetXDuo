@@ -103,9 +103,24 @@ UNIT=0
 CONFIGURE=DHCP
 EOF
 
+# TWO INVOCATIONS, because the verdict reads two things and no single one
+# prints both.  ShowNetStatus with no arguments is summary mode, which prints
+# the per-interface detail block and the "handed out by DHCP when the interface
+# comes up" line the verdict looks for; INTERFACES is a category, and asking for
+# any category turns summary mode off (src/tools/shownetstatus.c:1645), so it
+# prints the Interfaces table and nothing else.
+#
+# addifup_verdict() asserts on the table row -- it is the only place the state,
+# the link and the address are separate fields -- and this harness asked for
+# the summary, so `addifup_fail=no_eth0_row_in_interfaces_table` was the
+# verdict on every run, including ones where the guest came up with a lease.
+# tests/tools/addifup-verdict-selftest.sh feeds it a transcript with both
+# halves in it, which is what a person gets by running the command twice and
+# what no single invocation produces, so the self-test stayed green throughout.
 cat > "$STAGE/commands.txt" <<'EOF'
 SYS:AddNetInterface DEVS:NetInterfaces/eth0
 SYS:ShowNetStatus
+SYS:ShowNetStatus INTERFACES
 EOF
 
 # ------------------------------------------------------------------ run ---
