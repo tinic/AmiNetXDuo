@@ -52,6 +52,13 @@
 #   the mapping, so nothing was measured.  That is exit 2, the rig, in the same
 #   sense tests/tools/run-iperf.sh spends 2.
 #
+# EXIT CODES
+#
+#   0  the first ARP was lost and the connect completed anyway
+#   1  it was lost and the connect did not recover
+#   2  the drill measured nothing, or this box cannot run it
+#   3  the guest reached no verdict at all
+#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -339,9 +346,15 @@ grep -E "Request who-has $PEERADDR tell $ADDRESS|Reply $PEERADDR is-at" \
 echo "==================================================================="
 echo
 
+# "failed" and "never ran" are different values, and 3 is the one the rest of
+# the tree spends on a run that reached no verdict.  A guest that never wrote a
+# transcript did not fail the drill; it did not take it.
+if [ ! -f "$REPORT" ]; then
+    STATUS=no_verdict
+    RC=3
 # arp_reqs=0 is the rig, not the stack: the guest already had the mapping and
 # no retransmit was exercised.  See the header.
-if [ "$ARP_REQS" = 0 ]; then
+elif [ "$ARP_REQS" = 0 ]; then
     STATUS=skip_setup
     RC=2
 elif [ "$DROPPED" = 0 ]; then
@@ -361,6 +374,10 @@ printf 'arpretry: status=%s connect_rc=%s arp_reqs=%s first_retry_ms=%s netem_dr
        "$RUN_RC" "$BOARD" "$OUT"
 
 case "$STATUS" in
+    no_verdict)
+        echo "the guest wrote no $REPORT (run rc=$RUN_RC).  Nothing was" >&2
+        echo "measured: this is a boot that did not happen, not a lost ARP" >&2
+        echo "that was not recovered from." >&2 ;;
     skip_setup)
         echo "the drill measured nothing.  arp_reqs=0 means the guest never" >&2
         echo "asked for $PEERADDR -- it had the mapping already, so no" >&2
