@@ -38,6 +38,7 @@ static union
     struct { NetStatusHeader hdr; NetStatusRoute6    e[TOOL_MAX_ROUTE6]; } route6;
     struct { NetStatusHeader hdr; NetStatusNeighbour e[TOOL_MAX_ND]; }     nd;
     struct { NetStatusHeader hdr; NetStatusHealth    e; }      health;
+    struct { NetStatusHeader hdr; NetStatusTcpStall  e[TOOL_MAX_SOCK]; } stall;
 } nx_answer;
 
 /*
@@ -235,6 +236,41 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
             }
 
             out->sock_count = (UWORD)n;
+        }
+
+        /*
+         * Second call, because the stall numbers are their own table. It reuses
+         * nx_answer, so it has to come after the copy above. A library that
+         * predates the selector answers an error and every row keeps its zeros.
+         *
+         * Joined on the tuple rather than by index: the two walks are the same
+         * order at the same instant, but these are two calls and a connection
+         * can arrive or leave between them.
+         */
+        n = tool_netstatus_query(base, NETSTATUS_TCPSTALL, &nx_answer,
+                                 sizeof(nx_answer.stall),
+                                 sizeof(NetStatusTcpStall));
+        for (i = 0; i < n && i < (LONG)TOOL_MAX_SOCK; i++)
+        {
+            const NetStatusTcpStall *src = &nx_answer.stall.e[i];
+            UWORD                    j;
+
+            for (j = 0; j < out->sock_count; j++)
+            {
+                ToolSockInfo *si = &out->sock[j];
+
+                if (si->is_tcp &&
+                    si->local_port == src->nst_LocalPort &&
+                    si->peer_port == src->nst_PeerPort &&
+                    si->peer_address == src->nst_PeerAddress)
+                {
+                    si->stalled_ms      = src->nst_Stalled;
+                    si->retransmits     = src->nst_Retransmits;
+                    si->rto_ms          = src->nst_Rto;
+                    si->user_timeout_ms = src->nst_UserTimeout;
+                    break;
+                }
+            }
         }
     }
 

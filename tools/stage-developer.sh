@@ -37,7 +37,10 @@ DEST="${1:?usage: stage-developer.sh <destdir>}"
 # DLT_*, the BPF_* opcodes, FIONREAD, SIOCGIFADDR, is already in the NDK's
 # net/bpf.h, sys/filio.h and sys/sockio.h, and everything AMI_BPF_* in ours is
 # implementation internals.
-PUBLIC_HEADERS=(ifindex.h in6.h cmsg.h netstatus.h)
+#   tcp.h      TCP_USER_TIMEOUT and TCP_STALLINFO, the two IPPROTO_TCP option
+#              numbers <netinet/tcp.h> has no room for. Option numbers and one
+#              struct, no vectors, same shape as in6.h.
+PUBLIC_HEADERS=(ifindex.h in6.h cmsg.h netstatus.h tcp.h)
 
 mkdir -p "$DEST/include/aminetxduo" "$DEST/sfd" "$DEST/examples"
 

@@ -158,6 +158,12 @@ static VOID ns_mac_from_words(ULONG msw, ULONG lsw, UBYTE *mac)
  * legitimate way to ask "how many are there?", nsh_Available is still
  * filled in.
  */
+/* ThreadX ticks -> milliseconds, for the records that report a duration. */
+static ULONG ns_ticks_ms(ULONG ticks)
+{
+    return (ticks * 1000UL) / (ULONG)NX_IP_PERIODIC_RATE;
+}
+
 typedef struct NsWriter
 {
     NetStatusHeader *hdr;
@@ -1082,6 +1088,43 @@ static VOID ns_fill_sockets(NX_IP *ip, NsWriter *w)
     }
 }
 
+/*
+ * The same TCP walk again, for the numbers that say whether a connection is
+ * getting anywhere. Its own table because NetStatusSocket is 16 published
+ * bytes and every consumer checks that width exactly.
+ *
+ * nx_tcp_socket_timeout is what is LEFT on the retransmit timer, not the
+ * interval it was armed with. That is the useful one to print: it counts down
+ * in front of the reader, and its ceiling still shows which rung of the ladder
+ * the connection has reached.
+ */
+static VOID ns_fill_tcpstall(NX_IP *ip, NsWriter *w)
+{
+    NX_TCP_SOCKET *sock = ip->nx_ip_tcp_created_sockets_ptr;
+    ULONG          n;
+
+    for (n = 0; n < ip->nx_ip_tcp_created_sockets_count && sock != NX_NULL; n++)
+    {
+        NetStatusTcpStall *out = (NetStatusTcpStall *)ns_writer_next(w);
+
+        if (out != NULL)
+        {
+            out->nst_LocalPort   = (UWORD)sock->nx_tcp_socket_port;
+            out->nst_PeerPort    = (UWORD)sock->nx_tcp_socket_connect_port;
+            out->nst_PeerAddress =
+                sock->nx_tcp_socket_connect_ip.nxd_ip_address.v4;
+            out->nst_Stalled     =
+                ns_ticks_ms(sock->nx_tcp_socket_stall_ticks);
+            out->nst_Retransmits = sock->nx_tcp_socket_timeout_retries;
+            out->nst_Rto         = ns_ticks_ms(sock->nx_tcp_socket_timeout);
+            out->nst_UserTimeout =
+                ns_ticks_ms(sock->nx_tcp_socket_user_timeout);
+        }
+
+        sock = sock->nx_tcp_socket_created_next;
+    }
+}
+
 #ifdef AMINETXDUO_MDNS
 /*
  * The mDNS service cache, as of now: everything in it, of every type.
@@ -1245,6 +1288,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         case NETSTATUS_HEALTH:      need = sizeof(NetStatusHealth);  break;
         case NETSTATUS_SERVICES:    need = 0;                        break;
         case NETSTATUS_OPENERS:     need = 0;                        break;
+        case NETSTATUS_TCPSTALL:    need = 0;                        break;
         default:                    return bsd_fail(SocketBase, AMI_EINVAL);
     }
 
@@ -1387,6 +1431,13 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             ns_writer_init(&w, hdr, size, NETSTATUS_NEIGHBOURS,
                            sizeof(NetStatusNeighbour));
             ns_fill_neighbours(ip, &w);
+            ns_writer_finish(&w);
+            break;
+
+        case NETSTATUS_TCPSTALL:
+            ns_writer_init(&w, hdr, size, NETSTATUS_TCPSTALL,
+                           sizeof(NetStatusTcpStall));
+            ns_fill_tcpstall(ip, &w);
             ns_writer_finish(&w);
             break;
 
