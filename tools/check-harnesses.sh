@@ -54,10 +54,21 @@ err()  { printf 'harness_error=%s\n' "$*"; bad=$((bad + 1)); }
 # Does FILE invoke PATH?  A non-comment line mentioning it.  Both YAML and
 # shell comment with '#', and every false positive found while writing this
 # was prose in a comment block ("the same reason run-httpd.sh is not here").
+#
+# NO PIPE INTO grep -q.  It was `grep -v '^#' "$file" | grep -qF -- "$path"`,
+# and `set -o pipefail` is on: the second grep exits the moment it matches, the
+# first takes SIGPIPE and returns 141, and the pipeline is then a failure even
+# though the path was found.  It is a RACE -- it depends on how much of the
+# file is still to be written when the match lands -- so it passed on one
+# machine and reported run-mdnsctl.sh and run-onoff.sh as uninvoked on
+# another, which is this script's loudest error and was untrue.  A check that
+# says "no runner invokes this" at random is worse than no check.
 invokes() {
-    local file="$1" path="$2"
+    local file="$1" path="$2" body
     [ -f "$file" ] || return 1
-    grep -v '^[[:space:]]*#' "$file" | grep -qF -- "$path"
+    body=$(grep -v '^[[:space:]]*#' "$file") || return 1
+    case "$body" in *"$path"*) return 0 ;; esac
+    return 1
 }
 
 # ---------------------------------------------------------- read the rows --
