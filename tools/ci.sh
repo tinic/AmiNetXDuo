@@ -500,7 +500,8 @@ stage_conformance() {
     fi
     # -b, or conf_launcher is silently left out. build.sh looks for the crash
     # guard in build/cm, which this script never produces; without the flag it
-    # printed one line on stderr, exited 0, and the next run-fsuae.sh stopped
+    # printed one line on stderr, exited 0, and the next
+    # tests/conformance/run-fsuae.sh stopped
     # with "missing conf_launcher" -- a build stage that reported success and
     # had not built the thing the run needs.
     tests/conformance/build.sh -b "$BUILD/default" \
@@ -508,8 +509,9 @@ stage_conformance() {
         tail -30 "$BUILD/conformance.log"; fail "conformance build"; return 1; }
     if [ ! -f build/bsdsocktest/conf_launcher ]; then
         tail -5 "$BUILD/conformance.log"
-        fail "conformance: conf_launcher was not built, so run-fsuae.sh cannot\
- start the suite. It needs $BUILD/default/src/common/libaminetxduo_common.a,\
+        fail "conformance: conf_launcher was not built, so\
+ tests/conformance/run-fsuae.sh cannot start the suite. It needs\
+ $BUILD/default/src/common/libaminetxduo_common.a,\
  which the cross stage produces -- run that first."
         return 1
     fi
