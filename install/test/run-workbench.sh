@@ -285,7 +285,26 @@ fi
 # The network backend the guest's A2065 is wired to.  A bare interface name
 # (`ens18`) puts it on the host's own LAN with its own MAC, which is what
 # makes the DHCP, DNS and http checks below real rather than NAT-shaped.
-BACKEND="${AMINETXDUO_EMU_BACKEND:-slirp}"
+#
+# -H IMPLIES A BRIDGE.  The terminal arm is defined by a SECOND MACHINE
+# driving this guest, and no second machine can reach a SLIRP guest: SLIRP
+# hands out 10.0.2.15 inside the emulator and nothing outside it has a route
+# there.  Defaulted to slirp, every -H run reached the install checks, booted,
+# and then failed the whole peer half at once:
+#
+#     guest_address=10.0.2.15
+#     httpd-drill against http://10.0.2.15:80/
+#     OSError: [Errno 101] Network is unreachable
+#
+# which reads as a broken httpd rather than a guest on the wrong network.  An
+# explicit AMINETXDUO_EMU_BACKEND still wins, and a run without -H is
+# unchanged: it needs nothing off this box, so SLIRP is the right default
+# there and asking for a bridge would need CAP_NET_RAW for no gain.
+if [ -z "${AMINETXDUO_EMU_BACKEND:-}" ] && [ "$TERMINAL" = "1" ]; then
+    BACKEND="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
+else
+    BACKEND="${AMINETXDUO_EMU_BACKEND:-slirp}"
+fi
 MAC="${AMINETXDUO_EMU_MAC:-52:54:00:c0:ff:ee}"
 
 XDFTOOL="${AMINETXDUO_XDFTOOL:-}"
