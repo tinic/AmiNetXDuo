@@ -59,20 +59,24 @@ set(AMINETXDUO_TOOLS_OPTIMISE "-Os" CACHE STRING
     "Optimisation level for the commands' own objects")
 set(TOOLS_OPTIMISE $<$<CONFIG:Release>:${AMINETXDUO_TOOLS_OPTIMISE}>)
 
-# The libnix crt0.o register-save bug that made every command crash on return
-# to the Shell is repaired in the TOOLCHAIN, by tools/fix-toolchain-crt0.py at
-# fetch time, not here.  It was briefly worked around per target, by patching
-# a private crt0 and linking it first under -nostartfiles; that had to be
-# repeated for every command, had to be right once per CPU multilib (there are
-# four affected crt0.o files), and left the toolchain broken for anything not
-# built through this file.  Nothing about it belongs in a link line.
+# THE COMMANDS NO LONGER LINK THE TOOLCHAIN crt0 AT ALL: they are linked
+# -nostartfiles against src/tools/tool_startup.S, which is 180 bytes and says
+# in its header what the toolchain's was costing.  So neither crt0 defect --
+# the register-save skew that made every command crash on return to the Shell,
+# nor the argv indirection -- can reach anything built by this file.
 #
-# `tools/fetch-toolchain.sh --check-crt0` says whether the toolchain in use has
-# been repaired, or does not need repairing.  Reported as bebbo/amiga-gcc
-# issue #12 and fixed there: m68k_save_reg() now honours the __entrypoint
-# attribute crt0.c already carried, on amiga15.2 (168be3619), amiga13.4 and
-# amiga16.1.  A toolchain built from those reports "immune".  The repair stays for the toolchains
-# that predate it; nothing in it runs against one that does not need it.
+# tools/fix-toolchain-crt0.py stays, and is not transitional either.  It
+# repairs the TOOLCHAIN at fetch time, which is what the ported clients under
+# clients/ and everything under tests/ still link; `tools/fetch-toolchain.sh
+# --check-crt0` says whether the toolchain in use needs it.  Reported as
+# bebbo/amiga-gcc issue #12 and fixed there: m68k_save_reg() now honours the
+# __entrypoint attribute crt0.c already carried, on amiga15.2 (168be3619),
+# amiga13.4 and amiga16.1.  A toolchain built from those reports "immune".
+#
+# An earlier attempt at a private crt0 was rejected for being per-target: it
+# had to be repeated by every command and got the CPU multilib wrong.  There
+# is one place that links a command now, the function below, and the multilib
+# follows from the same flags everything else here is built with.
 
 # Everything the tools include lives behind the core include set; the port
 # headers must stay first (tx_port.h / nx_port.h / nx_user.h).
