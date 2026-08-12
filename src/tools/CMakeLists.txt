@@ -79,7 +79,12 @@ set(TOOLS_OPTIMISE $<$<CONFIG:Release>:${AMINETXDUO_TOOLS_OPTIMISE}>)
 function(aminetxduo_add_tool target output)
     cmake_parse_arguments(TOOL "NX" "" "SOURCES;DEFINES" ${ARGN})
 
-    add_executable(${target} ${TOOL_SOURCES} ${TOOLS_COMMON_SOURCES})
+    # tool_startup.S FIRST, and that position is load-bearing: AmigaOS enters
+    # a command at the first byte of the first hunk, the linker script carries
+    # no ENTRY(), and *(.text) is filled in link order.  Checked on the map
+    # below rather than trusted.
+    add_executable(${target}
+        tool_startup.S ${TOOL_SOURCES} ${TOOLS_COMMON_SOURCES})
 
     # src/sana2 is on the path for its device header alone: the NDK ships no
     # <devices/sana2.h>, and tool_diag.c opens a SANA-II device to find out
@@ -116,6 +121,13 @@ function(aminetxduo_add_tool target output)
         -ffunction-sections -fno-optimize-sibling-calls)
     target_link_options(${target} PRIVATE -Wl,--gc-sections)
 
+    # No toolchain crt0.  src/tools/tool_startup.S says what it was costing and
+    # what replaces it; the short version is 3,048 bytes a command, of which
+    # 2,256 is newlib's strstr and the three functions it drags in, reached
+    # only from crt0's auto-open-library loop.  -lc stays on the link line, so
+    # memcpy() and memset() still come from newlib.
+    target_link_options(${target} PRIVATE -nostartfiles)
+
     # A map per tool, as the profiler targets already get.  Without one a
     # profile of a tool resolves no symbols and ranks the tool by module, and
     # a module that is one small library object then reads as a hot function.
@@ -147,6 +159,15 @@ function(aminetxduo_add_tool target output)
         COMMAND "${CMAKE_COMMAND}"
                 "-DTOOL_BINARY=$<TARGET_FILE:${target}>"
                 -P "${CMAKE_SOURCE_DIR}/cmake/check-version-tag.cmake"
+        VERBATIM)
+
+    # And the other thing no test would notice: which object is at hunk 0
+    # offset 0, which is where AmigaOS enters the command.  See the head of
+    # cmake/check-startup-first.cmake.
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+                "-DTOOL_MAP=$<TARGET_FILE_DIR:${target}>/${output}.map"
+                -P "${CMAKE_SOURCE_DIR}/cmake/check-startup-first.cmake"
         VERBATIM)
 
     # Symbols, after the version tag is checked and before the size is printed,
