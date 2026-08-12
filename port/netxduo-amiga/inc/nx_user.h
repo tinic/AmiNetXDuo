@@ -467,6 +467,63 @@
 #endif
 
 
+/* ------------------------------------------------- SEND SIDE LOSS RECOVERY, */
+
+/*
+ * RFC 5827 early retransmit.
+ *
+ * Fast retransmit waits for three duplicate acknowledgments, which are three
+ * segments arriving past the hole.  A flight of fewer than four segments cannot
+ * produce them, so below that the only thing that recovers a lost segment is
+ * the retransmission timeout: NX_TCP_RTO_MINIMUM_MS, one second, against a
+ * round trip of a millisecond on this lab's links.
+ *
+ * A request and its response is that flight.  The capture of a guest HTTP
+ * request is two segments, so at most one duplicate acknowledgment exists to be
+ * had and fast retransmit is unreachable by construction.
+ *
+ * Section 2 lowers the threshold to one less than the number of outstanding
+ * segments while there are fewer than four, which is the most the flight can
+ * reach.  Above four segments the threshold is three and nothing changes, so
+ * this does not touch a bulk transfer.
+ *
+ * Costs nothing per socket and one comparison per duplicate acknowledgment.
+ *
+ * Build with -DAMINETXDUO_TCP_EARLY_RETRANSMIT=OFF to take it out.
+ */
+#ifndef AMINETXDUO_TCP_EARLY_RETRANSMIT_OFF
+#define NX_ENABLE_TCP_EARLY_RETRANSMIT
+#endif
+
+/*
+ * RFC 8985 section 7.2 tail loss probe.
+ *
+ * The last segment of anything has no successor to produce a duplicate
+ * acknowledgment for it, so no threshold reaches it -- not three, not the one
+ * early retransmit lowers it to -- and the timeout is all there is.  Every
+ * outbound segment of a request is the last one until the response comes back,
+ * which makes a request and its response all tail.
+ *
+ * Two round trips after the last acknowledgment, plus the worst case delayed
+ * acknowledgment (NX_TCP_LOSS_PROBE_DELACK_MS), the outstanding segment is sent
+ * again once.  On this lab's links that is 300 ms against the second the
+ * timeout would have taken.  It is not a timeout: the congestion window, the
+ * slow start threshold and the retry ladder are left alone, so a peer that was
+ * only slow to acknowledge costs one duplicate segment and nothing else, and
+ * the timeout behind it still expires when it always would have.
+ *
+ * Needs the round trip estimator, which supplies the two round trips.
+ *
+ * Costs one ULONG per NX_TCP_SOCKET and, on a socket with data outstanding, a
+ * handful of comparisons per 100 ms fast timer tick.
+ *
+ * Build with -DAMINETXDUO_TCP_LOSS_PROBE=OFF to take it out.
+ */
+#ifndef AMINETXDUO_TCP_LOSS_PROBE_OFF
+#define NX_ENABLE_TCP_LOSS_PROBE
+#endif
+
+
 /* ------------------------------------------------------------- SOCK_RAW, */
 
 /*

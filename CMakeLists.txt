@@ -363,6 +363,23 @@ if(NOT AMINETXDUO_TCP_RTT)
     add_compile_definitions(AMINETXDUO_TCP_RTT_OFF)
 endif()
 
+# RFC 5827 early retransmit: below four segments in flight, three duplicate
+# acknowledgments cannot happen, so the threshold drops to what the flight can
+# reach.  No layout change, but a with/without measurement wants the whole tree
+# built the same way, like the options above.
+option(AMINETXDUO_TCP_EARLY_RETRANSMIT "Lower the fast retransmit threshold on a small flight, RFC 5827" ON)
+if(NOT AMINETXDUO_TCP_EARLY_RETRANSMIT)
+    add_compile_definitions(AMINETXDUO_TCP_EARLY_RETRANSMIT_OFF)
+endif()
+
+# RFC 8985 section 7.2 tail loss probe: one extra transmission two round trips
+# after the last acknowledgment, instead of waiting out the timeout.  An
+# NX_TCP_SOCKET layout change, so whole-tree.
+option(AMINETXDUO_TCP_LOSS_PROBE "Probe for a lost tail segment before the timeout, RFC 8985" ON)
+if(NOT AMINETXDUO_TCP_LOSS_PROBE)
+    add_compile_definitions(AMINETXDUO_TCP_LOSS_PROBE_OFF)
+endif()
+
 # ami_log() verbosity: 0 = errors only ... 4 = trace. Empty keeps compat.c's
 # own default (WARN in release, DEBUG when AMINETXDUO_DEBUG is set).
 set(AMINETXDUO_LOG_LEVEL "" CACHE STRING "Override ami_log() verbosity (0..4)")
