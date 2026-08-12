@@ -9,6 +9,7 @@ version at the top when it merges.
 
 ## Unreleased
 
+- Reading over a link that loses packets no longer collapses. Half a percent of loss cost seven eighths of the read rate, because the acknowledgment threshold only ever climbed and a connection that lost a segment fell onto a 200 ms timer for the rest of its life. Measured on an emulated A1200 with an a2065: 554 KB/s before, 3584 after, at the cost of about 4% on a link losing nothing
 - A program can put a deadline on a connection with `TCP_USER_TIMEOUT`, instead of waiting out a retransmit ladder that takes 127 seconds to give up. Measured from the last acknowledgement that moved the connection forward, so a slow transfer that is still making progress is never cut off
 - `netstat` and `ShowNetStatus TCPSOCKETS` mark a connection whose peer has stopped acknowledging, with how long it has been stalled and how many times it has retransmitted. A machine with nothing wrong prints exactly what it printed before
 - A SYN arriving on a connection that is already up no longer renegotiates it. Anyone who knew the four addresses and ports could drop the segment size to 536, turn SACK off, or stop the connection sending altogether, without guessing a sequence number
