@@ -110,6 +110,14 @@ UINT tx_amiga_stack_in_use(APTR base, ULONG size)
     return 0;
 }
 
+/* No port here, so no Exec Task ever outlives its TX_THREAD: the count the
+   teardown reads to decide whether freeing a reader stack is safe is always
+   zero, which is the answer that lets it free. */
+ULONG tx_amiga_zombie_tasks_live(VOID)
+{
+    return 0;
+}
+
 /* --------------------------------------------------------------- threadx -- */
 
 UINT _txe_thread_create(TX_THREAD *p, CHAR *n, VOID (*e)(ULONG), ULONG i,

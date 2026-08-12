@@ -342,6 +342,7 @@ int main(void)
         APTR   sstack;
         ULONG  spin;
         ULONG  zombies_before;
+        ULONG  live_before;
         ULONG  t0, t1;
         struct Task *stask;
 
@@ -359,6 +360,7 @@ int main(void)
 
         stask = (struct Task *)stuck_thread.tx_thread_amiga_task;
         zombies_before = tx_amiga_zombie_tasks();
+        live_before    = tx_amiga_zombie_tasks_live();
 
         t0 = ami_millis();
         (VOID)tx_thread_terminate(&stuck_thread);
@@ -388,11 +390,38 @@ int main(void)
         for (spin = 0; spin < 500 && stuck_gone == 0; spin++)
             Delay(2);
         check("phase e: the zombie unblocked", stuck_gone != 0);
-        Delay(25);
-        /* Its stack is only safe to free once it is really gone. */
-        if (sstack != NULL)
+
+        /* stuck_gone says the entry function is returning, not that the task has
+           gone: the port teardown and RemTask() are still ahead of it, all of it
+           running on sstack.  A fixed Delay() here is a guess, and tx_amiga.h
+           says outright that a caller which saw the zombie count move must not
+           free that thread's stack.  The live count ends the wait:
+           _tx_amiga_task_destroy() decrements it inside the Forbid() it holds
+           until Exec removes the task, so a Task that observes the count fall is
+           observing one that is gone. */
+        for (spin = 0;
+             spin < 500 && tx_amiga_zombie_tasks_live() != live_before;
+             spin++)
+            Delay(2);
+        check("phase e: the zombie destroyed itself",
+              tx_amiga_zombie_tasks_live() == live_before);
+
+        /* Still live means unwakeable for good: leak the stack rather than free
+           memory a task is running on, which is what ami_sana2_rx_stop() does
+           with a reader that will not stop. */
+        if (sstack != NULL && tx_amiga_zombie_tasks_live() == live_before)
             ami_free(sstack);
     }
+
+    /* The kernel comes down before the program does.  tx_amiga_kernel_start()
+       leaves a VERTB interrupt server and two Tasks whose code, and whose
+       Interrupt node, are in this program's hunk, and AmigaDOS frees that hunk
+       the instant main() returns.  Without this the next VBlank executes freed
+       memory: 18 checks, exit 0, and an illegal instruction at the address of
+       _tx_amiga_vblank_entry 20 ms later.  tools/smoke/kernelstop.c is the test
+       for the shutdown itself. */
+    (VOID)tx_semaphore_delete(&never);
+    check("ThreadX kernel stopped", tx_amiga_kernel_stop() == TX_SUCCESS);
 
 done:
     Printf((STRPTR)"\n%ld checks, %ld failure(s)\n", checks, failures);

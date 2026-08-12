@@ -1349,6 +1349,7 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
 VOID ami_sana2_rx_stop(AmiSana2If *iface)
 {
     UWORD i;
+    ULONG zombies;
 
 #ifdef AMINETXDUO_RXPROBE
     ami_sana2_rxprobe_report(iface);
@@ -1452,8 +1453,32 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
              */
             tx_thread_sleep(5);
 
+            zombies = tx_amiga_zombie_tasks_live();
+
             tx_thread_terminate(&rx->thread);
             tx_thread_delete(&rx->thread);
+
+            /*
+             * tx_thread_delete() removes the Task by asking it to destroy
+             * itself and gives up after two seconds. A reader that has put
+             * `exited` is on its way out of its entry function with no Exec
+             * call left to block in, so it always arrives; if it ever did not,
+             * the port would hand back a zombie still running on rx->stack and
+             * this would free the memory under it. The live count is the only
+             * signal that happened (tx_amiga.h), and it falls inside the
+             * Forbid() the dying task holds until Exec removes it, so seeing it
+             * unchanged here means the Task is gone. Leak the stack otherwise,
+             * as the two paths above do.
+             */
+            if (tx_amiga_zombie_tasks_live() != zombies)
+            {
+                AMI_ERROR("sana2: reader %ld could not be removed; leaking its "
+                          "stack rather than freeing memory it is running on",
+                          (long)i);
+                iface->rx_orphaned = TRUE;
+                continue;
+            }
+
             tx_semaphore_delete(&rx->ready);
             tx_semaphore_delete(&rx->exited);
         }
