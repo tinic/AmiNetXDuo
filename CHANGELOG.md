@@ -7,9 +7,24 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
-## Unreleased
+## 0.21.1
 
 - `tftp` writes what it downloaded. Every file it fetched was written from the wrong address and was garbage
+- `send()` with `MSG_OOB` put a segment on the wire with a checksum nothing accepts, so urgent data never arrived
+- `accept()` on an idle listener that has been set non-blocking answers `EWOULDBLOCK` instead of `EINVAL`
+- A name server that says a name does not exist is believed for as long as it asks, instead of being asked again on every lookup
+- A DNS answer that is not about the name asked is refused, including the record after a `CNAME`
+- A first `ARP` that goes unanswered is retried within a second, so one lost broadcast no longer fails a connection outright
+- Data a peer says it already holds is not retransmitted, so recovering from loss on send takes one round trip instead of one per segment
+- Encrypted connections offer encrypt-then-MAC (RFC 7366) and the extended master secret (RFC 7627); a cached session that predates this is discarded rather than resumed
+- A certificate that marks an extension critical is refused unless this stack enforces that extension, and `nameConstraints` and extended key usage are enforced
+- Every command is about 3 KB smaller: 90 KB off `C:` across the twenty-eight of them
+- `NetTrace LOOPBACK` was accepted and ignored, capturing the wire instead
+- The installer said "already exists (version 0)" when asked to replace an AmiNetXDuo it had found
+- The guide said this needs a 68020, OS 3.0 and 4 MB. It needs any 68000, OS 2.04 and 1 MB
+- `netstat -h` is documented
+
+**`bsdsocket.library` and the commands must be installed together in this release**: the library's revision and the private status interface both moved, and a command from 0.21.0 will refuse to talk to this library rather than misread it.
 
 - `NetShutdown` tells every program using the network to stop, the same `SIGBREAKF_CTRL_C` AmiTCP and Roadshow send, waits `TIMEOUT` seconds for them to close the library, and then shuts the stack down and gives its memory back. It used to take the interfaces down and leave `httpd`, `nc` and everything else running against a network that had gone, with the library resident until a reboot
 - `NetShutdown` names the programs that did not let go, and returns `WARN` rather than `OK` when there are any
