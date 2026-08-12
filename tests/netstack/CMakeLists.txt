@@ -228,6 +228,38 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME tcp_rtt COMMAND test_tcp_rtt)
 
+    # RFC 5827 early retransmit: one duplicate acknowledgment is enough when
+    # the flight is two, and three are still required when it is four.  The
+    # rig cannot see the difference -- a recovery inside one round trip reads
+    # as a fetch that lost nothing at the guest's 20 ms clock -- so the
+    # threshold is asserted here instead.  Same sources as test_tcp_rtt above,
+    # because it is the same acknowledgment path.
+    add_executable(test_tcp_earlyretx
+        host/test_tcp_earlyretx_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_rtt_sample.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_create.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_send_internal.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_ack_check.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_retransmit.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_transmit_configure.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_timestamp_option_get.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_block_cleanup.c")
+
+    target_compile_options(test_tcp_earlyretx PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_tcp_earlyretx PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_tcp_earlyretx PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME tcp_earlyretx COMMAND test_tcp_earlyretx)
+
     # Whether a name lookup stops when it is told to, the retransmission
     # ladder on its own, with the DNS client replaced by scripted answers and
     # the clock by a variable.  A black hole, a Ctrl-C and a mistyped name are
