@@ -9,6 +9,7 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `fetch` says what went wrong on an encrypted connection. An alert from the server, a record that would not decrypt and a transfer that stopped being answered all printed "the connection failed: the network connection failed"
 - A machine answers queries for its own `<name>.local`. It announced the name when it booted and then answered nothing, for as long as this stack has had mDNS, so no machine was ever reachable by name
 
 ## 0.21.1
