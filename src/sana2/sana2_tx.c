@@ -551,6 +551,25 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
     {
         UCHAR *eth;
 
+        /*
+         * The deferred transmit checksum, before the link header goes on.
+         *
+         * Everything downstream that reads this packet as an IP datagram
+         * starts at nx_packet_prepend_ptr: sana2_copy.c's fusion, and
+         * _nx_ip_packet_checksum_compute() behind it. Fourteen bytes of
+         * Ethernet in front of that and neither finds a datagram -- measured,
+         * on the wire: every IPv6 SYN left with cksum 0x0000 and nothing
+         * answered one, while echo replies kept coming back, because ICMPv6
+         * is checksummed by the stack and TCP is the only thing deferred here.
+         *
+         * Paying it now costs a pass over the segment that the fusion would
+         * have folded into the copy. It costs it on IPv6 TCP only: nothing
+         * else reaches this arm.
+         */
+        if ((packet->nx_packet_interface_capability_flag &
+             NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) != 0)
+            _nx_ip_packet_checksum_compute(packet);  /* clears the flag */
+
         if ((ULONG)(packet->nx_packet_prepend_ptr -
                     packet->nx_packet_data_start) < AMI_ETH_HEADER_SIZE)
         {

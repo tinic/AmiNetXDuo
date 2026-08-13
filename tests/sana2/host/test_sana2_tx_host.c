@@ -164,8 +164,14 @@ ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count)
     return acc;
 }
 
+/* Where the packet's prepend pointer was when the deferred checksum was asked
+   for. The real one reads the IP header from there, so an Ethernet header in
+   front of it is a checksum computed over the wrong bytes. */
+static const UCHAR *h_deferred_at;
+
 VOID _nx_ip_packet_checksum_compute(NX_PACKET *packet_ptr)
 {
+    h_deferred_at = packet_ptr->nx_packet_prepend_ptr;
     packet_ptr->nx_packet_interface_capability_flag = 0;
 }
 
@@ -512,6 +518,37 @@ static void test_high_ethertype_goes_raw(void)
             "and with its prepend pointer back where it was");
 }
 
+/*
+ * And the deferred transmit checksum is taken before the header goes on.
+ *
+ * sana2_copy.c's fusion and _nx_ip_packet_checksum_compute() behind it both
+ * read the IP header from nx_packet_prepend_ptr. Fourteen bytes of Ethernet in
+ * front of it and neither finds a datagram: every IPv6 SYN left the card with
+ * cksum 0x0000 and nothing ever answered one.
+ */
+static void test_high_ethertype_checksum_first(void)
+{
+    printf("sana2: the deferred checksum is taken before the header goes on\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    packet_init(ack_frame, ACK_LEN);
+    pkt.nx_packet_interface_capability_flag =
+        NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM;
+    h_deferred_at = NULL;
+
+    h_check(ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_IPV6, 0x3333,
+                              0x00000002) == NX_SUCCESS,
+            "the write is posted");
+    h_check(h_deferred_at == pool + NX_PHYSICAL_HEADER,
+            "and the checksum was asked for at the datagram, not the header");
+    h_check((pkt.nx_packet_interface_capability_flag &
+             NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) == 0,
+            "and nothing is left deferred for the copy hook to redo");
+    h_check(pkt.nx_packet_prepend_ptr ==
+            pool + NX_PHYSICAL_HEADER - AMI_ETH_HEADER_SIZE,
+            "and the header is on the front of the packet afterwards");
+}
+
 /* IPv4 and ARP are below 0x8000, come out of every driver right, and stay on
    the path they have always taken. */
 static void test_low_ethertype_stays_cooked(void)
@@ -622,6 +659,7 @@ int main(void)
     test_pad_cooked_with_fusion();
     test_pad_raw();
     test_high_ethertype_goes_raw();
+    test_high_ethertype_checksum_first();
     test_low_ethertype_stays_cooked();
     test_raw_refused_falls_back_to_cooked();
     test_no_pad_when_long_enough();
