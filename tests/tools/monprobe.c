@@ -618,7 +618,10 @@ int main(void)
     (VOID)p_add_hook(base, MHT_Connect, &hook_a, NULL);
 
     state_a.ps_Answer = PROBE_DENY;
-    sa.sin_addr = 0x0A000202UL;         /* 10.0.2.2, which would answer */
+    /* Loopback, because the hook has to deny this before any wire is
+       touched.  This was 10.0.2.2, SLIRP's gateway, which is unroutable on
+       every other backend. */
+    sa.sin_addr = 0x7F000001UL;         /* 127.0.0.1 */
 
     s  = p_socket(base, P_AF_INET, P_SOCK_STREAM, 0);
     rc = p_connect(base, s, &sa);
@@ -648,7 +651,12 @@ int main(void)
         dest.sin_len    = (UBYTE)sizeof(dest);
         dest.sin_family = P_AF_INET;
         dest.sin_port   = PROBE_PORT;
-        dest.sin_addr   = 0x0A000202UL;             /* 10.0.2.2 */
+        /* Loopback.  What is asserted here is the hook -- that a denied send
+           never reaches the stack and an allowed one returns the whole
+           length -- and loopback gives the same answer on every backend.
+           10.0.2.2 was SLIRP's gateway and made `send allowed` fail with
+           ENETUNREACH on a bridged wire. */
+        dest.sin_addr   = 0x7F000001UL;             /* 127.0.0.1 */
 
         /* ---- send(): neither smm_To nor smm_Msg, because there is neither */
         state_a.ps_Answer = PROBE_DENY;
