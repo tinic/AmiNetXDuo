@@ -1130,10 +1130,18 @@
  *                                  decrements the timeout, and that runs the
  *                                  whole socket list 2.5x as often.  Measured
  *                                  as a cost with no return: 592/524/224
- *                                  against 603/535/229 KB/s.  The latency it
- *                                  would buy is already bought by
- *                                  NX_TCP_ACK_EVERY_N_PACKETS above, which
- *                                  put ACK delay at a 2.0 ms median.
+ *                                  against 603/535/229 KB/s, on a rig that
+ *                                  never lost a packet.  The reason recorded
+ *                                  here was that NX_TCP_ACK_EVERY_N_PACKETS
+ *                                  already bought the latency, at a 2.0 ms
+ *                                  median -- true clean, false under loss:
+ *                                  the packet trigger stops firing and ACK
+ *                                  delay was p50 195 ms, max 1009 ms at 0.5%.
+ *                                  The ramp cap has since restored it (p90
+ *                                  7.9 ms at 0.5%), so the decision stands on
+ *                                  the throughput number alone and wants
+ *                                  re-measuring under loss before it is
+ *                                  trusted again.
  *   NX_TCP_MAXIMUM_TX_QUEUE 16 , twice the in-flight depth.  Also a cost:
  *                                  592/528/224 against 603/535/229.  On a
  *                                  machine that is CPU-bound rather than
