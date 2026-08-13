@@ -376,20 +376,34 @@ printf 'cardsweep: cards=%d pass=%d fail=%d fail_assert=%d skip=%d carried_both_
        "$((NPASS + NFAIL + NSKIP))" "$NPASS" "$((NFAIL - NCARRIED))" \
        "$NCARRIED" "$NSKIP" "$((NPASS + NCARRIED))" "$WALL"
 
-# THREE OUTCOMES, AND THE MIDDLE ONE IS THE POINT.
+# FOUR OUTCOMES, AND ONLY ONE OF THEM IS GREEN.
 #
 #   0  every card carried bytes both ways and every arm was clean
-#   1  A CARD DID NOT CARRY BYTES BOTH WAYS.  This is the gate.
-#   3  every card carried bytes both ways, and something else failed or was
-#      not measured -- read the table.
+#   1  A CARD DID NOT CARRY BYTES BOTH WAYS.  The card claim.
+#   3  nothing failed, and a card was not measured -- read the table.
+#   4  A CARD CARRIED BYTES BOTH WAYS AND AN ASSERTION IN ITS ARM FAILED.
 #
-# 1 is reserved for the card claim because that claim is stable and the arm
-# around it is not.  Two full sweeps twelve minutes apart, 2026-08-11, agreed
-# exactly on which cards carried traffic -- eight of nine, eb920 the one that
-# carried none -- and disagreed on which of them failed the three-second TCP
-# send: a2065, hydra and ariadne_ii failed it in one run and passed it in the
-# other, ariadne and cnet the other way round.  A gate built on that is red on
-# a coin toss, and a nightly that is red on a coin toss stops being read.
-[ "$((NFAIL - NCARRIED))" = 0 ] || exit 1
-[ "$NCARRIED" = 0 ] && [ "$NSKIP" = 0 ] || exit 3
+# 1 and 4 are separate because the two claims are separate: "this card does not
+# work" and "something in this arm does not work on this card" want different
+# people looking at them, and 1 was read as covering both.  Both are FAILURES,
+# and 4 used to be folded into 3.
+#
+# 3 SAYS NOTHING FAILED.  That is the whole content of it: skip_setup, the rig
+# refusing an arm before the card was measured, and skip_no_driver, a driver
+# that is not in the store.  Neither is a verdict on a card and neither is a
+# verdict on this project.  Nothing that produced a failing assertion reaches
+# it any more.
+#
+# The earlier reading -- that 4 belongs with 3 because the arm is flaky -- came
+# from two sweeps twelve minutes apart on 2026-08-11 disagreeing about which
+# cards failed the three-second TCP send.  That flapping was our own iperf UDP
+# sender, and it is fixed; xsurf100z3 sat in exit 3 for weeks behind it, and
+# only went red at all because ne2000_pcmcia failed outright beside it.  A gate
+# that cannot go red is worse than one that cannot go green, because the second
+# one gets noticed.  If the arm flaps again, fix the arm or drop the assertion;
+# do not colour a failure green.
+if [ "$((NFAIL - NCARRIED))" != 0 ]; then echo "result=fail"; exit 1; fi
+if [ "$NCARRIED" != 0 ];             then echo "result=fail_assert"; exit 4; fi
+if [ "$NSKIP" != 0 ];                then echo "result=partial"; exit 3; fi
+echo "result=ok"
 exit 0
