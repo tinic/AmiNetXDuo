@@ -7,7 +7,7 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
-## Unreleased
+## 0.21.3
 
 - An Ariadne reaches the network over IPv6. Its driver compares the packet type as a signed number, so every type with the top bit set — which IPv6 has and IPv4 does not — was framed as an old-style 802.3 packet with a length where the type belongs, and left the machine unanswerable. Those frames are now written unframed, and the driver passes them through verbatim
 - The third machine reached over IPv6 no longer fails silently. The table of known destinations held four entries and never gave one up, and two were spent before any command ran, on the answers sent to the network's own routers. A guest that pinged twelve addresses put two on the wire, with nothing reported for the other ten
