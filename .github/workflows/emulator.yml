@@ -337,6 +337,25 @@ jobs:
           -r AMINETXDUO_A2065 -r AMINETXDUO_CARDSWEEP_PEER --
           tools/ci.sh cards
 
+      # EVERY NETWORK CARD AGAIN, AND A DIFFERENT QUESTION: OFF-LAN IPv6.
+      #
+      # The step above is IPv4 and one segment, and it passed for months while
+      # x-surf, x-surf-100 Z2 and Z3 could not reach a single address past the
+      # router: their drivers refuse every S2_ADDMULTICASTADDRESS, so the
+      # router's neighbour solicitation for the guest was dropped by the card.
+      # Nothing under tests/ipv6 could have caught it either -- WinUAE or
+      # SLIRP, and SLIRP answers a router solicitation itself.
+      #
+      # No peer: nothing calls into the guest.  It does need the LAN's IPv6 to
+      # be up, and it exits 2 and says so rather than reddening nine cards
+      # when it is not.
+      - name: Every network card reaches past the router over IPv6
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "Every network card reaches past the router over IPv6"
+          -r AMINETXDUO_A2065 --
+          tools/ci.sh cards6
+
       # THE TWO REGRESSION TESTS THAT NEEDED A REAL LINK AND SO HAD NO HOME.
       #
       # NetShutdown against live services -- httpd serving, nc listening, two

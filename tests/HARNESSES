@@ -49,6 +49,7 @@ install/test/run-workbench.sh      : tools/ci.sh                    : the releas
 tests/perf/run-lossgate.sh         : tools/ci.sh                    : throughput on a link that loses packets, gated on tests/perf/lossgate-baseline.txt
 tests/tools/run-arpretry.sh        : tools/ci.sh                    : the guest's first ARP is lost on purpose; the connect must still complete
 tests/tools/run-cardsweep.sh       : tools/ci.sh                    : every network card, one boot each
+tests/tools/run-cardsweep6.sh      : tools/ci.sh                    : every network card again, and whether IPv6 reaches past the router
 tests/tools/run-netshutdown.sh     : tools/ci.sh                    : NetShutdown, and what it does to the programs using the network
 tests/tools/run-tcphandler.sh      : tools/ci.sh                    : the TCP: handler, driven by Commodore's own Type and Copy
 tests/tcpstall/run-tcpstall.sh     : tools/ci.sh                    : a peer that stops answering; the stall must be readable and a deadline must be served
