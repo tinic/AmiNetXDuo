@@ -111,63 +111,18 @@ done
 
 # ------------------------------------------------------------- the cards ----
 #
-# board  model  address  mac-tail
-#
-# The MAC tail is the only part that is ours: the A2065's LANCE overwrites the
-# first three bytes with Commodore's OUI (tools/amiberry-run.sh:178-181), so
-# two cards that differ only in the head reach the wire as one machine.  These
-# differ in the last byte and none of them is the demo's :77.
-#
-# eb920 NEEDS AMIBERRY ef28da7e OR LATER.  Before it, `toariadne2()` decoded the
-# LAN Rover's buffer window as `(addr & 0xc000) == 0x8000` with
-# `maddr = addr & 16383`, so only the first 16K of the card's 32K was visible.
-# eb920.device programs PSTART=0x06 PSTOP=0x80, and the moment the receive ring
-# crossed page 0x40 the driver read zeroes where the packet header was, stopped
-# clearing ENISR_RX, and receive died with `bnry=7f curr=4b isr=01`: online, a
-# DHCP lease, one ARP request out, and then the 300 s ceiling with zero bytes
-# either way.  Run with AMIBERRY_NE2000_STATS=1 to get those registers back.
-CARDS="
-a2065          A1200  192.168.1.241  0c:01
-ariadne        A1200  192.168.1.242  0c:02
-ariadne2       A1200  192.168.1.244  0c:03
-hydra          A1200  192.168.1.245  0c:04
-eb920          A1200  192.168.1.246  0c:05
-xsurf          A1200  192.168.1.247  0c:06
-xsurf100z2     A1200  192.168.1.248  0c:07
-xsurf100z3     A3000  192.168.1.250  0c:08
-ne2000_pcmcia  A1200  192.168.1.251  0c:09
-"
+# The table is tests/tools/cards.sh, shared with tests/tools/run-cardsweep6.sh.
+# One table: a card added for one sweep is a card the other sweep boots too.
+# CARDS, UNTESTABLE and cards_rows() come from there.
 
-# Cards this project names that no arm here can reach, and why.  Printed every
-# run: a list of what is covered is worth nothing without the list of what is
-# not.  Keyed by the DRIVER, because these are drivers with no board rather
-# than boards with no driver.
-#
-#   a2060   ARCnet.  Amiberry emulates no ARCnet board -- there is no key for
-#           one in tools/amiberry-run.sh:226-241 and none in expansion.cpp.
-#   slip    serial-line IP, and rs485 likewise.  No Ethernet board to bridge,
-#           and the harness has no serial peer.
-UNTESTABLE="
-a2060.device   no ARCnet board exists in Amiberry
-slip.device    serial line, not an Ethernet board
-rs485.device   serial line, not an Ethernet board
-"
+# shellcheck source=tests/tools/cards.sh
+. "$ROOT/tests/tools/cards.sh"
 
 . "$ROOT/tools/sana2-stage.sh"
 
 # ----------------------------------------------------------------- listing --
 
-card_rows() {
-    printf '%s\n' "$CARDS" | while read -r board model addr mac; do
-        [ -n "$board" ] || continue
-        case ",$ONLY," in
-            ,,) ;;
-            *",$board,"*) ;;
-            *) continue ;;
-        esac
-        printf '%s %s %s %s\n' "$board" "$model" "$addr" "$mac"
-    done
-}
+card_rows() { cards_rows "$ONLY"; }
 
 if [ "$LIST" = 1 ]; then
     echo "cards this sweep boots:"
