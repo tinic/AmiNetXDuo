@@ -7,6 +7,7 @@
 #   tools/ci.sh cross                # just the cross builds
 #   tools/ci.sh emulator             # tier 2: FS-UAE, needs a boot ROM
 #   tools/ci.sh cards                # tier 2: every network card, one boot each
+#   tools/ci.sh cards6               # tier 2: every card, IPv6 past the router
 #   tools/ci.sh bridged lossgate smb # tier 2: the arms that need a real link
 #   tools/ci.sh host cross emulator  # pick and choose
 #
@@ -28,6 +29,9 @@
 #   cards        tier 2, boots EVERY network card this project supports,
 #                one guest each, and proves each one carries bytes in
 #                both directions.  Needs a bridge and a peer.
+#   cards6       tier 2, boots EVERY network card again and asks a different
+#                question: does IPv6 reach anything PAST THE ROUTER.  Needs a
+#                bridge and a working IPv6 delegation on it; no peer.
 #   bridged      tier 2, the two pass/fail harnesses that need a real link:
 #                NetShutdown against live services, and TCP: driven by
 #                Commodore's own Type and Copy.  Needs a bridge, and a peer
@@ -846,6 +850,45 @@ stage_cards() {
     return "$rc"
 }
 
+# ---------------------------------------------------------------- cards6 ----
+#
+# EVERY network card again, and off-LAN IPv6 this time: a global address off
+# the wire, and an answer from a host past the default router.
+#
+# `cards` cannot see this and neither could anything else.  It is IPv4 and one
+# segment; the tests/ipv6 runners are WinUAE or SLIRP, and SLIRP answers a
+# router solicitation itself.  x-surf.device and x-surf-100.device refused
+# every S2_ADDMULTICASTADDRESS, so the router's neighbour solicitation for the
+# guest was dropped by the card and every off-link answer died one hop away --
+# three shipping cards with no off-LAN IPv6 for as long as they were
+# supported, and no harness that could go red for it.
+#
+# Needs a bridge and a LAN with IPv6 on it, and no peer at all: nothing has to
+# call into the guest.  Nightly, like `cards`: nine guests, boot to verdict.
+stage_cards6() {
+    hr "network cards, off-LAN IPv6 (tier 2, needs a bridge with IPv6)"
+
+    local rc=0
+
+    "$ROOT/tests/tools/run-cardsweep6.sh" -b "$BUILD/default" || rc=$?
+
+    # 2 is the lab, not the cards: no IPv6 default route, no global address,
+    # a target that is on-link here, an uplink that is down.  The delegation
+    # on this LAN has gone away for an afternoon before, and nine red cards
+    # would be the wrong reading of it.
+    case "$rc" in
+        0) note "PASS  every card formed a global address and reached past the router" ;;
+        1) fail "off-LAN IPv6: a card cannot reach past the router -- the table" \
+                "above names it and says how far it got" ;;
+        2) skip "off-LAN IPv6: the lab could not run it, and no card was" \
+                "measured -- the error line above says what was missing" ;;
+        3) skip "off-LAN IPv6: no card failed the claim, and a card was not" \
+                "measured -- the table above says which and why" ;;
+        *) fail "off-LAN IPv6: exit $rc" ;;
+    esac
+    return "$rc"
+}
+
 # --------------------------------------------------------------- bridged ----
 #
 # The two harnesses that are ordinary pass/fail regression tests and happen to
@@ -1047,7 +1090,7 @@ stage_submodules
 # Anything but a pure host run needs the cross compiler.
 for s in "${WANT[@]}"; do
     case "$s" in
-        cross|analyze|conformance|emulator|e2e|cards|bridged|lossgate|smb)
+        cross|analyze|conformance|emulator|e2e|cards|cards6|bridged|lossgate|smb)
             stage_toolchain; break ;;
     esac
 done
@@ -1066,6 +1109,7 @@ for s in "${WANT[@]}"; do
         conformance) stage_conformance || true ;;
         emulator)    stage_emulator || true ;;
         cards)       stage_cards || true ;;
+        cards6)      stage_cards6 || true ;;
         bridged)     stage_bridged || true ;;
         lossgate)    stage_lossgate || true ;;
         smb)         stage_smb || true ;;

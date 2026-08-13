@@ -182,4 +182,6 @@ jobs:
             tests/conformance/run-fsuae.sh \
             tests/tools/run-iperf.sh \
             tests/tools/run-arpretry.sh \
-            tests/tools/run-cardsweep.sh
+            tests/tools/run-cardsweep.sh \
+            tests/tools/cards.sh \
+            tests/tools/run-cardsweep6.sh
