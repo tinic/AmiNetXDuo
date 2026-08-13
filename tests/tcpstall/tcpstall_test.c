@@ -371,7 +371,9 @@ static LONG t_open(struct Library *base, TConn *c, TAddr *sa)
 static VOID t_poll(struct Library *base, TConn *c, LONG now, UBYTE *chunk,
                    LONG chunk_len, LONG verbose)
 {
-    struct TcpStallInfo info;
+    /* Zeroed because the reads below are guarded by a getsockopt this file
+       cannot prove fills it. */
+    struct TcpStallInfo info = { 0 };
     LONG                len = sizeof(info);
     LONG                n;
 
@@ -420,7 +422,7 @@ static VOID t_poll(struct Library *base, TConn *c, LONG now, UBYTE *chunk,
  */
 static VOID t_arm_options(struct Library *base)
 {
-    struct TcpStallInfo info;
+    struct TcpStallInfo info = { 0 };
     LONG                len;
     LONG                value;
     LONG                s;
