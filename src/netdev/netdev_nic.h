@@ -34,6 +34,16 @@
 #define NETDEV_FRAME_MAX    (NETDEV_HDR_LEN + NETDEV_MTU)   /* no FCS on RX */
 #define NETDEV_FRAME_MIN    60
 
+/*
+ * The receive staging buffer takes anything the ring can hold, not just an
+ * untagged MTU: an 802.1Q frame is 1518 bytes and a jumbo-ish clone can be
+ * longer still, and the alternative to accepting it is resetting the chip.
+ */
+#define NETDEV_RXBUF_MAX    2048
+
+/* How many times one interrupt may go round before it gives the machine back. */
+#define NETDEV_DRAIN_MAX    32
+
 typedef struct NetdevNic NetdevNic;
 
 typedef VOID (*NetdevRxFn)(APTR arg, const UBYTE *frame, UWORD len);
@@ -124,7 +134,7 @@ struct NetdevNic
     ULONG               resets;
 
     /* One frame at a time comes out of the ring, into here. */
-    ULONG               rxbuf[(NETDEV_FRAME_MAX + 7) / 4];
+    ULONG               rxbuf[(NETDEV_RXBUF_MAX + 7) / 4];
 };
 
 /* The two cores. netdev_nic_ops_for() returns NULL for a chip with no core. */

@@ -119,17 +119,38 @@ static VOID bus_rdata(const NetdevBus *bus, UBYTE *dst, UWORD len)
         return;
     }
 
-    if (bus->dmode == NETDEV_DMODE_BYTE)
-    {
-        volatile UBYTE *b = bus->asic;
+    port = (volatile UWORD *)bus->asic;
 
-        for (i = 0; i < len; i++)
-            dst[i] = *b;
+    /*
+     * An odd destination cannot be written as words: a 68000 takes an address
+     * error on it.  The port is still 16 bits wide -- the chip hands out whole
+     * words and reading it a byte at a time would lose half of every one -- so
+     * the word is read and split.
+     */
+    if (bus->dmode == NETDEV_DMODE_BYTE || ((ULONG)dst & 1u) != 0)
+    {
+        if (bus->dmode == NETDEV_DMODE_BYTE)
+        {
+            volatile UBYTE *b = bus->asic;
+
+            for (i = 0; i < len; i++)
+                dst[i] = *b;
+            return;
+        }
+
+        for (i = 0; i + 2 <= len; i += 2)
+        {
+            UWORD w = *port;
+
+            dst[i]     = (UBYTE)(w >> 8);
+            dst[i + 1] = (UBYTE)w;
+        }
+        if (i < len)
+            dst[i] = (UBYTE)(*port >> 8);
         return;
     }
 
-    port = (volatile UWORD *)bus->asic;
-    out  = (UWORD *)(APTR)dst;
+    out = (UWORD *)(APTR)dst;
     for (i = 0; i + 2 <= len; i += 2)
         *out++ = *port;
     if (i < len)
@@ -152,17 +173,28 @@ static VOID bus_wdata(const NetdevBus *bus, const UBYTE *src, UWORD len)
         return;
     }
 
-    if (bus->dmode == NETDEV_DMODE_BYTE)
-    {
-        volatile UBYTE *b = bus->asic;
+    port = (volatile UWORD *)bus->asic;
 
-        for (i = 0; i < len; i++)
-            *b = src[i];
+    /* Same reason as the read side: an odd source cannot be read as words. */
+    if (bus->dmode == NETDEV_DMODE_BYTE || ((ULONG)src & 1u) != 0)
+    {
+        if (bus->dmode == NETDEV_DMODE_BYTE)
+        {
+            volatile UBYTE *b = bus->asic;
+
+            for (i = 0; i < len; i++)
+                *b = src[i];
+            return;
+        }
+
+        for (i = 0; i + 2 <= len; i += 2)
+            *port = (UWORD)(((UWORD)src[i] << 8) | src[i + 1]);
+        if (i < len)
+            *port = (UWORD)(src[i] << 8);
         return;
     }
 
-    port = (volatile UWORD *)bus->asic;
-    in   = (const UWORD *)(CONST_APTR)src;
+    in = (const UWORD *)(const void *)src;
     for (i = 0; i + 2 <= len; i += 2)
         *port = *in++;
     if (i < len)

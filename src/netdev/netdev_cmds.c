@@ -307,18 +307,34 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
     {
     case CMD_READ:
     case S2_READORPHAN:
+    {
+        BOOL queued;
+
         if (op->op_CopyTo == NULL)
         {
             netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_NULL_POINTER);
             return;
         }
-        if (!unit->nu_Online)
-        {
+
+        /*
+         * One Disable() over the test and the queueing.  Split, a concurrent
+         * S2_OFFLINE drains the list between them and the read lands on an
+         * offline unit with nothing left to answer it.
+         */
+        io->ios2_Req.io_Flags &= (UBYTE)~IOF_QUICK;
+        io->ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+
+        Disable();
+        queued = unit->nu_Online ? TRUE : FALSE;
+        if (queued)
+            AddTail(cmd == CMD_READ ? &op->op_Reads : &op->op_Orphans,
+                    &io->ios2_Req.io_Message.mn_Node);
+        Enable();
+
+        if (!queued)
             netdev_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
-            return;
-        }
-        cmd_queue(cmd == CMD_READ ? &op->op_Reads : &op->op_Orphans, io);
         return;
+    }
 
     case CMD_WRITE:
     case S2_MULTICAST:
@@ -460,6 +476,12 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
         while ((q = (struct IOSana2Req *)RemHead(&op->op_Events)) != NULL)
             netdev_reply(q, IOERR_ABORTED, 0);
         Enable();
+
+        /* And the writes, which are queued on the unit rather than the
+           opener.  A caller flushes so that teardown is safe, and one of its
+           own requests still live in the driver is exactly what it flushed
+           to prevent. */
+        netdev_drop_writes(unit, op);
 
         netdev_reply(io, 0, 0);
         return;
@@ -613,6 +635,10 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
             netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_NULL_POINTER);
             return;
         }
+        /* Filled from the chip core rather than kept twice: two counters for
+           one event that disagree cost an hour in the field. */
+        unit->nu_Stats.Overruns = unit->nu_Nic.overruns;
+        unit->nu_Stats.BadData  = unit->nu_Nic.rx_errors;
         cmd_bytes((UBYTE *)io->ios2_StatData, (const UBYTE *)&unit->nu_Stats,
                   sizeof(struct Sana2DeviceStats));
         netdev_reply(io, 0, 0);

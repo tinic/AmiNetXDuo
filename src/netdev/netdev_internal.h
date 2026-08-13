@@ -39,7 +39,7 @@ typedef struct NetdevTrack
 } NetdevTrack;
 
 /*
- * One per OpenDevice().  io_Unit points at op_Unit, so every request arrives
+ * One per OpenDevice().  io_Unit points at the opener, so every request arrives
  * already attached to the opener that made it: the CMD_READ queue, the copy
  * hooks and the RAW flag are per opener, which is the whole of what SANA-II
  * means by an opener.
@@ -56,6 +56,8 @@ typedef struct NetdevOpener
 
     UBYTE               op_Raw;
     UBYTE               op_Promisc;
+    UBYTE               op_Exclusive;
+    UBYTE               op_Pad;
 
     struct List         op_Reads;
     struct List         op_Orphans;
@@ -85,6 +87,8 @@ typedef struct NetdevUnit
     ULONG                       nu_McastFull;   /* joins the table could not hold */
     UWORD                       nu_AllMulti;    /* ranges too wide to hash */
     UWORD                       nu_Promisc;     /* openers that asked for it */
+    UBYTE                       nu_Exclusive;   /* SANA2OPF_MINE is held */
+    UBYTE                       nu_Pad2;
 
     struct Sana2DeviceStats     nu_Stats;
 
@@ -107,6 +111,7 @@ BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len);
 VOID netdev_event(NetdevUnit *unit, ULONG mask);
 VOID netdev_rebuild_filter(NetdevUnit *unit);
 VOID netdev_tx_pump(NetdevUnit *unit);
+VOID netdev_drop_writes(NetdevUnit *unit, NetdevOpener *op);
 LONG netdev_online(NetdevUnit *unit);
 VOID netdev_offline(NetdevUnit *unit, ULONG event);
 

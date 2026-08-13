@@ -89,6 +89,16 @@ VOID dp8390_halt(NetdevNic *nic)
     while ((NIC_GET(nic, ED_P0_ISR) & ED_ISR_RST) == 0 && --n != 0)
         dp_pause(nic, 1);
 
+    /*
+     * STP does not deassert INT.  The chip asserts while ISR & IMR is
+     * non-zero whatever the command register says, and dp8390_intr() returns
+     * without acknowledging anything once running is clear -- so a bit set in
+     * the window before the stop would hold a level-triggered INT2 down
+     * forever, with the server about to be removed.  Mask, then acknowledge.
+     */
+    NIC_PUT(nic, ED_P0_IMR, 0);
+    NIC_PUT(nic, ED_P0_ISR, 0xff);
+
     nic->running = FALSE;
 }
 
@@ -259,6 +269,8 @@ static VOID dp8390_rint(NetdevNic *nic)
     UBYTE      current;
     UBYTE      nlen;
 
+    UWORD rounds = NETDEV_DRAIN_MAX;
+
  loop:
     NIC_PUT(nic, ED_P0_CR, nic->cr_proto | ED_CR_PAGE_1 | ED_CR_STA);
     dp_pause(nic, 1);
@@ -293,10 +305,16 @@ static VOID dp8390_rint(NetdevNic *nic)
             --nlen;
         len = (UWORD)((len & ED_PAGE_MASK) | (nlen << ED_PAGE_SHIFT));
 
-        if (len <= NETDEV_FRAME_MAX + sizeof(NetdevRing) &&
-            len > sizeof(NetdevRing) &&
-            hdr.next_packet >= nic->rec_page_start &&
-            hdr.next_packet < nic->rec_page_stop)
+        if (hdr.next_packet < nic->rec_page_start ||
+            hdr.next_packet >= nic->rec_page_stop)
+        {
+            /* The ring pointers are corrupt; nothing short of a reset. */
+            nic->rx_errors++;
+            dp8390_reset(nic);
+            return;
+        }
+
+        if (len > sizeof(NetdevRing) && len <= NETDEV_RXBUF_MAX)
         {
             UWORD flen = (UWORD)(len - sizeof(NetdevRing));
 
@@ -308,10 +326,14 @@ static VOID dp8390_rint(NetdevNic *nic)
         }
         else
         {
-            /* The ring pointers are corrupt; nothing short of a reset. */
+            /*
+             * Too long or impossibly short: skip it and carry on.  Upstream
+             * accepts anything up to a cluster and this used to reset the
+             * chip instead, which flushes the receive ring and discards
+             * every transmit already reported as sent -- one 802.1Q-tagged
+             * frame from any host on the LAN was enough.
+             */
             nic->rx_errors++;
-            dp8390_reset(nic);
-            return;
         }
 
         nic->next_packet = hdr.next_packet;
@@ -323,7 +345,8 @@ static VOID dp8390_rint(NetdevNic *nic)
     }
     while (nic->next_packet != current);
 
-    goto loop;
+    if (--rounds != 0)
+        goto loop;
 }
 
 /* ------------------------------------------------------------ interrupt --- */
@@ -335,6 +358,7 @@ static VOID dp8390_rint(NetdevNic *nic)
  */
 BOOL dp8390_intr(NetdevNic *nic)
 {
+    UWORD rounds = NETDEV_DRAIN_MAX;
     UBYTE isr;
 
     if (!nic->running)
@@ -414,6 +438,14 @@ BOOL dp8390_intr(NetdevNic *nic)
 
         isr = NIC_GET(nic, ED_P0_ISR);
         if (isr == 0)
+            break;
+
+        /*
+         * A board that has been pulled reads 0xff forever, and this loop runs
+         * at interrupt level where nothing else in the machine does.  Give up
+         * and return: the line is level-triggered, so real work re-enters.
+         */
+        if (--rounds == 0)
             break;
     }
 

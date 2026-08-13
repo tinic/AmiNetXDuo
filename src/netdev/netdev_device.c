@@ -549,6 +549,7 @@ VOID netdev_event(NetdevUnit *unit, ULONG mask)
 {
     struct Node *n;
 
+    Disable();
     for (n = unit->nu_OpenerList.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
     {
         NetdevOpener *op = (NetdevOpener *)n;
@@ -568,6 +569,7 @@ VOID netdev_event(NetdevUnit *unit, ULONG mask)
             e = next;
         }
     }
+    Enable();
 }
 
 /* ------------------------------------------------------ online / offline -- */
@@ -596,14 +598,38 @@ LONG netdev_online(NetdevUnit *unit)
     return 0;
 }
 
+/*
+ * Take one opener's CMD_WRITEs off the unit's queue.  Disable(), because the
+ * interrupt server walks the same list, and because AddTail() on it is
+ * Disable()d too -- that is the only arbitration this driver has.
+ */
+VOID netdev_drop_writes(NetdevUnit *unit, NetdevOpener *op)
+{
+    struct Node *n;
+
+    Disable();
+    n = unit->nu_Writes.lh_Head;
+    while (n->ln_Succ != NULL)
+    {
+        struct IOSana2Req *io   = (struct IOSana2Req *)n;
+        struct Node       *next = n->ln_Succ;
+
+        if ((NetdevOpener *)io->ios2_Req.io_Unit == op)
+        {
+            Remove(n);
+            netdev_reply(io, IOERR_ABORTED, 0);
+        }
+        n = next;
+    }
+    Enable();
+}
+
 VOID netdev_offline(NetdevUnit *unit, ULONG event)
 {
     struct Node *n;
 
     Disable();
     unit->nu_Nic.ops->stop(&unit->nu_Nic);
-    Enable();
-
     unit->nu_Online = 0;
 
     /* Everything queued is answered now rather than left to time out. */
@@ -624,6 +650,7 @@ VOID netdev_offline(NetdevUnit *unit, ULONG event)
 
         netdev_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
     }
+    Enable();
 
     if (event != 0)
         netdev_event(unit, event);
@@ -763,9 +790,12 @@ static NetdevUnit *netdev_find_unit(NetdevDevice *dev, ULONG unit,
     }
     else if (unit >= ANXNET_UNIT_PIN)
     {
-        UWORD idx = (UWORD)(unit / ANXNET_UNIT_PIN) - 1;
+        ULONG idx = (unit / ANXNET_UNIT_PIN) - 1;
 
-        if (idx >= netdev_card_count)
+        /* Range-checked as a ULONG: truncating first wraps a huge unit
+           number onto a valid card index, which is the one thing a pin
+           must never do. */
+        if (idx >= (ULONG)netdev_card_count)
         {
             *why = "no such card type";
             return NULL;
@@ -902,9 +932,26 @@ static struct Device *netdev_open(
         return NULL;
     }
 
-    op->op_Hw      = hw;
-    op->op_Raw     = (UBYTE)((io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0);
-    op->op_Promisc = (UBYTE)((flags & SANA2OPF_PROM) != 0);
+    /*
+     * SANA2OPF_MINE is exclusive access, and a driver that takes the flag and
+     * then shares the unit anyway is worse than one that refuses it.
+     */
+    if (((flags & SANA2OPF_MINE) != 0 && hw->nu_Openers != 0) ||
+        hw->nu_Exclusive)
+    {
+        netdev_moan(ANXNET_DEVICE_NAME ": open refused, the unit is in "
+                    "exclusive use.\n");
+        FreeMem(op, sizeof(NetdevOpener));
+        io->ios2_Req.io_Error = IOERR_UNITBUSY;
+        return NULL;
+    }
+
+    op->op_Hw       = hw;
+    op->op_Raw      = (UBYTE)((io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0);
+    op->op_Promisc  = (UBYTE)((flags & SANA2OPF_PROM) != 0);
+    op->op_Exclusive = (UBYTE)((flags & SANA2OPF_MINE) != 0);
+    if (op->op_Exclusive)
+        hw->nu_Exclusive = 1;
     op->op_Unit.unit_flags = 0;
     nd_newlist(&op->op_Reads);
     nd_newlist(&op->op_Orphans);
@@ -964,6 +1011,17 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
             netdev_reply(q, IOERR_ABORTED, 0);
         while ((q = netdev_take(&op->op_Events, ~0UL)) != NULL)
             netdev_reply(q, IOERR_ABORTED, 0);
+
+        /*
+         * And this opener's writes, which live on the UNIT and not on the
+         * opener.  Left behind, the next transmit interrupt reads op_Raw and
+         * op_CopyFrom out of the memory freed below, at interrupt level, and
+         * the request is never replied to either.
+         */
+        netdev_drop_writes(hw, op);
+
+        if (op->op_Exclusive)
+            hw->nu_Exclusive = 0;
 
         if (op->op_Promisc && hw->nu_Promisc != 0 && --hw->nu_Promisc == 0)
         {
