@@ -161,6 +161,7 @@ VOID _nx_tcp_socket_thread_resume(TX_THREAD **suspension_list_head, UINT status)
 
 VOID _nx_tcp_transmit_cleanup(TX_THREAD *thread_ptr NX_CLEANUP_PARAMETER)
 {
+    NX_CLEANUP_EXTENSION
     (void)thread_ptr;
 }
 
