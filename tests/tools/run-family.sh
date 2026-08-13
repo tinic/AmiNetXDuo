@@ -92,11 +92,12 @@
 #   The lab has lost its IPv6 delegation for hours at a time -- WAN_DHCP6 with
 #   no gateway, 100% loss -- and a run that straddled that reported the
 #   product as broken.  So the guest's own address is a PRECONDITION, checked
-#   out of `ShowNetStatus ALL` in the transcript before any -6 arm is judged.
-#   Without it those arms are reported `blocked`, which is neither a pass nor a
-#   failure, and the run exits 3.  A tentative address does not count: it is
-#   one duplicate-address probe short of being usable and nothing may be sent
-#   from it.
+#   out of `ShowNetStatus ALL` in the transcript before any -6 arm is judged,
+#   and the guest is polled for it rather than sampled once.  Without it those
+#   arms are reported `blocked`, which is neither a pass nor a failure, and the
+#   run exits 3.  A tentative address does not count: it is one
+#   duplicate-address probe short of being usable and nothing may be sent from
+#   it, which is why the poll waits for one that is not.
 #
 #   This is not a precaution for one bad afternoon.  That link is unreliable
 #   for IPv6, so every -6 assertion in this tree is written this way.
@@ -115,8 +116,9 @@
 #
 # WHAT IT NEEDS
 #
-#   A 68020 Release build, a2065.device, a Kickstart, and a wire with a router
-#   advertising IPv6.  The names it asks for are checked from the host first:
+#   A 68020 Release build, the SANA-II driver the -N board wants, a Kickstart
+#   matching the model and the CPU, and a wire with a router advertising
+#   IPv6.  The names it asks for are checked from the host first:
 #   if the DUAL name has no AAAA here, or this host cannot reach it over IPv6,
 #   the run exits 2 rather than reporting the Amiga as broken.
 #
@@ -138,6 +140,13 @@ MODEL="${AMINETXDUO_FAMILY_MODEL:-A1200}"
 # -w asked for -- but it is a connect timeout and not a hang, and the whole
 # list has to fit inside this one.
 TIMEOUT="${AMINETXDUO_FAMILY_TIMEOUT:-900}"
+# How long the guest keeps asking for a global IPv6 address before the run
+# gives up on the wire.  The poll stops the moment it has one, so this is a
+# ceiling and not a cost.  Measured on one wire on one afternoon: 2 s on the
+# a2065 and 36 s on the ariadne, which is the whole argument against a number
+# somebody picks -- 20 s would have been right for one card and wrong for the
+# other.
+SLAAC_DEADLINE="${AMINETXDUO_FAMILY_SLAAC_DEADLINE:-90}"
 VERDICT_ONLY=0
 INJECT=""
 GUEST_V6=""
@@ -199,7 +208,10 @@ done
 TOOLS="$BUILD/src/tools"
 PROBES="$BUILD/tests/tools"
 BSD="$BUILD/src/bsdsocket/bsdsocket.library"
-STAGE="$ROOT/build/family-stage"
+# Tagged, like the drive and the log.  The file says two guests may share a
+# wire if they do not share a tag, a MAC or a host name, and a stage directory
+# they both `rm -rf` is a fourth thing they cannot share.
+STAGE="$ROOT/build/family-stage-$AMINETXDUO_RUN_TAG"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 REPORT="$HD/tools.txt"
 PARAMS="$ROOT/build/family-params-$AMINETXDUO_RUN_TAG.env"
@@ -267,14 +279,25 @@ host_preflight() {
     echo "host/goog=$GOOG"
 }
 
-find_a2065() {
-    local c
-    if [ -n "${AMINETXDUO_A2065:-}" ] && [ -f "${AMINETXDUO_A2065}" ]; then
+# The board's own driver, not a2065.device for every board.  -N xsurf used to
+# put an X-Surf in the machine and leave DEVICE=a2065.device in the config, so
+# every arm failed on the driver and none of them on what it was testing.
+# sana2_driver_for() is the one table that maps the two, shared with
+# tests/tools/run-cardsweep.sh through tests/tools/run-iperf.sh.
+. "$ROOT/tools/sana2-stage.sh"
+
+find_driver() {
+    local want="$1" c
+    if [ -n "${AMINETXDUO_SANA2_DRIVER:-}" ] &&
+       [ -f "${AMINETXDUO_SANA2_DRIVER}" ]; then
+        echo "$AMINETXDUO_SANA2_DRIVER"; return 0
+    fi
+    if [ "$want" = a2065.device ] && [ -n "${AMINETXDUO_A2065:-}" ] &&
+       [ -f "${AMINETXDUO_A2065}" ]; then
         echo "$AMINETXDUO_A2065"; return 0
     fi
-    for c in "$ROOT/build/a2065.device" \
-             "$HOME/amiga-assets/devs/a2065.device"; do
-        [ -f "$c" ] && { echo "$c"; return 0; }
+    for c in "$ROOT/build/$want" "$(sana2_local_driver "$want")"; do
+        [ -n "$c" ] && [ -f "$c" ] && { echo "$c"; return 0; }
     done
     return 1
 }
@@ -293,6 +316,13 @@ find_a2065() {
 # the command printed is asserting which family it actually used.
 V4RE='[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+'
 V6RE='[0-9a-fA-F]*:[0-9a-fA-F]*:'
+# A WHOLE address, for the rows that assert one inside brackets.  $V6RE stops
+# at the second colon, which is enough where the rest of the line follows it
+# and impossible where a `)` has to come next: `\($V6RE\)` cannot match
+# `(2606:4700:10::ac42:93f3)` and traceroute/v6 was red on a run whose
+# traceroute was right.  It still cannot match a dotted quad: a colon is
+# required.
+V6FULL='[0-9a-fA-F:]*:[0-9a-fA-F:]*'
 
 arms() {
     # A table of one's own, for putting a single arm to the question without
@@ -342,7 +372,7 @@ ping/v6|0|SYS:ping $DUAL -c 2 -t 25 -6|+bytes from $V6RE|+0% packet loss
 ping/no-aaaa|10|SYS:ping $V4ONLY_NAME -c 1 -t 10 -6|+$V4ONLY_NAME has no IPv6 address, and -6 was given
 ping/both|10|SYS:ping $DUAL -c 1 -t 10 -4 -6|+-4 and -6 cannot both be given
 traceroute/v4|*|SYS:traceroute $DUAL -m 1 -q 1 -w 5 -n -4|+traceroute to $DUAL \\($V4RE\\)
-traceroute/v6|*|SYS:traceroute $DUAL -m 1 -q 1 -w 5 -n -6|+traceroute to $DUAL \\($V6RE\\)
+traceroute/v6|*|SYS:traceroute $DUAL -m 1 -q 1 -w 5 -n -6|+traceroute to $DUAL \\($V6FULL\\)
 # A HOP HAS TO ANSWER.  The two rows above assert the header line, which
 # traceroute prints from the resolved address before it sends anything, so they
 # pass on a trace where every single probe times out -- which is exactly the
@@ -407,7 +437,7 @@ EOF
 # ======================================================================= #
 
 stage_and_boot() {
-    local a2065 t
+    local driver drvpath t
 
     for t in ToolsSmoke AddNetInterface ShowNetStatus nslookup host ping \
              traceroute fetch nc telnet tftp whois sntp iperf; do
@@ -416,12 +446,14 @@ stage_and_boot() {
     [ -x "$PROBES/TrBreak" ] || infra "no $PROBES/TrBreak; build $BUILD first"
     [ -f "$BSD" ] || infra "no $BSD; build $BUILD first"
 
-    a2065=$(find_a2065) || infra "no a2065.device; set AMINETXDUO_A2065"
+    driver=$(sana2_driver_for "$BOARD")
+    drvpath=$(find_driver "$driver") ||
+        infra "$BOARD wants $driver and there is none; put one in the driver\
+ store or set AMINETXDUO_SANA2_DRIVER"
 
     rm -rf "$STAGE"
     mkdir -p "$STAGE/libs"
     cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
-    cp "$a2065" "$STAGE/devs/a2065.device"
     cp "$BSD"   "$STAGE/libs/bsdsocket.library"
     for t in AddNetInterface ShowNetStatus nslookup host ping traceroute \
              fetch nc telnet tftp whois sntp iperf; do
@@ -435,11 +467,17 @@ stage_and_boot() {
     # a change to the shared one cannot silently move this test to a static
     # address the LAN does not route.
     cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
-DEVICE=a2065.device
+DEVICE=$driver
 UNIT=0
 CONFIGURE=DHCP
 CONFIGURE6=AUTO
 EOF
+
+    # And the driver itself, where that board's driver really lives: DEVS: for
+    # the A2065, DEVS:Networks for a third-party card, with DEVICE= rewritten
+    # to match.  sana2_stage() owns both halves.
+    export AMINETXDUO_SANA2_DRIVER="$drvpath"
+    sana2_stage "$BOARD" "$STAGE/devs"
 
     printf '%s %s\n' "$V4ONLY_ADDR" "$V4ONLY_NAME" \
         >> "$STAGE/devs/Internet/hosts"
@@ -459,9 +497,17 @@ EOF
     printf 'x\r\n\r\n' > "$STAGE/telnetin.txt"
 
     arms | grep -v '^#' | cut -d'|' -f3 > "$STAGE/cmds.raw"
+    # A router advertisement arrives on its own schedule and the address the
+    # guest builds from it appears when it appears.  Sampling once, straight
+    # after bring-up, called the guest address-less and reported every -6 arm
+    # `blocked`; a fixed sleep instead of the sample is the same bug on a
+    # slower machine.  So the wait is the CONDITION, and it is the same
+    # condition guest_global_v6() judges on: ShowNetStatus until one address6
+    # line is neither the fe80 one nor still in duplicate-address detection.
+    # $SLAAC_DEADLINE seconds is when we stop asking and say so.
     {
         echo "SYS:AddNetInterface eth0"
-        echo "SYS:ShowNetStatus ALL"
+        echo "until $SLAAC_DEADLINE address6 fe80,tentative SYS:ShowNetStatus ALL"
         cat "$STAGE/cmds.raw"
     } > "$STAGE/commands.txt"
 
@@ -469,6 +515,7 @@ EOF
     echo "boot/hostname=$GUEST_NAME"
     echo "boot/tag=$AMINETXDUO_RUN_TAG"
     echo "boot/iface=$IFACE board=$BOARD model=$MODEL"
+    echo "boot/driver=$SANA2_DRIVER device=$SANA2_DEVICE path=$drvpath"
 
     set +e
     "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
@@ -515,14 +562,21 @@ BLOCKED=0
 # finishing duplicate-address detection: nothing may be sent from a tentative
 # address, so a command that answers over IPv4 from one is right to.
 #
-# The WHOLE transcript, not one block.  A global address arrives when a router
-# advertisement does, which is after bring-up and not during it, and the
-# command list therefore samples the interface a second time further down.
-# Reading only the first sample called a guest address-less that had one twenty
-# seconds later.
+# The WHOLE transcript, not one block, and the poll above is what makes the
+# tentative exclusion mean something rather than everything.  Measured on the
+# lab wire 2026-08-12: the sample taken straight after AddNetInterface has no
+# global address at all, the one two seconds later has it and it is already
+# out of DAD.  Sampling once at the first moment reported all thirteen -6 arms
+# `blocked` on a guest whose IPv6 worked perfectly -- the transcript of that
+# run has `ping 2606:4700:10::6814:179a` answering in 20 ms with 0% loss.
 guest_global_v6() {
     awk '$1 == "address6" && $2 !~ /^fe80:/ && $0 !~ /\(tentative\)/ \
          { print $2; exit }' "$REPORT"
+}
+
+# What the bounded poll above concluded, verbatim.
+slaac_wait_outcome() {
+    sed -n 's/^----- until address6: \(.*\) -----$/\1/p' "$REPORT" | head -1
 }
 
 # An arm that cannot mean anything without that address.
@@ -582,11 +636,14 @@ judge() {
     [ -f "$REPORT" ] || infra "the guest wrote no $REPORT"
 
     GUEST_V6=$(guest_global_v6)
+    echo "guest/slaac-wait=$(slaac_wait_outcome) deadline=${SLAAC_DEADLINE}s"
     if [ -n "$GUEST_V6" ]; then
         echo "guest/global6=$GUEST_V6"
     else
         echo "guest/global6=none"
-        block "SYS:ShowNetStatus ALL" | sed -n 's/^ *address6/guest\/address6=/p'
+        # Every sample, so a global that stayed tentative is told apart from
+        # one that never arrived.
+        sed -n 's/^ *address6 */guest\/address6=/p' "$REPORT" | sort -u
     fi
 
     # A transcript that stops early is a timeout, not a set of failures.
@@ -650,6 +707,13 @@ judge() {
 judge_files() {
     local four six ok
 
+    # The two files the DEFAULT table's fetch rows write.  A run given a table
+    # of its own has no such rows and these would be two failures nothing
+    # asked for.
+    if [ -n "${AMINETXDUO_FAMILY_TABLE:-}" ]; then
+        return
+    fi
+
     four="$HD/f4.txt"
     six="$HD/f6.txt"
 
@@ -697,6 +761,10 @@ fi
 if [ "$BLOCKED" -ne 0 ]; then
     # Nothing failed, but the -6 arms were never put to the question.  Not a
     # pass: a pass here would be read as "IPv6 works".
+    echo "error=no global IPv6 address on the guest after ${SLAAC_DEADLINE}s of\
+ asking; the wire carries no usable router advertisement, or the guest did not\
+ act on one.  Raising the deadline is not the fix unless the poll shows it\
+ arriving late"
     echo "result=infra-no-guest-ipv6"
     exit 3
 fi
