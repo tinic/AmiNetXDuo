@@ -150,107 +150,6 @@ static BOOL parse_range(const char *text, UWORD *lo, UWORD *hi)
 }
 
 
-/* ------------------------------------------------------------ connecting, */
-
-/*
- * connect(), with a ceiling on how long it may take.
- *
- * The plain call blocks for the stack's whole retransmit schedule, which on an
- * unreachable address is the better part of a minute.  With TIMEOUT the socket
- * goes non-blocking (FIONBIO), the connect returns EINPROGRESS, and
- * WaitSelect() watches the write set for the end of the handshake.  SO_ERROR
- * then says whether it finished or failed.
- *
- * 0 on success, -1 on failure, -2 on timeout.  Nothing is printed; the errno
- * comes back in *why, so a port scan calling this once per port decides for
- * itself what to report.
- */
-#define NC_TIMED_OUT    (-2)
-
-static LONG nc_connect(struct Library *sb, LONG sock,
-                       const ToolSockAddrAny *sa, ULONG timeout, LONG *why)
-{
-    ToolFdSet   writefds;
-    ToolTimeval tv;
-    LONG        nonblock = 1;
-    LONG        err = 0;
-    LONG        errlen = (LONG)sizeof(err);
-    LONG        ready;
-
-    *why = 0;
-
-    if (timeout == 0)
-    {
-        if (tool_sock_connect(sb, sock, sa) == 0)
-            return 0;
-
-        *why = tool_sock_errno(sb);
-        return -1;
-    }
-
-    if (tool_sock_ioctl(sb, sock, TOOL_FIONBIO, &nonblock) != 0)
-    {
-        /* No non-blocking mode: the blocking call is still correct, it just
-           cannot be cut short. */
-        if (tool_sock_connect(sb, sock, sa) == 0)
-            return 0;
-
-        *why = tool_sock_errno(sb);
-        return -1;
-    }
-
-    if (tool_sock_connect(sb, sock, sa) != 0)
-    {
-        LONG e = tool_sock_errno(sb);
-
-        if (e != TOOL_EINPROGRESS && e != TOOL_EWOULDBLOCK)
-        {
-            *why = e;
-            return -1;
-        }
-
-        tool_fd_zero(&writefds);
-        tool_fd_add(&writefds, sock);
-
-        tv.tv_secs  = (LONG)timeout;
-        tv.tv_micro = 0;
-
-        ready = tool_sock_select(sb, sock + 1, NULL, &writefds, &tv);
-        if (ready == 0)
-            return NC_TIMED_OUT;
-        if (ready < 0)
-        {
-            *why = tool_sock_errno(sb);
-            return -1;
-        }
-
-        if (tool_sock_getsockopt(sb, sock, TOOL_SOL_SOCKET, TOOL_SO_ERROR,
-                                 &err, &errlen) != 0)
-        {
-            /*
-             * No SO_ERROR to read.  A second connect() reports EISCONN if the
-             * socket is already through, and the real reason if it failed.
-             */
-            err = (tool_sock_connect(sb, sock, sa) == 0)
-                      ? 0 : tool_sock_errno(sb);
-            if (err == 56 /* EISCONN */)
-                err = 0;
-        }
-
-        if (err != 0)
-        {
-            *why = err;
-            return -1;
-        }
-    }
-
-    nonblock = 0;
-    (VOID)tool_sock_ioctl(sb, sock, TOOL_FIONBIO, &nonblock);
-
-    return 0;
-}
-
-
 /* --------------------------------------------------------------- shovel --- */
 
 /*
@@ -662,7 +561,7 @@ static LONG nc_scan(struct Library *sb, const NcOptions *opt,
 
         (VOID)tool_sock_addr(&sa, address, (UWORD)port);
 
-        result = nc_connect(sb, sock, &sa, opt->timeout, &why);
+        result = tool_sock_connect_timed(sb, sock, &sa, opt->timeout, &why);
 
         if (result == 0)
         {
@@ -671,7 +570,7 @@ static LONG nc_scan(struct Library *sb, const NcOptions *opt,
         }
         else if (opt->verbose)
         {
-            if (result == NC_TIMED_OUT)
+            if (result == TOOL_CONNECT_TIMEDOUT)
                 tool_printf("%s port %lu no answer\n", (LONG)dotted, port);
             else
                 tool_printf("%s port %lu %s\n", (LONG)dotted, port,
@@ -701,7 +600,6 @@ int main(int argc, char **argv)
     NcOptions       opt;
     const char     *host;
     const char     *portspec;
-    ToolSockAddrAny sa;
     ToolAddr        address;
     UWORD           port = 0;
     LONG            sock = -1;
@@ -872,83 +770,47 @@ int main(int argc, char **argv)
     }
     else
     {
-        LONG result;
-
-        if (!tool_sock_resolve_af(sb, host, opt.family, &address))
-        {
-            CloseLibrary(sb);
-            FreeArgs(rda);
-            return RETURN_ERROR;
-        }
-
-        sock = tool_sock_socket(sb, (LONG)address.ta_Family,
-                                opt.udp ? TOOL_SOCK_DGRAM : TOOL_SOCK_STREAM,
-                                0);
-        if (sock < 0)
-        {
-            tool_error("no socket: %s",
-                       (LONG)tool_sock_errstr(tool_sock_errno(sb)));
-            CloseLibrary(sb);
-            FreeArgs(rda);
-            return RETURN_FAIL;
-        }
+        ToolConnect how;
 
         /* -p pins the local port, which a firewall on the far side may be
            written against. */
-        if (opt.localport != 0)
-        {
-            ToolSockAddrAny local;
-            ToolAddr        any;
-            LONG            one = 1;
+        how.family    = opt.family;
+        how.socktype  = opt.udp ? TOOL_SOCK_DGRAM : TOOL_SOCK_STREAM;
+        how.port      = (UWORD)port;
+        how.localport = (UWORD)opt.localport;
+        how.timeout   = opt.timeout;
+        how.announce  = FALSE;
 
-            (VOID)tool_sock_setsockopt(sb, sock, TOOL_SOL_SOCKET,
-                                       TOOL_SO_REUSEADDR, &one,
-                                       (LONG)sizeof(one));
-            /* The wildcard of the family being connected to. */
-            any = address;
-            if (TOOL_ADDR_IS6(&any))
-            {
-                ULONG b;
-
-                for (b = 0; b < 16UL; b++)
-                    any.ta_V6[b] = 0;
-            }
-            else
-            {
-                any.ta_V4 = 0;
-            }
-
-            (VOID)tool_sock_addr(&local, &any, opt.localport);
-
-            if (tool_sock_bind(sb, sock, &local) != 0)
-            {
-                tool_error("cannot use local port %ld: %s",
-                           (LONG)opt.localport,
-                           (LONG)tool_sock_errstr(tool_sock_errno(sb)));
-                (VOID)tool_sock_close(sb, sock);
-                CloseLibrary(sb);
-                FreeArgs(rda);
-                return RETURN_ERROR;
-            }
-        }
-
-        (VOID)tool_sock_addr(&sa, &address, port);
-
-        result = nc_connect(sb, sock, &sa, opt.timeout, &why);
-        if (result != 0)
+        sock = tool_sock_connect_host(sb, host, &how, &address, &why);
+        if (sock < 0)
         {
             char dotted[TOOL_ADDR_STRLEN];
 
             tool_addr_text(sb, &address, dotted, sizeof(dotted));
 
-            if (result == NC_TIMED_OUT)
+            switch (sock)
+            {
+            case TOOL_CONNECT_NORESOLVE:
+                break;
+            case TOOL_CONNECT_NOSOCKET:
+                tool_error("no socket: %s", (LONG)tool_sock_errstr(why));
+                CloseLibrary(sb);
+                FreeArgs(rda);
+                return RETURN_FAIL;
+            case TOOL_CONNECT_NOBIND:
+                tool_error("cannot use local port %ld: %s",
+                           (LONG)opt.localport, (LONG)tool_sock_errstr(why));
+                break;
+            case TOOL_CONNECT_TIMEDOUT:
                 tool_error("%s port %ld did not answer within %lu seconds",
                            (LONG)dotted, (LONG)port, opt.timeout);
-            else
+                break;
+            default:
                 tool_error("cannot connect to %s port %ld: %s", (LONG)dotted,
                            (LONG)port, (LONG)tool_sock_errstr(why));
+                break;
+            }
 
-            (VOID)tool_sock_close(sb, sock);
             CloseLibrary(sb);
             FreeArgs(rda);
             return RETURN_ERROR;

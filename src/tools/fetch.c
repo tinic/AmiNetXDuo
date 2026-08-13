@@ -120,39 +120,6 @@ struct FetchTimeval
 
 #define FETCH_SOCK_STREAM   1
 
-static LONG sock_socket(struct Library *base, LONG domain, LONG type, LONG proto)
-{
-    register struct Library *a6  __asm("a6") = base;
-    register LONG            d0  __asm("d0") = domain;
-    register LONG            d1  __asm("d1") = type;
-    register LONG            d2  __asm("d2") = proto;
-    register LONG            res __asm("d0");
-    register LONG _clob_d1 __asm("d1");
-
-    __asm __volatile ("jsr a6@(-30:W)"
-                      : "=r" (res), "=r" (_clob_d1)
-                      : "r" (a6), "r" (d0), "r" (d1), "r" (d2)
-                      : "a0", "a1", "cc", "memory");
-    return res;
-}
-
-static LONG sock_connect(struct Library *base, LONG s, APTR name, LONG len)
-{
-    register struct Library *a6  __asm("a6") = base;
-    register LONG            d0  __asm("d0") = s;
-    register APTR            a0  __asm("a0") = name;
-    register LONG            d1  __asm("d1") = len;
-    register LONG            res __asm("d0");
-    register LONG _clob_d1 __asm("d1");
-    register LONG _clob_a0 __asm("a0");
-
-    __asm __volatile ("jsr a6@(-54:W)"
-                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
-                      : "r" (a6), "r" (d0), "r" (a0), "r" (d1)
-                      : "a1", "cc", "memory");
-    return res;
-}
-
 static LONG sock_send(struct Library *base, LONG s, CONST_APTR buf, LONG len)
 {
     register struct Library *a6  __asm("a6") = base;
@@ -494,9 +461,9 @@ static LONG fetch_run(VOID)
     for (hop = 0; hop <= (ULONG)FETCH_MAX_HOPS; hop++)
     {
         FetchIO         io;
-        ToolSockAddrAny sa;
+        ToolConnect     how;
         ToolAddr        address;
-        LONG            salen;
+        LONG            cerr = 0;
         ULONG       interim = 0;
         LONG        n;
         LONG        why = TLS_OK;
@@ -549,37 +516,48 @@ static LONG fetch_run(VOID)
             }
         }
 
-        /* ---- resolve ----------------------------------------------------- */
+        /* ---- resolve and connect ----------------------------------------- */
 
-        if (!tool_sock_resolve_af(sbase, u.host, st.family, &address))
-        {
-            rc = RETURN_ERROR;
-            break;
-        }
+        /*
+         * Every address the name has, not the first one.  A dual-stack name
+         * whose AAAA goes nowhere used to cost the stack's whole SYN schedule
+         * and then fail, with the A never tried.  TIMEOUT bounds the connect
+         * as well now, so the ceiling is the one the user asked for.
+         */
+        how.family    = st.family;
+        how.socktype  = FETCH_SOCK_STREAM;
+        how.port      = u.port;
+        how.localport = 0;
+        how.timeout   = timeout;
+        how.announce  = FALSE;
 
-        /* ---- connect ----------------------------------------------------- */
-
-        salen = tool_sock_addr(&sa, &address, u.port);
-
-        io.sock = sock_socket(sbase, (LONG)address.ta_Family,
-                              FETCH_SOCK_STREAM, 0);
+        io.sock = tool_sock_connect_host(sbase, u.host, &how, &address, &cerr);
         if (io.sock < 0)
         {
-            tool_error("no socket (errno %ld)", (LONG)sock_errno(sbase));
-            rc = RETURN_FAIL;
-            break;
-        }
-
-        if (sock_connect(sbase, io.sock, (APTR)&sa, salen) != 0)
-        {
-            LONG err = sock_errno(sbase);
             char dotted[TOOL_ADDR_STRLEN];
 
             tool_addr_text(sbase, &address, dotted, sizeof(dotted));
-            tool_error("cannot connect to %s port %ld (errno %ld)",
-                       (LONG)dotted, (LONG)u.port, (LONG)err);
-            (VOID)sock_close(sbase, io.sock);
+
             rc = RETURN_ERROR;
+
+            switch (io.sock)
+            {
+            case TOOL_CONNECT_NORESOLVE:
+                break;                  /* the resolver has said why */
+            case TOOL_CONNECT_NOSOCKET:
+                tool_error("no socket (errno %ld)", (LONG)cerr);
+                rc = RETURN_FAIL;
+                break;
+            case TOOL_CONNECT_TIMEDOUT:
+                tool_error("%s port %ld did not answer within %lu seconds",
+                           (LONG)dotted, (LONG)u.port, timeout);
+                break;
+            default:
+                tool_error("cannot connect to %s port %ld (errno %ld)",
+                           (LONG)dotted, (LONG)u.port, (LONG)cerr);
+                break;
+            }
+
             break;
         }
 

@@ -153,6 +153,7 @@ typedef struct ToolAddrInfo
 #define TOOL_EADDRINUSE     48
 #define TOOL_ENETUNREACH    51
 #define TOOL_ECONNRESET     54
+#define TOOL_EISCONN        56
 #define TOOL_ETIMEDOUT      60
 #define TOOL_ECONNREFUSED   61
 #define TOOL_EHOSTUNREACH   65
@@ -324,6 +325,28 @@ BOOL tool_sock_resolve_af(struct Library *base, const char *host, LONG want,
 BOOL tool_sock_resolve(struct Library *base, const char *host, ToolAddr *out);
 
 /*
+ * Four, which covers a dual-stack name with a pair of records in each family.
+ * A longer answer is truncated: the point is to have a second address to try
+ * when the first one is unreachable, not to walk a whole round robin.
+ */
+#define TOOL_ADDR_TRIES     4
+
+typedef struct ToolAddrList
+{
+    ULONG       count;
+    ToolAddr    addr[TOOL_ADDR_TRIES];
+} ToolAddrList;
+
+/*
+ * The same lookup, keeping every address instead of the first.  The order is
+ * the resolver's, IPv6 ahead of IPv4, and `want` still pins absolutely: -6
+ * yields AAAAs and nothing else.  Failures are worded and printed exactly as
+ * tool_sock_resolve_af() words them, which is the same code.
+ */
+BOOL tool_sock_resolve_list(struct Library *base, const char *host, LONG want,
+                            ToolAddrList *out);
+
+/*
  * `IPV4=-4/S,IPV6=-6/S` out of a ReadArgs array and into a `want`.  Every
  * client command carries the pair, so the refusal when both are given is
  * worded once here rather than ten times.  FALSE after printing it.
@@ -363,6 +386,65 @@ const char *tool_sock_errstr(LONG err);
  */
 VOID tool_sock_fail(struct Library *base, const char *what,
                     const ToolAddr *addr, UWORD port);
+
+/*
+ * The same sentence with the errno given rather than read back.  A caller
+ * that has closed the failed socket already cannot use the one above: the
+ * close is itself a library call and overwrites what it would report.
+ */
+VOID tool_sock_fail_why(struct Library *base, const char *what,
+                        const ToolAddr *addr, UWORD port, LONG err);
+
+/* ---------------------------------------------------------- connecting --- */
+
+/*
+ * connect(), with a ceiling on how long it may take.
+ *
+ * The plain call blocks for the stack's whole SYN schedule, 191 s on ours,
+ * and a command with a timeout of its own cannot cut that short.  With
+ * `timeout` the socket goes non-blocking, the connect returns EINPROGRESS,
+ * and WaitSelect() watches the write set; SO_ERROR then says whether the
+ * handshake finished or failed.  0 means the ceiling is the stack's.
+ *
+ * 0 on success, -1 on failure with the errno in *why, TOOL_CONNECT_TIMEDOUT
+ * when the ceiling was reached.  Nothing is printed.
+ */
+#define TOOL_CONNECT_TIMEDOUT   (-2)
+
+LONG tool_sock_connect_timed(struct Library *base, LONG s,
+                             const ToolSockAddrAny *sa, ULONG timeout,
+                             LONG *why);
+
+/* What tool_sock_connect_host() is being asked for. */
+typedef struct ToolConnect
+{
+    LONG    family;         /* TOOL_AF_UNSPEC, or the one -4/-6 pinned  */
+    LONG    socktype;       /* TOOL_SOCK_STREAM or TOOL_SOCK_DGRAM      */
+    UWORD   port;
+    UWORD   localport;      /* 0, or a local port to bind first         */
+    ULONG   timeout;        /* seconds, 0 for the stack's own ceiling   */
+    BOOL    announce;       /* "Trying <address> port <n>..." per try   */
+} ToolConnect;
+
+#define TOOL_CONNECT_NORESOLVE  (-3)    /* the resolver has already said why */
+#define TOOL_CONNECT_NOSOCKET   (-4)
+#define TOOL_CONNECT_NOBIND     (-5)
+#define TOOL_CONNECT_FAILED     (-6)
+
+/*
+ * Resolve `host` and connect to the first of its addresses that answers.
+ *
+ * A name with an AAAA and an A gets both tried, so a machine on a network
+ * whose IPv6 goes nowhere still reaches the service.  Every address but the
+ * last is given a short trial first; the last keeps the caller's whole
+ * timeout, so a slow path is not abandoned for a fast failure.
+ *
+ * The socket on success, else one of the negative codes above, with *chosen
+ * the address that failed and *why its errno.  Only the resolver prints.
+ */
+LONG tool_sock_connect_host(struct Library *base, const char *host,
+                            const ToolConnect *how, ToolAddr *chosen,
+                            LONG *why);
 
 /* ------------------------------------------------------------- console ---- */
 
