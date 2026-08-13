@@ -497,9 +497,13 @@ typedef struct NetStatusStats
  * no one place to count them.  netstack_pool_sample() refreshes them on the way
  * out of every stack operation, and this call refreshes them before answering.
  *
- * nsl_TickWorstStallMs large next to nsl_TickWorstServiceUs small says the
- * tick task was not dispatched, not that it was slow.  nsl_BatonMoved or
- * nsl_BatonFull non-zero says the bracket lost track of a thread.
+ * nsl_TickWorstStallMs is the longest the tick task ever went between wakeups,
+ * and nsl_TickWorstServiceUs is what the wakeup before that one spent.  Large
+ * next to a small service figure says the tick task was not dispatched, not
+ * that it was slow.  Both cover every wakeup, not only the ones that clipped,
+ * so they are non-zero on a healthy machine and the pair explains a skew peak
+ * rather than sitting at 0 beside it.  nsl_BatonMoved or nsl_BatonFull
+ * non-zero says the bracket lost track of a thread.
  *
  * nsl_BatonStateShared counts the times a task inside the bracket found
  * _tx_thread_system_state already raised by another one. That window makes
@@ -513,6 +517,15 @@ typedef struct NetStatusStats
  * way, so this is a measure of how late timers are running and of nothing
  * else. nsl_TickSkewPeak is sampled before a backlog is worked off, so it moves
  * on a machine where nothing was ever lost.
+ *
+ * nsl_TickSkewPeak has a floor of one wakeup's worth of ticks: a wakeup is
+ * sampled owing every tick period that elapsed since the last one, and the
+ * VBlank source wakes once every TX_AMIGA_VBLANK_DIVIDER frames, 2 on a stock
+ * build. A healthy PAL machine therefore reads 2 having never been late. The
+ * floor is not subtracted, because what one wakeup owes depends on the source
+ * that woke it. Read it against nsl_TickWorstStallMs: a peak worth no more
+ * than that stall at 20 ms a tick is one late wakeup, and a larger one is
+ * lateness that accumulated across several.
  *
  * nsl_TickDeferred is ticks the budget put off to a later wakeup, which the
  * wheel does get. nsl_TickLost is ticks it never gets.
