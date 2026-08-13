@@ -640,9 +640,10 @@ static VOID show_arp(const AmiConfig *cfg, const ToolStats *st)
 
 static VOID show_routes(const AmiConfig *cfg, BOOL have_live)
 {
-    static ToolRoutes  routes;
-    static ToolRoutes6 routes6;
-    char               gw[AMI_CFG_NAME_LEN];
+    static ToolRoutes     routes;
+    static ToolRoutes6    routes6;
+    static ToolDest6Table dest6;
+    char                  gw[AMI_CFG_NAME_LEN];
 
     tool_printf("\nRoutes\n");
 
@@ -681,6 +682,16 @@ static VOID show_routes(const AmiConfig *cfg, BOOL have_live)
        there is no reverse lookup for an IPv6 address in this report. */
     if (tool_routes6(&routes6) == 0)
         tool_print_routes6(&routes6, cfg);
+
+    /*
+     * The destination cache under the two lists it is resolved from, because
+     * it is the routing decision this machine actually made and it is the
+     * first table _nx_ipv6_packet_send() reads. It is a fixed-size cache and a
+     * full one used to fail a send with nothing said anywhere; this report is
+     * where a reader finds out that it is full and what is holding the slots.
+     */
+    if (tool_dest6(&dest6) == 0)
+        tool_print_dest6(&dest6, cfg);
 }
 
 static VOID show_resolver(const AmiResolverConfig *r, BOOL from_files)

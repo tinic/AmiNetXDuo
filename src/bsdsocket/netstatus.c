@@ -704,6 +704,87 @@ static VOID ns_fill_neighbours(NX_IP *ip, NsWriter *w)
 #endif
 }
 
+/*
+ * The destination cache: another flat array, walked the same way, but the
+ * entries are ordered by a use counter rather than by a clock, so the age
+ * reported is a difference against nx_ipv6_destination_table_clock and is
+ * computed here because that counter is not published anywhere else.
+ */
+static VOID ns_fill_dest6(NX_IP *ip, NsWriter *w)
+{
+#ifdef AMINETXDUO_IPV6
+    UINT i;
+
+    if (!netstack_ipv6_enabled())
+        return;
+
+    for (i = 0; i < (UINT)NX_IPV6_DESTINATION_TABLE_SIZE; i++)
+    {
+        const NX_IPV6_DESTINATION_ENTRY *e = &ip->nx_ipv6_destination_table[i];
+        const ND_CACHE_ENTRY            *nd;
+        NetStatusDest6                  *out;
+
+        if (!e->nx_ipv6_destination_entry_valid)
+            continue;
+
+        out = (NetStatusDest6 *)ns_writer_next(w);
+        if (out == NULL)
+            continue;
+
+        out->nsd6_Destination[0] = e->nx_ipv6_destination_entry_destination_address[0];
+        out->nsd6_Destination[1] = e->nx_ipv6_destination_entry_destination_address[1];
+        out->nsd6_Destination[2] = e->nx_ipv6_destination_entry_destination_address[2];
+        out->nsd6_Destination[3] = e->nx_ipv6_destination_entry_destination_address[3];
+
+        out->nsd6_NextHop[0] = e->nx_ipv6_destination_entry_next_hop[0];
+        out->nsd6_NextHop[1] = e->nx_ipv6_destination_entry_next_hop[1];
+        out->nsd6_NextHop[2] = e->nx_ipv6_destination_entry_next_hop[2];
+        out->nsd6_NextHop[3] = e->nx_ipv6_destination_entry_next_hop[3];
+
+        /* Signed difference, the way nx_icmpv6_dest_table_add.c compares it,
+           so a wrapped counter still orders the entries. */
+        out->nsd6_Age = (ULONG)(LONG)(ip->nx_ipv6_destination_table_clock -
+                                      e->nx_ipv6_destination_entry_last_used);
+
+        out->nsd6_Capacity = (ULONG)NX_IPV6_DESTINATION_TABLE_SIZE;
+
+#ifdef NX_ENABLE_IPV6_PATH_MTU_DISCOVERY
+        out->nsd6_PathMtu = e->nx_ipv6_destination_entry_path_mtu;
+#else
+        out->nsd6_PathMtu = NETSTATUS_DEST6_NO_MTU;
+#endif
+
+        /* Compared word by word rather than with CHECK_IPV6_ADDRESSES_SAME:
+           without NX_IPV6_UTIL_INLINE that name is a function taking two
+           non-const ULONG *. */
+        if (out->nsd6_Destination[0] == out->nsd6_NextHop[0] &&
+            out->nsd6_Destination[1] == out->nsd6_NextHop[1] &&
+            out->nsd6_Destination[2] == out->nsd6_NextHop[2] &&
+            out->nsd6_Destination[3] == out->nsd6_NextHop[3])
+            out->nsd6_Flags |= NETSTATUS_DEST6_ONLINK;
+
+        /*
+         * The cross-link is what says whether anything can be sent at all: a
+         * destination whose next hop never resolved is exactly the case that
+         * used to fail with nothing printed.
+         */
+        nd = e->nx_ipv6_destination_entry_nd_entry;
+        if (nd != NX_NULL)
+        {
+            out->nsd6_NdState   = (UWORD)nd->nx_nd_cache_nd_status;
+            out->nsd6_Interface = ns_interface_index(ip,
+                                                     nd->nx_nd_cache_interface_ptr);
+
+            if (nd->nx_nd_cache_is_router != NX_NULL)
+                out->nsd6_Flags |= NETSTATUS_DEST6_ROUTER;
+        }
+    }
+#else
+    (VOID)ip;
+    (VOID)w;
+#endif
+}
+
 static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
 {
     UINT i;
@@ -1289,6 +1370,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         case NETSTATUS_SERVICES:    need = 0;                        break;
         case NETSTATUS_OPENERS:     need = 0;                        break;
         case NETSTATUS_TCPSTALL:    need = 0;                        break;
+        case NETSTATUS_DEST6:       need = 0;                        break;
         default:                    return bsd_fail(SocketBase, AMI_EINVAL);
     }
 
@@ -1438,6 +1520,13 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             ns_writer_init(&w, hdr, size, NETSTATUS_TCPSTALL,
                            sizeof(NetStatusTcpStall));
             ns_fill_tcpstall(ip, &w);
+            ns_writer_finish(&w);
+            break;
+
+        case NETSTATUS_DEST6:
+            ns_writer_init(&w, hdr, size, NETSTATUS_DEST6,
+                           sizeof(NetStatusDest6));
+            ns_fill_dest6(ip, &w);
             ns_writer_finish(&w);
             break;
 

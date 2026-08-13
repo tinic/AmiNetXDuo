@@ -831,20 +831,23 @@ stage_cards() {
 
     "$ROOT/tests/tools/run-cardsweep.sh" -b "$BUILD/default" || rc=$?
 
-    # 1 is the CARD claim -- online, and bytes both ways agreeing with a
-    # machine off this box -- and it is the only one that turns this red.
-    # 3 is every card carrying traffic with something else wrong, which is
-    # loud here and in the table and is not a build break: the arm around the
-    # claim is flaky in a way the claim is not, and a nightly that goes red on
-    # a coin toss stops being read.  run-cardsweep.sh says why at length.
+    # Two red codes, because there are two claims: 1 is the CARD -- online, and
+    # bytes both ways agreeing with a machine off this box -- and 4 is a card
+    # that carried the bytes and failed an assertion around them.  4 used to be
+    # inside 3, and 3 is a skip, so xsurf100z3 failed for weeks reported as a
+    # skipped tier and only went red because ne2000_pcmcia failed beside it.
+    #
+    # 3 now means nothing failed: a rig that refused an arm, a driver that is
+    # not in the store.  Neither is a verdict on a card.
     case "$rc" in
         0) note "PASS  every card came online and carried bytes both ways" ;;
         1) fail "card sweep: a card did not carry traffic -- the table above" \
                 "names it and says which direction failed" ;;
         2) fail "card sweep: the rig refused it before any card was measured" ;;
-        3) skip "card sweep: every card carried bytes both ways, and an arm" \
-                "failed or a card was not measured -- the table above says" \
-                "which and why" ;;
+        3) skip "card sweep: every card that was measured passed, and a card" \
+                "was not measured -- the table above says which and why" ;;
+        4) fail "card sweep: a card carried bytes both ways and an assertion" \
+                "in its arm failed -- the table above names it" ;;
         *) fail "card sweep: exit $rc" ;;
     esac
     return "$rc"
@@ -882,8 +885,9 @@ stage_cards6() {
                 "above names it and says how far it got" ;;
         2) skip "off-LAN IPv6: the lab could not run it, and no card was" \
                 "measured -- the error line above says what was missing" ;;
-        3) skip "off-LAN IPv6: no card failed the claim, and a card was not" \
-                "measured -- the table above says which and why" ;;
+        3) skip "off-LAN IPv6: nothing failed, and a card was not measured --" \
+                "no driver in the store, or an interface that never came" \
+                "online, which is the card sweep's gate and not this one" ;;
         *) fail "off-LAN IPv6: exit $rc" ;;
     esac
     return "$rc"

@@ -418,12 +418,17 @@ IFEOF
     [ "${p6:-0}" -gt 0 ] && offlan=yes
     [ "$tcp6" = yes ] && offlan=yes
 
+    # A guest that produced nothing is a FAILURE, not a skip.  run-cardsweep.sh
+    # has always scored both of these as fail; this scored them as skip, so a
+    # card whose guest hung every night was green.  A timeout voids the
+    # artefact it was supposed to produce, which is the same thing as having no
+    # artefact, so the two share a status.
     status=fail; why=""
     if [ ! -f "$REPORT" ]; then
-        status=skip_setup
+        status=fail_no_transcript
         why=" reason=\"the guest wrote no transcript at all (rc=$rc); read the log\""
     elif [ "$rc" = 124 ]; then
-        status=skip_setup
+        status=fail_hang
         why=" reason=\"the guest never finished; ${TIMEOUT}s timeout\""
     elif [ "${iface_rc:-1}" != 0 ]; then
         status=skip_offline
@@ -441,10 +446,14 @@ IFEOF
         why=" reason=\"a global address formed and no IPv6 came back from anywhere\""
     fi
 
+    # skip_offline is the one status here that is a skip on purpose: the claim
+    # "this card comes online" belongs to run-cardsweep.sh, whose exit 1 is
+    # exactly that, so counting it twice would put one defect in two gates.
+    # skip_no_driver above is the other: nothing to boot.
     case "$status" in
-        pass)                 NPASS=$((NPASS + 1)) ;;
-        skip_setup|skip_offline) NSKIP=$((NSKIP + 1)) ;;
-        *)                    NFAIL=$((NFAIL + 1)) ;;
+        pass)                    NPASS=$((NPASS + 1)) ;;
+        skip_offline)            NSKIP=$((NSKIP + 1)) ;;
+        *)                       NFAIL=$((NFAIL + 1)) ;;
     esac
 
     printf 'card=%s model=%s driver=%s status=%s rc=%s iface_rc=%s global6=%s ping6_offlan=%s tcp6_offlan=%s trace6_hops=%s ping6_onlink=%s ping4_offlan=%s wall_s=%s log=%s%s\n' \
@@ -471,9 +480,11 @@ printf 'cardsweep6: cards=%d pass=%d fail=%d skip=%d target6=%s wall_s=%d\n' \
        "$((NPASS + NFAIL + NSKIP))" "$NPASS" "$NFAIL" "$NSKIP" "$TARGET6" "$WALL"
 
 # 0  every card formed a global address and reached past the router
-# 1  A CARD DID NOT.  This is the gate.
+# 1  A CARD DID NOT, or a card's guest produced nothing at all.  The gate.
 # 2  the lab could not run it, and no card was measured
-# 3  no card failed the claim, and a card was not measured -- read the table
+# 3  nothing failed, and a card was not measured -- read the table.  Only two
+#    things reach it: no driver in the store, and an interface that never came
+#    online, which is run-cardsweep.sh's exit 1 and not a second gate here.
 if [ "$NFAIL" != 0 ]; then echo "result=fail"; exit 1; fi
 if [ "$NSKIP" != 0 ]; then echo "result=partial"; exit 3; fi
 echo "result=ok"

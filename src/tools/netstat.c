@@ -365,8 +365,9 @@ static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
  */
 static VOID show_routes(const AmiConfig *cfg)
 {
-    static ToolRoutes  routes;
-    static ToolRoutes6 routes6;
+    static ToolRoutes      routes;
+    static ToolRoutes6     routes6;
+    static ToolDest6Table  dest6;
 
     tool_printf("\nRouting table\n");
 
@@ -378,6 +379,16 @@ static VOID show_routes(const AmiConfig *cfg)
     /* Prints nothing on a machine with no IPv6 routes. */
     if (tool_routes6(&routes6) == 0)
         tool_print_routes6(&routes6, cfg);
+
+    /*
+     * The destination cache under the lists it is resolved from, because it
+     * is the routing decision this machine actually made and it is the first
+     * table _nx_ipv6_packet_send() reads. Here as well as in ShowNetStatus
+     * for the reason routes6 is: both commands print the live routing surface
+     * and they print it through the same function so they cannot disagree.
+     */
+    if (tool_dest6(&dest6) == 0)
+        tool_print_dest6(&dest6, cfg);
 }
 
 /*
