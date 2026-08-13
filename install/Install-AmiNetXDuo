@@ -1037,6 +1037,32 @@
   (confirm)
   (optional "force"))
 
+; --- anxnet.device, DEVS:Networks ----------------------------------------
+;
+; One SANA-II driver for every NE2000/DP8390 card: Ariadne II, X-Surf, X-Surf
+; 100, and the two shared-memory boards as their core lands.  Which card it
+; drives is the UNIT in the interface file, not which file is opened, so there
+; is one driver here and no per-card copies.  Per CPU, like the libraries.
+
+(set S_NETDEVS (tackon (tackon S_DEVS "Networks") CPUDIR))
+
+(if (exists (tackon S_NETDEVS "anxnet.device") (noreq))
+  (
+    (makedir "DEVS:Networks"
+      (prompt "Creating DEVS:Networks, the drawer network card drivers live in")
+      (help   @makedir-help))
+
+    (copylib
+      (prompt (cat "Installing anxnet.device into DEVS:Networks. This is one "
+                   "driver for every NE2000 and DP8390 card: Ariadne II, "
+                   "X-Surf and X-Surf 100. It is the build for a " CPU "."))
+      (help   @copylib-help)
+      (source (tackon S_NETDEVS "anxnet.device"))
+      (dest   "DEVS:Networks")
+      (confirm)
+      (optional "force"))
+  ))
+
 ; --- tls.library, if this archive has one --------------------------------
 ;
 ; Only a build made with -DAMINETXDUO_TLS=ON carries it, so its absence is

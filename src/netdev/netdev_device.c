@@ -220,7 +220,7 @@ BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len)
 /* One line to the shell that asked, when there is one. Never from an ISR. */
 static VOID netdev_moan(const char *text)
 {
-    struct Library *dosbase = OpenLibrary("dos.library", 36);
+    struct Library *dosbase = OpenLibrary((CONST_STRPTR)"dos.library", 36);
     struct Process *me      = (struct Process *)FindTask(NULL);
 
     if (dosbase == NULL)
@@ -845,7 +845,7 @@ static NetdevDevice *netdev_init(
     base->nd_Device.dd_Library.lib_IdString = (APTR)netdev_id;
 
     nd_trace("anx: init\r\n");
-    base->nd_ExpansionBase = OpenLibrary("expansion.library", 36);
+    base->nd_ExpansionBase = OpenLibrary((CONST_STRPTR)"expansion.library", 36);
     ExpansionBase = (struct ExpansionBase *)base->nd_ExpansionBase;
     nd_tracex("anx: expansion ", (ULONG)base->nd_ExpansionBase);
     netdev_probe(base);
