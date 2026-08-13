@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A DHCP server that offers a finite lease with an infinite rebind time can no longer pin the client in RENEWING forever. It would sit renewing an address the server was free to hand to someone else, never rebinding and never expiring; an infinite rebind is now honoured only under a genuinely infinite lease
+- Every host-side test and fuzzer builds and runs under AddressSanitizer and UndefinedBehaviorSanitizer in CI, 32-bit and 64-bit. Four latent defects it found are fixed; a sign-extended shift in the Ed25519 reduction and two test buffers a byte short of their own ceilings
 - `netstat -r` and `ShowNetStatus ROUTES` show the IPv6 destination cache: every destination the stack has decided a next hop for, how recently each was used, and whether the table is full. The table that silently dropped every new destination when it filled was invisible to both commands
 
 ## 0.21.3
