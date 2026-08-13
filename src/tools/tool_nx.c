@@ -39,6 +39,7 @@ static union
     struct { NetStatusHeader hdr; NetStatusNeighbour e[TOOL_MAX_ND]; }     nd;
     struct { NetStatusHeader hdr; NetStatusHealth    e; }      health;
     struct { NetStatusHeader hdr; NetStatusTcpStall  e[TOOL_MAX_SOCK]; } stall;
+    struct { NetStatusHeader hdr; NetStatusDest6     e[TOOL_MAX_DEST6]; } dest6;
 } nx_answer;
 
 /*
@@ -922,6 +923,122 @@ VOID tool_print_routes6(const ToolRoutes6 *routes, const AmiConfig *cfg)
 
     if (routes->truncated)
         tool_printf("(more IPv6 routes than this command can hold)\n");
+}
+
+/* ----------------------------------------------------- destination cache, */
+
+LONG tool_dest6(ToolDest6Table *out)
+{
+    struct Library *base;
+    LONG            n;
+    LONG            i;
+    LONG            j;
+
+    if (out == NULL)
+        return -1;
+
+    out->count     = 0;
+    out->capacity  = 0;
+    out->truncated = FALSE;
+
+    base = nx_open();
+    if (base == NULL)
+        return -1;
+
+    /*
+     * A library without IPv6 answers with no entries; one that predates the
+     * selector answers -1. Both print nothing and neither is a failure, the
+     * way tool_routes6() treats the same two cases.
+     */
+    n = tool_netstatus_query(base, NETSTATUS_DEST6, &nx_answer,
+                             sizeof(nx_answer.dest6), sizeof(NetStatusDest6));
+    if (n > 0)
+    {
+        if (nx_answer.dest6.hdr.nsh_Available > nx_answer.dest6.hdr.nsh_Count)
+            out->truncated = TRUE;
+
+        for (i = 0; i < n && i < (LONG)TOOL_MAX_DEST6; i++)
+        {
+            const NetStatusDest6 *src = &nx_answer.dest6.e[i];
+            ToolDest6            *e   = &out->entry[out->count];
+
+            tool_format_ip6(src->nsd6_Destination, e->dest, sizeof(e->dest));
+            tool_format_ip6(src->nsd6_NextHop, e->next_hop,
+                            sizeof(e->next_hop));
+
+            e->age      = src->nsd6_Age;
+            e->path_mtu = src->nsd6_PathMtu;
+            e->nd_state = src->nsd6_NdState;
+            e->flags    = src->nsd6_Flags;
+            e->nx_index = src->nsd6_Interface;
+
+            out->capacity = (UWORD)src->nsd6_Capacity;
+            out->count    = (UWORD)(out->count + 1);
+        }
+
+        /*
+         * Sorted by age here rather than in the library: the table is a flat
+         * array in slot order, and slot order says nothing. Ascending age is
+         * most recently used first, which puts the entry about to be evicted
+         * last, where a reader looking at a full table wants it.
+         */
+        for (i = 1; i < (LONG)out->count; i++)
+        {
+            ToolDest6 held = out->entry[i];
+
+            for (j = i - 1; j >= 0 && out->entry[j].age > held.age; j--)
+                out->entry[j + 1] = out->entry[j];
+
+            out->entry[j + 1] = held;
+        }
+    }
+
+    tool_netstatus_close(base);
+
+    return 0;
+}
+
+/*
+ * The cache, printed under the routes it resolves to. Two things a reader
+ * cannot get anywhere else: how many of the slots are taken, and how stale
+ * each entry is, because a full cache evicts on every new destination and
+ * used to do it without saying so.
+ */
+VOID tool_print_dest6(const ToolDest6Table *table, const AmiConfig *cfg)
+{
+    UWORD i;
+
+    if (table == NULL || table->count == 0)
+        return;
+
+    tool_printf("\nIPv6 destination cache, %lu of %lu slots%s\n",
+                (LONG)table->count, (LONG)table->capacity,
+                (LONG)((table->capacity != 0 &&
+                        table->count >= table->capacity)
+                           ? " -- FULL, a new destination evicts the last row"
+                           : ""));
+
+    tool_printf("Destination                              "
+                "Next hop                       Age    MTU    "
+                "Neighbour   Interface\n");
+
+    for (i = 0; i < table->count; i++)
+    {
+        const ToolDest6 *e = &table->entry[i];
+
+        tool_printf("%-40s %-30s %-6lu %-6lu %-11s %s\n",
+                    (LONG)e->dest,
+                    (LONG)((e->flags & NETSTATUS_DEST6_ONLINK)
+                               ? "(on link)" : e->next_hop),
+                    (LONG)e->age, (LONG)e->path_mtu,
+                    (LONG)((e->nd_state != 0)
+                               ? tool_nd_state_name(e->nd_state)
+                               : "(none)"),
+                    (LONG)tool_iface_name(cfg, e->nx_index));
+    }
+
+    if (table->truncated)
+        tool_printf("(more destinations than this command can hold)\n");
 }
 
 /* ------------------------------------------------------------ neighbours, */

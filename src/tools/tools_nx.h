@@ -442,6 +442,44 @@ LONG tool_routes6(ToolRoutes6 *out);
 VOID tool_print_routes6(const ToolRoutes6 *routes, const AmiConfig *cfg);
 
 /*
+ * The IPv6 destination cache, which is what the two lists above resolve TO.
+ * One entry per destination this machine has sent to, and it is a fixed-size
+ * cache: a machine that reaches more distinct addresses than it has slots is
+ * evicting on every new one, and until this was reportable a full table was
+ * silent in both directions -- nothing said which destinations held the slots
+ * and nothing said a send had been dropped for want of one.
+ *
+ * `age` is uses of the table since this entry was last chosen, so 0 is the
+ * entry just used and the largest is the next one evicted.
+ */
+#define TOOL_MAX_DEST6  16
+
+typedef struct ToolDest6
+{
+    char    dest[48];
+    char    next_hop[48];            /* on link = the destination itself     */
+    ULONG   age;                     /* table uses since last chosen         */
+    ULONG   path_mtu;                /* 0 = not discovered                   */
+    UWORD   nd_state;                /* NETSTATUS_ND_*, 0 = nothing linked   */
+    UWORD   flags;                   /* NETSTATUS_DEST6_*                    */
+    UWORD   nx_index;
+} ToolDest6;
+
+typedef struct ToolDest6Table
+{
+    ToolDest6   entry[TOOL_MAX_DEST6];
+    UWORD       count;
+    UWORD       capacity;            /* slots the stack has, 0 = not answered */
+    BOOL        truncated;
+} ToolDest6Table;
+
+LONG tool_dest6(ToolDest6Table *out);
+
+/* Printed most recently used first, so the row nearest eviction is last.
+   Prints nothing when the cache is empty. */
+VOID tool_print_dest6(const ToolDest6Table *table, const AmiConfig *cfg);
+
+/*
  * The table, printed. Both commands that print one call this, so they cannot
  * disagree about the stack's routes.
  *

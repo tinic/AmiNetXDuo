@@ -184,6 +184,11 @@ extern "C" {
  */
 #define NETSTATUS_TCPSTALL     14   /* NetStatusTcpStall[]                   */
 
+/* 15 the same way, and for the same reason: a new record no older library
+   ever wrote. A version-10 library that predates it answers EINVAL and the
+   section is left out. */
+#define NETSTATUS_DEST6        15   /* NetStatusDest6[]                      */
+
 /*
  * Every buffer starts with this. The caller fills nsh_Magic and nsh_Version;
  * the library fills the rest and writes as many entries after it as will fit,
@@ -684,6 +689,55 @@ typedef struct NetStatusRoute6
     UWORD   nsr6_Flags;
     UWORD   nsr6_Interface;             /* NX_IP interface index             */
 } NetStatusRoute6;
+
+/* ---------------------------------------------------- NETSTATUS_DEST6 --- */
+
+/*
+ * The destination cache, nx_ipv6_destination_table[].  Where NETSTATUS_ROUTES6
+ * reports the two lists a route is DERIVED from, this reports what the stack
+ * actually decided, per destination, and it is the first thing
+ * _nx_ipv6_packet_send() looks at.
+ *
+ * It is reported because a full one used to be silent.  A miss on a full table
+ * released the packet and returned, out of a VOID function, so a machine that
+ * had reached its capacity of distinct destinations simply stopped sending to
+ * new ones with no error anywhere -- and two slots go before any user command,
+ * to the link-local addresses of the routers this machine answered.  Entries
+ * are given up least-recently-used now, but "which destinations are hot, and
+ * is the table full" is still the question a reader has to be able to ask.
+ *
+ * nsd6_Age is that answer: uses of the table since this entry was last chosen,
+ * so 0 is the entry just used and the largest is the next one to be evicted.
+ * It counts uses, not seconds; the table has no clock but its own.
+ *
+ * nsd6_Capacity is the same number in every row, because a count of entries
+ * does not say whether the table is full and nothing else here carries the
+ * build's NX_IPV6_DESTINATION_TABLE_SIZE.
+ *
+ * An IPv4-only build answers with no entries rather than an error.
+ */
+
+/* nsd6_Flags */
+#define NETSTATUS_DEST6_ONLINK  0x0001  /* next hop is the destination itself */
+#define NETSTATUS_DEST6_ROUTER  0x0002  /* the next hop is a router           */
+
+/* nsd6_PathMtu when the build has no path MTU discovery. */
+#define NETSTATUS_DEST6_NO_MTU  0UL
+
+typedef struct NetStatusDest6
+{
+    ULONG   nsd6_Destination[4];        /* host byte order, four words       */
+    ULONG   nsd6_NextHop[4];            /* host byte order; == destination
+                                           when the destination is on link   */
+    ULONG   nsd6_Age;                   /* table uses since last chosen      */
+    ULONG   nsd6_PathMtu;               /* 0 = not discovered / not built in */
+    ULONG   nsd6_Capacity;              /* slots in the table, every row     */
+    UWORD   nsd6_NdState;               /* NETSTATUS_ND_* of the next hop's
+                                           cache entry; 0 = no entry linked  */
+    UWORD   nsd6_Flags;
+    UWORD   nsd6_Interface;             /* NX_IP interface index             */
+    UWORD   nsd6_Pad;
+} NetStatusDest6;
 
 /* -------------------------------------------------- NETSTATUS_SOCKETS --- */
 
