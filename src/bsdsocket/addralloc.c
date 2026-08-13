@@ -611,18 +611,26 @@ static VOID bsd_aam_worker(VOID)
     LONG         result = AAMR_Timeout;
     LONG         rc;
 
-    /* The launcher PutMsg()ed the job here, the same way tcp_ctrl_find() hands
-       a FIND packet to a session. It is the only message that ever arrives on
-       this port, and it arrives whether or not we got here first. */
-    WaitPort(&me->pr_MsgPort);
-    job = (BsdAamJob *)GetMsg(&me->pr_MsgPort);
-
-    if (job == NULL)
+    /*
+     * The launcher PutMsg()ed the job here, the same way tcp_ctrl_find() hands
+     * a FIND packet to a session. It is the only message that ever arrives on
+     * this port, and it arrives whether or not we got here first.
+     *
+     * Waited for in a loop rather than taken once. The slot in bsd_aam_jobs[]
+     * is claimed before CreateNewProc(), so a worker that gave up on a NULL
+     * GetMsg() would leave that slot claimed with nobody to release it and no
+     * message to reply -- and it could not do either, because the job is the
+     * only thing that names the index and the message. Every other path out of
+     * here releases the slot and replies; this one could not, so it is gone:
+     * the launcher PutMsg()s exactly once and unconditionally, so there is
+     * always a message coming and the only thing to do is wait for it.
+     */
+    do
     {
-        Forbid();
-        bsd_aam_workers--;
-        return;
+        WaitPort(&me->pr_MsgPort);
+        job = (BsdAamJob *)GetMsg(&me->pr_MsgPort);
     }
+    while (job == NULL);
 
     aam = job->baj_Message;
 
