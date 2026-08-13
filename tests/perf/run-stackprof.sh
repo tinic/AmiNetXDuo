@@ -95,7 +95,7 @@ PROFILE=1
 # default outlived a peer move and pointed at the host its own guard refuses.
 PEER_ADDR="${AMINETXDUO_FITZ_PEER_ADDR:-}"
 PEER="${AMINETXDUO_FITZ_PEER:-}"
-PEER_DIR="${AMINETXDUO_FITZ_PEER_DIR:-/tmp/fitzbench-share}"
+PEER_DIR="${AMINETXDUO_FITZ_PEER_DIR:-}"
 PEER_BIN="${AMINETXDUO_FITZ_PEER_BIN:-\$HOME/fitzsrc/fitz-serve}"
 PORT="${AMINETXDUO_FITZ_PORT:-17712}"
 KB=4096
@@ -143,6 +143,13 @@ while getopts "s:T:pdci:A:P:k:C:r:b:R:G:B:m:t:L:M:wW:E:" opt; do
         *) sed -n '3,60p' "$0" >&2; exit 2 ;;
     esac
 done
+
+# The share is per-port, as the server and its kill pattern already are.  One
+# fixed /tmp/fitzbench-share left two runs on two ports writing one
+# fitzbench.dat on the peer, and the second run's write truncated it under the
+# first run's read: `Read() gave 0 of 32768` mid-transfer on a clean link, with
+# the connection itself never closed or lost.
+PEER_DIR="${PEER_DIR:-/tmp/fitzbench-share-$PORT}"
 
 [ -n "$STACK" ] || { sed -n '3,50p' "$0" >&2; exit 2; }
 [ -n "$TAG" ] || TAG="sp-$STACK$([ "$PROFILE" = 1 ] || echo -plain)$([ "$DIAG" = 0 ] || echo -diag)"
