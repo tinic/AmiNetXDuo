@@ -477,6 +477,18 @@ VOID netdev_tx_pump(NetdevUnit *unit)
             total = (UWORD)(len + NETDEV_HDR_LEN);
         }
 
+        /*
+         * The chip pads a short frame to the Ethernet minimum out of whatever
+         * is in the buffer, so the padding has to be written.  Left out, the
+         * tail of the last frame -- up to 46 bytes of it -- goes on the wire
+         * behind every ARP.
+         */
+        if (total < NETDEV_FRAME_MIN)
+        {
+            nd_zero(buf + total, (ULONG)(NETDEV_FRAME_MIN - total));
+            total = NETDEV_FRAME_MIN;
+        }
+
         rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, buf, total);
         if (rc == DP8390_TX_BUSY)
         {
@@ -902,7 +914,7 @@ static struct Device *netdev_open(
     AddTail(&hw->nu_OpenerList, (struct Node *)&op->op_Node);
     Enable();
 
-    if (op->op_Promisc && !hw->nu_Nic.promisc)
+    if (op->op_Promisc && hw->nu_Promisc++ == 0)
     {
         hw->nu_Nic.promisc = TRUE;
         if (hw->nu_Online)
@@ -953,6 +965,13 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
         while ((q = netdev_take(&op->op_Events, ~0UL)) != NULL)
             netdev_reply(q, IOERR_ABORTED, 0);
 
+        if (op->op_Promisc && hw->nu_Promisc != 0 && --hw->nu_Promisc == 0)
+        {
+            hw->nu_Nic.promisc = FALSE;
+            if (hw->nu_Online)
+                netdev_rebuild_filter(hw);
+        }
+
         if (hw->nu_Openers != 0 && --hw->nu_Openers == 0)
         {
             if (hw->nu_Online)
@@ -962,7 +981,6 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
                 RemIntServer(INTB_PORTS, &hw->nu_Intr);
                 hw->nu_IntrAdded = 0;
             }
-            hw->nu_Nic.promisc = FALSE;
         }
 
         FreeMem(op, sizeof(NetdevOpener));

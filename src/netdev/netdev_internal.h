@@ -84,6 +84,7 @@ typedef struct NetdevUnit
     NetdevMcast                 nu_Mcast[NETDEV_MCAST_MAX];
     ULONG                       nu_McastFull;   /* joins the table could not hold */
     UWORD                       nu_AllMulti;    /* ranges too wide to hash */
+    UWORD                       nu_Promisc;     /* openers that asked for it */
 
     struct Sana2DeviceStats     nu_Stats;
 
