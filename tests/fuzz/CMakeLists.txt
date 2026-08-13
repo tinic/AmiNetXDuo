@@ -31,13 +31,19 @@ include(CheckCSourceCompiles)
 set(_fuzz_san -fsanitize=address,undefined -fno-sanitize-recover=all
               -fno-omit-frame-pointer)
 
-set(CMAKE_REQUIRED_FLAGS "-fsanitize=address,undefined")
-check_c_source_compiles("int main(void){return 0;}" AMINETXDUO_HAVE_SANITIZERS)
-unset(CMAKE_REQUIRED_FLAGS)
+if(AMINETXDUO_SANITIZE)
+    # The whole build already carries the sanitizer flags, and may have
+    # degraded to UBSan alone; repeating ASan here would undo that choice.
+    set(_fuzz_san "")
+else()
+    set(CMAKE_REQUIRED_FLAGS "-fsanitize=address,undefined")
+    check_c_source_compiles("int main(void){return 0;}" AMINETXDUO_HAVE_SANITIZERS)
+    unset(CMAKE_REQUIRED_FLAGS)
 
-if(NOT AMINETXDUO_HAVE_SANITIZERS)
-    message(STATUS "fuzz: no ASan/UBSan in this host compiler, drivers skipped")
-    return()
+    if(NOT AMINETXDUO_HAVE_SANITIZERS)
+        message(STATUS "fuzz: no ASan/UBSan in this host compiler, drivers skipped")
+        return()
+    endif()
 endif()
 
 # How many random cases per driver under a plain `ctest`. Small on purpose:

@@ -213,6 +213,42 @@ endif()
 
 option(AMINETXDUO_TESTS "Build the on-Amiga test harnesses"           ON)
 
+# ASan and UBSan over the host test tier.  The target has no MMU and no
+# sanitizer runtime, so the lever is the host builds, which compile the real
+# stack sources against the Linux/macOS shims.  Inert when cross-compiling for
+# that reason; tools/ci.sh's sanitize stage is what turns it on.  A host whose
+# compiler cannot link the ASan runtime for the requested flags (-m32 without
+# a 32-bit libasan, macOS with -m32 at all) degrades to UBSan alone and says
+# so; a compiler with neither is a hard error, because a sanitize build that
+# sanitizes nothing would read as coverage.
+option(AMINETXDUO_SANITIZE "Build the host test tier under ASan/UBSan" OFF)
+if(AMINETXDUO_SANITIZE AND NOT CMAKE_CROSSCOMPILING)
+    include(CheckCSourceCompiles)
+    set(_san_flags -fsanitize=address,undefined -fno-sanitize-recover=all
+                   -fno-omit-frame-pointer -g)
+    set(CMAKE_REQUIRED_FLAGS "-fsanitize=address,undefined")
+    check_c_source_compiles("int main(void){return 0;}" AMINETXDUO_SANITIZE_ASAN)
+    unset(CMAKE_REQUIRED_FLAGS)
+    if(NOT AMINETXDUO_SANITIZE_ASAN)
+        set(CMAKE_REQUIRED_FLAGS "-fsanitize=undefined")
+        check_c_source_compiles("int main(void){return 0;}" AMINETXDUO_SANITIZE_UBSAN)
+        unset(CMAKE_REQUIRED_FLAGS)
+        if(NOT AMINETXDUO_SANITIZE_UBSAN)
+            message(FATAL_ERROR "AMINETXDUO_SANITIZE=ON but this compiler has"
+                                " neither ASan nor UBSan for these flags")
+        endif()
+        set(_san_flags -fsanitize=undefined -fno-sanitize-recover=all
+                       -fno-omit-frame-pointer -g)
+        message(STATUS "sanitize: undefined only (no ASan runtime for these flags)")
+    else()
+        message(STATUS "sanitize: address,undefined")
+    endif()
+    add_compile_options(${_san_flags})
+    add_link_options(${_san_flags})
+elseif(AMINETXDUO_SANITIZE)
+    message(STATUS "sanitize: inert in a cross build, the target has no runtime")
+endif()
+
 # The SANA-II raw-framing probe posts a CMD_READ with SANA2IOF_RAW and takes it
 # straight back with AbortIO(). Commodore's a2065.device 2.16 does not abort it,
 # so ami_sana2_open() never returns, verified under FS-UAE, 2026-07-25. Raw
