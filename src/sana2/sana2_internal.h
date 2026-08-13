@@ -342,6 +342,9 @@ struct AmiSana2If
     BOOL                admin_up;
     BOOL                raw_supported;
     BOOL                raw_mode;
+    /* Set once a device answers an error to a raw CMD_WRITE this shim sent on
+       its own initiative; see the EtherType note in ami_sana2_tx_send(). */
+    BOOL                raw_tx_refused;
 
     /* NetX Duo binding. */
     NX_IP              *ip;

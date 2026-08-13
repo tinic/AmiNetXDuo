@@ -9,13 +9,12 @@
  * nx_ip_driver_physical_address_msw/lsw, and the payload from the prepend
  * pointer.
  *
- * Only the (default-off) raw path builds a header, and it undoes that before
- * releasing the packet, because TCP hands the same NX_PACKET back for
- * retransmission.
+ * A raw write builds a header, and it undoes that before releasing the packet,
+ * because TCP hands the same NX_PACKET back for retransmission.
  *
- * Writes go out with SendIO, never DoIO: the sending thread is the IP thread
- * or an application thread inside nx_tcp_socket_send, and neither may block on
- * the wire.
+ * Writes are queued, never DoIO: the sending thread is the IP thread or an
+ * application thread inside nx_tcp_socket_send, and neither may block on the
+ * wire. BeginIO rather than SendIO, for the reason at the post below.
  *
  * Reaping is a lifecycle problem, and getting it wrong disables
  * retransmission.
@@ -77,6 +76,8 @@
 #endif
 
 #include <proto/exec.h>
+/* BeginIO(): a macro over the device's own vector, no amiga.lib to link. */
+#include <inline/alib.h>
 
 VOID ami_sana2_tx_init(AmiSana2If *iface)
 {
@@ -205,6 +206,24 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
 
         if (err != 0)
         {
+            /*
+             * A raw write this shim asked for on its own initiative, refused.
+             * Latched, so the next frame of that type is cooked again and the
+             * device is never asked twice; the frame itself is lost, which the
+             * retransmission above it covers. iface->raw_mode is the operator
+             * asking for raw framing outright and is not downgraded here.
+             */
+            if (!iface->raw_mode &&
+                (slot->req.ios2_Req.io_Flags & SANA2IOF_RAW) != 0 &&
+                !iface->raw_tx_refused)
+            {
+                iface->raw_tx_refused = TRUE;
+                AMI_WARN("sana2: %s refuses raw writes; EtherType %lx goes "
+                         "back to cooked framing",
+                         iface->device,
+                         (LONG)slot->req.ios2_PacketType);
+            }
+
             iface->stats.tx_errors++;
             AMI_ERROR("sana2: CMD_WRITE failed err=%ld wire=%ld type=%lx "
                       "len=%ld dst=%lx%lx",
@@ -363,7 +382,7 @@ static VOID ami_sana2_tx_pad(AmiSana2If *iface, AmiTxSlot *slot,
 #endif
 
     on_wire = packet->nx_packet_length +
-              (iface->raw_mode ? 0UL : (ULONG)AMI_ETH_HEADER_SIZE);
+              (slot->hdr_len != 0 ? 0UL : (ULONG)AMI_ETH_HEADER_SIZE);
 
     if (on_wire >= (ULONG)AMI_ETH_MIN_FRAME)
         return;
@@ -463,6 +482,7 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
     AmiTxSlot *slot;
     UWORD      spins;
     ULONG      length;
+    BOOL       raw_write;
 
     if (iface == NULL || packet == NULL)
         return NX_PTR_ERROR;
@@ -497,9 +517,58 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
 
     slot->hdr_len = 0;
 
-    if (iface->raw_mode)
+    /*
+     * ariadne.device 1.50 builds the cooked Ethernet header with
+     *
+     *     move.w  38(a2),d0        ; low word of ios2_PacketType
+     *     cmpi.w  #1500,d0
+     *     ble.s   as_802_3         ; SIGNED
+     *
+     * so every type with bit 15 set reads as negative, takes the IEEE 802.3
+     * arm, and gets ios2_DataLength written into the type field instead of the
+     * type. 0x0800 and 0x0806 are positive and come out right, which is why
+     * IPv4 works and IPv6 leaves as a length-framed frame no router will
+     * answer: no neighbour solicitation, no router solicitation, no global
+     * address, on a card whose IPv4 is perfect.
+     *
+     * Its raw arm is correct -- it tests io_Flags bit 7 and transmits the
+     * buffer verbatim -- so the header goes on here for the types the cooked
+     * arm cannot carry. Nothing below 0x8000 changes, which leaves IPv4, ARP
+     * and RARP on the path they have always taken. A device that refuses
+     * SANA2IOF_RAW says so on the write and ami_sana2_tx_reap() latches
+     * raw_tx_refused, and everything after it goes back to cooked.
+     */
+    raw_write = iface->raw_mode;
+
+    if (!raw_write
+        && (ether_type & 0x8000U) != 0
+        && iface->hw_type == S2WireType_Ethernet
+        && iface->addr_bytes == AMI_ETH_ADDR_SIZE
+        && !iface->raw_tx_refused)
+        raw_write = TRUE;
+
+    if (raw_write)
     {
         UCHAR *eth;
+
+        /*
+         * The deferred transmit checksum, before the link header goes on.
+         *
+         * Everything downstream that reads this packet as an IP datagram
+         * starts at nx_packet_prepend_ptr: sana2_copy.c's fusion, and
+         * _nx_ip_packet_checksum_compute() behind it. Fourteen bytes of
+         * Ethernet in front of that and neither finds a datagram -- measured,
+         * on the wire: every IPv6 SYN left with cksum 0x0000 and nothing
+         * answered one, while echo replies kept coming back, because ICMPv6
+         * is checksummed by the stack and TCP is the only thing deferred here.
+         *
+         * Paying it now costs a pass over the segment that the fusion would
+         * have folded into the copy. It costs it on IPv6 TCP only: nothing
+         * else reaches this arm.
+         */
+        if ((packet->nx_packet_interface_capability_flag &
+             NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) != 0)
+            _nx_ip_packet_checksum_compute(packet);  /* clears the flag */
 
         if ((ULONG)(packet->nx_packet_prepend_ptr -
                     packet->nx_packet_data_start) < AMI_ETH_HEADER_SIZE)
@@ -534,13 +603,13 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
 #ifdef AMINETXDUO_BPF
     /*
      * The transmit tap, after the raw block above so one call site serves both
-     * modes.  `iface->raw_mode` doubles as `has_link_header`: in raw mode the
-     * 14 bytes are now in the packet; in cooked mode they exist nowhere and
-     * the tap synthesises them from the three facts the CMD_WRITE below
-     * carries.  Nothing is written into the packet, which is often a queued
-     * TCP segment that will be handed back for retransmission.
+     * modes.  `slot->hdr_len` doubles as `has_link_header`: the 14 bytes are
+     * now in the packet, or they exist nowhere and the tap synthesises them
+     * from the three facts the CMD_WRITE below carries.  Nothing is written
+     * into the packet, which is often a queued TCP segment that will be handed
+     * back for retransmission.
      */
-    ami_bpf_tap_tx(iface, packet, iface->raw_mode, ether_type,
+    ami_bpf_tap_tx(iface, packet, slot->hdr_len != 0, ether_type,
                    dst_msw, dst_lsw, iface->mac);
 #endif
 
@@ -555,7 +624,7 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
     slot->req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
     slot->req.ios2_Req.io_Message.mn_ReplyPort    = &iface->tx_port;
     slot->req.ios2_Req.io_Command = CMD_WRITE;
-    slot->req.ios2_Req.io_Flags   = iface->raw_mode ? SANA2IOF_RAW : 0;
+    slot->req.ios2_Req.io_Flags   = raw_write ? SANA2IOF_RAW : 0;
     slot->req.ios2_Req.io_Error   = 0;
     slot->req.ios2_WireError      = 0;
     slot->req.ios2_PacketType     = (ULONG)ether_type;
@@ -588,7 +657,19 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
             slot->req.ios2_DstAddr[i] = 0;
     }
 
-    SendIO((struct IORequest *)&slot->req);
+    /*
+     * BeginIO() and not SendIO(), because SendIO() is
+     *
+     *     ln_Type = NT_MESSAGE; io_Flags = 0; BeginIO()
+     *
+     * and that zero takes SANA2IOF_RAW with it. A raw write posted through
+     * SendIO() arrives at the device as a cooked one, the device builds a
+     * header in front of the header this shim just built, and the frame goes
+     * out with fourteen bytes of Ethernet inside its own payload. Both lines
+     * SendIO() would have run are above; IOF_QUICK stays clear, so the request
+     * is queued and replied to iface->tx_port exactly as before.
+     */
+    BeginIO((struct IORequest *)&slot->req);
 
     return NX_SUCCESS;
 }

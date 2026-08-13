@@ -49,6 +49,8 @@
 #endif
 
 #include <proto/exec.h>
+/* BeginIO(): a macro over the device's own vector, no amiga.lib to link. */
+#include <inline/alib.h>
 
 VOID ami_sana2_block_enter(VOID);
 VOID ami_sana2_block_leave(VOID);
@@ -612,7 +614,9 @@ static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
         slot->req.ios2_Data           = slot;
         slot->posted                  = TRUE;
 
-        SendIO((struct IORequest *)&slot->req);
+        /* BeginIO(), not SendIO(): SendIO() zeroes io_Flags and would drop the
+           SANA2IOF_RAW just set. Both lines it would have run are above. */
+        BeginIO((struct IORequest *)&slot->req);
 #ifdef AMINETXDUO_RXPROBE
         rx->probe.posts++;
         rx->probe.live++;

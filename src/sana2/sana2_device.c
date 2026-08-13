@@ -10,6 +10,8 @@
 
 #include <exec/memory.h>
 #include <proto/exec.h>
+/* BeginIO(): a macro over the device's own vector, no amiga.lib to link. */
+#include <inline/alib.h>
 
 /* ------------------------------------------------------------------ state */
 
@@ -345,7 +347,9 @@ static BOOL ami_sana2_probe_raw(AmiSana2If *iface)
     req.ios2_DataLength                     = 0;
     req.ios2_Data                           = &slot;
 
-    SendIO((struct IORequest *)&req);
+    /* BeginIO(), not SendIO(): SendIO() zeroes io_Flags, so the probe would
+       have asked every device for a cooked read and called it raw support. */
+    BeginIO((struct IORequest *)&req);
     AbortIO((struct IORequest *)&req);
     WaitIO((struct IORequest *)&req);
 
