@@ -736,6 +736,9 @@ endif()
 add_subdirectory(src/common)
 add_subdirectory(src/config)
 add_subdirectory(src/sana2)
+# The far side of src/sana2: anxnet.device is a SANA-II provider, not a
+# consumer, and links none of the stack.
+add_subdirectory(src/netdev)
 add_subdirectory(src/mbuf)
 if(AMINETXDUO_BPF)
     add_subdirectory(src/bpf)

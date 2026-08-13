@@ -1,0 +1,116 @@
+/*
+ * anxnet.device, layer 1 of 3: what the SANA-II shell keeps.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#ifndef AMINETXDUO_NETDEV_INTERNAL_H
+#define AMINETXDUO_NETDEV_INTERNAL_H
+
+#include <exec/types.h>
+#include <exec/devices.h>
+#include <exec/interrupts.h>
+#include <exec/lists.h>
+#include <exec/nodes.h>
+#include <exec/ports.h>
+#include <dos/dos.h>          /* BPTR, for the expunge seglist */
+
+#include "aminetxduo/anxnet.h"
+#include "netdev_nic.h"
+#include "sana2_device.h"
+
+#define NETDEV_MAX_UNITS    4
+#define NETDEV_MCAST_MAX    32      /* the hash is 64 bits; more is pointless */
+#define NETDEV_TRACK_MAX    16
+
+struct NetdevUnit;
+
+typedef struct NetdevMcast
+{
+    UBYTE   addr[NETDEV_ADDR_LEN];
+    UWORD   refs;
+} NetdevMcast;
+
+typedef struct NetdevTrack
+{
+    ULONG                       type;
+    UWORD                       used;
+    struct Sana2PacketTypeStats st;
+} NetdevTrack;
+
+/*
+ * One per OpenDevice().  io_Unit points at op_Unit, so every request arrives
+ * already attached to the opener that made it: the CMD_READ queue, the copy
+ * hooks and the RAW flag are per opener, which is the whole of what SANA-II
+ * means by an opener.
+ */
+typedef struct NetdevOpener
+{
+    struct MinNode      op_Node;
+    struct Unit         op_Unit;
+    struct NetdevUnit  *op_Hw;
+
+    APTR                op_CopyTo;
+    APTR                op_CopyFrom;
+    APTR                op_Filter;
+
+    UBYTE               op_Raw;
+    UBYTE               op_Promisc;
+
+    struct List         op_Reads;
+    struct List         op_Orphans;
+    struct List         op_Events;
+
+    NetdevTrack         op_Track[NETDEV_TRACK_MAX];
+} NetdevOpener;
+
+typedef struct NetdevUnit
+{
+    NetdevNic                   nu_Nic;
+    struct NetdevDevice        *nu_Dev;
+    UWORD                       nu_Unit;
+    UWORD                       nu_Openers;
+
+    UBYTE                       nu_Configured;
+    UBYTE                       nu_Online;
+    UBYTE                       nu_IntrAdded;
+    UBYTE                       nu_Pad;
+
+    struct List                 nu_OpenerList;
+    struct List                 nu_Writes;      /* CMD_WRITE awaiting a slot */
+
+    struct Interrupt            nu_Intr;
+
+    NetdevMcast                 nu_Mcast[NETDEV_MCAST_MAX];
+    ULONG                       nu_McastFull;   /* joins the table could not hold */
+    UWORD                       nu_AllMulti;    /* ranges too wide to hash */
+
+    struct Sana2DeviceStats     nu_Stats;
+
+    /* Frames are staged here on the way out; 4-aligned for the long window. */
+    ULONG                       nu_TxBuf[(NETDEV_FRAME_MAX + 7) / 4];
+} NetdevUnit;
+
+typedef struct NetdevDevice
+{
+    struct Device       nd_Device;
+    struct Library     *nd_ExpansionBase;
+    BPTR                nd_SegList;
+    UWORD               nd_UnitCount;
+    NetdevUnit          nd_Units[NETDEV_MAX_UNITS];
+} NetdevDevice;
+
+/* netdev_device.c */
+VOID netdev_reply(struct IOSana2Req *io, LONG err, ULONG wire);
+BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len);
+VOID netdev_event(NetdevUnit *unit, ULONG mask);
+VOID netdev_rebuild_filter(NetdevUnit *unit);
+VOID netdev_tx_pump(NetdevUnit *unit);
+LONG netdev_online(NetdevUnit *unit);
+VOID netdev_offline(NetdevUnit *unit, ULONG event);
+
+/* netdev_cmds.c */
+VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io);
+BOOL netdev_abort(NetdevOpener *op, struct IOSana2Req *io);
+
+#endif /* AMINETXDUO_NETDEV_INTERNAL_H */
