@@ -23,6 +23,10 @@
 
 #include "sana2_internal.h"
 
+/* BeginIO(), which the transmit path posts with; the shim declares it and
+   this file defines it. */
+#include <inline/alib.h>
+
 #include <stdio.h>
 #include <string.h>
 
@@ -46,7 +50,7 @@ static void h_check(int ok, const char *what)
 /* ------------------------------------------------------------------ exec -- */
 
 /*
- * A device that never finishes: SendIO records the request and leaves it, so
+ * A device that never finishes: the post records the request and leaves it, so
  * a test can look at what would have gone to the wire before anything reaps
  * it. h_reply() is the completion, and it is explicit because the reap is
  * half of what these tests are about.
@@ -59,7 +63,15 @@ VOID Enable(VOID)  { }
 VOID Forbid(VOID)  { }
 VOID Permit(VOID)  { }
 
+/* The real one is exec's `io_Flags = 0; BeginIO()`, and the zero is why the
+   transmit path does not use it. Nothing under test calls this. */
 VOID SendIO(struct IORequest *req)
+{
+    req->io_Flags = 0;
+    BeginIO(req);
+}
+
+VOID BeginIO(struct IORequest *req)
 {
     h_sent = req;
     h_sends++;
@@ -458,6 +470,102 @@ static void test_pad_raw(void)
             "and with its prepend pointer back where it was");
 }
 
+/*
+ * A cooked interface still builds the header itself for an EtherType with bit
+ * 15 set, and posts the write raw.
+ *
+ * ariadne.device 1.50 decides between an EtherType and an 802.3 length field
+ * with `cmpi.w #1500` and a SIGNED branch, so 0x86DD reads as negative, takes
+ * the 802.3 arm and puts ios2_DataLength in the type field. The frame leaves
+ * the card with no EtherType and nothing answers it: IPv4 is perfect and IPv6
+ * never gets a global address. Its raw arm is correct, so the header goes on
+ * here instead.
+ */
+static void test_high_ethertype_goes_raw(void)
+{
+    printf("sana2: a cooked device gets an EtherType over 0x8000 raw\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    packet_init(arp_frame, ARP_LEN);
+
+    h_check(ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_IPV6, 0x3333,
+                              0x00000002) == NX_SUCCESS,
+            "the write is posted");
+    h_check((sent_req()->ios2_Req.io_Flags & SANA2IOF_RAW) != 0,
+            "and it carries SANA2IOF_RAW");
+    h_check(sent_req()->ios2_DataLength == 60,
+            "and its length counts the header this shim built");
+
+    h_check(device_copy() == TRUE, "the copy hook hands over all 60");
+    h_check(devbuf[0] == 0x33 && devbuf[1] == 0x33 && devbuf[5] == 0x02,
+            "and the frame starts with the destination address");
+    h_check(memcmp(devbuf + 6, iface.mac, AMI_ETH_ADDR_SIZE) == 0,
+            "then the station address");
+    h_check(devbuf[12] == 0x86 && devbuf[13] == 0xDD,
+            "then the EtherType, which is the byte pair the driver loses");
+
+    h_reply();
+    ami_sana2_tx_reap(&iface);
+    h_check(pkt.nx_packet_length == ARP_LEN,
+            "and the packet goes back at its own length, header off again");
+    h_check(pkt.nx_packet_prepend_ptr == pool + NX_PHYSICAL_HEADER,
+            "and with its prepend pointer back where it was");
+}
+
+/* IPv4 and ARP are below 0x8000, come out of every driver right, and stay on
+   the path they have always taken. */
+static void test_low_ethertype_stays_cooked(void)
+{
+    printf("sana2: an EtherType under 0x8000 is still posted cooked\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    packet_init(arp_frame, ARP_LEN);
+
+    h_check(ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_ARP, 0xFFFF,
+                              0xFFFFFFFF) == NX_SUCCESS,
+            "the write is posted");
+    h_check((sent_req()->ios2_Req.io_Flags & SANA2IOF_RAW) == 0,
+            "and it does not carry SANA2IOF_RAW");
+    h_check(sent_req()->ios2_DataLength == 46,
+            "and its length is the payload's, no header of ours");
+}
+
+/*
+ * A device that refuses the raw write says so, and is not asked again. The
+ * frame is lost, which is what retransmission is for; the type it was refused
+ * for goes back to cooked framing for the life of the interface.
+ */
+static void test_raw_refused_falls_back_to_cooked(void)
+{
+    printf("sana2: a refused raw write puts the interface back on cooked\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    packet_init(arp_frame, ARP_LEN);
+
+    h_check(ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_IPV6, 0x3333,
+                              0x00000002) == NX_SUCCESS,
+            "the first write is posted");
+    h_check((sent_req()->ios2_Req.io_Flags & SANA2IOF_RAW) != 0,
+            "and it asks for raw framing");
+
+    sent_req()->ios2_Req.io_Error = (BYTE)S2ERR_BAD_ARGUMENT;
+    h_reply();
+    ami_sana2_tx_reap(&iface);
+    h_check(iface.raw_tx_refused == TRUE, "the refusal is latched");
+    h_check(iface.stats.tx_errors == 1, "and the frame counts as an error");
+    h_check(pkt.nx_packet_length == ARP_LEN,
+            "and the packet is handed back at its own length even so");
+
+    packet_init(arp_frame, ARP_LEN);
+    h_check(ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_IPV6, 0x3333,
+                              0x00000002) == NX_SUCCESS,
+            "the next write of that type is posted");
+    h_check((sent_req()->ios2_Req.io_Flags & SANA2IOF_RAW) == 0,
+            "and the device is not asked for raw framing twice");
+    h_check(sent_req()->ios2_DataLength == 46,
+            "and it is framed as the payload again");
+}
+
 /* A frame already at or over the minimum is not touched. */
 static void test_no_pad_when_long_enough(void)
 {
@@ -513,6 +621,9 @@ int main(void)
     test_pad_cooked_no_fusion();
     test_pad_cooked_with_fusion();
     test_pad_raw();
+    test_high_ethertype_goes_raw();
+    test_low_ethertype_stays_cooked();
+    test_raw_refused_falls_back_to_cooked();
     test_no_pad_when_long_enough();
     test_no_pad_off_ethernet();
 

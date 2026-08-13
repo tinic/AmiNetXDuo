@@ -247,7 +247,7 @@ static BOOL ami_sana2_tx_fuse_checksum(AmiTxSlot *slot, UCHAR *out, ULONG len)
     ULONG        ihl, total, tcp_len, sum;
     UCHAR       *csum;
 
-    if (slot->iface == NULL || slot->iface->raw_mode)
+    if (slot->iface == NULL || slot->hdr_len != 0)
         return FALSE;                   /* the frame would start at Ethernet */
 
     if (len != slot->total)
