@@ -260,6 +260,32 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME tcp_earlyretx COMMAND test_tcp_earlyretx)
 
+    # A sub-MSS peer cannot pin more than a full-MSS window's worth of packets.
+    # The window is a byte budget but the pool is spent a whole packet per
+    # segment, so without a per-socket packet-count cap a one-byte-at-a-time
+    # peer drains the pool against a window that still says it has room.  Drives
+    # the real _nx_tcp_socket_state_data_check enqueue path; fails on a build
+    # with NX_ENABLE_LOW_WATERMARK off, passes with it on and the cap sized.
+    add_executable(test_tcp_rxflood
+        host/test_tcp_rxflood_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_data_check.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_create.c")
+
+    target_compile_options(test_tcp_rxflood PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_tcp_rxflood PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_tcp_rxflood PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME tcp_rxflood COMMAND test_tcp_rxflood)
+
     # Whether a name lookup stops when it is told to, the retransmission
     # ladder on its own, with the DNS client replaced by scripted answers and
     # the clock by a variable.  A black hole, a Ctrl-C and a mistyped name are

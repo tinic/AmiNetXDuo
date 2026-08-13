@@ -304,6 +304,31 @@ static VOID bsd_tcp_keepalive_default(NX_TCP_SOCKET *tcp)
 #endif
 }
 
+/*
+ * Bound the receive queue in packets, sized from this socket's own window.
+ *
+ * nx_tcp_socket_create leaves the cap at NX_TCP_MAXIMUM_RX_QUEUE (20), which
+ * binds at ~29 KB and would starve our 50..100 KB window.  Raise it to what the
+ * byte window admits in full-MSS packets plus slack, floored at the vendored
+ * default so a small window never caps below what reassembly wants.  A full-MSS
+ * peer is stopped by the byte window before it reaches this; a sub-MSS flood is
+ * bounded to it.  See nx_user.h NX_ENABLE_LOW_WATERMARK.
+ */
+static VOID bsd_tcp_rx_queue_cap(NX_TCP_SOCKET *tcp)
+{
+#ifdef NX_ENABLE_LOW_WATERMARK
+    ULONG cap = tcp->nx_tcp_socket_rx_window_default / BSD_TCP_RX_MSS_REF +
+                BSD_TCP_RX_QUEUE_SLACK;
+
+    if (cap < NX_TCP_MAXIMUM_RX_QUEUE)
+        cap = NX_TCP_MAXIMUM_RX_QUEUE;
+
+    tcp->nx_tcp_socket_receive_queue_maximum = cap;
+#else
+    (VOID)tcp;
+#endif
+}
+
 static VOID bsd_tcp_seed_isn(NX_TCP_SOCKET *tcp)
 {
     ULONG seed = ami_random_ulong();
@@ -1421,6 +1446,7 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
         {
             bsd_tcp_seed_isn(&sock->as_Nx.tcp);
             bsd_tcp_keepalive_default(&sock->as_Nx.tcp);
+            bsd_tcp_rx_queue_cap(&sock->as_Nx.tcp);
         }
     }
     else
@@ -1838,6 +1864,7 @@ static BOOL bsd_listen_park_one(struct AmiSocketBase *base, AmiSocket *sock)
 
     bsd_tcp_seed_isn(&spare->as_Nx.tcp);
     bsd_tcp_keepalive_default(&spare->as_Nx.tcp);
+    bsd_tcp_rx_queue_cap(&spare->as_Nx.tcp);
 
     spare->as_Flags    |= ASF_INCOMING | ASF_SERVER;
     spare->as_Parent    = sock;
@@ -2013,6 +2040,7 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
     {
         bsd_tcp_seed_isn(&incoming->as_Nx.tcp);
         bsd_tcp_keepalive_default(&incoming->as_Nx.tcp);
+        bsd_tcp_rx_queue_cap(&incoming->as_Nx.tcp);
     }
     if (status != NX_SUCCESS)
     {

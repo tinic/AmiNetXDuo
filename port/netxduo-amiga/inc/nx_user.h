@@ -111,6 +111,42 @@
 #define NX_TCP_MAXIMUM_TX_QUEUE                 8
 
 /*
+ * A per-socket cap on the number of packets a receive queue may pin.
+ *
+ * The receive window is a byte budget (BSD_TCP_WINDOW_POOL_SHARE, and
+ * src/bsdsocket/socket.c ami_bsd_tcp_window), but the pool is spent one whole
+ * pinned packet per PEER segment whatever its size, and the window shrinks only
+ * by the bytes a segment carries (nx_tcp_socket_state_data_check.c:1061).  So a
+ * peer sending one byte at a time pins one packet each while the window barely
+ * moves, and fills the pool -- 512 packets at most -- long before it fills a
+ * 50..100 KB window.  A full pool drops frames on every interface.  Nothing
+ * else bounds it: NX_ENABLE_TCP_MSS_CHECK polices the SYN, not each segment.
+ *
+ * This define is what compiles the per-socket cap in
+ * nx_tcp_socket_state_data_check.c: at nx_tcp_socket_receive_queue_maximum
+ * packets it drops the tail and advertises a zero window, telling the peer to
+ * pause.  src/bsdsocket/socket.c sizes the cap from each socket's window
+ * (window/reference-MSS, floored at the default 20) so a well-behaved full-MSS
+ * peer, already stopped by the byte window at window/MSS packets, never reaches
+ * it, and a sub-MSS flood is bounded to it.
+ *
+ * docs/RESEARCH.md 24.7 reported this off rather than on for two reasons now
+ * spent: it argued a tail-drop had "no SACK to recover cheaply", but
+ * NX_ENABLE_TCP_SACK ships on (below); and it argued the default cap of 20
+ * bound at ~28 KB before a 32 KB window, but the window is 50..100 KB now and
+ * the cap is sized from it, above what the byte window admits.
+ *
+ * The same define also compiles a second, global guard: a pool-wide low
+ * watermark below which TCP, UDP receive and IPv4 fragment reassembly all drop.
+ * nx_packet_pool_create() leaves nx_packet_pool_low_watermark at zero and
+ * src/netstack never calls nx_packet_pool_low_watermark_set(), so that guard
+ * stays inert -- an unsigned "available < 0" is never true, and the fragment
+ * path's "available >= 0" is always true, so UDP and reassembly behave exactly
+ * as with the define off.  The per-socket cap above is the whole of the change.
+ */
+#define NX_ENABLE_LOW_WATERMARK
+
+/*
  * How many ports may be listened on at once (default 10).
  *
  * A hard ceiling on listen(): the eleventh nx_tcp_server_socket_listen()
@@ -365,7 +401,11 @@
  * socket more than 64 KB.  AMINETXDUO_TCP_SACK has been on by default since the
  * receive side landed, so the first is met; the second was measured and
  * refused, and the note on BSD_TCP_WINDOW_POOL_SHARE has the table.  Our own
- * receive window is 50,176 at most, so the exponent WE announce is zero.
+ * receive window is 72,128 on the lab's 8 MB A1200 and reaches the 100,352
+ * ceiling above about 13.6 MB free (AMI_POOL_MAX_PACKETS is 512, an eighth of
+ * it times the 1568 payload), both past 64 KB, so on those machines the
+ * exponent WE announce is one, not zero.  It is zero only where the window
+ * budget stays under 65535, on the smallest pools.
  *
  * IT IS NOT INERT AT A ZERO EXPONENT.  The two directions scale independently
  * (RFC 7323 2.2): announcing the option is what lets the PEER announce one,
@@ -1152,7 +1192,7 @@
 
 
 /*
- * Five more surveyed and rejected, with the working.
+ * Four more surveyed and rejected, with the working.
  *
  *   NX_DISABLE_ARP_AUTO_ENTRY
  *       Every ARP we see creates a cache entry (nx_arp_packet_receive.c:499),
@@ -1196,18 +1236,13 @@
  *       already prevents.  An ACK that cannot be allocated is also a symptom of
  *       a data pool already empty, and the data is what was lost.
  *
- *   NX_ENABLE_LOW_WATERMARK
- *       docs/RESEARCH.md 24.7 found this and reported it rather than switching
- *       it on.  It needs three things together: the define, an
- *       nx_packet_pool_low_watermark_set() call from src/netstack/
- *       (nx_packet_pool_create() never touches the field, so a zeroed watermark
- *       means the guard is compiled in and can never fire), and
- *       NX_TCP_MAXIMUM_RX_QUEUE raised, because at its default of 20 and
- *       1440-byte wire segments it binds at about 28 KB, before a 32 KB window
- *       does, and the tail-drop it would then perform costs a retransmission
- *       this stack has no SACK to recover cheaply.  It also changes IPv4
- *       fragment reassembly and UDP receive, not only TCP.  That is a piece of
- *       work with its own measurement, not a line here.
+ *   NX_ENABLE_LOW_WATERMARK is no longer here: it is on, for the per-socket
+ *       receive-queue cap, at the top of this file next to NX_TCP_MAXIMUM_TX_QUEUE.
+ *       docs/RESEARCH.md 24.7's two grounds for leaving it off both expired --
+ *       SACK ships on to recover a tail-drop, and the default cap that bound
+ *       before the window is now sized from the window in src/bsdsocket/socket.c.
+ *       The global watermark half stays inert (watermark zero, never set), so
+ *       UDP receive and fragment reassembly are untouched; the cap is the change.
  */
 
 #endif /* NX_USER_H */

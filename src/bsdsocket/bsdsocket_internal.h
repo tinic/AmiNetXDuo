@@ -304,6 +304,18 @@ typedef struct
 #define BSD_TCP_WINDOW        8192
 #endif
 
+/*
+ * The per-socket receive queue is capped in packets, not only in window bytes:
+ * the pool is spent one whole packet per peer segment whatever its size, so a
+ * sub-MSS peer would otherwise pin one packet each while the byte window barely
+ * moves (see nx_user.h NX_ENABLE_LOW_WATERMARK).  bsd_tcp_rx_queue_cap() sets
+ * the cap to window/BSD_TCP_RX_MSS_REF + slack: a full-MSS peer is already held
+ * to window/MSS packets by the byte window and never reaches it, so the flood
+ * is bounded without touching the clean path.
+ */
+#define BSD_TCP_RX_MSS_REF      1460
+#define BSD_TCP_RX_QUEUE_SLACK  4
+
 /* The UDP receive queue, in datagrams. bsd_udp_queue_max() in socket.c derives
    the per-socket default from the pool between these two; options.c bounds a
    SO_RCVBUF request by the ceiling. */
