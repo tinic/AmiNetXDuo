@@ -527,7 +527,7 @@ guest_global_v6() {
 
 # An arm that cannot mean anything without that address.
 #
-traceroute/v6-arrives IS in this list, and the -hop arms are not, which looks
+# traceroute/v6-arrives IS in this list, and the -hop arms are not, which looks
 # inconsistent until you look at what each one needs.  A -hop arm needs one
 # router on this link to answer, and a link-local source is enough for that.
 # Arriving needs a globally routable source: on two runs of the same image an
