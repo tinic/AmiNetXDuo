@@ -3,8 +3,7 @@
 # A DUAL-STACK NAME WHOSE IPv6 GOES NOWHERE.
 #
 #   tests/tools/run-multiaddr.sh [-b BUILDDIR] [-B IFACE] [-m MODEL] [-t SECS]
-#                                [-N BOARD] [-d NAME] [-g GATEWAY6] [-a ADDR6]
-#                                [-V]
+#                                [-N BOARD] [-d NAME] [-V]
 #
 # WHAT IT PROVES
 #
@@ -18,17 +17,21 @@
 #
 # HOW THE IPv6 IS BROKEN, AND WHY THAT WAY
 #
-#   The guest is given a static global address on this wire and a default
-#   router that is a machine on the same segment which is NOT a router.  It
-#   answers neighbour discovery, so the route is real and every send succeeds;
-#   it forwards nothing, so every packet is dropped in silence.  That is a
-#   blackhole and not an error, which is the case that costs 191 s -- an ICMP
-#   unreachable would fail in milliseconds and prove nothing.
+#   The guest comes up an ordinary dual-stack machine -- DHCP and a router
+#   advertisement -- and the IPv6 half is proved working before anything is
+#   broken.  Then `AddNetRoute DST 2000::/3` declares the whole of global
+#   unicast ON LINK, so every IPv6 destination gets a neighbour solicitation
+#   instead of being handed to the router, nothing answers, and the packet is
+#   dropped in silence.
 #
-#   -g takes that machine's address.  It must be ON THIS SEGMENT and must not
-#   forward.  The emulator's host is not a candidate: frames the guest sends
-#   never enter its receive path, so it would not answer the solicitation and
-#   the route would be dead rather than silent.
+#   Silence is the point.  An ICMP unreachable, or no route at all, fails in
+#   milliseconds and proves nothing; only a blackhole costs the stack's whole
+#   SYN schedule, which is the 191 s a user waits.
+#
+#   A GATEWAY6 pointing at a machine that does not forward was tried first and
+#   is not durable: a router advertisement arrives on its own schedule, puts a
+#   working route back mid-run, and the arm that had been stuck for 63 s then
+#   completed over IPv6.  The on-link list is not touched by an RA.
 #
 # OUTPUT
 #
@@ -40,13 +43,13 @@
 #     0   every arm passed
 #     1   an arm failed
 #     2   infrastructure: no build, no ROM, no IPv6 on this wire, a timeout
-#     3   the guest came up without the static IPv6 address it was given, so
-#         nothing here was measured against a dual stack at all
+#     3   the guest came up with no global IPv6 address, so nothing here was
+#         measured against a dual stack at all
 #
 # WHAT IT NEEDS
 #
-#   A 68020 Release build, a2065.device, a Kickstart, a bridged wire, and a
-#   second machine on it to play the silent router.
+#   A 68020 Release build, a2065.device, a Kickstart, and a bridged wire with
+#   a router advertising IPv6.
 #
 # SPDX-License-Identifier: MIT
 
@@ -66,10 +69,8 @@ VERDICT_ONLY=0
 
 # A name with an A and an AAAA and a web server answering over both.
 DUAL="${AMINETXDUO_MULTIADDR_DUAL:-example.com}"
-# The silent router, and the address the guest gives itself.  Both belong to
-# the wire this runs on and have no defaults worth guessing.
-GATEWAY6="${AMINETXDUO_MULTIADDR_GATEWAY6:-}"
-ADDRESS6="${AMINETXDUO_MULTIADDR_ADDRESS6:-}"
+# Global unicast, all of it.  Declared on-link, it is the blackhole.
+BLACKHOLE="${AMINETXDUO_MULTIADDR_BLACKHOLE:-2000::/3}"
 # One address, nothing behind it.  RFC 5737 TEST-NET-1: routed nowhere.
 DEADV4="${AMINETXDUO_MULTIADDR_DEADV4:-192.0.2.1}"
 
@@ -77,7 +78,7 @@ export AMINETXDUO_AMIBERRY_MAC="${AMINETXDUO_MULTIADDR_MAC:-02:41:4d:49:00:6a}"
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-multiaddr}"
 GUEST_NAME="${AMINETXDUO_MULTIADDR_HOSTNAME:-anxdma}"
 
-while getopts "b:B:m:t:N:d:g:a:V" opt; do
+while getopts "b:B:m:t:N:d:V" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         B) IFACE="$OPTARG" ;;
@@ -85,8 +86,6 @@ while getopts "b:B:m:t:N:d:g:a:V" opt; do
         t) TIMEOUT="$OPTARG" ;;
         N) BOARD="$OPTARG" ;;
         d) DUAL="$OPTARG" ;;
-        g) GATEWAY6="$OPTARG" ;;
-        a) ADDRESS6="$OPTARG" ;;
         V) VERDICT_ONLY=1 ;;
         *) sed -n '3,8p' "$0" >&2; exit 2 ;;
     esac
@@ -103,9 +102,6 @@ infra() { echo "error=$*"; echo "result=infra"; exit 2; }
 host_preflight() {
     local a aaaa
 
-    [ -n "$GATEWAY6" ] || infra "no -g: this needs a machine on this wire that answers ND and forwards nothing"
-    [ -n "$ADDRESS6" ] || infra "no -a: the guest needs a static global address on this wire"
-
     command -v getent >/dev/null 2>&1 || infra "no getent on this host"
 
     a=$(getent ahostsv4 "$DUAL" 2>/dev/null | awk 'NR==1{print $1}')
@@ -115,8 +111,14 @@ host_preflight() {
     [ -n "$a" ]    || infra "$DUAL has no A record from this host"
     [ -n "$aaaa" ] || infra "$DUAL has no AAAA record from this host"
 
+    ip -6 route show default 2>/dev/null | grep -q . ||
+        infra "this host has no IPv6 default route, so the wire has no RA"
+
+    ping -6 -c 1 -W 3 "$DUAL" >/dev/null 2>&1 ||
+        infra "this host cannot reach $DUAL over IPv6"
+
     echo "host/dual=$DUAL a=$a aaaa=$aaaa"
-    echo "host/gateway6=$GATEWAY6 address6=$ADDRESS6"
+    echo "host/blackhole=$BLACKHOLE"
 }
 
 find_a2065() {
@@ -144,14 +146,23 @@ find_a2065() {
 arms() {
     cat <<EOF
 net/settled|0|SYS:ShowNetStatus ALL|+address6
+# IPv6 WORKS HERE.  Asserted before anything is broken, because every arm
+# below is about what happens when it stops, and a wire that never carried
+# IPv6 would make all of them pass for the wrong reason.  It is also half of
+# the -6 proof: this is the flag reaching a service over the family it names.
+pin/v6-works|0|SYS:fetch http://$DUAL/ TIMEOUT 30 TO DH0:pre6.txt -6|+HTTP/1.[01] 200
+# And now it does not.  Global unicast declared on-link: every IPv6 packet
+# waits for a neighbour nobody is, and is dropped without a word.
+blackhole|0|SYS:AddNetRoute DST $BLACKHOLE|*
 # THE DEFECT.  No flag, so the resolver decides, and it decides AAAA first.
-# The AAAA is blackholed; the A is a working web server.
+# The AAAA is now a blackhole; the A is the same working web server.
 dual/fetch|0|SYS:fetch http://$DUAL/ TIMEOUT 30 TO DH0:dual.txt|+HTTP/1.[01] 200
 # The same transfer with the family pinned, as the control.
 dual/v4|0|SYS:fetch http://$DUAL/ TIMEOUT 30 TO DH0:v4.txt -4|+HTTP/1.[01] 200
-# -6 MUST NOT FALL BACK.  A user who said -6 and got an IPv4 transfer has been
-# lied to, so this arm has to FAIL on a machine whose IPv6 goes nowhere.
-dual/v6|10|SYS:fetch http://$DUAL/ TIMEOUT 30 TO DH0:v6.txt -6|-HTTP/1.[01] 200
+# The other half of the -6 proof.  A user who said -6 and got an IPv4 transfer
+# has been lied to, so this MUST fail now, and it is the same command line
+# that succeeded above.
+pin/v6-blackholed|10|SYS:fetch http://$DUAL/ TIMEOUT 30 TO DH0:v6.txt -6|-HTTP/1.[01] 200
 # Nothing answers in either family: the discard port, blackholed over IPv6 and
 # unanswered over IPv4.  This is the case that must not get slower.
 dead/both|10|SYS:fetch http://$DUAL:9/ TIMEOUT 30|-HTTP/1.[01] 200
@@ -160,6 +171,8 @@ dead/one|10|SYS:fetch http://$DEADV4/ TIMEOUT 30|-HTTP/1.[01] 200
 EOF
 }
 
+
+
 # ======================================================================= #
 #                                the boot                                 #
 # ======================================================================= #
@@ -167,7 +180,7 @@ EOF
 stage_and_boot() {
     local a2065 t
 
-    for t in ToolsSmoke AddNetInterface ShowNetStatus fetch; do
+    for t in ToolsSmoke AddNetInterface ShowNetStatus AddNetRoute fetch; do
         [ -x "$TOOLS/$t" ] || infra "no $TOOLS/$t; build $BUILD first"
     done
     [ -f "$BSD" ] || infra "no $BSD; build $BUILD first"
@@ -179,20 +192,18 @@ stage_and_boot() {
     cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
     cp "$a2065" "$STAGE/devs/a2065.device"
     cp "$BSD"   "$STAGE/libs/bsdsocket.library"
-    for t in AddNetInterface ShowNetStatus fetch; do
+    for t in AddNetInterface ShowNetStatus AddNetRoute fetch; do
         cp "$TOOLS/$t" "$STAGE/$t"
     done
 
-    # DHCP for IPv4, and an IPv6 configuration that is deliberately useless:
-    # a real address on this wire so the machine believes it has IPv6 and
-    # source selection offers it, behind a router that swallows everything.
+    # An ordinary dual-stack guest.  What is broken is broken later, by a
+    # command in the list, so the transcript carries the before and the after
+    # of the same machine.
     cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
 DEVICE=a2065.device
 UNIT=0
 CONFIGURE=DHCP
-CONFIGURE6=STATIC
-ADDRESS6=$ADDRESS6
-GATEWAY6=$GATEWAY6
+CONFIGURE6=AUTO
 EOF
 
     # The shared file names SLIRP's forwarder, which does not exist here and
@@ -201,13 +212,13 @@ EOF
         > "$STAGE/devs/Internet/name_resolution"
 
     arms | grep -v '^#' | cut -d'|' -f3 > "$STAGE/cmds.raw"
-    # Duplicate address detection has to finish before the static address is
-    # anything but tentative, and nothing may be sent from a tentative one:
-    # without the wait every IPv6 arm fails instantly with EADDRNOTAVAIL,
-    # which looks like a blackhole and is not one.
+    # A router advertisement arrives on its own schedule and duplicate address
+    # detection takes a moment after it.  Without the wait the IPv6 arms fail
+    # instantly with EADDRNOTAVAIL from a tentative address, which looks like
+    # a blackhole and is not one.
     {
         echo "SYS:AddNetInterface eth0"
-        echo "wait 15"
+        echo "wait 20"
         cat "$STAGE/cmds.raw"
     } > "$STAGE/commands.txt"
 
@@ -221,7 +232,7 @@ EOF
         -t "$TIMEOUT" \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" \
         "$STAGE/libs" "$STAGE/AddNetInterface" "$STAGE/ShowNetStatus" \
-        "$STAGE/fetch" \
+        "$STAGE/AddNetRoute" "$STAGE/fetch" \
         > "$ROOT/build/multiaddr-run-$AMINETXDUO_RUN_TAG.log" 2>&1
     RUN_RC=$?
     set -e
@@ -283,7 +294,7 @@ judge() {
 
     if [ -z "$(guest_global_v6)" ]; then
         echo "guest/address6=none"
-        echo "error=the guest never took the static IPv6 address, so nothing here saw a dual stack"
+        echo "error=the guest has no global IPv6 address, so nothing here saw a dual stack"
         echo "result=noipv6"
         exit 3
     fi
