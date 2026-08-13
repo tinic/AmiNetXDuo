@@ -65,6 +65,19 @@ static const char version_tag[] __attribute__((used)) =
  *                this one and its Output() is NIL:.
  *   wait <secs>  Delay(), so the next line starts after the background one
  *                has had time to reach its accept().
+ *
+ *   until <secs> <needle> <not,not,...> <command>
+ *                run <command> over and over until one line of its output
+ *                holds <needle> and holds none of the comma-separated <not>
+ *                substrings, or <secs> have gone.  `-` excludes nothing.
+ *                Plain substrings with no spaces in them, one line at a time.
+ *
+ * `until` exists because `wait` is a guess.  A router advertisement, a lease
+ * or a listener arrives on its own schedule, and a delay long enough for this
+ * machine is short on a slower one and wasted on a faster one; the harness
+ * that made every IPv6 arm `blocked` was sampling at a fixed moment.  Each
+ * attempt is a command of its own in the transcript, header and rc and all,
+ * so what was polled and how long it took are both readable afterwards.
  */
 #define COMMANDS    "DH0:commands.txt"
 /*
@@ -182,6 +195,299 @@ static void report(const char *fmt, LONG a, LONG b, LONG c)
     Close(fh);
 }
 
+/* No libc here beyond memcpy and memset, and newlib's strstr costs 2 KB. */
+static int line_holds(const char *hay, const char *needle)
+{
+    int i;
+    int j;
+
+    if (needle[0] == '\0')
+        return 1;
+
+    for (i = 0; hay[i] != '\0'; i++)
+    {
+        for (j = 0; needle[j] != '\0' && hay[i + j] == needle[j]; j++)
+            ;
+        if (needle[j] == '\0')
+            return 1;
+    }
+
+    return 0;
+}
+
+/* Run one staged command, header, redirection, rc and all.  Returns 1 when
+   the Shell could not start it, which is what `failures` counts. */
+static int run_command(const char *command)
+{
+    char             line[MAX_LINE + 40];
+    struct DateStamp started;
+    LONG             rc;
+    int              n = 0;
+    int              k;
+    int              has_input = 0;
+    int              has_output = 0;
+    int              async = 0;
+
+    report((const char *)"\n===== %s =====\n", (LONG)command, 0, 0);
+
+    if (command[0] == '&')
+    {
+        async = 1;
+        command++;
+    }
+
+    for (k = 0; command[k] != '\0'; k++)
+    {
+        if (command[k] == '<')
+            has_input = 1;
+        if (command[k] == '>')
+            has_output = 1;
+    }
+
+    for (k = 0; command[k] != '\0' && n < (int)sizeof(line) - 32; k++)
+        line[n++] = command[k];
+
+    if (!has_input)
+    {
+        const char *tail = (const char *)REDIRECT_IN;
+
+        for (k = 0; tail[k] != '\0' && n < (int)sizeof(line) - 1; k++)
+            line[n++] = tail[k];
+    }
+
+    if (!has_output && !async)
+    {
+        const char *tail = (const char *)REDIRECT_OUT;
+
+        for (k = 0; tail[k] != '\0' && n < (int)sizeof(line) - 1; k++)
+            line[n++] = tail[k];
+    }
+
+    line[n] = '\0';
+
+    DateStamp(&started);
+
+    if (async)
+    {
+        /*
+         * A detached child cannot share this process's streams: System()
+         * closes whatever it is given when the child ends, and closing the
+         * Shell's own Output() out from under it is fatal. It gets a pair of
+         * NIL: handles of its own, and anything worth keeping is redirected
+         * by the line itself.
+         */
+        BPTR in  = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+        BPTR out = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+
+        rc = SystemTags((CONST_STRPTR)line,
+                        SYS_Input,  (Tag)in,
+                        SYS_Output, (Tag)out,
+                        SYS_Asynch, (Tag)DOSTRUE,
+                        TAG_DONE);
+
+        if (rc == -1)
+        {
+            /* Nothing was started, so nothing will close them. */
+            if (in != (BPTR)0)
+                Close(in);
+            if (out != (BPTR)0)
+                Close(out);
+        }
+    }
+    else
+    {
+        rc = SystemTagList((CONST_STRPTR)line, NULL);
+    }
+
+    if (rc == -1)
+    {
+        report((const char *)"----- could not run (IoErr %ld) -----\n",
+               IoErr(), 0, 0);
+        return 1;
+    }
+
+    if (async)
+    {
+        report((const char *)"----- started in the background -----\n",
+               0, 0, 0);
+        return 0;
+    }
+
+    /*
+     * Free memory after every command, the same accounting
+     * clients/dropbear/clientrun.c does for ported clients.  AmigaOS reclaims
+     * nothing when a process exits, so anything a command allocated and did
+     * not give back is gone until the next reboot, and a leak reads here as
+     * the same step down run after run.  SystemTagList() above passes no
+     * NP_StackSize, so these run on the Shell's own stack, which is what a
+     * 1 MB machine has.
+     *
+     * And how long it took, which is the only way from out here to see that a
+     * command spent its time waiting rather than working.
+     */
+    {
+        struct DateStamp finished;
+
+        DateStamp(&finished);
+
+        report((const char *)"----- rc %ld, %ld ms, free %ld -----\n", rc,
+               elapsed_ms(&started, &finished),
+               (LONG)AvailMem(MEMF_ANY));
+    }
+
+    return 0;
+}
+
+/* Any one of a comma-separated list of substrings, on this line. */
+static int line_holds_any(const char *hay, const char *list)
+{
+    char one[MAX_LINE];
+    int  i = 0;
+    int  n;
+
+    while (list[i] != '\0')
+    {
+        for (n = 0; list[i] != '\0' && list[i] != ',' &&
+                    n < (int)sizeof(one) - 1; i++)
+            one[n++] = list[i];
+        one[n] = '\0';
+
+        if (list[i] == ',')
+            i++;
+
+        if (n > 0 && line_holds(hay, one))
+            return 1;
+    }
+
+    return 0;
+}
+
+/*
+ * Did this attempt's output carry a line with `needle` and with none of the
+ * comma-separated substrings in `stop`?  `from` is where the report stood
+ * before the command ran, so only what this attempt appended is read.
+ */
+static int attempt_met(LONG from, const char *needle, const char *stop)
+{
+    BPTR fh = Open((CONST_STRPTR)REPORT, MODE_OLDFILE);
+    char line[MAX_LINE + 40];
+    int  met = 0;
+
+    if (fh == (BPTR)0)
+        return 0;
+
+    if (Seek(fh, from, OFFSET_BEGINNING) < 0)
+    {
+        Close(fh);
+        return 0;
+    }
+
+    while (!met && FGets(fh, (STRPTR)line, (ULONG)sizeof(line)) != NULL)
+    {
+        if (!line_holds(line, needle))
+            continue;
+        if (stop[0] != '\0' && line_holds_any(line, stop))
+            continue;
+        met = 1;
+    }
+
+    Close(fh);
+    return met;
+}
+
+/* Where the report currently ends. */
+static LONG report_end(void)
+{
+    BPTR fh = Open((CONST_STRPTR)REPORT, MODE_OLDFILE);
+    LONG pos;
+
+    if (fh == (BPTR)0)
+        return 0;
+
+    Seek(fh, 0, OFFSET_END);
+    pos = Seek(fh, 0, OFFSET_CURRENT);
+    Close(fh);
+
+    return (pos < 0) ? 0 : pos;
+}
+
+/*
+ * "until <secs> <needle> <not> <command>".  Retries every two seconds and
+ * stops the moment the condition holds, so the cost is what the machine
+ * needed and the deadline is only reached when the thing never happened.
+ * Returns the number of attempts the Shell could not start.
+ */
+static int run_until(const char *spec)
+{
+    char        needle[MAX_LINE];
+    char        stop[MAX_LINE];
+    const char *p = spec + 5;           /* past "until" */
+    LONG        secs = 0;
+    LONG        waited = 0;
+    int         failures = 0;
+    int         met = 0;
+    int         n;
+
+    while (*p == ' ')
+        p++;
+    for (; *p >= '0' && *p <= '9'; p++)
+        secs = (secs * 10) + (*p - '0');
+    while (*p == ' ')
+        p++;
+
+    for (n = 0; *p != '\0' && *p != ' ' && n < (int)sizeof(needle) - 1; p++)
+        needle[n++] = *p;
+    needle[n] = '\0';
+    while (*p == ' ')
+        p++;
+
+    for (n = 0; *p != '\0' && *p != ' ' && n < (int)sizeof(stop) - 1; p++)
+        stop[n++] = *p;
+    stop[n] = '\0';
+    while (*p == ' ')
+        p++;
+
+    /* `-` is "exclude nothing", so that a plain condition needs no placeholder
+       of its own invention. */
+    if (stop[0] == '-' && stop[1] == '\0')
+        stop[0] = '\0';
+
+    if (needle[0] == '\0' || *p == '\0')
+    {
+        report((const char *)"----- until: malformed, nothing run -----\n",
+               0, 0, 0);
+        return 1;
+    }
+
+    for (;;)
+    {
+        LONG from = report_end();
+
+        failures += run_command(p);
+
+        if (attempt_met(from, needle, stop))
+        {
+            met = 1;
+            break;
+        }
+
+        if (waited >= secs)
+            break;
+
+        Delay(2UL * 50UL);
+        waited += 2;
+
+        if (SetSignal(0L, 0L) & SIGBREAKF_CTRL_C)
+            break;
+    }
+
+    report(met ? (const char *)"----- until %s: met after %ld s -----\n"
+                : (const char *)"----- until %s: NOT MET after %ld s -----\n",
+           (LONG)needle, waited, 0);
+
+    return failures;
+}
+
 int main(int argc, char **argv)
 {
     struct Process *self = (struct Process *)FindTask(NULL);
@@ -213,15 +519,8 @@ int main(int argc, char **argv)
 
     for (i = 0; ; i++)
     {
-        char             line[MAX_LINE + 40];
-        const char      *command;
-        struct DateStamp started;
-        LONG             rc;
-        int         n = 0;
+        const char *command;
         int         k;
-        int         has_input = 0;
-        int         has_output = 0;
-        int         async = 0;
 
         if (script_count > 0)
         {
@@ -236,8 +535,6 @@ int main(int argc, char **argv)
             command = commands[i];
         }
 
-        report((const char *)"\n===== %s =====\n", (LONG)command, 0, 0);
-
         /* "wait <seconds>", for letting a background listener settle. */
         if ((command[0] == 'w' || command[0] == 'W') &&
             (command[1] == 'a' || command[1] == 'A') &&
@@ -246,6 +543,8 @@ int main(int argc, char **argv)
             (command[4] == ' ' || command[4] == '\0'))
         {
             LONG secs = 0;
+
+            report((const char *)"\n===== %s =====\n", (LONG)command, 0, 0);
 
             for (k = 5; command[k] >= '0' && command[k] <= '9'; k++)
                 secs = (secs * 10) + (command[k] - '0');
@@ -257,111 +556,27 @@ int main(int argc, char **argv)
             continue;
         }
 
-        if (command[0] == '&')
+        /* "until <secs> <needle> <not> <command>", the same idea without the
+           guess: it stops when the condition holds. */
+        if ((command[0] == 'u' || command[0] == 'U') &&
+            (command[1] == 'n' || command[1] == 'N') &&
+            (command[2] == 't' || command[2] == 'T') &&
+            (command[3] == 'i' || command[3] == 'I') &&
+            (command[4] == 'l' || command[4] == 'L') &&
+            command[5] == ' ')
         {
-            async = 1;
-            command++;
-        }
+            failures += run_until(command);
 
-        for (k = 0; command[k] != '\0'; k++)
-        {
-            if (command[k] == '<')
-                has_input = 1;
-            if (command[k] == '>')
-                has_output = 1;
-        }
-
-        for (k = 0; command[k] != '\0' && n < (int)sizeof(line) - 32; k++)
-            line[n++] = command[k];
-
-        if (!has_input)
-        {
-            const char *tail = (const char *)REDIRECT_IN;
-
-            for (k = 0; tail[k] != '\0' && n < (int)sizeof(line) - 1; k++)
-                line[n++] = tail[k];
-        }
-
-        if (!has_output && !async)
-        {
-            const char *tail = (const char *)REDIRECT_OUT;
-
-            for (k = 0; tail[k] != '\0' && n < (int)sizeof(line) - 1; k++)
-                line[n++] = tail[k];
-        }
-
-        line[n] = '\0';
-
-        DateStamp(&started);
-
-        if (async)
-        {
-            /*
-             * A detached child cannot share this process's streams: System()
-             * closes whatever it is given when the child ends, and closing
-             * the Shell's own Output() out from under it is fatal. It gets a
-             * pair of NIL: handles of its own, and anything worth keeping is
-             * redirected by the line itself.
-             */
-            BPTR in  = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
-            BPTR out = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
-
-            rc = SystemTags((CONST_STRPTR)line,
-                            SYS_Input,  (Tag)in,
-                            SYS_Output, (Tag)out,
-                            SYS_Asynch, (Tag)DOSTRUE,
-                            TAG_DONE);
-
-            if (rc == -1)
+            if (SetSignal(0L, 0L) & SIGBREAKF_CTRL_C)
             {
-                /* Nothing was started, so nothing will close them. */
-                if (in != (BPTR)0)
-                    Close(in);
-                if (out != (BPTR)0)
-                    Close(out);
+                SetSignal(0L, SIGBREAKF_CTRL_C);
+                report((const char *)"\n*** Break, stopping\n", 0, 0, 0);
+                break;
             }
-        }
-        else
-        {
-            rc = SystemTagList((CONST_STRPTR)line, NULL);
+            continue;
         }
 
-        if (rc == -1)
-        {
-            report((const char *)"----- could not run (IoErr %ld) -----\n",
-                   IoErr(), 0, 0);
-            failures++;
-        }
-        else if (async)
-        {
-            report((const char *)"----- started in the background -----\n",
-                   0, 0, 0);
-        }
-        else
-        {
-            /*
-             * Free memory after every command, the same accounting
-             * clients/dropbear/clientrun.c does for ported clients.  AmigaOS
-             * reclaims nothing when a process exits, so anything a command
-             * allocated and did not give back is gone until the next reboot,
-             * and a leak reads here as the same step down run after run.
-             * SystemTagList() above passes no NP_StackSize, so these run on
-             * the Shell's own stack, which is what a 1 MB machine has.
-             */
-            struct DateStamp finished;
-
-            DateStamp(&finished);
-
-            /*
-             * How long it took, which is the only way from out here to see
-             * that a command spent its time waiting rather than working.  A
-             * boot path is made of these, and without the number a stage that
-             * costs seconds is indistinguishable from one that costs none.
-             */
-            report((const char *)"----- rc %ld, %ld ms, free %ld -----\n", rc,
-                   elapsed_ms(&started, &finished),
-                   (LONG)AvailMem(MEMF_ANY));
-        }
+        failures += run_command(command);
 
         if (SetSignal(0L, 0L) & SIGBREAKF_CTRL_C)
         {
