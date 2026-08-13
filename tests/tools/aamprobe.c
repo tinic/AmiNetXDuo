@@ -464,7 +464,7 @@ static VOID p_ask_again_from_another_process(const char *ifname)
 #define PROBE_DOMAIN        48
 #define PROBE_BOOTP         300
 
-int main(void)
+int main(int argc, char **argv)
 {
     struct Library                  *base;
     struct MsgPort                  *port;
@@ -478,6 +478,39 @@ int main(void)
     LONG                             rc;
     ULONG                            i;
     ULONG                            n;
+    BOOL                             staged_down = FALSE;
+
+    (VOID)argv;
+
+    /*
+     * STATE DOWN, passed by the harness when it staged the interface
+     * configured down.  The half of this file that needs a lease is skipped in
+     * that mode, and skipped rather than left to fail: the addressed-interface
+     * assertion below asks for AAMR_AddressKnown, and on an interface that
+     * never got an address that request is in order, so BeginInterfaceConfig()
+     * starts a real allocation, holds the interface's bsd_aam_jobs[] slot for
+     * the ten-second floor, and the ten assertions after it are answered
+     * AAMR_Busy by a stack doing exactly what it should.  Read before the
+     * library is opened, the same as IfProbe.
+     */
+    if (argc != 0)
+    {
+        struct RDArgs *rda;
+        LONG           args[1];
+
+        args[0] = 0;
+
+        rda = ReadArgs((CONST_STRPTR)"STATE", args, NULL);
+        if (rda != NULL)
+        {
+            const char *word = (const char *)args[0];
+
+            if (word != NULL && (*word == 'D' || *word == 'd'))
+                staged_down = TRUE;
+
+            FreeArgs(rda);
+        }
+    }
 
     base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4);
     if (base == NULL)
@@ -514,6 +547,10 @@ int main(void)
 
     Printf((CONST_STRPTR)"interface: %s\n",
            (LONG)(ifname[0] != '\0' ? ifname : "(none)"));
+
+    Printf((CONST_STRPTR)"staged: %s\n",
+           (LONG)(staged_down ? "down, the lease half is skipped"
+                              : "up, everything runs"));
 
     if (ifname[0] == '\0')
     {
@@ -710,8 +747,9 @@ int main(void)
      * that returns -1 in d0 leaves a caller waiting on this port forever,
      * because the call returns VOID and nothing else can tell it.
      */
-    p_begin_and_collect(base, port, aam, "on an addressed interface",
-                        AAMR_AddressKnown);
+    if (!staged_down)
+        p_begin_and_collect(base, port, aam, "on an addressed interface",
+                            AAMR_AddressKnown);
 
     /* An interface name nothing answers to. */
     aam->aam_InterfaceName[0] = 'z';
@@ -744,6 +782,7 @@ int main(void)
      * SLIRP runs a DHCP server, so this is a real DISCOVER/OFFER/REQUEST/ACK
      * on the wire and the address that comes back is one a server chose.
      */
+    if (!staged_down)
     {
         struct AddressAllocationMessage *live = NULL;
         struct Message                  *got;

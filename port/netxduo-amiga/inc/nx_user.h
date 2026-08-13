@@ -769,10 +769,16 @@
 #define NX_IPV6_NEIGHBOR_CACHE_SIZE             8
 
 /*
- * Destination cache (default 8).  One entry per off-link destination in use;
- * four matches NX_IP_ROUTING_TABLE_SIZE above, the IPv4 equivalent.
+ * Destination cache (default 8).  One entry per destination in use, and not
+ * only the ones a user asked for: a neighbour advertisement sent back to a
+ * router's link-local address takes a slot too, so a quiet link with two
+ * advertising routers arrives at the first ping with two already gone.
+ * Measured at four: the third and every later destination could not be sent
+ * to at all.  Entries are given up least-recently-used now
+ * (nx_icmpv6_dest_table_add.c), so this is how many destinations stay hot
+ * rather than how many can be reached.
  */
-#define NX_IPV6_DESTINATION_TABLE_SIZE          4
+#define NX_IPV6_DESTINATION_TABLE_SIZE          16
 
 /*
  * Default router list (default 8).  RFC 4861 requires at least one; a home

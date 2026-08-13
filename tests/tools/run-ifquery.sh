@@ -191,7 +191,15 @@ cp "$MONPROBE" "$STAGE/MonProbe"
 # bsdsocket.library open between commands, and netstat run on its own finds no
 # stack to report on.  AddNetInterface stays resident, so the interface is
 # still in the state the previous command left it in.
-cat > "$STAGE/commands.txt" <<'EOF'
+# AamProbe is told, because it cannot ask.  The half of it that needs a lease
+# asks BeginInterfaceConfig for AAMR_AddressKnown, and on an interface staged
+# down there is no address to know, so that request is in order: the stack
+# starts a real allocation, holds the interface's job slot for the documented
+# ten-second floor, and answers AAMR_Busy to the ten assertions after it.
+AAMARG=""
+[ "$STATE_DOWN" = "1" ] && AAMARG=" DOWN"
+
+cat > "$STAGE/commands.txt" <<EOF
 SYS:IfProbe
 SYS:AddNetInterface eth0
 SYS:IfProbe
@@ -202,7 +210,7 @@ SYS:netstat -s
 SYS:IfProbe UP
 SYS:StatProbe
 SYS:MonProbe
-SYS:AamProbe
+SYS:AamProbe${AAMARG}
 EOF
 
 # ------------------------------------------------------------------ run ---
@@ -819,6 +827,14 @@ else
     fail "the carved buffers were not zeroed"
 fi
 
+if [ "$STATE_DOWN" = "1" ]; then
+    if grep -q "^staged: down, the lease half is skipped" "$REPORT"; then
+        pass "AamProbe was told the interface was staged down and skipped the lease half"
+    else
+        fail "AamProbe did not get its STATE argument, so it asked for a lease on a down interface"
+    fi
+fi
+
 if grep -q "^unicast 1, honoured at version 2, correctly" "$REPORT"; then
     pass "CAAMTA_RequestUnicast is honoured at AAM_VERSION 2"
 else
@@ -826,14 +842,21 @@ else
 fi
 
 # THE ONE THAT MATTERS.  Not the result code, the message coming back.
-for case in "on an addressed interface" "on an unknown interface" \
-            "with a bad version"; do
-    if grep -q "^begin $case: .* replied, correctly" "$REPORT"; then
-        pass "BeginInterfaceConfig replied the message: $case"
+begin_replied() {
+    if grep -q "^begin $1: .* replied, correctly" "$REPORT"; then
+        pass "BeginInterfaceConfig replied the message: $1"
     else
-        fail "BeginInterfaceConfig did not reply the message: $case"
+        fail "BeginInterfaceConfig did not reply the message: $1"
     fi
-done
+}
+
+# The addressed case is a lease row, and the probe skips it when it was told
+# the interface was staged down.
+if live_only; then
+    begin_replied "on an addressed interface"
+fi
+begin_replied "on an unknown interface"
+begin_replied "with a bad version"
 
 if grep -q "^AbortInterfaceConfig(NULL): returned" "$REPORT"; then
     pass "AbortInterfaceConfig is safe with nothing in flight and with NULL"
@@ -848,16 +871,18 @@ fi
 # with, an interface with no address at all, and then asks
 # BeginInterfaceConfig for one.  A real DISCOVER/OFFER/REQUEST/ACK on the LAN.
 
-if grep -q "^live: begin returned with the message still out, asynchronous, correctly" "$REPORT"; then
-    pass "BeginInterfaceConfig returned before the allocation finished"
-else
-    fail "BeginInterfaceConfig blocked its caller, it is documented asynchronous"
-fi
+if live_only; then
+    if grep -q "^live: begin returned with the message still out, asynchronous, correctly" "$REPORT"; then
+        pass "BeginInterfaceConfig returned before the allocation finished"
+    else
+        fail "BeginInterfaceConfig blocked its caller, it is documented asynchronous"
+    fi
 
-if grep -q "^live: replied after .* result 0, AAMR_Success, correctly" "$REPORT"; then
-    pass "and the message came back with AAMR_Success"
-else
-    fail "the allocation did not succeed"
+    if grep -q "^live: replied after .* result 0, AAMR_Success, correctly" "$REPORT"; then
+        pass "and the message came back with AAMR_Success"
+    else
+        fail "the allocation did not succeed"
+    fi
 fi
 
 # THE LEASE CARRIES THE SERVER'S OWN NUMBERS, and on a real network that is a
@@ -882,7 +907,9 @@ LIVE_ADDR=$(field_after "live: address" 3)
 LIVE_MASK=$(field_after "live: address" 5)
 LIVE_SERVER=$(field_after "live: address" 7)
 
-if [ -z "$LIVE_ADDR" ]; then
+if ! live_only; then
+    : "no lease was asked for, so there is none to read"
+elif [ -z "$LIVE_ADDR" ]; then
     fail "the allocation printed no address line at all"
 elif ! is_netmask "${LIVE_MASK:-}"; then
     fail "the lease mask is not a netmask: ${LIVE_MASK:-nothing}"
@@ -905,7 +932,9 @@ fi
 LIVE_ROUTER=$(field_after "live: router[0]" 3)
 LIVE_ROUTER="${LIVE_ROUTER%,}"
 
-if [ -z "$LIVE_ROUTER" ] || grep -q "^live: router\[0\] .*, none offered" "$REPORT"; then
+if ! live_only; then
+    : "no lease, no router table"
+elif [ -z "$LIVE_ROUTER" ] || grep -q "^live: router\[0\] .*, none offered" "$REPORT"; then
     fail "no router came back, the parameter request list is not being sent"
 elif [ "$LIVE_ROUTER" = "0.0.0.0" ]; then
     fail "aam_RouterTable[0] is zero, option 3 was parsed into nothing"
@@ -915,17 +944,20 @@ else
     pass "aam_RouterTable carries $LIVE_ROUTER, a router on the leased subnet"
 fi
 
-if grep -Eq "^live: lease expires day [1-9][0-9]+ " "$REPORT"; then
-    pass "aam_LeaseExpires holds a real date rather than the zero that means infinite"
-else
-    fail "the lease expiry DateStamp was not filled in"
-fi
+if live_only; then
+    if grep -Eq "^live: lease expires day [1-9][0-9]+ " "$REPORT"; then
+        pass "aam_LeaseExpires holds a real date rather than the zero that means infinite"
+    else
+        fail "the lease expiry DateStamp was not filled in"
+    fi
 
-# And it really configured the interface, rather than only reporting a number.
-if grep -q "^begin a second time: result 4, replied, correctly" "$REPORT"; then
-    pass "a second allocation on the now-addressed interface is AAMR_AddressKnown"
-else
-    fail "the allocation did not put the address on the interface"
+    # And it really configured the interface, rather than only reporting a
+    # number.
+    if grep -q "^begin a second time: result 4, replied, correctly" "$REPORT"; then
+        pass "a second allocation on the now-addressed interface is AAMR_AddressKnown"
+    else
+        fail "the allocation did not put the address on the interface"
+    fi
 fi
 
 # ---- the two paths a working DHCP server hides ---------------------------
@@ -968,14 +1000,12 @@ fi
 # launch overwrites bsd_aam_jobs[index], so the FIRST caller's
 # AbortInterfaceConfig() can no longer find its own job and the three `slow:`
 # assertions below fail with it.
-if live_only; then
-    if grep -q "^busy: .*, refused at the door with AAMR_Busy, correctly" "$REPORT"; then
-        pass "a second process asking for an interface already being configured is refused AAMR_Busy"
-    elif grep -q "^busy: .*, NOT TESTED" "$REPORT"; then
-        fail "the second process never got as far as asking, AAMR_Busy is UNTESTED"
-    else
-        fail "the second request got a worker of its own, bsd_aam_jobs[] did not refuse it at the door, and the first caller's job is no longer the one in the table"
-    fi
+if grep -q "^busy: .*, refused at the door with AAMR_Busy, correctly" "$REPORT"; then
+    pass "a second process asking for an interface already being configured is refused AAMR_Busy"
+elif grep -q "^busy: .*, NOT TESTED" "$REPORT"; then
+    fail "the second process never got as far as asking, AAMR_Busy is UNTESTED"
+else
+    fail "the second request got a worker of its own, bsd_aam_jobs[] did not refuse it at the door, and the first caller's job is no longer the one in the table"
 fi
 
 if grep -q "^slow: abort replied after .*, AAMR_Aborted, correctly" "$REPORT"; then
