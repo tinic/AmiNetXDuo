@@ -4,7 +4,8 @@ comment beside the code, not an entry here.
 **HARD CAP: 250 LINES.** Over it, delete rows. Never relocate them; git has it.
 | Item | Why it is open | Cite |
 |---|---|---|
-| `ShowNetStatus` cannot show the IPv6 destination table | It prints the router table and the ND cache, so the table that silently dropped every third destination was invisible to the one command that should have shown it | `src/bsdsocket/netstatus.c:610,657` |
+| A skipped arm renders as a green PASS in the GitHub summary | `ci-arm.sh:117-123` maps exit 0 to `status=pass` whether the stage ran or skipped, which is why the cardsweep masking was total rather than amber. Changing it changes every arm's reporting | `tools/ci-arm.sh:117-123` |
+| Four harnesses skip their only off-box assertion and exit 0 | Green with the substance untested | `run-dnscache.sh:190`, `run-routes.sh:270`, `run-iperf.sh:631`, `run-tcpdrill.sh:75` |
+| `test-verdict.sh` reports 'skipped' over real failures | It greps for the string SKIPPED and returns 77 before checking the failure count. Still exits non-zero, so red — a wrong message, not a hole | `tools/test-verdict.sh:121-126` |
 | `whois -6` calls a timeout a refusal | Reports `connection refused` after 191 s, which is the connect ladder running out, not an RST | `src/tools/whois.c` |
-| A card that carries bytes but fails an assertion is scored a skip | `run-cardsweep.sh` exits 3 for `fail_assert`, and `tools/ci.sh:840` maps 3 to skip, so a real assertion failure is quiet unless some other card fails outright | `tests/tools/run-cardsweep.sh:438`, `tools/ci.sh:840` |
 | Unpaced `iperf -u` is 8x slower than paced | 1.00 Mbit/s flat out against 8.00 Mbit/s at `-b 8000` with nothing lost. Unchanged by the pacing fix, so it is its own defect | `src/tools/iperfcore.c` |

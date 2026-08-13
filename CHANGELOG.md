@@ -7,6 +7,10 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
+## Unreleased
+
+- `netstat -r` and `ShowNetStatus ROUTES` show the IPv6 destination cache: every destination the stack has decided a next hop for, how recently each was used, and whether the table is full. The table that silently dropped every new destination when it filled was invisible to both commands
+
 ## 0.21.3
 
 - An Ariadne reaches the network over IPv6. Its driver compares the packet type as a signed number, so every type with the top bit set — which IPv6 has and IPv4 does not — was framed as an old-style 802.3 packet with a length where the type belongs, and left the machine unanswerable. Those frames are now written unframed, and the driver passes them through verbatim
