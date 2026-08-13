@@ -43,8 +43,12 @@
 #   restored before the interface state is touched, so a failure part-way
 #   leaves the machine reachable.
 #
-# The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.
+# The SANA-II drivers are not ours to ship.  The -N board's driver is looked up
+# in the driver store, or named with AMINETXDUO_SANA2_DRIVER.
+#
+# IT RUNS BRIDGED AND ONLY BRIDGED.  A DHCP server on the wire is what the
+# allocation half needs, and none of the assertions below knows or cares which
+# server that is.
 #
 # SPDX-License-Identifier: MIT
 
@@ -58,29 +62,45 @@ MODEL=A1200
 # DHCP server that cannot answer, twice over, so this is not the usual 240.
 TIMEOUT=400
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
-# FS-UAE needs an X server; on a headless Linux box it dies in GLAD before the
-# guest boots, so -A picks Amiberry, which runs genuinely headless.
-RUNNER="${AMINETXDUO_RUNNER:-fsuae}"
-BOARD=a2065
-IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
+BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
+# BRIDGED, AND THERE IS NO OTHER MODE.  This defaulted to SLIRP and its DHCP
+# assertions were written against SLIRP's fixed answers -- 10.0.2.15 from
+# 10.0.2.2 -- so it could not pass anywhere else, and SLIRP is not run here.
+# Everything below is now written against what a DHCP server is REQUIRED to
+# provide: a real address, a real mask, a server that names itself and a router
+# on the leased subnet.  -B takes the host interface to bridge onto.
+IFACE="${AMINETXDUO_IFQUERY_IFACE:-${AMINETXDUO_AMIBERRY_BACKEND:-ens18}}"
 
 # -D stages the interface configured down, which is the only way to test that
 # STATE=down is honoured: it is read once at startup and there is no way to ask
 # for it afterwards.  The assertion is at the bottom.
 STATE_DOWN=0
 
-while getopts "m:t:b:AN:B:D" opt; do
+while getopts "m:t:b:N:B:D" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        A) RUNNER=amiberry ;;
         N) BOARD="$OPTARG" ;;
         B) IFACE="$OPTARG" ;;
         D) STATE_DOWN=1 ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-A [-N board] [-B backend]] [-D]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-N board] [-B iface] [-D]" >&2; exit 2 ;;
     esac
 done
+
+# The assertions that need a lease.  -D stages the interface configured down,
+# so it never gets one and those rows have nothing to read; every other run
+# has a DHCP server on the wire and they all apply.
+#
+# THIS FUNCTION WAS MISSING.  It was called ten times from cad30b42 (1 Aug) to
+# today and never defined, so under `set -e` an `if live_only` took the else
+# branch every time and the ten assertions it guards -- the address, the mask,
+# the bind type, the netmask atomicity, the address move and restore, ipstat,
+# udpstat and the AAMR_Busy race -- did not run in ANY mode, including the
+# default one CI carries.
+live_only() {
+    [ "$STATE_DOWN" = "0" ]
+}
 
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
@@ -94,17 +114,22 @@ for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$TOOLS/netstat" \
     [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
-A2065="${AMINETXDUO_A2065:-}"
-if [ -z "$A2065" ]; then
-    for candidate in \
-        "$ROOT/build/a2065.device" \
-        "$HOME/amiga-os-src/os-source/other_networking/sana2/bin/devs/a2065.device"
-    do
-        [ -f "$candidate" ] && { A2065="$candidate"; break; }
+# The driver the -N board wants, from the one table that maps them.
+. "$ROOT/tools/sana2-stage.sh"
+DRIVER=$(sana2_driver_for "$BOARD")
+
+DRVPATH="${AMINETXDUO_SANA2_DRIVER:-}"
+if [ -z "$DRVPATH" ] && [ "$DRIVER" = a2065.device ]; then
+    DRVPATH="${AMINETXDUO_A2065:-}"
+fi
+if [ -z "$DRVPATH" ]; then
+    for candidate in "$ROOT/build/$DRIVER" "$(sana2_local_driver "$DRIVER")"; do
+        [ -n "$candidate" ] && [ -f "$candidate" ] && { DRVPATH="$candidate"; break; }
     done
 fi
-[ -n "$A2065" ] && [ -f "$A2065" ] || {
-    echo "No a2065.device found. Set AMINETXDUO_A2065=<path>." >&2
+[ -n "$DRVPATH" ] && [ -f "$DRVPATH" ] || {
+    echo "No $DRIVER for board $BOARD. Put one in the driver store or set" >&2
+    echo "AMINETXDUO_SANA2_DRIVER=<path>." >&2
     exit 2
 }
 
@@ -114,7 +139,10 @@ STAGE="$ROOT/build/ifquery-stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
-cp "$A2065" "$STAGE/devs/a2065.device"
+
+export AMINETXDUO_SANA2_DRIVER="$DRVPATH"
+sana2_stage "$BOARD" "$STAGE/devs"
+echo "==> $BOARD: $SANA2_DRIVER, opened as '$SANA2_DEVICE', from $DRVPATH"
 
 # HARDWAREADDRESS.  Staged unconditionally, because the keyword was on the
 # ignored list for the whole life of the project and nothing here would have
@@ -181,23 +209,15 @@ EOF
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-ifquery}"
 
+HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
+
 set +e
-if [ "$RUNNER" = "amiberry" ]; then
-    HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
-    echo "==> booting $MODEL under Amiberry, $BOARD on $IFACE"
-    "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
-        -t "$TIMEOUT" \
-        "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-        "$STAGE/AddNetInterface" "$STAGE/netstat" "$STAGE/IfProbe" \
-        "$STAGE/StatProbe" "$STAGE/AamProbe" "$STAGE/MonProbe"
-else
-    HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
-    echo "==> booting $MODEL with the A2065 on SLIRP"
-    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
-        "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-        "$STAGE/AddNetInterface" "$STAGE/netstat" "$STAGE/IfProbe" \
-        "$STAGE/StatProbe" "$STAGE/AamProbe" "$STAGE/MonProbe"
-fi
+echo "==> booting $MODEL under Amiberry, $BOARD bridged on $IFACE"
+"$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
+    -t "$TIMEOUT" \
+    "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
+    "$STAGE/AddNetInterface" "$STAGE/netstat" "$STAGE/IfProbe" \
+    "$STAGE/StatProbe" "$STAGE/AamProbe" "$STAGE/MonProbe"
 RUN_RC=$?
 set -e
 
@@ -213,6 +233,68 @@ echo
 FAILED=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
+
+# ---- reading a real lease ------------------------------------------------
+#
+# A real DHCP server picks its own numbers, so nothing below may be written
+# against a literal.  What it MUST provide is a shape: an address inside the
+# subnet the mask describes, a mask of contiguous ones, a server that names
+# itself, and a router reachable without going through a router.  Each of
+# those is checkable on any wire and each of them is something a stack that
+# invented the answer, or dropped it, gets wrong.
+
+ip2int() {
+    local a b c d
+    IFS=. read -r a b c d <<EOF
+$1
+EOF
+    [ -n "$a" ] && [ -n "$b" ] && [ -n "$c" ] && [ -n "$d" ] || return 1
+    case "$a$b$c$d" in
+        *[!0-9]*) return 1 ;;
+    esac
+    [ "$a" -le 255 ] && [ "$b" -le 255 ] && [ "$c" -le 255 ] && [ "$d" -le 255 ] || return 1
+    echo $(( (a << 24) | (b << 16) | (c << 8) | d ))
+}
+
+# A netmask is ones then zeros and nothing else, and this stack has been seen
+# to guess a classful one where the server said /24, so the width is checked
+# as well as the shape.  /8 to /30: narrower has no host addresses, wider is
+# not a mask a DHCP server hands a LAN client.
+is_netmask() {
+    local n bits=0 v
+    n=$(ip2int "$1") || return 1
+    v=$n
+    while [ $(( v & 0x80000000 )) -ne 0 ]; do
+        bits=$(( bits + 1 ))
+        v=$(( (v << 1) & 0xFFFFFFFF ))
+    done
+    [ "$v" -eq 0 ] || return 1
+    [ "$bits" -ge 8 ] && [ "$bits" -le 30 ]
+}
+
+# On the subnet, and not the two addresses on it that name the subnet itself.
+on_subnet() {
+    local a m net bcast
+    a=$(ip2int "$1") || return 1
+    m=$(ip2int "$2") || return 1
+    net=$(( a & m ))
+    bcast=$(( net | (~m & 0xFFFFFFFF) ))
+    [ "$a" -ne "$net" ] && [ "$a" -ne "$bcast" ]
+}
+
+same_subnet() {
+    local a b m
+    a=$(ip2int "$1") || return 1
+    b=$(ip2int "$2") || return 1
+    m=$(ip2int "$3") || return 1
+    [ $(( a & m )) -eq $(( b & m )) ]
+}
+
+# The first field the probe printed for a line starting with $1.
+field_after() {
+    awk -v key="$1" -v n="$2" '
+        index($0, key) == 1 { print $n; exit }' "$REPORT"
+}
 
 # ---- one boot (docs/RESEARCH.md 25) --------------------------------------
 #
@@ -266,10 +348,11 @@ else
     fail "QueryInterfaceTagList(eth0) did not return 0"
 fi
 
-if grep -Eq "IFQ_DeviceName +a2065\.device" "$REPORT"; then
-    pass "IFQ_DeviceName returned a pointer to the SANA-II device name"
+# The driver the -N board wants, not a2065.device for every board.
+if grep -Eq "IFQ_DeviceName +$SANA2_DEVICE\$" "$REPORT"; then
+    pass "IFQ_DeviceName returned a pointer to the SANA-II device name, $SANA2_DEVICE"
 else
-    fail "IFQ_DeviceName did not return the device name"
+    fail "IFQ_DeviceName did not return $SANA2_DEVICE: $(grep -m1 IFQ_DeviceName "$REPORT")"
 fi
 
 if grep -Eq "IFQ_HardwareAddressSize +48$" "$REPORT"; then
@@ -287,19 +370,37 @@ else
     fail "IFQ_HardwareAddress wrote past the six bytes of an Ethernet address"
 fi
 
+# The leased address and mask, read once here and cross-checked against each
+# other and against everything the run does with them afterwards.
+LEASED=""
+LEASEMASK=""
 if live_only; then
-    if grep -Eq "IFQ_Address +10\.0\.2\.[0-9]+ \(len 16 family 2\)" "$REPORT"; then
-        pass "IFQ_Address is a well-formed sockaddr_in holding the leased address"
+    LEASED=$(awk '$1 == "IFQ_Address" { print $2; exit }' "$REPORT")
+    LEASEMASK=$(awk '$1 == "IFQ_NetMask" { print $2; exit }' "$REPORT")
+fi
+
+# sockaddr_in or nothing: sin_len 16 and sin_family AF_INET, which is the half
+# of this tag a compiler cannot check, and an address that is really on the
+# subnet its own mask describes.  A stack that answered with a zero, with the
+# network or broadcast address, or with a sockaddr of the wrong length or
+# family fails this as squarely as it failed the literal it replaced.
+if live_only; then
+    if ! grep -Eq "IFQ_Address +$LEASED \(len 16 family 2\)" "$REPORT"; then
+        fail "IFQ_Address is not a well-formed sockaddr_in: $(grep -m1 IFQ_Address "$REPORT")"
+    elif [ -z "$LEASEMASK" ] || ! on_subnet "$LEASED" "$LEASEMASK"; then
+        fail "IFQ_Address $LEASED is not a host address on $LEASEMASK"
     else
-        fail "IFQ_Address is not a well-formed sockaddr_in"
+        pass "IFQ_Address is a sockaddr_in holding $LEASED, a host address on $LEASEMASK"
     fi
 fi
 
+# Ones then zeros, /8 to /30.  0.0.0.0 and a classful guess both fail; the
+# classful guess is the one that has actually happened.
 if live_only; then
-    if grep -Eq "IFQ_NetMask +255\." "$REPORT"; then
-        pass "IFQ_NetMask is the interface's mask"
+    if [ -n "$LEASEMASK" ] && is_netmask "$LEASEMASK"; then
+        pass "IFQ_NetMask is a contiguous netmask, $LEASEMASK"
     else
-        fail "IFQ_NetMask did not come back"
+        fail "IFQ_NetMask is not a netmask: ${LEASEMASK:-nothing came back}"
     fi
 fi
 
@@ -312,7 +413,8 @@ if live_only; then
     fi
 fi
 
-# The lease came from SLIRP's DHCP server, so the bind type is IFABT_Dynamic.
+# The address came from a DHCP server, so the bind type is IFABT_Dynamic and
+# not IFABT_Static.  Nothing about which server it was matters here.
 if live_only; then
     if grep -Eq "IFQ_AddressBindType +2$" "$REPORT"; then
         pass "IFQ_AddressBindType is IFABT_Dynamic for a DHCP lease"
@@ -426,19 +528,27 @@ else
     fail "IFC_LimitMTU 9000 was not clamped to the driver's 1500"
 fi
 
+# The probe asks for host .200 of the subnet it is already on, so the address
+# to expect is computed from the lease and not written down.  Both halves of
+# the line are asserted: what was asked for, and what IFQ_Address reported
+# afterwards.  A stack that accepted IFC_Address and did not move the
+# interface prints rc 0 and the old address, and fails here.
 if live_only; then
-    if grep -Eq "config: address -> 10\.0\.2\.200: rc 0, IFQ_Address now 10\.0\.2\.200" "$REPORT"; then
-        pass "IFC_Address moved the interface address"
+    MOVED="${LEASED%.*}.200"
+    if grep -Eq "config: address -> $MOVED: rc 0, IFQ_Address now $MOVED\$" "$REPORT"; then
+        pass "IFC_Address moved the interface address to $MOVED"
     else
-        fail "IFC_Address did not move the interface address"
+        fail "IFC_Address did not move the interface address to $MOVED: $(grep -m1 'config: address ->' "$REPORT")"
     fi
 fi
 
+# And back to the address it had, exactly.  The literal this replaces would
+# have passed on any address in 10.0.2.0/24, including the .200 above.
 if live_only; then
-    if grep -Eq "config: address restored: rc 0, IFQ_Address now 10\.0\.2\.[0-9]+" "$REPORT"; then
-        pass "and IFC_Address with IFC_NetMask put it back in one call"
+    if grep -Eq "config: address restored: rc 0, IFQ_Address now $LEASED\$" "$REPORT"; then
+        pass "and IFC_Address with IFC_NetMask put $LEASED back in one call"
     else
-        fail "the address was not restored"
+        fail "the address was not restored to $LEASED: $(grep -m1 'config: address restored' "$REPORT")"
     fi
 fi
 
@@ -516,7 +626,7 @@ fi
 # accepted. None is implemented and none changes anything this API or the wire
 # can show; refusing one refused the interface itself, which is the likeliest
 # reason a third-party tool worked on Roadshow and not here.
-if grep -q "^add eth0 (a2065.device unit 0): rc 0 .*, added, correctly" "$REPORT"; then
+if grep -q "^add eth0 ($SANA2_DEVICE unit 0): rc 0 .*, added, correctly" "$REPORT"; then
     pass "AddInterfaceTagList accepts the advisory tuning tags and adds"
 else
     fail "AddInterfaceTagList refused a tuning tag and did not re-add"
@@ -736,8 +846,7 @@ fi
 # The interface this run is riding on already has an address, so the probe
 # removes it and adds it back, which is what AddInterfaceTagList leaves you
 # with, an interface with no address at all, and then asks
-# BeginInterfaceConfig for one.  SLIRP runs a DHCP server, so this is a real
-# DISCOVER/OFFER/REQUEST/ACK on the wire.
+# BeginInterfaceConfig for one.  A real DISCOVER/OFFER/REQUEST/ACK on the LAN.
 
 if grep -q "^live: begin returned with the message still out, asynchronous, correctly" "$REPORT"; then
     pass "BeginInterfaceConfig returned before the allocation finished"
@@ -751,20 +860,59 @@ else
     fail "the allocation did not succeed"
 fi
 
-# The address is the assertion.  A server chose it; nothing in this stack
-# could have invented 10.0.2.15 with the interface freshly added and empty.
-if grep -Eq "^live: address 10\.0\.2\.[0-9]+ mask 255\.255\.255\.0 server 10\.0\.2\.2$" "$REPORT"; then
-    pass "the address, mask and server address came from SLIRP's DHCP server"
+# THE LEASE CARRIES THE SERVER'S OWN NUMBERS, and on a real network that is a
+# shape rather than three literals:
+#
+#   * an address that is a host address on the mask that came with it.  The
+#     interface was freshly added and empty, so nothing in this stack could
+#     have produced one -- a zero, or the address it used to have, both fail.
+#   * a mask of contiguous ones.  The defect this catches is a stack that
+#     ignores DHCP option 1 and guesses the classful mask; on 192.168/16 that
+#     is /16 where the server said /24, and is_netmask() alone would not see
+#     it, so it is also checked against the mask the same server gave the same
+#     interface at boot.
+#   * a server address that is not zero and is on the leased subnet, which is
+#     DHCP option 54 having been read.  A stack that never stored the server
+#     identifier prints 0.0.0.0 and fails.
+#
+# A DHCP relay would put the server off the leased subnet and this row would
+# have to change; the lab wire has the server on it and says so here rather
+# than silently accepting either.
+LIVE_ADDR=$(field_after "live: address" 3)
+LIVE_MASK=$(field_after "live: address" 5)
+LIVE_SERVER=$(field_after "live: address" 7)
+
+if [ -z "$LIVE_ADDR" ]; then
+    fail "the allocation printed no address line at all"
+elif ! is_netmask "${LIVE_MASK:-}"; then
+    fail "the lease mask is not a netmask: ${LIVE_MASK:-nothing}"
+elif ! on_subnet "$LIVE_ADDR" "$LIVE_MASK"; then
+    fail "the leased $LIVE_ADDR is not a host address on $LIVE_MASK"
+elif live_only && [ -n "$LEASEMASK" ] && [ "$LIVE_MASK" != "$LEASEMASK" ]; then
+    fail "the same server gave this interface $LEASEMASK at boot and $LIVE_MASK now"
+elif [ "${LIVE_SERVER:-0.0.0.0}" = "0.0.0.0" ]; then
+    fail "the lease carries no server address, DHCP option 54 was not stored"
+elif ! same_subnet "$LIVE_SERVER" "$LIVE_ADDR" "$LIVE_MASK"; then
+    fail "the server $LIVE_SERVER is not on the subnet it leased, $LIVE_ADDR/$LIVE_MASK"
 else
-    fail "the lease does not carry the server's own numbers"
+    pass "the lease carries the server's own numbers: $LIVE_ADDR mask $LIVE_MASK from $LIVE_SERVER"
 fi
 
 # aam_RouterTable is filled from DHCP option 3, which the server only sends
-# because the client asked for it in its parameter request list.
-if grep -q "^live: router\[0\] 10.0.2.2, the server offered one" "$REPORT"; then
-    pass "aam_RouterTable carries the router the server offered"
-else
+# because the client asked for it in its parameter request list.  Which router
+# it is cannot be predicted; that there is one, and that it is an address the
+# leased interface can reach without a router, can.
+LIVE_ROUTER=$(field_after "live: router[0]" 3)
+LIVE_ROUTER="${LIVE_ROUTER%,}"
+
+if [ -z "$LIVE_ROUTER" ] || grep -q "^live: router\[0\] .*, none offered" "$REPORT"; then
     fail "no router came back, the parameter request list is not being sent"
+elif [ "$LIVE_ROUTER" = "0.0.0.0" ]; then
+    fail "aam_RouterTable[0] is zero, option 3 was parsed into nothing"
+elif ! same_subnet "$LIVE_ROUTER" "$LIVE_ADDR" "$LIVE_MASK"; then
+    fail "the offered router $LIVE_ROUTER is not on the leased subnet $LIVE_ADDR/$LIVE_MASK"
+else
+    pass "aam_RouterTable carries $LIVE_ROUTER, a router on the leased subnet"
 fi
 
 if grep -Eq "^live: lease expires day [1-9][0-9]+ " "$REPORT"; then
@@ -782,8 +930,8 @@ fi
 
 # ---- the two paths a working DHCP server hides ---------------------------
 #
-# AAMR_Timeout and AAMR_Aborted cannot be reached while SLIRP is answering in
-# four tenths of a second: neither the deadline nor the abort window ever
+# AAMR_Timeout and AAMR_Aborted cannot be reached while a server is answering
+# in a fraction of a second: neither the deadline nor the abort window ever
 # opens.  The probe takes the interface DOWN first, so DISCOVER goes nowhere
 # and the worker runs to its own deadline, the only path that proves the
 # deadline exists, and the only one that releases a lease never granted.

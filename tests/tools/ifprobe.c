@@ -697,6 +697,7 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
     UBYTE          mac_after[8];
     struct TagItem tags[5];
     BOOL           present;
+    ULONG          addr_before;
     ULONG          mask_before;
     ULONG          mask_after;
     char           mask_text[16];
@@ -708,6 +709,7 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
     p_poison(mac_before, sizeof(mac_before));
     p_poison(mac_after, sizeof(mac_after));
 
+    addr_before = p_read_address(base, name, IFQ_Address);
     mask_before = p_read_address(base, name, IFQ_NetMask);
 
     tags[0].ti_Tag  = IFQ_HardwareAddress;
@@ -838,11 +840,17 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
                           : ", STILL ADDRESSED, WRONG"));
     }
 
-    /* ---- and it works again ----------------------------------------------- */
+    /* ---- and it works again -----------------------------------------------
+     *
+     * The address it had, not a literal.  This was 10.0.2.15, SLIRP's first
+     * lease, which on any other wire puts the interface on a subnet the LAN
+     * does not carry for the rest of the run.
+     */
     {
-        static char addr_text[16] = "10.0.2.15";
-        char        mask_arg[16];
+        char addr_text[16];
+        char mask_arg[16];
 
+        p_dotted(addr_before, addr_text);
         p_dotted(mask_before, mask_arg);
 
         tags[0].ti_Tag  = IFC_Address;
@@ -858,9 +866,10 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
         Printf((CONST_STRPTR)"reconfigure and bring up: rc %ld (errno %ld)\n",
                rc, p_errno(base));
 
-        Printf((CONST_STRPTR)"state after: %ld, address %ld%s\n",
+        p_dotted(p_read_address(base, name, IFQ_Address), mask_text);
+        Printf((CONST_STRPTR)"state after: %ld, address %s, wanted %s%s\n",
                p_read_long(base, name, IFQ_State),
-               (LONG)p_read_address(base, name, IFQ_Address),
+               (LONG)mask_text, (LONG)addr_text,
                (LONG)((p_read_long(base, name, IFQ_State) == SM_Up)
                           ? ", up again, correctly" : ", STILL DOWN, WRONG"));
     }
