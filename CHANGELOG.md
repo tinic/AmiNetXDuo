@@ -9,6 +9,7 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The third machine reached over IPv6 no longer fails silently. The table of known destinations held four entries and never gave one up, and two were spent before any command ran, on the answers sent to the network's own routers. A guest that pinged twelve addresses put two on the wire, with nothing reported for the other ten
 - `iperf -u` with a rate limit runs to completion on a fast machine. The sender waited for the socket to become writable, which a datagram socket always is, so it spun instead of pacing and the run gave up saying the clock had stopped. An A1200 was slow enough to stay inside the limit; an A3000 was not
 
 ## 0.21.2
