@@ -7,7 +7,7 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
-## Unreleased
+## 0.21.2
 
 - A lost outbound segment is recovered without waiting out a full second. A request that fits in one or two segments can never draw the three duplicate acknowledgements a fast retransmit needs, so every loss cost a 1 s timeout; a tail probe now recovers it in 200-899 ms. Over a link losing 10% of what this machine sends, a run of 90 fetches went from 11.7 s to 7.4 s, and the one-second timeouts from 34 to 7
 - Reading over a link that loses packets no longer collapses. Half a percent of loss cost seven eighths of the read rate, because the acknowledgment threshold only ever climbed and a connection that lost a segment fell onto a 200 ms timer for the rest of its life. Measured on an emulated A1200 with an a2065: 554 KB/s before, 3796 after
