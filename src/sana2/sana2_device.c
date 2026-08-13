@@ -408,20 +408,62 @@ LONG ami_sana2_offline(AmiSana2If *iface)
 
 /* ---------------------------------------------------------------- multicast */
 
+/*
+ * The bucket an address lands in on a DP8390-class receive filter: the top six
+ * bits of the CRC-32 of the six address bytes. Every NE2000 derivative hashes
+ * this way, so neither the driver nor we have any freedom in it.
+ */
+static UBYTE ami_sana2_mcast_bucket(const UBYTE *addr)
+{
+    ULONG crc = 0xFFFFFFFFUL;
+    WORD  i;
+    WORD  j;
+
+    for (i = 0; i < 6; i++)
+    {
+        UBYTE b = addr[i];
+
+        for (j = 0; j < 8; j++)
+        {
+            ULONG carry = ((crc & 0x80000000UL) ? 1UL : 0UL) ^ (ULONG)(b & 1);
+
+            crc <<= 1;
+            b >>= 1;
+            if (carry != 0)
+            {
+                crc = (crc ^ 0x04C11DB6UL) | carry;
+            }
+        }
+    }
+
+    return (UBYTE)(crc >> 26);
+}
+
+/*
+ * One address per bucket, all of the form 80:00:00:00:00:xx. Bit 7 of the
+ * first octet is what the X-Surf drivers demand, and the group bit is clear so
+ * none of these can ever deliver a unicast frame: the hash filter is only
+ * consulted for frames that already have the group bit set.
+ */
+static const UBYTE ami_sana2_mcast_alias[64] =
+{
+    0x89, 0x09, 0xC9, 0x49, 0x82, 0x02, 0xC2, 0x42,
+    0x00, 0x80, 0x40, 0xC0, 0x0B, 0x8B, 0x4B, 0xCB,
+    0x41, 0xC1, 0x01, 0x81, 0x4A, 0xCA, 0x0A, 0x8A,
+    0xC8, 0x48, 0x88, 0x08, 0xC3, 0x43, 0x83, 0x03,
+    0xC6, 0x46, 0x86, 0x06, 0xCD, 0x4D, 0x8D, 0x0D,
+    0x4F, 0xCF, 0x0F, 0x8F, 0x44, 0xC4, 0x04, 0x84,
+    0x0E, 0x8E, 0x4E, 0xCE, 0x05, 0x85, 0x45, 0xC5,
+    0x87, 0x07, 0xC7, 0x47, 0x8C, 0x0C, 0xCC, 0x4C
+};
+
 LONG ami_sana2_multicast(AmiSana2If *iface, UWORD command,
                          ULONG addr_msw, ULONG addr_lsw)
 {
     struct IOSana2Req req = iface->templ;
     LONG              err;
 
-    /*
-     * The spec puts the multicast address in ios2_SrcAddr for both commands.
-     *
-     * x-surf-100.device 1.16 answers S2ERR_BAD_ADDRESS/S2WERR_BAD_MULTICAST to
-     * every join, and no address we could pass would change that: it tests bit
-     * 7 of ios2_SrcAddr[0] where the Ethernet group bit is bit 0. See
-     * docs/RESEARCH.md 44.9, there is nothing to work around here.
-     */
+    /* The spec puts the multicast address in ios2_SrcAddr for both commands. */
     req.ios2_SrcAddr[0] = (UBYTE)(addr_msw >> 8);
     req.ios2_SrcAddr[1] = (UBYTE)(addr_msw);
     req.ios2_SrcAddr[2] = (UBYTE)(addr_lsw >> 24);
@@ -430,6 +472,45 @@ LONG ami_sana2_multicast(AmiSana2If *iface, UWORD command,
     req.ios2_SrcAddr[5] = (UBYTE)(addr_lsw);
 
     err = ami_sana2_command(iface, &req, command);
+
+    /*
+     * x-surf.device and x-surf-100.device 1.16 test bit 7 of ios2_SrcAddr[0]
+     * where the Ethernet group bit is bit 0, so they refuse every address a
+     * real group has and the hash filter stays empty. IPv6 then fails in a way
+     * that looks like nothing at all: the router solicits the guest at its
+     * solicited-node address, the card drops it, and every off-link answer is
+     * discarded one hop away while ping and SLAAC keep working. What the card
+     * is being asked for is a bucket and not an address, so ask for the same
+     * bucket with an address the driver will take. Whatever else that bucket
+     * lets in the IP layer drops, which is what a hash filter always required.
+     */
+    if (err == (LONG)S2ERR_BAD_ADDRESS
+        && req.ios2_WireError == (ULONG)S2WERR_BAD_MULTICAST
+        && (req.ios2_SrcAddr[0] & 0x80) == 0)
+    {
+        struct IOSana2Req alias  = iface->templ;
+        UBYTE             bucket = ami_sana2_mcast_bucket(req.ios2_SrcAddr);
+
+        alias.ios2_SrcAddr[0] = 0x80;
+        alias.ios2_SrcAddr[1] = 0x00;
+        alias.ios2_SrcAddr[2] = 0x00;
+        alias.ios2_SrcAddr[3] = 0x00;
+        alias.ios2_SrcAddr[4] = 0x00;
+        alias.ios2_SrcAddr[5] = ami_sana2_mcast_alias[bucket];
+
+        err = ami_sana2_command(iface, &alias, command);
+        if (err == 0)
+        {
+            AMI_DEBUG("sana2: %s took bucket %ld as 80:00:00:00:00:%02lx",
+                      iface->device, (long)bucket,
+                      (unsigned long)alias.ios2_SrcAddr[5]);
+        }
+        else
+        {
+            req = alias;
+        }
+    }
+
     if (err != 0)
     {
         AMI_WARN("sana2: multicast cmd %ld failed (%ld/%ld)", (long)command,
