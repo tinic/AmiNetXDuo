@@ -20,6 +20,9 @@
 #   toolchain    resolve, or download, the pinned m68k-amigaos-gcc
 #   host         the parser / mbuf / BPF VM / crypto68k vector tests, ctest
 #   host32       the mDNS and TLS-crypto fuzz drivers, which need a 32-bit build
+#   sanitize     the whole host tier again, 64-bit and 32-bit, built under
+#                ASan+UBSan with leaks fatal.  AMINETXDUO_SANITIZE=1 runs it,
+#                the way analyze is gated; CI sets it.
 #   cross        every build configuration, warnings fatal
 #   web          httpd's terminal page still matches the TypeScript it is
 #                generated from, and the vendored xterm.js is untouched
@@ -408,6 +411,111 @@ stage_host32() {
     note "$n 32-bit fuzz test(s) registered"
     [ "${n:-0}" -ge "$want" ] || {
         fail "host32 registered $n tests, expected $want"; return 1; }
+}
+
+# -------------------------------------------------------------- sanitize ----
+
+# The host tier again, both widths, built under -fsanitize=address,undefined
+# with recovery off and leaks fatal.  The target cannot run a sanitizer, so
+# this is the only place a stray write in the portable stack sources faults
+# instead of corrupting another task.  Gated like analyze: off unless
+# AMINETXDUO_SANITIZE=1, and CI sets it, so nothing lands unsanitized.
+
+stage_sanitize() {
+    if [ "${AMINETXDUO_SANITIZE:-0}" != "1" ]; then
+        hr "sanitizers (host)"
+        skip "sanitize: off by default, AMINETXDUO_SANITIZE=1 runs it (CI does)"
+        return 0
+    fi
+
+    hr "sanitizers (host, 64-bit)"
+
+    # Leak reports fail the run wherever the runtime has a detector.  Linux
+    # ASan turns LSan on by itself; macOS carries the detector but off, and on
+    # some Apple toolchains it is absent entirely, so probe rather than assume:
+    # asking for a detector that is not there aborts every test at startup.
+    local leakopt="" probe="$BUILD/sanprobe"
+    if echo 'int main(void){return 0;}' > "$probe.c" &&
+       "${CC:-cc}" -fsanitize=address "$probe.c" -o "$probe" 2>/dev/null &&
+       ASAN_OPTIONS=detect_leaks=1 "$probe" >/dev/null 2>&1; then
+        leakopt="detect_leaks=1"
+    else
+        case "$(uname -s)" in
+            Linux) leakopt="detect_leaks=1" ;;   # on by default anyway
+            *) skip "sanitize: no leak detector in this host's ASan runtime,\
+ leaks were NOT checked here (the Linux runner checks them)" ;;
+        esac
+    fi
+    export ASAN_OPTIONS="${leakopt:+$leakopt:}${ASAN_OPTIONS:-}"
+    export UBSAN_OPTIONS="print_stacktrace=1:${UBSAN_OPTIONS:-}"
+
+    cmake -S . -B "$BUILD/san" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DAMINETXDUO_SANITIZE=ON \
+        -DCMAKE_PROJECT_INCLUDE="$ROOT/cmake/ci-warnings.cmake" \
+        > "$BUILD/san-configure.log" 2>&1 || {
+            tail -30 "$BUILD/san-configure.log"; fail "sanitize configure"; return 1; }
+    note "$(grep -o 'sanitize: .*' "$BUILD/san-configure.log" | head -1)"
+
+    cmake --build "$BUILD/san" --parallel "$JOBS" \
+        --target "${HOST_TEST_TARGETS[@]}" || { fail "sanitize build"; return 1; }
+
+    ( cd "$BUILD/san" && ctest --output-on-failure ) || { fail "sanitize ctest"; return 1; }
+
+    # Exact, both directions, for stage_host's reason: a gate that drifts
+    # below what it guards has already failed.
+    local n want
+    want="$HOST_TESTS_EXPECTED"
+    n=$( (cd "$BUILD/san" && ctest -N 2>/dev/null | sed -n 's/^Total Tests: //p') )
+    note "$n sanitized tests ran (expected $want)"
+    if [ "${n:-0}" -ne "$want" ]; then
+        fail "sanitize registered $n tests, expected $want"
+        return 1
+    fi
+
+    hr "sanitizers (host, 32-bit)"
+
+    # m68k is ILP32, and the host32 drivers exist for the type-width
+    # assumptions a 64-bit build cannot represent, so they get sanitized too.
+    if ! (echo 'int main(void){return 0;}' > "$BUILD/m32probe.c" &&
+          "${CC:-cc}" -m32 "$BUILD/m32probe.c" -o "$BUILD/m32probe") 2>/dev/null; then
+        skip "sanitize32: no -m32 on this host (needs gcc-multilib on\
+ Debian/Ubuntu), the mDNS and TLS-crypto drivers were not sanitized here"
+        return 0
+    fi
+
+    cmake -S . -B "$BUILD/san32" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DAMINETXDUO_SANITIZE=ON \
+        -DCMAKE_C_FLAGS=-m32 -DCMAKE_CXX_FLAGS=-m32 -DCMAKE_EXE_LINKER_FLAGS=-m32 \
+        > "$BUILD/san32-configure.log" 2>&1 || {
+            tail -30 "$BUILD/san32-configure.log"; fail "sanitize32 configure"; return 1; }
+
+    # The configure degrades to UBSan alone where -m32 has no ASan runtime.
+    # That is a recorded gap, not a quiet one.
+    local mode
+    mode=$(grep -o 'sanitize: .*' "$BUILD/san32-configure.log" | head -1)
+    note "$mode"
+    case "$mode" in
+        *undefined\ only*) skip "sanitize32: no 32-bit ASan runtime on this\
+ host, the 32-bit tier ran under UBSan alone" ;;
+    esac
+
+    cmake --build "$BUILD/san32" --parallel "$JOBS" \
+        --target "${HOST32_TEST_TARGETS[@]}" \
+        || { fail "sanitize32 build"; return 1; }
+
+    ( cd "$BUILD/san32" && ctest --output-on-failure -R 'mdns|tls_crypto' ) \
+        || { fail "sanitize32 ctest"; return 1; }
+
+    local n32 want32
+    want32=$(( ${#HOST32_TEST_TARGETS[@]} * 2 ))
+    n32=$( (cd "$BUILD/san32" && ctest -N -R 'mdns|tls_crypto' 2>/dev/null | sed -n 's/^Total Tests: //p') )
+    note "$n32 sanitized 32-bit tests ran (expected $want32)"
+    if [ "${n32:-0}" -ne "$want32" ]; then
+        fail "sanitize32 registered $n32 tests, expected $want32"
+        return 1
+    fi
 }
 
 # ----------------------------------------------------------------- cross ----
@@ -1104,6 +1212,7 @@ for s in "${WANT[@]}"; do
         toolchain)   [ -n "${AMIGA_TOOLCHAIN_ROOT:-}" ] || stage_toolchain ;;
         host)        stage_host || true ;;
         host32)      stage_host32 || true ;;
+        sanitize)    stage_sanitize || true ;;
         # `|| true` on every stage, cross included: bash suppresses `set -e`
         # inside a function called that way, which is what keeps one unguarded
         # command in a stage from taking the summary down with it.
@@ -1132,6 +1241,10 @@ note "stages: ${STAGES_RUN[*]}"
 case " ${STAGES_RUN[*]} " in
     *" analyze "*) ;;
     *) note "analyze NOT RUN, AMINETXDUO_ANALYZE=1 tools/ci.sh analyze" ;;
+esac
+case " ${STAGES_RUN[*]} " in
+    *" sanitize "*) ;;
+    *) note "sanitize NOT RUN, AMINETXDUO_SANITIZE=1 tools/ci.sh sanitize" ;;
 esac
 if [ ${#SKIPPED[@]} -ne 0 ]; then
     printf '\033[33m%d skipped:\033[0m\n' "${#SKIPPED[@]}"
