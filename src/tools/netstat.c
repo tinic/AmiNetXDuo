@@ -164,11 +164,18 @@ static VOID show_memory(const ToolStats *st)
  * hundreds of microseconds says the tick task was not dispatched, rather than
  * that it was slow. Anything but zero on the last line is a defect.
  *
+ * The stall is the longest gap between two wakeups, whether or not it clipped,
+ * so it is non-zero on a healthy machine and is what the skew peak above it
+ * has to be read against: a peak worth no more than that stall at 20 ms a tick
+ * is one late wakeup, and a larger one accumulated across several.
+ *
  * The skew line is the timers, not the clock: tx_time_get() comes from the
  * E-Clock, so a tick the wheel never got made timers late and did not lose any
  * time. The peak counts lateness that was subsequently made good, so it moves
- * on a machine where nothing was ever clipped. Deferred ticks reach the wheel
- * late; lost ones never reach it.
+ * on a machine where nothing was ever clipped. Its floor is one wakeup's worth
+ * of ticks, 2 on the VBlank source, because a wakeup is sampled owing every
+ * period since the last one. Deferred ticks reach the wheel late; lost ones
+ * never reach it.
  *
  * Memory first, then the scheduler.  The one function both routes print
  * through, -h off the published mark and -s -h through the library, so the

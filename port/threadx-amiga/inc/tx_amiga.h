@@ -182,10 +182,17 @@ typedef struct TX_AMIGA_TICK_STATS_STRUCT
        by Profile WATCH over the divide helper.  tx_amiga_uptime_ms() below
        puts the two together for whoever actually asks. */
     ULONG   tx_amiga_tick_uptime_rem;
-    /* The worst stall ever seen, kept because only the first few are logged
-       and a machine that then freezes never flushes the log anyway. A priority
-       20 task not dispatched for this long, next to a service cost in the
-       hundreds of microseconds, means something else held the machine. */
+    /* The longest gap between two wakeups, and what the wakeup before it
+       spent, kept because only the first few are logged and a machine that
+       then freezes never flushes the log anyway. A priority 20 task not
+       dispatched for this long, next to a service cost in the hundreds of
+       microseconds, means something else held the machine.
+
+       Every wakeup, not only a clipped one. The clip was once the only writer,
+       which left these at 0 on every machine healthy enough never to clip
+       while tx_amiga_tick_skew_peak below said the wheel had been late. A peak
+       of N ticks and a stall of N tick periods is one late wakeup; a peak
+       larger than the stall accounts for is accumulation across several. */
     ULONG   tx_amiga_tick_worst_stall_ms;
     ULONG   tx_amiga_tick_worst_service_us;
     /* Catch-up bursts that hit TX_AMIGA_TIMER_BUDGET_MS and gave the machine
@@ -199,7 +206,15 @@ typedef struct TX_AMIGA_TICK_STATS_STRUCT
        is not in this, it comes from the E-Clock and is true regardless, so
        this is a measure of how late timers are running and of nothing else.
        The peak is sampled before a backlog is worked off, so it moves on a
-       machine where nothing was ever clipped or lost. */
+       machine where nothing was ever clipped or lost.
+
+       The peak has a floor of one wakeup's worth of ticks, because a wakeup is
+       sampled owing everything that elapsed since the last one: on the VBlank
+       source that is TX_AMIGA_VBLANK_DIVIDER, 2 on a stock build, so a healthy
+       PAL machine reads 2 having never been late at all. It is not subtracted:
+       what one wakeup owes depends on the source that woke it, and on the
+       timer.device fallback it is 1. tx_amiga_tick_worst_stall_ms above is the
+       figure that says whether a peak is one wakeup or several. */
     ULONG   tx_amiga_tick_skew;
     ULONG   tx_amiga_tick_skew_peak;
 } TX_AMIGA_TICK_STATS;
@@ -234,6 +249,40 @@ static __inline ULONG tx_amiga_uptime_ms(const TX_AMIGA_TICK_STATS *t)
     }
     return(t -> tx_amiga_tick_uptime_ms +
            ((t -> tx_amiga_tick_uptime_rem * 1000UL) / hz));
+}
+
+
+/*
+ * E-Clock ticks to milliseconds and to microseconds.
+ *
+ * eclock_per_ms is the E-Clock rate divided by a thousand, which every caller
+ * already holds; taking the rate instead would put a multiply by 1000 in front
+ * of the millisecond conversion and wrap it above six seconds.
+ */
+static __inline ULONG tx_amiga_eclock_ms(ULONG ec, ULONG eclock_per_ms)
+{
+    if (eclock_per_ms == 0UL)
+    {
+        return(0UL);
+    }
+    return(ec / eclock_per_ms);
+}
+
+static __inline ULONG tx_amiga_eclock_us(ULONG ec, ULONG eclock_per_ms)
+{
+    if (eclock_per_ms == 0UL)
+    {
+        return(0UL);
+    }
+
+    /* ec * 1000 wraps a ULONG above about six seconds' worth, which is longer
+       than anything measured in microseconds is worth reading; past that,
+       divide first and lose the last three digits instead of the answer. */
+    if (ec >= 4000000UL)
+    {
+        return((ec / eclock_per_ms) * 1000UL);
+    }
+    return((ec * 1000UL) / eclock_per_ms);
 }
 
 

@@ -775,6 +775,7 @@ ULONG                measured;
 ULONG                delta;
 ULONG                service;
 ULONG                last_service;
+ULONG                worst_delta;    /* longest gap between wakeups, E-Clock  */
 ULONG                rate_chz;
 ULONG                unit;
 ULONG                i;
@@ -1024,6 +1025,7 @@ UINT                 armed;
     frac         =  0UL;
     backlog      =  0UL;
     last_service =  0UL;
+    worst_delta  =  0UL;
     ReadEClock(&now);
     last_lo =  now.ev_lo;
     up_lo    =  now.ev_lo;
@@ -1206,6 +1208,26 @@ UINT                 armed;
                     backlog + _tx_amiga_tick.tx_amiga_tick_lost;
             }
 
+            /* The same moment in wall-clock terms: how long the machine went
+               without running this task, and what the wakeup before it spent,
+               which is the pair that tells a slow tick from an undispatched
+               one.  Kept for every wakeup, not just a clipped one; the clip
+               was the only writer, so a machine that never clips -- which is
+               every healthy one -- reported nothing beside a skew peak that
+               does move.
+
+               Compared raw, so an ordinary wakeup costs a compare against a
+               register: the divide runs only when a new worst is set, which is
+               a handful of times during bring-up and then not again. */
+            if (delta > worst_delta)
+            {
+                worst_delta =  delta;
+                _tx_amiga_tick.tx_amiga_tick_worst_stall_ms =
+                    tx_amiga_eclock_ms(delta, eclock_per_ms);
+                _tx_amiga_tick.tx_amiga_tick_worst_service_us =
+                    tx_amiga_eclock_us(last_service, eclock_per_ms);
+            }
+
             if (backlog > (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP)
             {
 
@@ -1220,16 +1242,6 @@ UINT                 armed;
                     backlog - (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP;
                 _tx_amiga_tick.tx_amiga_tick_clipped++;
 
-                /* Kept for every stall, not just the three that get logged. */
-                if ((ULONG) (delta / eclock_per_ms) >
-                    _tx_amiga_tick.tx_amiga_tick_worst_stall_ms)
-                {
-                    _tx_amiga_tick.tx_amiga_tick_worst_stall_ms =
-                        (ULONG) (delta / eclock_per_ms);
-                    _tx_amiga_tick.tx_amiga_tick_worst_service_us =
-                        (last_service * 1000UL) / eclock_per_ms;
-                }
-
                 if (_tx_amiga_tick.tx_amiga_tick_clipped <= 3UL)
                 {
                     /* The previous wakeup's service cost is in the message
@@ -1242,10 +1254,10 @@ UINT                 armed;
                     ami_log(AMI_LOG_WARN,
                             "tick: %ld ms since the last wakeup, wheel skips %ld "
                             "of %ld owed (cap %ld, previous service %ld us)",
-                            (LONG) (delta / eclock_per_ms),
+                            (LONG) tx_amiga_eclock_ms(delta, eclock_per_ms),
                             (LONG) (backlog - (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP),
                             (LONG) backlog, (LONG) TX_AMIGA_TIMER_MAX_CATCHUP,
-                            (LONG) ((last_service * 1000UL) / eclock_per_ms));
+                            (LONG) tx_amiga_eclock_us(last_service, eclock_per_ms));
                 }
 
                 backlog =  (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP;
