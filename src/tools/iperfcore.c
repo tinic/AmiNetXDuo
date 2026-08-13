@@ -34,6 +34,13 @@ enum
 /* An unpaced sender still has to come back to the caller. */
 #define IPERF_SEND_BURST    64
 
+/*
+ * How long a sender with nothing to do sleeps.  Short, because on a datagram
+ * socket there is no event to wake it: it is a sleep and not a wait, and one
+ * that clears in a millisecond should not be waited out for twenty.
+ */
+#define IPERF_PACE_MICROS   2000UL
+
 /* iperf 2 repeats its end-of-test datagram this many times before giving up. */
 #define IPERF_FIN_TRIES     10
 #define IPERF_FIN_WAIT_MS   250UL
@@ -298,6 +305,8 @@ LONG iperf_begin(IperfRun *run, struct Library *sb, const IperfPlan *plan,
             iperf_fail(run, "the system timer is not running", 0);
             return -1;
         }
+
+        run->t_guard = b;
     }
 
     if (plan->kbytes != 0)
@@ -351,6 +360,30 @@ static LONG iperf_wait(IperfRun *run, LONG sock, BOOL forwrite, ULONG micros)
     return tool_sock_select(run->sb, sock + 1,
                             forwrite ? NULL : &set,
                             forwrite ? &set : NULL, &tv);
+}
+
+/*
+ * The same wait for a sender, on the side that can actually block it.
+ *
+ * select() answers "writable" for a DATAGRAM socket at once, and goes on
+ * answering it while the driver queue is full -- a UDP send fails with
+ * EWOULDBLOCK long before anything makes the socket unwritable.  Waiting for
+ * writability there does not wait, it spins, and the run then goes round the
+ * loop as fast as the machine can: the same three-second `iperf -u -b 2000`
+ * ran 30,000 slices in 2.5 s on an A3000 and stayed well inside them on an
+ * A1200.  Waiting on the read side does sleep, and still wakes early if the
+ * far end says anything.  A stream socket is the other way round: writable
+ * means the buffer drained, which is exactly the wake-up wanted.
+ */
+static LONG iperf_wait_send(IperfRun *run, ULONG micros)
+{
+    if (!iperf_udp(run))
+        return iperf_wait(run, run->sock, TRUE, micros);
+
+    if (micros > IPERF_PACE_MICROS)
+        micros = IPERF_PACE_MICROS;
+
+    return iperf_wait(run, run->sock, FALSE, micros);
 }
 
 static VOID iperf_slice_connect(IperfRun *run)
@@ -487,7 +520,7 @@ static VOID iperf_slice_send(IperfRun *run)
     {
         /* Ahead of the asked-for rate.  Give the slice back rather than
            spinning on the clock. */
-        (VOID)iperf_wait(run, run->sock, TRUE, 2000UL);
+        (VOID)iperf_wait_send(run, IPERF_PACE_MICROS);
         return;
     }
 
@@ -518,7 +551,7 @@ static VOID iperf_slice_send(IperfRun *run)
                 if (run->plan.dir == IPERF_UDP_TX)
                     run->seq--;     /* not sent, so not an id anyone saw    */
 
-                (VOID)iperf_wait(run, run->sock, TRUE, IPERF_SLICE_MICROS);
+                (VOID)iperf_wait_send(run, IPERF_SLICE_MICROS);
                 return;
             }
 
@@ -761,17 +794,34 @@ static VOID iperf_slice_report(IperfRun *run)
 LONG iperf_slice(IperfRun *run)
 {
     /*
-     * The bound that does not consult the clock.  Everything else here decides
-     * it has finished by comparing two readings, so a clock that stops
-     * advancing means a run that never ends: it would send until something
-     * killed it, and a caller with its output redirected would have an
-     * unbounded writer.  Counting slices cannot be fooled that way.
+     * The bound for a clock that has stopped.  Everything else here decides it
+     * has finished by comparing two readings, so a clock that stops advancing
+     * means a run that never ends: it would send until something killed it,
+     * and a caller with its output redirected would have an unbounded writer.
+     *
+     * Slices are the trigger and the clock is the authority.  Counting alone
+     * made the bound a property of the machine: the same three-second UDP send
+     * spent its 30,000 slices in 2.5 s on an A3000 and finished inside them on
+     * an A1200, so the A3000 was told its clock had stopped by the same clock
+     * that was printing a line a second.  A budget that runs out now reads the
+     * clock, and only a reading that has not moved since the last one ends the
+     * run -- which a stopped clock reaches one budget later and a running one
+     * never does.
      */
     if (run->state != ST_DONE && run->state != ST_FAILED
         && ++run->slices > run->slice_max)
     {
-        iperf_fail(run, "the clock stopped advancing", 0);
-        return IPERF_FAILED;
+        ULONG now = ami_millis();
+
+        run->slices = 0;
+
+        if (now == run->t_guard)
+        {
+            iperf_fail(run, "the clock stopped advancing", 0);
+            return IPERF_FAILED;
+        }
+
+        run->t_guard = now;
     }
 
     switch (run->state)

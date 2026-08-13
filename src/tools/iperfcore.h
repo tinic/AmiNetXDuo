@@ -96,15 +96,21 @@ typedef struct IperfRun
     UBYTE           pad;
 
     /*
-     * How many slices this run may take before it is declared stuck.  A
-     * measurement whose clock stops advancing would otherwise never reach its
-     * deadline and would send for ever -- which is not hypothetical: the
-     * host-side iperf 2.2.1 used to pin this protocol down wedged on a failed
-     * clock_nanosleep() and spun for seventeen hours.  A timing call that
-     * fails has to end the run with a diagnosis, not become a busy loop.
+     * How many slices this run may take before the clock is asked whether it
+     * is still moving.  A measurement whose clock stops advancing would never
+     * reach its deadline and would send for ever -- which is not
+     * hypothetical: the host-side iperf 2.2.1 used to pin this protocol down
+     * wedged on a failed clock_nanosleep() and spun for seventeen hours.  A
+     * timing call that fails has to end the run with a diagnosis, not become
+     * a busy loop.
+     *
+     * The count is the trigger and t_guard is the evidence: how fast a
+     * machine goes round the loop is not a measurement of anything, so the
+     * budget running out asks the clock rather than answering for it.
      */
     ULONG           slices;
     ULONG           slice_max;
+    ULONG           t_guard;        /* the clock when the budget last ran out */
 
     LONG            lsock;          /* listening socket, server directions  */
     LONG            sock;
