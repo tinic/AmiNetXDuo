@@ -99,7 +99,7 @@ PEER="${AMINETXDUO_FITZ_PEER:-}"
 # run that staged the server on one machine and pointed the guest at another
 # still exited 0, printing RESULT read FAILED beside a healthy RAM: control.
 PEER_ADDR="${AMINETXDUO_FITZ_PEER_ADDR:-}"
-PEER_DIR="${AMINETXDUO_FITZ_PEER_DIR:-/tmp/fitzbench-share}"
+PEER_DIR="${AMINETXDUO_FITZ_PEER_DIR:-}"
 PEER_BIN="${AMINETXDUO_FITZ_PEER_BIN:-\$HOME/fitzsrc/fitz-serve}"
 MODEL=A3000
 CPU=""
@@ -158,6 +158,13 @@ while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:aB:N:wl:L:G:E:" opt; do
            exit 2 ;;
     esac
 done
+
+# The share is per-port, as the server and its kill pattern already are.  One
+# fixed /tmp/fitzbench-share left two runs on two ports writing one
+# fitzbench.dat on the peer, and the second run's write truncated it under the
+# first run's read: `Read() gave 0 of 32768` mid-transfer on a clean link, with
+# the connection itself never closed or lost.
+PEER_DIR="${PEER_DIR:-/tmp/fitzbench-share-$PORT}"
 
 # NOT playhouse2, whatever its convenience: it is an LXC container on a veth, so
 # its SYN-ACK carries an uncomputed TX-offload checksum that no NIC ever fixes

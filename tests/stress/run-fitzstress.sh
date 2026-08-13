@@ -67,7 +67,7 @@ PEER="${AMINETXDUO_FITZ_PEER:-}"
 PEER_ADDR="${AMINETXDUO_FITZ_PEER_ADDR:-}"
 # $HOME, expanded on the PEER: /tmp there is a 2 GB tmpfs, and a run
 # of hours moves several gigabytes through the share.
-PEER_DIR="${AMINETXDUO_FITZ_PEER_DIR:-\$HOME/fitzstress-share}"
+PEER_DIR="${AMINETXDUO_FITZ_PEER_DIR:-}"
 MODEL=A3000
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 SECONDS_RUN=1800
@@ -112,6 +112,11 @@ while getopts "H:A:m:t:s:g:S:w:c:T:b:B:N:p:M:D:rk" opt; do
            exit 2 ;;
     esac
 done
+
+# Per-port, as the server and its kill pattern already are: one fixed share
+# left two concurrent runs writing one set of files on the peer, where the
+# second run's write truncates a file the first is still reading.
+PEER_DIR="${PEER_DIR:-\$HOME/fitzstress-share-$PORT}"
 
 [ -n "$PEER" ] && [ -n "$PEER_ADDR" ] || {
     echo "set -H user@host and -A addr (or AMINETXDUO_FITZ_PEER" \
