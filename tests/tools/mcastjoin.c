@@ -46,8 +46,52 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 
-#include <stdio.h>
 #include <string.h>
+
+/*
+ * No printf.  newlib's drags mathieeedoubbas.library in, and a probe that
+ * dies with "mathieeedoubbas.library failed to load" on a bare test drive
+ * reads as a fault in the thing being probed.  Same reason as
+ * tests/tcpdrill/tcpdrill.c.
+ */
+static VOID p_str(const char *s)
+{
+    if (s != NULL)
+        PutStr((CONST_STRPTR)s);
+}
+
+static VOID p_num(LONG v)
+{
+    char  buf[12];
+    int   i = (int)sizeof(buf) - 1;
+    ULONG u;
+
+    buf[i] = '\0';
+    if (v < 0)
+        u = (ULONG)(-v);
+    else
+        u = (ULONG)v;
+    do
+    {
+        buf[--i] = (char)('0' + (int)(u % 10u));
+        u /= 10u;
+    }
+    while (u != 0);
+    if (v < 0)
+        buf[--i] = '-';
+    p_str(&buf[i]);
+}
+
+static VOID p_hex2(UBYTE v)
+{
+    static const char hex[] = "0123456789abcdef";
+    char buf[3];
+
+    buf[0] = hex[(v >> 4) & 0xf];
+    buf[1] = hex[v & 0xf];
+    buf[2] = '\0';
+    p_str(buf);
+}
 
 #define SANA2_MAX_ADDR_BYTES    16
 
@@ -113,6 +157,7 @@ int main(int argc, char **argv)
     const char        *device = "anxnet.device";
     ULONG              unit   = 0;
     int                i;
+    int                opened;
     int                wrong  = 0;
     LONG               rc     = 0;
 
@@ -121,12 +166,10 @@ int main(int argc, char **argv)
 
     /* Amiga guest programs see argc == 1, so the arguments come from DOS. */
     {
-        static char line[128];
         struct RDArgs *rda;
         LONG   args[2] = { 0, 0 };
 
-        (VOID)line;
-        rda = ReadArgs("DEVICE/K,UNIT/K/N", args, NULL);
+        rda = ReadArgs((CONST_STRPTR)"DEVICE/K,UNIT/K/N", args, NULL);
         if (rda != NULL)
         {
             if (args[0] != 0)
@@ -136,12 +179,12 @@ int main(int argc, char **argv)
         }
         /* rda is freed at exit; the strings above point into it. */
         if (rda == NULL)
-            printf("note=could-not-parse-arguments\n");
+            p_str("note=could-not-parse-arguments\n");
 
         port = CreateMsgPort();
         if (port == NULL)
         {
-            printf("error=no-msgport\n");
+            p_str("error=no-msgport\n");
             return 20;
         }
 
@@ -149,25 +192,50 @@ int main(int argc, char **argv)
                                                    sizeof(struct IOSana2Req));
         if (req == NULL)
         {
-            printf("error=no-iorequest\n");
+            p_str("error=no-iorequest\n");
             DeleteMsgPort(port);
             return 20;
         }
 
         req->ios2_BufferManagement = buffer_tags;
 
-        if (OpenDevice((CONST_STRPTR)device, unit,
-                       (struct IORequest *)req, 0) != 0)
+        /*
+         * A bare name is looked up in DEVS: only.  Third-party card drivers
+         * live in DEVS:Networks, and exec does not look there, so the stack
+         * carries this same fallback (ami_sana2_open_device, and
+         * tools/sana2-stage.sh's note about it).
+         */
+        opened = (OpenDevice((CONST_STRPTR)device, unit,
+                             (struct IORequest *)req, 0) == 0);
+        if (!opened)
         {
-            printf("device=%s unit=%lu open=FAILED error=%ld\n",
-                   device, (unsigned long)unit,
-                   (long)(BYTE)req->ios2_Req.io_Error);
+            static char path[128];
+
+            strcpy(path, "DEVS:Networks/");
+            strncat(path, device, sizeof(path) - 20);
+            opened = (OpenDevice((CONST_STRPTR)path, unit,
+                                 (struct IORequest *)req, 0) == 0);
+        }
+
+        if (!opened)
+        {
+            p_str("device=");
+            p_str(device);
+            p_str(" unit=");
+            p_num((LONG)unit);
+            p_str(" open=FAILED error=");
+            p_num((LONG)(BYTE)req->ios2_Req.io_Error);
+            p_str("\n");
             DeleteIORequest((struct IORequest *)req);
             DeleteMsgPort(port);
             return 10;
         }
 
-        printf("device=%s unit=%lu open=ok\n", device, (unsigned long)unit);
+        p_str("device=");
+        p_str(device);
+        p_str(" unit=");
+        p_num((LONG)unit);
+        p_str(" open=ok\n");
 
         for (i = 0; i < NCASES; i++)
         {
@@ -188,18 +256,34 @@ int main(int argc, char **argv)
             wire = req->ios2_WireError;
             ok   = (err == 0);
 
-            printf("addr=%02x:%02x:%02x:%02x:%02x:%02x name=%s "
-                   "group_bit=%d bit7=%d error=%ld wire=%lu accepted=%s "
-                   "expected=%s %s\n",
-                   cases[i].addr[0], cases[i].addr[1], cases[i].addr[2],
-                   cases[i].addr[3], cases[i].addr[4], cases[i].addr[5],
-                   cases[i].name,
-                   cases[i].addr[0] & 1,
-                   (cases[i].addr[0] & 0x80) ? 1 : 0,
-                   (long)err, (unsigned long)wire,
-                   ok ? "yes" : "no",
-                   cases[i].want_ok ? "yes" : "no",
-                   (ok == cases[i].want_ok) ? "ok" : "WRONG");
+            {
+                int b;
+
+                p_str("addr=");
+                for (b = 0; b < 6; b++)
+                {
+                    if (b != 0)
+                        p_str(":");
+                    p_hex2(cases[i].addr[b]);
+                }
+                p_str(" name=");
+                p_str(cases[i].name);
+                p_str(" group_bit=");
+                p_num((LONG)(cases[i].addr[0] & 1));
+                p_str(" bit7=");
+                p_num((LONG)((cases[i].addr[0] & 0x80) ? 1 : 0));
+                p_str(" error=");
+                p_num(err);
+                p_str(" wire=");
+                p_num((LONG)wire);
+                p_str(" accepted=");
+                p_str(ok ? "yes" : "no");
+                p_str(" expected=");
+                p_str(cases[i].want_ok ? "yes" : "no");
+                p_str(" ");
+                p_str((ok == cases[i].want_ok) ? "ok" : "WRONG");
+                p_str("\n");
+            }
 
             if (ok != cases[i].want_ok)
                 wrong++;
@@ -213,8 +297,13 @@ int main(int argc, char **argv)
             }
         }
 
-        printf("cases=%d wrong=%d verdict=%s\n", NCASES, wrong,
-               (wrong == 0) ? "PASS" : "FAIL");
+        p_str("cases=");
+        p_num((LONG)NCASES);
+        p_str(" wrong=");
+        p_num((LONG)wrong);
+        p_str(" verdict=");
+        p_str((wrong == 0) ? "PASS" : "FAIL");
+        p_str("\n");
 
         rc = (wrong == 0) ? 0 : 10;
 
