@@ -850,7 +850,10 @@ static void sc_modL(unsigned char r[32], int64_t x[64])
         for (j = i - 32; j < i - 12; j++) {
             x[j] += carry - 16 * x[i] * sc_L[j - (i - 32)];
             carry = (x[j] + 128) >> 8;
-            x[j] -= carry << 8;
+            /* carry * 256, not carry << 8: the carry is signed and can be
+               negative here, and a left shift of a negative value is
+               undefined before C23.  Same code out of the compiler. */
+            x[j] -= carry * 256;
         }
         x[j] += carry;
         x[i] = 0;

@@ -186,6 +186,14 @@ if(NOT CMAKE_CROSSCOMPILING)
         AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h"
         _nx_ip_checksum_compute=n68k_checksum_reference)
 
+    # The differential runs both implementations at every start alignment, odd
+    # ones included.  Ours carries N68K_NO_SANITIZE_ALIGNMENT per function; the
+    # vendored reference cannot (submodule), so UBSan's alignment check alone
+    # is dropped for that one file, in this test target only.
+    set_source_files_properties(
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_checksum_compute.c"
+        PROPERTIES COMPILE_OPTIONS "-fno-sanitize=alignment")
+
     # The receive verifier, on the host, because its whole job is a decision
     # about an IPv4 frame in memory and that is steppable here and not in an
     # emulator.

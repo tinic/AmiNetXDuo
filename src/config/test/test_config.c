@@ -1215,7 +1215,7 @@ static void test_resolver(void)
         expect[199] = 'z';
         expect[200] = '\0';
 
-        sprintf(line, "domain %s\n", expect);
+        snprintf(line, sizeof(line), "domain %s\n", expect);
 
         memset(&res, 0, sizeof(res));
         buf = dup_text(line);
@@ -1333,7 +1333,7 @@ static void test_search_domains(void)
 
         for (i = 0; i < AMI_CFG_MAX_SEARCH + 3; i++)
         {
-            sprintf(name, "d%d.test", i);
+            snprintf(name, sizeof(name), "d%d.test", i);
             (void)ami_config_search_offer(&res, name);
         }
     }

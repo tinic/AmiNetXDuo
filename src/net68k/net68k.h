@@ -19,6 +19,16 @@
 extern "C" {
 #endif
 
+/* The host differential test drives these loops at every start alignment,
+   odd ones included, because the 68020+ takes a misaligned word load on
+   purpose and real pools longword-align for the 68000.  This turns off only
+   UBSan's alignment check, only on the functions that carry it. */
+#if defined(__GNUC__) || defined(__clang__)
+#define N68K_NO_SANITIZE_ALIGNMENT __attribute__((no_sanitize("alignment")))
+#else
+#define N68K_NO_SANITIZE_ALIGNMENT
+#endif
+
 /*
  * The one's-complement 32-bit sum of `count` longwords at `p`, i.e. the
  * add.l/addx.l carry chain.  The result is congruent to the plain sum modulo

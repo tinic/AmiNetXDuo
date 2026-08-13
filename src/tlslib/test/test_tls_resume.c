@@ -542,7 +542,9 @@ static UINT h_generate_session_keys(const NX_SECURE_TLS_CIPHERSUITE_INFO *cipher
    mistaken for a whole one. */
 static UBYTE h_master[TLS_MASTER_SECRET_SIZE];
 static UBYTE h_sid[TLS_RESUME_SID_MAX];
-static UBYTE h_ticket[192];
+/* Sized for the largest take: the ceiling test copies TLS_RESUME_TICKET_MAX
+   from it.  Most tests use the first 192 bytes. */
+static UBYTE h_ticket[TLS_RESUME_TICKET_MAX];
 
 static void fixtures_init(void)
 {
@@ -1753,10 +1755,20 @@ int main(void)
        tests are about.  TMPDIR first: a build running in a sandbox may not
        have /tmp, and a test that cannot write is a test that passes. */
     const char *tmp = getenv("TMPDIR");
-    char        dir_template[64];
+    char        dir_template[sizeof(h_dir)];
+    int         want;
 
-    snprintf(dir_template, sizeof(dir_template), "%s/anx-tls-resume-XXXXXX",
-             (tmp != NULL && tmp[0] != '\0') ? tmp : "/tmp");
+    /* 64 bytes used to truncate the XXXXXX off under a macOS TMPDIR
+       (/var/folders/... is 49 characters), and mkdtemp then fails on the
+       template rather than the filesystem. */
+    want = snprintf(dir_template, sizeof(dir_template),
+                    "%s/anx-tls-resume-XXXXXX",
+                    (tmp != NULL && tmp[0] != '\0') ? tmp : "/tmp");
+    if (want < 0 || (size_t)want >= sizeof(dir_template))
+    {
+        printf("TMPDIR is too long for the template\n");
+        return 1;
+    }
 
     if (mkdtemp(dir_template) == NULL)
     {

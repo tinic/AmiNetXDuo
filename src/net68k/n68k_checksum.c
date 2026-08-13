@@ -51,6 +51,7 @@
  * (AMINETXDUO_NET68K_ASM) and not a #if on the target, because a host build
  * has to compile this file to run the host tier of the differential test.
  */
+N68K_NO_SANITIZE_ALIGNMENT
 ULONG n68k_sum_longwords(const ULONG *p, ULONG count)
 {
 
@@ -98,6 +99,7 @@ static ULONG n68k_fold(ULONG sum)
 #ifndef AMINETXDUO_NET68K_ASM
 /* The assembly counterpart is in n68k_checksum.S; same guard as
    n68k_sum_longwords above, so a host build still has one. */
+N68K_NO_SANITIZE_ALIGNMENT
 ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count)
 {
 
@@ -124,6 +126,7 @@ ULONG   acc = 0;
 #endif /* AMINETXDUO_NET68K_ASM */
 
 
+N68K_NO_SANITIZE_ALIGNMENT
 USHORT n68k_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
                                 UINT data_length, ULONG *src_ip_addr,
                                 ULONG *dest_ip_addr)
