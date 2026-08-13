@@ -367,6 +367,7 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
     {
         struct Sana2DeviceQuery *q =
             (struct Sana2DeviceQuery *)io->ios2_StatData;
+        struct Sana2DeviceQuery answer;
         ULONG want;
 
         if (q == NULL)
@@ -379,13 +380,23 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
         if (q->SizeAvailable < want)
             want = q->SizeAvailable;
 
-        q->DevQueryFormat = 0;
-        q->DeviceLevel    = 0;
-        q->AddrFieldSize  = 48;
-        q->MTU            = NETDEV_MTU;
-        q->BPS            = unit->nu_Nic.card->bps;
-        q->HardwareType   = S2WireType_Ethernet;
-        q->SizeSupplied   = want;
+        /*
+         * Filled here and copied, rather than written through the caller's
+         * pointer: SizeAvailable is the caller saying how much room there is,
+         * and a caller built against an older Sana2DeviceQuery has less than
+         * this structure.  Writing every field and then reporting a smaller
+         * SizeSupplied overruns exactly the caller that was careful.
+         */
+        answer.SizeAvailable  = q->SizeAvailable;
+        answer.SizeSupplied   = want;
+        answer.DevQueryFormat = 0;
+        answer.DeviceLevel    = 0;
+        answer.AddrFieldSize  = 48;
+        answer.MTU            = NETDEV_MTU;
+        answer.BPS            = unit->nu_Nic.card->bps;
+        answer.HardwareType   = S2WireType_Ethernet;
+
+        cmd_bytes((UBYTE *)q, (const UBYTE *)&answer, want);
 
         netdev_reply(io, 0, 0);
         return;
