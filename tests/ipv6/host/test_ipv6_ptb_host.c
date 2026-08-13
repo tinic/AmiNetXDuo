@@ -494,10 +494,13 @@ ULONG invalid_before;
     h_check(h_packets_released == 1, "and is released");
 }
 
-/* A full destination table, which is where the entry pointer was not written. */
+/* A full destination table, which used to be where a destination stopped being
+   reachable at all: _nx_icmpv6_dest_table_add() refused, _nx_ipv6_packet_send()
+   released the packet, and nothing ever freed a slot again. */
 static VOID test_destination_table_full(VOID)
 {
 ULONG peer[4];
+ULONG oldest[4];
 ULONG i;
 
     h_reset();
@@ -512,13 +515,30 @@ ULONG i;
             "the destination table fills");
 
     /* One more destination than the table holds.  Reachable from the network. */
+    h_peer(oldest, 0x100);
     h_peer(peer, 0x200);
     h_deliver_ptb(1400, peer, h_local.nxd_ipv6_address);
 
-    h_check(h_entry(peer) == NX_NULL,
-            "a destination that does not fit is not added");
+    h_check(h_entry(peer) != NX_NULL,
+            "a destination that does not fit takes the place of another");
+    h_check(h_entry(oldest) == NX_NULL,
+            "and the one it takes is the least recently used");
     h_check(h_ip.nx_ipv6_destination_table_size == NX_IPV6_DESTINATION_TABLE_SIZE,
             "and the table is not corrupted");
+
+    /* Touched, so it is no longer the oldest, and the next new destination has
+       to displace the one after it instead. */
+    h_peer(peer, 0x101);
+    h_deliver_ptb(1400, peer, h_local.nxd_ipv6_address);
+    h_peer(peer, 0x201);
+    h_deliver_ptb(1400, peer, h_local.nxd_ipv6_address);
+
+    h_peer(peer, 0x101);
+    h_check(h_entry(peer) != NX_NULL,
+            "a destination in use is not the one given up");
+    h_peer(peer, 0x102);
+    h_check(h_entry(peer) == NX_NULL,
+            "the one untouched for longest is");
 
     /* And the other half of it: the ND cache refuses, so the entry is NX_NULL. */
     h_reset();
