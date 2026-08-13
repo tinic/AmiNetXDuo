@@ -829,6 +829,9 @@ static BOOL tool_list_has(const ToolAddrList *list, const ToolAddr *addr)
  * One getaddrinfo(), no output.  Returns 0 with *out filled, or the EAI_ code.
  * An answer with nothing usable in it counts as EAI_NONAME: the caller only
  * distinguishes "not found" from "try again".
+ *
+ * Every address is kept, up to TOOL_ADDR_TRIES, because the first one is not
+ * always the one that answers.
  */
 static LONG tool_gai_list(struct Library *base, const char *host, LONG want,
                           BOOL literal, ToolAddrList *out)
@@ -875,6 +878,7 @@ static LONG tool_gai_list(struct Library *base, const char *host, LONG want,
     return (rc == 0 && out->count == 0) ? (LONG)TOOL_EAI_NONAME : rc;
 }
 
+/* The same, for a caller that only wants to know whether there is one. */
 static LONG tool_gai_try(struct Library *base, const char *host, LONG want,
                          BOOL literal, ToolAddr *out)
 {

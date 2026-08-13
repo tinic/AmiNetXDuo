@@ -120,8 +120,6 @@ struct FetchTimeval
 
 #define FETCH_SOCK_STREAM   1
 
-
-
 static LONG sock_send(struct Library *base, LONG s, CONST_APTR buf, LONG len)
 {
     register struct Library *a6  __asm("a6") = base;
@@ -531,6 +529,7 @@ static LONG fetch_run(VOID)
         how.port      = u.port;
         how.localport = 0;
         how.timeout   = timeout;
+        how.announce  = FALSE;
 
         io.sock = tool_sock_connect_host(sbase, u.host, &how, &address, &cerr);
         if (io.sock < 0)

@@ -192,6 +192,7 @@ static LONG whois_ask(struct Library *sb, const char *server, UWORD port,
     how.port      = port;
     how.localport = 0;
     how.timeout   = 0;
+    how.announce  = FALSE;
 
     sock = tool_sock_connect_host(sb, server, &how, &address, &why);
     if (sock < 0)
