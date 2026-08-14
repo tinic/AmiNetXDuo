@@ -49,6 +49,19 @@
 | The 68060 makes movem microcoded and non-pipelining while ordinary moves
 | dual-issue, so it takes the plain loop.  Same bet, and the same lack of a
 | measurement behind it, as n68k_copy.S -- see the note there.
+|
+| THIS BRANCH IS UNREACHED IN WHAT SHIPS, and that is a statement rather than an
+| oversight.  The default build is AMINETXDUO_CPU=any: -m68000 codegen, so
+| __mc68060__ is never defined and every machine gets the movem form.  It is
+| CORRECT everywhere -- movem.l is an original 68000 instruction -- and what a
+| 68060 loses is an untested tuning guess.
+|
+| Making it a run-time choice is what src/net68k/n68k_cpu.c does for the
+| checksum and the copy, and it would need the same here: both forms assembled
+| under suffixed names and a vector set from AttnFlags at DEVICE init, because
+| anxnet.device is its own binary and never opens the library that selects.
+| Worth doing when somebody measures an 060 with a real card, and not before:
+| the bet it would settle has never had a number behind it.
 #if defined(__mc68060__)
 #define N68K_NO_MOVEM 1
 #endif

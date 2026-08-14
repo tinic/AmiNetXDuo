@@ -11,6 +11,7 @@
  */
 
 #include "c68k_p256.h"
+#include "c68k_variant.h"
 
 #include "nx_crypto_huge_number.h"
 
@@ -32,7 +33,66 @@ static const c68k_limb c68k_p256_one[C68K_P256_LIMBS] =
 
 /* ------------------------------------------------------ limb helpers ----- */
 
-#ifndef C68K_ASM
+/*
+ * ONE BINARY FOR EVERY CPU carries both assemblies of the three routines
+ * c68k_p256.S holds: they differ in one instruction, EXTB.L against ext.w plus
+ * ext.l, and both are legal on every part -- so unlike the multiply primitives
+ * there is no C to fall back to here, only a slower assembly.  The vectors
+ * start on that one.
+ */
+#ifdef C68K_MV
+
+extern c68k_limb c68k_p256_add_raw_mv0(c68k_limb *r, const c68k_limb *a,
+                                       const c68k_limb *b);
+extern c68k_limb c68k_p256_add_raw_mv20(c68k_limb *r, const c68k_limb *a,
+                                        const c68k_limb *b);
+extern c68k_limb c68k_p256_sub_raw_mv0(c68k_limb *r, const c68k_limb *a,
+                                       const c68k_limb *b);
+extern c68k_limb c68k_p256_sub_raw_mv20(c68k_limb *r, const c68k_limb *a,
+                                        const c68k_limb *b);
+extern INT c68k_p256_reduce_core_mv0(c68k_limb *r, const c68k_limb *t);
+extern INT c68k_p256_reduce_core_mv20(c68k_limb *r, const c68k_limb *t);
+
+static c68k_limb (*c68k_vec_p256_add_raw)(c68k_limb *, const c68k_limb *,
+                                          const c68k_limb *) =
+    c68k_p256_add_raw_mv0;
+static c68k_limb (*c68k_vec_p256_sub_raw)(c68k_limb *, const c68k_limb *,
+                                          const c68k_limb *) =
+    c68k_p256_sub_raw_mv0;
+static INT (*c68k_vec_p256_reduce_core)(c68k_limb *, const c68k_limb *) =
+    c68k_p256_reduce_core_mv0;
+
+#define C68K_P256_ADD_RAW       (*c68k_vec_p256_add_raw)
+#define C68K_P256_SUB_RAW       (*c68k_vec_p256_sub_raw)
+#define C68K_P256_REDUCE_CORE   (*c68k_vec_p256_reduce_core)
+
+/* Called by c68k_cpu_select(); the vectors are static to this file. */
+VOID c68k_p256_cpu_select(UINT wide)
+{
+
+    if (wide != 0u)
+    {
+        c68k_vec_p256_add_raw     = c68k_p256_add_raw_mv20;
+        c68k_vec_p256_sub_raw     = c68k_p256_sub_raw_mv20;
+        c68k_vec_p256_reduce_core = c68k_p256_reduce_core_mv20;
+    }
+    else
+    {
+        c68k_vec_p256_add_raw     = c68k_p256_add_raw_mv0;
+        c68k_vec_p256_sub_raw     = c68k_p256_sub_raw_mv0;
+        c68k_vec_p256_reduce_core = c68k_p256_reduce_core_mv0;
+    }
+}
+
+#else
+
+#define C68K_P256_ADD_RAW       c68k_p256_add_raw
+#define C68K_P256_SUB_RAW       c68k_p256_sub_raw
+#define C68K_P256_REDUCE_CORE   c68k_p256_reduce_core
+
+#endif
+
+#ifndef C68K_ASM_P256
 
 /*
  * The portable halves of the three routines c68k_p256.S replaces.  Always
@@ -288,7 +348,7 @@ VOID c68k_p256_fe_reduce(c68k_p256_fe r, const c68k_limb t[16])
 INT     hi;
 
 
-    hi = c68k_p256_reduce_core(r, t);
+    hi = C68K_P256_REDUCE_CORE(r, t);
 
     /*
      * hi is the leftover coefficient of 2^256.  Adding p raises the value by
@@ -297,17 +357,17 @@ INT     hi;
      */
     while (hi < 0)
     {
-        hi = hi + (INT)c68k_p256_add_raw(r, r, c68k_p256_p);
+        hi = hi + (INT)C68K_P256_ADD_RAW(r, r, c68k_p256_p);
     }
 
     while (hi > 0)
     {
-        hi = hi - (INT)c68k_p256_sub_raw(r, r, c68k_p256_p);
+        hi = hi - (INT)C68K_P256_SUB_RAW(r, r, c68k_p256_p);
     }
 
     while (fe_cmp(r, c68k_p256_p) >= 0)
     {
-        (VOID) c68k_p256_sub_raw(r, r, c68k_p256_p);
+        (VOID) C68K_P256_SUB_RAW(r, r, c68k_p256_p);
     }
 }
 
@@ -318,12 +378,12 @@ static VOID c68k_p256_fe_add(c68k_p256_fe r, const c68k_p256_fe a, const c68k_p2
 c68k_limb   carry;
 
 
-    carry = c68k_p256_add_raw(r, a, b);
+    carry = C68K_P256_ADD_RAW(r, a, b);
 
     /* a + b < 2p < 2^257, so at most one subtraction is ever needed. */
     if ((carry != 0) || (fe_cmp(r, c68k_p256_p) >= 0))
     {
-        (VOID) c68k_p256_sub_raw(r, r, c68k_p256_p);
+        (VOID) C68K_P256_SUB_RAW(r, r, c68k_p256_p);
     }
 }
 
@@ -331,9 +391,9 @@ c68k_limb   carry;
 static VOID c68k_p256_fe_sub(c68k_p256_fe r, const c68k_p256_fe a, const c68k_p256_fe b)
 {
 
-    if (c68k_p256_sub_raw(r, a, b) != 0)
+    if (C68K_P256_SUB_RAW(r, a, b) != 0)
     {
-        (VOID) c68k_p256_add_raw(r, r, c68k_p256_p);
+        (VOID) C68K_P256_ADD_RAW(r, r, c68k_p256_p);
     }
 }
 
@@ -358,7 +418,7 @@ UINT        i;
      */
     for (i = 0; i < C68K_P256_LIMBS; i++)
     {
-        t[i + C68K_P256_LIMBS] = c68k_addmul_1(&t[i], b, C68K_P256_LIMBS, a[i]);
+        t[i + C68K_P256_LIMBS] = C68K_ADDMUL_1(&t[i], b, C68K_P256_LIMBS, a[i]);
     }
 
     c68k_p256_fe_reduce(r, t);
@@ -386,7 +446,7 @@ UINT        i;
      */
     for (i = 0; i < C68K_P256_LIMBS - 1u; i++)
     {
-        t[i + C68K_P256_LIMBS] = c68k_addmul_1(&t[(i << 1) + 1u], &a[i + 1u],
+        t[i + C68K_P256_LIMBS] = C68K_ADDMUL_1(&t[(i << 1) + 1u], &a[i + 1u],
                                                C68K_P256_LIMBS - 1u - i, a[i]);
     }
 
@@ -429,7 +489,7 @@ c68k_limb   top;
 
     if ((x[0] & 1UL) != 0)
     {
-        top = c68k_p256_add_raw(x, x, c68k_p256_p);
+        top = C68K_P256_ADD_RAW(x, x, c68k_p256_p);
     }
 
     fe_rshift1(x, top);
@@ -478,12 +538,12 @@ c68k_p256_fe    x2;
 
         if (fe_cmp(u, v) >= 0)
         {
-            (VOID) c68k_p256_sub_raw(u, u, v);
+            (VOID) C68K_P256_SUB_RAW(u, u, v);
             c68k_p256_fe_sub(x1, x1, x2);
         }
         else
         {
-            (VOID) c68k_p256_sub_raw(v, v, u);
+            (VOID) C68K_P256_SUB_RAW(v, v, u);
             c68k_p256_fe_sub(x2, x2, x1);
         }
     }

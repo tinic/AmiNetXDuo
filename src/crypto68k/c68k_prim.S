@@ -74,6 +74,8 @@
 
 #ifdef C68K_ASM
 
+#include "c68k_variant.h"
+
         .text
         .align  2
 
@@ -91,8 +93,8 @@
 | and neither ADDX can carry out of the high half.
 | ---------------------------------------------------------------------------
 
-        .globl  _c68k_addmul_1
-_c68k_addmul_1:
+        .globl  C68K_MV_SYM(_c68k_addmul_1)
+C68K_MV_SYM(_c68k_addmul_1):
         movem.l d2-d5,-(sp)             | 4 longs
         move.l  20(sp),a0               | r
         move.l  24(sp),a1               | b
@@ -200,8 +202,8 @@ Lac_done:
 | d0, d1 and a0 are scratch in this ABI, so nothing needs saving.
 | ---------------------------------------------------------------------------
 
-        .globl  _c68k_div_2by1
-_c68k_div_2by1:
+        .globl  C68K_MV_SYM(_c68k_div_2by1)
+C68K_MV_SYM(_c68k_div_2by1):
         move.l  4(sp),d1                | hi, the remainder half
         move.l  8(sp),d0                | lo, the quotient half
         divu.l  12(sp),d1:d0            | d0 = quotient, d1 = remainder

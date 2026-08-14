@@ -36,6 +36,7 @@
  */
 
 #include "c68k_25519.h"
+#include "c68k_variant.h"
 
 /*
  * <stdint.h> rather than exec/types.h: this file has to compile on the build
@@ -149,7 +150,31 @@ static void fe_sub_c(fe r, const fe a, const fe b)
     }
 }
 
-#if defined(C68K_ASM) || defined(C68K_ASM_MULW)
+/*
+ * ONE BINARY FOR EVERY CPU takes the vectors.  Both halves of c68k_25519.S are
+ * assembled -- the MULU.L one for a 68020 to a 68040, the four-MULU.W one for
+ * a 68000 or a 68060, which is the same split c68k_prim.S and c68k_prim_mulw.S
+ * have -- and c68k_cpu_select() points these at one set.  They start on the C,
+ * so a program that never selects is slow and correct.
+ *
+ * fe_add and fe_sub carry no multiply and the two assemblies of them are the
+ * same instructions; they are vectored anyway, because one variant per object
+ * is what keeps the symbols apart and a profile honest.
+ */
+#if defined(C68K_MV)
+
+extern void c68k_fe_add_asm_mulu(fe r, const fe a, const fe b);
+extern void c68k_fe_sub_asm_mulu(fe r, const fe a, const fe b);
+extern void c68k_fe_add_asm_mulw(fe r, const fe a, const fe b);
+extern void c68k_fe_sub_asm_mulw(fe r, const fe a, const fe b);
+
+void (*c68k_vec_fe_add)(fe, const fe, const fe) = fe_add_c;
+void (*c68k_vec_fe_sub)(fe, const fe, const fe) = fe_sub_c;
+
+#define fe_add  (*c68k_vec_fe_add)
+#define fe_sub  (*c68k_vec_fe_sub)
+
+#elif defined(C68K_ASM_25519) || defined(C68K_ASM_MULW)
 extern void c68k_fe_add_asm(fe r, const fe a, const fe b);
 extern void c68k_fe_sub_asm(fe r, const fe a, const fe b);
 #define fe_add  c68k_fe_add_asm
@@ -232,7 +257,12 @@ static void fe_mul_c(fe r, const fe a, const fe b)
  * are mutually exclusive and src/crypto68k/CMakeLists.txt refuses both at
  * once, because they define the same symbol.
  */
-#if defined(C68K_ASM) || defined(C68K_ASM_MULW)
+#if defined(C68K_MV)
+extern void c68k_fe_mul_asm_mulu(fe r, const fe a, const fe b);
+extern void c68k_fe_mul_asm_mulw(fe r, const fe a, const fe b);
+void (*c68k_vec_fe_mul)(fe, const fe, const fe) = fe_mul_c;
+#define fe_mul  (*c68k_vec_fe_mul)
+#elif defined(C68K_ASM_25519) || defined(C68K_ASM_MULW)
 extern void c68k_fe_mul_asm(fe r, const fe a, const fe b);
 #define fe_mul  c68k_fe_mul_asm
 #else
@@ -258,7 +288,7 @@ void c68k_25519_fe_mul_ref(uint32_t r[8], const uint32_t a[8],
 
 int c68k_25519_fe_mul_is_asm(void)
 {
-#if defined(C68K_ASM) || defined(C68K_ASM_MULW)
+#if defined(C68K_ASM_25519) || defined(C68K_ASM_MULW)
     return 1;
 #else
     return 0;
@@ -325,7 +355,12 @@ static void fe_sqr_c(fe r, const fe a)
     fe_fold(r, (uint32_t)v);
 }
 
-#if defined(C68K_ASM) || defined(C68K_ASM_MULW)
+#if defined(C68K_MV)
+extern void c68k_fe_sqr_asm_mulu(fe r, const fe a);
+extern void c68k_fe_sqr_asm_mulw(fe r, const fe a);
+void (*c68k_vec_fe_sqr)(fe, const fe) = fe_sqr_c;
+#define fe_sqr  (*c68k_vec_fe_sqr)
+#elif defined(C68K_ASM_25519) || defined(C68K_ASM_MULW)
 extern void c68k_fe_sqr_asm(fe r, const fe a);
 #define fe_sqr  c68k_fe_sqr_asm
 #else
@@ -1017,3 +1052,30 @@ int c68k_25519_selfcheck_sqr(const unsigned char in[32])
     fe_tobytes(b2, r2);
     return memcmp(b1, b2, 32) == 0 ? 0 : -1;
 }
+
+
+#ifdef C68K_MV
+/*
+ * Called by c68k_cpu_select(), which is the only place AttnFlags is read.  It
+ * lives here rather than there because fe_mul_c and its three siblings are
+ * static to this file: the default has to be set where it can be named.
+ */
+void c68k_25519_cpu_select(unsigned int mul_ul)
+{
+
+    if (mul_ul != 0u)
+    {
+        c68k_vec_fe_mul = c68k_fe_mul_asm_mulu;
+        c68k_vec_fe_sqr = c68k_fe_sqr_asm_mulu;
+        c68k_vec_fe_add = c68k_fe_add_asm_mulu;
+        c68k_vec_fe_sub = c68k_fe_sub_asm_mulu;
+    }
+    else
+    {
+        c68k_vec_fe_mul = c68k_fe_mul_asm_mulw;
+        c68k_vec_fe_sqr = c68k_fe_sqr_asm_mulw;
+        c68k_vec_fe_add = c68k_fe_add_asm_mulw;
+        c68k_vec_fe_sub = c68k_fe_sub_asm_mulw;
+    }
+}
+#endif

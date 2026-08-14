@@ -32,6 +32,45 @@
 #include "c68k_25519.h"
 
 /*
+ * ONE ssh FOR EVERY CPU.  A C68K_MV build of c68k_25519.c carries both field
+ * multiplies -- the MULU.L one a 68020 to a 68040 has, and the four-MULU.W one
+ * a 68000 never grew out of and a 68060 gave back -- and something has to pick
+ * before the first handshake.  tls.library does it in its init; a client has no
+ * init, so the four entry points below do it once between them.
+ *
+ * The test costs a compare and a branch per SCALARMULT, which is one per
+ * handshake against tens of thousands of field multiplies inside it.
+ */
+#ifdef C68K_MV
+
+#include <exec/execbase.h>
+#include <proto/exec.h>
+
+extern void c68k_25519_cpu_select(unsigned int mul_ul);
+
+static int amiga_25519_picked;
+
+static void amiga_25519_pick(void)
+{
+    unsigned long attn;
+
+    if (amiga_25519_picked)
+        return;
+
+    /* The same two facts src/crypto68k/c68k_variant.h names: the 68060 raises
+       AFF_68040 too, so the 64-bit MULU.L is 020-and-up AND NOT an 060. */
+    attn = (unsigned long)SysBase->AttnFlags;
+    c68k_25519_cpu_select(((attn & AFF_68020) != 0UL &&
+                           (attn & AFF_68060) == 0UL) ? 1u : 0u);
+
+    amiga_25519_picked = 1;
+}
+
+#else
+#define amiga_25519_pick()      ((void)0)
+#endif
+
+/*
  * Ed25519's SHA-512, taken from the libtomcrypt already in this binary.
  * c68k_25519.c has no hash of its own: this program has one, a TLS build has
  * nx_crypto's, and a second copy would be a second thing to keep right.
@@ -67,12 +106,16 @@ void __wrap_dropbear_curve25519_scalarmult(unsigned char *q,
      * this call.  RFC 7748 section 6.1's all-zero check is still performed by
      * c68k_x25519(), as it was in the TweetNaCl version being replaced.
      */
+    amiga_25519_pick();
+
     (void)c68k_x25519(q, n, p);
 }
 
 void __wrap_dropbear_ed25519_make_key(unsigned char *pk, unsigned char *sk);
 void __wrap_dropbear_ed25519_make_key(unsigned char *pk, unsigned char *sk)
 {
+    amiga_25519_pick();
+
     genrandom(sk, 32);
     c68k_ed25519_pubkey(amiga_sha512_3, pk, sk);
 }
@@ -86,6 +129,8 @@ void __wrap_dropbear_ed25519_sign(const unsigned char *m, unsigned long mlen,
                                   const unsigned char *sk,
                                   const unsigned char *pk)
 {
+    amiga_25519_pick();
+
     *slen = 64;
     c68k_ed25519_sign(amiga_sha512_3, s, m, mlen, sk, pk);
 }
@@ -97,6 +142,8 @@ int __wrap_dropbear_ed25519_verify(const unsigned char *m, unsigned long mlen,
                                    const unsigned char *s, unsigned long slen,
                                    const unsigned char *pk)
 {
+    amiga_25519_pick();
+
     if (slen < 64)
         return -1;
     return c68k_ed25519_verify(amiga_sha512_3, m, mlen, s, pk);

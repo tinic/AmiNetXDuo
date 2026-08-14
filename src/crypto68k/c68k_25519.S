@@ -58,6 +58,8 @@
 
 #if defined(C68K_ASM) || defined(C68K_ASM_MULW)
 
+#include "c68k_variant.h"
+
         .text
         .align  2
 
@@ -152,8 +154,8 @@ c68k_fe_row:
 | 108(sp) and the arguments follow it.
 | ---------------------------------------------------------------------------
 
-        .globl  _c68k_fe_mul_asm
-_c68k_fe_mul_asm:
+        .globl  C68K_MV_SYM(_c68k_fe_mul_asm)
+C68K_MV_SYM(_c68k_fe_mul_asm):
         movem.l d2-d7/a2-a6,-(sp)       | 11 longs
         suba.l  #64,sp                  | t[16]
 
@@ -322,8 +324,8 @@ Lfoldc_done:
 |   Five registers saved, so the arguments sit at 24, 28 and 32.
 | ---------------------------------------------------------------------------
 
-        .globl  _c68k_fe_add_asm
-_c68k_fe_add_asm:
+        .globl  C68K_MV_SYM(_c68k_fe_add_asm)
+C68K_MV_SYM(_c68k_fe_add_asm):
         movem.l d2-d5/a2,-(sp)          | 5 longs
         move.l  24(sp),a0               | r
         move.l  28(sp),a1               | a
@@ -346,8 +348,8 @@ Ladd_loop:
         movem.l (sp)+,d2-d5/a2
         rts
 
-        .globl  _c68k_fe_sub_asm
-_c68k_fe_sub_asm:
+        .globl  C68K_MV_SYM(_c68k_fe_sub_asm)
+C68K_MV_SYM(_c68k_fe_sub_asm):
         movem.l d2-d5/a2,-(sp)          | 5 longs
         move.l  24(sp),a0               | r
         move.l  28(sp),a1               | a
@@ -411,8 +413,8 @@ Lsub_done:
 |   rather than only against published vectors.
 | ---------------------------------------------------------------------------
 
-        .globl  _c68k_fe_sqr_asm
-_c68k_fe_sqr_asm:
+        .globl  C68K_MV_SYM(_c68k_fe_sqr_asm)
+C68K_MV_SYM(_c68k_fe_sqr_asm):
         movem.l d2-d7/a2-a6,-(sp)       | 11 longs
         suba.l  #64,sp                  | t[16]
 

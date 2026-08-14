@@ -475,7 +475,7 @@ fi
 
 if [ -z "$ARCHIVE" ]; then
     echo "==> building the distribution archive"
-    AMINETXDUO_DIST_CPUS="68020-40" \
+    AMINETXDUO_DIST_NO_MINIMAL=1 \
         "$ROOT/dist/make-dist.sh" -b "$BUILD" >"$ROOT/build/wb31-make-dist.log" 2>&1 || {
         echo "dist/make-dist.sh failed, see build/wb31-make-dist.log" >&2
         tail -20 "$ROOT/build/wb31-make-dist.log" >&2
@@ -631,8 +631,8 @@ fi
 # "you packed a build that never had it" is stated here rather than left for
 # somebody to work out from a return code.
 echo "==> the archive holds:"
-for f in Libs/68020-40/bsdsocket.library Libs/68020-40/usergroup.library \
-         Libs/68020-40/tls.library Devs/Internet/certificates \
+for f in Libs/bsdsocket.library Libs/usergroup.library \
+         Libs/tls.library Devs/Internet/certificates \
          C/fetch C/ssh; do
     if [ -f "$HD/Unpacked/AmiNetXDuo/$f" ]; then
         printf '      %-36s %s bytes\n' "$f" \
@@ -641,7 +641,7 @@ for f in Libs/68020-40/bsdsocket.library Libs/68020-40/usergroup.library \
         printf '      %-36s ABSENT\n' "$f"
     fi
 done
-if [ ! -f "$HD/Unpacked/AmiNetXDuo/Libs/68020-40/tls.library" ]; then
+if [ ! -f "$HD/Unpacked/AmiNetXDuo/Libs/tls.library" ]; then
     echo "!! This archive has NO tls.library, so the https: check cannot pass"
     echo "!! and its failure will say nothing about the product.  Build the"
     echo "!! archive from a tree configured with -DAMINETXDUO_TLS=ON."

@@ -13,6 +13,7 @@
  */
 
 #include <stddef.h>
+#include "c68k_variant.h"
 
 #include "c68k_poly1305.h"
 
@@ -185,10 +186,21 @@ ULONG64 d0, d1, d2, d3, d4;
  * on every part that can run it.  AMINETXDUO_CRYPTO68K_ASM=OFF, the 68000 and
  * the 68060 take the C.
  */
-#ifdef C68K_ASM
+#ifdef C68K_ASM_POLY1305
 extern VOID c68k_poly1305_blocks_asm(C68K_POLY1305 *ctx, const UCHAR *m,
                                      ULONG blocks, ULONG hibit);
+/*
+ * One binary for every CPU takes the vector instead: the inner loop is a
+ * 32x32 -> 64 product, so this is 68020-to-68040 assembly or the C, and which
+ * one is a run-time fact (c68k_cpu.c).  The indirection is per BLOCK RUN, not
+ * per block -- update() calls this once per call with however many blocks it
+ * has -- so it costs nothing measurable.
+ */
+#ifdef C68K_MV
+#define C68K_POLY1305_BLOCKS    (*c68k_vec_poly1305_blocks)
+#else
 #define C68K_POLY1305_BLOCKS    c68k_poly1305_blocks_asm
+#endif
 
 /*
  * c68k_poly1305.S reaches into C68K_POLY1305 with two hardcoded offsets, and
@@ -220,7 +232,12 @@ VOID c68k_poly1305_blocks(C68K_POLY1305 *ctx, const UCHAR *m, ULONG blocks,
 UINT c68k_poly1305_blocks_is_asm(VOID)
 {
 
-#ifdef C68K_ASM
+#if defined(C68K_MV)
+    /* The vector, not the build: a 68000 or a 68060 in this same binary is
+       running the C, because the kernel's inner product is a MULU.L. */
+    return((c68k_vec_poly1305_blocks == c68k_poly1305_blocks_asm) ?
+           (UINT)NX_CRYPTO_TRUE : (UINT)NX_CRYPTO_FALSE);
+#elif defined(C68K_ASM_POLY1305)
     return((UINT)NX_CRYPTO_TRUE);
 #else
     return((UINT)NX_CRYPTO_FALSE);

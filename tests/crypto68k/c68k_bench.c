@@ -28,6 +28,7 @@
 #include "aminetxduo/crashguard.h"
 
 #include <exec/types.h>
+#include <exec/execbase.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 
@@ -160,7 +161,7 @@ ULONG   ratio;
 static VOID b_prim_asm(VOID)
 {
 
-    (VOID) c68k_addmul_1(b_result, b_y, 64u, 0xDEADBEEFUL);
+    (VOID) C68K_ADDMUL_1(b_result, b_y, 64u, 0xDEADBEEFUL);
 }
 
 static VOID b_prim_c(VOID)
@@ -447,6 +448,10 @@ int main(VOID)
 
 ULONG   start;
 
+
+    /* As a shipped library does at init, so the rows below are labelled
+       with what would actually run (src/crypto68k/c68k_cpu.c). */
+    c68k_cpu_select((ULONG)SysBase->AttnFlags);
 
     ami_crash_set_reference((APTR)main, "crypto68k_bench");
     if (!ami_crash_install())

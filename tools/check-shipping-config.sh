@@ -3,11 +3,13 @@
 
     tools/check-shipping-config.sh
 
-dist/make-dist.sh packs four drawers -- 68000, 68000-minimal, 68020-40 and
-68060 -- and .github/workflows/release.yml is what builds them.  tools/ci.sh's
-CROSS_CONFIGS is what compiles configurations with warnings fatal, and its own
-comment says of the minimal arm: "It must stay byte-for-byte the options
-.github/workflows/release.yml gives build/release-68000-minimal."
+dist/make-dist.sh packs two drawers -- the full stack at the top of Libs: and
+`minimal` below it -- and .github/workflows/release.yml is what builds them.
+There used to be four, one per CPU; the CPU is gone from the archive entirely,
+so what is left to check is the FEATURE set.  tools/ci.sh's CROSS_CONFIGS is
+what compiles configurations with warnings fatal, and its own comment says of
+the minimal arm: "It must stay byte-for-byte the options
+.github/workflows/release.yml gives build/release-minimal."
 
 Nothing checked that, and it is not true.  A drawer built with options no CI
 arm compiles is a binary that ships having been compiled exactly once, on the
@@ -33,9 +35,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # is a decision about what ships and not about the test.  Key is the drawer;
 # value is (the pair that disagrees, why it is here).
 KNOWN = {
-    "68000-minimal": (
+    "minimal": (
         "release.yml vs ci.sh",
-        "release.yml gives five OFF flags and ci.sh's minimal68000 arm gives "
+        "release.yml gives five OFF flags and ci.sh's minimal arm gives "
         "seven; AMINETXDUO_AREXX and AMINETXDUO_TCPDEVICE default ON "
         "(CMakeLists.txt:151,191), so the drawer that ships carries the ARexx "
         "host and the TCP: handler and the arm that compiles it does not. "
@@ -98,11 +100,9 @@ def ci_cross_configs():
 # CPU_DIRS and CPU_BUILD, whose default build root is build/cm; the release
 # workflow passes -b build/release, so the suffixes are the same.
 DRAWERS = [
-    #  drawer            release.yml dir              ci.sh arm
-    ("68020-40",        "build/release",              "default"),
-    ("68000",           "build/release-68000",        "m68000"),
-    ("68060",           "build/release-68060",        "m68060"),
-    ("68000-minimal",   "build/release-68000-minimal", "minimal68000"),
+    #  drawer      release.yml dir           ci.sh arm
+    ("full",      "build/release",          "default"),
+    ("minimal",   "build/release-minimal",  "minimal"),
 ]
 
 
@@ -123,15 +123,10 @@ def main():
         # matched by its case arms instead.
         if reldir in rel:
             got = rel[reldir]
-        elif drawer == "68000-minimal":
+        else:
             say("drawer_%s" % drawer, "NOT_BUILT_BY_release.yml")
             bad += 1
             continue
-        else:
-            # The loop form. Its only per-drawer option is the CPU, which the
-            # case arm sets; everything else is default, so the expected set
-            # is just the CPU.
-            got = {"AMINETXDUO_CPU": drawer.split("-")[0]}
 
         want = dict(ci.get(arm, {}))
         if arm not in ci:
@@ -139,10 +134,10 @@ def main():
             bad += 1
             continue
 
-        # The default arm carries no -D at all; the 68020 drawer is the same.
+        # The default arm carries no -D at all, and neither does the full
+        # drawer: there is no CPU to name any more.
         if arm == "default":
             want = {}
-            got = {k: v for k, v in got.items() if k != "AMINETXDUO_CPU"}
 
         if got == want:
             say("drawer_%s" % drawer, "matches_ci_arm_%s" % arm)

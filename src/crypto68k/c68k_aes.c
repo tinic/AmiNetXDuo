@@ -31,6 +31,7 @@
  */
 
 #include "c68k_aes.h"
+#include "c68k_variant.h"
 
 
 /* ------------------------------------------------------------- variant --- */
@@ -60,7 +61,7 @@ const char *c68k_aes_variant_name(UINT variant)
 UINT c68k_aes_variant_is_asm(UINT variant)
 {
 
-#ifdef C68K_ASM
+#ifdef C68K_ASM_AES
     return((variant >= C68K_AES_V_T4_ASM) ? NX_CRYPTO_TRUE : NX_CRYPTO_FALSE);
 #else
     (VOID)variant;
@@ -790,7 +791,7 @@ UINT    r;
  * the sixteen byte reads would be free; here they are bus cycles, still
  * cheaper than the rotates they replace.
  */
-#ifdef C68K_ASM
+#ifdef C68K_ASM_AES
 extern VOID c68k_aes_core_enc_t4_asm(const ULONG *rk, UINT nr, ULONG *st);
 extern VOID c68k_aes_core_dec_t4_asm(const ULONG *rk, UINT nr, ULONG *st);
 extern VOID c68k_aes_core_enc_t1_asm(const ULONG *rk, UINT nr, ULONG *st);
@@ -802,7 +803,7 @@ static VOID c68k_aes_enc_dispatch(const ULONG *rk, UINT nr, ULONG *st)
 
     switch (c68k_aes_variant)
     {
-#ifdef C68K_ASM
+#ifdef C68K_ASM_AES
     case C68K_AES_V_T4_ASM:
         c68k_aes_core_enc_t4_asm(rk, nr, st);
         break;
@@ -831,7 +832,7 @@ static VOID c68k_aes_dec_dispatch(const ULONG *rk, UINT nr, ULONG *st)
 
     switch (c68k_aes_variant)
     {
-#ifdef C68K_ASM
+#ifdef C68K_ASM_AES
     case C68K_AES_V_T4_ASM:
         c68k_aes_core_dec_t4_asm(rk, nr, st);
         break;

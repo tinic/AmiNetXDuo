@@ -83,24 +83,19 @@ JOBS="${AMINETXDUO_CI_JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl 
 # entries here are the OFF ones, the configurations a user gets by asking for
 # a smaller stack, and the ones that would otherwise stop being compiled at all.
 #
-# Then the three CPU targets.  They are not "the same build with a different
-# -m flag": each one changes what the compiler may emit and what the tree may
-# contain, and each broke something the others did not while it was being
-# brought up (docs/RESEARCH.md §45).
+# THE CPU ARMS ARE GONE, and their absence is the point: the archive used to
+# carry a library per CPU and each -m flag had to compile, so three full cross
+# builds ran here to prove three binaries that one binary now replaces.  What
+# the tree may contain no longer depends on the flag -- every part of the data
+# path and the crypto that needs a 68020 instruction is assembled for the part
+# that needs it and reached through a vector chosen from AttnFlags at init
+# (src/net68k/n68k_cpu.c, src/crypto68k/c68k_cpu.c), so the `default` arm is
+# the shipping arm and compiles all of it.
 #
-#   m68000  no 32-bit multiply or divide at all, so the compiler runtime in
-#           src/common carries five more routines and the crypto assembly
-#           cannot be assembled.  TLS is off by default here.
-#   m68040  -m68020 -mtune=68040.  Cheap to build and it is what catches
-#           anyone "fixing" that mapping to -m68040, which would silently
-#           link the 68000 C library.
-#   m68060  the 64-bit-result MULU.L and DIVU.L are gone, so GCC calls
-#           __muldi3, the symbol whose absence blocked this target.
-#
-# `default`, m68000, m68060 and minimal68000 are the four libraries the archive
-# ships, in the options the release workflow gives them, so a break in any of
-# them is a break in something a user downloads.  Nothing may ship in a shape
-# that is not built here.
+# `default` and `minimal` are the two libraries the archive ships, in the
+# options the release workflow gives them, so a break in either is a break in
+# something a user downloads.  Nothing may ship in a shape that is not built
+# here.
 CROSS_CONFIGS=(
     "default:"
     "noipv6:-DAMINETXDUO_IPV6=OFF"
@@ -134,17 +129,22 @@ CROSS_CONFIGS=(
     # leak nobody wrote a test for, and an instrument that stops building is
     # the one nobody notices.
     "census:-DAMINETXDUO_ALLOCCENSUS=ON"
-    "m68000:-DAMINETXDUO_CPU=68000"
-    "m68040:-DAMINETXDUO_CPU=68040"
-    "m68060:-DAMINETXDUO_CPU=68060"
-    # The fourth drawer in the archive, and the only arm here that turns more
+    # NO PER-CPU ARMS.  There used to be three -- m68000, m68040, m68060 -- and
+    # they were here because the archive shipped a library per CPU and each had
+    # to compile.  It does not any more: one build serves every 68k and chooses
+    # its inner loops from AttnFlags at init, so the default configuration IS
+    # the shipping one and these arms were three full cross builds proving
+    # something nothing ships.  A specific CPU is still buildable and is how
+    # every figure in cmake/toolchain-m68k-amigaos.cmake was measured; it is
+    # not CI's job.
+    # The second drawer in the archive, and the only arm here that turns more
     # than one thing off at once.  Every option above is a separate arm because
     # each has its own compile-time surface; this one exists because the
     # combination is what a user downloads, and the arms above do not cover it
     # BPF=OFF appears nowhere else at all, and the interactions between five
     # of them appear nowhere else at all.  It must stay byte-for-byte the
-    # options .github/workflows/release.yml gives build/release-68000-minimal.
-    "minimal68000:-DAMINETXDUO_CPU=68000 -DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF"
+    # options .github/workflows/release.yml gives build/release-minimal.
+    "minimal:-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF"
 )
 
 # Host-side test executables.  ctest fails loudly ("Unable to find executable")

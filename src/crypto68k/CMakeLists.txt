@@ -61,8 +61,12 @@ endif()
 # 68000 because MULU.W is the only multiply it ever had.  It is a separate option because it is a separate file with a
 # separate CPU rule, and because the two cannot both be on: they define the same
 # symbol.
+# `any` takes it for the reason both of those do, and it is the only assembly
+# here a CPU-independent binary can carry: MULU.W is in the original 68000 set
+# and the 68060 kept it, so one build of this file runs on the whole family.
 if(CMAKE_CROSSCOMPILING AND (AMINETXDUO_CPU STREQUAL "68060" OR
-                            AMINETXDUO_CPU STREQUAL "68000"))
+                            AMINETXDUO_CPU STREQUAL "68000" OR
+                            AMINETXDUO_CPU STREQUAL "any"))
     set(_crypto68k_asm_mulw_default ON)
 else()
     set(_crypto68k_asm_mulw_default OFF)
@@ -194,6 +198,8 @@ set(CRYPTO68K_SOURCES
 # it is not a third option -- unlike c68k_prim.S and c68k_prim_mulw.S, which
 # are two files defining the same symbol and cannot both be built, these are
 # two halves of one file and exactly one is ever assembled.
+list(APPEND CRYPTO68K_SOURCES c68k_cpu.c)
+
 if(AMINETXDUO_CRYPTO68K_ASM)
     list(APPEND CRYPTO68K_SOURCES
          c68k_prim.S c68k_p256.S c68k_aes.S c68k_chacha20.S c68k_poly1305.S
@@ -202,6 +208,77 @@ endif()
 
 if(AMINETXDUO_CRYPTO68K_ASM_MULW)
     list(APPEND CRYPTO68K_SOURCES c68k_prim_mulw.S c68k_25519.S)
+endif()
+
+# ------------------------------------------------ one binary for every CPU ---
+#
+# AMINETXDUO_CPU=any takes both halves of the module and chooses at run time.
+# What that needs is narrower than it looks, because most of the assembly here
+# is legal on every 68k and only two routines are not:
+#
+#   c68k_chacha20.S          assembles at -m68000, checked: 0 illegal
+#                            instructions.  So the 68000 and the 68060 get the
+#                            ChaCha20 kernel they have never had, and the
+#                            default TLS cipher is ChaCha20-Poly1305 (54).
+#   c68k_prim.S              add, sub, cmp and add_carry are original 68000
+#                            code and are called by name everywhere.  Only
+#                            addmul_1 (MULU.L 32x32 -> 64) and div_2by1
+#                            (DIVU.L 64/32) are 68020-to-68040, and those two
+#                            are the ones c68k_cpu.c dispatches.
+#   c68k_prim_mulw.S         the MULU.W addmul_1, legal everywhere, and the
+#                            answer for both the 68000 and the 68060.
+#   c68k_poly1305.S          a 32x32 -> 64 product per block: dispatched.
+#
+# The file is assembled for its own needs rather than for the machine: an
+# object may hold an instruction this CPU lacks as long as nothing calls the
+# routine that uses it.  Hence -m68020 on c68k_prim.S in a -m68000 binary.
+#
+#   c68k_aes.S               the 68020 scaled index and nothing else, which
+#                            the 68060 kept, so it is assembled -m68020 and
+#                            selected on AFF_68020 alone.  c68k_aes_variant was
+#                            already a run-time choice; this only sets its
+#                            default (c68k_cpu.c).
+#   c68k_25519.S             two halves of one file, so two objects, exactly
+#                            as src/net68k's variants are.
+#
+# c68k_p256.S is NOT here yet: one instruction in a per-limb macro (extb.l) has
+# to be substituted before a 68000 can run it, which is its own commit.
+set(CRYPTO68K_MV OFF)
+if(CMAKE_CROSSCOMPILING AND AMINETXDUO_CPU STREQUAL "any")
+    set(CRYPTO68K_MV ON)
+    list(APPEND CRYPTO68K_SOURCES
+         c68k_prim.S c68k_chacha20.S c68k_poly1305.S c68k_prim_mulw.S
+         c68k_aes.S c68k_dispatch.S)
+
+    # c68k_25519.S is one file holding both halves, picked by a define, so it
+    # becomes two objects the way src/net68k's variants do -- and for the same
+    # two reasons, a translation unit of its own and a file name of its own.
+    # This is also exactly what one ssh binary needs: clients/dropbear compiles
+    # c68k_25519.c itself and picks the half with the same define today.
+    foreach(mv mulu:C68K_ASM:-m68020:c68k_25519.S
+               mulw:C68K_ASM_MULW:-m68000:c68k_25519.S
+               mv20:C68K_P256_EXTB:-m68020:c68k_p256.S
+               mv0:C68K_ASM:-m68000:c68k_p256.S)
+        string(REPLACE ":" ";" _parts "${mv}")
+        list(GET _parts 0 _sfx)
+        list(GET _parts 1 _def)
+        list(GET _parts 2 _arch)
+        list(GET _parts 3 _src)
+        string(REPLACE ".S" "" _stem "${_src}")
+        set(C68K_MV_DEFINE "${_def}")
+        set(C68K_MV_SUFFIX "_${_sfx}")
+        set(C68K_MV_SRC "${_src}")
+        set(_gen "${CMAKE_CURRENT_BINARY_DIR}/${_stem}_${_sfx}.S")
+        configure_file(c68k_mv.S.in "${_gen}" @ONLY)
+        list(APPEND CRYPTO68K_SOURCES "${_gen}")
+        set_source_files_properties("${_gen}" PROPERTIES
+            COMPILE_DEFINITIONS "C68K_MV=1;C68K_ASM=1"
+            COMPILE_OPTIONS "${_arch}"
+            INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}")
+    endforeach()
+    unset(C68K_MV_DEFINE)
+    unset(C68K_MV_SUFFIX)
+    unset(C68K_MV_SRC)
 endif()
 
 add_library(crypto68k STATIC ${CRYPTO68K_SOURCES})
@@ -239,5 +316,44 @@ if(AMINETXDUO_CRYPTO68K_ASM_MULW)
         COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
 endif()
 
+if(CRYPTO68K_MV)
+    # C68K_ASM tells the .c files the assembly exists and to declare it;
+    # C68K_MV tells them the choice is a vector rather than a name.  PUBLIC on
+    # both: crypto68k.h resolves C68K_ADDMUL_1 and C68K_DIV_2BY1 on C68K_MV,
+    # and src/tls and tests/crypto68k are callers that must agree with this
+    # directory about which one those are.
+    # C68K_ASM says the module has assembly, C68K_MV says the choice is a
+    # vector rather than a name, and the per-file gates below say WHICH files
+    # are here (c68k_variant.h).  PUBLIC on all of them: crypto68k.h resolves
+    # C68K_ADDMUL_1 and C68K_DIV_2BY1 on C68K_MV, and src/tls and
+    # tests/crypto68k are callers that must agree with this directory.
+    target_compile_definitions(crypto68k PUBLIC
+        C68K_ASM=1 C68K_MV=1
+        C68K_ASM_PRIM=1 C68K_ASM_CHACHA20=1 C68K_ASM_POLY1305=1
+        C68K_ASM_AES=1 C68K_ASM_25519=1 C68K_ASM_P256=1)
+
+    # Per file, the arch it is written for.  C68K_MV_SUFFIX is what keeps the
+    # two addmul_1 twins apart in one archive (c68k_variant.h).
+    set_source_files_properties(c68k_prim.S PROPERTIES
+        COMPILE_DEFINITIONS "C68K_ASM=1;C68K_MV=1;C68K_MV_SUFFIX=_mulu"
+        COMPILE_OPTIONS "-m68020")
+    set_source_files_properties(c68k_prim_mulw.S PROPERTIES
+        COMPILE_DEFINITIONS "C68K_ASM_MULW=1;C68K_MV=1;C68K_MV_SUFFIX=_mulw"
+        COMPILE_OPTIONS "-m68000")
+    set_source_files_properties(c68k_poly1305.S PROPERTIES
+        COMPILE_DEFINITIONS "C68K_ASM=1;C68K_MV=1"
+        COMPILE_OPTIONS "-m68020")
+    set_source_files_properties(c68k_aes.S PROPERTIES
+        COMPILE_DEFINITIONS "C68K_ASM=1;C68K_MV=1"
+        COMPILE_OPTIONS "-m68020")
+    set_source_files_properties(c68k_chacha20.S PROPERTIES
+        COMPILE_DEFINITIONS "C68K_ASM=1;C68K_MV=1"
+        COMPILE_OPTIONS "-m68000")
+    set_source_files_properties(c68k_dispatch.S PROPERTIES
+        COMPILE_DEFINITIONS "C68K_MV=1"
+        COMPILE_OPTIONS "-m68000")
+endif()
+
 message(STATUS "  crypto68k asm . ${AMINETXDUO_CRYPTO68K_ASM}")
 message(STATUS "  crypto68k mulw asm . ${AMINETXDUO_CRYPTO68K_ASM_MULW}")
+message(STATUS "  crypto68k mv .. ${CRYPTO68K_MV}")

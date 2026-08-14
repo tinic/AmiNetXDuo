@@ -202,6 +202,48 @@ INT c68k_cmp(const c68k_limb *a, const c68k_limb *b, UINT n);
 UINT c68k_using_assembly(VOID);
 
 
+/* ------------------------------------------------------ the CPU, at run time */
+/*
+ * An AMINETXDUO_CPU=any build carries every form of these primitives and picks
+ * from SysBase->AttnFlags once, at tls.library's init (c68k_cpu.c).  Every
+ * other build picks at compile time and these are an empty function and a
+ * constant, so a caller need not know which build it is in.
+ *
+ * Call it before the first handshake.  Skipping it leaves the portable C in
+ * place: slower, never wrong, and never an illegal instruction.
+ */
+VOID c68k_cpu_select(ULONG attnflags);
+
+/*
+ * What was selected, as the C68K_ASM_* values above: what a test prints and
+ * what a bench labels its rows with.  In a per-CPU build it answers what was
+ * compiled, which is the same question there.
+ */
+UINT c68k_cpu_class(VOID);
+
+/*
+ * What the stack's own callers use for the two primitives that cannot be one
+ * routine.  The rest of c68k_prim.S -- add, sub, cmp, add_carry -- is original
+ * 68000 code and is called by name on every CPU.
+ */
+#ifdef C68K_MV
+
+extern c68k_limb (*c68k_vec_addmul_1)(c68k_limb *, const c68k_limb *, UINT,
+                                      c68k_limb);
+extern c68k_limb (*c68k_vec_div_2by1)(c68k_limb, c68k_limb, c68k_limb,
+                                      c68k_limb *);
+
+#define C68K_ADDMUL_1   (*c68k_vec_addmul_1)
+#define C68K_DIV_2BY1   (*c68k_vec_div_2by1)
+
+#else
+
+#define C68K_ADDMUL_1   c68k_addmul_1
+#define C68K_DIV_2BY1   c68k_div_2by1
+
+#endif
+
+
 /* ------------------------------------------------------------ Montgomery, */
 
 /*

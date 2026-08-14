@@ -448,61 +448,30 @@
            "This machine is running Kickstart " OSVER ".\n\n"
            "Nothing has been changed."))
 
-; --- which library this machine can run ----------------------------------
+; --- one library, every processor -----------------------------------------
 ;
-; The archive carries three builds of bsdsocket.library in Libs/68000,
-; Libs/68020-40 and Libs/68060, and this is where one of them is chosen.  It
-; used to be where the installer gave up on anything below a 68020.
+; THERE IS NOTHING TO PICK HERE ANY MORE, and that is the point.  The archive
+; used to carry three builds of bsdsocket.library -- Libs/68000, Libs/68020-40,
+; Libs/68060 -- and this is where `database "cpu"` chose between them.  Every
+; binary in the archive now runs on every 68k and chooses its own inner loops
+; from SysBase->AttnFlags when the library opens, so a 68000 and a 68060 install
+; the same file and each gets the code written for it.
 ;
-;   68000, 68010   the 68000 build.  A 68010 is a 68000 plus supervisor
-;                  instructions nothing here uses.
-;   68020..68040   the 68020-40 build.  A 68040 runs every 68020 instruction,
-;                  so this build is complete for it, which is why there is no
-;                  fourth drawer.
-;   68060          its own build: the 68060 dropped the 64-bit-result MULU.L
-;                  and DIVU.L, and the 68020-40 build uses both.  That build
-;                  WOULD run here -- 68060.library emulates them -- but at an
-;                  exception per multiply, which is the whole reason not to.
+; What that removes is the failure this section was built around: an owner who
+; picked the low drawer to be safe got a library with none of the faster
+; assembly in it, and on the encryption that was not a few percent.  Nobody can
+; pick wrong now.
 ;
-; The fallback is the 68020-40 build rather than an abort, because
-; `database "cpu"` on an older Installer does not know every processor and
-; guessing low is the answer that runs everywhere above a 68020.  A 68060
-; reported as something else therefore gets a library that works and is
-; slower, never one that does not load.
-(set CPU (database "cpu"))
-
-(set CPUDIR "68020-40")
-
-(if (patmatch "(68000|68010)" CPU) (set CPUDIR "68000"))
-(if (patmatch "68060"         CPU) (set CPUDIR "68060"))
-
-; What was detected, as an index into the list below, so the machine's own
-; answer is what the question defaults to.
-(set CPUPICK 2)
-(if (= CPUDIR "68000")   (set CPUPICK 1))
-(if (= CPUDIR "68060")   (set CPUPICK 3))
-
-(set S_LIBS (tackon S_LIBSBASE CPUDIR))
-
-; A 68000 GETS NO ENCRYPTION, AND HAS TO BE TOLD SO -- ON THE LAST PAGE.
-;
-; tls.library is built for 68020 and above only: on a 7 MHz 68000 the
-; public-key arithmetic takes longer than the far end will wait, so the archive
-; carries no 68000 build of it.  The check below only ever looked for
-; bsdsocket.library, so such a machine installed cleanly, said nothing, and
-; then answered `fetch https://...` with "needs LIBS:tls.library, and there is
-; none" -- which reads as a broken download rather than as a decision.
-;
-; NOT a (message): at NOVICE level -- the default, and an A500 or A600 owner is
-; exactly who has a 68000 -- (message) prints NOTHING, so the people who most
-; need this would never see it.  See the header of this file.  The final page
-; is shown at every level, so the fact is recorded here and said there.
+; Libs/minimal is still a drawer, and still a question further down, because it
+; is a FEATURE choice -- no IPv6, no .local names, no packet filter, no
+; encryption -- for somebody who has measured their memory.  MINPICK, not
+; CPUPICK, and it defaults to the full stack.
+(set MINPICK 0)
 
 (if (NOT (exists (tackon S_LIBS "bsdsocket.library") (noreq)))
-    (abort "This archive has no library for a " CPU ".\n\n"
-           "It should contain Libs/" CPUDIR ", and that drawer is missing or "
-           "empty.  The download is incomplete or was unpacked with a tool "
-           "that dropped the subdrawers.\n\n"
+    (abort "This archive has no Libs/bsdsocket.library.\n\n"
+           "The download is incomplete or was unpacked with a tool that "
+           "dropped the subdrawers.\n\n"
            "Nothing has been changed."))
 
 ; ==========================================================================
@@ -588,54 +557,46 @@
 ;  4.  Questions.  All of them, before anything is written.
 ; ==========================================================================
 
-; ASKED FOR, by a user who installs on one machine and moves the disk to
-; another: "I often install things on one machine and then take it to
-; another."  The detected processor is the right default and a wrong answer
-; for anyone doing that, so it is a default and not a decision.
+; ONE QUESTION, AND IT IS NOT ABOUT THE PROCESSOR.  It used to be: the archive
+; carried a library per CPU and this page asked which -- with the detected one
+; as the default, because a user who installs on one machine and moves the disk
+; to another said so ("I often install things on one machine and then take it
+; to another").  Every binary now runs on every 68k, so that question has no
+; answer left to get wrong and is gone.
+;
+; What remains is a real choice between two different stacks: the full one, and
+; the minimal one with IPv6, .local name lookups, the packet filter, encrypted
+; connections and IPv4 multicast left out.  It is about 104 KB smaller, which is
+; worth having on a 1 MB machine and worth nothing on a larger one.
 ;
 ; Nothing changes for a novice install.  At NOVICE every ask... returns its
-; (default) without showing anything, so the detected build is still what
-; goes on -- which is why the default has to be independently correct.
-(set CPUPICK
+; (default) without showing anything, so the full stack is what goes on.
+(set MINPICK
   (askchoice
-    (prompt "Which build of the network library should be installed?\n\n")
-    (help "Every build does the same things at the same time; they differ "
-          "only in which processor instructions they were compiled for. The "
-          "one for this machine is already selected.\n\n"
-          "Pick another when the disk is going into a different machine "
-          "than the one it is being installed on.\n\n"
-          "The 68000 build runs on every Amiga, including an 020 or better. "
-          "It is the safe answer for a disk that moves around.\n\n"
-          "The minimal build is the 68000 one with IPv6, .local name "
-          "lookups, the packet filter, encrypted connections and IPv4 "
-          "multicast left out. It is about 104 KB smaller, which is worth "
-          "having on a 1 MB machine and worth nothing on a larger one.\n\n"
-          "Encrypted (https:) connections need a 68020 or better whichever "
-          "build is chosen: the cryptography takes longer than the other end "
-          "will wait on a 68000.")
+    (prompt "Which stack should be installed?\n\n")
+    (help "Both run on every Amiga from a 68000 up: one binary picks the code "
+          "for this processor when the library opens, so there is nothing to "
+          "match to the machine and nothing to change if the disk moves to "
+          "another one.\n\n"
+          "The full stack is the one to install unless memory is tight.\n\n"
+          "The minimal stack leaves out IPv6, .local name lookups, the packet "
+          "filter, encrypted (https:) connections and IPv4 multicast. It is "
+          "about 104 KB smaller. On a 1 MB machine that is worth having; on a "
+          "larger one it is worth nothing.\n\n"
+          "Encrypted connections work on any processor with the full stack, "
+          "but on a 68000 a first handshake takes a minute or two. A repeat "
+          "connection to the same server is under a second.")
     ; 22 characters is the limit -- install/tools/checkscript.py enforces it,
-    ; because a longer gadget is dropped from the page without a word. So the
-    ; two omissions a user is most likely to miss go here and the full list is
-    ; in the help above, and in the message after installing.
-    (choices "68000, no IPv6/https:"
-             "68000, everything"
-             "68020 to 68040"
-             "68060")
-    (default CPUPICK)))
+    ; because a longer gadget is dropped from the page without a word.
+    (choices "Everything"
+             "Minimal, no IPv6/TLS")
+    (default MINPICK)))
 
-(if (= CPUPICK 0) (set CPUDIR "68000-minimal"))
-(if (= CPUPICK 1) (set CPUDIR "68000"))
-(if (= CPUPICK 2) (set CPUDIR "68020-40"))
-(if (= CPUPICK 3) (set CPUDIR "68060"))
-
-; From the base again, not from the detected path -- the answer above may not
-; be the machine's own build, which is the point of asking.  The drawer is
-; checked here as well as earlier: the first check was that the archive has
-; something for THIS machine, and this one is that it has what was asked for.
-(set S_LIBS (tackon S_LIBSBASE CPUDIR))
+; MINPICK 0 is the full stack at the top of Libs:, 1 is the minimal drawer.
+(if (= MINPICK 1) (set S_LIBS (tackon S_LIBSBASE "minimal")))
 
 (if (NOT (exists (tackon S_LIBS "bsdsocket.library") (noreq)))
-    (abort "This archive has no Libs/" CPUDIR " drawer.\n\n"
+    (abort "This archive has no " S_LIBS " with a bsdsocket.library in it.\n\n"
            "The download is incomplete, or was unpacked with a tool that "
            "dropped the subdrawers.\n\n"
            "Nothing has been changed."))
@@ -1022,7 +983,8 @@
 
 (copylib
   (prompt (cat "Installing bsdsocket.library into LIBS:\n\n"
-               "This is the build for a " CPU "."))
+               "One build for every processor: it picks the code for this "
+               "one when it opens."))
   (help   @copylib-help)
   (source (tackon S_LIBS "bsdsocket.library"))
   (dest   "LIBS:")
@@ -1039,12 +1001,16 @@
 
 ; --- anxnet.device -------------------------------------------------------
 ;
-; NOT INSTALLED HERE, DELIBERATELY.  The archive carries it in
-; Devs/Networks/<cpu>/ and a user who wants it copies it to DEVS:Networks and
-; names it in DEVS:NetInterfaces/<name> with a CARD= line.  It drives six
-; cards and beats the driver it replaces on every one of them, but it is new
-; and the installer is how a working machine gets changed, so it stays a
-; deliberate step until it has been run somewhere other than here.
+; NOT INSTALLED HERE, DELIBERATELY.  The archive carries it in Devs/Networks/
+; and a user who wants it copies it to DEVS:Networks and names it in
+; DEVS:NetInterfaces/<name> with a CARD= line.  It drives six cards and beats
+; the driver it replaces on every one of them, but it is new and the installer
+; is how a working machine gets changed, so it stays a deliberate step until it
+; has been run somewhere other than here.
+;
+; One build of it, like everything else in the archive: the drawer had a
+; subdrawer per CPU and does not any more.  Devs/Networks/minimal/ is the
+; minimal stack's copy, built with that stack's options.
 
 ; --- tls.library, if this archive has one --------------------------------
 ;
@@ -1085,26 +1051,21 @@
       (optional "force"))
   ))
 
-; A 68000 gets no tls.library, and saying nothing would leave the one machine
-; that cannot have it wondering why https: does not work.  Not an error, and
-; not a question -- the rest of the installation is unaffected.
+; THE ONLY WAY TO END UP WITHOUT ENCRYPTION IS TO HAVE ASKED FOR IT.  It used
+; to be the 68000's lot: the archive carried no tls.library for one, because a
+; 7 MHz machine's public-key arithmetic took longer than the far end would wait.
+; One binary settled that differently -- measured on an A600, a TLS 1.3
+; handshake completes in a minute or two and a resumed one in under a second --
+; so every processor gets it and only the minimal stack leaves it out.
 (if (NOT (exists (tackon S_LIBS "tls.library") (noreq)))
-    (if (= CPUDIR "68000-minimal")
-        ; Chosen, not imposed -- and worth restating, because what the smallest
-        ; build leaves out is easy to pick in one screen and be surprised by
-        ; later.
-        (message
-          "The smallest build was chosen, so several things are not "
-          "installed: encrypted (https:) connections, ssh, IPv6, .local name "
-          "lookups, the packet filter and IPv4 multicast.\n\n"
-          "The stack, the commands and ordinary http: work normally.  "
-          "Installing again and choosing another build brings the rest back.")
-        (message
-          "Encrypted (https:) connections are not installed: this build "
-          "carries no tls.library.\n\n"
-          "Everything else -- the stack, the commands, ordinary http:, ssh -- "
-          "works normally.  Installing again and choosing another build "
-          "brings https: back.")))
+    ; Chosen, not imposed -- and worth restating, because what the minimal
+    ; stack leaves out is easy to pick in one screen and be surprised by later.
+    (message
+      "The minimal stack was chosen, so several things are not installed: "
+      "encrypted (https:) connections, IPv6, .local name lookups, the packet "
+      "filter and IPv4 multicast.\n\n"
+      "The stack, the commands, ssh and ordinary http: work normally.  "
+      "Installing again and choosing Everything brings the rest back."))
 
 (set @special-msg "")
 
@@ -1138,39 +1099,22 @@
           "them to read and write.\n\nAll of "
           "them are installed: they are small, and missing the one command "
           "that turns out to be wanted is worse than a few extra files "
-          "in C:.  ssh is installed separately, just after these, because "
-          "it is the one command with a build per processor.")
+          "in C:.  ssh comes with them.")
   (source S_C)
   (dest   "C:")
-  (pattern "~(ssh.#?)")
+  ; (all), because a copyfiles from a DRAWER needs one of (all) or (pattern)
+  ; and answers "Bad parameters for copying from drawer" without either.  It
+  ; used to be (pattern "~(ssh.#?)"), keeping the per-CPU ssh.000/.020/.060 out
+  ; of the wholesale copy; there is one ssh now and it comes with the rest.
+  (all)
   (optional "force"))
 
-; Dropbear comes from clients/ rather than the CMake tree, so it is built once
-; per architecture: the archive carries ssh.000, ssh.020 and ssh.060 beside
-; the other commands and this copies the one for this machine to C:ssh.  The
-; pattern above keeps the suffixed set itself out of C:; only the copy under
-; the plain name lands.
-;
-; A 68000 gets one too.  It is slower there, which is not a reason to leave
-; it out: the machine that can run it should have it.
-(set SSHFILE "")
-(if (= CPUDIR "68000")    (set SSHFILE "ssh.000"))
-(if (= CPUDIR "68020-40") (set SSHFILE "ssh.020"))
-(if (= CPUDIR "68060")    (set SSHFILE "ssh.060"))
-
-(if (> (strlen SSHFILE) 0)
-    (if (exists (tackon S_C SSHFILE) (noreq))
-        (copyfiles
-          (prompt "Installing ssh into C:")
-          (help   "Dropbear's dbclient, the SSH client.  It brings its own "
-                  "argument handling and its own 256 KB stack, but wants "
-                  "mathieeedoubbas.library in LIBS:, which every Workbench "
-                  "installation has.  There is one build per processor and "
-                  "this is the one for yours.")
-          (source  (tackon S_C SSHFILE))
-          (dest    "C:")
-          (newname "ssh")
-          (optional "force" "nofail"))))
+; ssh went into C: with the copy above.  It used to need its own step and a
+; pattern that kept ssh.000, ssh.020 and ssh.060 out of the wholesale copy,
+; because Dropbear comes from clients/ rather than the CMake tree and was built
+; once per architecture; the one binary carries both X25519 field multiplies and
+; picks at the first handshake, so it is just another command now.  A 68000 gets
+; it too: slower is not a reason to leave it out.
 
 (complete 55)
 

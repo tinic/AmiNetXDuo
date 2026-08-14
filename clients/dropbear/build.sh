@@ -352,11 +352,22 @@ if [ "$STOCK25519" = "0" ]; then
     #
     # dbclient compiles c68k_25519.c itself rather than linking the crypto68k
     # archive, so the .S has to be assembled here too.
+    #
+    # AMINETXDUO_CLIENT_ANY=1 builds ONE ssh for the whole family instead:
+    # -m68000 code, both halves of c68k_25519.S assembled, and the choice made
+    # from AttnFlags at the first handshake (clients/dropbear/amiga_25519.c).
+    # It is the same arrangement AMINETXDUO_CPU=any gives the two libraries,
+    # and it matters more here than anywhere: an ssh handshake is 97% public
+    # key arithmetic (docs/RESEARCH.md 35), so the wrong binary is not a few
+    # percent, it is the difference between 12 s and 84 s.
     case "$AMIGA_CLIENT_ARCH" in
         *68020*|*68030*|*68040*) C68K_25519_ASM="-DC68K_ASM=1" ;;
         *68000*|*68010*|*68060*) C68K_25519_ASM="-DC68K_ASM_MULW=1" ;;
         *)                       C68K_25519_ASM="" ;;
     esac
+    if [ -n "${AMINETXDUO_CLIENT_ANY:-}" ]; then
+        C68K_25519_ASM="-DC68K_MV=1"
+    fi
 
     # AMINETXDUO_25519_NOASM=1 takes the portable C on any part.  It is the
     # other arm of the A/B the assembly has to justify itself against, and it
@@ -372,7 +383,20 @@ if [ "$STOCK25519" = "0" ]; then
                  "$ROOT/src/crypto68k/c68k_25519.c"
     SHIM_OBJS+=("$C68K_O")
 
-    if [ -n "$C68K_25519_ASM" ]; then
+    if [ -n "${AMINETXDUO_CLIENT_ANY:-}" ]; then
+        # Both halves, each assembled for what it needs and named apart, the
+        # way src/crypto68k/CMakeLists.txt does it for tls.library.
+        for half in "mulu:-DC68K_ASM=1:-m68020" "mulw:-DC68K_ASM_MULW=1:-m68000"; do
+            sfx="${half%%:*}"; rest="${half#*:}"
+            hdef="${rest%%:*}"; harch="${rest##*:}"
+            C68K_ASM_O="$CLIENT_OBJ/db-c68k_25519_$sfx.o"
+            echo "  AS c68k_25519.S $hdef $harch"
+            "$AMIGA_GCC" $harch $hdef -DC68K_MV=1 -DC68K_MV_SUFFIX="_$sfx" \
+                         -I"$ROOT/src/crypto68k" -c -o "$C68K_ASM_O" \
+                         "$ROOT/src/crypto68k/c68k_25519.S"
+            SHIM_OBJS+=("$C68K_ASM_O")
+        done
+    elif [ -n "$C68K_25519_ASM" ]; then
         C68K_ASM_O="$CLIENT_OBJ/db-c68k_25519_asm.o"
         echo "  AS c68k_25519.S $C68K_25519_ASM"
         "$AMIGA_GCC" $AMIGA_CLIENT_ARCH $C68K_25519_ASM \

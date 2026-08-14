@@ -101,8 +101,15 @@ VOID c68k_poly1305_blocks(C68K_POLY1305 *ctx, const UCHAR *m, ULONG blocks,
 VOID c68k_poly1305_blocks_c(C68K_POLY1305 *ctx, const UCHAR *m, ULONG blocks,
                             ULONG hibit);
 
-/* NX_CRYPTO_TRUE when this build's block function is the assembly. */
+/* NX_CRYPTO_TRUE when this build's block function is the assembly.  In an
+   AMINETXDUO_CPU=any build that is a run-time answer: c68k_cpu_select() has
+   pointed the vector below at one of the two above. */
 UINT c68k_poly1305_blocks_is_asm(VOID);
+
+#ifdef C68K_MV
+extern VOID (*c68k_vec_poly1305_blocks)(C68K_POLY1305 *, const UCHAR *, ULONG,
+                                        ULONG);
+#endif
 
 #ifdef __cplusplus
 }

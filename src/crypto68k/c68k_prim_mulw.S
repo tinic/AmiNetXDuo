@@ -73,6 +73,8 @@
 
 #ifdef C68K_ASM_MULW
 
+#include "c68k_variant.h"
+
         .text
         .align  2
 
@@ -86,8 +88,8 @@
 | return address: r at 32(sp), b at 36(sp), n at 40(sp), a at 44(sp).
 | ---------------------------------------------------------------------------
 
-        .globl  _c68k_addmul_1
-_c68k_addmul_1:
+        .globl  C68K_MV_SYM(_c68k_addmul_1)
+C68K_MV_SYM(_c68k_addmul_1):
         movem.l d2-d7/a2,-(sp)          | 7 longs
         move.l  40(sp),d0               | n, and MOVE sets Z for the test
         beq     Lam60_zero

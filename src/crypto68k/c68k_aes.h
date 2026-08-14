@@ -126,7 +126,15 @@ VOID c68k_aes_cbc_decrypt(const C68K_AES *aes, UCHAR *iv,
  * AMINETXDUO_CRYPTO68K_ASM=OFF, one of CI's four configurations, so the
  * reported variant never names code that is not there.
  */
-#ifdef C68K_ASM
+#if defined(C68K_MV)
+/*
+ * One binary for every CPU starts on the C and is moved to the assembly by
+ * c68k_cpu_select() when AttnFlags says 68020 or better.  The kernels need the
+ * scaled index and nothing else -- an instruction the 68060 kept -- so this
+ * follows "has the 68020 addressing modes", not "has the 64-bit MULU.L".
+ */
+#define C68K_AES_V_BEST     C68K_AES_V_T4_C
+#elif defined(C68K_ASM_AES)
 #define C68K_AES_V_BEST     C68K_AES_V_T4_ASM
 #else
 #define C68K_AES_V_BEST     C68K_AES_V_T4_C

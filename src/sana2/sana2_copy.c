@@ -47,7 +47,7 @@
  */
 VOID ami_sana2_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
 {
-    n68k_copy_bytes(to, from, len);
+    N68K_COPY_BYTES(to, from, len);
 }
 
 /*
@@ -112,7 +112,7 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
         ULONG   words =  len >> 2;
         ULONG   tail  =  len & 3UL;
 
-        slot->sum = n68k_copy_sum_longwords((ULONG *)slot->dst,
+        slot->sum = N68K_COPY_SUM_LONGWORDS((ULONG *)slot->dst,
                                             (const ULONG *)from, words);
 
         if (tail != 0UL)
@@ -217,7 +217,7 @@ static ULONG ami_sana2_copy_sum(UCHAR *to, const UCHAR *from, ULONG len)
     words = len >> 2;
     tail  = len & 3UL;
 
-    sum = n68k_copy_sum_longwords((ULONG *)(void *)to,
+    sum = N68K_COPY_SUM_LONGWORDS((ULONG *)(void *)to,
                                   (const ULONG *)(const void *)from, words);
 
     if (tail != 0UL)

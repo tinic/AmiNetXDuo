@@ -30,9 +30,9 @@
 #                                    installer creates on the user's disk
 #       ReadMe  ReadMe.info
 #       C/                           the commands
-#       Libs/68000/                  one drawer per CPU; the installer picks
-#       Libs/68020-40/               the one this machine can run
-#       Libs/68060/
+#       Libs/                        the libraries: ONE build, every 68k
+#       Libs/minimal/                the same stack with the big options out
+#       Devs/Networks/               the SANA-II drivers, one build
 #       Devs/Internet/               protocols, services, networks
 #       Docs/  Docs.info             the manual, from docs/user/
 #       Examples/  Examples.info     commented configuration files
@@ -90,7 +90,7 @@ need() {
 
 LIBS=(bsdsocket usergroup)
 
-# SANA-II drivers, DEVS:Networks/.  Per CPU, like the libraries and unlike the
+# SANA-II drivers, DEVS:Networks/.  From the same build as the libraries and
 # commands: this is interrupt-level packet handling, not a shell command whose
 # hot work happens inside a library.
 #
@@ -105,101 +105,80 @@ CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ShowNetServices
       ConfigureNetInterface
       AddNetRoute DeleteNetRoute)
 
-# ---------------------------------------------------------- the CPU builds --
+# ------------------------------------------------------------- the builds --
 #
-# ONE ARCHIVE, THREE LIBRARIES, and the installer picks.  The alternative --
-# three archives, was rejected: the thing a user has to get right is the one
-# thing they cannot see from the outside, and an Amiga owner who downloads the
-# wrong one gets either a machine that will not boot the stack or a library
-# that quietly runs emulated instructions.  The installer already reads
-# DEVS: to find the network card, so reading `database "cpu"` to pick a
-# library is in keeping rather than a new kind of magic.
+# ONE ARCHIVE, ONE SET OF BINARIES.  There is no CPU in here any more and the
+# installer does not ask: every library, device and command is built -m68000 and
+# picks its own inner loops from SysBase->AttnFlags at init
+# (src/net68k/n68k_cpu.c, src/crypto68k/c68k_cpu.c).  What used to be four
+# drawers keyed on `database "cpu"` -- 68000, 68000-minimal, 68020-40, 68060 --
+# is now one, plus `minimal`, which is a FEATURE choice and not a CPU one.
 #
-# THREE, NOT FOUR, and this is the part worth reading.  The toolchain has
-# multilibs for `.` (68000), `libm020` and `libm060`, and those three cover
-# every 68k Amiga:
+# That removes the failure this archive was shaped around.  A user who picked
+# the low drawer to be safe got a library with none of the 68020 assembly, and
+# on crypto that is not a few percent: a 68060 running the portable bignums
+# spends 64% of a TLS 1.3 transfer in one function.  Nobody can pick wrong now
+# because there is nothing to pick.
 #
-#   68000     68000 and 68010.
-#   68020-40  68020, 68030 and 68040.  A 68040 implements the whole 68020
-#             instruction set, so the 020 build is COMPLETE for it, there is
-#             no 68040 multilib to link against and -m68040 would silently
-#             select the 68000 C library.  AMINETXDUO_CPU=68040 exists for
-#             someone building their own tuned copy; it produces the same
-#             instructions and is not worth a fourth of everything in here.
-#   68060     genuinely different: the 68060 dropped MULU.L's and DIVU.L's
-#             64-bit-result forms, so it needs its own codegen.
+# minimal is the same stack with IPv6, mDNS, the packet filter, TLS and IPv4
+# multicast compiled out: 225 KB against the full build's 308 KB, 83 KB of
+# options, both stripped.  It is for somebody who has measured their 1 MB
+# machine and decided, which is why it is a drawer and not a threshold: a stack
+# that silently drops IPv6 and .local resolution on a machine that could have
+# run them is a support question, not a saving.
 #
-# The naming is AmiSSL's, which ships exactly `68020-40` and `68060` drawers,
-# because a user who has seen one will recognise the other.  docs/RESEARCH.md
-# §45.
-#
-# The build directories are derived from -b rather than named separately, so
-# `-b build/release` wants build/release-68000 and build/release-68060 beside
-# it and cannot be pointed at a tree from a different commit by accident.
-#
-# AMINETXDUO_DIST_CPUS names a subset, for building a test archive from one
-# build tree, install/test/run-installer-fsuae.sh uses it, because it boots
-# one emulated machine and only ever installs one of the three.  A RELEASE
-# must not set it: the installer aborts on a machine whose drawer is absent,
-# which is the right behaviour for a damaged download and the wrong thing to
-# discover about your own archive.
-CPU_DIRS=(${AMINETXDUO_DIST_CPUS:-68000 68000-minimal 68020-40 68060})
-declare -A CPU_BUILD=(
-    [68000]="${AMINETXDUO_BUILD_68000:-$BUILD-68000}"
-    [68000-minimal]="${AMINETXDUO_BUILD_68000_MINIMAL:-$BUILD-68000-minimal}"
-    [68020-40]="$BUILD"
-    [68060]="${AMINETXDUO_BUILD_68060:-$BUILD-68060}"
-)
+# The build directory is derived from -b, so `-b build/release` wants
+# build/release-minimal beside it and cannot be pointed at a tree from a
+# different commit by accident.
+MINIMAL_BUILD="${AMINETXDUO_BUILD_MINIMAL:-$BUILD-minimal}"
+case "$MINIMAL_BUILD" in /*) ;; *) MINIMAL_BUILD="$ROOT/$MINIMAL_BUILD" ;; esac
 
-# 68000-minimal is the same stack with IPv6, mDNS, the packet filter, TLS and
-# IPv4 multicast compiled out: 225 KB against the 68000 drawer's 308 KB, 83 KB
-# of options.  Both figures are stripped, which they were not when this drawer
-# was introduced -- it was the only one the release workflow stripped by hand,
-# so 40 KB of the gap it used to claim was symbol table the other drawers were
-# carrying and this one was not.  The free-memory figure §81 measured on the
-# 1 MB machine predates the strip and is now conservative by that much.
-#
-# Multicast is the cheapest of the five at 3,888 bytes (3,696 of code and the
-# 192-byte membership table) and is out for the same reason the others are:
-# this drawer is what somebody installs having measured their machine.
-#
-# NOT what the installer picks.  It is here for somebody who has measured
-# their machine and decided, which is why it is a drawer rather than a
-# threshold: a stack that silently drops IPv6 and .local resolution on a
-# machine that could have run them is a support question, not a saving.
+# AMINETXDUO_DIST_NO_MINIMAL=1 packs the full build alone, for a test archive
+# from one build tree.  A RELEASE must not set it.
+WANT_MINIMAL=1
+[ -z "${AMINETXDUO_DIST_NO_MINIMAL:-}" ] || WANT_MINIMAL=0
 
-# THE COMMANDS ARE BUILT ONCE, FOR THE 68000, and every machine runs that one
-# set.  They are not where the work happens: each is a few hundred lines around
-# bsdsocket.library calls, and the code whose instruction set actually matters
-# the checksums, the copies, the bignums, is inside the libraries, which
-# ARE per-CPU.  Twenty-one commands times three would add roughly 9 MB to the
-# archive to make `ping` parse its arguments faster.
-#
-# It costs nothing in features: src/tools/CMakeLists.txt notes that one binary
-# serves both -DAMINETXDUO_TLS=ON and OFF, because fetch opens LIBS:tls.library
-# at run time rather than linking it.  So the 68000-built fetch still does
-# https on a machine whose installed library has TLS.
+BUILDS=("$BUILD")
+[ "$WANT_MINIMAL" = "0" ] || BUILDS+=("$MINIMAL_BUILD")
 
-for cpu in "${CPU_DIRS[@]}"; do
-    b="${CPU_BUILD[$cpu]}"
-    case "$b" in /*) ;; *) b="$ROOT/$b"; CPU_BUILD[$cpu]="$b" ;; esac
+# WHAT IS IN THE TREE IS WHAT GETS PACKED, so check that it is the build that
+# runs everywhere.  A build directory configured before the default changed --
+# or by hand for a measurement -- still has AMINETXDUO_CPU=68020 in its cache,
+# CMake keeps a cached value across a reconfigure, and the result is an archive
+# that promises every 68k and contains a library that stops a 68000 on an
+# illegal instruction.  That happened here once, and nothing said a word: the
+# libraries were the right size for what they were and the wrong thing entirely.
+cpu_of() {
+    sed -n 's/^AMINETXDUO_CPU:STRING=//p' "$1/CMakeCache.txt" 2>/dev/null
+}
+
+for b in "${BUILDS[@]}"; do
     [ -d "$b" ] || {
-        echo "missing the $cpu build: $b" >&2
+        echo "missing build: $b" >&2
         echo "  cmake -S . -B $b -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \\" >&2
-        echo "        -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_CPU=${cpu%%-*}" >&2
+        echo "        -DCMAKE_BUILD_TYPE=Release" >&2
         echo "  cmake --build $b --parallel" >&2
         exit 2
     }
+    got=$(cpu_of "$b")
+    [ "$got" = "any" ] || {
+        echo "!! $b was configured with AMINETXDUO_CPU=${got:-unset}." >&2
+        echo "!! The archive has no CPU drawers: one build serves every 68k," >&2
+        echo "!! and a per-CPU one packed into it would stop a machine it was" >&2
+        echo "!! not built for.  Configure it fresh -- a cached value survives" >&2
+        echo "!! a reconfigure -- or pass -DAMINETXDUO_CPU=any." >&2
+        exit 2
+    }
+
     for lib in "${LIBS[@]}"; do need "$b/src/$lib/$lib.library"; done
     for dev in "${DEVICES[@]}"; do need "$b/src/$dev.device"; done
 done
 
-# Normally the 68000 build, per the note above.  When AMINETXDUO_DIST_CPUS has
-# excluded it there is no 68000 tree to take them from, so a subset archive
-# falls back to the primary build, which is right for what that option is
-# for, and never happens in a release.
-CMD_BUILD="${CPU_BUILD[68000]:-$BUILD}"
-[ -d "$CMD_BUILD" ] || CMD_BUILD="$BUILD"
+# The commands come from the full build, which is the only build there is for
+# them: src/tools/CMakeLists.txt notes that one binary serves both
+# -DAMINETXDUO_TLS=ON and OFF, because fetch opens LIBS:tls.library at run time
+# rather than linking it, so even a minimal installation runs these.
+CMD_BUILD="$BUILD"
 
 for cmd in "${CMDS[@]}"; do need "$CMD_BUILD/src/tools/$cmd"; done
 
@@ -242,40 +221,48 @@ rm -rf "$TREE" "$OUTDIR/AmiNetXDuo.info"
 mkdir -p "$TREE/C" "$TREE/Libs" "$TREE/Devs/Internet" "$TREE/Devs/Networks" \
          "$TREE/Docs" "$TREE/Examples" "$TREE/Terminal"
 
-for cpu in "${CPU_DIRS[@]}"; do
-    mkdir -p "$TREE/Libs/$cpu"
+# The full build at the top of Libs: and Devs/Networks:, minimal one drawer
+# down.  tls.library ships with the bsdsocket.library FROM THE SAME BUILD --
+# the two share struct layouts and a private context ABI
+# (include/aminetxduo/nxcontext.h) -- which one directory per build keeps
+# impossible to get wrong.
+#
+# THE 68000 GETS ENCRYPTION NOW.  There used to be no 68000 tls.library at all:
+# §9's M9 gate measured the handshake on the 68020 floor and rejected it below.
+# One binary settles that differently, because it is the same binary -- measured
+# on an A600 under Amiberry, TLS 1.3 completes in 58.4 s against an RSA leaf and
+# 97.7 s against an EC one, and session resumption takes a repeat connection to
+# well under a second (13).  Slow is a thing a user can decide about; absent is
+# not.
+stage_build() {          # $1 = build dir, $2 = "" for the top or a drawer name
+    local b="$1" sub="$2"
+    local libs="$TREE/Libs${sub:+/$sub}"
+    local devs="$TREE/Devs/Networks${sub:+/$sub}"
+    local lib dev
+
+    mkdir -p "$libs" "$devs"
     for lib in "${LIBS[@]}"; do
-        cp "${CPU_BUILD[$cpu]}/src/$lib/$lib.library" "$TREE/Libs/$cpu/"
+        cp "$b/src/$lib/$lib.library" "$libs/"
     done
-
-    # tls.library ships with the bsdsocket.library FROM THE SAME BUILD: the two
-    # share struct layouts and a private context ABI, so a 68060 tls.library
-    # beside a 68020 bsdsocket.library is not a supported combination even
-    # though both would load (include/aminetxduo/nxcontext.h).  Per-CPU
-    # drawers make that impossible to get wrong.
-    #
-    # There is deliberately no 68000 tls.library.  §9's M9 gate measured the
-    # handshake on the 68020 floor and rejected it there; a 7 MHz 68000 with
-    # no 32-bit multiply is not the machine that changes that answer.  The
-    # stack ships for the 68000, the encryption does not, and the installer
-    # says so rather than leaving a drawer mysteriously short of a file.
-    if [ -f "${CPU_BUILD[$cpu]}/src/tlslib/tls.library" ]; then
-        cp "${CPU_BUILD[$cpu]}/src/tlslib/tls.library" "$TREE/Libs/$cpu/"
-        echo "==> $cpu: bsdsocket, usergroup, tls"
+    if [ -f "$b/src/tlslib/tls.library" ]; then
+        cp "$b/src/tlslib/tls.library" "$libs/"
+        echo "==> ${sub:-full}: bsdsocket, usergroup, tls"
     else
-        echo "==> $cpu: bsdsocket, usergroup (no tls.library in this build)"
+        echo "==> ${sub:-full}: bsdsocket, usergroup (no tls.library in this build)"
     fi
-    chmod 755 "$TREE/Libs/$cpu"/*
+    chmod 755 "$libs"/*
 
-    mkdir -p "$TREE/Devs/Networks/$cpu"
     for dev in "${DEVICES[@]}"; do
-        cp "${CPU_BUILD[$cpu]}/src/$dev.device" "$TREE/Devs/Networks/$cpu/"
+        cp "$b/src/$dev.device" "$devs/"
     done
-    chmod 755 "$TREE/Devs/Networks/$cpu"/*
-done
+    chmod 755 "$devs"/*
+}
+
+stage_build "$BUILD" ""
+[ "$WANT_MINIMAL" = "0" ] || stage_build "$MINIMAL_BUILD" "minimal"
 
 # The trust store comes from the primary build, and is packed whenever any
-# CPU build produced a tls.library.
+# build produced a tls.library.
 if [ -f "$BUILD/src/tlslib/tls.library" ]; then
 
     # A trust store is not optional when tls.library is packed: without one the
@@ -324,31 +311,22 @@ chmod 755 "$TREE"/C/*
 #
 # AMINETXDUO_SSH names the built binary outright, the release workflow sets
 # it, so the path it builds into and the path packed here cannot drift.
-# ONE PER CPU, all in C:.  dbclient is the only thing in the archive that
-# comes from clients/ rather than the CMake tree, so it is built once per
-# architecture rather than inheriting the CMake target's.  Copying the drawer
-# wholesale would put a 68020 binary on a 68000 machine: the installer offered
-# it, the user ran it, and the machine took an illegal instruction.
+# ONE ssh, in C:, like everything else.  It used to be three -- ssh.000,
+# ssh.020 and ssh.060, with the installer copying the one this machine could run
+# -- because dbclient comes from clients/ rather than the CMake tree and was
+# built once per architecture, and copying the drawer wholesale had put a 68020
+# binary on a 68000 machine: the installer offered it, the user ran it, and the
+# machine took an illegal instruction.
 #
-# So the archive carries ssh.000, ssh.020 and ssh.060 and the installer copies
-# the one this machine can run to C:ssh.  The suffixed set exists only inside
-# the archive; what lands on the disk is C:ssh, where it has always been.
+# clients/dropbear/build.sh with AMINETXDUO_CLIENT_ANY=1 builds one instead: the
+# code is -m68000 and both X25519 field multiplies are in it, the MULU.L one and
+# the four-MULU.W one, picked from AttnFlags at the first handshake
+# (clients/dropbear/amiga_25519.c).  That matters more here than anywhere else
+# in the archive -- an ssh handshake is 97% public-key arithmetic (35), so the
+# wrong binary was never a few percent.
 #
-# AMINETXDUO_SSH_68000, _68020 and _68060 name the three builds; the release
-# workflow runs clients/dropbear/build.sh once per architecture to make them.
-declare -A SSH_BUILD=(
-    [000]="${AMINETXDUO_SSH_68000:-$ROOT/build/ssh00/dbclient}"
-    [020]="${AMINETXDUO_SSH_68020:-$ROOT/build/ssh20/dbclient}"
-    [060]="${AMINETXDUO_SSH_68060:-$ROOT/build/ssh60/dbclient}"
-)
-for sshcpu in "${!SSH_BUILD[@]}"; do
-    src="${SSH_BUILD[$sshcpu]}"
-    [ -x "$src" ] || continue
-    cp "$src" "$TREE/C/ssh.$sshcpu"
-    chmod 755 "$TREE/C/ssh.$sshcpu"
-    echo "==> including ssh.$sshcpu ($(wc -c < "$src" | tr -d ' ') bytes)"
-done
-
+# AMINETXDUO_SSH names the built binary outright; the release workflow sets it,
+# so the path it builds into and the path packed here cannot drift.
 CLIENT_SSH="${AMINETXDUO_SSH:-}"
 if [ -n "$CLIENT_SSH" ] && [ -x "$CLIENT_SSH" ]; then
     cp "$CLIENT_SSH" "$TREE/C/ssh"
@@ -428,7 +406,7 @@ cp "$INSTALL/Document.info" "$TREE/Developer/ReadMe.info"
 # a 68020 has a usable cycle model, so what this stack costs on a 68060 with a
 # real card is not currently knowable any other way.
 #
-# The 68000 build, like the commands and for the same reason: the sampling
+# The one build, like the commands and for the same reason: the sampling
 # handler is assembly and identical on every 68k, and nothing else in the tool
 # is on a hot path.  One binary runs on every machine.
 #

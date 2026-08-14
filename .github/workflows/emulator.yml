@@ -427,28 +427,25 @@ jobs:
       # ADFs and the Installer, so it is skipped rather than failed where they
       # are not configured; the arm table says so per arm.
       #
-      # The four configurations are built here rather than inside the arm
-      # because building them is worth doing on its own: they are what
-      # .github/workflows/release.yml packs, so a break in one of them is a
-      # break in something a user downloads, whether or not this machine has
-      # the floppies to install it on.
+      # TWO configurations, and they are what .github/workflows/release.yml
+      # packs, so a break in either is a break in something a user downloads,
+      # whether or not this machine has the floppies to install it on.  It was
+      # four -- one per CPU -- until the CPU left the archive.
       - name: Build the release archive
         id: dist
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
-          for d in cm:68020 cm-68000:68000 cm-68060:68060; do
-            cmake -S . -B "build/${d%%:*}" \
-                  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
-                  -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_CPU="${d##*:}"
-            cmake --build "build/${d%%:*}" --parallel
-          done
-          cmake -S . -B build/cm-68000-minimal \
+          cmake -S . -B build/cm \
                 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
-                -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_CPU=68000 \
+                -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/cm --parallel
+          cmake -S . -B build/cm-minimal \
+                -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
+                -DCMAKE_BUILD_TYPE=Release \
                 -DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF \
                 -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF \
                 -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF
-          cmake --build build/cm-68000-minimal --parallel
+          cmake --build build/cm-minimal --parallel
           dist/make-dist.sh
 
       # -H IS THE HALF THIS ARM CLAIMS TO DO, and it is why the arm goes

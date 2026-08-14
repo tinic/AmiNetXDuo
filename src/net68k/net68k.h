@@ -61,6 +61,47 @@ USHORT n68k_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
  */
 VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len);
 
+/*
+ * Point the three routines above at the forms this machine wants, from an
+ * AttnFlags the caller supplies -- SysBase->AttnFlags, and it is a parameter
+ * so that nothing here has to have an ExecBase of its own.  Call it once,
+ * before the first packet; bsd_lib_init() does.
+ *
+ * Only the `any` build has anything to choose (n68k_variant.h).  Everywhere
+ * else this is an empty function, so a caller need not know which build it is
+ * in, and skipping it is a slow stack rather than a broken one.
+ */
+VOID n68k_cpu_select(ULONG attnflags);
+
+/*
+ * What the stack's own callers use.  In an `any` build the three names above
+ * are trampolines -- a load and a jump, ~20 cycles, which is 2.5% of a 20-byte
+ * memcpy on a 68000 and nothing at all on a 288-byte one -- and they exist for
+ * callers this tree does not own: the vendored code that reaches memcpy(), the
+ * benches, the tests.  Anything in here that is on the data path goes through
+ * the vector instead and pays only the indirection the call already needed.
+ *
+ * Everywhere else these are the plain names and the call is direct, so the
+ * per-CPU builds are exactly what they always were.
+ */
+#ifdef N68K_MV_MULTI
+
+extern ULONG (*n68k_vec_sum)(const ULONG *, ULONG);
+extern ULONG (*n68k_vec_copy_sum)(ULONG *, const ULONG *, ULONG);
+extern VOID  (*n68k_vec_copy)(UCHAR *, const UCHAR *, ULONG);
+
+#define N68K_SUM_LONGWORDS      (*n68k_vec_sum)
+#define N68K_COPY_SUM_LONGWORDS (*n68k_vec_copy_sum)
+#define N68K_COPY_BYTES         (*n68k_vec_copy)
+
+#else
+
+#define N68K_SUM_LONGWORDS      n68k_sum_longwords
+#define N68K_COPY_SUM_LONGWORDS n68k_copy_sum_longwords
+#define N68K_COPY_BYTES         n68k_copy_bytes
+
+#endif
+
 #ifdef __cplusplus
 }
 #endif
