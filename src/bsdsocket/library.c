@@ -490,6 +490,12 @@ static struct AmiSocketBase *bsd_lib_init(
        call that picks; anywhere else it does nothing.  src/net68k/n68k_cpu.c. */
     n68k_cpu_select((ULONG)sysbase->AttnFlags);
 
+    /* And the compiler runtime: this binary is -m68000 code, so every 32-bit
+       multiply and divide GCC could not emit is a call into src/common, and
+       those five routines have a one-instruction form on anything from a
+       68020 up.  ami_udivdi3.c. */
+    ami_rt_cpu_select(((ULONG)sysbase->AttnFlags & AFF_68020) != 0UL);
+
     /* A shared library gets no C startup: dos.library and the random number
        generator are ours to set up (library_runtime.c). */
     if (!bsd_runtime_open())

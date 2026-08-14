@@ -111,6 +111,16 @@ VOID ami_mem_open_delta(LONG delta);
  */
 VOID ami_log(int level, const char *fmt, ...);
 
+/*
+ * The compiler runtime's own CPU choice.  src/common/ami_udivdi3.c supplies
+ * __mulsi3, __udivsi3, __umodsi3, __divsi3 and __modsi3, because this
+ * toolchain ships a zero-byte libgcc and a -m68000 build calls all five; each
+ * has a one-instruction form from the 68020 up, and this is what turns it on.
+ * Pass non-zero when SysBase->AttnFlags has AFF_68020.  Never calling it means
+ * the 68000 routines, which are correct everywhere.
+ */
+void ami_rt_cpu_select(int have_68020);
+
 #ifdef AMINETXDUO_DEBUG
 #  define AMI_DEBUG(...)  ami_log(AMI_LOG_DEBUG, __VA_ARGS__)
 #  define AMI_TRACE(...)  ami_log(AMI_LOG_TRACE, __VA_ARGS__)

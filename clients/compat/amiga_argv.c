@@ -27,6 +27,7 @@
 #include <exec/types.h>
 #include <exec/memory.h>
 #include <exec/tasks.h>
+#include <exec/execbase.h>   /* AttnFlags, for ami_rt_cpu_select() */
 #include <dos/dosextens.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -300,6 +301,19 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
 
     (void)argc_ignored;
     (void)argv_ignored;
+
+    /* The compiler runtime's CPU choice, before anything this program does.
+       A ported client is -m68000 code -- one binary for every 68k -- so every
+       32-bit multiply and divide is a call into src/common/ami_udivdi3.c, and
+       those five have a one-instruction form from the 68020 up.  It is the
+       whole difference between a 5 s ssh handshake on an A1200 and a slower
+       one; declared here rather than included because this file is compat
+       glue and pulls in no headers of ours. */
+    {
+        extern void ami_rt_cpu_select(int have_68020);
+
+        ami_rt_cpu_select((SysBase->AttnFlags & AFF_68020) != 0);
+    }
 
     /*
      * A Workbench launch has no CLI, and GetArgStr()/GetProgramName() are a
