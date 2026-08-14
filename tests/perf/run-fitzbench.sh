@@ -45,6 +45,12 @@
 #   smoke test for the harness, not a measurement: read nothing into the
 #   numbers it prints.
 #
+# -N NAMES THE CARD AND ITS DRIVER BOTH.  The board key goes to the emulator,
+# and tools/sana2-stage.sh's table decides which SANA-II driver is staged and
+# what DEVS:NetInterfaces/eth0 asks for.  A card whose driver is not on this
+# host is refused before the boot rather than booted into "the network would not
+# start".  Amiberry only: the other two branches boot an a2065 and say so.
+#
 # THE PEER MUST BE A THIRD MACHINE.  A frame the emulator's host sends to the
 # guest's MAC leaves its NIC and never comes back to that NIC's own pcap
 # capture, so a server on the host is unreachable from the guest while being
@@ -221,6 +227,62 @@ fi
 [ -n "$A2065" ] && [ -f "$A2065" ] || {
     echo "No a2065.device found. Set AMINETXDUO_A2065=<path>." >&2; exit 2; }
 
+# ------------------------------------------------------------------ board ---
+#
+# -N names the card the emulator puts in the machine, and a card that is not
+# the a2065 needs ITS driver on the disk and an eth0 that names that driver.
+# Staging below copied a2065.device unconditionally and left DEVICE=a2065.device
+# in place whatever -N said, so `-N ne2000_pcmcia` booted a machine holding an
+# NE2000 and a guest asking for a card that was not in it: "AddNetInterface: the
+# network would not start", both FitzBench arms printing RESULT FAILED, and this
+# script exiting 0 over it.  Resolve the driver HERE, before a boot and before a
+# server on the peer, and refuse when this host has not got it.
+#
+# board -> driver is tools/sana2-stage.sh, the table the card sweeps use.  The
+# VENDOR driver, not anxnet.device: this measures the stack over whatever
+# already works, and cnet.device is the measured-good ne2000 arm.  A driver of
+# ours is benchmarked by naming it, which the two knobs below still do.
+. "$ROOT/tools/sana2-stage.sh"
+
+# The keys tools/amiberry-run.sh:228 knows.  Repeated rather than derived
+# because that file is a script and not sourceable; an unknown board costs a
+# second here instead of a staged drive, a started server and a boot.
+case "$BOARD" in
+    a2065|ariadne|ariadne2|hydra|eb920|xsurf|xsurf100z2|xsurf100z3|ne2000_pcmcia) ;;
+    *) echo "unknown network board '$BOARD'.  tools/amiberry-run.sh knows:" >&2
+       echo "  a2065 ariadne ariadne2 hydra eb920 xsurf xsurf100z2" >&2
+       echo "  xsurf100z3 ne2000_pcmcia" >&2
+       exit 2 ;;
+esac
+
+# Only the Amiberry branch below passes -N to an emulator at all: the WinUAE one
+# has no board argument and the SLIRP one boots an a2065.  Refuse rather than
+# accept a board key, ignore it, and print a figure for a different card.
+[ "$BOARD" = a2065 ] || [ "$USE_AMIBERRY" = "1" ] || {
+    echo "-N $BOARD needs the Amiberry path (-a, or -B <iface>): the WinUAE" >&2
+    echo "and SLIRP branches here boot an a2065 and nothing else." >&2
+    exit 2; }
+
+# Empty for the a2065, whose driver the block above already resolved, and empty
+# when the caller spelled the staging out with the two knobs.
+BOARD_DRIVER=""
+BOARD_DEVICE=""
+if [ "$BOARD" != a2065 ] &&
+   [ -z "${AMINETXDUO_EXTRA_DRIVER:-}${AMINETXDUO_IFCONFIG:-}" ]; then
+    BOARD_DEVICE=$(sana2_driver_for "$BOARD")
+    BOARD_DRIVER=$(sana2_local_driver "$BOARD_DEVICE")
+    [ -n "$BOARD_DRIVER" ] || {
+        echo "-N $BOARD wants $BOARD_DEVICE and this host has not got it." >&2
+        echo "Looked in:" >&2
+        for _d in ${AMINETXDUO_SANA2_STORE:-} "$HOME/amiga-assets/devs"; do
+            echo "  $_d" >&2
+        done
+        echo "Put the driver there, or name one:" >&2
+        echo "  AMINETXDUO_EXTRA_DRIVER=<path to the .device>" >&2
+        echo "  AMINETXDUO_IFCONFIG=<an eth0 whose DEVICE= is that driver>" >&2
+        exit 2; }
+fi
+
 # ------------------------------------------------------------- the server ---
 #
 # SLIRP reaches this Mac at 10.0.2.2; bridged reaches a real address, and the
@@ -287,9 +349,19 @@ else
     PEER_KILL="pkill -f '[f]itz-serve .* PORT $PORT'; sleep 1;
                pkill -9 -f '[f]itz-serve .* PORT $PORT'; true"
     ssh "$PEER" "$PEER_KILL" >/dev/null 2>&1 || true
+    # `ps` is the assertion, not decoration: a fitz-serve that died on the
+    # spot -- a missing binary, a port already bound -- leaves the guest to
+    # time out on a mount, which the RESULT gate below reports as our defect.
+    # Its non-zero status used to kill this script through set -e with nothing
+    # said, so it is read here and it says which machine and which port.
     ssh "$PEER" "rm -rf $PEER_DIR; mkdir -p $PEER_DIR;
                  nohup $PEER_BIN $PEER_DIR PORT $PORT > /tmp/fitzbench-peer.log 2>&1 &
-                 sleep 1; ps -o args= -C fitz-serve" > "$PEERLOG" 2>&1
+                 sleep 1; ps -o args= -C fitz-serve" > "$PEERLOG" 2>&1 || {
+        echo "no fitz-serve is running on $PEER after starting one on port" >&2
+        echo "$PORT.  $PEER_BIN is what was run; its output there is in" >&2
+        echo "/tmp/fitzbench-peer.log, and what came back is:" >&2
+        sed 's/^/  /' "$PEERLOG" >&2
+        exit 2; }
     cat "$PEERLOG"
     cleanup() { ssh "$PEER" "$PEER_KILL" >/dev/null 2>&1 || true; }
 fi
@@ -312,6 +384,33 @@ cp "$A2065" "$STAGE/devs/a2065.device"
     cp "$AMINETXDUO_EXTRA_DRIVER" "$STAGE/devs/$(basename "$AMINETXDUO_EXTRA_DRIVER")"
 [ -z "${AMINETXDUO_IFCONFIG:-}" ] || \
     cp "$AMINETXDUO_IFCONFIG" "$STAGE/devs/NetInterfaces/eth0"
+# What -N resolved to, staged the same way the two knobs above stage: the driver
+# at DEVS: root under its own name, and eth0 naming it bare.  That is the shape
+# the ne2000 arm was measured working in.
+if [ -n "$BOARD_DRIVER" ]; then
+    cp "$BOARD_DRIVER" "$STAGE/devs/$BOARD_DEVICE"
+    sed "s|^DEVICE=.*|DEVICE=$BOARD_DEVICE|" "$STAGE/devs/NetInterfaces/eth0" \
+        > "$STAGE/devs/NetInterfaces/eth0.new"
+    mv "$STAGE/devs/NetInterfaces/eth0.new" "$STAGE/devs/NetInterfaces/eth0"
+    echo "==> $BOARD: staged $BOARD_DEVICE from $BOARD_DRIVER"
+fi
+
+# The interface file and the disk have to agree, whichever of the three staged
+# them.  AMINETXDUO_EXTRA_DRIVER stages under the file's BASENAME, so a driver
+# taken from a build tree as anxnet.000 lands as anxnet.000 while eth0 asks for
+# anxnet.device; and a hand-written AMINETXDUO_IFCONFIG can name anything at
+# all.  Either way the guest says the device would not open, both FitzBench arms
+# print RESULT FAILED, and the only thing measured is the boot.
+WANT_DEVICE=$(sed -n 's/^DEVICE=//p' "$STAGE/devs/NetInterfaces/eth0" |
+              head -1 | tr -d '\r')
+WANT_DEVICE=${WANT_DEVICE##*[:/]}
+[ -n "$WANT_DEVICE" ] || {
+    echo "the staged DEVS:NetInterfaces/eth0 has no DEVICE= line" >&2; exit 2; }
+[ -n "$(find "$STAGE/devs" -name "$WANT_DEVICE" -print -quit)" ] || {
+    echo "eth0 asks for $WANT_DEVICE and nothing staged it into DEVS:." >&2
+    echo "What is on the drive:" >&2
+    (cd "$STAGE/devs" && find . -name '*.device' | sed 's|^\./|  |') >&2
+    exit 2; }
 # -R swaps the whole stack, library and starter both.  It is the discriminator
 # for "is this rig or is this us": a figure Roadshow also cannot beat on the
 # same emulator, the same bridge and the same peer is not ours to fix.
@@ -341,9 +440,18 @@ fi
 [ -n "$ROADSHOW$NGDIR" ] || cp "$TOOLS/netstat" "$STAGE/NetStat"
 # Libraries the stack under test needs and the boot shell has no LIBS: for.
 if [ -n "$EXTRALIBS" ]; then
+    # An -E naming a directory with no .library in it leaves the glob unexpanded
+    # and the test false, which under set -e exited this script from inside the
+    # loop with nothing printed.  The caller asked for libraries; say there are
+    # none rather than dying as if the run had finished.
+    _found=0
     for _l in "$EXTRALIBS"/*.library; do
-        [ -f "$_l" ] && cp "$_l" "$STAGE/libs/"
+        [ -f "$_l" ] || continue
+        cp "$_l" "$STAGE/libs/"
+        _found=1
     done
+    [ "$_found" = 1 ] || {
+        echo "-E $EXTRALIBS holds no *.library" >&2; exit 2; }
 fi
 cp "$FITZ"  "$STAGE/fitz"
 cp "$BENCH" "$STAGE/FitzBench"
@@ -453,22 +561,67 @@ cat "$REPORT"
 echo "====================================================================="
 echo
 
-# The RESULT has to come from the NETWORK arm.  A bare "fitzbench: RESULT"
-# anywhere is satisfied by the RAM: arm alone, which runs with no network under
-# it and therefore reports a figure even when the card never carried a byte:
-# the ariadne and ariadne_ii arms of the 2026-08-10 driver sweep exited 0 with
-# read_kbs=0 that way.  Look only between the FITZ: command header and the next
-# one.
-if ! awk '/^===== .*FitzBench FITZ:/ { infitz = 1; next }
-          /^===== /                  { infitz = 0 }
-          infitz && /fitzbench: RESULT/ { found = 1 }
-          END { exit(found ? 0 : 1) }' "$REPORT"; then
-    echo "FAIL: no RESULT line in the FITZ: arm, the network transfer did not finish" >&2
+# A NUMBER PER DIRECTION PER ARM, PARSED, OR THIS RUN FAILED.
+#
+# Two ways this has reported a green run over nothing.  A bare "fitzbench:
+# RESULT" anywhere is satisfied by the RAM: arm alone, which has no network
+# under it and prints a figure even when the card never carried a byte: the
+# ariadne and ariadne_ii arms of the 2026-08-10 driver sweep exited 0 with
+# read_kbs=0 that way.  And "fitzbench: RESULT" is a SUBSTRING OF THE FAILURE
+# MESSAGE -- fitzbench.c:314 prints "fitzbench: RESULT write FAILED" when no rep
+# timed -- so the arm-scoped version of the same test passed a run whose guest
+# could not open its network device at all, which is how -N shipped broken.
+#
+# So the test is what the run claims to have measured: kbs_mean, parsed, greater
+# than zero, for both directions of both arms.  Nothing here matches prose.
+FIGURES=$(awk '
+    # The arm each line belongs to.  fitzbench names it itself further down
+    # ("fitzbench: file=FITZ:fitzbench.dat"), but the header is what brackets
+    # the whole arm including a failure printed before any name.
+    /^===== / { arm = ($0 ~ /FitzBench FITZ:/) ? "fitz" :
+                      ($0 ~ /FitzBench RAM:/)  ? "ram"  : "" }
+
+    # Cut out of the line rather than taken as $3: a transcript line can carry a
+    # prefix, and a field index that is off by one silently records the
+    # direction as something no lookup below will ever match.
+    arm && /fitzbench: RESULT [a-z]+ FAILED/ {
+        d = $0; sub(/.*fitzbench: RESULT /, "", d); sub(/[^a-z].*/, "", d)
+        failed[arm " " d] = 1 }
+    arm && /fitzbench: RESULT [a-z]+ kbs_mean=/ {
+        d = $0; sub(/.*fitzbench: RESULT /, "", d); sub(/[^a-z].*/, "", d)
+        v = $0; sub(/.*kbs_mean=/, "", v); sub(/[^0-9].*/, "", v)
+        kbs[arm " " d] = v + 0 }
+
+    END {
+        split("fitz ram", arms, " ")
+        split("write read", dirs, " ")
+        for (a = 1; a <= 2; a++) for (d = 1; d <= 2; d++) {
+            k = arms[a] " " dirs[d]
+            if (failed[k])
+                bad = bad sprintf("  %s %s: the guest printed RESULT %s FAILED\n",
+                                  arms[a], dirs[d], dirs[d])
+            else if (!(k in kbs))
+                bad = bad sprintf("  %s %s: no RESULT line for it at all\n",
+                                  arms[a], dirs[d])
+            else if (kbs[k] <= 0)
+                bad = bad sprintf("  %s %s: kbs_mean=0\n", arms[a], dirs[d])
+            else
+                printf "%s_%s_kbs=%d\n", arms[a], dirs[d], kbs[k]
+        }
+        if (bad != "") { printf "%s", bad > "/dev/stderr"; exit 1 }
+    }
+' "$REPORT") || {
+    echo "FAIL: this run measured nothing it can report.  fitz is the network" >&2
+    echo "arm and ram is the control that runs beside it in the same boot; the" >&2
+    echo "transcript above says what the guest did instead." >&2
+    printf '%s\n' "$FIGURES"
     exit 1
-fi
+}
 
 echo "==> results ($MODEL${CPU:+/$CPU}, $KB KB, chunk $CHUNK, $REPS reps)"
 grep "fitzbench: RESULT\|fitzbench: file=" "$REPORT" | sed 's/^/    /'
+# key=value, so nothing downstream has to read the block above.
+printf '%s\n' "$FIGURES"
 
 # ------------------------------------------------------------ packet rate ---
 #
@@ -505,7 +658,15 @@ awk -v kb="$KB" -v reps="$REPS" '
     infitz && /RESULT read kbs_mean=/  { sub(/.*kbs_mean=/, ""); rkbs = $1 + 0 }
 
     END {
-        if (n_s < 2 || n_r < 2 || wkbs == 0) { exit 0 }
+        # Says so rather than printing nothing.  The block needs the NetStat
+        # pair that brackets the network arm, and a stack that ships no NetStat
+        # of ours (-R, -G) or a run whose second snapshot never printed has
+        # neither -- which looked exactly like a run where the wire was idle.
+        if (n_s < 2 || n_r < 2 || wkbs == 0) {
+            printf "==> no packet-rate block: %d NetStat snapshot(s) of ip: tx" \
+                   " and %d of ip: rx, two of each are needed\n", n_s, n_r
+            exit 0
+        }
         dps = ns[1] - ns[0];  dbs = nb[1] - nb[0]
         dpr = nr[1] - nr[0];  dbr = nrb[1] - nrb[0]
         printf "==> what crossed the wire (NetStat pair around the network arm)\n"
