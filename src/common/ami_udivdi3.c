@@ -64,6 +64,38 @@ typedef unsigned long       u32;
 typedef unsigned short      u16;
 
 /*
+ * THE 68020 FORMS, IN THE 68000 BUILD, CHOSEN AT RUN TIME.
+ *
+ * These five exist because GCC emits calls to them when it has no 32-bit
+ * multiply or divide instruction -- that is, when the code is compiled
+ * -m68000, which is what one binary for every 68k means.  On the machines
+ * that DO have the instruction the call is then paying a software loop for
+ * something the hardware does in one instruction, and it is not a small
+ * effect: an ssh handshake on an A1200 measured 5.00 s against 4.30 s for the
+ * same client compiled -m68020, and the whole of that difference is here,
+ * inside libtommath's and libtomcrypt's bignum inner loops.
+ *
+ * `.chip 68020` is what lets a -m68000 translation unit hold the instruction
+ * at all; the flag is what stops a 68000 ever reaching it.  MULS.L 32x32 -> 32
+ * and DIVU.L/DIVS.L 32/32 -> 32 are all implemented on the 68060 -- it dropped
+ * only the 64-bit-result forms -- so one test on AFF_68020 covers 68020 to
+ * 68060 and needs no second question.
+ *
+ * A zero divisor still goes the long way round: the C below answers ~0 with a
+ * zero remainder deliberately, where the instruction would trap.
+ */
+static int ami_rt_020;
+static int ami_rt_mulul;
+
+void ami_rt_cpu_select(int have_68020, int have_mulul);
+void ami_rt_cpu_select(int have_68020, int have_mulul)
+{
+
+    ami_rt_020   = (have_68020 != 0) ? 1 : 0;
+    ami_rt_mulul = (have_mulul != 0) ? 1 : 0;
+}
+
+/*
  * 64/32 -> 32 with remainder, on hardware that has it.
  *
  * divu.l <ea>,Dr:Dq divides the 64-bit value Dr:Dq by a 32-bit divisor,
@@ -426,37 +458,6 @@ u32 __umodsi3(u32 numerator, u32 denominator);
 long __divsi3(long numerator, long denominator);
 long __modsi3(long numerator, long denominator);
 
-/*
- * THE 68020 FORMS, IN THE 68000 BUILD, CHOSEN AT RUN TIME.
- *
- * These five exist because GCC emits calls to them when it has no 32-bit
- * multiply or divide instruction -- that is, when the code is compiled
- * -m68000, which is what one binary for every 68k means.  On the machines
- * that DO have the instruction the call is then paying a software loop for
- * something the hardware does in one instruction, and it is not a small
- * effect: an ssh handshake on an A1200 measured 5.00 s against 4.30 s for the
- * same client compiled -m68020, and the whole of that difference is here,
- * inside libtommath's and libtomcrypt's bignum inner loops.
- *
- * `.chip 68020` is what lets a -m68000 translation unit hold the instruction
- * at all; the flag is what stops a 68000 ever reaching it.  MULS.L 32x32 -> 32
- * and DIVU.L/DIVS.L 32/32 -> 32 are all implemented on the 68060 -- it dropped
- * only the 64-bit-result forms -- so one test on AFF_68020 covers 68020 to
- * 68060 and needs no second question.
- *
- * A zero divisor still goes the long way round: the C below answers ~0 with a
- * zero remainder deliberately, where the instruction would trap.
- */
-static int ami_rt_020;
-static int ami_rt_mulul;
-
-void ami_rt_cpu_select(int have_68020, int have_mulul);
-void ami_rt_cpu_select(int have_68020, int have_mulul)
-{
-
-    ami_rt_020   = (have_68020 != 0) ? 1 : 0;
-    ami_rt_mulul = (have_mulul != 0) ? 1 : 0;
-}
 
 u32 __mulsi3(u32 a, u32 b)
 {
