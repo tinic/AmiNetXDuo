@@ -135,13 +135,24 @@ if(CMAKE_CROSSCOMPILING AND AMINETXDUO_C68K_LIMBS)
     # other, which is how the 68060 TLS 1.3 failure was pinned down.
     option(AMINETXDUO_C68K_GCM
            "Longword GHASH and the longword GCM xor" ON)
-    # `any` is out with the 68000, and it has to be: a binary that must run on
-    # a 68000 cannot contain a misaligned longword access on a path a 68000
-    # reaches.  Giving it back on the machines that can take it is a run-time
-    # choice this file does not have yet -- src/net68k/n68k_cpu.c is what that
-    # would look like -- and it is the tls.library half of the same question.
+    # THE TWO ARE NOT THE SAME QUESTION, and pairing them cost the 68000 the
+    # faster GHASH for nothing.
+    #
+    #   NX_CRYPTO_ENABLE_UNALIGNED_ACCESS is the vendored one: it turns
+    #   sixteen byte moves into four longword ones by CASTING the caller's
+    #   buffer, which a 68000 answers with an address error.  68020 and up,
+    #   and `any` is out with the 68000 because one binary has to run there.
+    #
+    #   NX_CRYPTO_AMIGA_C68K_GCM is ours, and it copies through an aligned
+    #   ULONG[4] with NX_CRYPTO_MEMCPY rather than casting -- the comment at
+    #   nx_crypto_gcm.c:184 says so and the code does it.  It needs a
+    #   big-endian machine and nothing else, so every 68k can run it, and the
+    #   bit-serial GF(2^128) multiply it replaces is 128 iterations of byte
+    #   shifting and a call per block on every AES-GCM record.
     if(NOT AMINETXDUO_CPU MATCHES "^(68000|any)$" AND AMINETXDUO_C68K_GCM)
         target_compile_definitions(nx_crypto PRIVATE NX_CRYPTO_ENABLE_UNALIGNED_ACCESS)
+    endif()
+    if(AMINETXDUO_C68K_GCM)
         target_compile_definitions(nx_crypto PRIVATE NX_CRYPTO_AMIGA_C68K_GCM)
     endif()
 endif()
