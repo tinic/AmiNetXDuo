@@ -233,16 +233,22 @@ endif()
 # object may hold an instruction this CPU lacks as long as nothing calls the
 # routine that uses it.  Hence -m68020 on c68k_prim.S in a -m68000 binary.
 #
-# c68k_p256.S, c68k_aes.S and c68k_25519.S are NOT here yet: p256 needs one
-# instruction substituted (extb.l), aes needs the 68020 scaled index and so a
-# C fallback selected on a 68000, and 25519 is two halves of one file that have
-# to become two objects.  Each is its own measurement and its own commit.
+#   c68k_aes.S               the 68020 scaled index and nothing else, which
+#                            the 68060 kept, so it is assembled -m68020 and
+#                            selected on AFF_68020 alone.  c68k_aes_variant was
+#                            already a run-time choice; this only sets its
+#                            default (c68k_cpu.c).
+#   c68k_25519.S             two halves of one file, so two objects, exactly
+#                            as src/net68k's variants are.
+#
+# c68k_p256.S is NOT here yet: one instruction in a per-limb macro (extb.l) has
+# to be substituted before a 68000 can run it, which is its own commit.
 set(CRYPTO68K_MV OFF)
 if(CMAKE_CROSSCOMPILING AND AMINETXDUO_CPU STREQUAL "any")
     set(CRYPTO68K_MV ON)
     list(APPEND CRYPTO68K_SOURCES
          c68k_prim.S c68k_chacha20.S c68k_poly1305.S c68k_prim_mulw.S
-         c68k_dispatch.S)
+         c68k_aes.S c68k_dispatch.S)
 
     # c68k_25519.S is one file holding both halves, picked by a define, so it
     # becomes two objects the way src/net68k's variants do -- and for the same
@@ -318,7 +324,8 @@ if(CRYPTO68K_MV)
     # tests/crypto68k are callers that must agree with this directory.
     target_compile_definitions(crypto68k PUBLIC
         C68K_ASM=1 C68K_MV=1
-        C68K_ASM_PRIM=1 C68K_ASM_CHACHA20=1 C68K_ASM_POLY1305=1)
+        C68K_ASM_PRIM=1 C68K_ASM_CHACHA20=1 C68K_ASM_POLY1305=1
+        C68K_ASM_AES=1 C68K_ASM_25519=1)
 
     # Per file, the arch it is written for.  C68K_MV_SUFFIX is what keeps the
     # two addmul_1 twins apart in one archive (c68k_variant.h).
@@ -329,6 +336,9 @@ if(CRYPTO68K_MV)
         COMPILE_DEFINITIONS "C68K_ASM_MULW=1;C68K_MV=1;C68K_MV_SUFFIX=_mulw"
         COMPILE_OPTIONS "-m68000")
     set_source_files_properties(c68k_poly1305.S PROPERTIES
+        COMPILE_DEFINITIONS "C68K_ASM=1;C68K_MV=1"
+        COMPILE_OPTIONS "-m68020")
+    set_source_files_properties(c68k_aes.S PROPERTIES
         COMPILE_DEFINITIONS "C68K_ASM=1;C68K_MV=1"
         COMPILE_OPTIONS "-m68020")
     set_source_files_properties(c68k_chacha20.S PROPERTIES

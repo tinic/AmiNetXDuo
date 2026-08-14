@@ -31,6 +31,7 @@
 
 #include "crypto68k.h"
 #include "c68k_poly1305.h"
+#include "c68k_aes.h"
 
 #ifdef C68K_MV
 
@@ -81,6 +82,12 @@ VOID c68k_cpu_select(ULONG attnflags)
      */
     UINT wide   = ((attnflags & AFF_68020) != 0UL) ? 1u : 0u;
     UINT mul_ul = (wide != 0u && (attnflags & AFF_68060) == 0UL) ? 1u : 0u;
+
+    /* AES wants the first fact and not the second: its kernels are built on
+       the scaled index, which the 68060 kept.  c68k_aes_variant is already a
+       run-time choice -- tests/crypto68k/crypto68k_bulk moves it to time the
+       five forms against each other -- so this only sets the default. */
+    c68k_aes_variant = (wide != 0u) ? C68K_AES_V_T4_ASM : C68K_AES_V_T4_C;
 
     if (mul_ul != 0u)
     {
