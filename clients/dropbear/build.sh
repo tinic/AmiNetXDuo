@@ -417,7 +417,16 @@ if [ "$STOCK25519" = "0" ]; then
     # -I"$OUT" FIRST: config.h, localoptions.h and the generated
     # default_options_guard.h all live in the build directory, and Dropbear's
     # own objects are compiled with the same precedence.
-    "$AMIGA_GCC" -I"$OUT" $DB_CFLAGS -I"$ROOT/src/crypto68k" \
+    #
+    # $C68K_25519_ASM BELONGS HERE TOO, and leaving it off cost 17x.  In an
+    # AMINETXDUO_CLIENT_ANY build it is -DC68K_MV=1, which is what makes
+    # amiga_25519_pick() in this file exist at all: without it the pick is
+    # ((void)0), c68k_25519_cpu_select() is never called, and the vectors stay
+    # on the portable C for the life of the process.  The client then carries
+    # both assembly halves and uses neither -- 75.06 s for a handshake on an
+    # A1200 against 4.30 s for the same code with the pick compiled in, and
+    # nothing about it fails: the handshake completes, just slowly.
+    "$AMIGA_GCC" -I"$OUT" $DB_CFLAGS $C68K_25519_ASM -I"$ROOT/src/crypto68k" \
                  -I"$DB_DIR/src" -I"$DB_DIR/libtomcrypt/src/headers" \
                  -I"$DB_DIR/libtommath" -DLOCALOPTIONS_H_EXISTS \
                  -DDROPBEAR_CLIENT -Wall -c -o "$G25519_O" \
