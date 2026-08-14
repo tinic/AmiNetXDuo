@@ -39,6 +39,9 @@
 
 #include <proto/exec.h>
 
+/* The resource base every stub below calls through. */
+struct Library *CardResource;
+
 /*
  * CARD.RESOURCE IS CALLED THROUGH STUBS WRITTEN HERE, not through the NDK's,
  * because the two toolchains this builds with disagree about the file names
@@ -168,8 +171,6 @@ static VOID pc_trace(const char *s, ULONG v)
    tuple gives.  Bit 6 is the level-mode interrupt select every LAN card wants. */
 #define PC_COR_OFF          0
 #define PC_COR_LEVEL_IRQ    0x40
-
-struct Library *CardResource;
 
 /*
  * A tuple, copied out of attribute memory by card.resource.  The buffer is
