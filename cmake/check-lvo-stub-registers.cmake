@@ -24,6 +24,14 @@
 #
 # THE INVARIANT
 #
+# BOTH DISASSEMBLY SYNTAXES ARE ACCEPTED.  binutils prints the vector call as
+# `jsr -552(a6)` in Motorola syntax and `jsr a6@(-552)` in MIT, and which one
+# comes out depends on the binutils build, not on anything we control: 2.39 in
+# the pinned toolchain gives Motorola, 2.46 on a locally built macOS toolchain
+# gives MIT.  Matching only one of them meant the check found no vector call at
+# all and stopped the build with "the disassembly was not read as expected",
+# which is a true statement about the wrong thing.
+#
 # At a `jsr <disp>(a6)`, no argument register may have been written before the
 # last subroutine call and left alone since.  d0, d1, a0 and a1 are the four an
 # AmigaOS library call may destroy, so they are the four tracked; a call is
@@ -84,13 +92,21 @@ set(bad "")
 set(checked 0)
 
 foreach(line IN LISTS lines)
+    # TWO HEADER SPELLINGS, because binutils changed it and we build with both:
+    #   2.39   00000000 00000000 _tool_fd_zero:
+    #   2.46   00000000 <_tool_fd_zero>:
+    # Matching only the first meant the check never entered a function on 2.46
+    # and reported that it had found no vector call, which was true and useless.
     if(line MATCHES "^Disassembly of section [^:]*:" OR
-       line MATCHES "^[0-9a-f]+ [0-9a-f]+ _?([A-Za-z_][A-Za-z0-9_]*):")
+       line MATCHES "^[0-9a-f]+ [0-9a-f]+ _?([A-Za-z_][A-Za-z0-9_.]*):" OR
+       line MATCHES "^[0-9a-f]+ <_?([A-Za-z_][A-Za-z0-9_.]*)>:")
         set(fn "")
         set(called "")
         set(stale "")
         set(written "")
-        if(line MATCHES "^[0-9a-f]+ [0-9a-f]+ _?([A-Za-z_][A-Za-z0-9_]*):")
+        if(line MATCHES "^[0-9a-f]+ [0-9a-f]+ _?([A-Za-z_][A-Za-z0-9_.]*):")
+            set(fn "${CMAKE_MATCH_1}")
+        elseif(line MATCHES "^[0-9a-f]+ <_?([A-Za-z_][A-Za-z0-9_.]*)>:")
             set(fn "${CMAKE_MATCH_1}")
         endif()
         continue()
@@ -102,7 +118,7 @@ foreach(line IN LISTS lines)
     set(insn "${CMAKE_MATCH_1}")
 
     if(insn MATCHES "^(jsr|bsr)[a-z.]*[ \t]")
-        if(insn MATCHES "\\(a6\\)")
+        if(insn MATCHES "\\(a6\\)|a6@\\(")
             # The vector. Anything still standing from before the last call is
             # not the value this stub meant to pass.
             math(EXPR checked "${checked} + 1")
