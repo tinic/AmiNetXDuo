@@ -1,14 +1,20 @@
 /*
  * AmiNetXDuo, pick this machine's inner loops.
  *
- * The three routines in this directory each exist in one form per CPU class
+ * The three primitives in this directory each exist in one form per CPU class
  * (n68k_variant.h), and this is where one of them is chosen.  Until the `any`
  * build the choice was the preprocessor's and the archive carried a library
  * per CPU; here it is AttnFlags at library init and there is one binary.
  *
+ * THE PRIMITIVES ONLY.  n68k_cpu_data.c does the same for the C on the data
+ * path and owns n68k_cpu_select(), which is what a stack calls; this file is
+ * the half that references nothing but assembly, so a program that wants the
+ * copy and the checksum loops does not have to link the IP checksum, NetX Duo
+ * and ThreadX behind them to get them.  tests/perf/n68kmv is that program.
+ *
  * The vectors start on the 68000 forms rather than on NULL, so a caller that
- * links net68k and never calls n68k_cpu_select() -- a Shell command, a bench,
- * a test -- gets the slow answer and not an address error.  Every variant is
+ * links net68k and never selects -- a Shell command, a bench, a test -- gets
+ * the slow answer and not an address error.  Every variant is
  * assembled from original 68000 instructions, so a wrong answer here is only
  * ever a wrong speed; the one exception is the parity guard in the 68000 copy,
  * which the faster forms omit because they run on parts that fetch a longword
@@ -55,17 +61,6 @@ extern VOID n68k_copy_bytes_mv20(UCHAR *to, const UCHAR *from, ULONG len);
 extern VOID n68k_copy_bytes_mv40(UCHAR *to, const UCHAR *from, ULONG len);
 extern VOID n68k_copy_bytes_mv60(UCHAR *to, const UCHAR *from, ULONG len);
 
-/* The C data path, `-mcpu=68060`, for anything with AFF_68020 set. */
-extern USHORT n68k_ip_checksum_compute_fast(NX_PACKET *packet_ptr,
-                                            ULONG protocol, UINT data_length,
-                                            ULONG *src_ip_addr,
-                                            ULONG *dest_ip_addr);
-#ifdef AMINETXDUO_RX_VERIFY
-extern ULONG n68k_rx_verify_fast(NX_PACKET *packet, UINT *drop);
-extern ULONG n68k_rx_verify_sum_fast(NX_PACKET *packet, ULONG carried,
-                                     ULONG copied, UINT *drop);
-#endif
-
 /* n68k_dispatch.S jumps through these three.  They are written once, before
    the first packet, and read on every one after that. */
 ULONG (*n68k_vec_sum)(const ULONG *, ULONG) = n68k_sum_longwords_mv0;
@@ -73,17 +68,7 @@ ULONG (*n68k_vec_copy_sum)(ULONG *, const ULONG *, ULONG) =
     n68k_copy_sum_longwords_mv0;
 VOID (*n68k_vec_copy)(UCHAR *, const UCHAR *, ULONG) = n68k_copy_bytes_mv0;
 
-/* The C ones start on the copy that is legal everywhere, for the same reason
-   the assembly does: this file is linked by programs that never select. */
-USHORT (*n68k_vec_ip_checksum)(NX_PACKET *, ULONG, UINT, ULONG *, ULONG *) =
-    n68k_ip_checksum_compute;
-#ifdef AMINETXDUO_RX_VERIFY
-ULONG (*n68k_vec_rx_verify)(NX_PACKET *, UINT *) = n68k_rx_verify;
-ULONG (*n68k_vec_rx_verify_sum)(NX_PACKET *, ULONG, ULONG, UINT *) =
-    n68k_rx_verify_sum;
-#endif
-
-VOID n68k_cpu_select(ULONG attnflags)
+VOID n68k_cpu_select_prims(ULONG attnflags)
 {
 
     if ((attnflags & AFF_68060) != 0UL)
@@ -110,32 +95,19 @@ VOID n68k_cpu_select(ULONG attnflags)
         n68k_vec_copy_sum = n68k_copy_sum_longwords_mv0;
         n68k_vec_copy     = n68k_copy_bytes_mv0;
     }
-
-    /* The C has one boundary rather than four: 32-bit multiply, scaled index
-       and bitfield exist above a 68010 and nowhere below it. */
-    if ((attnflags & AFF_68020) != 0UL)
-    {
-        n68k_vec_ip_checksum   = n68k_ip_checksum_compute_fast;
-#ifdef AMINETXDUO_RX_VERIFY
-        n68k_vec_rx_verify     = n68k_rx_verify_fast;
-        n68k_vec_rx_verify_sum = n68k_rx_verify_sum_fast;
-#endif
-    }
-    else
-    {
-        n68k_vec_ip_checksum   = n68k_ip_checksum_compute;
-#ifdef AMINETXDUO_RX_VERIFY
-        n68k_vec_rx_verify     = n68k_rx_verify;
-        n68k_vec_rx_verify_sum = n68k_rx_verify_sum;
-#endif
-    }
 }
 
 #else
 
 /* One variant, chosen when it was assembled: the call is direct and there is
-   nothing to select.  The entry point still exists so a caller need not know
+   nothing to select.  Both entry points still exist so a caller need not know
    which build it is in. */
+VOID n68k_cpu_select_prims(ULONG attnflags)
+{
+
+    (VOID)attnflags;
+}
+
 VOID n68k_cpu_select(ULONG attnflags)
 {
 

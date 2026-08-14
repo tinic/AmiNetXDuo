@@ -74,6 +74,14 @@ VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len);
 VOID n68k_cpu_select(ULONG attnflags);
 
 /*
+ * The primitives only, from n68k_cpu.c.  n68k_cpu_select() calls this and then
+ * does the data-path C as well, which is what a stack wants; this one exists
+ * for a program that links the copy and checksum loops and nothing else, and
+ * would otherwise drag the IP checksum, NetX Duo and ThreadX in behind them.
+ */
+VOID n68k_cpu_select_prims(ULONG attnflags);
+
+/*
  * What the stack's own callers use.  In an `any` build the three names above
  * are trampolines -- a load and a jump, ~20 cycles, which is 2.5% of a 20-byte
  * memcpy on a 68000 and nothing at all on a 288-byte one -- and they exist for

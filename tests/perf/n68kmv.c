@@ -49,7 +49,7 @@
    typedef of VOID: bench/copycheck.c takes the same way out. */
 extern ULONG n68k_sum_longwords(const ULONG *p, ULONG count);
 extern VOID  n68k_copy_bytes(UBYTE *to, const UBYTE *from, ULONG len);
-extern VOID  n68k_cpu_select(ULONG attnflags);
+extern VOID  n68k_cpu_select_prims(ULONG attnflags);
 
 extern ULONG n68k_sum_longwords_mv0(const ULONG *p, ULONG count);
 extern ULONG n68k_sum_longwords_mv20(const ULONG *p, ULONG count);
@@ -409,8 +409,10 @@ int main(void)
     }
 
     /* Nothing has opened bsdsocket.library here, so nothing has selected yet:
-       this program is the one caller that has to do it for itself. */
-    n68k_cpu_select(attn);
+       this program is the one caller that has to do it for itself.  The
+       primitives half only -- the data-path C is not linked here and does not
+       need to be, see src/net68k/n68k_cpu_data.c. */
+    n68k_cpu_select_prims(attn);
 
     m_log("attnflags=%08lx", (LONG)attn);
     m_log("selected=%s", (LONG)selected());

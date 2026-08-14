@@ -69,7 +69,7 @@ if(AMINETXDUO_NET68K_ASM AND NOT NET68K_MV)
 endif()
 
 if(NET68K_MV)
-    list(APPEND NET68K_SOURCES n68k_dispatch.S)
+    list(APPEND NET68K_SOURCES n68k_dispatch.S n68k_cpu_data.c)
 endif()
 
 add_library(aminetxduo_net68k STATIC ${NET68K_SOURCES}
