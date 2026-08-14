@@ -148,6 +148,24 @@ sha256_of() {
     else shasum -a 256 "$1" | cut -d' ' -f1; fi
 }
 
+# binutils 2.39 has an old-style function-pointer mismatch that every current
+# compiler rejects OUTRIGHT: objdump.c:4196 assigns dummy_fprintf, which
+# ignores its arguments and returns int, to memory_error_func, which returns
+# void.  clang 16+ and GCC 14+ both promoted that from a warning to an error,
+# so --disable-werror does not reach it.  They spell the switch that demotes it
+# differently, and neither accepts the other's spelling, so ask the compiler
+# which one it has rather than deciding from $OS -- this failed on Linux/GCC 14
+# exactly as it failed on macOS/clang, and a uname gate would have hidden that.
+CC_PROBE="${CC:-cc}"
+NO_PTR_WARN=""
+for f in -Wno-incompatible-function-pointer-types -Wno-incompatible-pointer-types; do
+    if echo 'int main(void){return 0;}' | "$CC_PROBE" -Werror "$f" -x c - -o /dev/null >/dev/null 2>&1; then
+        NO_PTR_WARN="$f"
+        break
+    fi
+done
+[ -n "$NO_PTR_WARN" ] && echo "==> binutils 2.39 objdump.c needs $NO_PTR_WARN"
+
 case "$OS" in
 Darwin)
     BREW=$(command -v brew >/dev/null 2>&1 && brew --prefix || echo /opt/homebrew)
@@ -159,13 +177,6 @@ Darwin)
     export LDFLAGS="-L$BREW/lib ${LDFLAGS:-}"
     export PATH="$BREW/bin:$BREW/opt/texinfo/bin:$PATH"
 
-    # clang 16 made an old-style function-pointer mismatch a hard error, and
-    # binutils 2.39 has one: objdump.c:4196 assigns dummy_fprintf, which
-    # ignores every argument, to memory_error_func.  --disable-werror does not
-    # reach it -- it is an error, not a warning.
-    export CFLAGS="-Os -Wno-incompatible-function-pointer-types ${CFLAGS:-}"
-    export CXXFLAGS="$CFLAGS"
-
     # libnix installs with `rsync --exclude`, and macOS's openrsync gets those
     # patterns wrong: the build succeeds and the library is short some objects.
     if ! rsync --version 2>/dev/null | head -1 | grep -qi 'rsync.*version.*protocol'; then
@@ -176,8 +187,8 @@ Darwin)
     for t in lha makeinfo; do need "$t"; done
     ;;
 Linux)
-    # Nothing.  gcc accepts binutils 2.39's objdump.c, the system zlib and
-    # gmp/mpfr are where configure looks, and rsync is GNU rsync.
+    # Nothing beyond the shared objdump.c switch: the system zlib and gmp/mpfr
+    # are where configure looks, and rsync is GNU rsync.
     for t in makeinfo; do need "$t"; done
     command -v lha >/dev/null 2>&1 || command -v lhasa >/dev/null 2>&1 || {
         echo "!! need lha or lhasa to unpack the NDK" >&2; exit 2; }
@@ -186,6 +197,9 @@ Linux)
     echo "!! unsupported build host: $OS.  Linux and macOS only." >&2
     exit 2 ;;
 esac
+
+export CFLAGS="-Os $NO_PTR_WARN ${CFLAGS:-}"
+export CXXFLAGS="$CFLAGS"
 
 echo "==> host $OS/$ARCH, -j$JOBS"
 echo "==> work   $WORK"
@@ -332,20 +346,10 @@ echo "==> built GCC $VER at $PREFIX"
 # --------------------------------------------------------------- package ----
 
 if [ -n "$PACKAGE" ]; then
-    # The archive must carry the opt/m68k-amigaos prefix: that is the single
-    # path fetch-toolchain.sh strips, and it is what the AmigaPorts image layer
-    # used, so both sources stay interchangeable.
-    TARROOT=$(cd "$PREFIX/../.." && pwd)
-    case "$PREFIX" in
-        "$TARROOT/opt/m68k-amigaos") ;;
-        *) echo "!! --package needs --prefix to end in opt/m68k-amigaos (got $PREFIX)" >&2; exit 2 ;;
-    esac
-    echo "==> packaging $PACKAGE"
-    mkdir -p "$(dirname "$PACKAGE")"
-    # Reproducible-ish: sorted, no owner names, no macOS extended attributes.
-    ( cd "$TARROOT" && COPYFILE_DISABLE=1 tar --no-xattrs -cf - opt/m68k-amigaos 2>/dev/null \
-        || tar -cf - opt/m68k-amigaos ) | xz -T0 -9 > "$PACKAGE.tmp"
-    mv "$PACKAGE.tmp" "$PACKAGE"
-    echo "    $(sha256_of "$PACKAGE")  $(basename "$PACKAGE")"
-    ls -l "$PACKAGE"
+    # One packer for both routes.  It renames the top directory to
+    # opt/m68k-amigaos, preserves the 46 hard links between the binaries
+    # (storing them as copies costs ~100 MB), and unpacks the result to check
+    # it against the tree it came from before printing a sha256 anyone will
+    # pin.  None of that is worth writing twice.
+    exec "$HERE/package-toolchain-mirror.sh" --from "$PREFIX" --out "$PACKAGE"
 fi

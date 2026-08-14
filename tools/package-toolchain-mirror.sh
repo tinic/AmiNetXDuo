@@ -3,21 +3,26 @@
 # Build the toolchain tarball that tools/fetch-toolchain.sh downloads from our
 # GitHub release, and print the sha256 to pin it by.
 #
-#   tools/package-toolchain-mirror.sh                 # package + verify
-#   tools/package-toolchain-mirror.sh --out /tmp/x.tar.xz
-#   tools/package-toolchain-mirror.sh --from <root>   # package a tree you have
+#   tools/package-toolchain-mirror.sh --from <root>
+#   tools/package-toolchain-mirror.sh --from <root> --out /tmp/x.tar.xz
+#
+#   tools/build-toolchain.sh --package <file> calls this for you, which is the
+#   normal way to get here.
 #
 # WHY THIS EXISTS
 #
-#   We host a copy of a toolchain someone else built, because CI needs it and
-#   the only upstream distribution is one layer of a Docker image.  Hosting it
-#   is cheap; hosting it without a written-down way to REMAKE it is how a
-#   mirror turns into a mystery binary that nobody dares to touch.  This is
-#   that way.
+#   CI needs a working m68k-amigaos toolchain and there is no upstream that
+#   publishes this one: GCC 16.2 paired with binutils 2.39.0 exists as no
+#   image, package or tarball anywhere, so we build it (tools/build-toolchain.sh)
+#   and host the result.  Hosting a binary is cheap; hosting it without a
+#   written-down way to REMAKE it is how a mirror turns into a mystery blob
+#   nobody dares touch.  That way is the build script; this script is only the
+#   wrapping, and it is separate so that re-cutting an asset from a tree you
+#   already have does not mean rebuilding for an hour.
 #
-#   It also fixes the source of the copy.  Packaging is always done from the
-#   UPSTREAM REGISTRY, never from our own mirror, otherwise re-cutting the
-#   asset would copy from the last copy, and any drift becomes permanent.
+#   PACKAGE WHAT YOU BUILT, NEVER WHAT YOU DOWNLOADED.  `--from` is required
+#   for exactly that reason: pointing it at the fetch cache would copy from the
+#   last copy, and any drift would become permanent.
 #
 # THE OUTPUT IS NOT BIT-REPRODUCIBLE
 #
@@ -25,16 +30,8 @@
 #   two runs on two machines will not produce identical bytes.  They produce
 #   identical TREES, which is what matters and what this script checks.  The
 #   sha256 printed at the end is therefore a fact about the artifact you just
-#   made: paste it into TC_MIRROR_SHA256 whenever you upload a new one.
-#
-# WHAT TO DO WITH THE RESULT
-#
-#   The release body carries the provenance and the GPLv3 6(d) corresponding
-#   source directions, we redistribute GCC binaries, so that is not
-#   optional.  It is kept in tools/toolchain-mirror-release-notes.md rather
-#   than only on the release page, because an obligation that exists solely in
-#   a text box on github.com is one nobody can review, diff, or reinstate.
-#   Update the digests and commit hashes in it whenever the pin moves.
+#   made: paste it into the right TC_SHA256_* in tools/fetch-toolchain.sh
+#   whenever you upload a new one.
 #
 # SPDX-License-Identifier: MIT
 
@@ -42,22 +39,35 @@ set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
-GCC_VERSION="15.2.0"
-ASSET="m68k-amigaos-gcc-${GCC_VERSION}-ndk3.9-linux-x86_64.tar.xz"
+GCC_VERSION="16.2.0"
 PREFIX="opt/m68k-amigaos"
 
+# The platform is part of the asset name because there is now more than one,
+# and a tarball of ELF binaries whose name does not say so is a support ticket.
+case "$(uname -s)/$(uname -m)" in
+    Linux/x86_64|Linux/amd64) PLATFORM="linux-x86_64" ;;
+    Darwin/arm64)             PLATFORM="darwin-arm64" ;;
+    Darwin/x86_64)            PLATFORM="darwin-x86_64" ;;
+    Linux/aarch64|Linux/arm64) PLATFORM="linux-aarch64" ;;
+    *) PLATFORM="$(uname -s | tr 'A-Z' 'a-z')-$(uname -m)" ;;
+esac
+
 FROM=""
-OUT="${TMPDIR:-/tmp}/$ASSET"
+OUT=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) FROM="$2"; shift ;;
         --out)  OUT="$2"; shift ;;
-        -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
-        *) echo "usage: $0 [--from <toolchain root>] [--out <file.tar.xz>]" >&2; exit 2 ;;
+        --platform) PLATFORM="$2"; shift ;;
+        -h|--help) sed -n '2,37p' "$0"; exit 0 ;;
+        *) echo "usage: $0 --from <toolchain root> [--out <file.tar.xz>] [--platform <name>]" >&2; exit 2 ;;
     esac
     shift
 done
+
+ASSET="m68k-amigaos-gcc-${GCC_VERSION}-ndk3.9-${PLATFORM}.tar.xz"
+[ -n "$OUT" ] || OUT="${TMPDIR:-/tmp}/$ASSET"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing required tool: $1" >&2; exit 2; }; }
 need tar
@@ -73,13 +83,12 @@ sha256_of() {
 
 # ------------------------------------------------------------------ source ---
 
-if [ -z "$FROM" ]; then
-    FROM=$("$ROOT_DIR/tools/fetch-toolchain.sh" --print-root)
-    if [ ! -x "$FROM/bin/m68k-amigaos-gcc" ]; then
-        echo "==> no cached toolchain; fetching from upstream (not from our mirror)"
-        AMINETXDUO_TOOLCHAIN_SOURCE=registry "$ROOT_DIR/tools/fetch-toolchain.sh" >/dev/null
-    fi
-fi
+[ -n "$FROM" ] || {
+    echo "!! --from <toolchain root> is required." >&2
+    echo "   Build one with tools/build-toolchain.sh; do not package the" >&2
+    echo "   fetch cache, that would be copying from the last copy." >&2
+    exit 2
+}
 
 [ -x "$FROM/bin/m68k-amigaos-gcc" ] || {
     echo "!! $FROM has no bin/m68k-amigaos-gcc" >&2; exit 1; }
@@ -145,15 +154,11 @@ echo "    sha256  $SHA"
 echo
 echo "Pin it, then publish it:"
 echo
-echo "  1. set TC_MIRROR_SHA256 in tools/fetch-toolchain.sh to"
+echo "  1. in tools/fetch-toolchain.sh, set the sha256 for $PLATFORM to"
 echo "     $SHA"
 echo
-echo "  2. gh release create toolchain-m68k-amigaos-gcc-$GCC_VERSION \\"
-echo "       --title 'Toolchain mirror - m68k-amigaos GCC $GCC_VERSION (build artifact, not an AmiNetXDuo release)' \\"
-echo "       --notes-file tools/toolchain-mirror-release-notes.md \\"
-echo "       --prerelease \\"
-echo "       '$OUT'"
+echo "  2. gh release upload toolchain-m68k-amigaos-gcc-$GCC_VERSION '$OUT'"
 echo
-echo "     (that body carries the provenance and the GPLv3 6(d) corresponding"
-echo "      source directions, publishing GCC binaries without them is not"
-echo "      an option.  Check its digests still match before you upload.)"
+echo "     (or gh release create, with a body naming every asset, its"
+echo "      platform and its sha256.  tools/toolchain-mirror-release-notes.md"
+echo "      is the model to follow.)"
