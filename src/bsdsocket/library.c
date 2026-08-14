@@ -22,6 +22,7 @@
 #include "aminetxduo/version.h"
 
 #include "net68k.h"          /* n68k_cpu_select() */
+#include "aminetxduo/compat.h"   /* ami_rt_cpu_select() */
 
 #include <stddef.h>
 

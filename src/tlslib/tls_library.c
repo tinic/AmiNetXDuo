@@ -17,6 +17,7 @@
 #include "tls_vectors.h"
 
 #include "crypto68k.h"       /* c68k_cpu_select() */
+#include "aminetxduo/compat.h"   /* ami_rt_cpu_select() */
 
 /* Included explicitly, not transitively.  NDK 3.2 reaches <exec/resident.h>
    through another header and NDK 3.9 does not, so leaving it out builds here
