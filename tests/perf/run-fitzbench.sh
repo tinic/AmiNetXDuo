@@ -645,7 +645,7 @@ printf '%s\n' "$FIGURES"
 # and taking them positionally reads the driver's counter as the second run's
 # IP counter, which comes out negative.
 echo
-awk -v kb="$KB" -v reps="$REPS" '
+awk -v kb="$KB" -v reps="$REPS" -v board="$BOARD" '
     /^===== / { cmd = $0; infitz = (cmd ~ /FitzBench FITZ:/); inip = 0; inif = 0 }
 
     cmd ~ /NetStat/ && /^ip:/    { inip = 1; next }
@@ -680,8 +680,8 @@ awk -v kb="$KB" -v reps="$REPS" '
         if (dpr > 0) printf ", mean %d bytes", dbr / dpr
         printf "\n"
         if (n_f >= 2)
-            printf "    a2065 frames: %d sent, %d received\n",
-                   fs[1] - fs[0], fr[1] - fr[0]
+            printf "    %s frames: %d sent, %d received\n",
+                   board, fs[1] - fs[0], fr[1] - fr[0]
         # FitzBench moves KB each way once to warm up and then once per rep, so
         # the bytes in the bracket are known and the measured rates turn them
         # into the seconds they took.  Both directions ran back to back, so
