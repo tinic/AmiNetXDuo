@@ -781,21 +781,21 @@ stage_emulator() {
     export AMINETXDUO_KICKSTART
     export AMINETXDUO_KICKSTART_EXT="${AMINETXDUO_KICKSTART_EXT:-}"
 
-    # TWO MACHINES, not one.  The default cross build on a 68020, and the
-    # m68000 build on an actual 68000, which is a different compiler output
-    # (no 32-bit multiply or divide, the 68000 C library) executing under a
-    # different scheduler budget, and for a long time nothing ran it at all.
+    # TWO MACHINES, ONE BUILD.  An A1200 and an A600, both running the build
+    # that ships -- which since AMINETXDUO_CPU=any is -m68000 codegen chosen at
+    # run time, so there is no separate 68000 tree to build any more and
+    # nothing would be gained by one.  This is a stronger arm than the old
+    # pair, not a weaker one: what executes on the 68000 is now the very
+    # binary a user installs, rather than a variant nobody ships.
     #
-    # That gap hid a real defect in this suite: soak_test's starvation floor
-    # was a constant tuned against 68020 throughput, so the lowest-priority
-    # worker failed it on a 68000 while being perfectly healthy.  A build that
-    # is never executed is not tested, and we ship a 68000 library.
-    for dir in default m68000; do
-        if [ ! -d "$BUILD/$dir" ]; then
-            fail "no $BUILD/$dir, run the cross stage first"
-            return 1
-        fi
-    done
+    # The two machines still both matter.  That gap once hid a real defect in
+    # this suite: soak_test's starvation floor was a constant tuned against
+    # 68020 throughput, so the lowest-priority worker failed it on a 68000
+    # while being perfectly healthy.
+    if [ ! -d "$BUILD/default" ]; then
+        fail "no $BUILD/default, run the cross stage first"
+        return 1
+    fi
 
     # Say this once, here, rather than letting four tests time out in turn.
     # An A600 booted with an A1200 ROM never reaches a Shell, and the only
@@ -810,14 +810,15 @@ stage_emulator() {
         return 1
     fi
 
-    local entry exe timeout dir cpuopt tag budget
-    for dir in default m68000; do
+    local entry exe timeout dir arm cpuopt tag budget
+    dir=default
+    for arm in a1200 a600; do
         # These budgets multiply the per-test ceilings below.  They are ceilings,
         # not fixed waits, so a passing run finishes long before them and paying
         # for headroom is free, and the hosted GitHub runner is markedly slower
         # at emulation than a dedicated box, enough to time a test out on the old
         # 68020 x1 / 68000 x2 budgets.  Doubled so a slow runner has rope.
-        if [ "$dir" = "m68000" ]; then
+        if [ "$arm" = "a600" ]; then
             # -m A600, not -c 68000.  Forcing cpu_type=68000 onto the default
             # A1200 makes a machine that does not exist: the quickstart puts up
             # an AGA board with a 68EC020 and the ROM to match, and the CPU line
