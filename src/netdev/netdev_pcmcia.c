@@ -165,11 +165,9 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
 
     /* What is in the slot.  Anything but a LAN adapter is given straight
        back: an IDE adapter driven as an NE2000 is a write to a disk. */
-    {
-        BOOL got = pc_tuple(handle, CISTPL_FUNCID, buf, sizeof(buf));
-
-        pc_trace("pc: funcid ", ((ULONG)got << 16) | buf[2]);
-    }
+    buf[2] = 0;
+    (VOID)pc_tuple(handle, CISTPL_FUNCID, buf, sizeof(buf));
+    pc_trace("pc: funcid ", (ULONG)buf[2]);
     if (buf[2] != CIS_FUNC_LAN)
     {
         ReleaseCard(handle, 0);

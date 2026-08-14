@@ -55,8 +55,9 @@ typedef struct NetdevCard
     ULONG       mem_size;
     ULONG       prom_off;       /* station address PROM, same stride          */
 
-    /* Trailing, so every autoconfig row keeps its positional initialiser and
-       reads as NETDEV_BUS_ZORRO with no base of its own. */
+    /* Named by every row: -Werror=missing-field-initializers does not accept
+       a trailing field that defaults, and a card row is exactly the place
+       where a silently-defaulted field would be worth catching. */
     UBYTE       bus;            /* NETDEV_BUS_*                               */
     ULONG       base;           /* NETDEV_BUS_PCMCIA: the fixed window base   */
 } NetdevCard;
