@@ -379,6 +379,47 @@ static VOID bench_copy(const char *name,
           (LONG)best, (LONG)((best * 1410UL) / (len * reps)));
 }
 
+/*
+ * The decode, on every machine, from AttnFlags this one does not have.
+ *
+ * Without this the 68060 branch of n68k_cpu_select() is unreachable in the
+ * lab: AFF_68060 is set by 68060.library and not by any ROM here, so `-c
+ * 68060` under Amiberry reads 0x0F and lands on the 68040 forms.  A typo in
+ * that branch would ship.  Feeding the flag values directly costs nothing and
+ * covers all four, and the machine's own answer is put back afterwards.
+ *
+ * Cumulative, as Exec sets them: a 68060 also raises 010, 020, 030 and 040.
+ */
+static VOID check_decode(VOID)
+{
+    static const struct { ULONG attn; VOID (*want)(UBYTE *, const UBYTE *,
+                                                   ULONG); const char *name; }
+    cases[] =
+    {
+        { 0x00UL,                            n68k_copy_bytes_mv0,  "0"  },
+        { AFF_68010,                         n68k_copy_bytes_mv0,  "0"  },
+        { AFF_68010 | AFF_68020,             n68k_copy_bytes_mv20, "20" },
+        { AFF_68010 | AFF_68020 | AFF_68030, n68k_copy_bytes_mv20, "20" },
+        { AFF_68010 | AFF_68020 | AFF_68030 |
+          AFF_68040,                         n68k_copy_bytes_mv40, "40" },
+        { AFF_68010 | AFF_68020 | AFF_68030 |
+          AFF_68040 | AFF_68060,             n68k_copy_bytes_mv60, "60" },
+    };
+    ULONG i;
+
+    for (i = 0; i < (ULONG)(sizeof(cases) / sizeof(cases[0])); i++)
+    {
+        n68k_cpu_select(cases[i].attn);
+
+        if (n68k_vec_copy != cases[i].want)
+        {
+            m_log("FAIL decode %08lx wanted mv%s",
+                  (LONG)cases[i].attn, (LONG)cases[i].name);
+            failures++;
+        }
+    }
+}
+
 static const char *selected(VOID)
 {
 
@@ -410,7 +451,8 @@ int main(void)
 
     /* Nothing has opened bsdsocket.library here, so nothing has selected yet:
        this program is the one caller that has to do it for itself. */
-    n68k_cpu_select(attn);
+    check_decode();                     /* all four branches, on any machine */
+    n68k_cpu_select(attn);              /* and then this machine's own */
 
     m_log("attnflags=%08lx", (LONG)attn);
     m_log("selected=%s", (LONG)selected());
