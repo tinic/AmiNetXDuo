@@ -116,7 +116,12 @@ static ULONG    c_bracket;              /* cost of one measurement, ticks */
 
 static ULONG c_now(VOID)
 {
-struct EClockVal ev;
+/* Zeroed for -fanalyzer, which cannot see through ReadEClock() -- a library
+   call behind an inline stub -- and reads ev.ev_lo as uninitialised.  It was
+   carried in tools/analyzer-baseline.txt instead until this file stopped being
+   compiled in the default configuration, which would have dropped the triage
+   note and let the finding come back as NEW in a -DAMINETXDUO_CPU=68020 tree. */
+struct EClockVal ev = { 0UL, 0UL };
 
     (VOID)ReadEClock(&ev);
 
@@ -132,7 +137,7 @@ ULONG   d = stop - start;
 
 static VOID c_timer_init(VOID)
 {
-struct EClockVal ev;
+struct EClockVal ev = { 0UL, 0UL };
 ULONG            i, t0, t1, total;
 
     (VOID)ami_millis();                 /* opens timer.device, sets TimerBase */

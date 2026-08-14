@@ -152,7 +152,11 @@ static ULONG rnd(VOID)
 
 static ULONG eclock(VOID)
 {
-    struct EClockVal ev;
+    /* Zeroed because -fanalyzer cannot see through ReadEClock(): it is a
+       library call behind an inline stub, so the analyzer reads ev.ev_lo as
+       uninitialised and says so.  tests/perf/cpucal.c carries the same finding
+       in tools/analyzer-baseline.txt; a new file does not get to add one. */
+    struct EClockVal ev = { 0UL, 0UL };
 
     (VOID)ReadEClock(&ev);
 
