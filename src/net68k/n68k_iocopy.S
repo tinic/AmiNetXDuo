@@ -62,6 +62,13 @@
 | anxnet.device is its own binary and never opens the library that selects.
 | Worth doing when somebody measures an 060 with a real card, and not before:
 | the bet it would settle has never had a number behind it.
+|
+| IT HAS NOW BEEN RUN THERE.  The shipping binary -- this movem form, built
+| -m68000 -- on an A3000 at 68060 with an A2065: rc=0, read 4651 KB/s, write
+| 2372, no exception in the log.  The 68060-targeted build measured 4678/2268
+| in a different block, which under the interleaving rule means only that
+| there is no large difference either way.  So the movem form is correct AND
+| not slower on an 060, and the dispatch this note describes stays unbuilt.
 #if defined(__mc68060__)
 #define N68K_NO_MOVEM 1
 #endif
