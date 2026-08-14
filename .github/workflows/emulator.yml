@@ -157,6 +157,17 @@ jobs:
           tools/ci-arm.sh -n "IPv6 socket surface (RFC 3542)" --
           tests/ipv6/run-socket-fsuae.sh -A -b build/ci/default
 
+      # One binary for every 68k means the compiler runtime picks its MULU.L
+      # and DIVU.L paths from AttnFlags at run time, and a green run on one
+      # machine says nothing about the others.  Five boots, no NIC and no peer,
+      # all five at once.  It found three helpers that had compiled into calls
+      # to themselves.
+      - name: the compiler runtime, on every CPU class
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "the compiler runtime, on every CPU class" --
+          tests/common/run-rt.sh -b build/ci/default
+
       # The same regression, one tier down and in a minute rather than ten.
       # A bare drive shows it as an interface that comes up with no address,
       # where a real Workbench shows it as a machine that stops booting; the
