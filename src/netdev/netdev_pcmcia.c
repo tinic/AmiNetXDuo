@@ -397,6 +397,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
         return NULL;
     }
     index = (UBYTE)(buf[2] & 0x3f);
+    pc_trace("pc: index ", (ULONG)index);
 
     /*
      * PUT THE SOCKET INTO I/O MODE, BEFORE THE COR WRITE AND NOT AFTER IT.
@@ -495,7 +496,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
         pc_trace("pc: irqmode skipped v ", (ULONG)CardResource->lib_Version);
     }
 
-    pc_trace("pc: index ", (ULONG)index);
+    pc_trace("pc: claimed ", (ULONG)card->base);
     return (APTR)(ULONG)card->base;
 }
 
