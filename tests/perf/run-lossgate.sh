@@ -48,6 +48,16 @@
 #
 #   AMINETXDUO_PEER_TC names it; the default is ~/tc-cap.
 #
+# AN ARM EITHER PRODUCED NUMBERS OR IT DID NOT
+#
+#   Every arm is one run-fitzbench.sh, whose exit status now means something:
+#   it is non-zero unless both directions of both its arms parsed to a rate.
+#   An arm that failed contributes no sample, says so as it happens, and makes
+#   the whole run exit 2 -- so `over N rep(s)` under the medians is the number
+#   of arms that measured, and a run that lost any of them does not print a
+#   verdict at all.  arms_ok, arms_failed and arms_asked are printed as
+#   key=value for whatever reads this.
+#
 # WHAT IT CANNOT TELL YOU
 #
 #   The emulated card is an A2065 and the guest is not the machine a user has.
@@ -372,10 +382,25 @@ rm -rf "$OUT"; mkdir -p "$OUT"
 # control: a rig that cannot move bytes cleanly is not going to say anything
 # useful about a lossy one.
 echo "==> warm-up arm, no loss, to learn the guest address"
+WARM_RC=0
 AMINETXDUO_FITZ_PEER="$PEER" AMINETXDUO_FITZ_PEER_ADDR="$PEER_ADDR" \
 AMINETXDUO_RUN_TAG="$TAG-warm" \
     tests/perf/run-fitzbench.sh -H "$PEER" -A "$PEER_ADDR" -b "$BUILD" \
-        $FBFLAGS -k "$KB" -r 1 -T "$TAG-warm" > "$OUT/warm.txt" 2>&1 || true
+        $FBFLAGS -k "$KB" -r 1 -T "$TAG-warm" > "$OUT/warm.txt" 2>&1 || WARM_RC=$?
+
+# The status is read now that it means something.  run-fitzbench.sh used to
+# exit 0 over a transcript saying RESULT write FAILED, so every arm here was
+# discarded with `|| true` and judged by what could be grepped out of it
+# afterwards; it now exits non-zero unless every direction of both its arms
+# parsed to a number.  This one is the control -- a rig that cannot move bytes
+# on a clean link says nothing about a lossy one -- so it is fatal, and 2 for
+# the reason the address check below gives.
+[ "$WARM_RC" = "0" ] || {
+    echo "the warm-up arm failed (rc=$WARM_RC) on a link with no impairment" >&2
+    echo "on it yet, so this is the rig and not a result." >&2
+    echo "--- the last 15 lines of $OUT/warm.txt ---" >&2
+    tail -15 "$OUT/warm.txt" >&2
+    exit 2; }
 
 GUEST=$(sed -n 's/.*address \([0-9][0-9.]*\).*/\1/p' "$OUT/warm.txt" | head -1)
 # `|| true` on the fallback, and it is not decoration.  Under `set -e` a grep
@@ -405,13 +430,26 @@ echo "==> guest is $GUEST"
 
 netem_on "$GUEST"
 
+# AN ARM THAT MEASURED NOTHING IS EXCLUDED, NAMED, AND FATAL AT THE END.
+#
+# Excluded rather than aborting the sweep on the spot: netem is already on the
+# peer, the remaining arms cost only their own boots, and "3 of 5 arms failed"
+# is a diagnosis where "arm 2 failed" is a symptom.  Fatal rather than
+# tolerated: the medians below would otherwise be quoted over a population the
+# run does not say it shrank, which is the same quiet wrongness as a harness
+# reporting success over RESULT FAILED.  So a failed arm contributes nothing,
+# says so as it happens, and the run ends non-zero however the comparison went.
 : > "$OUT/samples.txt"
+ARMS_OK=0
+ARMS_FAILED=0
 for rep in $(seq 1 "$REPS"); do
     echo "==> lossy arm $rep/$REPS"
+    ARM_RC=0
     AMINETXDUO_FITZ_PEER="$PEER" AMINETXDUO_FITZ_PEER_ADDR="$PEER_ADDR" \
     AMINETXDUO_RUN_TAG="$TAG-$rep" \
         tests/perf/run-fitzbench.sh -H "$PEER" -A "$PEER_ADDR" -b "$BUILD" \
-            $FBFLAGS -k "$KB" -r 1 -T "$TAG-$rep" > "$OUT/arm-$rep.txt" 2>&1 || true
+            $FBFLAGS -k "$KB" -r 1 -T "$TAG-$rep" > "$OUT/arm-$rep.txt" 2>&1 ||
+        ARM_RC=$?
 
     # Only the FITZ: arm, not the RAM: control that follows it in the same
     # boot -- and the read figure first, because the write one is buffer
@@ -447,13 +485,39 @@ for rep in $(seq 1 "$REPS"); do
         infitz && /^[ \t]*[0-9]+ retransmitted, [0-9]+ dropped/ && !seen["d"]++ {
             print rep, "retransmitted", $1
             print rep, "dropped_rx",    $3 }
-    ' "$OUT/arm-$rep.txt" >> "$OUT/samples.txt"
+    ' "$OUT/arm-$rep.txt" > "$OUT/arm-$rep.samples"
+
+    # BOTH tests, not either.  The status is the arm's own verdict on itself
+    # and it is the authority; the count is against the transcript changing
+    # shape under this parse, which it has done before -- the RESULT header it
+    # matched on was renamed and every sample came back empty for weeks.
+    ARM_RATES=$(awk '$2 == "read_kbs" || $2 == "write_kbs" { n++ }
+                     END { print n + 0 }' "$OUT/arm-$rep.samples")
+    if [ "$ARM_RC" = "0" ] && [ "$ARM_RATES" = "2" ]; then
+        cat "$OUT/arm-$rep.samples" >> "$OUT/samples.txt"
+        ARMS_OK=$((ARMS_OK + 1))
+        echo "arm_$rep=ok"
+    else
+        ARMS_FAILED=$((ARMS_FAILED + 1))
+        echo "arm_$rep=failed rc=$ARM_RC rates=$ARM_RATES" >&2
+        echo "    it contributes no sample; $OUT/arm-$rep.txt ends:" >&2
+        tail -6 "$OUT/arm-$rep.txt" | sed 's/^/    /' >&2
+    fi
 done
 
 tx_loss_report
 netem_off
 
-[ -s "$OUT/samples.txt" ] || { echo "FAIL: no arm produced a RESULT line" >&2; exit 1; }
+echo "arms_ok=$ARMS_OK"
+echo "arms_failed=$ARMS_FAILED"
+echo "arms_asked=$REPS"
+
+# Exit 2 and not 1, for the reason the warm-up arm's check gives: tools/ci.sh
+# reads a 1 out of this script as "a metric moved past its tolerance", which is
+# a regression reported against a run that measured nothing.
+[ "$ARMS_OK" != "0" ] || {
+    echo "FAIL: no arm produced a figure; there is nothing to take a median of" >&2
+    exit 2; }
 
 # THE SPREAD IS THE INTERQUARTILE RANGE, not the full range.  The gate
 # compares MEDIANS, and a median is robust: one arm that lands at half the
@@ -477,6 +541,15 @@ awk '{ v[$2] = v[$2] " " $3 }
      }' "$OUT/samples.txt" | sort > "$OUT/median.txt"
 
 if [ "$RECORD" = "1" ]; then
+    # AND NOT FROM A SWEEP THAT LOST ARMS.  The tolerance recorded below is the
+    # spread over root(n), and the header written beside it says the -r it was
+    # asked for; recording from a short population states a confidence the run
+    # did not earn and every later run is judged against it.
+    [ "$ARMS_FAILED" = "0" ] || {
+        echo "==> NOT recorded: $ARMS_FAILED of $REPS arms measured nothing," >&2
+        echo "    so this sweep is $ARMS_OK arms deep and says it is $REPS." >&2
+        exit 2; }
+
     # A TOLERANCE WIDE ENOUGH IS NOT A GATE.  The tolerance is twice the
     # observed spread, so a noisy run records a number no regression can
     # breach and the file still looks like a baseline: the first one recorded
@@ -576,5 +649,15 @@ awk '{ printf "    %-14s median %8s  iqr %s%%  range %s%%  over %s rep(s)\n", \
     "$OUT/median.txt"
 
 echo
+# The verdict is withheld rather than qualified.  A PASS printed under a line
+# saying two of five arms measured nothing is read as a PASS by everything
+# downstream, and the medians it rests on are over a population the caller did
+# not ask for.
+if [ "$ARMS_FAILED" != "0" ]; then
+    echo "==> INCOMPLETE: $ARMS_FAILED of $REPS arms measured nothing, so the"
+    echo "    medians above are over $ARMS_OK arm(s).  Whatever the comparison"
+    echo "    says, this run is not a verdict on the tolerance."
+    exit 2
+fi
 [ "$RC" = "0" ] && echo "==> PASS" || echo "==> FAIL"
 exit "$RC"
