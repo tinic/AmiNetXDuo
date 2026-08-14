@@ -1086,7 +1086,9 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
     unit->nu_Tick.is_Code     = (VOID (*)())netdev_tick;
 
     dev->nd_UnitCount++;
-    }
+
+    return TRUE;
+}
 
 static VOID netdev_probe(NetdevDevice *dev)
 {
@@ -1115,7 +1117,6 @@ static VOID netdev_probe(NetdevDevice *dev)
     while ((cd = FindConfigDev(cd, -1, -1)) != NULL)
     {
         const NetdevCard *card = NULL;
-        NetdevUnit       *unit;
         UWORD             i;
 
         for (i = 0; i < netdev_card_count; i++)
