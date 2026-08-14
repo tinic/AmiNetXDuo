@@ -176,6 +176,7 @@ LONG dp8390_init(NetdevNic *nic)
 
     NIC_PUT(nic, ED_P0_RBCR0, 0);
     NIC_PUT(nic, ED_P0_RBCR1, 0);
+    nic->dma_left = 0;          /* the count just written is not ours */
 
     NIC_PUT(nic, ED_P0_RCR, ED_RCR_MON | nic->rcr_proto);
     NIC_PUT(nic, ED_P0_TCR, ED_TCR_LB0);

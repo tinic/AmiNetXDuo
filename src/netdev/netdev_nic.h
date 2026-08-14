@@ -101,6 +101,18 @@ struct NetdevNic
     BOOL                running;
 
     /* DP8390 ring state, the names are NetBSD's. */
+    /*
+     * Where the chip's remote-DMA pointer is, and how much of the burst is
+     * left.  A read of the 4-byte ring header leaves the pointer exactly at
+     * the frame body, so the body's own RSAR/RBCR programming is writing the
+     * chip's own position back to it -- six register accesses, and on the
+     * PCMCIA card a scalar register access costs 8.3 us against 0.5 for a
+     * word through the data port.  dma_left is 0 whenever the position is not
+     * to be trusted.
+     */
+    LONG                dma_pos;
+    UWORD               dma_left;
+
     LONG                mem_start;
     LONG                mem_end;
     LONG                mem_size;
