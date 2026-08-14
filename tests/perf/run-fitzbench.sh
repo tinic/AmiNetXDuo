@@ -578,8 +578,12 @@ FIGURES=$(awk '
     # The arm each line belongs to.  fitzbench names it itself further down
     # ("fitzbench: file=FITZ:fitzbench.dat"), but the header is what brackets
     # the whole arm including a failure printed before any name.
-    /^===== / { arm = ($0 ~ /FitzBench FITZ:/) ? "fitz" :
-                      ($0 ~ /FitzBench RAM:/)  ? "ram"  : "" }
+    # if/else and not a ternary split over two lines: the awk macOS ships is
+    # the one true awk, which will not parse that, and the default path of this
+    # script is a Mac driving WinUAE over ssh.
+    /^===== / { arm = ""
+                if ($0 ~ /FitzBench FITZ:/)     arm = "fitz"
+                else if ($0 ~ /FitzBench RAM:/) arm = "ram" }
 
     # Cut out of the line rather than taken as $3: a transcript line can carry a
     # prefix, and a field index that is off by one silently records the
@@ -663,8 +667,7 @@ awk -v kb="$KB" -v reps="$REPS" '
         # of ours (-R, -G) or a run whose second snapshot never printed has
         # neither -- which looked exactly like a run where the wire was idle.
         if (n_s < 2 || n_r < 2 || wkbs == 0) {
-            printf "==> no packet-rate block: %d NetStat snapshot(s) of ip: tx" \
-                   " and %d of ip: rx, two of each are needed\n", n_s, n_r
+            printf "==> no packet-rate block: ip: tx counted %d time(s) and ip: rx %d, two of each are needed\n", n_s, n_r
             exit 0
         }
         dps = ns[1] - ns[0];  dbs = nb[1] - nb[0]
