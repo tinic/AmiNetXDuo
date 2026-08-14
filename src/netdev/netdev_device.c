@@ -851,7 +851,7 @@ static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
         netdev_tx_pump(unit);
         nd_t_tx += nd_since(t0);
 
-        if (nd_n_frame >= 512)
+        if (nd_n_frame >= 2048)
             nd_time_report();
 
         return 1;
