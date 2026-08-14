@@ -189,7 +189,14 @@ fi
 
 # ------------------------------------------------------------- staging ----
 
-STAGE="$ROOT/build/dropbear-stage"
+# One staging directory PER RUN, keyed on the tag the emulator run already
+# uses.  It was a fixed path, so two of these could not run at once: the second
+# died on `cp: cannot create directory .../devs: File exists` while the first
+# was still booting.  The arms are independent -- different model, different
+# MAC -- and an ssh handshake on a 68000 takes minutes, so running them
+# together is the difference between one arm's wall clock and the sum.
+# tests/tls/run-tls13.sh had the same defect and the same fix.
+STAGE="$ROOT/build/dropbear-stage${AMINETXDUO_RUN_TAG:+-$AMINETXDUO_RUN_TAG}"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
