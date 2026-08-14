@@ -91,8 +91,11 @@ struct NetdevNic
     NetdevRxFn          rx;
     APTR                rx_arg;
 
-    UBYTE               factory[NETDEV_ADDR_LEN];
-    UBYTE               mac[NETDEV_ADDR_LEN];
+    /* Even, and stated rather than inherited from what precedes them:
+       netdev_device.c copies both as a longword and a word, which is an
+       address error on a 68000 if a field reorder ever lands them odd. */
+    UBYTE               factory[NETDEV_ADDR_LEN] __attribute__((aligned(2)));
+    UBYTE               mac[NETDEV_ADDR_LEN] __attribute__((aligned(2)));
     UBYTE               mar[8];         /* the multicast hash, host order */
     BOOL                promisc;
     BOOL                running;
@@ -124,6 +127,19 @@ struct NetdevNic
      */
     VOID  (*read_hdr)(NetdevNic *nic, LONG src, NetdevRing *hdr);
     LONG  (*ring_copy)(NetdevNic *nic, LONG src, UBYTE *dst, UWORD amount);
+
+    /*
+     * A pointer straight into the card's own buffer, or NULL when the frame
+     * has to be staged.  Set only by cores whose buffer is memory-mapped:
+     * the receive path then makes ONE pass over the frame -- the opener's
+     * CopyToBuff reads the card directly -- instead of copying it to rxbuf
+     * and having CopyToBuff copy it again.  hydra.device is 6 KB with no
+     * bulk copy loop in it at all, which is how it does the same thing.
+     *
+     * NULL for a wrapped frame, and NULL for every port-driven core, where
+     * there is no address to hand out.
+     */
+    const volatile UBYTE *(*frame_at)(NetdevNic *nic, LONG src, UWORD len);
     UWORD (*write_buf)(NetdevNic *nic, const UBYTE *frame, UWORD len,
                        LONG buf);
 

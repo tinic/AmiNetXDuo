@@ -73,6 +73,10 @@
 
 /* ------------------------------------------------------------- plumbing --- */
 
+#ifdef NETDEV_TIME
+extern ULONG netdev_time_rdc;  /* netdev_device.c reports it */
+#endif
+
 #define NIC_GET(nic, reg)       netdev_bus_r8(&(nic)->bus, (reg))
 #define NIC_PUT(nic, reg, val)  netdev_bus_w8(&(nic)->bus, (reg), (UBYTE)(val))
 #define ASIC_GET(nic, reg)      netdev_bus_ra8(&(nic)->bus, (reg))
@@ -234,6 +238,9 @@ static UWORD ne2000_write_buf(NetdevNic *nic, const UBYTE *frame, UWORD len,
     while ((NIC_GET(nic, ED_P0_ISR) & ED_ISR_RDC) != ED_ISR_RDC &&
            --maxwait != 0)
     {
+#ifdef NETDEV_TIME
+        netdev_time_rdc++;
+#endif
         (VOID)NIC_GET(nic, ED_P0_CRDA1);
         (VOID)NIC_GET(nic, ED_P0_CRDA0);
     }
@@ -435,6 +442,7 @@ static LONG ne2000_attach(NetdevNic *nic)
 
     nic->read_hdr  = ne2000_read_hdr;
     nic->ring_copy = ne2000_ring_copy;
+    nic->frame_at  = NULL;   /* a port has no address to hand out */
     nic->write_buf = ne2000_write_buf;
 
     ne2000_probe_wide(nic);

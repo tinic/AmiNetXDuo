@@ -167,6 +167,94 @@ VOID netdev_trace_cmd(UWORD c)
 #define nd_tracex(t, v)     ((VOID)0)
 #endif
 
+#ifdef NETDEV_TIME
+/*
+ * Where the time in an interrupt actually goes, in beam positions.  There is
+ * no timer at interrupt level and ReadEClock() needs a base this has no way to
+ * hold, but VHPOSR is a free-running counter one chip read away: 227 colour
+ * clocks of 280 ns to the line, and the low eight bits of vpos wrap every 256
+ * lines, which is 16 ms and far longer than anything measured here.
+ */
+#define ND_TICKS_WRAP   (256UL * 227UL)
+
+static ULONG nd_now(VOID)
+{
+    UWORD vh = *(volatile UWORD *)0xdff006;
+
+    return (ULONG)((vh >> 8) & 0xff) * 227UL + (ULONG)(vh & 0xff);
+}
+
+static ULONG nd_since(ULONG t0)
+{
+    ULONG t1 = nd_now();
+
+    return (t1 >= t0) ? (t1 - t0) : (ND_TICKS_WRAP + t1 - t0);
+}
+
+static ULONG nd_t_isr;      /* ops->intr(), the whole chip service */
+static ULONG nd_t_copy;     /* the ring-to-rxbuf copy inside it */
+static ULONG nd_t_up;       /* handing frames to the openers */
+static ULONG nd_t_tx;       /* netdev_tx_pump() after the service */
+static ULONG nd_t_hook;     /* the stack's CopyToBuff, inside the hand-over */
+static ULONG nd_t_pre;      /* type, group test, stats, before the walk      */
+static ULONG nd_t_take;     /* netdev_take: the pending-read list walk       */
+static ULONG nd_t_find;     /* netdev_track_find: the 16-entry scan          */
+static ULONG nd_t_addr;     /* the two addresses and the request fields      */
+static ULONG nd_t_reply;    /* netdev_reply: ReplyMsg at interrupt level     */
+static ULONG nd_t_probe;    /* what 16 back-to-back probes cost, to subtract */
+static ULONG nd_n_int;
+static ULONG nd_n_frame;
+static ULONG nd_n_hook;
+
+ULONG netdev_time_copy;     /* dp8390.c adds its copy span here */
+ULONG netdev_time_rdc;      /* ne2000.c counts its DMA-completion spins */
+ULONG netdev_time_null;     /* interrupts where ISR read zero: not ours */
+ULONG netdev_time_rx;       /* ISR passes with a receive bit set */
+ULONG netdev_time_tx;       /* ISR passes with a transmit bit set */
+
+static VOID nd_time_report(VOID)
+{
+    nd_t_copy += netdev_time_copy;
+    netdev_time_copy = 0;
+    nd_tracex("t frames ", nd_n_frame);
+    nd_tracex("t up     ", nd_t_up);
+    {
+        ULONG tp = nd_now();
+        UWORD k;
+
+        for (k = 0; k < 16; k++)
+            (VOID)nd_now();
+        nd_t_probe = nd_since(tp);
+    }
+    nd_tracex("t hook   ", nd_t_hook);
+    nd_tracex("t pre    ", nd_t_pre);
+    nd_tracex("t take   ", nd_t_take);
+    nd_tracex("t find   ", nd_t_find);
+    nd_tracex("t addr   ", nd_t_addr);
+    nd_tracex("t reply  ", nd_t_reply);
+    nd_tracex("t probe16", nd_t_probe);
+    netdev_time_rdc = netdev_time_null = 0;
+    netdev_time_rx = netdev_time_tx = 0;
+    nd_t_isr = nd_t_copy = nd_t_up = nd_t_tx = nd_t_hook = 0;
+    nd_t_pre = nd_t_take = nd_t_find = nd_t_addr = nd_t_reply = 0;
+    nd_n_int = nd_n_frame = nd_n_hook = 0;
+}
+#endif
+
+/*
+ * A 6-byte Ethernet address, as a longword and a word.  Both ends are even --
+ * the staging buffer is AllocMem'd and ios2_DstAddr/ios2_SrcAddr sit at even
+ * offsets in the request -- and the source's second half is 2 mod 4, which
+ * costs a 68020 one extra bus cycle and a 68000 nothing.  nd_bytes compiled to
+ * `move.b (a2)+,(a6)+ / cmpa.l / bne`, three instructions a byte, twice per
+ * frame; the profile priced the pair at 16% of the hand-over.
+ */
+static VOID nd_addr6(UBYTE *to, const UBYTE *from)
+{
+    *(ULONG *)(APTR)to        = *(const ULONG *)(const APTR)from;
+    *(UWORD *)(APTR)(to + 4)  = *(const UWORD *)(const APTR)(from + 4);
+}
+
 static VOID nd_bytes(UBYTE *to, const UBYTE *from, ULONG n)
 {
     while (n-- != 0)
@@ -175,6 +263,17 @@ static VOID nd_bytes(UBYTE *to, const UBYTE *from, ULONG n)
 
 static VOID nd_zero(UBYTE *p, ULONG n)
 {
+    /* The transmit pad is the hot caller and always lands on an even offset
+       of nu_TxBuf; everything else here is init-time and does not care. */
+    if ((((unsigned long)(APTR)p) & 1u) == 0)
+    {
+        while (n >= 2)
+        {
+            *(UWORD *)(APTR)p = 0;
+            p += 2;
+            n -= 2;
+        }
+    }
     while (n-- != 0)
         *p++ = 0;
 }
@@ -237,11 +336,18 @@ BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len)
 
 /* ------------------------------------------------------- the RX callback -- */
 
+/*
+ * Bounded by the highest slot ever taken, not by the array.  The profile put
+ * this at 26% of the hand-over -- the largest thing the driver owns there --
+ * because it ran the full sixteen entries for every opener on every frame, to
+ * answer a question that is usually "nothing is tracked".  An opener that
+ * tracks two types now scans two.
+ */
 static NetdevTrack *netdev_track_find(NetdevOpener *op, ULONG type)
 {
     UWORD i;
 
-    for (i = 0; i < NETDEV_TRACK_MAX; i++)
+    for (i = 0; i < op->op_TrackHigh; i++)
     {
         if (op->op_Track[i].used && op->op_Track[i].type == type)
             return &op->op_Track[i];
@@ -262,21 +368,56 @@ static BOOL netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
     const UBYTE *payload = raw ? frame : frame + NETDEV_HDR_LEN;
     ULONG        plen    = raw ? len : (ULONG)(len - NETDEV_HDR_LEN);
 
-    nd_bytes(io->ios2_DstAddr, frame, NETDEV_ADDR_LEN);
-    nd_bytes(io->ios2_SrcAddr, frame + NETDEV_ADDR_LEN, NETDEV_ADDR_LEN);
+#ifdef NETDEV_TIME
+    {
+        ULONG ta = nd_now();
+#endif
+    nd_addr6(io->ios2_DstAddr, frame);
+    nd_addr6(io->ios2_SrcAddr, frame + NETDEV_ADDR_LEN);
     io->ios2_PacketType = type;
     io->ios2_DataLength = plen;
     io->ios2_Req.io_Flags =
         (UBYTE)((io->ios2_Req.io_Flags & ~(SANA2IOF_BCAST | SANA2IOF_MCAST)) |
                 flags);
+#ifdef NETDEV_TIME
+        nd_t_addr += nd_since(ta);
+    }
+#endif
 
+#ifdef NETDEV_TIME
+    {
+        ULONG th = nd_now();
+        BOOL  ok = netdev_copy_call(op->op_CopyTo, io->ios2_Data,
+                                    (APTR)payload, plen);
+
+        nd_t_hook += nd_since(th);
+        nd_n_hook++;
+        if (!ok)
+        {
+            netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
+            return FALSE;
+        }
+    }
+    if (0)
+    {
+#else
     if (!netdev_copy_call(op->op_CopyTo, io->ios2_Data, (APTR)payload, plen))
     {
+#endif
         netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
         return FALSE;
     }
 
+#ifdef NETDEV_TIME
+    {
+        ULONG tr = nd_now();
+
+        netdev_reply(io, 0, 0);
+        nd_t_reply += nd_since(tr);
+    }
+#else
     netdev_reply(io, 0, 0);
+#endif
     return TRUE;
 }
 
@@ -303,7 +444,22 @@ static struct IOSana2Req *netdev_take(struct List *list, ULONG type)
  * a CMD_READ outstanding for this packet type gets a copy; if none does, the
  * frame goes to an S2_READORPHAN, and only then is it dropped.
  */
+#ifdef NETDEV_TIME
+static VOID netdev_rx_body(APTR arg, const UBYTE *frame, UWORD len);
+
 static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
+{
+    ULONG t0 = nd_now();
+
+    netdev_rx_body(arg, frame, len);
+    nd_t_up += nd_since(t0);
+    nd_n_frame++;
+}
+
+static VOID netdev_rx_body(APTR arg, const UBYTE *frame, UWORD len)
+#else
+static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
+#endif
 {
     NetdevUnit  *unit = (NetdevUnit *)arg;
     struct Node *n;
@@ -317,30 +473,44 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
         return;
     }
 
-    type = ((ULONG)frame[12] << 8) | frame[13];
-
-    if (frame[0] == 0xff)
+#ifdef NETDEV_TIME
     {
-        UWORD i;
-        UBYTE all = 0xff;
+        ULONG tp = nd_now();
+#endif
+    /* The frame is even-aligned, so the type is one word and the broadcast
+       test is one longword and one word rather than six byte reads. */
+    type = *(const UWORD *)(const APTR)(frame + 12);
 
-        for (i = 1; i < NETDEV_ADDR_LEN; i++)
-            all &= frame[i];
-        if (all == 0xff)
-            flags = SANA2IOF_BCAST;
+    if ((frame[0] & 1) != 0)
+    {
+        flags = (UBYTE)((*(const ULONG *)(const APTR)frame == 0xffffffffUL &&
+                         *(const UWORD *)(const APTR)(frame + 4) == 0xffffu)
+                        ? SANA2IOF_BCAST : SANA2IOF_MCAST);
     }
-    if (flags == 0 && (frame[0] & 1) != 0)
-        flags = SANA2IOF_MCAST;
 
     unit->nu_Stats.PacketsReceived++;
+#ifdef NETDEV_TIME
+        nd_t_pre += nd_since(tp);
+    }
+#endif
 
     for (n = unit->nu_OpenerList.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
     {
         NetdevOpener      *op = (NetdevOpener *)n;
         struct IOSana2Req *io;
-        NetdevTrack       *tr = netdev_track_find(op, type);
+        NetdevTrack       *tr;
+#ifdef NETDEV_TIME
+        ULONG tf = nd_now();
 
+        tr = netdev_track_find(op, type);
+        nd_t_find += nd_since(tf);
+        tf = nd_now();
         io = netdev_take(&op->op_Reads, type);
+        nd_t_take += nd_since(tf);
+#else
+        tr = netdev_track_find(op, type);
+        io = netdev_take(&op->op_Reads, type);
+#endif
         if (io != NULL)
         {
             BOOL ok = netdev_hand_over(op, io, frame, len, type, flags);
@@ -439,10 +609,11 @@ VOID netdev_tx_pump(NetdevUnit *unit)
                 continue;
             }
 
-            nd_bytes(buf, io->ios2_DstAddr, NETDEV_ADDR_LEN);
-            nd_bytes(buf + NETDEV_ADDR_LEN, unit->nu_Nic.mac, NETDEV_ADDR_LEN);
-            buf[12] = (UBYTE)(io->ios2_PacketType >> 8);
-            buf[13] = (UBYTE)(io->ios2_PacketType);
+            /* Same aligned moves as the receive side: nu_TxBuf is ULONG[]
+               and both addresses sit at even offsets. */
+            nd_addr6(buf, io->ios2_DstAddr);
+            nd_addr6(buf + NETDEV_ADDR_LEN, unit->nu_Nic.mac);
+            *(UWORD *)(APTR)(buf + 12) = (UWORD)io->ios2_PacketType;
 
             if (len != 0 &&
                 !netdev_copy_call(op->op_CopyFrom, buf + NETDEV_HDR_LEN,
@@ -685,12 +856,34 @@ static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
      * returns FALSE when it reads zero, which is the same answer the board bit
      * was there to give.
      */
+#ifdef NETDEV_TIME
+    {
+        ULONG t0 = nd_now();
+        BOOL  mine;
+
+        mine = unit->nu_Nic.ops->intr(&unit->nu_Nic);
+        nd_t_isr += nd_since(t0);
+        nd_n_int++;
+        if (!mine)
+            return 0;
+
+        t0 = nd_now();
+        netdev_tx_pump(unit);
+        nd_t_tx += nd_since(t0);
+
+        if (nd_n_frame >= 512)
+            nd_time_report();
+
+        return 1;
+    }
+#else
     if (!unit->nu_Nic.ops->intr(&unit->nu_Nic))
         return 0;
 
     netdev_tx_pump(unit);
 
     return 1;
+#endif
 }
 
 /*

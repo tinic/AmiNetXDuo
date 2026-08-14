@@ -42,6 +42,13 @@
 
 /* --------------------------------------------------------------- helpers -- */
 
+#ifdef NETDEV_TIME
+extern ULONG netdev_time_copy;  /* netdev_device.c folds this into its report */
+extern ULONG netdev_time_null;
+extern ULONG netdev_time_rx;
+extern ULONG netdev_time_tx;
+#endif
+
 #define NIC_GET(nic, reg)       netdev_bus_r8(&(nic)->bus, (reg))
 #define NIC_PUT(nic, reg, val)  netdev_bus_w8(&(nic)->bus, (reg), (UBYTE)(val))
 
@@ -80,9 +87,22 @@ VOID dp8390_config(NetdevNic *nic)
 
 /* ----------------------------------------------------------------- halt --- */
 
+/*
+ * What the poll waits for is the frame in progress finishing, which at 10 Mbit
+ * is at most 1214 us for a maximum-length frame.  The old bound of 5000 was a
+ * count with no time behind it, and it is reached EVERY time on an emulated
+ * NE2000, which never asserts ISR.RST: two register accesses per iteration at
+ * 0.82 us each measured 8.1-8.4 ms with interrupts disabled, on the offline,
+ * expunge and chip-reset paths.  900 iterations is that same worst-case frame
+ * time and a margin.  A real chip does assert RST and leaves long before the
+ * bound, so this is not a shorter wait for it -- it is a bound that means
+ * something for the case where the bit never arrives.
+ */
+#define DP8390_HALT_POLLS   900
+
 VOID dp8390_halt(NetdevNic *nic)
 {
-    UWORD n = 5000;
+    UWORD n = DP8390_HALT_POLLS;
 
     NIC_PUT(nic, ED_P0_CR, nic->cr_proto | ED_CR_PAGE_0 | ED_CR_STP);
 
@@ -341,13 +361,37 @@ static VOID dp8390_rint(NetdevNic *nic)
 
         if (len > sizeof(NetdevRing) && len <= NETDEV_RXBUF_MAX)
         {
-            UWORD flen = (UWORD)(len - sizeof(NetdevRing));
+            UWORD        flen = (UWORD)(len - sizeof(NetdevRing));
+            LONG         src  = packet_ptr + (LONG)sizeof(NetdevRing);
+            const UBYTE *fp   = NULL;
 
-            (VOID)nic->ring_copy(nic, packet_ptr + (LONG)sizeof(NetdevRing),
-                                 (UBYTE *)nic->rxbuf, flen);
+            /* A mapped buffer needs no staging: hand the frame up where it
+               lies and the opener's CopyToBuff reads the card once, instead
+               of this copying it to rxbuf for CopyToBuff to copy again. */
+            if (nic->frame_at != NULL)
+                fp = (const UBYTE *)nic->frame_at(nic, src, flen);
+
+            if (fp == NULL)
+            {
+#ifdef NETDEV_TIME
+                UWORD vh0 = *(volatile UWORD *)0xdff006;
+                UWORD vh1;
+                ULONG t0, t1;
+#endif
+                (VOID)nic->ring_copy(nic, src, (UBYTE *)nic->rxbuf, flen);
+                fp = (const UBYTE *)nic->rxbuf;
+#ifdef NETDEV_TIME
+                vh1 = *(volatile UWORD *)0xdff006;
+                t0  = (ULONG)((vh0 >> 8) & 0xff) * 227UL + (vh0 & 0xff);
+                t1  = (ULONG)((vh1 >> 8) & 0xff) * 227UL + (vh1 & 0xff);
+                netdev_time_copy += (t1 >= t0) ? (t1 - t0)
+                                               : (256UL * 227UL + t1 - t0);
+#endif
+            }
+
             nic->rx_packets++;
             if (nic->rx != NULL)
-                nic->rx(nic->rx_arg, (const UBYTE *)nic->rxbuf, flen);
+                nic->rx(nic->rx_arg, fp, flen);
         }
         else
         {
@@ -401,7 +445,19 @@ BOOL dp8390_intr(NetdevNic *nic)
 
     isr = NIC_GET(nic, ED_P0_ISR);
     if (isr == 0)
+    {
+#ifdef NETDEV_TIME
+        netdev_time_null++;
+#endif
         return FALSE;
+    }
+
+#ifdef NETDEV_TIME
+    if ((isr & (ED_ISR_PRX | ED_ISR_RXE | ED_ISR_OVW)) != 0)
+        netdev_time_rx++;
+    if ((isr & (ED_ISR_PTX | ED_ISR_TXE)) != 0)
+        netdev_time_tx++;
+#endif
 
     for (;;)
     {

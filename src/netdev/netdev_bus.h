@@ -40,18 +40,14 @@ typedef struct NetdevBus NetdevBus;
 
 struct NetdevBusOps
 {
-    /* NIC register file, index 0..15, page-selected by the caller. */
-    UBYTE (*r8)(const NetdevBus *bus, UWORD reg);
-    VOID  (*w8)(const NetdevBus *bus, UWORD reg, UBYTE val);
-
-    /* ASIC register file, index 0..15.  NE2000: 0 = data, 15 = reset. */
-    UBYTE (*ra8)(const NetdevBus *bus, UWORD reg);
-    VOID  (*wa8)(const NetdevBus *bus, UWORD reg, UBYTE val);
-
     /*
-     * Burst through the data port.  The port does not advance an address, the
-     * chip does, so these are repeated accesses to ONE location.  len is
-     * rounded up to the transfer unit by the caller, never here.
+     * Bursts only.  The four scalar accessors used to live here and are now
+     * inline below: one implementation, and the call cost more than the
+     * access it was wrapping.
+     *
+     * The port does not advance an address, the chip does, so a burst is
+     * repeated access to ONE location.  len is rounded up to the transfer
+     * unit by the caller, never here.
      */
     VOID  (*rdata)(const NetdevBus *bus, UBYTE *dst, UWORD len);
     VOID  (*wdata)(const NetdevBus *bus, const UBYTE *src, UWORD len);
@@ -63,6 +59,7 @@ struct NetdevBus
     volatile UBYTE *asic;       /* nic + 16 * stride, unless overridden */
     volatile UBYTE *wide;       /* 32-bit mirrored data window, or NULL */
     UWORD           stride;     /* bytes between consecutive register indices */
+    UBYTE           shift;      /* log2(stride); 1, 2 and 4 are the only ones */
     UBYTE           dmode;      /* NETDEV_DMODE_*, set by the probe */
 
     const struct NetdevBusOps *ops;
@@ -81,24 +78,36 @@ VOID netdev_bus_setup(NetdevBus *bus, APTR base, UWORD stride, APTR wide);
  */
 #define NETDEV_BUS_PROBE_LEN    32
 
+/*
+ * The four scalar accessors do NOT go through ops.  There is one
+ * implementation and there has only ever been one, and the indirection cost
+ * more than the access: -O2 compiled bus_r8 to a call whose body was
+ *
+ *   movea.l 4(sp),a0 / move.w 10(sp),d0 / mulu.w 12(a0),d0 / add.l (a0),d0
+ *   / movea.l d0,a0 / move.b (a0),d0 / rts
+ *
+ * -- a mulu.w, 28 cycles on a 68020, once for every register touched, and a
+ * frame touches around twenty-five.  The stride is 1, 2 or 4, so it is a
+ * shift, and inline it is one indexed move.
+ */
 static inline UBYTE netdev_bus_r8(const NetdevBus *bus, UWORD reg)
 {
-    return bus->ops->r8(bus, reg);
+    return bus->nic[(ULONG)reg << bus->shift];
 }
 
 static inline VOID netdev_bus_w8(const NetdevBus *bus, UWORD reg, UBYTE val)
 {
-    bus->ops->w8(bus, reg, val);
+    bus->nic[(ULONG)reg << bus->shift] = val;
 }
 
 static inline UBYTE netdev_bus_ra8(const NetdevBus *bus, UWORD reg)
 {
-    return bus->ops->ra8(bus, reg);
+    return bus->asic[(ULONG)reg << bus->shift];
 }
 
 static inline VOID netdev_bus_wa8(const NetdevBus *bus, UWORD reg, UBYTE val)
 {
-    bus->ops->wa8(bus, reg, val);
+    bus->asic[(ULONG)reg << bus->shift] = val;
 }
 
 static inline VOID netdev_bus_rdata(const NetdevBus *bus, UBYTE *dst, UWORD len)
