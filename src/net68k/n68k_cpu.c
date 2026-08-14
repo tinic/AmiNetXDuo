@@ -19,6 +19,14 @@
  * 68010 lands on 0 and a 68030 on 20, which is the mapping the per-CPU builds
  * already had (cmake/toolchain-m68k-amigaos.cmake).
  *
+ * AFF_68060 IS NOT SET BY THE ROM.  Kickstart 3.1 predates the part; the bit
+ * is set by 68060.library, which every real 68060 installs because the machine
+ * needs it for the instructions the 68060 dropped.  A machine without it reads
+ * 0x0F and lands on the 68040 forms -- measured, `-c 68060` under Amiberry
+ * with a 3.1 ROM does exactly that (tests/perf/n68kmv).  That is a slower
+ * answer and never a wrong one: the two differ in whether the copy uses
+ * movem.l, and nothing here is an instruction the 68060 lacks.
+ *
  * SPDX-License-Identifier: MIT
  */
 
