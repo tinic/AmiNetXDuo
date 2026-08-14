@@ -50,6 +50,7 @@
 #include "dp8390.h"
 #include "netdev_bsdtypes.h"
 #include "dp8390reg.h"
+#include "n68k_iocopy.h"
 
 #define NIC_GET(nic, reg)       netdev_bus_r8(&(nic)->bus, (reg))
 #define NIC_PUT(nic, reg, val)  netdev_bus_w8(&(nic)->bus, (reg), (UBYTE)(val))
@@ -72,11 +73,18 @@ static volatile UBYTE *ed_buf(NetdevNic *nic)
 #define ED_ODD(p)   ((((unsigned long)(const void *)(p)) & 1ul) != 0)
 
 /*
- * Word moves only.  The buffer is 16 bits wide on both boards and the byte
+ * NEVER A BYTE ACCESS.  The buffer is 16 bits wide on both boards and the byte
  * lanes are not separately selectable, so a byte write puts the same value in
  * both halves on real hardware even where the emulator accepts it.  Every
  * caller here starts on an even chip address; ED_PAGE_SIZE is 256 and the
  * header is 4 bytes, so nothing rounds it to an odd one.
+ *
+ * That is what rules out n68k_copy_bytes(), which is otherwise exactly this
+ * copy: it brings the destination to a longword boundary with byte moves and
+ * drops to a byte loop on a 68000 whose pointers disagree in parity.  The
+ * longword bulk of it is available though, and that is where its win is --
+ * n68k_copy_longs() is the same movem.l block with the byte paths removed.
+ * The word loops below are what is left, the 0..3 byte tail.
  *
  * The odd-host-address arms are not reachable from today's callers -- the
  * staging buffers are longword-aligned and a ring wrap resumes on a page
@@ -85,19 +93,29 @@ static volatile UBYTE *ed_buf(NetdevNic *nic)
  */
 static VOID ed_copy_in(const volatile UBYTE *src, UBYTE *dst, UWORD len)
 {
-    const volatile UWORD *s = (const volatile UWORD *)(const volatile void *)src;
+    const volatile UWORD *s;
     UWORD i;
 
     if (!ED_ODD(dst))
     {
-        UWORD *d = (UWORD *)(APTR)dst;
+        UWORD *d;
+        UWORD  bulk = (UWORD)(len & (UWORD)~3u);
 
-        for (i = 0; i + 2 <= len; i += 2)
+        if (bulk != 0)
+            n68k_copy_longs(dst, src, (ULONG)(bulk >> 2));
+
+        i = bulk;
+        s = (const volatile UWORD *)(const volatile void *)(src + i);
+        d = (UWORD *)(APTR)(dst + i);
+
+        for (; i + 2 <= len; i += 2)
             *d++ = *s++;
         if (i < len)
             dst[i] = (UBYTE)(*s >> 8);
         return;
     }
+
+    s = (const volatile UWORD *)(const volatile void *)src;
 
     for (i = 0; i + 2 <= len; i += 2)
     {
@@ -112,19 +130,29 @@ static VOID ed_copy_in(const volatile UBYTE *src, UBYTE *dst, UWORD len)
 
 static VOID ed_copy_out(volatile UBYTE *dst, const UBYTE *src, UWORD len)
 {
-    volatile UWORD *d = (volatile UWORD *)(volatile void *)dst;
+    volatile UWORD *d;
     UWORD i;
 
     if (!ED_ODD(src))
     {
-        const UWORD *s = (const UWORD *)(const void *)src;
+        const UWORD *s;
+        UWORD        bulk = (UWORD)(len & (UWORD)~3u);
 
-        for (i = 0; i + 2 <= len; i += 2)
+        if (bulk != 0)
+            n68k_copy_longs(dst, src, (ULONG)(bulk >> 2));
+
+        i = bulk;
+        d = (volatile UWORD *)(volatile void *)(dst + i);
+        s = (const UWORD *)(const void *)(src + i);
+
+        for (; i + 2 <= len; i += 2)
             *d++ = *s++;
         if (i < len)
             *d = (UWORD)(src[i] << 8);
         return;
     }
+
+    d = (volatile UWORD *)(volatile void *)dst;
 
     for (i = 0; i + 2 <= len; i += 2)
         *d++ = (UWORD)(((UWORD)src[i] << 8) | src[i + 1]);

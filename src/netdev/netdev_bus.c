@@ -11,6 +11,7 @@
  */
 
 #include "netdev_bus.h"
+#include "n68k_iocopy.h"
 
 /*
  * unsigned long, not ULONG: identical on the 68000 and 32 bits too narrow for
@@ -54,50 +55,18 @@ static VOID bus_wa8(const NetdevBus *bus, UWORD reg, UBYTE val)
  * and the win is small.  Nothing else in the family reaches this path: the
  * word port is one non-mirrored address and cannot be batched at all.
  */
-#if defined(__mc68000__)
-#define BUS_MOVEM   1
-#endif
-
 static VOID bus_rdata_long(const NetdevBus *bus, UBYTE *dst, UWORD len)
 {
     volatile ULONG *port = (volatile ULONG *)bus->wide;
     ULONG          *out  = (ULONG *)(APTR)dst;
-    UWORD           i;
+    UWORD           i    = (UWORD)(len & (UWORD)~31u);
 
-#ifdef BUS_MOVEM
-    i = (UWORD)(len & (UWORD)~31u);
     if (i != 0)
     {
-        UWORD n = (UWORD)((i >> 5) - 1u);
+        n68k_port_in(out, bus->wide, (ULONG)(i >> 5));
+        out += (i >> 2);
+    }
 
-        /*
-         * The store side cannot post-increment -- movem to memory is (an) or
-         * -(an) only -- so the destination is advanced with lea.
-         */
-        __asm__ __volatile__ (
-            "1:\n\t"
-            "movem.l (%2),%%d2-%%d7/%%a2-%%a3\n\t"
-            "movem.l %%d2-%%d7/%%a2-%%a3,(%0)\n\t"
-            "lea 32(%0),%0\n\t"
-            "dbra %1,1b"
-            : "+a" (out), "+d" (n)
-            : "a" (port)
-            : "d2", "d3", "d4", "d5", "d6", "d7", "a2", "a3", "memory", "cc");
-    }
-#else
-    for (i = 0; i + 32 <= len; i += 32)
-    {
-        out[0] = port[0];
-        out[1] = port[1];
-        out[2] = port[2];
-        out[3] = port[3];
-        out[4] = port[4];
-        out[5] = port[5];
-        out[6] = port[6];
-        out[7] = port[7];
-        out += 8;
-    }
-#endif
     for (; i + 4 <= len; i += 4)
         *out++ = *port;
 
@@ -113,38 +82,14 @@ static VOID bus_wdata_long(const NetdevBus *bus, const UBYTE *src, UWORD len)
 {
     volatile ULONG *port = (volatile ULONG *)bus->wide;
     const ULONG    *in   = (const ULONG *)(const void *)src;
-    UWORD           i;
+    UWORD           i    = (UWORD)(len & (UWORD)~31u);
 
-#ifdef BUS_MOVEM
-    i = (UWORD)(len & (UWORD)~31u);
     if (i != 0)
     {
-        UWORD n = (UWORD)((i >> 5) - 1u);
+        n68k_port_out(bus->wide, in, (ULONG)(i >> 5));
+        in += (i >> 2);
+    }
 
-        /* The load side does post-increment, so this is four instructions. */
-        __asm__ __volatile__ (
-            "1:\n\t"
-            "movem.l (%0)+,%%d2-%%d7/%%a2-%%a3\n\t"
-            "movem.l %%d2-%%d7/%%a2-%%a3,(%2)\n\t"
-            "dbra %1,1b"
-            : "+a" (in), "+d" (n)
-            : "a" (port)
-            : "d2", "d3", "d4", "d5", "d6", "d7", "a2", "a3", "memory", "cc");
-    }
-#else
-    for (i = 0; i + 32 <= len; i += 32)
-    {
-        port[0] = in[0];
-        port[1] = in[1];
-        port[2] = in[2];
-        port[3] = in[3];
-        port[4] = in[4];
-        port[5] = in[5];
-        port[6] = in[6];
-        port[7] = in[7];
-        in += 8;
-    }
-#endif
     for (; i + 4 <= len; i += 4)
         *port = *in++;
 

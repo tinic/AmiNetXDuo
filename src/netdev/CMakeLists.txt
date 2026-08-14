@@ -20,7 +20,13 @@ set(NETDEV_SOURCES
     netdev_mcaf.c       # the multicast hash, host-testable
     dp8390.c            # NetBSD chip core
     ne2000.c            # NetBSD remote-DMA glue
-    ed.c)               # NetBSD mapped-buffer glue: Hydra, ASDG LAN Rover
+    ed.c                # NetBSD mapped-buffer glue: Hydra, ASDG LAN Rover
+    # The data path's bulk moves, from src/net68k rather than a private copy:
+    # the movem.l block and its measurements live there.  Two files, the same
+    # arrangement as src/net68k's own target -- the .S is #ifdef'd end to end
+    # on AMINETXDUO_NET68K_ASM and the .c supplies the symbols when it is off.
+    "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.S"
+    "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c")
 
 if(AMINETXDUO_NETDEV_LINK AND CMAKE_CROSSCOMPILING)
     add_executable(anxnet_device ${NETDEV_SOURCES})
@@ -30,7 +36,18 @@ if(AMINETXDUO_NETDEV_LINK AND CMAKE_CROSSCOMPILING)
     target_include_directories(anxnet_device PRIVATE
         ${AMINETXDUO_CORE_INCLUDES}
         "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/net68k"   # n68k_iocopy.h, and nothing else
         "${CMAKE_SOURCE_DIR}/src/sana2")   # sana2_device.h, the command numbers
+
+    if(AMINETXDUO_NET68K_ASM)
+        set_source_files_properties(
+            "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.S"
+            "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c"
+            PROPERTIES COMPILE_DEFINITIONS AMINETXDUO_NET68K_ASM=1)
+        set_source_files_properties(
+            "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.S"
+            PROPERTIES COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
+    endif()
 
     # No aminetxduo_common: that library defines its own SysBase handling and
     # pulls the logging macros, and this image defines SysBase itself.
@@ -97,10 +114,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     # through it, which is the only part of the probe a host can drive.
     add_executable(test_netdev_ed
         test/test_netdev_ed.c
-        netdev_bus.c)
+        netdev_bus.c
+        "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c")
 
     target_include_directories(test_netdev_ed PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/net68k"
         "${CMAKE_SOURCE_DIR}/src/config/test/shim")
 
     target_compile_options(test_netdev_ed PRIVATE -Wall -Wextra)
