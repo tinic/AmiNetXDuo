@@ -69,8 +69,10 @@ what survive, and they are not interchangeable:
 franke.ms is the only remote serving that commit. Each line above is the remote
 verified to serve its pin.
 
-No source file in any of those trees was edited. Two host fixes are carried by
-the build script as configure/compiler flags:
+No compiler or binutils source was edited. The build script's only edit to any
+of those trees is one line in amiga-gcc's own Makefile, adding
+`--with-system-zlib` to the binutils configure line. The rest is carried as
+configure and compiler flags:
 
 * binutils 2.39's `objdump.c:4196` assigns `dummy_fprintf` to
   `memory_error_func` across incompatible types. clang 16+ and GCC 14+ both
