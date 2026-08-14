@@ -107,6 +107,9 @@ typedef struct NetdevDevice
     struct Library     *nd_ExpansionBase;
     BPTR                nd_SegList;
     UWORD               nd_UnitCount;
+    /* Supported boards found past NETDEV_MAX_UNITS.  Non-zero means a fitted
+       card has no unit and nothing else would have said so. */
+    UWORD               nd_UnitsDropped;
     NetdevUnit          nd_Units[NETDEV_MAX_UNITS];
 } NetdevDevice;
 

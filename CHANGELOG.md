@@ -9,6 +9,7 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxnet.device`, one network driver for the NE2000 family — X-Surf 100, X-Surf and Ariadne II today, with Hydra and the ASDG LanRover left as table entries. It takes the multicast addresses the shipping drivers refuse, so IPv6 reaches past the router on cards where it never has. Adding a card is a row in a table, not another driver
 - A peer sending a flood of tiny TCP segments can no longer exhaust the packet pool and stall the whole stack. The receive window was budgeted in bytes but the pool is spent one buffer per segment whatever its size, so a stream of one-byte segments pinned more buffers than the pool holds while the window still read almost empty; the queue is now bounded in buffers as well
 - A DHCP server that offers a finite lease with an infinite rebind time can no longer pin the client in RENEWING forever. It would sit renewing an address the server was free to hand to someone else, never rebinding and never expiring; an infinite rebind is now honoured only under a genuinely infinite lease
 - Every host-side test and fuzzer builds and runs under AddressSanitizer and UndefinedBehaviorSanitizer in CI, 32-bit and 64-bit. Four latent defects it found are fixed; a sign-extended shift in the Ed25519 reduction and two test buffers a byte short of their own ceilings

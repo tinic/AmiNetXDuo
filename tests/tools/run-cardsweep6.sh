@@ -28,6 +28,13 @@
 #   and the answer is discarded one hop away.  Three shipping cards had no
 #   off-LAN IPv6 for as long as they were supported.
 #
+#   BUT THIS SWEEP CANNOT SEE THAT DEFECT, and must not be read as proving
+#   a driver takes multicast.  src/sana2/sana2_device.c re-asks for the same
+#   hash bucket with a synthetic 80:00:00:00:00:xx that the bit-7 test
+#   accepts, so those cards pass here through THIS stack and would fail
+#   through Roadshow or AmiTCP.  What discriminates is tests/tools/mcastjoin.c,
+#   which asks the driver with no stack in the way.
+#
 #   An on-LAN IPv6 check passes happily through all of that.  So does
 #   tests/tools/run-cardsweep.sh, which is IPv4 and one segment.  So does
 #   every runner under tests/ipv6/, which is WinUAE or SLIRP -- and SLIRP

@@ -733,8 +733,15 @@ static VOID netdev_probe(NetdevDevice *dev)
         NetdevUnit       *unit;
         UWORD             i;
 
+        /* A board past the table is dropped, and a silent drop is the
+           failure this driver exists to stop making: the card is fitted,
+           nothing opens it, and nothing says why.  Count it so
+           S2_GETSPECIALSTATS can be asked. */
         if (dev->nd_UnitCount >= NETDEV_MAX_UNITS)
-            break;
+        {
+            dev->nd_UnitsDropped++;
+            continue;
+        }
 
         for (i = 0; i < netdev_card_count; i++)
         {
