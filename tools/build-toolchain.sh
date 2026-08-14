@@ -156,15 +156,33 @@ sha256_of() {
 # differently, and neither accepts the other's spelling, so ask the compiler
 # which one it has rather than deciding from $OS -- this failed on Linux/GCC 14
 # exactly as it failed on macOS/clang, and a uname gate would have hidden that.
+#
+# The probe compiles the offending assignment, not an empty file: GCC accepts
+# an unrecognised -Wno-anything in silence unless some other diagnostic fires,
+# so "does the compiler take this flag" answers yes to both spellings and picks
+# the wrong one.  "Does this flag make THIS code compile" has one right answer.
 CC_PROBE="${CC:-cc}"
 NO_PTR_WARN=""
-for f in -Wno-incompatible-function-pointer-types -Wno-incompatible-pointer-types; do
-    if echo 'int main(void){return 0;}' | "$CC_PROBE" -Werror "$f" -x c - -o /dev/null >/dev/null 2>&1; then
+PROBE_SRC='typedef void (*memerr)(int, unsigned long, void *);
+int dummy_fprintf(void *s, const char *f, ...);
+memerr p;
+int main(void) { p = dummy_fprintf; return 0; }'
+for f in "" -Wno-incompatible-function-pointer-types -Wno-incompatible-pointer-types; do
+    if printf '%s\n' "$PROBE_SRC" | "$CC_PROBE" ${f:+"$f"} -c -x c - -o /dev/null >/dev/null 2>&1; then
         NO_PTR_WARN="$f"
         break
     fi
 done
-[ -n "$NO_PTR_WARN" ] && echo "==> binutils 2.39 objdump.c needs $NO_PTR_WARN"
+if [ -n "$NO_PTR_WARN" ]; then
+    echo "==> binutils 2.39 objdump.c needs $NO_PTR_WARN"
+elif printf '%s\n' "$PROBE_SRC" | "$CC_PROBE" -c -x c - -o /dev/null >/dev/null 2>&1; then
+    : # this compiler still only warns
+else
+    echo "!! $CC_PROBE rejects binutils 2.39's objdump.c:4196 and neither" >&2
+    echo "   -Wno-incompatible-function-pointer-types nor" >&2
+    echo "   -Wno-incompatible-pointer-types demotes it." >&2
+    exit 2
+fi
 
 case "$OS" in
 Darwin)
