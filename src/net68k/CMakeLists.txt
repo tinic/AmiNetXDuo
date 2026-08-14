@@ -97,10 +97,20 @@ if(AMINETXDUO_NET68K_ASM)
 endif()
 
 if(NET68K_MV)
-    # Four assemblies of the same two files, one per class, each in its own
-    # object library because that is what gives each its own translation unit:
-    # the routines share local label names, so two variants in one TU is a
-    # duplicate-symbol error rather than a nuisance.
+    # Four assemblies of the same two files, one per class, each through a
+    # generated one-line wrapper.  Two things force that shape:
+    #
+    #   * a translation unit of its own, because the variants share local label
+    #     names and two in one TU is a duplicate-symbol error;
+    #   * a FILE NAME of its own, because the object file name is how
+    #     tools/profiler/profreport.py gets from a sample address to a symbol,
+    #     through the linker map.  Four archive members called
+    #     n68k_checksum.S.obj is legal and builds and links, and it makes a
+    #     profile name the wrong variant: the first arm read as
+    #     _n68k_copy_sum_longwords_mv40 and _n68k_copy_bytes_mv60 in the same
+    #     run on a 68020, which the dispatch cannot produce -- it sets all
+    #     three vectors in one branch.  The code was right and the profile was
+    #     not, which is the worse of the two failures.
     #
     # ALL FOUR ARE ASSEMBLED WITH THE SAME -m68000 AS THE REST OF THE BINARY,
     # and that is not an oversight.  Nothing in either file is an instruction a
@@ -115,15 +125,21 @@ if(NET68K_MV)
     # 2 KB of a 330 KB library and removes a per-routine special case from
     # n68k_cpu.c.
     foreach(mv 0 20 40 60)
-        add_library(aminetxduo_net68k_mv${mv} OBJECT
-            n68k_checksum.S n68k_copy.S)
-        target_compile_definitions(aminetxduo_net68k_mv${mv} PRIVATE
-            AMINETXDUO_NET68K_ASM=1 N68K_MV_MULTI=1 N68K_MV=${mv})
-        target_compile_options(aminetxduo_net68k_mv${mv} PRIVATE
-            ${AMIGA_ARCH_FLAGS})
-        target_link_libraries(aminetxduo_net68k PRIVATE
-            aminetxduo_net68k_mv${mv})
+        foreach(src n68k_checksum n68k_copy)
+            set(N68K_MV ${mv})
+            set(N68K_MV_SRC "${src}.S")
+            set(_gen "${CMAKE_CURRENT_BINARY_DIR}/${src}_mv${mv}.S")
+            configure_file(n68k_mv.S.in "${_gen}" @ONLY)
+            list(APPEND NET68K_MV_SOURCES "${_gen}")
+            set_source_files_properties("${_gen}" PROPERTIES
+                COMPILE_DEFINITIONS "AMINETXDUO_NET68K_ASM=1;N68K_MV_MULTI=1"
+                COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}"
+                INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}")
+        endforeach()
     endforeach()
+    unset(N68K_MV)
+    unset(N68K_MV_SRC)
+    target_sources(aminetxduo_net68k PRIVATE ${NET68K_MV_SOURCES})
 
     # The C half of the dispatch needs to know it is in this build too: the
     # vector table and n68k_cpu_select()'s body are both behind it, and without
