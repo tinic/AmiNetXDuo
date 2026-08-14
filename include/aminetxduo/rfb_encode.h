@@ -90,6 +90,11 @@ typedef signed int     rfb_s32;
 #define RFB_F_COPYRECT         0x0010u  /* detect a vertical scroll */
 #define RFB_F_SCROLL_ADAPTIVE  0x0020u  /* probe only after a busy frame */
 #define RFB_F_RLE2             0x0040u  /* PackBits runs start at 2, not 3 */
+/* BMF_INTERLEAVED: the plane rows of one screen row sit together, so a plane
+ * advances by bytes_per_row and a row by bytes_per_row * depth.  The wire
+ * format does not change -- a tile index and a plane number mean the same
+ * thing either way -- only how the encoder walks the bitmap and its shadow. */
+#define RFB_F_INTERLEAVED      0x0080u
 
 #define RFB_F_BASELINE (RFB_F_PACKBITS | RFB_F_XOR | RFB_F_PLANEMASK | \
                         RFB_F_BESTOF)
@@ -143,6 +148,8 @@ typedef struct {
     rfb_u16  tiles_y;
     rfb_u32  plane_bytes;   /* bytes_per_row * height */
     rfb_u32  frame_bytes;   /* plane_bytes * depth */
+    rfb_u32  row_stride;    /* source bytes from one row to the next */
+    rfb_u32  plane_stride;  /* source bytes from one plane to the next */
     rfb_u16  seq;
 
     rfb_u8  *shadow;

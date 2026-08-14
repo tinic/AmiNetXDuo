@@ -232,6 +232,13 @@ long rfb_encoder_init(rfb_encoder *e, const rfb_geom *g, rfb_u32 flags,
     e->tiles_y = (rfb_u16)(((rfb_u32)g->height + g->tile_h - 1u) / g->tile_h);
     e->plane_bytes = (rfb_u32)g->bytes_per_row * g->height;
     e->frame_bytes = e->plane_bytes * g->depth;
+    if (flags & RFB_F_INTERLEAVED) {
+        e->row_stride = (rfb_u32)g->bytes_per_row * g->depth;
+        e->plane_stride = g->bytes_per_row;
+    } else {
+        e->row_stride = g->bytes_per_row;
+        e->plane_stride = e->plane_bytes;
+    }
     e->shadow = shadow;
     e->scratch = scratch;
     e->scratch_len = scratch_len;
@@ -405,15 +412,16 @@ static rfb_u32 rfb_probe_pass(rfb_encoder *e, const rfb_u8 *src,
                               rfb_u32 *chg, rfb_u32 *out_nsamp)
 {
     const rfb_u32 bpr = e->g.bytes_per_row;
+    const rfb_u32 stride = e->row_stride;
     const rfb_u32 h = e->g.height;
     rfb_u32 y, c, nsamp = 0, dirty = 0;
 
     for (y = 0; y < h && nsamp < e->n_samples; y += e->probe_step, nsamp++) {
         rfb_u32 cm;
-        memcpy(e->probe_row, src + y * bpr, (size_t)bpr);
+        memcpy(e->probe_row, src + y * stride, (size_t)bpr);
         e->st.probe_bytes += bpr;
 
-        cm = ~rfb_blk_match(e->probe_row, e->shadow + y * bpr, bpr,
+        cm = ~rfb_blk_match(e->probe_row, e->shadow + y * stride, bpr,
                             e->blk_bytes, e->n_blk);
         cm &= (e->n_blk >= 32u) ? 0xFFFFFFFFu : ((1u << e->n_blk) - 1u);
         chg[nsamp] = cm;
@@ -425,7 +433,7 @@ static rfb_u32 rfb_probe_pass(rfb_encoder *e, const rfb_u8 *src,
             rfb_u32 mask = 0;
             if (sy >= 0 && (rfb_u32)sy < h)
                 mask = rfb_blk_match(e->probe_row,
-                                     e->shadow + (rfb_u32)sy * bpr, bpr,
+                                     e->shadow + (rfb_u32)sy * stride, bpr,
                                      e->blk_bytes, e->n_blk);
             e->probe_mask[c * e->n_samples + nsamp] = mask;
         }
@@ -589,24 +597,24 @@ again:
 
 static void rfb_apply_copy(rfb_encoder *e, const rfb_copy *cp)
 {
-    const rfb_u32 bpr = e->g.bytes_per_row;
+    const rfb_u32 stride = e->row_stride;
     rfb_u32 p, r;
 
     for (p = 0; p < e->g.depth; p++) {
-        rfb_u8 *plane = e->shadow + p * e->plane_bytes;
+        rfb_u8 *plane = e->shadow + p * e->plane_stride;
         if (cp->dy > 0) {
             for (r = 0; r < cp->h; r++) {
                 rfb_u32 dstr = cp->y0 + r;
                 rfb_u32 srcr = dstr + (rfb_u32)cp->dy;
-                memmove(plane + dstr * bpr + cp->x0,
-                        plane + srcr * bpr + cp->x0, (size_t)cp->w);
+                memmove(plane + dstr * stride + cp->x0,
+                        plane + srcr * stride + cp->x0, (size_t)cp->w);
             }
         } else {
             for (r = cp->h; r > 0; r--) {
                 rfb_u32 dstr = cp->y0 + r - 1u;
                 rfb_u32 srcr = (rfb_u32)((rfb_s32)dstr + cp->dy);
-                memmove(plane + dstr * bpr + cp->x0,
-                        plane + srcr * bpr + cp->x0, (size_t)cp->w);
+                memmove(plane + dstr * stride + cp->x0,
+                        plane + srcr * stride + cp->x0, (size_t)cp->w);
             }
         }
     }
@@ -697,7 +705,7 @@ long rfb_encode_frame(rfb_encoder *e, const rfb_u8 *src,
         for (tx = 0; tx < e->tiles_x; tx++) {
             rfb_u32 x0 = tx * e->g.tile_w;
             rfb_u32 tw = bpr - x0;
-            rfb_u32 off = y0 * bpr + x0;
+            rfb_u32 off = y0 * e->row_stride + x0;
             rfb_u32 raw_len, mask = 0;
 
             if (tw > e->g.tile_w)
@@ -706,10 +714,10 @@ long rfb_encode_frame(rfb_encoder *e, const rfb_u8 *src,
             e->st.tiles_scanned++;
 
             for (p = 0; p < depth; p++) {
-                accs[p] = rfb_diff_plane(src + p * e->plane_bytes + off,
-                                         e->shadow + p * e->plane_bytes + off,
+                accs[p] = rfb_diff_plane(src + p * e->plane_stride + off,
+                                         e->shadow + p * e->plane_stride + off,
                                          e->xorbuf + p * tb,
-                                         bpr, tw, th, keep_xor);
+                                         e->row_stride, tw, th, keep_xor);
                 if (accs[p])
                     mask |= 1u << p;
             }
@@ -734,8 +742,8 @@ long rfb_encode_frame(rfb_encoder *e, const rfb_u8 *src,
                 if (!(mask & (1u << p)))
                     continue;
 
-                rfb_gather(e->shadow + p * e->plane_bytes + off,
-                           e->rawbuf, bpr, tw, th);
+                rfb_gather(e->shadow + p * e->plane_stride + off,
+                           e->rawbuf, e->row_stride, tw, th);
 
                 best_code = RFB_CODE_RAW;
                 best_len = raw_len;

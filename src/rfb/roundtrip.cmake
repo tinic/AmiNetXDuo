@@ -16,14 +16,18 @@ if(seqs STREQUAL "")
     message(FATAL_ERROR "rfbgen produced nothing in ${DIR}")
 endif()
 
-execute_process(COMMAND "${BENCH}" --reps 1 --tiles 8x8,16x8,32x16 ${seqs}
-                RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
-message("${out}")
-if(NOT rc EQUAL 0)
-    message(FATAL_ERROR "round trip failed: ${rc}\n${err}")
-endif()
-
-string(REGEX MATCHALL "rt_fail=[1-9][0-9]*" bad "${out}")
-if(NOT bad STREQUAL "")
-    message(FATAL_ERROR "round trip mismatches: ${bad}")
-endif()
+# Both source layouts: plane-major, and the BMF_INTERLEAVED stride the encoder
+# takes when RFB_F_INTERLEAVED is set.
+foreach(layout "" "--interleaved")
+    execute_process(COMMAND "${BENCH}" --reps 1 --tiles 8x8,16x8,32x16 ${layout}
+                            ${seqs}
+                    RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
+    message("${out}")
+    if(NOT rc EQUAL 0)
+        message(FATAL_ERROR "round trip failed ${layout}: ${rc}\n${err}")
+    endif()
+    string(REGEX MATCHALL "rt_fail=[1-9][0-9]*" bad "${out}")
+    if(NOT bad STREQUAL "")
+        message(FATAL_ERROR "round trip mismatches ${layout}: ${bad}")
+    endif()
+endforeach()

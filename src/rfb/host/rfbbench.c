@@ -33,6 +33,8 @@ typedef struct {
     rfb_geom g;
     unsigned tiles_x, tiles_y;
     unsigned plane_bytes;
+    unsigned row_stride;     /* bytes_per_row, or * depth when interleaved */
+    unsigned plane_stride;
     unsigned char *fb;
 } rfb_dec;
 
@@ -41,6 +43,7 @@ static unsigned rd16(const unsigned char *p) { return ((unsigned)p[0] << 8) | p[
 static int dec_frame(rfb_dec *d, const unsigned char *in, unsigned n)
 {
     const unsigned bpr = d->g.bytes_per_row;
+    const unsigned rs = d->row_stride;
     unsigned i = 4;
     unsigned char tile[RFB_MAX_TILE_W * RFB_MAX_TILE_H];
 
@@ -67,16 +70,16 @@ static int dec_frame(rfb_dec *d, const unsigned char *in, unsigned n)
                         x0, w, y0, h, dy);
             if (x0 + w > bpr || y0 + h > d->g.height) return -4;
             for (p = 0; p < d->g.depth; p++) {
-                unsigned char *pl = d->fb + (size_t)p * d->plane_bytes;
+                unsigned char *pl = d->fb + (size_t)p * d->plane_stride;
                 if (dy > 0) {
                     for (r = 0; r < h; r++)
-                        memmove(pl + (size_t)(y0 + r) * bpr + x0,
-                                pl + (size_t)(y0 + r + (unsigned)dy) * bpr + x0, w);
+                        memmove(pl + (size_t)(y0 + r) * rs + x0,
+                                pl + (size_t)(y0 + r + (unsigned)dy) * rs + x0, w);
                 } else {
                     for (r = h; r > 0; r--) {
                         unsigned dr = y0 + r - 1;
-                        memmove(pl + (size_t)dr * bpr + x0,
-                                pl + (size_t)((int)dr + dy) * bpr + x0, w);
+                        memmove(pl + (size_t)dr * rs + x0,
+                                pl + (size_t)((int)dr + dy) * rs + x0, w);
                     }
                 }
             }
@@ -117,9 +120,9 @@ static int dec_frame(rfb_dec *d, const unsigned char *in, unsigned n)
                     i += len;
                     if (got != (long)(tw * th)) return -12;
                 }
-                pl = d->fb + (size_t)p * d->plane_bytes;
+                pl = d->fb + (size_t)p * d->plane_stride;
                 for (r = 0; r < th; r++) {
-                    unsigned char *dst = pl + (size_t)(y0 + r) * bpr + x0;
+                    unsigned char *dst = pl + (size_t)(y0 + r) * rs + x0;
                     const unsigned char *s = tile + (size_t)r * tw;
                     unsigned c;
                     if (code == RFB_CODE_PB_XOR)
@@ -230,6 +233,30 @@ typedef struct {
 } tiling;
 
 static int g_deflate;
+static int g_interleaved;
+
+/* The measured wire rate the frame-rate column divides by. */
+#define WIRE_BYTES_PER_SEC 407552.0   /* 398 KB/s */
+
+/* Rearrange a plane-major sequence into the BMF_INTERLEAVED layout, so the
+ * encoder's stride path is round-tripped rather than argued about. */
+static int pfs_interleave(pfs *s)
+{
+    unsigned char *tmp = malloc(s->frame_bytes);
+    unsigned i, p, y;
+    unsigned bpr = s->g.bytes_per_row, h = s->g.height, d = s->g.depth;
+    if (!tmp) return -1;
+    for (i = 0; i < s->frames; i++) {
+        unsigned char *f = s->data + (size_t)i * s->frame_bytes;
+        memcpy(tmp, f, s->frame_bytes);
+        for (p = 0; p < d; p++)
+            for (y = 0; y < h; y++)
+                memcpy(f + ((size_t)y * d + p) * bpr,
+                       tmp + ((size_t)p * h + y) * bpr, bpr);
+    }
+    free(tmp);
+    return 0;
+}
 
 #ifdef RFBBENCH_ZLIB
 /* One deflate stream for the whole sequence, which is the friendliest case for
@@ -285,9 +312,11 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
     rfb_geom g = s->g;
     unsigned char *shadow, *scratch, *out, *decfb;
     unsigned i, rep;
-    unsigned long total = 0, mx = 0;
+    unsigned long total = 0, mx = 0, f0 = 0, mx_after = 0;
     unsigned rt_ok = 0, rt_fail = 0;
     double t0, us;
+
+    rfb_u32 flags = st->flags | (g_interleaved ? RFB_F_INTERLEAVED : 0u);
 
     g.tile_w = (rfb_u8)t.tile_w;
     g.tile_h = (rfb_u8)t.tile_h;
@@ -304,12 +333,15 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
         mx = s->frame_bytes;
         rt_ok = s->frames;
         free(dst);
-        printf("strat=%s seq=%s tile=%ux%u total=%lu mean=%.1f max=%lu "
+        printf("strat=%s seq=%s tile=%ux%u total=%lu mean=%.1f mean_after_f0=%.1f "
+               "f0=%lu max=%lu max_after_f0=%lu fps_at_398k=%.1f "
                "ratio=%.3f us_per_frame=%.1f rt_ok=%u rt_fail=%u "
                "src_kb=%lu probe_kb=0 move_kb=0 dirty=0 sent=0 "
                "c_raw=0 c_pbraw=0 c_pbxor=0 copies=0\n",
                st->name, s->name, t.tile_w, t.tile_h, total,
-               (double)total / (double)s->frames, mx, 1.0,
+               (double)total / (double)s->frames, (double)s->frame_bytes,
+               (unsigned long)s->frame_bytes, mx, mx,
+               WIRE_BYTES_PER_SEC / (double)s->frame_bytes, 1.0,
                us / (double)s->frames, rt_ok, rt_fail,
                (unsigned long)((unsigned long)s->frame_bytes * s->frames / 1024));
         return 0;
@@ -321,7 +353,7 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
     if (st->backoff)
         cfg.max_backoff = (rfb_u8)(st->backoff < 0 ? 0 : st->backoff);
     shadow = calloc(1, rfb_shadow_size(&g));
-    scratch = calloc(1, rfb_scratch_size(&g, st->flags, &cfg));
+    scratch = calloc(1, rfb_scratch_size(&g, flags, &cfg));
     out = malloc(rfb_worst_case_frame(&g));
     decfb = calloc(1, rfb_shadow_size(&g));
     if (!shadow || !scratch || !out || !decfb) return -1;
@@ -330,9 +362,9 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
     t0 = now_us();
     for (rep = 0; rep < (unsigned)reps; rep++) {
         memset(shadow, 0, rfb_shadow_size(&g));
-        if (rfb_encoder_init(&e, &g, st->flags, &cfg, shadow,
+        if (rfb_encoder_init(&e, &g, flags, &cfg, shadow,
                              rfb_shadow_size(&g), scratch,
-                             rfb_scratch_size(&g, st->flags, &cfg)) != 0) {
+                             rfb_scratch_size(&g, flags, &cfg)) != 0) {
             fprintf(stderr, "init failed\n");
             return -1;
         }
@@ -347,12 +379,14 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
     /* Untimed pass: the same frames again, this time decoded and compared. */
     memset(shadow, 0, rfb_shadow_size(&g));
     memset(decfb, 0, rfb_shadow_size(&g));
-    rfb_encoder_init(&e, &g, st->flags, &cfg, shadow, rfb_shadow_size(&g),
-                     scratch, rfb_scratch_size(&g, st->flags, &cfg));
+    rfb_encoder_init(&e, &g, flags, &cfg, shadow, rfb_shadow_size(&g),
+                     scratch, rfb_scratch_size(&g, flags, &cfg));
     memset(&d, 0, sizeof(d));
     d.g = g;
     d.tiles_x = e.tiles_x; d.tiles_y = e.tiles_y;
     d.plane_bytes = e.plane_bytes;
+    d.row_stride = e.row_stride;
+    d.plane_stride = e.plane_stride;
     d.fb = decfb;
 
 #ifdef RFBBENCH_ZLIB
@@ -370,6 +404,10 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
         if (n < 0) { fprintf(stderr, "encode error %ld\n", n); return -1; }
         total += (unsigned long)n;
         if ((unsigned long)n > mx) mx = (unsigned long)n;
+        if (i == 0)
+            f0 = (unsigned long)n;
+        else if ((unsigned long)n > mx_after)
+            mx_after = (unsigned long)n;
         used = dec_frame(&d, out, (unsigned)n);
         if (used != (int)n || memcmp(decfb, src, s->frame_bytes) != 0)
             rt_fail++;
@@ -383,12 +421,17 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
 #endif
     }
 
-    printf("strat=%s seq=%s tile=%ux%u total=%lu mean=%.1f max=%lu "
+    {
+    double mean_after = s->frames > 1
+        ? (double)(total - f0) / (double)(s->frames - 1) : (double)total;
+    printf("strat=%s seq=%s tile=%ux%u total=%lu mean=%.1f mean_after_f0=%.1f "
+           "f0=%lu max=%lu max_after_f0=%lu fps_at_398k=%.0f "
            "ratio=%.3f us_per_frame=%.1f rt_ok=%u rt_fail=%u "
            "src_kb=%lu probe_kb=%lu move_kb=%lu dirty=%lu sent=%lu "
            "c_raw=%lu c_pbraw=%lu c_pbxor=%lu copies=%lu\n",
            st->name, s->name, t.tile_w, t.tile_h, total,
-           (double)total / (double)s->frames, mx,
+           (double)total / (double)s->frames, mean_after, f0, mx, mx_after,
+           mean_after > 0.0 ? WIRE_BYTES_PER_SEC / mean_after : 99999.0,
            (double)((unsigned long)s->frame_bytes * s->frames) / (double)(total ? total : 1),
            us / (double)s->frames, rt_ok, rt_fail,
            (unsigned long)e.st.src_bytes / 1024, (unsigned long)e.st.probe_bytes / 1024,
@@ -396,6 +439,7 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
            (unsigned long)e.st.tiles_dirty, (unsigned long)e.st.planes_sent,
            (unsigned long)e.st.code_raw, (unsigned long)e.st.code_pb_raw,
            (unsigned long)e.st.code_pb_xor, (unsigned long)e.st.copies);
+    }
 
 #ifdef RFBBENCH_ZLIB
     if (g_deflate) {
@@ -455,6 +499,8 @@ int main(int argc, char **argv)
             }
         } else if (strcmp(argv[a], "--strat") == 0 && a + 1 < argc) {
             strat_filter = argv[++a];
+        } else if (strcmp(argv[a], "--interleaved") == 0) {
+            g_interleaved = 1;
         } else if (strcmp(argv[a], "--deflate") == 0) {
             g_deflate = 1;
         } else if (strcmp(argv[a], "--reps") == 0 && a + 1 < argc) {
@@ -469,6 +515,7 @@ int main(int argc, char **argv)
         pfs s;
         int ti, si;
         if (pfs_load(argv[a], &s) != 0) { rc = 1; continue; }
+        if (g_interleaved && pfs_interleave(&s) != 0) { rc = 1; continue; }
         printf("seq=%s file=%s w=%u h=%u depth=%u bpr=%u frames=%u "
                "frame_bytes=%u\n",
                s.name, argv[a], s.g.width, s.g.height, s.g.depth,
