@@ -433,6 +433,25 @@ if [ "$STOCK25519" = "0" ]; then
                  "$ROOT/clients/dropbear/amiga_25519.c"
     SHIM_OBJS+=("$G25519_O")
 
+    # AND CHECK THAT THE PICK IS REALLY IN THERE.  This is the guard for the
+    # defect above rather than a restatement of it: the failure mode is silent
+    # at every level -- the object compiles, the binary links, the handshake
+    # completes, and the only symptom is that it takes 75 s instead of 5 on an
+    # A1200 because the vectors never left the portable C.  An undefined
+    # reference to the selector is what a compiled-in pick looks like from
+    # outside, so a missing one stops the build here.
+    if [ -n "${AMINETXDUO_CLIENT_ANY:-}" ]; then
+        if ! "${AMIGA_GCC%gcc}nm" "$G25519_O" 2>/dev/null \
+             | grep -q "U _c68k_25519_cpu_select"; then
+            echo "amiga_25519.c has no reference to c68k_25519_cpu_select." >&2
+            echo "The CPU pick was compiled out, so this client would carry" >&2
+            echo "both X25519 halves and use neither.  C68K_MV must reach" >&2
+            echo "this translation unit." >&2
+            exit 1
+        fi
+        echo "  ok amiga_25519.c calls c68k_25519_cpu_select"
+    fi
+
     FAST_WRAPS=",--wrap=dropbear_curve25519_scalarmult"
     FAST_WRAPS="$FAST_WRAPS,--wrap=dropbear_ed25519_make_key"
     FAST_WRAPS="$FAST_WRAPS,--wrap=dropbear_ed25519_sign"
