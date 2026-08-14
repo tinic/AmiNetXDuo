@@ -70,10 +70,10 @@
 #define FB_WORD_MAX         48
 
 /* How often the session says what it is costing.  Frames, because a count is
-   what the arithmetic afterwards divides by, and 64 rather than 128 because a
-   fifteen-second run at depth 4 produced ninety frames and therefore no
-   figure at all. */
-#define FB_STAT_EVERY       64
+   what the arithmetic afterwards divides by.  32 and not 128: a screen that is
+   scrolling costs half a second a frame, so a twenty-second run of the case
+   the figure is most wanted for produces thirty-five frames. */
+#define FB_STAT_EVERY       32
 
 /* The floor between grabs, in fiftieths.  One tick, so a screen nothing is
  * drawing on does not have 40 KB of chip RAM read on every pass of a loop
@@ -601,11 +601,17 @@ static BOOL fb_take_buffers(const FbGeometry *g)
 
     fb_geom = *g;
 
-    /* Neither is known to the receiver yet, and the palette has to be re-read
-       rather than compared against what the last screen had. */
+    /*
+     * The shape is queued; the colours are NOT.  Zeroing the remembered
+     * palette is what makes the next grab's comparison report a change, and
+     * that is where the `pal` word comes from -- queueing one here would send
+     * 3 << depth zeroes, which a viewer draws as a black screen until the real
+     * one arrives a frame later.  http_fb_start() reads the ColorMap itself,
+     * because it is the one caller that still holds the screen.
+     */
     memset(fb_pal, 0, sizeof(fb_pal));
     fb_want_geom = 1;
-    fb_want_pal  = 1;
+    fb_want_pal  = 0;
 
     return TRUE;
 }
@@ -1063,7 +1069,10 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
      * one arrives a frame later.
      */
     if (ok)
+    {
         (VOID)fb_read_palette(sc->ViewPort.ColorMap, g.depth, fb_pal);
+        fb_want_pal = 1;
+    }
 
     UnlockPubScreen(NULL, sc);
 
