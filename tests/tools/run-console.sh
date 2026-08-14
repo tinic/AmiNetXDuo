@@ -249,9 +249,21 @@ export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
 # never came up, and the defect then looks like a pass.
 MAC=$(printf '02:41:4d:49:%02x:%02x' $(( ($$ >> 8) & 0xff )) $(( $$ & 0xff )))
 
+# TERM, and then KILL.  A headless Amiberry does not always go on TERM, and one
+# that survives the harness leaves a guest ANSWERING AT THIS ADDRESS -- which
+# the next run then measures instead of its own.  That happened: a run reported
+# a one-second boot because the previous run's guest was still there.
 EMU_PID=""
 cleanup() {
-    [ -n "$EMU_PID" ] && kill -TERM "$EMU_PID" 2>/dev/null
+    local n=0
+    [ -n "$EMU_PID" ] || return 0
+    kill -TERM "$EMU_PID" 2>/dev/null || true
+    while [ "$n" -lt 10 ] && kill -0 "$EMU_PID" 2>/dev/null; do
+        sleep 1
+        n=$((n + 1))
+    done
+    kill -KILL "$EMU_PID" 2>/dev/null || true
+    wait "$EMU_PID" 2>/dev/null || true
     EMU_PID=""
     return 0
 }
@@ -279,18 +291,11 @@ a2065_rom_file=:ENABLED
 a2065_rom_options=mac=$MAC,$BACKEND
 EOF
 
-    ( trap '' PIPE; exec "$AMIBERRY" --log -f "$cfg" ) >"$EMULOG" 2>&1 &
+    # NOT --log.  It writes about a megabyte a second, playhouse3 is shared,
+    # and a five-minute run left 427 MB of it here; nothing in this harness
+    # reads it, because the backend assertion below is a better one.
+    ( trap '' PIPE; exec "$AMIBERRY" -f "$cfg" ) >"$EMULOG" 2>&1 &
     EMU_PID=$!
-}
-
-# A bridged run that quietly came up on SLIRP passes every check and proves
-# nothing: ethernet_getselectionname() falls back to slirp for any name it
-# cannot match.  Asserted, exactly as tools/amiberry-run.sh asserts it.
-backend_ok() {
-    case "$BACKEND" in
-        slirp|slirp_inbound|none) return 0 ;;
-    esac
-    grep -q "UAENET: '$BACKEND' open successful" "$EMULOG" 2>/dev/null
 }
 
 # ---------------------------------------------------------------- the probe --
@@ -340,6 +345,18 @@ say model "$MODEL"
 say client "${CLIENT:-this host}"
 say page "$PAGE"
 
+# NOTHING MAY ALREADY BE AT THIS ADDRESS.
+#
+# The MAC is fresh every run but the address is not, and a guest left over from
+# an earlier run answers on it exactly as this one's would.  A run that measures
+# the previous run's machine is worse than a run that does not start.
+if [ "$(alive)" = "200" ]; then
+    say error "something already answers on http://$ADDRESS:$PORT/"
+    say hint "an earlier guest is still up, or -a names an address in use"
+    say RESULT INFRA
+    exit 2
+fi
+
 VERDICT=pass
 
 for depth in "${DEPTHS[@]}"; do
@@ -360,17 +377,19 @@ for depth in "${DEPTHS[@]}"; do
 
     if [ "$up" != yes ]; then
         say "${tag}_up" no
-        if ! backend_ok; then
-            say "${tag}_backend" "NOT $BACKEND -- the emulator fell back"
-        fi
         say "${tag}_emulog" "$EMULOG"
         cleanup
         VERDICT=infra
         continue
     fi
 
-    backend_ok && say "${tag}_backend" "$BACKEND confirmed" \
-                || say "${tag}_backend" "unconfirmed"
+    # BRIDGED IS PROVEN BY THE ADDRESS, not by a line in a log.  The interface
+    # is configured STATIC on the host's own LAN and the client is another
+    # machine on it: a guest that quietly came up on SLIRP is behind NAT at
+    # 10.0.2.15 and cannot be reached from there at all, so an answer from
+    # $ADDRESS is the assertion.  (Amiberry logs no UAENET line for the a2065,
+    # so the string tools/amiberry-run.sh greps for is not available here.)
+    say "${tag}_bridged" "confirmed by an answer at $ADDRESS from ${CLIENT:-this host}"
 
     # The page, from disk, on the same address the socket upgrades on.
     read -r code bytes <<<"$(fetch_page)"

@@ -832,12 +832,23 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     }
 
     ok = fb_geometry_of(sc->RastPort.BitMap, &g);
+
+    if (ok)
+        ok = fb_take_buffers(&g);
+
+    /*
+     * The colours, HERE, while the screen is still locked.  fb_take_buffers()
+     * clears the remembered palette so that the first grab's comparison is
+     * against nothing, and without this the first `pal` word out is 3 << depth
+     * zeroes -- a black palette, which is what a viewer draws until the second
+     * one arrives a frame later.
+     */
+    if (ok)
+        (VOID)fb_read_palette(sc->ViewPort.ColorMap, g.depth, fb_pal);
+
     UnlockPubScreen(NULL, sc);
 
     if (!ok)
-        return FALSE;
-
-    if (!fb_take_buffers(&g))
         return FALSE;
 
     fb_sb         = sb;

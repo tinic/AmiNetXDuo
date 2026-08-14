@@ -342,6 +342,7 @@ class Screen:
         return out
 
     def png(self, path):
+        made(path)
         pix = self.chunky()
         raw = bytearray()
         for y in range(self.h):
@@ -362,8 +363,18 @@ class Screen:
             fh.write(blob)
 
 
+def made(path):
+    """The drawer the output goes in.  A probe that runs over ssh on another
+    machine has no reason to expect the caller's tree to exist there, and a
+    twelve-second capture ending in FileNotFoundError is a run thrown away."""
+    d = os.path.dirname(os.path.abspath(path))
+    if d:
+        os.makedirs(d, exist_ok=True)
+
+
 def pfs(path, screens):
     """The frames as a .pfs, so tests/tools/pfs-check.py can read them too."""
+    made(path)
     first = screens[0][0]
     blob = bytearray(b"PFS1")
     blob += struct.pack(">HHBBHHH", first.w, first.h, first.depth, 0,
