@@ -114,9 +114,18 @@ echo "    -> $OUT"
 SRC_PARENT=$(cd "$FROM/.." && pwd)
 SRC_BASE=$(basename "$FROM")
 
-TAR_FLAGS=(--uid 0 --gid 0 --uname root --gname root)
+# Owner normalisation, so the archive does not carry whoever happened to build
+# it.  The two tars share no spelling of this at all: --uid/--gid/--uname/--gname
+# are bsdtar's and GNU tar rejects them outright, which is how the first Linux
+# packaging run died after a 40-minute build.
 IS_BSDTAR=0
 tar --version 2>/dev/null | head -1 | grep -qi bsdtar && IS_BSDTAR=1
+
+if [ "$IS_BSDTAR" = "1" ]; then
+    TAR_FLAGS=(--uid 0 --gid 0 --uname root --gname root)
+else
+    TAR_FLAGS=(--owner=root:0 --group=root:0)
+fi
 
 if [ "$SRC_PARENT/$SRC_BASE" = "${SRC_PARENT%/opt}/opt/m68k-amigaos" ]; then
     TAR_MEMBER="$PREFIX"
