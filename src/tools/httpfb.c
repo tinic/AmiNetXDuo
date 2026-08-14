@@ -45,7 +45,6 @@
 
 #include <proto/graphics.h>
 #include <proto/intuition.h>
-#include <proto/layers.h>
 
 #define PUBSCREEN_NAME      "Workbench"
 
@@ -83,7 +82,6 @@
 
 struct GfxBase       *GfxBase;
 struct IntuitionBase *IntuitionBase;
-struct Library       *LayersBase;
 
 /*
  * What the header says and what the copy loop needs.  row_stride and row_bytes
@@ -154,6 +152,11 @@ static ULONG           fb_bytes;
 static ULONG           fb_grab_ticks;
 static ULONG           fb_encode_ticks;
 static ULONG           fb_since_stat;
+
+/* Frames read without the layer lock, because somebody else had it.  Reported
+   in `fbstat` so a session that looks torn can be told apart from one that is
+   dropping frames. */
+static ULONG           fb_torn;
 
 /* ------------------------------------------------------------------ input -- */
 
@@ -253,19 +256,17 @@ static BOOL fb_open_libraries(VOID)
         OpenLibrary((CONST_STRPTR)"graphics.library", 39);
     IntuitionBase = (struct IntuitionBase *)
         OpenLibrary((CONST_STRPTR)"intuition.library", 39);
-    LayersBase = OpenLibrary((CONST_STRPTR)"layers.library", 39);
 
-    if (GfxBase != NULL && IntuitionBase != NULL && LayersBase != NULL)
+    if (GfxBase != NULL && IntuitionBase != NULL)
         return TRUE;
 
-    fb_say("this needs Kickstart 3.0 or later: graphics, intuition and layers "
-           "must all answer OpenLibrary() at version 39");
+    fb_say("this needs Kickstart 3.0 or later: graphics and intuition must "
+           "both answer OpenLibrary() at version 39");
     return FALSE;
 }
 
 static VOID fb_close_libraries(VOID)
 {
-    if (LayersBase != NULL)      { CloseLibrary(LayersBase); LayersBase = NULL; }
     if (IntuitionBase != NULL)
     {
         CloseLibrary((struct Library *)IntuitionBase);
@@ -472,15 +473,42 @@ enum
 };
 
 /*
- * One frame into `buf`, and the palette while the screen is locked.  The
- * screen is locked, read and unlocked here and nowhere else, so everything
- * downstream -- the encode, the socket -- runs with nothing held.
+ * One frame into `buf`, and the palette.  Everything downstream -- the encode,
+ * the socket -- runs with nothing held.
+ *
+ * THE LAYER LOCK IS ATTEMPTED, NEVER WAITED FOR, AND NOT REQUIRED
+ *
+ *   LockLayers() was here and it wedged the whole server.  The lock it takes
+ *   is sc->LayerInfo.Lock, and it is held for as long as a mouse button is
+ *   down: Intuition holds it while a menu is up or a window is being dragged
+ *   or sized, and the Workbench task holds it through an icon drag or a
+ *   rubber-band selection.  Those last as long as a person holds a button,
+ *   and httpd serves every connection from one task, so for that whole time
+ *   nothing was answered -- not the console, not plain HTTP, not to anybody.
+ *   A guest was found forty minutes into exactly that: ss_Owner the Workbench
+ *   task, and the one SemaphoreRequest queued on it httpd's own stack.
+ *
+ *   Waiting is out, and so is giving up.  A grab that returned empty-handed
+ *   whenever the lock was busy would freeze the picture for the whole of every
+ *   drag -- the console would stop moving at the exact moment there is
+ *   something to watch.  So the lock is ATTEMPTED, and the frame is read
+ *   either way.
+ *
+ *   Reading it unlocked is safe and is what a mirror wants.  The planes are
+ *   memory; the lock serialises the tasks DRAWING into them, not the reading
+ *   of them, and the pubscreen lock above is what keeps the screen and its
+ *   bitmap in existence.  The cost is that a frame read while somebody is
+ *   drawing may carry half of a change -- and the encoder diffs the next grab
+ *   against what it actually sent, so the very next frame that differs puts it
+ *   right.  A torn frame for two milliseconds is the price of a console that
+ *   keeps up during a drag and a server that never stops.
  */
 static int fb_grab_frame(const FbGeometry *want, UBYTE *buf, FbGeometry *now,
                          BOOL *palette_moved)
 {
     struct Screen *sc;
     int            rc = FB_GRAB_OK;
+    BOOL           locked;
 
     *palette_moved = FALSE;
 
@@ -504,13 +532,18 @@ static int fb_grab_frame(const FbGeometry *want, UBYTE *buf, FbGeometry *now,
         return FB_GRAB_CHANGED;
     }
 
+    locked = (BOOL)(AttemptSemaphore(&sc->LayerInfo.Lock) != 0);
+    if (!locked)
+        fb_torn++;
+
     *palette_moved = fb_read_palette(sc->ViewPort.ColorMap,
                                      want->depth, fb_pal);
 
-    LockLayers(&sc->LayerInfo);
     WaitBlit();
     fb_copy_frame(sc->RastPort.BitMap, want, buf);
-    UnlockLayers(&sc->LayerInfo);
+
+    if (locked)
+        ReleaseSemaphore(&sc->LayerInfo.Lock);
 
     UnlockPubScreen(NULL, sc);
     return rc;
@@ -1097,6 +1130,7 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_grab_ticks = 0;
     fb_encode_ticks = 0;
     fb_since_stat = 0;
+    fb_torn       = 0;
     fb_want_stat  = 0;
 
     http_ws_reset(&fb_in);
@@ -1260,14 +1294,15 @@ BOOL http_fb_slice(ULONG now)
     {
         /* An unrecognised word is ignored at the far end, which is what lets
            this go down the same channel without the viewer knowing it. */
-        static const char *const tags[4] = { "fbstat f=", " b=", " gt=", " et=" };
-        const ULONG values[4] = { fb_frames, fb_bytes, fb_grab_ticks,
-                                  fb_encode_ticks };
+        static const char *const tags[5] = { "fbstat f=", " b=", " gt=", " et=",
+                                            " tn=" };
+        const ULONG values[5] = { fb_frames, fb_bytes, fb_grab_ticks,
+                                  fb_encode_ticks, fb_torn };
         ULONG at = 0;
         ULONG f;
         ULONG i;
 
-        for (f = 0; f < 4UL; f++)
+        for (f = 0; f < 5UL; f++)
         {
             for (i = 0; tags[f][i] != '\0'; i++)
                 fb_tx[10 + at++] = (UBYTE)tags[f][i];
