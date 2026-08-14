@@ -1042,7 +1042,7 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
 
     unit->nu_Nic.ops = netdev_nic_ops_for(card->chip);
     if (unit->nu_Nic.ops == NULL)
-        continue;           /* no core for this chip yet */
+        return FALSE;       /* no core for this chip yet */
 
     unit->nu_Dev    = dev;
     unit->nu_Nic.card   = card;
@@ -1061,7 +1061,7 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
     if (unit->nu_Nic.ops->attach(&unit->nu_Nic) != 0)
     {
         nd_trace("anx: attach failed\r\n");
-        continue;           /* the board did not answer as a DP8390 */
+        return FALSE;       /* the board did not answer as a DP8390 */
     }
     nd_tracex("anx: mac ", ((ULONG)unit->nu_Nic.factory[2] << 24) |
                    ((ULONG)unit->nu_Nic.factory[3] << 16) |

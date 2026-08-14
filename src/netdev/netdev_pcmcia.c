@@ -38,7 +38,11 @@
 #include <resources/card.h>
 
 #include <proto/exec.h>
-#include <proto/card.h>
+
+/* proto/card.h in this NDK includes clib/card_protos.h, which the NDK does
+   not ship -- the protos are clib/cardres_protos.h.  inline/card.h is the
+   half that matters here: the LVO stubs, against the CardResource below. */
+#include <inline/card.h>
 
 /* Attribute memory is byte-per-word: the card's byte n is at 2n. */
 #define PC_ATTR_STRIDE      2
