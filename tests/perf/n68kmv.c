@@ -25,29 +25,31 @@
  *   AMINETXDUO_RUN_TAG=mv ./tools/amiberry-run.sh -t 300 -m A1200 \
  *       build/any/tests/perf/n68kmv
  *
+ * Output goes through RawDoFmt and Write(), not stdio, for the reason
+ * cpucal.c does the same: printf drags in newlib's double formatting, the
+ * startup then opens mathieeedoubbas.library, and a 3.1 ROM has no such
+ * library -- the program exits 20 before main() with nothing measured.
+ *
  * SPDX-License-Identifier: MIT
  */
 
 #include <exec/types.h>
 #include <exec/execbase.h>
+#include <dos/dos.h>
 #include <devices/timer.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/timer.h>
 
-#include <stdio.h>
+#include <stdarg.h>
+
+#include "aminetxduo/compat.h"
 
 /* Declared here rather than from net68k.h, which reaches nx_api.h and its own
    typedef of VOID: bench/copycheck.c takes the same way out. */
 extern ULONG n68k_sum_longwords(const ULONG *p, ULONG count);
-extern ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from,
-                                     ULONG count);
 extern VOID  n68k_copy_bytes(UBYTE *to, const UBYTE *from, ULONG len);
 extern VOID  n68k_cpu_select(ULONG attnflags);
-
-struct Device           *TimerBase;
-static struct IORequest  timer_req;
-static struct MsgPort   *timer_port;
 
 extern ULONG n68k_sum_longwords_mv0(const ULONG *p, ULONG count);
 extern ULONG n68k_sum_longwords_mv20(const ULONG *p, ULONG count);
@@ -68,9 +70,60 @@ extern VOID n68k_copy_bytes_mv20(UBYTE *to, const UBYTE *from, ULONG len);
 extern VOID n68k_copy_bytes_mv40(UBYTE *to, const UBYTE *from, ULONG len);
 extern VOID n68k_copy_bytes_mv60(UBYTE *to, const UBYTE *from, ULONG len);
 
-extern ULONG (*n68k_vec_sum)(const ULONG *, ULONG);
-extern ULONG (*n68k_vec_copy_sum)(ULONG *, const ULONG *, ULONG);
-extern VOID  (*n68k_vec_copy)(UBYTE *, const UBYTE *, ULONG);
+extern VOID (*n68k_vec_copy)(UBYTE *, const UBYTE *, ULONG);
+
+extern struct Device *TimerBase;        /* src/common/compat.c owns it */
+
+/* ------------------------------------------------------------- logging --- */
+
+#ifndef RawPutChar
+#  define RawPutChar(c) \
+      LP1NR(0x204, RawPutChar, UBYTE, (c), d0, , EXEC_BASE_NAME)
+#endif
+
+#define M_LOG_SIZE      8192
+
+static char     m_log_buffer[M_LOG_SIZE];
+static ULONG    m_log_used;
+
+static VOID m_put(UBYTE ch)
+{
+
+    RawPutChar(ch);
+
+    if (m_log_used < (ULONG)(M_LOG_SIZE - 1))
+        m_log_buffer[m_log_used++] = (char)ch;
+}
+
+static VOID m_put_char(register UBYTE ch     __asm("d0"),
+                       register APTR  unused __asm("a3"))
+{
+
+    (VOID)unused;
+    if (ch != '\0')
+        m_put(ch);
+}
+
+static VOID m_log(const char *fmt, ...)
+{
+    va_list args;
+
+    va_start(args, fmt);
+    RawDoFmt((STRPTR)fmt, args, (void (*)())m_put_char, NULL);
+    va_end(args);
+
+    m_put('\n');
+}
+
+static VOID m_flush(VOID)
+{
+    BPTR out = Output();
+
+    if (out != (BPTR)0)
+        (VOID)Write(out, (APTR)m_log_buffer, (LONG)m_log_used);
+}
+
+/* ------------------------------------------------------------ the data --- */
 
 #define BUFW    512                     /* longwords */
 
@@ -87,7 +140,7 @@ static UBYTE  bref[320] __attribute__((aligned(4)));
 static ULONG  rng = 0x2545f491UL;
 static ULONG  failures;
 
-static ULONG rnd(void)
+static ULONG rnd(VOID)
 {
 
     rng ^= rng << 13;
@@ -97,11 +150,11 @@ static ULONG rnd(void)
     return rng;
 }
 
-static ULONG eclock(void)
+static ULONG eclock(VOID)
 {
     struct EClockVal ev;
 
-    ReadEClock(&ev);
+    (VOID)ReadEClock(&ev);
 
     return ev.ev_lo;
 }
@@ -145,7 +198,9 @@ static ULONG copy_sum_reference(ULONG *to, const ULONG *from, ULONG count)
     return acc;
 }
 
-static void check_sum(const char *name, ULONG (*fn)(const ULONG *, ULONG))
+/* ---------------------------------------------------------- the checks --- */
+
+static VOID check_sum(const char *name, ULONG (*fn)(const ULONG *, ULONG))
 {
     ULONG n;
 
@@ -158,14 +213,14 @@ static void check_sum(const char *name, ULONG (*fn)(const ULONG *, ULONG))
 
         if (fn(src, n) != sum_reference(src, n))
         {
-            printf("FAIL sum %s at n=%lu\n", name, (unsigned long)n);
+            m_log("FAIL sum %s at n=%lu", (LONG)name, (LONG)n);
             failures++;
             return;
         }
     }
 }
 
-static void check_copy_sum(const char *name,
+static VOID check_copy_sum(const char *name,
                            ULONG (*fn)(ULONG *, const ULONG *, ULONG))
 {
     ULONG n;
@@ -177,14 +232,17 @@ static void check_copy_sum(const char *name,
         for (i = 0; i < n; i++)
             src[i] = (rnd() << 8) ^ rnd();
         for (i = 0; i <= n; i++)
-            dst[i] = ref[i] = 0xDEADBEEFUL;
+        {
+            dst[i] = 0xDEADBEEFUL;
+            ref[i] = 0xDEADBEEFUL;
+        }
 
         want = copy_sum_reference(ref, src, n);
         got  = fn(dst, src, n);
 
         if (got != want || dst[n] != 0xDEADBEEFUL)
         {
-            printf("FAIL copysum %s at n=%lu\n", name, (unsigned long)n);
+            m_log("FAIL copysum %s at n=%lu", (LONG)name, (LONG)n);
             failures++;
             return;
         }
@@ -193,8 +251,8 @@ static void check_copy_sum(const char *name,
         {
             if (dst[i] != ref[i])
             {
-                printf("FAIL copysum %s at n=%lu word %lu\n",
-                       name, (unsigned long)n, (unsigned long)i);
+                m_log("FAIL copysum %s at n=%lu word %lu",
+                      (LONG)name, (LONG)n, (LONG)i);
                 failures++;
                 return;
             }
@@ -203,10 +261,11 @@ static void check_copy_sum(const char *name,
 }
 
 /*
- * `pairs` is 4 on a 68000 -- matched parity only, the other twelve offsets are
- * an address error there by design -- and 16 everywhere else.
+ * `all_offsets` is false on a 68000: only the four matched-parity pairs are
+ * legal there for the forms that carry no parity guard, and the other twelve
+ * are an address error by design rather than a defect.
  */
-static void check_copy(const char *name,
+static VOID check_copy(const char *name,
                        VOID (*fn)(UBYTE *, const UBYTE *, ULONG),
                        int all_offsets)
 {
@@ -244,9 +303,9 @@ static void check_copy(const char *name,
                 {
                     if (bdst[i] != bref[i])
                     {
-                        printf("FAIL copy %s s%lu d%lu n=%lu at %lu\n",
-                               name, (unsigned long)so, (unsigned long)dof,
-                               (unsigned long)n, (unsigned long)i);
+                        m_log("FAIL copy %s s%lu d%lu n=%lu at %lu",
+                              (LONG)name, (LONG)so, (LONG)dof, (LONG)n,
+                              (LONG)i);
                         failures++;
                         return;
                     }
@@ -256,25 +315,27 @@ static void check_copy(const char *name,
     }
 }
 
-static void bench_sum(const char *name, ULONG (*fn)(const ULONG *, ULONG),
+/* ----------------------------------------------------------- the bench --- */
+/*
+ * The E-Clock is 709379 Hz, so a tick is 1409.68 ns and the 1410 below is
+ * 0.02% out.  Integer throughout: a double here is mathieeedoubbas.library.
+ */
+
+static VOID bench_sum(const char *name, ULONG (*fn)(const ULONG *, ULONG),
                       ULONG words, ULONG reps)
 {
     ULONG t0, ticks, i;
 
     t0 = eclock();
     for (i = 0; i < reps; i++)
-        (void)fn(src, words);
+        (VOID)fn(src, words);
     ticks = eclock() - t0;
 
-    /* The E-Clock is 709379 Hz, so a tick is 1409.68 ns and the rounded
-       1410 is 0.02% out: integer throughout, because a double here pulls in
-       mathieeedoubbas.library, which a 3.1 ROM does not have. */
-    printf("  sum       %-8s %6lu ticks  %4lu ns/B\n", name,
-           (unsigned long)ticks,
-           (unsigned long)((ticks * 1410UL) / (words * 4UL * reps)));
+    m_log("sum %s ticks=%lu nsB=%lu", (LONG)name, (LONG)ticks,
+          (LONG)((ticks * 1410UL) / (words * 4UL * reps)));
 }
 
-static void bench_copy(const char *name,
+static VOID bench_copy(const char *name,
                        VOID (*fn)(UBYTE *, const UBYTE *, ULONG),
                        ULONG len, ULONG reps)
 {
@@ -285,12 +346,11 @@ static void bench_copy(const char *name,
         fn(bdst, bsrc, len);
     ticks = eclock() - t0;
 
-    printf("  copy%-4lu  %-8s %6lu ticks  %4lu ns/B\n",
-           (unsigned long)len, name, (unsigned long)ticks,
-           (unsigned long)((ticks * 1410UL) / (len * reps)));
+    m_log("copy%lu %s ticks=%lu nsB=%lu", (LONG)len, (LONG)name,
+          (LONG)ticks, (LONG)((ticks * 1410UL) / (len * reps)));
 }
 
-static const char *selected(void)
+static const char *selected(VOID)
 {
 
     if (n68k_vec_copy == n68k_copy_bytes_mv60)
@@ -311,24 +371,20 @@ int main(void)
     int   wide = (attn & AFF_68020) != 0UL;
     ULONG i;
 
-    timer_port = CreateMsgPort();
-    if (timer_port == NULL)
-        return 20;
-
-    timer_req.io_Message.mn_ReplyPort = timer_port;
-    if (OpenDevice("timer.device", UNIT_ECLOCK, &timer_req, 0) != 0)
+    (VOID)ami_millis();                 /* opens timer.device, sets TimerBase */
+    if (TimerBase == NULL)
     {
-        printf("no timer.device\n");
+        m_log("no timer.device");
+        m_flush();
         return 20;
     }
-    TimerBase = timer_req.io_Device;
 
-    /* Nothing has opened bsdsocket.library here, so nothing has done this
-       yet: this program is the one caller that has to select for itself. */
+    /* Nothing has opened bsdsocket.library here, so nothing has selected yet:
+       this program is the one caller that has to do it for itself. */
     n68k_cpu_select(attn);
 
-    printf("attnflags=%08lx\n", (unsigned long)attn);
-    printf("selected=%s\n", selected());
+    m_log("attnflags=%08lx", (LONG)attn);
+    m_log("selected=%s", (LONG)selected());
 
     for (i = 0; i < BUFW; i++)
         src[i] = (rnd() << 8) ^ rnd();
@@ -345,50 +401,39 @@ int main(void)
     check_copy_sum("mv40", n68k_copy_sum_longwords_mv40);
     check_copy_sum("mv60", n68k_copy_sum_longwords_mv60);
 
-    check_copy("mv0", n68k_copy_bytes_mv0, 1);
-    if (wide)
-    {
-        check_copy("mv20", n68k_copy_bytes_mv20, 1);
-        check_copy("mv40", n68k_copy_bytes_mv40, 1);
-        check_copy("mv60", n68k_copy_bytes_mv60, 1);
-    }
-    else
-    {
-        check_copy("mv20", n68k_copy_bytes_mv20, 0);
-        check_copy("mv40", n68k_copy_bytes_mv40, 0);
-        check_copy("mv60", n68k_copy_bytes_mv60, 0);
-    }
+    check_copy("mv0",  n68k_copy_bytes_mv0,  1);
+    check_copy("mv20", n68k_copy_bytes_mv20, wide);
+    check_copy("mv40", n68k_copy_bytes_mv40, wide);
+    check_copy("mv60", n68k_copy_bytes_mv60, wide);
 
-    printf("checked=%s\n", wide ? "all16" : "matched-parity");
-    printf("\n");
+    m_log("checked=%s", (LONG)(wide ? "all16" : "matched-parity"));
 
-    bench_sum("mv0",  n68k_sum_longwords_mv0,  365, 200);
-    bench_sum("mv20", n68k_sum_longwords_mv20, 365, 200);
-    bench_sum("mv40", n68k_sum_longwords_mv40, 365, 200);
-    bench_sum("mv60", n68k_sum_longwords_mv60, 365, 200);
-    bench_sum("chosen", n68k_sum_longwords, 365, 200);
+    bench_sum("mv0",    n68k_sum_longwords_mv0,  365, 200);
+    bench_sum("mv20",   n68k_sum_longwords_mv20, 365, 200);
+    bench_sum("mv40",   n68k_sum_longwords_mv40, 365, 200);
+    bench_sum("mv60",   n68k_sum_longwords_mv60, 365, 200);
+    bench_sum("chosen", n68k_sum_longwords,      365, 200);
 
-    /* 288 bytes is a copy the bulk loop cares about, 20 is the TCP header
-       that Profile found is most of what memcpy() is asked for.  The chosen
-       row is the same routine reached through the trampoline, so the two
-       differ by the dispatch and nothing else. */
-    bench_copy("mv0",  n68k_copy_bytes_mv0,  288, 400);
-    bench_copy("mv20", n68k_copy_bytes_mv20, 288, 400);
-    bench_copy("mv40", n68k_copy_bytes_mv40, 288, 400);
-    bench_copy("mv60", n68k_copy_bytes_mv60, 288, 400);
-    bench_copy("chosen", n68k_copy_bytes, 288, 400);
+    /* 288 bytes is a copy the bulk loop cares about; 20 is the TCP header,
+       which Profile found is most of what memcpy() is asked for.  The chosen
+       row is the same routine reached through the trampoline, so those two
+       rows differ by the dispatch and nothing else. */
+    bench_copy("mv0",    n68k_copy_bytes_mv0,  288, 400);
+    bench_copy("mv20",   n68k_copy_bytes_mv20, 288, 400);
+    bench_copy("mv40",   n68k_copy_bytes_mv40, 288, 400);
+    bench_copy("mv60",   n68k_copy_bytes_mv60, 288, 400);
+    bench_copy("chosen", n68k_copy_bytes,      288, 400);
 
-    bench_copy("mv0",  n68k_copy_bytes_mv0,  20, 4000);
-    bench_copy("mv20", n68k_copy_bytes_mv20, 20, 4000);
-    bench_copy("mv40", n68k_copy_bytes_mv40, 20, 4000);
-    bench_copy("mv60", n68k_copy_bytes_mv60, 20, 4000);
-    bench_copy("chosen", n68k_copy_bytes, 20, 4000);
+    bench_copy("mv0",    n68k_copy_bytes_mv0,  20, 4000);
+    bench_copy("mv20",   n68k_copy_bytes_mv20, 20, 4000);
+    bench_copy("mv40",   n68k_copy_bytes_mv40, 20, 4000);
+    bench_copy("mv60",   n68k_copy_bytes_mv60, 20, 4000);
+    bench_copy("chosen", n68k_copy_bytes,      20, 4000);
 
-    printf("\nfailures=%lu\n", (unsigned long)failures);
-    printf("%s\n", failures == 0UL ? "PASS" : "FAIL");
+    m_log("failures=%lu", (LONG)failures);
+    m_log("%s", (LONG)(failures == 0UL ? "PASS" : "FAIL"));
 
-    CloseDevice(&timer_req);
-    DeleteMsgPort(timer_port);
+    m_flush();
 
     return failures ? 20 : 0;
 }

@@ -141,7 +141,7 @@ if(CMAKE_CROSSCOMPILING AND AMINETXDUO_NET68K_ASM AND
    AMINETXDUO_CPU STREQUAL "any")
 
     add_executable(n68kmv n68kmv.c)
-    target_link_libraries(n68kmv PRIVATE aminetxduo_net68k)
+    target_link_libraries(n68kmv PRIVATE aminetxduo_net68k aminetxduo_common)
     set_target_properties(n68kmv PROPERTIES OUTPUT_NAME "n68kmv")
 
     if(AMIGA_NDK_INCLUDE)
