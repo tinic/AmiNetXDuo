@@ -266,10 +266,12 @@ static void bench_sum(const char *name, ULONG (*fn)(const ULONG *, ULONG),
         (void)fn(src, words);
     ticks = eclock() - t0;
 
+    /* The E-Clock is 709379 Hz, so a tick is 1409.68 ns and the rounded
+       1410 is 0.02% out: integer throughout, because a double here pulls in
+       mathieeedoubbas.library, which a 3.1 ROM does not have. */
     printf("  sum       %-8s %6lu ticks  %4lu ns/B\n", name,
            (unsigned long)ticks,
-           (unsigned long)(((double)ticks * 1000000000.0) / 709379.0 /
-                           (double)(words * 4UL * reps)));
+           (unsigned long)((ticks * 1410UL) / (words * 4UL * reps)));
 }
 
 static void bench_copy(const char *name,
@@ -285,8 +287,7 @@ static void bench_copy(const char *name,
 
     printf("  copy%-4lu  %-8s %6lu ticks  %4lu ns/B\n",
            (unsigned long)len, name, (unsigned long)ticks,
-           (unsigned long)(((double)ticks * 1000000000.0) / 709379.0 /
-                           (double)(len * reps)));
+           (unsigned long)((ticks * 1410UL) / (len * reps)));
 }
 
 static const char *selected(void)
