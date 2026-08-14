@@ -114,9 +114,12 @@ jobs:
             exit 1
           fi
 
-      - name: Build the default and 68000 configurations
+      # One build, both machines.  AMINETXDUO_CPU=any means the shipping
+      # binary is what runs on the A600 too, so there is no 68000 tree to
+      # build -- and "m68000" stopped being a configuration when that landed.
+      - name: Build the shipping configuration
         id: build
-        run: AMINETXDUO_CI_CROSS="default m68000" tools/ci.sh cross
+        run: AMINETXDUO_CI_CROSS="default" tools/ci.sh cross
 
       - name: Run the on-Amiga harnesses
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
