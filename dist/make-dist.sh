@@ -32,7 +32,8 @@
 #       C/                           the commands
 #       Libs/                        the libraries: ONE build, every 68k
 #       Libs/minimal/                the same stack with the big options out
-#       Devs/Networks/               the SANA-II drivers, one build
+#       Devs/Networks/               the SANA-II drivers, one build, and one
+#                                    copy: no minimal drawer, see stage_build
 #       Devs/Internet/               protocols, services, networks
 #       Docs/  Docs.info             the manual, from docs/user/
 #       Examples/  Examples.info     commented configuration files
@@ -252,10 +253,22 @@ stage_build() {          # $1 = build dir, $2 = "" for the top or a drawer name
     fi
     chmod 755 "$libs"/*
 
-    for dev in "${DEVICES[@]}"; do
-        cp "$b/src/$dev.device" "$devs/"
-    done
-    chmod 755 "$devs"/*
+    # THE DRIVER IS STAGED ONCE, at the top, and not again in the minimal
+    # drawer.  anxnet.device is standalone -- it opens exec and expansion and
+    # nothing else, and no AMINETXDUO_* feature flag reaches src/netdev -- so
+    # the minimal build compiles the same code.  Checked rather than assumed:
+    # the two binaries are the same 25084 bytes and differ in FIVE, which are
+    # the CPU label inside the $VER: string ("any" against "68000").  Shipping
+    # a second copy of one driver is a second thing to keep in step for no
+    # difference a machine can observe.
+    if [ -z "$sub" ]; then
+        for dev in "${DEVICES[@]}"; do
+            cp "$b/src/$dev.device" "$devs/"
+        done
+        chmod 755 "$devs"/*
+    else
+        rmdir "$devs" 2>/dev/null || true
+    fi
 }
 
 stage_build "$BUILD" ""
