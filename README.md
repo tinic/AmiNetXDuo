@@ -81,10 +81,9 @@ card: `a2065.device`, `ariadne.device`, `ariadne2.device`, `amiganet.device`,
 `uaenet.device` for emulators are all offered by name in the installer, and
 anything else can be typed in.
 
-The archive also carries `anxnet.device` in `Devs/Networks/`, one driver
-covering seven of those cards and faster than most of them. The installer does
-not install it: copy it to `DEVS:Networks` and name it in your interface file
-if you want it.
+The archive also carries `anxnet.device` in `Devs/Networks/`, worth installing
+by hand if you use IPv6 on an X-Surf or X-Surf 100, whose own drivers refuse
+the multicast addresses IPv6 needs.
 
 ## Installing
 
