@@ -54,6 +54,20 @@ xsurf100z3     A3000  192.168.1.250  0c:08
 ne2000_pcmcia  A1200  192.168.1.251  0c:09
 "
 
+# TWO CARDS IN ONE MACHINE CANNOT BE TESTED HERE, and it is the emulator, not
+# the harness.  Amiberry holds one network board of each family in file-scope
+# statics -- a2065.cpp has one `romtype`, one `boardram` and one `csr[]` for
+# the whole LANCE family, and qemuvga/ne2000.cpp has one `ne2000_data` for the
+# DP8390 family -- so only the board named by -N is ever instantiated.  Adding
+# a second through AMINETXDUO_AMIBERRY_EXTRA writes it into the config and it
+# never appears, silently, with nothing in the log.  Tried both ways round and
+# across families (a2065 + ariadne2): one board, always.
+#
+# What that leaves untested in anxnet.device: unit numbering across more than
+# one board, and CARD= picking the right one of several.  Both are exercised
+# by the pinning arithmetic in the host test, and neither has ever run on a
+# machine holding two cards.
+
 # Cards this project names that no arm can reach, and why.  Printed every run:
 # a list of what is covered is worth nothing without the list of what is not.
 # Keyed by the DRIVER, because these are drivers with no board rather than
