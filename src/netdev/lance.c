@@ -412,11 +412,18 @@ LONG lance_attach(NetdevNic *nic)
         return -1;
 
     /*
-     * The station address is in the board's own PROM, one byte every other
-     * address like everything else in a 16-bit Zorro window.
+     * THE STATION ADDRESS IS IN THE AUTOCONFIG SERIAL NUMBER, not in the
+     * board window: there is no address PROM on either card, and a read below
+     * the SRAM returns zero.  Commodore put the low four bytes in the serial
+     * field and left the OUI to the driver, which is why the card row carries
+     * it -- 00:80:10 for the A2065, 00:60:30 for the Ariadne.
      */
-    for (i = 0; i < NETDEV_ADDR_LEN; i++)
-        nic->factory[i] = nic->board[nic->card->prom_off + i * 2];
+    nic->factory[0] = (UBYTE)(nic->card->serial_oui >> 8);
+    nic->factory[1] = (UBYTE)(nic->card->serial_oui);
+    nic->factory[2] = (UBYTE)(nic->serial >> 24);
+    nic->factory[3] = (UBYTE)(nic->serial >> 16);
+    nic->factory[4] = (UBYTE)(nic->serial >> 8);
+    nic->factory[5] = (UBYTE)(nic->serial);
 
     for (i = 0; i < NETDEV_ADDR_LEN; i++)
         nic->mac[i] = nic->factory[i];

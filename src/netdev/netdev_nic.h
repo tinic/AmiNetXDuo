@@ -118,6 +118,7 @@ struct NetdevNic
     LONG                mem_size;
     LONG                mem_ring;
     UWORD               txb_cnt;
+    ULONG               serial;     /* the board's autoconfig serial number */
     UWORD               txb_inuse;
 
     /* LANCE ring cursors.  The DP8390 cores do not use them: their ring is

@@ -1071,7 +1071,7 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
  * ConfigDev walk below, and the PCMCIA slot, which has no ConfigDev at all.
  */
 static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
-                            APTR board)
+                            APTR board, ULONG serial)
 {
     NetdevUnit *unit;
 
@@ -1085,6 +1085,7 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
     unit->nu_Dev    = dev;
     unit->nu_Nic.card   = card;
     unit->nu_Nic.board  = (volatile UBYTE *)board;
+    unit->nu_Nic.serial = serial;
     unit->nu_Nic.rx     = netdev_rx;
     unit->nu_Nic.rx_arg = unit;
 
@@ -1189,7 +1190,8 @@ static VOID netdev_probe(NetdevDevice *dev)
             continue;
         }
 
-        if (!netdev_add_unit(dev, card, (APTR)cd->cd_BoardAddr))
+        if (!netdev_add_unit(dev, card, (APTR)cd->cd_BoardAddr,
+                             cd->cd_Rom.er_SerialNumber))
             continue;
     }
 
@@ -1219,7 +1221,7 @@ static VOID netdev_probe(NetdevDevice *dev)
                 continue;       /* no slot, nothing in it, or not a LAN card */
 
             nd_trace("anx: pcmcia claimed\r\n");
-            if (!netdev_add_unit(dev, card, base))
+            if (!netdev_add_unit(dev, card, base, 0))
                 netdev_pcmcia_release();
         }
     }

@@ -65,6 +65,10 @@ typedef struct NetdevCard
                                    the register file is contiguous            */
     UBYTE       lance_swap;     /* the board crosses the SRAM byte lanes, so
                                    descriptor words are written pre-swapped   */
+    UWORD       serial_oui;     /* non-zero: the station address is this OUI
+                                   prefix plus the autoconfig serial number,
+                                   which is where Commodore put it -- there is
+                                   no address PROM in the board window        */
 } NetdevCard;
 
 extern const NetdevCard netdev_cards[];
