@@ -30,6 +30,7 @@
  */
 
 #include "config_internal.h"
+#include "aminetxduo/anxnet.h"
 #include "aminetxduo/compat.h"
 
 /* ------------------------------------------------------- interface files */
@@ -39,6 +40,7 @@ typedef enum
     IF_KEY_UNKNOWN = 0,
     IF_KEY_IGNORED,          /* real Roadshow keyword with no AmiIfConfig field */
     IF_KEY_DEVICE,
+    IF_KEY_CARD,
     IF_KEY_ID,
     IF_KEY_UNIT,
     IF_KEY_ADDRESS,
@@ -66,6 +68,7 @@ ami_if_keywords[] =
 {
     /* Keywords that map onto AmiIfConfig. */
     { "device",             IF_KEY_DEVICE    },
+    { "card",               IF_KEY_CARD      },
     { "id",                 IF_KEY_ID        },
     { "unit",               IF_KEY_UNIT      },
     { "mdns",               IF_KEY_MDNS      },
@@ -370,6 +373,86 @@ static VOID report_bad_value(ULONG line, UWORD severity, const char *keyword,
     ami_cfg_problem(line, severity, text, hint);
 }
 
+/* ------------------------------------------------------------------ CARD,
+ *
+ * One device file can cover a family of boards -- anxnet.device is opened for
+ * every NE2000/DP8390 card -- and then UNIT alone only says "the Nth board in
+ * probe order".  CARD says which board by name.
+ *
+ * The names are the driver's, include/aminetxduo/anxnet.h, read here so that
+ * CARD=nonsense is a configuration error with the list beside it rather than
+ * an OpenDevice that fails at boot with nothing to read.
+ */
+static const char *const cfg_card_names[] = ANXNET_CARD_NAMES;
+
+#define CFG_CARD_COUNT \
+    ((ULONG)(sizeof(cfg_card_names) / sizeof(cfg_card_names[0])))
+
+static BOOL cfg_card_known(const char *name)
+{
+    ULONG i;
+
+    for (i = 0; i < CFG_CARD_COUNT; i++)
+    {
+        if (ami_cfg_stricmp(name, cfg_card_names[i]) == 0)
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+/* "XSURF100, XSURF, ARIADNE2, ...", built from the same list it checks. */
+static VOID cfg_card_list(char *dst, ULONG dstlen)
+{
+    ULONG at = 0;
+    ULONG i;
+
+    if (dst == NULL || dstlen == 0)
+        return;
+
+    dst[0] = '\0';
+
+    for (i = 0; i < CFG_CARD_COUNT; i++)
+    {
+        const char *name = cfg_card_names[i];
+        ULONG       need = ami_cfg_strlen(name) + (at != 0 ? 2UL : 0UL);
+        ULONG       j;
+
+        if (at + need + 1 > dstlen)
+            break;
+
+        if (at != 0)
+        {
+            dst[at++] = ',';
+            dst[at++] = ' ';
+        }
+
+        for (j = 0; name[j] != '\0'; j++)
+        {
+            char c = name[j];
+
+            dst[at++] = (c >= 'a' && c <= 'z') ? (char)(c - ('a' - 'A')) : c;
+        }
+
+        dst[at] = '\0';
+    }
+}
+
+static VOID report_bad_card(ULONG line, const char *value)
+{
+    char list[128];
+    char hint[224];
+
+    if (!ami_cfg_problems_wanted())
+        return;
+
+    cfg_card_list(list, sizeof(list));
+    ami_cfg_join3(hint, sizeof(hint),
+                  "CARD says which board the driver binds to, one of ", list,
+                  ".  Leave CARD out and UNIT decides.");
+    report_bad_value(line, AMI_CFG_PROBLEM_ERROR, "CARD", value, hint);
+}
+
 #define CFG_HINT_KEYWORDS \
     "The keywords an interface file understands are DEVICE, UNIT, CONFIGURE, " \
     "ADDRESS, NETMASK, GATEWAY and MTU.  The line was ignored."
@@ -494,6 +577,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
     char *line;
     ULONG lineno = 0;
     BOOL  have_device = FALSE;
+    BOOL  bad_card = FALSE;
 #ifdef AMINETXDUO_IPV6
     BOOL  have_configure6 = FALSE;
 #endif
@@ -585,6 +669,23 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 }
                 ami_cfg_copy_string(out->device, sizeof(out->device), value);
                 have_device = TRUE;
+                break;
+
+            /*
+             * Which board, when the device file covers a family of them.  An
+             * unknown name is an ERROR and the field stays empty: acting on
+             * half of it would open the first board in probe order, which is
+             * the silent bind to the wrong card CARD exists to prevent.
+             */
+            case IF_KEY_CARD:
+                if (!cfg_card_known(value))
+                {
+                    AMI_WARN("config: %s: bad CARD '%s'", out->name, value);
+                    report_bad_card(lineno, value);
+                    bad_card = TRUE;
+                    break;
+                }
+                ami_cfg_copy_string(out->card, sizeof(out->card), value);
                 break;
 
             /*
@@ -892,6 +993,18 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                         "Add a line like  DEVICE = a2065.device  naming the "
                         "driver for your card, or let NetSetup write the file "
                         "for you.");
+        return AMI_CFG_ERR_SYNTAX;
+    }
+
+    /*
+     * A CARD nobody knows refuses the interface rather than dropping the line.
+     * Coming up anyway would bind to whatever UNIT points at, which is the
+     * silent wrong board this keyword exists to prevent; report_bad_card()
+     * above has already named the value and the line.
+     */
+    if (bad_card)
+    {
+        AMI_WARN("config: %s: unknown CARD, ignoring interface", out->name);
         return AMI_CFG_ERR_SYNTAX;
     }
 

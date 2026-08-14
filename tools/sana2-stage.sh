@@ -19,6 +19,10 @@
 #   AMINETXDUO_SANA2_DEVICE       what goes in DEVICE=, for proving whether a
 #                                 bare name reaches DEVS:Networks
 #   AMINETXDUO_SANA2_DIR          subdirectory of DEVS: to stage into
+#   AMINETXDUO_SANA2_CARD         CARD= to write into the interface file, for
+#                                 a driver that covers a family of boards
+#   AMINETXDUO_SANA2_VENDOR       set to anything: sana2_select() picks the
+#                                 vendor driver for every card
 #
 # SPDX-License-Identifier: MIT
 
@@ -34,6 +38,82 @@ sana2_driver_for() {
         ne2000_pcmcia)         echo cnet.device ;;
         *)                     echo "$1.device" ;;
     esac
+}
+
+# ------------------------------------------------- our driver, per card ----
+#
+# THE ONE PLACE.  anxnet.device covers the NE2000/DP8390 family and nothing
+# else, so a sweep gates on it for the boards it supports and on the vendor
+# driver for the rest.  This table is what decides which is which, and adding
+# a row is the whole change:
+#
+#   hydra   ->  hydra      when NETDEV_CHIP_ED has a core.  src/netdev/
+#   eb920   ->  lanrover   netdev_cards.c has both rows already and
+#                          netdev_nic_ops_for() returns NULL for the chip, so
+#                          the open fails today; that is why they are not here.
+#
+# Never covered, and not waiting on anything:
+#   a2065, ariadne          Am7990 LANCE, a different chip family
+#   ne2000_pcmcia           fixed at 0xA20300 with no autoconfig record, so
+#                           there is nothing for the ConfigDev walk to find
+#
+# The value is the CARD= name, which is netdev_cards.c's row name and is also
+# what include/aminetxduo/anxnet.h lists for the config parser.  Echoes
+# nothing when anxnet.device does not cover the board.
+anxnet_card_for() {
+    case "$1" in
+        xsurf100z2|xsurf100z3) echo xsurf100 ;;
+        ariadne2)              echo ariadne2 ;;
+        xsurf)                 echo xsurf ;;
+        hydra)                 echo hydra ;;
+        eb920)                 echo lanrover ;;
+        *)                     echo "" ;;
+    esac
+}
+
+# Where the built anxnet.device is, given a build directory.  Echoes the path
+# or nothing.
+anxnet_binary() { # [builddir]
+    if [ -n "${AMINETXDUO_ANXNET:-}" ] && [ -f "$AMINETXDUO_ANXNET" ]; then
+        echo "$AMINETXDUO_ANXNET"
+        return 0
+    fi
+    if [ -n "${1:-}" ] && [ -f "$1/src/netdev/anxnet.device" ]; then
+        echo "$1/src/netdev/anxnet.device"
+        return 0
+    fi
+    [ -f "$HOME/amiga-assets/devs/anxnet.device" ] &&
+        echo "$HOME/amiga-assets/devs/anxnet.device"
+    return 0
+}
+
+# Which driver a sweep should gate this board on.  Sets, always:
+#
+#   SANA2_SEL_DRIVER   the driver file name
+#   SANA2_SEL_PATH     where its binary is, empty when it is not on this host
+#   SANA2_SEL_CARD     the CARD= name, empty for a vendor driver
+#   SANA2_SEL_SOURCE   anxnet | vendor
+#
+# A board anxnet.device covers whose binary is missing does NOT fall back to
+# the vendor driver: the sweep would then report a green card for a driver it
+# was not asked to measure.  It comes back with SANA2_SEL_PATH empty and
+# SANA2_SEL_SOURCE=anxnet, which every caller already reports as a skip.
+sana2_select() { # board [builddir]
+    SANA2_SEL_CARD=""
+    SANA2_SEL_SOURCE=vendor
+    SANA2_SEL_DRIVER=$(sana2_driver_for "$1")
+
+    if [ -z "${AMINETXDUO_SANA2_VENDOR:-}" ]; then
+        SANA2_SEL_CARD=$(anxnet_card_for "$1")
+        if [ -n "$SANA2_SEL_CARD" ]; then
+            SANA2_SEL_SOURCE=anxnet
+            SANA2_SEL_DRIVER=anxnet.device
+            SANA2_SEL_PATH=$(anxnet_binary "${2:-}")
+            return 0
+        fi
+    fi
+
+    SANA2_SEL_PATH=$(sana2_local_driver "$SANA2_SEL_DRIVER")
 }
 
 # Where a hand-placed driver lives.  Most of these cannot be fetched, the
@@ -67,6 +147,15 @@ sana2_stage() {
         > "$_devs/NetInterfaces/eth0.new"
     mv "$_devs/NetInterfaces/eth0.new" "$_devs/NetInterfaces/eth0"
 
+    # CARD= when a driver covers a family of boards.  Rewritten rather than
+    # appended so a stage run twice does not leave two lines, and dropped
+    # entirely when nothing asked for one: a vendor driver would report it as
+    # an unknown keyword.
+    grep -v '^CARD=' "$_devs/NetInterfaces/eth0" > "$_devs/NetInterfaces/eth0.new"
+    [ -z "${AMINETXDUO_SANA2_CARD:-}" ] ||
+        echo "CARD=$AMINETXDUO_SANA2_CARD" >> "$_devs/NetInterfaces/eth0.new"
+    mv "$_devs/NetInterfaces/eth0.new" "$_devs/NetInterfaces/eth0"
+
     if [ -n "$_drv_path" ] && [ -f "$_drv_path" ]; then
         if [ -n "$_dir" ]; then
             mkdir -p "$_devs/$_dir"
@@ -82,4 +171,5 @@ sana2_stage() {
 
     SANA2_DRIVER=$_drv_name
     SANA2_DEVICE=$_device
+    SANA2_CARD=${AMINETXDUO_SANA2_CARD:-}
 }

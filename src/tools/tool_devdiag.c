@@ -203,10 +203,30 @@ VOID tool_explain_device_refused(const char *device, ULONG unit)
                 (LONG)device, unit);
 }
 
-VOID tool_explain_device(const char *device, ULONG unit)
+VOID tool_explain_device(const char *device, ULONG unit, const char *card)
 {
     const char *where = tool_device_where(device);
     LONG        probe;
+
+    /*
+     * CARD= first, because every answer below it would be wrong.  A driver
+     * covering a family of boards opens on UNIT alone, so an unpinned probe
+     * succeeds on the wrong card and prints "opens perfectly well" at someone
+     * whose interface just refused to come up.  The pinned probe is the one
+     * the stack made, and this is the one line that names what was asked for.
+     */
+    if (card != NULL && *card != '\0' &&
+        tool_device_probe(device, unit, card) != 0 &&
+        tool_device_probe(device, unit, NULL) == 0)
+    {
+        tool_printf("  %s unit %lu opens, and there is no %s in this machine.\n",
+                    (LONG)device, unit, (LONG)card);
+        tool_printf("  The CARD line in DEVS:NetInterfaces asked for that board\n");
+        tool_printf("  and %s will not bind to a different one.  Correct the\n",
+                    (LONG)device);
+        tool_printf("  CARD line, or remove it and let UNIT choose.\n");
+        return;
+    }
 
 
     /*
@@ -220,7 +240,7 @@ VOID tool_explain_device(const char *device, ULONG unit)
      * had just opened and then failed to initialise, which sent them looking
      * for a driver they already had.
      */
-    probe = tool_device_probe(device, unit);
+    probe = tool_device_probe(device, unit, card);
 
     /*
      * Opened and then refused a SANA-II command. The driver is installed, the
@@ -276,7 +296,7 @@ VOID tool_explain_device(const char *device, ULONG unit)
     tool_printf("  %s is installed (%s) but unit %lu would not open.\n",
                 (LONG)device, (LONG)where, unit);
 
-    if (unit != 0 && tool_device_probe(device, 0) == 0)
+    if (unit != 0 && tool_device_probe(device, 0, card) == 0)
     {
         tool_printf("  Unit 0 opens. Almost every card is unit 0: change the UNIT\n");
         tool_printf("  line in DEVS:NetInterfaces to 0, or run NetSetup again.\n");

@@ -301,22 +301,23 @@ static VOID check_device(const char *path, const AmiIfConfig *ifc)
             (LONG)ifc->device, (LONG)ifc->name);
 
         if (!cnc_quiet)
-            tool_explain_device(ifc->device, ifc->unit);
+            tool_explain_device(ifc->device, ifc->unit, ifc->card);
 
         return;
     }
 
-    if (tool_device_probe(ifc->device, ifc->unit) == 0)
+    if (tool_device_probe(ifc->device, ifc->unit, ifc->card) == 0)
         return;                     /* installed, and it opens */
 
-    /* The driver is present, so the line to look at is the UNIT one. */
-    line = keyword_line(path, "UNIT");
+    /* The driver is present, so the line to look at is the one that says which
+       board: CARD when the file pins one, UNIT otherwise. */
+    line = keyword_line(path, ifc->card[0] != '\0' ? "CARD" : "UNIT");
 
     finding(path, line, AMI_CFG_PROBLEM_ERROR);
     say("      %s will not come up as it stands\n", (LONG)ifc->name);
 
     if (!cnc_quiet)
-        tool_explain_device(ifc->device, ifc->unit);
+        tool_explain_device(ifc->device, ifc->unit, ifc->card);
 }
 
 /* ------------------------------------------------------ the address check, */

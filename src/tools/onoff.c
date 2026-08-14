@@ -324,7 +324,7 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
                    (LONG)(up ? "online" : "offline"));
 
         if (up && ifc != NULL)
-            tool_explain_device(ifc->device, ifc->unit);
+            tool_explain_device(ifc->device, ifc->unit, ifc->card);
 
         tool_netstatus_close(base);
         FreeArgs(rda);
@@ -546,7 +546,7 @@ int main(int argc, char **argv)
                 /* The card is only worth probing when the library that would
                    drive it is on the machine at all. */
                 if (tool_stack_installed())
-                    tool_explain_device(ifc.device, ifc.unit);
+                    tool_explain_device(ifc.device, ifc.unit, ifc.card);
                 else
                     tool_printf("  LIBS:bsdsocket.library is not installed.\n");
 
@@ -595,7 +595,7 @@ int main(int argc, char **argv)
                    (LONG)tool_net_error(err));
 
         if (err == AMI_NET_ERR_NODEV)
-            tool_explain_device(ifc.device, ifc.unit);
+            tool_explain_device(ifc.device, ifc.unit, ifc.card);
         else if (err == AMI_NET_ERR_DEVBAD)
             tool_explain_device_refused(ifc.device, ifc.unit);
 
@@ -663,7 +663,7 @@ int main(int argc, char **argv)
     {
         tool_error("%s would not come online: %s", (LONG)name,
                    (LONG)tool_net_error(err));
-        tool_explain_device(ifc.device, ifc.unit);
+        tool_explain_device(ifc.device, ifc.unit, ifc.card);
         FreeArgs(rda);
         return RETURN_FAIL;
     }

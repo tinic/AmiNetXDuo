@@ -154,6 +154,14 @@ static VOID nd_tracex(const char *tag, ULONG v)
     buf[10] = '\0';
     nd_trace(buf);
 }
+
+/* netdev_cmds.c's way in: nd_trace is static, so the command number of every
+   request that reaches the table comes back through here.  Without it
+   -DAMINETXDUO_NETDEV_TRACE=ON does not link at all. */
+VOID netdev_trace_cmd(UWORD c)
+{
+    nd_tracex("anx: cmd ", (ULONG)c);
+}
 #else
 #define nd_trace(s)         ((VOID)0)
 #define nd_tracex(t, v)     ((VOID)0)
