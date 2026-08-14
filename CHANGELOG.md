@@ -9,8 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
-- `anxnet.device`, one network driver for the NE2000 family — X-Surf 100, Ariadne II, Hydra and the ASDG LAN Rover. It takes the multicast addresses the shipping drivers refuse, so IPv6 reaches past the router on cards where it never has. Adding a card is a row in a table, not another driver
-- `anxnet.device` is now faster than the driver it replaces on every card it covers, on both an A1200 and an A3000. Read is 4 to 15% above the vendor driver depending on the card, and write is level with it or better everywhere except the Hydra and the LAN Rover, which are 3% behind
+- `anxnet.device`, one network driver for six cards — X-Surf 100, Ariadne II, Hydra, the ASDG LAN Rover, the A2065 and the Ariadne. It takes the multicast addresses the shipping drivers refuse, so IPv6 reaches past the router on cards where it never has. The archive carries it in `Devs/Networks/`; the installer does not install it yet
+- `anxnet.device` reads faster than the driver it replaces on every card it covers, on both an A1200 and an A3000 — 4 to 15% depending on the card. Write is level or better everywhere except the Hydra and the LAN Rover, which are 3% behind
 - `CARD=` in `DEVS:NetInterfaces/<name>` says which board the driver binds to, so one driver file serves every card without guessing. Naming a board the machine does not have refuses the interface and says so, instead of quietly binding to a different one
 - A peer sending a flood of tiny TCP segments can no longer exhaust the packet pool and stall the whole stack. The receive window was budgeted in bytes but the pool is spent one buffer per segment whatever its size, so a stream of one-byte segments pinned more buffers than the pool holds while the window still read almost empty; the queue is now bounded in buffers as well
 - A DHCP server that offers a finite lease with an infinite rebind time can no longer pin the client in RENEWING forever. It would sit renewing an address the server was free to hand to someone else, never rebinding and never expiring; an infinite rebind is now honoured only under a genuinely infinite lease
