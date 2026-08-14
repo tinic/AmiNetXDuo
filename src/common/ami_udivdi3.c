@@ -135,6 +135,24 @@ u32     rem = hi;
 int     bit;
 
     /*
+     * AND AT RUN TIME, the same instruction on the same parts as the 64-bit
+     * MULU.L above: one-binary code is compiled -m68000, so the block above is
+     * out of reach at compile time and every 020 to 040 would otherwise run
+     * the 32-iteration loop below.  The caller's precondition -- hi < divisor,
+     * so the quotient fits in 32 bits -- is what both forms need and neither
+     * checks.
+     */
+    if (ami_rt_mulul != 0)
+    {
+        __asm__ (".chip 68020\n\tdivu.l %2,%0:%1\n\t.chip 68000"
+                 : "+d" (hi), "+d" (lo)
+                 : "d"  (divisor));
+
+        *remainder = hi;
+        return(lo);
+    }
+
+    /*
      * Restoring shift-subtract, 32 iterations.  Reached on a plain 68000,
      * which has no divu.l at all.  It could use the two divu.w steps
      * ami_udivsi3() below does, but this is the 64-bit path: the high half
