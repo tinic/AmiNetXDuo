@@ -3,7 +3,7 @@
 # wbgrab against a real Workbench 3.1, one boot per sequence.
 #
 #   tests/tools/run-wbgrab.sh [-b BUILDDIR] [-m MODEL] [-t SECONDS]
-#                             [-o OUTDIR] [-s SEQUENCE]...
+#                             [-o OUTDIR] [-s SEQUENCE]... [-d DEPTH]
 #
 # The screen has to be Workbench's own, so the guest boots Commodore's
 # Startup-Sequence with LoadWB in it, exactly as install/test/run-workbench.sh
@@ -39,14 +39,16 @@ BUILD="${AMINETXDUO_BUILD:-$ROOT/build/cm}"
 MODEL="${AMINETXDUO_EMU_MODEL:-A1200}"
 TIMEOUT=180
 OUTDIR="$ROOT/build/wbgrab-out"
+DEPTH=""
 SEQUENCES=()
 
-while getopts "b:m:t:o:s:" opt; do
+while getopts "b:m:t:o:s:d:" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         o) OUTDIR="$OPTARG" ;;
+        d) DEPTH="$OPTARG" ;;
         s) SEQUENCES+=("$OPTARG") ;;
         *) sed -n '3,6p' "$0" >&2; exit 2 ;;
     esac
@@ -169,6 +171,7 @@ if [ "$wb_stale" = "1" ]; then
     done
 fi
 say workbench "$WB"
+[ -n "$DEPTH" ] && say screen_depth_asked "$DEPTH" || true
 
 # ------------------------------------------------------------ the drive ----
 
@@ -209,6 +212,43 @@ Skip loop BACK
 EOF
 
     chmod 644 "$HD/S/scroller" "$HD/S/winclose" "$HD/S/windower"
+
+    [ -n "$DEPTH" ] && screenmode_prefs "$DEPTH"
+    return 0
+}
+
+# -d asks for a Workbench screen of a given depth, and the way to ask is the
+# file the ScreenMode editor writes: an IFF PREF with one SCRM chunk, dropped
+# in ENVARC: before the boot copies it to ENV: and IPrefs reads it.  Without
+# one a 3.1 Workbench comes up two planes deep whatever the machine, so this is
+# how a capture at any other depth is taken at all.
+screenmode_prefs() {
+    mkdir -p "$HD/Prefs/Env-Archive/Sys"
+    AMINETXDUO_SMP_DEPTH="$1" python3 - "$HD/Prefs/Env-Archive/Sys/screenmode.prefs" <<'EOF'
+import os, struct, sys
+
+# PAL hires: PAL_MONITOR_ID | HIRES_KEY.  640x256 is what the stock screen is,
+# so the depth is the only thing this changes.
+DISPLAY_ID = 0x00021000 | 0x00008000
+
+depth = int(os.environ["AMINETXDUO_SMP_DEPTH"])
+
+# struct FilePrefHeader: version, type, flags[4].
+prhd = struct.pack(">BB4B", 0, 0, 0, 0, 0, 0)
+
+# struct ScreenModePrefs: reserved[4], displayid, width, height, depth, control.
+scrm = struct.pack(">4L L HHHH", 0, 0, 0, 0, DISPLAY_ID, 640, 256, depth, 0)
+
+def chunk(tag, payload):
+    out = tag + struct.pack(">L", len(payload)) + payload
+    if len(payload) & 1:
+        out += b"\0"
+    return out
+
+body = b"PREF" + chunk(b"PRHD", prhd) + chunk(b"SCRM", scrm)
+with open(sys.argv[1], "wb") as fh:
+    fh.write(b"FORM" + struct.pack(">L", len(body)) + body)
+EOF
 }
 
 # The stock 3.1 Startup-Sequence with the tail replaced.  LoadWB stays, since
