@@ -23,6 +23,7 @@
  */
 #define NETDEV_CHIP_NE2000  0   /* DP8390 clone with an ASIC remote-DMA port */
 #define NETDEV_CHIP_ED      1   /* DP8390 with a memory-mapped packet buffer */
+#define NETDEV_CHIP_LANCE   2   /* Am7990/Am79C960: bus master, rings in RAM  */
 
 /*
  * How the board tells us the interrupt was its.  A Zorro INT2 is shared, so a
@@ -62,6 +63,8 @@ typedef struct NetdevCard
     ULONG       base;           /* NETDEV_BUS_PCMCIA: the fixed window base   */
     ULONG       odd_off;        /* odd-register window, offset from base; 0 =
                                    the register file is contiguous            */
+    UBYTE       lance_swap;     /* the board crosses the SRAM byte lanes, so
+                                   descriptor words are written pre-swapped   */
 } NetdevCard;
 
 extern const NetdevCard netdev_cards[];

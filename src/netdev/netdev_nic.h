@@ -119,6 +119,12 @@ struct NetdevNic
     LONG                mem_ring;
     UWORD               txb_cnt;
     UWORD               txb_inuse;
+
+    /* LANCE ring cursors.  The DP8390 cores do not use them: their ring is
+       the chip's own page walk, not a descriptor list we index. */
+    UWORD               rx_next;
+    UWORD               tx_next;
+    UWORD               tx_done;
     UWORD               txb_new;
     UWORD               txb_next_tx;
     UWORD               txb_len[3];
@@ -171,6 +177,7 @@ struct NetdevNic
 /* The two cores. netdev_nic_ops_for() returns NULL for a chip with no core. */
 extern const struct NetdevNicOps netdev_nic_ne2000;
 extern const struct NetdevNicOps netdev_nic_ed;
+extern const struct NetdevNicOps netdev_nic_lance;
 
 const struct NetdevNicOps *netdev_nic_ops_for(UBYTE chip);
 

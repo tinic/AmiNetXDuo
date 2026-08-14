@@ -22,6 +22,7 @@ set(NETDEV_SOURCES
     dp8390.c            # NetBSD chip core
     ne2000.c            # NetBSD remote-DMA glue
     ed.c                # NetBSD mapped-buffer glue: Hydra, ASDG LAN Rover
+    lance.c             # Am7990/Am79C960: A2065 and Ariadne
     # The data path's bulk moves, from src/net68k rather than a private copy:
     # the movem.l block and its measurements live there.  Two files, the same
     # arrangement as src/net68k's own target -- the .S is #ifdef'd end to end

@@ -27,26 +27,41 @@ const NetdevCard netdev_cards[] =
 {
     /* name        manid prodid reg_off stride wide_off
        chip                bps         ax  mem_off mem_size prom_off
-       bus               base      odd_off */
+       bus               base      odd_off  swap */
     { "xsurf100",  4626,   100, 0x0800,     4, 0x8880,
       NETDEV_CHIP_NE2000, 100000000UL, 1,       0,       0,       0,
-      NETDEV_BUS_ZORRO, 0, 0 },
+      NETDEV_BUS_ZORRO, 0, 0, 0 },
 
     { "xsurf",     4626,    23, 0x8600,     2,      0,
       NETDEV_CHIP_NE2000,  10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_ZORRO, 0, 0 },
+      NETDEV_BUS_ZORRO, 0, 0, 0 },
 
     { "ariadne2",  2167,   202, 0x0600,     2,      0,
       NETDEV_CHIP_NE2000,  10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_ZORRO, 0, 0 },
+      NETDEV_BUS_ZORRO, 0, 0, 0 },
 
     { "hydra",     2121,     1, 0xffe1,     2,      0,
       NETDEV_CHIP_ED,      10000000UL, 0,       0,  0x4000,  0xffc0,
-      NETDEV_BUS_ZORRO, 0, 0 },
+      NETDEV_BUS_ZORRO, 0, 0, 0 },
 
     { "lanrover",  1023,   254, 0x0001,     2,      0,
       NETDEV_CHIP_ED,      10000000UL, 0,  0x8000,  0x8000,  0x0100,
-      NETDEV_BUS_ZORRO, 0, 0 },
+      NETDEV_BUS_ZORRO, 0, 0, 0 },
+
+    /*
+     * The two LANCE boards.  Registers are RDP then RAP, a word apart, and
+     * the 32 KB SRAM behind them holds the rings, the buffers and the init
+     * block.  The Ariadne crosses the SRAM byte lanes -- see lance.c -- and
+     * is an Am79C960 rather than an Am7990, which changes nothing this
+     * driver touches.
+     */
+    { "a2065",      514,   112, 0x4000,     2,      0,
+      NETDEV_CHIP_LANCE,   10000000UL, 0,  0x8000,  0x8000,  0x0000,
+      NETDEV_BUS_ZORRO, 0, 0, 0 },
+
+    { "ariadne",   2167,   201, 0x0370,     2,      0,
+      NETDEV_CHIP_LANCE,   10000000UL, 0,  0x8000,  0x8000,  0x0000,
+      NETDEV_BUS_ZORRO, 0, 0, 1 },
 
     /*
      * The A1200/A600 PCMCIA slot.  No autoconfig record and no board base:
@@ -57,7 +72,7 @@ const NetdevCard netdev_cards[] =
      */
     { "pcmcia",       0,     0, 0x0300,     1,      0,
       NETDEV_CHIP_NE2000,  10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL },
+      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0 },
 };
 
 const UWORD netdev_card_count =
@@ -75,6 +90,8 @@ const struct NetdevNicOps *netdev_nic_ops_for(UBYTE chip)
         return &netdev_nic_ne2000;
     if (chip == NETDEV_CHIP_ED)
         return &netdev_nic_ed;
+    if (chip == NETDEV_CHIP_LANCE)
+        return &netdev_nic_lance;
 
     return NULL;
 }
