@@ -45,6 +45,7 @@
 #include <dos/dos.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <inline/macros.h>
 
 #include <stdarg.h>
 
