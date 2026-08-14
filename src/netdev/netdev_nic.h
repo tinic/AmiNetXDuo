@@ -109,9 +109,7 @@ struct NetdevNic
     UBYTE               cr_proto;
     UBYTE               rcr_proto;
     UBYTE               dcr_reg;
-    UBYTE               useword;
-    UBYTE               ax_workaround;  /* AX88190 ISR acknowledge quirk */
-    UBYTE               no_rdc;         /* AX88796 has no ISR.RDC        */
+    UBYTE               pad_proto;
 
     /*
      * How the packet buffer is reached.  NE2000 fills these with its remote

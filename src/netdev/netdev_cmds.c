@@ -639,6 +639,13 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
            one event that disagree cost an hour in the field. */
         unit->nu_Stats.Overruns = unit->nu_Nic.overruns;
         unit->nu_Stats.BadData  = unit->nu_Nic.rx_errors;
+        /*
+         * LastStart stays zero, and that is a gap rather than a value: it
+         * wants a timeval, timer.device is not open in this device, and a
+         * driver that opens one to fill in a statistic nobody has asked for
+         * is the wrong trade.  Declared here so it is not read as "the
+         * interface started at the epoch".
+         */
         cmd_bytes((UBYTE *)io->ios2_StatData, (const UBYTE *)&unit->nu_Stats,
                   sizeof(struct Sana2DeviceStats));
         netdev_reply(io, 0, 0);

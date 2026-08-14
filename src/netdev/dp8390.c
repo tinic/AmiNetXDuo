@@ -373,19 +373,14 @@ BOOL dp8390_intr(NetdevNic *nic)
 
     for (;;)
     {
+        /*
+         * One write clears every bit set here.  An AX88190 or AX88790 needs
+         * the acknowledge retried until it takes; no such part is in the card
+         * table, and the retry loop lived here behind a flag nothing ever set,
+         * which read as support for a chip that is not supported.  See the
+         * note in ne2000.c for what a row for one has to add.
+         */
         NIC_PUT(nic, ED_P0_ISR, isr);
-
-        /* AX88190: the acknowledge does not always take the first time. */
-        if (nic->ax_workaround)
-        {
-            UWORD guard = 100;
-
-            while ((NIC_GET(nic, ED_P0_ISR) & isr) != 0 && --guard != 0)
-            {
-                NIC_PUT(nic, ED_P0_ISR, 0);
-                NIC_PUT(nic, ED_P0_ISR, isr);
-            }
-        }
 
         if ((isr & (ED_ISR_PTX | ED_ISR_TXE)) != 0 && nic->txb_inuse != 0)
         {

@@ -907,13 +907,20 @@ static struct Device *netdev_open(
     NetdevUnit   *hw;
     const char   *pin  = NULL;
     const char   *why  = "no such board";
+    BOOL          first_opener;
+    BOOL          first_promisc;
 
     io->ios2_Req.io_Error = 0;
 
     op = AllocMem(sizeof(NetdevOpener), MEMF_PUBLIC | MEMF_CLEAR);
     if (op == NULL)
     {
-        io->ios2_Req.io_Error = IOERR_OPENFAIL;
+        /* A failed Open() poisons both fields, as the standard device
+           skeleton does: a caller that uses the request anyway then faults
+           on -1 instead of on whatever OpenDevice() left there. */
+        io->ios2_Req.io_Device = (struct Device *)-1;
+        io->ios2_Req.io_Unit   = (struct Unit *)-1;
+        io->ios2_Req.io_Error  = IOERR_OPENFAIL;
         return NULL;
     }
 
@@ -928,47 +935,61 @@ static struct Device *netdev_open(
         netdev_moan(why);
         netdev_moan(".\n");
         FreeMem(op, sizeof(NetdevOpener));
-        io->ios2_Req.io_Error = IOERR_OPENFAIL;
+        io->ios2_Req.io_Device = (struct Device *)-1;
+        io->ios2_Req.io_Unit   = (struct Unit *)-1;
+        io->ios2_Req.io_Error  = IOERR_OPENFAIL;
         return NULL;
     }
 
-    /*
-     * SANA2OPF_MINE is exclusive access, and a driver that takes the flag and
-     * then shares the unit anyway is worse than one that refuses it.
-     */
-    if (((flags & SANA2OPF_MINE) != 0 && hw->nu_Openers != 0) ||
-        hw->nu_Exclusive)
-    {
-        netdev_moan(ANXNET_DEVICE_NAME ": open refused, the unit is in "
-                    "exclusive use.\n");
-        FreeMem(op, sizeof(NetdevOpener));
-        io->ios2_Req.io_Error = IOERR_UNITBUSY;
-        return NULL;
-    }
-
-    op->op_Hw       = hw;
-    op->op_Raw      = (UBYTE)((io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0);
-    op->op_Promisc  = (UBYTE)((flags & SANA2OPF_PROM) != 0);
+    op->op_Hw        = hw;
+    op->op_Raw       = (UBYTE)((io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0);
+    op->op_Promisc   = (UBYTE)((flags & SANA2OPF_PROM) != 0);
     op->op_Exclusive = (UBYTE)((flags & SANA2OPF_MINE) != 0);
-    if (op->op_Exclusive)
-        hw->nu_Exclusive = 1;
     op->op_Unit.unit_flags = 0;
     nd_newlist(&op->op_Reads);
     nd_newlist(&op->op_Orphans);
     nd_newlist(&op->op_Events);
 
+    /*
+     * SANA2OPF_MINE is exclusive access, and a driver that takes the flag and
+     * then shares the unit anyway is worse than one that refuses it.
+     *
+     * Tested, claimed and joined under ONE Disable().  Split, two opens racing
+     * both read nu_Openers == 0, both decide they may have the unit
+     * exclusively, and both get it.  Rare -- opens come from processes -- and
+     * exactly the kind of rare that is never reproduced afterwards.
+     */
     Disable();
+    if (hw->nu_Exclusive ||
+        (op->op_Exclusive && hw->nu_Openers != 0))
+    {
+        Enable();
+        netdev_moan(ANXNET_DEVICE_NAME ": open refused, the unit is in "
+                    "exclusive use.\n");
+        FreeMem(op, sizeof(NetdevOpener));
+        io->ios2_Req.io_Device = (struct Device *)-1;
+        io->ios2_Req.io_Unit   = (struct Unit *)-1;
+        io->ios2_Req.io_Error  = IOERR_UNITBUSY;
+        return NULL;
+    }
+    if (op->op_Exclusive)
+        hw->nu_Exclusive = 1;
     AddTail(&hw->nu_OpenerList, (struct Node *)&op->op_Node);
+    /* Counted here and not after Enable(): the test above reads it, so an
+       increment outside the bracket is the same race one line further down. */
+    first_opener  = (BOOL)(hw->nu_Openers++ == 0);
+    first_promisc = (BOOL)(op->op_Promisc && hw->nu_Promisc++ == 0);
     Enable();
 
-    if (op->op_Promisc && hw->nu_Promisc++ == 0)
+    /* Both of these talk to the chip or to Exec and must not run Disable()d. */
+    if (first_promisc)
     {
         hw->nu_Nic.promisc = TRUE;
         if (hw->nu_Online)
             netdev_rebuild_filter(hw);
     }
 
-    if (hw->nu_Openers++ == 0 && !hw->nu_IntrAdded)
+    if (first_opener && !hw->nu_IntrAdded)
     {
         AddIntServer(INTB_PORTS, &hw->nu_Intr);
         hw->nu_IntrAdded = 1;

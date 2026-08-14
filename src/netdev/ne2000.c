@@ -139,9 +139,6 @@ static VOID ne2000_writemem(NetdevNic *nic, const UBYTE *src, LONG dst,
 
     netdev_bus_wdata(&nic->bus, src, len);
 
-    if (nic->no_rdc)
-        return;
-
     while ((NIC_GET(nic, ED_P0_ISR) & ED_ISR_RDC) != ED_ISR_RDC &&
            --maxwait != 0)
         ne_delay(nic, 1);
@@ -196,6 +193,35 @@ static UWORD ne2000_write_buf(NetdevNic *nic, const UBYTE *frame, UWORD len,
     NIC_PUT(nic, ED_P0_CR, ED_CR_RD2 | ED_CR_PAGE_0 | ED_CR_STA);
     NIC_PUT(nic, ED_P0_ISR, ED_ISR_RDC);
 
+    /*
+     * RBCR IS THE FRAME LENGTH, ODD OR NOT, AND THE PUSH BELOW IS ROUNDED UP.
+     * That looks like a mismatch against ne2000_readmem(), which rounds before
+     * it programs RBCR, and it is not the same question:
+     *
+     *   readmem rounds because the DESTINATION is host memory and the port
+     *   hands out whole words -- the rounding protects the caller's buffer.
+     *   Here RBCR only bounds the DMA into buffer RAM.  What goes on the wire
+     *   is TBCR, which dp8390_xmit() sets from txb_len, which is the unrounded
+     *   length.  A rounded-up odd frame therefore parks one extra byte in the
+     *   transmit slot (1515 bytes worst case in a 1536-byte slot) and never
+     *   transmits it.
+     *
+     *   The one hazard is ISR.RDC: a part that terminates the DMA on
+     *   count-EQUALS-zero rather than count-exhausted would never assert it
+     *   for an odd RBCR, the wait below would time out, and the chip would be
+     *   reset once per odd frame.  Measured on the emulated X-Surf 100
+     *   (tests/tools/oddtx.c, transfer_mode=2): eight odd frames from 61 to
+     *   1513 bytes, all error=0, resets_delta=0, even-length control frames
+     *   likewise.  This is also NetBSD's arrangement unchanged, which has run
+     *   on real NE2000 hardware for decades.
+     *
+     *   WHAT THAT DOES NOT SETTLE: Amiberry terminates on count-exhausted
+     *   ("if (s->rcnt <= len) s->rcnt = 0"), so the rig cannot tell the two
+     *   implementations apart.  A real part that hangs here would show up as
+     *   "Chip resets" climbing in S2_GETSPECIALSTATS, one per odd frame, with
+     *   CMD_WRITE answering S2ERR_TX_FAILURE.  If that is ever seen, rounding
+     *   RBCR up here is the fix and costs nothing.
+     */
     NIC_PUT(nic, ED_P0_RBCR0, len);
     NIC_PUT(nic, ED_P0_RBCR1, len >> 8);
     NIC_PUT(nic, ED_P0_RSAR0, buf);
@@ -204,9 +230,6 @@ static UWORD ne2000_write_buf(NetdevNic *nic, const UBYTE *frame, UWORD len,
     NIC_PUT(nic, ED_P0_CR, ED_CR_RD1 | ED_CR_PAGE_0 | ED_CR_STA);
 
     netdev_bus_wdata(&nic->bus, frame, (UWORD)((len + 1u) & ~1u));
-
-    if (nic->no_rdc)
-        return len;
 
     while ((NIC_GET(nic, ED_P0_ISR) & ED_ISR_RDC) != ED_ISR_RDC &&
            --maxwait != 0)
@@ -328,9 +351,6 @@ static LONG ne2000_attach(NetdevNic *nic)
     UBYTE romdata[32];
     UWORD i;
 
-    nic->useword = 1;
-    nic->no_rdc  = 0;
-
     if (!ne2000_detect(nic))
         return -1;
 
@@ -338,6 +358,25 @@ static LONG ne2000_attach(NetdevNic *nic)
     nic->mem_size  = 16384;
 
     nic->cr_proto  = ED_CR_RD2;
+
+    /*
+     * rcr_proto is zero for every part in the table.  WHAT A NEW ROW MAY NEED,
+     * because none of it is here and its absence should not read as a decision
+     * that it is unnecessary (NetBSD ne2000.c, ne2000_attach):
+     *
+     *   AX88190 / AX88790   rcr_proto = ED_RCR_INTT, and the ISR acknowledge
+     *                       has to be retried -- writing ISR once does not
+     *                       always clear it on those parts.
+     *   a part with no ISR.RDC   the two waits in this file have to be skipped
+     *                       rather than allowed to time out; a timeout here
+     *                       resets the chip.
+     *   NE1000 / 8-bit      byte-wide remote DMA, 8 KB of buffer, and the
+     *                       station address at romdata[i] rather than [i * 2].
+     *
+     * Flags for all three used to sit in NetdevNic assigned once and never
+     * set, so the code read as though the quirks were handled.  They are not;
+     * this comment is what is handled.
+     */
     nic->rcr_proto = 0;
     nic->dcr_reg   = ED_DCR_FT1 | ED_DCR_LS | ED_DCR_WTS;
 
