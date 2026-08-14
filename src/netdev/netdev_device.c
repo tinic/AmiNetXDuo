@@ -1591,6 +1591,19 @@ static BPTR netdev_expunge(register struct Device *dev __asm("a6"))
         Enable();
     }
 
+    /*
+     * GIVE THE PCMCIA SLOT BACK BEFORE THE SEGLIST GOES.
+     *
+     * card.resource holds the CardHandle we passed to OwnCard(), and that
+     * handle -- and the removal Interrupt hanging off it -- are statics in
+     * this driver's own BSS.  Unloading without releasing leaves the resource
+     * with a node in freed memory: the next OwnCard() walks it, and the card
+     * is gone until the machine is rebooted.  Found by reading this path for
+     * the cycle drill rather than by the drill, which had never been pointed
+     * at the slot.
+     */
+    netdev_pcmcia_release();
+
     if (d->nd_ExpansionBase != NULL)
     {
         CloseLibrary(d->nd_ExpansionBase);
