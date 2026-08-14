@@ -178,21 +178,36 @@ static int pfs_load(const char *path, pfs *s)
 
 /* ------------------------------------------------------------ strategy --- */
 
-typedef struct { const char *name; rfb_u32 flags; int is_raw; } strategy;
+/* busy and backoff are 0 for "leave the default"; they only matter to the
+ * copy arms. */
+typedef struct {
+    const char *name;
+    rfb_u32 flags;
+    int is_raw;
+    int busy;
+    int backoff;
+} strategy;
+
+#define CP (RFB_F_BASELINE | RFB_F_COPYRECT)
+#define CPA (CP | RFB_F_SCROLL_ADAPTIVE)
 
 static const strategy STRATS[] = {
-    { "raw",            0,                                        1 },
-    { "tile",           0,                                        0 },
-    { "tile_pb",        RFB_F_PACKBITS,                           0 },
-    { "tile_xor_pb",    RFB_F_XOR,                                0 },
-    { "baseline",       RFB_F_BASELINE,                           0 },
-    { "no_planemask",   RFB_F_PACKBITS | RFB_F_XOR | RFB_F_BESTOF, 0 },
-    { "no_bestof",      RFB_F_XOR | RFB_F_PLANEMASK,              0 },
-    { "xor_only",       RFB_F_XOR | RFB_F_PLANEMASK | RFB_F_BESTOF, 0 },
-    { "pbraw_only",     RFB_F_PACKBITS | RFB_F_PLANEMASK | RFB_F_BESTOF, 0 },
-    { "rle2",           RFB_F_BASELINE | RFB_F_RLE2,              0 },
-    { "copy",           RFB_F_BASELINE | RFB_F_COPYRECT,          0 },
-    { "copy_adaptive",  RFB_F_BASELINE | RFB_F_COPYRECT | RFB_F_SCROLL_ADAPTIVE, 0 },
+    { "raw",            0,                                        1, 0, 0 },
+    { "tile",           0,                                        0, 0, 0 },
+    { "tile_pb",        RFB_F_PACKBITS,                           0, 0, 0 },
+    { "tile_xor_pb",    RFB_F_XOR,                                0, 0, 0 },
+    { "baseline",       RFB_F_BASELINE,                           0, 0, 0 },
+    { "no_planemask",   RFB_F_PACKBITS | RFB_F_XOR | RFB_F_BESTOF, 0, 0, 0 },
+    { "no_bestof",      RFB_F_XOR | RFB_F_PLANEMASK,              0, 0, 0 },
+    { "xor_only",       RFB_F_XOR | RFB_F_PLANEMASK | RFB_F_BESTOF, 0, 0, 0 },
+    { "pbraw_only",     RFB_F_PACKBITS | RFB_F_PLANEMASK | RFB_F_BESTOF, 0, 0, 0 },
+    { "rle2",           RFB_F_BASELINE | RFB_F_RLE2,              0, 0, 0 },
+    { "copy",           CP,                                       0, 0, 0 },
+    { "copy_adaptive",  CPA,                                      0, 0, 0 },
+    { "copy_busy1",     CPA,                                      0, 1, 16 },
+    { "copy_nobackoff", CPA,                                      0, 8, -1 },
+    { "copy_b1_nobk",   CPA,                                      0, 1, -1 },
+    { "copy_b1_bk4",    CPA,                                      0, 1, 4 },
 };
 #define NSTRAT ((int)(sizeof(STRATS) / sizeof(STRATS[0])))
 
@@ -246,6 +261,10 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
     }
 
     rfb_scroll_defaults(&cfg);
+    if (st->busy)
+        cfg.busy_tiles = (rfb_u16)st->busy;
+    if (st->backoff)
+        cfg.max_backoff = (rfb_u8)(st->backoff < 0 ? 0 : st->backoff);
     shadow = calloc(1, rfb_shadow_size(&g));
     scratch = calloc(1, rfb_scratch_size(&g, st->flags, &cfg));
     out = malloc(rfb_worst_case_frame(&g));

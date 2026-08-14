@@ -133,6 +133,7 @@ typedef struct {
     rfb_u8  n_cand;
     rfb_s16 cand[RFB_MAX_CAND];  /* row offsets to try */
     rfb_u16 busy_tiles;     /* RFB_F_SCROLL_ADAPTIVE threshold */
+    rfb_u8  max_backoff;    /* frames skipped after a miss, 0 = never skip */
 } rfb_scroll_cfg;
 
 typedef struct {
@@ -166,6 +167,7 @@ typedef struct {
     rfb_s16  last_dy;       /* the offset that worked, tried first next time */
     rfb_u8   backoff;       /* frames to skip after a probe found nothing */
     rfb_u8   backoff_left;
+    rfb_u8   miss_run;      /* consecutive probes that found nothing */
 
     rfb_stats st;
 } rfb_encoder;

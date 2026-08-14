@@ -187,6 +187,7 @@ void rfb_scroll_defaults(rfb_scroll_cfg *cfg)
     cfg->match_pct  = 75;
     cfg->min_band   = 32;
     cfg->busy_tiles = 8;
+    cfg->max_backoff = 16;
     cfg->n_cand     = (rfb_u8)(sizeof(def) / sizeof(def[0]));
     for (i = 0; i < sizeof(def) / sizeof(def[0]); i++)
         cfg->cand[i] = def[i];
@@ -667,12 +668,22 @@ long rfb_encode_frame(rfb_encoder *e, const rfb_u8 *src,
                 e->last_dy = cp.dy;
                 e->backoff = 0;
                 e->backoff_left = 0;
+                e->miss_run = 0;
                 did_copy = 1;
-            } else {
-                e->backoff = (rfb_u8)(e->backoff ? (e->backoff < 16u
-                                                    ? e->backoff * 2u : 16u)
-                                                 : 1u);
-                e->backoff_left = e->backoff;
+            } else if (e->scroll.max_backoff) {
+                /* A scroll misses the odd frame -- a redraw lands in the band,
+                 * the window resizes -- and backing off on the first miss
+                 * costs the whole burst that follows it.  Three in a row is a
+                 * screen that is busy with something else. */
+                if (e->miss_run < 255u)
+                    e->miss_run++;
+                if (e->miss_run >= 3u) {
+                    rfb_u32 b = e->backoff ? e->backoff * 2u : 1u;
+                    if (b > e->scroll.max_backoff)
+                        b = e->scroll.max_backoff;
+                    e->backoff = (rfb_u8)b;
+                    e->backoff_left = e->backoff;
+                }
             }
         }
     }
