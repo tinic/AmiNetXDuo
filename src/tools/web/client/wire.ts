@@ -93,6 +93,8 @@ export function csiTo8Bit(s: string): string {
   return s.indexOf("\u001B[") < 0 ? s : s.replace(CSI7, "\u009B");
 }
 
+import { watchSocket } from "./socket";
+
 export type WireState =
   | "connecting"
   | "open"
@@ -140,9 +142,18 @@ export class Wire {
 
     this.h.onState("connecting", "");
 
-    let opened = false;
-
-    ws.onopen = () => { opened = true; this.h.onState("open", ""); };
+    /*
+     * Open, closed and refused are client/socket.ts's -- the console page
+     * has the same three states and the same reason for needing the last two
+     * told apart, and it reads the same rule from the same place.
+     */
+    watchSocket(ws, {
+      onOpen: () => this.h.onState("open", ""),
+      onGone: (state, detail) => {
+        this.ws = null;
+        this.h.onState(state, detail);
+      },
+    });
 
     /*
      * WHICH FRAME IS WHICH, AND WHY THE OPCODE IS ENOUGH
@@ -162,25 +173,6 @@ export class Wire {
       this.h.onText(csiTo7Bit(fromLatin1(e.data as ArrayBuffer)));
     };
 
-    /*
-     * A socket that never opened is a DIFFERENT thing from one that closed,
-     * and the browser reports both as 1006 with no reason on it: the HTTP
-     * status behind a refused upgrade is not exposed to script at all.  So
-     * the two are told apart here, by whether onopen ever ran.
-     *
-     * Worth the four lines because the server's one refusal a working client
-     * can provoke is "somebody else has the Shell" -- it takes one session at
-     * a time -- and "closed (1006)" sends that person looking at the network.
-     */
-    ws.onclose = (e: CloseEvent) => {
-      this.ws = null;
-      if (opened) this.h.onState("closed", e.reason || String(e.code));
-      else this.h.onState("refused", "");
-    };
-
-    /* onerror carries nothing a person can act on and is always followed by
-       onclose, which does.  Left to it. */
-    ws.onerror = () => { /* onclose says what happened */ };
   }
 
   disconnect(): void {

@@ -9,21 +9,26 @@
  * quarter-megabyte per frame.  Here the ArrayBuffer is handed over as it
  * arrived and the decoder reads it in place.
  *
- * The refused-versus-closed distinction is copied deliberately, and the
- * reasoning is client/wire.ts:166.  A browser reports both as 1006 with no
- * reason on it, and the only refusal a correct client can provoke here --
- * something else already has the screen -- reads as a network fault unless
- * the two are told apart by whether onopen ever ran.
+ * The refused-versus-closed distinction IS shared, out of client/socket.ts:
+ * both pages have a refusal a correct client can provoke and a browser
+ * reports it identically to a network fault.
  *
  * ?ws= overrides the endpoint, and it is not a nicety: the player half of
  * this page is worth opening straight off the filesystem, and a file:// page
- * has no host to upgrade.  Absent, the address is the page's own, so a page
- * served by an Amiga connects back to that Amiga with nothing configured.
+ * has no host to upgrade.  Absent, the address is /console on whatever
+ * machine served the page, so an Amiga serving it is the Amiga it connects
+ * back to with nothing configured.
  *
  * SPDX-License-Identifier: MIT
  */
 
+import { watchSocket } from "../socket";
+
 export type WireState = "idle" | "connecting" | "open" | "closed" | "refused";
+
+/* The console's own address, beside the terminal's /shell.  It is a separate
+   app and not a mode of that one. */
+export const CONSOLE_URL = "/console";
 
 export interface WireHandlers {
   onFrame: (data: ArrayBuffer) => void;
@@ -34,9 +39,9 @@ export interface WireHandlers {
 export function defaultEndpoint(): string {
   const q = new URLSearchParams(location.search).get("ws");
   if (q !== null && q !== "") return q;
-  if (location.protocol === "file:") return "ws://127.0.0.1:8098/screen";
+  if (location.protocol === "file:") return "ws://127.0.0.1:8098" + CONSOLE_URL;
   const scheme = location.protocol === "https:" ? "wss://" : "ws://";
-  return scheme + location.host + location.pathname;
+  return scheme + location.host + CONSOLE_URL;
 }
 
 export class Wire {
@@ -76,9 +81,13 @@ export class Wire {
     this.ws = ws;
     this.h.onState("connecting", url);
 
-    let opened = false;
-
-    ws.onopen = () => { opened = true; this.h.onState("open", url); };
+    watchSocket(ws, {
+      onOpen: () => this.h.onState("open", url),
+      onGone: (state, detail) => {
+        this.ws = null;
+        this.h.onState(state, detail);
+      },
+    });
 
     ws.onmessage = (e: MessageEvent) => {
       if (typeof e.data === "string") {
@@ -91,14 +100,6 @@ export class Wire {
       this.bytesIn += buf.byteLength;
       this.h.onFrame(buf);
     };
-
-    ws.onclose = (e: CloseEvent) => {
-      this.ws = null;
-      if (opened) this.h.onState("closed", e.reason || String(e.code));
-      else this.h.onState("refused", "");
-    };
-
-    ws.onerror = () => { /* onclose says what happened */ };
   }
 
   disconnect(): void {

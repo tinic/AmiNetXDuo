@@ -1,8 +1,8 @@
 /*
- * Build build/web/rfb.html: the framebuffer viewer, TypeScript in, one file
- * out.
+ * Build build/web/console.html: the framebuffer viewer, TypeScript in, one
+ * file out.
  *
- *   node tools/web/build-rfb.mjs
+ *   node tools/web/build-console.mjs
  *
  * The same shape as build.mjs and deliberately a SEPARATE script rather than
  * a second entry point in it.  build.mjs's output is committed and checked by
@@ -33,9 +33,9 @@ import * as esbuild from "esbuild";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
-const SRC = join(ROOT, "src", "tools", "web", "client", "rfb");
+const SRC = join(ROOT, "src", "tools", "web", "client", "console");
 const OUTDIR = join(ROOT, "build", "web");
-const OUT = join(OUTDIR, "rfb.html");
+const OUT = join(OUTDIR, "console.html");
 
 const bundle = await esbuild.build({
   entryPoints: [join(SRC, "main.ts")],
@@ -80,9 +80,9 @@ const html = template
   .replace("/*STYLE*/", () => style)
   .replace("/*SCRIPT*/", () => script)
   .replace(
-    "  TEMPLATE.  The page that runs is build/web/rfb.html, which is this with the\n" +
-      "  stylesheet and the script inlined by tools/web/build-rfb.mjs.",
-    "  GENERATED.  Edit src/tools/web/client/rfb/ and run tools/web/build-rfb.mjs."
+    "  TEMPLATE.  The page that runs is build/web/console.html, which is this\n" +
+      "  with the stylesheet and the script inlined by tools/web/build-console.mjs.",
+    "  GENERATED.  Edit src/tools/web/client/console/ and run tools/web/build-console.mjs."
   );
 
 const problems = [];
@@ -101,13 +101,13 @@ for (const m of html.matchAll(/url\(\s*["']?(?!data:)(?:https?:)?\/\//g)) {
 if (/@import/.test(html)) problems.push("an @import");
 
 if (problems.length > 0) {
-  for (const p of problems) console.error("rfb: " + p);
+  for (const p of problems) console.error("console: " + p);
   process.exit(1);
 }
 
 mkdirSync(OUTDIR, { recursive: true });
 writeFileSync(OUT, html);
 
-console.log("rfb: build/web/rfb.html written, %d bytes, sha %s",
+console.log("console: build/web/console.html written, %d bytes, sha %s",
             Buffer.byteLength(html),
             createHash("sha256").update(html).digest("hex").slice(0, 12));

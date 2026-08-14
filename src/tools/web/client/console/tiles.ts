@@ -11,7 +11,7 @@
  *
  * It is one module, and the rest of the viewer reaches it through applyUpdate
  * and geometryFromWord alone, so replacing it with the real thing is a file
- * and not a refactor.  Nothing else in client/rfb/ parses a byte off the
+ * and not a refactor.  Nothing else in client/console/ parses a byte off the
  * socket.
  *
  * PLACEHOLDER framing, big-endian:
@@ -69,10 +69,6 @@ export interface Damage {
   keyframe: boolean;
   seq: number;
 }
-
-export const EMPTY: Damage = {
-  x0: 0, y0: 0, x1: 0, y1: 0, tiles: 0, bytes: 0, keyframe: false, seq: 0,
-};
 
 export function makeGeometry(
   screen: Screen, tileW: number, tileH: number,
