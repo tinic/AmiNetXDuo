@@ -621,7 +621,7 @@ static BOOL check_device(Plan *plan, BOOL quiet)
     if (setup_aborted)
         return FALSE;
 
-    probe = tool_device_probe(plan->device, plan->unit);
+    probe = tool_device_probe(plan->device, plan->unit, NULL);
 
     if (probe == 0)
     {
@@ -639,7 +639,7 @@ static BOOL check_device(Plan *plan, BOOL quiet)
         tool_printf("  That driver is not installed: it is not in\n");
         tool_printf("  DEVS:Networks/ or anywhere else I looked.\n");
     }
-    else if (plan->unit != 0 && tool_device_probe(plan->device, 0) == 0)
+    else if (plan->unit != 0 && tool_device_probe(plan->device, 0, NULL) == 0)
     {
         tool_printf("  Unit 0 of the same driver does answer. Almost every\n");
         tool_printf("  card is unit 0.\n");

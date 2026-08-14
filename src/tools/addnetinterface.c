@@ -89,7 +89,7 @@ static VOID explain_startup_failure(LONG err, const AmiIfConfig *ifc)
     switch (err)
     {
         case AMI_NET_ERR_NODEV:
-            tool_explain_device(ifc->device, ifc->unit);
+            tool_explain_device(ifc->device, ifc->unit, ifc->card);
             break;
 
         case AMI_NET_ERR_DEVBAD:
@@ -153,7 +153,7 @@ static VOID explain_library_failure(const AmiIfConfig *ifc)
 
 
     /* Probe the hardware rather than guess at it. */
-    tool_explain_device(ifc->device, ifc->unit);
+    tool_explain_device(ifc->device, ifc->unit, ifc->card);
 }
 
 /*
@@ -315,7 +315,7 @@ static VOID explain_add_failure(LONG err, const char *name,
             break;
 
         case ENXIO:
-            tool_explain_device(ifc->device, ifc->unit);
+            tool_explain_device(ifc->device, ifc->unit, ifc->card);
             break;
 
         case EIO:
@@ -741,7 +741,7 @@ int main(int argc, char **argv)
             {
                 tool_error("%s would not come online: %s", (LONG)name,
                            (LONG)tool_net_error(err));
-                tool_explain_device(ifc.device, ifc.unit);
+                tool_explain_device(ifc.device, ifc.unit, ifc.card);
                 FreeArgs(rda);
                 return RETURN_FAIL;
             }

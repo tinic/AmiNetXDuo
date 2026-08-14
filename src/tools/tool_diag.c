@@ -31,6 +31,7 @@
  */
 #include "sana2_device.h"
 
+#include "aminetxduo/anxnet.h"
 #include "aminetxduo/compat.h"
 
 extern struct ExecBase *SysBase;
@@ -271,12 +272,13 @@ static BOOL diag_copy(register APTR to __asm("a0"),
     return FALSE;
 }
 
-LONG tool_device_probe(const char *device, ULONG unit)
+LONG tool_device_probe(const char *device, ULONG unit, const char *card)
 {
     struct IOSana2Req *req;
     struct MsgPort    *port;
-    struct TagItem     tags[3];
+    struct TagItem     tags[4];
     LONG               status;
+    UWORD              tag = 0;
 
     if (device == NULL || *device == '\0')
         return TOOL_PROBE_NO_NAME;
@@ -292,12 +294,23 @@ LONG tool_device_probe(const char *device, ULONG unit)
         return TOOL_PROBE_NO_MEMORY;
     }
 
-    tags[0].ti_Tag  = S2_CopyToBuff;
-    tags[0].ti_Data = (ULONG)diag_copy;
-    tags[1].ti_Tag  = S2_CopyFromBuff;
-    tags[1].ti_Data = (ULONG)diag_copy;
-    tags[2].ti_Tag  = TAG_DONE;
-    tags[2].ti_Data = 0;
+    tags[tag].ti_Tag  = S2_CopyToBuff;
+    tags[tag].ti_Data = (ULONG)diag_copy;
+    tag++;
+    tags[tag].ti_Tag  = S2_CopyFromBuff;
+    tags[tag].ti_Data = (ULONG)diag_copy;
+    tag++;
+    /* CARD=, the same pin src/sana2/sana2_device.c passes. Without it this
+       probe opens the first board in probe order and reports a card that is
+       not in the machine as working. */
+    if (card != NULL && *card != '\0')
+    {
+        tags[tag].ti_Tag  = S2_AnxCardType;
+        tags[tag].ti_Data = (ULONG)card;
+        tag++;
+    }
+    tags[tag].ti_Tag  = TAG_DONE;
+    tags[tag].ti_Data = 0;
 
     req->ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
     req->ios2_Req.io_Message.mn_Length       = (UWORD)sizeof(struct IOSana2Req);

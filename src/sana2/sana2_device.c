@@ -739,8 +739,17 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
 
     if (status != 0)
     {
-        AMI_ERROR("sana2: cannot open %s unit %ld (%ld)", iface->device,
-                  (long)iface->unit, (long)status);
+        /* The card is in the message when one was pinned: a driver that
+           covers a family refuses the open when the name does not match what
+           is in the machine, and "cannot open anxnet.device unit 0" alone
+           reads as a missing driver rather than as the wrong board. */
+        if (iface->card[0] != '\0')
+            AMI_ERROR("sana2: cannot open %s unit %ld CARD=%s (%ld): no such "
+                      "card in this machine", iface->device,
+                      (long)iface->unit, iface->card, (long)status);
+        else
+            AMI_ERROR("sana2: cannot open %s unit %ld (%ld)", iface->device,
+                      (long)iface->unit, (long)status);
         ami_free(iface);
         if (err != NULL)
             *err = AMI_NET_ERR_NODEV;

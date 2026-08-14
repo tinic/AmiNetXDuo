@@ -144,7 +144,9 @@ const char *tool_device_where(const char *device);
    the probe has to derive it because a failed OpenLibrary() carries no status
    back to a command. */
 #define TOOL_PROBE_REFUSED      (-102)
-LONG tool_device_probe(const char *device, ULONG unit);
+/* `card` pins which board a driver that covers a family should bind to,
+   NULL or empty for the ordinary one-card-per-device case. */
+LONG tool_device_probe(const char *device, ULONG unit, const char *card);
 
 /* Indented advice under an error line, and a blank separator. */
 
@@ -161,7 +163,8 @@ VOID tool_config_unwatch(VOID);
 
 /* The explainers. Each prints a block; none of them exits. */
 VOID tool_explain_interface_file(const char *name);   /* file missing        */
-VOID tool_explain_device(const char *device, ULONG unit);
+VOID tool_explain_device(const char *device, ULONG unit,
+                         const char *card);
 VOID tool_explain_device_refused(const char *device, ULONG unit);
 VOID tool_explain_no_interfaces(VOID);                /* nothing configured  */
 VOID tool_explain_dhcp(const char *name);             /* nobody answered     */
