@@ -101,6 +101,19 @@ endif()
 target_compile_options(test_mcastrace PRIVATE -Wall -Wextra)
 set_target_properties(test_mcastrace PROPERTIES OUTPUT_NAME "McastRace")
 
+# McastJoin asks a SANA-II driver directly whether it accepts a real multicast
+# address.  It is the only thing that can see the defect anxnet.device exists
+# to remove: our own stack works around a driver that refuses a group address,
+# so every sweep passes through the workaround and prints nothing.  It was
+# written and never built, which is the same as not having it.
+add_executable(test_mcastjoin mcastjoin.c)
+target_include_directories(test_mcastjoin PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_mcastjoin PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_mcastjoin PRIVATE -Wall -Wextra)
+set_target_properties(test_mcastjoin PROPERTIES OUTPUT_NAME "McastJoin")
+
 # MonProbe drives AddNetMonitorHookTagList/RemoveNetMonitorHook and the two
 # call-site hook types.  The hook register convention (Hook in A0, NULL in A2,
 # message in A1) is not the pair a reader would guess, and a wrong guess hands
