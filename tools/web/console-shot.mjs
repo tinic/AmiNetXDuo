@@ -135,7 +135,29 @@ try {
       type: "mouseReleased", x: 380, y: 340, button: "left", buttons: 0,
       clickCount: 1,
     });
+
+    /* After the click, because the keyboard only goes to the screen while the
+       screen has focus and the click is what gives it focus. */
+    for (const [type, code, key] of [
+      ["keyDown", "KeyA", "a"], ["keyUp", "KeyA", "a"],
+      ["keyDown", "ArrowLeft", "ArrowLeft"], ["keyUp", "ArrowLeft", "ArrowLeft"],
+    ]) {
+      await cdp.send("Input.dispatchKeyEvent", { type, code, key });
+    }
     await sleep(300);
+  }
+
+  /* --eval runs in the page before the probe, which is how a gadget gets
+     poked: the aspect and zoom selects are the two things whose effect is
+     only visible in the element's box, and the probe reports that. */
+  const expr = pick("--eval");
+  if (expr !== undefined) {
+    const r = await cdp.send("Runtime.evaluate", { expression: expr });
+    if (r.exceptionDetails) {
+      throw new Error("--eval threw: " +
+                      JSON.stringify(r.exceptionDetails.exception));
+    }
+    await sleep(200);
   }
 
   const probe = await cdp.send("Runtime.evaluate", {

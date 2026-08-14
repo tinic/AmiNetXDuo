@@ -15,9 +15,10 @@
  * which is the property that makes the player evidence about the live viewer
  * rather than a second implementation that agrees with it by luck.
  *
- * The live half's tile format is a PLACEHOLDER and says so on the page as
- * well as here; see tiles.ts, which is the one file that has to change when
- * the encoder lands.
+ * The live half's wire format is the frame encoder's, and tiles.ts is the
+ * only file that reads a byte of it -- which is what let the rest of this be
+ * built and measured against a placeholder framing before the encoder
+ * existed, and then swapped for the real one without touching anything else.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -286,23 +287,26 @@ function update(buf: ArrayBuffer): void {
   try {
     d = applyUpdate(geom, new Uint8Array(buf), planes, scratch);
   } catch (e) {
-    /* A malformed update is not survivable by carrying on: the XOR chain is
-       now wrong for every tile after it.  Ask for a keyframe and say so. */
+    /* A malformed frame is not survivable by carrying on: what is in the
+       buffer is now half a frame and every delta after it builds on that. */
     say("down", e instanceof Error ? e.message : String(e));
+    planes.fill(0);
     live.word("refresh");
     expectSeq = -1;
     return;
   }
 
   /*
-   * A gap in the sequence means an update was lost, and every XOR after it
-   * is applied to bytes that are not what the encoder thought they were.
-   * There is nothing to reconstruct from, so the only correct move is to ask
-   * for the screen again.
+   * A gap in the sequence means a frame was lost, and every XOR and every
+   * copy after it is applied to bytes that are not what the encoder thought
+   * were there.  There is nothing to reconstruct from, so the only correct
+   * move is to ask for the screen again -- `refresh` makes the far side
+   * forget its shadow, which is what turns the next frame into a full one.
    */
-  if (expectSeq >= 0 && d.seq !== expectSeq && !d.keyframe) {
-    log("! seq " + d.seq + ", expected " + expectSeq + " -- asking for a keyframe");
+  if (expectSeq >= 0 && d.seq !== expectSeq) {
+    log("! seq " + d.seq + ", expected " + expectSeq + " -- asking for a resend");
     live.word("refresh");
+    planes.fill(0);
   }
   expectSeq = (d.seq + 1) & 0xffff;
 
@@ -415,8 +419,8 @@ addEventListener("keydown", (e) => {
 /* -------------------------------------------------------------- the start -- */
 
 say("", "idle -- open a .pfs capture, or connect");
-log("tile updates use the PLACEHOLDER framing in tiles.ts; the encoder's");
-log("real one is not written yet (branch proto/rfb-encoder)");
+log("frames arrive in the encoder's format; input words go out and nothing");
+log("on the Amiga reads them yet");
 
 /*
  * ?pfs=URL loads a capture over HTTP.

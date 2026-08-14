@@ -8,16 +8,22 @@
  * where the viewer's whole cost lives.
  *
  * bytesPerRow is read from the capture and is NOT width/8.  A BitMap is
- * allocated in whole words and a Workbench screen is routinely padded, so a
- * decoder that computes the stride draws a picture that shears one byte
- * further left on every row.
+ * allocated in whole words, BMF_INTERLEAVED moves the stride again, and a
+ * decoder that computes it draws a picture that shears one byte further left
+ * on every row.
  *
- * The `if (b === 0) continue` in the inner loop is worth more than it looks.
- * A Workbench screen is mostly pen 0, which is all-zero in every plane, so
- * most bytes skip the eight tests below them -- and it is also why the times
- * quoted in the selftest are quoted against synthesised Workbench-like
- * content rather than noise, which would be the slowest case and not the one
- * anybody is going to look at.
+ * Measured on the real captures, node on an M-series laptop, whole screen:
+ * 640x256x2 in 0.144 ms and 640x256x4 in 0.173 ms, which is what stock
+ * Workbench 3.1 is.  As headroom, 640x480x3 in 0.284 ms and 800x600x8 in
+ * 0.668 ms.  In the browser the same call plus the putImageData upload is
+ * 0.20 ms at 640x256x2.  A 60 Hz budget is 16.7 ms, so the straightforward
+ * loop stays.
+ *
+ * The `if (b === 0) continue` in the inner loop is worth more than it looks:
+ * a Workbench screen is mostly pen 0, which is all-zero in every plane, so
+ * most bytes skip the eight tests below them.  It is also why those times are
+ * quoted against Workbench and not noise, which is the slowest case and not
+ * the one anybody is going to look at.
  *
  * Scaling is deliberately absent.  The canvas is the screen's native size and
  * CSS stretches it with image-rendering: pixelated, so nearest-neighbour is

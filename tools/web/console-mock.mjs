@@ -1,9 +1,14 @@
 /*
  * A Workbench screen that is not an Amiga.
  *
- *   node tools/web/console-mock.mjs [PORT] [W H DEPTH]     default 8098
+ *   node tools/web/console-mock.mjs [PORT] [CAPTURE.pfs]
+ *   node tools/web/console-mock.mjs [PORT] [W H DEPTH]      synthesised
  *
- * Then open http://127.0.0.1:8098/console.
+ * Default port 8098; then open http://127.0.0.1:8098/console.
+ *
+ * A real capture is the better argument now that there are some: it replays
+ * the frames an A1200 actually produced, through the same encoder the Amiga
+ * will run, so what the page draws is what a session will look like.
  *
  * The same argument as tools/web/mock.mjs makes for the Shell: everything the
  * page does that is hard -- the tile apply, the XOR chain, the damage
@@ -11,9 +16,10 @@
  * without a 68020, and booting an emulator to find out whether a redraw is
  * one tile short is a minute a change.
  *
- * It speaks the PLACEHOLDER framing in client/console/tiles.ts and is
- * therefore provisional in exactly the same way.  It is a DEVELOPMENT AID and
- * asserts nothing; tools/web/console-selftest.mjs is where the checks are.
+ * The frames go out in the encoder's own wire format -- see
+ * include/aminetxduo/rfb_encode.h -- coded by console-host.mjs, which is a
+ * second implementation of it and not the one that ships.  A DEVELOPMENT AID
+ * that asserts nothing; console-selftest.mjs is where the checks are.
  *
  * /sample.pfs is served as well, so ?pfs=/sample.pfs exercises the player
  * half against a real HTTP fetch.
@@ -28,13 +34,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  encodeUpdate,
+  encodeFrame,
   makeGeometry,
-  palette,
   synth,
-  toPlanes,
-  drawFrame,
-  wordAligned,
   writePfs,
 } from "./console-host.mjs";
 
@@ -44,20 +46,51 @@ const PAGE = process.env.AMINETXDUO_CONSOLE_PAGE ||
   join(ROOT, "build", "web", "console.html");
 
 const PORT = Number(process.argv[2] || 8098);
-const W = Number(process.argv[3] || 640);
-const H = Number(process.argv[4] || 256);
-const DEPTH = Number(process.argv[5] || 3);
-const TILE_W = 32;
-const TILE_H = 16;
+const CAPTURE = (process.argv[3] || "").endsWith(".pfs") ? process.argv[3] : null;
+
+/* 640x256 and two planes deep, because that is what stock Workbench 3.1
+   comes up as on any machine. */
+const W = Number(CAPTURE ? 0 : process.argv[3] || 640);
+const H = Number(CAPTURE ? 0 : process.argv[4] || 256);
+const DEPTH = Number(CAPTURE ? 0 : process.argv[5] || 2);
+/* Bytes and rows, matching rfb_geom.  16x8 is the middle of rfbbench's
+   sweep. */
+const TILE_W = 16;
+const TILE_H = 8;
 const FPS = 12;
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-const screen = {
-  width: W, height: H, depth: DEPTH, bytesPerRow: wordAligned(W),
-};
+const cap = CAPTURE !== null ? readCapture(CAPTURE)
+                             : synth(W, H, DEPTH, 60);
+const screen = cap.screen;
 const geom = makeGeometry(screen, TILE_W, TILE_H);
-const rgb = palette(DEPTH);
-const stride = screen.bytesPerRow * H * DEPTH;
+const rgb = cap.rgb;
+const stride = cap.stride;
+
+/* The .pfs reader, which is the one the page has in TypeScript; kept short
+   here rather than shared, because sharing it would mean the mock and the
+   page agreeing with each other about a file neither of them wrote. */
+function readCapture(path) {
+  const b = readFileSync(path);
+  if (b.toString("latin1", 0, 4) !== "PFS1") throw new Error(path + " is not a .pfs");
+  const s = {
+    width: b.readUInt16BE(4),
+    height: b.readUInt16BE(6),
+    depth: b[8],
+    bytesPerRow: b.readUInt16BE(10),
+  };
+  const frameCount = b.readUInt16BE(12);
+  const palBytes = 3 * (1 << s.depth);
+  const st = s.bytesPerRow * s.height * s.depth;
+  return {
+    screen: s,
+    rgb: b.subarray(16, 16 + palBytes),
+    frames: b.subarray(16 + palBytes, 16 + palBytes + frameCount * st),
+    frameCount,
+    stride: st,
+    file: b,
+  };
+}
 
 /* -------------------------------------------------------------- framing -- */
 
@@ -76,26 +109,25 @@ function u64(n) { const b = Buffer.alloc(8); b.writeBigUInt64BE(BigInt(n)); retu
 /* --------------------------------------------------------------- the run -- */
 
 function makeSession(sock) {
-  let prev = new Uint8Array(stride);
+  /* The shadow, which the encoder keeps and the receiver mirrors.  Zeroed,
+     so the first frame codes as a delta from a blank screen -- which is what
+     a viewer that has just connected has. */
+  let shadow = new Uint8Array(stride);
   let t = 0;
   let seq = 0;
-  let keyframe = true;
 
   const word = (s) => sock.write(frame(0x1, Buffer.from(s, "latin1")));
   const binary = (b) => sock.write(frame(0x2, b));
 
-  word("geom " + W + " " + H + " " + DEPTH + " " + screen.bytesPerRow +
-       " " + TILE_W + " " + TILE_H);
+  word("geom " + screen.width + " " + screen.height + " " + screen.depth +
+       " " + screen.bytesPerRow + " " + TILE_W + " " + TILE_H);
   word("pal " + Buffer.from(rgb).toString("hex"));
 
   const timer = setInterval(() => {
-    const next = toPlanes(drawFrame(W, H, DEPTH, t), W, H, DEPTH,
-                          screen.bytesPerRow);
-    const u = encodeUpdate(geom, prev, next, seq, keyframe);
-    binary(u);
-    prev = next;
+    const at = (t % cap.frameCount) * stride;
+    const next = cap.frames.subarray(at, at + stride);
+    binary(encodeFrame(geom, shadow, next, seq));
     seq = (seq + 1) & 0xffff;
-    keyframe = false;
     t++;
   }, Math.round(1000 / FPS));
 
@@ -105,8 +137,7 @@ function makeSession(sock) {
          one when a sequence number skipped, which is the state the XOR chain
          cannot be recovered from. */
       if (w === "refresh") {
-        keyframe = true;
-        prev = new Uint8Array(stride);
+        shadow = new Uint8Array(stride);
         return;
       }
       /* Everything else is input, which nothing here consumes -- the point
@@ -123,7 +154,7 @@ const server = createServer((req, res) => {
   const path = (req.url || "/").split("?")[0];
 
   if (path === "/sample.pfs") {
-    const body = writePfs(synth(W, H, DEPTH, 60));
+    const body = cap.file ?? writePfs(cap);
     res.writeHead(200, {
       "content-type": "application/octet-stream",
       "content-length": body.length,
@@ -191,6 +222,8 @@ server.on("upgrade", (req, sock) => {
 
 server.listen(PORT, () => {
   console.log("mock Workbench on http://127.0.0.1:%d/console", PORT);
-  console.log("%dx%dx%d, %dx%d tiles, %d fps, /sample.pfs for the player",
-              W, H, DEPTH, TILE_W, TILE_H, FPS);
+  console.log("%s: %dx%dx%d, %d frames, %dx%d tiles, %d fps, " +
+              "/sample.pfs for the player",
+              CAPTURE ?? "synthesised", screen.width, screen.height,
+              screen.depth, cap.frameCount, TILE_W, TILE_H, FPS);
 });

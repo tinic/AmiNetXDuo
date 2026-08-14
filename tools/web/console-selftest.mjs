@@ -21,7 +21,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -29,10 +29,11 @@ import * as esbuild from "esbuild";
 
 import {
   drawFrame,
-  encodeUpdate,
+  encodeFrame,
   makeGeometry,
   packBits,
   palette,
+  readPng,
   synth,
   writePfs,
   writePng,
@@ -211,20 +212,24 @@ for (const [name, w, h, depth, bpr] of SHAPES) {
 /* ----------------------------------------------------------- the tiles -- */
 
 /*
- * The placeholder framing, both sides.  What is being checked is not the
- * format -- it is provisional -- but that the XOR chain reconstructs the
- * capture exactly: an update path that is one byte out anywhere accumulates,
- * so frame 20 is the test and frame 1 is not.
+ * The encoder's format, both sides.  What is checked is not the format --
+ * that is the encoder's header -- but that a chain of deltas reconstructs the
+ * capture exactly: an apply that is one byte out anywhere accumulates, so
+ * frame 20 is the test and frame 1 is not.
+ *
+ * Tile widths are BYTES.  The sizes are rfbbench's own sweep, and the ragged
+ * grid is there because bytesPerRow is not always a whole number of tiles.
  */
 for (const [name, w, h, depth, tw, th] of [
-  ["640x480x3 16x16 tiles", 640, 480, 3, 16, 16],
+  ["640x480x3 16x8 tiles", 640, 480, 3, 16, 8],
   ["800x600x8 32x16 tiles", 800, 600, 8, 32, 16],
-  ["634x242x4 ragged grid", 634, 242, 4, 32, 32],
+  ["634x242x4 ragged grid", 634, 242, 4, 12, 10],
 ]) {
   const cap = synth(w, h, depth, 20);
   const g = makeGeometry(cap.screen, tw, th);
   const cg = M.makeGeometry(cap.screen, tw, th);
   const fb = new Uint8Array(cap.stride);
+  const shadow = new Uint8Array(cap.stride);
   const scratch = new Uint8Array(M.scratchBytes(cg));
 
   let exact = true;
@@ -232,10 +237,13 @@ for (const [name, w, h, depth, tw, th] of [
   let bytes = 0;
 
   for (let t = 0; t < cap.frameCount; t++) {
-    const prev = t === 0 ? new Uint8Array(cap.stride)
-                         : cap.frames.subarray((t - 1) * cap.stride, t * cap.stride);
     const next = cap.frames.subarray(t * cap.stride, (t + 1) * cap.stride);
-    const u = encodeUpdate(g, prev, next, t, t === 0);
+    /* A scroll every fifth frame, so the COPY op is on the path rather than
+       being a branch nothing ever takes. */
+    const copy = t > 0 && t % 5 === 0
+      ? { x0: 0, w: cap.screen.bytesPerRow, y0: 0, h: h - 16, dy: 16 }
+      : undefined;
+    const u = encodeFrame(g, shadow, next, t, copy);
     bytes += u.length;
 
     M.applyUpdate(cg, u, fb, scratch);
@@ -247,8 +255,9 @@ for (const [name, w, h, depth, tw, th] of [
     }
   }
 
-  ok(name + ": 20 updates reconstruct the capture byte for byte", exact, why);
-  console.log("      " + bytes + " bytes of updates for " + cap.frameCount +
+  ok(name + ": 20 frames, 3 of them scrolls, reconstruct byte for byte",
+     exact, why);
+  console.log("      " + bytes + " bytes for " + cap.frameCount +
               " frames, " +
               ((bytes * 100) / (cap.stride * cap.frameCount)).toFixed(2) +
               "% of raw");
@@ -261,14 +270,142 @@ for (const [name, w, h, depth, tw, th] of [
 }
 
 {
+  /* The three ways a frame can be malformed that a decoder must not take a
+     guess at.  A viewer that carries on from any of them draws a screen that
+     is half of two different frames. */
+  const cap = synth(64, 32, 2, 2);
+  const cg = M.makeGeometry(cap.screen, 4, 8);
+  const fb = new Uint8Array(cap.stride);
+  const scratch = new Uint8Array(M.scratchBytes(cg));
+  const good = encodeFrame(cg, new Uint8Array(cap.stride),
+                           cap.frames.subarray(0, cap.stride), 0);
+
+  ok("a frame with the wrong version is refused",
+     throws(() => {
+       const b = Buffer.from(good); b[0] = 9;
+       M.applyUpdate(cg, b, fb, scratch);
+     }));
+  ok("a frame with no END op is refused",
+     throws(() => M.applyUpdate(cg, good.subarray(0, good.length - 1), fb, scratch)));
+  ok("an unknown op is refused",
+     throws(() => {
+       const b = Buffer.concat([good.subarray(0, 4), Buffer.from([0x7f])]);
+       M.applyUpdate(cg, b, fb, scratch);
+     }));
+  ok("a copy that reads off the screen is refused",
+     throws(() => {
+       const c = Buffer.alloc(11);
+       c.writeUInt8(1, 0);
+       c.writeUInt16BE(0, 1); c.writeUInt16BE(8, 3);
+       c.writeUInt16BE(0, 5); c.writeUInt16BE(32, 7);
+       c.writeInt16BE(8, 9);
+       M.applyUpdate(cg, Buffer.concat([good.subarray(0, 4), c,
+                                        Buffer.from([0])]), fb, scratch);
+     }));
+}
+
+{
   const rgb = palette(3);
   const hex = Buffer.from(rgb).toString("hex");
   const back = M.paletteFromWord("pal " + hex, 3);
   ok("the pal word round trips", Buffer.compare(Buffer.from(back), rgb) === 0);
   ok("a pal word of the wrong length is refused",
      throws(() => M.paletteFromWord("pal " + hex.slice(0, 10), 3)));
-  ok("a tile width that is not a multiple of 8 is refused",
-     throws(() => M.makeGeometry({ width: 64, height: 64, depth: 2, bytesPerRow: 8 }, 12, 16)));
+  ok("a tile wider than RFB_MAX_TILE_W is refused",
+     throws(() => M.makeGeometry({ width: 64, height: 64, depth: 2, bytesPerRow: 8 }, 65, 16)));
+  ok("a tile taller than RFB_MAX_TILE_H is refused",
+     throws(() => M.makeGeometry({ width: 64, height: 64, depth: 2, bytesPerRow: 8 }, 8, 65)));
+}
+
+/* ------------------------------------------------- the real captures -- */
+
+/*
+ * Grabs off an A1200 running Kickstart 3.1 40.68 and Workbench 3.1 40.42,
+ * with a .png beside each one decoded by the capture side's own host decoder.
+ * Those PNGs are the ground truth this viewer has to agree with: they share
+ * no code with anything here, so a match is evidence about the planar unpack
+ * and the palette rather than about my arithmetic being self-consistent.
+ *
+ * Stock Workbench 3.1 comes up TWO planes deep whatever the machine is, so
+ * the depth2 set is the real case and depth4 is what a person who changed it
+ * in Prefs gets.  640x256, bytesPerRow 80.
+ *
+ * Skipped, not failed, when the captures are not on this machine: they live
+ * outside the tree.
+ */
+const CONTENT = process.env.CONSOLE_CONTENT || "/Users/turo/rfb-proto-content";
+
+if (!existsSync(CONTENT)) {
+  console.log("skip  real captures: %s is not here", CONTENT);
+} else {
+  for (const dir of readdirSync(CONTENT)) {
+    const at = join(CONTENT, dir);
+    let files;
+    try { files = readdirSync(at); } catch { continue; }
+
+    for (const name of files.filter((f) => f.endsWith(".pfs")).sort()) {
+      const cap = M.parsePfs(bufferToArrayBuffer(readFileSync(join(at, name))));
+      const stem = name.replace(/\.pfs$/, "");
+      const w = cap.screen.width, h = cap.screen.height;
+
+      const shots = files.filter((f) => f.endsWith(".png") &&
+                                        f.replace(/^d\d+-/, "").startsWith(stem + "-"));
+
+      for (const shot of shots.sort()) {
+        const png = readPng(readFileSync(join(at, shot)));
+
+        if (png.width !== w || png.height !== h) {
+          ok(dir + "/" + shot + ": same geometry as the capture", false,
+             png.width + "x" + png.height + " vs " + w + "x" + h);
+          continue;
+        }
+
+        /* Which frame it is is not written down, so it is found: a match on
+           exactly one frame is a stronger statement than a match on the one
+           somebody said it would be. */
+        const hits = [];
+        for (let t = 0; t < cap.frameCount; t++) {
+          if (sameRGB(decodeFrame(cap, t), png.rgba, w * h)) hits.push(t);
+        }
+
+        ok(dir + "/" + shot + ": a decoded frame matches it exactly",
+           hits.length > 0,
+           hits.length === 0
+             ? firstDifference(decodeFrame(cap, 0), png.rgba, w) +
+               " against frame 0 of " + cap.frameCount
+             : "");
+        if (hits.length > 0) {
+          console.log("      %s %dx%dx%d, %d frames, matched at %s",
+                      dir + "/" + name, w, h, cap.screen.depth, cap.frameCount,
+                      hits.length > 4 ? hits.length + " frames (a still)"
+                                      : hits.join(","));
+        }
+      }
+    }
+  }
+
+  /* And the clock, on the frames a person will actually be looking at. */
+  for (const [dir, name] of [["depth2", "windows.pfs"], ["depth4", "windows.pfs"]]) {
+    const file = join(CONTENT, dir, name);
+    if (!existsSync(file)) continue;
+    const cap = M.parsePfs(bufferToArrayBuffer(readFileSync(file)));
+    const words = new Uint32Array(cap.screen.width * cap.screen.height);
+    const runs = slow ? 400 : 200;
+
+    for (let i = 0; i < 20; i++) {
+      M.decodeInto(cap.screen, cap.frames, M.frameAt(cap, i % cap.frameCount),
+                   cap.palette, words);
+    }
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < runs; i++) {
+      M.decodeInto(cap.screen, cap.frames, M.frameAt(cap, i % cap.frameCount),
+                   cap.palette, words);
+    }
+    const ms = Number(process.hrtime.bigint() - t0) / 1e6 / runs;
+    console.log("real  " + (dir + "/" + name).padEnd(20) +
+                col(ms.toFixed(3) + " ms/frame") +
+                col((1000 / ms).toFixed(0) + " fps"));
+  }
 }
 
 /* ------------------------------------------------------------ the clock -- */
@@ -304,7 +441,10 @@ function timeDecode(w, h, depth, label) {
 }
 
 console.log("");
-timeDecode(640, 256, 3, "640x256x3");
+/* The real cases first: stock Workbench 3.1 is 640x256 and two planes deep
+   whatever the machine is, and the larger geometries below are headroom. */
+timeDecode(640, 256, 2, "640x256x2");
+timeDecode(640, 256, 4, "640x256x4");
 timeDecode(640, 480, 3, "640x480x3");
 timeDecode(800, 600, 8, "800x600x8");
 timeDecode(1280, 1024, 8, "1280x1024x8");
@@ -318,29 +458,29 @@ function timeLive(w, h, depth, tw, th, label) {
   const g = makeGeometry(cap.screen, tw, th);
   const cg = M.makeGeometry(cap.screen, tw, th);
   const fb = new Uint8Array(cap.stride);
+  const shadow = new Uint8Array(cap.stride);
   const scratch = new Uint8Array(M.scratchBytes(cg));
   const words = new Uint32Array(w * h);
   const pal = M.palette32(cap.rgb, depth);
 
-  const updates = [];
+  const frames = [];
   for (let t = 0; t < cap.frameCount; t++) {
-    const prev = t === 0 ? new Uint8Array(cap.stride)
-                         : cap.frames.subarray((t - 1) * cap.stride, t * cap.stride);
-    const next = cap.frames.subarray(t * cap.stride, (t + 1) * cap.stride);
-    updates.push(encodeUpdate(g, prev, next, t, t === 0));
+    frames.push(encodeFrame(g, shadow,
+                            cap.frames.subarray(t * cap.stride, (t + 1) * cap.stride),
+                            t));
   }
 
   const runs = slow ? 400 : 120;
   let bytes = 0;
   let area = 0;
 
-  /* The keyframe is applied once and then only the deltas are timed: a
-     session sends one keyframe and then runs. */
-  M.applyUpdate(cg, updates[0], fb, scratch);
+  /* The first frame is applied once and then only the deltas are timed: a
+     session sends one full screen and then runs. */
+  M.applyUpdate(cg, frames[0], fb, scratch);
 
   const t0 = process.hrtime.bigint();
   for (let i = 0; i < runs; i++) {
-    const u = updates[1 + (i % (updates.length - 1))];
+    const u = frames[1 + (i % (frames.length - 1))];
     const d = M.applyUpdate(cg, u, fb, scratch);
     M.decodeRectInto(cap.screen, fb, 0, pal, words, d.x0, d.y0, d.x1, d.y1);
     bytes += u.length;
@@ -349,14 +489,14 @@ function timeLive(w, h, depth, tw, th, label) {
   const ms = Number(process.hrtime.bigint() - t0) / 1e6 / runs;
 
   console.log("live  " + label.padEnd(13) +
-              col(ms.toFixed(3) + " ms/update") +
+              col(ms.toFixed(3) + " ms/frame") +
               col((1000 / ms).toFixed(0) + " fps") +
-              col(Math.round(bytes / runs) + " B/update") +
+              col(Math.round(bytes / runs) + " B/frame") +
               col(Math.round(area / runs) + " px damaged"));
 }
 
 console.log("");
-timeLive(640, 480, 3, 16, 16, "640x480x3");
+timeLive(640, 480, 3, 16, 8, "640x480x3");
 timeLive(800, 600, 8, 32, 16, "800x600x8");
 
 console.log("");
@@ -367,6 +507,17 @@ if (failures > 0) {
 console.log("selftest: all checks passed");
 
 /* ---------------------------------------------------------------- bits -- */
+
+/* Alpha is not compared: the reference PNG has none and the decoder writes
+   255 everywhere by construction. */
+function sameRGB(got, want, pixels) {
+  for (let i = 0; i < pixels; i++) {
+    const o = i * 4;
+    if (got[o] !== want[o] || got[o + 1] !== want[o + 1] ||
+        got[o + 2] !== want[o + 2]) return false;
+  }
+  return true;
+}
 
 function col(s) {
   return s.padStart(18) + "  ";

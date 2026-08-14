@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-import { deflateSync } from "node:zlib";
+import { deflateSync, inflateSync } from "node:zlib";
 
 /* --------------------------------------------------------- the synthesis -- */
 
@@ -231,90 +231,153 @@ export function packBits(src) {
 export function makeGeometry(screen, tileW, tileH) {
   return {
     screen,
-    tileW,
+    tileW,                       /* BYTES, matching rfb_geom.tile_w */
     tileH,
-    across: Math.ceil(screen.width / tileW),
+    across: Math.ceil(screen.bytesPerRow / tileW),
     down: Math.ceil(screen.height / tileH),
-    tileBytesPerRow: tileW >> 3,
-    tileBytes: (tileW >> 3) * tileH,
   };
 }
 
-/*
- * An update, in the PLACEHOLDER framing documented at the top of
- * client/console/tiles.ts.  Per tile, per plane: XOR against the previous frame,
- * skip the planes that are all zero, PackBits what is left and keep it only
- * if it came out smaller.
- */
-export function encodeUpdate(g, prev, next, seq, keyframe) {
-  const plane = g.screen.bytesPerRow * g.screen.height;
-  const bpr = g.screen.bytesPerRow;
-  const rowBytes = g.tileBytesPerRow;
-  const parts = [];
-  let tiles = 0;
+const OP_END = 0x00;
+const OP_COPY = 0x01;
+const OP_TILE = 0x02;
 
-  const payload = Buffer.alloc(g.tileBytes * g.screen.depth);
+const CODE_RAW = 0;
+const CODE_PB_RAW = 1;
+const CODE_PB_XOR = 2;
+
+/*
+ * One frame in the encoder's wire format, as documented in
+ * include/aminetxduo/rfb_encode.h on branch proto/rfb-encoder.
+ *
+ * This is NOT that encoder.  It is a second implementation of the same
+ * format, written from the header, and it exists so the browser's decoder can
+ * be exercised without a 68020 in the room -- and so that a disagreement
+ * between the two shows up here rather than as a smeared Workbench.  The C
+ * encoder is the one that ships; anything this does that it does not is a bug
+ * in the mock and not in the format.
+ *
+ * `shadow` is the previous frame and is updated in place to be `next`.
+ * `copy` is an optional { x0, w, y0, h, dy } in byte columns and rows, which
+ * is how the COPY op gets exercised: the real encoder finds these with a
+ * scroll detector and the caller here just says so.
+ */
+export function encodeFrame(g, shadow, next, seq, copy) {
+  const bpr = g.screen.bytesPerRow;
+  const h = g.screen.height;
+  const depth = g.screen.depth;
+  const plane = bpr * h;
+
+  const head = Buffer.alloc(4);
+  head.writeUInt8(1, 0);
+  head.writeUInt8(0, 1);
+  head.writeUInt16BE(seq & 0xffff, 2);
+  const parts = [head];
+
+  if (copy !== undefined) {
+    const c = Buffer.alloc(11);
+    c.writeUInt8(OP_COPY, 0);
+    c.writeUInt16BE(copy.x0, 1);
+    c.writeUInt16BE(copy.w, 3);
+    c.writeUInt16BE(copy.y0, 5);
+    c.writeUInt16BE(copy.h, 7);
+    c.writeInt16BE(copy.dy, 9);
+    parts.push(c);
+
+    /* Applied to the shadow here, so the tiles below are coded against what
+       the receiver will actually have after it runs the same op. */
+    for (let p = 0; p < depth; p++) {
+      const base = p * plane;
+      if (copy.dy > 0) {
+        for (let r = 0; r < copy.h; r++) {
+          const to = base + (copy.y0 + r) * bpr + copy.x0;
+          const from = base + (copy.y0 + r + copy.dy) * bpr + copy.x0;
+          shadow.copyWithin(to, from, from + copy.w);
+        }
+      } else {
+        for (let r = copy.h; r > 0; r--) {
+          const to = base + (copy.y0 + r - 1) * bpr + copy.x0;
+          const from = base + (copy.y0 + r - 1 + copy.dy) * bpr + copy.x0;
+          shadow.copyWithin(to, from, from + copy.w);
+        }
+      }
+    }
+  }
+
+  const raw = Buffer.alloc(g.tileW * g.tileH);
+  const xor = Buffer.alloc(g.tileW * g.tileH);
+  let tiles = 0;
 
   for (let ty = 0; ty < g.down; ty++) {
     for (let tx = 0; tx < g.across; tx++) {
-      const px = tx * g.tileW;
-      const py = ty * g.tileH;
-      const rows = Math.min(g.tileH, g.screen.height - py);
+      const x0 = tx * g.tileW;
+      const y0 = ty * g.tileH;
+      const tw = Math.min(g.tileW, bpr - x0);
+      const th = Math.min(g.tileH, h - y0);
+      const want = tw * th;
 
       let mask = 0;
-      let at = 0;
+      const bodies = [];
 
-      for (let p = 0; p < g.screen.depth; p++) {
-        const start = at;
-        let any = false;
+      for (let p = 0; p < depth; p++) {
+        const base = p * plane;
+        let differs = false;
 
-        for (let r = 0; r < g.tileH; r++) {
-          const so = p * plane + (Math.min(py + r, g.screen.height - 1)) * bpr + (px >> 3);
-          for (let i = 0; i < rowBytes; i++) {
-            /* Rows past the bottom edge are padding: the payload is always a
-               whole tile, which is one less special case on the 68020. */
-            const v = r < rows
-              ? (keyframe ? next[so + i] : (next[so + i] ^ prev[so + i]))
-              : 0;
-            payload[at + r * rowBytes + i] = v;
-            if (v !== 0) any = true;
+        for (let r = 0; r < th; r++) {
+          const at = base + (y0 + r) * bpr + x0;
+          for (let c = 0; c < tw; c++) {
+            const v = next[at + c];
+            const o = shadow[at + c];
+            raw[r * tw + c] = v;
+            xor[r * tw + c] = v ^ o;
+            if (v !== o) differs = true;
           }
         }
+        if (!differs) continue;
 
-        /* A keyframe carries every plane whether or not it has a bit set: it
-           REPLACES rather than XORs, and a plane left out would be whatever
-           was there before. */
-        if (any || keyframe) {
-          mask |= 1 << p;
-          at = start + g.tileBytes;
+        mask |= 1 << p;
+
+        const pbRaw = packBits(raw.subarray(0, want));
+        const pbXor = packBits(xor.subarray(0, want));
+
+        /* Smallest of the three, counting the two length bytes the packed
+           forms carry and the raw form does not. */
+        let best = Buffer.concat([Buffer.from([CODE_RAW]), raw.subarray(0, want)]);
+        if (pbRaw.length + 3 < best.length) {
+          best = Buffer.concat([Buffer.from([CODE_PB_RAW]), u16be(pbRaw.length), pbRaw]);
         }
-        /* else: leave `at` where it was and the next plane overwrites it */
+        if (pbXor.length + 3 < best.length) {
+          best = Buffer.concat([Buffer.from([CODE_PB_XOR]), u16be(pbXor.length), pbXor]);
+        }
+        bodies.push(best);
+
+        for (let r = 0; r < th; r++) {
+          const at = base + (y0 + r) * bpr + x0;
+          for (let c = 0; c < tw; c++) shadow[at + c] = next[at + c];
+        }
       }
 
       if (mask === 0) continue;
 
-      const raw = payload.subarray(0, at);
-      const packed = packBits(raw);
-      const use = packed.length < raw.length ? packed : raw;
-      const coding = packed.length < raw.length ? 1 : 0;
-
-      const head = Buffer.alloc(6);
-      head.writeUInt16BE(ty * g.across + tx, 0);
-      head.writeUInt8(mask, 2);
-      head.writeUInt8(coding, 3);
-      head.writeUInt16BE(use.length, 4);
-      parts.push(head, Buffer.from(use));
+      const th3 = Buffer.alloc(4);
+      th3.writeUInt8(OP_TILE, 0);
+      th3.writeUInt16BE(ty * g.across + tx, 1);
+      th3.writeUInt8(mask, 3);
+      parts.push(th3, ...bodies);
       tiles++;
     }
   }
 
-  const head = Buffer.alloc(6);
-  head.writeUInt8(1, 0);
-  head.writeUInt8(keyframe ? 1 : 0, 1);
-  head.writeUInt16BE(seq & 0xffff, 2);
-  head.writeUInt16BE(tiles, 4);
+  parts.push(Buffer.from([OP_END]));
+  const out = Buffer.concat(parts);
+  out.tiles = tiles;
+  return out;
+}
 
-  return Buffer.concat([head, ...parts]);
+function u16be(n) {
+  const b = Buffer.alloc(2);
+  b.writeUInt16BE(n);
+  return b;
 }
 
 /* ---------------------------------------------------------------- the PNG -- */
@@ -366,4 +429,84 @@ export function writePng(rgba, w, h) {
     chunk("IDAT", deflateSync(raw, { level: 6 })),
     chunk("IEND", Buffer.alloc(0)),
   ]);
+}
+
+/*
+ * PNG in, RGBA out.  Colour type 2 at 8 bits, which is what the capture
+ * side's decoder writes, and the four filters a PNG encoder actually uses.
+ *
+ * Here so the viewer can be checked against a picture produced by an
+ * implementation that shares no code with it: the .png files beside the real
+ * captures are ground truth, and a comparison against them is worth more
+ * than any number of round trips through my own encoder.
+ */
+export function readPng(buf) {
+  if (buf.length < 8 || buf.readUInt32BE(0) !== 0x89504e47) {
+    throw new Error("not a PNG");
+  }
+
+  let at = 8;
+  let w = 0, h = 0, bits = 0, type = 0;
+  const idat = [];
+
+  while (at + 8 <= buf.length) {
+    const len = buf.readUInt32BE(at);
+    const kind = buf.toString("latin1", at + 4, at + 8);
+    const body = buf.subarray(at + 8, at + 8 + len);
+    at += 12 + len;
+
+    if (kind === "IHDR") {
+      w = body.readUInt32BE(0);
+      h = body.readUInt32BE(4);
+      bits = body[8];
+      type = body[9];
+      if (bits !== 8 || type !== 2) {
+        throw new Error("PNG is " + bits + "-bit type " + type +
+                        ", this reads 8-bit truecolour only");
+      }
+      if (body[12] !== 0) throw new Error("an interlaced PNG");
+    } else if (kind === "IDAT") {
+      idat.push(body);
+    } else if (kind === "IEND") {
+      break;
+    }
+  }
+
+  const raw = inflateSync(Buffer.concat(idat));
+  const out = Buffer.alloc(w * h * 4);
+  const stride = w * 3;
+  let prev = Buffer.alloc(stride);
+
+  for (let y = 0; y < h; y++) {
+    const filter = raw[y * (stride + 1)];
+    const line = Buffer.from(raw.subarray(y * (stride + 1) + 1,
+                                          y * (stride + 1) + 1 + stride));
+
+    for (let i = 0; i < stride; i++) {
+      const a = i >= 3 ? line[i - 3] : 0;
+      const b = prev[i];
+      const c = i >= 3 ? prev[i - 3] : 0;
+      if (filter === 1) line[i] = (line[i] + a) & 0xff;
+      else if (filter === 2) line[i] = (line[i] + b) & 0xff;
+      else if (filter === 3) line[i] = (line[i] + ((a + b) >> 1)) & 0xff;
+      else if (filter === 4) line[i] = (line[i] + paeth(a, b, c)) & 0xff;
+      else if (filter !== 0) throw new Error("PNG filter " + filter);
+    }
+
+    for (let x = 0; x < w; x++) {
+      out[(y * w + x) * 4] = line[x * 3];
+      out[(y * w + x) * 4 + 1] = line[x * 3 + 1];
+      out[(y * w + x) * 4 + 2] = line[x * 3 + 2];
+      out[(y * w + x) * 4 + 3] = 255;
+    }
+    prev = line;
+  }
+
+  return { width: w, height: h, rgba: out };
+}
+
+function paeth(a, b, c) {
+  const p = a + b - c;
+  const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+  return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
 }
