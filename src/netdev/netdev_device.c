@@ -199,6 +199,7 @@ static ULONG nd_n_int;
 static ULONG nd_n_frame;
 
 ULONG netdev_time_copy;     /* dp8390.c adds its copy span here */
+ULONG netdev_time_rdc;      /* ne2000.c counts its DMA-completion spins */
 
 static VOID nd_time_report(VOID)
 {
@@ -210,6 +211,8 @@ static VOID nd_time_report(VOID)
     nd_tracex("t copy   ", nd_t_copy);
     nd_tracex("t up     ", nd_t_up);
     nd_tracex("t tx     ", nd_t_tx);
+    nd_tracex("t rdc    ", netdev_time_rdc);
+    netdev_time_rdc = 0;
     nd_t_isr = nd_t_copy = nd_t_up = nd_t_tx = 0;
     nd_n_int = nd_n_frame = 0;
 }
