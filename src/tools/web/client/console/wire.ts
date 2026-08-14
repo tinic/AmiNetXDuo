@@ -9,9 +9,13 @@
  * quarter-megabyte per frame.  Here the ArrayBuffer is handed over as it
  * arrived and the decoder reads it in place.
  *
- * The refused-versus-closed distinction IS shared, out of client/socket.ts:
- * both pages have a refusal a correct client can provoke and a browser
- * reports it identically to a network fault.
+ * The refused-versus-closed distinction below is client/wire.ts's, COPIED.
+ * It was briefly factored out into a module both pages imported, and that is
+ * the right end state -- but it regenerates shell.html, which is a committed,
+ * shipped artifact, and a prototype does not get to perturb one.  Eighteen
+ * lines of duplication is the cheaper side of that trade until this is a
+ * feature rather than an experiment; the extraction is then its own commit
+ * with the artifact regeneration as its visible point.
  *
  * ?ws= overrides the endpoint, and it is not a nicety: the player half of
  * this page is worth opening straight off the filesystem, and a file:// page
@@ -21,8 +25,6 @@
  *
  * SPDX-License-Identifier: MIT
  */
-
-import { watchSocket } from "../socket";
 
 export type WireState = "idle" | "connecting" | "open" | "closed" | "refused";
 
@@ -81,13 +83,29 @@ export class Wire {
     this.ws = ws;
     this.h.onState("connecting", url);
 
-    watchSocket(ws, {
-      onOpen: () => this.h.onState("open", url),
-      onGone: (state, detail) => {
-        this.ws = null;
-        this.h.onState(state, detail);
-      },
-    });
+    /*
+     * A socket that never opened is a DIFFERENT thing from one that closed,
+     * and the browser reports both as 1006 with no reason on it: the HTTP
+     * status behind a refused upgrade is not exposed to script at all.  So
+     * the two are told apart by whether onopen ever ran.
+     *
+     * Worth the four lines because the refusal a working client can provoke
+     * is "somebody else has the screen", and "closed (1006)" sends that
+     * person looking at the network.
+     */
+    let opened = false;
+
+    ws.onopen = () => { opened = true; this.h.onState("open", url); };
+
+    ws.onclose = (e: CloseEvent) => {
+      this.ws = null;
+      if (opened) this.h.onState("closed", e.reason || String(e.code));
+      else this.h.onState("refused", "");
+    };
+
+    /* onerror carries nothing a person can act on and is always followed by
+       onclose, which does.  Left to it. */
+    ws.onerror = () => { /* onclose says what happened */ };
 
     ws.onmessage = (e: MessageEvent) => {
       if (typeof e.data === "string") {
