@@ -53,6 +53,7 @@ tests/tools/run-cardsweep6.sh      : tools/ci.sh                    : every netw
 tests/tools/run-netshutdown.sh     : tools/ci.sh                    : NetShutdown, and what it does to the programs using the network
 tests/tools/run-tcphandler.sh      : tools/ci.sh                    : the TCP: handler, driven by Commodore's own Type and Copy
 tests/tcpstall/run-tcpstall.sh     : tools/ci.sh                    : a peer that stops answering; the stall must be readable and a deadline must be served
+tests/common/run-rt.sh             : .github/workflows/emulator.yml : the compiler runtime, both forms, on all five CPU classes
 tests/conformance/run-fsuae.sh     : .github/workflows/emulator.yml : the bsdsocktest conformance suite
 tests/ipv6/run-socket-fsuae.sh     : .github/workflows/emulator.yml : the AF_INET6 socket surface, RFC 3542
 tests/tls/run-tls13.sh             : .github/workflows/emulator.yml : a TLS 1.3 handshake, on both CPU arms
