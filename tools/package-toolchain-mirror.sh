@@ -100,26 +100,49 @@ echo "    -> $OUT"
 
 # ------------------------------------------------------------------- pack ----
 
-# The archive keeps the upstream layer's `opt/m68k-amigaos/` prefix so that
-# fetch-toolchain.sh extracts either source with one code path.  That means
-# renaming the top-level directory on the way in, and the two tars spell that
-# differently.
+# The archive carries the `opt/m68k-amigaos/` prefix, because that is the one
+# path fetch-toolchain.sh strips.
+#
+# PREFER NOT RENAMING.  tools/build-toolchain.sh already builds into
+# .../opt/m68k-amigaos, and a tree that is already in the right shape is
+# archived with no path rewriting at all.  Renaming is the fallback, for a tree
+# somewhere else, and it is the risky path: bsdtar's -s rewrites SYMLINK
+# TARGETS as well as member names by default, so a source directory named
+# `m68k-amigaos` would silently turn every `m68k-amigaos-*` symlink target into
+# `opt/m68k-amigaos-*` and ship a tarball of dangling links.  The `S` modifier
+# turns that off; GNU tar leaves symlink targets alone unless asked.
 SRC_PARENT=$(cd "$FROM/.." && pwd)
 SRC_BASE=$(basename "$FROM")
 
 TAR_FLAGS=(--uid 0 --gid 0 --uname root --gname root)
-if tar --version 2>/dev/null | head -1 | grep -qi bsdtar; then
-    TAR_FLAGS+=(--no-mac-metadata --no-xattrs -s "|^${SRC_BASE}|${PREFIX}|")
+IS_BSDTAR=0
+tar --version 2>/dev/null | head -1 | grep -qi bsdtar && IS_BSDTAR=1
+
+if [ "$SRC_PARENT/$SRC_BASE" = "${SRC_PARENT%/opt}/opt/m68k-amigaos" ]; then
+    TAR_MEMBER="$PREFIX"
+    TAR_ROOT=$(cd "$SRC_PARENT/.." && pwd)
+else
+    TAR_MEMBER="$SRC_BASE"
+    TAR_ROOT="$SRC_PARENT"
+    if [ "$IS_BSDTAR" = "1" ]; then
+        TAR_FLAGS+=(-s "|^${SRC_BASE}|${PREFIX}|S")
+    else
+        TAR_FLAGS+=(--transform "s|^${SRC_BASE}|${PREFIX}|")
+    fi
+fi
+
+if [ "$IS_BSDTAR" = "1" ]; then
+    TAR_FLAGS+=(--no-mac-metadata --no-xattrs)
 else
     # --sort=name buys GNU tar a stable member order; bsdtar has no equivalent.
-    TAR_FLAGS+=(--sort=name --transform "s|^${SRC_BASE}|${PREFIX}|")
+    TAR_FLAGS+=(--sort=name)
 fi
 
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"
 # Hard links matter here: 46 of the binaries are links to each other, and
 # storing them as copies would add ~100 MB of duplicates.
-COPYFILE_DISABLE=1 tar "${TAR_FLAGS[@]}" -cf - -C "$SRC_PARENT" "$SRC_BASE" \
+COPYFILE_DISABLE=1 tar "${TAR_FLAGS[@]}" -cf - -C "$TAR_ROOT" "$TAR_MEMBER" \
     | xz -9 -T0 -c > "$OUT"
 
 # ----------------------------------------------------------------- verify ----
@@ -134,6 +157,16 @@ tar xf "$OUT" -C "$VTMP"
 if ! diff -rq --no-dereference "$FROM" "$VTMP/$PREFIX" >/dev/null; then
     echo "!! the repackaged tree differs from the source tree" >&2
     diff -rq --no-dereference "$FROM" "$VTMP/$PREFIX" | head -20 >&2
+    exit 1
+fi
+
+# A dangling link is the one defect that survives every other check here: the
+# tarball has the right size, the right entry count and the right sha256, and
+# the compiler driver fails to find its own cc1 the first time anyone runs it.
+DANGLING=$(find "$VTMP/$PREFIX" -type l ! -exec test -e {} \; -print 2>/dev/null)
+if [ -n "$DANGLING" ]; then
+    echo "!! the packaged tree has dangling symlinks:" >&2
+    printf '%s\n' "$DANGLING" | head -20 >&2
     exit 1
 fi
 
