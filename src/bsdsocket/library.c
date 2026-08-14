@@ -22,7 +22,6 @@
 #include "aminetxduo/version.h"
 
 #include "net68k.h"          /* n68k_cpu_select() */
-#include "aminetxduo/compat.h"   /* ami_rt_cpu_select() */
 
 #include <stddef.h>
 
@@ -491,11 +490,13 @@ static struct AmiSocketBase *bsd_lib_init(
        call that picks; anywhere else it does nothing.  src/net68k/n68k_cpu.c. */
     n68k_cpu_select((ULONG)sysbase->AttnFlags);
 
-    /* And the compiler runtime: this binary is -m68000 code, so every 32-bit
-       multiply and divide GCC could not emit is a call into src/common, and
-       those five routines have a one-instruction form on anything from a
-       68020 up.  ami_udivdi3.c. */
-    ami_rt_cpu_select(((ULONG)sysbase->AttnFlags & AFF_68020) != 0UL);
+    /* NOT ami_rt_cpu_select() here, and the reason is worth writing down: this
+       library resolves __mulsi3 and its four siblings from newlib's libc.a,
+       not from src/common/ami_udivdi3.c, so there is nothing of ours to
+       switch.  It would also buy nothing -- no object on the data path
+       references them (checked with nm across the whole link) -- which is why
+       one binary costs this library 0.8% and costs tls.library and ssh much
+       more.  Those two do link ours and do call it. */
 
     /* A shared library gets no C startup: dos.library and the random number
        generator are ours to set up (library_runtime.c). */
