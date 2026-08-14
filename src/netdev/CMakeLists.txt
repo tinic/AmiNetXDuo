@@ -53,6 +53,11 @@ if(AMINETXDUO_NETDEV_LINK AND CMAKE_CROSSCOMPILING)
     # pulls the logging macros, and this image defines SysBase itself.
     target_link_options(anxnet_device PRIVATE -nostartfiles -Wl,--gc-sections)
 
+    # -O2 over the tree's -Os, the same trade AMINETXDUO_HOT_O2 makes for the
+    # eight profiled NetX Duo files: this is interrupt-path code and the
+    # receive service is the whole throughput figure.  Appended, so it wins.
+    target_compile_options(anxnet_device PRIVATE -O2)
+
     if(CMAKE_STRIP AND NOT AMINETXDUO_KEEP_SYMBOLS)
         add_custom_command(TARGET anxnet_device POST_BUILD
             COMMAND "${CMAKE_STRIP}" "$<TARGET_FILE:anxnet_device>"
