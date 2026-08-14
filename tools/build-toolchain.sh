@@ -77,8 +77,10 @@ fd2pragma|https://github.com/adtools/fd2pragma|8c0f352c348a3252f84170eab73791937
 vasm|https://github.com/mheyer32/vasm|bb048d9d3cf54d5e38c643182a0ff55b552f65be|master
 "
 
-# A mirror to try first where one exists, keyed by project name.  Only gcc has
-# one that was confirmed to serve the pinned object.
+# A second remote to try, keyed by project name.  Only gcc has one that was
+# confirmed to serve the pinned object.  Read by name construction below, which
+# is why shellcheck cannot see the use.
+# shellcheck disable=SC2034
 MIRROR_gcc="https://codeberg.org/bebbo/gcc"
 
 # NDK 3.9.  A single unmirrored third-party host, which is why the built
@@ -207,7 +209,7 @@ Darwin)
 Linux)
     # Nothing beyond the shared objdump.c switch: the system zlib and gmp/mpfr
     # are where configure looks, and rsync is GNU rsync.
-    for t in makeinfo; do need "$t"; done
+    need makeinfo
     command -v lha >/dev/null 2>&1 || command -v lhasa >/dev/null 2>&1 || {
         echo "!! need lha or lhasa to unpack the NDK" >&2; exit 2; }
     ;;

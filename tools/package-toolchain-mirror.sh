@@ -37,7 +37,6 @@
 
 set -euo pipefail
 
-ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 GCC_VERSION="16.2.0"
 PREFIX="opt/m68k-amigaos"
