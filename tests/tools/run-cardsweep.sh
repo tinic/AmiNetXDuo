@@ -32,7 +32,12 @@
 #
 # EVERY PER-CARD SETTING BELOW IS TRACEABLE
 #
-#   board -> driver           tools/sana2-stage.sh:25-37
+#   board -> driver           tools/sana2-stage.sh, sana2_select().  OUR
+#                             driver where it covers the card -- anxnet.device,
+#                             pinned with CARD= -- and the vendor driver
+#                             everywhere else.  AMINETXDUO_SANA2_VENDOR=1
+#                             forces the vendor driver for every card, which is
+#                             the A/B side of tests/tools/mcastjoin.c.
 #   where the driver lives    tools/sana2-stage.sh:43-48 (~/amiga-assets/devs)
 #   Zorro II boards           tools/amiberry-run.sh:230-233
 #   ne2000_pcmcia             pcmcia=true + inserted=true and so a Gayle
@@ -109,6 +114,11 @@ while getopts "P:B:b:t:c:p:l" opt; do
     esac
 done
 
+case "$BUILD" in
+    /*) BUILDDIR="$BUILD" ;;
+    *)  BUILDDIR="$ROOT/${BUILD#./}" ;;
+esac
+
 # ------------------------------------------------------------- the cards ----
 #
 # The table is tests/tools/cards.sh, shared with tests/tools/run-cardsweep6.sh.
@@ -127,11 +137,11 @@ card_rows() { cards_rows "$ONLY"; }
 if [ "$LIST" = 1 ]; then
     echo "cards this sweep boots:"
     card_rows | while read -r board model addr mac; do
-        drv=$(sana2_driver_for "$board")
-        have=$(sana2_local_driver "$drv")
-        printf '  card=%s board=%s model=%s driver=%s address=%s mac_tail=%s driver_present=%s\n' \
-               "$board" "$board" "$model" "$drv" "$addr" "$mac" \
-               "$( [ -n "$have" ] && echo yes || echo no)"
+        sana2_select "$board" "$BUILDDIR"
+        printf '  card=%s board=%s model=%s driver=%s driver_source=%s anxcard=%s address=%s mac_tail=%s driver_present=%s\n' \
+               "$board" "$board" "$model" "$SANA2_SEL_DRIVER" \
+               "$SANA2_SEL_SOURCE" "${SANA2_SEL_CARD:-none}" "$addr" "$mac" \
+               "$( [ -n "$SANA2_SEL_PATH" ] && echo yes || echo no)"
     done
     echo "drivers with no board to run them on:"
     printf '%s\n' "$UNTESTABLE" | while read -r drv reason; do
@@ -221,16 +231,24 @@ echo "==> peer $PEERHOST, bridge $IFACE, build $BUILD, ${TIMEOUT}s per card," \
 while read -r -u 3 board model addr mac; do
     [ -n "$board" ] || continue
 
-    drv=$(sana2_driver_for "$board")
-    drvpath=$(sana2_local_driver "$drv")
+    sana2_select "$board" "$BUILDDIR"
+    drv=$SANA2_SEL_DRIVER
+    drvpath=$SANA2_SEL_PATH
+    anxcard=$SANA2_SEL_CARD
 
     # A driver that is not on this machine is a SKIP with its own status, and
-    # it is decided here rather than by booting: tools/sana2-stage.sh:77-81
-    # warns and carries on, which would spend a boot and a timeout to report
-    # "the network would not start".
+    # it is decided here rather than by booting: tools/sana2-stage.sh warns and
+    # carries on, which would spend a boot and a timeout to report "the network
+    # would not start".
     if [ -z "$drvpath" ]; then
-        printf 'card=%s board=%s model=%s driver=%s status=skip_no_driver wall_s=0 reason="no %s in the driver store; set AMINETXDUO_SANA2_STORE"\n' \
-               "$board" "$board" "$model" "$drv" "$drv" | tee -a "$RESULTS"
+        if [ "$SANA2_SEL_SOURCE" = anxnet ]; then
+            reason="no anxnet.device in $BUILD; build the tree, or set AMINETXDUO_ANXNET"
+        else
+            reason="no $drv in the driver store; set AMINETXDUO_SANA2_STORE"
+        fi
+        printf 'card=%s board=%s model=%s driver=%s driver_source=%s anxcard=%s status=skip_no_driver wall_s=0 reason="%s"\n' \
+               "$board" "$board" "$model" "$drv" "$SANA2_SEL_SOURCE" \
+               "${anxcard:-none}" "$reason" | tee -a "$RESULTS"
         NSKIP=$((NSKIP + 1))
         continue
     fi
@@ -241,7 +259,7 @@ while read -r -u 3 board model addr mac; do
     IDX=$((IDX + 1))
 
     echo
-    echo "===================== $board ($drv, $model, $addr, ports $base+) ====================="
+    echo "===================== $board ($drv${anxcard:+ CARD=$anxcard}, $model, $addr, ports $base+) ====================="
 
     # < /dev/null is load-bearing.  run-iperf.sh starts its peers as
     # backgrounded ssh, and an ssh with a readable stdin reads it: given this
@@ -252,6 +270,9 @@ while read -r -u 3 board model addr mac; do
     env AMINETXDUO_RUN_TAG="$tag" \
         AMINETXDUO_AMIBERRY_MAC="02:41:4d:49:$mac" \
         AMINETXDUO_SANA2_DRIVER="$drvpath" \
+        AMINETXDUO_SANA2_DRIVER_NAME="$drv" \
+        AMINETXDUO_SANA2_DEVICE="$drv" \
+        AMINETXDUO_SANA2_CARD="$anxcard" \
         AMINETXDUO_IPERF_PORT_TCP="$((base + 1))" \
         AMINETXDUO_IPERF_PORT_UDP="$((base + 2))" \
         AMINETXDUO_IPERF_PORT_SIZE="$((base + 3))" \
@@ -352,8 +373,9 @@ while read -r -u 3 board model addr mac; do
         *)           NFAIL=$((NFAIL + 1)) ;;
     esac
 
-    printf 'card=%s board=%s model=%s driver=%s status=%s rc=%s iface_rc=%s tx_bytes=%s peer_rx_bytes=%s rx_bytes=%s peer_tx_bytes=%s udp_tx_bytes=%s peer_udp_rx_bytes=%s wall_s=%s log=%s%s\n' \
-           "$board" "$board" "$model" "$drv" "$status" "$rc" "${iface_rc:-none}" \
+    printf 'card=%s board=%s model=%s driver=%s driver_source=%s anxcard=%s status=%s rc=%s iface_rc=%s tx_bytes=%s peer_rx_bytes=%s rx_bytes=%s peer_tx_bytes=%s udp_tx_bytes=%s peer_udp_rx_bytes=%s wall_s=%s log=%s%s\n' \
+           "$board" "$board" "$model" "$drv" "$SANA2_SEL_SOURCE" \
+           "${anxcard:-none}" "$status" "$rc" "${iface_rc:-none}" \
            "$tx" "$peer_rx" "$rx" "$peer_tx" "$utx" "$peer_urx" "$wall" \
            "$LOGDIR/$board.log" "$why" | tee -a "$RESULTS"
 done 3<<EOF

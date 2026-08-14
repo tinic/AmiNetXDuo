@@ -326,6 +326,9 @@ struct AmiSana2If
     BOOL                device_open;
     char                device[AMI_CFG_PATH_LEN];
     ULONG               unit;
+    /* S2_AnxCardType points here, not at the caller's AmiIfConfig: the tag
+       list is an input to OpenDevice and outlives the open. */
+    char                card[AMI_CFG_NAME_LEN];
     struct TagItem      buffer_tags[8];
 
     /* Hardware facts from S2_DEVICEQUERY / S2_GETSTATIONADDRESS. */

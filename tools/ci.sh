@@ -155,7 +155,7 @@ HOST_TEST_TARGETS=(test_config test_usergroup test_mbuf test_bpf test_httppath t
                    test_tcp_retries test_bcast_loopback test_tcp_source_connect test_tcp_rtt test_tcp_earlyretx test_tcp_rxflood test_tick_conv
                    test_dns_retry test_dns_status
                    test_sockopt_numbers test_tls_expiry test_tls_resume test_sana2_copy test_sana2_tx test_sana2_rx test_sana2_driver test_ipv6_ra test_ipv6_ptb
-                   test_httpframe test_httpws test_tls_x509 test_ipv6_frag test_iperfwire test_netdev_mcaf
+                   test_httpframe test_httpws test_tls_x509 test_ipv6_frag test_iperfwire test_netdev_mcaf test_netdev_cards
                    fuzz_config fuzz_bpf fuzz_dns fuzz_usergroup
                    fuzz_dhcp dhcp_lease_regression fuzz_tls_record fuzz_tls_x509 fuzz_httpframe)
 
@@ -180,7 +180,7 @@ esac
 #
 # Adding a test therefore turns CI red until this is raised.  That is the
 # maintenance the gate is made of, and it is one line.
-HOST_TESTS_EXPECTED=60
+HOST_TESTS_EXPECTED=61
 case "$(uname -m)" in
     x86_64|amd64) ;;
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 1)) ;;   # no test_inet

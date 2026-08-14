@@ -52,7 +52,10 @@
 #
 #   The table is tests/tools/cards.sh, shared with run-cardsweep.sh so the two
 #   sweeps cannot disagree about what "every card" is.  Board to driver is
-#   tools/sana2-stage.sh, the same mapping the other sweep uses.  Each card
+#   tools/sana2-stage.sh's sana2_select(), the same choice the other sweep
+#   makes: anxnet.device, pinned with CARD=, for the boards it covers and the
+#   vendor driver for the rest, with AMINETXDUO_SANA2_VENDOR=1 forcing the
+#   vendor driver everywhere.  Each card
 #   gets its own AMINETXDUO_RUN_TAG, its own MAC and its own guest name,
 #   because tools/amiberry-run.sh:245-259 derives the drive, the serial log
 #   and the serial PORT from the tag.  Cards run in sequence under a lock, and
@@ -147,11 +150,11 @@ infra() { echo "error=$*"; echo "result=infra"; exit 2; }
 if [ "$LIST" = 1 ]; then
     echo "cards this sweep boots:"
     cards_rows "$ONLY" | while read -r board model _addr mac; do
-        drv=$(sana2_driver_for "$board")
-        have=$(sana2_local_driver "$drv")
-        printf '  card=%s model=%s driver=%s mac_tail=%s driver_present=%s\n' \
-               "$board" "$model" "$drv" "$mac" \
-               "$( [ -n "$have" ] && echo yes || echo no)"
+        sana2_select "$board" "$BUILDDIR"
+        printf '  card=%s model=%s driver=%s driver_source=%s anxcard=%s mac_tail=%s driver_present=%s\n' \
+               "$board" "$model" "$SANA2_SEL_DRIVER" "$SANA2_SEL_SOURCE" \
+               "${SANA2_SEL_CARD:-none}" "$mac" \
+               "$( [ -n "$SANA2_SEL_PATH" ] && echo yes || echo no)"
     done
     echo "drivers with no board to run them on:"
     printf '%s\n' "$UNTESTABLE" | while read -r drv reason; do
@@ -320,12 +323,20 @@ echo "==> bridge $IFACE, build $BUILD, ${TIMEOUT}s per card, ${SETTLE}s settle,"
 while read -r -u 3 board model _addr mac; do
     [ -n "$board" ] || continue
 
-    drv=$(sana2_driver_for "$board")
-    drvpath=$(sana2_local_driver "$drv")
+    sana2_select "$board" "$BUILDDIR"
+    drv=$SANA2_SEL_DRIVER
+    drvpath=$SANA2_SEL_PATH
+    anxcard=$SANA2_SEL_CARD
 
     if [ -z "$drvpath" ]; then
-        printf 'card=%s model=%s driver=%s status=skip_no_driver wall_s=0 reason="no %s in the driver store; set AMINETXDUO_SANA2_STORE"\n' \
-               "$board" "$model" "$drv" "$drv" | tee -a "$RESULTS"
+        if [ "$SANA2_SEL_SOURCE" = anxnet ]; then
+            reason="no anxnet.device in $BUILD; build the tree, or set AMINETXDUO_ANXNET"
+        else
+            reason="no $drv in the driver store; set AMINETXDUO_SANA2_STORE"
+        fi
+        printf 'card=%s model=%s driver=%s driver_source=%s anxcard=%s status=skip_no_driver wall_s=0 reason="%s"\n' \
+               "$board" "$model" "$drv" "$SANA2_SEL_SOURCE" \
+               "${anxcard:-none}" "$reason" | tee -a "$RESULTS"
         NSKIP=$((NSKIP + 1))
         continue
     fi
@@ -334,7 +345,7 @@ while read -r -u 3 board model _addr mac; do
     t0=$(date +%s)
 
     echo
-    echo "===================== $board ($drv, $model) ====================="
+    echo "===================== $board ($drv${anxcard:+ CARD=$anxcard}, $model) ====================="
 
     STAGE="$ROOT/build/cardsweep6-stage-$tag"
     rm -rf "$STAGE"
@@ -359,8 +370,11 @@ IFEOF
     printf 'hostname anx6-%s\n' "$board" > "$STAGE/devs/Internet/name_resolution"
 
     export AMINETXDUO_SANA2_DRIVER="$drvpath"
+    export AMINETXDUO_SANA2_DRIVER_NAME="$drv"
+    export AMINETXDUO_SANA2_DEVICE="$drv"
+    export AMINETXDUO_SANA2_CARD="$anxcard"
     sana2_stage "$board" "$STAGE/devs"
-    echo "==> $board: $SANA2_DRIVER, opened as '$SANA2_DEVICE'"
+    echo "==> $board: $SANA2_DRIVER, opened as '$SANA2_DEVICE'${SANA2_CARD:+, CARD=$SANA2_CARD}"
 
     # The commands, in order, and the order is load-bearing: the IPv4 control
     # first, then the two off-LAN arms, and the on-link probe LAST so it
@@ -463,8 +477,9 @@ IFEOF
         *)                       NFAIL=$((NFAIL + 1)) ;;
     esac
 
-    printf 'card=%s model=%s driver=%s status=%s rc=%s iface_rc=%s global6=%s ping6_offlan=%s tcp6_offlan=%s trace6_hops=%s ping6_onlink=%s ping4_offlan=%s wall_s=%s log=%s%s\n' \
-           "$board" "$model" "$drv" "$status" "$rc" "${iface_rc:-none}" \
+    printf 'card=%s model=%s driver=%s driver_source=%s anxcard=%s status=%s rc=%s iface_rc=%s global6=%s ping6_offlan=%s tcp6_offlan=%s trace6_hops=%s ping6_onlink=%s ping4_offlan=%s wall_s=%s log=%s%s\n' \
+           "$board" "$model" "$drv" "$SANA2_SEL_SOURCE" "${anxcard:-none}" \
+           "$status" "$rc" "${iface_rc:-none}" \
            "${global6:-none}" "$p6" "$tcp6" "$hops" "$onlink" "$v4" \
            "$wall" "$LOGDIR/$board.log" "$why" | tee -a "$RESULTS"
 done 3<<EOF

@@ -74,8 +74,22 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     target_compile_options(test_netdev_mcaf PRIVATE -Wall -Wextra)
 
+    # The card table needs no chip either, and it is the one file the config
+    # parser shares a fact with: the CARD= names.
+    add_executable(test_netdev_cards
+        test/test_netdev_cards.c
+        netdev_cards.c)
+
+    target_include_directories(test_netdev_cards PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_cards PRIVATE -Wall -Wextra)
+
     include(CTest)
     add_test(NAME netdev_mcaf COMMAND test_netdev_mcaf)
+    add_test(NAME netdev_cards COMMAND test_netdev_cards)
 endif()
 
 # Raw-serial tracing through the custom chips, for bring-up on an emulator

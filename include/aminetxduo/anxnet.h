@@ -37,4 +37,15 @@
 /* unit = (card index + 1) * ANXNET_UNIT_PIN + instance */
 #define ANXNET_UNIT_PIN         100
 
+/*
+ * Every name S2_AnxCardType accepts, in netdev_cards.c row order, so the Nth
+ * entry here is the card ANXNET_UNIT_PIN * (N + 1) names.
+ *
+ * Here and not only in the table because a config parser has to reject
+ * CARD=nonsense without linking the driver: src/config/config_parse.c reads
+ * this, src/netdev/test/test_netdev_cards.c fails if the two ever drift.
+ */
+#define ANXNET_CARD_NAMES \
+    { "xsurf100", "xsurf", "ariadne2", "hydra", "lanrover" }
+
 #endif /* AMINETXDUO_ANXNET_H */

@@ -106,6 +106,17 @@ typedef struct AmiIfConfig {
     char        id[AMI_CFG_NAME_LEN];        /* Roadshow ID=; free text          */
     char        device[AMI_CFG_PATH_LEN];    /* SANA-II device, e.g. "a2065.device" */
     ULONG       unit;
+
+    /*
+     * CARD. Which board the driver should bind to, by name, when one device
+     * file covers a family of them: anxnet.device is opened for every
+     * NE2000/DP8390 card, so UNIT alone only says "the Nth board in probe
+     * order". Empty means the driver decides from UNIT, which is right on a
+     * machine with one card. The name goes to the driver as S2_AnxCardType and
+     * a name the hardware does not match fails the open rather than binding to
+     * a different board.
+     */
+    char        card[AMI_CFG_NAME_LEN];
     AmiIpType   iptype;
     ULONG       address;                     /* host byte order; 0 if unset      */
     ULONG       netmask;

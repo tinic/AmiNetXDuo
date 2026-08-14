@@ -6,6 +6,7 @@
 
 #include "sana2_internal.h"
 
+#include "aminetxduo/anxnet.h"
 #include "aminetxduo/netstack.h"
 
 #include <exec/memory.h>
@@ -652,6 +653,7 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     }
 
     ami_str_copy(iface->device, cfg->device, (ULONG)sizeof(iface->device));
+    ami_str_copy(iface->card, cfg->card, (ULONG)sizeof(iface->card));
     iface->unit = cfg->unit;
 
     /*
@@ -694,6 +696,19 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     iface->buffer_tags[tag].ti_Data = (ULONG)ami_sana2_copy_from_buff;
     tag++;
 #endif
+    /*
+     * CARD=, when the file said one.  A driver that covers a family of boards
+     * cannot tell which one is wanted from UNIT alone, and anxnet.device fails
+     * the open when the name does not match what is in the machine rather than
+     * binding to the next board along.  Every other driver ignores an unknown
+     * tag, so this costs nothing on the ones that open a single card.
+     */
+    if (iface->card[0] != '\0')
+    {
+        iface->buffer_tags[tag].ti_Tag  = S2_AnxCardType;
+        iface->buffer_tags[tag].ti_Data = (ULONG)iface->card;
+        tag++;
+    }
     iface->buffer_tags[tag].ti_Tag  = TAG_DONE;
     iface->buffer_tags[tag].ti_Data = 0;
 

@@ -828,6 +828,64 @@ static void test_problem_reporter(void)
 }
 
 /*
+ * CARD=, which board the driver binds to when the device file covers a family
+ * of them. Names come from include/aminetxduo/anxnet.h; a name no card has
+ * refuses the interface rather than coming up on whatever UNIT points at.
+ */
+static void test_interface_card(void)
+{
+    AmiIfConfig iface;
+    char       *buf;
+
+    printf("interface: CARD\n");
+
+    buf = dup_text("device=anxnet.device\nunit=0\ncard=xsurf100\n"
+                   "address=192.168.1.10\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK_STR(iface.card, "xsurf100");
+    free(buf);
+
+    /* Case-insensitive like every other keyword's value that names a thing. */
+    buf = dup_text("device=anxnet.device\nCARD = Ariadne2\naddress=10.0.0.1\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK_STR(iface.card, "Ariadne2");
+    free(buf);
+
+    /* No CARD at all is the ordinary case and leaves the field empty. */
+    buf = dup_text("device=a2065.device\naddress=10.0.0.1\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.card[0] == '\0');
+    free(buf);
+
+    /* A name no card has, and an empty one, refuse the interface. */
+    buf = dup_text("device=anxnet.device\ncard=nonsense\naddress=10.0.0.1\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_ERR_SYNTAX);
+    free(buf);
+
+    buf = dup_text("device=anxnet.device\ncard=\naddress=10.0.0.1\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_ERR_SYNTAX);
+    free(buf);
+
+    /* And the report names the keyword, the value and the choices. */
+    seen_count = 0;
+    ami_config_set_reporter(collect, NULL);
+    buf = dup_text("device=anxnet.device\n"
+                   "card=xsurf1000\n"       /* line 2 */
+                   "address=10.0.0.1\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_ERR_SYNTAX);
+    free(buf);
+    ami_config_set_reporter(NULL, NULL);
+
+    CHECK(seen_count == 1);
+    CHECK(seen[0].line == 2);
+    CHECK(seen[0].severity == AMI_CFG_PROBLEM_ERROR);
+    CHECK(seen_mentions("CARD"));
+    CHECK(seen_mentions("xsurf1000"));
+    CHECK(seen_mentions("XSURF100"));
+    CHECK(seen_mentions("ARIADNE2"));
+}
+
+/*
  * The host-name chain: name_resolution, then DHCP option 12, then
  * ENV:HOSTNAME, then an interface file's ID=. Reported from real hardware: an
  * interface with ID=a1200 was written and the machine kept answering to
@@ -2053,6 +2111,7 @@ int main(int argc, char **argv)
     test_interface_amitcp_flavour();
     test_interface_errors();
     test_problem_reporter();
+    test_interface_card();
     test_hostname_syntax();
     test_hostname_precedence();
     test_hostname_from_hwaddr();
