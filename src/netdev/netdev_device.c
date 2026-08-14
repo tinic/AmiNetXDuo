@@ -195,11 +195,16 @@ static ULONG nd_t_isr;      /* ops->intr(), the whole chip service */
 static ULONG nd_t_copy;     /* the ring-to-rxbuf copy inside it */
 static ULONG nd_t_up;       /* handing frames to the openers */
 static ULONG nd_t_tx;       /* netdev_tx_pump() after the service */
+static ULONG nd_t_hook;     /* the stack's CopyToBuff, inside the hand-over */
 static ULONG nd_n_int;
 static ULONG nd_n_frame;
+static ULONG nd_n_hook;
 
 ULONG netdev_time_copy;     /* dp8390.c adds its copy span here */
 ULONG netdev_time_rdc;      /* ne2000.c counts its DMA-completion spins */
+ULONG netdev_time_null;     /* interrupts where ISR read zero: not ours */
+ULONG netdev_time_rx;       /* ISR passes with a receive bit set */
+ULONG netdev_time_tx;       /* ISR passes with a transmit bit set */
 
 static VOID nd_time_report(VOID)
 {
@@ -211,10 +216,16 @@ static VOID nd_time_report(VOID)
     nd_tracex("t copy   ", nd_t_copy);
     nd_tracex("t up     ", nd_t_up);
     nd_tracex("t tx     ", nd_t_tx);
+    nd_tracex("t hook   ", nd_t_hook);
+    nd_tracex("t nhook  ", nd_n_hook);
     nd_tracex("t rdc    ", netdev_time_rdc);
-    netdev_time_rdc = 0;
-    nd_t_isr = nd_t_copy = nd_t_up = nd_t_tx = 0;
-    nd_n_int = nd_n_frame = 0;
+    nd_tracex("t null   ", netdev_time_null);
+    nd_tracex("t irx    ", netdev_time_rx);
+    nd_tracex("t itx    ", netdev_time_tx);
+    netdev_time_rdc = netdev_time_null = 0;
+    netdev_time_rx = netdev_time_tx = 0;
+    nd_t_isr = nd_t_copy = nd_t_up = nd_t_tx = nd_t_hook = 0;
+    nd_n_int = nd_n_frame = nd_n_hook = 0;
 }
 #endif
 
@@ -321,8 +332,26 @@ static BOOL netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
         (UBYTE)((io->ios2_Req.io_Flags & ~(SANA2IOF_BCAST | SANA2IOF_MCAST)) |
                 flags);
 
+#ifdef NETDEV_TIME
+    {
+        ULONG th = nd_now();
+        BOOL  ok = netdev_copy_call(op->op_CopyTo, io->ios2_Data,
+                                    (APTR)payload, plen);
+
+        nd_t_hook += nd_since(th);
+        nd_n_hook++;
+        if (!ok)
+        {
+            netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
+            return FALSE;
+        }
+    }
+    if (0)
+    {
+#else
     if (!netdev_copy_call(op->op_CopyTo, io->ios2_Data, (APTR)payload, plen))
     {
+#endif
         netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
         return FALSE;
     }

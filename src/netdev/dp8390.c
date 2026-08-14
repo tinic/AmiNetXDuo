@@ -44,6 +44,9 @@
 
 #ifdef NETDEV_TIME
 extern ULONG netdev_time_copy;  /* netdev_device.c folds this into its report */
+extern ULONG netdev_time_null;
+extern ULONG netdev_time_rx;
+extern ULONG netdev_time_tx;
 #endif
 
 #define NIC_GET(nic, reg)       netdev_bus_r8(&(nic)->bus, (reg))
@@ -435,7 +438,19 @@ BOOL dp8390_intr(NetdevNic *nic)
 
     isr = NIC_GET(nic, ED_P0_ISR);
     if (isr == 0)
+    {
+#ifdef NETDEV_TIME
+        netdev_time_null++;
+#endif
         return FALSE;
+    }
+
+#ifdef NETDEV_TIME
+    if ((isr & (ED_ISR_PRX | ED_ISR_RXE | ED_ISR_OVW)) != 0)
+        netdev_time_rx++;
+    if ((isr & (ED_ISR_PTX | ED_ISR_TXE)) != 0)
+        netdev_time_tx++;
+#endif
 
     for (;;)
     {
