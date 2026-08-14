@@ -434,26 +434,34 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
      * WHICH ADDRESS THE COR IS AT is not something the CIS settles.  Attribute
      * memory is byte-per-word, so a card-space offset n is at 0xA00000 + 2n --
      * but CISTPL_CONFIG's TPCC_RADR is written by whoever authored the CIS,
-     * and it is not always in card space.  Amiberry's own NE2000 CIS is the
-     * case in point: it is READ through the doubling (pcmcia_attrs[addr / 2])
-     * and its COR is DECODED without it (addr == 0x3f8, gayle_attr_write).
+     * and card.resource's own CopyTuple() has already undone the doubling for
+     * the bytes it handed back, so what the tuple carries is an address in the
+     * Amiga's attribute window and not one to double again.
      *
-     * So the doubled address is tried first, because that is what the standard
-     * says, and the undoubled one only if the chip is still not there.  An
-     * unconfigured or absent card floats the bus and reads 0xff; a DP8390 in
-     * any state has bits clear in CR.  Nothing is written to the second
-     * address unless the first has already failed to bring a card up.
+     * cnet.device, which is the code that has been run against a hundred real
+     * cards, adds TPCC_RADR to $A00000 and writes there, and does nothing else
+     * (cnetdevice.asm:4705, 4718-4722).  That form goes first here.  Ours went
+     * the other way round -- doubled first -- which put a stray byte into
+     * attribute memory at an address some card is entitled to decode as one of
+     * its own registers before the validated write ever happened.
+     *
+     * The doubled address stays as a fallback only, and is reached only when
+     * the undoubled write has already failed to bring a chip up, so on a card
+     * that works it is never written at all.  An unconfigured or absent card
+     * floats the bus and reads 0xff; a DP8390 in any state has bits clear in
+     * CR, which is what pc_chip_answers() is deciding.
      */
-    attr = (volatile UBYTE *)(ULONG)(0x00a00000UL +
-                                     (cfg_base + PC_COR_OFF) * PC_ATTR_STRIDE);
+    attr = (volatile UBYTE *)(ULONG)(0x00a00000UL + cfg_base + PC_COR_OFF);
     *attr = (UBYTE)(index | PC_COR_LEVEL_IRQ);
+    pc_trace("pc: cor ", (ULONG)(APTR)attr);
 
     if (!pc_chip_answers(card))
     {
         attr = (volatile UBYTE *)(ULONG)(0x00a00000UL +
-                                         cfg_base + PC_COR_OFF);
+                                         (cfg_base + PC_COR_OFF) *
+                                         PC_ATTR_STRIDE);
         *attr = (UBYTE)(index | PC_COR_LEVEL_IRQ);
-        pc_trace("pc: cor undoubled ", (ULONG)(APTR)attr);
+        pc_trace("pc: cor doubled ", (ULONG)(APTR)attr);
 
         if (!pc_chip_answers(card))
         {
