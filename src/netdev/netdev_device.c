@@ -560,110 +560,128 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
  * server after a transmit completes, so it never touches anything the ISR
  * does not already own.
  */
+/*
+ * Frame one CMD_WRITE into nu_TxBuf.  Returns the wire length, or 0 with the
+ * request already answered.  No mask needed: everything here is host work,
+ * and the opener's CopyFrom is 135 us of the 219 us a transmit spends in the
+ * driver on an A3000.
+ */
+static UWORD netdev_tx_build(NetdevUnit *unit, struct IOSana2Req *io,
+                             NetdevOpener *op)
+{
+    UBYTE *buf = (UBYTE *)unit->nu_TxBuf;
+    ULONG  len = io->ios2_DataLength;
+    UWORD  total;
+
+    if (op->op_Raw || (io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0)
+    {
+        if (len < NETDEV_HDR_LEN || len > NETDEV_FRAME_MAX)
+        {
+            netdev_reply(io, S2ERR_MTU_EXCEEDED, S2WERR_GENERIC_ERROR);
+            return 0;
+        }
+        if (!netdev_copy_call(op->op_CopyFrom, buf, io->ios2_Data, len))
+        {
+            netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
+            return 0;
+        }
+        total = (UWORD)len;
+    }
+    else
+    {
+        /*
+         * The RAW arm above bounds its length and this one did not, so a
+         * CMD_WRITE with any ios2_DataLength at all copied that many bytes
+         * past nu_TxBuf -- past the whole unit, since the buffer is its last
+         * field.
+         */
+        if (len > NETDEV_MTU)
+        {
+            netdev_reply(io, S2ERR_MTU_EXCEEDED, S2WERR_GENERIC_ERROR);
+            return 0;
+        }
+
+        /* Aligned moves, as on the receive side: nu_TxBuf is ULONG[] and both
+           addresses sit at even offsets. */
+        nd_addr6(buf, io->ios2_DstAddr);
+        nd_addr6(buf + NETDEV_ADDR_LEN, unit->nu_Nic.mac);
+        *(UWORD *)(APTR)(buf + 12) = (UWORD)io->ios2_PacketType;
+
+        if (len != 0 &&
+            !netdev_copy_call(op->op_CopyFrom, buf + NETDEV_HDR_LEN,
+                              io->ios2_Data, len))
+        {
+            netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
+            return 0;
+        }
+        total = (UWORD)(len + NETDEV_HDR_LEN);
+    }
+
+    /*
+     * The chip pads a short frame to the Ethernet minimum out of whatever is
+     * in the buffer, so the padding has to be written.  Left out, the tail of
+     * the last frame -- up to 46 bytes of it -- goes on the wire behind every
+     * ARP.
+     */
+    if (total < NETDEV_FRAME_MIN)
+    {
+        nd_zero(buf + total, (ULONG)(NETDEV_FRAME_MIN - total));
+        total = NETDEV_FRAME_MIN;
+    }
+
+    return total;
+}
+
+/* The chip half, and the only half that needs the mask. */
+static LONG netdev_tx_issue(NetdevUnit *unit, struct IOSana2Req *io,
+                            NetdevOpener *op, UWORD total)
+{
+    NetdevTrack *tr;
+    LONG         rc;
+
+    rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, (UBYTE *)unit->nu_TxBuf, total);
+    if (rc != 0)
+        return rc;
+
+    unit->nu_Stats.PacketsSent++;
+    tr = netdev_track_find(op, io->ios2_PacketType);
+    if (tr != NULL)
+    {
+        tr->st.PacketsSent++;
+        tr->st.BytesSent += total;
+    }
+
+    return 0;
+}
+
+/*
+ * Drain the queue into whatever transmit buffers the chip has free.  Runs
+ * from the interrupt server after a transmit completes, and from BeginIO for
+ * anything that could not take the direct path.  The caller holds Disable().
+ *
+ * It stands off while a task-level build owns nu_TxBuf; the builder pumps
+ * again itself once its own frame is issued, so nothing is stranded.
+ */
 VOID netdev_tx_pump(NetdevUnit *unit)
 {
     while (unit->nu_Nic.txb_inuse < unit->nu_Nic.txb_cnt)
     {
         struct IOSana2Req *io;
         NetdevOpener      *op;
-        UBYTE             *buf = (UBYTE *)unit->nu_TxBuf;
-        ULONG              len;
         UWORD              total;
         LONG               rc;
-        NetdevTrack       *tr;
 
-        if (IsListEmpty(&unit->nu_Writes))
+        if (unit->nu_TxBuilding || IsListEmpty(&unit->nu_Writes))
             return;
 
         io = (struct IOSana2Req *)RemHead(&unit->nu_Writes);
         op = NETDEV_OPENER(io->ios2_Req.io_Unit);
-        len = io->ios2_DataLength;
 
-        if (op->op_Raw || (io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0)
-        {
-            if (len < NETDEV_HDR_LEN || len > NETDEV_FRAME_MAX)
-            {
-                netdev_reply(io, S2ERR_MTU_EXCEEDED, S2WERR_GENERIC_ERROR);
-                continue;
-            }
-            if (!netdev_copy_call(op->op_CopyFrom, buf, io->ios2_Data, len))
-            {
-                netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
-                continue;
-            }
-            total = (UWORD)len;
-        }
-        else
-        {
-            /*
-             * The RAW arm above bounds its length and this one did not, so a
-             * CMD_WRITE with any ios2_DataLength at all copied that many
-             * bytes past nu_TxBuf -- past the whole unit, in fact, since the
-             * buffer is its last field.  Found reading the transmit path for
-             * the ED core, which is the write_buf on the other end of it.
-             */
-            if (len > NETDEV_MTU)
-            {
-                netdev_reply(io, S2ERR_MTU_EXCEEDED, S2WERR_GENERIC_ERROR);
-                continue;
-            }
+        total = netdev_tx_build(unit, io, op);
+        if (total == 0)
+            continue;
 
-            /* Same aligned moves as the receive side: nu_TxBuf is ULONG[]
-               and both addresses sit at even offsets. */
-            nd_addr6(buf, io->ios2_DstAddr);
-            nd_addr6(buf + NETDEV_ADDR_LEN, unit->nu_Nic.mac);
-            *(UWORD *)(APTR)(buf + 12) = (UWORD)io->ios2_PacketType;
-
-#ifdef NETDEV_TIME
-            {
-                ULONG tb = nd_now();
-                BOOL  ok = (BOOL)(len == 0 ||
-                                  netdev_copy_call(op->op_CopyFrom,
-                                                   buf + NETDEV_HDR_LEN,
-                                                   io->ios2_Data, len));
-
-                nd_t_bld += nd_since(tb);
-                nd_n_tx++;
-                if (!ok)
-                {
-                    netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
-                    continue;
-                }
-            }
-#else
-            if (len != 0 &&
-                !netdev_copy_call(op->op_CopyFrom, buf + NETDEV_HDR_LEN,
-                                  io->ios2_Data, len))
-            {
-                netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
-                continue;
-            }
-#endif
-            total = (UWORD)(len + NETDEV_HDR_LEN);
-        }
-
-        /*
-         * The chip pads a short frame to the Ethernet minimum out of whatever
-         * is in the buffer, so the padding has to be written.  Left out, the
-         * tail of the last frame -- up to 46 bytes of it -- goes on the wire
-         * behind every ARP.
-         */
-        if (total < NETDEV_FRAME_MIN)
-        {
-            nd_zero(buf + total, (ULONG)(NETDEV_FRAME_MIN - total));
-            total = NETDEV_FRAME_MIN;
-        }
-
-#ifdef NETDEV_TIME
-        {
-            ULONG ti = nd_now();
-
-            rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, buf, total);
-            nd_t_iss += nd_since(ti);
-        }
-#else
-        rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, buf, total);
-#endif
+        rc = netdev_tx_issue(unit, io, op, total);
         if (rc == DP8390_TX_BUSY)
         {
             AddHead(&unit->nu_Writes, &io->ios2_Req.io_Message.mn_Node);
@@ -675,25 +693,71 @@ VOID netdev_tx_pump(NetdevUnit *unit)
             continue;
         }
 
-        unit->nu_Stats.PacketsSent++;
-        tr = netdev_track_find(op, io->ios2_PacketType);
-        if (tr != NULL)
-        {
-            tr->st.PacketsSent++;
-            tr->st.BytesSent += total;
-        }
-
-#ifdef NETDEV_TIME
-        {
-            ULONG tr2 = nd_now();
-
-            netdev_reply(io, 0, 0);
-            nd_t_rep += nd_since(tr2);
-        }
-#else
         netdev_reply(io, 0, 0);
-#endif
     }
+}
+
+/* netdev_cmds.c's cmd_queue, which is static there; the caller holds the
+   mask here, so this one does not take it. */
+static VOID nd_queue(struct List *list, struct IOSana2Req *io)
+{
+    io->ios2_Req.io_Flags &= (UBYTE)~IOF_QUICK;
+    io->ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+    AddTail(list, &io->ios2_Req.io_Message.mn_Node);
+}
+
+/*
+ * From BeginIO at task level.  The pump runs the opener's CopyFrom under
+ * Disable(), which the timing build prices at 135 us of the 219 us a transmit
+ * spends in the driver -- 46% of an A3000's frame interval with interrupts
+ * off, and on a write it is the acknowledgements that get held up.  So claim
+ * nu_TxBuf under the mask, frame outside it, and take the mask again only for
+ * the chip.
+ */
+VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
+{
+    NetdevOpener *op = NETDEV_OPENER(io->ios2_Req.io_Unit);
+    UWORD         total;
+    LONG          rc;
+
+    Disable();
+    if (unit->nu_TxBuilding || !IsListEmpty(&unit->nu_Writes) ||
+        !unit->nu_Nic.running ||
+        unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt)
+    {
+        nd_queue(&unit->nu_Writes, io);
+        netdev_tx_pump(unit);
+        Enable();
+        return;
+    }
+    unit->nu_TxBuilding = 1;
+    Enable();
+
+    total = netdev_tx_build(unit, io, op);
+
+    Disable();
+    unit->nu_TxBuilding = 0;
+    if (total == 0)
+    {
+        netdev_tx_pump(unit);       /* the build failed and answered io */
+        Enable();
+        return;
+    }
+
+    rc = netdev_tx_issue(unit, io, op, total);
+    if (rc == DP8390_TX_BUSY)
+    {
+        AddHead(&unit->nu_Writes, &io->ios2_Req.io_Message.mn_Node);
+        Enable();
+        return;
+    }
+    netdev_tx_pump(unit);           /* anything queued while we built */
+    Enable();
+
+    if (rc != 0)
+        netdev_reply(io, S2ERR_TX_FAILURE, S2WERR_GENERIC_ERROR);
+    else
+        netdev_reply(io, 0, 0);
 }
 
 /* ------------------------------------------------------------- the filter -- */
