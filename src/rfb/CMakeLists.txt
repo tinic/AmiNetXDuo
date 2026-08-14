@@ -12,7 +12,7 @@
 #   cc -std=c99 -O2 -Wall -Wextra src/rfb/host/rfbgen.c -o rfbgen
 #   rfbgen <dir> && rfbbench <dir>/*.pfs
 
-add_library(aminetxduo_rfb STATIC rfb_encode.c)
+add_library(aminetxduo_rfb STATIC rfb_encode.c rfb_words.c)
 
 target_include_directories(aminetxduo_rfb
     PUBLIC  ${AMINETXDUO_CORE_INCLUDES}
@@ -43,6 +43,17 @@ if(NOT CMAKE_CROSSCOMPILING)
         target_compile_definitions(rfbbench PRIVATE RFBBENCH_ZLIB)
         target_link_libraries(rfbbench PRIVATE ZLIB::ZLIB)
     endif()
+
+    # The control words against the spellings the browser reads.  Host-side
+    # for the reason rfb_words.c is its own file: the words are what the two
+    # ends have to agree on, and they can be checked with no Amiga in the room.
+    add_executable(rfbwords host/rfbwords.c rfb_words.c)
+    target_include_directories(rfbwords PRIVATE "${CMAKE_SOURCE_DIR}/include")
+    target_compile_options(rfbwords PRIVATE -Wall -Wextra)
+    set_target_properties(rfbwords PROPERTIES C_STANDARD 99)
+
+    include(CTest)
+    add_test(NAME rfb_words COMMAND rfbwords)
 
     # rfbbench decodes every frame it encodes and compares it with the frame
     # that went in, for every strategy, and exits non-zero on a mismatch.  A

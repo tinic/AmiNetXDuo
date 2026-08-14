@@ -336,11 +336,20 @@ endif()
 # iperfcore.c and iperfwire.c are the same measurement the `iperf` command
 # runs, driven from httpd's own loop a slice at a time so that a user with a
 # browser and no Shell can produce a figure.  See the iperf block in httpd.c.
+# httpfb.c is the console: the Workbench screen down a WebSocket, behind -C.
+# AmigaOS through and through -- LockPubScreen, LockLayers, GetRGB32 -- and so
+# is tested on the guest, exactly as httpterm.c is.  What it is NOT is the
+# frame encoder: that is src/rfb, portable C99 with no Amiga header in it, and
+# it is linked here rather than restated so that the bytes this server puts on
+# the wire are the bytes the host bench round-trips.
 aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httppath.c httpif.c
                                           httpframe.c httplock.c httpws.c
-                                          httpsha1.c httpterm.c toolsock.c
+                                          httpsha1.c httpterm.c httpfb.c
+                                          toolsock.c
                                           iperfcore.c iperfwire.c
                                           "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha1.c")
+
+target_link_libraries(tool_httpd PRIVATE aminetxduo_rfb)
 
 # httpd's terminal page, beside the binary that serves it.
 #
