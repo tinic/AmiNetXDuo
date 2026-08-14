@@ -418,6 +418,19 @@ VOID netdev_tx_pump(NetdevUnit *unit)
         }
         else
         {
+            /*
+             * The RAW arm above bounds its length and this one did not, so a
+             * CMD_WRITE with any ios2_DataLength at all copied that many
+             * bytes past nu_TxBuf -- past the whole unit, in fact, since the
+             * buffer is its last field.  Found reading the transmit path for
+             * the ED core, which is the write_buf on the other end of it.
+             */
+            if (len > NETDEV_MTU)
+            {
+                netdev_reply(io, S2ERR_MTU_EXCEEDED, S2WERR_GENERIC_ERROR);
+                continue;
+            }
+
             nd_bytes(buf, io->ios2_DstAddr, NETDEV_ADDR_LEN);
             nd_bytes(buf + NETDEV_ADDR_LEN, unit->nu_Nic.mac, NETDEV_ADDR_LEN);
             buf[12] = (UBYTE)(io->ios2_PacketType >> 8);
@@ -726,22 +739,24 @@ static VOID netdev_probe(NetdevDevice *dev)
      * FindConfigDev(NULL, -1, -1) walks the board list in the order Expansion
      * built it, which is autoconfig order, which is slot order.  That is what
      * makes unit N the same board on the next boot.
+     *
+     * WHAT MOVED WHEN THE ED CORE LANDED.  Hydra and the ASDG LAN Rover used
+     * to be recognised and skipped, so on a machine holding one of them plus
+     * an NE2000 board the NE2000 board was unit 0.  It is now unit 1 if the
+     * ED board autoconfigures first.  The pinned numbers did not move and
+     * that was the point of adding the two card rows before the core: a pin
+     * is (index + 1) * 100 + instance over netdev_cards[], hydra has been
+     * index 3 -> 400 and lanrover index 4 -> 500 since the table was written,
+     * so anything that pinned a card by number or by S2_AnxCardType is
+     * unaffected.  Only bare positional units shift, and only on a machine
+     * that has one of these two boards -- where they previously did not work
+     * at all.
      */
     while ((cd = FindConfigDev(cd, -1, -1)) != NULL)
     {
         const NetdevCard *card = NULL;
         NetdevUnit       *unit;
         UWORD             i;
-
-        /* A board past the table is dropped, and a silent drop is the
-           failure this driver exists to stop making: the card is fitted,
-           nothing opens it, and nothing says why.  Count it so
-           S2_GETSPECIALSTATS can be asked. */
-        if (dev->nd_UnitCount >= NETDEV_MAX_UNITS)
-        {
-            dev->nd_UnitsDropped++;
-            continue;
-        }
 
         for (i = 0; i < netdev_card_count; i++)
         {
@@ -755,6 +770,18 @@ static VOID netdev_probe(NetdevDevice *dev)
 
         if (card == NULL)
             continue;
+
+        /* A supported board past the table is dropped, and a silent drop is
+           the failure this driver exists to stop making: the card is fitted,
+           nothing opens it, and nothing says why.  Count it so
+           S2_GETSPECIALSTATS can be asked.  AFTER the match, not before: the
+           count is boards this driver could have driven, and a RAM board
+           walked past once the slots were full is not one of them. */
+        if (dev->nd_UnitCount >= NETDEV_MAX_UNITS)
+        {
+            dev->nd_UnitsDropped++;
+            continue;
+        }
 
         unit = &dev->nd_Units[dev->nd_UnitCount];
         nd_zero((UBYTE *)unit, sizeof(*unit));

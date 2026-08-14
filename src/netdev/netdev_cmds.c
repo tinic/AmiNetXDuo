@@ -229,6 +229,8 @@ static const char netdev_stat_rst[]   = "Chip resets";
 static const char netdev_stat_mc[]    = "Multicast addresses";
 static const char netdev_stat_mcful[] = "Multicast joins refused";
 static const char netdev_stat_coll[]  = "Collisions";
+static const char netdev_stat_wedge[] = "Transmitter watchdog resets";
+static const char netdev_stat_drop[]  = "Supported boards with no unit";
 
 static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
 {
@@ -277,6 +279,16 @@ static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
     STAT(netdev_stat_mc,    mc);
     STAT(netdev_stat_mcful, unit->nu_McastFull);
     STAT(netdev_stat_coll,  unit->nu_Nic.collisions);
+
+    /*
+     * Both of these were counted and read by nothing, which is the same
+     * as not counting them and worse, because the code that increments
+     * them reads as a reported number.  The watchdog one especially: a
+     * transmitter that wedges twice a minute and is quietly reset looks
+     * exactly like one that never wedges.
+     */
+    STAT(netdev_stat_wedge, unit->nu_TxWedges);
+    STAT(netdev_stat_drop,  unit->nu_Dev->nd_UnitsDropped);
 
 #undef STAT
 

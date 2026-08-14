@@ -21,6 +21,7 @@
  */
 
 #include "netdev_cards.h"
+#include "netdev_nic.h"
 
 /*
  * Not a row yet: the PCMCIA NE2000 is at a fixed 0xA20300 (second bank
@@ -50,6 +51,22 @@ const NetdevCard netdev_cards[] =
 
 const UWORD netdev_card_count =
     (UWORD)(sizeof(netdev_cards) / sizeof(netdev_cards[0]));
+
+/*
+ * Chip family -> core.  Here rather than in either core, because a core that
+ * names the other one is a core that cannot be built without it.  NULL for a
+ * family with no core: the board is then recognised and skipped instead of
+ * enumerated and then failing to open, and netdev_probe() counts the skip.
+ */
+const struct NetdevNicOps *netdev_nic_ops_for(UBYTE chip)
+{
+    if (chip == NETDEV_CHIP_NE2000)
+        return &netdev_nic_ne2000;
+    if (chip == NETDEV_CHIP_ED)
+        return &netdev_nic_ed;
+
+    return NULL;
+}
 
 static int card_streq(const char *a, const char *b)
 {

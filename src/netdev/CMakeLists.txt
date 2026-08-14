@@ -19,7 +19,8 @@ set(NETDEV_SOURCES
     netdev_cards.c      # the card table
     netdev_mcaf.c       # the multicast hash, host-testable
     dp8390.c            # NetBSD chip core
-    ne2000.c)           # NetBSD remote-DMA glue
+    ne2000.c            # NetBSD remote-DMA glue
+    ed.c)               # NetBSD mapped-buffer glue: Hydra, ASDG LAN Rover
 
 if(AMINETXDUO_NETDEV_LINK AND CMAKE_CROSSCOMPILING)
     add_executable(anxnet_device ${NETDEV_SOURCES})
@@ -76,6 +77,22 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     include(CTest)
     add_test(NAME netdev_mcaf COMMAND test_netdev_mcaf)
+
+    # ed.c is #included by the test, not listed here: read_hdr, ring_copy and
+    # write_buf are static and the test would otherwise be changing the code
+    # it tests.  netdev_bus.c is linked because attach reaches the registers
+    # through it, which is the only part of the probe a host can drive.
+    add_executable(test_netdev_ed
+        test/test_netdev_ed.c
+        netdev_bus.c)
+
+    target_include_directories(test_netdev_ed PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_ed PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_ed COMMAND test_netdev_ed)
 endif()
 
 # Raw-serial tracing through the custom chips, for bring-up on an emulator

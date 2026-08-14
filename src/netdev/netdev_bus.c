@@ -12,6 +12,12 @@
 
 #include "netdev_bus.h"
 
+/*
+ * unsigned long, not ULONG: identical on the 68000 and 32 bits too narrow for
+ * a pointer on the 64-bit host that builds this file for src/netdev/test.
+ */
+#define BUS_ALIGN(p, n) (((unsigned long)(const void *)(p)) & (unsigned long)(n))
+
 static UBYTE bus_r8(const NetdevBus *bus, UWORD reg)
 {
     return bus->nic[reg * bus->stride];
@@ -104,7 +110,7 @@ static VOID bus_wdata_long(const NetdevBus *bus, const UBYTE *src, UWORD len)
 static BOOL bus_long_ok(const NetdevBus *bus, const void *p, UWORD len)
 {
     return (BOOL)(bus->dmode == NETDEV_DMODE_LONG && bus->wide != NULL &&
-                  ((ULONG)p & 3u) == 0 && len >= 4);
+                  BUS_ALIGN(p, 3) == 0 && len >= 4);
 }
 
 static VOID bus_rdata(const NetdevBus *bus, UBYTE *dst, UWORD len)
@@ -127,7 +133,7 @@ static VOID bus_rdata(const NetdevBus *bus, UBYTE *dst, UWORD len)
      * words and reading it a byte at a time would lose half of every one -- so
      * the word is read and split.
      */
-    if (bus->dmode == NETDEV_DMODE_BYTE || ((ULONG)dst & 1u) != 0)
+    if (bus->dmode == NETDEV_DMODE_BYTE || BUS_ALIGN(dst, 1) != 0)
     {
         if (bus->dmode == NETDEV_DMODE_BYTE)
         {
@@ -176,7 +182,7 @@ static VOID bus_wdata(const NetdevBus *bus, const UBYTE *src, UWORD len)
     port = (volatile UWORD *)bus->asic;
 
     /* Same reason as the read side: an odd source cannot be read as words. */
-    if (bus->dmode == NETDEV_DMODE_BYTE || ((ULONG)src & 1u) != 0)
+    if (bus->dmode == NETDEV_DMODE_BYTE || BUS_ALIGN(src, 1) != 0)
     {
         if (bus->dmode == NETDEV_DMODE_BYTE)
         {

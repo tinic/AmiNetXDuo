@@ -16,9 +16,10 @@
 #include <exec/types.h>
 
 /*
- * Chip family.  The value picks the ops table in netdev_nic.c, so a LANCE
- * (A2065, Ariadne I) is a new value here and a new ops table beside the two
- * that exist -- not a change to the shell or to any card row.
+ * Chip family.  The value picks the ops table in netdev_nic_ops_for(), at the
+ * foot of netdev_cards.c, so a LANCE (A2065, Ariadne I) is a new value here
+ * and a new ops table beside the two that exist -- not a change to the shell
+ * or to any card row.
  */
 #define NETDEV_CHIP_NE2000  0   /* DP8390 clone with an ASIC remote-DMA port */
 #define NETDEV_CHIP_ED      1   /* DP8390 with a memory-mapped packet buffer */
