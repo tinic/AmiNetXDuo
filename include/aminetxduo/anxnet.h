@@ -46,6 +46,6 @@
  * this, src/netdev/test/test_netdev_cards.c fails if the two ever drift.
  */
 #define ANXNET_CARD_NAMES \
-    { "xsurf100", "xsurf", "ariadne2", "hydra", "lanrover" }
+    { "xsurf100", "xsurf", "ariadne2", "hydra", "lanrover", "pcmcia" }
 
 #endif /* AMINETXDUO_ANXNET_H */
