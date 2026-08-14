@@ -70,6 +70,10 @@ WBGRAB="$BUILD/src/tools/wbgrab"
 # A Kickstart must match the model: the A1200 40.68 image does not boot an
 # A600 and the machine then never reaches a Shell, which reads as a crash in
 # the thing under test.  Same rule and same variables as tools/amiberry-run.sh.
+#
+# So must the wbgrab in -b BUILDDIR.  It is copied, not rebuilt, so an A500 or
+# an A600 wants a tree configured -DAMINETXDUO_CPU=68000; a 68020 binary takes
+# an illegal instruction before it reaches the screen.
 model_var=$(printf '%s' "$MODEL" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_')
 model_var=${model_var%_}
 eval "KICKSTART=\${AMINETXDUO_KICKSTART_$model_var:-}"
