@@ -32,6 +32,7 @@
 #include "tapdev.h"
 
 #include <exec/types.h>
+#include <dos/dos.h>
 #include <exec/devices.h>
 #include <exec/errors.h>
 #include <exec/io.h>

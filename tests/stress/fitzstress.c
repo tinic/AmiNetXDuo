@@ -76,6 +76,7 @@
 #include <dos/dosextens.h>
 #include <dos/dostags.h>
 #include <proto/exec.h>
+#include <inline/macros.h>
 #include <proto/dos.h>
 
 static const char version_tag[] __attribute__((used)) =
