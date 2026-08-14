@@ -132,10 +132,9 @@ unset(_amiga_dos_inline)
 
 # ------------------------------------------------------------- target CPU ---
 #
-# -DAMINETXDUO_CPU=68000|68020|68040|68060.  The default is 68020 because that
-# is what §9 chose and what everything has been measured on, NOT because the
-# others do not work, see docs/RESEARCH.md §45, which is where the four
-# entries below come from.
+# -DAMINETXDUO_CPU=any|68000|68020|68040|68060.  `any` is the default and is
+# what ships; the four CPU values build for one part and exist to measure
+# against.  docs/RESEARCH.md §45 is where the four entries below come from.
 #
 # THE FLAGS ARE NOT THE OBVIOUS ONES, because this toolchain ships exactly
 # three multilibs, `.` (68000), `libm020` (@mcpu=68020) and `libm060`
@@ -171,7 +170,13 @@ unset(_amiga_dos_inline)
 # The rest is instruction selection spread over the C, and none of it is the
 # 32-bit multiply and divide helpers, which no data-path object references
 # (src/net68k/n68k_cpu.c).
-set(AMINETXDUO_CPU "68020" CACHE STRING "Target CPU: 68000, 68020, 68040, 68060 or any")
+# THE DEFAULT IS `any`, and the per-CPU values are measurement configurations
+# now rather than shipping ones.  The archive has no CPU in it: one build of
+# every library, device and command, choosing its own inner loops at init.  Keep
+# the specific values -- every figure in this file and in src/net68k was taken
+# by building one of them and comparing back to back, and that is the only way
+# to take the next one.
+set(AMINETXDUO_CPU "any" CACHE STRING "Target CPU: any (every 68k), or 68000, 68020, 68040, 68060 for a measurement build")
 set_property(CACHE AMINETXDUO_CPU PROPERTY STRINGS 68000 68020 68040 68060 any)
 
 set(_amiga_cpu_flags_68000 "-m68000")

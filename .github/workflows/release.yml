@@ -133,52 +133,42 @@ jobs:
       # store.  make-dist.sh refuses to pack a missing or host-scavenged store,
       # so a release cannot silently ship one that trusts nothing.
       #
-      # THREE BUILDS, because the archive carries three libraries and the
-      # installer picks between them at install time.  The directory names are
-      # what make-dist.sh derives from -b, so they are not free-form.
-      # AMINETXDUO_CPU=68000 turns TLS off by itself (docs/RESEARCH.md §45) and
-      # is not overridden here.
+      # TWO BUILDS, because the archive carries two libraries: the one every
+      # 68k runs, and `minimal` for a measured 1 MB machine.  It was four, one
+      # per CPU, and the CPU is gone from the archive entirely -- each library,
+      # device and command is built -m68000 and picks its own inner loops from
+      # AttnFlags at init.  The directory names are what make-dist.sh derives
+      # from -b, so they are not free-form.
       - name: Build the shipping configuration
         run: |
-          for cpu in 68020 68000 68060; do
-              case "$cpu" in
-                  68020) dir=build/release ;;
-                  *)     dir=build/release-$cpu ;;
-              esac
-              cmake -S . -B "$dir" \
-                    -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
-                    -DCMAKE_BUILD_TYPE=Release \
-                    -DAMINETXDUO_CPU=$cpu
-              cmake --build "$dir" --parallel
-          done
+          cmake -S . -B build/release \
+                -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
+                -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/release --parallel
 
-          # The fourth drawer: a 68000 with everything optional compiled out,
-          # for somebody who has measured their machine and wants the memory
-          # back.  It used to be stripped by hand here, and was the only drawer
-          # that was; the build strips every binary now.
-          cmake -S . -B build/release-68000-minimal \
+          # The second drawer: everything optional compiled out, for somebody
+          # who has measured their machine and wants the memory back.
+          cmake -S . -B build/release-minimal \
                 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
                 -DCMAKE_BUILD_TYPE=Release \
-                -DAMINETXDUO_CPU=68000 \
                 -DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF \
                 -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF \
                 -DAMINETXDUO_MULTICAST=OFF
-          cmake --build build/release-68000-minimal --parallel
+          cmake --build build/release-minimal --parallel
 
       # ssh comes from clients/, not the CMake tree, so a `cmake --build` does
       # not produce it and make-dist.sh would quietly ship an archive without
       # it. Built here so a release always carries it; dbclient defaults to the
       # 25519 rewritten for this machine.
-      # Once per processor drawer.  The three are not interchangeable: a 68020
-      # binary takes an illegal instruction on a 68000, and the 68060 dropped
-      # instructions the 68020 build uses, so the installer picks by CPU.
-      # The 68000 build is slower and ships anyway -- the archive carries one
-      # per processor and nothing is withheld for being slow.
+      # ONCE.  It used to be three times, one per processor drawer, because a
+      # 68020 binary takes an illegal instruction on a 68000 and the 68060
+      # dropped instructions the 68020 build uses.  AMINETXDUO_CLIENT_ANY=1
+      # builds one that carries both X25519 field multiplies and picks at the
+      # first handshake (clients/dropbear/amiga_25519.c).
       - name: Build the ported clients
         run: |
-          AMIGA_CLIENT_ARCH=-m68000    clients/dropbear/build.sh -b build/ssh00
-          AMIGA_CLIENT_ARCH=-m68020    clients/dropbear/build.sh -b build/ssh20
-          AMIGA_CLIENT_ARCH=-mcpu=68060 clients/dropbear/build.sh -b build/ssh60
+          AMINETXDUO_CLIENT_ANY=1 AMIGA_CLIENT_ARCH=-m68000 \
+              clients/dropbear/build.sh -b build/ssh
 
       # An archiver that can CREATE.  Lhasa, which is what "lha" usually is on
       # a Linux box, only extracts, and make-dist.sh then falls back to
@@ -193,9 +183,7 @@ jobs:
       # binary cannot be a stale tree.
       - name: Build the distribution archive
         env:
-          AMINETXDUO_SSH_68000: build/ssh00/dbclient
-          AMINETXDUO_SSH_68020: build/ssh20/dbclient
-          AMINETXDUO_SSH_68060: build/ssh60/dbclient
+          AMINETXDUO_SSH: build/ssh/dbclient
         run: dist/make-dist.sh -b build/release
 
       # A release that silently lost ssh or the bundled Installer would look
@@ -205,38 +193,35 @@ jobs:
       # the wrong directory and said so in a note nobody read.
       - name: ssh, the Installer and the manual really are in the archive
         run: |
-          # ssh.000 is in this list because it was not, and its absence is
-          # silent at every step: dist/make-dist.sh's SSH_BUILD loop skips a
-          # binary that is not executable rather than failing, and
-          # install/Install-AmiNetXDuo:1153 copies it only `(if (exists ...))`,
-          # so a 68000 machine would install with no C:ssh and no message.
-          # The installer resolves 68000 to ssh.000 at :1148; all three names
-          # it can ask for are checked here.
-          for f in C/ssh.000 C/ssh.020 C/ssh.060 Installer \
+          # ssh is in this list because a per-CPU one was not, once, and its
+          # absence is silent at every step: make-dist.sh skips a binary that is
+          # not executable rather than failing, and the installer copies it only
+          # `(if (exists ...))`, so a machine could install with no C:ssh and no
+          # message.  There is one name now and this is where it is checked.
+          for f in C/ssh Installer \
                    Docs/AmiNetXDuo.guide Docs/AmiNetXDuo.guide.info; do
               [ -f "build/dist/AmiNetXDuo/$f" ] || {
                   echo "::error::$f is missing from the archive"; exit 1; }
           done
-          # And no unsuffixed ssh: that name is what the installer WRITES, from
-          # whichever of the pair matches the machine.  One in the archive would
-          # be copied to every machine by the wholesale C: copy, which is how a
-          # 68020 binary reached a 68000 before.
-          [ ! -e "build/dist/AmiNetXDuo/C/ssh" ] || {
-              echo "::error::C/ssh is back; only ssh.020 and ssh.060 belong here"
-              exit 1; }
-          ls -l build/dist/AmiNetXDuo/C/ssh.* build/dist/AmiNetXDuo/Installer
+          ls -l build/dist/AmiNetXDuo/C/ssh build/dist/AmiNetXDuo/Installer
           ls -l build/dist/AmiNetXDuo/Docs/
 
-      # And so would a release that lost a CPU drawer -- right up until
-      # somebody with that machine ran the installer and it aborted.  The
-      # installer resolves 68000/68010, 68020/68030/68040 and 68060 to exactly
-      # these three names.
-      - name: All three CPU builds really are in the archive
+      # The two libraries the archive carries.  There used to be four, one per
+      # CPU, and a release that lost one looked fine right up until somebody
+      # with that machine ran the installer and it aborted.  Now there is
+      # nothing to resolve: Libs/ is what every machine gets and Libs/minimal/
+      # is what somebody asks for.
+      - name: Both libraries really are in the archive
         run: |
-          for cpu in 68000 68000-minimal 68020-40 68060; do
-              [ -f "build/dist/AmiNetXDuo/Libs/$cpu/bsdsocket.library" ] || {
-                  echo "::error::Libs/$cpu/bsdsocket.library is missing"; exit 1; }
+          for f in Libs/bsdsocket.library Libs/tls.library \
+                   Libs/minimal/bsdsocket.library; do
+              [ -f "build/dist/AmiNetXDuo/$f" ] || {
+                  echo "::error::$f is missing"; exit 1; }
           done
+          # minimal is built with -DAMINETXDUO_TLS=OFF, so it must NOT have one.
+          [ ! -e "build/dist/AmiNetXDuo/Libs/minimal/tls.library" ] || {
+              echo "::error::Libs/minimal has a tls.library; that build has TLS off"
+              exit 1; }
           ls -lR build/dist/AmiNetXDuo/Libs/
 
       - name: Describe what is in it
