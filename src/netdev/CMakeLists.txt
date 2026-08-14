@@ -130,6 +130,13 @@ endif()
 
 # Raw-serial tracing through the custom chips, for bring-up on an emulator
 # where nothing of ours is open yet.  Off, and not a shipped configuration.
+option(AMINETXDUO_NETDEV_TIME
+       "Report where interrupt time goes, in beam positions, to the serial port"
+       OFF)
+if(AMINETXDUO_NETDEV_TIME AND TARGET anxnet_device)
+    target_compile_definitions(anxnet_device PRIVATE NETDEV_TRACE=1 NETDEV_TIME=1)
+endif()
+
 option(AMINETXDUO_NETDEV_TRACE "Trace anxnet.device to the serial port" OFF)
 if(AMINETXDUO_NETDEV_TRACE AND TARGET anxnet_device)
     target_compile_definitions(anxnet_device PRIVATE NETDEV_TRACE=1)

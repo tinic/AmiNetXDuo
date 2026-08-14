@@ -42,6 +42,10 @@
 
 /* --------------------------------------------------------------- helpers -- */
 
+#ifdef NETDEV_TIME
+extern ULONG netdev_time_copy;  /* netdev_device.c folds this into its report */
+#endif
+
 #define NIC_GET(nic, reg)       netdev_bus_r8(&(nic)->bus, (reg))
 #define NIC_PUT(nic, reg, val)  netdev_bus_w8(&(nic)->bus, (reg), (UBYTE)(val))
 
@@ -356,8 +360,25 @@ static VOID dp8390_rint(NetdevNic *nic)
         {
             UWORD flen = (UWORD)(len - sizeof(NetdevRing));
 
+#ifdef NETDEV_TIME
+            {
+                UWORD vh0 = *(volatile UWORD *)0xdff006;
+                UWORD vh1;
+                ULONG t0, t1;
+
+                (VOID)nic->ring_copy(nic,
+                                     packet_ptr + (LONG)sizeof(NetdevRing),
+                                     (UBYTE *)nic->rxbuf, flen);
+                vh1 = *(volatile UWORD *)0xdff006;
+                t0  = (ULONG)((vh0 >> 8) & 0xff) * 227UL + (vh0 & 0xff);
+                t1  = (ULONG)((vh1 >> 8) & 0xff) * 227UL + (vh1 & 0xff);
+                netdev_time_copy += (t1 >= t0) ? (t1 - t0)
+                                               : (256UL * 227UL + t1 - t0);
+            }
+#else
             (VOID)nic->ring_copy(nic, packet_ptr + (LONG)sizeof(NetdevRing),
                                  (UBYTE *)nic->rxbuf, flen);
+#endif
             nic->rx_packets++;
             if (nic->rx != NULL)
                 nic->rx(nic->rx_arg, (const UBYTE *)nic->rxbuf, flen);

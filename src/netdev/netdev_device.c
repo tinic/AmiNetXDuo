@@ -167,6 +167,54 @@ VOID netdev_trace_cmd(UWORD c)
 #define nd_tracex(t, v)     ((VOID)0)
 #endif
 
+#ifdef NETDEV_TIME
+/*
+ * Where the time in an interrupt actually goes, in beam positions.  There is
+ * no timer at interrupt level and ReadEClock() needs a base this has no way to
+ * hold, but VHPOSR is a free-running counter one chip read away: 227 colour
+ * clocks of 280 ns to the line, and the low eight bits of vpos wrap every 256
+ * lines, which is 16 ms and far longer than anything measured here.
+ */
+#define ND_TICKS_WRAP   (256UL * 227UL)
+
+static ULONG nd_now(VOID)
+{
+    UWORD vh = *(volatile UWORD *)0xdff006;
+
+    return (ULONG)((vh >> 8) & 0xff) * 227UL + (ULONG)(vh & 0xff);
+}
+
+static ULONG nd_since(ULONG t0)
+{
+    ULONG t1 = nd_now();
+
+    return (t1 >= t0) ? (t1 - t0) : (ND_TICKS_WRAP + t1 - t0);
+}
+
+static ULONG nd_t_isr;      /* ops->intr(), the whole chip service */
+static ULONG nd_t_copy;     /* the ring-to-rxbuf copy inside it */
+static ULONG nd_t_up;       /* handing frames to the openers */
+static ULONG nd_t_tx;       /* netdev_tx_pump() after the service */
+static ULONG nd_n_int;
+static ULONG nd_n_frame;
+
+ULONG netdev_time_copy;     /* dp8390.c adds its copy span here */
+
+static VOID nd_time_report(VOID)
+{
+    nd_t_copy += netdev_time_copy;
+    netdev_time_copy = 0;
+    nd_tracex("t frames ", nd_n_frame);
+    nd_tracex("t ints   ", nd_n_int);
+    nd_tracex("t isr    ", nd_t_isr);
+    nd_tracex("t copy   ", nd_t_copy);
+    nd_tracex("t up     ", nd_t_up);
+    nd_tracex("t tx     ", nd_t_tx);
+    nd_t_isr = nd_t_copy = nd_t_up = nd_t_tx = 0;
+    nd_n_int = nd_n_frame = 0;
+}
+#endif
+
 static VOID nd_bytes(UBYTE *to, const UBYTE *from, ULONG n)
 {
     while (n-- != 0)
@@ -303,7 +351,22 @@ static struct IOSana2Req *netdev_take(struct List *list, ULONG type)
  * a CMD_READ outstanding for this packet type gets a copy; if none does, the
  * frame goes to an S2_READORPHAN, and only then is it dropped.
  */
+#ifdef NETDEV_TIME
+static VOID netdev_rx_body(APTR arg, const UBYTE *frame, UWORD len);
+
 static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
+{
+    ULONG t0 = nd_now();
+
+    netdev_rx_body(arg, frame, len);
+    nd_t_up += nd_since(t0);
+    nd_n_frame++;
+}
+
+static VOID netdev_rx_body(APTR arg, const UBYTE *frame, UWORD len)
+#else
+static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
+#endif
 {
     NetdevUnit  *unit = (NetdevUnit *)arg;
     struct Node *n;
@@ -685,12 +748,34 @@ static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
      * returns FALSE when it reads zero, which is the same answer the board bit
      * was there to give.
      */
+#ifdef NETDEV_TIME
+    {
+        ULONG t0 = nd_now();
+        BOOL  mine;
+
+        mine = unit->nu_Nic.ops->intr(&unit->nu_Nic);
+        nd_t_isr += nd_since(t0);
+        nd_n_int++;
+        if (!mine)
+            return 0;
+
+        t0 = nd_now();
+        netdev_tx_pump(unit);
+        nd_t_tx += nd_since(t0);
+
+        if (nd_n_frame >= 512)
+            nd_time_report();
+
+        return 1;
+    }
+#else
     if (!unit->nu_Nic.ops->intr(&unit->nu_Nic))
         return 0;
 
     netdev_tx_pump(unit);
 
     return 1;
+#endif
 }
 
 /*
