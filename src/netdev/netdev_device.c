@@ -580,9 +580,18 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
 static UWORD netdev_tx_build(NetdevUnit *unit, struct IOSana2Req *io,
                              NetdevOpener *op)
 {
-    UBYTE *buf = (UBYTE *)unit->nu_TxBuf;
+    UBYTE *buf;
     ULONG  len = io->ios2_DataLength;
     UWORD  total;
+
+    /* A core whose transmit buffer the CPU can address takes the frame
+       directly; everything else is framed in the unit's own staging buffer
+       and copied across by ops->tx. */
+    buf = (unit->nu_Nic.tx_at != NULL) ? unit->nu_Nic.tx_at(&unit->nu_Nic)
+                                       : NULL;
+    if (buf == NULL)
+        buf = (UBYTE *)unit->nu_TxBuf;
+    unit->nu_TxAt = buf;
 
     if (op->op_Raw || (io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0)
     {
@@ -650,7 +659,7 @@ static LONG netdev_tx_issue(NetdevUnit *unit, struct IOSana2Req *io,
     NetdevTrack *tr;
     LONG         rc;
 
-    rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, (UBYTE *)unit->nu_TxBuf, total);
+    rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, unit->nu_TxAt, total);
     if (rc != 0)
         return rc;
 

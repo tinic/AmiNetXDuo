@@ -159,6 +159,19 @@ struct NetdevNic
      * there is no address to hand out.
      */
     const volatile UBYTE *(*frame_at)(NetdevNic *nic, LONG src, UWORD len);
+
+    /*
+     * Where to frame the NEXT transmit, or NULL to use the unit's staging
+     * buffer.  A core whose transmit buffer is CPU-addressable returns it and
+     * the opener's CopyFrom writes the card directly -- one pass instead of
+     * building in RAM and copying it across.  The profile priced that copy at
+     * 223 us of a 273 us deficit against a2065.device.
+     *
+     * NULL for the DP8390 cores: an NE2000's buffer is behind a port, and the
+     * Hydra and LAN Rover map a buffer whose byte lanes are not separately
+     * selectable, so CopyFrom writing bytes into it would corrupt both halves.
+     */
+    UBYTE *(*tx_at)(NetdevNic *nic);
     UWORD (*write_buf)(NetdevNic *nic, const UBYTE *frame, UWORD len,
                        LONG buf);
 

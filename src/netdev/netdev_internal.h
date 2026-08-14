@@ -87,6 +87,7 @@ typedef struct NetdevUnit
     struct Interrupt            nu_Intr;      /* INT2, the card               */
     struct Interrupt            nu_Tick;      /* INT3 vertical blank, watchdog */
     UBYTE                       nu_TxBuilding; /* a task owns nu_TxBuf         */
+    UBYTE                      *nu_TxAt;      /* where the frame was built    */
     UWORD                       nu_TxStall;   /* blanks with a transmit stuck  */
     UWORD                       nu_TxWedges;  /* how often it had to be reset  */
 

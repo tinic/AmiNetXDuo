@@ -316,6 +316,16 @@ static VOID le_tint(NetdevNic *nic)
     }
 }
 
+/* The buffer the next transmit will use, for the shell to frame into. */
+static UBYTE *lance_tx_at(NetdevNic *nic)
+{
+    if (nic->txb_inuse >= LE_TX_RING)
+        return NULL;
+
+    return (UBYTE *)(le_ram(nic) + LE_TXB_OFF +
+                     (ULONG)nic->tx_next * LE_BUFSZ);
+}
+
 LONG lance_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
 {
     ULONG           d;
@@ -341,6 +351,7 @@ LONG lance_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
      * write figure against a2065.device.  Both ends are longword-aligned:
      * nu_TxBuf is ULONG[] and the buffers sit at 0x100 + n * 1536.
      */
+    if (frame != (const UBYTE *)buf)
     {
         UWORD bulk = (UWORD)(len & (UWORD)~3u);
 
@@ -454,6 +465,9 @@ LONG lance_attach(NetdevNic *nic)
     nic->mem_end   = (LONG)nic->card->mem_size;
     nic->mem_ring  = 0;
     nic->txb_cnt   = LE_TX_RING;
+    nic->tx_at     = lance_tx_at;
+    nic->frame_at  = NULL;      /* the receive path hands up the ring buffer
+                                   itself, so there is nothing to translate */
 
     return 0;
 }
