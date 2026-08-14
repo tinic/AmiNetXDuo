@@ -163,6 +163,9 @@ typedef struct {
     rfb_u16  n_blk;
     rfb_u16  last_dirty;    /* dirty tiles in the previous frame */
     rfb_u8   last_copy;
+    rfb_s16  last_dy;       /* the offset that worked, tried first next time */
+    rfb_u8   backoff;       /* frames to skip after a probe found nothing */
+    rfb_u8   backoff_left;
 
     rfb_stats st;
 } rfb_encoder;

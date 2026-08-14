@@ -245,10 +245,13 @@ long rfb_encoder_init(rfb_encoder *e, const rfb_geom *g, rfb_u32 flags,
     if (flags & RFB_F_COPYRECT) {
         e->probe_step = (rfb_u16)rfb_probe_step(g, &e->scroll);
         e->n_samples  = (rfb_u16)((rfb_u32)g->height / e->probe_step + 1u);
-        e->blk_bytes  = (rfb_u16)(((rfb_u32)g->bytes_per_row + RFB_PROBE_MAX_BLK - 1u)
-                                  / RFB_PROBE_MAX_BLK);
+        /* Rounded up to a multiple of four so rfb_blk_match() can compare
+         * whole longwords. */
+        e->blk_bytes  = (rfb_u16)((((rfb_u32)g->bytes_per_row
+                                    + RFB_PROBE_MAX_BLK - 1u)
+                                   / RFB_PROBE_MAX_BLK + 3u) & ~3u);
         if (e->blk_bytes == 0)
-            e->blk_bytes = 1;
+            e->blk_bytes = 4;
         e->n_blk = (rfb_u16)(((rfb_u32)g->bytes_per_row + e->blk_bytes - 1u)
                              / e->blk_bytes);
         e->probe_row = p; p = rfb_align4(p + g->bytes_per_row);
@@ -351,72 +354,133 @@ typedef struct {
     rfb_s16 dy;
 } rfb_copy;
 
-static int rfb_detect_scroll(rfb_encoder *e, const rfb_u8 *src, rfb_copy *cp)
+/* Which column blocks of a row are byte-identical.  Bit b set = block b
+ * matched.  Word compares with an early exit per block: this runs
+ * n_samples * (n_cand + 1) times a frame and is the whole cost of the
+ * detector, so it does not call memcmp per block. */
+static rfb_u32 rfb_blk_match(const rfb_u8 *a, const rfb_u8 *b, rfb_u32 bpr,
+                             rfb_u32 blk, rfb_u32 nblk)
+{
+    const rfb_u32 words = blk >> 2;
+    const int aligned = ((((unsigned long)a) | ((unsigned long)b) | blk)
+                         & 3ul) == 0ul;
+    rfb_u32 mask = 0, i, off = 0;
+
+    for (i = 0; i < nblk; i++, off += blk) {
+        rfb_u32 n = bpr - off;
+        if (n > blk) {
+            if (aligned) {
+                const rfb_u32 *pa = (const rfb_u32 *)(const void *)(a + off);
+                const rfb_u32 *pb = (const rfb_u32 *)(const void *)(b + off);
+                rfb_u32 w;
+                for (w = 0; w < words; w++)
+                    if (pa[w] != pb[w])
+                        break;
+                if (w == words)
+                    mask |= 1u << i;
+                continue;
+            }
+            n = blk;
+        }
+        /* The tail block runs a byte at a time rather than reading past the
+         * end of the row. */
+        {
+            rfb_u32 c;
+            for (c = 0; c < n; c++)
+                if (a[off + c] != b[off + c])
+                    break;
+            if (c == n)
+                mask |= 1u << i;
+        }
+    }
+    return mask;
+}
+
+/* One streamed read of the sampled plane-0 rows.  Every candidate offset is
+ * then answered out of the shadow, which is fast RAM, so the probe costs one
+ * strided read of one plane however many offsets it carries. */
+static rfb_u32 rfb_probe_pass(rfb_encoder *e, const rfb_u8 *src,
+                              const rfb_s16 *cand, rfb_u32 ncand,
+                              rfb_u32 *chg, rfb_u32 *out_nsamp)
 {
     const rfb_u32 bpr = e->g.bytes_per_row;
     const rfb_u32 h = e->g.height;
-    const rfb_u32 ncand = e->scroll.n_cand;
-    const rfb_u32 nblk = e->n_blk;
-    rfb_u32 *chg = e->probe_mask + (rfb_u32)ncand * e->n_samples;
-    rfb_u32 s, c, b, y;
-    rfb_u32 dirtyblk[RFB_PROBE_MAX_BLK], scrollblk[RFB_PROBE_MAX_BLK];
-    rfb_u32 nsamp = 0;
-    rfb_u32 dirty = 0;
-    rfb_u32 best = 0, best_score = 0;
-    rfb_u32 lo, hi, run, run_start, best_run, best_start;
-    rfb_u32 sel;
+    rfb_u32 y, c, nsamp = 0, dirty = 0;
 
-    if (ncand == 0 || nblk == 0)
-        return 0;
-
-    /* One read of the sampled plane-0 rows, into fast RAM.  Every candidate
-     * offset is then answered out of the shadow, which is fast RAM too, so the
-     * probe costs one strided read of one plane however many offsets it
-     * tries. */
     for (y = 0; y < h && nsamp < e->n_samples; y += e->probe_step, nsamp++) {
-        rfb_u32 cm = 0;
+        rfb_u32 cm;
         memcpy(e->probe_row, src + y * bpr, (size_t)bpr);
         e->st.probe_bytes += bpr;
 
-        for (b = 0; b < nblk; b++) {
-            rfb_u32 off = b * e->blk_bytes;
-            rfb_u32 n = bpr - off;
-            if (n > e->blk_bytes)
-                n = e->blk_bytes;
-            if (memcmp(e->probe_row + off, e->shadow + y * bpr + off,
-                       (size_t)n) != 0)
-                cm |= 1u << b;
-        }
+        cm = ~rfb_blk_match(e->probe_row, e->shadow + y * bpr, bpr,
+                            e->blk_bytes, e->n_blk);
+        cm &= (e->n_blk >= 32u) ? 0xFFFFFFFFu : ((1u << e->n_blk) - 1u);
         chg[nsamp] = cm;
         if (cm)
             dirty++;
 
         for (c = 0; c < ncand; c++) {
-            rfb_s32 sy = (rfb_s32)y + e->scroll.cand[c];
+            rfb_s32 sy = (rfb_s32)y + cand[c];
             rfb_u32 mask = 0;
-            if (sy >= 0 && (rfb_u32)sy < h) {
-                const rfb_u8 *ref = e->shadow + (rfb_u32)sy * bpr;
-                for (b = 0; b < nblk; b++) {
-                    rfb_u32 off = b * e->blk_bytes;
-                    rfb_u32 n = bpr - off;
-                    if (n > e->blk_bytes)
-                        n = e->blk_bytes;
-                    if (memcmp(e->probe_row + off, ref + off, (size_t)n) == 0)
-                        mask |= 1u << b;
-                }
-            }
+            if (sy >= 0 && (rfb_u32)sy < h)
+                mask = rfb_blk_match(e->probe_row,
+                                     e->shadow + (rfb_u32)sy * bpr, bpr,
+                                     e->blk_bytes, e->n_blk);
             e->probe_mask[c * e->n_samples + nsamp] = mask;
         }
     }
     e->st.probes++;
+    *out_nsamp = nsamp;
+    return dirty;
+}
+
+static int rfb_detect_scroll(rfb_encoder *e, const rfb_u8 *src, rfb_copy *cp)
+{
+    const rfb_u32 bpr = e->g.bytes_per_row;
+    const rfb_u32 h = e->g.height;
+    const rfb_u32 nblk = e->n_blk;
+    rfb_u32 *chg = e->probe_mask + (rfb_u32)e->scroll.n_cand * e->n_samples;
+    rfb_s16 sticky[1];
+    const rfb_s16 *cand = e->scroll.cand;
+    rfb_u32 ncand = e->scroll.n_cand;
+    rfb_u32 s, c, b;
+    rfb_u32 dirtyblk[RFB_PROBE_MAX_BLK], scrollblk[RFB_PROBE_MAX_BLK];
+    rfb_u32 nsamp = 0, dirty, changed = 0;
+    rfb_u32 best = 0, best_score = 0;
+    rfb_u32 lo, hi, run, run_start, best_run, best_start;
+    rfb_u32 sel;
+    int retried = 0;
+
+    if (ncand == 0 || nblk == 0)
+        return 0;
+
+    /* A scroll runs for many frames, so the offset that worked last frame is
+     * tried alone first.  That is one candidate instead of nine for every
+     * frame of a scroll after the first, and the full list is only paid for
+     * when the shortcut does not explain what moved. */
+    if (e->last_copy && e->last_dy != 0) {
+        sticky[0] = e->last_dy;
+        cand = sticky;
+        ncand = 1;
+    }
+
+again:
+    dirty = rfb_probe_pass(e, src, cand, ncand, chg, &nsamp);
 
     if (nsamp < 4 || dirty * 4u < nsamp)   /* too little moved to be a scroll */
         return 0;
+
+    changed = 0;
+    for (s = 0; s < nsamp; s++) {
+        rfb_u32 m = chg[s];
+        while (m) { changed++; m &= m - 1u; }
+    }
 
     /* Score a candidate on blocks that CHANGED and still matched at the
      * offset.  Scoring on matches alone elects any offset under which a static
      * background happens to agree with itself, and that is most of the
      * screen. */
+    best = 0; best_score = 0;
     for (c = 0; c < ncand; c++) {
         rfb_u32 score = 0;
         for (s = 0; s < nsamp; s++) {
@@ -424,6 +488,15 @@ static int rfb_detect_scroll(rfb_encoder *e, const rfb_u8 *src, rfb_copy *cp)
             while (m) { score++; m &= m - 1u; }
         }
         if (score > best_score) { best_score = score; best = c; }
+    }
+
+    if (best_score * 100u < changed * e->scroll.match_pct && !retried &&
+        cand != e->scroll.cand) {
+        /* The shortcut did not explain the frame.  Pay for the full list. */
+        cand = e->scroll.cand;
+        ncand = e->scroll.n_cand;
+        retried = 1;
+        goto again;
     }
     if (best_score == 0)
         return 0;
@@ -488,7 +561,7 @@ static int rfb_detect_scroll(rfb_encoder *e, const rfb_u8 *src, rfb_copy *cp)
         cp->w = (rfb_u16)(bpr - cp->x0);
     cp->y0 = (rfb_u16)(best_start * e->probe_step);
     cp->h  = (rfb_u16)(best_run * e->probe_step);
-    cp->dy = e->scroll.cand[best];
+    cp->dy = cand[best];
 
     /* Clip so both ends of the move stay on the screen. */
     if (cp->dy > 0) {
@@ -568,8 +641,17 @@ long rfb_encode_frame(rfb_encoder *e, const rfb_u8 *src,
 
     if (e->flags & RFB_F_COPYRECT) {
         int probe = 1;
-        if (e->flags & RFB_F_SCROLL_ADAPTIVE)
+        if (e->flags & RFB_F_SCROLL_ADAPTIVE) {
+            /* Nothing much moved last frame, so nothing can be scrolling. */
             probe = (e->last_dirty >= e->scroll.busy_tiles) || e->last_copy;
+            /* A busy screen that is not scrolling -- a window being dragged --
+             * would otherwise pay for the probe on every frame of the drag.
+             * Back off doubling after each miss, and reset on a hit. */
+            if (probe && e->backoff_left) {
+                e->backoff_left--;
+                probe = 0;
+            }
+        }
         if (probe) {
             rfb_copy cp;
             if (rfb_detect_scroll(e, src, &cp)) {
@@ -582,7 +664,15 @@ long rfb_encode_frame(rfb_encoder *e, const rfb_u8 *src,
                 rfb_apply_copy(e, &cp);
                 e->st.copies++;
                 e->st.copy_rows += cp.h;
+                e->last_dy = cp.dy;
+                e->backoff = 0;
+                e->backoff_left = 0;
                 did_copy = 1;
+            } else {
+                e->backoff = (rfb_u8)(e->backoff ? (e->backoff < 16u
+                                                    ? e->backoff * 2u : 16u)
+                                                 : 1u);
+                e->backoff_left = e->backoff;
             }
         }
     }
