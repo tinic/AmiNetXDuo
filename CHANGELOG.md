@@ -9,6 +9,11 @@ version at the top when it merges.
 
 ## Unreleased
 
+- One `bsdsocket.library`, one `tls.library` and one `ssh` for every 68k. The installer no longer asks which processor this is and the archive has no drawer to pick wrong: each binary chooses the code for the machine it opens on. On an A1200 it is 0.4% faster than the 68000 build a cautious user was installing, and 0.8% behind the 68020 one
+- Encrypted connections work on a 68000. The archive carried no `tls.library` for one at all, so `https:` answered "there is none"; a TLS 1.3 handshake there now takes 58 s against an RSA certificate and 98 s against an EC one, and a resumed connection under a second
+- A 68000 and a 68060 get the hand-written ChaCha20, P-256, X25519 and multiply-accumulate they have never had. The assembly was one switch that only a 68020 or a 68040 could turn on, so both ends of the family ran portable C for all of it — and a 68060 that installed the 68020 drawer instead trapped every 32-bit multiply into emulation
+- Encrypted transfers are faster on every machine: the GHASH step works a longword at a time rather than a byte. A handshake is 17% shorter on an A1200 and 12% on an A600
+- `C:ssh` is one binary rather than three, and the archive is two drawers rather than four — `Libs/` for every machine and `Libs/minimal/` for a 1 MB one
 - `anxnet.device`, one network driver for six cards — X-Surf 100, Ariadne II, Hydra, the ASDG LAN Rover, the A2065 and the Ariadne. It takes the multicast addresses the shipping drivers refuse, so IPv6 reaches past the router on cards where it never has. The archive carries it in `Devs/Networks/`; the installer does not install it yet
 - `anxnet.device` reads faster than the driver it replaces on every card it covers, on both an A1200 and an A3000 — 4 to 15% depending on the card. Write is level or better everywhere except the Hydra and the LAN Rover, which are 3% behind
 - `CARD=` in `DEVS:NetInterfaces/<name>` says which board the driver binds to, so one driver file serves every card without guessing. Naming a board the machine does not have refuses the interface and says so, instead of quietly binding to a different one
