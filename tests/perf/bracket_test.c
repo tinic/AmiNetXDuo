@@ -55,6 +55,7 @@
 #include <dos/dos.h>
 #include <devices/timer.h>
 #include <proto/exec.h>
+#include <inline/macros.h>
 #include <proto/dos.h>
 #include <proto/timer.h>
 

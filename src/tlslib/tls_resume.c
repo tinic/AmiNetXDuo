@@ -144,6 +144,8 @@
  */
 #ifdef TLS_RESUME_TRACE
 
+#include <inline/macros.h>
+
 #ifndef RawPutChar
 #  define RawPutChar(c) \
       LP1NR(0x204, RawPutChar, UBYTE, (c), d0, , EXEC_BASE_NAME)

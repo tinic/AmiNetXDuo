@@ -13,6 +13,7 @@
 #include <exec/semaphores.h>
 #include <devices/timer.h>
 #include <proto/exec.h>
+#include <inline/macros.h>
 #include <proto/timer.h>
 
 #include <stdarg.h>

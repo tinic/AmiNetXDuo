@@ -45,6 +45,7 @@
 #include <resources/cia.h>
 
 #include <proto/exec.h>
+#include <inline/macros.h>
 #include <proto/dos.h>
 #include <proto/cia.h>
 

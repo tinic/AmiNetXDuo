@@ -39,6 +39,7 @@
 #include <exec/execbase.h>
 #include <dos/dos.h>
 #include <proto/exec.h>
+#include <inline/macros.h>
 #include <proto/dos.h>
 
 #include <stdarg.h>

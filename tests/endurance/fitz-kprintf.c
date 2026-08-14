@@ -24,6 +24,7 @@
 
 #include <exec/types.h>
 #include <proto/exec.h>
+#include <inline/macros.h>
 
 #include <stdarg.h>
 #include <stddef.h>

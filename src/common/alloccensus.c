@@ -29,6 +29,7 @@
 
 #include <exec/execbase.h>
 #include <proto/exec.h>
+#include <inline/macros.h>
 
 #include "aminetxduo/compat.h"
 
