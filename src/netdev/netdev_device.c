@@ -212,6 +212,7 @@ static ULONG nd_n_hook;
 
 ULONG netdev_time_copy;     /* dp8390.c adds its copy span here */
 ULONG netdev_time_rdc;      /* ne2000.c counts its DMA-completion spins */
+ULONG netdev_time_regs;     /* netdev_bus.h counts every scalar access    */
 ULONG netdev_time_null;     /* interrupts where ISR read zero: not ours */
 ULONG netdev_time_rx;       /* ISR passes with a receive bit set */
 ULONG netdev_time_tx;       /* ISR passes with a transmit bit set */
@@ -231,6 +232,8 @@ static VOID nd_time_report(VOID)
         nd_t_probe = nd_since(tp);
     }
     nd_tracex("t hook   ", nd_t_hook);
+    nd_tracex("t regs   ", netdev_time_regs);
+    netdev_time_regs = 0;
     nd_tracex("t isr    ", nd_t_isr);
     nd_tracex("t copy   ", nd_t_copy);
     nd_tracex("t ntx    ", nd_n_tx);

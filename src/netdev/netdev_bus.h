@@ -90,23 +90,34 @@ VOID netdev_bus_setup(NetdevBus *bus, APTR base, UWORD stride, APTR wide);
  * frame touches around twenty-five.  The stride is 1, 2 or 4, so it is a
  * shift, and inline it is one indexed move.
  */
+#ifdef NETDEV_TIME
+extern ULONG netdev_time_regs;      /* scalar register accesses, per report */
+#define NETDEV_BUS_COUNT()  (netdev_time_regs++)
+#else
+#define NETDEV_BUS_COUNT()  ((VOID)0)
+#endif
+
 static inline UBYTE netdev_bus_r8(const NetdevBus *bus, UWORD reg)
 {
+    NETDEV_BUS_COUNT();
     return bus->nic[(ULONG)reg << bus->shift];
 }
 
 static inline VOID netdev_bus_w8(const NetdevBus *bus, UWORD reg, UBYTE val)
 {
+    NETDEV_BUS_COUNT();
     bus->nic[(ULONG)reg << bus->shift] = val;
 }
 
 static inline UBYTE netdev_bus_ra8(const NetdevBus *bus, UWORD reg)
 {
+    NETDEV_BUS_COUNT();
     return bus->asic[(ULONG)reg << bus->shift];
 }
 
 static inline VOID netdev_bus_wa8(const NetdevBus *bus, UWORD reg, UBYTE val)
 {
+    NETDEV_BUS_COUNT();
     bus->asic[(ULONG)reg << bus->shift] = val;
 }
 
