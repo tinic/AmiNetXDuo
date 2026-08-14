@@ -21,6 +21,6 @@ USHORT _nx_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
                                ULONG *dest_ip_addr)
 {
 
-    return(N68K_IP_CHECKSUM_COMPUTE(packet_ptr, protocol, data_length,
+    return(n68k_ip_checksum_compute(packet_ptr, protocol, data_length,
                                     src_ip_addr, dest_ip_addr));
 }

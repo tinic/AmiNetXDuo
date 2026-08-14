@@ -31,7 +31,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "n68k_variant.h"       /* renames this file's exports in the fast copy */
 #include "net68k.h"
 
 #include "nx_ip.h"

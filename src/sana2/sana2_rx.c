@@ -254,7 +254,7 @@ static VOID ami_sana2_rxprobe_drop(NX_PACKET *packet, const AmiRxSlot *slot)
     ULONG        pseudo = 0;
     UWORD        part   = 0;
 
-    (VOID)N68K_RX_VERIFY(packet, &rewalk);
+    (VOID)n68k_rx_verify(packet, &rewalk);
 
     if (packet->nx_packet_length >= 40 && (ip[0] >> 4) == 4)
     {
@@ -471,10 +471,10 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
              * zero and the verifier walks, exactly as before.
              */
             if ((slot != NULL) && (slot->summed != FALSE))
-                caps = N68K_RX_VERIFY_SUM(packet, slot->sum, slot->copied,
+                caps = n68k_rx_verify_sum(packet, slot->sum, slot->copied,
                                           &drop);
             else
-                caps = N68K_RX_VERIFY(packet, &drop);
+                caps = n68k_rx_verify(packet, &drop);
 
             if (drop != NX_FALSE)
             {

@@ -1,20 +1,14 @@
 /*
  * AmiNetXDuo, pick this machine's inner loops.
  *
- * The three primitives in this directory each exist in one form per CPU class
+ * The three routines in this directory each exist in one form per CPU class
  * (n68k_variant.h), and this is where one of them is chosen.  Until the `any`
  * build the choice was the preprocessor's and the archive carried a library
  * per CPU; here it is AttnFlags at library init and there is one binary.
  *
- * THE PRIMITIVES ONLY.  n68k_cpu_data.c does the same for the C on the data
- * path and owns n68k_cpu_select(), which is what a stack calls; this file is
- * the half that references nothing but assembly, so a program that wants the
- * copy and the checksum loops does not have to link the IP checksum, NetX Duo
- * and ThreadX behind them to get them.  tests/perf/n68kmv is that program.
- *
  * The vectors start on the 68000 forms rather than on NULL, so a caller that
- * links net68k and never selects -- a Shell command, a bench, a test -- gets
- * the slow answer and not an address error.  Every variant is
+ * links net68k and never calls n68k_cpu_select() -- a Shell command, a bench,
+ * a test -- gets the slow answer and not an address error.  Every variant is
  * assembled from original 68000 instructions, so a wrong answer here is only
  * ever a wrong speed; the one exception is the parity guard in the 68000 copy,
  * which the faster forms omit because they run on parts that fetch a longword
@@ -24,14 +18,6 @@
  * the 010, 020, 030 and 040 bits as well, so this reads highest first.  A
  * 68010 lands on 0 and a 68030 on 20, which is the mapping the per-CPU builds
  * already had (cmake/toolchain-m68k-amigaos.cmake).
- *
- * AFF_68060 IS NOT SET BY THE ROM.  Kickstart 3.1 predates the part; the bit
- * is set by 68060.library, which every real 68060 installs because the machine
- * needs it for the instructions the 68060 dropped.  A machine without it reads
- * 0x0F and lands on the 68040 forms -- measured, `-c 68060` under Amiberry
- * with a 3.1 ROM does exactly that (tests/perf/n68kmv).  That is a slower
- * answer and never a wrong one: the two differ in whether the copy uses
- * movem.l, and nothing here is an instruction the 68060 lacks.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -68,7 +54,7 @@ ULONG (*n68k_vec_copy_sum)(ULONG *, const ULONG *, ULONG) =
     n68k_copy_sum_longwords_mv0;
 VOID (*n68k_vec_copy)(UCHAR *, const UCHAR *, ULONG) = n68k_copy_bytes_mv0;
 
-VOID n68k_cpu_select_prims(ULONG attnflags)
+VOID n68k_cpu_select(ULONG attnflags)
 {
 
     if ((attnflags & AFF_68060) != 0UL)
@@ -100,14 +86,8 @@ VOID n68k_cpu_select_prims(ULONG attnflags)
 #else
 
 /* One variant, chosen when it was assembled: the call is direct and there is
-   nothing to select.  Both entry points still exist so a caller need not know
+   nothing to select.  The entry point still exists so a caller need not know
    which build it is in. */
-VOID n68k_cpu_select_prims(ULONG attnflags)
-{
-
-    (VOID)attnflags;
-}
-
 VOID n68k_cpu_select(ULONG attnflags)
 {
 

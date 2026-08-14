@@ -69,7 +69,7 @@ if(AMINETXDUO_NET68K_ASM AND NOT NET68K_MV)
 endif()
 
 if(NET68K_MV)
-    list(APPEND NET68K_SOURCES n68k_dispatch.S n68k_cpu_data.c)
+    list(APPEND NET68K_SOURCES n68k_dispatch.S)
 endif()
 
 add_library(aminetxduo_net68k STATIC ${NET68K_SOURCES}
@@ -125,26 +125,6 @@ if(NET68K_MV)
             aminetxduo_net68k_mv${mv})
     endforeach()
 
-    # And the C on the data path, once more at -mcpu=68060.  Two files, the
-    # checksum walk and the receive verification, which is what the whole of
-    # net68k's C amounts to once the assembly has the primitives: 1.9 KB of
-    # object between them, so the second copy is not a size question.
-    #
-    # -mcpu=68060 rather than -m68020 because ONE copy has to serve every
-    # machine with AFF_68020 set, and only the 68060's instruction set is a
-    # subset of all of theirs (src/net68k/n68k_variant.h).  It lands last on
-    # the command line, after the toolchain file's -m68000, which is what
-    # makes it win.
-    add_library(aminetxduo_net68k_cfast OBJECT
-        n68k_checksum.c n68k_rx_verify.c)
-    target_compile_definitions(aminetxduo_net68k_cfast PRIVATE
-        AMINETXDUO_NET68K_ASM=1 N68K_MV_MULTI=1 N68K_MV_FAST=1)
-    target_compile_options(aminetxduo_net68k_cfast PRIVATE -mcpu=68060)
-    target_include_directories(aminetxduo_net68k_cfast PRIVATE
-        ${AMINETXDUO_CORE_INCLUDES}
-        "${CMAKE_CURRENT_SOURCE_DIR}")
-    target_link_libraries(aminetxduo_net68k PRIVATE aminetxduo_net68k_cfast)
-
     # The C half of the dispatch needs to know it is in this build too: the
     # vector table and n68k_cpu_select()'s body are both behind it, and without
     # it the file is the empty function every other build gets.
@@ -155,6 +135,31 @@ if(NET68K_MV)
     # call the trampoline instead of the vector: slower, not wrong, and
     # invisible -- which is a worse failure than a link error.
     target_compile_definitions(aminetxduo_net68k PUBLIC N68K_MV_MULTI=1)
+
+    # THE C IN THIS DIRECTORY IS NOT MULTIVERSIONED, MEASURED AND NOT TAKEN,
+    # 2026-08-13.  n68k_checksum.c and n68k_rx_verify.c were built a second
+    # time for the 68020-and-up machines, symbols renamed, two more vectors,
+    # the checksum hook and src/sana2's two receive call sites dispatched
+    # through them.  A1200 profile, 512 KB loopback, six runs an arm, quoted
+    # against the -m68020 control in the same run because the control itself
+    # drifts ~2 ms between rounds:
+    #
+    #     assembly dispatch only     +8.0 ms
+    #     and the C at -mcpu=68060   +8.9 ms
+    #     and the C at -m68020       +11.5 ms
+    #
+    # Nothing, or slightly worse, for 1.6 KB and an indirect call per packet
+    # on two more paths.  It also revises what the earlier arm meant: relinking
+    # the whole 68020-built net68k archive was worth 4.4 ms, and this says
+    # ~3.7 ms of that was the assembly variants and the rest is noise.  The
+    # remaining gap to a per-CPU build is C codegen spread over the whole tree,
+    # not concentrated here.
+    #
+    # One caveat is written down rather than resolved: loopback never enters
+    # src/sana2, so n68k_rx_verify() ran zero times in those arms.  Its half of
+    # the question needs the bridged rig, where the spread is 13% and the whole
+    # effect under test is under 1%.  A per-primitive instrument (perf_test)
+    # would be the way in, not another throughput run.
 endif()
 
 message(STATUS "  net68k asm .... ${AMINETXDUO_NET68K_ASM}")

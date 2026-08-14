@@ -26,7 +26,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "n68k_variant.h"       /* renames this file's exports in the fast copy */
 #include "net68k.h"
 
 #include "nx_api.h"
@@ -41,12 +40,7 @@
 #define N68K_RD32(p)    ((ULONG)(((ULONG)(p)[0] << 24) | ((ULONG)(p)[1] << 16) | \
                                  ((ULONG)(p)[2] << 8)  |  (ULONG)(p)[3]))
 
-/* One set of counters for both copies of this file: the fast one refers to
-   this definition rather than making a second, so a machine that switches
-   nothing at run time still reads one census.  net68k.h declares it. */
-#ifndef N68K_MV_FAST
 N68kRxVerifyStats  n68k_rx_verify_stats;
-#endif
 
 /*
  * One checksum, through the same function the stack would have used, with the
