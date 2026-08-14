@@ -7,6 +7,10 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
+## Unreleased
+
+- A 64-bit divide by a value of 2^32 or more no longer takes the machine down. The three 64-bit shift helpers were each compiled into a call to themselves and recursed until the stack was gone; nothing in the shipped libraries divides by that much, so it was reachable rather than reached
+
 ## 0.22.1
 
 - `ssh` completes a handshake in about 5 seconds on an A1200 instead of 75. The 0.22.0 client carried both forms of the X25519 field arithmetic and used neither: the run-time choice was compiled out of one file, so it ran the portable C. Nothing failed and no message said so
