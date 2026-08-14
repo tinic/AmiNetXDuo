@@ -66,21 +66,35 @@ static volatile UBYTE *le_ram(NetdevNic *nic)
     return nic->board + nic->card->mem_off;
 }
 
+/*
+ * The board's crossing applies to EVERY 16-bit access through the window, not
+ * only to the SRAM: on the Ariadne a word written to a chip register arrives
+ * with its halves exchanged exactly as a descriptor word does.  Missing that
+ * is why the first version read a command register full of nonsense and
+ * refused the card.
+ *
+ * Frame data needs no swap at any width -- the crossing cancels between the
+ * CPU's access and the chip's, whichever way round it is.
+ */
+static UWORD le_swap(NetdevNic *nic, UWORD v)
+{
+    return nic->card->lance_swap ? (UWORD)((v >> 8) | (v << 8)) : v;
+}
+
 /* A descriptor or init-block word, in the order the CHIP reads it. */
 static VOID le_put16(NetdevNic *nic, ULONG off, UWORD v)
 {
     volatile UWORD *p = (volatile UWORD *)(volatile void *)(le_ram(nic) + off);
 
-    *p = nic->card->lance_swap ? (UWORD)((v >> 8) | (v << 8)) : v;
+    *p = le_swap(nic, v);
 }
 
 static UWORD le_get16(NetdevNic *nic, ULONG off)
 {
     const volatile UWORD *p =
         (const volatile UWORD *)(const volatile void *)(le_ram(nic) + off);
-    UWORD v = *p;
 
-    return nic->card->lance_swap ? (UWORD)((v >> 8) | (v << 8)) : v;
+    return le_swap(nic, *p);
 }
 
 /* ---------------------------------------------------------- registers ---- */
@@ -104,14 +118,14 @@ static volatile UWORD *le_rap(NetdevNic *nic)
 
 static UWORD le_csr_get(NetdevNic *nic, UWORD csr)
 {
-    *le_rap(nic) = csr;
-    return *le_rdp(nic);
+    *le_rap(nic) = le_swap(nic, csr);
+    return le_swap(nic, *le_rdp(nic));
 }
 
 static VOID le_csr_put(NetdevNic *nic, UWORD csr, UWORD v)
 {
-    *le_rap(nic) = csr;
-    *le_rdp(nic) = v;
+    *le_rap(nic) = le_swap(nic, csr);
+    *le_rdp(nic) = le_swap(nic, v);
 }
 
 LONG lance_init(NetdevNic *nic);
