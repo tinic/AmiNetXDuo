@@ -54,6 +54,10 @@ extern VOID c68k_poly1305_blocks_asm(C68K_POLY1305 *ctx, const UCHAR *m,
    is inside c68k_25519.c: they are static there. */
 extern void c68k_25519_cpu_select(unsigned int mul_ul);
 
+/* Same, for the three P-256 limb routines: both assemblies are legal on
+   every part and differ in one instruction, so this follows `wide`. */
+extern VOID c68k_p256_cpu_select(UINT wide);
+
 /*
  * The portable C to begin with, exactly as src/net68k does it: this file is
  * linked by programs that never select -- a bench, a test, a Shell command --
@@ -88,6 +92,7 @@ VOID c68k_cpu_select(ULONG attnflags)
        run-time choice -- tests/crypto68k/crypto68k_bulk moves it to time the
        five forms against each other -- so this only sets the default. */
     c68k_aes_variant = (wide != 0u) ? C68K_AES_V_T4_ASM : C68K_AES_V_T4_C;
+    c68k_p256_cpu_select(wide);
 
     if (mul_ul != 0u)
     {

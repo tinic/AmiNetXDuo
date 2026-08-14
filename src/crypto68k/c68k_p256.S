@@ -59,6 +59,8 @@
 
 #ifdef C68K_ASM
 
+#include "c68k_variant.h"
+
         .text
 
 | -----------------------------------------------------------------------------
@@ -69,8 +71,8 @@
 | r may alias a or b.
 | -----------------------------------------------------------------------------
 
-        .globl  _c68k_p256_add_raw
-_c68k_p256_add_raw:
+        .globl  C68K_MV_SYM(_c68k_p256_add_raw)
+C68K_MV_SYM(_c68k_p256_add_raw):
         move.l  a2,-(sp)
         move.l  8(sp),a0                | r
         move.l  12(sp),a1               | a
@@ -102,8 +104,8 @@ _c68k_p256_add_raw:
 | r may alias a or b.
 | -----------------------------------------------------------------------------
 
-        .globl  _c68k_p256_sub_raw
-_c68k_p256_sub_raw:
+        .globl  C68K_MV_SYM(_c68k_p256_sub_raw)
+C68K_MV_SYM(_c68k_p256_sub_raw):
         move.l  a2,-(sp)
         move.l  8(sp),a0                | r
         move.l  12(sp),a1               | a
@@ -160,15 +162,27 @@ _c68k_p256_sub_raw:
 | Store the finished limb and shift the signed carry down into lo.
 | MOVE.L sets N from hi, Scc reads it, and neither writes X, immaterial here
 | because every limb below starts with a plain ADD.L.
+| EXTB.L IS THE ONE INSTRUCTION IN THIS FILE A 68000 DOES NOT HAVE, and it is
+| here, in the per-limb step.  Everything else assembles at -m68000, checked
+| rather than assumed.  So the 68000 form spells the same sign extension in two
+| instructions instead of one -- SMI leaves 0 or 0xFF in the byte, and ext.w
+| then ext.l walks it up -- and the whole file is assembled twice, once each
+| way (src/crypto68k/CMakeLists.txt).  Four extra cycles a limb against having
+| no assembly at all on that part.
 .macro  PNEXT
         move.l  d0,(a0)+
         move.l  d1,d0
         smi     d1
+#ifdef C68K_P256_EXTB
         extb.l  d1
+#else
+        ext.w   d1
+        ext.l   d1
+#endif
 .endm
 
-        .globl  _c68k_p256_reduce_core
-_c68k_p256_reduce_core:
+        .globl  C68K_MV_SYM(_c68k_p256_reduce_core)
+C68K_MV_SYM(_c68k_p256_reduce_core):
         movem.l d2-d3,-(sp)
         move.l  12(sp),a0               | r
         move.l  16(sp),a1               | t

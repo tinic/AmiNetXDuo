@@ -255,19 +255,24 @@ if(CMAKE_CROSSCOMPILING AND AMINETXDUO_CPU STREQUAL "any")
     # two reasons, a translation unit of its own and a file name of its own.
     # This is also exactly what one ssh binary needs: clients/dropbear compiles
     # c68k_25519.c itself and picks the half with the same define today.
-    foreach(mv mulu:C68K_ASM:-m68020 mulw:C68K_ASM_MULW:-m68000)
+    foreach(mv mulu:C68K_ASM:-m68020:c68k_25519.S
+               mulw:C68K_ASM_MULW:-m68000:c68k_25519.S
+               mv20:C68K_P256_EXTB:-m68020:c68k_p256.S
+               mv0:C68K_ASM:-m68000:c68k_p256.S)
         string(REPLACE ":" ";" _parts "${mv}")
         list(GET _parts 0 _sfx)
         list(GET _parts 1 _def)
         list(GET _parts 2 _arch)
+        list(GET _parts 3 _src)
+        string(REPLACE ".S" "" _stem "${_src}")
         set(C68K_MV_DEFINE "${_def}")
         set(C68K_MV_SUFFIX "_${_sfx}")
-        set(C68K_MV_SRC "c68k_25519.S")
-        set(_gen "${CMAKE_CURRENT_BINARY_DIR}/c68k_25519_${_sfx}.S")
+        set(C68K_MV_SRC "${_src}")
+        set(_gen "${CMAKE_CURRENT_BINARY_DIR}/${_stem}_${_sfx}.S")
         configure_file(c68k_mv.S.in "${_gen}" @ONLY)
         list(APPEND CRYPTO68K_SOURCES "${_gen}")
         set_source_files_properties("${_gen}" PROPERTIES
-            COMPILE_DEFINITIONS "C68K_MV=1"
+            COMPILE_DEFINITIONS "C68K_MV=1;C68K_ASM=1"
             COMPILE_OPTIONS "${_arch}"
             INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
@@ -325,7 +330,7 @@ if(CRYPTO68K_MV)
     target_compile_definitions(crypto68k PUBLIC
         C68K_ASM=1 C68K_MV=1
         C68K_ASM_PRIM=1 C68K_ASM_CHACHA20=1 C68K_ASM_POLY1305=1
-        C68K_ASM_AES=1 C68K_ASM_25519=1)
+        C68K_ASM_AES=1 C68K_ASM_25519=1 C68K_ASM_P256=1)
 
     # Per file, the arch it is written for.  C68K_MV_SUFFIX is what keeps the
     # two addmul_1 twins apart in one archive (c68k_variant.h).
