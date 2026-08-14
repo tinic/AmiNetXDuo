@@ -7,6 +7,13 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
+## 0.22.1
+
+- `ssh` completes a handshake in about 5 seconds on an A1200 instead of 75. The 0.22.0 client carried both forms of the X25519 field arithmetic and used neither: the run-time choice was compiled out of one file, so it ran the portable C. Nothing failed and no message said so
+- `https:` is a third faster than 0.22.0 on a 68020 or better. The 32x32 -> 64 multiply that every RSA and EC operation is built from picks MULU.L at run time now; in 0.22.0 it could only be chosen when the build named a processor, which one binary for every 68k never does. A TLS 1.3 handshake against an RSA certificate takes 4.4 s against 5.5, and against an EC one 9.2 against 11.1
+- The 64-bit divide and the five 32-bit multiply and divide helpers choose their instruction the same way, worth about a further 1.5% on an ssh handshake
+- A client built for every CPU that cannot make that choice no longer links
+
 ## 0.22.0
 
 - One `bsdsocket.library`, one `tls.library` and one `ssh` for every 68k. The installer no longer asks which processor this is and the archive has no drawer to pick wrong: each binary chooses the code for the machine it opens on. On an A1200 it is 0.4% faster than the 68000 build a cautious user was installing, and 0.8% behind the 68020 one
