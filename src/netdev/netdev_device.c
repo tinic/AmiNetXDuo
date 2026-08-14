@@ -1126,6 +1126,12 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
                          (APTR)((UBYTE *)board + card->odd_off +
                                 card->reg_off));
 
+    /* A scattered register file replaces the stride entirely, and carries its
+       own data-port address: entry 16 of the table. */
+    if (card->regmap != NULL)
+        netdev_bus_regmap(&unit->nu_Nic.bus, card->regmap,
+                          (APTR)((UBYTE *)board + card->regmap[16]));
+
     nd_tracex("anx: board ", (ULONG)board);
     if (unit->nu_Nic.ops->attach(&unit->nu_Nic) != 0)
     {
@@ -1231,7 +1237,8 @@ static VOID netdev_probe(NetdevDevice *dev)
             const NetdevCard *card = &netdev_cards[i];
             APTR              base;
 
-            if (card->bus != NETDEV_BUS_PCMCIA)
+            if (card->bus != NETDEV_BUS_PCMCIA &&
+                card->bus != NETDEV_BUS_FIXED)
                 continue;
             if (dev->nd_UnitCount >= NETDEV_MAX_UNITS)
             {
@@ -1239,15 +1246,30 @@ static VOID netdev_probe(NetdevDevice *dev)
                 break;
             }
 
-            base = netdev_pcmcia_claim(card);
+            if (card->bus == NETDEV_BUS_FIXED)
+            {
+                /* Nothing to claim and nothing to configure: the board is
+                   wherever the machine puts it, and attach() deciding a
+                   DP8390 is not answering is the whole of the probe. */
+                base = (APTR)(ULONG)card->base;
+            }
+            else
+            {
+                base = netdev_pcmcia_claim(card);
+            }
             if (base == NULL)
                 continue;       /* no slot, nothing in it, or not a LAN card */
 
-            nd_trace("anx: pcmcia claimed\r\n");
+            nd_tracex("anx: fixed/pcmcia base ", (ULONG)base);
             if (!netdev_add_unit(dev, card, base, 0))
-                netdev_pcmcia_release();
-            else
+            {
+                if (card->bus == NETDEV_BUS_PCMCIA)
+                    netdev_pcmcia_release();
+            }
+            else if (card->bus == NETDEV_BUS_PCMCIA)
+            {
                 netdev_pcmcia_bind(&dev->nd_Units[dev->nd_UnitCount - 1]);
+            }
         }
     }
 }

@@ -213,12 +213,24 @@ VOID netdev_bus_split(NetdevBus *bus, APTR odd)
     bus->odd = (volatile UBYTE *)odd;
 }
 
+/*
+ * The scattered register file, and the data port that goes with it: bulk
+ * transfers still go through bus->asic, which for such a card is whatever
+ * address the table gives for ASIC register 0 rather than nic + 16 * stride.
+ */
+VOID netdev_bus_regmap(NetdevBus *bus, const ULONG *map, APTR data_port)
+{
+    bus->regmap = map;
+    bus->asic   = (volatile UBYTE *)data_port;
+}
+
 VOID netdev_bus_setup(NetdevBus *bus, APTR base, UWORD stride, APTR wide)
 {
     bus->nic    = (volatile UBYTE *)base;
     bus->asic   = (volatile UBYTE *)base + 16u * stride;
     bus->wide   = (volatile UBYTE *)wide;
-    bus->odd    = NULL;         /* netdev_bus_split() for the ones that need it */
+    bus->odd    = NULL;
+    bus->regmap = NULL;         /* netdev_bus_split() for the ones that need it */
     bus->stride = stride;
     bus->shift  = (UBYTE)((stride == 4u) ? 2u : ((stride == 2u) ? 1u : 0u));
     bus->dmode  = NETDEV_DMODE_WORD;
