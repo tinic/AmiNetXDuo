@@ -81,11 +81,19 @@ card: `a2065.device`, `ariadne.device`, `ariadne2.device`, `amiganet.device`,
 `uaenet.device` for emulators are all offered by name in the installer, and
 anything else can be typed in.
 
-The archive carries a separate build for the 68000, the 68020–68040 and the
-68060, and the installer works out which one your machine wants. Encrypted
-(`https:`) connections need a 68020 or better; on a 68000 the cryptography
-takes longer than the other end will wait, so it is left out and everything
-else works as normal.
+The archive also carries `anxnet.device` in `Devs/Networks/`, one driver
+covering seven of those cards and faster than most of them. The installer does
+not install it: copy it to `DEVS:Networks` and name it in your interface file
+if you want it.
+
+One build serves every 68k: each binary picks the code for the machine it is
+opened on, so there is no processor to choose and no drawer to pick wrong.
+A second, smaller set in `Libs/minimal/` is there for a 1 MB machine.
+
+Encrypted (`https:`) connections now work on a 68000 too. They are slow there
+— a handshake takes about a minute, and under two seconds when the connection
+is resumed — but they complete, where before there was no `tls.library` for a
+68000 at all.
 
 ## Installing
 
