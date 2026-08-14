@@ -4,6 +4,8 @@
     tests/tools/console-probe.py HOST PORT [--seconds N] [--png OUT.png]
                                 [--pfs OUT.pfs] [--refresh] [--path /console]
                                 [--type TEXT] [--at N]
+                                [--pointer "X,Y,B; X,Y,B; ..."] [--step N]
+                                [--png-before OUT.png]
 
 WHY IT DECODES RATHER THAN COUNTING
 
@@ -18,6 +20,16 @@ WHY IT DECODES RATHER THAN COUNTING
   It is the same decode the browser does, written a second time on purpose.
   src/tools/web/client/console/tiles.ts is the one the person looks at; this
   one has never seen that file's output and agreeing with it is evidence.
+
+--pointer PROVES THE MOUSE HALF
+
+  A semicolon-separated list of `X,Y,BUTTONS` steps in AMIGA SCREEN PIXELS,
+  each sent as the `m X Y B` word the browser sends, N frames apart.  A click
+  is three steps -- move, press, release -- and a drag is a press, several
+  moves with the button still held, and a release.  --png-before is written
+  the moment the first step goes out and --png at the end, so what is asserted
+  is that the picture changed where the pointer was, which is the only thing
+  that distinguishes a mouse that works from one that lands somewhere else.
 
 --type PROVES THE INPUT HALF
 
@@ -430,6 +442,9 @@ def main(argv):
     path = "/console"
     typing = None
     type_at = 8
+    pointer = None
+    step = 4
+    png_before = None
 
     i = 3
     while i < len(argv):
@@ -445,6 +460,22 @@ def main(argv):
             typing = argv[i + 1]; i += 2
         elif argv[i] == "--at":
             type_at = int(argv[i + 1]); i += 2
+        elif argv[i] == "--pointer":
+            pointer = []
+            for part in argv[i + 1].split(";"):
+                part = part.strip()
+                if not part:
+                    continue
+                f = [int(v) for v in part.split(",")]
+                if len(f) != 3:
+                    print("--pointer takes X,Y,BUTTONS steps", file=sys.stderr)
+                    return 2
+                pointer.append(tuple(f))
+            i += 2
+        elif argv[i] == "--step":
+            step = int(argv[i + 1]); i += 2
+        elif argv[i] == "--png-before":
+            png_before = argv[i + 1]; i += 2
         elif argv[i] == "--refresh":
             want_refresh = True; i += 1
         else:
@@ -473,6 +504,9 @@ def main(argv):
     changed = 0
     changed_before = 0
     typed = 0
+    pointed = 0
+    point_at = None
+    changed_before_pointer = 0
     last = None
     fault = None
 
@@ -544,7 +578,26 @@ def main(argv):
                 changed += 1
                 if typing is not None and typed == 0:
                     changed_before += 1
+                if pointer is not None and pointed == 0:
+                    changed_before_pointer += 1
             last = now
+
+            # One step every `step` TENTHS OF A SECOND.  Not every N frames:
+            # a drag holds the screen's layer lock, the grab then reads a torn
+            # frame or the encoder finds nothing to send, and a schedule that
+            # counted frames would stop advancing in the middle of the drag
+            # and never send the release.
+            if pointer is not None and frames >= type_at:
+                if point_at is None:
+                    point_at = time.time()
+                    if png_before is not None:
+                        screen.png(png_before)
+                        say("png_before", png_before)
+                idx = int((time.time() - point_at) / (max(step, 1) * 0.1))
+                while pointed <= idx and pointed < len(pointer):
+                    x, y, b = pointer[pointed]
+                    wire.word("m %d %d %d" % (x, y, b))
+                    pointed += 1
 
             # Once the screen has settled, type.  Down and up for each key,
             # which is what a keyboard sends and what IECODE_UP_PREFIX is for;
@@ -585,6 +638,10 @@ def main(argv):
     if typing is not None:
         say("frames_changed_before_typing", changed_before)
         say("frames_changed_after_typing", changed - changed_before)
+    if pointer is not None:
+        say("pointer_steps_sent", pointed)
+        say("frames_changed_before_pointer", changed_before_pointer)
+        say("frames_changed_after_pointer", changed - changed_before_pointer)
     if fbstat:
         say("guest_fbstat", fbstat)
 
@@ -625,6 +682,14 @@ def main(argv):
         problems.append("the palette is entirely black")
     if gaps:
         problems.append("%d gap(s) in the sequence" % gaps)
+    if pointer is not None:
+        if pointed < len(pointer):
+            problems.append("only %d of %d pointer steps went out: too few"
+                            " frames arrived" % (pointed, len(pointer)))
+        elif changed - changed_before_pointer == 0:
+            problems.append("the screen did not change after %d pointer words"
+                            " went out, so nothing reached input.device"
+                            % pointed)
     if typing is not None:
         if typed == 0:
             problems.append("nothing was typed: too few frames arrived")
