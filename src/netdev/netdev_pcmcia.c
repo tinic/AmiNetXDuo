@@ -105,6 +105,21 @@ static BOOL pc_tuple(struct CardHandle *h, UBYTE code, UBYTE *buf, UWORD len)
 }
 
 /*
+ * Is a DP8390 decoding at the register base?  An absent or unconfigured card
+ * floats every line, so 0xff from the command register means "not there".
+ */
+static BOOL pc_chip_answers(const NetdevCard *card)
+{
+    const volatile UBYTE *cr =
+        (const volatile UBYTE *)(ULONG)(card->base + card->reg_off);
+    UBYTE                 v  = *cr;
+
+    pc_trace("pc: cr ", (ULONG)v);
+
+    return (BOOL)(v != 0xff);
+}
+
+/*
  * Configure the card and hand back the register base, or NULL.  The handle
  * stays owned for as long as the unit does; releasing it powers the socket
  * down under a driver that is still using it.
@@ -184,10 +199,40 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     }
     index = (UBYTE)(buf[2] & 0x3f);
 
-    /* Write the COR.  Attribute memory is byte-per-word. */
+    /*
+     * Write the COR, and check the card answered.
+     *
+     * WHICH ADDRESS THE COR IS AT is not something the CIS settles.  Attribute
+     * memory is byte-per-word, so a card-space offset n is at 0xA00000 + 2n --
+     * but CISTPL_CONFIG's TPCC_RADR is written by whoever authored the CIS,
+     * and it is not always in card space.  Amiberry's own NE2000 CIS is the
+     * case in point: it is READ through the doubling (pcmcia_attrs[addr / 2])
+     * and its COR is DECODED without it (addr == 0x3f8, gayle_attr_write).
+     *
+     * So the doubled address is tried first, because that is what the standard
+     * says, and the undoubled one only if the chip is still not there.  An
+     * unconfigured or absent card floats the bus and reads 0xff; a DP8390 in
+     * any state has bits clear in CR.  Nothing is written to the second
+     * address unless the first has already failed to bring a card up.
+     */
     attr = (volatile UBYTE *)(ULONG)(0x00a00000UL +
                                      (cfg_base + PC_COR_OFF) * PC_ATTR_STRIDE);
     *attr = (UBYTE)(index | PC_COR_LEVEL_IRQ);
+
+    if (!pc_chip_answers(card))
+    {
+        attr = (volatile UBYTE *)(ULONG)(0x00a00000UL +
+                                         cfg_base + PC_COR_OFF);
+        *attr = (UBYTE)(index | PC_COR_LEVEL_IRQ);
+        pc_trace("pc: cor undoubled ", (ULONG)(APTR)attr);
+
+        if (!pc_chip_answers(card))
+        {
+            pc_trace("pc: chip silent ", 0);
+            ReleaseCard(handle, 0);
+            return NULL;
+        }
+    }
 
     /*
      * The card's interrupt reaches INT2 through Gayle, and Gayle will not
