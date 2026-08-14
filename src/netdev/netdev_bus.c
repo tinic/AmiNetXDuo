@@ -156,7 +156,18 @@ static VOID bus_rdata(const NetdevBus *bus, UBYTE *dst, UWORD len)
     }
 
     out = (UWORD *)(APTR)dst;
-    for (i = 0; i + 2 <= len; i += 2)
+
+    /* Whole 32-byte blocks first.  The port is one address and cannot be
+       batched; the block form is here for the other three quarters of the
+       instructions, which is what a whole frame through this loop costs. */
+    i = (UWORD)(len & (UWORD)~31u);
+    if (i != 0)
+    {
+        n68k_port_in_w(out, port, (ULONG)(i >> 5));
+        out += (i >> 1);
+    }
+
+    for (; i + 2 <= len; i += 2)
         *out++ = *port;
     if (i < len)
     {
@@ -200,7 +211,15 @@ static VOID bus_wdata(const NetdevBus *bus, const UBYTE *src, UWORD len)
     }
 
     in = (const UWORD *)(const void *)src;
-    for (i = 0; i + 2 <= len; i += 2)
+
+    i = (UWORD)(len & (UWORD)~31u);
+    if (i != 0)
+    {
+        n68k_port_out_w(port, in, (ULONG)(i >> 5));
+        in += (i >> 1);
+    }
+
+    for (; i + 2 <= len; i += 2)
         *port = *in++;
     if (i < len)
         *port = (UWORD)(src[i] << 8);

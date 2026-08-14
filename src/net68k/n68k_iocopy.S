@@ -43,6 +43,8 @@
         .globl  _n68k_copy_longs
         .globl  _n68k_port_in
         .globl  _n68k_port_out
+        .globl  _n68k_port_in_w
+        .globl  _n68k_port_out_w
 
 | The 68060 makes movem microcoded and non-pipelining while ordinary moves
 | dual-issue, so it takes the plain loop.  Same bet, and the same lack of a
@@ -113,6 +115,133 @@ _n68k_port_in:
         subq.l  #1,d0
         bne     .Lpi
 .Lpi_out:
+        movem.l sp@+,d2-d7/a2-a3
+        rts
+
+| a0 = to, a1 = port, d0 = 32-byte blocks
+|
+| The word port is ONE address and is not mirrored, so nothing can be batched
+| on the port side: sixteen words are sixteen reads however they are spelled.
+| What the block form removes is everything else.  The C loop compiles to a
+| move, an add, a compare and a branch for every word, and this is the path
+| every NE2000-family card that is not an X-Surf 100 takes for a whole frame --
+| 750 iterations of it.  Pairing the reads into longwords and pushing them out
+| eight at a time with movem.l leaves 16 reads, 8 swaps and one movem per 32
+| bytes: the same 16 port cycles, half the memory cycles, and a quarter of the
+| instructions.  Big-endian order comes out right because the first word read
+| is the high half, which is what swap puts it in.
+_n68k_port_in_w:
+        movem.l d2-d7/a2-a3,sp@-
+        movea.l sp@(36),a0
+        movea.l sp@(40),a1
+        move.l  sp@(44),d0
+        tst.l   d0
+        beq     .Lpiw_out
+.Lpiw:
+        move.w  a1@,d2
+        swap    d2
+        move.w  a1@,d2
+        move.w  a1@,d3
+        swap    d3
+        move.w  a1@,d3
+        move.w  a1@,d4
+        swap    d4
+        move.w  a1@,d4
+        move.w  a1@,d5
+        swap    d5
+        move.w  a1@,d5
+        move.w  a1@,d6
+        swap    d6
+        move.w  a1@,d6
+        move.w  a1@,d7
+        swap    d7
+        move.w  a1@,d7
+        move.w  a1@,d1
+        swap    d1
+        move.w  a1@,d1
+        movea.l d1,a2
+        move.w  a1@,d1
+        swap    d1
+        move.w  a1@,d1
+        movea.l d1,a3
+#ifdef N68K_NO_MOVEM
+        move.l  d2,a0@+
+        move.l  d3,a0@+
+        move.l  d4,a0@+
+        move.l  d5,a0@+
+        move.l  d6,a0@+
+        move.l  d7,a0@+
+        move.l  a2,a0@+
+        move.l  a3,a0@+
+#else
+        movem.l d2-d7/a2-a3,a0@
+        lea     a0@(32),a0
+#endif
+        subq.l  #1,d0
+        bne     .Lpiw
+.Lpiw_out:
+        movem.l sp@+,d2-d7/a2-a3
+        rts
+
+| a0 = port, a1 = from, d0 = 32-byte blocks.  The mirror image: eight longwords
+| in with one movem.l, sixteen words out to the one port address.
+_n68k_port_out_w:
+        movem.l d2-d7/a2-a3,sp@-
+        movea.l sp@(36),a0
+        movea.l sp@(40),a1
+        move.l  sp@(44),d0
+        tst.l   d0
+        beq     .Lpow_out
+.Lpow:
+#ifdef N68K_NO_MOVEM
+        move.l  a1@+,d2
+        move.l  a1@+,d3
+        move.l  a1@+,d4
+        move.l  a1@+,d5
+        move.l  a1@+,d6
+        move.l  a1@+,d7
+        movea.l a1@+,a2
+        movea.l a1@+,a3
+#else
+        movem.l a1@+,d2-d7/a2-a3
+#endif
+        move.l  d2,d1
+        swap    d1
+        move.w  d1,a0@
+        move.w  d2,a0@
+        move.l  d3,d1
+        swap    d1
+        move.w  d1,a0@
+        move.w  d3,a0@
+        move.l  d4,d1
+        swap    d1
+        move.w  d1,a0@
+        move.w  d4,a0@
+        move.l  d5,d1
+        swap    d1
+        move.w  d1,a0@
+        move.w  d5,a0@
+        move.l  d6,d1
+        swap    d1
+        move.w  d1,a0@
+        move.w  d6,a0@
+        move.l  d7,d1
+        swap    d1
+        move.w  d1,a0@
+        move.w  d7,a0@
+        move.l  a2,d1
+        swap    d1
+        move.w  d1,a0@
+        move.l  a2,d1
+        move.w  d1,a0@
+        move.l  a3,d1
+        swap    d1
+        move.w  d1,a0@
+        move.l  a3,d1
+        move.w  d1,a0@
+        subq.l  #1,d0
+        bne     .Lpow
+.Lpow_out:
         movem.l sp@+,d2-d7/a2-a3
         rts
 
