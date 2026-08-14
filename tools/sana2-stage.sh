@@ -64,9 +64,15 @@ anxnet_card_for() {
     case "$1" in
         xsurf100z2|xsurf100z3) echo xsurf100 ;;
         ariadne2)              echo ariadne2 ;;
-        xsurf)                 echo xsurf ;;
+        # NOT xsurf.  The row exists in netdev_cards.c and attach fails on it:
+        # the card's DP8390 sits behind ISA Plug-and-Play that nothing
+        # configures (docs/BACKLOG.md).  The vendor driver is the one that
+        # works there, so that is what the sweeps boot.
         hydra)                 echo hydra ;;
         eb920)                 echo lanrover ;;
+        a2065)                 echo a2065 ;;
+        ariadne)               echo ariadne ;;
+        ne2000_pcmcia)         echo pcmcia ;;
         *)                     echo "" ;;
     esac
 }

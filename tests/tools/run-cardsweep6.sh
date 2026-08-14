@@ -136,6 +136,7 @@ case "$BUILD" in
     *)  BUILDDIR="$ROOT/${BUILD#./}" ;;
 esac
 TOOLS="$BUILDDIR/src/tools"
+MCASTJOIN="$BUILDDIR/tests/tools/McastJoin"
 BSD="$BUILDDIR/src/bsdsocket/bsdsocket.library"
 
 # shellcheck source=tests/tools/cards.sh
@@ -175,6 +176,7 @@ fi
 for t in ToolsSmoke AddNetInterface ShowNetStatus ping nc traceroute netstat; do
     [ -x "$TOOLS/$t" ] || infra "no $TOOLS/$t; build $BUILD first"
 done
+[ -x "$MCASTJOIN" ] || infra "no $MCASTJOIN; build $BUILD first"
 [ -f "$BSD" ] || infra "no $BSD; build $BUILD first"
 
 # A tree built with -DAMINETXDUO_IPV6=OFF has no IPv6 to gate, and would
@@ -356,6 +358,7 @@ while read -r -u 3 board model _addr mac; do
     for t in AddNetInterface ShowNetStatus ping nc traceroute netstat; do
         cp "$TOOLS/$t" "$STAGE/$t"
     done
+    cp "$MCASTJOIN" "$STAGE/McastJoin"
 
     # DHCP for IPv4 and AUTO for IPv6: nothing calls in, so no address has to
     # be known before the boot, and AUTO is what a user gets.  CONFIGURE6 is
@@ -387,7 +390,16 @@ IFEOF
     C_TRACE="SYS:traceroute $TARGET6 -m 6 -q 1 -w 2 -n"
     C_ONLINK="SYS:ping $ONLINK6 -c 3 -t 10 -n"
     C_ROUTES="SYS:netstat -r"
+
+    # BEFORE the interface comes up, and that is the point: McastJoin asks the
+    # DRIVER whether it takes a real group address, with no stack in the way.
+    # Once AddNetInterface has run, src/sana2's workaround has already re-asked
+    # for the same hash bucket with a synthetic address a bit-7 test accepts,
+    # and a driver that refuses every group passes anyway.  This is the only
+    # arm that can see the defect anxnet.device was written to remove.
+    C_MCAST="SYS:McastJoin DEVICE=$SANA2_DEVICE UNIT=0"
     {
+        echo "$C_MCAST"
         echo "$C_IFUP"
         echo "wait $SETTLE"
         echo "$C_STATUS"
@@ -406,6 +418,7 @@ IFEOF
             "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" \
             "$STAGE/libs" "$STAGE/AddNetInterface" "$STAGE/ShowNetStatus" \
             "$STAGE/ping" "$STAGE/nc" "$STAGE/traceroute" "$STAGE/netstat" \
+            "$STAGE/McastJoin" \
         > "$LOGDIR/$board.log" 2>&1 < /dev/null
     rc=$?
 
@@ -415,9 +428,12 @@ IFEOF
     REPORT="$ROOT/build/amiberry-testhd-$tag/tools.txt"
 
     iface_rc=""; global6=""; v4=0; p6=0; tcp6=no; hops=0; onlink=skip
+    mcast=none
     if [ -f "$REPORT" ]; then
         cp "$REPORT" "$LOGDIR/$board.tools.txt"
         iface_rc=$(rc_of "$C_IFUP")
+        mcast=$(block "$C_MCAST" | sed -n 's/.*verdict=\([A-Z]*\).*/\1/p' | tail -1)
+        mcast=${mcast:-none}
         global6=$(guest_global6)
         v4=$(replies_of "$C_PING4"); v4=${v4:-0}
         p6=$(replies_of "$C_PING6"); p6=${p6:-0}
@@ -457,6 +473,13 @@ IFEOF
     elif [ -z "$global6" ]; then
         status=fail_no_global
         why=" reason=\"online, and no global IPv6 address formed: no router advertisement reached this card\""
+    elif [ "$SANA2_SEL_SOURCE" = anxnet ] && [ "$mcast" != PASS ]; then
+        # OUR driver only.  A vendor driver refusing a group address is the
+        # defect this one exists to remove, not a regression in this run, and
+        # gating on it would red the X-Surf row for something already known.
+        status=fail_mcast
+        why=" reason=\"McastJoin verdict=$mcast: the driver refused a real"
+        why="$why group address, which is the whole point of this driver\""
     elif [ "$offlan" = yes ]; then
         status=pass
     elif [ "$onlink" = yes ]; then
@@ -477,11 +500,11 @@ IFEOF
         *)                       NFAIL=$((NFAIL + 1)) ;;
     esac
 
-    printf 'card=%s model=%s driver=%s driver_source=%s anxcard=%s status=%s rc=%s iface_rc=%s global6=%s ping6_offlan=%s tcp6_offlan=%s trace6_hops=%s ping6_onlink=%s ping4_offlan=%s wall_s=%s log=%s%s\n' \
+    printf 'card=%s model=%s driver=%s driver_source=%s anxcard=%s status=%s rc=%s iface_rc=%s global6=%s ping6_offlan=%s tcp6_offlan=%s trace6_hops=%s ping6_onlink=%s ping4_offlan=%s mcast=%s wall_s=%s log=%s%s\n' \
            "$board" "$model" "$drv" "$SANA2_SEL_SOURCE" "${anxcard:-none}" \
            "$status" "$rc" "${iface_rc:-none}" \
            "${global6:-none}" "$p6" "$tcp6" "$hops" "$onlink" "$v4" \
-           "$wall" "$LOGDIR/$board.log" "$why" | tee -a "$RESULTS"
+           "$mcast" "$wall" "$LOGDIR/$board.log" "$why" | tee -a "$RESULTS"
 done 3<<EOF
 $(cards_rows "$ONLY")
 EOF

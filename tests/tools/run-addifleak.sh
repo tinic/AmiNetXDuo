@@ -125,6 +125,17 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE/libs" "$STAGE/devs/NetInterfaces"
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 cp "$CNET"  "$STAGE/devs/cnet.device"
+# AMINETXDUO_ADDIF_DRIVER points the drill at a different SANA-II driver.  The
+# device only has to OPEN here -- STATE=down means bring-up fails afterwards --
+# so this is also the cheapest thing that answers "does the driver load at all
+# under this Kickstart", which for anxnet.device is the only Kickstart 2.x
+# coverage there is.
+ADDIF_DRIVER="${AMINETXDUO_ADDIF_DRIVER:-cnet.device}"
+ADDIF_CARD="${AMINETXDUO_ADDIF_CARD:-}"
+if [ "$ADDIF_DRIVER" != cnet.device ]; then
+    cp "${AMINETXDUO_ADDIF_DRIVER_PATH:?set AMINETXDUO_ADDIF_DRIVER_PATH}" \
+       "$STAGE/devs/$ADDIF_DRIVER"
+fi
 cp "$ADDIF" "$STAGE/AddNetInterface"
 # STATE=down is what makes this test reach the RIGHT state.
 #
@@ -138,8 +149,9 @@ cp "$ADDIF" "$STAGE/AddNetInterface"
 #
 # A device that never opens cannot show it. Nothing has been allocated yet, so
 # there is nothing to leave behind, and the run passes on a broken build.
-cat > "$STAGE/devs/NetInterfaces/eth0" <<'EOF'
-DEVICE=cnet.device
+cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
+DEVICE=$ADDIF_DRIVER
+${ADDIF_CARD:+CARD=$ADDIF_CARD}
 UNIT=0
 CONFIGURE=DHCP
 STATE=down

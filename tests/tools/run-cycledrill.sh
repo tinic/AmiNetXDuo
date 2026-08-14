@@ -181,8 +181,20 @@ cp "$A2065" "$STAGE/devs/a2065.device"
 # takes the DHCP exchange off the clock of every expunge cycle, which is what
 # makes EXPUNGES=10 affordable.  10.0.2.15 and 10.0.2.2 are SLIRP's own
 # numbers, taken statically rather than leased.
-cat > "$STAGE/devs/NetInterfaces/eth0" <<'IFEOF'
-DEVICE=a2065.device
+# AMINETXDUO_CYCLE_DRIVER / _CARD point the drill at a different SANA-II
+# driver, which is how anxnet.device gets its open/close/expunge and
+# online/offline exercised: the a2065.device default cycles Commodore's
+# driver and proves nothing about ours.
+CYCLE_DRIVER="${AMINETXDUO_CYCLE_DRIVER:-a2065.device}"
+CYCLE_CARD="${AMINETXDUO_CYCLE_CARD:-}"
+if [ "$CYCLE_DRIVER" != a2065.device ]; then
+    cp "${AMINETXDUO_CYCLE_DRIVER_PATH:?set AMINETXDUO_CYCLE_DRIVER_PATH}" \
+       "$STAGE/devs/$CYCLE_DRIVER"
+fi
+
+cat > "$STAGE/devs/NetInterfaces/eth0" <<IFEOF
+DEVICE=$CYCLE_DRIVER
+${CYCLE_CARD:+CARD=$CYCLE_CARD}
 UNIT=0
 CONFIGURE=STATIC
 ADDRESS=10.0.2.15

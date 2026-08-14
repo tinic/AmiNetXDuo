@@ -1246,6 +1246,8 @@ static VOID netdev_probe(NetdevDevice *dev)
             nd_trace("anx: pcmcia claimed\r\n");
             if (!netdev_add_unit(dev, card, base, 0))
                 netdev_pcmcia_release();
+            else
+                netdev_pcmcia_bind(&dev->nd_Units[dev->nd_UnitCount - 1]);
         }
     }
 }
@@ -1588,6 +1590,19 @@ static BPTR netdev_expunge(register struct Device *dev __asm("a6"))
         d->nd_Units[i].nu_Nic.ops->stop(&d->nd_Units[i].nu_Nic);
         Enable();
     }
+
+    /*
+     * GIVE THE PCMCIA SLOT BACK BEFORE THE SEGLIST GOES.
+     *
+     * card.resource holds the CardHandle we passed to OwnCard(), and that
+     * handle -- and the removal Interrupt hanging off it -- are statics in
+     * this driver's own BSS.  Unloading without releasing leaves the resource
+     * with a node in freed memory: the next OwnCard() walks it, and the card
+     * is gone until the machine is rebooted.  Found by reading this path for
+     * the cycle drill rather than by the drill, which had never been pointed
+     * at the slot.
+     */
+    netdev_pcmcia_release();
 
     if (d->nd_ExpansionBase != NULL)
     {
