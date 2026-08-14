@@ -3,10 +3,15 @@
  *
  * The SANA-II shell above never names a register.  It calls attach/init/stop/
  * tx/setfilter/intr and is handed whole Ethernet frames back through a
- * callback.  Everything DP8390 lives behind that, so a second core -- an
- * Am7990 LANCE for the A2065 and Ariadne I, which are not in this family and
- * are not implemented here -- is another NetdevNicOps table and no change at
- * all above this line.
+ * callback.  Everything DP8390 lives behind that, so a second core is another
+ * NetdevNicOps table and no change at all above this line.
+ *
+ * That has now been paid for once: ed.c is the second core, for the Hydra and
+ * the ASDG LAN Rover, and it changed nothing in this file except adding its
+ * name to the list at the bottom.  It shares dp8390.c whole and differs only
+ * in the three buffer-access pointers below.  A third core -- an Am7990 LANCE
+ * for the A2065 and Ariadne I, which are not in this family and are not
+ * implemented here -- would share none of dp8390.c and still fit.
  *
  * What the seam has to carry for a LANCE to fit later, and does:
  *   - the frame callback takes a complete frame, header included, so a core
@@ -137,6 +142,7 @@ struct NetdevNic
 
 /* The two cores. netdev_nic_ops_for() returns NULL for a chip with no core. */
 extern const struct NetdevNicOps netdev_nic_ne2000;
+extern const struct NetdevNicOps netdev_nic_ed;
 
 const struct NetdevNicOps *netdev_nic_ops_for(UBYTE chip);
 

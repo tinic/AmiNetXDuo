@@ -492,19 +492,3 @@ const struct NetdevNicOps netdev_nic_ne2000 =
     dp8390_setfilter,
     dp8390_intr
 };
-
-const struct NetdevNicOps *netdev_nic_ops_for(UBYTE chip)
-{
-    /*
-     * NETDEV_CHIP_ED -- Hydra and the ASDG LanRover -- has no core yet: those
-     * boards map their packet buffer instead of reaching it through a remote
-     * DMA port, so they need a second set of read_hdr/ring_copy/write_buf and
-     * ED_DCR_BOS.  The rows are in the table; returning NULL keeps them out of
-     * the unit numbering until the core lands, rather than enumerating a board
-     * that would then fail to open.
-     */
-    if (chip == NETDEV_CHIP_NE2000)
-        return &netdev_nic_ne2000;
-
-    return NULL;
-}
