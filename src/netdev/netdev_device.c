@@ -162,6 +162,12 @@ VOID netdev_trace_cmd(UWORD c)
 {
     nd_tracex("anx: cmd ", (ULONG)c);
 }
+
+/* For the chip cores, which cannot see nd_tracex. */
+VOID netdev_trace_val(const char *tag, ULONG v)
+{
+    nd_tracex(tag, v);
+}
 #else
 #define nd_trace(s)         ((VOID)0)
 #define nd_tracex(t, v)     ((VOID)0)

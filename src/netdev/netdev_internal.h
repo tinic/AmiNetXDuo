@@ -133,6 +133,7 @@ VOID netdev_tx_pump(NetdevUnit *unit);
 /* netdev_pcmcia.c: the slot has no autoconfig record, so it is claimed
    rather than found.  NULL when there is no slot, nothing in it, or what is
    in it is not a LAN card. */
+VOID netdev_trace_val(const char *tag, ULONG v);
 APTR netdev_pcmcia_claim(const NetdevCard *card);
 VOID netdev_pcmcia_release(VOID);
 VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io);

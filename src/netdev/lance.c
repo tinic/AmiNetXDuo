@@ -33,8 +33,11 @@
 #include "lancereg.h"
 #include "dp8390.h"     /* the DP8390_TX_* return codes are the shared contract */
 
-#ifdef NETDEV_TIME
-extern ULONG netdev_time_copy;
+#ifdef NETDEV_TRACE
+extern VOID netdev_trace_val(const char *tag, ULONG v);
+#define LE_TRACE(t, v)  netdev_trace_val((t), (ULONG)(v))
+#else
+#define LE_TRACE(t, v)  ((VOID)0)
 #endif
 
 /* ------------------------------------------------------- shared RAM ------ */
@@ -229,6 +232,7 @@ LONG lance_init(NetdevNic *nic)
     }
     while ((csr0 & (LE_C0_IDON | LE_C0_ERR)) == 0 && --n != 0);
 
+    LE_TRACE("le: init csr0 ", csr0);
     if ((csr0 & LE_C0_IDON) == 0)
         return -1;
 
@@ -236,6 +240,7 @@ LONG lance_init(NetdevNic *nic)
     le_csr_put(nic, LE_CSR0, LE_C0_STRT | LE_C0_INEA);
 
     nic->running = TRUE;
+    LE_TRACE("le: running ", le_csr_get(nic, LE_CSR0));
 
     return 0;
 }
@@ -408,6 +413,7 @@ LONG lance_attach(NetdevNic *nic)
 
     le_csr_put(nic, LE_CSR0, LE_C0_STOP);
     csr0 = le_csr_get(nic, LE_CSR0);
+    LE_TRACE("le: attach csr0 ", csr0);
     if ((csr0 & 0xff00) != 0 || (csr0 & LE_C0_STOP) == 0)
         return -1;
 
