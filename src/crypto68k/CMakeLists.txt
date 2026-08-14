@@ -241,7 +241,8 @@ set(CRYPTO68K_MV OFF)
 if(CMAKE_CROSSCOMPILING AND AMINETXDUO_CPU STREQUAL "any")
     set(CRYPTO68K_MV ON)
     list(APPEND CRYPTO68K_SOURCES
-         c68k_prim.S c68k_chacha20.S c68k_poly1305.S c68k_prim_mulw.S)
+         c68k_prim.S c68k_chacha20.S c68k_poly1305.S c68k_prim_mulw.S
+         c68k_dispatch.S)
 endif()
 
 add_library(crypto68k STATIC ${CRYPTO68K_SOURCES})
@@ -307,6 +308,9 @@ if(CRYPTO68K_MV)
         COMPILE_OPTIONS "-m68020")
     set_source_files_properties(c68k_chacha20.S PROPERTIES
         COMPILE_DEFINITIONS "C68K_ASM=1;C68K_MV=1"
+        COMPILE_OPTIONS "-m68000")
+    set_source_files_properties(c68k_dispatch.S PROPERTIES
+        COMPILE_DEFINITIONS "C68K_MV=1"
         COMPILE_OPTIONS "-m68000")
 endif()
 
