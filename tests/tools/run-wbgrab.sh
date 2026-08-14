@@ -163,7 +163,7 @@ if [ "$wb_stale" = "1" ]; then
     # command in C: without its E bit.
     chmod -R a+rx "$WB"
     : > "$WBSTAMP"
-    for want in C/Assign C/LoadWB C/NewShell C/Wait S/Startup-Sequence \
+    for want in C/Assign C/LoadWB C/Wait C/Dir S/Startup-Sequence \
                 Fonts/topaz.font Devs/system-configuration; do
         [ -e "$WB/$want" ] || { say error "assembled SYS: has no $want"; exit 2; }
     done
@@ -199,11 +199,11 @@ EOF
 
     cat > "$HD/S/windower" <<'EOF'
 Lab loop
-C:NewShell CON:20/30/300/120/One FROM S:winclose
+NewShell CON:20/30/300/120/One FROM S:winclose
 C:Wait 1
-C:NewShell CON:200/80/320/120/Two FROM S:winclose
+NewShell CON:200/80/320/120/Two FROM S:winclose
 C:Wait 1
-C:NewShell CON:80/140/360/100/Three FROM S:winclose
+NewShell CON:80/140/360/100/Three FROM S:winclose
 C:Wait 2
 Skip loop BACK
 EOF
@@ -237,7 +237,7 @@ EOF
         cat <<'EOF'
 FailAt 9999
 C:Wait 6
-C:NewShell CON:0/11/240/60/Driver FROM S:windower
+NewShell CON:0/11/240/60/Driver FROM S:windower
 C:Wait 2
 C:wbgrab FRAMES 100 DELAY 2 TO DH0:windows.pfs >DH0:windows.txt
 Echo >DH0:.done "$RC"
@@ -247,7 +247,7 @@ EOF
         cat <<'EOF'
 FailAt 9999
 C:Wait 6
-C:NewShell CON:0/11/640/190/Scroll FROM S:scroller
+NewShell CON:0/11/640/190/Scroll FROM S:scroller
 C:Wait 3
 C:wbgrab FRAMES 100 DELAY 2 TO DH0:scroll.pfs >DH0:scroll.txt
 Echo >DH0:.done "$RC"
