@@ -125,6 +125,32 @@ if(CMAKE_CROSSCOMPILING)
 endif()
 
 
+# ------------------------------------------------------ the variant probe --
+#
+# n68kmv checks and times every multiversioned inner loop against the others
+# on the machine it is run on, so it exists only where there is more than one
+# of them.  It is also the only instrument that can settle the two 68060 bets
+# in n68k_copy.S and n68k_checksum.S, which are reasoning and not measurement
+# because no emulator charges cycles above a 68020.
+#
+#   cmake --build build/any --parallel --target n68kmv
+#   AMINETXDUO_RUN_TAG=mv ./tools/amiberry-run.sh -t 300 -m A1200 \
+#       build/any/tests/perf/n68kmv
+
+if(CMAKE_CROSSCOMPILING AND AMINETXDUO_NET68K_ASM AND
+   AMINETXDUO_CPU STREQUAL "any")
+
+    add_executable(n68kmv n68kmv.c)
+    target_link_libraries(n68kmv PRIVATE aminetxduo_net68k)
+    set_target_properties(n68kmv PROPERTIES OUTPUT_NAME "n68kmv")
+
+    if(AMIGA_NDK_INCLUDE)
+        target_include_directories(n68kmv PRIVATE "${AMIGA_NDK_INCLUDE}")
+    endif()
+
+endif()
+
+
 # ------------------------------------------------------- calibration probe --
 #
 # cpucal answers the question every other number in this directory depends on:
