@@ -120,12 +120,13 @@ CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ShowNetServices
 # spends 64% of a TLS 1.3 transfer in one function.  Nobody can pick wrong now
 # because there is nothing to pick.
 #
-# minimal is the same stack with IPv6, mDNS, the packet filter, TLS and IPv4
-# multicast compiled out: 225 KB against the full build's 308 KB, 83 KB of
-# options, both stripped.  It is for somebody who has measured their 1 MB
-# machine and decided, which is why it is a drawer and not a threshold: a stack
-# that silently drops IPv6 and .local resolution on a machine that could have
-# run them is a support question, not a saving.
+# minimal is the same stack with IPv6, mDNS, the packet filter, TLS, IPv4
+# multicast, the ARexx host and the TCP: handler compiled out: 234,768 bytes
+# against the full build's 335,752, 98 KB of options, both stripped.  It is for
+# somebody who has measured their 1 MB machine and decided, which is why it is
+# a drawer and not a threshold: a stack that silently drops IPv6 and .local
+# resolution on a machine that could have run them is a support question, not a
+# saving.
 #
 # The build directory is derived from -b, so `-b build/release` wants
 # build/release-minimal beside it and cannot be pointed at a tree from a

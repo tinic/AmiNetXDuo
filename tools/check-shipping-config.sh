@@ -35,17 +35,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # is a decision about what ships and not about the test.  Key is the drawer;
 # value is (the pair that disagrees, why it is here).
 KNOWN = {
-    "minimal": (
-        "release.yml vs ci.sh",
-        "release.yml gives five OFF flags and ci.sh's minimal arm gives "
-        "seven; AMINETXDUO_AREXX and AMINETXDUO_TCPDEVICE default ON "
-        "(CMakeLists.txt:151,191), so the drawer that ships carries the ARexx "
-        "host and the TCP: handler and the arm that compiles it does not. "
-        "make-dist.sh's own note names five options and its 225 KB figure was "
-        "measured on five. emulator.yml:348 builds the archive its e2e "
-        "installs with seven, so the drawer tested on a real Workbench is not "
-        "the drawer that ships. Pick one.",
-    ),
+    # Empty, and it should stay that way.  The one entry it held was the
+    # minimal drawer: release.yml gave five OFF flags where ci.sh's arm gave
+    # seven, so the drawer that shipped carried the ARexx host and the TCP:
+    # handler and the arm that compiled it under fatal warnings did not, while
+    # emulator.yml's end-to-end installed the seven-option build -- three
+    # answers to one question.  Settled at seven, measured: the two options are
+    # 12,248 bytes, on the 1 MB machine that drawer is for.
 }
 
 OPT = re.compile(r"-D(AMINETXDUO_[A-Z0-9_]+)=(\w+)")

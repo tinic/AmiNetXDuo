@@ -148,12 +148,21 @@ jobs:
 
           # The second drawer: everything optional compiled out, for somebody
           # who has measured their machine and wants the memory back.
+          #
+          # SEVEN OPTIONS, not five.  This step used to give five and ci.sh's
+          # minimal arm gave seven, so the drawer that shipped carried the
+          # ARexx host and the TCP: handler and the arm that compiled it under
+          # fatal warnings did not -- and emulator.yml's end-to-end installed
+          # the seven-option one, so what was tested on a real Workbench was
+          # not what shipped either.  Measured: the two are 12,248 bytes,
+          # which on the 1 MB machine this drawer exists for is the point.
           cmake -S . -B build/release-minimal \
                 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF \
                 -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF \
-                -DAMINETXDUO_MULTICAST=OFF
+                -DAMINETXDUO_MULTICAST=OFF \
+                -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF
           cmake --build build/release-minimal --parallel
 
       # ssh comes from clients/, not the CMake tree, so a `cmake --build` does

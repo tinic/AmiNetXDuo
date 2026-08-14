@@ -580,9 +580,9 @@
           "another one.\n\n"
           "The full stack is the one to install unless memory is tight.\n\n"
           "The minimal stack leaves out IPv6, .local name lookups, the packet "
-          "filter, encrypted (https:) connections and IPv4 multicast. It is "
-          "about 104 KB smaller. On a 1 MB machine that is worth having; on a "
-          "larger one it is worth nothing.\n\n"
+          "filter, encrypted (https:) connections, IPv4 multicast, the ARexx "
+          "host and the TCP: handler. It is 98 KB smaller. On a 1 MB machine "
+          "that is worth having; on a larger one it is worth nothing.\n\n"
           "Encrypted connections work on any processor with the full stack, "
           "but on a 68000 a first handshake takes a minute or two. A repeat "
           "connection to the same server is under a second.")
@@ -1063,7 +1063,7 @@
     (message
       "The minimal stack was chosen, so several things are not installed: "
       "encrypted (https:) connections, IPv6, .local name lookups, the packet "
-      "filter and IPv4 multicast.\n\n"
+      "filter, IPv4 multicast, the ARexx host and the TCP: handler.\n\n"
       "The stack, the commands, ssh and ordinary http: work normally.  "
       "Installing again and choosing Everything brings the rest back."))
 
