@@ -61,8 +61,12 @@ endif()
 # 68000 because MULU.W is the only multiply it ever had.  It is a separate option because it is a separate file with a
 # separate CPU rule, and because the two cannot both be on: they define the same
 # symbol.
+# `any` takes it for the reason both of those do, and it is the only assembly
+# here a CPU-independent binary can carry: MULU.W is in the original 68000 set
+# and the 68060 kept it, so one build of this file runs on the whole family.
 if(CMAKE_CROSSCOMPILING AND (AMINETXDUO_CPU STREQUAL "68060" OR
-                            AMINETXDUO_CPU STREQUAL "68000"))
+                            AMINETXDUO_CPU STREQUAL "68000" OR
+                            AMINETXDUO_CPU STREQUAL "any"))
     set(_crypto68k_asm_mulw_default ON)
 else()
     set(_crypto68k_asm_mulw_default OFF)

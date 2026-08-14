@@ -152,8 +152,18 @@ if(CMAKE_CROSSCOMPILING AND NOT AMINETXDUO_CPU STREQUAL "68000")
     # the same default that made objdump print `.short 0x4c06` in the crypto
     # work.  src/net68k/ and src/crypto68k/ pass the arch flags to their .S
     # files for the same reason.
+    #
+    # An AMINETXDUO_CPU=any tree compiles -m68000 and would reject it too, so
+    # this file names the flag it needs rather than taking the tree's.  That is
+    # sound here and nowhere else: cpucal is a probe run by hand on the machine
+    # it is asking about, never shipped and never opened by anything.
+    if(AMINETXDUO_CPU STREQUAL "any")
+        set(_cpucal_arch "-m68020")
+    else()
+        set(_cpucal_arch "${AMIGA_ARCH_FLAGS}")
+    endif()
     set_source_files_properties(cpucal.S PROPERTIES
-        COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
+        COMPILE_OPTIONS "${_cpucal_arch}")
 
     if(AMIGA_NDK_INCLUDE)
         target_include_directories(cpucal PRIVATE "${AMIGA_NDK_INCLUDE}")
