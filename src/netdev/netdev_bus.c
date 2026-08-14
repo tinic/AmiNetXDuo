@@ -236,6 +236,7 @@ VOID netdev_bus_setup(NetdevBus *bus, APTR base, UWORD stride, APTR wide)
     bus->asic   = (volatile UBYTE *)base + 16u * stride;
     bus->wide   = (volatile UBYTE *)wide;
     bus->stride = stride;
+    bus->shift  = (UBYTE)((stride == 4u) ? 2u : ((stride == 2u) ? 1u : 0u));
     bus->dmode  = NETDEV_DMODE_WORD;
     bus->ops    = &netdev_bus_generic;
 }
