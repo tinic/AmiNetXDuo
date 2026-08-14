@@ -35,7 +35,9 @@
 
 #include <exec/types.h>
 #include <exec/nodes.h>
+#include <exec/interrupts.h>
 #include <resources/card.h>
+#include <devices/sana2.h>   /* S2EVENT_OFFLINE */
 
 #include <proto/exec.h>
 
@@ -135,6 +137,42 @@ static BOOL pc_chip_answers(const NetdevCard *card)
    the unit: there is nothing for a second one to point at. */
 static struct CardHandle pc_handle;
 
+/*
+ * CARD REMOVAL.  A PCMCIA card is the one card in the table that can leave
+ * while the machine is running, and until this existed the driver went on
+ * driving the empty socket: reads return bus noise, the chip never answers,
+ * and every request waits for a timeout that means nothing.
+ *
+ * card.resource calls this at interrupt level with the handle in a1.  It must
+ * not touch the card -- there isn't one -- so `running` is cleared FIRST and
+ * netdev_offline() then finds ops->stop harmless and answers everything that
+ * was queued with S2ERR_OUTOFSERVICE, which is what a caller can act on.
+ */
+static NetdevUnit *pc_unit;
+static struct Interrupt pc_removed;
+
+static ULONG pc_on_removed(register struct CardHandle *h __asm("a1"))
+{
+    NetdevUnit *unit = pc_unit;
+
+    (VOID)h;
+
+    if (unit != NULL)
+    {
+        unit->nu_Nic.running = FALSE;
+        if (unit->nu_Online)
+            netdev_offline(unit, S2EVENT_OFFLINE);
+    }
+
+    return 0;
+}
+
+/* The probe calls this once the unit the slot belongs to exists. */
+VOID netdev_pcmcia_bind(NetdevUnit *unit)
+{
+    pc_unit = unit;
+}
+
 APTR netdev_pcmcia_claim(const NetdevCard *card)
 {
     struct CardHandle *handle = &pc_handle;
@@ -151,9 +189,18 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
             return NULL;        /* no slot on this machine */
     }
 
+    pc_removed.is_Node.ln_Type = NT_INTERRUPT;
+    pc_removed.is_Node.ln_Pri  = 0;
+    pc_removed.is_Node.ln_Name = (char *)"anxnet.device";
+    pc_removed.is_Data         = NULL;
+    pc_removed.is_Code         = (VOID (*)())pc_on_removed;
+
     handle->cah_CardNode.ln_Name = (char *)"anxnet.device";
     handle->cah_CardNode.ln_Pri  = 0;
     handle->cah_CardFlags        = 0;
+    handle->cah_CardRemoved      = &pc_removed;
+    handle->cah_CardInserted     = NULL;
+    handle->cah_CardStatus       = NULL;
 
     {
         struct CardHandle *owner = OwnCard(handle);
@@ -253,6 +300,8 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
 VOID netdev_pcmcia_release(VOID)
 {
     struct CardHandle *handle = &pc_handle;
+
+    pc_unit = NULL;
 
     if (CardResource != NULL && handle->cah_CardNode.ln_Name != NULL)
     {

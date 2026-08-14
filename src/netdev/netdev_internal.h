@@ -137,6 +137,7 @@ VOID netdev_tx_pump(NetdevUnit *unit);
 VOID netdev_trace_val(const char *tag, ULONG v);
 APTR netdev_pcmcia_claim(const NetdevCard *card);
 VOID netdev_pcmcia_release(VOID);
+VOID netdev_pcmcia_bind(NetdevUnit *unit);
 VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io);
 VOID netdev_drop_writes(NetdevUnit *unit, NetdevOpener *op);
 LONG netdev_online(NetdevUnit *unit);

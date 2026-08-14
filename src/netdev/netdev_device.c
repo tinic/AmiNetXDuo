@@ -1246,6 +1246,8 @@ static VOID netdev_probe(NetdevDevice *dev)
             nd_trace("anx: pcmcia claimed\r\n");
             if (!netdev_add_unit(dev, card, base, 0))
                 netdev_pcmcia_release();
+            else
+                netdev_pcmcia_bind(&dev->nd_Units[dev->nd_UnitCount - 1]);
         }
     }
 }
