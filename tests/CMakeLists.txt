@@ -1,6 +1,5 @@
 # On-Amiga test harnesses.
 
-add_subdirectory(common)
 add_subdirectory(ram_driver)
 add_subdirectory(soak)
 add_subdirectory(netstack)
