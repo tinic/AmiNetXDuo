@@ -105,20 +105,25 @@ static BOOL pc_tuple(struct CardHandle *h, UBYTE code, UBYTE *buf, UWORD len)
 }
 
 /*
- * Is a DP8390 decoding at the register base?  Both 0xff and 0x00 mean it is
- * not: a floating bus reads as ones, an address nothing decodes reads as
- * zeroes under Gayle, and a DP8390's command register is neither -- STP is
- * set out of reset, so CR is 0x21 before anything touches it.
+ * Is a DP8390 decoding at the register base?
+ *
+ * NOT by reading the command register: it comes out of reset reading 0 and an
+ * address nothing decodes reads 0 too, so the two are indistinguishable --
+ * which cost an evening.  Write it instead.  CR is read/write, STP|RD2 is the
+ * state the chip is already in, and a window with nothing behind it does not
+ * remember what was written to it.
  */
 static BOOL pc_chip_answers(const NetdevCard *card)
 {
-    const volatile UBYTE *cr =
-        (const volatile UBYTE *)(ULONG)(card->base + card->reg_off);
-    UBYTE                 v  = *cr;
+    volatile UBYTE *cr =
+        (volatile UBYTE *)(ULONG)(card->base + card->reg_off);
+    UBYTE           v;
 
+    *cr = 0x21;             /* ED_CR_STP | ED_CR_RD2 */
+    v   = *cr;
     pc_trace("pc: cr ", (ULONG)v);
 
-    return (BOOL)(v != 0xff && v != 0x00);
+    return (BOOL)(v == 0x21);
 }
 
 /*
