@@ -211,6 +211,32 @@ static void test_ring_copy(void)
     (VOID)ed_ring_copy(&nic, 0x2000, (UBYTE *)dst, 7);
     expect_u32("ring_copy odd tail byte",
                ((UBYTE *)dst)[6], (UBYTE)(win_get(0x2006) >> 8));
+
+    /*
+     * An ODD DESTINATION.  No caller in the driver produces one -- the
+     * staging buffer is longword-aligned and a ring wrap resumes on a page
+     * boundary -- so this branch would otherwise be code that reads as
+     * handled and has never run.  It splits the word by shifting, which is
+     * the same on either endianness.
+     */
+    {
+        UBYTE odd[64];
+        int   bad = 0;
+
+        memset(odd, 0, sizeof(odd));
+        (VOID)ed_ring_copy(&nic, 0x3000, odd + 1, 16);
+        for (i = 0; i < 8; i++)
+        {
+            UWORD w = win_get(0x3000u + i * 2u);
+
+            bad |= odd[1 + i * 2] != (UBYTE)(w >> 8);
+            bad |= odd[2 + i * 2] != (UBYTE)w;
+        }
+        bad |= odd[0] != 0;
+        bad |= odd[17] != 0;
+        expect_u32("ring_copy into an odd destination",
+                   (unsigned long)bad, 0);
+    }
 }
 
 /* ------------------------------------------------------------ write_buf --- */

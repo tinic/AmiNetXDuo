@@ -77,6 +77,11 @@ static volatile UBYTE *ed_buf(NetdevNic *nic)
  * both halves on real hardware even where the emulator accepts it.  Every
  * caller here starts on an even chip address; ED_PAGE_SIZE is 256 and the
  * header is 4 bytes, so nothing rounds it to an odd one.
+ *
+ * The odd-host-address arms are not reachable from today's callers -- the
+ * staging buffers are longword-aligned and a ring wrap resumes on a page
+ * boundary -- so test_netdev_ed.c drives them directly rather than leaving
+ * two branches that read as handled and have never run.
  */
 static VOID ed_copy_in(const volatile UBYTE *src, UBYTE *dst, UWORD len)
 {
