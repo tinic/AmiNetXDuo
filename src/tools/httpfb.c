@@ -700,104 +700,6 @@ static VOID fb_frame_payload(HttpWsEvent ev, ULONG len)
     fb_tx_len  = 10UL + len;
 }
 
-/* ------------------------------------------------------------- input words -- */
-
-static VOID fb_take_word(const char *w, ULONG len)
-{
-    rfb_input ev;
-
-    if (!rfb_word_parse(w, (rfb_u32)len, &ev))
-        return;                     /* not ours; ignored, never an error */
-
-    switch (ev.kind)
-    {
-    case RFB_IN_REFRESH:
-        fb_forget_shadow();
-        break;
-
-    case RFB_IN_POINTER:
-        /* Buttons first: a press that arrives in the same word as a move is a
-           press AT that position, and the other order clicks where the pointer
-           used to be. */
-        fb_inject_pointer(ev.a, ev.b);
-        fb_inject_buttons(ev.c);
-        break;
-
-    case RFB_IN_KEYDOWN:
-        fb_inject_key(ev.a, ev.b, TRUE);
-        break;
-
-    case RFB_IN_KEYUP:
-        fb_inject_key(ev.a, ev.b, FALSE);
-        break;
-
-    case RFB_IN_WHEEL:
-        /*
-         * Dropped, deliberately.  AmigaOS 3.1 has no wheel: there is no input
-         * class for one and nothing in a stock Workbench reads the rawkey
-         * codes a third-party driver invented for it, so injecting those would
-         * send keystrokes that some programs would act on as keystrokes.  The
-         * word is read and refused rather than left to fail as a framing
-         * error, so a viewer that sends it costs nothing.
-         */
-        break;
-
-    default:
-        break;
-    }
-}
-
-static VOID fb_sink(void *ctx, HttpWsEvent ev, const unsigned char *data,
-                    long len, int final)
-{
-    (VOID)ctx;
-
-    switch (ev)
-    {
-    case HTTP_WS_EV_TEXT:
-    {
-        long i;
-
-        for (i = 0; i < len; i++)
-        {
-            if (fb_word_n < (UWORD)FB_WORD_MAX)
-                fb_word[fb_word_n++] = (char)data[i];
-            else
-                fb_word_over = 1;
-        }
-
-        if (final)
-        {
-            if (!fb_word_over)
-                fb_take_word(fb_word, (ULONG)fb_word_n);
-            fb_word_n = 0;
-            fb_word_over = 0;
-        }
-        break;
-    }
-
-    case HTTP_WS_EV_BINARY:
-        /* There is no inbound data stream on this socket: a viewer sends
-           input and asks for redraws, and both are control.  A binary frame
-           is a client sending something this does not speak. */
-        break;
-
-    case HTTP_WS_EV_PING:
-        fb_control(HTTP_WS_EV_PONG, data, (ULONG)len);
-        break;
-
-    case HTTP_WS_EV_PONG:
-        break;
-
-    case HTTP_WS_EV_CLOSE:
-        fb_close_session(HTTP_WS_CLOSE_NORMAL);
-        break;
-
-    default:
-        break;
-    }
-}
-
 /* ------------------------------------------------------------------ input -- */
 
 static BOOL fb_input_open(VOID)
@@ -954,6 +856,104 @@ static VOID fb_inject_key(rfb_s32 raw, rfb_s32 qual, BOOL down)
        and Intuition reads all of it off this field. */
     fb_event.ie_Qualifier = (UWORD)(((ULONG)qual & 0xFFFFUL) | fb_buttons);
     fb_write_event();
+}
+
+/* ------------------------------------------------------------- input words -- */
+
+static VOID fb_take_word(const char *w, ULONG len)
+{
+    rfb_input ev;
+
+    if (!rfb_word_parse(w, (rfb_u32)len, &ev))
+        return;                     /* not ours; ignored, never an error */
+
+    switch (ev.kind)
+    {
+    case RFB_IN_REFRESH:
+        fb_forget_shadow();
+        break;
+
+    case RFB_IN_POINTER:
+        /* Buttons first: a press that arrives in the same word as a move is a
+           press AT that position, and the other order clicks where the pointer
+           used to be. */
+        fb_inject_pointer(ev.a, ev.b);
+        fb_inject_buttons(ev.c);
+        break;
+
+    case RFB_IN_KEYDOWN:
+        fb_inject_key(ev.a, ev.b, TRUE);
+        break;
+
+    case RFB_IN_KEYUP:
+        fb_inject_key(ev.a, ev.b, FALSE);
+        break;
+
+    case RFB_IN_WHEEL:
+        /*
+         * Dropped, deliberately.  AmigaOS 3.1 has no wheel: there is no input
+         * class for one and nothing in a stock Workbench reads the rawkey
+         * codes a third-party driver invented for it, so injecting those would
+         * send keystrokes that some programs would act on as keystrokes.  The
+         * word is read and refused rather than left to fail as a framing
+         * error, so a viewer that sends it costs nothing.
+         */
+        break;
+
+    default:
+        break;
+    }
+}
+
+static VOID fb_sink(void *ctx, HttpWsEvent ev, const unsigned char *data,
+                    long len, int final)
+{
+    (VOID)ctx;
+
+    switch (ev)
+    {
+    case HTTP_WS_EV_TEXT:
+    {
+        long i;
+
+        for (i = 0; i < len; i++)
+        {
+            if (fb_word_n < (UWORD)FB_WORD_MAX)
+                fb_word[fb_word_n++] = (char)data[i];
+            else
+                fb_word_over = 1;
+        }
+
+        if (final)
+        {
+            if (!fb_word_over)
+                fb_take_word(fb_word, (ULONG)fb_word_n);
+            fb_word_n = 0;
+            fb_word_over = 0;
+        }
+        break;
+    }
+
+    case HTTP_WS_EV_BINARY:
+        /* There is no inbound data stream on this socket: a viewer sends
+           input and asks for redraws, and both are control.  A binary frame
+           is a client sending something this does not speak. */
+        break;
+
+    case HTTP_WS_EV_PING:
+        fb_control(HTTP_WS_EV_PONG, data, (ULONG)len);
+        break;
+
+    case HTTP_WS_EV_PONG:
+        break;
+
+    case HTTP_WS_EV_CLOSE:
+        fb_close_session(HTTP_WS_CLOSE_NORMAL);
+        break;
+
+    default:
+        break;
+    }
 }
 
 /* ------------------------------------------------------------ the lifetime -- */
