@@ -196,6 +196,12 @@ static ULONG nd_t_copy;     /* the ring-to-rxbuf copy inside it */
 static ULONG nd_t_up;       /* handing frames to the openers */
 static ULONG nd_t_tx;       /* netdev_tx_pump() after the service */
 static ULONG nd_t_hook;     /* the stack's CopyToBuff, inside the hand-over */
+static ULONG nd_t_pre;      /* type, group test, stats, before the walk      */
+static ULONG nd_t_take;     /* netdev_take: the pending-read list walk       */
+static ULONG nd_t_find;     /* netdev_track_find: the 16-entry scan          */
+static ULONG nd_t_addr;     /* the two addresses and the request fields      */
+static ULONG nd_t_reply;    /* netdev_reply: ReplyMsg at interrupt level     */
+static ULONG nd_t_probe;    /* what 16 back-to-back probes cost, to subtract */
 static ULONG nd_n_int;
 static ULONG nd_n_frame;
 static ULONG nd_n_hook;
@@ -216,7 +222,21 @@ static VOID nd_time_report(VOID)
     nd_tracex("t copy   ", nd_t_copy);
     nd_tracex("t up     ", nd_t_up);
     nd_tracex("t tx     ", nd_t_tx);
+    {
+        ULONG tp = nd_now();
+        UWORD k;
+
+        for (k = 0; k < 16; k++)
+            (VOID)nd_now();
+        nd_t_probe = nd_since(tp);
+    }
     nd_tracex("t hook   ", nd_t_hook);
+    nd_tracex("t pre    ", nd_t_pre);
+    nd_tracex("t take   ", nd_t_take);
+    nd_tracex("t find   ", nd_t_find);
+    nd_tracex("t addr   ", nd_t_addr);
+    nd_tracex("t reply  ", nd_t_reply);
+    nd_tracex("t probe16", nd_t_probe);
     nd_tracex("t nhook  ", nd_n_hook);
     nd_tracex("t rdc    ", netdev_time_rdc);
     nd_tracex("t null   ", netdev_time_null);
@@ -225,6 +245,7 @@ static VOID nd_time_report(VOID)
     netdev_time_rdc = netdev_time_null = 0;
     netdev_time_rx = netdev_time_tx = 0;
     nd_t_isr = nd_t_copy = nd_t_up = nd_t_tx = nd_t_hook = 0;
+    nd_t_pre = nd_t_take = nd_t_find = nd_t_addr = nd_t_reply = 0;
     nd_n_int = nd_n_frame = nd_n_hook = 0;
 }
 #endif
@@ -324,6 +345,10 @@ static BOOL netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
     const UBYTE *payload = raw ? frame : frame + NETDEV_HDR_LEN;
     ULONG        plen    = raw ? len : (ULONG)(len - NETDEV_HDR_LEN);
 
+#ifdef NETDEV_TIME
+    {
+        ULONG ta = nd_now();
+#endif
     nd_bytes(io->ios2_DstAddr, frame, NETDEV_ADDR_LEN);
     nd_bytes(io->ios2_SrcAddr, frame + NETDEV_ADDR_LEN, NETDEV_ADDR_LEN);
     io->ios2_PacketType = type;
@@ -331,6 +356,10 @@ static BOOL netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
     io->ios2_Req.io_Flags =
         (UBYTE)((io->ios2_Req.io_Flags & ~(SANA2IOF_BCAST | SANA2IOF_MCAST)) |
                 flags);
+#ifdef NETDEV_TIME
+        nd_t_addr += nd_since(ta);
+    }
+#endif
 
 #ifdef NETDEV_TIME
     {
@@ -356,7 +385,16 @@ static BOOL netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
         return FALSE;
     }
 
+#ifdef NETDEV_TIME
+    {
+        ULONG tr = nd_now();
+
+        netdev_reply(io, 0, 0);
+        nd_t_reply += nd_since(tr);
+    }
+#else
     netdev_reply(io, 0, 0);
+#endif
     return TRUE;
 }
 
@@ -412,6 +450,10 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
         return;
     }
 
+#ifdef NETDEV_TIME
+    {
+        ULONG tp = nd_now();
+#endif
     type = ((ULONG)frame[12] << 8) | frame[13];
 
     if (frame[0] == 0xff)
@@ -428,14 +470,28 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
         flags = SANA2IOF_MCAST;
 
     unit->nu_Stats.PacketsReceived++;
+#ifdef NETDEV_TIME
+        nd_t_pre += nd_since(tp);
+    }
+#endif
 
     for (n = unit->nu_OpenerList.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
     {
         NetdevOpener      *op = (NetdevOpener *)n;
         struct IOSana2Req *io;
-        NetdevTrack       *tr = netdev_track_find(op, type);
+        NetdevTrack       *tr;
+#ifdef NETDEV_TIME
+        ULONG tf = nd_now();
 
+        tr = netdev_track_find(op, type);
+        nd_t_find += nd_since(tf);
+        tf = nd_now();
         io = netdev_take(&op->op_Reads, type);
+        nd_t_take += nd_since(tf);
+#else
+        tr = netdev_track_find(op, type);
+        io = netdev_take(&op->op_Reads, type);
+#endif
         if (io != NULL)
         {
             BOOL ok = netdev_hand_over(op, io, frame, len, type, flags);
