@@ -83,7 +83,10 @@ add_executable(crypto68k_ec_bench c68k_ec_bench.c)
 set(CRYPTO68K_PROGS crypto68k_test crypto68k_bench crypto68k_25519_test
     crypto68k_ec_test
                     crypto68k_ec_bench)
-if(NOT AMINETXDUO_CPU STREQUAL "68000")
+# `any` is out for the same reason and one more: it compiles -m68000, which is
+# what lets one binary serve every machine, and the assembler would reject the
+# kernels outright.  Configure a -DAMINETXDUO_CPU=68020 tree to run them.
+if(NOT AMINETXDUO_CPU MATCHES "^(68000|any)$")
     add_executable(crypto68k_bulk c68k_bulk_bench.c c68k_bulk_kernels.S)
     set_source_files_properties(c68k_bulk_kernels.S PROPERTIES
         COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")

@@ -135,7 +135,12 @@ if(CMAKE_CROSSCOMPILING AND AMINETXDUO_C68K_LIMBS)
     # other, which is how the 68060 TLS 1.3 failure was pinned down.
     option(AMINETXDUO_C68K_GCM
            "Longword GHASH and the longword GCM xor" ON)
-    if(NOT AMINETXDUO_CPU STREQUAL "68000" AND AMINETXDUO_C68K_GCM)
+    # `any` is out with the 68000, and it has to be: a binary that must run on
+    # a 68000 cannot contain a misaligned longword access on a path a 68000
+    # reaches.  Giving it back on the machines that can take it is a run-time
+    # choice this file does not have yet -- src/net68k/n68k_cpu.c is what that
+    # would look like -- and it is the tls.library half of the same question.
+    if(NOT AMINETXDUO_CPU MATCHES "^(68000|any)$" AND AMINETXDUO_C68K_GCM)
         target_compile_definitions(nx_crypto PRIVATE NX_CRYPTO_ENABLE_UNALIGNED_ACCESS)
         target_compile_definitions(nx_crypto PRIVATE NX_CRYPTO_AMIGA_C68K_GCM)
     endif()

@@ -142,7 +142,12 @@ endif()
 # reason: cpucal exists to time MULU.L against the MC68020UM's published
 # figures, so on a 68000, which has no MULU.L, there is no measurement for
 # it to make.  Excluded rather than made portable.  docs/RESEARCH.md §45.
-if(CMAKE_CROSSCOMPILING AND NOT AMINETXDUO_CPU STREQUAL "68000")
+#
+# `any` is excluded on the same rule.  It compiles -m68000 because it has to
+# run on one, so the flag would reject the file, and a tree that does not know
+# its CPU has nothing to calibrate: configure a second tree with
+# -DAMINETXDUO_CPU=68020 to ask this question.
+if(CMAKE_CROSSCOMPILING AND NOT AMINETXDUO_CPU MATCHES "^(68000|any)$")
 
     add_executable(cpucal cpucal.c cpucal.S)
     target_link_libraries(cpucal PRIVATE aminetxduo_common)
@@ -152,18 +157,8 @@ if(CMAKE_CROSSCOMPILING AND NOT AMINETXDUO_CPU STREQUAL "68000")
     # the same default that made objdump print `.short 0x4c06` in the crypto
     # work.  src/net68k/ and src/crypto68k/ pass the arch flags to their .S
     # files for the same reason.
-    #
-    # An AMINETXDUO_CPU=any tree compiles -m68000 and would reject it too, so
-    # this file names the flag it needs rather than taking the tree's.  That is
-    # sound here and nowhere else: cpucal is a probe run by hand on the machine
-    # it is asking about, never shipped and never opened by anything.
-    if(AMINETXDUO_CPU STREQUAL "any")
-        set(_cpucal_arch "-m68020")
-    else()
-        set(_cpucal_arch "${AMIGA_ARCH_FLAGS}")
-    endif()
     set_source_files_properties(cpucal.S PROPERTIES
-        COMPILE_OPTIONS "${_cpucal_arch}")
+        COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
 
     if(AMIGA_NDK_INCLUDE)
         target_include_directories(cpucal PRIVATE "${AMIGA_NDK_INCLUDE}")
