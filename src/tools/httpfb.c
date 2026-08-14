@@ -32,6 +32,7 @@
 #include "aminetxduo/rfb_encode.h"
 #include "aminetxduo/rfb_words.h"
 
+#include <devices/input.h>
 #include <devices/inputevent.h>
 #include <exec/io.h>
 #include <exec/memory.h>
