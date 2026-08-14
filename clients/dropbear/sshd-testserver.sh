@@ -128,6 +128,12 @@ LogLevel VERBOSE
 # on this client, which is a finding, not a bug in the harness, and the same
 # shape as the Cloudflare TLS timeouts in docs/RESEARCH.md §11.8.  Raised here
 # so that a run measures the Amiga rather than the server's patience.
+#
+# 600 IS SIZED BY A 68000 NOW, not by a guess about the 020.  One dbclient
+# connection from an A600 -- key exchange, publickey auth, one command --
+# measured 413 s against a stock OpenSSH server on the LAN.  The 120 s default
+# hangs up on it at "Error writing: Broken pipe", which reads as a client
+# defect and is not one.
 LoginGraceTime 600
 EOF
 
