@@ -87,6 +87,7 @@ typedef struct NetdevUnit
     struct Interrupt            nu_Intr;      /* INT2, the card               */
     struct Interrupt            nu_Tick;      /* INT3 vertical blank, watchdog */
     UBYTE                       nu_TxBuilding; /* a task owns nu_TxBuf         */
+    UBYTE                      *nu_TxAt;      /* where the frame was built    */
     UWORD                       nu_TxStall;   /* blanks with a transmit stuck  */
     UWORD                       nu_TxWedges;  /* how often it had to be reset  */
 
@@ -129,6 +130,13 @@ BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len);
 VOID netdev_event(NetdevUnit *unit, ULONG mask);
 VOID netdev_rebuild_filter(NetdevUnit *unit);
 VOID netdev_tx_pump(NetdevUnit *unit);
+
+/* netdev_pcmcia.c: the slot has no autoconfig record, so it is claimed
+   rather than found.  NULL when there is no slot, nothing in it, or what is
+   in it is not a LAN card. */
+VOID netdev_trace_val(const char *tag, ULONG v);
+APTR netdev_pcmcia_claim(const NetdevCard *card);
+VOID netdev_pcmcia_release(VOID);
 VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io);
 VOID netdev_drop_writes(NetdevUnit *unit, NetdevOpener *op);
 LONG netdev_online(NetdevUnit *unit);

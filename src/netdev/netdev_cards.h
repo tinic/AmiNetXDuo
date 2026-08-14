@@ -23,12 +23,21 @@
  */
 #define NETDEV_CHIP_NE2000  0   /* DP8390 clone with an ASIC remote-DMA port */
 #define NETDEV_CHIP_ED      1   /* DP8390 with a memory-mapped packet buffer */
+#define NETDEV_CHIP_LANCE   2   /* Am7990/Am79C960: bus master, rings in RAM  */
 
 /*
  * How the board tells us the interrupt was its.  A Zorro INT2 is shared, so a
  * server that answers "mine" without asking eats every other board's.
  */
 #define NETDEV_IRQ_NONE     0   /* no status register: ask the chip's ISR */
+
+/*
+ * How the board is found.  Everything with an autoconfig record comes off the
+ * ConfigDev list; the PCMCIA slot has no such record and lives at a fixed
+ * address behind Gayle, so it is claimed through card.resource instead.
+ */
+#define NETDEV_BUS_ZORRO    0
+#define NETDEV_BUS_PCMCIA   1
 
 typedef struct NetdevCard
 {
@@ -46,6 +55,20 @@ typedef struct NetdevCard
     ULONG       mem_off;
     ULONG       mem_size;
     ULONG       prom_off;       /* station address PROM, same stride          */
+
+    /* Named by every row: -Werror=missing-field-initializers does not accept
+       a trailing field that defaults, and a card row is exactly the place
+       where a silently-defaulted field would be worth catching. */
+    UBYTE       bus;            /* NETDEV_BUS_*                               */
+    ULONG       base;           /* NETDEV_BUS_PCMCIA: the fixed window base   */
+    ULONG       odd_off;        /* odd-register window, offset from base; 0 =
+                                   the register file is contiguous            */
+    UBYTE       lance_swap;     /* the board crosses the SRAM byte lanes, so
+                                   descriptor words are written pre-swapped   */
+    UWORD       serial_oui;     /* non-zero: the station address is this OUI
+                                   prefix plus the autoconfig serial number,
+                                   which is where Commodore put it -- there is
+                                   no address PROM in the board window        */
 } NetdevCard;
 
 extern const NetdevCard netdev_cards[];

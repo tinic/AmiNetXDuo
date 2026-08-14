@@ -93,6 +93,9 @@ LIBS=(bsdsocket usergroup)
 # SANA-II drivers, DEVS:Networks/.  Per CPU, like the libraries and unlike the
 # commands: this is interrupt-level packet handling, not a shell command whose
 # hot work happens inside a library.
+#
+# It ships but Install-AmiNetXDuo does NOT install it: a user who wants it
+# copies it across deliberately.  See the note there.
 DEVICES=(netdev/anxnet)
 CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ShowNetServices
       ping netstat host hostname

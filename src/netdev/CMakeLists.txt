@@ -17,10 +17,12 @@ set(NETDEV_SOURCES
     netdev_cmds.c       # the S2_* table
     netdev_bus.c        # register stride and the data port
     netdev_cards.c      # the card table
+    netdev_pcmcia.c     # the A600/A1200 slot, which has no autoconfig record
     netdev_mcaf.c       # the multicast hash, host-testable
     dp8390.c            # NetBSD chip core
     ne2000.c            # NetBSD remote-DMA glue
     ed.c                # NetBSD mapped-buffer glue: Hydra, ASDG LAN Rover
+    lance.c             # Am7990/Am79C960: A2065 and Ariadne
     # The data path's bulk moves, from src/net68k rather than a private copy:
     # the movem.l block and its measurements live there.  Two files, the same
     # arrangement as src/net68k's own target -- the .S is #ifdef'd end to end

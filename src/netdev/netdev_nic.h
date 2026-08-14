@@ -101,12 +101,31 @@ struct NetdevNic
     BOOL                running;
 
     /* DP8390 ring state, the names are NetBSD's. */
+    /*
+     * Where the chip's remote-DMA pointer is, and how much of the burst is
+     * left.  A read of the 4-byte ring header leaves the pointer exactly at
+     * the frame body, so the body's own RSAR/RBCR programming is writing the
+     * chip's own position back to it -- six register accesses, and on the
+     * PCMCIA card a scalar register access costs 8.3 us against 0.5 for a
+     * word through the data port.  dma_left is 0 whenever the position is not
+     * to be trusted.
+     */
+    LONG                dma_pos;
+    UWORD               dma_left;
+
     LONG                mem_start;
     LONG                mem_end;
     LONG                mem_size;
     LONG                mem_ring;
     UWORD               txb_cnt;
+    ULONG               serial;     /* the board's autoconfig serial number */
     UWORD               txb_inuse;
+
+    /* LANCE ring cursors.  The DP8390 cores do not use them: their ring is
+       the chip's own page walk, not a descriptor list we index. */
+    UWORD               rx_next;
+    UWORD               tx_next;
+    UWORD               tx_done;
     UWORD               txb_new;
     UWORD               txb_next_tx;
     UWORD               txb_len[3];
@@ -140,6 +159,19 @@ struct NetdevNic
      * there is no address to hand out.
      */
     const volatile UBYTE *(*frame_at)(NetdevNic *nic, LONG src, UWORD len);
+
+    /*
+     * Where to frame the NEXT transmit, or NULL to use the unit's staging
+     * buffer.  A core whose transmit buffer is CPU-addressable returns it and
+     * the opener's CopyFrom writes the card directly -- one pass instead of
+     * building in RAM and copying it across.  The profile priced that copy at
+     * 223 us of a 273 us deficit against a2065.device.
+     *
+     * NULL for the DP8390 cores: an NE2000's buffer is behind a port, and the
+     * Hydra and LAN Rover map a buffer whose byte lanes are not separately
+     * selectable, so CopyFrom writing bytes into it would corrupt both halves.
+     */
+    UBYTE *(*tx_at)(NetdevNic *nic);
     UWORD (*write_buf)(NetdevNic *nic, const UBYTE *frame, UWORD len,
                        LONG buf);
 
@@ -159,6 +191,7 @@ struct NetdevNic
 /* The two cores. netdev_nic_ops_for() returns NULL for a chip with no core. */
 extern const struct NetdevNicOps netdev_nic_ne2000;
 extern const struct NetdevNicOps netdev_nic_ed;
+extern const struct NetdevNicOps netdev_nic_lance;
 
 const struct NetdevNicOps *netdev_nic_ops_for(UBYTE chip);
 

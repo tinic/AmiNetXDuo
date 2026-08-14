@@ -207,11 +207,18 @@ static VOID bus_wdata(const NetdevBus *bus, const UBYTE *src, UWORD len)
 
 const struct NetdevBusOps netdev_bus_generic = { bus_rdata, bus_wdata };
 
+/* The odd-register window, for a bus whose register file is not contiguous. */
+VOID netdev_bus_split(NetdevBus *bus, APTR odd)
+{
+    bus->odd = (volatile UBYTE *)odd;
+}
+
 VOID netdev_bus_setup(NetdevBus *bus, APTR base, UWORD stride, APTR wide)
 {
     bus->nic    = (volatile UBYTE *)base;
     bus->asic   = (volatile UBYTE *)base + 16u * stride;
     bus->wide   = (volatile UBYTE *)wide;
+    bus->odd    = NULL;         /* netdev_bus_split() for the ones that need it */
     bus->stride = stride;
     bus->shift  = (UBYTE)((stride == 4u) ? 2u : ((stride == 2u) ? 1u : 0u));
     bus->dmode  = NETDEV_DMODE_WORD;

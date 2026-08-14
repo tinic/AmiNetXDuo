@@ -162,6 +162,12 @@ VOID netdev_trace_cmd(UWORD c)
 {
     nd_tracex("anx: cmd ", (ULONG)c);
 }
+
+/* For the chip cores, which cannot see nd_tracex. */
+VOID netdev_trace_val(const char *tag, ULONG v)
+{
+    nd_tracex(tag, v);
+}
 #else
 #define nd_trace(s)         ((VOID)0)
 #define nd_tracex(t, v)     ((VOID)0)
@@ -212,6 +218,7 @@ static ULONG nd_n_hook;
 
 ULONG netdev_time_copy;     /* dp8390.c adds its copy span here */
 ULONG netdev_time_rdc;      /* ne2000.c counts its DMA-completion spins */
+ULONG netdev_time_regs;     /* netdev_bus.h counts every scalar access    */
 ULONG netdev_time_null;     /* interrupts where ISR read zero: not ours */
 ULONG netdev_time_rx;       /* ISR passes with a receive bit set */
 ULONG netdev_time_tx;       /* ISR passes with a transmit bit set */
@@ -231,6 +238,10 @@ static VOID nd_time_report(VOID)
         nd_t_probe = nd_since(tp);
     }
     nd_tracex("t hook   ", nd_t_hook);
+    nd_tracex("t regs   ", netdev_time_regs);
+    netdev_time_regs = 0;
+    nd_tracex("t isr    ", nd_t_isr);
+    nd_tracex("t copy   ", nd_t_copy);
     nd_tracex("t ntx    ", nd_n_tx);
     nd_tracex("t bld    ", nd_t_bld);
     nd_tracex("t iss    ", nd_t_iss);
@@ -569,9 +580,18 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
 static UWORD netdev_tx_build(NetdevUnit *unit, struct IOSana2Req *io,
                              NetdevOpener *op)
 {
-    UBYTE *buf = (UBYTE *)unit->nu_TxBuf;
+    UBYTE *buf;
     ULONG  len = io->ios2_DataLength;
     UWORD  total;
+
+    /* A core whose transmit buffer the CPU can address takes the frame
+       directly; everything else is framed in the unit's own staging buffer
+       and copied across by ops->tx. */
+    buf = (unit->nu_Nic.tx_at != NULL) ? unit->nu_Nic.tx_at(&unit->nu_Nic)
+                                       : NULL;
+    if (buf == NULL)
+        buf = (UBYTE *)unit->nu_TxBuf;
+    unit->nu_TxAt = buf;
 
     if (op->op_Raw || (io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0)
     {
@@ -639,7 +659,7 @@ static LONG netdev_tx_issue(NetdevUnit *unit, struct IOSana2Req *io,
     NetdevTrack *tr;
     LONG         rc;
 
-    rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, (UBYTE *)unit->nu_TxBuf, total);
+    rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, unit->nu_TxAt, total);
     if (rc != 0)
         return rc;
 
@@ -653,6 +673,39 @@ static LONG netdev_tx_issue(NetdevUnit *unit, struct IOSana2Req *io,
 
     return 0;
 }
+
+/*
+ * The timing build's way in.  Wrappers rather than spans inside the two
+ * functions, because the transmit rewrite already lost one set of spans that
+ * were inlined into a body -- these cannot be dropped by editing the body.
+ */
+#ifdef NETDEV_TIME
+static UWORD netdev_tx_timed_build(NetdevUnit *unit, struct IOSana2Req *io,
+                                   NetdevOpener *op)
+{
+    ULONG t = nd_now();
+    UWORD n = netdev_tx_build(unit, io, op);
+
+    nd_t_bld += nd_since(t);
+    nd_n_tx++;
+
+    return n;
+}
+
+static LONG netdev_tx_timed_issue(NetdevUnit *unit, struct IOSana2Req *io,
+                                  NetdevOpener *op, UWORD total)
+{
+    ULONG t = nd_now();
+    LONG  r = netdev_tx_issue(unit, io, op, total);
+
+    nd_t_iss += nd_since(t);
+
+    return r;
+}
+#else
+#define netdev_tx_timed_build(u, i, o)      netdev_tx_build((u), (i), (o))
+#define netdev_tx_timed_issue(u, i, o, t)   netdev_tx_issue((u), (i), (o), (t))
+#endif
 
 /*
  * Drain the queue into whatever transmit buffers the chip has free.  Runs
@@ -677,11 +730,11 @@ VOID netdev_tx_pump(NetdevUnit *unit)
         io = (struct IOSana2Req *)RemHead(&unit->nu_Writes);
         op = NETDEV_OPENER(io->ios2_Req.io_Unit);
 
-        total = netdev_tx_build(unit, io, op);
+        total = netdev_tx_timed_build(unit, io, op);
         if (total == 0)
             continue;
 
-        rc = netdev_tx_issue(unit, io, op, total);
+        rc = netdev_tx_timed_issue(unit, io, op, total);
         if (rc == DP8390_TX_BUSY)
         {
             AddHead(&unit->nu_Writes, &io->ios2_Req.io_Message.mn_Node);
@@ -733,7 +786,7 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
     unit->nu_TxBuilding = 1;
     Enable();
 
-    total = netdev_tx_build(unit, io, op);
+    total = netdev_tx_timed_build(unit, io, op);
 
     Disable();
     unit->nu_TxBuilding = 0;
@@ -744,7 +797,7 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
         return;
     }
 
-    rc = netdev_tx_issue(unit, io, op, total);
+    rc = netdev_tx_timed_issue(unit, io, op, total);
     if (rc == DP8390_TX_BUSY)
     {
         AddHead(&unit->nu_Writes, &io->ios2_Req.io_Message.mn_Node);
@@ -1028,6 +1081,76 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
 
 /* ----------------------------------------------------------------- probe -- */
 
+/*
+ * One matched board becomes one unit.  Shared by the two ways in: the
+ * ConfigDev walk below, and the PCMCIA slot, which has no ConfigDev at all.
+ */
+static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
+                            APTR board, ULONG serial)
+{
+    NetdevUnit *unit;
+
+    unit = &dev->nd_Units[dev->nd_UnitCount];
+    nd_zero((UBYTE *)unit, sizeof(*unit));
+
+    unit->nu_Nic.ops = netdev_nic_ops_for(card->chip);
+    if (unit->nu_Nic.ops == NULL)
+        return FALSE;       /* no core for this chip yet */
+
+    unit->nu_Dev    = dev;
+    unit->nu_Nic.card   = card;
+    unit->nu_Nic.board  = (volatile UBYTE *)board;
+    unit->nu_Nic.serial = serial;
+    unit->nu_Nic.rx     = netdev_rx;
+    unit->nu_Nic.rx_arg = unit;
+
+    netdev_bus_setup(&unit->nu_Nic.bus,
+             (APTR)((UBYTE *)board + card->reg_off),
+             card->stride,
+             card->wide_off != 0
+                 ? (APTR)((UBYTE *)board + card->wide_off)
+                 : NULL);
+
+    /* A register file split across two windows, which is Gayle's PCMCIA I/O
+       and nothing else in the table. */
+    if (card->odd_off != 0)
+        netdev_bus_split(&unit->nu_Nic.bus,
+                         (APTR)((UBYTE *)board + card->odd_off +
+                                card->reg_off));
+
+    nd_tracex("anx: board ", (ULONG)board);
+    if (unit->nu_Nic.ops->attach(&unit->nu_Nic) != 0)
+    {
+        nd_trace("anx: attach failed\r\n");
+        return FALSE;       /* the board did not answer as a DP8390 */
+    }
+    nd_tracex("anx: mac ", ((ULONG)unit->nu_Nic.factory[2] << 24) |
+                   ((ULONG)unit->nu_Nic.factory[3] << 16) |
+                   ((ULONG)unit->nu_Nic.factory[4] << 8) |
+                   (ULONG)unit->nu_Nic.factory[5]);
+    nd_tracex("anx: dmode ", (ULONG)unit->nu_Nic.bus.dmode);
+
+    nd_newlist(&unit->nu_OpenerList);
+    nd_newlist(&unit->nu_Writes);
+    unit->nu_Unit = dev->nd_UnitCount;
+
+    unit->nu_Intr.is_Node.ln_Type = NT_INTERRUPT;
+    unit->nu_Intr.is_Node.ln_Pri  = 10;
+    unit->nu_Intr.is_Node.ln_Name = netdev_name;
+    unit->nu_Intr.is_Data     = unit;
+    unit->nu_Intr.is_Code     = (VOID (*)())netdev_server;
+
+    unit->nu_Tick.is_Node.ln_Type = NT_INTERRUPT;
+    unit->nu_Tick.is_Node.ln_Pri  = 0;
+    unit->nu_Tick.is_Node.ln_Name = netdev_name;
+    unit->nu_Tick.is_Data     = unit;
+    unit->nu_Tick.is_Code     = (VOID (*)())netdev_tick;
+
+    dev->nd_UnitCount++;
+
+    return TRUE;
+}
+
 static VOID netdev_probe(NetdevDevice *dev)
 {
     struct ConfigDev *cd = NULL;
@@ -1055,7 +1178,6 @@ static VOID netdev_probe(NetdevDevice *dev)
     while ((cd = FindConfigDev(cd, -1, -1)) != NULL)
     {
         const NetdevCard *card = NULL;
-        NetdevUnit       *unit;
         UWORD             i;
 
         for (i = 0; i < netdev_card_count; i++)
@@ -1083,55 +1205,40 @@ static VOID netdev_probe(NetdevDevice *dev)
             continue;
         }
 
-        unit = &dev->nd_Units[dev->nd_UnitCount];
-        nd_zero((UBYTE *)unit, sizeof(*unit));
+        if (!netdev_add_unit(dev, card, (APTR)cd->cd_BoardAddr,
+                             cd->cd_Rom.er_SerialNumber))
+            continue;
+    }
 
-        unit->nu_Nic.ops = netdev_nic_ops_for(card->chip);
-        if (unit->nu_Nic.ops == NULL)
-            continue;               /* no core for this chip yet */
+    /*
+     * And the slot, after the boards.  Last so that a machine with both keeps
+     * its Zorro unit numbers where they were: a PCMCIA card is the one card
+     * that can be inserted between two boots.
+     */
+    {
+        UWORD i;
 
-        unit->nu_Dev        = dev;
-        unit->nu_Nic.card   = card;
-        unit->nu_Nic.board  = (volatile UBYTE *)cd->cd_BoardAddr;
-        unit->nu_Nic.rx     = netdev_rx;
-        unit->nu_Nic.rx_arg = unit;
-
-        netdev_bus_setup(&unit->nu_Nic.bus,
-                         (APTR)((UBYTE *)cd->cd_BoardAddr + card->reg_off),
-                         card->stride,
-                         card->wide_off != 0
-                             ? (APTR)((UBYTE *)cd->cd_BoardAddr + card->wide_off)
-                             : NULL);
-
-        nd_tracex("anx: board ", (ULONG)cd->cd_BoardAddr);
-        if (unit->nu_Nic.ops->attach(&unit->nu_Nic) != 0)
+        for (i = 0; i < netdev_card_count; i++)
         {
-            nd_trace("anx: attach failed\r\n");
-            continue;               /* the board did not answer as a DP8390 */
+            const NetdevCard *card = &netdev_cards[i];
+            APTR              base;
+
+            if (card->bus != NETDEV_BUS_PCMCIA)
+                continue;
+            if (dev->nd_UnitCount >= NETDEV_MAX_UNITS)
+            {
+                dev->nd_UnitsDropped++;
+                break;
+            }
+
+            base = netdev_pcmcia_claim(card);
+            if (base == NULL)
+                continue;       /* no slot, nothing in it, or not a LAN card */
+
+            nd_trace("anx: pcmcia claimed\r\n");
+            if (!netdev_add_unit(dev, card, base, 0))
+                netdev_pcmcia_release();
         }
-        nd_tracex("anx: mac ", ((ULONG)unit->nu_Nic.factory[2] << 24) |
-                               ((ULONG)unit->nu_Nic.factory[3] << 16) |
-                               ((ULONG)unit->nu_Nic.factory[4] << 8) |
-                               (ULONG)unit->nu_Nic.factory[5]);
-        nd_tracex("anx: dmode ", (ULONG)unit->nu_Nic.bus.dmode);
-
-        nd_newlist(&unit->nu_OpenerList);
-        nd_newlist(&unit->nu_Writes);
-        unit->nu_Unit = dev->nd_UnitCount;
-
-        unit->nu_Intr.is_Node.ln_Type = NT_INTERRUPT;
-        unit->nu_Intr.is_Node.ln_Pri  = 10;
-        unit->nu_Intr.is_Node.ln_Name = netdev_name;
-        unit->nu_Intr.is_Data         = unit;
-        unit->nu_Intr.is_Code         = (VOID (*)())netdev_server;
-
-        unit->nu_Tick.is_Node.ln_Type = NT_INTERRUPT;
-        unit->nu_Tick.is_Node.ln_Pri  = 0;
-        unit->nu_Tick.is_Node.ln_Name = netdev_name;
-        unit->nu_Tick.is_Data         = unit;
-        unit->nu_Tick.is_Code         = (VOID (*)())netdev_tick;
-
-        dev->nd_UnitCount++;
     }
 }
 
