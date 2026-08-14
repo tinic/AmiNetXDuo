@@ -32,6 +32,7 @@
 #include "netdev_bsdtypes.h"
 #include "lancereg.h"
 #include "dp8390.h"     /* the DP8390_TX_* return codes are the shared contract */
+#include "n68k_iocopy.h"
 
 #ifdef NETDEV_TRACE
 extern VOID netdev_trace_val(const char *tag, ULONG v);
@@ -332,10 +333,22 @@ LONG lance_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
     d   = LE_TXD_OFF + (ULONG)nic->tx_next * 8;
     buf = le_ram(nic) + LE_TXB_OFF + (ULONG)nic->tx_next * LE_BUFSZ;
 
-    /* Frame bytes are NOT swapped: the board's crossed lanes cancel between
-       the CPU write and the chip's read.  Only descriptors need it. */
-    for (i = 0; i < len; i++)
-        buf[i] = frame[i];
+    /*
+     * Frame bytes are NOT swapped: the board's crossed lanes cancel between
+     * the CPU write and the chip's read.  Only descriptors need it.
+     *
+     * Longwords, not the byte loop this started as -- that cost 25% of the
+     * write figure against a2065.device.  Both ends are longword-aligned:
+     * nu_TxBuf is ULONG[] and the buffers sit at 0x100 + n * 1536.
+     */
+    {
+        UWORD bulk = (UWORD)(len & (UWORD)~3u);
+
+        if (bulk != 0)
+            n68k_copy_longs(buf, frame, (ULONG)(bulk >> 2));
+        for (i = bulk; i < len; i++)
+            buf[i] = frame[i];
+    }
 
     le_put16(nic, d + 4, (UWORD)(0xf000 | ((UWORD)(-(LONG)len) & 0x0fff)));
     le_put16(nic, d + 6, 0);
