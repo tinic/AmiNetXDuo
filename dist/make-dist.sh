@@ -138,6 +138,17 @@ WANT_MINIMAL=1
 BUILDS=("$BUILD")
 [ "$WANT_MINIMAL" = "0" ] || BUILDS+=("$MINIMAL_BUILD")
 
+# WHAT IS IN THE TREE IS WHAT GETS PACKED, so check that it is the build that
+# runs everywhere.  A build directory configured before the default changed --
+# or by hand for a measurement -- still has AMINETXDUO_CPU=68020 in its cache,
+# CMake keeps a cached value across a reconfigure, and the result is an archive
+# that promises every 68k and contains a library that stops a 68000 on an
+# illegal instruction.  That happened here once, and nothing said a word: the
+# libraries were the right size for what they were and the wrong thing entirely.
+cpu_of() {
+    sed -n 's/^AMINETXDUO_CPU:STRING=//p' "$1/CMakeCache.txt" 2>/dev/null
+}
+
 for b in "${BUILDS[@]}"; do
     [ -d "$b" ] || {
         echo "missing build: $b" >&2
@@ -146,6 +157,16 @@ for b in "${BUILDS[@]}"; do
         echo "  cmake --build $b --parallel" >&2
         exit 2
     }
+    got=$(cpu_of "$b")
+    [ "$got" = "any" ] || {
+        echo "!! $b was configured with AMINETXDUO_CPU=${got:-unset}." >&2
+        echo "!! The archive has no CPU drawers: one build serves every 68k," >&2
+        echo "!! and a per-CPU one packed into it would stop a machine it was" >&2
+        echo "!! not built for.  Configure it fresh -- a cached value survives" >&2
+        echo "!! a reconfigure -- or pass -DAMINETXDUO_CPU=any." >&2
+        exit 2
+    }
+
     for lib in "${LIBS[@]}"; do need "$b/src/$lib/$lib.library"; done
     for dev in "${DEVICES[@]}"; do need "$b/src/$dev.device"; done
 done

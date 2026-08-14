@@ -1119,6 +1119,11 @@
           "in C:.  ssh comes with them.")
   (source S_C)
   (dest   "C:")
+  ; (all), because a copyfiles from a DRAWER needs one of (all) or (pattern)
+  ; and answers "Bad parameters for copying from drawer" without either.  It
+  ; used to be (pattern "~(ssh.#?)"), keeping the per-CPU ssh.000/.020/.060 out
+  ; of the wholesale copy; there is one ssh now and it comes with the rest.
+  (all)
   (optional "force"))
 
 ; ssh went into C: with the copy above.  It used to need its own step and a
