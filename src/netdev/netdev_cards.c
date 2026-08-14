@@ -23,30 +23,55 @@
 #include "netdev_cards.h"
 #include "netdev_nic.h"
 
+/*
+ * THE X-SURF 500'S REGISTER FILE, transcribed from
+ * wiki.icomp.de/wiki/X-Surf-500_registers and not computed from anything.
+ *
+ * The card hangs off an ACA500's 34-pin header, which exposes so few address
+ * lines that the register number's bits come out scattered: consecutive
+ * registers sit anywhere from $0204 to $6E94 apart and no stride describes
+ * it.  Offsets are from the card's base, $EE0000.
+ *
+ * 0..15 are the NIC file, 16..31 the ASIC block -- the same split the NE2000
+ * core already uses, so entry 16 is the 16-bit data port and entry 31 is the
+ * reset.  Nothing here is derived: a guessed offset would give a driver that
+ * looks right and silently talks to the wrong register, and with no emulation
+ * of this card there is nothing to catch that.
+ */
+static const ULONG xsurf500_regmap[32] =
+{
+    /* NIC, page-selected by CR as usual */
+    0x0000, 0x0204, 0x0c00, 0x0e04, 0x2010, 0x2214, 0x2c10, 0x2e14,
+    0x4080, 0x4284, 0x4c80, 0x4e84, 0x6090, 0x6294, 0x6c90, 0x6e94,
+    /* ASIC: 16 = 16-bit data port, 17 = 8-bit data port, 31 = HWAKE/Reset */
+    0x0060, 0x0264, 0x0c60, 0x0e64, 0x2070, 0x2274, 0x2c70, 0x2e74,
+    0x40e0, 0x42e4, 0x4ce0, 0x4ee4, 0x60f0, 0x62f4, 0x6cf0, 0x6ef4
+};
+
 const NetdevCard netdev_cards[] =
 {
     /* name        manid prodid reg_off stride wide_off
        chip                bps         ax  mem_off mem_size prom_off
-       bus               base      odd_off  swap  oui */
+       bus               base      odd_off  swap  regmap  oui */
     { "xsurf100",  4626,   100, 0x0800,     4, 0x8880,
       NETDEV_CHIP_NE2000, 100000000UL, 1,       0,       0,       0,
-      NETDEV_BUS_ZORRO, 0, 0, 0, 0 },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0 },
 
     { "xsurf",     4626,    23, 0x8600,     2,      0,
       NETDEV_CHIP_NE2000,  10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_ZORRO, 0, 0, 0, 0 },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0 },
 
     { "ariadne2",  2167,   202, 0x0600,     2,      0,
       NETDEV_CHIP_NE2000,  10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_ZORRO, 0, 0, 0, 0 },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0 },
 
     { "hydra",     2121,     1, 0xffe1,     2,      0,
       NETDEV_CHIP_ED,      10000000UL, 0,       0,  0x4000,  0xffc0,
-      NETDEV_BUS_ZORRO, 0, 0, 0, 0 },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0 },
 
     { "lanrover",  1023,   254, 0x0001,     2,      0,
       NETDEV_CHIP_ED,      10000000UL, 0,  0x8000,  0x8000,  0x0100,
-      NETDEV_BUS_ZORRO, 0, 0, 0, 0 },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0 },
 
     /*
      * The two LANCE boards.  Registers are RDP then RAP, a word apart, and
@@ -57,11 +82,11 @@ const NetdevCard netdev_cards[] =
      */
     { "a2065",      514,   112, 0x4000,     2,      0,
       NETDEV_CHIP_LANCE,   10000000UL, 0,  0x8000,  0x8000,  0x0000,
-      NETDEV_BUS_ZORRO, 0, 0, 0, 0x0080 },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0x0080 },
 
     { "ariadne",   2167,   201, 0x0370,     2,      0,
       NETDEV_CHIP_LANCE,   10000000UL, 0,  0x8000,  0x8000,  0x0000,
-      NETDEV_BUS_ZORRO, 0, 0, 1, 0x0060 },
+      NETDEV_BUS_ZORRO, 0, 0, 1, NULL, 0x0060 },
 
     /*
      * The A1200/A600 PCMCIA slot.  No autoconfig record and no board base:
@@ -72,7 +97,22 @@ const NetdevCard netdev_cards[] =
      */
     { "pcmcia",       0,     0, 0x0300,     1,      0,
       NETDEV_CHIP_NE2000,  10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, 0 },
+      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0 },
+    /*
+     * The X-Surf 500, on an ACA500 or ACA500plus.  An AX88796B -- the same
+     * family as the X-Surf 100 -- at a fixed $EE0000 with no autoconfig
+     * record, so it is probed rather than found, and its register file is a
+     * table (see above) rather than a stride.  The 16-bit data port is ASIC
+     * register 0 at $EE0060; the FIFO at $EE8440 is sixteen bytes that take a
+     * movem.l, which is what wide_off names.
+     *
+     * NOTHING EMULATES THIS CARD, so it has never been run.  It is written to
+     * cost nothing when absent: the probe reads the chip and attach refuses
+     * if a DP8390 does not answer, exactly as the X-Surf row does today.
+     */
+    { "xsurf500",     0,     0, 0x0000,     1, 0x8440,
+      NETDEV_CHIP_NE2000, 100000000UL, 1,       0,       0,       0,
+      NETDEV_BUS_FIXED, 0x00ee0000UL, 0, 0, xsurf500_regmap, 0 },
 };
 
 const UWORD netdev_card_count =

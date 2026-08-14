@@ -71,6 +71,15 @@ struct NetdevBus
      * address in both windows and never anything else.
      */
     volatile UBYTE *odd;
+
+    /*
+     * A 32-entry offset table when the register file is not evenly spaced,
+     * NULL otherwise.  The X-Surf 500 is the case that needs it: an ACA500
+     * exposes so few address lines that the register number's bits land
+     * scattered across the address, from $0204 to $6E94 apart with no stride
+     * to compute.  Entries 0..15 are the NIC file, 16..31 the ASIC block.
+     */
+    const ULONG *regmap;
     UWORD           stride;     /* bytes between consecutive register indices */
     UBYTE           shift;      /* log2(stride); 1, 2 and 4 are the only ones */
     UBYTE           dmode;      /* NETDEV_DMODE_*, set by the probe */
@@ -86,6 +95,9 @@ VOID netdev_bus_setup(NetdevBus *bus, APTR base, UWORD stride, APTR wide);
 
 /* Call after setup for a card whose odd registers live in a second window. */
 VOID netdev_bus_split(NetdevBus *bus, APTR odd);
+
+/* Call after setup for a card whose register file is not evenly spaced. */
+VOID netdev_bus_regmap(NetdevBus *bus, const ULONG *map, APTR data_port);
 
 /*
  * Promote to NETDEV_DMODE_LONG only if the wide window really is the same
@@ -117,6 +129,9 @@ extern ULONG netdev_time_regs;      /* scalar register accesses, per report */
    split; NULL for every board whose file is contiguous. */
 static inline volatile UBYTE *netdev_bus_at(const NetdevBus *bus, UWORD reg)
 {
+    if (bus->regmap != NULL)
+        return &bus->nic[bus->regmap[reg & 31u]];
+
     if (bus->odd != NULL && (reg & 1) != 0)
         return &bus->odd[(ULONG)(reg - 1) << bus->shift];
 
@@ -138,12 +153,20 @@ static inline VOID netdev_bus_w8(const NetdevBus *bus, UWORD reg, UBYTE val)
 static inline UBYTE netdev_bus_ra8(const NetdevBus *bus, UWORD reg)
 {
     NETDEV_BUS_COUNT();
+    if (bus->regmap != NULL)
+        return *netdev_bus_at(bus, (UWORD)(16u + (reg & 15u)));
+
     return bus->asic[(ULONG)reg << bus->shift];
 }
 
 static inline VOID netdev_bus_wa8(const NetdevBus *bus, UWORD reg, UBYTE val)
 {
     NETDEV_BUS_COUNT();
+    if (bus->regmap != NULL)
+    {
+        *netdev_bus_at(bus, (UWORD)(16u + (reg & 15u))) = val;
+        return;
+    }
     bus->asic[(ULONG)reg << bus->shift] = val;
 }
 

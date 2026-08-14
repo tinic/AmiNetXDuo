@@ -38,6 +38,7 @@
  */
 #define NETDEV_BUS_ZORRO    0
 #define NETDEV_BUS_PCMCIA   1
+#define NETDEV_BUS_FIXED    2   /* a fixed address, no autoconfig, no claim */
 
 typedef struct NetdevCard
 {
@@ -65,6 +66,13 @@ typedef struct NetdevCard
                                    the register file is contiguous            */
     UBYTE       lance_swap;     /* the board crosses the SRAM byte lanes, so
                                    descriptor words are written pre-swapped   */
+    /*
+     * A register file whose addresses are not base + reg * stride.  32 entries
+     * when set: 0..15 are the NIC registers, 16..31 the ASIC block, which is
+     * how the NE2000 core already thinks of them (ASIC 0 is the data port,
+     * ASIC 15 the reset).  NULL for every card whose file is evenly spaced.
+     */
+    const ULONG *regmap;
     UWORD       serial_oui;     /* non-zero: the station address is this OUI
                                    prefix plus the autoconfig serial number,
                                    which is where Commodore put it -- there is
