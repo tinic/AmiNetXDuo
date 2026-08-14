@@ -21,6 +21,13 @@
 #include "aminetxduo/anxnet.h"
 #include "netdev_cards.h"
 
+/* netdev_cards.c carries netdev_nic_ops_for(), which names the two chip cores.
+   This test is about the card table, not the cores, so they are stood in for
+   rather than linked -- ed.c and ne2000.c reach the hardware. */
+#include "netdev_nic.h"
+const struct NetdevNicOps netdev_nic_ne2000;
+const struct NetdevNicOps netdev_nic_ed;
+
 static int failures;
 
 static void expect_str(const char *what, const char *got, const char *want)
