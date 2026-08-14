@@ -29,6 +29,39 @@ concurrency:
 
 jobs:
 
+  # -fanalyzer over the tree, beside the rest rather than in front of it.
+  analyze:
+    name: static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Toolchain pin
+        id: pin
+        run: echo "sha=$(tools/fetch-toolchain.sh --print-sha)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the pinned m68k toolchain
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/aminetxduo/toolchain
+          key: m68k-amigaos-gcc-15.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
+
+      - name: Fetch the toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: tools/fetch-toolchain.sh
+
+      - name: The toolchain's crt0 is repaired
+        run: tools/fetch-toolchain.sh --check-crt0
+
+      - name: The toolchain's inline register ABI is repaired
+        run: tools/fetch-toolchain.sh --check-inlines
+
+      - name: tools/ci.sh analyze
+        run: AMINETXDUO_ANALYZE=1 tools/ci.sh analyze
+
   # Every option arm, one runner each, at the same time as the job above.
   # Not `needs:` -- a failure here reddens the run without putting these
   # minutes back on the critical path, which is the point of splitting them.
@@ -153,11 +186,12 @@ jobs:
       # twenty-two minute run, all of it serial and none of it needed by
       # anything later in this job except `default`, which conformance wants.
       # The coverage is unchanged; only the shape is.
+      # analyze is its own job below: 2 m 34 s of -fanalyzer on the critical
+      # path of a run with a ten-minute ceiling, and it gates nothing here.
       - name: tools/ci.sh
         run: >-
-          AMINETXDUO_ANALYZE=1 AMINETXDUO_SANITIZE=1
-          AMINETXDUO_CI_CROSS="default"
-          tools/ci.sh host host32 sanitize cross web analyze conformance
+          AMINETXDUO_SANITIZE=1 AMINETXDUO_CI_CROSS="default"
+          tools/ci.sh host host32 sanitize cross web conformance
 
       # The logs are where a failure is diagnosed, and they are the only thing
       # that survives the runner.
