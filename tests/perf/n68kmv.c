@@ -37,7 +37,13 @@
 
 #include <stdio.h>
 
-#include "net68k.h"
+/* Declared here rather than from net68k.h, which reaches nx_api.h and its own
+   typedef of VOID: bench/copycheck.c takes the same way out. */
+extern ULONG n68k_sum_longwords(const ULONG *p, ULONG count);
+extern ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from,
+                                     ULONG count);
+extern VOID  n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len);
+extern VOID  n68k_cpu_select(ULONG attnflags);
 
 struct Device           *TimerBase;
 static struct IORequest  timer_req;
