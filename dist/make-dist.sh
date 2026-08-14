@@ -89,6 +89,11 @@ need() {
 }
 
 LIBS=(bsdsocket usergroup)
+
+# SANA-II drivers, DEVS:Networks/.  Per CPU, like the libraries and unlike the
+# commands: this is interrupt-level packet handling, not a shell command whose
+# hot work happens inside a library.
+DEVICES=(netdev/anxnet)
 CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ShowNetServices
       ping netstat host hostname
       nslookup arp fetch nc telnet NetTrace sntp traceroute tftp whois httpd
@@ -183,6 +188,7 @@ for cpu in "${CPU_DIRS[@]}"; do
         exit 2
     }
     for lib in "${LIBS[@]}"; do need "$b/src/$lib/$lib.library"; done
+    for dev in "${DEVICES[@]}"; do need "$b/src/$dev.device"; done
 done
 
 # Normally the 68000 build, per the note above.  When AMINETXDUO_DIST_CPUS has
@@ -230,8 +236,8 @@ python3 "$INSTALL/tools/makeicon.py" "$INSTALL" >/dev/null
 # -------------------------------------------------------------- the layout --
 
 rm -rf "$TREE" "$OUTDIR/AmiNetXDuo.info"
-mkdir -p "$TREE/C" "$TREE/Libs" "$TREE/Devs/Internet" "$TREE/Docs" \
-         "$TREE/Examples" "$TREE/Terminal"
+mkdir -p "$TREE/C" "$TREE/Libs" "$TREE/Devs/Internet" "$TREE/Devs/Networks" \
+         "$TREE/Docs" "$TREE/Examples" "$TREE/Terminal"
 
 for cpu in "${CPU_DIRS[@]}"; do
     mkdir -p "$TREE/Libs/$cpu"
@@ -257,6 +263,12 @@ for cpu in "${CPU_DIRS[@]}"; do
         echo "==> $cpu: bsdsocket, usergroup (no tls.library in this build)"
     fi
     chmod 755 "$TREE/Libs/$cpu"/*
+
+    mkdir -p "$TREE/Devs/Networks/$cpu"
+    for dev in "${DEVICES[@]}"; do
+        cp "${CPU_BUILD[$cpu]}/src/$dev.device" "$TREE/Devs/Networks/$cpu/"
+    done
+    chmod 755 "$TREE/Devs/Networks/$cpu"/*
 done
 
 # The trust store comes from the primary build, and is packed whenever any
