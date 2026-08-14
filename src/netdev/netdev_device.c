@@ -245,20 +245,15 @@ static VOID nd_time_report(VOID)
  * A 6-byte Ethernet address, as a longword and a word.  Both ends are even --
  * the staging buffer is AllocMem'd and ios2_DstAddr/ios2_SrcAddr sit at even
  * offsets in the request -- and the source's second half is 2 mod 4, which
- * costs a 68020 one extra bus cycle and a 68000 nothing.  nd_bytes compiled to
- * `move.b (a2)+,(a6)+ / cmpa.l / bne`, three instructions a byte, twice per
- * frame; the profile priced the pair at 16% of the hand-over.
+ * costs a 68020 one extra bus cycle and a 68000 nothing.  The byte loop this
+ * replaced compiled to `move.b (a2)+,(a6)+ / cmpa.l / bne`, three instructions
+ * a byte, twice per frame; the profile priced the pair at 16% of the
+ * hand-over.
  */
 static VOID nd_addr6(UBYTE *to, const UBYTE *from)
 {
     *(ULONG *)(APTR)to        = *(const ULONG *)(const APTR)from;
     *(UWORD *)(APTR)(to + 4)  = *(const UWORD *)(const APTR)(from + 4);
-}
-
-static VOID nd_bytes(UBYTE *to, const UBYTE *from, ULONG n)
-{
-    while (n-- != 0)
-        *to++ = *from++;
 }
 
 static VOID nd_zero(UBYTE *p, ULONG n)
