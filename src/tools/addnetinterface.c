@@ -516,8 +516,14 @@ int main(int argc, char **argv)
         {
             name = tool_basename((const char *)names[n]);
             (VOID)load_interface(name, &ifc, TRUE);
-            tool_printf("%s: %s unit %ld\n", (LONG)name, (LONG)ifc.device,
-                        (LONG)ifc.unit);
+            /* The card is part of what was asked for when the file pins one,
+               and this line is the only place the request is echoed. */
+            if (ifc.card[0] != '\0')
+                tool_printf("%s: %s unit %ld card %s\n", (LONG)name,
+                            (LONG)ifc.device, (LONG)ifc.unit, (LONG)ifc.card);
+            else
+                tool_printf("%s: %s unit %ld\n", (LONG)name, (LONG)ifc.device,
+                            (LONG)ifc.unit);
         }
     }
 
