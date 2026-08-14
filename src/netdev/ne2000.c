@@ -316,35 +316,88 @@ static BOOL ne2000_detect(NetdevNic *nic)
  */
 static VOID ne2000_probe_wide(NetdevNic *nic)
 {
-    UBYTE back[NETDEV_BUS_PROBE_LEN];
+    /*
+     * BOTH BUFFERS ARE ULONG ARRAYS AND THAT IS LOAD-BEARING.  netdev_bus.c
+     * refuses the 32-bit path for a buffer that is not 4-aligned and silently
+     * falls back to 16-bit moves -- correct for a data path, fatal for a probe,
+     * because the readback then matches without the wide window ever having
+     * been touched and the mode is promoted on no evidence.  That is exactly
+     * what happened when the second leg read from `ne_test_pattern + 16`: the
+     * pattern sits at .text+0x8da, so +16 is 2 mod 4, and the leg whose own
+     * comment claimed to test the transmit direction tested the 16-bit port.
+     */
+    ULONG  outbuf[NETDEV_BUS_PROBE_LEN / 4];
+    ULONG  inbuf[NETDEV_BUS_PROBE_LEN / 4];
+    UBYTE *out = (UBYTE *)outbuf;
+    UBYTE *back = (UBYTE *)inbuf;
+    UWORD  i;
 
     if (nic->bus.wide == NULL)
         return;
 
-    /* Written narrow, read wide. */
+    /* Leg 1: written narrow, read wide. */
+    for (i = 0; i < NETDEV_BUS_PROBE_LEN; i++)
+        out[i] = (UBYTE)(0x5au ^ (i * 7u));
+
     nic->bus.dmode = NETDEV_DMODE_WORD;
-    ne2000_writemem(nic, ne_test_pattern, 16384, NETDEV_BUS_PROBE_LEN);
+    ne2000_writemem(nic, out, 16384, NETDEV_BUS_PROBE_LEN);
     nic->bus.dmode = NETDEV_DMODE_LONG;
     ne2000_readmem(nic, 16384, back, NETDEV_BUS_PROBE_LEN);
-    if (ne_memcmp(ne_test_pattern, back, NETDEV_BUS_PROBE_LEN) != 0)
+    if (ne_memcmp(out, back, NETDEV_BUS_PROBE_LEN) != 0)
     {
         nic->bus.dmode = NETDEV_DMODE_WORD;
         return;
     }
 
-    /* And written wide, read narrow, which is the direction that transmits. */
+    /*
+     * Leg 2: written wide, read narrow, which is the direction that
+     * transmits.  A different pattern, so that a buffer left over from leg 1
+     * cannot make this one pass.
+     */
+    for (i = 0; i < NETDEV_BUS_PROBE_LEN; i++)
+        out[i] = (UBYTE)(0xa5u ^ (i * 3u));
+
     nic->bus.dmode = NETDEV_DMODE_LONG;
-    ne2000_writemem(nic, ne_test_pattern + 16, 16384 + 256,
-                    NETDEV_BUS_PROBE_LEN - 16);
+    ne2000_writemem(nic, out, 16384 + 256, NETDEV_BUS_PROBE_LEN);
     nic->bus.dmode = NETDEV_DMODE_WORD;
-    ne2000_readmem(nic, 16384 + 256, back, NETDEV_BUS_PROBE_LEN - 16);
-    if (ne_memcmp(ne_test_pattern + 16, back, NETDEV_BUS_PROBE_LEN - 16) != 0)
+    ne2000_readmem(nic, 16384 + 256, back, NETDEV_BUS_PROBE_LEN);
+    if (ne_memcmp(out, back, NETDEV_BUS_PROBE_LEN) != 0)
         return;
 
     nic->bus.dmode = NETDEV_DMODE_LONG;
 }
 
 /* --------------------------------------------------------------- attach --- */
+
+/*
+ * NetBSD zeroes and reads back the whole buffer before it trusts the card
+ * (dp8390_test_mem / ne2000_test_mem).  Dropping it accepts a board with bad
+ * buffer RAM and, worse, leaves the receive ring holding whatever was there --
+ * which is the feedstock for the corrupt-header path in dp8390_rint().
+ * A page at a time, so the staging buffer stays small.
+ */
+static BOOL ne2000_test_mem(NetdevNic *nic)
+{
+    ULONG  zero[ED_PAGE_SIZE / 4];
+    ULONG  back[ED_PAGE_SIZE / 4];
+    UWORD  i;
+    LONG   off;
+
+    for (i = 0; i < ED_PAGE_SIZE / 4; i++)
+        zero[i] = 0;
+
+    for (off = 0; off < nic->mem_size; off += ED_PAGE_SIZE)
+    {
+        ne2000_writemem(nic, (const UBYTE *)zero, nic->mem_start + off,
+                        ED_PAGE_SIZE);
+        ne2000_readmem(nic, nic->mem_start + off, (UBYTE *)back, ED_PAGE_SIZE);
+        if (ne_memcmp((const UBYTE *)zero, (const UBYTE *)back,
+                      ED_PAGE_SIZE) != 0)
+            return FALSE;
+    }
+
+    return TRUE;
+}
 
 static LONG ne2000_attach(NetdevNic *nic)
 {
@@ -421,6 +474,10 @@ static LONG ne2000_attach(NetdevNic *nic)
     NIC_PUT(nic, ED_P0_ISR, 0xff);
 
     dp8390_config(nic);
+
+    if (!ne2000_test_mem(nic))
+        return -1;
+
     dp8390_halt(nic);
 
     return 0;

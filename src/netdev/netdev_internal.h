@@ -7,6 +7,8 @@
 #ifndef AMINETXDUO_NETDEV_INTERNAL_H
 #define AMINETXDUO_NETDEV_INTERNAL_H
 
+#include <stddef.h>
+
 #include <exec/types.h>
 #include <exec/devices.h>
 #include <exec/interrupts.h>
@@ -81,7 +83,10 @@ typedef struct NetdevUnit
     struct List                 nu_OpenerList;
     struct List                 nu_Writes;      /* CMD_WRITE awaiting a slot */
 
-    struct Interrupt            nu_Intr;
+    struct Interrupt            nu_Intr;      /* INT2, the card               */
+    struct Interrupt            nu_Tick;      /* INT3 vertical blank, watchdog */
+    UWORD                       nu_TxStall;   /* blanks with a transmit stuck  */
+    UWORD                       nu_TxWedges;  /* how often it had to be reset  */
 
     NetdevMcast                 nu_Mcast[NETDEV_MCAST_MAX];
     ULONG                       nu_McastFull;   /* joins the table could not hold */
@@ -104,6 +109,14 @@ typedef struct NetdevDevice
     UWORD               nd_UnitCount;
     NetdevUnit          nd_Units[NETDEV_MAX_UNITS];
 } NetdevDevice;
+
+/*
+ * io_Unit points at the embedded struct Unit, not at the opener, so a caller
+ * or a tool that treats io_Unit as a struct Unit * is not being lied to.  The
+ * opener is recovered from it here.
+ */
+#define NETDEV_OPENER(u) \
+    ((NetdevOpener *)(void *)((UBYTE *)(u) - offsetof(NetdevOpener, op_Unit)))
 
 /* netdev_device.c */
 VOID netdev_reply(struct IOSana2Req *io, LONG err, ULONG wire);

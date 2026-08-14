@@ -148,7 +148,10 @@ static BOOL mcast_add(NetdevUnit *unit, const UBYTE *addr)
 
     if (m != NULL)
     {
-        m->refs++;
+        /* Saturate rather than wrap: a wrap to zero frees a row that callers
+           still hold, and the group stops being received with nothing said. */
+        if (m->refs != 0xffffu)
+            m->refs++;
         return TRUE;
     }
 
@@ -288,7 +291,7 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
     NetdevUnit *unit;
     UWORD       cmd = io->ios2_Req.io_Command;
 
-    if (op == NULL || op == (NetdevOpener *)-1)
+    if (op == NULL)
     {
         netdev_reply(io, IOERR_BADADDRESS, S2WERR_GENERIC_ERROR);
         return;
@@ -429,6 +432,9 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
     case S2_CONFIGINTERFACE:
         if (unit->nu_Configured)
         {
+            /* The caller learns which address is actually in force, rather
+               than being refused and left believing its own was taken. */
+            cmd_bytes(io->ios2_SrcAddr, unit->nu_Nic.mac, NETDEV_ADDR_LEN);
             netdev_reply(io, S2ERR_BAD_STATE, S2WERR_IS_CONFIGURED);
             return;
         }
@@ -575,10 +581,13 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
             return;
         }
 
+        /* The interrupt server walks this array on every frame. */
+        Disable();
         cmd_zero((UBYTE *)&op->op_Track[free_slot],
                  sizeof(op->op_Track[free_slot]));
         op->op_Track[free_slot].type = io->ios2_PacketType;
         op->op_Track[free_slot].used = 1;
+        Enable();
         netdev_reply(io, 0, 0);
         return;
     }
@@ -592,7 +601,9 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
             if (op->op_Track[i].used &&
                 op->op_Track[i].type == io->ios2_PacketType)
             {
+                Disable();
                 op->op_Track[i].used = 0;
+                Enable();
                 netdev_reply(io, 0, 0);
                 return;
             }
@@ -721,7 +732,7 @@ BOOL netdev_abort(NetdevOpener *op, struct IOSana2Req *io)
     NetdevUnit *unit;
     BOOL        found;
 
-    if (op == NULL || op == (NetdevOpener *)-1)
+    if (op == NULL)
         return FALSE;
 
     unit = op->op_Hw;

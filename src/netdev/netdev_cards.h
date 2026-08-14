@@ -28,7 +28,6 @@
  * server that answers "mine" without asking eats every other board's.
  */
 #define NETDEV_IRQ_NONE     0   /* no status register: ask the chip's ISR */
-#define NETDEV_IRQ_BIT7     1   /* byte at board + irq_off, bit 7 set = ours */
 
 typedef struct NetdevCard
 {
@@ -38,8 +37,6 @@ typedef struct NetdevCard
     ULONG       reg_off;        /* register file, offset from the board base */
     UWORD       stride;         /* bytes between consecutive register indices */
     ULONG       wide_off;       /* 32-bit mirrored data window, 0 = none      */
-    ULONG       irq_off;        /* board-level interrupt status byte          */
-    UBYTE       irq_kind;       /* NETDEV_IRQ_*                               */
     UBYTE       chip;           /* NETDEV_CHIP_*                              */
     ULONG       bps;            /* S2_DEVICEQUERY line rate                   */
     UBYTE       ax88796;        /* station address at AX88796_NODEID_OFFSET   */

@@ -217,59 +217,15 @@ BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len)
     return (BOOL)(res != 0);
 }
 
-/* One line to the shell that asked, when there is one. Never from an ISR. */
-static VOID netdev_moan(const char *text)
-{
-    struct Library *dosbase = OpenLibrary((CONST_STRPTR)"dos.library", 36);
-    struct Process *me      = (struct Process *)FindTask(NULL);
-
-    if (dosbase == NULL)
-        return;
-
-    if (me->pr_Task.tc_Node.ln_Type == NT_PROCESS && me->pr_CLI != 0)
-    {
-        struct DosLibrary *dl = (struct DosLibrary *)dosbase;
-        BPTR out;
-
-        {
-            register struct DosLibrary *a6 __asm("a6") = dl;
-            register BPTR res __asm("d0");
-
-            __asm __volatile ("jsr a6@(-60:W)"      /* Output() */
-                              : "=r" (res) : "r" (a6)
-                              : "a0", "a1", "d1", "cc", "memory");
-            out = res;
-        }
-
-        if (out != 0)
-        {
-            register struct DosLibrary *a6 __asm("a6") = dl;
-            register BPTR   d1 __asm("d1") = out;
-            register CONST_STRPTR d2 __asm("d2") = (CONST_STRPTR)text;
-            register LONG   d3 __asm("d3");
-            register LONG   res __asm("d0");
-
-            d3 = 0;
-            while (text[d3] != '\0')
-                d3++;
-
-            __asm __volatile ("jsr a6@(-48:W)"      /* Write() */
-                              : "=r" (res)
-                              : "r" (a6), "r" (d1), "r" (d2), "r" (d3)
-                              : "a0", "a1", "cc", "memory");
-        }
-    }
-
-    CloseLibrary(dosbase);
-}
-
-#ifdef NETDEV_TRACE
-VOID netdev_trace_cmd(UWORD c);
-VOID netdev_trace_cmd(UWORD c)
-{
-    nd_tracex("anx: cmd ", (ULONG)c);
-}
-#endif
+/*
+ * There is deliberately no diagnostic printed from Open().  Exec calls a
+ * device's Open vector under Forbid(), and dos.library's Write() can Wait --
+ * breaking Forbid inside the one call that must not break it.  A refused open
+ * says so through io_Error (IOERR_OPENFAIL for a pin that names no board in
+ * this machine, IOERR_UNITBUSY for a unit somebody holds exclusively), and
+ * explaining it belongs to the caller, which is a shell command with a
+ * console and no Forbid.
+ */
 
 /* ------------------------------------------------------- the RX callback -- */
 
@@ -443,7 +399,7 @@ VOID netdev_tx_pump(NetdevUnit *unit)
             return;
 
         io = (struct IOSana2Req *)RemHead(&unit->nu_Writes);
-        op = (NetdevOpener *)io->ios2_Req.io_Unit;
+        op = NETDEV_OPENER(io->ios2_Req.io_Unit);
         len = io->ios2_DataLength;
 
         if (op->op_Raw || (io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0)
@@ -614,7 +570,7 @@ VOID netdev_drop_writes(NetdevUnit *unit, NetdevOpener *op)
         struct IOSana2Req *io   = (struct IOSana2Req *)n;
         struct Node       *next = n->ln_Succ;
 
-        if ((NetdevOpener *)io->ios2_Req.io_Unit == op)
+        if (NETDEV_OPENER(io->ios2_Req.io_Unit) == op)
         {
             Remove(n);
             netdev_reply(io, IOERR_ABORTED, 0);
@@ -622,6 +578,36 @@ VOID netdev_drop_writes(NetdevUnit *unit, NetdevOpener *op)
         n = next;
     }
     Enable();
+}
+
+/*
+ * The unit outlives every opener, so anything an opener changed about it has
+ * to be undone when the last one goes.  Across a stack restart the three that
+ * matter are: an accept-all-multicast latch that never clears, a multicast
+ * table that fills with 32 stale groups and then refuses the new stack's
+ * joins with S2ERR_NO_RESOURCES -- taking IPv6 solicited-node frames with it
+ * -- and a configured flag that makes the new stack's S2_CONFIGINTERFACE fail
+ * so it silently runs on the old stack's address.
+ */
+static VOID netdev_release_unit(NetdevUnit *unit)
+{
+    UWORD i;
+
+    for (i = 0; i < NETDEV_MCAST_MAX; i++)
+    {
+        unit->nu_Mcast[i].refs = 0;
+        unit->nu_Mcast[i].addr[0] = 0;
+    }
+    unit->nu_AllMulti  = 0;
+    unit->nu_Promisc   = 0;
+    unit->nu_Exclusive = 0;
+    unit->nu_Nic.promisc = FALSE;
+
+    unit->nu_Configured = 0;
+    for (i = 0; i < NETDEV_ADDR_LEN; i++)
+        unit->nu_Nic.mac[i] = unit->nu_Nic.factory[i];
+
+    netdev_mar_clear(unit->nu_Nic.mar);
 }
 
 VOID netdev_offline(NetdevUnit *unit, ULONG event)
@@ -660,24 +646,71 @@ VOID netdev_offline(NetdevUnit *unit, ULONG event)
 
 static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
 {
-    const NetdevCard *card = unit->nu_Nic.card;
-
     /*
-     * INT2 is shared with every other Zorro board, so a server that answers
-     * without asking eats somebody else's interrupt.  Where the board has a
-     * status byte, that is the question; where it has not, the chip's own ISR
-     * is, and dp8390_intr() returns FALSE when it reads zero.
+     * THE CHIP'S OWN ISR IS THE QUESTION, and it is the only one asked.
+     *
+     * There was a board-level test here first -- X-Surf and X-Surf 100 put an
+     * interrupt-status bit at board+0x40 -- on the theory that INT2 is shared
+     * and a server should not answer for somebody else's card.  It is not
+     * worth what it risks: NetBSD's xsurf.c and xsh.c install dp8390_intr
+     * directly with no such test, the offset and bit are the one part of the
+     * card table that could not be checked against NetBSD, and getting them
+     * wrong on a row nobody has run means the chip's level-triggered INT is
+     * never acknowledged.  That is INT2 held down for the whole machine, or a
+     * card that simply never receives -- the silent whole-card failure the
+     * table exists to prevent.
+     *
+     * Reading ISR costs two bus cycles and cannot be wrong: dp8390_intr()
+     * returns FALSE when it reads zero, which is the same answer the board bit
+     * was there to give.
      */
-    if (card->irq_kind == NETDEV_IRQ_BIT7 &&
-        (unit->nu_Nic.board[card->irq_off] & 0x80) == 0)
-        return 0;
-
     if (!unit->nu_Nic.ops->intr(&unit->nu_Nic))
         return 0;
 
     netdev_tx_pump(unit);
 
     return 1;
+}
+
+/*
+ * NetBSD arms ifp->if_timer on every transmit and dp8390_watchdog() resets the
+ * chip when it expires.  There is no callout here and no task, so the tick is
+ * the vertical blank -- the one clock a device can have for free.
+ *
+ * WHY IT IS NOT OPTIONAL.  netdev_tx_pump() only runs while
+ * txb_inuse < txb_cnt, and only dp8390_init() clears txb_inuse.  A single lost
+ * or never-delivered transmit completion therefore wedges the transmitter for
+ * good: every later CMD_WRITE queues on nu_Writes and is never replied to, and
+ * the caller sits in WaitIO() forever.  Nothing else in the driver can notice,
+ * because noticing requires a clock the card does not drive.
+ *
+ * Disable() rather than a software interrupt: the vertical blank is INT3 and
+ * the card is INT2, so this can preempt the card's own server and must not
+ * touch the chip alongside it.  The recovery is rare and its cost is a few
+ * milliseconds once, against a transmitter that never comes back.
+ */
+#define NETDEV_TX_STALL_BLANKS  120     /* ~2 s at 50 Hz, ~2 s at 60 Hz */
+
+static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
+{
+    Disable();
+
+    if (!unit->nu_Online || unit->nu_Nic.txb_inuse == 0)
+    {
+        unit->nu_TxStall = 0;
+    }
+    else if (++unit->nu_TxStall >= NETDEV_TX_STALL_BLANKS)
+    {
+        unit->nu_TxStall = 0;
+        unit->nu_TxWedges++;
+        unit->nu_Nic.tx_errors++;
+        dp8390_reset(&unit->nu_Nic);
+        netdev_tx_pump(unit);
+    }
+
+    Enable();
+
+    return 0;
 }
 
 /* ----------------------------------------------------------------- probe -- */
@@ -757,6 +790,12 @@ static VOID netdev_probe(NetdevDevice *dev)
         unit->nu_Intr.is_Node.ln_Name = netdev_name;
         unit->nu_Intr.is_Data         = unit;
         unit->nu_Intr.is_Code         = (VOID (*)())netdev_server;
+
+        unit->nu_Tick.is_Node.ln_Type = NT_INTERRUPT;
+        unit->nu_Tick.is_Node.ln_Pri  = 0;
+        unit->nu_Tick.is_Node.ln_Name = netdev_name;
+        unit->nu_Tick.is_Data         = unit;
+        unit->nu_Tick.is_Code         = (VOID (*)())netdev_tick;
 
         dev->nd_UnitCount++;
     }
@@ -931,9 +970,7 @@ static struct Device *netdev_open(
     hw = netdev_find_unit(d, unit, pin, &why);
     if (hw == NULL)
     {
-        netdev_moan(ANXNET_DEVICE_NAME ": open refused, ");
-        netdev_moan(why);
-        netdev_moan(".\n");
+        (VOID)why;
         FreeMem(op, sizeof(NetdevOpener));
         io->ios2_Req.io_Device = (struct Device *)-1;
         io->ios2_Req.io_Unit   = (struct Unit *)-1;
@@ -964,8 +1001,6 @@ static struct Device *netdev_open(
         (op->op_Exclusive && hw->nu_Openers != 0))
     {
         Enable();
-        netdev_moan(ANXNET_DEVICE_NAME ": open refused, the unit is in "
-                    "exclusive use.\n");
         FreeMem(op, sizeof(NetdevOpener));
         io->ios2_Req.io_Device = (struct Device *)-1;
         io->ios2_Req.io_Unit   = (struct Unit *)-1;
@@ -992,12 +1027,13 @@ static struct Device *netdev_open(
     if (first_opener && !hw->nu_IntrAdded)
     {
         AddIntServer(INTB_PORTS, &hw->nu_Intr);
+        AddIntServer(INTB_VERTB, &hw->nu_Tick);
         hw->nu_IntrAdded = 1;
     }
 
     nd_trace("anx: open ok\r\n");
     io->ios2_Req.io_Device = dev;
-    io->ios2_Req.io_Unit   = (struct Unit *)op;
+    io->ios2_Req.io_Unit   = &op->op_Unit;
     io->ios2_Req.io_Error  = 0;
 
     dev->dd_Library.lib_OpenCnt++;
@@ -1009,14 +1045,16 @@ static struct Device *netdev_open(
 static BPTR netdev_close(register struct Device     *dev __asm("a6"),
                          register struct IOSana2Req *io  __asm("a1"))
 {
-    NetdevOpener *op = (NetdevOpener *)io->ios2_Req.io_Unit;
+    NetdevOpener *op = (io->ios2_Req.io_Unit != NULL &&
+                        io->ios2_Req.io_Unit != (struct Unit *)-1)
+                       ? NETDEV_OPENER(io->ios2_Req.io_Unit) : NULL;
     NetdevUnit   *hw;
     BPTR          seg = (BPTR)0;
 
     io->ios2_Req.io_Device = (struct Device *)-1;
     io->ios2_Req.io_Unit   = (struct Unit *)-1;
 
-    if (op != NULL && op != (NetdevOpener *)-1)
+    if (op != NULL)
     {
         struct IOSana2Req *q;
 
@@ -1055,9 +1093,11 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
         {
             if (hw->nu_Online)
                 netdev_offline(hw, S2EVENT_OFFLINE);
+            netdev_release_unit(hw);
             if (hw->nu_IntrAdded)
             {
                 RemIntServer(INTB_PORTS, &hw->nu_Intr);
+                RemIntServer(INTB_VERTB, &hw->nu_Tick);
                 hw->nu_IntrAdded = 0;
             }
         }
@@ -1092,6 +1132,7 @@ static BPTR netdev_expunge(register struct Device *dev __asm("a6"))
         if (d->nd_Units[i].nu_IntrAdded)
         {
             RemIntServer(INTB_PORTS, &d->nd_Units[i].nu_Intr);
+            RemIntServer(INTB_VERTB, &d->nd_Units[i].nu_Tick);
             d->nd_Units[i].nu_IntrAdded = 0;
         }
         Disable();
@@ -1123,7 +1164,9 @@ static ULONG netdev_null(VOID)
 static VOID netdev_begin_io(register struct Device     *dev __asm("a6"),
                             register struct IOSana2Req *io  __asm("a1"))
 {
-    NetdevOpener *op = (NetdevOpener *)io->ios2_Req.io_Unit;
+    NetdevOpener *op = (io->ios2_Req.io_Unit != NULL &&
+                        io->ios2_Req.io_Unit != (struct Unit *)-1)
+                       ? NETDEV_OPENER(io->ios2_Req.io_Unit) : NULL;
 
     (VOID)dev;
 
@@ -1136,7 +1179,9 @@ static VOID netdev_begin_io(register struct Device     *dev __asm("a6"),
 static LONG netdev_abort_io(register struct Device     *dev __asm("a6"),
                             register struct IOSana2Req *io  __asm("a1"))
 {
-    NetdevOpener *op = (NetdevOpener *)io->ios2_Req.io_Unit;
+    NetdevOpener *op = (io->ios2_Req.io_Unit != NULL &&
+                        io->ios2_Req.io_Unit != (struct Unit *)-1)
+                       ? NETDEV_OPENER(io->ios2_Req.io_Unit) : NULL;
 
     (VOID)dev;
 

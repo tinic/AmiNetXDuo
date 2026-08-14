@@ -270,6 +270,7 @@ static VOID dp8390_rint(NetdevNic *nic)
     UBYTE      nlen;
 
     UWORD rounds = NETDEV_DRAIN_MAX;
+    UWORD steps;
 
  loop:
     NIC_PUT(nic, ED_P0_CR, nic->cr_proto | ED_CR_PAGE_1 | ED_CR_STA);
@@ -281,6 +282,14 @@ static VOID dp8390_rint(NetdevNic *nic)
 
     NIC_PUT(nic, ED_P1_CR, nic->cr_proto | ED_CR_PAGE_0 | ED_CR_STA);
     dp_pause(nic, 1);
+
+    /*
+     * The walk cannot legitimately visit more buffers than the ring has
+     * pages, so that is the bound.  Belt as well as braces: the header check
+     * below already guarantees forward progress, and this catches a cycle
+     * that steps forward every time and still never reaches `current`.
+     */
+    steps = (UWORD)(nic->rec_page_stop - nic->rec_page_start);
 
     do
     {
@@ -305,8 +314,24 @@ static VOID dp8390_rint(NetdevNic *nic)
             --nlen;
         len = (UWORD)((len & ED_PAGE_MASK) | (nlen << ED_PAGE_SHIFT));
 
+        /*
+         * FORWARD PROGRESS, and it has to be checked here rather than implied.
+         *
+         * next_packet is only ever assigned hdr.next_packet, so a header that
+         * points at its own page leaves the loop condition unchanged and this
+         * spins forever -- inside the INT2 server, with interrupts masked,
+         * which is a dead machine and not a dropped frame.
+         *
+         * NetBSD is protected from that input by accident: a self-referencing
+         * header underflows nlen, the length comes out >= 0xFE00, and its
+         * `len <= MCLBYTES` test sends it down the reset-and-return arm.  When
+         * the over-length arm here stopped resetting -- so that one 802.1Q
+         * frame could not flush the ring -- that exit went with it.  So the
+         * pathological headers are named explicitly instead.
+         */
         if (hdr.next_packet < nic->rec_page_start ||
-            hdr.next_packet >= nic->rec_page_stop)
+            hdr.next_packet >= nic->rec_page_stop ||
+            hdr.next_packet == nic->next_packet)
         {
             /* The ring pointers are corrupt; nothing short of a reset. */
             nic->rx_errors++;
@@ -342,6 +367,13 @@ static VOID dp8390_rint(NetdevNic *nic)
         if (boundary < nic->rec_page_start)
             boundary = (UBYTE)(nic->rec_page_stop - 1);
         NIC_PUT(nic, ED_P0_BNRY, boundary);
+
+        if (--steps == 0)
+        {
+            nic->rx_errors++;
+            dp8390_reset(nic);
+            return;
+        }
     }
     while (nic->next_packet != current);
 
