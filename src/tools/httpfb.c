@@ -174,6 +174,26 @@ static struct IOStdReq  *fb_in_req;
 static BOOL              fb_in_open;
 static struct InputEvent fb_event;
 
+/*
+ * WHAT ie_X AND ie_Y ARE MEASURED IN, WHICH IS NOT SCREEN PIXELS
+ *
+ *   IECLASS_POINTERPOS carries a position in the VIEW's units, and a screen's
+ *   pixels are only the same thing when the screen is hires and interlaced.
+ *   A stock Workbench is 640x256 -- hires, NOT laced -- and its 256 rows are
+ *   512 view lines, so a row handed straight through lands at half its
+ *   number.  Measured: `m 300 200` put the pointer on screen row 100, an
+ *   error of nothing at the top of the screen and 128 rows at the bottom,
+ *   which is what a viewer whose clicks miss by more the further down you go
+ *   is actually reporting.
+ *
+ *   The two factors are read off the ViewPort's Modes and kept here, because
+ *   the injectors have a word from a viewer and no screen in hand.  A screen
+ *   that changes mode under a live session changes them on the next grab.
+ *   Halves, not whole numbers: superhires is HALF a view unit per pixel.
+ */
+static UWORD             fb_x_halves = 2;   /* view units per pixel, doubled */
+static UWORD             fb_y_halves = 4;
+
 /* What the far end is holding down, as IEQUALIFIER_ bits.  Intuition reads the
    button state off the qualifier of every RAWMOUSE event, not off a history of
    the codes, so a button that goes down and is not carried in the qualifier of
@@ -464,6 +484,26 @@ static VOID fb_copy_frame(struct BitMap *bm, const FbGeometry *g, UBYTE *dst)
     }
 }
 
+/*
+ * The view's units per screen pixel, doubled so superhires can be a half.
+ * Straight off the ViewPort: SUPERHIRES is two pixels to a view unit, HIRES
+ * one to one, and anything else is lores at two view units to a pixel; a
+ * screen that is not interlaced is two view lines to a row.
+ */
+static VOID fb_view_units(struct ViewPort *vp)
+{
+    UWORD modes = (UWORD)vp->Modes;
+
+    if ((modes & SUPERHIRES) != 0)
+        fb_x_halves = 1;
+    else if ((modes & HIRES) != 0)
+        fb_x_halves = 2;
+    else
+        fb_x_halves = 4;
+
+    fb_y_halves = (UWORD)(((modes & LACE) != 0) ? 2 : 4);
+}
+
 enum
 {
     FB_GRAB_OK = 0,
@@ -531,6 +571,8 @@ static int fb_grab_frame(const FbGeometry *want, UBYTE *buf, FbGeometry *now,
         UnlockPubScreen(NULL, sc);
         return FB_GRAB_CHANGED;
     }
+
+    fb_view_units(&sc->ViewPort);
 
     locked = (BOOL)(AttemptSemaphore(&sc->LayerInfo.Lock) != 0);
     if (!locked)
@@ -829,8 +871,9 @@ static VOID fb_inject_pointer(rfb_s32 x, rfb_s32 y)
     fb_event.ie_Class     = IECLASS_POINTERPOS;
     fb_event.ie_Code      = IECODE_NOBUTTON;
     fb_event.ie_Qualifier = fb_buttons;
-    fb_event.ie_X         = (WORD)x;
-    fb_event.ie_Y         = (WORD)y;
+    /* Screen pixels in, view units out; see fb_x_halves. */
+    fb_event.ie_X         = (WORD)((x * (rfb_s32)fb_x_halves) / 2);
+    fb_event.ie_Y         = (WORD)((y * (rfb_s32)fb_y_halves) / 2);
     fb_write_event();
 }
 
