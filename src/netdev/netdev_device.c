@@ -263,6 +263,17 @@ static VOID nd_bytes(UBYTE *to, const UBYTE *from, ULONG n)
 
 static VOID nd_zero(UBYTE *p, ULONG n)
 {
+    /* The transmit pad is the hot caller and always lands on an even offset
+       of nu_TxBuf; everything else here is init-time and does not care. */
+    if ((((unsigned long)(APTR)p) & 1u) == 0)
+    {
+        while (n >= 2)
+        {
+            *(UWORD *)(APTR)p = 0;
+            p += 2;
+            n -= 2;
+        }
+    }
     while (n-- != 0)
         *p++ = 0;
 }
@@ -598,10 +609,11 @@ VOID netdev_tx_pump(NetdevUnit *unit)
                 continue;
             }
 
-            nd_bytes(buf, io->ios2_DstAddr, NETDEV_ADDR_LEN);
-            nd_bytes(buf + NETDEV_ADDR_LEN, unit->nu_Nic.mac, NETDEV_ADDR_LEN);
-            buf[12] = (UBYTE)(io->ios2_PacketType >> 8);
-            buf[13] = (UBYTE)(io->ios2_PacketType);
+            /* Same aligned moves as the receive side: nu_TxBuf is ULONG[]
+               and both addresses sit at even offsets. */
+            nd_addr6(buf, io->ios2_DstAddr);
+            nd_addr6(buf + NETDEV_ADDR_LEN, unit->nu_Nic.mac);
+            *(UWORD *)(APTR)(buf + 12) = (UWORD)io->ios2_PacketType;
 
             if (len != 0 &&
                 !netdev_copy_call(op->op_CopyFrom, buf + NETDEV_HDR_LEN,

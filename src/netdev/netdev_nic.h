@@ -91,8 +91,11 @@ struct NetdevNic
     NetdevRxFn          rx;
     APTR                rx_arg;
 
-    UBYTE               factory[NETDEV_ADDR_LEN];
-    UBYTE               mac[NETDEV_ADDR_LEN];
+    /* Even, and stated rather than inherited from what precedes them:
+       netdev_device.c copies both as a longword and a word, which is an
+       address error on a 68000 if a field reorder ever lands them odd. */
+    UBYTE               factory[NETDEV_ADDR_LEN] __attribute__((aligned(2)));
+    UBYTE               mac[NETDEV_ADDR_LEN] __attribute__((aligned(2)));
     UBYTE               mar[8];         /* the multicast hash, host order */
     BOOL                promisc;
     BOOL                running;
