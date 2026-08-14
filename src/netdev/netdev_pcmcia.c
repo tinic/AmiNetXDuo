@@ -249,6 +249,24 @@ VOID netdev_pcmcia_bind(NetdevUnit *unit)
     pc_unit = unit;
 }
 
+/*
+ * GIVE THE SLOT BACK, AND TAKE THE HANDLE OUT OF THE RESOURCE WITH IT.
+ *
+ * ReleaseCard(handle, 0) drops ownership and leaves the handle enqueued, so
+ * card.resource still holds a Node that lives in this driver's BSS: it hands
+ * the slot to us again on the next insertion, with nothing of ours listening,
+ * and after an expunge the Node is in freed memory.  CARDF_REMOVEHANDLE is
+ * what takes it out, and it is what cnet.device passes on every give-up path
+ * it has (cnetdevice.asm:963-964 for the OpenDevice error, :1325-1329 for the
+ * expunge).  ln_Name is this file's own "the resource still has it" marker,
+ * so it is cleared in the same place, once.
+ */
+static VOID pc_give_up(struct CardHandle *handle)
+{
+    pc_release_card(handle, CARDF_REMOVEHANDLE);
+    handle->cah_CardNode.ln_Name = NULL;
+}
+
 APTR netdev_pcmcia_claim(const NetdevCard *card)
 {
     struct CardHandle *handle = &pc_handle;
@@ -271,9 +289,29 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     pc_removed.is_Data         = NULL;
     pc_removed.is_Code         = (VOID (*)())pc_on_removed;
 
+    /*
+     * CARDF_IFAVAILABLE, AND THIS IS THE BIT THAT MATTERS TO SOMEBODY WHO
+     * NEVER USES PCMCIA AT ALL.
+     *
+     * Without it, OwnCard() does not answer "no" -- it enqueues the handle
+     * and grants the slot later, when a card appears or the present owner
+     * lets go.  anxnet.device is opened once on an A600 or an A1200 with an
+     * empty slot, the probe finds nothing and moves on, and the handle stays
+     * in card.resource's list for the life of the machine.  From then on the
+     * slot is ours the moment anything is plugged into it, with
+     * cah_CardInserted NULL so nothing of ours ever notices, and cnet.device
+     * -- or the CF IDE driver, or anything else -- is locked out until the
+     * next reboot.  With the bit set, OwnCard() returns the current owner and
+     * enqueues nothing, which is the only sensible thing for a driver that is
+     * probing.
+     *
+     * cnet.device sets CARDF_IFAVAILABLE (cnetdevice.asm:4655-4665) for the
+     * same reason, plus CARDF_POSTSTATUS on V39+, which is part of its
+     * interrupt path and not of this one.
+     */
     handle->cah_CardNode.ln_Name = (char *)"anxnet.device";
     handle->cah_CardNode.ln_Pri  = 0;
-    handle->cah_CardFlags        = 0;
+    handle->cah_CardFlags        = CARDF_IFAVAILABLE;
     handle->cah_CardRemoved      = &pc_removed;
     handle->cah_CardInserted     = NULL;
     handle->cah_CardStatus       = NULL;
@@ -283,7 +321,14 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
 
         pc_trace("pc: own ", (ULONG)owner);
         if (owner != NULL)
-            return NULL;        /* somebody else has it, or nothing is in it */
+        {
+            /* Somebody else has it, or nothing is in it.  Release anyway:
+               CARDF_IFAVAILABLE means the handle should not have been
+               enqueued, and a give-up path that leaves the resource holding a
+               pointer into our BSS is the whole of the defect above. */
+            pc_give_up(handle);
+            return NULL;
+        }
     }
 
     /* What is in the slot.  Anything but a LAN adapter is given straight
@@ -293,7 +338,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     pc_trace("pc: funcid ", (ULONG)buf[2]);
     if (buf[2] != CIS_FUNC_LAN)
     {
-        pc_release_card(handle, 0);
+        pc_give_up(handle);
         return NULL;
     }
 
@@ -303,7 +348,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     if (!pc_tuple(handle, CISTPL_CONFIG, buf, sizeof(buf)))
     {
         pc_trace("pc: no config tuple ", 0);
-        pc_release_card(handle, 0);
+        pc_give_up(handle);
         return NULL;
     }
     {
@@ -322,7 +367,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     if (!pc_tuple(handle, CISTPL_CFTABLE, buf, sizeof(buf)))
     {
         pc_trace("pc: no cftable ", 0);
-        pc_release_card(handle, 0);
+        pc_give_up(handle);
         return NULL;
     }
     index = (UBYTE)(buf[2] & 0x3f);
@@ -387,7 +432,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
         if (!pc_chip_answers(card))
         {
             pc_trace("pc: chip silent ", 0);
-            pc_release_card(handle, 0);
+            pc_give_up(handle);
             return NULL;
         }
     }
@@ -430,7 +475,6 @@ VOID netdev_pcmcia_release(VOID)
     {
         if (CardResource->lib_Version >= 39)
             (VOID)pc_misc_control(handle, CARD_INTF_IRQ);   /* SETCLR clear */
-        (VOID)pc_release_card(handle, 0);
-        handle->cah_CardNode.ln_Name = NULL;
+        pc_give_up(handle);
     }
 }
