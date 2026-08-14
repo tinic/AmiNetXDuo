@@ -130,7 +130,9 @@ input[type=text], input[type=number] {
 }
 
 #url { width: 22ch; }
-#fps { width: 5ch; }
+/* Wide enough for two digits AND the browser's spinner, which is drawn
+   inside the field and clips the value if it is not allowed for. */
+#fps { width: 7ch; }
 
 /* The picker is reached through the button beside it: a browser's own file
    gadget cannot be made to look like anything, and it does not have to be

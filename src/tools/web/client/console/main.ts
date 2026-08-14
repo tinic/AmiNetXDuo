@@ -232,6 +232,7 @@ function greyPalette(depth: number): Uint8Array {
 
 let inBytes = 0;
 let inFrames = 0;
+let inMs = 0;
 let statAt = 0;
 
 const live = new Wire({
@@ -311,17 +312,28 @@ function update(buf: ArrayBuffer): void {
   inFrames++;
 
   const now = performance.now();
+  inMs += now - t0;
+
+  /*
+   * Milliseconds a second, not milliseconds a frame.
+   *
+   * A browser clamps performance.now() to 100 microseconds for a page that
+   * is not cross-origin isolated, and one tile update is under that -- shown
+   * per frame it reads 0.00 ms, which is a number nobody can do anything
+   * with.  Accumulated over half a second it is the share of a core the
+   * viewer is costing, which is the question actually being asked.
+   */
   if (now - statAt >= 500) {
     const secs = (now - statAt) / 1000;
     perfEl.textContent =
       inFrames === 0 ? "" :
       (inFrames / secs).toFixed(1) + " fps  " +
       (inBytes / secs / 1024).toFixed(1) + " KB/s  " +
-      "apply " + (now - t0).toFixed(2) + " ms  " +
-      "decode " + view.lastDecodeMs.toFixed(2) + " ms";
+      (inMs / secs).toFixed(1) + " ms/s in decode";
     statAt = now;
     inBytes = 0;
     inFrames = 0;
+    inMs = 0;
   }
 }
 
@@ -348,6 +360,7 @@ function connection(state: WireState, detail: string): void {
        one should not be showing the last session's statistics. */
     inBytes = 0;
     inFrames = 0;
+    inMs = 0;
     statAt = performance.now();
   }
   if (state === "closed" || state === "refused") expectSeq = -1;
@@ -404,3 +417,33 @@ addEventListener("keydown", (e) => {
 say("", "idle -- open a .pfs capture, or connect");
 log("tile updates use the PLACEHOLDER framing in tiles.ts; the encoder's");
 log("real one is not written yet (branch proto/rfb-encoder)");
+
+/*
+ * ?pfs=URL loads a capture over HTTP.
+ *
+ * This is the ONE fetch the page can make and it does not weaken the
+ * self-contained rule, which is about the page needing nothing to render:
+ * with no query there is no request, and the guards in build-console.mjs
+ * check exactly that -- no script, no font, no stylesheet, no source map.
+ * A capture is a document somebody asked for by naming it, the same as the
+ * file picker, and being able to send a colleague a link to one is the
+ * difference between a capture being evidence and being an attachment.
+ */
+const wantPfs = new URLSearchParams(location.search).get("pfs");
+
+if (wantPfs !== null && wantPfs !== "") {
+  say("", "fetching " + wantPfs);
+  fetch(wantPfs)
+    .then((r) => {
+      if (!r.ok) throw new Error(r.status + " " + r.statusText);
+      return r.arrayBuffer();
+    })
+    .then((b) => loadCapture(wantPfs, b))
+    .catch((e) => say("down", "not fetched: " +
+                              (e instanceof Error ? e.message : String(e))));
+} else if (location.protocol !== "file:") {
+  /* Served over HTTP means something served it, and the thing that serves
+     this page is the thing with the screen on it.  Opened off the
+     filesystem it waits, because there is nothing to guess. */
+  live.connect(urlEl.value);
+}
