@@ -214,6 +214,18 @@ static VOID ed_read_hdr(NetdevNic *nic, LONG src, NetdevRing *hdr)
  * amount <= NETDEV_RXBUF_MAX, which is smaller than the smallest ring this
  * table has, so the tail cannot wrap a second time either.
  */
+/*
+ * The buffer is mapped, so an unwrapped frame needs no staging at all: the
+ * caller can read it where it lies.  A wrapped one still has to be gathered.
+ */
+static const volatile UBYTE *ed_frame_at(NetdevNic *nic, LONG src, UWORD len)
+{
+    if (src + (LONG)len > nic->mem_end)
+        return NULL;
+
+    return ed_buf(nic) + src;
+}
+
 static LONG ed_ring_copy(NetdevNic *nic, LONG src, UBYTE *dst, UWORD amount)
 {
     volatile UBYTE *base = ed_buf(nic);
@@ -413,6 +425,7 @@ static LONG ed_attach(NetdevNic *nic)
 
     nic->read_hdr  = ed_read_hdr;
     nic->ring_copy = ed_ring_copy;
+    nic->frame_at  = ed_frame_at;
     nic->write_buf = ed_write_buf;
 
     dp8390_config(nic);

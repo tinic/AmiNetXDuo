@@ -442,6 +442,7 @@ static LONG ne2000_attach(NetdevNic *nic)
 
     nic->read_hdr  = ne2000_read_hdr;
     nic->ring_copy = ne2000_ring_copy;
+    nic->frame_at  = NULL;   /* a port has no address to hand out */
     nic->write_buf = ne2000_write_buf;
 
     ne2000_probe_wide(nic);

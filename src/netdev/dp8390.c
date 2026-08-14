@@ -361,30 +361,37 @@ static VOID dp8390_rint(NetdevNic *nic)
 
         if (len > sizeof(NetdevRing) && len <= NETDEV_RXBUF_MAX)
         {
-            UWORD flen = (UWORD)(len - sizeof(NetdevRing));
+            UWORD        flen = (UWORD)(len - sizeof(NetdevRing));
+            LONG         src  = packet_ptr + (LONG)sizeof(NetdevRing);
+            const UBYTE *fp   = NULL;
 
-#ifdef NETDEV_TIME
+            /* A mapped buffer needs no staging: hand the frame up where it
+               lies and the opener's CopyToBuff reads the card once, instead
+               of this copying it to rxbuf for CopyToBuff to copy again. */
+            if (nic->frame_at != NULL)
+                fp = (const UBYTE *)nic->frame_at(nic, src, flen);
+
+            if (fp == NULL)
             {
+#ifdef NETDEV_TIME
                 UWORD vh0 = *(volatile UWORD *)0xdff006;
                 UWORD vh1;
                 ULONG t0, t1;
-
-                (VOID)nic->ring_copy(nic,
-                                     packet_ptr + (LONG)sizeof(NetdevRing),
-                                     (UBYTE *)nic->rxbuf, flen);
+#endif
+                (VOID)nic->ring_copy(nic, src, (UBYTE *)nic->rxbuf, flen);
+                fp = (const UBYTE *)nic->rxbuf;
+#ifdef NETDEV_TIME
                 vh1 = *(volatile UWORD *)0xdff006;
                 t0  = (ULONG)((vh0 >> 8) & 0xff) * 227UL + (vh0 & 0xff);
                 t1  = (ULONG)((vh1 >> 8) & 0xff) * 227UL + (vh1 & 0xff);
                 netdev_time_copy += (t1 >= t0) ? (t1 - t0)
                                                : (256UL * 227UL + t1 - t0);
-            }
-#else
-            (VOID)nic->ring_copy(nic, packet_ptr + (LONG)sizeof(NetdevRing),
-                                 (UBYTE *)nic->rxbuf, flen);
 #endif
+            }
+
             nic->rx_packets++;
             if (nic->rx != NULL)
-                nic->rx(nic->rx_arg, (const UBYTE *)nic->rxbuf, flen);
+                nic->rx(nic->rx_arg, fp, flen);
         }
         else
         {
