@@ -175,6 +175,17 @@ static VOID ed_read_hdr(NetdevNic *nic, LONG src, NetdevRing *hdr)
     hdr->count       = (UWORD)(((w1 & 0xffu) << 8) | (w1 >> 8));
 }
 
+/*
+ * The wrap is an `if`, not a loop, so nothing here can spin however corrupt
+ * the ring is -- which matters because this runs in the interrupt server.
+ *
+ * head cannot underflow, and the reason is not local: src is packet_ptr + 4,
+ * packet_ptr is mem_ring + (next_packet - rec_page_start) * 256, and
+ * dp8390_rint() only ever assigns next_packet a value it has range-checked
+ * against [rec_page_start, rec_page_stop).  So src <= mem_end - 252 and
+ * amount <= NETDEV_RXBUF_MAX, which is smaller than the smallest ring this
+ * table has, so the tail cannot wrap a second time either.
+ */
 static LONG ed_ring_copy(NetdevNic *nic, LONG src, UBYTE *dst, UWORD amount)
 {
     volatile UBYTE *base = ed_buf(nic);
