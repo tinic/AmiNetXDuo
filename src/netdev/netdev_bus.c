@@ -11,6 +11,7 @@
  */
 
 #include "netdev_bus.h"
+#include "n68k_iocopy.h"
 
 /*
  * unsigned long, not ULONG: identical on the 68000 and 32 bits too narrow for
@@ -18,50 +19,34 @@
  */
 #define BUS_ALIGN(p, n) (((unsigned long)(const void *)(p)) & (unsigned long)(n))
 
-static UBYTE bus_r8(const NetdevBus *bus, UWORD reg)
-{
-    return bus->nic[reg * bus->stride];
-}
-
-static VOID bus_w8(const NetdevBus *bus, UWORD reg, UBYTE val)
-{
-    bus->nic[reg * bus->stride] = val;
-}
-
-static UBYTE bus_ra8(const NetdevBus *bus, UWORD reg)
-{
-    return bus->asic[reg * bus->stride];
-}
-
-static VOID bus_wa8(const NetdevBus *bus, UWORD reg, UBYTE val)
-{
-    bus->asic[reg * bus->stride] = val;
-}
-
 /*
  * The 32-bit window is 128 bytes of the same FIFO mirrored end to end, so a
  * `movem.l` reads sixteen longwords from sixteen consecutive addresses and
  * every one of them is the port.  That is the only reason a burst wider than
  * the port exists at all: the address does not have to hold still.
+ *
+ * Eight registers is 32 bytes in two instructions.  The same 32 bytes as eight
+ * separate `move.l` is sixteen, and the bus cycles are identical either way --
+ * eight long accesses to the window, eight to memory -- so what the movem
+ * form saves is instruction fetch and decode, not bus time.  That is a real
+ * saving on a 68020 with a 256-byte cache and a much larger one under an
+ * emulator, which charges per instruction; on real Zorro II, where a long
+ * access is 0.28-0.56 us against a handful of CPU cycles, the bus dominates
+ * and the win is small.  Nothing else in the family reaches this path: the
+ * word port is one non-mirrored address and cannot be batched at all.
  */
 static VOID bus_rdata_long(const NetdevBus *bus, UBYTE *dst, UWORD len)
 {
     volatile ULONG *port = (volatile ULONG *)bus->wide;
     ULONG          *out  = (ULONG *)(APTR)dst;
-    UWORD           i;
+    UWORD           i    = (UWORD)(len & (UWORD)~31u);
 
-    for (i = 0; i + 32 <= len; i += 32)
+    if (i != 0)
     {
-        out[0] = port[0];
-        out[1] = port[1];
-        out[2] = port[2];
-        out[3] = port[3];
-        out[4] = port[4];
-        out[5] = port[5];
-        out[6] = port[6];
-        out[7] = port[7];
-        out += 8;
+        n68k_port_in(out, bus->wide, (ULONG)(i >> 5));
+        out += (i >> 2);
     }
+
     for (; i + 4 <= len; i += 4)
         *out++ = *port;
 
@@ -77,20 +62,14 @@ static VOID bus_wdata_long(const NetdevBus *bus, const UBYTE *src, UWORD len)
 {
     volatile ULONG *port = (volatile ULONG *)bus->wide;
     const ULONG    *in   = (const ULONG *)(const void *)src;
-    UWORD           i;
+    UWORD           i    = (UWORD)(len & (UWORD)~31u);
 
-    for (i = 0; i + 32 <= len; i += 32)
+    if (i != 0)
     {
-        port[0] = in[0];
-        port[1] = in[1];
-        port[2] = in[2];
-        port[3] = in[3];
-        port[4] = in[4];
-        port[5] = in[5];
-        port[6] = in[6];
-        port[7] = in[7];
-        in += 8;
+        n68k_port_out(bus->wide, in, (ULONG)(i >> 5));
+        in += (i >> 2);
     }
+
     for (; i + 4 <= len; i += 4)
         *port = *in++;
 
@@ -157,7 +136,18 @@ static VOID bus_rdata(const NetdevBus *bus, UBYTE *dst, UWORD len)
     }
 
     out = (UWORD *)(APTR)dst;
-    for (i = 0; i + 2 <= len; i += 2)
+
+    /* Whole 32-byte blocks first.  The port is one address and cannot be
+       batched; the block form is here for the other three quarters of the
+       instructions, which is what a whole frame through this loop costs. */
+    i = (UWORD)(len & (UWORD)~31u);
+    if (i != 0)
+    {
+        n68k_port_in_w(out, port, (ULONG)(i >> 5));
+        out += (i >> 1);
+    }
+
+    for (; i + 2 <= len; i += 2)
         *out++ = *port;
     if (i < len)
     {
@@ -201,23 +191,36 @@ static VOID bus_wdata(const NetdevBus *bus, const UBYTE *src, UWORD len)
     }
 
     in = (const UWORD *)(const void *)src;
-    for (i = 0; i + 2 <= len; i += 2)
+
+    i = (UWORD)(len & (UWORD)~31u);
+    if (i != 0)
+    {
+        n68k_port_out_w(port, in, (ULONG)(i >> 5));
+        in += (i >> 1);
+    }
+
+    for (; i + 2 <= len; i += 2)
         *port = *in++;
     if (i < len)
         *port = (UWORD)(src[i] << 8);
 }
 
-const struct NetdevBusOps netdev_bus_generic =
+const struct NetdevBusOps netdev_bus_generic = { bus_rdata, bus_wdata };
+
+/* The odd-register window, for a bus whose register file is not contiguous. */
+VOID netdev_bus_split(NetdevBus *bus, APTR odd)
 {
-    bus_r8, bus_w8, bus_ra8, bus_wa8, bus_rdata, bus_wdata
-};
+    bus->odd = (volatile UBYTE *)odd;
+}
 
 VOID netdev_bus_setup(NetdevBus *bus, APTR base, UWORD stride, APTR wide)
 {
     bus->nic    = (volatile UBYTE *)base;
     bus->asic   = (volatile UBYTE *)base + 16u * stride;
     bus->wide   = (volatile UBYTE *)wide;
+    bus->odd    = NULL;         /* netdev_bus_split() for the ones that need it */
     bus->stride = stride;
+    bus->shift  = (UBYTE)((stride == 4u) ? 2u : ((stride == 2u) ? 1u : 0u));
     bus->dmode  = NETDEV_DMODE_WORD;
     bus->ops    = &netdev_bus_generic;
 }

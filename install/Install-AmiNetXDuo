@@ -999,35 +999,18 @@
   (confirm)
   (optional "force"))
 
-; --- anxnet.device, DEVS:Networks ----------------------------------------
+; --- anxnet.device -------------------------------------------------------
 ;
-; One SANA-II driver for every NE2000/DP8390 card: Ariadne II, X-Surf, X-Surf
-; 100, and the two shared-memory boards as their core lands.  Which card it
-; drives is the UNIT in the interface file, not which file is opened, so there
-; is one driver here and no per-card copies.  From the same build as the
-; libraries, so the minimal drawer has its own.
-
-; The driver comes from the same build as the libraries: the minimal drawer is
-; a different set of compile-time options and its device is built with them.
-(set S_NETDEVS (tackon S_DEVS "Networks"))
-(if (= MINPICK 1) (set S_NETDEVS (tackon S_NETDEVS "minimal")))
-
-(if (exists (tackon S_NETDEVS "anxnet.device") (noreq))
-  (
-    (makedir "DEVS:Networks"
-      (prompt "Creating DEVS:Networks, the drawer network card drivers live in")
-      (help   @makedir-help))
-
-    (copylib
-      (prompt (cat "Installing anxnet.device into DEVS:Networks. This is one "
-                   "driver for every NE2000 and DP8390 card: Ariadne II, "
-                   "X-Surf and X-Surf 100, on every processor."))
-      (help   @copylib-help)
-      (source (tackon S_NETDEVS "anxnet.device"))
-      (dest   "DEVS:Networks")
-      (confirm)
-      (optional "force"))
-  ))
+; NOT INSTALLED HERE, DELIBERATELY.  The archive carries it in Devs/Networks/
+; and a user who wants it copies it to DEVS:Networks and names it in
+; DEVS:NetInterfaces/<name> with a CARD= line.  It drives six cards and beats
+; the driver it replaces on every one of them, but it is new and the installer
+; is how a working machine gets changed, so it stays a deliberate step until it
+; has been run somewhere other than here.
+;
+; One build of it, like everything else in the archive: the drawer had a
+; subdrawer per CPU and does not any more.  Devs/Networks/minimal/ is the
+; minimal stack's copy, built with that stack's options.
 
 ; --- tls.library, if this archive has one --------------------------------
 ;

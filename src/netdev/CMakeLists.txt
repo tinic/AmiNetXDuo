@@ -17,10 +17,18 @@ set(NETDEV_SOURCES
     netdev_cmds.c       # the S2_* table
     netdev_bus.c        # register stride and the data port
     netdev_cards.c      # the card table
+    netdev_pcmcia.c     # the A600/A1200 slot, which has no autoconfig record
     netdev_mcaf.c       # the multicast hash, host-testable
     dp8390.c            # NetBSD chip core
     ne2000.c            # NetBSD remote-DMA glue
-    ed.c)               # NetBSD mapped-buffer glue: Hydra, ASDG LAN Rover
+    ed.c                # NetBSD mapped-buffer glue: Hydra, ASDG LAN Rover
+    lance.c             # Am7990/Am79C960: A2065 and Ariadne
+    # The data path's bulk moves, from src/net68k rather than a private copy:
+    # the movem.l block and its measurements live there.  Two files, the same
+    # arrangement as src/net68k's own target -- the .S is #ifdef'd end to end
+    # on AMINETXDUO_NET68K_ASM and the .c supplies the symbols when it is off.
+    "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.S"
+    "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c")
 
 if(AMINETXDUO_NETDEV_LINK AND CMAKE_CROSSCOMPILING)
     add_executable(anxnet_device ${NETDEV_SOURCES})
@@ -30,11 +38,27 @@ if(AMINETXDUO_NETDEV_LINK AND CMAKE_CROSSCOMPILING)
     target_include_directories(anxnet_device PRIVATE
         ${AMINETXDUO_CORE_INCLUDES}
         "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/net68k"   # n68k_iocopy.h, and nothing else
         "${CMAKE_SOURCE_DIR}/src/sana2")   # sana2_device.h, the command numbers
+
+    if(AMINETXDUO_NET68K_ASM)
+        set_source_files_properties(
+            "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.S"
+            "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c"
+            PROPERTIES COMPILE_DEFINITIONS AMINETXDUO_NET68K_ASM=1)
+        set_source_files_properties(
+            "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.S"
+            PROPERTIES COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
+    endif()
 
     # No aminetxduo_common: that library defines its own SysBase handling and
     # pulls the logging macros, and this image defines SysBase itself.
     target_link_options(anxnet_device PRIVATE -nostartfiles -Wl,--gc-sections)
+
+    # -O2 over the tree's -Os, the same trade AMINETXDUO_HOT_O2 makes for the
+    # eight profiled NetX Duo files: this is interrupt-path code and the
+    # receive service is the whole throughput figure.  Appended, so it wins.
+    target_compile_options(anxnet_device PRIVATE -O2)
 
     if(CMAKE_STRIP AND NOT AMINETXDUO_KEEP_SYMBOLS)
         add_custom_command(TARGET anxnet_device POST_BUILD
@@ -97,10 +121,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     # through it, which is the only part of the probe a host can drive.
     add_executable(test_netdev_ed
         test/test_netdev_ed.c
-        netdev_bus.c)
+        netdev_bus.c
+        "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c")
 
     target_include_directories(test_netdev_ed PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/net68k"
         "${CMAKE_SOURCE_DIR}/src/config/test/shim")
 
     target_compile_options(test_netdev_ed PRIVATE -Wall -Wextra)
@@ -111,6 +137,13 @@ endif()
 
 # Raw-serial tracing through the custom chips, for bring-up on an emulator
 # where nothing of ours is open yet.  Off, and not a shipped configuration.
+option(AMINETXDUO_NETDEV_TIME
+       "Report where interrupt time goes, in beam positions, to the serial port"
+       OFF)
+if(AMINETXDUO_NETDEV_TIME AND TARGET anxnet_device)
+    target_compile_definitions(anxnet_device PRIVATE NETDEV_TRACE=1 NETDEV_TIME=1)
+endif()
+
 option(AMINETXDUO_NETDEV_TRACE "Trace anxnet.device to the serial port" OFF)
 if(AMINETXDUO_NETDEV_TRACE AND TARGET anxnet_device)
     target_compile_definitions(anxnet_device PRIVATE NETDEV_TRACE=1)

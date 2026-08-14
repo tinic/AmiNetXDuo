@@ -73,6 +73,10 @@
 
 /* ------------------------------------------------------------- plumbing --- */
 
+#ifdef NETDEV_TIME
+extern ULONG netdev_time_rdc;  /* netdev_device.c reports it */
+#endif
+
 #define NIC_GET(nic, reg)       netdev_bus_r8(&(nic)->bus, (reg))
 #define NIC_PUT(nic, reg, val)  netdev_bus_w8(&(nic)->bus, (reg), (UBYTE)(val))
 #define ASIC_GET(nic, reg)      netdev_bus_ra8(&(nic)->bus, (reg))
@@ -106,18 +110,47 @@ static int ne_memcmp(const UBYTE *a, const UBYTE *b, UWORD n)
 
 /* --------------------------------------------------------- remote DMA ----- */
 
-static VOID ne2000_readmem(NetdevNic *nic, LONG src, UBYTE *dst, UWORD amount)
+/*
+ * Program a remote read of `amount` bytes from `src`, and remember where that
+ * leaves the pointer.  `over` is how much MORE the burst is allowed to cover
+ * beyond `amount`, so a caller that knows the next read is contiguous can pay
+ * for one setup instead of two.
+ */
+static VOID ne2000_dma_start(NetdevNic *nic, LONG src, UWORD amount, UWORD over)
 {
+    UWORD total = (UWORD)(amount + over);
+
     NIC_PUT(nic, ED_P0_CR, ED_CR_RD2 | ED_CR_PAGE_0 | ED_CR_STA);
 
-    amount = (UWORD)((amount + 1u) & ~1u);
-
-    NIC_PUT(nic, ED_P0_RBCR0, amount);
-    NIC_PUT(nic, ED_P0_RBCR1, amount >> 8);
+    NIC_PUT(nic, ED_P0_RBCR0, total);
+    NIC_PUT(nic, ED_P0_RBCR1, total >> 8);
     NIC_PUT(nic, ED_P0_RSAR0, src);
     NIC_PUT(nic, ED_P0_RSAR1, src >> 8);
 
     NIC_PUT(nic, ED_P0_CR, ED_CR_RD0 | ED_CR_PAGE_0 | ED_CR_STA);
+
+    nic->dma_pos  = src + (LONG)amount;
+    nic->dma_left = over;
+}
+
+static VOID ne2000_readmem(NetdevNic *nic, LONG src, UBYTE *dst, UWORD amount)
+{
+    amount = (UWORD)((amount + 1u) & ~1u);
+
+    /*
+     * The burst already running is at this address with room to spare, so the
+     * chip needs telling nothing: reading the port continues it.  Six
+     * register accesses saved on every frame.
+     */
+    if (nic->dma_left >= amount && nic->dma_pos == src)
+    {
+        nic->dma_pos  = src + (LONG)amount;
+        nic->dma_left = (UWORD)(nic->dma_left - amount);
+    }
+    else
+    {
+        ne2000_dma_start(nic, src, amount, 0);
+    }
 
     netdev_bus_rdata(&nic->bus, dst, amount);
 }
@@ -126,6 +159,8 @@ static VOID ne2000_writemem(NetdevNic *nic, const UBYTE *src, LONG dst,
                             UWORD len)
 {
     UWORD maxwait = 100;
+
+    nic->dma_left = 0;
 
     NIC_PUT(nic, ED_P0_CR, ED_CR_RD2 | ED_CR_PAGE_0 | ED_CR_STA);
     NIC_PUT(nic, ED_P0_ISR, ED_ISR_RDC);
@@ -148,7 +183,21 @@ static VOID ne2000_read_hdr(NetdevNic *nic, LONG src, NetdevRing *hdr)
 {
     UBYTE raw[4];
 
-    ne2000_readmem(nic, src, raw, 4);
+    /*
+     * Overshoot the header deliberately.  The body follows it in the ring, so
+     * one setup covering both is one setup fewer per frame; the burst is
+     * bounded by what is left before the ring wraps, so it can never read
+     * past the end of the buffer.  A frame that does wrap simply finds the
+     * position stale and programs its own.
+     */
+    {
+        LONG  room = nic->mem_end - (src + 4);
+        UWORD over = (UWORD)((room > (LONG)NETDEV_RXBUF_MAX)
+                             ? NETDEV_RXBUF_MAX : (room > 0 ? room : 0));
+
+        ne2000_dma_start(nic, src, 4, over);
+        netdev_bus_rdata(&nic->bus, raw, 4);
+    }
 
     /*
      * The chip stores the header little-endian and the data port is
@@ -189,6 +238,8 @@ static UWORD ne2000_write_buf(NetdevNic *nic, const UBYTE *frame, UWORD len,
 
     if (len < NETDEV_FRAME_MIN)
         len = NETDEV_FRAME_MIN;
+
+    nic->dma_left = 0;          /* the write below moves the pointer */
 
     NIC_PUT(nic, ED_P0_CR, ED_CR_RD2 | ED_CR_PAGE_0 | ED_CR_STA);
     NIC_PUT(nic, ED_P0_ISR, ED_ISR_RDC);
@@ -234,6 +285,9 @@ static UWORD ne2000_write_buf(NetdevNic *nic, const UBYTE *frame, UWORD len,
     while ((NIC_GET(nic, ED_P0_ISR) & ED_ISR_RDC) != ED_ISR_RDC &&
            --maxwait != 0)
     {
+#ifdef NETDEV_TIME
+        netdev_time_rdc++;
+#endif
         (VOID)NIC_GET(nic, ED_P0_CRDA1);
         (VOID)NIC_GET(nic, ED_P0_CRDA0);
     }
@@ -435,6 +489,7 @@ static LONG ne2000_attach(NetdevNic *nic)
 
     nic->read_hdr  = ne2000_read_hdr;
     nic->ring_copy = ne2000_ring_copy;
+    nic->frame_at  = NULL;   /* a port has no address to hand out */
     nic->write_buf = ne2000_write_buf;
 
     ne2000_probe_wide(nic);

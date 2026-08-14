@@ -162,19 +162,132 @@ VOID netdev_trace_cmd(UWORD c)
 {
     nd_tracex("anx: cmd ", (ULONG)c);
 }
+
+/* For the chip cores, which cannot see nd_tracex. */
+VOID netdev_trace_val(const char *tag, ULONG v)
+{
+    nd_tracex(tag, v);
+}
 #else
 #define nd_trace(s)         ((VOID)0)
 #define nd_tracex(t, v)     ((VOID)0)
 #endif
 
-static VOID nd_bytes(UBYTE *to, const UBYTE *from, ULONG n)
+#ifdef NETDEV_TIME
+/*
+ * Where the time in an interrupt actually goes, in beam positions.  There is
+ * no timer at interrupt level and ReadEClock() needs a base this has no way to
+ * hold, but VHPOSR is a free-running counter one chip read away: 227 colour
+ * clocks of 280 ns to the line, and the low eight bits of vpos wrap every 256
+ * lines, which is 16 ms and far longer than anything measured here.
+ */
+#define ND_TICKS_WRAP   (256UL * 227UL)
+
+static ULONG nd_now(VOID)
 {
-    while (n-- != 0)
-        *to++ = *from++;
+    UWORD vh = *(volatile UWORD *)0xdff006;
+
+    return (ULONG)((vh >> 8) & 0xff) * 227UL + (ULONG)(vh & 0xff);
+}
+
+static ULONG nd_since(ULONG t0)
+{
+    ULONG t1 = nd_now();
+
+    return (t1 >= t0) ? (t1 - t0) : (ND_TICKS_WRAP + t1 - t0);
+}
+
+static ULONG nd_t_isr;      /* ops->intr(), the whole chip service */
+static ULONG nd_t_copy;     /* the ring-to-rxbuf copy inside it */
+static ULONG nd_t_up;       /* handing frames to the openers */
+static ULONG nd_t_tx;       /* netdev_tx_pump() after the service */
+static ULONG nd_t_hook;     /* the stack's CopyToBuff, inside the hand-over */
+static ULONG nd_t_pre;      /* type, group test, stats, before the walk      */
+static ULONG nd_t_take;     /* netdev_take: the pending-read list walk       */
+static ULONG nd_t_find;     /* netdev_track_find: the 16-entry scan          */
+static ULONG nd_t_addr;     /* the two addresses and the request fields      */
+static ULONG nd_t_reply;    /* netdev_reply: ReplyMsg at interrupt level     */
+static ULONG nd_t_probe;    /* what 16 back-to-back probes cost, to subtract */
+static ULONG nd_t_bld;      /* the opener's CopyFrom, framing a transmit     */
+static ULONG nd_t_iss;      /* ops->tx: register setup and the port writes   */
+static ULONG nd_t_rep;      /* netdev_reply on the transmit side             */
+static ULONG nd_n_tx;
+static ULONG nd_regs_isr;   /* scalar accesses inside the chip service */
+static ULONG nd_regs_tx;    /* scalar accesses inside ops->tx          */
+static ULONG nd_n_int;
+static ULONG nd_n_frame;
+static ULONG nd_n_hook;
+
+ULONG netdev_time_copy;     /* dp8390.c adds its copy span here */
+ULONG netdev_time_rdc;      /* ne2000.c counts its DMA-completion spins */
+ULONG netdev_time_regs;     /* netdev_bus.h counts every scalar access    */
+ULONG netdev_time_null;     /* interrupts where ISR read zero: not ours */
+ULONG netdev_time_rx;       /* ISR passes with a receive bit set */
+ULONG netdev_time_tx;       /* ISR passes with a transmit bit set */
+
+static VOID nd_time_report(VOID)
+{
+    nd_t_copy += netdev_time_copy;
+    netdev_time_copy = 0;
+    nd_tracex("t frames ", nd_n_frame);
+    nd_tracex("t up     ", nd_t_up);
+    {
+        ULONG tp = nd_now();
+        UWORD k;
+
+        for (k = 0; k < 16; k++)
+            (VOID)nd_now();
+        nd_t_probe = nd_since(tp);
+    }
+    nd_tracex("t hook   ", nd_t_hook);
+    nd_tracex("t regs   ", netdev_time_regs);
+    nd_tracex("t rgisr  ", nd_regs_isr);
+    nd_tracex("t rgtx   ", nd_regs_tx);
+    netdev_time_regs = nd_regs_isr = nd_regs_tx = 0;
+    nd_tracex("t isr    ", nd_t_isr);
+    nd_tracex("t copy   ", nd_t_copy);
+    nd_tracex("t ntx    ", nd_n_tx);
+    nd_tracex("t bld    ", nd_t_bld);
+    nd_tracex("t iss    ", nd_t_iss);
+    nd_tracex("t rep    ", nd_t_rep);
+    nd_tracex("t probe16", nd_t_probe);
+    netdev_time_rdc = netdev_time_null = 0;
+    netdev_time_rx = netdev_time_tx = 0;
+    nd_t_isr = nd_t_copy = nd_t_up = nd_t_tx = nd_t_hook = 0;
+    nd_t_pre = nd_t_take = nd_t_find = nd_t_addr = nd_t_reply = 0;
+    nd_t_bld = nd_t_iss = nd_t_rep = nd_n_tx = 0;
+    nd_n_int = nd_n_frame = nd_n_hook = 0;
+}
+#endif
+
+/*
+ * A 6-byte Ethernet address, as a longword and a word.  Both ends are even --
+ * the staging buffer is AllocMem'd and ios2_DstAddr/ios2_SrcAddr sit at even
+ * offsets in the request -- and the source's second half is 2 mod 4, which
+ * costs a 68020 one extra bus cycle and a 68000 nothing.  The byte loop this
+ * replaced compiled to `move.b (a2)+,(a6)+ / cmpa.l / bne`, three instructions
+ * a byte, twice per frame; the profile priced the pair at 16% of the
+ * hand-over.
+ */
+static VOID nd_addr6(UBYTE *to, const UBYTE *from)
+{
+    *(ULONG *)(APTR)to        = *(const ULONG *)(const APTR)from;
+    *(UWORD *)(APTR)(to + 4)  = *(const UWORD *)(const APTR)(from + 4);
 }
 
 static VOID nd_zero(UBYTE *p, ULONG n)
 {
+    /* The transmit pad is the hot caller and always lands on an even offset
+       of nu_TxBuf; everything else here is init-time and does not care. */
+    if ((((unsigned long)(APTR)p) & 1u) == 0)
+    {
+        while (n >= 2)
+        {
+            *(UWORD *)(APTR)p = 0;
+            p += 2;
+            n -= 2;
+        }
+    }
     while (n-- != 0)
         *p++ = 0;
 }
@@ -237,11 +350,18 @@ BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len)
 
 /* ------------------------------------------------------- the RX callback -- */
 
+/*
+ * Bounded by the highest slot ever taken, not by the array.  The profile put
+ * this at 26% of the hand-over -- the largest thing the driver owns there --
+ * because it ran the full sixteen entries for every opener on every frame, to
+ * answer a question that is usually "nothing is tracked".  An opener that
+ * tracks two types now scans two.
+ */
 static NetdevTrack *netdev_track_find(NetdevOpener *op, ULONG type)
 {
     UWORD i;
 
-    for (i = 0; i < NETDEV_TRACK_MAX; i++)
+    for (i = 0; i < op->op_TrackHigh; i++)
     {
         if (op->op_Track[i].used && op->op_Track[i].type == type)
             return &op->op_Track[i];
@@ -262,21 +382,56 @@ static BOOL netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
     const UBYTE *payload = raw ? frame : frame + NETDEV_HDR_LEN;
     ULONG        plen    = raw ? len : (ULONG)(len - NETDEV_HDR_LEN);
 
-    nd_bytes(io->ios2_DstAddr, frame, NETDEV_ADDR_LEN);
-    nd_bytes(io->ios2_SrcAddr, frame + NETDEV_ADDR_LEN, NETDEV_ADDR_LEN);
+#ifdef NETDEV_TIME
+    {
+        ULONG ta = nd_now();
+#endif
+    nd_addr6(io->ios2_DstAddr, frame);
+    nd_addr6(io->ios2_SrcAddr, frame + NETDEV_ADDR_LEN);
     io->ios2_PacketType = type;
     io->ios2_DataLength = plen;
     io->ios2_Req.io_Flags =
         (UBYTE)((io->ios2_Req.io_Flags & ~(SANA2IOF_BCAST | SANA2IOF_MCAST)) |
                 flags);
+#ifdef NETDEV_TIME
+        nd_t_addr += nd_since(ta);
+    }
+#endif
 
+#ifdef NETDEV_TIME
+    {
+        ULONG th = nd_now();
+        BOOL  ok = netdev_copy_call(op->op_CopyTo, io->ios2_Data,
+                                    (APTR)payload, plen);
+
+        nd_t_hook += nd_since(th);
+        nd_n_hook++;
+        if (!ok)
+        {
+            netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
+            return FALSE;
+        }
+    }
+    if (0)
+    {
+#else
     if (!netdev_copy_call(op->op_CopyTo, io->ios2_Data, (APTR)payload, plen))
     {
+#endif
         netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
         return FALSE;
     }
 
+#ifdef NETDEV_TIME
+    {
+        ULONG tr = nd_now();
+
+        netdev_reply(io, 0, 0);
+        nd_t_reply += nd_since(tr);
+    }
+#else
     netdev_reply(io, 0, 0);
+#endif
     return TRUE;
 }
 
@@ -303,7 +458,22 @@ static struct IOSana2Req *netdev_take(struct List *list, ULONG type)
  * a CMD_READ outstanding for this packet type gets a copy; if none does, the
  * frame goes to an S2_READORPHAN, and only then is it dropped.
  */
+#ifdef NETDEV_TIME
+static VOID netdev_rx_body(APTR arg, const UBYTE *frame, UWORD len);
+
 static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
+{
+    ULONG t0 = nd_now();
+
+    netdev_rx_body(arg, frame, len);
+    nd_t_up += nd_since(t0);
+    nd_n_frame++;
+}
+
+static VOID netdev_rx_body(APTR arg, const UBYTE *frame, UWORD len)
+#else
+static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
+#endif
 {
     NetdevUnit  *unit = (NetdevUnit *)arg;
     struct Node *n;
@@ -317,30 +487,44 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
         return;
     }
 
-    type = ((ULONG)frame[12] << 8) | frame[13];
-
-    if (frame[0] == 0xff)
+#ifdef NETDEV_TIME
     {
-        UWORD i;
-        UBYTE all = 0xff;
+        ULONG tp = nd_now();
+#endif
+    /* The frame is even-aligned, so the type is one word and the broadcast
+       test is one longword and one word rather than six byte reads. */
+    type = *(const UWORD *)(const APTR)(frame + 12);
 
-        for (i = 1; i < NETDEV_ADDR_LEN; i++)
-            all &= frame[i];
-        if (all == 0xff)
-            flags = SANA2IOF_BCAST;
+    if ((frame[0] & 1) != 0)
+    {
+        flags = (UBYTE)((*(const ULONG *)(const APTR)frame == 0xffffffffUL &&
+                         *(const UWORD *)(const APTR)(frame + 4) == 0xffffu)
+                        ? SANA2IOF_BCAST : SANA2IOF_MCAST);
     }
-    if (flags == 0 && (frame[0] & 1) != 0)
-        flags = SANA2IOF_MCAST;
 
     unit->nu_Stats.PacketsReceived++;
+#ifdef NETDEV_TIME
+        nd_t_pre += nd_since(tp);
+    }
+#endif
 
     for (n = unit->nu_OpenerList.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
     {
         NetdevOpener      *op = (NetdevOpener *)n;
         struct IOSana2Req *io;
-        NetdevTrack       *tr = netdev_track_find(op, type);
+        NetdevTrack       *tr;
+#ifdef NETDEV_TIME
+        ULONG tf = nd_now();
 
+        tr = netdev_track_find(op, type);
+        nd_t_find += nd_since(tf);
+        tf = nd_now();
         io = netdev_take(&op->op_Reads, type);
+        nd_t_take += nd_since(tf);
+#else
+        tr = netdev_track_find(op, type);
+        io = netdev_take(&op->op_Reads, type);
+#endif
         if (io != NULL)
         {
             BOOL ok = netdev_hand_over(op, io, frame, len, type, flags);
@@ -391,82 +575,172 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
  * server after a transmit completes, so it never touches anything the ISR
  * does not already own.
  */
+/*
+ * Frame one CMD_WRITE into nu_TxBuf.  Returns the wire length, or 0 with the
+ * request already answered.  No mask needed: everything here is host work,
+ * and the opener's CopyFrom is 135 us of the 219 us a transmit spends in the
+ * driver on an A3000.
+ */
+static UWORD netdev_tx_build(NetdevUnit *unit, struct IOSana2Req *io,
+                             NetdevOpener *op)
+{
+    UBYTE *buf;
+    ULONG  len = io->ios2_DataLength;
+    UWORD  total;
+
+    /* A core whose transmit buffer the CPU can address takes the frame
+       directly; everything else is framed in the unit's own staging buffer
+       and copied across by ops->tx. */
+    buf = (unit->nu_Nic.tx_at != NULL) ? unit->nu_Nic.tx_at(&unit->nu_Nic)
+                                       : NULL;
+    if (buf == NULL)
+        buf = (UBYTE *)unit->nu_TxBuf;
+    unit->nu_TxAt = buf;
+
+    if (op->op_Raw || (io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0)
+    {
+        if (len < NETDEV_HDR_LEN || len > NETDEV_FRAME_MAX)
+        {
+            netdev_reply(io, S2ERR_MTU_EXCEEDED, S2WERR_GENERIC_ERROR);
+            return 0;
+        }
+        if (!netdev_copy_call(op->op_CopyFrom, buf, io->ios2_Data, len))
+        {
+            netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
+            return 0;
+        }
+        total = (UWORD)len;
+    }
+    else
+    {
+        /*
+         * The RAW arm above bounds its length and this one did not, so a
+         * CMD_WRITE with any ios2_DataLength at all copied that many bytes
+         * past nu_TxBuf -- past the whole unit, since the buffer is its last
+         * field.
+         */
+        if (len > NETDEV_MTU)
+        {
+            netdev_reply(io, S2ERR_MTU_EXCEEDED, S2WERR_GENERIC_ERROR);
+            return 0;
+        }
+
+        /* Aligned moves, as on the receive side: nu_TxBuf is ULONG[] and both
+           addresses sit at even offsets. */
+        nd_addr6(buf, io->ios2_DstAddr);
+        nd_addr6(buf + NETDEV_ADDR_LEN, unit->nu_Nic.mac);
+        *(UWORD *)(APTR)(buf + 12) = (UWORD)io->ios2_PacketType;
+
+        if (len != 0 &&
+            !netdev_copy_call(op->op_CopyFrom, buf + NETDEV_HDR_LEN,
+                              io->ios2_Data, len))
+        {
+            netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
+            return 0;
+        }
+        total = (UWORD)(len + NETDEV_HDR_LEN);
+    }
+
+    /*
+     * The chip pads a short frame to the Ethernet minimum out of whatever is
+     * in the buffer, so the padding has to be written.  Left out, the tail of
+     * the last frame -- up to 46 bytes of it -- goes on the wire behind every
+     * ARP.
+     */
+    if (total < NETDEV_FRAME_MIN)
+    {
+        nd_zero(buf + total, (ULONG)(NETDEV_FRAME_MIN - total));
+        total = NETDEV_FRAME_MIN;
+    }
+
+    return total;
+}
+
+/* The chip half, and the only half that needs the mask. */
+static LONG netdev_tx_issue(NetdevUnit *unit, struct IOSana2Req *io,
+                            NetdevOpener *op, UWORD total)
+{
+    NetdevTrack *tr;
+    LONG         rc;
+
+    rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, unit->nu_TxAt, total);
+    if (rc != 0)
+        return rc;
+
+    unit->nu_Stats.PacketsSent++;
+    tr = netdev_track_find(op, io->ios2_PacketType);
+    if (tr != NULL)
+    {
+        tr->st.PacketsSent++;
+        tr->st.BytesSent += total;
+    }
+
+    return 0;
+}
+
+/*
+ * The timing build's way in.  Wrappers rather than spans inside the two
+ * functions, because the transmit rewrite already lost one set of spans that
+ * were inlined into a body -- these cannot be dropped by editing the body.
+ */
+#ifdef NETDEV_TIME
+static UWORD netdev_tx_timed_build(NetdevUnit *unit, struct IOSana2Req *io,
+                                   NetdevOpener *op)
+{
+    ULONG t = nd_now();
+    UWORD n = netdev_tx_build(unit, io, op);
+
+    nd_t_bld += nd_since(t);
+    nd_n_tx++;
+
+    return n;
+}
+
+static LONG netdev_tx_timed_issue(NetdevUnit *unit, struct IOSana2Req *io,
+                                  NetdevOpener *op, UWORD total)
+{
+    ULONG t  = nd_now();
+    ULONG r0 = netdev_time_regs;
+    LONG  r  = netdev_tx_issue(unit, io, op, total);
+
+    nd_t_iss += nd_since(t);
+    nd_regs_tx += netdev_time_regs - r0;
+
+    return r;
+}
+#else
+#define netdev_tx_timed_build(u, i, o)      netdev_tx_build((u), (i), (o))
+#define netdev_tx_timed_issue(u, i, o, t)   netdev_tx_issue((u), (i), (o), (t))
+#endif
+
+/*
+ * Drain the queue into whatever transmit buffers the chip has free.  Runs
+ * from the interrupt server after a transmit completes, and from BeginIO for
+ * anything that could not take the direct path.  The caller holds Disable().
+ *
+ * It stands off while a task-level build owns nu_TxBuf; the builder pumps
+ * again itself once its own frame is issued, so nothing is stranded.
+ */
 VOID netdev_tx_pump(NetdevUnit *unit)
 {
     while (unit->nu_Nic.txb_inuse < unit->nu_Nic.txb_cnt)
     {
         struct IOSana2Req *io;
         NetdevOpener      *op;
-        UBYTE             *buf = (UBYTE *)unit->nu_TxBuf;
-        ULONG              len;
         UWORD              total;
         LONG               rc;
-        NetdevTrack       *tr;
 
-        if (IsListEmpty(&unit->nu_Writes))
+        if (unit->nu_TxBuilding || IsListEmpty(&unit->nu_Writes))
             return;
 
         io = (struct IOSana2Req *)RemHead(&unit->nu_Writes);
         op = NETDEV_OPENER(io->ios2_Req.io_Unit);
-        len = io->ios2_DataLength;
 
-        if (op->op_Raw || (io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0)
-        {
-            if (len < NETDEV_HDR_LEN || len > NETDEV_FRAME_MAX)
-            {
-                netdev_reply(io, S2ERR_MTU_EXCEEDED, S2WERR_GENERIC_ERROR);
-                continue;
-            }
-            if (!netdev_copy_call(op->op_CopyFrom, buf, io->ios2_Data, len))
-            {
-                netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
-                continue;
-            }
-            total = (UWORD)len;
-        }
-        else
-        {
-            /*
-             * The RAW arm above bounds its length and this one did not, so a
-             * CMD_WRITE with any ios2_DataLength at all copied that many
-             * bytes past nu_TxBuf -- past the whole unit, in fact, since the
-             * buffer is its last field.  Found reading the transmit path for
-             * the ED core, which is the write_buf on the other end of it.
-             */
-            if (len > NETDEV_MTU)
-            {
-                netdev_reply(io, S2ERR_MTU_EXCEEDED, S2WERR_GENERIC_ERROR);
-                continue;
-            }
+        total = netdev_tx_timed_build(unit, io, op);
+        if (total == 0)
+            continue;
 
-            nd_bytes(buf, io->ios2_DstAddr, NETDEV_ADDR_LEN);
-            nd_bytes(buf + NETDEV_ADDR_LEN, unit->nu_Nic.mac, NETDEV_ADDR_LEN);
-            buf[12] = (UBYTE)(io->ios2_PacketType >> 8);
-            buf[13] = (UBYTE)(io->ios2_PacketType);
-
-            if (len != 0 &&
-                !netdev_copy_call(op->op_CopyFrom, buf + NETDEV_HDR_LEN,
-                                  io->ios2_Data, len))
-            {
-                netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
-                continue;
-            }
-            total = (UWORD)(len + NETDEV_HDR_LEN);
-        }
-
-        /*
-         * The chip pads a short frame to the Ethernet minimum out of whatever
-         * is in the buffer, so the padding has to be written.  Left out, the
-         * tail of the last frame -- up to 46 bytes of it -- goes on the wire
-         * behind every ARP.
-         */
-        if (total < NETDEV_FRAME_MIN)
-        {
-            nd_zero(buf + total, (ULONG)(NETDEV_FRAME_MIN - total));
-            total = NETDEV_FRAME_MIN;
-        }
-
-        rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, buf, total);
+        rc = netdev_tx_timed_issue(unit, io, op, total);
         if (rc == DP8390_TX_BUSY)
         {
             AddHead(&unit->nu_Writes, &io->ios2_Req.io_Message.mn_Node);
@@ -478,16 +752,71 @@ VOID netdev_tx_pump(NetdevUnit *unit)
             continue;
         }
 
-        unit->nu_Stats.PacketsSent++;
-        tr = netdev_track_find(op, io->ios2_PacketType);
-        if (tr != NULL)
-        {
-            tr->st.PacketsSent++;
-            tr->st.BytesSent += total;
-        }
-
         netdev_reply(io, 0, 0);
     }
+}
+
+/* netdev_cmds.c's cmd_queue, which is static there; the caller holds the
+   mask here, so this one does not take it. */
+static VOID nd_queue(struct List *list, struct IOSana2Req *io)
+{
+    io->ios2_Req.io_Flags &= (UBYTE)~IOF_QUICK;
+    io->ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+    AddTail(list, &io->ios2_Req.io_Message.mn_Node);
+}
+
+/*
+ * From BeginIO at task level.  The pump runs the opener's CopyFrom under
+ * Disable(), which the timing build prices at 135 us of the 219 us a transmit
+ * spends in the driver -- 46% of an A3000's frame interval with interrupts
+ * off, and on a write it is the acknowledgements that get held up.  So claim
+ * nu_TxBuf under the mask, frame outside it, and take the mask again only for
+ * the chip.
+ */
+VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
+{
+    NetdevOpener *op = NETDEV_OPENER(io->ios2_Req.io_Unit);
+    UWORD         total;
+    LONG          rc;
+
+    Disable();
+    if (unit->nu_TxBuilding || !IsListEmpty(&unit->nu_Writes) ||
+        !unit->nu_Nic.running ||
+        unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt)
+    {
+        nd_queue(&unit->nu_Writes, io);
+        netdev_tx_pump(unit);
+        Enable();
+        return;
+    }
+    unit->nu_TxBuilding = 1;
+    Enable();
+
+    total = netdev_tx_timed_build(unit, io, op);
+
+    Disable();
+    unit->nu_TxBuilding = 0;
+    if (total == 0)
+    {
+        netdev_tx_pump(unit);       /* the build failed and answered io */
+        Enable();
+        return;
+    }
+
+    rc = netdev_tx_timed_issue(unit, io, op, total);
+    if (rc == DP8390_TX_BUSY)
+    {
+        AddHead(&unit->nu_Writes, &io->ios2_Req.io_Message.mn_Node);
+        Enable();
+        return;
+    }
+    netdev_tx_pump(unit);           /* anything queued while we built */
+    Enable();
+
+    if (rc != 0)
+        netdev_reply(io, S2ERR_TX_FAILURE, S2WERR_GENERIC_ERROR);
+    else
+        netdev_reply(io, 0, 0);
 }
 
 /* ------------------------------------------------------------- the filter -- */
@@ -685,12 +1014,36 @@ static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
      * returns FALSE when it reads zero, which is the same answer the board bit
      * was there to give.
      */
+#ifdef NETDEV_TIME
+    {
+        ULONG t0 = nd_now();
+        ULONG r0 = netdev_time_regs;
+        BOOL  mine;
+
+        mine = unit->nu_Nic.ops->intr(&unit->nu_Nic);
+        nd_t_isr += nd_since(t0);
+        nd_regs_isr += netdev_time_regs - r0;
+        nd_n_int++;
+        if (!mine)
+            return 0;
+
+        t0 = nd_now();
+        netdev_tx_pump(unit);
+        nd_t_tx += nd_since(t0);
+
+        if (nd_n_frame >= 512)
+            nd_time_report();
+
+        return 1;
+    }
+#else
     if (!unit->nu_Nic.ops->intr(&unit->nu_Nic))
         return 0;
 
     netdev_tx_pump(unit);
 
     return 1;
+#endif
 }
 
 /*
@@ -736,6 +1089,76 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
 
 /* ----------------------------------------------------------------- probe -- */
 
+/*
+ * One matched board becomes one unit.  Shared by the two ways in: the
+ * ConfigDev walk below, and the PCMCIA slot, which has no ConfigDev at all.
+ */
+static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
+                            APTR board, ULONG serial)
+{
+    NetdevUnit *unit;
+
+    unit = &dev->nd_Units[dev->nd_UnitCount];
+    nd_zero((UBYTE *)unit, sizeof(*unit));
+
+    unit->nu_Nic.ops = netdev_nic_ops_for(card->chip);
+    if (unit->nu_Nic.ops == NULL)
+        return FALSE;       /* no core for this chip yet */
+
+    unit->nu_Dev    = dev;
+    unit->nu_Nic.card   = card;
+    unit->nu_Nic.board  = (volatile UBYTE *)board;
+    unit->nu_Nic.serial = serial;
+    unit->nu_Nic.rx     = netdev_rx;
+    unit->nu_Nic.rx_arg = unit;
+
+    netdev_bus_setup(&unit->nu_Nic.bus,
+             (APTR)((UBYTE *)board + card->reg_off),
+             card->stride,
+             card->wide_off != 0
+                 ? (APTR)((UBYTE *)board + card->wide_off)
+                 : NULL);
+
+    /* A register file split across two windows, which is Gayle's PCMCIA I/O
+       and nothing else in the table. */
+    if (card->odd_off != 0)
+        netdev_bus_split(&unit->nu_Nic.bus,
+                         (APTR)((UBYTE *)board + card->odd_off +
+                                card->reg_off));
+
+    nd_tracex("anx: board ", (ULONG)board);
+    if (unit->nu_Nic.ops->attach(&unit->nu_Nic) != 0)
+    {
+        nd_trace("anx: attach failed\r\n");
+        return FALSE;       /* the board did not answer as a DP8390 */
+    }
+    nd_tracex("anx: mac ", ((ULONG)unit->nu_Nic.factory[2] << 24) |
+                   ((ULONG)unit->nu_Nic.factory[3] << 16) |
+                   ((ULONG)unit->nu_Nic.factory[4] << 8) |
+                   (ULONG)unit->nu_Nic.factory[5]);
+    nd_tracex("anx: dmode ", (ULONG)unit->nu_Nic.bus.dmode);
+
+    nd_newlist(&unit->nu_OpenerList);
+    nd_newlist(&unit->nu_Writes);
+    unit->nu_Unit = dev->nd_UnitCount;
+
+    unit->nu_Intr.is_Node.ln_Type = NT_INTERRUPT;
+    unit->nu_Intr.is_Node.ln_Pri  = 10;
+    unit->nu_Intr.is_Node.ln_Name = netdev_name;
+    unit->nu_Intr.is_Data     = unit;
+    unit->nu_Intr.is_Code     = (VOID (*)())netdev_server;
+
+    unit->nu_Tick.is_Node.ln_Type = NT_INTERRUPT;
+    unit->nu_Tick.is_Node.ln_Pri  = 0;
+    unit->nu_Tick.is_Node.ln_Name = netdev_name;
+    unit->nu_Tick.is_Data     = unit;
+    unit->nu_Tick.is_Code     = (VOID (*)())netdev_tick;
+
+    dev->nd_UnitCount++;
+
+    return TRUE;
+}
+
 static VOID netdev_probe(NetdevDevice *dev)
 {
     struct ConfigDev *cd = NULL;
@@ -763,7 +1186,6 @@ static VOID netdev_probe(NetdevDevice *dev)
     while ((cd = FindConfigDev(cd, -1, -1)) != NULL)
     {
         const NetdevCard *card = NULL;
-        NetdevUnit       *unit;
         UWORD             i;
 
         for (i = 0; i < netdev_card_count; i++)
@@ -791,55 +1213,42 @@ static VOID netdev_probe(NetdevDevice *dev)
             continue;
         }
 
-        unit = &dev->nd_Units[dev->nd_UnitCount];
-        nd_zero((UBYTE *)unit, sizeof(*unit));
+        if (!netdev_add_unit(dev, card, (APTR)cd->cd_BoardAddr,
+                             cd->cd_Rom.er_SerialNumber))
+            continue;
+    }
 
-        unit->nu_Nic.ops = netdev_nic_ops_for(card->chip);
-        if (unit->nu_Nic.ops == NULL)
-            continue;               /* no core for this chip yet */
+    /*
+     * And the slot, after the boards.  Last so that a machine with both keeps
+     * its Zorro unit numbers where they were: a PCMCIA card is the one card
+     * that can be inserted between two boots.
+     */
+    {
+        UWORD i;
 
-        unit->nu_Dev        = dev;
-        unit->nu_Nic.card   = card;
-        unit->nu_Nic.board  = (volatile UBYTE *)cd->cd_BoardAddr;
-        unit->nu_Nic.rx     = netdev_rx;
-        unit->nu_Nic.rx_arg = unit;
-
-        netdev_bus_setup(&unit->nu_Nic.bus,
-                         (APTR)((UBYTE *)cd->cd_BoardAddr + card->reg_off),
-                         card->stride,
-                         card->wide_off != 0
-                             ? (APTR)((UBYTE *)cd->cd_BoardAddr + card->wide_off)
-                             : NULL);
-
-        nd_tracex("anx: board ", (ULONG)cd->cd_BoardAddr);
-        if (unit->nu_Nic.ops->attach(&unit->nu_Nic) != 0)
+        for (i = 0; i < netdev_card_count; i++)
         {
-            nd_trace("anx: attach failed\r\n");
-            continue;               /* the board did not answer as a DP8390 */
+            const NetdevCard *card = &netdev_cards[i];
+            APTR              base;
+
+            if (card->bus != NETDEV_BUS_PCMCIA)
+                continue;
+            if (dev->nd_UnitCount >= NETDEV_MAX_UNITS)
+            {
+                dev->nd_UnitsDropped++;
+                break;
+            }
+
+            base = netdev_pcmcia_claim(card);
+            if (base == NULL)
+                continue;       /* no slot, nothing in it, or not a LAN card */
+
+            nd_trace("anx: pcmcia claimed\r\n");
+            if (!netdev_add_unit(dev, card, base, 0))
+                netdev_pcmcia_release();
+            else
+                netdev_pcmcia_bind(&dev->nd_Units[dev->nd_UnitCount - 1]);
         }
-        nd_tracex("anx: mac ", ((ULONG)unit->nu_Nic.factory[2] << 24) |
-                               ((ULONG)unit->nu_Nic.factory[3] << 16) |
-                               ((ULONG)unit->nu_Nic.factory[4] << 8) |
-                               (ULONG)unit->nu_Nic.factory[5]);
-        nd_tracex("anx: dmode ", (ULONG)unit->nu_Nic.bus.dmode);
-
-        nd_newlist(&unit->nu_OpenerList);
-        nd_newlist(&unit->nu_Writes);
-        unit->nu_Unit = dev->nd_UnitCount;
-
-        unit->nu_Intr.is_Node.ln_Type = NT_INTERRUPT;
-        unit->nu_Intr.is_Node.ln_Pri  = 10;
-        unit->nu_Intr.is_Node.ln_Name = netdev_name;
-        unit->nu_Intr.is_Data         = unit;
-        unit->nu_Intr.is_Code         = (VOID (*)())netdev_server;
-
-        unit->nu_Tick.is_Node.ln_Type = NT_INTERRUPT;
-        unit->nu_Tick.is_Node.ln_Pri  = 0;
-        unit->nu_Tick.is_Node.ln_Name = netdev_name;
-        unit->nu_Tick.is_Data         = unit;
-        unit->nu_Tick.is_Code         = (VOID (*)())netdev_tick;
-
-        dev->nd_UnitCount++;
     }
 }
 
@@ -1181,6 +1590,19 @@ static BPTR netdev_expunge(register struct Device *dev __asm("a6"))
         d->nd_Units[i].nu_Nic.ops->stop(&d->nd_Units[i].nu_Nic);
         Enable();
     }
+
+    /*
+     * GIVE THE PCMCIA SLOT BACK BEFORE THE SEGLIST GOES.
+     *
+     * card.resource holds the CardHandle we passed to OwnCard(), and that
+     * handle -- and the removal Interrupt hanging off it -- are statics in
+     * this driver's own BSS.  Unloading without releasing leaves the resource
+     * with a node in freed memory: the next OwnCard() walks it, and the card
+     * is gone until the machine is rebooted.  Found by reading this path for
+     * the cycle drill rather than by the drill, which had never been pointed
+     * at the slot.
+     */
+    netdev_pcmcia_release();
 
     if (d->nd_ExpansionBase != NULL)
     {
