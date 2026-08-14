@@ -52,6 +52,11 @@
 #     d<N>_geom             what the guest said its screen was
 #     d<N>_fps              frames a second the probe actually received
 #     d<N>_bytes_per_second and what they cost
+#
+#   -A scroll runs `dir SYS: ALL` in a Shell on the screen while the probe
+#   watches, which is the worst case for anything that diffs tiles: every row
+#   of the window moves on every frame.  -A idle, the default, measures the
+#   other end of the range, where the encoder sends five bytes a frame.
 #     d<N>_guest_fbstat     the guest's own counters: frames, bytes, and the
 #                           ticks it spent grabbing and encoding
 #     d<N>_png              a decoded frame, to look at
@@ -86,11 +91,12 @@ PROBE_SECONDS=10
 OUTDIR="$ROOT/build/console-out"
 PAGE="${AMINETXDUO_CONSOLE_PAGE:-$ROOT/build/web/console.html}"
 CLIENT="${AMINETXDUO_CONSOLE_CLIENT:-}"
+ACTIVITY=idle
 DEPTHS=()
 
 say() { printf '%s=%s\n' "$1" "$2"; }
 
-while getopts "a:p:b:m:B:d:t:s:H:o:c:g:" opt; do
+while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:" opt; do
     case "$opt" in
         a) ADDRESS="$OPTARG" ;;
         p) PORT="$OPTARG" ;;
@@ -104,6 +110,7 @@ while getopts "a:p:b:m:B:d:t:s:H:o:c:g:" opt; do
         o) OUTDIR="$OPTARG" ;;
         c) CLIENT="$OPTARG" ;;
         g) GATEWAY="$OPTARG" ;;
+        A) ACTIVITY="$OPTARG" ;;
         *) sed -n '3,8p' "$0" >&2; exit 2 ;;
     esac
 done
@@ -215,6 +222,16 @@ EOF
 
     echo "Hello from an Amiga." > "$HD/Public/readme.txt"
 
+    # A shell whose FROM script never ends: `dir SYS: ALL` on a loop is the
+    # worst case for anything that diffs tiles, because every row of the window
+    # moves on every frame.  run-wbgrab.sh drives its capture the same way.
+    cat > "$HD/S/scroller" <<'EOF'
+Lab loop
+Dir SYS: ALL
+Skip loop BACK
+EOF
+    chmod 644 "$HD/S/scroller"
+
     wb31_screenmode_prefs "$HD" "$depth"
 }
 
@@ -231,6 +248,11 @@ startup_for() {
 
 FailAt 9999
 C:Wait 6
+EOF
+    [ "$ACTIVITY" = "scroll" ] && cat >> "$HD/S/Startup-Sequence" <<'EOF'
+NewShell CON:0/11/640/190/Scroll FROM S:scroller
+EOF
+    cat >> "$HD/S/Startup-Sequence" <<EOF
 Run >DH0:httpd.txt <NIL: C:httpd DH0:Public $PORT -C CONSOLEPAGE DH0:Console/console.html -v
 EOF
     chmod 755 "$HD/S/Startup-Sequence"
@@ -344,6 +366,7 @@ say mac "$MAC"
 say model "$MODEL"
 say client "${CLIENT:-this host}"
 say page "$PAGE"
+say activity "$ACTIVITY"
 
 # NOTHING MAY ALREADY BE AT THIS ADDRESS.
 #

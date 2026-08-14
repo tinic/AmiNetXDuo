@@ -66,9 +66,11 @@
    vocabulary is a keyword and at most three small numbers. */
 #define FB_WORD_MAX         48
 
-/* How often the session tells the log what it is costing.  Frames, because a
-   count is what the arithmetic afterwards divides by. */
-#define FB_STAT_EVERY       128
+/* How often the session says what it is costing.  Frames, because a count is
+   what the arithmetic afterwards divides by, and 64 rather than 128 because a
+   fifteen-second run at depth 4 produced ninety frames and therefore no
+   figure at all. */
+#define FB_STAT_EVERY       64
 
 /* The floor between grabs, in fiftieths.  One tick, so a screen nothing is
  * drawing on does not have 40 KB of chip RAM read on every pass of a loop
