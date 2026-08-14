@@ -217,11 +217,7 @@ static VOID nd_time_report(VOID)
     nd_t_copy += netdev_time_copy;
     netdev_time_copy = 0;
     nd_tracex("t frames ", nd_n_frame);
-    nd_tracex("t ints   ", nd_n_int);
-    nd_tracex("t isr    ", nd_t_isr);
-    nd_tracex("t copy   ", nd_t_copy);
     nd_tracex("t up     ", nd_t_up);
-    nd_tracex("t tx     ", nd_t_tx);
     {
         ULONG tp = nd_now();
         UWORD k;
@@ -237,11 +233,6 @@ static VOID nd_time_report(VOID)
     nd_tracex("t addr   ", nd_t_addr);
     nd_tracex("t reply  ", nd_t_reply);
     nd_tracex("t probe16", nd_t_probe);
-    nd_tracex("t nhook  ", nd_n_hook);
-    nd_tracex("t rdc    ", netdev_time_rdc);
-    nd_tracex("t null   ", netdev_time_null);
-    nd_tracex("t irx    ", netdev_time_rx);
-    nd_tracex("t itx    ", netdev_time_tx);
     netdev_time_rdc = netdev_time_null = 0;
     netdev_time_rx = netdev_time_tx = 0;
     nd_t_isr = nd_t_copy = nd_t_up = nd_t_tx = nd_t_hook = 0;
@@ -851,7 +842,7 @@ static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
         netdev_tx_pump(unit);
         nd_t_tx += nd_since(t0);
 
-        if (nd_n_frame >= 2048)
+        if (nd_n_frame >= 512)
             nd_time_report();
 
         return 1;
