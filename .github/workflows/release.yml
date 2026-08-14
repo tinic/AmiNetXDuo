@@ -67,7 +67,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/aminetxduo/toolchain
-          key: m68k-amigaos-gcc-15.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
+          key: m68k-amigaos-gcc-16.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
 
       - name: Fetch the toolchain
         if: steps.toolchain-cache.outputs.cache-hit != 'true'
@@ -100,7 +100,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/aminetxduo/toolchain
-          key: m68k-amigaos-gcc-15.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
+          key: m68k-amigaos-gcc-16.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
 
       - name: Fetch the toolchain
         if: steps.toolchain-cache.outputs.cache-hit != 'true'
@@ -163,7 +163,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/aminetxduo/toolchain
-          key: m68k-amigaos-gcc-15.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
+          key: m68k-amigaos-gcc-16.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
 
       - name: Fetch the toolchain
         if: steps.toolchain-cache.outputs.cache-hit != 'true'

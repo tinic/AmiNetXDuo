@@ -47,7 +47,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/aminetxduo/toolchain
-          key: m68k-amigaos-gcc-15.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
+          key: m68k-amigaos-gcc-16.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
 
       - name: Fetch the toolchain
         if: steps.toolchain-cache.outputs.cache-hit != 'true'
@@ -87,7 +87,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/aminetxduo/toolchain
-          key: m68k-amigaos-gcc-15.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
+          key: m68k-amigaos-gcc-16.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
 
       - name: Fetch the toolchain
         if: steps.toolchain-cache.outputs.cache-hit != 'true'
@@ -144,7 +144,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/aminetxduo/toolchain
-          key: m68k-amigaos-gcc-15.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
+          key: m68k-amigaos-gcc-16.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
 
       # On a warm cache this does not run at all, so the mirror is touched
       # once per pin change rather than once per build.
@@ -255,6 +255,7 @@ jobs:
             tools/cppcheck.sh \
             tools/version.sh \
             tools/fetch-toolchain.sh \
+            tools/build-toolchain.sh \
             tools/package-toolchain-mirror.sh \
             tools/amiga-toolchain.sh \
             tools/amiberry-run.sh \
