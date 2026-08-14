@@ -119,7 +119,7 @@ VOID ami_log(int level, const char *fmt, ...);
  * Pass non-zero when SysBase->AttnFlags has AFF_68020.  Never calling it means
  * the 68000 routines, which are correct everywhere.
  */
-void ami_rt_cpu_select(int have_68020);
+void ami_rt_cpu_select(int have_68020, int have_mulul);
 
 #ifdef AMINETXDUO_DEBUG
 #  define AMI_DEBUG(...)  ami_log(AMI_LOG_DEBUG, __VA_ARGS__)

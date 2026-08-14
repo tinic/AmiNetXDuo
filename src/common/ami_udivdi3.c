@@ -340,6 +340,28 @@ u32     lo = a;
 
 #else
 
+    /*
+     * AND AT RUN TIME, which is the same instruction for the same reason.  A
+     * one-binary build is compiled -m68000, so the block above is not
+     * available to it at compile time and every RSA and EC operation would
+     * take the four-mulu.w form on a machine that has the one-instruction one.
+     * The flag is set from AttnFlags: 68020-and-up AND NOT 68060, because the
+     * 68060 is exactly the part that dropped this form.  `.chip 68020` is what
+     * lets a -m68000 unit hold the instruction at all.
+     */
+    if (ami_rt_mulul != 0)
+    {
+    u32     w_hi;
+    u32     w_lo = a;
+
+        __asm__ (".chip 68020\n\tmulu.l %2,%1:%0\n\t.chip 68000"
+                 : "=d" (w_lo), "=d" (w_hi)
+                 : "dmi" (b), "0" (w_lo));
+
+        return(((u64)w_hi << 32) | (u64)w_lo);
+    }
+
+    {
 u16     a_lo = (u16)a;
 u16     a_hi = (u16)(a >> 16);
 u16     b_lo = (u16)b;
@@ -356,6 +378,7 @@ u32     mid;
 
     return(((u64)(hh + (lh >> 16) + (hl >> 16) + (mid >> 16)) << 32) |
            (u64)((mid << 16) | (u32)(u16)ll));
+    }
 
 #endif
 }
@@ -425,12 +448,14 @@ long __modsi3(long numerator, long denominator);
  * zero remainder deliberately, where the instruction would trap.
  */
 static int ami_rt_020;
+static int ami_rt_mulul;
 
-void ami_rt_cpu_select(int have_68020);
-void ami_rt_cpu_select(int have_68020)
+void ami_rt_cpu_select(int have_68020, int have_mulul);
+void ami_rt_cpu_select(int have_68020, int have_mulul)
 {
 
-    ami_rt_020 = (have_68020 != 0) ? 1 : 0;
+    ami_rt_020   = (have_68020 != 0) ? 1 : 0;
+    ami_rt_mulul = (have_mulul != 0) ? 1 : 0;
 }
 
 u32 __mulsi3(u32 a, u32 b)

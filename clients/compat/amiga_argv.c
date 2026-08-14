@@ -310,9 +310,14 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
        one; declared here rather than included because this file is compat
        glue and pulls in no headers of ours. */
     {
-        extern void ami_rt_cpu_select(int have_68020);
+        extern void ami_rt_cpu_select(int have_68020, int have_mulul);
 
-        ami_rt_cpu_select((SysBase->AttnFlags & AFF_68020) != 0);
+        /* Two facts, not one: the 68060 has the 68020 instructions but not
+           MULU.L's 64-bit result, which is the one the bignum inner loop
+           wants.  Same split as src/crypto68k/c68k_variant.h. */
+        ami_rt_cpu_select((SysBase->AttnFlags & AFF_68020) != 0,
+                          (SysBase->AttnFlags & AFF_68020) != 0 &&
+                          (SysBase->AttnFlags & AFF_68060) == 0);
     }
 
     /*

@@ -90,7 +90,9 @@ static struct TLSLibBase *tls_lib_init(
     /* And the compiler runtime, for the same reason: the bignum code reaches
        __mulsi3 and __udivsi3 on every limb in a -m68000 build.
        src/common/ami_udivdi3.c. */
-    ami_rt_cpu_select(((ULONG)sysbase->AttnFlags & AFF_68020) != 0UL);
+    ami_rt_cpu_select(((ULONG)sysbase->AttnFlags & AFF_68020) != 0UL,
+                      ((ULONG)sysbase->AttnFlags & AFF_68020) != 0UL &&
+                      ((ULONG)sysbase->AttnFlags & AFF_68060) == 0UL);
 
     if (!tls_runtime_open())
         return NULL;
