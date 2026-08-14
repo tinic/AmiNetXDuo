@@ -85,7 +85,6 @@ typedef struct NetdevUnit
 
     struct Interrupt            nu_Intr;      /* INT2, the card               */
     struct Interrupt            nu_Tick;      /* INT3 vertical blank, watchdog */
-    UBYTE                       nu_TxBuilding; /* a task owns nu_TxBuf         */
     UWORD                       nu_TxStall;   /* blanks with a transmit stuck  */
     UWORD                       nu_TxWedges;  /* how often it had to be reset  */
 
@@ -128,7 +127,6 @@ BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len);
 VOID netdev_event(NetdevUnit *unit, ULONG mask);
 VOID netdev_rebuild_filter(NetdevUnit *unit);
 VOID netdev_tx_pump(NetdevUnit *unit);
-VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io);
 VOID netdev_drop_writes(NetdevUnit *unit, NetdevOpener *op);
 LONG netdev_online(NetdevUnit *unit);
 VOID netdev_offline(NetdevUnit *unit, ULONG event);

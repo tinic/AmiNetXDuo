@@ -387,7 +387,10 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
             return;
         }
 
-        netdev_tx_direct(unit, io);
+        cmd_queue(&unit->nu_Writes, io);
+        Disable();
+        netdev_tx_pump(unit);
+        Enable();
         return;
     }
 
