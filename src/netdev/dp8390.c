@@ -294,15 +294,23 @@ static VOID dp8390_rint(NetdevNic *nic)
     UWORD steps;
 
  loop:
+    /*
+     * NO SETTLING READ AFTER THE PAGE SWITCH.  There used to be one at each
+     * of these, on the theory that the chip needs a bus cycle between a
+     * command write and the next access.  cnet.device, which drives this
+     * family on real hardware, writes CR and reads the next register with
+     * nothing in between -- and on the PCMCIA card a scalar register access
+     * costs 5.7 us, so five of them a frame was 29 us of a 108 us deficit.
+     * The reset and bring-up paths keep theirs: they are not per frame and
+     * the margin there is free.
+     */
     NIC_PUT(nic, ED_P0_CR, nic->cr_proto | ED_CR_PAGE_1 | ED_CR_STA);
-    dp_pause(nic, 1);
 
     current = NIC_GET(nic, ED_P1_CURR);
     if (nic->next_packet == current)
         return;
 
     NIC_PUT(nic, ED_P1_CR, nic->cr_proto | ED_CR_PAGE_0 | ED_CR_STA);
-    dp_pause(nic, 1);
 
     /*
      * The walk cannot legitimately visit more buffers than the ring has
@@ -442,8 +450,6 @@ BOOL dp8390_intr(NetdevNic *nic)
         return FALSE;
 
     NIC_PUT(nic, ED_P0_CR, nic->cr_proto | ED_CR_PAGE_0 | ED_CR_STA);
-    dp_pause(nic, 1);
-
     isr = NIC_GET(nic, ED_P0_ISR);
     if (isr == 0)
     {
