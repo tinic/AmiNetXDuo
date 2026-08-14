@@ -67,6 +67,9 @@ anxnet_card_for() {
         xsurf)                 echo xsurf ;;
         hydra)                 echo hydra ;;
         eb920)                 echo lanrover ;;
+        a2065)                 echo a2065 ;;
+        ariadne)               echo ariadne ;;
+        ne2000_pcmcia)         echo pcmcia ;;
         *)                     echo "" ;;
     esac
 }
