@@ -15,7 +15,9 @@
  *   Read the CIS.  A PCMCIA slot holds an SRAM card or an IDE adapter just as
  *   readily as a network card, and driving the wrong one writes to somebody's
  *   disk.  CopyTuple() walks the tuple chain; CISTPL_FUNCID says what the card
- *   is and the answer has to be 6, LAN adapter.
+ *   is, and when a card carries one the answer has to be 6, LAN adapter.
+ *   It is optional, and a card that omits it is taken at the value
+ *   cnet.device takes it at: a network card.
  *
  *   Configure it.  A PCMCIA card decodes nothing until its Configuration
  *   Option Register is written with an index from CISTPL_CFTABLE_ENTRY.  Until
@@ -331,15 +333,39 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
         }
     }
 
-    /* What is in the slot.  Anything but a LAN adapter is given straight
-       back: an IDE adapter driven as an NE2000 is a write to a disk. */
-    buf[2] = 0;
-    (VOID)pc_tuple(handle, CISTPL_FUNCID, buf, sizeof(buf));
-    pc_trace("pc: funcid ", (ULONG)buf[2]);
-    if (buf[2] != CIS_FUNC_LAN)
+    /*
+     * What is in the slot.  A card that SAYS it is anything but a LAN adapter
+     * is given straight back: an IDE adapter driven as an NE2000 is a write to
+     * somebody's disk.
+     *
+     * A CARD THAT SAYS NOTHING IS NOT THE SAME AS A CARD THAT SAYS "NOT LAN".
+     * CISTPL_FUNCID is optional in practice and real cards ship without it.
+     * This used to pre-zero buf[2], throw CopyTuple()'s result away, and then
+     * compare the zero it had written itself against 6 -- so a card with no
+     * FUNCID tuple was rejected as function 0, multi-function, and the slot
+     * given back with the card in it working perfectly.  cnet.device assumes a
+     * network card when the tuple is absent and only enforces the value when
+     * it is present (cnetdevice.asm:4682-4688, "did we get one? if not assume
+     * it's a network card... (Neil Cafferkey)"); that workaround exists
+     * because cards in the field do this.
+     *
+     * The two later tuples are NOT optional in the same way: CISTPL_CONFIG
+     * gives the address of the register that has to be written and
+     * CISTPL_CFTABLE_ENTRY the value, and neither can be guessed.  Their
+     * absence stays a rejection.
+     */
+    if (!pc_tuple(handle, CISTPL_FUNCID, buf, sizeof(buf)))
     {
-        pc_give_up(handle);
-        return NULL;
+        pc_trace("pc: no funcid, assume lan ", 0);
+    }
+    else
+    {
+        pc_trace("pc: funcid ", (ULONG)buf[2]);
+        if (buf[2] != CIS_FUNC_LAN)
+        {
+            pc_give_up(handle);
+            return NULL;
+        }
     }
 
     /* CISTPL_CONFIG carries the configuration register base, in the card's
