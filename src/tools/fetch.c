@@ -502,14 +502,17 @@ static LONG fetch_run(VOID)
                 tool_error("https: needs LIBS:tls.library, and there is none");
 
                 /*
-                 * The archive carries no tls.library for a 68000, the
-                 * encryption needs a 68020, so the line above sends that user
-                 * after a file that does not exist.  One binary serves every
-                 * CPU, so the check can only happen at run time.
+                 * This used to add "and there is none for a 68000", because
+                 * the archive carried no 68000 tls.library at all.  It carries
+                 * one for every processor now -- the same one -- so the only
+                 * way to be here is not to have installed it, which is what
+                 * the line above says.  A 68000 owner who did install it is
+                 * told what to expect instead, once, because a first handshake
+                 * there takes a minute or two and silence looks like a hang.
                  */
                 if ((SysBase->AttnFlags & AFF_68020) == 0)
-                    tool_printf("  This machine is a 68000, and there is no "
-                                "tls.library for one.\n");
+                    tool_printf("  Install it with the full stack; on a 68000 "
+                                "the first handshake takes a minute or two.\n");
 
                 rc = RETURN_FAIL;
                 break;
