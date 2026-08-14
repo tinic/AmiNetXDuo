@@ -1,4 +1,4 @@
-/* Automatically generated header (sfdc 1.11f)! Do not edit! */
+/* Automatically generated header (sfdc 1.11e)! Do not edit! */
 #ifndef PRAGMAS_AMINETXDUO_PRAGMAS_H
 #define PRAGMAS_AMINETXDUO_PRAGMAS_H
 
