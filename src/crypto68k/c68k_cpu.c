@@ -49,6 +49,10 @@ extern c68k_limb c68k_div_2by1_c(c68k_limb hi, c68k_limb lo, c68k_limb d,
 extern VOID c68k_poly1305_blocks_asm(C68K_POLY1305 *ctx, const UCHAR *m,
                                      ULONG blocks, ULONG hibit);
 
+/* X25519's four field routines are set where their portable twins are, which
+   is inside c68k_25519.c: they are static there. */
+extern void c68k_25519_cpu_select(unsigned int mul_ul);
+
 /*
  * The portable C to begin with, exactly as src/net68k does it: this file is
  * linked by programs that never select -- a bench, a test, a Shell command --
@@ -84,6 +88,7 @@ VOID c68k_cpu_select(ULONG attnflags)
         c68k_vec_div_2by1        = c68k_div_2by1_mulu;
         c68k_vec_poly1305_blocks = c68k_poly1305_blocks_asm;
         c68k_selected            = C68K_ASM_68020;
+        c68k_25519_cpu_select(1u);
     }
     else
     {
@@ -93,6 +98,7 @@ VOID c68k_cpu_select(ULONG attnflags)
         c68k_vec_div_2by1        = c68k_div_2by1_c;
         c68k_vec_poly1305_blocks = c68k_poly1305_blocks_c;
         c68k_selected            = C68K_ASM_68060;
+        c68k_25519_cpu_select(0u);
     }
 }
 

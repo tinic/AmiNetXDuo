@@ -243,6 +243,31 @@ if(CMAKE_CROSSCOMPILING AND AMINETXDUO_CPU STREQUAL "any")
     list(APPEND CRYPTO68K_SOURCES
          c68k_prim.S c68k_chacha20.S c68k_poly1305.S c68k_prim_mulw.S
          c68k_dispatch.S)
+
+    # c68k_25519.S is one file holding both halves, picked by a define, so it
+    # becomes two objects the way src/net68k's variants do -- and for the same
+    # two reasons, a translation unit of its own and a file name of its own.
+    # This is also exactly what one ssh binary needs: clients/dropbear compiles
+    # c68k_25519.c itself and picks the half with the same define today.
+    foreach(mv mulu:C68K_ASM:-m68020 mulw:C68K_ASM_MULW:-m68000)
+        string(REPLACE ":" ";" _parts "${mv}")
+        list(GET _parts 0 _sfx)
+        list(GET _parts 1 _def)
+        list(GET _parts 2 _arch)
+        set(C68K_MV_DEFINE "${_def}")
+        set(C68K_MV_SUFFIX "_${_sfx}")
+        set(C68K_MV_SRC "c68k_25519.S")
+        set(_gen "${CMAKE_CURRENT_BINARY_DIR}/c68k_25519_${_sfx}.S")
+        configure_file(c68k_mv.S.in "${_gen}" @ONLY)
+        list(APPEND CRYPTO68K_SOURCES "${_gen}")
+        set_source_files_properties("${_gen}" PROPERTIES
+            COMPILE_DEFINITIONS "C68K_MV=1"
+            COMPILE_OPTIONS "${_arch}"
+            INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}")
+    endforeach()
+    unset(C68K_MV_DEFINE)
+    unset(C68K_MV_SUFFIX)
+    unset(C68K_MV_SRC)
 endif()
 
 add_library(crypto68k STATIC ${CRYPTO68K_SOURCES})
