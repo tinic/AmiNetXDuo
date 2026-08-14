@@ -27,6 +27,7 @@
 #include "netdev_nic.h"
 const struct NetdevNicOps netdev_nic_ne2000;
 const struct NetdevNicOps netdev_nic_ed;
+const struct NetdevNicOps netdev_nic_lance;
 
 static int failures;
 
