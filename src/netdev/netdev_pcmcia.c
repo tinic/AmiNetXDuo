@@ -39,10 +39,89 @@
 
 #include <proto/exec.h>
 
-/* proto/card.h in this NDK includes clib/card_protos.h, which the NDK does
-   not ship -- the protos are clib/cardres_protos.h.  inline/card.h is the
-   half that matters here: the LVO stubs, against the CardResource below. */
-#include <inline/card.h>
+/* The resource base every stub below calls through. */
+struct Library *CardResource;
+
+/*
+ * CARD.RESOURCE IS CALLED THROUGH STUBS WRITTEN HERE, not through the NDK's,
+ * because the two toolchains this builds with disagree about the file names
+ * and each one's proto header is internally inconsistent:
+ *
+ *   pinned Linux NDK   inline/card.h    proto/card.h -> clib/card_protos.h,
+ *                                       which it does not ship
+ *   macOS amiga-gcc    inline/cardres.h proto/cardres.h -> clib/card_protos.h
+ *                                       and inline/card.h, neither shipped
+ *
+ * There is no include that works on both.  What they DO agree on exactly is
+ * the four LVOs and their registers, checked in both inline headers, so those
+ * are spelled out below and neither proto header is needed.  resources/card.h
+ * is fine everywhere: it is structures and constants, no calls.
+ *
+ *   OwnCard          -0x06  a1 handle                       -> d0 owner
+ *   ReleaseCard      -0x0c  a1 handle, d0 flags             -> void
+ *   CardMiscControl  -0x30  a1 handle, d1 bits              -> d0
+ *   CopyTuple        -0x48  a1 handle, a0 buf, d1 code,
+ *                           d0 size                         -> d0 BOOL
+ */
+
+static struct CardHandle *pc_own_card(struct CardHandle *h)
+{
+    register struct Library    *_a6 __asm("a6") = CardResource;
+    register struct CardHandle *_a1 __asm("a1") = h;
+    register struct CardHandle *res __asm("d0");
+
+    __asm __volatile ("jsr a6@(-0x6)"
+                      : "=r" (res)
+                      : "r" (_a6), "r" (_a1)
+                      : "d1", "a0", "cc", "memory");
+
+    return res;
+}
+
+static VOID pc_release_card(struct CardHandle *h, ULONG flags)
+{
+    register struct Library    *_a6 __asm("a6") = CardResource;
+    register struct CardHandle *_a1 __asm("a1") = h;
+    register ULONG              _d0 __asm("d0") = flags;
+
+    __asm __volatile ("jsr a6@(-0xc)"
+                      : "+r" (_d0)
+                      : "r" (_a6), "r" (_a1)
+                      : "d1", "a0", "cc", "memory");
+}
+
+static UBYTE pc_misc_control(struct CardHandle *h, UBYTE bits)
+{
+    register struct Library    *_a6 __asm("a6") = CardResource;
+    register struct CardHandle *_a1 __asm("a1") = h;
+    register ULONG              _d1 __asm("d1") = (ULONG)bits;
+    register LONG               res __asm("d0");
+
+    __asm __volatile ("jsr a6@(-0x30)"
+                      : "=r" (res)
+                      : "r" (_a6), "r" (_a1), "r" (_d1)
+                      : "a0", "cc", "memory");
+
+    return (UBYTE)res;
+}
+
+static BOOL pc_copy_tuple(struct CardHandle *h, UBYTE *buf, ULONG code,
+                          ULONG size)
+{
+    register struct Library    *_a6 __asm("a6") = CardResource;
+    register struct CardHandle *_a1 __asm("a1") = h;
+    register UBYTE             *_a0 __asm("a0") = buf;
+    register ULONG              _d1 __asm("d1") = code;
+    register ULONG              _d0 __asm("d0") = size;
+    register LONG               res __asm("d0");
+
+    __asm __volatile ("jsr a6@(-0x48)"
+                      : "=r" (res)
+                      : "r" (_a6), "r" (_a1), "r" (_a0), "r" (_d1), "0" (_d0)
+                      : "cc", "memory");
+
+    return (BOOL)(res != 0);
+}
 
 #ifdef NETDEV_TRACE
 /* Local, because netdev_device.c's is static there and this runs before any
@@ -93,15 +172,13 @@ static VOID pc_trace(const char *s, ULONG v)
 #define PC_COR_OFF          0
 #define PC_COR_LEVEL_IRQ    0x40
 
-struct Library *CardResource;
-
 /*
  * A tuple, copied out of attribute memory by card.resource.  The buffer is
  * the largest a tuple can be plus its two header bytes.
  */
 static BOOL pc_tuple(struct CardHandle *h, UBYTE code, UBYTE *buf, UWORD len)
 {
-    return (BOOL)(CopyTuple(h, buf, code, (ULONG)len) != 0);
+    return pc_copy_tuple(h, buf, (ULONG)code, (ULONG)len);
 }
 
 /*
@@ -201,7 +278,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     handle->cah_CardStatus       = NULL;
 
     {
-        struct CardHandle *owner = OwnCard(handle);
+        struct CardHandle *owner = pc_own_card(handle);
 
         pc_trace("pc: own ", (ULONG)owner);
         if (owner != NULL)
@@ -215,7 +292,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     pc_trace("pc: funcid ", (ULONG)buf[2]);
     if (buf[2] != CIS_FUNC_LAN)
     {
-        ReleaseCard(handle, 0);
+        pc_release_card(handle, 0);
         return NULL;
     }
 
@@ -225,7 +302,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     if (!pc_tuple(handle, CISTPL_CONFIG, buf, sizeof(buf)))
     {
         pc_trace("pc: no config tuple ", 0);
-        ReleaseCard(handle, 0);
+        pc_release_card(handle, 0);
         return NULL;
     }
     {
@@ -244,7 +321,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     if (!pc_tuple(handle, CISTPL_CFTABLE, buf, sizeof(buf)))
     {
         pc_trace("pc: no cftable ", 0);
-        ReleaseCard(handle, 0);
+        pc_release_card(handle, 0);
         return NULL;
     }
     index = (UBYTE)(buf[2] & 0x3f);
@@ -279,7 +356,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
         if (!pc_chip_answers(card))
         {
             pc_trace("pc: chip silent ", 0);
-            ReleaseCard(handle, 0);
+            pc_release_card(handle, 0);
             return NULL;
         }
     }
@@ -289,7 +366,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
      * pass it until the status change is enabled.  card.resource owns that
      * register, so this goes through CardMiscControl() rather than a poke.
      */
-    (VOID)CardMiscControl(handle, CARD_INTF_SETCLR | CARD_INTF_IRQ);
+    (VOID)pc_misc_control(handle, CARD_INTF_SETCLR | CARD_INTF_IRQ);
 
     pc_trace("pc: index ", (ULONG)index);
     return (APTR)(ULONG)card->base;
@@ -303,8 +380,8 @@ VOID netdev_pcmcia_release(VOID)
 
     if (CardResource != NULL && handle->cah_CardNode.ln_Name != NULL)
     {
-        (VOID)CardMiscControl(handle, CARD_INTF_IRQ);   /* SETCLR clear */
-        (VOID)ReleaseCard(handle, 0);
+        (VOID)pc_misc_control(handle, CARD_INTF_IRQ);   /* SETCLR clear */
+        (VOID)pc_release_card(handle, 0);
         handle->cah_CardNode.ln_Name = NULL;
     }
 }
