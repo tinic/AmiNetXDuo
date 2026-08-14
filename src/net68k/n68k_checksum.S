@@ -78,9 +78,11 @@
 
 #ifdef AMINETXDUO_NET68K_ASM
 
+#include "n68k_variant.h"
+
         .text
         .even
-        .globl  _n68k_sum_longwords
+        .globl  N68K_MV_SYM(_n68k_sum_longwords)
 
 | THREE PARTS, THREE ANSWERS.  The seven-longword step below is the whole
 | inner loop, and which form of it is fastest is a question about the machine
@@ -120,7 +122,7 @@
 
 | An 060 takes the add/addx form; everything else takes movem.  Overridable
 | by hand for the A/B, which is how the 68000 row below was taken.
-#if defined(__mc68060__) && !defined(N68K_SUM_NO_MOVEM)
+#if N68K_MV == 60 && !defined(N68K_SUM_NO_MOVEM)
 #define N68K_SUM_NO_MOVEM 1
 #endif
 
@@ -160,7 +162,7 @@
 #define N68K_TABLE      64
 #define N68K_BLOCKS     8
 
-_n68k_sum_longwords:
+N68K_MV_SYM(_n68k_sum_longwords):
         movea.l sp@(4),a0
         move.l  sp@(8),d1
 
@@ -301,8 +303,8 @@ _n68k_sum_longwords:
 |   is off above the 68020 and this lab has no such hardware.
 | ---------------------------------------------------------------------------
 
-        .globl  _n68k_copy_sum_longwords
-_n68k_copy_sum_longwords:
+        .globl  N68K_MV_SYM(_n68k_copy_sum_longwords)
+N68K_MV_SYM(_n68k_copy_sum_longwords):
         movem.l d2-d7/a2-a3,sp@-        | 8 longs
         movea.l sp@(36),a0              | to
         movea.l sp@(40),a1              | from
@@ -327,14 +329,14 @@ _n68k_copy_sum_longwords:
         add.l   d1,d1                   | X = 0; from here nothing may touch it
 
 .Lcs_block:
-#if defined(N68K_SUM_NO_MOVEM) || defined(__mc68040__)
+#if defined(N68K_SUM_NO_MOVEM) || N68K_MV == 40
         | 68060, and 68040: no MOVEM on either side.
         .rept   14
         move.l  a1@+,d1
         move.l  d1,a0@+
         addx.l  d1,d0
         .endr
-#elif defined(__mc68020__) || defined(__mc68030__)
+#elif N68K_MV == 20
         | Post-incrementing stores, interleaved with the chain.
         movem.l a1@+,d1-d7
         move.l  d1,a0@+

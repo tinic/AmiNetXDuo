@@ -46,14 +46,30 @@ cmake_dependent_option(AMINETXDUO_NET68K_MEMCPY
 set(NET68K_SOURCES
     n68k_checksum.c
     n68k_checksum_hook.c
-    n68k_copy.c)
+    n68k_copy.c
+    n68k_cpu.c)
 
 if(AMINETXDUO_NET68K_MEMCPY)
     list(APPEND NET68K_SOURCES n68k_memcpy_hook.c)
 endif()
 
-if(AMINETXDUO_NET68K_ASM)
+# One assembly of each routine per CPU class, or one for the CPU this tree is
+# being built for.  AMINETXDUO_CPU=any takes the first: -m68000 codegen with
+# every form of the inner loops present and the choice made from AttnFlags at
+# init, which is the whole of what makes one binary serve the family.  Any
+# other value keeps the single-variant build, unchanged and byte for byte
+# comparable, which is what the measurement in the toolchain file is against.
+set(NET68K_MV OFF)
+if(AMINETXDUO_NET68K_ASM AND AMINETXDUO_CPU STREQUAL "any")
+    set(NET68K_MV ON)
+endif()
+
+if(AMINETXDUO_NET68K_ASM AND NOT NET68K_MV)
     list(APPEND NET68K_SOURCES n68k_checksum.S n68k_copy.S)
+endif()
+
+if(NET68K_MV)
+    list(APPEND NET68K_SOURCES n68k_dispatch.S)
 endif()
 
 add_library(aminetxduo_net68k STATIC ${NET68K_SOURCES}
@@ -74,9 +90,46 @@ if(AMINETXDUO_NET68K_ASM)
     # toolchain file does not reach the assembler.  Same arrangement as
     # src/crypto68k/CMakeLists.txt, and for the same reasons.
     target_compile_definitions(aminetxduo_net68k PRIVATE AMINETXDUO_NET68K_ASM=1)
-    set_source_files_properties(n68k_checksum.S n68k_copy.S PROPERTIES
+    set_source_files_properties(n68k_checksum.S n68k_copy.S n68k_dispatch.S
+        PROPERTIES
         COMPILE_DEFINITIONS AMINETXDUO_NET68K_ASM=1
         COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
 endif()
 
+if(NET68K_MV)
+    # Four assemblies of the same two files, one per class, each in its own
+    # object library because that is what gives each its own translation unit:
+    # the routines share local label names, so two variants in one TU is a
+    # duplicate-symbol error rather than a nuisance.
+    #
+    # ALL FOUR ARE ASSEMBLED WITH THE SAME -m68000 AS THE REST OF THE BINARY,
+    # and that is not an oversight.  Nothing in either file is an instruction a
+    # 68000 lacks -- movem.l, add.l, addx.l, move.l, lea and dbf, all original
+    # -- so what the variants differ in is which of those to use on which part,
+    # not what the assembler will accept.  The arch flag would only change what
+    # __mc68020__ says, and N68K_MV says it now.
+    #
+    # Four rather than the three distinct answers the two files actually have
+    # (the copy has nothing to say about a 68040, the sum nothing about the
+    # difference between a 68000 and a 68020): a uniform table costs about
+    # 2 KB of a 330 KB library and removes a per-routine special case from
+    # n68k_cpu.c.
+    foreach(mv 0 20 40 60)
+        add_library(aminetxduo_net68k_mv${mv} OBJECT
+            n68k_checksum.S n68k_copy.S)
+        target_compile_definitions(aminetxduo_net68k_mv${mv} PRIVATE
+            AMINETXDUO_NET68K_ASM=1 N68K_MV_MULTI=1 N68K_MV=${mv})
+        target_compile_options(aminetxduo_net68k_mv${mv} PRIVATE
+            ${AMIGA_ARCH_FLAGS})
+        target_link_libraries(aminetxduo_net68k PRIVATE
+            aminetxduo_net68k_mv${mv})
+    endforeach()
+
+    # The C half of the dispatch needs to know it is in this build too: the
+    # vector table and n68k_cpu_select()'s body are both behind it, and without
+    # it the file is the empty function every other build gets.
+    target_compile_definitions(aminetxduo_net68k PRIVATE N68K_MV_MULTI=1)
+endif()
+
 message(STATUS "  net68k asm .... ${AMINETXDUO_NET68K_ASM}")
+message(STATUS "  net68k mv ..... ${NET68K_MV}")

@@ -37,9 +37,11 @@
 
 #ifdef AMINETXDUO_NET68K_ASM
 
+#include "n68k_variant.h"
+
         .text
         .even
-        .globl  _n68k_copy_bytes
+        .globl  N68K_MV_SYM(_n68k_copy_bytes)
 
 | An odd address is fatal on a 68000.
 |
@@ -63,8 +65,7 @@
 |
 | 68020 and up assemble without this, where the byte loop would be a 4x
 | slowdown to avoid an 18% one.
-#if !defined(__mc68020__) && !defined(__mc68030__) && \
-    !defined(__mc68040__) && !defined(__mc68060__)
+#if N68K_MV == 0
 #define N68K_ODD_IS_FATAL 1
 #endif
 
@@ -91,12 +92,12 @@
 | a 68000 must would put eight of the sixteen alignment pairs on a path that
 | measured 2638 ns/B against 990 on the part that has no choice.  Two separate
 | CPU questions, two separate answers.
-#if defined(__mc68060__)
+#if N68K_MV == 60
 #define N68K_NO_MOVEM 1
 #endif
 
 | a0 = to, a1 = from, d0 = len
-_n68k_copy_bytes:
+N68K_MV_SYM(_n68k_copy_bytes):
 #ifndef N68K_NO_MOVEM
 | SHORT COPIES TOUCH NO CALLEE-SAVED REGISTER.
 |

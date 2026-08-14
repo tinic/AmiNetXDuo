@@ -161,19 +161,30 @@ unset(_amiga_dos_inline)
 # bignums are all integer), the m68881 multilibs exist only in the 68020 row,
 # and a library that requires an FPU would refuse to load on the 68020s and
 # 68EC020s that do not have one.  A soft-float build runs everywhere.
-set(AMINETXDUO_CPU "68020" CACHE STRING "Target CPU: 68000, 68020, 68040 or 68060")
-set_property(CACHE AMINETXDUO_CPU PROPERTY STRINGS 68000 68020 68040 68060)
+#
+# `any` is the fifth value and it is not a CPU: it is -m68000 codegen, which
+# every 68k runs, plus src/net68k's inner loops assembled once per CPU class
+# and chosen from SysBase->AttnFlags at library init.  One binary for the whole
+# family.  What it costs is measured, on the A1200 profile, 512 KB loopback,
+# six runs an arm: -m68000 throughout is 987.8 ms against the -m68020 build's
+# 973.8, and giving the assembly back its 68020 form recovers 6 of those 14 ms.
+# The rest is instruction selection spread over the C, and none of it is the
+# 32-bit multiply and divide helpers, which no data-path object references
+# (src/net68k/n68k_cpu.c).
+set(AMINETXDUO_CPU "68020" CACHE STRING "Target CPU: 68000, 68020, 68040, 68060 or any")
+set_property(CACHE AMINETXDUO_CPU PROPERTY STRINGS 68000 68020 68040 68060 any)
 
 set(_amiga_cpu_flags_68000 "-m68000")
 set(_amiga_cpu_flags_68020 "-m68020")
 set(_amiga_cpu_flags_68040 "-m68020;-mtune=68040")
 set(_amiga_cpu_flags_68060 "-mcpu=68060")
+set(_amiga_cpu_flags_any   "-m68000")
 
 if(NOT DEFINED _amiga_cpu_flags_${AMINETXDUO_CPU})
     message(FATAL_ERROR
         "AMINETXDUO_CPU=${AMINETXDUO_CPU} is not one of 68000, 68020, 68040, "
-        "68060.  A 68010 runs the 68000 build and a 68030 runs the 68020 one; "
-        "there is no separate configuration for either.")
+        "68060, any.  A 68010 runs the 68000 build and a 68030 runs the 68020 "
+        "one; there is no separate configuration for either.")
 endif()
 
 # AMIGA_ARCH_FLAGS is what the rest of the tree reads, including the two

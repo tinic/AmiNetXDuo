@@ -61,6 +61,18 @@ USHORT n68k_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
  */
 VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len);
 
+/*
+ * Point the three routines above at the forms this machine wants, from an
+ * AttnFlags the caller supplies -- SysBase->AttnFlags, and it is a parameter
+ * so that nothing here has to have an ExecBase of its own.  Call it once,
+ * before the first packet; bsd_lib_init() does.
+ *
+ * Only the `any` build has anything to choose (n68k_variant.h).  Everywhere
+ * else this is an empty function, so a caller need not know which build it is
+ * in, and skipping it is a slow stack rather than a broken one.
+ */
+VOID n68k_cpu_select(ULONG attnflags);
+
 #ifdef __cplusplus
 }
 #endif

@@ -21,6 +21,8 @@
 #include "aminetxduo/config.h"
 #include "aminetxduo/version.h"
 
+#include "net68k.h"          /* n68k_cpu_select() */
+
 #include <stddef.h>
 
 #include <exec/execbase.h>   /* ThisTask, TaskReady, TaskWait: bsd_task_alive */
@@ -481,6 +483,12 @@ static struct AmiSocketBase *bsd_lib_init(
     register struct ExecBase      *sysbase __asm("a6"))
 {
     SysBase = sysbase;
+
+    /* Before anything can send or receive a packet: which form of the checksum
+       and the copy this machine wants.  In an AMINETXDUO_CPU=any build these
+       are four assemblies of each routine in this one binary and this is the
+       call that picks; anywhere else it does nothing.  src/net68k/n68k_cpu.c. */
+    n68k_cpu_select((ULONG)sysbase->AttnFlags);
 
     /* A shared library gets no C startup: dos.library and the random number
        generator are ours to set up (library_runtime.c). */
