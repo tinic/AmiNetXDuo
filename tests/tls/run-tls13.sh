@@ -126,7 +126,13 @@ PKI="$ROOT/build/peer-pki"
 
 # ------------------------------------------------------------- staging ---
 
-STAGE="$ROOT/build/tls13-stage"
+# One staging directory PER RUN, keyed on the tag the emulator run already uses.
+# It was a fixed path, which meant two of these could not run at once: the
+# second wiped the first's drive mid-boot and died on `cannot create directory
+# .../devs`.  The arms here are independent -- different model, different MAC,
+# different peer port -- so running them together is what makes this gate cost
+# one arm's wall clock instead of the sum.
+STAGE="$ROOT/build/tls13-stage${AMINETXDUO_RUN_TAG:+-$AMINETXDUO_RUN_TAG}"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
