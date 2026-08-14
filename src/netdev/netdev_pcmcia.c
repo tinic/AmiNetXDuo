@@ -105,8 +105,10 @@ static BOOL pc_tuple(struct CardHandle *h, UBYTE code, UBYTE *buf, UWORD len)
 }
 
 /*
- * Is a DP8390 decoding at the register base?  An absent or unconfigured card
- * floats every line, so 0xff from the command register means "not there".
+ * Is a DP8390 decoding at the register base?  Both 0xff and 0x00 mean it is
+ * not: a floating bus reads as ones, an address nothing decodes reads as
+ * zeroes under Gayle, and a DP8390's command register is neither -- STP is
+ * set out of reset, so CR is 0x21 before anything touches it.
  */
 static BOOL pc_chip_answers(const NetdevCard *card)
 {
@@ -116,7 +118,7 @@ static BOOL pc_chip_answers(const NetdevCard *card)
 
     pc_trace("pc: cr ", (ULONG)v);
 
-    return (BOOL)(v != 0xff);
+    return (BOOL)(v != 0xff && v != 0x00);
 }
 
 /*
