@@ -599,6 +599,8 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
                  sizeof(op->op_Track[free_slot]));
         op->op_Track[free_slot].type = io->ios2_PacketType;
         op->op_Track[free_slot].used = 1;
+        if ((UWORD)(free_slot + 1) > op->op_TrackHigh)
+            op->op_TrackHigh = (UWORD)(free_slot + 1);
         Enable();
         netdev_reply(io, 0, 0);
         return;
@@ -615,6 +617,9 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
             {
                 Disable();
                 op->op_Track[i].used = 0;
+                while (op->op_TrackHigh != 0 &&
+                       !op->op_Track[op->op_TrackHigh - 1].used)
+                    op->op_TrackHigh--;
                 Enable();
                 netdev_reply(io, 0, 0);
                 return;

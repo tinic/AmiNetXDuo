@@ -66,6 +66,7 @@ typedef struct NetdevOpener
     struct List         op_Events;
 
     NetdevTrack         op_Track[NETDEV_TRACK_MAX];
+    UWORD               op_TrackHigh;   /* one past the highest used slot */
 } NetdevOpener;
 
 typedef struct NetdevUnit

@@ -311,11 +311,18 @@ BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len)
 
 /* ------------------------------------------------------- the RX callback -- */
 
+/*
+ * Bounded by the highest slot ever taken, not by the array.  The profile put
+ * this at 26% of the hand-over -- the largest thing the driver owns there --
+ * because it ran the full sixteen entries for every opener on every frame, to
+ * answer a question that is usually "nothing is tracked".  An opener that
+ * tracks two types now scans two.
+ */
 static NetdevTrack *netdev_track_find(NetdevOpener *op, ULONG type)
 {
     UWORD i;
 
-    for (i = 0; i < NETDEV_TRACK_MAX; i++)
+    for (i = 0; i < op->op_TrackHigh; i++)
     {
         if (op->op_Track[i].used && op->op_Track[i].type == type)
             return &op->op_Track[i];
