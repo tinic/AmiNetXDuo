@@ -3,6 +3,7 @@
 
     tests/tools/console-probe.py HOST PORT [--seconds N] [--png OUT.png]
                                 [--pfs OUT.pfs] [--refresh] [--path /console]
+                                [--type TEXT] [--at N]
 
 WHY IT DECODES RATHER THAN COUNTING
 
@@ -17,6 +18,16 @@ WHY IT DECODES RATHER THAN COUNTING
   It is the same decode the browser does, written a second time on purpose.
   src/tools/web/client/console/tiles.ts is the one the person looks at; this
   one has never seen that file's output and agreeing with it is evidence.
+
+--type PROVES THE INPUT HALF
+
+  It sends Amiga rawkey codes for TEXT and then Return, once N frames have
+  arrived, and reports how many of the frames after that differ from the one
+  before them.  Typing `dir` at the Shell on the screen and then seeing the
+  screen change is the whole assertion: nothing else on an idle machine moves
+  a pixel, so a change after the keys and none before them is the keys having
+  arrived.  The table is the one the browser sends,
+  src/tools/web/client/console/rawkey.ts.
 
 NO DEPENDENCIES
 
@@ -48,6 +59,23 @@ OP_TILE = 0x02
 CODE_RAW = 0
 CODE_PB_RAW = 1
 CODE_PB_XOR = 2
+
+
+# KeyboardEvent.code to Amiga rawkey, the letters and the two keys this needs.
+# Same numbers as src/tools/web/client/console/rawkey.ts, which is what a
+# browser sends: a rawkey is a key position and the Amiga's own keymap is what
+# turns it into a character.
+RAWKEY = {
+    "q": 0x10, "w": 0x11, "e": 0x12, "r": 0x13, "t": 0x14, "y": 0x15,
+    "u": 0x16, "i": 0x17, "o": 0x18, "p": 0x19,
+    "a": 0x20, "s": 0x21, "d": 0x22, "f": 0x23, "g": 0x24, "h": 0x25,
+    "j": 0x26, "k": 0x27, "l": 0x28,
+    "z": 0x31, "x": 0x32, "c": 0x33, "v": 0x34, "b": 0x35, "n": 0x36,
+    "m": 0x37,
+    "1": 0x01, "2": 0x02, "3": 0x03, "4": 0x04, "5": 0x05,
+    "6": 0x06, "7": 0x07, "8": 0x08, "9": 0x09, "0": 0x0a,
+    " ": 0x40, ":": 0x29, ".": 0x39, "\n": 0x44,
+}
 
 
 def say(k, v):
@@ -400,6 +428,8 @@ def main(argv):
     pfs_path = None
     want_refresh = False
     path = "/console"
+    typing = None
+    type_at = 8
 
     i = 3
     while i < len(argv):
@@ -411,6 +441,10 @@ def main(argv):
             pfs_path = argv[i + 1]; i += 2
         elif argv[i] == "--path":
             path = argv[i + 1]; i += 2
+        elif argv[i] == "--type":
+            typing = argv[i + 1]; i += 2
+        elif argv[i] == "--at":
+            type_at = int(argv[i + 1]); i += 2
         elif argv[i] == "--refresh":
             want_refresh = True; i += 1
         else:
@@ -437,6 +471,8 @@ def main(argv):
     fbstat = ""
     kept = []
     changed = 0
+    changed_before = 0
+    typed = 0
     last = None
     fault = None
 
@@ -506,7 +542,22 @@ def main(argv):
             now = bytes(screen.planes)
             if last is not None and now != last:
                 changed += 1
+                if typing is not None and typed == 0:
+                    changed_before += 1
             last = now
+
+            # Once the screen has settled, type.  Down and up for each key,
+            # which is what a keyboard sends and what IECODE_UP_PREFIX is for;
+            # a down with no up leaves the Amiga repeating it.
+            if typing is not None and typed == 0 and frames >= type_at:
+                for ch in list(typing.lower()) + ["\n"]:
+                    raw = RAWKEY.get(ch)
+                    if raw is None:
+                        continue
+                    wire.word("kd %d 0" % raw)
+                    wire.word("ku %d 0" % raw)
+                    typed += 1
+                say("typed_keys", typed)
             if pfs_path is not None and len(kept) < 200:
                 kept.append((screen, now))
 
@@ -531,6 +582,9 @@ def main(argv):
         say("fps", "%.2f" % (frames / elapsed))
         say("bytes_per_second", "%.0f" % (payload / elapsed))
     say("frames_changed", changed)
+    if typing is not None:
+        say("frames_changed_before_typing", changed_before)
+        say("frames_changed_after_typing", changed - changed_before)
     if fbstat:
         say("guest_fbstat", fbstat)
 
@@ -571,6 +625,12 @@ def main(argv):
         problems.append("the palette is entirely black")
     if gaps:
         problems.append("%d gap(s) in the sequence" % gaps)
+    if typing is not None:
+        if typed == 0:
+            problems.append("nothing was typed: too few frames arrived")
+        elif changed - changed_before == 0:
+            problems.append("the screen did not change after %d keys went out,"
+                            " so nothing reached input.device" % typed)
 
     for p in problems:
         say("problem", p)

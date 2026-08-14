@@ -53,10 +53,17 @@
 #     d<N>_fps              frames a second the probe actually received
 #     d<N>_bytes_per_second and what they cost
 #
-#   -A scroll runs `dir SYS: ALL` in a Shell on the screen while the probe
+#   -A scroll runs `dir SYS: ALL` in the Shell on the screen while the probe
 #   watches, which is the worst case for anything that diffs tiles: every row
 #   of the window moves on every frame.  -A idle, the default, measures the
 #   other end of the range, where the encoder sends five bytes a frame.
+#
+#   -T <word> types that word and Return at the guest, as Amiga rawkey codes
+#   down the same socket, and the run fails unless the screen then changes.
+#   That is the input half's whole assertion: on an idle machine nothing else
+#   moves a pixel, so a change after the keys and none before them is the keys
+#   having arrived.  Use it with -A idle; a screen that is already scrolling
+#   can prove nothing about what made it scroll.
 #     d<N>_guest_fbstat     the guest's own counters: frames, bytes, and the
 #                           ticks it spent grabbing and encoding
 #     d<N>_png              a decoded frame, to look at
@@ -92,11 +99,12 @@ OUTDIR="$ROOT/build/console-out"
 PAGE="${AMINETXDUO_CONSOLE_PAGE:-$ROOT/build/web/console.html}"
 CLIENT="${AMINETXDUO_CONSOLE_CLIENT:-}"
 ACTIVITY=idle
+TYPE=""
 DEPTHS=()
 
 say() { printf '%s=%s\n' "$1" "$2"; }
 
-while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:" opt; do
+while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:T:" opt; do
     case "$opt" in
         a) ADDRESS="$OPTARG" ;;
         p) PORT="$OPTARG" ;;
@@ -111,6 +119,7 @@ while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:" opt; do
         c) CLIENT="$OPTARG" ;;
         g) GATEWAY="$OPTARG" ;;
         A) ACTIVITY="$OPTARG" ;;
+        T) TYPE="$OPTARG" ;;
         *) sed -n '3,8p' "$0" >&2; exit 2 ;;
     esac
 done
@@ -249,11 +258,16 @@ startup_for() {
 FailAt 9999
 C:Wait 6
 EOF
-    [ "$ACTIVITY" = "scroll" ] && cat >> "$HD/S/Startup-Sequence" <<'EOF'
-NewShell CON:0/11/640/190/Scroll FROM S:scroller
-EOF
     cat >> "$HD/S/Startup-Sequence" <<EOF
 Run >DH0:httpd.txt <NIL: C:httpd DH0:Public $PORT -C CONSOLEPAGE DH0:Console/console.html -v
+EOF
+    # The BOOT shell does the scrolling, in the window that is already on the
+    # screen.  `NewShell CON:...` was tried first and opened nothing that ever
+    # appeared in a grab -- no window, no changed tile, over twenty seconds --
+    # so this drives the one window that is demonstrably there.  Last, because
+    # it never returns.
+    [ "$ACTIVITY" = "scroll" ] && cat >> "$HD/S/Startup-Sequence" <<'EOF'
+Execute S:scroller
 EOF
     chmod 755 "$HD/S/Startup-Sequence"
 }
@@ -420,10 +434,13 @@ for depth in "${DEPTHS[@]}"; do
     say "${tag}_page_bytes" "${bytes:-0}"
     [ "${code:-0}" = "200" ] && [ "${bytes:-0}" -gt 1000 ] || VERDICT=fail
 
+    typing=()
+    [ -z "$TYPE" ] || typing=(--type "$TYPE")
+
     set +e
     probe "$OUTDIR/$tag-probe.txt" \
         "$ADDRESS" "$PORT" --seconds "$PROBE_SECONDS" \
-        --png "$OUTDIR/$tag.png" --pfs "$OUTDIR/$tag.pfs"
+        --png "$OUTDIR/$tag.png" --pfs "$OUTDIR/$tag.pfs" ${typing[@]+"${typing[@]}"}
     rc=$?
     set -e
 

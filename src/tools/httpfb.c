@@ -32,6 +32,8 @@
 #include "aminetxduo/rfb_encode.h"
 #include "aminetxduo/rfb_words.h"
 
+#include <devices/inputevent.h>
+#include <exec/io.h>
 #include <exec/memory.h>
 #include <graphics/gfx.h>
 #include <graphics/gfxbase.h>
@@ -151,6 +153,28 @@ static ULONG           fb_bytes;
 static ULONG           fb_grab_ticks;
 static ULONG           fb_encode_ticks;
 static ULONG           fb_since_stat;
+
+/* ------------------------------------------------------------------ input -- */
+
+/*
+ * input.device, opened with -C and held for the server's life.  One port, one
+ * request and one event, taken once: an event is written per mouse move and
+ * allocating for each would be a thousand AllocMem/FreeMem pairs a minute.
+ *
+ * The event is STATIC and not automatic for the reason every buffer here is:
+ * a Shell command has 4 KB of stack on a stock Kickstart 3.1, and this one is
+ * also the thing io_Data points at while DoIO() runs.
+ */
+static struct MsgPort   *fb_in_port;
+static struct IOStdReq  *fb_in_req;
+static BOOL              fb_in_open;
+static struct InputEvent fb_event;
+
+/* What the far end is holding down, as IEQUALIFIER_ bits.  Intuition reads the
+   button state off the qualifier of every RAWMOUSE event, not off a history of
+   the codes, so a button that goes down and is not carried in the qualifier of
+   what follows reads as released. */
+static UWORD             fb_buttons;
 
 /* ------------------------------------------------------------ diagnostics -- */
 
@@ -691,13 +715,33 @@ static VOID fb_take_word(const char *w, ULONG len)
         fb_forget_shadow();
         break;
 
-    /* Phase 2.  The words are read and counted now so that a viewer sending
-       them is not a stream of framing errors while the injection is being
-       built; nothing here reaches input.device yet. */
     case RFB_IN_POINTER:
-    case RFB_IN_WHEEL:
+        /* Buttons first: a press that arrives in the same word as a move is a
+           press AT that position, and the other order clicks where the pointer
+           used to be. */
+        fb_inject_pointer(ev.a, ev.b);
+        fb_inject_buttons(ev.c);
+        break;
+
     case RFB_IN_KEYDOWN:
+        fb_inject_key(ev.a, ev.b, TRUE);
+        break;
+
     case RFB_IN_KEYUP:
+        fb_inject_key(ev.a, ev.b, FALSE);
+        break;
+
+    case RFB_IN_WHEEL:
+        /*
+         * Dropped, deliberately.  AmigaOS 3.1 has no wheel: there is no input
+         * class for one and nothing in a stock Workbench reads the rawkey
+         * codes a third-party driver invented for it, so injecting those would
+         * send keystrokes that some programs would act on as keystrokes.  The
+         * word is read and refused rather than left to fail as a framing
+         * error, so a viewer that sends it costs nothing.
+         */
+        break;
+
     default:
         break;
     }
@@ -754,6 +798,164 @@ static VOID fb_sink(void *ctx, HttpWsEvent ev, const unsigned char *data,
     }
 }
 
+/* ------------------------------------------------------------------ input -- */
+
+static BOOL fb_input_open(VOID)
+{
+    fb_in_port = CreateMsgPort();
+    if (fb_in_port == NULL)
+    {
+        fb_say("no message port for input.device");
+        return FALSE;
+    }
+
+    fb_in_req = (struct IOStdReq *)
+        CreateIORequest(fb_in_port, (ULONG)sizeof(struct IOStdReq));
+    if (fb_in_req == NULL)
+    {
+        fb_say("no IORequest for input.device");
+        return FALSE;
+    }
+
+    if (OpenDevice((CONST_STRPTR)"input.device", 0,
+                   (struct IORequest *)fb_in_req, 0) != 0)
+    {
+        fb_say("input.device would not open, so the console can show the "
+               "screen but not be typed at");
+        return FALSE;
+    }
+
+    fb_in_open = TRUE;
+    return TRUE;
+}
+
+static VOID fb_input_close(VOID)
+{
+    if (fb_in_open)
+    {
+        CloseDevice((struct IORequest *)fb_in_req);
+        fb_in_open = FALSE;
+    }
+    if (fb_in_req != NULL)
+    {
+        DeleteIORequest((struct IORequest *)fb_in_req);
+        fb_in_req = NULL;
+    }
+    if (fb_in_port != NULL)
+    {
+        DeleteMsgPort(fb_in_port);
+        fb_in_port = NULL;
+    }
+}
+
+/*
+ * One event into the input stream.
+ *
+ * Synchronous.  IND_WRITEEVENT hands the event to the input task and returns;
+ * it is not a transfer and there is nothing to wait for the far end of, so the
+ * asynchronous form would only add a second trip through the loop for a call
+ * that has already finished.  Nothing is locked here -- input is read in
+ * http_fb_read(), and the screen is locked only inside the grab -- so this
+ * cannot be the thing a lock is held across.
+ */
+static VOID fb_write_event(VOID)
+{
+    if (!fb_in_open)
+        return;
+
+    fb_event.ie_NextEvent = NULL;
+    /* Double-click and key repeat are both decided from this, so an event with
+       no time on it is an event Intuition cannot group with the one before. */
+    CurrentTime((ULONG *)&fb_event.ie_TimeStamp.tv_secs,
+                (ULONG *)&fb_event.ie_TimeStamp.tv_micro);
+
+    fb_in_req->io_Command = IND_WRITEEVENT;
+    fb_in_req->io_Flags   = 0;
+    fb_in_req->io_Length  = (LONG)sizeof(struct InputEvent);
+    fb_in_req->io_Data    = (APTR)&fb_event;
+
+    (VOID)DoIO((struct IORequest *)fb_in_req);
+}
+
+/* The pointer, absolutely.  IECLASS_POINTERPOS is the one class that takes a
+   screen coordinate rather than a delta, which is what a viewer has: a browser
+   knows where in the canvas the mouse is and has no idea how far it moved on
+   the far side of a coalesced frame. */
+static VOID fb_inject_pointer(rfb_s32 x, rfb_s32 y)
+{
+    memset(&fb_event, 0, sizeof(fb_event));
+    fb_event.ie_Class     = IECLASS_POINTERPOS;
+    fb_event.ie_Code      = IECODE_NOBUTTON;
+    fb_event.ie_Qualifier = fb_buttons;
+    fb_event.ie_X         = (WORD)x;
+    fb_event.ie_Y         = (WORD)y;
+    fb_write_event();
+}
+
+/*
+ * The buttons, as the difference between what is held now and what was held
+ * before.  A viewer sends the whole mask on every move, so a press and a
+ * release are both "this bit changed" rather than events of their own -- and a
+ * mask that arrives with two bits changed at once produces two events, because
+ * IECODE carries one button.
+ */
+static VOID fb_inject_buttons(rfb_s32 mask)
+{
+    static const struct {
+        rfb_u32 bit;        /* the browser's, which is also the viewer's */
+        UWORD   qualifier;
+        UWORD   code;
+    } map[3] = {
+        { RFB_BUTTON_LEFT,   IEQUALIFIER_LEFTBUTTON,  IECODE_LBUTTON },
+        { RFB_BUTTON_RIGHT,  IEQUALIFIER_RBUTTON,     IECODE_RBUTTON },
+        { RFB_BUTTON_MIDDLE, IEQUALIFIER_MIDBUTTON,   IECODE_MBUTTON }
+    };
+    ULONG i;
+
+    for (i = 0; i < 3UL; i++)
+    {
+        BOOL now  = (BOOL)((((rfb_u32)mask) & map[i].bit) != 0);
+        BOOL was  = (BOOL)((fb_buttons & map[i].qualifier) != 0);
+
+        if (now == was)
+            continue;
+
+        if (now)
+            fb_buttons |= map[i].qualifier;
+        else
+            fb_buttons &= (UWORD)~map[i].qualifier;
+
+        memset(&fb_event, 0, sizeof(fb_event));
+        fb_event.ie_Class = IECLASS_RAWMOUSE;
+        fb_event.ie_Code  = now ? map[i].code
+                                : (UWORD)(map[i].code | IECODE_UP_PREFIX);
+        /*
+         * RELATIVEMOUSE with no movement.  Without it ie_X and ie_Y are read
+         * as an absolute position, and a button event carrying (0,0) would
+         * take the pointer to the top left corner on every click.
+         */
+        fb_event.ie_Qualifier = (UWORD)(fb_buttons |
+                                        IEQUALIFIER_RELATIVEMOUSE);
+        fb_event.ie_X = 0;
+        fb_event.ie_Y = 0;
+        fb_write_event();
+    }
+}
+
+/* A key, as the Amiga rawkey code the viewer already sends.  IECODE_UP_PREFIX
+   is the release, which is the same convention the keyboard itself uses. */
+static VOID fb_inject_key(rfb_s32 raw, rfb_s32 qual, BOOL down)
+{
+    memset(&fb_event, 0, sizeof(fb_event));
+    fb_event.ie_Class = IECLASS_RAWKEY;
+    fb_event.ie_Code  = (UWORD)((raw & 0x7F) |
+                                (down ? 0 : IECODE_UP_PREFIX));
+    /* The mouse buttons stay in it: a drag with a qualifier held is one state
+       and Intuition reads all of it off this field. */
+    fb_event.ie_Qualifier = (UWORD)(((ULONG)qual & 0xFFFFUL) | fb_buttons);
+    fb_write_event();
+}
+
 /* ------------------------------------------------------------ the lifetime -- */
 
 BOOL http_fb_open(VOID)
@@ -788,6 +990,19 @@ BOOL http_fb_open(VOID)
         return FALSE;
     }
 
+    /*
+     * And the input stream.  Held for the server's life beside the libraries
+     * and for the same reason: a machine that cannot be typed at says so
+     * before it is serving anything, rather than showing a screen that does
+     * not answer the mouse and leaving somebody to work out why.
+     */
+    if (!fb_input_open())
+    {
+        fb_input_close();
+        fb_close_libraries();
+        return FALSE;
+    }
+
     fb_on = TRUE;
     return TRUE;
 }
@@ -795,6 +1010,7 @@ BOOL http_fb_open(VOID)
 VOID http_fb_close(VOID)
 {
     http_fb_stop();
+    fb_input_close();
     fb_close_libraries();
     fb_on = FALSE;
 }
@@ -896,6 +1112,13 @@ VOID http_fb_stop(VOID)
     fb_live = FALSE;
     fb_sb   = NULL;
     fb_sock = -1;
+
+    /* A viewer that goes away mid-drag leaves a button down, and the machine
+       then behaves as if somebody were holding the mouse: menus stay up and
+       nothing else can be clicked.  Released here, which is the only place
+       that knows the far end has gone. */
+    if (fb_buttons != 0)
+        fb_inject_buttons(0);
 
     fb_free_buffers();
 }
