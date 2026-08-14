@@ -151,6 +151,8 @@ static VOID le_write_init(NetdevNic *nic)
                  (UWORD)(nic->mar[i * 2] | (nic->mar[i * 2 + 1] << 8)));
     }
 
+    LE_TRACE("le: padr ", ((ULONG)nic->mac[0] << 24) | ((ULONG)nic->mac[1] << 16) |
+                          ((ULONG)nic->mac[2] << 8) | nic->mac[3]);
     le_put16(nic, LE_INIT_OFF + 16, (UWORD)(rxd & 0xffff));
     le_put16(nic, LE_INIT_OFF + 18,
              (UWORD)(((rxd >> 16) & 0xff) | (LE_RX_LOG << 13)));
