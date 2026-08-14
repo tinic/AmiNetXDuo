@@ -47,13 +47,73 @@
 #include <proto/exec.h>
 #include <inline/macros.h>
 #include <proto/dos.h>
-#include <proto/cia.h>
 
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "aminetxduo/compat.h"   /* ami_millis(): the probe needs to poke timer.device */
+
+
+/* --------------------------------------------------------- cia.resource --- */
+
+/*
+ * Called through stubs written here rather than through <proto/cia.h>, for the
+ * reason netdev_pcmcia.c does the same with card.resource: the two toolchains'
+ * generated inlines disagree.  sfdc 1.11f emits LPnNB, which passes the
+ * resource in a6 and wants no library base.  sfdc 1.11e emits the base-taking
+ * form, which expands CIA_BASE_NAME -- a symbol a resource does not have and
+ * neither NDK declares -- so the file does not compile there at all.
+ *
+ * What both inline headers agree on exactly is the LVOs and their registers,
+ * so those are spelled out.  hardware/cia.h and resources/cia.h stay: they are
+ * structures and constants, no calls.
+ *
+ *   AddICRVector  -0x06  a6 resource, d0 bit, a1 interrupt -> d0 owner
+ *   RemICRVector  -0x0c  a6 resource, d0 bit, a1 interrupt -> void
+ *   AbleICR       -0x12  a6 resource, d0 mask              -> d0 mask before
+ */
+
+static struct Interrupt *prof_add_icr_vector(struct Library *res, WORD bit,
+                                             struct Interrupt *intr)
+{
+    register struct Library   *_a6 __asm("a6") = res;
+    register ULONG             _d0 __asm("d0") = (ULONG)(UWORD)bit;
+    register struct Interrupt *_a1 __asm("a1") = intr;
+
+    __asm __volatile ("jsr a6@(-0x6)"
+                      : "+r" (_d0), "+r" (_a1)
+                      : "r" (_a6)
+                      : "d1", "a0", "cc", "memory");
+
+    return (struct Interrupt *)_d0;
+}
+
+static VOID prof_rem_icr_vector(struct Library *res, WORD bit,
+                                struct Interrupt *intr)
+{
+    register struct Library   *_a6 __asm("a6") = res;
+    register ULONG             _d0 __asm("d0") = (ULONG)(UWORD)bit;
+    register struct Interrupt *_a1 __asm("a1") = intr;
+
+    __asm __volatile ("jsr a6@(-0xc)"
+                      : "+r" (_d0), "+r" (_a1)
+                      : "r" (_a6)
+                      : "d1", "a0", "cc", "memory");
+}
+
+static WORD prof_able_icr(struct Library *res, WORD mask)
+{
+    register struct Library *_a6 __asm("a6") = res;
+    register ULONG           _d0 __asm("d0") = (ULONG)(UWORD)mask;
+
+    __asm __volatile ("jsr a6@(-0x12)"
+                      : "+r" (_d0)
+                      : "r" (_a6)
+                      : "d1", "a0", "a1", "cc", "memory");
+
+    return (WORD)_d0;
+}
 
 
 /* ------------------------------------------------------------- logging --- */
@@ -460,7 +520,7 @@ static BOOL prof_audio_start(ULONG rate_hz)
     memset(&prof_irq, 0, sizeof(prof_irq));
     prof_irq.is_Node.ln_Type = NT_INTERRUPT;
     prof_irq.is_Node.ln_Pri  = 0;
-    prof_irq.is_Node.ln_Name = (STRPTR)"AmiNetXDuo prof";
+    prof_irq.is_Node.ln_Name = (char *)"AmiNetXDuo prof";
     prof_irq.is_Data         = NULL;
     prof_irq.is_Code         = (VOID (*)())prof_audio_stub;
 
@@ -515,7 +575,7 @@ static BOOL prof_install(VOID)
     if (prof_src->src_Kind == PROF_SRC_CIA)
     {
         /* Masked while the timer is programmed. */
-        AbleICR(prof_res, CIAICRF_TA << prof_src->src_Bit);
+        prof_able_icr(prof_res, CIAICRF_TA << prof_src->src_Bit);
         prof_saved_cr = prof_read_cr(prof_src);
         prof_timer_program();
     }
@@ -536,7 +596,7 @@ static BOOL prof_install(VOID)
 
     if (prof_src->src_Kind == PROF_SRC_CIA)
     {
-        AbleICR(prof_res, CIAICRF_SETCLR | (CIAICRF_TA << prof_src->src_Bit));
+        prof_able_icr(prof_res, CIAICRF_SETCLR | (CIAICRF_TA << prof_src->src_Bit));
     }
 
     return(TRUE);
@@ -546,7 +606,7 @@ static VOID prof_uninstall(VOID)
 {
     if (prof_src->src_Kind == PROF_SRC_CIA)
     {
-        AbleICR(prof_res, CIAICRF_TA << prof_src->src_Bit);
+        prof_able_icr(prof_res, CIAICRF_TA << prof_src->src_Bit);
         prof_timer_stop();
     }
     else
@@ -576,7 +636,7 @@ static VOID prof_uninstall(VOID)
             cia->ciacrb = prof_saved_cr;
         }
 
-        RemICRVector(prof_res, (LONG)prof_src->src_Bit, &prof_irq);
+        prof_rem_icr_vector(prof_res, (LONG)prof_src->src_Bit, &prof_irq);
     }
 }
 
@@ -845,11 +905,11 @@ ULONG            i;
             memset(&prof_irq, 0, sizeof(prof_irq));
             prof_irq.is_Node.ln_Type = NT_INTERRUPT;
             prof_irq.is_Node.ln_Pri  = 0;
-            prof_irq.is_Node.ln_Name = (STRPTR)"AmiNetXDuo prof";
+            prof_irq.is_Node.ln_Name = (char *)"AmiNetXDuo prof";
             prof_irq.is_Data         = NULL;
             prof_irq.is_Code         = (VOID (*)())prof_cia_stub;
 
-            if (AddICRVector(res, (LONG)cand->src_Bit, &prof_irq) != NULL)
+            if (prof_add_icr_vector(res, (LONG)cand->src_Bit, &prof_irq) != NULL)
             {
                 continue;               /* somebody holds the vector */
             }
@@ -863,7 +923,7 @@ ULONG            i;
         {
             if (cand->src_Kind == PROF_SRC_CIA)
             {
-                RemICRVector(prof_res, (LONG)cand->src_Bit, &prof_irq);
+                prof_rem_icr_vector(prof_res, (LONG)cand->src_Bit, &prof_irq);
             }
             prof_src = NULL;
             continue;
