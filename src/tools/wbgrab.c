@@ -392,7 +392,7 @@ int main(int argc, char **argv)
     Geometry        g;
     const char     *path;
     UBYTE          *buf     = NULL;
-    BPTR            fh      = ZERO;
+    BPTR            fh      = 0;
     ULONG           frames  = DEFAULT_FRAMES;
     ULONG           delay   = DEFAULT_DELAY;
     ULONG           written = 0;
@@ -500,7 +500,7 @@ int main(int argc, char **argv)
     }
 
     fh = Open((CONST_STRPTR)path, MODE_NEWFILE);
-    if (fh == ZERO)
+    if (fh == 0)
     {
         tool_error("cannot write %s", (LONG)path);
         tool_fault(IoErr());
@@ -556,7 +556,7 @@ int main(int argc, char **argv)
                 (LONG)(header_bytes + g.frame_bytes * written));
 
 done:
-    if (fh != ZERO)
+    if (fh != 0)
         Close(fh);
     if (buf != NULL)
         FreeVec(buf);
