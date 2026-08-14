@@ -92,89 +92,18 @@ if [ -z "$AMIBERRY" ]; then
 fi
 [ -n "$AMIBERRY" ] || { say error "amiberry not found; set AMIBERRY=<path>"; exit 2; }
 
-XDFTOOL="${AMINETXDUO_XDFTOOL:-}"
-if [ -z "$XDFTOOL" ]; then
-    for candidate in \
-        "$(command -v xdftool || true)" \
-        "$HOME/venv-amitools/bin/xdftool" \
-        "$HOME/.venvs/amitools/bin/xdftool" \
-        "$HOME/amigaos/tools/amitools/bin/xdftool"
-    do
-        [ -n "$candidate" ] && [ -x "$candidate" ] && { XDFTOOL="$candidate"; break; }
-    done
-fi
-
-ADFDIR="${AMINETXDUO_ADF_DIR:-$HOME/amigaos/adf}"
-
 # ------------------------------------------------------ Workbench 3.1 SYS: --
 #
-# Five floppies make one hard drive, Commodore's own layout: the Workbench disk
-# IS the root and the other four are the drawers the HD installer would have
-# made.  Cached, because unpacking five ADFs on every run is a minute of
-# nothing.  Lifted from install/test/run-workbench.sh, which is the harness
-# that already had to do this.
+# tests/tools/wb31-sys.sh: five floppies into one hard drive, Commodore's own
+# layout, cached.  Shared with tests/tools/run-console.sh, which needs exactly
+# the same tree for exactly the same reason -- a real Workbench SCREEN.
 
-WB="$ROOT/build/wb31-sys"
-WBSTAMP="$ROOT/build/.wb31-sys.stamp"
+# shellcheck source=tests/tools/wb31-sys.sh
+. "$ROOT/tests/tools/wb31-sys.sh"
 
-wb_stale=0
-[ -d "$WB" ] && [ -f "$WBSTAMP" ] || wb_stale=1
-for disk in workbench fonts locale storage extras; do
-    adf="$ADFDIR/amiga-wb31_$disk.adf"
-    [ -f "$adf" ] || {
-        say error "missing $adf"
-        say hint "set AMINETXDUO_ADF_DIR to the directory holding the WB 3.1 set"
-        exit 2
-    }
-    [ "$adf" -nt "$WBSTAMP" ] && wb_stale=1
-done
+wb31_assemble "$ROOT/build/wb31-sys" || exit 2
+WB="$WB31_SYS"
 
-unpack_adf() {
-    local adf="$1" into="$2" marker="$3" inner
-    rm -rf "$into"
-    mkdir -p "$into"
-    "$XDFTOOL" "$adf" unpack "$into" >/dev/null
-    [ -e "$into/$marker" ] && return 0
-    inner=$(find "$into" -maxdepth 1 -mindepth 1 -type d | head -1)
-    [ -n "$inner" ] && [ -e "$inner/$marker" ] || {
-        say error "$(basename "$adf") did not unpack to something holding $marker"
-        exit 2
-    }
-    mv "$inner"/* "$into"/ 2>/dev/null || true
-    rmdir "$inner" 2>/dev/null || true
-}
-
-if [ "$wb_stale" = "1" ]; then
-    [ -n "$XDFTOOL" ] && [ -x "$XDFTOOL" ] || {
-        say error "amitools' xdftool not found, needed to unpack the Workbench ADFs"
-        exit 2
-    }
-    SCRATCH="$ROOT/build/.wb31-unpack"
-    rm -rf "$SCRATCH" "$WB"
-    mkdir -p "$SCRATCH" "$WB"
-    for pair in "workbench:S/Startup-Sequence" "fonts:topaz.font" \
-                "locale:Catalogs" "storage:DOSDrivers" "extras:Tools"; do
-        unpack_adf "$ADFDIR/amiga-wb31_${pair%%:*}.adf" \
-                   "$SCRATCH/${pair%%:*}" "${pair##*:}"
-    done
-    cp -R "$SCRATCH/workbench/." "$WB/"
-    for pair in "fonts:Fonts" "locale:Locale" "storage:Storage" "extras:Extras"; do
-        mkdir -p "$WB/${pair##*:}"
-        cp -R "$SCRATCH/${pair%%:*}/." "$WB/${pair##*:}/"
-    done
-    rm -rf "$SCRATCH"
-
-    # A directory hard drive takes its Amiga protection bits from the host's
-    # mode bits, and xdftool unpacks everything 0644, which would leave every
-    # command in C: without its E bit.
-    chmod -R a+rx "$WB"
-    : > "$WBSTAMP"
-    for want in C/Assign C/LoadWB C/Wait C/Dir S/Startup-Sequence \
-                Fonts/topaz.font Devs/system-configuration; do
-        [ -e "$WB/$want" ] || { say error "assembled SYS: has no $want"; exit 2; }
-    done
-fi
-say workbench "$WB"
 [ -n "$DEPTH" ] && say screen_depth_asked "$DEPTH" || true
 
 # ------------------------------------------------------------ the drive ----
@@ -217,42 +146,8 @@ EOF
 
     chmod 644 "$HD/S/scroller" "$HD/S/winclose" "$HD/S/windower"
 
-    [ -n "$DEPTH" ] && screenmode_prefs "$DEPTH"
+    [ -n "$DEPTH" ] && wb31_screenmode_prefs "$HD" "$DEPTH"
     return 0
-}
-
-# -d asks for a Workbench screen of a given depth, and the way to ask is the
-# file the ScreenMode editor writes: an IFF PREF with one SCRM chunk, dropped
-# in ENVARC: before the boot copies it to ENV: and IPrefs reads it.  Without
-# one a 3.1 Workbench comes up two planes deep whatever the machine, so this is
-# how a capture at any other depth is taken at all.
-screenmode_prefs() {
-    mkdir -p "$HD/Prefs/Env-Archive/Sys"
-    AMINETXDUO_SMP_DEPTH="$1" python3 - "$HD/Prefs/Env-Archive/Sys/screenmode.prefs" <<'EOF'
-import os, struct, sys
-
-# PAL hires: PAL_MONITOR_ID | HIRES_KEY.  640x256 is what the stock screen is,
-# so the depth is the only thing this changes.
-DISPLAY_ID = 0x00021000 | 0x00008000
-
-depth = int(os.environ["AMINETXDUO_SMP_DEPTH"])
-
-# struct FilePrefHeader: version, type, flags[4].
-prhd = struct.pack(">BB4B", 0, 0, 0, 0, 0, 0)
-
-# struct ScreenModePrefs: reserved[4], displayid, width, height, depth, control.
-scrm = struct.pack(">4L L HHHH", 0, 0, 0, 0, DISPLAY_ID, 640, 256, depth, 0)
-
-def chunk(tag, payload):
-    out = tag + struct.pack(">L", len(payload)) + payload
-    if len(payload) & 1:
-        out += b"\0"
-    return out
-
-body = b"PREF" + chunk(b"PRHD", prhd) + chunk(b"SCRM", scrm)
-with open(sys.argv[1], "wb") as fh:
-    fh.write(b"FORM" + struct.pack(">L", len(body)) + body)
-EOF
 }
 
 # The stock 3.1 Startup-Sequence with the tail replaced.  LoadWB stays, since

@@ -131,6 +131,7 @@ tests/tools/run-smbprobe.sh        : manual : bench, bridged. a transcript of pi
 tests/ipv6/run-rdnss.sh            : manual : bridged. a router advertisement's resolver reaching the resolver
 tests/trace/run-trace.sh           : manual : peer, bridged. packet-trace through the bpf_* LVOs
 tests/tools/run-wbgrab.sh          : manual : asset. wbgrab against a real Workbench 3.1 screen; needs the licensed WB 3.1 floppy set
+tests/tools/run-console.sh         : manual : asset, bridged. httpd -C streaming a real Workbench 3.1 screen to a decoder on another machine
 tests/bebboget/run-bebboget.sh     : manual : asset, peer. bebboget, a third-party client
 tests/bebbossh/run-bebbossh.sh     : manual : asset, peer. BebboSSH; the only harness that runs an ssh client at all
 tests/compare/run-legacy-client.sh : manual : asset, bridged. an unmodified third-party Amiga client
