@@ -86,15 +86,6 @@ covering seven of those cards and faster than most of them. The installer does
 not install it: copy it to `DEVS:Networks` and name it in your interface file
 if you want it.
 
-One build serves every 68k: each binary picks the code for the machine it is
-opened on, so there is no processor to choose and no drawer to pick wrong.
-A second, smaller set in `Libs/minimal/` is there for a 1 MB machine.
-
-Encrypted (`https:`) connections now work on a 68000 too. They are slow there
-— a handshake takes about a minute, and under two seconds when the connection
-is resumed — but they complete, where before there was no `tls.library` for a
-68000 at all.
-
 ## Installing
 
 Download the `.lha` from [Releases](https://github.com/tinic/AmiNetXDuo/releases),
