@@ -319,35 +319,64 @@ static VOID check_copy(const char *name,
 /*
  * The E-Clock is 709379 Hz, so a tick is 1409.68 ns and the 1410 below is
  * 0.02% out.  Integer throughout: a double here is mathieeedoubbas.library.
+ *
+ * Best of three, because the first pass through a routine pays for a cold
+ * instruction cache and the host the emulator runs on has its own load.
+ *
+ * The copy rows for mv20 and mv40 are the SAME instructions at different
+ * addresses -- n68k_copy.S has nothing to say about a 68040 -- so the gap
+ * between those two is this instrument's floor, and no gap smaller than it
+ * is a fact about a variant.  On the A1200 profile it was 7%, which is more
+ * than the whole of what the dispatch costs.
  */
+
+#define ROUNDS  3
 
 static VOID bench_sum(const char *name, ULONG (*fn)(const ULONG *, ULONG),
                       ULONG words, ULONG reps)
 {
-    ULONG t0, ticks, i;
+    ULONG best = 0xFFFFFFFFUL;
+    ULONG r;
 
-    t0 = eclock();
-    for (i = 0; i < reps; i++)
-        (VOID)fn(src, words);
-    ticks = eclock() - t0;
+    for (r = 0; r < ROUNDS; r++)
+    {
+        ULONG t0, ticks, i;
 
-    m_log("sum %s ticks=%lu nsB=%lu", (LONG)name, (LONG)ticks,
-          (LONG)((ticks * 1410UL) / (words * 4UL * reps)));
+        t0 = eclock();
+        for (i = 0; i < reps; i++)
+            (VOID)fn(src, words);
+        ticks = eclock() - t0;
+
+        if (ticks < best)
+            best = ticks;
+    }
+
+    m_log("sum %s ticks=%lu nsB=%lu", (LONG)name, (LONG)best,
+          (LONG)((best * 1410UL) / (words * 4UL * reps)));
 }
 
 static VOID bench_copy(const char *name,
                        VOID (*fn)(UBYTE *, const UBYTE *, ULONG),
                        ULONG len, ULONG reps)
 {
-    ULONG t0, ticks, i;
+    ULONG best = 0xFFFFFFFFUL;
+    ULONG r;
 
-    t0 = eclock();
-    for (i = 0; i < reps; i++)
-        fn(bdst, bsrc, len);
-    ticks = eclock() - t0;
+    for (r = 0; r < ROUNDS; r++)
+    {
+        ULONG t0, ticks, i;
+
+        t0 = eclock();
+        for (i = 0; i < reps; i++)
+            fn(bdst, bsrc, len);
+        ticks = eclock() - t0;
+
+        if (ticks < best)
+            best = ticks;
+    }
 
     m_log("copy%lu %s ticks=%lu nsB=%lu", (LONG)len, (LONG)name,
-          (LONG)ticks, (LONG)((ticks * 1410UL) / (len * reps)));
+          (LONG)best, (LONG)((best * 1410UL) / (len * reps)));
 }
 
 static const char *selected(VOID)
