@@ -35,6 +35,15 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(rfbbench PRIVATE -Wall -Wextra)
     set_target_properties(rfbbench PROPERTIES C_STANDARD 99)
 
+    # --deflate prices an entropy coder on top of the encoder's output, which
+    # is how the decision not to have one stays a measurement.  Optional: the
+    # bench builds and every other arm works without zlib.
+    find_package(ZLIB QUIET)
+    if(ZLIB_FOUND)
+        target_compile_definitions(rfbbench PRIVATE RFBBENCH_ZLIB)
+        target_link_libraries(rfbbench PRIVATE ZLIB::ZLIB)
+    endif()
+
     # rfbbench decodes every frame it encodes and compares it with the frame
     # that went in, for every strategy, and exits non-zero on a mismatch.  A
     # compression number from an encoder nobody round-tripped is worthless, so

@@ -18,6 +18,13 @@
 
 #include <aminetxduo/rfb_encode.h>
 
+/* --deflate prices what an entropy coder on top of the encoder's output would
+ * buy and what it would cost, so the argument for leaving it out is a
+ * measurement.  Host-only; nothing in rfb_encode.c knows about zlib. */
+#ifdef RFBBENCH_ZLIB
+#include <zlib.h>
+#endif
+
 /* ------------------------------------------------------------- decoder --- */
 /* The receiver's side of the wire format, kept here so a compression number
  * can never come from an encoder nobody checked. */
@@ -222,6 +229,54 @@ typedef struct {
     unsigned tile_w, tile_h;
 } tiling;
 
+static int g_deflate;
+
+#ifdef RFBBENCH_ZLIB
+/* One deflate stream for the whole sequence, which is the friendliest case for
+ * it: the dictionary carries across frames.  Reported alongside the same
+ * sequence's PackBits numbers. */
+typedef struct {
+    z_stream z;
+    unsigned char *out;
+    unsigned long total;
+    double us;
+    int level;
+    int live;
+} dfl;
+
+static void dfl_start(dfl *d, int level, unsigned cap)
+{
+    memset(d, 0, sizeof(*d));
+    d->level = level;
+    d->out = malloc(cap + 4096);
+    if (!d->out) return;
+    if (deflateInit(&d->z, level) != Z_OK) { free(d->out); d->out = NULL; return; }
+    d->live = 1;
+}
+
+static void dfl_frame(dfl *d, const unsigned char *in, unsigned n, unsigned cap)
+{
+    double t0;
+    if (!d->live) return;
+    d->z.next_in = (Bytef *)in;
+    d->z.avail_in = n;
+    d->z.next_out = d->out;
+    d->z.avail_out = cap + 4096;
+    t0 = now_us();
+    deflate(&d->z, Z_SYNC_FLUSH);
+    d->us += now_us() - t0;
+    d->total += (unsigned long)(cap + 4096 - d->z.avail_out);
+}
+
+static void dfl_end(dfl *d)
+{
+    if (!d->live) return;
+    deflateEnd(&d->z);
+    free(d->out);
+    d->live = 0;
+}
+#endif
+
 static int run(const pfs *s, const strategy *st, tiling t, int reps)
 {
     rfb_encoder e;
@@ -300,6 +355,14 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
     d.plane_bytes = e.plane_bytes;
     d.fb = decfb;
 
+#ifdef RFBBENCH_ZLIB
+    dfl d1, d6;
+    if (g_deflate) {
+        dfl_start(&d1, 1, rfb_worst_case_frame(&g));
+        dfl_start(&d6, 6, rfb_worst_case_frame(&g));
+    }
+#endif
+
     for (i = 0; i < s->frames; i++) {
         const unsigned char *src = s->data + (size_t)i * s->frame_bytes;
         long n = rfb_encode_frame(&e, src, out, rfb_worst_case_frame(&g));
@@ -312,6 +375,12 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
             rt_fail++;
         else
             rt_ok++;
+#ifdef RFBBENCH_ZLIB
+        if (g_deflate) {
+            dfl_frame(&d1, out, (unsigned)n, rfb_worst_case_frame(&g));
+            dfl_frame(&d6, out, (unsigned)n, rfb_worst_case_frame(&g));
+        }
+#endif
     }
 
     printf("strat=%s seq=%s tile=%ux%u total=%lu mean=%.1f max=%lu "
@@ -327,6 +396,22 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
            (unsigned long)e.st.tiles_dirty, (unsigned long)e.st.planes_sent,
            (unsigned long)e.st.code_raw, (unsigned long)e.st.code_pb_raw,
            (unsigned long)e.st.code_pb_xor, (unsigned long)e.st.copies);
+
+#ifdef RFBBENCH_ZLIB
+    if (g_deflate) {
+        printf("deflate seq=%s strat=%s tile=%ux%u packbits_total=%lu "
+               "z1_total=%lu z1_gain=%.3f z1_us_per_frame=%.1f "
+               "z6_total=%lu z6_gain=%.3f z6_us_per_frame=%.1f "
+               "encode_us_per_frame=%.1f\n",
+               s->name, st->name, t.tile_w, t.tile_h, total,
+               d1.total, (double)total / (double)(d1.total ? d1.total : 1),
+               d1.us / (double)s->frames,
+               d6.total, (double)total / (double)(d6.total ? d6.total : 1),
+               d6.us / (double)s->frames,
+               us / (double)s->frames);
+        dfl_end(&d1); dfl_end(&d6);
+    }
+#endif
 
     free(shadow); free(scratch); free(out); free(decfb);
     return rt_fail ? 1 : 0;
@@ -370,6 +455,8 @@ int main(int argc, char **argv)
             }
         } else if (strcmp(argv[a], "--strat") == 0 && a + 1 < argc) {
             strat_filter = argv[++a];
+        } else if (strcmp(argv[a], "--deflate") == 0) {
+            g_deflate = 1;
         } else if (strcmp(argv[a], "--reps") == 0 && a + 1 < argc) {
             reps = atoi(argv[++a]);
         } else {
