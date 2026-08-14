@@ -202,6 +202,10 @@ static ULONG nd_t_find;     /* netdev_track_find: the 16-entry scan          */
 static ULONG nd_t_addr;     /* the two addresses and the request fields      */
 static ULONG nd_t_reply;    /* netdev_reply: ReplyMsg at interrupt level     */
 static ULONG nd_t_probe;    /* what 16 back-to-back probes cost, to subtract */
+static ULONG nd_t_bld;      /* the opener's CopyFrom, framing a transmit     */
+static ULONG nd_t_iss;      /* ops->tx: register setup and the port writes   */
+static ULONG nd_t_rep;      /* netdev_reply on the transmit side             */
+static ULONG nd_n_tx;
 static ULONG nd_n_int;
 static ULONG nd_n_frame;
 static ULONG nd_n_hook;
@@ -227,16 +231,16 @@ static VOID nd_time_report(VOID)
         nd_t_probe = nd_since(tp);
     }
     nd_tracex("t hook   ", nd_t_hook);
-    nd_tracex("t pre    ", nd_t_pre);
-    nd_tracex("t take   ", nd_t_take);
-    nd_tracex("t find   ", nd_t_find);
-    nd_tracex("t addr   ", nd_t_addr);
-    nd_tracex("t reply  ", nd_t_reply);
+    nd_tracex("t ntx    ", nd_n_tx);
+    nd_tracex("t bld    ", nd_t_bld);
+    nd_tracex("t iss    ", nd_t_iss);
+    nd_tracex("t rep    ", nd_t_rep);
     nd_tracex("t probe16", nd_t_probe);
     netdev_time_rdc = netdev_time_null = 0;
     netdev_time_rx = netdev_time_tx = 0;
     nd_t_isr = nd_t_copy = nd_t_up = nd_t_tx = nd_t_hook = 0;
     nd_t_pre = nd_t_take = nd_t_find = nd_t_addr = nd_t_reply = 0;
+    nd_t_bld = nd_t_iss = nd_t_rep = nd_n_tx = 0;
     nd_n_int = nd_n_frame = nd_n_hook = 0;
 }
 #endif
@@ -610,6 +614,23 @@ VOID netdev_tx_pump(NetdevUnit *unit)
             nd_addr6(buf + NETDEV_ADDR_LEN, unit->nu_Nic.mac);
             *(UWORD *)(APTR)(buf + 12) = (UWORD)io->ios2_PacketType;
 
+#ifdef NETDEV_TIME
+            {
+                ULONG tb = nd_now();
+                BOOL  ok = (BOOL)(len == 0 ||
+                                  netdev_copy_call(op->op_CopyFrom,
+                                                   buf + NETDEV_HDR_LEN,
+                                                   io->ios2_Data, len));
+
+                nd_t_bld += nd_since(tb);
+                nd_n_tx++;
+                if (!ok)
+                {
+                    netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
+                    continue;
+                }
+            }
+#else
             if (len != 0 &&
                 !netdev_copy_call(op->op_CopyFrom, buf + NETDEV_HDR_LEN,
                                   io->ios2_Data, len))
@@ -617,6 +638,7 @@ VOID netdev_tx_pump(NetdevUnit *unit)
                 netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
                 continue;
             }
+#endif
             total = (UWORD)(len + NETDEV_HDR_LEN);
         }
 
@@ -632,7 +654,16 @@ VOID netdev_tx_pump(NetdevUnit *unit)
             total = NETDEV_FRAME_MIN;
         }
 
+#ifdef NETDEV_TIME
+        {
+            ULONG ti = nd_now();
+
+            rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, buf, total);
+            nd_t_iss += nd_since(ti);
+        }
+#else
         rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, buf, total);
+#endif
         if (rc == DP8390_TX_BUSY)
         {
             AddHead(&unit->nu_Writes, &io->ios2_Req.io_Message.mn_Node);
@@ -652,7 +683,16 @@ VOID netdev_tx_pump(NetdevUnit *unit)
             tr->st.BytesSent += total;
         }
 
+#ifdef NETDEV_TIME
+        {
+            ULONG tr2 = nd_now();
+
+            netdev_reply(io, 0, 0);
+            nd_t_rep += nd_since(tr2);
+        }
+#else
         netdev_reply(io, 0, 0);
+#endif
     }
 }
 
