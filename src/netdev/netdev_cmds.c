@@ -234,6 +234,7 @@ static const char netdev_stat_drop[]  = "Supported boards with no unit";
 static const char netdev_stat_grp[]   = "ROM address group bit cleared";
 static const char netdev_stat_cis[]   = "Address taken from the card's CIS";
 static const char netdev_stat_derv[]  = "Address derived, PROM was blank";
+static const char netdev_stat_godd[]  = "Odd registers read as words";
 
 static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
 {
@@ -302,6 +303,16 @@ static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
     STAT(netdev_stat_grp,   unit->nu_Nic.mac_group_fix);
     STAT(netdev_stat_cis,   unit->nu_Nic.mac_from_cis);
     STAT(netdev_stat_derv,  unit->nu_Nic.mac_derived);
+
+    /*
+     * And whether the probe put this card on cnet16's word-read path.  Same
+     * reason the transfer mode is record 0: it cannot be inferred from
+     * outside, it is the difference between a card that works and one that
+     * receives nothing, and the whole point of probing for it rather than
+     * shipping two binaries is that nobody has to guess which one they are
+     * running.
+     */
+    STAT(netdev_stat_godd,  unit->nu_Nic.bus.getodd);
 
 #undef STAT
 

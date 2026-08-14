@@ -152,6 +152,22 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME netdev_macgen COMMAND test_netdev_macgen)
 
+    # The bus accessors, and in particular the CNet16 word-read path for odd
+    # registers: pure address arithmetic, and the one part of it a host can
+    # pin exactly where an emulator models none of it.
+    add_executable(test_netdev_bus
+        test/test_netdev_bus.c
+        netdev_bus.c
+        "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c")
+
+    target_include_directories(test_netdev_bus PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/net68k"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_bus PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_bus COMMAND test_netdev_bus)
 endif()
 
 # Raw-serial tracing through the custom chips, for bring-up on an emulator

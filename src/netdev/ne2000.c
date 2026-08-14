@@ -315,6 +315,49 @@ static UWORD ne2000_write_buf(NetdevNic *nic, const UBYTE *frame, UWORD len,
 static const UBYTE ne_test_pattern[32] = "THIS is A memory TEST pattern";
 
 /*
+ * Could this bus need cnet16's word reads at all?  Mirrors what
+ * netdev_bus_set_getodd() refuses, and is asked FIRST so that no card whose
+ * registers are plain adjacent bytes has its detection sequence changed by
+ * any of this.  Only the PCMCIA row is a split stride-1 file.
+ */
+static BOOL ne2000_odd_window(const NetdevNic *nic)
+{
+    return (BOOL)(nic->bus.odd != NULL && nic->bus.regmap == NULL &&
+                  nic->bus.stride == 1u);
+}
+
+/*
+ * Do odd-numbered registers read correctly the way they are being read now?
+ *
+ * TWO TESTS, because neither one alone is enough.
+ *
+ *   ISR after a reset has ED_ISR_RST set.  That is the value NetBSD checks,
+ *   and it is why this is the right point in the sequence -- but a mis-decoded
+ *   read very often returns 0xff, which has that bit set, so on its own it
+ *   passes on exactly the card this is looking for.
+ *
+ *   BNRY is register 3, odd, and read/write, and the ring is not programmed
+ *   until dp8390_config(), so its value here is nobody's.  Two patterns, one
+ *   the complement of the other, so neither a stuck-high nor a stuck-low bus
+ *   can round-trip both.
+ *
+ * The chip is in page 0 and stopped, which is where the caller left it.
+ */
+static BOOL ne2000_odd_reads(NetdevNic *nic)
+{
+    if ((NIC_GET(nic, ED_P0_ISR) & ED_ISR_RST) != ED_ISR_RST)
+        return FALSE;
+
+    NIC_PUT(nic, ED_P0_BNRY, 0x5a);
+    if (NIC_GET(nic, ED_P0_BNRY) != 0x5a)
+        return FALSE;
+
+    NIC_PUT(nic, ED_P0_BNRY, 0xa5);
+
+    return (BOOL)(NIC_GET(nic, ED_P0_BNRY) == 0xa5);
+}
+
+/*
  * NetBSD's ne2000_detect, minus the NE1000 arm: no card in this family has an
  * 8-bit buffer, and the byte-mode write it uses to find one is invasive.
  * TRUE means a DS8390 answered and its 16 KB of buffer reads back.
@@ -351,9 +394,50 @@ static BOOL ne2000_detect(NetdevNic *nic)
         (ED_CR_RD2 | ED_CR_STP))
         return FALSE;
 
-    tmp = NIC_GET(nic, ED_P0_ISR);
-    if ((tmp & ED_ISR_RST) != ED_ISR_RST)
-        return FALSE;
+    /*
+     * THE CNET16 PROBE, AND IT IS A PROBE RATHER THAN A SECOND BINARY.
+     *
+     * A Fast-Ethernet NE2000 clone that asserts -IOIS16 unconditionally
+     * decodes 16-bit I/O cycles and nothing else, so a BYTE read of an ODD
+     * register returns bus noise.  Every ISR poll, CR readback and CURR/BNRY
+     * ring pointer this driver makes is an odd register, so the symptom is a
+     * card that attaches and receives nothing.  cnet answers this with a
+     * separate cnet16.device (cnetdevice.asm:551-556, naming the Netgear
+     * FA411 and the CNet SinglePoint 10/100) and leaves the user to work out
+     * which of the two their card needs.
+     *
+     * CR, read just above, is register 0 and EVEN: it answers on such a card
+     * and cannot tell one apart.  The first odd register touched is where the
+     * question has to be asked, and if it fails the word path is turned on
+     * and it is asked again.  Both answers are load-bearing: on a card that
+     * does not need this the first call succeeds and nothing changes, and on
+     * a window with no chip behind it both calls fail and the card is
+     * rejected as before.
+     *
+     * EVERY OTHER CARD KEEPS NETBSD'S TEST, unchanged, byte for byte.  A
+     * Zorro board's registers are adjacent bytes at a stride and cannot need
+     * any of this, and giving them a new way to fail detection to buy nothing
+     * is not a trade worth making.
+     */
+    if (!ne2000_odd_window(nic))
+    {
+        tmp = NIC_GET(nic, ED_P0_ISR);
+        if ((tmp & ED_ISR_RST) != ED_ISR_RST)
+            return FALSE;
+    }
+    else if (!ne2000_odd_reads(nic))
+    {
+        if (!netdev_bus_set_getodd(&nic->bus))
+            return FALSE;
+
+        NE_TRACE("ne: trying cnet16 odd reads ", 0);
+        if (!ne2000_odd_reads(nic))
+        {
+            nic->bus.getodd = 0;
+            return FALSE;
+        }
+        NE_TRACE("ne: odd registers read as words ", 1);
+    }
 
     NIC_PUT(nic, ED_P0_CR, ED_CR_RD2 | ED_CR_PAGE_0 | ED_CR_STA);
 

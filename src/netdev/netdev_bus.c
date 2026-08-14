@@ -224,6 +224,28 @@ VOID netdev_bus_regmap(NetdevBus *bus, const ULONG *map, APTR data_port)
     bus->asic   = (volatile UBYTE *)data_port;
 }
 
+/*
+ * cnet16's GETODD, turned on by the probe rather than by a second binary.
+ *
+ * REFUSED rather than asserted on a bus it cannot work on.  The read takes
+ * the word at reg-1 from the even window and keeps its low half, which is the
+ * odd register only when consecutive indices are ONE byte apart: at stride 2
+ * the word at (reg-1)*2 spans register reg-1 and the padding byte beside it,
+ * and a scatter table has no arithmetic relation between neighbours at all.
+ * Nothing in the table but the PCMCIA row is stride 1, and the flag exists
+ * for that row, but a refusal is what keeps a future stride-2 card from
+ * turning this on and reading half its registers as padding.
+ */
+BOOL netdev_bus_set_getodd(NetdevBus *bus)
+{
+    if (bus->stride != 1u || bus->regmap != NULL || bus->odd == NULL)
+        return FALSE;
+
+    bus->getodd = 1;
+
+    return TRUE;
+}
+
 VOID netdev_bus_setup(NetdevBus *bus, APTR base, UWORD stride, APTR wide)
 {
     bus->nic    = (volatile UBYTE *)base;
@@ -234,5 +256,6 @@ VOID netdev_bus_setup(NetdevBus *bus, APTR base, UWORD stride, APTR wide)
     bus->stride = stride;
     bus->shift  = (UBYTE)((stride == 4u) ? 2u : ((stride == 2u) ? 1u : 0u));
     bus->dmode  = NETDEV_DMODE_WORD;
+    bus->getodd = 0;            /* ne2000_detect() turns it on if it is needed */
     bus->ops    = &netdev_bus_generic;
 }
