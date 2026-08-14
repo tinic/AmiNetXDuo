@@ -584,6 +584,19 @@ stage_cross() {
 
         if cmake --build "$BUILD/$name" --parallel "$JOBS" > "$BUILD/$name-build.log" 2>&1; then
             note "built clean"
+
+            # And that no runtime helper became a call to itself.  It links,
+            # exports the right symbol, and eats the stack; see the script.
+            if tools/check-rt-recursion.sh "$BUILD/$name" \
+                    > "$BUILD/$name-rt-recursion.log" 2>&1; then
+                note "$(sed -n 's/^rt_recursion=/runtime helpers: /p' \
+                      "$BUILD/$name-rt-recursion.log" | head -1)"
+            elif grep -q 'rt_recursion=skipped' "$BUILD/$name-rt-recursion.log"; then
+                skip "cross: $(cat "$BUILD/$name-rt-recursion.log")"
+            else
+                cat "$BUILD/$name-rt-recursion.log"
+                fail "a compiler runtime helper calls itself ($name)"
+            fi
         else
             # `|| tail`, not a bare pipeline.  Under `set -euo pipefail` the
             # grep exits 1 when nothing matches and 141 when head -20 closes

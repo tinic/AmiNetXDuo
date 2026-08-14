@@ -697,6 +697,21 @@ u32     remainder = 0;
  * count of 32 or more moves whole words, and a count of 64 or more is
  * undefined in C but must not fault here. The arithmetic version replicates
  * the sign bit; the logical one does not.
+ *
+ * EVERY SHIFT BELOW IS A 32-BIT ONE, and it has to stay that way.  Writing the
+ * in-word case as `value >> count` is the obvious C and it does not work: a
+ * 64-bit shift by a variable count is precisely what GCC lowers to a call to
+ * this function, so the routine compiles into a call to itself and recurses
+ * until the stack is gone.  It did:
+ *
+ *   5ca: move.l a0,-(sp) / move.l d1,-(sp) / move.l d0,-(sp)
+ *   5d0: jsr ___lshrdi3(pc)          <- 0x594, this function
+ *
+ * reached from __udivmoddi4's wide-divisor branch, which took out a 68000
+ * inside __udivdi3(0x10000, 0x100000000).  A constant count is safe -- GCC
+ * expands `value >> 32` to a register move -- but only a constant one.
+ * tools/check-rt-recursion.sh fails the build if any of these calls itself
+ * again; tests/common/rt_test.c runs them on the machine.
  */
 
 u64 __lshrdi3(u64 value, int count);
@@ -705,30 +720,49 @@ s64 __ashrdi3(s64 value, int count);
 
 u64 __lshrdi3(u64 value, int count)
 {
+
+u32     hi = (u32)(value >> 32);
+u32     lo = (u32)value;
+
+
     if (count <= 0)
         return value;
     if (count >= 64)
         return 0;
     if (count >= 32)
-        return (u64)((u32)(value >> 32) >> (count - 32));
+        return (u64)(hi >> (count - 32));
 
-    return (value >> count);
+    /* 1 to 31, so 32 - count is 1 to 31 as well and neither shift is by a
+       width the hardware leaves undefined. */
+    return (((u64)(hi >> count) << 32) |
+            (u64)((lo >> count) | (hi << (32 - count))));
 }
 
 u64 __ashldi3(u64 value, int count)
 {
+
+u32     hi = (u32)(value >> 32);
+u32     lo = (u32)value;
+
+
     if (count <= 0)
         return value;
     if (count >= 64)
         return 0;
     if (count >= 32)
-        return ((u64)((u32)value << (count - 32))) << 32;
+        return ((u64)(lo << (count - 32)) << 32);
 
-    return (value << count);
+    return (((u64)((hi << count) | (lo >> (32 - count))) << 32) |
+            (u64)(lo << count));
 }
 
 s64 __ashrdi3(s64 value, int count)
 {
+
+long    hi = (long)(u32)((u64)value >> 32);
+u32     lo = (u32)(u64)value;
+
+
     if (count <= 0)
         return value;
 
@@ -737,11 +771,8 @@ s64 __ashrdi3(s64 value, int count)
         return (value < 0) ? (s64)-1 : (s64)0;
 
     if (count >= 32)
-    {
-        long high = (long)(u32)((u64)value >> 32);
+        return (s64)(hi >> (count - 32));
 
-        return (s64)(high >> (count - 32));
-    }
-
-    return (value >> count);
+    return (s64)(((u64)(u32)(hi >> count) << 32) |
+                 (u64)((lo >> count) | ((u32)hi << (32 - count))));
 }
