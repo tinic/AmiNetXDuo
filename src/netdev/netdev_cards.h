@@ -30,6 +30,14 @@
  */
 #define NETDEV_IRQ_NONE     0   /* no status register: ask the chip's ISR */
 
+/*
+ * How the board is found.  Everything with an autoconfig record comes off the
+ * ConfigDev list; the PCMCIA slot has no such record and lives at a fixed
+ * address behind Gayle, so it is claimed through card.resource instead.
+ */
+#define NETDEV_BUS_ZORRO    0
+#define NETDEV_BUS_PCMCIA   1
+
 typedef struct NetdevCard
 {
     const char *name;           /* what the user pins with, and what we print */
@@ -46,6 +54,11 @@ typedef struct NetdevCard
     ULONG       mem_off;
     ULONG       mem_size;
     ULONG       prom_off;       /* station address PROM, same stride          */
+
+    /* Trailing, so every autoconfig row keeps its positional initialiser and
+       reads as NETDEV_BUS_ZORRO with no base of its own. */
+    UBYTE       bus;            /* NETDEV_BUS_*                               */
+    ULONG       base;           /* NETDEV_BUS_PCMCIA: the fixed window base   */
 } NetdevCard;
 
 extern const NetdevCard netdev_cards[];

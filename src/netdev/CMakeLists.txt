@@ -17,6 +17,7 @@ set(NETDEV_SOURCES
     netdev_cmds.c       # the S2_* table
     netdev_bus.c        # register stride and the data port
     netdev_cards.c      # the card table
+    netdev_pcmcia.c     # the A600/A1200 slot, which has no autoconfig record
     netdev_mcaf.c       # the multicast hash, host-testable
     dp8390.c            # NetBSD chip core
     ne2000.c            # NetBSD remote-DMA glue

@@ -1028,6 +1028,66 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
 
 /* ----------------------------------------------------------------- probe -- */
 
+/*
+ * One matched board becomes one unit.  Shared by the two ways in: the
+ * ConfigDev walk below, and the PCMCIA slot, which has no ConfigDev at all.
+ */
+static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
+                            APTR board)
+{
+    NetdevUnit *unit;
+
+    unit = &dev->nd_Units[dev->nd_UnitCount];
+    nd_zero((UBYTE *)unit, sizeof(*unit));
+
+    unit->nu_Nic.ops = netdev_nic_ops_for(card->chip);
+    if (unit->nu_Nic.ops == NULL)
+        continue;           /* no core for this chip yet */
+
+    unit->nu_Dev    = dev;
+    unit->nu_Nic.card   = card;
+    unit->nu_Nic.board  = (volatile UBYTE *)board;
+    unit->nu_Nic.rx     = netdev_rx;
+    unit->nu_Nic.rx_arg = unit;
+
+    netdev_bus_setup(&unit->nu_Nic.bus,
+             (APTR)((UBYTE *)board + card->reg_off),
+             card->stride,
+             card->wide_off != 0
+                 ? (APTR)((UBYTE *)board + card->wide_off)
+                 : NULL);
+
+    nd_tracex("anx: board ", (ULONG)board);
+    if (unit->nu_Nic.ops->attach(&unit->nu_Nic) != 0)
+    {
+        nd_trace("anx: attach failed\r\n");
+        continue;           /* the board did not answer as a DP8390 */
+    }
+    nd_tracex("anx: mac ", ((ULONG)unit->nu_Nic.factory[2] << 24) |
+                   ((ULONG)unit->nu_Nic.factory[3] << 16) |
+                   ((ULONG)unit->nu_Nic.factory[4] << 8) |
+                   (ULONG)unit->nu_Nic.factory[5]);
+    nd_tracex("anx: dmode ", (ULONG)unit->nu_Nic.bus.dmode);
+
+    nd_newlist(&unit->nu_OpenerList);
+    nd_newlist(&unit->nu_Writes);
+    unit->nu_Unit = dev->nd_UnitCount;
+
+    unit->nu_Intr.is_Node.ln_Type = NT_INTERRUPT;
+    unit->nu_Intr.is_Node.ln_Pri  = 10;
+    unit->nu_Intr.is_Node.ln_Name = netdev_name;
+    unit->nu_Intr.is_Data     = unit;
+    unit->nu_Intr.is_Code     = (VOID (*)())netdev_server;
+
+    unit->nu_Tick.is_Node.ln_Type = NT_INTERRUPT;
+    unit->nu_Tick.is_Node.ln_Pri  = 0;
+    unit->nu_Tick.is_Node.ln_Name = netdev_name;
+    unit->nu_Tick.is_Data     = unit;
+    unit->nu_Tick.is_Code     = (VOID (*)())netdev_tick;
+
+    dev->nd_UnitCount++;
+    }
+
 static VOID netdev_probe(NetdevDevice *dev)
 {
     struct ConfigDev *cd = NULL;
@@ -1083,55 +1143,39 @@ static VOID netdev_probe(NetdevDevice *dev)
             continue;
         }
 
-        unit = &dev->nd_Units[dev->nd_UnitCount];
-        nd_zero((UBYTE *)unit, sizeof(*unit));
+        if (!netdev_add_unit(dev, card, (APTR)cd->cd_BoardAddr))
+            continue;
+    }
 
-        unit->nu_Nic.ops = netdev_nic_ops_for(card->chip);
-        if (unit->nu_Nic.ops == NULL)
-            continue;               /* no core for this chip yet */
+    /*
+     * And the slot, after the boards.  Last so that a machine with both keeps
+     * its Zorro unit numbers where they were: a PCMCIA card is the one card
+     * that can be inserted between two boots.
+     */
+    {
+        UWORD i;
 
-        unit->nu_Dev        = dev;
-        unit->nu_Nic.card   = card;
-        unit->nu_Nic.board  = (volatile UBYTE *)cd->cd_BoardAddr;
-        unit->nu_Nic.rx     = netdev_rx;
-        unit->nu_Nic.rx_arg = unit;
-
-        netdev_bus_setup(&unit->nu_Nic.bus,
-                         (APTR)((UBYTE *)cd->cd_BoardAddr + card->reg_off),
-                         card->stride,
-                         card->wide_off != 0
-                             ? (APTR)((UBYTE *)cd->cd_BoardAddr + card->wide_off)
-                             : NULL);
-
-        nd_tracex("anx: board ", (ULONG)cd->cd_BoardAddr);
-        if (unit->nu_Nic.ops->attach(&unit->nu_Nic) != 0)
+        for (i = 0; i < netdev_card_count; i++)
         {
-            nd_trace("anx: attach failed\r\n");
-            continue;               /* the board did not answer as a DP8390 */
+            const NetdevCard *card = &netdev_cards[i];
+            APTR              base;
+
+            if (card->bus != NETDEV_BUS_PCMCIA)
+                continue;
+            if (dev->nd_UnitCount >= NETDEV_MAX_UNITS)
+            {
+                dev->nd_UnitsDropped++;
+                break;
+            }
+
+            base = netdev_pcmcia_claim(card);
+            if (base == NULL)
+                continue;       /* no slot, nothing in it, or not a LAN card */
+
+            nd_trace("anx: pcmcia claimed\r\n");
+            if (!netdev_add_unit(dev, card, base))
+                netdev_pcmcia_release();
         }
-        nd_tracex("anx: mac ", ((ULONG)unit->nu_Nic.factory[2] << 24) |
-                               ((ULONG)unit->nu_Nic.factory[3] << 16) |
-                               ((ULONG)unit->nu_Nic.factory[4] << 8) |
-                               (ULONG)unit->nu_Nic.factory[5]);
-        nd_tracex("anx: dmode ", (ULONG)unit->nu_Nic.bus.dmode);
-
-        nd_newlist(&unit->nu_OpenerList);
-        nd_newlist(&unit->nu_Writes);
-        unit->nu_Unit = dev->nd_UnitCount;
-
-        unit->nu_Intr.is_Node.ln_Type = NT_INTERRUPT;
-        unit->nu_Intr.is_Node.ln_Pri  = 10;
-        unit->nu_Intr.is_Node.ln_Name = netdev_name;
-        unit->nu_Intr.is_Data         = unit;
-        unit->nu_Intr.is_Code         = (VOID (*)())netdev_server;
-
-        unit->nu_Tick.is_Node.ln_Type = NT_INTERRUPT;
-        unit->nu_Tick.is_Node.ln_Pri  = 0;
-        unit->nu_Tick.is_Node.ln_Name = netdev_name;
-        unit->nu_Tick.is_Data         = unit;
-        unit->nu_Tick.is_Code         = (VOID (*)())netdev_tick;
-
-        dev->nd_UnitCount++;
     }
 }
 

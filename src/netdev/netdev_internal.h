@@ -129,6 +129,12 @@ BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len);
 VOID netdev_event(NetdevUnit *unit, ULONG mask);
 VOID netdev_rebuild_filter(NetdevUnit *unit);
 VOID netdev_tx_pump(NetdevUnit *unit);
+
+/* netdev_pcmcia.c: the slot has no autoconfig record, so it is claimed
+   rather than found.  NULL when there is no slot, nothing in it, or what is
+   in it is not a LAN card. */
+APTR netdev_pcmcia_claim(const NetdevCard *card);
+VOID netdev_pcmcia_release(VOID);
 VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io);
 VOID netdev_drop_writes(NetdevUnit *unit, NetdevOpener *op);
 LONG netdev_online(NetdevUnit *unit);
