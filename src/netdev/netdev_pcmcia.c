@@ -44,6 +44,41 @@
    half that matters here: the LVO stubs, against the CardResource below. */
 #include <inline/card.h>
 
+#ifdef NETDEV_TRACE
+/* Local, because netdev_device.c's is static there and this runs before any
+   of it.  Same channel: raw SERDAT, which needs nothing to be open. */
+static VOID pc_trace(const char *s, ULONG v)
+{
+    static const char hex[] = "0123456789abcdef";
+    volatile UWORD   *serdat  = (volatile UWORD *)0xdff030;
+    volatile UWORD   *serdatr = (volatile UWORD *)0xdff018;
+    char              buf[12];
+    const char       *p;
+    int               i;
+
+    for (i = 0; i < 8; i++)
+        buf[i] = hex[(v >> ((7 - i) * 4)) & 0xf];
+    buf[8] = '\r'; buf[9] = '\n'; buf[10] = '\0';
+
+    for (p = s; *p != '\0'; p++)
+    {
+        ULONG guard = 200000;
+        while ((*serdatr & 0x2000) == 0 && --guard != 0)
+            ;
+        *serdat = (UWORD)(0x100 | (UBYTE)*p);
+    }
+    for (p = buf; *p != '\0'; p++)
+    {
+        ULONG guard = 200000;
+        while ((*serdatr & 0x2000) == 0 && --guard != 0)
+            ;
+        *serdat = (UWORD)(0x100 | (UBYTE)*p);
+    }
+}
+#else
+#define pc_trace(s, v)  ((VOID)0)
+#endif
+
 /* Attribute memory is byte-per-word: the card's byte n is at 2n. */
 #define PC_ATTR_STRIDE      2
 
@@ -89,6 +124,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     if (CardResource == NULL)
     {
         CardResource = OpenResource((STRPTR)CARDRESNAME);
+        pc_trace("pc: resource ", (ULONG)CardResource);
         if (CardResource == NULL)
             return NULL;        /* no slot on this machine */
     }
@@ -97,13 +133,22 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     handle->cah_CardNode.ln_Pri  = 0;
     handle->cah_CardFlags        = 0;
 
-    if (OwnCard(handle) != NULL)
-        return NULL;            /* somebody else has it, or nothing is in it */
+    {
+        struct CardHandle *owner = OwnCard(handle);
+
+        pc_trace("pc: own ", (ULONG)owner);
+        if (owner != NULL)
+            return NULL;        /* somebody else has it, or nothing is in it */
+    }
 
     /* What is in the slot.  Anything but a LAN adapter is given straight
        back: an IDE adapter driven as an NE2000 is a write to a disk. */
-    if (!pc_tuple(handle, CISTPL_FUNCID, buf, sizeof(buf)) ||
-        buf[2] != CIS_FUNC_LAN)
+    {
+        BOOL got = pc_tuple(handle, CISTPL_FUNCID, buf, sizeof(buf));
+
+        pc_trace("pc: funcid ", ((ULONG)got << 16) | buf[2]);
+    }
+    if (buf[2] != CIS_FUNC_LAN)
     {
         ReleaseCard(handle, 0);
         return NULL;
@@ -114,6 +159,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
        follow it; the low two bits are that count minus one. */
     if (!pc_tuple(handle, CISTPL_CONFIG, buf, sizeof(buf)))
     {
+        pc_trace("pc: no config tuple ", 0);
         ReleaseCard(handle, 0);
         return NULL;
     }
@@ -129,8 +175,10 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     /* CISTPL_CFTABLE_ENTRY's first byte holds the configuration index in its
        low six bits.  The first entry is the one to take: a LAN card's first
        entry is its I/O configuration. */
+    pc_trace("pc: cfgbase ", cfg_base);
     if (!pc_tuple(handle, CISTPL_CFTABLE, buf, sizeof(buf)))
     {
+        pc_trace("pc: no cftable ", 0);
         ReleaseCard(handle, 0);
         return NULL;
     }
@@ -148,6 +196,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
      */
     (VOID)CardMiscControl(handle, CARD_INTF_SETCLR | CARD_INTF_IRQ);
 
+    pc_trace("pc: index ", (ULONG)index);
     return (APTR)(ULONG)card->base;
 }
 
