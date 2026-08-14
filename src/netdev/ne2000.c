@@ -66,10 +66,18 @@
 #include "netdev_nic.h"
 #include "dp8390.h"
 #include "netdev_bsdtypes.h"
+#include "netdev_macgen.h"
 #include "dp8390reg.h"
 #include "ne2000reg.h"
 
 #define AX88190_NODEID_OFFSET   0x400
+
+#ifdef NETDEV_TRACE
+extern VOID netdev_trace_val(const char *tag, ULONG v);
+#define NE_TRACE(t, v)  netdev_trace_val((t), (ULONG)(v))
+#else
+#define NE_TRACE(t, v)  ((VOID)0)
+#endif
 
 /* ------------------------------------------------------------- plumbing --- */
 
@@ -325,8 +333,21 @@ static BOOL ne2000_detect(NetdevNic *nic)
     NIC_PUT(nic, ED_P0_CR, ED_CR_RD2 | ED_CR_PAGE_0 | ED_CR_STP);
     ne_delay(nic, 5000);
 
+    /*
+     * ED_CR_STA IS NOT IN THE MASK, and NetBSD's is the only version of this
+     * comparison that has it there.  Some NE2000 clones come out of reset
+     * with CR bit 1 stuck set and read back 0x23 where the datasheet says
+     * 0x21; cnet.device masks DSCM_START out of its own copy of this test
+     * (cnetdevice.asm:3611-3615) for "buggy chips" and names the Netgear
+     * FA411.  With the bit demanded clear those cards fail detection and the
+     * driver reports an empty slot.
+     *
+     * The case this must keep rejecting is a window with nothing behind it,
+     * and it does: a floating bus reads 0xff, which has TXP set and fails the
+     * comparison whether STA is masked or not.
+     */
     tmp = NIC_GET(nic, ED_P0_CR);
-    if ((tmp & (ED_CR_RD2 | ED_CR_TXP | ED_CR_STA | ED_CR_STP)) !=
+    if ((tmp & (ED_CR_RD2 | ED_CR_TXP | ED_CR_STP)) !=
         (ED_CR_RD2 | ED_CR_STP))
         return FALSE;
 
@@ -521,6 +542,71 @@ static LONG ne2000_attach(NetdevNic *nic)
     {
         for (i = 0; i < NETDEV_ADDR_LEN; i++)
             nic->factory[i] = romdata[i * 2];
+    }
+
+    /*
+     * CLEAR THE GROUP BIT IN THE ROM ADDRESS.
+     *
+     * The D-Link DFE-670TXD's PROM reads 01:D4:FF:03:00:20.  Programmed into
+     * PAR0..5 as it stands, the DP8390 does not match its own unicast address
+     * -- the comparator treats bit 0 of octet 0 as the group bit -- and every
+     * frame the card transmits carries a multicast source address, which some
+     * switches drop and every receiver mis-learns.  cnet.device clears the bit
+     * unconditionally and warns (cnetdevice.asm:3666-3672); this is the same
+     * fix and it is a no-op on every card whose PROM is right.
+     */
+    if ((nic->factory[0] & 1u) != 0)
+    {
+        nic->factory[0] &= (UBYTE)~1u;
+        nic->mac_group_fix++;
+        NE_TRACE("ne: rom group bit cleared ", (ULONG)nic->factory[0]);
+    }
+
+    /*
+     * AND IF THERE IS NO ADDRESS IN THE PROM AT ALL.
+     *
+     * All-zero and all-ones are both "the PROM is not answering" -- ed.c has
+     * rejected them since it was written (ed.c:406) and this path never
+     * tested for them, so such a card enumerated a unit that came online and
+     * was never delivered a frame.  Rejecting it is one answer; it is not the
+     * useful one, because a PCMCIA clone with a blank PROM is a card that
+     * works perfectly once it has an address.
+     *
+     * So: the card's CIS first, which is where the PC Card standard puts a
+     * LAN address and where a card built for a CIS-reading PC driver keeps
+     * it, and a derived locally-administered address after that.  NOT
+     * cnet.device's hardcoded 00:00:12:34:56:78 (cnetdevice.asm:5445-5447),
+     * whose own comment is "replace this with your card's address!": two
+     * Amigas running it on one segment answer each other's ARP.
+     */
+    if (!netdev_mac_usable(nic->factory))
+    {
+        NE_TRACE("ne: prom has no address ", 0);
+
+        if (netdev_mac_cis_node_id(nic->factory))
+        {
+            nic->mac_from_cis++;
+        }
+        else
+        {
+            UBYTE fp[NETDEV_MAC_FP_MAX];
+            UWORD n;
+            ULONG salt = nic->serial ^
+                         ((ULONG)nic->card->manid << 16) ^
+                         (ULONG)nic->card->prodid ^
+                         (ULONG)(APTR)nic->board;
+
+            n = netdev_mac_fingerprint(fp, (UWORD)sizeof(fp), salt);
+            netdev_mac_derive(fp, n, nic->factory);
+            nic->mac_derived++;
+        }
+
+        NE_TRACE("ne: address now ", ((ULONG)nic->factory[2] << 24) |
+                                     ((ULONG)nic->factory[3] << 16) |
+                                     ((ULONG)nic->factory[4] << 8) |
+                                     (ULONG)nic->factory[5]);
+        NE_TRACE("ne: address top ", ((ULONG)nic->factory[0] << 8) |
+                                     (ULONG)nic->factory[1]);
     }
 
     for (i = 0; i < NETDEV_ADDR_LEN; i++)

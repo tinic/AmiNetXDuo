@@ -19,6 +19,7 @@ set(NETDEV_SOURCES
     netdev_cards.c      # the card table
     netdev_pcmcia.c     # the A600/A1200 slot, which has no autoconfig record
     netdev_mcaf.c       # the multicast hash, host-testable
+    netdev_macgen.c     # the derived station address, host-testable
     dp8390.c            # NetBSD chip core
     ne2000.c            # NetBSD remote-DMA glue
     ed.c                # NetBSD mapped-buffer glue: Hydra, ASDG LAN Rover
@@ -133,6 +134,24 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME netdev_ed COMMAND test_netdev_ed)
     add_test(NAME netdev_cards COMMAND test_netdev_cards)
+
+    # The derived station address.  Determinism, the locally-administered and
+    # unicast bits, and "two different machines get two different addresses"
+    # are all properties an emulator cannot show: its card has a valid PROM,
+    # so this path is never reached there.
+    add_executable(test_netdev_macgen
+        test/test_netdev_macgen.c
+        netdev_macgen.c
+        netdev_mcaf.c)
+
+    target_include_directories(test_netdev_macgen PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_macgen PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_macgen COMMAND test_netdev_macgen)
+
 endif()
 
 # Raw-serial tracing through the custom chips, for bring-up on an emulator

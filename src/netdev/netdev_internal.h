@@ -136,6 +136,9 @@ VOID netdev_tx_pump(NetdevUnit *unit);
    in it is not a LAN card. */
 VOID netdev_trace_val(const char *tag, ULONG v);
 APTR netdev_pcmcia_claim(const NetdevCard *card);
+/* The card's own CIS bytes, for the derived-address fingerprint.  0 when
+   there is no slot or nothing was read from it. */
+UWORD netdev_pcmcia_fingerprint(UBYTE *buf, UWORD max);
 VOID netdev_pcmcia_release(VOID);
 VOID netdev_pcmcia_bind(NetdevUnit *unit);
 VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io);

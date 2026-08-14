@@ -231,6 +231,9 @@ static const char netdev_stat_mcful[] = "Multicast joins refused";
 static const char netdev_stat_coll[]  = "Collisions";
 static const char netdev_stat_wedge[] = "Transmitter watchdog resets";
 static const char netdev_stat_drop[]  = "Supported boards with no unit";
+static const char netdev_stat_grp[]   = "ROM address group bit cleared";
+static const char netdev_stat_cis[]   = "Address taken from the card's CIS";
+static const char netdev_stat_derv[]  = "Address derived, PROM was blank";
 
 static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
 {
@@ -289,6 +292,16 @@ static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
      */
     STAT(netdev_stat_wedge, unit->nu_TxWedges);
     STAT(netdev_stat_drop,  unit->nu_Dev->nd_UnitsDropped);
+
+    /*
+     * The three ways the address in PAR0..5 can differ from what the card's
+     * PROM said.  Each is 0 or 1.  They are here rather than only in the
+     * trace build because a machine that invented its own hardware address
+     * has to be able to say so to somebody who is not holding a serial cable.
+     */
+    STAT(netdev_stat_grp,   unit->nu_Nic.mac_group_fix);
+    STAT(netdev_stat_cis,   unit->nu_Nic.mac_from_cis);
+    STAT(netdev_stat_derv,  unit->nu_Nic.mac_derived);
 
 #undef STAT
 
