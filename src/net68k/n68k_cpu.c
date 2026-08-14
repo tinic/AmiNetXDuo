@@ -55,12 +55,33 @@ extern VOID n68k_copy_bytes_mv20(UCHAR *to, const UCHAR *from, ULONG len);
 extern VOID n68k_copy_bytes_mv40(UCHAR *to, const UCHAR *from, ULONG len);
 extern VOID n68k_copy_bytes_mv60(UCHAR *to, const UCHAR *from, ULONG len);
 
+/* The C data path, `-mcpu=68060`, for anything with AFF_68020 set. */
+extern USHORT n68k_ip_checksum_compute_fast(NX_PACKET *packet_ptr,
+                                            ULONG protocol, UINT data_length,
+                                            ULONG *src_ip_addr,
+                                            ULONG *dest_ip_addr);
+#ifdef AMINETXDUO_RX_VERIFY
+extern ULONG n68k_rx_verify_fast(NX_PACKET *packet, UINT *drop);
+extern ULONG n68k_rx_verify_sum_fast(NX_PACKET *packet, ULONG carried,
+                                     ULONG copied, UINT *drop);
+#endif
+
 /* n68k_dispatch.S jumps through these three.  They are written once, before
    the first packet, and read on every one after that. */
 ULONG (*n68k_vec_sum)(const ULONG *, ULONG) = n68k_sum_longwords_mv0;
 ULONG (*n68k_vec_copy_sum)(ULONG *, const ULONG *, ULONG) =
     n68k_copy_sum_longwords_mv0;
 VOID (*n68k_vec_copy)(UCHAR *, const UCHAR *, ULONG) = n68k_copy_bytes_mv0;
+
+/* The C ones start on the copy that is legal everywhere, for the same reason
+   the assembly does: this file is linked by programs that never select. */
+USHORT (*n68k_vec_ip_checksum)(NX_PACKET *, ULONG, UINT, ULONG *, ULONG *) =
+    n68k_ip_checksum_compute;
+#ifdef AMINETXDUO_RX_VERIFY
+ULONG (*n68k_vec_rx_verify)(NX_PACKET *, UINT *) = n68k_rx_verify;
+ULONG (*n68k_vec_rx_verify_sum)(NX_PACKET *, ULONG, ULONG, UINT *) =
+    n68k_rx_verify_sum;
+#endif
 
 VOID n68k_cpu_select(ULONG attnflags)
 {
@@ -88,6 +109,25 @@ VOID n68k_cpu_select(ULONG attnflags)
         n68k_vec_sum      = n68k_sum_longwords_mv0;
         n68k_vec_copy_sum = n68k_copy_sum_longwords_mv0;
         n68k_vec_copy     = n68k_copy_bytes_mv0;
+    }
+
+    /* The C has one boundary rather than four: 32-bit multiply, scaled index
+       and bitfield exist above a 68010 and nowhere below it. */
+    if ((attnflags & AFF_68020) != 0UL)
+    {
+        n68k_vec_ip_checksum   = n68k_ip_checksum_compute_fast;
+#ifdef AMINETXDUO_RX_VERIFY
+        n68k_vec_rx_verify     = n68k_rx_verify_fast;
+        n68k_vec_rx_verify_sum = n68k_rx_verify_sum_fast;
+#endif
+    }
+    else
+    {
+        n68k_vec_ip_checksum   = n68k_ip_checksum_compute;
+#ifdef AMINETXDUO_RX_VERIFY
+        n68k_vec_rx_verify     = n68k_rx_verify;
+        n68k_vec_rx_verify_sum = n68k_rx_verify_sum;
+#endif
     }
 }
 

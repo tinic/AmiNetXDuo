@@ -94,11 +94,25 @@ extern VOID  (*n68k_vec_copy)(UCHAR *, const UCHAR *, ULONG);
 #define N68K_COPY_SUM_LONGWORDS (*n68k_vec_copy_sum)
 #define N68K_COPY_BYTES         (*n68k_vec_copy)
 
+/*
+ * The C on the data path is multiversioned as well, and for a different
+ * reason from the assembly: not which instruction to prefer, but which the
+ * compiler may use at all.  Two copies, `-m68000` and `-mcpu=68060`, and the
+ * second serves everything with AFF_68020 (n68k_variant.h says why 68060 and
+ * not 68020 codegen).  The whole checksum walk and the whole receive
+ * verification are behind these two vectors.
+ */
+extern USHORT (*n68k_vec_ip_checksum)(NX_PACKET *, ULONG, UINT, ULONG *,
+                                      ULONG *);
+
+#define N68K_IP_CHECKSUM_COMPUTE (*n68k_vec_ip_checksum)
+
 #else
 
-#define N68K_SUM_LONGWORDS      n68k_sum_longwords
-#define N68K_COPY_SUM_LONGWORDS n68k_copy_sum_longwords
-#define N68K_COPY_BYTES         n68k_copy_bytes
+#define N68K_SUM_LONGWORDS       n68k_sum_longwords
+#define N68K_COPY_SUM_LONGWORDS  n68k_copy_sum_longwords
+#define N68K_COPY_BYTES          n68k_copy_bytes
+#define N68K_IP_CHECKSUM_COMPUTE n68k_ip_checksum_compute
 
 #endif
 
@@ -153,6 +167,22 @@ ULONG n68k_rx_verify(NX_PACKET *packet, UINT *drop);
  */
 ULONG n68k_rx_verify_sum(NX_PACKET *packet, ULONG carried, ULONG copied,
                          UINT *drop);
+
+/* Both of the above are multiversioned too; see N68K_IP_CHECKSUM_COMPUTE. */
+#ifdef N68K_MV_MULTI
+
+extern ULONG (*n68k_vec_rx_verify)(NX_PACKET *, UINT *);
+extern ULONG (*n68k_vec_rx_verify_sum)(NX_PACKET *, ULONG, ULONG, UINT *);
+
+#define N68K_RX_VERIFY          (*n68k_vec_rx_verify)
+#define N68K_RX_VERIFY_SUM      (*n68k_vec_rx_verify_sum)
+
+#else
+
+#define N68K_RX_VERIFY          n68k_rx_verify
+#define N68K_RX_VERIFY_SUM      n68k_rx_verify_sum
+
+#endif
 
 #endif /* AMINETXDUO_RX_VERIFY */
 

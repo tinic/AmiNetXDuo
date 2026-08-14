@@ -44,4 +44,28 @@
 #define N68K_MV_SYM(n)          n
 #endif
 
+/*
+ * The C half of the same idea, and it needs only two forms rather than four.
+ *
+ * The assembly variants differ in which 68000 instruction to use where; the C
+ * ones differ in what the compiler may emit at all, and that is one question
+ * with one boundary: a 68000 has no 32-bit multiply, no scaled index and no
+ * bitfield, and everything above it has all three.  So the fast copy is built
+ * once, `-mcpu=68060`, and serves every machine with AFF_68020 set -- 68060
+ * codegen is a SUBSET of the 68020's, because the 68060 only ever dropped
+ * instructions (the 64-bit MULU.L and DIVU.L results), so what assembles for
+ * an 060 runs on an 020.  The reverse is not true, which is why this is not
+ * built `-m68020`.
+ *
+ * N68K_MV_FAST renames what that copy exports.  It has to be in effect before
+ * net68k.h declares them, so the two files concerned include this first.
+ */
+#ifdef N68K_MV_FAST
+
+#define n68k_ip_checksum_compute        n68k_ip_checksum_compute_fast
+#define n68k_rx_verify                  n68k_rx_verify_fast
+#define n68k_rx_verify_sum              n68k_rx_verify_sum_fast
+
+#endif
+
 #endif /* AMINETXDUO_N68K_VARIANT_H */

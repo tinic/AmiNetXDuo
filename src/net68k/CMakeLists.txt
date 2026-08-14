@@ -125,6 +125,26 @@ if(NET68K_MV)
             aminetxduo_net68k_mv${mv})
     endforeach()
 
+    # And the C on the data path, once more at -mcpu=68060.  Two files, the
+    # checksum walk and the receive verification, which is what the whole of
+    # net68k's C amounts to once the assembly has the primitives: 1.9 KB of
+    # object between them, so the second copy is not a size question.
+    #
+    # -mcpu=68060 rather than -m68020 because ONE copy has to serve every
+    # machine with AFF_68020 set, and only the 68060's instruction set is a
+    # subset of all of theirs (src/net68k/n68k_variant.h).  It lands last on
+    # the command line, after the toolchain file's -m68000, which is what
+    # makes it win.
+    add_library(aminetxduo_net68k_cfast OBJECT
+        n68k_checksum.c n68k_rx_verify.c)
+    target_compile_definitions(aminetxduo_net68k_cfast PRIVATE
+        AMINETXDUO_NET68K_ASM=1 N68K_MV_MULTI=1 N68K_MV_FAST=1)
+    target_compile_options(aminetxduo_net68k_cfast PRIVATE -mcpu=68060)
+    target_include_directories(aminetxduo_net68k_cfast PRIVATE
+        ${AMINETXDUO_CORE_INCLUDES}
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(aminetxduo_net68k PRIVATE aminetxduo_net68k_cfast)
+
     # The C half of the dispatch needs to know it is in this build too: the
     # vector table and n68k_cpu_select()'s body are both behind it, and without
     # it the file is the empty function every other build gets.
