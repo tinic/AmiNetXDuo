@@ -160,7 +160,7 @@ ULONG   ratio;
 static VOID b_prim_asm(VOID)
 {
 
-    (VOID) c68k_addmul_1(b_result, b_y, 64u, 0xDEADBEEFUL);
+    (VOID) C68K_ADDMUL_1(b_result, b_y, 64u, 0xDEADBEEFUL);
 }
 
 static VOID b_prim_c(VOID)

@@ -16,6 +16,8 @@
 
 #include "tls_vectors.h"
 
+#include "crypto68k.h"       /* c68k_cpu_select() */
+
 /* Included explicitly, not transitively.  NDK 3.2 reaches <exec/resident.h>
    through another header and NDK 3.9 does not, so leaving it out builds here
    and fails on a machine with the other NDK, which is how it reached CI.
@@ -76,6 +78,12 @@ static struct TLSLibBase *tls_lib_init(
     register struct ExecBase   *sysbase __asm("a6"))
 {
     SysBase = sysbase;
+
+    /* Which crypto primitives this machine wants, before any of them runs.
+       In an AMINETXDUO_CPU=any build this is the whole of what makes one
+       tls.library serve a 68000 and a 68060; anywhere else it does nothing.
+       src/crypto68k/c68k_cpu.c. */
+    c68k_cpu_select((ULONG)sysbase->AttnFlags);
 
     if (!tls_runtime_open())
         return NULL;

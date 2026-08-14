@@ -142,7 +142,7 @@ c68k_limb   sum;
         /* u * m zeroes t[i] and adds a multiple of m, preserving the residue. */
         u = (c68k_limb)(t[i] * n0inv);
 
-        carry = c68k_addmul_1(&t[i], m, m_len, u);
+        carry = C68K_ADDMUL_1(&t[i], m, m_len, u);
 
         /*
          * Propagate into the limbs above.  The first addition almost always
@@ -242,7 +242,7 @@ UINT    i;
      */
     for (i = 0; i < n; i++)
     {
-        t[i + n] = c68k_addmul_1(&t[i], y, n, x[i]);
+        t[i + n] = C68K_ADDMUL_1(&t[i], y, n, x[i]);
     }
 }
 
@@ -444,7 +444,7 @@ HN_UBASE2   product;
 
     for (i = 0; i < n; i++)
     {
-        t[i + n] = c68k_addmul_1(&t[(i << 1) + 1], &x[i + 1], n - i - 1, x[i]);
+        t[i + n] = C68K_ADDMUL_1(&t[(i << 1) + 1], &x[i + 1], n - i - 1, x[i]);
     }
 
     /* Double.  The top limb of the triangle sum is 0, so nothing falls off. */

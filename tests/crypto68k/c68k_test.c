@@ -218,7 +218,7 @@ UINT        mismatch = 0;
             t_ref_result[i] = t_mine[i];
         }
 
-        c_mine  = c68k_addmul_1(t_mine, t_y, n, a);
+        c_mine  = C68K_ADDMUL_1(t_mine, t_y, n, a);
         c_model = t_addmul_model(t_ref_result, t_y, n, a);
 
         t_checks++;

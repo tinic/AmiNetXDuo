@@ -160,7 +160,7 @@ HN_UBASE2   num;
         for (j = (INT)u_len - 1; j >= 0; j--)
         {
             /* rhat < m[0] always, so the quotient fits and DIVU.L is safe. */
-            (VOID) c68k_div_2by1(rhat, u[(UINT)j], m[0], &rhat);
+            (VOID) C68K_DIV_2BY1(rhat, u[(UINT)j], m[0], &rhat);
         }
         rem[0] = rhat;
         return;
@@ -196,7 +196,7 @@ HN_UBASE2   num;
         }
         else
         {
-            qhat = c68k_div_2by1(top, un[(UINT)j + n - 1u], vn[n - 1u], &rhat);
+            qhat = C68K_DIV_2BY1(top, un[(UINT)j + n - 1u], vn[n - 1u], &rhat);
         }
 
         /* At most two corrections, by the normalisation above. */

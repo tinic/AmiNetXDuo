@@ -358,7 +358,7 @@ UINT        i;
      */
     for (i = 0; i < C68K_P256_LIMBS; i++)
     {
-        t[i + C68K_P256_LIMBS] = c68k_addmul_1(&t[i], b, C68K_P256_LIMBS, a[i]);
+        t[i + C68K_P256_LIMBS] = C68K_ADDMUL_1(&t[i], b, C68K_P256_LIMBS, a[i]);
     }
 
     c68k_p256_fe_reduce(r, t);
@@ -386,7 +386,7 @@ UINT        i;
      */
     for (i = 0; i < C68K_P256_LIMBS - 1u; i++)
     {
-        t[i + C68K_P256_LIMBS] = c68k_addmul_1(&t[(i << 1) + 1u], &a[i + 1u],
+        t[i + C68K_P256_LIMBS] = C68K_ADDMUL_1(&t[(i << 1) + 1u], &a[i + 1u],
                                                C68K_P256_LIMBS - 1u - i, a[i]);
     }
 

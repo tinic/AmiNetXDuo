@@ -198,6 +198,8 @@ set(CRYPTO68K_SOURCES
 # it is not a third option -- unlike c68k_prim.S and c68k_prim_mulw.S, which
 # are two files defining the same symbol and cannot both be built, these are
 # two halves of one file and exactly one is ever assembled.
+list(APPEND CRYPTO68K_SOURCES c68k_cpu.c)
+
 if(AMINETXDUO_CRYPTO68K_ASM)
     list(APPEND CRYPTO68K_SOURCES
          c68k_prim.S c68k_p256.S c68k_aes.S c68k_chacha20.S c68k_poly1305.S
@@ -206,6 +208,40 @@ endif()
 
 if(AMINETXDUO_CRYPTO68K_ASM_MULW)
     list(APPEND CRYPTO68K_SOURCES c68k_prim_mulw.S c68k_25519.S)
+endif()
+
+# ------------------------------------------------ one binary for every CPU ---
+#
+# AMINETXDUO_CPU=any takes both halves of the module and chooses at run time.
+# What that needs is narrower than it looks, because most of the assembly here
+# is legal on every 68k and only two routines are not:
+#
+#   c68k_chacha20.S          assembles at -m68000, checked: 0 illegal
+#                            instructions.  So the 68000 and the 68060 get the
+#                            ChaCha20 kernel they have never had, and the
+#                            default TLS cipher is ChaCha20-Poly1305 (54).
+#   c68k_prim.S              add, sub, cmp and add_carry are original 68000
+#                            code and are called by name everywhere.  Only
+#                            addmul_1 (MULU.L 32x32 -> 64) and div_2by1
+#                            (DIVU.L 64/32) are 68020-to-68040, and those two
+#                            are the ones c68k_cpu.c dispatches.
+#   c68k_prim_mulw.S         the MULU.W addmul_1, legal everywhere, and the
+#                            answer for both the 68000 and the 68060.
+#   c68k_poly1305.S          a 32x32 -> 64 product per block: dispatched.
+#
+# The file is assembled for its own needs rather than for the machine: an
+# object may hold an instruction this CPU lacks as long as nothing calls the
+# routine that uses it.  Hence -m68020 on c68k_prim.S in a -m68000 binary.
+#
+# c68k_p256.S, c68k_aes.S and c68k_25519.S are NOT here yet: p256 needs one
+# instruction substituted (extb.l), aes needs the 68020 scaled index and so a
+# C fallback selected on a 68000, and 25519 is two halves of one file that have
+# to become two objects.  Each is its own measurement and its own commit.
+set(CRYPTO68K_MV OFF)
+if(CMAKE_CROSSCOMPILING AND AMINETXDUO_CPU STREQUAL "any")
+    set(CRYPTO68K_MV ON)
+    list(APPEND CRYPTO68K_SOURCES
+         c68k_prim.S c68k_chacha20.S c68k_poly1305.S c68k_prim_mulw.S)
 endif()
 
 add_library(crypto68k STATIC ${CRYPTO68K_SOURCES})
@@ -243,5 +279,30 @@ if(AMINETXDUO_CRYPTO68K_ASM_MULW)
         COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
 endif()
 
+if(CRYPTO68K_MV)
+    # C68K_ASM tells the .c files the assembly exists and to declare it;
+    # C68K_MV tells them the choice is a vector rather than a name.  PUBLIC on
+    # both: crypto68k.h resolves C68K_ADDMUL_1 and C68K_DIV_2BY1 on C68K_MV,
+    # and src/tls and tests/crypto68k are callers that must agree with this
+    # directory about which one those are.
+    target_compile_definitions(crypto68k PUBLIC C68K_ASM=1 C68K_MV=1)
+
+    # Per file, the arch it is written for.  C68K_MV_SUFFIX is what keeps the
+    # two addmul_1 twins apart in one archive (c68k_variant.h).
+    set_source_files_properties(c68k_prim.S PROPERTIES
+        COMPILE_DEFINITIONS "C68K_ASM=1;C68K_MV=1;C68K_MV_SUFFIX=_mulu"
+        COMPILE_OPTIONS "-m68020")
+    set_source_files_properties(c68k_prim_mulw.S PROPERTIES
+        COMPILE_DEFINITIONS "C68K_ASM_MULW=1;C68K_MV=1;C68K_MV_SUFFIX=_mulw"
+        COMPILE_OPTIONS "-m68000")
+    set_source_files_properties(c68k_poly1305.S PROPERTIES
+        COMPILE_DEFINITIONS "C68K_ASM=1;C68K_MV=1"
+        COMPILE_OPTIONS "-m68020")
+    set_source_files_properties(c68k_chacha20.S PROPERTIES
+        COMPILE_DEFINITIONS "C68K_ASM=1;C68K_MV=1"
+        COMPILE_OPTIONS "-m68000")
+endif()
+
 message(STATUS "  crypto68k asm . ${AMINETXDUO_CRYPTO68K_ASM}")
 message(STATUS "  crypto68k mulw asm . ${AMINETXDUO_CRYPTO68K_ASM_MULW}")
+message(STATUS "  crypto68k mv .. ${CRYPTO68K_MV}")

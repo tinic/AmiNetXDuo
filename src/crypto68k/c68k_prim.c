@@ -177,13 +177,21 @@ c68k_limb   old;
 }
 
 
-#ifndef C68K_ASM
-
 /*
  * The portable quotient estimate.  On target this is replaced by a single
  * DIVU.L; here it is a 64-bit divide, which on m68k reaches __udivdi3 in
  * src/common/ami_udivdi3.c because this toolchain ships an empty libgcc.
+ *
+ * COMPILED IN THE ASSEMBLY BUILD TOO when the binary serves every CPU: DIVU.L
+ * 64/32 is 68020-to-68040 only, so a 68000 or a 68060 needs this at run time
+ * and not merely as a build option (c68k_cpu.c).  It takes the _c name there,
+ * beside c68k_addmul_1_c, and the plain name stays the per-CPU build's.
  */
+#if defined(C68K_MV)
+#define c68k_div_2by1 c68k_div_2by1_c
+#endif
+
+#if !defined(C68K_ASM) || defined(C68K_MV)
 c68k_limb c68k_div_2by1(c68k_limb hi, c68k_limb lo, c68k_limb d,
                         c68k_limb *rem)
 {
@@ -196,7 +204,13 @@ HN_UBASE2   num;
 
     return((c68k_limb)(num / (HN_UBASE2)d));
 }
+#endif /* !C68K_ASM || C68K_MV */
 
+#ifdef C68K_MV
+#undef c68k_div_2by1
+#endif
+
+#ifndef C68K_ASM
 
 /*
  * C68K_ASM_MULW is the 68060 build, where c68k_prim_mulw.S supplies this one
@@ -324,7 +338,11 @@ UINT    j;
 UINT c68k_using_assembly(VOID)
 {
 
-#if defined(C68K_ASM)
+#if defined(C68K_MV)
+    /* One binary for every CPU: what is in use is what was selected, not what
+       was compiled, and c68k_cpu.c is the only place that knows. */
+    return(c68k_cpu_class());
+#elif defined(C68K_ASM)
     return(C68K_ASM_68020);
 #elif defined(C68K_ASM_MULW)
     return(C68K_ASM_68060);
