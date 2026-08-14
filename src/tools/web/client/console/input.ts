@@ -1,13 +1,11 @@
 /*
  * Input, produced now and consumed later.
  *
- * There is nothing on the Amiga side to receive any of this yet -- the
- * injection into input.device does not exist -- and the events are still
- * generated, sent and shown, because the thing worth looking at before it
- * works is the latency: how long after a mouse move the word leaves, and how
- * long after that anything changes on the screen.  A viewer that draws its
- * own pointer answers the first half of that at compositor rate and leaves
- * the second half visible, which is the point.
+ * The far end writes these into input.device, so a word that goes out is a
+ * real event on a real Amiga.  The pointer is still drawn locally as well as
+ * sent, which is deliberate: the local one moves at compositor rate and the
+ * Amiga's at frame rate, and the gap between the two IS the latency, made
+ * visible rather than hidden.
  *
  * Words, not binary.  Everything here is control -- the binary channel is the
  * framebuffer and nothing else -- and a word is a thing you can read in a log
@@ -59,6 +57,10 @@ export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
   let scheduled = 0;
   let moves = 0;
   let buttons = 0;
+  /* Where the pointer was last known to be, in Amiga pixels.  A release that
+     arrives with no usable coordinate -- a cancelled gesture, a lost focus --
+     still has to say WHERE the button came up, and this is that. */
+  let last = { x: 0, y: 0 };
 
   const flush = () => {
     scheduled = 0;
@@ -70,7 +72,16 @@ export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
     sink.log(w);
   };
 
-  const at = (e: MouseEvent) => view.toNative(e.clientX, e.clientY);
+  /* While anything is held the coordinate is clamped rather than dropped: a
+     drag owns the pointer until the button comes up, and it has to be able to
+     reach the edge of the Amiga's screen. */
+  const at = (e: MouseEvent) => view.toNative(e.clientX, e.clientY, buttons !== 0);
+
+  const send = (x: number, y: number, b: number) => {
+    const w = "m " + x + " " + y + " " + b;
+    sink.send(w);
+    sink.log(w);
+  };
 
   const onMove = (e: PointerEvent) => {
     const p = at(e);
@@ -80,24 +91,62 @@ export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
        latency story, deliberately not the same rate. */
     view.movePointer(p.x, p.y);
     moves++;
+    last = p;
 
     pending = { x: p.x, y: p.y, b: buttons };
     if (scheduled === 0) scheduled = requestAnimationFrame(flush);
   };
 
-  const onButton = (e: PointerEvent) => {
+  const onDownButton = (e: PointerEvent) => {
     const p = at(e);
     if (p === null) return;
     e.preventDefault();
     stage.focus();
+    /*
+     * THE POINTER IS CAPTURED FOR THE WHOLE OF A DRAG.
+     *
+     * Without this, a press inside the canvas and a release anywhere else --
+     * off the edge, over the page furniture, in another window -- never
+     * produces a pointerup on this element, and the Amiga is left believing
+     * the button is still down.  That is not a cosmetic fault: Intuition and
+     * Workbench hold the screen's layer lock for as long as a button is down,
+     * so a lost release leaves the machine behaving as if somebody were
+     * holding the mouse forever.
+     */
+    try { stage.setPointerCapture(e.pointerId); } catch { /* not fatal */ }
     buttons = e.buttons;
+    last = p;
     /* Not coalesced.  A click is the event whose timing is the whole
        question, and holding it back to the next frame would be adding the
        latency this page exists to measure. */
     pending = null;
-    const w = "m " + p.x + " " + p.y + " " + buttons;
-    sink.send(w);
-    sink.log(w);
+    send(p.x, p.y, buttons);
+  };
+
+  const onUpButton = (e: PointerEvent) => {
+    const p = at(e);
+    e.preventDefault();
+    buttons = e.buttons;
+    pending = null;
+    if (p !== null) last = p;
+    send(last.x, last.y, buttons);
+    if (buttons === 0) {
+      try { stage.releasePointerCapture(e.pointerId); } catch { /* gone */ }
+    }
+  };
+
+  /*
+   * Every other way a press can end without a release: the capture being
+   * taken away, the gesture cancelled, the tab losing focus mid-drag.  All of
+   * them send the buttons up, because the one state this must never leave
+   * behind on the Amiga is a button that is down and never coming back.
+   */
+  const releaseAll = () => {
+    if (buttons === 0) return;
+    buttons = 0;
+    pending = null;
+    const p = last;
+    send(p.x, p.y, 0);
   };
 
   const onWheel = (e: WheelEvent) => {
@@ -108,7 +157,12 @@ export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
     sink.log(w);
   };
 
-  const onLeave = () => { view.clearPointer(); };
+  const onCancel = () => { releaseAll(); };
+
+  /* Only the drawn pointer goes.  The buttons do NOT: leaving the canvas with
+     one held is the normal middle of a drag, and releasing here would drop
+     the window the person is still moving. */
+  const onLeave = () => { if (buttons === 0) view.clearPointer(); };
 
   /* The right button is the Amiga's menu button and holding it is how a menu
      stays up, so the browser's context menu cannot have it. */
@@ -131,9 +185,12 @@ export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
   const onUp = (e: KeyboardEvent) => key(e, false);
 
   stage.addEventListener("pointermove", onMove);
-  stage.addEventListener("pointerdown", onButton);
-  stage.addEventListener("pointerup", onButton);
+  stage.addEventListener("pointerdown", onDownButton);
+  stage.addEventListener("pointerup", onUpButton);
+  stage.addEventListener("pointercancel", onCancel);
+  stage.addEventListener("lostpointercapture", onCancel);
   stage.addEventListener("pointerleave", onLeave);
+  addEventListener("blur", releaseAll);
   stage.addEventListener("wheel", onWheel, { passive: false });
   stage.addEventListener("contextmenu", onContext);
   addEventListener("keydown", onDown);
@@ -142,10 +199,14 @@ export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
   return {
     detach: () => {
       if (scheduled !== 0) cancelAnimationFrame(scheduled);
+      releaseAll();
       stage.removeEventListener("pointermove", onMove);
-      stage.removeEventListener("pointerdown", onButton);
-      stage.removeEventListener("pointerup", onButton);
+      stage.removeEventListener("pointerdown", onDownButton);
+      stage.removeEventListener("pointerup", onUpButton);
+      stage.removeEventListener("pointercancel", onCancel);
+      stage.removeEventListener("lostpointercapture", onCancel);
       stage.removeEventListener("pointerleave", onLeave);
+      removeEventListener("blur", releaseAll);
       stage.removeEventListener("wheel", onWheel);
       stage.removeEventListener("contextmenu", onContext);
       removeEventListener("keydown", onDown);

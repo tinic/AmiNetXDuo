@@ -162,19 +162,32 @@ export class View {
     this.box.style.height = h + "px";
   }
 
-  /* Client coordinates to Amiga pixels, or null off the screen.  The
-     rectangle is read every time on purpose: it changes with the zoom, the
-     window, and the page scrolling, and caching it is how a viewer ends up
-     clicking somewhere the person did not. */
-  toNative(clientX: number, clientY: number): { x: number; y: number } | null {
+  /*
+   * Client coordinates to Amiga pixels, or null off the screen.  The
+   * rectangle is read every time on purpose: it changes with the zoom, the
+   * window, and the page scrolling, and caching it is how a viewer ends up
+   * clicking somewhere the person did not.  Dividing by the RENDERED width is
+   * also what makes the aspect correction free -- a 640x256 screen shown
+   * 640x512 has r.height 512, and the ratio takes the 2x back out.
+   *
+   * `clamp` is for a drag.  A button held down owns the pointer until it comes
+   * up, wherever the mouse has got to, and an Amiga drag has to be able to
+   * reach the edge of the screen: dropping the coordinate because it is one
+   * pixel outside the canvas is how a window stops following the mouse
+   * half way through being moved.
+   */
+  toNative(clientX: number, clientY: number, clamp = false):
+      { x: number; y: number } | null {
     const r = this.fb.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return null;
 
-    const x = Math.floor((clientX - r.left) / r.width * this.screen.width);
-    const y = Math.floor((clientY - r.top) / r.height * this.screen.height);
+    let x = Math.floor((clientX - r.left) / r.width * this.screen.width);
+    let y = Math.floor((clientY - r.top) / r.height * this.screen.height);
 
     if (x < 0 || y < 0 || x >= this.screen.width || y >= this.screen.height) {
-      return null;
+      if (!clamp) return null;
+      x = Math.min(Math.max(x, 0), this.screen.width - 1);
+      y = Math.min(Math.max(y, 0), this.screen.height - 1);
     }
     return { x, y };
   }
