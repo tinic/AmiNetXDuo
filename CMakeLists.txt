@@ -760,6 +760,11 @@ if(AMINETXDUO_TLS)
 endif()
 add_subdirectory(src/tools)
 
+# The remote-framebuffer frame encoder. Nothing links it yet; it is the shared
+# half of the screen-streaming prototype, and it builds here so the m68k
+# warning gate and the host round-trip cover it from the start.
+add_subdirectory(src/rfb)
+
 # Profile, the sampling profiler.  Built for every cross configuration and
 # packed in the archive: it depends on nothing in this tree, it is useful to
 # anyone with an Amiga and a program that is slower than they expected, and it
