@@ -35,6 +35,7 @@
 
 #include <exec/types.h>
 #include <exec/nodes.h>
+#include <exec/libraries.h>
 #include <resources/card.h>
 
 #include <proto/exec.h>
@@ -327,6 +328,36 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     index = (UBYTE)(buf[2] & 0x3f);
 
     /*
+     * PUT THE SOCKET INTO I/O MODE, BEFORE THE COR WRITE AND NOT AFTER IT.
+     *
+     * A socket comes up as a MEMORY socket.  Two bits of CardMiscControl()
+     * change that and both of them have to be set before anything is written
+     * to attribute memory:
+     *
+     *   CARD_ENABLEF_DIGAUDIO  the autodoc's own words are that this
+     *                          "configures the socket for the I/O interface"
+     *                          and that you should ALWAYS try to enable
+     *                          digital audio for I/O cards.  The pin it names
+     *                          is the one Gayle reuses for I/O.
+     *
+     *   CARD_DISABLEF_WP       turns off hardware write protection, "for I/O
+     *                          cards lacking a write-enable line".  A card
+     *                          with no such line leaves the socket reading
+     *                          write-protected, and a write-protected socket
+     *                          swallows the COR write with no error anywhere:
+     *                          the card is never configured, the chip never
+     *                          answers, and the driver reports an empty slot.
+     *
+     * cnet.device does exactly this call, with exactly these two bits, in
+     * exactly this position (cnetdevice.asm:4713-4715, "enable card I/O
+     * functions").  Ours used to make one CardMiscControl() call, with the
+     * V39 interrupt bits, AFTER the COR write -- too late to help it, and on
+     * a V37 or V38 card.resource the bits mean nothing at all.
+     */
+    (VOID)pc_misc_control(handle, CARD_DISABLEF_WP | CARD_ENABLEF_DIGAUDIO);
+    pc_trace("pc: iomode ", (ULONG)(CARD_DISABLEF_WP | CARD_ENABLEF_DIGAUDIO));
+
+    /*
      * Write the COR, and check the card answered.
      *
      * WHICH ADDRESS THE COR IS AT is not something the CIS settles.  Attribute
@@ -365,8 +396,25 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
      * The card's interrupt reaches INT2 through Gayle, and Gayle will not
      * pass it until the status change is enabled.  card.resource owns that
      * register, so this goes through CardMiscControl() rather than a poke.
+     *
+     * THE CARD_INTF_* BITS ARE V39 AND LATER ONLY.  resources/card.h says so
+     * in capitals: "Only set these bits for V39 card.resource or greater
+     * (check resource base VERSION)".  A V37 or V38 resource -- which is what
+     * an unpatched A600 and most A1200s have, Kickstart 3.0 never shipped V39
+     * card.resource -- has no meaning for bit 7 or bit 2 of this argument and
+     * is entitled to do anything at all with them.  The defaults there
+     * already have BSY/IRQ enabled, so the call is not needed on those
+     * machines; it is skipped rather than guessed at.
      */
-    (VOID)pc_misc_control(handle, CARD_INTF_SETCLR | CARD_INTF_IRQ);
+    if (CardResource->lib_Version >= 39)
+    {
+        (VOID)pc_misc_control(handle, CARD_INTF_SETCLR | CARD_INTF_IRQ);
+        pc_trace("pc: irqmode ", (ULONG)CardResource->lib_Version);
+    }
+    else
+    {
+        pc_trace("pc: irqmode skipped v ", (ULONG)CardResource->lib_Version);
+    }
 
     pc_trace("pc: index ", (ULONG)index);
     return (APTR)(ULONG)card->base;
@@ -380,7 +428,8 @@ VOID netdev_pcmcia_release(VOID)
 
     if (CardResource != NULL && handle->cah_CardNode.ln_Name != NULL)
     {
-        (VOID)pc_misc_control(handle, CARD_INTF_IRQ);   /* SETCLR clear */
+        if (CardResource->lib_Version >= 39)
+            (VOID)pc_misc_control(handle, CARD_INTF_IRQ);   /* SETCLR clear */
         (VOID)pc_release_card(handle, 0);
         handle->cah_CardNode.ln_Name = NULL;
     }
