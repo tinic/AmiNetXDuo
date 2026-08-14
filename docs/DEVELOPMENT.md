@@ -27,7 +27,8 @@ that cache → `m68k-amigaos-gcc` on `$PATH` → `/opt/m68k-amigaos` →
 
 | Option | Default | Effect |
 |---|---|---|
-| `AMINETXDUO_CPU` | `68020` | `68000`, `68020`, `68040`, `68060` (`cmake/toolchain-m68k-amigaos.cmake:145`) |
+| `AMINETXDUO_CPU` | `68020` | `68000`, `68020`, `68040`, `68060`, `any` (`cmake/toolchain-m68k-amigaos.cmake:145`) |
+| `AMINETXDUO_CPU=any` | — | one binary for every 68k: `-m68000` codegen, `src/net68k`'s inner loops assembled per class, chosen from `AttnFlags` in `bsd_lib_init()` (`src/net68k/n68k_cpu.c`). Verify with `tests/perf/n68kmv` |
 | `AMINETXDUO_IPV6` | ON | the dual stack; changes `NX_IP`/`NX_PACKET`/`NX_TCP_SOCKET` layout |
 | `AMINETXDUO_TLS` | ON | `tls.library`, nx_secure, nx_crypto. TLS 1.3 is on in every build (`src/tls/CMakeLists.txt:104`) |
 | `AMINETXDUO_MDNS` | ON | responder and `.local` resolver |

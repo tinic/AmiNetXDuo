@@ -137,6 +137,12 @@ CROSS_CONFIGS=(
     "m68000:-DAMINETXDUO_CPU=68000"
     "m68040:-DAMINETXDUO_CPU=68040"
     "m68060:-DAMINETXDUO_CPU=68060"
+    # The one binary for every CPU: -m68000 codegen plus four assemblies of
+    # each net68k inner loop and a run-time choice between them.  It is the
+    # only arm that compiles src/net68k/n68k_dispatch.S, n68k_cpu.c's real
+    # body and tests/perf/n68kmv, and the only one where the four variants of
+    # a file are assembled from one source in one build.
+    "any:-DAMINETXDUO_CPU=any"
     # The fourth drawer in the archive, and the only arm here that turns more
     # than one thing off at once.  Every option above is a separate arm because
     # each has its own compile-time surface; this one exists because the
