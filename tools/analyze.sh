@@ -80,6 +80,13 @@ fi
 # Configure only: compile_commands.json is written at generate time, and this
 # pass never wants the objects.
 
+# The configure log goes beside the build directory, so its parent has to
+# exist: in a clean checkout there is no build/ yet and this failed with
+# "build/analyze-configure.log: No such file or directory" before cmake was
+# even reached.  A tool that cannot run in a fresh clone is a tool that only
+# runs where somebody has already built.
+mkdir -p "$(dirname "$BUILD")"
+
 cmake -S . -B "$BUILD" \
     -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
     -DCMAKE_BUILD_TYPE=Release \
