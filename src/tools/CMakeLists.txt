@@ -295,6 +295,12 @@ aminetxduo_add_tool(tool_traceroute traceroute SOURCES traceroute.c toolsock.c)
 aminetxduo_add_tool(tool_tftp    tftp     SOURCES tftp.c  toolsock.c)
 aminetxduo_add_tool(tool_whois   whois    SOURCES whois.c toolsock.c)
 
+# wbgrab is the grab half of a remote framebuffer, and touches no part of the
+# network: intuition, graphics and layers, opened at run time like every other
+# library here.  Config-only in the plainest sense there is -- it links what
+# every command links and nothing else.
+aminetxduo_add_tool(tool_wbgrab wbgrab SOURCES wbgrab.c)
+
 # CensusProbe is the guest half of the allocation census, and exists only when
 # the census does.  It is not a command anybody installs: it walks the sites an
 # ordinary command walks and then provokes the library expunge, which is the
@@ -488,7 +494,7 @@ add_dependencies(tools
     tool_fetch tool_nc tool_telnet tool_nettrace tool_traceroute tool_nslookup tool_arp
     tool_tftp tool_whois tool_httpd tool_iperf
     tool_sntp tool_shownetservices
-    tool_shownetstatus tool_netstat tool_ping tool_smoke)
+    tool_shownetstatus tool_netstat tool_ping tool_smoke tool_wbgrab)
 if(CMAKE_CROSSCOMPILING)
     add_dependencies(tools tool_lvo_stub_check)
 endif()

@@ -193,7 +193,10 @@ for cmd in "${CMDS[@]}"; do need "$CMD_BUILD/src/tools/$cmd"; done
 # test driver -- it runs the real commands through SystemTagList() and records
 # rc, milliseconds and free memory per command, which is what the leak sweep
 # and the tool tests read -- and has no use on a user's machine.
-NOT_SHIPPED=(ToolsSmoke CensusProbe UafProbe HangProbe)
+# wbgrab is the grab half of a remote framebuffer that has no server yet, so it
+# is a prototype and not a command anybody installs.  It ships when the server
+# it feeds does.
+NOT_SHIPPED=(ToolsSmoke CensusProbe UafProbe HangProbe wbgrab)
 missing_from_cmds=()
 for path in "$CMD_BUILD"/src/tools/*; do
     [ -f "$path" ] && [ -x "$path" ] || continue
