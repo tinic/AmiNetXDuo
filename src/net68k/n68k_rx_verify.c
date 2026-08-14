@@ -309,7 +309,7 @@ UINT    payload;
     }
 
     /* ---- the IPv4 header ------------------------------------------------ */
-    head =  n68k_sum_longwords((const ULONG *)ip, (ULONG)ihl >> 2);
+    head =  N68K_SUM_LONGWORDS((const ULONG *)ip, (ULONG)ihl >> 2);
 
     if (n68k_rxv_fold(head) != 0xFFFFUL)
     {

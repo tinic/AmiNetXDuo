@@ -128,7 +128,13 @@ if(NET68K_MV)
     # The C half of the dispatch needs to know it is in this build too: the
     # vector table and n68k_cpu_select()'s body are both behind it, and without
     # it the file is the empty function every other build gets.
-    target_compile_definitions(aminetxduo_net68k PRIVATE N68K_MV_MULTI=1)
+    #
+    # PUBLIC, because net68k.h resolves N68K_COPY_BYTES and its two siblings on
+    # it, and src/sana2 is one of the callers that must get the same answer as
+    # this directory does.  A translation unit that saw it differently would
+    # call the trampoline instead of the vector: slower, not wrong, and
+    # invisible -- which is a worse failure than a link error.
+    target_compile_definitions(aminetxduo_net68k PUBLIC N68K_MV_MULTI=1)
 endif()
 
 message(STATUS "  net68k asm .... ${AMINETXDUO_NET68K_ASM}")

@@ -28,7 +28,7 @@
 void *memcpy(void *dst, const void *src, size_t n)
 {
 
-    n68k_copy_bytes((UCHAR *)dst, (const UCHAR *)src, (ULONG)n);
+    N68K_COPY_BYTES((UCHAR *)dst, (const UCHAR *)src, (ULONG)n);
 
     return(dst);
 }

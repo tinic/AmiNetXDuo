@@ -239,7 +239,7 @@ UINT        i;
              */
             words =  ((ULONG)(end_ptr - (ALIGN_TYPE)long_ptr) + 3UL) >> 2;
 
-            checksum +=  n68k_fold(n68k_sum_longwords(long_ptr, words));
+            checksum +=  n68k_fold(N68K_SUM_LONGWORDS(long_ptr, words));
 
             long_ptr +=  words;
         }
