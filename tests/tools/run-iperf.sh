@@ -4,7 +4,17 @@
 #
 #   tests/tools/run-iperf.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
 #                            [-B IFACE] [-P PEERHOST] [-a ADDR] [-g GATEWAY]
-#                            [-N BOARD] [-r TRANSCRIPT]
+#                            [-N BOARD] [-V] [-r TRANSCRIPT]
+#
+# WHICH DRIVER IT MEASURES
+#
+#   Ours.  -N BOARD stages anxnet.device wherever tools/sana2-stage.sh says it
+#   covers the board, and a vendor driver sitting in ~/amiga-assets/devs never
+#   displaces it: -V, or AMINETXDUO_SANA2_VENDOR=1, is the only way to ask for
+#   one.  The run prints driver_device= and driver_source= before it boots and
+#   driver_booted= after, and fails when the two disagree, because bytes cross
+#   the wire just as happily under somebody else's driver and every other
+#   assertion here would pass on that run.
 #
 # WHAT IT PROVES
 #
@@ -88,7 +98,9 @@ PORT_DEAD="${AMINETXDUO_IPERF_PORT_DEAD:-7409}"
 SECS=3
 SIZE_KB=64
 
-while getopts "m:t:b:B:P:a:g:N:r:" opt; do
+VENDOR="${AMINETXDUO_SANA2_VENDOR:-}"
+
+while getopts "m:t:b:B:P:a:g:N:r:V" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
@@ -99,9 +111,19 @@ while getopts "m:t:b:B:P:a:g:N:r:" opt; do
         g) GATEWAY="$OPTARG" ;;
         N) BOARD="$OPTARG" ;;
         r) REPLAY="$OPTARG" ;;
-        *) sed -n '3,7p' "$0" >&2; exit 2 ;;
+        V) VENDOR=1 ;;
+        *) sed -n '3,8p' "$0" >&2; exit 2 ;;
     esac
 done
+[ -z "$VENDOR" ] || export AMINETXDUO_SANA2_VENDOR="$VENDOR"
+
+# Which driver this run is about, filled in by the staging below and asserted
+# against the transcript at the end.  Empty means nothing decided it, which is
+# the case a replay is in.
+WANT_DEVICE=""
+WANT_CARD=""
+DRIVER_SOURCE=""
+DRIVER_PATH=""
 
 case "$BUILD" in /*) ;; *) BUILD="${BUILD#./}" ;; esac
 
@@ -123,6 +145,13 @@ if [ -n "$IFACE" ]; then
         exit 2
     fi
     SERVER_ARMS=yes
+elif [ "$BOARD" != a2065 ] && [ -z "$REPLAY" ]; then
+    # -N only reaches an emulator on the bridged branch; the SLIRP branch below
+    # boots an a2065 and nothing else.  Accepting the key here and ignoring it
+    # is how a run reports PASS for a card it never put in the machine.
+    echo "-N $BOARD needs -B <iface>: the SLIRP branch here boots an a2065" >&2
+    echo "and nothing else, so a board key would be ignored." >&2
+    exit 2
 fi
 
 # The address the guest calls.  SLIRP's gateway is the emulator host itself.
@@ -166,19 +195,27 @@ done
 command -v python3 >/dev/null || {
     echo "no python3, which is what runs the peer" >&2; exit 2; }
 
-A2065="${AMINETXDUO_A2065:-}"
-if [ -z "$A2065" ]; then
-    for candidate in \
-        "$ROOT/build/a2065.device" \
-        "$HOME/amiga-assets/devs/a2065.device"
-    do
-        [ -f "$candidate" ] && { A2065="$candidate"; break; }
-    done
+# The A2065 is the SLIRP board and the default bridged one, and it is the only
+# board whose driver is wanted unconditionally.  Asked for another card, this
+# used to demand an a2065.device that the run then overwrote the DEVICE= line
+# of, so a host with every PCMCIA driver and no LANCE driver could not run a
+# PCMCIA arm at all.
+A2065=""
+if [ "$BOARD" = a2065 ]; then
+    A2065="${AMINETXDUO_A2065:-}"
+    if [ -z "$A2065" ]; then
+        for candidate in \
+            "$ROOT/build/a2065.device" \
+            "$HOME/amiga-assets/devs/a2065.device"
+        do
+            [ -f "$candidate" ] && { A2065="$candidate"; break; }
+        done
+    fi
+    [ -n "$A2065" ] && [ -f "$A2065" ] || {
+        echo "No a2065.device found. Set AMINETXDUO_A2065=<path>." >&2
+        exit 2
+    }
 fi
-[ -n "$A2065" ] && [ -f "$A2065" ] || {
-    echo "No a2065.device found. Set AMINETXDUO_A2065=<path>." >&2
-    exit 2
-}
 
 # ----------------------------------------------------------------- staging ---
 
@@ -186,7 +223,7 @@ STAGE="$ROOT/build/iperf-stage-$AMINETXDUO_RUN_TAG"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
-cp "$A2065" "$STAGE/devs/a2065.device"
+[ -z "$A2065" ] || cp "$A2065" "$STAGE/devs/a2065.device"
 
 cat > "$STAGE/devs/NetInterfaces/eth0" <<IFEOF
 DEVICE=a2065.device
@@ -197,17 +234,65 @@ NETMASK=$NETMASK
 GATEWAY=$GATEWAY
 IFEOF
 
+# ------------------------------------------------------- which driver ---
+#
+# The question this run answers is whether OUR driver carries traffic on this
+# card, so anxnet.device is the default wherever tools/sana2-stage.sh says it
+# covers the board.  A hand-placed vendor driver in ~/amiga-assets/devs is NOT
+# preferred over it and is never a fallback for it: preferring one is how
+# `-N ne2000_pcmcia` booted cnet.device, measured cnet.device and printed PASS
+# for a run that never loaded anxnet.device.  A vendor driver is a request,
+# -V or AMINETXDUO_SANA2_VENDOR=1, and the choice is printed as key=value
+# below and asserted against the guest's own transcript at the end.
 if [ -n "$IFACE" ]; then
     . "$ROOT/tools/sana2-stage.sh"
-    if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
-        _want=$(sana2_driver_for "$BOARD")
-        _have=$(sana2_local_driver "$_want")
-        [ -n "$_have" ] && [ -f "$_have" ] &&
-            export AMINETXDUO_SANA2_DRIVER="$_have"
+    if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ]; then
+        sana2_select "$BOARD" "$BUILD"
+        if [ -z "$SANA2_SEL_PATH" ]; then
+            echo "-N $BOARD wants $SANA2_SEL_DRIVER and this host has not" \
+                 "got it." >&2
+            if [ "$SANA2_SEL_SOURCE" = anxnet ]; then
+                echo "Build the tree, or set AMINETXDUO_ANXNET=<path>." >&2
+                echo "This does NOT fall back to the vendor driver: that" >&2
+                echo "would measure somebody else's driver and call it ours." >&2
+                echo "To test the vendor driver on purpose, pass -V." >&2
+            else
+                echo "Put it in one of:" >&2
+                for _d in ${AMINETXDUO_SANA2_STORE:-} "$HOME/amiga-assets/devs"
+                do
+                    echo "  $_d" >&2
+                done
+                echo "or name one with AMINETXDUO_SANA2_DRIVER=<path>." >&2
+            fi
+            exit 2
+        fi
+        export AMINETXDUO_SANA2_DRIVER="$SANA2_SEL_PATH"
+        export AMINETXDUO_SANA2_DRIVER_NAME="${AMINETXDUO_SANA2_DRIVER_NAME:-$SANA2_SEL_DRIVER}"
+        export AMINETXDUO_SANA2_DEVICE="${AMINETXDUO_SANA2_DEVICE:-$SANA2_SEL_DRIVER}"
+        [ -z "$SANA2_SEL_CARD" ] ||
+            export AMINETXDUO_SANA2_CARD="${AMINETXDUO_SANA2_CARD:-$SANA2_SEL_CARD}"
+        DRIVER_SOURCE=$SANA2_SEL_SOURCE
+    else
+        # The caller spelled it out.  Believe it, and say that is what happened
+        # rather than reporting a source this script did not choose.
+        DRIVER_SOURCE=given
     fi
     sana2_stage "$BOARD" "$STAGE/devs"
-    echo "==> $BOARD: $SANA2_DRIVER, opened as '$SANA2_DEVICE'"
+    WANT_DEVICE=$SANA2_DEVICE
+    WANT_CARD=$SANA2_CARD
+    DRIVER_PATH=${AMINETXDUO_SANA2_DRIVER:-}
+else
+    # SLIRP boots the A2065 with the vendor LANCE driver.  Said out loud for
+    # the same reason as everything above: a reader must not have to infer it.
+    WANT_DEVICE=a2065.device
+    WANT_CARD=""
+    DRIVER_SOURCE=vendor
+    DRIVER_PATH=$A2065
 fi
+
+printf 'driver_board=%s driver_device=%s driver_card=%s driver_source=%s driver_path=%s\n' \
+       "$BOARD" "$WANT_DEVICE" "${WANT_CARD:-none}" "$DRIVER_SOURCE" \
+       "${DRIVER_PATH:-none}"
 
 cp "$BSD" "$STAGE/libs/bsdsocket.library"
 cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
@@ -427,6 +512,49 @@ elif [ "$BLOCKS" -eq "$EXPECTED_BLOCKS" ]; then
 else
     fail "expected $EXPECTED_BLOCKS command blocks, found $BLOCKS:" \
          "the machine rebooted, or the list was truncated"
+fi
+
+# ---- the run measured the driver it was asked to measure -----------------
+#
+# The gate this file went without.  Nothing else here mentions a driver: every
+# assertion below is about bytes, and bytes cross the wire just as happily
+# under somebody else's SANA-II driver as under ours.  `-N ne2000_pcmcia` used
+# to prefer a hand-placed cnet.device over anxnet.device, boot it, move real
+# bytes and report PASS, and the only way to notice was to read the boot log.
+#
+# AddNetInterface echoes DEVS:NetInterfaces/eth0 as "eth0: <driver> unit N
+# [card <card>]" before it starts anything, so the guest itself says which
+# driver the rest of the run went through.  Compare it to what was staged.
+
+IFCMD="SYS:AddNetInterface eth0"
+BOOTED=$(block "$IFCMD" 1 |
+         sed -n 's/^eth0: \([^ ]*\) unit [0-9].*/\1/p' | head -1)
+BOOTED_CARD=$(block "$IFCMD" 1 |
+              sed -n 's/^eth0: [^ ]* unit [0-9]* card \([^ ]*\).*/\1/p' | head -1)
+
+printf 'driver_asked=%s driver_booted=%s card_asked=%s card_booted=%s\n' \
+       "${WANT_DEVICE:-unknown}" "${BOOTED:-none}" \
+       "${WANT_CARD:-none}" "${BOOTED_CARD:-none}"
+
+if [ -z "$WANT_DEVICE" ]; then
+    skip "which driver this transcript went through: a replay knows what the" \
+         "guest printed and not what was staged for it"
+elif [ -z "$BOOTED" ]; then
+    fail "the guest never named a driver, so nothing here proves which one" \
+         "carried the bytes.  Expected '$WANT_DEVICE'."
+    show "$IFCMD" 1
+elif [ "$BOOTED" != "$WANT_DEVICE" ]; then
+    fail "asked for $WANT_DEVICE and the guest opened $BOOTED: every figure" \
+         "below is about $BOOTED and this run proves nothing about" \
+         "$WANT_DEVICE."
+    show "$IFCMD" 1
+elif [ "${BOOTED_CARD:-}" != "${WANT_CARD:-}" ]; then
+    fail "asked for $WANT_DEVICE CARD=${WANT_CARD:-none} and the guest opened" \
+         "it as CARD=${BOOTED_CARD:-none}, which is a different board"
+    show "$IFCMD" 1
+else
+    pass "the run went through $BOOTED (${DRIVER_SOURCE:-?})" \
+         "${WANT_CARD:+CARD=$WANT_CARD}, which is what was asked for"
 fi
 
 # ---- the help says which iperf this is ----------------------------------
