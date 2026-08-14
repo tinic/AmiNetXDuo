@@ -57,11 +57,11 @@ const NetdevCard netdev_cards[] =
      */
     { "a2065",      514,   112, 0x4000,     2,      0,
       NETDEV_CHIP_LANCE,   10000000UL, 0,  0x8000,  0x8000,  0x0000,
-      NETDEV_BUS_ZORRO, 0, 0, 0, 0 },
+      NETDEV_BUS_ZORRO, 0, 0, 0, 0x0080 },
 
     { "ariadne",   2167,   201, 0x0370,     2,      0,
       NETDEV_CHIP_LANCE,   10000000UL, 0,  0x8000,  0x8000,  0x0000,
-      NETDEV_BUS_ZORRO, 0, 0, 1 },
+      NETDEV_BUS_ZORRO, 0, 0, 1, 0x0060 },
 
     /*
      * The A1200/A600 PCMCIA slot.  No autoconfig record and no board base:
