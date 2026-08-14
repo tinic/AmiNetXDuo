@@ -81,11 +81,9 @@ card: `a2065.device`, `ariadne.device`, `ariadne2.device`, `amiganet.device`,
 `uaenet.device` for emulators are all offered by name in the installer, and
 anything else can be typed in.
 
-The archive carries a separate build for the 68000, the 68020–68040 and the
-68060, and the installer works out which one your machine wants. Encrypted
-(`https:`) connections need a 68020 or better; on a 68000 the cryptography
-takes longer than the other end will wait, so it is left out and everything
-else works as normal.
+The archive also carries `anxnet.device` in `Devs/Networks/`, worth installing
+by hand if you use IPv6 on an X-Surf or X-Surf 100, whose own drivers refuse
+the multicast addresses IPv6 needs.
 
 ## Installing
 

@@ -7,7 +7,7 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
-## Unreleased
+## 0.22.0
 
 - One `bsdsocket.library`, one `tls.library` and one `ssh` for every 68k. The installer no longer asks which processor this is and the archive has no drawer to pick wrong: each binary chooses the code for the machine it opens on. On an A1200 it is 0.4% faster than the 68000 build a cautious user was installing, and 0.8% behind the 68020 one
 - Encrypted connections work on a 68000. The archive carried no `tls.library` for one at all, so `https:` answered "there is none"; a TLS 1.3 handshake there now takes 58 s against an RSA certificate and 98 s against an EC one, and a resumed connection under a second
@@ -15,8 +15,8 @@ version at the top when it merges.
 - Encrypted transfers are faster on every machine: the GHASH step works a longword at a time rather than a byte. A handshake is 17% shorter on an A1200 and 12% on an A600
 - `C:ssh` is one binary rather than three, and the archive is two drawers rather than four — `Libs/` for every machine and `Libs/minimal/` for a 1 MB one
 - The minimal stack is what CI compiles and what the end-to-end installs. It shipped with the ARexx host and the `TCP:` handler in it while both were compiled out of the build being tested; it now leaves out all seven options and is 98 KB smaller than the full stack
-- `anxnet.device`, one network driver for six cards — X-Surf 100, Ariadne II, Hydra, the ASDG LAN Rover, the A2065 and the Ariadne. It takes the multicast addresses the shipping drivers refuse, so IPv6 reaches past the router on cards where it never has. The archive carries it in `Devs/Networks/`; the installer does not install it yet
-- `anxnet.device` reads faster than the driver it replaces on every card it covers, on both an A1200 and an A3000 — 4 to 15% depending on the card. Write is level or better everywhere except the Hydra and the LAN Rover, which are 3% behind
+- `anxnet.device`, one network driver for seven cards — X-Surf 100, Ariadne II, Hydra, the ASDG LAN Rover, the A2065, the Ariadne, and a PCMCIA network card in an A600 or A1200. It takes the multicast addresses the shipping drivers refuse, so IPv6 reaches past the router on cards where it never has. The archive carries it in `Devs/Networks/`; the installer does not install it yet
+- `anxnet.device` reads faster than the driver it replaces on six of those seven, on both an A1200 and an A3000 — 4 to 15% depending on the card. Write is level or better except on the Hydra and the LAN Rover, 3% behind; the PCMCIA card is 5% behind `cnet.device` both ways
 - `CARD=` in `DEVS:NetInterfaces/<name>` says which board the driver binds to, so one driver file serves every card without guessing. Naming a board the machine does not have refuses the interface and says so, instead of quietly binding to a different one
 - A peer sending a flood of tiny TCP segments can no longer exhaust the packet pool and stall the whole stack. The receive window was budgeted in bytes but the pool is spent one buffer per segment whatever its size, so a stream of one-byte segments pinned more buffers than the pool holds while the window still read almost empty; the queue is now bounded in buffers as well
 - A DHCP server that offers a finite lease with an infinite rebind time can no longer pin the client in RENEWING forever. It would sit renewing an address the server was free to hand to someone else, never rebinding and never expiring; an infinite rebind is now honoured only under a genuinely infinite lease
