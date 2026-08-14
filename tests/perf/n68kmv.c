@@ -42,7 +42,7 @@
 extern ULONG n68k_sum_longwords(const ULONG *p, ULONG count);
 extern ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from,
                                      ULONG count);
-extern VOID  n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len);
+extern VOID  n68k_copy_bytes(UBYTE *to, const UBYTE *from, ULONG len);
 extern VOID  n68k_cpu_select(ULONG attnflags);
 
 struct Device           *TimerBase;
@@ -63,14 +63,14 @@ extern ULONG n68k_copy_sum_longwords_mv40(ULONG *to, const ULONG *from,
 extern ULONG n68k_copy_sum_longwords_mv60(ULONG *to, const ULONG *from,
                                           ULONG count);
 
-extern VOID n68k_copy_bytes_mv0(UCHAR *to, const UCHAR *from, ULONG len);
-extern VOID n68k_copy_bytes_mv20(UCHAR *to, const UCHAR *from, ULONG len);
-extern VOID n68k_copy_bytes_mv40(UCHAR *to, const UCHAR *from, ULONG len);
-extern VOID n68k_copy_bytes_mv60(UCHAR *to, const UCHAR *from, ULONG len);
+extern VOID n68k_copy_bytes_mv0(UBYTE *to, const UBYTE *from, ULONG len);
+extern VOID n68k_copy_bytes_mv20(UBYTE *to, const UBYTE *from, ULONG len);
+extern VOID n68k_copy_bytes_mv40(UBYTE *to, const UBYTE *from, ULONG len);
+extern VOID n68k_copy_bytes_mv60(UBYTE *to, const UBYTE *from, ULONG len);
 
 extern ULONG (*n68k_vec_sum)(const ULONG *, ULONG);
 extern ULONG (*n68k_vec_copy_sum)(ULONG *, const ULONG *, ULONG);
-extern VOID  (*n68k_vec_copy)(UCHAR *, const UCHAR *, ULONG);
+extern VOID  (*n68k_vec_copy)(UBYTE *, const UBYTE *, ULONG);
 
 #define BUFW    512                     /* longwords */
 
@@ -79,10 +79,10 @@ static ULONG  dst[BUFW + 1];
 static ULONG  ref[BUFW + 1];
 
 /* Longword aligned, so the offsets below are the whole of what varies: an
-   array of UCHAR is only guaranteed to start on a word. */
-static UCHAR  bsrc[320] __attribute__((aligned(4)));
-static UCHAR  bdst[320] __attribute__((aligned(4)));
-static UCHAR  bref[320] __attribute__((aligned(4)));
+   array of UBYTE is only guaranteed to start on a word. */
+static UBYTE  bsrc[320] __attribute__((aligned(4)));
+static UBYTE  bdst[320] __attribute__((aligned(4)));
+static UBYTE  bref[320] __attribute__((aligned(4)));
 
 static ULONG  rng = 0x2545f491UL;
 static ULONG  failures;
@@ -207,7 +207,7 @@ static void check_copy_sum(const char *name,
  * an address error there by design -- and 16 everywhere else.
  */
 static void check_copy(const char *name,
-                       VOID (*fn)(UCHAR *, const UCHAR *, ULONG),
+                       VOID (*fn)(UBYTE *, const UBYTE *, ULONG),
                        int all_offsets)
 {
     /* 0..80 covers the byte tail, the 32-byte threshold and the alignment
@@ -273,7 +273,7 @@ static void bench_sum(const char *name, ULONG (*fn)(const ULONG *, ULONG),
 }
 
 static void bench_copy(const char *name,
-                       VOID (*fn)(UCHAR *, const UCHAR *, ULONG),
+                       VOID (*fn)(UBYTE *, const UBYTE *, ULONG),
                        ULONG len, ULONG reps)
 {
     ULONG t0, ticks, i;
@@ -332,7 +332,7 @@ int main(void)
     for (i = 0; i < BUFW; i++)
         src[i] = (rnd() << 8) ^ rnd();
     for (i = 0; i < sizeof(bsrc); i++)
-        bsrc[i] = (UCHAR)rnd();
+        bsrc[i] = (UBYTE)rnd();
 
     check_sum("mv0",  n68k_sum_longwords_mv0);
     check_sum("mv20", n68k_sum_longwords_mv20);
