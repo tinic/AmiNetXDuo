@@ -1,0 +1,351 @@
+#!/usr/bin/env bash
+#
+# Build the pinned m68k-amigaos cross toolchain from source.
+#
+#   tools/build-toolchain.sh                     # build into ./build-toolchain
+#   tools/build-toolchain.sh --package out.tar.xz
+#   tools/build-toolchain.sh --fetch-only        # just clone the sources
+#   tools/build-toolchain.sh --print-pins        # what this would build
+#
+# WHAT THIS BUILDS
+#
+#   GCC 16.2.0b + binutils 2.39.0 + NDK 3.9, targeting m68k-amigaos, from
+#   bebbo's amiga-gcc build system.  tools/fetch-toolchain.sh downloads a
+#   prebuilt copy of exactly this; that is the fast path and what CI uses.
+#   This script is the slow path: it is how the prebuilt asset is cut, and it
+#   is the answer to "the binary does not run on my machine".
+#
+#   Budget the better part of an hour and ~12 GB of disk.
+#
+# PINNED BY COMMIT, NOT BY BRANCH
+#
+#   bebbo's `amiga-2.39.0` and `amiga16.2` are branches, and branches move.
+#   Every source below is pinned to the exact commit the published assets were
+#   built from, and the clone is a fetch of that object by name.  A moved
+#   branch changes nothing here.
+#
+# WHY BINUTILS 2.39 AND NOT 2.46
+#
+#   2.46 cannot assemble GCC 16.2's own output: it forces the MIT-syntax
+#   pseudo-branches (jne, jeq, ...) to a byte displacement and then rejects
+#   thousands of them as operand mismatches.  It fails a second way, too --
+#   its `size` does not recognise the format of some of our own objects, so
+#   three targets fall back to unstripped binaries.  Under 2.39 the whole tree
+#   builds with no fallbacks.  The pairing is deliberate; do not "upgrade" it.
+#
+# WHERE THE SOURCES LIVE
+#
+#   bebbo's GitHub repositories are gone.  What survives is Codeberg and his
+#   own franke.ms Gitea.  They are not interchangeable: at the time of writing
+#   codeberg.org/bebbo/binutils-gdb does not carry the amiga-2.39.0 branch at
+#   all, and franke.ms is the only remote that serves that commit.  Each entry
+#   below therefore records the remote that was verified to serve its pin, and
+#   a mirror only where one actually exists.
+#
+# HOST REQUIREMENTS
+#
+#   Linux    build-essential, git, curl, python3, flex, bison, texinfo,
+#            libgmp-dev, libmpfr-dev, libmpc-dev, lhasa (or lha), rsync, xz
+#   macOS    Xcode command line tools, plus Homebrew: texinfo gmp mpfr libmpc
+#            lha rsync.  GNU rsync is REQUIRED -- macOS ships openrsync, which
+#            mishandles libnix's --exclude patterns and silently installs the
+#            wrong set of objects.  No container is used or needed.
+#
+# SPDX-License-Identifier: MIT
+
+set -euo pipefail
+
+# ------------------------------------------------------------------ pins ----
+
+# The amiga-gcc build system itself.
+PIN_AMIGA_GCC_URL="https://codeberg.org/bebbo/amiga-gcc"
+PIN_AMIGA_GCC_SHA="86f8ba62f7a5035e309600c86962681e1cbacccb"
+
+# projects/<name>|<remote that serves this commit>|<commit>|<branch it was on>
+#
+# The branch is recorded only so a human can find the commit again; nothing
+# reads it as a pin.  `binutils` has no mirror: only franke.ms carries 2.39.0.
+PINS="
+binutils|https://franke.ms/git/bebbo/binutils-gdb|ab4e5183f56fd83165356a03c890bf0b681d7535|amiga-2.39.0
+gcc|https://franke.ms/git/bebbo/gcc|6f4ca1b48cd0edef7d2ee8da1bf161124f685182|amiga16.2
+libnix|https://franke.ms/git/bebbo/libnix|b7268e35510b8b7b4ccdad67fbcbb25e73189aef|master
+sfdc|https://franke.ms/git/bebbo/sfdc|5d4efca359e949547553463f5873778bd85e5506|master
+fd2sfd|https://franke.ms/git/bebbo/fd2sfd|7f14d7f15aac2b8426f577f838069e53bf6008ea|master
+amiga-netinclude|https://franke.ms/git/bebbo/amiga-netinclude|b9a8d2cdd410dbb896a93bc9c64b253be436dd89|master
+aros-stuff|https://franke.ms/git/bebbo/aros-stuff|c0a06b4ccd13f52d1518540aa88a450d70581458|master
+fd2pragma|https://github.com/adtools/fd2pragma|8c0f352c348a3252f84170eab737919372562e82|master
+vasm|https://github.com/mheyer32/vasm|bb048d9d3cf54d5e38c643182a0ff55b552f65be|master
+"
+
+# A mirror to try first where one exists, keyed by project name.  Only gcc has
+# one that was confirmed to serve the pinned object.
+MIRROR_gcc="https://codeberg.org/bebbo/gcc"
+
+# NDK 3.9.  A single unmirrored third-party host, which is why the built
+# toolchain is worth publishing at all.  Pinned by content.
+PIN_NDK_URL="http://hp.alinea-computer.de/AmigaOS/NDK39.lha"
+PIN_NDK_SHA256="ca5d8f923158d69a9c15b59d6e1580555ca6c0a48be21c5226c71f90fc927ca6"
+
+# What the result must report, checked at the end.
+EXPECT_GCC_VERSION="16.2.0b"
+
+# amiga-gcc target list.  NOT `all`: that drags in gdb, which wants a host
+# GMP/MPFR it does not need here, and libSDL12, which this project never uses.
+MAKE_TARGETS="binutils gcc gprof fd2sfd fd2pragma sfdc vasm libnix libgcc libpthread ndk ndk13"
+
+# --------------------------------------------------------------- options ----
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+WORK="$PWD/build-toolchain"
+PREFIX=""
+PACKAGE=""
+JOBS=""
+FETCH_ONLY=0
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --work)     WORK="$2"; shift ;;
+        --prefix)   PREFIX="$2"; shift ;;
+        --package)  PACKAGE="$2"; shift ;;
+        -j)         JOBS="$2"; shift ;;
+        -j*)        JOBS="${1#-j}" ;;
+        --fetch-only) FETCH_ONLY=1 ;;
+        --print-pins)
+            printf 'amiga-gcc %s %s\n' "$PIN_AMIGA_GCC_SHA" "$PIN_AMIGA_GCC_URL"
+            printf '%s\n' "$PINS" | while IFS='|' read -r n u s b; do
+                [ -n "$n" ] || continue
+                printf '%-17s %s %s (%s)\n' "$n" "$s" "$u" "$b"
+            done
+            printf 'NDK3.9.lha        sha256:%s %s\n' "$PIN_NDK_SHA256" "$PIN_NDK_URL"
+            exit 0 ;;
+        -h|--help)  sed -n '2,50p' "$0"; exit 0 ;;
+        *) echo "usage: $0 [--work DIR] [--prefix DIR] [--package FILE.tar.xz] [-j N] [--fetch-only]" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+# The tarball is extracted so that <root>/bin/m68k-amigaos-gcc lands where
+# fetch-toolchain.sh expects, which means the build has to happen under a
+# directory literally named opt/m68k-amigaos.
+[ -n "$PREFIX" ] || PREFIX="$WORK/opt/m68k-amigaos"
+
+# ---------------------------------------------------------------- host ------
+
+OS=$(uname -s)
+ARCH=$(uname -m)
+
+need() { command -v "$1" >/dev/null 2>&1 || { echo "!! missing required tool: $1" >&2; exit 2; }; }
+for t in git curl make python3 tar; do need "$t"; done
+
+if [ -z "$JOBS" ]; then
+    if command -v nproc >/dev/null 2>&1; then JOBS=$(nproc)
+    elif command -v sysctl >/dev/null 2>&1; then JOBS=$(sysctl -n hw.ncpu)
+    else JOBS=4; fi
+fi
+
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+    else shasum -a 256 "$1" | cut -d' ' -f1; fi
+}
+
+case "$OS" in
+Darwin)
+    BREW=$(command -v brew >/dev/null 2>&1 && brew --prefix || echo /opt/homebrew)
+    [ -d "$BREW" ] || { echo "!! Homebrew not found; see HOST REQUIREMENTS" >&2; exit 2; }
+
+    # configure looks for gmp/mpfr in the default search path and Homebrew is
+    # not on it.
+    export CPPFLAGS="-I$BREW/include ${CPPFLAGS:-}"
+    export LDFLAGS="-L$BREW/lib ${LDFLAGS:-}"
+    export PATH="$BREW/bin:$BREW/opt/texinfo/bin:$PATH"
+
+    # clang 16 made an old-style function-pointer mismatch a hard error, and
+    # binutils 2.39 has one: objdump.c:4196 assigns dummy_fprintf, which
+    # ignores every argument, to memory_error_func.  --disable-werror does not
+    # reach it -- it is an error, not a warning.
+    export CFLAGS="-Os -Wno-incompatible-function-pointer-types ${CFLAGS:-}"
+    export CXXFLAGS="$CFLAGS"
+
+    # libnix installs with `rsync --exclude`, and macOS's openrsync gets those
+    # patterns wrong: the build succeeds and the library is short some objects.
+    if ! rsync --version 2>/dev/null | head -1 | grep -qi 'rsync.*version.*protocol'; then
+        echo "!! rsync on PATH is not GNU rsync (macOS ships openrsync)." >&2
+        echo "   brew install rsync, and make sure $BREW/bin comes first." >&2
+        exit 2
+    fi
+    for t in lha makeinfo; do need "$t"; done
+    ;;
+Linux)
+    # Nothing.  gcc accepts binutils 2.39's objdump.c, the system zlib and
+    # gmp/mpfr are where configure looks, and rsync is GNU rsync.
+    for t in makeinfo; do need "$t"; done
+    command -v lha >/dev/null 2>&1 || command -v lhasa >/dev/null 2>&1 || {
+        echo "!! need lha or lhasa to unpack the NDK" >&2; exit 2; }
+    ;;
+*)
+    echo "!! unsupported build host: $OS.  Linux and macOS only." >&2
+    exit 2 ;;
+esac
+
+echo "==> host $OS/$ARCH, -j$JOBS"
+echo "==> work   $WORK"
+echo "==> prefix $PREFIX"
+
+# --------------------------------------------------------------- sources ----
+
+mkdir -p "$WORK"
+SRC="$WORK/amiga-gcc"
+
+# Fetch one commit by name.  --depth 1 of a named object is the whole point:
+# no branch is consulted, so nothing can drift, and gcc's history stays
+# unfetched.  Falls back to a deepening branch fetch for a server that refuses
+# uploadpack.allowReachableSHA1InWant.
+fetch_pinned() {
+    local dir="$1" url="$2" sha="$3" branch="$4" mirror="${5:-}"
+
+    if [ -d "$dir/.git" ] && [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" = "$sha" ]; then
+        echo "    $(basename "$dir") already at ${sha:0:12}"
+        return 0
+    fi
+
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    git -C "$dir" init -q
+    git -C "$dir" remote add origin "$url"
+    [ -n "$mirror" ] && git -C "$dir" remote add mirror "$mirror"
+
+    local remote
+    for remote in origin ${mirror:+mirror}; do
+        echo "    $(basename "$dir") <- $remote ${sha:0:12}"
+        if git -C "$dir" fetch -q --depth 1 "$remote" "$sha" 2>/dev/null; then
+            git -C "$dir" checkout -q FETCH_HEAD
+            return 0
+        fi
+        local depth=32
+        while [ "$depth" -le 4096 ]; do
+            git -C "$dir" fetch -q --depth "$depth" "$remote" "$branch" 2>/dev/null || break
+            if git -C "$dir" cat-file -e "$sha^{commit}" 2>/dev/null; then
+                git -C "$dir" checkout -q "$sha"
+                return 0
+            fi
+            depth=$((depth * 2))
+        done
+    done
+
+    echo "!! could not fetch $sha for $(basename "$dir") from $url" >&2
+    return 1
+}
+
+echo "==> sources"
+fetch_pinned "$SRC" "$PIN_AMIGA_GCC_URL" "$PIN_AMIGA_GCC_SHA" master
+
+mkdir -p "$SRC/projects" "$SRC/download"
+printf '%s\n' "$PINS" | while IFS='|' read -r name url sha branch; do
+    [ -n "$name" ] || continue
+    eval "mirror=\${MIRROR_$(printf '%s' "$name" | tr -c 'A-Za-z0-9' '_'):-}"
+    fetch_pinned "$SRC/projects/$name" "$url" "$sha" "$branch" "$mirror"
+done
+
+# amiga-gcc consults .repos for anything not already cloned.  Everything the
+# target list needs is pinned above, so this only exists so a stray `make
+# update` or an added target reaches a remote that is still alive rather than
+# the dead GitHub ones in the shipped default.
+{
+    printf '%s\n' "$PINS" | while IFS='|' read -r name url sha branch; do
+        [ -n "$name" ] || continue
+        printf '%-18s %s\t%s\n' "$name" "$url" "$branch"
+    done
+} > "$SRC/.repos"
+
+# --- NDK ---------------------------------------------------------------------
+
+NDK_LHA="$SRC/download/NDK3.9.lha"
+if [ ! -f "$NDK_LHA" ] || [ "$(sha256_of "$NDK_LHA")" != "$PIN_NDK_SHA256" ]; then
+    echo "    NDK3.9.lha <- $PIN_NDK_URL"
+    curl -fsSL --retry 3 --retry-connrefused --retry-delay 2 --connect-timeout 30 \
+         "$PIN_NDK_URL" -o "$NDK_LHA.tmp"
+    got=$(sha256_of "$NDK_LHA.tmp")
+    if [ "$got" != "$PIN_NDK_SHA256" ]; then
+        echo "!! NDK3.9.lha does not match its pin" >&2
+        echo "   want $PIN_NDK_SHA256" >&2
+        echo "   got  $got" >&2
+        rm -f "$NDK_LHA.tmp"
+        exit 1
+    fi
+    mv "$NDK_LHA.tmp" "$NDK_LHA"
+fi
+echo "    NDK3.9.lha sha256 verified"
+
+[ "$FETCH_ONLY" = "1" ] && { echo "==> --fetch-only, stopping"; exit 0; }
+
+# --------------------------------------------------------------- patches ----
+
+# binutils 2.39 bundles a zlib whose headers collide with a current macOS SDK's
+# _stdio.h and the build dies in libz_a-zutil.o.  The system zlib is fine and
+# is what everything else links anyway, on both hosts, so this is unconditional
+# rather than one more thing that is only exercised on one platform.
+if ! grep -q 'with-system-zlib' "$SRC/Makefile"; then
+    python3 - "$SRC/Makefile" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "CONFIG_BINUTILS =--prefix=$(PREFIX)"
+i = s.index(anchor)
+j = s.index("\n", i) + 1
+s = s[:j] + "CONFIG_BINUTILS += --with-system-zlib\n" + s[j:]
+open(p, "w").write(s)
+PY
+    echo "==> patched CONFIG_BINUTILS += --with-system-zlib"
+fi
+
+# ----------------------------------------------------------------- build ----
+
+mkdir -p "$PREFIX"
+echo "==> make $MAKE_TARGETS"
+( cd "$SRC" && make NDK=3.9 PREFIX="$PREFIX" -j"$JOBS" $MAKE_TARGETS )
+
+# ------------------------------------------------------------- post-build ----
+
+# The same two repairs fetch-toolchain.sh applies to a downloaded tree, applied
+# here so a locally built one is equally sound before anything links against
+# it.  Both are idempotent and leave a clean tree alone, so applying them twice
+# (here, then again on install) costs nothing.
+if [ -f "$HERE/fix-toolchain-crt0.py" ]; then
+    echo "==> crt0 frame skew"
+    python3 "$HERE/fix-toolchain-crt0.py" "$PREFIX"
+fi
+if [ -f "$HERE/fix-toolchain-inline-const.py" ]; then
+    echo "==> NDK inline register ABI"
+    python3 "$HERE/fix-toolchain-inline-const.py" "$PREFIX"
+fi
+
+VER=$("$PREFIX/bin/m68k-amigaos-gcc" -dumpversion 2>/dev/null || echo "")
+if [ "$VER" != "$EXPECT_GCC_VERSION" ]; then
+    echo "!! expected GCC $EXPECT_GCC_VERSION, got '${VER:-nothing}'" >&2
+    exit 1
+fi
+[ -f "$PREFIX/m68k-amigaos/ndk-include/exec/types.h" ] || {
+    echo "!! no NDK headers under $PREFIX/m68k-amigaos/ndk-include" >&2; exit 1; }
+
+echo "==> built GCC $VER at $PREFIX"
+
+# --------------------------------------------------------------- package ----
+
+if [ -n "$PACKAGE" ]; then
+    # The archive must carry the opt/m68k-amigaos prefix: that is the single
+    # path fetch-toolchain.sh strips, and it is what the AmigaPorts image layer
+    # used, so both sources stay interchangeable.
+    TARROOT=$(cd "$PREFIX/../.." && pwd)
+    case "$PREFIX" in
+        "$TARROOT/opt/m68k-amigaos") ;;
+        *) echo "!! --package needs --prefix to end in opt/m68k-amigaos (got $PREFIX)" >&2; exit 2 ;;
+    esac
+    echo "==> packaging $PACKAGE"
+    mkdir -p "$(dirname "$PACKAGE")"
+    # Reproducible-ish: sorted, no owner names, no macOS extended attributes.
+    ( cd "$TARROOT" && COPYFILE_DISABLE=1 tar --no-xattrs -cf - opt/m68k-amigaos 2>/dev/null \
+        || tar -cf - opt/m68k-amigaos ) | xz -T0 -9 > "$PACKAGE.tmp"
+    mv "$PACKAGE.tmp" "$PACKAGE"
+    echo "    $(sha256_of "$PACKAGE")  $(basename "$PACKAGE")"
+    ls -l "$PACKAGE"
+fi
