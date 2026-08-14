@@ -219,12 +219,27 @@ fi
 
 EXTRA_C=("$STAGE/c")
 # ssh.  dbclient is built by clients/dropbear/build.sh, NOT by the CMake tree,
-# so a plain `cmake --build` does not produce it and it lands in
-# build/dropbear/dbclient rather than anywhere under clients/.  Staging it
-# from the wrong path is a silent omission -- the Shell simply has no ssh --
-# so say so loudly when it is absent.
-if [ -f "$ROOT/build/dropbear/dbclient" ]; then
-    cp -f "$ROOT/build/dropbear/dbclient" "$STAGE/c/ssh"
+# so a plain `cmake --build` does not produce it and it lands under build/
+# rather than anywhere under clients/.  Staging it from the wrong path is a
+# silent omission -- the Shell simply has no ssh -- so the places it is
+# actually built into are named here and the one taken is printed.
+#
+#   build/ssh          what .github/workflows/release.yml builds and packs
+#   build/dropbear     the script's own default -b
+#   build/dropbear-any an explicitly named one-binary build
+#
+# AMINETXDUO_DEMO_SSH overrides all three.
+DEMO_SSH="${AMINETXDUO_DEMO_SSH:-}"
+if [ -z "$DEMO_SSH" ]; then
+    for _c in build/ssh build/dropbear build/dropbear-any; do
+        [ -f "$ROOT/$_c/dbclient" ] || continue
+        DEMO_SSH="$ROOT/$_c/dbclient"
+        break
+    done
+fi
+if [ -n "$DEMO_SSH" ] && [ -f "$DEMO_SSH" ]; then
+    cp -f "$DEMO_SSH" "$STAGE/c/ssh"
+    echo "==> ssh from $DEMO_SSH"
 else
     echo "==> no ssh: run clients/dropbear/build.sh to get one" >&2
 fi
