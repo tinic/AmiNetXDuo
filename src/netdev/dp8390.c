@@ -80,9 +80,22 @@ VOID dp8390_config(NetdevNic *nic)
 
 /* ----------------------------------------------------------------- halt --- */
 
+/*
+ * What the poll waits for is the frame in progress finishing, which at 10 Mbit
+ * is at most 1214 us for a maximum-length frame.  The old bound of 5000 was a
+ * count with no time behind it, and it is reached EVERY time on an emulated
+ * NE2000, which never asserts ISR.RST: two register accesses per iteration at
+ * 0.82 us each measured 8.1-8.4 ms with interrupts disabled, on the offline,
+ * expunge and chip-reset paths.  900 iterations is that same worst-case frame
+ * time and a margin.  A real chip does assert RST and leaves long before the
+ * bound, so this is not a shorter wait for it -- it is a bound that means
+ * something for the case where the bit never arrives.
+ */
+#define DP8390_HALT_POLLS   900
+
 VOID dp8390_halt(NetdevNic *nic)
 {
-    UWORD n = 5000;
+    UWORD n = DP8390_HALT_POLLS;
 
     NIC_PUT(nic, ED_P0_CR, nic->cr_proto | ED_CR_PAGE_0 | ED_CR_STP);
 
