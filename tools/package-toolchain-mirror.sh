@@ -106,11 +106,11 @@ echo "    -> $OUT"
 # PREFER NOT RENAMING.  tools/build-toolchain.sh already builds into
 # .../opt/m68k-amigaos, and a tree that is already in the right shape is
 # archived with no path rewriting at all.  Renaming is the fallback, for a tree
-# somewhere else, and it is the risky path: bsdtar's -s rewrites SYMLINK
-# TARGETS as well as member names by default, so a source directory named
-# `m68k-amigaos` would silently turn every `m68k-amigaos-*` symlink target into
-# `opt/m68k-amigaos-*` and ship a tarball of dangling links.  The `S` modifier
-# turns that off; GNU tar leaves symlink targets alone unless asked.
+# somewhere else, and it is the risky path: BOTH tars rewrite SYMLINK TARGETS
+# as well as member names by default, so a source directory named
+# `m68k-amigaos` silently turns every `m68k-amigaos-*` symlink target into
+# `opt/m68k-amigaos-*` and ships a tarball of dangling links.  Measured, not
+# assumed: bsdtar needs the `S` modifier and GNU tar needs `flags=r` to stop.
 SRC_PARENT=$(cd "$FROM/.." && pwd)
 SRC_BASE=$(basename "$FROM")
 
@@ -127,7 +127,7 @@ else
     if [ "$IS_BSDTAR" = "1" ]; then
         TAR_FLAGS+=(-s "|^${SRC_BASE}|${PREFIX}|S")
     else
-        TAR_FLAGS+=(--transform "s|^${SRC_BASE}|${PREFIX}|")
+        TAR_FLAGS+=(--transform "flags=r;s|^${SRC_BASE}|${PREFIX}|")
     fi
 fi
 
