@@ -60,6 +60,8 @@ typedef struct NetdevCard
        where a silently-defaulted field would be worth catching. */
     UBYTE       bus;            /* NETDEV_BUS_*                               */
     ULONG       base;           /* NETDEV_BUS_PCMCIA: the fixed window base   */
+    ULONG       odd_off;        /* odd-register window, offset from base; 0 =
+                                   the register file is contiguous            */
 } NetdevCard;
 
 extern const NetdevCard netdev_cards[];

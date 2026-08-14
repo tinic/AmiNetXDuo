@@ -1095,6 +1095,13 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
                  ? (APTR)((UBYTE *)board + card->wide_off)
                  : NULL);
 
+    /* A register file split across two windows, which is Gayle's PCMCIA I/O
+       and nothing else in the table. */
+    if (card->odd_off != 0)
+        netdev_bus_split(&unit->nu_Nic.bus,
+                         (APTR)((UBYTE *)board + card->odd_off +
+                                card->reg_off));
+
     nd_tracex("anx: board ", (ULONG)board);
     if (unit->nu_Nic.ops->attach(&unit->nu_Nic) != 0)
     {

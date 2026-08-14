@@ -58,6 +58,19 @@ struct NetdevBus
     volatile UBYTE *nic;        /* register file, index 0 */
     volatile UBYTE *asic;       /* nic + 16 * stride, unless overridden */
     volatile UBYTE *wide;       /* 32-bit mirrored data window, or NULL */
+
+    /*
+     * The odd-register window, or NULL when the register file is contiguous.
+     *
+     * Gayle splits PCMCIA I/O in two: 0xA20000 carries 16-bit accesses and
+     * the EVEN 8-bit registers, 0xA30000 the odd ones, and both are addressed
+     * at even offsets.  An odd register reached at an odd address in the even
+     * window is not a register access on the real card.  Amiberry decodes it
+     * 1:1 and accepts it either way, which is exactly why this is written
+     * down: cnet.device, which was written for the hardware, uses an even
+     * address in both windows and never anything else.
+     */
+    volatile UBYTE *odd;
     UWORD           stride;     /* bytes between consecutive register indices */
     UBYTE           shift;      /* log2(stride); 1, 2 and 4 are the only ones */
     UBYTE           dmode;      /* NETDEV_DMODE_*, set by the probe */
@@ -70,6 +83,9 @@ extern const struct NetdevBusOps netdev_bus_generic;
 
 /* base is the board's register window; stride is 1, 2 or 4. */
 VOID netdev_bus_setup(NetdevBus *bus, APTR base, UWORD stride, APTR wide);
+
+/* Call after setup for a card whose odd registers live in a second window. */
+VOID netdev_bus_split(NetdevBus *bus, APTR odd);
 
 /*
  * Promote to NETDEV_DMODE_LONG only if the wide window really is the same
@@ -97,16 +113,26 @@ extern ULONG netdev_time_regs;      /* scalar register accesses, per report */
 #define NETDEV_BUS_COUNT()  ((VOID)0)
 #endif
 
+/* Where register `reg` is.  One predictable test for the cards that need the
+   split; NULL for every board whose file is contiguous. */
+static inline volatile UBYTE *netdev_bus_at(const NetdevBus *bus, UWORD reg)
+{
+    if (bus->odd != NULL && (reg & 1) != 0)
+        return &bus->odd[(ULONG)(reg - 1) << bus->shift];
+
+    return &bus->nic[(ULONG)reg << bus->shift];
+}
+
 static inline UBYTE netdev_bus_r8(const NetdevBus *bus, UWORD reg)
 {
     NETDEV_BUS_COUNT();
-    return bus->nic[(ULONG)reg << bus->shift];
+    return *netdev_bus_at(bus, reg);
 }
 
 static inline VOID netdev_bus_w8(const NetdevBus *bus, UWORD reg, UBYTE val)
 {
     NETDEV_BUS_COUNT();
-    bus->nic[(ULONG)reg << bus->shift] = val;
+    *netdev_bus_at(bus, reg) = val;
 }
 
 static inline UBYTE netdev_bus_ra8(const NetdevBus *bus, UWORD reg)
