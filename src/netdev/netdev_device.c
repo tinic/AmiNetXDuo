@@ -231,6 +231,8 @@ static VOID nd_time_report(VOID)
         nd_t_probe = nd_since(tp);
     }
     nd_tracex("t hook   ", nd_t_hook);
+    nd_tracex("t isr    ", nd_t_isr);
+    nd_tracex("t copy   ", nd_t_copy);
     nd_tracex("t ntx    ", nd_n_tx);
     nd_tracex("t bld    ", nd_t_bld);
     nd_tracex("t iss    ", nd_t_iss);
@@ -655,6 +657,39 @@ static LONG netdev_tx_issue(NetdevUnit *unit, struct IOSana2Req *io,
 }
 
 /*
+ * The timing build's way in.  Wrappers rather than spans inside the two
+ * functions, because the transmit rewrite already lost one set of spans that
+ * were inlined into a body -- these cannot be dropped by editing the body.
+ */
+#ifdef NETDEV_TIME
+static UWORD netdev_tx_timed_build(NetdevUnit *unit, struct IOSana2Req *io,
+                                   NetdevOpener *op)
+{
+    ULONG t = nd_now();
+    UWORD n = netdev_tx_build(unit, io, op);
+
+    nd_t_bld += nd_since(t);
+    nd_n_tx++;
+
+    return n;
+}
+
+static LONG netdev_tx_timed_issue(NetdevUnit *unit, struct IOSana2Req *io,
+                                  NetdevOpener *op, UWORD total)
+{
+    ULONG t = nd_now();
+    LONG  r = netdev_tx_issue(unit, io, op, total);
+
+    nd_t_iss += nd_since(t);
+
+    return r;
+}
+#else
+#define netdev_tx_timed_build(u, i, o)      netdev_tx_build((u), (i), (o))
+#define netdev_tx_timed_issue(u, i, o, t)   netdev_tx_issue((u), (i), (o), (t))
+#endif
+
+/*
  * Drain the queue into whatever transmit buffers the chip has free.  Runs
  * from the interrupt server after a transmit completes, and from BeginIO for
  * anything that could not take the direct path.  The caller holds Disable().
@@ -677,11 +712,11 @@ VOID netdev_tx_pump(NetdevUnit *unit)
         io = (struct IOSana2Req *)RemHead(&unit->nu_Writes);
         op = NETDEV_OPENER(io->ios2_Req.io_Unit);
 
-        total = netdev_tx_build(unit, io, op);
+        total = netdev_tx_timed_build(unit, io, op);
         if (total == 0)
             continue;
 
-        rc = netdev_tx_issue(unit, io, op, total);
+        rc = netdev_tx_timed_issue(unit, io, op, total);
         if (rc == DP8390_TX_BUSY)
         {
             AddHead(&unit->nu_Writes, &io->ios2_Req.io_Message.mn_Node);
@@ -733,7 +768,7 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
     unit->nu_TxBuilding = 1;
     Enable();
 
-    total = netdev_tx_build(unit, io, op);
+    total = netdev_tx_timed_build(unit, io, op);
 
     Disable();
     unit->nu_TxBuilding = 0;
@@ -744,7 +779,7 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
         return;
     }
 
-    rc = netdev_tx_issue(unit, io, op, total);
+    rc = netdev_tx_timed_issue(unit, io, op, total);
     if (rc == DP8390_TX_BUSY)
     {
         AddHead(&unit->nu_Writes, &io->ios2_Req.io_Message.mn_Node);
