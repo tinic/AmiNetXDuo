@@ -212,6 +212,8 @@ static ULONG nd_t_bld;      /* the opener's CopyFrom, framing a transmit     */
 static ULONG nd_t_iss;      /* ops->tx: register setup and the port writes   */
 static ULONG nd_t_rep;      /* netdev_reply on the transmit side             */
 static ULONG nd_n_tx;
+static ULONG nd_regs_isr;   /* scalar accesses inside the chip service */
+static ULONG nd_regs_tx;    /* scalar accesses inside ops->tx          */
 static ULONG nd_n_int;
 static ULONG nd_n_frame;
 static ULONG nd_n_hook;
@@ -239,7 +241,9 @@ static VOID nd_time_report(VOID)
     }
     nd_tracex("t hook   ", nd_t_hook);
     nd_tracex("t regs   ", netdev_time_regs);
-    netdev_time_regs = 0;
+    nd_tracex("t rgisr  ", nd_regs_isr);
+    nd_tracex("t rgtx   ", nd_regs_tx);
+    netdev_time_regs = nd_regs_isr = nd_regs_tx = 0;
     nd_tracex("t isr    ", nd_t_isr);
     nd_tracex("t copy   ", nd_t_copy);
     nd_tracex("t ntx    ", nd_n_tx);
@@ -695,10 +699,12 @@ static UWORD netdev_tx_timed_build(NetdevUnit *unit, struct IOSana2Req *io,
 static LONG netdev_tx_timed_issue(NetdevUnit *unit, struct IOSana2Req *io,
                                   NetdevOpener *op, UWORD total)
 {
-    ULONG t = nd_now();
-    LONG  r = netdev_tx_issue(unit, io, op, total);
+    ULONG t  = nd_now();
+    ULONG r0 = netdev_time_regs;
+    LONG  r  = netdev_tx_issue(unit, io, op, total);
 
     nd_t_iss += nd_since(t);
+    nd_regs_tx += netdev_time_regs - r0;
 
     return r;
 }
@@ -1011,10 +1017,12 @@ static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
 #ifdef NETDEV_TIME
     {
         ULONG t0 = nd_now();
+        ULONG r0 = netdev_time_regs;
         BOOL  mine;
 
         mine = unit->nu_Nic.ops->intr(&unit->nu_Nic);
         nd_t_isr += nd_since(t0);
+        nd_regs_isr += netdev_time_regs - r0;
         nd_n_int++;
         if (!mine)
             return 0;
