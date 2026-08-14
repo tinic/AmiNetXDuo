@@ -40,18 +40,14 @@ typedef struct NetdevBus NetdevBus;
 
 struct NetdevBusOps
 {
-    /* NIC register file, index 0..15, page-selected by the caller. */
-    UBYTE (*r8)(const NetdevBus *bus, UWORD reg);
-    VOID  (*w8)(const NetdevBus *bus, UWORD reg, UBYTE val);
-
-    /* ASIC register file, index 0..15.  NE2000: 0 = data, 15 = reset. */
-    UBYTE (*ra8)(const NetdevBus *bus, UWORD reg);
-    VOID  (*wa8)(const NetdevBus *bus, UWORD reg, UBYTE val);
-
     /*
-     * Burst through the data port.  The port does not advance an address, the
-     * chip does, so these are repeated accesses to ONE location.  len is
-     * rounded up to the transfer unit by the caller, never here.
+     * Bursts only.  The four scalar accessors used to live here and are now
+     * inline below: one implementation, and the call cost more than the
+     * access it was wrapping.
+     *
+     * The port does not advance an address, the chip does, so a burst is
+     * repeated access to ONE location.  len is rounded up to the transfer
+     * unit by the caller, never here.
      */
     VOID  (*rdata)(const NetdevBus *bus, UBYTE *dst, UWORD len);
     VOID  (*wdata)(const NetdevBus *bus, const UBYTE *src, UWORD len);

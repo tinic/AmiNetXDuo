@@ -19,26 +19,6 @@
  */
 #define BUS_ALIGN(p, n) (((unsigned long)(const void *)(p)) & (unsigned long)(n))
 
-static UBYTE bus_r8(const NetdevBus *bus, UWORD reg)
-{
-    return bus->nic[reg * bus->stride];
-}
-
-static VOID bus_w8(const NetdevBus *bus, UWORD reg, UBYTE val)
-{
-    bus->nic[reg * bus->stride] = val;
-}
-
-static UBYTE bus_ra8(const NetdevBus *bus, UWORD reg)
-{
-    return bus->asic[reg * bus->stride];
-}
-
-static VOID bus_wa8(const NetdevBus *bus, UWORD reg, UBYTE val)
-{
-    bus->asic[reg * bus->stride] = val;
-}
-
 /*
  * The 32-bit window is 128 bytes of the same FIFO mirrored end to end, so a
  * `movem.l` reads sixteen longwords from sixteen consecutive addresses and
@@ -225,10 +205,7 @@ static VOID bus_wdata(const NetdevBus *bus, const UBYTE *src, UWORD len)
         *port = (UWORD)(src[i] << 8);
 }
 
-const struct NetdevBusOps netdev_bus_generic =
-{
-    bus_r8, bus_w8, bus_ra8, bus_wa8, bus_rdata, bus_wdata
-};
+const struct NetdevBusOps netdev_bus_generic = { bus_rdata, bus_wdata };
 
 VOID netdev_bus_setup(NetdevBus *bus, APTR base, UWORD stride, APTR wide)
 {

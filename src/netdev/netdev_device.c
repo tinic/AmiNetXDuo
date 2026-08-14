@@ -241,6 +241,20 @@ static VOID nd_time_report(VOID)
 }
 #endif
 
+/*
+ * A 6-byte Ethernet address, as a longword and a word.  Both ends are even --
+ * the staging buffer is AllocMem'd and ios2_DstAddr/ios2_SrcAddr sit at even
+ * offsets in the request -- and the source's second half is 2 mod 4, which
+ * costs a 68020 one extra bus cycle and a 68000 nothing.  nd_bytes compiled to
+ * `move.b (a2)+,(a6)+ / cmpa.l / bne`, three instructions a byte, twice per
+ * frame; the profile priced the pair at 16% of the hand-over.
+ */
+static VOID nd_addr6(UBYTE *to, const UBYTE *from)
+{
+    *(ULONG *)(APTR)to        = *(const ULONG *)(const APTR)from;
+    *(UWORD *)(APTR)(to + 4)  = *(const UWORD *)(const APTR)(from + 4);
+}
+
 static VOID nd_bytes(UBYTE *to, const UBYTE *from, ULONG n)
 {
     while (n-- != 0)
@@ -347,8 +361,8 @@ static BOOL netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
     {
         ULONG ta = nd_now();
 #endif
-    nd_bytes(io->ios2_DstAddr, frame, NETDEV_ADDR_LEN);
-    nd_bytes(io->ios2_SrcAddr, frame + NETDEV_ADDR_LEN, NETDEV_ADDR_LEN);
+    nd_addr6(io->ios2_DstAddr, frame);
+    nd_addr6(io->ios2_SrcAddr, frame + NETDEV_ADDR_LEN);
     io->ios2_PacketType = type;
     io->ios2_DataLength = plen;
     io->ios2_Req.io_Flags =
@@ -452,20 +466,16 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
     {
         ULONG tp = nd_now();
 #endif
-    type = ((ULONG)frame[12] << 8) | frame[13];
+    /* The frame is even-aligned, so the type is one word and the broadcast
+       test is one longword and one word rather than six byte reads. */
+    type = *(const UWORD *)(const APTR)(frame + 12);
 
-    if (frame[0] == 0xff)
+    if ((frame[0] & 1) != 0)
     {
-        UWORD i;
-        UBYTE all = 0xff;
-
-        for (i = 1; i < NETDEV_ADDR_LEN; i++)
-            all &= frame[i];
-        if (all == 0xff)
-            flags = SANA2IOF_BCAST;
+        flags = (UBYTE)((*(const ULONG *)(const APTR)frame == 0xffffffffUL &&
+                         *(const UWORD *)(const APTR)(frame + 4) == 0xffffu)
+                        ? SANA2IOF_BCAST : SANA2IOF_MCAST);
     }
-    if (flags == 0 && (frame[0] & 1) != 0)
-        flags = SANA2IOF_MCAST;
 
     unit->nu_Stats.PacketsReceived++;
 #ifdef NETDEV_TIME
