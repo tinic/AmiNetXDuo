@@ -23,6 +23,7 @@
    and fails on a machine with the other NDK, which is how it reached CI.
    src/bsdsocket/bsdsocket_internal.h and src/usergroup/ug_library.c both name
    it for the same reason. */
+#include <exec/execbase.h>   /* AttnFlags, for c68k_cpu_select() */
 #include <exec/resident.h>
 #include <proto/exec.h>
 
