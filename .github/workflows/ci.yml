@@ -29,6 +29,46 @@ concurrency:
 
 jobs:
 
+  # Every option arm, one runner each, at the same time as the job above.
+  # Not `needs:` -- a failure here reddens the run without putting these
+  # minutes back on the critical path, which is the point of splitting them.
+  options:
+    name: "cross: ${{ matrix.config }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [noipv6, nomdns, notls, nomcast, noasm, norxverify,
+                 nosack, nots, nowscale, census, minimal]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Toolchain pin
+        id: pin
+        run: echo "sha=$(tools/fetch-toolchain.sh --print-sha)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the pinned m68k toolchain
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/aminetxduo/toolchain
+          key: m68k-amigaos-gcc-15.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
+
+      - name: Fetch the toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: tools/fetch-toolchain.sh
+
+      - name: The toolchain's crt0 is repaired
+        run: tools/fetch-toolchain.sh --check-crt0
+
+      - name: The toolchain's inline register ABI is repaired
+        run: tools/fetch-toolchain.sh --check-inlines
+
+      - name: Build it
+        run: AMINETXDUO_CI_CROSS="${{ matrix.config }}" tools/ci.sh cross
+
   # ------------------------------------------------------------------------
   # Host tests + every cross configuration in tools/ci.sh's CROSS_CONFIGS +
   # the conformance suite build.  The count lives there, not here.
@@ -108,8 +148,16 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq gcc-multilib
 
+      # THE OPTION ARMS RUN IN PARALLEL, in the `options` job below.  Twelve
+      # cross builds at ~82 s each on a hosted runner was fifteen minutes of a
+      # twenty-two minute run, all of it serial and none of it needed by
+      # anything later in this job except `default`, which conformance wants.
+      # The coverage is unchanged; only the shape is.
       - name: tools/ci.sh
-        run: AMINETXDUO_ANALYZE=1 AMINETXDUO_SANITIZE=1 tools/ci.sh host host32 sanitize cross web analyze conformance
+        run: >-
+          AMINETXDUO_ANALYZE=1 AMINETXDUO_SANITIZE=1
+          AMINETXDUO_CI_CROSS="default"
+          tools/ci.sh host host32 sanitize cross web analyze conformance
 
       # The logs are where a failure is diagnosed, and they are the only thing
       # that survives the runner.
