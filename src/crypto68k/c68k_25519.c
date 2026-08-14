@@ -36,6 +36,7 @@
  */
 
 #include "c68k_25519.h"
+#include "c68k_variant.h"
 
 /*
  * <stdint.h> rather than exec/types.h: this file has to compile on the build
@@ -149,7 +150,7 @@ static void fe_sub_c(fe r, const fe a, const fe b)
     }
 }
 
-#if defined(C68K_ASM) || defined(C68K_ASM_MULW)
+#if defined(C68K_ASM_25519) || defined(C68K_ASM_MULW)
 extern void c68k_fe_add_asm(fe r, const fe a, const fe b);
 extern void c68k_fe_sub_asm(fe r, const fe a, const fe b);
 #define fe_add  c68k_fe_add_asm
@@ -232,7 +233,7 @@ static void fe_mul_c(fe r, const fe a, const fe b)
  * are mutually exclusive and src/crypto68k/CMakeLists.txt refuses both at
  * once, because they define the same symbol.
  */
-#if defined(C68K_ASM) || defined(C68K_ASM_MULW)
+#if defined(C68K_ASM_25519) || defined(C68K_ASM_MULW)
 extern void c68k_fe_mul_asm(fe r, const fe a, const fe b);
 #define fe_mul  c68k_fe_mul_asm
 #else
@@ -258,7 +259,7 @@ void c68k_25519_fe_mul_ref(uint32_t r[8], const uint32_t a[8],
 
 int c68k_25519_fe_mul_is_asm(void)
 {
-#if defined(C68K_ASM) || defined(C68K_ASM_MULW)
+#if defined(C68K_ASM_25519) || defined(C68K_ASM_MULW)
     return 1;
 #else
     return 0;
@@ -325,7 +326,7 @@ static void fe_sqr_c(fe r, const fe a)
     fe_fold(r, (uint32_t)v);
 }
 
-#if defined(C68K_ASM) || defined(C68K_ASM_MULW)
+#if defined(C68K_ASM_25519) || defined(C68K_ASM_MULW)
 extern void c68k_fe_sqr_asm(fe r, const fe a);
 #define fe_sqr  c68k_fe_sqr_asm
 #else

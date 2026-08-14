@@ -13,6 +13,7 @@
  */
 
 #include "c68k_chacha20.h"
+#include "c68k_variant.h"
 
 
 /* "expand 32-byte k", the four constant words, little-endian. */
@@ -106,7 +107,7 @@ UINT    i;
  * same algorithm, faster, on every part that can run it.
  * AMINETXDUO_CRYPTO68K_ASM=OFF, the 68000 and the 68060 take the C.
  */
-#ifdef C68K_ASM
+#ifdef C68K_ASM_CHACHA20
 extern VOID c68k_chacha20_core_asm(const ULONG *in, ULONG *out);
 #define C68K_CHACHA20_CORE  c68k_chacha20_core_asm
 #else
@@ -116,7 +117,7 @@ extern VOID c68k_chacha20_core_asm(const ULONG *in, ULONG *out);
 UINT c68k_chacha20_core_is_asm(VOID)
 {
 
-#ifdef C68K_ASM
+#ifdef C68K_ASM_CHACHA20
     return((UINT)NX_CRYPTO_TRUE);
 #else
     return((UINT)NX_CRYPTO_FALSE);
@@ -136,7 +137,7 @@ UINT c68k_chacha20_core_is_asm(VOID)
  * The 68020 build takes the assembly instead: this loop is a sixth of the
  * cipher and -Os does not compile it to those seven instructions.
  */
-#ifndef C68K_ASM
+#ifndef C68K_ASM_CHACHA20
 static VOID c68k_chacha20_xor_block(const ULONG *ks, const UCHAR *in,
                                     UCHAR *out)
 {

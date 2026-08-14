@@ -285,7 +285,14 @@ if(CRYPTO68K_MV)
     # both: crypto68k.h resolves C68K_ADDMUL_1 and C68K_DIV_2BY1 on C68K_MV,
     # and src/tls and tests/crypto68k are callers that must agree with this
     # directory about which one those are.
-    target_compile_definitions(crypto68k PUBLIC C68K_ASM=1 C68K_MV=1)
+    # C68K_ASM says the module has assembly, C68K_MV says the choice is a
+    # vector rather than a name, and the per-file gates below say WHICH files
+    # are here (c68k_variant.h).  PUBLIC on all of them: crypto68k.h resolves
+    # C68K_ADDMUL_1 and C68K_DIV_2BY1 on C68K_MV, and src/tls and
+    # tests/crypto68k are callers that must agree with this directory.
+    target_compile_definitions(crypto68k PUBLIC
+        C68K_ASM=1 C68K_MV=1
+        C68K_ASM_PRIM=1 C68K_ASM_CHACHA20=1 C68K_ASM_POLY1305=1)
 
     # Per file, the arch it is written for.  C68K_MV_SUFFIX is what keeps the
     # two addmul_1 twins apart in one archive (c68k_variant.h).

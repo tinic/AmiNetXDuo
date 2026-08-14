@@ -45,6 +45,27 @@
 #ifndef AMINETXDUO_C68K_VARIANT_H
 #define AMINETXDUO_C68K_VARIANT_H
 
+/*
+ * ONE GATE PER FILE, and this is where the module's all-or-nothing switch comes
+ * apart.  C68K_ASM used to mean every .S here at once, which is why a 68000 or
+ * a 68060 got none of them -- including c68k_chacha20.S, which both parts can
+ * run perfectly well, and the four routines in c68k_prim.S that are original
+ * 68000 code.  A per-CPU build still says C68K_ASM and gets all six, so it is
+ * unchanged; the `any` build names the ones it carries and the rest take their
+ * portable C.
+ *
+ * src/net68k took the same step for the same reason, and its CMakeLists says
+ * so: "THE TWO SWITCHES HAVE COME APART".
+ */
+#if defined(C68K_ASM) && !defined(C68K_MV)
+#define C68K_ASM_PRIM           1
+#define C68K_ASM_P256           1
+#define C68K_ASM_AES            1
+#define C68K_ASM_CHACHA20       1
+#define C68K_ASM_POLY1305       1
+#define C68K_ASM_25519          1
+#endif
+
 #define C68K_PASTE2(a, b)       a ## b
 #define C68K_PASTE(a, b)        C68K_PASTE2(a, b)
 

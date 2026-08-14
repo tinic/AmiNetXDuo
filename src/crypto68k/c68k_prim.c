@@ -16,6 +16,7 @@
  */
 
 #include "crypto68k.h"
+#include "c68k_variant.h"
 
 /* Declared in crypto68k.h; see the note there. */
 VOID (*c68k_yield_hook)(VOID);
@@ -210,7 +211,7 @@ HN_UBASE2   num;
 #undef c68k_div_2by1
 #endif
 
-#ifndef C68K_ASM
+#ifndef C68K_ASM_PRIM
 
 /*
  * C68K_ASM_MULW is the 68060 build, where c68k_prim_mulw.S supplies this one
@@ -342,7 +343,7 @@ UINT c68k_using_assembly(VOID)
     /* One binary for every CPU: what is in use is what was selected, not what
        was compiled, and c68k_cpu.c is the only place that knows. */
     return(c68k_cpu_class());
-#elif defined(C68K_ASM)
+#elif defined(C68K_ASM_PRIM)
     return(C68K_ASM_68020);
 #elif defined(C68K_ASM_MULW)
     return(C68K_ASM_68060);

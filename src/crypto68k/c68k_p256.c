@@ -11,6 +11,7 @@
  */
 
 #include "c68k_p256.h"
+#include "c68k_variant.h"
 
 #include "nx_crypto_huge_number.h"
 
@@ -32,7 +33,7 @@ static const c68k_limb c68k_p256_one[C68K_P256_LIMBS] =
 
 /* ------------------------------------------------------ limb helpers ----- */
 
-#ifndef C68K_ASM
+#ifndef C68K_ASM_P256
 
 /*
  * The portable halves of the three routines c68k_p256.S replaces.  Always
