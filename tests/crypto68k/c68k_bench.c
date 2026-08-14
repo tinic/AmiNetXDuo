@@ -28,6 +28,7 @@
 #include "aminetxduo/crashguard.h"
 
 #include <exec/types.h>
+#include <exec/execbase.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 
@@ -447,6 +448,10 @@ int main(VOID)
 
 ULONG   start;
 
+
+    /* As a shipped library does at init, so the rows below are labelled
+       with what would actually run (src/crypto68k/c68k_cpu.c). */
+    c68k_cpu_select((ULONG)SysBase->AttnFlags);
 
     ami_crash_set_reference((APTR)main, "crypto68k_bench");
     if (!ami_crash_install())

@@ -35,6 +35,7 @@
 #include "aminetxduo/crashguard.h"
 
 #include <exec/types.h>
+#include <exec/execbase.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <string.h>
@@ -510,6 +511,11 @@ CONST_STRPTR    cmdline = (CONST_STRPTR)GetArgStr();
 BOOL            quick   = (cmdline != NULL) &&
                           (strchr((const char *)cmdline, 'q') != NULL);
 
+
+    /* What a shipped library does at init, so this measures and checks
+       what shipped: in an AMINETXDUO_CPU=any build the primitives are
+       chosen here and nowhere else (src/crypto68k/c68k_cpu.c). */
+    c68k_cpu_select((ULONG)SysBase->AttnFlags);
 
     ami_crash_set_reference((APTR)main, "crypto68k_test");
     if (!ami_crash_install())
