@@ -35,9 +35,7 @@
 
 #include <exec/types.h>
 #include <exec/nodes.h>
-#include <exec/interrupts.h>
 #include <resources/card.h>
-#include <devices/sana2.h>   /* S2EVENT_OFFLINE */
 
 #include <proto/exec.h>
 
