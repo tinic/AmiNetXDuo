@@ -272,7 +272,13 @@ static VOID pc_give_up(struct CardHandle *handle)
 APTR netdev_pcmcia_claim(const NetdevCard *card)
 {
     struct CardHandle *handle = &pc_handle;
-    UBYTE            buf[64];
+    /* Zeroed because CopyTuple() fills it through an inline asm the analyzer
+       cannot see into, so every byte read out of it afterwards reads as
+       uninitialized to -fanalyzer.  This is NOT the pre-zeroing the FUNCID
+       check used to rely on: every pc_tuple() below has its return value
+       checked, so nothing here mistakes a zero this line wrote for a byte the
+       card supplied. */
+    UBYTE            buf[64] = { 0 };
     volatile UBYTE  *attr;
     ULONG            cfg_base;
     UBYTE            index;
