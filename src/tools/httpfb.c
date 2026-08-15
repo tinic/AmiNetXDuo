@@ -80,6 +80,22 @@
  * past which grabbing again cannot produce anything a viewer could see. */
 #define FB_GRAB_FLOOR       1
 
+/*
+ * HOW OFTEN A `refresh` CAN ACTUALLY FORCE A FULL FRAME.  Fiftieths.
+ *
+ * A refresh is expensive and asymmetric: the answer is a whole screen, about
+ * 7 KB at 640x256x4, against the 5 bytes an idle frame costs.  A viewer that
+ * asks once -- it lost sync, it saw a sequence gap -- must get one AT ONCE,
+ * and does: the floor only applies to the second and later ask inside a
+ * second.  A viewer that asks on every frame degrades to one re-sync a
+ * second instead of a saturated link that never carries anything else.
+ *
+ * The number is one second because that is well above the grab rate and well
+ * below anything a person would notice as a stall in a picture that is, by
+ * construction, already correct.
+ */
+#define FB_RESYNC_FLOOR     50UL
+
 struct GfxBase       *GfxBase;
 struct IntuitionBase *IntuitionBase;
 
@@ -146,6 +162,24 @@ static UBYTE           fb_want_pal;
 static UBYTE           fb_want_stat;
 
 static ULONG           fb_next_tick;
+
+/*
+ * A RESYNC IS A SEQUENCE, NOT AN EVENT, AND ASKING TWICE MUST NOT RESTART IT
+ *
+ * Honouring a refresh queues geom, then pal, then a full frame, and clears
+ * the shadow so that frame is decodable from zero.  A second refresh arriving
+ * inside that sequence has nothing to add -- the shadow is already zero and
+ * the full frame is already coming -- and acting on it would re-queue geom
+ * and re-clear a shadow the viewer has not yet been given a frame from.  A
+ * client that asks on every geom would then be answered with a geom, ask
+ * again, and never get past the handshake.  No client here does that; the
+ * guard is on this side because it is the side that protects every client
+ * that will ever be written.
+ */
+static UBYTE           fb_resync;      /* the sequence is under way        */
+static UBYTE           fb_resync_due;  /* asked under the floor; owed one  */
+static UBYTE           fb_resync_ever; /* fb_resync_at means something     */
+static ULONG           fb_resync_at;   /* when the last one was honoured   */
 
 static ULONG           fb_frames;
 static ULONG           fb_bytes;
@@ -941,6 +975,43 @@ static VOID fb_inject_key(rfb_s32 raw, rfb_s32 qual, BOOL down)
     fb_write_event();
 }
 
+/*
+ * A refresh, honoured, coalesced or deferred.
+ *
+ * The shadow goes and the viewer is TOLD, because a full frame is not
+ * distinguishable from an ordinary one and the tiles in it are XOR against
+ * the shadow.  A viewer that still has the last picture when one arrives XORs
+ * the two together and gets the all-zero screen: grey, on a stock Workbench,
+ * and it stays grey because an idle desktop produces no more tiles to correct
+ * it.  geom is the barrier that already exists for that -- everything the
+ * viewer had is discarded when one arrives -- so re-queuing geom and pal puts
+ * a known zero on both sides at the same point in the stream.
+ */
+static VOID fb_ask_resync(VOID)
+{
+    ULONG now = fb_ticks();
+
+    /* One is already on its way; a second changes nothing but the timing. */
+    if (fb_resync)
+        return;
+
+    /* Too soon after the last, so it is remembered rather than dropped: a
+       viewer asking constantly still re-syncs, just not every frame. */
+    if (fb_resync_ever && (LONG)(now - fb_resync_at) < (LONG)FB_RESYNC_FLOOR)
+    {
+        fb_resync_due = 1;
+        return;
+    }
+
+    fb_forget_shadow();
+    fb_want_geom   = 1;
+    fb_want_pal    = 1;
+    fb_resync      = 1;
+    fb_resync_due  = 0;
+    fb_resync_ever = 1;
+    fb_resync_at   = now;
+}
+
 /* ------------------------------------------------------------- input words -- */
 
 static VOID fb_take_word(const char *w, ULONG len)
@@ -953,25 +1024,7 @@ static VOID fb_take_word(const char *w, ULONG len)
     switch (ev.kind)
     {
     case RFB_IN_REFRESH:
-        /*
-         * The shadow goes, and the viewer is TOLD, because a bare full frame
-         * is not distinguishable from an ordinary one and the tiles in it are
-         * XOR against the shadow.  A viewer that still has the last picture
-         * when one arrives XORs the two together and gets the all-zero
-         * screen: grey, on a stock Workbench, and it stays grey because an
-         * idle desktop produces no more tiles to correct it.
-         *
-         * geom is the barrier that already exists for this.  Everything the
-         * viewer had is discarded when one arrives, so re-queuing it puts a
-         * known zero on both sides at the same point in the stream: frames
-         * already in flight are applied to the old picture and then thrown
-         * away with it, and the full frame that follows lands on a cleared
-         * one.  pal goes with it because a geom leaves the viewer on a grey
-         * palette until the real one arrives.
-         */
-        fb_forget_shadow();
-        fb_want_geom = 1;
-        fb_want_pal  = 1;
+        fb_ask_resync();
         break;
 
     case RFB_IN_POINTER:
@@ -1193,6 +1246,14 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_since_stat = 0;
     fb_torn       = 0;
     fb_want_stat  = 0;
+    /* A session opens with geom, pal and a full frame already queued, which
+       is a resync by any other name: a refresh arriving before that frame has
+       gone -- which is exactly what a viewer asking on `geom` produces --
+       must not restart it. */
+    fb_resync      = 1;
+    fb_resync_due  = 0;
+    fb_resync_ever = 0;
+    fb_resync_at   = 0;
 
     http_ws_reset(&fb_in);
 
@@ -1316,6 +1377,11 @@ BOOL http_fb_slice(ULONG now)
        nowhere to put anything. */
     if (fb_tx_sent < fb_tx_len || fb_ctl_at < fb_ctl_n)
         return TRUE;
+
+    /* A refresh that was asked for under the floor is owed one, and this is
+       where it comes due. */
+    if (fb_resync_due && !fb_resync)
+        fb_ask_resync();
 
     if (fb_want_geom)
     {
@@ -1449,6 +1515,10 @@ BOOL http_fb_slice(ULONG now)
     }
 
     fb_frame_payload(HTTP_WS_EV_BINARY, (ULONG)n);
+
+    /* The frame the resync promised has gone; the next refresh is a new
+       question rather than a repeat of this one. */
+    fb_resync = 0;
 
     fb_frames++;
     fb_bytes += (ULONG)n;
