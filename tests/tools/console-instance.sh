@@ -45,11 +45,14 @@ PORT="${CONSOLE_PORT:-8080}"
 DEPTH="${CONSOLE_DEPTH:-4}"
 RUN="${CONSOLE_RUN:-$ROOT/build/console-instance}"
 PAGE="${AMINETXDUO_CONSOLE_PAGE:-$ROOT/build/web/console.html}"
+# The Shell too, on the same guest, so the two endpoints that hold a
+# single-instance resource can be exercised against one machine.
+SHELLPAGE="${AMINETXDUO_SHELL_PAGE:-$ROOT/src/tools/web/shell.html}"
 
 ACTION="${1:-status}"
 shift || true
 
-while getopts "a:p:b:m:B:d:H:r:" opt; do
+while getopts "a:p:b:m:B:d:H:r:S:" opt; do
     case "$opt" in
         a) ADDRESS="$OPTARG" ;;
         p) PORT="$OPTARG" ;;
@@ -59,6 +62,7 @@ while getopts "a:p:b:m:B:d:H:r:" opt; do
         d) DEPTH="$OPTARG" ;;
         H) PAGE="$OPTARG" ;;
         r) RUN="$OPTARG" ;;
+        S) SHELLPAGE="$OPTARG" ;;
         *) sed -n '3,8p' "$0" >&2; exit 2 ;;
     esac
 done
@@ -185,6 +189,7 @@ mkdir -p "$HD/Libs" "$HD/Devs/Networks" "$HD/Devs/NetInterfaces"
 cp "$BSD" "$HD/Libs/bsdsocket.library"
 cp "$A2065" "$HD/Devs/Networks/a2065.device"
 cp "$PAGE" "$HD/Console/console.html"
+[ -f "$SHELLPAGE" ] && cp "$SHELLPAGE" "$HD/Console/shell.html"
 
 cat > "$HD/Devs/NetInterfaces/eth0" <<EOF
 DEVICE=a2065.device
@@ -222,8 +227,10 @@ Run >NIL: <NIL: C:Execute S:httpd-run
 EOF
 chmod 755 "$HD/S/Startup-Sequence"
 
+TERMARGS=""
+[ -f "$HD/Console/shell.html" ] && TERMARGS="-T PAGE DH0:Console/shell.html"
 cat > "$HD/S/httpd-run" <<EOF
-C:httpd DH0:Public $PORT -C CONSOLEPAGE DH0:Console/console.html -v >DH0:httpd.log
+C:httpd DH0:Public $PORT -C CONSOLEPAGE DH0:Console/console.html $TERMARGS -v >DH0:httpd.log
 EOF
 chmod 755 "$HD/S/httpd-run"
 
@@ -286,6 +293,7 @@ say pid "$(cat "$PIDFILE")"
 say mac "$MAC"
 say address "$ADDRESS:$PORT"
 say url "http://$ADDRESS:$PORT/console"
+say shell_url "http://$ADDRESS:$PORT/shell"
 say serial "$SERIAL"
 say serial_socket "127.0.0.1:$SERIAL_PORT"
 say httpd_log "$HD/httpd.log"
