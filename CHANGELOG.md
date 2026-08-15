@@ -7,7 +7,7 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
-## Unreleased
+## 0.23.0
 
 - `httpd -C` serves this machine's display at `/console`. This is work in progress, and it serves the chipset's own planar screens only -- a screen on a graphics card is not shown. The browser shows the frontmost screen, so a Preferences editor that opens its own screen appears, and a change of resolution, depth or overscan is carried through. The mouse and keyboard work. A screen where nothing changes costs five bytes a frame; an idle 640x256 four-colour Workbench runs at about 33 frames a second on an A1200 and about four times that on an A3000. There is no password, and anyone who can reach the port has the screen, the keyboard, the mouse and a button that reboots the machine
 - The console can save a PNG of the screen, and record what it receives to a file that carries the time each frame was taken and where the pointer was
