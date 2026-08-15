@@ -9,6 +9,12 @@ version at the top when it merges.
 
 ## Unreleased
 
+- PCMCIA cards that this driver refused now attach. The socket was never put into I/O mode before the configuration register was written, so on a write-protected socket the write was swallowed; the chip's reset register was addressed in the wrong Gayle window; a card whose CIS carries no CISTPL_FUNCID was rejected outright; and the configuration register was written at the doubled address first. `cnet.device`, whose source is public domain, is what each of these was checked against
+- `anxnet.device` no longer holds the PCMCIA slot on a machine where it found no card. Its card.resource handle was queued whether or not the slot could be owned and was never taken back out, so opening the driver once could lock `cnet.device` and every other PCMCIA driver out until the machine was rebooted
+- PCMCIA cards that only answer 16-bit reads on their odd-numbered registers now work. Detection probes for it and switches, so there is no second binary and nothing for you to choose
+- A card whose address PROM is blank now takes its station address from the CIS if the card carries one there, and otherwise derives a stable one from this machine rather than refusing. The derived address is locally administered, is the same on every boot, and `HARDWAREADDRESS` in the interface file still overrides it
+- `CheckNetDevice` says what `anxnet.device` found: every card it looked at, the step each one reached, and why any was refused. It works when no card came up at all, which is when it is wanted, and it needs no special build
+
 - A 64-bit divide by a value of 2^32 or more no longer takes the machine down. The three 64-bit shift helpers were each compiled into a call to themselves and recursed until the stack was gone; nothing in the shipped libraries divides by that much, so it was reachable rather than reached
 
 ## 0.22.1

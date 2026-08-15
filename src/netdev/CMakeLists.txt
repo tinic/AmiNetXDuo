@@ -18,6 +18,7 @@ set(NETDEV_SOURCES
     netdev_bus.c        # register stride and the data port
     netdev_cards.c      # the card table
     netdev_pcmcia.c     # the A600/A1200 slot, which has no autoconfig record
+    netdev_diag.c       # the probe record, published for CheckNetDevice
     netdev_mcaf.c       # the multicast hash, host-testable
     netdev_macgen.c     # the derived station address, host-testable
     dp8390.c            # NetBSD chip core
@@ -96,6 +97,7 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     target_include_directories(test_netdev_mcaf PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
         "${CMAKE_SOURCE_DIR}/src/config/test/shim")
 
     target_compile_options(test_netdev_mcaf PRIVATE -Wall -Wextra)
@@ -127,6 +129,7 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     target_include_directories(test_netdev_ed PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
         "${CMAKE_SOURCE_DIR}/src/net68k"
         "${CMAKE_SOURCE_DIR}/src/config/test/shim")
 
@@ -146,6 +149,7 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     target_include_directories(test_netdev_macgen PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
         "${CMAKE_SOURCE_DIR}/src/config/test/shim")
 
     target_compile_options(test_netdev_macgen PRIVATE -Wall -Wextra)
@@ -162,6 +166,7 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     target_include_directories(test_netdev_bus PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
         "${CMAKE_SOURCE_DIR}/src/net68k"
         "${CMAKE_SOURCE_DIR}/src/config/test/shim")
 

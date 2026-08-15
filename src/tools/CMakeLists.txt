@@ -203,6 +203,14 @@ aminetxduo_add_tool(tool_addnetinterface AddNetInterface
 aminetxduo_add_tool(tool_checknetconfig CheckNetConfig
     SOURCES checknetconfig.c ${TOOLS_DEVDIAG})
 
+# CheckNetDevice reads the probe record anxnet.device publishes and says why
+# each card it looked at did or did not come up.  Config-only for the same
+# reason CheckNetConfig is: the machine that needs it is the one where nothing
+# came up, so it must not need a running stack -- and it must not need an open
+# unit either, which is the whole point of the record.
+aminetxduo_add_tool(tool_checknetdevice CheckNetDevice
+    SOURCES checknetdevice.c)
+
 # The interactive configurator.  Config-only: it writes the files the parser
 # reads and then runs AddNetInterface, rather than starting a stack itself.
 aminetxduo_add_tool(tool_netsetup NetSetup SOURCES netsetup.c ${TOOLS_DEVDIAG})
@@ -480,7 +488,7 @@ endif()
 
 add_custom_target(tools ALL)
 add_dependencies(tools
-    tool_addnetinterface tool_checknetconfig
+    tool_addnetinterface tool_checknetconfig tool_checknetdevice
     tool_addnetroute tool_deletenetroute
     tool_getnetstatus tool_netshutdown tool_removenetinterface
     tool_configurenetinterface

@@ -105,6 +105,7 @@ static int checks;
  */
 static const char *const commands[] = {
     "addnetinterface", "addnetroute", "arp", "checknetconfig",
+    "checknetdevice",
     "configurenetinterface", "fetch",
     "getnetstatus", "host", "hostname", "httpd", "iperf", "nc", "netsetup",
     "netshutdown",
@@ -1006,6 +1007,7 @@ static char *flatten(const char *text, int strip_comment_stars)
 /* The commands docs/user/AmiNetXDuo.guide prints a template for. */
 static const char *const guide_commands[] = {
     "addnetinterface", "onoff", "shownetstatus", "netstat", "ping", "host",
+    "checknetdevice",
 };
 
 #define GUIDE_COUNT ((int)(sizeof(guide_commands) / \

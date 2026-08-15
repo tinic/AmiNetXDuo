@@ -455,7 +455,10 @@ LONG lance_attach(NetdevNic *nic)
     csr0 = le_csr_get(nic, LE_CSR0);
     LE_TRACE("le: attach csr0 ", csr0);
     if ((csr0 & 0xff00) != 0 || (csr0 & LE_C0_STOP) == 0)
+    {
+        nic->diag_why = (UBYTE)ANXDIAG_WHY_CSR;
         return -1;
+    }
 
     /*
      * THE STATION ADDRESS IS IN THE AUTOCONFIG SERIAL NUMBER, not in the
@@ -464,6 +467,8 @@ LONG lance_attach(NetdevNic *nic)
      * field and left the OUI to the driver, which is why the card row carries
      * it -- 00:80:10 for the A2065, 00:60:30 for the Ariadne.
      */
+    nic->mac_source = (UBYTE)ANXDIAG_MAC_SERIAL;
+
     nic->factory[0] = (UBYTE)(nic->card->serial_oui >> 8);
     nic->factory[1] = (UBYTE)(nic->card->serial_oui);
     nic->factory[2] = (UBYTE)(nic->serial >> 24);
