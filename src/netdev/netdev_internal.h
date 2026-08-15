@@ -144,7 +144,12 @@ VOID netdev_tx_pump(NetdevUnit *unit);
    rather than found.  NULL when there is no slot, nothing in it, or what is
    in it is not a LAN card. */
 VOID netdev_trace_val(const char *tag, ULONG v);
-APTR netdev_pcmcia_claim(const NetdevCard *card);
+/*
+ * Claim the slot, identify what is in it from its CIS, and configure it for
+ * the row that drives that card.  *card_out is that row, set only on success.
+ * Called ONCE, not once per PCMCIA row: there is one slot and one handle.
+ */
+APTR netdev_pcmcia_claim(const NetdevCard **card_out);
 /* The card's own CIS bytes, for the derived-address fingerprint.  0 when
    there is no slot or nothing was read from it. */
 UWORD netdev_pcmcia_fingerprint(UBYTE *buf, UWORD max);

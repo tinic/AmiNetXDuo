@@ -25,6 +25,7 @@ set(NETDEV_SOURCES
     ne2000.c            # NetBSD remote-DMA glue
     ed.c                # NetBSD mapped-buffer glue: Hydra, ASDG LAN Rover
     lance.c             # Am7990/Am79C960: A2065 and Ariadne
+    el3.c               # 3Com EtherLink III: the 3C589 in the PCMCIA slot
     # The data path's bulk moves, from src/net68k rather than a private copy:
     # the movem.l block and its measurements live there.  Two files, the same
     # arrangement as src/net68k's own target -- the .S is #ifdef'd end to end
@@ -137,6 +138,30 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME netdev_ed COMMAND test_netdev_ed)
     add_test(NAME netdev_cards COMMAND test_netdev_cards)
+
+    # The EtherLink III, which NOTHING EMULATES: Amiberry's PCMCIA support is
+    # NE2000 only, so this test is the only thing that has ever driven el3.c.
+    # It is a reactive mock rather than a memory image -- a window is not a
+    # buffer -- which is why el3.c is #included whole and its raw word access
+    # is redirected.  netdev_cards.c is linked for the CIS-to-row selection
+    # and netdev_mcaf.c for the multicast hash the part has no hardware for.
+    add_executable(test_netdev_el3
+        test/test_netdev_el3.c
+        netdev_bus.c
+        netdev_cards.c
+        netdev_mcaf.c
+        netdev_macgen.c
+        "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c")
+
+    target_include_directories(test_netdev_el3 PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/net68k"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_el3 PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_el3 COMMAND test_netdev_el3)
 
     # The derived station address.  Determinism, the locally-administered and
     # unicast bits, and "two different machines get two different addresses"

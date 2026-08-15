@@ -109,6 +109,14 @@ extern "C" {
                                        so the reader does not claim a transfer
                                        mode for a LANCE, which has no data
                                        port to have one                       */
+#define ANXDIAG_EL3_MFG        23   /* EtherLink III: the window 0 manufacturer
+                                       ID exactly as read, before any swap    */
+#define ANXDIAG_EL3_ORDER      24   /* EtherLink III: 0 = the register window
+                                       delivers words straight, 1 = its halves
+                                       are exchanged and the core swaps them  */
+#define ANXDIAG_EL3_MEDIA      25   /* EtherLink III: window 0 config control,
+                                       whose high half says which media the
+                                       card was built with                    */
 
 /* --- the PCMCIA slot --------------------------------------------------- */
 #define ANXDIAG_PC_RESOURCE    30   /* card.resource base, 0 = no slot       */
@@ -132,6 +140,16 @@ extern "C" {
                                        card.resource version                 */
 #define ANXDIAG_PC_IRQSKIP     48   /* pre-V39 resource, bits not meaningful */
 #define ANXDIAG_PC_CLAIMED     49   /* slot claimed; value = register base   */
+#define ANXDIAG_PC_CARD        50   /* which row the CIS picked; value = the
+                                       netdev_cards[] index.  The steps above
+                                       this one are recorded against the
+                                       MACHINE and not a card, because until
+                                       this step there is no card yet         */
+#define ANXDIAG_PC_CFTABLE     51   /* the first configuration table entry's
+                                       leading body bytes, 2 << 24 | 3 << 16 |
+                                       4 << 8 | 5 -- the I/O descriptor this
+                                       driver does not parse, so that a report
+                                       can say what it would have said        */
 
 /* A tuple or a value that was not there at all, rather than one that was
    there and zero.  Chosen so it cannot be a real MANFID or subtuple. */
@@ -145,6 +163,9 @@ extern "C" {
 #define ANXDIAG_WHY_ADDRESS     4   /* no usable station address anywhere    */
 #define ANXDIAG_WHY_REGS        5   /* ED core: register file did not answer */
 #define ANXDIAG_WHY_CSR         6   /* LANCE: CSR0 did not answer            */
+#define ANXDIAG_WHY_MFGID       7   /* EL3: the manufacturer ID read back as
+                                       neither byte order                     */
+#define ANXDIAG_WHY_EEPROM      8   /* EL3: the EEPROM never went ready       */
 
 /* ANXDIAG_MAC_SOURCE values. */
 #define ANXDIAG_MAC_PROM        0   /* the card's address PROM               */
