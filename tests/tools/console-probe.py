@@ -89,17 +89,57 @@ CODE_PB_XOR = 2
 # Same numbers as src/tools/web/client/console/rawkey.ts, which is what a
 # browser sends: a rawkey is a key position and the Amiga's own keymap is what
 # turns it into a character.
+# One character to the rawkey that produces it, and whether it needs shift.
+# A rawkey is a key POSITION, so the colon is the semicolon key WITH the
+# qualifier: sending 0x29 bare types a semicolon, which is what this table did
+# before it carried the second half.  IEQUALIFIER_LSHIFT is 1.
+QUAL_SHIFT = 1
+
 RAWKEY = {
-    "q": 0x10, "w": 0x11, "e": 0x12, "r": 0x13, "t": 0x14, "y": 0x15,
-    "u": 0x16, "i": 0x17, "o": 0x18, "p": 0x19,
-    "a": 0x20, "s": 0x21, "d": 0x22, "f": 0x23, "g": 0x24, "h": 0x25,
-    "j": 0x26, "k": 0x27, "l": 0x28,
-    "z": 0x31, "x": 0x32, "c": 0x33, "v": 0x34, "b": 0x35, "n": 0x36,
-    "m": 0x37,
-    "1": 0x01, "2": 0x02, "3": 0x03, "4": 0x04, "5": 0x05,
-    "6": 0x06, "7": 0x07, "8": 0x08, "9": 0x09, "0": 0x0a,
-    " ": 0x40, ":": 0x29, ".": 0x39, "\n": 0x44,
+    "`": (0x00, 0), "1": (0x01, 0), "2": (0x02, 0), "3": (0x03, 0),
+    "4": (0x04, 0), "5": (0x05, 0), "6": (0x06, 0), "7": (0x07, 0),
+    "8": (0x08, 0), "9": (0x09, 0), "0": (0x0a, 0), "-": (0x0b, 0),
+    "=": (0x0c, 0), "\\": (0x0d, 0),
+    "q": (0x10, 0), "w": (0x11, 0), "e": (0x12, 0), "r": (0x13, 0),
+    "t": (0x14, 0), "y": (0x15, 0), "u": (0x16, 0), "i": (0x17, 0),
+    "o": (0x18, 0), "p": (0x19, 0), "[": (0x1a, 0), "]": (0x1b, 0),
+    "a": (0x20, 0), "s": (0x21, 0), "d": (0x22, 0), "f": (0x23, 0),
+    "g": (0x24, 0), "h": (0x25, 0), "j": (0x26, 0), "k": (0x27, 0),
+    "l": (0x28, 0), ";": (0x29, 0), "'": (0x2a, 0),
+    "z": (0x31, 0), "x": (0x32, 0), "c": (0x33, 0), "v": (0x34, 0),
+    "b": (0x35, 0), "n": (0x36, 0), "m": (0x37, 0),
+    ",": (0x38, 0), ".": (0x39, 0), "/": (0x3a, 0), " ": (0x40, 0),
+    "\n": (0x44, 0),
+
+    ":": (0x29, 1), '"': (0x2a, 1), "?": (0x3a, 1), "<": (0x38, 1),
+    ">": (0x39, 1), "_": (0x0b, 1), "+": (0x0c, 1), "!": (0x01, 1),
+    "@": (0x02, 1), "#": (0x03, 1), "$": (0x04, 1), "%": (0x05, 1),
+    "^": (0x06, 1), "&": (0x07, 1), "*": (0x08, 1), "(": (0x09, 1),
+    ")": (0x0a, 1), "{": (0x1a, 1), "}": (0x1b, 1), "|": (0x0d, 1),
+    "~": (0x00, 1),
 }
+for _c in "abcdefghijklmnopqrstuvwxyz":
+    RAWKEY[_c.upper()] = (RAWKEY[_c][0], 1)
+
+
+def type_text(wire, text):
+    """Down and up for every character, which is what a keyboard sends.
+
+    A down with no up leaves the Amiga repeating it, and the qualifier goes on
+    both halves because Intuition reads the shift state off the event rather
+    than off a history of them.
+    """
+    n = 0
+    for ch in text:
+        kc = RAWKEY.get(ch)
+        if kc is None:
+            continue
+        raw, shifted = kc
+        qual = QUAL_SHIFT if shifted else 0
+        wire.word("kd %d %d" % (raw, qual))
+        wire.word("ku %d %d" % (raw, qual))
+        n += 1
+    return n
 
 
 def say(k, v):
@@ -756,13 +796,7 @@ def main(argv):
             # which is what a keyboard sends and what IECODE_UP_PREFIX is for;
             # a down with no up leaves the Amiga repeating it.
             if typing is not None and typed == 0 and frames >= type_at:
-                for ch in list(typing.lower()) + ["\n"]:
-                    raw = RAWKEY.get(ch)
-                    if raw is None:
-                        continue
-                    wire.word("kd %d 0" % raw)
-                    wire.word("ku %d 0" % raw)
-                    typed += 1
+                typed = type_text(wire, typing + "\n")
                 say("typed_keys", typed)
             if pfs_path is not None and len(kept) < 200:
                 kept.append((screen, now))
