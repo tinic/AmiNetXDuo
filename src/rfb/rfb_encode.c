@@ -311,27 +311,67 @@ static void rfb_putblk(rfb_out *o, const rfb_u8 *src, rfb_u32 n)
 static int rfb_cmp_plane(const rfb_u8 *src, const rfb_u8 *sh,
                          rfb_u32 bpr, rfb_u32 tw, rfb_u32 th, int word)
 {
-    rfb_u32 r;
+    rfb_u32 r = th;
 
-    for (r = 0; r < th; r++) {
-        const rfb_u8 *s = src + r * bpr;
-        const rfb_u8 *d = sh + r * bpr;
-        rfb_u32 c = 0;
+    if (word) {
+        const rfb_u32 words = tw >> 2;
+        const rfb_u32 eights = words >> 3;
+        const rfb_u32 rest = words & 7u;
+        const rfb_u32 tail = tw & 3u;
 
-        if (word) {
-            const rfb_u32 *sw = (const rfb_u32 *)(const void *)s;
-            const rfb_u32 *dw = (const rfb_u32 *)(const void *)d;
-            rfb_u32 n = tw >> 2;
+        /* The rows are walked by adding the stride, not by multiplying the row
+         * number by it: bpr is a variable, so `src + r * bpr` on the -m68000
+         * build the archive ships is a call to __mulsi3, once per row of every
+         * tile of every plane. */
+        do {
+            rfb_u32 n = eights;
+            const rfb_u32 *sw = (const rfb_u32 *)(const void *)src;
+            const rfb_u32 *dw = (const rfb_u32 *)(const void *)sh;
 
+            /* Eight at a turn with the differences ORed together, so the loop
+             * test is paid once per 32 bytes instead of once per 4.  The early
+             * exit is still an early exit -- 32 bytes of granularity on a
+             * 256-byte tile-plane -- and on the case that matters, a screen
+             * where nothing moved, there is nothing to exit early from. */
+            while (n--) {
+                rfb_u32 acc = sw[0] ^ dw[0];
+                acc |= sw[1] ^ dw[1];
+                acc |= sw[2] ^ dw[2];
+                acc |= sw[3] ^ dw[3];
+                acc |= sw[4] ^ dw[4];
+                acc |= sw[5] ^ dw[5];
+                acc |= sw[6] ^ dw[6];
+                acc |= sw[7] ^ dw[7];
+                if (acc)
+                    return 1;
+                sw += 8; dw += 8;
+            }
+            n = rest;
             while (n--)
                 if (*sw++ != *dw++)
                     return 1;
-            c = tw & ~3u;
-        }
-        for (; c < tw; c++)
-            if (s[c] != d[c])
-                return 1;
+
+            if (tail) {
+                const rfb_u8 *s = (const rfb_u8 *)(const void *)sw;
+                const rfb_u8 *d = (const rfb_u8 *)(const void *)dw;
+                rfb_u32 c = tail;
+                while (c--)
+                    if (*s++ != *d++)
+                        return 1;
+            }
+            src += bpr; sh += bpr;
+        } while (--r);
+        return 0;
     }
+
+    do {
+        rfb_u32 c = tw;
+        const rfb_u8 *s = src, *d = sh;
+        while (c--)
+            if (*s++ != *d++)
+                return 1;
+        src += bpr; sh += bpr;
+    } while (--r);
     return 0;
 }
 
@@ -344,29 +384,31 @@ static void rfb_take_plane(const rfb_u8 *src, rfb_u8 *sh, rfb_u8 *raw,
                            rfb_u8 *xb, rfb_u32 bpr, rfb_u32 tw, rfb_u32 th,
                            int keep_xor, int word)
 {
-    rfb_u32 r;
+    rfb_u32 r = th;
 
-    for (r = 0; r < th; r++) {
-        const rfb_u8 *s = src + r * bpr;
-        rfb_u8 *d = sh + r * bpr;
-        rfb_u8 *w = raw + r * tw;
-        rfb_u8 *x = xb + r * tw;
-        rfb_u32 c = 0;
+    /* raw and xb are tile-shaped, so their rows are simply consecutive: they
+     * are walked with the same pointer that finished the row before, and the
+     * source and the shadow get the stride added.  No row index, and so no
+     * multiply by a variable stride. */
+    if (word) {
+        const rfb_u32 words = tw >> 2;
+        const rfb_u32 tail = tw & 3u;
 
-        if (word) {
-            const rfb_u32 *sw = (const rfb_u32 *)(const void *)s;
-            rfb_u32 *dw = (rfb_u32 *)(void *)d;
-            rfb_u32 *ww = (rfb_u32 *)(void *)w;
-            rfb_u32 n = tw >> 2;
+        do {
+            const rfb_u32 *sw = (const rfb_u32 *)(const void *)src;
+            rfb_u32 *dw = (rfb_u32 *)(void *)sh;
+            rfb_u32 *ww = (rfb_u32 *)(void *)raw;
+            rfb_u32 n = words;
 
             if (keep_xor) {
-                rfb_u32 *xw = (rfb_u32 *)(void *)x;
+                rfb_u32 *xw = (rfb_u32 *)(void *)xb;
                 while (n--) {
                     rfb_u32 sv = *sw++;
                     *xw++ = sv ^ *dw;
                     *dw++ = sv;
                     *ww++ = sv;
                 }
+                xb = (rfb_u8 *)(void *)xw;
             } else {
                 while (n--) {
                     rfb_u32 sv = *sw++;
@@ -374,16 +416,38 @@ static void rfb_take_plane(const rfb_u8 *src, rfb_u8 *sh, rfb_u8 *raw,
                     *ww++ = sv;
                 }
             }
-            c = tw & ~3u;
-        }
-        for (; c < tw; c++) {
-            rfb_u8 sv = s[c];
-            if (keep_xor)
-                x[c] = (rfb_u8)(sv ^ d[c]);
-            d[c] = sv;
-            w[c] = sv;
-        }
+            raw = (rfb_u8 *)(void *)ww;
+
+            if (tail) {
+                const rfb_u8 *s = (const rfb_u8 *)(const void *)sw;
+                rfb_u8 *d = (rfb_u8 *)(void *)dw;
+                rfb_u32 c = tail;
+                while (c--) {
+                    rfb_u8 sv = *s++;
+                    if (keep_xor)
+                        *xb++ = (rfb_u8)(sv ^ *d);
+                    *d++ = sv;
+                    *raw++ = sv;
+                }
+            }
+            src += bpr; sh += bpr;
+        } while (--r);
+        return;
     }
+
+    do {
+        const rfb_u8 *s = src;
+        rfb_u8 *d = sh;
+        rfb_u32 c = tw;
+        while (c--) {
+            rfb_u8 sv = *s++;
+            if (keep_xor)
+                *xb++ = (rfb_u8)(sv ^ *d);
+            *d++ = sv;
+            *raw++ = sv;
+        }
+        src += bpr; sh += bpr;
+    } while (--r);
 }
 
 /* A plane that did not change but has to be sent anyway (no RFB_F_PLANEMASK).
@@ -391,13 +455,17 @@ static void rfb_take_plane(const rfb_u8 *src, rfb_u8 *sh, rfb_u8 *raw,
 static void rfb_take_clean(const rfb_u8 *sh, rfb_u8 *raw, rfb_u8 *xb,
                            rfb_u32 bpr, rfb_u32 tw, rfb_u32 th, int keep_xor)
 {
-    rfb_u32 r;
+    rfb_u32 r = th;
 
-    for (r = 0; r < th; r++) {
-        memcpy(raw + r * tw, sh + r * bpr, (size_t)tw);
-        if (keep_xor)
-            memset(xb + r * tw, 0, (size_t)tw);
-    }
+    do {
+        memcpy(raw, sh, (size_t)tw);
+        raw += tw;
+        if (keep_xor) {
+            memset(xb, 0, (size_t)tw);
+            xb += tw;
+        }
+        sh += bpr;
+    } while (--r);
 }
 
 /* Can the whole frame use the longword path.  Every tile row starts at
@@ -712,9 +780,12 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
     rfb_u32 bpr, depth, tb, tile_row;
     int keep_xor, min_run, word;
     rfb_out o;
-    rfb_u32 ty, tx, p, y0;
+    rfb_u32 ty, tx, p, y0, top = 0, tile_index;
     rfb_u32 dirty_tiles = 0;
     rfb_u32 dirty_plane[RFB_MAX_DEPTH];
+    rfb_u8 *sh_plane[RFB_MAX_DEPTH];
+    rfb_u8 *raw_plane[RFB_MAX_DEPTH];
+    rfb_u8 *xor_plane[RFB_MAX_DEPTH];
     int did_copy = 0;
 
     if (!e || !planes || !out)
@@ -786,34 +857,47 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
         }
     }
 
+    /* Every per-plane base the tile walk needs, worked out once for the frame.
+     * These were `e->shadow + p * e->plane_stride`, `e->rawbuf + p * tb` and
+     * `e->xorbuf + p * tb` INSIDE the walk, so a 640x256x2 frame paid 240
+     * 32-bit multiplies -- which the -m68000 build the archive ships compiles
+     * to calls to __mulsi3 -- to recompute eight pointers. */
+    for (p = 0; p < depth; p++) {
+        sh_plane[p]  = e->shadow + p * e->plane_stride;
+        raw_plane[p] = e->rawbuf + p * tb;
+        xor_plane[p] = e->xorbuf + p * tb;
+    }
+
     y0 = 0;
+    tile_index = 0;
     for (ty = 0; ty < e->tiles_y; ty++, y0 += tile_row) {
-        rfb_u32 top = ty * e->g.tile_h;
         rfb_u32 th = e->g.height - top;
+        rfb_u32 x0 = 0;
+
         if (th > e->g.tile_h)
             th = e->g.tile_h;
+        top += e->g.tile_h;
 
-        for (tx = 0; tx < e->tiles_x; tx++) {
-            rfb_u32 x0 = tx * e->g.tile_w;
+        for (tx = 0; tx < e->tiles_x; tx++, tile_index++,
+                                       x0 += e->g.tile_w) {
             rfb_u32 tw = bpr - x0;
             rfb_u32 off = y0 + x0;
             rfb_u32 raw_len, mask = 0;
 
             if (tw > e->g.tile_w)
                 tw = e->g.tile_w;
-            raw_len = tw * th;
+            /* Both fit a word, so this is a MULU.W and not a helper call. */
+            raw_len = (rfb_u32)((rfb_u16)tw * (rfb_u16)th);
             e->st.tiles_scanned++;
 
             /* Ask first, write nothing.  A tile nobody drew on ends here. */
             for (p = 0; p < depth; p++) {
                 dirty_plane[p] = (rfb_u32)rfb_cmp_plane(
-                        planes[p] + off,
-                        e->shadow + p * e->plane_stride + off,
+                        planes[p] + off, sh_plane[p] + off,
                         e->row_stride, tw, th, word);
                 if (dirty_plane[p])
                     mask |= 1u << p;
             }
-            e->st.src_bytes += raw_len * depth;
             if (mask == 0)
                 continue;
 
@@ -828,23 +912,22 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
                 if (!(mask & (1u << p)))
                     continue;
                 if (dirty_plane[p])
-                    rfb_take_plane(planes[p] + off,
-                                   e->shadow + p * e->plane_stride + off,
-                                   e->rawbuf + p * tb, e->xorbuf + p * tb,
+                    rfb_take_plane(planes[p] + off, sh_plane[p] + off,
+                                   raw_plane[p], xor_plane[p],
                                    e->row_stride, tw, th, keep_xor, word);
                 else
-                    rfb_take_clean(e->shadow + p * e->plane_stride + off,
-                                   e->rawbuf + p * tb, e->xorbuf + p * tb,
+                    rfb_take_clean(sh_plane[p] + off,
+                                   raw_plane[p], xor_plane[p],
                                    e->row_stride, tw, th, keep_xor);
             }
 
             rfb_put8(&o, RFB_OP_TILE);
-            rfb_put16(&o, ty * e->tiles_x + tx);
+            rfb_put16(&o, tile_index);
             rfb_put8(&o, (rfb_u8)mask);
 
             for (p = 0; p < depth; p++) {
                 rfb_u32 best_len, la, lb;
-                rfb_u8 *raw = e->rawbuf + p * tb;
+                rfb_u8 *raw = raw_plane[p];
                 rfb_u8 *best_ptr;
                 int best_code;
 
@@ -859,7 +942,7 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
                     /* Each candidate is capped at what is already the best, so
                      * a losing one stops early instead of finishing. */
                     if (keep_xor) {
-                        la = rfb_packbits(e->xorbuf + p * tb, raw_len,
+                        la = rfb_packbits(xor_plane[p], raw_len,
                                           e->pb_a, best_len - 1u, min_run);
                         if (la != RFB_PB_FAIL) {
                             best_code = RFB_CODE_PB_XOR;
@@ -877,7 +960,7 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
                         }
                     }
                 } else if (keep_xor) {
-                    la = rfb_packbits(e->xorbuf + p * tb, raw_len, e->pb_a,
+                    la = rfb_packbits(xor_plane[p], raw_len, e->pb_a,
                                       RFB_PB_BOUND(raw_len), min_run);
                     if (la != RFB_PB_FAIL) {
                         best_code = RFB_CODE_PB_XOR;
@@ -917,6 +1000,10 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
     if (o.over)
         return RFB_E_OVERFLOW;
 
+    /* Every tile of every plane was read, and the clipped tiles at the edges
+       sum to exactly one frame, so this is the frame rather than a running
+       total with a 32-bit multiply per tile in it. */
+    e->st.src_bytes += e->frame_bytes;
     e->last_dirty = (rfb_u16)(dirty_tiles > 0xFFFFu ? 0xFFFFu : dirty_tiles);
     e->last_copy = (rfb_u8)did_copy;
     e->st.frames++;
