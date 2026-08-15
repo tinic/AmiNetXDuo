@@ -75,9 +75,8 @@
 #
 #   The five Workbench 3.1 ADFs (AMINETXDUO_ADF_DIR), a Kickstart that matches
 #   the model, a2065.device (AMINETXDUO_A2065), a 68020 Release build, and the
-#   console page.  The page is built by `node tools/web/build-console.mjs` and
-#   is NOT committed; -H names one built elsewhere, which is what a build host
-#   with no node needs.
+#   console page.  The page is the committed src/tools/web/console.html, so a
+#   build host with no node has one; -H names another.
 #
 # SPDX-License-Identifier: MIT
 

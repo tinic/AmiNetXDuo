@@ -46,6 +46,7 @@
 #include <intuition/screens.h>
 
 #include <proto/exec.h>
+#include <inline/macros.h>
 #include <proto/dos.h>
 #include <proto/graphics.h>
 #include <proto/intuition.h>
