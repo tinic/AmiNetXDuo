@@ -362,6 +362,18 @@ static void test_byte_order(void)
         /* And the manufacturer ID really did come back as the constant. */
         sprintf(what, "window 0 selected after attach, swapped=%d", swapped);
         expect_u32(what, (unsigned long)mock_window, 0);
+
+        /*
+         * The burst path's address.  netdev_bus_setup() puts it sixteen
+         * strides past the register base, which is where a DP8390's data
+         * port is and not where this part's FIFO is; attach has to move it
+         * or every frame goes to an address nothing here decodes, silently.
+         */
+        sprintf(what, "fifo address, swapped=%d", swapped);
+        expect_u32(what,
+                   (unsigned long)((const volatile unsigned char *)nic.bus.asic -
+                                   (const volatile unsigned char *)board),
+                   (unsigned long)(card.reg_off + EL3_W1_FIFO));
     }
 
     /* A card that answers with neither order is refused, and says why. */

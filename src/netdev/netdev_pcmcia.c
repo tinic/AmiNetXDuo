@@ -640,7 +640,6 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
     }
     ci = netdev_diag_card(card);
     netdev_diag_note(ANXDIAG_PC_CARD, ci, (ULONG)ci);
-    netdev_diag_note(ANXDIAG_CHIP, ci, (ULONG)card->chip);
 
     /*
      * PUT THE SOCKET INTO I/O MODE, BEFORE THE COR WRITE AND NOT AFTER IT.

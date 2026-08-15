@@ -876,6 +876,23 @@ LONG el3_attach(NetdevNic *nic)
      * is not, and the other buffer fields stay zero so that anything reading
      * them as a ring reads an empty one.
      */
+    /*
+     * WHERE THE BURST PATH POINTS, WHICH IS NOT WHERE netdev_bus_setup() PUT
+     * IT.  bus->asic is the address netdev_bus_rdata/wdata hammer, and setup
+     * derives it as the register base plus sixteen strides -- true for a
+     * DP8390, whose data port really is ASIC register 0 past the NIC block,
+     * and false here.  This part's FIFO is window 1 offset 0, which is the
+     * register base itself.  Left uncorrected, every frame would have been
+     * pushed into and pulled out of whatever decodes sixteen bytes further
+     * on, and nothing in the register path would have looked wrong.
+     *
+     * netdev_bus_regmap() with no map is the seam for exactly this: it says
+     * "the data port is here" without claiming the register file is scattered.
+     */
+    netdev_bus_regmap(&nic->bus, NULL,
+                      (APTR)(volatile void *)(nic->board + nic->card->reg_off +
+                                              EL3_W1_FIFO));
+
     nic->txb_cnt   = 1;
     nic->txb_inuse = 0;
     nic->read_hdr  = NULL;
