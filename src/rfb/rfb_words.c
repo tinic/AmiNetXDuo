@@ -37,6 +37,17 @@ static rfb_u32 put_char(char *out, rfb_u32 cap, rfb_u32 at, char c)
     return at;
 }
 
+/* A hotspot can sit left of or above the sprite's own corner, so the one
+   number in this vocabulary that can be negative needs its sign written. */
+static rfb_u32 put_signed(char *out, rfb_u32 cap, rfb_u32 at, rfb_s16 v)
+{
+    if (v < 0) {
+        at = put_char(out, cap, at, '-');
+        return put_num(out, cap, at, (rfb_u32)(-(rfb_s32)v));
+    }
+    return put_num(out, cap, at, (rfb_u32)v);
+}
+
 rfb_u32 rfb_word_geom(char *out, rfb_u32 cap, const rfb_geom *g)
 {
     static const char kw[] = "geom";
@@ -89,6 +100,72 @@ rfb_u32 rfb_word_pal(char *out, rfb_u32 cap, const rfb_u8 *rgb,
     for (i = 0; i < colours * 3u; i++) {
         out[at++] = hex[(rgb[i] >> 4) & 0x0fu];
         out[at++] = hex[rgb[i] & 0x0fu];
+    }
+
+    out[at] = '\0';
+    return at;
+}
+
+
+/*
+ * The pointer image.  Refused rather than truncated when the shape is past
+ * what the vocabulary carries: a viewer handed half a sprite draws a wrong
+ * pointer and has no way to know it, where one handed nothing keeps its own.
+ */
+rfb_u32 rfb_word_ptr(char *out, rfb_u32 cap, const rfb_pointer *p,
+                     const rfb_u8 *rgb, const rfb_u8 *bits)
+{
+    static const char hex[] = "0123456789abcdef";
+    static const char kw[] = "ptr";
+    rfb_u32 colours;
+    rfb_u32 nbits;
+    rfb_u32 at = 0;
+    rfb_u32 i;
+
+    if (!out || cap == 0u || !p || !rgb || !bits)
+        return 0;
+
+    if (p->width == 0u || p->width > RFB_PTR_MAX_W ||
+        p->height == 0u || p->height > RFB_PTR_MAX_H ||
+        p->depth == 0u || p->depth > RFB_PTR_MAX_DEPTH ||
+        p->x_scale == 0u || p->y_scale == 0u)
+        return 0;
+
+    colours = (1u << p->depth) - 1u;
+    nbits   = (rfb_u32)p->depth * RFB_PTR_ROW_BYTES(p->width) * p->height;
+
+    for (i = 0; kw[i] != '\0'; i++)
+        at = put_char(out, cap, at, kw[i]);
+
+    at = put_char(out, cap, at, ' ');
+    at = put_num(out, cap, at, p->width);
+    at = put_char(out, cap, at, ' ');
+    at = put_num(out, cap, at, p->height);
+    at = put_char(out, cap, at, ' ');
+    at = put_num(out, cap, at, p->depth);
+    at = put_char(out, cap, at, ' ');
+    at = put_num(out, cap, at, p->x_scale);
+    at = put_char(out, cap, at, ' ');
+    at = put_num(out, cap, at, p->y_scale);
+    at = put_char(out, cap, at, ' ');
+    at = put_signed(out, cap, at, p->hot_x);
+    at = put_char(out, cap, at, ' ');
+    at = put_signed(out, cap, at, p->hot_y);
+    at = put_char(out, cap, at, ' ');
+
+    if (at > cap || at + 2u * (3u * colours + nbits) + 2u > cap)
+        return 0;
+
+    for (i = 0; i < 3u * colours; i++) {
+        out[at++] = hex[(rgb[i] >> 4) & 0x0fu];
+        out[at++] = hex[rgb[i] & 0x0fu];
+    }
+
+    out[at++] = ' ';
+
+    for (i = 0; i < nbits; i++) {
+        out[at++] = hex[(bits[i] >> 4) & 0x0fu];
+        out[at++] = hex[bits[i] & 0x0fu];
     }
 
     out[at] = '\0';

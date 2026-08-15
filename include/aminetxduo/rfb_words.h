@@ -24,6 +24,21 @@
  *                     Sent after geom and again whenever the ColorMap moves.
  *                     A geom leaves the viewer on a grey palette until one
  *                     arrives, so a geom is always followed by a pal.
+ *   ptr W H DEPTH XS YS HOTX HOTY RRGGBB... BITS
+ *                     the mouse pointer's IMAGE, which is a hardware sprite
+ *                     and is therefore in no frame this ever sends.  Seven
+ *                     decimal numbers, then the sprite's own colours as hex
+ *                     triples -- (1 << DEPTH) - 1 of them, because index 0 is
+ *                     transparent -- then the planar bits as hex, plane-major,
+ *                     DEPTH * ((W + 15) / 16 * 2) * H bytes of them.
+ *                     W and H are SPRITE pixels and XS and YS are how many
+ *                     screen pixels one sprite pixel covers across and down: a
+ *                     sprite pixel is a lores pixel whatever the screen is.
+ *                     HOTX and HOTY are the hotspot, in sprite pixels.
+ *                     Sent when the session opens and again only when the
+ *                     image changes, which is almost never -- it is the
+ *                     viewer that tracks the mouse, from its own pointer, so
+ *                     nothing here is sent per movement.
  *
  * Client to server:
  *
@@ -77,6 +92,28 @@ extern "C" {
 #define RFB_WORD_GEOM_MAX   44
 #define RFB_WORD_PAL_MAX    (5u + 6u * (1u << RFB_MAX_DEPTH))
 
+/*
+ * What a pointer sprite may be, which is what sizes the `ptr` word.
+ *
+ * 64 wide and 64 high is four times the classic 16x16 in each direction and
+ * more than any pointer a 3.x machine has been seen to carry; an image past it
+ * is REFUSED rather than truncated, because half a pointer drawn at the wrong
+ * scale is worse than the viewer's own arrow.  Four planes is the same
+ * judgement: a 16-colour pointer is an AGA extreme and anything past it is not
+ * something to guess the colour registers for.
+ */
+#define RFB_PTR_MAX_W       64u
+#define RFB_PTR_MAX_H       64u
+#define RFB_PTR_MAX_DEPTH   4u
+#define RFB_PTR_ROW_BYTES(w) ((((w) + 15u) / 16u) * 2u)
+#define RFB_PTR_MAX_BITS    (RFB_PTR_MAX_DEPTH * \
+                             RFB_PTR_ROW_BYTES(RFB_PTR_MAX_W) * RFB_PTR_MAX_H)
+#define RFB_PTR_MAX_COLOURS ((1u << RFB_PTR_MAX_DEPTH) - 1u)
+
+/* "ptr " and seven numbers with their spaces, then two hex digits a byte. */
+#define RFB_WORD_PTR_MAX    (4u + 7u * 7u + \
+                             2u * (3u * RFB_PTR_MAX_COLOURS + RFB_PTR_MAX_BITS))
+
 enum {
     RFB_IN_NONE = 0,
     RFB_IN_REFRESH,
@@ -104,6 +141,24 @@ typedef struct {
  * fit.  Both write a NUL. */
 rfb_u32 rfb_word_geom(char *out, rfb_u32 cap, const rfb_geom *g);
 rfb_u32 rfb_word_pal(char *out, rfb_u32 cap, const rfb_u8 *rgb, rfb_u32 colours);
+
+/*
+ * The pointer image.  `rgb` is 3 * ((1 << depth) - 1) bytes and `bits` is
+ * depth * RFB_PTR_ROW_BYTES(width) * height, plane-major.  0 when the shape is
+ * one this refuses or the buffer is too small.
+ */
+typedef struct {
+    rfb_u16 width;
+    rfb_u16 height;
+    rfb_u16 depth;
+    rfb_u16 x_scale;    /* screen pixels one sprite pixel covers across */
+    rfb_u16 y_scale;    /* screen rows one sprite row covers            */
+    rfb_s16 hot_x;      /* sprite pixels from the left                  */
+    rfb_s16 hot_y;
+} rfb_pointer;
+
+rfb_u32 rfb_word_ptr(char *out, rfb_u32 cap, const rfb_pointer *p,
+                     const rfb_u8 *rgb, const rfb_u8 *bits);
 
 /* Fills `ev` and returns 1 when `w` is a word this knows, 0 when it is not.
  * `w` need not be terminated; `len` is what arrived in the text frame.  A word
