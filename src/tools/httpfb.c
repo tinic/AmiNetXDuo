@@ -60,7 +60,9 @@
 #include <graphics/view.h>
 #include <intuition/intuition.h>
 #include <intuition/intuitionbase.h>
+#include <intuition/preferences.h>
 #include <intuition/screens.h>
+#include <prefs/pointer.h>
 
 #include <proto/graphics.h>
 #include <proto/intuition.h>
@@ -667,6 +669,481 @@ static BOOL fb_read_palette(struct ColorMap *cm, UWORD depth, UBYTE *pal)
     }
 
     return moved;
+}
+
+/* ---------------------------------------------------------- the pointer -- */
+
+/*
+ * THE MOUSE POINTER, WHICH IS A SPRITE AND IS THEREFORE IN NO FRAME
+ *
+ *   Every frame this sends is the screen's bitplanes.  The pointer is drawn by
+ *   the hardware from a sprite that is not in them, so a viewer that showed
+ *   only what arrives has no pointer at all -- which is why the browser drew an
+ *   arrow of its own, at the local mouse, and why that arrow was never the
+ *   Amiga's.
+ *
+ *   The image is sent as its own word, once, and again only if it changes.
+ *   The POSITION is not sent at all: the viewer puts the Amiga's pointer where
+ *   the browser's is, so the browser already knows where it is and drawing it
+ *   locally is what keeps it moving without a round trip.
+ *
+ * WHERE THE IMAGE COMES FROM, AND WHY NOT FROM THE POINTER ON SCREEN
+ *
+ *   There is no way to read the pointer that is actually being displayed.
+ *   struct Window's Pointer, PtrWidth and PtrHeight are filled by SetPointer()
+ *   and are NOT touched by SetWindowPointer(): a window that used the newer
+ *   call leaves them stale from an earlier SetPointer() or zero, and 3.1's
+ *   Workbench, the busy pointer and every pointer wider than 16 pixels all use
+ *   the newer call.  Reading them as sprite data reads memory somebody else
+ *   freed.  The pointerclass object that does hold the imagery answers no
+ *   OM_GET, so there is nothing to ask it either.
+ *
+ *   So this reads what the pointer was CONFIGURED to be, which is a file:
+ *   ENV:Sys/pointer.prefs, an IFF PREF with a PNTR chunk, written by the
+ *   Pointer editor and read by IPrefs.  A machine that has never had one saved
+ *   has no such file, and the pointer there came from devs:system-configuration
+ *   instead -- GetPrefs() hands that over as PointerMatrix, a 16x16 two-plane
+ *   sprite with its hotspot and its three colours.  Both are read; the file
+ *   wins when it is there, because it is the newer answer.
+ *
+ * WHAT THIS CANNOT SHOW, AND IT MATTERS
+ *
+ *   THE BUSY POINTER, and any pointer an application set for itself.  Both
+ *   live in pointerclass objects that cannot be read back, so the browser goes
+ *   on showing the configured arrow while the machine shows a stopwatch.  That
+ *   disagreement lands during a long operation, which is exactly when somebody
+ *   is most likely to be watching the screen and waiting.  The file HAS a
+ *   second PNTR chunk carrying the busy pointer's image -- pp_Which is
+ *   WBP_BUSY -- and it is deliberately not read: having the picture is no use
+ *   without knowing WHEN it is up, and nothing here can know that.
+ */
+
+/* An IFF PREF file for a pointer is a few hundred bytes; this is room for a
+   64x64 four-plane pointer twice over and then some.  Static, for the reason
+   every buffer in this file is: a Shell command has 4 KB of stack. */
+#define FB_PREFS_MAX        8192U
+
+/* struct PointerPrefs, up to its colour table, as it is on disk. */
+#define PP_WHICH            16
+#define PP_SIZE             18
+#define PP_WIDTH            20
+#define PP_HEIGHT           22
+#define PP_DEPTH            24
+#define PP_YSIZE            26
+#define PP_X                28
+#define PP_Y                30
+#define PP_HEAD             32
+
+typedef struct FbPointer
+{
+    UWORD width;
+    UWORD height;
+    UWORD depth;
+    UWORD row_bytes;
+    UWORD x_scale;
+    UWORD y_scale;
+    WORD  hot_x;
+    WORD  hot_y;
+    ULONG bits_len;
+    UBYTE rgb[3U * RFB_PTR_MAX_COLOURS];
+    UBYTE bits[RFB_PTR_MAX_BITS];
+} FbPointer;
+
+static FbPointer fb_ptr;        /* what the viewer was last told  */
+static UBYTE     fb_ptr_have;   /* fb_ptr holds something         */
+static UBYTE     fb_want_ptr;   /* a `ptr` word is queued         */
+static ULONG     fb_ptr_next;   /* when to look at the prefs again */
+
+/*
+ * HOW OFTEN THE PREFERENCES ARE RE-READ.  Fiftieths.
+ *
+ * IPrefs rewrites the file when somebody changes the setting, so noticing
+ * means looking at the file again -- and looking means a Lock, an Examine and
+ * an UnLock on ENV:, which is RAM: and therefore fast but is still three DOS
+ * calls on the one task that also serves every connection.  Once a second is
+ * far more often than a person changes their pointer and is a rounding error
+ * against the twenty grabs a second beside it.
+ */
+#define FB_PTR_EVERY        50UL
+
+/* Big-endian, out of a byte buffer, because that is how the file is and this
+   must not assume the reader's alignment. */
+static UWORD fb_be16(const UBYTE *p)
+{
+    return (UWORD)(((UWORD)p[0] << 8) | p[1]);
+}
+
+static ULONG fb_be32(const UBYTE *p)
+{
+    return ((ULONG)p[0] << 24) | ((ULONG)p[1] << 16) |
+           ((ULONG)p[2] << 8) | p[3];
+}
+
+/*
+ * How many screen pixels one sprite pixel covers.
+ *
+ * A sprite pixel is NOT always a lores pixel, which is the assumption that
+ * would put the pointer at half width on a superhires screen.  V39's ColorMap
+ * carries the answer: SpriteResolution, or SpriteResDefault when it is
+ * SPRITERESN_DEFAULT.  Both are in the same units as the screen's own pixel --
+ * 140ns, 70ns, 35ns -- so the scale is one divided by the other.
+ *
+ * SPRITERESN_ECS is 140ns except on a 35ns screen where it is 70ns, which is
+ * what makes superhires come out at two and not four.
+ */
+static VOID fb_pointer_scale(struct Screen *sc, UWORD *xs, UWORD *ys)
+{
+    struct ColorMap *cm    = sc->ViewPort.ColorMap;
+    UWORD            modes = (UWORD)sc->ViewPort.Modes;
+    UWORD            screen_ns;
+    UWORD            sprite_ns;
+    UBYTE            resn = (UBYTE)SPRITERESN_ECS;
+
+    if ((modes & SUPERHIRES) != 0)
+        screen_ns = 35;
+    else if ((modes & HIRES) != 0)
+        screen_ns = 70;
+    else
+        screen_ns = 140;
+
+    /* Only a V39 ColorMap has the fields; an older one is an ECS sprite. */
+    if (cm != NULL && cm->Type >= (UBYTE)COLORMAP_TYPE_V39)
+    {
+        resn = cm->SpriteResolution;
+        if (resn == (UBYTE)SPRITERESN_DEFAULT)
+            resn = cm->SpriteResDefault;
+    }
+
+    switch (resn)
+    {
+    case SPRITERESN_140NS: sprite_ns = 140; break;
+    case SPRITERESN_70NS:  sprite_ns = 70;  break;
+    case SPRITERESN_35NS:  sprite_ns = 35;  break;
+    case SPRITERESN_ECS:
+    default:
+        sprite_ns = (screen_ns == 35) ? 70 : 140;
+        break;
+    }
+
+    *xs = (UWORD)((sprite_ns >= screen_ns) ? (sprite_ns / screen_ns) : 1);
+
+    /*
+     * Down the screen the sprite is not scaled by a resolution field: a sprite
+     * line is a display line, so on an interlaced screen -- two display fields
+     * to one picture -- one sprite row covers two screen rows.
+     */
+    *ys = (UWORD)(((modes & LACE) != 0) ? 2 : 1);
+}
+
+/*
+ * The sprite's own colours, which are NOT the screen's first four.
+ *
+ * The pointer is sprite 0 and its three pens are colour registers 17, 18 and
+ * 19, with 16 transparent.  Those registers are the live truth -- a program
+ * that recoloured the pointer moved them and moved nothing in any prefs file
+ * -- so they are preferred, and the configured colours are the fallback for a
+ * ColorMap too short to hold them.
+ *
+ * Only at depth 2.  A deeper sprite is an attached pair and which registers it
+ * lands on is not something to guess at, so those keep the colours the file
+ * supplied.
+ */
+static VOID fb_pointer_colours(struct Screen *sc, FbPointer *p)
+{
+    struct ColorMap *cm = sc->ViewPort.ColorMap;
+    ULONG            table[3 * 3];
+    ULONG            i;
+
+    if (p->depth != 2 || cm == NULL || (ULONG)cm->Count < 20UL)
+        return;
+
+    GetRGB32(cm, 17, 3, table);
+
+    for (i = 0; i < 3UL; i++)
+    {
+        p->rgb[i * 3 + 0] = (UBYTE)(table[i * 3 + 0] >> 24);
+        p->rgb[i * 3 + 1] = (UBYTE)(table[i * 3 + 1] >> 24);
+        p->rgb[i * 3 + 2] = (UBYTE)(table[i * 3 + 2] >> 24);
+    }
+}
+
+/*
+ * devs:system-configuration's pointer, through GetPrefs().  The stock answer:
+ * a 16x16 two-plane sprite in PointerMatrix, its hotspot in XOffset/YOffset
+ * and its colours in color17..19 as RGB4.
+ *
+ * PointerMatrix is (1 + 16 + 1) word PAIRS: a control pair, sixteen rows of
+ * one word per plane, and a terminating pair.  The rows are INTERLEAVED and
+ * everything downstream of here is plane-major, so this is where they are
+ * separated.
+ */
+static BOOL fb_pointer_from_prefs(FbPointer *p)
+{
+    /* Static: struct Preferences is over 300 bytes and this runs on httpd's
+       stack, which is a Shell command's. */
+    static struct Preferences prefs;
+    UWORD row;
+
+    if (GetPrefs(&prefs, (LONG)sizeof(prefs)) == NULL)
+        return FALSE;
+
+    p->width     = 16;
+    p->height    = 16;
+    p->depth     = 2;
+    p->row_bytes = 2;
+    p->bits_len  = 2UL * 2UL * 16UL;
+    p->hot_x     = (WORD)prefs.XOffset;
+    p->hot_y     = (WORD)prefs.YOffset;
+
+    memset(p->bits, 0, (size_t)p->bits_len);
+
+    for (row = 0; row < 16; row++)
+    {
+        UWORD p0 = prefs.PointerMatrix[2 + row * 2 + 0];
+        UWORD p1 = prefs.PointerMatrix[2 + row * 2 + 1];
+
+        p->bits[row * 2 + 0]      = (UBYTE)(p0 >> 8);
+        p->bits[row * 2 + 1]      = (UBYTE)p0;
+        p->bits[32 + row * 2 + 0] = (UBYTE)(p1 >> 8);
+        p->bits[32 + row * 2 + 1] = (UBYTE)p1;
+    }
+
+    /* RGB4 to RGB8, by repeating the nibble, so 0xF becomes 0xFF and not
+       0xF0 -- the second is a colour a quarter of a step dark on everything
+       and it shows on a white pointer. */
+    {
+        const UWORD c[3] = { prefs.color17, prefs.color18, prefs.color19 };
+        ULONG i;
+
+        for (i = 0; i < 3UL; i++)
+        {
+            UBYTE r = (UBYTE)((c[i] >> 8) & 0x0F);
+            UBYTE g = (UBYTE)((c[i] >> 4) & 0x0F);
+            UBYTE b = (UBYTE)(c[i] & 0x0F);
+
+            p->rgb[i * 3 + 0] = (UBYTE)(r * 17U);
+            p->rgb[i * 3 + 1] = (UBYTE)(g * 17U);
+            p->rgb[i * 3 + 2] = (UBYTE)(b * 17U);
+        }
+    }
+
+    return TRUE;
+}
+
+/*
+ * ENV:Sys/pointer.prefs, if it is there.  An IFF FORM PREF holding one PNTR
+ * chunk per pointer; the one wanted is pp_Which == WBP_NORMAL, and the BUSY
+ * one is stepped over for the reason in the block at the top of this section.
+ *
+ * The whole file is read and then walked, rather than seeking around it: it is
+ * a few hundred bytes on RAM: and one Read is one DOS call instead of a dozen.
+ */
+static BOOL fb_pointer_from_env(FbPointer *p)
+{
+    static UBYTE buf[FB_PREFS_MAX];
+    BPTR  fh;
+    LONG  got;
+    ULONG at;
+    BOOL  found = FALSE;
+
+    fh = Open((CONST_STRPTR)"ENV:Sys/pointer.prefs", MODE_OLDFILE);
+    if (fh == 0)
+        return FALSE;
+
+    got = Read(fh, buf, (LONG)sizeof(buf));
+    Close(fh);
+
+    if (got < 12 || memcmp(buf, "FORM", 4) != 0 || memcmp(buf + 8, "PREF", 4) != 0)
+        return FALSE;
+
+    at = 12;
+    while (at + 8UL <= (ULONG)got && !found)
+    {
+        ULONG len  = fb_be32(buf + at + 4);
+        ULONG body = at + 8UL;
+
+        if (len > (ULONG)got || body + len > (ULONG)got)
+            break;                          /* truncated; take nothing */
+
+        if (memcmp(buf + at, "PNTR", 4) == 0 && len >= (ULONG)PP_HEAD)
+        {
+            const UBYTE *c = buf + body;
+
+            if (fb_be16(c + PP_WHICH) == (UWORD)WBP_NORMAL)
+            {
+                UWORD w = fb_be16(c + PP_WIDTH);
+                UWORD h = fb_be16(c + PP_HEIGHT);
+                UWORD d = fb_be16(c + PP_DEPTH);
+                ULONG cols;
+                ULONG rb;
+                ULONG need;
+
+                if (w == 0U || w > RFB_PTR_MAX_W ||
+                    h == 0U || h > RFB_PTR_MAX_H ||
+                    d == 0U || d > RFB_PTR_MAX_DEPTH)
+                {
+                    /* A shape past what the wire carries.  Refused here and
+                       not truncated: half a sprite at the wrong scale is a
+                       worse answer than the viewer keeping its own arrow. */
+                    return FALSE;
+                }
+
+                cols = (1UL << d) - 1UL;
+                rb   = ((w + 15UL) / 16UL) * 2UL;
+                need = (ULONG)PP_HEAD + cols * 3UL + (ULONG)d * rb * h;
+
+                if (len < need)
+                    return FALSE;           /* the chunk is shorter than it says */
+
+                p->width     = w;
+                p->height    = h;
+                p->depth     = d;
+                p->row_bytes = (UWORD)rb;
+                p->bits_len  = (ULONG)d * rb * h;
+                p->hot_x     = (WORD)fb_be16(c + PP_X);
+                p->hot_y     = (WORD)fb_be16(c + PP_Y);
+
+                memcpy(p->rgb, c + PP_HEAD, (size_t)(cols * 3UL));
+                memcpy(p->bits, c + PP_HEAD + cols * 3UL, (size_t)p->bits_len);
+                found = TRUE;
+            }
+        }
+
+        /* IFF chunks are word aligned. */
+        at = body + len + (len & 1UL);
+    }
+
+    return found;
+}
+
+/*
+ * THE HOTSPOT, KEPT INSIDE THE SPRITE.
+ *
+ * devs:system-configuration's stock arrow carries XOffset -1 with its tip in
+ * column 0, and the two readings of that field -- the hotspot is at
+ * (XOffset, YOffset) in the sprite, or the sprite is drawn at the mouse PLUS
+ * (XOffset, YOffset) -- put the tip one lores pixel either side of the mouse.
+ * Neither can be settled from here: the sprite is not in any bitmap this can
+ * see, so there is nothing to measure the drawn position against.
+ *
+ * What IS certain is that a hotspot outside the image is not a hotspot for
+ * anything this draws, so it is clamped in.  For the stock arrow that lands it
+ * on (0,0), which is the tip, which is where an arrow points from.
+ *
+ * It costs nothing if it is wrong: a click goes to the coordinate the viewer
+ * SENDS and not to where the image was drawn, so the worst this can be is the
+ * picture of the pointer sitting one lores pixel off.
+ */
+static VOID fb_pointer_hotspot(FbPointer *p)
+{
+    if (p->hot_x < 0)                       p->hot_x = 0;
+    if (p->hot_x > (WORD)(p->width - 1))    p->hot_x = (WORD)(p->width - 1);
+    if (p->hot_y < 0)                       p->hot_y = 0;
+    if (p->hot_y > (WORD)(p->height - 1))   p->hot_y = (WORD)(p->height - 1);
+}
+
+/*
+ * The current pointer, whatever it takes.  TRUE when `p` holds one.
+ *
+ * The file first, because it is the newer answer and the one the Pointer
+ * editor writes; devs:system-configuration when there is no file, which is a
+ * machine nobody has changed the pointer on.
+ *
+ * NO SCREEN IS TOUCHED HERE and nothing is locked, because this opens a file:
+ * a DOS call is not something to make with Intuition stopped.  The scale and
+ * the live sprite colours are added afterwards, in fb_pointer_poll(), which is
+ * where a screen is resolved.
+ */
+static BOOL fb_pointer_read(FbPointer *p)
+{
+    memset(p, 0, sizeof(*p));
+
+    if (!fb_pointer_from_env(p) && !fb_pointer_from_prefs(p))
+        return FALSE;
+
+    fb_pointer_hotspot(p);
+    return TRUE;
+}
+
+/* Two pointers are the same picture.  Compared over the fields and the bytes
+   rather than with one memcmp of the struct, because the tail of bits[] past
+   bits_len is not written and would compare as noise. */
+static BOOL fb_pointer_same(const FbPointer *a, const FbPointer *b)
+{
+    if (a->width != b->width || a->height != b->height ||
+        a->depth != b->depth || a->x_scale != b->x_scale ||
+        a->y_scale != b->y_scale || a->hot_x != b->hot_x ||
+        a->hot_y != b->hot_y || a->bits_len != b->bits_len)
+        return FALSE;
+
+    if (memcmp(a->rgb, b->rgb, (size_t)(3UL * ((1UL << a->depth) - 1UL))) != 0)
+        return FALSE;
+
+    return (BOOL)(memcmp(a->bits, b->bits, (size_t)a->bits_len) == 0);
+}
+
+/*
+ * Look again, and queue a word if the picture moved.
+ *
+ * Once a second, not once a pass: this opens a file, and three DOS calls
+ * twenty times a second on the task that also answers every connection is a
+ * cost with nothing to show for it.  A person changes their pointer about as
+ * often as they change their wallpaper.
+ *
+ * The file is read with nothing held; the screen is resolved afterwards and
+ * only the scale and the sprite's live colours come out of it, which is a
+ * short lock rather than one held across DOS.
+ */
+static VOID fb_pointer_poll(ULONG now)
+{
+    /* Static, and 2 KB of it: this is the second of these buffers and it is
+       not going on a 4 KB stack. */
+    static FbPointer fresh;
+    struct Screen   *sc;
+    ULONG            ilock = 0;
+    BOOL             pub;
+
+    if (fb_ptr_next != 0UL && (LONG)(now - fb_ptr_next) < 0L)
+        return;
+
+    fb_ptr_next = now + FB_PTR_EVERY;
+    if (fb_ptr_next == 0UL)
+        fb_ptr_next = 1UL;              /* 0 means "never looked" */
+
+    if (!fb_pointer_read(&fresh))
+        return;
+
+    sc = fb_lock_front(&pub);
+    if (sc == NULL)
+        return;
+
+    if (!pub)
+        ilock = LockIBase(0);
+
+    if (pub || fb_listed(sc))
+    {
+        fb_pointer_scale(sc, &fresh.x_scale, &fresh.y_scale);
+        fb_pointer_colours(sc, &fresh);
+    }
+    else
+    {
+        fresh.x_scale = 0;              /* refused below */
+    }
+
+    if (!pub)
+        UnlockIBase(ilock);
+    else
+        UnlockPubScreen(NULL, sc);
+
+    if (fresh.x_scale == 0)
+        return;
+
+    if (fb_ptr_have && fb_pointer_same(&fb_ptr, &fresh))
+        return;
+
+    fb_ptr      = fresh;
+    fb_ptr_have = 1;
+    fb_want_ptr = 1;
 }
 
 /* ------------------------------------------------------------------- grab -- */
@@ -1567,6 +2044,9 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_gone       = 0;
     fb_gone_at    = 0;
     fb_gone_passes = 0;
+    fb_ptr_have   = 0;
+    fb_want_ptr   = 0;
+    fb_ptr_next   = 0;
     fb_want_stat  = 0;
     fb_reset      = 0;
     /* A session opens with geom, pal and a full frame already queued, which
@@ -1766,6 +2246,9 @@ BOOL http_fb_slice(ULONG now)
     if (fb_resync_due && !fb_resync)
         fb_ask_resync();
 
+    /* And the pointer, which is its own clock: see FB_PTR_EVERY. */
+    fb_pointer_poll(fb_ticks());
+
     if (fb_want_geom)
     {
         rfb_u32 len = rfb_word_geom((char *)&fb_tx[10],
@@ -1798,6 +2281,34 @@ BOOL http_fb_slice(ULONG now)
         fb_frame_payload(HTTP_WS_EV_TEXT, (ULONG)len);
         fb_want_pal = 0;
         return TRUE;
+    }
+
+    if (fb_want_ptr)
+    {
+        rfb_pointer w;
+        rfb_u32     len;
+
+        w.width   = (rfb_u16)fb_ptr.width;
+        w.height  = (rfb_u16)fb_ptr.height;
+        w.depth   = (rfb_u16)fb_ptr.depth;
+        w.x_scale = (rfb_u16)fb_ptr.x_scale;
+        w.y_scale = (rfb_u16)fb_ptr.y_scale;
+        w.hot_x   = (rfb_s16)fb_ptr.hot_x;
+        w.hot_y   = (rfb_s16)fb_ptr.hot_y;
+
+        len = rfb_word_ptr((char *)&fb_tx[10], fb_tx_cap - 10UL, &w,
+                           fb_ptr.rgb, fb_ptr.bits);
+
+        /* A pointer this cannot carry is DROPPED and not fatal: the viewer
+           keeps whatever it had, which is its own arrow at worst, and nothing
+           else about the session is affected. */
+        fb_want_ptr = 0;
+
+        if (len != 0UL)
+        {
+            fb_frame_payload(HTTP_WS_EV_TEXT, (ULONG)len);
+            return TRUE;
+        }
     }
 
     if (fb_want_stat)

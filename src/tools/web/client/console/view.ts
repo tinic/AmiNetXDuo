@@ -26,7 +26,7 @@ import {
   pixelAspect,
   type Screen,
 } from "./planar";
-import { HOT_X, HOT_Y, POINTER_H, POINTER_W, pointerRGBA } from "./pointer";
+import { defaultPointer, type PointerImage } from "./pointer";
 
 export type Aspect = "auto" | "square";
 export type Zoom = number | "fit";
@@ -48,7 +48,13 @@ export class View {
   private aspect: Aspect = "auto";
   private zoom: Zoom = "fit";
 
-  private readonly cursor: ImageData;
+  /* The pointer being drawn.  Starts as this page's own arrow and is replaced
+     the moment the Amiga says what its own is; see pointer.ts. */
+  private pointer: PointerImage = defaultPointer();
+  /* Whether the pointer above is the Amiga's or this page's placeholder.  A
+     screenshot carries the first and never the second. */
+  private told = false;
+  private cursor: ImageData;
   private drawnAt: { x: number; y: number } | null = null;
 
   /* The last decode, in milliseconds, for the bar.  Kept as a number and not
@@ -71,7 +77,8 @@ export class View {
     this.fbCtx = this.fb.getContext("2d", { alpha: false })!;
     this.ptrCtx = this.ptr.getContext("2d")!;
 
-    this.cursor = new ImageData(pointerRGBA(), POINTER_W, POINTER_H);
+    this.cursor = new ImageData(this.pointer.rgba,
+                                this.pointer.w, this.pointer.h);
 
     new ResizeObserver(() => this.relayout()).observe(box.parentElement ?? box);
   }
@@ -97,6 +104,19 @@ export class View {
   setPalette(palette: Uint32Array): void {
     this.palette = palette;
   }
+
+  /* The Amiga's own pointer, already scaled to screen pixels.  Redrawn where
+     the old one was, so it changes under a stationary mouse. */
+  setPointer(p: PointerImage): void {
+    const was = this.drawnAt;
+    this.clearPointer();
+    this.pointer = p;
+    this.told = true;
+    this.cursor = new ImageData(p.rgba, p.w, p.h);
+    if (was !== null) this.movePointer(was.x, was.y);
+  }
+
+  get pointerImage(): PointerImage { return this.pointer; }
 
   /*
    * Decode and put.  `rect` is the damaged area when one is known; a full
@@ -201,7 +221,8 @@ export class View {
     const was = this.drawnAt;
     if (was !== null && was.x === x && was.y === y) return;
     this.clearPointer();
-    this.ptrCtx.putImageData(this.cursor, x - HOT_X, y - HOT_Y);
+    this.ptrCtx.putImageData(this.cursor, x - this.pointer.hotX,
+                             y - this.pointer.hotY);
     this.drawnAt = { x, y };
   }
 
@@ -218,11 +239,22 @@ export class View {
    *   thread.  Reading the canvas back instead would go through the
    *   compositor's colour handling for no gain.
    *
-   *   The POINTER is deliberately absent.  The Amiga draws its pointer with
-   *   a sprite, so it is not in the screen's bitmap at all and never reaches
-   *   this viewer; the arrow on the page is one this viewer draws on a
-   *   second canvas to show where the mouse is.  A screenshot of the Amiga's
-   *   screen should not have a pointer in it that the Amiga never drew.
+   *   THE POINTER IS IN IT, and it did not use to be.
+   *
+   *   The Amiga draws its pointer with a sprite, so it is in no frame this
+   *   viewer receives, and while the arrow on the page was one this viewer
+   *   invented, putting it in a screenshot would have been putting something
+   *   in the file that the Amiga never drew.  It is the Amiga's own pointer
+   *   now -- its image, its colours, its hotspot -- so leaving it out loses
+   *   the one thing a screenshot is usually taken to show, which is what was
+   *   being pointed at.
+   *
+   *   ONE RULE, BOTH SOURCES.  A screenshot of a live session and a
+   *   screenshot of a capture playing back both include it; the two used to
+   *   disagree, because a capture carries the pointer and a live session did
+   *   not.  What is drawn is whatever the pointer overlay holds, so a viewer
+   *   that has not been told a pointer -- a .pfs with none in it -- gets no
+   *   pointer in the file either, rather than this page's placeholder arrow.
    *
    * ASPECT
    *
@@ -269,13 +301,29 @@ export class View {
     }
 
     ctx.putImageData(dst, 0, 0);
+
+    /*
+     * The pointer over the top, at the same whole-number scale, and only when
+     * one is actually being drawn: `told` is what separates the Amiga's
+     * pointer from the placeholder this page starts with.
+     */
+    const at = this.drawnAt;
+    if (at !== null && this.told) {
+      /* Nearest neighbour, for the reason the stretch above is done by hand:
+         a smoothed pointer over unsmoothed pixels is the one part of the file
+         that would not be the Amiga's own colours. */
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(this.ptr, 0, 0, s.width, s.height, 0, 0, w, h);
+    }
+
     return { canvas: out, w: w, h: h };
   }
 
   clearPointer(): void {
     const was = this.drawnAt;
     if (was === null) return;
-    this.ptrCtx.clearRect(was.x - HOT_X, was.y - HOT_Y, POINTER_W, POINTER_H);
+    this.ptrCtx.clearRect(was.x - this.pointer.hotX, was.y - this.pointer.hotY,
+                          this.pointer.w, this.pointer.h);
     this.drawnAt = null;
   }
 

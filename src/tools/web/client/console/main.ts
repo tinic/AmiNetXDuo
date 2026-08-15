@@ -32,6 +32,7 @@ import {
   pfsDuration,
   type Capture,
   type PointerAt,
+  type Pointer,
 } from "./pfs";
 import { frameBytes, palette32, pixelAspect } from "./planar";
 import {
@@ -41,6 +42,7 @@ import {
   scratchBytes,
   type Geometry,
 } from "./tiles";
+import { defaultPointer, pointerImage } from "./pointer";
 import { View, type Aspect, type Zoom } from "./view";
 import { Wire, defaultEndpoint, type WireState } from "./wire";
 
@@ -119,6 +121,10 @@ let raf = 0;
 let startedAt = 0;
 let startedFrom = 0;
 
+/* Which pointer image the player last expanded, so a scrub does not rebuild
+   it on every frame.  Reset when a capture is loaded. */
+let shownImage = -1;
+
 const playEl = $("play") as HTMLButtonElement;
 const prevEl = $("prev") as HTMLButtonElement;
 const nextEl = $("next") as HTMLButtonElement;
@@ -148,6 +154,16 @@ function showFrame(i: number): void {
     if (p === undefined || (p.image === 0 && p.x === 0 && p.y === 0)) {
       view.clearPointer();
     } else {
+      /* The image the file names, expanded once per capture and not per
+         frame: a recording carries one pointer and names it on every frame. */
+      if (p.image !== shownImage) {
+        shownImage = p.image;
+        const q = cap.pointers[p.image - 1];
+        view.setPointer(q === undefined
+          ? defaultPointer()
+          : pointerImage(q.width, q.height, q.depth, q.xScale, q.yScale,
+                         q.hotX, q.hotY, q.rgb, q.bits));
+      }
       view.movePointer(p.x, p.y);
     }
   }
@@ -222,6 +238,7 @@ function loadCapture(name: string, buf: ArrayBuffer): void {
   live.disconnect();
   cap = c;
   frame = 0;
+  shownImage = -1;
 
   view.setScreen(c.screen, c.palette);
   showGeometry();
@@ -287,6 +304,23 @@ let expectSeq = -1;
    the only thing that asks for them. */
 let liveRgb: Uint8Array = new Uint8Array(0);
 
+/* Two hex digits a byte, which is how both `pal` and `ptr` carry theirs. */
+function hexBytes(hex: string): Uint8Array {
+  const out = new Uint8Array(hex.length >> 1);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = parseInt(hex.substr(i * 2, 2), 16);
+  }
+  return out;
+}
+
+/* What the Amiga said its pointer is, in SPRITE pixels and unscaled, or null
+   before it has said.  Kept in that form because it is what a recording
+   stores: the file carries the truth and the scale, not the expansion. */
+let livePointer: {
+  w: number; h: number; depth: number; xScale: number; yScale: number;
+  hotX: number; hotY: number; rgb: Uint8Array; bits: Uint8Array;
+} | null = null;
+
 /* Frames arrive before the palette does, so there is one to start with: grey
    is what an Amiga screen is before LoadRGB4 runs, and a black one reads as
    the viewer having failed. */
@@ -347,6 +381,32 @@ function heard(w: string): void {
        * one frame after the desktop appeared and stayed: an idle Workbench
        * has nothing more to send.
        */
+      return;
+    }
+
+    /*
+     * The Amiga's own pointer.  It is a hardware sprite, so it is in no frame
+     * this ever receives and has to come as its own word; the POSITION does
+     * not, because this viewer is what puts the Amiga's pointer where the
+     * browser's is and therefore already knows where it is.
+     */
+    if (w.startsWith("ptr ")) {
+      const f = w.split(" ");
+      if (f.length !== 10) return;
+
+      const n = f.slice(1, 8).map(Number);
+      if (n.some((v) => !Number.isFinite(v))) return;
+      const [pw, ph, pd, xs, ys, hx, hy] = n;
+      if (pw < 1 || ph < 1 || pd < 1 || pd > 8 || xs < 1 || ys < 1) return;
+
+      const rgb = hexBytes(f[8]);
+      const bits = hexBytes(f[9]);
+      if (rgb.length !== 3 * ((1 << pd) - 1)) return;
+      if (bits.length !== pd * (Math.floor((pw + 15) / 16) * 2) * ph) return;
+
+      livePointer = { w: pw, h: ph, depth: pd, xScale: xs, yScale: ys,
+                      hotX: hx, hotY: hy, rgb, bits };
+      view.setPointer(pointerImage(pw, ph, pd, xs, ys, hx, hy, rgb, bits));
       return;
     }
 
@@ -579,17 +639,17 @@ interface Rec {
      the first, so what goes in the file is milliseconds from frame zero. */
   times: number[];
   /*
-   * Where the pointer was on each frame.
+   * Where the pointer was on each frame, and which image it was.
    *
-   * THE POSITION IS REAL AND THE IMAGE IS NOT THERE YET.  Absolute pointer
-   * positions are what this viewer SENDS -- the Amiga's pointer is put where
-   * the browser's is -- so the position it is drawing is where the Amiga's
-   * pointer was, and recording it is recording what happened.  The IMAGE is a
-   * hardware sprite on the far side and no word carries one yet, so every
-   * frame names image 0 and the file has no pointer table.  Nothing here
-   * invents a shape to fill the field.
+   * Both are real.  Absolute pointer positions are what this viewer SENDS --
+   * the Amiga's pointer is put where the browser's is -- so the position it is
+   * drawing is where the Amiga's pointer was.  The image is whatever the
+   * `ptr` word last carried, stored UNSCALED in sprite pixels with its scale,
+   * which is what the file wants; a session that never received one records
+   * image 0 rather than the arrow this page draws for itself.
    */
   pointerAt: PointerAt[];
+  pointers: Pointer[];
   bytes: number;
   part: number;
 }
@@ -612,7 +672,7 @@ function recFlush(): boolean {
   const name = recName(rec);
   try {
     download(new Blob([buildPfs(rec.screen, rec.rgb, rec.frames, rec.times,
-                                rec.pointerAt)],
+                                rec.pointerAt, rec.pointers)],
                       { type: "application/octet-stream" }), name);
   } catch (e) {
     say("down", "the recording would not write: " +
@@ -641,6 +701,7 @@ function recStart(): void {
     frames: [],
     times: [],
     pointerAt: [],
+    pointers: [],
     bytes: 0,
     part: 1,
   };
@@ -668,6 +729,7 @@ function recRoll(): void {
     frames: [],
     times: [],
     pointerAt: [],
+    pointers: [],
     bytes: 0,
     part,
   };
@@ -678,10 +740,27 @@ function recTake(planar: Uint8Array): void {
   if (rec === null) return;
 
   const p = view.pointerAt;
+
+  /* The image goes in ONCE and every frame names it.  It changes about as
+     often as somebody changes their pointer preference, so a table of one is
+     the usual case and a copy per frame would be 2 KB a frame for nothing. */
+  let image = 0;
+  if (livePointer !== null) {
+    if (rec.pointers.length === 0) {
+      rec.pointers.push({
+        width: livePointer.w, height: livePointer.h, depth: livePointer.depth,
+        xScale: livePointer.xScale, yScale: livePointer.yScale,
+        hotX: livePointer.hotX, hotY: livePointer.hotY,
+        rgb: livePointer.rgb, bits: livePointer.bits,
+      });
+    }
+    image = 1;
+  }
+
   rec.frames.push(planar.slice());
   rec.times.push(performance.now());
   rec.pointerAt.push(p === null ? { x: 0, y: 0, image: 0 }
-                                : { x: p.x, y: p.y, image: 0 });
+                                : { x: p.x, y: p.y, image });
   rec.bytes += planar.length;
 
   if (rec.frames.length >= PFS_MAX_FRAMES) recRoll();

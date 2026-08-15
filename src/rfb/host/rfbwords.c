@@ -94,6 +94,66 @@ static void word_pal(void)
     yes(rfb_word_pal(out, 10, four, 4) == 0, "pal refuses a buffer it overruns");
 }
 
+/* The word's leading fields, which is what the numbers are checked through:
+   the tail is hex and is checked by length. */
+static int starts(const char *s, const char *want)
+{
+    return strncmp(s, want, strlen(want)) == 0;
+}
+
+static void words_pointer(void)
+{
+    /* The classic pointer: 16 wide, 16 rows, two planes, three colours, and
+       on a hires screen one sprite pixel covers two across and one down. */
+    rfb_pointer p;
+    rfb_u8 rgb[9];
+    rfb_u8 bits[2 * 2 * 16];
+    static char out[RFB_WORD_PTR_MAX];
+    rfb_u32 n;
+    rfb_u32 i;
+
+    for (i = 0; i < sizeof(rgb); i++)  rgb[i]  = (rfb_u8)(i * 16u + 1u);
+    for (i = 0; i < sizeof(bits); i++) bits[i] = (rfb_u8)i;
+
+    p.width = 16; p.height = 16; p.depth = 2;
+    p.x_scale = 2; p.y_scale = 1;
+    p.hot_x = 0; p.hot_y = 0;
+
+    n = rfb_word_ptr(out, sizeof(out), &p, rgb, bits);
+    yes(n > 0u, "ptr builds");
+    yes(n > 0u && out[0] == 'p' && out[1] == 't' && out[2] == 'r' &&
+        out[3] == ' ', "ptr starts with its keyword");
+    yes(n > 0u && starts(out, "ptr 16 16 2 2 1 0 0 "),
+        "ptr carries the shape, the scale and the hotspot");
+    /* 4 + "16 16 2 2 1 0 0 " is 16, then 18 hex of colour, a space, 128 hex. */
+    yes(n == 4u + 16u + 18u + 1u + 128u, "ptr is exactly as long as it says");
+
+    /* A hotspot away from the corner, and negative, which a crosshair has. */
+    p.hot_x = -3; p.hot_y = 7;
+    n = rfb_word_ptr(out, sizeof(out), &p, rgb, bits);
+    yes(n > 0u && starts(out, "ptr 16 16 2 2 1 -3 7 "),
+        "a negative hotspot keeps its sign");
+
+    /* Refusals: every one of these would have a viewer draw a wrong pointer
+       with no way to know it. */
+    p.hot_x = 0; p.hot_y = 0;
+    p.width = 0;
+    yes(rfb_word_ptr(out, sizeof(out), &p, rgb, bits) == 0u,
+        "a pointer no pixels wide is refused");
+    p.width = RFB_PTR_MAX_W + 1u;
+    yes(rfb_word_ptr(out, sizeof(out), &p, rgb, bits) == 0u,
+        "a pointer wider than the vocabulary carries is refused");
+    p.width = 16; p.depth = RFB_PTR_MAX_DEPTH + 1u;
+    yes(rfb_word_ptr(out, sizeof(out), &p, rgb, bits) == 0u,
+        "a pointer deeper than the vocabulary carries is refused");
+    p.depth = 2; p.x_scale = 0;
+    yes(rfb_word_ptr(out, sizeof(out), &p, rgb, bits) == 0u,
+        "a zero scale is refused");
+    p.x_scale = 2;
+    yes(rfb_word_ptr(out, 40, &p, rgb, bits) == 0u,
+        "a buffer too small is refused rather than half filled");
+}
+
 static void words_in(void)
 {
     rfb_input ev;
@@ -159,6 +219,7 @@ int main(void)
     word_geom();
     word_pal();
     words_in();
+    words_pointer();
     words_refused();
 
     printf("%d checks, %d failure%s\n", checks, failures,
