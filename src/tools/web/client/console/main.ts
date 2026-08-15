@@ -354,6 +354,7 @@ function update(buf: ArrayBuffer): void {
 
 const urlEl = $("url") as HTMLInputElement;
 const liveEl = $("live") as HTMLButtonElement;
+const shotEl = $("shot") as HTMLButtonElement;
 
 /*
  * There is one Workbench screen and one input.device, so the server takes one
@@ -391,6 +392,44 @@ function connection(state: WireState, detail: string): void {
   }
   if (state === "closed" || state === "refused") expectSeq = -1;
 }
+
+/*
+ * THE SCREENSHOT.
+ *
+ * Two digits of month and day and a 24-hour clock, and the geometry, so a
+ * folder of these sorts into the order they were taken and says what each one
+ * is without opening it.  `native` is in the name too, because a 640x256 file
+ * and a 640x512 file of the same screen are both correct and telling them
+ * apart afterwards is otherwise guesswork.
+ */
+function stamp(): string {
+  const d = new Date();
+  const p = (n: number, w = 2) => String(n).padStart(w, "0");
+  return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "-" +
+         p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+}
+
+function saveShot(native: boolean): void {
+  const shot = view.snapshot(native);
+  if (shot === null) { say("down", "there is no screen to save yet"); return; }
+
+  shot.canvas.toBlob((blob) => {
+    if (blob === null) { say("down", "the screenshot would not encode"); return; }
+    const name = "amiga-" + shot.w + "x" + shot.h +
+                 (native ? "-native" : "") + "-" + stamp() + ".png";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    /* The object URL is the only thing here that would otherwise be held for
+       the life of the page, one per screenshot. */
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    say("up", "saved " + name);
+  }, "image/png");
+}
+
+shotEl.onclick = (e: MouseEvent) => saveShot(e.shiftKey);
 
 liveEl.onclick = () => {
   if (live.open) { away = false; live.disconnect(); return; }
