@@ -178,4 +178,18 @@ sana2_stage() {
     SANA2_DRIVER=$_drv_name
     SANA2_DEVICE=$_device
     SANA2_CARD=${AMINETXDUO_SANA2_CARD:-}
+
+    # Said out loud, once, by the one function every caller goes through.
+    # Which driver a run booted decides what the run proves, and a caller that
+    # leaves it to the reader ships a green result for a driver nobody asked
+    # about.  source= is read off the file name rather than off a variable so
+    # it cannot disagree with what was actually copied.
+    case "$_drv_name" in
+        anxnet.device) _src=anxnet ;;
+        *)             _src=vendor ;;
+    esac
+    printf 'sana2_staged board=%s driver=%s source=%s device=%s card=%s dir=%s path=%s\n' \
+           "$_board" "$_drv_name" "$_src" "$_device" \
+           "${SANA2_CARD:-none}" "DEVS:${_dir:+$_dir/}" \
+           "${_drv_path:-none}"
 }

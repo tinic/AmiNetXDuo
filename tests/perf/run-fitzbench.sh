@@ -395,6 +395,26 @@ if [ -n "$BOARD_DRIVER" ]; then
     echo "==> $BOARD: staged $BOARD_DEVICE from $BOARD_DRIVER"
 fi
 
+# In the same key=value shape tools/sana2-stage.sh prints, and deliberately a
+# different answer: this script compares STACKS over one SANA-II driver, so -N
+# stages the VENDOR driver for the board on purpose.  tests/tools/run-iperf.sh
+# asks the other question, "does our driver carry traffic", and defaults to
+# anxnet.device for the same board.  Both say which, so neither has to be
+# guessed at from the boot log.
+case "$BOARD" in
+    a2065) _fb_dev=a2065.device; _fb_path=${A2065:-none} ;;
+    *)     _fb_dev=$BOARD_DEVICE; _fb_path=$BOARD_DRIVER ;;
+esac
+[ -z "${AMINETXDUO_EXTRA_DRIVER:-}" ] || {
+    _fb_dev=$(basename "$AMINETXDUO_EXTRA_DRIVER")
+    _fb_path=$AMINETXDUO_EXTRA_DRIVER; }
+[ -z "${AMINETXDUO_IFCONFIG:-}" ] ||
+    _fb_dev=$(sed -n 's/^DEVICE=//p' "$STAGE/devs/NetInterfaces/eth0" | head -1)
+printf 'sana2_staged board=%s driver=%s source=%s device=%s card=none dir=DEVS: path=%s\n' \
+       "$BOARD" "${_fb_dev:-none}" \
+       "$(case "$_fb_dev" in anxnet*) echo anxnet ;; *) echo vendor ;; esac)" \
+       "${_fb_dev:-none}" "${_fb_path:-none}"
+
 # The interface file and the disk have to agree, whichever of the three staged
 # them.  AMINETXDUO_EXTRA_DRIVER stages under the file's BASENAME, so a driver
 # taken from a build tree as anxnet.000 lands as anxnet.000 while eth0 asks for
