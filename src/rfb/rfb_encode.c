@@ -338,36 +338,34 @@ static int rfb_cmp_plane(const rfb_u8 *src, const rfb_u8 *sh,
 
     if (word) {
         const rfb_u32 words = tw >> 2;
-        const rfb_u32 eights = words >> 3;
-        const rfb_u32 rest = words & 7u;
+        const rfb_u32 quads = words >> 2;
+        const rfb_u32 rest = words & 3u;
         const rfb_u32 tail = tw & 3u;
 
-        /* The rows are walked by adding the stride, not by multiplying the row
-         * number by it: bpr is a variable, so `src + r * bpr` on the -m68000
-         * build the archive ships is a call to __mulsi3, once per row of every
-         * tile of every plane. */
+        /* FOUR at a turn, not eight.  A tile is tile_w BYTES wide and the
+         * shipping tile_w is 16, which is four longwords -- an eight-wide
+         * unroll never executed a single iteration on the geometry this
+         * actually runs on, and every row fell through to the one-longword
+         * loop.  Four is the width of a row, so the common case is one
+         * straight-line body per row and no inner loop test at all.
+         *
+         * The rows are walked by adding the stride rather than multiplying
+         * the row number by it: bpr is a variable, so `src + r * bpr` on the
+         * -m68000 codegen the archive ships is a call to __mulsi3, once per
+         * row of every tile of every plane. */
         do {
-            rfb_u32 n = eights;
+            rfb_u32 n = quads;
             const rfb_u32 *sw = (const rfb_u32 *)(const void *)src;
             const rfb_u32 *dw = (const rfb_u32 *)(const void *)sh;
 
-            /* Eight at a turn with the differences ORed together, so the loop
-             * test is paid once per 32 bytes instead of once per 4.  The early
-             * exit is still an early exit -- 32 bytes of granularity on a
-             * 256-byte tile-plane -- and on the case that matters, a screen
-             * where nothing moved, there is nothing to exit early from. */
             while (n--) {
                 rfb_u32 acc = sw[0] ^ dw[0];
                 acc |= sw[1] ^ dw[1];
                 acc |= sw[2] ^ dw[2];
                 acc |= sw[3] ^ dw[3];
-                acc |= sw[4] ^ dw[4];
-                acc |= sw[5] ^ dw[5];
-                acc |= sw[6] ^ dw[6];
-                acc |= sw[7] ^ dw[7];
                 if (acc)
                     return 1;
-                sw += 8; dw += 8;
+                sw += 4; dw += 4;
             }
             n = rest;
             while (n--)
@@ -423,8 +421,20 @@ static void rfb_take_plane(const rfb_u8 *src, rfb_u8 *sh, rfb_u8 *raw,
             rfb_u32 *ww = (rfb_u32 *)(void *)raw;
             rfb_u32 n = words;
 
+            /* Four at a turn for the same reason the compare is: a tile row
+             * is four longwords wide, so this is one straight-line body. */
             if (keep_xor) {
                 rfb_u32 *xw = (rfb_u32 *)(void *)xb;
+                rfb_u32 q = n >> 2;
+                n &= 3u;
+                while (q--) {
+                    rfb_u32 a = sw[0], b = sw[1], c = sw[2], d = sw[3];
+                    xw[0] = a ^ dw[0]; xw[1] = b ^ dw[1];
+                    xw[2] = c ^ dw[2]; xw[3] = d ^ dw[3];
+                    dw[0] = a; dw[1] = b; dw[2] = c; dw[3] = d;
+                    ww[0] = a; ww[1] = b; ww[2] = c; ww[3] = d;
+                    sw += 4; dw += 4; ww += 4; xw += 4;
+                }
                 while (n--) {
                     rfb_u32 sv = *sw++;
                     *xw++ = sv ^ *dw;
@@ -433,6 +443,14 @@ static void rfb_take_plane(const rfb_u8 *src, rfb_u8 *sh, rfb_u8 *raw,
                 }
                 xb = (rfb_u8 *)(void *)xw;
             } else {
+                rfb_u32 q = n >> 2;
+                n &= 3u;
+                while (q--) {
+                    rfb_u32 a = sw[0], b = sw[1], c = sw[2], d = sw[3];
+                    dw[0] = a; dw[1] = b; dw[2] = c; dw[3] = d;
+                    ww[0] = a; ww[1] = b; ww[2] = c; ww[3] = d;
+                    sw += 4; dw += 4; ww += 4;
+                }
                 while (n--) {
                     rfb_u32 sv = *sw++;
                     *dw++ = sv;
