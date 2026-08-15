@@ -46,6 +46,17 @@ typedef char rfb_u32_is_four_bytes[(sizeof(rfb_u32) == 4) ? 1 : -1];
  * tile pass corrects anyway. */
 #define RFB_PROBE_MIN_BLK     16
 
+/* The two tile loops get their own registers.  Inlined into the frame
+ * function, which is large, the compare's four-longword body spilled and
+ * measured SLOWER than a one-longword loop; out of line it has the register
+ * file to itself and the call is paid once per tile-plane, 160 times a frame.
+ * Portable: it is a hint the compiler is free not to have. */
+#if defined(__GNUC__)
+#define RFB_NOINLINE __attribute__((noinline))
+#else
+#define RFB_NOINLINE
+#endif
+
 /* ------------------------------------------------------------- PackBits --- */
 
 rfb_u32 rfb_packbits(const rfb_u8 *in, rfb_u32 n, rfb_u8 *out, rfb_u32 cap,
@@ -331,6 +342,7 @@ static void rfb_putblk(rfb_out *o, const rfb_u8 *src, rfb_u32 n)
  * `word` is the caller's frame-constant verdict on alignment -- see
  * rfb_words_ok().  It is not rederived here because it was the same answer on
  * every row of every tile of every plane, 2560 times a frame. */
+RFB_NOINLINE
 static int rfb_cmp_plane(const rfb_u8 *src, const rfb_u8 *sh,
                          rfb_u32 bpr, rfb_u32 tw, rfb_u32 th, int word)
 {
@@ -401,6 +413,7 @@ static int rfb_cmp_plane(const rfb_u8 *src, const rfb_u8 *sh,
  * the shadow is written from it, and it is what goes on the wire.  The source
  * is never read twice, so a screen being drawn on underneath cannot put a
  * shadow on this end that disagrees with the bytes the far end was sent. */
+RFB_NOINLINE
 static void rfb_take_plane(const rfb_u8 *src, rfb_u8 *sh, rfb_u8 *raw,
                            rfb_u8 *xb, rfb_u32 bpr, rfb_u32 tw, rfb_u32 th,
                            int keep_xor, int word)
