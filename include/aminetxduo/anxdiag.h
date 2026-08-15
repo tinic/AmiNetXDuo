@@ -103,6 +103,12 @@ extern "C" {
                                        detection; value = the byte            */
 #define ANXDIAG_ODD_RETRY      21   /* odd registers failed a byte read and
                                        the CNet16 word path was tried         */
+#define ANXDIAG_CHIP           22   /* value = NETDEV_CHIP_*.  Recorded before
+                                       attach, so a card that never attaches
+                                       still says what it was taken for -- and
+                                       so the reader does not claim a transfer
+                                       mode for a LANCE, which has no data
+                                       port to have one                       */
 
 /* --- the PCMCIA slot --------------------------------------------------- */
 #define ANXDIAG_PC_RESOURCE    30   /* card.resource base, 0 = no slot       */

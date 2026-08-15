@@ -151,20 +151,33 @@ static const char *cnd_macsource(ULONG src)
     switch (src)
     {
     case ANXDIAG_MAC_PROM:
-        return "the card's own address PROM";
+        return "the card's address PROM";
     case ANXDIAG_MAC_PROM_FIXED:
-        return "the card's address PROM, with its group bit cleared";
+        return "the address PROM (group bit cleared)";
     case ANXDIAG_MAC_CIS:
-        return "the card's CIS, which carried a LAN node ID";
+        return "the CIS (a LAN node ID)";
     case ANXDIAG_MAC_DERIVED:
-        return "derived from this machine: the card's PROM was blank";
+        return "this machine: the PROM was blank";
     case ANXDIAG_MAC_SERIAL:
-        return "the board's autoconfig serial number";
+        return "the autoconfig serial number";
     default:
         break;
     }
 
     return "somewhere this command does not know about";
+}
+
+static const char *cnd_chip(ULONG chip)
+{
+    switch (chip)
+    {
+    case 0:  return "a DP8390 reached through a remote-DMA port (NE2000)";
+    case 1:  return "a DP8390 with a memory-mapped packet buffer";
+    case 2:  return "an Am7990 LANCE, which masters the bus itself";
+    default: break;
+    }
+
+    return "a chip this command does not know about";
 }
 
 static const char *cnd_dmode(ULONG mode)
@@ -198,6 +211,11 @@ static VOID say(const char *fmt, ...)
  * older CheckNetDevice against a newer driver -- is printed as itself rather
  * than dropped, so the report is still true.
  */
+/* The chip of the card being printed, so ANXDIAG_ATTACH_OK does not claim a
+   transfer mode for a part that has no data port.  Set by ANXDIAG_CHIP, which
+   the driver records before it calls attach(). */
+static UWORD cnd_chip_seen;
+
 static VOID cnd_step(const AnxDiagStep *st)
 {
     ULONG v = st->ds_Value;
@@ -258,11 +276,26 @@ static VOID cnd_step(const AnxDiagStep *st)
         say("  Odd-numbered registers would not read as bytes, so the\n"
             "  word-read path some Fast-Ethernet clones need was tried.\n");
         return;
+    case ANXDIAG_CHIP:
+        cnd_chip_seen = (UWORD)v;
+        say("  The chip is %s.\n", (LONG)cnd_chip(v));
+        return;
     case ANXDIAG_ATTACH_OK:
+        /*
+         * A LANCE has no data port, so it has no transfer mode: bus.dmode is
+         * whatever netdev_bus_setup() left there and reporting it would be an
+         * invented fact.  The chip step above is what says which this is.
+         */
+        if (cnd_chip_seen == 2)
+        {
+            say("  ATTACHED.\n");
+            return;
+        }
         say("  ATTACHED.  Packet data moves %s.\n", (LONG)cnd_dmode(v));
         return;
     case ANXDIAG_ATTACH_FAIL:
-        say("  REFUSED: %s.\n", (LONG)cnd_why(v));
+        say("  REFUSED, and this is why:\n");
+        tool_wrap(4, cnd_why(v));
         return;
     case ANXDIAG_MAC_SOURCE:
         say("  The station address came from %s.\n", (LONG)cnd_macsource(v));
@@ -522,6 +555,7 @@ static VOID cnd_report(BOOL raw)
             seen[nseen++] = c;
 
         say("\nCARD \"%s\"\n", (LONG)cnd_card(c));
+        cnd_chip_seen = 0xffffu;
 
         for (j = 0; j < cnd_mark.ad_Used; j++)
         {

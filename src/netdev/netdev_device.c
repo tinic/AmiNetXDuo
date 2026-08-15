@@ -1255,6 +1255,8 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
         netdev_bus_regmap(&unit->nu_Nic.bus, card->regmap,
                           (APTR)((UBYTE *)board + card->regmap[16]));
 
+    netdev_diag_note(ANXDIAG_CHIP, netdev_diag_card(card), (ULONG)card->chip);
+
     nd_tracex("anx: board ", (ULONG)board);
     if (unit->nu_Nic.ops->attach(&unit->nu_Nic) != 0)
     {
