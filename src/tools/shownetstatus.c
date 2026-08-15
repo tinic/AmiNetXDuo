@@ -35,9 +35,10 @@
  * have anything behind them, see NETSTATUS_igmp in src/bsdsocket/
  * netstats.c), MULTICASTROUTING (no multicast router to have statistics
  * about) and ROUTING as a statistics category (NetX Duo keeps no routing
- * counters, and
- * NX_ENABLE_IP_STATIC_ROUTING is off, so the routing table is the connected
- * routes plus the default gateway, what ROUTES prints).
+ * counters).  ROUTES prints the routing table itself: the connected routes,
+ * the default gateway, and whatever AddNetRoute has put there --
+ * NX_ENABLE_IP_STATIC_ROUTING is defined (nx_user.h:704), so static routes
+ * exist even though no configuration file can express one.
  *
  * SPDX-License-Identifier: MIT
  */
