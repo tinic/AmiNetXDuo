@@ -14,7 +14,7 @@ version at the top when it merges.
 - PCMCIA cards that only answer 16-bit reads on their odd-numbered registers now work. Detection probes for it and switches, so there is no second binary and nothing for you to choose
 - A card whose address PROM is blank now takes its station address from the CIS if the card carries one there, and otherwise derives a stable one from this machine rather than refusing. The derived address is locally administered, is the same on every boot, and `HARDWAREADDRESS` in the interface file still overrides it
 - `CheckNetDevice` says what `anxnet.device` found: every card it looked at, the step each one reached, and why any was refused. It works when no card came up at all, which is when it is wanted, and it needs no special build
-
+- The cross toolchain is published for macOS as well as Linux, so the tree can be built on either without a container. `tools/fetch-toolchain.sh` picks the one for your machine and checks it; `tools/build-toolchain.sh` reproduces it from source, pinned to exact commits rather than branch names
 - A 64-bit divide by a value of 2^32 or more no longer takes the machine down. The three 64-bit shift helpers were each compiled into a call to themselves and recursed until the stack was gone; nothing in the shipped libraries divides by that much, so it was reachable rather than reached
 
 ## 0.22.1
