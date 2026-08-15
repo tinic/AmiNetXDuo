@@ -205,6 +205,73 @@ export class View {
     this.drawnAt = { x, y };
   }
 
+  /*
+   * A PNG of the Amiga's screen, as a canvas for the caller to encode.
+   *
+   * WHAT IT CAPTURES, AND WHY IT IS NOT A SCREENSHOT OF THE PAGE
+   *
+   *   The source is `this.image`, the ImageData every frame decodes into.
+   *   That is the same surface the visible canvas is painted from -- every
+   *   damaged rectangle is written into it and then copied out -- so it is
+   *   the current picture by construction and never half of a frame: a
+   *   click handler cannot interleave with a decode, both being on the one
+   *   thread.  Reading the canvas back instead would go through the
+   *   compositor's colour handling for no gain.
+   *
+   *   The POINTER is deliberately absent.  The Amiga draws its pointer with
+   *   a sprite, so it is not in the screen's bitmap at all and never reaches
+   *   this viewer; the arrow on the page is one this viewer draws on a
+   *   second canvas to show where the mouse is.  A screenshot of the Amiga's
+   *   screen should not have a pointer in it that the Amiga never drew.
+   *
+   * ASPECT
+   *
+   *   `native` false -- the default -- follows the aspect the page is
+   *   showing, because saving something other than what the person was
+   *   looking at is a trap.  A 640x256 Workbench is displayed 640x512 and is
+   *   saved 640x512.  `native` true saves the Amiga's own pixels, 640x256,
+   *   for anything that wants to do its own correction.
+   *
+   *   The stretch is a whole-number row and column duplication done here
+   *   rather than by drawImage: an integer nearest-neighbour scale is exact,
+   *   and doing it explicitly means no smoothing setting, no colour space
+   *   and no resampler is between the palette and the file.  ZOOM is not
+   *   applied at all -- it is how big the picture is on the page, not what
+   *   the picture is.
+   */
+  snapshot(native: boolean): { canvas: HTMLCanvasElement; w: number; h: number } | null {
+    const img = this.image;
+    const s = this.screen;
+    if (img === null || s.width === 0 || s.height === 0) return null;
+
+    const a = native || this.aspect !== "auto" ? { x: 1, y: 1 } : pixelAspect(s);
+    const w = s.width * a.x;
+    const h = s.height * a.y;
+
+    const out = document.createElement("canvas");
+    out.width = w;
+    out.height = h;
+    const ctx = out.getContext("2d", { alpha: false });
+    if (ctx === null) return null;
+
+    const dst = ctx.createImageData(w, h);
+    const src = new Uint32Array(img.data.buffer);
+    const d32 = new Uint32Array(dst.data.buffer);
+
+    for (let y = 0; y < h; y++) {
+      const si = ((y / a.y) | 0) * s.width;
+      const di = y * w;
+      if (a.x === 1) {
+        d32.set(src.subarray(si, si + s.width), di);
+      } else {
+        for (let x = 0; x < w; x++) d32[di + x] = src[si + ((x / a.x) | 0)];
+      }
+    }
+
+    ctx.putImageData(dst, 0, 0);
+    return { canvas: out, w: w, h: h };
+  }
+
   clearPointer(): void {
     const was = this.drawnAt;
     if (was === null) return;
