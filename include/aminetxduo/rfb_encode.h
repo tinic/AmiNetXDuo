@@ -175,6 +175,7 @@ typedef struct {
     rfb_u8   backoff;       /* frames to skip after a probe found nothing */
     rfb_u8   backoff_left;
     rfb_u8   miss_run;      /* consecutive probes that found nothing */
+    rfb_u8   since_copy;    /* frames since a copy, saturating at 255 */
 
     rfb_stats st;
 } rfb_encoder;
