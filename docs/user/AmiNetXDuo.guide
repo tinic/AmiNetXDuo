@@ -856,6 +856,7 @@
   @{b}Looking at what is happening@{ub}
 
     @{"ShowNetStatus   " link SHOWNETSTATUS}  what the stack thinks the network looks like
+    @{"CheckNetDevice  " link CHECKNETDEVICE}  what anxnet.device found, card by card
     @{"netstat         " link NETSTAT}  interfaces, routes and connections
     GetNetStatus      the same, for a script to read
     ShowNetServices   what this machine is announcing
@@ -1359,7 +1360,7 @@
 @node HOST "host"
 @toc COMMANDS
 @prev PING
-@next TROUBLE
+@next CHECKNETDEVICE
 
                                 @{b}host@{ub}
 
@@ -1408,9 +1409,70 @@
 @endnode
 
 
+@node CHECKNETDEVICE "CheckNetDevice"
+@toc COMMANDS
+@prev HOST
+@next TROUBLE
+
+                          @{b}CheckNetDevice@{ub}
+
+      CheckNetDevice DEVICE/K,NOLOAD/S,RAW/S
+
+  Answers one question: what did anxnet.device find on this machine?
+
+  Run it when a card does not work. It prints every card the driver
+  looked at, the step each one reached, and the reason any of them was
+  refused. It reads what the driver recorded while it was probing, so
+  it reports the attempt that actually happened rather than making a
+  second one.
+
+  It works when no card came up at all, which is when you need it.
+
+      1> CheckNetDevice
+      CARD "pcmcia"
+        card.resource is at $00209010: this machine has a PCMCIA slot.
+        OwnCard() gave us the slot.
+        CISTPL_FUNCID says function 6, a LAN adapter.
+        Configuration index 32, from the first CISTPL_CFTABLE_ENTRY.
+        The socket was put into I/O mode (CardMiscControl $0A).
+        The command register read back $21: a DP8390 answered.
+        The slot is claimed.  The chip's registers are at $00A20300.
+        ATTACHED.  Station address 3E:24:11:93:E8:8B.
+        This card is unit 0 of anxnet.device.
+
+  A card that was found and refused says so, and says with what:
+
+      CARD "xsurf"
+        Found by autoconfig, board memory at $00E90000.
+        Detection read the command register as $00.
+        REFUSED, and this is why:
+          the command register did not read back as a stopped DP8390,
+          so either nothing is decoding at that address or what is
+          there is not a DP8390
+
+  @{b}DEVICE@{ub}    The driver to ask about. Only needed if it has been
+            renamed; the default is anxnet.device.
+  @{b}NOLOAD@{ub}    Do not load the driver to make it probe. Without this,
+            a driver that has not run yet is loaded so that there is
+            something to report.
+  @{b}RAW@{ub}       The steps as the driver recorded them, unformatted.
+
+  It returns 0 when a card attached, 5 when the driver ran and none
+  did, and 10 when the driver has not run on this machine at all.
+
+  To send the report to somebody, redirect it:
+
+      1> CheckNetDevice > T:netdevice.txt
+
+  This command never touches the network. It is safe to run at any
+  time, including while the stack is up.
+
+@endnode
+
+
 @node TROUBLE "Troubleshooting"
 @toc MAIN
-@prev HOST
+@prev CHECKNETDEVICE
 @next T_NOSTACK
 
                          @{b}Troubleshooting@{ub}
@@ -1564,6 +1626,14 @@
   @{b}Diagnose@{ub}
 
       1> list DEVS:#?.device
+
+  If the driver is anxnet.device, ask it what it found instead of
+  guessing, see @{"CheckNetDevice" link CHECKNETDEVICE}:
+
+      1> CheckNetDevice
+
+  It names every card it looked at and the step each one stopped at,
+  and it works when no card came up at all.
 
   @{b}Causes and fixes@{ub}
 

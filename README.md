@@ -118,6 +118,7 @@ Configuration follows Roadshow's layout, `DEVS:NetInterfaces/<name>`,
 | `traceroute` | trace the path to a host |
 | `tftp`, `whois` | the usual small clients |
 | `CheckNetConfig` | read the configuration and say what is wrong with it |
+| `CheckNetDevice` | what `anxnet.device` found, card by card, and why any was refused |
 | `AddNetRoute`, `DeleteNetRoute` | where packets go that are not for this network |
 | `GetNetStatus`, `NetShutdown` | status for scripts, and a clean shutdown |
 | `RemoveNetInterface` | take one interface out of the running network |
