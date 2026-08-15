@@ -30,6 +30,8 @@
 
 #include <exec/types.h>
 
+#include "aminetxduo/anxdiag.h"
+
 #include "netdev_bus.h"
 #include "netdev_cards.h"
 #include "netdev_mcaf.h"
@@ -194,9 +196,35 @@ struct NetdevNic
     ULONG               mac_from_cis;   /* PROM blank, address taken from CIS */
     ULONG               mac_derived;    /* PROM blank, address derived here   */
 
+    /*
+     * The two fields the probe record reads out of a core.  Both are set on
+     * the way through attach() and neither is used for anything else: a core
+     * setting one field is less to remember than a call, and it keeps the
+     * ANXDIAG_ATTACH_FAIL emission in the one place that knows the card.
+     */
+    UBYTE               diag_why;       /* ANXDIAG_WHY_*, 0 = did not say     */
+    UBYTE               mac_source;     /* ANXDIAG_MAC_*                      */
+
     /* One frame at a time comes out of the ring, into here. */
     ULONG               rxbuf[(NETDEV_RXBUF_MAX + 7) / 4];
 };
+
+/*
+ * THE PROBE RECORD, netdev_diag.c.  Declared here rather than in
+ * netdev_internal.h because the chip cores are half of what records into it:
+ * "the command register read back 0x23" is a fact only ne2000.c has, and it
+ * is the fact a user needs when their card does not come up.
+ *
+ * netdev_diag_note() is safe to call from anywhere the probe reaches,
+ * including before netdev_diag_reset() and after netdev_diag_unpublish(),
+ * where it does nothing.  It cannot fail and it allocates nothing.
+ */
+VOID  netdev_diag_reset(AnxDiagMark *mark);
+VOID  netdev_diag_note(UWORD code, UWORD card, ULONG value);
+VOID  netdev_diag_counts(UWORD units, UWORD dropped);
+UWORD netdev_diag_card(const NetdevCard *card);
+VOID  netdev_diag_publish(AnxDiagMark *mark);
+VOID  netdev_diag_unpublish(AnxDiagMark *mark);
 
 /* The two cores. netdev_nic_ops_for() returns NULL for a chip with no core. */
 extern const struct NetdevNicOps netdev_nic_ne2000;

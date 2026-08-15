@@ -102,7 +102,7 @@ CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ShowNetServices
       ping netstat host hostname
       nslookup arp fetch nc telnet NetTrace sntp traceroute tftp whois httpd
       iperf
-      CheckNetConfig GetNetStatus NetShutdown RemoveNetInterface
+      CheckNetConfig CheckNetDevice GetNetStatus NetShutdown RemoveNetInterface
       ConfigureNetInterface
       AddNetRoute DeleteNetRoute)
 

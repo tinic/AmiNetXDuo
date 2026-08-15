@@ -113,6 +113,15 @@ typedef struct NetdevDevice
     /* Supported boards found past NETDEV_MAX_UNITS.  Non-zero means a fitted
        card has no unit and nothing else would have said so. */
     UWORD               nd_UnitsDropped;
+
+    /*
+     * What the probe did, published under a public semaphore for the life of
+     * the device.  Here rather than in a static because it must go when the
+     * device base goes: the reader finds it by name and a record outliving
+     * its memory is the one way this can hurt somebody.
+     */
+    AnxDiagMark         nd_Diag;
+
     NetdevUnit          nd_Units[NETDEV_MAX_UNITS];
 } NetdevDevice;
 

@@ -385,7 +385,10 @@ static LONG ed_attach(NetdevNic *nic)
     NIC_PUT(nic, ED_P0_ISR, 0xff);
 
     if (!ed_test_regs(nic))
+    {
+        nic->diag_why = (UBYTE)ANXDIAG_WHY_REGS;
         return -1;
+    }
 
     prom = nic->board + nic->card->prom_off;
     for (i = 0; i < NETDEV_ADDR_LEN; i++)
@@ -404,7 +407,12 @@ static LONG ed_attach(NetdevNic *nic)
      * a frame.
      */
     if (ored == 0 || anded == 0xff || (nic->factory[0] & 1u) != 0)
+    {
+        nic->diag_why = (UBYTE)ANXDIAG_WHY_ADDRESS;
         return -1;
+    }
+
+    nic->mac_source = (UBYTE)ANXDIAG_MAC_PROM;
 
     for (i = 0; i < NETDEV_ADDR_LEN; i++)
         nic->mac[i] = nic->factory[i];

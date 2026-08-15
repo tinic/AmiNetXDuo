@@ -18,6 +18,7 @@ set(NETDEV_SOURCES
     netdev_bus.c        # register stride and the data port
     netdev_cards.c      # the card table
     netdev_pcmcia.c     # the A600/A1200 slot, which has no autoconfig record
+    netdev_diag.c       # the probe record, published for CheckNetDevice
     netdev_mcaf.c       # the multicast hash, host-testable
     netdev_macgen.c     # the derived station address, host-testable
     dp8390.c            # NetBSD chip core

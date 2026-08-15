@@ -1222,7 +1222,11 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
 
     unit->nu_Nic.ops = netdev_nic_ops_for(card->chip);
     if (unit->nu_Nic.ops == NULL)
+    {
+        netdev_diag_note(ANXDIAG_NO_CORE, netdev_diag_card(card),
+                         (ULONG)card->chip);
         return FALSE;       /* no core for this chip yet */
+    }
 
     unit->nu_Dev    = dev;
     unit->nu_Nic.card   = card;
@@ -1255,6 +1259,11 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
     if (unit->nu_Nic.ops->attach(&unit->nu_Nic) != 0)
     {
         nd_trace("anx: attach failed\r\n");
+        /* The core leaves the reason in diag_why; it is recorded here, once,
+           so a core has one field to set rather than a call to remember.
+           Zero is ANXDIAG_WHY_UNKNOWN, so a refusal is never silent. */
+        netdev_diag_note(ANXDIAG_ATTACH_FAIL, netdev_diag_card(card),
+                         (ULONG)unit->nu_Nic.diag_why);
         return FALSE;       /* the board did not answer as a DP8390 */
     }
     nd_tracex("anx: mac ", ((ULONG)unit->nu_Nic.factory[2] << 24) |
@@ -1262,6 +1271,24 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
                    ((ULONG)unit->nu_Nic.factory[4] << 8) |
                    (ULONG)unit->nu_Nic.factory[5]);
     nd_tracex("anx: dmode ", (ULONG)unit->nu_Nic.bus.dmode);
+
+    {
+        UWORD ci = netdev_diag_card(card);
+
+        netdev_diag_note(ANXDIAG_ATTACH_OK, ci, (ULONG)unit->nu_Nic.bus.dmode);
+        netdev_diag_note(ANXDIAG_MAC_HI, ci,
+                         ((ULONG)unit->nu_Nic.mac[0] << 8) |
+                         (ULONG)unit->nu_Nic.mac[1]);
+        netdev_diag_note(ANXDIAG_MAC_LO, ci,
+                         ((ULONG)unit->nu_Nic.mac[2] << 24) |
+                         ((ULONG)unit->nu_Nic.mac[3] << 16) |
+                         ((ULONG)unit->nu_Nic.mac[4] << 8) |
+                         (ULONG)unit->nu_Nic.mac[5]);
+        netdev_diag_note(ANXDIAG_MAC_SOURCE, ci,
+                         (ULONG)unit->nu_Nic.mac_source);
+        netdev_diag_note(ANXDIAG_GETODD, ci, (ULONG)unit->nu_Nic.bus.getodd);
+        netdev_diag_note(ANXDIAG_UNIT, ci, (ULONG)dev->nd_UnitCount);
+    }
 
     nd_newlist(&unit->nu_OpenerList);
     nd_newlist(&unit->nu_Writes);
@@ -1287,6 +1314,7 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
 static VOID netdev_probe(NetdevDevice *dev)
 {
     struct ConfigDev *cd = NULL;
+    ULONG             boards = 0;
 
     if (dev->nd_ExpansionBase == NULL)
         return;
@@ -1313,6 +1341,8 @@ static VOID netdev_probe(NetdevDevice *dev)
         const NetdevCard *card = NULL;
         UWORD             i;
 
+        boards++;
+
         for (i = 0; i < netdev_card_count; i++)
         {
             if (cd->cd_Rom.er_Manufacturer == netdev_cards[i].manid &&
@@ -1324,7 +1354,18 @@ static VOID netdev_probe(NetdevDevice *dev)
         }
 
         if (card == NULL)
+        {
+            /* Recorded, because "there are boards on this bus and none of
+               them is one I know" is a different answer from "there are no
+               boards", and only one of them means a broken card. */
+            netdev_diag_note(ANXDIAG_NOMATCH, ANXDIAG_NOCARD,
+                             ((ULONG)cd->cd_Rom.er_Manufacturer << 16) |
+                             (ULONG)cd->cd_Rom.er_Product);
             continue;
+        }
+
+        netdev_diag_note(ANXDIAG_ZORRO_FOUND, netdev_diag_card(card),
+                         (ULONG)cd->cd_BoardAddr);
 
         /* A supported board past the table is dropped, and a silent drop is
            the failure this driver exists to stop making: the card is fitted,
@@ -1335,6 +1376,8 @@ static VOID netdev_probe(NetdevDevice *dev)
         if (dev->nd_UnitCount >= NETDEV_MAX_UNITS)
         {
             dev->nd_UnitsDropped++;
+            netdev_diag_note(ANXDIAG_UNITS_FULL, netdev_diag_card(card),
+                             (ULONG)NETDEV_MAX_UNITS);
             continue;
         }
 
@@ -1342,6 +1385,8 @@ static VOID netdev_probe(NetdevDevice *dev)
                              cd->cd_Rom.er_SerialNumber))
             continue;
     }
+
+    netdev_diag_note(ANXDIAG_BOARDS, ANXDIAG_NOCARD, (ULONG)boards);
 
     /*
      * And the slot, after the boards.  Last so that a machine with both keeps
@@ -1362,6 +1407,8 @@ static VOID netdev_probe(NetdevDevice *dev)
             if (dev->nd_UnitCount >= NETDEV_MAX_UNITS)
             {
                 dev->nd_UnitsDropped++;
+                netdev_diag_note(ANXDIAG_UNITS_FULL, i,
+                                 (ULONG)NETDEV_MAX_UNITS);
                 break;
             }
 
@@ -1371,6 +1418,7 @@ static VOID netdev_probe(NetdevDevice *dev)
                    wherever the machine puts it, and attach() deciding a
                    DP8390 is not answering is the whole of the probe. */
                 base = (APTR)(ULONG)card->base;
+                netdev_diag_note(ANXDIAG_FIXED_TRY, i, (ULONG)base);
             }
             else
             {
@@ -1518,11 +1566,28 @@ static NetdevDevice *netdev_init(
     base->nd_Device.dd_Library.lib_IdString = (APTR)netdev_id;
 
     nd_trace("anx: init\r\n");
+
+    /*
+     * THE RECORD IS ARMED BEFORE ANYTHING IS TRIED and published after
+     * everything has been, whether or not a single unit came up.  A machine
+     * where none did is the case this whole path exists for: there is no unit
+     * to open and no other way to ask what happened.
+     */
+    netdev_diag_reset(&base->nd_Diag);
+    netdev_diag_note(ANXDIAG_START, ANXDIAG_NOCARD, (ULONG)netdev_card_count);
+
     base->nd_ExpansionBase = OpenLibrary((CONST_STRPTR)"expansion.library", 36);
     ExpansionBase = (struct ExpansionBase *)base->nd_ExpansionBase;
     nd_tracex("anx: expansion ", (ULONG)base->nd_ExpansionBase);
+    netdev_diag_note(ANXDIAG_EXPANSION, ANXDIAG_NOCARD,
+                     (ULONG)base->nd_ExpansionBase);
+
     netdev_probe(base);
     nd_tracex("anx: units ", (ULONG)base->nd_UnitCount);
+
+    netdev_diag_note(ANXDIAG_DONE, ANXDIAG_NOCARD, (ULONG)base->nd_UnitCount);
+    netdev_diag_counts(base->nd_UnitCount, base->nd_UnitsDropped);
+    netdev_diag_publish(&base->nd_Diag);
 
     return base;
 }
@@ -1744,6 +1809,14 @@ static BPTR netdev_expunge(register struct Device *dev __asm("a6"))
      * at the slot.
      */
     netdev_pcmcia_release();
+
+    /*
+     * AND TAKE THE PROBE RECORD OUT OF THE SEMAPHORE LIST BEFORE THE MEMORY
+     * IT LIVES IN IS FREED.  nd_Diag is inside this device base; leaving the
+     * name published would hand the next FindSemaphore() a pointer into freed
+     * memory, which is exactly the defect the card.resource handle above had.
+     */
+    netdev_diag_unpublish(&d->nd_Diag);
 
     if (d->nd_ExpansionBase != NULL)
     {

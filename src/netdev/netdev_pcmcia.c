@@ -194,6 +194,14 @@ static VOID pc_trace(const char *s, ULONG v)
  * state the chip is already in, and a window with nothing behind it does not
  * remember what was written to it.
  */
+/*
+ * What the command register last read back.  The probe record carries the
+ * BYTE and not only the verdict: 0x00 is "nothing is decoding there at all",
+ * 0xff is "the bus is floating", 0x23 is "a chip answered with a stuck START
+ * bit", and those are three different cards to somebody holding one.
+ */
+static UBYTE pc_last_cr;
+
 static BOOL pc_chip_answers(const NetdevCard *card)
 {
     volatile UBYTE *cr =
@@ -203,6 +211,7 @@ static BOOL pc_chip_answers(const NetdevCard *card)
     *cr = 0x21;             /* ED_CR_STP | ED_CR_RD2 */
     v   = *cr;
     pc_trace("pc: cr ", (ULONG)v);
+    pc_last_cr = v;
 
     /*
      * THE START BIT IS MASKED OUT OF THE COMPARISON.  Some NE2000 clones come
@@ -372,14 +381,15 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     volatile UBYTE  *attr;
     ULONG            cfg_base;
     UBYTE            index;
+    UWORD            ci = netdev_diag_card(card);
 
     if (CardResource == NULL)
-    {
         CardResource = OpenResource((STRPTR)CARDRESNAME);
-        pc_trace("pc: resource ", (ULONG)CardResource);
-        if (CardResource == NULL)
-            return NULL;        /* no slot on this machine */
-    }
+
+    pc_trace("pc: resource ", (ULONG)CardResource);
+    netdev_diag_note(ANXDIAG_PC_RESOURCE, ci, (ULONG)CardResource);
+    if (CardResource == NULL)
+        return NULL;            /* no slot on this machine */
 
     /* A second claim -- a card taken out and another put in -- must not read
        the first card's CIS. */
@@ -423,6 +433,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
         struct CardHandle *owner = pc_own_card(handle);
 
         pc_trace("pc: own ", (ULONG)owner);
+        netdev_diag_note(ANXDIAG_PC_OWN, ci, (ULONG)owner);
         if (owner != NULL)
         {
             /* Somebody else has it, or nothing is in it.  Release anyway:
@@ -458,12 +469,15 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     if (!pc_cis_read(handle, CISTPL_FUNCID, buf, sizeof(buf)))
     {
         pc_trace("pc: no funcid, assume lan ", 0);
+        netdev_diag_note(ANXDIAG_PC_FUNCID, ci, ANXDIAG_ABSENT);
     }
     else
     {
         pc_trace("pc: funcid ", (ULONG)buf[2]);
+        netdev_diag_note(ANXDIAG_PC_FUNCID, ci, (ULONG)buf[2]);
         if (buf[2] != CIS_FUNC_LAN)
         {
+            netdev_diag_note(ANXDIAG_PC_NOTLAN, ci, (ULONG)buf[2]);
             pc_give_up(handle);
             return NULL;
         }
@@ -476,12 +490,22 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
      * every card that works today.
      */
     if (pc_cis_read(handle, CISTPL_MANFID, buf, sizeof(buf)))
+    {
         pc_trace("pc: manfid ", ((ULONG)buf[3] << 8) | (ULONG)buf[2]);
+        netdev_diag_note(ANXDIAG_PC_MANFID, ci,
+                         ((((ULONG)buf[3] << 8) | (ULONG)buf[2]) << 16) |
+                         (((ULONG)buf[5] << 8) | (ULONG)buf[4]));
+    }
+    else
+    {
+        netdev_diag_note(ANXDIAG_PC_MANFID, ci, ANXDIAG_ABSENT);
+    }
     (VOID)pc_cis_read(handle, CISTPL_VERS_1, buf, sizeof(buf));
 
     if (pc_cis_read(handle, CISTPL_FUNCE, buf, sizeof(buf)))
     {
         pc_trace("pc: funce ", (ULONG)buf[2]);
+        netdev_diag_note(ANXDIAG_PC_FUNCE, ci, (ULONG)buf[2]);
         if (buf[2] == CIS_FUNCE_LAN_NODE_ID &&
             buf[3] == (UBYTE)NETDEV_ADDR_LEN)
         {
@@ -494,7 +518,13 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
                                          ((ULONG)pc_node_id[3] << 16) |
                                          ((ULONG)pc_node_id[4] << 8) |
                                          (ULONG)pc_node_id[5]);
+            netdev_diag_note(ANXDIAG_PC_NODEID, ci,
+                             (ULONG)(pc_have_node_id ? 1u : 0u));
         }
+    }
+    else
+    {
+        netdev_diag_note(ANXDIAG_PC_FUNCE, ci, ANXDIAG_ABSENT);
     }
 
     /* CISTPL_CONFIG carries the configuration register base, in the card's
@@ -503,6 +533,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     if (!pc_cis_read(handle, CISTPL_CONFIG, buf, sizeof(buf)))
     {
         pc_trace("pc: no config tuple ", 0);
+        netdev_diag_note(ANXDIAG_PC_NOCONFIG, ci, 0);
         pc_give_up(handle);
         return NULL;
     }
@@ -519,14 +550,17 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
        low six bits.  The first entry is the one to take: a LAN card's first
        entry is its I/O configuration. */
     pc_trace("pc: cfgbase ", cfg_base);
+    netdev_diag_note(ANXDIAG_PC_CFGBASE, ci, cfg_base);
     if (!pc_cis_read(handle, CISTPL_CFTABLE, buf, sizeof(buf)))
     {
         pc_trace("pc: no cftable ", 0);
+        netdev_diag_note(ANXDIAG_PC_NOCFTABLE, ci, 0);
         pc_give_up(handle);
         return NULL;
     }
     index = (UBYTE)(buf[2] & 0x3f);
     pc_trace("pc: index ", (ULONG)index);
+    netdev_diag_note(ANXDIAG_PC_INDEX, ci, (ULONG)index);
 
     /*
      * PUT THE SOCKET INTO I/O MODE, BEFORE THE COR WRITE AND NOT AFTER IT.
@@ -557,6 +591,8 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
      */
     (VOID)pc_misc_control(handle, CARD_DISABLEF_WP | CARD_ENABLEF_DIGAUDIO);
     pc_trace("pc: iomode ", (ULONG)(CARD_DISABLEF_WP | CARD_ENABLEF_DIGAUDIO));
+    netdev_diag_note(ANXDIAG_PC_IOMODE, ci,
+                     (ULONG)(CARD_DISABLEF_WP | CARD_ENABLEF_DIGAUDIO));
 
     /*
      * Write the COR, and check the card answered.
@@ -584,21 +620,33 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     attr = (volatile UBYTE *)(ULONG)(0x00a00000UL + cfg_base + PC_COR_OFF);
     *attr = (UBYTE)(index | PC_COR_LEVEL_IRQ);
     pc_trace("pc: cor ", (ULONG)(APTR)attr);
+    netdev_diag_note(ANXDIAG_PC_COR, ci, (ULONG)(APTR)attr);
 
     if (!pc_chip_answers(card))
     {
+        netdev_diag_note(ANXDIAG_PC_CR, ci, (ULONG)pc_last_cr);
+
         attr = (volatile UBYTE *)(ULONG)(0x00a00000UL +
                                          (cfg_base + PC_COR_OFF) *
                                          PC_ATTR_STRIDE);
         *attr = (UBYTE)(index | PC_COR_LEVEL_IRQ);
         pc_trace("pc: cor doubled ", (ULONG)(APTR)attr);
+        netdev_diag_note(ANXDIAG_PC_COR2, ci, (ULONG)(APTR)attr);
 
         if (!pc_chip_answers(card))
         {
             pc_trace("pc: chip silent ", 0);
+            netdev_diag_note(ANXDIAG_PC_CR2, ci, (ULONG)pc_last_cr);
+            netdev_diag_note(ANXDIAG_PC_SILENT, ci,
+                             (ULONG)(card->base + card->reg_off));
             pc_give_up(handle);
             return NULL;
         }
+        netdev_diag_note(ANXDIAG_PC_CR2, ci, (ULONG)pc_last_cr);
+    }
+    else
+    {
+        netdev_diag_note(ANXDIAG_PC_CR, ci, (ULONG)pc_last_cr);
     }
 
     /*
@@ -619,13 +667,19 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     {
         (VOID)pc_misc_control(handle, CARD_INTF_SETCLR | CARD_INTF_IRQ);
         pc_trace("pc: irqmode ", (ULONG)CardResource->lib_Version);
+        netdev_diag_note(ANXDIAG_PC_IRQMODE, ci,
+                         (ULONG)CardResource->lib_Version);
     }
     else
     {
         pc_trace("pc: irqmode skipped v ", (ULONG)CardResource->lib_Version);
+        netdev_diag_note(ANXDIAG_PC_IRQSKIP, ci,
+                         (ULONG)CardResource->lib_Version);
     }
 
     pc_trace("pc: claimed ", (ULONG)card->base);
+    netdev_diag_note(ANXDIAG_PC_CLAIMED, ci,
+                     (ULONG)(card->base + card->reg_off));
     return (APTR)(ULONG)card->base;
 }
 

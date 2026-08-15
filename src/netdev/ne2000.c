@@ -390,9 +390,13 @@ static BOOL ne2000_detect(NetdevNic *nic)
      * comparison whether STA is masked or not.
      */
     tmp = NIC_GET(nic, ED_P0_CR);
+    netdev_diag_note(ANXDIAG_CR_READ, netdev_diag_card(nic->card), (ULONG)tmp);
     if ((tmp & (ED_CR_RD2 | ED_CR_TXP | ED_CR_STP)) !=
         (ED_CR_RD2 | ED_CR_STP))
+    {
+        nic->diag_why = (UBYTE)ANXDIAG_WHY_CR;
         return FALSE;
+    }
 
     /*
      * THE CNET16 PROBE, AND IT IS A PROBE RATHER THAN A SECOND BINARY.
@@ -423,17 +427,26 @@ static BOOL ne2000_detect(NetdevNic *nic)
     {
         tmp = NIC_GET(nic, ED_P0_ISR);
         if ((tmp & ED_ISR_RST) != ED_ISR_RST)
+        {
+            nic->diag_why = (UBYTE)ANXDIAG_WHY_ODD;
             return FALSE;
+        }
     }
     else if (!ne2000_odd_reads(nic))
     {
+        netdev_diag_note(ANXDIAG_ODD_RETRY, netdev_diag_card(nic->card), 1);
+
         if (!netdev_bus_set_getodd(&nic->bus))
+        {
+            nic->diag_why = (UBYTE)ANXDIAG_WHY_ODD;
             return FALSE;
+        }
 
         NE_TRACE("ne: trying cnet16 odd reads ", 0);
         if (!ne2000_odd_reads(nic))
         {
             nic->bus.getodd = 0;
+            nic->diag_why   = (UBYTE)ANXDIAG_WHY_ODD;
             return FALSE;
         }
         NE_TRACE("ne: odd registers read as words ", 1);
@@ -463,8 +476,14 @@ static BOOL ne2000_detect(NetdevNic *nic)
 
     NIC_PUT(nic, ED_P0_ISR, 0xff);
 
-    return (BOOL)(ne_memcmp(ne_test_pattern, test_buffer,
-                            sizeof(ne_test_pattern)) == 0);
+    if (ne_memcmp(ne_test_pattern, test_buffer,
+                  sizeof(ne_test_pattern)) != 0)
+    {
+        nic->diag_why = (UBYTE)ANXDIAG_WHY_BUFFER;
+        return FALSE;
+    }
+
+    return TRUE;
 }
 
 /*
@@ -639,10 +658,13 @@ static LONG ne2000_attach(NetdevNic *nic)
      * unconditionally and warns (cnetdevice.asm:3666-3672); this is the same
      * fix and it is a no-op on every card whose PROM is right.
      */
+    nic->mac_source = (UBYTE)ANXDIAG_MAC_PROM;
+
     if ((nic->factory[0] & 1u) != 0)
     {
         nic->factory[0] &= (UBYTE)~1u;
         nic->mac_group_fix++;
+        nic->mac_source = (UBYTE)ANXDIAG_MAC_PROM_FIXED;
         NE_TRACE("ne: rom group bit cleared ", (ULONG)nic->factory[0]);
     }
 
@@ -670,6 +692,7 @@ static LONG ne2000_attach(NetdevNic *nic)
         if (netdev_mac_cis_node_id(nic->factory))
         {
             nic->mac_from_cis++;
+            nic->mac_source = (UBYTE)ANXDIAG_MAC_CIS;
         }
         else
         {
@@ -683,6 +706,7 @@ static LONG ne2000_attach(NetdevNic *nic)
             n = netdev_mac_fingerprint(fp, (UWORD)sizeof(fp), salt);
             netdev_mac_derive(fp, n, nic->factory);
             nic->mac_derived++;
+            nic->mac_source = (UBYTE)ANXDIAG_MAC_DERIVED;
         }
 
         NE_TRACE("ne: address now ", ((ULONG)nic->factory[2] << 24) |
@@ -701,7 +725,10 @@ static LONG ne2000_attach(NetdevNic *nic)
     dp8390_config(nic);
 
     if (!ne2000_test_mem(nic))
+    {
+        nic->diag_why = (UBYTE)ANXDIAG_WHY_BUFFER;
         return -1;
+    }
 
     dp8390_halt(nic);
 
