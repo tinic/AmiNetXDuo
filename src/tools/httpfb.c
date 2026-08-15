@@ -1945,6 +1945,17 @@ BOOL http_fb_enabled(VOID)
     return fb_on;
 }
 
+/*
+ * The button state the far end is holding, as a yes or no.  Set BEFORE the
+ * event that makes Intuition take the layer lock is written -- see
+ * fb_inject_buttons() -- and cleared before the release is written, so it is
+ * never FALSE while Intuition is holding the lock on this server's account.
+ */
+BOOL http_fb_buttons_held(VOID)
+{
+    return (BOOL)(fb_live && fb_buttons != 0);
+}
+
 BOOL http_fb_available(VOID)
 {
     return (BOOL)(fb_on && !fb_live);

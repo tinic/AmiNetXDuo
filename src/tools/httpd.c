@@ -982,8 +982,67 @@ static VOID httpd_iso8601(ULONG secs, char *out)
 
 /* ------------------------------------------------------------------- log --- */
 
+/*
+ * WHY A LOG LINE CAN STOP THIS SERVER DEAD, AND WHEN IT IS NOT ALLOWED TO RUN
+ *
+ *   `-v` started from a Shell on Workbench writes through the console handler,
+ *   and CON: needs the layer lock of the screen its window is on before it can
+ *   draw.  Intuition holds that lock for the whole of a menu or a window drag.
+ *   httpd serves every connection from one task, so a log line written while a
+ *   button is down waits inside DOS and NOTHING is answered -- not WebDAV, not
+ *   /shell, not to clients who never opened the console.
+ *
+ *   A person holding a menu open lets go, so that is a pause.  A button held
+ *   by the CONSOLE is not a pause: the only thing that can release it is this
+ *   task reading the release word off the console socket, and this task is
+ *   inside the Write.  It is a deadlock and it needs the machine restarted.
+ *   Measured, not reasoned about: a viewer holding the right button over the
+ *   menu bar for fifteen seconds left httpd answering nothing at all, still
+ *   nothing four minutes later, on a guest that was otherwise well.
+ *
+ *   So the log is DROPPED for as long as the console holds a button, and how
+ *   many lines went is said once when it lets go.  Dropped rather than
+ *   buffered: a buffer would have to be drained by the same task and sized for
+ *   a drag nobody has bounded, and this is a diagnostic, not a record.
+ *
+ *   Only when the output is INTERACTIVE.  `-v >file` -- which is how a server
+ *   left running should be started -- goes through a handler that wants
+ *   nothing from Intuition, cannot take the lock, and loses no line here.
+ */
+static BOOL   httpd_log_console;        /* Output() is a console handler   */
+static ULONG  httpd_log_dropped;
+
+static BOOL httpd_may_log(VOID)
+{
+    if (!httpd_log_console || !http_fb_buttons_held())
+        return TRUE;
+
+    httpd_log_dropped++;
+    return FALSE;
+}
+
+/* Once the console lets go: what was not said, said. */
+static VOID httpd_log_resume(VOID)
+{
+    ULONG n = httpd_log_dropped;
+
+    if (n == 0UL)
+        return;
+
+    if (httpd_log_console && http_fb_buttons_held())
+        return;
+
+    httpd_log_dropped = 0;
+    tool_printf("[-] %lu log lines were dropped while the console held a "
+                "mouse button\n", (LONG)n);
+    (VOID)Flush(Output());
+}
+
 static VOID httpd_log(const HttpConn *c, const char *fmt, LONG a, LONG b)
 {
+    if (!httpd_may_log())
+        return;
+
     tool_printf("[%ld] ", (LONG)(c - httpd_conn));
     tool_printf(fmt, a, b);
     tool_printf("\n");
@@ -997,6 +1056,9 @@ static VOID httpd_log(const HttpConn *c, const char *fmt, LONG a, LONG b)
 static VOID httpd_trace_head(const HttpConn *c, const UBYTE *head, ULONG len)
 {
     ULONG i = 0;
+
+    if (!httpd_may_log())
+        return;
 
     while (i < len)
     {
@@ -6609,7 +6671,7 @@ static LONG httpd_consume_body(HttpConn *c, const UBYTE *data, LONG len)
     {
         c->method->sink(c, data, take);
     }
-    else if (httpd_trace)
+    else if (httpd_trace && httpd_may_log())
     {
         char  text[200];
         ULONG n = 0;
@@ -7400,6 +7462,9 @@ static VOID httpd_serve(LONG lsock)
            says is that a packet is on the port now. */
         http_term_service();
 
+        /* And whatever the log could not say while a button was down. */
+        httpd_log_resume();
+
         if (ready > 0 && live < httpd_conns && tool_fd_isset(&readfds, lsock))
             httpd_accept(lsock);
 
@@ -7593,6 +7658,11 @@ int main(int argc, char **argv)
 
     if (httpd_trace)
         httpd_verbose = TRUE;
+
+    /* Whether the log can be the thing that stops the server; see
+       httpd_may_log().  Asked once, because Output() does not change under a
+       running program and IsInteractive() is a packet to the handler. */
+    httpd_log_console = (BOOL)(IsInteractive(Output()) ? TRUE : FALSE);
 
     if (args[ARG_PORT] != 0)
     {

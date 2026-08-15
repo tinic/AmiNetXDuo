@@ -188,6 +188,16 @@ cp "$A2065" "$HD/Devs/Networks/a2065.device"
 cp "$PAGE" "$HD/Console/console.html"
 [ -f "$SHELLPAGE" ] && cp "$SHELLPAGE" "$HD/Console/shell.html"
 
+# AND THE PRECOMPRESSED FORMS.  httpd serves <page>.gz when one is beside the
+# page, and staging the page without it is a guest that answers every request
+# for the terminal with 400 KB where a released archive would send 120.  It is
+# also five failures in tests/tools/httpd-drill.py -- the Content-Encoding, the
+# size, the gzip magic, the Accept-Encoding negotiation and the two forms
+# sharing a validator -- which read as defects in the server and are this line
+# missing.
+[ -f "$PAGE.gz" ] && cp "$PAGE.gz" "$HD/Console/console.html.gz"
+[ -f "$SHELLPAGE.gz" ] && cp "$SHELLPAGE.gz" "$HD/Console/shell.html.gz"
+
 cat > "$HD/Devs/NetInterfaces/eth0" <<EOF
 DEVICE=a2065.device
 UNIT=0
