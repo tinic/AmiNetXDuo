@@ -217,6 +217,21 @@ static const char *const httpd_console_places[] = {
 #define HTTPD_HEADERS_MAX     48    /* header lines in one request          */
 #define HTTPD_BODY_MAX     65536UL  /* a BUFFERED request body: the XML     */
 #define HTTPD_TIMEOUT_DEF     30UL  /* seconds of no progress               */
+
+/*
+ * The same question for the two endpoints that hold a single-instance
+ * resource: the Shell and the console screen.  Deliberately SHORTER than
+ * HTTPD_TIMEOUT_DEF, because what is being held is not a connection slot --
+ * it is the only Shell, or the only screen, and everybody else is refused
+ * while a peer that has already gone still nominally has it.
+ *
+ * Ten seconds is the ceiling for the WORST case, a peer that vanished without
+ * saying so: half of it is spent waiting quietly, the ping goes out at the
+ * halfway mark and the answer is due by the end.  A peer that closes cleanly
+ * is acted on in the pass it happens, which is the ordinary navigate-away and
+ * costs nothing like ten seconds.
+ */
+#define HTTPD_WS_IDLE_DEF     10UL  /* seconds before a quiet viewer loses it */
 #define HTTPD_BACKLOG          8
 
 /* A walk that a client can ask for, DELETE and COPY of a drawer, has to
@@ -638,6 +653,7 @@ static char        httpd_root_buf[HTTP_PATH_MAX];
 static const char *httpd_root = "";
 static ULONG  httpd_conns   = HTTPD_CONN_DEFAULT;
 static ULONG  httpd_timeout = HTTPD_TIMEOUT_DEF;
+static ULONG  httpd_ws_idle = HTTPD_WS_IDLE_DEF;
 static BOOL   httpd_verbose = FALSE;
 static BOOL   httpd_trace   = FALSE;
 /* The HTML file -T resolved to, and "" when -T was not given.  One string
@@ -3984,7 +4000,7 @@ static BOOL httpd_term_reclaim(HttpConn *asking, ULONG now)
             continue;
 
         if (!asking->ws_take &&
-            !http_term_sock_stale(&h->ws, now, httpd_timeout))
+            !http_term_sock_stale(&h->ws, now, httpd_ws_idle))
             return FALSE;
 
         if (httpd_verbose || httpd_trace)
@@ -4154,7 +4170,7 @@ static BOOL httpd_console_reclaim(HttpConn *asking, ULONG now)
         if (h == asking || h->state == CONN_FREE || !h->fb_owner)
             continue;
 
-        if (!asking->ws_take && !http_fb_stale(now, httpd_timeout))
+        if (!asking->ws_take && !http_fb_stale(now, httpd_ws_idle))
             return FALSE;
 
         if (httpd_verbose || httpd_trace)
@@ -7422,7 +7438,7 @@ static VOID httpd_serve(LONG lsock)
                     keep = http_fb_write(now);
 
                 if (keep)
-                    keep = http_fb_idle(now, httpd_timeout);
+                    keep = http_fb_idle(now, httpd_ws_idle);
 
                 if (!keep)
                 {
@@ -7459,7 +7475,7 @@ static VOID httpd_serve(LONG lsock)
                     keep = http_term_sock_write(&c->ws, now);
 
                 if (keep)
-                    keep = http_term_sock_idle(&c->ws, now, httpd_timeout);
+                    keep = http_term_sock_idle(&c->ws, now, httpd_ws_idle);
 
                 if (!keep)
                 {
