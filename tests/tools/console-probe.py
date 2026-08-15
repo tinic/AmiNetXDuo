@@ -33,15 +33,23 @@ WHY IT DECODES RATHER THAN COUNTING
 
 --reconnect PROVES THE SESSION SURVIVES BEING RESTARTED
 
-  N+1 sessions in a row, each closed cleanly, and what is asserted is that
-  the LAST one still has the same picture as the first after its idle frames
-  have gone by.  An idle Workbench sends nothing once the first frame is
-  out, so anything that corrupts the viewer's copy on a reconnect is never
-  corrected and the screen simply stays wrong -- which is exactly how it
-  shipped: the viewer asked for a refresh on every geom, the server answered
-  a reconnect with a SECOND full frame, and the tiles being XOR against the
-  shadow meant the second one cancelled the first back to an all-zero
-  screen.  A connect-only check cannot see that.  This one compares pixels.
+  N+1 sessions in a row, each closed cleanly, and every one of them ends by
+  asking the server what the screen really is: the copy built out of three
+  hundred deltas, against the FULL FRAME the server sends for the same
+  moment, decoded from zero.  An idle Workbench sends nothing once the first
+  frame is out, so anything that corrupts the viewer's copy on a reconnect is
+  never corrected and the screen simply stays wrong -- which is exactly how
+  it shipped: the viewer asked for a refresh on every geom, the server
+  answered a reconnect with a SECOND full frame, and the tiles being XOR
+  against the shadow meant the second one cancelled the first back to an
+  all-zero screen.  A connect-only check cannot see that.  This one compares
+  pixels.
+
+  IT DOES NOT COMPARE TWO SESSIONS TO EACH OTHER.  It used to, and that made
+  every pixel the guest redrew on its own into a failure ten seconds later.
+  Two pictures of ONE moment is the comparison that means something, and the
+  cross-session difference is still printed -- as `screen_moved`, which is
+  what it is.
 
 --type PROVES THE INPUT HALF
 
@@ -493,9 +501,181 @@ def pfs(path, screens):
 
 # ---------------------------------------------------------------- the run --
 
+def differ(a, b, width):
+    """How many pixels two chunky buffers disagree in, and where.
+
+    The box matters more than the count: drift is corruption of whatever the
+    encoder last touched and lands where the tiles are, and a screen that
+    moved on its own lands where the thing that moved is.  A failure that
+    prints x 240..470 y 0..7 is a title bar and a failure that prints the
+    whole screen is not.
+    """
+    n = 0
+    x0 = y0 = 1 << 30
+    x1 = y1 = -1
+    for i, (p, q) in enumerate(zip(a, b)):
+        if p != q:
+            n += 1
+            x, y = i % width, i // width
+            if x < x0: x0 = x
+            if x > x1: x1 = x
+            if y < y0: y0 = y
+            if y > y1: y1 = y
+    if n == 0:
+        return 0, ""
+    return n, "x %d..%d y %d..%d" % (x0, x1, y0, y1)
+
+
+def refresh_to_truth(wire, screen, limit=8.0):
+    """Ask for a full frame and decode it into a SECOND, empty screen.
+
+    WHY THIS AND NOT TWO SESSIONS COMPARED TO EACH OTHER
+
+      What a reconnect can break is this receiver's copy: a full frame XORed
+      onto a picture that is already there, a shadow the two ends disagree
+      about.  On an idle screen nothing afterwards corrects it, which is what
+      makes it worth a check -- and also what made the old one compare two
+      pictures taken ten seconds apart and call every difference drift.  A
+      guest is a machine, not a photograph; anything that redraws on its own
+      -- a title bar counting memory, a cursor -- fails that comparison while
+      being exactly right.
+
+      So the comparison is between two pictures of the SAME MOMENT, built two
+      different ways.  `before` is what three hundred accumulated deltas say
+      the screen is; `truth` is what the server's own full frame says it is,
+      decoded from zero, milliseconds later.  The screen has no time to move
+      between them, and a copy that drifted disagrees with truth however idle
+      the guest is.
+
+    Returns (before, truth, screen), the screen being the fresh one the
+    session carries on from.
+    """
+    wire.word("refresh")
+    deadline = time.time() + limit
+    before = None
+    fresh = None
+
+    while time.time() < deadline:
+        wire.sock.settimeout(max(1.0, deadline - time.time()))
+        op, body = wire.frame()
+
+        if op == 0x8:
+            raise Bad("the server closed while it was answering a refresh")
+        if op == 0x1:
+            text = body.decode("iso-8859-1")
+            if text.startswith("geom "):
+                f = [int(x) for x in text.split()[1:]]
+                if len(f) != 6:
+                    raise Bad("geom takes six numbers: %r" % text)
+                # The reset lands here, so this is the last instant the
+                # incremental copy is worth anything.
+                if before is None:
+                    before = bytes(screen.chunky())
+                fresh = Screen(f[0], f[1], f[2], f[3], f[4], f[5])
+                fresh.rgb = bytearray(screen.rgb)
+            elif text.startswith("pal "):
+                target = fresh if fresh is not None else screen
+                target.rgb = bytearray.fromhex(text[4:].strip())
+            continue
+        if op != 0x2:
+            raise Bad("opcode %d is not one this server sends" % op)
+
+        if fresh is None:
+            screen.apply(body)          # still the old stream; keep up with it
+            continue
+
+        fresh.apply(body)
+        return before, bytes(fresh.chunky()), fresh
+
+    raise Bad("the server never answered a refresh with a geometry and a"
+              " full frame")
+
+
+def verify_copy(wire, screen):
+    """The copy this receiver built, against the server's own full frame.
+
+    NOT RETRIED, AND NOT TOLERATED EITHER.
+
+      Retrying is worthless here: the refresh that measures the copy also
+      REPLACES it, so a second attempt only ever says that the first one's
+      full frame arrived.  A corruption that happened at the start of the
+      session -- which is what a reconnect defect is -- is gone by then.  So
+      the first comparison is the verdict.
+
+      Nor is there a tolerance.  The two pictures are one grab apart: the
+      server sends a delta for anything that changes, so `before` is current
+      up to the last frame it sent, and the full frame is encoded from the
+      grab after that.  Nothing legitimate lands in a window that small
+      often.
+
+    WHEN IT DOES, THE GUEST SAYS SO ITSELF
+
+      A difference is put to the guest rather than waved through: a SECOND
+      full frame is asked for, and the server's own resync floor spaces it a
+      second after the first.  Pixels that differ between two full frames a
+      second apart are pixels the machine is actively redrawing -- a cursor,
+      a title bar counting memory -- and drift is by definition none of
+      those, because it is a copy that stopped tracking a screen that is
+      standing still.  So the difference is reported as whatever is left
+      after the moving pixels are taken out of it, and the moving ones are
+      reported separately as what they are.
+
+    Returns (pixels, box, live, screen); pixels 0 is a copy that is right.
+    """
+    before, truth, screen = refresh_to_truth(wire, screen)
+    n, box = differ(before, truth, screen.w)
+    if n == 0:
+        return 0, "", 0, screen
+
+    _before2, truth2, screen = refresh_to_truth(wire, screen)
+
+    live = 0
+    left = 0
+    x0 = y0 = 1 << 30
+    x1 = y1 = -1
+    for i, (b, t) in enumerate(zip(before, truth)):
+        if b == t:
+            continue
+        if truth[i] != truth2[i]:
+            live += 1
+            continue
+        left += 1
+        x, y = i % screen.w, i // screen.w
+        if x < x0: x0 = x
+        if x > x1: x1 = x
+        if y < y0: y0 = y
+        if y > y1: y1 = y
+
+    if left == 0:
+        return 0, "", live, screen
+    return left, "x %d..%d y %d..%d" % (x0, x1, y0, y1), live, screen
+
+
+class Shot:
+    """What one session left behind: the picture, and whether it was right."""
+
+    def __init__(self, pic, width, frames, words, geoms, drift, box, live):
+        self.pic = pic
+        self.width = width
+        self.frames = frames
+        self.words = words
+        self.geoms = geoms
+        self.drift = drift          # pixels the copy was wrong by; 0 is right
+        self.box = box
+        self.live = live            # pixels the guest was redrawing itself
+
+    def verdict(self):
+        moving = ("" if self.live == 0
+                  else ", %d pixels the guest was redrawing" % self.live)
+        if self.drift == 0:
+            return "copy verified against a full frame" + moving
+        return ("copy is %d pixels wrong (%s)%s"
+                % (self.drift, self.box, moving))
+
+
 def session_picture(host, port, path, seconds, refresh_at=4,
-                    refresh_every_geom=False):
-    """One whole session, closed cleanly.  Returns (chunky, frames, words).
+                    refresh_every_geom=False, verify=False):
+    """One whole session, closed cleanly.  Returns a Shot.
 
     One `refresh` goes out mid-session, once the picture is already drawn.
     That is the hazard in one line: the answer to a refresh is a FULL frame,
@@ -550,32 +730,55 @@ def session_picture(host, port, path, seconds, refresh_at=4,
             wire.word("refresh")
             asked = True
 
+    drift = 0
+    box = ""
+    live = 0
+    if screen is not None and verify:
+        drift, box, live, screen = verify_copy(wire, screen)
+
     wire.close()
     if screen is None:
         raise Bad("no geometry word ever arrived")
-    return bytes(screen.chunky()), frames, words, geoms
+    return Shot(bytes(screen.chunky()), screen.w, frames, words, geoms,
+                drift, box, live)
 
 
 def reconnect_check(host, port, path, times, seconds):
-    """Connect, close, reconnect N times; the picture must not drift."""
+    """Connect, close, reconnect N times; no session's copy may be wrong.
+
+    WHAT IS ASSERTED, AND WHY IT IS NOT "THE PICTURES MATCH"
+
+      Every session ends by asking the server what the screen really is and
+      comparing that against the copy it built out of deltas -- see
+      refresh_to_truth().  That is the assertion, once per session, between
+      two pictures of one moment.  A reconnect that corrupts the copy fails
+      it in the session it happened in and says where.
+
+      The pictures ARE still compared across sessions, and a difference is
+      reported -- but as `screen_moved`, not as a failure, once every session
+      involved has been shown to be a faithful copy.  Ten seconds apart on a
+      running Amiga is long enough for a title bar to count some memory, and
+      a check that calls that drift is a check that fails for being right.
+    """
     shots = []
     try:
         for i in range(times + 1):
-            pic, frames, words, _ = session_picture(host, port, path, seconds)
-            shots.append(pic)
+            s = session_picture(host, port, path, seconds, verify=True)
+            shots.append(s)
             say("reconnect_%d" % i,
-                "%d frames, %d words, %d distinct pixel values"
-                % (frames, words, len(set(pic))))
+                "%d frames, %d words, %d distinct pixel values, %s"
+                % (s.frames, s.words, len(set(s.pic)), s.verdict()))
             time.sleep(0.5)
 
         # And the receiver that asks on every geom.  The server answers a
         # refresh with a geom, so without a guard this is a loop that never
         # carries a frame; with one it re-syncs at the floor and converges.
-        loop_pic, loop_frames, loop_words, loop_geoms = session_picture(
-            host, port, path, seconds, refresh_every_geom=True)
+        loop = session_picture(host, port, path, seconds,
+                               refresh_every_geom=True, verify=True)
         say("refresh_loop",
-            "%d frames, %d words, %d geoms, %d distinct pixel values"
-            % (loop_frames, loop_words, loop_geoms, len(set(loop_pic))))
+            "%d frames, %d words, %d geoms, %d distinct pixel values, %s"
+            % (loop.frames, loop.words, loop.geoms, len(set(loop.pic)),
+               loop.verdict()))
     except Fault as e:
         say("error", e)
         say("RESULT", "INFRA")
@@ -586,28 +789,33 @@ def reconnect_check(host, port, path, times, seconds):
         return 1
 
     problems = []
-    for i, pic in enumerate(shots):
-        if len(set(pic)) < 2:
-            problems.append("session %d decoded to one pixel value: the"
-                            " screen went blank and stayed blank" % i)
-    if len(set(loop_pic)) < 2:
-        problems.append("the receiver that refreshes on every geom went"
-                        " blank: the resync sequence is being restarted")
-    if loop_pic != shots[0]:
-        differing = sum(1 for a, b in zip(loop_pic, shots[0]) if a != b)
-        problems.append("the receiver that refreshes on every geom ended"
-                        " %d pixels away from session 0" % differing)
-    if loop_frames == 0:
+    for i, s in enumerate(shots + [loop]):
+        who = ("session %d" % i if i < len(shots)
+               else "the receiver that refreshes on every geom")
+        if len(set(s.pic)) < 2:
+            problems.append("%s decoded to one pixel value: the screen went"
+                            " blank and stayed blank" % who)
+        if s.drift:
+            problems.append("%s built a copy %d pixels away from the full"
+                            " frame the server sent for the same moment, in"
+                            " pixels the guest was not redrawing, at %s"
+                            % (who, s.drift, s.box))
+    if loop.frames == 0:
         problems.append("the receiver that refreshes on every geom was"
                         " never sent a frame: refresh is ping-ponging")
-    # An idle Workbench is the same screen every time.  A session that differs
-    # from the first is a session whose copy drifted, which on an idle screen
-    # is never corrected.
-    for i, pic in enumerate(shots[1:], 1):
-        if pic != shots[0]:
-            differing = sum(1 for a, b in zip(pic, shots[0]) if a != b)
-            problems.append("session %d differs from session 0 in %d pixels"
-                            % (i, differing))
+
+    # And what the sessions saw of each other, which is an observation about
+    # the guest and not an assertion about this receiver: every copy above has
+    # already been shown to be faithful, so a difference here is the screen
+    # having changed between two sessions ten seconds apart.  Reported because
+    # a bench that expects an idle machine wants to know when it did not get
+    # one, and because it is the first thing to read when something below
+    # DOES fail.
+    for i, s in enumerate(shots[1:], 1):
+        if s.pic != shots[0].pic:
+            n, box = differ(s.pic, shots[0].pic, s.width)
+            say("screen_moved", "session %d is %d pixels from session 0 (%s)"
+                                % (i, n, box))
 
     for p in problems:
         say("problem", p)
