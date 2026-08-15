@@ -344,16 +344,27 @@ function update(buf: ArrayBuffer): void {
 const urlEl = $("url") as HTMLInputElement;
 const liveEl = $("live") as HTMLButtonElement;
 
+/*
+ * There is one Workbench screen and one input.device, so the server takes one
+ * viewer and refuses the rest; the HTTP status behind a refused upgrade is not
+ * exposed to script (see socket.ts), so the ONE refusal a correct client can
+ * provoke here is named rather than left as the bare word.  A server that is
+ * not there does not refuse -- it fails to connect, and that is the
+ * "connecting" that never resolves.
+ */
 const WORDS: Record<WireState, string> = {
   idle: "idle",
   connecting: "connecting",
   open: "live",
   closed: "closed",
-  refused: "refused",
+  refused: "refused -- somebody else has the screen",
 };
+
+let wireState: WireState = "idle";
 
 function connection(state: WireState, detail: string): void {
   const up = state === "open";
+  wireState = state;
   say(up ? "up" : state === "connecting" ? "" : "down",
       detail && !up ? WORDS[state] + ": " + detail : WORDS[state]);
 
@@ -371,10 +382,53 @@ function connection(state: WireState, detail: string): void {
 }
 
 liveEl.onclick = () => {
-  if (live.open) { live.disconnect(); return; }
+  if (live.open) { away = false; live.disconnect(); return; }
   setPlaying(false);
   live.connect(urlEl.value);
 };
+
+/*
+ * LEAVING THE PAGE HAS TO SAY SO, BECAUSE THE SCREEN IS A SINGLE-INSTANCE
+ * RESOURCE
+ *
+ * The server allows one console session, so a viewer that walks away without
+ * closing is a viewer still holding the screen as far as the server can tell.
+ * It has a liveness bound underneath -- a peer that has gone quiet loses the
+ * screen after ten seconds -- but ten seconds is the ceiling for the case
+ * where NOBODY SAID ANYTHING, and navigating away is not that case: the
+ * browser knows perfectly well that it is leaving.  Saying so turns a
+ * ten-second wait into the sixty milliseconds it takes to ask again, which is
+ * what "go away and come straight back" has to feel like.
+ *
+ * pagehide and not beforeunload: beforeunload does not fire reliably on
+ * mobile and it makes the page ineligible for the back/forward cache, which
+ * would trade this fix for a slower back button.  visibilitychange covers the
+ * other half -- a tab switched away from is not being watched either, and a
+ * screen nobody is looking at should not be one nobody else can have.
+ *
+ * `away` is what stops this from fighting the Connect button: only a session
+ * THIS closed on the way out is reopened on the way back.
+ */
+let away = false;
+
+const leaving = () => {
+  if (!live.open && wireState !== "connecting") return;
+  away = true;
+  live.disconnect();
+};
+
+const returning = () => {
+  if (!away) return;
+  away = false;
+  if (!live.open) live.connect(urlEl.value);
+};
+
+addEventListener("pagehide", leaving);
+addEventListener("pageshow", returning);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") leaving();
+  else returning();
+});
 
 urlEl.value = defaultEndpoint();
 
