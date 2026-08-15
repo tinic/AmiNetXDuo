@@ -48,14 +48,6 @@ export class Wire {
   private ws: WebSocket | null = null;
   private readonly h: WireHandlers;
 
-  /* Counted here because this is the only place that sees every frame, and
-     the bar wants a rate rather than the viewer keeping a second tally that
-     can drift from it. */
-  bytesIn = 0;
-  framesIn = 0;
-  wordsIn = 0;
-  wordsOut = 0;
-
   constructor(h: WireHandlers) {
     this.h = h;
   }
@@ -91,14 +83,10 @@ export class Wire {
 
     ws.onmessage = (e: MessageEvent) => {
       if (typeof e.data === "string") {
-        this.wordsIn++;
         this.h.onWord(e.data);
         return;
       }
-      const buf = e.data as ArrayBuffer;
-      this.framesIn++;
-      this.bytesIn += buf.byteLength;
-      this.h.onFrame(buf);
+      this.h.onFrame(e.data as ArrayBuffer);
     };
   }
 
@@ -118,9 +106,6 @@ export class Wire {
    * than being filled with a second encoding of the same thing.
    */
   word(w: string): void {
-    if (this.open) {
-      this.wordsOut++;
-      this.ws!.send(w);
-    }
+    if (this.open) this.ws!.send(w);
   }
 }

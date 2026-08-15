@@ -51,11 +51,9 @@ const BROWSER_KEEPS = new Set(["KeyW", "KeyR", "KeyT", "KeyN", "KeyQ"]);
 
 export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
   detach: () => void;
-  moves: () => number;
 } {
   let pending: { x: number; y: number; b: number } | null = null;
   let scheduled = 0;
-  let moves = 0;
   let buttons = 0;
   /* Where the pointer was last known to be, in Amiga pixels.  A release that
      arrives with no usable coordinate -- a cancelled gesture, a lost focus --
@@ -90,7 +88,6 @@ export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
     /* Drawn on the event and sent on the frame: the two halves of the
        latency story, deliberately not the same rate. */
     view.movePointer(p.x, p.y);
-    moves++;
     last = p;
 
     pending = { x: p.x, y: p.y, b: buttons };
@@ -212,6 +209,5 @@ export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
       removeEventListener("keydown", onDown);
       removeEventListener("keyup", onUp);
     },
-    moves: () => moves,
   };
 }

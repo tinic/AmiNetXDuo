@@ -106,7 +106,6 @@ const playEl = $("play") as HTMLButtonElement;
 const prevEl = $("prev") as HTMLButtonElement;
 const nextEl = $("next") as HTMLButtonElement;
 const scrubEl = $("scrub") as HTMLInputElement;
-const fpsEl = $("fps") as HTMLInputElement;
 
 function showFrame(i: number): void {
   if (cap === null) return;
@@ -176,10 +175,6 @@ playEl.onclick = () => setPlaying(!playing);
 prevEl.onclick = () => { setPlaying(false); showFrame(frame - 1); };
 nextEl.onclick = () => { setPlaying(false); showFrame(frame + 1); };
 scrubEl.oninput = () => { setPlaying(false); showFrame(Number(scrubEl.value)); };
-fpsEl.oninput = () => {
-  const v = Number(fpsEl.value);
-  if (v >= 1 && v <= 60) fps = v;
-};
 
 /* ------------------------------------------------------------ the source -- */
 
@@ -712,24 +707,14 @@ urlEl.value = defaultEndpoint();
 
 /* ------------------------------------------------------------- the input -- */
 
-const inputs = attachInput(view, $("box"), {
+attachInput(view, $("box"), {
   send: (w) => live.word(w),
   log: (w) => log((live.open ? "> " : "· ") + w),
 });
 
-/*
- * The pointer word rate, which is the number the coalescing exists to hold
- * down.  Shown next to the input log because that is where it is evidence:
- * moves is what the mouse produced and the log is what was sent.
- */
-setInterval(() => {
-  if (rec !== null) { recShow(); return; }
-  const el = $("count");
-  if (cap === null && geom !== null) {
-    el.textContent = inputs.moves() + " moves  " +
-                     live.wordsOut + " words out";
-  }
-}, 500);
+/* The recording's own counter, which is the only thing the deck's counter
+   shows during a live session. */
+setInterval(() => { if (rec !== null) recShow(); }, 500);
 
 /* -------------------------------------------------------------- the view -- */
 

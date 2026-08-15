@@ -130,9 +130,6 @@ input[type=text], input[type=number] {
 }
 
 #url { width: 22ch; }
-/* Wide enough for two digits AND the browser's spinner, which is drawn
-   inside the field and clips the value if it is not allowed for. */
-#fps { width: 7ch; }
 
 /* The picker is reached through the button beside it: a browser's own file
    gadget cannot be made to look like anything, and it does not have to be
@@ -195,6 +192,11 @@ input[type=range] { width: 14rem; accent-color: var(--pen3); }
 }
 
 #perf { margin-left: auto; }
+
+/* The deck has a left group and a right group, and the right one starts
+   here: the transport belongs beside the picture it scrubs, and what is left
+   is how the picture is drawn. */
+#deck #aspect { margin-left: auto; }
 
 #pal { display: flex; gap: 1px; flex-wrap: wrap; }
 
@@ -270,6 +272,5 @@ body.drop #stage { box-shadow: inset 0 0 0 3px var(--pen3); }
 
 @media (max-width: 60rem) {
   #src { display: none; }
-  #rate { display: none; }
   #url { width: 12ch; }
 }
