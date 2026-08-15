@@ -282,7 +282,8 @@ if(CMAKE_CROSSCOMPILING)
         rfb_worst_case_frame=rfb020_worst_case_frame
         rfb_scroll_defaults=rfb020_scroll_defaults
         rfb_encoder_init=rfb020_encoder_init
-        rfb_encode_frame=rfb020_encode_frame)
+        rfb_encode_frame=rfb020_encode_frame
+        rfb_encode_frame_planes=rfb020_encode_frame_planes)
 
     # The tree builds at -Os and the encoder's inner loop is where that shows:
     # at -Os GCC fetches the source longword a second time to store it into the
@@ -301,7 +302,8 @@ if(CMAKE_CROSSCOMPILING)
         rfb_worst_case_frame=rfbo2_worst_case_frame
         rfb_scroll_defaults=rfbo2_scroll_defaults
         rfb_encoder_init=rfbo2_encoder_init
-        rfb_encode_frame=rfbo2_encode_frame)
+        rfb_encode_frame=rfbo2_encode_frame
+        rfb_encode_frame_planes=rfbo2_encode_frame_planes)
 
     add_library(rfb_encode_o220 STATIC "${CMAKE_SOURCE_DIR}/src/rfb/rfb_encode.c")
     target_include_directories(rfb_encode_o220 PRIVATE ${AMINETXDUO_CORE_INCLUDES})
@@ -316,7 +318,8 @@ if(CMAKE_CROSSCOMPILING)
         rfb_worst_case_frame=rfb220_worst_case_frame
         rfb_scroll_defaults=rfb220_scroll_defaults
         rfb_encoder_init=rfb220_encoder_init
-        rfb_encode_frame=rfb220_encode_frame)
+        rfb_encode_frame=rfb220_encode_frame
+        rfb_encode_frame_planes=rfb220_encode_frame_planes)
 
     add_library(rfbkern STATIC rfbkern.c)
     target_compile_options(rfbkern PRIVATE -Wall -Wextra)

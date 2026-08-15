@@ -200,7 +200,7 @@ static UBYTE    *r_out;
 static UBYTE    *r_shadow2;
 static UBYTE    *r_scratch2;
 static ULONG     r_shadow_len, r_scratch_len, r_out_cap;
-static ULONG     r_reps = 8UL;
+static ULONG     r_reps = 8UL;   /* scaled to the frame count in main() */
 static char      r_name[32] = "synthetic";
 
 static const char *r_memtype(APTR p)
@@ -368,6 +368,53 @@ static const r_encfn r_enc_fn[4] = { rfb_encode_frame, rfb020_encode_frame,
 static const r_initfn r_init_fn[4] = { rfb_encoder_init, rfb020_encoder_init,
                                        rfbo2_encoder_init, rfb220_encoder_init };
 
+/* The same arm, but reading the frame out of CHIP RAM through the plane
+   pointers -- which is what httpfb.c does now that there is no grab buffer.
+   The frame is staged into chip OUTSIDE the timed region, because staging it
+   is the copy this exists to show nobody has to make. */
+static VOID r_encode_chip_arm(const char *tag, rfb_u32 flags,
+                              ULONG from, ULONG to)
+{
+    rfb_encoder     e;
+    rfb_scroll_cfg  cfg;
+    const rfb_u8   *planes[RFB_MAX_DEPTH];
+    ULONG           rep, i, p, t0, t1, ticks = 0UL, nframes = 0UL;
+    ULONG           bytes = 0UL;
+    long            n = 0;
+
+    rfb_scroll_defaults(&cfg);
+    for (p = 0UL; p < (ULONG)r_g.depth; p++)
+        planes[p] = r_chip + p * (ULONG)r_g.bytes_per_row * r_g.height;
+
+    for (rep = 0UL; rep < r_reps; rep++) {
+        memset(r_shadow, 0, (size_t)r_shadow_len);
+        (VOID)rfb_encoder_init(&e, &r_g, flags, &cfg, r_shadow, r_shadow_len,
+                               r_scratch, r_scratch_len);
+
+        for (i = 0UL; i <= from; i++) {
+            memcpy(r_chip, r_data + i * r_frame_bytes, (size_t)r_frame_bytes);
+            n = rfb_encode_frame_planes(&e, planes, r_out, r_out_cap);
+        }
+
+        for (i = from + 1UL; i <= to; i++) {
+            memcpy(r_chip, r_data + i * r_frame_bytes, (size_t)r_frame_bytes);
+            t0 = r_now();
+            n = rfb_encode_frame_planes(&e, planes, r_out, r_out_cap);
+            t1 = r_now();
+            ticks += (t1 - t0);
+            nframes++;
+            if (n > 0)
+                bytes += (ULONG)n;
+        }
+    }
+
+    if (nframes == 0UL)
+        nframes = 1UL;
+    r_log("rfbprof seq=%s arm=%s cpu=%s us=%lu bytes=%lu frames=%lu",
+          r_name, tag, "chip", r_us(ticks) / nframes, bytes / nframes,
+          nframes);
+}
+
 static VOID r_encode_arm(const char *tag, rfb_u32 flags, int use020,
                          ULONG from, ULONG to)
 {
@@ -514,11 +561,14 @@ static VOID r_run_sequence(ULONG from, ULONG to, const char *what)
     /* Interleaved: the two codegens of each arm are adjacent, so a host that
        slows down halfway through cannot make one look better than the other. */
     r_encode_arm("shipping", FB_FLAGS, 0, from, to);
+    r_encode_chip_arm("shipping_chip", FB_FLAGS, from, to);
     r_encode_arm("shipping", FB_FLAGS, 1, from, to);
     r_encode_arm("shipping", FB_FLAGS, 2, from, to);
     r_encode_arm("shipping", FB_FLAGS, 3, from, to);
     r_encode_arm("noprobe", FB_FLAGS & ~(RFB_F_COPYRECT
                                          | RFB_F_SCROLL_ADAPTIVE), 0, from, to);
+    r_encode_chip_arm("noprobe_chip", FB_FLAGS & ~(RFB_F_COPYRECT
+                                         | RFB_F_SCROLL_ADAPTIVE), from, to);
     r_encode_arm("noprobe", FB_FLAGS & ~(RFB_F_COPYRECT
                                          | RFB_F_SCROLL_ADAPTIVE), 1, from, to);
     r_encode_arm("noprobe", FB_FLAGS & ~(RFB_F_COPYRECT
@@ -589,6 +639,14 @@ int main(void)
 
     r_g.tile_w = 16;
     r_g.tile_h = 16;
+
+    /* A short capture is the wrong instrument for the scroll probe: its gate
+       backs off over frames, so a six-frame sequence never lets the backoff
+       develop and charges the probe to every frame.  Sixteen frames, and the
+       repeat count falls so the wall clock does not. */
+    r_reps = 48UL / (r_frames ? r_frames : 1UL);
+    if (r_reps == 0UL)
+        r_reps = 1UL;
 
     rfb_scroll_defaults(&cfg);
     r_shadow_len  = rfb_shadow_size(&r_g);
