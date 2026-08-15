@@ -6,12 +6,14 @@
  * anything else an Amiga can serve without a client on the other machine.
  *
  *     httpd ROOT/A,PORT/N,ADDRESS=-a/K,CONNECTIONS=-m/N/K,TIMEOUT=-w/N/K,
- *           VERBOSE=-v/S,TRACE/S,TERMINAL=-T/S,PAGE/K
+ *           VERBOSE=-v/S,TRACE/S,TERMINAL=-T/S,PAGE/K,CONSOLE=-C/S,
+ *           CONSOLEPAGE/K
  *
  *   httpd Work:Public            serve that drawer on port 80
  *   httpd DH0:Docs 8080 -v       another port, one log line per request
  *   httpd RAM: 8080 TRACE        every header, in the order it arrived
  *   httpd Work:Public 80 -T      and a Shell in a browser, on the same port
+ *   httpd Work:Public 80 -C      and the Workbench screen, live, in a browser
  *
  * WHAT IT ANSWERS
  *
@@ -47,6 +49,25 @@
  *   the served drawer.  The banner says so when there is one, because a file
  *   that stops being reachable without a word is the kind of thing that gets
  *   diagnosed as a network fault.
+ *
+ * AND, WHEN ASKED FOR, THE SCREEN
+ *
+ *   -C turns on /console, which serves an HTML page, and a WebSocket upgrade
+ *   to the same address gets the Workbench screen itself: what shape it is,
+ *   what colours it has, and then a frame per grab carrying only what changed.
+ *   The grab and the session are in src/tools/httpfb.c, the wire format in
+ *   include/aminetxduo/rfb_encode.h.
+ *
+ *   The same shape as -T in every respect that matters.  It takes no value and
+ *   CONSOLEPAGE= names the page somewhere other than the places searched; the
+ *   address is reserved only while it is on; it is one viewer at a time; and
+ *   ANYONE WHO CAN REACH THE PORT SEES THAT SCREEN.  Off unless -C was given,
+ *   so the decision is made once, on the command line, by the person starting
+ *   the server.
+ *
+ *   The Workbench screen and nothing else.  There is no screen enumeration and
+ *   no RTG: a non-planar BitMap has no bitplanes to read, and that case is
+ *   refused with a sentence rather than read anyway.
  *
  *   The class matters more than the verbs do.  Finder mounts a `DAV: 1`
  *   server READ-ONLY however many write methods it answers, so a server that
@@ -101,6 +122,7 @@
 #include "httpframe.h"
 #include "httpws.h"
 #include "httpterm.h"
+#include "httpfb.h"
 #include "iperfcore.h"
 #include "aminetxduo/version.h"
 
@@ -118,7 +140,8 @@ static const char version_tag[] __attribute__((used)) =
 
 #define TEMPLATE                                                        \
     "ROOT/A,PORT/N,ADDRESS=-a/K,CONNECTIONS=-m/N/K,TIMEOUT=-w/N/K,"     \
-    "VERBOSE=-v/S,TRACE/S,TERMINAL=-T/S,PAGE/K"
+    "VERBOSE=-v/S,TRACE/S,TERMINAL=-T/S,PAGE/K,CONSOLE=-C/S,"           \
+    "CONSOLEPAGE/K"
 
 enum
 {
@@ -131,6 +154,8 @@ enum
     ARG_TRACE,
     ARG_TERMINAL,
     ARG_PAGE,
+    ARG_CONSOLE,
+    ARG_CONSOLEPAGE,
     ARG_COUNT
 };
 
@@ -157,6 +182,24 @@ static const char *const httpd_term_places[] = {
 #define HTTPD_TERM_PLACES                                               \
     ((ULONG)(sizeof(httpd_term_places) / sizeof(httpd_term_places[0])))
 
+/*
+ * The same three places for -C's page, and the SAME drawer: the archive puts
+ * both pages in Terminal/ and the installer copies that drawer whole, so a
+ * page anywhere else is a page nothing installs.  The drawer holds httpd's
+ * pages and is named after the first one.  A machine that has one page and
+ * not the other still gets the right refusal, because each search is over its
+ * own file name and says which one it could not find.
+ */
+static const char *const httpd_console_places[] = {
+    "AmiNetXDuo:Terminal/console.html",
+    "PROGDIR:Terminal/console.html",
+    "PROGDIR:console.html"
+};
+
+#define HTTPD_CONSOLE_PLACES                                            \
+    ((ULONG)(sizeof(httpd_console_places) /                             \
+             sizeof(httpd_console_places[0])))
+
 /* --------------------------------------------------------------- limits --- */
 
 /*
@@ -176,6 +219,21 @@ static const char *const httpd_term_places[] = {
 #define HTTPD_HEADERS_MAX     48    /* header lines in one request          */
 #define HTTPD_BODY_MAX     65536UL  /* a BUFFERED request body: the XML     */
 #define HTTPD_TIMEOUT_DEF     30UL  /* seconds of no progress               */
+
+/*
+ * The same question for the two endpoints that hold a single-instance
+ * resource: the Shell and the console screen.  Deliberately SHORTER than
+ * HTTPD_TIMEOUT_DEF, because what is being held is not a connection slot --
+ * it is the only Shell, or the only screen, and everybody else is refused
+ * while a peer that has already gone still nominally has it.
+ *
+ * Ten seconds is the ceiling for the WORST case, a peer that vanished without
+ * saying so: half of it is spent waiting quietly, the ping goes out at the
+ * halfway mark and the answer is due by the end.  A peer that closes cleanly
+ * is acted on in the pass it happens, which is the ordinary navigate-away and
+ * costs nothing like ten seconds.
+ */
+#define HTTPD_WS_IDLE_DEF     10UL  /* seconds before a quiet viewer loses it */
 #define HTTPD_BACKLOG          8
 
 /* A walk that a client can ask for, DELETE and COPY of a drawer, has to
@@ -282,6 +340,11 @@ static const char *const httpd_term_places[] = {
  */
 #define HTTPD_TERM_URL      "/shell"
 
+/* And the console's, on the same rule.  A second reserved name and not a
+   parameter of the first: they are two apps, and a machine may be running
+   either, both or neither. */
+#define HTTPD_CONSOLE_URL   "/console"
+
 /* The version of RFC 6455 there is.  A client asking for another gets 426 and
    this number back, which is what 4.4 says to do rather than refusing flat. */
 #define HTTPD_WS_VERSION    13
@@ -347,7 +410,8 @@ enum
     CONN_SEND,          /* pushing out[], refilled by the producer         */
     CONN_DRAIN,         /* reading away a refused request's body           */
     CONN_WS,            /* the 101 has gone; this is frames from here on   */
-    CONN_IPERF          /* a slice of a throughput run per pass, as WALK   */
+    CONN_IPERF,         /* a slice of a throughput run per pass, as WALK   */
+    CONN_FB             /* the console: a screen grab per pass, and frames */
 };
 
 /*
@@ -523,6 +587,8 @@ struct HttpConn
      * given, and they are the part that has size to them; see httpterm.c.
      */
     UBYTE   is_term;                /* this request is for /shell          */
+    UBYTE   is_console;             /* this request is for /console        */
+    UBYTE   fb_owner;               /* this connection holds the console   */
     UBYTE   ws_upgrade;             /* Upgrade: websocket was there        */
     UBYTE   ws_connection;          /* and Connection: listed upgrade      */
     UBYTE   ws_owner;               /* this connection holds the Shell     */
@@ -589,6 +655,7 @@ static char        httpd_root_buf[HTTP_PATH_MAX];
 static const char *httpd_root = "";
 static ULONG  httpd_conns   = HTTPD_CONN_DEFAULT;
 static ULONG  httpd_timeout = HTTPD_TIMEOUT_DEF;
+static ULONG  httpd_ws_idle = HTTPD_WS_IDLE_DEF;
 static BOOL   httpd_verbose = FALSE;
 static BOOL   httpd_trace   = FALSE;
 /* The HTML file -T resolved to, and "" when -T was not given.  One string
@@ -598,6 +665,20 @@ static char   httpd_term_page[HTTP_PATH_MAX];
 /* The same name with .gz on the end.  A name only -- whether a file of it
    exists is asked per request, not here -- and "" when it would not fit. */
 static char   httpd_term_gz[HTTP_PATH_MAX];
+/* The console's page and its compressed sibling, on exactly the same rule:
+   one string answers both where it is and whether there is a console. */
+static char   httpd_console_page[HTTP_PATH_MAX];
+static char   httpd_console_gz[HTTP_PATH_MAX];
+
+/*
+ * Which connection holds the console, or NULL.  A pointer and not a scan over
+ * fb_owner, for the same reason httpd_iperf_owner is one: the 101 goes out a
+ * pass before the session starts, and in between http_fb_available() is still
+ * true -- so two upgrades arriving in ONE pass of the loop would both be
+ * answered 101 and the second would then fail to start with the socket already
+ * switched to a protocol it cannot speak.
+ */
+static HttpConn *httpd_fb_owner;
 static LONG   httpd_gmt_west = 0;       /* minutes west of GMT, from locale */
 static struct Library *httpd_sb = NULL;
 
@@ -1214,6 +1295,18 @@ static VOID httpd_close(HttpConn *c)
         c->ws_owner = 0;
     }
 
+    /* The same for the console: the viewer has gone, so the screen buffers
+       go with it.  AmigaOS reclaims nothing at process exit and nothing at
+       connection exit either; this is the only place they are given back. */
+    if (c->fb_owner)
+    {
+        http_fb_stop();
+        c->fb_owner = 0;
+    }
+
+    if (httpd_fb_owner == c)
+        httpd_fb_owner = NULL;
+
     if (c->sock >= 0)
     {
         (VOID)tool_sock_close(httpd_sb, c->sock);
@@ -1311,6 +1404,7 @@ static VOID httpd_reset(HttpConn *c)
     c->owner[0]   = '\0';
 
     c->is_term       = 0;
+    c->is_console    = 0;
     c->ws_take       = 0;
     c->ws_upgrade    = 0;
     c->ws_connection = 0;
@@ -3753,21 +3847,25 @@ static VOID httpd_do_get(HttpConn *c)
  *   it gets back when nothing has changed is 304 and no body, which is the
  *   same guarantee for a few hundred bytes instead of a few hundred thousand.
  */
-static VOID httpd_term_page_get(HttpConn *c)
+/* One page server, two pages.  `what` is the word that goes in the two
+   diagnostics, which is the only thing that differs between the terminal's
+   page and the console's. */
+static VOID httpd_app_page_get(HttpConn *c, const char *plain, const char *gz,
+                               const char *what)
 {
-    const char *path = httpd_term_page;
+    const char *path = plain;
     BOOL        gzipped = FALSE;
     char        etag[HTTPD_ETAG_MAX];
     LONG        size;
 
     c->file = (BPTR)0;
 
-    if (c->gzip_ok && httpd_term_gz[0] != '\0')
+    if (c->gzip_ok && gz[0] != '\0')
     {
-        c->file = Open((CONST_STRPTR)httpd_term_gz, MODE_OLDFILE);
+        c->file = Open((CONST_STRPTR)gz, MODE_OLDFILE);
         if (c->file != (BPTR)0)
         {
-            path    = httpd_term_gz;
+            path    = gz;
             gzipped = TRUE;
         }
     }
@@ -3782,7 +3880,7 @@ static VOID httpd_term_page_get(HttpConn *c)
         /* The command line named it and it was there when the server started,
            so this is the file having gone since.  503 and not 404: the
            address is right and the server is the one that cannot answer. */
-        httpd_error(c, 503, "the terminal's page will not open");
+        httpd_error(c, 503, what);
         return;
     }
 
@@ -3791,7 +3889,7 @@ static VOID httpd_term_page_get(HttpConn *c)
     {
         (VOID)Close(c->file);
         c->file = (BPTR)0;
-        httpd_error(c, 503, "the terminal's page will not seek");
+        httpd_error(c, 503, what);
         return;
     }
 
@@ -3843,6 +3941,18 @@ static VOID httpd_term_page_get(HttpConn *c)
     c->producer  = PROD_FILE;
 }
 
+static VOID httpd_term_page_get(HttpConn *c)
+{
+    httpd_app_page_get(c, httpd_term_page, httpd_term_gz,
+                       "the terminal's page will not open");
+}
+
+static VOID httpd_console_page_get(HttpConn *c)
+{
+    httpd_app_page_get(c, httpd_console_page, httpd_console_gz,
+                       "the console's page will not open");
+}
+
 /*
  * TAKE THE TERMINAL OFF WHOEVER HAS IT.  TRUE when somebody was let go of.
  *
@@ -3892,7 +4002,7 @@ static BOOL httpd_term_reclaim(HttpConn *asking, ULONG now)
             continue;
 
         if (!asking->ws_take &&
-            !http_term_sock_stale(&h->ws, now, httpd_timeout))
+            !http_term_sock_stale(&h->ws, now, httpd_ws_idle))
             return FALSE;
 
         if (httpd_verbose || httpd_trace)
@@ -4039,6 +4149,137 @@ static VOID httpd_do_terminal(HttpConn *c)
      * losing it loses the first thing typed.
      */
     c->state = CONN_SEND;
+}
+
+/* --------------------------------------------------------------- console --- */
+
+/*
+ * TAKE THE CONSOLE OFF WHOEVER HAS IT.  The terminal's rule, for the terminal's
+ * reason: a tab that goes away because the NETWORK did sends neither a close
+ * frame nor a FIN, and nothing downstream of a silent socket ever concludes
+ * anything.  A session that has been pinged and did not answer is not somebody
+ * and is taken with no permission; a live one is taken only when the request
+ * asked for it with `?take=1`.
+ */
+static BOOL httpd_console_reclaim(HttpConn *asking, ULONG now)
+{
+    ULONG i;
+
+    for (i = 0; i < httpd_conns; i++)
+    {
+        HttpConn *h = &httpd_conn[i];
+
+        if (h == asking || h->state == CONN_FREE || !h->fb_owner)
+            continue;
+
+        if (!asking->ws_take && !http_fb_stale(now, httpd_ws_idle))
+            return FALSE;
+
+        if (httpd_verbose || httpd_trace)
+            httpd_log(h, "console taken over (%s)",
+                      (LONG)(asking->ws_take ? "asked for" : "stopped answering"),
+                      0);
+
+        http_fb_evict(HTTP_WS_CLOSE_GOING);
+        httpd_close(h);
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+/*
+ * The upgrade, and everything RFC 6455 4.2.1 requires of the request, checked
+ * exactly as httpd_do_terminal() checks it.  The two are deliberately not one
+ * function with a flag: what they refuse is the same, what they then START is
+ * a Shell in one case and 160 KB of screen buffers in the other, and the
+ * failures either can have do not overlap at all.
+ */
+static VOID httpd_do_console(HttpConn *c)
+{
+    char accept[HTTPD_WS_ACC_MAX];
+
+    if (c->method->id != HTTPD_M_GET && c->method->id != HTTPD_M_HEAD)
+    {
+        httpd_begin(c, 405);
+        httpd_header(c, "Allow", "GET, HEAD");
+        httpd_body_text(c, "text/plain; charset=iso-8859-1",
+                        "The console answers GET.\r\n");
+        return;
+    }
+
+    /* No upgrade asked for: this is a browser fetching the page. */
+    if (!c->ws_upgrade)
+    {
+        httpd_console_page_get(c);
+        return;
+    }
+
+    if (!c->ws_connection)
+    {
+        httpd_error(c, 400, "an upgrade needs Connection: Upgrade too");
+        return;
+    }
+
+    if (c->ws_version != HTTPD_WS_VERSION)
+    {
+        httpd_begin(c, 426);
+        httpd_header(c, "Sec-WebSocket-Version", "13");
+        httpd_body_text(c, "text/plain; charset=iso-8859-1",
+                        "This server speaks WebSocket version 13.\r\n");
+        return;
+    }
+
+    if (!http_ws_accept(c->ws_key, accept, sizeof(accept)))
+    {
+        httpd_error(c, 400, "that is not a Sec-WebSocket-Key");
+        return;
+    }
+
+    if (httpd_fb_owner != NULL || !http_fb_available())
+    {
+        BOOL took = httpd_console_reclaim(c, httpd_now());
+
+        httpd_begin(c, 503);
+        httpd_header(c, "Retry-After", took ? "1" : "5");
+        httpd_body_text(c, "text/plain; charset=iso-8859-1",
+                        took ? "The console has been released; ask again.\r\n"
+                             : "Somebody else has the console.\r\n");
+        return;
+    }
+
+    /*
+     * The 101, by hand, for httpd_do_terminal()'s reason: httpd_begin() would
+     * decide about Content-Length and Connection and both are wrong on a 101.
+     *
+     * The session itself is NOT started here.  It is started once the 101 has
+     * actually left, in httpd_flush(), because the first thing it does is
+     * queue a geom word and there is nowhere to put one while the handshake
+     * is still in the buffer.
+     */
+    c->out_len  = 0;
+    c->out_sent = 0;
+    c->overflow = 0;
+    c->status   = 101;
+
+    httpd_out(c, "HTTP/1.1 101 Switching Protocols\r\n"
+                 "Upgrade: websocket\r\n"
+                 "Connection: Upgrade\r\n"
+                 "Sec-WebSocket-Accept: ");
+    httpd_out(c, accept);
+    httpd_out(c, "\r\n\r\n");
+
+    if (c->overflow)
+    {
+        httpd_error(c, 500, "the answer did not fit");
+        return;
+    }
+
+    c->fb_owner    = 1;
+    httpd_fb_owner = c;
+    c->keepalive   = 0;             /* there is no next request on this one */
+    c->producer    = PROD_NONE;
+    c->state       = CONN_SEND;
 }
 
 /* --------------------------------------------------------------- writing --- */
@@ -5691,6 +5932,43 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
     }
 
+    /* And the console's, on exactly the same rule.  `?take=1` means the same
+       thing here: claim the session from whoever is holding it. */
+    if (httpd_console_page[0] != '\0')
+    {
+        ULONG n = 0;
+
+        while (httpd_target[n] != '\0' && httpd_target[n] != '?')
+            n++;
+
+        if (n == hs_len(HTTPD_CONSOLE_URL) &&
+            hs_nicmp(httpd_target, HTTPD_CONSOLE_URL, n) == 0)
+        {
+            c->is_console = 1;
+            hs_copy(c->path.url, sizeof(c->path.url), HTTPD_CONSOLE_URL);
+            c->path.path[0] = '\0';
+            c->path.name[0] = '\0';
+
+            if (httpd_target[n] == '?')
+            {
+                ULONG i;
+
+                for (i = n + 1UL; httpd_target[i] != '\0'; i++)
+                {
+                    if (hs_nicmp(&httpd_target[i], "take=1", 6) == 0 &&
+                        (i == n + 1UL || httpd_target[i - 1] == '?' ||
+                         httpd_target[i - 1] == '&'))
+                    {
+                        c->ws_take = 1;
+                        break;
+                    }
+                }
+            }
+
+            return TRUE;
+        }
+    }
+
     why = http_path_resolve(httpd_root, httpd_target, &c->path);
     if (why != HTTP_PATH_OK)
     {
@@ -6198,6 +6476,15 @@ static VOID httpd_dispatch(HttpConn *c)
     if (c->is_term)
     {
         httpd_do_terminal(c);
+        httpd_log_status(c);
+        return;
+    }
+
+    /* And the console, for the same reason: it names no file, so there is no
+       entity tag to compare and nothing to lock. */
+    if (c->is_console)
+    {
+        httpd_do_console(c);
         httpd_log_status(c);
         return;
     }
@@ -6791,6 +7078,32 @@ static BOOL httpd_writable(HttpConn *c)
          * a browser that opens the socket and types in the same segment is
          * ordinary, and dropping that would drop the first thing said.
          */
+        /*
+         * The console's 101 has gone, and the session starts here for the
+         * same reason the terminal's socket is handed over here: what is in
+         * out[] until this moment is the handshake, and the first thing the
+         * session does is queue a word.
+         */
+        if (c->fb_owner && c->state == CONN_SEND)
+        {
+            ULONG first = c->in_len;
+
+            c->in_len   = 0;
+            c->out_len  = 0;
+            c->out_sent = 0;
+
+            if (!http_fb_start(httpd_sb, c->sock, c->in, first, httpd_now()))
+            {
+                if (httpd_verbose || httpd_trace)
+                    httpd_log(c, "console would not start: %s",
+                              (LONG)http_fb_fault(), 0);
+                return FALSE;
+            }
+
+            c->state = CONN_FB;
+            return TRUE;
+        }
+
         if (c->ws_owner && c->state == CONN_SEND)
         {
             c->state = CONN_WS;
@@ -6981,6 +7294,23 @@ static VOID httpd_serve(LONG lsock)
             {
                 walking++;
             }
+            else if (c->state == CONN_FB)
+            {
+                /*
+                 * Both halves, like a terminal, and counted as walking so the
+                 * wait is the short one: a viewer that is not typing still
+                 * wants the next frame, and a 250 ms tick would cap the
+                 * console at four frames a second whatever the machine could
+                 * do.  Short and NOT zero, which WaitSelect() reads as a poll
+                 * and answers without ever yielding.
+                 */
+                walking++;
+
+                tool_fd_add(&readfds, c->sock);
+
+                if (http_fb_wants_write())
+                    tool_fd_add(&writefds, c->sock);
+            }
             else if (c->state == CONN_WS)
             {
                 /*
@@ -7092,6 +7422,46 @@ static VOID httpd_serve(LONG lsock)
                 continue;
             }
 
+            if (c->state == CONN_FB)
+            {
+                /*
+                 * Read, then produce, then write.  Reading first is what makes
+                 * a `refresh` get through while a frame is going out: the
+                 * producer below would otherwise fill the buffer again before
+                 * the word was looked at.
+                 */
+                if (ready > 0 && tool_fd_isset(&readfds, c->sock))
+                    keep = http_fb_read(now);
+
+                if (keep)
+                    keep = http_fb_slice(now);
+
+                if (keep)
+                    keep = http_fb_write(now);
+
+                if (keep)
+                    keep = http_fb_idle(now, httpd_ws_idle);
+
+                if (!keep)
+                {
+                    if (httpd_verbose || httpd_trace)
+                    {
+                        ULONG frames = 0, bytes = 0, gt = 0, et = 0;
+
+                        http_fb_stats(&frames, &bytes, &gt, &et);
+                        httpd_log(c, "console ended: %s",
+                                  (LONG)http_ws_close_reason(http_fb_why()), 0);
+                        httpd_log(c, "console sent %lu frames, %lu bytes",
+                                  (LONG)frames, (LONG)bytes);
+                        httpd_log(c, "console spent %lu ticks grabbing and "
+                                     "%lu encoding", (LONG)gt, (LONG)et);
+                    }
+                    httpd_close(c);
+                }
+
+                continue;
+            }
+
             if (c->state == CONN_WS)
             {
                 /*
@@ -7107,7 +7477,7 @@ static VOID httpd_serve(LONG lsock)
                     keep = http_term_sock_write(&c->ws, now);
 
                 if (keep)
-                    keep = http_term_sock_idle(&c->ws, now, httpd_timeout);
+                    keep = http_term_sock_idle(&c->ws, now, httpd_ws_idle);
 
                 if (!keep)
                 {
@@ -7201,10 +7571,12 @@ int main(int argc, char **argv)
     if (rda == NULL)
     {
         tool_fault(IoErr());
-        tool_usage("<drawer> [<port>] [-v] [TRACE] [-T [PAGE <file>]]",
+        tool_usage("<drawer> [<port>] [-v] [TRACE] [-T [PAGE <file>]] "
+                   "[-C [CONSOLEPAGE <file>]]",
                    "Serves a drawer over HTTP and WebDAV, so this machine can "
                    "be mounted as a writable drive.  -T adds /shell, an "
-                   "AmigaDOS Shell in a browser, open to anyone who can reach "
+                   "AmigaDOS Shell in a browser, and -C adds /console, the "
+                   "Workbench screen; both are open to anyone who can reach "
                    "the port.");
         return RETURN_ERROR;
     }
@@ -7283,6 +7655,14 @@ int main(int argc, char **argv)
     {
         tool_error("PAGE names the terminal's page, and -T is what turns the "
                    "terminal on");
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
+    if (args[ARG_CONSOLEPAGE] != 0 && args[ARG_CONSOLE] == 0)
+    {
+        tool_error("CONSOLEPAGE names the console's page, and -C is what "
+                   "turns the console on");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
@@ -7385,6 +7765,92 @@ int main(int argc, char **argv)
         /* Said before the serving banner rather than in it: this is the one
            thing about the run the command line does not state. */
         tool_printf("Terminal page: %s\n", (LONG)httpd_term_page);
+    }
+
+    /*
+     * The console's page, on exactly the -T rule above: found before anything
+     * is served, named in the refusal when it is not there, and a -C with
+     * nowhere to serve from REFUSES TO START rather than starting without the
+     * endpoint.
+     */
+    if (args[ARG_CONSOLE] != 0)
+    {
+        const char *named = (args[ARG_CONSOLEPAGE] != 0)
+                                ? (const char *)args[ARG_CONSOLEPAGE] : NULL;
+        BPTR        page  = (BPTR)0;
+
+        if (named != NULL)
+        {
+            page = Open((CONST_STRPTR)named, MODE_OLDFILE);
+
+            if (page == (BPTR)0)
+            {
+                tool_error("there is no \"%s\" to serve the console from",
+                           (LONG)named);
+                tool_fault(IoErr());
+                FreeArgs(rda);
+                return RETURN_ERROR;
+            }
+        }
+        else
+        {
+            for (i = 0; i < HTTPD_CONSOLE_PLACES; i++)
+            {
+                page = Open((CONST_STRPTR)httpd_console_places[i],
+                            MODE_OLDFILE);
+
+                if (page != (BPTR)0)
+                {
+                    named = httpd_console_places[i];
+                    break;
+                }
+            }
+
+            if (named == NULL)
+            {
+                static char where[320];
+                ULONG       used = 0;
+                BOOL        ok   = TRUE;
+
+                for (i = 0; i < HTTPD_CONSOLE_PLACES; i++)
+                {
+                    ok = ok && hs_append(where, sizeof(where), &used,
+                                         "\n    ");
+                    ok = ok && hs_append(where, sizeof(where), &used,
+                                         httpd_console_places[i]);
+                }
+
+                if (!ok)
+                    where[0] = '\0';
+
+                tool_error("-C was given and there is no page to serve the "
+                           "console from.  Looked for:%s\n"
+                           "  CONSOLEPAGE=<file> names one somewhere else.",
+                           (LONG)where);
+                FreeArgs(rda);
+                return RETURN_ERROR;
+            }
+        }
+
+        (VOID)Close(page);
+        hs_copy(httpd_console_page, sizeof(httpd_console_page), named);
+
+        {
+            ULONG used = 0;
+            BOOL  fits;
+
+            httpd_console_gz[0] = '\0';
+
+            fits = hs_append(httpd_console_gz, sizeof(httpd_console_gz), &used,
+                             httpd_console_page);
+            fits = fits && hs_append(httpd_console_gz,
+                                     sizeof(httpd_console_gz), &used, ".gz");
+
+            if (!fits)
+                httpd_console_gz[0] = '\0';
+        }
+
+        tool_printf("Console page: %s\n", (LONG)httpd_console_page);
     }
 
     httpd_read_gmt_offset();
@@ -7513,6 +7979,42 @@ int main(int argc, char **argv)
         http_term_announce(httpd_root, dotted, port, HTTPD_TERM_URL);
     }
 
+    /*
+     * The screen, and the only cost -C has until somebody connects: three
+     * OpenLibrary() calls and one look at the Workbench screen.  Without -C
+     * not one of them happens.
+     *
+     * Here rather than beside the page search, for the reason http_term_init()
+     * is here: everything between the two has a failure path of its own, and
+     * the libraries must not be left open across any of them.
+     */
+    if (httpd_console_page[0] != '\0')
+    {
+        UWORD sw = 0, sh = 0, sd = 0;
+
+        if (!http_fb_open())
+        {
+            tool_error("-C cannot serve a screen: %s", (LONG)http_fb_fault());
+            http_term_shutdown();
+            (VOID)tool_sock_close(httpd_sb, lsock);
+            ami_free(httpd_info);
+            ami_free(httpd_fib2);
+            for (i = 0; i < httpd_conns; i++)
+                ami_free(httpd_conn[i].fib);
+            ami_free(httpd_conn);
+            CloseLibrary(httpd_sb);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+
+        http_fb_geometry(&sw, &sh, &sd);
+        tool_printf("The console is at http://%s:%ld%s  "
+                    "(the Workbench screen, %ldx%ld",
+                    (LONG)dotted, (LONG)port, (LONG)HTTPD_CONSOLE_URL,
+                    (LONG)sw, (LONG)sh);
+        tool_printf("x%ld, NO PASSWORD)\n", (LONG)sd);
+    }
+
     (VOID)Flush(Output());
 
     httpd_serve(lsock);
@@ -7525,6 +8027,12 @@ int main(int argc, char **argv)
             httpd_close(&httpd_conn[i]);
         ami_free(httpd_conn[i].fib);
     }
+
+    /* After the connections, so a session still running has already given its
+       buffers back and this is only the libraries.  AmigaOS reclaims nothing
+       at process exit: what is not given back here is gone until the machine
+       is restarted (docs/ALLOCATIONS.md). */
+    http_fb_close();
     ami_free(httpd_conn);
     ami_free(httpd_info);
     ami_free(httpd_fib2);

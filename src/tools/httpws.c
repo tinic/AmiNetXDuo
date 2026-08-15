@@ -582,3 +582,30 @@ unsigned long http_ws_close_frame(unsigned char *out, unsigned long outlen,
 
     return head + body;
 }
+
+/* --------------------------------------------------------- peer liveness --- */
+
+/* Half the budget, rounded up, so a timeout of 1 still leaves a whole second
+   to answer in rather than none. */
+static unsigned long ws_half(unsigned long timeout)
+{
+    return (timeout + 1UL) / 2UL;
+}
+
+int http_ws_live_stale(unsigned long progress, int pinged,
+                       unsigned long now, unsigned long timeout)
+{
+    if (timeout == 0UL || now < progress)
+        return 0;
+
+    return (pinged && now - progress >= ws_half(timeout)) ? 1 : 0;
+}
+
+int http_ws_live_ping_due(unsigned long progress, int pinged,
+                          unsigned long now, unsigned long timeout)
+{
+    if (timeout == 0UL || pinged || now < progress)
+        return 0;
+
+    return (now - progress >= ws_half(timeout)) ? 1 : 0;
+}

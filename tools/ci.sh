@@ -24,8 +24,9 @@
 #                ASan+UBSan with leaks fatal.  AMINETXDUO_SANITIZE=1 runs it,
 #                the way analyze is gated; CI sets it.
 #   cross        every build configuration, warnings fatal
-#   web          httpd's terminal page still matches the TypeScript it is
-#                generated from, and the vendored xterm.js is untouched
+#   web          httpd's two pages, the terminal's and the console's, still
+#                match the TypeScript they are generated from, and the
+#                vendored xterm.js is untouched
 #   analyze      GCC -fanalyzer over our own sources vs a triaged baseline
 #   conformance  build the bsdsocktest suite for m68k (running it needs tier 2)
 #   emulator     tier 2, boots FS-UAE, needs a ROM
@@ -151,11 +152,20 @@ CROSS_CONFIGS=(
 # if one is registered but not built, so a test added without touching this
 # list turns CI red rather than silently disappearing, which is what used to
 # happen when `ctest` reported "No tests were found" and nobody noticed.
+#
+# NOT ALL OF THEM ARE THE TEST.  rfbgen and rfbbench are named because
+# rfb_roundtrip RUNS them -- src/rfb/roundtrip.cmake generates the captures
+# with one and round-trips every frame of them through the other -- and a
+# target this list does not name does not exist when ctest starts.  It passed
+# in a working tree, where both were already built, and failed on every clean
+# configure; a test whose ingredients are built by something other than itself
+# belongs here with them.
 HOST_TEST_TARGETS=(test_config test_usergroup test_mbuf test_bpf test_httppath test_httpif test_httplock test_argtemplates test_fetchurl test_crypto68k test_crypto68k_25519 test_net68k_checksum test_net68k_rxverify
                    test_tcp_retries test_bcast_loopback test_tcp_source_connect test_tcp_rtt test_tcp_earlyretx test_tcp_rxflood test_tick_conv
                    test_dns_retry test_dns_status
                    test_sockopt_numbers test_tls_expiry test_tls_resume test_sana2_copy test_sana2_tx test_sana2_rx test_sana2_driver test_ipv6_ra test_ipv6_ptb
                    test_httpframe test_httpws test_tls_x509 test_ipv6_frag test_iperfwire test_netdev_mcaf test_netdev_ed test_netdev_cards test_netdev_macgen test_netdev_bus
+                   rfbwords rfbgen rfbbench
                    fuzz_config fuzz_bpf fuzz_dns fuzz_usergroup
                    fuzz_dhcp dhcp_lease_regression fuzz_tls_record fuzz_tls_x509 fuzz_httpframe)
 
@@ -180,7 +190,7 @@ esac
 #
 # Adding a test therefore turns CI red until this is raised.  That is the
 # maintenance the gate is made of, and it is one line.
-HOST_TESTS_EXPECTED=64
+HOST_TESTS_EXPECTED=66
 case "$(uname -m)" in
     x86_64|amd64) ;;
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 1)) ;;   # no test_inet
@@ -647,22 +657,28 @@ stage_conformance() {
 # -------------------------------------------------------------- the web ----
 
 stage_web() {
-    hr "httpd's terminal page"
+    hr "httpd's pages"
 
     #
-    # src/tools/web/shell.html is COMMITTED and the m68k build only copies
-    # it, so nothing about `cmake --build` needs node.  The price of that is
-    # that the file can drift from the TypeScript it was generated from, and a
-    # page a commit behind its sources is a page whose bug is already fixed in
-    # a source nobody rebuilt.  This is the check that catches it.
+    # src/tools/web/shell.html and src/tools/web/console.html are COMMITTED
+    # and the m68k build only copies them, so nothing about `cmake --build`
+    # needs node.  The price of that is that a file can drift from the
+    # TypeScript it was generated from, and a page a commit behind its sources
+    # is a page whose bug is already fixed in a source nobody rebuilt.  This is
+    # the check that catches it.
+    #
+    # BOTH pages, each by its own builder: they share no bundle -- the Shell's
+    # carries a vendored terminal and two webfonts, the console's carries a
+    # planar decoder -- and a stage that checked one of the two would let the
+    # other rot exactly as far.
     #
     # esbuild comes from npm and this may be a runner with no network, so a
     # missing node_modules is a SKIP with the command to fix it -- but a node
     # that is present and a page that does not match is a FAILURE.
     #
     if ! command -v node > /dev/null; then
-        skip "web: node is not installed, shell.html was not checked against\
- its sources (node tools/web/build.mjs --check)"
+        skip "web: node is not installed, shell.html and console.html were not\
+ checked against their sources (node tools/web/build.mjs --check)"
         return 0
     fi
 
@@ -670,7 +686,7 @@ stage_web() {
         if ! (cd tools/web && npm ci --silent --no-audit --no-fund) \
                 > "$BUILD/web-npm.log" 2>&1; then
             tail -5 "$BUILD/web-npm.log"
-            skip "web: npm could not install the bundler, shell.html was not\
+            skip "web: npm could not install the bundler, the pages were not\
  checked (cd tools/web && npm ci)"
             return 0
         fi
@@ -681,6 +697,15 @@ stage_web() {
     else
         cat "$BUILD/web.log"
         fail "web (shell.html does not match src/tools/web/client)"
+        return 1
+    fi
+
+    if node tools/web/build-console.mjs --check \
+            > "$BUILD/web-console.log" 2>&1; then
+        note "$(cat "$BUILD/web-console.log")"
+    else
+        cat "$BUILD/web-console.log"
+        fail "web (console.html does not match src/tools/web/client/console)"
         return 1
     fi
 

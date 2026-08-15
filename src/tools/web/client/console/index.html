@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<!--
+  TEMPLATE.  The file that ships is src/tools/web/console.html, which is this
+  with the stylesheet and the script inlined into it by
+  tools/web/build-console.mjs.  Editing the built file is editing something
+  that will be overwritten.
+
+  SPDX-License-Identifier: MIT
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>Workbench</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23aaaaaa'/%3E%3Crect x='1' y='1' width='14' height='4' fill='%236688bb'/%3E%3Crect x='3' y='7' width='10' height='7' fill='%23ffffff' stroke='%23000000'/%3E%3C/svg%3E">
+<style>/*STYLE*/</style>
+</head>
+<body>
+<div id="bar">
+  <span id="who"><b>Workbench</b><span id="src">no source</span></span>
+  <span id="tools">
+    <button id="open" type="button" title="or drop one anywhere on the page">Open .pfs</button>
+    <input id="file" type="file" accept=".pfs,application/octet-stream">
+    <input id="url" type="text" spellcheck="false" title="the screen socket">
+    <button id="live" type="button">Connect</button>
+    <button id="shot" type="button"
+            title="Save the screen as a PNG, at the aspect shown. Shift for the Amiga's own pixels.">Screenshot</button>
+  </span>
+  <span id="state"><i id="dot"></i><span id="word">idle</span></span>
+</div>
+
+<div id="stage">
+  <div id="box" tabindex="0" title="click to type at it"></div>
+</div>
+
+<div id="deck">
+  <button id="play" type="button" disabled>Play</button>
+  <button id="prev" type="button" disabled>&lt;</button>
+  <button id="next" type="button" disabled>&gt;</button>
+  <input id="scrub" type="range" min="0" max="0" value="0" disabled>
+  <span id="count">-</span>
+  <label id="rate">fps <input id="fps" type="number" min="1" max="60" value="25"></label>
+  <select id="aspect" title="how wide an Amiga pixel is">
+    <option value="auto">aspect</option>
+    <option value="square">1:1</option>
+  </select>
+  <select id="zoom">
+    <option value="fit">fit</option>
+    <option value="1">1x</option>
+    <option value="2">2x</option>
+    <option value="3">3x</option>
+  </select>
+</div>
+
+<div id="info">
+  <span id="geom">-</span>
+  <span id="perf"></span>
+  <div id="pal"></div>
+</div>
+
+<div id="log" title="what would go to the Amiga, if anything there read it"></div>
+
+<script type="module">/*SCRIPT*/</script>
+</body>
+</html>
