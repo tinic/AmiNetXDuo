@@ -258,6 +258,19 @@ startup_for() {
 FailAt 9999
 C:Wait 6
 EOF
+    # AMINETXDUO_CONSOLE_PROBE_CMD runs on the guest, after Workbench is up and
+    # before httpd, with its output on the serial port.  It exists so a question
+    # about the SCREEN the server is about to serve -- what depth it really
+    # opened, which BitMap layout it really got -- can be answered by the guest
+    # rather than assumed by the harness.  Unset by default and nothing is
+    # written when it is.
+    if [ -n "${AMINETXDUO_CONSOLE_PROBE_CMD:-}" ]; then
+        cp "$AMINETXDUO_CONSOLE_PROBE_BIN" "$HD/C/$(basename "$AMINETXDUO_CONSOLE_PROBE_BIN")"
+        cat >> "$HD/S/Startup-Sequence" <<EOF
+$AMINETXDUO_CONSOLE_PROBE_CMD
+EOF
+    fi
+
     cat >> "$HD/S/Startup-Sequence" <<EOF
 Run >DH0:httpd.txt <NIL: C:httpd DH0:Public $PORT -C CONSOLEPAGE DH0:Console/console.html -v
 EOF
