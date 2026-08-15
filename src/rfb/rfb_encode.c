@@ -1,11 +1,21 @@
 /* Frame encoder for the remote framebuffer.  Wire format is in the header.
  *
- * The shape of the thing: one pass over the source bitmap, tile by tile.  For
- * each tile the pass reads the new bytes once, XORs them against the shadow
- * copy of the previous frame, ORs the result into an accumulator and writes
- * the new bytes back to the shadow.  On the Amiga that single read is from
- * chip RAM and costs more than everything done with the bytes afterwards, so
- * nothing here reads the source twice -- except the scroll probe, which is
+ * The shape of the thing: one pass over the source bitmap, tile by tile, and
+ * the pass asks before it writes.  Each tile-plane is compared against the
+ * shadow copy of the previous frame and stops at the first word that
+ * disagrees; a tile nobody drew on is never written to at all.  That is the
+ * frame a live Workbench mostly serves -- 49 out of 50 of them change nothing.
+ *
+ * A tile that DID change is read once, into rawbuf, and that single copy is
+ * what the XOR is taken from, what the shadow is written from, and what goes
+ * on the wire.  The source is never read twice, which is what lets the Amiga
+ * caller point this at the live bitplanes with no drawing lock held: a torn
+ * read can produce a torn frame, and always could, but it cannot leave a
+ * shadow here that disagrees with the bytes the far end was sent.
+ *
+ * On the Amiga the source is chip RAM and the shadow is fast, so the compare
+ * is the expensive half and everything is arranged to do less of it.  The
+ * scroll probe is the one thing that reads the source separately, and it is
  * priced separately in rfb_stats.probe_bytes.
  *
  * SPDX-License-Identifier: MIT
