@@ -22,7 +22,9 @@ import sys
 import zlib
 
 HEADER = 16
-MAGIC = b"PFS1"
+MAGIC = b"PFS2"
+FRAMEREC = 12
+PTRHEAD = 16
 
 
 def say(k, v):
@@ -40,7 +42,7 @@ def parse(path):
     width, height = struct.unpack(">HH", blob[4:8])
     depth = blob[8]
     flags = blob[9]
-    bpr, frames, reserved = struct.unpack(">HHH", blob[10:16])
+    bpr, frames, pointers = struct.unpack(">HHH", blob[10:16])
 
     if magic != MAGIC:
         return None, "magic is %r, not %r" % (magic, MAGIC)
@@ -49,7 +51,26 @@ def parse(path):
 
     pal_bytes = 3 * (1 << depth)
     frame_bytes = depth * bpr * height
-    want = HEADER + pal_bytes + frames * frame_bytes
+    pixels = HEADER + pal_bytes + frames * frame_bytes
+    want = pixels + frames * FRAMEREC
+
+    # The pointer images are variable-length and self-sized, so the total is
+    # walked rather than computed.
+    at = want
+    for i in range(pointers):
+        if at + PTRHEAD > len(blob):
+            return None, "pointer image %d runs off the end" % (i + 1)
+        size = struct.unpack(">H", blob[at:at + 2])[0]
+        pw, ph = struct.unpack(">HH", blob[at + 2:at + 6])
+        pd = blob[at + 6]
+        if not 1 <= pd <= 8:
+            return None, "pointer image %d is %d planes deep" % (i + 1, pd)
+        need = PTRHEAD + 3 * ((1 << pd) - 1) + pd * (((pw + 15) // 16) * 2) * ph
+        if size != need:
+            return None, ("pointer image %d says %d bytes, its shape needs %d"
+                          % (i + 1, size, need))
+        at += need
+    want = at
 
     hdr = {
         "width": width,
@@ -58,7 +79,7 @@ def parse(path):
         "flags": flags,
         "bytesperrow": bpr,
         "frames": frames,
-        "reserved": reserved,
+        "pointers": pointers,
         "palette_bytes": pal_bytes,
         "frame_bytes": frame_bytes,
         "expect_bytes": want,
@@ -150,7 +171,7 @@ def main(argv):
     hdr, err = parse(path)
     if hdr is not None:
         for key in ("width", "height", "depth", "flags", "bytesperrow",
-                    "frames", "reserved", "palette_bytes", "frame_bytes",
+                    "frames", "pointers", "palette_bytes", "frame_bytes",
                     "expect_bytes", "actual_bytes"):
             say(key, hdr[key])
     if err is not None:

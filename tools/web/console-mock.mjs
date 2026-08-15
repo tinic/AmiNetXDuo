@@ -72,7 +72,7 @@ const stride = cap.stride;
    page agreeing with each other about a file neither of them wrote. */
 function readCapture(path) {
   const b = readFileSync(path);
-  if (b.toString("latin1", 0, 4) !== "PFS1") throw new Error(path + " is not a .pfs");
+  if (b.toString("latin1", 0, 4) !== "PFS2") throw new Error(path + " is not a .pfs");
   const s = {
     width: b.readUInt16BE(4),
     height: b.readUInt16BE(6),

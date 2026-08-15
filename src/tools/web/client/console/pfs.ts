@@ -12,18 +12,83 @@
  * that does not care, and a container that needs a decoder is a container
  * that can disagree with the wire format about what a frame is.
  *
- *   0   char magic[4] = "PFS1"
+ *   0   char magic[4] = "PFS2"
  *   4   u16  width
  *   6   u16  height
  *   8   u8   depth            1..8
  *   9   u8   flags
  *   10  u16  bytesPerRow      NOT width/8
  *   12  u16  frameCount
- *   14  u16  reserved
+ *   14  u16  pointerCount     pointer images at the end; 0 when there are none
  *   16  palette, 3*(1<<depth) bytes, RGB8
  *   ..  frameCount frames of depth*bytesPerRow*height bytes, plane-major
+ *   ..  frameCount frame records of 12 bytes:
+ *          0  u32  milliseconds from the first frame
+ *          4  s16  pointer x, in SCREEN pixels
+ *          6  s16  pointer y
+ *          8  u16  pointer image, 1-based; 0 is "no pointer on this frame"
+ *          10 u16  reserved
+ *   ..  pointerCount pointer images, each:
+ *          0  u16  bytes in this record, this field included
+ *          2  u16  width, in SPRITE pixels
+ *          4  u16  height, in rows
+ *          6  u8   depth, in planes
+ *          7  u8   xScale     screen pixels per sprite pixel: 1, 2 or 4
+ *          8  u8   yScale     screen rows per sprite row: 1 or 2
+ *          9  u8   reserved
+ *          10 s16  hotspot x, in sprite pixels
+ *          12 s16  hotspot y
+ *          14 u16  reserved
+ *          16 colours, 3 * ((1 << depth) - 1) bytes RGB8; index 0 is
+ *                 transparent and has no entry
+ *          ..  depth * ((width + 15) / 16 * 2) * height bytes, plane-major
  *
  * Big-endian throughout, because the machine that writes it is.
+ *
+ * WHY THERE ARE TIMESTAMPS AT ALL
+ *
+ *   A live recording has no frame rate.  An idle screen produces a frame every
+ *   few seconds and a window opening produces a burst, so replaying at any
+ *   fixed rate is a lie about what happened -- and the fps gadget the player
+ *   used to carry existed only because the file could not say.  Now it can,
+ *   and the gadget is gone.
+ *
+ * WHY THE POINTER IS IN HERE AT ALL
+ *
+ *   It is a hardware sprite and it is NOT in the bitmap, so a recording that
+ *   carries only the planes loses it completely -- and what somebody was
+ *   pointing at, clicking and dragging is most of what a screen recording is
+ *   for.
+ *
+ *   Position is per frame because it moves every frame.  The IMAGE is in a
+ *   table because it hardly ever changes: a busy pointer or an application's
+ *   own pointer is one more entry, not one more copy per frame.
+ *
+ *   The image is stored UNSCALED, in sprite pixels, with the scale beside it,
+ *   because a sprite pixel is a lores pixel whatever the screen is: on a hires
+ *   screen it covers two screen pixels across, on superhires four, and on an
+ *   interlaced screen two rows down.  Storing the truth and the rule means the
+ *   player and the live viewer scale from one source and cannot disagree.
+ *
+ *   Sprite colours are carried explicitly.  They come from the sprite's own
+ *   palette entries -- 17, 18 and 19 for the pointer on a standard screen --
+ *   and NOT from the screen's first four, so a reader that took them out of
+ *   the screen palette would draw the wrong colours.  Index 0 is transparent
+ *   and has no entry, which is why the table is one short.
+ *
+ * WHY THE TABLES ARE AT THE END
+ *
+ *   So a reader that only wants pixels is unchanged: the frames still begin at
+ *   a fixed offset and still sit at a constant stride, which is what every
+ *   decoder here indexes with and what lets a frame be a subarray rather than
+ *   a copy.  It is also what a STREAMING writer needs -- wbgrab writes frames
+ *   as it takes them and may stop early, and a table appended after the last
+ *   frame is trivially the right length, where one reserved up front would
+ *   have to be compacted.
+ *
+ *   Milliseconds, unsigned 32-bit, from the FIRST frame, so frame 0 is always
+ *   0 and a recording can run for 49 days.  Non-decreasing; two frames may
+ *   share a millisecond.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -37,6 +102,44 @@ import {
 
 export const PFS_HEADER = 16;
 
+/* One frame record: when, where the pointer was, and which image it was. */
+export const PFS_FRAMEREC = 12;
+
+/* The fixed part of a pointer image record, before its colours and bits. */
+export const PFS_PTRHEAD = 16;
+
+/* One pointer image, as the file carries it and as the viewer receives it
+   live: sprite pixels, with the rule for turning them into screen pixels. */
+export interface Pointer {
+  readonly width: number;         /* sprite pixels                       */
+  readonly height: number;        /* rows                                */
+  readonly depth: number;         /* planes                              */
+  readonly xScale: number;        /* screen pixels per sprite pixel      */
+  readonly yScale: number;        /* screen rows per sprite row          */
+  readonly hotX: number;          /* sprite pixels, from the left        */
+  readonly hotY: number;
+  /* 3 * ((1 << depth) - 1) bytes: index 0 is transparent and absent. */
+  readonly rgb: Uint8Array;
+  /* depth * ((width + 15) / 16 * 2) * height, plane-major. */
+  readonly bits: Uint8Array;
+}
+
+/* Where the pointer was on one frame.  `image` is 1-based into the capture's
+   pointer table; 0 means there was no pointer to draw. */
+export interface PointerAt {
+  readonly x: number;
+  readonly y: number;
+  readonly image: number;
+}
+
+export function pointerRowBytes(p: { width: number }): number {
+  return Math.floor((p.width + 15) / 16) * 2;
+}
+
+export function pointerBits(p: { width: number; height: number; depth: number }): number {
+  return pointerRowBytes(p) * p.height * p.depth;
+}
+
 export interface Capture {
   readonly screen: Screen;
   readonly flags: number;
@@ -47,6 +150,18 @@ export interface Capture {
   readonly palette: Uint32Array;
   readonly frames: Uint8Array;
   readonly stride: number;
+  /* Milliseconds from the first frame, one per frame.  frameCount long, and
+     times[0] is 0. */
+  readonly times: Uint32Array;
+  /* Where the pointer was on each frame.  frameCount long. */
+  readonly pointerAt: PointerAt[];
+  /* The images the frames reference, 1-based: pointers[0] is image 1. */
+  readonly pointers: Pointer[];
+}
+
+/* How long the whole recording ran, in milliseconds. */
+export function pfsDuration(c: Capture): number {
+  return c.frameCount === 0 ? 0 : c.times[c.frameCount - 1];
 }
 
 export function frameAt(c: Capture, i: number): number {
@@ -67,13 +182,20 @@ export const PFS_MAX_FRAMES = 0xffff;
  * on the screen and not a re-planarisation of what was drawn from it.
  */
 export function buildPfs(screen: Screen, rgb: Uint8Array,
-                         frames: readonly Uint8Array[]) {
+                         frames: readonly Uint8Array[],
+                         times: readonly number[],
+                         pointerAt: readonly PointerAt[] = [],
+                         pointers: readonly Pointer[] = []) {
   const fault = screenFault(screen);
   if (fault !== null) throw new Error("cannot write a .pfs with " + fault);
   if (frames.length === 0) throw new Error("no frames to write");
   if (frames.length > PFS_MAX_FRAMES) {
     throw new Error(frames.length + " frames; the header counts to " +
                     PFS_MAX_FRAMES);
+  }
+  if (times.length !== frames.length) {
+    throw new Error(times.length + " timestamps for " + frames.length +
+                    " frames");
   }
 
   const palBytes = 3 * (1 << screen.depth);
@@ -82,18 +204,36 @@ export function buildPfs(screen: Screen, rgb: Uint8Array,
                     screen.depth + " needs " + palBytes);
   }
 
+  for (const p of pointers) {
+    if (p.rgb.length < 3 * ((1 << p.depth) - 1)) {
+      throw new Error("a pointer image of depth " + p.depth + " needs " +
+                      3 * ((1 << p.depth) - 1) + " colour bytes");
+    }
+    if (p.bits.length !== pointerBits(p)) {
+      throw new Error("a pointer image is " + p.bits.length +
+                      " bytes, its shape needs " + pointerBits(p));
+    }
+  }
+
   const stride = frameBytes(screen);
-  const out = new Uint8Array(PFS_HEADER + palBytes + frames.length * stride);
+  let ptrBytes = 0;
+  for (const p of pointers) {
+    ptrBytes += PFS_PTRHEAD + 3 * ((1 << p.depth) - 1) + pointerBits(p);
+  }
+
+  const out = new Uint8Array(PFS_HEADER + palBytes +
+                             frames.length * (stride + PFS_FRAMEREC) +
+                             ptrBytes);
   const v = new DataView(out.buffer);
 
-  out[0] = 0x50; out[1] = 0x46; out[2] = 0x53; out[3] = 0x31;
+  out[0] = 0x50; out[1] = 0x46; out[2] = 0x53; out[3] = 0x32;
   v.setUint16(4, screen.width);
   v.setUint16(6, screen.height);
   out[8] = screen.depth;
   out[9] = 0;
   v.setUint16(10, screen.bytesPerRow);
   v.setUint16(12, frames.length);
-  v.setUint16(14, 0);
+  v.setUint16(14, pointers.length);
   out.set(rgb.subarray(0, palBytes), PFS_HEADER);
 
   let at = PFS_HEADER + palBytes;
@@ -106,7 +246,51 @@ export function buildPfs(screen: Screen, rgb: Uint8Array,
     at += stride;
   }
 
+  /* Rebased on the first, so frame 0 is 0 whatever clock the caller kept. */
+  const base = times[0];
+  let last = 0;
+  for (let i = 0; i < times.length; i++) {
+    let t = Math.round(times[i] - base);
+    if (!Number.isFinite(t) || t < last) t = last;      /* never goes back */
+    if (t > 0xffffffff) t = 0xffffffff;
+    last = t;
+
+    const p = pointerAt[i];
+    v.setUint32(at, t);
+    v.setInt16(at + 4, p === undefined ? 0 : clampS16(p.x));
+    v.setInt16(at + 6, p === undefined ? 0 : clampS16(p.y));
+    v.setUint16(at + 8, p === undefined ? 0 : p.image);
+    v.setUint16(at + 10, 0);
+    at += PFS_FRAMEREC;
+  }
+
+  for (const p of pointers) {
+    const cols = 3 * ((1 << p.depth) - 1);
+    v.setUint16(at, PFS_PTRHEAD + cols + pointerBits(p));
+    v.setUint16(at + 2, p.width);
+    v.setUint16(at + 4, p.height);
+    out[at + 6] = p.depth;
+    out[at + 7] = p.xScale;
+    out[at + 8] = p.yScale;
+    out[at + 9] = 0;
+    v.setInt16(at + 10, clampS16(p.hotX));
+    v.setInt16(at + 12, clampS16(p.hotY));
+    v.setUint16(at + 14, 0);
+    out.set(p.rgb.subarray(0, cols), at + PFS_PTRHEAD);
+    out.set(p.bits, at + PFS_PTRHEAD + cols);
+    at += PFS_PTRHEAD + cols + p.bits.length;
+  }
+
   return out;
+}
+
+/* A pointer that walked off the left of an overscan screen has a negative
+   position, and one on a 1280-wide screen has a big one; neither is a reason
+   to refuse a recording. */
+function clampS16(v: number): number {
+  const n = Math.round(v);
+  if (!Number.isFinite(n)) return 0;
+  return n < -32768 ? -32768 : n > 32767 ? 32767 : n;
 }
 
 /*
@@ -122,8 +306,8 @@ export function parsePfs(buf: ArrayBuffer): Capture {
   if (b.length < PFS_HEADER) {
     throw new Error("only " + b.length + " bytes, a .pfs header is 16");
   }
-  if (b[0] !== 0x50 || b[1] !== 0x46 || b[2] !== 0x53 || b[3] !== 0x31) {
-    throw new Error("not a .pfs: the first four bytes are not PFS1");
+  if (b[0] !== 0x50 || b[1] !== 0x46 || b[2] !== 0x53 || b[3] !== 0x32) {
+    throw new Error("not a .pfs: the first four bytes are not PFS2");
   }
 
   const v = new DataView(buf);
@@ -135,6 +319,7 @@ export function parsePfs(buf: ArrayBuffer): Capture {
   };
   const flags = b[9];
   const frameCount = v.getUint16(12);
+  const pointerCount = v.getUint16(14);
 
   const fault = screenFault(screen);
   if (fault !== null) throw new Error("the header says " + fault);
@@ -142,7 +327,8 @@ export function parsePfs(buf: ArrayBuffer): Capture {
 
   const palBytes = 3 * (1 << screen.depth);
   const stride = frameBytes(screen);
-  const want = PFS_HEADER + palBytes + frameCount * stride;
+  const pixels = PFS_HEADER + palBytes + frameCount * stride;
+  const want = pixels + frameCount * PFS_FRAMEREC;
 
   if (b.length < want) {
     /* Said as frames rather than bytes: a capture that was still being
@@ -156,13 +342,77 @@ export function parsePfs(buf: ArrayBuffer): Capture {
 
   const rgb = b.subarray(PFS_HEADER, PFS_HEADER + palBytes);
 
+  /* Read out rather than viewed in place: the tables are big-endian and a
+     Uint32Array view would read them in the host's order, which is the wrong
+     answer on every machine this runs on. */
+  const times = new Uint32Array(frameCount);
+  const pointerAt: PointerAt[] = [];
+  for (let i = 0; i < frameCount; i++) {
+    const at = pixels + i * PFS_FRAMEREC;
+    times[i] = v.getUint32(at);
+    pointerAt.push({
+      x: v.getInt16(at + 4),
+      y: v.getInt16(at + 6),
+      image: v.getUint16(at + 8),
+    });
+  }
+
+  const pointers: Pointer[] = [];
+  let at = want;
+  for (let i = 0; i < pointerCount; i++) {
+    if (at + PFS_PTRHEAD > b.length) {
+      throw new Error("pointer image " + (i + 1) + " of " + pointerCount +
+                      " runs off the end of the file");
+    }
+    const size = v.getUint16(at);
+    const p = {
+      width: v.getUint16(at + 2),
+      height: v.getUint16(at + 4),
+      depth: b[at + 6],
+      xScale: b[at + 7],
+      yScale: b[at + 8],
+      hotX: v.getInt16(at + 10),
+      hotY: v.getInt16(at + 12),
+      rgb: new Uint8Array(0),
+      bits: new Uint8Array(0),
+    };
+
+    if (p.depth < 1 || p.depth > 8) {
+      throw new Error("pointer image " + (i + 1) + " is " + p.depth +
+                      " planes deep; this reads 1 to 8");
+    }
+    const cols = 3 * ((1 << p.depth) - 1);
+    const need = PFS_PTRHEAD + cols + pointerBits(p);
+    if (size !== need || at + need > b.length) {
+      throw new Error("pointer image " + (i + 1) + " says " + size +
+                      " bytes, its shape needs " + need);
+    }
+
+    pointers.push({
+      ...p,
+      rgb: b.subarray(at + PFS_PTRHEAD, at + PFS_PTRHEAD + cols),
+      bits: b.subarray(at + PFS_PTRHEAD + cols, at + need),
+    });
+    at += need;
+  }
+
+  for (const q of pointerAt) {
+    if (q.image > pointers.length) {
+      throw new Error("a frame names pointer image " + q.image +
+                      " and there are " + pointers.length);
+    }
+  }
+
   return {
     screen,
     flags,
     frameCount,
     rgb,
     palette: palette32(rgb, screen.depth),
-    frames: b.subarray(PFS_HEADER + palBytes, want),
+    frames: b.subarray(PFS_HEADER + palBytes, pixels),
     stride,
+    times,
+    pointerAt,
+    pointers,
   };
 }

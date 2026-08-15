@@ -5,7 +5,7 @@
  *
  * FRAMES frames DELAY ticks apart into one .pfs file, big-endian throughout:
  *
- *      0  char  magic[4]     "PFS1"
+ *      0  char  magic[4]     "PFS2"
  *      4  UWORD width
  *      6  UWORD height
  *      8  UBYTE depth
@@ -15,10 +15,29 @@
  *     14  UWORD reserved     0
  *     16  UBYTE palette[3 << depth]     R,G,B
  *         frameCount x (depth * bytesPerRow * height), plane-major
+ *         frameCount x 12-byte frame records: ULONG milliseconds from the
+ *             first frame, WORD pointer x, WORD pointer y, UWORD pointer
+ *             image, UWORD reserved
+ *
+ * The full layout, including the pointer image table this does not write, is
+ * in src/tools/web/client/console/pfs.ts.  This is the capture half of a
+ * remote framebuffer and does not read the sprite: it writes the position it
+ * can see and image 0, which is "no pointer image in this file".
  *
  * bytesPerRow is the bitmap's, not width/8: a 640-wide screen has 80 and a
  * 644-wide one has 82, and the pixels past the width are real bytes in the
  * frame either way.
+ *
+ * THE TIMESTAMPS ARE MEASURED, NOT DERIVED FROM DELAY.  A grab of a 640x256x4
+ * screen costs real milliseconds and a machine under load costs more of them,
+ * so the interval between two frames is DELAY plus however long the grab took;
+ * a reader handed DELAY would be told a schedule rather than what happened.
+ * Each frame's time is read off DateStamp() as it is taken.
+ *
+ * The table goes at the END, after the last frame, which is what makes an
+ * early exit -- a Ctrl-C, a screen that changed shape -- come out right: the
+ * frames written are the frames counted and the table appended is exactly as
+ * long.  Reserving it up front would mean compacting the file afterwards.
  *
  * The screen is locked per frame, not for the session: this is the grab half
  * of a remote-framebuffer server, which runs for hours between grabs, and a
@@ -67,6 +86,7 @@ enum
 };
 
 #define PFS_HEADER_SIZE     16
+#define PFS_FRAMEREC        12
 #define PFS_MAX_DEPTH       8
 #define PFS_MAX_PALETTE     (3U * (1U << PFS_MAX_DEPTH))
 
@@ -103,6 +123,29 @@ static VOID put_be16(UBYTE *p, ULONG v)
 {
     p[0] = (UBYTE)((v >> 8) & 0xFF);
     p[1] = (UBYTE)(v & 0xFF);
+}
+
+static VOID put_be32(UBYTE *p, ULONG v)
+{
+    p[0] = (UBYTE)((v >> 24) & 0xFF);
+    p[1] = (UBYTE)((v >> 16) & 0xFF);
+    p[2] = (UBYTE)((v >> 8) & 0xFF);
+    p[3] = (UBYTE)(v & 0xFF);
+}
+
+/*
+ * Milliseconds since midnight, from the system clock.  DateStamp() counts
+ * minutes and ticks-in-the-minute, and a tick is a fiftieth; the caller takes
+ * differences, and a run that spans midnight has one frame's interval wrong on
+ * a file whose other thousand are right.
+ */
+static ULONG wb_millis(VOID)
+{
+    struct DateStamp ds;
+
+    (VOID)DateStamp(&ds);
+
+    return (ULONG)ds.ds_Minute * 60000UL + (ULONG)ds.ds_Tick * 20UL;
 }
 
 /* ---------------------------------------------------------------- library */
@@ -392,6 +435,8 @@ int main(int argc, char **argv)
     Geometry        g;
     const char     *path;
     UBYTE          *buf     = NULL;
+    ULONG          *times   = NULL;
+    ULONG           first_ms = 0;
     BPTR            fh      = 0;
     ULONG           frames  = DEFAULT_FRAMES;
     ULONG           delay   = DEFAULT_DELAY;
@@ -474,7 +519,7 @@ int main(int argc, char **argv)
 
     cm = sc->ViewPort.ColorMap;
 
-    header[0] = 'P'; header[1] = 'F'; header[2] = 'S'; header[3] = '1';
+    header[0] = 'P'; header[1] = 'F'; header[2] = 'S'; header[3] = '2';
     put_be16(header + 4, g.width);
     put_be16(header + 6, g.height);
     header[8] = (UBYTE)g.depth;
@@ -499,6 +544,17 @@ int main(int argc, char **argv)
         goto done;
     }
 
+    /* The timestamps, held until the frames are all written, because the table
+       goes after them.  Four bytes a frame, so the whole of the biggest file
+       this can write is 256 KB of them beside a frame buffer that is already
+       larger than that. */
+    times = (ULONG *)AllocVec(frames * sizeof(ULONG), MEMF_ANY);
+    if (times == NULL)
+    {
+        tool_error("no memory for %ld timestamps", (LONG)frames);
+        goto done;
+    }
+
     fh = Open((CONST_STRPTR)path, MODE_NEWFILE);
     if (fh == 0)
     {
@@ -512,6 +568,8 @@ int main(int argc, char **argv)
 
     while (written < frames)
     {
+        ULONG now;
+
         if (!grab_frame(&g, buf, &changed))
         {
             if (changed)
@@ -519,9 +577,20 @@ int main(int argc, char **argv)
             break;
         }
 
+        /* Read after the grab and before the write, so the number is when the
+           pixels were taken rather than when the disk finished with them. */
+        now = wb_millis();
+        if (written == 0)
+            first_ms = now;
+
         if (!write_all(fh, buf, g.frame_bytes))
             goto done;
 
+        /* Never backwards, so a run over midnight cannot produce a table a
+           reader has to second-guess. */
+        times[written] = (now >= first_ms) ? (now - first_ms)
+                                           : ((written > 0) ? times[written - 1]
+                                                            : 0UL);
         written++;
 
         if (written < frames && delay > 0 && tool_delay_ticks(delay))
@@ -540,6 +609,31 @@ int main(int argc, char **argv)
     if (written == 0)
         goto done;
 
+    /* The frame records, after the last frame.  Written in batches so a
+       hundred frames are not a hundred Write() calls. */
+    {
+        UBYTE be[PFS_FRAMEREC * 16];
+        ULONG done_ts = 0;
+
+        while (done_ts < written)
+        {
+            ULONG n = written - done_ts;
+            ULONG i;
+
+            if (n > 16UL)
+                n = 16UL;
+
+            memset(be, 0, (size_t)(n * PFS_FRAMEREC));
+            for (i = 0; i < n; i++)
+                put_be32(be + i * PFS_FRAMEREC, times[done_ts + i]);
+
+            if (!write_all(fh, be, n * PFS_FRAMEREC))
+                goto done;
+
+            done_ts += n;
+        }
+    }
+
     if (written != frames && !patch_frame_count(fh, (UWORD)written))
         goto done;
 
@@ -552,12 +646,16 @@ int main(int argc, char **argv)
     tool_printf("bytesperrow=%ld\n", (LONG)g.row_bytes);
     tool_printf("framebytes=%ld\n", (LONG)g.frame_bytes);
     tool_printf("frames=%ld\n", (LONG)written);
+    tool_printf("milliseconds=%ld\n", (LONG)times[written - 1]);
     tool_printf("filebytes=%ld\n",
-                (LONG)(header_bytes + g.frame_bytes * written));
+                (LONG)(header_bytes +
+                       (g.frame_bytes + PFS_FRAMEREC) * written));
 
 done:
     if (fh != 0)
         Close(fh);
+    if (times != NULL)
+        FreeVec(times);
     if (buf != NULL)
         FreeVec(buf);
     close_libraries();

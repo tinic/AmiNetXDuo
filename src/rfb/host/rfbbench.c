@@ -154,8 +154,8 @@ static int pfs_load(const char *path, pfs *s)
     size_t palette, want;
 
     if (!f) { perror(path); return -1; }
-    if (fread(hdr, 1, 16, f) != 16 || memcmp(hdr, "PFS1", 4) != 0) {
-        fprintf(stderr, "%s: not a PFS1 file\n", path); fclose(f); return -1;
+    if (fread(hdr, 1, 16, f) != 16 || memcmp(hdr, "PFS2", 4) != 0) {
+        fprintf(stderr, "%s: not a PFS2 file\n", path); fclose(f); return -1;
     }
     memset(s, 0, sizeof(*s));
     s->g.width = (rfb_u16)rd16(hdr + 4);

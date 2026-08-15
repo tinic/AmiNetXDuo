@@ -116,6 +116,28 @@
  */
 #define FB_RESYNC_FLOOR     50UL
 
+/*
+ * HOW LONG "THERE IS NO SCREEN" IS ALLOWED TO LAST.  Fiftieths.
+ *
+ * A RESOLUTION change closes the Workbench screen and opens a new one, and
+ * between the two Intuition's screen list is EMPTY.  With no other screen open
+ * -- no Shell window holding one, nothing else running -- that is a real
+ * moment with nothing to serve, and it used to end the session: "there are no
+ * screens left to show", on a machine that was perfectly well and about to
+ * show a bigger screen.  Reproduced first time by copying a lace prefs file
+ * over ENV:Sys/screenmode.prefs with the boot Shell ended; a DEPTH change does
+ * not do it, because Intuition rebuilds the bitmap without closing the screen.
+ *
+ * So an empty list is a moment to wait through, not an error.  Measured over
+ * eight resolution changes and two overscan changes, the gap is ONE OR TWO
+ * passes of this loop -- gn= counted 2 across two reopens -- which is tens of
+ * milliseconds.  Ten seconds is three orders of magnitude beyond that, and it
+ * is the same order as the session's own liveness timeout: a viewer never
+ * waits longer to find out the screen is gone for good than it would wait to
+ * find out its peer is dead.
+ */
+#define FB_GONE_GRACE       500UL
+
 struct GfxBase       *GfxBase;
 struct IntuitionBase *IntuitionBase;
 
@@ -211,6 +233,17 @@ static ULONG           fb_since_stat;
    in `fbstat` so a session that looks torn can be told apart from one that is
    dropping frames. */
 static ULONG           fb_torn;
+
+/*
+ * The screen list was empty on the last pass, and when it first was.  A
+ * screen being reopened in another resolution is the ordinary reason; see
+ * FB_GONE_GRACE.  `fb_gone_passes` is reported in `fbstat` as gn=, because
+ * "we sometimes lose the connection" is a report that needs a number behind
+ * it and this is the number.
+ */
+static UBYTE           fb_gone;
+static ULONG           fb_gone_at;
+static ULONG           fb_gone_passes;
 
 /* A `reset` arrived and the machine goes as soon as the close frame telling
    the viewer so has been handed to the socket.  See fb_reboot(). */
@@ -1531,6 +1564,9 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_encode_ticks = 0;
     fb_since_stat = 0;
     fb_torn       = 0;
+    fb_gone       = 0;
+    fb_gone_at    = 0;
+    fb_gone_passes = 0;
     fb_want_stat  = 0;
     fb_reset      = 0;
     /* A session opens with geom, pal and a full frame already queued, which
@@ -1768,15 +1804,15 @@ BOOL http_fb_slice(ULONG now)
     {
         /* An unrecognised word is ignored at the far end, which is what lets
            this go down the same channel without the viewer knowing it. */
-        static const char *const tags[5] = { "fbstat f=", " b=", " gt=", " et=",
-                                            " tn=" };
-        const ULONG values[5] = { fb_frames, fb_bytes, fb_grab_ticks,
-                                  fb_encode_ticks, fb_torn };
+        static const char *const tags[6] = { "fbstat f=", " b=", " gt=", " et=",
+                                            " tn=", " gn=" };
+        const ULONG values[6] = { fb_frames, fb_bytes, fb_grab_ticks,
+                                  fb_encode_ticks, fb_torn, fb_gone_passes };
         ULONG at = 0;
         ULONG f;
         ULONG i;
 
-        for (f = 0; f < 5UL; f++)
+        for (f = 0; f < 6UL; f++)
         {
             for (i = 0; tags[f][i] != '\0'; i++)
                 fb_tx[10 + at++] = (UBYTE)tags[f][i];
@@ -1823,8 +1859,30 @@ BOOL http_fb_slice(ULONG now)
         break;
 
     case FB_GRAB_GONE:
+        /*
+         * NO SCREEN THIS PASS, WHICH IS WHAT A RESOLUTION CHANGE LOOKS LIKE.
+         *
+         * The session is NOT ended and the viewer is told nothing: it stops
+         * receiving frames for as long as the gap lasts and then gets the geom
+         * that announces the screen that came back.  Ending it here is the
+         * defect this replaces -- a person changing the screen mode from the
+         * browser lost the browser, which is the one moment they cannot
+         * recover from by hand.
+         */
+        fb_gone_passes++;
+
+        if (!fb_gone)
+        {
+            fb_gone    = 1;
+            fb_gone_at = fb_ticks();
+            return TRUE;
+        }
+
+        if ((LONG)(fb_ticks() - fb_gone_at) < (LONG)FB_GONE_GRACE)
+            return TRUE;
+
         fb_close_saying(HTTP_WS_CLOSE_GOING,
-                        "there are no screens left to show");
+                        "there has been no screen to show for ten seconds");
         return TRUE;
 
     case FB_GRAB_VANISHED:
@@ -1841,7 +1899,13 @@ BOOL http_fb_slice(ULONG now)
          * now about a screen it is not being shown, so the buffers are retaken
          * at the new geometry and it is told again -- which is what stops a
          * frame going out that disagrees with the last geometry it was given.
+         *
+         * This is also how a session comes back from an empty screen list: the
+         * screen that reopens in the new resolution is a different shape, so
+         * the barrier that already existed is the one that carries it.
          */
+        fb_gone = 0;
+
         if (!fb_take_buffers(&seen))
         {
             fb_close_saying(HTTP_WS_CLOSE_GOING,
@@ -1854,6 +1918,28 @@ BOOL http_fb_slice(ULONG now)
     default:
         fb_close_saying(HTTP_WS_CLOSE_GOING,
                         "the front screen is not one this can read");
+        return TRUE;
+    }
+
+    /*
+     * A screen came back into an empty list at the SAME shape -- an overscan
+     * change that did not move the bitmap, or a reopen caught between two
+     * grabs.  Nothing above fires, because nothing about the geometry changed,
+     * and yet this is a different screen with a different bitmap: the shadow
+     * describes a picture that is not there any more.  So the barrier is
+     * raised by hand, which is the same three things fb_ask_resync() does and
+     * without its floor, because this is not a viewer asking twice.
+     *
+     * The frame just encoded is dropped.  It cost a pass, and the shadow it
+     * updated is zeroed on the line below, so the full frame that follows the
+     * geom is a delta from zero at both ends.
+     */
+    if (fb_gone)
+    {
+        fb_gone = 0;
+        fb_forget_shadow();
+        fb_want_geom = 1;
+        fb_want_pal  = 1;
         return TRUE;
     }
 
