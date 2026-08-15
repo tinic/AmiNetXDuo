@@ -226,6 +226,19 @@ function setPlaying(on: boolean): void {
   }
 }
 
+/*
+ * The transport gadgets belong to a capture.  A live session has no frame to
+ * step to and no end to scrub towards, so they are dead there rather than
+ * merely useless: leaving them lit invites a click that cannot do anything.
+ * Record is not one of them -- it is the gadget that works only when live.
+ */
+function setTransport(on: boolean): void {
+  playEl.disabled = !on;
+  prevEl.disabled = !on;
+  nextEl.disabled = !on;
+  scrubEl.disabled = !on;
+}
+
 function loadCapture(name: string, buf: ArrayBuffer): void {
   let c: Capture;
   try {
@@ -245,10 +258,7 @@ function loadCapture(name: string, buf: ArrayBuffer): void {
   showPalette(c.rgb, c.screen.depth);
 
   scrubEl.max = String(c.frameCount - 1);
-  scrubEl.disabled = c.frameCount < 2;
-  playEl.disabled = c.frameCount < 2;
-  prevEl.disabled = c.frameCount < 2;
-  nextEl.disabled = c.frameCount < 2;
+  setTransport(c.frameCount >= 2);
 
   srcEl.textContent = name;
   say("up", "capture, " + c.frameCount + " frames over " +
@@ -361,6 +371,8 @@ function heard(w: string): void {
       scratch = new Uint8Array(scratchBytes(g));
       expectSeq = -1;
       cap = null;
+      setPlaying(false);
+      setTransport(false);
       const rgb = greyPalette(g.screen.depth);
       liveRgb = rgb;
       view.setScreen(g.screen, palette32(rgb, g.screen.depth));
@@ -551,6 +563,12 @@ function connection(state: WireState, detail: string): void {
       detail && !up ? WORDS[state] + ": " + detail : WORDS[state]);
 
   liveEl.textContent = up || state === "connecting" ? "Disconnect" : "Connect";
+
+  /* Record takes what arrives on the wire, so it is dead without a session --
+     the mirror of the transport gadgets, which are dead with one. */
+  recEl.disabled = !up;
+  if (!up && rec !== null) recStop();
+
   if (up) {
     srcEl.textContent = urlEl.value;
     /* Cleared here rather than on the geom word: a reconnect that never gets
