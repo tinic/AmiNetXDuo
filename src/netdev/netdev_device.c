@@ -15,6 +15,7 @@
  */
 
 #include "netdev_internal.h"
+#include "netdev_macgen.h"
 #include "dp8390.h"
 
 #include "aminetxduo/version.h"
@@ -1085,6 +1086,124 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
     Enable();
 
     return 0;
+}
+
+/* --------------------------------------------------- machine fingerprint -- */
+
+/*
+ * WHAT THE MACHINE CAN BE ASKED, AND WHAT IT CANNOT.
+ *
+ * A card whose address PROM reads all-zero or all-ones needs an address from
+ * somewhere, and the requirement on it is not "unique" -- nothing here can
+ * promise that -- but "the same on every boot of this machine, and different
+ * from the next machine wherever the two machines differ".  What is reachable
+ * from a device's probe, which runs with exec.library and expansion.library
+ * open and nothing else:
+ *
+ *   TAKEN
+ *     the caller's salt         the card row, its window and its autoconfig
+ *                               serial: separates two units in one machine
+ *     ExecBase identity         AttnFlags (CPU/FPU/MMU), the Kickstart version
+ *                               and revision, and the E-clock (PAL vs NTSC)
+ *     MaxLocMem                 chip RAM size, which is an A600/A1200 fact and
+ *                               not a Zorro one
+ *     the memory list           each region's attributes and its bounds, which
+ *                               is where a trapdoor or PCMCIA-shadowing RAM
+ *                               expansion shows up.  mh_Free is NOT read: it
+ *                               moves with whatever is loaded.
+ *     every ConfigDev           manufacturer, product and SERIAL NUMBER, which
+ *                               is per-board and is the input Commodore's own
+ *                               convention uses for a MAC (lance.c:465)
+ *     the card's CIS            MANFID identifies the model, VERS_1 carries
+ *                               free-form strings that some cards use for a
+ *                               lot or serial number, and FUNCE is read for
+ *                               its LAN node ID before any of this runs
+ *
+ *   REJECTED
+ *     battclock / ReadEClock    not stable across boots, which is the one
+ *                               property that matters
+ *     AvailMem()                moves with what is loaded before the device is
+ *                               opened, so the address would move with it
+ *     the boot volume's root    the best per-INSTALL input there is, and it
+ *     block creation date       needs dos.library and a mounted, readable boot
+ *                               volume inside a device probe.  A SANA-II
+ *                               provider is loaded by whichever stack wants
+ *                               it, sometimes before a filesystem is up, and
+ *                               the one code path that has to work when
+ *                               nothing else does is not the place to add a
+ *                               DOS dependency and a bootstrap ordering rule.
+ *     CIS MANFID alone          it is the card MODEL.  Two people with the
+ *                               same D-Link get the same value.
+ *
+ * The honest limit: two stock A1200s with the same RAM, the same Kickstart and
+ * the same model of card derive the same address.  HARDWAREADDRESS in the
+ * interface config is the fix, and it is the fix for any other pair of cards
+ * that collide.
+ */
+static VOID nd_fp_put(UBYTE *buf, UWORD max, UWORD *n, ULONG v, UBYTE bytes)
+{
+    UBYTE i;
+
+    for (i = 0; i < bytes; i++)
+    {
+        if (*n >= max)
+            return;
+        buf[(*n)++] = (UBYTE)(v >> ((bytes - 1u - i) * 8u));
+    }
+}
+
+UWORD netdev_mac_fingerprint(UBYTE *buf, UWORD max, ULONG salt)
+{
+    UWORD n = 0;
+    UWORD i;
+
+    nd_fp_put(buf, max, &n, salt, 4);
+
+    if (SysBase != NULL)
+    {
+        struct MemHeader *mh;
+
+        nd_fp_put(buf, max, &n, (ULONG)SysBase->AttnFlags, 2);
+        nd_fp_put(buf, max, &n, (ULONG)SysBase->LibNode.lib_Version, 2);
+        nd_fp_put(buf, max, &n, (ULONG)SysBase->LibNode.lib_Revision, 2);
+        nd_fp_put(buf, max, &n, SysBase->ex_EClockFrequency, 4);
+        nd_fp_put(buf, max, &n, (ULONG)SysBase->MaxLocMem, 4);
+
+        /* Forbid(), not Disable(): the list is only rearranged by AddMemList
+           and by a task, and this runs at probe time where a Disable() would
+           be the heavier of the two for no gain. */
+        Forbid();
+        i = 0;
+        for (mh = (struct MemHeader *)SysBase->MemList.lh_Head;
+             mh->mh_Node.ln_Succ != NULL && i < 4; i++)
+        {
+            nd_fp_put(buf, max, &n, (ULONG)mh->mh_Attributes, 2);
+            nd_fp_put(buf, max, &n, (ULONG)(APTR)mh->mh_Lower, 4);
+            nd_fp_put(buf, max, &n, (ULONG)(APTR)mh->mh_Upper, 4);
+            mh = (struct MemHeader *)mh->mh_Node.ln_Succ;
+        }
+        Permit();
+    }
+
+    if (ExpansionBase != NULL)
+    {
+        struct ConfigDev *cd = NULL;
+
+        i = 0;
+        while ((cd = FindConfigDev(cd, -1, -1)) != NULL && i < 4)
+        {
+            nd_fp_put(buf, max, &n, (ULONG)cd->cd_Rom.er_Manufacturer, 2);
+            nd_fp_put(buf, max, &n, (ULONG)cd->cd_Rom.er_Product, 1);
+            nd_fp_put(buf, max, &n, cd->cd_Rom.er_SerialNumber, 4);
+            i++;
+        }
+    }
+
+    n = (UWORD)(n + netdev_pcmcia_fingerprint(buf + n, (UWORD)(max - n)));
+
+    nd_tracex("anx: fp bytes ", (ULONG)n);
+
+    return n;
 }
 
 /* ----------------------------------------------------------------- probe -- */

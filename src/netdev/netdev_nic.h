@@ -184,6 +184,16 @@ struct NetdevNic
     ULONG               collisions;
     ULONG               resets;
 
+    /*
+     * What had to be done to the station address before the chip could be
+     * given one.  All three are 0 or 1 and all three are reported: a driver
+     * that quietly repaired or invented a hardware address is exactly the
+     * thing that costs an afternoon later.
+     */
+    ULONG               mac_group_fix;  /* group bit cleared out of the PROM  */
+    ULONG               mac_from_cis;   /* PROM blank, address taken from CIS */
+    ULONG               mac_derived;    /* PROM blank, address derived here   */
+
     /* One frame at a time comes out of the ring, into here. */
     ULONG               rxbuf[(NETDEV_RXBUF_MAX + 7) / 4];
 };

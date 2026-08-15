@@ -24,16 +24,19 @@
  *   then 0xA20300 reads as bus noise, which is the failure mode this file
  *   exists to avoid reporting as "no card fitted".
  *
- * The station address is NOT taken from the CIS.  The chip core reads it from
+ * The station address comes from the chip, not from the CIS: the core reads
  * the RTL8019's own PROM through remote DMA, the same as every other NE2000
  * row, and a card whose CIS disagreed with its chip would be the CIS that was
- * wrong.
+ * wrong.  The CIS is read for one only when the PROM has nothing in it -- see
+ * pc_cis_read() below -- and its bytes are kept either way, as fingerprint
+ * material for netdev_macgen.c.
  *
  * SPDX-License-Identifier: MIT
  */
 
 #include "netdev_internal.h"
 #include "netdev_cards.h"
+#include "netdev_macgen.h"
 
 #include <exec/types.h>
 #include <exec/nodes.h>
@@ -165,24 +168,22 @@ static VOID pc_trace(const char *s, ULONG v)
 #define PC_ATTR_STRIDE      2
 
 /* Card Information Structure tuples, PC Card standard, release 2. */
-#define CISTPL_FUNCID       0x21
-#define CISTPL_CFTABLE      0x1b
+#define CISTPL_VERS_1       0x15
 #define CISTPL_CONFIG       0x1a
+#define CISTPL_CFTABLE      0x1b
+#define CISTPL_MANFID       0x20
+#define CISTPL_FUNCID       0x21
+#define CISTPL_FUNCE        0x22
 #define CIS_FUNC_LAN        6
+
+/* CISTPL_FUNCE subtuples for function 6.  0x04 is the one that carries the
+   card's assigned station address. */
+#define CIS_FUNCE_LAN_NODE_ID   0x04
 
 /* Configuration Option Register, offset from the config base the CISTPL_CONFIG
    tuple gives.  Bit 6 is the level-mode interrupt select every LAN card wants. */
 #define PC_COR_OFF          0
 #define PC_COR_LEVEL_IRQ    0x40
-
-/*
- * A tuple, copied out of attribute memory by card.resource.  The buffer is
- * the largest a tuple can be plus its two header bytes.
- */
-static BOOL pc_tuple(struct CardHandle *h, UBYTE code, UBYTE *buf, UWORD len)
-{
-    return pc_copy_tuple(h, buf, (ULONG)code, (ULONG)len);
-}
 
 /*
  * Is a DP8390 decoding at the register base?
@@ -203,7 +204,96 @@ static BOOL pc_chip_answers(const NetdevCard *card)
     v   = *cr;
     pc_trace("pc: cr ", (ULONG)v);
 
-    return (BOOL)(v == 0x21);
+    /*
+     * THE START BIT IS MASKED OUT OF THE COMPARISON.  Some NE2000 clones come
+     * out of reset with CR bit 1 stuck set and read back 0x23 where the
+     * datasheet says 0x21 -- cnet.device masks DSCM_START out of exactly this
+     * comparison (cnetdevice.asm:3611-3615) and names "a buggy chip in the
+     * Netgear FA411 (and maybe others)".  Demanding 0x21 exactly rejects
+     * those cards as an empty slot.
+     *
+     * It does not weaken what this is deciding.  The float case is the one
+     * that has to keep failing and it does: an unconfigured or absent card
+     * reads 0xff, and 0xff with bit 1 masked off is 0xfd, not 0x21.  An
+     * address nothing decodes at all reads 0x00, also not 0x21.
+     */
+    return (BOOL)((v & (UBYTE)~0x02u) == 0x21);
+}
+
+/*
+ * THE CIS, KEPT FOR TWO THINGS NEITHER OF WHICH IS PROBING.
+ *
+ * A PCMCIA NE2000 clone whose address PROM is blank often still knows its own
+ * address: the PC Card standard puts it in CISTPL_FUNCE subtuple 4 for a LAN
+ * function, and a card built for a PC driver that reads the CIS has no reason
+ * to program the PROM as well.  That address is preferred over anything
+ * derived, because it is the address the card was assigned.
+ *
+ * WHAT CANNOT BE DONE HERE.  card.resource's CopyTuple() returns the FIRST
+ * tuple with a given code, and a LAN card emits several CISTPL_FUNCE tuples
+ * -- technology, speed, media, node ID, connector -- in whatever order its
+ * author chose.  If the first one is not the node ID this finds nothing and
+ * says so; walking the whole chain is the CIS walk that belongs with the
+ * CFTABLE walk, and neither is here yet.
+ *
+ * Everything read is also kept as fingerprint bytes.  MANFID is the card
+ * model and separates two models, not two cards; VERS_1 is free-form strings
+ * and some cards put a lot or serial number in the third one, which is the
+ * only genuinely per-card input a CIS reliably offers.
+ */
+static UBYTE pc_cis[80];
+static UWORD pc_cis_len;
+static UBYTE pc_node_id[NETDEV_ADDR_LEN];
+static BOOL  pc_have_node_id;
+
+static VOID pc_cis_keep(const UBYTE *buf, UWORD len)
+{
+    UWORD i;
+
+    for (i = 0; i < len && pc_cis_len < (UWORD)sizeof(pc_cis); i++)
+        pc_cis[pc_cis_len++] = buf[i];
+}
+
+/* Read one tuple, keep it for the fingerprint, and hand it back. */
+static BOOL pc_cis_read(struct CardHandle *h, UBYTE code, UBYTE *buf, UWORD len)
+{
+    UWORD keep;
+
+    if (!pc_copy_tuple(h, buf, (ULONG)code, (ULONG)len))
+        return FALSE;
+
+    /* buf[1] is TPL_LINK, the body length; the two header bytes are not
+       fingerprint material -- the code is a constant and the length follows
+       from the body. */
+    keep = (UWORD)buf[1];
+    if (keep > (UWORD)(len - 2u))
+        keep = (UWORD)(len - 2u);
+    pc_cis_keep(buf + 2, keep);
+
+    return TRUE;
+}
+
+UWORD netdev_pcmcia_fingerprint(UBYTE *buf, UWORD max)
+{
+    UWORD i;
+
+    for (i = 0; i < pc_cis_len && i < max; i++)
+        buf[i] = pc_cis[i];
+
+    return i;
+}
+
+BOOL netdev_mac_cis_node_id(UBYTE *mac)
+{
+    UWORD i;
+
+    if (!pc_have_node_id)
+        return FALSE;
+
+    for (i = 0; i < NETDEV_ADDR_LEN; i++)
+        mac[i] = pc_node_id[i];
+
+    return TRUE;
 }
 
 /*
@@ -291,6 +381,11 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
             return NULL;        /* no slot on this machine */
     }
 
+    /* A second claim -- a card taken out and another put in -- must not read
+       the first card's CIS. */
+    pc_cis_len      = 0;
+    pc_have_node_id = FALSE;
+
     pc_removed.is_Node.ln_Type = NT_INTERRUPT;
     pc_removed.is_Node.ln_Pri  = 0;
     pc_removed.is_Node.ln_Name = (char *)"anxnet.device";
@@ -360,7 +455,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
      * CISTPL_CFTABLE_ENTRY the value, and neither can be guessed.  Their
      * absence stays a rejection.
      */
-    if (!pc_tuple(handle, CISTPL_FUNCID, buf, sizeof(buf)))
+    if (!pc_cis_read(handle, CISTPL_FUNCID, buf, sizeof(buf)))
     {
         pc_trace("pc: no funcid, assume lan ", 0);
     }
@@ -374,10 +469,38 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
         }
     }
 
+    /*
+     * The identity tuples, read for the fingerprint and for the node ID.
+     * Neither is required and neither can fail the claim: a card that does
+     * not carry them is a card whose address comes from its PROM, which is
+     * every card that works today.
+     */
+    if (pc_cis_read(handle, CISTPL_MANFID, buf, sizeof(buf)))
+        pc_trace("pc: manfid ", ((ULONG)buf[3] << 8) | (ULONG)buf[2]);
+    (VOID)pc_cis_read(handle, CISTPL_VERS_1, buf, sizeof(buf));
+
+    if (pc_cis_read(handle, CISTPL_FUNCE, buf, sizeof(buf)))
+    {
+        pc_trace("pc: funce ", (ULONG)buf[2]);
+        if (buf[2] == CIS_FUNCE_LAN_NODE_ID &&
+            buf[3] == (UBYTE)NETDEV_ADDR_LEN)
+        {
+            UWORD i;
+
+            for (i = 0; i < NETDEV_ADDR_LEN; i++)
+                pc_node_id[i] = buf[4 + i];
+            pc_have_node_id = netdev_mac_usable(pc_node_id);
+            pc_trace("pc: cis node id ", ((ULONG)pc_node_id[2] << 24) |
+                                         ((ULONG)pc_node_id[3] << 16) |
+                                         ((ULONG)pc_node_id[4] << 8) |
+                                         (ULONG)pc_node_id[5]);
+        }
+    }
+
     /* CISTPL_CONFIG carries the configuration register base, in the card's
        own attribute address space.  TPCC_SZ says how many bytes of base
        follow it; the low two bits are that count minus one. */
-    if (!pc_tuple(handle, CISTPL_CONFIG, buf, sizeof(buf)))
+    if (!pc_cis_read(handle, CISTPL_CONFIG, buf, sizeof(buf)))
     {
         pc_trace("pc: no config tuple ", 0);
         pc_give_up(handle);
@@ -396,7 +519,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
        low six bits.  The first entry is the one to take: a LAN card's first
        entry is its I/O configuration. */
     pc_trace("pc: cfgbase ", cfg_base);
-    if (!pc_tuple(handle, CISTPL_CFTABLE, buf, sizeof(buf)))
+    if (!pc_cis_read(handle, CISTPL_CFTABLE, buf, sizeof(buf)))
     {
         pc_trace("pc: no cftable ", 0);
         pc_give_up(handle);

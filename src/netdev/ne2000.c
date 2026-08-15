@@ -66,10 +66,18 @@
 #include "netdev_nic.h"
 #include "dp8390.h"
 #include "netdev_bsdtypes.h"
+#include "netdev_macgen.h"
 #include "dp8390reg.h"
 #include "ne2000reg.h"
 
 #define AX88190_NODEID_OFFSET   0x400
+
+#ifdef NETDEV_TRACE
+extern VOID netdev_trace_val(const char *tag, ULONG v);
+#define NE_TRACE(t, v)  netdev_trace_val((t), (ULONG)(v))
+#else
+#define NE_TRACE(t, v)  ((VOID)0)
+#endif
 
 /* ------------------------------------------------------------- plumbing --- */
 
@@ -307,6 +315,49 @@ static UWORD ne2000_write_buf(NetdevNic *nic, const UBYTE *frame, UWORD len,
 static const UBYTE ne_test_pattern[32] = "THIS is A memory TEST pattern";
 
 /*
+ * Could this bus need cnet16's word reads at all?  Mirrors what
+ * netdev_bus_set_getodd() refuses, and is asked FIRST so that no card whose
+ * registers are plain adjacent bytes has its detection sequence changed by
+ * any of this.  Only the PCMCIA row is a split stride-1 file.
+ */
+static BOOL ne2000_odd_window(const NetdevNic *nic)
+{
+    return (BOOL)(nic->bus.odd != NULL && nic->bus.regmap == NULL &&
+                  nic->bus.stride == 1u);
+}
+
+/*
+ * Do odd-numbered registers read correctly the way they are being read now?
+ *
+ * TWO TESTS, because neither one alone is enough.
+ *
+ *   ISR after a reset has ED_ISR_RST set.  That is the value NetBSD checks,
+ *   and it is why this is the right point in the sequence -- but a mis-decoded
+ *   read very often returns 0xff, which has that bit set, so on its own it
+ *   passes on exactly the card this is looking for.
+ *
+ *   BNRY is register 3, odd, and read/write, and the ring is not programmed
+ *   until dp8390_config(), so its value here is nobody's.  Two patterns, one
+ *   the complement of the other, so neither a stuck-high nor a stuck-low bus
+ *   can round-trip both.
+ *
+ * The chip is in page 0 and stopped, which is where the caller left it.
+ */
+static BOOL ne2000_odd_reads(NetdevNic *nic)
+{
+    if ((NIC_GET(nic, ED_P0_ISR) & ED_ISR_RST) != ED_ISR_RST)
+        return FALSE;
+
+    NIC_PUT(nic, ED_P0_BNRY, 0x5a);
+    if (NIC_GET(nic, ED_P0_BNRY) != 0x5a)
+        return FALSE;
+
+    NIC_PUT(nic, ED_P0_BNRY, 0xa5);
+
+    return (BOOL)(NIC_GET(nic, ED_P0_BNRY) == 0xa5);
+}
+
+/*
  * NetBSD's ne2000_detect, minus the NE1000 arm: no card in this family has an
  * 8-bit buffer, and the byte-mode write it uses to find one is invasive.
  * TRUE means a DS8390 answered and its 16 KB of buffer reads back.
@@ -325,14 +376,68 @@ static BOOL ne2000_detect(NetdevNic *nic)
     NIC_PUT(nic, ED_P0_CR, ED_CR_RD2 | ED_CR_PAGE_0 | ED_CR_STP);
     ne_delay(nic, 5000);
 
+    /*
+     * ED_CR_STA IS NOT IN THE MASK, and NetBSD's is the only version of this
+     * comparison that has it there.  Some NE2000 clones come out of reset
+     * with CR bit 1 stuck set and read back 0x23 where the datasheet says
+     * 0x21; cnet.device masks DSCM_START out of its own copy of this test
+     * (cnetdevice.asm:3611-3615) for "buggy chips" and names the Netgear
+     * FA411.  With the bit demanded clear those cards fail detection and the
+     * driver reports an empty slot.
+     *
+     * The case this must keep rejecting is a window with nothing behind it,
+     * and it does: a floating bus reads 0xff, which has TXP set and fails the
+     * comparison whether STA is masked or not.
+     */
     tmp = NIC_GET(nic, ED_P0_CR);
-    if ((tmp & (ED_CR_RD2 | ED_CR_TXP | ED_CR_STA | ED_CR_STP)) !=
+    if ((tmp & (ED_CR_RD2 | ED_CR_TXP | ED_CR_STP)) !=
         (ED_CR_RD2 | ED_CR_STP))
         return FALSE;
 
-    tmp = NIC_GET(nic, ED_P0_ISR);
-    if ((tmp & ED_ISR_RST) != ED_ISR_RST)
-        return FALSE;
+    /*
+     * THE CNET16 PROBE, AND IT IS A PROBE RATHER THAN A SECOND BINARY.
+     *
+     * A Fast-Ethernet NE2000 clone that asserts -IOIS16 unconditionally
+     * decodes 16-bit I/O cycles and nothing else, so a BYTE read of an ODD
+     * register returns bus noise.  Every ISR poll, CR readback and CURR/BNRY
+     * ring pointer this driver makes is an odd register, so the symptom is a
+     * card that attaches and receives nothing.  cnet answers this with a
+     * separate cnet16.device (cnetdevice.asm:551-556, naming the Netgear
+     * FA411 and the CNet SinglePoint 10/100) and leaves the user to work out
+     * which of the two their card needs.
+     *
+     * CR, read just above, is register 0 and EVEN: it answers on such a card
+     * and cannot tell one apart.  The first odd register touched is where the
+     * question has to be asked, and if it fails the word path is turned on
+     * and it is asked again.  Both answers are load-bearing: on a card that
+     * does not need this the first call succeeds and nothing changes, and on
+     * a window with no chip behind it both calls fail and the card is
+     * rejected as before.
+     *
+     * EVERY OTHER CARD KEEPS NETBSD'S TEST, unchanged, byte for byte.  A
+     * Zorro board's registers are adjacent bytes at a stride and cannot need
+     * any of this, and giving them a new way to fail detection to buy nothing
+     * is not a trade worth making.
+     */
+    if (!ne2000_odd_window(nic))
+    {
+        tmp = NIC_GET(nic, ED_P0_ISR);
+        if ((tmp & ED_ISR_RST) != ED_ISR_RST)
+            return FALSE;
+    }
+    else if (!ne2000_odd_reads(nic))
+    {
+        if (!netdev_bus_set_getodd(&nic->bus))
+            return FALSE;
+
+        NE_TRACE("ne: trying cnet16 odd reads ", 0);
+        if (!ne2000_odd_reads(nic))
+        {
+            nic->bus.getodd = 0;
+            return FALSE;
+        }
+        NE_TRACE("ne: odd registers read as words ", 1);
+    }
 
     NIC_PUT(nic, ED_P0_CR, ED_CR_RD2 | ED_CR_PAGE_0 | ED_CR_STA);
 
@@ -521,6 +626,71 @@ static LONG ne2000_attach(NetdevNic *nic)
     {
         for (i = 0; i < NETDEV_ADDR_LEN; i++)
             nic->factory[i] = romdata[i * 2];
+    }
+
+    /*
+     * CLEAR THE GROUP BIT IN THE ROM ADDRESS.
+     *
+     * The D-Link DFE-670TXD's PROM reads 01:D4:FF:03:00:20.  Programmed into
+     * PAR0..5 as it stands, the DP8390 does not match its own unicast address
+     * -- the comparator treats bit 0 of octet 0 as the group bit -- and every
+     * frame the card transmits carries a multicast source address, which some
+     * switches drop and every receiver mis-learns.  cnet.device clears the bit
+     * unconditionally and warns (cnetdevice.asm:3666-3672); this is the same
+     * fix and it is a no-op on every card whose PROM is right.
+     */
+    if ((nic->factory[0] & 1u) != 0)
+    {
+        nic->factory[0] &= (UBYTE)~1u;
+        nic->mac_group_fix++;
+        NE_TRACE("ne: rom group bit cleared ", (ULONG)nic->factory[0]);
+    }
+
+    /*
+     * AND IF THERE IS NO ADDRESS IN THE PROM AT ALL.
+     *
+     * All-zero and all-ones are both "the PROM is not answering" -- ed.c has
+     * rejected them since it was written (ed.c:406) and this path never
+     * tested for them, so such a card enumerated a unit that came online and
+     * was never delivered a frame.  Rejecting it is one answer; it is not the
+     * useful one, because a PCMCIA clone with a blank PROM is a card that
+     * works perfectly once it has an address.
+     *
+     * So: the card's CIS first, which is where the PC Card standard puts a
+     * LAN address and where a card built for a CIS-reading PC driver keeps
+     * it, and a derived locally-administered address after that.  NOT
+     * cnet.device's hardcoded 00:00:12:34:56:78 (cnetdevice.asm:5445-5447),
+     * whose own comment is "replace this with your card's address!": two
+     * Amigas running it on one segment answer each other's ARP.
+     */
+    if (!netdev_mac_usable(nic->factory))
+    {
+        NE_TRACE("ne: prom has no address ", 0);
+
+        if (netdev_mac_cis_node_id(nic->factory))
+        {
+            nic->mac_from_cis++;
+        }
+        else
+        {
+            UBYTE fp[NETDEV_MAC_FP_MAX];
+            UWORD n;
+            ULONG salt = nic->serial ^
+                         ((ULONG)nic->card->manid << 16) ^
+                         (ULONG)nic->card->prodid ^
+                         (ULONG)(APTR)nic->board;
+
+            n = netdev_mac_fingerprint(fp, (UWORD)sizeof(fp), salt);
+            netdev_mac_derive(fp, n, nic->factory);
+            nic->mac_derived++;
+        }
+
+        NE_TRACE("ne: address now ", ((ULONG)nic->factory[2] << 24) |
+                                     ((ULONG)nic->factory[3] << 16) |
+                                     ((ULONG)nic->factory[4] << 8) |
+                                     (ULONG)nic->factory[5]);
+        NE_TRACE("ne: address top ", ((ULONG)nic->factory[0] << 8) |
+                                     (ULONG)nic->factory[1]);
     }
 
     for (i = 0; i < NETDEV_ADDR_LEN; i++)

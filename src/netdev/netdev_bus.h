@@ -84,6 +84,31 @@ struct NetdevBus
     UBYTE           shift;      /* log2(stride); 1, 2 and 4 are the only ones */
     UBYTE           dmode;      /* NETDEV_DMODE_*, set by the probe */
 
+    /*
+     * READ ODD REGISTERS AS THE LOW HALF OF A WORD, cnet16's GETODD.
+     *
+     * A Fast-Ethernet NE2000 clone that asserts -IOIS16 unconditionally
+     * decodes 16-bit I/O cycles and nothing else, so a BYTE read of an odd
+     * register returns whatever the bus felt like: the CR readback, the ISR
+     * polls and the CURR/BNRY ring pointers are all odd registers, and all of
+     * them come back wrong.  cnet ships a second binary for this
+     * (cnetdevice.asm:551-556, "Netgear FA411, CNet SinglePoint 10/100"),
+     * which makes the user diagnose their own card; this is set by a probe
+     * instead, in ne2000_detect().
+     *
+     * IT IS NOT A 16-BIT DATA MODE.  DSDC_WTS is set unconditionally in both
+     * of cnet's binaries and the data port is 16 bits wide either way; what
+     * changes is CONTROL register reads and nothing else.  So it cannot be
+     * dmode, which the data-port probe measures and S2_GETSPECIALSTATS
+     * reports.  Nor can it be `odd`, whose non-NULL already means "a second
+     * window exists" -- and which must STAY set alongside this, because
+     * writes are unaffected and still go byte-wide into that window.
+     *
+     * The arithmetic below is only valid at stride 1; netdev_bus_set_getodd()
+     * refuses anything else.
+     */
+    UBYTE           getodd;
+
     const struct NetdevBusOps *ops;
 };
 
@@ -98,6 +123,14 @@ VOID netdev_bus_split(NetdevBus *bus, APTR odd);
 
 /* Call after setup for a card whose register file is not evenly spaced. */
 VOID netdev_bus_regmap(NetdevBus *bus, const ULONG *map, APTR data_port);
+
+/*
+ * Turn on the word-read path for odd registers.  FALSE, and nothing changed,
+ * on a bus where the arithmetic does not hold: it reads the word at reg-1 out
+ * of the EVEN window, which is only the same register pair when consecutive
+ * indices are one byte apart and the file is not a scatter table.
+ */
+BOOL netdev_bus_set_getodd(NetdevBus *bus);
 
 /*
  * Promote to NETDEV_DMODE_LONG only if the wide window really is the same
@@ -138,9 +171,30 @@ static inline volatile UBYTE *netdev_bus_at(const NetdevBus *bus, UWORD reg)
     return &bus->nic[(ULONG)reg << bus->shift];
 }
 
+/*
+ * GETODD, and why it is here rather than inside netdev_bus_at().
+ *
+ * netdev_bus_at() returns a UBYTE *, and this is a WORD access narrowed
+ * afterwards -- there is no address it could return that would make a byte
+ * load do the right thing.  So the two READ accessors branch ahead of it, and
+ * the two WRITE accessors do not branch at all: cnet's trick is read-only and
+ * a byte write to the odd window is what the card wants.
+ *
+ * The word comes out of the EVEN window at reg-1, and the odd register is its
+ * LOW half -- a 68k `move.w` loads the even address into the high byte, so
+ * casting the word to UBYTE is the byte at reg.  That is cnet's GETODD
+ * exactly: `move.w reg-odd-1+even,-(sp) / move.b 1(sp),d`.
+ *
+ * The burst functions are untouched: they address bus->asic, which is
+ * register 16 and even.
+ */
 static inline UBYTE netdev_bus_r8(const NetdevBus *bus, UWORD reg)
 {
     NETDEV_BUS_COUNT();
+    if (bus->getodd != 0 && bus->regmap == NULL && (reg & 1) != 0)
+        return (UBYTE)*(volatile UWORD *)
+                       &bus->nic[(ULONG)(reg & ~1u) << bus->shift];
+
     return *netdev_bus_at(bus, reg);
 }
 
@@ -167,8 +221,14 @@ static inline VOID netdev_bus_w8(const NetdevBus *bus, UWORD reg, UBYTE val)
  */
 static inline UBYTE netdev_bus_ra8(const NetdevBus *bus, UWORD reg)
 {
+    UWORD whole = (UWORD)(16u + (reg & 15u));
+
     NETDEV_BUS_COUNT();
-    return *netdev_bus_at(bus, (UWORD)(16u + (reg & 15u)));
+    if (bus->getodd != 0 && bus->regmap == NULL && (whole & 1) != 0)
+        return (UBYTE)*(volatile UWORD *)
+                       &bus->nic[(ULONG)(whole & ~1u) << bus->shift];
+
+    return *netdev_bus_at(bus, whole);
 }
 
 static inline VOID netdev_bus_wa8(const NetdevBus *bus, UWORD reg, UBYTE val)
