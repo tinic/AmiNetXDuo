@@ -227,7 +227,12 @@ static const char *r_memtype(APTR p)
 static BOOL r_load_pfs(const char *path)
 {
     BPTR  fh;
-    UBYTE hdr[16];
+    /* Zeroed for -fanalyzer, which cannot see through Read() -- a library call
+       behind an inline stub -- and reads hdr[4] as uninitialised.  Same shape
+       as the EClockVal in tests/perf/cpucal.c, and cheaper than a triage note
+       in tools/analyzer-baseline.txt for a header this file overwrites in the
+       next statement. */
+    UBYTE hdr[16] = { 0 };
     ULONG palette, want, i;
     LONG  n;
 
