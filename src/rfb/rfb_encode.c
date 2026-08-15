@@ -144,7 +144,7 @@ rfb_u32 rfb_scratch_size(const rfb_geom *g, rfb_u32 flags,
     }
     tb = (rfb_u32)g->tile_w * g->tile_h;
     need = tb * g->depth               /* xorbuf, one tile per plane */
-         + tb                          /* rawbuf */
+         + tb * g->depth               /* rawbuf, likewise */
          + 2u * RFB_PB_BOUND(tb)       /* two candidate PackBits outputs */
          + 4u * 4u;                    /* alignment slack */
 
@@ -246,7 +246,7 @@ long rfb_encoder_init(rfb_encoder *e, const rfb_geom *g, rfb_u32 flags,
     tb = (rfb_u32)g->tile_w * g->tile_h;
     p = rfb_align4(scratch);
     e->xorbuf = p; p = rfb_align4(p + tb * g->depth);
-    e->rawbuf = p; p = rfb_align4(p + tb);
+    e->rawbuf = p; p = rfb_align4(p + tb * g->depth);
     e->pb_a   = p; p = rfb_align4(p + RFB_PB_BOUND(tb));
     e->pb_b   = p; p = rfb_align4(p + RFB_PB_BOUND(tb));
 
@@ -299,60 +299,126 @@ static void rfb_putblk(rfb_out *o, const rfb_u8 *src, rfb_u32 n)
 
 /* ------------------------------------------------------- the tile pass --- */
 
-/* One plane of one tile: read src once, XOR against shadow, accumulate the
- * difference, write the new bytes into the shadow, and keep the XOR when the
- * caller can use it. */
-static rfb_u32 rfb_diff_plane(const rfb_u8 *src, rfb_u8 *sh, rfb_u8 *xb,
-                              rfb_u32 bpr, rfb_u32 tw, rfb_u32 th, int keep_xor)
+/* DOES THIS TILE-PLANE DIFFER FROM THE SHADOW.  Nothing is written and it
+ * stops at the first word that disagrees, so the answer for a screen where
+ * nothing moved costs one read of the source and one of the shadow and no
+ * more.  That is the whole idle frame: on a live Workbench 49 frames out of
+ * 50 reach no further than this.
+ *
+ * `word` is the caller's frame-constant verdict on alignment -- see
+ * rfb_words_ok().  It is not rederived here because it was the same answer on
+ * every row of every tile of every plane, 2560 times a frame. */
+static int rfb_cmp_plane(const rfb_u8 *src, const rfb_u8 *sh,
+                         rfb_u32 bpr, rfb_u32 tw, rfb_u32 th, int word)
 {
-    rfb_u32 acc = 0, r;
+    rfb_u32 r;
+
+    for (r = 0; r < th; r++) {
+        const rfb_u8 *s = src + r * bpr;
+        const rfb_u8 *d = sh + r * bpr;
+        rfb_u32 c = 0;
+
+        if (word) {
+            const rfb_u32 *sw = (const rfb_u32 *)(const void *)s;
+            const rfb_u32 *dw = (const rfb_u32 *)(const void *)d;
+            rfb_u32 n = tw >> 2;
+
+            while (n--)
+                if (*sw++ != *dw++)
+                    return 1;
+            c = tw & ~3u;
+        }
+        for (; c < tw; c++)
+            if (s[c] != d[c])
+                return 1;
+    }
+    return 0;
+}
+
+/* TAKE THE TILE-PLANE.  One read of the source into raw, which is then the
+ * only copy anybody uses: the XOR is computed from it against the old shadow,
+ * the shadow is written from it, and it is what goes on the wire.  The source
+ * is never read twice, so a screen being drawn on underneath cannot put a
+ * shadow on this end that disagrees with the bytes the far end was sent. */
+static void rfb_take_plane(const rfb_u8 *src, rfb_u8 *sh, rfb_u8 *raw,
+                           rfb_u8 *xb, rfb_u32 bpr, rfb_u32 tw, rfb_u32 th,
+                           int keep_xor, int word)
+{
+    rfb_u32 r;
 
     for (r = 0; r < th; r++) {
         const rfb_u8 *s = src + r * bpr;
         rfb_u8 *d = sh + r * bpr;
+        rfb_u8 *w = raw + r * tw;
         rfb_u8 *x = xb + r * tw;
         rfb_u32 c = 0;
 
-        /* The word path needs all three pointers 4-aligned.  With a BitMap
-         * bytes_per_row (always even, usually a multiple of 4) and a tile_w
-         * that is a multiple of 4 it is taken on every row. */
-        if ((((unsigned long)s | (unsigned long)d | (unsigned long)x) & 3ul) == 0ul) {
+        if (word) {
+            const rfb_u32 *sw = (const rfb_u32 *)(const void *)s;
+            rfb_u32 *dw = (rfb_u32 *)(void *)d;
+            rfb_u32 *ww = (rfb_u32 *)(void *)w;
+            rfb_u32 n = tw >> 2;
+
             if (keep_xor) {
-                while (c + 4u <= tw) {
-                    rfb_u32 sv = *(const rfb_u32 *)(const void *)(s + c);
-                    rfb_u32 xv = sv ^ *(const rfb_u32 *)(const void *)(d + c);
-                    acc |= xv;
-                    *(rfb_u32 *)(void *)(d + c) = sv;
-                    *(rfb_u32 *)(void *)(x + c) = xv;
-                    c += 4u;
+                rfb_u32 *xw = (rfb_u32 *)(void *)x;
+                while (n--) {
+                    rfb_u32 sv = *sw++;
+                    *xw++ = sv ^ *dw;
+                    *dw++ = sv;
+                    *ww++ = sv;
                 }
             } else {
-                while (c + 4u <= tw) {
-                    rfb_u32 sv = *(const rfb_u32 *)(const void *)(s + c);
-                    acc |= sv ^ *(const rfb_u32 *)(const void *)(d + c);
-                    *(rfb_u32 *)(void *)(d + c) = sv;
-                    c += 4u;
+                while (n--) {
+                    rfb_u32 sv = *sw++;
+                    *dw++ = sv;
+                    *ww++ = sv;
                 }
             }
+            c = tw & ~3u;
         }
         for (; c < tw; c++) {
             rfb_u8 sv = s[c];
-            rfb_u8 xv = (rfb_u8)(sv ^ d[c]);
-            acc |= xv;
-            d[c] = sv;
             if (keep_xor)
-                x[c] = xv;
+                x[c] = (rfb_u8)(sv ^ d[c]);
+            d[c] = sv;
+            w[c] = sv;
         }
     }
-    return acc;
 }
 
-static void rfb_gather(const rfb_u8 *sh, rfb_u8 *dst, rfb_u32 bpr,
-                       rfb_u32 tw, rfb_u32 th)
+/* A plane that did not change but has to be sent anyway (no RFB_F_PLANEMASK).
+ * The shadow already holds the bytes, and the XOR against them is zero. */
+static void rfb_take_clean(const rfb_u8 *sh, rfb_u8 *raw, rfb_u8 *xb,
+                           rfb_u32 bpr, rfb_u32 tw, rfb_u32 th, int keep_xor)
 {
     rfb_u32 r;
-    for (r = 0; r < th; r++)
-        memcpy(dst + r * tw, sh + r * bpr, (size_t)tw);
+
+    for (r = 0; r < th; r++) {
+        memcpy(raw + r * tw, sh + r * bpr, (size_t)tw);
+        if (keep_xor)
+            memset(xb + r * tw, 0, (size_t)tw);
+    }
+}
+
+/* Can the whole frame use the longword path.  Every tile row starts at
+ * plane_base + y * row_stride + tx * tile_w, so if the plane bases, the row
+ * stride and the tile width are all multiples of four then every one of them
+ * is, and the tile buffers are four-aligned by construction.  One answer per
+ * frame instead of one per row. */
+static int rfb_words_ok(const rfb_encoder *e, const rfb_u8 *const *planes)
+{
+    unsigned long bits = (unsigned long)e->row_stride
+                       | (unsigned long)e->g.tile_w
+                       | (unsigned long)e->plane_stride
+                       | (unsigned long)e->shadow
+                       | (unsigned long)e->xorbuf
+                       | (unsigned long)e->rawbuf;
+    rfb_u32 p;
+
+    for (p = 0; p < e->g.depth; p++)
+        bits |= (unsigned long)planes[p];
+
+    return ((bits & 3ul) == 0ul);
 }
 
 /* --------------------------------------------------------- scroll probe --- */
@@ -626,15 +692,32 @@ static void rfb_apply_copy(rfb_encoder *e, const rfb_copy *cp)
 long rfb_encode_frame(rfb_encoder *e, const rfb_u8 *src,
                       rfb_u8 *out, rfb_u32 out_cap)
 {
-    rfb_u32 bpr, depth, tb;
-    int keep_xor, min_run;
+    const rfb_u8 *planes[RFB_MAX_DEPTH];
+    rfb_u32 p;
+
+    if (!e || !src)
+        return RFB_E_GEOM;
+    if (e->g.depth > RFB_MAX_DEPTH)
+        return RFB_E_GEOM;
+
+    for (p = 0; p < e->g.depth; p++)
+        planes[p] = src + p * e->plane_stride;
+
+    return rfb_encode_frame_planes(e, planes, out, out_cap);
+}
+
+long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
+                             rfb_u8 *out, rfb_u32 out_cap)
+{
+    rfb_u32 bpr, depth, tb, tile_row;
+    int keep_xor, min_run, word;
     rfb_out o;
-    rfb_u32 ty, tx, p;
+    rfb_u32 ty, tx, p, y0;
     rfb_u32 dirty_tiles = 0;
-    rfb_u32 accs[RFB_MAX_DEPTH];
+    rfb_u32 dirty_plane[RFB_MAX_DEPTH];
     int did_copy = 0;
 
-    if (!e || !src || !out)
+    if (!e || !planes || !out)
         return RFB_E_GEOM;
 
     bpr = e->g.bytes_per_row;
@@ -642,6 +725,13 @@ long rfb_encode_frame(rfb_encoder *e, const rfb_u8 *src,
     tb = (rfb_u32)e->g.tile_w * e->g.tile_h;
     keep_xor = (e->flags & RFB_F_XOR) ? 1 : 0;
     min_run = (e->flags & RFB_F_RLE2) ? 2 : 3;
+
+    /* Both of these were being recomputed inside the tile walk: the alignment
+     * verdict on every row of every tile of every plane, and a 32-bit multiply
+     * per tile for the row offset, which on the -m68000 build the whole
+     * archive is compiled with is a call to __mulsi3. */
+    word = rfb_words_ok(e, planes);
+    tile_row = (rfb_u32)e->g.tile_h * e->row_stride;
 
     o.buf = out; o.cap = out_cap; o.len = 0; o.over = 0;
     rfb_put8(&o, RFB_VERSION);
@@ -663,7 +753,7 @@ long rfb_encode_frame(rfb_encoder *e, const rfb_u8 *src,
         }
         if (probe) {
             rfb_copy cp;
-            if (rfb_detect_scroll(e, src, &cp)) {
+            if (rfb_detect_scroll(e, planes[0], &cp)) {
                 rfb_put8(&o, RFB_OP_COPY);
                 rfb_put16(&o, cp.x0);
                 rfb_put16(&o, cp.w);
@@ -696,16 +786,17 @@ long rfb_encode_frame(rfb_encoder *e, const rfb_u8 *src,
         }
     }
 
-    for (ty = 0; ty < e->tiles_y; ty++) {
-        rfb_u32 y0 = ty * e->g.tile_h;
-        rfb_u32 th = e->g.height - y0;
+    y0 = 0;
+    for (ty = 0; ty < e->tiles_y; ty++, y0 += tile_row) {
+        rfb_u32 top = ty * e->g.tile_h;
+        rfb_u32 th = e->g.height - top;
         if (th > e->g.tile_h)
             th = e->g.tile_h;
 
         for (tx = 0; tx < e->tiles_x; tx++) {
             rfb_u32 x0 = tx * e->g.tile_w;
             rfb_u32 tw = bpr - x0;
-            rfb_u32 off = y0 * e->row_stride + x0;
+            rfb_u32 off = y0 + x0;
             rfb_u32 raw_len, mask = 0;
 
             if (tw > e->g.tile_w)
@@ -713,12 +804,13 @@ long rfb_encode_frame(rfb_encoder *e, const rfb_u8 *src,
             raw_len = tw * th;
             e->st.tiles_scanned++;
 
+            /* Ask first, write nothing.  A tile nobody drew on ends here. */
             for (p = 0; p < depth; p++) {
-                accs[p] = rfb_diff_plane(src + p * e->plane_stride + off,
-                                         e->shadow + p * e->plane_stride + off,
-                                         e->xorbuf + p * tb,
-                                         e->row_stride, tw, th, keep_xor);
-                if (accs[p])
+                dirty_plane[p] = (rfb_u32)rfb_cmp_plane(
+                        planes[p] + off,
+                        e->shadow + p * e->plane_stride + off,
+                        e->row_stride, tw, th, word);
+                if (dirty_plane[p])
                     mask |= 1u << p;
             }
             e->st.src_bytes += raw_len * depth;
@@ -730,24 +822,38 @@ long rfb_encode_frame(rfb_encoder *e, const rfb_u8 *src,
             if (!(e->flags & RFB_F_PLANEMASK))
                 mask = (1u << depth) - 1u;
 
+            /* One read of the source per changed plane, into rawbuf, which is
+             * then what updates the shadow and what is encoded below. */
+            for (p = 0; p < depth; p++) {
+                if (!(mask & (1u << p)))
+                    continue;
+                if (dirty_plane[p])
+                    rfb_take_plane(planes[p] + off,
+                                   e->shadow + p * e->plane_stride + off,
+                                   e->rawbuf + p * tb, e->xorbuf + p * tb,
+                                   e->row_stride, tw, th, keep_xor, word);
+                else
+                    rfb_take_clean(e->shadow + p * e->plane_stride + off,
+                                   e->rawbuf + p * tb, e->xorbuf + p * tb,
+                                   e->row_stride, tw, th, keep_xor);
+            }
+
             rfb_put8(&o, RFB_OP_TILE);
             rfb_put16(&o, ty * e->tiles_x + tx);
             rfb_put8(&o, (rfb_u8)mask);
 
             for (p = 0; p < depth; p++) {
                 rfb_u32 best_len, la, lb;
+                rfb_u8 *raw = e->rawbuf + p * tb;
                 rfb_u8 *best_ptr;
                 int best_code;
 
                 if (!(mask & (1u << p)))
                     continue;
 
-                rfb_gather(e->shadow + p * e->plane_stride + off,
-                           e->rawbuf, e->row_stride, tw, th);
-
                 best_code = RFB_CODE_RAW;
                 best_len = raw_len;
-                best_ptr = e->rawbuf;
+                best_ptr = raw;
 
                 if (e->flags & RFB_F_BESTOF) {
                     /* Each candidate is capped at what is already the best, so
@@ -762,7 +868,7 @@ long rfb_encode_frame(rfb_encoder *e, const rfb_u8 *src,
                         }
                     }
                     if (e->flags & RFB_F_PACKBITS) {
-                        lb = rfb_packbits(e->rawbuf, raw_len,
+                        lb = rfb_packbits(raw, raw_len,
                                           e->pb_b, best_len - 1u, min_run);
                         if (lb != RFB_PB_FAIL) {
                             best_code = RFB_CODE_PB_RAW;
@@ -779,7 +885,7 @@ long rfb_encode_frame(rfb_encoder *e, const rfb_u8 *src,
                         best_ptr = e->pb_a;
                     }
                 } else if (e->flags & RFB_F_PACKBITS) {
-                    lb = rfb_packbits(e->rawbuf, raw_len, e->pb_b,
+                    lb = rfb_packbits(raw, raw_len, e->pb_b,
                                       RFB_PB_BOUND(raw_len), min_run);
                     if (lb != RFB_PB_FAIL) {
                         best_code = RFB_CODE_PB_RAW;

@@ -58,9 +58,12 @@
  * captures: 5 bytes for an idle frame, 272 for windows opening, 1412 for a
  * shell scrolling.
  *
- * NOT RFB_F_INTERLEAVED: the grab is plane-major into a buffer of ours
- * whatever the BitMap's layout is, so the encoder never sees an interleaved
- * one.
+ * RFB_F_INTERLEAVED IS ADDED AT RUN TIME, in fb_take_buffers(), when the
+ * screen's BitMap is one.  It used to be impossible to need: the grab
+ * de-interleaved into a plane-major buffer of ours and the encoder only ever
+ * saw that.  The encoder reads the bitplanes where they are now, so the layout
+ * it is told about has to be the layout they are actually in -- and the flag is
+ * what lays the shadow out to match, since the two are walked with one stride.
  */
 #define FB_FLAGS    (RFB_F_BASELINE | RFB_F_COPYRECT | RFB_F_SCROLL_ADAPTIVE)
 
@@ -144,14 +147,13 @@ static FbGeometry      fb_geom;
 static rfb_geom        fb_rg;
 static rfb_encoder     fb_enc;
 static rfb_scroll_cfg  fb_cfg;
+static rfb_u32         fb_flags;        /* FB_FLAGS, plus the layout's own */
 
 static UBYTE          *fb_shadow;
 static UBYTE          *fb_scratch;
-static UBYTE          *fb_grab;
 static UBYTE          *fb_tx;
 static ULONG           fb_shadow_len;
 static ULONG           fb_scratch_len;
-static ULONG           fb_grab_len;
 static ULONG           fb_tx_cap;
 static ULONG           fb_tx_len;
 static ULONG           fb_tx_sent;
@@ -496,26 +498,34 @@ static BOOL fb_read_palette(struct ColorMap *cm, UWORD depth, UBYTE *pal)
 /* ------------------------------------------------------------------- grab -- */
 
 /*
- * Plane-major into dst, which is frame_bytes long.  Called with the layers
- * locked and the blitter idle, and it does nothing but read memory, so it
- * cannot be what a lock is held across.
+ * THE SCREEN IS NOT COPIED ANY MORE.  The encoder reads the bitplanes where
+ * they are.
+ *
+ * There used to be a frame_bytes buffer here and a CopyMem per 80-byte row
+ * into it, and then the encoder read that copy: 40 KB of chip RAM read, 40 KB
+ * written, 40 KB read again, to answer a question -- did anything change --
+ * that on a live Workbench is "no" 49 frames out of 50.  Measured on an A1200,
+ * two planes: the copy 14.9 ms and the encode 56.9 ms, against 13.6 ms for one
+ * pass that compares the planes against the shadow and stops.
+ *
+ * WHAT THE ENCODER PROMISES IN RETURN, because this reads the planes without
+ * holding a drawing lock: a tile it decides has changed is read ONCE, into a
+ * buffer, and that one copy is both what updates the shadow and what goes on
+ * the wire.  So a screen being drawn on underneath can produce a torn frame --
+ * it always could -- but it cannot produce a shadow here that disagrees with
+ * the bytes the far end was sent, which is the failure that would not correct
+ * itself on the next frame.
  */
-static VOID fb_copy_frame(struct BitMap *bm, const FbGeometry *g, UBYTE *dst)
+static LONG fb_encode_bitmap(struct BitMap *bm, const FbGeometry *g,
+                             UBYTE *out, ULONG out_cap)
 {
-    UWORD plane;
+    const UBYTE *planes[FB_MAX_DEPTH];
+    UWORD        plane;
 
     for (plane = 0; plane < g->depth; plane++)
-    {
-        const UBYTE *src = (const UBYTE *)bm->Planes[plane];
-        UWORD        y;
+        planes[plane] = (const UBYTE *)bm->Planes[plane];
 
-        for (y = 0; y < g->height; y++)
-        {
-            CopyMem((APTR)src, dst, (LONG)g->row_bytes);
-            src += g->row_stride;
-            dst += g->row_bytes;
-        }
-    }
+    return rfb_encode_frame_planes(&fb_enc, planes, out, out_cap);
 }
 
 /*
@@ -577,14 +587,16 @@ enum
  *   right.  A torn frame for two milliseconds is the price of a console that
  *   keeps up during a drag and a server that never stops.
  */
-static int fb_grab_frame(const FbGeometry *want, UBYTE *buf, FbGeometry *now,
-                         BOOL *palette_moved)
+static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
+                         BOOL *palette_moved, UBYTE *out, ULONG out_cap,
+                         LONG *encoded)
 {
     struct Screen *sc;
     int            rc = FB_GRAB_OK;
     BOOL           locked;
 
     *palette_moved = FALSE;
+    *encoded = -1L;                     /* nothing encoded this pass */
 
     sc = LockPubScreen((CONST_STRPTR)PUBSCREEN_NAME);
     if (sc == NULL)
@@ -608,18 +620,26 @@ static int fb_grab_frame(const FbGeometry *want, UBYTE *buf, FbGeometry *now,
 
     fb_view_units(&sc->ViewPort);
 
-    locked = (BOOL)(AttemptSemaphore(&sc->LayerInfo.Lock) != 0);
-    if (!locked)
-        fb_torn++;
-
     *palette_moved = fb_read_palette(sc->ViewPort.ColorMap,
                                      want->depth, fb_pal);
 
-    WaitBlit();
-    fb_copy_frame(sc->RastPort.BitMap, want, buf);
+    /*
+     * Colours before pixels, and the encode is skipped entirely on the pass
+     * that finds them moved -- it used to grab a whole frame and throw it
+     * away here.
+     */
+    if (!*palette_moved)
+    {
+        locked = (BOOL)(AttemptSemaphore(&sc->LayerInfo.Lock) != 0);
+        if (!locked)
+            fb_torn++;
 
-    if (locked)
-        ReleaseSemaphore(&sc->LayerInfo.Lock);
+        WaitBlit();
+        *encoded = fb_encode_bitmap(sc->RastPort.BitMap, want, out, out_cap);
+
+        if (locked)
+            ReleaseSemaphore(&sc->LayerInfo.Lock);
+    }
 
     UnlockPubScreen(NULL, sc);
     return rc;
@@ -630,12 +650,10 @@ static int fb_grab_frame(const FbGeometry *want, UBYTE *buf, FbGeometry *now,
 static VOID fb_free_buffers(VOID)
 {
     ami_free(fb_tx);
-    ami_free(fb_grab);
     ami_free(fb_scratch);
     ami_free(fb_shadow);
 
     fb_tx = NULL;
-    fb_grab = NULL;
     fb_scratch = NULL;
     fb_shadow = NULL;
     fb_tx_cap = 0;
@@ -643,7 +661,6 @@ static VOID fb_free_buffers(VOID)
     fb_tx_sent = 0;
     fb_shadow_len = 0;
     fb_scratch_len = 0;
-    fb_grab_len = 0;
 }
 
 /*
@@ -667,10 +684,16 @@ static BOOL fb_take_buffers(const FbGeometry *g)
 
     rfb_scroll_defaults(&fb_cfg);
 
+    /* An interleaved BitMap is the one whose rows within a plane are a whole
+       depth apart; fb_geometry_of() has already divided that out into
+       row_bytes, so the two disagreeing IS the layout. */
+    fb_flags = (rfb_u32)FB_FLAGS;
+    if (g->row_stride != (ULONG)g->row_bytes)
+        fb_flags |= RFB_F_INTERLEAVED;
+
     fb_shadow_len  = rfb_shadow_size(&fb_rg);
-    fb_scratch_len = rfb_scratch_size(&fb_rg, FB_FLAGS, &fb_cfg);
+    fb_scratch_len = rfb_scratch_size(&fb_rg, fb_flags, &fb_cfg);
     worst          = rfb_worst_case_frame(&fb_rg);
-    fb_grab_len    = g->frame_bytes;
 
     if (fb_shadow_len == 0UL || fb_scratch_len == 0UL || worst == 0UL)
     {
@@ -685,11 +708,9 @@ static BOOL fb_take_buffers(const FbGeometry *g)
 
     fb_shadow  = (UBYTE *)ami_alloc(fb_shadow_len);
     fb_scratch = (UBYTE *)ami_alloc(fb_scratch_len);
-    fb_grab    = (UBYTE *)ami_alloc(fb_grab_len);
     fb_tx      = (UBYTE *)ami_alloc(fb_tx_cap);
 
-    if (fb_shadow == NULL || fb_scratch == NULL || fb_grab == NULL ||
-        fb_tx == NULL)
+    if (fb_shadow == NULL || fb_scratch == NULL || fb_tx == NULL)
     {
         fb_say3("not enough memory for a ", fb_shadow_len / 1024UL,
                 " KB screen and the buffers around it");
@@ -699,7 +720,7 @@ static BOOL fb_take_buffers(const FbGeometry *g)
 
     /* ami_alloc() clears, so the shadow starts as the all-zero screen the
        receiver starts from and the first frame codes as a delta from it. */
-    if (rfb_encoder_init(&fb_enc, &fb_rg, FB_FLAGS, &fb_cfg,
+    if (rfb_encoder_init(&fb_enc, &fb_rg, fb_flags, &fb_cfg,
                          fb_shadow, fb_shadow_len,
                          fb_scratch, fb_scratch_len) != 0L)
     {
@@ -744,7 +765,7 @@ static VOID fb_forget_shadow(VOID)
     seq = fb_enc.seq;
     memset(fb_shadow, 0, (size_t)fb_shadow_len);
 
-    (VOID)rfb_encoder_init(&fb_enc, &fb_rg, FB_FLAGS, &fb_cfg,
+    (VOID)rfb_encoder_init(&fb_enc, &fb_rg, fb_flags, &fb_cfg,
                            fb_shadow, fb_shadow_len,
                            fb_scratch, fb_scratch_len);
     fb_enc.seq = seq;
@@ -1456,11 +1477,19 @@ BOOL http_fb_slice(ULONG now)
             fb_next_tick = 1UL;         /* 0 means "never grabbed" */
     }
 
+    /*
+     * gt= is what is left of the grab -- locking the public screen, checking
+     * the geometry, reading the ColorMap -- now that there is no copy of the
+     * screen to make.  et= is the pass that reads the bitplanes.  The two used
+     * to be a 40 KB copy and then a walk over the copy; slice (gt+et) is the
+     * figure that stayed comparable across that change.
+     */
     t0 = fb_ticks();
-    rc = fb_grab_frame(&fb_geom, fb_grab, &seen, &palette_moved);
+    rc = fb_grab_frame(&fb_geom, &seen, &palette_moved,
+                       &fb_tx[10], fb_tx_cap - 10UL, &n);
     t1 = fb_ticks();
     if (t1 >= t0)
-        fb_grab_ticks += t1 - t0;
+        fb_encode_ticks += t1 - t0;
 
     switch (rc)
     {
@@ -1500,12 +1529,6 @@ BOOL http_fb_slice(ULONG now)
         fb_want_pal = 1;
         return TRUE;                    /* colours before the pixels */
     }
-
-    t0 = fb_ticks();
-    n = rfb_encode_frame(&fb_enc, fb_grab, &fb_tx[10], fb_tx_cap - 10UL);
-    t1 = fb_ticks();
-    if (t1 >= t0)
-        fb_encode_ticks += t1 - t0;
 
     if (n < 0)
     {

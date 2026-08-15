@@ -158,7 +158,7 @@ typedef struct {
 
     /* Carved out of scratch by rfb_encoder_init(). */
     rfb_u8  *xorbuf;        /* depth * tile_w * tile_h */
-    rfb_u8  *rawbuf;        /* tile_w * tile_h */
+    rfb_u8  *rawbuf;        /* depth * tile_w * tile_h */
     rfb_u8  *pb_a;
     rfb_u8  *pb_b;
     rfb_u8  *probe_row;     /* one source row, RFB_F_COPYRECT only */
@@ -198,6 +198,21 @@ long rfb_encoder_init(rfb_encoder *e, const rfb_geom *g, rfb_u32 flags,
 
 long rfb_encode_frame(rfb_encoder *e, const rfb_u8 *src,
                       rfb_u8 *out, rfb_u32 out_cap);
+
+/* The same, for a source whose planes are not one block: planes[p] is the base
+ * of plane p and rows within it are row_stride apart.  This is what the Amiga
+ * caller uses -- a BitMap's Planes[] are separate allocations -- and it is what
+ * lets the encoder read the screen ITSELF rather than a copy of it.
+ *
+ * A tile whose planes all match the shadow is read once and nothing is written.
+ * A tile that differs is copied ONCE into rawbuf, and that one copy is what
+ * updates the shadow and what goes on the wire, so the two cannot disagree
+ * however much the screen moves underneath -- which matters because the caller
+ * reads the planes without holding a drawing lock.
+ *
+ * rfb_encode_frame() above is this with planes[p] = src + p * plane_stride. */
+long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
+                             rfb_u8 *out, rfb_u32 out_cap);
 
 /* PackBits, exposed because the decoder and the tests want the same pair. */
 rfb_u32 rfb_packbits(const rfb_u8 *in, rfb_u32 n, rfb_u8 *out, rfb_u32 cap,
