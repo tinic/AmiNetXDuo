@@ -54,9 +54,11 @@
 #include <dos/dosextens.h>
 #include <exec/io.h>
 #include <exec/memory.h>
+#include <graphics/displayinfo.h>
 #include <graphics/gfx.h>
 #include <graphics/gfxbase.h>
 #include <graphics/layers.h>
+#include <graphics/modeid.h>
 #include <graphics/view.h>
 #include <intuition/intuition.h>
 #include <intuition/intuitionbase.h>
@@ -270,22 +272,37 @@ static struct InputEvent fb_event;
 /*
  * WHAT ie_X AND ie_Y ARE MEASURED IN, WHICH IS NOT SCREEN PIXELS
  *
- *   IECLASS_POINTERPOS carries a position in the VIEW's units, and a screen's
- *   pixels are only the same thing when the screen is hires and interlaced.
- *   A stock Workbench is 640x256 -- hires, NOT laced -- and its 256 rows are
- *   512 view lines, so a row handed straight through lands at half its
- *   number.  Measured: `m 300 200` put the pointer on screen row 100, an
- *   error of nothing at the top of the screen and 128 rows at the bottom,
- *   which is what a viewer whose clicks miss by more the further down you go
- *   is actually reporting.
+ *   IECLASS_POINTERPOS carries a position in mouse units, and Intuition turns
+ *   one into a pixel with two numbers that both come out of the display
+ *   database: it multiplies ie_X by the MONITOR's ticks-per-mouse-unit and
+ *   divides by the SCREEN mode's ticks-per-pixel.  A tick is 1/44 of a lores
+ *   pixel on a 15 kHz monitor; a hires pixel is 22 of them, superhires 11, and
+ *   a PAL row is 44 non-interlaced or 22 interlaced.
  *
- *   The two factors are read off the ViewPort's Modes and kept here, because
- *   the injectors have a word from a viewer and no screen in hand.  A screen
- *   that changes mode under a live session changes them on the next grab.
- *   Halves, not whole numbers: superhires is HALF a view unit per pixel.
+ *   THE MODE BITS CANNOT ANSWER THIS.  A Multiscan Productivity screen is
+ *   640x480 with the SUPERHIRES and LACE bits both set -- that is how the
+ *   chipset makes it -- and its pixels are 22 ticks wide and 22 high, exactly
+ *   a PAL hires-interlaced pixel.  Reading the bits gave it half the width and
+ *   twice the height, which is a pointer that reaches the middle of the screen
+ *   at the right edge of the browser and is pinned to the bottom for the lower
+ *   half of it.  Measured, on Multiscan:ProductivityLace: sending (320,480)
+ *   put the pointer at (160,959).  Every doublescan, productivity and
+ *   multisync mode is that shape, which is what a reporter on a 1024x768
+ *   Super-High Res Laced screen was seeing.
+ *
+ *   So they are read from the database instead, per mode, and kept here
+ *   because the injectors have a word from a viewer and no screen in hand.  A
+ *   screen that changes mode under a live session changes them on the next
+ *   grab.
  */
-static UWORD             fb_x_halves = 2;   /* view units per pixel, doubled */
-static UWORD             fb_y_halves = 4;
+static UWORD             fb_res_x  = 22;    /* ticks per screen pixel        */
+static UWORD             fb_res_y  = 44;
+static UWORD             fb_tick_x = 22;    /* ticks per POINTERPOS unit     */
+static UWORD             fb_tick_y = 22;
+static UWORD             fb_spr_x  = 44;    /* ticks per sprite pixel        */
+static UWORD             fb_spr_y  = 44;
+static UWORD             fb_pixel_ns = 70;  /* what one screen pixel lasts   */
+static ULONG             fb_mode_id  = INVALID_ID;
 
 /*
  * WHERE THE FRONT SCREEN SITS IN THE VIEW, in its own pixels.
@@ -297,6 +314,8 @@ static UWORD             fb_y_halves = 4;
  *   injected IECLASS_POINTERPOS is a position in the VIEW, and a screen
  *   dragged down by fifty rows has its row 0 fifty rows into the view: without
  *   this the picture would be right and every click in it fifty rows high.
+ *   In the screen's own pixels, because that is the unit Intuition scales
+ *   them in.
  */
 static WORD              fb_left;
 static WORD              fb_top;
@@ -780,31 +799,143 @@ static ULONG fb_be32(const UBYTE *p)
 }
 
 /*
+ * THE FOUR NUMBERS THE DISPLAY DATABASE HAS AND THE MODE BITS DO NOT
+ *
+ * A tick is graphics.library's unit of displayed distance, 1/44 of a lores
+ * pixel across and 1/44 of a PAL row down, and the database gives three
+ * lengths in it per mode: what a screen pixel is worth (DisplayInfo's
+ * Resolution), what a sprite pixel is worth (SpriteResolution), and what one
+ * unit of the mouse is worth (MonitorInfo's MouseTicks, per MONITOR rather
+ * than per mode).  Everything below is a ratio of two of those.
+ *
+ * Re-read only when the mode changes.  The position of the screen in the view
+ * is not: a screen can be dragged without changing mode, and an injected
+ * position that ignored that would be right in the picture and wrong on the
+ * machine.
+ *
+ * A monitor whose file predates 3.01 has no MouseTicks, and Intuition then
+ * uses 22 across and 22 down, 26 down on an NTSC-rate monitor -- the same
+ * fallback, or the pointer would be scaled by one number and read back by
+ * another.
+ */
+static VOID fb_display_units(struct Screen *sc)
+{
+    struct DisplayInfo di;
+    struct MonitorInfo mi;
+    ULONG              id;
+    UWORD              modes;
+    BOOL               have_disp = FALSE;
+
+    fb_left = sc->LeftEdge;
+    fb_top  = sc->TopEdge;
+
+    id = GetVPModeID(&sc->ViewPort);
+    if (id != (ULONG)INVALID_ID && id == fb_mode_id)
+        return;
+
+    fb_mode_id = id;
+    modes      = (UWORD)sc->ViewPort.Modes;
+
+    /* The mode bits, which are what is left when there is no database entry to
+       ask.  Right for PAL and NTSC, and no worse than what it replaced. */
+    if ((modes & SUPERHIRES) != 0)
+    {
+        fb_res_x    = 11;
+        fb_pixel_ns = 35;
+    }
+    else if ((modes & HIRES) != 0)
+    {
+        fb_res_x    = 22;
+        fb_pixel_ns = 70;
+    }
+    else
+    {
+        fb_res_x    = 44;
+        fb_pixel_ns = 140;
+    }
+    fb_res_y  = (UWORD)(((modes & LACE) != 0) ? 22 : 44);
+    fb_spr_x  = (UWORD)(fb_res_x * 2U);
+    fb_spr_y  = fb_res_y;
+    fb_tick_x = 22;
+    fb_tick_y = 22;
+
+    if (id == (ULONG)INVALID_ID)
+        return;
+
+    /* A short answer is not a failure: GetDisplayInfoData() fills what the
+       database record holds, which is 48 bytes of a struct that is longer than
+       that, so what is checked is the FIELDS, over a struct zeroed first. */
+    memset(&di, 0, sizeof(di));
+    memset(&mi, 0, sizeof(mi));
+
+    if (GetDisplayInfoData(NULL, (UBYTE *)&di, sizeof(di), DTAG_DISP, id) > 0 &&
+        di.Resolution.x > 0 && di.Resolution.y > 0)
+    {
+        have_disp    = TRUE;
+        fb_res_x    = (UWORD)di.Resolution.x;
+        fb_res_y    = (UWORD)di.Resolution.y;
+        if (di.PixelSpeed > 0)
+            fb_pixel_ns = (UWORD)di.PixelSpeed;
+        if (di.SpriteResolution.x > 0 && di.SpriteResolution.y > 0)
+        {
+            fb_spr_x = (UWORD)di.SpriteResolution.x;
+            fb_spr_y = (UWORD)di.SpriteResolution.y;
+        }
+    }
+
+    /* The two halves of the position have to come from the same place.  A
+       monitor's ticks against a mode's guessed pixels is a ratio of two
+       different things, so a mode with no record of its own keeps the pair
+       that was there before. */
+    if (!have_disp)
+        return;
+
+    if (GetDisplayInfoData(NULL, (UBYTE *)&mi, sizeof(mi), DTAG_MNTR, id) > 0 &&
+        mi.MouseTicks.x > 0 && mi.MouseTicks.y > 0)
+    {
+        fb_tick_x = (UWORD)mi.MouseTicks.x;
+        fb_tick_y = (UWORD)mi.MouseTicks.y;
+        return;
+    }
+
+    switch (id & MONITOR_ID_MASK)
+    {
+    case NTSC_MONITOR_ID:
+    case DBLNTSC_MONITOR_ID:
+        fb_tick_y = 26;
+        break;
+    case DEFAULT_MONITOR_ID:
+    case A2024_MONITOR_ID:
+        if ((GfxBase->DisplayFlags & PAL) == 0)
+            fb_tick_y = 26;
+        break;
+    default:
+        break;
+    }
+}
+
+/*
  * How many screen pixels one sprite pixel covers.
  *
  * A sprite pixel is NOT always a lores pixel, which is the assumption that
- * would put the pointer at half width on a superhires screen.  V39's ColorMap
- * carries the answer: SpriteResolution, or SpriteResDefault when it is
- * SPRITERESN_DEFAULT.  Both are in the same units as the screen's own pixel --
- * 140ns, 70ns, 35ns -- so the scale is one divided by the other.
+ * would put the pointer at half width on a superhires screen, and it is not
+ * always two screen rows on an interlaced one either: a Productivity screen
+ * carries the LACE bit and its sprite rows are one row each.  Both ratios come
+ * off the database, in ticks.
  *
- * SPRITERESN_ECS is 140ns except on a 35ns screen where it is 70ns, which is
- * what makes superhires come out at two and not four.
+ * The one thing the database cannot answer is a sprite whose resolution was
+ * CHANGED, by the Pointer editor's preference or by an application: that lives
+ * in the V39 ColorMap, as SpriteResolution or SpriteResDefault under it, and
+ * it is in nanoseconds rather than ticks, so it divides the screen's own pixel
+ * speed instead.  This is Intuition's own arithmetic for the same question.
  */
 static VOID fb_pointer_scale(struct Screen *sc, UWORD *xs, UWORD *ys)
 {
-    struct ColorMap *cm    = sc->ViewPort.ColorMap;
-    UWORD            modes = (UWORD)sc->ViewPort.Modes;
-    UWORD            screen_ns;
+    struct ColorMap *cm = sc->ViewPort.ColorMap;
     UWORD            sprite_ns;
     UBYTE            resn = (UBYTE)SPRITERESN_ECS;
 
-    if ((modes & SUPERHIRES) != 0)
-        screen_ns = 35;
-    else if ((modes & HIRES) != 0)
-        screen_ns = 70;
-    else
-        screen_ns = 140;
+    fb_display_units(sc);
 
     /* Only a V39 ColorMap has the fields; an older one is an ECS sprite. */
     if (cm != NULL && cm->Type >= (UBYTE)COLORMAP_TYPE_V39)
@@ -821,18 +952,17 @@ static VOID fb_pointer_scale(struct Screen *sc, UWORD *xs, UWORD *ys)
     case SPRITERESN_35NS:  sprite_ns = 35;  break;
     case SPRITERESN_ECS:
     default:
-        sprite_ns = (screen_ns == 35) ? 70 : 140;
+        sprite_ns = 0;      /* the default sprite: the database has it */
         break;
     }
 
-    *xs = (UWORD)((sprite_ns >= screen_ns) ? (sprite_ns / screen_ns) : 1);
+    if (sprite_ns != 0 && fb_pixel_ns != 0)
+        *xs = (UWORD)((sprite_ns >= fb_pixel_ns) ? (sprite_ns / fb_pixel_ns)
+                                                 : 1);
+    else
+        *xs = (UWORD)((fb_spr_x >= fb_res_x) ? (fb_spr_x / fb_res_x) : 1);
 
-    /*
-     * Down the screen the sprite is not scaled by a resolution field: a sprite
-     * line is a display line, so on an interlaced screen -- two display fields
-     * to one picture -- one sprite row covers two screen rows.
-     */
-    *ys = (UWORD)(((modes & LACE) != 0) ? 2 : 1);
+    *ys = (UWORD)((fb_spr_y >= fb_res_y) ? (fb_spr_y / fb_res_y) : 1);
 }
 
 /*
@@ -1172,30 +1302,6 @@ static LONG fb_encode_planes(const UBYTE **planes, UBYTE *out, ULONG out_cap)
     return rfb_encode_frame_planes(&fb_enc, planes, out, out_cap);
 }
 
-/*
- * The view's units per screen pixel, doubled so superhires can be a half, and
- * where the screen starts in the view.  Straight off the ViewPort: SUPERHIRES
- * is two pixels to a view unit, HIRES one to one, and anything else is lores
- * at two view units to a pixel; a screen that is not interlaced is two view
- * lines to a row.
- */
-static VOID fb_view_units(struct Screen *sc)
-{
-    UWORD modes = (UWORD)sc->ViewPort.Modes;
-
-    if ((modes & SUPERHIRES) != 0)
-        fb_x_halves = 1;
-    else if ((modes & HIRES) != 0)
-        fb_x_halves = 2;
-    else
-        fb_x_halves = 4;
-
-    fb_y_halves = (UWORD)(((modes & LACE) != 0) ? 2 : 4);
-
-    fb_left = sc->LeftEdge;
-    fb_top  = sc->TopEdge;
-}
-
 enum
 {
     FB_GRAB_OK = 0,
@@ -1211,7 +1317,7 @@ enum
  * block and must not call Intuition -- and it does not: GetBitMapAttr() and
  * GetRGB32() are reads of structures the screen already owns.
  *
- * What leaves here is the geometry, the palette, the view units and the
+ * What leaves here is the geometry, the palette, the display units and the
  * bitplane ADDRESSES.  The encode that follows touches nothing but those
  * addresses, which is what lets it run with the lock given back.
  */
@@ -1227,7 +1333,7 @@ static int fb_examine(struct Screen *sc, const FbGeometry *want,
     if (!fb_geometry_same(want, now))
         return FB_GRAB_CHANGED;
 
-    fb_view_units(sc);
+    fb_display_units(sc);
 
     *palette_moved = fb_read_palette(sc->ViewPort.ColorMap,
                                      want->depth, fb_pal);
@@ -1655,12 +1761,14 @@ static VOID fb_inject_pointer(rfb_s32 x, rfb_s32 y)
     fb_event.ie_Class     = IECLASS_POINTERPOS;
     fb_event.ie_Code      = IECODE_NOBUTTON;
     fb_event.ie_Qualifier = fb_buttons;
-    /* Screen pixels in, view units out; see fb_x_halves.  The screen's own
-       origin goes in first, which is zero unless somebody dragged it. */
+    /* Screen pixels in, mouse units out: ticks per pixel over ticks per unit,
+       see fb_display_units().  The screen's own origin goes in first, which is
+       zero unless somebody dragged it, and is in the screen's pixels because
+       that is what Intuition scales it as. */
     fb_event.ie_X         = (WORD)(((x + (rfb_s32)fb_left) *
-                                    (rfb_s32)fb_x_halves) / 2);
+                                    (rfb_s32)fb_res_x) / (rfb_s32)fb_tick_x);
     fb_event.ie_Y         = (WORD)(((y + (rfb_s32)fb_top) *
-                                    (rfb_s32)fb_y_halves) / 2);
+                                    (rfb_s32)fb_res_y) / (rfb_s32)fb_tick_y);
     fb_write_event();
 }
 
