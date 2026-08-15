@@ -374,9 +374,43 @@ const WORDS: Record<WireState, string> = {
 
 let wireState: WireState = "idle";
 
+/*
+ * A REBOOT IS NOT A FAULT, AND THE STATES IT PASSES THROUGH LOOK LIKE ONE
+ *
+ * `reset` is answered with a close frame and then the machine goes, so the
+ * socket closes, every attempt to reopen it fails while the Amiga is in
+ * Kickstart, and the browser reports each of those as a socket that never
+ * opened -- which is the same thing it reports when somebody else has the
+ * screen.  So the session is marked as rebooting before the word goes out and
+ * every close is read against that: the page says "rebooting" and keeps
+ * asking until httpd answers again, instead of saying it was refused and
+ * stopping.
+ */
+let rebooting = false;
+let rebootPoll = 0;
+
 function connection(state: WireState, detail: string): void {
   const up = state === "open";
   wireState = state;
+
+  if (rebooting && !up) {
+    say("", "rebooting -- waiting for the Amiga to come back");
+    liveEl.textContent = "Disconnect";
+    if (rebootPoll === 0) {
+      rebootPoll = setInterval(() => {
+        if (!rebooting) return;
+        if (!live.open && wireState !== "connecting") live.connect(urlEl.value);
+      }, 2000) as unknown as number;
+    }
+    return;
+  }
+
+  if (rebooting && up) {
+    rebooting = false;
+    clearInterval(rebootPoll);
+    rebootPoll = 0;
+  }
+
   say(up ? "up" : state === "connecting" ? "" : "down",
       detail && !up ? WORDS[state] + ": " + detail : WORDS[state]);
 
@@ -431,7 +465,69 @@ function saveShot(native: boolean): void {
 
 shotEl.onclick = (e: MouseEvent) => saveShot(e.shiftKey);
 
+/* ------------------------------------------------------------- the reset -- */
+
+const askEl = $("ask") as HTMLDialogElement;
+const askWhatEl = $("askwhat");
+const askYesEl = $("askyes") as HTMLButtonElement;
+const askNoEl = $("askno") as HTMLButtonElement;
+
+let askThen: (() => void) | null = null;
+
+function ask(what: string, verb: string, then: () => void): void {
+  askWhatEl.textContent = what;
+  askYesEl.textContent = verb;
+  askThen = then;
+  askEl.showModal();
+}
+
+askNoEl.onclick = () => { askThen = null; askEl.close(); };
+
+/* Escape closes a <dialog> without going through either gadget, and a pending
+   action left behind would fire on the NEXT thing that asked. */
+askEl.onclose = () => { askThen = null; };
+askYesEl.onclick = () => {
+  const go = askThen;
+  askThen = null;
+  askEl.close();
+  if (go !== null) go();
+};
+
+/*
+ * The truth about what a reset costs, because the button is one click away
+ * from a machine somebody else may be using.  The server flushes every
+ * mounted volume before it reboots, so files already written are safe; what
+ * a program is still holding in memory is not, and nothing on an Amiga can
+ * ask it to save.
+ */
+const RESET_WHAT =
+  "Reboot the Amiga now?\n\n" +
+  "Anything a program is holding unsaved is lost. Files already written are " +
+  "flushed to disk first. This session drops and reconnects when the " +
+  "machine comes back.";
+
+const resetEl = $("reset") as HTMLButtonElement;
+
+resetEl.onclick = () => {
+  if (!live.open) { say("down", "there is no session to reset"); return; }
+  ask(RESET_WHAT, "Reboot", () => {
+    rebooting = true;
+    live.word("reset");
+    say("", "rebooting -- waiting for the Amiga to come back");
+  });
+};
+
 liveEl.onclick = () => {
+  /* Disconnect during a reboot wait means stop waiting: the poll is what
+     would otherwise reopen the session a second later. */
+  if (rebooting) {
+    rebooting = false;
+    clearInterval(rebootPoll);
+    rebootPoll = 0;
+    away = false;
+    live.disconnect();
+    return;
+  }
   if (live.open) { away = false; live.disconnect(); return; }
   setPlaying(false);
   live.connect(urlEl.value);

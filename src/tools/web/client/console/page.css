@@ -231,6 +231,37 @@ body.log #log { display: block; }
   opacity: 0.85;
 }
 
+/* ---------------------------------------------------------- the requester -- */
+
+/* A system requester, which is what an Amiga puts up when something is about
+   to be irreversible.  Two gadgets, the safe one focused. */
+#ask {
+  padding: 0;
+  border: 1px solid var(--pen1);
+  border-top-color: var(--pen2);
+  border-left-color: var(--pen2);
+  background: var(--pen0);
+  color: var(--pen1);
+  font: inherit;
+  max-width: 32rem;
+}
+
+#ask::backdrop { background: rgba(0, 0, 0, 0.4); }
+
+#ask p {
+  margin: 0;
+  padding: 0.8rem 1rem;
+  white-space: pre-wrap;
+  line-height: 1.35;
+}
+
+#ask div {
+  display: flex;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: 0 1rem 0.8rem;
+}
+
 /* Dropping a capture on the page: the whole window says so, because the
    target is the whole window. */
 body.drop #stage { box-shadow: inset 0 0 0 3px var(--pen3); }

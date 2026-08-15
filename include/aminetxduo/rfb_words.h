@@ -40,6 +40,16 @@
  *                     coalesced, and they are floored at one a second; a
  *                     request inside that window is remembered and honoured
  *                     when it passes, not dropped.
+ *   reset             reboot the Amiga.  Answered with a close frame saying so
+ *                     and nothing else: the machine goes, so there is no later
+ *                     word to send.  The server flushes every mounted volume
+ *                     before it calls ColdReboot(), which is as much as an
+ *                     Amiga can do about work in flight -- a program holding
+ *                     unsaved data in memory loses it, and the viewer says so
+ *                     before it sends this.
+ *                     Only the session holding the screen may send it; there
+ *                     is no authentication in front of that, and anyone who
+ *                     can reach the port holds it as soon as nobody else does.
  *   m X Y BUTTONS     pointer, screen pixels.  1 left, 2 right, 4 middle.
  *   w DX DY           wheel, in notches, either sign.
  *   kd RAW QUAL       key down, Amiga rawkey code and qualifier bits.
@@ -73,7 +83,8 @@ enum {
     RFB_IN_POINTER,     /* a = x, b = y, c = button bitmask               */
     RFB_IN_WHEEL,       /* a = dx, b = dy, notches, either sign           */
     RFB_IN_KEYDOWN,     /* a = rawkey, b = qualifier bits                 */
-    RFB_IN_KEYUP
+    RFB_IN_KEYUP,
+    RFB_IN_RESET        /* reboot the machine                             */
 };
 
 /* The browser's own bitmask, which is also the order IEQUALIFIER_ puts them

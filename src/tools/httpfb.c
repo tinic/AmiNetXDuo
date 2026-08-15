@@ -51,6 +51,7 @@
 
 #include <devices/input.h>
 #include <devices/inputevent.h>
+#include <dos/dosextens.h>
 #include <exec/io.h>
 #include <exec/memory.h>
 #include <graphics/gfx.h>
@@ -210,6 +211,10 @@ static ULONG           fb_since_stat;
    in `fbstat` so a session that looks torn can be told apart from one that is
    dropping frames. */
 static ULONG           fb_torn;
+
+/* A `reset` arrived and the machine goes as soon as the close frame telling
+   the viewer so has been handed to the socket.  See fb_reboot(). */
+static UBYTE           fb_reset;
 
 /* ------------------------------------------------------------------ input -- */
 
@@ -1272,6 +1277,11 @@ static VOID fb_take_word(const char *w, ULONG len)
         fb_inject_key(ev.a, ev.b, FALSE);
         break;
 
+    case RFB_IN_RESET:
+        fb_reset = 1;
+        fb_close_saying(HTTP_WS_CLOSE_GOING, "the Amiga is rebooting");
+        break;
+
     case RFB_IN_WHEEL:
         /*
          * Dropped, deliberately.  AmigaOS 3.1 has no wheel: there is no input
@@ -1522,6 +1532,7 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_since_stat = 0;
     fb_torn       = 0;
     fb_want_stat  = 0;
+    fb_reset      = 0;
     /* A session opens with geom, pal and a full frame already queued, which
        is a resync by any other name: a refresh arriving before that frame has
        gone -- which is exactly what a viewer asking on `geom` produces --
@@ -1539,6 +1550,57 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
         (VOID)http_ws_feed(&fb_in, first, (long)first_len, fb_sink, NULL);
 
     return TRUE;
+}
+
+/*
+ * ACTION_FLUSH to every mounted volume, and then the machine goes.
+ *
+ * ColdReboot() on its own can lose work: AmigaDOS filesystems hold dirty
+ * buffers for about half a second, and httpd is a WebDAV server, so a file
+ * written a moment ago may well be one of them.  ACTION_FLUSH is the packet
+ * that empties them and it is what a handler answers when a person clicks the
+ * disk's icon and chooses to flush.
+ *
+ * The ports are collected under the DosList lock and the packets sent with it
+ * given back: DoPkt() waits for the handler to answer, the handler may want
+ * the DosList to do so, and a caller that held it across the packet would be
+ * the deadlock.
+ *
+ * WHAT THIS DOES NOT DO.  A program holding unsaved work in memory loses it
+ * -- there is no Amiga convention for asking every task to save, and
+ * NetShutdown's CTRL_C is about network resources, not about documents.  The
+ * viewer's dialog says so before it sends the word.
+ */
+#define FB_FLUSH_MAX    16
+
+static VOID fb_reboot(VOID)
+{
+    struct MsgPort *ports[FB_FLUSH_MAX];
+    struct DosList *dl;
+    ULONG           n = 0;
+    ULONG           i;
+
+    dl = LockDosList(LDF_VOLUMES | LDF_READ);
+    if (dl != NULL)
+    {
+        while (n < (ULONG)FB_FLUSH_MAX &&
+               (dl = NextDosEntry(dl, LDF_VOLUMES | LDF_READ)) != NULL)
+        {
+            if (dl->dol_Task != NULL)
+                ports[n++] = dl->dol_Task;
+        }
+        UnLockDosList(LDF_VOLUMES | LDF_READ);
+    }
+
+    for (i = 0; i < n; i++)
+        (VOID)DoPkt(ports[i], ACTION_FLUSH, 0, 0, 0, 0, 0);
+
+    /* Half a second for the close frame and the FIN to leave: the viewer is
+       told it is a reboot rather than left to call it a dropped connection,
+       and that only works if the bytes get out first. */
+    Delay(25);
+
+    ColdReboot();
 }
 
 VOID http_fb_stop(VOID)
@@ -1563,6 +1625,15 @@ VOID http_fb_stop(VOID)
         fb_inject_buttons(0);
 
     fb_free_buffers();
+
+    /* Last, because this does not return.  Here and not where the word was
+       read: the session had to end first, so the close frame saying why has
+       already gone to the socket. */
+    if (fb_reset)
+    {
+        fb_reset = 0;
+        fb_reboot();
+    }
 }
 
 UWORD http_fb_why(VOID)

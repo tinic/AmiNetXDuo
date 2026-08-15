@@ -101,6 +101,9 @@ static void words_in(void)
     yes(rfb_word_parse("refresh", 7, &ev) && ev.kind == RFB_IN_REFRESH,
         "refresh");
 
+    yes(rfb_word_parse("reset", 5, &ev) && ev.kind == RFB_IN_RESET,
+        "reset");
+
     yes(rfb_word_parse("m 320 128 1", 11, &ev) && ev.kind == RFB_IN_POINTER &&
         ev.a == 320 && ev.b == 128 && ev.c == 1, "m X Y BUTTONS");
 
