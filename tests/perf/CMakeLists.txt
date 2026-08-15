@@ -343,6 +343,34 @@ if(CMAKE_CROSSCOMPILING)
 endif()
 
 
+# ------------------------------------------- the interleaved layout check --
+#
+# The encoder reads the real bitplanes now, so it depends on being told the
+# layout, and a wrong stride shears the picture rather than failing.  Every
+# .pfs capture is plane-major, so the host round trip can only interleave one
+# synthetically.  rfbil asks graphics.library for a real interleaved BitMap,
+# encodes it, decodes it with a receiver of its own and compares every byte of
+# the picture -- and prints what layout the Workbench screen on the machine
+# actually has, which is the question of whether the live path has ever run
+# interleaved at all.
+#
+#   cmake --build build/cm --parallel --target rfbil
+#   AMINETXDUO_RUN_TAG=il ./tools/amiberry-run.sh -t 300 -m A1200 \
+#       build/cm/tests/perf/rfbil
+
+if(CMAKE_CROSSCOMPILING)
+
+    add_executable(rfbil rfbil.c)
+    target_link_libraries(rfbil PRIVATE aminetxduo_rfb aminetxduo_common)
+    set_target_properties(rfbil PROPERTIES OUTPUT_NAME "rfbil")
+
+    if(AMIGA_NDK_INCLUDE)
+        target_include_directories(rfbil PRIVATE "${AMIGA_NDK_INCLUDE}")
+    endif()
+
+endif()
+
+
 # ---------------------------------------------------------- the sampler ----
 #
 # -DAMINETXDUO_PROFILER=ON only.  See prof/CMakeLists.txt for what it is and

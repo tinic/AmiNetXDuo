@@ -115,6 +115,7 @@ typedef struct FbGeometry
     UWORD row_bytes;
     ULONG row_stride;
     ULONG frame_bytes;
+    UWORD interleaved;      /* BMF_INTERLEAVED, as the BitMap reported it */
 } FbGeometry;
 
 /* ------------------------------------------------------------- the module -- */
@@ -386,7 +387,9 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g)
     /* An interleaved bitmap's BytesPerRow spans every plane; the stride from
        one row to the next in a plane is that, and a plane's row is a depth of
        it.  A non-interleaved one has the two equal. */
-    if ((flags & BMF_INTERLEAVED) != 0)
+    g->interleaved = (UWORD)(((flags & BMF_INTERLEAVED) != 0) ? 1 : 0);
+
+    if (g->interleaved)
     {
         if (stride == 0 || (stride % depth) != 0)
         {
@@ -430,7 +433,8 @@ static BOOL fb_geometry_same(const FbGeometry *a, const FbGeometry *b)
 {
     return (BOOL)(a->width == b->width && a->height == b->height &&
                   a->depth == b->depth && a->row_bytes == b->row_bytes &&
-                  a->row_stride == b->row_stride);
+                  a->row_stride == b->row_stride &&
+                  a->interleaved == b->interleaved);
 }
 
 VOID http_fb_geometry(UWORD *w, UWORD *h, UWORD *depth)
@@ -684,11 +688,13 @@ static BOOL fb_take_buffers(const FbGeometry *g)
 
     rfb_scroll_defaults(&fb_cfg);
 
-    /* An interleaved BitMap is the one whose rows within a plane are a whole
-       depth apart; fb_geometry_of() has already divided that out into
-       row_bytes, so the two disagreeing IS the layout. */
+    /* Straight off what the BitMap said, not inferred from the strides.  The
+       encoder walks the real bitplanes now, so this flag has to be the
+       screen's own answer -- GetBitMapAttr(BMA_FLAGS) & BMF_INTERLEAVED, in
+       fb_geometry_of() and nowhere else -- and not something derived from a
+       relationship that happens to hold. */
     fb_flags = (rfb_u32)FB_FLAGS;
-    if (g->row_stride != (ULONG)g->row_bytes)
+    if (g->interleaved)
         fb_flags |= RFB_F_INTERLEAVED;
 
     fb_shadow_len  = rfb_shadow_size(&fb_rg);
