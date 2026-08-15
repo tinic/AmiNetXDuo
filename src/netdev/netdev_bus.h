@@ -150,24 +150,31 @@ static inline VOID netdev_bus_w8(const NetdevBus *bus, UWORD reg, UBYTE val)
     *netdev_bus_at(bus, reg) = val;
 }
 
+/*
+ * THE ASIC BLOCK IS PART OF THE SAME REGISTER FILE, so it takes the same
+ * even/odd split.  ASIC register r is register 16 + r of the one file, and on
+ * a bus with a split window the parity that decides which window it lands in
+ * is the parity of 16 + r, which is the parity of r.
+ *
+ * These used to index bus->asic directly and never look at bus->odd, so the
+ * NE2000 reset register -- ASIC 15, file register 31 -- came out at
+ * 0xA2031F on the PCMCIA slot: an ODD address in the window Gayle reserves
+ * for 16-bit and even 8-bit accesses, which is not a register access on a
+ * real card at all.  cnet.device, written against the hardware, puts it at
+ * 31+odd = 0xA3031E (cnet.i:29,85).  Routing through netdev_bus_at() with the
+ * whole-file index gives exactly that, and is a no-op for every card whose
+ * odd window is NULL, because asic == nic + 16 * stride by construction.
+ */
 static inline UBYTE netdev_bus_ra8(const NetdevBus *bus, UWORD reg)
 {
     NETDEV_BUS_COUNT();
-    if (bus->regmap != NULL)
-        return *netdev_bus_at(bus, (UWORD)(16u + (reg & 15u)));
-
-    return bus->asic[(ULONG)reg << bus->shift];
+    return *netdev_bus_at(bus, (UWORD)(16u + (reg & 15u)));
 }
 
 static inline VOID netdev_bus_wa8(const NetdevBus *bus, UWORD reg, UBYTE val)
 {
     NETDEV_BUS_COUNT();
-    if (bus->regmap != NULL)
-    {
-        *netdev_bus_at(bus, (UWORD)(16u + (reg & 15u))) = val;
-        return;
-    }
-    bus->asic[(ULONG)reg << bus->shift] = val;
+    *netdev_bus_at(bus, (UWORD)(16u + (reg & 15u))) = val;
 }
 
 static inline VOID netdev_bus_rdata(const NetdevBus *bus, UBYTE *dst, UWORD len)

@@ -15,7 +15,9 @@
  *   Read the CIS.  A PCMCIA slot holds an SRAM card or an IDE adapter just as
  *   readily as a network card, and driving the wrong one writes to somebody's
  *   disk.  CopyTuple() walks the tuple chain; CISTPL_FUNCID says what the card
- *   is and the answer has to be 6, LAN adapter.
+ *   is, and when a card carries one the answer has to be 6, LAN adapter.
+ *   It is optional, and a card that omits it is taken at the value
+ *   cnet.device takes it at: a network card.
  *
  *   Configure it.  A PCMCIA card decodes nothing until its Configuration
  *   Option Register is written with an index from CISTPL_CFTABLE_ENTRY.  Until
@@ -35,6 +37,7 @@
 
 #include <exec/types.h>
 #include <exec/nodes.h>
+#include <exec/libraries.h>
 #include <resources/card.h>
 
 #include <proto/exec.h>
@@ -248,10 +251,34 @@ VOID netdev_pcmcia_bind(NetdevUnit *unit)
     pc_unit = unit;
 }
 
+/*
+ * GIVE THE SLOT BACK, AND TAKE THE HANDLE OUT OF THE RESOURCE WITH IT.
+ *
+ * ReleaseCard(handle, 0) drops ownership and leaves the handle enqueued, so
+ * card.resource still holds a Node that lives in this driver's BSS: it hands
+ * the slot to us again on the next insertion, with nothing of ours listening,
+ * and after an expunge the Node is in freed memory.  CARDF_REMOVEHANDLE is
+ * what takes it out, and it is what cnet.device passes on every give-up path
+ * it has (cnetdevice.asm:963-964 for the OpenDevice error, :1325-1329 for the
+ * expunge).  ln_Name is this file's own "the resource still has it" marker,
+ * so it is cleared in the same place, once.
+ */
+static VOID pc_give_up(struct CardHandle *handle)
+{
+    pc_release_card(handle, CARDF_REMOVEHANDLE);
+    handle->cah_CardNode.ln_Name = NULL;
+}
+
 APTR netdev_pcmcia_claim(const NetdevCard *card)
 {
     struct CardHandle *handle = &pc_handle;
-    UBYTE            buf[64];
+    /* Zeroed because CopyTuple() fills it through an inline asm the analyzer
+       cannot see into, so every byte read out of it afterwards reads as
+       uninitialized to -fanalyzer.  This is NOT the pre-zeroing the FUNCID
+       check used to rely on: every pc_tuple() below has its return value
+       checked, so nothing here mistakes a zero this line wrote for a byte the
+       card supplied. */
+    UBYTE            buf[64] = { 0 };
     volatile UBYTE  *attr;
     ULONG            cfg_base;
     UBYTE            index;
@@ -270,9 +297,29 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     pc_removed.is_Data         = NULL;
     pc_removed.is_Code         = (VOID (*)())pc_on_removed;
 
+    /*
+     * CARDF_IFAVAILABLE, AND THIS IS THE BIT THAT MATTERS TO SOMEBODY WHO
+     * NEVER USES PCMCIA AT ALL.
+     *
+     * Without it, OwnCard() does not answer "no" -- it enqueues the handle
+     * and grants the slot later, when a card appears or the present owner
+     * lets go.  anxnet.device is opened once on an A600 or an A1200 with an
+     * empty slot, the probe finds nothing and moves on, and the handle stays
+     * in card.resource's list for the life of the machine.  From then on the
+     * slot is ours the moment anything is plugged into it, with
+     * cah_CardInserted NULL so nothing of ours ever notices, and cnet.device
+     * -- or the CF IDE driver, or anything else -- is locked out until the
+     * next reboot.  With the bit set, OwnCard() returns the current owner and
+     * enqueues nothing, which is the only sensible thing for a driver that is
+     * probing.
+     *
+     * cnet.device sets CARDF_IFAVAILABLE (cnetdevice.asm:4655-4665) for the
+     * same reason, plus CARDF_POSTSTATUS on V39+, which is part of its
+     * interrupt path and not of this one.
+     */
     handle->cah_CardNode.ln_Name = (char *)"anxnet.device";
     handle->cah_CardNode.ln_Pri  = 0;
-    handle->cah_CardFlags        = 0;
+    handle->cah_CardFlags        = CARDF_IFAVAILABLE;
     handle->cah_CardRemoved      = &pc_removed;
     handle->cah_CardInserted     = NULL;
     handle->cah_CardStatus       = NULL;
@@ -282,18 +329,49 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
 
         pc_trace("pc: own ", (ULONG)owner);
         if (owner != NULL)
-            return NULL;        /* somebody else has it, or nothing is in it */
+        {
+            /* Somebody else has it, or nothing is in it.  Release anyway:
+               CARDF_IFAVAILABLE means the handle should not have been
+               enqueued, and a give-up path that leaves the resource holding a
+               pointer into our BSS is the whole of the defect above. */
+            pc_give_up(handle);
+            return NULL;
+        }
     }
 
-    /* What is in the slot.  Anything but a LAN adapter is given straight
-       back: an IDE adapter driven as an NE2000 is a write to a disk. */
-    buf[2] = 0;
-    (VOID)pc_tuple(handle, CISTPL_FUNCID, buf, sizeof(buf));
-    pc_trace("pc: funcid ", (ULONG)buf[2]);
-    if (buf[2] != CIS_FUNC_LAN)
+    /*
+     * What is in the slot.  A card that SAYS it is anything but a LAN adapter
+     * is given straight back: an IDE adapter driven as an NE2000 is a write to
+     * somebody's disk.
+     *
+     * A CARD THAT SAYS NOTHING IS NOT THE SAME AS A CARD THAT SAYS "NOT LAN".
+     * CISTPL_FUNCID is optional in practice and real cards ship without it.
+     * This used to pre-zero buf[2], throw CopyTuple()'s result away, and then
+     * compare the zero it had written itself against 6 -- so a card with no
+     * FUNCID tuple was rejected as function 0, multi-function, and the slot
+     * given back with the card in it working perfectly.  cnet.device assumes a
+     * network card when the tuple is absent and only enforces the value when
+     * it is present (cnetdevice.asm:4682-4688, "did we get one? if not assume
+     * it's a network card... (Neil Cafferkey)"); that workaround exists
+     * because cards in the field do this.
+     *
+     * The two later tuples are NOT optional in the same way: CISTPL_CONFIG
+     * gives the address of the register that has to be written and
+     * CISTPL_CFTABLE_ENTRY the value, and neither can be guessed.  Their
+     * absence stays a rejection.
+     */
+    if (!pc_tuple(handle, CISTPL_FUNCID, buf, sizeof(buf)))
     {
-        pc_release_card(handle, 0);
-        return NULL;
+        pc_trace("pc: no funcid, assume lan ", 0);
+    }
+    else
+    {
+        pc_trace("pc: funcid ", (ULONG)buf[2]);
+        if (buf[2] != CIS_FUNC_LAN)
+        {
+            pc_give_up(handle);
+            return NULL;
+        }
     }
 
     /* CISTPL_CONFIG carries the configuration register base, in the card's
@@ -302,7 +380,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     if (!pc_tuple(handle, CISTPL_CONFIG, buf, sizeof(buf)))
     {
         pc_trace("pc: no config tuple ", 0);
-        pc_release_card(handle, 0);
+        pc_give_up(handle);
         return NULL;
     }
     {
@@ -321,10 +399,41 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     if (!pc_tuple(handle, CISTPL_CFTABLE, buf, sizeof(buf)))
     {
         pc_trace("pc: no cftable ", 0);
-        pc_release_card(handle, 0);
+        pc_give_up(handle);
         return NULL;
     }
     index = (UBYTE)(buf[2] & 0x3f);
+    pc_trace("pc: index ", (ULONG)index);
+
+    /*
+     * PUT THE SOCKET INTO I/O MODE, BEFORE THE COR WRITE AND NOT AFTER IT.
+     *
+     * A socket comes up as a MEMORY socket.  Two bits of CardMiscControl()
+     * change that and both of them have to be set before anything is written
+     * to attribute memory:
+     *
+     *   CARD_ENABLEF_DIGAUDIO  the autodoc's own words are that this
+     *                          "configures the socket for the I/O interface"
+     *                          and that you should ALWAYS try to enable
+     *                          digital audio for I/O cards.  The pin it names
+     *                          is the one Gayle reuses for I/O.
+     *
+     *   CARD_DISABLEF_WP       turns off hardware write protection, "for I/O
+     *                          cards lacking a write-enable line".  A card
+     *                          with no such line leaves the socket reading
+     *                          write-protected, and a write-protected socket
+     *                          swallows the COR write with no error anywhere:
+     *                          the card is never configured, the chip never
+     *                          answers, and the driver reports an empty slot.
+     *
+     * cnet.device does exactly this call, with exactly these two bits, in
+     * exactly this position (cnetdevice.asm:4713-4715, "enable card I/O
+     * functions").  Ours used to make one CardMiscControl() call, with the
+     * V39 interrupt bits, AFTER the COR write -- too late to help it, and on
+     * a V37 or V38 card.resource the bits mean nothing at all.
+     */
+    (VOID)pc_misc_control(handle, CARD_DISABLEF_WP | CARD_ENABLEF_DIGAUDIO);
+    pc_trace("pc: iomode ", (ULONG)(CARD_DISABLEF_WP | CARD_ENABLEF_DIGAUDIO));
 
     /*
      * Write the COR, and check the card answered.
@@ -332,31 +441,39 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
      * WHICH ADDRESS THE COR IS AT is not something the CIS settles.  Attribute
      * memory is byte-per-word, so a card-space offset n is at 0xA00000 + 2n --
      * but CISTPL_CONFIG's TPCC_RADR is written by whoever authored the CIS,
-     * and it is not always in card space.  Amiberry's own NE2000 CIS is the
-     * case in point: it is READ through the doubling (pcmcia_attrs[addr / 2])
-     * and its COR is DECODED without it (addr == 0x3f8, gayle_attr_write).
+     * and card.resource's own CopyTuple() has already undone the doubling for
+     * the bytes it handed back, so what the tuple carries is an address in the
+     * Amiga's attribute window and not one to double again.
      *
-     * So the doubled address is tried first, because that is what the standard
-     * says, and the undoubled one only if the chip is still not there.  An
-     * unconfigured or absent card floats the bus and reads 0xff; a DP8390 in
-     * any state has bits clear in CR.  Nothing is written to the second
-     * address unless the first has already failed to bring a card up.
+     * cnet.device, which is the code that has been run against a hundred real
+     * cards, adds TPCC_RADR to $A00000 and writes there, and does nothing else
+     * (cnetdevice.asm:4705, 4718-4722).  That form goes first here.  Ours went
+     * the other way round -- doubled first -- which put a stray byte into
+     * attribute memory at an address some card is entitled to decode as one of
+     * its own registers before the validated write ever happened.
+     *
+     * The doubled address stays as a fallback only, and is reached only when
+     * the undoubled write has already failed to bring a chip up, so on a card
+     * that works it is never written at all.  An unconfigured or absent card
+     * floats the bus and reads 0xff; a DP8390 in any state has bits clear in
+     * CR, which is what pc_chip_answers() is deciding.
      */
-    attr = (volatile UBYTE *)(ULONG)(0x00a00000UL +
-                                     (cfg_base + PC_COR_OFF) * PC_ATTR_STRIDE);
+    attr = (volatile UBYTE *)(ULONG)(0x00a00000UL + cfg_base + PC_COR_OFF);
     *attr = (UBYTE)(index | PC_COR_LEVEL_IRQ);
+    pc_trace("pc: cor ", (ULONG)(APTR)attr);
 
     if (!pc_chip_answers(card))
     {
         attr = (volatile UBYTE *)(ULONG)(0x00a00000UL +
-                                         cfg_base + PC_COR_OFF);
+                                         (cfg_base + PC_COR_OFF) *
+                                         PC_ATTR_STRIDE);
         *attr = (UBYTE)(index | PC_COR_LEVEL_IRQ);
-        pc_trace("pc: cor undoubled ", (ULONG)(APTR)attr);
+        pc_trace("pc: cor doubled ", (ULONG)(APTR)attr);
 
         if (!pc_chip_answers(card))
         {
             pc_trace("pc: chip silent ", 0);
-            pc_release_card(handle, 0);
+            pc_give_up(handle);
             return NULL;
         }
     }
@@ -365,10 +482,27 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
      * The card's interrupt reaches INT2 through Gayle, and Gayle will not
      * pass it until the status change is enabled.  card.resource owns that
      * register, so this goes through CardMiscControl() rather than a poke.
+     *
+     * THE CARD_INTF_* BITS ARE V39 AND LATER ONLY.  resources/card.h says so
+     * in capitals: "Only set these bits for V39 card.resource or greater
+     * (check resource base VERSION)".  A V37 or V38 resource -- which is what
+     * an unpatched A600 and most A1200s have, Kickstart 3.0 never shipped V39
+     * card.resource -- has no meaning for bit 7 or bit 2 of this argument and
+     * is entitled to do anything at all with them.  The defaults there
+     * already have BSY/IRQ enabled, so the call is not needed on those
+     * machines; it is skipped rather than guessed at.
      */
-    (VOID)pc_misc_control(handle, CARD_INTF_SETCLR | CARD_INTF_IRQ);
+    if (CardResource->lib_Version >= 39)
+    {
+        (VOID)pc_misc_control(handle, CARD_INTF_SETCLR | CARD_INTF_IRQ);
+        pc_trace("pc: irqmode ", (ULONG)CardResource->lib_Version);
+    }
+    else
+    {
+        pc_trace("pc: irqmode skipped v ", (ULONG)CardResource->lib_Version);
+    }
 
-    pc_trace("pc: index ", (ULONG)index);
+    pc_trace("pc: claimed ", (ULONG)card->base);
     return (APTR)(ULONG)card->base;
 }
 
@@ -380,8 +514,8 @@ VOID netdev_pcmcia_release(VOID)
 
     if (CardResource != NULL && handle->cah_CardNode.ln_Name != NULL)
     {
-        (VOID)pc_misc_control(handle, CARD_INTF_IRQ);   /* SETCLR clear */
-        (VOID)pc_release_card(handle, 0);
-        handle->cah_CardNode.ln_Name = NULL;
+        if (CardResource->lib_Version >= 39)
+            (VOID)pc_misc_control(handle, CARD_INTF_IRQ);   /* SETCLR clear */
+        pc_give_up(handle);
     }
 }
