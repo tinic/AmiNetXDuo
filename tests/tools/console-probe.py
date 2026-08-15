@@ -440,7 +440,8 @@ def pfs(path, screens):
 
 # ---------------------------------------------------------------- the run --
 
-def session_picture(host, port, path, seconds, refresh_at=4):
+def session_picture(host, port, path, seconds, refresh_at=4,
+                    refresh_every_geom=False):
     """One whole session, closed cleanly.  Returns (chunky, frames, words).
 
     One `refresh` goes out mid-session, once the picture is already drawn.
@@ -448,11 +449,18 @@ def session_picture(host, port, path, seconds, refresh_at=4):
     the tiles in it are XOR against the shadow, and a viewer that still holds
     the last picture when it lands XORs the two together and goes blank.  It
     is asked for here rather than left to a viewer to trip over.
+
+    refresh_every_geom is the client nobody should write and somebody
+    eventually will: the server answers a refresh with a geom, so asking on
+    every geom is a request to be answered with the thing that provokes the
+    request.  It must converge anyway, and the picture must be right at the
+    end of it.
     """
     wire = Wire(host, port, path)
     screen = None
     frames = 0
     words = 0
+    geoms = 0
     asked = False
     started = time.time()
 
@@ -470,6 +478,9 @@ def session_picture(host, port, path, seconds, refresh_at=4):
                 if len(f) != 6:
                     raise Bad("geom takes six numbers: %r" % text)
                 screen = Screen(f[0], f[1], f[2], f[3], f[4], f[5])
+                geoms += 1
+                if refresh_every_geom:
+                    wire.word("refresh")
             elif text.startswith("pal "):
                 if screen is None:
                     raise Bad("a palette arrived before a geometry")
@@ -489,7 +500,7 @@ def session_picture(host, port, path, seconds, refresh_at=4):
     wire.close()
     if screen is None:
         raise Bad("no geometry word ever arrived")
-    return bytes(screen.chunky()), frames, words
+    return bytes(screen.chunky()), frames, words, geoms
 
 
 def reconnect_check(host, port, path, times, seconds):
@@ -497,12 +508,21 @@ def reconnect_check(host, port, path, times, seconds):
     shots = []
     try:
         for i in range(times + 1):
-            pic, frames, words = session_picture(host, port, path, seconds)
+            pic, frames, words, _ = session_picture(host, port, path, seconds)
             shots.append(pic)
             say("reconnect_%d" % i,
                 "%d frames, %d words, %d distinct pixel values"
                 % (frames, words, len(set(pic))))
             time.sleep(0.5)
+
+        # And the receiver that asks on every geom.  The server answers a
+        # refresh with a geom, so without a guard this is a loop that never
+        # carries a frame; with one it re-syncs at the floor and converges.
+        loop_pic, loop_frames, loop_words, loop_geoms = session_picture(
+            host, port, path, seconds, refresh_every_geom=True)
+        say("refresh_loop",
+            "%d frames, %d words, %d geoms, %d distinct pixel values"
+            % (loop_frames, loop_words, loop_geoms, len(set(loop_pic))))
     except Fault as e:
         say("error", e)
         say("RESULT", "INFRA")
@@ -517,6 +537,16 @@ def reconnect_check(host, port, path, times, seconds):
         if len(set(pic)) < 2:
             problems.append("session %d decoded to one pixel value: the"
                             " screen went blank and stayed blank" % i)
+    if len(set(loop_pic)) < 2:
+        problems.append("the receiver that refreshes on every geom went"
+                        " blank: the resync sequence is being restarted")
+    if loop_pic != shots[0]:
+        differing = sum(1 for a, b in zip(loop_pic, shots[0]) if a != b)
+        problems.append("the receiver that refreshes on every geom ended"
+                        " %d pixels away from session 0" % differing)
+    if loop_frames == 0:
+        problems.append("the receiver that refreshes on every geom was"
+                        " never sent a frame: refresh is ping-ponging")
     # An idle Workbench is the same screen every time.  A session that differs
     # from the first is a session whose copy drifted, which on an idle screen
     # is never corrected.
@@ -617,6 +647,7 @@ def main(argv):
     changed = 0
     changed_before = 0
     typed = 0
+    refreshed = False
     pointed = 0
     point_at = None
     changed_before_pointer = 0
@@ -649,8 +680,17 @@ def main(argv):
                     expect_seq = None
                     say("geom", " ".join(f[1:]))
                     say("frame_bytes", screen.plane * screen.depth)
-                    if want_refresh:
+                    # ONCE, and not on every geom.  A geom already means both
+                    # sides are at zero -- the server clears its shadow
+                    # whenever it queues one -- so a refresh here asks for a
+                    # full frame that is already coming.  Worse, the server
+                    # answers a refresh WITH a geom, so a receiver that asked
+                    # on every one would ask forever.  The server coalesces
+                    # that now, but this file is what the next client author
+                    # reads, and it must not model the wrong thing.
+                    if want_refresh and not refreshed:
                         wire.word("refresh")
+                        refreshed = True
                 elif text.startswith("pal "):
                     if screen is None:
                         raise Bad("a palette arrived before a geometry")
