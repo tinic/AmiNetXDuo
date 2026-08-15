@@ -635,9 +635,9 @@ int main(int argc, char **argv)
         tool_error("the driver publishes a probe record this command cannot "
                    "read");
         say("\n  The record says version %lu, %lu bytes; this command was\n"
-            "  built for version %lu, %lu bytes.  They ship together --\n"
-            "  DEVS:Networks/anxnet.device and C:%s -- so one of the two is\n"
-            "  from a different release.  Update both.\n",
+            "  built for version %lu, %lu bytes.  DEVS:Networks/anxnet.device\n"
+            "  and C:%s ship together, so one of the two is from a different\n"
+            "  release.  Update both.\n",
             (ULONG)cnd_mark.ad_Version, (ULONG)cnd_mark.ad_Size,
             (ULONG)ANXDIAG_VERSION, (ULONG)sizeof(AnxDiagMark),
             (LONG)tool_name);

@@ -290,6 +290,10 @@ VOID tool_explain_device(const char *device, ULONG unit, const char *card)
     {
         tool_printf("  %s unit %lu opens perfectly well on its own, so the\n",
                     (LONG)device, unit);
+        tool_printf("  card and the driver are not the problem.  Something else\n");
+        tool_printf("  stopped the stack: check the interface file for a wrong\n");
+        tool_printf("  ADDRESS or CONFIGURE line, and the debug log for what\n");
+        tool_printf("  failed after the device opened.\n");
         return;
     }
 
