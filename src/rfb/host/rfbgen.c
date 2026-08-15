@@ -135,6 +135,16 @@ static void pack(void)
     }
 }
 
+/* How many frames have gone into the file that is open, so close_pfs() can
+   write exactly that many timestamps after them. */
+static unsigned g_emitted;
+
+/* The cadence the synthetic captures claim.  They are generated, not
+   recorded, so there is no real timing to carry: 40 ms is the interval
+   wbgrab's DELAY 2 produces and is what makes a generated file play at the
+   speed the lab captures do. */
+#define GEN_FRAME_MS    40u
+
 static FILE *open_pfs(const char *dir, const char *name, unsigned frames)
 {
     char path[512];
@@ -146,7 +156,9 @@ static FILE *open_pfs(const char *dir, const char *name, unsigned frames)
     f = fopen(path, "wb");
     if (!f) { perror(path); exit(1); }
 
-    memcpy(hdr, "PFS1", 4);
+    g_emitted = 0;
+
+    memcpy(hdr, "PFS2", 4);
     hdr[4] = (unsigned char)(g_w >> 8);   hdr[5] = (unsigned char)g_w;
     hdr[6] = (unsigned char)(g_h >> 8);   hdr[7] = (unsigned char)g_h;
     hdr[8] = (unsigned char)g_depth;      hdr[9] = 0;
@@ -167,6 +179,27 @@ static void emit(FILE *f)
 {
     pack();
     fwrite(g_planes, 1, (size_t)g_depth * g_bpr * g_h, f);
+    g_emitted++;
+}
+
+/* The frame records go after the frames; see pfs.ts for why they are there
+   and not in front of them.  Twelve bytes each: when, where the pointer was,
+   and which image it was.  A generated capture has no pointer, so the image
+   is 0 and the position with it. */
+static void close_pfs(FILE *f)
+{
+    unsigned i;
+
+    for (i = 0; i < g_emitted; i++) {
+        unsigned long t = (unsigned long)i * GEN_FRAME_MS;
+        unsigned char rec[12];
+
+        memset(rec, 0, sizeof(rec));
+        rec[0] = (unsigned char)(t >> 24); rec[1] = (unsigned char)(t >> 16);
+        rec[2] = (unsigned char)(t >> 8);  rec[3] = (unsigned char)t;
+        fwrite(rec, 1, sizeof(rec), f);
+    }
+    fclose(f);
 }
 
 static void setup(unsigned w, unsigned h, unsigned depth)
@@ -192,7 +225,7 @@ static void seq_idle(const char *dir, const char *name)
         fill(72, 96, 8, 8, (i / 5u) & 1u ? 1 : 0);   /* blinking cursor */
         emit(f);
     }
-    fclose(f);
+    close_pfs(f);
 }
 
 static void seq_type(const char *dir)
@@ -208,7 +241,7 @@ static void seq_type(const char *dir)
         fill(72 + (i % 40u) * 8, 160, 8, 8, 1);
         emit(f);
     }
-    fclose(f);
+    close_pfs(f);
 }
 
 /* A Shell window scrolling text up by `step` pixels a frame: everything inside
@@ -230,7 +263,7 @@ static void seq_scroll(const char *dir, const char *name, unsigned step,
         }
         emit(f);
     }
-    fclose(f);
+    close_pfs(f);
 }
 
 static void seq_drag(const char *dir)
@@ -243,7 +276,7 @@ static void seq_drag(const char *dir)
         text(28 + i * 4, 60 + i * 3, 500, 30, 1, 0);
         emit(f);
     }
-    fclose(f);
+    close_pfs(f);
 }
 
 static void seq_menu(const char *dir)
@@ -261,7 +294,7 @@ static void seq_menu(const char *dir)
         }
         emit(f);
     }
-    fclose(f);
+    close_pfs(f);
 }
 
 static void seq_full(const char *dir)
@@ -276,7 +309,7 @@ static void seq_full(const char *dir)
                                     & ((1u << g_depth) - 1u));
         emit(f);
     }
-    fclose(f);
+    close_pfs(f);
 }
 
 int main(int argc, char **argv)

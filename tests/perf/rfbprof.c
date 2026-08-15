@@ -222,8 +222,11 @@ static const char *r_memtype(APTR p)
 
 /* ---------------------------------------------------------------- .pfs --- */
 
-/* PFS1: magic, w, h, depth, pad, bytes_per_row, frames, then 3<<depth bytes
-   of palette, then frames * frame_bytes of plane-major pixels. */
+/* PFS2: magic, w, h, depth, pad, bytes_per_row, frames, pointers, then
+   3<<depth bytes of palette, then frames * frame_bytes of plane-major pixels.
+   The frame records and the pointer images are after those and this does not
+   read them: it is a profiler for the ENCODER and wants pixels.  See
+   src/tools/web/client/console/pfs.ts for the whole layout. */
 static BOOL r_load_pfs(const char *path)
 {
     BPTR  fh;
@@ -243,9 +246,9 @@ static BOOL r_load_pfs(const char *path)
         return FALSE;
     }
 
-    if (Read(fh, hdr, 16L) != 16L || memcmp(hdr, "PFS1", 4) != 0)
+    if (Read(fh, hdr, 16L) != 16L || memcmp(hdr, "PFS2", 4) != 0)
     {
-        r_log("rfbprof error=not_pfs1 file=%s", path);
+        r_log("rfbprof error=not_pfs2 file=%s", path);
         Close(fh);
         return FALSE;
     }

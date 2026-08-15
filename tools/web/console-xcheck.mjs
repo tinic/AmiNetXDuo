@@ -79,7 +79,7 @@ int main(int argc, char **argv)
     buf = malloc((size_t)n);
     if (fread(buf,1,(size_t)n,f) != (size_t)n) return 2;
     fclose(f);
-    if (memcmp(buf,"PFS1",4)) return 2;
+    if (memcmp(buf,"PFS2",4)) return 2;
 
     w=rd16(buf+4); h=rd16(buf+6); depth=buf[8]; bpr=rd16(buf+10);
     frames=rd16(buf+12); pal=3u*(1u<<depth); stride=bpr*h*depth;

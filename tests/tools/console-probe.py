@@ -465,15 +465,28 @@ def made(path):
 
 
 def pfs(path, screens):
-    """The frames as a .pfs, so tests/tools/pfs-check.py can read them too."""
+    """The frames as a .pfs, so tests/tools/pfs-check.py can read them too.
+
+    `screens` is (screen, planes, millis) per frame, and the milliseconds are
+    when the frame ARRIVED -- a live session has no frame rate, so the file
+    carries what happened rather than a cadence somebody has to guess at.
+    There is no pointer image here: this probe never asked for one, so every
+    frame names image 0.
+    """
     made(path)
     first = screens[0][0]
-    blob = bytearray(b"PFS1")
+    base = screens[0][2]
+    blob = bytearray(b"PFS2")
     blob += struct.pack(">HHBBHHH", first.w, first.h, first.depth, 0,
                         first.bpr, len(screens), 0)
     blob += bytes(first.rgb)
-    for _, planes in screens:
+    for _, planes, _ms in screens:
         blob += planes
+    last = 0
+    for _, _planes, ms in screens:
+        t = max(last, int(round((ms - base) * 1000.0)))
+        last = t
+        blob += struct.pack(">LhhHH", t, 0, 0, 0, 0)
     with open(path, "wb") as fh:
         fh.write(blob)
 
@@ -799,7 +812,7 @@ def main(argv):
                 typed = type_text(wire, typing + "\n")
                 say("typed_keys", typed)
             if pfs_path is not None and len(kept) < 200:
-                kept.append((screen, now))
+                kept.append((screen, now, time.time()))
 
     except Fault as e:
         fault = ("INFRA", str(e))

@@ -131,6 +131,10 @@ function pfsFrames(cap) {
   return out;
 }
 
+function pfsTimes(cap) {
+  return Array.from(cap.times);
+}
+
 /* ------------------------------------------------ the picture is right -- */
 
 /*
@@ -178,20 +182,110 @@ for (const [name, w, h, depth, bpr] of SHAPES) {
 for (const [name, w, h, depth, bpr] of SHAPES) {
   const src = writePfs(synth(w, h, depth, 3, bpr));
   const cap = M.parsePfs(bufferToArrayBuffer(src));
-  const built = M.buildPfs(cap.screen, cap.rgb, pfsFrames(cap));
+  const built = M.buildPfs(cap.screen, cap.rgb, pfsFrames(cap),
+                           pfsTimes(cap), cap.pointerAt, cap.pointers);
 
   ok(name + ": buildPfs writes back the bytes parsePfs read",
      built.length === src.length && built.every((v, i) => v === src[i]),
      built.length + " vs " + src.length + " bytes");
 }
 
+const SCR2 = { width: 640, height: 256, depth: 2, bytesPerRow: 80 };
+const F2 = () => new Uint8Array(2 * 80 * 256);
+
 ok("buildPfs refuses a frame of the wrong length",
-   throws(() => M.buildPfs({ width: 640, height: 256, depth: 2, bytesPerRow: 80 },
-                           new Uint8Array(12), [new Uint8Array(17)])));
+   throws(() => M.buildPfs(SCR2, new Uint8Array(12), [new Uint8Array(17)], [0])));
 
 ok("buildPfs refuses no frames at all",
-   throws(() => M.buildPfs({ width: 640, height: 256, depth: 2, bytesPerRow: 80 },
-                           new Uint8Array(12), [])));
+   throws(() => M.buildPfs(SCR2, new Uint8Array(12), [], [])));
+
+ok("buildPfs refuses a timestamp count that is not the frame count",
+   throws(() => M.buildPfs(SCR2, new Uint8Array(12), [F2(), F2()], [0])));
+
+/* --------------------------------------------- the clock and the pointer -- */
+
+/*
+ * A recording has no rate, so what is checked is that IRREGULAR intervals
+ * survive exactly: 0, 17, 900, 901 is an idle screen with a burst in it,
+ * which is what a frames-per-second gadget could never have represented.
+ */
+{
+  const cap = M.parsePfs(bufferToArrayBuffer(Buffer.from(
+    M.buildPfs(SCR2, new Uint8Array(12), [F2(), F2(), F2(), F2()],
+               [1000.4, 1017.6, 1900.2, 1901.0]))));
+
+  ok("the timeline is rebased on the first frame and kept exactly",
+     Array.from(cap.times).join(",") === "0,17,900,901",
+     Array.from(cap.times).join(","));
+
+  ok("the duration is the last timestamp", M.pfsDuration(cap) === 901,
+     String(M.pfsDuration(cap)));
+
+  ok("a capture with no pointer names image 0 on every frame",
+     cap.pointers.length === 0 && cap.pointerAt.every((p) => p.image === 0));
+}
+
+/*
+ * The pointer half.  A 16x16x2 sprite with a hotspot away from the corner and
+ * a 2x1 scale is the ordinary hires case; what is checked is that every field
+ * comes back, the colours included -- they come from the SPRITE palette and
+ * not the screen's, so a reader that took them from the screen would draw the
+ * wrong pointer and no other check here would notice.
+ */
+{
+  const ptr = {
+    width: 16, height: 16, depth: 2, xScale: 2, yScale: 1,
+    hotX: 1, hotY: 2,
+    rgb: Uint8Array.from([0xee, 0x22, 0x22, 0x11, 0x33, 0xff, 0xff, 0xff, 0xff]),
+    bits: Uint8Array.from({ length: 2 * 2 * 16 }, (_v, i) => i & 0xff),
+  };
+  const src = M.buildPfs(SCR2, new Uint8Array(12), [F2(), F2()], [0, 40],
+                         [{ x: 12, y: 34, image: 1 },
+                          { x: -3, y: 300, image: 0 }], [ptr]);
+  const cap = M.parsePfs(bufferToArrayBuffer(Buffer.from(src)));
+  const got = cap.pointers[0];
+
+  ok("a pointer image survives the round trip",
+     cap.pointers.length === 1 && got.width === 16 && got.height === 16 &&
+     got.depth === 2 && got.xScale === 2 && got.yScale === 1 &&
+     got.hotX === 1 && got.hotY === 2,
+     JSON.stringify(cap.pointers.length ? {
+       w: got.width, h: got.height, d: got.depth,
+       sx: got.xScale, sy: got.yScale, hx: got.hotX, hy: got.hotY } : null));
+
+  ok("the sprite carries its own colours, three of them at depth 2",
+     got.rgb.length === 9 &&
+     Array.from(got.rgb).join(",") === Array.from(ptr.rgb).join(","));
+
+  ok("the sprite bits come back byte for byte",
+     got.bits.length === ptr.bits.length &&
+     got.bits.every((v, i) => v === ptr.bits[i]));
+
+  ok("a negative position survives, which an overscan screen produces",
+     cap.pointerAt[1].x === -3 && cap.pointerAt[1].y === 300 &&
+     cap.pointerAt[1].image === 0,
+     JSON.stringify(cap.pointerAt[1]));
+
+  ok("the writer reproduces a file with a pointer in it",
+     (() => {
+       const back = M.buildPfs(cap.screen, cap.rgb, pfsFrames(cap),
+                               pfsTimes(cap), cap.pointerAt, cap.pointers);
+       return back.length === src.length && back.every((v, i) => v === src[i]);
+     })());
+
+  ok("a frame naming an image that is not in the file is refused",
+     throws(() => M.parsePfs(bufferToArrayBuffer(Buffer.from(
+       M.buildPfs(SCR2, new Uint8Array(12), [F2(), F2()], [0, 40],
+                  [{ x: 0, y: 0, image: 3 }, { x: 0, y: 0, image: 0 }],
+                  [ptr]))))));
+}
+
+ok("a file with the old magic is refused rather than read as this one",
+   (() => {
+     const src = M.buildPfs(SCR2, new Uint8Array(12), [F2()], [0]);
+     src[3] = 0x31;
+     return throws(() => M.parsePfs(bufferToArrayBuffer(Buffer.from(src))));
+   })());
 
 /* ---------------------------------------------- the container complains -- */
 
@@ -383,7 +477,8 @@ if (!existsSync(CONTENT)) {
       const raw = readFileSync(join(at, name));
       const cap = M.parsePfs(bufferToArrayBuffer(raw));
 
-      const back = M.buildPfs(cap.screen, cap.rgb, pfsFrames(cap));
+      const back = M.buildPfs(cap.screen, cap.rgb, pfsFrames(cap),
+                              pfsTimes(cap), cap.pointerAt, cap.pointers);
       ok(dir + "/" + name + ": buildPfs reproduces the file exactly",
          back.length === raw.length && back.every((v, i) => v === raw[i]),
          back.length + " vs " + raw.length + " bytes");

@@ -24,7 +24,15 @@
  */
 
 import { attachInput } from "./input";
-import { PFS_MAX_FRAMES, buildPfs, frameAt, parsePfs, type Capture } from "./pfs";
+import {
+  PFS_MAX_FRAMES,
+  buildPfs,
+  frameAt,
+  parsePfs,
+  pfsDuration,
+  type Capture,
+  type PointerAt,
+} from "./pfs";
 import { frameBytes, palette32, pixelAspect } from "./planar";
 import {
   applyUpdate,
@@ -98,47 +106,107 @@ function showPalette(rgb: Uint8Array, depth: number): void {
 let cap: Capture | null = null;
 let frame = 0;
 let playing = false;
-let fps = 25;
-let lastTick = 0;
 let raf = 0;
+
+/*
+ * WHERE THE PLAYHEAD IS, IN THE RECORDING'S OWN MILLISECONDS.
+ *
+ * `startedAt` is the document clock reading that corresponds to `startedFrom`
+ * on the file's timeline, so the playhead is (now - startedAt) + startedFrom.
+ * Re-anchored on every play, pause and scrub, which is what keeps a seek from
+ * making the next frame jump.
+ */
+let startedAt = 0;
+let startedFrom = 0;
 
 const playEl = $("play") as HTMLButtonElement;
 const prevEl = $("prev") as HTMLButtonElement;
 const nextEl = $("next") as HTMLButtonElement;
 const scrubEl = $("scrub") as HTMLInputElement;
 
+/* Seconds and a decimal, which is what a duration under a minute reads as
+   and what a scrub position has to be compared against. */
+function secs(ms: number): string {
+  return (ms / 1000).toFixed(1) + "s";
+}
+
 function showFrame(i: number): void {
   if (cap === null) return;
   frame = ((i % cap.frameCount) + cap.frameCount) % cap.frameCount;
   view.paint(cap.frames, frameAt(cap, frame));
+
+  /*
+   * The pointer where the recording says it was.  A capture written before
+   * anything tracked it has image 0 at 0,0 on every frame, which is what the
+   * `image === 0 && x === 0 && y === 0` test reads as "nothing recorded" --
+   * a pointer genuinely parked in the top left corner for a whole recording
+   * is the one case this gets wrong, and drawing nothing there is better than
+   * drawing an arrow on a file that never had one.
+   */
+  {
+    const p = cap.pointerAt[frame];
+    if (p === undefined || (p.image === 0 && p.x === 0 && p.y === 0)) {
+      view.clearPointer();
+    } else {
+      view.movePointer(p.x, p.y);
+    }
+  }
+
   scrubEl.value = String(frame);
-  countEl.textContent = (frame + 1) + " / " + cap.frameCount;
+  countEl.textContent = (frame + 1) + " / " + cap.frameCount + "  " +
+                        secs(cap.times[frame]) + " / " + secs(pfsDuration(cap));
   perfEl.textContent = "decode " + view.lastDecodeMs.toFixed(2) + " ms";
 }
 
+/* Put the playhead at a frame and anchor the clock to it, so playing on from
+   a scrub or a step carries on from where the picture actually is. */
+function seek(i: number): void {
+  if (cap === null) return;
+  showFrame(i);
+  startedFrom = cap.times[frame];
+  startedAt = performance.now();
+}
+
 /*
- * rAF with an accumulator rather than setInterval.  A capture has a rate and
- * the display has a rate and they are not the same number: stepping on the
- * display's clock and dropping or repeating a frame when the two disagree is
- * what keeps 25 fps looking like 25 fps on a 120 Hz panel.
+ * rAF against the RECORDING'S clock, not the display's and not a rate.
+ *
+ * A live capture has no frame rate: an idle screen produces a frame every few
+ * seconds and a window opening produces a burst, so the file carries the
+ * milliseconds each frame was taken at and this walks that timeline in real
+ * time.  The accumulator idea survives the change -- the display's rate and
+ * the recording's still do not line up -- but what it does now is HOLD a frame
+ * whose successor is not due yet and SKIP past any that fell behind, rather
+ * than step one frame per interval.
  */
 function tick(now: number): void {
   raf = 0;
   if (!playing || cap === null) return;
 
-  if (now - lastTick >= 1000 / fps) {
-    lastTick = now;
-    showFrame(frame + 1);
+  const at = startedFrom + (now - startedAt);
+
+  if (at >= pfsDuration(cap)) {
+    /* Round again from the top, on the same clock. */
+    showFrame(0);
+    startedFrom = 0;
+    startedAt = now;
+  } else {
+    let next = frame;
+    while (next + 1 < cap.frameCount && cap.times[next + 1] <= at) next++;
+    if (next !== frame) showFrame(next);
   }
+
   raf = requestAnimationFrame(tick);
 }
 
 function setPlaying(on: boolean): void {
   playing = on && cap !== null;
   playEl.textContent = playing ? "Pause" : "Play";
-  if (playing && raf === 0) {
-    lastTick = 0;
-    raf = requestAnimationFrame(tick);
+  if (playing && cap !== null) {
+    /* From wherever the picture is, and from the top if it is at the end. */
+    startedFrom = frame + 1 >= cap.frameCount ? 0 : cap.times[frame];
+    if (startedFrom === 0 && frame + 1 >= cap.frameCount) showFrame(0);
+    startedAt = performance.now();
+    if (raf === 0) raf = requestAnimationFrame(tick);
   }
 }
 
@@ -166,15 +234,16 @@ function loadCapture(name: string, buf: ArrayBuffer): void {
   nextEl.disabled = c.frameCount < 2;
 
   srcEl.textContent = name;
-  say("up", "capture, " + c.frameCount + " frames");
-  showFrame(0);
+  say("up", "capture, " + c.frameCount + " frames over " +
+             secs(pfsDuration(c)));
+  seek(0);
   setPlaying(c.frameCount > 1);
 }
 
 playEl.onclick = () => setPlaying(!playing);
-prevEl.onclick = () => { setPlaying(false); showFrame(frame - 1); };
-nextEl.onclick = () => { setPlaying(false); showFrame(frame + 1); };
-scrubEl.oninput = () => { setPlaying(false); showFrame(Number(scrubEl.value)); };
+prevEl.onclick = () => { setPlaying(false); seek(frame - 1); };
+nextEl.onclick = () => { setPlaying(false); seek(frame + 1); };
+scrubEl.oninput = () => { setPlaying(false); seek(Number(scrubEl.value)); };
 
 /* ------------------------------------------------------------ the source -- */
 
@@ -506,6 +575,21 @@ interface Rec {
   screen: { width: number; height: number; depth: number; bytesPerRow: number };
   rgb: Uint8Array;
   frames: Uint8Array<ArrayBuffer>[];
+  /* When each frame arrived, on the page's clock.  buildPfs rebases them on
+     the first, so what goes in the file is milliseconds from frame zero. */
+  times: number[];
+  /*
+   * Where the pointer was on each frame.
+   *
+   * THE POSITION IS REAL AND THE IMAGE IS NOT THERE YET.  Absolute pointer
+   * positions are what this viewer SENDS -- the Amiga's pointer is put where
+   * the browser's is -- so the position it is drawing is where the Amiga's
+   * pointer was, and recording it is recording what happened.  The IMAGE is a
+   * hardware sprite on the far side and no word carries one yet, so every
+   * frame names image 0 and the file has no pointer table.  Nothing here
+   * invents a shape to fill the field.
+   */
+  pointerAt: PointerAt[];
   bytes: number;
   part: number;
 }
@@ -527,20 +611,25 @@ function recFlush(): boolean {
 
   const name = recName(rec);
   try {
-    download(new Blob([buildPfs(rec.screen, rec.rgb, rec.frames)],
+    download(new Blob([buildPfs(rec.screen, rec.rgb, rec.frames, rec.times,
+                                rec.pointerAt)],
                       { type: "application/octet-stream" }), name);
   } catch (e) {
     say("down", "the recording would not write: " +
                 (e instanceof Error ? e.message : String(e)));
     return false;
   }
-  say("up", "saved " + name + ", " + rec.frames.length + " frames");
+  say("up", "saved " + name + ", " + rec.frames.length + " frames over " +
+            secs(rec.times[rec.times.length - 1] - rec.times[0]));
   return true;
 }
 
 function recShow(): void {
   if (rec === null) return;
+  const ran = rec.times.length === 0
+    ? 0 : rec.times[rec.times.length - 1] - rec.times[0];
   countEl.textContent = "REC " + rec.frames.length + " frames  " +
+                        secs(ran) + "  " +
                         (rec.bytes / 1048576).toFixed(1) + " MB";
 }
 
@@ -550,6 +639,8 @@ function recStart(): void {
     screen: geom.screen,
     rgb: liveRgb.slice(),
     frames: [],
+    times: [],
+    pointerAt: [],
     bytes: 0,
     part: 1,
   };
@@ -575,6 +666,8 @@ function recRoll(): void {
     screen: geom.screen,
     rgb: liveRgb.slice(),
     frames: [],
+    times: [],
+    pointerAt: [],
     bytes: 0,
     part,
   };
@@ -584,7 +677,11 @@ function recRoll(): void {
 function recTake(planar: Uint8Array): void {
   if (rec === null) return;
 
+  const p = view.pointerAt;
   rec.frames.push(planar.slice());
+  rec.times.push(performance.now());
+  rec.pointerAt.push(p === null ? { x: 0, y: 0, image: 0 }
+                                : { x: p.x, y: p.y, image: 0 });
   rec.bytes += planar.length;
 
   if (rec.frames.length >= PFS_MAX_FRAMES) recRoll();

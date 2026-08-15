@@ -174,17 +174,30 @@ export function synth(w, h, depth, frames, bytesPerRow) {
 
 /* --------------------------------------------------------------- the file -- */
 
+/* The cadence a synthesised capture claims.  It was not recorded, so there is
+   no real timing to carry; 40 ms is what wbgrab's DELAY 2 produces and is what
+   makes a synthetic file play at the speed a lab capture does. */
+const SYNTH_FRAME_MS = 40;
+
 export function writePfs(cap) {
   const head = Buffer.alloc(16);
-  head.write("PFS1", 0, "latin1");
+  head.write("PFS2", 0, "latin1");
   head.writeUInt16BE(cap.screen.width, 4);
   head.writeUInt16BE(cap.screen.height, 6);
   head.writeUInt8(cap.screen.depth, 8);
   head.writeUInt8(0, 9);
   head.writeUInt16BE(cap.screen.bytesPerRow, 10);
   head.writeUInt16BE(cap.frameCount, 12);
-  head.writeUInt16BE(0, 14);
-  return Buffer.concat([head, cap.rgb, Buffer.from(cap.frames)]);
+  head.writeUInt16BE(0, 14);          /* no pointer images */
+
+  /* Twelve bytes a frame: when, where the pointer was, which image it was.
+     A synthesised capture has no pointer, so everything past the time is 0. */
+  const recs = Buffer.alloc(cap.frameCount * 12);
+  for (let i = 0; i < cap.frameCount; i++) {
+    recs.writeUInt32BE(i * SYNTH_FRAME_MS, i * 12);
+  }
+
+  return Buffer.concat([head, cap.rgb, Buffer.from(cap.frames), recs]);
 }
 
 /* ---------------------------------------------------------- the placeholder -- */

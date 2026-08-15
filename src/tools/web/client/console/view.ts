@@ -278,4 +278,11 @@ export class View {
     this.ptrCtx.clearRect(was.x - HOT_X, was.y - HOT_Y, POINTER_W, POINTER_H);
     this.drawnAt = null;
   }
+
+  /* Where the pointer is, in Amiga pixels, or null when it is not on the
+     screen.  The recorder asks, because a recording that loses where somebody
+     was pointing loses most of what it was made for. */
+  get pointerAt(): { x: number; y: number } | null {
+    return this.drawnAt;
+  }
 }
