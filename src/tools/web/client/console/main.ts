@@ -506,11 +506,21 @@ setInterval(() => {
 
 const aspectEl = $("aspect") as HTMLSelectElement;
 const zoomEl = $("zoom") as HTMLSelectElement;
+const logTogEl = $("logtog") as HTMLButtonElement;
 
 aspectEl.onchange = () => view.setAspect(aspectEl.value as Aspect);
 zoomEl.onchange = () => {
   const v = zoomEl.value;
   view.setZoom((v === "fit" ? "fit" : Number(v)) as Zoom);
+};
+
+/* Not remembered across reloads, which is what the aspect and zoom gadgets
+   beside it do: one persistence rule for the deck, and it is "none". */
+logTogEl.onclick = () => {
+  const on = !document.body.classList.contains("log");
+  document.body.classList.toggle("log", on);
+  logTogEl.setAttribute("aria-pressed", String(on));
+  if (on) logEl.scrollTop = logEl.scrollHeight;
 };
 
 addEventListener("keydown", (e) => {
