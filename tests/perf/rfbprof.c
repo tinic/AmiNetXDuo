@@ -164,9 +164,12 @@ static ULONG r_us(ULONG ticks)
     else
         ticks = 0UL;
 
-    if (ticks < 4000000UL)
-        return (ULONG)((ticks * 1000UL) / (r_rate / 1000UL));
-    return (ticks / r_rate) * 1000000UL;
+    /* Whole seconds first, then the remainder scaled -- (ticks % rate) * 1000
+       is at most 7.1e8 and fits, where ticks * 1000 stops fitting at six
+       seconds.  The first cut of this dropped the remainder entirely and
+       printed every arm over six seconds as a whole number of seconds. */
+    return (ticks / r_rate) * 1000000UL
+         + (((ticks % r_rate) * 1000UL) / (r_rate / 1000UL));
 }
 
 /* --------------------------------------------------------------- state --- */
