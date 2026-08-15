@@ -47,6 +47,15 @@
  * emitted.  A tile is one continuous byte stream across its rows, not one run
  * per row.
  *
+ * PB_XOR and RFB_OP_COPY are both against the SHADOW -- the frame the decoder
+ * last applied -- so a frame decodes correctly only where the decoder's shadow
+ * is the one the encoder had.  A full frame, every tile and no copies, is
+ * therefore decodable only from an all-zero shadow, and is what the encoder
+ * emits once its shadow has been cleared.  Nothing in a frame says whether it
+ * is a full one, so a decoder cannot tell and must not guess: the barrier is
+ * `geom`, which zeroes the shadow at both ends, and the frame after one is
+ * always full.  See rfb_words.h for the words that move that barrier.
+ *
  * SPDX-License-Identifier: MIT
  */
 

@@ -28,6 +28,11 @@
 
 command -v say >/dev/null 2>&1 || say() { printf '%s=%s\n' "$1" "$2"; }
 
+# The SHAPE of the assembled tree, not the contents.  The cache is keyed on the
+# ADFs' timestamps, which do not move when this file changes what it does with
+# them, so a tree built by an older version has to be recognised and rebuilt.
+WB31_LAYOUT=2
+
 wb31_tool() {
     local candidate
     if [ -n "${AMINETXDUO_XDFTOOL:-}" ] && [ -x "$AMINETXDUO_XDFTOOL" ]; then
@@ -75,6 +80,7 @@ wb31_assemble() {
     local stale=0 disk adf tool scratch pair want
 
     [ -d "$sys" ] && [ -f "$stamp" ] || stale=1
+    [ "$(cat "$stamp" 2>/dev/null)" = "layout $WB31_LAYOUT" ] || stale=1
     for disk in workbench fonts locale storage extras; do
         adf="$adfdir/amiga-wb31_$disk.adf"
         [ -f "$adf" ] || {
@@ -105,15 +111,36 @@ wb31_assemble() {
             mkdir -p "$sys/${pair##*:}"
             cp -R "$scratch/${pair%%:*}/." "$sys/${pair##*:}/"
         done
+        # A HARD DRIVE, NOT FIVE FLOPPIES.
+        #
+        # Commodore's installer merges the Extras disk INTO SYS:, which is why
+        # a real 3.1 hard drive has SYS:Prefs/ScreenMode and SYS:Tools.  The
+        # floppy layout leaves them under Extras/, so the Prefs drawer holds
+        # nothing but Env-Archive and Presets and there is no ScreenMode
+        # anywhere a person would look -- which is exactly what a viewer of
+        # this screen goes looking for first.
+        #
+        # Copied and not moved: Extras/ stays as it was, so anything that
+        # already knew where these lived still finds them there.
+        for pair in "Prefs:Prefs" "Tools:Tools" "System:System"; do
+            [ -d "$scratch/extras/${pair%%:*}" ] || continue
+            mkdir -p "$sys/${pair##*:}"
+            cp -R "$scratch/extras/${pair%%:*}/." "$sys/${pair##*:}/"
+        done
+        # The drawer icon too, or Workbench shows SYS:Tools as a plain file.
+        [ -f "$scratch/extras/Tools.info" ] &&
+            cp "$scratch/extras/Tools.info" "$sys/Tools.info"
+
         rm -rf "$scratch"
 
         # A directory hard drive takes its Amiga protection bits from the
         # host's mode bits, and xdftool unpacks everything 0644, which would
         # leave every command in C: without its E bit.
         chmod -R a+rx "$sys"
-        : > "$stamp"
+        printf 'layout %s\n' "$WB31_LAYOUT" > "$stamp"
         for want in C/Assign C/LoadWB C/Wait C/Dir S/Startup-Sequence \
-                    Fonts/topaz.font Devs/system-configuration; do
+                    Fonts/topaz.font Devs/system-configuration \
+                    Prefs/ScreenMode Prefs/Palette Tools/Lacer; do
             [ -e "$sys/$want" ] || {
                 say error "assembled SYS: has no $want"
                 return 2

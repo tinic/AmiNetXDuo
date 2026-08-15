@@ -203,6 +203,55 @@ EOF
 echo "Hello from an Amiga." > "$HD/Public/readme.txt"
 wb31_screenmode_prefs "$HD" "$DEPTH"
 
+# DH0:Modes -- one ScreenMode prefs file per mode worth changing to, and a
+# script that walks them.  A mode change can only be asked for from INSIDE the
+# guest, and the Prefs editor is a GUI, so this is the way to drive one from a
+# harness.  Copying a file over ENV:Sys/screenmode.prefs is exactly what the
+# editor's Use button does: IPrefs has a notification on it and applies what it
+# finds.
+#
+# ANY OPEN WINDOW BLOCKS IT.  Intuition cannot reset a screen with windows on
+# it and puts up "Please close all windows, except drawers" instead, so a
+# driver arms the sweep and then ends the boot Shell:
+#
+#   console-probe.py ADDR PORT --type "Run >NIL: <NIL: C:Execute DH0:Modes/sweep"
+#   console-probe.py ADDR PORT --type "EndCLI"
+#
+# The waits in the script are what that dance needs room for.
+mkdir -p "$HD/Modes"
+python3 - "$HD/Modes" <<'MODES'
+import os, struct, sys
+PAL, HIRES, LACE, SUPER = 0x00021000, 0x00008000, 0x00000004, 0x00008020
+MODES = {
+    "d2":     (PAL | HIRES,        640, 256, 2),
+    "d4":     (PAL | HIRES,        640, 256, 4),
+    "d8":     (PAL | HIRES,        640, 256, 8),
+    "lace":   (PAL | HIRES | LACE, 640, 512, 4),
+    "shires": (PAL | SUPER,       1280, 256, 2),
+}
+def chunk(tag, p):
+    return tag + struct.pack(">L", len(p)) + p + (b"\0" if len(p) & 1 else b"")
+for name, (did, w, h, d) in MODES.items():
+    body = (b"PREF"
+            + chunk(b"PRHD", struct.pack(">BB4B", 0, 0, 0, 0, 0, 0))
+            + chunk(b"SCRM", struct.pack(">4L L HHHH", 0, 0, 0, 0, did, w, h, d, 0)))
+    with open(os.path.join(sys.argv[1], name + ".prefs"), "wb") as fh:
+        fh.write(b"FORM" + struct.pack(">L", len(body)) + body)
+MODES
+
+cat > "$HD/Modes/sweep" <<'SWEEP'
+C:Wait 30
+C:Copy DH0:Modes/d8.prefs ENV:Sys/screenmode.prefs
+C:Wait 16
+C:Copy DH0:Modes/lace.prefs ENV:Sys/screenmode.prefs
+C:Wait 16
+C:Copy DH0:Modes/shires.prefs ENV:Sys/screenmode.prefs
+C:Wait 16
+C:Copy DH0:Modes/d2.prefs ENV:Sys/screenmode.prefs
+C:Wait 16
+C:Copy DH0:Modes/d4.prefs ENV:Sys/screenmode.prefs
+SWEEP
+
 # THE SERVER'S OWN LOG MAY NOT GO TO A WINDOW ON THE MIRRORED SCREEN
 #
 #   `Run >file C:httpd ... -v` redirects RUN, not httpd: the file gets one
