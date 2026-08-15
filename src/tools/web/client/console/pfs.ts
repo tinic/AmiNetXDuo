@@ -53,6 +53,62 @@ export function frameAt(c: Capture, i: number): number {
   return i * c.stride;
 }
 
+/* The most a frameCount field can hold, which is what bounds one file. */
+export const PFS_MAX_FRAMES = 0xffff;
+
+/*
+ * The other direction: planar frames the viewer already holds, into the bytes
+ * parsePfs reads back.
+ *
+ * Here rather than in the recorder because the two have to agree byte for
+ * byte and this is the file that says what the layout is.  The frames go in
+ * as they are -- plane-major, bytesPerRow strides, the same buffer the
+ * decoder wrote and the canvas was painted from -- so a recording is what was
+ * on the screen and not a re-planarisation of what was drawn from it.
+ */
+export function buildPfs(screen: Screen, rgb: Uint8Array,
+                         frames: readonly Uint8Array[]) {
+  const fault = screenFault(screen);
+  if (fault !== null) throw new Error("cannot write a .pfs with " + fault);
+  if (frames.length === 0) throw new Error("no frames to write");
+  if (frames.length > PFS_MAX_FRAMES) {
+    throw new Error(frames.length + " frames; the header counts to " +
+                    PFS_MAX_FRAMES);
+  }
+
+  const palBytes = 3 * (1 << screen.depth);
+  if (rgb.length < palBytes) {
+    throw new Error("palette is " + rgb.length + " bytes, depth " +
+                    screen.depth + " needs " + palBytes);
+  }
+
+  const stride = frameBytes(screen);
+  const out = new Uint8Array(PFS_HEADER + palBytes + frames.length * stride);
+  const v = new DataView(out.buffer);
+
+  out[0] = 0x50; out[1] = 0x46; out[2] = 0x53; out[3] = 0x31;
+  v.setUint16(4, screen.width);
+  v.setUint16(6, screen.height);
+  out[8] = screen.depth;
+  out[9] = 0;
+  v.setUint16(10, screen.bytesPerRow);
+  v.setUint16(12, frames.length);
+  v.setUint16(14, 0);
+  out.set(rgb.subarray(0, palBytes), PFS_HEADER);
+
+  let at = PFS_HEADER + palBytes;
+  for (const f of frames) {
+    if (f.length !== stride) {
+      throw new Error("a frame is " + f.length + " bytes, this screen is " +
+                      stride);
+    }
+    out.set(f, at);
+    at += stride;
+  }
+
+  return out;
+}
+
 /*
  * Parse, or throw a sentence a person can act on.
  *

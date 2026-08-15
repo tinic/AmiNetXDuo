@@ -210,7 +210,9 @@ input[type=range] { width: 14rem; accent-color: var(--pen3); }
 #log { display: none; }
 body.log #log { display: block; }
 
-#logtog[aria-pressed=true] {
+#rec[aria-pressed=true] { background: var(--pen4); color: var(--pen2); }
+
+#rec[aria-pressed=true], #logtog[aria-pressed=true] {
   border-top-color: var(--pen1);
   border-left-color: var(--pen1);
   border-right-color: var(--pen2);

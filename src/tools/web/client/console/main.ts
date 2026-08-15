@@ -24,7 +24,7 @@
  */
 
 import { attachInput } from "./input";
-import { frameAt, parsePfs, type Capture } from "./pfs";
+import { PFS_MAX_FRAMES, buildPfs, frameAt, parsePfs, type Capture } from "./pfs";
 import { frameBytes, palette32, pixelAspect } from "./planar";
 import {
   applyUpdate,
@@ -218,6 +218,11 @@ let planes: Uint8Array | null = null;
 let scratch = new Uint8Array(0);
 let expectSeq = -1;
 
+/* The live palette in RGB8.  The View keeps the 32-bit form it paints with;
+   a .pfs header wants the bytes that came off the wire, and the recorder is
+   the only thing that asks for them. */
+let liveRgb: Uint8Array = new Uint8Array(0);
+
 /* Frames arrive before the palette does, so there is one to start with: grey
    is what an Amiga screen is before LoadRGB4 runs, and a black one reads as
    the viewer having failed. */
@@ -259,9 +264,13 @@ function heard(w: string): void {
       expectSeq = -1;
       cap = null;
       const rgb = greyPalette(g.screen.depth);
+      liveRgb = rgb;
       view.setScreen(g.screen, palette32(rgb, g.screen.depth));
       showGeometry();
       showPalette(rgb, g.screen.depth);
+      /* Before the pal that follows, so the file that closes here keeps the
+         palette its frames were drawn with. */
+      recRoll();
       /*
        * NO `refresh` HERE.  A geom already means both sides are at zero: the
        * server clears its shadow whenever it queues one -- at the start of a
@@ -280,9 +289,11 @@ function heard(w: string): void {
     if (w.startsWith("pal ")) {
       if (geom === null) return;
       const rgb = paletteFromWord(w, geom.screen.depth);
+      liveRgb = rgb;
       view.setPalette(palette32(rgb, geom.screen.depth));
       showPalette(rgb, geom.screen.depth);
       if (planes !== null) view.paint(planes, 0);
+      recRoll();
       return;
     }
   } catch (e) {
@@ -322,6 +333,7 @@ function update(buf: ArrayBuffer): void {
   expectSeq = (d.seq + 1) & 0xffff;
 
   view.paint(planes, 0, d);
+  recTake(planes);
 
   inBytes += d.bytes;
   inFrames++;
@@ -443,6 +455,17 @@ function stamp(): string {
          p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
 }
 
+/* The object URL is the only thing here that would otherwise be held for the
+   life of the page, one per file saved. */
+function download(blob: Blob, name: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
 function saveShot(native: boolean): void {
   const shot = view.snapshot(native);
   if (shot === null) { say("down", "there is no screen to save yet"); return; }
@@ -451,19 +474,128 @@ function saveShot(native: boolean): void {
     if (blob === null) { say("down", "the screenshot would not encode"); return; }
     const name = "amiga-" + shot.w + "x" + shot.h +
                  (native ? "-native" : "") + "-" + stamp() + ".png";
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    a.click();
-    /* The object URL is the only thing here that would otherwise be held for
-       the life of the page, one per screenshot. */
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    download(blob, name);
     say("up", "saved " + name);
   }, "image/png");
 }
 
 shotEl.onclick = (e: MouseEvent) => saveShot(e.shiftKey);
+
+/* ---------------------------------------------------------- the recorder -- */
+
+/*
+ * THE LIVE SESSION INTO A .pfs THE PLAYER ON THIS PAGE CAN OPEN
+ *
+ * The planar frames, as the decoder wrote them and the canvas was painted
+ * from them -- not a re-planarisation of the RGB, which would be a second
+ * encoder to be wrong in a second way.
+ *
+ * ONE FILE HOLDS ONE GEOMETRY AND ONE PALETTE, so a `geom` or a `pal` ends
+ * the file and starts another.  Following the frontmost screen makes a swap
+ * ordinary rather than rare -- opening Palette changes size, depth, stride and
+ * colours at once -- and the alternative to rolling is either stopping at that
+ * moment, which loses the part somebody was recording FOR, or appending frames
+ * of one shape into a header that describes another, which is a file that
+ * parses and decodes to rubbish.
+ *
+ * A `pal` with no frames yet is not a roll: a geom is always followed by one,
+ * and the new file has not started.  The case that does roll on a palette
+ * alone is something animating the ColorMap -- dragging a slider in Palette
+ * Preferences is the one that produces a file a second, and it is the price of
+ * every file being decodable on its own.
+ *
+ * No cap, no ring, no duration limit.  The only bound is the format's
+ * frameCount field, and hitting it rolls the file the same way a geom does.
+ */
+interface Rec {
+  screen: { width: number; height: number; depth: number; bytesPerRow: number };
+  rgb: Uint8Array;
+  frames: Uint8Array<ArrayBuffer>[];
+  bytes: number;
+  part: number;
+}
+
+let rec: Rec | null = null;
+
+const recEl = $("rec") as HTMLButtonElement;
+
+function recName(r: Rec): string {
+  return "amiga-" + r.screen.width + "x" + r.screen.height + "x" +
+         r.screen.depth + (r.part > 1 ? "-" + r.part : "") + "-" +
+         stamp() + ".pfs";
+}
+
+/* What there is so far, downloaded.  Returns whether anything went out: a
+   roll that happens before the first frame has nothing to write. */
+function recFlush(): boolean {
+  if (rec === null || rec.frames.length === 0) return false;
+
+  const name = recName(rec);
+  try {
+    download(new Blob([buildPfs(rec.screen, rec.rgb, rec.frames)],
+                      { type: "application/octet-stream" }), name);
+  } catch (e) {
+    say("down", "the recording would not write: " +
+                (e instanceof Error ? e.message : String(e)));
+    return false;
+  }
+  say("up", "saved " + name + ", " + rec.frames.length + " frames");
+  return true;
+}
+
+function recShow(): void {
+  if (rec === null) return;
+  countEl.textContent = "REC " + rec.frames.length + " frames  " +
+                        (rec.bytes / 1048576).toFixed(1) + " MB";
+}
+
+function recStart(): void {
+  if (geom === null) { say("down", "there is no screen to record yet"); return; }
+  rec = {
+    screen: geom.screen,
+    rgb: liveRgb.slice(),
+    frames: [],
+    bytes: 0,
+    part: 1,
+  };
+  recEl.setAttribute("aria-pressed", "true");
+  recShow();
+}
+
+function recStop(): void {
+  if (rec === null) return;
+  recFlush();
+  rec = null;
+  recEl.setAttribute("aria-pressed", "false");
+}
+
+/* A geom or a pal under a running recording: finish this file and open the
+   next one on the shape that has just been announced. */
+function recRoll(): void {
+  if (rec === null || geom === null) return;
+
+  const part = recFlush() ? rec.part + 1 : rec.part;
+
+  rec = {
+    screen: geom.screen,
+    rgb: liveRgb.slice(),
+    frames: [],
+    bytes: 0,
+    part,
+  };
+  recShow();
+}
+
+function recTake(planar: Uint8Array): void {
+  if (rec === null) return;
+
+  rec.frames.push(planar.slice());
+  rec.bytes += planar.length;
+
+  if (rec.frames.length >= PFS_MAX_FRAMES) recRoll();
+}
+
+recEl.onclick = () => { if (rec === null) recStart(); else recStop(); };
 
 /* ------------------------------------------------------------- the reset -- */
 
@@ -591,6 +723,7 @@ const inputs = attachInput(view, $("box"), {
  * moves is what the mouse produced and the log is what was sent.
  */
 setInterval(() => {
+  if (rec !== null) { recShow(); return; }
   const el = $("count");
   if (cap === null && geom !== null) {
     el.textContent = inputs.moves() + " moves  " +
