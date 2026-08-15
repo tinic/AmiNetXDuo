@@ -262,7 +262,18 @@ function heard(w: string): void {
       view.setScreen(g.screen, palette32(rgb, g.screen.depth));
       showGeometry();
       showPalette(rgb, g.screen.depth);
-      live.word("refresh");
+      /*
+       * NO `refresh` HERE.  A geom already means both sides are at zero: the
+       * server clears its shadow whenever it queues one -- at the start of a
+       * session and again whenever it re-takes its buffers -- and the planes
+       * above have just been reallocated.  Asking as well made the server
+       * clear a shadow that was ALREADY clear and send a SECOND full frame,
+       * and because the tiles are XOR against the shadow the viewer XORed the
+       * picture it had just drawn back to zero.  On a reconnect, where the
+       * server is already producing before the word can reach it, that landed
+       * one frame after the desktop appeared and stayed: an idle Workbench
+       * has nothing more to send.
+       */
       return;
     }
 
