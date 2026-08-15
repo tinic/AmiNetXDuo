@@ -1546,6 +1546,13 @@
   The switch is off unless given. Without -C the endpoint does not
   exist and nothing is allocated for it.
 
+  @{b}This is work in progress@{ub}
+
+  It serves the native planar screens of the Amiga chipset only. A
+  screen on a graphics card is not shown: the browser is told the front
+  screen is not a standard planar bitmap and no picture follows.
+  Retargetable graphics is not supported yet.
+
   @{b}One viewer at a time@{ub}
 
   There is one display, one keyboard and one mouse, so there is one
