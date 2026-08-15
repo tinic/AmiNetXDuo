@@ -1315,7 +1315,9 @@ enum
  * Everything that dereferences the Screen, its BitMap or its ColorMap.  The
  * caller holds either a public screen lock or LockIBase(), so this must not
  * block and must not call Intuition -- and it does not: GetBitMapAttr() and
- * GetRGB32() are reads of structures the screen already owns.
+ * GetRGB32() are reads of structures the screen already owns, and
+ * GetVPModeID() and GetDisplayInfoData() are reads of the display database,
+ * which is the order Intuition takes them in itself.
  *
  * What leaves here is the geometry, the palette, the display units and the
  * bitplane ADDRESSES.  The encode that follows touches nothing but those
