@@ -1016,12 +1016,21 @@ static VOID fb_forget_shadow(VOID)
 
 /* ------------------------------------------------------------ the framing -- */
 
-/* Queue one control frame.  There is room for exactly one: a pong and a close
-   never both need to be in flight. */
+/*
+ * Queue one control frame.  There is room for exactly one, so nothing may
+ * overtake a close: a ping arriving after the session has decided to end --
+ * which a browser sends on a timer and is therefore ordinary -- would answer
+ * it with a pong written over the close frame, and http_fb_write() would then
+ * see fb_closing and shut the socket with the reason still in the buffer.
+ * The viewer would be told the connection dropped instead of why.
+ */
 static VOID fb_control(HttpWsEvent ev, const UBYTE *payload, ULONG len)
 {
     unsigned long head;
     ULONG         i;
+
+    if (fb_closing)
+        return;
 
     if (len > (unsigned long)HTTP_WS_CTL_MAX)
         len = (unsigned long)HTTP_WS_CTL_MAX;
@@ -2060,6 +2069,26 @@ BOOL http_fb_idle(ULONG now, ULONG timeout)
     return TRUE;
 }
 
+/*
+ * A CLOSE FRAME MAY ONLY GO AT A FRAME BOUNDARY.
+ *
+ * This writes to the socket itself rather than queueing, because the caller
+ * closes the connection on the next line and there is no later pass to drain
+ * anything in.  So it has to look at what is already half out: a frame here
+ * is up to a whole screen -- 7 KB at 640x256x4, four times that at depth 8 --
+ * and a viewer on a link whose window is smaller than one of them has the
+ * rest of it still to come.  Writing the close after those bytes SPLICES it
+ * into somebody's payload, and everything the receiver reads from there on is
+ * a mis-framed stream: the browser reports a protocol error instead of the
+ * sentence saying who took the screen, which is the one thing this function
+ * exists to deliver.
+ *
+ * The rest of the frame is pushed first, as far as the socket will take it in
+ * one go and no further -- this is called from the middle of the server's
+ * loop and nothing here may block.  If it will not all go, the close is not
+ * sent at all: a truncated frame and a FIN is an abnormal close, which is
+ * honest, and is what the far end concludes anyway.
+ */
 VOID http_fb_evict(UWORD code)
 {
     UBYTE         frame[HTTP_FB_CTL];
@@ -2068,12 +2097,23 @@ VOID http_fb_evict(UWORD code)
     if (!fb_live || fb_closing)
         return;
 
+    fb_closing    = 1;
+    fb_close_code = code;
+
+    while (fb_tx_sent < fb_tx_len)
+    {
+        LONG sent = tool_sock_send(fb_sb, fb_sock, &fb_tx[fb_tx_sent],
+                                   (LONG)(fb_tx_len - fb_tx_sent));
+
+        if (sent <= 0)
+            return;
+
+        fb_tx_sent += (ULONG)sent;
+    }
+
     n = http_ws_close_frame(frame, sizeof(frame), code,
                             "the console was taken over from another browser");
 
     if (n > 0UL)
         (VOID)tool_sock_send(fb_sb, fb_sock, frame, (LONG)n);
-
-    fb_closing    = 1;
-    fb_close_code = code;
 }
