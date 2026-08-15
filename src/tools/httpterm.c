@@ -2672,13 +2672,11 @@ BOOL http_term_sock_write(HttpTermSock *t, ULONG now)
 
 BOOL http_term_sock_stale(const HttpTermSock *t, ULONG now, ULONG timeout)
 {
-    if (timeout == 0UL || now < t->progress)
-        return FALSE;
-
-    /* A ping has been out for a whole timeout with nothing back.  Anything at
+    /* A ping has been out unanswered for its half of the budget.  Anything at
        all from the peer clears t->pinged, so this is not "quiet" -- it is
-       "asked, and did not answer". */
-    return (t->pinged && now - t->progress >= timeout) ? TRUE : FALSE;
+       "asked, and did not answer".  See http_ws_live_stale(). */
+    return (BOOL)(http_ws_live_stale(t->progress, (int)t->pinged, now, timeout)
+                      ? TRUE : FALSE);
 }
 
 BOOL http_term_sock_idle(HttpTermSock *t, ULONG now, ULONG timeout)
@@ -2686,16 +2684,8 @@ BOOL http_term_sock_idle(HttpTermSock *t, ULONG now, ULONG timeout)
     if (http_term_sock_stale(t, now, timeout))
         return FALSE;
 
-    if (timeout == 0UL || now < t->progress)
-        return TRUE;
-
-    if (now - t->progress < timeout)
-        return TRUE;
-
-    if (t->pinged)
-        return TRUE;                /* asked already; stale() decides when  */
-
-    if (t->ctl_at >= t->ctl_n)
+    if (http_ws_live_ping_due(t->progress, (int)t->pinged, now, timeout) &&
+        t->ctl_at >= t->ctl_n)
     {
         sock_control(t, HTTP_WS_EV_PING, (const UBYTE *)"", 0);
         t->pinged   = 1;

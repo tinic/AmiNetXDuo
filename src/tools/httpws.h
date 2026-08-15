@@ -170,6 +170,37 @@ unsigned long http_ws_head(unsigned char *out, unsigned long outlen,
 unsigned long http_ws_close_frame(unsigned char *out, unsigned long outlen,
                                   unsigned short code, const char *reason);
 
+/* --------------------------------------------------------- peer liveness --- */
+
+/*
+ * IS THE FAR END STILL THERE, AND HOW LONG BEFORE WE STOP BELIEVING IT
+ *
+ * Both endpoints that hold a single-instance resource -- the Shell and the
+ * console screen -- have to decide when a quiet peer has actually gone, and
+ * they had the same rule written out twice.  It is here once instead, as two
+ * pure functions over the two fields a caller keeps: when it last heard from
+ * the peer, and whether a ping is already outstanding.
+ *
+ * WHAT COUNTS AS HEARING FROM THE PEER IS ANYTHING THE PEER SENT, AND NOTHING
+ * THIS END WROTE.  A send that the local stack accepted says the socket
+ * buffer had room; it says nothing about whether anybody is on the other end.
+ * The console refreshed its progress on every successful send and so was
+ * never able to conclude anything: a viewer that vanished without a close
+ * held the screen for ever, measured at over 110 seconds and still counting.
+ *
+ * The budget is split in half: the ping goes out at half the timeout and the
+ * answer is due by the end of it, so the WHOLE thing is bounded by `timeout`
+ * rather than the two-timeouts-in-series it used to be.
+ */
+
+/* TRUE when a ping has gone unanswered for its half of the budget. */
+int http_ws_live_stale(unsigned long progress, int pinged,
+                       unsigned long now, unsigned long timeout);
+
+/* TRUE when the peer has been quiet long enough to be asked. */
+int http_ws_live_ping_due(unsigned long progress, int pinged,
+                          unsigned long now, unsigned long timeout);
+
 /*
  * SHA-1, which the accept is built on.  Declared here and implemented in
  * httpsha1.c over NetX Duo's own SHA-1: this file must build on a host with
