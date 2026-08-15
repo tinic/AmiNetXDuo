@@ -87,6 +87,19 @@ VOID http_fb_close(VOID);
 /* Whether -C was given and the libraries are open. */
 BOOL http_fb_enabled(VOID);
 
+/*
+ * Whether a viewer is holding a mouse button down on the guest right now.
+ *
+ * Asked by the LOG, of all things, and see httpd.c's httpd_may_log().
+ * Intuition holds the screen's layer lock for the whole of a menu or a drag,
+ * the console handler needs that lock to draw, and this server has one task:
+ * so a `-v` line written to a Shell window while a button is down waits inside
+ * DOS.  A person holding a menu open lets go; a button held by the CONSOLE
+ * cannot come up, because the only thing that would release it is this task
+ * reading the release word off the socket it is not reading.
+ */
+BOOL http_fb_buttons_held(VOID);
+
 /* Why the last thing that failed did.  Never NULL; "" when nothing has. */
 const char *http_fb_fault(VOID);
 
