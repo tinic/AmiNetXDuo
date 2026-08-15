@@ -284,6 +284,40 @@ if(CMAKE_CROSSCOMPILING)
         rfb_encoder_init=rfb020_encoder_init
         rfb_encode_frame=rfb020_encode_frame)
 
+    # The tree builds at -Os and the encoder's inner loop is where that shows:
+    # at -Os GCC fetches the source longword a second time to store it into the
+    # shadow rather than reusing the register it is already in.  Two more
+    # copies price -O2 against it, on both instruction sets, in the same run.
+    add_library(rfb_encode_o2 STATIC "${CMAKE_SOURCE_DIR}/src/rfb/rfb_encode.c")
+    target_include_directories(rfb_encode_o2 PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+    target_compile_options(rfb_encode_o2 PRIVATE
+        -m68000 -O2 -ffunction-sections -fno-optimize-sibling-calls
+        -Wall -Wextra)
+    target_compile_definitions(rfb_encode_o2 PRIVATE
+        rfb_packbits=rfbo2_packbits
+        rfb_unpackbits=rfbo2_unpackbits
+        rfb_shadow_size=rfbo2_shadow_size
+        rfb_scratch_size=rfbo2_scratch_size
+        rfb_worst_case_frame=rfbo2_worst_case_frame
+        rfb_scroll_defaults=rfbo2_scroll_defaults
+        rfb_encoder_init=rfbo2_encoder_init
+        rfb_encode_frame=rfbo2_encode_frame)
+
+    add_library(rfb_encode_o220 STATIC "${CMAKE_SOURCE_DIR}/src/rfb/rfb_encode.c")
+    target_include_directories(rfb_encode_o220 PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+    target_compile_options(rfb_encode_o220 PRIVATE
+        -m68020 -O2 -ffunction-sections -fno-optimize-sibling-calls
+        -Wall -Wextra)
+    target_compile_definitions(rfb_encode_o220 PRIVATE
+        rfb_packbits=rfb220_packbits
+        rfb_unpackbits=rfb220_unpackbits
+        rfb_shadow_size=rfb220_shadow_size
+        rfb_scratch_size=rfb220_scratch_size
+        rfb_worst_case_frame=rfb220_worst_case_frame
+        rfb_scroll_defaults=rfb220_scroll_defaults
+        rfb_encoder_init=rfb220_encoder_init
+        rfb_encode_frame=rfb220_encode_frame)
+
     add_library(rfbkern STATIC rfbkern.c)
     target_compile_options(rfbkern PRIVATE -Wall -Wextra)
 
@@ -293,7 +327,8 @@ if(CMAKE_CROSSCOMPILING)
 
     add_executable(rfbprof rfbprof.c)
     target_link_libraries(rfbprof PRIVATE
-        aminetxduo_rfb rfb_encode_020 rfbkern rfbkern020 aminetxduo_common)
+        aminetxduo_rfb rfb_encode_020 rfb_encode_o2 rfb_encode_o220
+        rfbkern rfbkern020 aminetxduo_common)
     target_link_options(rfbprof PRIVATE
         "-Wl,-Map=$<TARGET_FILE_DIR:rfbprof>/rfbprof.map")
     set_target_properties(rfbprof PROPERTIES OUTPUT_NAME "rfbprof")

@@ -59,6 +59,18 @@ extern long    rfb020_encoder_init(rfb_encoder *e, const rfb_geom *g,
 extern long    rfb020_encode_frame(rfb_encoder *e, const rfb_u8 *src,
                                    rfb_u8 *out, rfb_u32 out_cap);
 
+/* And the same source at -O2, on both instruction sets. */
+extern long rfbo2_encoder_init(rfb_encoder *, const rfb_geom *, rfb_u32,
+                               const rfb_scroll_cfg *, rfb_u8 *, rfb_u32,
+                               rfb_u8 *, rfb_u32);
+extern long rfbo2_encode_frame(rfb_encoder *, const rfb_u8 *, rfb_u8 *,
+                               rfb_u32);
+extern long rfb220_encoder_init(rfb_encoder *, const rfb_geom *, rfb_u32,
+                                const rfb_scroll_cfg *, rfb_u8 *, rfb_u32,
+                                rfb_u8 *, rfb_u32);
+extern long rfb220_encode_frame(rfb_encoder *, const rfb_u8 *, rfb_u8 *,
+                                rfb_u32);
+
 /* The candidate loops, both codegens. */
 #define KDECL(p)                                                              \
     extern ULONG p##xorstore(const UBYTE *, UBYTE *, ULONG);                  \
@@ -349,13 +361,20 @@ typedef long (*r_initfn)(rfb_encoder *, const rfb_geom *, rfb_u32,
                          const rfb_scroll_cfg *, rfb_u8 *, rfb_u32,
                          rfb_u8 *, rfb_u32);
 
+static const char *const r_cpu_name[4] = { "68000-Os", "68020-Os",
+                                           "68000-O2", "68020-O2" };
+static const r_encfn r_enc_fn[4] = { rfb_encode_frame, rfb020_encode_frame,
+                                     rfbo2_encode_frame, rfb220_encode_frame };
+static const r_initfn r_init_fn[4] = { rfb_encoder_init, rfb020_encoder_init,
+                                       rfbo2_encoder_init, rfb220_encoder_init };
+
 static VOID r_encode_arm(const char *tag, rfb_u32 flags, int use020,
                          ULONG from, ULONG to)
 {
     rfb_encoder     e;
     rfb_scroll_cfg  cfg;
-    r_encfn         enc  = use020 ? rfb020_encode_frame : rfb_encode_frame;
-    r_initfn        init = use020 ? rfb020_encoder_init : rfb_encoder_init;
+    r_encfn         enc  = r_enc_fn[use020 & 3];
+    r_initfn        init = r_init_fn[use020 & 3];
     ULONG           rep, i, t0, t1, ticks = 0UL, nframes = 0UL;
     ULONG           bytes = 0UL;
     long            n = 0;
@@ -388,7 +407,7 @@ static VOID r_encode_arm(const char *tag, rfb_u32 flags, int use020,
     if (nframes == 0UL)
         nframes = 1UL;
     r_log("rfbprof seq=%s arm=%s cpu=%s us=%lu bytes=%lu frames=%lu",
-          r_name, tag, use020 ? "68020" : "68000",
+          r_name, tag, r_cpu_name[use020 & 3],
           r_us(ticks) / nframes, bytes / nframes, nframes);
 }
 
@@ -496,10 +515,16 @@ static VOID r_run_sequence(ULONG from, ULONG to, const char *what)
        slows down halfway through cannot make one look better than the other. */
     r_encode_arm("shipping", FB_FLAGS, 0, from, to);
     r_encode_arm("shipping", FB_FLAGS, 1, from, to);
+    r_encode_arm("shipping", FB_FLAGS, 2, from, to);
+    r_encode_arm("shipping", FB_FLAGS, 3, from, to);
     r_encode_arm("noprobe", FB_FLAGS & ~(RFB_F_COPYRECT
                                          | RFB_F_SCROLL_ADAPTIVE), 0, from, to);
     r_encode_arm("noprobe", FB_FLAGS & ~(RFB_F_COPYRECT
                                          | RFB_F_SCROLL_ADAPTIVE), 1, from, to);
+    r_encode_arm("noprobe", FB_FLAGS & ~(RFB_F_COPYRECT
+                                         | RFB_F_SCROLL_ADAPTIVE), 2, from, to);
+    r_encode_arm("noprobe", FB_FLAGS & ~(RFB_F_COPYRECT
+                                         | RFB_F_SCROLL_ADAPTIVE), 3, from, to);
     r_encode_arm("probe_always", (FB_FLAGS & ~RFB_F_SCROLL_ADAPTIVE),
                  0, from, to);
     r_encode_arm("nobestof", FB_FLAGS & ~RFB_F_BESTOF, 0, from, to);
@@ -510,6 +535,8 @@ static VOID r_run_sequence(ULONG from, ULONG to, const char *what)
     r_encode_arm("rawtiles", RFB_F_PLANEMASK, 1, from, to);
     r_encode_arm("diffonly", 0u, 0, from, to);
     r_encode_arm("diffonly", 0u, 1, from, to);
+    r_encode_arm("diffonly", 0u, 2, from, to);
+    r_encode_arm("diffonly", 0u, 3, from, to);
 }
 
 int main(void)
