@@ -414,7 +414,13 @@ for depth in "${DEPTHS[@]}"; do
 
     started=$(date +%s)
     up=no
-    for _ in $(seq 1 "$BOOT_MAX"); do
+    # BOOT_MAX IS SECONDS, so the loop is bounded by the clock and not by a
+    # count of attempts.  Each attempt costs a curl, and a curl at an address
+    # nothing answers for costs its whole -m: counting attempts made the
+    # ceiling 240 on a reachable guest and half an hour on an unreachable one,
+    # which is the case the ceiling exists for.
+    deadline=$(( started + BOOT_MAX ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
         sleep 1
         kill -0 "$EMU_PID" 2>/dev/null || break
         [ "$(alive)" = "200" ] && { up=yes; break; }
