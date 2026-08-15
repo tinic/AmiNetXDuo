@@ -99,7 +99,7 @@ Configuration follows Roadshow's layout, `DEVS:NetInterfaces/<name>`,
 
 | | |
 |---|---|
-| `NetSetup` | set up an interface by answering questions, start here |
+| `NetSetup` | set up an interface by answering questions, and write the configuration files; start here |
 | `AddNetInterface`, `Online`, `Offline` | bring an interface up and take it down |
 | `ShowNetStatus`, `netstat` | interface state, routes, connections |
 | `ShowNetServices` | what else on this network is offering something |
@@ -122,7 +122,6 @@ Configuration follows Roadshow's layout, `DEVS:NetInterfaces/<name>`,
 | `GetNetStatus`, `NetShutdown` | status for scripts, and a clean shutdown |
 | `RemoveNetInterface` | take one interface out of the running network |
 | `ConfigureNetInterface` | change a running interface's address, or renew and release its DHCP lease |
-| `NetSetup` | write the configuration files |
 | `hostname` | what this machine is called, and where the name came from |
 
 The installer copies all of them into `C:`.
@@ -153,7 +152,9 @@ and is still reachable.
 Answering it is per interface and off unless asked for, because the responder
 costs time on a slow machine. The installer asks; otherwise it is `MDNS=YES`
 in `DEVS:NetInterfaces/<name>`, or `ConfigureNetInterface <name> MDNS=YES` on
-an interface that is already up.
+an interface that is already up. Looking `.local` names up needs the same
+setting: with no interface asking for it, nothing is started in either
+direction.
 
 Looking names up needs no separate command. `ping`, `host`, `fetch` and any
 older program that resolves a name all get it, because the lookup happens

@@ -30,7 +30,6 @@
   @{b}Reference@{ub}
 
     @{"The commands              " link COMMANDS}
-    @{"Configuration files       " link CONFIG}
     @{"Running network software  " link SOFTWARE}
     @{"TCP:, a connection as a file" link TCPDEVICE}
     @{"Where everything lives    " link FILES}
@@ -78,8 +77,10 @@
   It reaches the network card through SANA-II, the standard AmigaOS
   network driver interface, so any card with a SANA-II driver should
   work: A2065, Ariadne, X-Surf, CNet, PCMCIA cards, uaenet under an
-  emulator, and so on. AmiNetXDuo contains no drivers. It uses the
-  driver supplied with the card.
+  emulator, and so on. The driver normally comes with the card.
+  AmiNetXDuo also ships one SANA-II driver of its own, anxnet.device,
+  which the Installer does not install; see
+  @{"CheckNetDevice" link CHECKNETDEVICE}.
 
 
   @{b}Status@{ub}
@@ -91,10 +92,11 @@
   implementations. It has been tested under emulation on Kickstart 2.04
   and 3.1 with a 68000, a 68020 and a 68030.
 
-  It has @{b}not@{ub} been run on real hardware, and it is not yet something to
-  trust with data that matters. Classic AmigaOS has no memory
-  protection: a network stack that goes wrong takes the machine with
-  it. Save work before experimenting.
+  It has run on real hardware, an A3000 with an X-Surf-100, and most of
+  what is measured here was measured under emulation. It is not yet
+  something to trust with data that matters.
+  Classic AmigaOS has no memory protection: a network stack that goes
+  wrong takes the machine with it. Save work before experimenting.
 
   See @{"Known limitations" link LIMITS} for the specific things that
   are missing or do not work yet.
@@ -121,9 +123,14 @@
   8 MB free that is 512 buffers, about 800 KB. On a 1 MB machine the
   floor of 16 applies and the stack still runs.
 
-  Encrypted (https:) connections need a 68020 or better. On a 68000
-  the cryptography takes longer than the other end waits, so it is
-  left out and everything else works as normal.
+  Encrypted (https:) connections use LIBS:tls.library, which the
+  archive carries for every processor, the 68000 included. A first
+  handshake on a 68000 takes a minute or two -- measured on an A600,
+  58.4 seconds against an RSA certificate and 97.7 against an EC one --
+  and a resumed connection to the same site takes under a second. The
+  minimal stack, which the Installer offers for a 1 MB machine, leaves
+  tls.library out along with IPv6, mDNS, the packet filter, IPv4
+  multicast, the ARexx host and the TCP: handler.
 
   @{b}A network card and its driver@{ub}
 
@@ -155,17 +162,30 @@
                            @{b}Installing@{ub}
 
   If the archive came with an Installer script, run it and skip this
-  node. To install by hand, copy the files to these places:
+  node. The Installer copies the libraries into LIBS:, every command in
+  the archive's C drawer into C:, and the certificate store into
+  DEVS:Internet, and then writes the configuration files.
+
+  To install by hand, copy the files to these places:
 
     @{b}bsdsocket.library@{ub}       to LIBS:
     @{b}usergroup.library@{ub}       to LIBS:
-    @{b}AddNetInterface@{ub}         to C:
-    @{b}Online@{ub}                  to C:
-    @{b}Offline@{ub}                 to C:
-    @{b}ShowNetStatus@{ub}           to C:
-    @{b}netstat@{ub}                 to C:
-    @{b}ping@{ub}                    to C:
-    @{b}host@{ub}                    to C:
+    @{b}tls.library@{ub}             to LIBS:, for https:
+    @{b}certificates@{ub}            to DEVS:Internet, for https:
+    the archive's @{b}C@{ub} drawer  to C:
+
+  The archive's C drawer holds every command listed in
+  @{"The commands" link COMMANDS}. They are small; copying the drawer
+  is simpler than choosing. The seven that bring an interface up and
+  check it are AddNetInterface, Online, Offline, ShowNetStatus, netstat,
+  ping and host.
+
+  Two files in the archive are @{b}not@{ub} installed by the Installer, by
+  design. anxnet.device, in Devs/Networks, is AmiNetXDuo's own SANA-II
+  driver, and is copied to DEVS:Networks by hand when it is wanted. The
+  Libs/minimal drawer holds the same stack with the large options
+  compiled out; it is the alternative to the top-level Libs, not an
+  addition to it.
 
   Then make the two configuration drawers, if they are not there
   already:
@@ -298,6 +318,13 @@
              means the interface is configured but not brought online
              at startup. Bring it up later with
              @{"Online" link ONLINE}. Default UP.
+
+  @{b}MDNS@{ub}       YES or NO. YES makes this interface answer to
+             <hostname>.local and resolve other machines' .local
+             names. Default NO: the responder is per interface and so
+             is its cost, which on a 68000 is enough to be felt by
+             everything else. See
+             @{"Being found by name" link DNSSD}.
 
   @{b}IPTYPE@{ub}     A @{b}number@{ub} here is the SANA-II packet type, which is
              what Roadshow means by IPTYPE, and AmiNetXDuo ignores it.
@@ -465,10 +492,17 @@
   and if neither file supplies a gateway, a GATEWAY= line in the
   @{"interface file" link IFACE} is used.
 
-  @{b}Only the default route is supported.@{ub} Lines in the routes file that
+  @{b}The routes file carries the default route only.@{ub} Lines in it that
   describe a specific route -- those carrying DST, HOSTDST or NETDST --
-  are parsed and skipped. There is no way to add a route to one
-  particular network through a second router, and no route command.
+  are parsed and skipped.
+
+  A route to one particular network through a second router is added at
+  run time instead, with AddNetRoute, and removed with DeleteNetRoute.
+  The stack holds four such routes and consults them before the default
+  gateway, longest prefix first. There is no Unix-style route command;
+  AddNetRoute and DeleteNetRoute are the pair. Nothing writes these
+  routes to a file, so a script in S:User-Startup is what makes one
+  survive a reboot.
 
 @endnode
 
@@ -564,7 +598,13 @@
            @{b}Being found by name, and announcing servers@{ub}
 
   This Amiga answers to its own name on the local network, with no
-  server and nothing to configure. With a host name of bigbox,
+  server anywhere. It is @{b}off until an interface asks for it@{ub}: put
+  MDNS=YES in @{"the interface file" link IFACE}, or set it on a
+  running interface with
+
+    ConfigureNetInterface eth0 MDNS=YES
+
+  With that set and a host name of bigbox,
 
     ping bigbox.local
 
@@ -574,9 +614,12 @@
 
     host mymac.local
 
-  answers here. The name is the @{"host name" link HOSTNAME} up to the
-  first dot, so a host name of bigbox.home.lan is announced as
-  bigbox.local.
+  answers here. Both directions need the same setting. With no
+  interface asking for it nothing is started, and a .local name cannot
+  be resolved or answered.
+
+  The name is the @{"host name" link HOSTNAME} up to the first dot, so
+  a host name of bigbox.home.lan is announced as bigbox.local.
 
   This is most useful when there is no DHCP server. A machine that fell
   back to a 169.254.x.x address has an address nothing else can guess,
@@ -588,10 +631,11 @@
 
                      @{b}Announcing a server@{ub}
 
-  AmiNetXDuo is clients only, so it has nothing of its own to announce.
-  A server installed separately -- an FTP daemon, a web server, a file
-  server -- may be listed here, and other machines then find it by
-  browsing rather than by being told a port number.
+  The host name is announced on its own. A server is not, and that
+  includes httpd, which ships with AmiNetXDuo: no command registers
+  itself. List a server here -- httpd, or an FTP daemon or file server
+  installed separately -- and other machines then find it by browsing
+  rather than by being told a port number.
 
   @{b}DEVS:Internet/service_discovery@{ub}
 
@@ -630,7 +674,7 @@
 
   A line with a mistake in it is reported and skipped, and the rest of
   the file and the network come up as usual. At most eight services are
-  announced.
+  announced, and only on an interface with MDNS=YES.
 
   There is a commented example in the Examples drawer.
 
@@ -684,8 +728,9 @@
   scope-id suffix form (fe80::1%eth0) is understood where a link-local
   router is named.
 
-  What does not: IPv6 multicast group membership is not available to
-  programs.
+  What does not: an IPv6 group is joined without a Multicast Listener
+  Report, so a group wider than link-local scope is never reported to a
+  router.
 
 @endnode
 
@@ -844,6 +889,10 @@
     CheckNetConfig    read the configuration files back and report faults
     NetShutdown       stop the network and the programs using it
     RemoveNetInterface  remove one interface from the stack
+    ConfigureNetInterface  change a running interface's address, or
+                      renew and release its DHCP lease
+    hostname          what this machine is called, and where the name
+                      came from
     AddNetRoute       add a route by hand
     DeleteNetRoute    remove a route
 
@@ -873,6 +922,8 @@
     telnet            log in to another machine
     ssh               the same, encrypted
     tftp              the small file transfer protocol
+    iperf             measure throughput against an iperf server, or
+                      act as one
     httpd             serve a drawer, over HTTP and WebDAV, and with
                       -T a Shell in a browser
 
@@ -1175,10 +1226,12 @@
 
   @{b}Categories this command does not have@{ub}
 
-  IGMP, MULTICASTROUTING and ROUTING-as-statistics are absent because
-  there is nothing behind them. Multicast group membership is not
-  enabled in this stack, there is no multicast router, and no routing
-  counters are kept. ROUTES prints the routing table itself.
+  IGMP, MULTICASTROUTING and ROUTING as a statistics category are
+  absent because there is little or nothing behind them. Groups are
+  joined and reported, but only four of the nine counters an IGMP
+  category would print have anything behind them; there is no multicast
+  router to have statistics about; and NetX Duo keeps no routing
+  counters. ROUTES prints the routing table itself.
 
   @{b}Errors@{ub}
 
@@ -1983,9 +2036,10 @@
 
   @{b}Other operations that are slow@{ub}
 
-  Some operations are slow on classic hardware and are not faults. TLS
-  in particular is far too slow to be usable and is switched off. See
-  @{"Known limitations" link LIMITS}.
+  Some operations are slow on classic hardware and are not faults. A
+  first https: connection is the slowest of them: the handshake takes a
+  minute or two on a 68000, and a repeat connection to the same site
+  takes under a second. See @{"Known limitations" link LIMITS}.
 
 @endnode
 
@@ -2086,9 +2140,10 @@
 
   @{b}Networking@{ub}
 
-    o  @{b}Only the default route.@{ub} There is no route command and no way to
-       add a route to a particular network through a second gateway.
-       Specific routes in DEVS:Internet/routes are read and skipped.
+    o  @{b}Four static routes, and none of them in a file.@{ub} A route to a
+       particular network through a second gateway is added with
+       AddNetRoute; specific routes in DEVS:Internet/routes are read
+       and skipped, so nothing here survives a reboot by itself.
     o  @{b}At most two interfaces@{ub} are attached, even though four interface
        files are read.
     o  @{b}Only Ethernet-style SANA-II drivers have been tested.@{ub} A
@@ -2097,8 +2152,9 @@
        is unsupported for now.
     o  @{b}MTU= in the interface file is ignored@{ub}; the packet size comes
        from the driver.
-    o  @{b}No IGMP@{ub}, so no multicast group membership and no multicast
-       routing.
+    o  @{b}No multicast routing, and no source filtering.@{ub} Joining a group
+       works, in both families. IP_ADD_SOURCE_MEMBERSHIP and the
+       MCAST_* family of RFC 3678 are absent.
 
   @{b}For software authors and porters@{ub}
 
@@ -2119,20 +2175,24 @@
 
   @{b}TLS@{ub}
 
-  There is no HTTPS support and there will not be one that runs at a
-  useful speed on classic hardware. A single TLS 1.2 handshake measured
-  185 seconds on a 68020, so encryption is switched off. Software
-  needing TLS should offload it.
+  HTTPS works, through LIBS:tls.library, and fetch opens that library
+  when a URL asks for it. What remains is speed rather than absence: a
+  @{b}first@{ub} handshake on a slow machine can outlast the far end's own
+  timeout, in which case the connection fails and says so, and the next
+  attempt usually succeeds because the session is cached. The minimal
+  stack has no tls.library at all.
 
   @{b}IPv6@{ub}
 
-  IPv6 multicast group membership is not available to programs. See
-  @{"IPv6" link IPV6}.
+  An IPv6 group is joined without a Multicast Listener Report being
+  sent, because there is none in this NetX Duo to send. Link-local
+  groups (ff02::) work on any segment regardless; a wider scope is
+  never reported to a router. See @{"IPv6" link IPV6}.
 
   @{b}Generally@{ub}
 
-  This has not been run on real hardware. See
-  @{"What AmiNetXDuo is" link ABOUT}.
+  Most of what is measured in this guide was measured under emulation.
+  See @{"What AmiNetXDuo is" link ABOUT}.
 
 @endnode
 
@@ -2311,15 +2371,12 @@
       LIBS:bsdsocket.library          the TCP/IP stack itself
       LIBS:usergroup.library          user and group calls for ported
                                       software
-      C:AddNetInterface               start the stack, bring an
-                                      interface up
-      C:Online                        put an interface back on the
-                                      network
-      C:Offline                       take an interface off the network
-      C:ShowNetStatus                 status
-      C:netstat                       interfaces, routes, connections
-      C:ping                          reachability
-      C:host                          name lookups
+      LIBS:tls.library                encryption, opened by a program
+                                      that asks for it. Absent from the
+                                      minimal stack
+      C:<command>                     every command in
+                                      @{"The commands" link COMMANDS},
+                                      ssh included
 
   @{b}Configuration files@{ub}
 
@@ -2335,6 +2392,13 @@
       DEVS:Internet/passwd            optional, for usergroup.library
       DEVS:Internet/group             optional, for usergroup.library
 
+  Installed rather than written:
+
+      DEVS:Internet/certificates      the root authorities https: is
+                                      checked against. tls.library
+                                      refuses every connection without
+                                      it
+
   Also read if present:
 
       DEVS:Internet/default_gateway   an older place for the gateway
@@ -2342,16 +2406,21 @@
 
   @{b}Not written to@{ub}
 
-  AmiNetXDuo does not write to any of these files, does not create a
-  drawer of its own, and does not patch the operating system. Deleting
-  the files above removes it completely.
+  The stack writes to none of these files. NetSetup, the Installer and
+  a text editor are what create them. Nothing here creates a drawer of
+  its own or patches the operating system, and deleting the files above
+  removes AmiNetXDuo completely.
 
-  @{b}Driver@{ub}
+  @{b}Drivers@{ub}
 
       DEVS:<something>.device         the card's SANA-II driver, which
                                       comes from the card's
                                       manufacturer, not from this
                                       distribution
+      DEVS:Networks/anxnet.device     AmiNetXDuo's own SANA-II driver.
+                                      It ships in the archive, and the
+                                      Installer does not install it;
+                                      copy it across by hand to use it
 
 @endnode
 
