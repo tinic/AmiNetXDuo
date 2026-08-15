@@ -303,6 +303,12 @@ aminetxduo_add_tool(tool_traceroute traceroute SOURCES traceroute.c toolsock.c)
 aminetxduo_add_tool(tool_tftp    tftp     SOURCES tftp.c  toolsock.c)
 aminetxduo_add_tool(tool_whois   whois    SOURCES whois.c toolsock.c)
 
+# wbgrab is the grab half of a remote framebuffer, and touches no part of the
+# network: intuition, graphics and layers, opened at run time like every other
+# library here.  Config-only in the plainest sense there is -- it links what
+# every command links and nothing else.
+aminetxduo_add_tool(tool_wbgrab wbgrab SOURCES wbgrab.c)
+
 # CensusProbe is the guest half of the allocation census, and exists only when
 # the census does.  It is not a command anybody installs: it walks the sites an
 # ordinary command walks and then provokes the library expunge, which is the
@@ -338,11 +344,20 @@ endif()
 # iperfcore.c and iperfwire.c are the same measurement the `iperf` command
 # runs, driven from httpd's own loop a slice at a time so that a user with a
 # browser and no Shell can produce a figure.  See the iperf block in httpd.c.
+# httpfb.c is the console: the Workbench screen down a WebSocket, behind -C.
+# AmigaOS through and through -- LockPubScreen, LockLayers, GetRGB32 -- and so
+# is tested on the guest, exactly as httpterm.c is.  What it is NOT is the
+# frame encoder: that is src/rfb, portable C99 with no Amiga header in it, and
+# it is linked here rather than restated so that the bytes this server puts on
+# the wire are the bytes the host bench round-trips.
 aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httppath.c httpif.c
                                           httpframe.c httplock.c httpws.c
-                                          httpsha1.c httpterm.c toolsock.c
+                                          httpsha1.c httpterm.c httpfb.c
+                                          toolsock.c
                                           iperfcore.c iperfwire.c
                                           "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha1.c")
+
+target_link_libraries(tool_httpd PRIVATE aminetxduo_rfb)
 
 # httpd's terminal page, beside the binary that serves it.
 #
@@ -496,7 +511,7 @@ add_dependencies(tools
     tool_fetch tool_nc tool_telnet tool_nettrace tool_traceroute tool_nslookup tool_arp
     tool_tftp tool_whois tool_httpd tool_iperf
     tool_sntp tool_shownetservices
-    tool_shownetstatus tool_netstat tool_ping tool_smoke)
+    tool_shownetstatus tool_netstat tool_ping tool_smoke tool_wbgrab)
 if(CMAKE_CROSSCOMPILING)
     add_dependencies(tools tool_lvo_stub_check)
 endif()
