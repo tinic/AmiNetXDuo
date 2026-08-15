@@ -781,10 +781,17 @@
   desktop machine, and -T adds an AmigaDOS Shell in a web browser at
   http://<this machine>/shell.
 
-  Neither the drawer nor the Shell has a password. There is no setting
-  that adds one. Anyone who can reach the port can read and write the
-  drawer. Anyone who can reach the port has an AmigaDOS Shell on this
-  machine. Those are the complete terms of this option.
+  A third switch, -C, serves this machine's display at
+  http://<this machine>/console. The browser shows the frontmost screen
+  and sends the mouse and the keyboard back. It is described under
+  @{"The screen in a browser" link CONSOLE}.
+
+  None of the three has a password. There is no setting that adds one.
+  Anyone who can reach the port can read and write the drawer. Anyone
+  who can reach the port has an AmigaDOS Shell on this machine. With
+  -C, anyone who can reach the port has the screen, the keyboard, the
+  mouse, and a button that reboots the machine. Those are the complete
+  terms of this option.
 
   The assign is how -T finds the page it serves. The Installer places
   that page in the AmiNetXDuo drawer with the documentation. Running
@@ -924,8 +931,8 @@
     tftp              the small file transfer protocol
     iperf             measure throughput against an iperf server, or
                       act as one
-    httpd             serve a drawer, over HTTP and WebDAV, and with
-                      -T a Shell in a browser
+    httpd             serve a drawer, over HTTP and WebDAV, with -T a
+                      Shell in a browser and @{"-C the screen" link CONSOLE}
 
   Only the linked commands have a page here. The rest answer "?" with
   their template and behave the way the same command does on other
@@ -1460,7 +1467,7 @@
 @node CHECKNETDEVICE "CheckNetDevice"
 @toc COMMANDS
 @prev HOST
-@next TROUBLE
+@next CONSOLE
 
                           @{b}CheckNetDevice@{ub}
 
@@ -1514,6 +1521,72 @@
 
   This command never touches the network. It is safe to run at any
   time, including while the stack is up.
+
+@endnode
+
+
+@node CONSOLE "The screen in a browser"
+@toc COMMANDS
+@prev CHECKNETDEVICE
+@next TROUBLE
+
+                     @{b}The screen in a browser@{ub}
+
+  httpd -C serves this machine's display at
+
+      http://<this machine>/console
+
+  The browser shows the frontmost screen. The mouse and the keyboard
+  work: a click in the browser is a click on this machine, and what is
+  typed reaches the program that has the focus. Opening a screen in
+  front, such as a Preferences editor, switches the browser to it.
+  Changing the screen mode is carried through, including a change of
+  resolution, depth or overscan.
+
+  The switch is off unless given. Without -C the endpoint does not
+  exist and nothing is allocated for it.
+
+  @{b}One viewer at a time@{ub}
+
+  There is one display, one keyboard and one mouse, so there is one
+  session. A second browser is refused while the first is connected.
+  A session whose browser has gone is released after ten seconds.
+
+  @{b}The controls@{ub}
+
+  @{b}Screenshot@{ub}  Saves a PNG of what is on screen, at the aspect the
+              page is showing. Hold Shift to save at the screen's own
+              pixel dimensions instead.
+  @{b}Record@{ub}     Records what arrives to a file, with the time each
+              frame was taken and where the pointer was. A change of
+              screen mode starts a new file, because one file holds one
+              screen shape.
+  @{b}Reset@{ub}      Reboots this machine. It asks first. Mounted volumes
+              are flushed before the reboot; work held in a program's
+              memory is lost.
+
+  @{b}The pointer@{ub}
+
+  The pointer drawn in the browser is the one set in Preferences. It
+  does not change to the busy pointer, and it does not change to a
+  pointer an application sets for itself: those are held where no
+  program can read them. The pointer on this machine and the pointer in
+  the browser therefore differ while a program is busy.
+
+  @{b}What it costs@{ub}
+
+  A screen where nothing changes costs five bytes a frame. An A1200
+  serves an idle 640x256 four-colour Workbench at about 33 frames a
+  second, and about 20 with sixteen colours; a scrolling Shell is
+  about five. An A3000 is roughly four times that. The frames are
+  compressed against the previous one, so the figure depends on how
+  much of the screen is changing and not on its size alone.
+
+  @{b}There is no password@{ub}
+
+  Anyone who can reach the port has this machine's screen, keyboard and
+  mouse, and can reboot it. There is no setting that adds a password.
+  Serve it only on a network where that is acceptable.
 
 @endnode
 
