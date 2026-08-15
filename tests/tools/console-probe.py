@@ -5,7 +5,7 @@
                                 [--pfs OUT.pfs] [--refresh] [--path /console]
                                 [--type TEXT] [--at N]
                                 [--pointer "X,Y,B; X,Y,B; ..."] [--step N]
-                                [--png-before OUT.png]
+                                [--png-before OUT.png] [--reconnect N]
 
 WHY IT DECODES RATHER THAN COUNTING
 
@@ -30,6 +30,18 @@ WHY IT DECODES RATHER THAN COUNTING
   the moment the first step goes out and --png at the end, so what is asserted
   is that the picture changed where the pointer was, which is the only thing
   that distinguishes a mouse that works from one that lands somewhere else.
+
+--reconnect PROVES THE SESSION SURVIVES BEING RESTARTED
+
+  N+1 sessions in a row, each closed cleanly, and what is asserted is that
+  the LAST one still has the same picture as the first after its idle frames
+  have gone by.  An idle Workbench sends nothing once the first frame is
+  out, so anything that corrupts the viewer's copy on a reconnect is never
+  corrected and the screen simply stays wrong -- which is exactly how it
+  shipped: the viewer asked for a refresh on every geom, the server answered
+  a reconnect with a SECOND full frame, and the tiles being XOR against the
+  shadow meant the second one cancelled the first back to an all-zero
+  screen.  A connect-only check cannot see that.  This one compares pixels.
 
 --type PROVES THE INPUT HALF
 
@@ -428,6 +440,99 @@ def pfs(path, screens):
 
 # ---------------------------------------------------------------- the run --
 
+def session_picture(host, port, path, seconds, refresh_at=4):
+    """One whole session, closed cleanly.  Returns (chunky, frames, words).
+
+    One `refresh` goes out mid-session, once the picture is already drawn.
+    That is the hazard in one line: the answer to a refresh is a FULL frame,
+    the tiles in it are XOR against the shadow, and a viewer that still holds
+    the last picture when it lands XORs the two together and goes blank.  It
+    is asked for here rather than left to a viewer to trip over.
+    """
+    wire = Wire(host, port, path)
+    screen = None
+    frames = 0
+    words = 0
+    asked = False
+    started = time.time()
+
+    while time.time() - started < seconds:
+        wire.sock.settimeout(max(1.0, seconds - (time.time() - started) + 5))
+        op, body = wire.frame()
+
+        if op == 0x8:
+            break
+        if op == 0x1:
+            words += 1
+            text = body.decode("iso-8859-1")
+            if text.startswith("geom "):
+                f = [int(x) for x in text.split()[1:]]
+                if len(f) != 6:
+                    raise Bad("geom takes six numbers: %r" % text)
+                screen = Screen(f[0], f[1], f[2], f[3], f[4], f[5])
+            elif text.startswith("pal "):
+                if screen is None:
+                    raise Bad("a palette arrived before a geometry")
+                screen.rgb = bytearray.fromhex(text[4:].strip())
+            continue
+        if op != 0x2:
+            raise Bad("opcode %d is not one this server sends" % op)
+        if screen is None:
+            raise Bad("a frame arrived before a geometry")
+        screen.apply(body)
+        frames += 1
+
+        if not asked and frames >= refresh_at:
+            wire.word("refresh")
+            asked = True
+
+    wire.close()
+    if screen is None:
+        raise Bad("no geometry word ever arrived")
+    return bytes(screen.chunky()), frames, words
+
+
+def reconnect_check(host, port, path, times, seconds):
+    """Connect, close, reconnect N times; the picture must not drift."""
+    shots = []
+    try:
+        for i in range(times + 1):
+            pic, frames, words = session_picture(host, port, path, seconds)
+            shots.append(pic)
+            say("reconnect_%d" % i,
+                "%d frames, %d words, %d distinct pixel values"
+                % (frames, words, len(set(pic))))
+            time.sleep(0.5)
+    except Fault as e:
+        say("error", e)
+        say("RESULT", "INFRA")
+        return 2
+    except Bad as e:
+        say("error", e)
+        say("RESULT", "FAIL")
+        return 1
+
+    problems = []
+    for i, pic in enumerate(shots):
+        if len(set(pic)) < 2:
+            problems.append("session %d decoded to one pixel value: the"
+                            " screen went blank and stayed blank" % i)
+    # An idle Workbench is the same screen every time.  A session that differs
+    # from the first is a session whose copy drifted, which on an idle screen
+    # is never corrected.
+    for i, pic in enumerate(shots[1:], 1):
+        if pic != shots[0]:
+            differing = sum(1 for a, b in zip(pic, shots[0]) if a != b)
+            problems.append("session %d differs from session 0 in %d pixels"
+                            % (i, differing))
+
+    for p in problems:
+        say("problem", p)
+    say("reconnect_sessions", len(shots))
+    say("RESULT", "PASS" if not problems else "FAIL")
+    return 0 if not problems else 1
+
+
 def main(argv):
     if len(argv) < 3:
         print(__doc__.strip(), file=sys.stderr)
@@ -445,6 +550,7 @@ def main(argv):
     pointer = None
     step = 4
     png_before = None
+    reconnects = 0
 
     i = 3
     while i < len(argv):
@@ -476,11 +582,18 @@ def main(argv):
             step = int(argv[i + 1]); i += 2
         elif argv[i] == "--png-before":
             png_before = argv[i + 1]; i += 2
+        elif argv[i] == "--reconnect":
+            reconnects = int(argv[i + 1]); i += 2
         elif argv[i] == "--refresh":
             want_refresh = True; i += 1
         else:
             print("unknown argument: %s" % argv[i], file=sys.stderr)
             return 2
+
+    if reconnects > 0:
+        rc = reconnect_check(host, port, path, reconnects, seconds)
+        if rc != 0:
+            return rc
 
     try:
         wire = Wire(host, port, path)
