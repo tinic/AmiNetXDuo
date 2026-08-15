@@ -1,41 +1,58 @@
 /*
- * Build build/web/console.html: the framebuffer viewer, TypeScript in, one
- * file out.
+ * Build src/tools/web/console.html: the framebuffer viewer, TypeScript in,
+ * one HTML file out.
  *
- *   node tools/web/build-console.mjs
+ *   node tools/web/build-console.mjs            write the file
+ *   node tools/web/build-console.mjs --check    fail if what is committed differs
  *
- * The same shape as build.mjs and deliberately a SEPARATE script rather than
- * a second entry point in it.  build.mjs's output is committed and checked by
- * tools/ci.sh's web stage; this is a prototype whose output is not committed
- * at all, and folding the two together would mean either gating the prototype
- * or loosening the gate on the page that ships.
+ * The same shape as build.mjs, and still a SEPARATE script: that one inlines
+ * a vendored terminal, two subset webfonts and their licence notice into an
+ * iso-8859-1 page, and none of those exist here.  What was once also true --
+ * that this output was a prototype's, uncommitted, and folding the two
+ * together would mean either gating the prototype or loosening the gate on
+ * the page that ships -- is not: both pages are committed artifacts now and
+ * tools/ci.sh's web stage checks both.
  *
- * Into build/, which is gitignored, for the same reason.  shell.html is
- * committed because an Amiga with no node on it has to serve it; nothing
- * serves this one yet, so it is rebuilt by whoever wants to look at it.
+ * COMMITTED, for build.mjs's reason.  The m68k build must work on a machine
+ * with no node on it, so the artifact is committed and CMake copies it; this
+ * script is how it gets regenerated when a source under
+ * src/tools/web/client/console/ changes, and --check is how tools/ci.sh
+ * notices that somebody edited a source and forgot to run it.
+ *
+ * AND console.html.gz BESIDE IT
+ *
+ *   httpd serves the sibling to a browser that offered `Accept-Encoding:
+ *   gzip` and the plain file to one that did not -- it picks it up by
+ *   spelling, and there is no compressor on the Amiga.  The page is a
+ *   twentieth of the Shell's, so this saves tenths of a second rather than
+ *   seconds; it is here because a page shipped without one is served
+ *   uncompressed and says nothing about it, which is the sort of thing found
+ *   years later.
  *
  * The guards at the bottom are build.mjs's, minus the two that are about
- * things this page does not have -- the vendored font and its licence notice,
- * and the Latin-1 byte range that the Shell's output needs and a canvas does
- * not.  What they are for is unchanged: an Amiga serving this may have no
- * route off the LAN, and a CDN script, a webfont or a source map are all the
- * same bug, a request nothing answers.
+ * things this page does not have.  What they are for is unchanged: an Amiga
+ * serving this may have no route off the LAN, and a CDN script, a webfont or
+ * a source map are all the same bug, a request nothing answers.
  *
  * SPDX-License-Identifier: MIT
  */
 
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gunzipSync, gzipSync } from "node:zlib";
 
 import * as esbuild from "esbuild";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
-const SRC = join(ROOT, "src", "tools", "web", "client", "console");
-const OUTDIR = join(ROOT, "build", "web");
-const OUT = join(OUTDIR, "console.html");
+const WEB = join(ROOT, "src", "tools", "web");
+const SRC = join(WEB, "client", "console");
+const OUT = join(WEB, "console.html");
+const OUT_GZ = OUT + ".gz";
+
+const check = process.argv.includes("--check");
 
 const bundle = await esbuild.build({
   entryPoints: [join(SRC, "main.ts")],
@@ -80,9 +97,13 @@ const html = template
   .replace("/*STYLE*/", () => style)
   .replace("/*SCRIPT*/", () => script)
   .replace(
-    "  TEMPLATE.  The page that runs is build/web/console.html, which is this\n" +
-      "  with the stylesheet and the script inlined by tools/web/build-console.mjs.",
-    "  GENERATED.  Edit src/tools/web/client/console/ and run tools/web/build-console.mjs."
+    "  TEMPLATE.  The file that ships is src/tools/web/console.html, which is this\n" +
+      "  with the stylesheet and the script inlined into it by\n" +
+      "  tools/web/build-console.mjs.  Editing the built file is editing something\n" +
+      "  that will be overwritten.",
+    "  GENERATED.  Edit src/tools/web/client/console/ and run\n" +
+      "  tools/web/build-console.mjs; an edit made here is an edit the next build\n" +
+      "  throws away, and tools/ci.sh's web stage fails when the two disagree."
   );
 
 const problems = [];
@@ -105,9 +126,81 @@ if (problems.length > 0) {
   process.exit(1);
 }
 
-mkdirSync(OUTDIR, { recursive: true });
-writeFileSync(OUT, html);
+/* --------------------------------------------------------------- the file */
 
-console.log("console: build/web/console.html written, %d bytes, sha %s",
-            Buffer.byteLength(html),
-            createHash("sha256").update(html).digest("hex").slice(0, 12));
+const sha = (s) => createHash("sha256").update(s).digest("hex").slice(0, 12);
+
+/*
+ * Byte 9 of the gzip container is the compressing machine, and zlib fills it
+ * in from whatever it was compiled for -- 0x13 from the node on a Mac, 0x03
+ * from the one on Linux.  Stamped Unix so that what is committed depends on
+ * the page and not on who built it; the modification time in bytes 4..7 is
+ * already zero.  build.mjs does the same to shell.html.gz.
+ */
+const pack = (s) => {
+  const gz = gzipSync(Buffer.from(s, "utf8"), { level: 9 });
+  gz[9] = 0x03;
+  return gz;
+};
+
+let existing = null;
+try {
+  existing = readFileSync(OUT, "utf8");
+} catch {
+  /* first build */
+}
+
+/*
+ * The .gz is checked by unpacking it, not by rebuilding it: a newer zlib that
+ * packs the same bytes two per cent smaller is not a drift anybody needs to
+ * be told about, and treating it as one would fail CI on a node upgrade.
+ * What can actually go wrong is a compressed copy of a page that is no longer
+ * the page, and that is what this catches.
+ */
+let packed = null;
+try {
+  const raw = readFileSync(OUT_GZ);
+  packed = gunzipSync(raw).toString("utf8") === html ? raw : null;
+} catch {
+  /* absent, or not gzip at all */
+}
+
+if (check) {
+  if (existing === html && packed !== null) {
+    console.log("web: console.html matches its sources (%d bytes, sha %s)",
+                Buffer.byteLength(html), sha(html));
+    console.log("web: console.html.gz unpacks to it (%d bytes, %d%%)",
+                packed.length,
+                Math.round((packed.length * 100) / Buffer.byteLength(html)));
+    process.exit(0);
+  }
+  if (existing !== html) {
+    console.error("web: console.html does NOT match its sources.");
+    console.error("web: committed %s, sources build to %s",
+                  existing === null ? "nothing" : sha(existing), sha(html));
+  }
+  if (packed === null) {
+    console.error("web: console.html.gz is missing, or does not unpack to "
+                  + "the page beside it.");
+  }
+  console.error("web: run  node tools/web/build-console.mjs  and commit the "
+                + "result.");
+  process.exit(1);
+}
+
+if (existing === html) {
+  console.log("web: console.html unchanged (%d bytes)", Buffer.byteLength(html));
+} else {
+  writeFileSync(OUT, html);
+  console.log("web: console.html written, %d bytes, sha %s",
+              Buffer.byteLength(html), sha(html));
+}
+
+if (packed !== null) {
+  console.log("web: console.html.gz unchanged (%d bytes)", packed.length);
+} else {
+  const gz = pack(html);
+  writeFileSync(OUT_GZ, gz);
+  console.log("web: console.html.gz written, %d bytes, %d%% of the page",
+              gz.length, Math.round((gz.length * 100) / Buffer.byteLength(html)));
+}

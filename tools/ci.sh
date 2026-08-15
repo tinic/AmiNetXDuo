@@ -24,8 +24,9 @@
 #                ASan+UBSan with leaks fatal.  AMINETXDUO_SANITIZE=1 runs it,
 #                the way analyze is gated; CI sets it.
 #   cross        every build configuration, warnings fatal
-#   web          httpd's terminal page still matches the TypeScript it is
-#                generated from, and the vendored xterm.js is untouched
+#   web          httpd's two pages, the terminal's and the console's, still
+#                match the TypeScript they are generated from, and the
+#                vendored xterm.js is untouched
 #   analyze      GCC -fanalyzer over our own sources vs a triaged baseline
 #   conformance  build the bsdsocktest suite for m68k (running it needs tier 2)
 #   emulator     tier 2, boots FS-UAE, needs a ROM
@@ -647,22 +648,28 @@ stage_conformance() {
 # -------------------------------------------------------------- the web ----
 
 stage_web() {
-    hr "httpd's terminal page"
+    hr "httpd's pages"
 
     #
-    # src/tools/web/shell.html is COMMITTED and the m68k build only copies
-    # it, so nothing about `cmake --build` needs node.  The price of that is
-    # that the file can drift from the TypeScript it was generated from, and a
-    # page a commit behind its sources is a page whose bug is already fixed in
-    # a source nobody rebuilt.  This is the check that catches it.
+    # src/tools/web/shell.html and src/tools/web/console.html are COMMITTED
+    # and the m68k build only copies them, so nothing about `cmake --build`
+    # needs node.  The price of that is that a file can drift from the
+    # TypeScript it was generated from, and a page a commit behind its sources
+    # is a page whose bug is already fixed in a source nobody rebuilt.  This is
+    # the check that catches it.
+    #
+    # BOTH pages, each by its own builder: they share no bundle -- the Shell's
+    # carries a vendored terminal and two webfonts, the console's carries a
+    # planar decoder -- and a stage that checked one of the two would let the
+    # other rot exactly as far.
     #
     # esbuild comes from npm and this may be a runner with no network, so a
     # missing node_modules is a SKIP with the command to fix it -- but a node
     # that is present and a page that does not match is a FAILURE.
     #
     if ! command -v node > /dev/null; then
-        skip "web: node is not installed, shell.html was not checked against\
- its sources (node tools/web/build.mjs --check)"
+        skip "web: node is not installed, shell.html and console.html were not\
+ checked against their sources (node tools/web/build.mjs --check)"
         return 0
     fi
 
@@ -670,7 +677,7 @@ stage_web() {
         if ! (cd tools/web && npm ci --silent --no-audit --no-fund) \
                 > "$BUILD/web-npm.log" 2>&1; then
             tail -5 "$BUILD/web-npm.log"
-            skip "web: npm could not install the bundler, shell.html was not\
+            skip "web: npm could not install the bundler, the pages were not\
  checked (cd tools/web && npm ci)"
             return 0
         fi
@@ -681,6 +688,15 @@ stage_web() {
     else
         cat "$BUILD/web.log"
         fail "web (shell.html does not match src/tools/web/client)"
+        return 1
+    fi
+
+    if node tools/web/build-console.mjs --check \
+            > "$BUILD/web-console.log" 2>&1; then
+        note "$(cat "$BUILD/web-console.log")"
+    else
+        cat "$BUILD/web-console.log"
+        fail "web (console.html does not match src/tools/web/client/console)"
         return 1
     fi
 

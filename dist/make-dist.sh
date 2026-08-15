@@ -37,7 +37,8 @@
 #       Devs/Internet/               protocols, services, networks
 #       Docs/  Docs.info             the manual, from docs/user/
 #       Examples/  Examples.info     commented configuration files
-#       Terminal/  Terminal.info     httpd's terminal page, one HTML file
+#       Terminal/  Terminal.info     httpd's pages: the terminal's and the
+#                                    console's, one HTML file each
 #       Developer/  Developer.info   headers and glue for the vectors past
 #                                    the end of the NDK's SFD
 #
@@ -193,9 +194,11 @@ for cmd in "${CMDS[@]}"; do need "$CMD_BUILD/src/tools/$cmd"; done
 # test driver -- it runs the real commands through SystemTagList() and records
 # rc, milliseconds and free memory per command, which is what the leak sweep
 # and the tool tests read -- and has no use on a user's machine.
-# wbgrab is the grab half of a remote framebuffer that has no server yet, so it
-# is a prototype and not a command anybody installs.  It ships when the server
-# it feeds does.
+# wbgrab writes the Workbench screen's bitplanes to a file and is the harness
+# half of the console: httpd -C is what a user runs, and this is what
+# tests/tools/run-wbgrab.sh runs to check the grab against a decoder on
+# another machine.  A test driver, like ToolsSmoke, and no use on a user's
+# machine for the same reason.
 NOT_SHIPPED=(ToolsSmoke CensusProbe UafProbe HangProbe wbgrab)
 missing_from_cmds=()
 for path in "$CMD_BUILD"/src/tools/*; do
@@ -390,6 +393,18 @@ need "$ROOT/src/tools/web/shell.html"
 need "$ROOT/src/tools/web/shell.html.gz"
 cp "$ROOT/src/tools/web/shell.html"    "$TREE/Terminal/shell.html"
 cp "$ROOT/src/tools/web/shell.html.gz" "$TREE/Terminal/shell.html.gz"
+
+# httpd's console page, into the same drawer, `need`ed for the same reasons.
+#
+# The SAME drawer and not one of its own, which is what src/tools/httpd.c's
+# httpd_console_places[] says too: the installer copies this drawer whole, so
+# a page in it is a page that gets installed and a page anywhere else needs an
+# installer that knows about it.  What the drawer holds is httpd's pages; it
+# is named after the first one.
+need "$ROOT/src/tools/web/console.html"
+need "$ROOT/src/tools/web/console.html.gz"
+cp "$ROOT/src/tools/web/console.html"    "$TREE/Terminal/console.html"
+cp "$ROOT/src/tools/web/console.html.gz" "$TREE/Terminal/console.html.gz"
 
 cp "$ROOT/dist/ReadMe" "$TREE/ReadMe"
 cp "$INSTALL/Document.info" "$TREE/ReadMe.info"

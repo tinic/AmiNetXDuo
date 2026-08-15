@@ -43,7 +43,7 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
 const PAGE = process.env.AMINETXDUO_CONSOLE_PAGE ||
-  join(ROOT, "build", "web", "console.html");
+  join(ROOT, "src", "tools", "web", "console.html");
 
 const PORT = Number(process.argv[2] || 8098);
 const CAPTURE = (process.argv[3] || "").endsWith(".pfs") ? process.argv[3] : null;
@@ -172,7 +172,7 @@ const server = createServer((req, res) => {
   try {
     body = readFileSync(PAGE);
   } catch {
-    res.writeHead(500).end("build/web/console.html is not there -- run " +
+    res.writeHead(500).end("src/tools/web/console.html is not there -- run " +
                            "node tools/web/build-console.mjs");
     return;
   }

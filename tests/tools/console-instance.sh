@@ -44,7 +44,7 @@ GATEWAY=192.168.1.1
 PORT="${CONSOLE_PORT:-8080}"
 DEPTH="${CONSOLE_DEPTH:-4}"
 RUN="${CONSOLE_RUN:-$ROOT/build/console-instance}"
-PAGE="${AMINETXDUO_CONSOLE_PAGE:-$ROOT/build/web/console.html}"
+PAGE="${AMINETXDUO_CONSOLE_PAGE:-$ROOT/src/tools/web/console.html}"
 # The Shell too, on the same guest, so the two endpoints that hold a
 # single-instance resource can be exercised against one machine.
 SHELLPAGE="${AMINETXDUO_SHELL_PAGE:-$ROOT/src/tools/web/shell.html}"
@@ -150,9 +150,6 @@ for f in "$HTTPD" "$BSD"; do
     [ -f "$f" ] || { say error "no $f"; say hint "cmake --build $BUILD --parallel"; say RESULT INFRA; exit 2; }
 done
 
-if [ ! -f "$PAGE" ] && command -v node >/dev/null 2>&1; then
-    node "$ROOT/tools/web/build-console.mjs" >/dev/null 2>&1 || true
-fi
 [ -f "$PAGE" ] || { say error "no console page at $PAGE"; say RESULT INFRA; exit 2; }
 
 A2065="${AMINETXDUO_A2065:-}"

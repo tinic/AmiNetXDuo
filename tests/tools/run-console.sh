@@ -96,7 +96,7 @@ PORT=8080
 BOOT_MAX=240
 PROBE_SECONDS=10
 OUTDIR="$ROOT/build/console-out"
-PAGE="${AMINETXDUO_CONSOLE_PAGE:-$ROOT/build/web/console.html}"
+PAGE="${AMINETXDUO_CONSOLE_PAGE:-$ROOT/src/tools/web/console.html}"
 CLIENT="${AMINETXDUO_CONSOLE_CLIENT:-}"
 ACTIVITY=idle
 TYPE=""
@@ -140,14 +140,11 @@ for f in "$HTTPD" "$BSD"; do
     }
 done
 
-# The page is a build artifact of a prototype and is deliberately not committed
-# (tools/web/build-console.mjs says why).  Built here when node is about, taken
-# as it stands when it is already there, and named as the one missing thing
-# otherwise -- never faked, because a placeholder would make the one check that
-# the page is served pass against something that is not the page.
-if [ ! -f "$PAGE" ] && command -v node >/dev/null 2>&1; then
-    node "$ROOT/tools/web/build-console.mjs" >/dev/null 2>&1 || true
-fi
+# The page is a committed artifact, src/tools/web/console.html, the same as the
+# Shell's: what a released archive carries is what this serves.  Named as the
+# one missing thing when it is not there rather than built -- never faked,
+# because a placeholder would make the one check that the page is served pass
+# against something that is not the page.
 [ -f "$PAGE" ] || {
     say error "no console page at $PAGE"
     say hint "node tools/web/build-console.mjs, or -H <console.html>"

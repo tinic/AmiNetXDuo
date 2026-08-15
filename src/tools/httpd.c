@@ -183,14 +183,16 @@ static const char *const httpd_term_places[] = {
     ((ULONG)(sizeof(httpd_term_places) / sizeof(httpd_term_places[0])))
 
 /*
- * The same three places for -C's page, under a drawer of its own.  Separate
- * from the terminal's because the two are separate apps that happen to be
- * served by one command: a machine with one of them installed and not the
- * other must not be told the missing one is where the other one is.
+ * The same three places for -C's page, and the SAME drawer: the archive puts
+ * both pages in Terminal/ and the installer copies that drawer whole, so a
+ * page anywhere else is a page nothing installs.  The drawer holds httpd's
+ * pages and is named after the first one.  A machine that has one page and
+ * not the other still gets the right refusal, because each search is over its
+ * own file name and says which one it could not find.
  */
 static const char *const httpd_console_places[] = {
-    "AmiNetXDuo:Console/console.html",
-    "PROGDIR:Console/console.html",
+    "AmiNetXDuo:Terminal/console.html",
+    "PROGDIR:Terminal/console.html",
     "PROGDIR:console.html"
 };
 
