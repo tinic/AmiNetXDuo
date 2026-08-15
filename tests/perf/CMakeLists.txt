@@ -253,6 +253,58 @@ if(NOT CMAKE_CROSSCOMPILING)
 endif()
 
 
+# -------------------------------------------------- the encoder profile ----
+#
+# Where /console's frame encoder spends its time, measured on the machine.
+#
+#   cmake --build build/cm --parallel --target rfbprof
+#   AMINETXDUO_RUN_TAG=rfb ./tools/amiberry-run.sh -t 600 -m A1200 \
+#       -a DH0:d2-idle.pfs build/cm/tests/perf/rfbprof <capture>.pfs
+#
+# rfb_encode.c is compiled TWICE into it.  aminetxduo_rfb is the shipping
+# object, which on AMINETXDUO_CPU=any is -m68000; rfb_encode_020 is the same
+# source at -m68020 with its eight public symbols renamed, so one run times
+# both codegens over the same bytes in the same second.  That is the only way
+# to answer "what is the -m68000 codegen costing the hottest loop in the
+# program" without comparing two runs on a shared host.
+
+if(CMAKE_CROSSCOMPILING)
+
+    add_library(rfb_encode_020 STATIC "${CMAKE_SOURCE_DIR}/src/rfb/rfb_encode.c")
+    target_include_directories(rfb_encode_020 PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+    target_compile_options(rfb_encode_020 PRIVATE
+        -m68020 -ffunction-sections -fno-optimize-sibling-calls -Wall -Wextra)
+    target_compile_definitions(rfb_encode_020 PRIVATE
+        rfb_packbits=rfb020_packbits
+        rfb_unpackbits=rfb020_unpackbits
+        rfb_shadow_size=rfb020_shadow_size
+        rfb_scratch_size=rfb020_scratch_size
+        rfb_worst_case_frame=rfb020_worst_case_frame
+        rfb_scroll_defaults=rfb020_scroll_defaults
+        rfb_encoder_init=rfb020_encoder_init
+        rfb_encode_frame=rfb020_encode_frame)
+
+    add_library(rfbkern STATIC rfbkern.c)
+    target_compile_options(rfbkern PRIVATE -Wall -Wextra)
+
+    add_library(rfbkern020 STATIC rfbkern.c)
+    target_compile_options(rfbkern020 PRIVATE -m68020 -Wall -Wextra)
+    target_compile_definitions(rfbkern020 PRIVATE RFBK_020)
+
+    add_executable(rfbprof rfbprof.c)
+    target_link_libraries(rfbprof PRIVATE
+        aminetxduo_rfb rfb_encode_020 rfbkern rfbkern020 aminetxduo_common)
+    target_link_options(rfbprof PRIVATE
+        "-Wl,-Map=$<TARGET_FILE_DIR:rfbprof>/rfbprof.map")
+    set_target_properties(rfbprof PROPERTIES OUTPUT_NAME "rfbprof")
+
+    if(AMIGA_NDK_INCLUDE)
+        target_include_directories(rfbprof PRIVATE "${AMIGA_NDK_INCLUDE}")
+    endif()
+
+endif()
+
+
 # ---------------------------------------------------------- the sampler ----
 #
 # -DAMINETXDUO_PROFILER=ON only.  See prof/CMakeLists.txt for what it is and
