@@ -953,7 +953,25 @@ static VOID fb_take_word(const char *w, ULONG len)
     switch (ev.kind)
     {
     case RFB_IN_REFRESH:
+        /*
+         * The shadow goes, and the viewer is TOLD, because a bare full frame
+         * is not distinguishable from an ordinary one and the tiles in it are
+         * XOR against the shadow.  A viewer that still has the last picture
+         * when one arrives XORs the two together and gets the all-zero
+         * screen: grey, on a stock Workbench, and it stays grey because an
+         * idle desktop produces no more tiles to correct it.
+         *
+         * geom is the barrier that already exists for this.  Everything the
+         * viewer had is discarded when one arrives, so re-queuing it puts a
+         * known zero on both sides at the same point in the stream: frames
+         * already in flight are applied to the old picture and then thrown
+         * away with it, and the full frame that follows lands on a cleared
+         * one.  pal goes with it because a geom leaves the viewer on a grey
+         * palette until the real one arrives.
+         */
         fb_forget_shadow();
+        fb_want_geom = 1;
+        fb_want_pal  = 1;
         break;
 
     case RFB_IN_POINTER:
