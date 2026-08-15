@@ -6,7 +6,7 @@ An IPv4+IPv6 TCP/IP stack for classic AmigaOS, and the networking commands to go
 It provides `bsdsocket.library`, the socket API that Amiga network software
 already speaks, on top of
 [Eclipse ThreadX NetX Duo](https://github.com/eclipse-threadx/netxduo), and it
-drives the SANA-II network cards you already have.
+drives existing SANA-II network cards.
 
 > It gets a DHCP lease, configures itself by SLAAC, answers ARP and neighbour
 > discovery, pings its gateway, resolves DNS, moves TCP in both directions,
@@ -20,7 +20,7 @@ drives the SANA-II network cards you already have.
 > 795 KB/s reading and 939 KB/s writing over Fitz, and found two bugs that are
 > fixed.
 >
-> Note that if you want to try IPv6 under WinUAE you will need a patch [(tinic/winuae@d9df1d8)](https://github.com/tonioni/WinUAE/commit/d9df1d8357ade4f9631491cf9f482e159554bfeb)
+> IPv6 under WinUAE requires a patch [(tinic/winuae@d9df1d8)](https://github.com/tonioni/WinUAE/commit/d9df1d8357ade4f9631491cf9f482e159554bfeb)
 
 ## How this was written
 
@@ -31,17 +31,16 @@ finding, saying whether the tree still agrees with it. The full record, what was
 measured, what was tried and abandoned, and the conclusions that later turned out
 to be wrong, is in git history.
 
-Whether that is worth trusting is a question about evidence rather than about
-authorship, so the evidence is the part worth checking: an independent
-conformance suite, every build configuration in continuous integration, a
-triaged static-analysis baseline, fuzzers, and every bug a user has reported
-recorded with its fix and a test that reproduces it.
+The evidence available for checking is an independent conformance suite, every
+build configuration in continuous integration, a triaged static-analysis
+baseline, fuzzers, and every bug a user has reported recorded with its fix and
+a test that reproduces it.
 
 ## Why
 
 AmigaOS has never included a TCP/IP stack; networking has always come from a
-third-party shared library, and every existing option has a catch. AmiTCP 3.0b2
-is free but dates from 1994. AmiTCP 4.x and Miami are proprietary and
+third-party shared library, and each existing option has a limitation. AmiTCP
+3.0b2 is free but dates from 1994. AmiTCP 4.x and Miami are proprietary and
 effectively unobtainable. Roadshow, the one genuinely modern stack, is
 commercial and closed.
 
@@ -50,8 +49,8 @@ anywhere in it. It speaks the same socket API and reads the same configuration
 files as Roadshow, so existing software and existing habits carry over. It
 speaks **IPv6**: on a network with an IPv6 router a machine picks up an address
 without being configured for one. The commands that take a host take an IPv6
-address, `ping`, `traceroute`, `nc`, `telnet`, `tftp`, `whois`, `fetch`,
-`sntp`, `nslookup` and `host`, and
+address: `ping`, `traceroute`, `nc`, `telnet`, `tftp`, `whois`, `fetch`,
+`sntp`, `nslookup` and `host`.
 `ShowNetStatus` and `netstat -i` show the IPv6 addresses an interface holds.
 `netstat -r` shows the IPv6 routes, `AddNetRoute` and `DeleteNetRoute` change
 them, and `arp` lists the neighbours an IPv6 network is reached through.
@@ -65,8 +64,8 @@ of address the network has, and a program that passes it straight to
 
 Software written for IPv4 keeps working over IPv4, which covers most of what is
 already on an Amiga. A program is IPv4-only when it resolves with
-`gethostbyname()`, that call has no way to return an IPv6 address, or when it
-keeps an address in 32 bits, or reads a dotted quad out of a configuration
+`gethostbyname()`, which has no way to return an IPv6 address; when it keeps an
+address in 32 bits; or when it reads a dotted quad out of a configuration
 file.
 
 Reaching an IPv6 host from one of those is a small change rather than a
@@ -81,9 +80,9 @@ card: `a2065.device`, `ariadne.device`, `ariadne2.device`, `amiganet.device`,
 `uaenet.device` for emulators are all offered by name in the installer, and
 anything else can be typed in.
 
-The archive also carries `anxnet.device` in `Devs/Networks/`, worth installing
-by hand if you use IPv6 on an X-Surf or X-Surf 100, whose own drivers refuse
-the multicast addresses IPv6 needs.
+The archive also carries `anxnet.device` in `Devs/Networks/`. Install it by
+hand for IPv6 on an X-Surf or X-Surf 100, whose own drivers refuse the
+multicast addresses IPv6 needs.
 
 ## Installing
 
@@ -100,19 +99,19 @@ Configuration follows Roadshow's layout, `DEVS:NetInterfaces/<name>`,
 
 | | |
 |---|---|
-| `NetSetup` | set up an interface by answering questions, start here |
+| `NetSetup` | set up an interface by answering questions, and write the configuration files; start here |
 | `AddNetInterface`, `Online`, `Offline` | bring an interface up and take it down |
 | `ShowNetStatus`, `netstat` | interface state, routes, connections |
 | `ShowNetServices` | what else on this network is offering something |
 | `ping`, `host` | reachability and name lookups |
-| `nslookup` | ask the DNS for one kind of record, from a server of your choosing |
-| `arp` | which machines on this network have answered, and what they are |
+| `nslookup` | ask the DNS for one kind of record, from a named server |
+| `arp` | the machines on this network that have answered, and what they are |
 | `sntp` | set the clock from a time server |
 | `fetch` | retrieve an `http://` or `https://` URL |
 | `httpd` | share a drawer, so other machines can mount it as a drive; `-T` also serves a Shell in a browser |
 | `nc` | connect or listen, TCP and UDP, port ranges, timeouts |
-| `iperf` | measure throughput against an `iperf` server, or be one |
-| `telnet` | with enough option negotiation not to confuse a real server |
+| `iperf` | measure throughput against an `iperf` server, or act as one |
+| `telnet` | with enough option negotiation to work with a real server |
 | `ssh` | Dropbear's dbclient, public-key auth; see the ReadMe for keys |
 | `NetTrace` | capture packets to a `.pcap` file Wireshark can open |
 | `traceroute` | trace the path to a host |
@@ -123,7 +122,6 @@ Configuration follows Roadshow's layout, `DEVS:NetInterfaces/<name>`,
 | `GetNetStatus`, `NetShutdown` | status for scripts, and a clean shutdown |
 | `RemoveNetInterface` | take one interface out of the running network |
 | `ConfigureNetInterface` | change a running interface's address, or renew and release its DHCP lease |
-| `NetSetup` | write the configuration files |
 | `hostname` | what this machine is called, and where the name came from |
 
 The installer copies all of them into `C:`.
@@ -138,10 +136,10 @@ It is a real console, not a pipe: `Ed` and `More` work, the cursor keys and
 history work, a password typed at `ssh`'s prompt is not drawn on the screen,
 and a program that asks how big the window is gets an answer. On an A1200 the
 prompt appears in 44 ms and pressing Return shows the output about 23 ms
-later, which is not far off a Shell on the machine itself.
+later, which is comparable to a Shell on the machine itself.
 
-**There is no password.** Whoever can reach the port gets the Shell, exactly
-as they get the drawer.
+**There is no password.** Anyone who can reach the port gets the Shell,
+exactly as they get the drawer.
 
 ## Finding the machine by name
 
@@ -154,7 +152,9 @@ and is still reachable.
 Answering it is per interface and off unless asked for, because the responder
 costs time on a slow machine. The installer asks; otherwise it is `MDNS=YES`
 in `DEVS:NetInterfaces/<name>`, or `ConfigureNetInterface <name> MDNS=YES` on
-an interface that is already up.
+an interface that is already up. Looking `.local` names up needs the same
+setting: with no interface asking for it, nothing is started in either
+direction.
 
 Looking names up needs no separate command. `ping`, `host`, `fetch` and any
 older program that resolves a name all get it, because the lookup happens
@@ -179,17 +179,16 @@ have gone.
 
 ## HTTPS / SSH
 
-`fetch` handles `https://` URLs, and certificates are properly checked against
-the usual set of root authorities.
+`fetch` handles `https://` URLs, and certificates are checked against the usual
+set of root authorities.
 
-`ssh` needs no special settings at the far end. Expect around ten seconds
-before the prompt appears; almost all of that is the cryptography rather than
-the network.
+`ssh` needs no special settings at the far end. The prompt appears after about
+ten seconds; almost all of that is the cryptography rather than the network.
 
-Keys must be in **Dropbear's own format**, an OpenSSH key copied straight
-across will not be read, and you name the key on the command line with `-i`.
-Make it on your PC rather than on the Amiga, which has neither the entropy nor
-the patience. The ReadMe in the archive has the exact commands.
+Keys must be in **Dropbear's own format**. An OpenSSH key copied straight
+across is not read. Name the key on the command line with `-i`. Generate it on
+a PC rather than on the Amiga, which has neither the entropy nor the speed for
+it. The ReadMe in the archive has the exact commands.
 
 The first connection to a site takes twenty seconds or more, and some servers
 give up before it finishes. The second attempt to the same site takes under a
@@ -197,15 +196,15 @@ second: the session is kept on disk and survives a reboot.
 
 ## Prior art
 
-Two other modern-stack projects appeared in July 2026 and are worth knowing
-about. [lwip-amiga](https://github.com/rondoval/lwip-amiga) combines lwIP with
+Two other modern-stack projects appeared in July 2026.
+[lwip-amiga](https://github.com/rondoval/lwip-amiga) combines lwIP with
 `bsdsocket.library`, but uses a custom `netdev` driver ABI rather than SANA-II,
 which restricts it to PiStorm and Emu68.
 [AmiTCP_NG](https://github.com/MW0MWZ/AmiTCP_NG) is a GPL fork of AmiTCP 3.0b2
 with a clean-room Roadshow ABI. Neither is MIT-licensed and neither drives
 SANA-II, which is why this one exists.
 
-## Building it yourself
+## Building
 
 ```sh
 git submodule update --init --recursive
@@ -213,8 +212,8 @@ cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake
 cmake --build build --parallel
 ```
 
-`tools/fetch-toolchain.sh` downloads the pinned m68k cross-compiler if you have
-none. See **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** for the build options,
+`tools/fetch-toolchain.sh` downloads the pinned m68k cross-compiler if none is
+installed. See **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** for the build options,
 the test suites, continuous integration and how everything is measured, and
 **[docs/RESEARCH.md](docs/RESEARCH.md)** for the engineering record.
 
@@ -225,18 +224,18 @@ implementation code from AmiTCP, AROSTCP, Miami or Roadshow has been used,
 copied or disassembled.
 
 The ABI itself comes from interface definitions and documentation that exist to
-be read, and naming them is more useful than a blanket denial: Olaf Barthel's
-freely distributable Roadshow SDK headers and autodocs, the NDK's
+be read, and those sources are named here: Olaf Barthel's freely distributable
+Roadshow SDK headers and autodocs, the NDK's
 `pragmas/bsdsocket_pragmas.h`, and the `.fd`/`.sfd` function-descriptor files
-AmiTCP and Roadshow publish, `usergroup.library`'s 39 vectors, for instance,
+AmiTCP and Roadshow publish. `usergroup.library`'s 39 vectors, for instance,
 were settled by reading AmiTCP's `fd/usergroup_lib.fd` against Roadshow's
 `sfd/usergroup_lib.sfd` and the NDK pragma, all three agreeing.
 `tools/gen_vectors.py` regenerates the vector tables from those sources and names
 each one.
 
 MIT. ThreadX and NetX Duo are MIT-licensed as well (© Microsoft and the Eclipse
-ThreadX contributors). ThreadX is an unmodified submodule. **NetX Duo is not**,
-it is a fork carrying one patch per defect, each on its own branch off upstream
+ThreadX contributors). ThreadX is an unmodified submodule. **NetX Duo is not.**
+It is a fork carrying one patch per defect, each on its own branch off upstream
 `473d1928` and each written as a standalone change to submit upstream. The
 branches are at `github.com/tinic/netxduo` and what each one fixes is in the
 engineering record. The one further exception is the CA root
