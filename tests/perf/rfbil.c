@@ -405,7 +405,21 @@ static VOID il_workbench(VOID)
 
 int main(void)
 {
-    BPTR o;
+    BPTR  o;
+    char *args = (char *)GetArgStr();
+    int   wb_only = 0;
+
+    /* `rfbil WB` reports the Workbench screen's layout and stops.  The console
+       harness runs it that way during a live measurement, where the question
+       is which arithmetic the server is about to use and the bitmap tests
+       below would only be time the guest spends not serving. */
+    if (args != NULL) {
+        const char *p = args;
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if ((p[0] == 'W' || p[0] == 'w') && (p[1] == 'B' || p[1] == 'b'))
+            wb_only = 1;
+    }
 
     GfxBase = (struct GfxBase *)OpenLibrary((CONST_STRPTR)"graphics.library", 39);
     IntuitionBase = (struct IntuitionBase *)
@@ -417,6 +431,10 @@ int main(void)
     }
 
     il_workbench();
+    if (wb_only) {
+        il_say("rfbil RESULT=REPORTED");
+        goto out;
+    }
 
     il_one(2, BMF_INTERLEAVED | BMF_DISPLAYABLE | BMF_CLEAR, "interleaved_d2");
     il_one(4, BMF_INTERLEAVED | BMF_DISPLAYABLE | BMF_CLEAR, "interleaved_d4");
