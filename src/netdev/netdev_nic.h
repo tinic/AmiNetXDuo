@@ -81,6 +81,14 @@ struct NetdevNicOps
     VOID  (*setfilter)(NetdevNic *nic);
     /* Drain the ring and every ISR bit. TRUE if this board had work. */
     BOOL  (*intr)(NetdevNic *nic);
+    /*
+     * Recover a wedged transmitter: put the chip in a known state and clear
+     * txb_inuse.  The vertical-blank watchdog is the only caller, and it runs
+     * under Disable() at INT3 against a card server at INT2, so this may not
+     * poll for milliseconds.  Every core supplies one; a core that cannot
+     * wedge supplies a no-op rather than leaving it NULL.
+     */
+    VOID  (*reset)(NetdevNic *nic);
 };
 
 struct NetdevNic

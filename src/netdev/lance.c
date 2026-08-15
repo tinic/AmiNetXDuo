@@ -138,6 +138,18 @@ VOID lance_halt(NetdevNic *nic)
     nic->running = FALSE;
 }
 
+/*
+ * STOP and re-INIT, which is the only recovery this chip has: the rings live
+ * in the board's SRAM and lance_init() is what rebuilds them and zeroes
+ * txb_inuse.  No poll loop -- lance_init() already bounds its own IDON wait.
+ */
+VOID lance_reset(NetdevNic *nic)
+{
+    nic->resets++;
+    lance_halt(nic);
+    (VOID)lance_init(nic);
+}
+
 /* -------------------------------------------------------------- filter --- */
 
 /*
@@ -425,8 +437,7 @@ BOOL lance_intr(NetdevNic *nic)
             /* A memory error means the chip lost the bus; nothing short of
                a restart puts the rings back in a known state. */
             nic->rx_errors++;
-            lance_halt(nic);
-            (VOID)lance_init(nic);
+            lance_reset(nic);
             return TRUE;
         }
 
@@ -498,5 +509,6 @@ const struct NetdevNicOps netdev_nic_lance =
     lance_halt,
     lance_tx,
     lance_setfilter,
-    lance_intr
+    lance_intr,
+    lance_reset
 };
