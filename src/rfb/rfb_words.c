@@ -203,6 +203,13 @@ int rfb_word_parse(const char *w, rfb_u32 len, rfb_input *ev)
         return 1;
     }
 
+    if (take_keyword(&c, "reset")) {
+        if (!at_end(&c))
+            return 0;
+        ev->kind = RFB_IN_RESET;
+        return 1;
+    }
+
     if (take_keyword(&c, "m")) {
         if (!take_int(&c, &ev->a) || !take_int(&c, &ev->b) ||
             !take_int(&c, &ev->c) || !at_end(&c))

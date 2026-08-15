@@ -1,10 +1,10 @@
 /*
- * The Workbench screen, served live down a WebSocket.
+ * The frontmost screen, served live down a WebSocket.
  *
  * WHAT IT IS
  *
  *   httpd's second endpoint that is not a file.  /console serves an HTML page
- *   and a WebSocket upgrade to the same address gets the Workbench screen: one
+ *   and a WebSocket upgrade to the same address gets the frontmost screen: one
  *   text frame saying what shape it is, one saying what colours it has, and
  *   then a binary frame per grab carrying only what changed.  The wire format
  *   is the frame encoder's and is written down in include/aminetxduo/
@@ -21,20 +21,32 @@
  *   a close frame nor a FIN, and without reclaim the endpoint stays held until
  *   the machine is restarted.
  *
- * WORKBENCH ONLY, AND PLANAR ONLY
+ * THE FRONT SCREEN, WHOLE, AND PLANAR ONLY
  *
- *   LockPubScreen("Workbench") and nothing else.  There is no screen
- *   enumeration here and no RTG: an RTG screen's BitMap has no Planes[] to
- *   read, GetBitMapAttr(BMA_FLAGS) is what says so, and that case is refused
- *   with a sentence rather than read anyway.
+ *   IntuitionBase->FirstScreen, which is what is in front, and the picture is
+ *   its whole bitmap at its own origin.  That is the RTG metaphor: a screen
+ *   owns the display and screen dragging does not exist, so a screen dragged
+ *   down is shown whole rather than composited over what is behind it, and a
+ *   screen whose bitmap is bigger than the display -- an autoscroll or
+ *   overscan screen -- goes out entire rather than scrolled under a pointer
+ *   the far end does not have.  The geometry advertised is always the
+ *   BITMAP's, which is what the frames carry.
+ *
+ *   It used to be LockPubScreen("Workbench") and nothing else, which locked a
+ *   remote viewer out of the Palette and Overscan editors: each opens a screen
+ *   of its own that is not public, so the browser went on showing an unchanged
+ *   Workbench with no way to see or dismiss what had opened in front.
+ *
+ *   No RTG: an RTG screen's BitMap has no Planes[] to read,
+ *   GetBitMapAttr(BMA_FLAGS) is what says so, and that case is refused with a
+ *   sentence rather than read anyway.
  *
  * THE LOCKS ARE NOT HELD ACROSS THE SOCKET
  *
- *   docs/FORBID.md: nothing inside Forbid() may block, and LockLayers stops
- *   every other task drawing.  So the grab is lock, WaitBlit, CopyMem into a
- *   buffer of ours, unlock -- and the encode and the send both happen with
- *   nothing held.  That copy is what makes the rest of the pipeline free to
- *   take as long as it likes.
+ *   docs/FORBID.md: nothing inside Forbid() may block, LockLayers stops every
+ *   other task drawing, and LockIBase() stops Intuition.  So a grab takes what
+ *   it needs -- the geometry, the palette, the bitplane addresses -- gives the
+ *   lock back, and the encode and the send both happen with nothing held.
  *
  * IT COSTS NOTHING UNTIL SOMEBODY ASKS
  *
@@ -65,7 +77,7 @@
 
 /* ------------------------------------------------------------ the module --- */
 
-/* -C.  Opens graphics, intuition and layers at V39 and looks at the Workbench
+/* -C.  Opens graphics, intuition and layers at V39 and looks at the front
    screen once, so that a machine which cannot serve one refuses to start
    rather than answering 503 to the first person who asks.  FALSE having
    filled http_fb_fault(). */

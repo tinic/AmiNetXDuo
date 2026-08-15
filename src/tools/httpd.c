@@ -13,7 +13,7 @@
  *   httpd DH0:Docs 8080 -v       another port, one log line per request
  *   httpd RAM: 8080 TRACE        every header, in the order it arrived
  *   httpd Work:Public 80 -T      and a Shell in a browser, on the same port
- *   httpd Work:Public 80 -C      and the Workbench screen, live, in a browser
+ *   httpd Work:Public 80 -C      and the frontmost screen, live, in a browser
  *
  * WHAT IT ANSWERS
  *
@@ -53,7 +53,7 @@
  * AND, WHEN ASKED FOR, THE SCREEN
  *
  *   -C turns on /console, which serves an HTML page, and a WebSocket upgrade
- *   to the same address gets the Workbench screen itself: what shape it is,
+ *   to the same address gets the frontmost screen itself: what shape it is,
  *   what colours it has, and then a frame per grab carrying only what changed.
  *   The grab and the session are in src/tools/httpfb.c, the wire format in
  *   include/aminetxduo/rfb_encode.h.
@@ -65,9 +65,10 @@
  *   so the decision is made once, on the command line, by the person starting
  *   the server.
  *
- *   The Workbench screen and nothing else.  There is no screen enumeration and
- *   no RTG: a non-planar BitMap has no bitplanes to read, and that case is
- *   refused with a sentence rather than read anyway.
+ *   Whatever is in front, whole, and nothing behind it -- the way a screen
+ *   owns the display on RTG.  No compositing of a dragged-down screen over
+ *   what is under it, and no RTG: a non-planar BitMap has no bitplanes to
+ *   read, and that case is refused with a sentence rather than read anyway.
  *
  *   The class matters more than the verbs do.  Finder mounts a `DAV: 1`
  *   server READ-ONLY however many write methods it answers, so a server that
@@ -7576,7 +7577,7 @@ int main(int argc, char **argv)
                    "Serves a drawer over HTTP and WebDAV, so this machine can "
                    "be mounted as a writable drive.  -T adds /shell, an "
                    "AmigaDOS Shell in a browser, and -C adds /console, the "
-                   "Workbench screen; both are open to anyone who can reach "
+                   "frontmost screen; both are open to anyone who can reach "
                    "the port.");
         return RETURN_ERROR;
     }
@@ -7981,7 +7982,7 @@ int main(int argc, char **argv)
 
     /*
      * The screen, and the only cost -C has until somebody connects: three
-     * OpenLibrary() calls and one look at the Workbench screen.  Without -C
+     * OpenLibrary() calls and one look at the front screen.  Without -C
      * not one of them happens.
      *
      * Here rather than beside the page search, for the reason http_term_init()
@@ -8009,7 +8010,7 @@ int main(int argc, char **argv)
 
         http_fb_geometry(&sw, &sh, &sd);
         tool_printf("The console is at http://%s:%ld%s  "
-                    "(the Workbench screen, %ldx%ld",
+                    "(the frontmost screen, %ldx%ld",
                     (LONG)dotted, (LONG)port, (LONG)HTTPD_CONSOLE_URL,
                     (LONG)sw, (LONG)sh);
         tool_printf("x%ld, NO PASSWORD)\n", (LONG)sd);

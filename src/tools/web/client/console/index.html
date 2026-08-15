@@ -26,6 +26,7 @@
     <button id="live" type="button">Connect</button>
     <button id="shot" type="button"
             title="Save the screen as a PNG, at the aspect shown. Shift for the Amiga's own pixels.">Screenshot</button>
+    <button id="reset" type="button">Reset</button>
   </span>
   <span id="state"><i id="dot"></i><span id="word">idle</span></span>
 </div>
@@ -51,6 +52,8 @@
     <option value="2">2x</option>
     <option value="3">3x</option>
   </select>
+  <button id="rec" type="button" aria-pressed="false">Record</button>
+  <button id="logtog" type="button" aria-pressed="false">log</button>
 </div>
 
 <div id="info">
@@ -60,6 +63,14 @@
 </div>
 
 <div id="log" title="what would go to the Amiga, if anything there read it"></div>
+
+<dialog id="ask">
+  <p id="askwhat"></p>
+  <div>
+    <button id="askno" type="button" autofocus>Cancel</button>
+    <button id="askyes" type="button"></button>
+  </div>
+</dialog>
 
 <script type="module">/*SCRIPT*/</script>
 </body>

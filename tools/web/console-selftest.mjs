@@ -113,6 +113,24 @@ function decodeFrame(cap, i) {
   return new Uint8Array(words.buffer);
 }
 
+/* -------------------------------------------- the recorder writes it back -- */
+
+/*
+ * buildPfs() is what the Record button hands to the browser, and the player
+ * on the same page opens it with parsePfs().  A file the player cannot read
+ * is the one failure that makes the button pointless, so the check is byte
+ * equality against a file parsePfs already accepted: parse, hand the frames
+ * straight back, and the result has to be the same bytes.
+ */
+function pfsFrames(cap) {
+  const out = [];
+  for (let i = 0; i < cap.frameCount; i++) {
+    const at = M.frameAt(cap, i);
+    out.push(cap.frames.subarray(at, at + cap.stride));
+  }
+  return out;
+}
+
 /* ------------------------------------------------ the picture is right -- */
 
 /*
@@ -156,6 +174,24 @@ for (const [name, w, h, depth, bpr] of SHAPES) {
     console.log("      %s", file);
   }
 }
+
+for (const [name, w, h, depth, bpr] of SHAPES) {
+  const src = writePfs(synth(w, h, depth, 3, bpr));
+  const cap = M.parsePfs(bufferToArrayBuffer(src));
+  const built = M.buildPfs(cap.screen, cap.rgb, pfsFrames(cap));
+
+  ok(name + ": buildPfs writes back the bytes parsePfs read",
+     built.length === src.length && built.every((v, i) => v === src[i]),
+     built.length + " vs " + src.length + " bytes");
+}
+
+ok("buildPfs refuses a frame of the wrong length",
+   throws(() => M.buildPfs({ width: 640, height: 256, depth: 2, bytesPerRow: 80 },
+                           new Uint8Array(12), [new Uint8Array(17)])));
+
+ok("buildPfs refuses no frames at all",
+   throws(() => M.buildPfs({ width: 640, height: 256, depth: 2, bytesPerRow: 80 },
+                           new Uint8Array(12), [])));
 
 /* ---------------------------------------------- the container complains -- */
 
@@ -344,7 +380,14 @@ if (!existsSync(CONTENT)) {
     try { files = readdirSync(at); } catch { continue; }
 
     for (const name of files.filter((f) => f.endsWith(".pfs")).sort()) {
-      const cap = M.parsePfs(bufferToArrayBuffer(readFileSync(join(at, name))));
+      const raw = readFileSync(join(at, name));
+      const cap = M.parsePfs(bufferToArrayBuffer(raw));
+
+      const back = M.buildPfs(cap.screen, cap.rgb, pfsFrames(cap));
+      ok(dir + "/" + name + ": buildPfs reproduces the file exactly",
+         back.length === raw.length && back.every((v, i) => v === raw[i]),
+         back.length + " vs " + raw.length + " bytes");
+
       const stem = name.replace(/\.pfs$/, "");
       const w = cap.screen.width, h = cap.screen.height;
 
