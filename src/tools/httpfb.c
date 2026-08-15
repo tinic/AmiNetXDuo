@@ -1,6 +1,23 @@
 /*
- * The Workbench screen down a WebSocket.  See httpfb.h for what this is and
+ * The frontmost screen down a WebSocket.  See httpfb.h for what this is and
  * what it deliberately is not.
+ *
+ * THE FRONT SCREEN, THE WAY RTG DOES IT
+ *
+ *   IntuitionBase->FirstScreen is what is in front, and that is what is served.
+ *   It used to be LockPubScreen("Workbench") and nothing else, which meant the
+ *   Palette and Overscan editors -- each of which opens a screen of its own
+ *   that is not public -- locked a remote viewer out: the screen opened in
+ *   front on the machine and the browser went on showing an unchanged
+ *   Workbench with no way to see or dismiss it.
+ *
+ *   The whole front screen, at its own origin, and nothing behind it.  That is
+ *   the RTG metaphor -- on a graphics card the front screen owns the display
+ *   and screen dragging does not exist -- and it is deliberately not a
+ *   composite of a dragged-down screen over what is behind it.  sc->LeftEdge
+ *   and sc->TopEdge are read for one purpose only, aiming injected pointer
+ *   events at rows that have been dragged away from the top of the view; they
+ *   do not move the picture.
  *
  * THE GRAB IS wbgrab's
  *
@@ -41,12 +58,11 @@
 #include <graphics/layers.h>
 #include <graphics/view.h>
 #include <intuition/intuition.h>
+#include <intuition/intuitionbase.h>
 #include <intuition/screens.h>
 
 #include <proto/graphics.h>
 #include <proto/intuition.h>
-
-#define PUBSCREEN_NAME      "Workbench"
 
 #define FB_MAX_DEPTH        RFB_MAX_DEPTH
 #define FB_MAX_COLOURS      (1U << FB_MAX_DEPTH)
@@ -231,6 +247,20 @@ static struct InputEvent fb_event;
 static UWORD             fb_x_halves = 2;   /* view units per pixel, doubled */
 static UWORD             fb_y_halves = 4;
 
+/*
+ * WHERE THE FRONT SCREEN SITS IN THE VIEW, in its own pixels.
+ *
+ *   Zero for every screen nobody has dragged, which is every screen this
+ *   normally sees.  The picture is sent whole at the screen's own origin
+ *   whatever these are -- the front screen owns the display, the way it does
+ *   on RTG -- so they move nothing about what is drawn.  They exist because an
+ *   injected IECLASS_POINTERPOS is a position in the VIEW, and a screen
+ *   dragged down by fifty rows has its row 0 fifty rows into the view: without
+ *   this the picture would be right and every click in it fifty rows high.
+ */
+static WORD              fb_left;
+static WORD              fb_top;
+
 /* What the far end is holding down, as IEQUALIFIER_ bits.  Intuition reads the
    button state off the qualifier of every RAWMOUSE event, not off a history of
    the codes, so a button that goes down and is not carried in the qualifier of
@@ -336,6 +366,108 @@ static VOID fb_close_libraries(VOID)
     }
 }
 
+/* --------------------------------------------------- which screen is front -- */
+
+/*
+ * TRUE when `sc` is still one of Intuition's screens.  THE CALLER MUST HOLD
+ * LockIBase(), and that is the whole point of it: CloseScreen() takes
+ * IntuitionBase to unlink a screen before it frees it, so a screen found in
+ * the list under that lock cannot be freed for as long as the lock is held.
+ */
+static BOOL fb_listed(struct Screen *sc)
+{
+    struct Screen *s;
+
+    for (s = IntuitionBase->FirstScreen; s != NULL; s = s->NextScreen)
+    {
+        if (s == sc)
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+/*
+ * The frontmost screen, locked if it is one that CAN be locked.
+ *
+ * IntuitionBase->FirstScreen is a field and not a function, so it is read
+ * under LockIBase() and the lock is dropped at once: Intuition is blocked for
+ * as long as it is held and this runs many times a second.
+ *
+ * A REAL LOCK IS TAKEN WHENEVER ONE EXISTS.  A public screen can be held by
+ * name for the whole of a grab, and the screen then cannot close underneath --
+ * which is the guarantee the Workbench-only version had and is worth keeping
+ * unchanged for the case that is nearly always in front.  Its name comes off
+ * the public screen list rather than being assumed to be "Workbench", so any
+ * public screen in front gets the same treatment.
+ *
+ * A screen that is NOT public -- which the Palette and Overscan editors' are,
+ * and which is exactly why LockPubScreen() could not reach them -- has no such
+ * handle in 3.1.  It comes back unlocked and fb_grab_frame() reads it under
+ * the shorter guarantee LockIBase() gives instead.
+ */
+static struct Screen *fb_lock_front(BOOL *pub)
+{
+    /* Static for the reason every buffer in this file is: a Shell command has
+       4 KB of stack and MAXPUBSCREENNAME is 139 of them. */
+    static char           name[MAXPUBSCREENNAME + 1];
+    struct List          *list;
+    struct PubScreenNode *node;
+    struct Screen        *front;
+    struct Screen        *got;
+    ULONG                 ilock;
+    UWORD                 i;
+    BOOL                  named = FALSE;
+
+    *pub = FALSE;
+
+    ilock = LockIBase(0);
+    front = IntuitionBase->FirstScreen;
+    UnlockIBase(ilock);
+
+    if (front == NULL)
+        return NULL;
+
+    list = LockPubScreenList();
+    if (list != NULL)
+    {
+        for (node = (struct PubScreenNode *)list->lh_Head;
+             node->psn_Node.ln_Succ != NULL;
+             node = (struct PubScreenNode *)node->psn_Node.ln_Succ)
+        {
+            if (node->psn_Screen != front || node->psn_Node.ln_Name == NULL)
+                continue;
+
+            for (i = 0; i < (UWORD)MAXPUBSCREENNAME &&
+                        node->psn_Node.ln_Name[i] != '\0'; i++)
+                name[i] = node->psn_Node.ln_Name[i];
+            name[i] = '\0';
+            named = TRUE;
+            break;
+        }
+        UnlockPubScreenList();
+    }
+
+    if (named)
+    {
+        got = LockPubScreen((CONST_STRPTR)name);
+
+        if (got == front)
+        {
+            *pub = TRUE;
+            return front;
+        }
+
+        /* The name is now somebody else's screen, so the lock is not a lock on
+           the one in front.  Given back, and the front pointer goes out
+           unlocked to be re-checked against the screen list. */
+        if (got != NULL)
+            UnlockPubScreen(NULL, got);
+    }
+
+    return front;
+}
+
 /* --------------------------------------------------------------- geometry -- */
 
 /*
@@ -353,7 +485,7 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g)
 
     if (bm == NULL)
     {
-        fb_say("the Workbench screen has no bitmap");
+        fb_say("the front screen has no bitmap");
         return FALSE;
     }
 
@@ -364,21 +496,21 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g)
 
     if ((flags & BMF_STANDARD) == 0)
     {
-        fb_say("the Workbench screen is not a standard planar bitmap, so it "
-               "has no bitplanes to read; this serves planar screens only");
+        fb_say("the front screen is not a standard planar bitmap, so it has "
+               "no bitplanes to read; this serves planar screens only");
         return FALSE;
     }
 
     if (depth < 1 || depth > FB_MAX_DEPTH)
     {
-        fb_say3("the Workbench screen is ", depth,
+        fb_say3("the front screen is ", depth,
                 " planes deep; this handles 1 to 8");
         return FALSE;
     }
 
     if (width < 1 || width > 65535 || height < 1 || height > 65535)
     {
-        fb_say("the Workbench screen does not fit the wire format");
+        fb_say("the front screen does not fit the wire format");
         return FALSE;
     }
 
@@ -520,27 +652,21 @@ static BOOL fb_read_palette(struct ColorMap *cm, UWORD depth, UBYTE *pal)
  * the bytes the far end was sent, which is the failure that would not correct
  * itself on the next frame.
  */
-static LONG fb_encode_bitmap(struct BitMap *bm, const FbGeometry *g,
-                             UBYTE *out, ULONG out_cap)
+static LONG fb_encode_planes(const UBYTE **planes, UBYTE *out, ULONG out_cap)
 {
-    const UBYTE *planes[FB_MAX_DEPTH];
-    UWORD        plane;
-
-    for (plane = 0; plane < g->depth; plane++)
-        planes[plane] = (const UBYTE *)bm->Planes[plane];
-
     return rfb_encode_frame_planes(&fb_enc, planes, out, out_cap);
 }
 
 /*
- * The view's units per screen pixel, doubled so superhires can be a half.
- * Straight off the ViewPort: SUPERHIRES is two pixels to a view unit, HIRES
- * one to one, and anything else is lores at two view units to a pixel; a
- * screen that is not interlaced is two view lines to a row.
+ * The view's units per screen pixel, doubled so superhires can be a half, and
+ * where the screen starts in the view.  Straight off the ViewPort: SUPERHIRES
+ * is two pixels to a view unit, HIRES one to one, and anything else is lores
+ * at two view units to a pixel; a screen that is not interlaced is two view
+ * lines to a row.
  */
-static VOID fb_view_units(struct ViewPort *vp)
+static VOID fb_view_units(struct Screen *sc)
 {
-    UWORD modes = (UWORD)vp->Modes;
+    UWORD modes = (UWORD)sc->ViewPort.Modes;
 
     if ((modes & SUPERHIRES) != 0)
         fb_x_halves = 1;
@@ -550,15 +676,57 @@ static VOID fb_view_units(struct ViewPort *vp)
         fb_x_halves = 4;
 
     fb_y_halves = (UWORD)(((modes & LACE) != 0) ? 2 : 4);
+
+    fb_left = sc->LeftEdge;
+    fb_top  = sc->TopEdge;
 }
 
 enum
 {
     FB_GRAB_OK = 0,
-    FB_GRAB_GONE,       /* there is no Workbench screen any more            */
+    FB_GRAB_GONE,       /* there are no screens at all any more              */
     FB_GRAB_CHANGED,    /* it is not the screen the client was told about   */
-    FB_GRAB_REFUSED     /* it is a bitmap this cannot read; fb_why says why */
+    FB_GRAB_REFUSED,    /* it is a bitmap this cannot read; fb_why says why */
+    FB_GRAB_VANISHED    /* it closed while we were resolving it             */
 };
+
+/*
+ * Everything that dereferences the Screen, its BitMap or its ColorMap.  The
+ * caller holds either a public screen lock or LockIBase(), so this must not
+ * block and must not call Intuition -- and it does not: GetBitMapAttr() and
+ * GetRGB32() are reads of structures the screen already owns.
+ *
+ * What leaves here is the geometry, the palette, the view units and the
+ * bitplane ADDRESSES.  The encode that follows touches nothing but those
+ * addresses, which is what lets it run with the lock given back.
+ */
+static int fb_examine(struct Screen *sc, const FbGeometry *want,
+                      FbGeometry *now, const UBYTE **planes,
+                      BOOL *palette_moved)
+{
+    UWORD plane;
+
+    if (!fb_geometry_of(sc->RastPort.BitMap, now))
+        return FB_GRAB_REFUSED;
+
+    if (!fb_geometry_same(want, now))
+        return FB_GRAB_CHANGED;
+
+    fb_view_units(sc);
+
+    *palette_moved = fb_read_palette(sc->ViewPort.ColorMap,
+                                     want->depth, fb_pal);
+
+    /* Colours before pixels, and the encode is skipped entirely on the pass
+       that finds them moved. */
+    if (*palette_moved)
+        return FB_GRAB_OK;
+
+    for (plane = 0; plane < want->depth; plane++)
+        planes[plane] = (const UBYTE *)sc->RastPort.BitMap->Planes[plane];
+
+    return FB_GRAB_OK;
+}
 
 /*
  * One frame into `buf`, and the palette.  Everything downstream -- the encode,
@@ -584,68 +752,99 @@ enum
  *
  *   Reading it unlocked is safe and is what a mirror wants.  The planes are
  *   memory; the lock serialises the tasks DRAWING into them, not the reading
- *   of them, and the pubscreen lock above is what keeps the screen and its
- *   bitmap in existence.  The cost is that a frame read while somebody is
- *   drawing may carry half of a change -- and the encoder diffs the next grab
- *   against what it actually sent, so the very next frame that differs puts it
- *   right.  A torn frame for two milliseconds is the price of a console that
- *   keeps up during a drag and a server that never stops.
+ *   of them, and the screen lock above is what keeps the screen and its bitmap
+ *   in existence.  The cost is that a frame read while somebody is drawing may
+ *   carry half of a change -- and the encoder diffs the next grab against what
+ *   it actually sent, so the very next frame that differs puts it right.  A
+ *   torn frame for two milliseconds is the price of a console that keeps up
+ *   during a drag and a server that never stops.
+ *
+ * AND WHAT KEEPS A SCREEN NOTHING CAN LOCK IN EXISTENCE
+ *
+ *   A public screen is held for the whole of this and cannot close.  The
+ *   Palette and Overscan editors' screens are not public and 3.1 has no handle
+ *   for one, so the guarantee is shorter: everything read out of the Screen is
+ *   read under LockIBase() with the screen verified still listed, which is
+ *   enough because CloseScreen() has to take IntuitionBase to unlink it before
+ *   it frees anything.
+ *
+ *   What is left outside that is the encode, which reads the bitplane
+ *   addresses and nothing else.  A screen that closes in that window leaves
+ *   those pointing at freed chip RAM: bytes, on a machine with no MMU, so the
+ *   worst it can produce is ONE wrong frame, and the pass after it resolves the
+ *   front screen again and the geom barrier corrects the viewer.  Making that
+ *   window zero would mean holding LockIBase() across a 15 ms encode ten times
+ *   a second, which is Intuition stopped for a sixth of the time.
+ *
+ *   AND SUCH A SCREEN IS READ WITHOUT THE LAYER LOCK, counted in tn=.  Taking
+ *   it would mean releasing it after the encode, and the only way to know the
+ *   screen is still there to release it on is LockIBase() -- while holding a
+ *   layer lock.  That is a deadlock and it was measured, not reasoned about:
+ *   Intuition holds IntuitionBase and wants the layer lock, this holds the
+ *   layer lock and wants IntuitionBase.  The guest stopped dead, the whole GUI
+ *   frozen with a gadget stuck in its selected state and httpd answering
+ *   nothing, on the click that was closing an Overscan editor screen.
  */
 static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
                          BOOL *palette_moved, UBYTE *out, ULONG out_cap,
                          LONG *encoded)
 {
     struct Screen *sc;
-    int            rc = FB_GRAB_OK;
-    BOOL           locked;
+    const UBYTE   *planes[FB_MAX_DEPTH];
+    ULONG          ilock = 0;
+    int            rc;
+    BOOL           pub;
+    BOOL           locked = FALSE;
 
     *palette_moved = FALSE;
     *encoded = -1L;                     /* nothing encoded this pass */
 
-    sc = LockPubScreen((CONST_STRPTR)PUBSCREEN_NAME);
+    sc = fb_lock_front(&pub);
     if (sc == NULL)
     {
-        fb_say("the Workbench screen has gone: LockPubScreen(\"Workbench\") "
-               "found nothing");
+        fb_say("there are no screens left: Intuition's screen list is empty");
         return FB_GRAB_GONE;
     }
 
-    if (!fb_geometry_of(sc->RastPort.BitMap, now))
+    if (!pub)
+        ilock = LockIBase(0);
+
+    if (pub || fb_listed(sc))
     {
-        UnlockPubScreen(NULL, sc);
-        return FB_GRAB_REFUSED;
+        rc = fb_examine(sc, want, now, planes, palette_moved);
+
+        /* Only on a screen that is held, and see above for why.  Attempted and
+           never waited for: the lock is held for as long as a mouse button is
+           down and this server has one task. */
+        if (pub && rc == FB_GRAB_OK && !*palette_moved)
+            locked = (BOOL)(AttemptSemaphore(&sc->LayerInfo.Lock) != 0);
+    }
+    else
+    {
+        /* It closed between being read out of FirstScreen and being looked
+           at.  Nothing this pass; the next one resolves the front screen
+           again, which by then is whatever is really in front. */
+        rc = FB_GRAB_VANISHED;
     }
 
-    if (!fb_geometry_same(want, now))
+    if (!pub)
+        UnlockIBase(ilock);
+
+    if (rc == FB_GRAB_OK && !*palette_moved)
     {
-        UnlockPubScreen(NULL, sc);
-        return FB_GRAB_CHANGED;
-    }
-
-    fb_view_units(&sc->ViewPort);
-
-    *palette_moved = fb_read_palette(sc->ViewPort.ColorMap,
-                                     want->depth, fb_pal);
-
-    /*
-     * Colours before pixels, and the encode is skipped entirely on the pass
-     * that finds them moved -- it used to grab a whole frame and throw it
-     * away here.
-     */
-    if (!*palette_moved)
-    {
-        locked = (BOOL)(AttemptSemaphore(&sc->LayerInfo.Lock) != 0);
         if (!locked)
             fb_torn++;
 
         WaitBlit();
-        *encoded = fb_encode_bitmap(sc->RastPort.BitMap, want, out, out_cap);
+        *encoded = fb_encode_planes(planes, out, out_cap);
 
         if (locked)
             ReleaseSemaphore(&sc->LayerInfo.Lock);
     }
 
-    UnlockPubScreen(NULL, sc);
+    if (pub)
+        UnlockPubScreen(NULL, sc);
+
     return rc;
 }
 
@@ -932,9 +1131,12 @@ static VOID fb_inject_pointer(rfb_s32 x, rfb_s32 y)
     fb_event.ie_Class     = IECLASS_POINTERPOS;
     fb_event.ie_Code      = IECODE_NOBUTTON;
     fb_event.ie_Qualifier = fb_buttons;
-    /* Screen pixels in, view units out; see fb_x_halves. */
-    fb_event.ie_X         = (WORD)((x * (rfb_s32)fb_x_halves) / 2);
-    fb_event.ie_Y         = (WORD)((y * (rfb_s32)fb_y_halves) / 2);
+    /* Screen pixels in, view units out; see fb_x_halves.  The screen's own
+       origin goes in first, which is zero unless somebody dragged it. */
+    fb_event.ie_X         = (WORD)(((x + (rfb_s32)fb_left) *
+                                    (rfb_s32)fb_x_halves) / 2);
+    fb_event.ie_Y         = (WORD)(((y + (rfb_s32)fb_top) *
+                                    (rfb_s32)fb_y_halves) / 2);
     fb_write_event();
 }
 
@@ -1142,6 +1344,8 @@ static VOID fb_sink(void *ctx, HttpWsEvent ev, const unsigned char *data,
 BOOL http_fb_open(VOID)
 {
     struct Screen *sc;
+    ULONG          ilock = 0;
+    BOOL           pub;
     BOOL           ok;
 
     fb_why[0] = '\0';
@@ -1152,18 +1356,29 @@ BOOL http_fb_open(VOID)
         return FALSE;
     }
 
-    sc = LockPubScreen((CONST_STRPTR)PUBSCREEN_NAME);
+    sc = fb_lock_front(&pub);
     if (sc == NULL)
     {
-        fb_say("there is no Workbench screen: LockPubScreen(\"Workbench\") "
-               "found nothing.  -C serves the Workbench screen and nothing "
-               "else, so a machine booted to a Shell has nothing to serve");
+        fb_say("there are no screens: Intuition's screen list is empty.  -C "
+               "serves the frontmost screen, so a machine that has opened "
+               "none has nothing to serve");
         fb_close_libraries();
         return FALSE;
     }
 
-    ok = fb_geometry_of(sc->RastPort.BitMap, &fb_open_geom);
-    UnlockPubScreen(NULL, sc);
+    if (!pub)
+        ilock = LockIBase(0);
+
+    ok = (BOOL)(pub || fb_listed(sc));
+    if (ok)
+        ok = fb_geometry_of(sc->RastPort.BitMap, &fb_open_geom);
+    else
+        fb_say("the front screen closed while it was being looked at");
+
+    if (!pub)
+        UnlockIBase(ilock);
+    else
+        UnlockPubScreen(NULL, sc);
 
     if (!ok)
     {
@@ -1211,6 +1426,11 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
 {
     struct Screen *sc;
     FbGeometry     g;
+    FbGeometry     again;
+    const UBYTE   *planes[FB_MAX_DEPTH];
+    ULONG          ilock = 0;
+    BOOL           pub;
+    BOOL           moved;
     BOOL           ok;
 
     if (!fb_on || fb_live)
@@ -1222,36 +1442,65 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_why[0] = '\0';
 
     /* The geometry is read again rather than taken from startup: a screen mode
-       changed since then is the ordinary case, not an error. */
-    sc = LockPubScreen((CONST_STRPTR)PUBSCREEN_NAME);
+       changed since then, or another screen having come to the front, is the
+       ordinary case and not an error. */
+    sc = fb_lock_front(&pub);
     if (sc == NULL)
     {
-        fb_say("there is no Workbench screen to serve");
+        fb_say("there is no screen to serve");
         return FALSE;
     }
 
-    ok = fb_geometry_of(sc->RastPort.BitMap, &g);
+    if (!pub)
+        ilock = LockIBase(0);
 
+    ok = (BOOL)(pub || fb_listed(sc));
     if (ok)
-        ok = fb_take_buffers(&g);
+        ok = fb_geometry_of(sc->RastPort.BitMap, &g);
+    else
+        fb_say("the front screen closed while it was being looked at");
 
-    /*
-     * The colours, HERE, while the screen is still locked.  fb_take_buffers()
-     * clears the remembered palette so that the first grab's comparison is
-     * against nothing, and without this the first `pal` word out is 3 << depth
-     * zeroes -- a black palette, which is what a viewer draws until the second
-     * one arrives a frame later.
-     */
-    if (ok)
-    {
-        (VOID)fb_read_palette(sc->ViewPort.ColorMap, g.depth, fb_pal);
-        fb_want_pal = 1;
-    }
-
-    UnlockPubScreen(NULL, sc);
+    if (!pub)
+        UnlockIBase(ilock);
+    else
+        UnlockPubScreen(NULL, sc);
 
     if (!ok)
         return FALSE;
+
+    /* Outside every lock, because it allocates: LockIBase() stops Intuition
+       and AllocVec() is not something to stop it across. */
+    if (!fb_take_buffers(&g))
+        return FALSE;
+
+    /*
+     * The colours, before the first grab.  fb_take_buffers() clears the
+     * remembered palette so that grab's comparison is against nothing, and
+     * without this the first `pal` word out is 3 << depth zeroes -- a black
+     * palette, which is what a viewer draws until the second one arrives a
+     * frame later.
+     *
+     * The front screen is resolved a second time rather than kept from above,
+     * and the read is skipped if anything about it has changed in between:
+     * that leaves fb_pal at zero, the first grab finds the colours moved, and
+     * the viewer gets them one frame late instead of getting a screen's
+     * geometry with another screen's palette.
+     */
+    sc = fb_lock_front(&pub);
+    if (sc != NULL)
+    {
+        if (!pub)
+            ilock = LockIBase(0);
+
+        if ((pub || fb_listed(sc)) &&
+            fb_examine(sc, &g, &again, planes, &moved) == FB_GRAB_OK)
+            fb_want_pal = 1;
+
+        if (!pub)
+            UnlockIBase(ilock);
+        else
+            UnlockPubScreen(NULL, sc);
+    }
 
     fb_sb         = sb;
     fb_sock       = sock;
@@ -1504,16 +1753,23 @@ BOOL http_fb_slice(ULONG now)
 
     case FB_GRAB_GONE:
         fb_close_saying(HTTP_WS_CLOSE_GOING,
-                        "the Workbench screen has gone");
+                        "there are no screens left to show");
+        return TRUE;
+
+    case FB_GRAB_VANISHED:
+        /* The screen closed while it was being resolved.  Nothing this pass;
+           the next one resolves whatever is in front now, and that is either
+           the same shape -- in which case the stream simply carries on -- or a
+           different one, which comes back as CHANGED below. */
         return TRUE;
 
     case FB_GRAB_CHANGED:
         /*
-         * The screen changed shape under a live session.  Everything the
-         * receiver has is now about a screen that is not there, so the
-         * buffers are retaken at the new geometry and it is told again --
-         * which is what stops a frame going out that disagrees with the last
-         * geometry it was given.
+         * The screen changed shape under a live session, or another screen of
+         * a different shape came to the front.  Everything the receiver has is
+         * now about a screen it is not being shown, so the buffers are retaken
+         * at the new geometry and it is told again -- which is what stops a
+         * frame going out that disagrees with the last geometry it was given.
          */
         if (!fb_take_buffers(&seen))
         {
@@ -1526,7 +1782,7 @@ BOOL http_fb_slice(ULONG now)
     case FB_GRAB_REFUSED:
     default:
         fb_close_saying(HTTP_WS_CLOSE_GOING,
-                        "the Workbench screen is no longer one this can read");
+                        "the front screen is not one this can read");
         return TRUE;
     }
 
