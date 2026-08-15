@@ -46,7 +46,7 @@
     @{"Licence and credits       " link LICENCE}
 
 
-  AmiNetXDuo works and is not finished. Read
+  AmiNetXDuo works. It is not finished. Read
   @{"What AmiNetXDuo is" link ABOUT} before trusting it with anything
   that matters.
 
@@ -861,7 +861,7 @@
 
     @{"ping            " link PING}  test whether a machine answers
     @{"host            " link HOST}  look a name up, or an address back
-    nslookup          the same, the way other systems spell it
+    nslookup          the same, under the name other systems use
     traceroute        the path traffic takes
     whois             the owner of a domain
     sntp              set the clock from a time server
@@ -869,7 +869,7 @@
   @{b}Moving data@{ub}
 
     fetch             download an http: or https: address
-    nc                open a connection and pipe it about
+    nc                open a connection and pipe data through it
     telnet            log in to another machine
     ssh               the same, encrypted
     tftp              the small file transfer protocol
@@ -2267,16 +2267,16 @@
       1> List TCP:
       "tcp:" cannot be listed: not a FileSystem service
 
-  That message is correct. There are no files on it to see, only
+  That message is expected. There are no files on it to see, only
   connections to open.
 
   For the same reason Info shows a size that is not real:
 
       TCP:      512M       0 1048576   0%   0  Read/Write TCP
 
-  The free space is invented on purpose. Commands ask how much room a
-  destination has before they write to it, and a device answering
-  "nothing free" looks like a full disk and is refused.
+  The free space figure is fabricated deliberately. Commands ask how
+  much room a destination has before they write to it, and a device
+  answering "nothing free" looks like a full disk and is refused.
 
   @{b}Turning it off@{ub}
 
