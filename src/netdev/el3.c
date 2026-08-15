@@ -532,10 +532,13 @@ LONG el3_init(NetdevNic *nic)
     el3_cmd(nic, EL3_C_TX_ENABLE, 0);
 
     /*
-     * RX_EARLY and UPD_STATS are not asked for: neither has anything to do
-     * here and an unmasked cause that nothing services holds INT2 down.
+     * THE READ-ZERO MASK IS THE WAY ROUND ITS NAME DOES NOT SUGGEST: a CLEAR
+     * bit is what forces a status bit to read as zero, so all ones is "report
+     * everything" and zero would blind the interrupt handler to every cause
+     * it exists to service.  The power-up default is zero, which is harmless
+     * only because the interrupt mask is zero beside it.
      */
-    el3_cmd(nic, EL3_C_SET_ZERO_MASK, 0);
+    el3_cmd(nic, EL3_C_SET_ZERO_MASK, 0x00ff);
     el3_cmd(nic, EL3_C_SET_INTR_MASK,
             EL3_S_ADAPTER_FAIL | EL3_S_TX_COMPLETE | EL3_S_TX_AVAIL |
             EL3_S_RX_COMPLETE);

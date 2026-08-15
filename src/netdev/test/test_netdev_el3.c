@@ -802,6 +802,20 @@ static void test_interrupt(void)
     (void)el3_init(&nic);
     netdev_mar_clear(nic.mar);
 
+    /*
+     * The two masks, which are the way round their names do not suggest.  A
+     * CLEAR bit in the read-zero mask forces that status bit to read as zero,
+     * so all ones is "report everything"; writing zero there blinds the
+     * handler to every cause it exists to service and the card goes quiet
+     * with no error anywhere.  That is a mistake worth an assertion.
+     */
+    expect_u32("read-zero mask reports everything",
+               (unsigned long)mock_cmd_arg[EL3_C_SET_ZERO_MASK], 0xff);
+    expect_u32("interrupt mask asks for what is serviced",
+               (unsigned long)mock_cmd_arg[EL3_C_SET_INTR_MASK],
+               (unsigned long)(EL3_S_ADAPTER_FAIL | EL3_S_TX_COMPLETE |
+                               EL3_S_TX_AVAIL | EL3_S_RX_COMPLETE));
+
     /* Nothing pending is not ours: INT2 is shared. */
     mock_status = 0;
     expect_u32("an idle chip disclaims the interrupt",
