@@ -1446,6 +1446,11 @@ BOOL http_fb_slice(ULONG now)
 
 BOOL http_fb_write(ULONG now)
 {
+    /* Not a liveness signal.  What this end managed to hand the local stack
+       says the socket buffer had room and nothing whatever about whether
+       anybody is still on the far end; see http_ws_live_stale(). */
+    (VOID)now;
+
     if (!fb_live)
         return FALSE;
 
@@ -1465,7 +1470,6 @@ BOOL http_fb_write(ULONG now)
             }
 
             fb_tx_sent += (ULONG)sent;
-            fb_progress = now;
 
             if (fb_tx_sent < fb_tx_len)
                 return TRUE;            /* the socket is full for now */
@@ -1500,10 +1504,11 @@ BOOL http_fb_write(ULONG now)
 
 BOOL http_fb_stale(ULONG now, ULONG timeout)
 {
-    if (!fb_live || timeout == 0UL || now < fb_progress)
+    if (!fb_live)
         return FALSE;
 
-    return (BOOL)((fb_pinged && now - fb_progress >= timeout) ? TRUE : FALSE);
+    return (BOOL)(http_ws_live_stale(fb_progress, (int)fb_pinged, now, timeout)
+                      ? TRUE : FALSE);
 }
 
 BOOL http_fb_idle(ULONG now, ULONG timeout)
@@ -1514,16 +1519,8 @@ BOOL http_fb_idle(ULONG now, ULONG timeout)
     if (http_fb_stale(now, timeout))
         return FALSE;
 
-    if (timeout == 0UL || now < fb_progress)
-        return TRUE;
-
-    if (now - fb_progress < timeout)
-        return TRUE;
-
-    if (fb_pinged)
-        return TRUE;                    /* asked already; stale() decides */
-
-    if (fb_ctl_at >= fb_ctl_n)
+    if (http_ws_live_ping_due(fb_progress, (int)fb_pinged, now, timeout) &&
+        fb_ctl_at >= fb_ctl_n)
     {
         fb_control(HTTP_WS_EV_PING, (const UBYTE *)"", 0);
         fb_pinged   = 1;
