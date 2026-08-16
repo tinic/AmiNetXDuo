@@ -843,10 +843,18 @@ int main(int argc, char **argv)
     else if ((arp_stats.arp_truncated || arp_nd.truncated) && !quiet)
     {
         /*
-         * The snapshot holds TOOL_MAX_ARP entries and the stack can have more.
-         * nsh_Available says so. A list that silently stops reads as complete,
+         * The snapshot holds TOOL_MAX_ARP entries and the stack can report
+         * more in nsh_Available. A list that silently stops reads as complete,
          * which is worse than a short one: it is the same output a machine
          * with nothing else in its cache produces.
+         *
+         * Neither cache can currently reach this. AMI_ARP_CACHE_SIZE is 1024
+         * bytes of NX_ARP, which is 19 entries against TOOL_MAX_ARP's 32, and
+         * NX_IPV6_NEIGHBOR_CACHE_SIZE is 8 against TOOL_MAX_ND's 16 --
+         * measured, tests/tools/run-toolsay.sh fills the first with `arp SET=`
+         * and the 20th is refused. So this is what happens when either
+         * ceiling is raised past the other, not something to go looking for
+         * today.
          */
         tool_printf("\n");
 

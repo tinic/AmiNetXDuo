@@ -17,12 +17,16 @@
 #                     where the answer is "nothing has sent to it yet".  The
 #                     second printed the heading sentence and then stopped.
 #
-#     arp             with more entries in the stack than the snapshot holds.
-#                     TOOL_MAX_ARP is 32 and the truncation branch printed
-#                     "\n", so a list that stopped at 32 looked like a machine
-#                     with exactly 32 neighbours.  Seeded with 33 permanent
-#                     entries through `arp SET=`, which needs no wire and no
-#                     peer.
+#     arp             with a full cache.  The truncation branch printed "\n",
+#                     so a list that stopped at TOOL_MAX_ARP looked like a
+#                     machine with exactly that many neighbours.  It now says
+#                     what was cut -- and it cannot fire, which is the other
+#                     thing this measures: 33 permanent entries go in through
+#                     `arp SET=` and the stack refuses the 20th, because
+#                     AMI_ARP_CACHE_SIZE is 1024 bytes of NX_ARP and
+#                     TOOL_MAX_ARP is 32.  The assertion is on the ceiling, so
+#                     raising either one turns this red rather than leaving a
+#                     branch nothing reaches.
 #
 #     NetTrace        a connect that fails.  tool_sock_fail() pastes its `what`
 #                     into "cannot <what> <address> port <n>", and NetTrace
@@ -212,10 +216,18 @@ says "SYS:NetTrace WIRE HOST 127.0.0.1 PORT 21 NOCAPTURE" 1 \
      'cannot connect to 127\.0\.0\.1 port 21' \
      "NetTrace's connect failure is a sentence"
 
-says "SYS:arp" 1 'The address cache has more than 32 entries' \
-     "arp says the list is truncated"
-says "SYS:arp" 1 'only the first 32 are shown' \
-     "and says how much of it is shown"
+# The cache saturates below the snapshot, so the truncation branch above it
+# cannot fire.  Asserted rather than assumed: this is what makes arp.c's note
+# about the two ceilings a measurement.
+SEEDED=$(body "SYS:arp" 1 | grep -c 'permanent' || true)
+REFUSED=$(grep -c 'was not added to the cache' "$REPORT" || true)
+
+if [ "$SEEDED" -lt 32 ] && [ "$REFUSED" -gt 0 ]; then
+    pass "the ARP cache fills at $SEEDED entries, under TOOL_MAX_ARP's 32"
+else
+    fail "the ARP cache took $SEEDED entries with $REFUSED refusals: the\
+ truncation branch in arp.c may now be reachable and has no test"
+fi
 
 echo
 echo "toolsay=$( [ "$FAILED" -eq 0 ] && echo PASSED || echo FAILED )" \
