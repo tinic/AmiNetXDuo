@@ -100,10 +100,19 @@ CLIENT="${AMINETXDUO_CONSOLE_CLIENT:-}"
 ACTIVITY=idle
 TYPE=""
 DEPTHS=()
+# -R serves a GRAPHICS CARD instead of the chipset: Amiberry's uaegfx board,
+# Picasso96 staged onto the drive, and Workbench put on an 8-bit RTG screen.
+# The console's RTG path is 8-bit palette only, so the depth is not a choice.
+RTG=0
+P96DIR="${AMINETXDUO_P96_DIR:-$HOME/amiga-assets/p96}"
+# What Amiberry's uaegfx calls 640x480; see AssignModeID() in its picasso96.
+RTG_MODE_ID=0x50031000
+RTG_W=640
+RTG_H=480
 
 say() { printf '%s=%s\n' "$1" "$2"; }
 
-while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:T:" opt; do
+while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:T:R" opt; do
     case "$opt" in
         a) ADDRESS="$OPTARG" ;;
         p) PORT="$OPTARG" ;;
@@ -119,11 +128,24 @@ while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:T:" opt; do
         g) GATEWAY="$OPTARG" ;;
         A) ACTIVITY="$OPTARG" ;;
         T) TYPE="$OPTARG" ;;
+        R) RTG=1 ;;
         *) sed -n '3,8p' "$0" >&2; exit 2 ;;
     esac
 done
 
 [ ${#DEPTHS[@]} -gt 0 ] || DEPTHS=(2 4)
+if [ "$RTG" = 1 ]; then
+    DEPTHS=(8)
+    for f in Libs/Picasso96API.library Libs/Picasso96/rtg.library \
+             Libs/Picasso96/uaegfx.card Devs/Monitors/Picasso96; do
+        [ -f "$P96DIR/$f" ] || {
+            say error "no $P96DIR/$f"
+            say hint "AMINETXDUO_P96_DIR must hold a Picasso96 install tree"
+            say RESULT INFRA
+            exit 2
+        }
+    done
+fi
 
 # --------------------------------------------------------------- the parts --
 
@@ -237,7 +259,19 @@ Skip loop BACK
 EOF
     chmod 644 "$HD/S/scroller"
 
-    wb31_screenmode_prefs "$HD" "$depth"
+    if [ "$RTG" = 1 ]; then
+        # Picasso96 as its Installer would leave it, minus everything a
+        # headless uaegfx does not touch.  rtg.library loads uaegfx.card out
+        # of LIBS:Picasso96/ and emulation.library is what answers
+        # cybergraphics.library, so both of the console's readback families
+        # are on the machine.
+        cp -R "$P96DIR/Libs/." "$HD/Libs/"
+        mkdir -p "$HD/Devs/Monitors"
+        cp -R "$P96DIR/Devs/." "$HD/Devs/"
+        wb31_screenmode_prefs_id "$HD" "$depth" "$RTG_MODE_ID" "$RTG_W" "$RTG_H"
+    else
+        wb31_screenmode_prefs "$HD" "$depth"
+    fi
 }
 
 # The stock 3.1 Startup-Sequence with the tail replaced.  LoadWB stays, since
@@ -334,6 +368,15 @@ nr_floppies=0
 uaehf0=dir,rw,DH0:DH0:$HD,0
 a2065_rom_file=:ENABLED
 a2065_rom_options=mac=$MAC,$BACKEND
+EOF
+
+    # The graphics card.  8 MB is four times a 640x480x8 screen and is what
+    # leaves room for Picasso96's own buffers; rtg_modes is the emulator's
+    # mode list and 0x111 is the three sizes uaegfx offers at 8 bits.
+    [ "$RTG" = 1 ] && cat >> "$cfg" <<EOF
+gfxcard_size=8
+gfxcard_type=uaegfx
+rtg_modes=0x111
 EOF
 
     # NOT --log.  It writes about a megabyte a second, playhouse3 is shared,

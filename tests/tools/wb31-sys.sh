@@ -158,17 +158,28 @@ wb31_assemble() {
 # the ScreenMode editor writes: an IFF PREF with one SCRM chunk, dropped in
 # ENVARC: before the boot copies it to ENV: and IPrefs reads it.  Without one a
 # 3.1 Workbench comes up two planes deep whatever the machine.
+#
+# wb31_screenmode_prefs_id adds the other three numbers, for a screen that is
+# not a PAL hires one: an RTG mode has a DisplayID off the graphics card's own
+# monitor and a size the chipset cannot produce.
 wb31_screenmode_prefs() {
-    local hd="$1" depth="$2"
+    wb31_screenmode_prefs_id "$1" "$2" 0x00029000 640 256
+}
+
+wb31_screenmode_prefs_id() {
+    local hd="$1" depth="$2" id="$3" w="$4" h="$5"
 
     mkdir -p "$hd/Prefs/Env-Archive/Sys"
-    AMINETXDUO_SMP_DEPTH="$depth" \
+    AMINETXDUO_SMP_DEPTH="$depth" AMINETXDUO_SMP_ID="$id" \
+    AMINETXDUO_SMP_W="$w" AMINETXDUO_SMP_H="$h" \
         python3 - "$hd/Prefs/Env-Archive/Sys/screenmode.prefs" <<'EOF'
 import os, struct, sys
 
-# PAL hires: PAL_MONITOR_ID | HIRES_KEY.  640x256 is what the stock screen is,
-# so the depth is the only thing this changes.
-DISPLAY_ID = 0x00021000 | 0x00008000
+# The default is PAL hires: PAL_MONITOR_ID | HIRES_KEY, 640x256, which is what
+# a stock 3.1 Workbench is.  A caller with a graphics card passes the card's.
+DISPLAY_ID = int(os.environ["AMINETXDUO_SMP_ID"], 0)
+WIDTH = int(os.environ["AMINETXDUO_SMP_W"])
+HEIGHT = int(os.environ["AMINETXDUO_SMP_H"])
 
 depth = int(os.environ["AMINETXDUO_SMP_DEPTH"])
 
@@ -176,7 +187,8 @@ depth = int(os.environ["AMINETXDUO_SMP_DEPTH"])
 prhd = struct.pack(">BB4B", 0, 0, 0, 0, 0, 0)
 
 # struct ScreenModePrefs: reserved[4], displayid, width, height, depth, control.
-scrm = struct.pack(">4L L HHHH", 0, 0, 0, 0, DISPLAY_ID, 640, 256, depth, 0)
+scrm = struct.pack(">4L L HHHH", 0, 0, 0, 0, DISPLAY_ID, WIDTH, HEIGHT,
+                   depth, 0)
 
 def chunk(tag, payload):
     out = tag + struct.pack(">L", len(payload)) + payload
