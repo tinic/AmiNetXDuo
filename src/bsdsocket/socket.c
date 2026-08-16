@@ -181,12 +181,52 @@ static ULONG bsd_udp_queue_max(VOID)
  * opens all forty sockets before any of them carries data, so the pool is
  * still full when every one of them would be sized.
  *
- * The counter is NetX Duo's own, maintained by nx_tcp_socket_create/delete, so
- * there is none here to leak, a leaked one would silently pin every future
- * socket at the floor.  It counts listeners and parked spares, which never
- * carry a connection, so it over-counts consumers, which is the safe direction.
- * The socket being created is not on the list yet, hence the +1.
+ * WHAT COUNTS AS A CONSUMER.  nx_ip_tcp_created_sockets_count, which this used
+ * to divide by, counts every socket the IP instance has created, and a server
+ * has two of those before a connection exists: listen() creates the parked
+ * spare NetX Duo hands the connection to, and the listening descriptor's own
+ * socket, which never carries one.  So `iperf -s` on the lab's 8 MB A1200 sized
+ * the socket that then carried the whole transfer at 72,128 / 2 = 36,064, and
+ * the wire agreed: the guest advertised half the budget for the life of every
+ * connection it accepted, purely because it was a server.
+ *
+ * The list is walked instead, and a socket counts only once it is past
+ * NX_TCP_CLOSED and NX_TCP_LISTEN_STATE.  That is where a receive queue can
+ * start filling, and it is the point at which a listener stops being free: the
+ * parked spare costs nothing until a SYN moves it out of LISTEN, and the
+ * listening descriptor never leaves CLOSED and so never costs anything at all.
+ *
+ * It still over-counts rather than under-counts, which is the safe direction:
+ * a socket in FIN_WAIT or TIMED_WAIT keeps its share until NetX Duo deletes it.
+ * And the forty-socket case is unchanged, because connect() is what moves a
+ * socket to SYN_SENT and curl issues it per handle: socket n is sized with
+ * n-1 sockets already connecting, not with forty CLOSED ones.
+ *
+ * The list is NetX Duo's own, maintained by nx_tcp_socket_create/delete, so
+ * there is none here to leak.  Every caller holds the NX lock.  The socket
+ * being created is not on the list yet, hence the +1.
  */
+static ULONG bsd_tcp_consumer_count(NX_IP *ip)
+{
+    NX_TCP_SOCKET *tcp   = ip->nx_ip_tcp_created_sockets_ptr;
+    ULONG          total = ip->nx_ip_tcp_created_sockets_count;
+    ULONG          live  = 0;
+    ULONG          i;
+
+    /* Circular list, so the created count bounds the walk rather than a
+       NULL terminator. */
+    for (i = 0; i < total && tcp != NX_NULL; i++)
+    {
+        if (tcp->nx_tcp_socket_state != NX_TCP_CLOSED &&
+            tcp->nx_tcp_socket_state != NX_TCP_LISTEN_STATE)
+            live++;
+
+        tcp = tcp->nx_tcp_socket_created_next;
+    }
+
+    return live;
+}
+
 ULONG ami_bsd_tcp_window(VOID)
 {
     static ULONG    last_budget = 0;
@@ -210,7 +250,7 @@ ULONG ami_bsd_tcp_window(VOID)
                  (long)BSD_TCP_WINDOW, (long)BSD_TCP_WINDOW_CEILING);
     }
 
-    window = budget / (ip->nx_ip_tcp_created_sockets_count + 1UL);
+    window = budget / (bsd_tcp_consumer_count(ip) + 1UL);
 
     /* Floor last, so AMINETXDUO_TCP_WINDOW, which sets both, pins every
        socket at it whichever side of the built-in pair it falls. */

@@ -638,9 +638,10 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
 
             /*
              * With nothing set, this reports the window the socket got.  A
-             * TCP socket's is sized from the packet pool and the live socket
-             * count at creation (ami_bsd_tcp_window()), so BSD_TCP_WINDOW is
-             * only the floor and is not always any socket's actual window.
+             * TCP socket's is sized from the packet pool and the connected
+             * socket count at creation (ami_bsd_tcp_window()), so
+             * BSD_TCP_WINDOW is only the floor and is not always any socket's
+             * actual window.
              */
             case SO_RCVBUF:
             {
