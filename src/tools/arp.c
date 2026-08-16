@@ -430,9 +430,9 @@ static VOID explain_absence6(const ULONG addr[4], const char *text,
 
     /*
      * On this machine's link, or a machine that could not tell. An entry is
-     * made when something sends to the address and is aged out again when
-     * nothing does, so an absence here is "nothing has spoken to it lately"
-     * rather than a fault.
+     * made when something sends to the address, and unlike the ARP side it is
+     * aged out again when nothing does, so an absence here is "nothing has
+     * spoken to it lately" rather than a fault.
      */
     if (have_routes)
         tool_printf("  It is on this machine's link, so an entry appears as "
@@ -496,9 +496,10 @@ static VOID explain_absence(ULONG addr, const char *text, BOOL have_snapshot)
 
     /*
      * On this machine's network, or a machine that could not tell. An entry
-     * is made when something sends to the address and is aged out again when
-     * nothing does, so an absence here is "nothing has spoken to it lately"
-     * rather than a fault.
+     * is made when something sends to the address, and on this side nothing
+     * ages out (NX_ARP_EXPIRATION_RATE is 0, see the top of this file), so an
+     * absence here means nothing has ever sent to it since the stack came up.
+     * That is not a fault, which is why it needs saying.
      */
     if (have_snapshot)
         tool_printf("  It is on this machine's network, so an entry appears "
