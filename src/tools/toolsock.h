@@ -382,6 +382,11 @@ const char *tool_sock_errstr(LONG err);
 /*
  * "cannot connect to 10.0.2.2 port 21: connection refused", the standard
  * failure line, so all three commands word it the same way.
+ *
+ * `what` is the whole verb phrase and carries its own preposition: "connect
+ * to", "reach".  It is pasted straight into "cannot <what> <address> port
+ * <n>: <reason>", so "connect" on its own prints "cannot connect 10.0.2.2
+ * port 21", which is not a sentence.
  */
 VOID tool_sock_fail(struct Library *base, const char *what,
                     const ToolAddr *addr, UWORD port);
