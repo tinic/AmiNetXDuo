@@ -88,6 +88,7 @@ RFB_VERSION = 1
 OP_END = 0x00
 OP_COPY = 0x01
 OP_TILE = 0x02
+OP_TILE8 = 0x03
 CODE_RAW = 0
 CODE_PB_RAW = 1
 CODE_PB_XOR = 2
@@ -315,17 +316,23 @@ def unpackbits(src, at, end, want):
 
 
 class Screen:
-    def __init__(self, w, h, depth, bpr, tile_w, tile_h):
+    # fmt is rfb_geom.format as the geom word carries it: 0 planar, `depth`
+    # one-bit planes; 1 chunky, ONE eight-bit plane whose bytes are palette
+    # indices.  depth stays 8 there because it is what sizes the `pal`.
+    def __init__(self, w, h, depth, bpr, tile_w, tile_h, fmt=0):
         self.w = w
         self.h = h
         self.depth = depth
         self.bpr = bpr
         self.tile_w = tile_w
         self.tile_h = tile_h
+        self.fmt = fmt
+        self.clut8 = (fmt == 1)
+        self.nplanes = 1 if self.clut8 else depth
         self.across = (bpr + tile_w - 1) // tile_w
         self.down = (h + tile_h - 1) // tile_h
         self.plane = bpr * h
-        self.planes = bytearray(self.plane * depth)
+        self.planes = bytearray(self.plane * self.nplanes)
         self.rgb = bytearray(3 * (1 << depth))
 
     def apply(self, b):
@@ -358,7 +365,7 @@ class Screen:
                     raise Bad("a copy op leaves the screen")
                 if y0 + dy < 0 or y0 + ch + dy > self.h:
                     raise Bad("a copy op reads from off the screen")
-                for p in range(self.depth):
+                for p in range(self.nplanes):
                     base = p * self.plane
                     rows = range(ch) if dy > 0 else range(ch - 1, -1, -1)
                     for r in rows:
@@ -368,14 +375,23 @@ class Screen:
                 copies += 1
                 continue
 
-            if op != OP_TILE:
+            if op not in (OP_TILE, OP_TILE8):
                 raise Bad("op %d is not one of ours" % op)
+            # Which op arrives is the geometry's answer and not a choice, so
+            # the other one means the geom and the frames disagree about what
+            # a byte is -- which draws a picture rather than failing.
+            if (op == OP_TILE8) != self.clut8:
+                raise Bad("op %d on a %s screen"
+                          % (op, "chunky" if self.clut8 else "planar"))
 
-            if i + 3 > len(b):
+            # No plane mask on a chunky tile: one plane, and it is the one
+            # that changed.
+            head = 2 if self.clut8 else 3
+            if i + head > len(b):
                 raise Bad("a tile op is cut short")
             idx = (b[i] << 8) | b[i + 1]
-            mask = b[i + 2]
-            i += 3
+            mask = 1 if self.clut8 else b[i + 2]
+            i += head
 
             if idx >= self.across * self.down:
                 raise Bad("tile index %d is off the grid" % idx)
@@ -388,7 +404,7 @@ class Screen:
             th = min(self.tile_h, self.h - y0)
             want = tw * th
 
-            for p in range(self.depth):
+            for p in range(self.nplanes):
                 if not (mask & (1 << p)):
                     continue
                 if i >= len(b):
@@ -429,6 +445,15 @@ class Screen:
         return seq, tiles, copies
 
     def chunky(self):
+        # Already chunky on a card: the bytes are the indices and the only
+        # thing to do is drop the padding past the width.
+        if self.clut8:
+            out = bytearray(self.w * self.h)
+            for y in range(self.h):
+                o = y * self.w
+                out[o:o + self.w] = self.planes[y * self.bpr:
+                                                y * self.bpr + self.w]
+            return out
         out = bytearray(self.w * self.h)
         for p in range(self.depth):
             base = p * self.plane
@@ -485,7 +510,10 @@ def pfs(path, screens):
     first = screens[0][0]
     base = screens[0][2]
     blob = bytearray(b"PFS2")
-    blob += struct.pack(">HHBBHHH", first.w, first.h, first.depth, 0,
+    # Byte 9 is the .pfs flags byte, and bit 0 says the frames are chunky --
+    # one eight-bit plane and not `depth` one-bit ones.  See pfs.ts.
+    blob += struct.pack(">HHBBHHH", first.w, first.h, first.depth,
+                        1 if first.clut8 else 0,
                         first.bpr, len(screens), 0)
     blob += bytes(first.rgb)
     for _, planes, _ms in screens:
@@ -565,13 +593,13 @@ def refresh_to_truth(wire, screen, limit=8.0):
             text = body.decode("iso-8859-1")
             if text.startswith("geom "):
                 f = [int(x) for x in text.split()[1:]]
-                if len(f) != 6:
-                    raise Bad("geom takes six numbers: %r" % text)
+                if len(f) != 7:
+                    raise Bad("geom takes seven numbers: %r" % text)
                 # The reset lands here, so this is the last instant the
                 # incremental copy is worth anything.
                 if before is None:
                     before = bytes(screen.chunky())
-                fresh = Screen(f[0], f[1], f[2], f[3], f[4], f[5])
+                fresh = Screen(f[0], f[1], f[2], f[3], f[4], f[5], f[6])
                 fresh.rgb = bytearray(screen.rgb)
             elif text.startswith("pal "):
                 target = fresh if fresh is not None else screen
@@ -708,9 +736,9 @@ def session_picture(host, port, path, seconds, refresh_at=4,
             text = body.decode("iso-8859-1")
             if text.startswith("geom "):
                 f = [int(x) for x in text.split()[1:]]
-                if len(f) != 6:
-                    raise Bad("geom takes six numbers: %r" % text)
-                screen = Screen(f[0], f[1], f[2], f[3], f[4], f[5])
+                if len(f) != 7:
+                    raise Bad("geom takes seven numbers: %r" % text)
+                screen = Screen(f[0], f[1], f[2], f[3], f[4], f[5], f[6])
                 geoms += 1
                 if refresh_every_geom:
                     wire.word("refresh")
@@ -934,13 +962,13 @@ def main(argv):
                 text = body.decode("iso-8859-1")
                 if text.startswith("geom "):
                     f = text.split()
-                    if len(f) != 7:
-                        raise Bad("geom takes six numbers: %r" % text)
+                    if len(f) != 8:
+                        raise Bad("geom takes seven numbers: %r" % text)
                     n = [int(x) for x in f[1:]]
-                    screen = Screen(n[0], n[1], n[2], n[3], n[4], n[5])
+                    screen = Screen(n[0], n[1], n[2], n[3], n[4], n[5], n[6])
                     expect_seq = None
                     say("geom", " ".join(f[1:]))
-                    say("frame_bytes", screen.plane * screen.depth)
+                    say("frame_bytes", screen.plane * screen.nplanes)
                     # ONCE, and not on every geom.  A geom already means both
                     # sides are at zero -- the server clears its shadow
                     # whenever it queues one -- so a refresh here asks for a

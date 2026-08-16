@@ -45,6 +45,7 @@
 #include "toolsock.h"
 #include "httpws.h"
 #include "httpfb.h"
+#include "httprtg.h"
 
 #include "aminetxduo/rfb_encode.h"
 #include "aminetxduo/rfb_words.h"
@@ -159,6 +160,14 @@ typedef struct FbGeometry
     ULONG row_stride;
     ULONG frame_bytes;
     UWORD interleaved;      /* BMF_INTERLEAVED, as the BitMap reported it */
+    /*
+     * A GRAPHICS CARD'S SCREEN, which is one eight-bit plane and not eight
+     * one-bit ones.  depth is 8 and row_bytes is a byte a pixel, so everything
+     * downstream that counts in bytes is unchanged; what changes is that the
+     * bitplanes cannot be read where they are, so a staging buffer stands in
+     * for them and httprtg.c fills it.  See fb_grab_frame().
+     */
+    UWORD chunky;
 } FbGeometry;
 
 /* ------------------------------------------------------------- the module -- */
@@ -196,6 +205,19 @@ static rfb_u32         fb_flags;        /* FB_FLAGS, plus the layout's own */
 static UBYTE          *fb_shadow;
 static UBYTE          *fb_scratch;
 static UBYTE          *fb_tx;
+/*
+ * WHERE A CARD'S SCREEN LANDS BEFORE IT IS ENCODED.
+ *
+ * The chipset path points the encoder straight at the bitplanes and lets it
+ * read nothing where nothing changed, which is exactly right when the source
+ * is chip RAM.  On a card it cannot be done: the compare would itself be the
+ * readback, and the readback is the expensive thing.  So a card's screen is
+ * fetched whole, once a frame, into this -- ordinary Fast RAM -- and the
+ * encoder is pointed at that instead, which leaves one read of VRAM a frame
+ * and puts every comparison on memory that is cheap to read.
+ */
+static UBYTE          *fb_stage;
+static ULONG           fb_stage_len;
 static ULONG           fb_shadow_len;
 static ULONG           fb_scratch_len;
 static ULONG           fb_tx_cap;
@@ -206,6 +228,13 @@ static UBYTE           fb_pal[3U * FB_MAX_COLOURS];
 static UBYTE           fb_want_geom;
 static UBYTE           fb_want_pal;
 static UBYTE           fb_want_stat;
+
+/* httprtg.c has measured this screen's readback routes and picked one, and
+   the `rtg` word saying what it measured is queued.  Cleared with the buffers,
+   so a screen change re-probes rather than carrying a figure for a card
+   configuration that is not the one in front. */
+static UBYTE           fb_rtg_ready;
+static UBYTE           fb_want_rtg;
 
 static ULONG           fb_next_tick;
 
@@ -237,6 +266,11 @@ static ULONG           fb_since_stat;
    in `fbstat` so a session that looks torn can be told apart from one that is
    dropping frames. */
 static ULONG           fb_torn;
+
+/* Frames a card's screen was NOT read on because nothing could lock it.  See
+   fb_grab_frame(); reported in `fbstat` as nl=, because "the picture stopped"
+   is a report that needs a number behind it. */
+static ULONG           fb_nolock;
 
 /*
  * The screen list was empty on the last pass, and when it first was.  A
@@ -403,6 +437,12 @@ static BOOL fb_open_libraries(VOID)
     IntuitionBase = (struct IntuitionBase *)
         OpenLibrary((CONST_STRPTR)"intuition.library", 39);
 
+    /* Neither is required and neither is an error: a machine with no graphics
+       card has neither, and one with a card has whichever its driver installed.
+       What this decides is only whether an RTG screen in front can be read at
+       all -- see fb_geometry_of(). */
+    (VOID)http_rtg_open();
+
     if (GfxBase != NULL && IntuitionBase != NULL)
         return TRUE;
 
@@ -413,6 +453,8 @@ static BOOL fb_open_libraries(VOID)
 
 static VOID fb_close_libraries(VOID)
 {
+    http_rtg_close();
+
     if (IntuitionBase != NULL)
     {
         CloseLibrary((struct Library *)IntuitionBase);
@@ -548,6 +590,48 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g)
         return FALSE;
     }
 
+    /*
+     * THE CARD IS ASKED FIRST, BEFORE BMF_STANDARD.
+     *
+     * The planar path's first question has always been whether the bitmap
+     * carries BMF_STANDARD, and on a chipset machine that is the right one.
+     * A Picasso96 or CyberGraphX bitmap may carry it too -- it is what makes
+     * the rest of the OS treat the thing normally -- and its Planes[] are not
+     * eight bitplanes.  So whoever owns the bitmap is asked before the flag
+     * is read: http_rtg_owns() answers FALSE for every bitmap that is not a
+     * card's, and on a machine with neither library open it does not run at
+     * all, so the chipset path reaches BMF_STANDARD exactly as it did.
+     */
+    if (http_rtg_owns(bm))
+    {
+        HttpRtgScreen rs;
+        const char   *why = NULL;
+
+        if (!http_rtg_describe(bm, &rs, &why))
+        {
+            fb_say(why != NULL ? why
+                               : "the front screen is an RTG screen this "
+                                 "cannot read");
+            return FALSE;
+        }
+
+        /*
+         * The staging buffer's row, and therefore the tile grid's: the card's
+         * own stride is not used, so nothing here depends on a value that is
+         * only valid while the bitmap is locked.  Rounded up to a longword so
+         * the encoder's word-at-a-time compare stays on the fast path.
+         */
+        g->interleaved = 0;
+        g->chunky      = 1;
+        g->width       = rs.width;
+        g->height      = rs.height;
+        g->depth       = 8;
+        g->row_bytes   = (UWORD)((rs.width + 3U) & ~3U);
+        g->row_stride  = (ULONG)g->row_bytes;
+        g->frame_bytes = (ULONG)g->row_bytes * (ULONG)g->height;
+        return TRUE;
+    }
+
     flags  = GetBitMapAttr(bm, BMA_FLAGS);
     depth  = GetBitMapAttr(bm, BMA_DEPTH);
     width  = GetBitMapAttr(bm, BMA_WIDTH);
@@ -555,10 +639,18 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g)
 
     if ((flags & BMF_STANDARD) == 0)
     {
-        fb_say("the front screen is not a standard planar bitmap, so it has "
-               "no bitplanes to read; this serves planar screens only");
+        fb_say(http_rtg_present()
+               ? "the front screen is not a standard planar bitmap and "
+                 "neither Picasso96 nor CyberGraphX claims it, so there are "
+                 "no pixels here anything can read"
+               : "the front screen is not a standard planar bitmap, so it "
+                 "has no bitplanes to read; a graphics card needs "
+                 "Picasso96API.library or cybergraphics.library, and neither "
+                 "answered OpenLibrary()");
         return FALSE;
     }
+
+    g->chunky = 0;
 
     if (depth < 1 || depth > FB_MAX_DEPTH)
     {
@@ -625,7 +717,8 @@ static BOOL fb_geometry_same(const FbGeometry *a, const FbGeometry *b)
     return (BOOL)(a->width == b->width && a->height == b->height &&
                   a->depth == b->depth && a->row_bytes == b->row_bytes &&
                   a->row_stride == b->row_stride &&
-                  a->interleaved == b->interleaved);
+                  a->interleaved == b->interleaved &&
+                  a->chunky == b->chunky);
 }
 
 VOID http_fb_geometry(UWORD *w, UWORD *h, UWORD *depth)
@@ -1308,7 +1401,8 @@ enum
     FB_GRAB_GONE,       /* there are no screens at all any more              */
     FB_GRAB_CHANGED,    /* it is not the screen the client was told about   */
     FB_GRAB_REFUSED,    /* it is a bitmap this cannot read; fb_why says why */
-    FB_GRAB_VANISHED    /* it closed while we were resolving it             */
+    FB_GRAB_VANISHED,   /* it closed while we were resolving it             */
+    FB_GRAB_UNREADABLE  /* an RTG screen nothing here can safely read       */
 };
 
 /*
@@ -1343,6 +1437,13 @@ static int fb_examine(struct Screen *sc, const FbGeometry *want,
     /* Colours before pixels, and the encode is skipped entirely on the pass
        that finds them moved. */
     if (*palette_moved)
+        return FB_GRAB_OK;
+
+    /* A card's pixels are not addressable from here and the fetch is a
+       library call, so they are read in fb_grab_frame() where the lock that
+       makes the call safe is still held.  planes[0] is the staging buffer and
+       is filled there. */
+    if (want->chunky)
         return FB_GRAB_OK;
 
     for (plane = 0; plane < want->depth; plane++)
@@ -1441,6 +1542,54 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
            down and this server has one task. */
         if (pub && rc == FB_GRAB_OK && !*palette_moved)
             locked = (BOOL)(AttemptSemaphore(&sc->LayerInfo.Lock) != 0);
+
+        /*
+         * A CARD'S SCREEN IS READ ONLY WHILE A REAL LOCK IS HELD.
+         *
+         * The planar path deliberately reads the bitplanes with nothing but
+         * LockIBase() behind it on a screen that cannot be locked, and a
+         * screen closing in that window costs one wrong frame: the planes are
+         * bytes, and reading freed memory on a machine with no MMU produces a
+         * bad picture and nothing worse.  Here the fetch is a LIBRARY CALL
+         * against the screen's RastPort, and handing a graphics driver a
+         * RastPort whose screen has just closed is not one bad frame.
+         *
+         * So an RTG screen that offers no lock is not read.  The picture
+         * stops until something lockable is in front again and the count comes
+         * out in fbstat as nl=.  That is a real limitation and it is the safe
+         * half of it; a non-public screen on a card is rare, and a frozen
+         * picture is recoverable where a guru is not.
+         */
+        if (rc == FB_GRAB_OK && !*palette_moved && want->chunky && !pub)
+            rc = FB_GRAB_UNREADABLE;
+
+        /* Attach on the first frame of a geometry, not in fb_take_buffers():
+           the probe is library calls against a screen, and this is where one
+           is held.  It also has to happen again after a screen change, which
+           is what fb_rtg_ready being cleared with the buffers arranges. */
+        if (rc == FB_GRAB_OK && !*palette_moved && want->chunky &&
+            !fb_rtg_ready)
+        {
+            fb_rtg_ready = (UBYTE)http_rtg_attach(sc->RastPort.BitMap,
+                                                  &sc->RastPort,
+                                                  want->width, want->height,
+                                                  want->row_stride, fb_stage);
+            if (fb_rtg_ready)
+                fb_want_rtg = 1;
+            else
+                rc = FB_GRAB_UNREADABLE;
+        }
+
+        /* The fetch itself: whole contiguous rows into Fast RAM, with the
+           screen still held.  Everything after this -- the compare, the
+           PackBits, the socket -- runs on the copy. */
+        if (rc == FB_GRAB_OK && !*palette_moved && want->chunky)
+        {
+            if (http_rtg_read(sc->RastPort.BitMap, &sc->RastPort, fb_stage))
+                planes[0] = fb_stage;
+            else
+                rc = FB_GRAB_UNREADABLE;
+        }
     }
     else
     {
@@ -1475,13 +1624,21 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
 
 static VOID fb_free_buffers(VOID)
 {
+    /* Before the staging buffer goes: the probe was given that buffer as
+       scratch and the offscreen snapshot bitmap is the module's own. */
+    http_rtg_detach();
+    fb_rtg_ready = 0;
+
     ami_free(fb_tx);
     ami_free(fb_scratch);
     ami_free(fb_shadow);
+    ami_free(fb_stage);
 
     fb_tx = NULL;
     fb_scratch = NULL;
     fb_shadow = NULL;
+    fb_stage = NULL;
+    fb_stage_len = 0;
     fb_tx_cap = 0;
     fb_tx_len = 0;
     fb_tx_sent = 0;
@@ -1507,6 +1664,10 @@ static BOOL fb_take_buffers(const FbGeometry *g)
     fb_rg.depth         = (rfb_u8)g->depth;
     fb_rg.tile_w        = HTTP_FB_TILE_W;
     fb_rg.tile_h        = HTTP_FB_TILE_H;
+    /* One eight-bit plane or eight one-bit ones.  The depth above stays 8 on
+       a card because it is what sizes the palette; rfb_planes() is what says
+       there is one plane. */
+    fb_rg.format        = (rfb_u8)(g->chunky ? RFB_FMT_CLUT8 : RFB_FMT_PLANAR);
 
     rfb_scroll_defaults(&fb_cfg);
 
@@ -1537,6 +1698,21 @@ static BOOL fb_take_buffers(const FbGeometry *g)
     fb_shadow  = (UBYTE *)ami_alloc(fb_shadow_len);
     fb_scratch = (UBYTE *)ami_alloc(fb_scratch_len);
     fb_tx      = (UBYTE *)ami_alloc(fb_tx_cap);
+
+    /* One frame of the card, in Fast RAM.  Only on a card: the chipset path
+       has no copy of the screen at all and this would be 40 KB for nothing. */
+    if (g->chunky)
+    {
+        fb_stage_len = (ULONG)g->row_bytes * (ULONG)g->height;
+        fb_stage = (UBYTE *)ami_alloc(fb_stage_len);
+        if (fb_stage == NULL)
+        {
+            fb_say3("not enough memory for a ", fb_stage_len / 1024UL,
+                    " KB copy of the card's screen");
+            fb_free_buffers();
+            return FALSE;
+        }
+    }
 
     if (fb_shadow == NULL || fb_scratch == NULL || fb_tx == NULL)
     {
@@ -2171,6 +2347,7 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_encode_ticks = 0;
     fb_since_stat = 0;
     fb_torn       = 0;
+    fb_nolock     = 0;
     fb_gone       = 0;
     fb_gone_at    = 0;
     fb_gone_passes = 0;
@@ -2178,6 +2355,7 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_want_ptr   = 0;
     fb_ptr_next   = 0;
     fb_want_stat  = 0;
+    fb_want_rtg   = 0;
     fb_reset      = 0;
     /* A session opens with geom, pal and a full frame already queued, which
        is a resync by any other name: a refresh arriving before that frame has
@@ -2413,6 +2591,28 @@ BOOL http_fb_slice(ULONG now)
         return TRUE;
     }
 
+    /*
+     * WHAT THE READBACK PROBE MEASURED, ONCE A SCREEN.
+     *
+     * Nobody has published what an Amiga graphics card costs to read back,
+     * which is the number the whole RTG design turns on, so the probe's
+     * findings are SENT rather than kept: the viewer logs every word it does
+     * not know, so this lands in front of the one person who can report it.
+     * An unrecognised word is ignored at the far end, which is what lets it
+     * go down the same channel without the viewer being taught it.
+     */
+    if (fb_want_rtg)
+    {
+        ULONG len = http_rtg_word((char *)&fb_tx[10], fb_tx_cap - 10UL);
+
+        fb_want_rtg = 0;
+        if (len != 0UL)
+        {
+            fb_frame_payload(HTTP_WS_EV_TEXT, len);
+            return TRUE;
+        }
+    }
+
     if (fb_want_ptr)
     {
         rfb_pointer w;
@@ -2445,15 +2645,16 @@ BOOL http_fb_slice(ULONG now)
     {
         /* An unrecognised word is ignored at the far end, which is what lets
            this go down the same channel without the viewer knowing it. */
-        static const char *const tags[6] = { "fbstat f=", " b=", " gt=", " et=",
-                                            " tn=", " gn=" };
-        const ULONG values[6] = { fb_frames, fb_bytes, fb_grab_ticks,
-                                  fb_encode_ticks, fb_torn, fb_gone_passes };
+        static const char *const tags[7] = { "fbstat f=", " b=", " gt=", " et=",
+                                            " tn=", " gn=", " nl=" };
+        const ULONG values[7] = { fb_frames, fb_bytes, fb_grab_ticks,
+                                  fb_encode_ticks, fb_torn, fb_gone_passes,
+                                  fb_nolock };
         ULONG at = 0;
         ULONG f;
         ULONG i;
 
-        for (f = 0; f < 6UL; f++)
+        for (f = 0; f < 7UL; f++)
         {
             for (i = 0; tags[f][i] != '\0'; i++)
                 fb_tx[10 + at++] = (UBYTE)tags[f][i];
@@ -2524,6 +2725,17 @@ BOOL http_fb_slice(ULONG now)
 
         fb_close_saying(HTTP_WS_CLOSE_GOING,
                         "there has been no screen to show for ten seconds");
+        return TRUE;
+
+    case FB_GRAB_UNREADABLE:
+        /*
+         * A card's screen that could not be read this pass: nothing would
+         * lock it, or the readback route failed.  Not fatal and not a geom --
+         * the viewer keeps the picture it has and the next pass tries again,
+         * which is what happens while a non-public screen is in front.  The
+         * count is what tells a person the picture stopped on purpose.
+         */
+        fb_nolock++;
         return TRUE;
 
     case FB_GRAB_VANISHED:
