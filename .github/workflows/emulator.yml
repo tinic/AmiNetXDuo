@@ -267,12 +267,14 @@ jobs:
       # and an interface removed and re-added that must not claim it.  The two
       # that matter are the off and the re-add, which are what a flag that is
       # set and never acted on passes anyway.  Exit 3 is "the host-side half was
-      # not measured", which SLIRP decides, so it is not a failure.
+      # not measured", which SLIRP decides, so it is not a failure -- but it is
+      # not a pass either, and -s is what makes the row say SKIPPED rather than
+      # tick the arm off as measured.
       - name: mDNS switched on and off at runtime
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: >-
           tools/ci-arm.sh -n "mDNS switched on and off at runtime"
-          -r AMINETXDUO_A2065 -x 3 -m "3 = the host-side half was not measured"
+          -r AMINETXDUO_A2065 -s 3 -m "3 = the host-side half was not measured"
           -- tests/tools/run-mdnsctl.sh -b build/ci/default
 
       # Two boots with two hardware addresses and nothing naming either
