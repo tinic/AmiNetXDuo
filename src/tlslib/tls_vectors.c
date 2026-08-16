@@ -39,22 +39,23 @@ const APTR TlsVectorTable[] =
  * The drift guard, and why TLS_LIB_VECTORS is derived from TLS_LIB_VERSION
  * rather than written down beside it.
  *
- * Add a vector to the table above and this assertion fails.  The only way to
- * make it pass is to declare a TLS_LIB_VECTORS_V<n> in the public header and
- * point TLS_LIB_VERSION at it, so a new vector cannot reach a shipped library
- * without the version moving with it and OpenLibrary() stays accurate.
+ * A vector added to the table above makes this assertion fail.  The only way
+ * to make it pass is to declare a TLS_LIB_VECTORS_V<n> in the public header
+ * and point TLS_LIB_VERSION at it.  So a new vector cannot reach a shipped
+ * library without the version moving with it, and OpenLibrary() stays
+ * accurate.
  *
- * Version 2 nearly went out wrong: TLSRandom and TLSBuffered went into the
- * table while the version stayed at 1, and OpenLibrary("tls.library", 1) would
- * have handed an older library to a caller that then jumped past its jump
- * table.
+ * Version 2 nearly went out wrong.  TLSRandom and TLSBuffered went into the
+ * table while the version stayed at 1, and OpenLibrary("tls.library", 1) then
+ * hands an older library to a caller that jumps past its jump table.
  */
 _Static_assert(sizeof(TlsVectorTable) / sizeof(TlsVectorTable[0]) ==
                    (4u + TLS_LIB_VECTORS + 1u),
                "TLS_LIB_VERSION must be bumped when a vector is added, see "
                "the version rule in include/aminetxduo/tlslib.h");
 
-/* And the last LVO the header publishes has to be the last one here, or a
-   caller checking lib_NegSize against TLS_LVO_LAST checks the wrong thing. */
+/* And the last LVO the header publishes must be the last one here, or a
+   caller that checks lib_NegSize against TLS_LVO_LAST checks the wrong
+   thing. */
 _Static_assert((4u + TLS_LIB_VECTORS) * 6u == (unsigned)(-TLS_LVO_LAST),
                "TLS_LVO_LAST must name the last vector in TlsVectorTable");

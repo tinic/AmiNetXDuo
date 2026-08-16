@@ -1,11 +1,11 @@
 /*
  * tls.library, LVO declarations.
  *
- * Hand-written, unlike src/bsdsocket/bsdsocket_vectors.h, because there is no
- * vendor .fd to generate them from, this ABI is local.  The register
- * assignment here is the ABI, and has to match the inline stubs in
- * include/aminetxduo/tlslib.h exactly; those are the only other place it
- * appears.
+ * Hand-written, unlike src/bsdsocket/bsdsocket_vectors.h, because this ABI is
+ * local and there is no vendor .fd to generate them from.  The register
+ * assignment here is the ABI, and must match the inline stubs in
+ * include/aminetxduo/tlslib.h exactly.  Those stubs are the only other place
+ * it appears.
  *
  * Only d0, d1, a0 and a1 carry arguments.  a2 upward are ones GCC wants for
  * itself on m68k, and every call here fits in four registers because anything

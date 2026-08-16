@@ -2,7 +2,7 @@
  * tls_expiry, when a cached TLS session has aged out.  See tls_expiry.h for
  * the rule and why it is its own file.
  *
- * Includes nothing but its own header, deliberately: this translation unit is
+ * Includes nothing but its own header, deliberately.  This translation unit is
  * compiled twice, once for m68k as part of tls.library and once natively by
  * src/tlslib/test/test_tls_expiry.c.
  *
