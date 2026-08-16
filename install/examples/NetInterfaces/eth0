@@ -5,14 +5,13 @@
 ; of them commented out.  The other files in this drawer are the short
 ; version of the same thing, one per card.
 ;
-; To use one: copy it into DEVS:NetInterfaces, name the copy whatever you
-; want the interface to be called -- "eth0" is the usual answer -- and then
-; either reboot or type
+; To use one: copy it into DEVS:NetInterfaces, name the copy after the
+; interface -- "eth0" is the usual choice -- and then either reboot or type
 ;
 ;     C:AddNetInterface DEVS:NetInterfaces/eth0
 ;
-; THE FILE NAME IS THE INTERFACE NAME.  There is no NAME= keyword.  A name
-; longer than 15 characters is truncated to 15.
+; The name of the file is the name of the interface.  There is no NAME=
+; keyword.  A name longer than 15 characters is truncated to 15.
 ;
 ; Syntax: one KEYWORD=value per line.  Spaces around the '=' are ignored, the
 ; keywords are not case sensitive, ';' and '#' start a comment, and a value
@@ -22,10 +21,10 @@
 
 ; ---------------------------------------------------------------- the card
 
-; DEVICE -- the SANA-II driver for your network card.  Required; an interface
+; DEVICE -- the SANA-II driver for the network card.  Required; an interface
 ; file without it is ignored.
 ;
-; A bare name is looked up in DEVS:.  If your driver lives in DEVS:Networks,
+; A bare name is looked up in DEVS:.  If the driver is in DEVS:Networks,
 ; which is where AmiTCP-era packages put theirs, give the whole path:
 ;
 ;     DEVICE=DEVS:Networks/ariadne.device
@@ -39,7 +38,7 @@ UNIT=0
 
 ; CONFIGURE -- how this interface gets its Internet address.
 ;
-;   DHCP      ask the network.  What you want on any network with a router.
+;   DHCP      ask the network.  The choice for any network with a router.
 ;             The address, the netmask, the default route and the name
 ;             servers all arrive in the lease.
 ;   AUTO      try DHCP, and if nothing answers pick a link-local 169.254.x.x
@@ -48,10 +47,10 @@ UNIT=0
 ;   STATIC    use the ADDRESS and NETMASK below.  MANUAL means the same.
 ;
 ; This keyword is CONFIGURE.  It is *not* IPTYPE -- IPTYPE is a number, the
-; SANA-II packet type, and it defaults to 2048.  Documentation that tells you
-; to write IPTYPE=DHCP is repeating an AmiTCP/Genesis-era mistake.  (For what
-; it is worth, AmiNetXDuo accepts an alphabetic IPTYPE as an address mode
-; anyway, so such a file still works here.  It will not work on Roadshow.)
+; SANA-II packet type, and it defaults to 2048.  Documentation that gives
+; IPTYPE=DHCP is repeating an AmiTCP/Genesis-era mistake.  (AmiNetXDuo
+; accepts an alphabetic IPTYPE as an address mode anyway, so such a file
+; still works here.  It does not work on Roadshow.)
 ;
 CONFIGURE=DHCP
 
@@ -61,7 +60,7 @@ CONFIGURE=DHCP
 ;ADDRESS=192.168.1.10
 ;NETMASK=255.255.255.0
 
-; GATEWAY here is accepted, but the default route really belongs in
+; GATEWAY here is accepted, but the default route belongs in
 ; DEVS:Internet/routes -- see the routes example in this drawer.
 ;
 ;GATEWAY=192.168.1.1
@@ -85,14 +84,14 @@ CONFIGURE=DHCP
 ; ------------------------------------------------------------------- other
 
 ; STATE -- whether the interface comes up when the stack starts.  UP (the
-; default) or DOWN.  A DOWN interface is configured but idle until you type
-; "Online eth0".
+; default) or DOWN.  A DOWN interface is configured but idle until the
+; command "Online eth0" runs.
 ;
 ;STATE=UP
 
-; MTU -- the largest packet this interface will send.  Leave it alone unless
-; something on the path is telling you to lower it; 1500 is the Ethernet
-; answer and the driver supplies it.
+; MTU -- the largest packet this interface sends.  Leave it alone unless
+; something on the path requires a lower value.  1500 is the Ethernet answer
+; and the driver supplies it.
 ;
 ;MTU=1500
 

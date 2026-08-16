@@ -1,20 +1,20 @@
 ;
 ; DEVS:Internet/routes
 ;
-; Where the default route lives: the address of the router that everything
-; not on your own network gets handed to.
+; The default route: the address of the router that receives everything that
+; is not on the local network.
 ;
-; This is the file Roadshow uses.  There is no DEVS:Internet/default_gateway
-; in Roadshow 1.15, whatever secondary sources may say -- although
-; AmiNetXDuo reads one if it finds it, because its own design notes called
-; for it and a file that exists should not be ignored.
+; This is the file that Roadshow uses.  Roadshow 1.15 has no
+; DEVS:Internet/default_gateway, although some secondary sources say
+; otherwise -- AmiNetXDuo reads one if it finds it, because its own design
+; notes asked for it and a file that exists must not be ignored.
 ;
-; WITH DHCP YOU DO NOT NEED THIS FILE.  The router's address arrives with the
-; lease.
+; With DHCP this file is not necessary.  The address of the router arrives
+; with the lease.
 ;
 
-; DEFAULT -- the router.  Usually the address ending in .1 or .254 on your
-; own network.  DEFAULTGATEWAY= is accepted as a synonym.
+; DEFAULT -- the router.  Usually the address that ends in .1 or .254 on the
+; local network.  DEFAULTGATEWAY= is accepted as a synonym.
 ;
 DEFAULT=192.168.1.1
 

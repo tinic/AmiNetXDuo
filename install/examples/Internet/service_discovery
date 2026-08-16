@@ -1,19 +1,20 @@
 #
 # DEVS:Internet/service_discovery
 #
-# Servers running on this Amiga, announced to the rest of the network so that
+# Servers that run on this Amiga, announced to the rest of the network so that
 # a Mac, a Linux box or Windows finds them without being told an address.
 #
-# THIS IS NOT DEVS:Internet/services.  That file is the /etc/services table:
-# it says which port number the name "ftp" means, for every machine.  This
-# one says which servers are running HERE, and nothing else reads it.
+# This file is not DEVS:Internet/services.  That file is the /etc/services
+# table, and it gives the port number that the name "ftp" means, for every
+# machine.  This file gives the servers that run on this Amiga, and nothing
+# else reads it.
 #
-# NOTHING IS ANNOUNCED UNLESS YOU PUT IT HERE.  AmiNetXDuo ships clients and
-# no servers, so it has nothing of its own to advertise.  What it can
-# advertise is a server you installed -- AmiFTPd, a web server, a file server
-# -- because you are the one who knows it is running.  Announcing a port with
-# nothing behind it is worse than announcing nothing: the other machine will
-# list it, connect, and hang.
+# Nothing is announced unless it is listed here.  AmiNetXDuo ships clients and
+# no servers, so it has nothing of its own to advertise.  It can advertise a
+# separately installed server -- AmiFTPd, a web server, a file server --
+# because only the owner of the machine knows that it is running.  Do not
+# announce a port with no server behind it.  The other machine lists it,
+# connects, and then hangs.
 #
 # One line per service:
 #
@@ -21,10 +22,10 @@
 #
 #   type    what kind of server it is, in the standard form: an underscore,
 #           up to fifteen letters, digits or hyphens, then ._tcp or ._udp.
-#   port    the port it is really listening on, 1 to 65535.
-#   name    what it is called in the other machine's list.  It may contain
-#           spaces and runs to the end of the line.  Leave it out and this
-#           Amiga's host name is used, which is usually what you want.
+#   port    the port the server listens on, 1 to 65535.
+#   name    what it is called in the list on the other machine.  It can
+#           contain spaces and runs to the end of the line.  Leave it out to
+#           use the host name of this Amiga, which is the usual choice.
 #   txt=    extra settings some clients look for, separated by ';'.
 #           Optional.
 #
@@ -39,12 +40,12 @@
 #
 #_ftp._tcp     21
 
-# A web server, with a name of its own and the path browsers should open:
+# A web server, with a name of its own and the path that browsers open:
 #
 #_http._tcp    80    Amiga web server    txt=path=/
 
-# Some other things you might be running.  Use the port your server is
-# actually configured for, not the one written here.
+# Other servers to announce.  Use the port that the server is configured for,
+# not the one written here.
 #
 #_telnet._tcp  23
 #_ssh._tcp     22

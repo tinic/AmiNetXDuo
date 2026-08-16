@@ -6,19 +6,19 @@
 ;
 ;     C:AddNetInterface DEVS:NetInterfaces/eth0
 ;
-; The file name is the interface name; there is no NAME= keyword.
+; The file name is the interface name.  There is no NAME= keyword.
 ; See the file "eth0" in this drawer for every keyword there is.
 ;
-; This is also the card WinUAE and FS-UAE emulate, so it is what you
-; want when testing under an emulator with networking switched on.
+; This is also the card that WinUAE and FS-UAE emulate, so it is the
+; choice for a test under an emulator with networking switched on.
 ;
 
 DEVICE=a2065.device
 UNIT=0
 
-; Ask the network for an address.  Change to STATIC and fill in
-; ADDRESS/NETMASK below if nothing on your network hands out
-; addresses -- and see "eth0-static" for a worked example.
+; Ask the network for an address.  If nothing on the network hands
+; out addresses, change this to STATIC and fill in ADDRESS/NETMASK
+; below.  See "eth0-static" for a worked example.
 CONFIGURE=DHCP
 
 ;ADDRESS=192.168.1.10
