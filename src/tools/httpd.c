@@ -5449,14 +5449,12 @@ static ULONG httpd_parse_timeout(const char *value)
 }
 
 /*
- * Does this Accept-Encoding offer gzip?  RFC 7231 5.3.4: a comma list of
- * codings, each optionally with a quality, and `q=0` means "do not send me
- * this one" rather than "I would rather not".
+ * Does this Accept-Encoding offer gzip?  RFC 7231 5.3.4 defines a comma list
+ * of codings, each with an optional quality.  A quality of 0 refuses the
+ * coding outright, it does not rank it low.
  *
- * `*` is deliberately not honoured.  It says "anything", and the only thing
- * this server has is a file somebody compressed at build time; a client that
- * sent `*` without naming gzip is one whose idea of "anything" is untested,
- * and the plain page always works.
+ * `*` is deliberately not honoured.  The only compressed form this server has
+ * is a file compressed at build time, and the plain page always works.
  */
 static BOOL httpd_offers_gzip(const char *v)
 {

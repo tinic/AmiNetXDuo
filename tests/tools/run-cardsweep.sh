@@ -239,7 +239,7 @@ while read -r -u 3 board model addr mac; do
     # A driver that is not on this machine is a SKIP with its own status, and
     # it is decided here rather than by booting: tools/sana2-stage.sh warns and
     # carries on, which would spend a boot and a timeout to report "the network
-    # would not start".
+    # did not start".
     if [ -z "$drvpath" ]; then
         if [ "$SANA2_SEL_SOURCE" = anxnet ]; then
             reason="no anxnet.device in $BUILD; build the tree, or set AMINETXDUO_ANXNET"

@@ -973,7 +973,7 @@ typedef struct NetStatusOpener
  * This reads a file, so it must be called from a Process. ENOENT when there is
  * no such file or it cannot be parsed, EEXIST when the stack already has an
  * interface of that name, ENOSPC when every interface slot is taken, ENXIO or
- * EIO when the SANA-II device would not open or would not answer.
+ * EIO when the SANA-II device did not open or did not answer.
  *
  * The address is not waited for. A lease takes seconds to arrive and the
  * caller is the one with a Process to wait in; read NETSTATUS_INTERFACES until

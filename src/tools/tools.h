@@ -299,9 +299,9 @@ LONG tool_netstatus_control(struct Library *base, ULONG op,
 BOOL tool_netstatus_system(NetStatusSystem *out);
 
 /*
- * The message for "the stack is running but would not answer". Distinguishes a
- * foreign bsdsocket.library (Roadshow, AmiTCP, an emulator's own) from ours
- * being too old for these vectors; the two need different advice.
+ * The message for "the stack did not report on itself". It separates a foreign
+ * bsdsocket.library (Roadshow, AmiTCP, an emulator's own) from ours being too
+ * old for these vectors. The two need different advice.
  */
 VOID tool_explain_no_netstatus(struct Library *base);
 

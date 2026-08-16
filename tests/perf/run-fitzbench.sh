@@ -48,7 +48,7 @@
 # -N NAMES THE CARD AND ITS DRIVER BOTH.  The board key goes to the emulator,
 # and tools/sana2-stage.sh's table decides which SANA-II driver is staged and
 # what DEVS:NetInterfaces/eth0 asks for.  A card whose driver is not on this
-# host is refused before the boot rather than booted into "the network would not
+# host is refused before the boot rather than booted into "the network did not
 # start".  Amiberry only: the other two branches boot an a2065 and say so.
 #
 # THE PEER MUST BE A THIRD MACHINE.  A frame the emulator's host sends to the
@@ -234,7 +234,7 @@ fi
 # Staging below copied a2065.device unconditionally and left DEVICE=a2065.device
 # in place whatever -N said, so `-N ne2000_pcmcia` booted a machine holding an
 # NE2000 and a guest asking for a card that was not in it: "AddNetInterface: the
-# network would not start", both FitzBench arms printing RESULT FAILED, and this
+# network did not start", both FitzBench arms printing RESULT FAILED, and this
 # script exiting 0 over it.  Resolve the driver HERE, before a boot and before a
 # server on the peer, and refuse when this host has not got it.
 #

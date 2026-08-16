@@ -29,7 +29,7 @@ typedef struct AmiNetStack AmiNetStack;
 
 #define AMI_NET_OK              0
 #define AMI_NET_ERR_NOMEM      (-1)
-#define AMI_NET_ERR_NODEV      (-2)   /* SANA-II device would not open        */
+#define AMI_NET_ERR_NODEV      (-2)   /* SANA-II device did not open          */
 #define AMI_NET_ERR_CONFIG     (-3)
 #define AMI_NET_ERR_KERNEL     (-4)   /* ThreadX/NetX Duo refused to start    */
 #define AMI_NET_ERR_STATE      (-5)
@@ -38,7 +38,7 @@ typedef struct AmiNetStack AmiNetStack;
  * Resolver failures are separate because a mistyped host name is not a hardware
  * fault and must not be reported as one. netstack_resolve() used to answer
  * every failure with AMI_NET_ERR_NODEV, so a typo read as "the SANA-II device
- * would not open".
+ * did not open".
  *
  * bsdsocket.library's h_errno mapping treats everything except
  * AMI_NET_ERR_STATE as HOST_NOT_FOUND, which stays correct for all three.
@@ -49,7 +49,7 @@ typedef struct AmiNetStack AmiNetStack;
 #define AMI_NET_ERR_BUSY       (-9)   /* still carrying connections           */
 
 /*
- * The device opened and then would not answer S2_DEVICEQUERY,
+ * The device opened and then did not answer S2_DEVICEQUERY,
  * S2_GETSTATIONADDRESS or S2_CONFIGINTERFACE. Separate from AMI_NET_ERR_NODEV
  * because the advice is the opposite: the card is present and the driver is
  * loaded, so seating and unit numbers are not the thing to check.

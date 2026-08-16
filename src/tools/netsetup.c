@@ -610,9 +610,9 @@ static BOOL ask_device(Plan *plan)
 }
 
 /*
- * Ask the card whether it is really there, before anything is written: a wrong
- * unit, or a driver for a card that is not installed, is otherwise found out much
- * later by a command that can only say "would not open".
+ * Ask the card whether it is really there, before anything is written. A wrong
+ * unit, or a driver for a card that is not installed, is otherwise found out
+ * much later by a command that can only say "did not open".
  */
 static BOOL check_device(Plan *plan, BOOL quiet)
 {

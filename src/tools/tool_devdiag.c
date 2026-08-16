@@ -209,11 +209,11 @@ VOID tool_explain_device(const char *device, ULONG unit, const char *card)
     LONG        probe;
 
     /*
-     * CARD= first, because every answer below it would be wrong.  A driver
-     * covering a family of boards opens on UNIT alone, so an unpinned probe
-     * succeeds on the wrong card and prints "opens perfectly well" at someone
-     * whose interface just refused to come up.  The pinned probe is the one
-     * the stack made, and this is the one line that names what was asked for.
+     * CARD= comes first, because every answer below it depends on it. A driver
+     * that covers a family of boards opens on UNIT alone, so an unpinned probe
+     * succeeds on the wrong card and reports that the unit opens, at someone
+     * whose interface just refused to come up. The pinned probe is the one the
+     * stack made, and this is the one line that names what was asked for.
      */
     if (card != NULL && *card != '\0' &&
         tool_device_probe(device, unit, card) != 0 &&
@@ -283,8 +283,8 @@ VOID tool_explain_device(const char *device, ULONG unit, const char *card)
         return;
     }
 
-    /* Probed above, before the absence branch: what it answered distinguishes
-       "would not open" from "the card is on unit 0, not unit 1", which is the
+    /* Probed above, before the absence branch: what it answered separates
+       "did not open" from "the card is on unit 0, not unit 1", which is the
        usual mistake. */
     if (probe == 0)
     {

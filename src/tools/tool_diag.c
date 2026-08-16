@@ -322,12 +322,11 @@ LONG tool_device_probe(const char *device, ULONG unit, const char *card)
     if (status == 0)
     {
         /*
-         * Opening proves the driver and the unit; it does not prove the card.
-         * src/sana2/sana2_device.c calls S2_DEVICEQUERY straight after its own
-         * open and reports a refusal as AMI_NET_ERR_DEVBAD, so ask the same
-         * question here, otherwise a card that opens and then answers
-         * nothing is reported as "opens perfectly well", which is true and
-         * useless.
+         * A successful open proves the driver and the unit. It does not prove
+         * the card. src/sana2/sana2_device.c calls S2_DEVICEQUERY straight
+         * after its own open and reports a refusal as AMI_NET_ERR_DEVBAD, so
+         * ask the same question here. Without it a card that opens and then
+         * answers nothing is reported as working.
          */
         struct Sana2DeviceQuery query;
 
