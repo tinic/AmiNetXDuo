@@ -82,17 +82,9 @@ ADDRESS="${AMINETXDUO_IPERF_ADDRESS:-192.168.1.240}"
 GATEWAY="${AMINETXDUO_IPERF_GATEWAY:-192.168.1.1}"
 NETMASK=255.255.255.0
 
-# Where the guest listens when it is the server, and how long it waits.
-PORT_SRV_TCP="${AMINETXDUO_IPERF_PORT_SRVTCP:-7404}"
-PORT_SRV_UDP="${AMINETXDUO_IPERF_PORT_SRVUDP:-7405}"
+# How long the guest waits when it is the server.  The ports are derived from
+# the run tag, below, once the tag is known.
 SRV_WINDOW=20
-
-# Above 1024, in a private block, one per arm so a peer that is still finishing
-# cannot be mistaken for the next one.  DEAD is where nothing ever listens.
-PORT_TCP="${AMINETXDUO_IPERF_PORT_TCP:-7401}"
-PORT_UDP="${AMINETXDUO_IPERF_PORT_UDP:-7402}"
-PORT_SIZE="${AMINETXDUO_IPERF_PORT_SIZE:-7403}"
-PORT_DEAD="${AMINETXDUO_IPERF_PORT_DEAD:-7409}"
 
 # How long each transfer runs on the guest, and how much the -n arm moves.
 SECS=3
@@ -131,6 +123,32 @@ TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-iperf}"
+
+# ONE PORT BLOCK PER TAG, and not the fixed 7401..7409 this used to have.
+#
+# The peers are sized to outlive the run -- PEER_LIFE is TIMEOUT + 120, 420 s
+# at the default -- and a run itself is nearer 180 s.  So an arm's peers are
+# still holding those ports when the next arm starts.  Same tag and they are
+# killed first (the pkill below is tag-scoped); DIFFERENT tag, which is exactly
+# what an A/B is, and the second arm dies on "address already in use" before it
+# boots anything.  The peer that survives is not even the one under test.
+#
+# Ten ports per tag in 20000..29000: clear of tools/amiberry-run.sh's 12000
+# block, clear of tools/winuae-run.sh's 11000 block, and below the ephemeral
+# range on every peer this runs on.  The offsets keep the old layout, so a
+# capture filter written against 7401/7402/7403 still reads +1/+2/+3.
+#
+# Above 1024, one per arm so a peer that is still finishing cannot be mistaken
+# for the next one.  DEAD is where nothing ever listens.
+PORT_BASE=$((20000 + ($(printf '%s' "$AMINETXDUO_RUN_TAG" | cksum |
+                        cut -d' ' -f1) % 900) * 10))
+PORT_TCP="${AMINETXDUO_IPERF_PORT_TCP:-$((PORT_BASE + 1))}"
+PORT_UDP="${AMINETXDUO_IPERF_PORT_UDP:-$((PORT_BASE + 2))}"
+PORT_SIZE="${AMINETXDUO_IPERF_PORT_SIZE:-$((PORT_BASE + 3))}"
+PORT_SRV_TCP="${AMINETXDUO_IPERF_PORT_SRVTCP:-$((PORT_BASE + 4))}"
+PORT_SRV_UDP="${AMINETXDUO_IPERF_PORT_SRVUDP:-$((PORT_BASE + 5))}"
+PORT_DEAD="${AMINETXDUO_IPERF_PORT_DEAD:-$((PORT_BASE + 9))}"
+
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 REPORT="$HD/tools.txt"
 RUN_RC=0

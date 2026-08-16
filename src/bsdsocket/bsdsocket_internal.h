@@ -346,7 +346,7 @@ typedef struct
  * trade refused. docs/RESEARCH.md's own rule is that the retransmission rate
  * is the number to gate on and the throughput is downstream of it.
  *
- * At an eighth ami_bsd_tcp_window() divides the budget by the live socket
+ * At an eighth ami_bsd_tcp_window() divides the budget by the connected socket
  * count as before, so a lone socket can claim an eighth of the pool, all
  * sockets together never more than one budget, and above five sockets the
  * BSD_TCP_WINDOW floor governs instead.

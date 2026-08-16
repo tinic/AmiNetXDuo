@@ -89,13 +89,16 @@ LIST=0
 
 # TEN PORTS PER CARD ON THE PEER, AND NOT ONE SET SHARED.
 #
-# tests/tools/run-iperf.sh binds five fixed ports on the peer and clears
-# leftovers with a pkill scoped to its OWN run tag (:262), which is right --
-# a broad pattern takes out other people's runs on a shared machine.  The
-# consequence is that consecutive tagged runs cannot free each other, and its
-# peers outlive their run by design (:264, timeout $TIMEOUT + 150) while a card
-# here takes about thirty seconds.  Cards two onward then met "[Errno 98]
-# Address already in use" and a guest whose peer never answered.
+# tests/tools/run-iperf.sh clears leftover peers with a pkill scoped to its OWN
+# run tag, which is right -- a broad pattern takes out other people's runs on a
+# shared machine.  The consequence is that consecutive tagged runs cannot free
+# each other, and its peers outlive their run by design (timeout $TIMEOUT + 150)
+# while a card here takes about thirty seconds.  Cards two onward then met
+# "[Errno 98] Address already in use" and a guest whose peer never answered.
+#
+# run-iperf.sh derives its own block from its tag now, which would cover this,
+# but the explicit base stays: it is contiguous and printable, so a sweep's
+# ports can be read off one line rather than hashed per card.
 #
 # Distinct ports rather than a wider kill: nothing has to die on time, and two
 # sweeps on one LAN stay out of each other's way by moving the base.
