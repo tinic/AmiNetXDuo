@@ -1,41 +1,41 @@
 AmiNetXDuo, TCP/IP for classic AmigaOS
 ========================================
 
-AmiNetXDuo is a bsdsocket.library for classic AmigaOS: the shared library that
-Amiga network software (browsers, FTP clients, telnet, file sharing)
-opens in order to reach the network. It talks to your network card through
-the card's ordinary SANA-II driver, and it is configured with the same
-files and the same commands as Roadshow.
+AmiNetXDuo is a bsdsocket.library for classic AmigaOS. That shared library
+is the one that Amiga network software (browsers, FTP clients, telnet,
+file sharing) opens to reach the network. AmiNetXDuo talks to the network
+card through the ordinary SANA-II driver of that card. It is configured
+with the same files and the same commands as Roadshow.
 
 It is built on Eclipse ThreadX NetX Duo and is MIT licensed throughout.
 
 
-PLEASE READ THIS FIRST
-----------------------
+READ THIS FIRST
+---------------
 
 AmiNetXDuo works, and it is not finished.
 
 It gets a DHCP lease, configures itself by SLAAC, answers ARP and
 neighbour discovery, pings its gateway, resolves names and moves TCP in
-both directions, and it scores 142 of 142 on the bsdsocktest conformance
-suite. It has been tested under emulation on Kickstart 2.04 and 3.1 with a
+both directions. It scores 142 of 142 on the bsdsocktest conformance
+suite. It was tested under emulation on Kickstart 2.04 and 3.1 with a
 68000, a 68020 and a 68030, and on a real A3000 with an X-Surf-100.
 
-Classic AmigaOS has no memory protection, so a fault in a network stack
-takes the machine with it. Save your work before experimenting.
+Classic AmigaOS has no memory protection. A fault in a network stack takes
+the machine with it. Save all work before the first attempt.
 
 
-WHAT YOU NEED
--------------
+WHAT IS NEEDED
+--------------
 
   * Any 68000 or better, AmigaOS 2.04 or newer, 1 MB of RAM.
-    The archive carries a separate build for the 68000, the 68020-68040
-    and the 68060, and the Installer picks the right one. Encrypted
-    (https:) connections need a 68020 or better.
+    The archive carries a separate build for the 68000, for the
+    68020-68040 and for the 68060, and the Installer picks the right one.
+    Encrypted (https:) connections need a 68020 or better.
   * A network card with a SANA-II driver installed in DEVS:
     (a2065.device, ariadne.device, x-surf.device, uaenet.device, ...)
-    Drivers are not part of this archive; use the one for your card.
-  * You need to know the driver's name and its unit number (usually 0).
+    Drivers are not part of this archive. Use the one for the card.
+  * The name of the driver and its unit number, which is usually 0.
 
 
 INSTALLING
@@ -49,9 +49,9 @@ Run the Installer script if there is one. To install by hand:
   makedir DEVS:NetInterfaces
   makedir DEVS:Internet
 
-Do not run two TCP/IP stacks at once. If you already have AmiTCP, Miami or
-Roadshow installed, rename the old LIBS:bsdsocket.library rather than
-overwriting it, and make sure the old stack is not started from
+Do not run two TCP/IP stacks at once. If AmiTCP, Miami or Roadshow is
+already installed, rename the old LIBS:bsdsocket.library rather than
+overwriting it. Check that the old stack is not started from
 S:User-Startup.
 
 
@@ -67,11 +67,11 @@ router:
     UNIT      = 0
     CONFIGURE = DHCP
 
-That is the whole configuration: the address, the netmask, the gateway and
+That is the whole configuration. The address, the netmask, the gateway and
 the name servers all arrive from the DHCP server.
 
 Note that the address mode keyword is CONFIGURE, not IPTYPE. IPTYPE with a
-number after it means something else entirely (the SANA-II packet type)
+number after it means something else entirely, the SANA-II packet type,
 and is ignored.
 
 Without a DHCP server, use a fixed address instead:
@@ -93,40 +93,44 @@ Then start the stack:
 
   AddNetInterface eth0
 
-and, once that works, add this line to S:User-Startup so it happens at
-every boot:
+Once that works, add this line to S:User-Startup so it happens at every
+boot:
 
   C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET
 
-If you run a server on this machine, an FTP daemon or a web server,
-list it in DEVS:Internet/service_discovery and other machines on the
-network will find it by browsing:
+For a server on this machine, a file transfer daemon or a web server, add
+it to DEVS:Internet/service_discovery. Other machines on the network then
+find it by browsing:
 
   DEVS:Internet/service_discovery
     _ftp._tcp     21
     _http._tcp    80    Amiga web server
 
-Only list a server that is really running. There is a commented example
-in the Examples drawer, and the guide has the full description.
+List only a server that is really running. There is a commented example in
+the Examples drawer, and the guide has the full description.
 
 
 IS IT WORKING?
 --------------
 
   ShowNetStatus              is the stack up, and has it got an address?
-  ping <your gateway>        can it reach the network?
+  ping <the gateway>         can it reach the network?
   host www.aminet.net        do names work?
 
 The first of those to fail is where the problem is. AmiNetXDuo.guide has a
-troubleshooting section covering the usual causes: the wrong device name,
-no DHCP server answering, a cable or driver problem, a missing interface
-file, and a stack that is up while DNS is not.
+troubleshooting section that covers the usual causes:
+
+  * the wrong device name
+  * no DHCP server answering
+  * a cable or driver problem
+  * a missing interface file
+  * a stack that is up while DNS is not
 
 From another machine on the same network, this Amiga also answers to its
-own name with .local on the end, "ping amiga.local" from a Mac, from
-Linux with Avahi, or from Windows 10 or later. Nothing has to be set up
-for that, and it keeps working when there is no DHCP server to hand out
-an address anyone could guess.
+own name with .local on the end. "ping amiga.local" works from a Mac, from
+Linux with Avahi, and from Windows 10 or later. Nothing has to be
+configured for that. It also keeps working when there is no DHCP server to
+hand out an address that anyone can guess.
 
 
 THE COMMANDS
@@ -145,23 +149,23 @@ All of them answer "?" with their arguments, in the usual AmigaDOS way.
 DOCUMENTATION
 -------------
 
-AmiNetXDuo.guide is the manual. Double-click it, or:
+AmiNetXDuo.guide is the manual. Double-click it, or run:
 
   MultiView AmiNetXDuo.guide
 
-It covers installation, every configuration file and keyword, the commands
-with examples, and troubleshooting.
+It covers the installation, every configuration file and keyword, the
+commands with examples, and troubleshooting.
 
 
 THINGS IT DOES NOT DO
 ---------------------
 
   * At most four interfaces are attached.
-  * Only Ethernet-style SANA-II drivers have been tested; PPP and SLIP
-    should be treated as unsupported.
-  * A first HTTPS handshake to a busy host may not finish inside the far
-    end's timeout on a 68020. It usually succeeds on the next attempt,
-    because the session is cached. TLS is off on a 68000.
+  * Only Ethernet-style SANA-II drivers were tested. PPP and SLIP are not
+    supported.
+  * On a 68020, a first HTTPS handshake to a busy host does not always
+    finish inside the timeout of the far end. The next attempt usually
+    succeeds, because the session is cached. TLS is off on a 68000.
   * IPv6 multicast group membership is not available to programs.
   * The Roadshow interface-list, routing and statistics library calls
     return ENOSYS.
@@ -173,6 +177,6 @@ LICENCE
 -------
 
 MIT. See the LICENCE file. AmiNetXDuo is an independent implementation of
-a published interface; no AmiTCP, AROSTCP, Miami or Roadshow code is used.
+a published interface. No AmiTCP, AROSTCP, Miami or Roadshow code is used.
 ThreadX and NetX Duo are MIT licensed, copyright Microsoft and the Eclipse
 ThreadX contributors.
