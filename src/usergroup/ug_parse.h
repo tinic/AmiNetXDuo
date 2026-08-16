@@ -1,7 +1,7 @@
 /*
  * AmiNetXDuo, usergroup.library: the passwd and group file parsers.
  *
- * ug_db.c reads the files and calls these; the host test and the fuzz driver
+ * ug_db.c reads the files and calls these. The host test and the fuzz driver
  * call them directly with bytes of their own.
  *
  * SPDX-License-Identifier: MIT
@@ -16,7 +16,7 @@
 void ug_db_parse_passwd(struct UgDatabase *db, char *text);
 void ug_db_parse_group(struct UgDatabase *db, char *text, ULONG len);
 
-/* The single-user, single-group tables every machine without the files gets. */
+/* The single-user, single-group tables that a machine with no files gets. */
 void ug_db_default_passwd(struct UgDatabase *db);
 void ug_db_default_group(struct UgDatabase *db);
 

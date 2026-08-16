@@ -2,7 +2,7 @@
  * AmiNetXDuo, bpf_* internals.
  *
  * Private to src/bpf/. bpf_filter.c, bpf_validate.c, bpf_channel.c and
- * bpf_tap.c contain no AmigaOS calls; everything platform-specific is behind
+ * bpf_tap.c contain no AmigaOS calls. Everything platform-specific is behind
  * the five hooks at the bottom, which bpf_amiga.c implements and the host test
  * stubs out. Same split as src/config/ and src/mbuf/.
  *
@@ -84,7 +84,7 @@ typedef struct AmiBpfChan
 } AmiBpfChan;
 
 /* ami_bpf_chan[] is static in bpf_channel.c: nothing outside it reaches the
-   table, and every path that would is already a function declared below. */
+   table, and every path that needs the table is a function declared below. */
 extern AmiBpfIf   ami_bpf_iface[AMI_BPF_MAX_IFACES];
 
 /*
@@ -109,9 +109,9 @@ ULONG     ami_bpf_iface_address(const AmiBpfIf *ifp);
 /* bpf_filter.c, byte count for a BPF_SIZE field, 0 if the encoding is bad. */
 UWORD ami_bpf_size_bytes(UWORD code);
 
-/* Endian- and alignment-neutral field access inside a capture record.  The
-   put and copy halves are static in bpf_channel.c, which is the only writer;
-   the get half stays shared because tests/mbuf_bpf reads records back. */
+/* Endian- and alignment-neutral field access inside a capture record. The put
+   and copy halves are static in bpf_channel.c, the only writer. The get half
+   stays shared because tests/mbuf_bpf reads records back. */
 ULONG ami_bpf_get32(const UBYTE *p);
 UWORD ami_bpf_get16(const UBYTE *p);
 
@@ -129,7 +129,7 @@ VOID ami_bpf_lock(VOID);
 VOID ami_bpf_unlock(VOID);
 
 /* Open whatever clock ami_bpf_now() reads. Called from ami_bpf_open(), outside
-   the lock, because doing it lazily inside one would block under Forbid(). */
+   the lock. A lazy open inside the lock blocks under Forbid(). */
 VOID ami_bpf_time_init(VOID);
 
 /* Wall-clock time for bh_tstamp, seconds and microseconds since 1970. Must not

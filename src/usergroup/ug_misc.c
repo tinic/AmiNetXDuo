@@ -15,14 +15,14 @@
 /* ------------------------------------------------------------- crypt ----- */
 
 /*
- * We do not ship a DES implementation, and there is nothing here for one to
- * verify against: the built-in database has no passwords, and a passwd file
- * on an AmigaOS volume is readable by anyone anyway.
+ * No DES implementation ships here, and there is nothing for one to check
+ * against.  The built-in database has no passwords, and a passwd file on an
+ * AmigaOS volume is readable by anyone in any case.
  *
- * So crypt() fails, but it fails the safe way, it returns a valid, stable,
- * never-NULL string that cannot match any stored hash. Callers that do the
- * usual strcmp(crypt(typed, salt), pw->pw_passwd) get "no match" instead of a
- * NULL dereference, and callers that check ug_GetErr() see ENOSYS.
+ * crypt() therefore fails, and it fails the safe way. It returns a valid,
+ * stable, never-NULL string that cannot match any stored hash. Callers that do
+ * the usual strcmp(crypt(typed, salt), pw->pw_passwd) get "no match" instead
+ * of a NULL dereference, and callers that check ug_GetErr() see ENOSYS.
  */
 UBYTE *ugl_crypt(UG_A6, register UBYTE *key __asm("a0"),
                         register UBYTE *set __asm("a1"))
@@ -39,7 +39,7 @@ UBYTE *ugl_crypt(UG_A6, register UBYTE *key __asm("a0"),
 }
 
 /*
- * The salt of an existing entry is the first two characters of its hash;
+ * The salt of an existing entry is the first two characters of its hash.
  * "**" stands in when there is no hash to take it from, which keeps the
  * result usable as a crypt() argument either way.
  */
@@ -85,9 +85,9 @@ UBYTE *ugl_GetSalt(UG_A6, register struct ug_passwd *user __asm("a0"),
 /* ------------------------------------------------------------ getpass --- */
 
 /*
- * Read a line from the console with echo suppressed. Never returns NULL: with
+ * Read a line from the console with echo suppressed. Never returns NULL. With
  * no console (a non-Process caller, or no dos.library) the answer is the empty
- * string and ug_GetErr() explains why.
+ * string, and ug_GetErr() gives the reason.
  */
 STRPTR ugl_getpass(UG_A6, register STRPTR prompt __asm("a1"))
 {
@@ -162,9 +162,9 @@ STRPTR ugl_getpass(UG_A6, register STRPTR prompt __asm("a1"))
 
 /*
  * There is no utmp or lastlog on AmigaOS and nothing to synthesise them from.
- * An empty database is a correct answer rather than a failure: getutent()
- * returning NULL is exactly what "no more entries" looks like, so callers walk
- * zero records and carry on.
+ * An empty database is a correct answer and not a failure: a NULL from
+ * getutent() is what "no more entries" looks like, so callers walk zero
+ * records and continue.
  */
 VOID ugl_setutent(UG_A6)
 {

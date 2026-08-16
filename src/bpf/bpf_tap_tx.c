@@ -11,20 +11,21 @@
  *     nx_packet_prepend_ptr ---> [ IP header ][ payload ... ]
  *
  * There is no Ethernet header. NetX Duo leaves the link header to the driver
- * and reserves NX_PHYSICAL_HEADER bytes of headroom for it; the SANA-II shim
+ * and reserves NX_PHYSICAL_HEADER bytes of headroom for it. The SANA-II shim
  * never builds one either, because CMD_WRITE takes ios2_PacketType and
  * ios2_DstAddr as separate fields and the device does the framing. The
  * complete Ethernet frame that goes on the wire never exists in memory.
  *
  * A DLT_EN10MB consumer must see that frame, so the tap reconstructs the 14
- * bytes on the stack from the three things the CMD_WRITE carries,
- * destination from nx_ip_driver_physical_address_msw/lsw, source from the
- * interface's own MAC, type from the driver command, and hands the filter a
- * two-segment view. The packet is not touched, since it is often a queued TCP
- * segment that will be handed back for retransmission.
+ * bytes on the stack from the three things that the CMD_WRITE carries. The
+ * destination comes from nx_ip_driver_physical_address_msw/lsw, the source
+ * from the MAC of the interface, and the type from the driver command. The tap
+ * then hands the filter a two-segment view. The packet itself is not touched,
+ * because it is often a queued TCP segment that the stack hands back for
+ * retransmission.
  *
  * In raw mode the shim has already prepended the header, so segment 0 is
- * skipped and the view is just the packet chain.
+ * skipped and the view is only the packet chain.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -98,11 +99,11 @@ VOID ami_bpf_tap_tx(APTR cookie, NX_PACKET *packet, BOOL has_link_header,
 
         if (ami_bpf_view_add(&view, p->nx_packet_prepend_ptr, len) != 0)
             break;      /* more fragments than AMI_BPF_MAX_SEGS: capture what
-                           we have and let bh_caplen < bh_datalen say so */
+                           is present and let bh_caplen < bh_datalen show it */
     }
 
-    /* wirelen is the whole frame even where the view could not cover it, so
-       BPF_LEN and bh_datalen stay truthful. */
+    /* wirelen is the whole frame even where the view does not cover it, so
+       BPF_LEN and bh_datalen stay correct. */
     view.wirelen = wirelen;
 
     ami_bpf_capture(ifp, &view);

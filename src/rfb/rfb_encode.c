@@ -1,17 +1,17 @@
 /* Frame encoder for the remote framebuffer.  Wire format is in the header.
  *
- * The shape of the thing: one pass over the source bitmap, tile by tile, and
- * the pass asks before it writes.  Each tile-plane is compared against the
- * shadow copy of the previous frame and stops at the first word that
- * disagrees; a tile nobody drew on is never written to at all.  That is the
- * frame a live Workbench mostly serves -- 49 out of 50 of them change nothing.
+ * One pass over the source bitmap, tile by tile, and the pass asks before it
+ * writes.  Each tile-plane is compared against the shadow copy of the previous
+ * frame and stops at the first word that disagrees.  A tile that nobody drew
+ * on is never written to at all.  That is the frame a live Workbench mostly
+ * serves -- 49 out of 50 of them change nothing.
  *
- * A tile that DID change is read once, into rawbuf, and that single copy is
- * what the XOR is taken from, what the shadow is written from, and what goes
- * on the wire.  The source is never read twice, which is what lets the Amiga
- * caller point this at the live bitplanes with no drawing lock held: a torn
- * read can produce a torn frame, and always could, but it cannot leave a
- * shadow here that disagrees with the bytes the far end was sent.
+ * A tile that did change is read once, into rawbuf, and that single copy is
+ * the source of the XOR, of the shadow write, and of what goes on the wire.
+ * The source is never read twice, so the Amiga caller can point this at the
+ * live bitplanes with no drawing lock held.  A torn read can produce a torn
+ * frame, as it always has, but it cannot leave a shadow here that disagrees
+ * with the bytes the far end was sent.
  *
  * On the Amiga the source is chip RAM and the shadow is fast, so the compare
  * is the expensive half and everything is arranged to do less of it.  The
@@ -25,25 +25,25 @@
 
 #include <aminetxduo/rfb_encode.h>
 
-/* rfb_u32 has to be exactly 32 bits: the word loop below and the wire format
+/* rfb_u32 must be exactly 32 bits: the word loop below and the wire format
  * both depend on it. */
 typedef char rfb_u32_is_four_bytes[(sizeof(rfb_u32) == 4) ? 1 : -1];
 
 #define RFB_PB_FAIL     ((rfb_u32)0xFFFFFFFFu)
 #define RFB_PB_BOUND(n) ((n) + ((n) + 127u) / 128u + 1u)
 
-/* Sampled rows the scroll probe will keep masks for.  A taller screen raises
- * the effective probe_step rather than the scratch bill. */
+/* Sampled rows that the scroll probe keeps masks for.  A taller screen raises
+ * the effective probe_step and not the scratch cost. */
 #define RFB_PROBE_MAX_SAMPLES 256
 #define RFB_PROBE_MAX_BLK     32
 
-/* And a FLOOR on how narrow a probe column may be.  Without one the sizing
- * below divides the row into RFB_PROBE_MAX_BLK columns whatever the row is,
- * and an 80-byte Workbench row came out at four bytes a column: twenty
- * columns, each of them a function's worth of setup to compare one longword.
- * Sixteen bytes is 128 pixels, which is finer than any window edge the band
- * detector can act on -- the copy rectangle it produces is a prediction the
- * tile pass corrects anyway. */
+/* And a lower bound on how narrow a probe column can be.  Without one the
+ * sizing below divides the row into RFB_PROBE_MAX_BLK columns whatever the row
+ * is.  An 80-byte Workbench row then came out at four bytes a column: twenty
+ * columns, each with a whole function of setup to compare one longword.
+ * Sixteen bytes is 128 pixels, finer than any window edge that the band
+ * detector can act on.  The copy rectangle it produces is a prediction, and
+ * the tile pass corrects it anyway. */
 #define RFB_PROBE_MIN_BLK     16
 
 /* ------------------------------------------------------------- PackBits --- */
@@ -71,8 +71,8 @@ rfb_u32 rfb_packbits(const rfb_u8 *in, rfb_u32 n, rfb_u8 *out, rfb_u32 cap,
             i += run;
         } else {
             rfb_u32 start = i, lit = 0;
-            /* A literal stops where a codeable run starts.  min_run is 2 or 3;
-             * either way the first byte here cannot start one, because the run
+            /* A literal stops where a codeable run starts.  min_run is 2 or 3.
+             * Either way the first byte here cannot start one, because the run
              * scan above already said it does not. */
             while (i < n && lit < 128u) {
                 if (min_run == 2) {
@@ -133,11 +133,11 @@ static int rfb_geom_ok(const rfb_geom *g)
         return 0;
     if (g->format != RFB_FMT_PLANAR && g->format != RFB_FMT_CLUT8)
         return 0;
-    /* A chunky byte IS the palette index, so the depth is the palette's and
-     * not a plane count -- and eight bits is the only width of it this
-     * format has.  Refusing here rather than deriving a depth means a caller
-     * that gets it wrong is told so at init instead of sending a picture
-     * against a palette of the wrong length. */
+    /* A chunky byte is the palette index, so the depth belongs to the palette
+     * and is not a plane count.  Eight bits is the only width that this format
+     * has.  A refusal here, instead of a derived depth, tells a caller that
+     * gets it wrong at init, and not after a picture goes out against a
+     * palette of the wrong length. */
     if (g->format == RFB_FMT_CLUT8 && g->depth != 8)
         return 0;
     return 1;
@@ -253,8 +253,8 @@ long rfb_encoder_init(rfb_encoder *e, const rfb_geom *g, rfb_u32 flags,
         return RFB_E_GEOM;
 
     /* A chunky source has one plane, and BMF_INTERLEAVED is a statement about
-     * how eight of them are laid out.  Taking it would compute a row stride of
-     * bytes_per_row * 8 and read one row in eight. */
+     * how eight of them are laid out.  Accepted here, it computes a row stride
+     * of bytes_per_row * 8 and reads one row in eight. */
     if (g->format == RFB_FMT_CLUT8 && (flags & RFB_F_INTERLEAVED))
         return RFB_E_GEOM;
 
@@ -288,8 +288,8 @@ long rfb_encoder_init(rfb_encoder *e, const rfb_geom *g, rfb_u32 flags,
     e->shadow = shadow;
     e->scratch = scratch;
     e->scratch_len = scratch_len;
-    /* Nothing has scrolled yet, and memset() left this saying "one frame ago".
-       A session that never scrolls should be strict about the probe from its
+    /* Nothing has scrolled yet, and memset() left this at "one frame ago".
+       A session that never scrolls must be strict about the probe from its
        first busy frame, not from its sixty-fifth. */
     e->since_copy = 255u;
 
@@ -349,13 +349,13 @@ static void rfb_putblk(rfb_out *o, const rfb_u8 *src, rfb_u32 n)
 
 /* ------------------------------------------------------- the tile pass --- */
 
-/* DOES THIS TILE-PLANE DIFFER FROM THE SHADOW.  Nothing is written and it
+/* Does this tile-plane differ from the shadow.  Nothing is written and it
  * stops at the first word that disagrees, so the answer for a screen where
  * nothing moved costs one read of the source and one of the shadow and no
  * more.  That is the whole idle frame: on a live Workbench 49 frames out of
  * 50 reach no further than this.
  *
- * `word` is the caller's frame-constant verdict on alignment -- see
+ * `word` is the frame-constant alignment verdict of the caller -- see
  * rfb_words_ok().  It is not rederived here because it was the same answer on
  * every row of every tile of every plane, 2560 times a frame. */
 static int rfb_cmp_plane(const rfb_u8 *src, const rfb_u8 *sh,
@@ -367,23 +367,23 @@ static int rfb_cmp_plane(const rfb_u8 *src, const rfb_u8 *sh,
         const rfb_u32 words = tw >> 2;
         const rfb_u32 tail = tw & 3u;
 
-        /* The rows are walked by adding the stride, not by multiplying the row
-         * number by it: bpr is a variable, so `src + r * bpr` on the -m68000
-         * build the archive ships is a call to __mulsi3, once per row of every
-         * tile of every plane. */
+        /* The rows are walked by an add of the stride, not by a multiply of
+         * the row number.  bpr is a variable, so `src + r * bpr` on the
+         * -m68000 build that the archive ships is a call to __mulsi3, once per
+         * row of every tile of every plane. */
         do {
             rfb_u32 n = words;
             const rfb_u32 *sw = (const rfb_u32 *)(const void *)src;
             const rfb_u32 *dw = (const rfb_u32 *)(const void *)sh;
 
-            /* ONE LONGWORD AT A TIME, AND THAT IS THE FAST ONE.  Unrolling
-             * this was tried twice and lost both times, measured on the idle
-             * frame at depth 2: 25.3 ms like this, 30.7 ms unrolled four wide,
+            /* One longword at a time, and that is the fast form.  An unroll
+             * was tried twice and lost both times, measured on the idle frame
+             * at depth 2: 25.3 ms like this, 30.7 ms unrolled four wide,
              * 31.9 ms unrolled four wide and out of line.  A tile row is four
              * longwords, so an unrolled body pays its setup once per four
              * iterations and saves three loop tests, and CMPM.L with a
              * predictable branch is already about as cheap as the 68020 gets.
-             * Do not unroll this without measuring it. */
+             * Do not unroll this without a measurement. */
             while (n--)
                 if (*sw++ != *dw++)
                     return 1;
@@ -412,10 +412,10 @@ static int rfb_cmp_plane(const rfb_u8 *src, const rfb_u8 *sh,
     return 0;
 }
 
-/* TAKE THE TILE-PLANE.  One read of the source into raw, which is then the
- * only copy anybody uses: the XOR is computed from it against the old shadow,
- * the shadow is written from it, and it is what goes on the wire.  The source
- * is never read twice, so a screen being drawn on underneath cannot put a
+/* Take the tile-plane.  One read of the source into raw, which is then the
+ * only copy that anything uses.  The XOR is computed from it against the old
+ * shadow, the shadow is written from it, and it is what goes on the wire.  The
+ * source is never read twice, so a screen drawn on underneath cannot put a
  * shadow on this end that disagrees with the bytes the far end was sent. */
 static void rfb_take_plane(const rfb_u8 *src, rfb_u8 *sh, rfb_u8 *raw,
                            rfb_u8 *xb, rfb_u32 bpr, rfb_u32 tw, rfb_u32 th,
@@ -423,8 +423,8 @@ static void rfb_take_plane(const rfb_u8 *src, rfb_u8 *sh, rfb_u8 *raw,
 {
     rfb_u32 r = th;
 
-    /* raw and xb are tile-shaped, so their rows are simply consecutive: they
-     * are walked with the same pointer that finished the row before, and the
+    /* raw and xb are tile-shaped, so their rows are consecutive: they are
+     * walked with the same pointer that finished the row before, and the
      * source and the shadow get the stride added.  No row index, and so no
      * multiply by a variable stride. */
     if (word) {
@@ -487,7 +487,7 @@ static void rfb_take_plane(const rfb_u8 *src, rfb_u8 *sh, rfb_u8 *raw,
     } while (--r);
 }
 
-/* A plane that did not change but has to be sent anyway (no RFB_F_PLANEMASK).
+/* A plane that did not change but must be sent anyway (no RFB_F_PLANEMASK).
  * The shadow already holds the bytes, and the XOR against them is zero. */
 static void rfb_take_clean(const rfb_u8 *sh, rfb_u8 *raw, rfb_u8 *xb,
                            rfb_u32 bpr, rfb_u32 tw, rfb_u32 th, int keep_xor)
@@ -506,9 +506,9 @@ static void rfb_take_clean(const rfb_u8 *sh, rfb_u8 *raw, rfb_u8 *xb,
 }
 
 /* Can the whole frame use the longword path.  Every tile row starts at
- * plane_base + y * row_stride + tx * tile_w, so if the plane bases, the row
- * stride and the tile width are all multiples of four then every one of them
- * is, and the tile buffers are four-aligned by construction.  One answer per
+ * plane_base + y * row_stride + tx * tile_w.  If the plane bases, the row
+ * stride and the tile width are all multiples of four, then every tile row is
+ * too, and the tile buffers are four-aligned by construction.  One answer per
  * frame instead of one per row. */
 static int rfb_words_ok(const rfb_encoder *e, const rfb_u8 *const *planes)
 {
@@ -534,15 +534,15 @@ typedef struct {
 } rfb_copy;
 
 /* Which column blocks of a row are byte-identical.  Bit b set = block b
- * matched.  This runs n_samples * (n_cand + 1) times a frame and IS the cost
- * of the detector, so everything constant is hoisted out of it: the two
+ * matched.  This runs n_samples * (n_cand + 1) times a frame and is the cost
+ * of the detector, so everything constant is hoisted out of it.  The two
  * pointers walk, the block count is a countdown, and the whole-block case
  * carries no bounds arithmetic at all.
  *
  * It used to recompute `bpr - off` and rederive both pointers from a base and
- * an offset for every block, which at the four-byte block size the old sizing
- * produced for an 80-byte row was about twenty-four instructions to compare a
- * single longword. */
+ * an offset for every block.  At the four-byte block size that the old sizing
+ * produced for an 80-byte row, that was about twenty-four instructions to
+ * compare a single longword. */
 static rfb_u32 rfb_blk_match(const rfb_u8 *a, const rfb_u8 *b, rfb_u32 bpr,
                              rfb_u32 blk, rfb_u32 nblk)
 {
@@ -588,8 +588,8 @@ static rfb_u32 rfb_blk_match(const rfb_u8 *a, const rfb_u8 *b, rfb_u32 bpr,
         left = bpr - whole * blk;
     }
 
-    /* The short block at the end of the row, a byte at a time rather than
-     * reading past it. */
+    /* The short block at the end of the row, a byte at a time, so that no read
+     * goes past it. */
     if (whole < nblk && left) {
         rfb_u32 acc = 0;
 
@@ -633,7 +633,7 @@ static rfb_u32 rfb_probe_pass(rfb_encoder *e, const rfb_u8 *src,
         if (cm)
             dirty++;
 
-        /* pm walks by n_samples rather than being indexed with
+        /* pm walks by n_samples, and is not indexed with
          * c * n_samples + nsamp, which was a 32-bit multiply per candidate
          * per sample -- 585 of them a frame at the default candidate list. */
         for (c = 0; c < ncand; c++, pm += nsl) {
@@ -676,8 +676,8 @@ static int rfb_detect_scroll(rfb_encoder *e, const rfb_u8 *src, rfb_copy *cp)
 
     /* A scroll runs for many frames, so the offset that worked last frame is
      * tried alone first.  That is one candidate instead of nine for every
-     * frame of a scroll after the first, and the full list is only paid for
-     * when the shortcut does not explain what moved. */
+     * frame of a scroll after the first.  The full list costs nothing until
+     * the shortcut fails to explain what moved. */
     if (e->last_copy && e->last_dy != 0) {
         sticky[0] = e->last_dy;
         cand = sticky;
@@ -696,10 +696,9 @@ again:
         while (m) { changed++; m &= m - 1u; }
     }
 
-    /* Score a candidate on blocks that CHANGED and still matched at the
-     * offset.  Scoring on matches alone elects any offset under which a static
-     * background happens to agree with itself, and that is most of the
-     * screen. */
+    /* Score a candidate on blocks that changed and still matched at the
+     * offset.  A score on matches alone elects any offset under which a static
+     * background agrees with itself, and that is most of the screen. */
     best = 0; best_score = 0;
     {
         const rfb_u32 *pm = e->probe_mask;
@@ -715,7 +714,7 @@ again:
 
     if (best_score * 100u < changed * e->scroll.match_pct && !retried &&
         cand != e->scroll.cand) {
-        /* The shortcut did not explain the frame.  Pay for the full list. */
+        /* The shortcut did not explain the frame.  Use the full list. */
         cand = e->scroll.cand;
         ncand = e->scroll.n_cand;
         retried = 1;
@@ -725,9 +724,9 @@ again:
         return 0;
 
     /* A column is in the copy when it changes often and, when it changes, the
-     * offset explains it.  Columns that never change are left out: including
-     * them widens the op for nothing and lets an unrelated change anywhere in
-     * them cut the band in half. */
+     * offset explains it.  Columns that never change are left out: they widen
+     * the op for nothing, and an unrelated change anywhere in them cuts the
+     * band in half. */
     bestmask = e->probe_mask + best * e->n_samples;
     lo = nblk; hi = 0;
     for (b = 0; b < nblk; b++) {
@@ -753,10 +752,10 @@ again:
     for (b = lo; b <= hi; b++)
         sel |= 1u << b;
 
-    /* Longest run of consecutive samples where the span mostly matched.  A
-     * sloppy band is safe: the copy is a prediction, and the tile pass runs
-     * against the shadow the copy left behind, so a row the copy got wrong
-     * costs the tiles it dirties and nothing else. */
+    /* Longest run of consecutive samples where the span mostly matched.  An
+     * imprecise band is safe: the copy is a prediction, and the tile pass runs
+     * against the shadow that the copy left behind, so a row that the copy got
+     * wrong costs the tiles it dirties and nothing else. */
     {
         rfb_u32 nsel = hi - lo + 1u;
         rfb_u32 hit_need = (nsel * e->scroll.match_pct + 99u) / 100u;
@@ -874,18 +873,18 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
         return RFB_E_GEOM;
 
     bpr = e->g.bytes_per_row;
-    /* PLANES, not the depth: a chunky source is one eight-bit plane and its
-     * depth is what sizes the palette at the far end, nothing here. */
+    /* The plane count, not the depth: a chunky source is one eight-bit plane,
+     * and its depth sizes the palette at the far end, nothing here. */
     depth = e->nplanes;
     chunky = (e->g.format == RFB_FMT_CLUT8) ? 1 : 0;
     tb = (rfb_u32)e->g.tile_w * e->g.tile_h;
     keep_xor = (e->flags & RFB_F_XOR) ? 1 : 0;
     min_run = (e->flags & RFB_F_RLE2) ? 2 : 3;
 
-    /* Both of these were being recomputed inside the tile walk: the alignment
+    /* Both of these were recomputed inside the tile walk: the alignment
      * verdict on every row of every tile of every plane, and a 32-bit multiply
-     * per tile for the row offset, which on the -m68000 build the whole
-     * archive is compiled with is a call to __mulsi3. */
+     * per tile for the row offset.  On the -m68000 build that the whole
+     * archive is compiled with, that multiply is a call to __mulsi3. */
     word = rfb_words_ok(e, planes);
     tile_row = (rfb_u32)e->g.tile_h * e->row_stride;
 
@@ -899,9 +898,9 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
         if (e->flags & RFB_F_SCROLL_ADAPTIVE) {
             /* Nothing much moved last frame, so nothing can be scrolling. */
             probe = (e->last_dirty >= e->scroll.busy_tiles) || e->last_copy;
-            /* A busy screen that is not scrolling -- a window being dragged --
-             * would otherwise pay for the probe on every frame of the drag.
-             * Back off doubling after each miss, and reset on a hit. */
+            /* Without this, a busy screen that is not scrolling -- a window
+             * under a drag -- pays for the probe on every frame of the drag.
+             * The backoff doubles after each miss, and resets on a hit. */
             if (probe && e->backoff_left) {
                 e->backoff_left--;
                 probe = 0;
@@ -927,19 +926,18 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
                 did_copy = 1;
             } else if (e->scroll.max_backoff) {
                 /* A scroll misses the odd frame -- a redraw lands in the band,
-                 * the window resizes -- and backing off on the first miss
-                 * costs the whole burst that follows it.  Three in a row is a
-                 * screen that is busy with something else.
+                 * the window resizes -- and a backoff on the first miss costs
+                 * the whole burst that follows it.  Three in a row is a screen
+                 * that is busy with something else.
                  *
-                 * THAT TOLERANCE IS FOR A SCROLL THAT EXISTS.  A screen that
-                 * is merely busy -- windows opening, an icon being dragged --
-                 * never produces a copy at all, and paying three full probes
-                 * before starting to back off, and three more every time the
-                 * backoff expires, was most of what the detector cost on that
-                 * kind of activity: measured at 54 ms a frame, for a capture
-                 * on which it found nothing whatsoever.  So the tolerance is
-                 * extended only to a screen that has actually scrolled
-                 * recently; anything else backs off from the first miss. */
+                 * That tolerance is for a scroll that exists.  A screen that
+                 * is only busy -- windows that open, an icon under a drag --
+                 * never produces a copy at all.  Three full probes before the
+                 * backoff starts, and three more at every expiry, was most of
+                 * what the detector cost on that kind of activity: 54 ms a
+                 * frame, on a capture where it found nothing.  The tolerance
+                 * therefore reaches only a screen that scrolled recently.
+                 * Anything else backs off from the first miss. */
                 rfb_u32 tolerate = (e->since_copy < 64u) ? 3u : 1u;
 
                 if (e->miss_run < 255u)
@@ -957,9 +955,9 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
 
     /* Every per-plane base the tile walk needs, worked out once for the frame.
      * These were `e->shadow + p * e->plane_stride`, `e->rawbuf + p * tb` and
-     * `e->xorbuf + p * tb` INSIDE the walk, so a 640x256x2 frame paid 240
-     * 32-bit multiplies -- which the -m68000 build the archive ships compiles
-     * to calls to __mulsi3 -- to recompute eight pointers. */
+     * `e->xorbuf + p * tb` inside the walk.  A 640x256x2 frame therefore paid
+     * 240 32-bit multiplies to recompute eight pointers, and the -m68000 build
+     * that the archive ships compiles each one to a call to __mulsi3. */
     for (p = 0; p < depth; p++) {
         sh_plane[p]  = e->shadow + p * e->plane_stride;
         raw_plane[p] = e->rawbuf + p * tb;
@@ -988,7 +986,7 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
             raw_len = (rfb_u32)((rfb_u16)tw * (rfb_u16)th);
             e->st.tiles_scanned++;
 
-            /* Ask first, write nothing.  A tile nobody drew on ends here. */
+            /* Ask first, write nothing.  A tile that nobody drew on ends here. */
             for (p = 0; p < depth; p++) {
                 dirty_plane[p] = (rfb_u32)rfb_cmp_plane(
                         planes[p] + off, sh_plane[p] + off,
@@ -1107,8 +1105,8 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
         return RFB_E_OVERFLOW;
 
     /* Every tile of every plane was read, and the clipped tiles at the edges
-       sum to exactly one frame, so this is the frame rather than a running
-       total with a 32-bit multiply per tile in it. */
+       sum to exactly one frame.  This is therefore the frame, and not a
+       running total with a 32-bit multiply per tile in it. */
     e->st.src_bytes += e->frame_bytes;
     if (!did_copy && e->since_copy < 255u)
         e->since_copy++;
