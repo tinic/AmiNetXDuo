@@ -107,6 +107,7 @@ RTG=0
 P96DIR="${AMINETXDUO_P96_DIR:-$HOME/amiga-assets/p96}"
 # What Amiberry's uaegfx calls 640x480; see AssignModeID() in its picasso96.
 RTG_BOARD=uaegfx
+RTGSCREEN=""
 RTG_MODE_ID=0x50031000
 RTG_W=640
 RTG_H=480
@@ -137,6 +138,7 @@ done
 [ ${#DEPTHS[@]} -gt 0 ] || DEPTHS=(2 4)
 if [ "$RTG" = 1 ]; then
     DEPTHS=(8)
+    RTGSCREEN="${AMINETXDUO_RTGSCREEN:-$BUILD/tests/perf/rtgscreen}"
     [ -f "$RTGSCREEN" ] || {
         say error "no $RTGSCREEN"
         say hint "cmake --build $BUILD --parallel --target rtgscreen"
@@ -158,7 +160,6 @@ fi
 
 HTTPD="$BUILD/src/tools/httpd"
 BSD="$BUILD/src/bsdsocket/bsdsocket.library"
-RTGSCREEN="${AMINETXDUO_RTGSCREEN:-$BUILD/tests/perf/rtgscreen}"
 
 for f in "$HTTPD" "$BSD"; do
     [ -f "$f" ] || {
