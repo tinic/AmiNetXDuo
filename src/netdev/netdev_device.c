@@ -30,6 +30,7 @@
 #include <dos/dosextens.h>
 #include <libraries/configvars.h>
 #include <hardware/intbits.h>
+#include <utility/hooks.h>      /* S2_PacketFilter is a standard Hook */
 
 #include <proto/exec.h>
 #include <proto/expansion.h>
@@ -340,6 +341,37 @@ BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len)
 }
 
 /*
+ * A standard utility.library Hook, which S2_PacketFilter is and the two
+ * buffer-management tags are not: a0 = the hook, a2 = the object, a1 = the
+ * message, result in d0.  Written out for the same reason netdev_copy_call()
+ * is -- three address registers pinned by a convention no function-pointer
+ * typedef can express.  h_Entry, not h_SubEntry: the entry point is the one
+ * the caller registered and the stub behind it is its business.
+ */
+BOOL netdev_hook_call(APTR hook, APTR object, APTR message)
+{
+    register APTR _a3 __asm("a3");
+    register APTR _a0 __asm("a0") = hook;
+    register APTR _a2 __asm("a2") = object;
+    register APTR _a1 __asm("a1") = message;
+    register LONG _d1 __asm("d1");
+    register LONG res __asm("d0");
+
+    if (hook == NULL)
+        return TRUE;
+
+    _a3 = (APTR)((struct Hook *)hook)->h_Entry;
+
+    __asm __volatile ("jsr a3@"
+                      : "=r" (res), "=r" (_a0), "=r" (_a1), "=r" (_a2),
+                        "=r" (_d1)
+                      : "r" (_a3), "1" (_a0), "2" (_a1), "3" (_a2)
+                      : "cc", "memory");
+
+    return (BOOL)(res != 0);
+}
+
+/*
  * There is deliberately no diagnostic printed from Open().  Exec calls a
  * device's Open vector under Forbid(), and dos.library's Write() can Wait --
  * breaking Forbid inside the one call that must not break it.  A refused open
@@ -371,17 +403,32 @@ static NetdevTrack *netdev_track_find(NetdevOpener *op, ULONG type)
     return NULL;
 }
 
-static BOOL netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
-                             const UBYTE *frame, UWORD len, ULONG type,
-                             UBYTE flags)
+/*
+ * THE ORDER IS THE CONTRACT.  The request is filled in first, then the filter
+ * hook is asked, then and only then is the packet copied out:
+ *
+ *   "The IOSana2Req structure should be set up to look (almost) exactly as it
+ *    would if it was successfully returned for the current packet."
+ *                                             copybuff.spec, PacketFilter
+ *   "a pointer to a standard Hook to be called before S2_CopyToBuff is done."
+ *                                             SANA-II standard.txt
+ *
+ * A rejected packet is NOT an error and the request is NOT completed: the
+ * caller gets back its CMD_READ still queued, exactly as Commodore's own
+ * slip.device does it (main.c, the receive loop: on a FALSE return the
+ * IOSana2Req goes straight back on the queue with AddHead).  The frame then
+ * goes on to the next opener, and to S2_READORPHAN if nobody else wanted it.
+ *
+ * RAW is an opener property in the IC drivers and a per-request flag in the
+ * SANA-II autodocs.  Both are honoured; the superset is what a caller written
+ * against either one expects.
+ */
+static NetdevRxResult netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
+                                       const UBYTE *frame, UWORD len,
+                                       ULONG type, UBYTE flags)
 {
-    /* RAW is an opener property in the IC drivers and a per-request flag in
-       the SANA-II autodocs.  Both are honoured; the superset is what a caller
-       written against either one expects. */
-    BOOL         raw     = (BOOL)(op->op_Raw ||
-                                  (io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0);
-    const UBYTE *payload = raw ? frame : frame + NETDEV_HDR_LEN;
-    ULONG        plen    = raw ? len : (ULONG)(len - NETDEV_HDR_LEN);
+    ULONG        plen;
+    const UBYTE *payload = netdev_payload(op, io, frame, len, &plen);
 
 #ifdef NETDEV_TIME
     {
@@ -399,6 +446,9 @@ static BOOL netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
     }
 #endif
 
+    if (!netdev_filter_ok(op, io, payload))
+        return NETDEV_RX_REJECTED;
+
 #ifdef NETDEV_TIME
     {
         ULONG th = nd_now();
@@ -410,7 +460,7 @@ static BOOL netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
         if (!ok)
         {
             netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
-            return FALSE;
+            return NETDEV_RX_FAILED;
         }
     }
     if (0)
@@ -420,7 +470,7 @@ static BOOL netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
     {
 #endif
         netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
-        return FALSE;
+        return NETDEV_RX_FAILED;
     }
 
 #ifdef NETDEV_TIME
@@ -433,7 +483,7 @@ static BOOL netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
 #else
     netdev_reply(io, 0, 0);
 #endif
-    return TRUE;
+    return NETDEV_RX_TAKEN;
 }
 
 static struct IOSana2Req *netdev_take(struct List *list, ULONG type)
@@ -481,10 +531,20 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
     ULONG        type;
     UBYTE        flags = 0;
     BOOL         taken = FALSE;
+    /*
+     * What to post once the frame is disposed of, rather than per opener: one
+     * walk of the event lists at most, and none at all in the normal case
+     * where the frame was delivered.  netdev_event() itself returns on a word
+     * test when nobody has an S2_ONEVENT queued.
+     */
+    ULONG        events = 0;
 
     if (len < NETDEV_HDR_LEN)
     {
+        /* Garbage on the wire.  slip.device's ReceivedGarbage() posts exactly
+           this, BadData++ and S2EVENT_ERROR|S2EVENT_RX. */
         unit->nu_Stats.BadData++;
+        netdev_event(unit, S2EVENT_ERROR | S2EVENT_RX);
         return;
     }
 
@@ -528,20 +588,42 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
 #endif
         if (io != NULL)
         {
-            BOOL ok = netdev_hand_over(op, io, frame, len, type, flags);
+            NetdevRxResult r = netdev_hand_over(op, io, frame, len, type,
+                                                flags);
 
-            taken = TRUE;
-            if (tr != NULL)
+            if (r == NETDEV_RX_REJECTED)
             {
-                if (ok)
+                /*
+                 * The opener's filter hook said no.  Its CMD_READ was taken
+                 * off the queue to be filled in, so it goes back -- at the
+                 * head, so the opener does not lose its place -- and this
+                 * opener counts as having received nothing.  Not a drop: a
+                 * refusal it asked for is not a loss, and inflating an error
+                 * statistic with it would be the same lie the missing hook
+                 * was.
+                 */
+                AddHead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+            }
+            else
+            {
+                taken = TRUE;
+                if (tr != NULL)
                 {
-                    tr->st.PacketsReceived++;
-                    tr->st.BytesReceived += len;
+                    if (r == NETDEV_RX_TAKEN)
+                    {
+                        tr->st.PacketsReceived++;
+                        tr->st.BytesReceived += len;
+                    }
+                    else
+                    {
+                        tr->st.PacketsDropped++;
+                    }
                 }
-                else
-                {
-                    tr->st.PacketsDropped++;
-                }
+                /* The spec's own example of the qualifier rule: an error out
+                   of a buffer management function during receive processing
+                   is S2EVENT_ERROR, S2EVENT_RX and S2EVENT_BUFF together. */
+                if (r == NETDEV_RX_FAILED)
+                    events |= S2EVENT_ERROR | S2EVENT_RX | S2EVENT_BUFF;
             }
         }
         else if (tr != NULL)
@@ -550,22 +632,43 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
         }
     }
 
-    if (taken)
-        return;
-
-    for (n = unit->nu_OpenerList.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
+    if (!taken)
     {
-        NetdevOpener      *op = (NetdevOpener *)n;
-        struct IOSana2Req *io = netdev_take(&op->op_Orphans, ~0UL);
-
-        if (io != NULL)
+        for (n = unit->nu_OpenerList.lh_Head; n->ln_Succ != NULL;
+             n = n->ln_Succ)
         {
-            (VOID)netdev_hand_over(op, io, frame, len, type, flags);
-            return;
+            NetdevOpener      *op = (NetdevOpener *)n;
+            struct IOSana2Req *io = netdev_take(&op->op_Orphans, ~0UL);
+
+            if (io != NULL)
+            {
+                NetdevRxResult r = netdev_hand_over(op, io, frame, len, type,
+                                                    flags);
+
+                if (r == NETDEV_RX_REJECTED)
+                {
+                    AddHead(&op->op_Orphans,
+                            &io->ios2_Req.io_Message.mn_Node);
+                    continue;   /* try the next opener's orphan reader */
+                }
+                if (r == NETDEV_RX_FAILED)
+                    events |= S2EVENT_ERROR | S2EVENT_RX | S2EVENT_BUFF;
+                taken = TRUE;
+                break;
+            }
         }
     }
 
-    unit->nu_Stats.UnknownTypesReceived++;
+    if (!taken)
+    {
+        /* Nobody wanted it.  slip.device's PacketDropped() and cnet.device's
+           readpacket both post S2EVENT_ERROR|S2EVENT_RX here. */
+        unit->nu_Stats.UnknownTypesReceived++;
+        events |= S2EVENT_ERROR | S2EVENT_RX;
+    }
+
+    if (events != 0)
+        netdev_event(unit, events);
 }
 
 /* ------------------------------------------------------------- transmit --- */
@@ -603,11 +706,14 @@ static UWORD netdev_tx_build(NetdevUnit *unit, struct IOSana2Req *io,
         if (len < NETDEV_HDR_LEN || len > NETDEV_FRAME_MAX)
         {
             netdev_reply(io, S2ERR_MTU_EXCEEDED, S2WERR_GENERIC_ERROR);
+            netdev_event(unit, S2EVENT_ERROR | S2EVENT_TX);
             return 0;
         }
         if (!netdev_copy_call(op->op_CopyFrom, buf, io->ios2_Data, len))
         {
             netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
+            netdev_event(unit,
+                         S2EVENT_ERROR | S2EVENT_TX | S2EVENT_BUFF);
             return 0;
         }
         total = (UWORD)len;
@@ -623,6 +729,9 @@ static UWORD netdev_tx_build(NetdevUnit *unit, struct IOSana2Req *io,
         if (len > NETDEV_MTU)
         {
             netdev_reply(io, S2ERR_MTU_EXCEEDED, S2WERR_GENERIC_ERROR);
+            /* slip.device posts S2EVENT_TX for exactly this refusal and
+               cnet.device posts it from its .toobig arm. */
+            netdev_event(unit, S2EVENT_ERROR | S2EVENT_TX);
             return 0;
         }
 
@@ -637,6 +746,7 @@ static UWORD netdev_tx_build(NetdevUnit *unit, struct IOSana2Req *io,
                               io->ios2_Data, len))
         {
             netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
+            netdev_event(unit, S2EVENT_ERROR | S2EVENT_TX | S2EVENT_BUFF);
             return 0;
         }
         total = (UWORD)(len + NETDEV_HDR_LEN);
@@ -750,6 +860,7 @@ VOID netdev_tx_pump(NetdevUnit *unit)
         if (rc != 0)
         {
             netdev_reply(io, S2ERR_TX_FAILURE, S2WERR_GENERIC_ERROR);
+            netdev_event(unit, S2EVENT_ERROR | S2EVENT_TX);
             continue;
         }
 
@@ -815,9 +926,14 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
     Enable();
 
     if (rc != 0)
+    {
         netdev_reply(io, S2ERR_TX_FAILURE, S2WERR_GENERIC_ERROR);
+        netdev_event(unit, S2EVENT_ERROR | S2EVENT_TX);
+    }
     else
+    {
         netdev_reply(io, 0, 0);
+    }
 }
 
 /* ------------------------------------------------------------- the filter -- */
@@ -850,35 +966,6 @@ VOID netdev_rebuild_filter(NetdevUnit *unit)
     Enable();
 }
 
-/* ---------------------------------------------------------------- events -- */
-
-VOID netdev_event(NetdevUnit *unit, ULONG mask)
-{
-    struct Node *n;
-
-    Disable();
-    for (n = unit->nu_OpenerList.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
-    {
-        NetdevOpener *op = (NetdevOpener *)n;
-        struct Node  *e  = op->op_Events.lh_Head;
-
-        while (e->ln_Succ != NULL)
-        {
-            struct IOSana2Req *io   = (struct IOSana2Req *)e;
-            struct Node       *next = e->ln_Succ;
-
-            if ((io->ios2_WireError & mask) != 0)
-            {
-                Remove(e);
-                io->ios2_WireError = mask;
-                netdev_reply(io, 0, mask);
-            }
-            e = next;
-        }
-    }
-    Enable();
-}
-
 /* ------------------------------------------------------ online / offline -- */
 
 LONG netdev_online(NetdevUnit *unit)
@@ -890,7 +977,14 @@ LONG netdev_online(NetdevUnit *unit)
     Enable();
 
     if (rc != 0)
+    {
+        /* The chip would not start.  cnet.device fires
+           S2EVENT_ERROR|S2EVENT_HARDWARE from both init_card and init_nic for
+           this, and it is the only condition in this driver that is squarely
+           the hardware's. */
+        netdev_event(unit, S2EVENT_ERROR | S2EVENT_HARDWARE);
         return rc;
+    }
 
     netdev_rebuild_filter(unit);
 
@@ -1014,7 +1108,29 @@ static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
      * Reading ISR costs two bus cycles and cannot be wrong: dp8390_intr()
      * returns FALSE when it reads zero, which is the same answer the board bit
      * was there to give.
+     *
+     * THE CHIP'S OWN ERROR COUNTERS ARE READ HERE AND NOWHERE ELSE.  A CRC
+     * error, a framing error, a receiver overrun and a transmit that gave up
+     * after sixteen collisions are things only the core knows, and every core
+     * already records them.  Diffing the three counters across ops->intr() is
+     * how S2EVENT_RX and S2EVENT_TX get raised for the whole card family from
+     * one site, instead of ten cores each having to remember to.
+     * slip.device's PacketOverrun() is the same event from the same cause.
+     *
+     * Snapshotting is gated on nu_EventMask, so a driver nobody is watching
+     * pays one word read and a branch for all of it.
      */
+    UWORD watched = unit->nu_EventMask;
+    ULONG rx0 = 0;
+    ULONG tx0 = 0;
+    ULONG evt = 0;
+
+    if (watched != 0)
+    {
+        rx0 = unit->nu_Nic.rx_errors + unit->nu_Nic.overruns;
+        tx0 = unit->nu_Nic.tx_errors;
+    }
+
 #ifdef NETDEV_TIME
     {
         ULONG t0 = nd_now();
@@ -1034,17 +1150,25 @@ static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
 
         if (nd_n_frame >= 512)
             nd_time_report();
-
-        return 1;
     }
 #else
     if (!unit->nu_Nic.ops->intr(&unit->nu_Nic))
         return 0;
 
     netdev_tx_pump(unit);
+#endif
+
+    if (watched != 0)
+    {
+        if (unit->nu_Nic.rx_errors + unit->nu_Nic.overruns != rx0)
+            evt |= S2EVENT_ERROR | S2EVENT_RX;
+        if (unit->nu_Nic.tx_errors != tx0)
+            evt |= S2EVENT_ERROR | S2EVENT_TX;
+        if (evt != 0)
+            netdev_event(unit, evt);
+    }
 
     return 1;
-#endif
 }
 
 /*
@@ -1074,6 +1198,8 @@ static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
 
 static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
 {
+    BOOL wedged = FALSE;
+
     Disable();
 
     if (!unit->nu_Online || unit->nu_Nic.txb_inuse == 0)
@@ -1088,9 +1214,20 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
         if (unit->nu_Nic.ops->reset != NULL)
             unit->nu_Nic.ops->reset(&unit->nu_Nic);
         netdev_tx_pump(unit);
+        wedged = TRUE;
     }
 
     Enable();
+
+    /*
+     * A transmitter that had to be reset is a transmit error and a hardware
+     * one: cnet.device posts S2EVENT_ERROR|S2EVENT_TX for a transmit DMA
+     * timeout and S2EVENT_ERROR|S2EVENT_HARDWARE for a chip that had to be
+     * re-initialised, and this is both at once.  Posted outside the Disable()
+     * above only for tidiness -- netdev_event() takes its own and it nests.
+     */
+    if (wedged)
+        netdev_event(unit, S2EVENT_ERROR | S2EVENT_TX | S2EVENT_HARDWARE);
 
     return 0;
 }
@@ -1750,6 +1887,12 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
             netdev_reply(q, IOERR_ABORTED, 0);
         while ((q = netdev_take(&op->op_Events, ~0UL)) != NULL)
             netdev_reply(q, IOERR_ABORTED, 0);
+
+        /* The opener is off the unit's list by now, but nu_EventMask still
+           carries whatever it was waiting for.  Left set, every dropped frame
+           for the rest of the machine's uptime walks the event lists to find
+           them empty. */
+        netdev_event_rescan(hw);
 
         /*
          * And this opener's writes, which live on the UNIT and not on the

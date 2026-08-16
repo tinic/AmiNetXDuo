@@ -74,16 +74,6 @@ static VOID cmd_zero(UBYTE *p, ULONG n)
         *p++ = 0;
 }
 
-static VOID cmd_queue(struct List *list, struct IOSana2Req *io)
-{
-    io->ios2_Req.io_Flags &= (UBYTE)~IOF_QUICK;
-    io->ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
-
-    Disable();
-    AddTail(list, &io->ios2_Req.io_Message.mn_Node);
-    Enable();
-}
-
 static BOOL cmd_dequeue(struct List *list, struct IOSana2Req *io)
 {
     struct Node *n;
@@ -516,6 +506,11 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
             netdev_reply(q, IOERR_ABORTED, 0);
         Enable();
 
+        /* Recomputed rather than cleared: the other openers' waits are still
+           on their own lists.  A stale bit only costs a walk that finds
+           nothing, so the order here is not load-bearing. */
+        netdev_event_rescan(unit);
+
         /* And the writes, which are queued on the unit rather than the
            opener.  A caller flushes so that teardown is safe, and one of its
            own requests still live in the driver is exactly what it flushed
@@ -709,23 +704,34 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
         ULONG mask = io->ios2_WireError;
         ULONG now  = unit->nu_Online ? S2EVENT_ONLINE : S2EVENT_OFFLINE;
 
+        /*
+         * S2EVENT_SOFTWARE IS REFUSED, and used to be accepted.  Accepting an
+         * event this driver has no condition to raise is the same defect as
+         * queueing one and never posting it, except that the caller cannot
+         * even see it: it waits forever with io_Error zero.  The spec's answer
+         * is the honest one -- "If this device driver does not understand the
+         * specified event condition(s) then the command returns immediately
+         * with io_Error set to S2ERR_NOT_SUPPORTED and ios2_WireError
+         * S2WERR_BAD_EVENT" -- and cnet.device's accepted set is exactly the
+         * seven below, so no stack that works with it asks for the eighth.
+         */
         if ((mask & ~(ULONG)(S2EVENT_ERROR | S2EVENT_TX | S2EVENT_RX |
                              S2EVENT_ONLINE | S2EVENT_OFFLINE |
-                             S2EVENT_BUFF | S2EVENT_HARDWARE |
-                             S2EVENT_SOFTWARE)) != 0)
+                             S2EVENT_BUFF | S2EVENT_HARDWARE)) != 0)
         {
             netdev_reply(io, S2ERR_NOT_SUPPORTED, S2WERR_BAD_EVENT);
             return;
         }
 
+        /* "Types ONLINE and OFFLINE return immediately if the device is
+           already in the state to be waited for." */
         if ((mask & now) != 0)
         {
-            io->ios2_WireError = mask & now;
             netdev_reply(io, 0, mask & now);
             return;
         }
 
-        cmd_queue(&op->op_Events, io);
+        netdev_event_wait(unit, io);
         return;
     }
 
@@ -769,6 +775,7 @@ BOOL netdev_abort(NetdevOpener *op, struct IOSana2Req *io)
 {
     NetdevUnit *unit;
     BOOL        found;
+    BOOL        was_event = FALSE;
 
     if (op == NULL)
         return FALSE;
@@ -780,13 +787,18 @@ BOOL netdev_abort(NetdevOpener *op, struct IOSana2Req *io)
     if (!found)
         found = cmd_dequeue(&op->op_Orphans, io);
     if (!found)
-        found = cmd_dequeue(&op->op_Events, io);
+        was_event = found = cmd_dequeue(&op->op_Events, io);
     if (!found)
         found = cmd_dequeue(&unit->nu_Writes, io);
     Enable();
 
     if (!found)
         return FALSE;
+
+    /* Only when an S2_ONEVENT was the thing aborted: an aborted CMD_READ is
+       routine and must not drag a walk of every opener behind it. */
+    if (was_event)
+        netdev_event_rescan(unit);
 
     netdev_reply(io, IOERR_ABORTED, 0);
 
