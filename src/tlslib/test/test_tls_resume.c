@@ -1,14 +1,12 @@
 /*
  * The tests for src/tlslib/tls_resume.c, on the host.
  *
- * WHY THIS IS A TEST AND NOT A REVIEW
- *
  *   Every failure this file looks for is silent.  A resumption that does not
- *   happen looks exactly like a server declining one, and costs seconds
- *   nobody attributes to us.  A resumption that happens when it must not is
- *   worse and quieter still: the library claims a certificate chain was
- *   checked when what actually happened was a master secret coming out of a
- *   file.  Neither prints anything.
+ *   happen looks exactly like a server that declines one, and costs seconds
+ *   nobody attributes to this library.  A resumption that happens when it must
+ *   not is worse and quieter still.  The library claims a certificate chain
+ *   was checked when what happened was a master secret out of a file.  Neither
+ *   prints anything.
  *
  *   Three rules here have no other coverage:
  *
@@ -36,7 +34,7 @@
  *   the session-to-connection registry, and the vendored nx_secure entry
  *   points the two --wrap functions call through.  Everything else is real.
  *
- *   The compile-time defines have to match src/tlslib/CMakeLists.txt's
+ *   The compile-time defines must match src/tlslib/CMakeLists.txt's
  *   tls_library target exactly, NX_SECURE_TLS_ENABLE_TLS_1_3 above all:
  *   tls_resume_secret_bound() has a live #if on it, and it changes the layout
  *   of NX_SECURE_TLS_SESSION underneath everything else here.
@@ -97,7 +95,7 @@ ULONG tls_time_monotonic(VOID)
 
 /*
  * tls_resume_prepare() generates a session ID when the cached session has
- * none.  A counter rather than a PRNG: the test wants to know THAT thirty-two
+ * none.  A counter rather than a PRNG: the test needs to know that thirty-two
  * bytes were generated and that two attempts do not produce the same handle,
  * and a fixed sequence says both.
  */
@@ -183,10 +181,10 @@ VOID ami_tls_timer_close(VOID)
 /* ------------------------------------------------------------------- dos -- */
 
 /*
- * The disk mirror against a real file.  Nothing is modelled: the bytes
+ * The disk mirror against a real file.  Nothing is modelled.  The bytes
  * tls_resume_save() writes are the bytes on the disk, and tls_resume_load()
  * reads them back with Read(), so a record stride or an endianness that
- * drifted would show up here the way it would show up on an Amiga.
+ * drifted appears here the way it appears on an Amiga.
  */
 static char h_dir[96];
 
@@ -318,8 +316,8 @@ UINT __real__nx_secure_tls_client_handshake(NX_SECURE_TLS_SESSION *tls_session,
 
 /*
  * Everything tls_resume_finish() calls.  It is the abbreviated handshake's
- * tail, five vendored calls in a fixed order, and the order is the part worth
- * pinning: the client's Finished has to be hashed over the server's and the
+ * tail, five vendored calls in a fixed order, and the order is the part this
+ * pins.  The client's Finished must be hashed over the server's, and the
  * SHA-256 context destroyed after that and not before.
  */
 static char h_finish_log[128];
@@ -446,16 +444,16 @@ UINT _nx_secure_tls_send_handshake_record(NX_SECURE_TLS_SESSION *tls_session,
  * extensions block that is exactly the rest of the message.
  *
  * Hand-built rather than taken from nx_secure, because the wrap's contract is
- * with RFC 5246's wire format and not with the vendored function; a splice
- * that only worked against one version of nx_secure's output would be the bug
- * this catches.
+ * with RFC 5246's wire format and not with the vendored function.  A splice
+ * that only works against one version of nx_secure's output is the bug this
+ * catches.
  */
 /*
  * Sized so the whole thing is the length a real one from this library is,
- * about 135 bytes plus the host name.  That is not decoration: the ceiling
- * test below turns on the message being long enough that a 256-byte ticket
- * pushes it past 500, and a toy ClientHello would make that test pass while
- * asserting nothing.
+ * about 135 bytes plus the host name.  That is not decoration.  The ceiling
+ * test below turns on a message long enough that a 256-byte ticket pushes it
+ * past 500, and a toy ClientHello makes that test pass while it asserts
+ * nothing.
  */
 #define H_CH_EXT_BODY   180     /* one extension: 4 header + 176 payload */
 #define H_CH_LENGTH     (2 + 32 + 1 + 2 + 4 + 1 + 1 + 2 + H_CH_EXT_BODY)
@@ -698,10 +696,10 @@ static void test_mirror_round_trip(void)
 /*
  * The RFC 7627 magic bump.  An 'ATS2' file is byte-for-byte an 'ATS3' one, so
  * nothing but the magic tells them apart, and everything in it is a session
- * negotiated before the extended master secret was required.  It has to be
- * ignored rather than offered: offering it produces a ServerHello mismatch on
- * every connection to that host, which costs a round trip AND a full
- * handshake, forever, and looks like the server being difficult.
+ * negotiated before the extended master secret was required.  It must be
+ * ignored rather than offered.  An offer produces a ServerHello mismatch on
+ * every connection to that host, which costs a round trip and a full
+ * handshake, forever, and looks like a difficult server.
  */
 static void test_ats2_file_is_ignored(void)
 {
@@ -804,8 +802,8 @@ static void test_truncated_file(void)
 
 /*
  * The three shapes tls_resume_decode() refuses.  All three are what a
- * zero-filled or half-written file looks like, and none of them may come back
- * as a session: a record with no trust key cannot be matched against anything
+ * zero-filled or half-written file looks like, and none of them must come back
+ * as a session.  A record with no trust key cannot be matched against anything
  * the live code computes, and one with neither a session ID nor a ticket has
  * nothing to offer a server.
  */
@@ -866,7 +864,7 @@ static void test_decode_rejects(void)
 
 /*
  * TLSA_SessionFile naming a different file is a different cache, not an
- * addition to this one.  Getting this wrong means the tag is honoured on the
+ * addition to this one.  A mistake here means the tag is honoured on the
  * write and ignored on the read, and a caller that asked for its own session
  * file gets somebody else's master secrets.
  */
@@ -919,8 +917,8 @@ static void test_empty_path_writes_nothing(void)
  * The caching half.  A session negotiated without the extended master secret
  * is not written down at all: not to the resident cache, not to the file.
  * The negative is the whole point, so the positive is asserted beside it from
- * the same fixture, or a tls_resume_record() that had stopped working
- * entirely would pass this.
+ * the same fixture.  Otherwise a tls_resume_record() that stopped working
+ * entirely passes this.
  */
 static void test_no_ems_is_not_cached(void)
 {
@@ -975,9 +973,9 @@ static void test_no_ems_session_id_only(void)
  *
  * A ServerHello that echoes the offered session ID is the acceptance signal,
  * and it is the only one a TLS 1.2 client gets.  If it arrives without the
- * extended master secret the cached session cannot be the one being resumed,
- * or the server is downgrading, and either way the handshake has to stop:
- * carrying on would derive record keys from a secret bound to nothing.
+ * extended master secret, the cached session cannot be the one resumed, or
+ * the server is downgrading.  Either way the handshake must stop.  Otherwise
+ * the record keys are derived from a secret bound to nothing.
  */
 static UCHAR h_serverhello[8];
 
@@ -1062,16 +1060,16 @@ static void test_serverhello_without_ems_is_refused(void)
     CHECK(status == NX_SECURE_TLS_DOWNGRADE_DETECTED);
     CHECK((h_conn.tc_ResumeFlags & TLSR_RESUMED) == 0);
 
-    /* Nothing derived, and the session's own master secret left alone: a
-       failure that half-applied the cached secret would be worse than one
-       that did nothing. */
+    /* Nothing derived, and the session's own master secret left alone.  A
+       failure that half-applied the cached secret is worse than one that did
+       nothing. */
     CHECK(h_keys_generated == 0);
 }
 
 /*
  * A server that resumes a session and then changes the ciphersuite is broken
- * in a way this code cannot recover from mid-handshake.  It has to fail
- * rather than derive keys with the wrong PRF.
+ * in a way this code cannot recover from mid-handshake.  It must fail rather
+ * than derive keys with the wrong PRF.
  */
 static void test_serverhello_changing_ciphersuite(void)
 {
@@ -1099,8 +1097,8 @@ static void test_serverhello_changing_ciphersuite(void)
 
 /*
  * The ordinary decline: a server that ignores the offer echoes something
- * else, and the handshake carries on as a full one.  This must NOT be an
- * error, and nothing may be restored.
+ * else, and the handshake carries on as a full one.  This must not be an
+ * error, and nothing must be restored.
  */
 static void test_serverhello_declines(void)
 {
@@ -1148,10 +1146,10 @@ static void test_serverhello_empty_echo(void)
 /* ====================================================== the trust key ==== */
 
 /*
- * A resumed handshake verifies nothing: no certificate, no signature, no host
- * name.  So the cache key has to name the trust decision completely, or the
- * library resumes across a boundary it would never have crossed with a full
- * handshake and reports a verification it did not perform.
+ * A resumed handshake checks nothing: no certificate, no signature, no host
+ * name.  So the cache key must name the trust decision completely.  Otherwise
+ * the library resumes across a boundary a full handshake never crosses, and
+ * reports a check it did not perform.
  *
  * Each row changes exactly one thing about the caller and expects no offer.
  */
@@ -1267,9 +1265,9 @@ static void test_expired_entry_is_wiped(void)
 }
 
 /*
- * Nine hosts into eight slots.  The victim is the least recently USED, not
- * the least recently stored, so a session that keeps being offered keeps its
- * slot even though it was the first one written.
+ * Nine hosts into eight slots.  The victim is the least recently used, not
+ * the least recently stored, so a session that is still offered keeps its slot
+ * even though it was the first one written.
  */
 static void test_lru_eviction(void)
 {
@@ -1304,7 +1302,8 @@ static void test_lru_eviction(void)
     tls_resume_record(&h_conn);
     CHECK(tls_resume_count(&h_base) == TLS_RESUME_SLOTS);
 
-    /* h1 was the least recently used and is gone; h0 was touched and stayed. */
+    /* h1 was the least recently used and is gone.  h0 was touched and
+       stayed. */
     conn_init("h1.example", 443, "", 0xAAAA0001UL);
     tls_resume_prepare(&h_conn);
     CHECK((h_conn.tc_ResumeFlags & TLSR_OFFERED) == 0);
@@ -1318,8 +1317,8 @@ static void test_lru_eviction(void)
     CHECK((h_conn.tc_ResumeFlags & TLSR_OFFERED) != 0);
 }
 
-/* Resuming the same host twice reuses its slot rather than taking another,
-   or eight hosts would exhaust the cache in eight connections. */
+/* A second resumption of the same host reuses its slot rather than takes
+   another.  Otherwise eight hosts exhaust the cache in eight connections. */
 static void test_restore_reuses_the_slot(void)
 {
     printf("tls_resume: a second session for a host reuses its slot\n");
@@ -1389,8 +1388,8 @@ static UWORD be16(const UCHAR *p)
 
 /*
  * A first connection, nothing cached.  The empty session_ticket extension is
- * how a client asks to be issued one; without it the first handshake never
- * produces anything to resume from and resumption never starts working at
+ * how a client asks to be issued one.  Without it the first handshake never
+ * produces anything to resume from, and resumption never starts working at
  * all.
  */
 static void test_clienthello_asks_for_a_ticket(void)
@@ -1474,7 +1473,7 @@ static void test_clienthello_offers_the_session(void)
 /*
  * The 500-byte ceiling.  _nx_secure_tls_send_handshake_record() memcpy()s the
  * whole ClientHello into NX_SECURE_TLS_SESSION's own 500-byte array with no
- * bounds check, so overrunning it writes through the middle of the session
+ * bounds check, so an overrun writes through the middle of the session
  * struct on a machine with no memory protection.  The ticket is dropped and
  * the handshake falls back to a full one, which is slow and correct.
  *
@@ -1482,7 +1481,7 @@ static void test_clienthello_offers_the_session(void)
  * what a ticket-issuing server leaves behind (RFC 5077 3.4, and measured on
  * nginx).  tls_resume_prepare() generates a session ID for it, and when the
  * ticket then does not fit, the generated ID is not an acceptance signal for
- * anything, so TLSR_OFFERED has to come off with it.
+ * anything, so TLSR_OFFERED must come off with it.
  */
 static void test_clienthello_ticket_over_the_ceiling(void)
 {
@@ -1520,16 +1519,16 @@ static void test_clienthello_ticket_over_the_ceiling(void)
     /*
      * The session ID stays on the wire and TLSR_OFFERED stays set.
      *
-     * That is what the code does, and it is deliberate for the OTHER shape of
+     * That is what the code does, and it is deliberate for the other shape of
      * cached session, the one whose session ID came from a server rather than
-     * from ami_random_rand(): dropping the ticket still leaves a legitimate
+     * from ami_random_rand().  A dropped ticket still leaves a legitimate
      * RFC 5246 session-ID resumption to attempt.
      *
      * For the shape here, a generated handle with nothing behind it, the
-     * offer is meaningless.  It costs 32 bytes and a server cannot echo an ID
-     * it never issued; if one did, the restored master secret would not match
-     * and the handshake would die at the server's Finished, which is a failure
-     * and not a false verification.  tls_resume.c:1134 describes a guard for
+     * offer is meaningless.  It costs 32 bytes, and a server cannot echo an ID
+     * it never issued.  If one does, the restored master secret does not match
+     * and the handshake dies at the server's Finished, which is a failure and
+     * not a false trust claim.  tls_resume.c:1134 describes a guard for
      * exactly this and spells it `sid_length == 0`, which cannot be true here
      * because tls_resume_prepare() generates the ID precisely when a ticket is
      * present -- so the guard never fires for the case it names.
@@ -1541,8 +1540,8 @@ static void test_clienthello_ticket_over_the_ceiling(void)
 /*
  * The other end of the same ceiling: a ClientHello where not even the empty
  * four-byte extension fits under 500.  Here TLSR_OFFERED does come off, and it
- * has to, because the message goes out with no session ID and no ticket and
- * anything the server echoes would be its own.
+ * must, because the message goes out with no session ID and no ticket, and
+ * anything the server echoes is its own.
  */
 static void test_clienthello_cache_ceiling_leaves_nothing(void)
 {
@@ -1577,8 +1576,8 @@ static void test_clienthello_cache_ceiling_leaves_nothing(void)
 }
 
 /*
- * A packet with no room even for an empty extension.  The message has to be
- * left exactly as the vendored code wrote it: a partial splice is a corrupt
+ * A packet with no room even for an empty extension.  The message must be
+ * left exactly as the vendored code wrote it.  A partial splice is a corrupt
  * ClientHello, which is worse than no resumption.
  */
 static void test_clienthello_no_room_at_all(void)
@@ -1752,8 +1751,8 @@ static void test_new_session_ticket_bounds(void)
 int main(void)
 {
     /* A real directory, because the disk mirror is what several of these
-       tests are about.  TMPDIR first: a build running in a sandbox may not
-       have /tmp, and a test that cannot write is a test that passes. */
+       tests are about.  TMPDIR first: a build in a sandbox can lack /tmp,
+       and a test that cannot write is a test that passes. */
     const char *tmp = getenv("TMPDIR");
     char        dir_template[sizeof(h_dir)];
     int         want;
@@ -1816,8 +1815,8 @@ int main(void)
     test_new_session_ticket();
     test_new_session_ticket_bounds();
 
-    /* Nothing may be left holding tb_Lock, and nothing may be left
-       allocated: the base is expunged on a machine that will not notice. */
+    /* Nothing must be left holding tb_Lock, and nothing must be left
+       allocated.  The base is expunged on a machine that will not notice. */
     CHECK(h_sem_nest == 0);
     CHECK(h_sem_max > 0);
     base_reset();

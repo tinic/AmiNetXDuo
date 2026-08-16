@@ -1,6 +1,6 @@
 /*
  * <dos/dos.h> for the tls.library host tests.  src/config/test/shim has the
- * same file without the two modes, because nothing there opens anything;
+ * same file without the two modes, because nothing there opens anything.
  * tls_resume.c's disk mirror does, so they are here.
  *
  * SPDX-License-Identifier: MIT
