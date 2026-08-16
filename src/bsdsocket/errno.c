@@ -189,8 +189,8 @@ LONG bsd_errno_from_nx(UINT status)
 /*
  * The same, for a status from a call that was willing to wait.
  *
- * Three NetX Duo statuses mean "a wait was necessary": NX_NO_PACKET (no data,
- * or no packet in the pool), NX_TX_QUEUE_DEPTH and NX_WINDOW_OVERFLOW.
+ * Three NetX Duo statuses mean "I would have had to wait": NX_NO_PACKET (no
+ * data, or no packet in the pool), NX_TX_QUEUE_DEPTH and NX_WINDOW_OVERFLOW.
  * EWOULDBLOCK is right for all three only when the caller asked not to wait.
  * On a socket prepared to block for ever it tells the application to retry a
  * call that cannot succeed, the failure English Amiga Board thread 122501

@@ -1597,10 +1597,10 @@ static VOID bsd_if_put_addr(struct sockaddr *sa, ULONG addr)
 
 /*
  * What an interface looks like to code written for BSD flags. UP is
- * "configured and meant to carry traffic", RUNNING is "the link is there".
- * libpcap prints the difference, so the two are kept distinct. Same pair
- * IFQ_State reports on and IFF_RUNNING does not, and from the same two
- * fields. Every interface here is a SANA-II Ethernet device, so
+ * "configured and meant to be carrying traffic", RUNNING is "the link is
+ * actually there". libpcap prints the difference, so the two are kept
+ * distinct. Same pair IFQ_State reports on and IFF_RUNNING does not, and from
+ * the same two fields. Every interface here is a SANA-II Ethernet device, so
  * BROADCAST and MULTICAST are unconditional.
  */
 static UWORD bsd_if_flags(const BsdIfInfo *info)
