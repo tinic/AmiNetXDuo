@@ -208,7 +208,7 @@ host_test_targets() { # builddir
 #
 # Adding a test therefore turns CI red until this is raised.  That is the
 # maintenance the gate is made of, and it is one line.
-HOST_TESTS_EXPECTED=69
+HOST_TESTS_EXPECTED=70
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet and test_route, both x86_64-only for the reason in
@@ -1174,7 +1174,8 @@ stage_bridged() {
                     "version it was asked in, stayed quiet when another" \
                     "host answered first, and gave the group back" ;;
             2) fail "mld: an ingredient is missing -- most likely" \
-                    "~/python3-cap with CAP_NET_RAW on the peer" ; bad=1 ;;
+                    "python3-cap in the peer's home directory, with" \
+                    "CAP_NET_RAW set on it" ; bad=1 ;;
             3) fail "mld: the run produced no capture to read" ; bad=1 ;;
             *) fail "mld: read the failed= line above" ; bad=1 ;;
         esac
