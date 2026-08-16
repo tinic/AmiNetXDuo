@@ -15,17 +15,16 @@
  *   netdev_diag_unpublish() in the expunge, under Forbid(), BEFORE the memory
  *                           holding the record can go.
  *
- * NO dos.library ANYWHERE.  This driver is loaded by whichever stack wants it
- * and that can be before a filesystem is up, which is the same reason the
- * derived station address does not read the boot volume.  The record lives in
- * the device base and goes when the device goes.
+ * No dos.library anywhere.  This driver is loaded by whichever stack wants it,
+ * and that can be before a filesystem is up.  The derived station address does
+ * not read the boot volume for the same reason.  The record lives in the
+ * device base and goes when the device goes.
  *
- * THE LIFETIME DEFECT THIS IS WRITTEN AGAINST is one this driver has already
- * made once: netdev_pcmcia.c used to ReleaseCard() without CARDF_REMOVEHANDLE
- * and left card.resource holding a Node in freed BSS.  A published semaphore
- * is the same shape of mistake waiting to happen, so removal is in the
- * expunge path and nowhere else, and the reader copies the record whole
- * rather than keeping a pointer into it.
+ * This driver has already made the lifetime mistake once: netdev_pcmcia.c used
+ * to ReleaseCard() without CARDF_REMOVEHANDLE and left card.resource holding a
+ * Node in freed BSS.  A published semaphore is the same shape of mistake, so
+ * removal is in the expunge path and nowhere else, and the reader copies the
+ * record whole rather than keeping a pointer into it.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -36,17 +35,17 @@
 #include <proto/exec.h>
 
 /*
- * THE ONE RECORD, reached by the layers below without threading a pointer
- * through them.  There is one device base per machine and the probe is not
- * re-entrant -- it runs once, inside the romtag init -- so a global here is
- * the same shape as SysBase and ExpansionBase beside it.  NULL until
- * netdev_diag_reset(), which is what makes netdev_diag_note() safe to call
- * from a path that runs before or after the probe.
+ * The one record, reached by the layers below without a pointer threaded
+ * through them.  There is one device base per machine, and the probe is not
+ * re-entrant: it runs once, inside the romtag init.  A global here is the same
+ * shape as SysBase and ExpansionBase beside it.  It is NULL until
+ * netdev_diag_reset(), which makes netdev_diag_note() safe to call from a path
+ * that runs before or after the probe.
  */
 static AnxDiagMark *netdev_diag;
 
 /* The published name, as a writable array: ln_Name is char *, and a Node
-   should not be made to point at a string literal. */
+   must not point at a string literal. */
 static char netdev_diag_name[] = ANXDIAG_NAME;
 
 VOID netdev_diag_reset(AnxDiagMark *mark)
@@ -108,12 +107,12 @@ VOID netdev_diag_note(UWORD code, UWORD card, ULONG value)
         return;
 
     /*
-     * FULL MEANS COUNT, NOT WRAP.  A ring would keep the end of the probe and
-     * throw the beginning away, and the beginning is where "expansion.library
-     * did not open" and "there is no card.resource on this machine" live --
-     * the two answers that explain everything after them.  Overflow is a
-     * number the tool prints, so a machine that produced more steps than this
-     * holds says so rather than showing a plausible half.
+     * A full record counts, it does not wrap.  A ring would keep the end of
+     * the probe and throw the beginning away, and the beginning is where
+     * "expansion.library did not open" and "there is no card.resource on this
+     * machine" live.  Those two answers explain everything after them.
+     * Overflow is a number the tool prints, so a machine that produced more
+     * steps than this holds reports that rather than a plausible half.
      */
     if (mark->ad_Used >= (UWORD)ANXDIAG_STEPS)
     {

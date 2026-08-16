@@ -1,8 +1,8 @@
 /*
  * anxnet.device: the 3Com EtherLink III, for the 3C589 in the PCMCIA slot.
  *
- * A THIRD CHIP CORE, sharing nothing below the SANA-II shell with either of
- * the other two.  What it is, against the two that were already here:
+ * A third chip core, sharing nothing below the SANA-II shell with either of
+ * the other two.  Against the two that were already here:
  *
  *                     DP8390 family        LANCE            EtherLink III
  *   registers         16, paged banks      RAP/RDP pair     14, windowed
@@ -11,40 +11,40 @@
  *                     card                 rings in SRAM    addresses at all
  *   frame boundary    a 4-byte header      a descriptor     a length preamble
  *                     the chip writes      the CPU wrote    the CPU writes
- *   multicast         a 64-bit hash in     a 64-bit hash    NOTHING.  Four
+ *   multicast         a 64-bit hash in     a 64-bit hash    none.  Four
  *                     the chip             in the init      filter bits and
  *                                          block            no hash at all
  *
- * WINDOWS.  The card is sixteen bytes of I/O space.  Offset 0x0e is Command
- * when written and Status when read, in every window; the fourteen bytes
- * under it are one of eight overlays, chosen by a command and read back in
- * the top three bits of Status.  There is no window register.  Window 1 is
- * where the driver lives once it is running, and every excursion out of it
- * (the filter is a command, so it is not one) comes back.
+ * The card is sixteen bytes of I/O space.  Offset 0x0e is Command when written
+ * and Status when read, in every window.  The fourteen bytes under it are one
+ * of eight overlays, chosen by a command and read back in the top three bits
+ * of Status.  There is no window register.  Window 1 is where the driver lives
+ * once it is running, and every excursion out of it comes back.  The filter is
+ * a command, so it is not an excursion.
  *
- * MULTICAST IS DONE IN SOFTWARE, AND THAT IS NOT A SHORTCUT.  Set RX Filter
- * has four bits -- individual, group, broadcast, promiscuous -- and the part
- * has no per-group filtering of any kind.  So the hardware is told to accept
- * every group address and el3_rx_wanted() then tests each multicast
- * destination against nic->mar[], the same 64-bit hash netdev_mcaf.c builds
- * for the other two cores and the same netdev_ether_crc32_be() that fills it.
- * The seam above this file does not change and cannot tell the difference.
+ * Multicast is done in software.  Set RX Filter has four bits, for individual,
+ * group, broadcast and promiscuous, and the part has no per-group filtering.
+ * The hardware is told to accept every group address, and el3_rx_wanted() then
+ * tests each multicast destination against nic->mar[].  That is the same
+ * 64-bit hash netdev_mcaf.c builds for the other two cores, and the same
+ * netdev_ether_crc32_be() that fills it.  The seam above this file does not
+ * change and cannot tell the difference.
  *
- * BYTE ORDER IS MEASURED, NOT CONFIGURED.  This is the first 16-bit register
+ * Byte order is measured, not configured.  This is the first 16-bit register
  * access to the PCMCIA slot in this driver, and Gayle's 0xA20000 window is
  * documented two ways: cnet.device's own comments say the register window is
- * swapped, and Amiberry decodes it 1:1 and would accept either. netdev_bus.h
- * names that trap. The window 0 manufacturer ID is a hard-wired 0x6d50, so
+ * swapped, and Amiberry decodes it 1:1 and would accept either.  netdev_bus.h
+ * names that trap.  The window 0 manufacturer ID is a hard-wired 0x6d50, so
  * el3_answers() reads it and accepts 0x6d50 or 0x506d, and everything after
  * that goes through accessors that consult the flag.  Nothing here is a card
- * table knob for somebody to flip.
+ * table knob.
  *
- * FRAME DATA IS NOT SWAPPED.  The FIFO is a byte stream through one address
- * and the halves of a word off the wire arrive in the order they arrived in;
- * it goes through netdev_bus's burst path, which is the same code and the
- * same window the NE2000 row already reads its ring through.
+ * Frame data is not swapped.  The FIFO is a byte stream through one address,
+ * and the halves of a word off the wire arrive in the order they arrived in.
+ * It goes through netdev_bus's burst path, which is the same code and the same
+ * window the NE2000 row already reads its ring through.
  *
- * NOTHING EMULATES THIS CARD.  Amiberry's PCMCIA support is NE2000 only, so
+ * Nothing emulates this card.  Amiberry's PCMCIA support is NE2000 only, so
  * everything below has been driven by the host test and by nothing else.
  *
  * SPDX-License-Identifier: MIT
@@ -73,22 +73,22 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
 /*
  * A word register, through the swap the probe measured.
  *
- * Not netdev_bus's accessors: those are byte-wide and every register here but
- * one is a word, and half of a word register is not a register -- the same
- * reason lance.c reaches its RAP and RDP directly.  The one exception is the
+ * Not netdev_bus's accessors: those are byte-wide, every register here but one
+ * is a word, and half of a word register is not a register.  lance.c reaches
+ * its RAP and RDP directly for the same reason.  The one exception is the
  * transmit status byte, which is at an odd offset and goes through the bus
- * layer precisely so that it lands in Gayle's odd window.
+ * layer so that it lands in Gayle's odd window.
  */
 /*
- * The raw word access, and the ONE seam this file has for the host test.
+ * The raw word access, and the one seam this file has for the host test.
  *
- * A window is not a memory: a write to the command register changes what the
- * next read of offset 0x04 means, and a test that models that has to see the
- * access happen rather than inspect an array afterwards.  Nothing else here
- * would give it that -- every other core is testable against a plain buffer
- * because its registers are a buffer.  test/test_netdev_el3.c defines these
- * two and includes this file; they are a plain load and store otherwise, and
- * the shipping driver compiles as if they were not here.
+ * A window is not a memory.  A write to the command register changes what the
+ * next read of offset 0x04 means, and a test that models that must see the
+ * access happen rather than inspect an array afterwards.  Every other core is
+ * testable against a plain buffer, because its registers are a buffer.
+ * test/test_netdev_el3.c defines these two and includes this file.  Otherwise
+ * they are a plain load and store, and the shipping driver compiles as if they
+ * were not here.
  */
 #ifndef EL3_RAW_GET
 #define EL3_RAW_GET(p)      (*(p))
@@ -127,14 +127,14 @@ static UWORD el3_status(NetdevNic *nic)
 }
 
 /*
- * SELECT A WINDOW, AND REMEMBER WHICH ONE.
+ * Select a window, and remember which one.
  *
  * The bookkeeping is not an optimisation.  A register access in the wrong
- * window is not an error the chip reports -- it reads whatever the other
- * window has there -- so the only defence is that exactly one place changes
- * the window and every reader knows what it left behind.  el3_window is what
- * that place wrote; it is invalidated wherever the chip may have changed it
- * without being asked, which is a reset.
+ * window is not an error the chip reports, because it reads whatever the other
+ * window has there.  The only defence is that exactly one place changes the
+ * window and every reader knows what it left behind.  The saved window is what
+ * that place wrote, and it is invalidated wherever the chip can have changed
+ * it without being asked, which is a reset.
  */
 static VOID el3_window(NetdevNic *nic, UBYTE win)
 {
@@ -148,17 +148,17 @@ static VOID el3_window(NetdevNic *nic, UBYTE win)
 /*
  * Wait out a multi-cycle command.
  *
- * BOUNDED, AND SHORT, BECAUSE THIS RUNS AT INTERRUPT LEVEL.  Receive discard
- * is a multi-cycle command and the receive drain issues one per frame, so
- * this is on the interrupt path of every packet.  NetBSD spins here for up to
- * 100 ms; nothing of the sort may happen inside an INT2 server on a 14 MHz
- * 68020, where 100 ms is five vertical blanks with interrupts held off.
+ * Bounded and short, because this runs at interrupt level.  Receive discard is
+ * a multi-cycle command and the receive drain issues one per frame, so this is
+ * on the interrupt path of every packet.  NetBSD spins here for up to 100 ms.
+ * That cannot happen inside an INT2 server on a 14 MHz 68020, where 100 ms is
+ * five vertical blanks with interrupts held off.
  *
- * The count is register reads and not time, deliberately: a slower machine
- * takes longer per read and so waits longer in wall clock, which is the way
- * round that is wanted.  Running out is not fatal here -- the caller carries
- * on and the next interrupt finds the chip wherever it got to -- so this
- * returns the verdict rather than acting on it.
+ * The count is register reads and not time.  A slower machine takes longer per
+ * read and so waits longer in wall clock, which is the wanted behaviour.  An
+ * exhausted count is not fatal: the caller carries on and the next interrupt
+ * finds the chip wherever it got to.  This returns the verdict rather than
+ * acting on it.
  */
 #define EL3_CMD_SPINS   4000
 
@@ -180,39 +180,38 @@ static BOOL el3_wait_cmd(NetdevNic *nic)
 /* ---------------------------------------------------------- detection ---- */
 
 /*
- * IS AN ETHERLINK III DECODING HERE, AND WHICH WAY ROUND?
+ * Is an EtherLink III decoding here, and which way round?
  *
- * Called from netdev_pcmcia.c with no NetdevNic in existence yet -- the slot
- * has to be identified before a unit can be built for it -- so this addresses
+ * Called from netdev_pcmcia.c with no NetdevNic in existence yet, because the
+ * slot must be identified before a unit can be built for it.  This addresses
  * the card straight off the row and answers a plain yes or no.  el3_attach()
- * repeats the measurement into the unit; doing it twice costs two word reads
- * and means neither caller depends on the other having run.
+ * repeats the measurement into the unit.  Twice costs two word reads and means
+ * neither caller depends on the other having run.
  *
- * The global reset first, and it is the only command that can be issued
+ * The global reset comes first, and it is the only command that can be issued
  * before the byte order is known: opcode 0 with a zero argument is the word
  * 0x0000, which is itself in either order.  It also leaves the part in window
- * 0, which is where the manufacturer ID is, and it is what makes this test
- * independent of whatever state a warm-booted card was left in.
+ * 0, where the manufacturer ID is, and it makes this test independent of
+ * whatever state a warm-booted card was left in.
  *
  * On this part the busy bit is not visible during a global reset, so there is
- * nothing to poll: the manual asks for a millisecond and the wait below is
- * register reads, which cost at least a bus cycle each and cannot be
- * optimised away.
+ * nothing to poll.  The manual asks for a millisecond, and the wait below is
+ * register reads, which cost at least a bus cycle each and cannot be optimised
+ * away.
  */
 /*
- * TASK LEVEL ONLY, AND THE COUNT IS NOT ARBITRARY.
+ * Task level only, and the count is not arbitrary.
  *
  * A scalar register access to a PCMCIA card costs about 8.3 us on a 14 MHz
- * 68020 -- netdev_nic.h prices it, against 0.5 us for a word through a data
- * port -- and the reset wants a millisecond.  2048 reads is 17 ms at that
- * price and still a millisecond at the fastest access this bus could
- * plausibly manage, which is the bracket to be on the right side of when the
- * only alternative is a clock this driver deliberately does not open.
+ * 68020, against 0.5 us for a word through a data port, and netdev_nic.h
+ * prices both.  The reset wants a millisecond.  2048 reads is 17 ms at that
+ * price, and still a millisecond at the fastest access this bus can manage,
+ * which brackets the requirement without a clock this driver does not open.
  *
- * NOTHING AT INTERRUPT LEVEL MAY CALL THIS.  el3_init() runs from the
- * vertical-blank watchdog under Disable(), so it uses the receive and
- * transmit resets instead, whose busy bit IS visible and whose wait is
- * therefore as short as the chip needs rather than as long as the worst case.
+ * Nothing at interrupt level can call this.  el3_init() runs from the
+ * vertical-blank watchdog under Disable(), so it uses the receive and transmit
+ * resets instead.  Their busy bit is visible, so their wait is as short as the
+ * chip needs rather than as long as the worst case.
  */
 static VOID el3_reset_wait(volatile UWORD *cmd)
 {
@@ -242,9 +241,9 @@ BOOL el3_answers(const NetdevCard *card)
 /* ------------------------------------------------------------- EEPROM ---- */
 
 /*
- * NOT BIT-BANGED.  One word says "read word N" and the answer is in the data
- * register once the busy bit clears.  A read is quoted at 162 us, so the
- * bound below is generous and this only ever runs from attach, at task level.
+ * Not bit-banged.  One word says "read word N", and the answer is in the data
+ * register once the busy bit clears.  A read is quoted at 162 us, so the bound
+ * below is generous.  This runs only from attach, at task level.
  */
 static BOOL el3_eeprom(NetdevNic *nic, UBYTE word, UWORD *out)
 {
@@ -272,12 +271,12 @@ static BOOL el3_eeprom(NetdevNic *nic, UBYTE word, UWORD *out)
  * Three EEPROM words into six octets, the earlier octet in each high half,
  * and keep them only if what comes out is a station address.
  *
- * THE GROUP-BIT REPAIR HAPPENS BEFORE THE VERDICT, not after it.  An address
- * with bit 0 of octet 0 set is not one the part can match its own unicast
- * frames against, and every frame sent with it carries a group source that
- * switches mislearn -- the other two cores clear it and count it, and so does
- * this one.  Testing usability first would send a merely-repairable address
- * to the fallback and hide the repair.
+ * The group-bit repair happens before the verdict, not after it.  The part
+ * cannot match its own unicast frames against an address with bit 0 of octet 0
+ * set, and every frame sent with it carries a group source that switches
+ * mislearn.  The other two cores clear it and count it, and so does this one.
+ * A usability test first would send a repairable address to the fallback and
+ * hide the repair.
  *
  * Nothing is committed until the address is accepted, so a rejected first
  * attempt leaves neither the address nor the repair counter touched.
@@ -342,9 +341,9 @@ VOID el3_halt(NetdevNic *nic)
 /* ------------------------------------------------------------- filter ---- */
 
 /*
- * The hardware half.  Group is on whenever anything at all is joined, because
- * that is the only granularity the part has; the software half in
- * el3_rx_wanted() is what makes it behave like a hash.
+ * The hardware half.  Group is on whenever anything is joined, because that is
+ * the only granularity the part has.  The software half in el3_rx_wanted()
+ * makes it behave like a hash.
  */
 static BOOL el3_any_group(const NetdevNic *nic)
 {
@@ -364,11 +363,11 @@ VOID el3_setfilter(NetdevNic *nic)
     UWORD filter = EL3_FIL_INDIVIDUAL | EL3_FIL_BROADCAST;
 
     /*
-     * GROUP ONLY WHEN SOMETHING IS JOINED.  It is all multicast or none on
-     * this part, so leaving it on hands the CPU every group frame on the
-     * segment to hash and throw away -- and on a 14 MHz 68020 with a 2 KB
-     * receive FIFO that is not free.  An empty hash is exactly "no opener
-     * wants a group address", which is the condition for turning it off.
+     * Group only when something is joined.  It is all multicast or none on
+     * this part, so a group bit left on hands the CPU every group frame on the
+     * segment to hash and throw away.  On a 14 MHz 68020 with a 2 KB receive
+     * FIFO that is not free.  An empty hash means no opener wants a group
+     * address, which is the condition for turning it off.
      */
     if (el3_any_group(nic))
         filter |= EL3_FIL_GROUP;
@@ -386,9 +385,9 @@ VOID el3_setfilter(NetdevNic *nic)
  * the openers built has to be applied here.  Promiscuous takes everything, as
  * it does on every other core.
  *
- * netdev_mcaf.c is used exactly as it stands -- same CRC, same six bits, same
- * byte and bit -- so a group that reaches an opener through an Ariadne II
- * reaches it through this card and one that does not, does not.
+ * netdev_mcaf.c is used exactly as it stands, with the same CRC, the same six
+ * bits, and the same byte and bit.  A group address therefore reaches an
+ * opener through this card whenever it reaches one through an Ariadne II.
  */
 static BOOL el3_rx_wanted(const NetdevNic *nic, const UBYTE *frame)
 {
@@ -413,19 +412,18 @@ static BOOL el3_rx_wanted(const NetdevNic *nic, const UBYTE *frame)
 /* --------------------------------------------------------------- init ---- */
 
 /*
- * WHAT PCMCIA NEEDS THAT THE ISA CARDS DO NOT.
+ * What PCMCIA needs that the ISA cards do not.
  *
- * On a 3C589 neither the address configuration nor the resource
- * configuration is loaded from the EEPROM -- the manual says so -- and the
- * part will not answer I/O at all while its I/O base field is non-zero.  So
- * both are written here, every time, and a global reset (which does not reset
- * the PCMCIA interface chip, only the ASIC behind it) means writing them
- * again.
+ * On a 3C589 the manual says that neither the address configuration nor the
+ * resource configuration is loaded from the EEPROM, and the part does not
+ * answer I/O while its I/O base field is non-zero.  Both are therefore written
+ * here every time.  A global reset resets the ASIC behind the PCMCIA interface
+ * chip and not the interface chip itself, so both must be written again.
  *
- * Zeroing the I/O base is also what makes the card row's 0x300 safe: with the
- * field zero the part decodes on the bottom four address lines only, so it
- * answers in every sixteen-byte block of the window Gayle maps and the exact
- * one this driver picked stops mattering.
+ * A zeroed I/O base also makes the card row's 0x300 safe.  With the field zero
+ * the part decodes on the bottom four address lines only, so it answers in
+ * every sixteen-byte block of the window Gayle maps, and the exact one this
+ * driver picked stops mattering.
  */
 static VOID el3_pcmcia_setup(NetdevNic *nic)
 {
@@ -439,16 +437,16 @@ static VOID el3_pcmcia_setup(NetdevNic *nic)
 }
 
 /*
- * NO GLOBAL RESET HERE, AND THAT IS THE WHOLE REASON THIS IS SHAPED AS IT IS.
+ * No global reset here, which is why this function is shaped as it is.
  *
  * A global reset on this part does not show its busy bit, so the only way to
- * wait one out is to burn a millisecond; el3_reset() calls this from the
+ * wait one out is to burn a millisecond.  el3_reset() calls this from the
  * vertical-blank watchdog, under Disable(), at INT3 above the card's own INT2
  * server.  A millisecond there is not payable.  The receive and transmit
- * resets do show the busy bit, they are what the transmitter actually needs
- * after an underrun or a jabber, and between them they put both FIFOs back
- * where a global reset would have -- so the global reset stays at attach,
- * which runs once, at task level.
+ * resets do show the busy bit, they are what the transmitter needs after an
+ * underrun or a jabber, and between them they put both FIFOs back where a
+ * global reset would have.  The global reset stays at attach, which runs once,
+ * at task level.
  */
 LONG el3_init(NetdevNic *nic)
 {
@@ -481,7 +479,7 @@ LONG el3_init(NetdevNic *nic)
      * The media the card was built with decides what to switch on.  The
      * coaxial transceiver's converter needs 800 us before it carries
      * anything, which is why it is started here and not on the first
-     * transmit; link beat is only meaningful on twisted pair.
+     * transmit.  Link beat is only meaningful on twisted pair.
      */
     el3_window(nic, 4);
     if ((nic->el3_media & EL3_CC_UTP_PRESENT) != 0)
@@ -532,11 +530,11 @@ LONG el3_init(NetdevNic *nic)
     el3_cmd(nic, EL3_C_TX_ENABLE, 0);
 
     /*
-     * THE READ-ZERO MASK IS THE WAY ROUND ITS NAME DOES NOT SUGGEST: a CLEAR
-     * bit is what forces a status bit to read as zero, so all ones is "report
-     * everything" and zero would blind the interrupt handler to every cause
-     * it exists to service.  The power-up default is zero, which is harmless
-     * only because the interrupt mask is zero beside it.
+     * The read-zero mask runs the opposite way to its name.  A clear bit is
+     * what forces a status bit to read as zero, so all ones reports everything
+     * and zero blinds the interrupt handler to every cause it services.  The
+     * power-up default is zero, which is harmless only because the interrupt
+     * mask is zero beside it.
      */
     el3_cmd(nic, EL3_C_SET_ZERO_MASK, 0x00ff);
     el3_cmd(nic, EL3_C_SET_INTR_MASK,
@@ -553,11 +551,11 @@ LONG el3_init(NetdevNic *nic)
 /*
  * The watchdog's recovery, and this core needs a real one.
  *
- * el3_tx() sets txb_inuse when the FIFO could not take a frame and arms the
- * transmit-available threshold to hear about it; acknowledging that interrupt
- * disarms the threshold, so a lost or never-delivered TX Available leaves the
- * transmitter blocked with nothing left to unblock it.  That is exactly the
- * wedge netdev_tick() exists for.
+ * el3_tx() sets txb_inuse when the FIFO could not take a frame, and arms the
+ * transmit-available threshold to hear about it.  That interrupt's
+ * acknowledgement disarms the threshold, so a lost or never-delivered TX
+ * Available leaves the transmitter blocked with nothing left to unblock it.
+ * That is the wedge netdev_tick() exists for.
  */
 VOID el3_reset(NetdevNic *nic)
 {
@@ -595,15 +593,15 @@ VOID el3_drain_tx_status(NetdevNic *nic)
         if ((st & EL3_TXS_UNDERRUN) != 0)
             nic->overruns++;
 
-        /* Any value pops it; zero is the value, so that nothing here can be
-           read as writing a bit back into a register that has none. */
+        /* Any value pops it.  Zero is the value, so that nothing here reads
+           as a bit written back into a register that has none. */
         netdev_bus_w8(&nic->bus, EL3_W1_TX_STATUS, 0);
 
         /*
-         * Any error bit disables the transmitter; jabber and underrun need
-         * the transmitter reset before it can be enabled again.  Doing that
-         * here rather than after the loop keeps one entry's recovery with
-         * that entry, which matters because the next entry may be clean.
+         * Any error bit disables the transmitter.  Jabber and underrun need
+         * the transmitter reset before it can be enabled again.  The recovery
+         * runs here rather than after the loop, so that it stays with its own
+         * entry, because the next entry can be clean.
          */
         if ((st & EL3_TXS_FATAL) != 0)
         {
@@ -649,9 +647,9 @@ LONG el3_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
     }
 
     /*
-     * Length counts the frame, not the padding.  Short frames are NOT padded
-     * here: the card pads to the Ethernet minimum itself, and padding them
-     * twice would put the pad inside the length.
+     * Length counts the frame, not the padding.  Short frames are not padded
+     * here: the card pads to the Ethernet minimum itself, and a second pad
+     * would fall inside the length.
      */
     el3_put(nic, EL3_W1_FIFO, (UWORD)(len & EL3_TX_LEN_MASK));
     el3_put(nic, EL3_W1_FIFO, 0);
@@ -678,9 +676,9 @@ LONG el3_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
 /*
  * One frame out of the receive FIFO, or nothing.
  *
- * Discard is issued for EVERY frame, good or bad, and it is the only thing
- * that advances the FIFO past the dword padding -- so the error paths below
- * fall through to it rather than returning.  Reading past the pad is an
+ * Discard is issued for every frame, good or bad, and it is the only thing
+ * that advances the FIFO past the dword padding, so the error paths below
+ * fall through to it rather than returning.  A read past the pad is an
  * underrun and an adapter failure, which is why the read is rounded up to a
  * word and no further.
  */
@@ -748,8 +746,9 @@ BOOL el3_intr(NetdevNic *nic)
 
         if ((status & EL3_S_RX_COMPLETE) != 0)
         {
-            /* Acknowledging receive-complete does nothing on this part; the
-               frame has to be taken out and discarded, and the bit follows. */
+            /* An acknowledgement of receive-complete does nothing on this
+               part.  The frame must be taken out and discarded, and the bit
+               follows. */
             if (!el3_rint(nic))
                 break;
             continue;
@@ -757,14 +756,14 @@ BOOL el3_intr(NetdevNic *nic)
 
         if ((status & EL3_S_TX_COMPLETE) != 0)
         {
-            /* Likewise: the stack has to be popped, not acknowledged. */
+            /* Likewise: the stack must be popped, not acknowledged. */
             el3_drain_tx_status(nic);
             continue;
         }
 
         if ((status & EL3_S_TX_AVAIL) != 0)
         {
-            /* This one IS cleared by its acknowledgement, and the same
+            /* This one is cleared by its acknowledgement, and the same
                acknowledgement disarms the threshold behind it. */
             el3_cmd(nic, EL3_C_ACK_INTR, EL3_S_TX_AVAIL);
             nic->txb_inuse = 0;
@@ -774,10 +773,10 @@ BOOL el3_intr(NetdevNic *nic)
         if ((status & EL3_S_ADAPTER_FAIL) != 0)
         {
             /*
-             * A FIFO over- or underran and the bit behind it lives in a
-             * diagnostic register in another window.  Nothing narrower than
-             * a restart clears every case, and this is rare enough that
-             * paying for the restart is cheaper than getting the cases wrong.
+             * A FIFO over- or underran, and the bit behind it lives in a
+             * diagnostic register in another window.  Nothing narrower than a
+             * restart clears every case, and the condition is rare, so the
+             * restart is the cheaper answer.
              */
             nic->rx_errors++;
             el3_reset(nic);
@@ -804,10 +803,10 @@ LONG el3_attach(NetdevNic *nic)
     UWORD id;
 
     /*
-     * The reset is repeated here rather than assumed from the claim: attach
-     * runs for the fixed-address rows too, where nothing claimed anything,
-     * and a core that only works after some other file ran is a core with an
-     * undocumented precondition.
+     * The reset is repeated here rather than assumed from the claim.  Attach
+     * runs for the fixed-address rows too, where nothing claimed anything, and
+     * a core that works only after some other file ran carries an undocumented
+     * precondition.
      */
     nic->el3_swap = 0;
     nic->el3_win  = 0xff;
@@ -849,17 +848,17 @@ LONG el3_attach(NetdevNic *nic)
                      (ULONG)nic->el3_media);
 
     /*
-     * THE STATION ADDRESS, AND THERE ARE TWO OF THEM IN THIS EEPROM.
+     * There are two station addresses in this EEPROM.
      *
-     * Words 0..2 are 3Com's own node address and words 10..12 are the OEM
-     * one, and the manual does not say which a driver should use.  The answer
-     * is a fact about the cards rather than about the part: 3c589.device, the
+     * Words 0..2 are 3Com's own node address and words 10..12 are the OEM one,
+     * and the manual does not say which a driver must use.  The answer is a
+     * fact about the cards rather than about the part.  3c589.device, the
      * AmigaOS driver that has been in front of these cards since 2000, takes
-     * the OEM address, and a rebadged card -- which is most of them -- is
-     * exactly the case where the two differ.
+     * the OEM address, and a rebadged card is where the two differ.  Most of
+     * these cards are rebadged.
      *
-     * Taken in that order, then, with 3Com's own as the fallback rather than
-     * as the choice: a card that has one and not the other still comes up.
+     * They are taken in that order, with 3Com's own as the fallback, so a card
+     * that has one and not the other still comes up.
      *
      * Each word holds two octets, the earlier one in the high half.
      */
@@ -877,17 +876,17 @@ LONG el3_attach(NetdevNic *nic)
      * them as a ring reads an empty one.
      */
     /*
-     * WHERE THE BURST PATH POINTS, WHICH IS NOT WHERE netdev_bus_setup() PUT
-     * IT.  bus->asic is the address netdev_bus_rdata/wdata hammer, and setup
-     * derives it as the register base plus sixteen strides -- true for a
-     * DP8390, whose data port really is ASIC register 0 past the NIC block,
-     * and false here.  This part's FIFO is window 1 offset 0, which is the
-     * register base itself.  Left uncorrected, every frame would have been
-     * pushed into and pulled out of whatever decodes sixteen bytes further
-     * on, and nothing in the register path would have looked wrong.
+     * The burst path does not point where netdev_bus_setup() put it.
+     * bus->asic is the address netdev_bus_rdata/wdata hammer, and setup
+     * derives it as the register base plus sixteen strides.  That is true for
+     * a DP8390, whose data port is ASIC register 0 past the NIC block, and
+     * false here.  This part's FIFO is window 1 offset 0, which is the
+     * register base itself.  Left uncorrected, every frame goes into and out
+     * of whatever decodes sixteen bytes further on, and nothing in the
+     * register path looks wrong.
      *
-     * netdev_bus_regmap() with no map is the seam for exactly this: it says
-     * "the data port is here" without claiming the register file is scattered.
+     * netdev_bus_regmap() with no map is the seam for this: it says the data
+     * port is here without claiming the register file is scattered.
      */
     netdev_bus_regmap(&nic->bus, NULL,
                       (APTR)(volatile void *)(nic->board + nic->card->reg_off +

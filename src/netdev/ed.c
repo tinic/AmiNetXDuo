@@ -33,7 +33,7 @@
  * value, the ring-wrap arithmetic in ring_copy and the 4-byte header's byte
  * order -- is NetBSD's.  What was replaced:
  *
- *   bus_space_*   -> plain moves through the board window; the buffer is
+ *   bus_space_*   -> plain moves through the board window.  The buffer is
  *                    mapped, so there is no bus abstraction to go through
  *   mbuf chains   -> one linear frame
  *   test_mem      -> a pattern pass before the zero pass, see ed_test_mem()
@@ -73,23 +73,23 @@ static volatile UBYTE *ed_buf(NetdevNic *nic)
 #define ED_ODD(p)   ((((unsigned long)(const void *)(p)) & 1ul) != 0)
 
 /*
- * NEVER A BYTE ACCESS.  The buffer is 16 bits wide on both boards and the byte
+ * Never a byte access.  The buffer is 16 bits wide on both boards and the byte
  * lanes are not separately selectable, so a byte write puts the same value in
- * both halves on real hardware even where the emulator accepts it.  Every
- * caller here starts on an even chip address; ED_PAGE_SIZE is 256 and the
+ * both halves on real hardware, even where the emulator accepts it.  Every
+ * caller here starts on an even chip address.  ED_PAGE_SIZE is 256 and the
  * header is 4 bytes, so nothing rounds it to an odd one.
  *
- * That is what rules out n68k_copy_bytes(), which is otherwise exactly this
- * copy: it brings the destination to a longword boundary with byte moves and
- * drops to a byte loop on a 68000 whose pointers disagree in parity.  The
- * longword bulk of it is available though, and that is where its win is --
- * n68k_copy_longs() is the same movem.l block with the byte paths removed.
- * The word loops below are what is left, the 0..3 byte tail.
+ * That rules out n68k_copy_bytes(), which is otherwise this same copy.  It
+ * brings the destination to a longword boundary with byte moves, and drops to
+ * a byte loop on a 68000 whose pointers disagree in parity.  Its longword bulk
+ * is available on its own, and that is where its gain is: n68k_copy_longs() is
+ * the same movem.l block with the byte paths removed.  The word loops below
+ * are what is left, the 0..3 byte tail.
  *
- * The odd-host-address arms are not reachable from today's callers -- the
- * staging buffers are longword-aligned and a ring wrap resumes on a page
- * boundary -- so test_netdev_ed.c drives them directly rather than leaving
- * two branches that read as handled and have never run.
+ * The odd-host-address arms are not reachable from today's callers, because
+ * the staging buffers are longword-aligned and a ring wrap resumes on a page
+ * boundary.  test_netdev_ed.c drives them directly, rather than leaving two
+ * branches that read as handled and have never run.
  */
 static VOID ed_copy_in(const volatile UBYTE *src, UBYTE *dst, UWORD len)
 {
@@ -174,11 +174,11 @@ static VOID ed_fill(volatile UBYTE *dst, UWORD val, UWORD len)
 /* ---------------------------------------------------------- buffer access - */
 
 /*
- * WHY THE FIRST WORD IS SWAPPED AND THE SECOND IS NOT.
+ * Why the first word is swapped and the second is not.
  *
- * ED_DCR_BOS is set, which is what makes the chip lay packet DATA down in
- * host byte order on a 68000: the byte the receiver saw first ends up at the
- * lower address.  It does NOT do the same to the whole 4-byte header, because
+ * ED_DCR_BOS is set, which makes the chip lay packet data down in host byte
+ * order on a 68000: the byte the receiver saw first ends up at the lower
+ * address.  It does not do the same to the whole 4-byte header, because
  * status/next-page and the byte count are two separate 16-bit quantities to
  * the chip and only the first is a byte pair.  In memory:
  *
@@ -188,8 +188,8 @@ static VOID ed_fill(volatile UBYTE *dst, UWORD val, UWORD len)
  * chip's own little-endian order.  Both NetBSD's ed_zbus_read_hdr() and
  * Linux's hydra_get_8390_hdr() encode exactly this, and Amiberry's DP8390
  * emulation writes exactly this (qemuvga/ne2000.cpp, the `s->dcfg & 2` arm of
- * ne2000_receive).  Assuming one uniform swap gets the count backwards and
- * every frame is then rejected as over-length.
+ * ne2000_receive).  One uniform swap gets the count backwards, and every frame
+ * is then rejected as over-length.
  */
 static VOID ed_read_hdr(NetdevNic *nic, LONG src, NetdevRing *hdr)
 {
@@ -205,7 +205,7 @@ static VOID ed_read_hdr(NetdevNic *nic, LONG src, NetdevRing *hdr)
 
 /*
  * The wrap is an `if`, not a loop, so nothing here can spin however corrupt
- * the ring is -- which matters because this runs in the interrupt server.
+ * the ring is.  That matters, because this runs in the interrupt server.
  *
  * head cannot underflow, and the reason is not local: src is packet_ptr + 4,
  * packet_ptr is mem_ring + (next_packet - rec_page_start) * 256, and
@@ -277,18 +277,18 @@ static UWORD ed_write_buf(NetdevNic *nic, const UBYTE *frame, UWORD len,
 /* ---------------------------------------------------------------- probe --- */
 
 /*
- * NetBSD zeroes the buffer and reads back zero.  Two things that would pass:
- * a window that ignores writes and reads as zero, and a window that decodes
- * fewer address lines than the buffer has, so that the top half is an alias
- * of the bottom.  Neither is hypothetical -- the second is precisely what
- * Amiberry did to the LAN Rover's 32K until ef28da7e, and the symptom was a
- * receive ring that died the first time it crossed page 0x40.
+ * NetBSD zeroes the buffer and reads back zero.  Two things would pass that
+ * test: a window that ignores writes and reads as zero, and a window that
+ * decodes fewer address lines than the buffer has, so that the top half is an
+ * alias of the bottom.  The second is what Amiberry did to the LAN Rover's 32K
+ * until ef28da7e, and the symptom was a receive ring that died the first time
+ * it crossed page 0x40.
  *
- * So: a distinct pattern per page over the WHOLE buffer, then a second sweep
+ * So: a distinct pattern per page over the whole buffer, then a second sweep
  * that reads every page back.  A page that aliases another has been
- * overwritten by the time it is read.  Only then the zero pass, which is what
- * leaves the ring clean.  Read back through ed_copy_in(), the same path the
- * receive ring uses, so this exercises the code that matters.
+ * overwritten by the time it is read.  The zero pass comes last, and it is
+ * what leaves the ring clean.  The read back goes through ed_copy_in(), the
+ * same path the receive ring uses.
  */
 static UWORD ed_mem_seed(LONG off)
 {
@@ -438,7 +438,7 @@ static LONG ed_attach(NetdevNic *nic)
 
     dp8390_config(nic);
 
-    /* Monitor mode as well as stopped, same belt and braces as ne2000.c. */
+    /* Monitor mode as well as stopped, the same double guard as ne2000.c. */
     NIC_PUT(nic, ED_P0_RCR, ED_RCR_MON);
 
     if (!ed_test_mem(nic))

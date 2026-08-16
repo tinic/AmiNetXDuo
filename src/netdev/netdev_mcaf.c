@@ -13,7 +13,7 @@
  * AmiNetXDuo: the arithmetic is unchanged.  dp8390_getmcaf() walked a
  * NetBSD ether_multi list and wrote the filter; here the shell keeps the list
  * and calls netdev_mar_set() per address, because SANA-II hands joins in one
- * at a time and the list has to be reference counted per opener.
+ * at a time and the list must be reference counted per opener.
  *
  * SPDX-License-Identifier: MIT AND BSD-2-Clause-NetBSD
  */

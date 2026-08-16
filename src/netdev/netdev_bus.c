@@ -1,11 +1,11 @@
 /*
  * anxnet.device, the stride-driven bus implementation.
  *
- * Two facts about the emulated and the real cards decide the word path:
- * the register window is byte-swapped in hardware, so a 68k `move.w` from the
- * data port already delivers the two bytes in wire order and nothing here may
- * swap them again; and the port does not advance a host address, so a burst is
- * repeated access to ONE location.
+ * Two facts about the emulated and the real cards decide the word path.  The
+ * register window is byte-swapped in hardware, so a 68k `move.w` from the data
+ * port already delivers the two bytes in wire order and nothing here can swap
+ * them again.  The port does not advance a host address, so a burst is
+ * repeated access to one location.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -23,17 +23,17 @@
  * The 32-bit window is 128 bytes of the same FIFO mirrored end to end, so a
  * `movem.l` reads sixteen longwords from sixteen consecutive addresses and
  * every one of them is the port.  That is the only reason a burst wider than
- * the port exists at all: the address does not have to hold still.
+ * the port exists: the address does not have to hold still.
  *
  * Eight registers is 32 bytes in two instructions.  The same 32 bytes as eight
- * separate `move.l` is sixteen, and the bus cycles are identical either way --
- * eight long accesses to the window, eight to memory -- so what the movem
- * form saves is instruction fetch and decode, not bus time.  That is a real
- * saving on a 68020 with a 256-byte cache and a much larger one under an
- * emulator, which charges per instruction; on real Zorro II, where a long
- * access is 0.28-0.56 us against a handful of CPU cycles, the bus dominates
- * and the win is small.  Nothing else in the family reaches this path: the
- * word port is one non-mirrored address and cannot be batched at all.
+ * separate `move.l` is sixteen instructions, and the bus cycles are identical
+ * either way: eight long accesses to the window, eight to memory.  The movem
+ * form saves instruction fetch and decode, not bus time.  That is a real
+ * saving on a 68020 with a 256-byte cache, and a larger one under an emulator,
+ * which charges per instruction.  On real Zorro II a long access is
+ * 0.28-0.56 us against a handful of CPU cycles, so the bus dominates and the
+ * gain is small.  Nothing else in the family reaches this path, because the
+ * word port is one non-mirrored address and cannot be batched.
  */
 static VOID bus_rdata_long(const NetdevBus *bus, UBYTE *dst, UWORD len)
 {
@@ -50,7 +50,8 @@ static VOID bus_rdata_long(const NetdevBus *bus, UBYTE *dst, UWORD len)
     for (; i + 4 <= len; i += 4)
         *out++ = *port;
 
-    /* The chip only ever hands out whole words; a 2-byte tail is possible. */
+    /* The chip only ever hands out whole words, so a 2-byte tail is
+       possible. */
     if (i < len)
     {
         volatile UWORD *w = (volatile UWORD *)bus->asic;
@@ -107,10 +108,10 @@ static VOID bus_rdata(const NetdevBus *bus, UBYTE *dst, UWORD len)
     port = (volatile UWORD *)bus->asic;
 
     /*
-     * An odd destination cannot be written as words: a 68000 takes an address
-     * error on it.  The port is still 16 bits wide -- the chip hands out whole
-     * words and reading it a byte at a time would lose half of every one -- so
-     * the word is read and split.
+     * An odd destination cannot be written as words, because a 68000 takes an
+     * address error on it.  The port is still 16 bits wide: the chip hands out
+     * whole words, and a byte-at-a-time read would lose half of every one.
+     * The word is therefore read and split.
      */
     if (bus->dmode == NETDEV_DMODE_BYTE || BUS_ALIGN(dst, 1) != 0)
     {
@@ -138,7 +139,7 @@ static VOID bus_rdata(const NetdevBus *bus, UBYTE *dst, UWORD len)
     out = (UWORD *)(APTR)dst;
 
     /* Whole 32-byte blocks first.  The port is one address and cannot be
-       batched; the block form is here for the other three quarters of the
+       batched.  The block form is here for the other three quarters of the
        instructions, which is what a whole frame through this loop costs. */
     i = (UWORD)(len & (UWORD)~31u);
     if (i != 0)
@@ -227,14 +228,14 @@ VOID netdev_bus_regmap(NetdevBus *bus, const ULONG *map, APTR data_port)
 /*
  * cnet16's GETODD, turned on by the probe rather than by a second binary.
  *
- * REFUSED rather than asserted on a bus it cannot work on.  The read takes
+ * Refused, rather than asserted, on a bus it cannot work on.  The read takes
  * the word at reg-1 from the even window and keeps its low half, which is the
- * odd register only when consecutive indices are ONE byte apart: at stride 2
+ * odd register only when consecutive indices are one byte apart.  At stride 2
  * the word at (reg-1)*2 spans register reg-1 and the padding byte beside it,
- * and a scatter table has no arithmetic relation between neighbours at all.
- * Nothing in the table but the PCMCIA row is stride 1, and the flag exists
- * for that row, but a refusal is what keeps a future stride-2 card from
- * turning this on and reading half its registers as padding.
+ * and a scatter table has no arithmetic relation between neighbours.  Only the
+ * PCMCIA row in the table is stride 1, and the flag exists for that row.  The
+ * refusal keeps a future stride-2 card from turning this on and reading half
+ * its registers as padding.
  */
 BOOL netdev_bus_set_getodd(NetdevBus *bus)
 {

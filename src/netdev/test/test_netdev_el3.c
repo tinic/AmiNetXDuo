@@ -1,23 +1,23 @@
 /*
  * el3.c against a chip modelled in C.
  *
- * WHY THIS MOCK IS REACTIVE AND test_netdev_ed.c'S IS NOT.
+ * This mock is reactive, and test_netdev_ed.c's is not.
  *
  * A DP8390's registers are a buffer: write one, read it back, and an array
  * models it exactly.  An EtherLink III's are not.  Offset 0x04 is a different
  * register depending on a window that was selected by a command written to a
- * different offset, and reading the wrong window is not an error the chip
- * reports -- it quietly answers with somebody else's register.  A passive
- * array cannot model that, and window bookkeeping is precisely the thing most
- * worth testing in a driver for this part.
+ * different offset, and a read of the wrong window is not an error the chip
+ * reports.  It quietly answers with another register.  A passive array cannot
+ * model that, and window bookkeeping is the thing most worth testing in a
+ * driver for this part.
  *
  * So the mock is a function.  el3.c routes its raw word access through
  * EL3_RAW_GET/EL3_RAW_PUT, which are a plain load and store in the shipping
- * driver; this file defines them first and then includes el3.c whole, the
+ * driver.  This file defines them first and then includes el3.c whole, the
  * same way test_netdev_ed.c includes ed.c to reach its statics.  The frame
  * FIFOs come in through NetdevBusOps, which is a seam that already existed.
  *
- * NOTHING EMULATES THIS CARD.  Amiberry's PCMCIA support is NE2000 only, so
+ * Nothing emulates this card.  Amiberry's PCMCIA support is NE2000 only, so
  * what is below is the only thing that has ever driven this core.
  *
  * SPDX-License-Identifier: MIT
@@ -71,12 +71,12 @@ static void expect_u32(const char *what, unsigned long got, unsigned long want)
 }
 
 /*
- * THE BUS, WHICH IS WHERE THE BYTE ORDER LIVES.
+ * The bus, which is where the byte order lives.
  *
  * mock_swapped is the hardware question the driver has to answer for itself:
  * with it set, a word the chip holds as 0x6d50 is delivered to the CPU as
  * 0x506d and everything the CPU writes is exchanged the same way.  Both
- * settings are run below, and the driver is told neither.
+ * orders are run below, and the driver is told neither.
  */
 static unsigned short bus_in(unsigned short v)
 {
@@ -116,7 +116,7 @@ UWORD netdev_diag_card(const NetdevCard *c) { (void)c; return 0; }
 
 /*
  * The other three cores.  netdev_cards.c is linked whole, for the CIS-to-row
- * selection, and netdev_nic_ops_for() names every core in the table; linking
+ * selection, and netdev_nic_ops_for() names every core in the table.  Linking
  * them all in would drag the DP8390 and the LANCE into a test about neither.
  * The tables are referenced by address only, so empty ones are enough.
  */
@@ -126,7 +126,7 @@ const struct NetdevNicOps netdev_nic_lance;
 
 #include "el3.c"
 
-/* The board window the driver addresses.  Only its ADDRESS is used: every
+/* The board window the driver addresses.  Only its address is used: every
    access is intercepted, so nothing is ever stored here. */
 static unsigned char board[0x400 + 16];
 static NetdevCard    card;
@@ -340,7 +340,7 @@ static void nic_reset(int swapped)
 
 /*
  * The byte order, which the driver is never told and has to measure.  Run
- * both ways round; a card that reads 0x6d50 straight and a card whose window
+ * both ways round.  A card that reads 0x6d50 straight and a card whose window
  * exchanges the halves must both attach, and must set the flag differently.
  */
 static void test_byte_order(void)
@@ -366,8 +366,8 @@ static void test_byte_order(void)
         /*
          * The burst path's address.  netdev_bus_setup() puts it sixteen
          * strides past the register base, which is where a DP8390's data
-         * port is and not where this part's FIFO is; attach has to move it
-         * or every frame goes to an address nothing here decodes, silently.
+         * port is and not where this part's FIFO is.  Attach must move it, or
+         * every frame goes silently to an address nothing here decodes.
          */
         snprintf(what, sizeof(what), "fifo address, swapped=%d", swapped);
         expect_u32(what,
@@ -510,10 +510,10 @@ static void test_filter(void)
 }
 
 /*
- * THE HASH THE HARDWARE DOES NOT HAVE.  A group address whose bit is set in
- * nic->mar[] is delivered and one whose bit is clear is dropped, using the
- * same netdev_mcaf.c the DP8390 core hands to its chip -- so an opener sees
- * the same frames through this card as through an Ariadne II.
+ * The hash the hardware does not have.  A group address whose bit is set in
+ * nic->mar[] is delivered and one whose bit is clear is dropped, through the
+ * same netdev_mcaf.c the DP8390 core hands to its chip.  An opener therefore
+ * sees the same frames through this card as through an Ariadne II.
  */
 static void test_software_multicast(void)
 {
@@ -553,8 +553,8 @@ static void test_software_multicast(void)
 
 /*
  * The transmit preamble and the padding.  The length word counts the frame
- * and NOT the padding, and a runt is left for the card to pad -- padding it
- * here would put the pad inside the length.
+ * and not the padding, and a runt is left for the card to pad, because a pad
+ * written here would fall inside the length.
  */
 static void check_tx(const char *what, UWORD len, UWORD want_fifo)
 {
@@ -617,7 +617,7 @@ static void test_transmit(void)
     /*
      * A FIFO with no room does not take the frame, does not corrupt it, and
      * arms the threshold that says when there will be room.  txb_inuse is
-     * what tells the shell to stop pumping -- and what the vertical-blank
+     * what tells the shell to stop pumping, and what the vertical-blank
      * watchdog then watches.
      */
     memset(frame, 0, sizeof(frame));
@@ -641,7 +641,7 @@ static void test_transmit(void)
 
 /*
  * The transmit status stack.  Read the byte, act on it, write it back, and
- * stop when it reads zero -- the write is what pops it, and writing zero is
+ * stop when it reads zero.  The write is what pops it, and a written zero is
  * what makes the next read terminate the loop in this model.
  */
 static void test_tx_status(void)
@@ -685,7 +685,7 @@ static void test_tx_status(void)
                    (unsigned long)(enables + 1));
     }
 
-    /* Maximum collisions re-enables without a reset: the chip is not sick. */
+    /* Maximum collisions re-enables without a reset. */
     odd[EL3_W1_TX_STATUS - 1] =
         (UBYTE)(EL3_TXS_COMPLETE | EL3_TXS_MAX_COLLISION);
     nic.collisions = 0;
@@ -751,7 +751,7 @@ static void test_receive(void)
     }
 
     /*
-     * AN ERRORED FRAME IS STILL DISCARDED.  Discard is the only thing that
+     * An errored frame is still discarded.  Discard is the only thing that
      * advances the FIFO past a packet and its padding, so a receive path that
      * returned early on an error would stop receiving entirely.
      */
@@ -802,7 +802,7 @@ static void test_receive(void)
 
 /*
  * The interrupt drain.  What matters here is what an acknowledgement does
- * NOT clear: receive-complete and transmit-complete are cleared by servicing
+ * not clear: receive-complete and transmit-complete are cleared by servicing
  * the FIFO and the status stack, so a drain that acknowledged them and left
  * would hold INT2 down forever.
  */
@@ -815,11 +815,10 @@ static void test_interrupt(void)
     netdev_mar_clear(nic.mar);
 
     /*
-     * The two masks, which are the way round their names do not suggest.  A
-     * CLEAR bit in the read-zero mask forces that status bit to read as zero,
-     * so all ones is "report everything"; writing zero there blinds the
-     * handler to every cause it exists to service and the card goes quiet
-     * with no error anywhere.  That is a mistake worth an assertion.
+     * The two masks run the opposite way to their names.  A clear bit in the
+     * read-zero mask forces that status bit to read as zero, so all ones
+     * reports everything.  A zero there blinds the handler to every cause it
+     * services, and the card goes quiet with no error anywhere.
      */
     expect_u32("read-zero mask reports everything",
                (unsigned long)mock_cmd_arg[EL3_C_SET_ZERO_MASK], 0xff);
@@ -873,7 +872,7 @@ static void test_interrupt(void)
     expect_u32("and is recovered by a restart",
                (unsigned long)nic.resets, 1);
 
-    /* A stopped unit disclaims everything: the server may still be armed. */
+    /* A stopped unit disclaims everything: the server can still be armed. */
     nic.running = FALSE;
     mock_status = EL3_S_INT_LATCH | EL3_S_RX_COMPLETE;
     expect_u32("a stopped unit disclaims",

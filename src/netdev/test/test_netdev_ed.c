@@ -1,20 +1,20 @@
 /*
  * The ED core's buffer arithmetic, on the host.
  *
- * The three functions this core adds over the NE2000 one -- read_hdr,
- * ring_copy, write_buf -- are all address arithmetic over a mapped window,
- * and every one of their failure modes is silent: a header decoded wrong
- * reads as an over-length frame and is counted as an error, a wrap computed
- * wrong shreds one packet in sixty-four, a pad that overwrites the last byte
- * of an odd frame corrupts one in two.  None of that shows up in a boot log.
+ * The three functions this core adds over the NE2000 one are read_hdr,
+ * ring_copy and write_buf.  All three are address arithmetic over a mapped
+ * window, and every one of their failure modes is silent.  A header decoded
+ * wrong reads as an over-length frame and is counted as an error, a wrap
+ * computed wrong shreds one packet in sixty-four, and a pad that overwrites
+ * the last byte of an odd frame corrupts one in two.  None of that shows up in
+ * a boot log.
  *
- * WHAT MAKES THIS HONEST ON A LITTLE-ENDIAN HOST.  The window is a 16-bit
- * port on a 68000 and everything here goes through WORD accesses, so the test
- * states its expectations in words: the value a 68k `move.w` would load is
- * the value this test stores.  Byte-level claims are made only where the code
- * itself extracts a byte from a word by shifting, which is the same
- * expression on either endianness.  A test that laid the window out as bytes
- * would be asserting the host's byte order, not the card's.
+ * The window is a 16-bit port on a 68000 and everything here goes through word
+ * accesses, so the test states its expectations in words: the value a 68k
+ * `move.w` would load is the value this test stores.  Byte-level claims are
+ * made only where the code itself extracts a byte from a word by shifting,
+ * which is the same expression on either endianness.  A test that laid the
+ * window out as bytes would assert the host's byte order, not the card's.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -66,14 +66,14 @@ static NetdevCard card;
 static NetdevNic  nic;
 
 /*
- * TWO VIEWS OF THE SAME WINDOW, AND THE DIFFERENCE IS NOT COSMETIC.
+ * Two views of the same window, and the difference is not cosmetic.
  *
- * The buffer is reached with WORD accesses, so what a 68k `move.w` loads is
- * the word this array holds: win_get/win_put are the model, and win_byte()
- * takes the byte apart the way the 68k lays it down -- even address in the
- * high half.  The PROM is reached with BYTE accesses at stride 2, which have
- * no endianness at all, so it is planted straight into the byte image.  Mix
- * the two up and the test asserts x86's byte order rather than the card's.
+ * The buffer is reached with word accesses, so what a 68k `move.w` loads is
+ * the word this array holds.  win_get/win_put are the model, and win_byte()
+ * takes the byte apart the way the 68k lays it down, with the even address in
+ * the high half.  The PROM is reached with byte accesses at stride 2, which
+ * have no endianness, so it is planted straight into the byte image.  Mixed
+ * up, the test asserts x86's byte order rather than the card's.
  */
 static UWORD win_get(ULONG off) { return window[off / 2u]; }
 static void  win_put(ULONG off, UWORD v) { window[off / 2u] = v; }
@@ -176,10 +176,10 @@ static void test_ring_copy(void)
     printf("ok   ring_copy flat contents\n");
 
     /*
-     * Wrapped: 40 bytes starting 16 short of the end.  The tail has to resume
-     * at mem_ring, NOT at mem_start -- the transmit slots live between them
-     * and a copy that restarted at zero would deliver a fragment of the frame
-     * being transmitted.
+     * Wrapped: 40 bytes starting 16 short of the end.  The tail must resume at
+     * mem_ring and not at mem_start.  The transmit slots live between them, and
+     * a copy that restarted at zero would deliver a fragment of the frame being
+     * transmitted.
      */
     memset(dst, 0, sizeof(dst));
     ret = ed_ring_copy(&nic, MEM_SIZE - 16, (UBYTE *)dst, 40);
@@ -213,11 +213,11 @@ static void test_ring_copy(void)
                ((UBYTE *)dst)[6], (UBYTE)(win_get(0x2006) >> 8));
 
     /*
-     * An ODD DESTINATION.  No caller in the driver produces one -- the
+     * An odd destination.  No caller in the driver produces one, because the
      * staging buffer is longword-aligned and a ring wrap resumes on a page
-     * boundary -- so this branch would otherwise be code that reads as
-     * handled and has never run.  It splits the word by shifting, which is
-     * the same on either endianness.
+     * boundary, so this branch would otherwise be code that reads as handled
+     * and has never run.  It splits the word by shifting, which is the same on
+     * either endianness.
      */
     {
         UBYTE odd[64];
@@ -243,8 +243,8 @@ static void test_ring_copy(void)
 
 /*
  * The whole slot, checked the way the copy wrote it.  For an even source the
- * body is a raw word move -- byte order preserving on a 68000 and not on this
- * host -- so the claim it can carry here is that the WORDS arrived in order.
+ * body is a raw word move, byte order preserving on a 68000 and not on this
+ * host, so the claim it can carry here is that the words arrived in order.
  * Everything else in the function goes through an explicit shift and is
  * byte-exact on either machine: an odd source's whole body, the last byte of
  * an odd length, and the pad.  Returns non-zero on any mismatch.
@@ -299,7 +299,7 @@ static void test_write_buf(void)
                (unsigned long)check_slot(frame, 14, sent), 0);
 
     /*
-     * An ODD runt, which is where a pad that rounds the wrong way eats the
+     * An odd runt, which is where a pad that rounds the wrong way eats the
      * last byte of the frame: byte 14 shares its word with the first pad
      * byte.
      */
@@ -328,12 +328,12 @@ static void test_write_buf(void)
 
 /*
  * ed_test_mem() claims to catch a window that decodes fewer address lines
- * than the buffer has -- the top half aliasing the bottom, which is what the
- * LAN Rover's 32K looked like until Amiberry ef28da7e.  That claim rests
- * entirely on every page's pattern being different from every other page's.
- * If the seed collided, the whole sweep would still pass on an aliased board
- * and the probe would be measuring nothing.  So: assert the seeds are
- * distinct over the largest buffer any row in the table asks for.
+ * than the buffer has, with the top half aliasing the bottom, which is what
+ * the LAN Rover's 32K looked like until Amiberry ef28da7e.  That claim rests
+ * on every page's pattern being different from every other page's.  If the
+ * seed collided, the whole sweep would still pass on an aliased board and the
+ * probe would measure nothing.  So: assert the seeds are distinct over the
+ * largest buffer any row in the table asks for.
  */
 static void test_mem_seed_distinct(void)
 {
@@ -364,8 +364,8 @@ static void plant_prom(const UBYTE *mac)
 /*
  * attach's station-address gates.  A board that answers 0x00 or 0xff to
  * everything, or hands back a group address, is a board that would come
- * online and never be delivered a frame -- which is indistinguishable from a
- * driver bug once it is in a user's machine.
+ * online and never be delivered a frame.  In a user's machine that is
+ * indistinguishable from a driver bug.
  */
 static void test_attach_station_address(void)
 {
