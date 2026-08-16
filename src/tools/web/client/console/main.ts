@@ -57,7 +57,6 @@ const stateEl = $("state");
 const wordEl = $("word");
 const geomEl = $("geom");
 const perfEl = $("perf");
-const palEl = $("pal");
 const countEl = $("count");
 
 function say(kind: "" | "up" | "down", text: string): void {
@@ -88,19 +87,6 @@ function showGeometry(): void {
     "  bpr " + s.bytesPerRow +
     "  " + frameBytes(s) + " B/frame" +
     "  displayed " + s.width * a.x + "x" + s.height * a.y;
-}
-
-function showPalette(rgb: Uint8Array, depth: number): void {
-  palEl.replaceChildren();
-  for (let i = 0; i < 1 << depth; i++) {
-    const sw = document.createElement("i");
-    sw.style.background =
-      "rgb(" + rgb[i * 3] + "," + rgb[i * 3 + 1] + "," + rgb[i * 3 + 2] + ")";
-    sw.title = i + ": " +
-      [rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]]
-        .map((v) => v.toString(16).padStart(2, "0")).join("");
-    palEl.append(sw);
-  }
 }
 
 /* ------------------------------------------------------------ the player -- */
@@ -255,7 +241,6 @@ function loadCapture(name: string, buf: ArrayBuffer): void {
 
   view.setScreen(c.screen, c.palette);
   showGeometry();
-  showPalette(c.rgb, c.screen.depth);
 
   scrubEl.max = String(c.frameCount - 1);
   setTransport(c.frameCount >= 2);
@@ -377,7 +362,6 @@ function heard(w: string): void {
       liveRgb = rgb;
       view.setScreen(g.screen, palette32(rgb, g.screen.depth));
       showGeometry();
-      showPalette(rgb, g.screen.depth);
       /* Before the pal that follows, so the file that closes here keeps the
          palette its frames were drawn with. */
       recRoll();
@@ -427,7 +411,6 @@ function heard(w: string): void {
       const rgb = paletteFromWord(w, geom.screen.depth);
       liveRgb = rgb;
       view.setPalette(palette32(rgb, geom.screen.depth));
-      showPalette(rgb, geom.screen.depth);
       if (planes !== null) view.paint(planes, 0);
       recRoll();
       return;

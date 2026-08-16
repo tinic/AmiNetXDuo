@@ -156,27 +156,6 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
 }
 
 /*
- * S2_CopyFromBuff: the device wants `len` bytes of the frame being sent.
- * `from` is this CMD_WRITE's ios2_Data, that is the AmiTxSlot.
- *
- * A device can take the frame in one call or several, and can restart the
- * whole transfer if it has to retry the wire. The cursor below handles the
- * chunked case. The reset conditions handle the retry case, and rewind to the
- * start of the packet for any request the cursor cannot satisfy from its
- * current position. For the common single-buffer, single-call frame both are
- * no-ops, and this reduces to one copy from the prepend pointer.
- */
-/*
- * Copy one whole TCP frame into `out`, summing as it goes, and write the
- * checksum into the device's buffer.  TRUE if it did. FALSE leaves the packet
- * untouched for the caller to hand to NetX Duo.
- *
- * The pseudo-header is the source and destination addresses, the protocol and
- * the TCP length, which is what RFC 793 puts in front of the segment. The
- * segment itself is summed with its checksum field still zero, which is the
- * identity for a ones-complement sum and is what the send path left there.
- */
-/*
  * Copy `len` bytes and return the ones-complement accumulator of what was
  * copied, in the convention n68k_copy_sum_longwords() uses: the caller folds,
  * and a partial trailing longword is padded with zeroes exactly as a walk
@@ -239,6 +218,16 @@ static ULONG ami_sana2_copy_sum(UCHAR *to, const UCHAR *from, ULONG len)
     return sum;
 }
 
+/*
+ * Copy one whole TCP frame into `out`, summing as it goes, and write the
+ * checksum into the device's buffer.  TRUE if it did. FALSE leaves the packet
+ * untouched for the caller to hand to NetX Duo.
+ *
+ * The pseudo-header is the source and destination addresses, the protocol and
+ * the TCP length, which is what RFC 793 puts in front of the segment. The
+ * segment itself is summed with its checksum field still zero, which is the
+ * identity for a ones-complement sum and is what the send path left there.
+ */
 static BOOL ami_sana2_tx_fuse_checksum(AmiTxSlot *slot, UCHAR *out, ULONG len)
 {
     NX_PACKET *pkt = slot->packet;
@@ -318,6 +307,17 @@ static BOOL ami_sana2_tx_fuse_checksum(AmiTxSlot *slot, UCHAR *out, ULONG len)
     return TRUE;
 }
 
+/*
+ * S2_CopyFromBuff: the device wants `len` bytes of the frame being sent.
+ * `from` is this CMD_WRITE's ios2_Data, that is the AmiTxSlot.
+ *
+ * A device can take the frame in one call or several, and can restart the
+ * whole transfer if it has to retry the wire. The cursor below handles the
+ * chunked case. The reset conditions handle the retry case, and rewind to the
+ * start of the packet for any request the cursor cannot satisfy from its
+ * current position. For the common single-buffer, single-call frame both are
+ * no-ops, and this reduces to one copy from the prepend pointer.
+ */
 BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
                               register APTR from __asm("a1"),
                               register ULONG len __asm("d0"))

@@ -152,12 +152,6 @@ static VOID ns_mac_from_words(ULONG msw, ULONG lsw, UBYTE *mac)
     mac[5] = (UBYTE)(lsw & 0xff);
 }
 
-/*
- * How many entries of `entry_size` fit after the header, and where the first
- * one goes. `room` is 0 when the buffer holds only the header, which is a
- * legitimate way to ask "how many are there?". nsh_Available is still filled
- * in.
- */
 /* ThreadX ticks -> milliseconds, for the records that report a duration. */
 static ULONG ns_ticks_ms(ULONG ticks)
 {
@@ -174,6 +168,12 @@ typedef struct NsWriter
     ULONG            available;
 } NsWriter;
 
+/*
+ * How many entries of `entry_size` fit after the header, and where the first
+ * one goes. `room` is 0 when the buffer holds only the header, which is a
+ * legitimate way to ask "how many are there?". nsh_Available is still filled
+ * in.
+ */
 static VOID ns_writer_init(NsWriter *w, NetStatusHeader *hdr, ULONG size,
                            UWORD type, ULONG entry_size)
 {

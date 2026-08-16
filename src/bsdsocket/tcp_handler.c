@@ -954,10 +954,9 @@ static VOID tcp_ctrl_find(struct DosPacket *pkt)
 }
 
 /*
- * Info() on the device. Answered rather than refused because commands ask
- * about a copy destination before they write, and "0 blocks free" would look
- * like a full disk. There is no disk, so report plenty of space and a valid
- * state.
+ * Put TCP: in the DOS device list and open the port the control process
+ * listens on. FALSE leaves nothing behind: every allocation made here is
+ * undone before it returns.
  */
 static BOOL tcp_ctrl_publish(VOID)
 {

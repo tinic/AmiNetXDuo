@@ -134,7 +134,9 @@ static UINT c68k_window_for(UINT bits)
  * rr = radix^(2*m_len) mod m, that is R^2 mod m.
  *
  * Done the way the vendored routine does it: reduce R, square the remainder,
- * reduce again.  setup needs 3*m_len + 4 limbs.
+ * reduce again.  setup needs 4*m_len + 3 limbs, see crypto68k.h: the first
+ * reduction fits in 3*m_len + 4 and the second, over a double-width square,
+ * does not.
  */
 VOID c68k_mont_setup_rr(c68k_limb *rr, const c68k_limb *m, UINT m_len,
                         c68k_limb *setup)

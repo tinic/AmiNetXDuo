@@ -173,7 +173,13 @@ VOID c68k_mod(c68k_limb *rem, const c68k_limb *u, UINT u_len,
 extern UINT c68k_fast_modulus;
 
 /*
- * rr = R^2 mod m, where R = 2^(32*m_len).  setup needs 7*m_len + 8 limbs.
+ * rr = R^2 mod m, where R = 2^(32*m_len).  setup needs 4*m_len + 3 limbs:
+ * m_len + 1 to hold R, then the larger of the two c68k_mod() scratch areas
+ * over it, C68K_MOD_SCRATCH_LIMBS(2*m_len, m_len).  The vendored-divider path
+ * needs 3*m_len + 3 and is covered by the same figure.
+ *
+ * c68k_mont_power_modulus() hands it the 7*m_len + 8 its own layout reserves,
+ * which is more than that and is not sized by this.
  *
  * Public so it can be timed on its own.  It was 22% of an RSA-2048 public
  * operation before c68k_mod() replaced the reduction inside it, large enough

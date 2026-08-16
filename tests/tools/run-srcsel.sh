@@ -85,8 +85,19 @@ fi
     exit 2
 }
 
-SELF="${AMINETXDUO_SRC_SELF:-10.0.2.15}"
-PEER="${AMINETXDUO_SRC_PEER:-10.0.2.2}"
+# Every arm here asserts on what the GUEST prints and none of them needs a
+# peer to answer, so bridged runs on a fixed address of their own rather than
+# a DHCP lease: the probe is given `self` on its command line before the guest
+# boots, and a lease is not known then.  A /24 nothing on the host's LAN uses,
+# so no address there is claimed or answered for.
+if [ "$RUNNER" = amiberry ]; then
+    SELF="${AMINETXDUO_SRC_SELF:-10.78.0.2}"
+    PEER="${AMINETXDUO_SRC_PEER:-10.78.0.1}"
+    MASK="${AMINETXDUO_SRC_MASK:-255.255.255.0}"
+else
+    SELF="${AMINETXDUO_SRC_SELF:-10.0.2.15}"
+    PEER="${AMINETXDUO_SRC_PEER:-10.0.2.2}"
+fi
 
 # ------------------------------------------------------------- staging ---
 
@@ -95,6 +106,18 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
+
+if [ "$RUNNER" = amiberry ]; then
+    cat > "$STAGE/devs/NetInterfaces/eth0" <<IFEOF
+DEVICE=a2065.device
+UNIT=0
+CONFIGURE=STATIC
+ADDRESS=$SELF
+NETMASK=$MASK
+GATEWAY=$PEER
+STATE=up
+IFEOF
+fi
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
 cp "$PROBE" "$STAGE/SrcProbe"
@@ -107,6 +130,9 @@ EOF
 # ------------------------------------------------------------------ run ---
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-srcsel}"
+# A MAC of its own, so a router or switch cache cannot answer for a guest that
+# never came up.
+export AMINETXDUO_AMIBERRY_MAC="${AMINETXDUO_AMIBERRY_MAC:-02:41:4d:49:00:7a}"
 
 set +e
 if [ "$RUNNER" = "amiberry" ]; then
@@ -166,6 +192,9 @@ for want in \
     "an unbound datagram still leaves by the route" \
     "sending to loopback from the interface address is ENETUNREACH" \
     "connect to 127.0.0.1 from 127.0.0.1" \
+    "getsockname on an unbound socket reports the source the route chose" \
+    "getsockname on an unbound datagram reports 127.0.0.1" \
+    "getsockname on it reports the interface the route chose" \
     "connect to 127.0.0.1 from the interface address is ENETUNREACH" \
     "connect to the interface address from the interface address" \
     "the accepted peer address is the bound source" \
