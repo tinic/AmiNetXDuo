@@ -1295,7 +1295,9 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
                          (ULONG)unit->nu_Nic.mac[5]);
         netdev_diag_note(ANXDIAG_MAC_SOURCE, ci,
                          (ULONG)unit->nu_Nic.mac_source);
-        netdev_diag_note(ANXDIAG_GETODD, ci, (ULONG)unit->nu_Nic.bus.getodd);
+        /* No ANXDIAG_GETODD here.  ne2000_detect() records it where the mode
+           is decided, for the split-window cards it can mean anything on, and
+           recording it again put the same sentence in the report twice. */
         netdev_diag_note(ANXDIAG_UNIT, ci, (ULONG)dev->nd_UnitCount);
     }
 
