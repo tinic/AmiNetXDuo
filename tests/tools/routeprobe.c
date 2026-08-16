@@ -7,22 +7,24 @@
  * where an instrument below this stack can see it.
  *
  *   destination 192.168.77.5      not on any of the guest's own subnets
- *   next hop    10.0.2.99         on the guest's subnet, so NetX Duo will
- *                                 accept it, and answered by nothing, since
- *                                 SLIRP is 10.0.2.2 and 10.0.2.3
+ *   next hop    .249 of the guest's own subnet, read out of NETSTATUS_ROUTES
+ *                                 rather than written in: it has to be on one
+ *                                 of the machine's own subnets or NetX Duo
+ *                                 refuses the route, and which subnet that is
+ *                                 depends on what the emulator is bridged onto
  *
  *   with the route     _nx_ip_route_find() matches the table entry, the next
- *                      hop becomes 10.0.2.99, and the stack emits
- *                          ARP who-has 10.0.2.99
- *                      because it has never resolved that address;
- *   without the route  the default gateway 10.0.2.2 is used, whose ARP entry
- *                      the DHCP exchange already resolved, so the frame goes
- *                      out immediately and there is no ARP at all.
+ *                      hop becomes that address, and the stack emits
+ *                          ARP who-has <next hop>
+ *                      because it has never resolved it;
+ *   without the route  the default gateway is used, whose ARP entry the DHCP
+ *                      exchange already resolved, so the frame goes out
+ *                      immediately and there is no ARP at all.
  *
- * An ARP request for 10.0.2.99 in the emulated A2065's own frame log therefore
- * appears if and only if the routing table was consulted.  That log is written
- * inside the emulated hardware, below every line of our code, so the assertion
- * is made there rather than on a capture this stack took of itself.
+ * That ARP request therefore appears if and only if the routing table was
+ * consulted.  It is read off the host NIC the emulator is bridged onto, below
+ * every line of our code, rather than off a capture this stack took of itself;
+ * tests/tools/run-routes.sh takes it.
  *
  * The subject is the stack, not the commands: the table exists, an entry goes
  * into it, the entry is reported back, it governs where a packet goes, and
@@ -47,8 +49,11 @@
 #define PROBE_DEST      0xC0A84D05UL    /* 192.168.77.5 , nothing routes here */
 #define PROBE_NETWORK   0xC0A84D00UL    /* 192.168.77.0                         */
 #define PROBE_MASK      0xFFFFFF00UL    /* /24                                  */
-#define PROBE_NEXTHOP   0x0A000263UL    /* 10.0.2.99, on-subnet, answered by  */
-                                        /*              nothing at all          */
+/* The next hop is derived at run time, not written in: it has to be on one of
+   the guest's own subnets or NetX Duo refuses the route, and what that subnet
+   is depends on what the emulator is bridged onto.  .249 of it, which nothing
+   is expected to answer and which RtProbe's .250/.251 do not collide with. */
+#define PROBE_NEXTHOP_HOST      249
 #define PROBE_ABSENT    0xC0A85800UL    /* 192.168.88.0, never added          */
 #define PROBE_PORT      9999
 
@@ -271,6 +276,42 @@ static VOID show_routes(struct Library *base, const char *when)
 }
 
 /*
+ * The guest's own subnet, out of the same table.  An interface route is the
+ * one with no gateway and a mask that is neither 0 (the default route) nor all
+ * ones (a host route); loopback is skipped because no frame leaves by it.
+ * Returns 0 when there is none, which means the interface is not up.
+ */
+static ULONG local_network(struct Library *base)
+{
+    LONG n;
+    LONG i;
+
+    probe_zero(&probe_routes, sizeof(probe_routes));
+    probe_routes.hdr.nsh_Magic   = AMI_NETSTATUS_MAGIC;
+    probe_routes.hdr.nsh_Version = AMI_NETSTATUS_VERSION;
+
+    n = p_query(base, NETSTATUS_ROUTES, &probe_routes, sizeof(probe_routes));
+
+    for (i = 0; i < n; i++)
+    {
+        const NetStatusRoute *r = &probe_routes.e[i];
+
+        if (r->nsr_Gateway != 0)
+            continue;
+        if (r->nsr_NetMask == 0 || r->nsr_NetMask == 0xFFFFFFFFUL)
+            continue;
+        if (r->nsr_Destination == 0)
+            continue;
+        if ((r->nsr_Destination & 0xFF000000UL) == 0x7F000000UL)
+            continue;
+
+        return r->nsr_Destination & r->nsr_NetMask;
+    }
+
+    return 0;
+}
+
+/*
  * One datagram at 192.168.77.5.  Nothing will answer it; the measurement is
  * where the stack decided to send it, which only the wire shows.
  */
@@ -319,7 +360,9 @@ int main(void)
         NetStatusHeader hdr;
         NetStatusSystem e;
     } sys;
-    LONG rc;
+    LONG  rc;
+    ULONG next_hop;
+    char  hop_text[16];
 
     base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4);
     if (base == NULL)
@@ -345,14 +388,25 @@ int main(void)
 
     show_routes(base, "before");
 
+    next_hop = local_network(base);
+    if (next_hop == 0)
+    {
+        Printf((CONST_STRPTR)"RouteProbe: no interface route, is the interface up?\n");
+        CloseLibrary(base);
+        return RETURN_FAIL;
+    }
+    next_hop |= PROBE_NEXTHOP_HOST;
+    probe_dotted(next_hop, hop_text);
+    Printf((CONST_STRPTR)"route next hop: %s\n", (LONG)hop_text);
+
     probe_ctl_init(&ctl);
     ctl.nsc_Destination = PROBE_NETWORK;
     ctl.nsc_NetMask     = PROBE_MASK;
-    ctl.nsc_Gateway     = PROBE_NEXTHOP;
+    ctl.nsc_Gateway     = next_hop;
 
     rc = p_control(base, NETCTRL_ROUTE_ADD, &ctl);
-    Printf((CONST_STRPTR)"add 192.168.77.0/24 via 10.0.2.99: %ld (errno %ld)\n",
-           rc, p_errno(base));
+    Printf((CONST_STRPTR)"add 192.168.77.0/24 via %s: %ld (errno %ld)\n",
+           (LONG)hop_text, rc, p_errno(base));
 
     show_routes(base, "with");
 

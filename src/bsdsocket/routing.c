@@ -3,6 +3,7 @@
  *
  *   AddRouteTagList()       a gateway route, or the default one
  *   DeleteRouteTagList()    the same, undone
+ *   ChangeRouteTagList()    the same, given a different next hop
  *   GetRouteInfo()          a copy of the whole table, as rt_msghdr entries
  *
  * Same primary source as interfaces.c: NDK 3.2's
@@ -37,6 +38,44 @@
  * RTA_Gateway, RTA_DefaultGateway, RTA_DestinationHost and RTA_DestinationNet
  * and nothing else, so the prefix length is implied by which of them was used.
  * See bsd_route_mask_for() below.
+ *
+ * ChangeRouteTagList() is the one of the four with no autodoc page, here or in
+ * the copy at wiki.amigaos.net. What the NDK does fix, and all it fixes:
+ *
+ *   sfd/bsdsocket_lib.sfd:88   LONG ChangeRouteTagList(struct TagItem *tags)
+ *                              (a0), listed under "* Route management" between
+ *                              DeleteRouteTagList and GetRouteInfo
+ *   pragmas/bsdsocket_pragmas.h:78   offset 0x1aa
+ *   libraries/bsdsocket.h:360-370    RTA_BASE+1..+5, the five tags that are
+ *                              the whole routing-API vocabulary. There is no
+ *                              tag for a metric, a flag or an interface
+ *
+ * The rest comes from the two things the autodoc does say. AddRouteTagList()
+ * is "a simplified, specialized front end to the underlying routing socket
+ * API", and on that API's own page RTM_CHANGE is "Change Metrics, Flags, or
+ * Gateway" of an entry that already exists, with ESRCH reserved for one that
+ * does not. Of those three, a next hop is the only one this table holds and
+ * the only one the five tags can name. So:
+ *
+ *   RTA_Destination / -Host / -Net + RTA_Gateway
+ *                              the static entry with that destination and its
+ *                              implied mask takes a new next hop
+ *   RTA_DefaultGateway         the installed default route takes a new one
+ *
+ * and the difference from AddRouteTagList() is that the entry must already be
+ * there. A change that installs is an add, and then ESRCH could never happen.
+ *
+ * Refused rather than accepted and ignored:
+ *
+ *   a destination with no RTA_Gateway   nothing to change it to, and no other
+ *                                       tag names anything else about it
+ *   RTA_Gateway with no destination     names no entry
+ *   RTA_DefaultGateway beside either    the exclusion AddRouteTagList()'s and
+ *                                       DeleteRouteTagList()'s pages both state
+ *
+ * All five tags are honoured. Nothing in the routing vocabulary is taken and
+ * dropped. Metrics and flags are not refused by name because no tag can carry
+ * one; RTM_CHANGE's other two thirds have no expression in this API at all.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -378,6 +417,187 @@ LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
         return bsd_fail(SocketBase, AMI_ENOSYS);
 
     return bsd_fail(SocketBase, AMI_EINVAL);
+}
+
+/* -------------------------------------------------------- ChangeRouteTagList */
+
+#ifdef NX_ENABLE_IP_STATIC_ROUTING
+/*
+ * The interface a next hop would leave by, by NetX Duo's own rule: the first
+ * valid interface whose network the address falls in. Written against
+ * nx_ip_static_route_add()'s loop rather than bsd_route_iface_for()'s so that
+ * "no interface" here and NX_IP_ADDRESS_ERROR there are the same condition.
+ * NULL when there is none.
+ */
+static NX_INTERFACE *bsd_route_nx_iface_for(NX_IP *ip, ULONG next_hop)
+{
+    UINT i;
+
+    for (i = 0; i < (UINT)NX_MAX_IP_INTERFACES; i++)
+    {
+        NX_INTERFACE *nxif = &ip->nx_ip_interface[i];
+
+        if (nxif->nx_interface_valid == 0)
+            continue;
+
+        if ((next_hop & nxif->nx_interface_ip_network_mask) ==
+            nxif->nx_interface_ip_network)
+            return nxif;
+    }
+
+    return NX_NULL;
+}
+
+/* The static entry for exactly this destination and mask, or NULL. The same
+   walk bsd_route_fill() does, and the same one nx_ip_static_route_add() does
+   to decide between updating and inserting. */
+static NX_IP_ROUTING_ENTRY *bsd_route_find(NX_IP *ip, ULONG dest, ULONG mask)
+{
+    ULONG network = dest & mask;
+    ULONG r;
+
+    for (r = 0; r < ip->nx_ip_routing_table_entry_count; r++)
+    {
+        NX_IP_ROUTING_ENTRY *e = &ip->nx_ip_routing_table[r];
+
+        if (e->nx_ip_routing_dest_ip == network &&
+            e->nx_ip_routing_net_mask == mask)
+            return e;
+    }
+
+    return NX_NULL;
+}
+#endif /* NX_ENABLE_IP_STATIC_ROUTING */
+
+LONG bsd_ChangeRouteTagList(register struct TagItem *tags __asm("a0"),
+                            register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    NX_IP      *ip = netstack_ip();
+    BsdRouteReq req;
+    UINT        status;
+
+    if (tags == NULL)
+        return bsd_fail(SocketBase, AMI_EINVAL);
+
+    if (ip == NULL)
+        return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+    if (bsd_route_parse_tags(SocketBase, tags, &req) != 0)
+        return -1;
+
+    if (bsd_nx_enter(SocketBase) != 0)
+        return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+    if (req.brr_HaveDefault)
+    {
+        /*
+         * RTA_DefaultGateway is the new one. The tag set has no second address
+         * to name the old one with, and the default route needs none: there is
+         * one of it. What it does need is to be there already, or this is an
+         * add wearing the wrong name.
+         */
+        ULONG installed = 0;
+
+        if (nx_ip_gateway_address_get(ip, &installed) != NX_SUCCESS ||
+            installed == 0)
+        {
+            bsd_nx_leave(SocketBase);
+            return bsd_fail(SocketBase, AMI_ESRCH);
+        }
+
+        /* One assignment of address and interface together, under the IP mutex
+           with interrupts off (nx_ip_gateway_address_set.c). No window in
+           which the machine has no default route. */
+        status = nx_ip_gateway_address_set(ip, req.brr_Default);
+    }
+    else if (req.brr_HaveDest && req.brr_HaveGateway)
+    {
+#ifdef NX_ENABLE_IP_STATIC_ROUTING
+        ULONG                mask = bsd_route_mask_for(req.brr_Dest,
+                                                       req.brr_DestKind);
+        NX_IP_ROUTING_ENTRY *entry = bsd_route_find(ip, req.brr_Dest, mask);
+        NX_INTERFACE        *was;
+        NX_INTERFACE        *now;
+
+        if (entry == NX_NULL)
+        {
+            bsd_nx_leave(SocketBase);
+            return bsd_fail(SocketBase, AMI_ESRCH);
+        }
+
+        was = entry->nx_ip_routing_entry_ip_interface;
+        now = bsd_route_nx_iface_for(ip, req.brr_Gateway);
+
+        if (now == was || now == NX_NULL)
+        {
+            /*
+             * nx_ip_static_route_add() on a destination and mask already in
+             * the table assigns the next hop in place and returns, so this is
+             * the change, not an add. Nothing is removed and no packet is
+             * routed by an absent entry in between.
+             *
+             * now == NX_NULL takes the same path deliberately: that call
+             * checks the next hop before it touches the table and returns
+             * NX_IP_ADDRESS_ERROR having changed nothing, which is the
+             * ENETUNREACH below.
+             */
+            status = nx_ip_static_route_add(ip, req.brr_Dest, mask,
+                                            req.brr_Gateway);
+        }
+        else
+        {
+            /*
+             * The one case the in-place update gets wrong, and it is the
+             * vendored code's: on an existing entry it writes the next hop and
+             * leaves nx_ip_routing_entry_ip_interface alone
+             * (nx_ip_static_route_add.c:126). nx_ip_route_find() reads that
+             * field to pick the outgoing card, so a next hop moved from one
+             * interface to another would keep sending out the old one.
+             *
+             * So when, and only when, the interface changes, the entry is
+             * removed and put back. That is not atomic. It is also the case
+             * where the old entry was about to become wrong, and a machine
+             * with one interface never reaches it. Delete cannot fail here
+             * (the entry was just found) and the add that follows cannot
+             * overflow (a slot was just freed) or fail on the address (checked
+             * above), so no path here loses the route.
+             */
+            (VOID)nx_ip_static_route_delete(ip, req.brr_Dest, mask);
+            status = nx_ip_static_route_add(ip, req.brr_Dest, mask,
+                                            req.brr_Gateway);
+        }
+#else
+        bsd_nx_leave(SocketBase);
+        return bsd_fail(SocketBase, AMI_ENOSYS);
+#endif
+    }
+    else
+    {
+        /*
+         * Everything else the five tags can spell: a destination with no
+         * gateway, a gateway with no destination, an empty list. RTM_CHANGE
+         * changes "Metrics, Flags, or Gateway" and the gateway is the only one
+         * of the three that has a tag, so a list that does not carry one names
+         * no change. EINVAL rather than a success that did nothing.
+         */
+        bsd_nx_leave(SocketBase);
+        return bsd_fail(SocketBase, AMI_EINVAL);
+    }
+
+    bsd_nx_leave(SocketBase);
+
+    if (status == NX_SUCCESS)
+        return 0;
+
+    /* Same mapping as AddRouteTagList(): the next hop reaching none of this
+       machine's own subnets is ENETUNREACH, not a full table. */
+    switch (status)
+    {
+        case NX_OVERFLOW:           return bsd_fail(SocketBase, AMI_ENOBUFS);
+        case NX_IP_ADDRESS_ERROR:   return bsd_fail(SocketBase, AMI_ENETUNREACH);
+        case NX_NOT_SUPPORTED:      return bsd_fail(SocketBase, AMI_ENOSYS);
+        default:                    return bsd_fail(SocketBase, AMI_EINVAL);
+    }
 }
 
 /* ------------------------------------------------------------ GetRouteInfo */
