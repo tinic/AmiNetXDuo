@@ -4,9 +4,9 @@
  *
  * interfaces.c holds the naming rule: the name from DEVS:NetInterfaces if
  * there is one, otherwise the name NetX Duo gave the slot, compared
- * case-insensitively. addralloc.c needs the same lookup,
+ * case-insensitively. addralloc.c needs the same lookup, because
  * CreateAddrAllocMessageA() returns CAAME_Interface_not_found for an unknown
- * name, so the rule is implemented once and declared here.
+ * name. The rule is therefore implemented once and declared here.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -28,18 +28,18 @@
 LONG bsd_if_index_of(NX_IP *ip, const char *name);
 
 /* The name of interface `index` counting from 1, as RFC 3493 and rtm_index do.
-   Sets no errno: display paths call it, and a caller checking errno after a
-   call that succeeded must not find it moved. FALSE and out[0]=0 if there is
-   no such interface. */
+   Sets no errno: display paths call it, and a caller that checks errno after
+   a call that succeeded must not find it moved. FALSE and out[0]=0 if there
+   is no such interface. */
 BOOL bsd_if_name_by_index(NX_IP *ip, ULONG index, char *out, ULONG outlen);
 
 /*
  * Address and mask on one physical slot, the half of
  * ConfigureInterfaceTagList() that NETCTRL_INTERFACE_CONFIGURE needs too.
- * Either may be left as it stands by passing FALSE for it; a mask of zero on
- * an interface that has none becomes the classful default. Returns 0, or -1
- * with errno set. Takes the ThreadX bracket itself, so it must not be called
- * from inside one.
+ * FALSE for either one leaves that value as it stands. A mask of zero on an
+ * interface that has none becomes the classful default. Returns 0, or -1 with
+ * errno set. Takes the ThreadX bracket itself, so it must not be called from
+ * inside one.
  */
 LONG bsd_if_set_address(struct AmiSocketBase *SocketBase, LONG index,
                         BOOL have_address, ULONG address,
@@ -55,8 +55,8 @@ LONG bsd_if_ioctl(ULONG req, APTR argp, struct AmiSocketBase *SocketBase);
 /*
  * From addralloc.c: TRUE while an address allocation Process is still running.
  * Declared here rather than in its own header because it has one caller,
- * bsd_lib_expunge(), which must decline while a worker is executing out of the
- * segment it would hand to UnLoadSeg(). Same reason as
+ * bsd_lib_expunge(). That caller must decline while a worker still runs out of
+ * the segment it hands to UnLoadSeg(). Same reason as
  * bsd_tcp_handler_alive().
  */
 BOOL bsd_aam_busy(VOID);
