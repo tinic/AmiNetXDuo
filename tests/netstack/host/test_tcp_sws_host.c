@@ -346,12 +346,14 @@ static UINT h_write(ULONG bytes)
 }
 
 /* Put the socket in the state the rule is about: `flight` bytes unacknowledged
-   and a peer window that leaves exactly `usable` bytes on top of them. */
+   and a PEER window that leaves exactly `usable` bytes on top of them.  The
+   congestion window is left wide open, because the rule is not about it --
+   g_congestion_window_is_not_a_sliver is the case that says so. */
 static void h_in_flight(ULONG flight, ULONG usable)
 {
     h_sock.nx_tcp_socket_tx_outstanding_bytes = flight;
     h_sock.nx_tcp_socket_tx_window_advertised = flight + usable;
-    h_sock.nx_tcp_socket_tx_window_congestion = flight + usable;
+    h_sock.nx_tcp_socket_tx_window_congestion = H_PEER_WINDOW;
 }
 
 /* --------------------------------------------------------------- cases ---- */
@@ -539,7 +541,41 @@ static void f_zero_window_still_persists(void)
     printf("  zero window         persist probe armed\n");
 }
 
-static void g_a_blocked_sender_is_woken_once(void)
+static void g_congestion_window_is_not_a_sliver(void)
+{
+    UINT status;
+
+    /*
+     * THE CASE THAT KEEPS THE RULE OFF THE BULK PATH, and the one that cost
+     * measurable throughput before it existed.  RFC 1122 4.2.3.4's U is
+     * SND.UNA + SND.WND - SND.NXT: the window the RECEIVER advertised.  A
+     * congestion window that happens to leave 200 bytes on top of what is in
+     * flight is not a silly window -- it is the ACK clock, and those 200 bytes
+     * are the segment that keeps the pipe full.
+     *
+     * Judging cwnd by this rule held that segment back once per round trip on
+     * every bulk transfer, and cost 0.3% (a2065), 0.4% (ariadne) and 2.8%
+     * (x-surf-100 Z3) of the write path, n=3 per card on tests/tools/
+     * run-iperf.sh.  Not one of those peers ever had a small window.
+     */
+    h_fixture();
+    h_sock.nx_tcp_socket_tx_outstanding_bytes = 512;
+    h_sock.nx_tcp_socket_tx_window_advertised = H_PEER_WINDOW;   /* peer: wide */
+    h_sock.nx_tcp_socket_tx_window_congestion = 512 + 200;       /* cwnd: 200  */
+
+    status = h_write(200);
+
+    h_check_eq(status, NX_SUCCESS,
+               "a congestion-limited segment was refused as a silly window");
+    h_check_eq(h_datagrams, 1,
+               "a congestion-limited segment was withheld as a silly window");
+
+    printf("  cwnd sliver         %u datagram(s), peer window %lu\n",
+           (unsigned int)h_datagrams,
+           (unsigned long)h_sock.nx_tcp_socket_tx_window_advertised);
+}
+
+static void i_a_blocked_sender_is_woken_once(void)
 {
     /*
      * The other half of the rule, and the reason it is a shared function
@@ -570,7 +606,7 @@ static void g_a_blocked_sender_is_woken_once(void)
            (unsigned int)h_resumes);
 }
 
-static void h_peak_window_is_remembered(void)
+static void j_peak_window_is_remembered(void)
 {
     NX_TCP_HEADER hdr;
 
@@ -628,8 +664,9 @@ int main(void)
     d_nothing_in_flight_always_sends();
     e_half_the_max_window_releases();
     f_zero_window_still_persists();
-    g_a_blocked_sender_is_woken_once();
-    h_peak_window_is_remembered();
+    g_congestion_window_is_not_a_sliver();
+    i_a_blocked_sender_is_woken_once();
+    j_peak_window_is_remembered();
 
     printf("%lu checks, %lu failures, %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");
