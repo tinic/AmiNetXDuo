@@ -4,35 +4,36 @@
 | VOID n68k_port_in(APTR to, const APTR port, ULONG blocks);
 | VOID n68k_port_out(APTR port, const APTR from, ULONG blocks);
 |
-| WHY THESE ARE NOT n68k_copy_bytes.  That routine brings the destination to a
-| longword boundary with byte moves and falls to a byte loop on a 68000 whose
+| These are not n68k_copy_bytes.  That routine brings the destination to a
+| longword boundary with byte moves, and falls to a byte loop on a 68000 whose
 | two pointers disagree in parity.  Neither is allowed on the far side here:
 |
 |   Hydra and the ASDG LAN Rover map a 16-bit buffer whose byte lanes are not
-|   separately selectable, so a byte write reaches BOTH halves on the real
+|   separately selectable, so a byte write reaches both halves on the real
 |   boards even where an emulator accepts it (src/netdev/ed.c).
 |
-|   The X-Surf 100's 32-bit window is 128 bytes of one FIFO mirrored end to
-|   end.  A byte access there is a FIFO access of the wrong width.
+|   The 32-bit window of the X-Surf 100 is 128 bytes of one FIFO mirrored end
+|   to end.  A byte access there is a FIFO access of the wrong width.
 |
-| So these move longwords and nothing narrower; the caller keeps the odd head
+| So these move longwords and nothing narrower.  The caller keeps the odd head
 | and tail, which it has to spell as word accesses anyway.  Both pointers must
-| be even, which is what the callers already guarantee -- a 68000 fetches a
+| be even, which is what the callers already guarantee.  A 68000 fetches a
 | longword from any even address, 2 mod 4 included, at one extra bus cycle.
 |
-| The technique is n68k_copy.S's and the measurements there apply unchanged:
-| movem.l moves eight longwords per instruction pair, and four pairs unrolled
-| into a 128-byte block is where the rest of the win is.  The bus cycles are
-| the same either way -- eight long accesses per pair, whatever issued them --
-| so what this saves is instruction fetch and decode.  That is most of the cost
-| under an emulator, which charges per instruction, and a smaller share on real
-| Zorro II, where one long access is 0.28-0.56 us and the bus is the wall.
+| The technique is that of n68k_copy.S and the measurements there apply
+| unchanged: movem.l moves eight longwords per instruction pair, and four pairs
+| unrolled into a 128-byte block is where the rest of the win is.  The bus
+| cycles are the same either way, eight long accesses per pair whatever issued
+| them, so what this saves is instruction fetch and decode.  That is most of
+| the cost under an emulator, which charges per instruction, and a smaller
+| share on real Zorro II, where one long access is 0.28-0.56 us and the bus is
+| the wall.
 |
-| n68k_port_* take 32-byte blocks and address the port at a FIXED address,
-| because the port does not advance a host address -- the chip advances
-| internally and every address in the window is the same FIFO.  32 and not 128
-| because 32 bytes is exactly what netdev_bus_probe_wide() verifies before it
-| promotes a card to NETDEV_DMODE_LONG (NETDEV_BUS_PROBE_LEN).
+| n68k_port_* take 32-byte blocks and address the port at a fixed address,
+| because the port does not advance a host address.  The chip advances
+| internally and every address in the window is the same FIFO.  The block is 32
+| bytes and not 128 because 32 bytes is exactly what netdev_bus_probe_wide()
+| checks before it promotes a card to NETDEV_DMODE_LONG (NETDEV_BUS_PROBE_LEN).
 |
 | SPDX-License-Identifier: MIT
 
@@ -47,28 +48,28 @@
         .globl  _n68k_port_out_w
 
 | The 68060 makes movem microcoded and non-pipelining while ordinary moves
-| dual-issue, so it takes the plain loop.  Same bet, and the same lack of a
-| measurement behind it, as n68k_copy.S -- see the note there.
+| dual-issue, so it takes the plain loop.  The same bet, and the same lack of a
+| measurement behind it, as n68k_copy.S.  See the note there.
 |
-| THIS BRANCH IS UNREACHED IN WHAT SHIPS, and that is a statement rather than an
-| oversight.  The default build is AMINETXDUO_CPU=any: -m68000 codegen, so
-| __mc68060__ is never defined and every machine gets the movem form.  It is
-| CORRECT everywhere -- movem.l is an original 68000 instruction -- and what a
-| 68060 loses is an untested tuning guess.
+| This branch is unreached in what ships.  The default build is
+| AMINETXDUO_CPU=any: -m68000 codegen, so __mc68060__ is never defined and
+| every machine gets the movem form.  That form is correct everywhere, because
+| movem.l is an original 68000 instruction, and what a 68060 loses is an
+| untested tuning guess.
 |
-| Making it a run-time choice is what src/net68k/n68k_cpu.c does for the
-| checksum and the copy, and it would need the same here: both forms assembled
-| under suffixed names and a vector set from AttnFlags at DEVICE init, because
-| anxnet.device is its own binary and never opens the library that selects.
-| Worth doing when somebody measures an 060 with a real card, and not before:
-| the bet it would settle has never had a number behind it.
+| A run-time choice is what src/net68k/n68k_cpu.c does for the checksum and the
+| copy, and it needs the same here: both forms assembled under suffixed names,
+| and a vector set from AttnFlags at device init, because anxnet.device is its
+| own binary and never opens the library that selects.  That is worth doing
+| once somebody measures an 060 with a real card, and not before, because the
+| bet it settles has never had a number behind it.
 |
-| IT HAS NOW BEEN RUN THERE.  The shipping binary -- this movem form, built
-| -m68000 -- on an A3000 at 68060 with an A2065: rc=0, read 4651 KB/s, write
+| It has since been run there.  The shipping binary, this movem form built
+| -m68000, ran on an A3000 at 68060 with an A2065: rc=0, read 4651 KB/s, write
 | 2372, no exception in the log.  The 68060-targeted build measured 4678/2268
-| in a different block, which under the interleaving rule means only that
-| there is no large difference either way.  So the movem form is correct AND
-| not slower on an 060, and the dispatch this note describes stays unbuilt.
+| in a different block, which under the interleaving rule means only that there
+| is no large difference either way.  So the movem form is correct and not
+| slower on an 060, and the dispatch this note describes stays unbuilt.
 #if defined(__mc68060__)
 #define N68K_NO_MOVEM 1
 #endif
@@ -140,20 +141,20 @@ _n68k_port_in:
 
 | a0 = to, a1 = port, d0 = 32-byte blocks
 |
-| The word port is ONE address and is not mirrored, so nothing can be batched
+| The word port is one address and is not mirrored, so nothing can be batched
 | on the port side: sixteen words are sixteen accesses however they are
 | spelled.  What is left is instruction count, and the answer is the plainest
-| possible one -- sixteen moves and two of loop.
+| one, sixteen moves and two of loop.
 |
-| IT WAS NOT ALWAYS THIS.  The first version paired the reads into longwords
-| and pushed them out eight at a time with movem.l, on the theory that halving
-| the memory-side cycles was worth something.  It costs a move.l and a swap per
-| longword to build them: 33 instructions per 16 words against 18 here.
-| cnet.device, the PCMCIA card's own driver, spells it the plain way and enters
-| a 16-way block by computed jump for the remainder; disassembling it is what
-| showed the pairing was a loss.  The bus cycles were never in question -- only
-| the instructions around them, which is most of the cost under an emulator and
-| a real if smaller one on a 68020 with a 256-byte cache.
+| The first version paired the reads into longwords and pushed them out eight
+| at a time with movem.l, on the theory that halving the memory-side cycles was
+| worth something.  Building the longwords costs a move.l and a swap each: 33
+| instructions per 16 words against 18 here.  cnet.device, the driver of the
+| PCMCIA card itself, spells it the plain way and enters a 16-way block by
+| computed jump for the remainder.  Disassembling it is what showed the pairing
+| was a loss.  The bus cycles were never in question, only the instructions
+| around them, which are most of the cost under an emulator and a real if
+| smaller one on a 68020 with a 256-byte cache.
 _n68k_port_in_w:
         movea.l sp@(4),a0
         movea.l sp@(8),a1
@@ -169,7 +170,7 @@ _n68k_port_in_w:
 .Lpiw_out:
         rts
 
-| a0 = port, a1 = from, d0 = 32-byte blocks.  The mirror image.
+| a0 = port, a1 = from, d0 = 32-byte blocks.  The reverse of the above.
 _n68k_port_out_w:
         movea.l sp@(4),a0
         movea.l sp@(8),a1

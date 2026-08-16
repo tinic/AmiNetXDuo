@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo, the internet checksum, in the form the 68k actually has.
+ * AmiNetXDuo, the internet checksum in the form the 68k has.
  *
  * third_party/netxduo/common/src/nx_ip_checksum_compute.c walks the payload a
  * longword at a time and splits each one into two 16-bit halves by hand:
@@ -7,26 +7,26 @@
  *     checksum += (*long_ptr & NX_LOWER_16_MASK);
  *     checksum += (*long_ptr >> NX_SHIFT_BY_16);
  *
- * which GCC 15.2 -O2 -m68020 turns into seven instructions per longword
+ * GCC 15.2 -O2 -m68020 turns that into seven instructions per longword
  * (move.l (An)+,Dn / move.l / andi.l #65535 / clr.w / swap / add.l / add.l)
- * plus the dbf.  That is the price of expressing a carry in a language that
- * has no carry flag.
+ * plus the dbf.  That is the cost of expressing a carry in a language with no
+ * carry flag.
  *
- * The machine has one.  A one's-complement sum is add.l followed by addx.l of
- * a zero register, two instructions per longword, no immediate, no swap, and
- * the operand comes straight out of (An)+ with no separate load.  The 32-bit
- * sum that produces is congruent to the 16-bit one modulo 0xFFFF, so folding
- * it at the end gives the same checksum; see n68k_sum_longwords().
+ * The 68k has a carry flag, so a one's-complement sum is add.l followed by
+ * addx.l of a zero register: two instructions per longword, no immediate, no
+ * swap, and the operand comes straight out of (An)+ with no separate load.
+ * The 32-bit sum that produces is congruent to the 16-bit one modulo 0xFFFF,
+ * so folding it at the end gives the same checksum.  See
+ * n68k_sum_longwords().
  *
- * Everything else, the pseudo-header arithmetic, the chain walk, the
- * end-pointer rounding, the two-byte carry across a packet boundary whose
- * append pointer is 2 mod 4, and the trailing 1/2/3-byte case including its
- * zero-write into the pad byte, is structurally identical to the vendored
- * code.  The requirement is to return exactly what NetX Duo would have
- * returned, not merely a correct internet checksum.  tests/perf/host/ checks
- * that differentially against the vendored function compiled under a different
- * name, over random buffers, every length from 0 to 64, every start alignment
- * and multi-packet chains.
+ * The rest is structurally identical to the vendored code: the pseudo-header
+ * arithmetic, the chain walk, the end-pointer rounding, the two-byte carry
+ * across a packet boundary whose append pointer is 2 mod 4, and the trailing
+ * 1/2/3-byte case with its zero-write into the pad byte.  This must return
+ * exactly what NetX Duo returns, and a correct internet checksum is not
+ * enough.  tests/perf/host/ checks that differentially against the vendored
+ * function compiled under a different name.  It covers random buffers, every
+ * length from 0 to 64, every start alignment and multi-packet chains.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -41,15 +41,15 @@
 #ifndef AMINETXDUO_NET68K_ASM
 
 /*
- * The portable fallback: the same carry chain the assembly does, which GCC
+ * The portable fallback: the same carry chain as the assembly, which GCC
  * compiles to
  *
  *     movea.l (a1)+,a0 / add.l a0,d0 / cmp.l a0,d0 / bcc.s / addq.l #1,d0
  *
- * four instructions and a branch where the machine needs two, still better
- * than the vendored seven.  Selecting the assembly is a build option
- * (AMINETXDUO_NET68K_ASM) and not a #if on the target, because a host build
- * has to compile this file to run the host tier of the differential test.
+ * four instructions and a branch where the machine needs two, and still better
+ * than the vendored seven.  A build option (AMINETXDUO_NET68K_ASM) selects the
+ * assembly, rather than a #if on the target, because a host build has to
+ * compile this file to run the host tier of the differential test.
  */
 N68K_NO_SANITIZE_ALIGNMENT
 ULONG n68k_sum_longwords(const ULONG *p, ULONG count)
@@ -91,13 +91,13 @@ static ULONG n68k_fold(ULONG sum)
 /* --------------------------------------------------------- the compute --- */
 
 /*
- * The melded copy, in portable form.  The assembly is what earns anything
- * here -- it feeds the adds from the movem.l the copy already does -- but the
- * contract is the same either way: copy, and return what n68k_sum_longwords()
- * would have returned over the source.
+ * The combined copy and sum, in portable form.  The assembly is where the win
+ * is, because it feeds the adds from the movem.l the copy already does.  The
+ * contract is the same either way: copy, and return the sum that
+ * n68k_sum_longwords() returns over the source.
  */
 #ifndef AMINETXDUO_NET68K_ASM
-/* The assembly counterpart is in n68k_checksum.S; same guard as
+/* The assembly counterpart is in n68k_checksum.S, under the same guard as
    n68k_sum_longwords above, so a host build still has one. */
 N68K_NO_SANITIZE_ALIGNMENT
 ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count)
@@ -146,7 +146,7 @@ UINT        i;
 #endif
 
 
-    /* TCP, UDP and ICMPv6 cover a pseudo header; ICMPv4 does not. */
+    /* TCP, UDP and ICMPv6 cover a pseudo header.  ICMPv4 does not. */
     if ((protocol == NX_PROTOCOL_UDP) ||
 #ifdef FEATURE_NX_IPV6
         (protocol == NX_PROTOCOL_ICMPV6) ||
@@ -185,7 +185,7 @@ UINT        i;
 
         checksum =  n68k_fold(checksum);
 
-        /* The payload below is summed in network order; this is not. */
+        /* The payload below is summed in network order.  This is not. */
         tmp =  (USHORT)checksum;
         NX_CHANGE_USHORT_ENDIAN(tmp);
         checksum =  tmp;
@@ -231,11 +231,11 @@ UINT        i;
 
             /*
              * The vendored loop is `while (long_ptr < end_ptr) long_ptr++`,
-             * which is ceil((end_ptr - long_ptr) / 4) iterations.  That equals
+             * that is, ceil((end_ptr - long_ptr) / 4) iterations.  That equals
              * consumed/4 whenever the prepend pointer is longword aligned,
-             * always, here, but it is computed rather than assumed, so a
-             * pool that handed out an odd prepend pointer would still sum the
-             * same bytes the vendored code sums.
+             * which it always is here.  The count is computed rather than
+             * assumed, so a pool that handed out an odd prepend pointer still
+             * sums the bytes the vendored code sums.
              */
             words =  ((ULONG)(end_ptr - (ALIGN_TYPE)long_ptr) + 3UL) >> 2;
 
@@ -265,7 +265,7 @@ UINT        i;
     }
 #endif /* NX_DISABLE_PACKET_CHAIN */
 
-    /* One, two or three bytes may be left; the odd byte is zero padded. */
+    /* One, two or three bytes can be left over.  The odd byte is zero padded. */
     if (data_length)
     {
 

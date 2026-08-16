@@ -1,27 +1,25 @@
 /*
- * AmiNetXDuo, receive checksum validation in the driver glue.
+ * AmiNetXDuo, receive checksum checks in the driver glue.
  *
  * NX_ENABLE_INTERFACE_CAPABILITY lets an interface tell NetX Duo that receive
- * checksums are already verified, so the stack skips its own walk.  Upstream
- * checks the capability PER INTERFACE, which would make this glue answerable
- * for every frame on the interface with no way to decline one; the fork
- * requires the per-packet nx_packet_interface_capability_flag as well, so a
- * frame this file does not vouch for is checked by the stack exactly as
- * before.  That is what makes declining possible, and declining is what makes
- * this safe.
+ * checksums are already checked, so the stack skips its own walk.  Upstream
+ * reads the capability per interface.  On its own that makes this glue
+ * answerable for every frame on the interface, with no way to decline one.
+ * The fork requires the per-packet nx_packet_interface_capability_flag as
+ * well, so a frame this file does not clear is checked by the stack exactly
+ * as before.
  *
- * WHY NOT FUSE IT INTO THE COPY.  Summing inside ami_sana2_copy_to_buff()
- * saves the second pass over the payload and is measurably faster, and it was
- * tried: it needs somewhere to leave the answer, the only sanctioned place is
- * NX_PACKET_HEADER_PAD, and growing NX_PACKET wedged the stack on 6 of 6
- * tcpdrill runs against 0 of 6 without it.  This costs a second parse of the
- * IP header and a second walk of the payload -- the walk the stack would have
- * done anyway, just here instead -- and it changes no structure, allocates
- * nothing, and keeps no state between packets.  There is nothing to go stale.
+ * Summing inside ami_sana2_copy_to_buff() saves the second pass over the
+ * payload and is measurably faster.  That was tried.  It needs somewhere to
+ * leave the answer, the only sanctioned place is NX_PACKET_HEADER_PAD, and
+ * growing NX_PACKET wedged the stack on 6 of 6 tcpdrill runs against 0 of 6
+ * without it.  The arrangement here costs a second parse of the IP header and
+ * a second walk of the payload, the walk the stack does anyway.  It changes no
+ * structure, allocates nothing, and keeps no state between packets.
  *
- * The per-packet flag's lifetime is the core's: _nx_packet_allocate() and
- * _nx_packet_release() both clear it.  This file only ever sets bits on a
- * frame it has just checked.
+ * The core owns the lifetime of the per-packet flag: _nx_packet_allocate() and
+ * _nx_packet_release() both clear it.  This file sets bits only on a frame it
+ * has just checked.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -34,8 +32,8 @@
 #ifdef AMINETXDUO_RX_VERIFY
 
 /* Big-endian reads: the header has not been byte swapped yet.  This runs
-   before nx_ipv4_packet_receive(), which is the whole point -- a frame is
-   vouched for or it is not, before the stack looks at it. */
+   before nx_ipv4_packet_receive(), so a frame is cleared or declined before
+   the stack looks at it. */
 #define N68K_RD16(p)    ((ULONG)(((ULONG)(p)[0] << 8) | (ULONG)(p)[1]))
 #define N68K_RD32(p)    ((ULONG)(((ULONG)(p)[0] << 24) | ((ULONG)(p)[1] << 16) | \
                                  ((ULONG)(p)[2] << 8)  |  (ULONG)(p)[3]))
@@ -43,9 +41,9 @@
 N68kRxVerifyStats  n68k_rx_verify_stats;
 
 /*
- * One checksum, through the same function the stack would have used, with the
- * packet temporarily presented the way that layer expects to see it.  The
- * caller restores; nothing here keeps the packet modified past its return.
+ * One checksum, through the same function the stack uses, with the packet
+ * presented the way that layer expects to see it.  The caller restores the
+ * packet fields.  Nothing here leaves the packet modified after it returns.
  */
 static UINT n68k_rx_sum_ok(NX_PACKET *packet, ULONG protocol, UINT length,
                            ULONG *src, ULONG *dst)
@@ -58,13 +56,13 @@ ULONG   checksum;
 }
 
 /*
- * Verify what can be verified and say what was verified.
+ * Check what can be checked, and report what was checked.
  *
  * Returns the capability bits to publish on the packet, or sets *drop when the
- * frame is corrupt and must not reach the stack at all.  A frame this does not
- * understand -- IPv6, a fragment, a truncated or padded header, anything odd
- * -- returns fewer bits and is checked by the stack in the ordinary way.  The
- * conservative answer is always "no bits".
+ * frame is corrupt and must not reach the stack at all.  A frame this function
+ * does not understand -- IPv6, a fragment, a truncated or padded header --
+ * returns fewer bits and is checked by the stack in the ordinary way.  The
+ * conservative answer is always no bits.
  */
 ULONG n68k_rx_verify(NX_PACKET *packet, UINT *drop)
 {
@@ -85,7 +83,7 @@ UINT        ok;
 
     ip =  packet -> nx_packet_prepend_ptr;
 
-    /* Below an IPv4 header there is nothing to check; the stack rejects it. */
+    /* Shorter than an IPv4 header: nothing to check, and the stack rejects it. */
     if (packet -> nx_packet_length < 20UL)
     {
         n68k_rx_verify_stats.skip_short++;
@@ -115,7 +113,7 @@ UINT        ok;
     if (n68k_rx_sum_ok(packet, NX_IP_VERSION_V4, ihl, NX_NULL, NX_NULL)
         != NX_TRUE)
     {
-        /* A header that fails here is exactly what the stack would drop, and
+        /* A header that fails here is what the stack drops anyway, and
            dropping it now saves carrying it further. */
         n68k_rx_verify_stats.bad_ip++;
         *drop =  NX_TRUE;
@@ -127,10 +125,11 @@ UINT        ok;
 
     /* ---- the transport ---------------------------------------------------
      *
-     * The IP header's total length is the authority, not nx_packet_length: an
-     * Ethernet frame below the minimum is padded, and the padding is not part
-     * of the datagram or of its checksum.  A frame whose header claims more
-     * than arrived is truncated and gets no transport bit.
+     * The total length in the IP header is the authority, rather than
+     * nx_packet_length.  An Ethernet frame below the minimum is padded, and
+     * the padding is not part of the datagram or of its checksum.  A frame
+     * whose header claims more than arrived is truncated and gets no
+     * transport bit.
      */
     total =  N68K_RD16(&ip[2]);
     frag  =  N68K_RD16(&ip[6]);
@@ -142,8 +141,8 @@ UINT        ok;
     }
 
     /* MF or a non-zero offset: the transport checksum covers the reassembled
-       datagram, which a frame-level check cannot see.  The stack verifies it
-       after reassembly, which is what declining the bit asks it to do. */
+       datagram, which a frame-level check cannot see.  The stack checks it
+       after reassembly, which is what declining the bit asks for. */
     if ((frag & 0x3FFFUL) != 0UL)
     {
         n68k_rx_verify_stats.skip_fragment++;
@@ -169,8 +168,8 @@ UINT        ok;
     }
 
     /*
-     * A UDP datagram may legitimately carry a zero checksum, which means the
-     * sender did not compute one.  There is then nothing to verify and the
+     * A UDP datagram can legitimately carry a zero checksum, which means the
+     * sender did not compute one.  There is then nothing to check, and the
      * bit must not be claimed.
      */
     if ((protocol == NX_PROTOCOL_UDP) && (payload >= 8U) &&
@@ -233,19 +232,19 @@ static ULONG n68k_rxv_fold(ULONG sum)
 }
 
 /*
- * The same verification, from a sum the copy already produced.
+ * The same check, from a sum the copy already produced.
  *
- * `carried` is the ones-complement sum of `copied` bytes starting where the
- * copy hook wrote -- for a cooked frame, the IPv4 header onward, which is
- * exactly what this function is looking at.  The transport's sum is then the
- * carried sum less the header's, one subtraction instead of a second walk of
- * the payload.  The header is still summed here, but that is twenty bytes
- * against up to fifteen hundred.
+ * `carried` is the ones-complement sum of `copied` bytes, starting where the
+ * copy hook wrote.  For a cooked frame that is the IPv4 header onward, which
+ * is what this function looks at.  The transport sum is then the carried sum
+ * less the header sum, one subtraction instead of a second walk of the
+ * payload.  The header is still summed here, twenty bytes against up to
+ * fifteen hundred.
  *
- * A frame carrying Ethernet padding is declined rather than corrected: the
+ * A frame carrying Ethernet padding is declined rather than corrected.  The
  * padding sits inside `copied` and outside the datagram, and it is only zero
- * by convention.  Such frames are short by definition, so the walk costs
- * nothing; the fast path is for the full-sized ones that matter.
+ * by convention.  Such frames are short, so the ordinary walk costs little.
+ * The fast path is for the full-sized frames.
  */
 ULONG n68k_rx_verify_sum(NX_PACKET *packet, ULONG carried, ULONG copied,
                          UINT *drop)
@@ -281,8 +280,8 @@ UINT    payload;
     ihl   =  (UINT)((ip[0] & 0x0FU) << 2);
     total =  N68K_RD16(&ip[2]);
 
-    /* Anything the carried sum cannot be trusted to describe exactly goes to
-       the ordinary path, which re-derives everything from the frame. */
+    /* Anything the carried sum cannot describe exactly goes to the ordinary
+       path, which re-derives everything from the frame. */
     if ((ihl < 20U) || ((ULONG)ihl > packet -> nx_packet_length) ||
         (total < (ULONG)ihl) || (total > packet -> nx_packet_length) ||
         (copied != total))
