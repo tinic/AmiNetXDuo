@@ -141,14 +141,40 @@ ULONG diff;
 
 static UINT anx6_same_address(const ULONG *a, const ULONG *b)
 {
-    return (anx6_common_prefix_len(a, b) == 128) ? 1U : 0U;
+    return (UINT)((a[0] == b[0]) && (a[1] == b[1]) &&
+                  (a[2] == b[2]) && (a[3] == b[3]));
 }
 
 
+/*
+ * Does `prefix`/`length` cover `addr`?  Masked longword compares rather than
+ * anx6_common_prefix_len() >= length: this runs nine times per policy lookup
+ * and once per address in the on-link walk, and every one of the §2.1 rows
+ * but two is answered by the first longword.  The bit position inside the
+ * longword, which is what makes CommonPrefixLen expensive, is never needed
+ * here.
+ */
 static UINT anx6_prefix_covers(const ULONG *prefix, UINT length,
                                const ULONG *addr)
 {
-    return (anx6_common_prefix_len(prefix, addr) >= length) ? 1U : 0U;
+UINT  i;
+UINT  bits;
+ULONG mask;
+
+    for (i = 0; (i < 4) && (length > 0); i++)
+    {
+        bits = (length >= 32) ? 32 : length;
+        mask = (bits == 32) ? 0xFFFFFFFFUL : ~(0xFFFFFFFFUL >> bits);
+
+        if (((prefix[i] ^ addr[i]) & mask) != 0)
+        {
+            return 0;
+        }
+
+        length -= bits;
+    }
+
+    return 1;
 }
 
 
@@ -469,21 +495,73 @@ NX_INTERFACE     *first_up = NX_NULL;
 
 
 /*
+ * ONE CANDIDATE, WITH EVERYTHING THE RULES ASK ABOUT IT ALREADY WORKED OUT.
+ *
+ * The rules are a pairwise comparison and the loop below is a pass over the
+ * table keeping the best so far, so a field read straight out of
+ * NXD_IPV6_ADDRESS would be recomputed for every comparison the incumbent
+ * takes part in.  The label is the one that matters: it is a walk of the
+ * nine-row policy table, and _nxd_ipv6_interface_find() is on the UDP send
+ * path (nxd_udp_socket_send.c) and runs once per datagram.
+ *
+ * Filling this in is O(candidates); comparing is then field reads.
+ */
+typedef struct ANX6_CANDIDATE_STRUCT
+{
+    NXD_IPV6_ADDRESS *anx6_cand_address;
+    UINT              anx6_cand_same;         /* Rule 1: it IS the destination */
+    UINT              anx6_cand_scope;        /* Rule 2 */
+    UINT              anx6_cand_deprecated;   /* Rule 3 */
+    UINT              anx6_cand_outgoing;     /* Rule 5 */
+    UINT              anx6_cand_label_match;  /* Rule 6 */
+    UINT              anx6_cand_prefix_len;   /* Rule 8, already capped */
+} ANX6_CANDIDATE;
+
+
+static VOID anx6_describe(ANX6_CANDIDATE *out, NXD_IPV6_ADDRESS *addr,
+                          const ULONG *dest, UINT dest_label,
+                          const NX_INTERFACE *out_if)
+{
+UINT length;
+
+    out -> anx6_cand_address = addr;
+    out -> anx6_cand_same    = anx6_same_address(addr -> nxd_ipv6_address, dest);
+    out -> anx6_cand_scope   = anx6_scope(addr -> nxd_ipv6_address);
+
+    out -> anx6_cand_deprecated =
+        (addr -> nxd_ipv6_address_state == NX_IPV6_ADDR_STATE_DEPRECATED) ? 1U : 0U;
+
+    out -> anx6_cand_outgoing =
+        (addr -> nxd_ipv6_address_attached == out_if) ? 1U : 0U;
+
+    out -> anx6_cand_label_match =
+        (anx6_label(addr -> nxd_ipv6_address) == dest_label) ? 1U : 0U;
+
+    /* §2.2: CommonPrefixLen counts only as far as the source's own prefix. */
+    length = anx6_common_prefix_len(addr -> nxd_ipv6_address, dest);
+    if (length > addr -> nxd_ipv6_address_prefix_length)
+    {
+        length = addr -> nxd_ipv6_address_prefix_length;
+    }
+    out -> anx6_cand_prefix_len = length;
+}
+
+
+/*
  * RFC 6724 §5, the rules, in order.  Positive when sa is preferred, negative
  * when sb is, zero when no rule separates them -- in which case the caller
  * keeps the one it already had, so the answer is the first in table order and
  * is stable rather than arbitrary.
  */
-static INT anx6_better(const ULONG *dest, UINT dest_scope, UINT dest_label,
-                       const NX_INTERFACE *out_if,
-                       const NXD_IPV6_ADDRESS *sa, const NXD_IPV6_ADDRESS *sb)
+static INT anx6_better(UINT dest_scope,
+                       const ANX6_CANDIDATE *sa, const ANX6_CANDIDATE *sb)
 {
 UINT a;
 UINT b;
 
     /* Rule 1: prefer same address. */
-    a = anx6_same_address(sa -> nxd_ipv6_address, dest);
-    b = anx6_same_address(sb -> nxd_ipv6_address, dest);
+    a = sa -> anx6_cand_same;
+    b = sb -> anx6_cand_same;
     if (a != b)
     {
         return a ? 1 : -1;
@@ -491,8 +569,8 @@ UINT b;
 
     /* Rule 2: prefer appropriate scope.  The smaller scope wins only when it
        is still large enough for the destination. */
-    a = anx6_scope(sa -> nxd_ipv6_address);
-    b = anx6_scope(sb -> nxd_ipv6_address);
+    a = sa -> anx6_cand_scope;
+    b = sb -> anx6_cand_scope;
     if (a != b)
     {
         if (a < b)
@@ -504,8 +582,8 @@ UINT b;
     }
 
     /* Rule 3: avoid deprecated addresses. */
-    a = (sa -> nxd_ipv6_address_state == NX_IPV6_ADDR_STATE_DEPRECATED) ? 1U : 0U;
-    b = (sb -> nxd_ipv6_address_state == NX_IPV6_ADDR_STATE_DEPRECATED) ? 1U : 0U;
+    a = sa -> anx6_cand_deprecated;
+    b = sb -> anx6_cand_deprecated;
     if (a != b)
     {
         return a ? -1 : 1;
@@ -520,8 +598,8 @@ UINT b;
      */
 
     /* Rule 5: prefer the outgoing interface. */
-    a = (sa -> nxd_ipv6_address_attached == out_if) ? 1U : 0U;
-    b = (sb -> nxd_ipv6_address_attached == out_if) ? 1U : 0U;
+    a = sa -> anx6_cand_outgoing;
+    b = sb -> anx6_cand_outgoing;
     if (a != b)
     {
         return a ? 1 : -1;
@@ -538,8 +616,8 @@ UINT b;
      */
 
     /* Rule 6: prefer matching label, from the §2.1 policy table. */
-    a = (anx6_label(sa -> nxd_ipv6_address) == dest_label) ? 1U : 0U;
-    b = (anx6_label(sb -> nxd_ipv6_address) == dest_label) ? 1U : 0U;
+    a = sa -> anx6_cand_label_match;
+    b = sb -> anx6_cand_label_match;
     if (a != b)
     {
         return a ? 1 : -1;
@@ -554,20 +632,9 @@ UINT b;
      * has nothing to prefer, and there is no field it could read if it had.
      */
 
-    /* Rule 8: use longest matching prefix, §2.2 CommonPrefixLen, capped at
-       the length of the source's own prefix. */
-    a = anx6_common_prefix_len(sa -> nxd_ipv6_address, dest);
-    if (a > sa -> nxd_ipv6_address_prefix_length)
-    {
-        a = sa -> nxd_ipv6_address_prefix_length;
-    }
-
-    b = anx6_common_prefix_len(sb -> nxd_ipv6_address, dest);
-    if (b > sb -> nxd_ipv6_address_prefix_length)
-    {
-        b = sb -> nxd_ipv6_address_prefix_length;
-    }
-
+    /* Rule 8: use longest matching prefix, §2.2 CommonPrefixLen. */
+    a = sa -> anx6_cand_prefix_len;
+    b = sb -> anx6_cand_prefix_len;
     if (a != b)
     {
         return (a > b) ? 1 : -1;
@@ -609,9 +676,11 @@ UINT _nxd_ipv6_interface_find(NX_IP *ip_ptr, ULONG *dest_address,
 UINT              i;
 UINT              dest_scope;
 UINT              dest_label;
+UINT              have_best = 0;
 NX_INTERFACE     *out_if;
-NXD_IPV6_ADDRESS *best = NX_NULL;
 NXD_IPV6_ADDRESS *addr;
+ANX6_CANDIDATE    best;
+ANX6_CANDIDATE    here;
 
     /* ipv6_addr must not be NULL. */
     NX_ASSERT(ipv6_addr != NX_NULL);
@@ -689,15 +758,16 @@ NXD_IPV6_ADDRESS *addr;
             continue;
         }
 
-        if ((best == NX_NULL) ||
-            (anx6_better(dest_address, dest_scope, dest_label, out_if,
-                         addr, best) > 0))
+        anx6_describe(&here, addr, dest_address, dest_label, out_if);
+
+        if (!have_best || (anx6_better(dest_scope, &here, &best) > 0))
         {
-            best = addr;
+            best      = here;
+            have_best = 1;
         }
     }
 
-    if (best == NX_NULL)
+    if (!have_best)
     {
         return NX_NO_INTERFACE_ADDRESS;
     }
@@ -711,12 +781,12 @@ NXD_IPV6_ADDRESS *addr;
      * a source that cannot work -- which is what the routine this replaces
      * did, by never considering the address at all.
      */
-    if (anx6_scope(best -> nxd_ipv6_address) < dest_scope)
+    if (best.anx6_cand_scope < dest_scope)
     {
         return NX_NO_INTERFACE_ADDRESS;
     }
 
-    *ipv6_addr = best;
+    *ipv6_addr = best.anx6_cand_address;
 
     return NX_SUCCESS;
 }

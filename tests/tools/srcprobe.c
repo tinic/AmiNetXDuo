@@ -281,7 +281,9 @@ static LONG p_errno(struct Library *base)
 
 /*
  * The four vectors above take an address of any family, so each family gets a
- * typed wrapper rather than a cast at every call site.  Nothing else changes:
+ * typed wrapper rather than a cast at every call site.  There is no p_bind6():
+ * RFC 6724 selection is what an UNBOUND socket gets, so the IPv6 arm never
+ * binds and a wrapper for it would be a function nothing calls.  Nothing else changes:
  * these are the same LVOs with the same registers, and the length is the only
  * thing sockaddr_in and sockaddr_in6 disagree about.
  */
@@ -305,11 +307,6 @@ static LONG p_sendto(struct Library *base, LONG s, const void *buf, LONG len,
 static LONG p_getsockname(struct Library *base, LONG s, ProbeAddr *sa)
 {
     return p_getsockname_raw(base, s, (APTR)sa, (LONG)sizeof(*sa));
-}
-
-static LONG p_bind6(struct Library *base, LONG s, const ProbeAddr6 *sa)
-{
-    return p_bind_raw(base, s, (CONST_APTR)sa, (LONG)sizeof(*sa));
 }
 
 static LONG p_connect6(struct Library *base, LONG s, const ProbeAddr6 *sa)
