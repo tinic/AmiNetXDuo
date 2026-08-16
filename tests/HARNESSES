@@ -129,6 +129,7 @@ tests/tools/run-sntp.sh            : manual : peer. sntp, and what setting the c
 tests/tools/run-toolleak.sh        : manual : peer, bridged. the leak sweep for the whole command set
 tests/tools/run-httpd.sh           : manual : peer, bridged. httpd on the LAN for real WebDAV clients; a transcript, not a verdict
 tests/tools/run-synflood.sh        : manual : peer, bridged. a SYN flood at a listening httpd; the guest must still complete a legitimate handshake. Needs a python carrying cap_net_raw on the peer, so not a gate yet
+tests/tools/run-syncost.sh         : manual : peer, bridged. what the SYN cache costs an idle server: handshake latency and throughput, two builds interleaved, against a no-attack baseline
 tests/tools/run-wsterm.sh          : manual : peer, bridged. the websocket terminal and the WebDAV drill
 tests/tools/run-wsconsole.sh       : manual : peer, bridged. the console as opposed to the pipe
 tests/tools/run-smbprobe.sh        : manual : bench, bridged. a transcript of ping and nc against an SMB server's 445 and 139 from a booted guest, which is how far a socket test can get; it asserts nothing, so there is nothing here to go red. install/test/run-smbmount.sh is the gate

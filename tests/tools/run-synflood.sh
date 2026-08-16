@@ -37,12 +37,15 @@
 #
 # THE MEASUREMENT IS THE LEGITIMATE CLIENT, NOT THE FLOOD
 #
-#   handshake_ms is a real curl from this host to the guest's httpd, timed,
-#   taken three times before the flood and three times during it.  The verdict
-#   is whether the during-flood GETs still return 200, and whether their time
-#   is within reach of the quiet ones -- a legitimate client must not see a
-#   slower or less reliable handshake, which is the whole point of a cache over
-#   a drop.
+#   handshake_ms is a real connect-plus-GET FROM THE PEER to the guest's
+#   httpd, timed on the peer (tests/tools/synprobe.py), taken three times
+#   before the flood and five times during it.  It runs on the peer because
+#   the emulator host cannot reach its own bridged guest, and it is timed
+#   there because an ssh round trip inside a handshake figure would dwarf the
+#   handshake.  The verdict is whether the during-flood GETs still return 200,
+#   and whether their median time is within reach of the quiet one -- a
+#   legitimate client must not see a slower or less reliable handshake, which
+#   is the whole point of a cache over a drop.
 #
 # EVERY CARD, NOT ONE
 #
@@ -193,6 +196,8 @@ rm -rf "$OUT"; mkdir -p "$OUT"
 peer_sh "rm -f $RTMP-*; exit 0"
 scp -q "$ROOT/tests/tools/synflood.py" "$PEERHOST:$RTMP-synflood-$TAG.py" || {
     echo "cannot copy the flooder to $PEERHOST" >&2; exit 2; }
+scp -q "$ROOT/tests/tools/synprobe.py" "$PEERHOST:$RTMP-synprobe-$TAG.py" || {
+    echo "cannot copy the probe to $PEERHOST" >&2; exit 2; }
 
 # --------------------------------------------------------------- one card ---
 #
@@ -208,27 +213,25 @@ CARD_FLOOD_TRIES=0
 CARD_SENT=0
 CARD_DRIVER=""
 
-geturl() {
-    curl -s -m 6 -o /dev/null -w '%{http_code}' \
-        "http://$1:$PORT/readme.txt" 2>/dev/null || echo 000
-}
-
-# A timed GET in milliseconds, or `fail`.
-timed_get() {
-    local start end code
-    start=$(date +%s%N)
-    code=$(geturl "$1")
-    end=$(date +%s%N)
-    if [ "$code" = 200 ]; then
-        echo $(( (end - start) / 1000000 ))
-    else
-        echo fail
-    fi
+# A legitimate client, RUN ON THE PEER and timed there.  The emulator host
+# cannot reach its own bridged guest (docs/RESEARCH.md 63), and an ssh round
+# trip inside a handshake figure would dwarf the handshake, so the probe runs
+# where the connection is opened.  Echoes "ok_median" e.g. "3 7", the count
+# that returned 200 and their median millisecond time, or "0 none".
+peer_probe() {
+    local address="$1" count="$2" line
+    line=$(ssh -o ConnectTimeout=10 -n "$PEERHOST" \
+        "$PYCAP $RTMP-synprobe-$TAG.py $address --port $PORT \
+         --path /readme.txt --count $count --gap 1 --timeout 8" 2>/dev/null || true)
+    local ok med
+    ok=$(printf '%s' "$line" | sed -n 's/.*ok=\([0-9]*\).*/\1/p')
+    med=$(printf '%s' "$line" | sed -n 's/.*ms_median=\([0-9]*\).*/\1/p')
+    echo "${ok:-0} ${med:-none}"
 }
 
 run_one_card() {
     local board="$1" model="$2" address="$3" mactail="$4"
-    local stage hd ms sum ok
+    local stage hd ok
 
     CARD_STATUS=fail
     CARD_QUIET_MS=none
@@ -297,11 +300,12 @@ IFEOF
 
     # Poll rather than sleeping a guessed amount: a boot is 30-90 s and the
     # interface comes up under the server.
-    local answered=no
+    local answered=no probe_ok
     for _ in $(seq 1 $((TIMEOUT / 2))); do
         sleep 2
         kill -0 "$RUNNER" 2>/dev/null || break
-        if [ "$(geturl "$address")" = 200 ]; then
+        read -r probe_ok _ <<<"$(peer_probe "$address" 1)"
+        if [ "$probe_ok" -ge 1 ]; then
             answered=yes
             break
         fi
@@ -315,22 +319,17 @@ IFEOF
         return 0
     fi
 
-    # Three quiet handshakes, the baseline the flood is judged against.
-    ok=0; sum=0
-    for _ in 1 2 3; do
-        ms=$(timed_get "$address")
-        echo "    $board quiet GET: $ms"
-        if [ "$ms" != fail ]; then ok=$((ok + 1)); sum=$((sum + ms)); fi
-        sleep 1
-    done
-    if [ "$ok" -lt 2 ]; then
+    # Three quiet handshakes from the peer, the baseline the flood is judged
+    # against.
+    read -r ok CARD_QUIET_MS <<<"$(peer_probe "$address" 3)"
+    echo "    $board quiet: ok=$ok/3 median_ms=$CARD_QUIET_MS"
+    if [ "$ok" -lt 2 ] || [ "$CARD_QUIET_MS" = none ]; then
         kill "$RUNNER" 2>/dev/null || true
         wait "$RUNNER" 2>/dev/null || true
         RUNNER=""
         CARD_STATUS=skip_baseline
         return 0
     fi
-    CARD_QUIET_MS=$((sum / ok))
 
     echo "==> $board: $PEERHOST flooding $address:$PORT at ${FLOOD_PPS} pps for ${FLOOD_SECS}s"
     ssh -o ConnectTimeout=10 -n "$PEERHOST" \
@@ -345,16 +344,12 @@ IFEOF
     # pressure and not before it.
     sleep 5
 
-    ok=0; sum=0
-    for _ in 1 2 3; do
-        ms=$(timed_get "$address")
-        echo "    $board flooded GET: $ms"
-        CARD_FLOOD_TRIES=$((CARD_FLOOD_TRIES + 1))
-        if [ "$ms" != fail ]; then ok=$((ok + 1)); sum=$((sum + ms)); fi
-        sleep 2
-    done
-    CARD_FLOOD_OK=$ok
-    [ "$ok" -gt 0 ] && CARD_FLOOD_MS=$((sum / ok))
+    # Five legitimate connections DURING the flood, from the peer.  This is
+    # the claim: a real client completes a handshake and a GET while the port
+    # is under attack.
+    CARD_FLOOD_TRIES=5
+    read -r CARD_FLOOD_OK CARD_FLOOD_MS <<<"$(peer_probe "$address" 5)"
+    echo "    $board flooded: ok=$CARD_FLOOD_OK/5 median_ms=$CARD_FLOOD_MS"
 
     wait "$FLOOD_PID" 2>/dev/null || true
     FLOOD_PID=""
