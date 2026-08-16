@@ -2,12 +2,12 @@
  * AmiNetXDuo, usergroup.library public vectors.
  *
  * One declaration per LVO, in table order, with the register assignment each
- * argument must arrive in. Transcribed verbatim from AmiTCP's
- * fd/usergroup_lib.fd and Roadshow's sfd/usergroup_lib.sfd, which agree
- * exactly; see the ABI note at the top of usergroup_internal.h.
+ * argument must arrive in. Transcribed verbatim from the AmiTCP
+ * fd/usergroup_lib.fd and the Roadshow sfd/usergroup_lib.sfd, which agree
+ * exactly. See the ABI note at the top of usergroup_internal.h.
  *
  * Both the table in ug_library.c and every implementation file include this,
- * so a signature can never drift away from the ABI unnoticed.
+ * so a signature cannot drift away from the ABI unnoticed.
  *
  * SPDX-License-Identifier: MIT
  */

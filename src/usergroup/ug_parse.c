@@ -1,10 +1,10 @@
 /*
  * AmiNetXDuo, usergroup.library: parsing the passwd and group files.
  *
- * Split out of ug_db.c, which keeps the file reading and the library vectors.
+ * Split out of ug_db.c, which keeps the file read and the library vectors.
  * Nothing here calls dos.library or exec.library, so the source that runs on
- * the Amiga is the source tests/fuzz drives under ASan, the arrangement
- * src/config has, and for the same reason: a sizing pass that disagrees with
+ * the Amiga is the source that tests/fuzz drives under ASan. src/config has
+ * the same arrangement, for the same reason: a sizing pass that disagrees with
  * the parse pass is a heap overrun on a machine with no MMU.
  *
  * SPDX-License-Identifier: MIT
@@ -87,8 +87,8 @@ static char *ug_field(char **cursor, char sep)
 }
 
 /*
- * Accumulates unsigned and saturates. Multiplying a signed LONG is undefined
- * past 2^31 and a uid field in DEVS: can hold any number of digits; UBSan
+ * Accumulates unsigned and saturates. A multiply of a signed LONG is undefined
+ * past 2^31, and a uid field in DEVS: can hold any number of digits. UBSan
  * found it through tests/fuzz/fuzz_usergroup.c.
  */
 static LONG ug_atol(const char *s)
@@ -206,8 +206,8 @@ void ug_db_parse_group(struct UgDatabase *db, char *text, ULONG len)
 
     /*
      * ug_next_line() ends a line on '\n' or '\r', so both count. A file with
-     * no '\n' in it used to size the arena for one line and parse dozens.
-     * Counting a CRLF twice only over-allocates.
+     * no '\n' in it used to size the arena for one line and parse dozens. A
+     * CRLF counted twice only over-allocates.
      */
     for (i = 0; i < len; i++)
     {
@@ -263,7 +263,7 @@ void ug_db_parse_group(struct UgDatabase *db, char *text, ULONG len)
         /*
          * Checked independently of the sizing above, so a future change there
          * cannot reach past the arena. gr_mem is walked to its NULL, so the
-         * group is counted only once one has been written.
+         * group is counted only after a NULL is written.
          */
         if (slot >= slots)
         {

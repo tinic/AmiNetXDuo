@@ -22,9 +22,9 @@
 
 /*
  * The first code in the image, ahead of everything the compiler emits below.
- * Running a .library as a program must fail with a return code, not fall into
- * the romtag. Written as top-level asm because GCC is free to order the
- * functions it generates however it likes, and does.
+ * A .library run as a program must fail with a return code, and must not fall
+ * into the romtag. Written as top-level asm because GCC is free to order the
+ * functions it generates in any way, and does.
  */
 __asm__ (
     "   .text                   \n"
@@ -36,7 +36,7 @@ __asm__ (
 
 /*
  * The library owns these: a shared library gets no C startup code, so nothing
- * else is going to fill them in. They are per-image, not per-opener.
+ * else fills them in. They are per-image, not per-opener.
  */
 struct ExecBase   *SysBase;
 struct DosLibrary *DOSBase;
@@ -50,8 +50,8 @@ static char ug_lib_id[]   = "usergroup.library 4.0 (AmiNetXDuo)\r\n";
 /* ------------------------------------------------------- ABI assertions, */
 
 /*
- * If any of these fire, the records we hand back are not the ones AmiTCP and
- * Roadshow clients were compiled against. See the ABI note in
+ * If any of these fire, the records handed back are not the ones that AmiTCP
+ * and Roadshow clients were compiled against. See the ABI note in
  * usergroup_internal.h for where the reference layouts come from.
  */
 _Static_assert(sizeof(struct ug_passwd) == 28,      "struct passwd ABI");
@@ -118,7 +118,7 @@ int ug_strcmp(const char *a, const char *b)
     return (int)((unsigned char)*a) - (int)((unsigned char)*b);
 }
 
-/* NewList() lives in amiga.lib; a shared library open-codes it. */
+/* NewList() lives in amiga.lib. A shared library open-codes it. */
 void ug_newlist(struct MinList *list)
 {
     list->mlh_Head     = (struct MinNode *)&list->mlh_Tail;
@@ -129,9 +129,9 @@ void ug_newlist(struct MinList *list)
 /* ------------------------------------------------------------- dos base, */
 
 /*
- * Opened on first use rather than at init: the database files are optional,
- * and a caller that never touches them never pays for dos.library. Safe to
- * call with the global lock already held, Exec semaphores nest per task.
+ * Opened on first use and not at init: the database files are optional, and a
+ * caller that never touches them never pays for dos.library. Safe to call with
+ * the global lock already held, because Exec semaphores nest per task.
  */
 struct DosLibrary *ug_dos(struct UserGroupBase *base)
 {
@@ -206,7 +206,8 @@ static struct UserGroupBase *ug_LibOpen(UG_A6)
 
     /*
      * Copy the jump table plus the Library header. Everything past the header
-     * is this opener's private state and stays as ami_alloc() left it: zero.
+     * is the private state of this opener, and stays as ami_alloc() left it:
+     * zero.
      */
     CopyMem((APTR)((UBYTE *)master - neg), mem, neg + sizeof(struct Library));
 
@@ -226,10 +227,10 @@ static struct UserGroupBase *ug_LibOpen(UG_A6)
 
     /*
      * Forbid(), not ug_Global->lock. Exec calls this vector with a Forbid()
-     * already held, and that lock is the database lock, ug_db.c holds it
-     * across file reads and ug_dos() across an OpenLibrary(). Waiting for it
-     * here would break exec's Forbid for the length of a disk access, with the
-     * library list supposedly frozen. The list this guards is short and
+     * already held, and that lock is the database lock: ug_db.c holds it
+     * across file reads and ug_dos() across an OpenLibrary(). A wait for it
+     * here breaks the exec Forbid for the length of a disk access, while the
+     * library list is meant to be frozen. The list this guards is short, and
      * ugl_getcredentials() walks it under the same Forbid().
      */
     Forbid();
@@ -248,7 +249,7 @@ static BPTR ug_LibClose(UG_A6)
 
     if (master != NULL)
     {
-        /* Forbid(), for the reason ug_LibOpen() gives. */
+        /* Forbid(), for the reason that ug_LibOpen() gives. */
         Forbid();
         Remove((struct Node *)&base->ug_Node);
         Permit();
@@ -257,7 +258,7 @@ static BPTR ug_LibClose(UG_A6)
     }
     else
     {
-        /* Someone closed the master base directly. Tolerate it. */
+        /* A caller closed the master base directly. Tolerate it. */
         master = base;
     }
 
@@ -315,8 +316,8 @@ static LONG ug_LibReserved(UG_A6)
 /* --------------------------------------------------------- vector table,
  *
  * Dense: slot 4 lands on bias 30 (ug_SetupContextTagList) and slot 42 on
- * -258 (getcredentials), exactly as the .fd/.sfd require. There is no gap in
- * the range, so no slot needs a failure stub, every one of the 39 public
+ * -258 (getcredentials), exactly as the .fd and .sfd require. There is no gap
+ * in the range, so no slot needs a failure stub. Every one of the 39 public
  * vectors below is a real implementation.
  */
 static const APTR ug_func_table[] =
@@ -385,7 +386,7 @@ static struct Library *ug_LibInit(register struct UserGroupBase *lib __asm("d0")
 {
     struct UgGlobal *g;
 
-    /* Nothing has set this up for us; every Exec call below depends on it. */
+    /* Nothing else sets this, and every Exec call below depends on it. */
     SysBase = sysbase;
 
     lib->ug_SysBase = sysbase;
@@ -430,7 +431,7 @@ const struct Resident ug_romtag =
 {
     RTC_MATCHWORD,
     (struct Resident *)&ug_romtag,      /* rt_MatchTag: points at itself */
-    (APTR)(&ug_romtag + 1),             /* rt_EndSkip:  just past the end */
+    (APTR)(&ug_romtag + 1),             /* rt_EndSkip:  one past the end */
     RTF_AUTOINIT,
     UG_VERSION,
     NT_LIBRARY,

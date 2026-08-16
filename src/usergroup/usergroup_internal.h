@@ -2,12 +2,12 @@
  * AmiNetXDuo, usergroup.library internals.
  *
  * usergroup.library is AmiTCP's companion to bsdsocket.library. Ported Unix
- * software links against it for the BSD user/group database calls; without it
+ * software links against it for the BSD user/group database calls. Without it
  * those binaries fail to load. See docs/RESEARCH.md §3.3.
  *
  * ------------------------------------------------------------------ ABI ---
  *
- * The vector table below is CONFIRMED, not inferred. Five independent sources
+ * The vector table below is confirmed, not inferred. Five independent sources
  * in two lineages agree function-for-function and register-for-register:
  *
  *   1. AmiTCP  fd/usergroup_lib.fd     (c) 1993 AmiTCP/IP Group, HUT Finland
@@ -20,14 +20,14 @@
  *
  *   ##base _UserGroupBase   ##bias 30   39 public vectors, LVO -30 .. -258.
  *
- * The passwd/group record layouts are equally confirmed: AmiTCP's netinclude
- * pwd.h and Roadshow's netinclude pwd.h define byte-identical structures
- * (7 fields, no pw_change/pw_class/pw_expire).
+ * The passwd and group record layouts are equally confirmed: the AmiTCP
+ * netinclude pwd.h and the Roadshow netinclude pwd.h define byte-identical
+ * structures (7 fields, no pw_change, pw_class or pw_expire).
  *
- * NOTE: the local toolchain's ndk-include/pwd.h is NOT the usergroup ABI. It
- * is newlib's own 10-field 4.4BSD struct passwd, substituted over Roadshow's.
- * That is exactly why the toolchain's AmiTCP inline header spells the return
- * type "struct TCP_passwd", the 7-field layout we use here.
+ * Note: the local ndk-include/pwd.h of the toolchain is not the usergroup ABI.
+ * It is the newlib 10-field 4.4BSD struct passwd, substituted over the
+ * Roadshow one. That is why the AmiTCP inline header of the toolchain spells
+ * the return type "struct TCP_passwd", the 7-field layout used here.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -46,9 +46,9 @@
 
 /* ------------------------------------------------------------ ABI records,
  *
- * Layout-compatible with AmiTCP's and Roadshow's <pwd.h>, <grp.h>, <utmp.h>
- * and <libraries/usergroup.h>. Deliberately given our own tag names so they
- * cannot collide with newlib's incompatible <pwd.h>/<grp.h>.
+ * Layout-compatible with the AmiTCP and Roadshow <pwd.h>, <grp.h>, <utmp.h>
+ * and <libraries/usergroup.h>. Deliberately given local tag names so that they
+ * cannot collide with the incompatible newlib <pwd.h> and <grp.h>.
  */
 
 #define UG_NGROUPS        32    /* NGROUPS       */
@@ -90,8 +90,8 @@ struct ug_lastlog {
 
 /*
  * struct UserGroupCredentials. cr_umask is a UWORD between two LONGs, so this
- * only matches on a 2-byte-alignment ABI, which is what m68k gives us and
- * what Roadshow's "#pragma pack(2)" forces on PPC. Asserted in ug_library.c.
+ * only matches on a 2-byte-alignment ABI, which is what m68k gives, and what
+ * the Roadshow "#pragma pack(2)" forces on PPC. Asserted in ug_library.c.
  */
 struct ug_credentials {
     LONG   cr_ruid;
@@ -153,7 +153,7 @@ struct UgGlobal {
     struct SignalSemaphore lock;
     struct MinList         children;
     struct UgDatabase      db;
-    struct DosLibrary     *dosbase;     /* opened lazily, may stay NULL */
+    struct DosLibrary     *dosbase;     /* opened lazily, can stay NULL */
     BOOL                   dos_tried;
 };
 
@@ -161,7 +161,7 @@ struct UgGlobal {
  *
  * Every opener gets its own copy (a "child base"), so the get*ent cursors and
  * the buffers behind getpwnam()/crypt()/getpass() are per-task by
- * construction. This is the same discipline bsdsocket.library uses for
+ * construction. This is the same discipline that bsdsocket.library uses for
  * SocketBase (docs/RESEARCH.md §3.1).
  */
 struct UserGroupBase {

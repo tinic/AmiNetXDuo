@@ -2,18 +2,18 @@
  * AmiNetXDuo, usergroup.library: the passwd and group databases.
  *
  * AmigaOS has no user database, so the no-file path is the one that matters
- * and it is the one that must be perfect: every real system takes it. It
- * yields exactly one user, root, uid 0, gid 0, home SYS:, shell C:Shell,
- * and one group.
+ * and the one that must be correct: every real system takes it. It yields
+ * exactly one user, root, uid 0, gid 0, home SYS:, shell C:Shell, and one
+ * group.
  *
  * If DEVS:Internet/passwd (or AmiTCP:db/passwd) does exist, it is parsed in
- * the ordinary /etc format and used instead. Reading is deliberately
+ * the ordinary /etc format and used instead. The read is deliberately
  * self-contained: src/config/ owns netdb parsing, but this must not depend on
  * it, and it must never pull in newlib stdio.
  *
- * The parsed tables are shared by every opener and immutable once built; only
+ * The parsed tables are shared by every opener and immutable once built. Only
  * the iteration cursor and the returned record live in the per-opener base,
- * which is what makes the get*ent() iterators re-entrant across tasks.
+ * which makes the get*ent() iterators re-entrant across tasks.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -46,8 +46,8 @@ static const char *const ug_group_paths[] =
 
 /*
  * Read a whole small file through dos.library. Returns a NUL-terminated
- * ami_alloc() buffer, or NULL if the file is absent, unreadable, or larger
- * than UG_MAX_FILE. A missing file is not an error, it is the normal case.
+ * ami_alloc() buffer, or NULL when the file is absent, unreadable, or larger
+ * than UG_MAX_FILE. A missing file is not an error. It is the normal case.
  */
 char *ug_db_read_file(struct UserGroupBase *base, const char *path, ULONG *len_out)
 {
@@ -65,7 +65,7 @@ char *ug_db_read_file(struct UserGroupBase *base, const char *path, ULONG *len_o
     if (dos == NULL)
         return NULL;
 
-    /* Open() needs the pr_ fields; a plain Task has none. */
+    /* Open() needs the pr_ fields, and a plain Task has none. */
     self = (struct Process *)FindTask(NULL);
     if (self->pr_Task.tc_Node.ln_Type != NT_PROCESS)
         return NULL;
@@ -181,9 +181,9 @@ void ug_db_require_group(struct UserGroupBase *base)
 /* -------------------------------------------------------- passwd vectors - */
 
 /*
- * The record is copied into the opener's own base before being handed back:
- * callers routinely scribble on the struct they get, and the shared table
- * must stay pristine.
+ * The record is copied into the base of the opener before it is handed back:
+ * callers routinely write into the struct they get, and the shared table must
+ * stay unchanged.
  */
 static struct ug_passwd *ug_pw_return(struct UserGroupBase *base, UWORD index)
 {
