@@ -556,7 +556,7 @@ static VOID cnd_step(const AnxDiagStep *st)
     case ANXDIAG_PNP_VENDOR:
         say("  The card behind the ISA Plug and Play bridge identified itself\n"
             "  as vendor and device $%08lx.  $4a8c8019 is a Realtek RTL8019,\n"
-            "  which is what an X-Surf carries; $00000000 means the isolation\n"
+            "  which is what an X-Surf carries.  $00000000 means the isolation\n"
             "  reads found nothing driving the bus.\n", v);
         return;
     case ANXDIAG_PNP_SERIAL:
@@ -588,8 +588,8 @@ static VOID cnd_step(const AnxDiagStep *st)
         }
         say("  The chip was given %lu round(s) of 2 ms after it was activated\n"
             "  before it answered, or before the wait ran out.  Nothing\n"
-            "  documents a settling time for this, so a non-zero number here\n"
-            "  is worth reporting.\n", v);
+            "  documents a settling time for this.  Report a non-zero number\n"
+            "  here.\n", v);
         return;
     case ANXDIAG_PNP_CR:
         if ((v & ~0x02UL) == 0x21UL)

@@ -11,8 +11,8 @@
 # 127.0.0.1, but the library still needs an interface to bring the stack up on.
 #
 # FS-UAE's own bsdsocket.library emulation is turned off the same way
-# tests/conformance/run-conformance.sh turns it off, a host configuration dropped
-# into the run's private base directory, so a pass cannot be WinUAE's
+# tests/conformance/run-conformance.sh turns it off, a host configuration
+# dropped into the run's private base directory, so a pass cannot be WinUAE's
 # host-socket shim answering instead of ours.
 #
 # Results: build/testhd-<tag>/stdout.txt
