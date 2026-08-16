@@ -163,9 +163,12 @@ echo "====================================================================="
 echo
 
 FAILED=0
+# An assertion that did not run is counted, not just printed.  See the verdict
+# at the end: it is what stops this exiting 0 with its own subject untested.
+UNRUN=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
-skip() { echo "  --: $*"; }
+skip() { echo "  --: $*"; UNRUN=$((UNRUN + 1)); }
 
 # ---- one boot, as ever (docs/RESEARCH.md 25) ------------------------------
 #
@@ -273,6 +276,12 @@ else
     # back.  Skipped rather than passed -- they are the only checks here that
     # see what actually left the machine, and this used to be reported only on
     # the -A branch, so the default branch dropped them in silence.
+    #
+    # And skipped is not zero.  "ARP who-has 10.0.2.99 appears if and only if
+    # the routing table was consulted" is the whole claim of this file; every
+    # other assertion here reads what a command PRINTED, which a build with no
+    # routing table at all can print correctly.  The verdict at the end exits
+    # 77 for it.
     skip "no host-side wire capture under Amiberry: the two assertions on what
        left the card did not run"
 fi
@@ -377,9 +386,20 @@ else
 fi
 
 echo
+# Failures first.  A run with both a failure and an unrun assertion is a
+# failure: the skip is the less urgent of the two facts and reporting it first
+# sends somebody to look at the rig instead of at the defect.
 if [ "$FAILED" -ne 0 ]; then
     echo "routes: FAILED" >&2
     exit 1
+fi
+
+if [ "$UNRUN" -ne 0 ]; then
+    echo "routes: SKIPPED, $UNRUN assertion group(s) did not run" >&2
+    echo "  The wire is what this test is for: nothing else here can tell a" >&2
+    echo "  stack that consulted the routing table from one that sent to the" >&2
+    echo "  default gateway and printed a table it never used." >&2
+    exit 77
 fi
 
 echo "routes: PASSED"

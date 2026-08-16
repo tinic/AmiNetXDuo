@@ -202,25 +202,30 @@ STARTED=$(date +%s)
 # The emulator's own log grows at roughly a megabyte a second and playhouse3
 # is shared; a five-minute run left 313 MB of it and filled the disk twice,
 # which reads as "cat: write error" and "unpack-objects failed" rather than as
-# anything about this feature.  Truncated in place while the run is going, and
-# what is kept is the tail, which is what a person reads when something went
-# wrong.  The backend assertion inside amiberry-run.sh has already read the
-# line it needs by the time the first poll happens.
-EMULOG="$ROOT/build/amiberry-$AMINETXDUO_RUN_TAG.log"
-EMULOG_MAX=${AMINETXDUO_WSTERM_LOGMAX:-33554432}
-
-trim_emulog() {
-    [ -f "$EMULOG" ] || return 0
-    local size
-    size=$(wc -c < "$EMULOG" 2>/dev/null || echo 0)
-    [ "$size" -gt "$EMULOG_MAX" ] || return 0
-    tail -c 4194304 "$EMULOG" > "$EMULOG.tail" 2>/dev/null || return 0
-    mv "$EMULOG.tail" "$EMULOG"
-}
+# anything about this feature.
+#
+# THE TRIM THAT USED TO BE HERE IS GONE, and it was worse than useless.
+#
+#   EMULOG=build/amiberry-$TAG.log
+#   tail -c 4194304 "$EMULOG" > "$EMULOG.tail" && mv "$EMULOG.tail" "$EMULOG"
+#
+# `mv` puts a NEW INODE at that name.  The emulator still holds an open
+# descriptor on the old one, which is now unlinked, so everything it writes
+# after the first trim goes to a file with no name and the log on disk stops
+# growing at the moment it was trimmed.  Measured with a writer producing
+# 200,000 lines and one trim 0.3 s in: 25 lines survived, and the file never
+# grew again while the writer ran to completion.  A run that tripped this lost
+# its whole emulator log and looked like it had a very quiet one.
+#
+# Nothing has to replace it.  tools/logcap.sh caps the log at the source now
+# (tools/amiberry-run.sh), so it cannot reach the 32 MB this fired at: the
+# same runs that produced 313 MB here produce a few tens of KB.  The end-of-
+# run `tail -400` went with it -- it ran after the emulator was stopped, so it
+# was safe, but it existed for the same unbounded log and threw away the
+# artifact somebody would read.
 
 for _ in $(seq 1 "$BOOT_MAX"); do
     sleep 1
-    trim_emulog
     kill -0 "$RUNNER" 2>/dev/null || break
     code=$(curl -s -m 3 -o /dev/null -w '%{http_code}' \
            "http://127.0.0.1:${HOSTPORT}/" 2>/dev/null || true)
@@ -255,7 +260,6 @@ python3 "$ROOT/tests/tools/httpd-drill.py" --terminal \
 DRILL=$!
 while kill -0 "$DRILL" 2>/dev/null; do
     sleep 5
-    trim_emulog
 done
 wait "$DRILL"
 DRILL_RC=$?
@@ -291,7 +295,6 @@ if [ "$DRILL_RC" -eq 0 ] && [ "${FAILS:-1}" -eq 0 ]; then
     python3 "$ROOT/tests/tools/wsterm-bench.py" 127.0.0.1 "$HOSTPORT" \
         > "$ROOT/build/wsterm-bench.txt" 2>&1
     set -e
-    trim_emulog
     echo
     echo "===================== what the session costs ===================="
     cat "$ROOT/build/wsterm-bench.txt"
@@ -300,11 +303,6 @@ fi
 
 cleanup
 trap - EXIT
-
-# And the last of it, once nothing is writing any more.
-if [ -f "$EMULOG" ]; then
-    tail -400 "$EMULOG" > "$EMULOG.tail" && mv "$EMULOG.tail" "$EMULOG"
-fi
 
 echo "drill_seconds=$DRILL_SECS"
 echo "checks=${CHECKS:-0}"

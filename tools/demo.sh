@@ -329,6 +329,15 @@ fi
 # sat in the MAC loop until the timeout with nothing wrong anywhere else.
 EMU="$ROOT/build/amiberry-$AMINETXDUO_RUN_TAG.log"
 
+# THIS ONE STANDS FOR DAYS, so its log gets the smallest cap in the tree.
+# amiberry-run.sh puts every emulator log through tools/logcap.sh; the default
+# 4 MB head is sized for a harness that runs for minutes, and a demo instance
+# that is left up is exactly the case that filled playhouse3 -- 27.6 GB in one
+# file.  A standing guest needs its boot header, which is where the board line
+# and the MAC this script greps for are printed, and a short recent tail.
+export AMINETXDUO_LOG_HEAD="${AMINETXDUO_LOG_HEAD:-1048576}"
+export AMINETXDUO_LOG_TAIL="${AMINETXDUO_LOG_TAIL:-100}"
+
 # One demo at a time.  Two guests on one wire derive the same MAC from the
 # a2065 unit and neither reaches the network -- httpd serves on 0.0.0.0 and
 # reports itself happily, so it reads as stuck rather than as unplugged.

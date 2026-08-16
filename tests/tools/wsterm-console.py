@@ -46,6 +46,24 @@ WsConn = d.WsConn
 ws_frame = d.ws_frame
 WS_WAIT = d.WS_WAIT
 
+# WHY AN ARM SAYS IT SKIPPED RATHER THAN JUST SAYING SO ON STDOUT.
+#
+# Six of these arms need something the machine may not have -- an ssh client,
+# an sshd the guest can reach, a Dropbear-format identity, Ed, More, vim -- and
+# each used to print one line and return.  The tally then said
+# `N checks, 0 failure(s)` over a run with no ssh in it at all, and
+# tests/tools/run-wsconsole.sh turned that into `result=pass`, exit 0.  This
+# file's own header says such an arm is "never quietly passed"; it was.
+#
+# skip() records it, main() counts it, and the tally carries the count out to
+# the harness.
+_SKIPPED = []
+
+
+def skip(why):
+    _SKIPPED.append(why)
+    print("  SKIPPED: %s" % why)
+
 WANT_ED = os.environ.get("AMINETXDUO_WSCONSOLE_ED") == "yes"
 WANT_MORE = os.environ.get("AMINETXDUO_WSCONSOLE_MORE") == "yes"
 WANT_SSH = os.environ.get("AMINETXDUO_WSCONSOLE_SSH") == "yes"
@@ -247,7 +265,7 @@ def test_ssh_password():
     print("ssh, and the password")
 
     if not WANT_SSH:
-        print("  SKIPPED: no ssh client staged, or no sshd to point it at")
+        skip("no ssh client staged, or no sshd to point it at")
         return
 
     s = Session()
@@ -273,7 +291,7 @@ def test_ssh_password():
     # a server this arm cannot ask its question of, not a failure of the
     # console, and it is said rather than scored.
     if not reached and b"No auth methods" in s.out[-400:]:
-        print("  SKIPPED: the server offers no password authentication")
+        skip("the server offers no password authentication")
         s.close()
         free()
         return
@@ -345,10 +363,10 @@ def test_ssh_interactive():
     print("ssh, and an interactive session")
 
     if not WANT_SSH:
-        print("  SKIPPED: no ssh client staged, or no sshd to point it at")
+        skip("no ssh client staged, or no sshd to point it at")
         return
     if not HAVE_KEY:
-        print("  SKIPPED: no identity staged (AMINETXDUO_WSCONSOLE_SSHKEY)")
+        skip("no identity staged (AMINETXDUO_WSCONSOLE_SSHKEY)")
         return
 
     s = Session()
@@ -443,7 +461,7 @@ def test_ed():
     print("Ed")
 
     if not WANT_ED:
-        print("  SKIPPED: no Ed staged (AMINETXDUO_WBC)")
+        skip("no Ed staged (AMINETXDUO_WBC)")
         return
 
     s = Session()
@@ -522,7 +540,7 @@ def test_more():
     print("More")
 
     if not WANT_MORE:
-        print("  SKIPPED: no More staged (AMINETXDUO_WBC)")
+        skip("no More staged (AMINETXDUO_WBC)")
         return
 
     s = Session()
@@ -713,7 +731,7 @@ def test_vim():
     print("vim")
 
     if not WANT_VIM:
-        print("  SKIPPED: no vim staged (AMINETXDUO_WSCONSOLE_VIM)")
+        skip("no vim staged (AMINETXDUO_WSCONSOLE_VIM)")
         return
 
     s = Session()
@@ -765,23 +783,46 @@ def test_vim():
     free()
 
 
+# Named, and in one list, because main() has to know how many there were.
+# The dead-client arm is last: it is the slow one and it deliberately leaves
+# the terminal quiet for over a minute.
+ARMS = (
+    ("mode is announced",    lambda: test_mode_is_announced()),
+    ("a short command",      lambda: test_short_command_is_cheap()),
+    ("the window size",      lambda: test_size_is_taken()),
+    ("takeover",             lambda: test_takeover()),
+    ("ssh and the password", lambda: test_ssh_password()),
+    ("ssh interactive",      lambda: test_ssh_interactive()),
+    ("Ed",                   lambda: test_ed()),
+    ("More",                 lambda: test_more()),
+    ("vim",                  lambda: test_vim()),
+    ("a dead client",        lambda: test_dead_client_is_reclaimed()),
+)
+
+
 def main():
     print("wsterm-console against ws://%s:%d/shell\n" % (d.ADDR, d.PORT))
 
-    test_mode_is_announced()
-    test_short_command_is_cheap()
-    test_size_is_taken()
-    test_takeover()
-    test_ssh_password()
-    test_ssh_interactive()
-    test_ed()
-    test_more()
-    test_vim()
-    # Last, because it is the slow one and because it deliberately leaves the
-    # terminal quiet for over a minute.
-    test_dead_client_is_reclaimed()
+    ran = 0
+    skipped = 0
+    for name, fn in ARMS:
+        was_checks = d.checks
+        was_skips = len(_SKIPPED)
+        fn()
+        if len(_SKIPPED) > was_skips:
+            skipped += 1
+        elif d.checks == was_checks:
+            # AN ARM THAT RETURNED WITHOUT ASSERTING ANYTHING AND WITHOUT
+            # SAYING IT SKIPPED.  This is what a check floor is for, and here
+            # it is exact: no recorded expected count to keep up to date, and
+            # it names the arm rather than a total that came out low.
+            check(False, "%s ran, asserted nothing and did not say it "
+                         "skipped" % name)
+        else:
+            ran += 1
 
-    print("\n%d checks, %d failure(s)" % (d.checks, len(d.failures)))
+    print("\n%d arms, %d ran, %d skipped" % (len(ARMS), ran, skipped))
+    print("%d checks, %d failure(s)" % (d.checks, len(d.failures)))
     for f in d.failures:
         print("  %s" % f)
 

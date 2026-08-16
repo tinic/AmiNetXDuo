@@ -58,6 +58,16 @@ NDK="${AMIGA_NDK:-$HOME/amigaos/tools/m68k-amigaos-gcc/m68k-amigaos/ndk-include}
 
 failures=0
 skipped=0
+# HOW MANY SCENARIOS REACHED A VERDICT.  Without it, `exit "$failures"` at the
+# end reports 0 for a box where every scenario skipped -- no licensed
+# Workbench, no ADFs, no peer -- and prints "everything that could run passed"
+# over a run that installed nothing.  STATIC always skips, so "any skip" is the
+# wrong gate; the gate is whether a single scenario reached a verdict.
+#
+# SCENARIOS ONLY.  ICONS is a preamble -- it hands the generated .info files to
+# the real icon.library and needs no Workbench -- and counting it here would
+# let the one cheap check stand in for the five this file is named after.
+passed=0
 
 # --------------------------------------------------------------- the icons --
 #
@@ -112,7 +122,8 @@ for scenario in "${SCENARIOS[@]}"; do
         # and neither is a defect in the installer, so they are their own
         # result rather than a failure that sends somebody reading the
         # installer script.
-        0) RESULTS+=("  PASS  $scenario") ;;
+        0) RESULTS+=("  PASS  $scenario")
+           passed=$((passed + 1)) ;;
         2) RESULTS+=("  SKIP  $scenario -- an ingredient is missing on this machine")
            skipped=$((skipped + 1)) ;;
         3) RESULTS+=("  SKIP  $scenario -- no second machine could reach the Amiga")
@@ -128,11 +139,21 @@ echo "  summary"
 echo "============================================================"
 printf '%s\n' "${RESULTS[@]}"
 echo
+echo "scenarios_passed=$passed"
 echo "scenarios_failed=$failures"
 echo "scenarios_skipped=$skipped"
-if [ "$failures" = "0" ]; then
-    echo "==> everything that could run passed"
-else
+if [ "$failures" != "0" ]; then
     echo "==> $failures check(s) failed"
+    exit "$failures"
 fi
-exit "$failures"
+# Nothing failed AND nothing ran.  77 is what tools/ci-arm.sh renders as
+# SKIPPED and what the rest of the tree means by "no verdict in either
+# direction"; this used to be 0 and read as a full installer sweep.
+if [ "$passed" = "0" ]; then
+    echo "==> NOTHING WAS TESTED: not one installer scenario reached a"
+    echo "    verdict, so this says nothing about the installer in either"
+    echo "    direction.  The SKIP lines above say what is missing."
+    exit 77
+fi
+echo "==> everything that could run passed"
+exit 0

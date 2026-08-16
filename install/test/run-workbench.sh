@@ -704,6 +704,8 @@ release_lock() {
 
 EMU_PID=""
 SERIAL_PID=""
+LOGCAP_PID=""
+LOGPIPE=""
 cleanup() {
     if [ -n "$EMU_PID" ]; then
         kill -TERM "$EMU_PID" 2>/dev/null || true
@@ -767,8 +769,31 @@ EOF
     # SIGPIPE ignored for the reason tools/amiberry-run.sh ignores it: SLIRP
     # writes guest payload to host sockets without MSG_NOSIGNAL, so a peer that
     # hangs up first otherwise kills the emulator and it looks like a guru.
-    ( trap '' PIPE; exec "$AMIBERRY" --log -f "$cfg" ) \
-        >"$ROOT/build/amiberry-wb31-$name.log" 2>&1 &
+    #
+    # Through tools/logcap.sh for the reason tools/amiberry-run.sh does it:
+    # --log is unbounded, ~3.3 GB an hour, and it has filled playhouse3 three
+    # times.  It matters MORE here than anywhere -- this is the longest thing
+    # in the tree, boot() is called for three installs and their power cycles,
+    # each writes its own log, and every one of them is kept.  Nothing reads
+    # these; they are artifacts, so the cap costs nothing but disk that was
+    # never wanted.  Degrades to the plain redirect if the capper is missing,
+    # because opening a FIFO for writing blocks until a reader appears.
+    local uaelog="$ROOT/build/amiberry-wb31-$name.log"
+    LOGPIPE="$ROOT/build/amiberry-wb31-$name.logpipe"
+    rm -f "$LOGPIPE"
+    if [ -x "$ROOT/tools/logcap.sh" ] && mkfifo "$LOGPIPE" 2>/dev/null; then
+        "$ROOT/tools/logcap.sh" < "$LOGPIPE" > "$uaelog" &
+        LOGCAP_PID=$!
+    else
+        echo "!! no tools/logcap.sh; $uaelog is UNCAPPED for this boot" >&2
+        rm -f "$LOGPIPE"
+        LOGPIPE=""
+    fi
+    if [ -n "$LOGPIPE" ]; then
+        ( trap '' PIPE; exec "$AMIBERRY" --log -f "$cfg" ) >"$LOGPIPE" 2>&1 &
+    else
+        ( trap '' PIPE; exec "$AMIBERRY" --log -f "$cfg" ) >"$uaelog" 2>&1 &
+    fi
     EMU_PID=$!
 
     # serial_port=.../wait blocks the emulator until something connects, so
@@ -802,6 +827,14 @@ EOF
     EMU_PID=""
     kill -TERM "$SERIAL_PID" 2>/dev/null || true
     SERIAL_PID=""
+    # The capper still holds the tail of this boot in its ring.  boot() is
+    # called again straight after, so it has to be finished with before the
+    # next one takes the same names.
+    if [ -n "$LOGCAP_PID" ]; then
+        wait "$LOGCAP_PID" 2>/dev/null || true
+        LOGCAP_PID=""
+    fi
+    [ -z "$LOGPIPE" ] || { rm -f "$LOGPIPE"; LOGPIPE=""; }
 
     echo "    ($name finished after ${elapsed}s, status $BOOT_STATUS)"
     if [ -s "$serial" ]; then

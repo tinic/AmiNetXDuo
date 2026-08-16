@@ -129,9 +129,12 @@ echo "====================================================================="
 echo
 
 FAILED=0
+# An assertion that did not run is counted, not just printed.  See the verdict
+# at the end: it is what stops this exiting 0 with its own subject untested.
+UNRUN=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
-skip() { echo "  --: $*"; }
+skip() { echo "  --: $*"; UNRUN=$((UNRUN + 1)); }
 
 STARTS=$(grep -c "SYS:AddNetInterface eth0 =====" "$REPORT" || true)
 if [ "$STARTS" -eq 1 ]; then
@@ -167,9 +170,14 @@ done
 # log, and FS-UAE is gone: Amiberry's log carries no frames.  So the two "asked
 # for exactly once" assertions have nothing to read.
 #
-# SKIPPED, NOT FAILED.  This used to end in `fail "no host-side capture"`, so
-# the harness could not pass at all -- it is `manual : UNWIRED`, which is why
-# nobody saw it.  A check that cannot be made is not a defect in the product.
+# SKIPPED, NOT FAILED, AND NOT PASSED EITHER.  This used to end in `fail "no
+# host-side capture"`, so the harness could not pass at all -- it is
+# `manual : UNWIRED`, which is why nobody saw it.  A check that cannot be made
+# is not a defect in the product.  But it was then made to exit 0, and that is
+# the opposite mistake: the assertion this file exists for is "the second
+# lookup PUT NO QUERY ON THE WIRE", nothing produces $HD/host.pcap under
+# Amiberry, so every run of it since has reported a cache proved by a harness
+# that never looked at a packet.  It exits 77 now -- see the verdict.
 if [ -s "$HD/host.pcap" ]; then
     # Queries only: the guest's own datagrams TO port 53. tcpdump prints the
     # question name for a DNS query, so each name can be counted separately.
@@ -193,9 +201,20 @@ else
 fi
 
 echo
+# Failures first.  A run with both a failure and an unrun assertion is a
+# failure: the skip is the less urgent of the two facts and reporting it first
+# sends somebody to look at the rig instead of at the defect.
 if [ "$FAILED" -ne 0 ]; then
     echo "dnscache: FAILED" >&2
     exit 1
+fi
+
+if [ "$UNRUN" -ne 0 ]; then
+    echo "dnscache: SKIPPED, $UNRUN assertion group(s) did not run" >&2
+    echo "  The wire is what this test is for.  Nothing else here can tell a" >&2
+    echo "  cache that answered from memory from a stack that queried again" >&2
+    echo "  and got the same answer, so this is not a pass." >&2
+    exit 77
 fi
 
 echo "dnscache: PASSED"
