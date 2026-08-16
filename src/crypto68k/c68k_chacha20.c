@@ -4,8 +4,8 @@
  * See c68k_chacha20.h for why this cipher and not AES-GCM.
  *
  * Written here from RFC 8439.  The quarter-round, the state layout and the
- * AEAD's padding rule are the RFC's; no code was copied from any
- * implementation of it.  Checked against RFC 8439's own vectors, the 2.3.2
+ * padding rule of the AEAD are the ones from the RFC.  No code was copied from
+ * any implementation of it.  Checked against the RFC 8439 vectors, the 2.3.2
  * block, the 2.4.2 keystream and the 2.8.2 AEAD, in tests/crypto68k, on the
  * host and on the Amiga.
  *
@@ -31,7 +31,7 @@
     (c) += (d); (b) ^= (c); (b) = C68K_ROTL((b), 7u)
 
 
-/* A little-endian longword at an arbitrary address; same form and the same
+/* A little-endian longword at an arbitrary address.  Same form and the same
    __mc68020__ guard as c68k_sha256_load_be(), with a byte reversal because
    ChaCha20 reads its key and nonce little-endian on a big-endian machine. */
 static ULONG c68k_chacha20_load_le(const UCHAR *p)
@@ -53,17 +53,17 @@ ULONG   v;
 
 /*
  * The core: twenty rounds over a copy of the state, then the original added
- * back in.  The state is an array rather than sixteen locals, the part has
+ * back in.  The state is an array rather than sixteen locals.  The part has
  * eight data registers and a quarter-round needs four of them, so a compiler
- * given sixteen live values spills them anyway, and an array lets it spill the
+ * with sixteen live values spills them anyway, and an array lets it spill the
  * ones it chooses.  docs/RESEARCH.md 18.1 is the same finding from the AES
  * side: on this machine the state lives in memory.
  *
  * The reference, not the fast path.  c68k_chacha20.S does the same sixteen
  * words in registers, eight in d0-d7, seven in a0-a6 and one on the stack,
  * exchanged with EXG, and crypto68k_bulk checks the two against each other
- * block for block before timing either.  This stays compiled and reachable in
- * the assembly build so that check is possible.
+ * block for block before it times either.  This stays compiled and reachable
+ * in the assembly build so that check is possible.
  */
 VOID c68k_chacha20_core_c(const ULONG *in, ULONG *out)
 {
@@ -103,9 +103,9 @@ UINT    i;
 /*
  * Which one the rest of this file calls.  A macro rather than a wrapper so a
  * build without the assembly has no extra call, and not a variant switch like
- * c68k_aes.c's because there is nothing to choose between: the assembly is the
- * same algorithm, faster, on every part that can run it.
- * AMINETXDUO_CRYPTO68K_ASM=OFF, the 68000 and the 68060 take the C.
+ * the one in c68k_aes.c, because there is nothing to choose between.  The
+ * assembly is the same algorithm, faster, on every part that can run it.
+ * AMINETXDUO_CRYPTO68K_ASM=OFF takes the C, and so do the 68000 and the 68060.
  */
 #ifdef C68K_ASM_CHACHA20
 extern VOID c68k_chacha20_core_asm(const ULONG *in, ULONG *out);
@@ -130,9 +130,9 @@ UINT c68k_chacha20_core_is_asm(VOID)
  *
  * On a 68020 that is one MOVE.L in, a three-instruction byte reversal of the
  * keystream word, an EOR.L and one MOVE.L out, about 34 cycles for four
- * bytes.  Serialising the block to a byte array and exclusive-oring byte by
- * byte, which is what the portable form below has to do, is four times that
- * by the instruction table in docs/RESEARCH.md 18.1.
+ * bytes.  A serialisation of the block to a byte array with a byte-by-byte
+ * exclusive-or, which is what the portable form below has to do, is four times
+ * that by the instruction table in docs/RESEARCH.md 18.1.
  *
  * The 68020 build takes the assembly instead: this loop is a sixth of the
  * cipher and -Os does not compile it to those seven instructions.
@@ -242,7 +242,7 @@ ULONG   want;
 UINT    i;
 
 
-    /* Whatever the last call left behind, first. */
+    /* The bytes the last call left behind, first. */
     if (ctx -> c68k_chacha20_used < C68K_CHACHA20_BLOCK_SIZE)
     {
         want = (ULONG)(C68K_CHACHA20_BLOCK_SIZE - ctx -> c68k_chacha20_used);
@@ -337,7 +337,7 @@ UINT    i;
 }
 
 /* Called at the associated-data-to-payload transition, and again from _tag()
-   in case there was no payload at all. */
+   in case there was no payload. */
 static VOID c68k_chacha20_poly1305_start_data(C68K_CHACHA20_POLY1305 *ctx)
 {
 
@@ -419,7 +419,7 @@ VOID c68k_chacha20_poly1305_decrypt(C68K_CHACHA20_POLY1305 *ctx,
 
     c68k_chacha20_poly1305_start_data(ctx);
 
-    /* Read the ciphertext into the tag before it is overwritten, since `in`
+    /* Read the ciphertext into the tag before it is overwritten, because `in`
        and `out` are the same buffer on the record path. */
     c68k_poly1305_update(&ctx -> c68k_aead_mac, in, length);
     ctx -> c68k_aead_data_length += length;
@@ -440,8 +440,8 @@ UINT    i;
     c68k_chacha20_poly1305_pad16(ctx, ctx -> c68k_aead_data_length);
 
     /* The two lengths, each a 64-bit little-endian count.  A TLS record
-       cannot reach 2^32 bytes, so the top halves are zero; written out
-       because the field is 64 bits wide. */
+       cannot reach 2^32 bytes, so the top halves are zero.  They are written
+       out because the field is 64 bits wide. */
     for (i = 0u; i < 16u; i++)
     {
         lengths[i] = 0u;

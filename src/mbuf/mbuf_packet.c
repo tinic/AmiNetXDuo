@@ -1,15 +1,15 @@
 /*
  * AmiNetXDuo, the NX_PACKET <-> mbuf boundary.
  *
- * Both directions COPY. See the ownership decision at the top of
- * include/aminetxduo/mbuf.h for why an mbuf may not reference an NX_PACKET's
- * payload: dtom() is ABI and requires the data to live inside the mbuf, and
- * NX_PACKETs are a pinned pool resource that must not escape into application
- * hands.
+ * Both directions copy. See the ownership decision at the top of
+ * include/aminetxduo/mbuf.h for why an mbuf must not reference the payload of
+ * an NX_PACKET. dtom() is ABI and requires the data to live inside the mbuf,
+ * and NX_PACKETs are a pinned pool resource that must not escape to
+ * applications.
  *
- * tx_api.h / nx_api.h must come before any exec header, exec/types.h turns
- * VOID into a macro, which breaks tx_port.h's `typedef void VOID`. Same rule
- * as src/sana2/sana2_internal.h.
+ * tx_api.h / nx_api.h must come before any exec header. exec/types.h turns
+ * VOID into a macro, which breaks the `typedef void VOID` in tx_port.h. Same
+ * rule as src/sana2/sana2_internal.h.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -32,7 +32,7 @@ struct mbuf *ami_mbuf_from_packet(NX_PACKET *packet, BOOL want_pkthdr)
     /*
      * Each NX_PACKET in the chain contributes [prepend_ptr, append_ptr).
      * nx_packet_length on the first packet is the whole chain, but the
-     * per-packet windows are what actually has to be copied.
+     * per-packet windows are what has to be copied.
      */
     for (p = packet; p != NULL; p = p->nx_packet_next)
     {

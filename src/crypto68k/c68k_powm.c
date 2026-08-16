@@ -8,24 +8,24 @@
  *   1. It never skips the leading zero bits of the top exponent limb.  For
  *      e = 65537 the exponent is one limb, 0x00010001, so it performs 32
  *      squarings and 2 multiplies where 16 squarings and 1 multiply suffice.
- *      An RSA *public* operation, the certificate signature check a TLS
+ *      An RSA public operation, the certificate signature check a TLS
  *      client does three times per handshake, therefore costs about twice
- *      what it should.  The largest win in the module, and not an assembly
- *      trick.
+ *      what it needs to.  The largest gain in the module, and not an assembly
+ *      change.
  *
  *   2. For a full-length private exponent it does one multiply per set bit,
  *      about 1024 of them for RSA-2048.  Sliding window with w bits needs
- *      2^(w-1) + (b-w)/(w+1) instead; at b = 1024, w = 6 that is 32 + 145
- *      against 512.  (Formula from OpenSSL's bn_local.h, which is also where
- *      the window thresholds below come from.)
+ *      2^(w-1) + (b-w)/(w+1) instead.  At b = 1024, w = 6 that is 32 + 145
+ *      against 512.  (Formula from the bn_local.h of OpenSSL, which is also
+ *      where the window thresholds below come from.)
  *
- *   Squarings are then most of the work, which is what makes c68k_mont_sqr()'s
- *   ~24% over c68k_mont_mul() matter.
+ *   Squarings are then most of the work, which is what makes the ~24% of
+ *   c68k_mont_sqr() over c68k_mont_mul() matter.
  *
- *   The setup, radix^2 mod m, still goes through the vendored long
- *   division.  It is O(s^2) and runs once, so replacing it would buy little;
- *   leaving it keeps the before/after numbers differing only in the part being
- *   optimised, and leaves one less division routine to get subtly wrong.
+ *   The setup, radix^2 mod m, still goes through the vendored long division.
+ *   It is O(s^2) and runs once, so a replacement gains little.  It also keeps
+ *   the before/after numbers different only in the part under optimisation,
+ *   and leaves one less division routine to get subtly wrong.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -102,7 +102,7 @@ c68k_limb   top;
 }
 
 /*
- * OpenSSL's BN_window_bits_for_exponent_size, the standard crossover table.
+ * BN_window_bits_for_exponent_size from OpenSSL, the standard crossover table.
  * These are the exact algebraic crossovers of 2^(w-1) + (b-w)/(w+1).
  */
 static UINT c68k_window_for(UINT bits)
@@ -131,7 +131,7 @@ static UINT c68k_window_for(UINT bits)
 /* ---------------------------------------------------- radix^2 mod m setup, */
 
 /*
- * rr = radix^(2*m_len) mod m, i.e. R^2 mod m.
+ * rr = radix^(2*m_len) mod m, that is R^2 mod m.
  *
  * Done the way the vendored routine does it: reduce R, square the remainder,
  * reduce again.  setup needs 3*m_len + 4 limbs.
@@ -165,10 +165,10 @@ UINT                    i;
     if (c68k_fast_modulus != 0u)
     {
         /*
-         * R mod m and then (R mod m)^2 mod m, both through this module's
-         * 32-bit divider, all the fast path changes.  The square in between
-         * is the vendored one either way: 2080 limb products against the tens
-         * of thousands of limb operations the two reductions cost.
+         * R mod m and then (R mod m)^2 mod m, both through the 32-bit divider
+         * of this module.  That is all the fast path changes.  The square in
+         * between is the vendored one either way: 2080 limb products against
+         * the tens of thousands of limb operations the two reductions cost.
          */
         c68k_mod(temp, temp, m_len + 1u, m, m_len, &setup[m_len + 1u]);
 
@@ -298,7 +298,7 @@ UINT        started;
     c68k_copy(table, xm, m_len);
     if (table_size > 1u)
     {
-        /* acc doubles as the running xm^2 here; it is reset before the scan. */
+        /* acc doubles as the running xm^2 here.  It is reset before the scan. */
         c68k_mont_sqr(acc, xm, m, m_len, n0inv, work);
         for (i = 1; i < table_size; i++)
         {

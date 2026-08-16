@@ -1,10 +1,10 @@
 /*
  * AmiNetXDuo, mbuf emulation internals.
  *
- * Private to src/mbuf/. mbuf_alloc.c and mbuf_ops.c contain no AmigaOS calls
- * at all; everything platform-specific is behind the three hooks at the bottom
- * of this file, which mbuf_amiga.c implements for the Amiga and the host test
- * stubs out. That is the same split src/config/ uses.
+ * Private to src/mbuf/. mbuf_alloc.c and mbuf_ops.c contain no AmigaOS calls.
+ * Everything platform-specific is behind the three hooks at the bottom of this
+ * file. mbuf_amiga.c implements them for the Amiga, the host test stubs them.
+ * src/config/ uses the same split.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -18,10 +18,10 @@
 /* --------------------------------------------------------------- tunables */
 
 /*
- * Ceilings, not reservations: slabs are carved on demand and the cluster pool
+ * Ceilings, not reservations. Slabs are carved on demand and the cluster pool
  * grows one cluster at a time. 256 mbufs is 32 KB and 16 clusters is 32 KB, so
- * the worst case is 64 KB of the 1 MB floor (docs/RESEARCH.md 81), and only
- * if something actually uses them, which on a normal system nothing does.
+ * the worst case is 64 KB of the 1 MB floor (docs/RESEARCH.md 81). Nothing on
+ * a normal system reaches that.
  */
 #ifndef AMI_MBUF_DEFAULT_MBUFS
 #define AMI_MBUF_DEFAULT_MBUFS      256
@@ -36,7 +36,7 @@
 #define AMI_MBUF_SLAB_COUNT         32
 #endif
 
-/* Free clusters kept cached rather than handed back to ami_free(). */
+/* Free clusters kept cached rather than returned to ami_free(). */
 #ifndef AMI_MBUF_CLUSTER_CACHE
 #define AMI_MBUF_CLUSTER_CACHE      4
 #endif
@@ -56,10 +56,10 @@ typedef struct AmiMbufSlab
 
 /*
  * One MCLBYTES cluster. The reference count lives here rather than in
- * `struct m_ext` because that struct has no room for one and is ABI. We never
- * find this header by walking backwards from an arbitrary ext_buf, clusters
- * we own are identified by searching the `all` list, so a foreign ext_buf can
- * never make us read memory we do not own.
+ * `struct m_ext`, which has no room for one and is ABI. Nothing finds this
+ * header by a backward step from an arbitrary ext_buf. Clusters we own are
+ * identified by a search of the `all` list, so a foreign ext_buf can never
+ * make us read memory we do not own.
  */
 typedef struct AmiCluster
 {
@@ -100,8 +100,8 @@ AmiCluster *ami_mbuf_cluster_of(const void *ext_buf);
 VOID        ami_mbuf_ext_ref(struct mbuf *m);
 
 /*
- * Start of the internal data area for m, m_pktdat when M_PKTHDR is set,
- * m_dat otherwise. Both end at (UBYTE *)m + MSIZE.
+ * Start of the internal data area for m. If M_PKTHDR is set, that is
+ * m_pktdat, otherwise m_dat. Both end at (UBYTE *)m + MSIZE.
  */
 #define AMI_MBUF_BASE(m) \
     (((m)->m_flags & M_PKTHDR) ? (UBYTE *)(m)->m_pktdat : (UBYTE *)(m)->m_dat)
@@ -117,7 +117,7 @@ VOID        ami_mbuf_ext_ref(struct mbuf *m);
 VOID ami_mbuf_lock(VOID);
 VOID ami_mbuf_unlock(VOID);
 
-/* memcpy without dragging in a libc dependency. */
+/* memcpy without a libc dependency. */
 VOID ami_mbuf_copy_bytes(void *dst, const void *src, ULONG len);
 VOID ami_mbuf_zero_bytes(void *dst, ULONG len);
 

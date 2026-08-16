@@ -3,7 +3,7 @@
  * else in the handshake that hashes.
  *
  *   docs/RESEARCH.md 15.7 named "an unwritten 68020 SHA-256" as the largest
- *   single lever available to https:// on a classic Amiga.  This is it.  The
+ *   single gain available to https:// on a classic Amiga.  This is it.  The
  *   tree was already 1.28x AmiSSL on HMAC-SHA256 with both sides portable C,
  *   so that 1.28x described two C implementations, not the machine.
  *
@@ -20,13 +20,13 @@
  *        have to serve both.
  *
  *   A hand-written 68020 compression function was written, checked and timed
- *   against this, on the argument that SHA-256's rotations map onto ROR.L,
+ *   against this, on the argument that the SHA-256 rotations map onto ROR.L,
  *   ROL.L and SWAP and that a compiler cannot use a count above eight without
- *   burning a data register.  It lost: 67,656 us against 66,687.  The measured
- *   instruction costs say why, on this part ROR.L #n is 5.94 cycles and
- *   ROR.L Dm,Dn is 7.91, so SWAP-then-rotate (9.89) and MOVEQ-then-rotate
+ *   a data register for the count.  It lost: 67,656 us against 66,687.  The
+ *   measured instruction costs say why.  On this part ROR.L #n is 5.94 cycles
+ *   and ROR.L Dm,Dn is 7.91, so SWAP-then-rotate (9.89) and MOVEQ-then-rotate
  *   (9.91) are the same price.  The SWAP idiom is a 68000 habit, where a
- *   rotate cost 8+2n; a 68020's shifter is flat.  docs/RESEARCH.md 18 has the
+ *   rotate cost 8+2n.  The 68020 shifter is flat.  docs/RESEARCH.md 18 has the
  *   table.
  *
  *   c68k_sha256_initialize / _update / _digest_calculate have the same
@@ -62,8 +62,8 @@ typedef struct C68K_SHA256_STRUCT
 
 /*
  * `algorithm` is accepted and ignored beyond a check, so the three functions
- * are drop-in for nx_crypto's.  SHA-224 is not implemented; it is not on any
- * path this client takes.
+ * are drop-in for the nx_crypto ones.  SHA-224 is not implemented.  It is not
+ * on any path this client takes.
  */
 UINT c68k_sha256_initialize(C68K_SHA256 *ctx, UINT algorithm);
 UINT c68k_sha256_update(C68K_SHA256 *ctx, UCHAR *input, UINT input_length);
@@ -76,7 +76,7 @@ UINT c68k_sha256_digest_calculate(C68K_SHA256 *ctx, UCHAR *digest,
  * longword reads in hardware, and a TLS record's payload starts 21 bytes into
  * the packet buffer.
  *
- * Public because it is what gets measured; measuring it through the
+ * Public because it is what gets measured.  A measurement through the
  * update/padding layer measures the padding layer too.
  */
 
@@ -87,11 +87,11 @@ UINT c68k_sha256_digest_calculate(C68K_SHA256 *ctx, UCHAR *digest,
  * Only one, which is the result.  A 68020 assembly compression function was
  * written, checked against the vectors and measured against this C in the same
  * process: 67,656 us against 66,687 for 16 KiB on an aligned buffer, 67,653
- * against 70,241 on a misaligned one.  Once the misaligned MOVE.L, the
- * assembly's only real advantage, moved into the C as three lines of inline
- * assembly, the C was ahead on both and the 230 lines of hand-written rounds
- * were dropped.  See docs/RESEARCH.md 18 for the instruction costs, and for
- * the 68000-era SWAP idiom that a 68020's flat shifter makes pointless.
+ * against 70,241 on a misaligned one.  The misaligned MOVE.L was the only real
+ * advantage of the assembly.  Once it moved into the C as three lines of
+ * inline assembly, the C was ahead on both and the 230 lines of hand-written
+ * rounds were dropped.  See docs/RESEARCH.md 18 for the instruction costs and
+ * for the 68000-era SWAP idiom that the flat 68020 shifter makes pointless.
  */
 #define C68K_SHA256_V_C     0u  /* portable C, schedule computed up front  */
 #define C68K_SHA256_V_COUNT 1u

@@ -27,17 +27,17 @@
 |                          so the round ends with a single MOVEM.L.
 |
 |   The second is fewer instructions.  On a part with a data cache the sixteen
-|   byte reads would be nearly free and it would not be close; on this part
-|   they are bus cycles and it is still ahead, because the rotates they replace
-|   are not free either.  tests/crypto68k/crypto68k_bulk measures both forms of
+|   byte reads are nearly free and the gap is wide.  On this part they are bus
+|   cycles and it is still ahead, because the rotates they replace are not free
+|   either.  tests/crypto68k/crypto68k_bulk measures both forms of
 |   the rotate and the byte read.
 |
 | The round loop is not unrolled
 |
 |   The 68020's instruction cache is 256 bytes.  The four-table round body
 |   below is 176 bytes and the one-table body is 200, so each sits inside it
-|   and is fetched once.  Unrolling two rounds would put the body at 350-400
-|   bytes and every instruction fetch would go to the bus.  The same benchmark
+|   and is fetched once.  A two-round unroll puts the body at 350-400 bytes,
+|   and every instruction fetch then goes to the bus.  The same benchmark
 |   sweeps a straight-line body from 32 bytes to 2 KB and shows where that
 |   turns.
 |
@@ -65,7 +65,7 @@
         .set    AES_ARG,        44
 
 | ---------------------------------------------------------------------------
-| One output word, four tables.  \acc accumulates; \o0..\o3 are the byte
+| One output word, four tables.  \acc accumulates.  \o0..\o3 are the byte
 | offsets into the state, which encode ShiftRows.
 | ---------------------------------------------------------------------------
         .macro  AES_W4  acc, o0, o1, o2, o3
@@ -110,7 +110,7 @@
 | ---------------------------------------------------------------------------
 | The last round: SubBytes, ShiftRows and AddRoundKey, no MixColumns.  a1 is
 | the 256-byte S-box by now, so this is byte reads and a shift, which is
-| cheaper than masking four table entries the way OpenSSL does it.
+| cheaper than a mask over four table entries the way OpenSSL does it.
 | ---------------------------------------------------------------------------
         .macro  AES_WL  acc, o0, o1, o2, o3
         moveq   #0,\acc

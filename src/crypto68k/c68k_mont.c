@@ -5,59 +5,59 @@
  *   Algorithms", IEEE Micro 16(3), 1996,
  *   https://www.microsoft.com/en-us/research/wp-content/uploads/1996/01/j37acmon.pdf)
  *   name five ways to interleave the multiplication and the reduction.  All
- *   five perform the same 2s^2 + s limb multiplications; they differ only in
- *   memory traffic and temporary space.  Their measurements make CIOS the
- *   default recommendation, and SOS a close second at twice the scratch.
+ *   five perform the same 2s^2 + s limb multiplications.  They differ only in
+ *   memory traffic and temporary space.  The measurements in the paper make
+ *   CIOS the default recommendation, and SOS a close second at twice the
+ *   scratch.
  *
  *   This module uses SOS, full product first, then reduce in place, for a
  *   reason specific to the 68020, recorded here because it contradicts the
- *   paper's headline advice.
+ *   main advice of the paper.
  *
- *   The fast multiply-accumulate on this machine (see c68k_prim.S) is GMP's
- *   two-limb loop, whose speed comes from `ADD.L Dn,(An)+`: a read-modify-
- *   write straight into the accumulator, with the memory carry folded into the
- *   next limb through the X flag.  That instruction only exists when the
- *   destination is the source.  CIOS's second inner loop writes one limb below
- *   where it reads, that displacement is how CIOS gets its divide-by-radix
- *   for free, so half of all limb products would have to use a slower
- *   two-pointer loop.  SOS keeps every one of its 2s^2 products in the
- *   read-modify-write form; the shift disappears because the reduction's
- *   window into the 2s-limb product moves instead of the data.  The paper
- *   counts memory operations; this machine also cares which addressing mode
+ *   The fast multiply-accumulate on this machine (see c68k_prim.S) is the
+ *   two-limb loop of GMP, whose speed comes from `ADD.L Dn,(An)+`: a
+ *   read-modify-write straight into the accumulator, with the memory carry
+ *   folded into the next limb through the X flag.  That instruction only
+ *   exists when the destination is the source.  The second inner loop of CIOS
+ *   writes one limb below where it reads, and that displacement is how CIOS
+ *   gets its divide-by-radix for free, so half of all limb products need a
+ *   slower two-pointer loop.  SOS keeps every one of its 2s^2 products in the
+ *   read-modify-write form.  The shift disappears because the window of the
+ *   reduction into the 2s-limb product moves instead of the data.  The paper
+ *   counts memory operations.  This machine also cares which addressing mode
  *   they use.
  *
  *   Karatsuba, above a measured threshold, see the block further down.  The
  *   earlier judgement here was "not Karatsuba", on the grounds that the
- *   reduction is not Karatsuba-able and that one level buys about 5% at the
- *   32-limb halves an RSA-2048 CRT operation runs.  Both of those still hold,
- *   but an RSA-2048 public operation is 64 limbs, not 32, and the split
- *   removes more than twice as many limb products there, and a TLS client
- *   does three public operations per handshake and one private one only if it
- *   holds a certificate.  The threshold, not the technique, was what needed
- *   getting right.
+ *   reduction is not Karatsuba-able and that one level gains about 5% at the
+ *   32-limb halves an RSA-2048 CRT operation runs.  Both of those still hold.
+ *   An RSA-2048 public operation is 64 limbs, not 32, and the split removes
+ *   more than twice as many limb products there.  A TLS client does three
+ *   public operations per handshake, and one private operation only if it
+ *   holds a certificate.  The threshold was what needed to be right.
  *
  *   The off-diagonal products of a square each appear twice, so the product
  *   phase costs s(s+1)/2 instead of s^2 (HAC Algorithm 14.16).  The reduction
  *   is unchanged, so a Montgomery square is (s^2 + 3s/2) / (2s^2 + s), about
  *   76% of a Montgomery multiply, not half.  In a sliding-window
- *   exponentiation almost every operation is a squaring, so a 24% saving on it
- *   is worth having.
+ *   exponentiation almost every operation is a squaring, so the 24% saving
+ *   applies to nearly all of them.
  *
  *   Both routines produce exactly what _nx_crypto_huge_number_mont() produces
  *   over thousands of random operands, including the final conditional
  *   subtraction, and tests/crypto68k checks it.
  *
- *   They disagree with it for operands within a whisker of the modulus, where
- *   the vendored routine is wrong.  Two cases, both checked against an
- *   independent answer rather than against either implementation: with
- *   m = 2^64 - 1 and x = m-1, mont(x,x) must be 1 and the vendored routine
- *   returns 0; at 32 limbs with m nearly all ones and x = m-1, its top limb is
- *   one less than the true value.  Random operands never come that close to m
- *, which is why a 400-trial sweep never caught it, and why no RSA or EC
- *   path can reach it, but it means the vendored routine cannot be the
- *   oracle for exactly the extreme operands Karatsuba's carry handling most
- *   needs checking on.  So that test diffs the split against this module's own
- *   schoolbook instead, which is what c68k_karatsuba_limbs exists for.
+ *   They disagree with it for operands very close to the modulus, where the
+ *   vendored routine is wrong.  Two cases, both checked against an independent
+ *   answer rather than against either implementation.  With m = 2^64 - 1 and
+ *   x = m-1, mont(x,x) must be 1 and the vendored routine returns 0.  At 32
+ *   limbs with m nearly all ones and x = m-1, its top limb is one less than
+ *   the true value.  Random operands never come that close to m, which is why
+ *   a 400-trial sweep never caught it, and why no RSA or EC path can reach it.
+ *   It does mean the vendored routine cannot be the oracle for exactly the
+ *   extreme operands the Karatsuba carry handling most needs.  So that test
+ *   diffs the split against the schoolbook of this module instead, which is
+ *   what c68k_karatsuba_limbs exists for.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -76,9 +76,10 @@ UINT        i;
 
     /*
      * Newton iteration for m0^-1 mod 2^k: each step doubles the number of
-     * correct bits.  Seeding with m0 itself is correct to 3 bits for odd m0
+     * correct bits.  A seed of m0 itself is correct to 3 bits for odd m0
      * (Dusse and Kaliski, EUROCRYPT'90), so 3 -> 6 -> 12 -> 24 -> 48 covers
-     * 32 bits in four steps; the fifth costs nothing, once per exponentiation.
+     * 32 bits in four steps.  The fifth costs nothing, once per
+     * exponentiation.
      */
     inv = m0;
     for (i = 0; i < 5; i++)
@@ -121,7 +122,7 @@ UINT    i;
 
 /*
  * t holds 2*m_len+1 limbs and is < m*R.  Add multiples of m until the low half
- * is zero; the answer is then t[m_len .. 2*m_len], which is < 2m.
+ * is zero.  The answer is then t[m_len .. 2*m_len], which is < 2m.
  */
 static VOID c68k_mont_reduce(c68k_limb *t, const c68k_limb *m, UINT m_len,
                              c68k_limb n0inv)
@@ -146,10 +147,10 @@ c68k_limb   sum;
 
         /*
          * Propagate into the limbs above.  The first addition almost always
-         * absorbs it; the loop covers the rest.  The bound cannot be reached
-         * the running value stays below 2*m*R, so t[top] is 0 or 1, but
-         * an unreachable bound is cheaper than a buffer overrun if that
-         * analysis is ever wrong.
+         * absorbs it, and the loop covers the rest.  The bound cannot be
+         * reached, because the running value stays below 2*m*R, so t[top] is
+         * 0 or 1.  An unreachable bound is cheaper than a buffer overrun if
+         * that analysis is ever wrong.
          */
         j = i + m_len;
         while ((carry != 0) && (j <= top))
@@ -166,9 +167,9 @@ c68k_limb   sum;
 /* ----------------------------------------------------------- Karatsuba ---- */
 
 /*
- * docs/RESEARCH.md 9 rejected Karatsuba at 32 limbs, where it measured ~5%;
- * that measurement stands.  An RSA-2048 CRT half is 32 limbs; an RSA-2048
- * *public* operation is 64, and the split is worth much more there:
+ * docs/RESEARCH.md 9 rejected Karatsuba at 32 limbs, where it measured ~5%.
+ * That measurement stands.  An RSA-2048 CRT half is 32 limbs.  An RSA-2048
+ * public operation is 64, and the split is worth much more there:
  *
  *     limbs      8      16      32      64
  *     squaring   1.00x  1.26x   1.63x   2.14x     (fewer limb products)
@@ -180,7 +181,7 @@ c68k_limb   sum;
  *
  * The delivered gain is less than that table suggests.  A Montgomery step is a
  * product and a reduction, and the reduction is a chain of scalar-by-vector
- * c68k_addmul_1 calls Karatsuba cannot touch; it costs s^2 + s regardless.  So
+ * c68k_addmul_1 calls Karatsuba cannot touch.  It costs s^2 + s regardless.  So
  * 2.14x on the squaring of 64 limbs dilutes to 6240 -> 5132 on the Montgomery
  * square, 1.22x, and the whole e=65537 exponentiation goes 124,608 -> 99,776
  * limb products.
@@ -192,8 +193,9 @@ c68k_limb   sum;
  *   limbs with no carry out.  Nothing to sign-track and nothing to carry.
  *
  *   Multiplying:  the matching subtractive form is (x1-x0)*(y0-y1), whose sign
- *   depends on the operands, the term OpenSSL's bn_mul_recursive carries a
- *   `neg` flag for, and where this kind of code goes wrong.  The additive form
+ *   depends on the operands, the term that the bn_mul_recursive of OpenSSL
+ *   carries a `neg` flag for, and where this kind of code goes wrong.  The
+ *   additive form
  *   (x0+x1)*(y0+y1) has no sign, at the price of two h-limb sums that can
  *   carry out.  Those carries are handled below as two conditional adds and
  *   one conditional increment.
@@ -237,8 +239,8 @@ UINT    i;
 
     /*
      * The carry out of row i lands in t[i+n], which no earlier row has
-     * touched, row i' writes at most t[i'+n], so storing it is the same as
-     * adding it, hence a store and not an accumulate.
+     * touched, because row i' writes at most t[i'+n].  A store is therefore
+     * the same as an accumulate, so this stores.
      */
     for (i = 0; i < n; i++)
     {
@@ -272,7 +274,7 @@ c68k_limb   carry;
 c68k_limb   borrow;
 
 
-    /* Odd sizes fall back rather than growing a special case; no RSA or EC
+    /* Odd sizes fall back rather than take a special case.  No RSA or EC
        size in this tree is odd. */
     if ((n < c68k_karatsuba_limbs) || (n < 2u) || ((n & 1u) != 0u))
     {
@@ -423,7 +425,7 @@ c68k_limb  *t = work;
  * t[0..2n-1] = x[0..n-1]^2.
  *
  * The off-diagonal products x[i]*x[j], i < j, each appear twice, so they are
- * accumulated once, the whole thing is doubled, and the x[i]^2 diagonal is
+ * accumulated once, the whole of it is doubled, and the x[i]^2 diagonal is
  * added afterwards.  Same algorithm as the vendored
  * _nx_crypto_huge_number_square, which is why the two agree limb for limb.
  */

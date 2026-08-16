@@ -1,13 +1,13 @@
 /*
  * AmiNetXDuo, mbuf ABI pin.
  *
- * Amiga-only, and deliberately a translation unit of its own: on the Amiga
+ * Amiga-only, and a translation unit of its own. On the Amiga
  * "aminetxduo/mbuf.h" is <sys/mbuf.h>, so every assertion below runs against
  * the Roadshow NDK header itself. If a future toolchain substitutes a
- * different <sys/mbuf.h>, the way this toolchain's <pwd.h> turned out to be
- * newlib's rather than the usergroup ABI's, silently wrong by 12 bytes
- * (docs/RESEARCH.md 3.3), the build stops here instead of shipping a struct
- * that applications walk wrongly.
+ * different <sys/mbuf.h>, the build stops here instead of shipping a struct
+ * that applications walk wrongly. The <pwd.h> of this toolchain was newlib's
+ * rather than the usergroup ABI's, silently wrong by 12 bytes
+ * (docs/RESEARCH.md 3.3).
  *
  * Every number was measured on 2026-07-24 with
  *   m68k-amigaos-gcc 15.2.0 -c -O2 -m68020 -Wall -Wextra
@@ -40,8 +40,7 @@ AMI_STATIC_ASSERT(offsetof(struct mbuf, m_pktdat) == AMI_MBUF_OFF_PKTDAT, "m_pkt
 AMI_STATIC_ASSERT(offsetof(struct mbuf, m_dat)    == AMI_MBUF_OFF_DAT,    "m_dat");
 
 /* Field widths: m_len is a 32-bit LONG and m_type/m_flags are 16-bit WORDs.
-   Getting these wrong is the classic way to be right about offsets and still
-   corrupt the next field. */
+   Correct offsets with a wrong width still corrupt the next field. */
 AMI_STATIC_ASSERT(sizeof(((struct mbuf *)0)->m_len)   == 4, "mh_len width");
 AMI_STATIC_ASSERT(sizeof(((struct mbuf *)0)->m_type)  == 2, "mh_type width");
 AMI_STATIC_ASSERT(sizeof(((struct mbuf *)0)->m_flags) == 2, "mh_flags width");
@@ -77,6 +76,6 @@ AMI_STATIC_ASSERT(M_BCAST   == 0x0100, "M_BCAST");
 AMI_STATIC_ASSERT(M_MCAST   == 0x0200, "M_MCAST");
 AMI_STATIC_ASSERT(M_COPYALL == 1000000000, "M_COPYALL");
 
-/* Not an empty translation unit, ISO C forbids that, and some linkers
+/* Not an empty translation unit. ISO C forbids that, and some linkers
    dislike the empty object it produces. */
 const char ami_mbuf_abi_checked[] = "mbuf ABI pinned against ndk-include/sys/mbuf.h";

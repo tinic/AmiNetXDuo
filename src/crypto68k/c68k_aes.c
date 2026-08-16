@@ -5,26 +5,26 @@
  * missing data cache changed about it.
  *
  *   Three portable implementations of the same cipher.  The literature offers
- *   three plausible answers for a machine with no data cache, disagreeing
- *   about which resource is scarce.  All three are built, checked against the
- *   NIST vectors and against each other, and timed in one process on the same
- *   buffer by tests/crypto68k/crypto68k_bulk.  The two that lose are kept so
- *   the measurement stays reproducible.
+ *   three plausible answers for a machine with no data cache, and they
+ *   disagree about which resource is scarce.  All three are built, checked
+ *   against the NIST vectors and against each other, and timed in one process
+ *   on the same buffer by tests/crypto68k/crypto68k_bulk.  The two that lose
+ *   are kept so the measurement stays reproducible.
  *
  *     T4    four 1 KB tables.  One indexed longword read per byte and no
- *           post-processing.  What OpenSSL's aes_core.c does, and therefore
- *           what AmiSSL runs on this target.
+ *           post-processing.  What the aes_core.c of OpenSSL does, and
+ *           therefore what AmiSSL runs on this target.
  *     T1    one 1 KB table and three rotates per column.  What
  *           nx_crypto_aes.c does.  Costs 12 rotates a round to save 3 KB of
- *           table, a trade that only pays if the 3 KB would have displaced
- *           something from a data cache.
+ *           table, a trade that only pays if the 3 KB displaces something
+ *           from a data cache.
  *     SBOX  a 256-byte S-box and MixColumns done in the ALU, word-parallel.
  *           Trades 4-byte reads for 1-byte reads, which is the right trade
  *           only if the bus is the binding constraint.
  *
  *   The tables are built at run time rather than spelled out: 2,048
- *   hexadecimal constants in a source file cannot be reviewed, and generating
- *   them from the field arithmetic is 60 reviewable lines.  Cost is a few
+ *   hexadecimal constants in a source file cannot be reviewed, and a build
+ *   from the field arithmetic is 60 reviewable lines.  Cost is a few
  *   hundred microseconds once, inside the first c68k_aes_key_set().
  *
  * SPDX-License-Identifier: MIT
@@ -73,8 +73,8 @@ UINT c68k_aes_variant_is_asm(UINT variant)
 /* -------------------------------------------------------------- tables --- */
 
 /*
- * Shared with the assembly, which indexes them with the 68020's scaled
- * (An,Dn.W*4) mode and so needs exactly this layout.  Not static; the
+ * Shared with the assembly, which indexes them with the scaled (An,Dn.W*4)
+ * mode of the 68020 and so needs exactly this layout.  Not static.  The
  * assembler sees them as _c68k_aes_te0 and so on.
  */
 ULONG   c68k_aes_te[4][256];        /* Te0..Te3, encryption               */
@@ -85,12 +85,12 @@ UCHAR   c68k_aes_isbox[256];
 /*
  * Built once, on the first c68k_aes_key_set(), with no lock.  tls.library is
  * an AmigaOS shared library with one data segment behind every opener, so two
- * processes can reach this at the same time; both write the same bytes.  The
- * flag is set last, so a thread that sees it set is looking at a finished
- * table, and a thread that does not see it set rebuilds, storing the values
- * that were already there.  Reads begin only after the reader's own
- * c68k_aes_key_set() returned, hence after its own build completed.  A
- * Forbid() pair would buy nothing.
+ * processes can reach this at the same time, and both write the same bytes.
+ * The flag is set last, so a thread that sees it set sees a finished table,
+ * and a thread that does not see it set rebuilds and stores the values that
+ * were already there.  Reads begin only after the c68k_aes_key_set() of that
+ * reader returned, and therefore after its own build completed.  A Forbid()
+ * pair gains nothing.
  */
 static UINT c68k_aes_tables_ready;
 
@@ -225,11 +225,11 @@ static const UCHAR c68k_aes_rcon[11] =
 /*
  * A big-endian longword at an arbitrary address.
  *
- * On the 68020 that is one MOVE.L: the part does misaligned data accesses in
+ * On the 68020 that is one MOVE.L.  The part does misaligned data accesses in
  * hardware, at the cost of an extra bus cycle, and misaligned is the normal
- * case here, a TLS record's payload starts 21 bytes into the packet buffer,
- * so every CBC block in the record path is on an odd address.  Inline
- * assembly because C cannot express an intentionally unaligned load: GCC
+ * case here.  The payload of a TLS record starts 21 bytes into the packet
+ * buffer, so every CBC block in the record path is on an odd address.  Inline
+ * assembly because C cannot express an intentionally unaligned load.  GCC
  * compiles the portable form below into four byte reads, three shifts and
  * three ORs, 300 cycles a block of load and store around a 3,000 cycle cipher.
  */
@@ -693,9 +693,9 @@ UINT    r;
 }
 
 /*
- * Decryption the same way.  The equivalent inverse cipher's InvMixColumns is
- * three MixColumns-shaped applications of xtime, so this is slower than its
- * encryption twin; it exists so the SBOX row of the comparison covers both
+ * Decryption the same way.  The InvMixColumns of the equivalent inverse cipher
+ * is three MixColumns-shaped applications of xtime, so this is slower than its
+ * encryption twin.  It exists so the SBOX row of the comparison covers both
  * directions.
  */
 static ULONG c68k_aes_invmixcolumn(ULONG w)
@@ -780,15 +780,15 @@ UINT    r;
  * (round keys, rounds, four-longword state in memory), so the dispatch is
  * a switch and not two code paths.
  *
- * The state lives in memory.  The 68020 has eight data registers; a round
+ * The state lives in memory.  The 68020 has eight data registers, and a round
  * needs four state words, four accumulators, an index and a temporary, which
- * is ten.  The choice is between extracting the sixteen index bytes from
- * registers, MOVE.B plus a ROL.L each, since only the low byte of a register
- * can be moved out, and reading them straight out of a sixteen-byte buffer
- * with MOVE.B d16(An),Dn, one instruction and no rotate.  The second is fewer
- * instructions and leaves four registers free for the accumulators, so the
- * round ends with a single MOVEM.L of all four.  On a part with a data cache
- * the sixteen byte reads would be free; here they are bus cycles, still
+ * is ten.  The choice is between the sixteen index bytes extracted from
+ * registers, MOVE.B plus a ROL.L each, because only the low byte of a
+ * register can be moved out, and the same bytes read out of a sixteen-byte
+ * buffer with MOVE.B d16(An),Dn, one instruction and no rotate.  The second
+ * is fewer instructions and leaves four registers free for the accumulators,
+ * so the round ends with a single MOVEM.L of all four.  On a part with a data
+ * cache the sixteen byte reads are free.  Here they are bus cycles, still
  * cheaper than the rotates they replace.
  */
 #ifdef C68K_ASM_AES
@@ -895,15 +895,15 @@ ULONG   st[4];
 }
 
 /*
- * CBC.  The chaining value stays in st[] across blocks rather than going back
- * to the IV buffer, which is why these exist instead of a loop around
- * c68k_aes_encrypt_block(); nx_crypto_cbc.c does the latter, through a
+ * CBC.  The chaining value stays in st[] across blocks rather than returns to
+ * the IV buffer, which is why these exist instead of a loop around
+ * c68k_aes_encrypt_block().  nx_crypto_cbc.c does that instead, through a
  * function pointer, with a separate XOR pass over the block.
  *
- * The byte-at-a-time loads are what a portable fallback costs: `in` may be on
- * any address, because a TLS record's payload starts 21 bytes into the packet
- * buffer.  The fused assembly path below uses MOVE.L regardless, since the
- * 68020 does misaligned longword accesses in hardware.
+ * The byte-at-a-time loads are what a portable fallback costs.  `in` can be
+ * on any address, because the payload of a TLS record starts 21 bytes into
+ * the packet buffer.  The fused assembly path below uses MOVE.L regardless,
+ * because the 68020 does misaligned longword accesses in hardware.
  */
 VOID c68k_aes_cbc_encrypt(const C68K_AES *aes, UCHAR *iv,
                           const UCHAR *in, UCHAR *out, ULONG blocks)
