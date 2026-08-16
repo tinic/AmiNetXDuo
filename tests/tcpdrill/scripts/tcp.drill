@@ -221,6 +221,12 @@ tx A seq=101 ack=1 len=1 within=6000
 # segments while a cut one is already on the wire -- is a difference between
 # those two numbers whatever the window rule allows.  z03 below keeps the cut
 # segment itself, where nothing is in flight and the rule permits it.
+#
+# NO `notx` AFTER THE SEGMENT.  Nothing here acknowledges the 1460 bytes, so
+# the tail loss probe re-sends them about two round trips later, which on this
+# rig is a few milliseconds: a quiet window is not a thing this case can
+# assert.  The 240 bytes not leaving is asserted by `wirebytes` instead, which
+# counts what left and would see them.
 case z02_short_send_credits_what_left
 socket
 connect
@@ -229,7 +235,6 @@ rx SA seq=0 ack=1 win=1700 mss=1460
 tx A seq=1 ack=1
 send 2048 = SHORT
 tx PA seq=1 ack=1 len=1460
-notx 400
 wirebytes
 
 # The same fault with nothing in front of it to hide it.  The window is
