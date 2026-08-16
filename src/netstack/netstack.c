@@ -905,6 +905,23 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
 
 #ifdef AMINETXDUO_IPV6
     /*
+     * Multicast Listener Discovery, ahead of nxd_ipv6_enable() and not after
+     * it: what MLD announces is a join, and the first joins this stack makes
+     * are the ones nxd_ipv6_enable() and the address configuration below it
+     * make themselves. A join taken before this call is in the driver's
+     * address filter and not in MLD's table, so it is never announced and no
+     * later query finds it.
+     *
+     * ff02::1 is the exception either way -- RFC 9777 section 6 excepts it,
+     * every node is a member by definition -- so ordering only decides
+     * whether the solicited-node groups are reported, which is the whole
+     * point of the feature.
+     */
+    status = nx_mld_enable(&ns->ns_Ip);
+    if (status != NX_SUCCESS)
+        AMI_WARN("netstack: nx_mld_enable failed (%ld)", (long)status);
+
+    /*
      * nxd_icmp_enable() covers ICMPv4 as well, so it replaces the
      * nx_icmp_enable() below rather than adding to it.
      *
