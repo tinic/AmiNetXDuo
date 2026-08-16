@@ -565,9 +565,9 @@ int main(int argc, char **argv)
 
     if (!mdns_enabled_somewhere(base))
     {
-        tool_error("mDNS is not enabled on any interface; add MDNS=YES to "
-                   "the interface file in DEVS:NetInterfaces and restart the "
-                   "stack");
+        tool_error("mDNS is not enabled on any interface. Add MDNS=YES to "
+                   "the interface file in DEVS:NetInterfaces, then restart "
+                   "the stack");
         tool_netstatus_close(base);
         FreeArgs(rda);
         return RETURN_WARN;
@@ -644,7 +644,7 @@ int main(int argc, char **argv)
 
     if (count < 0)
     {
-        tool_error("the stack would not say what answered");
+        tool_error("the stack did not say what answered");
         FreeArgs(rda);
         return RETURN_ERROR;
     }

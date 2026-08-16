@@ -346,8 +346,8 @@ static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
         if (st->packets_received == 0 && st->packets_sent == 0)
         {
             tool_printf("  Nothing has gone in or out of this interface at all.\n");
-            tool_printf("  If it should have, check the cable and that the\n");
-            tool_printf("  interface is online (ShowNetStatus says).\n");
+            tool_printf("  If traffic was expected, check the cable and check\n");
+            tool_printf("  that the interface is online (ShowNetStatus says).\n");
         }
 
         shown++;

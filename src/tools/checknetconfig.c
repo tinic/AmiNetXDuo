@@ -314,7 +314,8 @@ static VOID check_device(const char *path, const AmiIfConfig *ifc)
     line = keyword_line(path, ifc->card[0] != '\0' ? "CARD" : "UNIT");
 
     finding(path, line, AMI_CFG_PROBLEM_ERROR);
-    say("      %s will not come up as it stands\n", (LONG)ifc->name);
+    say("      %s will not come up with this configuration\n",
+        (LONG)ifc->name);
 
     if (!cnc_quiet)
         tool_explain_device(ifc->device, ifc->unit, ifc->card);
@@ -339,10 +340,9 @@ static VOID check_addressing(const char *path, const AmiIfConfig *ifc)
     {
         finding(path, keyword_line(path, "ADDRESS"), AMI_CFG_PROBLEM_ERROR);
         note("this is a loopback address. It always means \"this machine\", "
-             "so an interface with one can never be reached from anywhere "
-             "else.");
-        note("Use an address on your own network, 192.168.x.y on nearly "
-             "every home network, or CONFIGURE = DHCP to be given one.");
+             "so no other machine can reach an interface that has one.");
+        note("Use an address on the local network, usually 192.168.x.y, or "
+             "set CONFIGURE = DHCP to be given one.");
         return;
     }
 
@@ -350,18 +350,17 @@ static VOID check_addressing(const char *path, const AmiIfConfig *ifc)
     {
         finding(path, keyword_line(path, "ADDRESS"), AMI_CFG_PROBLEM_ERROR);
         note("addresses from 224.0.0.0 upwards are reserved for multicast "
-             "and for future use, and cannot be given to a machine.");
+             "and for future use. A machine cannot have one.");
         return;
     }
 
     if (ifc->netmask == 0)
     {
         finding(path, 0, AMI_CFG_PROBLEM_ERROR);
-        note("the interface has an address but no NETMASK, so the stack "
-             "cannot tell which machines are on the same network as this "
-             "one.");
-        note("Add  NETMASK = 255.255.255.0, the right answer on "
-             "almost every home network.");
+        note("the interface has an address and no NETMASK. Without a netmask "
+             "the stack cannot tell which machines are on this network.");
+        note("Add  NETMASK = 255.255.255.0, which is correct on almost "
+             "every home network.");
         return;
     }
 
@@ -388,7 +387,7 @@ static VOID check_addressing(const char *path, const AmiIfConfig *ifc)
         say("      a /%ld netmask leaves no room for anything else on this\n",
             (LONG)prefix);
         say("      network, so nothing here can be reached directly\n");
-        note("255.255.255.0 is what a home network almost always wants.");
+        note("255.255.255.0 is correct on almost every home network.");
         return;
     }
 
@@ -397,20 +396,19 @@ static VOID check_addressing(const char *path, const AmiIfConfig *ifc)
         finding(path, keyword_line(path, "ADDRESS"), AMI_CFG_PROBLEM_ERROR);
         note("this is the network's own address rather than a machine's, "
              "because every bit the netmask leaves free is zero. Nothing can "
-             "talk to it.");
-        note("Raise the last part of the address: .1 is usually the router, "
-             "so .10 or higher is a safe choice for an Amiga.");
+             "reach it.");
+        note("Raise the last part of the address. The router is usually .1, "
+             "so use .10 or higher.");
         return;
     }
 
     if (host_bits == (~ifc->netmask & 0xffffffffUL))
     {
         finding(path, keyword_line(path, "ADDRESS"), AMI_CFG_PROBLEM_ERROR);
-        note("this is the broadcast address of its own network, which "
-             "reaches every machine at once and therefore cannot belong to "
-             "one. Nothing will answer it.");
-        note("Lower the last part of the address; .10 upwards is a safe "
-             "choice.");
+        note("this is the broadcast address of its own network. That address "
+             "reaches every machine at once, so it cannot belong to one. "
+             "Nothing answers it.");
+        note("Lower the last part of the address. Use .10 or higher.");
         return;
     }
 
@@ -419,10 +417,10 @@ static VOID check_addressing(const char *path, const AmiIfConfig *ifc)
     {
         finding(path, keyword_line(path, "ADDRESS"), AMI_CFG_PROBLEM_WARN);
         note("169.254.x.y is the range a machine picks for itself when "
-             "nothing hands out addresses, so setting one by hand risks "
-             "colliding with a machine that picked the same one.");
+             "nothing hands out addresses. An address set by hand can "
+             "collide with a machine that picked the same one.");
         note("Use CONFIGURE = LINKLOCAL to have one picked safely, or an "
-             "address on your own network.");
+             "address on the local network.");
     }
 }
 
@@ -444,9 +442,9 @@ static VOID check_gateway(const AmiConfig *cfg)
             return;
 
         finding("DEVS:Internet/routes", 0, AMI_CFG_PROBLEM_WARN);
-        note("there is no default route, so this machine can reach other "
-             "machines on its own network and nothing at all beyond it.");
-        note("Put  GATEWAY = <your router's address>  in "
+        note("there is no default route. This machine can reach other "
+             "machines on its own network, and nothing beyond it.");
+        note("Put  GATEWAY = <router address>  in "
              "DEVS:Internet/routes, or run NetSetup. On a home network the "
              "router is the box the broadband comes into, usually at .1.");
         return;
@@ -493,8 +491,8 @@ static VOID check_gateway(const AmiConfig *cfg)
     say("      the router %s is not on any network this machine is\n",
         (LONG)text);
     say("      on, so nothing sent to it can arrive\n");
-    note("A router has to be reachable directly. Check its address against "
-         "the ADDRESS and NETMASK of your interface: all but the last part "
+    note("A router must be reachable directly. Check its address against "
+         "the ADDRESS and NETMASK of the interface. All but the last part "
          "of the two addresses normally match.");
 }
 
@@ -538,9 +536,9 @@ static VOID check_resolver(const AmiConfig *cfg)
         say("      the name server %s is not on this machine's network\n",
             (LONG)text);
         say("      and there is no default route to reach it through\n");
-        note("Either give this machine a router (GATEWAY in "
-             "DEVS:Internet/routes), or use a name server on your own "
-             "network, which on a home network is the router itself.");
+        note("Give this machine a router (GATEWAY in "
+             "DEVS:Internet/routes), or use a name server on the local "
+             "network. On a home network that is the router itself.");
     }
 }
 
@@ -573,8 +571,8 @@ static VOID check_collisions(const AmiConfig *cfg)
                 say("      %s and %s both claim %s unit %lu, and one card\n",
                     (LONG)a->name, (LONG)b->name, (LONG)b->device, b->unit);
                 say("      cannot be two interfaces\n");
-                note("Delete whichever of the two files is the leftover, or "
-                     "give one of them the UNIT of a second card.");
+                note("Remove the file that is left over, or give one of the "
+                     "two the UNIT of a second card.");
                 continue;
             }
 
@@ -617,9 +615,9 @@ static VOID check_drawer_size(const AmiConfig *cfg)
         count);
     say("      for %ld, so the rest are ignored\n",
         (LONG)AMI_CFG_MAX_INTERFACES);
-    note("The files are taken in alphabetical order, so it is the ones at "
-         "the end of the alphabet that are dropped. Move the ones you do not "
-         "use out of DEVS:NetInterfaces.");
+    note("The files are taken in alphabetical order, so the ones at the end "
+         "of the alphabet are dropped. Move the unused files out of "
+         "DEVS:NetInterfaces.");
 }
 
 /*
@@ -825,7 +823,7 @@ static VOID check_netdb_file(const NetdbFile *spec)
         if (said >= 5)
         {
             finding(spec->path, 0, AMI_CFG_PROBLEM_WARN);
-            note("more lines after this one have the same problem; they are "
+            note("more lines after this one have the same problem. They are "
                  "not all listed.");
             break;
         }
@@ -898,7 +896,7 @@ int main(int argc, char **argv)
         tool_error("this machine has no network configuration at all");
         tool_explain_no_interfaces();
 
-        verdict("The network has never been set up on this machine.\n");
+        verdict("The network has never been configured on this machine.\n");
 
         FreeArgs(rda);
         return RETURN_WARN;
@@ -944,8 +942,8 @@ int main(int argc, char **argv)
     }
     else
     {
-        verdict("\n%lu problem(s) will stop the network working; %lu more are\n"
-                "worth a look.\n",
+        verdict("\n%lu problem(s) will stop the network from working.\n"
+                "%lu more need attention.\n",
                 (ULONG)cnc_errors, (ULONG)cnc_warnings);
         rc = RETURN_WARN;
     }
