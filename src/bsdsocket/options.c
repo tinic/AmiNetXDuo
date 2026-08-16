@@ -192,14 +192,6 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
         switch (optname)
         {
             /*
-             * Remembered and answered, not honoured. bind() hands the port to
-             * NetX Duo's own table (socket.c), which is exclusive and has no
-             * override: a socket in TIMED_WAIT keeps its port whatever this
-             * says. Nothing here can change that, and refusing the call
-             * breaks every ported daemon that sets it and does not look at the
-             * result. The round-trip is pinned by tests/sockopt.
-             */
-            /*
              * SO_REUSEADDR lets a bind take a port whose only holders are in
              * TIME-WAIT, which is what a server restarting after its last
              * client disconnected runs into: the port is unavailable for up

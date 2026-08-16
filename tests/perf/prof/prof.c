@@ -21,7 +21,8 @@
  *      device and resource on Exec's lists, so a PC in Kickstart can be named
  *      by the nearest preceding entry, "exec.library/Forbid" rather than
  *      "$00f8xxxx".  This is not decoration.  A separate probe measured the
- *      ThreadX bracket at 214 us per socket call and that time is spent in
+ *      ThreadX bracket at ~270 us per socket call, ~790 us on a base whose
+ *      TX_THREAD is not yet cached, and that time is spent in
  *      Exec; a profile that lumped Kickstart into one bucket would hide the
  *      largest known cost in the system.
  *

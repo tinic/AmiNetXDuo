@@ -47,7 +47,7 @@
  * sample is taken inside a Disable()/Enable() pair; the interrupt lands
  * immediately after instead, charging that time to whatever runs next.
  * Forbid()/Permit() does NOT mask interrupts and is sampled normally, which
- * matters because that is where the 214 us ThreadX bracket lives.
+ * matters because that is where the ThreadX bracket lives, ~270 us a call.
  *
  * SPDX-License-Identifier: MIT
  */
