@@ -163,7 +163,7 @@ jobs:
           'tests/conformance/build.sh -b build/ci/default &&
           tests/conformance/run-conformance.sh -b build/ci/default -a "LOOPBACK NOPAGE"'
 
-      # 129 checks over the whole RFC 3542 surface -- IPV6_RECVPKTINFO and
+      # The whole RFC 3542 surface -- IPV6_RECVPKTINFO and
       # IP_PKTINFO arriving together on one datagram, both hop-limit paths read
       # off the wire, the arrival index through if_indextoname() and back. It
       # ran green by hand from the day it was written and nothing re-ran it,
@@ -174,10 +174,10 @@ jobs:
       # opens the library, so it needs no driver anyone has to supply. A ROM is
       # the whole requirement.
       #
-      # The results are on the SERIAL log, not the guest's stdout.txt -- the
-      # harness prints the verdict either way.  It used to carry -A here, which
-      # picked between two branches that both ran Amiberry; the branch is gone
-      # and the invocation is the same run.
+      # The harness grades on the guest's own counters, from stdout.txt or the
+      # serial log, whichever arrived; 134 checks against a floor of 120.  It
+      # used to carry -A here, which picked between two branches that both ran
+      # Amiberry; the branch is gone and the invocation is the same run.
       - name: IPv6 socket surface
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: >-
