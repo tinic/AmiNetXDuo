@@ -106,6 +106,7 @@ DEPTHS=()
 RTG=0
 P96DIR="${AMINETXDUO_P96_DIR:-$HOME/amiga-assets/p96}"
 # What Amiberry's uaegfx calls 640x480; see AssignModeID() in its picasso96.
+RTG_BOARD=uaegfx
 RTG_MODE_ID=0x50031000
 RTG_W=640
 RTG_H=480
@@ -267,7 +268,15 @@ EOF
         # are on the machine.
         cp -R "$P96DIR/Libs/." "$HD/Libs/"
         mkdir -p "$HD/Devs/Monitors"
-        cp -R "$P96DIR/Devs/." "$HD/Devs/"
+        cp "$P96DIR/Devs/Picasso96Settings" "$HD/Devs/Picasso96Settings"
+        # THE MONITOR IS NAMED AFTER THE BOARD, and that is not cosmetic.
+        # InstallPicasso96's P_InstallCard copies devs/monitors/Picasso96 with
+        # (newname #_boardname) and writes BoardType=<boardname> into the icon
+        # it drops beside it; the one file drives every card P96 supports and
+        # the name is how it knows which .card to load.  Staged as `Picasso96`
+        # it loads nothing, publishes no resolutions, and Workbench comes up on
+        # the chipset with every check here still passing.
+        cp "$P96DIR/Devs/Monitors/Picasso96" "$HD/Devs/Monitors/$RTG_BOARD"
         wb31_screenmode_prefs_id "$HD" "$depth" "$RTG_MODE_ID" "$RTG_W" "$RTG_H"
     else
         wb31_screenmode_prefs "$HD" "$depth"
@@ -534,6 +543,27 @@ for depth in "${DEPTHS[@]}"; do
         [ -n "$k" ] || continue
         say "${tag}_$k" "$v"
     done < <(grep '=' "$OUTDIR/$tag-probe.txt" || true)
+
+    #
+    # -R MUST FAIL IF THE SESSION DID NOT COME UP ON A CARD.
+    #
+    # Every other check in this file passes on the chipset screen Workbench
+    # falls back to when the board is missing: it is a screen, it has more
+    # than one colour, its palette is not black, and it changes.  A run that
+    # tested the planar path while reporting on the RTG one is worse than a
+    # run that fails, and it happened three times here -- once on a 24-bit
+    # address space, once on an RGBFF mask without CLUT, once on a monitor
+    # file staged under the wrong name.  The seventh number of the geom word
+    # is rfb_geom.format, and 1 is the only value that says a card.
+    if [ "$RTG" = 1 ]; then
+        fmt=$(awk '/^geom=/ { print $NF }' "$OUTDIR/$tag-probe.txt" 2>/dev/null || true)
+        say "${tag}_rtg_format" "${fmt:-none}"
+        if [ "${fmt:-0}" != "1" ]; then
+            say "${tag}_error" "the session came up planar: -R asked for a card\
+ and the geom word says format ${fmt:-none}, not 1"
+            VERDICT=fail
+        fi
+    fi
 
     case "$rc" in
         0) ;;
