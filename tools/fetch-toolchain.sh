@@ -225,11 +225,11 @@ emit_root() {
 
 # ------------------------------------------------------------ already here ---
 
-# `ln -sfn X tmp` then `mv -f tmp current` LOOKS like the atomic-swap idiom and
-# is not one, because `current` is a symlink TO A DIRECTORY: mv resolves it and
-# moves the new link INSIDE the old toolchain tree, under the name current.tmp,
-# leaving `current` exactly where it was.  It fails silently and only from the
-# SECOND pin bump onwards, when there is a `current` to trip over.
+# `ln -sfn X tmp` then `mv -f tmp current` looks like the atomic-swap idiom and
+# is not one, because `current` is a symlink to a directory: mv resolves it and
+# moves the new link inside the old toolchain tree, under the name current.tmp,
+# leaving `current` exactly where it was.  It fails silently, and only from the
+# second pin bump onwards, when a `current` already exists.
 #
 # That is how the self-hosted emulator runner came to hold both eabb6789378f
 # (the pin, GCC 16.2.0b) and c63033fd4473 (GCC 15.2) with `current` on the older
@@ -237,8 +237,8 @@ emit_root() {
 # happened.  Every cross build there ran under GCC 15.2 for three releases.
 #
 # `ln -sfn` is the whole fix: -n is precisely "if the link name is a symlink to
-# a directory, do not follow it".  There is no portable atomic form -- `mv -T`
-# is GNU-only -- and a single-writer cache does not need one; being right does.
+# a directory, do not follow it".  There is no portable atomic form, because
+# `mv -T` is GNU-only, and a single-writer cache does not need one.
 point_current_at_pin() {
     local have want
     have=$(cd "$CACHE/current" 2>/dev/null && pwd -P || true)
@@ -251,8 +251,8 @@ point_current_at_pin() {
 if [ "$FORCE" = "0" ] && [ -x "$ROOT/bin/m68k-amigaos-gcc" ]; then
     say "==> toolchain already at $ROOT"
     # A cache that already holds the pinned tree took this exit without looking
-    # at `current`, so a symlink the swap above had failed to move stayed wrong
-    # for every later run as well.  Repointing is this script's own bookkeeping.
+    # at `current`, so a symlink the swap above failed to move stayed wrong for
+    # every later run as well.  Repointing is this script's own bookkeeping.
     point_current_at_pin
     emit_root
     exit 0
@@ -372,7 +372,7 @@ mkdir -p "$CACHE"
 mv "$TMP/x/$TC_PREFIX_IN_TAR" "$ROOT.tmp"
 mv "$ROOT.tmp" "$ROOT"
 
-# `current` is a convenience pointer at the pin.  Nothing SELECTS a toolchain
+# `current` is a convenience pointer at the pin.  Nothing selects a toolchain
 # through it any more -- both resolvers ask this script for --print-root -- and
 # that is deliberate, because this line was wrong for two pin bumps and nothing
 # could tell.

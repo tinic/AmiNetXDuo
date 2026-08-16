@@ -49,11 +49,9 @@ static const ULONG xsurf500_regmap[32] =
 };
 
 /*
- * THE X-SURF'S ISA PLUG AND PLAY BRIDGE.
- *
- * The board is a Zorro II card carrying an RTL8019AS on a private ISA bus.
+ * The X-Surf is a Zorro II board carrying an RTL8019AS on a private ISA bus.
  * Its 4 KB window at board+$8000 is that bus's I/O space at the row's stride
- * of 2, so it reaches ISA ports $000..$7ff and no further; port bit 11 comes
+ * of 2, so it reaches ISA ports $000..$7ff and no further.  Port bit 11 comes
  * out of a write-only latch at board+$7e, bit 7.  That is why the PnP ADDRESS
  * port ($279) and WRITE_DATA port ($a79) are one board address, $84f2, with
  * the latch deciding which of the two it is.
@@ -63,7 +61,7 @@ static const ULONG xsurf500_regmap[32] =
  * and compares it against `0x279 * 2` and `0xa79 * 2`, and the flag is set from
  * bit 7 of a byte written where `(addr & 0x80ff) == 0x007e`.  The chip's
  * registers appear only while `pnp.activated`, at `io_port * 2` in the same
- * window, 32 ports wide -- which is the whole NE2000 file, NIC and ASIC.
+ * window, 32 ports wide -- the whole NE2000 file, NIC and ASIC.
  *
  * One logical device, so LDN 0.
  */
@@ -86,15 +84,16 @@ const NetdevCard netdev_cards[] =
       NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL },
 
     /*
-     * reg_off IS THE ONE PLACE THE REGISTER BASE IS WRITTEN DOWN, still.  The
-     * chip decodes nothing until netdev_isapnp.c has configured it, and what
-     * that file programs is derived from this number rather than carried
-     * beside it: ISA port = (reg_off - pnp->io_win) / stride, which is
-     * ($8600 - $8000) / 2 = $300, the port if_ne_xsurf.c names.  The
-     * alternative -- letting the PnP phase report where it put the chip and
-     * writing that back into the row -- would make the register base a
-     * runtime value on one row out of ten and leave every reader of this table
-     * unable to say where the card is.
+     * reg_off is still the one place the register base is written down.  The
+     * chip decodes nothing until netdev_isapnp.c configures it.  What that
+     * file programs is derived from this number rather than carried beside
+     * it: ISA port = (reg_off - pnp->io_win) / stride, which is
+     * ($8600 - $8000) / 2 = $300, the port if_ne_xsurf.c names.
+     *
+     * The alternative is to let the PnP phase report where it put the chip
+     * and write that back into the row.  That makes the register base a
+     * runtime value on one row out of ten.  No reader of this table can then
+     * say where the card is.
      */
     { "xsurf",     4626,    23, 0x8600,     2,      0,
       NETDEV_CHIP_NE2000,  10000000UL, 0,       0,       0,       0,

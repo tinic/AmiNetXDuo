@@ -6,7 +6,7 @@
 #                            [-N BOARD] [-B BACKEND]
 #
 # It was called run-socket-fsuae.sh and both halves of it drove
-# tools/amiberry-run.sh; -A picked between two branches that ran the same
+# tools/amiberry-run.sh.  -A picked between two branches that ran the same
 # emulator.  fs-uae left the tree on 2026-08-04 and the name outlived it.
 #
 # Stages LIBS:bsdsocket.library, LIBS:usergroup.library and the DEVS: config.
@@ -32,8 +32,8 @@ CPU=""
 BUILD="${AMINETXDUO_BUILD:-build/v6}"
 BOARD=a2065
 # Both defaults are tools/amiberry-run.sh's own, repeated here only so -N and
-# -B can override them.  Leave AMINETXDUO_AMIBERRY_BACKEND unset and this is
-# SLIRP, which is what the test wants: it talks to ::1 and needs no LAN.
+# -B can override them.  With AMINETXDUO_AMIBERRY_BACKEND unset this is SLIRP,
+# which is what the test wants: it talks to ::1 and needs no LAN.
 IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
 
 while getopts "m:t:c:b:N:B:" opt; do

@@ -43,19 +43,17 @@
 #define NETDEV_BUS_FIXED    2   /* a fixed address, no autoconfig, no claim */
 
 /*
- * A CARD WHOSE CHIP IS BEHIND AN ISA PLUG AND PLAY BRIDGE.
+ * The X-Surf is a Zorro II board carrying an RTL8019AS on a private ISA bus.
+ * That chip decodes nothing until ISA PnP assigns it an I/O base and
+ * activates it.  Until then the board's window reads as a floating bus and
+ * the card looks absent.  netdev_isapnp.c runs the sequence.  This structure
+ * is what it needs, and it is NULL on every row that has no bridge.
  *
- * The X-Surf is a Zorro II board carrying an RTL8019AS on a private ISA bus,
- * and that chip decodes nothing at all until ISA PnP has assigned it an I/O
- * base and activated it.  Until then the board's window reads as a floating
- * bus and the card looks absent.  netdev_isapnp.c runs the sequence; this is
- * the four numbers it needs, and NULL on every row that has no bridge.
- *
- * io_win + port * stride is where an ISA port lands in the board window, and
- * the window is not wide enough for the whole 12-bit port space: the X-Surf's
- * is 4 KB at stride 2, so it carries ports 0..0x7ff and the twelfth address
- * line comes out of a latch on the board.  hi_reg/hi_bit is that latch, and
- * it is why the PnP ADDRESS port (0x279) and WRITE_DATA port (0xa79) are the
+ * io_win + port * stride is where an ISA port lands in the board window.  The
+ * window is not wide enough for the whole 12-bit port space: the X-Surf's is
+ * 4 KB at stride 2, so it carries ports 0..0x7ff, and the twelfth address
+ * line comes out of a latch on the board.  hi_reg/hi_bit is that latch.  It
+ * is why the PnP ADDRESS port (0x279) and WRITE_DATA port (0xa79) are the
  * same board address with one bit of state between them.
  */
 typedef struct NetdevIsaPnp

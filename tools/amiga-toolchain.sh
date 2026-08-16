@@ -13,7 +13,7 @@
 #
 # Order, first hit wins:
 #   1. $AMIGA_TOOLCHAIN_ROOT, explicit, always wins
-#   2. the PINNED tree in the fetch cache, tools/fetch-toolchain.sh --print-root
+#   2. the pinned tree in the fetch cache, tools/fetch-toolchain.sh --print-root
 #   3. m68k-amigaos-gcc on $PATH, a container or a module load
 #   4. /opt/m68k-amigaos, the amigadev/crosstools layout
 #   5. $HOME/amigaos/tools/m68k-amigaos-gcc, the historical local default
@@ -22,25 +22,24 @@
 # fetch cache is a linux/amd64 tree and can be populated on a machine that
 # cannot execute it.
 #
-# THE CACHE CANDIDATE IS THE PIN, NOT <cache>/current.
+# The cache candidate is the pin and not <cache>/current.  It used to be
+# <cache>/current, on the "it runs" test alone.  That symlink is written by
+# tools/fetch-toolchain.sh when it installs, so a cache that already holds the
+# pinned tree -- put there by some other route, or fetched before a pin bump
+# moved the directory -- leaves it addressing whatever was current last.
+# Nothing compared it to anything.
 #
-#   It used to be <cache>/current, on the "it runs" test alone.  That symlink
-#   is written by tools/fetch-toolchain.sh when it INSTALLS, so a cache that
-#   already holds the pinned tree -- put there by some other route, or fetched
-#   before a pin bump moved the directory -- leaves it addressing whatever was
-#   current last.  Nothing compared it to anything.  On the self-hosted
-#   emulator runner it pointed at c63033fd4473 (GCC 15.2) while eabb6789378f
-#   (GCC 16.2.0b) sat in the same directory unused, so every build and every
-#   generator ran under the wrong compiler and the only symptom was
-#   tools/gen-developer.sh --check reporting the committed headers stale.  That
-#   arm was red from 2026-08-14 through three releases on a wrong answer, which
-#   is the failure a hash pin exists to prevent.
+# On the self-hosted emulator runner it pointed at c63033fd4473 (GCC 15.2)
+# while eabb6789378f (GCC 16.2.0b) sat in the same directory unused.  Every
+# build and every generator ran under the wrong compiler, and the only symptom
+# was tools/gen-developer.sh --check reporting the committed headers stale.
+# That arm was red from 2026-08-14 through three releases.
 #
-#   The pin names its own directory (<cache>/<sha12>), so ask for that and a
-#   stale symlink cannot be mistaken for it.  A <cache>/current that runs here
-#   and is NOT the pin is then an error, not a fallback: the cache is this
-#   project's, something wrote a toolchain we did not ask for into it, and
-#   ranking around it quietly is how the wrong answer got used the first time.
+# The pin names its own directory (<cache>/<sha12>), so asking for that
+# directory keeps a stale symlink from being mistaken for it.  A
+# <cache>/current that runs here and is not the pin is an error and not a
+# fallback: the cache belongs to this project, and something wrote a toolchain
+# into it that this tree did not ask for.
 #
 # Set AMIGA_TOOLCHAIN_QUIET=1 to suppress the "==> toolchain:" line.
 #
@@ -100,7 +99,7 @@ _ami_tc_resolve() {
         echo "   the headers, the codegen and the library ABI all move." >&2
         echo "" >&2
         echo "       tools/fetch-toolchain.sh        # install the pin" >&2
-        echo "       export AMIGA_TOOLCHAIN_ROOT=... # or say so on purpose" >&2
+        echo "       export AMIGA_TOOLCHAIN_ROOT=... # or choose one on purpose" >&2
         return 3
     fi
 
@@ -128,8 +127,8 @@ AMIGA_TOOLCHAIN_ROOT=$(_ami_tc_resolve)
 _ami_tc_rc=$?
 
 # 3 is the stale cache, which has already said what it is and what to do about
-# it.  Printing the generic "no toolchain found" over the top would bury the
-# one line that names the defect.
+# it.  Printing the generic "no toolchain found" over the top buries the one
+# line that names the defect.
 if [ "$_ami_tc_rc" = 3 ]; then
     unset _ami_tc_rc
     return 3 2>/dev/null || exit 3

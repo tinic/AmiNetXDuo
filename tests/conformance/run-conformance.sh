@@ -5,13 +5,13 @@
 #   tests/conformance/run-conformance.sh [-m MODEL] [-c CPU] [-t SECONDS]
 #                                        [-T TAG] [-a "SUITE ARGS"] [-p] [-b BUILDDIR]
 #
-# It was called run-fsuae.sh and it has driven tools/amiberry-run.sh since
-# fs-uae left the tree on 2026-08-04.  The name was the only thing left saying
-# otherwise, and it said it in the one place that is read as a decision: the
-# job in .github/workflows/emulator.yml was titled after it.  Named for what it
-# tests now, like every other wired harness -- run-tls13.sh, run-addifup.sh,
-# run-cardsweep.sh -- so that which emulator boots the guest stays a question
-# tools/amiberry-run.sh answers, once, for all of them.
+# It was called run-fsuae.sh and it drove tools/amiberry-run.sh from the day
+# fs-uae left the tree, 2026-08-04.  The name was the only thing left saying
+# otherwise, and it said it where it is read as a decision: the job in
+# .github/workflows/emulator.yml was titled after it.  It is now named for
+# what it tests, like every other wired harness -- run-tls13.sh,
+# run-addifup.sh, run-cardsweep.sh -- so that which emulator boots the guest
+# is a question tools/amiberry-run.sh answers once, for all of them.
 #
 # -b (or AMINETXDUO_BUILD) picks the build tree the library comes from, so the
 # floor build and an -DAMINETXDUO_IPV6=ON build can both be measured.
