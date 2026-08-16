@@ -5,26 +5,26 @@
  * BPF_MEMWORDS words of scratch, eight instruction classes, and a return value
  * that is the number of bytes of the packet to keep.
  *
- * It is total: there is no input, valid program or not, valid packet or not,
- * for which it can trap, read outside the packet, divide by zero, shift by
- * more than 31, loop forever, or step outside the instruction array. Each of
- * those is checked and rejects the packet instead:
+ * The interpreter is total: no input can make it trap, read outside the
+ * packet, divide by zero, shift by more than 31, loop forever, or step outside
+ * the instruction array. This holds for an invalid program and for an invalid
+ * packet. Each of these cases is checked, and the packet is rejected:
  *
  *   - packet reads are bounds-checked against the view, in arithmetic that
- *     cannot wrap (`off > caplen - size` after proving `size <= caplen`);
- *   - X + k for indexed loads is checked for wraparound;
+ *     cannot wrap (`off > caplen - size` after `size <= caplen` is proved)
+ *   - X + k for indexed loads is checked for wraparound
  *   - every jump is checked against the remaining instruction count, and only
  *     forward jumps exist in the encoding, so pc strictly increases and the
- *     loop always terminates;
- *   - scratch indices are checked against BPF_MEMWORDS;
- *   - unknown encodings reject rather than falling through.
+ *     loop always terminates
+ *   - scratch indices are checked against BPF_MEMWORDS
+ *   - unknown encodings reject instead of a fall-through
  *
  * ami_bpf_validate() still runs at BIOCSETF time, so a bad program is rejected
- * when it is loaded rather than silently dropping every packet afterwards. The
- * interpreter does not depend on having been validated.
+ * at load time and does not silently drop every packet afterwards. The
+ * interpreter does not depend on that validation.
  *
- * Packet bytes are assembled big-endian, which is what BPF specifies (network
- * order) and, on 68k, also what a direct load would give.
+ * Packet bytes are assembled big-endian, the order that BPF specifies (network
+ * order). On 68k a direct load gives the same order.
  *
  * No AmigaOS calls here.
  *
@@ -273,8 +273,8 @@ ULONG ami_bpf_filter_view(const struct bpf_insn *insns, ULONG count,
             case BPF_OR:  A |= operand; break;
             case BPF_AND: A &= operand; break;
 
-            /* C leaves shifts of >= the width undefined; BPF programs are not
-               trusted to stay under 32. */
+            /* C leaves a shift of the width or more undefined. BPF programs
+               are not trusted to stay under 32. */
             case BPF_LSH: A = (operand > 31) ? 0 : (A << operand); break;
             case BPF_RSH: A = (operand > 31) ? 0 : (A >> operand); break;
 
@@ -343,7 +343,7 @@ ULONG ami_bpf_filter_view(const struct bpf_insn *insns, ULONG count,
         }
     }
 
-    /* Ran off the end without returning: reject, as 4.4BSD does. */
+    /* Ran off the end with no return: reject, as 4.4BSD does. */
     return 0;
 }
 

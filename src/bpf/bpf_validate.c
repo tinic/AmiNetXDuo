@@ -3,23 +3,23 @@
  *
  * Runs at BIOCSETF time, on a program that came from an application over an
  * LVO, on a machine with no memory protection. Anything the interpreter in
- * bpf_filter.c does not implement is refused here rather than left to reject
- * packets silently at run time. 4.4BSD's bpf_validate is more permissive: it
+ * bpf_filter.c does not implement is refused here, and not left to reject
+ * packets silently at run time. The 4.4BSD bpf_validate is more permissive: it
  * lets several undefined encodings through because the interpreter treats them
- * as no-ops, which is a bad trade when the cost of being wrong is the whole
- * machine.
+ * as no-ops. Here the cost of a wrong decision is the whole machine, so this
+ * validator is stricter.
  *
  * Rejected:
- *   - an empty program, or one longer than BPF_MAXINSNS;
+ *   - an empty program, or one longer than BPF_MAXINSNS
  *   - any jump that is backward, or that lands at or past the end (only
- *     forward jumps exist in the encoding, so this also guarantees the
- *     interpreter terminates);
- *   - a scratch-memory index at or past BPF_MEMWORDS;
- *   - division by a zero constant;
- *   - a load, store, ALU, jump, return or misc opcode outside the defined set,
- *     including size/mode combinations that are individually defined but not
- *     legal together (BPF_LDX|BPF_ABS, BPF_LD|BPF_MSH, a 16-bit BPF_MSH, ...);
- *   - a program whose last instruction is not a BPF_RET.
+ *     forward jumps exist in the encoding, so this also guarantees that the
+ *     interpreter terminates)
+ *   - a scratch-memory index at or past BPF_MEMWORDS
+ *   - division by a zero constant
+ *   - a load, store, ALU, jump, return or misc opcode outside the defined set.
+ *     This includes size and mode combinations that are defined on their own
+ *     but not legal together (BPF_LDX|BPF_ABS, BPF_LD|BPF_MSH, 16-bit BPF_MSH)
+ *   - a program whose last instruction is not a BPF_RET
  *
  * No AmigaOS calls here.
  *
@@ -44,8 +44,8 @@ LONG ami_bpf_validate(const struct bpf_insn *insns, ULONG count)
         UWORD                  code = p->code;
         ULONG                  k    = (ULONG)p->k;
 
-        /* Instructions that may still be reached from here, i.e. how far a
-           forward jump at insn i is allowed to go. */
+        /* Instructions that can still be reached from here, that is, how far
+           a forward jump at insn i can go. */
         ULONG room = count - (i + 1);
 
         switch (BPF_CLASS(code))
@@ -126,7 +126,7 @@ LONG ami_bpf_validate(const struct bpf_insn *insns, ULONG count)
                 break;
 
             case BPF_DIV:
-                /* A variable zero divisor can only be caught at run time; a
+                /* A variable zero divisor can only be caught at run time. A
                    constant one is a bug in the program. */
                 if (BPF_SRC(code) == BPF_K && k == 0)
                     return -1;
@@ -145,7 +145,7 @@ LONG ami_bpf_validate(const struct bpf_insn *insns, ULONG count)
             {
             case BPF_JA:
                 /* A negative k becomes a huge unsigned one and is caught by
-                   the same test, backward jumps do not exist. */
+                   the same test. Backward jumps do not exist. */
                 if (k >= room)
                     return -1;
                 break;
@@ -190,7 +190,7 @@ LONG ami_bpf_validate(const struct bpf_insn *insns, ULONG count)
         }
     }
 
-    /* Falling off the end is a rejection at run time; make it a load-time one. */
+    /* A fall off the end is a rejection at run time. Make it a load-time one. */
     if (BPF_CLASS(insns[count - 1].code) != BPF_RET)
         return -1;
 

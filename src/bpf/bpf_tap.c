@@ -3,17 +3,18 @@
  *
  * This is the whole of the coupling between src/bpf/ and the rest of the
  * stack: two lines added to src/sana2/ and one registration call from
- * whatever brings an interface up. See the block comment above the tap
+ * whatever code starts an interface. See the block comment above the tap
  * declarations in include/aminetxduo/bpf.h for the exact call sites.
  *
- * The two taps differ because of SANA-II's cooked framing (docs/RESEARCH.md
+ * The two taps differ because of the SANA-II cooked framing (docs/RESEARCH.md
  * 3.4). On receive the shim has already synthesised an Ethernet header, so the
- * frame is complete and contiguous and the filter reads it where it lies. On
- * transmit no header exists anywhere, NetX Duo does not build one and the
- * shim does not either, because the device will, so the tap builds the 14
- * bytes from the three facts the CMD_WRITE carries and presents them as
- * segment 0 of a scatter view over the untouched NX_PACKET chain. Nothing is
- * written into the packet and nothing is copied except the captured prefix.
+ * frame is complete and contiguous, and the filter reads it where it lies. On
+ * transmit no header exists anywhere: NetX Duo does not build one, and the
+ * shim does not either, because the device does. The tap therefore builds the
+ * 14 bytes from the three facts that the CMD_WRITE carries, and presents them
+ * as segment 0 of a scatter view over the untouched NX_PACKET chain. Nothing
+ * is written into the packet, and nothing is copied except the captured
+ * prefix.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -174,9 +175,9 @@ VOID ami_bpf_tap_rx(APTR cookie, const UBYTE *frame, ULONG len)
     if (ami_bpf_bound_channels == 0 || frame == NULL || len == 0)
         return;
 
-    /* Already a complete link-layer frame in one run, cooked mode
-       synthesised the header in ami_sana2_rx_complete(), raw mode got it off
-       the wire. No copy, the filter reads the packet buffer in place. */
+    /* Already a complete link-layer frame in one run. Cooked mode synthesised
+       the header in ami_sana2_rx_complete(), raw mode got it from the wire.
+       No copy: the filter reads the packet buffer in place. */
     ami_bpf_view_linear(&view, frame, len);
 
     ami_bpf_tap_view(cookie, &view);

@@ -8,17 +8,17 @@
  * replica ABI that -DAMI_BPF_REPLICA selects in include/aminetxduo/bpf.h.
  *
  * The filter programs below are what libpcap emits for "ip", "arp" and
- * "tcp port 80" on an Ethernet link, run against real frames with the
- * accept/reject decision asserted each way round. The "tcp port 80" program
- * exercises the awkward parts: a BPF_LDX|BPF_B|BPF_MSH to pick the IP header
- * length out of the low nibble, a BPF_JSET against the fragment-offset field,
- * and two BPF_IND loads through X.
+ * "tcp port 80" on an Ethernet link. They run against real frames, and the
+ * accept or reject decision is asserted each way round. The "tcp port 80"
+ * program exercises the awkward parts: a BPF_LDX|BPF_B|BPF_MSH to pick the IP
+ * header length out of the low nibble, a BPF_JSET against the fragment-offset
+ * field, and two BPF_IND loads through X.
  *
  * Not covered here, and what covers it instead:
  *   - the exact bpf_hdr and bpf_insn offsets and the BIOC* encodings: asserted
- *     at compile time against the real NDK <net/bpf.h> by bpf_abi_check.c;
- *   - Forbid()/Permit(), Signal(), and GetSysTime(): tests/mbuf_bpf/;
- *   - ami_bpf_tap_tx(), which needs an NX_PACKET: tests/mbuf_bpf/.
+ *     at compile time against the real NDK <net/bpf.h> by bpf_abi_check.c
+ *   - Forbid()/Permit(), Signal(), and GetSysTime(): tests/mbuf_bpf/
+ *   - ami_bpf_tap_tx(), which needs an NX_PACKET: tests/mbuf_bpf/
  *
  *   cc -std=c11 -Wall -Wextra -DAMI_BPF_REPLICA -I../../../include \
  *      -I../../config/test/shim -I.. test_bpf.c ../bpf_filter.c \
@@ -34,8 +34,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Channel ownership is a library base on the Amiga; here it is just a token,
-   with a second one to prove a stranger gets EPERM. */
+/* Channel ownership is a library base on the Amiga. Here it is a token, with
+   a second one to prove that a stranger gets EPERM. */
 static char t_bpf_base_a;
 static char t_bpf_base_b;
 #define T_BPF_OWNER  ((APTR)&t_bpf_base_a)
@@ -99,9 +99,9 @@ VOID ami_log(int level, const char *fmt, ...)
 VOID ami_bpf_lock(VOID)   { }
 
 /*
- * Unlock is the only place inside ami_bpf_read() where another task could get
- * in, so it is where the interleaving test below wedges its second task. The
- * hook fires once, on the Nth unlock, and clears itself.
+ * Unlock is the only place inside ami_bpf_read() where another task can get
+ * in, so the interleave test below starts its second task there. The hook
+ * fires once, on the Nth unlock, and then clears itself.
  */
 static void (*stub_on_unlock)(void);
 static int    stub_unlock_after;
@@ -175,9 +175,9 @@ static void put32be(UBYTE *p, ULONG v)
 }
 
 /*
- * Ethernet + IPv4 + TCP, with the two fields the filter under test cares
- * about: `ihl_words` (so BPF_MSH has something to compute) and `fragoff` (so
- * the BPF_JSET #0x1fff fragment check has something to reject).
+ * Ethernet + IPv4 + TCP, with the two fields that the filter under test reads:
+ * `ihl_words` (so BPF_MSH has something to compute) and `fragoff` (so the
+ * BPF_JSET #0x1fff fragment check has something to reject).
  */
 static ULONG make_tcp(UBYTE *buf, UWORD sport, UWORD dport, UBYTE ihl_words,
                       UWORD fragoff, UBYTE proto)
@@ -306,8 +306,8 @@ static void test_validator(void)
     }
 
     {
-        /* Conditional jump landing exactly at the end, still out of range,
-           same as 4.4BSD's `from + jt >= len`. */
+        /* A conditional jump that lands exactly at the end is still out of
+           range, the same as `from + jt >= len` in 4.4BSD. */
         static const struct bpf_insn bad[] = {
             BPF_STMT(BPF_LD  | BPF_W | BPF_ABS, 0),
             BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 1, 1, 0),
@@ -463,7 +463,7 @@ static void test_filter_edges(void)
     CHECK(ami_bpf_filter(prog_ip, 0, frame, len, len) == (ULONG)-1);
 
     {
-        /* A read past the end rejects rather than trapping, the same frame
+        /* A read past the end rejects instead of a trap. The same frame
            truncated to 20 bytes cannot answer a load at offset 34. */
         static const struct bpf_insn p[] = {
             BPF_STMT(BPF_LD  | BPF_W | BPF_ABS, 34),
@@ -476,7 +476,7 @@ static void test_filter_edges(void)
     }
 
     {
-        /* A wildly out-of-range offset must not wrap into a valid one. */
+        /* A far out-of-range offset must not wrap into a valid one. */
         static const struct bpf_insn p[] = {
             BPF_STMT(BPF_LD  | BPF_W | BPF_ABS, (LONG)0xFFFFFFFEUL),
             BPF_STMT(BPF_RET | BPF_K, 1)
@@ -506,8 +506,8 @@ static void test_filter_edges(void)
     }
 
     {
-        /* Shifts of 32 or more are defined here as producing zero, not as
-           whatever the host CPU happens to do. */
+        /* A shift of 32 or more gives zero here, and not whatever the host
+           CPU does. */
         static const struct bpf_insn p[] = {
             BPF_STMT(BPF_LD  | BPF_W | BPF_IMM, 1),
             BPF_STMT(BPF_ALU | BPF_LSH | BPF_K, 32),
@@ -535,8 +535,8 @@ static void test_filter_edges(void)
     }
 
     {
-        /* Falling off the end without a RET rejects. The validator refuses
-           such a program, but the interpreter must not depend on that. */
+        /* A fall off the end with no RET rejects. The validator refuses such
+           a program, but the interpreter must not depend on that. */
         static const struct bpf_insn p[] = {
             BPF_STMT(BPF_LD | BPF_W | BPF_IMM, 1)
         };
@@ -546,7 +546,7 @@ static void test_filter_edges(void)
 
     {
         /* An unvalidated jump past the end of the program must not run off
-           the array, the interpreter range-checks jumps itself. */
+           the array. The interpreter range-checks jumps itself. */
         static const struct bpf_insn p[] = {
             BPF_STMT(BPF_JMP | BPF_JA, 1000),
             BPF_STMT(BPF_RET | BPF_K, 1)
@@ -570,8 +570,8 @@ static void test_filter_scatter(void)
 
     /*
      * Split exactly where the transmit tap splits: link header in segment 0,
-     * packet payload in segment 1. Every load past offset 14 now has to find
-     * its way through the segment walk.
+     * packet payload in segment 1. Every load past offset 14 now goes through
+     * the segment walk.
      */
     view.wirelen = 0;
     view.caplen  = 0;
@@ -587,7 +587,7 @@ static void test_filter_scatter(void)
         /*
          * A load that straddles the boundary: [13] is one byte inside the link
          * header and one byte past it. The slow byte-at-a-time path in
-         * ami_bpf_load() is the only thing that can answer this.
+         * ami_bpf_load() is the only path that can answer this.
          */
         static const struct bpf_insn p[] = {
             BPF_STMT(BPF_LD  | BPF_H | BPF_ABS, 13),
@@ -678,7 +678,7 @@ static void test_channel_basics(void)
     CHECK(ami_bpf_open(T_BPF_OWNER, AMI_BPF_MAX_CHANNELS) == AMI_BPF_ENXIO);
 
     /* "Any free one" skips the channel already taken and names the one it
-       claimed, the form Roadshow's libpcap uses. */
+       claimed, the form that the Roadshow libpcap uses. */
     CHECK(ami_bpf_open(T_BPF_OWNER, -1) == 1);
     CHECK(ami_bpf_close(T_BPF_OWNER, 1) == 0);
     CHECK(ami_bpf_ioctl(T_BPF_OWNER, 1, BIOCFLUSH, NULL) == AMI_BPF_ENXIO);
@@ -780,8 +780,8 @@ static void test_capture_records(void)
     CHECK(r1.stride  == 84);                        /* WORDALIGN(20 + 61)    */
     CHECK(memcmp(out + r0.stride + r1.hdrlen, frame, 61) == 0);
 
-    /* The read returns both whole records and NO trailing alignment on the
-       last one, a consumer that walked by stride would otherwise overrun. */
+    /* The read returns both whole records and no trailing alignment on the
+       last one. Otherwise a consumer that walks by stride overruns. */
     CHECK(got == (LONG)(r0.stride + r1.hdrlen + r1.caplen));
     CHECK(got == 80 + 81);
 
@@ -831,7 +831,7 @@ static void test_capture_records(void)
         CHECK(st.bs_drop == 0);
     }
 
-    /* Installing a filter discards what is buffered. */
+    /* A new filter discards what is buffered. */
     prog.bf_len   = 0;
     prog.bf_insns = NULL;
     CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETF, &prog) == 0);
@@ -853,8 +853,8 @@ static void test_capture_records(void)
         CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETF, &prog) == AMI_BPF_EINVAL);
     }
 
-    /* A caller's buffer too small for even the first record: nothing is
-       consumed, so the next properly sized read still gets it. */
+    /* A caller buffer too small for the first record: nothing is consumed, so
+       the next read of the correct size still gets it. */
     len = make_tcp(frame, 1234, 80, 5, 0, 6);
     ami_bpf_tap_rx(iface_cookie, frame, len);
     CHECK(ami_bpf_read(T_BPF_OWNER, 0, out, 8) == AMI_BPF_EINVAL);
@@ -963,7 +963,7 @@ static void test_write_and_binding(void)
     CHECK(ami_bpf_init() == 0);
     CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
 
-    /* Binding before the interface exists fails... */
+    /* A bind before the interface exists fails, and works after the attach. */
     CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0") == AMI_BPF_EINVAL);
 
     CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
@@ -994,9 +994,10 @@ static void test_write_and_binding(void)
     inject_result = 0;
 
     /*
-     * Detaching unbinds the channel without closing it; reattaching the same
-     * name rebinds it, because the channel remembers the name it asked for.
-     * That is what lets a capture survive an interface going offline and back.
+     * A detach unbinds the channel and does not close it. A reattach under the
+     * same name rebinds it, because the channel remembers the name it asked
+     * for. A capture therefore survives an interface that goes offline and
+     * returns.
      */
     ami_bpf_detach_interface(iface_cookie);
     CHECK(ami_bpf_write(T_BPF_OWNER, 0, frame, (LONG)len) == AMI_BPF_ENXIO);
@@ -1053,7 +1054,7 @@ static void test_channel_ownership(void)
     CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
     CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0") == 0);
 
-    /* A stranger sees the channel exists but may not touch it. */
+    /* A stranger sees that the channel exists but cannot touch it. */
     CHECK(ami_bpf_close(T_BPF_OTHER, 0) == AMI_BPF_EPERM);
     CHECK(ami_bpf_read(T_BPF_OTHER, 0, frame, (LONG)sizeof(frame)) ==
           AMI_BPF_EPERM);
@@ -1068,7 +1069,7 @@ static void test_channel_ownership(void)
        comes first, so a stranger cannot probe which channels are taken. */
     CHECK(ami_bpf_ioctl(T_BPF_OTHER, 1, BIOCGBLEN, &value) == AMI_BPF_ENXIO);
 
-    /* The stranger's own channel is its own. */
+    /* A channel that the stranger opens belongs to the stranger. */
     CHECK(ami_bpf_open(T_BPF_OTHER, 1) == 1);
     CHECK(ami_bpf_ioctl(T_BPF_OTHER, 1, BIOCSETIF, "eth0") == 0);
     CHECK(ami_bpf_ioctl(T_BPF_OWNER, 1, BIOCGBLEN, &value) == AMI_BPF_EPERM);
@@ -1078,13 +1079,14 @@ static void test_channel_ownership(void)
     CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) > 0);
     CHECK(ami_bpf_data_waiting(T_BPF_OTHER, 1) > 0);
 
-    /* Closing one base releases its channels and leaves the other's alone. */
+    /* A close of one base releases its channels and leaves those of the other
+       base alone. */
     ami_bpf_close_owner(T_BPF_OWNER);
     CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) == AMI_BPF_ENXIO);
     CHECK(ami_bpf_data_waiting(T_BPF_OTHER, 1) > 0);
     CHECK(ami_bpf_capturing() == 1);
 
-    /* The channel is free again, and lands with whoever asks next. */
+    /* The channel is free again, and goes to the next caller that asks. */
     CHECK(ami_bpf_open(T_BPF_OTHER, -1) == 0);
     CHECK(ami_bpf_close(T_BPF_OTHER, 0) == 0);
 
@@ -1097,18 +1099,18 @@ static void test_channel_ownership(void)
 }
 
 /*
- * The base is closed while one of its channels is copying out.
+ * The base is closed during a copy-out on one of its channels.
  *
  * ami_bpf_close() answers EBUSY for this, because a caller can be told to try
- * again; ami_bpf_close_owner() cannot, because it runs from bsd_child_destroy()
- * on CloseLibrary() and has nowhere to put a refusal.  So it takes the channel
- * away at once and leaves the two allocations for the reader, which is still
- * copying out of one of them.  Freeing them there would hand a live memcpy
- * freed memory, and there is no MMU to notice.
+ * again. ami_bpf_close_owner() cannot, because it runs from
+ * bsd_child_destroy() on CloseLibrary() and has nowhere to put a refusal. It
+ * therefore takes the channel away at once and leaves the two allocations for
+ * the reader, which still copies out of one of them. A free there hands freed
+ * memory to a live memcpy, and there is no MMU to notice.
  *
- * Reproduced exactly rather than approximated: the hook below runs on the
- * unlock ami_bpf_read() takes to do the copy outside the lock, which is the one
- * moment the window is open.
+ * The reproduction is exact and not an approximation. The hook below runs on
+ * the unlock that ami_bpf_read() takes for the copy outside the lock, the one
+ * moment when the window is open.
  */
 static ULONG t_race_allocs;
 
@@ -1150,8 +1152,8 @@ static void test_close_owner_under_reader(void)
 
     CHECK(stub_on_unlock == NULL);                  /* the hook did fire */
 
-    /* What the defect was: the channel's allocations still exist at the moment
-       the close returns, so the copy below them reads memory that is ours. */
+    /* The defect: the allocations of the channel still exist when the close
+       returns, so the copy below reads memory that is still valid. */
     CHECK(before != 0);
     CHECK(t_race_allocs == before);
 
@@ -1164,7 +1166,7 @@ static void test_close_owner_under_reader(void)
     CHECK(ami_bpf_capturing() == 0);
     CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) == AMI_BPF_ENXIO);
 
-    /* The slot is genuinely free again, not left reserved by the deferral. */
+    /* The slot is free again, and not left reserved by the deferral. */
     CHECK(ami_bpf_open(T_BPF_OTHER, -1) == 0);
     CHECK(ami_bpf_close(T_BPF_OTHER, 0) == 0);
 
