@@ -1123,9 +1123,9 @@ const char *tool_nd_state_note(UWORD state)
         case NETSTATUS_ND_INCOMPLETE:
             return "asked, nothing back yet";
         case NETSTATUS_ND_STALE:
-            return "answered once; not checked since";
+            return "answered once, not checked since";
         case NETSTATUS_ND_DELAY:
-            return "sent something; about to check again";
+            return "sent something, about to check again";
         case NETSTATUS_ND_PROBE:
             return "being checked now";
         case NETSTATUS_ND_CREATED:

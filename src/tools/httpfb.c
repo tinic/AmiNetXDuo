@@ -679,7 +679,7 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
                  "neither Picasso96 nor CyberGraphX claims it, so there are "
                  "no pixels here anything can read"
                : "the front screen is not a standard planar bitmap, so it "
-                 "has no bitplanes to read; a graphics card needs "
+                 "has no bitplanes to read. A graphics card needs "
                  "Picasso96API.library or cybergraphics.library, and neither "
                  "answered OpenLibrary()");
         return FALSE;
@@ -690,7 +690,7 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
     if (depth < 1 || depth > FB_MAX_DEPTH)
     {
         fb_say3("the front screen is ", depth,
-                " planes deep; this handles 1 to 8");
+                " planes deep. This handles 1 to 8");
         return FALSE;
     }
 
@@ -2210,8 +2210,8 @@ BOOL http_fb_open(VOID)
     if (sc == NULL)
     {
         fb_say("there are no screens: Intuition's screen list is empty.  -C "
-               "serves the frontmost screen, so a machine that has opened "
-               "none has nothing to serve");
+               "serves the frontmost screen, so a machine with no screen "
+               "open has nothing to serve");
         fb_close_libraries();
         return FALSE;
     }
@@ -2797,7 +2797,7 @@ BOOL http_fb_slice(ULONG now)
         if (!fb_take_buffers(&seen))
         {
             fb_close_saying(HTTP_WS_CLOSE_GOING,
-                            "the screen changed and this could not follow it");
+                            "the screen changed and this cannot follow it");
             return TRUE;
         }
         return TRUE;

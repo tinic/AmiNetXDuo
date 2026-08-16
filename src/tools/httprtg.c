@@ -342,16 +342,16 @@ BOOL http_rtg_describe(struct BitMap *bm, HttpRtgScreen *s, const char **why)
         {
             switch (depth)
             {
-            case 15UL: *why = "the front screen is a 15-bit RTG screen; the "
+            case 15UL: *why = "the front screen is a 15-bit RTG screen. The "
                               "console serves 8-bit palette screens and planar "
                               "ones"; break;
-            case 16UL: *why = "the front screen is a 16-bit RTG screen; the "
+            case 16UL: *why = "the front screen is a 16-bit RTG screen. The "
                               "console serves 8-bit palette screens and planar "
                               "ones"; break;
-            case 24UL: *why = "the front screen is a 24-bit RTG screen; the "
+            case 24UL: *why = "the front screen is a 24-bit RTG screen. The "
                               "console serves 8-bit palette screens and planar "
                               "ones"; break;
-            case 32UL: *why = "the front screen is a 32-bit RTG screen; the "
+            case 32UL: *why = "the front screen is a 32-bit RTG screen. The "
                               "console serves 8-bit palette screens and planar "
                               "ones"; break;
             default:   *why = "the front screen is an RTG screen this cannot "

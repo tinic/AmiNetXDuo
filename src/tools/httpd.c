@@ -1970,7 +1970,7 @@ static VOID httpd_walk_copy_stage(HttpConn *c)
 
         if (err != ERROR_RENAME_ACROSS_DEVICES)
         {
-            httpd_error(c, httpd_dos_status(err), "that could not be moved");
+            httpd_error(c, httpd_dos_status(err), "that cannot be moved");
             return;
         }
     }
@@ -2006,7 +2006,7 @@ static VOID httpd_walk_copy_stage(HttpConn *c)
         if (made == (BPTR)0)
         {
             httpd_error(c, httpd_dos_status(IoErr()),
-                        "that drawer could not be made");
+                        "that drawer cannot be made");
             return;
         }
         UnLock(made);
@@ -3641,7 +3641,7 @@ static BOOL httpd_examine(HttpConn *c, BOOL *is_dir, BOOL keep_lock)
     if (!Examine(lock, c->fib))
     {
         UnLock(lock);
-        httpd_error(c, 500, "that file could not be examined");
+        httpd_error(c, 500, "that file cannot be examined");
         return FALSE;
     }
 
@@ -4164,7 +4164,7 @@ static VOID httpd_do_terminal(HttpConn *c)
         httpd_begin(c, 503);
         httpd_header(c, "Retry-After", took ? "1" : "5");
         httpd_body_text(c, "text/plain; charset=iso-8859-1",
-                        took ? "The terminal has been released; ask again.\r\n"
+                        took ? "The terminal is released. Ask again.\r\n"
                              : "Somebody else has the terminal.\r\n");
         return;
     }
@@ -4306,7 +4306,7 @@ static VOID httpd_do_console(HttpConn *c)
         httpd_begin(c, 503);
         httpd_header(c, "Retry-After", took ? "1" : "5");
         httpd_body_text(c, "text/plain; charset=iso-8859-1",
-                        took ? "The console has been released; ask again.\r\n"
+                        took ? "The console is released. Ask again.\r\n"
                              : "Somebody else has the console.\r\n");
         return;
     }
@@ -4493,7 +4493,7 @@ static VOID httpd_do_put(HttpConn *c)
         ULONG why = httpd_dos_status(c->put_err);
 
         httpd_put_abandon(c);
-        httpd_error(c, why, "that file could not be written");
+        httpd_error(c, why, "that file cannot be written");
         return;
     }
 
@@ -4540,7 +4540,7 @@ static VOID httpd_do_put(HttpConn *c)
         ULONG why = httpd_dos_status(IoErr());
 
         httpd_put_abandon(c);
-        httpd_error(c, why, "that file could not be put in place");
+        httpd_error(c, why, "that file cannot be put in place");
         return;
     }
 
@@ -4645,7 +4645,7 @@ static VOID httpd_do_mkcol(HttpConn *c)
     if (made == (BPTR)0)
     {
         httpd_error(c, httpd_dos_status(IoErr()),
-                    "that drawer could not be made");
+                    "that drawer cannot be made");
         return;
     }
     UnLock(made);
@@ -6242,7 +6242,7 @@ static const char httpd_iperf_page[] =
 "<button onclick=\"r('udp-rx')\">UDP in</button>"
 "<button onclick=\"r('tcp-tx')\">TCP out</button>"
 "<button onclick=\"r('udp-tx')\">UDP out</button>"
-"<pre id=o>Pick a direction. \"in\" waits for a sender; \"out\" needs a peer.</pre>"
+"<pre id=o>Pick a direction. \"in\" waits for a sender. \"out\" needs a peer.</pre>"
 "<script>function r(d){var u='/iperf/'+d+'/'+t.value;"
 "if(d.slice(-2)=='tx'){if(!h.value){o.textContent='\"out\" needs a peer address.';return}"
 "u+='/'+h.value}o.textContent='running '+d+'...';"
@@ -6471,8 +6471,8 @@ static BOOL httpd_iperf_hook(HttpConn *c)
 
         if (!httpd_iperf_dotted(host, &v4))
         {
-            httpd_error(c, 400, "the peer has to be a dotted address, not a "
-                                "name: nothing here may wait on a resolver");
+            httpd_error(c, 400, "the peer must be a dotted address, not a "
+                                "name: nothing here can wait on a resolver");
             return TRUE;
         }
 
@@ -7591,7 +7591,7 @@ static VOID httpd_serve(LONG lsock)
                 now - c->progress >= httpd_timeout)
             {
                 if (httpd_verbose || httpd_trace)
-                    httpd_log(c, "no progress for %lu seconds; closing",
+                    httpd_log(c, "closed after %lu seconds with no progress",
                               (LONG)httpd_timeout, 0);
                 httpd_close(c);
             }
@@ -7602,8 +7602,8 @@ static VOID httpd_serve(LONG lsock)
             else if (!httpd_body_rate_ok(c, now))
             {
                 if (httpd_verbose || httpd_trace)
-                    httpd_log(c, "body arriving slower than %lu bytes a "
-                                 "second; closing",
+                    httpd_log(c, "closed: the body arrived slower than %lu "
+                                 "bytes a second",
                               (LONG)HTTPD_BODY_RATE, 0);
                 httpd_close(c);
             }
@@ -7641,9 +7641,9 @@ int main(int argc, char **argv)
                    "[-C [CONSOLEPAGE <file>]]",
                    "Serves a drawer over HTTP and WebDAV, so this machine can "
                    "be mounted as a writable drive.  -T adds /shell, an "
-                   "AmigaDOS Shell in a browser, and -C adds /console, the "
-                   "frontmost screen; both are open to anyone who can reach "
-                   "the port.");
+                   "AmigaDOS Shell in a browser.  -C adds /console, the "
+                   "frontmost screen.  Both are open to anyone who can "
+                   "reach the port.");
         return RETURN_ERROR;
     }
 
@@ -7683,7 +7683,7 @@ int main(int argc, char **argv)
 
         if (value < 1 || value > HTTPD_CONN_MAX)
         {
-            tool_error("CONNECTIONS has to be between 1 and %ld",
+            tool_error("CONNECTIONS must be between 1 and %ld",
                        (LONG)HTTPD_CONN_MAX);
             FreeArgs(rda);
             return RETURN_ERROR;
@@ -7724,16 +7724,16 @@ int main(int argc, char **argv)
        ignoring it would look like the terminal is on. */
     if (args[ARG_PAGE] != 0 && args[ARG_TERMINAL] == 0)
     {
-        tool_error("PAGE names the terminal's page, and -T is what turns the "
-                   "terminal on");
+        tool_error("PAGE names the terminal's page, and -T turns the terminal "
+                   "on");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
 
     if (args[ARG_CONSOLEPAGE] != 0 && args[ARG_CONSOLE] == 0)
     {
-        tool_error("CONSOLEPAGE names the console's page, and -C is what "
-                   "turns the console on");
+        tool_error("CONSOLEPAGE names the console's page, and -C turns the "
+                   "console on");
         FreeArgs(rda);
         return RETURN_ERROR;
     }

@@ -1045,8 +1045,8 @@ VOID http_term_service(VOID)
                 now - term_stop_at >= (ULONG)TERM_ABANDON_TICKS)
             {
                 term_abandoned = 1;
-                tool_printf("httpd: the terminal's Shell will not stop; "
-                            "letting go of it so the next visitor gets one\n");
+                tool_printf("httpd: the terminal's Shell will not stop. "
+                            "It is abandoned, so the next visitor gets one\n");
                 (VOID)Flush(Output());
             }
         }
@@ -2170,8 +2170,8 @@ VOID http_term_shutdown(VOID)
              * choice is between a leak this program is about to end with and a
              * write into somebody else's memory.
              */
-            tool_error("the terminal's Shell is still running; its memory is "
-                       "not being given back");
+            tool_error("the terminal's Shell is still running. Its memory is "
+                       "not given back");
             return;
         }
 

@@ -258,7 +258,7 @@ VOID tool_explain_device(const char *device, ULONG unit, const char *card)
 
     if (where == NULL && probe == 0)
     {
-        tool_printf("  %s unit %lu opens, and no driver file was found in the\n",
+        tool_printf("  %s unit %lu opens, and no driver file was found.\n",
                     (LONG)device, unit);
         return;
     }
@@ -288,12 +288,12 @@ VOID tool_explain_device(const char *device, ULONG unit, const char *card)
        usual mistake. */
     if (probe == 0)
     {
-        tool_printf("  %s unit %lu opens perfectly well on its own, so the\n",
+        tool_printf("  %s unit %lu opens on its own, so the card and the\n",
                     (LONG)device, unit);
-        tool_printf("  card and the driver are not the problem.  Something else\n");
-        tool_printf("  stopped the stack: check the interface file for a wrong\n");
-        tool_printf("  ADDRESS or CONFIGURE line, and the debug log for what\n");
-        tool_printf("  failed after the device opened.\n");
+        tool_printf("  driver are not the problem.  Something else stopped the\n");
+        tool_printf("  stack.  Check the interface file for a wrong ADDRESS or\n");
+        tool_printf("  CONFIGURE line.  Check the debug log for what failed\n");
+        tool_printf("  after the device opened.\n");
         return;
     }
 
