@@ -1475,6 +1475,20 @@
 
   Reports what anxnet.device found on this machine.
 
+  anxnet.device is one driver for ten cards. It finds the card itself,
+  so nothing needs configuring; CARD= in the interface file pins it to
+  one when a machine has more than one, and naming a card the driver
+  does not know is reported as an error with the list beside it. The
+  names are:
+
+      a2065      ariadne     ariadne2    hydra       lanrover
+      xsurf      xsurf100    xsurf500    pcmcia      3c589
+
+  pcmcia is any NE2000-compatible card in the slot of an A600 or A1200.
+  3c589 is the 3Com EtherLink III. xsurf500 and 3c589 have never been
+  run on the hardware they are written for; if one of them works, or
+  does not, that is worth reporting.
+
   Run it when a card does not work. It prints every card the driver
   looked at, the step each one reached, and the reason any of them was
   refused. It reads what the driver recorded while it was probing, so
