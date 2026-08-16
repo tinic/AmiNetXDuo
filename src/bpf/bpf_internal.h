@@ -83,8 +83,12 @@ typedef struct AmiBpfChan
     ULONG            drop_count;                /* bpf_stat.bs_drop         */
 } AmiBpfChan;
 
-/* ami_bpf_chan[] is static in bpf_channel.c: nothing outside it reaches the
-   table, and every path that needs the table is a function declared below. */
+/* There is deliberately no ami_bpf_chan[] here. The channel table is static in
+   bpf_channel.c: nothing outside it reaches the table, and every path that
+   needs it is one of the functions declared below. */
+
+/* The interface table, which is shared: bpf_tap.c fills it from the SANA-II
+   attachments and bpf_channel.c binds channels to its entries. */
 extern AmiBpfIf   ami_bpf_iface[AMI_BPF_MAX_IFACES];
 
 /*

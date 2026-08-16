@@ -409,23 +409,26 @@ UINT    i;
  * Scratch for c68k, in limbs, on top of the vendored NX_CRYPTO_RSA context.
  *
  * c68k_mont_power_modulus() picks the largest sliding window that fits what it
- * is given, C68K_POWM_SCRATCH_LIMBS(m_len, w) = (10 + 2^(w-1)) * m_len + 8,
- * and 1536 limbs buys:
+ * is given, C68K_POWM_SCRATCH_LIMBS(m_len, w) = (20 + 2^(w-1)) * m_len + 16,
+ * and 2048 limbs buys:
  *
  *     CRT half of a 2048-bit key (m_len 32)   w = 6   the case that matters
  *     full-width 2048-bit        (m_len 64)   w = 4   ~4% off w = 6
- *     full-width 4096-bit        (m_len 128)  w = 1   plain square-and-multiply
+ *     full-width 4096-bit        (m_len 128)  does not fit at all
  *
- * The w = 4 line only runs when a private key's primes are unknown.
+ * The w = 4 line only runs when a private key's primes are unknown.  w = 6 is
+ * also C68K_POWM_MAX_WINDOW, so the first line is not short of scratch.
  *
- * 6 KB per RSA context.  Measured effect on a session:
- * nx_secure_tls_metadata_size_calculate() goes from 10,128 bytes with the
- * vendored table to 16,272 with this one, exactly one scratch area.  The
- * public-cipher slot is already sized by NX_CRYPTO_ECDH, and only the
- * public-auth slot grows.
+ * 8 KB per RSA context, HN_UBASE being a ULONG here, and a session pays for
+ * exactly one of them: nx_secure_tls_metadata_size_calculate() came out
+ * 6,144 bytes over the vendored table when the area was 1536 limbs, which is
+ * one area and not two, so 2048 limbs puts the ECC table at 18,320 (see
+ * tls_conn.c).
  *
- * An undersized area is safe.  c68k_huge_number_mont_power_modulus() falls
- * back to the vendored routine when the window will not fit at all.
+ * An undersized area is safe, which is what the 4096-bit line means:
+ * c68k_mont_power_modulus() answers NX_CRYPTO_SIZE_ERROR when not even w = 1
+ * fits and c68k_huge_number_mont_power_modulus() then falls back to the
+ * vendored routine.  A 4096-bit key still verifies, at the vendored speed.
  */
 #define AMI_TLS_POWM_SCRATCH_LIMBS  2048u
 

@@ -288,8 +288,6 @@ static VOID report_unknown_keyword(ULONG line, const char *key,
     ami_cfg_problem(line, AMI_CFG_PROBLEM_WARN, text, hint);
 }
 
-/* "bad ADDRESS '10.0.0.300'" + whatever the keyword's own advice is. */
-
 /*
  * A Roadshow keyword that is read and does nothing.
  *
@@ -354,6 +352,8 @@ static VOID report_inert_keyword(ULONG line, const char *key)
     /* NAMESERVER and DOMAIN in an interface file: handled elsewhere, and not
        inert. */
 }
+
+/* "bad ADDRESS '10.0.0.300'" + whatever the keyword's own advice is. */
 
 static VOID report_bad_value(ULONG line, UWORD severity, const char *keyword,
                              const char *value, const char *hint)
