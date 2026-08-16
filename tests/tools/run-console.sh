@@ -401,6 +401,7 @@ EOF
     # it actually found: whether rtg.library loaded, whether it saw a board,
     # and what Intuition ended up opening.
     [ "$RTG" = 1 ] && cat >> "$HD/S/Startup-Sequence" <<'EOF'
+C:rtgscreen 0 >DH0:rtglist.txt
 Run >DH0:rtgscreen.txt <NIL: C:rtgscreen 8 640 480
 C:Wait 3
 C:Version >DH0:rtg-ver.txt LIBS:Picasso96/rtg.library FILE
