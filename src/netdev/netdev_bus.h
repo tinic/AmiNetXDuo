@@ -80,7 +80,7 @@ struct NetdevBus
      */
     const ULONG *regmap;
     UWORD           stride;     /* bytes between consecutive register indices */
-    UBYTE           shift;      /* log2(stride); 1, 2 and 4 are the only ones */
+    UBYTE           shift;      /* log2(stride).  1, 2 and 4 are the only ones */
     UBYTE           dmode;      /* NETDEV_DMODE_*, set by the probe */
 
     /*
@@ -114,7 +114,7 @@ struct NetdevBus
 /* The stride-driven implementation every card in the family uses today. */
 extern const struct NetdevBusOps netdev_bus_generic;
 
-/* base is the board's register window; stride is 1, 2 or 4. */
+/* base is the board's register window, and stride is 1, 2 or 4. */
 VOID netdev_bus_setup(NetdevBus *bus, APTR base, UWORD stride, APTR wide);
 
 /* Call after setup for a card whose odd registers live in a second window. */
@@ -134,7 +134,7 @@ BOOL netdev_bus_set_getodd(NetdevBus *bus);
 /*
  * Promote to NETDEV_DMODE_LONG only if the wide window really is the same
  * FIFO.  Called with the chip already set up for a remote-DMA write of
- * NETDEV_BUS_PROBE_LEN bytes; returns the mode it settled on.
+ * NETDEV_BUS_PROBE_LEN bytes.  Returns the mode it settled on.
  */
 #define NETDEV_BUS_PROBE_LEN    32
 

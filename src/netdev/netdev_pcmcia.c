@@ -181,8 +181,9 @@ static VOID pc_trace(const char *s, ULONG v)
    card's assigned station address. */
 #define CIS_FUNCE_LAN_NODE_ID   0x04
 
-/* Configuration Option Register, offset from the config base the CISTPL_CONFIG
-   tuple gives.  Bit 6 is the level-mode interrupt select every LAN card wants. */
+/* Configuration Option Register, offset from the configuration base the
+   CISTPL_CONFIG tuple gives.  Bit 6 is the level-mode interrupt select every
+   LAN card wants. */
 #define PC_COR_OFF          0
 #define PC_COR_LEVEL_IRQ    0x40
 

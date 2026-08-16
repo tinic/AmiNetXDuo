@@ -417,7 +417,7 @@ BOOL lance_intr(NetdevNic *nic)
 
     do
     {
-        /* Writing the bits back is the acknowledge; INEA is kept set. */
+        /* The bits written back are the acknowledge.  INEA is kept set. */
         le_csr_put(nic, LE_CSR0,
                    (UWORD)((csr0 & (LE_C0_BABL | LE_C0_CERR | LE_C0_MISS |
                                     LE_C0_MERR | LE_C0_RINT | LE_C0_TINT)) |

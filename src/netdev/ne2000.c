@@ -48,7 +48,7 @@
  *
  *   bus_space_*   -> netdev_bus.h, so the register stride is the card's
  *   mbuf chains   -> one linear frame
- *   delay()       -> a bus-read spin; there is no timer at device-init time
+ *   delay()       -> a bus-read spin.  There is no timer at device-init time
  *   printf        -> counters
  *
  * Added, and not from NetBSD: netdev_ne2000_probe_wide().  The X-Surf 100 has

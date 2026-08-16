@@ -18,7 +18,7 @@
  * unchanged in behaviour.  What was replaced:
  *
  *   bus_space_*      -> netdev_bus.h, which knows the per-card register stride
- *   struct ifnet     -> a frame callback; there is no network stack here
+ *   struct ifnet     -> a frame callback.  There is no network stack here
  *   struct mbuf      -> one linear staging buffer per unit
  *   ether_multi list -> the shell's reference-counted list, hashed by the
  *                       same ether_crc32_be.  Every X-Surf and X-Surf 100

@@ -46,7 +46,7 @@
 
 #define EL3_C_RESET             0x00    /* global reset                      */
 #define EL3_C_WINDOW            0x01    /* arg bits 2..0 = window 0..7       */
-#define EL3_C_COAX_START        0x02    /* DC-DC converter on; the LED, here */
+#define EL3_C_COAX_START        0x02    /* DC-DC converter on, and the LED   */
 #define EL3_C_RX_DISABLE        0x03
 #define EL3_C_RX_ENABLE         0x04
 #define EL3_C_RX_RESET          0x05
@@ -156,7 +156,7 @@
 #define EL3_AC_XCVR_SHIFT       14
 #define EL3_AC_XCVR_UTP         0       /* 10BASE-T                          */
 #define EL3_AC_XCVR_AUI         1
-#define EL3_AC_XCVR_BNC         3       /* 10BASE2; 2 is not assigned        */
+#define EL3_AC_XCVR_BNC         3       /* 10BASE2, and 2 is not assigned    */
 #define EL3_AC_ROM_IO_MASK      0x3f1f  /* ROM size, ROM base and I/O base   */
 
 /*
@@ -205,7 +205,7 @@
 
 /*
  * Receive status.  Length is only meaningful once INCOMPLETE is clear.
- * ERROR set means bits 13..11 are the reason; ERROR clear means they are
+ * ERROR set means bits 13..11 are the reason.  ERROR clear means they are
  * either nothing or the dribble-bits note, which is not a reason to drop a
  * frame.
  */
@@ -270,8 +270,8 @@
 /*
  * A transmit is two preamble words and then the body.
  *
- * Word one is the length in bytes in its low eleven bits.  Word two is a
- * don't-care that the manual asks be written as zero.  The body is then padded
+ * Word one is the length in bytes in its low eleven bits.  Word two is
+ * ignored, and the manual asks that it be written as zero.  The body is then padded
  * to a four-byte boundary, and the pad bytes are in the FIFO but not in the
  * length.  Frames under the Ethernet minimum are padded by the card and must
  * not be padded here.

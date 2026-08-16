@@ -162,7 +162,7 @@ struct NetdevNic
 
     /*
      * How the packet buffer is reached.  NE2000 fills these with its remote
-     * DMA; a shared-memory DP8390 board (Hydra, LanRover) fills them with
+     * DMA.  A shared-memory DP8390 board (Hydra, LanRover) fills them with
      * moves through its mapped window, and that is the whole of the
      * difference between the two.
      */

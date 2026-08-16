@@ -18,7 +18,8 @@
  * Is an EtherLink III decoding at this row's register base?  Addresses the
  * card off the row, because the slot has to be identified before there is a
  * unit to identify it into.  Accepts the manufacturer ID in either byte
- * order; which order it was is measured again, into the unit, by el3_attach().
+ * order.  Which order it was is measured again, into the unit, by
+ * el3_attach().
  */
 BOOL  el3_answers(const NetdevCard *card);
 

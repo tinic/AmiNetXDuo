@@ -1,13 +1,13 @@
 /*
  * S2_ONEVENT delivery and the S2_PacketFilter hook, on the host.
  *
- * WHY THIS IS NOT AN EMULATOR TEST.  Everything netdev_event.c decides runs
- * from an interrupt, and the two ways it can be wrong are invisible from a
- * booted machine: a request completed while still on its list corrupts that
- * list only under a race, and a filter hook asked on the wrong side of the
- * copy-out drops traffic that nothing counts.  Here the list is inspected
- * directly after every post, the Disable() nesting is counted, and the filter
- * hook records exactly what it was passed.
+ * This is not an emulator test.  Everything netdev_event.c decides runs from
+ * an interrupt, and the two ways it can be wrong are invisible from a booted
+ * machine: a request completed while still on its list corrupts that list only
+ * under a race, and a filter hook asked on the wrong side of the copy-out
+ * drops traffic that nothing counts.  Here the list is inspected directly
+ * after every post, the Disable() nesting is counted, and the filter hook
+ * records what it was passed.
  *
  * The expectations are the SANA-II specification's, not this code's output:
  *
@@ -95,7 +95,7 @@ VOID Enable(VOID)
 }
 
 /*
- * The one thing the driver may not do: complete somebody else's IORequest
+ * The one thing the driver must not do: complete somebody else's IORequest
  * while it is still on the list it was taken from.  ln_Succ is nulled by
  * Remove() below, so a reply from a node still linked is caught here.
  */
@@ -157,7 +157,7 @@ struct Node *RemHead(struct List *l)
 
 /*
  * netdev_hook_call() is three pinned address registers and a jsr on the
- * Amiga; on the host it is this, and what the test checks is that the three
+ * Amiga.  On the host it is this, and what the test checks is that the three
  * arguments arrive in the roles the autodoc gives them:
  * a0 = hook, a2 = object (the IOSana2Req), a1 = message (the packet data).
  */
@@ -264,7 +264,7 @@ static void test_queue(void)
 }
 
 /*
- * A request matches on ANY bit in common, not on equality.  Three cases, and
+ * A request matches on any bit in common, not on equality.  Three cases, and
  * the middle one is the spec's own worked example: a buffer-management failure
  * during receive posts ERROR|RX|BUFF, and a caller that asked only for
  * S2EVENT_ERROR is woken by it.
@@ -347,7 +347,7 @@ static void test_all_pending(void)
 
 /*
  * The gate is what makes an unwatched driver free, so it must be exactly the
- * union of what is queued -- never less, or an event is silently swallowed.
+ * union of what is queued.  Any less, and an event is silently swallowed.
  * netdev_event_rescan() is what the abort and close paths use to keep it so.
  */
 static void test_gate(void)
@@ -367,7 +367,7 @@ static void test_gate(void)
     expect_u32("gate is the union", unit.nu_EventMask,
                S2EVENT_TX | S2EVENT_HARDWARE);
 
-    /* An abort takes one off its list; the rescan is what the driver runs
+    /* An abort takes one off its list.  The rescan is what the driver runs
        next, and the other opener's bit must survive it. */
     Remove(&b.ios2_Req.io_Message.mn_Node);
     netdev_event_rescan(&unit);
@@ -382,8 +382,8 @@ static void test_gate(void)
 /*
  * What the filter hook and CopyToBuff are shown.  "The data should NOT include
  * any hardware specific headers (unless of course the CMD_READ request wanted
- * RAW packets)" -- and RAW is either an opener property or a per-request flag,
- * so both have to work.
+ * RAW packets)".  RAW is either an opener property or a per-request flag, so
+ * both must work.
  */
 static void test_payload(void)
 {

@@ -504,7 +504,7 @@ static struct IOSana2Req *netdev_take(struct List *list, ULONG type)
 
 /*
  * Called from the interrupt server with a whole frame.  Every opener that has
- * a CMD_READ outstanding for this packet type gets a copy; if none does, the
+ * a CMD_READ outstanding for this packet type gets a copy.  If none does, the
  * frame goes to an S2_READORPHAN, and only then is it dropped.
  */
 #ifdef NETDEV_TIME
