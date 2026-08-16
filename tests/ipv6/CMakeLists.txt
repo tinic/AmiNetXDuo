@@ -201,4 +201,33 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME mld COMMAND test_mld)
 
+    # RFC 6724 source address selection.  Ours, not NetX Duo's: the top-level
+    # CMakeLists drops the vendored nxd_ipv6_interface_find.c and
+    # src/ipv6/ipv6_srcsel.c supplies the symbol, so this compiles that one
+    # file and drives it.  It calls nothing outward -- it reads NX_IP's address
+    # and interface tables and returns -- so there is nothing else to link and
+    # nothing to stub but NX_ASSERT's failure arm.
+    #
+    # This is where every rule gets its case.  A lab network can only produce
+    # one interface with one link-local and one global on it, which is the
+    # configuration in which all the rules agree.
+
+    add_executable(test_ipv6_srcsel
+        host/test_ipv6_srcsel_host.c
+        "${CMAKE_SOURCE_DIR}/src/ipv6/ipv6_srcsel.c")
+
+    target_include_directories(test_ipv6_srcsel PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${CMAKE_SOURCE_DIR}/src/ipv6")
+
+    target_compile_definitions(test_ipv6_srcsel PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME ipv6_srcsel COMMAND test_ipv6_srcsel)
+
 endif()

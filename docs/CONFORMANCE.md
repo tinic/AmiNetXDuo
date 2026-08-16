@@ -13,7 +13,6 @@ annotated — git has the history.
 |---|---|---|---|
 | 1122 §4.2.3.4 (MUST-38) | Sender SWS avoidance | `nx_tcp_socket_send_internal.c:589` gates on a non-zero window only; no minimum-usable-window test | Undersized segments are sent when the peer advertises small window increments. Nagle is absent from the vendored tree entirely |
 | 3810 §6.2 / 2710 §3 | A received MLD message without a Hop-by-Hop Router Alert MUST be discarded | `nx_mld_packet_process.c` checks hop limit 1 and a link-local source, and nothing else. `_nx_ipv6_process_hop_by_hop_option()` skips the option and records nothing, and `NX_PACKET` has no field to carry the answer forward | A query forged from on-link without the option is answered. The hop-limit and source-scope checks are what keep off-link senders out |
-| 8504 §6.6 / 6724 §5 | RFC 6724 source selection MUST be implemented | `nxd_ipv6_interface_find.c:128-200` is a per-interface walk that breaks on the first link-local or longest-prefix hit | No candidate set, no policy table, none of Rules 1/2/3/6/7/8 |
 | 5280 §4.2 | Unrecognized critical extension MUST be rejected | flag written at `nx_secure_x509_extension_find.c:191`, declared at `nx_secure_x509.h:611`, read nowhere | nameConstraints and every other critical extension silently ignored |
 | 5280 §6.1.3 | Revocation | `nx_secure_x509_crl_revocation_check.c` is built (`nx_secure/CMakeLists.txt:207`) and called from nothing | A stolen key stays usable indefinitely |
 | 7627 / 9325 §3.5 | Extended master secret MUST be supported | absent from the vendored tree; `src/tlslib/tls_resume.c:46-51` records that nx_secure does not implement it | Session resumption restores a master secret that was never bound to a handshake transcript |
@@ -36,7 +35,6 @@ out-of-mask `ai_flags` (`addrinfo.c:373`), sticky `IPV6_HOPLIMIT`
 
 | Location | Claim | Reality |
 |---|---|---|
-| `netstack_ipv6.c:733`, `raw.c:456`, `options.c:859` | "RFC 6724 selection routine" | first-match walk, one on-link test, `break` |
 | `README.md:182-183` | certificates "properly checked" | overstated: revocation, critical-extension rejection, EKU and nameConstraints are all absent |
 | `ami_random.c:564-577` | clock credit conditional on the seconds field being wall time | the guard at `:590` tests non-zero. On a no-RTC machine uptime is non-zero a second after boot, so 8 bits are credited in the case the comment excludes |
 | `netstack_dns.c:719` | RFC 6762 §6.7 | §6.7 is Legacy Unicast Responses; the rule is §3, which `:757` and `:929` cite correctly |
@@ -49,6 +47,7 @@ out-of-mask `ai_flags` (`addrinfo.c:373`), sticky `IPV6_HOPLIMIT`
 | AES-GCM in TLS 1.2 | GHASH on 68k is a bit-serial GF(2^128) multiply: 344.6 ms/KB against AES-CBC's 21.9. No server takes GCM but neither ChaCha20-Poly1305 nor CBC |
 | Certificate date checking when the clock is implausible | `tls_time.c:57`, `:62`, `:111-112`; window is 2026-01-01 + 50 years, outside which dates are not checked. Without it a machine with a discharged clock battery reaches no HTTPS site. Reported through `TLSInfo()`. Cost: no bound on the useful lifetime of a leaked key |
 | Parsed root set | 119 roots would need ~30 KB parsed plus 125 KB DER and 119 ASN.1 walks per page load. The lazy store is keyed on FNV-1a of the full subject Name DER (`tls_store.c:23`) because four Mozilla roots share the CN "GlobalSign" |
+| RFC 6724 Rule 5.5 | Prefer a source in a prefix the next hop advertised. `NX_IPV6_PREFIX_ENTRY` holds the prefix, its length, its lifetime and its L bit, and `nx_icmpv6_process_ra.c` does not record which router put it there, so the information is never written rather than merely unread. Cost: on a link with two advertising routers and a prefix from each, the source may be the one the chosen next hop will not accept. The table holds two routers | `src/ipv6/ipv6_srcsel.c` |
 | `SetProtection` on the session file | `src/tlslib/tls_resume.c` writes it with default protection bits. Master secrets and tickets sit in the clear on disk, so anyone taking the disk can decrypt captured traffic for resumed sessions |
 | IDNA | AmigaOS provides no Unicode input path to a hostname; the `xn--` form passes through unchanged |
 | `ChangeRouteTagList`'s metrics and flags | `RTM_CHANGE` on the routing socket changes "Metrics, Flags, or Gateway". The five `RTA_*` tags express addresses only, so two thirds of that is unreachable and is not refused by name because no tag can carry one. The vector itself has no published autodoc anywhere; ours is derived from the sfd prototype, the tag set and the `-route-` page, and is documented as such in `src/bsdsocket/routing.c` |
@@ -71,5 +70,3 @@ out-of-mask `ai_flags` (`addrinfo.c:373`), sticky `IPV6_HOPLIMIT`
 - RFC 4086 contains no RFC 2119 keywords. The normative obligation is RFC 5246
   §D.1. The DRBG construction meets it; the seeding does not.
 - RFC 8659 §1.1 forbids using CAA in validation. Having no CAA code is correct.
-- RFC 4193 ULAs need no internet-layer handling. The ULA problem is 6724's
-  policy table.
