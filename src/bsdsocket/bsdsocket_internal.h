@@ -23,8 +23,8 @@
 #define AMINETXDUO_BSDSOCKET_INTERNAL_H
 
 /*
- * ThreadX and NetX Duo first, always. tx_port.h *typedefs* VOID, CHAR, UINT
- * and friends; <exec/types.h> guards its own definitions with #ifndef, so it
+ * ThreadX and NetX Duo first, always. tx_port.h typedefs VOID, CHAR, UINT and
+ * others. <exec/types.h> guards its own definitions with #ifndef, so it
  * tolerates being second but not first.
  */
 #include "tx_api.h"
@@ -47,8 +47,8 @@
 #include <utility/hooks.h>
 
 /*
- * <sys/socket.h> uses size_t/ssize_t but does not pull them in itself, and we
- * cannot rely on the ThreadX port header having included <stdlib.h> first.
+ * <sys/socket.h> uses size_t/ssize_t but does not pull them in itself, and the
+ * ThreadX port header does not always include <stdlib.h> first.
  */
 #include <stddef.h>
 #include <sys/types.h>
@@ -67,9 +67,9 @@
 #include "aminetxduo/netstatus.h"
 
 /*
- * The AF_INET6 names the NDK lacks. Published, it ships in the archive's
+ * The AF_INET6 names the NDK lacks. It is published and ships in the archive's
  * Developer drawer, so the numbers below are derived from it rather than
- * restated: two copies of an ABI constant is one copy too many.
+ * copied. Two copies of an ABI constant is one copy too many.
  */
 #include "aminetxduo/in6.h"
 
@@ -79,7 +79,7 @@
  * in this toolchain define (they use the Linux numbering: EWOULDBLOCK
  * 11, ENOTSOCK 108, ...). Applications compare against the AmiTCP netinclude
  * values, so those are the numbers that go into the caller's errno. They are
- * ABI constants; the prefixed names keep them clear of <errno.h>.
+ * ABI constants. The prefixed names keep them clear of <errno.h>.
  */
 #define AMI_EPERM               1
 #define AMI_ENOENT              2
@@ -135,10 +135,10 @@
 
 /* ------------------------------------------------------------------ IPv6,
  *
- * What the roadshow NDK already defines, verified against
+ * What the roadshow NDK already defines, checked against
  * amigaos/tools/m68k-amigaos-gcc/m68k-amigaos/ndk-include:
  *
- *   sys/socket.h:196   AF_INET6 23, and note it collides with
+ *   sys/socket.h:196   AF_INET6 23, which collides with
  *                                              AF_IPX 23 three lines above.
  *                                              Nothing here uses AF_IPX.
  *   netinet/in.h:178   struct in6_addr, unsigned char s6_addr[16]
@@ -149,32 +149,32 @@
  * What it does not define is in aminetxduo/in6.h, included above: IPPROTO_IPV6,
  * every IPV6_* socket option, INET6_ADDRSTRLEN, IN6ADDR_*_INIT, the
  * IN6_IS_ADDR_* macros, sockaddr_storage, PF_INET6 and AI_ADDRCONFIG. That
- * header is PUBLISHED, it ships in the archive's Developer drawer, and the
- * BSD numbers below are aliases of it, not second copies. An application built
- * against this NDK cannot name any of them, so it will have spelled them out
+ * header is published, it ships in the archive's Developer drawer, and the BSD
+ * numbers below are aliases of it rather than second copies. An application
+ * built against this NDK cannot name any of them, so it spells them out
  * itself, which is why in6.h #ifndef-guards every one.
  *
  * The BSD/Linux pairs are here rather than there because accepting both
- * numberings is behaviour, not ABI: in6.h publishes the one number a caller
- * should use, and these are what setsockopt() matches against.
+ * numberings is behaviour, not ABI. in6.h publishes the one number a caller
+ * uses, and these are what setsockopt() matches against.
  *
- * struct sockaddr_in6 is a trap, and in6.h carries the warning in full for
- * the callers who need it: `struct sockaddr_in` here is 4.4BSD's, sin_len at
- * offset 0 and sin_family at 1, while `struct sockaddr_in6` right below it is
- * the Linux one, pasted in verbatim, comment about "Scope ID (new in 2.4)"
- * and all, with sin6_family at offset 0 and no sin6_len. Reading
- * sa->sa_family out of a sockaddr_in6 reads its padding byte. (Same class of
- * hazard as ndk-include/pwd.h being newlib's 10-field struct passwd rather
- * than the Amiga's 7-field one.) So bsd_sa_family() below decides the family
- * from the bytes and the length rather than from a struct member, and in6.c
- * pins every offset with _Static_assert.
+ * struct sockaddr_in6 is a hazard, and in6.h carries the warning in full for
+ * the callers who need it. `struct sockaddr_in` here is 4.4BSD's, sin_len at
+ * offset 0 and sin_family at 1. `struct sockaddr_in6` right below it is the
+ * Linux one, pasted in verbatim, comment about "Scope ID (new in 2.4)" and
+ * all, with sin6_family at offset 0 and no sin6_len. Reading sa->sa_family out
+ * of a sockaddr_in6 reads its padding byte. (Same class of hazard as
+ * ndk-include/pwd.h being newlib's 10-field struct passwd rather than the
+ * Amiga's 7-field one.) So bsd_sa_family() below decides the family from the
+ * bytes and the length rather than from a struct member, and in6.c pins every
+ * offset with _Static_assert.
  */
 
 /*
  * IPPROTO_IPV6 comes from aminetxduo/in6.h and IPPROTO_ICMPV6 from
- * aminetxduo/cmsg.h, a caller has to be able to name a level as well as an
- * option. The AMI_IPPROTO_IPV6 alias is gone rather than kept pointing at the
- * published name: nothing used it once options.c stopped.
+ * aminetxduo/cmsg.h, because a caller has to be able to name a level as well
+ * as an option. The AMI_IPPROTO_IPV6 alias is gone rather than kept pointing
+ * at the published name. Nothing used it once options.c stopped.
  *
  * IPV6_V6ONLY has two numberings in the wild and the NDK picks neither:
  * 27 in KAME and the BSDs (netinet6/in6.h), 26 in Linux. This header set is
@@ -182,12 +182,12 @@
  * there is no lineage to defer to. Both are accepted, and getsockopt answers
  * to both.
  *
- * 26 IS a collision, on one socket. It is IPV6_CHECKSUM in BSD, and this
- * library DOES offer raw IPv6 sockets, socket(AF_INET6, SOCK_RAW, ...) is
- * what traceroute and ping open, and raw.c carries them. So the Linux
- * numbering is withdrawn on a raw socket; bsd_v6_linux_numbering() in in6.c
- * has the whole argument. (27 is IPV6_JOIN_ANYCAST in Linux, which this
- * library does not offer, so the BSD number needs no such guard.)
+ * 26 is a collision, on one socket. It is IPV6_CHECKSUM in BSD, and this
+ * library does offer raw IPv6 sockets: socket(AF_INET6, SOCK_RAW, ...) is what
+ * traceroute and ping open, and raw.c carries them. So the Linux numbering is
+ * withdrawn on a raw socket. bsd_v6_linux_numbering() in in6.c has the whole
+ * reasoning. (27 is IPV6_JOIN_ANYCAST in Linux, which this library does not
+ * offer, so the BSD number needs no such guard.)
  */
 #define AMI_IPV6_V6ONLY_BSD         IPV6_V6ONLY
 #define AMI_IPV6_V6ONLY_LINUX       26
@@ -200,7 +200,7 @@
  * IPV6_TCLASS: 61 in BSD, 67 in Linux. Darwin's 36 is deliberately not
  * accepted, Apple kept it for binary compatibility, and 36 is
  * IPV6_RECVPKTINFO in BSD and IPV6_HDRINCL in Linux, so it names something
- * else in both lineages this header set could belong to. 61 is Linux's
+ * else in both lineages this header set can belong to. 61 is Linux's
  * IPV6_PATHMTU, which this library does not offer.
  */
 #define AMI_IPV6_TCLASS_BSD         IPV6_TCLASS
@@ -241,9 +241,9 @@
  *   3  RFC 3493 if_nametoindex/if_indextoname/if_nameindex/if_freenameindex
  *      at -0x372..-0x384, the first slots past the end of the NDK's table.
  *      AMI_NETSTATUS_VERSION also went 6 -> 7 here (NETCTRL_INTERFACE_ADD,
- *      NETCTRL_STACK_HOLD) and this list was not told, which is how a command
- *      built against 7 could meet a revision-3 library that answers 6 and be
- *      told nothing useful.
+ *      NETCTRL_STACK_HOLD) and this list was not updated. A command built
+ *      against 7 can meet a revision-3 library that answers 6 and be told
+ *      nothing useful.
  *   4  AMI_NETSTATUS_VERSION 8, NETCTRL_INTERFACE_CONFIGURE
  *   5  AMI_NETSTATUS_VERSION 9, NETCTRL_INTERFACE_MDNS
  *   6  AMI_NETSTATUS_VERSION 10, NETCTRL_STACK_NOTIFY/_RELEASE,
@@ -264,7 +264,7 @@
  * bytes instead of 256 for an opener that makes a socket, and nothing for one
  * that does not. SBTC_DTABLESIZE can raise or lower it.
  *
- * The ceiling is the largest table SBTC_DTABLESIZE will hand out. It also
+ * The ceiling is the largest table SBTC_DTABLESIZE hands out. It also
  * sizes the fd_set scratch in WaitSelect() and tcp_handler.c, 4 bytes per 32
  * descriptors per set. A caller asking for more than FD_SETSIZE descriptors
  * has to build its own wider fd_set to name them.
@@ -288,17 +288,16 @@ typedef struct
 
 /*
  * TCP receive window. This is what limits a bulk transfer, and it was measured
- * see tests/trace/. On loopback the sender held exactly one 4096-byte
- * segment in flight against a 4096-byte advertised window, 100% of it, and
- * waited 14.9 ms (median) between segments; over the wire it reached 7200
- * bytes against 8192, 88%. Neither the CPU, the link nor the periodic tick was
- * the limit.
+ * in tests/trace/. On loopback the sender held exactly one 4096-byte segment
+ * in flight against a 4096-byte advertised window, 100% of it, and waited
+ * 14.9 ms (median) between segments. Over the wire it reached 7200 bytes
+ * against 8192, 88%. Neither the CPU, the link nor the periodic tick was the
+ * limit.
  *
- * ami_bsd_tcp_window() is what sockets actually get; this is only its floor.
- * The floor is what shipped before it, and what forty concurrent transfers
- * were measured passing on. Setting this and the ceiling to the same value
- * pins the window, which is how a fixed window is measured against the derived
- * one.
+ * ami_bsd_tcp_window() is what sockets actually get. This is only its floor,
+ * which is what shipped before it, and what forty concurrent transfers were
+ * measured passing on. Setting this and the ceiling to the same value pins the
+ * window, which is how a fixed window is measured against the derived one.
  */
 #ifndef BSD_TCP_WINDOW
 #define BSD_TCP_WINDOW        8192
@@ -317,7 +316,7 @@ typedef struct
 #define BSD_TCP_RX_QUEUE_SLACK  4
 
 /* The UDP receive queue, in datagrams. bsd_udp_queue_max() in socket.c derives
-   the per-socket default from the pool between these two; options.c bounds a
+   the per-socket default from the pool between these two. options.c bounds a
    SO_RCVBUF request by the ceiling. */
 #define BSD_UDP_QUEUE_MIN       8
 #define BSD_UDP_QUEUE_CEILING   64
@@ -325,9 +324,9 @@ typedef struct
 
 /*
  * One in this many pool packets is the budget the whole stack's TCP receive
- * windows may claim ABOVE the floor. See ami_bsd_tcp_window().
+ * windows can claim above the floor. See ami_bsd_tcp_window().
  *
- * 8, AND A QUARTER WAS TRIED AND REFUSED. (AMI_POOL_MAX_PACKETS / share) *
+ * 8. A quarter was tried and refused. (AMI_POOL_MAX_PACKETS / share) *
  * AMI_POOL_PAYLOAD is 50,176 at 8 and 100,352 at 4, so a quarter is what it
  * takes to give one socket a window the 16-bit field cannot hold and make RFC
  * 1323's scale exponent non-zero. It was built and measured, A1200 bridged to
@@ -348,7 +347,7 @@ typedef struct
  * is the number to gate on and the throughput is downstream of it.
  *
  * At an eighth ami_bsd_tcp_window() divides the budget by the live socket
- * count as before, so a lone socket may claim an eighth of the pool, all
+ * count as before, so a lone socket can claim an eighth of the pool, all
  * sockets together never more than one budget, and above five sockets the
  * BSD_TCP_WINDOW floor governs instead.
  */
@@ -362,18 +361,19 @@ typedef struct
  * The largest window the pool can ever produce is the budget at the pool's own
  * maximum size, which is what this is: a lone socket on a machine with enough
  * free memory to reach AMI_POOL_MAX_PACKETS. Anything below it caps a window
- * the pool was willing to give; anything above it can never be reached. So it
- * is not a free number and it is not a constant -- it moves with the pool
- * sizing in include/aminetxduo/netstack.h and with the share above.
+ * the pool was willing to give. Anything above it can never be reached. So it
+ * is not a free number and not a constant. It moves with the pool sizing in
+ * include/aminetxduo/netstack.h and with the share above.
  *
  * 33580 used to be here: 23 whole segments at the Ethernet MSS, which is what
  * a 32 KB payload behind a header needs to arrive in one round trip. 32768 is
- * twelve bytes short of that, so a 32,780-byte response could not complete in
+ * twelve bytes short of that, so a 32,780-byte response did not complete in
  * one whatever else was true.
  *
- * WHAT THAT NUMBER WAS MEASURED ON, kept because it is a request/response
- * workload and tests/perf/run-fitzbench.sh is a bulk one, and neither answers
- * the other.
+ * The measurements behind that number are kept below. They come from a
+ * request/response workload and tests/perf/run-fitzbench.sh is a bulk one, and
+ * neither answers the other.
+ *
  * An early sweep read 32768, 33580 and 48180 as flat and kept 32768, with a
  * congestion window of 12 segments that bound the transfer before the receive
  * window did. SACK and D-SACK take it to 24 on a clean link, which puts the
@@ -406,8 +406,7 @@ typedef struct
  * where AvailMem()/16 is what sizes the pool: the lab's 8 MB A1200 gets 368
  * packets and a 72,128-byte window, and the ceiling never applies.
  *
- * Every byte of window is a byte of packet pool somebody else cannot have, and
- * this is the packet pool saying so in its own units.
+ * Every byte of window is a byte of packet pool no other socket can have.
  *
  * AMINETXDUO_TCP_WINDOW overrides both this and the floor, which is how a
  * fixed window is measured against the derived one.
@@ -419,20 +418,19 @@ typedef struct
      (ULONG)AMI_POOL_PAYLOAD)
 #else
 /*
- * WITHOUT THE OPTION THE FIELD IS THE CEILING. The window goes on the wire in
- * sixteen bits and there is nothing to scale it by, so 65535 is not a policy
- * here, it is the architecture -- and nxe_tcp_socket_create.c:170 enforces it,
- * refusing a larger window with NX_OPTION_ERROR.
+ * Without the option, the field itself is the ceiling. The window goes on the
+ * wire in sixteen bits and there is nothing to scale it by, so 65535 is what
+ * the wire format allows rather than a policy. nxe_tcp_socket_create.c:170
+ * enforces it, refusing a larger window with NX_OPTION_ERROR.
  *
  * That guard is why this arm exists. At the share above the budget is 50,176
- * and fits the field on its own, so nothing reaches it today -- but it was
- * reached: with the share at a quarter the budget is 100,352 on any machine
- * with about 4.2 MB of free public memory, and a tree built with
+ * and fits the field on its own, so nothing reaches it today. It was reached
+ * once: with the share at a quarter the budget is 100,352 on any machine with
+ * about 4.2 MB of free public memory, and a tree built with
  * -DAMINETXDUO_TCP_WINDOW_SCALING=OFF and no ceiling of its own failed socket()
  * for every TCP socket on the lab's own A1200 profile. tcp.drill w01 opened
  * with "socket() failed" and "connect() failed, errno 9" and every case after
- * it followed. The two arms are what stop the share and the option being able
- * to disagree at all.
+ * it followed. The two arms stop the share and the option disagreeing at all.
  */
 #define BSD_TCP_WINDOW_CEILING  65535UL
 #endif
@@ -450,23 +448,22 @@ struct AmiSocket;
  * wherever it liked, and nothing outside can turn it back into a function
  * without knowing where the hunks landed, which is what the seglist says.
  * Exec publishes struct Library and nothing after it, so sb_SegList sits at an
- * offset only this file knows, and a profiler reading it from a hard-coded
- * number would break silently the first time a field moved: it would still
- * find eight bytes that look like a segment header and still resolve every
- * address to a wrong, plausible name.
+ * offset only this file knows. A profiler reading it from a hard-coded number
+ * breaks silently the first time a field moves: it still finds eight bytes
+ * that look like a segment header and still resolves every address to a wrong,
+ * plausible name.
  *
- * So this says where it is, in a record that identifies itself. The profiler
- * scans our positive half for the magic, checks that bst_LibBase is the base
- * it was found in and that the five longwords sum to zero, and then checks the
- * seglist it gets against the hull of our own jump table. It costs five
- * longwords and one assignment; a library that does not carry it is named by
- * module, which is where every library started.
+ * So this record says where it is and identifies itself. The profiler scans
+ * our positive half for the magic, checks that bst_LibBase is the base it was
+ * found in and that the five longwords sum to zero, and then checks the
+ * seglist it gets against the hull of our own jump table. A library that does
+ * not carry it is named by module instead.
  *
  * The convention is the profiler's and is written down in
  * tools/profiler/prof.h, deliberately not included from here, because it
- * belongs to a tool that is meant to be liftable out of this tree whole and
- * this library must not acquire a dependency on it. Five longwords is the
- * whole of it.
+ * belongs to a tool meant to be liftable out of this tree whole and this
+ * library must not acquire a dependency on it. Five longwords is the whole
+ * of it.
  */
 #define BSD_PROF_SEGTAG_MAGIC   0x50534731UL    /* 'PSG1' */
 
@@ -481,7 +478,7 @@ struct BsdProfSegTag
 
 /*
  * One of these per OpenLibrary(). The master base (sb_Master == NULL) owns
- * the segment list and the child list; every opener gets a byte-for-byte
+ * the segment list and the child list. Every opener gets a byte-for-byte
  * clone of it (jump table included) with its own descriptor table, errno
  * pointer and tag state. docs/RESEARCH.md S3.1: SocketBase is never shared.
  */
@@ -503,9 +500,9 @@ struct AmiSocketBase
     /*
      * The library's own reference to the stack it is running, taken once and
      * never given back (bsd_stack_hold()).  It is what keeps the network up
-     * after the command that started it has exited, so that command does not
-     * have to leak a base to do the same job.  A flag and not a count: the
-     * point is that the second AddNetInterface costs nothing.
+     * after the command that started it exits, so that command does not have
+     * to leak a base to do the same job.  A flag and not a count, so a second
+     * AddNetInterface costs nothing.
      */
     BOOL                    sb_StackHeld;
 
@@ -529,14 +526,14 @@ struct AmiSocketBase
     AmiNetCaller            sb_NxCaller;
 
     /*
-     * WaitSelect()'s input sets, here for the reason above and then some: they
+     * WaitSelect()'s input sets, here for the reason above and one more. They
      * are sized to BSD_MAX_DTABLESIZE rather than to the caller's nfds, so on
-     * the stack they cost 384 bytes of the CALLER's stack on every call
-     * whether it is watching two descriptors or a thousand. An Amiga caller may
+     * the stack they cost 384 bytes of the caller's stack on every call,
+     * whether it is watching two descriptors or a thousand. An Amiga caller can
      * have 4 KB and no guard page, and a program that sits in WaitSelect() in a
-     * loop is the normal shape of a network client, measured at 864 bytes for
-     * the whole frame before this moved (-fstack-usage), which real hardware
-     * reported as freezes under sustained TCP.
+     * loop is the normal shape of a network client. The whole frame measured
+     * 864 bytes before this moved (-fstack-usage), which real hardware reported
+     * as freezes under sustained TCP.
      */
     BsdFdSets               sb_SelIn;
     BsdFdSets               sb_SelReady;   /* and its result sets    */
@@ -556,7 +553,7 @@ struct AmiSocketBase
     LONG                    sb_TableSize;
 
     LONG                    sb_Errno;
-    APTR                    sb_ErrnoPtr;    /* caller-supplied, may be NULL  */
+    APTR                    sb_ErrnoPtr;    /* caller-supplied, can be NULL  */
     LONG                    sb_ErrnoSize;   /* 1, 2 or 4                     */
     LONG                    sb_HErrno;
     LONG                   *sb_HErrnoPtr;
@@ -645,7 +642,7 @@ struct AmiSocketBase
 #define ASF_RDSHUT      (1UL <<  7)
 #define ASF_WRSHUT      (1UL <<  8)
 #define ASF_EOF         (1UL <<  9)   /* peer closed, no more data coming   */
-#define ASF_INCOMING    (1UL << 10)   /* listen slave; has no descriptor yet */
+#define ASF_INCOMING    (1UL << 10)   /* listen slave, no descriptor yet     */
 #define ASF_ACCEPTPEND  (1UL << 11)   /* listen callback fired              */
 #define ASF_REUSEADDR   (1UL << 12)
 #define ASF_BROADCAST   (1UL << 13)
@@ -655,9 +652,9 @@ struct AmiSocketBase
 #define ASF_SERVER      (1UL << 18)   /* came off a listen port: unaccept   */
 #define ASF_ORPHANED    (1UL << 19)   /* NX would not delete it; leaked     */
 #define ASF_INET6       (1UL << 20)   /* created with domain AF_INET6       */
-#define ASF_V6ONLY      (1UL << 21)   /* IPV6_V6ONLY; see options.c         */
-#define ASF_RAW         (1UL << 22)   /* SOCK_RAW; see raw.c                */
-#define ASF_OOBHAVE     (1UL << 23)   /* an urgent byte is waiting; oob.c   */
+#define ASF_V6ONLY      (1UL << 21)   /* IPV6_V6ONLY, see options.c         */
+#define ASF_RAW         (1UL << 22)   /* SOCK_RAW, see raw.c                */
+#define ASF_OOBHAVE     (1UL << 23)   /* an urgent byte is waiting, oob.c   */
 #define ASF_CLOSING     (1UL << 24)   /* FIN sent, parked for a late reap   */
 #define ASF_RELISTENING (1UL << 25)   /* inside the listen callback's relisten */
 
@@ -757,14 +754,14 @@ typedef struct AmiSocket
     LONG                    as_Ttl;
     LONG                    as_Tos;
 
-    /* TCP_USER_TIMEOUT in milliseconds, as the caller set it; the NX socket
+    /* TCP_USER_TIMEOUT in milliseconds, as the caller set it. The NX socket
        holds the same deadline in ticks. Kept so getsockopt answers what went
        in rather than what rounding made of it. 0 == not asked for. */
     ULONG                   as_UserTimeout;
 
     /*
      * IP_HDRINCL. The caller supplies its own IP header ahead of the payload
-     * on a raw socket; traceroute is the only user. See bsd_raw_hdrincl() in
+     * on a raw socket, and traceroute is the only user. See bsd_raw_hdrincl() in
      * raw.c for what survives the translation.
      */
     LONG                    as_HdrIncl;
@@ -799,7 +796,7 @@ typedef struct AmiSocket
 #endif
 
     /*
-     * RFC 3542 (cmsg.c). as_CmsgWant is the ACW_ set above; as_CmsgSticky is
+     * RFC 3542 (cmsg.c). as_CmsgWant is the ACW_ set above. as_CmsgSticky is
      * the source a setsockopt(IPV6_PKTINFO) named, which a per-datagram cmsg
      * on sendmsg() overrides.
      */
@@ -809,7 +806,7 @@ typedef struct AmiSocket
 #ifdef AMINETXDUO_IPV6
     /*
      * ICMP6_FILTER, one bit per ICMPv6 type. All ones until a caller installs
-     * one, which is RFC 3542 3.2's "pass everything" default; raw.c reads it
+     * one, which is RFC 3542 3.2's "pass everything" default. raw.c reads it
      * on the IP thread.
      */
     ULONG                   as_Icmp6Filter[8];
@@ -818,7 +815,7 @@ typedef struct AmiSocket
     /*
      * Listening state. NetX Duo hands an incoming connection to a specific
      * socket, so a listening descriptor keeps spare sockets parked on the
-     * port; accept() takes a finished one and parks a fresh one in its place.
+     * port. accept() takes a finished one and parks a fresh one in its place.
      * docs/RESEARCH.md S6.4.
      *
      * as_Incoming is the head of that list, as_IncomingNext the link, and
@@ -852,7 +849,7 @@ typedef struct AmiSocket
 
     /*
      * Orderly-close list. CloseSocket() sends a FIN and returns, so the
-     * connection outlives the descriptor and usually the base as well; socket.c
+     * connection outlives the descriptor and usually the base as well. socket.c
      * keeps the block here until TCP has finished with it. as_ClosingAt is a
      * tx_time_get() deadline, so a peer that never answers cannot pin the block
      * for ever.
@@ -871,7 +868,7 @@ typedef struct AmiSocket
 
 /* ------------------------------------------------------------- prototypes,
  *
- * Everything below is internal; the ABI entry points live in the generated
+ * Everything below is internal. The ABI entry points live in the generated
  * bsdsocket_vectors.h.
  */
 
@@ -879,14 +876,14 @@ typedef struct AmiSocket
 BOOL  bsd_runtime_open(VOID);
 VOID  bsd_runtime_close(VOID);
 
-/* netx_call.c, ThreadX context. Nothing may call a NetX Duo THREADS_ONLY
- * vector outside a successful bsd_nx_enter()/bsd_nx_leave() bracket, and
- * nothing inside one may block on anything except ThreadX. */
+/* netx_call.c, ThreadX context. Every call to a NetX Duo THREADS_ONLY
+ * vector must be inside a successful bsd_nx_enter()/bsd_nx_leave() bracket.
+ * Inside one, nothing must block on anything except ThreadX. */
 LONG  bsd_nx_enter(struct AmiSocketBase *base);
 VOID  bsd_nx_leave(struct AmiSocketBase *base);
 
-/* Drop the base's cached ThreadX registration. Teardown only, no bracket open;
-   see netx_call.c for what is cached and why. */
+/* Drop the base's cached ThreadX registration. Teardown only, no bracket open.
+   See netx_call.c for what is cached and why. */
 VOID  bsd_nx_release(struct AmiSocketBase *base);
 
 /* library.c */
@@ -898,12 +895,13 @@ APTR  bsd_lib_reserved(VOID);
 
 /* library.c, NETCTRL_STACK_HOLD.  Make the library hold its own reference to
    the running stack so the caller's open can be closed without taking the
-   network down with it.  Idempotent; 0 on success, -1 if there is no stack. */
+   network down with it.  Idempotent.  0 on success, -1 if there is no stack. */
 LONG  bsd_stack_hold(struct AmiSocketBase *base);
 
-/* library.c, the shutdown pair.  bsd_stack_unhold() gives that reference back;
-   0 on success, -1 when the caller is the only one left holding the stack up.
-   bsd_stack_notify() signals every other opener and reports how many. */
+/* library.c, the shutdown pair.  bsd_stack_unhold() gives that reference back.
+   It returns 0 on success, -1 when the caller is the only one left holding the
+   stack up.  bsd_stack_notify() signals every other opener and reports how
+   many. */
 LONG  bsd_stack_unhold(struct AmiSocketBase *base);
 LONG  bsd_stack_notify(struct AmiSocketBase *base, ULONG *signalled);
 
@@ -927,8 +925,8 @@ LONG       bsd_fd_alloc(struct AmiSocketBase *base, AmiSocket *sock);
 VOID       bsd_fd_free(struct AmiSocketBase *base, LONG fd);
 VOID       bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock);
 
-/* socket.c, reclaim sockets whose orderly close has finished. Must be
-   called inside a bsd_nx_enter() bracket; a no-op when the list is empty. */
+/* socket.c, reclaim sockets whose orderly close has finished. Must be called
+   inside a bsd_nx_enter() bracket. A no-op when the list is empty. */
 VOID       bsd_closing_sweep(VOID);
 VOID       bsd_closing_drain(VOID);
 
@@ -953,21 +951,21 @@ VOID       bsd_bpf_close_all(struct AmiSocketBase *base);
 /* socket.c, the receive window this machine can afford right now. */
 ULONG      ami_bsd_tcp_window(VOID);
 
-/* handoff.c, cross-base descriptor transfer. The registry lives in the
- * master base; bsd_handoff_flush() runs from bsd_lib_close() when the last
- * opener goes, because nothing can obtain a parked socket after that. */
+/* handoff.c, cross-base descriptor transfer. The registry lives in the master
+ * base. bsd_handoff_flush() runs from bsd_lib_close() when the last opener
+ * goes, because nothing can obtain a parked socket after that. */
 VOID  bsd_handoff_init(struct AmiSocketBase *master);
 VOID  bsd_handoff_flush(struct AmiSocketBase *base);
 
 /* socket.c, sockaddr helpers.
  *
- * bsd_sa_family() decides what a caller's `struct sockaddr *` actually is; see
- * the sockaddr_in6 note above for why that cannot be a struct member read.
+ * bsd_sa_family() decides what a caller's `struct sockaddr *` actually is. The
+ * sockaddr_in6 note above says why that cannot be a struct member read.
  * Returns AF_INET, AF_INET6, AF_UNSPEC, or -1 for anything it will not touch.
  *
  * bsd_sockaddr_get() parses one into an NXD_ADDRESS + port (+ scope id, which
- * may be NULL); bsd_sockaddr_put() writes one back in the shape the socket's
- * family calls for, which is not always the shape of the address, an
+ * can be NULL). bsd_sockaddr_put() writes one back in the shape the socket's
+ * family calls for, which is not always the shape of the address: an
  * AF_INET6 socket reports a v4 peer as ::ffff:a.b.c.d.
  */
 LONG  bsd_sa_family(const struct sockaddr *sa, socklen_t len);
@@ -989,7 +987,7 @@ VOID  bsd_opt_apply_ip(AmiSocket *sock);
 #ifdef AMINETXDUO_IPV6
 /* in6.c, everything that only exists in the dual-stack build. */
 
-/* TRUE when `addr` is ::ffff:a.b.c.d; *v4 receives a.b.c.d. */
+/* TRUE when `addr` is ::ffff:a.b.c.d. *v4 receives a.b.c.d. */
 BOOL  bsd_addr_is_v4mapped(const NXD_ADDRESS *addr, ULONG *v4);
 
 /* ::ffff:a.b.c.d from a.b.c.d. */
@@ -1009,7 +1007,7 @@ VOID  bsd_in6_to_words(const UBYTE bytes[16], ULONG words[4]);
 VOID  bsd_words_to_in6(const ULONG words[4], UBYTE bytes[16]);
 
 /* setsockopt/getsockopt for level IPPROTO_IPV6. Returns 0, or -1 with errno
-   set; ENOPROTOOPT for an option this library does not implement. */
+   set. ENOPROTOOPT means an option this library does not implement. */
 LONG  bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
                           LONG level, LONG optname, APTR optval,
                           socklen_t optlen);
@@ -1017,7 +1015,7 @@ LONG  bsd_getsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
                           LONG level, LONG optname, APTR optval,
                           socklen_t *optlen);
 
-/* Whether the Linux option numbering may be read on this socket. FALSE on a
+/* Whether the Linux option numbering can be read on this socket. FALSE on a
    raw one, where RFC 3542 claims 26 for IPV6_CHECKSUM; the whole rationale is
    at the definition in in6.c. */
 BOOL  bsd_v6_linux_numbering(const AmiSocket *sock);
@@ -1033,10 +1031,9 @@ BOOL  bsd_v6_linux_numbering(const AmiSocket *sock);
  * and IPPROTO_ICMPV6, and returns 1 for an optname it does not own so the
  * caller can carry on looking. 0 is done, -1 is done with errno set.
  *
- * bsd_cmsg_build() fills msg_control from the packet a datagram arrived in
- * and sets msg_controllen; MSG_CTRUNC goes into msg_flags if the caller's
- * buffer was too small. Safe with msg == NULL, which is every recv() and
- * recvfrom().
+ * bsd_cmsg_build() fills msg_control from the packet a datagram arrived in and
+ * sets msg_controllen. If the caller's buffer was too small, MSG_CTRUNC goes
+ * into msg_flags. Safe with msg == NULL, which is every recv() and recvfrom().
  *
  * bsd_cmsg_parse() reads the caller's ancillary data on sendmsg(). Anything
  * this library cannot honour is refused rather than ignored.
@@ -1054,13 +1051,13 @@ LONG  bsd_cmsg_source_index(NX_IP *ip, const BsdCmsgSource *src, BOOL v6);
 
 /* oob.c, TCP urgent data (MSG_OOB, SIOCATMARK, SIGURG).
  *
- * bsd_oob_send() sends one byte with the URG bit set; it must be called
- * inside a bsd_nx_enter() bracket and returns 1, or -1 with errno set.
+ * bsd_oob_send() sends one byte with the URG bit set. It must be called inside
+ * a bsd_nx_enter() bracket and returns 1, or -1 with errno set.
  *
  * bsd_tcp_urgent_notify() is what nx_tcp_socket_create() is handed as its
  * urgent-data callback, and runs on the NetX Duo IP thread.
  *
- * bsd_oob_take() hands the stored byte to recv(MSG_OOB) and clears the mark;
+ * bsd_oob_take() hands the stored byte to recv(MSG_OOB) and clears the mark.
  * TRUE means there was one.
  */
 LONG  bsd_oob_send(struct AmiSocketBase *base, AmiSocket *sock, UBYTE byte);
@@ -1072,13 +1069,13 @@ BOOL  bsd_oob_take(AmiSocket *sock, UBYTE *out);
  * Every one of these must be called inside a bsd_nx_enter() bracket, except
  * bsd_raw_available() and bsd_raw_source(), which only read.
  *
- * bsd_raw_open() registers the socket with the IP-level filter (installing it
- * on the first raw socket); bsd_raw_close() unregisters it, drains its queue
+ * bsd_raw_open() registers the socket with the IP-level filter, installing it
+ * on the first raw socket. bsd_raw_close() unregisters it, drains its queue
  * and removes the filter again when the last one goes.
  *
  * bsd_raw_send_packet() hands a packet the caller has already filled to
  * nxd_ip_raw_packet_send(), which prepends the IP header. `scope` is the
- * sockaddr_in6 zone, 0 for none; `src` is the RFC 3542 ancillary data of a
+ * sockaddr_in6 zone, 0 for none. `src` is the RFC 3542 ancillary data of a
  * sendmsg(), or NULL. The packet is consumed either way, released here on
  * failure, so the caller must not touch it again.
  *
@@ -1089,7 +1086,7 @@ BOOL  bsd_oob_take(AmiSocket *sock, UBYTE *out);
  * The IP-layer MTU of the interface a datagram to `addr` would leave by, or -1
  * if the route does not resolve. Both send paths measure against it and refuse
  * an oversize datagram with EMSGSIZE rather than let transmit fragmentation
- * have it; bsd_udp_maxdgram() in transfer.c says why.
+ * handle it. bsd_udp_maxdgram() in transfer.c says why.
  */
 LONG       bsd_route_mtu(NX_IP *ip, const NXD_ADDRESS *addr);
 
@@ -1107,7 +1104,7 @@ ULONG      bsd_raw_available(AmiSocket *sock);
  *
  * bsd_mcast_setopt()/bsd_mcast_getopt() answer IP_ADD_MEMBERSHIP,
  * IP_DROP_MEMBERSHIP, IP_MULTICAST_IF, IP_MULTICAST_TTL and
- * IP_MULTICAST_LOOP; options.c dispatches those five and nothing else here.
+ * IP_MULTICAST_LOOP. options.c dispatches those five and nothing else here.
  * Both take their own bsd_nx_enter() bracket where they need one.
  *
  * bsd_mcast_close() drops every membership the socket still holds, as BSD
@@ -1126,12 +1123,12 @@ LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr);
 
 #ifdef AMINETXDUO_IPV6
 /* The RFC 3493 section 5.2 half, same file and same shape. in6.c dispatches
- * the five; bsd_mcast_close() drops both families' memberships.
+ * the five. bsd_mcast_close() drops both families' memberships.
  *
  * bsd_mcast6_prepare_send() answers with the IPv6 ADDRESS index to send from
  * what nxd_udp_socket_source_send() wants, or -1, and stores the NX_IP
- * hop limit it overwrote in *saved. bsd_mcast6_finish_send() puts it back;
- * the pair must bracket the send, and 0 in *saved means nothing changed.
+ * hop limit it overwrote in *saved. bsd_mcast6_finish_send() puts it back. The
+ * pair must bracket the send, and 0 in *saved means nothing changed.
  *
  * BSD_MCAST6_NO_LINK is the third answer: IPV6_MULTICAST_HOPS is 0, "this
  * host only" (RFC 3493 5.2), so the datagram is consumed and nothing goes on
@@ -1153,7 +1150,7 @@ VOID bsd_mcast6_finish_send(ULONG saved);
 /* select.c, event plumbing.
  *
  * bsd_events_attach() installs the NetX Duo receive/connect/disconnect
- * callbacks on a freshly created socket; every one of them ends up in
+ * callbacks on a freshly created socket. Every one of them ends up in
  * bsd_event_post(), which records the FD_* bits and signals the owning task.
  */
 VOID  bsd_events_attach(AmiSocket *sock);
@@ -1177,18 +1174,18 @@ ULONG bsd_wait_option(AmiSocket *sock, ULONG timeout_ticks);
 /*
  * The break-signal test the resolver's retransmission ladder asks between
  * queries (resolver.c). `arg` is the struct AmiSocketBase whose sb_BreakMask
- * applies; the signature is netstack's AmiNetGiveUpFn.
+ * applies. The signature is netstack's AmiNetGiveUpFn.
  */
 BOOL  bsd_resolve_break(VOID *arg);
 
 /*
- * NextTagItem(), open-coded (errno.c). utility.library may not be open when
+ * NextTagItem(), open-coded (errno.c). utility.library is not always open when
  * this library is called, and the four control tags are three lines of
  * arithmetic. Shared by interfaces.c, routing.c and addralloc.c.
  *
  * Returns the next real tag, advancing *cursor past it, or NULL at the end.
  * TAG_MORE follows the chain, TAG_SKIP skips ti_Data further items and
- * TAG_IGNORE skips itself; none of the three is ever handed back.
+ * TAG_IGNORE skips itself. None of the three is ever handed back.
  */
 struct TagItem *bsd_next_tag(struct TagItem **cursor);
 
@@ -1198,7 +1195,8 @@ VOID  bsd_strncpy(char *dst, const char *src, ULONG size);
 VOID  bsd_bzero(APTR p, ULONG size);
 VOID  bsd_bcopy(const APTR src, APTR dst, ULONG size);
 
-/* Host byte order == network byte order on m68k; spelled out for clarity. */
+/* Host byte order and network byte order are the same on m68k. Spelled out
+   for clarity. */
 #define BSD_HTONL(x)    ((ULONG)(x))
 #define BSD_NTOHL(x)    ((ULONG)(x))
 #define BSD_HTONS(x)    ((UWORD)(x))
@@ -1206,14 +1204,14 @@ VOID  bsd_bcopy(const APTR src, APTR dst, ULONG size);
 
 /*
  * Would a socket bound to as_LocalAddr take traffic that arrived on `nxif`?
- * TRUE for the wildcard. socket.c owns it; transfer.c filters received
+ * TRUE for the wildcard. socket.c owns it. transfer.c filters received
  * datagrams with it, accept() filters completed connections.
  */
 BOOL bsd_bind_wants_interface(const AmiSocket *sock, const NX_INTERFACE *nxif);
 
 /*
  * Is this the peer a connected UDP socket named? TRUE for a socket that never
- * connected. transfer.c owns it and filters received datagrams with it;
+ * connected. transfer.c owns it and filters received datagrams with it.
  * select.c asks it of an ICMP error's peer.
  */
 BOOL bsd_udp_from_peer(const AmiSocket *sock, const NXD_ADDRESS *src,
@@ -1221,13 +1219,13 @@ BOOL bsd_udp_from_peer(const AmiSocket *sock, const NXD_ADDRESS *src,
 
 /*
  * The send direction of the same question: which source must a datagram from
- * this socket leave with? socket.c owns it; transfer.c and raw.c use it to
+ * this socket leave with? socket.c owns it. transfer.c and raw.c use it to
  * pick the nxd_*_source_send() index, connect() to decide whether TCP can
  * honour the request at all.
  */
 typedef enum
 {
-    BSD_SOURCE_ROUTE = 0,   /* nothing pinned: NetX may route as it likes  */
+    BSD_SOURCE_ROUTE = 0,   /* nothing pinned: NetX can route as it likes  */
     BSD_SOURCE_INDEX,       /* pinned; *index is what source_send() wants  */
     BSD_SOURCE_REFUSE,      /* pinned to something absent: EADDRNOTAVAIL   */
     BSD_SOURCE_UNREACH      /* pinned, but no route from there: ENETUNREACH */
