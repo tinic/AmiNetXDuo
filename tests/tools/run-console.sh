@@ -430,11 +430,19 @@ EOF
     # from the outside at once.  This is the only way to ask an RTG boot what
     # it actually found: whether rtg.library loaded, whether it saw a board,
     # and what Intuition ended up opening.
+    #
+    # AND NO SCREEN OF ITS OWN.  This ran `rtgscreen 8 640 480` as well, which
+    # put a PUBLIC, QUIET, EMPTY screen in front of Workbench -- and the front
+    # screen is the one the console serves, so the session read a card screen
+    # correctly and streamed 640x480 of colour zero.  Every RTG assertion
+    # passed on it: format 1, a palette, a decoded frame, one pixel value.
+    # screenmode.prefs puts WORKBENCH on the card and the geom word's format
+    # says so per run, so there is nothing for a second screen to insure
+    # against -- an -R run that comes up planar is meant to fail, not to be
+    # rescued by a blank screen that hides what Workbench did.
     [ "$RTG" = 1 ] && cat >> "$HD/S/Startup-Sequence" <<'EOF'
 DEVS:Monitors/uaegfx >DH0:rtgmon.txt
 C:rtgscreen 0 >DH0:rtglist.txt
-Run >DH0:rtgscreen.txt <NIL: C:rtgscreen 8 640 480
-C:Wait 3
 C:Version >DH0:rtg-ver.txt LIBS:Picasso96/rtg.library FILE
 C:Version >>DH0:rtg-ver.txt LIBS:Picasso96API.library FILE
 C:Version >>DH0:rtg-ver.txt Picasso96API.library
@@ -605,26 +613,48 @@ probe() {
         "python3 - $*" < "$ROOT/tests/tools/console-probe.py" > "$out" 2>&1
 }
 
-fetch_page() {
+# ONE HTTP CLIENT, AND IT IS THE ONE THE CLIENT MACHINE ALREADY HAS TO HAVE.
+#
+# These fetches used curl, and the probe travels as python3 -- so a client with
+# python3 and no curl (playhouse4 carries wget instead) answered every probe and
+# no fetch.  What that looks like from here is not "curl is missing": alive()
+# returns the empty string on every attempt, the boot loop runs to BOOT_MAX, and
+# the run reports d8_up=no on a guest that was serving the whole time.  Two
+# 240-second RTG runs were spent on it.  python3 is already a hard requirement
+# for the client, so the fetches use it too and the dependency list is one line
+# shorter.
+HTTP_GET_PY='
+import sys, urllib.request, urllib.error
+url, t = sys.argv[1], float(sys.argv[2])
+try:
+    with urllib.request.urlopen(url, timeout=t) as r:
+        print(r.status, len(r.read()))
+except urllib.error.HTTPError as e:
+    print(e.code, 0)
+except Exception:
+    print(0, 0)
+'
+
+# url seconds -> "<status> <bytes>", "0 0" when nothing answered.
+http_get() {
+    local out
     if [ -z "$CLIENT" ]; then
-        curl -s -m 8 -o /dev/null -w '%{http_code} %{size_download}' \
-             "http://$ADDRESS:$PORT/console" 2>/dev/null || true
+        out=$(python3 -c "$HTTP_GET_PY" "$1" "$2" 2>/dev/null || true)
     else
-        ssh -o BatchMode=yes -o ConnectTimeout=10 "$CLIENT" \
-            "curl -s -m 8 -o /dev/null -w '%{http_code} %{size_download}' \
-             'http://$ADDRESS:$PORT/console'" 2>/dev/null || true
+        out=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$CLIENT" \
+              "python3 - '$1' '$2'" <<<"$HTTP_GET_PY" 2>/dev/null || true)
     fi
+    printf '%s' "${out:-0 0}"
+}
+
+fetch_page() {
+    http_get "http://$ADDRESS:$PORT/console" 8
 }
 
 alive() {
-    if [ -z "$CLIENT" ]; then
-        curl -s -m 4 -o /dev/null -w '%{http_code}' \
-             "http://$ADDRESS:$PORT/" 2>/dev/null || true
-    else
-        ssh -o BatchMode=yes -o ConnectTimeout=8 "$CLIENT" \
-            "curl -s -m 4 -o /dev/null -w '%{http_code}' \
-             'http://$ADDRESS:$PORT/'" 2>/dev/null || true
-    fi
+    local s
+    s=$(http_get "http://$ADDRESS:$PORT/" 4)
+    printf '%s' "${s%% *}"
 }
 
 # ------------------------------------------------------------------- run ----

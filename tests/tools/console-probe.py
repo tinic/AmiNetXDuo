@@ -993,7 +993,12 @@ def main(argv):
                 elif text.startswith("fbstat "):
                     fbstat = text[7:]
                 else:
-                    say("word_unknown", text[:60])
+                    # WHOLE, not the first sixty characters.  The rtg word is
+                    # the one deliverable of the readback probe and it is about
+                    # a hundred: cut at sixty it stopped inside the third
+                    # route's number, so the run reported "cgxr=4" for a rate
+                    # of 4-something and dropped cgxl and blit entirely.
+                    say("word_unknown", text[:240])
                 continue
 
             if op != 0x2:
