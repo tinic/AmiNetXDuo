@@ -2,26 +2,24 @@
  * The tests for src/tools/httppath.c, the one part of the WebDAV server
  * that decides whether a request can reach a file outside the document root.
  *
- * WHY THIS IS A TEST AND NOT A REVIEW
+ * The server writes.  A path check that only looked right leaked a file when
+ * the server only read, and destroys one now that DELETE, MOVE and PUT are
+ * here, and the mistakes are all the same shape: a thing that does not look
+ * like an escape until something else has decoded it.  So the escapes are
+ * written down here, one case each, and the file is built for the host so they
+ * run in `tools/ci.sh host` on every change rather than only when somebody
+ * boots an Amiga.
  *
- *   The server writes.  A path check that is merely "looked right" leaked a
- *   file when it only read and destroys one now that DELETE, MOVE and PUT are
- *   here, and the mistakes are all the same shape: a thing that does not look
- *   like an escape until something else has decoded it.  So the escapes are
- *   written down here, one case each, and the file is built for the host so
- *   they run in `tools/ci.sh host` on every change rather than only when
- *   somebody boots an Amiga.
+ * Three of the destructive primitives live in that file for the same reason,
+ * joining a child onto a walked path, backing up one level, and asking whether
+ * one path is inside another.  A walk that appends the wrong separator deletes
+ * the parent, and the containment test is what both a lock and a
+ * COPY-into-itself check are made of.
  *
- *   Three of the destructive primitives live in that file for the same
- *   reason, joining a child onto a walked path, backing up one level, and
- *   asking whether one path is inside another.  A walk that appends the
- *   wrong separator deletes the parent, and the containment test is what
- *   both a lock and a COPY-into-itself check are made of.
- *
- *   The AmigaOS case is the one no ported Unix server has: a colon makes
- *   everything before it a device or an assign, so "/RAM:foo" is the RAM disk
- *   and not a file called "RAM:foo", and every ../ check ever written is blind
- *   to it.  It is tested here in every position a colon can appear in.
+ * The AmigaOS case is the one no ported Unix server has.  A colon makes
+ * everything before it a device or an assign, so "/RAM:foo" is the RAM disk
+ * and not a file called "RAM:foo", and every ../ check ever written is blind
+ * to it.  It is tested here in every position a colon can appear in.
  *
  *   cc -std=c11 -Wall -Wextra -Isrc/tools \
  *      src/tools/test/test_httppath.c src/tools/httppath.c -o test_httppath
@@ -48,7 +46,7 @@ static int checks;
         }                                                                    \
     } while (0)
 
-/* Deliberately not the CHECK_STR in src/config/test/test_config.c: its NULL
+/* Deliberately not the CHECK_STR in src/config/test/test_config.c.  Its NULL
    guard is dead for an array argument and costs a -Waddress exemption in
    cmake/ci-warnings.cmake. */
 #define CHECK_STR(got, want)                                                 \
@@ -80,7 +78,7 @@ static HttpPathResult refused(const char *target)
     return http_path_resolve("Work:Public", target, &out);
 }
 
-/* -------------------------------------------------------- what should work */
+/* --------------------------------------------------------- what must work */
 
 static void test_ordinary(void)
 {
@@ -92,28 +90,28 @@ static void test_ordinary(void)
               "Work:Public/Docs/readme.txt");
     CHECK_STR(resolved("Work:Public", "/Docs/"), "Work:Public/Docs");
 
-    /* A root that is a whole volume already carries its separator; adding one
-       would name the volume's root directory instead of the drawer, which is
-       a different place on AmigaOS. */
+    /* A root that is a whole volume already carries its separator.  Adding one
+       would name the volume's root directory instead of the drawer, which is a
+       different place on AmigaOS. */
     CHECK_STR(resolved("RAM:", "/foo"), "RAM:foo");
     CHECK_STR(resolved("RAM:", "/"), "RAM:");
     CHECK_STR(resolved("DH0:", "/Docs/x"), "DH0:Docs/x");
 
-    /* A root written with a trailing slash must not produce a doubled one:
-       "a//b" is a's PARENT's b here, not "a/b". */
+    /* A root written with a trailing slash must not produce a doubled one.
+       "a//b" is a's parent's b here, not "a/b". */
     CHECK_STR(resolved("Work:Public/", "/x"), "Work:Public/x");
 
     /* Query strings and fragments are not part of the path. */
     CHECK_STR(resolved("RAM:", "/foo?bar=1"), "RAM:foo");
     CHECK_STR(resolved("RAM:", "/foo#frag"), "RAM:foo");
 
-    /* The absolute form, which a proxy-aware client may send. */
+    /* The absolute form, which a proxy-aware client can send. */
     CHECK_STR(resolved("RAM:", "http://amiga.local/foo"), "RAM:foo");
     CHECK_STR(resolved("RAM:", "http://amiga.local:8080/foo"), "RAM:foo");
     CHECK_STR(resolved("RAM:", "http://amiga.local"), "RAM:");
 
-    /* Percent-decoding of the things AmigaOS file names are actually full of:
-       spaces, brackets and exclamation marks. */
+    /* Percent-decoding of what AmigaOS file names are full of: spaces,
+       brackets and exclamation marks. */
     CHECK_STR(resolved("RAM:", "/My%20File.txt"), "RAM:My File.txt");
     CHECK_STR(resolved("RAM:", "/Kickstart%20%5B!%5D.rom"),
               "RAM:Kickstart [!].rom");
@@ -132,9 +130,9 @@ static void test_device_escape(void)
     printf("the colon, an AmigaOS device reference\n");
 
     /*
-     * Every one of these resolves to a real place on a real Amiga, and not
-     * one of them contains a "..".  This is the case the brief was written
-     * around: a Unix server ported to this machine refuses none of them.
+     * Every one of these resolves to a real place on a real Amiga, and not one
+     * of them contains a "..".  A Unix server ported to this machine refuses
+     * none of them.
      */
     CHECK(refused("/RAM:foo") == HTTP_PATH_DEVICE);
     CHECK(refused("/DH0:") == HTTP_PATH_DEVICE);
@@ -143,7 +141,7 @@ static void test_device_escape(void)
     CHECK(refused("/Docs/RAM:secret") == HTTP_PATH_DEVICE);
     CHECK(refused("/Docs/DH0:/x") == HTTP_PATH_DEVICE);
 
-    /* A colon anywhere in a segment, not only at its end, "a:b" is still a
+    /* A colon anywhere in a segment, not only at its end.  "a:b" is still a
        device reference to AmigaDOS. */
     CHECK(refused("/a:b") == HTTP_PATH_DEVICE);
     CHECK(refused("/x/a:b/y") == HTTP_PATH_DEVICE);
@@ -172,16 +170,16 @@ static void test_parent_escape(void)
     CHECK(refused("/.%2e/secret") == HTTP_PATH_PARENT);
 
     /*
-     * The doubly-awkward one: an encoded SEPARATOR next to an encoded parent.
-     * Decoding first turns %2F into a real separator, which can only ever
-     * create more segments, and every segment is checked, so the ".." it was
-     * hiding is found rather than smuggled through as one long name.
+     * An encoded separator next to an encoded parent.  Decoding first turns
+     * %2F into a real separator, which can only ever create more segments, and
+     * every segment is checked, so the ".." it was hiding is found rather than
+     * passed through as one long name.
      */
     CHECK(refused("/a%2F..%2Fsecret") == HTTP_PATH_PARENT);
     CHECK(refused("/..%2Fsecret") == HTTP_PATH_PARENT);
     CHECK(refused("/%2e%2e%2f%2e%2e%2fsecret") == HTTP_PATH_PARENT);
 
-    /* Double encoding is NOT decoded twice: "%252E" is the four characters
+    /* Double encoding is not decoded twice.  "%252E" is the four characters
        %2E, which is a legal file name and not a parent reference. */
     CHECK_STR(resolved("RAM:", "/%252E%252E"), "RAM:%2E%2E");
 
@@ -218,7 +216,7 @@ static void test_malformed(void)
     CHECK(refused("/a\\b") == HTTP_PATH_BACKSLASH);
     CHECK(refused("/a%5Cb") == HTTP_PATH_BACKSLASH);
 
-    /* Bounded: a client cannot make the server walk, and cannot make it build
+    /* Bounded.  A client cannot make the server walk, and cannot make it build
        a path longer than AmigaDOS carries. */
     {
         char deep[HTTP_URL_MAX];
@@ -273,7 +271,7 @@ static void test_fields(void)
     CHECK_STR(p.name, "x.txt");
     CHECK(p.trailing_slash == 0);
 
-    /* The URL is the normalised one, not the one that arrived: it is what the
+    /* The URL is the normalised one, not the one that arrived.  It is what the
        multistatus hrefs are built from, and a href that disagrees with the URL
        the client asked about is where a WebDAV client gives up. */
     CHECK(http_path_resolve("RAM:", "/a//b/./c", &p) == HTTP_PATH_OK);
@@ -287,8 +285,8 @@ static void test_fields(void)
 /* ------------------------------------------------- what a write relies on */
 
 /*
- * The document root itself is the one resource a client may not replace or
- * remove, and `segments == 0` is the ONLY thing that says a path is it.  Every
+ * The document root itself is the one resource a client cannot replace or
+ * remove, and `segments == 0` is the only thing that says a path is it.  Every
  * spelling of a root has to agree, because a root written with a trailing
  * slash that came back with one segment would make the drawer deletable.
  */
@@ -306,8 +304,8 @@ static void test_root_is_identifiable(void)
     CHECK(p.segments == 0);
     CHECK(http_path_resolve("RAM:", "", &p) != HTTP_PATH_OK);
 
-    /* And the ways a client might try to say "the root" with something in it
-       that collapses to nothing. */
+    /* And the ways a client can name the root with something in it that
+       collapses to nothing. */
     CHECK(http_path_resolve("Work:Public", "//", &p) == HTTP_PATH_OK);
     CHECK(p.segments == 0);
     CHECK(http_path_resolve("Work:Public", "/./", &p) == HTTP_PATH_OK);
@@ -325,11 +323,11 @@ static void test_root_is_identifiable(void)
 }
 
 /*
- * COPY and MOVE take the other end of the operation in a header rather than
- * on the request line, and it is an absolute URI.  It goes through this same
- * function, and these are the shapes clients send, a Destination given its
- * own decoder is exactly the mistake this file exists to make impossible, so
- * every escape is asserted here too and not only on the request line.
+ * COPY and MOVE take the other end of the operation in a header rather than on
+ * the request line, and it is an absolute URI.  It goes through this same
+ * function, and these are the shapes clients send.  A Destination given its
+ * own decoder is the mistake this file exists to make impossible, so every
+ * escape is asserted here too and not only on the request line.
  */
 static void test_destination_forms(void)
 {
@@ -349,7 +347,7 @@ static void test_destination_forms(void)
               "Work:Public/My File.txt");
 
     /* A collection destination is written with a trailing slash and must
-       resolve to the same place as one without: they are one drawer, and a
+       resolve to the same place as one without.  They are one drawer, and a
        MOVE that made two of them would lose the contents of one. */
     CHECK_STR(resolved("Work:Public", "http://amiga.local/Docs/"),
               "Work:Public/Docs");
@@ -383,8 +381,8 @@ static void test_destination_forms(void)
 
 /*
  * What every walk and every join downstream assumes about a resolved path.
- * These are cheap to assert and expensive to discover: a path that ended in a
- * separator would make the join produce "a//b", which is a's PARENT's b.
+ * These are cheap to assert and expensive to discover.  A path that ended in a
+ * separator would make the join produce "a//b", which is a's parent's b.
  */
 static void test_resolved_shape(void)
 {
@@ -419,8 +417,8 @@ static void test_resolved_shape(void)
             n = strlen(p.path);
             CHECK(n > 0);
 
-            /* No doubled separator anywhere: on AmigaOS that means the
-               parent, so one here walks UP out of the document root. */
+            /* No doubled separator anywhere.  On AmigaOS that means the
+               parent, so one here walks up out of the document root. */
             for (i = 1; i < n; i++)
             {
                 if (p.path[i] == '/' && p.path[i - 1] == '/')
@@ -450,8 +448,8 @@ static void test_resolved_shape(void)
 
 /*
  * A name longer than a FileInfoBlock carries is refused rather than cut down.
- * Truncating would be worse than refusing: two different long names would
- * become one, and a PUT of the second would silently overwrite the first.
+ * Truncating would make two different long names into one, and a PUT of the
+ * second would silently overwrite the first.
  */
 static void test_long_name_refused(void)
 {
@@ -467,8 +465,8 @@ static void test_long_name_refused(void)
 
     CHECK(refused(target) == HTTP_PATH_TOO_LONG);
 
-    /* And one that just fits still resolves, so the limit is the limit and
-       not an off-by-one that costs a legal name. */
+    /* And one that just fits still resolves, so the limit is not an
+       off-by-one that costs a legal name. */
     target[HTTP_NAME_MAX - 1] = '\0';
     CHECK(refused(target) == HTTP_PATH_OK);
 }
@@ -494,7 +492,7 @@ static void test_root_trimmed(void)
     http_path_root("Work:Public", out, sizeof(out));
     CHECK(strcmp(out, "Work:Public") == 0);
 
-    /* A device or assign keeps its colon; "RAM" is not "RAM:". */
+    /* A device or assign keeps its colon.  "RAM" is not "RAM:". */
     http_path_root("RAM:", out, sizeof(out));
     CHECK(strcmp(out, "RAM:") == 0);
 
@@ -550,7 +548,7 @@ static void test_utf8_trim(void)
     http_utf8_trim(text);
     CHECK_STR(text, "");
 
-    /* Complete sequences are left alone: two, three and four bytes. */
+    /* Complete sequences are left alone, at two, three and four bytes. */
     strcpy(text, "Bj\xc3\xb6rn");
     http_utf8_trim(text);
     CHECK_STR(text, "Bj\xc3\xb6rn");
@@ -608,8 +606,8 @@ static void test_join(void)
     CHECK_STR(path, "Work:Public/Docs/readme.txt");
 
     /* A device root already carries its separator.  "RAM:/foo" is the root
-       DIRECTORY of the volume and not the drawer, which is a different
-       place, and "RAM://foo" is somewhere else again. */
+       directory of the volume and not the drawer, which is a different place,
+       and "RAM://foo" is somewhere else again. */
     strcpy(path, "RAM:");
     CHECK(http_path_join(path, sizeof(path), "foo") == 1);
     CHECK_STR(path, "RAM:foo");
@@ -618,7 +616,7 @@ static void test_join(void)
     CHECK(http_path_join(path, sizeof(path), "x") == 1);
     CHECK_STR(path, "Work:Public/x");
 
-    /* Names AmigaOS filenames really contain. */
+    /* Names AmigaOS file names contain. */
     strcpy(path, "RAM:");
     CHECK(http_path_join(path, sizeof(path), "My File.txt") == 1);
     CHECK_STR(path, "RAM:My File.txt");
@@ -641,8 +639,8 @@ static void test_join(void)
     CHECK(http_path_join(path, sizeof(path), "") == 0);
     CHECK_STR(path, "RAM:Docs");
 
-    /* It does not fit, so it does not happen, and the path is still the
-       path it was, because the walk carries on using it. */
+    /* It does not fit, so it does not happen, and the path is unchanged,
+       because the walk carries on using it. */
     {
         char tiny[16];
 
@@ -667,7 +665,7 @@ static void test_up(void)
     CHECK_STR(path, "Work:");
 
     /* A device reference has nothing above it, and going up from it for ever
-       must not empty the string, a walk that did would then delete
+       must not empty the string.  A walk that emptied it would then delete
        whatever the current directory happens to be. */
     http_path_up(path);
     CHECK_STR(path, "Work:");
@@ -744,7 +742,7 @@ static void test_escaping(void)
     CHECK(http_url_escape("/Docs/x.txt", out, sizeof(out)) > 0);
     CHECK_STR(out, "/Docs/x.txt");
 
-    /* The separator survives; everything a file name can hold does not. */
+    /* The separator survives.  Everything a file name can hold does not. */
     CHECK(http_url_escape("/My File.txt", out, sizeof(out)) > 0);
     CHECK_STR(out, "/My%20File.txt");
 
@@ -756,8 +754,8 @@ static void test_escaping(void)
 
     /*
      * Percent-encoding leaves nothing an XML parser reads as markup, which is
-     * why an href is escaped once and not twice.  If this ever stops being
-     * true the multistatus needs the second pass.
+     * why an href is escaped once and not twice.  If that stops being true,
+     * the multistatus needs the second pass.
      */
     CHECK(http_url_escape("/<a>&'\"", out, sizeof(out)) > 0);
     CHECK(strchr(out, '<') == NULL);
@@ -771,7 +769,7 @@ static void test_escaping(void)
     CHECK(http_xml_escape("<tag>", out, sizeof(out)) > 0);
     CHECK_STR(out, "&lt;tag&gt;");
 
-    /* Neither writes past the end; both say so by returning 0. */
+    /* Neither writes past the end, and both say so by returning 0. */
     {
         char tiny[4];
 

@@ -13,8 +13,8 @@
  *       build/cm/src/tools/AddNetInterface build/cm/src/tools/Online ... \
  *       src/tools/testdata/Devs
  *
- * With no stack linked in (the netstack_weak.c stubs) every tool should report
- * that the network stack is not running and exit with a sensible return code.
+ * With no stack linked in (the netstack_weak.c stubs) every tool reports that
+ * the network stack is not running and exits with a sensible return code.
  * That is what can be tested end to end before src/netstack exists.
  *
  * SPDX-License-Identifier: MIT
@@ -50,10 +50,10 @@ static const char version_tag[] __attribute__((used)) =
 
 /*
  * The command list can be staged as DH0:commands.txt, one command per line,
- * '#' and blank lines ignored. Staging different directories lets the harness
- * which can only start one executable with no arguments, exercise a
- * machine with no configuration, one with a broken configuration, and one whose
- * config names a device that is not there.
+ * '#' and blank lines ignored. Staging different directories lets the harness,
+ * which can only start one executable with no arguments, exercise a machine
+ * with no configuration, one with a broken configuration, and one whose
+ * configuration names a device that is not there.
  *
  * Two prefixes exist because SystemTagList() waits, while a listener and the
  * thing that connects to it must run at the same time. Without them no staged
@@ -61,8 +61,8 @@ static const char version_tag[] __attribute__((used)) =
  *
  *   &<command>   run it and carry straight on, SYS_Asynch, which is what
  *                the Shell's own `Run` does. Its output must be redirected by
- *                the line itself; a detached process shares no console with
- *                this one and its Output() is NIL:.
+ *                the line itself, because a detached process shares no console
+ *                with this one and its Output() is NIL:.
  *   wait <secs>  Delay(), so the next line starts after the background one
  *                has had time to reach its accept().
  *
@@ -74,7 +74,7 @@ static const char version_tag[] __attribute__((used)) =
  *
  * `until` exists because `wait` is a guess.  A router advertisement, a lease
  * or a listener arrives on its own schedule, and a delay long enough for this
- * machine is short on a slower one and wasted on a faster one; the harness
+ * machine is short on a slower one and wasted on a faster one.  The harness
  * that made every IPv6 arm `blocked` was sampling at a fixed moment.  Each
  * attempt is a command of its own in the transcript, header and rc and all,
  * so what was polled and how long it took are both readable afterwards.
@@ -82,7 +82,7 @@ static const char version_tag[] __attribute__((used)) =
 #define COMMANDS    "DH0:commands.txt"
 /*
  * Truncation at this ceiling is silent, so it sits well above what any staged
- * list uses: a run that stops reading at line 40 looks like a set of commands
+ * list uses.  A run that stops reading at line 40 looks like a set of commands
  * that were never written.
  */
 #define MAX_COMMANDS    96
@@ -114,7 +114,7 @@ static const char *const commands[] =
     NULL
 };
 
-/* Storage for a staged command list; static, because a Shell command's stack
+/* Storage for a staged command list.  Static, because a Shell command's stack
    is 4K and this is 6K of it. */
 static char  script[MAX_COMMANDS][MAX_LINE];
 static ULONG script_count;
@@ -156,12 +156,6 @@ static ULONG load_script(void)
     return script_count;
 }
 
-/* Append a line to the report, opening and closing around every write so the
-   Shell's own >> redirection never fights us for the file position.
-
-   The argarray is cast to (APTR), not (CONST_APTR): NDK 3.2 and NDK 3.9 spell
-   VFPrintf's third parameter differently and only APTR converts to both.  See
-   the long note in src/tools/tool_util.c. */
 /*
  * Milliseconds between two DateStamps.  ds_Tick is fiftieths of a second, so
  * the resolution is 20 ms, which is fine for a stage measured in seconds and
@@ -176,6 +170,12 @@ static LONG elapsed_ms(const struct DateStamp *from, const struct DateStamp *to)
     return ((days * 1440L + mins) * 60L * 50L + ticks) * 20L;
 }
 
+/* Append a line to the report, opening and closing around every write so the
+   Shell's own >> redirection never competes for the file position.
+
+   The argarray is cast to (APTR), not (CONST_APTR).  NDK 3.2 and NDK 3.9 spell
+   VFPrintf's third parameter differently and only APTR converts to both.  See
+   the long note in src/tools/tool_util.c. */
 static void report(const char *fmt, LONG a, LONG b, LONG c)
 {
     BPTR fh = Open((CONST_STRPTR)REPORT, MODE_READWRITE);
@@ -270,11 +270,11 @@ static int run_command(const char *command)
     if (async)
     {
         /*
-         * A detached child cannot share this process's streams: System()
+         * A detached child cannot share this process's streams. System()
          * closes whatever it is given when the child ends, and closing the
          * Shell's own Output() out from under it is fatal. It gets a pair of
-         * NIL: handles of its own, and anything worth keeping is redirected
-         * by the line itself.
+         * NIL: handles of its own, and anything to be kept is redirected by
+         * the line itself.
          */
         BPTR in  = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
         BPTR out = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
@@ -287,7 +287,7 @@ static int run_command(const char *command)
 
         if (rc == -1)
         {
-            /* Nothing was started, so nothing will close them. */
+            /* Nothing was started, so nothing else closes them. */
             if (in != (BPTR)0)
                 Close(in);
             if (out != (BPTR)0)
@@ -447,8 +447,8 @@ static int run_until(const char *spec)
     while (*p == ' ')
         p++;
 
-    /* `-` is "exclude nothing", so that a plain condition needs no placeholder
-       of its own invention. */
+    /* `-` excludes nothing, so a plain condition needs no placeholder of its
+       own. */
     if (stop[0] == '-' && stop[1] == '\0')
         stop[0] = '\0';
 
@@ -499,8 +499,8 @@ int main(int argc, char **argv)
     (void)argc;
     (void)argv;
 
-    /* No "please insert volume DEVS:" requester is going to be answered on a
-       machine with nobody at the keyboard. */
+    /* No "please insert volume DEVS:" requester is answered on a machine with
+       nobody at the keyboard. */
     old_window = self->pr_WindowPtr;
     self->pr_WindowPtr = (APTR)-1;
 
@@ -557,7 +557,7 @@ int main(int argc, char **argv)
         }
 
         /* "until <secs> <needle> <not> <command>", the same idea without the
-           guess: it stops when the condition holds. */
+           guess.  It stops when the condition holds. */
         if ((command[0] == 'u' || command[0] == 'U') &&
             (command[1] == 'n' || command[1] == 'N') &&
             (command[2] == 't' || command[2] == 'T') &&

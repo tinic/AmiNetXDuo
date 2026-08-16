@@ -1,11 +1,11 @@
 /*
- * The tests for src/tools/iperfwire.c: the iperf 2 wire format, and the
+ * The tests for src/tools/iperfwire.c, the iperf 2 wire format and the
  * arithmetic that turns a byte count into a rate.
  *
  * Every number here was taken off iperf 2.2.1 rather than out of its source.
  * The report bytes in test_report_real() are a verbatim capture of what
- * `iperf -s -u` answered a 200-datagram run with, so if a field ever moves,
- * this fails rather than the tool quietly printing somebody else's number.
+ * `iperf -s -u` answered a 200-datagram run with, so a field that moves fails
+ * this rather than making the tool print somebody else's number.
  *
  *   cc -std=c11 -Wall -Wextra -Isrc/tools \
  *      src/tools/test/test_iperfwire.c src/tools/iperfwire.c -o test_iperfwire
@@ -51,7 +51,7 @@ static void test_pattern(void)
     CHECK(buf[0] == '7' && buf[1] == '8' && buf[2] == '9' && buf[3] == '0');
 
     /*
-     * The one that matters on the wire: an iperf 2 receiver reads the first
+     * The one that matters on the wire.  An iperf 2 receiver reads the first
      * four bytes of a TCP stream as a client_hdr and switches mode on the top
      * two bits.  "0123" must leave both clear or the far end parses a
      * negotiation that never happens.  A run whose payload began with an
@@ -77,7 +77,7 @@ static void test_datagram(void)
     memset(buf, 0xa5, sizeof(buf));
     iperf_dg_put(buf, 1, 0x6a7a4f03UL, 0x000eb333UL);
 
-    /* Big-endian, byte at a time, because a caller may place this at an odd
+    /* Big-endian, byte at a time, because a caller can place this at an odd
        offset and a 68000 traps on a misaligned load. */
     CHECK(buf[0] == 0x00 && buf[1] == 0x00 && buf[2] == 0x00 && buf[3] == 0x01);
     CHECK(buf[4] == 0x6a && buf[7] == 0x03);
@@ -88,8 +88,8 @@ static void test_datagram(void)
      * vendored nx_iperf.c: it writes the 12-byte header and leaves the rest of
      * the packet as whatever the pool buffer held, and an iperf 2.2 server
      * reads a client_hdr there.  With 0x20000000 set in that word the server
-     * enters trip-time mode, reports one datagram and drops the whole rest of
-     * the run -- reproduced against iperf 2.2.1 before this was written.
+     * enters trip-time mode, reports one datagram and drops the rest of the
+     * run.  Reproduced against iperf 2.2.1 before this was written.
      */
     for (i = IPERF_DG_LEN; i < IPERF_DG_TOTAL; i++)
         CHECK(buf[i] == 0);
@@ -144,7 +144,7 @@ static void test_report_roundtrip(void)
     CHECK(iperf_report_get(buf, 20, &out) == -1);
     CHECK(iperf_report_get(buf, 0, &out) == -1);
 
-    /* So is a datagram that is not a report: without the version bit this is
+    /* So is a datagram that is not a report.  Without the version bit this is
        somebody else's traffic on port 5001, not an answer. */
     buf[16] = 0x00;
     CHECK(iperf_report_get(buf, sizeof(buf), &out) == -1);
@@ -153,9 +153,9 @@ static void test_report_roundtrip(void)
 static void test_report_real(void)
 {
     /*
-     * Verbatim from iperf 2.2.1's answer to a 200-datagram, 295470-byte run
-     * on 2026-08-10.  Truncated after the fields this parses; the real
-     * datagram is 128 bytes and the rest is 2.2's own extensions.
+     * Verbatim from iperf 2.2.1's answer to a 200-datagram, 295470-byte run on
+     * 2026-08-10.  Truncated after the fields this parses.  The real datagram
+     * is 128 bytes and the rest is 2.2's own extensions.
      */
     static const unsigned char wire[56] = {
         0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
@@ -176,8 +176,8 @@ static void test_report_real(void)
 
     CHECK(iperf_report_get(wire, sizeof(wire), &out) == 0);
 
-    /* The flags word carries more than the version bit; only that bit decides
-       whether this is an answer. */
+    /* The flags word carries more than the version bit, and only that bit
+       decides whether this is an answer. */
     CHECK((out.flags & IPERF_HEADER_VERSION1) != 0);
     CHECK(out.flags == 0x88000000UL);
 
@@ -226,9 +226,9 @@ static void test_rate(void)
     /*
      * Past 4 GB the count is two words.  8 GB in 10 s is 6.87 Gbit/s, which
      * does not fit in the unsigned long this returns, so it saturates rather
-     * than wrapping to 2.58 Gbit/s.  No Amiga will reach it; a host running
-     * the same code over loopback does, and a wrapped figure there would be
-     * read as a regression.
+     * than wrapping to 2.58 Gbit/s.  No Amiga reaches it.  A host running the
+     * same code over loopback does, and a wrapped figure there would be read
+     * as a regression.
      */
     CHECK(iperf_bits_per_sec(2, 0, 10000UL) == 0xffffffffUL);
 
@@ -281,8 +281,8 @@ static void test_format(void)
     iperf_format_rate(buf, sizeof(buf), 0UL);
     CHECK(strcmp(buf, "0.00 bit/s") == 0);
 
-    /* The rounding carry: .995 and up must move the whole part, not print
-       "2.100". */
+    /* The rounding carry.  .995 and up must move the whole part rather than
+       print "2.100". */
     iperf_format_rate(buf, sizeof(buf), 1999995UL);
     CHECK(strcmp(buf, "2.00 Mbit/s") == 0);
 
@@ -316,17 +316,16 @@ static void test_limits(void)
     /*
      * The gate.  A run with neither a duration nor a size would go until
      * something stopped it, printing progress the whole time, and a caller
-     * that redirected that to a file would have an unbounded writer.  That is
-     * not hypothetical: a wedged iperf 2.2.1 wrote 72 GB of interval reports
-     * into a shell redirect on the test host while this was being written.
-     * Ours cannot be asked to.
+     * that redirected that to a file would have an unbounded writer.  A wedged
+     * iperf 2.2.1 wrote 72 GB of interval reports into a shell redirect on the
+     * test host while this was being written.  Ours cannot be asked to.
      */
     CHECK(iperf_limits_check(0, 0, 4096, 5001) != NULL);
     CHECK(iperf_limits_check(IPERF_MAX_SECONDS + 1, 0, 4096, 5001) != NULL);
     CHECK(iperf_limits_check(0x7fffffffUL, 0, 4096, 5001) != NULL);
 
-    /* And the two ways of saying when to stop are exclusive, so neither can
-       be quietly ignored in favour of the other. */
+    /* And the two ways of saying when to stop are exclusive, so neither is
+       quietly ignored in favour of the other. */
     CHECK(iperf_limits_check(10, 1024, 4096, 5001) != NULL);
 
     /* A byte target is bounded too. */
@@ -340,8 +339,8 @@ static void test_limits(void)
     CHECK(iperf_limits_check(10, 0, IPERF_BUF_MAX + 1, 5001) != NULL);
 
     /*
-     * The output budget follows from the ceiling: one progress line a second
-     * for at most an hour.  If the ceiling ever moves, this says so.
+     * The output budget follows from the ceiling, at one progress line a
+     * second for at most an hour.  A ceiling that moves fails this.
      */
     CHECK(IPERF_MAX_LINES == IPERF_MAX_SECONDS);
     CHECK(IPERF_MAX_SECONDS <= 3600UL);
@@ -354,7 +353,7 @@ static void test_slice_budget(void)
     /*
      * Everything else here decides it has finished by comparing two clock
      * readings, so a clock that stops advancing is a run that never ends.
-     * That is the failure the host-side iperf 2.2.1 had: a timing call failed
+     * That is the failure the host-side iperf 2.2.1 had.  A timing call failed
      * and it spun for seventeen hours.  This is the second bound, and it
      * counts slices instead of milliseconds.
      */
@@ -367,9 +366,9 @@ static void test_slice_budget(void)
     CHECK(iperf_slice_budget(IPERF_MAX_SECONDS, 0, 4096)
           > iperf_slice_budget(600, 0, 4096));
 
-    /* Generous by a wide margin: a slice does at most 64 sends or waits 20 ms,
-       so a real second is a few hundred slices.  This must never fire on a
-       slow machine, only on a stopped clock. */
+    /* Generous by a wide margin.  A slice does at most 64 sends or waits
+       20 ms, so a real second is a few hundred slices.  This must never fire
+       on a slow machine, only on a stopped clock. */
     CHECK(iperf_slice_budget(10, 0, 4096) > 10UL * 1000UL);
 
     /* A byte target is bounded by sends rather than by seconds, and still

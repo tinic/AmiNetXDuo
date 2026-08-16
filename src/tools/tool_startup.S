@@ -5,9 +5,9 @@
 | allocate through AllocVec(), so the only thing they ever wanted from a C
 | runtime is a Process, a DOSBase and a call to main().
 |
-| WHAT THE TOOLCHAIN crt0 COSTS, measured on the pinned toolchain over all 28
+| What the toolchain crt0 costs, measured on the pinned toolchain over all 28
 | shipped commands.  Its ____start walks an INIT_LIST whose entries are
-| __initlibraries and __initcpp; __initlibraries opens every library named in
+| __initlibraries and __initcpp.  __initlibraries opens every library named in
 | LIB_LIST, and to decide between OpenLibrary() and OpenResource() it asks
 | strstr(name, ".resource").  LIB_LIST has exactly one entry, dos.library,
 | put there by libc's __dosbase.o.  That one strstr() call is the whole reason
@@ -23,20 +23,20 @@
 | memchr, memcmp, strcat, strcpy or strlen.  This file is about 150 bytes and
 | does the same job.
 |
-| It also settles the question toolchain-side: the LOCAL (non-pinned) 15.2.0
+| It also settles the question toolchain-side.  The local (non-pinned) 15.2.0
 | build ships a crt0 that parses the command line into argv through libc's
 | __nocommandline.o, which calls calloc, which reaches _impure_ptr, which
 | drags in findfp and the whole stdio close-down machinery -- another 7.5 KB
 | that nothing calls.  Under -nostartfiles neither toolchain can add anything.
 |
-| WHAT MAIN SEES IS UNCHANGED.  The toolchain crt0 passes argc = 1 and
+| What main() sees is unchanged.  The toolchain crt0 passes argc = 1 and
 | argv = the raw command line from a Shell, argc = 0 and argv = the WBStartup
-| message from Workbench; it never builds an argv array on the pinned
+| message from Workbench.  It never builds an argv array on the pinned
 | toolchain either.  This does exactly the same, which is what
 | tool_from_workbench() reads and all any command here looks at.
 |
-| 68000 CLEAN.  Every instruction below is in the original 68000 set and none
-| was dropped from the 68060, so one file serves all four CPU configurations.
+| Every instruction below is in the original 68000 set and none was dropped
+| from the 68060, so one file serves all four CPU configurations.
 |
 | SPDX-License-Identifier: MIT
 
@@ -62,7 +62,7 @@ pr_CLI          = 172
 
 RETURN_FAIL     = 20
 
-| THE ENTRY MUST BE THE FIRST BYTE OF THE FIRST HUNK: AmigaOS jumps to the
+| The entry must be the first byte of the first hunk.  AmigaOS jumps to the
 | start of what LoadSeg() loaded, and there is no ENTRY() in the linker script
 | to say otherwise.  aminetxduo_add_tool() names this file first in
 | add_executable() so its .text is the first input to *(.text), and
@@ -84,10 +84,10 @@ _____start:
         tst.l   a0@(pr_CLI)
         bne.s   .Lopendos
 
-| Workbench.  Nothing here has a GUI, so the only thing this path owes anybody
-| is the WBStartup message: taking it and replying it is what lets Workbench
-| unload the command again.  main() is still called, sees argc == 0 and says
-| through tool_from_workbench() that this is a Shell command.
+| Workbench.  Nothing here has a GUI, so this path only has to take the
+| WBStartup message and reply to it, which is what lets Workbench unload the
+| command again.  main() is still called, sees argc == 0 and says through
+| tool_from_workbench() that this is a Shell command.
         lea     a0@(pr_MsgPort),a0
         movea.l a0,a2
         jsr     a6@(LVOWaitPort)
@@ -120,7 +120,7 @@ _____start:
         jsr     _exit
 
 | exit(int).  Reached by falling out of main() and by any command that calls
-| it; it abandons the stack rather than returning through its callers, which
+| it.  It abandons the stack rather than returning through its callers, which
 | is what makes the second case work.
 _exit:
 __exit:

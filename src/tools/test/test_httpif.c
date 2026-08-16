@@ -2,19 +2,17 @@
  * The tests for src/tools/httpif.c, the If: header, which decides whether a
  * write goes ahead against somebody else's lock.
  *
- * WHY THIS IS A TEST AND NOT A REVIEW
+ * The failure this file exists to catch is silent in both directions.  An
+ * evaluator that always says yes answers 201 to a request that named a lock
+ * token nobody is holding, which is what the server did before this file
+ * existed and which no client reports.  One that says no too often refuses a
+ * client that was entitled to write, and that shows up as a mount that cannot
+ * save.  Neither is visible in a transcript without knowing the correct
+ * answer.
  *
- *   The failure this file exists to catch is silent in both directions.  An
- *   evaluator that always says yes answers 201 to a request that named a lock
- *   token nobody is holding, which is what the server did before this file
- *   existed and which no client reports; one that says no too often refuses a
- *   client that was entitled to write, and that shows up as a mount that
- *   cannot save.  Neither is visible in a transcript without knowing what the
- *   answer should have been.
- *
- *   So the shapes are written down here, one case each: lists are OR'd, the
- *   conditions inside one are AND'd, Not inverts a condition and not a list,
- *   and a Resource-Tag redirects the ones after it at another resource.
+ * So the shapes are written down here, one case each: lists are OR'd, the
+ * conditions inside one are AND'd, Not inverts a condition and not a list, and
+ * a Resource-Tag redirects the ones after it at another resource.
  *
  *   cc -std=c11 -Wall -Wextra -Isrc/tools \
  *      src/tools/test/test_httpif.c src/tools/httpif.c -o test_httpif
@@ -42,9 +40,9 @@ static int checks;
 /* ------------------------------------------------------------- the world --- */
 
 /*
- * Two resources.  The untagged one is the request target, and it is locked
- * and has a tag; "/other" is locked with a different token.  Anything else is
- * a resource this server knows nothing about.
+ * Two resources.  The untagged one is the request target, and it is locked and
+ * has a tag.  "/other" is locked with a different token.  Anything else is a
+ * resource this server knows nothing about.
  */
 #define TOKEN  "opaquelocktoken:aabbccdd"
 #define OTHER  "opaquelocktoken:11223344"
@@ -74,7 +72,8 @@ static void world(void *ctx, const char *tag, HttpIfState *out)
     /* Not ours.  Both fields stay empty, which is a list that cannot hold. */
 }
 
-/* A resource with no lock and no tag: the null resource a LOCK creates. */
+/* A resource with no lock and no tag, which is the null resource a LOCK
+   creates. */
 static void nothing(void *ctx, const char *tag, HttpIfState *out)
 {
     (void)ctx;
@@ -98,9 +97,9 @@ static void test_state_tokens(void)
     CHECK(eval("(<" TOKEN ">)") == 1);
 
     /*
-     * The measured failure this file exists for: a token nobody is holding
-     * used to be answered as though the condition held, so a PUT behind it
-     * was a 201 where it must be a 412.
+     * The measured failure this file exists for.  A token nobody is holding
+     * used to be answered as though the condition held, so a PUT behind it was
+     * a 201 where it must be a 412.
      */
     CHECK(eval("(<opaquelocktoken:deadbeef>)") == 0);
 
@@ -117,15 +116,15 @@ static void test_not(void)
 {
     printf("Not\n");
 
-    /* The other measured failure: Not against a token that IS held has to be
+    /* The other measured failure.  Not against a token that is held has to be
        false, and used to be true along with everything else. */
     CHECK(eval("(Not <" TOKEN ">)") == 0);
 
     /* And true against one that is not. */
     CHECK(eval("(Not <opaquelocktoken:deadbeef>)") == 1);
 
-    /* Not applies to the condition after it and not to the rest of the
-       list: the second condition here still has to hold on its own. */
+    /* Not applies to the condition after it and not to the rest of the list,
+       so the second condition here still has to hold on its own. */
     CHECK(eval("(Not <opaquelocktoken:deadbeef> <" TOKEN ">)") == 1);
     CHECK(eval("(Not <opaquelocktoken:deadbeef> <opaquelocktoken:00>)") == 0);
 
@@ -142,7 +141,7 @@ static void test_entity_tags(void)
     CHECK(eval("(Not [" ETAG "])") == 0);
     CHECK(eval("(Not [\"9999-1-1-1\"])") == 1);
 
-    /* A weak tag is compared as the strong one it wraps: this server emits
+    /* A weak tag is compared as the strong one it wraps.  This server emits
        none, so a client asking about one means the resource. */
     CHECK(eval("([W/" ETAG "])") == 1);
 
@@ -194,8 +193,8 @@ static void test_tagged_lists(void)
     CHECK(eval("</other> (<" TOKEN ">) (<" OTHER ">)") == 1);
     CHECK(lookups == 1);
 
-    /* But a new tag is a new resource and a new lookup, even for the same
-       name, the first list here fails, so the second is reached. */
+    /* A new tag is a new resource and a new lookup, even for the same name.
+       The first list here fails, so the second is reached. */
     lookups = 0;
     CHECK(eval("</other> (<" TOKEN ">) </other> (<" OTHER ">)") == 1);
     CHECK(lookups == 2);
@@ -221,7 +220,7 @@ static void test_malformed(void)
        even when a condition beside it does. */
     CHECK(eval("(rubbish <" TOKEN ">)") == 0);
 
-    /* Junk between lists is skipped: the lists still speak for themselves. */
+    /* Junk between lists is skipped, and the lists still stand on their own. */
     CHECK(eval("rubbish (<" TOKEN ">)") == 1);
 
     /* Whitespace anywhere it is allowed. */
