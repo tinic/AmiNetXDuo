@@ -1053,11 +1053,17 @@ static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
  * the vertical blank -- the one clock a device can have for free.
  *
  * WHY IT IS NOT OPTIONAL.  netdev_tx_pump() only runs while
- * txb_inuse < txb_cnt, and only dp8390_init() clears txb_inuse.  A single lost
- * or never-delivered transmit completion therefore wedges the transmitter for
- * good: every later CMD_WRITE queues on nu_Writes and is never replied to, and
- * the caller sits in WaitIO() forever.  Nothing else in the driver can notice,
- * because noticing requires a clock the card does not drive.
+ * txb_inuse < txb_cnt, and only a core's own re-init clears txb_inuse.  A
+ * single lost or never-delivered transmit completion therefore wedges the
+ * transmitter for good: every later CMD_WRITE queues on nu_Writes and is never
+ * replied to, and the caller sits in WaitIO() forever.  Nothing else in the
+ * driver can notice, because noticing requires a clock the card does not drive.
+ *
+ * The recovery goes through ops->reset rather than a named core.  This tick is
+ * armed for every unit, so calling dp8390_reset() here wrote DP8390 register
+ * numbers into whatever chip the unit actually had -- on an A2065 or an
+ * Ariadne that is a LANCE, and the result is an undefined chip, not a
+ * recovered one.
  *
  * Disable() rather than a software interrupt: the vertical blank is INT3 and
  * the card is INT2, so this can preempt the card's own server and must not
@@ -1079,7 +1085,8 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
         unit->nu_TxStall = 0;
         unit->nu_TxWedges++;
         unit->nu_Nic.tx_errors++;
-        dp8390_reset(&unit->nu_Nic);
+        if (unit->nu_Nic.ops->reset != NULL)
+            unit->nu_Nic.ops->reset(&unit->nu_Nic);
         netdev_tx_pump(unit);
     }
 

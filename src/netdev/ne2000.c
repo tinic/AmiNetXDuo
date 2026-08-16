@@ -742,5 +742,6 @@ const struct NetdevNicOps netdev_nic_ne2000 =
     dp8390_halt,
     dp8390_tx,
     dp8390_setfilter,
-    dp8390_intr
+    dp8390_intr,
+    dp8390_reset
 };
