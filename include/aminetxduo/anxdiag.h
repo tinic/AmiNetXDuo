@@ -166,6 +166,20 @@ extern "C" {
 #define ANXDIAG_PC_NOROW       55   /* the CIS named a card no row drives, and
                                        there is no fallback row either        */
 
+/* --- the ISA Plug and Play bridge, netdev_isapnp.c --------------------- */
+#define ANXDIAG_PNP_VENDOR     60   /* isolation serial identifier bytes 0..3,
+                                       the vendor and device ID              */
+#define ANXDIAG_PNP_SERIAL     61   /* bytes 4..7, the card's serial number  */
+#define ANXDIAG_PNP_CSUM       62   /* byte 8 << 8 | the checksum computed
+                                       over the eight before it              */
+#define ANXDIAG_PNP_IO         63   /* the ISA port the logical device was
+                                       told to decode at                     */
+#define ANXDIAG_PNP_SETTLE     64   /* 2 ms rounds waited after Activate     */
+#define ANXDIAG_PNP_CR         65   /* CR readback after it; value = byte    */
+#define ANXDIAG_PNP_SILENT     66   /* nothing answered; value = the register
+                                       base it was configured for            */
+#define ANXDIAG_PNP_OK         67   /* configured; value = the register base */
+
 /* A tuple or a value that was not there at all, rather than one that was
    there and zero.  Chosen so it cannot be a real MANFID or subtuple. */
 #define ANXDIAG_ABSENT      0xfffffffeUL

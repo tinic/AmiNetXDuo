@@ -48,30 +48,69 @@ static const ULONG xsurf500_regmap[32] =
     0x40e0, 0x42e4, 0x4ce0, 0x4ee4, 0x60f0, 0x62f4, 0x6cf0, 0x6ef4
 };
 
+/*
+ * THE X-SURF'S ISA PLUG AND PLAY BRIDGE.
+ *
+ * The board is a Zorro II card carrying an RTL8019AS on a private ISA bus.
+ * Its 4 KB window at board+$8000 is that bus's I/O space at the row's stride
+ * of 2, so it reaches ISA ports $000..$7ff and no further; port bit 11 comes
+ * out of a write-only latch at board+$7e, bit 7.  That is why the PnP ADDRESS
+ * port ($279) and WRITE_DATA port ($a79) are one board address, $84f2, with
+ * the latch deciding which of the two it is.
+ *
+ * Derived from Amiberry's model of the card, qemuvga/ne2000.cpp: the XSURF arm
+ * of toariadne2() computes `isa_addr = (flags ? 0x1000 : 0) + (addr - 0x8000)`
+ * and compares it against `0x279 * 2` and `0xa79 * 2`, and the flag is set from
+ * bit 7 of a byte written where `(addr & 0x80ff) == 0x007e`.  The chip's
+ * registers appear only while `pnp.activated`, at `io_port * 2` in the same
+ * window, 32 ports wide -- which is the whole NE2000 file, NIC and ASIC.
+ *
+ * One logical device, so LDN 0.
+ */
+static const NetdevIsaPnp xsurf_pnp =
+{
+    0x8000,     /* the ISA I/O window                                        */
+    0x007e,     /* the latch carrying ISA A11                                */
+    0x80,       /* its bit 7                                                 */
+    0,          /* logical device 0                                          */
+    32          /* ports: the NE2000 register file, NIC block plus ASIC      */
+};
+
 const NetdevCard netdev_cards[] =
 {
     /* name        manid prodid reg_off stride wide_off
        chip                bps         ax  mem_off mem_size prom_off
-       bus               base      odd_off  swap  regmap  oui */
+       bus               base      odd_off  swap  regmap  oui  pnp */
     { "xsurf100",  4626,   100, 0x0800,     4, 0x8880,
       NETDEV_CHIP_NE2000, 100000000UL, 1,       0,       0,       0,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0 },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL },
 
+    /*
+     * reg_off IS THE ONE PLACE THE REGISTER BASE IS WRITTEN DOWN, still.  The
+     * chip decodes nothing until netdev_isapnp.c has configured it, and what
+     * that file programs is derived from this number rather than carried
+     * beside it: ISA port = (reg_off - pnp->io_win) / stride, which is
+     * ($8600 - $8000) / 2 = $300, the port if_ne_xsurf.c names.  The
+     * alternative -- letting the PnP phase report where it put the chip and
+     * writing that back into the row -- would make the register base a
+     * runtime value on one row out of ten and leave every reader of this table
+     * unable to say where the card is.
+     */
     { "xsurf",     4626,    23, 0x8600,     2,      0,
       NETDEV_CHIP_NE2000,  10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0 },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, &xsurf_pnp },
 
     { "ariadne2",  2167,   202, 0x0600,     2,      0,
       NETDEV_CHIP_NE2000,  10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0 },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL },
 
     { "hydra",     2121,     1, 0xffe1,     2,      0,
       NETDEV_CHIP_ED,      10000000UL, 0,       0,  0x4000,  0xffc0,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0 },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL },
 
     { "lanrover",  1023,   254, 0x0001,     2,      0,
       NETDEV_CHIP_ED,      10000000UL, 0,  0x8000,  0x8000,  0x0100,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0 },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL },
 
     /*
      * The two LANCE boards.  Registers are RDP then RAP, a word apart, and
@@ -82,11 +121,11 @@ const NetdevCard netdev_cards[] =
      */
     { "a2065",      514,   112, 0x4000,     2,      0,
       NETDEV_CHIP_LANCE,   10000000UL, 0,  0x8000,  0x8000,  0x0000,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0x0080 },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0x0080, NULL },
 
     { "ariadne",   2167,   201, 0x0370,     2,      0,
       NETDEV_CHIP_LANCE,   10000000UL, 0,  0x8000,  0x8000,  0x0000,
-      NETDEV_BUS_ZORRO, 0, 0, 1, NULL, 0x0060 },
+      NETDEV_BUS_ZORRO, 0, 0, 1, NULL, 0x0060, NULL },
 
     /*
      * The A1200/A600 PCMCIA slot.  No autoconfig record and no board base:
@@ -97,7 +136,7 @@ const NetdevCard netdev_cards[] =
      */
     { "pcmcia",       0,     0, 0x0300,     1,      0,
       NETDEV_CHIP_NE2000,  10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0 },
+      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL },
     /*
      * The X-Surf 500, on an ACA500 or ACA500plus.  An AX88796B -- the same
      * family as the X-Surf 100 -- at a fixed $EE0000 with no autoconfig
@@ -112,7 +151,7 @@ const NetdevCard netdev_cards[] =
      */
     { "xsurf500",     0,     0, 0x0000,     1, 0x8440,
       NETDEV_CHIP_NE2000, 100000000UL, 1,       0,       0,       0,
-      NETDEV_BUS_FIXED, 0x00ee0000UL, 0, 0, xsurf500_regmap, 0 },
+      NETDEV_BUS_FIXED, 0x00ee0000UL, 0, 0, xsurf500_regmap, 0, NULL },
 
     /*
      * The 3Com EtherLink III PCMCIA card, a 3C589 of any revision.  Same slot
@@ -146,7 +185,7 @@ const NetdevCard netdev_cards[] =
      */
     { "3c589",   0x0101, 0x0589, 0x0300,     1,      0,
       NETDEV_CHIP_EL3,     10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0 },
+      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL },
 };
 
 const UWORD netdev_card_count =

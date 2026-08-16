@@ -1402,6 +1402,23 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
     netdev_diag_note(ANXDIAG_CHIP, netdev_diag_card(card), (ULONG)card->chip);
 
     nd_tracex("anx: board ", (ULONG)board);
+
+    /*
+     * A chip behind an ISA Plug and Play bridge decodes nothing until it has
+     * been configured, so on the one row that has one this runs before attach
+     * and attach then has a chip to find.  Every other row returns TRUE
+     * without touching the board.
+     *
+     * A refusal is not passed on to attach.  There is no register file to
+     * detect, so ne2000.c would read a floating bus and file the answer as a
+     * command register that read $ff -- true, and three steps downstream of
+     * the step that failed.  netdev_isapnp.c has already recorded which.
+     */
+    if (!netdev_isapnp_configure(card, board))
+    {
+        nd_trace("anx: isapnp failed\r\n");
+        return FALSE;
+    }
     if (unit->nu_Nic.ops->attach(&unit->nu_Nic) != 0)
     {
         nd_trace("anx: attach failed\r\n");
