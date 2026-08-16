@@ -592,7 +592,7 @@ int main(int argc, char **argv)
 
     if (err != AMI_NET_OK)
     {
-        tool_error("the network would not start: %s",
+        tool_error("the network did not start: %s",
                    (LONG)tool_net_error(err));
 
         if (err == AMI_NET_ERR_NODEV)

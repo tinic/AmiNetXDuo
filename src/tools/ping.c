@@ -506,7 +506,7 @@ static int ping_main(int argc, char **argv)
         {
             LONG err = tool_sock_errno(sb);
 
-            tool_error("could not send the request: %s",
+            tool_error("cannot send the request: %s",
                        (LONG)tool_sock_errstr(err));
 
             rc = RETURN_ERROR;

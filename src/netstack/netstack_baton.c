@@ -205,7 +205,7 @@ VOID ami_netstack_baton_reset(VOID)
     Permit();
 
     if (held != 0)
-        AMI_WARN("netstack: %ld baton slot(s) still held at shutdown; a task "
+        AMI_WARN("netstack: %ld baton slot(s) still held at shutdown. A task "
                  "died inside a release/acquire bracket", (LONG)held);
 }
 
@@ -283,7 +283,8 @@ VOID ami_netstack_baton_release(VOID)
            cannot track, and warn. */
         ami_baton_stats.bs_Full++;
         Permit();
-        AMI_WARN("netstack: baton table full; '%s' will block holding the baton",
+        AMI_WARN("netstack: baton table full. '%s' will block and hold "
+                 "the baton",
                  (thread->tx_thread_name != TX_NULL) ? thread->tx_thread_name
                                                      : (CHAR *)"?");
         return;

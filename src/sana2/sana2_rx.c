@@ -811,7 +811,7 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
             if (rx->iface->interface_ptr != NULL)
                 rx->iface->interface_ptr->nx_interface_link_up = NX_FALSE;
 
-            AMI_WARN("sana2: %s went out of service; link marked down",
+            AMI_WARN("sana2: %s went out of service. The link is marked down",
                      rx->iface->device);
         }
         else
@@ -960,8 +960,9 @@ static VOID ami_sana2_rx_teardown(AmiSana2Rx *rx)
     {
         /* Nothing below this line may run: each of those is a pointer the
            device still holds. */
-        AMI_ERROR("sana2: %ld read(s) still owned by the device; leaking the "
-                  "reader rather than corrupting memory", (long)outstanding);
+        AMI_ERROR("sana2: %ld read(s) still owned by the device. The "
+                  "reader leaks. A free here corrupts memory",
+                  (long)outstanding);
         return;
     }
 
@@ -1025,7 +1026,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         }
         else
         {
-            AMI_WARN("sana2: no signal for TX reaping; retransmission will "
+            AMI_WARN("sana2: no signal for TX reaping. Retransmission will "
                      "wait for the next send");
         }
     }
@@ -1249,7 +1250,8 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
     /* A reader the device still owns cannot be re-created on top of. */
     if (iface->rx_orphaned)
     {
-        AMI_ERROR("sana2: interface has orphaned readers; not restarting");
+        AMI_ERROR("sana2: interface has orphaned readers. "
+                  "It is not restarted");
         return -1;
     }
 
@@ -1424,8 +1426,9 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
                  * so neither may be freed: leaking 4 KB is recoverable, a thread
                  * executing freed memory is not.
                  */
-                AMI_ERROR("sana2: reader %ld did not stop; leaking its stack "
-                          "rather than freeing memory it is running on", (long)i);
+                AMI_ERROR("sana2: reader %ld did not stop. Its stack leaks. A "
+                          "free here corrupts memory the reader runs on",
+                          (long)i);
                 iface->rx_orphaned = TRUE;
                 continue;
             }
@@ -1441,8 +1444,9 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
              */
             if (rx->orphans != 0)
             {
-                AMI_ERROR("sana2: reader %ld left %ld read(s) with the device; "
-                          "leaking its thread and stack, the reply port they "
+                AMI_ERROR("sana2: reader %ld left %ld read(s) with the "
+                          "device. Its thread and stack leak. The reply "
+                          "port they "
                           "will complete through signals that Task",
                           (long)i, (long)rx->orphans);
                 iface->rx_orphaned = TRUE;
@@ -1476,8 +1480,9 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
              */
             if (tx_amiga_zombie_tasks_live() != zombies)
             {
-                AMI_ERROR("sana2: reader %ld could not be removed; leaking its "
-                          "stack rather than freeing memory it is running on",
+                AMI_ERROR("sana2: reader %ld cannot be removed. Its stack "
+                          "leaks. A free here corrupts memory the reader "
+                          "runs on",
                           (long)i);
                 iface->rx_orphaned = TRUE;
                 continue;

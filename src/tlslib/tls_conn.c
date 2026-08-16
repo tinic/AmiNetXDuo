@@ -240,11 +240,11 @@ CONST_STRPTR tls_TLSErrorString(register LONG               code    __asm("d0"),
     case TLS_ERR_BADSOCKET: return (CONST_STRPTR)"not a connected TCP socket";
     case TLS_ERR_NOSTACK:   return (CONST_STRPTR)"bsdsocket.library was built without TLS support";
     case TLS_ERR_TRUSTSTORE:return (CONST_STRPTR)"cannot read DEVS:Internet/certificates";
-    case TLS_ERR_HANDSHAKE: return (CONST_STRPTR)"the server would not complete a TLS handshake";
+    case TLS_ERR_HANDSHAKE: return (CONST_STRPTR)"the server did not complete a TLS handshake";
     case TLS_ERR_UNTRUSTED: return (CONST_STRPTR)"the certificate chain reaches no trusted root";
     case TLS_ERR_HOSTNAME:  return (CONST_STRPTR)"the certificate is issued to another host";
     case TLS_ERR_EXPIRED:   return (CONST_STRPTR)"the certificate is expired or not yet valid";
-    case TLS_ERR_TIMEOUT:   return (CONST_STRPTR)"the server stopped responding";
+    case TLS_ERR_TIMEOUT:   return (CONST_STRPTR)"the server stopped answering";
     case TLS_ERR_CLOSED:    return (CONST_STRPTR)"the connection is closed";
     case TLS_ERR_IO:        return (CONST_STRPTR)"the network connection failed";
     case TLS_ERR_NOHOSTNAME:return (CONST_STRPTR)"no host name was given to check the certificate against";

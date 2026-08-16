@@ -567,7 +567,7 @@ int main(int argc, char **argv)
 
         if (base == NULL)
         {
-            tool_error("the network would not start");
+            tool_error("the network did not start");
             explain_library_failure(&ifc);
             FreeArgs(rda);
             return RETURN_FAIL;
@@ -706,7 +706,7 @@ int main(int argc, char **argv)
 
     if (err != AMI_NET_OK)
     {
-        tool_error("the network would not start: %s",
+        tool_error("the network did not start: %s",
                    (LONG)tool_net_error(err));
         explain_startup_failure(err, &ifc);
         FreeArgs(rda);

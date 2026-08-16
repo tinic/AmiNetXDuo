@@ -279,8 +279,8 @@ static VOID report_unknown_keyword(ULONG line, const char *key,
         char upper[CFG_SUGGEST_MAX + 1];
 
         upcase_into(upper, sizeof(upper), guess);
-        ami_cfg_join3(hint, sizeof(hint), "Did you mean ", upper,
-                      "?  The line was ignored.");
+        ami_cfg_join3(hint, sizeof(hint), "The nearest keyword is ", upper,
+                      ".  The line was ignored.");
     }
     else
     {
@@ -1226,8 +1226,8 @@ BOOL ami_config_search_offer(AmiResolverConfig *res, const char *domain)
     /* Off the network, and about to be pasted onto a name and queried. */
     if (!ami_config_hostname_valid(domain))
     {
-        AMI_WARN("config: the network offered '%s' as a search domain; that is "
-                 "not a domain name, ignoring it", domain);
+        AMI_WARN("config: the network offered '%s' as a search domain. "
+                 "That is not a domain name, so it is ignored", domain);
         return FALSE;
     }
 

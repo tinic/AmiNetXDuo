@@ -69,7 +69,7 @@ struct Library *tool_socket_open(VOID)
     if (base == NULL)
     {
         if (tool_stack_installed())
-            tool_error("the network would not start");
+            tool_error("the network did not start");
         else
             tool_error("no bsdsocket.library");
         tool_explain_no_stack();

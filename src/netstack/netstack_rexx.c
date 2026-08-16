@@ -411,7 +411,8 @@ static VOID ami_rx_main(VOID)
             Permit();
             DeleteMsgPort(port);
             port = NULL;
-            AMI_WARN("AMITCP: a port of that name already exists; not adding ours");
+            AMI_WARN("AMITCP: a port of that name already exists. "
+                     "Ours is not added");
         }
         else
         {
@@ -445,7 +446,7 @@ static VOID ami_rx_main(VOID)
      */
     ami_rx_rexxbase = OpenLibrary((CONST_STRPTR)"rexxsyslib.library", 0);
     if (ami_rx_rexxbase == NULL)
-        AMI_WARN("AMITCP: no rexxsyslib.library; messages will be replied to "
+        AMI_WARN("AMITCP: no rexxsyslib.library. Messages will be replied to "
                  "but not interpreted");
 
     AMI_INFO("AMITCP: ARexx host started");
@@ -511,7 +512,7 @@ VOID ami_netstack_rexx_start(VOID)
        crash, and no port is the failure mode that was always safe. */
     if (me == NULL || me->tc_Node.ln_Type != NT_PROCESS)
     {
-        AMI_WARN("AMITCP: opener is not a Process; no ARexx host");
+        AMI_WARN("AMITCP: opener is not a Process. There is no ARexx host");
         return;
     }
 

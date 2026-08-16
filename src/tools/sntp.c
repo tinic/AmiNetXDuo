@@ -578,7 +578,7 @@ static BOOL sntp_exchange(struct Library *sbase, LONG sock, ULONG timeout,
 
         if (sock_send(sbase, sock, msg, (LONG)sizeof(msg)) != (LONG)sizeof(msg))
         {
-            tool_error("could not send the request to %s (errno %ld)",
+            tool_error("cannot send the request to %s (errno %ld)",
                        (LONG)where, (LONG)sock_errno(sbase));
             return FALSE;
         }

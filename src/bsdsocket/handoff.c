@@ -240,8 +240,8 @@ VOID bsd_handoff_flush(struct AmiSocketBase *base)
         }
         else
         {
-            AMI_WARN("bsdsocket: released socket id %ld abandoned; "
-                     "the kernel is already down", (long)entry->bh_Id);
+            AMI_WARN("bsdsocket: released socket id %ld abandoned. "
+                     "The kernel is already down", (long)entry->bh_Id);
         }
 
         ami_free(entry);

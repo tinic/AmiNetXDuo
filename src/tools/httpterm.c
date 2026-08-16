@@ -1080,7 +1080,7 @@ VOID http_term_service(VOID)
              * transcript that was supposed to explain it.  Cost a guest run.
              */
             term_err = term_runner->rn_Err;
-            tool_printf("httpd: no Shell would start for the terminal "
+            tool_printf("httpd: no Shell started for the terminal "
                         "(IoErr %ld)\n", (LONG)term_err);
             (VOID)Flush(Output());
             term_rc     = -1;

@@ -1907,7 +1907,7 @@ static BOOL fb_input_open(VOID)
     if (OpenDevice((CONST_STRPTR)"input.device", 0,
                    (struct IORequest *)fb_in_req, 0) != 0)
     {
-        fb_say("input.device would not open, so the console can show the "
+        fb_say("input.device did not open, so the console can show the "
                "screen but not be typed at");
         return FALSE;
     }
@@ -2600,7 +2600,7 @@ BOOL http_fb_slice(ULONG now)
         if (len == 0UL)
         {
             fb_close_saying(HTTP_WS_CLOSE_PROTOCOL,
-                            "the geometry word would not fit");
+                            "the geometry word did not fit");
             return TRUE;
         }
 
@@ -2617,7 +2617,7 @@ BOOL http_fb_slice(ULONG now)
         if (len == 0UL)
         {
             fb_close_saying(HTTP_WS_CLOSE_PROTOCOL,
-                            "the palette word would not fit");
+                            "the palette word did not fit");
             return TRUE;
         }
 
@@ -2842,7 +2842,7 @@ BOOL http_fb_slice(ULONG now)
     if (n < 0)
     {
         fb_close_saying(HTTP_WS_CLOSE_PROTOCOL,
-                        "the frame encoder would not encode this screen");
+                        "the frame encoder did not encode this screen");
         return TRUE;
     }
 

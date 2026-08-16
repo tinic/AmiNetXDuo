@@ -129,7 +129,7 @@ static VOID ami_ns_port_create(VOID)
     port = CreateMsgPort();
     if (port == NULL)
     {
-        AMI_WARN("AMITCP: no public port; WaitForPort will not return");
+        AMI_WARN("AMITCP: no public port. WaitForPort will not return");
         return;
     }
 
@@ -141,7 +141,8 @@ static VOID ami_ns_port_create(VOID)
     {
         Permit();
         DeleteMsgPort(port);
-        AMI_WARN("AMITCP: a port of that name already exists; not adding ours");
+        AMI_WARN("AMITCP: a port of that name already exists. "
+                 "Ours is not added");
         return;
     }
     AddPort(port);
@@ -624,13 +625,13 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
                with a device probe behind it, is in src/tools/tool_diag.c. */
             if (status == AMI_NET_ERR_DEVBAD)
             {
-                AMI_ERROR("netstack: interface '%s' would not start: %s unit "
+                AMI_ERROR("netstack: interface '%s' did not start: %s unit "
                           "%lu opened and then refused a SANA-II command",
                           cfg->name, cfg->device, (unsigned long)cfg->unit);
             }
             else
             {
-                AMI_ERROR("netstack: interface '%s' would not open: %s unit "
+                AMI_ERROR("netstack: interface '%s' did not open: %s unit "
                           "%lu did not answer, is the driver in "
                           "DEVS:Networks/ and is the card installed on that "
                           "unit?",
@@ -704,7 +705,7 @@ static VOID ami_ns_name_after_card(AmiNetStack *ns)
         ami_ns_copy_name(ns->ns_Config.hostname, derived,
                          (ULONG)sizeof(ns->ns_Config.hostname));
 
-        AMI_INFO("netstack: nothing named this machine; calling it \"%s\" "
+        AMI_INFO("netstack: nothing named this machine. It is called \"%s\" "
                  "after %s", ns->ns_Config.hostname,
                  ns->ns_Config.interfaces[i].name);
         return;
@@ -726,10 +727,10 @@ static VOID ami_ns_name_after_card(AmiNetStack *ns)
     ami_ns_copy_name(ns->ns_Config.hostname, "amiga",
                      (ULONG)sizeof(ns->ns_Config.hostname));
 
-    AMI_WARN("netstack: nothing named this machine and no card would give a "
-             "hardware address, so it answers to \"amiga\" and may collide "
-             "with another machine doing the same. Set one with `hostname "
-             "<name>`");
+    AMI_WARN("netstack: nothing named this machine, and no card gave a "
+             "hardware address. It answers to \"amiga\". Another machine "
+             "in the same state has the same name. Set a name with "
+             "`hostname <name>`");
 }
 
 /* ---------------------------------------------------------- NetX Duo build */
@@ -946,7 +947,7 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
                                                        AMI_LINK_STACK_DISABLE,
                                                        (UINT)i, &value);
         if (status != NX_SUCCESS)
-            AMI_WARN("netstack: interface '%s' would not stay down (%ld)",
+            AMI_WARN("netstack: interface '%s' did not stay down (%ld)",
                      ns->ns_Config.interfaces[i].name, (long)status);
     }
 
@@ -1259,7 +1260,7 @@ static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
 
     case NX_DHCP_STATE_REBINDING:
         AMI_WARN("netstack: interface %ld, the DHCP server that issued the "
-                 "lease is not answering; asking any server on this network",
+                 "lease is not answering. The request goes to any server here",
                  (long)iface_index);
         break;
 
@@ -1273,9 +1274,9 @@ static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
             previous == (UBYTE)NX_DHCP_STATE_RENEWING ||
             previous == (UBYTE)NX_DHCP_STATE_REBINDING)
         {
-            AMI_WARN("netstack: interface %ld has LOST its DHCP lease, the "
-                     "address and the gateway have been taken off it, and "
-                     "every open connection through it is dead",
+            AMI_WARN("netstack: interface %ld has LOST its DHCP lease. The "
+                     "address and the gateway are off it. Every open "
+                     "connection through it is dead",
                      (long)iface_index);
 
             /* RFC 3927 1.7: keep the machine reachable on the local wire
@@ -1503,8 +1504,8 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
             == TX_SUCCESS)
         ns->ns_AddrArrivedReady = TRUE;
     else
-        AMI_WARN("netstack: no address-arrival semaphore; falling back to "
-                 "polling for the first address");
+        AMI_WARN("netstack: no address-arrival semaphore. The first address "
+                 "is found by polling instead");
 
     (VOID)nx_ip_address_change_notify(&ns->ns_Ip, ami_ns_address_changed,
                                       NX_NULL);
@@ -1862,7 +1863,7 @@ static LONG ami_ns_bring_up(VOID)
                         TX_AUTO_ACTIVATE) == TX_SUCCESS)
         ns->ns_SecondCreated = TRUE;
     else
-        AMI_WARN("netstack: no one-second heartbeat; a task that exits "
+        AMI_WARN("netstack: no one-second heartbeat. A task that exits "
                  "without closing bsdsocket.library will not be noticed");
 
     ami_netstack_leave(&caller);
@@ -1998,8 +1999,9 @@ VOID netstack_shutdown(VOID)
 
         if (txstatus != TX_SUCCESS)
         {
-            AMI_ERROR("netstack: tx_amiga_kernel_stop failed (%ld), ThreadX "
-                      "Tasks are still running; do not unload", (LONG)txstatus);
+            AMI_ERROR("netstack: tx_amiga_kernel_stop failed (%ld). ThreadX "
+                      "Tasks are still running. Do not unload",
+                      (LONG)txstatus);
         }
         else
         {
@@ -2544,7 +2546,7 @@ LONG netstack_interface_dhcp_start(UWORD index, ULONG requested_address)
     if (status != NX_SUCCESS && status != NX_DHCP_INTERFACE_ALREADY_ENABLED)
     {
         ami_netstack_leave_free(caller);
-        AMI_WARN("netstack: DHCP would not enable interface %ld (%ld)",
+        AMI_WARN("netstack: DHCP did not enable interface %ld (%ld)",
                  (long)index, (long)status);
         return AMI_NET_ERR_STATE;
     }
@@ -2570,7 +2572,7 @@ LONG netstack_interface_dhcp_start(UWORD index, ULONG requested_address)
 
     if (status != NX_SUCCESS)
     {
-        AMI_WARN("netstack: DHCP would not start on interface %ld (%ld)",
+        AMI_WARN("netstack: DHCP did not start on interface %ld (%ld)",
                  (long)index, (long)status);
         return AMI_NET_ERR_STATE;
     }
@@ -2816,7 +2818,7 @@ LONG netstack_interface_dhcp_renew(UWORD index)
 
     if (status != NX_SUCCESS)
     {
-        AMI_WARN("netstack: DHCP would not renew interface %ld (%ld)",
+        AMI_WARN("netstack: DHCP did not renew interface %ld (%ld)",
                  (long)index, (long)status);
         return AMI_NET_ERR_STATE;
     }
@@ -2970,7 +2972,7 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
     iface = ami_sana2_open(slot_cfg, &err);
     if (iface == NULL)
     {
-        AMI_ERROR("netstack: interface \'%s\' would not start: %s unit %lu %s",
+        AMI_ERROR("netstack: interface \'%s\' did not start: %s unit %lu %s",
                   slot_cfg->name, slot_cfg->device,
                   (unsigned long)slot_cfg->unit,
                   (err == AMI_NET_ERR_DEVBAD) ? "refused a SANA-II command"

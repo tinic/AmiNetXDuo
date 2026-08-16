@@ -451,7 +451,7 @@ static LONG fetch_run(VOID)
     if (sbase == NULL)
     {
         if (tool_stack_installed())
-            tool_error("the network would not start");
+            tool_error("the network did not start");
         else
             tool_error("no bsdsocket.library");
         tool_explain_no_stack();

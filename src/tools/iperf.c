@@ -83,7 +83,7 @@ static VOID iperf_help(VOID)
     tool_printf("Usage: %s [-s] [-u] [<host>]\n", (LONG)tool_name);
     tool_printf("  Measures throughput against an iperf 2 peer on port 5001.\n");
     tool_printf("\n");
-    tool_printf("  -s                              receive; wait for a sender\n");
+    tool_printf("  -s                              receive, wait for a sender\n");
     tool_printf("  -u                              UDP instead of TCP\n");
     tool_printf("  -p PORT                         port to use (5001)\n");
     tool_printf("  -t SECONDS                      how long to run (10)\n");
