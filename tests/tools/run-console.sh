@@ -301,6 +301,20 @@ $AMINETXDUO_CONSOLE_PROBE_CMD
 EOF
     fi
 
+    # DH0 is a host directory, so anything the guest writes there is readable
+    # from the outside at once.  This is the only way to ask an RTG boot what
+    # it actually found: whether rtg.library loaded, whether it saw a board,
+    # and what Intuition ended up opening.
+    [ "$RTG" = 1 ] && cat >> "$HD/S/Startup-Sequence" <<'EOF'
+C:Version >DH0:rtg-ver.txt LIBS:Picasso96/rtg.library FILE
+C:Version >>DH0:rtg-ver.txt LIBS:Picasso96API.library FILE
+C:Version >>DH0:rtg-ver.txt Picasso96API.library
+C:Version >>DH0:rtg-ver.txt cybergraphics.library
+C:List >DH0:rtg-libs.txt LIBS:Picasso96
+C:List >>DH0:rtg-libs.txt DEVS:Monitors
+C:Avail >DH0:rtg-avail.txt
+EOF
+
     cat >> "$HD/S/Startup-Sequence" <<EOF
 Run >DH0:httpd.txt <NIL: C:httpd DH0:Public $PORT -C CONSOLEPAGE DH0:Console/console.html -v
 EOF
