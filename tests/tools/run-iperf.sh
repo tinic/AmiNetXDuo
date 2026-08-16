@@ -82,13 +82,24 @@ ADDRESS="${AMINETXDUO_IPERF_ADDRESS:-192.168.1.240}"
 GATEWAY="${AMINETXDUO_IPERF_GATEWAY:-192.168.1.1}"
 NETMASK=255.255.255.0
 
-# How long the guest waits when it is the server.  The ports are derived from
-# the run tag, below, once the tag is known.
-SRV_WINDOW=20
-
 # How long each transfer runs on the guest, and how much the -n arm moves.
-SECS=3
+#
+# Three seconds is what the byte-count assertions need, and they are what this
+# script is for.  A THROUGHPUT comparison needs longer -- a 68020 read at 400
+# KB/s moves 1.2 MB in three seconds, most of which is slow start -- so
+# AMINETXDUO_IPERF_SECS raises it without changing what is asserted.  Both
+# directions and the UDP arms take it, so the arms stay the same length as each
+# other whatever it is set to.
+SECS="${AMINETXDUO_IPERF_SECS:-3}"
 SIZE_KB=64
+
+# How long the guest waits when it is the server.  It has to outlast the
+# transfer with room for the peer's retry loop to find it, hence the transfer
+# plus seventeen seconds rather than a constant: at a raised SECS a constant
+# ends the server while the peer is still sending, and the arm reads as a short
+# transfer rather than as a truncated one.  The ports are derived from the run
+# tag, below, once the tag is known.
+SRV_WINDOW=$((SECS + 17))
 
 VENDOR="${AMINETXDUO_SANA2_VENDOR:-}"
 
