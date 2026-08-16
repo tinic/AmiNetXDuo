@@ -251,8 +251,11 @@ rtg_monitor_icon() {
 import os, struct, sys
 
 board = os.environ["AMINETXDUO_ICON_BOARD"]
+# NO SettingsFile.  The one the archive ships is configured for a PicassoIV --
+# its own installer says so and tells you to re-attach it with Picasso96Mode --
+# and a settings file naming another board is worse than none: uaegfx reports
+# its own resolutions and wants no timing list at all.
 tools = ["IgnoreMask=Yes",
-         "SettingsFile=DEVS:Picasso96Settings",
          "BoardType=" + board]
 
 W, H, D = 8, 8, 1
@@ -346,7 +349,6 @@ EOF
         # are on the machine.
         cp -R "$P96DIR/Libs/." "$HD/Libs/"
         mkdir -p "$HD/Devs/Monitors"
-        cp "$P96DIR/Devs/Picasso96Settings" "$HD/Devs/Picasso96Settings"
         # THE MONITOR IS NAMED AFTER THE BOARD, and that is not cosmetic.
         # InstallPicasso96's P_InstallCard copies devs/monitors/Picasso96 with
         # (newname #_boardname) and writes BoardType=<boardname> into the icon
@@ -401,6 +403,7 @@ EOF
     # it actually found: whether rtg.library loaded, whether it saw a board,
     # and what Intuition ended up opening.
     [ "$RTG" = 1 ] && cat >> "$HD/S/Startup-Sequence" <<'EOF'
+DEVS:Monitors/uaegfx >DH0:rtgmon.txt
 C:rtgscreen 0 >DH0:rtglist.txt
 Run >DH0:rtgscreen.txt <NIL: C:rtgscreen 8 640 480
 C:Wait 3
