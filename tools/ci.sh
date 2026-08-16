@@ -325,8 +325,8 @@ stage_host() {
     # It costs no toolchain and no network to check, and the failure it covers
     # was invisible everywhere except one generated-header diff.
     if tools/toolchain-resolve-selftest.sh > "$BUILD/tcresolve.log" 2>&1; then
-        note "toolchain resolve: $(sed -n 's/^toolchain_resolve_selftest=/&/p' \
-              "$BUILD/tcresolve.log")"
+        note "toolchain resolve selftest: $(sed -n \
+              's/^toolchain_resolve_selftest=//p' "$BUILD/tcresolve.log")"
     else
         cat "$BUILD/tcresolve.log"
         fail "the toolchain resolvers accept a cache that is not the pin"

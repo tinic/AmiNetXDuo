@@ -81,8 +81,18 @@ if(NOT AMIGA_TOOLCHAIN_ROOT)
             get_filename_component(_amiga_cur_real
                                    "${_amiga_cache}/current" REALPATH)
             get_filename_component(_amiga_pin_real "${_amiga_pin}" REALPATH)
+            # "Runs here", not "exists", on both sides -- the same test the
+            # candidate loop below uses, so the two cannot disagree about
+            # whether the pin was available.
+            set(_amiga_pin_rc 1)
+            if(EXISTS "${_amiga_pin}/bin/m68k-amigaos-gcc")
+                execute_process(
+                    COMMAND "${_amiga_pin}/bin/m68k-amigaos-gcc" -dumpversion
+                    RESULT_VARIABLE _amiga_pin_rc
+                    OUTPUT_QUIET ERROR_QUIET)
+            endif()
             if(_amiga_cur_rc EQUAL 0 AND NOT _amiga_cur_real STREQUAL _amiga_pin_real)
-                if(NOT EXISTS "${_amiga_pin}/bin/m68k-amigaos-gcc")
+                if(NOT _amiga_pin_rc EQUAL 0)
                     message(FATAL_ERROR
                         "${_amiga_cache}/current is not the toolchain this "
                         "tree pins.\n"
