@@ -275,6 +275,7 @@ if(CMAKE_CROSSCOMPILING)
     target_compile_options(rfb_encode_020 PRIVATE
         -m68020 -ffunction-sections -fno-optimize-sibling-calls -Wall -Wextra)
     target_compile_definitions(rfb_encode_020 PRIVATE
+        rfb_planes=rfb020_planes
         rfb_packbits=rfb020_packbits
         rfb_unpackbits=rfb020_unpackbits
         rfb_shadow_size=rfb020_shadow_size
@@ -295,6 +296,7 @@ if(CMAKE_CROSSCOMPILING)
         -m68000 -O2 -ffunction-sections -fno-optimize-sibling-calls
         -Wall -Wextra)
     target_compile_definitions(rfb_encode_o2 PRIVATE
+        rfb_planes=rfbo2_planes
         rfb_packbits=rfbo2_packbits
         rfb_unpackbits=rfbo2_unpackbits
         rfb_shadow_size=rfbo2_shadow_size
@@ -311,6 +313,7 @@ if(CMAKE_CROSSCOMPILING)
         -m68020 -O2 -ffunction-sections -fno-optimize-sibling-calls
         -Wall -Wextra)
     target_compile_definitions(rfb_encode_o220 PRIVATE
+        rfb_planes=rfb220_planes
         rfb_packbits=rfb220_packbits
         rfb_unpackbits=rfb220_unpackbits
         rfb_shadow_size=rfb220_shadow_size
