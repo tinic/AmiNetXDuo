@@ -403,12 +403,20 @@ static const char *default_router6(BOOL have_routes)
     return NULL;
 }
 
-static VOID explain_absence6(const ULONG addr[4], BOOL have_routes)
+/*
+ * Why an address is not in the neighbour cache. The IPv6 half of
+ * explain_absence() below, and the same two reasons.
+ */
+static VOID explain_absence6(const ULONG addr[4], const char *text,
+                             BOOL have_routes)
 {
     const char *router;
 
     if (off_link6(addr, have_routes))
     {
+        tool_printf("  It is not on this machine's link, so nothing ever asks "
+                    "for its hardware address. Packets to it go to the "
+                    "router.\n");
 
         router = default_router6(have_routes);
         if (router != NULL)
@@ -420,6 +428,19 @@ static VOID explain_absence6(const ULONG addr[4], BOOL have_routes)
         return;
     }
 
+    /*
+     * On this machine's link, or a machine that could not tell. An entry is
+     * made when something sends to the address and is aged out again when
+     * nothing does, so an absence here is "nothing has spoken to it lately"
+     * rather than a fault.
+     */
+    if (have_routes)
+        tool_printf("  It is on this machine's link, so an entry appears as "
+                    "soon as something sends to it:\n");
+    else
+        tool_printf("  An entry appears as soon as something sends to it:\n");
+
+    tool_printf("      ping %s\n", (LONG)text);
 }
 
 /* TRUE when `addr` is on the network of an interface this machine has up. */
@@ -453,12 +474,15 @@ static BOOL on_our_network(ULONG addr, BOOL have_snapshot)
  * "nothing has tried to reach it", which would be wrong after a successful
  * ping.
  */
-static VOID explain_absence(ULONG addr, BOOL have_snapshot)
+static VOID explain_absence(ULONG addr, const char *text, BOOL have_snapshot)
 {
     char gw[16];
 
     if (!on_our_network(addr, have_snapshot))
     {
+        tool_printf("  It is not on this machine's network, so nothing ever "
+                    "sends it an ARP request. Packets to it go to the "
+                    "router.\n");
 
         if (arp_snap.have_gateway && arp_snap.gateway != 0)
         {
@@ -470,6 +494,19 @@ static VOID explain_absence(ULONG addr, BOOL have_snapshot)
         return;
     }
 
+    /*
+     * On this machine's network, or a machine that could not tell. An entry
+     * is made when something sends to the address and is aged out again when
+     * nothing does, so an absence here is "nothing has spoken to it lately"
+     * rather than a fault.
+     */
+    if (have_snapshot)
+        tool_printf("  It is on this machine's network, so an entry appears "
+                    "as soon as something sends to it:\n");
+    else
+        tool_printf("  An entry appears as soon as something sends to it:\n");
+
+    tool_printf("      ping %s\n", (LONG)text);
 }
 
 /*
@@ -787,13 +824,13 @@ int main(int argc, char **argv)
         {
             tool_printf("%s is not in the neighbour cache.\n",
                         (LONG)address_text);
-            explain_absence6(want6, have_routes6);
+            explain_absence6(want6, address_text, have_routes6);
             rc = RETURN_WARN;
         }
         else if (want_one)
         {
             tool_printf("%s is not in the cache.\n", (LONG)address_text);
-            explain_absence(want, have_snapshot);
+            explain_absence(want, address_text, have_snapshot);
             rc = RETURN_WARN;
         }
         else
@@ -807,9 +844,24 @@ int main(int argc, char **argv)
     {
         /*
          * The snapshot holds TOOL_MAX_ARP entries and the stack can have more.
-         * nsh_Available says so. A list that silently stops reads as complete.
+         * nsh_Available says so. A list that silently stops reads as complete,
+         * which is worse than a short one: it is the same output a machine
+         * with nothing else in its cache produces.
          */
         tool_printf("\n");
+
+        if (arp_stats.arp_truncated)
+            tool_printf("The address cache has more than %ld entries and only "
+                        "the first %ld are shown.\n",
+                        (LONG)TOOL_MAX_ARP, (LONG)TOOL_MAX_ARP);
+
+        if (arp_nd.truncated)
+            tool_printf("The neighbour cache has more than %ld entries and "
+                        "only the first %ld are shown.\n",
+                        (LONG)TOOL_MAX_ND, (LONG)TOOL_MAX_ND);
+
+        tool_printf("Name one address to see just that entry:\n");
+        tool_printf("      arp 192.168.1.1\n");
     }
 
     FreeArgs(rda);
