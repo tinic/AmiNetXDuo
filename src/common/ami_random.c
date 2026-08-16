@@ -17,9 +17,8 @@
  *   The state must survive disclosure: a TLS client random goes on the wire
  *   in clear, and with an LCG or an xorshift that is the whole state.  SHA-256
  *   counter mode plus a forward ratchet costs ~300-500 us per 32-byte block on
- *   a 14 MHz 68020, one hash per eight rand() calls, which the packet paths
- *   can afford (a 200 packet/s TCP stream spends well under 1% of the CPU
- *   here).
+ *   a 14 MHz 68020, one hash per eight rand() calls.  The packet paths can
+ *   afford that: a 200 packet/s TCP stream spends under 1% of the CPU here.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -93,9 +92,9 @@ static const ULONG sha256_k[64] =
  * updated in place. Bit-identical, and 64 bytes of schedule instead of 256.
  *
  * That matters here because this is the deepest frame under NX_RAND, and
- * NX_RAND is on the caller's stack: an ephemeral port, a TCP ISN and a DNS
- * query ID are all drawn inside a bsdsocket.library vector, and an AmigaDOS
- * Shell gives 4 KB with no guard page.
+ * NX_RAND sits on the stack of the caller.  An ephemeral port, a TCP ISN and a
+ * DNS query ID are all drawn inside a bsdsocket.library vector, and an
+ * AmigaDOS Shell gives 4 KB with no guard page.
  */
 static VOID sha256_compress(Sha256 *ctx, const UBYTE *block)
 {
@@ -126,7 +125,7 @@ static VOID sha256_compress(Sha256 *ctx, const UBYTE *block)
             s0 = ROR32(x, 7) ^ ROR32(x, 18) ^ (x >> 3);
             s1 = ROR32(y, 17) ^ ROR32(y, 19) ^ (y >> 10);
 
-            /* w[i&15] is w[i-16]; w[(i+9)&15] is w[i-7]. */
+            /* w[i&15] is w[i-16]. w[(i+9)&15] is w[i-7]. */
             w[i & 15] += s0 + w[(i + 9) & 15] + s1;
         }
 
@@ -572,8 +571,8 @@ static ULONG gather_tasks(EntropySample *s)
  *
  * Credited 8 bits, far below the ~20 that the microsecond field nominally
  * holds.  An attacker who knows the power-on time to within a second has only
- * the sub-second part left to search, and one who can observe the boot (anyone
- * on the same LAN who watches for DHCP) narrows it further.  The credit of 8
+ * the sub-second part left to search.  One who can observe the boot (anyone on
+ * the same LAN who watches for DHCP) narrows it further.  The credit of 8
  * assumes both.
  */
 static ULONG gather_clock(EntropySample *s)
@@ -645,7 +644,7 @@ static VOID random_gather(VOID)
 /*
  * Repeat calls still add, as the header promises. What is excluded is two
  * collections at once. random_gather() writes the ~800-byte file-scope
- * random_sample from top to bottom, and the two lazy callers below are plain
+ * random_sample from top to bottom.  The two lazy callers below are plain
  * test-then-act on pool_started, so two tasks can both fall through and
  * interleave two machine fingerprints into one buffer.
  *

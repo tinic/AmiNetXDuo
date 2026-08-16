@@ -102,8 +102,8 @@ VOID ami_bpf_tap_tx(APTR cookie, NX_PACKET *packet, BOOL has_link_header,
                            is present and let bh_caplen < bh_datalen show it */
     }
 
-    /* wirelen is the whole frame even where the view could not cover it, so
-       BPF_LEN and bh_datalen stay truthful. */
+    /* wirelen is the whole frame even where the view does not cover it, so
+       BPF_LEN and bh_datalen stay correct. */
     view.wirelen = wirelen;
 
     ami_bpf_capture(ifp, &view);

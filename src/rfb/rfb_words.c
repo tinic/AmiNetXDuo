@@ -181,7 +181,7 @@ rfb_u32 rfb_word_ptr(char *out, rfb_u32 cap, const rfb_pointer *p,
 /*
  * A word is a keyword and then decimal numbers separated by runs of spaces.
  * The cursor is a pair of indices into the frame as it arrived, which is not
- * terminated: a text frame carries a length and nothing else, and a copy into
+ * terminated.  A text frame carries a length and nothing else, and a copy into
  * a buffer, so that string functions can run on it, is one copy per mouse
  * move.
  */

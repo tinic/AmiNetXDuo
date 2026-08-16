@@ -16,7 +16,7 @@
 
 /*
  * No DES implementation ships here, and there is nothing for one to check
- * against: the built-in database has no passwords, and a passwd file on an
+ * against.  The built-in database has no passwords, and a passwd file on an
  * AmigaOS volume is readable by anyone in any case.
  *
  * crypt() therefore fails, and it fails the safe way. It returns a valid,

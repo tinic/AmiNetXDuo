@@ -400,7 +400,7 @@ static void test_filter_real_programs(void)
 
     printf("bpf: real libpcap programs against real frames\n");
 
-    /* "ip" accepts IPv4 and rejects ARP; "arp" the other way round. */
+    /* "ip" accepts IPv4 and rejects ARP. "arp" answers the other way round. */
     len = make_tcp(frame, 1234, 80, 5, 0, 6);
     CHECK(ami_bpf_filter(prog_ip,  NELEM(prog_ip),  frame, len, len) == 262144);
     CHECK(ami_bpf_filter(prog_arp, NELEM(prog_arp), frame, len, len) == 0);

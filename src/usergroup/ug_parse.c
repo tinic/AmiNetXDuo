@@ -4,7 +4,7 @@
  * Split out of ug_db.c, which keeps the file read and the library vectors.
  * Nothing here calls dos.library or exec.library, so the source that runs on
  * the Amiga is the source that tests/fuzz drives under ASan. src/config has
- * the same arrangement, for the same reason: a sizing pass that disagrees with
+ * the same arrangement, for the same reason. A sizing pass that disagrees with
  * the parse pass is a heap overrun on a machine with no MMU.
  *
  * SPDX-License-Identifier: MIT

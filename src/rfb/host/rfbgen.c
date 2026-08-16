@@ -13,10 +13,10 @@
 static unsigned g_w, g_h, g_depth, g_bpr;
 static unsigned char *g_idx;   /* w*h colour indices */
 
-/* The frames go out as one eight-bit plane, and not as g_depth one-bit ones:
-   a Picasso96 or CyberGraphX screen, and the flag that the .pfs header carries
-   in its byte 9.  g_idx is already indices, so this only changes what emit()
-   writes and how wide a row is. */
+/* The frames go out as one eight-bit plane, and not as g_depth one-bit ones.
+   That is a Picasso96 or CyberGraphX screen, and the flag that the .pfs header
+   carries in its byte 9.  g_idx is already indices, so this only changes what
+   emit() writes and how wide a row is. */
 static unsigned g_chunky;
 
 static unsigned hash32(unsigned x)
@@ -373,9 +373,9 @@ int main(int argc, char **argv)
     seq_scroll(dir, "scroll1024", 8, 20);
 
     /* And the RTG shape: 8-bit chunky, at the two sizes a graphics card runs
-       at.  640x480 has a bytes_per_row that is a whole number of 16-byte tiles
-       and 804 wide does not, so the clipped tile at the right edge is walked
-       too. */
+       at.  640x480 has a bytes_per_row that is a whole number of 16-byte
+       tiles, and 804 wide does not.  The clipped tile at the right edge is
+       therefore walked too. */
     setup_chunky(640, 480);
     seq_idle(dir, "idle_c8");
     seq_scroll(dir, "scroll_c8", 8, 40);

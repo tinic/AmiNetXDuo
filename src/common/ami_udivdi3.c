@@ -71,7 +71,7 @@ typedef unsigned short      u16;
  * do have the instruction, the call then pays for a software loop that the
  * hardware does in one instruction.  The effect is not small: an ssh handshake
  * on an A1200 measured 5.00 s against 4.30 s for the same client compiled
- * -m68020, and the whole of that difference is here, inside the bignum inner
+ * -m68020.  The whole of that difference is here, inside the bignum inner
  * loops of libtommath and libtomcrypt.
  *
  * `.chip 68020` lets a -m68000 translation unit hold the instruction at all.
@@ -392,7 +392,7 @@ u32     lo = a;
     /*
      * And at run time, which is the same instruction for the same reason.  A
      * one-binary build is compiled -m68000, so the block above is not
-     * available to it at compile time, and without this every RSA and EC
+     * available to it at compile time.  Without this, every RSA and EC
      * operation takes the four-mulu.w form on a machine that has the
      * one-instruction form.  The flag is set from AttnFlags: 68020 and up, and
      * not the 68060, because the 68060 is the part that dropped this form.
@@ -496,7 +496,7 @@ u32 __mulsi3(u32 a, u32 b)
  * divu.w divides a 32-bit register by a 16-bit operand, leaving the quotient
  * in the low word and the remainder in the high word, and sets V without
  * changing the register if the quotient does not fit in 16 bits.  Two of them
- * cover every divisor below 65536, which is nearly every division a network
+ * cover every divisor below 65536.  That is nearly every division a network
  * stack or a printf performs.  The step-2 quotient cannot overflow, because
  * step 1 leaves a remainder strictly below the divisor.
  */
@@ -697,7 +697,7 @@ u32     remainder = 0;
  * the sign bit. The logical one does not.
  *
  * Every shift below is a 32-bit one, and it must stay that way. The in-word
- * case written as `value >> count` is the obvious C and it does not work: a
+ * case written as `value >> count` is the obvious C and it does not work.  A
  * 64-bit shift by a variable count is exactly what GCC lowers to a call to
  * this function, so the routine compiles into a call to itself and recurses
  * until the stack is gone.  It did:

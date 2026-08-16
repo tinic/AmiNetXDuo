@@ -1,9 +1,9 @@
 /*
  * AmiNetXDuo, usergroup.library: romtag, library structure, vector table.
  *
- * ug_LibEntry() must be the first thing in the linked image so that running
- * the file as a program returns -1 instead of executing the library. Keep
- * this object first on the link line.
+ * ug_LibEntry() must be the first thing in the linked image, so that the file
+ * run as a program returns -1 and does not run the library. Keep this object
+ * first on the link line.
  *
  * SPDX-License-Identifier: MIT
  */

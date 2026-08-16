@@ -2,11 +2,11 @@
  * AmiNetXDuo, the allocation census.
  *
  * A side table, not a header in front of the block. A header on every
- * allocation moves every pointer that the product hands around, changes what
- * fits in a cache line and what shares one, and gives the census build a
- * different memory layout from the one under investigation. The cost of the
- * side table is a hash probe per alloc and per free, and nothing here is timed
- * on that.
+ * allocation moves every pointer that the product hands around, and changes
+ * what fits in a cache line and what shares one. It also gives the census
+ * build a different memory layout from the one under investigation. The cost
+ * of the side table is a hash probe per alloc and per free, and nothing here
+ * is timed on that.
  *
  * The table is open-addressed on the pointer, with linear probing and no
  * tombstones. A drop clears the slot and then re-inserts whatever follows in
@@ -41,7 +41,7 @@
  * of BSS in every image that links src/common, which in a census build is the
  * library and every command. AMINETXDUO_ALLOCCENSUS_SLOTS moves it. The live
  * count on a working stack is in the low hundreds, so this has three binary
- * orders of headroom, and `lost=` in the report says when that was not enough.
+ * orders of headroom. `lost=` in the report says when that was not enough.
  */
 #ifndef AMINETXDUO_ALLOCCENSUS_SLOTS
 #  define AMINETXDUO_ALLOCCENSUS_SLOTS 2048

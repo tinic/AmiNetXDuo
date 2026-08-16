@@ -51,7 +51,7 @@ VOID ami_bpf_notify(APTR task, ULONG mask)
 VOID ami_bpf_sleep(ULONG ticks)
 {
     /* dos.library Delay(), which waits on the timer of the calling Process.
-       Deliberately not a MsgPort of ours: one made on another Process leaves
+       Deliberately not a MsgPort here: one made on another Process leaves
        mp_SigTask set to a task that can be gone (544398f). */
     if (ticks != 0)
         Delay((LONG)ticks);
