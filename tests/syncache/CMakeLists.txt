@@ -32,9 +32,17 @@ target_include_directories(test_syncache PRIVATE
 # and the window scale, SACK and timestamp options are all compiled out -- the
 # three things the cookie has to carry.  The test would pass against a build
 # that negotiates none of them.
+# NX_IPV6_UTIL_INLINE makes COPY_IPV6_ADDRESS and CHECK_IPV6_ADDRESSES_SAME
+# the inline macros rather than functions.  The shipping build links their
+# function forms out of the IPv6 util source, which this test does not compile;
+# the macro bodies are the same field-by-field copy and compare, so inlining
+# them here links the test without pulling the IPv6 core in and changes nothing
+# about what runs on the Amiga.  A dual-stack CI build defines AMINETXDUO_IPV6
+# globally, so FEATURE_NX_IPV6 is on here and the IPv6 branch is compiled.
 target_compile_definitions(test_syncache PRIVATE
     NX_PACKET_ALIGNMENT=8
     NX_INCLUDE_USER_DEFINE_FILE
+    NX_IPV6_UTIL_INLINE
     AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
 
 target_compile_options(test_syncache PRIVATE -Wall -Wextra)
