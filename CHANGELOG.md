@@ -9,6 +9,9 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxnet.device` posts the SANA-II events it accepts. `S2EVENT_ERROR`, `_TX`, `_RX`, `_BUFF` and `_HARDWARE` were taken in the mask and never sent, so a program waiting on one waited forever. `S2EVENT_SOFTWARE` is now refused rather than accepted and never sent
+- `S2_PacketFilter` filters. The hook was stored and never called, so a program that installed one believed it was filtering and was not
+- A PCMCIA card is no longer configured and then switched back off. `CardMiscControl` writes the Gayle status register outright rather than setting bits, and the value passed one step after the configuration write cleared it, taking the socket out of I/O mode and re-enabling write protection. Every register read after that was bus noise. Emulation cannot show this: it ignores those two bits
 - `anxnet.device` recognises the 3Com EtherLink III (3c589) in the PCMCIA slot of an A600 or A1200. It has never been run on the card it is written for: if it works, or does not, that is worth reporting
 - The pointer sent to the Amiga lands where it is pointed on every screen mode. It was scaled from the display's mode bits, which say SUPERHIRES and LACE for a Productivity screen that is neither, so on those modes the two pointers diverged further the further right you pointed and moved in jumps. It now asks the display database, which is what Intuition itself does
 - The driver's watchdog resets the chip the unit actually has. It called the DP8390 routine for every card, so on an A2065 or an Ariadne a wedged transmitter was never freed

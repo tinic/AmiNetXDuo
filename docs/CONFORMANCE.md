@@ -51,6 +51,7 @@ out-of-mask `ai_flags` (`addrinfo.c:373`), sticky `IPV6_HOPLIMIT`
 | Parsed root set | 119 roots would need ~30 KB parsed plus 125 KB DER and 119 ASN.1 walks per page load. The lazy store is keyed on FNV-1a of the full subject Name DER (`tls_store.c:23`) because four Mozilla roots share the CN "GlobalSign" |
 | `SetProtection` on the session file | `src/tlslib/tls_resume.c` writes it with default protection bits. Master secrets and tickets sit in the clear on disk, so anyone taking the disk can decrypt captured traffic for resumed sessions |
 | IDNA | AmigaOS provides no Unicode input path to a hostname; the `xn--` form passes through unchanged |
+| `S2EVENT_SOFTWARE` | SANA-II defines it; `anxnet.device` refuses it at `S2_ONEVENT` with `S2WERR_BAD_EVENT` rather than accepting a request it would never complete. `cnet.device` refuses the same one (`cnetdevice.asm:2157`) and every stack in the field works with cnet, so the accepted set is deliberately cnet's seven. Untested against Roadshow, AmiTCP and Miami |
 | RFC 4361 client identifier | DHCP option 61 is emitted from the MAC (`netstack.c:1443-1450`) so the machine gets the same lease Roadshow would on the same NIC. A DUID would prevent that |
 | RFC 8985 RACK-TLP | retransmission re-headers packets in place, so per-segment send times do not exist |
 | RFC 6928 IW10 | a 14 KB initial window against a packet pool bounded at 256 packets |
