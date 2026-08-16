@@ -23,8 +23,9 @@ BEFORE THE INSTALLATION
 This machine needs:
 
   *  AmigaOS 2.04 or newer.
-  *  Any 68000 or better.  Encrypted (https:) connections need a 68020.  On
-     a 68000 they are left out, and everything else works as normal.
+  *  Any 68000 or better.  Encrypted (https:) connections work on every
+     processor, the 68000 included, but a first handshake there takes a
+     minute or two.  A resumed one takes under a second.
   *  1 MB of memory.  The stack takes about 520 KB of that once it is up.
      It sizes its packet buffers from what is left, so more memory means
      more buffers.  Encryption adds about 210 KB the first time it is used.
@@ -226,7 +227,8 @@ TCP in both directions and listens for incoming connections.
 bsdsocket.library scores 141 of 142 on the bsdsocktest conformance suite.
 
 Everything above was measured on an emulated 68000, 68020 and 68030 under
-Kickstart 2.04 and 3.1.  It has not run on real hardware.
+Kickstart 2.04 and 3.1.  It has also run on real hardware: an A3000 with
+an X-Surf-100, where a user measured 795 KB/s.
 
 
 LICENCE

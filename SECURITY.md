@@ -36,7 +36,7 @@ Untrusted — anything reachable from the network:
 |---|---|
 | IPv4/IPv6, TCP, UDP, ICMP, ICMPv6, ARP, neighbour discovery | NetX Duo |
 | DHCP and DHCPv6 responses, router advertisements | NetX Duo |
-| DNS responses, including compression pointers | `src/netstack/netstack_dns.c` |
+| DNS responses, including compression pointers | `third_party/netxduo/addons/dns/nxd_dns.c`, the vendored parser. `src/netstack/netstack_dns.c` is our cache and resolver policy above it |
 | mDNS queries and responses — unauthenticated multicast from any host on the segment | `src/netstack/netstack_mdns.c` |
 | TLS records and X.509 certificate chains | NX Secure, in `tls.library` |
 | SSH protocol | Dropbear's `dbclient`, `clients/dropbear/` |
