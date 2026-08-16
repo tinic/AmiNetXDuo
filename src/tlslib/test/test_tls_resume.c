@@ -460,7 +460,7 @@ UINT _nx_secure_tls_send_handshake_record(NX_SECURE_TLS_SESSION *tls_session,
 
 /*
  * A ClientHello so long that even the empty four-byte extension will not fit
- * under the 500-byte handshake cache.  495 + 4 header is 499; one extension
+ * under the 500-byte handshake cache.  495 + 4 header is 499.  One extension
  * more is 503.
  */
 #define H_CH_LONG_EXT   450
@@ -560,8 +560,8 @@ static void fixtures_init(void)
 }
 
 /*
- * A connection as tls_conn.c would have left it: resumption on, persisting to
- * the given file, verified against a store with the given fingerprint.
+ * A connection as tls_conn.c leaves it: resumption on, persisting to the
+ * given file, checked against a store with the given fingerprint.
  */
 static TLSStore h_store;
 
@@ -620,7 +620,7 @@ static void base_reset(void)
     memset(&h_base, 0, sizeof(h_base));
 }
 
-/* A NewSessionTicket the server issued, as tls_conn.c would have seen it. */
+/* A NewSessionTicket the server issued, as tls_conn.c sees it. */
 static void conn_take_ticket(UWORD length, ULONG lifetime)
 {
     memcpy(h_conn.tc_Ticket, h_ticket, length);
@@ -770,7 +770,7 @@ static void test_truncated_file(void)
 
     CHECK(file_size(h_path_a) == 16 + 2 * 424);
 
-    /* Cut the second record in half; the header still claims two. */
+    /* Cut the second record in half.  The header still claims two. */
     whole = 16 + 424 + 200;
     bytes = malloc((size_t)whole);
     CHECK(bytes != NULL);
@@ -839,7 +839,7 @@ static void test_decode_rejects(void)
         fseek(fh, pos, SEEK_SET);
         fputc(poke[i].value, fh);
 
-        /* The trust key is four bytes; one zeroed byte is not enough. */
+        /* The trust key is four bytes.  One zeroed byte is not enough. */
         if (poke[i].offset == 112)
         {
             fputc(0, fh);
@@ -1157,7 +1157,7 @@ static void test_trust_key_discriminates(void)
 {
     printf("tls_resume: a session is not offered under different trust\n");
 
-    /* Store it once, verified, dated, two certificates deep, fingerprint A. */
+    /* Store it once, checked, dated, two certificates deep, fingerprint A. */
     base_reset();
     conn_init("example.com", 443, "", 0xAAAA0001UL);
     h_conn.tc_ResumeFlags &= ~TLSR_PERSIST;
@@ -1199,8 +1199,7 @@ static void test_trust_key_discriminates(void)
     CHECK((h_conn.tc_ResumeFlags & TLSR_OFFERED) == 0);
 
     /* Everything the same: the control, and the reason the rows above mean
-       anything.  Six negatives with a broken tls_resume_find() would all
-       pass. */
+       anything.  Six negatives with a broken tls_resume_find() all pass. */
     conn_init("example.com", 443, "", 0xAAAA0001UL);
     tls_resume_prepare(&h_conn);
     CHECK((h_conn.tc_ResumeFlags & TLSR_OFFERED) != 0);

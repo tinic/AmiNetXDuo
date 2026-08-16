@@ -85,17 +85,17 @@
  *     _nx_secure_tls_client_handshake, three handshake message types need
  *         behaviour the vendored state machine does not have.  Everything else
  *         is handed to the vendored function byte for byte, in the same record
- *         boundaries it would have seen.
+ *         boundaries it sees today.
  *
  *   Checked on this toolchain before anything was written: a three-object test
  *   with the caller in a separate archive member disassembles to
  *   `jsr ___wrap_vendored`.
  *
  *   ServerHello.  Handed to the vendored function.  Afterwards its echoed
- *   session ID is compared against the one offered; equal and non-empty means
- *   the server has resumed.  Then the cached master secret goes into the key
- *   material, the session keys are derived from it through the session's own
- *   generate_session_keys pointer, and the client state is advanced to
+ *   session ID is compared against the one offered.  Equal and non-empty
+ *   means the server resumed.  Then the cached master secret goes into the
+ *   key material, the session keys are derived from it through the session's
+ *   own generate_session_keys pointer, and the client state is advanced to
  *   SERVERHELLO_DONE, which _nx_secure_tls_process_changecipherspec() requires
  *   before it will accept the server's ChangeCipherSpec.
  *
@@ -517,7 +517,7 @@ static TLSResumeEntry *tls_resume_slot(TLSResumeEntry *table, const char *host,
  *         66  UWORD ciphersuite
  *         68  UWORD protocol version
  *         70  UBYTE session id length
- *         71  UBYTE flags (bit 0: the chain and host name were verified)
+ *         71  UBYTE flags (bit 0: the chain and host name were checked)
  *         72  session id[32]
  *        104  ULONG stamp, UNIX seconds (0 when the clock was unset)
  *        108  ULONG server lifetime hint, seconds
@@ -986,7 +986,7 @@ VOID tls_resume_record(TLSConnection *conn)
          * handshake carries the authentication of neither -- the triple
          * handshake.  A refusal to remember it is the client-side half.  The
          * other half is in tls_resume_accept, which will not use a resumption
-         * the server did not confirm.
+         * the server did not accept.
          */
         if ((have_ticket || have_sid) && tls_resume_secret_bound(s))
         {

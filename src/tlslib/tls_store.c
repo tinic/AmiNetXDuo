@@ -153,10 +153,10 @@ static const UCHAR *tls_issuer_name_der(const NX_SECURE_X509_CERT *cert,
     avail = tlv_length;
 
     /*
-     * Walk to the issuer.  `field` counts what has been consumed:
-     *   0, nothing yet; the next block is either [0] version or the serial
+     * Walk to the issuer.  `field` counts what is consumed so far:
+     *   0, nothing yet, and the next block is either [0] version or the serial
      *   1, serial consumed
-     *   2, signature AlgorithmIdentifier consumed; the next block is the
+     *   2, signature AlgorithmIdentifier consumed, and the next block is the
      *        issuer
      */
     for (field = 0; field < 3; field++)
@@ -427,7 +427,7 @@ static ULONG tls_store_fetch(TLSStore *store, ULONG key, UCHAR *buffer, ULONG si
     return length;
 }
 
-/* ------------------------------------------------- the lazy verifier ---- */
+/* ------------------------------------------ the lazy certificate check -- */
 
 /*
  * nx_secure's certificate-check hook takes the certificate store, not the

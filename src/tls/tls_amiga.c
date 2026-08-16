@@ -88,7 +88,8 @@ BOOL ami_tls_timer_open(VOID)
        and the task that opened first is gone long before tls.library is. */
     ami_tls_port.mp_SigTask      = NULL;
 
-    /* NewList() is amiga.lib; open-code it so this stays link-library free. */
+    /* NewList() is amiga.lib, so it is open-coded here to stay link-library
+       free. */
     ami_tls_port.mp_MsgList.lh_Head     =
         (struct Node *)&ami_tls_port.mp_MsgList.lh_Tail;
     ami_tls_port.mp_MsgList.lh_Tail     = NULL;
