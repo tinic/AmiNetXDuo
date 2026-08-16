@@ -192,8 +192,8 @@ const UWORD netdev_card_count =
     (UWORD)(sizeof(netdev_cards) / sizeof(netdev_cards[0]));
 
 /*
- * Chip family -> core.  Here rather than in either core, because a core that
- * names the other one is a core that cannot be built without it.  NULL for a
+ * Chip family -> core.  Here rather than in any of the four cores, because a
+ * core that names another is a core that cannot be built without it.  NULL for a
  * family with no core: the board is then recognised and skipped instead of
  * enumerated and then failing to open, and netdev_probe() counts the skip.
  */

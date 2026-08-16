@@ -37,4 +37,33 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
         -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
 
     add_test(NAME inet_conversions COMMAND test_inet)
+
+    # routing.c, for ChangeRouteTagList's grammar and its refusals.  The four
+    # NetX Duo entry points it uses are stubbed in the test rather than linked;
+    # the header of test_route_host.c says what each stub reproduces and from
+    # which line of the vendored source.
+    add_executable(test_route host/test_route_host.c
+                              "${CMAKE_SOURCE_DIR}/src/bsdsocket/routing.c")
+
+    target_include_directories(test_route PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_options(test_route PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+
+    # Without this the Linux nx_port.h skips port/netxduo-amiga/inc/nx_user.h,
+    # NX_ENABLE_IP_STATIC_ROUTING is not set, NX_IP carries no routing table
+    # and routing.c compiles to its "no static routing in this build" branches.
+    # The test would then pass against code the Amiga never runs.  The AmigaOS
+    # nx_port.h includes nx_user.h unconditionally and needs no such flag.
+    target_compile_definitions(test_route PRIVATE NX_INCLUDE_USER_DEFINE_FILE)
+
+    add_test(NAME route_change COMMAND test_route)
 endif()

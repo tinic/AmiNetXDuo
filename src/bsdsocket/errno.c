@@ -499,8 +499,9 @@ static const BsdConstTag bsd_const_tags[] =
     /*
      * TRUE since routing.c: AddRouteTagList(), DeleteRouteTagList(),
      * GetRouteInfo() and FreeRouteInfo() are the whole routing API the autodoc
-     * documents. ChangeRouteTagList() has an LVO and no documentation, so it
-     * is not covered by this tag.
+     * documents, and ChangeRouteTagList(), which the sfd gives an LVO and no
+     * page anywhere, is implemented beside them. A caller that reads TRUE here
+     * and calls it gets a route changed, not an ENOSYS.
      */
     { SBTC_HAVE_ROUTING_API,            SBT_RO, TRUE  },
     /*

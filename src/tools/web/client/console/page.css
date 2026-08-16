@@ -198,14 +198,6 @@ input[type=range] { width: 14rem; accent-color: var(--pen3); }
    is how the picture is drawn. */
 #deck #aspect { margin-left: auto; }
 
-#pal { display: flex; gap: 1px; flex-wrap: wrap; }
-
-#pal i {
-  width: 12px;
-  height: 12px;
-  border: 1px solid var(--pen1);
-}
-
 /* Off unless the deck's toggle is on.  It is two hundred lines of what the
    viewer said and the Amiga answered, which is noise on a page whose subject
    is a screen. */

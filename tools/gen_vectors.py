@@ -167,10 +167,12 @@ IMPLEMENTED = {
     # Tier 3, the monitoring hooks (netmonitor.c).  MHT_Send is not dispatched
     # see the foot of netmonitor.c, but the registry serves all types.
     "AddNetMonitorHookTagList", "RemoveNetMonitorHook",
-    # Tier 3, the routing API (routing.c).  ChangeRouteTagList is NOT here:
-    # the NDK assigns it an offset and neither the autodoc nor
-    # clib/bsdsocket_protos.h documents it, so it keeps the ENOSYS stub.
-    "AddRouteTagList", "DeleteRouteTagList", "GetRouteInfo", "FreeRouteInfo",
+    # Tier 3, the routing API (routing.c).  ChangeRouteTagList has no autodoc
+    # page and no clib prototype; its signature comes from the sfd, through
+    # PROTO_SUPPLEMENT below, and what stands in for the missing page is set
+    # out in routing.c's header.
+    "AddRouteTagList", "DeleteRouteTagList", "ChangeRouteTagList",
+    "GetRouteInfo", "FreeRouteInfo",
     # Tier 3, the statistics call (netstats.c).
     "GetNetworkStatistics",
 }
@@ -254,6 +256,22 @@ def parse_arg(arg, index):
     return ctype.strip(), name
 
 
+# Vectors the pragmas assign an offset to and clib/bsdsocket_protos.h does not
+# prototype.  A name here is NOT a guess: the signature is copied from
+# SANA+RoadshowTCP-IP/sfd/bsdsocket_lib.sfd in the same NDK, which is a
+# machine-readable interface description and states the register too.  Merged
+# into what clib gives, never over it.
+#
+#   ChangeRouteTagList   sfd line 88, under "* Route management":
+#                        LONG ChangeRouteTagList(struct TagItem *tags) (a0)
+#
+# The ipf_* set is absent from both and stays that way; it has no sfd entry
+# either, so there is nothing to copy.
+PROTO_SUPPLEMENT = {
+    "ChangeRouteTagList": ("LONG", [("struct TagItem *", "tags")]),
+}
+
+
 def parse_protos(path):
     """{name: (return_type, [(ctype, argname), ...])}"""
     out = {}
@@ -272,6 +290,14 @@ def parse_protos(path):
             else:
                 args = [parse_arg(a, i) for i, a in enumerate(split_args(argtext))]
             out[name] = (ret, args)
+
+    for name, sig in PROTO_SUPPLEMENT.items():
+        if name in out:
+            raise SystemExit(
+                "%s is prototyped in clib after all; drop it from "
+                "PROTO_SUPPLEMENT rather than shadowing the header" % name)
+        out[name] = sig
+
     return out
 
 
@@ -293,10 +319,11 @@ def generate(vectors, protos):
     by_offset = {}
     for offset, name, regs in vectors:
         if name not in protos:
-            # Vectors the NDK assigns an offset to but does not prototype:
-            # ChangeRouteTagList and the ipf_* packet-filter set (Roadshow
-            # private, out of scope per docs/RESEARCH.md S9). They still need
-            # a dense slot, so record them with no signature, always stubbed.
+            # Vectors the NDK assigns an offset to but does not prototype in
+            # clib and does not describe in the sfd either: the ipf_*
+            # packet-filter set (Roadshow private, out of scope per
+            # docs/RESEARCH.md S9). They still need a dense slot, so record
+            # them with no signature, always stubbed.
             if name in IMPLEMENTED:
                 raise SystemExit("no prototype for implemented vector %s" % name)
             by_offset[offset] = (name, None, None, regs)

@@ -771,7 +771,7 @@ static VOID nt_wire(struct Library *base, NtCap *cap, const ToolAddr *address,
 
     if (tool_sock_connect(base, s, &sa) < 0)
     {
-        tool_sock_fail(base, "connect", address, port);
+        tool_sock_fail(base, "connect to", address, port);
         (VOID)tool_sock_close(base, s);
         return;
     }

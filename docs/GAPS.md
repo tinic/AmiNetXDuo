@@ -13,7 +13,7 @@ and **AmiTCP_NG 4.1.5-beta** (`src/netinclude/fd/socket_lib.fd`, `src/api/`,
 
 | Surface | State |
 |---|---|
-| `bsdsocket.library` socket API | AmiTCP's `socket_lib.fd` is 45 entries and we implement all of them. Roadshow's sfd is 125, 10 of which are varargs aliases; the 32 names we do not implement are below, and every one is outside the socket API proper |
+| `bsdsocket.library` socket API | AmiTCP's `socket_lib.fd` is 45 entries and we implement all of them. Roadshow's sfd is 125, 10 of which are varargs aliases; the 31 names we do not implement are below, and every one is outside the socket API proper |
 | `usergroup.library` | all 39 vectors (`src/usergroup/`), the same set as AmiTCP's `usergroup_lib.fd` |
 | BPF / packet capture | `bpf_*`, 8 vectors, plus `NetTrace` |
 | `TCP:` handler | `src/bsdsocket/tcp_handler.c`, `TCPHANDLER=` in the interface file |
@@ -27,7 +27,6 @@ and nine more) are excluded: they are stub-level, not LVOs.
 | Vector | LVO | Ours | What a user loses |
 |---|---|---|---|
 | `ObtainRoadshowData` `ReleaseRoadshowData` `ChangeRoadshowData` | sfd 159-161 | `bsd_enosys` | The tunables API, which is what `RoadshowControl` drives. No way to read or set `tcp.sendspace`, `ip.forwarding`, `icmp.processecho` and the rest at runtime. `SBTC_HAVE_ROADSHOWDATA_API` correctly answers FALSE |
-| `ChangeRouteTagList` | -0x1aa (`bsdsocket_vectors.c:99`) | `bsd_enosys` | A route can be added and deleted but not modified. Changing a metric or gateway means delete-then-add, which drops traffic in between |
 | `ipf_open` `ipf_close` `ipf_ioctl` `ipf_log_read` `ipf_log_data_waiting` `ipf_set_notify_mask` `ipf_set_interrupt_mask` | sfd 172-178 | absent | The IP filter and NAT API. Roadshow ships `ipf`, `ipfstat`, `ipnat`, `ipmon` and `S:IPF` rules on top of it |
 | `mbuf_get` `mbuf_gethdr` `mbuf_free` `mbuf_freem` `mbuf_copym` `mbuf_copydata` `mbuf_copyback` `mbuf_cat` `mbuf_adj` `mbuf_prepend` `mbuf_pullup` | sfd 146-157 | absent | The kernel memory API: a program that walks the stack's own buffers cannot. `SBTC_HAVE_KERNEL_MEMORY_API` correctly answers FALSE. NetX Duo has `NX_PACKET`, not mbufs, so this is a translation layer rather than an omission |
 | `syslog` `vsyslog` | -0x0fc, -0x102 (`bsdsocket_vectors.c:71`) | `bsd_enosys` | `SyslogA` is in AmiTCP's fd and in ours as a stub. A program that logs through the stack logs nothing |
