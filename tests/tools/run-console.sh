@@ -220,6 +220,76 @@ fi
 wb31_assemble "$ROOT/build/wb31-sys" || { say RESULT INFRA; exit 2; }
 WB="$WB31_SYS"
 
+# ------------------------------------------------------- the monitor icon ----
+#
+# WHAT THE MONITOR READS BEFORE IT LOADS ANYTHING, and it is not in the file.
+#
+# devs/monitors/Picasso96 is one executable that drives every card Picasso96
+# supports; which .card it opens comes from the TOOLTYPES of the icon beside
+# it, which InstallPicasso96 writes in P_InstallCard.  Without an icon it
+# loads no board driver, publishes no resolutions, and Workbench comes up on
+# the chipset -- silently, because nothing on an Amiga complains about a
+# missing .info.
+#
+# So the icon is generated rather than hand-copied: the archive ships
+# Picasso96.info, which carries a PicassoIV's tooltypes and would be wrong
+# here in exactly the way that is hardest to notice.  A minimal WBTOOL icon
+# with a 8x8 one-plane image and the three tooltypes the installer sets that
+# are not disabled -- the parenthesised ones it writes are off by convention.
+rtg_monitor_icon() {
+    local out="$1" board="$2"
+
+    AMINETXDUO_ICON_BOARD="$board" python3 - "$out" <<'EOF'
+import os, struct, sys
+
+board = os.environ["AMINETXDUO_ICON_BOARD"]
+tools = ["IgnoreMask=Yes",
+         "SettingsFile=DEVS:Picasso96Settings",
+         "BoardType=" + board]
+
+W, H, D = 8, 8, 1
+rowbytes = ((W + 15) // 16) * 2
+
+# struct Gadget, 44 bytes, inside the DiskObject at offset 4.  GadgetRender is
+# non-NULL so the Image below it is read; SelectRender and GadgetText are not.
+gadget = struct.pack(">LhhhhHHHLLLLLHL",
+                     0,            # NextGadget
+                     0, 0, W, H,   # LeftEdge, TopEdge, Width, Height
+                     0x0004,       # Flags: GADGIMAGE
+                     0, 1,         # Activation, GadgetType (BOOLGADGET)
+                     1,            # GadgetRender, any non-zero
+                     0, 0, 0, 0,   # SelectRender, GadgetText, Mutual, Special
+                     0, 0)         # GadgetID, UserData
+assert len(gadget) == 44, len(gadget)
+
+# struct DiskObject: magic, version, the gadget, then the pointers that say
+# which of the sections after it are present.
+obj = struct.pack(">HH", 0xE310, 1) + gadget + struct.pack(
+    ">BBLLLLLLL",
+    3, 0,       # do_Type = WBTOOL, pad
+    0,          # DefaultTool: none
+    1,          # ToolTypes: present
+    0x80000000, 0x80000000,   # CurrentX, CurrentY = NO_ICON_POSITION
+    0,          # DrawerData
+    0,          # ToolWindow
+    4096)       # StackSize
+assert len(obj) == 78, len(obj)
+
+image = struct.pack(">hhhhhLBBL", 0, 0, W, H, D, 1, 0x1, 0x0, 0)
+bits = bytes([0xFF] + [0x81] * (H - 2) + [0xFF]) if rowbytes == 1 else \
+       b"".join(struct.pack(">H", v) for v in
+                [0xFF00] + [0x8100] * (H - 2) + [0xFF00])
+
+tt = struct.pack(">L", (len(tools) + 1) * 4)
+for t in tools:
+    b = t.encode("latin-1") + b"\0"
+    tt += struct.pack(">L", len(b)) + b
+
+with open(sys.argv[1], "wb") as fh:
+    fh.write(obj + image + bits + tt)
+EOF
+}
+
 # ------------------------------------------------------------- the drive ----
 
 HD="$ROOT/build/console-dh0"
@@ -277,6 +347,7 @@ EOF
         # it loads nothing, publishes no resolutions, and Workbench comes up on
         # the chipset with every check here still passing.
         cp "$P96DIR/Devs/Monitors/Picasso96" "$HD/Devs/Monitors/$RTG_BOARD"
+        rtg_monitor_icon "$HD/Devs/Monitors/$RTG_BOARD.info" "$RTG_BOARD"
         wb31_screenmode_prefs_id "$HD" "$depth" "$RTG_MODE_ID" "$RTG_W" "$RTG_H"
     else
         wb31_screenmode_prefs "$HD" "$depth"
