@@ -37,6 +37,7 @@ PORT=80
 WINDOW=28800
 SNAPROOT="${AMINETXDUO_CWB_SNAPSHOTS:-$HOME/amiga-assets/classicwb/snapshots}"
 P96DIR="${AMINETXDUO_P96_DIR:-$HOME/amiga-assets/p96}"
+CHECKHOST="${AMINETXDUO_CWB_CHECKHOST:-}"
 
 usage() {
     cat <<'EOF'
@@ -52,6 +53,8 @@ usage: tools/classicwb.sh [-m A600|A1200|A3000] [-v plain|rtg] [-b builddir]
   -p  httpd port                                      (default 80)
   -t  seconds before the guest is stopped          (default 28800)
   -s  snapshot store         (default ~/amiga-assets/classicwb/snapshots)
+  -c  ssh host that checks the served version; this host cannot reach
+      its own guest, so leaving it unset skips that one check
 EOF
 }
 
@@ -59,7 +62,7 @@ say() { printf '%s=%s\n' "$1" "$2"; }
 
 case "${1:-}" in -h|--help) usage; exit 0 ;; esac
 
-while getopts "m:v:b:B:n:p:t:s:h" opt; do
+while getopts "m:v:b:B:n:p:t:s:c:h" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         v) VARIANT="$OPTARG" ;;
@@ -69,6 +72,7 @@ while getopts "m:v:b:B:n:p:t:s:h" opt; do
         p) PORT="$OPTARG" ;;
         t) WINDOW="$OPTARG" ;;
         s) SNAPROOT="$OPTARG" ;;
+        c) CHECKHOST="$OPTARG" ;;
         h) usage; exit 0 ;;
         *) usage >&2; exit 2 ;;
     esac
@@ -254,8 +258,11 @@ if [ "$VARIANT" = rtg ]; then
         cp "$P96DIR/Devs/Monitors/Picasso96" "$HD/Devs/Monitors/$RTG_BOARD"
     fi
 
-    # devs/monitors reads the board name out of the TOOLTYPES of the icon
-    # beside it, so a monitor with no icon loads no card.
+    # devs/monitors reads the board name out of the tooltypes of the icon
+    # beside it, so a monitor with no icon loads no card.  ClassicWB P96
+    # brings its own, already set to uaegfx with the settings file off, and
+    # that one is left alone; this builds one only where there is none.
+    if [ ! -f "$HD/Devs/Monitors/$RTG_BOARD.info" ]; then
     AMINETXDUO_ICON_BOARD="$RTG_BOARD" python3 - \
         "$HD/Devs/Monitors/$RTG_BOARD.info" <<'EOF'
 import os, struct, sys
@@ -284,6 +291,7 @@ for t in tools:
 with open(sys.argv[1], "wb") as fh:
     fh.write(obj + img + planes + tt)
 EOF
+    fi
 
     # ENVARC:Sys/screenmode.prefs, which IPrefs reads through the ENVARC:
     # assign ClassicWB makes to SYS:Prefs/Env-Archive.  Without it Workbench
@@ -318,13 +326,17 @@ fi
 
 # ------------------------------------------------------- startup-sequence ---
 
-# ClassicWB's own sequence, with its EndCLI taken off so the tail below can
-# replace it.  LoadWB stays: on the rtg arm the screen it opens is the screen
-# being served.
+# ClassicWB's own sequence, with its final EndCLI taken off so the tail below
+# can replace it.  LoadWB stays: on the rtg arm the screen it opens is the
+# screen being served.
+#
+# Anchored at column 0, which is the whole of why it is safe.  ClassicWB's
+# sequence has two more EndCLI lines indented inside the boot-menu branches,
+# and those end the shell on purpose; deleting them drops both branches
+# through into a normal boot.
 [ -f "$HD/S/Startup-Sequence" ] || {
     say error "the snapshot has no S/Startup-Sequence"; exit 2; }
-sed -e '/^[[:space:]]*EndCLI/Id' "$SNAP/S/Startup-Sequence" \
-    > "$HD/S/Startup-Sequence"
+sed -e '/^EndCLI/d' "$SNAP/S/Startup-Sequence" > "$HD/S/Startup-Sequence"
 
 # Version of the binary the guest actually loads, written where the host can
 # read it: DH0 is a host directory, so this file appears beside the drive.  It
@@ -394,10 +406,14 @@ kickstart_rom_file=$KICKSTART
 fastmem_size=8
 floppy0type=-1
 nr_floppies=0
-uaehf0=dir,rw,DH0:DH0:$HD,0
+uaehf0=dir,rw,DH0:System:$HD,0
 a2065_rom_file=:ENABLED
 a2065_rom_options=mac=$MAC,$BACKEND
 EOF
+
+# The device is DH0, which is what the httpd arguments above spell, and the
+# volume is System, which is what ClassicWB's backdrop names.  Get the volume
+# wrong and the drive still works and its icon is missing from Workbench.
 
 if [ "$VARIANT" = rtg ]; then
     # uaegfx is Zorro III, and a quickstart model comes up 24-bit: without
@@ -516,25 +532,52 @@ for _ in $(seq 1 60); do
 done
 say guest_httpd_version "${GUEST_VER:-unknown}"
 
-SERVED=""
-for _ in $(seq 1 60); do
-    SERVED=$(curl -s -m 4 -D - -o /dev/null "http://$ADDR:$PORT/" 2>/dev/null |
-             sed -n 's/^[Ss]erver:[[:space:]]*//p' | tr -d '\r' | head -1 || true)
-    [ -n "$SERVED" ] && break
-    sleep 2
-done
-say served_by "${SERVED:-none}"
-
-if [ -z "$SERVED" ]; then
-    say error "nothing answered on http://$ADDR:$PORT/"
+if [ -z "$GUEST_VER" ]; then
+    say error "the guest never wrote httpd-ver.txt: it did not get as far as\
+ running the server"
     say emulog "$EMULOG"; say drive "$HD"; exit 1
 fi
-if [ -n "$BUILD_VER" ] && [ "$SERVED" != "AmiNetXDuo-httpd/$BUILD_VER" ]; then
-    say error "the guest is serving '$SERVED' and $BUILD built $BUILD_VER --\
+if [ -n "$BUILD_VER" ] && [ "${GUEST_VER#*"$BUILD_VER"}" = "$GUEST_VER" ]; then
+    say error "the guest loaded '$GUEST_VER' and $BUILD built $BUILD_VER --\
  the drive was staged from somewhere else"
     exit 1
 fi
+
+# The bytes on the drive against the bytes in the build directory.  Version
+# strings only catch a different release; this catches the same release built
+# from a different commit, which is the way a stale binary usually arrives.
+if command -v sha256sum >/dev/null 2>&1; then
+    a=$(sha256sum "$HTTPD" | cut -d' ' -f1)
+    b=$(sha256sum "$HD/C/httpd" | cut -d' ' -f1)
+    [ "$a" = "$b" ] || {
+        say error "the httpd on the drive is not the one in $BUILD"; exit 1; }
+    say staged_sha256 "$a"
+fi
 say version_match ok
+
+# What the running server says it is, asked from somewhere that can hear it.
+#
+# Not from here.  A frame this host sends to a guest of its own never reaches
+# it, so curl on the emulator host times out on a guest that is serving
+# perfectly well and the timeout says nothing about the guest.  -c names a
+# machine on the same segment that is not this one.
+if [ -n "$CHECKHOST" ]; then
+    SERVED=""
+    for _ in $(seq 1 30); do
+        SERVED=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$CHECKHOST" \
+                 "curl -s -m 5 -D - -o /dev/null http://$ADDR:$PORT/" 2>/dev/null |
+                 sed -n 's/^[Ss]erver:[[:space:]]*//p' | tr -d '\r' | head -1 || true)
+        [ -n "$SERVED" ] && break
+        sleep 2
+    done
+    say served_by "${SERVED:-none}"
+    [ -n "$SERVED" ] || {
+        say error "nothing answered on http://$ADDR:$PORT/ from $CHECKHOST"
+        exit 1; }
+    [ -z "$BUILD_VER" ] || [ "$SERVED" = "AmiNetXDuo-httpd/$BUILD_VER" ] || {
+        say error "the guest is serving '$SERVED', not $BUILD_VER"; exit 1; }
+    say served_check ok
+fi
 
 # --------------------------------------------------------------------------
 

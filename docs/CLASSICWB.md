@@ -8,11 +8,14 @@ the tools staged onto it from a build directory.
 | Model | Kickstart | Variant | ClassicWB | Command |
 |---|---|---|---|---|
 | A600 | 3.1 40.63 A500-A600-A2000 | plain | 68K | `tools/classicwb.sh -m A600` |
-| A600 | 3.1 40.63 A500-A600-A2000 | rtg | none | refused |
+| A600 | 3.1 40.63 A500-A600-A2000 | rtg | none | refused, exit 2 |
 | A1200 | 3.1 40.68 A1200 | plain | FULL | `tools/classicwb.sh -m A1200` |
 | A1200 | 3.1 40.68 A1200 | rtg | P96 | `tools/classicwb.sh -m A1200 -v rtg` |
 | A3000 | 3.1 40.68 A3000 | plain | FULL | `tools/classicwb.sh -m A3000` |
 | A3000 | 3.1 40.68 A3000 | rtg | P96 | `tools/classicwb.sh -m A3000 -v rtg` |
+
+Add `-c <host>` to any of them to have the served version checked from another
+machine.
 
 The Kickstart comes from `~/amiga-assets/env.sh`. A ROM that does not match the
 model and the CPU produces a black screen and an empty log.
@@ -61,16 +64,25 @@ the copy rather than the install.
 | `-p` | httpd port | 80 |
 | `-t` | seconds before the guest is stopped | 28800 |
 | `-s` | snapshot store | `~/amiga-assets/classicwb/snapshots` |
+| `-c` | ssh host that checks the served version | unset |
 
 Output is `key=value` lines. `RESULT=UP` and exit 0 mean the guest booted, took
 a lease, and answered.
 
 ## The version gate
 
-The launcher compares the `Server:` header of the running guest against
-`AMINETXDUO_VERSION` in the build directory it staged from, and exits non-zero
-on a mismatch. The guest also writes the full version cookie of the binary it
-loaded to `httpd-ver.txt` on the drive, which is a host directory.
+Three checks, so a launch cannot serve a binary left over from an earlier one.
+
+| Check | Compares | Fails with |
+|---|---|---|
+| `guest_httpd_version` | the version the guest read off the binary it loaded, against the build directory | staged from somewhere else |
+| `staged_sha256` | the bytes on the drive against the bytes in the build directory | not the one in the build |
+| `served_check` | the `Server:` header of the running server, against the build directory | serving another version |
+
+The third needs `-c`. A frame the emulator host sends to a guest of its own
+never reaches it, so a request from that host times out against a guest that is
+serving normally and the timeout says nothing about the guest. `-c` names
+another machine on the same segment. Without it the first two still run.
 
 ## Rebuilding a snapshot
 
