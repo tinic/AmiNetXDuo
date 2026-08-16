@@ -394,12 +394,12 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
             (tool_stricmp(cfg->device, live->nx_device) != 0 ||
              cfg->unit != live->nx_unit))
         {
-            tool_printf("  NOTE        running on this driver, but the "
+            tool_printf("  NOTE        running on this driver. The "
                         "configuration file says\n");
-            tool_printf("              %s unit %ld, the file has been "
-                        "changed since\n", (LONG)cfg->device, (LONG)cfg->unit);
-            tool_printf("              the network started, or this "
-                        "interface was brought up by hand.\n");
+            tool_printf("              %s unit %ld. The file was changed "
+                        "after the\n", (LONG)cfg->device, (LONG)cfg->unit);
+            tool_printf("              network started, or this interface "
+                        "was brought up by hand.\n");
         }
     }
     else
@@ -662,7 +662,7 @@ static VOID show_routes(const AmiConfig *cfg, BOOL have_live)
         }
         else
         {
-            tool_printf("(the stack is not readable from here; nothing but the "
+            tool_printf("(the stack is not readable from here: only the "
                         "configuration)\n");
         }
         return;
@@ -734,7 +734,7 @@ static VOID show_resolver(const AmiResolverConfig *r, BOOL from_files)
      * machine is not using.
      */
     if (from_files && r->nameserver_count > 0)
-        tool_printf("                (from DEVS:Internet; a DHCP interface is\n"
+        tool_printf("                (from DEVS:Internet. A DHCP interface is\n"
                     "                given its own, which replace these)\n");
 }
 
@@ -1050,9 +1050,9 @@ static VOID diagnose_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
         problem_head();
         tool_printf("  * %s is configured but the stack never attached it.\n",
                     (LONG)cfg->name);
-        tool_printf("    Its driver (%s) may not have opened. Start the\n",
+        tool_printf("    Start the network again and watch what\n");
+        tool_printf("    AddNetInterface says about its driver (%s).\n",
                     (LONG)cfg->device);
-        tool_printf("    network again and watch what AddNetInterface says.\n");
         return;
     }
 
@@ -1061,8 +1061,8 @@ static VOID diagnose_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
         problem_head();
         tool_printf("  * %s has no link: the card sees no network.\n",
                     (LONG)cfg->name);
-        tool_printf("    Check the cable at both ends, and that whatever it\n");
-        tool_printf("    plugs into is switched on.\n");
+        tool_printf("    Check the cable at both ends. Check that the device\n");
+        tool_printf("    at the far end is switched on.\n");
     }
 
     if (live->address == 0)
@@ -1074,9 +1074,9 @@ static VOID diagnose_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
         if (cfg->iptype == AMI_IPTYPE_DHCP)
         {
             tool_printf("    It is set to ask for one (DHCP) and nothing has\n");
-            tool_printf("    answered. Check the cable, and that something on\n");
-            tool_printf("    this network hands out addresses, or run\n");
-            tool_printf("    NetSetup and choose a fixed address instead.\n");
+            tool_printf("    answered. Check the cable. Check that something\n");
+            tool_printf("    on this network hands out addresses. To use a\n");
+            tool_printf("    fixed address instead, run NetSetup.\n");
         }
         else
         {
@@ -1224,7 +1224,8 @@ static VOID show_users(BOOL stack_running)
 
     if (!stack_running)
     {
-        tool_printf("(the network is not running, so nothing is)\n");
+        tool_printf("(the network is not running, so no program is using "
+                    "it)\n");
         return;
     }
 
@@ -1534,8 +1535,8 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
         tool_printf("  * The network has not been started.\n");
         tool_printf("    Start it with:   AddNetInterface %s\n",
                     (LONG)cfg->interfaces[0].name);
-        tool_printf("    Put that line in S:User-Startup to have it happen at\n");
-        tool_printf("    every boot.\n");
+        tool_printf("    Put that line in S:User-Startup to run it at every\n");
+        tool_printf("    boot.\n");
     }
 
     /*
@@ -1558,10 +1559,10 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
             if (cfg->default_gateway == 0 && (!have_live || !snap.have_gateway))
             {
                 problem_head();
-                tool_printf("  * There is no default route, so only machines on "
-                            "your own\n");
+                tool_printf("  * There is no default route, so only machines "
+                            "on this\n");
                 tool_printf("    network can be reached, nothing beyond it.\n");
-                tool_printf("    Run NetSetup and give it your router's address, "
+                tool_printf("    Run NetSetup and give it the router address, "
                             "or put\n");
                 tool_printf("    DEFAULT=<router address> in "
                             "DEVS:Internet/routes.\n");
@@ -1586,9 +1587,9 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
     {
         problem_head();
         tool_printf("  * The counters and per-interface detail above come from\n");
-        tool_printf("    the configuration, not from the running stack: the\n");
-        tool_printf("    stack is inside bsdsocket.library and has no call yet\n");
-        tool_printf("    that lets another command read it.\n");
+        tool_printf("    the configuration, not from the running stack. The\n");
+        tool_printf("    stack is inside bsdsocket.library, which has no call\n");
+        tool_printf("    yet that lets another command read it.\n");
     }
 
     if (problem_count == 0)

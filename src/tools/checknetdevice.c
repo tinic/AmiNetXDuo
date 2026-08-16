@@ -123,24 +123,24 @@ static const char *cnd_why(ULONG why)
     switch (why)
     {
     case ANXDIAG_WHY_CR:
-        return "the command register did not read back as a stopped DP8390, "
-               "so either nothing is decoding at that address or what is "
-               "there is not a DP8390";
+        return "the command register did not read back as a stopped DP8390. "
+               "Either nothing is decoding at that address, or what is there "
+               "is not a DP8390";
     case ANXDIAG_WHY_ODD:
-        return "the odd-numbered registers could not be read, as bytes or as "
-               "words.  A chip is answering at the even addresses and not at "
-               "the odd ones";
+        return "the odd-numbered registers did not answer a read, as bytes or "
+               "as words.  A chip is answering at the even addresses and not "
+               "at the odd ones";
     case ANXDIAG_WHY_ODD_BNRY:
-        return "the odd-numbered registers answered a read but would not hold "
+        return "the odd-numbered registers answered a read but did not hold "
                "a value written to them, as bytes or as words.  Half the "
                "register file is decoding and half is not";
     case ANXDIAG_WHY_BUFFER:
         return "a 32-byte pattern written through the data port did not read "
                "back, so the data port itself is wrong";
     case ANXDIAG_WHY_MEM:
-        return "the data port works -- a 32-byte pattern went through it and "
-               "came back -- and a full pass over the 16 KB packet buffer did "
-               "not, so the buffer RAM behind it is bad";
+        return "the data port works: a 32-byte pattern went through it and "
+               "came back. A full pass over the 16 KB packet buffer did not, "
+               "so the buffer RAM behind it is bad";
     case ANXDIAG_WHY_ADDRESS:
         return "the card offered no usable station address";
     case ANXDIAG_WHY_REGS:
@@ -152,7 +152,7 @@ static const char *cnd_why(ULONG why)
                "no EtherLink III is decoding at that address";
     case ANXDIAG_WHY_EEPROM:
         return "the card's EEPROM never reported itself ready, so no station "
-               "address could be read out of it";
+               "address was read out of it";
     default:
         break;
     }
@@ -244,9 +244,9 @@ static VOID cnd_step(const AnxDiagStep *st)
     case ANXDIAG_EXPANSION:
         if (v == 0)
         {
-            say("  expansion.library did NOT open.  No Zorro board can be\n"
-                "  found without it; only the PCMCIA slot and fixed-address\n"
-                "  cards were looked for.\n");
+            say("  expansion.library did not open.  Without it no Zorro board\n"
+                "  can be found.  Only the PCMCIA slot and the fixed-address\n"
+                "  cards were examined.\n");
             return;
         }
         say("  expansion.library opened at $%08lx.\n", v);
@@ -261,7 +261,7 @@ static VOID cnd_step(const AnxDiagStep *st)
         return;
     case ANXDIAG_NOMATCH:
         say("  A board with manufacturer %lu product %lu is not a card this\n"
-            "  driver supports; it was left alone.\n",
+            "  driver supports.  It was left alone.\n",
             (v >> 16) & 0xffffUL, v & 0xffUL);
         return;
     case ANXDIAG_UNITS_FULL:
@@ -277,7 +277,7 @@ static VOID cnd_step(const AnxDiagStep *st)
         say("  Found by autoconfig, board memory at $%08lx.\n", v);
         return;
     case ANXDIAG_FIXED_TRY:
-        say("  Looked for at its fixed address $%08lx; this card has no\n"
+        say("  Looked for at its fixed address $%08lx.  This card has no\n"
             "  autoconfig record, so it is probed rather than found.\n", v);
         return;
     case ANXDIAG_NO_CORE:
@@ -288,14 +288,14 @@ static VOID cnd_step(const AnxDiagStep *st)
         say("  Detection read the command register as $%02lx.\n", v);
         return;
     case ANXDIAG_ODD_RETRY:
-        say("  Odd-numbered registers would not read as bytes, so the\n"
+        say("  Odd-numbered registers did not read as bytes, so the\n"
             "  word-read path some Fast-Ethernet clones need was tried.\n");
         return;
     case ANXDIAG_ODD_PLAIN:
     case ANXDIAG_ODD_WORD:
         say("  Odd registers read as %s: ISR $%02lx, and $5a/$a5 written to\n"
-            "  BNRY came back $%02lx/$%02lx.  ISR should have bit 7 set after\n"
-            "  a reset and BNRY should return what was written.\n",
+            "  BNRY came back $%02lx/$%02lx.  ISR must have bit 7 set after a\n"
+            "  reset, and BNRY must return what was written.\n",
             (LONG)((st->ds_Code == (UWORD)ANXDIAG_ODD_PLAIN)
                        ? "bytes" : "words"),
             (v >> 16) & 0xffUL, (v >> 8) & 0xffUL, v & 0xffUL);
@@ -308,7 +308,7 @@ static VOID cnd_step(const AnxDiagStep *st)
     case ANXDIAG_ODDWIN:
         if (v == 0)
         {
-            say("  This card's registers are one contiguous block; it has no\n"
+            say("  This card's registers are one contiguous block.  It has no\n"
                 "  separate window for the odd-numbered ones.\n");
             return;
         }
@@ -343,7 +343,7 @@ static VOID cnd_step(const AnxDiagStep *st)
         if (v != 0)
         {
             say("  Odd-numbered registers are read as words.  This card only\n"
-                "  decodes 16-bit I/O cycles, and the driver found that out\n"
+                "  decodes 16-bit I/O cycles, and the driver measured that\n"
                 "  by itself.\n");
             return;
         }
@@ -382,7 +382,7 @@ static VOID cnd_step(const AnxDiagStep *st)
         if (v == ANXDIAG_ABSENT)
         {
             say("  The card has no CISTPL_FUNCID tuple.  Many real cards do\n"
-                "  not; it was assumed to be a network card.\n");
+                "  not have one.  It was assumed to be a network card.\n");
             return;
         }
         if (v == 6)
@@ -394,8 +394,8 @@ static VOID cnd_step(const AnxDiagStep *st)
         return;
     case ANXDIAG_PC_NOTLAN:
         say("  That is not a LAN adapter, so the slot was given straight\n"
-            "  back.  Driving an IDE adapter as a network card would write\n"
-            "  to somebody's disk.\n");
+            "  back.  Driving an IDE adapter as a network card writes to\n"
+            "  the disk behind it.\n");
         return;
     case ANXDIAG_PC_MANFID:
         if (v == ANXDIAG_ABSENT)
@@ -461,8 +461,9 @@ static VOID cnd_step(const AnxDiagStep *st)
         }
         say("  card.resource answered $%02lx, and a bit missing from that is\n"
             "  a bit this machine does not support.  Without $08 the socket\n"
-            "  is still write-protected and it will swallow the write below\n"
-            "  with no error; without $02 it is still a memory socket.\n", v);
+            "  is still write-protected, and it accepts the write below\n"
+            "  without an error.  Without $02 it is still a memory socket.\n",
+            v);
         return;
     case ANXDIAG_PC_COR:
         say("  The configuration option register was written at $%08lx.\n", v);
@@ -515,10 +516,10 @@ static VOID cnd_step(const AnxDiagStep *st)
     case ANXDIAG_PC_SILENT:
         say("  No chip answered at $%08lx after either write, with 40 ms of\n"
             "  settling time allowed for each, so the slot was given back.\n"
-            "  Either the card is not an NE2000 clone, or it wants a\n"
+            "  Either the card is not an NE2000 clone, or it needs a\n"
             "  configuration entry other than the first, or the socket never\n"
-            "  came out of memory mode -- the card.resource answer above\n"
-            "  says which of those it is.\n", v);
+            "  left memory mode.  The card.resource answer above says which\n"
+            "  of those it is.\n", v);
         return;
     case ANXDIAG_PC_NOROW:
         say("  The card in the slot says manufacturer $%04lx product $%04lx,\n"
@@ -533,8 +534,8 @@ static VOID cnd_step(const AnxDiagStep *st)
     case ANXDIAG_PC_IRQSKIP:
         say("  card.resource is V%lu.  The card's interrupt is left at the\n"
             "  resource's own default, which already passes it: OwnCard()\n"
-            "  enables BSY/IRQ on every version.  Asking for it again would\n"
-            "  rewrite the socket's mode register and turn the socket off.\n",
+            "  enables BSY/IRQ on every version.  Asking for it again\n"
+            "  rewrites the socket's mode register and turns the socket off.\n",
             v);
         return;
     case ANXDIAG_PC_CLAIMED:
@@ -542,27 +543,28 @@ static VOID cnd_step(const AnxDiagStep *st)
         return;
     case ANXDIAG_PC_CARD:
         say("  The card in the slot was identified from its CIS as card row\n"
-            "  %lu.  Everything printed for THIS MACHINE above about the slot\n"
-            "  happened before that and so belongs to no card.\n", v);
+            "  %lu.  The slot lines printed under THIS MACHINE above happened\n"
+            "  before that, so they belong to no card.\n", v);
         return;
     case ANXDIAG_PC_CFTABLE:
         say("  The first configuration table entry begins $%02lx $%02lx $%02lx\n"
             "  $%02lx.  This driver reads the configuration index out of it and\n"
-            "  assumes the card row's register offset for the rest; those bytes\n"
-            "  are what would say otherwise.\n",
+            "  assumes the card row's register offset for the rest.  Any other\n"
+            "  offset is recorded in those bytes.\n",
             (v >> 24) & 0xff, (v >> 16) & 0xff, (v >> 8) & 0xff, v & 0xff);
         return;
 
     /* ---- the EtherLink III ---- */
     case ANXDIAG_EL3_MFG:
         say("  The manufacturer ID read back as $%04lx.  It is $6d50 on every\n"
-            "  EtherLink III, so $506d means the register window exchanges the\n"
-            "  halves of a word and anything else means no such card answered.\n",
+            "  EtherLink III.  $506d means the register window exchanges the\n"
+            "  halves of a word.  Anything else means no such card answered.\n",
             v);
         return;
     case ANXDIAG_EL3_ORDER:
         if (v == 0)
-            say("  Register words arrive as the chip holds them; no swap.\n");
+            say("  Register words arrive as the chip holds them.  There is\n"
+                "  no swap.\n");
         else
             say("  The register window exchanges the halves of every word, and\n"
                 "  the driver measured that rather than being told it.\n");
@@ -747,7 +749,7 @@ int main(int argc, char **argv)
     {
         tool_error("the driver publishes a probe record this command cannot "
                    "read");
-        say("\n  The record says version %lu, %lu bytes; this command was\n"
+        say("\n  The record says version %lu, %lu bytes.  This command was\n"
             "  built for version %lu, %lu bytes.  DEVS:Networks/anxnet.device\n"
             "  and C:%s ship together, so one of the two is from a different\n"
             "  release.  Update both.\n",
@@ -769,7 +771,7 @@ int main(int argc, char **argv)
             "it.");
         say("\n");
         tool_wrap(2,
-            "Check that DEVS:Networks/anxnet.device exists, then run this "
+            "Check that DEVS:Networks/anxnet.device exists. Then run this "
             "command again without NOLOAD, which loads the driver so it can "
             "probe.");
         FreeArgs(rda);
@@ -779,8 +781,8 @@ int main(int argc, char **argv)
     say("\n");
     if (cnd_mark.ad_Lost != 0)
     {
-        say("%lu step(s) recorded, and %lu more than the record holds, which\n"
-            "were dropped.\n",
+        say("%lu step(s) recorded.  %lu more than the record holds were\n"
+            "dropped.\n",
             (ULONG)cnd_mark.ad_Used, (ULONG)cnd_mark.ad_Lost);
     }
     else
@@ -811,7 +813,7 @@ int main(int argc, char **argv)
         say("\n");
         tool_wrap(2,
             "One or more supported cards were found after the driver had "
-            "run out of units. Take a card out, or open the ones you have "
+            "run out of units. Remove a card, or open the attached cards "
             "by name.");
         rc = RETURN_WARN;
     }
