@@ -951,9 +951,12 @@ static BOOL bsd_v4_source_for(AmiSocket *sock, ULONG *addr_out)
 
     peer = sock->as_PeerAddr.nxd_ip_address.v4;
 
+#ifndef NX_DISABLE_LOOPBACK_INTERFACE
     if ((peer >> 24) == 127UL)
         nxif = &ip->nx_ip_interface[NX_LOOPBACK_INTERFACE];
-    else if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) == ASF_TCP)
+    else
+#endif
+    if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) == ASF_TCP)
         nxif = sock->as_Nx.tcp.nx_tcp_socket_connect_interface;
 
     if (nxif == NX_NULL)

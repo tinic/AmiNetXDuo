@@ -8,8 +8,11 @@
  *   A connection allocates, listed in one place:
  *
  *     crypto metadata      sized by _nx_secure_tls_metadata_size_calculate()
- *                          rather than guessed, measured at 16,272 bytes for
- *                          the ECC ciphersuite table (docs/RESEARCH.md 9)
+ *                          rather than guessed.  The vendored table wants
+ *                          10,128 bytes for the ECC ciphersuites
+ *                          (docs/RESEARCH.md 9) and ours costs one
+ *                          AMI_TLS_POWM_SCRATCH_LIMBS area on top, measured,
+ *                          so 8 KB more: 18,320
  *     record buffer        TLSA_RecordBuffer, default 10 KB.  A certificate
  *                          flight arrives as one record and must fit
  *     remote certificates  TLSA_MaxChain x (NX_SECURE_X509_CERT + 2.5 KB DER)

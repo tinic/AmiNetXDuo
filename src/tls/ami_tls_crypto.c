@@ -419,11 +419,11 @@ UINT    i;
  * The w = 4 line only runs when a private key's primes are unknown.  w = 6 is
  * also C68K_POWM_MAX_WINDOW, so the first line is not short of scratch.
  *
- * 8 KB per RSA context, HN_UBASE being a ULONG here.  That is what a session
- * pays: nx_secure_tls_metadata_size_calculate() sizes the public-auth slot
- * from the largest method in the table and this is it, so the whole scratch
- * area lands there and nowhere else.  The public-cipher slot is already sized
- * by NX_CRYPTO_ECDH and does not move.
+ * 8 KB per RSA context, HN_UBASE being a ULONG here, and a session pays for
+ * exactly one of them: nx_secure_tls_metadata_size_calculate() came out
+ * 6,144 bytes over the vendored table when the area was 1536 limbs, which is
+ * one area and not two, so 2048 limbs puts the ECC table at 18,320 (see
+ * tls_conn.c).
  *
  * An undersized area is safe, which is what the 4096-bit line means:
  * c68k_mont_power_modulus() answers NX_CRYPTO_SIZE_ERROR when not even w = 1
