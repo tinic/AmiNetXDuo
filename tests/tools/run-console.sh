@@ -752,8 +752,19 @@ for depth in "${DEPTHS[@]}"; do
     # address space, once on an RGBFF mask without CLUT, once on a monitor
     # file staged under the wrong name.  The seventh number of the geom word
     # is rfb_geom.format, and 1 is the only value that says a card.
+    #
+    # EVERY geom, not the geom.  A session gets a fresh geometry whenever the
+    # screen it serves changes, and this read all of them into one variable:
+    # the first run in which the front screen changed resolution mid-session
+    # put two lines in `fmt`, and the assertion then failed a perfectly good
+    # card session with "says format 1<newline>1, not 1".  sort -u collapses a
+    # session that stayed on the card to the one value, and a session that
+    # dropped to the chipset half way through still fails -- which is the case
+    # this check exists for and the one a last-line-wins fix would have lost.
     if [ "$RTG" = 1 ]; then
-        fmt=$(awk '/^geom=/ { print $NF }' "$OUTDIR/$tag-probe.txt" 2>/dev/null || true)
+        fmt=$(awk '/^geom=/ { print $NF }' "$OUTDIR/$tag-probe.txt" 2>/dev/null \
+              | sort -u | tr '\n' ' ' || true)
+        fmt=${fmt% }
         say "${tag}_rtg_format" "${fmt:-none}"
         if [ "${fmt:-0}" != "1" ]; then
             say "${tag}_error" "the session came up planar: -R asked for a card\

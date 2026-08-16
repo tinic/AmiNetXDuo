@@ -196,6 +196,19 @@ static char            fb_word[FB_WORD_MAX + 1];
 static UWORD           fb_word_n;
 static UBYTE           fb_word_over;    /* this message is longer than we read */
 
+/*
+ * WHY THE LAST GEOMETRY WAS REFUSED, for the close frame.
+ *
+ * httprtg.h promises that a 15, 16, 24 or 32-bit screen is refused BY NAME,
+ * and the sentence it hands back went to fb_say() -- the server's own log,
+ * which on a guest the harness starts with `Run >DH0:httpd.txt` is a file
+ * nobody ever sees.  What the person watching got instead, when a 16-bit
+ * screen came to the front of a live session, was the generic "the front
+ * screen is not one this can read".  A string literal, so no copy: only the
+ * RTG refusals set it, because they are the ones with a name to give.
+ */
+static const char     *fb_refuse_why;
+
 static FbGeometry      fb_geom;
 static rfb_geom        fb_rg;
 static rfb_encoder     fb_enc;
@@ -584,6 +597,10 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
     ULONG stride;
     UWORD plane;
 
+    /* Cleared here, so a refusal from an earlier screen is never the sentence
+       a later one closes with. */
+    fb_refuse_why = NULL;
+
     if (bm == NULL)
     {
         fb_say("the front screen has no bitmap");
@@ -626,9 +643,10 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
 
         if (!http_rtg_describe(bm, &rs, &why))
         {
-            fb_say(why != NULL ? why
-                               : "the front screen is an RTG screen this "
-                                 "cannot read");
+            fb_refuse_why = (why != NULL) ? why
+                                          : "the front screen is an RTG screen "
+                                            "this cannot read";
+            fb_say(fb_refuse_why);
             return FALSE;
         }
 
@@ -2787,7 +2805,9 @@ BOOL http_fb_slice(ULONG now)
     case FB_GRAB_REFUSED:
     default:
         fb_close_saying(HTTP_WS_CLOSE_GOING,
-                        "the front screen is not one this can read");
+                        (fb_refuse_why != NULL)
+                        ? fb_refuse_why
+                        : "the front screen is not one this can read");
         return TRUE;
     }
 
