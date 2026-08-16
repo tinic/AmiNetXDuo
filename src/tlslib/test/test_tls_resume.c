@@ -1502,6 +1502,7 @@ static void test_clienthello_ticket_over_the_ceiling(void)
     CHECK((h_conn.tc_ResumeFlags & TLSR_OFFERED) != 0);
     CHECK(h_conn.tc_TicketLength == TLS_RESUME_TICKET_MAX);
     CHECK(h_conn.tc_OfferSidLength == TLS_RESUME_SID_MAX);  /* generated */
+    CHECK((h_conn.tc_ResumeFlags & TLSR_SID_GEN) != 0);
 
     /* H_CH_LENGTH + 32 + 4 + 256 + 4 is over 500. */
     CHECK((ULONG)(H_CH_LENGTH + TLS_RESUME_SID_MAX + 4 +
@@ -1516,22 +1517,55 @@ static void test_clienthello_ticket_over_the_ceiling(void)
     CHECK(be16(&h_packet[45 + TLS_RESUME_SID_MAX + H_CH_EXT_BODY + 2]) == 0);
 
     /*
-     * The session ID stays on the wire and TLSR_OFFERED stays set.
+     * The session ID still goes out -- the splice already happened and 32
+     * bytes are not worth a second layout pass -- but TLSR_OFFERED comes off,
+     * so nothing the server echoes can restore the cached master secret.
      *
-     * That is what the code does, and it is deliberate for the other shape of
-     * cached session, the one whose session ID came from a server rather than
-     * from ami_random_rand().  A dropped ticket still leaves a legitimate
-     * RFC 5246 session-ID resumption to attempt.
-     *
-     * For the shape here, a generated handle with nothing behind it, the
-     * offer is meaningless.  It costs 32 bytes, and a server cannot echo an ID
-     * it never issued.  If one does, the restored master secret does not match
-     * and the handshake dies at the server's Finished, which is a failure and
-     * not a false trust claim.  tls_resume.c:1134 describes a guard for
-     * exactly this and spells it `sid_length == 0`, which cannot be true here
-     * because tls_resume_prepare() generates the ID precisely when a ticket is
-     * present -- so the guard never fires for the case it names.
+     * TLSR_SID_GEN is what separates this from the other shape of cached
+     * session, the one whose session ID came from a server.  There a dropped
+     * ticket leaves a legitimate RFC 5246 session-ID resumption to attempt,
+     * and TLSR_OFFERED stays set; test_clienthello_server_sid_survives_drop()
+     * below is that case.
      */
+    CHECK((h_conn.tc_ResumeFlags & TLSR_OFFERED) == 0);
+    CHECK(h_packet[34] == TLS_RESUME_SID_MAX);
+}
+
+/*
+ * The same ceiling, with a session ID the server issued.
+ *
+ * The ticket is dropped for the same reason, but the ID on the wire is one
+ * the server can recognise, so the offer is real and TLSR_OFFERED stays set.
+ * This is the half the guard must not take away.
+ */
+static void test_clienthello_server_sid_survives_drop(void)
+{
+    printf("tls_resume: a server's session ID outlives the dropped ticket\n");
+
+    base_reset();
+    conn_init("example.com", 443, "", 0xAAAA0001UL);
+    h_conn.tc_ResumeFlags &= ~TLSR_PERSIST;
+
+    /* A session with BOTH: a server session ID and a ticket. */
+    conn_take_ticket(TLS_RESUME_TICKET_MAX, 3600);
+    tls_resume_record(&h_conn);
+
+    conn_init("example.com", 443, "", 0xAAAA0001UL);
+    h_conn.tc_ResumeFlags &= ~TLSR_PERSIST;
+    tls_resume_prepare(&h_conn);
+
+    CHECK((h_conn.tc_ResumeFlags & TLSR_OFFERED) != 0);
+    CHECK((h_conn.tc_ResumeFlags & TLSR_SID_GEN) == 0);
+    CHECK(h_conn.tc_OfferSidLength == TLS_RESUME_SID_MAX);
+    CHECK(h_conn.tc_TicketLength == TLS_RESUME_TICKET_MAX);
+
+    ch_packet_init(sizeof(h_packet));
+    CHECK(__wrap__nx_secure_tls_send_clienthello(&h_conn.tc_Session,
+                                                 &h_ch_packet) == NX_SUCCESS);
+
+    /* The ticket is gone and the offer is not. */
+    CHECK(h_ch_packet.nx_packet_length + 4 <= TLS_CLIENTHELLO_CACHE_MAX);
+    CHECK(be16(&h_packet[45 + TLS_RESUME_SID_MAX + H_CH_EXT_BODY + 2]) == 0);
     CHECK((h_conn.tc_ResumeFlags & TLSR_OFFERED) != 0);
     CHECK(h_packet[34] == TLS_RESUME_SID_MAX);
 }
@@ -1807,6 +1841,7 @@ int main(void)
     test_clienthello_asks_for_a_ticket();
     test_clienthello_offers_the_session();
     test_clienthello_ticket_over_the_ceiling();
+    test_clienthello_server_sid_survives_drop();
     test_clienthello_cache_ceiling_leaves_nothing();
     test_clienthello_no_room_at_all();
     test_clienthello_unfamiliar_layout();

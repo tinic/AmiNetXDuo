@@ -855,6 +855,7 @@ VOID tls_resume_prepare(TLSConnection *conn)
             }
 
             conn->tc_OfferSidLength = TLS_RESUME_SID_MAX;
+            conn->tc_ResumeFlags   |= TLSR_SID_GEN;
         }
 
         entry->re_Serial = ++base->tb_SessionSerial;
@@ -1135,10 +1136,24 @@ UINT __wrap__nx_secure_tls_send_clienthello(NX_SECURE_TLS_SESSION *tls_session,
             return NX_SUCCESS;
         }
 
-        /* The cached ticket cannot be presented, so the cached master secret
-           must not be either.  Otherwise the ServerHello echo test can match
-           a session-ID resumption this connection is not set up for. */
-        if ((conn->tc_ResumeFlags & TLSR_OFFERED) != 0 && sid_length == 0)
+        /*
+         * The cached ticket cannot be presented, so the cached master secret
+         * must not be either -- but only where the session ID going out is
+         * one tls_resume_prepare() generated.  That ID is the ticket's echo
+         * handle (RFC 5077 3.4) and nothing else: no server ever issued it,
+         * so an echo of it is not an acceptance signal and must not restore
+         * the cached master secret.
+         *
+         * A session ID that came from a server is left offered.  Dropping the
+         * ticket still leaves a legitimate RFC 5246 session-ID resumption to
+         * attempt, and refusing it here would cost a full handshake for
+         * nothing.
+         *
+         * This used to be spelled `sid_length == 0`, which cannot hold for a
+         * dropped ticket: prepare() generates the ID precisely when a ticket
+         * is present, so the guard never fired for the case it names.
+         */
+        if ((conn->tc_ResumeFlags & TLSR_SID_GEN) != 0)
             conn->tc_ResumeFlags &= ~TLSR_OFFERED;
     }
 

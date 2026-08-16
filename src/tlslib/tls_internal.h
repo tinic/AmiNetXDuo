@@ -160,6 +160,9 @@ typedef struct TLSResumeEntry
 #define TLSR_RESUMED        (1UL << 2)  /* the server took it                */
 #define TLSR_TICKET_NEW     (1UL << 3)  /* a NewSessionTicket arrived        */
 #define TLSR_PERSIST        (1UL << 4)  /* mirror the cache to disk          */
+#define TLSR_SID_GEN        (1UL << 5)  /* the session ID is ours, not a
+                                           server's: it exists only as the
+                                           ticket's echo handle              */
 
 /* -------------------------------------------------------- trust store --- */
 
