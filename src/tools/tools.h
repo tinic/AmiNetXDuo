@@ -38,7 +38,7 @@ extern "C" {
 #endif
 
 /*
- * Every tool defines this once; it prefixes diagnostics and is what
+ * Every tool defines this once.  It prefixes diagnostics and is what
  * PrintFault() puts in front of the DOS error text.
  */
 extern const char *const tool_name;
@@ -87,7 +87,7 @@ AmiNetStack *tool_require_stack(VOID);
 /* Interface index in config order, or -1 after printing a message. */
 LONG tool_find_interface(const char *name);
 
-/* "DEVS:NetInterfaces/eth0" -> "eth0"; "eth0" -> "eth0". */
+/* "DEVS:NetInterfaces/eth0" -> "eth0", and "eth0" -> "eth0". */
 const char *tool_basename(const char *path);
 
 /* Was this started from Workbench? These commands are Shell-only. */
@@ -130,7 +130,7 @@ const char *tool_device_where(const char *device);
 
 /*
  * Open and immediately close a SANA-II device, to find out whether it really
- * works. 0 means it opened; anything else is the OpenDevice() error.
+ * works. 0 means it opened, and anything else is the OpenDevice() error.
  */
 /* TOOL_VERSTAG, which every command uses for its $VER: string. */
 #include "aminetxduo/version.h"
@@ -140,28 +140,26 @@ const char *tool_device_where(const char *device);
 
 /* The device opened and then refused S2_DEVICEQUERY, the driver is there and
    the card answered the open, so neither the unit number nor a missing file is
-   what to look at. Same distinction the library draws as AMI_NET_ERR_DEVBAD;
-   the probe has to derive it because a failed OpenLibrary() carries no status
+   what to look at. Same distinction the library draws as AMI_NET_ERR_DEVBAD.
+   The probe has to derive it because a failed OpenLibrary() carries no status
    back to a command. */
 #define TOOL_PROBE_REFUSED      (-102)
-/* `card` pins which board a driver that covers a family should bind to,
+/* `card` pins which board a driver that covers a family must bind to,
    NULL or empty for the ordinary one-card-per-device case. */
 LONG tool_device_probe(const char *device, ULONG unit, const char *card);
-
-/* Indented advice under an error line, and a blank separator. */
 
 /* Word-wrap to the width of a Shell window, indented. */
 VOID tool_wrap(ULONG indent, const char *text);
 
 /*
  * Print configuration-file problems, file, line number, suggestion, while
- * the config layer is parsing. Bracket a call to ami_config_load() or
+ * the configuration layer is parsing. Bracket a call to ami_config_load() or
  * ami_config_load_interface() with these.
  */
 VOID tool_config_watch(VOID);
 VOID tool_config_unwatch(VOID);
 
-/* The explainers. Each prints a block; none of them exits. */
+/* The explainers. Each prints a block, and none of them exits. */
 VOID tool_explain_interface_file(const char *name);   /* file missing        */
 VOID tool_explain_device(const char *device, ULONG unit,
                          const char *card);
@@ -187,7 +185,7 @@ BOOL tool_stack_installed(VOID);
  * outlives this command. NULL means the library is missing or the stack refused
  * to start.
  *
- * Hand the base back to tool_stack_release() on EVERY exit path, including the
+ * Hand the base back to tool_stack_release() on every exit path, including the
  * failing ones. It closes when closing is safe and keeps the open when it is
  * not, which is the one case a command must not decide for itself.
  */
@@ -197,7 +195,7 @@ VOID tool_stack_release(struct Library *base);
 /*
  * Is that library AmiNetXDuo's? Every Amiga TCP/IP stack answers to the name
  * bsdsocket.library, so a machine with Roadshow, AmiTCP or an emulator's own
- * stack will hand out somebody else's.
+ * stack hands out somebody else's.
  */
 BOOL tool_stack_is_ours(struct Library *base);
 BOOL tool_stack_version(char *buf, ULONG len);
@@ -205,7 +203,7 @@ VOID tool_explain_foreign_stack(struct Library *base);
 
 /*
  * gethostid() and gethostname() through the library's own vectors. FALSE when
- * nothing is running; never starts the stack.
+ * nothing is running. Never starts the stack.
  */
 BOOL tool_stack_query(ULONG *addr_out, char *host, ULONG hostlen);
 
@@ -214,7 +212,7 @@ BOOL tool_stack_query(ULONG *addr_out, char *host, ULONG hostlen);
  * where a DHCP option 15 ends up, and a router advertisement's RFC 8106 5.2
  * list when nothing else named a domain, so it can be set on a machine whose
  * DEVS:Internet says nothing. FALSE when nothing is running or no domain is
- * known; never starts the stack.
+ * known. Never starts the stack.
  */
 BOOL tool_stack_domain(char *domain, ULONG domainlen);
 
@@ -232,7 +230,7 @@ BOOL tool_stack_lookup_addr(ULONG addr, char *name_out, ULONG name_len);
  * The name servers the running stack is really using, as text, including ones
  * no file on disk mentions: a DHCP lease's, and a router advertisement's, which
  * are IPv6 literals and are why the strings are this wide. Returns how many
- * were written; 0 when nothing is running.
+ * were written, and 0 when nothing is running.
  *
  * TOOL_NAME_SERVERS_MAX is what the stack can hold of both families at once.
  */
@@ -247,7 +245,7 @@ ULONG tool_stack_name_servers(char out[][AMI_CFG_IP6_STRLEN], ULONG max);
  * include/aminetxduo/netstatus.h.
  *
  * A command that links libnetxduo.a gets its own NX_IP with no interfaces and
- * its own ThreadX kernel that was never started; the running stack lives inside
+ * its own ThreadX kernel that was never started. The running stack lives inside
  * bsdsocket.library. netstack_ip() in a tool resolves to
  * src/tools/netstack_weak.c's stub and returns NULL in every shipped build,
  * which left `netstat`, `ping` and ShowNetStatus inert in v0.2.0 while printing
@@ -266,15 +264,6 @@ struct Library *tool_netstatus_open(BOOL quiet);
 VOID            tool_netstatus_close(struct Library *base);
 
 /*
- * One snapshot. `what` is a NETSTATUS_* selector; `buffer` starts with a
- * NetStatusHeader this fills in. Returns the number of entries written, or -1
- * having printed nothing, the caller decides what a failure means, since "no
- * ARP entries" and "this is not our library" need different words.
- *
- * A buffer that holds the header but no entries asks how many there are:
- * nsh_Available comes back regardless of nsh_Count.
- */
-/*
  * An IPv6 address, four host-order ULONGs, in RFC 5952 text, and the same
  * text back to four ULONGs.  Both answer the same on a library with IPv6 and
  * one without: they convert text, and whether the machine can reach the
@@ -284,6 +273,15 @@ VOID            tool_netstatus_close(struct Library *base);
 VOID tool_format_ip6(const ULONG addr[4], char *buf, ULONG buflen);
 BOOL tool_parse_ip6(const char *text, ULONG out[4]);
 
+/*
+ * One snapshot. `what` is a NETSTATUS_* selector, and `buffer` starts with a
+ * NetStatusHeader this fills in. Returns the number of entries written, or -1
+ * having printed nothing. The caller decides what a failure means, because an
+ * empty ARP table and a library that is not ours need different words.
+ *
+ * A buffer that holds the header but no entries asks how many there are:
+ * nsh_Available comes back regardless of nsh_Count.
+ */
 LONG tool_netstatus_query(struct Library *base, ULONG what,
                           APTR buffer, ULONG size, ULONG entry_size);
 

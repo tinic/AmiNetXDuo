@@ -1,7 +1,7 @@
 /*
  * AmiNetXDuo tools, reading the running NetX Duo instance.
  *
- * Only ShowNetStatus and netstat need this; the rest of the tools stay clear
+ * Only ShowNetStatus and netstat need this. The rest of the tools stay clear
  * of the stack's internals.
  *
  * The snapshot comes from bsdsocket.library through NetStackQuery()
@@ -34,8 +34,8 @@ extern "C" {
 
 /*
  * Suppress the failure messages the three calls below print by default.
- * netstat wants them; ShowNetStatus does not, since it words the "up but
- * unreadable" case itself and an error block halfway through its table would
+ * netstat wants them. ShowNetStatus does not, since it words a running but
+ * unreadable stack itself, and an error block halfway through its table would
  * break the report.
  */
 VOID tool_nx_quiet(BOOL quiet);
@@ -46,7 +46,7 @@ VOID tool_nx_quiet(BOOL quiet);
 #define TOOL_MAX_SOCK   32
 
 /*
- * IPv6 addresses across all interfaces.  Each gets a link-local one and may
+ * IPv6 addresses across all interfaces.  Each gets a link-local one and can
  * hold a configured or advertised global one alongside it, so two per
  * interface plus room to see a third arrive.
  */
@@ -96,7 +96,7 @@ typedef struct ToolAddr6Info
     char    text[48];
 } ToolAddr6Info;
 
-/* "valid", "tentative"; NULL when the state needs no comment. */
+/* "valid", "tentative", or NULL when the state needs no comment. */
 const char *tool_addr6_state(UWORD state);
 
 typedef struct ToolSockInfo
@@ -147,8 +147,8 @@ typedef struct ToolSnapshot
 
 /*
  * One question to the running library. Set `want_sockets` only when the
- * connection table is needed; it costs another call across the boundary.
- * Returns 0, or a negative code after printing a message.
+ * connection table is needed, because it costs another call across the
+ * boundary. Returns 0, or a negative code after printing a message.
  */
 LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets);
 
@@ -156,11 +156,11 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets);
 
 /*
  * The per-protocol counters and the ARP cache in one place, so ShowNetStatus
- * and netstat cannot report different numbers for the same thing; only their
+ * and netstat cannot report different numbers for the same thing. Only their
  * layout differs.
  *
  * A `have_*` flag is FALSE when the protocol is not enabled in the running
- * stack. That is not the same as "all its counters are zero" and must not be
+ * stack. That is not the same as every counter reading zero, and must not be
  * printed as though it were.
  */
 
@@ -215,7 +215,7 @@ typedef struct ToolNeighbours
 
 LONG tool_neighbours(ToolNeighbours *out);
 
-/* "REACHABLE", "STALE"; never NULL. */
+/* "REACHABLE", "STALE". Never NULL. */
 const char *tool_nd_state_name(UWORD state);
 
 /* What that state means, one sentence, or NULL when it needs no comment. */
@@ -373,7 +373,7 @@ typedef struct ToolDhcp
 
 /*
  * Returns 0, or a negative code.  A stack too old to know the selector is not
- * an error; callers treat it as "no lease detail".
+ * an error, and callers treat it as having no lease detail to give.
  */
 LONG tool_dhcp(ToolDhcp *out);
 
@@ -397,8 +397,8 @@ typedef struct ToolRoutes
     BOOL        truncated;
     /*
      * FALSE when NX_ENABLE_IP_STATIC_ROUTING is not in the running stack's
-     * build, the directly-attached prefixes and the default gateway are
-     * still reported and are still real, but there is no table to add to.
+     * build. The directly-attached prefixes and the default gateway are still
+     * reported and are still real, but there is no table to add to.
      */
     BOOL        static_routing;
 } ToolRoutes;
@@ -408,8 +408,8 @@ LONG tool_routes(ToolRoutes *out);
 /*
  * The IPv6 routes: the on-link prefixes and the default routers, in the order
  * the stack consults them. Separate from ToolRoutes because IPv6 has no
- * netmask and no single default gateway, there may be several default
- * routers, each with its own lifetime.
+ * netmask and no single default gateway. There can be several default routers,
+ * each with its own lifetime.
  *
  * Text rather than words, for ToolAddr6Info's reason.
  */
@@ -420,7 +420,7 @@ typedef struct ToolRoute6
     char    dest[48];
     char    next_hop[48];            /* empty = on link, no next hop         */
     /* The same destination in words, because text cannot be masked and a
-       caller asking "is this address inside this prefix" needs to. */
+       caller has to test whether an address is inside the prefix. */
     ULONG   dest_words[4];
     ULONG   prefix;
     ULONG   lifetime;                /* NETSTATUS_RT6_FOREVER = never expires */
@@ -484,7 +484,7 @@ VOID tool_print_dest6(const ToolDest6Table *table, const AmiConfig *cfg);
  * disagree about the stack's routes.
  *
  * `fmt` turns an address into text. NULL means ami_config_format_ip(), the
- * dotted quad; ShowNetStatus passes its own so NAMES turns a gateway into a
+ * dotted quad. ShowNetStatus passes its own so NAMES turns a gateway into a
  * host name here as it does elsewhere in that report.
  */
 typedef VOID (*ToolAddrText)(ULONG addr, char *buf, ULONG buflen);

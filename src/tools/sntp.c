@@ -14,9 +14,9 @@
  * `fetch` reports which of the two happened on every https: URL.
  *
  * RFC 4330 defines broadcast and unicast.  Broadcast means waiting for a LAN
- * server to announce the time on its own schedule, NetX Duo's own client
- * allows two hours between announcements, and believing whatever claims to
- * be a time server; neither suits a Shell command.  This is unicast: ask the
+ * server to announce the time on its own schedule, and believing whatever
+ * claims to be a time server.  NetX Duo's own client allows two hours between
+ * announcements.  Neither suits a Shell command.  This is unicast: ask the
  * named server, get an answer or a timeout.
  *
  * Epochs.  NTP counts seconds from 1900-01-01, UNIX from 1970-01-01, AmigaOS
@@ -30,16 +30,16 @@
  * (t + 2^32) - K == t - K, modulo 2^32.  The AmigaOS epoch runs out in 2114,
  * which is when this stops holding.
  *
- * Local time.  NTP is UTC; AmigaOS keeps local time, and neither DateStamp()
+ * Local time.  NTP is UTC, AmigaOS keeps local time, and neither DateStamp()
  * nor the battery clock has any timezone concept, so writing the clock needs
  * an offset.  It comes from locale.library's loc_GMTOffset, held since
  * AmigaOS 2.1 and set by the Locale preferences editor, not from a new
  * configuration file, since nothing in DEVS:Internet or DEVS:NetInterfaces
  * has ever known about time and NetSetup has never asked.  When
- * locale.library is absent (a bare 3.1 install may not have it) or the offset
- * is zero, the clock is set to UTC and the report says so.  AmigaOS has no
- * daylight-saving rules: the preferences offset is the whole answer, summer
- * and winter alike.
+ * locale.library is absent (a bare 3.1 install does not always carry it) or
+ * the offset is zero, the clock is set to UTC and the report says so.  AmigaOS
+ * has no daylight-saving rules: the preferences offset is the whole answer,
+ * summer and winter alike.
  *
  * Both clocks are written, timer.device's TR_SETSYSTIME for the running
  * system, battclock.resource for the next boot, because setting only the
@@ -47,11 +47,11 @@
  * for.  A machine with no real-time clock has no battclock.resource,
  * OpenResource() returns NULL, and that half is skipped and reported.
  *
- * NetX Duo vendors an SNTP client at third_party/netxduo/addons/sntp; it
+ * NetX Duo vendors an SNTP client at third_party/netxduo/addons/sntp, and it
  * cannot be used from a Shell command.  A command links its own copy of
- * ThreadX and NetX Duo whose kernel is not running, the running one is
- * inside bsdsocket.library.  nx_sntp_client_create() calls tx_thread_create(),
- * tx_timer_create() and tx_mutex_create(); nx_sntp_client_run_unicast() calls
+ * ThreadX and NetX Duo whose kernel is not running.  The running one is inside
+ * bsdsocket.library.  nx_sntp_client_create() calls tx_thread_create(),
+ * tx_timer_create() and tx_mutex_create().  nx_sntp_client_run_unicast() calls
  * nx_udp_socket_bind(), which suspends the calling thread.  All of those touch
  * ThreadX's scheduler globals, which in a Shell command belong to a kernel
  * that was never entered.  The same fact keeps netstat and ping from reading
@@ -114,8 +114,8 @@ enum
 /*
  * Through the LVOs, for the reason fetch.c gives: linking the whole socket
  * surface to send one datagram is too much, and the NDK inlines assume a
- * global SocketBase.  These are the vectors this command needs; offsets from
- * docs/RESEARCH.md 3.2.
+ * global SocketBase.  These are the vectors this command needs, with offsets
+ * from docs/RESEARCH.md 3.2.
  */
 
 struct SntpTimeval
@@ -316,13 +316,14 @@ static VOID clock_set(ULONG secs, ULONG micro)
 
 /*
  * The battery-backed clock, which survives the power switch.  It holds the same
- * "seconds since 1978, local time" as the system clock.  A machine without a
+ * seconds since 1978, local time, as the system clock.  A machine without a
  * real-time chip, a bare A500 or A1200, has no resource at all, and this
  * returns FALSE.
  *
- * Through the NDK inlines rather than by hand: fetch.c and toolsock.c hand-code
- * bsdsocket.library's LVOs because that ABI is what they exist to demonstrate,
- * which does not apply to a resource that has had three functions since 1985.
+ * Through the NDK inlines rather than by hand.  fetch.c and toolsock.c
+ * hand-code bsdsocket.library's LVOs because that ABI is what they exist to
+ * demonstrate, which does not apply to a resource that has had three functions
+ * since 1985.
  */
 static BOOL battclock_write(ULONG secs)
 {
@@ -339,7 +340,7 @@ static BOOL battclock_write(ULONG secs)
 
 /*
  * Minutes west of Greenwich, from the Locale preferences.  FALSE when
- * locale.library is not on the machine; nothing else here knows the timezone,
+ * locale.library is not on the machine.  Nothing else here knows the timezone,
  * so the caller falls back to UTC.
  */
 static BOOL locale_gmt_offset(LONG *minutes_west)
@@ -449,7 +450,7 @@ static VOID put_be32(UBYTE *p, ULONG v)
 }
 
 /*
- * NTP's fraction field is a binary fraction of a second; timer.device wants
+ * NTP's fraction field is a binary fraction of a second, and timer.device wants
  * microseconds.  The exact conversion, frac * 1000000 / 2^32, needs 64 bits,
  * and 64-bit division on a 68020 is a libgcc call for a number whose bottom
  * sixteen bits are noise.  Dropping those first leaves g * 15625 / 1024 with
@@ -476,7 +477,7 @@ typedef struct SntpReply
  *   LI != 3         the server says its own clock is not synchronised
  *   stratum 1..15   0 is a kiss-o'-death, 16+ is unsynchronised
  *   transmit != 0   a server that has never had the time sends zero
- *   originate       must be the timestamp we put in our request; this is what
+ *   originate       must be the timestamp we put in our request, which is what
  *                   stops a stale or spoofed reply being believed
  *
  * The source address needs no check: the socket is connect()ed, so the stack
@@ -532,7 +533,7 @@ static LONG arg_or(const LONG *args, int index, LONG fallback)
 }
 
 /*
- * One request, one reply.  FALSE after reporting what went wrong; `where` is
+ * One request, one reply.  FALSE after reporting what went wrong.  `where` is
  * the server's address, so a failure names the machine it was talking to.
  *
  * Up to SNTP_ATTEMPTS requests go out, sharing TIMEOUT between them, since a
@@ -560,7 +561,7 @@ static BOOL sntp_exchange(struct Library *sbase, LONG sock, ULONG timeout,
             return FALSE;
 
         /*
-         * The transmit timestamp is our own clock, which may be decades out.
+         * The transmit timestamp is our own clock, which can be decades out.
          * That does not matter: its only job is to come back in the originate
          * field so the reply can be matched to the request, and RFC 4330 lets
          * a client use any unique value.  The microsecond reading is used raw
@@ -621,7 +622,7 @@ static BOOL sntp_exchange(struct Library *sbase, LONG sock, ULONG timeout,
                 if (bad != NULL)
                 {
                     /*
-                     * A bad reply is not a reason to give up: it may be a
+                     * A bad reply is not a reason to give up: it can be a
                      * stale datagram from a previous run.  Report it once and
                      * try again.
                      */

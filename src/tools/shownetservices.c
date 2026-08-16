@@ -4,57 +4,47 @@
  *     ShowNetServices TYPE,ALL/S,SECONDS/K/N,TXT/S,QUIET/S
  *
  * The other half of mDNS. netstack_mdns.c makes this machine findable by name
- * and advertises whatever DEVS:Internet/service_discovery declares; this asks
+ * and advertises whatever DEVS:Internet/service_discovery declares. This asks
  * the same wire what everything else has to offer. No server, no configuration
- * and no address typed by hand, a Mac, a Linux box running Avahi, a network
+ * and no address typed by hand: a Mac, a Linux box running Avahi, a network
  * printer and any Windows since 10 all answer.
  *
- * WHY IT TAKES A FEW SECONDS AND WHY THE LIST IS NOT "EVERYTHING"
+ * A browse is a subscription, not a lookup. The query goes out, and answers
+ * arrive over the following seconds from whatever is awake and listening.
+ * mDNS never says that the list is complete, and a machine that boots in a
+ * minute answers then. So this command listens for a fixed window and then
+ * prints the peer cache, which differs from what is on the network in both
+ * directions: shorter, because only what was awake has answered, and longer,
+ * because a cache entry outlives the machine that put it there. The output
+ * says so. A short list is not proof that nothing else is there, and a listed
+ * machine is not proof that it is still up.
  *
- *   A browse is a subscription, not a lookup. The query goes out, answers
- *   arrive over the following seconds from whatever is awake and listening,
- *   and there is no point at which mDNS says "that is all of them", a
- *   machine that boots in a minute will answer then. So this command listens
- *   for a fixed window and then prints the peer cache, which is a different
- *   thing from what is on the network in both directions: shorter, because
- *   only what was awake has answered, and longer, because a cache entry
- *   outlives the machine that put it there. The output says so. A user who
- *   reads a short list as "there is nothing else here", or a listed machine as
- *   one that is still up, will file a bug about the wrong thing.
+ * The window is three seconds. A responder on the same wire answers in well
+ * under one, and RFC 6762 6 gives a shared record a 20-120 ms delay before it
+ * replies, so three catches the ordinary case with room to spare. A command
+ * that sat there for ten would read as hung. SECONDS raises it for a busy or a
+ * slow network.
  *
- *   The window is three seconds. A responder on the same wire answers in well
- *   under one, RFC 6762 6 gives a shared record a 20-120 ms delay before it
- *   replies, so three catches the ordinary case with room to spare, and a
- *   command that sat there for ten would read as hung. SECONDS raises it for a
- *   busy or a slow network.
+ * With no TYPE, RFC 6763 9's meta-query _services._dns-sd._udp.local
+ * enumerates the service types present rather than instances of any one of
+ * them. That is how a browser finds out what there is to browse for, and it is
+ * what this command does when asked for nothing in particular. A user does not
+ * know that a network printer is _ipp._tcp until something says so.
  *
- * WITH NO TYPE
+ * ALL lists the types, and then every instance of every one of them. It costs
+ * one more window and not one per type: a continuous query per type is
+ * registered and they all run at once, so a machine answers whichever of them
+ * apply to it in a single response.
  *
- *   RFC 6763 9's meta-query: _services._dns-sd._udp.local enumerates the
- *   service TYPES present rather than instances of any one of them. That is
- *   how a browser finds out what there is to browse for, and it is what this
- *   command does when asked for nothing in particular, a user does not know
- *   that a network printer is _ipp._tcp until something tells them.
+ * What ALL does cost is peer cache. Four records land per instance, and the
+ * queries themselves take a record each. When the cache fills, the module
+ * evicts the least recently used record rather than refusing the new one,
+ * which used to mean an SRV outliving the A record it points at, and a row
+ * printing "no address". That is now chased: netstack_mdns_browse_collect()
+ * asks for an address the browse did not carry. SVC_TYPES_MAX bounds the rest.
  *
- * WITH ALL
- *
- *   The types, and then every instance of every one of them. It costs one more
- *   window and not one per type: a continuous query per type is registered and
- *   they all run at once, so a machine answers whichever of them apply to it
- *   in a single response.
- *
- *   What it does cost is peer cache. Four records land per instance and the
- *   queries themselves take a record each, and when the cache fills the module
- *   evicts the least recently used record rather than refusing the new one,
- *   which used to mean an SRV outliving the A record it points at, and a row
- *   printing "no address". That is now chased: netstack_mdns_browse_collect()
- *   asks for an address the browse did not carry. SVC_TYPES_MAX bounds the
- *   rest.
- *
- * WHAT IT DOES NOT DO
- *
- *   It does not connect to anything it finds. An SRV record is a claim by the
- *   machine that published it, and this command reports the claim.
+ * It does not connect to anything it finds. An SRV record is a claim by the
+ * machine that published it, and this command reports the claim.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -78,8 +68,8 @@ enum
     ARG_COUNT
 };
 
-/* The window, and the range SECONDS may set it to. One second is enough on a
-   quiet wire; past a minute the user wants a browser, not a command. */
+/* The window, and the range SECONDS can set it to. One second is enough on a
+   quiet wire. Past a minute a Shell command is the wrong shape for the job. */
 #define SVC_SECONDS         3
 #define SVC_SECONDS_MIN     1
 #define SVC_SECONDS_MAX     60
@@ -166,10 +156,10 @@ static const char *plural(ULONG n)
 
 /*
  * A field a responder chose, printed. A TXT record is arbitrary bytes and an
- * instance name is free UTF-8 text (RFC 6763 4.1.1); either can carry
+ * instance name is free UTF-8 text (RFC 6763 4.1.1), and either can carry
  * something that would move the cursor or clear the screen. Anything below a
- * space becomes '.' so a hostile or merely broken responder cannot rearrange
- * the terminal this list is going to be pasted out of.
+ * space becomes '.' so a hostile or broken responder cannot rearrange the
+ * terminal this list is going to be pasted out of.
  */
 static VOID put_safe(const char *text)
 {
@@ -204,8 +194,7 @@ static VOID put_address(ULONG addr)
  * network: RFC 6763 4.1.1 instance names are free text and the ones on this
  * LAN run to "HIKVISION DS-2CD2085FWD-I - 167921371" with a host name of
  * "DS-2CD2085FWD-I20180113AAWR167921371.local" beside it. Every column past
- * the first was pushed out of line by the first entry, which is worse than no
- * columns at all in something meant to be pasted into a post.
+ * the first was pushed out of line by the first entry.
  */
 static VOID print_instance(const NetStatusService *e, BOOL want_txt)
 {
@@ -304,7 +293,7 @@ static BOOL type_already_shown(UWORD upto, const char *type)
  * started per type. They are collected from the instances as well as from the
  * bare rows, for the reason type_already_shown() gives.
  *
- * Returns how many were taken; a network offering more than SVC_TYPES_MAX
+ * Returns how many were taken. A network offering more than SVC_TYPES_MAX
  * leaves the rest alone.
  */
 static UWORD collect_types(UWORD count)
@@ -382,15 +371,10 @@ static UWORD print_type(UWORD count, const char *type, BOOL want_txt)
 /* ------------------------------------------------------------------ browse, */
 
 /*
- * Whether the library on this machine has a responder in it at all. A build
- * without AMINETXDUO_MDNS answers ENOSYS to the browse, which on its own would
- * read as "nothing found".
- */
-/*
  * Is any interface actually answering .local?  Distinct from stack_has_mdns():
  * that asks whether this build has a responder at all, this asks whether any
- * interface asked it to run.  MDNS= is per interface and defaults to off, so
- * "built in and idle" is the ordinary case, not a fault.
+ * interface asked it to run.  MDNS= is per interface and defaults to off, so a
+ * responder that is built in and idle is the ordinary case, not a fault.
  */
 static BOOL mdns_enabled_somewhere(struct Library *base)
 {
@@ -416,6 +400,11 @@ static BOOL mdns_enabled_somewhere(struct Library *base)
     return FALSE;
 }
 
+/*
+ * Whether the library on this machine has a responder in it at all. A build
+ * without AMINETXDUO_MDNS answers ENOSYS to the browse, which on its own would
+ * read as an empty network.
+ */
 static BOOL stack_has_mdns(struct Library *base)
 {
     struct
@@ -545,8 +534,8 @@ int main(int argc, char **argv)
     }
 
     /* Never starts the stack: a machine with no network has nothing to
-       discover, and starting one to say so would be a surprise. */
-    /* FALSE: QUIET drops the progress lines, never the reason nothing can be
+       discover, and starting one to say so would be a surprise. FALSE, because
+       QUIET drops the progress lines, never the reason nothing can be
        discovered. */
     base = tool_netstatus_open(FALSE);
     if (base == NULL)
@@ -599,7 +588,7 @@ int main(int argc, char **argv)
 
     /*
      * ALL is two windows, not one per type. The first is the meta-query above,
-     * which says which types are here; the second asks after all of them at
+     * which says which types are here. The second asks after all of them at
      * once, since RFC 6762 5.2 queries run concurrently and a machine answers
      * whichever of them apply to it in one response.
      *
@@ -740,7 +729,7 @@ int main(int argc, char **argv)
                 tool_printf("\n");
         }
 
-        /* SVC_MAX is what the library was asked for; nsh_Available is what it
+        /* SVC_MAX is what the library was asked for, nsh_Available is what it
            had. Saying nothing here would present a cut list as the whole one. */
         if (svc_answer.hdr.nsh_Available > svc_answer.hdr.nsh_Count)
             tool_printf("More answered than are shown here.\n");

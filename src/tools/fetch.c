@@ -14,12 +14,12 @@
  * something legible for an https: one.
  *
  * Uses bsdsocket.library's published vectors, called by hand, and tls.library's
- * eight (include/aminetxduo/tlslib.h).  Nothing here links our stack; this is
+ * eight (include/aminetxduo/tlslib.h).  Nothing here links our stack.  This is
  * an ordinary Amiga network application.
  *
- * Opening bsdsocket.library starts the network, the library is
- * self-starting, and closing it stops it again unless something else (Online,
- * AddNetInterface) is holding it open.
+ * Opening bsdsocket.library starts the network, because the library is
+ * self-starting.  Closing it stops the network again unless something else
+ * (Online, AddNetInterface) is holding it open.
  *
  * No chunked transfer decoding and no keep-alive: the request goes out as
  * HTTP/1.0 with Connection: close, so the body runs until the other end hangs
@@ -29,17 +29,18 @@
  * The URL, the Location: resolved against it and the framing of a response's
  * header block are in fetchurl.c, which includes nothing and is driven
  * directly by src/tools/test/test_fetchurl.c.  A 1xx interim response is
- * discarded there rather than taken for a final one, note that a server is
- * not supposed to send one to an HTTP/1.0 request at all (RFC 9110 15.2), but
- * the same section makes parsing one a client's obligation regardless, and
- * the failure it used to cause was the real response landing in the user's
- * file as body with a return code of OK.
+ * discarded there rather than taken for a final one.  A server is not meant to
+ * send one to an HTTP/1.0 request at all (RFC 9110 15.2), but the same section
+ * makes parsing one a client's obligation regardless.  Taking one for the
+ * final answer landed the real response in the user's file as body, with a
+ * return code of OK.
  *
  * Known limit: on a certificate chain of three or more, a 14 MHz 68020 takes
- * longer to verify than a busy front end will wait for a ClientKeyExchange, and
+ * longer to check than a busy front end will wait for a ClientKeyExchange, and
  * the peer closes.  This command reports "the connection is closed" and returns
- * 10; only a faster handshake fixes it.  See docs/RESEARCH.md.  (The crash once
- * described here was the emulator dying of SIGPIPE on the host, not the Amiga.)
+ * 10.  Only a faster handshake corrects it.  See docs/RESEARCH.md.  (The crash
+ * once described here was the emulator dying of SIGPIPE on the host, not the
+ * Amiga.)
  *
  * SPDX-License-Identifier: MIT
  */
@@ -84,7 +85,7 @@ enum
 /*
  * A server that answered every request with a 1xx would keep this loop going
  * for as long as it kept sending, which is no worse than one that streams a
- * body forever, but a bound costs nothing and makes the diagnostic say what
+ * body forever.  A bound costs nothing and lets the diagnostic say what
  * happened.
  */
 #define FETCH_MAX_INTERIM       8
@@ -216,7 +217,7 @@ static ULONG str_len(const char *s)
     return n;
 }
 
-/* Append to a bounded buffer.  Returns FALSE when it would not fit; callers
+/* Append to a bounded buffer.  Returns FALSE when it would not fit.  Callers
    treat that as a hard error rather than truncating a URL. */
 static BOOL str_append(char *dst, ULONG dstlen, ULONG *used, const char *src)
 {
@@ -286,8 +287,8 @@ static LONG io_write(FetchIO *io, const char *buf, LONG len)
 }
 
 /*
- * A read with a ceiling on how long it may block.  tls.library applies
- * TLSA_Timeout itself; the plain socket has no portable NDK timeout, so this
+ * A read with a ceiling on how long it can block.  tls.library applies
+ * TLSA_Timeout itself.  The plain socket has no portable NDK timeout, so this
  * polls with WaitSelect() first.  Returns 0 at end of stream, -1 on error, -2
  * on timeout.
  */
@@ -295,11 +296,11 @@ static LONG io_write(FetchIO *io, const char *buf, LONG len)
 
 /*
  * What went wrong on this connection.  TLSRead() and TLSWrite() answer -1 and
- * leave the reason on the connection, so a caller that invents one is telling
- * the user something it never looked up: an alert the server sent, a record
- * that would not decrypt and a read that ran out of time all used to print
- * "the network connection failed".  TLS_ERR_IO stays the answer when the
- * library will not say, which is the one case that sentence ever fitted.
+ * leave the reason on the connection, so a caller that invents one reports
+ * something it never looked up.  An alert the server sent, a record that would
+ * not decrypt and a read that ran out of time all came out as one generic
+ * connection failure.  TLS_ERR_IO stays the answer when the library will not
+ * say, which is the one case that sentence ever fitted.
  */
 static LONG io_tls_error(FetchIO *io)
 {
@@ -444,7 +445,7 @@ static LONG fetch_run(VOID)
     /* ---- the network ---------------------------------------------------- */
 
     /*
-     * This open starts the stack; the close at the end stops it again if
+     * This open starts the stack.  The close at the end stops it again if
      * nobody else wants it.  See tool_stack_start().
      */
     sbase = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
@@ -493,8 +494,8 @@ static LONG fetch_run(VOID)
              * TLSClose, TLSInfo and TLSErrorString are all original vectors,
              * so asking for the constant would let a recompile demand a newer
              * library than the transfer needs and break https: for a user with
-             * a working older pair.  ti_Resumed is a version-2 TLSInfo field;
-             * zeroing the structure below is what makes version 1 safe.
+             * a working older pair.  ti_Resumed is a version-2 TLSInfo field,
+             * and zeroing the structure below is what makes version 1 safe.
              */
             tbase = OpenLibrary((CONST_STRPTR)TLS_LIB_NAME, 1UL);
             if (tbase == NULL)
@@ -502,13 +503,13 @@ static LONG fetch_run(VOID)
                 tool_error("https: needs LIBS:tls.library, and there is none");
 
                 /*
-                 * This used to add "and there is none for a 68000", because
-                 * the archive carried no 68000 tls.library at all.  It carries
-                 * one for every processor now -- the same one -- so the only
-                 * way to be here is not to have installed it, which is what
-                 * the line above says.  A 68000 owner who did install it is
-                 * told what to expect instead, once, because a first handshake
-                 * there takes a minute or two and silence looks like a hang.
+                 * The message once named the 68000, because the archive
+                 * carried no 68000 tls.library at all.  It carries one for
+                 * every processor now, the same one, so the only way to be
+                 * here is not to have installed it.  A 68000 owner who did
+                 * install it is told what to expect instead, once, because a
+                 * first handshake there takes a minute or two and silence
+                 * looks like a hang.
                  */
                 if ((SysBase->AttnFlags & AFF_68020) == 0)
                     tool_printf("  Install it with the full stack.  On a 68000 "
@@ -603,10 +604,10 @@ static LONG fetch_run(VOID)
                 ULONG          i;
 
                 /*
-                 * Zeroed first, and that is load-bearing.  This command opens
-                 * tls.library with version 1, so the library may predate
-                 * ti_Resumed and will leave that field untouched; uninitialised
-                 * stack would then decide whether "(resumed session)" prints.
+                 * Zeroed first.  This command opens tls.library with version
+                 * 1, so the library can predate ti_Resumed and leaves that
+                 * field untouched.  Uninitialised stack would then decide
+                 * whether " (resumed session)" prints.
                  */
                 for (i = 0; i < (ULONG)sizeof(info); i++)
                     info_bytes[i] = 0;
@@ -616,7 +617,7 @@ static LONG fetch_run(VOID)
                 {
                     /*
                      * "resumed" is printed explicitly: a resumed handshake
-                     * sends no certificate and verifies no signature, so
+                     * sends no certificate and checks no signature, so
                      * ti_ChainDepth reads 0 and the time reads 0.2 s, which
                      * otherwise look like a failure.
                      */
@@ -649,7 +650,7 @@ static LONG fetch_run(VOID)
             /*
              * RFC 9112 section 3.2: "a client MUST send a field value for Host
              * that is identical to that authority component" of the target
-             * URI.  So a non-default port belongs in it, without one,
+             * URI.  A non-default port therefore belongs in it.  Without one,
              * "fetch http://host:8080/" reaches whichever virtual host the
              * server answers for port 80.
              */
@@ -717,7 +718,7 @@ static LONG fetch_run(VOID)
             /*
              * The header block first, then whatever of this read is left is
              * body.  The loop repeats because one read can carry a whole
-             * interim response AND the final one behind it.
+             * interim response and the final one behind it.
              */
             for (;;)
             {
@@ -748,7 +749,7 @@ static LONG fetch_run(VOID)
                     /*
                      * RFC 9110 15.2: a 1xx is an interim response, terminated
                      * by the end of its header section and carrying no
-                     * content.  Discard it and read the next block, taking
+                     * content.  Discard it and read the next block.  Taking
                      * it for the final answer wrote the real response into the
                      * user's file as body and reported success.
                      */
@@ -786,8 +787,8 @@ static LONG fetch_run(VOID)
 
                         /*
                          * The one case where losing the tail of the headers
-                         * costs something; report it as truncation rather than
-                         * as a redirect the server never sent.
+                         * costs something.  Report it as truncation rather
+                         * than as a redirect the server never sent.
                          */
                         if (head.truncated)
                         {
@@ -873,12 +874,11 @@ static LONG fetch_run(VOID)
             }
 
             /*
-             * A server that closes an idle connection after a handshake that
-             * took a long time is enforcing a budget, not failing.  Say which
-             * it was: at ten seconds and up this is almost always the far end
-             * giving up on a slow machine, and a user who is told only that
-             * the connection closed goes looking for a fault in the trust
-             * store or the configuration instead.
+             * A server that closes an idle connection after a long handshake
+             * is enforcing a budget rather than failing.  At ten seconds and
+             * up this is almost always the far end giving up on a slow
+             * machine.  A user told only that the connection closed goes
+             * looking for a fault in the trust store or the configuration.
              */
             if (hs_ms >= 10000UL)
             {
@@ -925,8 +925,8 @@ static LONG fetch_run(VOID)
             /*
              * RFC 9110 10.2.2: the Location value is a URI reference, and the
              * target is it resolved against the URI this request was made to.
-             * Most of them are relative, "about.html" and "docs/x.html" both
-             * used to be handed to the absolute parser, which made them a host
+             * Most of them are relative.  "about.html" and "docs/x.html" were
+             * both handed to the absolute parser, which made them a host
              * called about.html and a host called docs.
              */
             if (!url_resolve(&u, fetch_next, &next))
@@ -1002,15 +1002,15 @@ static LONG fetch_run(VOID)
  * seconds later.
  *
  * So this command brings its own stack via StackSwap() (exec V36, present on
- * the 3.1 floor) instead of requiring `stack 65536` first; any program that
- * opens tls.library should do the same.  64 KB against the ~40 KB the
- * connection allocates, on a machine assumed to have four megabytes.
+ * the 3.1 floor) instead of requiring `stack 65536` first.  Any program that
+ * opens tls.library must do the same.  64 KB against the ~40 KB the connection
+ * allocates, on a machine assumed to have four megabytes.
  *
  * Hazard: fetch_trampoline() must have no locals and no arguments, and is
  * noinline for the same reason.  Between the two StackSwap() calls the stack
  * pointer belongs to the new stack, so reading a stack-based local of its own
- * there would read the wrong memory.  Everything it needs is static; the
- * transfer's own locals are fine because they live on the new stack.  Verified
+ * there would read the wrong memory.  Everything it needs is static, and the
+ * transfer's own locals are fine because they live on the new stack.  Checked
  * in the disassembly: the only stack traffic is one push of a6 before the first
  * swap and its matching pop after the second, which balances because
  * StackSwap() restores the pointer exactly.
@@ -1109,7 +1109,7 @@ int main(int argc, char **argv)
     else
     {
         /* Out of memory for a stack.  http: fits on the caller's, so try
-           rather than refuse; https: would not have worked on a machine this
+           rather than refuse.  https: would not have worked on a machine this
            short of memory anyway. */
         fetch_result = fetch_run();
     }
