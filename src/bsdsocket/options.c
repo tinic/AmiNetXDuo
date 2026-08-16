@@ -419,9 +419,17 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
             /*
              * NetX Duo has no Nagle -- nx_tcp_socket_send_internal.c sends a
              * segment as soon as there is one to send, and the vendored tree
-             * has no small-segment hold anywhere in it (docs/CONFORMANCE.md,
-             * RFC 1122 MUST-38). So TCP_NODELAY is permanently 1 and the get
-             * side answering 1 is the truth, not a placeholder.
+             * has no small-segment hold anywhere in it. So TCP_NODELAY is
+             * permanently 1 and the get side answering 1 is the truth, not a
+             * placeholder.
+             *
+             * The RFC 1122 4.2.3.4 rule that IS there,
+             * _nx_tcp_socket_sws_send_permitted(), is not one: it withholds
+             * a write when the peer's WINDOW is a sliver, never because the
+             * write is small, so a one-byte send into an open window leaves
+             * immediately whatever else is in flight. That is asserted in
+             * tests/netstack/host/test_tcp_sws_host.c, because this answer
+             * depends on it.
              *
              * Which makes 0 the one value that cannot be honoured, and taking
              * it and returning 0 was the lie: a caller that asked for Nagle
