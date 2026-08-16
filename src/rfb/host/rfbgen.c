@@ -330,6 +330,13 @@ int main(int argc, char **argv)
     seq_idle(dir, "idle8");
     seq_scroll(dir, "scroll8", 8, 40);
 
+    /* 128 bytes to a row, which is the widest a screen gets: a 1024-pixel
+       Super-High Res screen, four planes.  The first frame of any sequence is
+       encoded whole, so this walks every tile at that stride. */
+    setup(1024, 768, 4);
+    seq_idle(dir, "idle1024");
+    seq_scroll(dir, "scroll1024", 8, 20);
+
     free(g_idx); free(g_planes);
     return 0;
 }

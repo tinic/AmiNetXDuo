@@ -298,3 +298,21 @@ if(AMIGA_NDK_INCLUDE)
 endif()
 target_compile_options(test_shutprobe PRIVATE -Wall -Wextra)
 set_target_properties(test_shutprobe PROPERTIES OUTPUT_NAME "ShutProbe")
+
+# PtrProbe asks where an injected IECLASS_POINTERPOS actually lands, per
+# display mode.  It opens a screen for each of a table of mode IDs, sends a
+# position, and reads back Screen->MouseX/MouseY, so a row is a measurement
+# and not a derivation.  It carries both httpfb.c's old rule and its current
+# one, which is what makes it a before-and-after in one boot:
+#
+#   tools/amiberry-run.sh -m A1200 build/cm/tests/tools/PtrProbe devs
+#
+# with DEVS:Monitors staged in `devs` -- everything but PAL and NTSC needs a
+# monitor file, and nothing runs them on a boot with no Workbench.
+add_executable(test_ptrprobe ptrprobe.c)
+target_include_directories(test_ptrprobe PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_ptrprobe PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_ptrprobe PRIVATE -Wall -Wextra)
+set_target_properties(test_ptrprobe PROPERTIES OUTPUT_NAME "PtrProbe")
