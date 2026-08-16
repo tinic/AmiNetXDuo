@@ -1562,10 +1562,15 @@
 
   @{b}This is work in progress@{ub}
 
-  It serves the native planar screens of the Amiga chipset only. A
-  screen on a graphics card is not shown: the browser is told the front
-  screen is not a standard planar bitmap and no picture follows.
-  Retargetable graphics is not supported yet.
+  It serves the planar screens of the Amiga chipset, and 8-bit screens
+  on a graphics card under Picasso96 or CyberGraphX. A screen of 15, 16,
+  24 or 32 bits is refused by name; those depths are not served yet.
+
+  A graphics card is much slower to read than to write, so the console
+  measures its own readback when a card session starts and uses the
+  fastest route it finds. It reports what each route managed. That
+  figure has never been published for any Amiga board, so it is worth
+  sending on.
 
   @{b}One viewer at a time@{ub}
 

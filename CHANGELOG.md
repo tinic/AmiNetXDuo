@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `httpd -C` serves a graphics card. An 8-bit RTG screen under Picasso96 or CyberGraphX appears in the browser like a chipset one, and a mode change is carried through. Deeper screens are refused by name rather than drawn wrongly: 15, 16, 24 and 32-bit are not served yet
+- The console measures its own readback at the start of an RTG session and reports what each route managed, because a graphics card is far slower to read than to write and how much slower has never been published for any Amiga board
 - `anxnet.device` posts the SANA-II events it accepts. `S2EVENT_ERROR`, `_TX`, `_RX`, `_BUFF` and `_HARDWARE` were taken in the mask and never sent, so a program waiting on one waited forever. `S2EVENT_SOFTWARE` is now refused rather than accepted and never sent
 - `S2_PacketFilter` filters. The hook was stored and never called, so a program that installed one believed it was filtering and was not
 - A PCMCIA card is no longer configured and then switched back off. `CardMiscControl` writes the Gayle status register outright rather than setting bits, and the value passed one step after the configuration write cleared it, taking the socket out of I/O mode and re-enabling write protection. Every register read after that was bus noise. Emulation cannot show this: it ignores those two bits
