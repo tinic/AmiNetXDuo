@@ -465,7 +465,7 @@ file(GLOB NETXDUO_SOURCES "${AMINETXDUO_NETXDUO}/common/src/*.c")
 
 if(NOT AMINETXDUO_IPV6)
     # Keep the IPv6 objects out of the floor build (~30 KB, docs/RESEARCH.md §5.4).
-    list(FILTER NETXDUO_SOURCES EXCLUDE REGEX "/(nx_icmpv6|nx_ipv6|nx_nd)_")
+    list(FILTER NETXDUO_SOURCES EXCLUDE REGEX "/(nx_icmpv6|nx_ipv6|nx_nd|nx_mld)_")
 endif()
 
 # src/net68k/ supplies _nx_ip_checksum_compute(), so the vendored object must

@@ -170,6 +170,37 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME ipv6_frag COMMAND test_ipv6_frag)
 
+    # Multicast Listener Discovery.  Same shim.  It answers three things a
+    # bridged run cannot: report suppression, which a snooping switch makes
+    # untestable on a real segment because it consumes reports rather than
+    # flooding them (RFC 4541 section 3); the messages octet by octet,
+    # Hop-by-Hop header included; and what is refused, since a query with the
+    # wrong hop limit or an off-link source is not something a lab network can
+    # be asked to send.
+
+    add_executable(test_mld
+        host/test_mld_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_mld_enable.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_mld_group_join.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_mld_group_leave.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_mld_message_send.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_mld_packet_process.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_mld_utility.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ipv6_util.c")
+
+    target_include_directories(test_mld PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_mld PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME mld COMMAND test_mld)
+
     # RFC 6724 source address selection.  Ours, not NetX Duo's: the top-level
     # CMakeLists drops the vendored nxd_ipv6_interface_find.c and
     # src/ipv6/ipv6_srcsel.c supplies the symbol, so this compiles that one

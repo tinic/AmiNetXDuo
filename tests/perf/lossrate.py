@@ -523,7 +523,23 @@ def bursts(segs, port, reads, burst_gap):
 
 # ------------------------------------------------------------------ the `ss` --
 
-SS_FIELDS = ("cwnd", "ssthresh", "bytes_sent", "bytes_retrans", "rtt")
+SS_FIELDS = ("cwnd", "ssthresh", "bytes_sent", "bytes_retrans", "rtt",
+             "busy", "rwnd_limited", "sndbuf_limited")
+
+# busy, rwnd_limited and sndbuf_limited are cumulative milliseconds, and they
+# are the only place the question "was the sender stopped by OUR receive
+# window" is answered rather than inferred.  A capture shows a sender that
+# stopped; it cannot show whether it stopped because it had nothing to send or
+# because the window we advertised was full, and those two call for opposite
+# work.  Linux counts a socket busy whenever its send queue is not empty and
+# attributes each busy millisecond to exactly one cause, so rwnd_limited over
+# busy is the fraction of the transfer our acknowledgment cadence paid for.
+#
+# `ss` OMITS A COUNTER THAT IS STILL ZERO, so a sender that was never window
+# limited prints no rwnd_limited at all.  Absent therefore means zero here,
+# which is why these default to 0.0 rather than being dropped: an absent
+# counter is the negative result, not a missing measurement.
+SS_CHRONO = ("rwnd_limited", "sndbuf_limited")
 
 
 def read_ss(path, eph):
@@ -554,6 +570,11 @@ def read_ss(path, eph):
                 vals[f] = float(mm.group(1))
         vals["app_limited"] = 1.0 if re.search(r"(?:^|\s)app_limited(?:\s|$)",
                                                line) else 0.0
+        # Absent means zero, see SS_CHRONO.  Without this an all-zero
+        # rwnd_limited reads as "no samples" and the report says nothing
+        # where the answer is the strongest one available.
+        for f in SS_CHRONO:
+            vals.setdefault(f, 0.0)
         out[cur].append((now, vals))
         cur = None
     if eph:
@@ -594,6 +615,28 @@ def ss_report(path, eph, idle_frac):
                      "%.1f ms" % (med("cwnd"), med("ssthresh"), med("rtt")))
         applim = sum(1 for s in keep if s.get("app_limited"))
         lines.append("    app_limited in %d of them" % applim)
+
+        # WHAT STOPPED THE SENDER, from the sender's own kernel.  Deltas over
+        # the kept samples, not the socket's lifetime totals, so a previous
+        # phase's stall cannot be read into this one.  rwnd_limited is the
+        # receive window WE advertised; sndbuf_limited is the peer's own
+        # buffer and is its problem, reported so the two are not confused.
+        def delta(f):
+            v = [s[f] for s in keep if f in s]
+            return (v[-1] - v[0]) if v else 0.0
+
+        busy = delta("busy")
+        rwnd = delta("rwnd_limited")
+        snd = delta("sndbuf_limited")
+        if busy > 0:
+            lines.append("    of %.0f ms with data to send: %.0f ms (%.1f %%) "
+                         "blocked by OUR receive window, %.0f ms (%.1f %%) by "
+                         "its own send buffer"
+                         % (busy, rwnd, 100.0 * rwnd / busy,
+                            snd, 100.0 * snd / busy))
+        else:
+            lines.append("    busy never moved, so nothing can be said about "
+                         "what stopped the sender")
         if "bytes_sent" in keep[-1] and "bytes_retrans" in keep[-1]:
             bs = keep[-1]["bytes_sent"] - keep[0].get("bytes_sent", 0)
             br = keep[-1]["bytes_retrans"] - keep[0].get("bytes_retrans", 0)

@@ -11,8 +11,8 @@ annotated — git has the history.
 
 | RFC | Requirement | Where | Effect |
 |---|---|---|---|
-| 9777 §6 | MLD reports MUST be sent for scope ≥ 2 | `nx_mld.h` is a 48-line stub; `nx_ipv6_multicast_join.c:71-95` sends `NX_LINK_MULTICAST_JOIN` with a 33:33 MAC and nothing else | Solicited-node groups are scope 2. Behind a snooping switch with an active querier, ND fails |
 | 1122 §4.2.3.4 (MUST-38) | Sender SWS avoidance | `nx_tcp_socket_send_internal.c:589` gates on a non-zero window only; no minimum-usable-window test | Undersized segments are sent when the peer advertises small window increments. Nagle is absent from the vendored tree entirely |
+| 3810 §6.2 / 2710 §3 | A received MLD message without a Hop-by-Hop Router Alert MUST be discarded | `nx_mld_packet_process.c` checks hop limit 1 and a link-local source, and nothing else. `_nx_ipv6_process_hop_by_hop_option()` skips the option and records nothing, and `NX_PACKET` has no field to carry the answer forward | A query forged from on-link without the option is answered. The hop-limit and source-scope checks are what keep off-link senders out |
 | 8504 §6.6 / 6724 §5 | RFC 6724 source selection MUST be implemented | `nxd_ipv6_interface_find.c:128-200` is a per-interface walk that breaks on the first link-local or longest-prefix hit | No candidate set, no policy table, none of Rules 1/2/3/6/7/8 |
 | 5280 §4.2 | Unrecognized critical extension MUST be rejected | flag written at `nx_secure_x509_extension_find.c:191`, declared at `nx_secure_x509.h:611`, read nowhere | nameConstraints and every other critical extension silently ignored |
 | 5280 §6.1.3 | Revocation | `nx_secure_x509_crl_revocation_check.c` is built (`nx_secure/CMakeLists.txt:207`) and called from nothing | A stolen key stays usable indefinitely |

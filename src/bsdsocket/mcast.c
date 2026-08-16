@@ -11,15 +11,12 @@
  * nxd_ipv6_multicast_interface_join()/_leave().  Same table discipline, three
  * different reconciliations.  The note above that half says which.
  *
- * There is no MLD.  A v6 join registers the group's 33:33 MAC with the
- * interface and makes the stack accept datagrams sent to it.  It sends no
- * Multicast Listener Report, because the vendored NetX Duo has none to send.
- * nx_mld.h is a stub that declares nothing, and no nx_mld_*.c exists.
- * Link-local groups (ff02::fb, ff02::c, ff02::1:3) still work on any segment.
- * RFC 4541 section 3 has an MLD snooping switch forward FF02::/16 on every
- * port regardless of membership, so a querier prunes none of them.  Wider
- * scopes need that report, and no router forwards those groups here.
- * port/netxduo-amiga/inc/nx_user.h has the decision and the numbers behind it.
+ * A v6 join registers the group's 33:33 MAC with the interface, makes the
+ * stack accept datagrams sent to it, and announces it: _nx_mld_group_join()
+ * sends a Multicast Listener Report at once and answers the queries that
+ * follow.  That is what makes a group above link scope work at all, and it is
+ * what stops a snooping switch pruning a link-scope one.  The protocol is in
+ * the fork, nx_mld_*.c; port/netxduo-amiga/inc/nx_user.h has the switch.
  *
  * Three things NetX Duo keeps somewhere other than where BSD keeps them, and
  * this file is where they are reconciled:
@@ -484,7 +481,7 @@ LONG bsd_mcast_getopt(struct AmiSocketBase *base, AmiSocket *sock,
 /* ====================================================================== v6 ==
  *
  * RFC 3493 section 5.2.  The header at the top of this file says what a join
- * does without MLD.  What follows is where NetX Duo keeps things and BSD does
+ * puts on the wire.  What follows is where NetX Duo keeps things and BSD does
  * not, which is a different list from the IPv4 one:
  *
  *   Membership is per NX_IP again, refcounted, capped at
