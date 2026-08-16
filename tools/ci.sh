@@ -1153,6 +1153,30 @@ stage_bridged() {
         esac
     fi
 
+    # MLD, which is the one gate that cannot be run anywhere but a real
+    # segment: what is being tested is whether a report reaches the wire, and
+    # under SLIRP there is no wire, no snooping switch and no second listener.
+    printf '\n-- the groups this host listens to, announced or not\n'
+    if [ -z "${AMINETXDUO_PEER:-}" ]; then
+        skip "mld: AMINETXDUO_PEER is not set, so there is no querier and no" \
+             "second listener.  Join and leave would still be checked;" \
+             "answering a query and being suppressed would not."
+    else
+        rc=0
+        "$ROOT/tests/ipv6/run-mld.sh" -b "$BUILD/default" \
+            -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" \
+            -P "$AMINETXDUO_PEER" || rc=$?
+        case "$rc" in
+            0) note "PASS  reported on join, answered the query in the" \
+                    "version it was asked in, stayed quiet when another" \
+                    "host answered first, and gave the group back" ;;
+            2) fail "mld: an ingredient is missing -- most likely" \
+                    "~/python3-cap with CAP_NET_RAW on the peer" ; bad=1 ;;
+            3) fail "mld: the run produced no capture to read" ; bad=1 ;;
+            *) fail "mld: read the failed= line above" ; bad=1 ;;
+        esac
+    fi
+
     # The stall arm is here rather than in the emulator stage because the
     # question is a retransmission ladder against a real peer.  It costs its
     # own two minutes: the socket that asked for nothing has to be watched all

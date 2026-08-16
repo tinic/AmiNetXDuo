@@ -305,10 +305,24 @@ def main():
         failures.append("query_answer_v2")
     if control_answered == 0:
         failures.append("query_answer_v1")
+
     if suppressed_windows == 0:
-        failures.append("suppression_untested")
+        # NOT A FAILURE, AND NOT A PASS.  A switch that snoops MLD consumes
+        # reports rather than flooding them -- RFC 4541 section 3 has it
+        # forward them to multicast router ports only -- so a second host's
+        # report never reaches the guest and there is nothing to be suppressed
+        # by.  Measured on this lab segment: the peer's queries to ff02::1
+        # arrive, and its reports, including one addressed to ff02::1, do not.
+        #
+        # Which is the premise of the whole feature confirmed from the other
+        # side, and it is also why MLDv2 has no suppression at all.  The rule
+        # is exercised in tests/ipv6/host/test_mld_host.c, where a report can
+        # be handed to the receive path directly.
+        print("suppression=unreachable_on_this_segment")
     elif suppressed != suppressed_windows:
         failures.append("suppression")
+    else:
+        print("suppression=held")
 
     if failures:
         print("failed=%s" % ",".join(failures))

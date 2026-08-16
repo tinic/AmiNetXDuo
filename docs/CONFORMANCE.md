@@ -11,7 +11,6 @@ annotated — git has the history.
 
 | RFC | Requirement | Where | Effect |
 |---|---|---|---|
-| 9777 §6 | MLD reports MUST be sent for scope ≥ 2 | `nx_mld.h` is a 48-line stub; `nx_ipv6_multicast_join.c:71-95` sends `NX_LINK_MULTICAST_JOIN` with a 33:33 MAC and nothing else | Solicited-node groups are scope 2. Behind a snooping switch with an active querier, ND fails |
 | 1122 §4.2.3.4 (MUST-38) | Sender SWS avoidance | `nx_tcp_socket_send_internal.c:589` gates on a non-zero window only; no minimum-usable-window test | Undersized segments are sent when the peer advertises small window increments. Nagle is absent from the vendored tree entirely |
 | 8504 §6.6 / 6724 §5 | RFC 6724 source selection MUST be implemented | `nxd_ipv6_interface_find.c:128-200` is a per-interface walk that breaks on the first link-local or longest-prefix hit | No candidate set, no policy table, none of Rules 1/2/3/6/7/8 |
 | 5280 §4.2 | Unrecognized critical extension MUST be rejected | flag written at `nx_secure_x509_extension_find.c:191`, declared at `nx_secure_x509.h:611`, read nowhere | nameConstraints and every other critical extension silently ignored |
