@@ -24,7 +24,7 @@
  * address family and this library only ever fills it with IPv4.
  *
  * -4 and -6 mean something different here than in the commands that open a
- * socket. Those pin the family they will CONNECT over; this command connects
+ * socket. Those pin the family they connect over. This command connects
  * to nothing, so the pair asks for one kind of record and not the other: -4
  * reports the A records, -6 the AAAA. It is what nslookup already does through
  * TYPE=A / TYPE=AAAA, which host has no equivalent of. Both together is an
@@ -45,7 +45,7 @@
  *     host works, nslookup fails  the answer came from this machine,
  *                                 DEVS:Internet/hosts, or mDNS, or the cache
  *     host fails, nslookup works  this machine's resolver configuration is
- *                                 wrong; not the network and not the name
+ *                                 wrong, not the network and not the name
  *     both fail                   the name, the servers, or the network
  *
  * Like every other client command, host calls tool_socket_open() and so starts
@@ -139,7 +139,7 @@ int main(int argc, char **argv)
     }
 
     /* A dotted quad is looked up backwards, and an address already says which
-       family it is; -6 over one contradicts the argument. */
+       family it is. -6 over one contradicts the argument. */
     if (family == TOOL_AF_INET6 && ami_config_parse_ip(name, &addr))
     {
         tool_error("%s is an IPv4 address, and -6 was given", (LONG)name);

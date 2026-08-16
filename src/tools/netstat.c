@@ -7,16 +7,16 @@
  * and "netstat ROUTES" do the same thing and "netstat ?" shows both. With no
  * switches it prints everything except -h.
  *
- * -s is per-protocol statistics followed by the SANA-II per-interface counters;
- * no other switch shows the driver's own numbers.
+ * -s is per-protocol statistics followed by the SANA-II per-interface counters.
+ * No other switch shows the driver's own numbers.
  *
  * -h is the memory and scheduler blocks on their own, and takes a different
  * route to them: the published mark (aminetxduo/health.h) rather than a library
- * call, so it opens nothing, allocates nothing and cannot block. That is what
- * makes it usable on a machine that is halfway into the fault it is meant to
- * describe, and it is why it is the one switch that works without a stack
- * answering for itself. It is the command to ask for in a fault report, for a
- * freeze and for a suspected leak alike, docs/FREEZE-DIAGNOSTIC.md.
+ * call, so it opens nothing, allocates nothing and cannot block. It is
+ * therefore usable on a machine halfway into the fault it describes, and it is
+ * the one switch that works without a stack answering for itself. It is the
+ * command to ask for in a fault report, for a freeze and for a suspected leak
+ * alike, docs/FREEZE-DIAGNOSTIC.md.
  *
  * This command covers the same ground as ShowNetStatus: that one has named
  * categories and a diagnosis, this one has switches and columns. Neither reads
@@ -121,12 +121,12 @@ static VOID show_interfaces(const AmiConfig *cfg, const ToolSnapshot *snap)
 /*
  * What the stack owns, and the most it has ever owned.
  *
- * This is the half of -h that answers "I think it leaks". Each of the three
- * counts is a different fault with a different fix, which is why they are not
- * one number: allocations are the general heap, sockets are the structure
+ * This is the half of -h that answers a suspected leak. Each of the three
+ * counts is a different fault with a different fix, so they are not one
+ * number: allocations are the general heap, sockets are the structure
  * docs/RESEARCH.md 37.5 lost 776 of, and packets are a fixed pool that starves
- * rather than grows. The peak beside each is what makes a single reading worth
- * anything, a count on its own cannot say whether it is climbing.
+ * rather than grows. The peak beside each is what makes a single reading
+ * usable, because a count on its own cannot say whether it is climbing.
  *
  * AvailMem is read here rather than carried in ToolStats so both routes into
  * this function report the same machine at the same moment. It is the number a
@@ -174,11 +174,11 @@ static VOID show_memory(const ToolStats *st)
  * time. The peak counts lateness that was subsequently made good, so it moves
  * on a machine where nothing was ever clipped. Its floor is one wakeup's worth
  * of ticks, 2 on the VBlank source, because a wakeup is sampled owing every
- * period since the last one. Deferred ticks reach the wheel late; lost ones
+ * period since the last one. Deferred ticks reach the wheel late. Lost ones
  * never reach it.
  *
- * Memory first, then the scheduler.  The one function both routes print
- * through, -h off the published mark and -s -h through the library, so the
+ * Memory first, then the scheduler. Both routes print through this one
+ * function, -h off the published mark and -s -h through the library, so the
  * two cannot disagree about what they found.
  */
 static VOID show_health(const ToolStats *st)
@@ -335,8 +335,8 @@ static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
                         st->rx_copy_hook, st->rx_copy_summed);
 
         /* Only when there are any: the four causes behind receive errors are
-           nothing alike, and the total on its own has twice sent someone
-           building a probe to find out which one it was. */
+           nothing alike, and the total on its own does not say which one
+           fired. */
         if (st->rx_errors != 0)
             tool_printf("  of the receive errors: %lu checksum, %lu runt, "
                         "%lu length, %lu device\n",
@@ -346,8 +346,8 @@ static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
         if (st->packets_received == 0 && st->packets_sent == 0)
         {
             tool_printf("  Nothing has gone in or out of this interface at all.\n");
-            tool_printf("  If it should have, check the cable and that the\n");
-            tool_printf("  interface is online (ShowNetStatus says).\n");
+            tool_printf("  If traffic was expected, check the cable and check\n");
+            tool_printf("  that the interface is online (ShowNetStatus says).\n");
         }
 
         shown++;
@@ -383,9 +383,9 @@ static VOID show_routes(const AmiConfig *cfg)
     /*
      * The destination cache under the lists it is resolved from, because it
      * is the routing decision this machine actually made and it is the first
-     * table _nx_ipv6_packet_send() reads. Here as well as in ShowNetStatus
-     * for the reason routes6 is: both commands print the live routing surface
-     * and they print it through the same function so they cannot disagree.
+     * table _nx_ipv6_packet_send() reads. Here as well as in ShowNetStatus,
+     * for the reason routes6 is: both commands print the live routing surface,
+     * and through the same function, so they cannot disagree.
      */
     if (tool_dest6(&dest6) == 0)
         tool_print_dest6(&dest6, cfg);
@@ -396,8 +396,8 @@ static VOID show_routes(const AmiConfig *cfg)
  *
  * Gated on a retransmission having already fired rather than on the stall
  * clock, because that clock is running on every healthy connection with a
- * segment in flight; one retransmit with no acknowledgement in between is the
- * first moment there is anything to tell anyone. A machine with nothing wrong
+ * segment in flight. One retransmit with no acknowledgement in between is the
+ * first moment there is anything to report. A machine with nothing wrong
  * prints exactly what it printed before.
  */
 static VOID show_stall(const ToolSockInfo *s)

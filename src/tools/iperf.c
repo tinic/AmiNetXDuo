@@ -15,11 +15,11 @@
  * iperf 3 is a different protocol on a different port and the two do not
  * interoperate: pointing this at an `iperf3 -s` gets a connection that goes
  * nowhere, not a slow number.  Debian and Ubuntu package 2.x as `iperf` and
- * 3.x as `iperf3`; Homebrew calls them `iperf` and `iperf3` too.
+ * 3.x as `iperf3`.  Homebrew calls them `iperf` and `iperf3` too.
  *
- * Why this exists.  When somebody says this stack is slower than another one
- * there was no way for them to produce a figure on their own machine and
- * their own card, which is exactly where the differences we cannot test live.
+ * It exists so that a report of this stack being slower than another one can
+ * carry a figure from the reporter's own machine and card, which is where the
+ * differences we cannot test live.
  * It goes through bsdsocket.library rather than linking any part of the stack,
  * so the same binary runs on Roadshow and AmiTCP and the comparison is one
  * tool against one peer.
@@ -83,7 +83,7 @@ static VOID iperf_help(VOID)
     tool_printf("Usage: %s [-s] [-u] [<host>]\n", (LONG)tool_name);
     tool_printf("  Measures throughput against an iperf 2 peer on port 5001.\n");
     tool_printf("\n");
-    tool_printf("  -s                              receive; wait for a sender\n");
+    tool_printf("  -s                              receive, wait for a sender\n");
     tool_printf("  -u                              UDP instead of TCP\n");
     tool_printf("  -p PORT                         port to use (5001)\n");
     tool_printf("  -t SECONDS                      how long to run (10)\n");
@@ -161,7 +161,7 @@ static VOID iperf_print_error(struct Library *sb, const IperfResult *res,
     switch (res->err)
     {
     case TOOL_ECONNREFUSED:
-        tool_error("nothing is listening on %s port %lu; start `iperf -s` "
+        tool_error("nothing is listening on %s port %lu. Start `iperf -s` "
                    "there first", (LONG)addr, (LONG)plan->port);
         break;
     case TOOL_ETIMEDOUT:
@@ -243,7 +243,8 @@ int main(int argc, char **argv)
 
     if (!server && host == NULL)
     {
-        tool_error("which host? give one to send to, or -s to receive");
+        tool_error("no host was given. Name one to send to, or use -s "
+                   "to receive");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
@@ -423,9 +424,8 @@ int main(int argc, char **argv)
             break;
         }
 
-        /* One line a second while it runs.  A user diagnosing "slower than
-           the others" wants to see whether it starts slow or falls off, which
-           a single average hides. */
+        /* One line a second while it runs.  A single average hides whether the
+           transfer starts slow or falls off part way. */
         if (!quiet && iperf_run.res.ms == 0)
         {
             ULONG now = ami_millis();

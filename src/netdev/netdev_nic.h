@@ -13,14 +13,14 @@
  * for the A2065 and Ariadne I, which are not in this family and are not
  * implemented here -- would share none of dp8390.c and still fit.
  *
- * What the seam has to carry for a LANCE to fit later, and does:
+ * What the seam carries for a LANCE to fit later:
  *   - the frame callback takes a complete frame, header included, so a core
  *     that DMAs into host memory hands over a pointer and a core that reads a
- *     FIFO hands over its staging buffer;
+ *     FIFO hands over its staging buffer
  *   - the filter is a 64-bit hash plus a promiscuous flag, which is what both
- *     chips actually implement;
+ *     chips implement
  *   - tx takes one linear frame, because that is the only shape either chip
- *     can be given one in.
+ *     can be given one in
  *
  * SPDX-License-Identifier: MIT
  */
@@ -48,7 +48,7 @@
  */
 #define NETDEV_RXBUF_MAX    2048
 
-/* How many times one interrupt may go round before it gives the machine back. */
+/* How many times one interrupt can go round before it gives the machine back. */
 #define NETDEV_DRAIN_MAX    32
 
 typedef struct NetdevNic NetdevNic;
@@ -84,8 +84,8 @@ struct NetdevNicOps
     /*
      * Recover a wedged transmitter: put the chip in a known state and clear
      * txb_inuse.  The vertical-blank watchdog is the only caller, and it runs
-     * under Disable() at INT3 against a card server at INT2, so this may not
-     * poll for milliseconds.  Every core supplies one; a core that cannot
+     * under Disable() at INT3 against a card server at INT2, so this must not
+     * poll for milliseconds.  Every core supplies one, and a core that cannot
      * wedge supplies a no-op rather than leaving it NULL.
      */
     VOID  (*reset)(NetdevNic *nic);
@@ -132,10 +132,10 @@ struct NetdevNic
     UWORD               txb_inuse;
 
     /*
-     * EtherLink III.  el3_swap is MEASURED at attach from the window 0
-     * manufacturer ID and is not a card-table knob; el3_win is the window
+     * EtherLink III.  el3_swap is measured at attach from the window 0
+     * manufacturer ID and is not a card-table knob.  el3_win is the window
      * last selected, because the part has no readable window register and an
-     * access in the wrong one is not an error it reports; el3_media is which
+     * access in the wrong one is not an error it reports.  el3_media is which
      * transceivers the card was built with, which is read-only and decides
      * what init switches on.
      */
@@ -144,7 +144,7 @@ struct NetdevNic
     UWORD               el3_media;
 
     /* LANCE ring cursors.  The DP8390 cores do not use them: their ring is
-       the chip's own page walk, not a descriptor list we index. */
+       the chip's own page walk, not an indexed descriptor list. */
     UWORD               rx_next;
     UWORD               tx_next;
     UWORD               tx_done;
@@ -162,7 +162,7 @@ struct NetdevNic
 
     /*
      * How the packet buffer is reached.  NE2000 fills these with its remote
-     * DMA; a shared-memory DP8390 board (Hydra, LanRover) fills them with
+     * DMA.  A shared-memory DP8390 board (Hydra, LanRover) fills them with
      * moves through its mapped window, and that is the whole of the
      * difference between the two.
      */
@@ -171,11 +171,11 @@ struct NetdevNic
 
     /*
      * A pointer straight into the card's own buffer, or NULL when the frame
-     * has to be staged.  Set only by cores whose buffer is memory-mapped:
-     * the receive path then makes ONE pass over the frame -- the opener's
-     * CopyToBuff reads the card directly -- instead of copying it to rxbuf
-     * and having CopyToBuff copy it again.  hydra.device is 6 KB with no
-     * bulk copy loop in it at all, which is how it does the same thing.
+     * must be staged.  Set only by cores whose buffer is memory-mapped.  The
+     * receive path then makes one pass over the frame, with the opener's
+     * CopyToBuff reading the card directly, instead of a copy to rxbuf and a
+     * second copy by CopyToBuff.  hydra.device is 6 KB with no bulk copy loop
+     * in it, which is how it does the same thing.
      *
      * NULL for a wrapped frame, and NULL for every port-driven core, where
      * there is no address to hand out.
@@ -183,10 +183,10 @@ struct NetdevNic
     const volatile UBYTE *(*frame_at)(NetdevNic *nic, LONG src, UWORD len);
 
     /*
-     * Where to frame the NEXT transmit, or NULL to use the unit's staging
-     * buffer.  A core whose transmit buffer is CPU-addressable returns it and
-     * the opener's CopyFrom writes the card directly -- one pass instead of
-     * building in RAM and copying it across.  The profile priced that copy at
+     * Where to frame the next transmit, or NULL to use the unit's staging
+     * buffer.  A core whose transmit buffer is CPU-addressable returns it, and
+     * the opener's CopyFrom writes the card directly.  That is one pass rather
+     * than a build in RAM and a copy across.  The profile priced that copy at
      * 223 us of a 273 us deficit against a2065.device.
      *
      * NULL for the DP8390 cores: an NE2000's buffer is behind a port, and the
@@ -208,9 +208,9 @@ struct NetdevNic
 
     /*
      * What had to be done to the station address before the chip could be
-     * given one.  All three are 0 or 1 and all three are reported: a driver
-     * that quietly repaired or invented a hardware address is exactly the
-     * thing that costs an afternoon later.
+     * given one.  All three are 0 or 1 and all three are reported, because a
+     * silently repaired or invented hardware address is hard to diagnose
+     * later.
      */
     ULONG               mac_group_fix;  /* group bit cleared out of the PROM  */
     ULONG               mac_from_cis;   /* PROM blank, address taken from CIS */
@@ -230,10 +230,10 @@ struct NetdevNic
 };
 
 /*
- * THE PROBE RECORD, netdev_diag.c.  Declared here rather than in
- * netdev_internal.h because the chip cores are half of what records into it:
- * "the command register read back 0x23" is a fact only ne2000.c has, and it
- * is the fact a user needs when their card does not come up.
+ * The probe record, netdev_diag.c.  Declared here rather than in
+ * netdev_internal.h, because the chip cores are half of what records into it.
+ * "The command register read back 0x23" is a fact only ne2000.c has, and it is
+ * the fact a user needs when a card does not come up.
  *
  * netdev_diag_note() is safe to call from anywhere the probe reaches,
  * including before netdev_diag_reset() and after netdev_diag_unpublish(),

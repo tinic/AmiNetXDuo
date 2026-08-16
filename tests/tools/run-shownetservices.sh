@@ -57,7 +57,7 @@
 #     window turned up a type, so on an empty network ALL is one window and
 #     the branch that browses every type found is never entered.
 #   * the machine whose stack has mDNS built in but disabled on every
-#     interface (RETURN_WARN, "add MDNS=YES ... and restart the stack").
+#     interface (RETURN_WARN, "Add MDNS=YES ... then restart the stack").
 #     MDNS is read out of the interface file at startup, so it cannot be both
 #     on and off in one boot, and the enabled half is what the rest of this
 #     file needs.

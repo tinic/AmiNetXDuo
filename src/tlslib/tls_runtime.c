@@ -1,13 +1,13 @@
 /*
- * tls.library, the bits a shared library has to bring itself.
+ * tls.library, the parts a shared library must bring itself.
  *
  * No crt0, so this library opens DOSBase itself (the trust store is a file).
  * The memory and string helpers are here rather than borrowed from src/common
- * because this library is standalone in the same way usergroup.library is:
- * everything else it needs comes either from its own objects or, at run time,
- * from bsdsocket.library through the private context.  Linking
- * aminetxduo_common would drag in a second entropy pool, the thing
- * tls_netx.c exists to avoid, for the sake of an AllocVec() wrapper.
+ * because this library is standalone in the same way usergroup.library is.
+ * Everything else it needs comes either from its own objects or, at run time,
+ * from bsdsocket.library through the private context.  A link against
+ * aminetxduo_common brings in a second entropy pool, which tls_netx.c exists
+ * to avoid, in exchange for an AllocVec() wrapper.
  *
  * SPDX-License-Identifier: MIT
  */

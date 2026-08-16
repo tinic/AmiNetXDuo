@@ -5,7 +5,7 @@
  * ever delivered to the card.  Individual Computers' x-surf.device and
  * x-surf-100.device never reach it -- they reject the join first, on bit 7 of
  * the address where the group bit is bit 0 -- so the hash itself is not what
- * was broken there.  It is what has to be right for the fix to mean anything,
+ * was broken there.  It is what must be right for the fix to mean anything,
  * and it is the one part of this driver that can be checked without hardware.
  *
  * The expected values are not this code's own output.  They were computed
@@ -172,7 +172,7 @@ int main(void)
 
     /*
      * The group bit test the whole driver turns on.  Bit 0 of the first octet
-     * is set on every one of these; bit 7, which both IC drivers test, is
+     * is set on every one of these.  Bit 7, which both IC drivers test, is
      * clear on all but none.  That asymmetry is the defect, stated as an
      * assertion rather than as a comment.
      */

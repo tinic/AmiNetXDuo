@@ -3,13 +3,14 @@
  *
  * Separate from net68k.h deliberately: that header declares the checksum over
  * NX_PACKET, and anxnet.device links neither NetX Duo nor ThreadX.  These
- * three routines need nothing but exec types, so the driver can take them
- * without taking the stack.
+ * routines need nothing but exec types, so the driver can take them without
+ * taking the stack.
  *
- * The far side of all three tolerates word and longword accesses and NOT byte
- * accesses, which is why n68k_copy_bytes() cannot be used there; see the
- * header of n68k_iocopy.S.  Both pointers must be even, and `longs` and
- * `blocks` are counts of longwords and of 32-byte blocks, not byte lengths.
+ * The far side of every one of them accepts word and longword accesses, and
+ * never a byte access.  That is why n68k_copy_bytes() cannot be used there.
+ * The header of n68k_iocopy.S has the detail.  Both pointers must be even,
+ * and `longs` and `blocks` are counts of longwords and of 32-byte blocks, not
+ * byte lengths.
  *
  * SPDX-License-Identifier: MIT
  */

@@ -1,22 +1,22 @@
 /*
  * AmiNetXDuo, crash guard implementation.
  *
- * How a CPU exception reaches us:
+ * How a CPU exception reaches this code:
  *   1. The 68k takes the exception and enters supervisor mode.
  *   2. Exec's exception handler pushes the trap number as a longword on the
  *      supervisor stack and jumps to the task's tc_TrapCode.
  *   3. Above that longword sits the exception frame: SR.w, PC.l, and on 68010+
  *      a format/vector word.
  *
- * The handler saves the registers, records the frame, then rewrites the return
- * PC in the frame to point at a user-mode bail-out routine before executing
- * RTE. The processor drops back to user mode running the recovery code instead
- * of re-executing the faulting instruction, so the process can report and exit
- * rather than taking the machine down.
+ * The handler saves the registers and records the frame. It then rewrites the
+ * return PC in the frame to a user-mode bail-out routine, and runs RTE. The
+ * processor drops back to user mode in the recovery code, and does not re-run
+ * the faulting instruction, so the process can report and exit instead of a
+ * machine halt.
  *
- * This assumes the exception happened in user mode. If SR in the frame has the
- * supervisor bit set there is nothing safe to return to, so no recovery is
- * attempted.
+ * This assumes that the exception happened in user mode. If SR in the frame
+ * has the supervisor bit set, there is nothing safe to return to, and no
+ * recovery is attempted.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -102,7 +102,7 @@ VOID ami_crash_set_reference(APTR code_address, const char *label)
 }
 
 
-/* One-line summary, for the DH0:crash.txt breadcrumb. */
+/* One-line summary, for the DH0:crash.txt record. */
 VOID ami_crash_format(char *buf, ULONG len)
 {
     static const char hex[] = "0123456789abcdef";
@@ -125,7 +125,7 @@ VOID ami_crash_format(char *buf, ULONG len)
     buf[i] = '\0';
 }
 
-/* Runs in user mode, on the crashing task's stack, straight after the RTE. */
+/* Runs in user mode, on the stack of the crashed task, directly after the RTE. */
 VOID ami_crash_bailout(VOID)
 {
     int i;
@@ -149,9 +149,9 @@ VOID ami_crash_bailout(VOID)
     if (ami_crash_ref != NULL)
     {
         /*
-         * No %c here: RawDoFmt consumes a *word* for %c but the C caller pushes
-         * a longword, which misaligns every argument after it. Only %ld/%lx/%s
-         * (all longword) are safe in this formatter.
+         * No %c here: RawDoFmt consumes a word for %c, but the C caller pushes
+         * a longword, which misaligns every argument after it. Only %ld, %lx
+         * and %s, all longword, are safe in this formatter.
          */
         LONG delta = (LONG)ami_crash.pc - (LONG)ami_crash_ref;
 
@@ -177,9 +177,9 @@ VOID ami_crash_bailout(VOID)
               (LONG)ami_crash.a[4], (LONG)ami_crash.a[5], (LONG)ami_crash.a[6]);
 
     /*
-     * Leave a breadcrumb the host can read even if the unwind below fails,
-     * the harness stages DH0: from a host directory, so this file appears
-     * outside the emulator immediately.
+     * Leave a record that the host can read even if the unwind below fails.
+     * The harness stages DH0: from a host directory, so this file appears
+     * outside the emulator at once.
      */
     {
         BPTR fh = Open((STRPTR)"DH0:crash.txt", MODE_NEWFILE);
@@ -197,12 +197,12 @@ VOID ami_crash_bailout(VOID)
     /*
      * Unwind to the ami_crash_install() call site.
      *
-     * KNOWN LIMITATION: this does not reliably return control. Recovery from a
-     * patched exception frame lands here in user mode with the crashing task's
-     * stack pointer, and the setjmp context is not always honoured from that
-     * state, observed under FS-UAE resuming after the call site rather than
-     * at it. The *report* above is dependable; the resume is not, so callers
-     * must treat a caught crash as fatal and never rely on continuing.
+     * This does not reliably return control. Recovery from a patched exception
+     * frame lands here in user mode with the stack pointer of the crashed
+     * task, and the setjmp context is not always honoured from that state.
+     * Under FS-UAE the resume was observed after the call site, not at it. The
+     * report above is dependable and the resume is not, so callers must treat
+     * a caught crash as fatal and must not continue.
      */
     ami_crash_task->tc_TrapCode = ami_crash_old_trap;
     longjmp(ami_crash_jmp, 1);
@@ -238,16 +238,16 @@ const AmiCrashInfo *ami_crash_info(VOID)
 /* ------------------------------------------------------- exec Alert hook, */
 
 /*
- * A Guru is not a CPU exception. When Exec detects corruption it calls its own
- * Alert(), LVO -108, with the alert number in d7, which never goes near
- * tc_TrapCode, so the trap handler above cannot see a double free, a corrupt
- * memory list or a reused IORequest.
+ * A Guru is not a CPU exception. When Exec detects corruption, it calls its
+ * own Alert(), LVO -108, with the alert number in d7. That path never goes
+ * near tc_TrapCode, so the trap handler above cannot see a double free, a
+ * corrupt memory list or a reused IORequest.
  *
- * SetFunction() on exec's Alert vector catches them. The trampoline logs and
- * then tail-jumps to the original, so normal Guru behaviour is unchanged.
+ * SetFunction() on the Alert vector of exec catches them. The trampoline logs
+ * and then tail-jumps to the original, so normal Guru behaviour is unchanged.
  *
- * This patches Exec machine-wide, so it is a debugging aid: install it in
- * tests and tools under the emulator, and always remove it before exiting.
+ * This patches Exec machine-wide, so it is a debugging aid. Install it in
+ * tests and tools under the emulator, and always remove it before exit.
  */
 
 static APTR ami_alert_old;

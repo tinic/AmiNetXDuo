@@ -6,9 +6,9 @@
  *   ReleaseDomainNameServerList()
  *   In_LocalAddr() / In_CanForward()
  *
- * Tier 3 (docs/RESEARCH.md S3.2) is ~35 vectors: interface config and query,
- * routing, GetNetworkStatistics(), the *RoadshowData set. Most now live
- * elsewhere, written against the NDK 3.2 autodoc (docs/RESEARCH.md S47):
+ * Tier 3 (docs/RESEARCH.md S3.2) is ~35 vectors: interface configuration and
+ * query, routing, GetNetworkStatistics(), the *RoadshowData set. Most now
+ * live elsewhere, written against the NDK 3.2 autodoc (docs/RESEARCH.md S47):
  *
  *   interfaces.c   ObtainInterfaceList(), ReleaseInterfaceList(),
  *                  QueryInterfaceTagList(), ConfigureInterfaceTagList(),
@@ -20,18 +20,19 @@
  *                  BeginInterfaceConfig(), AbortInterfaceConfig(), the
  *                  message and every documented refusal. The allocation
  *                  itself is the one gap left, and it answers AAMR_Ignored
- *                  rather than being a stub, because that vector returns VOID
- *                  and an ENOSYS in it hangs the caller (RESEARCH S47.12).
+ *                  rather than acting as a stub, because that vector returns
+ *                  VOID and an ENOSYS in it hangs the caller (RESEARCH
+ *                  S47.12).
  *
  * Still stubbed:
  *
  *   ObtainRoadshowData()       struct RoadshowDataNode is defined, but the
  *                              rdn_Name strings are Roadshow-private and
  *                              ChangeRoadshowData() looks items up by name.
- *                              Inventing them gives an API nothing can use
- *                              and that disagrees with Roadshow. The autodoc
- *                              does not list the names either.
- *   the mbuf_* family          no caller we would ship. In the whole NDK a
+ *                              Invented names give an API nothing can use,
+ *                              and one that disagrees with Roadshow. The
+ *                              autodoc does not list the names either.
+ *   the mbuf_* family          no caller we ship. In the whole NDK a
  *                              `struct mbuf` crosses this ABI in one place
  *                              that is not an mbuf_* prototype:
  *                              IPFilterMsg.ifm_Packet
@@ -47,27 +48,27 @@
  *                              pointers. netmonitor.c is complete without a
  *                              single mbuf.
  *
- *                              Implementing them would also mean a real BSD
- *                              mbuf allocator, since sys/mbuf.h pins the
- *                              layout callers compile against, next/len/
- *                              data chains NetX Duo has no use for, as it
- *                              allocates fixed-size NX_PACKETs from one pool.
+ *                              They also need a real BSD mbuf allocator,
+ *                              because sys/mbuf.h pins the layout callers
+ *                              compile against. Those next/len/data chains
+ *                              have no use in NetX Duo, which allocates
+ *                              fixed-size NX_PACKETs from one pool.
  *
  *                              src/mbuf is that allocator, already written and
- *                              tested and linked into nothing. Wiring any one
- *                              of these eleven to it also means linking
- *                              aminetxduo_mbuf and calling ami_mbuf_cleanup()
- *                              from ami_ns_destroy(); see aminetxduo/mbuf.h.
- *                              Without both, every slab is resident until
- *                              reboot.
+ *                              tested and linked into nothing. A connection
+ *                              from any one of these eleven to it also needs
+ *                              aminetxduo_mbuf linked, and ami_mbuf_cleanup()
+ *                              called from ami_ns_destroy(). See
+ *                              aminetxduo/mbuf.h. Without both, every slab is
+ *                              resident until reboot.
  *   ChangeRouteTagList()       the NDK assigns it an offset and neither the
  *                              autodoc nor clib/bsdsocket_protos.h says what
  *                              it takes.
  *   the ipf_* set              Roadshow's packet filter, out of scope per
- *                              RESEARCH 9; nothing outside Roadshow's own
+ *                              RESEARCH 9. Nothing outside Roadshow's own
  *                              tools calls it, and NetTrace covers the
  *                              capture half through BPF.
- *   vsyslog()                  prototyped; there is nothing on this machine
+ *   vsyslog()                  prototyped. There is nothing on this machine
  *                              for it to log to.
  *
  * The net-monitor hooks are done: netmonitor.c registers all four types, and
@@ -76,14 +77,13 @@
  * The autodoc exists: NDK 3.2 ships it at SANA+RoadshowTCP-IP/doc/
  * bsdsocket.doc, beside interfaces/bsdsocket.xml, the same NDK this project
  * builds against. 10,436 lines, 121 functions, including 35 of the vectors
- * that used to answer ENOSYS here. The remaining stubs are unwritten, not
- * unknowable.
+ * that used to answer ENOSYS here.
  *
  * Not in that autodoc: the seven ipf_* vectors and ChangeRouteTagList.
  *
- * Guessing an ABI cost this project time twice (ndk-include/pwd.h,
- * bpf_set_notify_mask's register order), so anything written here is written
- * against that document and not from the name.
+ * A guessed ABI cost this project time twice (ndk-include/pwd.h,
+ * bpf_set_notify_mask's register order). Anything written here is written
+ * against that document, not from the name.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -121,7 +121,7 @@ BOOL bsd_GetDefaultDomainName(register STRPTR buffer   __asm("a0"),
     if (cfg == NULL || cfg->resolver.domain[0] == '\0')
         return FALSE;
 
-    /* Truncating would hand back a domain that is not the domain. */
+    /* A truncated domain is not the domain, so this fails instead. */
     if (bsd_strlen(cfg->resolver.domain) >= (ULONG)buffer_size)
         return FALSE;
 
@@ -139,17 +139,18 @@ BOOL bsd_GetDefaultDomainName(register STRPTR buffer   __asm("a0"),
  *
  * struct DomainNameServerNode (libraries/bsdsocket.h) embeds a MinNode, not a
  * Node, while the prototype says struct List. The two are layout-compatible
- * for AddTail/traversal, lh_Head and mlh_Head are at the same offset, so
- * the list header is a struct List and the nodes are MinNodes, which is the
- * only reading that satisfies both halves of the published interface.
+ * for AddTail and traversal, because lh_Head and mlh_Head are at the same
+ * offset. The list header is therefore a struct List and the nodes are
+ * MinNodes, the only reading that satisfies both halves of the published
+ * interface.
  *
- * Twice the slots and IPv6-wide strings: dnsn_Address is a STRPTR and Roadshow
- * never had a server this call could not spell, but this stack can be handed
- * one in a router advertisement, and a resolver reporting only half the
- * servers it queries is what the report exists to prevent. A caller written
- * for Roadshow passes the text to inet_addr() and gets INADDR_NONE for an IPv6
- * entry, which is the same answer it gets for any address it cannot use; there
- * is no dotted quad to give it instead.
+ * Twice the slots and IPv6-wide strings. dnsn_Address is a STRPTR, and
+ * Roadshow never had a server this call cannot spell. This stack can be
+ * handed one in a router advertisement, and the report must not list only half
+ * the servers the resolver queries. A caller written for Roadshow passes the
+ * text to inet_addr() and gets INADDR_NONE for an IPv6 entry. That is the same
+ * answer it gets for any address it cannot use, and there is no dotted quad to
+ * give it instead.
  */
 typedef struct BsdDnsList
 {
@@ -168,9 +169,9 @@ struct List *bsd_ObtainDomainNameServerList(
     UWORD            i;
 
 #ifdef AMINETXDUO_IPV6
-    /* Before the configuration is read: a router advertisement's servers are
-       recorded on the IP thread and only reach the configuration when a caller
-       task absorbs them, and this is one. */
+    /* Before the configuration is read. A router advertisement's servers are
+       recorded on the IP thread, and they only reach the configuration when a
+       caller task absorbs them. This is one such task. */
     netstack_dns_absorb_ra();
 #endif
 
@@ -223,9 +224,9 @@ struct List *bsd_ObtainDomainNameServerList(
         count++;
     }
 
-    /* After the IPv4 ones, in the order the resolver tries them: NetX Duo's
-       DNS client asks its servers in the order they were added, and the file's
-       and the lease's are added before an advertisement can arrive. */
+    /* After the IPv4 ones, in the order the resolver tries them. NetX Duo's
+       DNS client asks its servers in the order they were added, and the
+       file's and the lease's are added before an advertisement can arrive. */
     for (i = 0; i < cfg->resolver.nameserver6_count &&
                 i < (UWORD)AMI_CFG_MAX_NAMESERVERS; i++)
     {
@@ -238,8 +239,8 @@ struct List *bsd_ObtainDomainNameServerList(
         node->dnsn_Size    = (LONG)sizeof(*node);
         node->dnsn_Address = (STRPTR)out->bdl_Text[count];
 
-        /* Positive: nothing writes this list but a router advertisement, and
-           the file the negative sign means cannot hold an IPv6 address. */
+        /* Positive: only a router advertisement writes this list, and the
+           file that the negative sign denotes cannot hold an IPv6 address. */
         node->dnsn_UseCount = 1;
 
         AddTail((struct List *)&out->bdl_List, (struct Node *)&node->dnsn_MinNode);
@@ -251,11 +252,11 @@ struct List *bsd_ObtainDomainNameServerList(
 
 /*
  * The three calls that change the resolver. Roadshow's own AddNetInterface
- * hands over the name servers from the lease it obtained by calling
- * AddDomainNameServer(). With these as ENOSYS stubs it configured the
- * interface, took a DHCP lease, set the netmask and the default route, then
- * returned rc 20 on the last step, so the command in every Roadshow user's
- * S:Network-Startup reported failure after doing everything right
+ * calls AddDomainNameServer() to hand over the name servers from the lease it
+ * obtained. With these as ENOSYS stubs it configured the interface, took a
+ * DHCP lease, set the netmask and the default route, then returned rc 20 on
+ * the last step. The command in every Roadshow user's S:Network-Startup then
+ * reported failure for a configuration that had completed
  * (docs/RESEARCH.md 55).
  *
  * The address arrives as a dotted quad, not as an in_addr: Roadshow's autodoc
@@ -307,14 +308,14 @@ LONG bsd_RemoveDomainNameServer(register STRPTR address __asm("a0"),
 }
 
 /*
- * VOID is not a slip. clib/bsdsocket_protos.h:184 says
+ * The VOID return is deliberate. clib/bsdsocket_protos.h:184 says
  *
  *     __stdargs VOID SetDefaultDomainName( STRPTR buffer );
  *
  * while its Add/Remove neighbours return LONG. This used to return LONG here,
- * and the mismatch was invisible because the prototype had been hand-added to
+ * and the mismatch was invisible because the prototype was hand-added to
  * bsdsocket_vectors.h under the wrong LVO comment, so the generator never saw
- * the disagreement. Regenerating the table surfaced it.
+ * the disagreement. A regenerated table surfaced it.
  *
  * The caller gets no result, so failures go to errno only: bsd_fail() sets it
  * and Errno() reports it.
@@ -385,7 +386,7 @@ LONG bsd_In_LocalAddr(register in_addr_t address __asm("d0"),
 }
 
 /*
- * 4.4BSD in_canforward(): an address may be forwarded unless it is loopback,
+ * 4.4BSD in_canforward(): an address can be forwarded unless it is loopback,
  * multicast/class D, class E, or has a zero network part.
  */
 LONG bsd_In_CanForward(register in_addr_t address __asm("d0"),

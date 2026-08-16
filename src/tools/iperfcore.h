@@ -46,9 +46,9 @@ enum
 };
 
 /*
- * How long a slice may spend inside the library.  250 ms is httpd's own idle
+ * How long a slice can spend inside the library.  250 ms is httpd's own idle
  * select timeout, so a measurement adds no latency that a request did not
- * already face; 20 ms leaves the loop responsive without spinning.
+ * already face.  20 ms leaves the loop responsive without spinning.
  */
 #define IPERF_SLICE_MICROS  20000UL
 
@@ -61,7 +61,7 @@ typedef struct IperfPlan
     ULONG       seconds;            /* 0 when kbytes decides instead        */
     ULONG       kbytes;             /* 0 when seconds decides               */
     ULONG       buflen;             /* payload per send                     */
-    ULONG       rate_kbit;          /* UDP send pacing; 0 is unpaced        */
+    ULONG       rate_kbit;          /* UDP send pacing, 0 is unpaced        */
 } IperfPlan;
 
 typedef struct IperfResult
@@ -96,13 +96,12 @@ typedef struct IperfRun
     UBYTE           pad;
 
     /*
-     * How many slices this run may take before the clock is asked whether it
+     * How many slices this run can take before the clock is asked whether it
      * is still moving.  A measurement whose clock stops advancing would never
-     * reach its deadline and would send for ever -- which is not
-     * hypothetical: the host-side iperf 2.2.1 used to pin this protocol down
-     * wedged on a failed clock_nanosleep() and spun for seventeen hours.  A
-     * timing call that fails has to end the run with a diagnosis, not become
-     * a busy loop.
+     * reach its deadline and would send for ever.  The host-side iperf 2.2.1
+     * used to pin this protocol down wedged on a failed clock_nanosleep() and
+     * spun for seventeen hours.  A timing call that fails has to end the run
+     * with a diagnosis rather than become a busy loop.
      *
      * The count is the trigger and t_guard is the evidence: how fast a
      * machine goes round the loop is not a measurement of anything, so the
@@ -144,11 +143,11 @@ VOID iperf_plan_init(IperfPlan *plan);
 const char *iperf_plan_check(const IperfPlan *plan);
 
 /*
- * Open the sockets and start.  0 on success; on failure the reason is in
+ * Open the sockets and start.  0 on success.  On failure the reason is in
  * run->res.err and run->res.stage and iperf_end() still has to be called.
  *
  * `buf` is the payload buffer, supplied by the caller so that neither this nor
- * httpd needs a static one; it must be at least plan->buflen bytes and stay
+ * httpd needs a static one.  It must be at least plan->buflen bytes and stay
  * alive until iperf_end().
  */
 LONG iperf_begin(IperfRun *run, struct Library *sb, const IperfPlan *plan,
@@ -172,7 +171,7 @@ VOID iperf_end(IperfRun *run, IperfResult *out);
  *   dir=tcp-tx bytes=4194304 ms=10012 bits_per_sec=3351000 packets=512 \
  *   lost=0 peer=192.168.1.9 port=5001
  *
- * Fixed key order, every key always present, so a reader may index it.
+ * Fixed key order, every key always present, so a reader can index it.
  */
 VOID iperf_result_line(const IperfResult *res, struct Library *sb,
                        char *buf, ULONG buflen);

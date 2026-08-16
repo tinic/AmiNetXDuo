@@ -89,7 +89,7 @@ static LONG bsd_opt_set_long(struct AmiSocketBase *base, APTR optval,
  * IP_TTL and IP_TOS onto the live NetX socket.
  *
  * Both are arguments _nx_ip_packet_send() takes from the socket on every send,
- * so writing them here is what puts them on the wire; without it the caller's
+ * so writing them here is what puts them on the wire. Without it the caller's
  * value was stored, echoed back by getsockopt, and never used. raw.c reads
  * as_Ttl and as_Tos directly and needs nothing from here.
  *
@@ -99,7 +99,7 @@ static LONG bsd_opt_set_long(struct AmiSocketBase *base, APTR optval,
  * The IPv6 halves are not covered: _nx_ipv6_packet_send() takes the traffic
  * class as a literal 0 from both the TCP and the UDP send paths, and takes the
  * TCP hop limit from nx_ipv6_hop_limit on the NX_IP rather than from the
- * socket. The UDP hop limit IS nx_udp_socket_time_to_live, so
+ * socket. The UDP hop limit is nx_udp_socket_time_to_live, so
  * IPV6_UNICAST_HOPS reaches the wire on a UDP socket through the line below.
  *
  * Must be called inside a bsd_nx_enter() bracket: this is live NX state.
@@ -145,7 +145,7 @@ static ULONG bsd_timeval_ticks(const struct timeval *tv)
  * Milliseconds -> ThreadX ticks, rounded up. Rounding up matters here: at 50
  * ticks a second anything under 20 ms truncates to zero, and zero is the
  * value that means "no deadline", so a caller asking for the shortest
- * deadline it can name would get no deadline at all.
+ * deadline it can name gets no deadline at all.
  *
  * The caller's ceiling keeps the multiply inside a ULONG.
  */
@@ -191,8 +191,8 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
              * Remembered and answered, not honoured. bind() hands the port to
              * NetX Duo's own table (socket.c), which is exclusive and has no
              * override: a socket in TIMED_WAIT keeps its port whatever this
-             * says. Nothing here can change that, and refusing the call would
-             * break every ported daemon that sets it and does not look at the
+             * says. Nothing here can change that, and refusing the call
+             * breaks every ported daemon that sets it and does not look at the
              * result. The round-trip is pinned by tests/sockopt.
              */
             /*
@@ -207,13 +207,13 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
              *
              * SO_REUSEPORT is the same flag here.  BSD's REUSEPORT also
              * allows several live sockets on one port and shares arrivals
-             * between them; NetX Duo demultiplexes to one socket, so that
-             * half has nowhere to go and pretending otherwise would deliver
-             * every connection to whichever socket bound first.
+             * between them.  NetX Duo demultiplexes to one socket, so that
+             * half has nowhere to go and pretending otherwise delivers every
+             * connection to whichever socket bound first.
              *
              * Set on the NX socket as well as recorded, and only while the
              * socket is unbound: after bind() the flag has already been read
-             * and the call would silently do nothing.
+             * and the call does nothing.
              */
             case SO_REUSEADDR:
             case SO_REUSEPORT:
@@ -238,7 +238,7 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
             /*
              * Likewise. BSD uses this as permission, sendto() to a broadcast
              * address is EACCES without it, and this stack has never asked,
-             * so enforcing it now would start failing sends that work today.
+             * so enforcing it now starts failing sends that work today.
              * The flag is kept so getsockopt answers what was set.
              */
             case SO_BROADCAST:
@@ -252,7 +252,7 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
 
             /*
              * SO_KEEPALIVE reaches the NX socket only when
-             * NX_ENABLE_TCP_KEEPALIVE is defined; without it
+             * NX_ENABLE_TCP_KEEPALIVE is defined.  Without it
              * nx_tcp_periodic_processing.c's keepalive block is compiled out
              * and an idle connection is never probed.  The flag is kept
              * alongside because getsockopt() must answer for a socket that is
@@ -269,7 +269,7 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) == ASF_TCP)
                 {
                     /* Live NX socket state, so it needs the bracket every
-                       neighbouring option takes; the IP thread reads this
+                       neighbouring option takes. The IP thread reads this
                        field in nx_tcp_periodic_processing(). */
                     if (bsd_nx_enter(SocketBase) != 0)
                         return bsd_fail(SocketBase, AMI_ENETDOWN);
@@ -283,8 +283,8 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
             /*
              * Accepted, stored nowhere, and getsockopt always answers 1: the
              * urgent byte is delivered in the stream whatever this says, which
-             * is oob.c's first documented divergence. Answering back a 0 the
-             * caller had set would be the one thing it cannot find out.
+             * is oob.c's first documented divergence. Echoing back a 0 the
+             * caller set hides the one fact it cannot discover any other way.
              */
             case SO_OOBINLINE:
                 return (bsd_opt_set_long(SocketBase, optval, optlen,
@@ -323,11 +323,11 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
              * only unit NetX Duo counts either queue in.
              *
              * On TCP nothing is applied. The receive queue depth is the only
-             * knob NetX Duo offers and the whole body of
+             * knob NetX Duo offers, and the whole body of
              * nx_tcp_socket_receive_queue_max_set() is inside
-             * NX_ENABLE_LOW_WATERMARK, which this port does not define, the
-             * note at the end of nx_user.h says why, and it is a piece of work
-             * with its own measurement rather than a define. The advertised
+             * NX_ENABLE_LOW_WATERMARK, which this port does not define. The
+             * note at the end of nx_user.h says why. Defining it is a piece of
+             * work with its own measurement. The advertised
              * window is sized from the packet pool at socket-create time
              * (ami_bsd_tcp_window()) and is not settable afterwards. The call
              * used to be made unconditionally with its NX_NOT_SUPPORTED
@@ -354,7 +354,7 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 if ((sock->as_Flags & (ASF_UDP | ASF_DELETED)) == ASF_UDP &&
                     value > 0)
                 {
-                    /* The UDP receive queue IS caller-tunable: it is a
+                    /* The UDP receive queue is caller-tunable: it is a
                        datagram count on the socket, which nx_udp_socket_create
                        took from bsd_udp_queue_max(). Lowered or raised, never
                        past what the pool can hold. */
@@ -375,8 +375,9 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) == ASF_TCP &&
                     value > 0)
                 {
-                    /* nx_tcp_socket_transmit_configure() would do this, but it
-                       rewrites the retransmit timer and retry count too, and
+                    /* nx_tcp_socket_transmit_configure() does this as well,
+                       but it rewrites the retransmit timer and retry count too,
+                       and
                        sets nx_tcp_socket_rtt_configured, which stops the RTT
                        estimator for the life of the socket. */
                     if (bsd_nx_enter(SocketBase) != 0)
@@ -423,9 +424,9 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
              * NetX Duo does not implement Nagle, so a segment is sent as soon
              * as there is one to send and getsockopt answers 1 whatever was
              * asked for. The arguments are still checked, and the socket type
-             * still has to be TCP: accepting this on a UDP socket, which it
-             * did, by returning before looking at anything, told a caller
-             * that a level it does not have was configured.
+             * still has to be TCP. Accepting this on a UDP socket, which it
+             * did by returning before looking at anything, told a caller that
+             * a level it does not have was configured.
              */
             case TCP_NODELAY:
                 if ((sock->as_Flags & ASF_TCP) == 0)
@@ -444,7 +445,7 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
 
                 /*
                  * The floor is RFC 791's 68-byte minimum datagram less the two
-                 * 20-byte headers; the ceiling is what is left of a maximum
+                 * 20-byte headers. The ceiling is what is left of a maximum
                  * datagram. A negative went in as a four-billion MSS, which
                  * NetX Duo stored without complaint.
                  */
@@ -531,7 +532,7 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 return 0;
 
             /*
-             * IP_HDRINCL is only meaningful on a raw socket; BSD returns
+             * IP_HDRINCL is only meaningful on a raw socket. BSD returns
              * ENOPROTOOPT on anything else.
              */
             case IP_HDRINCL:
@@ -631,7 +632,7 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
                 return bsd_opt_get_long(SocketBase, optval, optlen,
                     ((sock->as_Flags & ASF_KEEPALIVE) != 0) ? 1 : 0);
 
-            /* Always in force; see the set side. */
+            /* Always in force, see the set side. */
             case SO_OOBINLINE:
                 return bsd_opt_get_long(SocketBase, optval, optlen, 1);
 
@@ -640,10 +641,10 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
                                         (LONG)sock->as_EventMask);
 
             /*
-             * With nothing set, report the window this socket got.  A TCP
-             * socket's is sized from the packet pool and the live socket count
-             * at creation (ami_bsd_tcp_window()), so BSD_TCP_WINDOW is only
-             * the floor and may not be any socket's actual window.
+             * With nothing set, this reports the window the socket got.  A
+             * TCP socket's is sized from the packet pool and the live socket
+             * count at creation (ami_bsd_tcp_window()), so BSD_TCP_WINDOW is
+             * only the floor and is not always any socket's actual window.
              */
             case SO_RCVBUF:
             {
@@ -699,7 +700,7 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
         switch (optname)
         {
             /* Both refuse a socket that has no TCP under it, as the set side
-               does; answering 1 and 0 there described a level the socket does
+               does. Answering 1 and 0 there described a level the socket does
                not have. */
             case TCP_NODELAY:
                 if ((sock->as_Flags & ASF_TCP) == 0)
@@ -878,9 +879,9 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
              * always OOBINLINE (see oob.c), so the urgent byte is in the
              * stream and the mark means "one has arrived and recv(MSG_OOB) has
              * not taken it yet".  A caller that uses SIOCATMARK to decide when
-             * to stop discarding, as telnet does, gets the right answer; a
+             * to stop discarding, as telnet does, gets the right answer.  A
              * caller that expects the byte to be absent from the stream does
-             * not, the divergence oob.c documents.
+             * not, which is the divergence oob.c documents.
              */
             *(LONG *)argp = ((sock->as_Flags & ASF_OOBHAVE) != 0) ? 1 : 0;
             return 0;
@@ -941,10 +942,10 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
          addr.nxd_ip_address.v6[2] | addr.nxd_ip_address.v6[3]) == 0)
     {
         /*
-         * Bound to in6addr_any. Report the source address the stack would put
-         * on a packet to this socket's peer, using NetX Duo's own RFC 6724
-         * selection, so the answer matches what the peer sees. Link-local vs
-         * global is not something an application can work out for itself.
+         * Bound to in6addr_any. This reports the source address the stack
+         * puts on a packet to this socket's peer, using NetX Duo's own RFC
+         * 6724 selection, so the answer matches what the peer sees. An
+         * application cannot choose between link-local and global for itself.
          */
         ULONG chosen[4];
 
@@ -966,7 +967,7 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
     {
         NX_IP *ip = netstack_ip();
 
-        /* An unbound-to-INADDR_ANY socket reports the interface address. */
+        /* A socket at INADDR_ANY reports the interface address. */
         if (ip != NULL && (sock->as_Flags & ASF_CONNECTED) != 0)
             bsd_addr_from_v4(&addr,
                              ip->nx_ip_interface[0].nx_interface_ip_address);

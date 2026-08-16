@@ -8,8 +8,9 @@
  *
  * Same primary source as interfaces.c and routing.c: NDK 3.2's
  * SANA+RoadshowTCP-IP/doc/bsdsocket.doc, together with libraries/bsdsocket.h
- * and the netinet/ *_var.h headers from the same NDK, used as an ABI reference only. No
- * Roadshow, AmiTCP, AROSTCP or Miami code was consulted or is present.
+ * and the netinet/ *_var.h headers from the same NDK, used as an ABI reference
+ * only. No Roadshow, AmiTCP, AROSTCP or Miami code was consulted or is
+ * present.
  *
  *   The return value is a byte count: "length, Number of bytes copied, or -1
  *   for failure". Not zero-on-success and not an entry count, the two other
@@ -24,14 +25,14 @@
  *   data structures you need to see. The version described in this
  *   documentation is 1."
  *
- * Unlike interfaces.c, this call cannot leave a value unset: the caller gets a
- * whole C struct copied, every member of it, and a member this stack does not
+ * Unlike interfaces.c, this call cannot leave a value unset. The caller gets a
+ * whole C struct copied, every member of it. A member this stack does not
  * count is a zero with no way to mark it as unmeasured. The mapping at each
- * fill function below therefore names every member it fills; anything unnamed
+ * fill function below therefore names every member it fills. Anything unnamed
  * is zero because it is uncounted, not because it was measured as none.
  *
- * A type this stack keeps nothing for at all is refused with EOPNOTSUPP: an
- * all-zero mbstat would report a healthy mbuf allocator that does not exist.
+ * A type this stack keeps nothing for at all is refused with EOPNOTSUPP. An
+ * all-zero mbstat reports a healthy mbuf allocator that does not exist.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -68,9 +69,9 @@ typedef union BsdNetStat
  *   ips_ofragments  <- ip_total_fragments_sent
  *
  * ip_invalid_packets and ip_receive_packets_dropped have no ipstat member that
- * means the same thing: ipstat splits input failure into seven named causes
- * (tooshort, toosmall, badhlen, badlen, badvers, badoptions, noproto) and
- * NetX Duo counts them as one number, so it goes into none of them.
+ * means the same thing. ipstat splits input failure into seven named causes
+ * (tooshort, toosmall, badhlen, badlen, badvers, badoptions, noproto), and
+ * NetX Duo counts them as one number. It therefore goes into none of them.
  */
 static VOID bsd_stat_ip(NX_IP *ip, struct ipstat *out)
 {
@@ -103,7 +104,7 @@ static VOID bsd_stat_ip(NX_IP *ip, struct ipstat *out)
  * not. NetX Duo counts no replies sent, so icps_reflect stays zero.
  *
  * ping_threads_suspended and ping_timeouts describe this host's own outbound
- * pings and have no icmpstat member, icmpstat is a per-message-type
+ * pings and have no icmpstat member. icmpstat is a per-message-type
  * histogram, not a client statistic.
  */
 static VOID bsd_stat_icmp(NX_IP *ip, struct icmpstat *out)
@@ -136,9 +137,9 @@ static VOID bsd_stat_icmp(NX_IP *ip, struct icmpstat *out)
  *   tcps_drops          <- tcp_connections_dropped
  *   tcps_sndrexmitpack  <- tcp_retransmit_packets
  *
- * tcps_connattempt and tcps_accepts are not filled from tcp_connections: that
+ * tcps_connattempt and tcps_accepts are not filled from tcp_connections. That
  * counter is connections established, incoming and outgoing together, and
- * there is no basis for splitting it.
+ * there is no basis for a split.
  */
 static VOID bsd_stat_tcp(NX_IP *ip, struct tcpstat *out)
 {
@@ -175,7 +176,7 @@ static VOID bsd_stat_tcp(NX_IP *ip, struct tcpstat *out)
  *   udps_noport    <- nx_ip_udp_no_port_for_delivery
  *
  * On the last three: NetX Duo increments nx_ip_udp_invalid_packets at exactly
- * two places, both a datagram whose length is shorter than its header
+ * two places. Both are a datagram whose length is shorter than its header
  * (nx_udp_packet_receive.c), which is udps_hdrops and not udps_badlen. Its
  * receive_packets_dropped is a socket whose queue is full, exactly
  * udps_fullsock. "No socket on port" has a counter of its own that
@@ -207,11 +208,11 @@ static VOID bsd_stat_udp(NX_IP *ip, struct udpstat *out)
 /*
  * TCP state, NetX Duo's -> 4.4BSD's. A table, not arithmetic: the two
  * enumerations agree up to CLOSE_WAIT and then diverge. NetX Duo has
- * FIN_WAIT_2 = 8, CLOSING = 9, TIMED_WAIT = 10, LAST_ACK = 11;
+ * FIN_WAIT_2 = 8, CLOSING = 9, TIMED_WAIT = 10, LAST_ACK = 11.
  * <netinet/tcp_fsm.h> has CLOSING = 7, LAST_ACK = 8, FIN_WAIT_2 = 9,
- * TIME_WAIT = 10. Subtracting one, which the first four states invite, since
- * NX_TCP_CLOSED is 1 and TCPS_CLOSED is 0, reports a connection in LAST_ACK
- * as being in FIN_WAIT_2.
+ * TIME_WAIT = 10. A subtraction of one, which the first four states invite
+ * because NX_TCP_CLOSED is 1 and TCPS_CLOSED is 0, reports a connection in
+ * LAST_ACK as FIN_WAIT_2.
  */
 typedef struct BsdTcpStateMap
 {
@@ -249,11 +250,11 @@ static LONG bsd_tcp_state(ULONG nx_state)
 }
 
 /*
- * The bytes sitting in a packet queue. NetX Duo queues whole NX_PACKETs and
- * keeps a packet count, but pcd_receive_queue_size is a byte size, so
- * nx_packet_length is summed over the queue. The queues are short (the receive
- * one is bounded by the socket's window) and the walk happens inside the
- * bracket, where nothing else can be adding to them.
+ * The bytes in a packet queue. NetX Duo queues whole NX_PACKETs and keeps a
+ * packet count, but pcd_receive_queue_size is a byte size, so nx_packet_length
+ * is summed over the queue. The queues are short (the receive one is bounded
+ * by the socket's window) and the walk happens inside the bracket, where
+ * nothing else can add to them.
  */
 static ULONG bsd_queue_bytes(NX_PACKET *head, ULONG count)
 {
@@ -271,7 +272,7 @@ static ULONG bsd_queue_bytes(NX_PACKET *head, ULONG count)
 
 /*
  * How many entries the caller's buffer holds, and where the next one goes.
- * `size` may be smaller than the whole answer, "size, Number of bytes to
+ * `size` can be smaller than the whole answer. "size, Number of bytes to
  * copy" is the caller's limit, not the total, so this is bounded both ways.
  */
 typedef struct BsdPcdWriter
@@ -299,15 +300,15 @@ static struct protocol_connection_data *bsd_pcd_next(BsdPcdWriter *w)
 
 /*
  * Listening sockets need a rule of their own. One BSD listen() is two
- * NX_TCP_SOCKETs here, and neither is in NetX Duo's LISTEN state: as socket.c
+ * NX_TCP_SOCKETs here, and neither is in NetX Duo's LISTEN state. As socket.c
  * describes, the descriptor keeps its own socket, which is never used for a
- * connection and stays in NX_TCP_CLOSED, and parks a second spare socket on
- * the port with the accept already posted so NetX Duo can answer a SYN before
- * the application calls accept(). The spare sits in NX_TCP_SYN_RECEIVED.
+ * connection and stays in NX_TCP_CLOSED. It also parks a second spare socket
+ * on the port with the accept already posted, so NetX Duo can answer a SYN
+ * before the application calls accept(). The spare sits in
+ * NX_TCP_SYN_RECEIVED.
  *
  * Reported literally, one listen() on port 80 shows a monitor a socket in
- * CLOSED and one in SYN_RECEIVED on the same port with no SYN having arrived.
- * So:
+ * CLOSED and one in SYN_RECEIVED on the same port, when no SYN arrived. So:
  *
  *   the parked spare      is skipped. The application does not own it and it
  *                         has no descriptor.
@@ -340,8 +341,8 @@ static NX_TCP_SOCKET *bsd_listen_spare(NX_IP *ip, UINT port)
 
 /*
  * The created-socket lists are singly linked and circular, so the walk is
- * bounded by the count NetX Duo keeps rather than by a NULL that never comes
- * the same trap netstatus.c notes for the same two lists.
+ * bounded by the count NetX Duo keeps rather than by a NULL that never comes.
+ * netstatus.c notes the same for the same two lists.
  */
 static VOID bsd_pcd_tcp(NX_IP *ip, BsdPcdWriter *w)
 {
@@ -382,7 +383,7 @@ static VOID bsd_pcd_tcp(NX_IP *ip, BsdPcdWriter *w)
                 sock->nx_tcp_socket_connect_ip.nxd_ip_address.v4);
 
             /* The local address is the address of the interface the connection
-               went out of; a listening socket has none yet, so it stays
+               went out of. A listening socket has none yet, so it stays
                INADDR_ANY. */
             if (sock->nx_tcp_socket_connect_interface != NX_NULL)
                 out->pcd_local_address.s_addr = (in_addr_t)BSD_HTONL(
@@ -392,8 +393,8 @@ static VOID bsd_pcd_tcp(NX_IP *ip, BsdPcdWriter *w)
                 bsd_queue_bytes(sock->nx_tcp_socket_receive_queue_head,
                                 sock->nx_tcp_socket_receive_queue_count);
 
-            /* Send-Q is what has been sent and not yet acknowledged, which is
-               what NetX Duo's transmit_sent queue holds. */
+            /* Send-Q is the data sent and not yet acknowledged, which is what
+               NetX Duo's transmit_sent queue holds. */
             out->pcd_send_queue_size =
                 bsd_queue_bytes(sock->nx_tcp_socket_transmit_sent_head,
                                 sock->nx_tcp_socket_transmit_sent_count);
@@ -424,10 +425,10 @@ static VOID bsd_pcd_udp(NX_IP *ip, BsdPcdWriter *w)
                 bsd_queue_bytes(sock->nx_udp_socket_receive_head,
                                 sock->nx_udp_socket_receive_count);
 
-            /* A datagram socket has no peer and nothing queued for output,
-               sendto() hands the packet to the IP thread and returns, so the
-               foreign address, foreign port and send queue really are zero
-               rather than uncounted. */
+            /* A datagram socket has no peer and nothing queued for output.
+               sendto() hands the packet to the IP thread and returns. The
+               foreign address, foreign port and send queue are therefore
+               really zero, not uncounted. */
         }
 
         sock = sock->nx_udp_socket_created_next;
@@ -449,7 +450,7 @@ LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
     ULONG        copy;
 
     /* "You must fill in this member or the message will be rejected" is the
-       neighbouring call's wording; this one simply says the version is 1. */
+       neighbouring call's wording. This one says the version is 1. */
     if (version != NETWORKSTATUS_VERSION)
         return bsd_fail(SocketBase, AMI_EINVAL);
 
@@ -474,8 +475,8 @@ LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
          * measurement:
          *
          *   NETSTATUS_mb    no mbuf allocator. NetX Duo has a fixed NX_PACKET
-         *                   pool with different semantics, and mapping one
-         *                   onto the other would report free clusters that do
+         *                   pool with different semantics, and a mapping of
+         *                   one onto the other reports free clusters that do
          *                   not exist. The mbuf_* vectors are stubs for the
          *                   same reason.
          *   NETSTATUS_igmp  IGMP runs (src/bsdsocket/mcast.c), but NetX Duo
@@ -484,9 +485,9 @@ LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
          *                   and part of tooshort, and the other five are
          *                   unknown rather than zero.
          *   NETSTATUS_mrt   no multicast routing.
-         *   NETSTATUS_rt    three of rtstat's five members would be genuinely
-         *                   zero, this stack creates no dynamic routes and
-         *                   processes no redirects, and the other two,
+         *   NETSTATUS_rt    three of rtstat's five members are genuinely
+         *                   zero, because this stack creates no dynamic
+         *                   routes and processes no redirects. The other two,
          *                   rts_unreach and rts_wildcard, are lookups nothing
          *                   counts.
          */
@@ -524,8 +525,8 @@ LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
         bsd_nx_leave(SocketBase);
 
         /*
-         * With no destination the answer is what a complete copy would take.
-         * It is a snapshot: a caller that allocates from it and asks again may
+         * With no destination the answer is the size of a complete copy.
+         * It is a snapshot: a caller that allocates from it and asks again can
          * find one more socket, so the second call's return value is what was
          * actually written.
          */
@@ -554,9 +555,9 @@ LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
 
     bsd_nx_leave(SocketBase);
 
-    /* "size, Number of bytes to copy" is the caller's limit; a caller built
-       against an older struct may ask for less than all of it, and copying
-       `need` regardless would overrun its buffer. */
+    /* "size, Number of bytes to copy" is the caller's limit. A caller built
+       against an older struct can ask for less than all of it, and a copy of
+       `need` regardless overruns its buffer. */
     copy = ((ULONG)size < need) ? (ULONG)size : need;
 
     bsd_bcopy(&fixed, destination, copy);

@@ -1,15 +1,14 @@
 /*
  * AmiNetXDuo, crypto68k portable limb primitives.
  *
- * The fallback half of the build option: when C68K_ASM is not defined these
- * definitions are used, and when it is they are replaced wholesale by
- * c68k_prim.S.  Keeping both lets the module build and be cross-checked on any
- * target, and isolates a suspected assembly bug with one build flag instead of
- * a bisect.
+ * The fallback half of the build option.  When C68K_ASM is not defined these
+ * definitions are used, and when it is defined c68k_prim.S replaces them all.
+ * Both together let the module build and be checked on any target, and isolate
+ * a suspected assembly bug with one build flag instead of a bisect.
  *
  * The C here is written the way that makes GCC generate the best m68k it can:
  * one 64-bit accumulator per limb, no separate high/low bookkeeping.  GCC does
- * emit MULU.L for it; it carries about nine instructions of register shuffling
+ * emit MULU.L for it.  It carries about nine instructions of register shuffling
  * per limb that the assembly does not need.
  *
  * SPDX-License-Identifier: MIT
@@ -18,7 +17,7 @@
 #include "crypto68k.h"
 #include "c68k_variant.h"
 
-/* Declared in crypto68k.h; see the note there. */
+/* Declared in crypto68k.h, see the note there. */
 VOID (*c68k_yield_hook)(VOID);
 
 /*
@@ -29,22 +28,22 @@ VOID (*c68k_yield_hook)(VOID);
 /*
  * 32x32 -> 64 without a call and without __muldi3.
  *
- * Writing the product as (HN_UBASE2)a * (HN_UBASE2)b asks for a 64x64
+ * The product written as (HN_UBASE2)a * (HN_UBASE2)b asks for a 64x64
  * multiply, so GCC emits __muldi3, which does three partial products and then
  * calls ami_umul32_wide for each.  On a 68060 that made the software multiply
  * 77% of a TLS 1.3 transfer: 64.7% in ami_umul32_wide, 12.8% in __muldi3.
  *
  * Only 32x32 -> 64 is wanted, and it is four partial products of 16-bit
- * halves.  The 68060 dropped the 64-bit-RESULT forms of MULU.L but implements
+ * halves.  The 68060 dropped the 64-bit-result forms of MULU.L but implements
  * the 32x32 -> 32 one, so each partial product below is a single instruction
- * there, and the whole thing inlines into the multiply-accumulate loop with
+ * there, and the whole of it inlines into the multiply-accumulate loop with
  * nothing spilled.
  *
  * A 68000 has no 32-bit multiply, but it does have MULU.W, so it gets the
- * same treatment with 16-bit operands: declaring the halves as USHORT is what
- * makes GCC pick the widening 16x16 -> 32 pattern instead of promoting to int
- * and calling __mulsi3.  That is the same reason ami_umul32_wide declares them
- * that way; the difference here is that the four products are inline, so the
+ * same treatment with 16-bit operands.  The halves declared as USHORT are what
+ * make GCC pick the widening 16x16 -> 32 pattern instead of a promotion to int
+ * and a call to __mulsi3.  ami_umul32_wide declares them that way for the same
+ * reason.  The difference here is that the four products are inline, so the
  * multiply-accumulate loop does not pay a call per limb.
  */
 #define C68K_HAVE_INLINE_WIDE_MUL   1
@@ -100,7 +99,7 @@ HN_UBASE2   product;
 
 
     /*
-     * product holds the running 64-bit sum; its high half is the carry into
+     * product holds the running 64-bit sum.  Its high half is the carry into
      * the next limb.  No separate carry bit is needed because
      *
      *     (2^32-1) * (2^32-1) + (2^32-1) + (2^32-1) == 2^64 - 1
@@ -129,9 +128,9 @@ HN_UBASE2   product;
  * r -= a * b, the inner loop of long division.
  *
  * Always compiled: unlike c68k_addmul_1 there is no assembly twin.  GCC emits
- * MULU.L for the product here as it does there, and the division's cost is
- * dominated by the quotient estimate rather than by this pass, so
- * hand-writing it gains little.
+ * MULU.L for the product here as it does there, and the cost of the division
+ * is dominated by the quotient estimate rather than by this pass, so a
+ * hand-written form gains little.
  */
 c68k_limb c68k_submul_1(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a)
 {
@@ -180,13 +179,14 @@ c68k_limb   old;
 
 /*
  * The portable quotient estimate.  On target this is replaced by a single
- * DIVU.L; here it is a 64-bit divide, which on m68k reaches __udivdi3 in
+ * DIVU.L.  Here it is a 64-bit divide, which on m68k reaches __udivdi3 in
  * src/common/ami_udivdi3.c because this toolchain ships an empty libgcc.
  *
- * COMPILED IN THE ASSEMBLY BUILD TOO when the binary serves every CPU: DIVU.L
- * 64/32 is 68020-to-68040 only, so a 68000 or a 68060 needs this at run time
- * and not merely as a build option (c68k_cpu.c).  It takes the _c name there,
- * beside c68k_addmul_1_c, and the plain name stays the per-CPU build's.
+ * It is compiled in the assembly build too when the binary serves every CPU.
+ * DIVU.L 64/32 is 68020-to-68040 only, so a 68000 or a 68060 needs this at run
+ * time and not only as a build option (c68k_cpu.c).  It takes the _c name
+ * there, beside c68k_addmul_1_c, and the plain name stays with the per-CPU
+ * build.
  */
 #if defined(C68K_MV)
 #define c68k_div_2by1 c68k_div_2by1_c
@@ -236,13 +236,13 @@ HN_UBASE2   sum;
 
 
     /*
-     * The carry lives in the HIGH half between iterations, which is what the
+     * The carry lives in the high half between iterations, which is what the
      * shift at the top of the loop reads, so an incoming carry has to be
-     * seeded there.  Seeding it in the low half discarded it on the first
-     * shift and returned 0 for n == 0, where the answer is the carry itself:
+     * seeded there.  A carry seeded in the low half was discarded on the first
+     * shift and returned 0 for n == 0, where the answer is the carry itself.
      * c68k_prim.S branches straight to its exit and returns d0 untouched.
-     * Nothing called this with a carry in until the huge-number add started
-     * to, so the two implementations had never disagreed anywhere it showed.
+     * Nothing called this with a carry in until the huge-number add did, so
+     * the two implementations never disagreed anywhere it showed.
      */
     sum = ((HN_UBASE2)carry) << 32;
 
@@ -300,7 +300,7 @@ c68k_limb   right;
 
         /*
          * Borrow out.  Two comparisons rather than a 64-bit subtract, because
-         * the 68020 has no 64-bit compare and GCC would synthesise one.
+         * the 68020 has no 64-bit compare and GCC synthesises one.
          */
         if (borrow != 0)
         {

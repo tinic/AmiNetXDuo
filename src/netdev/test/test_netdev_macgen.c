@@ -3,10 +3,9 @@
  *
  * This path cannot be reached under an emulator: Amiberry's NE2000 presents a
  * valid PROM address, so the card never asks for one.  What is asserted here
- * is exactly what an emulator could not tell us anyway -- that the address is
- * the same on every boot of one machine, that it is a locally-administered
- * unicast address, and that two machines that differ in anything get two
- * different addresses.
+ * is what an emulator could not show: that the address is the same on every
+ * boot of one machine, that it is a locally-administered unicast address, and
+ * that two machines that differ in anything get two different addresses.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -93,7 +92,7 @@ static void test_derive(void)
     ok("octet 1 is the marker",       a[1] == (UBYTE)NETDEV_MAC_TAG);
 
     /*
-     * PINNED, not computed from the code under test: a change to the mixing
+     * Pinned, not computed from the code under test: a change to the mixing
      * changes every address in the field, which for anyone whose DHCP server
      * has a reservation is a machine that loses its address on an upgrade.
      * If this value has to move, that is the cost being accepted.

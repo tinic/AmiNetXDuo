@@ -3,11 +3,11 @@
  *
  * See c68k_poly1305.h for why the limbs are 2^26 wide.
  *
- * Written here from RFC 8439's specification.  The five-limb radix-2^26
- * decomposition is the standard one for a 32-bit machine, what Bernstein's
- * original description does and what poly1305-donna (Andrew Moon, public
- * domain) made the common spelling, and the clamp constants below are the
- * RFC's, transposed into those limbs.  No code was copied from either.
+ * Written here from the RFC 8439 specification.  The five-limb radix-2^26
+ * decomposition is the standard one for a 32-bit machine, what the original
+ * description of Bernstein does and what poly1305-donna (Andrew Moon, public
+ * domain) made the common spelling.  The clamp constants below are the ones
+ * from the RFC, transposed into those limbs.  No code was copied from either.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -21,8 +21,8 @@
 /* A little-endian longword at an arbitrary address.
  *
  * The 68020 does misaligned data accesses in hardware, so this is one MOVE.L
- * and a three-instruction byte reversal; the portable form GCC compiles the
- * shifts-and-ORs into is four byte reads and six ALU operations.  Same
+ * and a three-instruction byte reversal.  The portable form of shifts and ORs
+ * compiles into four byte reads and six ALU operations.  Same
  * reasoning and the same __mc68020__ guard as c68k_sha256_load_be(), with a
  * reversal because Poly1305 reads its input little-endian and this is a
  * big-endian machine. */
@@ -64,7 +64,7 @@ ULONG   t0, t1, t2, t3;
     t3 = c68k_poly1305_load_le(&key[12]);
 
     /*
-     * r &= 0x0ffffffc0ffffffc0ffffffc0fffffff, RFC 8439's clamp, folded
+     * r &= 0x0ffffffc0ffffffc0ffffffc0fffffff, the RFC 8439 clamp, folded
      * into the limb masks so that the AND and the split are one operation.
      */
     ctx -> c68k_poly1305_r[0] = (t0) & 0x03FFFFFFuL;
@@ -96,7 +96,7 @@ ULONG   t0, t1, t2, t3;
  * loop has no branch in it.
  *
  * The twenty-five products are the whole cost.  Each is a MULU.L with a 64-bit
- * destination, real on a 68020, and the reason src/crypto68k exists at all.
+ * destination, real on a 68020, and the reason src/crypto68k exists.
  * The s1..s4 values are r1..r4 pre-multiplied by five: the reduction of the
  * terms that fall off the top of the 130-bit accumulator, folded into the
  * multiplier instead of into a separate pass.
@@ -181,10 +181,10 @@ ULONG64 d0, d1, d2, d3, d4;
 
 /*
  * Which one the rest of this file calls.  A macro rather than a wrapper, as in
- * c68k_chacha20.c: a build without the assembly gets no extra call, and there
- * is nothing to choose between, the assembly is the same function, faster,
- * on every part that can run it.  AMINETXDUO_CRYPTO68K_ASM=OFF, the 68000 and
- * the 68060 take the C.
+ * c68k_chacha20.c.  A build without the assembly gets no extra call, and there
+ * is nothing to choose between.  The assembly is the same function, faster, on
+ * every part that can run it.  AMINETXDUO_CRYPTO68K_ASM=OFF takes the C, and
+ * so do the 68000 and the 68060.
  */
 #ifdef C68K_ASM_POLY1305
 extern VOID c68k_poly1305_blocks_asm(C68K_POLY1305 *ctx, const UCHAR *m,
@@ -192,9 +192,9 @@ extern VOID c68k_poly1305_blocks_asm(C68K_POLY1305 *ctx, const UCHAR *m,
 /*
  * One binary for every CPU takes the vector instead: the inner loop is a
  * 32x32 -> 64 product, so this is 68020-to-68040 assembly or the C, and which
- * one is a run-time fact (c68k_cpu.c).  The indirection is per BLOCK RUN, not
- * per block -- update() calls this once per call with however many blocks it
- * has -- so it costs nothing measurable.
+ * one is a run-time fact (c68k_cpu.c).  The indirection is per block run, not
+ * per block.  update() calls this once per call with the number of blocks it
+ * has, so it costs nothing measurable.
  */
 #ifdef C68K_MV
 #define C68K_POLY1305_BLOCKS    (*c68k_vec_poly1305_blocks)
@@ -204,9 +204,9 @@ extern VOID c68k_poly1305_blocks_asm(C68K_POLY1305 *ctx, const UCHAR *m,
 
 /*
  * c68k_poly1305.S reaches into C68K_POLY1305 with two hardcoded offsets, and
- * a struct that moved under it would give a wrong tag rather than a crash, so
- * make it a build failure.  (An array of negative size; this tree is built as
- * C89 and _Static_assert is not available.)
+ * a struct that moves under it gives a wrong tag rather than a crash, so this
+ * is a build failure instead.  (An array of negative size.  This tree is built
+ * as C89 and _Static_assert is not available.)
  */
 typedef char c68k_poly1305_layout_check[
     (offsetof(C68K_POLY1305, c68k_poly1305_r) == 0u &&
@@ -217,7 +217,7 @@ typedef char c68k_poly1305_layout_check[
 
 /*
  * The dispatch, as a real function, so tests/crypto68k/crypto68k_bulk can call
- * the shipped kernel and the portable one over the same input and compare; it
+ * the shipped kernel and the portable one over the same input and compare.  It
  * is not compiled with C68K_ASM, so it cannot make the choice itself.  Nothing
  * on the hot path goes through here: update() and finish() below call the
  * macro.
@@ -234,7 +234,7 @@ UINT c68k_poly1305_blocks_is_asm(VOID)
 
 #if defined(C68K_MV)
     /* The vector, not the build: a 68000 or a 68060 in this same binary is
-       running the C, because the kernel's inner product is a MULU.L. */
+       running the C, because the inner product of the kernel is a MULU.L. */
     return((c68k_vec_poly1305_blocks == c68k_poly1305_blocks_asm) ?
            (UINT)NX_CRYPTO_TRUE : (UINT)NX_CRYPTO_FALSE);
 #elif defined(C68K_ASM_POLY1305)
@@ -340,15 +340,15 @@ UINT    i;
     h1 += c;
 
     /* g = h + 5.  If that does not borrow at the top, h was >= 2^130 - 5 and
-       g is the reduced value; if it does, h already was. */
+       g is the reduced value.  If it does borrow, h was already reduced. */
     g0 = h0 + 5uL; c = g0 >> 26; g0 &= 0x03FFFFFFuL;
     g1 = h1 + c; c = g1 >> 26; g1 &= 0x03FFFFFFuL;
     g2 = h2 + c; c = g2 >> 26; g2 &= 0x03FFFFFFuL;
     g3 = h3 + c; c = g3 >> 26; g3 &= 0x03FFFFFFuL;
     g4 = h4 + c - ((ULONG)1uL << 26);
 
-    /* Branch-free select: the borrow is g4's sign bit, and ULONG is 32 bits
-       here, as the header requires. */
+    /* Branch-free select: the borrow is the sign bit of g4, and ULONG is 32
+       bits here, as the header requires. */
     mask = (g4 >> 31) - 1uL;
     g0 &= mask;
     g1 &= mask;

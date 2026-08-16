@@ -1,9 +1,9 @@
 /*
  * AmiNetXDuo, text handling for the configuration parsers.
  *
- * No dos.library, no newlib: these are user-edited files and this code runs
- * inside a shared library, so everything here works on a plain memory buffer
- * and uses only self-contained string helpers.
+ * No dos.library, no newlib. These are user-edited files, and this code runs
+ * inside a shared library. Everything here works on a plain memory buffer and
+ * uses only self-contained string helpers.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -94,8 +94,8 @@ VOID ami_cfg_join3(char *dst, ULONG dstlen, const char *a, const char *b,
 
 /*
  * One reporter, one current file. The configuration is read once, from one
- * task, at startup, so nothing here needs to be thread-safe; a per-parser
- * context argument would have to be threaded through code the host test drives
+ * task, at startup, so nothing here needs to be thread-safe. The alternative,
+ * a per-parser context argument, runs through code the host test drives
  * directly.
  */
 static AmiCfgReporter   ami_cfg_reporter;
@@ -450,10 +450,9 @@ BOOL ami_cfg_parse_ulong(const char *s, ULONG *out)
 /*
  * Six hexadecimal bytes, for HARDWAREADDRESS.
  *
- * Colons, hyphens or nothing between them, because all three are written in
- * the wild and refusing two of them would be refusing a correct address on a
- * technicality. Exactly six: a short one is a typo, and a long one is not an
- * Ethernet address.
+ * Colons, hyphens or nothing between them: all three forms are written by
+ * hand. Exactly six. A short one is a typo, and a long one is not an Ethernet
+ * address.
  */
 BOOL ami_cfg_parse_mac(const char *s, UBYTE *out)
 {

@@ -2,11 +2,11 @@
  * AmiNetXDuo, usergroup.library: ids, groups, umask, sessions, login name.
  *
  * AmigaOS has no protection domain: there is one user, and it is root. The
- * set*id() calls therefore always succeed for the default context and simply
- * record what they were told, which is what the ported daemons that call them
- * (in the hope of dropping privilege) expect to see afterwards. If a caller
- * has already dropped its effective uid away from 0, we start refusing, so
- * code that tests for EPERM still behaves sanely.
+ * set*id() calls therefore always succeed for the default context and record
+ * what they were told, which is what the ported daemons that call them (in the
+ * hope of a privilege drop) expect to see afterwards. Once a caller has moved
+ * its effective uid away from 0, the calls start to refuse, so code that tests
+ * for EPERM still behaves correctly.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -79,7 +79,7 @@ LONG ugl_getegid(UG_A6)
 {
     /*
      * The credentials block has no cr_egid: 4.4BSD keeps the effective gid in
-     * cr_groups[0], and so do we.
+     * cr_groups[0], and this does the same.
      */
     return (base->ug_Cred.cr_ngroups > 0) ? base->ug_Cred.cr_groups[0]
                                           : base->ug_Cred.cr_rgid;
@@ -249,7 +249,7 @@ LONG ugl_initgroups(UG_A6, register STRPTR name __asm("a1"),
 
 /*
  * The .sfd declares "ULONG umask(UWORD mask)", so only the low word of d0 is
- * meaningful, the caller may well leave garbage in the top half.
+ * meaningful. The caller can leave anything in the top half.
  */
 ULONG ugl_umask(UG_A6, register ULONG mask __asm("d0"))
 {
@@ -269,7 +269,7 @@ ULONG ugl_getumask(UG_A6)
 
 /*
  * AmiTCP defines pid_t as "struct Task *", so the session id is the Task
- * pointer of whoever established the session.
+ * pointer of the caller that established the session.
  */
 LONG ugl_setsid(UG_A6)
 {

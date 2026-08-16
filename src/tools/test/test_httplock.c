@@ -1,21 +1,19 @@
 /*
  * The tests for src/tools/httplock.c, the WebDAV lock table.
  *
- * WHY THIS IS A TEST AND NOT A REVIEW
+ * Every rule here is a decision to refuse somebody, and both mistakes are
+ * quiet.  A table that covers too little lets two clients write one file,
+ * which shows up as one of them losing work with no error anywhere.  A table
+ * that covers too much refuses a client holding the right token, which shows
+ * up as a mount that cannot save and a 423 the client does not explain.
+ * Neither is visible in a transcript without knowing the answer beforehand.
  *
- *   Every rule here is a decision to refuse somebody, and both mistakes are
- *   quiet.  A table that covers too little lets two clients write one file,
- *   which shows up as one of them losing work with no error anywhere.  A table
- *   that covers too much refuses a client holding the right token, which shows
- *   up as a mount that cannot save and a 423 the client does not explain.
- *   Neither is visible in a transcript without knowing the answer beforehand.
+ * The rules are RFC 4918: §6.6 for expiry, §7.1 for a collection locking its
+ * own member namespace, §9.6 for a DELETE destroying what it removes, and
+ * §9.10 for depth.  Each is one case below.
  *
- *   The rules are RFC 4918: §6.6 for expiry, §7.1 for a collection locking its
- *   own member namespace, §9.6 for a DELETE destroying what it removes, and
- *   §9.10 for depth.  Each is one case below.
- *
- *   Paths are AmigaOS paths, because that is what the server locks: a device
- *   ends in ':' and is the top, and comparison is case-insensitive.
+ * Paths are AmigaOS paths, because that is what the server locks.  A device
+ * ends in ':' and is the top, and comparison is case-insensitive.
  *
  *   cc -std=c11 -Wall -Wextra -Isrc/tools \
  *      src/tools/test/test_httplock.c src/tools/httplock.c \
@@ -80,7 +78,7 @@ static HttpLock *place(const char *path, const char *token,
 /* ---------------------------------------------------------------- depth --- */
 
 /*
- * RFC 4918 §9.10.1.  A Depth: 0 lock is that resource and nothing else; a
+ * RFC 4918 §9.10.1.  A Depth: 0 lock is that resource and nothing else.  A
  * Depth: infinity lock is that resource and everything under it.
  */
 static void test_depth(void)
@@ -190,7 +188,7 @@ static void test_tokens(void)
     CHECK(httplock_allows(OTHER, NONE, "Work:theirs.txt", 50) == 1);
     CHECK(httplock_allows(NONE,  NONE, "Work:mine.txt",   50) == 0);
 
-    /* An If: header carries up to two, and either may be the one. */
+    /* An If: header carries up to two, and either can be the one. */
     CHECK(httplock_allows(OTHER, TOKEN, "Work:mine.txt", 50) == 1);
     CHECK(httplock_allows(TOKEN, OTHER, "Work:mine.txt", 50) == 1);
 
@@ -201,7 +199,7 @@ static void test_tokens(void)
 
 /*
  * httplock_covers() is asked by UNLOCK and by a LOCK refresh, and it is a
- * different question from httplock_on(): the token names the lock, and this
+ * different question from httplock_on().  The token names the lock, and this
  * asks whether that lock reaches the address it was named through.
  */
 static void test_covers(void)
@@ -284,7 +282,7 @@ static void test_drop(void)
 
 /*
  * RFC 4918 §7.1.  A lock on a collection, at any depth including 0, locks that
- * collection's internal member namespace: adding a name or taking one away
+ * collection's internal member namespace.  Adding a name or taking one away
  * needs the token even though the name itself is not locked.
  */
 static void test_parent(void)
@@ -318,7 +316,7 @@ static void test_parent(void)
 
 /*
  * The table is a fixed eight.  A ninth asker is told the server is busy, and
- * the eight already there keep working, which is the half that matters.
+ * the eight already there keep working.
  */
 static void test_table_full(void)
 {

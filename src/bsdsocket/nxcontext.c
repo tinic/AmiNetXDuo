@@ -3,8 +3,8 @@
  *
  * Compiled only when AMINETXDUO_TLS_CONTEXT is defined, which happens only in
  * an AMINETXDUO_TLS build.  A default build has neither this object nor the
- * vector-table slot that points at it, so the default bsdsocket.library stays
- * byte-identical to a build of the tree without TLS.
+ * vector-table slot that points at it.  The default bsdsocket.library
+ * therefore stays byte-identical to a build of the tree without TLS.
  *
  * See include/aminetxduo/nxcontext.h for why a separate library has to borrow
  * the stack rather than link one.
@@ -26,9 +26,9 @@ VOID ami_netstack_baton_release(VOID);
 VOID ami_netstack_baton_acquire(VOID);
 
 /*
- * The table is const and static; every entry is a function this library
+ * The table is const and static.  Every entry is a function this library
  * already contains.  Nothing in it is per opener, so one copy serves every
- * caller, the only per-caller argument is the SocketBase passed to
+ * caller.  The only per-caller argument is the SocketBase passed to
  * nxc_TcpSocket().
  */
 
@@ -45,9 +45,8 @@ static NX_TCP_SOCKET *bsd_nxc_tcp_socket(APTR socket_base, LONG fd)
         return NX_NULL;
 
     /* TLS runs only over a connected byte stream.  A UDP socket, a listening
-       socket or one whose connect() has not completed would instead fail late
-       and obscurely: nx_secure would sit in nx_tcp_socket_receive() until the
-       caller's timeout. */
+       socket or one whose connect() has not completed fails late instead:
+       nx_secure sits in nx_tcp_socket_receive() until the caller's timeout. */
     if ((sock->as_Flags & ASF_TCP) == 0)
         return NX_NULL;
     if ((sock->as_Flags & ASF_CONNECTED) == 0)
@@ -105,9 +104,9 @@ LONG ami_nxd_context_obtain(ULONG magic, ULONG version,
     if (ctx == NULL)
         return -1;
 
-    /* The stack is up because the caller holds an open bsdsocket.library;
-       checked anyway, since a context with a NULL NX_IP behind it would fail
-       in nx_secure with a caller error instead of here. */
+    /* The stack is up because the caller holds an open bsdsocket.library.
+       Checked anyway: a context with a NULL NX_IP behind it fails in
+       nx_secure with a caller error instead of here. */
     if (netstack_ip() == NX_NULL)
         return -1;
 

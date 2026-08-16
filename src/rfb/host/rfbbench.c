@@ -6,7 +6,7 @@
  * encoded frame back with the reference decoder below and compares it with the
  * frame that went in.  Output is key=value, one line per (sequence, strategy).
  *
- * Host-only and loose on purpose; the encoder next door is the portable half.
+ * Host-only and loose on purpose.  The encoder next door is the portable half.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -18,16 +18,16 @@
 
 #include <aminetxduo/rfb_encode.h>
 
-/* --deflate prices what an entropy coder on top of the encoder's output would
- * buy and what it would cost, so the argument for leaving it out is a
- * measurement.  Host-only; nothing in rfb_encode.c knows about zlib. */
+/* --deflate measures what an entropy coder on top of the encoder output gains
+ * and what it costs, so the case for its exclusion rests on a measurement.
+ * Host-only.  Nothing in rfb_encode.c knows about zlib. */
 #ifdef RFBBENCH_ZLIB
 #include <zlib.h>
 #endif
 
 /* ------------------------------------------------------------- decoder --- */
-/* The receiver's side of the wire format, kept here so a compression number
- * can never come from an encoder nobody checked. */
+/* The receiver side of the wire format, kept here so that a compression number
+ * can never come from an unchecked encoder. */
 
 typedef struct {
     rfb_geom g;
@@ -86,8 +86,8 @@ static int dec_frame(rfb_dec *d, const unsigned char *in, unsigned n)
             continue;
         }
 
-        /* One op or the other, and which one is the geometry's answer: a
-         * chunky frame carries no plane mask because there is one plane. */
+        /* One op or the other, and the geometry decides which: a chunky frame
+         * carries no plane mask, because there is one plane. */
         if (op != RFB_OP_TILE && op != RFB_OP_TILE8)
             return -5;
         if ((op == RFB_OP_TILE8) != (d->g.format == RFB_FMT_CLUT8))
@@ -168,7 +168,7 @@ static int pfs_load(const char *path, pfs *s)
     s->g.width = (rfb_u16)rd16(hdr + 4);
     s->g.height = (rfb_u16)rd16(hdr + 6);
     s->g.depth = hdr[8];
-    /* Byte 9 bit 0: one eight-bit plane rather than depth one-bit ones. */
+    /* Byte 9 bit 0: one eight-bit plane, and not depth one-bit ones. */
     s->g.format = (rfb_u8)((hdr[9] & 1u) ? RFB_FMT_CLUT8 : RFB_FMT_PLANAR);
     s->g.bytes_per_row = (rfb_u16)rd16(hdr + 10);
     s->frames = rd16(hdr + 12);
@@ -202,7 +202,7 @@ static int pfs_load(const char *path, pfs *s)
 
 /* ------------------------------------------------------------ strategy --- */
 
-/* busy and backoff are 0 for "leave the default"; they only matter to the
+/* busy and backoff are 0 for "leave the default".  They only matter to the
  * copy arms. */
 typedef struct {
     const char *name;
@@ -249,11 +249,11 @@ typedef struct {
 static int g_deflate;
 static int g_interleaved;
 
-/* The measured wire rate the frame-rate column divides by. */
+/* The measured wire rate that the frame-rate column divides by. */
 #define WIRE_BYTES_PER_SEC 407552.0   /* 398 KB/s */
 
 /* Rearrange a plane-major sequence into the BMF_INTERLEAVED layout, so the
- * encoder's stride path is round-tripped rather than argued about. */
+ * stride path of the encoder is round-tripped and not assumed. */
 static int pfs_interleave(pfs *s)
 {
     unsigned char *tmp = malloc(s->frame_bytes);
@@ -273,9 +273,9 @@ static int pfs_interleave(pfs *s)
 }
 
 #ifdef RFBBENCH_ZLIB
-/* One deflate stream for the whole sequence, which is the friendliest case for
- * it: the dictionary carries across frames.  Reported alongside the same
- * sequence's PackBits numbers. */
+/* One deflate stream for the whole sequence, which is the best case for it:
+ * the dictionary carries across frames.  Reported beside the PackBits numbers
+ * of the same sequence. */
 typedef struct {
     z_stream z;
     unsigned char *out;
@@ -530,8 +530,8 @@ int main(int argc, char **argv)
         int ti, si;
         if (pfs_load(argv[a], &s) != 0) { rc = 1; continue; }
         /* BMF_INTERLEAVED is a statement about eight planes and a chunky
-           source has one, so the sweep's interleaved pass skips those files
-           rather than pretending. */
+           source has one, so the interleaved pass of the sweep skips those
+           files. */
         if (g_interleaved && s.g.format == RFB_FMT_CLUT8) { free(s.data); continue; }
         if (g_interleaved && pfs_interleave(&s) != 0) { rc = 1; continue; }
         printf("seq=%s file=%s w=%u h=%u depth=%u bpr=%u fmt=%u frames=%u "

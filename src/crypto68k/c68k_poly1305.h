@@ -1,9 +1,9 @@
 /*
  * AmiNetXDuo, crypto68k: Poly1305, the authenticator half of RFC 8439.
  *
- *   docs/RESEARCH.md 5.5 measured AES-GCM at 344.6 ms for 1 KB against
- *   AES-CBC's 21.9, twenty times slower, because nx_crypto_gcm.c's GHASH is a
- *   bit-serial GF(2^128) multiply, and then said what the alternative was:
+ *   docs/RESEARCH.md 5.5 measured AES-GCM at 344.6 ms for 1 KB against 21.9
+ *   for AES-CBC, twenty times slower, because the GHASH in nx_crypto_gcm.c is
+ *   a bit-serial GF(2^128) multiply, and then said what the alternative was:
  *   "nx_secure has no ChaCha20-Poly1305 (verified: no source files, no
  *   ciphersuite entries).  That is the AEAD a 68k would want."  This is the
  *   authenticator half of writing it.
@@ -13,8 +13,6 @@
  *   AES-GCM and nothing else, so the question is which AEAD this machine can
  *   afford.
  *
- *   2^26 limbs and not 2^32:
- *
  *   Poly1305 is arithmetic modulo 2^130 - 5, so a 32-bit machine holds the
  *   accumulator in five limbs either way.  The 2^26 layout is the standard
  *   32-bit one, the same decomposition RFC 8439 2.5 describes and that
@@ -22,8 +20,8 @@
  *   accumulator with room to add four more, so a block is twenty-five MULU.L
  *   and no carry chain at all.  A 2^32 layout needs twenty multiplies
  *   but pays for them in explicit carry propagation, which on this part costs
- *   more than the five multiplies it saves: an ADD.L is 2 cycles against
- *   MULU.L's 43, but the 2^32 form needs a two-word add and a compare per
+ *   more than the five multiplies it saves: an ADD.L is 2 cycles against 43
+ *   for MULU.L, and the 2^32 form needs a two-word add and a compare per
  *   partial product rather than one 64-bit accumulate.
  *
  *   Twenty-five MULU.L at 43 cycles is 1,075 cycles a block, 67 a byte: the
@@ -67,8 +65,8 @@ typedef struct C68K_POLY1305_STRUCT
 
 /*
  * `key` is 32 bytes: r in the first sixteen, s in the second.  A Poly1305 key
- * is one-time, reusing one over two messages hands over r, so the AEAD in
- * c68k_chacha20.h derives a fresh one per record from the cipher itself, and
+ * is one-time.  Reuse of one key over two messages reveals r, so the AEAD in
+ * c68k_chacha20.h derives a fresh key per record from the cipher itself, and
  * this interface takes the key rather than generating it.
  */
 VOID c68k_poly1305_initialize(C68K_POLY1305 *ctx, const UCHAR *key);
@@ -77,8 +75,8 @@ VOID c68k_poly1305_update(C68K_POLY1305 *ctx, const UCHAR *input,
                           ULONG input_length);
 
 /*
- * Writes the 16-byte tag and leaves the context zeroed: what is left behind is
- * r and the accumulator, and neither should outlive the record.
+ * Writes the 16-byte tag and leaves the context zeroed.  The context holds r
+ * and the accumulator.  Neither is allowed to outlive the record.
  */
 VOID c68k_poly1305_finish(C68K_POLY1305 *ctx, UCHAR *tag);
 
@@ -89,11 +87,11 @@ VOID c68k_poly1305_finish(C68K_POLY1305 *ctx, UCHAR *tag);
  *
  * Exposed so it can be checked against c68k_poly1305.S, which implements the
  * same interface in 68020 assembly.  The three calls above take whichever this
- * build has, ask with c68k_poly1305_blocks_is_asm(), but the C stays
+ * build has, which c68k_poly1305_blocks_is_asm() reports.  The C stays
  * compiled either way, so a test can run both over the same blocks and compare
- * the accumulator.  tests/crypto68k/crypto68k_bulk does; a kernel bug that
- * only showed once the accumulator had grown would pass RFC 8439 2.5.2's
- * single vector.
+ * the accumulator.  tests/crypto68k/crypto68k_bulk does that.  A kernel bug
+ * that appears only after the accumulator grows passes the single vector in
+ * RFC 8439 2.5.2.
  */
 VOID c68k_poly1305_blocks(C68K_POLY1305 *ctx, const UCHAR *m, ULONG blocks,
                           ULONG hibit);
@@ -101,9 +99,9 @@ VOID c68k_poly1305_blocks(C68K_POLY1305 *ctx, const UCHAR *m, ULONG blocks,
 VOID c68k_poly1305_blocks_c(C68K_POLY1305 *ctx, const UCHAR *m, ULONG blocks,
                             ULONG hibit);
 
-/* NX_CRYPTO_TRUE when this build's block function is the assembly.  In an
-   AMINETXDUO_CPU=any build that is a run-time answer: c68k_cpu_select() has
-   pointed the vector below at one of the two above. */
+/* NX_CRYPTO_TRUE when the block function of this build is the assembly.  In an
+   AMINETXDUO_CPU=any build that is a run-time answer: c68k_cpu_select() points
+   the vector below at one of the two above. */
 UINT c68k_poly1305_blocks_is_asm(VOID);
 
 #ifdef C68K_MV

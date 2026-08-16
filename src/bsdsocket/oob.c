@@ -1,63 +1,62 @@
 /*
  * bsdsocket.library, TCP urgent data: MSG_OOB, SIOCATMARK and SIGURG.
  *
- * Receive needed only wiring up: _nx_tcp_socket_packet_process() tests
+ * Receive needed only the callback.  _nx_tcp_socket_packet_process() tests
  * NX_TCP_URG_BIT and calls the socket's nx_tcp_urgent_data_callback
- * (nx_tcp_socket_packet_process.c:710-722), the segment is still on
- * nx_tcp_socket_receive_queue_head with its TCP header, the header is only
- * stripped at delivery, in nx_tcp_socket_receive.c:183, and the urgent
- * pointer is in the low half of nx_tcp_header_word_4 in host order.
- * bsdsocket.library was passing NX_NULL for that callback.
+ * (nx_tcp_socket_packet_process.c:710-722).  The segment is still on
+ * nx_tcp_socket_receive_queue_head with its TCP header, because the header is
+ * only stripped at delivery, in nx_tcp_socket_receive.c:183.  The urgent
+ * pointer is in the low half of nx_tcp_header_word_4, in host order.
+ * bsdsocket.library passed NX_NULL for that callback.
  *
  * Transmit has no support at all.  NX_TCP_URG_BIT is never set anywhere in the
- * vendored tree, and it cannot be added from outside by preparing a header,
+ * vendored tree, and it cannot be added from outside with a prepared header,
  * because both senders finish with
  *
  *     header_ptr -> nx_tcp_header_word_4 = (checksum << NX_SHIFT_BY_16);
  *
- * a plain assignment, after the checksum has been computed
+ * a plain assignment, after the checksum is computed
  * (nx_tcp_socket_send_internal.c:1034, nx_tcp_packet_send_control.c:403).  Any
- * urgent pointer planted beforehand is destroyed, and the checksum was
- * computed over it, so you get both a zero pointer and a wrong sum.
+ * urgent pointer written beforehand is destroyed, and the checksum covered
+ * it.  The result is both a zero pointer and a wrong sum.
  *
- * Open-coding an urgent segment the way bsd_tcp_send_fin() open-codes the
- * graceful FIN does not work either.  A FIN is a control packet:
- * fire-and-forget, never queued for retransmission.  An urgent byte is data
- * and consumes a sequence number, so a copy of nx_tcp_socket_send_internal()
- * would have to reproduce the window arithmetic, the transmit-queue linking,
- * the outstanding-bytes accounting and the mutex-drop race check around the
- * checksum, some eight hundred lines, or skip the retransmit queue and
- * leave a hole in the sequence space that stalls the connection permanently
- * the first time the segment is lost.
+ * An open-coded urgent segment, the way bsd_tcp_send_fin() open-codes the
+ * graceful FIN, does not work either.  A FIN is a control packet, sent once
+ * and never queued for retransmission.  An urgent byte is data and consumes a
+ * sequence number.  A copy of nx_tcp_socket_send_internal() therefore has to
+ * reproduce the window arithmetic, the transmit-queue links, the
+ * outstanding-bytes accounting and the mutex-drop race check around the
+ * checksum, some eight hundred lines.  The alternative is to skip the
+ * retransmit queue, which leaves a hole in the sequence space.  That hole
+ * stalls the connection permanently the first time the segment is lost.
  *
- * So the byte goes out through nx_tcp_socket_send() like any other: queued,
- * retransmitted, accounted by NetX Duo.  The URG bit and the urgent pointer
- * are written into that one segment on its way past nx_ip_packet_filter, which
- * _nx_ip_packet_send() consults after _nx_ip_header_add() and before the
- * driver (nx_ip_packet_send.c:209-222), the last point at which the bytes are
- * still ours.  Two 16-bit words change, so the TCP checksum is repaired
- * incrementally by RFC 1624 equation 3 rather than recomputed.
+ * The byte therefore goes out through nx_tcp_socket_send() like any other:
+ * queued, retransmitted, accounted by NetX Duo.  The URG bit and the urgent
+ * pointer are written into that one segment as it passes nx_ip_packet_filter.
+ * _nx_ip_packet_send() consults that filter after _nx_ip_header_add() and
+ * before the driver (nx_ip_packet_send.c:209-222), the last point at which
+ * the bytes are still ours.  Two 16-bit words change, so the TCP checksum is
+ * repaired incrementally by RFC 1624 equation 3 rather than recomputed.
  *
- * The filter is installed for the duration of that one send and removed
- * immediately, so the steady-state cost on the packet path is zero.  A
- * retransmission of the urgent segment therefore carries the byte but not the
- * URG bit (_nx_tcp_socket_retransmit rebuilds word_3 without it anyway,
- * nx_tcp_socket_retransmit.c:493).  The data is always reliable; only the
- * urgency marking is best effort, which both real callers, ftp's ABOR and
- * telnet's interrupt, already assume, since both also send the command
- * inline.
+ * The filter is installed for that one send and removed immediately, so the
+ * steady-state cost on the packet path is zero.  A retransmission of the
+ * urgent segment therefore carries the byte but not the URG bit
+ * (_nx_tcp_socket_retransmit rebuilds word_3 without it anyway,
+ * nx_tcp_socket_retransmit.c:493).  The data is always reliable.  Only the
+ * urgency mark is best effort, which both real callers already assume: ftp's
+ * ABOR and telnet's interrupt both send the command inline as well.
  *
- * nx_ip_packet_filter is the plain hook and is free; src/netstack/ uses
+ * nx_ip_packet_filter is the plain hook and is free.  src/netstack/ uses
  * nx_ip_packet_filter_extended for packet capture, a different slot and a
  * different call.  The previous value is saved and restored regardless.
  *
  * Two divergences from BSD, both recorded in docs/RESEARCH.md 17
  *
  *   1. The urgent byte is also delivered in the normal stream, as though
- *      SO_OOBINLINE were set, recv(MSG_OOB) returns a copy.  Taking a byte
- *      back out of the middle of a queued NX_PACKET would mean rewriting a
- *      segment the TCP state machine still owns and still counts in its
- *      sequence space, to hide one byte the caller is about to see again.
+ *      SO_OOBINLINE were set.  recv(MSG_OOB) returns a copy.  To take the
+ *      byte back out of a queued NX_PACKET means a rewrite of a segment the
+ *      TCP state machine still owns and still counts in its sequence space,
+ *      to hide one byte the caller is about to see again.
  *
  *   2. recv(MSG_OOB) with nothing marked returns EINVAL, which is what 4.4BSD
  *      does and what Roadshow returns unconditionally.
@@ -67,7 +66,7 @@
 
 #include "bsdsocket_vectors.h"
 
-/* For NX_TCP_HEADER and NX_TCP_HEADER_SHIFT; nx_packet.h for the queue
+/* For NX_TCP_HEADER and NX_TCP_HEADER_SHIFT. nx_packet.h is for the queue
    sentinel that terminates nx_tcp_socket_receive_queue_head. */
 #include "nx_tcp.h"
 #include "nx_packet.h"
@@ -88,7 +87,7 @@
 /*
  * The urgent pointer we send: one past the urgent byte.  RFC 793 says "the
  * sequence number of the octet following the urgent data", RFC 1122 4.2.2.4
- * requires that reading, and every BSD has used it since 4.3-Reno.  A single
+ * requires that reading, and every BSD from 4.3-Reno onward uses it.  A single
  * urgent byte at the start of the segment is pointer 1, not 0.
  */
 #define BSD_TCP_URGENT_PTR       1
@@ -97,8 +96,8 @@
 
 /*
  * RFC 1624 equation 3: HC' = ~(~HC + ~m + m').  Equation 3 rather than 1 or 2
- * because those two misbehave when a partial sum reaches negative zero, which
- * is what the RFC exists to correct.
+ * because those two fail when a partial sum reaches negative zero, the case
+ * the RFC exists to correct.
  */
 static UWORD bsd_oob_csum_update(UWORD hc, UWORD old_word, UWORD new_word)
 {
@@ -113,10 +112,10 @@ static UWORD bsd_oob_csum_update(UWORD hc, UWORD old_word, UWORD new_word)
 /* ---------------------------------------------------------- the send mark, */
 
 /*
- * Which segment the filter is looking for.  One record rather than a list: it
- * is armed and disarmed inside a single bsd_nx_enter() bracket around one
- * nx_tcp_socket_send(), and a second task that finds it already armed sends
- * its byte unmarked rather than waiting or racing.  Losing the URG bit on a
+ * Which segment the filter looks for.  One record rather than a list: it is
+ * armed and disarmed inside a single bsd_nx_enter() bracket around one
+ * nx_tcp_socket_send().  A second task that finds it already armed sends its
+ * byte unmarked, rather than a wait or a race.  A lost URG bit on a
  * simultaneous second OOB send costs the urgency, never the data.
  */
 static struct
@@ -128,15 +127,15 @@ static struct
     /*
      * Whether the checksum field is the driver's to fill.
      *
-     * WITHOUT THIS THE URGENT SEGMENT WENT OUT UNUSABLE, on every default
+     * Without this the urgent segment went out unusable, on every default
      * build. _nx_tcp_socket_send_internal.c:918 asks the outgoing interface
-     * for NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM and, when it has it, leaves
-     * the field zero and marks the packet (:944) for the driver to sum later;
-     * src/sana2/sana2_copy.c does that inside its copy, which is well after
-     * nx_ip_packet_filter has run. So the incremental repair below was
-     * operating on a checksum that was not there yet, and the value it wrote
-     * was then summed as part of the segment by the driver -- a segment with
-     * the right flags, the right pointer, and a checksum nothing accepts.
+     * for NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM. When the interface has it,
+     * the stack leaves the field zero and marks the packet (:944) for the
+     * driver to sum later. src/sana2/sana2_copy.c sums it inside its copy,
+     * well after nx_ip_packet_filter runs. The incremental repair below then
+     * worked on a checksum that was not there yet, and the driver summed the
+     * value it wrote as part of the segment. That segment carried the right
+     * flags, the right pointer and a checksum nothing accepts.
      *
      * The interface is read here with the same expression the stack uses to
      * decide, so the two cannot disagree about which packet is whose.
@@ -185,12 +184,11 @@ static UINT bsd_oob_ip_filter(VOID *ip_header_ptr, UINT direction)
     flags = (UWORD)(((UWORD)tcp[BSD_TCP_OFF_FLAGS] << 8) |
                     tcp[BSD_TCP_OFF_FLAGS + 1]);
 
-    /* Already marked. Not reachable through a retransmission, whatever it
-       looks like: _nx_tcp_socket_retransmit.c:493 rebuilds word_3 from the
-       socket rather than resending the bytes that were queued, so a resent
-       segment arrives here with no URG bit and is patched afresh -- or would
-       be, if the mark were still armed, which it is not. It stands for the
-       case the record cannot rule out on its own. */
+    /* Already marked. A retransmission does not reach here:
+       _nx_tcp_socket_retransmit.c:493 rebuilds word_3 from the socket rather
+       than a resend of the queued bytes. A resent segment therefore arrives
+       with no URG bit, and the mark is no longer armed by then. This test
+       stands for the case the record cannot rule out on its own. */
     if ((flags & BSD_TCP_FLAGS_URG) != 0)
         return NX_SUCCESS;
 
@@ -202,8 +200,8 @@ static UINT bsd_oob_ip_filter(VOID *ip_header_ptr, UINT direction)
     tcp[BSD_TCP_OFF_URGENT + 1]    = (UBYTE)BSD_TCP_URGENT_PTR;
 
     /* The driver sums the segment as it stands, so the two words above are
-       already in it and the field has to be left at the zero the offload
-       contract puts there. */
+       already in it. The field stays at the zero the offload contract puts
+       there. */
     if (bsd_oob_mark.om_Offload)
         return NX_SUCCESS;
 
@@ -311,17 +309,17 @@ LONG bsd_oob_send(struct AmiSocketBase *base, AmiSocket *sock, UBYTE byte)
 /* ---------------------------------------------------------------- receive, */
 
 /*
- * A segment with URG set has arrived.  Runs on the IP thread, from
+ * A segment with URG set arrived.  Runs on the IP thread, from
  * _nx_tcp_socket_packet_process(), with nx_ip_protection held.
  *
  * The segment is normally still on the receive queue with its header intact,
  * so the urgent pointer can be read rather than assumed.  Two cases where it
  * is not: a zero-payload URG segment is never queued, and a segment that
- * satisfied a thread already suspended inside nx_tcp_socket_receive() has been
+ * satisfied a thread already suspended inside nx_tcp_socket_receive() is
  * dequeued and header-stripped before this runs
- * (nx_tcp_socket_state_data_check.c:1114-1149).  In both the exception is
- * still reported, WaitSelect() wakes, SIGURG fires, and the byte is in the
- * stream either way, since this implementation is always OOBINLINE.  Only
+ * (nx_tcp_socket_state_data_check.c:1114-1149).  In both cases the exception
+ * is still reported, WaitSelect() wakes and SIGURG fires.  The byte is in the
+ * stream either way, because this implementation is always OOBINLINE.  Only
  * recv(MSG_OOB) misses it, and it answers EINVAL.
  */
 VOID bsd_tcp_urgent_notify(NX_TCP_SOCKET *socket_ptr)
@@ -380,7 +378,7 @@ next:
         remaining--;
     }
 
-    /* Report the exception whether or not the byte was recoverable; that is
+    /* Report the exception whether or not the byte was recoverable. That is
        what WaitSelect()'s exceptfds and SIGURG signal. */
     bsd_event_post(sock, FD_OOB);
 }

@@ -1,13 +1,13 @@
 /*
  * bsdsocket.library, the eight bpf_* LVOs.
  *
- * Thin wrappers: the work lives in src/bpf/, and what is here is the m68k
- * register convention, the SocketBase argument every vector carries, and the
- * errno the caller reads back.
+ * Thin wrappers. The work lives in src/bpf/. What is here is the m68k register
+ * convention, the SocketBase argument every vector carries, and the errno the
+ * caller reads back.
  *
  * The slots exist whatever AMINETXDUO_BPF says. A build without it compiles
- * eight ENOSYS bodies, so the vector table has the same shape either way and a
- * caller gets a documented failure instead of a jump into a slot that means
+ * eight ENOSYS bodies, so the vector table has the same shape either way. A
+ * caller then gets a documented failure, not a jump into a slot that means
  * something else in the next build.
  *
  * bpf_set_notify_mask takes (d1, d0), channel in d1, mask in d0, the
@@ -16,12 +16,12 @@
  * tools/gen_vectors.py reads the order from the pragma, so the declaration in
  * bsdsocket_vectors.h follows automatically.
  *
- * No ThreadX bracket here, unlike every other vector that touches the stack:
- * those go through bsd_nx_enter() because NetX Duo will suspend the caller.
+ * No ThreadX bracket here, unlike every other vector that touches the stack.
+ * Those go through bsd_nx_enter() because NetX Duo suspends the caller.
  * src/bpf/ never calls NetX Duo, never allocates from the packet pool and
  * never blocks. It guards its own table with Forbid()/Permit(), which suits a
  * structure shared with the SANA-II reader Tasks and the IP thread. An
- * adoption bracket would cost more than the capture read itself.
+ * adoption bracket costs more than the capture read itself.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -35,10 +35,10 @@
 #ifdef AMINETXDUO_BPF
 
 /*
- * src/bpf/ returns a negative AMI_BPF_* status; the LVOs report -1 and set the
+ * src/bpf/ returns a negative AMI_BPF_* status. The LVOs report -1 and set the
  * errno the autodoc names. -1 is AMI_BPF_EINVAL, so an unannotated failure
- * still lands on EINVAL. An out-of-range status would index past the table, so
- * the range is checked rather than assumed.
+ * still lands on EINVAL. An out-of-range status indexes past the table, so the
+ * range is checked rather than assumed.
  */
 static const LONG bsd_bpf_errno[] = {
     0,                  /* unused: 0 is success  */
@@ -69,7 +69,7 @@ static LONG bsd_bpf_result(struct AmiSocketBase *SocketBase, LONG status)
 /*
  * The autodoc: the channel "will be associated with the library base ... It
  * will be automatically closed when the library is closed". library.c calls
- * this from bsd_child_destroy(); it frees memory and takes Forbid()/Permit(),
+ * this from bsd_child_destroy(). It frees memory and takes Forbid()/Permit(),
  * and does not block.
  */
 VOID bsd_bpf_close_all(struct AmiSocketBase *SocketBase)

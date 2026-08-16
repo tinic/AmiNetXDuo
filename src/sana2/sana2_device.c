@@ -19,8 +19,8 @@
 /*
  * Raw framing is off unless the caller asks for it. SANA-II has no capability
  * query: a device that does not implement SANA2IOF_RAW is free to ignore the
- * flag and hand back cooked frames, which would look like silent corruption
- * rather than an error. See ami_sana2_probe_raw() below.
+ * flag and hand back cooked frames, which looks like silent corruption rather
+ * than an error. See ami_sana2_probe_raw() below.
  */
 static BOOL ami_raw_allowed = (AMI_SANA2_RAW_DEFAULT != 0) ? TRUE : FALSE;
 
@@ -28,7 +28,7 @@ static BOOL ami_raw_allowed = (AMI_SANA2_RAW_DEFAULT != 0) ? TRUE : FALSE;
  * The reader threads block in exec Wait() for IORequest completion, which
  * ThreadX knows nothing about. Under the baton scheduling model
  * (docs/RESEARCH.md §6.2) a ThreadX thread must release the baton before
- * blocking that way. The ThreadX port registers these; both default to no-ops,
+ * blocking that way. The ThreadX port registers these. Both default to no-ops,
  * which suits a model that lets Exec schedule.
  */
 static AmiSana2BlockHook ami_block_enter;
@@ -42,12 +42,12 @@ VOID ami_sana2_set_block_hooks(AmiSana2BlockHook before_wait,
 }
 
 /*
- * Both hooks are called unconditionally; pairing them is the hook's job.
+ * Both hooks are called unconditionally. Pairing them is the hook's job.
  *
  * Do not guard them on tx_thread_identify() != TX_NULL. The before-wait hook
  * releases the baton, which clears _tx_thread_current_ptr, which makes
  * tx_thread_identify() return TX_NULL, so the matching after-wait hook is
- * skipped and the thread runs on without the baton. Verified under FS-UAE,
+ * skipped and the thread runs on without the baton. Seen under FS-UAE,
  * 2026-07-25: the NX_IP thread came back from S2_ONLINE without the baton and
  * every ThreadX service it called afterwards returned garbage.
  *
@@ -108,7 +108,7 @@ VOID ami_sana2_port_init(struct MsgPort *port, struct Task *task, BYTE sigbit,
  * Run one synchronous device command. A fresh reply port is created for the
  * calling task each time: control commands come from whichever task is driving
  * (startup task at open, IP thread from the driver entry) and DoIO() waits on
- * mn_ReplyPort->mp_SigTask, so a cached port would signal the wrong task.
+ * mn_ReplyPort->mp_SigTask, so a cached port signals the wrong task.
  * Control traffic is rare enough for the cost not to matter.
  */
 LONG ami_sana2_command(AmiSana2If *iface, struct IOSana2Req *req, UWORD command)
@@ -132,7 +132,7 @@ LONG ami_sana2_command(AmiSana2If *iface, struct IOSana2Req *req, UWORD command)
     req->ios2_WireError                      = 0;
 
     /* DoIO() blocks in exec Wait(), so the same baton rule as the readers
-       applies; NX_LINK_ENABLE reaches here on the IP thread. */
+       applies. NX_LINK_ENABLE reaches here on the IP thread. */
     ami_sana2_block_enter();
     DoIO((struct IORequest *)req);
     ami_sana2_block_leave();
@@ -165,8 +165,8 @@ static LONG ami_sana2_query(AmiSana2If *iface)
 
     if (query.SizeSupplied < (ULONG)sizeof(query))
     {
-        /* Level-0 devices must supply the whole common block. Be forgiving:
-           anything missing falls back to the Ethernet defaults below. */
+        /* Level-0 devices must supply the whole common block. Anything missing
+           falls back to the Ethernet defaults below. */
         AMI_WARN("sana2: short S2_DEVICEQUERY (%ld bytes)",
                  (long)query.SizeSupplied);
     }
@@ -211,7 +211,7 @@ static LONG ami_sana2_query(AmiSana2If *iface)
 /*
  * S2_GETSTATIONADDRESS returns the current address in ios2_SrcAddr and the
  * factory address, if any, in ios2_DstAddr. S2_CONFIGINTERFACE then commits an
- * address and may only be run once per unit; a device already configured by
+ * address and can only be run once per unit. A device already configured by
  * another opener answers S2WERR_IS_CONFIGURED, treated here as success.
  */
 static LONG ami_sana2_configure(AmiSana2If *iface, const AmiIfConfig *cfg)
@@ -235,7 +235,7 @@ static LONG ami_sana2_configure(AmiSana2If *iface, const AmiIfConfig *cfg)
             have_factory = TRUE;
     }
 
-    /* Prefer the factory address; fall back to whatever is configured now. */
+    /* Prefer the factory address, and fall back to whatever is configured. */
     if (!have_factory)
     {
         for (i = 0; i < SANA2_MAX_ADDR_BYTES; i++)
@@ -255,8 +255,8 @@ static LONG ami_sana2_configure(AmiSana2If *iface, const AmiIfConfig *cfg)
      * end of a wider one.
      *
      * Two emulated guests on one bridge carry the same factory address and
-     * answer each other's ARP; so do two of some real cards. Roadshow has had
-     * this since 1.0 and ours dropped the keyword on the floor.
+     * answer each other's ARP. So do two of some real cards. Roadshow has had
+     * this since 1.0, and this stack ignored the keyword.
      */
     if (cfg != NULL && cfg->have_hw_address && iface->addr_bytes > 0)
     {
@@ -305,12 +305,12 @@ static LONG ami_sana2_configure(AmiSana2If *iface, const AmiIfConfig *cfg)
 /*
  * There is no capability query for raw framing, so this posts one raw CMD_READ
  * and immediately takes it back. A device that does not implement the flag
- * should refuse the request in BeginIO (IOERR_NOCMD, S2ERR_BAD_ARGUMENT or
- * S2ERR_NOT_SUPPORTED); one that does implement it queues the request, and
+ * refuses the request in BeginIO (IOERR_NOCMD, S2ERR_BAD_ARGUMENT or
+ * S2ERR_NOT_SUPPORTED). One that does implement it queues the request, and
  * AbortIO returns it with IOERR_ABORTED.
  *
  * This cannot detect a device that accepts the flag and then ignores it,
- * handing back cooked frames that would be parsed as though they carried a
+ * handing back cooked frames that are then parsed as though they carried a
  * link header. The result therefore only enables raw when
  * ami_sana2_set_raw_allowed(TRUE) has been called.
  */
@@ -319,9 +319,9 @@ static BOOL ami_sana2_probe_raw(AmiSana2If *iface)
     struct MsgPort   *port;
     struct IOSana2Req req;
     /* A slot with no packet: the copy hook rejects anything aimed at it. On
-       the stack, not at file scope, it is per-probe, it lives only until the
-       WaitIO() below, and a shared one is a shared write target for any driver
-       that writes ios2_Data itself instead of calling the copy hooks. */
+       the stack rather than at file scope, so it is per-probe and lives only
+       until the WaitIO() below. A shared one is a shared write target for any
+       driver that writes ios2_Data itself instead of calling the copy hooks. */
     AmiRxSlot         slot;
     LONG              err;
     ULONG             i;
@@ -348,8 +348,8 @@ static BOOL ami_sana2_probe_raw(AmiSana2If *iface)
     req.ios2_DataLength                     = 0;
     req.ios2_Data                           = &slot;
 
-    /* BeginIO(), not SendIO(): SendIO() zeroes io_Flags, so the probe would
-       have asked every device for a cooked read and called it raw support. */
+    /* BeginIO(), not SendIO(): SendIO() zeroes io_Flags, so the probe asks
+       every device for a cooked read and takes that as raw support. */
     BeginIO((struct IORequest *)&req);
     AbortIO((struct IORequest *)&req);
     WaitIO((struct IORequest *)&req);
@@ -357,9 +357,9 @@ static BOOL ami_sana2_probe_raw(AmiSana2If *iface)
     err = (LONG)(BYTE)req.ios2_Req.io_Error;
     DeleteMsgPort(port);
 
-    /* IOERR_ABORTED means the device queued a raw read; 0 means one was
+    /* IOERR_ABORTED means the device queued a raw read. 0 means one was
        satisfied. Everything else, including S2ERR_OUTOFSERVICE from a unit
-       that is not up yet, counts as no. */
+       that is not up yet, counts as no support. */
     return (err == 0 || err == (LONG)IOERR_ABORTED) ? TRUE : FALSE;
 }
 #endif /* AMI_SANA2_PROBE_RAW */
@@ -381,7 +381,7 @@ LONG ami_sana2_online(AmiSana2If *iface)
 
     iface->online = TRUE;
 
-    /* S2_ONLINE resets the device's counters, so ours restart with them. */
+    /* S2_ONLINE resets the device's counters, so these restart with them. */
     iface->stats.bad_data        = 0;
     iface->stats.overruns        = 0;
     iface->stats.unknown_types   = 0;
@@ -416,7 +416,7 @@ LONG ami_sana2_offline(AmiSana2If *iface)
 /*
  * The bucket an address lands in on a DP8390-class receive filter: the top six
  * bits of the CRC-32 of the six address bytes. Every NE2000 derivative hashes
- * this way, so neither the driver nor we have any freedom in it.
+ * this way, so neither the driver nor this code has any freedom in it.
  */
 static UBYTE ami_sana2_mcast_bucket(const UBYTE *addr)
 {
@@ -479,15 +479,15 @@ LONG ami_sana2_multicast(AmiSana2If *iface, UWORD command,
     err = ami_sana2_command(iface, &req, command);
 
     /*
-     * x-surf.device and x-surf-100.device 1.16 test bit 7 of ios2_SrcAddr[0]
-     * where the Ethernet group bit is bit 0, so they refuse every address a
-     * real group has and the hash filter stays empty. IPv6 then fails in a way
-     * that looks like nothing at all: the router solicits the guest at its
-     * solicited-node address, the card drops it, and every off-link answer is
-     * discarded one hop away while ping and SLAAC keep working. What the card
-     * is being asked for is a bucket and not an address, so ask for the same
-     * bucket with an address the driver will take. Whatever else that bucket
-     * lets in the IP layer drops, which is what a hash filter always required.
+     * x-surf.device and x-surf-100.device 1.16 test bit 7 of ios2_SrcAddr[0],
+     * where the Ethernet group bit is bit 0. They refuse every address a real
+     * group has, and the hash filter stays empty. IPv6 then fails silently:
+     * the router solicits the guest at its solicited-node address, the card
+     * drops it, and every off-link answer is discarded one hop away while ping
+     * and SLAAC keep working. The card is asked for a bucket rather than an
+     * address, so the same bucket is asked for with an address the driver
+     * takes. The IP layer drops whatever else that bucket lets in, as it
+     * always had to with a hash filter.
      */
     if (err == (LONG)S2ERR_BAD_ADDRESS
         && req.ios2_WireError == (ULONG)S2WERR_BAD_MULTICAST
@@ -571,9 +571,9 @@ VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out)
     }
 
     /* Software counters only: the device-derived fields are refreshed on the
-       IP thread (NX_LINK_GET_*_COUNT, NX_LINK_DEFERRED_PROCESSING) because
-       issuing S2_GETGLOBALSTATS here would need a reply port on whichever
-       random task called GetNetworkStatistics(). */
+       IP thread (NX_LINK_GET_*_COUNT, NX_LINK_DEFERRED_PROCESSING), because
+       S2_GETGLOBALSTATS here needs a reply port on whichever task called
+       GetNetworkStatistics(). */
     *out = iface->stats;
 
 #ifdef AMINETXDUO_RXPROBE
@@ -660,12 +660,12 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
      * The buffer-management tag list is an input to OpenDevice and must
      * outlive the unit, so it lives in the interface, not on the stack.
      *
-     * WHY NOT S2_DMACopyToBuff32.  sana2.h defines S2_CopyToBuff32/FromBuff32
-     * (S2_Dummy + 6, + 7) and S2_DMACopyToBuff32/FromBuff32 (+ 8, + 9), and
-     * the DMA pair is the only thing that could remove the receive copy, which
-     * is 18.6% of an A1200 wire transfer with n68k_copy_bytes at 179.5 ns/B.
-     * Every SANA-II driver on hand was scanned for the tag constants it looks
-     * up, 2026-08-07:
+     * S2_DMACopyToBuff32 is not offered.  sana2.h defines
+     * S2_CopyToBuff32/FromBuff32 (S2_Dummy + 6, + 7) and
+     * S2_DMACopyToBuff32/FromBuff32 (+ 8, + 9), and the DMA pair is the only
+     * thing that can remove the receive copy, which is 18.6% of an A1200 wire
+     * transfer with n68k_copy_bytes at 179.5 ns/B.  Every SANA-II driver on
+     * hand was scanned for the tag constants it looks up, 2026-08-07:
      *
      *     a2060, eb920, eb920-i6, ppp-serial, rs485      base pair
      *     a2065, ariadne, ariadne_ii, hydra, slip,       base pair + filter
@@ -675,12 +675,12 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
      *
      * Three of fifteen, none of them a card in general use, and not the a2065
      * every measurement in this tree is taken on.  Nothing asks for the
-     * non-DMA 32 variants at all.  Offering the DMA pair means a packet pool in
-     * DMA-reachable memory with the alignment and coherency that implies, for
-     * cnet alone; the copy stays.
+     * non-DMA 32 variants at all.  Offering the DMA pair means a packet pool
+     * in DMA-reachable memory with the alignment and coherency that implies,
+     * for cnet alone.  The copy stays.
      *
-     * A driver could compute the tag rather than carry the constant, so this
-     * is evidence rather than proof.  None of the fifteen appears to.
+     * A driver can compute the tag rather than carry the constant, so this is
+     * evidence rather than proof.  None of the fifteen appears to.
      */
     iface->buffer_tags[tag].ti_Tag  = S2_CopyToBuff;
     iface->buffer_tags[tag].ti_Data = (ULONG)ami_sana2_copy_to_buff;
@@ -799,13 +799,13 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     }
 
     /*
-     * REQUIRESINITDELAY. Some cards hiccup and lose data if the first packet
-     * follows the configure too closely; Roadshow's manual names the original
-     * Ariadne. After the configure and before anything is sent or the readers
-     * are started, which is the window the option is about.
+     * REQUIRESINITDELAY. Some cards lose data if the first packet follows the
+     * configure too closely, and Roadshow's manual names the original Ariadne.
+     * The delay goes after the configure and before anything is sent or the
+     * readers are started, which is the window the option is about.
      *
      * A second, as Roadshow specifies, and only when asked for: it is paid at
-     * every bring-up, and the cards we can test do not need it.
+     * every bring-up, and the cards available for testing do not need it.
      */
     if (cfg != NULL && cfg->requires_init_delay)
     {
@@ -860,9 +860,9 @@ VOID ami_sana2_close(AmiSana2If *iface)
          * A device that still owns one of these requests must not be closed
          * and this memory must not be freed: the request points into this
          * allocation and into a reply port inside it, so the next completion
-         * would be written over whatever took their place. True of a queued
-         * CMD_WRITE as much as a CMD_READ, tx_port and the tx ring are
-         * fields of AmiSana2If.
+         * is written over whatever took their place. That is true of a queued
+         * CMD_WRITE as much as a CMD_READ: tx_port and the tx ring are fields
+         * of AmiSana2If.
          */
         if (iface->rx_orphaned || iface->tx_orphaned)
         {

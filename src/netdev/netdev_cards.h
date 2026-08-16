@@ -2,10 +2,10 @@
  * anxnet.device, layer 3 of 3: the card table.
  *
  * Adding a card to this driver is a row in netdev_cards.c.  Nothing else in
- * the tree needs to change, and that is the whole point of the three layers:
- * the shell knows SANA-II, the chip core knows the DP8390, and only this table
- * knows that an X-Surf 100 puts its registers 4 bytes apart at board+0x800
- * while an Ariadne II puts them 2 bytes apart at board+0x600.
+ * the tree needs to change, which is what the three layers are for: the shell
+ * knows SANA-II, the chip core knows the DP8390, and only this table knows
+ * that an X-Surf 100 puts its registers 4 bytes apart at board+0x800 while an
+ * Ariadne II puts them 2 bytes apart at board+0x600.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -18,8 +18,8 @@
 /*
  * Chip family.  The value picks the ops table in netdev_nic_ops_for(), at the
  * foot of netdev_cards.c, so a LANCE (A2065, Ariadne I) is a new value here
- * and a new ops table beside the two that exist -- not a change to the shell
- * or to any card row.
+ * and a new ops table beside the two that exist.  It is not a change to the
+ * shell or to any card row.
  */
 #define NETDEV_CHIP_NE2000  0   /* DP8390 clone with an ASIC remote-DMA port */
 #define NETDEV_CHIP_ED      1   /* DP8390 with a memory-mapped packet buffer */
@@ -27,14 +27,15 @@
 #define NETDEV_CHIP_EL3     3   /* 3Com EtherLink III: windowed, PIO FIFO     */
 
 /*
- * How the board tells us the interrupt was its.  A Zorro INT2 is shared, so a
- * server that answers "mine" without asking eats every other board's.
+ * How the board reports that the interrupt was its own.  A Zorro INT2 is
+ * shared, so a server that answers "mine" without asking eats every other
+ * board's.
  */
 #define NETDEV_IRQ_NONE     0   /* no status register: ask the chip's ISR */
 
 /*
  * How the board is found.  Everything with an autoconfig record comes off the
- * ConfigDev list; the PCMCIA slot has no such record and lives at a fixed
+ * ConfigDev list.  The PCMCIA slot has no such record and lives at a fixed
  * address behind Gayle, so it is claimed through card.resource instead.
  */
 #define NETDEV_BUS_ZORRO    0
@@ -69,7 +70,7 @@ typedef struct NetdevIsaPnp
 
 typedef struct NetdevCard
 {
-    const char *name;           /* what the user pins with, and what we print */
+    const char *name;           /* what the user pins with, and what is shown */
     UWORD       manid;
     UWORD       prodid;
     ULONG       reg_off;        /* register file, offset from the board base */
@@ -89,7 +90,7 @@ typedef struct NetdevCard
        where a silently-defaulted field would be worth catching. */
     UBYTE       bus;            /* NETDEV_BUS_*                               */
     ULONG       base;           /* NETDEV_BUS_PCMCIA: the fixed window base   */
-    ULONG       odd_off;        /* odd-register window, offset from base; 0 =
+    ULONG       odd_off;        /* odd-register window, offset from base.  0 =
                                    the register file is contiguous            */
     UBYTE       lance_swap;     /* the board crosses the SRAM byte lanes, so
                                    descriptor words are written pre-swapped   */
@@ -131,12 +132,11 @@ BOOL netdev_isapnp_configure(const NetdevCard *card, APTR board);
 /*
  * Which PCMCIA row drives the card whose CIS says (manf, prod).
  *
- * A PCMCIA row's manid/prodid are its CISTPL_MANFID, not an autoconfig
- * record; the slot has no autoconfig record to carry one.  An exact match
- * wins, and a row with 0/0 is the catch-all -- the NE2000 clones, which are a
- * hundred manufacturer IDs for one chip and cannot be enumerated.  NULL when
- * the table has neither, which cannot happen while the catch-all row exists
- * and is the answer if it ever stops existing.
+ * A PCMCIA row's manid/prodid are its CISTPL_MANFID, not an autoconfig record.
+ * The slot has no autoconfig record to carry one.  An exact match wins, and a
+ * row with 0/0 is the catch-all: the NE2000 clones, which are a hundred
+ * manufacturer IDs for one chip and cannot be enumerated.  NULL when the table
+ * has neither, which cannot happen while the catch-all row exists.
  */
 const NetdevCard *netdev_card_by_cis(UWORD manf, UWORD prod);
 

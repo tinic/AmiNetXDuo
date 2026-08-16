@@ -30,7 +30,7 @@
  * every length in the reply is bounded against the bytes actually received.
  * Message compression (RFC 1035 4.1.4, a label length byte with its top two
  * bits set points to an earlier name) is followed only backwards and at most
- * sixteen times; a forward or self-referential pointer would otherwise let a
+ * sixteen times. A forward or self-referential pointer would otherwise let a
  * fourteen-byte reply loop until the machine is reset. Text out of a record is
  * filtered too, because 0x9B is the Amiga console's CSI and a TXT record can
  * carry one.
@@ -72,7 +72,7 @@ enum
 #define NSL_QUERY_MAX           (NSL_HDR + NSL_WIRE_NAME_MAX + 4)
 
 /*
- * Bigger than the 512 a reply without EDNS0 may be: the bound that keeps this
+ * Bigger than the 512 a reply without EDNS0 can be: the bound that keeps this
  * parser safe is the bytes received, not the bytes a well-behaved server would
  * have sent.
  */
@@ -160,7 +160,7 @@ static VOID nsl_put16(UBYTE *p, UWORD v)
 
 /*
  * One byte of a record, on its way to the screen. Below 0x20 is a control
- * character; 0x7f-0x9f are C1, and 0x9b is the Amiga console's CSI, which
+ * character, 0x7f-0x9f are C1, and 0x9b is the Amiga console's CSI, which
  * moves the cursor, clears the window and changes the mode. Names and TXT
  * records are free text chosen by whoever runs the zone.
  */
@@ -178,7 +178,7 @@ static char nsl_safe_char(UBYTE c)
  * A name in wire form: each label prefixed by its length, a zero label for the
  * root. Returns bytes written, or 0 when the name is not a valid one.
  *
- * "example.com." and "example.com" are the same name; "." alone is the root,
+ * "example.com." and "example.com" are the same name. "." alone is the root,
  * which is a legitimate NS or SOA question.
  */
 static ULONG nsl_encode_name(const char *name, UBYTE *out, ULONG outlen)
@@ -222,7 +222,7 @@ static ULONG nsl_encode_name(const char *name, UBYTE *out, ULONG outlen)
         {
             i++;
 
-            /* A trailing dot ends the name; anything after it is a label. */
+            /* A trailing dot ends the name. Anything after it is a label. */
             if (name[i] == '\0')
                 break;
         }
@@ -307,7 +307,7 @@ static VOID nsl_reverse_name(ULONG addr, char *out, ULONG outlen)
  *
  * Every exit from the loop is a bound. `len` is the bytes received, never a
  * length the message claimed. A pointer must go strictly backwards, which is
- * what makes the walk terminate; sixteen jumps is far past any real message.
+ * what makes the walk terminate. Sixteen jumps is far past any real message.
  * The 0x40 and 0x80 label types are reserved, so they are rejected.
  */
 static LONG nsl_decode_name(const UBYTE *msg, ULONG len, ULONG pos,
@@ -585,7 +585,7 @@ static VOID nsl_print_record(const UBYTE *msg, ULONG len, UWORD type,
 /*
  * Walk the answer section. Returns records printed, or -1 for a malformed
  * reply (not the same as an empty one). The question section is walked first
- * to find where the answers start; its name may itself be compressed.
+ * to find where the answers start, and its name can itself be compressed.
  */
 static LONG nsl_print_answers(const UBYTE *msg, ULONG len)
 {
@@ -876,7 +876,7 @@ int main(int argc, char **argv)
      * tool_parse_ip6() rather than the library's inet_pton(): an IPv4-only
      * library answers EAFNOSUPPORT for AF_INET6, and a command that took that
      * for "not an address" asked the DNS for a name spelt "::1" and reported
-     * NXDOMAIN. Nothing about a PTR question needs IPv6 to carry it, the
+     * NXDOMAIN. Nothing about a PTR question needs IPv6 to carry it. The
      * ip6.arpa query travels to the name server over whatever this machine
      * has, and the answer is the same either way.
      */
@@ -914,7 +914,7 @@ int main(int argc, char **argv)
     {
         if (nsl_type_from_name((const char *)args[ARG_TYPE], &type) != 0)
         {
-            tool_error("\"%s\" is not a record type I know",
+            tool_error("\"%s\" is not a record type this command knows",
                        (LONG)args[ARG_TYPE]);
             nsl_print_types();
             CloseLibrary(sb);
@@ -924,7 +924,7 @@ int main(int argc, char **argv)
     }
     else if (is_v4 || is_v6)
     {
-        /* Same rule as host: an address typed on its own means "who is this". */
+        /* Same rule as host: an address on its own is a reverse lookup. */
         type = NSL_T_PTR;
     }
 
@@ -1041,7 +1041,7 @@ int main(int argc, char **argv)
 
     if (printed < 0)
     {
-        tool_error("%s sent an answer this cannot be read", (LONG)dotted);
+        tool_error("%s sent an answer that cannot be read", (LONG)dotted);
         FreeArgs(rda);
         return RETURN_ERROR;
     }
@@ -1050,7 +1050,7 @@ int main(int argc, char **argv)
      * TC means the answer did not fit in a datagram and the rest is only
      * available over TCP, which this command does not do. Checked before the
      * empty case, because a server with too much to say commonly sets TC and
-     * sends an empty answer section; reporting "no records of that type" there
+     * sends an empty answer section. Reporting "no records of that type" there
      * would be wrong. Seen with `nslookup google.com TYPE TXT`, whose RRset is
      * well over 512 bytes.
      */
@@ -1064,8 +1064,8 @@ int main(int argc, char **argv)
     {
         /*
          * Not an error: the name exists and has no record of this kind.
-         * Saying that is more useful than "not found", which reads as a bad
-         * name.
+         * Saying that is more useful than reporting the name as not found,
+         * which reads as a name that does not exist.
          */
         tool_printf("  no records of that type\n");
         rc = RETURN_WARN;

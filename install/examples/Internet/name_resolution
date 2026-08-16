@@ -1,23 +1,22 @@
 #
 # DEVS:Internet/name_resolution
 #
-# How names like "aminet.net" are turned into addresses.  Copy this into
-# DEVS:Internet and edit it, or let the installer write it for you.
+# How a name such as "aminet.net" is turned into an address.  Copy this file
+# into DEVS:Internet and edit it, or let the installer write it.
 #
 # One keyword per line.  '#' and ';' start a comment.  "keyword value" and
 # "keyword=value" are both accepted.
 #
-# WITH DHCP YOU DO NOT NEED THIS FILE.  The name servers arrive with the
-# lease.  It is worth having anyway for the "hostname" line, and as somewhere
-# to put a name server you would rather use than the one your router hands
-# out.
+# With DHCP this file is not necessary.  The name servers arrive with the
+# lease.  It is still useful for the "hostname" line, and to name a server
+# to use instead of the one the router hands out.
 #
 
-# nameserver -- who to ask.  Repeat the line for a second and third server;
-# they are tried in the order they appear here.
+# nameserver -- which server to ask.  Repeat the line for a second and third
+# server.  They are tried in the order they appear here.
 #
-# On a home network this is nearly always the router itself.  If you would
-# rather not use it, these two are public and work from anywhere:
+# On a home network this is nearly always the router.  These two are public
+# and work from anywhere:
 #
 #     nameserver 9.9.9.9
 #     nameserver 1.1.1.1
@@ -27,9 +26,10 @@ nameserver 192.168.1.1
 # domain -- appended to a name that has no dots in it, so that "fileserver"
 # is looked up as "fileserver.localdomain".
 #
-# LEAVE IT OUT ON DHCP.  The lease names the domain and the resolver uses it;
-# a domain written here is tried FIRST and the lease's after it, so a made-up
-# name like "localdomain" costs a wasted query on every short name.
+# Leave it out with DHCP.  The lease names the domain and the resolver uses
+# it.  A domain written here is tried first and the one from the lease after
+# it, so an invented name such as "localdomain" costs a wasted query on every
+# short name.
 #
 #domain localdomain
 
@@ -41,7 +41,7 @@ nameserver 192.168.1.1
 
 # hostname -- what this Amiga calls itself.  Letters, digits and hyphens.
 #
-# ENV:HOSTNAME is read too, and wins if it is set.
+# ENV:HOSTNAME is read too, and takes precedence when it is set.
 #
 hostname amiga
 

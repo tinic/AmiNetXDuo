@@ -22,7 +22,7 @@
 #include "sana2_device.h"
 
 #define NETDEV_MAX_UNITS    4
-#define NETDEV_MCAST_MAX    32      /* the hash is 64 bits; more is pointless */
+#define NETDEV_MCAST_MAX    32      /* the hash is 64 bits, so more is idle */
 #define NETDEV_TRACK_MAX    16
 
 struct NetdevUnit;
@@ -110,7 +110,7 @@ typedef struct NetdevUnit
 
     struct Sana2DeviceStats     nu_Stats;
 
-    /* Frames are staged here on the way out; 4-aligned for the long window. */
+    /* Frames are staged here on the way out, 4-aligned for the long window. */
     ULONG                       nu_TxBuf[(NETDEV_FRAME_MAX + 7) / 4];
 } NetdevUnit;
 
@@ -126,9 +126,9 @@ typedef struct NetdevDevice
 
     /*
      * What the probe did, published under a public semaphore for the life of
-     * the device.  Here rather than in a static because it must go when the
-     * device base goes: the reader finds it by name and a record outliving
-     * its memory is the one way this can hurt somebody.
+     * the device.  Here rather than in a static, because it must go when the
+     * device base goes.  The reader finds it by name, and a record that
+     * outlives its memory is the one way this can do harm.
      */
     AnxDiagMark         nd_Diag;
 
@@ -179,7 +179,7 @@ VOID netdev_trace_val(const char *tag, ULONG v);
 /*
  * Claim the slot, identify what is in it from its CIS, and configure it for
  * the row that drives that card.  *card_out is that row, set only on success.
- * Called ONCE, not once per PCMCIA row: there is one slot and one handle.
+ * Called once, not once per PCMCIA row: there is one slot and one handle.
  */
 APTR netdev_pcmcia_claim(const NetdevCard **card_out);
 /* The card's own CIS bytes, for the derived-address fingerprint.  0 when

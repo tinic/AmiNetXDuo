@@ -3,14 +3,14 @@
  *
  *   NetX Duo and ThreadX are singletons with file-scope state: the IP thread,
  *   the created-object lists, _tx_thread_current_ptr.  bsdsocket.library
- *   contains the only copy on the machine.  If this library linked netxduo
- *   too it would get a second, private set of those globals, a stack with no
- *   interfaces, a scheduler with no threads, and every call would fail in a
- *   way that looked like a NetX Duo bug.
+ *   contains the only copy on the machine.  A netxduo linked into this library
+ *   too gives it a second, private set of those globals, a stack with no
+ *   interfaces and a scheduler with no threads.  Every call then fails in a
+ *   way that looks like a NetX Duo bug.
  *
- *   nx_secure and nx_crypto have no such state that is not per-session, so
- *   linking them here is correct and keeps 227 KB out of the resident library
- *   of every machine that never makes a TLS connection.
+ *   nx_secure and nx_crypto have no such state that is not per-session, so a
+ *   link here is correct and keeps 227 KB out of the resident library of every
+ *   machine that never makes a TLS connection.
  *
  *   nx_secure calls twelve NetX Duo/ThreadX entry points and nothing else,
  *   measured with `nm` over the archives, not assumed.  This file defines those
@@ -19,16 +19,16 @@
  *   over its private LVO.  No vendored source is edited and no NetX Duo object
  *   is duplicated.
  *
- *   The same mechanism carries the entropy pool: NX_RAND is ami_random_rand()
- *   (port/netxduo-amiga/inc/nx_port.h), and defining the ami_random_* names
- *   here rather than linking src/common/ami_random.c means a TLS handshake
+ *   The same mechanism carries the entropy pool.  NX_RAND is ami_random_rand()
+ *   (port/netxduo-amiga/inc/nx_port.h), and the ami_random_* names are defined
+ *   here rather than linked from src/common/ami_random.c, so a TLS handshake
  *   draws from the pool bsdsocket.library already seeded, one pool per
  *   machine, not two.
  *
- *   Every forwarder checks for a context.  Reaching one without a context is a
- *   bug in this library (TLSOpenA binds before it does anything else), but the
- *   failure has to be a status code and not a jump through NULL on a machine
- *   with no memory protection.
+ *   Every forwarder checks for a context.  A forwarder reached without a
+ *   context is a bug in this library (TLSOpenA binds before it does anything
+ *   else), but the failure must be a status code and not a jump through NULL
+ *   on a machine with no memory protection.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -46,7 +46,7 @@ static const AmiNetXDuoContext *tls_ctx;
 /*
  * The private LVO, called by hand.  The register assignment is stated in
  * include/aminetxduo/nxcontext.h and implemented in
- * src/bsdsocket/nxcontext.c; this is the third and last place it appears.
+ * src/bsdsocket/nxcontext.c.  This is the third and last place it appears.
  */
 static LONG tls_obtain_context(APTR socket_base, const AmiNetXDuoContext **out)
 {
@@ -69,9 +69,9 @@ static LONG tls_obtain_context(APTR socket_base, const AmiNetXDuoContext **out)
  * The handshake's public-key arithmetic is the longest stretch of code in
  * this library that makes no ThreadX call, and the port only reschedules at
  * ThreadX API boundaries, so without this the IP thread does not run for the
- * length of a key exchange or a chain verification.  crypto68k calls this
- * between iterations; the pair is a no-op for a caller that does not hold
- * the baton, and nesting-safe for one that does.
+ * length of a key exchange or a chain check.  crypto68k calls this between
+ * iterations.  The pair is a no-op for a caller that does not hold the baton,
+ * and nesting-safe for one that does.
  */
 static VOID tls_crypto_yield(VOID)
 {
@@ -108,9 +108,9 @@ LONG tls_netx_bind(APTR socket_base)
     if (ctx == NULL)
         return -1;
 
-    /* nxcontext.c checks these too; re-checking costs four compares and makes
-       a mismatched pair of libraries fail here rather than in the middle of a
-       handshake. */
+    /* nxcontext.c checks these too.  A second check costs four compares and
+       makes a mismatched pair of libraries fail here rather than in the middle
+       of a handshake. */
     if (ctx->nxc_Magic != AMI_NXD_CONTEXT_MAGIC)
         return -1;
     if (ctx->nxc_Version != AMI_NXD_CONTEXT_VERSION)
@@ -244,20 +244,20 @@ UINT _tx_thread_sleep(ULONG timer_ticks)
  * nx_secure's `nxe_*` objects reference _tx_thread_current_ptr,
  * _tx_thread_system_state and _tx_timer_thread directly, out of
  * NX_THREADS_ONLY_CALLER_CHECKING.  Those are ThreadX *data*, not functions,
- * so they cannot be forwarded through a table, a definition here would be a
- * copy, not an alias, and would read as "no thread is running" forever.
+ * so they cannot be forwarded through a table.  A definition here is a copy,
+ * not an alias, and reads as "no thread is running" forever.
  *
- * That is normally moot, because this library calls the `_nx_secure_*` entry
- * points directly and does its own argument checking at the LVO, so no nxe_
- * object is pulled in.  One exception: src/tls/ami_tls_crypto.c offers
+ * That does not normally matter, because this library calls the `_nx_secure_*`
+ * entry points directly and does its own argument checking at the LVO, so no
+ * nxe_ object is pulled in.  One exception: src/tls/ami_tls_crypto.c offers
  * ami_tls_local_certificate_add() for a server or a client certificate, and
  * that spells the call `nx_secure_tls_local_certificate_add`, which the
- * vendored header maps to the wrapper.  Nothing in tls.library uses it, it
- * arrives only because it shares a translation unit with the crypto tables,
- * but the linker does not know that, so defining the wrapper here keeps the
- * archive member out and the three data symbols with it.
+ * vendored header maps to the wrapper.  Nothing in tls.library uses it, and it
+ * arrives only because it shares a translation unit with the crypto tables.
+ * The linker does not know that, so the wrapper defined here keeps the archive
+ * member out and the three data symbols with it.
  *
- * Verified after every link: `nm tls.library | grep _tx_thread_current_ptr` is
+ * Checked after every link: `nm tls.library | grep _tx_thread_current_ptr` is
  * empty.
  */
 UINT _nxe_secure_tls_local_certificate_add(NX_SECURE_TLS_SESSION *tls_session,
@@ -282,10 +282,10 @@ int ami_random_rand(void)
 /*
  * NX_CRYPTO_RBG, which is where the ECDHE private key comes from.  Not
  * ami_random_rand() in a loop: that one clears bit 31 to keep rand()'s
- * contract, and nx_crypto's own huge-number RBG would put the gap in every
- * 32-bit word of the key.  Zero is NX_CRYPTO_SUCCESS; a missing context leaves
- * the buffer alone and the handshake fails on the key exchange rather than on
- * a silently weak one.
+ * contract, and nx_crypto's own huge-number RBG then puts the gap in every
+ * 32-bit word of the key.  Zero is NX_CRYPTO_SUCCESS.  A missing context
+ * leaves the buffer alone, and the handshake fails on the key exchange rather
+ * than on a silently weak one.
  */
 unsigned int ami_crypto_rbg(unsigned int bits, unsigned char *result)
 {
@@ -314,9 +314,9 @@ ULONG ami_random_entropy_bits(VOID)
 
 /*
  * bsdsocket.library seeded the pool at its own OpenLibrary(), and this library
- * only runs behind an open bsdsocket.library, so re-running the 22 ms
- * collection here would cost time and credit nothing.  The symbol exists
- * because src/tls/tls_amiga.c calls it.
+ * only runs behind an open bsdsocket.library, so a second run of the 22 ms
+ * collection here costs time and credits nothing.  The symbol exists because
+ * src/tls/tls_amiga.c calls it.
  */
 VOID ami_random_init(VOID)
 {

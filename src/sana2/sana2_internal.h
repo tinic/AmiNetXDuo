@@ -24,27 +24,27 @@
 
 /*
  * CMD_READ is per packet type and the device has no buffers of its own: every
- * frame that arrives with no matching read outstanding is dropped on the
- * floor. Each outstanding read therefore pins one NX_PACKET for its whole
- * life, so depth trades pool occupancy against loss under burst.
+ * frame that arrives with no matching read outstanding is dropped. Each
+ * outstanding read pins one NX_PACKET for its whole life, so depth trades pool
+ * occupancy against loss under burst.
  *
  * The IPv4 depth is the receive window in frames, and four is too few.
  * Measured with tests/curl/run-curlverify.sh -p: sixteen concurrent HTTP
  * transfers through curl's multi interface lost six, twenty-four lost seven,
- * forty lost fifteen, all as `curl: (7) Could not connect` after about
- * thirteen seconds, on connections the host had already accepted. The SYN went
- * out, the peer answered, and the SYN/ACK arrived in a burst with no read
- * outstanding to catch it. At depth eight, forty concurrent transfers lost
- * none.
+ * and forty lost fifteen. All failed as `curl: (7) Could not connect` after
+ * about thirteen seconds, on connections the host had already accepted. The
+ * SYN went out, the peer answered, and the SYN/ACK arrived in a burst with no
+ * read outstanding to catch it. At depth eight, forty concurrent transfers
+ * lost none.
  *
  * The value below is therefore a floor. ami_sana2_rx_start() sizes the IPv4
- * reader from the packet pool instead (see the comment there), since the pool
- * is itself sized from AvailMem().
+ * reader from the packet pool instead (see the comment there), because the
+ * pool is itself sized from AvailMem().
  *
  * The 1 MB floor (docs/RESEARCH.md §81) gives a pool of 17 packets, close to
- * AMI_POOL_MIN_PACKETS (16), and pinning a quarter of that would starve
- * transmit, so such a machine keeps the four and cannot absorb the burst.
- * ARP and IPv6 ND are low-rate and stay shallow.
+ * AMI_POOL_MIN_PACKETS (16). Pinning a quarter of that starves transmit, so
+ * such a machine keeps the four and cannot absorb the burst. ARP and IPv6 ND
+ * are low-rate and stay shallow.
  */
 #ifndef AMI_SANA2_RX_DEPTH_IPV4
 #define AMI_SANA2_RX_DEPTH_IPV4     4
@@ -56,7 +56,7 @@
 #define AMI_SANA2_RX_DEPTH_IPV6     2
 #endif
 
-/* One in this many pool packets may be pinned by the IPv4 reader. */
+/* One in this many pool packets can be pinned by the IPv4 reader. */
 #ifndef AMI_SANA2_RX_POOL_SHARE
 #define AMI_SANA2_RX_POOL_SHARE     8
 #endif
@@ -91,11 +91,10 @@
 /*
  * Probe for raw-frame support at open time (see ami_sana2_probe_raw).
  *
- * Off, and the default has to be off rather than the build's job: the probe's
- * WaitIO() has no deadline and a2065.device 2.16 does not answer the AbortIO()
- * before it, so ami_sana2_open() never returns. CMakeLists.txt names the same
- * answer in both directions; this is what a build that does not go through it
- * gets.
+ * Off, and off here rather than only in the build: the probe's WaitIO() has no
+ * deadline, and a2065.device 2.16 does not answer the AbortIO() before it, so
+ * ami_sana2_open() never returns. CMakeLists.txt gives the same answer. This
+ * is what a build that does not go through it gets.
  */
 #ifndef AMI_SANA2_PROBE_RAW
 #define AMI_SANA2_PROBE_RAW         0
@@ -107,7 +106,7 @@
 #endif
 
 /* Offer the 16-bit buffer-management tags. Off: the tag numbers could not be
-   verified against any header on this toolchain, see sana2_device.h. */
+   checked against any header on this toolchain, see sana2_device.h. */
 #ifndef AMI_SANA2_OFFER_COPY16
 #define AMI_SANA2_OFFER_COPY16      0
 #endif
@@ -122,18 +121,17 @@
 
 /*
  * Off by default, in the shape AMINETXDUO_NXCENSUS uses: two ReadEClock()
- * calls per drain, and the totals land in the serial log when the readers
- * stop.
+ * calls per drain, and the totals go to the serial log when the readers stop.
  *
  *   cmake -B build/rxprobe -DAMINETXDUO_RXPROBE=ON ...
  *
- * It answers two questions the existing counters cannot. How many CMD_READs
- * the device still held each time the reader woke, the receive window in
- * frames, live rather than configured, since a frame arriving with none
- * outstanding is dropped by the device and counted nowhere. And whether the
- * TCP sequence space is already holed at the moment the frame is handed to
- * NetX Duo, which separates a frame lost below this line from one NetX Duo
- * dropped after it.
+ * It answers two questions the existing counters cannot. The first is how many
+ * CMD_READs the device still held each time the reader woke, which is the
+ * receive window in frames, live rather than configured. A frame that arrives
+ * with none outstanding is dropped by the device and counted nowhere. The
+ * second is whether the TCP sequence space is already holed when the frame
+ * reaches NetX Duo, which separates a frame lost below this line from one
+ * NetX Duo dropped after it.
  */
 #ifdef AMINETXDUO_RXPROBE
 
@@ -166,7 +164,7 @@ typedef struct AmiRxProbe
     ULONG   baton_sum;
     ULONG   baton_hist[AMI_RXPROBE_BUCKETS];
 
-    /* The worst wakes by backlog: was the reader held, or was that a burst? */
+    /* The worst wakes by backlog, to separate a held reader from a burst. */
     ULONG   worst_when[AMI_RXPROBE_WORST];   /* ticks since the last wake  */
     ULONG   worst_baton[AMI_RXPROBE_WORST];
     UWORD   worst_backlog[AMI_RXPROBE_WORST];
@@ -177,7 +175,7 @@ typedef struct AmiRxProbe
 
 /*
  * One bulk TCP flow, latched on the first segment carrying 512 bytes or more.
- * `next` is the sequence the wire order would produce, so a segment starting
+ * `next` is the sequence that wire order produces, so a segment starting
  * beyond it is a hole that already existed when the frame reached this line.
  */
 typedef struct AmiRxSeqProbe
@@ -244,11 +242,10 @@ typedef struct AmiRxSlot
 #ifdef AMINETXDUO_RX_VERIFY
     /*
      * The frame's ones-complement sum, computed out of the loads the copy is
-     * already doing.  Here rather than in NX_PACKET because this struct is
-     * ours and its lifetime is the slot's: it is written by the copy hook and
-     * read by the drain, one request apart, and re-armed before the next.
-     * Growing NX_PACKET to carry the same value wedged the stack, so it is
-     * not carried there.
+     * already doing.  Here rather than in NX_PACKET because this struct
+     * belongs to the shim and its lifetime is the slot's. It is written by the
+     * copy hook and read by the drain, one request apart, and re-armed before
+     * the next. Growing NX_PACKET to carry the same value hung the stack.
      */
     ULONG               sum;
     BOOL                summed;
@@ -287,7 +284,7 @@ typedef struct AmiSana2Rx
 
     /* Reads the device would not give back at teardown. Nonzero means this
        reader's slots, pinned packets and reply port are still reachable by the
-       device, so none may be freed, see ami_sana2_rx_teardown(). */
+       device, so none of them can be freed, see ami_sana2_rx_teardown(). */
     volatile UWORD      orphans;
 
 #ifdef AMINETXDUO_RXPROBE
@@ -319,9 +316,9 @@ typedef struct AmiTxSlot
 
 struct AmiSana2If
 {
-    /* Device. The opened request doubles as the template every cloned
-       request is copied from, it carries io_Device, io_Unit and the
-       device-side ios2_BufferManagement cookie. */
+    /* Device. The opened request doubles as the template every cloned request
+       is copied from. It carries io_Device, io_Unit and the device-side
+       ios2_BufferManagement cookie. */
     struct IOSana2Req   templ;
     BOOL                device_open;
     char                device[AMI_CFG_PATH_LEN];
@@ -346,7 +343,7 @@ struct AmiSana2If
     BOOL                raw_supported;
     BOOL                raw_mode;
     /* Set once a device answers an error to a raw CMD_WRITE this shim sent on
-       its own initiative; see the EtherType note in ami_sana2_tx_send(). */
+       its own initiative. See the EtherType note in ami_sana2_tx_send(). */
     BOOL                raw_tx_refused;
 
     /* NetX Duo binding. */
@@ -356,7 +353,7 @@ struct AmiSana2If
     NX_PACKET_POOL     *pool;
 
     /* TX ring. The reply port raises a signal on the reader that carries the
-       reaping duty, and falls back to PA_IGNORE when no reader holds it; the
+       reaping duty, and falls back to PA_IGNORE when no reader holds it. The
        sending thread never blocks on it either way. */
     struct MsgPort      tx_port;
     AmiTxSlot           tx[AMI_SANA2_TX_SLOTS];
@@ -415,8 +412,8 @@ LONG ami_sana2_rx_start(AmiSana2If *iface);
 VOID ami_sana2_rx_stop(AmiSana2If *iface);
 /*
  * `slot` is the request the frame arrived on, or NULL when there is none.  It
- * carries the sum the copy hook computed, which is what lets the verification
- * below avoid a second walk of the payload.
+ * carries the sum the copy hook computed, so the check below does not walk the
+ * payload a second time.
  */
 VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
                           const AmiRxSlot *slot);

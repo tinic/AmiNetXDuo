@@ -2,10 +2,9 @@
  * AmiNetXDuo, bpf ABI pin.
  *
  * Amiga-only, and a translation unit of its own so that every assertion runs
- * against the Roadshow NDK <net/bpf.h> itself. The record layout is what
- * matters: a consumer walks the buffer with
- * BPF_WORDALIGN(bh_hdrlen + bh_caplen) and reads data at record + bh_hdrlen,
- * so bh_hdrlen being 20 rather than 18 or 24 is load-bearing.
+ * against the Roadshow NDK <net/bpf.h> itself. A consumer walks the buffer
+ * with BPF_WORDALIGN(bh_hdrlen + bh_caplen) and reads data at
+ * record + bh_hdrlen, so bh_hdrlen must be 20, not 18 or 24.
  *
  * Measured 2026-07-24 with m68k-amigaos-gcc 15.2.0 -c -O2 -m68020.
  *
@@ -31,14 +30,14 @@ AMI_STATIC_ASSERT(sizeof(((struct bpf_hdr *)0)->bh_caplen)  == 4, "bh_caplen wid
 AMI_STATIC_ASSERT(sizeof(((struct bpf_hdr *)0)->bh_datalen) == 4, "bh_datalen width");
 AMI_STATIC_ASSERT(sizeof(((struct bpf_hdr *)0)->bh_hdrlen)  == 2, "bh_hdrlen width");
 
-/* bh_tstamp is a `struct timeval`, the Amiga one, two ULONGs. If a
-   toolchain substituted a Unix timeval with a 64-bit time_t the record would
-   grow silently and every consumer would misparse it. */
+/* bh_tstamp is a `struct timeval`, the Amiga one, two ULONGs. If a toolchain
+   substitutes a Unix timeval with a 64-bit time_t, the record grows silently
+   and every consumer misparses it. */
 AMI_STATIC_ASSERT(sizeof(((struct bpf_hdr *)0)->bh_tstamp) == 8, "bh_tstamp size");
 
 /* struct bpf_insn, an array of these is copied verbatim out of application
-   memory by BIOCSETF, so the width of every field matters. Note `code` is a
-   16-bit UWORD here, not the 32-bit int some BPF headers use. */
+   memory by BIOCSETF, so the width of every field matters. Note that `code`
+   is a 16-bit UWORD here, not the 32-bit int that some BPF headers use. */
 AMI_STATIC_ASSERT(sizeof(struct bpf_insn) == 8, "bpf_insn size");
 AMI_STATIC_ASSERT(offsetof(struct bpf_insn, code) == 0, "insn.code");
 AMI_STATIC_ASSERT(offsetof(struct bpf_insn, jt)   == 2, "insn.jt");
@@ -79,9 +78,9 @@ AMI_STATIC_ASSERT(BPF_IMM == 0x00 && BPF_ABS == 0x20 && BPF_IND == 0x40 &&
 AMI_STATIC_ASSERT(BPF_K == 0x00 && BPF_X == 0x08 && BPF_A == 0x10, "src/rval");
 AMI_STATIC_ASSERT(DLT_EN10MB == 1 && DLT_NULL == 0, "link types");
 
-/* The ioctl encodings. A caller built against a different struct ifreq would
-   disagree on IOCPARM_LEN, so ami_bpf_ioctl() dispatches on direction + group
-   + number and ignores the length. */
+/* The ioctl encodings. A caller built against a different struct ifreq
+   disagrees on IOCPARM_LEN, so ami_bpf_ioctl() dispatches on direction, group
+   and number, and ignores the length. */
 AMI_STATIC_ASSERT(IOCGROUP(BIOCGBLEN)    == 'B', "BIOCGBLEN group");
 AMI_STATIC_ASSERT(IOCPARM_LEN(BIOCSETIF) == 32,  "sizeof(struct ifreq)");
 AMI_STATIC_ASSERT(IOCPARM_LEN(BIOCGSTATS) == 8,  "sizeof(struct bpf_stat)");

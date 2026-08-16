@@ -4,10 +4,10 @@
  *     Online  NAME/A,UNIT/N,TIMEOUT/N
  *
  * NAME is either a configured interface or a SANA-II driver. Commands like
- * these are usually given a driver and a unit, "Offline a2065.device UNIT 0"
- * since that is the level at which a driver can be switched off to run
- * hardware diagnostics. What this stack acts on is a configured interface: a
- * file in DEVS:NetInterfaces naming a driver and a unit, which is the handle
+ * these are usually given a driver and a unit, "Offline a2065.device UNIT 0",
+ * because that is the level at which a driver can be switched off to run
+ * hardware diagnostics. This stack acts on a configured interface: a file in
+ * DEVS:NetInterfaces naming a driver and a unit. That name is the handle
  * ShowNetStatus prints, AddNetInterface takes, and the netstack indexes by.
  *
  * NAME is resolved in this order, and both spellings work:
@@ -19,21 +19,21 @@
  *      configured interface, and the command operates on the interface found.
  *   3. otherwise the message says so and lists what this machine does have,
  *      with the driver and unit of each. A driver name that no interface uses
- *      may be a card installed, but nothing here has been told to use it,
- *      so there is nothing to switch.
+ *      can mean the card is installed but nothing here has been told to use
+ *      it, so there is nothing to switch.
  *
- * A name that is both, an interface file called the same thing as a driver
- * is taken as the interface, and says so.
+ * A name that is both, an interface file called the same thing as a driver, is
+ * taken as the interface, and the command says so.
  *
- * TIMEOUT is how many seconds to wait for the interface to reach the state
- * that was asked for, with 0 meaning wait for as long as it takes; Ctrl-C
- * aborts the wait either way. The transition here is synchronous, so the state
- * is normally reached before the wait begins.
+ * TIMEOUT is how many seconds to wait for the interface to reach the state that
+ * was asked for, with 0 meaning wait for as long as it takes. Ctrl-C aborts the
+ * wait either way. The transition here is synchronous, so the state is normally
+ * reached before the wait begins.
  *
- * One source, two executables: TOOL_OFFLINE picks which. Online may have to
- * start the network (the user may never have run AddNetInterface); Offline
- * never does, since taking an interface down on a machine with no stack is a
- * no-op rather than a reason to boot the stack.
+ * One source, two executables: TOOL_OFFLINE picks which. If the network is not
+ * running, Online starts it, because AddNetInterface need not have been run
+ * first. Offline never starts it, because taking an interface down on a machine
+ * with no stack is a no-op.
  *
  * Both resolve NAME before they touch anything, so a mistyped name is answered
  * with the list of interfaces that do exist.
@@ -176,9 +176,9 @@ static VOID explain_unknown_name(const char *given, ULONG unit, BOOL had_unit)
  * 22.
  *
  * The index is looked up by name out of the live snapshot rather than computed
- * from the order of DEVS:NetInterfaces. The two happen to agree, since
- * src/netstack attaches the configured interfaces in config order, but that is
- * a coincidence and the wrong thing to rely on when taking an interface down.
+ * from the order of DEVS:NetInterfaces. The two happen to agree, because
+ * src/netstack attaches the configured interfaces in configuration order, but
+ * that agreement is a coincidence and must not be relied on.
  */
 
 static struct
@@ -320,7 +320,7 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
                                   : NETCTRL_INTERFACE_DOWN,
                                &ctl, &err) != 0)
     {
-        tool_error("%s would not go %s", (LONG)name,
+        tool_error("%s did not go %s", (LONG)name,
                    (LONG)(up ? "online" : "offline"));
 
         if (up && ifc != NULL)
@@ -333,7 +333,7 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
 
     if (!wait_for_live_state(base, name, up, timeout, &broken) && !broken)
     {
-        tool_error("%s was still %s %lu seconds after being asked to go %s",
+        tool_error("%s was still %s %lu seconds after the request to go %s",
                    (LONG)name, (LONG)(up ? "down" : "up"), timeout,
                    (LONG)(up ? "up" : "down"));
         rc = RETURN_WARN;
@@ -450,7 +450,7 @@ int main(int argc, char **argv)
     {
         tool_fault(IoErr());
         tool_usage("<interface or driver> [UNIT <n>] [TIMEOUT <secs>]",
-                   "eth0, or the driver it uses, e.g. a2065.device.");
+                   "eth0, or the driver it uses, for example a2065.device.");
         return RETURN_ERROR;
     }
 
@@ -494,9 +494,10 @@ int main(int argc, char **argv)
                                &other) &&
                 tool_stricmp(othername, name) != 0)
             {
-                tool_printf("%s: taken as the interface name; the interface "
-                            "that uses a driver\n", (LONG)name);
-                tool_printf("  of that name is %s.\n", (LONG)othername);
+                tool_printf("%s: taken as the interface name. The interface "
+                            "that uses a\n", (LONG)name);
+                tool_printf("  driver of that name is %s.\n",
+                            (LONG)othername);
             }
         }
     }
@@ -534,17 +535,17 @@ int main(int argc, char **argv)
         {
             struct Library *base;
 
-            /* Up to half a minute while DHCP is asked; do not sit silent. */
+            /* Up to half a minute while DHCP is asked, so say something. */
             tool_printf("%s: starting the network...\n", (LONG)name);
 
             base = tool_stack_start();
 
             if (base == NULL)
             {
-                tool_error("%s would not come online", (LONG)name);
+                tool_error("%s did not come online", (LONG)name);
 
-                /* The card is only worth probing when the library that would
-                   drive it is on the machine at all. */
+                /* Probe the card only when the library that would drive it is
+                   installed. */
                 if (tool_stack_installed())
                     tool_explain_device(ifc.device, ifc.unit, ifc.card);
                 else
@@ -591,7 +592,7 @@ int main(int argc, char **argv)
 
     if (err != AMI_NET_OK)
     {
-        tool_error("the network would not start: %s",
+        tool_error("the network did not start: %s",
                    (LONG)tool_net_error(err));
 
         if (err == AMI_NET_ERR_NODEV)
@@ -642,7 +643,7 @@ int main(int argc, char **argv)
 
     if (!wait_for_state(index, FALSE, timeout, &broken) && !broken)
     {
-        tool_error("%s was still up %lu seconds after being asked to go down",
+        tool_error("%s was still up %lu seconds after the request to go down",
                    (LONG)name, timeout);
         FreeArgs(rda);
         return RETURN_WARN;
@@ -661,7 +662,7 @@ int main(int argc, char **argv)
     err = netstack_interface_up((UWORD)index);
     if (err != AMI_NET_OK)
     {
-        tool_error("%s would not come online: %s", (LONG)name,
+        tool_error("%s did not come online: %s", (LONG)name,
                    (LONG)tool_net_error(err));
         tool_explain_device(ifc.device, ifc.unit, ifc.card);
         FreeArgs(rda);
@@ -670,7 +671,7 @@ int main(int argc, char **argv)
 
     if (!wait_for_state(index, TRUE, timeout, &broken) && !broken)
     {
-        tool_error("%s was still down %lu seconds after being asked to come up",
+        tool_error("%s was still down %lu seconds after the request to come up",
                    (LONG)name, timeout);
         FreeArgs(rda);
         return RETURN_WARN;

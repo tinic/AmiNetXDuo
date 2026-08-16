@@ -1,8 +1,8 @@
 /*
  * anxnet.device, the card table.
  *
- * Sources for every number here, so a seventh row does not need the archaeology
- * again:
+ * Sources for every number here, so the next row does not need the same
+ * search:
  *
  *   X-Surf 100   NetBSD sys/arch/amiga/dev/xsh.c (XSURF100_NE_OFFSET 0x0800)
  *                and if_ne_xsh.c (amiga_bus_stride_4).  The 0x8880 window and
@@ -24,19 +24,19 @@
 #include "netdev_nic.h"
 
 /*
- * THE X-SURF 500'S REGISTER FILE, transcribed from
+ * The X-Surf 500's register file, transcribed from
  * wiki.icomp.de/wiki/X-Surf-500_registers and not computed from anything.
  *
  * The card hangs off an ACA500's 34-pin header, which exposes so few address
- * lines that the register number's bits come out scattered: consecutive
- * registers sit anywhere from $0204 to $6E94 apart and no stride describes
+ * lines that the register number's bits come out scattered.  Consecutive
+ * registers sit anywhere from $0204 to $6E94 apart, and no stride describes
  * it.  Offsets are from the card's base, $EE0000.
  *
- * 0..15 are the NIC file, 16..31 the ASIC block -- the same split the NE2000
- * core already uses, so entry 16 is the 16-bit data port and entry 31 is the
- * reset.  Nothing here is derived: a guessed offset would give a driver that
- * looks right and silently talks to the wrong register, and with no emulation
- * of this card there is nothing to catch that.
+ * 0..15 are the NIC file and 16..31 the ASIC block, which is the same split
+ * the NE2000 core uses, so entry 16 is the 16-bit data port and entry 31 is
+ * the reset.  Nothing here is derived.  A guessed offset gives a driver that
+ * looks right and silently talks to the wrong register, and no emulation of
+ * this card exists to catch that.
  */
 static const ULONG xsurf500_regmap[32] =
 {
@@ -131,23 +131,23 @@ const NetdevCard netdev_cards[] =
      * The A1200/A600 PCMCIA slot.  No autoconfig record and no board base:
      * Gayle puts the card's I/O space at 0xA20000 and the card is told to
      * decode at 0x300, so the register file is 0xA20300 with the indices one
-     * byte apart.  netdev_pcmcia.c does the claiming and the configuring;
-     * from the chip core's side it is an NE2000 like any other.
+     * byte apart.  netdev_pcmcia.c does the claiming and the configuring.
+     * From the chip core's side it is an NE2000 like any other.
      */
     { "pcmcia",       0,     0, 0x0300,     1,      0,
       NETDEV_CHIP_NE2000,  10000000UL, 0,       0,       0,       0,
       NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL },
     /*
-     * The X-Surf 500, on an ACA500 or ACA500plus.  An AX88796B -- the same
-     * family as the X-Surf 100 -- at a fixed $EE0000 with no autoconfig
-     * record, so it is probed rather than found, and its register file is a
+     * The X-Surf 500, on an ACA500 or ACA500plus.  An AX88796B, the same
+     * family as the X-Surf 100, at a fixed $EE0000 with no autoconfig record.
+     * It is therefore probed rather than found, and its register file is a
      * table (see above) rather than a stride.  The 16-bit data port is ASIC
-     * register 0 at $EE0060; the FIFO at $EE8440 is sixteen bytes that take a
+     * register 0 at $EE0060.  The FIFO at $EE8440 is sixteen bytes that take a
      * movem.l, which is what wide_off names.
      *
-     * NOTHING EMULATES THIS CARD, so it has never been run.  It is written to
-     * cost nothing when absent: the probe reads the chip and attach refuses
-     * if a DP8390 does not answer, exactly as the X-Surf row does today.
+     * Nothing emulates this card, so it has never been run.  It is written to
+     * cost nothing when absent: the probe reads the chip, and attach refuses
+     * if a DP8390 does not answer, as the X-Surf row does today.
      */
     { "xsurf500",     0,     0, 0x0000,     1, 0x8440,
       NETDEV_CHIP_NE2000, 100000000UL, 1,       0,       0,       0,
@@ -155,33 +155,34 @@ const NetdevCard netdev_cards[] =
 
     /*
      * The 3Com EtherLink III PCMCIA card, a 3C589 of any revision.  Same slot
-     * and the same two Gayle windows as the "pcmcia" row; what differs is the
+     * and the same two Gayle windows as the "pcmcia" row.  What differs is the
      * chip, which is windowed rather than paged and moves frames through one
      * PIO port instead of a remote-DMA ring.
      *
-     * APPENDED, NOT PUT BESIDE THE OTHER PCMCIA ROW.  A unit pin is
-     * (index + 1) * 100, so inserting a row renumbers every row after it and
+     * Appended, not put beside the other PCMCIA row.  A unit pin is
+     * (index + 1) * 100, so an inserted row renumbers every row after it and
      * silently repoints somebody's DEVICE= UNIT=.  The table's order is a
-     * published interface; new cards go on the end.
+     * published interface, so new cards go on the end.
      *
-     * manid/prodid ARE THE CIS MANFID, 0x0101/0x0589, and that is how
+     * manid/prodid are the CIS MANFID, 0x0101/0x0589, which is how
      * netdev_pcmcia.c tells this card from an NE2000 clone in the same slot.
-     * A PCMCIA row is never matched against a ConfigDev -- the probe's Zorro
-     * loop skips any row that is not NETDEV_BUS_ZORRO -- so the two uses of
-     * these two fields cannot collide.
+     * A PCMCIA row is never matched against a ConfigDev, because the probe's
+     * Zorro loop skips any row that is not NETDEV_BUS_ZORRO, so the two uses
+     * of these two fields cannot collide.
      *
-     * reg_off 0x0300 IS AN ASSUMPTION, and the one thing here a hardware
-     * reporter has to settle.  The card decodes wherever the configuration
-     * table entry it was given says, and this driver writes the first entry's
-     * index without parsing that entry's I/O descriptor -- the same thing it
-     * does for the NE2000 row, where 0x300 is what cnet.device has assumed
-     * against a hundred real cards.  The entry's raw bytes go into the probe
-     * record (ANXDIAG_PC_CFTABLE) so one report settles it either way.
+     * reg_off 0x0300 is an assumption, and the one thing here a hardware
+     * report has to settle.  The card decodes wherever the configuration table
+     * entry it was given says, and this driver writes the first entry's index
+     * without parsing that entry's I/O descriptor.  It does the same for the
+     * NE2000 row, where 0x300 is what cnet.device has assumed against a
+     * hundred real cards.  The entry's raw bytes go into the probe record
+     * (ANXDIAG_PC_CFTABLE), so one report settles it either way.
      *
-     * NOTHING EMULATES THIS CARD.  Amiberry's PCMCIA support is NE2000 only,
-     * so this row has never been run against a chip; it is written the way
-     * the X-Surf 500 row above is, to cost nothing when the card is absent --
-     * the claim gives the slot straight back when no EtherLink III answers.
+     * Nothing emulates this card.  Amiberry's PCMCIA support is NE2000 only,
+     * so this row has never been run against a chip.  It is written the way
+     * the X-Surf 500 row above is, to cost nothing when the card is absent,
+     * and the claim gives the slot straight back when no EtherLink III
+     * answers.
      */
     { "3c589",   0x0101, 0x0589, 0x0300,     1,      0,
       NETDEV_CHIP_EL3,     10000000UL, 0,       0,       0,       0,

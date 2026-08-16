@@ -392,8 +392,8 @@ says "SYS:ConfigureNetInterface eth0 CONFIGURE=AUTO" 1 \
 want_rc "SYS:ConfigureNetInterface eth0 CONFIGURE=AUTO" 1 10 "and returns ERROR"
 
 says "SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 3" 1 \
-     "says more about the deadline than about the network" \
-     "a TIMEOUT under ten seconds is refused"
+     "is too short to tell anything about the network" \
+     "a TIMEOUT of less than ten seconds is refused"
 want_rc "SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 3" 1 10 \
         "and returns ERROR"
 

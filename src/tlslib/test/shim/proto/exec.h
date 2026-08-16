@@ -4,8 +4,8 @@
  * else.  test_tls_resume.c defines them.
  *
  * The semaphore is a counter there rather than a no-op, because every entry
- * point in tls_resume.c takes tb_Lock and a path that returns while still
- * holding it deadlocks the next connection on a machine where nothing else
+ * point in tls_resume.c takes tb_Lock, and a path that returns while it still
+ * holds tb_Lock deadlocks the next connection on a machine where nothing else
  * will ever release it.
  *
  * SPDX-License-Identifier: MIT

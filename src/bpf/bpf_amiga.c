@@ -17,13 +17,13 @@
 /*
  * Forbid()/Permit(), not Disable()/Enable(). The taps run on the SANA-II
  * reader threads and on whatever thread is inside nx_tcp_socket_send, and the
- * vectors run on application tasks, so the channel table is shared; but
- * nothing here runs at interrupt level, and long Disable() regions break
- * serial, floppy and audio (docs/RESEARCH.md 6.2).
+ * vectors run on application tasks, so the channel table is shared. Nothing
+ * here runs at interrupt level, and long Disable() regions break serial,
+ * floppy and audio (docs/RESEARCH.md 6.2).
  *
  * The longest bracket is ami_bpf_capture(), which copies the captured prefix
- * of a frame inside it, bounded by the snap length. bpf_read()'s copy-out,
- * which can be a whole 32 KB buffer, is done outside the bracket.
+ * of a frame inside it, bounded by the snap length. The copy-out in
+ * bpf_read(), which can be a whole 32 KB buffer, happens outside the bracket.
  */
 VOID ami_bpf_lock(VOID)
 {
@@ -50,17 +50,17 @@ VOID ami_bpf_notify(APTR task, ULONG mask)
 
 VOID ami_bpf_sleep(ULONG ticks)
 {
-    /* dos.library's Delay(), which waits on the calling Process's own timer.
-       Deliberately not a MsgPort of ours: one made on another Process leaves
-       mp_SigTask pointing at a task that may be gone (544398f). */
+    /* dos.library Delay(), which waits on the timer of the calling Process.
+       Deliberately not a MsgPort here: one made on another Process leaves
+       mp_SigTask set to a task that can be gone (544398f). */
     if (ticks != 0)
         Delay((LONG)ticks);
 }
 
 ULONG ami_bpf_signals_set(ULONG mask)
 {
-    /* Read without consuming: the caller asked to be interrupted by these,
-       and clearing them here would swallow the wake-up it is waiting for. */
+    /* Read the signals without a clear: the caller asked to be interrupted by
+       these, and a clear here loses the wake-up that it waits for. */
     return (mask != 0) ? (SetSignal(0UL, 0UL) & mask) : 0UL;
 }
 
@@ -68,21 +68,21 @@ ULONG ami_bpf_signals_set(ULONG mask)
  * bh_tstamp, as seconds and microseconds since the Unix epoch.
  *
  * GetSysTime() rather than DateStamp(): it is a timer.device library call, so
- * it is safe from a Task that is not a Process, which the SANA-II readers are
- * not. It reports Amiga time, seconds since 1978-01-01, so the epoch
- * difference goes on top, or every capture would appear to have happened in
+ * it is safe from a Task that is not a Process. The SANA-II readers are such
+ * Tasks. GetSysTime() reports Amiga time, seconds since 1978-01-01, so the
+ * epoch difference goes on top. Without it every capture appears to date from
  * the 1970s.
  *
  * TimerBase is opened by src/common/compat.c for its EClock millisecond
- * counter, and ami_bpf_time_init() forces that open from ami_bpf_open(). It has
- * to happen there rather than here: ami_bpf_capture() calls ami_bpf_now() with
+ * counter, and ami_bpf_time_init() forces that open from ami_bpf_open(). It
+ * must happen there and not here: ami_bpf_capture() calls ami_bpf_now() with
  * the channel lock, a Forbid(), held, and ami_millis() reaches
- * OpenDevice("timer.device") on the first call. That would have run on a
- * SANA-II reader thread with task switching off, and once per captured frame
- * for as long as the open kept failing.
+ * OpenDevice("timer.device") on the first call. Here that runs on a SANA-II
+ * reader thread with task switching off, once per captured frame for as long
+ * as the open keeps failing.
  *
  * With no timer the capture still happens and only the timestamps are zero,
- * which a viewer renders as 1970. Cosmetic, where refusing to capture is not.
+ * which a viewer shows as 1970. That is preferred to a refusal to capture.
  */
 extern struct Device *TimerBase;
 
@@ -93,10 +93,10 @@ VOID ami_bpf_time_init(VOID)
 
 VOID ami_bpf_now(ULONG *sec, ULONG *usec)
 {
-    /* `struct timeval`, not `TimeVal_Type`: the typedef is NDK 3.2's, and NDK
-       3.9 has no such name.  Both NDKs declare GetSysTime() as taking the
-       Amiga timeval, 3.2 spells that parameter TimeVal_Type, which is a
-       typedef for exactly this struct, and both give it tv_secs/tv_micro. */
+    /* `struct timeval`, not `TimeVal_Type`: that typedef belongs to NDK 3.2,
+       and NDK 3.9 has no such name. Both NDKs declare GetSysTime() with the
+       Amiga timeval, and both give it tv_secs and tv_micro. NDK 3.2 spells
+       the parameter TimeVal_Type, a typedef for this same struct. */
     struct timeval tv;
 
     if (TimerBase == NULL)

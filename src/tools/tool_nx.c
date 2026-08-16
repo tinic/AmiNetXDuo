@@ -2,7 +2,7 @@
  * AmiNetXDuo tools, talking to the live NetX Duo instance.
  *
  * Every function here is a NetStackQuery() call and a copy out of the answer.
- * No ThreadX is involved: the ThreadX a command could adopt into is never the
+ * No ThreadX is involved: the ThreadX a command can adopt into is never the
  * one the stack is running on. See tools_nx.h, and
  * include/aminetxduo/netstatus.h for the interface these go through.
  *
@@ -59,7 +59,7 @@ static VOID nx_query_failed(struct Library *base)
     if (nx_quiet)
         return;
 
-    tool_error("the network is up, but it would not report on itself");
+    tool_error("the network is up, but it did not report on itself");
     tool_explain_no_netstatus(base);
 }
 
@@ -192,8 +192,8 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
 
     /*
      * A library without IPv6 answers with no entries and one too old to know
-     * the selector answers -1.  Both mean "this machine has no IPv6 address to
-     * report", which is not a failure and prints nothing.
+     * the selector answers -1.  Both mean this machine has no IPv6 address to
+     * report, which is not a failure and prints nothing.
      */
     n = tool_netstatus_query(base, NETSTATUS_ADDRESSES6, &nx_answer,
                              sizeof(nx_answer.addr6),
@@ -858,8 +858,7 @@ LONG tool_routes6(ToolRoutes6 *out)
 /*
  * The IPv6 table, next to the IPv4 one and not merged with it: there is no
  * netmask column to fill, a default router has a lifetime where a gateway has
- * none, and "::/0" in a Netmask column would be a lie about how the stack
- * decides.
+ * none, and "::/0" in a Netmask column would misstate how the stack decides.
  */
 VOID tool_print_routes6(const ToolRoutes6 *routes, const AmiConfig *cfg)
 {
@@ -946,7 +945,7 @@ LONG tool_dest6(ToolDest6Table *out)
         return -1;
 
     /*
-     * A library without IPv6 answers with no entries; one that predates the
+     * A library without IPv6 answers with no entries. One that predates the
      * selector answers -1. Both print nothing and neither is a failure, the
      * way tool_routes6() treats the same two cases.
      */
@@ -1123,9 +1122,9 @@ const char *tool_nd_state_note(UWORD state)
         case NETSTATUS_ND_INCOMPLETE:
             return "asked, nothing back yet";
         case NETSTATUS_ND_STALE:
-            return "answered once; not checked since";
+            return "answered once, not checked since";
         case NETSTATUS_ND_DELAY:
-            return "sent something; about to check again";
+            return "sent something, about to check again";
         case NETSTATUS_ND_PROBE:
             return "being checked now";
         case NETSTATUS_ND_CREATED:

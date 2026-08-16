@@ -1,21 +1,18 @@
 /*
  * The tests for src/tools/fetchurl.c, the URL half of `fetch`.
  *
- * WHY THIS IS A TEST AND NOT A REVIEW
+ * Both halves of this file fail silently when they are wrong.  A relative
+ * Location: resolved as if it were absolute asks the resolver for a host called
+ * "about.html", and "docs/x.html" becomes host "docs", and neither reads as a
+ * bug in the code that does it.  An interim 1xx response taken for a final one
+ * writes the real response, status line and headers included, into the user's
+ * file as body and returns success.
  *
- *   Both halves of this file fail silently when they are wrong.  A relative
- *   Location: resolved as if it were absolute asks the resolver for a host
- *   called "about.html", and "docs/x.html" becomes host "docs", neither
- *   reads as a bug in the code that does it.  An interim 1xx response taken
- *   for a final one writes the real response, status line and headers
- *   included, into the user's file as body and returns success.
- *
- *   RFC 3986 section 5.4 is a ready-made table of thirty-six references and
- *   the target URI each one resolves to against a single base, so the
- *   resolution half is not tested against what this implementation happens to
- *   do, it is tested against the specification's own worked answers, which
- *   is the only kind of test worth having here.  The handful that cannot pass
- *   verbatim are listed in the deviations block below with the reason.
+ * RFC 3986 section 5.4 is a ready-made table of thirty-six references and the
+ * target URI each one resolves to against a single base, so the resolution
+ * half is tested against the specification's own worked answers rather than
+ * against what this implementation happens to do.  The handful that cannot
+ * pass verbatim are listed in the deviations block below with the reason.
  *
  *     cc -std=c11 -Wall -Wextra -Isrc/tools \
  *        src/tools/test/test_fetchurl.c src/tools/fetchurl.c -o test_fetchurl
@@ -55,9 +52,9 @@ static int checks;
 
 /*
  * The absolute form of a parsed URL, for comparing against section 5.4's
- * right-hand column.  Sized for the worst case rather than FETCH_URL_MAX:
- * a maximum authority and a maximum path together overrun that, and a URL
- * this test never builds is still one -Wformat-truncation reasons about.
+ * right-hand column.  Sized for the worst case rather than FETCH_URL_MAX,
+ * because a maximum authority and a maximum path together overrun that, and a
+ * URL this test never builds is still one -Wformat-truncation reasons about.
  */
 #define COMPOSED_MAX    (8 + FETCH_AUTHORITY_MAX + FETCH_PATH_MAX + 8)
 
@@ -81,7 +78,7 @@ static const char *composed(const FetchUrl *u)
 /*
  * Base: http://a/b/c/d;p?q
  *
- * DEVIATIONS, all deliberate:
+ * The deviations, all deliberate:
  *
  *   "g:h"  ->  "g:h".  A URI in a scheme this command does not speak.  It is
  *              resolved correctly, scheme "g", no authority, and then
@@ -99,8 +96,8 @@ static const char *composed(const FetchUrl *u)
  *
  *   "http:g" -> the strict answer, "http:g", is a scheme with no authority,
  *              so it is refused here too.  Section 5.4.2 records the
- *              alternative ("http://a/b/c/g") as what a NON-strict parser
- *              produces for backward compatibility; this one is strict.
+ *              alternative ("http://a/b/c/g") as what a non-strict parser
+ *              produces for backward compatibility.  This one is strict.
  */
 
 typedef struct RefCase
@@ -428,7 +425,7 @@ static void test_interim_responses(void)
     CHECK_STR(wire + at, "the body");
 }
 
-/* One byte at a time: the terminator scan must survive a split across reads,
+/* One byte at a time.  The terminator scan must survive a split across reads,
    which is how a 1xx arrives in practice, alone in its own segment. */
 static void test_interim_split_reads(void)
 {

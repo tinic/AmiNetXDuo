@@ -15,8 +15,8 @@
 /* ----------------------------------------------------------------- errno, */
 
 /*
- * Mirror the error into the caller's errno at the width it asked for through
- * UGT_ERRNOPTR, the same contract bsdsocket.library's SetErrnoPtr() has.
+ * Mirror the error into the caller errno at the width it asked for through
+ * UGT_ERRNOPTR, the same contract that SetErrnoPtr() of bsdsocket.library has.
  */
 void ug_set_err(struct UserGroupBase *base, LONG err)
 {
@@ -49,8 +49,8 @@ void ug_context_init(struct UserGroupBase *base)
 
     /*
      * AmigaOS has no user database and no protection domain, so every opener
-     * starts out as the one and only user: root. The name is resolved lazily
-     * from the passwd file (if there is one) by ug_resolve_login().
+     * starts as the one and only user: root. ug_resolve_login() resolves the
+     * name lazily from the passwd file, when there is one.
      */
     base->ug_Cred.cr_ruid     = 0;
     base->ug_Cred.cr_rgid     = 0;
@@ -65,9 +65,9 @@ void ug_context_init(struct UserGroupBase *base)
 }
 
 /*
- * Fill in cr_login on first use: the passwd file gets a say in what the single
- * user is called, but only if something actually asks. An explicit setlogin()
- * wins, because it will have made the field non-empty already.
+ * Fill in cr_login on first use: the passwd file gets a say in the name of the
+ * single user, but only when something asks. An explicit setlogin() wins,
+ * because it already made the field non-empty.
  */
 void ug_resolve_login(struct UserGroupBase *base)
 {
@@ -104,7 +104,7 @@ LONG ugl_SetupContextTagList(UG_A6, register STRPTR name __asm("a0"),
         ug_strncpy(base->ug_ProgName, (const char *)name,
                    sizeof(base->ug_ProgName));
 
-    /* NextTagItem() is utility.library; walk the list ourselves. */
+    /* NextTagItem() is utility.library, so the list is walked here. */
     while (ti != NULL)
     {
         ULONG tag  = ti->ti_Tag;
@@ -152,7 +152,7 @@ LONG ugl_SetupContextTagList(UG_A6, register STRPTR name __asm("a0"),
                 break;
 
             default:
-                break;      /* TAG_IGNORE and anything we do not know */
+                break;      /* TAG_IGNORE and any unknown tag */
         }
 
         ti++;
@@ -190,8 +190,8 @@ STRPTR ugl_StrError(UG_A6, register LONG err __asm("d1"))
 
 /*
  * getcredentials(NULL) and getcredentials(self) are the common cases. For any
- * other task we look through the open contexts; the pointer stays valid as
- * long as that opener holds the library open.
+ * other task this searches the open contexts. The pointer stays valid as long
+ * as that opener holds the library open.
  */
 struct ug_credentials *ugl_getcredentials(UG_A6,
                                           register struct Task *task __asm("a0"))
@@ -218,9 +218,9 @@ struct ug_credentials *ugl_getcredentials(UG_A6,
         if (other->ug_Owner == task)
         {
             /*
-             * Returned as-is: resolving cr_login here would mean writing into
-             * another task's context behind its back, and the caller only
-             * asked to read it.
+             * Returned as it is: a cr_login resolution here writes into the
+             * context of another task without its knowledge, and the caller
+             * only asked to read it.
              */
             result = &other->ug_Cred;
             break;

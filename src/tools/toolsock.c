@@ -5,11 +5,11 @@
  * inlines.  Every stub below is written the same way: the arguments go into
  * the registers the ABI names, a6 holds the library base, and the call is a
  * `jsr a6@(-LVO:W)`.  The LVOs are docs/RESEARCH.md 3.2's and the register
- * assignments are src/bsdsocket/bsdsocket_vectors.h's; a disagreement between
+ * assignments are src/bsdsocket/bsdsocket_vectors.h's.  A disagreement between
  * the two is a bug, and shows up here.
  *
  * Hazard: every stub must declare d1/a0/a1 written.  An AmigaOS library call
- * clobbers d0, d1, a0 and a1, and GCC may assume an input-only operand is left
+ * clobbers d0, d1, a0 and a1, and GCC can assume an input-only operand is left
  * alone, so a stub passing an argument in d1 without declaring d1 written lets
  * GCC keep a value there across the `jsr` and then reuse or spill whatever the
  * library left behind.  This turned IoctlSocket(FIONBIO) into a call with a
@@ -17,16 +17,16 @@
  * `_clob_*` dummies bound to those registers and listed as outputs are the
  * NDK's own idiom, from inline/macros.h.
  *
- * Hazard, the other half: nothing may be CALLED between the first register
+ * Hazard, the other half: nothing can be called between the first register
  * variable and the `jsr`.  A local register variable lives in its hard
  * register from its initialiser onwards, and GCC does not reload it after a
  * call, so a call in a later initialiser returns having clobbered d0/d1/a0/a1
  * the earlier arguments, and the library is entered with the callee's
  * leftovers.  bind(), connect() and sendto() each computed the sockaddr
- * length that way.  At -Os tool_sock_len() inlines and nothing shows; at -O0
- * it is a real `jsr` and sendto() went to the library with d0 holding 16
+ * length that way.  At -Os tool_sock_len() inlines and nothing shows.  At -O0
+ * it is a real `jsr`, and sendto() went to the library with d0 holding 16
  * instead of the descriptor, which the stack answered with EBADF.  Compute
- * anything that needs a call into a plain local FIRST.
+ * anything that needs a call into a plain local first.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -69,7 +69,7 @@ struct Library *tool_socket_open(VOID)
     if (base == NULL)
     {
         if (tool_stack_installed())
-            tool_error("the network would not start");
+            tool_error("the network did not start");
         else
             tool_error("no bsdsocket.library");
         tool_explain_no_stack();
@@ -406,7 +406,7 @@ LONG tool_sock_select(struct Library *base, LONG nfds, ToolFdSet *readfds,
  * each other.  src/tools/httpd.c waits on the terminal's pipe this way.
  *
  * The mask is in and out: on return it holds the signals that were received,
- * and those have been CLEARED from the task.  So a caller may pass only the
+ * and those have been cleared from the task.  So a caller passes only the
  * signals it is prepared to consume -- SIGBREAKF_CTRL_C is deliberately not
  * among httpd's, because tool_break() is what reads that one.
  */
@@ -828,7 +828,7 @@ static BOOL tool_list_has(const ToolAddrList *list, const ToolAddr *addr)
 /*
  * One getaddrinfo(), no output.  Returns 0 with *out filled, or the EAI_ code.
  * An answer with nothing usable in it counts as EAI_NONAME: the caller only
- * distinguishes "not found" from "try again".
+ * tells a name that is not there from one worth asking about again.
  *
  * Every address is kept, up to TOOL_ADDR_TRIES, because the first one is not
  * always the one that answers.
@@ -949,7 +949,7 @@ BOOL tool_sock_resolve_list(struct Library *base, const char *host, LONG want,
     {
         /*
          * No getaddrinfo in this library's table.  A name can still be looked
-         * up the old way; an IPv6 literal cannot be used at all, and neither
+         * up the old way.  An IPv6 literal cannot be used at all, and neither
          * can -6, because gethostbyname() only ever answers with an A.
          */
         if (!literal && want != TOOL_AF_INET6 &&
@@ -1118,10 +1118,10 @@ LONG tool_sock_connect_timed(struct Library *base, LONG s,
  * How long one address gets while another is still untried.
  *
  * Ten seconds spans four SYNs on this stack -- 0, 1, 3 and 7 s -- so three
- * lost in a row are ridden out before the next address is tried, which is
- * well past what a slow link costs a handshake.  The number is deliberately
- * not a race delay: a path that needs longer than this is not abandoned, it
- * is retried at the end of the list with the caller's whole timeout.
+ * lost in a row are ridden out before the next address is tried, which is well
+ * past what a slow link costs a handshake.  It is not a race delay.  A path
+ * that needs longer than this is not abandoned, it is retried at the end of
+ * the list with the caller's whole timeout.
  */
 #define TOOL_CONNECT_TRY_SECS   10UL
 
@@ -1214,7 +1214,7 @@ LONG tool_sock_connect_host(struct Library *base, const char *host,
         if (result == TOOL_CONNECT_TIMEDOUT)
         {
             /* So a caller that prints only the errno still says something
-               true; the code is what a caller with its own wording reads. */
+               true.  The code is what a caller with its own wording reads. */
             *why = TOOL_ETIMEDOUT;
             rc   = TOOL_CONNECT_TIMEDOUT;
         }
@@ -1296,9 +1296,9 @@ UWORD tool_sock_port(struct Library *base, const char *text, const char *proto)
 }
 
 /*
- * The unnamed case gets the number.  The errnos that turn up in bug reports are
- * the ones not in the list below, so printing the number beats a generic "the
- * network refused".
+ * The unnamed case gets the number.  The errnos that turn up in bug reports
+ * are the ones not in the list below, so the number is printed rather than one
+ * generic sentence for all of them.
  */
 static char tool_sock_errbuf[64];
 

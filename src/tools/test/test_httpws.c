@@ -1,23 +1,20 @@
 /*
  * The tests for src/tools/httpws.c, RFC 6455 on the wire.
  *
- * WHY THIS IS A TEST AND NOT A REVIEW
+ * Everything here fails silently.  An accept computed over the key without the
+ * GUID is 28 characters of base64 and every browser refuses the connection
+ * with no diagnostic the server can see.  A mask applied from the wrong offset
+ * when a frame is split across two reads produces different bytes rather than
+ * an error, so a shell behind it runs a command nobody typed.  A control frame
+ * accepted while fragmented, or a 64-bit length whose top word was not
+ * checked, is a length the decoder and the client disagree about, and after
+ * that the two are reading different frames on the same socket for ever.
  *
- *   Everything here fails silently.  An accept computed over the key without
- *   the GUID is 28 characters of base64 and every browser refuses the
- *   connection with no diagnostic the server can see.  A mask applied from the
- *   wrong offset when a frame is split across two reads produces a payload
- *   that is not an error, it is different bytes -- so a shell behind it runs a
- *   command nobody typed.  A control frame accepted while fragmented, or a
- *   64-bit length whose top word was not checked, is a length the decoder and
- *   the client disagree about, and after that the two are reading different
- *   frames on the same socket for ever.
- *
- *   So the vectors are written down.  The handshake pair is RFC 6455 1.3's
- *   own, digit for digit; the frames are 5.7's; the rest are the cases the
- *   specification says a server MUST fail, each fed BOTH whole and one byte at
- *   a time, because a state machine that is right on a whole buffer and wrong
- *   across a split is the failure this decoder exists to avoid.
+ * So the vectors are written down.  The handshake pair is RFC 6455 1.3's own,
+ * digit for digit, and the frames are 5.7's.  The rest are the cases the
+ * specification says a server must fail, each fed both whole and one byte at a
+ * time, because a state machine that is right on a whole buffer and wrong
+ * across a split is the failure this decoder exists to avoid.
  *
  *   cc -std=c11 -Wall -Wextra -Isrc/tools -DNX_CRYPTO_STANDALONE_ENABLE \
  *      -Ithird_party/netxduo/crypto_libraries/inc \
@@ -48,8 +45,8 @@ static int checks;
 
 /*
  * What the decoder said, flattened.  A message's pieces are concatenated and
- * the count of calls is kept, because "one message in three pieces" and "three
- * messages" are the difference a fragmentation test is about.
+ * the count of calls is kept, because one message in three pieces and three
+ * messages are the difference a fragmentation test is about.
  */
 typedef struct
 {
@@ -57,12 +54,12 @@ typedef struct
     int             finals;
     HttpWsEvent     last_ev;
     /*
-     * TWO buffers, and that is a finding rather than a convenience.  RFC 6455
-     * 5.4 lets a control frame arrive between the fragments of a data message,
-     * so a reader with one accumulator concatenates a ping's payload onto the
-     * half-finished message and delivers both as one.  A single buffer here
-     * reported "Helhi" and "lo" for a Hello split around a ping, which is
-     * exactly what a terminal with one buffer would type into the shell.
+     * Two buffers, for a reason.  RFC 6455 5.4 lets a control frame arrive
+     * between the fragments of a data message, so a reader with one
+     * accumulator concatenates a ping's payload onto the half-finished message
+     * and delivers both as one.  A single buffer here reported "Helhi" and
+     * "lo" for a Hello split around a ping, which is what a terminal with one
+     * buffer would type into the shell.
      */
     unsigned long   len;
     unsigned char   buf[4096];
@@ -139,7 +136,7 @@ static void heard_clear(void)
 }
 
 /*
- * Feed the same bytes two ways: in one call, and one byte at a time.  The log
+ * Feed the same bytes two ways, in one call and one byte at a time.  The log
  * both produce has to be identical, and the failure code too.  A decoder is
  * only correct if the split does not matter, and every real split is the
  * network's choice.
@@ -165,7 +162,7 @@ static void feed_both(const unsigned char *frame, long len,
     *fail_split = in.failed;
 }
 
-/* ONE call for both shapes, so no test can accidentally check only one. */
+/* One call for both shapes, so no test can check only one of them. */
 static void expect(const char *what, const unsigned char *frame, long len,
                    const char *want_log, unsigned short want_fail)
 {
@@ -226,7 +223,7 @@ static void test_base64(void)
     CHECK(http_ws_b64_decode("Zm9v*mFy", raw, sizeof(raw)) == -1);
     CHECK(http_ws_b64_decode("Zm9vYmF", raw, sizeof(raw)) == -1);
     CHECK(http_ws_b64_decode("Zg==Zg==", raw, sizeof(raw)) == -1);
-    /* Padding bits that are not zero: two texts for one value. */
+    /* Padding bits that are not zero, which is two texts for one value. */
     CHECK(http_ws_b64_decode("Zh==", raw, sizeof(raw)) == -1);
     /* Longer than the caller's buffer is refused, not truncated. */
     CHECK(http_ws_b64_decode("Zm9vYmFy", raw, 3) == -1);
@@ -244,17 +241,17 @@ static void test_handshake(void)
     printf("the upgrade handshake\n");
 
     /*
-     * RFC 6455 1.3, verbatim.  This pair is the whole reason the GUID is in
-     * the source: the key alone hashes to something else entirely, and a
-     * server that got it wrong would look identical from the outside up to
-     * the moment every browser refused it.
+     * RFC 6455 1.3, verbatim.  This pair is why the GUID is in the source.
+     * The key alone hashes to something else entirely, and a server that got
+     * it wrong would look identical from the outside up to the moment every
+     * browser refused it.
      */
     CHECK(http_ws_accept("dGhlIHNhbXBsZSBub25jZQ==", accept,
                          sizeof(accept)) == 1);
     CHECK(strcmp(accept, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=") == 0);
 
-    /* RFC 6455 4.2.2 spells the header value with the surrounding space that
-       a header parser may or may not have taken off. */
+    /* RFC 6455 4.2.2 spells the header value with the surrounding space that a
+       header parser can leave on. */
     CHECK(http_ws_accept("  dGhlIHNhbXBsZSBub25jZQ==  ", accept,
                          sizeof(accept)) == 1 &&
           strcmp(accept, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=") == 0);
@@ -266,10 +263,10 @@ static void test_handshake(void)
                          sizeof(accept)) == 0);
     CHECK(http_ws_accept("dGhlIHNhbXBsZSBub25j!!==", accept,
                          sizeof(accept)) == 0);
-    /* 24 unpadded characters decode to EIGHTEEN bytes, not sixteen, so a
-       length check on the text alone would let this through and a nonce of
-       the wrong size would be hashed.  The padded form of the same length is
-       the one that is a key. */
+    /* 24 unpadded characters decode to eighteen bytes, not sixteen, so a
+       length check on the text alone would let this through and a nonce of the
+       wrong size would be hashed.  The padded form of the same length is the
+       one that is a key. */
     CHECK(http_ws_accept("AAAAAAAAAAAAAAAAAAAAAAAA", accept,
                          sizeof(accept)) == 0);
     CHECK(http_ws_accept("AAAAAAAAAAAAAAAAAAAAAA==", accept,
@@ -285,7 +282,7 @@ static void test_frames(void)
 {
     printf("frames the client sends\n");
 
-    /* RFC 6455 5.7's masked "Hello": the specification's own bytes. */
+    /* RFC 6455 5.7's masked "Hello", the specification's own bytes. */
     {
         static const unsigned char hello[] = {
             0x81, 0x85, 0x37, 0xfa, 0x21, 0x3d,
@@ -297,7 +294,7 @@ static void test_frames(void)
     }
 
     /* And 5.7's fragmented "Hel" + "lo", which is the same message in two
-       frames and must read as ONE. */
+       frames and must read as one. */
     {
         static const unsigned char frag[] = {
             0x01, 0x83, 0x00, 0x00, 0x00, 0x00, 'H', 'e', 'l',
@@ -309,7 +306,7 @@ static void test_frames(void)
     }
 
     /* A control frame between the fragments, which RFC 6455 5.4 allows and
-       which is the interleaving a keep-alive ping actually produces. */
+       which is the interleaving a keep-alive ping produces. */
     {
         static const unsigned char mixed[] = {
             0x01, 0x83, 0x00, 0x00, 0x00, 0x00, 'H', 'e', 'l',
@@ -382,7 +379,8 @@ static void test_frames(void)
 
     printf("frames the client may not send\n");
 
-    /* RFC 6455 5.1: unmasked, from a client, is 1002 and the end of it. */
+    /* RFC 6455 5.1: unmasked, from a client, is 1002 and the end of the
+       connection. */
     {
         static const unsigned char bare[] = {
             0x81, 0x05, 'H', 'e', 'l', 'l', 'o'
@@ -461,7 +459,7 @@ static void test_frames(void)
     }
 
     /* A 64-bit length whose top word is set is not a length this machine can
-       hold, and the answer is 1009 rather than 1002: the frame is well
+       hold, and the answer is 1009 rather than 1002, because the frame is well
        formed. */
     {
         static const unsigned char huge[] = {
@@ -504,11 +502,11 @@ static void test_encoder(void)
     n = http_ws_head(out, sizeof(out), HTTP_WS_EV_TEXT, 0, 1);
     CHECK(n == 2 && out[0] == 0x81 && out[1] == 0x00);
 
-    /* Not final: the same opcode without the FIN bit. */
+    /* Not final, which is the same opcode without the FIN bit. */
     n = http_ws_head(out, sizeof(out), HTTP_WS_EV_BINARY, 5, 0);
     CHECK(n == 2 && out[0] == 0x02);
 
-    /* 125 is the last two-byte header; 126 is the first four-byte one. */
+    /* 125 is the last two-byte header, and 126 the first four-byte one. */
     n = http_ws_head(out, sizeof(out), HTTP_WS_EV_BINARY, 125, 1);
     CHECK(n == 2 && out[1] == 125);
 
@@ -539,10 +537,10 @@ static void test_encoder(void)
 
     /*
      * What this server sends must be what it can read back, minus the mask
-     * that only a client applies.  Composed here rather than asserted by eye:
-     * an encoder and a decoder that agree with each other and not with the
-     * specification is the failure a single-sided test cannot see, which is
-     * why every case above is the RFC's bytes and this one is the round trip.
+     * that only a client applies.  An encoder and a decoder that agree with
+     * each other and not with the specification is the failure a single-sided
+     * test cannot see, so every case above is the RFC's bytes and this one is
+     * the round trip.
      */
     {
         HttpWsIn      in;
@@ -554,8 +552,8 @@ static void test_encoder(void)
         for (i = 0; i < 5; i++)
             frame[head + (unsigned long)i] = (unsigned char)("Hello"[i]);
 
-        /* The decoder is a server's, so it refuses what it just wrote: a
-           server frame is unmasked and only a client's may be read. */
+        /* The decoder is a server's, so it refuses what it just wrote.  A
+           server frame is unmasked and only a client's can be read. */
         heard_clear();
         http_ws_reset(&in);
         (void)http_ws_feed(&in, frame, (long)(head + 5), sink, &heard);

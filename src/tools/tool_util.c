@@ -36,7 +36,7 @@ VOID tool_printf(const char *fmt, ...)
  * Not ErrorOutput(): that is dos.library LVO -1134, which only exists from V50
  * on. On Kickstart 3.1 (V40, the floor, docs/RESEARCH.md 9) the LVO table
  * stops well short of it, so calling it jumps into whatever follows the library
- * and hangs the machine. Verified under FS-UAE, 2026-07-25.
+ * and hangs the machine. Checked under FS-UAE, 2026-07-25.
  *
  * pr_CES is the field ErrorOutput() would have returned and has been in struct
  * Process since 2.0. It is zero unless the Shell was given a "*>" redirection,
@@ -100,7 +100,7 @@ BOOL tool_delay_ticks(ULONG ticks)
         if (tool_break())
             return TRUE;
 
-        /* Delay(0) is documented as undefined; skip it. */
+        /* Delay(0) is documented as undefined, so it is skipped. */
         if (slice > 0)
             Delay(slice);
         ticks -= slice;
@@ -159,10 +159,10 @@ const char *tool_net_error(LONG err)
     {
         case AMI_NET_OK:            return "no error";
         case AMI_NET_ERR_NOMEM:     return "out of memory";
-        case AMI_NET_ERR_NODEV:     return "the SANA-II device would not open";
-        case AMI_NET_ERR_DEVBAD:    return "the SANA-II device opened but would not answer";
+        case AMI_NET_ERR_NODEV:     return "the SANA-II device did not open";
+        case AMI_NET_ERR_DEVBAD:    return "the SANA-II device opened but did not answer";
         case AMI_NET_ERR_CONFIG:    return "the configuration is not usable";
-        case AMI_NET_ERR_KERNEL:    return "the network kernel would not start";
+        case AMI_NET_ERR_KERNEL:    return "the network kernel did not start";
         case AMI_NET_ERR_STATE:     return "the network stack is not running";
         case AMI_NET_ERR_NONAME:    return "there is no such name";
         case AMI_NET_ERR_NOSERVER:  return "no name server is configured";
@@ -213,7 +213,7 @@ BOOL tool_from_workbench(int argc)
      */
     if (argc == 0)
     {
-        tool_error("this is a Shell command; run it from a Shell");
+        tool_error("this is a Shell command. Run it from a Shell");
         return TRUE;
     }
 

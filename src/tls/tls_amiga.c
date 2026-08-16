@@ -7,10 +7,10 @@
 
 /*
  * Use a private library base for the timer inlines.  src/common/compat.c
- * defines the conventional `TimerBase` for its own ami_millis(); with
- * -fno-common (the GCC 15 default) a second definition here would be a
- * duplicate symbol as soon as anything links both.  The NDK inlines are
- * parameterised for this.
+ * defines the conventional `TimerBase` for its own ami_millis().  With
+ * -fno-common (the GCC 15 default) a second definition here is a duplicate
+ * symbol as soon as anything links both.  The NDK inlines are parameterised
+ * for this.
  */
 #define TIMER_BASE_NAME ami_tls_timer_base
 
@@ -35,20 +35,21 @@ static struct MsgPort              ami_tls_port;
 static ULONG                       ami_tls_hz;
 
 /*
- * The open is lazy and the request is a file-scope static, so it has to be
- * serialised: ami_tls_eclock(), ami_tls_eclock_hz() and ami_tls_eclock_micros()
- * all reach it with no lock of their own from whatever task is doing crypto,
- * and two racing the ami_tls_timer_base test both OpenDevice() the same
- * timerequest. Same reasoning and same shape as src/common/compat.c.
+ * The open is lazy and the request is a file-scope static, so it must be
+ * serialised.  ami_tls_eclock(), ami_tls_eclock_hz() and
+ * ami_tls_eclock_micros() reach it with no lock of their own, from whatever
+ * task is doing crypto.  Two tasks racing the ami_tls_timer_base test both
+ * OpenDevice() the same timerequest.  Same reasoning and same shape as
+ * src/common/compat.c.
  */
 static struct SignalSemaphore      ami_tls_timer_lock;
 static volatile BOOL               ami_tls_timer_lock_ready;
 
 /*
- * "Safe to use", and not ami_tls_timer_base, because that one cannot be both:
- * ReadEClock() is an inline that resolves the library base through it, so it
- * has to be set before the rate is read, and a caller on the fast path would
- * otherwise see a live base with ami_tls_hz still at zero.
+ * A separate flag, and not ami_tls_timer_base itself.  ReadEClock() is an
+ * inline that resolves the library base through that variable, so the base
+ * must be set before the rate is read.  Without the flag, a caller on the
+ * fast path sees a live base with ami_tls_hz still at zero.
  */
 static volatile BOOL               ami_tls_timer_ready;
 
@@ -87,7 +88,8 @@ BOOL ami_tls_timer_open(VOID)
        and the task that opened first is gone long before tls.library is. */
     ami_tls_port.mp_SigTask      = NULL;
 
-    /* NewList() is amiga.lib; open-code it so this stays link-library free. */
+    /* NewList() is amiga.lib, so it is open-coded here to stay link-library
+       free. */
     ami_tls_port.mp_MsgList.lh_Head     =
         (struct Node *)&ami_tls_port.mp_MsgList.lh_Tail;
     ami_tls_port.mp_MsgList.lh_Tail     = NULL;
@@ -106,13 +108,13 @@ BOOL ami_tls_timer_open(VOID)
     }
 
     /* ReadEClock() needs the base, so it is published before the rate is
-       read; ami_tls_timer_ready is what a second caller tests. */
+       read.  ami_tls_timer_ready is what a second caller tests. */
     ami_tls_timer_base = ami_tls_req.tr_node.io_Device;
 
     ami_tls_hz = ReadEClock(&ev);
     if (ami_tls_hz == 0)
     {
-        ami_tls_hz = 709379UL;         /* PAL, if the device lies */
+        ami_tls_hz = 709379UL;         /* PAL, if the device reports zero */
     }
 
     ami_tls_timer_ready = TRUE;
@@ -143,13 +145,14 @@ VOID ami_tls_timer_close(VOID)
 
     if (ami_tls_timer_ready)
     {
-        /* Unpublish first, so nobody enters on the fast path between the
-           CloseDevice() and the base going away. */
+        /* Unpublish first, so no caller enters on the fast path between the
+           CloseDevice() and the base being cleared. */
         ami_tls_timer_ready = FALSE;
         CloseDevice((struct IORequest *)&ami_tls_req);
         ami_tls_timer_base  = NULL;
-        /* Or a reopen keeps a rate read through a base it no longer holds,
-           and ami_tls_eclock_micros()'s hz == 0 guard never re-arms. */
+        /* Otherwise a reopen keeps a rate read through a base it no longer
+           holds, and the hz == 0 guard in ami_tls_eclock_micros() never
+           re-arms. */
         ami_tls_hz          = 0UL;
     }
 
@@ -191,10 +194,10 @@ ULONG ami_tls_eclock_micros(ULONG ticks)
     /*
      * 64-bit intermediate: at ~709 kHz a one-second measurement is ~709,000
      * ticks, and ticks * 1,000,000 overflows 32 bits after ~4,295 ticks (6 ms).
-     * This is a report path, not a hot path, so the __udivdi3 call (out of
-     * src/common/ami_udivdi3.c, this toolchain's libgcc.a is empty) is
-     * acceptable here.  It is not acceptable inside the timed region, so every
-     * measurement below accumulates raw ticks and converts once.
+     * This is a report path, so the __udivdi3 call is acceptable here.  It
+     * comes out of src/common/ami_udivdi3.c, because this toolchain's
+     * libgcc.a is empty.  It is not acceptable inside a timed region, so
+     * every measurement there accumulates raw ticks and converts once.
      */
     return (ULONG)(((unsigned long long)ticks * 1000000ULL) /
                    (unsigned long long)ami_tls_hz);
@@ -207,9 +210,9 @@ ULONG ami_tls_seed_rng(VOID)
     ami_random_init();
 
     /*
-     * The E-Clock and beam position are already sampled by the pool's own
-     * collection; feeding them again credits nothing, and is done only so a
-     * caller who opened the timer before the pool did contributes its phase.
+     * The pool's own collection already samples the E-Clock and the beam
+     * position.  This second sample credits nothing.  It only lets a caller
+     * that opened the timer before the pool did contribute its phase.
      */
     eclock = ami_tls_eclock();
     ami_random_add_entropy(&eclock, sizeof(eclock), 0);

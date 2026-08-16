@@ -4,14 +4,14 @@
  *     arp ADDRESS,DELETE/S,SET/K,UNIT/K/N,STATS/S,QUIET/S
  *
  * Every packet leaving this machine for the local network needs the ethernet
- * address of its destination, and ARP is how that is found and remembered. The
- * cache separates "the network does not work" from "that machine is not
- * answering", and needs nothing of the other end but ARP, which a machine that
- * drops pings still answers.
+ * address of its destination, and ARP is how that address is found and
+ * remembered. The cache separates "the network does not work" from "that
+ * machine is not answering". It needs nothing of the other end but ARP, which
+ * a machine that drops pings still answers.
  *
- *   an entry with a hardware address   it answered; the wire is fine, and
+ *   an entry with a hardware address   it answered. The wire is fine, and
  *                                      whatever is wrong is above this layer
- *   an entry with no reply             we asked and nothing came back,
+ *   an entry with no reply             we asked and nothing came back:
  *                                      wrong address, wrong network, or it
  *                                      is switched off
  *   no entry at all                    nothing here has tried to reach it
@@ -25,18 +25,15 @@
  *                             answer ARP or that keeps changing
  *
  * IPv6 is in the same command, in a section of its own. There is no ARP in
- * IPv6, RFC 4861 neighbour discovery does the same job over ICMPv6, and NetX
- * Duo keeps its answers in a separate table, but it is the same question,
- * asked of the same wire, and every command in this suite that grew IPv6 grew
- * it inside itself rather than beside itself: one ping, one nslookup, one
- * netstat. A second binary would put "what is at that address" in two places
- * and make the user pick before knowing which family the answer is in.
+ * IPv6. RFC 4861 neighbour discovery does the same job over ICMPv6, and NetX
+ * Duo keeps its answers in a separate table. Both families stay in one command
+ * here, as they do in ping, nslookup and netstat, so there is one place to ask
+ * what is at an address.
  *
  * What the section adds over the ARP one is the state. An ARP entry has
- * answered or it has not; a neighbour entry says what the stack currently
- * believes, and the difference between "asked, nothing back" (INCOMPLETE),
- * "answered once, not checked since" (STALE) and "being re-checked now"
- * (PROBE) is most of the diagnostic value there is. Each state that appears is
+ * answered or it has not. A neighbour entry says what the stack currently
+ * believes: INCOMPLETE is asked with nothing back, STALE is answered once and
+ * not checked since, PROBE is being re-checked now. Each state that appears is
  * spelled out under the list.
  *
  * Nothing ages out on the IPv4 side. NX_ARP_EXPIRATION_RATE is 0 in this
@@ -86,7 +83,7 @@ static VOID zero_control(NetStatusControl *ctl)
 }
 
 /*
- * "02:11:22:33:44:55". The separator may be ':' or '-' or absent; all three
+ * "02:11:22:33:44:55". The separator can be ':' or '-' or absent. All three
  * turn up on labels and in documentation.
  */
 static BOOL parse_mac(const char *text, UBYTE *out)
@@ -130,8 +127,8 @@ static BOOL parse_mac(const char *text, UBYTE *out)
 
 /*
  * The interface an entry was learnt on, by the name the rest of the tools use.
- * "interface 0" is a number out of the stack's internals; "a2065.0" is the line
- * the user wrote in the config file, which is what identifies the card on a
+ * "interface 0" is a number out of the stack's internals. "a2065.0" is the
+ * line from the configuration file, which is what identifies the card on a
  * machine with two of them.
  */
 static const char *interface_name(UWORD nx_index, BOOL have_snapshot)
@@ -239,8 +236,8 @@ static BOOL same_address6(const ULONG a[4], const ULONG b[4])
 
 /*
  * Resolved for display purposes: RFC 4861 7.3.3 says the cached link-layer
- * address may be used in every state but INCOMPLETE, so those are the states
- * that have a hardware address worth printing.
+ * address can be used in every state but INCOMPLETE, so those are the states
+ * with a hardware address to print.
  */
 static BOOL neighbour_resolved(UWORD state)
 {
@@ -291,8 +288,7 @@ static VOID print_neighbour(const ToolNeighbour *e, BOOL have_snapshot)
 
 /*
  * What each state that appeared means, once, under the list. The names are
- * RFC 4861's and say nothing to a reader who has not read it, and they are the
- * reason this section exists at all, so they are not left bare.
+ * RFC 4861's and say nothing to a reader who has not read it.
  */
 static VOID explain_states(const ToolNeighbours *nd, const ULONG want[4],
                            BOOL one)
@@ -356,17 +352,17 @@ static BOOL same_prefix6(const ULONG a[4], const ULONG b[4], ULONG bits)
 }
 
 /*
- * TRUE when nothing on this machine could ever put `addr` in the neighbour
+ * TRUE when nothing on this machine can ever put `addr` in the neighbour
  * cache: it is not link-local and no on-link prefix covers it, so packets for
- * it go to a router and it is the router's own entry that is worth looking at.
- * The IPv4 half says the same thing about an address off this machine's subnet.
+ * it go to a router and the router's own entry is the one to check. The IPv4
+ * half says the same thing about an address off this machine's subnet.
  */
 static BOOL off_link6(const ULONG addr[4], BOOL have_routes)
 {
     UWORD i;
 
     if (!have_routes)
-        return FALSE;               /* cannot tell; do not assert otherwise */
+        return FALSE;               /* cannot tell, so do not assert otherwise */
 
     /* _nxd_ipv6_search_onlink() answers 1 for every fe80:: address before it
        looks at any list, so there is no prefix to find and none is needed. */
@@ -417,8 +413,8 @@ static VOID explain_absence6(const ULONG addr[4], BOOL have_routes)
         router = default_router6(have_routes);
         if (router != NULL)
         {
-            tool_printf("  The router is %s, and THAT is the entry worth "
-                        "checking:\n", (LONG)router);
+            tool_printf("  The router is %s, and its entry is the one to "
+                        "check:\n", (LONG)router);
             tool_printf("      arp %s\n", (LONG)router);
         }
         return;
@@ -432,7 +428,7 @@ static BOOL on_our_network(ULONG addr, BOOL have_snapshot)
     UWORD i;
 
     if (!have_snapshot)
-        return TRUE;                /* cannot tell; do not assert otherwise */
+        return TRUE;                /* cannot tell, so do not assert otherwise */
 
     for (i = 0; i < arp_snap.iface_count; i++)
     {
@@ -449,7 +445,7 @@ static BOOL on_our_network(ULONG addr, BOOL have_snapshot)
 }
 
 /*
- * Why an address is not in the cache; there are two distinct reasons.
+ * Why an address is not in the cache. There are two distinct reasons.
  *
  * ARP is only spoken to machines on this machine's own network. An address
  * anywhere else is reached by handing the packet to the router, so it never
@@ -467,8 +463,8 @@ static VOID explain_absence(ULONG addr, BOOL have_snapshot)
         if (arp_snap.have_gateway && arp_snap.gateway != 0)
         {
             ami_config_format_ip(arp_snap.gateway, gw, sizeof(gw));
-            tool_printf("  The router is %s, and THAT is the entry worth "
-                        "checking:\n", (LONG)gw);
+            tool_printf("  The router is %s, and its entry is the one to "
+                        "check:\n", (LONG)gw);
             tool_printf("      arp %s\n", (LONG)gw);
         }
         return;
@@ -479,7 +475,7 @@ static VOID explain_absence(ULONG addr, BOOL have_snapshot)
 /*
  * The protocol counters, which say how the cache came to look the way it
  * does. Requests sent with few responses received is a quiet network or a
- * wrong netmask; invalid messages are somebody else's malformed frames.
+ * wrong netmask. Invalid messages are somebody else's malformed frames.
  */
 static VOID print_stats(const ToolStats *s)
 {
@@ -609,19 +605,19 @@ int main(int argc, char **argv)
     }
     else if (args[ARG_DELETE] != 0 || args[ARG_SET] != 0)
     {
-        tool_error("which address? DELETE and SET each need one");
+        tool_error("DELETE and SET each need an address");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
 
     /*
      * The interface table, for the name column and for deciding whether ARP
-     * could ever have an answer about an address. Wanted on every path; a
+     * can ever have an answer about an address. Wanted on every path. A
      * failure here only costs detail.
      */
     tool_nx_quiet(TRUE);
     have_snapshot = (BOOL)(tool_snapshot(&arp_snap, FALSE) == 0);
-    /* The IPv6 on-link prefixes, which are what says whether an address could
+    /* The IPv6 on-link prefixes, which are what says whether an address can
        ever be a neighbour. Empty on a machine without IPv6. */
     have_routes6  = (BOOL)(tool_routes6(&arp_routes6) == 0);
     tool_nx_quiet(FALSE);
@@ -642,8 +638,8 @@ int main(int argc, char **argv)
 
         /* Changing the cache needs the library, but still must not start it:
            there is no cache to change until something is running. */
-        /* FALSE: QUIET drops the confirmation, never the reason there is
-           nothing to confirm. */
+        /* FALSE: QUIET drops the message, never the reason there is
+           nothing to report. */
         base = tool_netstatus_open(FALSE);
         if (base == NULL)
         {
@@ -810,8 +806,8 @@ int main(int argc, char **argv)
     else if ((arp_stats.arp_truncated || arp_nd.truncated) && !quiet)
     {
         /*
-         * The snapshot holds TOOL_MAX_ARP entries and the stack may have more.
-         * nsh_Available says so; a list that silently stops reads as complete.
+         * The snapshot holds TOOL_MAX_ARP entries and the stack can have more.
+         * nsh_Available says so. A list that silently stops reads as complete.
          */
         tool_printf("\n");
     }

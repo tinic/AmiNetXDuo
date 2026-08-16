@@ -5,7 +5,7 @@
  *     NetTrace LOOPBACK/S,WIRE/S,HOST/K,PORT/N/K,PATH/K,BYTES/N/K,OUT/K,
  *              SNAP/N/K,BLEN/N/K,NOCAPTURE/S,IFACE/K
  *
- *   LOOPBACK and WIRE are alternatives; HOST implies WIRE.
+ *   LOOPBACK and WIRE are alternatives, and HOST implies WIRE.
  *
  *   Capture and workload share one process so the throughput number and the
  *   trace come out of the same run.  Draining the capture between socket
@@ -179,8 +179,8 @@ static LONG nt_bpf_ioctl(struct Library *base, LONG channel, ULONG cmd,
 /*
  * Every line is flushed as it is written: VPrintf() buffers through
  * dos.library, so the last lines are lost if the machine has to be killed.
- * It is also the only progress indicator, a megabyte at 14 MHz takes
- * seconds, and a stalled run looks like a working one without it.
+ * It is also the only progress indicator. A megabyte at 14 MHz takes
+ * seconds, and without it a stalled run looks like a working one.
  */
 static VOID nt_say(const char *fmt, ...)
 {
@@ -346,7 +346,7 @@ typedef struct NtCap
  * number of records taken.
  *
  * bpf_read() is non-blocking (include/aminetxduo/bpf.h), so this is called
- * from inside the workload's own loop rather than from a reader task; there is
+ * from inside the workload's own loop rather than from a reader task. There is
  * nothing to synchronise.
  */
 static ULONG nt_drain(NtCap *cap)
@@ -427,8 +427,8 @@ static BOOL nt_cap_start(NtCap *cap, struct Library *base, const char *iface,
     if (cap->channel < 0)
     {
         cap->channel = 0;
-        tool_error("bpf_open failed: is this bsdsocket.library ours, and "
-                   "was it built with BPF on?");
+        tool_error("bpf_open failed: either this bsdsocket.library is not "
+                   "ours, or it was built without BPF");
         return FALSE;
     }
     cap->open = TRUE;
@@ -515,8 +515,8 @@ static VOID nt_cap_stop(NtCap *cap)
     st.bs_drop = 0;
     (VOID)nt_bpf_ioctl(cap->base, cap->channel, BIOCGSTATS_, &st);
 
-    /* Nothing should still be buffered after the drain above; if it is, the
-       trace stops short of the last few frames. FIONREAD rather than
+    /* Nothing must still be buffered after the drain above. Anything left
+       means the trace stops short of the last few frames. FIONREAD rather than
        bpf_data_waiting(), which the autodoc defines as a 0/1 flag. */
     (VOID)nt_bpf_ioctl(cap->base, cap->channel, FIONREAD_, &left);
 
@@ -528,10 +528,11 @@ static VOID nt_cap_stop(NtCap *cap)
                 (LONG)st.bs_recv, (LONG)st.bs_drop, (LONG)cap->short_reads);
 
     if (cap->out.failed)
-        tool_error("the trace file was truncated, disk full?");
+        tool_error("the trace file was truncated, perhaps because the disk "
+                   "is full");
 
     if (st.bs_drop != 0)
-        tool_error("%lu frames were seen and NOT written: the trace has holes",
+        tool_error("%lu frames were seen and not written: the trace has holes",
                    (LONG)st.bs_drop);
 
     if (left != 0UL)
@@ -613,7 +614,7 @@ static VOID nt_loopback(struct Library *base, NtCap *cap, ULONG want,
         tool_sock_listen(base, lst, 1) < 0 ||
         tool_sock_getsockname(base, lst, &sa) < 0)
     {
-        tool_error("cannot set up the loopback listener: %s",
+        tool_error("cannot create the loopback listener: %s",
                    (LONG)tool_sock_errstr(tool_sock_errno(base)));
         goto done;
     }
@@ -732,7 +733,7 @@ done:
  *
  * HTTP/1.0 with no keep-alive, so the body ends when the peer closes: the
  * trace covers the shutdown as well, and there is no chunk parser here.  The
- * bytes are counted, not kept; tests/curl checks payloads byte for byte.
+ * bytes are counted, not kept. tests/curl checks payloads byte for byte.
  */
 static VOID nt_wire(struct Library *base, NtCap *cap, const ToolAddr *address,
                     UWORD port, const char *path, NtResult *res)

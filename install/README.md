@@ -1,6 +1,6 @@
 # install/
 
-The Installer script, the configuration files the archive ships, and the
+The Installer script, the configuration files that the archive ships, and the
 tooling that proves both work. `dist/make-dist.sh` assembles all of it into the
 distribution archive.
 
@@ -29,44 +29,44 @@ test/smbprobe.c             SMB mount probe, driven by test/run-smbmount.sh
 test/peer-drill.sh          what the second machine does to the Amiga
 ```
 
-The user-facing text in the archive is `dist/ReadMe` and `docs/user/`; this file
+The user-facing text in the archive is `dist/ReadMe` and `docs/user/`. This file
 is not shipped.
 
 ## The script
 
 Written for Commodore's Installer, whose language is documented in
 `installer.doc` (Commodore, 9 February 1993) and implemented in the Installer
-2.17 sources. Where the two disagree the sources win: `compile.c`'s symbol
+2.17 sources. Where the two disagree, the sources win. `compile.c`'s symbol
 tables are the authority for which keywords exist and which parameters are legal
 in which statement.
 
 Three properties of the tool shape the whole script.
 
 **At NOVICE level every `ask...` returns its `(default)` without drawing
-anything, and `(message ...)` prints nothing.** Novice mode therefore only works
-if every default is independently correct, which is why the network card is
-auto-detected from known drivers in `DEVS:` and `DEVS:Networks` and why the
-address mode defaults to DHCP. It is also why no validation loop may depend on a
-`(message)` to make progress — at level 0 that loop spins forever behind a blank
-screen. Each one is satisfied unconditionally when `@user-level` is 0.
+anything, and `(message ...)` prints nothing.** Novice mode therefore works only
+if every default is independently correct. That is why the network card is
+auto-detected from known drivers in `DEVS:` and `DEVS:Networks`, and why the
+address mode defaults to DHCP. It is also why no validation loop can depend on a
+`(message)` to make progress. At level 0 that loop spins forever behind a blank
+screen. Each loop is satisfied unconditionally when `@user-level` is 0.
 
 **`(startup)` replaces the `;BEGIN AmiNetXDuo` .. `;END AmiNetXDuo` block in
 `S:User-Startup` and leaves every other application's lines alone.** That is
-what makes re-running the installer safe.
+what makes a second run of the installer safe.
 
 **Two things in the language look like C and are not.** `install/tools/checkscript.py`
 tests for both:
 
 * `("fmt" a b)` takes only the *first* element as the format string. Adjacent
-  string literals are not concatenated, so a format spelled as several literals
-  formats the second literal's address through the first one's `%s` and silently
-  drops the rest. Build long formats with `(cat ...)` and pass the variable.
-* A `(choices ...)` list that does not fit on a page is silently truncated:
-  `layout_box_gads()` creates fewer gadgets than there are choices,
-  `default_radio()` then marks one that does not exist, and the installation
-  dies on "askchoice: No choices selected" with no hint that the labels were too
-  long. Keep radio labels under 22 characters and put the detail in the help
-  text.
+  string literals are not concatenated. A format spelled as several literals
+  therefore formats the second literal's address through the first one's `%s`
+  and silently drops the rest. Build long formats with `(cat ...)` and pass the
+  variable.
+* A `(choices ...)` list that does not fit on a page is silently truncated.
+  `layout_box_gads()` creates fewer gadgets than there are choices, and
+  `default_radio()` then marks one that does not exist. The installation dies on
+  "askchoice: No choices selected" with no hint that the labels were too long.
+  Keep radio labels under 22 characters and put the detail in the help text.
 
 ## Testing
 
@@ -77,18 +77,21 @@ install/test/run-workbench.sh -l AVERAGE -H -a <archive>   # the terminal arm
 
 This is what `tools/ci.sh e2e` runs, and what `.github/workflows/emulator.yml`
 calls in the release job. It stages a bare machine with a real Workbench 3.1,
-runs the real Installer on the unpacked release archive, power-cycles, and
-requires the stock Startup-Sequence to reach `S:User-Startup` and bring the
-network up on its own.
+runs the real Installer on the unpacked release archive, and power-cycles. The
+stock Startup-Sequence must then reach `S:User-Startup` and bring the network up
+on its own.
 
 `-l` is `NOVICE`, `AVERAGE` or `EXPERT`. `-H` makes the run three installs and
-adds a second machine: it checks that a pre-existing `S:User-Startup` survives,
-that the managed block is replaced rather than appended to, that the third
-install takes the added lines away again, and — while the machine is up — that
-the peer can fetch `/shell`, PUT and GET a file byte-for-byte, and have the
-Amiga `lha x` our own release archive. `AMINETXDUO_PEER` names that machine and
-has no default; the host running the emulator cannot be it, and without one the
-run exits 3 rather than passing.
+adds a second machine. It then checks four more things:
+
+- that a pre-existing `S:User-Startup` survives
+- that the managed block is replaced rather than appended to
+- that the third install takes the added lines away again
+- that the peer, while the machine is up, can fetch `/shell`, PUT and GET a file
+  byte-for-byte, and have the Amiga `lha x` the release archive
+
+`AMINETXDUO_PEER` names that machine and has no default. The host that runs the
+emulator cannot be it. Without a peer the run exits 3 rather than passing.
 
 Ingredients, none of which are ours to ship:
 
@@ -99,12 +102,12 @@ Ingredients, none of which are ours to ship:
 | Commodore Installer | `build/Installer`, or `AMINETXDUO_INSTALLER` |
 | `a2065.device` | `build/a2065.device`, or `AMINETXDUO_A2065` |
 | amitools' `xdftool` | `AMINETXDUO_XDFTOOL`, or on `$PATH` (`pip install amitools`) |
-| `lha` | to unpack the archive on the host; Lhasa will do |
+| `lha` | to unpack the archive on the host. Lhasa is sufficient |
 
 `tests/HARNESSES` records the state of every harness here, including the ones
 nothing invokes.
 
-The Installer has no batch mode and its buttons have no keyboard shortcuts, so
-`installdrive` finds the Proceed gadget by its gadget ID and posts the window the
-GADGETUP that Intuition would have posted. See the comment at the top of
-`test/installdrive.c`.
+The Installer has no batch mode and its buttons have no keyboard shortcuts. For
+that reason `installdrive` finds the Proceed gadget by its gadget ID and posts
+to the window the GADGETUP that Intuition normally posts. See the comment at the
+top of `test/installdrive.c`.

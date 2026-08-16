@@ -8,7 +8,7 @@
  * Every option carries both spellings, short flag and keyword, as netstat does
  * for its switches.
  *
- *   COUNT     echo requests to send; 0 means "until Ctrl-C". Default 4.
+ *   COUNT     echo requests to send. 0 means until Ctrl-C. Default 4.
  *   INTERVAL  seconds to wait between requests. Default 1.
  *   LOAD      send this many requests back to back before the interval
  *             starts being honoured.
@@ -31,12 +31,12 @@
  * NULL, and this command printed "the network is up, but this command cannot
  * read it" and exited 5 (docs/RESEARCH.md 22). Handing out the running NX_IP
  * means a pointer into another task's stack on a machine with no memory
- * protection. A "do a ping for me" LVO on bsdsocket.library was designed and
- * rejected, because nx_icmp_ping() matches an inbound echo reply on the
- * sequence number alone: nx_icmpv4_process_echo_reply.c:124 compares
- * tx_thread_suspend_info against nx_icmpv4_echo_sequence_num and looks at
- * nothing else, and nx_icmpv4.h:191 says the identifier "is not used as a
- * host". FS-UAE's SLIRP zeroes the sequence on a proxied reply and preserves
+ * protection. An LVO on bsdsocket.library that runs the ping on the caller's
+ * behalf was designed and rejected, because nx_icmp_ping() matches an inbound
+ * echo reply on the sequence number alone. nx_icmpv4_process_echo_reply.c:124
+ * compares tx_thread_suspend_info against nx_icmpv4_echo_sequence_num and
+ * looks at nothing else, and nx_icmpv4.h:191 says the identifier "is not used
+ * as a host". FS-UAE's SLIRP zeroes the sequence on a proxied reply and preserves
  * the identifier (docs/RESEARCH.md 20.2), so every probe after the first of an
  * NX_IP's lifetime would time out while its reply sat in the stack.
  *
@@ -47,7 +47,7 @@
  * adoption.
  *
  * Ctrl-C stops the loop and still prints the summary. The break is noticed
- * every 200 ms, including while waiting for a reply; the ThreadX version
+ * every 200 ms, including while waiting for a reply. The ThreadX version
  * suspended inside a kernel where an Exec signal means nothing.
  *
  * SPDX-License-Identifier: MIT
@@ -105,7 +105,7 @@ enum
 static UBYTE ping_probe[PING_MAX_SIZE + 8];
 static UBYTE ping_reply[2048];
 
-/* Delay() counts DOS ticks; dos/dos.h has TICKS_PER_SECOND (50). */
+/* Delay() counts DOS ticks. dos/dos.h has TICKS_PER_SECOND (50). */
 
 static LONG arg_or(const LONG *args, int index, LONG fallback)
 {
@@ -174,11 +174,11 @@ static ULONG ping_build(BOOL v6, UWORD ident, UWORD seq, ULONG payload)
  *
  * A raw ICMP socket sees every inbound ICMP datagram, src/bsdsocket/raw.c
  * filters on the IP protocol number, not on the type, so the checks have to
- * be strict. An IPv4 read hands back the IP header too; an IPv6 read does not.
+ * be strict. An IPv4 read hands back the IP header too. An IPv6 read does not.
  *
  * `seq == 0` is accepted alongside the expected number because FS-UAE's SLIRP
  * zeroes the sequence on a proxied reply while preserving the identifier
- * (docs/RESEARCH.md 20.2); rejecting those would report 100% loss against
+ * (docs/RESEARCH.md 20.2). Rejecting those would report 100% loss against
  * every address outside the emulated LAN. Safe here because this command has
  * exactly one probe outstanding at a time. traceroute has three per hop and
  * cannot do the same.
@@ -228,7 +228,7 @@ static BOOL ping_is_reply(BOOL v6, const UBYTE *buf, ULONG len, UWORD ident,
     }
 
     /* A reply from another address is not an answer from the host that was
-       asked about; SLIRP's proxied replies do carry the destination's. */
+       asked about. SLIRP's proxied replies do carry the destination's. */
     if (!tool_addr_same(from, target))
         return FALSE;
 
@@ -248,10 +248,10 @@ static BOOL ping_is_reply(BOOL v6, const UBYTE *buf, ULONG len, UWORD ident,
 
 /*
  * The body, so that ami_netdb_free() has exactly one place to run and this
- * command does not have to carry atexit().  atexit() is not free here: libnix
+ * command does not have to carry atexit(). atexit() is not free here: libnix
  * satisfies it out of an object that also references malloc and __errno, which
  * pulls in the C++ AVL allocator and the stdio FILE machinery, about 7.7 KB
- * that nothing in the command calls.  A wrapper gives the same guarantee for
+ * that nothing in the command calls. A wrapper gives the same guarantee for
  * nothing.
  */
 static int ping_main(int argc, char **argv);
@@ -371,18 +371,19 @@ static int ping_main(int argc, char **argv)
          *
          * gethostbyaddr() would cost BSD_RESOLVE_TIMEOUT: thirty seconds
          * (src/bsdsocket/resolver.c:18) per name server, against a server that
-         * may never answer a PTR query, FS-UAE's SLIRP does not, all of it
-         * before the first packet leaves, for a cosmetic change to one line of
-         * output. The host table is instant and needs no name server. NUMERIC
-         * skips even that.
+         * need not answer a PTR query at all, FS-UAE's SLIRP does not, all of
+         * it before the first packet leaves, for a cosmetic change to one line
+         * of output. The host table is instant and needs no name server.
+         * NUMERIC skips even that.
          */
         const AmiNetdbEntry *local;
 
         /*
          * AmigaOS does not reclaim AllocVec() memory when a process exits, and
-         * ami_alloc() is AllocVec(), so the twelve blocks ami_netdb_load() builds
-         * out of DEVS:Internet outlive this command, 12,616 bytes per run on a
-         * stock netdb, gone until reboot.  main() frees it on the way out.
+         * ami_alloc() is AllocVec(), so the twelve blocks ami_netdb_load()
+         * builds out of DEVS:Internet outlive this command, 12,616 bytes per
+         * run on a stock netdb, gone until reboot. main() frees it on the way
+         * out.
          */
         (VOID)ami_netdb_load();
 
@@ -419,14 +420,12 @@ static int ping_main(int argc, char **argv)
      * the deadline below does its job, and a lost reply costs one "Request
      * timed out" line rather than the command.
      *
-     * An earlier version of this comment blamed the stack, reading a serial
-     * trace that stopped at `recvfrom` as proof that WaitSelect() and
-     * bsd_raw_receive() disagreed about the queue. They never did. The command
-     * was jumping into the middle of another function on the way out of
-     * tool_delay_ticks(), a mis-resolved 32-bit PC-relative branch,
-     * docs/RESEARCH.md 25, and the trace stopped because the machine
-     * stopped, not because a read blocked. Adding FIONBIO changed nothing. The
-     * raw receive path is not to be "fixed" on the strength of that old note.
+     * An earlier note here blamed WaitSelect() and bsd_raw_receive() for
+     * disagreeing about the queue, on the strength of a serial trace that
+     * stopped at `recvfrom`. The real fault was a mis-resolved 32-bit
+     * PC-relative branch out of tool_delay_ticks(), docs/RESEARCH.md 25, and
+     * the trace stopped because the machine stopped. Adding FIONBIO changed
+     * nothing. The raw receive path is not to be changed on that old note.
      */
     {
         LONG nonblock = 1;
@@ -448,7 +447,7 @@ static int ping_main(int argc, char **argv)
      * The identifier tells this command's replies from another raw reader's:
      * src/bsdsocket/raw.c tees every inbound ICMP datagram to every open raw
      * socket, so two pings at once would credit each other's answers. The task
-     * pointer is unique on the machine; its low two bits are always zero, so
+     * pointer is unique on the machine. Its low two bits are always zero, so
      * they are shifted off.
      */
     ident = (UWORD)((((ULONG)FindTask(NULL)) >> 2) & 0xffffUL);
@@ -506,7 +505,7 @@ static int ping_main(int argc, char **argv)
         {
             LONG err = tool_sock_errno(sb);
 
-            tool_error("could not send the request: %s",
+            tool_error("cannot send the request: %s",
                        (LONG)tool_sock_errstr(err));
 
             rc = RETURN_ERROR;

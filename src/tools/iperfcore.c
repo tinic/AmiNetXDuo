@@ -7,8 +7,8 @@
 
 #include "iperfcore.h"
 
-/* The states a run passes through.  One machine covers all four directions;
-   which states are reachable depends on plan.dir. */
+/* The states a run passes through.  One machine covers all four directions,
+   and which states are reachable depends on plan.dir. */
 enum
 {
     ST_IDLE = 0,
@@ -36,8 +36,8 @@ enum
 
 /*
  * How long a sender with nothing to do sleeps.  Short, because on a datagram
- * socket there is no event to wake it: it is a sleep and not a wait, and one
- * that clears in a millisecond should not be waited out for twenty.
+ * socket there is no event to wake it: it is a sleep and not a wait, and a
+ * pause that clears in a millisecond must not be waited out for twenty.
  */
 #define IPERF_PACE_MICROS   2000UL
 
@@ -317,7 +317,7 @@ LONG iperf_begin(IperfRun *run, struct Library *sb, const IperfPlan *plan,
     }
 
     /* The payload, filled once.  A TCP sender rewrites the pattern's phase per
-       send so a receiver reading the stream sees it continuous; a UDP sender
+       send so a receiver reading the stream sees it continuous.  A UDP sender
        overwrites the first 36 bytes per datagram. */
     iperf_pattern_fill(buf, plan->buflen, 0);
 
@@ -365,7 +365,7 @@ static LONG iperf_wait(IperfRun *run, LONG sock, BOOL forwrite, ULONG micros)
 /*
  * The same wait for a sender, on the side that can actually block it.
  *
- * select() answers "writable" for a DATAGRAM socket at once, and goes on
+ * select() answers "writable" for a datagram socket at once, and goes on
  * answering it while the driver queue is full -- a UDP send fails with
  * EWOULDBLOCK long before anything makes the socket unwritable.  Waiting for
  * writability there does not wait, it spins, and the run then goes round the
@@ -670,7 +670,7 @@ static VOID iperf_slice_recv(IperfRun *run)
                 if (e == TOOL_ECONNRESET && run->clock_on)
                 {
                     /* A peer that resets after sending is still a completed
-                       measurement; a reset before any byte is a failure. */
+                       measurement.  A reset before any byte is a failure. */
                     run->res.ms = ami_millis() - run->t_begin;
                     run->state  = ST_DONE;
                     return;
@@ -708,7 +708,7 @@ static VOID iperf_slice_fin(IperfRun *run)
     if (run->fin_tries >= IPERF_FIN_TRIES)
     {
         /* No answer.  Our own send-side figure still stands, and
-           got_report says the far end never confirmed it. */
+           got_report says the far end never reported back. */
         run->state = ST_DONE;
         return;
     }
@@ -786,7 +786,7 @@ static VOID iperf_slice_report(IperfRun *run)
     run->t_lastact = now;
 
     /* Repeated because it is a datagram and the client is listening for
-       exactly one; iperf 2 does the same.  A slice between each so the
+       exactly one.  iperf 2 does the same.  A slice between each so the
        burst does not hold the caller. */
     (VOID)iperf_wait(run, run->sock, FALSE, 20000UL);
 }
@@ -935,7 +935,7 @@ VOID iperf_result_line(const IperfResult *res, struct Library *sb,
     p = line_put(buf, buflen, p, "dir=");
     p = line_put(buf, buflen, p, iperf_dir_name(res->dir));
     p = line_put(buf, buflen, p, " bytes=");
-    /* The low half alone up to 4 GB; above that the high half is printed as a
+    /* The low half alone up to 4 GB.  Above that the high half is printed as a
        multiplier rather than a wrong number. */
     if (res->bytes_hi != 0)
     {

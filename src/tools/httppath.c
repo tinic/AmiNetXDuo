@@ -60,7 +60,7 @@ static int hp_unreserved(int c)
 /*
  * Step past the scheme and authority of an absolute-form target.  RFC 7230
  * says a server must accept it, and a client behind a proxy configuration
- * sends it; both Windows' redirector and gvfs have been seen to.  Returns a
+ * sends it.  Both Windows' redirector and gvfs have been seen to.  Returns a
  * pointer to the path, which is "/" when the authority was the whole target.
  */
 static const char *hp_skip_authority(const char *target)
@@ -89,8 +89,8 @@ static const char *hp_skip_authority(const char *target)
 
 /*
  * The decode.  Everything a client can say arrives here as text and leaves as
- * bytes, and the checks that follow read the bytes, which is the whole point:
- * %2E%2E is ".." by the time anything asks whether it is.
+ * bytes, and the checks that follow read the bytes.  So %2E%2E is ".." by the
+ * time anything asks whether it is.
  */
 static HttpPathResult hp_decode(const char *target, char *out,
                                 unsigned long outlen, unsigned long *outused)
@@ -114,10 +114,9 @@ static HttpPathResult hp_decode(const char *target, char *out,
         }
 
         /*
-         * A NUL truncates every AmigaDOS call downstream and a control
-         * character has no business in a file name that arrived over a
-         * socket, so both are refused here rather than sanitised: a request
-         * that contains one is not a request for a file we have.
+         * A NUL truncates every AmigaDOS call downstream, and a control
+         * character in a name that arrived over a socket names no file the
+         * server serves.  Both are refused here rather than sanitised.
          */
         if (c < 0x20 || c == 0x7f)
             return HTTP_PATH_CONTROL;
@@ -170,10 +169,11 @@ HttpPathResult http_path_resolve(const char *root, const char *target,
 
     /*
      * The join is done here rather than by the caller so that no path this
-     * function returns can contain the doubled slash that means "parent" on
-     * AmigaOS.  A root ending in ':' or '/' already carries its separator;
-     * "DH0:" + "foo" is "DH0:foo" and not "DH0:/foo", which is a different
-     * place, the root directory of the volume rather than the drawer.
+     * function returns can contain the doubled slash that means the parent
+     * directory on AmigaOS.  A root ending in ':' or '/' already carries its
+     * separator.  "DH0:" + "foo" is "DH0:foo" and not "DH0:/foo", which is a
+     * different place, the root directory of the volume rather than the
+     * drawer.
      */
     i = 0;
     while (i < declen)
@@ -193,9 +193,9 @@ HttpPathResult http_path_resolve(const char *root, const char *target,
             i++;
         seglen = i - start;
 
-        /* ".." never walks up here; it is refused.  Popping a segment is what
-           a browser does before it sends, and a request that still contains
-           one after that is not one we have to be clever about. */
+        /* ".." is refused rather than walked.  A browser drops the segment
+           before it sends, so a request that still carries one is not one to
+           be resolved. */
         if (seglen == 2UL && decoded[start] == '.' && decoded[start + 1] == '.')
             return HTTP_PATH_PARENT;
 
@@ -335,8 +335,8 @@ void http_utf8_trim(char *text)
         else if ((c & 0xF8) == 0xF0) need = 4UL;
         else
         {
-            /* A continuation or an invalid lead where a lead should be.  Not
-               a sequence this can complete, so it goes. */
+            /* An invalid lead byte where a lead byte belongs.  Nothing here
+               completes a sequence, so it is cut. */
             text[n - 1UL - back] = '\0';
             return;
         }
@@ -417,7 +417,7 @@ void http_path_up(char *path)
     while (n > 0UL && path[n - 1] != '/' && path[n - 1] != ':')
         n--;
 
-    /* A trailing ':' is the device and stays; a trailing '/' was the
+    /* A trailing ':' is the device and stays.  A trailing '/' was the
        separator this level was joined with and goes. */
     if (n > 0UL && path[n - 1] == '/')
         n--;
@@ -539,8 +539,8 @@ full:
 
 /*
  * Only what an Amiga is likely to be serving, and text/plain rather than
- * application/octet-stream for the ones a browser can show.  A table because
- * the alternative is a ladder of strcmp.
+ * application/octet-stream for the ones a browser can show.  A table rather
+ * than a chain of strcmp calls.
  */
 typedef struct HttpMimeEntry
 {

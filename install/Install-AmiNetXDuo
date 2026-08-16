@@ -69,9 +69,9 @@
 ; --------------------------------------------------------------------------
 
 (set H_CARD
-  (cat "AmiNetXDuo reaches the network card through its SANA-II driver, "
-       "which is a file whose name ends in \".device\".\n\n"
-       "The choices, in full, and the driver each one needs:\n\n"
+  (cat "AmiNetXDuo reaches the network card through a SANA-II driver.  The "
+       "driver is a file whose name ends in \".device\".\n\n"
+       "Each choice, and the driver it needs:\n\n"
        "  A2065        a2065.device\n"
        "  Ariadne      ariadne.device\n"
        "  Ariadne II   ariadne2.device\n"
@@ -80,15 +80,16 @@
        "  X-Surf 100   xsurf100.device\n"
        "  PCMCIA       asked next\n"
        "  UAE          uaenet.device\n\n"
-       "UAE's driver is in the emulator rather than on disk, so it is not "
-       "detected like the others and must be selected explicitly.\n\n"
-       "Select the card this machine has.  If a driver was found in "
-       "DEVS: the matching entry is already selected, and that is almost "
-       "always correct.\n\n"
-       "A card that is not listed goes under the last entry, where the "
-       "driver's file name is typed in -- for example \"myCard.device\".  "
-       "The driver comes with the card; this installer does not supply it."
-       "\n\nThe wrong choice is harmless: nothing is damaged, the network "
+       "The UAE driver is in the emulator, not on disk.  It cannot be "
+       "detected, so select it directly.\n\n"
+       "Select the card that this machine has.  If a driver was found in "
+       "DEVS:, the matching entry is already selected.  That entry is "
+       "almost always correct.\n\n"
+       "For a card that is not listed, select the last entry.  The "
+       "installer then asks for the file name of the driver, for example "
+       "\"myCard.device\".  The driver comes with the card.  This installer "
+       "does not supply it."
+       "\n\nA wrong choice is harmless: nothing is damaged, the network "
        "does not come up, and the installer can be run again."))
 
 (set H_PCMCIA
@@ -97,13 +98,13 @@
        "  NE2000 or CNet    cnet.device\n"
        "  3Com 3C589        etherlink3.device\n"
        "  Prism2 wireless   prism2.device\n\n"
-       "Most NE2000-compatible Ethernet cards -- which is most of the cheap "
-       "ones -- use cnet.device.  3Com's EtherLink III / 3C589 has its own "
-       "driver.  Prism2 is the usual driver for wireless cards.\n\n"
-       "When in doubt, cnet.device is the one to try first."))
+       "Most NE2000-compatible Ethernet cards use cnet.device.  The 3Com "
+       "EtherLink III (3C589) has its own driver.  Prism2 is the usual "
+       "driver for wireless cards.\n\n"
+       "If the card is not known, try cnet.device first."))
 
 (set H_OTHERDEV
-  (cat "Type the file name of the card's SANA-II driver, including the "
+  (cat "Type the file name of the SANA-II driver for the card, with the "
        "\".device\" part -- for example \"ariadne.device\".\n\n"
        "The installer looks for it in DEVS: and in DEVS:Networks.  If it is "
        "somewhere else, type the whole path, for example "
@@ -116,151 +117,147 @@
        "at 0."))
 
 (set H_IFNAME
-  (cat "Each network interface is described by one file in "
-       "DEVS:NetInterfaces, and the file's name is the interface's name.  It "
-       "is the name the network commands take, as in\n\n"
+  (cat "One file in DEVS:NetInterfaces describes each network interface.  "
+       "The name of the file is the name of the interface.  The network "
+       "commands take that name:\n\n"
        "\tOnline eth0\n\tShowNetStatus INTERFACE eth0\n\n"
-       "\"eth0\" is a good name and is what the documentation uses.  The name "
-       "may be at most 15 characters long."))
+       "The documentation uses \"eth0\".  A name can have at most 15 "
+       "characters."))
 
 (set H_MDNS
-  (cat "mDNS lets this Amiga be reached by a .local name, and lets "
-       "ShowNetServices list what else is on the network, with no name "
-       "server anywhere.\n\n"
-       "It is off unless you ask for it, and that is deliberate.  The "
-       "responder joins a multicast group on this interface, so every .local "
-       "query any machine on the network sends becomes work for this Amiga, "
-       "whether or not it was asking about this one.  On a 68000 that is "
-       "enough to be felt by everything else the machine is doing.  On a fast "
-       "accelerator it is not.\n\n"
-       "This is one line, MDNS=, in the file DEVS:NetInterfaces that this "
-       "installer writes, so it is easy to change later."))
+  (cat "mDNS makes this Amiga reachable by a .local name.  It also lets "
+       "ShowNetServices list the other machines on the network.  No name "
+       "server is necessary.\n\n"
+       "mDNS is off by default.  The responder joins a multicast group on "
+       "this interface.  Every .local query on the network then becomes "
+       "work for this Amiga, even when the query is about another machine.  "
+       "On a 68000 that cost is enough to slow down everything else.  On a "
+       "fast accelerator it is not.\n\n"
+       "MDNS= is one line in the file that this installer writes in "
+       "DEVS:NetInterfaces, so it is easy to change later."))
 
 (set H_DHCP
   (cat "Almost every home network has a router that hands out addresses "
-       "automatically, using DHCP.  Where other machines on the network "
-       "simply work when plugged in, it does.  The first option then needs "
-       "no numbers entered at all.\n\n"
+       "automatically, with DHCP.  If the other machines on the network "
+       "work when they are plugged in, this network has DHCP.  The first "
+       "option then needs no numbers at all.\n\n"
        "The second option is for a fixed address supplied by whoever runs "
        "the network, or for a network with no router.\n\n"
-       "This choice is easy to change later: it is one line, CONFIGURE=, in "
-       "the file DEVS:NetInterfaces that this installer writes."))
+       "This choice is easy to change later.  CONFIGURE= is one line in the "
+       "file that this installer writes in DEVS:NetInterfaces."))
 
 (set H_ADDR
   (cat "The Internet address for this Amiga, written as four numbers from 0 "
        "to 255 separated by full stops -- for example 192.168.1.10.\n\n"
-       "It must be unused by anything else on the network, and on the same "
-       "network as the router.  With a router at 192.168.1.1, that means "
-       "192.168.1.something.\n\n"
-       "An address already in use leaves both machines misbehaving until one "
-       "of them is changed."))
+       "No other machine on the network can use this address, and the "
+       "address must be on the same network as the router.  With a router "
+       "at 192.168.1.1, the first three numbers are 192.168.1.\n\n"
+       "If two machines have the same address, both fail until one of them "
+       "is changed."))
 
 (set H_MASK
   (cat "The netmask says which part of the address is the network and which "
        "part is this machine.\n\n"
-       "255.255.255.0 is right for essentially every home and small office "
-       "network, and stays as it is unless the network requires "
-       "otherwise."))
+       "255.255.255.0 is correct for almost every home and small office "
+       "network.  If the network requires another value, change it."))
 
 (set H_GW
-  (cat "The gateway -- the router -- is the machine that forwards traffic "
-       "to the rest of the world.  Anything not on the local network is "
-       "handed to it.\n\n"
-       "It is usually the address ending in .1 or .254.\n\n"
-       "Without a correct gateway the Amiga can still talk to other machines "
-       "in the same house, but nothing beyond them.\n\n"
+  (cat "The gateway, or router, forwards traffic to the other networks.  "
+       "Everything that is not on the local network goes to it.\n\n"
+       "It is usually the address that ends in .1 or .254.\n\n"
+       "Without a correct gateway, the Amiga reaches only the machines on "
+       "the local network.\n\n"
        "This is written to DEVS:Internet/routes as DEFAULT=."))
 
 (set H_DNS
-  (cat "A name server turns names like \"aminet.net\" into addresses.  On a "
-       "home network this is nearly always the router itself, so the address "
-       "offered here is usually correct.\n\n"
-       "A public server also works: 9.9.9.9 and 1.1.1.1 both do.\n\n"
+  (cat "A name server turns a name such as \"aminet.net\" into an address.  "
+       "On a home network the name server is nearly always the router, so "
+       "the address offered here is usually correct.\n\n"
+       "A public name server also works, for example 9.9.9.9 or 1.1.1.1.\n\n"
        "Without a name server, addresses typed as numbers still work but "
        "names do not.\n\n"
        "This is written to DEVS:Internet/name_resolution."))
 
 (set H_HOSTNAME
-  (cat "The name this Amiga calls itself.  It is what programs report as the "
-       "local host name, and what appears in some log messages.\n\n"
-       "Letters, digits and hyphens; no spaces.  \"amiga\" is a perfectly "
-       "good answer."))
+  (cat "The name that this Amiga calls itself.  Programs report it as the "
+       "local host name, and it appears in some log messages.\n\n"
+       "Use letters, digits and hyphens.  Do not use spaces.  \"amiga\" is "
+       "an acceptable name."))
 
 (set H_KEEPOLD
   (cat "This machine already has an AmiNetXDuo or Roadshow style network "
        "configuration in DEVS:NetInterfaces.\n\n"
        "Answer \"Keep them\" to update the software and leave the existing "
-       "settings alone -- the usual choice when installing a newer "
-       "version.\n\n"
-       "Answer \"Set them up again\" to be asked all the network questions "
-       "afresh.  That rewrites the interface file, DEVS:Internet/routes and "
-       "DEVS:Internet/name_resolution, and any hand-made changes in them are "
-       "lost."))
+       "configuration alone.  That is the usual choice for an update to a "
+       "newer version.\n\n"
+       "Answer \"Set them up again\" to answer all the network questions "
+       "again.  That rewrites the interface file, DEVS:Internet/routes and "
+       "DEVS:Internet/name_resolution.  Any manual changes in these files "
+       "are lost."))
 
 (set H_STARTUP
-  (cat "S:User-Startup is the file the Amiga runs every time it boots.  "
-       "Adding the line\n\n\tC:AddNetInterface DEVS:NetInterfaces/"
-       "<interface> QUIET\n\nto it makes the network come up by itself.\n\n"
-       "Answering no leaves the network not starting on its own; it would "
-       "type that command yourself, or just run any networking program, "
-       "because bsdsocket.library starts the stack the first time a program "
-       "opens it.\n\n"
-       "Only AmiNetXDuo's own lines are touched.  Everything else in "
-       "S:User-Startup is left alone, so it is safe to run this installer "
+  (cat "S:User-Startup is the file that the Amiga runs at every boot.  "
+       "This line in it starts the network automatically:"
+       "\n\n\tC:AddNetInterface DEVS:NetInterfaces/<interface> QUIET\n\n"
+       "If the answer is no, the network does not start by itself.  Type "
+       "that command by hand, or run any network program: "
+       "bsdsocket.library starts the stack when a program first opens "
+       "it.\n\n"
+       "The installer changes only its own lines.  Everything else in "
+       "S:User-Startup stays as it is, so it is safe to run this installer "
        "again."))
 
 (set H_HTTPD
   (cat "httpd serves one drawer to the other machines on the network, over "
-       "HTTP and WebDAV, so it appears as a drive in Finder, in Explorer and "
-       "on Linux with nothing installed at the far end.  With the terminal "
-       "switched on it also answers at /shell with an AmigaDOS Shell that "
-       "runs in a web browser.\n\n"
-       "There is no password on either half of that, and there is no setting "
-       "that adds one.  Anyone who can reach the port can read and write the "
-       "drawer, and anyone who can reach the port gets a Shell on this "
-       "machine.  Behind a home router that is a convenience; on a network "
-       "with people you do not know on it, it is not, and that is the whole "
-       "of the decision being made here.\n\n"
-       "Answering yes adds two lines to S:User-Startup next to the one that "
-       "starts the network: an assign, so httpd can find the page the "
-       "terminal is served from, and httpd itself.  Answering no on a later "
-       "run takes them away again.\n\n"
-       "The drawer and the port are asked for next."))
+       "HTTP and WebDAV.  The drawer appears as a drive in Finder, in "
+       "Explorer and on Linux, with nothing installed at the far end.  With "
+       "the terminal on, httpd also answers at /shell with an AmigaDOS "
+       "Shell that runs in a web browser.\n\n"
+       "Neither half has a password, and no setting adds one.  Anyone who "
+       "can reach the port can read and write the drawer.  Anyone who can "
+       "reach the port gets a Shell on this machine.  Behind a home router "
+       "that is a convenience.  On a network with unknown people on it, it "
+       "is not, and that is the whole of this decision.\n\n"
+       "If the answer is yes, two lines go into S:User-Startup next to the "
+       "line that starts the network.  One is an assign, so httpd can find "
+       "the page that the terminal is served from.  The other starts httpd. "
+       " If the answer is no on a later run, both lines are removed.\n\n"
+       "The installer asks for the drawer and the port next."))
 
 (set H_HTTPDROOT
-  (cat "httpd has to be given a drawer, and everything in it can be read, "
-       "changed and deleted by anyone who reaches the port.\n\n"
-       "RAM: is offered because it is on every Amiga, it is empty at boot and "
-       "nothing in it survives one, so it is the answer that cannot expose "
-       "something that was not put there deliberately.  It makes a serviceable "
-       "drop box between this machine and a desktop one.\n\n"
-       "Name a real drawer instead to have its contents there at every boot.  "
-       "A whole volume works and is a poor idea: SYS: is the system, and "
-       "serving it means serving S:User-Startup and LIBS: as well.\n\n"
-       "The terminal does not depend on this.  It is served from the same "
-       "port whatever the drawer is."))
+  (cat "httpd needs a drawer.  Anyone who reaches the port can read, change "
+       "and delete everything in that drawer.\n\n"
+       "RAM: is offered because every Amiga has it.  RAM: is empty at boot "
+       "and nothing in it survives a boot, so it cannot expose a file that "
+       "was not put there deliberately.  It works as a drop box between "
+       "this machine and a desktop machine.\n\n"
+       "Name a real drawer instead to serve its contents at every boot.  Do "
+       "not serve a whole volume: SYS: is the system, and serving it serves "
+       "S:User-Startup and LIBS: as well.\n\n"
+       "The terminal does not depend on this drawer.  It is served from the "
+       "same port for any drawer."))
 
 (set H_HTTPDPORT
-  (cat "80 is offered because it is the port a browser uses when the address "
-       "does not name one, so the terminal is at http://<this machine>/"
-       "terminal rather than at an address with a number in it.  Nothing in a "
-       "stock Workbench listens there, and AmigaOS has no notion of a port "
-       "being privileged, so nothing is gained by moving it.\n\n"
-       "Change it if something else on this machine is already using 80, or "
-       "to keep the server away from a browser that would find it by "
-       "accident.  8080 is the usual second choice, and the address is then "
-       "http://<this machine>:8080/shell."))
+  (cat "80 is offered because a browser uses that port when the address "
+       "does not name one.  The terminal is then at http://<this machine>/"
+       "terminal, not at an address with a number in it.  Nothing in a "
+       "stock Workbench listens there, and AmigaOS has no privileged "
+       "ports, so a move gains nothing.\n\n"
+       "If something else on this machine already uses 80, change it.  "
+       "Change it also to keep the server away from a browser that finds it "
+       "by accident.  8080 is the usual second choice, and the address is "
+       "then http://<this machine>:8080/shell."))
 
 (set H_REPLACELIB
   (cat "There is already a bsdsocket.library on this machine.  It belongs to "
        "whichever TCP/IP stack was installed before -- AmiTCP, Miami, "
        "Roadshow, or an earlier AmiNetXDuo.\n\n"
-       "Two stacks cannot share the machine: there is one LIBS:bsdsocket."
-       "library and whoever owns it owns the network.\n\n"
-       "Answering yes renames the old file to bsdsocket.library.old rather "
-       "than deleting it, so it can be put back by hand later if the "
-       "mind.  Answering no leaves the other stack in place and installs "
-       "nothing but the commands -- which will then not work."))
+       "Two stacks cannot share one machine: there is one LIBS:bsdsocket."
+       "library, and the stack that owns it owns the network.\n\n"
+       "If the answer is yes, the old file is renamed to bsdsocket.library."
+       "old.  It is not deleted, so it can be restored by hand later.  If "
+       "the answer is no, the other stack stays in place and only the "
+       "commands are installed.  Those commands then do not work."))
 
 ; --------------------------------------------------------------------------
 ; Format strings.
@@ -276,24 +273,24 @@
 
 (set F_KEEPOLD
   (cat "This machine already has a network interface called \"%s\".\n\n"
-       "Keep those settings, or set the network up again from scratch?"))
+       "Keep this configuration, or configure the network again?"))
 
 (set F_NODEV
   (cat "The installer cannot find \"%s\" in DEVS: or in DEVS:Networks.\n\n"
-       "The configuration will be written anyway, but the network will not "
-       "come up until that driver is in place.  It comes with the card, "
-       "usually on a floppy or in the card's own archive; copy it into DEVS: "
-       "and the network will work from the next reboot."))
+       "The configuration is written anyway, but the network does not come "
+       "up until that driver is in place.  The driver comes with the card, "
+       "usually on a floppy or in the archive of the card.  Copy it into "
+       "DEVS:, and the network works from the next reboot."))
 
 (set F_BADIP
   (cat "\"%s\" is not an Internet address.\n\n"
        "An address is four numbers, each from 0 to 255, separated by full "
-       "stops -- like 192.168.1.10.  Please try again."))
+       "stops -- for example 192.168.1.10.  Type it again."))
 
 (set F_OLDLIB
   (cat "LIBS:bsdsocket.library already exists (version %ld.%ld).\n\n"
-       "AmiNetXDuo has to replace it.  The old one will be renamed to "
-       "bsdsocket.library.old, not deleted."))
+       "AmiNetXDuo must replace it.  The old file is renamed to "
+       "bsdsocket.library.old.  It is not deleted."))
 
 ; The final page does not scroll: anything past the bottom of the requester is
 ; simply lost, so it is kept short enough to fit rather than complete.  The
@@ -305,19 +302,19 @@
        "    C:AddNetInterface DEVS:NetInterfaces/%s\n"))
 
 (set F_START_NO
-  (cat "It will not start by itself.  To start it:\n\n"
+  (cat "It does not start by itself.  To start it:\n\n"
        "    C:AddNetInterface DEVS:NetInterfaces/%s\n"))
 
 (set F_HTTPD
-  (cat "\nhttpd serves %s on port %ld from the next reboot, and a Shell in a "
-       "browser at /shell.  Neither asks for a password.\n"))
+  (cat "\nFrom the next reboot, httpd serves %s on port %ld, and a Shell in "
+       "a browser at /shell.  Neither asks for a password.\n"))
 
 (set H_DOCDIR
   (cat "The documentation, the example configuration files and the "
        "installation log go into a drawer called AmiNetXDuo.\n\n"
-       "Choose where that drawer should be created.  Nothing here is needed "
-       "for the network to work -- the parts that matter go to LIBS:, C: and "
-       "DEVS: -- so any drawer will do."))
+       "Select where to create that drawer.  Nothing in it is necessary for "
+       "the network.  The files that matter go to LIBS:, C: and DEVS:, so "
+       "any drawer is acceptable."))
 
 ; ==========================================================================
 ;  Small helpers
@@ -445,8 +442,8 @@
 
 (if (< OSVER 37)
     (abort "AmiNetXDuo needs AmigaOS 2.04 (Kickstart 37) or newer.\n\n"
-           "This machine is running Kickstart " OSVER ".\n\n"
-           "Nothing has been changed."))
+           "This machine has Kickstart " OSVER ".\n\n"
+           "Nothing was changed."))
 
 ; --- one library, every processor -----------------------------------------
 ;
@@ -470,9 +467,9 @@
 
 (if (NOT (exists (tackon S_LIBS "bsdsocket.library") (noreq)))
     (abort "This archive has no Libs/bsdsocket.library.\n\n"
-           "The download is incomplete or was unpacked with a tool that "
+           "The download is incomplete, or was unpacked with a tool that "
            "dropped the subdrawers.\n\n"
-           "Nothing has been changed."))
+           "Nothing was changed."))
 
 ; ==========================================================================
 ;  2.  What is already here?
@@ -573,19 +570,20 @@
 ; (default) without showing anything, so the full stack is what goes on.
 (set MINPICK
   (askchoice
-    (prompt "Which stack should be installed?\n\n")
-    (help "Both run on every Amiga from a 68000 up: one binary picks the code "
-          "for this processor when the library opens, so there is nothing to "
-          "match to the machine and nothing to change if the disk moves to "
-          "another one.\n\n"
-          "The full stack is the one to install unless memory is tight.\n\n"
+    (prompt "Select the stack to install.\n\n")
+    (help "Both stacks run on every Amiga from a 68000 up.  One binary picks "
+          "the code for this processor when the library opens.  Nothing has "
+          "to match the machine.  If the disk moves to another machine, "
+          "nothing changes.\n\n"
+          "If memory is tight, install the minimal stack.  If not, "
+          "install the full stack.\n\n"
           "The minimal stack leaves out IPv6, .local name lookups, the packet "
           "filter, encrypted (https:) connections, IPv4 multicast, the ARexx "
           "host and the TCP: handler. It is 98 KB smaller. On a 1 MB machine "
-          "that is worth having; on a larger one it is worth nothing.\n\n"
-          "Encrypted connections work on any processor with the full stack, "
-          "but on a 68000 a first handshake takes a minute or two. A repeat "
-          "connection to the same server is under a second.")
+          "that is worth having. On a larger machine it is not.\n\n"
+          "With the full stack, encrypted connections work on any processor. "
+          "On a 68000 a first handshake takes a minute or two. A repeat "
+          "connection to the same server takes less than a second.")
     ; 22 characters is the limit -- install/tools/checkscript.py enforces it,
     ; because a longer gadget is dropped from the page without a word.
     (choices "Everything"
@@ -599,13 +597,13 @@
     (abort "This archive has no " S_LIBS " with a bsdsocket.library in it.\n\n"
            "The download is incomplete, or was unpacked with a tool that "
            "dropped the subdrawers.\n\n"
-           "Nothing has been changed."))
+           "Nothing was changed."))
 
 ; --- where the drawer of documentation goes ------------------------------
 
 (set DOCPARENT
   (askdir
-    (prompt "Where should the \"AmiNetXDuo\" drawer go?\n\n"
+    (prompt "Select where the \"AmiNetXDuo\" drawer goes.\n\n"
             "It holds the documentation and the examples.")
     (help H_DOCDIR)
     (default @default-dest)))
@@ -627,13 +625,13 @@
 ; question can simply pick another level on the page they have just seen.
 
 (if (AND (= @user-level 0) (AND (< DET_INDEX 0) (= HAVE_OLD 0)))
-    (abort "The installer could not find a network card driver in DEVS: or "
-           "DEVS:Networks, and in Novice mode it cannot ask which card is "
+    (abort "The installer found no network card driver in DEVS: or "
+           "DEVS:Networks.  In Novice mode it cannot ask which card is "
            "installed.\n\n"
-           "Either copy the card's .device driver into DEVS: first, or start "
-           "this installer again and choose \"Intermediate User\", which "
-           "lets the card be picked from a list.\n\n"
-           "Nothing has been changed."))
+           "Copy the .device driver for the card into DEVS: first.  As an "
+           "alternative, start this installer again and choose "
+           "\"Intermediate User\", which shows a list of cards.\n\n"
+           "Nothing was changed."))
 
 ; --- keep or replace an existing configuration ---------------------------
 
@@ -659,10 +657,10 @@
 ; took the drivers away, installed again and was told nothing.
 (if (AND HAVE_OLD KEEP_OLD)
     (message
-      "The existing settings for \"" OLD_IF "\" are being kept as they are.\n\n"
-      "They are not checked -- if the card or its driver has changed since "
-      "they were written, the network will not come up.  Installing again and "
-      "choosing \"Set them up again\" asks the questions afresh."))
+      "The existing configuration for \"" OLD_IF "\" is kept as it is.\n\n"
+      "It is not checked.  If the card or its driver changed since the file "
+      "was written, the network does not come up.  Install again and choose "
+      "\"Set them up again\" to answer the questions again."))
 
 ; --- the card ------------------------------------------------------------
 
@@ -738,7 +736,7 @@
         (set DEV_OK 0)
         (until DEV_OK
           (set DEV_NAME (askstring
-            (prompt "Type the file name of the card's driver, ending "
+            (prompt "Type the file name of the card driver.  The name ends "
                     "in \".device\".")
             (help   H_OTHERDEV)
             (default "mycard.device")))
@@ -768,7 +766,7 @@
         (set IF_OK 0)
         (until IF_OK
           (set IFNAME (askstring
-            (prompt "What should this interface be called?")
+            (prompt "Type a name for this interface.")
             (help   H_IFNAME)
             (default "eth0")))
           (set IF_OK (if (AND (> (strlen IFNAME) 0)
@@ -797,7 +795,7 @@
     (set USEDHCP
       (askbool
         (prompt "Does the network hand out addresses automatically?\n\n"
-                "If other computers just plug in and work, it does.")
+                "If other computers work when they are plugged in, it does.")
         (help    H_DHCP)
         (choices "Yes, use DHCP" "No, I will type them")
         (default 1)))
@@ -812,7 +810,7 @@
 
 (if (AND (= KEEP_OLD 0) (= USEDHCP 0))
   (
-    (set ask_prompt "What Internet address should this Amiga use?")
+    (set ask_prompt "Type the Internet address for this Amiga.")
     (set ask_help   H_ADDR)
     (set ask_default IPADDR)
     (P_ask_ip)
@@ -835,7 +833,7 @@
     (P_ask_ip)
     (set IPGW ask_result)
 
-    (set ask_prompt "Which name server should this Amiga use?")
+    (set ask_prompt "Type the address of the name server.")
     (set ask_help   H_DNS)
     (set ask_default IPGW)
     (P_ask_ip)
@@ -849,7 +847,7 @@
 (if (= KEEP_OLD 0)
     (set HOSTNAME
       (askstring
-        (prompt "What should this Amiga be called on the network?")
+        (prompt "Type the name of this Amiga on the network.")
         (help   H_HOSTNAME)
         (default "amiga"))))
 
@@ -866,9 +864,9 @@
         (default 1))))
 
 (if (= REPLACE_LIB 0)
-    (abort "Left LIBS:bsdsocket.library alone, so AmiNetXDuo has not been "
+    (abort "LIBS:bsdsocket.library is unchanged, so AmiNetXDuo is not "
            "installed.\n\n"
-           "Nothing has been changed."))
+           "Nothing was changed."))
 
 ; --- start the network at boot? ------------------------------------------
 
@@ -921,15 +919,15 @@
       (
         (set HTTPD_ROOT
           (askdir
-            (prompt "Which drawer should be served?\n\n"
-                    "Everything in it can be read, changed and deleted from "
-                    "the network.")
+            (prompt "Select the drawer to serve.\n\n"
+                    "Anyone on the network can read, change and delete "
+                    "everything in it.")
             (help    H_HTTPDROOT)
             (default "RAM:")))
 
         (set HTTPD_PORT
           (asknumber
-            (prompt "Which port should it listen on?")
+            (prompt "Type the port number for httpd.")
             (help    H_HTTPDPORT)
             (range   1 65535)
             (default 80)))
@@ -952,7 +950,7 @@
 
 (set @special-msg
   (cat "If this failed because the file is in use, the network is already "
-       "running.  Reboot and run this installer again before doing anything "
+       "running.  Reboot, then run this installer again before anything "
        "else.\n"))
 
 (if OLD_BSD
@@ -983,8 +981,8 @@
 
 (copylib
   (prompt (cat "Installing bsdsocket.library into LIBS:\n\n"
-               "One build for every processor: it picks the code for this "
-               "one when it opens."))
+               "One build for every processor.  It picks the code for this "
+               "processor when it opens."))
   (help   @copylib-help)
   (source (tackon S_LIBS "bsdsocket.library"))
   (dest   "LIBS:")
@@ -1041,9 +1039,9 @@
       ))
     (copylib
       (prompt (cat "Installing tls.library into LIBS:\n\n"
-                   "This lets programs make encrypted (https:) connections.  "
-                   "It is used only by programs that ask for it, so it costs "
-                   "nothing until something opens it."))
+                   "This library makes encrypted (https:) connections "
+                   "possible.  Only a program that asks for it opens it, so "
+                   "it costs nothing until then."))
       (help   @copylib-help)
       (source (tackon S_LIBS "tls.library"))
       (dest   "LIBS:")
@@ -1065,7 +1063,7 @@
       "encrypted (https:) connections, IPv6, .local name lookups, the packet "
       "filter, IPv4 multicast, the ARexx host and the TCP: handler.\n\n"
       "The stack, the commands, ssh and ordinary http: work normally.  "
-      "Installing again and choosing Everything brings the rest back."))
+      "Install again and choose Everything to add the rest."))
 
 (set @special-msg "")
 
@@ -1078,29 +1076,29 @@
 (copyfiles
   (prompt "Installing the network commands into C:")
   (help   "AddNetInterface, Online and Offline bring an interface up and "
-          "take it down, and NetSetup writes or edits the interface file "
+          "take it down.  NetSetup writes or edits the interface file "
           "instead.  ConfigureNetInterface changes the address, netmask and "
           "gateway of an interface that is already running, and releases or "
-          "renews its DHCP lease.  hostname says what this machine calls "
-          "itself and which of the four places that can name it did so, and "
-          "sets the name.  ShowNetStatus and netstat report what it is "
-          "doing, and ShowNetServices lists what else on the local network "
-          "is offering something.  ping, host and traceroute are the usual diagnostics, and "
-          "nslookup asks the DNS for one kind of record -- an MX, a TXT, an "
-          "SRV -- from a named server, and arp lists which "
-          "machines on this network have answered.  "
-          "fetch retrieves an http:// or https:// URL; nc, telnet and "
-          "tftp are netcat and the usual clients; sntp sets the clock from "
-          "a time server and whois asks who owns a name.  NetTrace captures "
-          "packets to a .pcap file, CheckNetConfig reads the "
-          "configuration back and says what is wrong with it, and "
-          "CheckNetDevice says what anxnet.device found on this machine "
-          "when a card will not work.  httpd serves "
+          "renews its DHCP lease.  hostname reports the name of this "
+          "machine, reports which of the four places that can name it did "
+          "so, and sets the name.  ShowNetStatus and netstat report what "
+          "the stack is doing.  ShowNetServices lists what else on the "
+          "local network offers something.  ping, host and traceroute are "
+          "the usual diagnostics.  nslookup asks a named server for one "
+          "kind of record -- an MX, a TXT, an SRV.  arp lists the machines "
+          "on this network that answered.  "
+          "fetch retrieves an http:// or https:// URL.  nc, telnet and "
+          "tftp are netcat and the usual clients.  sntp sets the clock from "
+          "a time server, and whois asks who owns a name.  NetTrace captures "
+          "packets to a .pcap file.  CheckNetConfig reads the "
+          "configuration back and reports what is wrong with it.  "
+          "CheckNetDevice reports what anxnet.device found on this machine "
+          "when a card does not work.  httpd serves "
           "a drawer over HTTP and WebDAV to other machines on the network, "
-          "and asks for no password, so give it a drawer you are content for "
-          "them to read and write.\n\nAll of "
-          "them are installed: they are small, and missing the one command "
-          "that turns out to be wanted is worse than a few extra files "
+          "and asks for no password.  Serve only a drawer that those "
+          "machines can read and write.\n\nAll of "
+          "them are installed.  They are small, and a missing command "
+          "is worse than a few extra files "
           "in C:.  ssh comes with them.")
   (source S_C)
   (dest   "C:")
@@ -1131,7 +1129,7 @@
 
 (makedir "DEVS:Internet"
   (prompt "Creating DEVS:Internet, the drawer that holds the name server "
-          "and routing settings")
+          "and routing configuration")
   (help   @makedir-help))
 
 ; --- the interface file --------------------------------------------------
@@ -1142,9 +1140,9 @@
 
     (textfile
       (prompt ("Writing DEVS:NetInterfaces/%s" IFNAME))
-      (help   "This file describes one network card: which driver to open, "
-              "and how the card gets its Internet address.  Its name is the "
-              "interface's name.")
+      (help   "This file describes one network card.  It gives the driver "
+              "to open, and how the card gets its Internet address.  The "
+              "name of the file is the name of the interface.")
       (dest   (tackon "DEVS:NetInterfaces" IFNAME))
       (append "; DEVS:NetInterfaces/" IFNAME " -- written by the AmiNetXDuo "
               "installer.\n")
@@ -1157,11 +1155,11 @@
       (append ";     ShowNetStatus INTERFACE " IFNAME "\n")
       (append ";\n")
       (append "; DEVICE     the SANA-II driver for the card.  A bare name is\n")
-      (append ";            looked up in DEVS:; a path is used as given.\n")
+      (append ";            looked up in DEVS:.  A path is used as given.\n")
       (append "; UNIT       which card, when one driver has several.\n")
       (append "; CONFIGURE  how the address is obtained:\n")
-      (append ";              DHCP   -- ask the network (what most want)\n")
-      (append ";              AUTO   -- self-assign 169.254.x.x if no DHCP\n")
+      (append ";              DHCP   -- ask the network (the usual choice)\n")
+      (append ";              AUTO   -- self-assign 169.254.x.x with no DHCP\n")
       (append ";              STATIC -- use the ADDRESS/NETMASK below\n")
       (append ";            Note this keyword is CONFIGURE, not IPTYPE.  In\n")
       (append ";            Roadshow IPTYPE is the SANA-II packet type, a\n")
@@ -1170,8 +1168,8 @@
       (append "; MDNS=  YES -- answer .local queries on this interface\n")
       (append ";        NO  -- do not, which is the default when the\n")
       (append ";               keyword is absent.  The responder costs\n")
-      (append ";               real time on a slow machine whether or\n")
-      (append ";               not anything asks it anything.\n")
+      (append ";               real time on a slow machine, even when\n")
+      (append ";               nothing asks it anything.\n")
       (append ";\n")
       (append "; An IPv6 build also understands CONFIGURE6 (OFF, LINKLOCAL,\n")
       (append "; AUTO or STATIC), ADDRESS6 and GATEWAY6.  A build without\n")
@@ -1191,8 +1189,9 @@
 
     (textfile
       (prompt "Writing DEVS:Internet/routes")
-      (help   "This file holds the default route -- the address of the "
-              "router that everything not on the local network is sent to.")
+      (help   "This file holds the default route.  The default route is "
+              "the address of the router that receives everything that is "
+              "not on the local network.")
       (dest   "DEVS:Internet/routes")
       (append "; DEVS:Internet/routes -- written by the AmiNetXDuo installer.\n")
       (append ";\n")
@@ -1211,13 +1210,13 @@
 
     (textfile
       (prompt "Writing DEVS:Internet/name_resolution")
-      (help   "This file says which name servers to ask when a program looks "
-              "up a name like \"aminet.net\".")
+      (help   "This file gives the name servers to ask when a program "
+              "looks up a name such as \"aminet.net\".")
       (dest   "DEVS:Internet/name_resolution")
       (append "; DEVS:Internet/name_resolution -- written by the AmiNetXDuo\n")
       (append "; installer.\n")
       (append ";\n")
-      (append "; nameserver <address>   ask this server; repeat for more.\n")
+      (append "; nameserver <address>   ask this server.  Repeat for more.\n")
       (append "; domain     <name>      added to names with no dots in them.\n")
       (append "; search     <a> <b> ..  several domains to try, in order.\n")
       (append "; hostname   <name>      what this machine calls itself.\n")
@@ -1242,7 +1241,7 @@
     ""
     (textfile
       (prompt "Writing DEVS:Internet/hosts")
-      (help   "Names the Amiga should know without asking a name "
+      (help   "Names that the Amiga knows without asking a name "
               "server.  One address, then the name, then any nicknames.")
       (dest   "DEVS:Internet/hosts")
       (append "# DEVS:Internet/hosts -- names this machine knows by itself.\n")
@@ -1278,9 +1277,9 @@
 (if (exists (tackon (tackon S_DEVS "Internet") "certificates") (noreq))
     (copyfiles
       (prompt (cat "Installing DEVS:Internet/certificates\n\n"
-                   "The list of certificate authorities tls.library trusts.  "
-                   "Replace this file with a newer one to "
-                   "update them; nothing else has to change."))
+                   "The list of certificate authorities that tls.library "
+                   "trusts.  Replace this file with a newer one to update "
+                   "the list.  Nothing else changes."))
       (help   @copyfiles-help)
       (source (tackon (tackon S_DEVS "Internet") "certificates"))
       (dest   "DEVS:Internet")
@@ -1326,10 +1325,10 @@
 (if (exists S_EXAM (noreq))
     (copyfiles
       (prompt "Installing the example configuration files")
-      (help   "These are commented copies of the files this installer just "
+      (help   "These are commented copies of the files that this installer "
               "wrote, one for each kind of card.  Nothing reads them where "
-              "they are -- they are there to be read, and copied into DEVS: "
-              "by hand where that is the preferred way to configure it.")
+              "they are.  They are there to be read, and to be copied into "
+              "DEVS: by hand.")
       (source S_EXAM)
       (dest   (tackon DOCDIR "Examples"))
       (all)
@@ -1345,9 +1344,9 @@
 (if (exists S_TERM (noreq))
     (copyfiles
       (prompt "Installing the terminal page for httpd")
-      (help   "httpd can serve an AmigaDOS Shell to a web browser. This is the page it hands that browser: one self-contained HTML file, with nothing to fetch from anywhere else. "
-              "Nothing reads it where it is until you ask for it. httpd Work:Public 80 -T is what turns the endpoint on, and without -T there is no terminal at all. "
-              "Note what it is when it is on: anyone who can reach that port gets a Shell on this machine, with no password, exactly as the WebDAV write methods on the same port have none.")
+      (help   "httpd can serve an AmigaDOS Shell to a web browser. This is the page that httpd hands to that browser: one self-contained HTML file, with nothing to fetch from anywhere else. "
+              "Nothing reads it where it is until it is asked for. The -T option turns the endpoint on, as in httpd Work:Public 80 -T. Without -T there is no terminal at all. "
+              "With the terminal on, anyone who can reach that port gets a Shell on this machine, with no password. The WebDAV write methods on the same port have no password either.")
       (source S_TERM)
       (dest   (tackon DOCDIR "Terminal"))
       (all)

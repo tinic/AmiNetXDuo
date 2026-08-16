@@ -5,13 +5,12 @@
  * shim in src/config/test/shim and the three stubs below. ug_db.c, the
  * dos.library Open/Read/Close around it, is not covered here.
  *
- * LINE ENDINGS ARE THE POINT. ug_next_line() ends a line on '\n' or '\r',
- * so a group file written by a classic-Mac editor is many lines to the
- * parser. The arena sizing pass used to count '\n' alone, so it sized for
- * one; the NULL terminator written after each group then walked off the
- * end of the allocation, on a machine with no MMU, from a file in DEVS:.
- * Run under ASan (tools/ci.sh host) the CR-only fixture below is what
- * catches it.
+ * Line endings are the subject here. ug_next_line() ends a line on '\n' or
+ * '\r', so a group file written by a classic-Mac editor is many lines to the
+ * parser. The arena sizing pass used to count '\n' alone, so it sized for one
+ * line. The NULL terminator written after each group then walked off the end
+ * of the allocation, on a machine with no MMU, from a file in DEVS:. Under
+ * ASan (tools/ci.sh host) the CR-only fixture below catches it.
  *
  *   cc -std=c99 -Wall -Wextra -I../../../include -I.. \
  *      -I../../config/test/shim test_usergroup.c ../ug_parse.c -o test_usergroup
@@ -41,8 +40,8 @@ APTR ami_alloc(ULONG size)
 
     /*
      * malloc, not calloc: an ASan redzone catches a write past the end either
-     * way, but leaving the block uninitialised also lets valgrind and MSan
-     * see a gr_mem vector that was never terminated.
+     * way, but an uninitialised block also lets valgrind and MSan see a gr_mem
+     * vector that was never terminated.
      */
     p = malloc(size);
     if (p != NULL)
@@ -360,8 +359,8 @@ static void test_passwd_line_endings(void)
 {
     /*
      * No "SYS:" in a home directory field here on purpose: ':' is the field
-     * separator, so an AmigaOS path cannot survive one. Roadshow's file has
-     * the same property; an empty field and the fallback is how it is written.
+     * separator, so an AmigaOS path cannot survive one. The Roadshow file has
+     * the same property. An empty field and the fallback is how it is written.
      */
     static const char body[] =
         "root:*:0:0:AmigaOS user::\n"
@@ -383,7 +382,7 @@ static void test_passwd_line_endings(void)
             CHECK_STR(db->pw[0].pw_name, "root");
             CHECK(db->pw[0].pw_uid == 0);
             CHECK_STR(db->pw[0].pw_dir, "SYS:");
-            /* An empty shell field falls back rather than staying empty. */
+            /* An empty shell field falls back and does not stay empty. */
             CHECK_STR(db->pw[0].pw_shell, "C:Shell");
 
             CHECK_STR(db->pw[1].pw_name, "jane");
@@ -417,7 +416,7 @@ static void test_passwd_edges(void)
     CHECK(db->pw[0].pw_gid == 3);
     free_db(db);
 
-    /* A uid longer than a LONG holds clamps; it used to wrap, which is UB. */
+    /* A uid longer than a LONG holds clamps. It used to wrap, which is UB. */
     db = load_passwd("big:*:99999999999999:88888888888888:g:d:s\r"
                      "neg:*:-99999999999999:0:g:d:s\r");
     CHECK(db->pw_count == 2);

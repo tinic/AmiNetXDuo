@@ -5,7 +5,7 @@
  *   _nx_crypto_huge_number_crt_power_modulus().  The only difference is the
  *   two lines that raise xp and xq to a power: they call this module instead.
  *   It lets the CRT path be measured with the fast exponentiation, and CRT is
- *   the largest single lever available.
+ *   the largest single gain available.
  *
  *   The measured baseline on the emulated 68020 is 44.4 s with CRT against
  *   158.0 s without, 3.6x, and nx_secure reaches for CRT on exactly one
@@ -15,14 +15,14 @@
  *   in nx_secure_tls_ecc_generate_keys.c and the client certificate signature
  *   in nx_secure_tls_send_certificate_verify.c both hand the full 2048-bit
  *   private exponent to _nx_crypto_rsa_operation() with p and q left NULL, so
- *   they take the 158 s path.  Supplying the primes there is a 3.6x win for
- *   the price of two nx_crypto_operation() calls, and it multiplies with
- *   everything in this module rather than overlapping it.
+ *   they take the 158 s path.  A call that supplies the primes there is worth
+ *   3.6x, for the price of two nx_crypto_operation() calls.  That gain
+ *   multiplies with everything in this module rather than overlaps it.
  *
  *   CRT is ~4x because each half works modulo a number of half the width, so
  *   each Montgomery multiply costs a quarter, and each exponent is half as
  *   long, so there are half as many of them, 8x per half, two halves, 4x
- *   overall (HAC Note 14.75(ii)).  The recombination is O(s^2) and eats the
+ *   overall (HAC Note 14.75(ii)).  The recombination is O(s^2) and takes the
  *   rest.
  *
  * SPDX-License-Identifier: MIT
@@ -59,8 +59,8 @@ HN_UBASE                digit_value;
      *   pi = p^-1 mod q    qi = q^-1 mod p
      *   r  = (m1*qi*q + m2*pi*p) mod m
      *
-     * The buffer carving below is the vendored routine's, unchanged, and load
-     * bearing: NX_CRYPTO_HUGE_NUMBER_INITIALIZE is a bump allocator that
+     * The buffer carving below is the vendored one, unchanged, and load
+     * bearing.  NX_CRYPTO_HUGE_NUMBER_INITIALIZE is a bump allocator that
      * advances `scratch`, and several of these buffers are reused under a
      * second name once their first value is dead.
      */

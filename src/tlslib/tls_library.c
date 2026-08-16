@@ -7,8 +7,8 @@
  *
  *   bsdsocket.library clones a base per OpenLibrary() because the ABI puts
  *   errno, the descriptor table and the tag state *in* SocketBase, so two
- *   tasks sharing one would corrupt each other.  None of this library's state
- *   lives in the base: a caller's state is entirely inside the TLSConnection
+ *   tasks that share one corrupt each other.  None of this library's state
+ *   lives in the base.  A caller's state is entirely inside the TLSConnection
  *   it was handed.  One base is therefore correct, and cheaper.
  *
  * SPDX-License-Identifier: MIT
@@ -20,8 +20,8 @@
 #include "aminetxduo/compat.h"   /* ami_rt_cpu_select() */
 
 /* Included explicitly, not transitively.  NDK 3.2 reaches <exec/resident.h>
-   through another header and NDK 3.9 does not, so leaving it out builds here
-   and fails on a machine with the other NDK, which is how it reached CI.
+   through another header and NDK 3.9 does not, so an omission builds here and
+   fails on a machine with the other NDK, which is how it reached CI.
    src/bsdsocket/bsdsocket_internal.h and src/usergroup/ug_library.c both name
    it for the same reason. */
 #include <exec/execbase.h>   /* AttnFlags, for c68k_cpu_select() */
@@ -83,7 +83,7 @@ static struct TLSLibBase *tls_lib_init(
 
     /* Which crypto primitives this machine wants, before any of them runs.
        In an AMINETXDUO_CPU=any build this is the whole of what makes one
-       tls.library serve a 68000 and a 68060; anywhere else it does nothing.
+       tls.library serve a 68000 and a 68060.  Anywhere else it does nothing.
        src/crypto68k/c68k_cpu.c. */
     c68k_cpu_select((ULONG)sysbase->AttnFlags);
 
@@ -100,8 +100,8 @@ static struct TLSLibBase *tls_lib_init(
     base->tb_SegList = seglist;
     base->tb_SysBase = sysbase;
 
-    /* The profiler's segment tag; the sum is computed so that the magic
-       turning up by accident in somebody's data is not enough to pass. */
+    /* The profiler's segment tag.  The sum is computed so that the magic by
+       itself, found by accident in somebody's data, is not enough to pass. */
     base->tb_ProfMagic   = 0x50534731UL;    /* 'PSG1' */
     base->tb_ProfSize    = 5UL * sizeof(ULONG);
     base->tb_ProfLibBase = (ULONG)base;
@@ -120,8 +120,8 @@ static struct TLSLibBase *tls_lib_init(
 
     base->tb_CryptoReady = FALSE;
 
-    /* Silences the unused warning; the helper is kept so a future per-opener
-       base has somewhere to hang. */
+    /* Silences the unused warning.  The helper is kept for a future
+       per-opener base. */
     (VOID)tls_new_list;
 
     return base;
@@ -170,9 +170,9 @@ APTR tls_lib_expunge(register struct TLSLibBase *TLSBase __asm("a6"))
     neg     = TLSBase->tb_Lib.lib_NegSize;
     pos     = TLSBase->tb_Lib.lib_PosSize;
 
-    /* The session cache is the one thing the base owns outright: allocated
-       lazily on the first handshake that has something to remember, and it
-       holds master secrets, so it is cleared and not merely freed. */
+    /* The session cache is the one thing the base owns outright, allocated
+       lazily on the first handshake that has something to remember.  It holds
+       master secrets, so it is cleared and not merely freed. */
     if (TLSBase->tb_Sessions != NULL)
     {
         tls_bzero(TLSBase->tb_Sessions,

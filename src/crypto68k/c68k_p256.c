@@ -34,11 +34,11 @@ static const c68k_limb c68k_p256_one[C68K_P256_LIMBS] =
 /* ------------------------------------------------------ limb helpers ----- */
 
 /*
- * ONE BINARY FOR EVERY CPU carries both assemblies of the three routines
- * c68k_p256.S holds: they differ in one instruction, EXTB.L against ext.w plus
- * ext.l, and both are legal on every part -- so unlike the multiply primitives
- * there is no C to fall back to here, only a slower assembly.  The vectors
- * start on that one.
+ * One binary for every CPU carries both assemblies of the three routines
+ * c68k_p256.S holds.  They differ in one instruction, EXTB.L against ext.w
+ * plus ext.l, and both are legal on every part, so unlike the multiply
+ * primitives there is no C to fall back to here, only a slower assembly.  The
+ * vectors start on that one.
  */
 #ifdef C68K_MV
 
@@ -66,7 +66,7 @@ static INT (*c68k_vec_p256_reduce_core)(c68k_limb *, const c68k_limb *) =
 #define C68K_P256_SUB_RAW       (*c68k_vec_p256_sub_raw)
 #define C68K_P256_REDUCE_CORE   (*c68k_vec_p256_reduce_core)
 
-/* Called by c68k_cpu_select(); the vectors are static to this file. */
+/* Called by c68k_cpu_select().  The vectors are static to this file. */
 VOID c68k_p256_cpu_select(UINT wide)
 {
 
@@ -163,8 +163,8 @@ c68k_limb   t;
  *
  * Returns the leftover coefficient of 2^256, for the caller to fold in.
  *
- * The decomposition was verified against Python's arbitrary precision
- * arithmetic over 20000 random 512-bit inputs plus the all-zero and all-ones
+ * The decomposition was checked against the arbitrary precision arithmetic of
+ * Python over 20000 random 512-bit inputs plus the all-zero and all-ones
  * cases, and the leftover was measured to stay in [-4, 4].
  */
 INT c68k_p256_reduce_core(c68k_limb *r, const c68k_limb *t)
@@ -351,9 +351,9 @@ INT     hi;
     hi = C68K_P256_REDUCE_CORE(r, t);
 
     /*
-     * hi is the leftover coefficient of 2^256.  Adding p raises the value by
-     * very nearly 2^256, so each addition moves hi towards zero by one;
-     * likewise each subtraction.  A handful of iterations.
+     * hi is the leftover coefficient of 2^256.  An addition of p raises the
+     * value by very nearly 2^256, so each addition moves hi towards zero by
+     * one, and each subtraction does the same.  A handful of iterations.
      */
     while (hi < 0)
     {
@@ -412,7 +412,7 @@ UINT        i;
 
     /*
      * Schoolbook, one c68k_addmul_1 per limb of a.  That routine is the 68020
-     * assembly the RSA work produced, so the ~1.4x limb-loop win carries over
+     * assembly the RSA work produced, so the ~1.4x limb-loop gain carries over
      * to elliptic curves with no new assembly.  t[i + 8] has not been written
      * when row i runs, so the carry-out is a store, not an add.
      */
@@ -476,8 +476,8 @@ UINT        i;
 
 
 /*
- * x = x / 2 mod p.  If x is odd, x + p is even and congruent, so add first.
- * The addition can carry out of 256 bits; that bit is shifted back in.
+ * x = x / 2 mod p.  If x is odd, x + p is even and congruent, so the addition
+ * comes first.  It can carry out of 256 bits, and that bit is shifted back in.
  */
 static VOID fe_half(c68k_p256_fe x)
 {
@@ -500,7 +500,7 @@ c68k_limb   top;
  * Binary extended Euclid, Hankerson Algorithm 2.22.  Chosen over Fermat
  * (a^(p-2), 255 squarings) because it uses no multiplications: on this machine
  * an inversion costs about four field multiplications, so one per scalar
- * multiplication plus one per batch inversion is not worth optimising around.
+ * multiplication plus one per batch inversion does not need optimisation.
  */
 VOID c68k_p256_fe_inv(c68k_p256_fe r, const c68k_p256_fe a)
 {
@@ -563,8 +563,8 @@ c68k_p256_fe    x2;
  *     Z3 = (Y + Z)^2 - gamma - delta
  *     Y3 = alpha * (4*beta - X3) - 8*gamma^2
  *
- * 3M + 5S, against the vendored 4M + 4S.  A win only because squaring here is
- * cheaper than multiplying, 28 limb products against 64.
+ * 3M + 5S, against the vendored 4M + 4S.  A gain only because squaring here is
+ * cheaper than a multiply, 28 limb products against 64.
  */
 VOID c68k_p256_jac_double(c68k_p256_jac *r, const c68k_p256_jac *p1)
 {
@@ -628,8 +628,8 @@ c68k_p256_fe    z3;
  * madd-2007-bl: Jacobian + affine, 7M + 4S against the vendored 8M + 3S.
  *
  * Every degenerate case is handled explicitly.  A scalar multiplication that
- * mishandles the accumulator equalling a table entry returns a valid curve
- * point that is wrong, which no sanity check catches.
+ * mishandles an accumulator equal to a table entry returns a valid curve point
+ * that is wrong, and no sanity check catches that.
  */
 VOID c68k_p256_jac_add_affine(c68k_p256_jac *r, const c68k_p256_jac *p1,
                               const c68k_p256_aff *q)
@@ -745,8 +745,8 @@ c68k_p256_fe    z2;
 
 /* ---------------------------------------------------- fixed base: comb --- */
 
-/* Bit i of a 256-bit scalar; indices at or above 256 read as zero, which is
-   what lets the comb's top row run past the end of the scalar. */
+/* Bit i of a 256-bit scalar.  Indices at or above 256 read as zero, which is
+   what lets the top row of the comb run past the end of the scalar. */
 static c68k_limb k_bit(const c68k_limb *k, UINT i)
 {
 
@@ -778,8 +778,8 @@ UINT            row;
      * Lim-Lee: k = sum_c 2^c * T1[digit(c)] over c in 0..d-1, split at e so
      * that columns e..d-1 are served by T2 = 2^e * T1 in the same iteration.
      * 26 doublings and 52 additions, against 256 doublings for a generic
-     * point, why ECDH key generation measures at 1.52 s while an ECDH shared
-     * secret measures at 5.18 s.
+     * point, which is why ECDH key generation measures at 1.52 s while an
+     * ECDH shared secret measures at 5.18 s.
      */
     for (c = C68K_P256_COMB_E; c > 0u; c--)
     {
@@ -942,10 +942,10 @@ INT             d;
      * Table: q, 3q, 5q, ..., 15q, affine so that every addition in the main
      * loop is the cheap mixed one.
      *
-     * Built by taking 2q to affine (one inversion), chaining seven mixed
-     * additions, then converting all eight results with a single batch
-     * inversion (Montgomery's trick: one inversion and 3*(n-1) multiplies
-     * instead of n inversions).  Two inversions total for the whole table.
+     * 2q goes to affine (one inversion), then seven mixed additions chain
+     * from it, then a single batch inversion converts all eight results
+     * (Montgomery's trick: one inversion and 3*(n-1) multiplies instead of n
+     * inversions).  Two inversions in total for the whole table.
      */
     fe_copy(dbl.x, q -> x);
     fe_copy(dbl.y, q -> y);
@@ -983,7 +983,7 @@ INT             d;
             fe_copy(zt, inv);
         }
 
-        /* zt = z_i^-1; convert in place, the z field is dead afterwards. */
+        /* zt = z_i^-1.  Convert in place, the z field is dead afterwards. */
         c68k_p256_fe_sqr(work -> tab[i - 1u].z, zt);
         c68k_p256_fe_mul(work -> tab[i - 1u].x, work -> tab[i - 1u].x,
                          work -> tab[i - 1u].z);
@@ -1026,7 +1026,7 @@ INT             d;
 /* --------------------------------------------------------- integration --- */
 
 /* Copy a huge number into eight limbs, zero padded.  Fails only if the value
-   does not fit, which is the caller's cue to fall back. */
+   does not fit, which tells the caller to fall back. */
 static UINT hn_to_fe(c68k_limb *r, const NX_CRYPTO_HUGE_NUMBER *h)
 {
 
@@ -1081,9 +1081,9 @@ c68k_p256_work *work;
 
 
     /*
-     * Everything this cannot do falls through to the vendored routine, so
-     * substituting it is safe under every caller.  _nx_crypto_ec_precomputation
-     * does pass scalars wider than 256 bits, which would otherwise be silently
+     * Everything this cannot do falls through to the vendored routine, so the
+     * substitution is safe under every caller.  _nx_crypto_ec_precomputation
+     * does pass scalars wider than 256 bits, which are otherwise silently
      * truncated.
      */
     if ((curve -> nx_crypto_ec_id != NX_CRYPTO_EC_SECP256R1) ||
@@ -1111,9 +1111,9 @@ c68k_p256_work *work;
         }
 
         /*
-         * The wNAF table lives in the caller's scratch, not on the stack: this
-         * runs under a 4 KB AmigaOS process stack, and the callers already
-         * carry a scratch area sized for the vendored routine's own tables
+         * The wNAF table lives in the scratch of the caller, not on the
+         * stack.  This runs under a 4 KB AmigaOS process stack, and every
+         * caller already carries a scratch area sized for the vendored tables
          * (ECDSA 3016 bytes, ECDH 2464, of which roughly 450 are spent before
          * this point, against the C68K_P256_WORK_LIMBS needed here).
          */

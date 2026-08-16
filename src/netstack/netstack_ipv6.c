@@ -16,7 +16,7 @@
  *   AUTO        Link-local, plus RFC 4862 stateless autoconfiguration: the
  *               stack sends a router solicitation, and a prefix from any
  *               router advertisement that comes back becomes a global
- *               address. The default when CONFIGURE6 is absent; on a link
+ *               address. The default when CONFIGURE6 is absent.  On a link
  *               with no IPv6 router it costs three ICMPv6 packets and behaves
  *               like LINK-LOCAL.
  *
@@ -26,9 +26,9 @@
  * DHCPv6 is not used. NetX Duo ships a client (addons/dhcp/nxd_dhcpv6_client.c)
  * but it is 40 KB of code before its own IANA/IAID option handling, needs its
  * own thread and UDP socket, and answers what SLAAC already answers on the
- * networks an Amiga is likely to be on; the floor target is a 68000 with 1 MB
- * (docs/RESEARCH.md §81). For a stateful-only network, the addon would be
- * wired up here.
+ * networks an Amiga is likely to be on. The floor target is a 68000 with 1 MB
+ * (docs/RESEARCH.md §81). A stateful-only network needs the addon wired up
+ * here.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -84,9 +84,9 @@ LONG ami_netstack_ipv6_enable(AmiNetStack *ns)
     }
 
     /*
-     * The resolver's only route in on an IPv6-only link.  Set directly, as
-     * nx_ip_packet_id is: there is no setter for it and the field is only read
-     * from the IP thread's own advertisement processing.
+     * The only route into the resolver on an IPv6-only link.  Set directly, as
+     * nx_ip_packet_id is: there is no setter, and the field is read only from
+     * the advertisement processing on the IP thread.
      */
     ns->ns_Ip.nx_ipv6_rdnss_notify = ami_ns6_rdnss;
     ns->ns_Ip.nx_ipv6_dnssl_notify = ami_ns6_dnssl;
@@ -111,10 +111,10 @@ LONG ami_netstack_ipv6_enable(AmiNetStack *ns)
  * nxd_ipv6_address_set() is asked for a link-local by being passed a NULL
  * address and a prefix length of 10, and it keeps that 10 in
  * nxd_ipv6_address_prefix_length. 10 is fe80::/10, the RFC 4291 2.5.6
- * allocation the address is carved out of, and NetX Duo wants it there:
+ * allocation the address is carved out of, and NetX Duo wants it there.
  * _nxd_ipv6_interface_find() and _nxd_ipv6_search_onlink() compare a
- * destination against this field, and at /64 our link-local would only be a
- * source for destinations sharing our own interface identifier. So the stored
+ * destination against this field, and at /64 the link-local is a source only
+ * for destinations that share the same interface identifier. So the stored
  * value stays as it is and the reported one is corrected here.
  *
  * What the interface has is a /64: RFC 4291 2.5.1 leaves the low 64 bits to
@@ -150,21 +150,21 @@ static VOID ami_ns6_log_tentative(const char *what, const ULONG addr[4],
 /*
  * An address finished duplicate address detection, one way or the other.
  *
- * RFC 4862 section 5.4 puts DAD ahead of an address being *used*, not ahead of
- * the caller who asked for it. An address is TENTATIVE for the seconds the
- * solicitations take, cannot be a source while it is, and needs nobody to sit
- * over it: a solicitation goes out on the IP thread's one-second periodic and
- * RFC 4862 5.4.5 waits one more before the address is valid, so waiting for
- * the answer inside ami_ns6_configure_interface() charged two seconds per
- * address to the thread that called it, and four when NX_IPV6_DAD_TRANSMITS
- * was 3. That thread is AddNetInterface, which is in the Startup-Sequence, and
- * which on a static-IPv4 interface has otherwise nothing at all to wait for.
- * The wait bought one log line.
+ * RFC 4862 section 5.4 puts DAD ahead of an address being used, and not ahead
+ * of the caller who asked for it. An address is TENTATIVE for the seconds the
+ * solicitations take and cannot be a source while it is. Nothing has to wait
+ * on it: a solicitation goes out on the one-second periodic of the IP thread
+ * and RFC 4862 5.4.5 waits one more before the address is valid, so waiting
+ * for the answer inside ami_ns6_configure_interface() charged two seconds per
+ * address to the calling thread, and four when NX_IPV6_DAD_TRANSMITS was 3.
+ * That thread is AddNetInterface, which is in the Startup-Sequence, and which
+ * on a static-IPv4 interface has nothing else to wait for. The wait bought one
+ * log line.
  *
  * So the line is printed from here instead, on the IP thread, when NetX Duo
- * has the answer. This is also strictly more than the wait could see: an
- * address a router hands out through stateless autoconfiguration arrives long
- * after bring-up has returned, and went unreported entirely.
+ * has the answer. That is more than the wait ever saw: an address a router
+ * hands out through stateless autoconfiguration arrives long after bring-up
+ * has returned, and went unreported entirely.
  */
 static VOID ami_ns6_address_changed(NX_IP *ip_ptr, UINT status,
                                     UINT interface_index, UINT address_index,
@@ -201,9 +201,9 @@ static VOID ami_ns6_address_changed(NX_IP *ip_ptr, UINT status,
     case NX_IPV6_ADDRESS_DAD_FAILURE:
         /*
          * RFC 4862 section 5.4.5: a duplicate link-local is meant to stop IPv6
-         * on the interface, and NetX Duo has already withdrawn the address. It
-         * is worth saying plainly, because the symptom otherwise is IPv6 that
-         * silently does nothing.
+         * on the interface, and NetX Duo has already withdrawn the address.
+         * Logged, because the symptom otherwise is IPv6 that silently does
+         * nothing.
          */
         AMI_WARN("netstack: %s: an IPv6 address is already in use on this "
                  "link and has been given up", name);
@@ -212,11 +212,11 @@ static VOID ami_ns6_address_changed(NX_IP *ip_ptr, UINT status,
     case NX_IPV6_ADDRESS_STATELESS_AUTO_CONFIG:
         /*
          * A router advertisement has just formed this address, and
-         * nx_icmpv6_process_ra.c leaves it TENTATIVE: nothing may use it until
-         * duplicate address detection finishes and the DAD_SUCCESSFUL arm
-         * above runs for the same address.  It used to print the same line as
-         * that arm, so a global address appeared in the log twice and the
-         * first one claimed it was ready seconds before it was.
+         * nx_icmpv6_process_ra.c leaves it TENTATIVE. Nothing must use it
+         * until duplicate address detection finishes and the DAD_SUCCESSFUL
+         * arm above runs for the same address.  It used to print the same line
+         * as that arm, so a global address appeared in the log twice and the
+         * first line claimed it was ready seconds before it was.
          */
         ami_ns6_log_tentative(name, address, prefix);
         ami_netstack_mark("ip6-slaac");
@@ -232,16 +232,17 @@ static VOID ami_ns6_address_changed(NX_IP *ip_ptr, UINT status,
  * Start this interface soliciting a router.
  *
  * nxd_ipv6_enable() seeds these four fields, but only for the interfaces that
- * exist when it runs; nx_ip_interface_attach() joins ff02::1 and seeds none of
+ * exist when it runs. nx_ip_interface_attach() joins ff02::1 and seeds none of
  * them, so an interface arriving through AddInterfaceTagList() has a solicit
  * count of zero and never asks. And nxd_ipv6_stateless_address_autoconfig_
- * enable() cannot cover it: NetX Duo's autoconfiguration status field means
- * "enabled" when zeroed, so the first call returns NX_ALREADY_ENABLED and
- * returns before it would have reset the counter.
+ * enable() cannot cover it: the autoconfiguration status field in NetX Duo
+ * means "enabled" when zeroed, so the first call returns NX_ALREADY_ENABLED
+ * and returns before it resets the counter.
  *
- * Without a solicitation the interface still autoconfigures, off the router's
- * next unsolicited advertisement, which RFC 4861 permits to be half an hour
- * away, and which a router answering solicitations only never sends at all.
+ * Without a solicitation the interface still autoconfigures, off the next
+ * unsolicited advertisement from the router, which RFC 4861 permits to be half
+ * an hour away, and which a router that answers solicitations only never sends
+ * at all.
  */
 static VOID ami_ns6_arm_solicitation(AmiNetStack *ns, UWORD i)
 {
@@ -268,18 +269,18 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
 
     if (cfg->ip6type == AMI_IP6TYPE_OFF)
     {
-        AMI_INFO("netstack: %s: IPv6 disabled by CONFIGURE6", cfg->name);
+        AMI_INFO("netstack: %s: IPv6 switched off by CONFIGURE6", cfg->name);
         return;
     }
 
     /*
      * RFC 8200 section 5 puts a floor of 1280 octets under every link IPv6
      * runs over, and there is no fragmentation below it to fall back on. The
-     * MTU here comes from S2_DEVICEQUERY and may then have been taken further
-     * down by MTU= in DEVS:NetInterfaces, so a driver reporting less, or a
-     * configuration asking for less, would otherwise have left IPv6 nominally
-     * up on a link that cannot carry a conformant packet. IPv4 has no such
-     * floor and stays on the interface.
+     * MTU here comes from S2_DEVICEQUERY and can then have been taken further
+     * down by MTU= in DEVS:NetInterfaces. Without this check, a driver
+     * reporting less, or a configuration asking for less, leaves IPv6
+     * nominally up on a link that cannot carry a conformant packet. IPv4 has
+     * no such floor and stays on the interface.
      */
     if (ns->ns_Ip.nx_ip_interface[i].nx_interface_ip_mtu_size < 1280)
     {
@@ -291,15 +292,15 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
 
     /*
      * Link-local first, always. A NULL address with prefix length 10 tells
-     * NetX Duo to derive fe80::/64 from this interface's MAC
-     * (nxd_ipv6_address_set.c); the 10 is the fe80::/10 prefix the address is
+     * NetX Duo to derive fe80::/64 from the MAC of this interface
+     * (nxd_ipv6_address_set.c). The 10 is the fe80::/10 prefix the address is
      * carved out of, not the /64 the identifier occupies.
      *
      * This also creates the solicited-node multicast group membership, which
      * reaches the SANA-II shim as NX_LINK_MULTICAST_JOIN and thence
      * S2_ADDMULTICASTADDRESS. Many devices answer S2ERR_NOT_SUPPORTED and
      * pass multicast anyway, so the shim logs and swallows that failure
-     * (src/sana2/sana2_driver.c); neighbour discovery still works on them.
+     * (src/sana2/sana2_driver.c). Neighbour discovery still works on them.
      */
     status = nxd_ipv6_address_set(&ns->ns_Ip, (UINT)i, NX_NULL, 10, &index);
     if (status == NX_DUPLICATED_ENTRY)
@@ -309,8 +310,8 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
          * here and everything below it was done then. Not an error: this runs
          * once per boot and again for every interface added at run time, and
          * an interface that was never detached is still holding what the first
-         * pass gave it. `index` is not usable after this, the duplicate
-         * check happens after the free slot has been picked.
+         * pass gave it. `index` is not usable after this, because the
+         * duplicate check happens after the free slot has been picked.
          */
         return;
     }
@@ -321,8 +322,8 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
         return;
     }
 
-    /* Configured, and TENTATIVE until the solicitations are answered or are
-       not; ami_ns6_address_changed() has the answer and reports it. */
+    /* Configured, and TENTATIVE until the solicitations are answered or time
+       out.  ami_ns6_address_changed() has the answer and reports it. */
 
     if (cfg->ip6type == AMI_IP6TYPE_STATIC)
     {
@@ -346,8 +347,8 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
     if (cfg->ip6type == AMI_IP6TYPE_AUTO)
     {
         /*
-         * NX_ALREADY_ENABLED is the normal answer: NetX Duo's per-interface
-         * status field is zero-initialised and zero means enabled, so
+         * NX_ALREADY_ENABLED is the normal answer: the per-interface status
+         * field in NetX Duo is zero-initialised and zero means enabled, so
          * autoconfiguration is on before anyone asks for it. Calling enable()
          * anyway keeps the intent visible here.
          */
@@ -364,16 +365,16 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
     else
     {
         /*
-         * LINKLOCAL and STATIC need an explicit disable, or a router
-         * advertisement would add a global address to an interface the
-         * operator asked to keep off the global Internet. Requires
-         * NX_IPV6_STATELESS_AUTOCONFIG_CONTROL in nx_user.h; see the note
-         * there for what happens without it.
+         * LINKLOCAL and STATIC need an explicit disable. Otherwise a router
+         * advertisement adds a global address to an interface the operator
+         * asked to keep off the global Internet. Requires
+         * NX_IPV6_STATELESS_AUTOCONFIG_CONTROL in nx_user.h, where the note
+         * says what happens without it.
          */
         status = nxd_ipv6_stateless_address_autoconfig_disable(&ns->ns_Ip,
                                                                (UINT)i);
         if (status != NX_SUCCESS)
-            AMI_WARN("netstack: %s: could not switch stateless "
+            AMI_WARN("netstack: %s: cannot switch stateless "
                      "autoconfiguration off (%ld)", cfg->name, (long)status);
     }
 
@@ -443,7 +444,7 @@ BOOL netstack_ipv6_have_global(VOID)
                 continue;
 
             /* RFC 4862 5.4: TENTATIVE is still under duplicate address
-               detection and may not be a source. */
+               detection and must not be a source. */
             if (state == (ULONG)NX_IPV6_ADDR_STATE_TENTATIVE ||
                 state == (ULONG)NX_IPV6_ADDR_STATE_UNKNOWN)
                 continue;
@@ -470,10 +471,10 @@ BOOL netstack_ipv6_address_get(UWORD interface_index, UWORD slot,
         return FALSE;
 
     /*
-     * Walk the interface's own list rather than the flat nx_ipv6_address[]
-     * array: that array is shared between interfaces and the loopback ::1
-     * entry, so indexing into it would report another interface's address as
-     * this one's.
+     * Walk the list of the interface itself rather than the flat
+     * nx_ipv6_address[] array: that array is shared between interfaces and the
+     * loopback ::1 entry, so indexing into it reports the address of another
+     * interface as this one.
      */
     entry = ns->ns_Ip.nx_ip_interface[interface_index]
                 .nxd_interface_ipv6_address_list_head;
@@ -536,12 +537,12 @@ static VOID ami_ns6_copy(const ULONG src[4], ULONG dst[4])
 /*
  * The destination cache remembers the next hop each destination was last sent
  * to, and _nx_ipv6_packet_send() consults it before either list. Left alone, a
- * route added or removed here would not move a packet already going somewhere
- * until the entry aged out, so the caller would see the route in the table and
- * the traffic still on the old path.
+ * route added or removed here does not move a packet already going somewhere
+ * until the entry ages out, so the caller sees the route in the table and the
+ * traffic still on the old path.
  *
- * Marking the slots invalid is what NetX Duo's own _nx_invalidate_destination_entry()
- * does; the ND cache entries the slots point at are left alone.
+ * Marking the slots invalid is what _nx_invalidate_destination_entry() in
+ * NetX Duo does. The ND cache entries the slots point at are left alone.
  */
 static VOID ami_ns6_forget_destinations(AmiNetStack *ns)
 {
@@ -631,7 +632,7 @@ UINT netstack_ipv6_route_add(const ULONG dest[4], ULONG prefix_len,
         ami_ns6_mask(prefix, prefix_len);
 
         /* _nx_ipv6_prefix_list_add_entry() is called from router advertisement
-           processing, which already holds the protection mutex; nothing here
+           processing, which already holds the protection mutex.  Nothing here
            does. */
         tx_mutex_get(&ns->ns_Ip.nx_ip_protection, TX_WAIT_FOREVER);
 
@@ -731,8 +732,8 @@ BOOL netstack_ipv6_source_for(const ULONG dest[4], ULONG addr_out[4])
 
     /*
      * _nxd_ipv6_interface_find() is the same RFC 6724 selection routine the
-     * IPv6 send path uses to fill in an outgoing packet's source, so
-     * getsockname() reports the address the packets will carry.
+     * IPv6 send path uses to fill in the source of an outgoing packet, so
+     * getsockname() reports the address the packets carry.
      */
     scratch[0] = dest[0];
     scratch[1] = dest[1];

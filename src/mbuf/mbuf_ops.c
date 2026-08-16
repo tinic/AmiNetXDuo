@@ -1,19 +1,19 @@
 /*
  * AmiNetXDuo, mbuf chain operations.
  *
- * The seven chain-manipulating vectors. Behaviour follows 4.4BSD's documented
- * semantics for m_adj / m_cat / m_copyback / m_copydata / m_copym / m_prepend
- * / m_pullup, including the two that surprise people:
+ * The seven chain-manipulating vectors. Behaviour follows the documented
+ * 4.4BSD semantics for m_adj / m_cat / m_copyback / m_copydata / m_copym /
+ * m_prepend / m_pullup, including these two:
  *
- *   - mbuf_prepend and mbuf_pullup Free the whole chain when they fail. A
+ *   - mbuf_prepend and mbuf_pullup free the whole chain when they fail. A
  *     caller that writes `if ((m = mbuf_pullup(m, n)) == NULL) mbuf_freem(m);`
  *     double-frees.
  *   - mbuf_adj never frees anything. Emptied mbufs stay in the chain with
  *     m_len 0.
  *
- * Where 4.4BSD panics on a malformed argument (m_copydata past the end of the
- * chain, most obviously) this returns -1 instead: these are called straight
- * from application code across an LVO, on a machine with no memory protection.
+ * Where 4.4BSD panics on a malformed argument, for example m_copydata past the
+ * end of the chain, this returns -1 instead. These are called straight from
+ * application code across an LVO, on a machine with no memory protection.
  *
  * No AmigaOS calls here.
  *
@@ -39,9 +39,9 @@ ULONG ami_mbuf_length(const struct mbuf *m)
 }
 
 /*
- * The span of storage m may move its data around inside, or FALSE when the
- * storage is not exclusively ours: foreign M_EXT, or one of our clusters that
- * mbuf_copym has handed a second reference to.
+ * The span of storage that m can move its data within. FALSE when the storage
+ * is not exclusively ours: foreign M_EXT, or one of our clusters that
+ * mbuf_copym gave a second reference to.
  */
 static BOOL ami_mbuf_span(struct mbuf *m, UBYTE **base, UBYTE **end)
 {
@@ -77,7 +77,7 @@ static LONG ami_mbuf_room(struct mbuf *m)
     return (LONG)(AMI_MBUF_END(m) - AMI_MBUF_BASE(m));
 }
 
-/* TRUE when m's external storage is a cluster we own and may reference-count. */
+/* TRUE when the external storage of m is a cluster we own and can count. */
 static BOOL ami_mbuf_ext_is_ours(struct mbuf *m)
 {
     AmiCluster *cl;
@@ -117,7 +117,7 @@ LONG ami_mbuf_adj(struct mbuf *mp, LONG req_len)
 
     if (req_len >= 0)
     {
-        /* Trim from the front: walk forward emptying mbufs as we go. */
+        /* Trim from the front. Walk forward and empty each mbuf. */
         len = req_len;
 
         for (m = mp; m != NULL && len > 0; )
@@ -156,7 +156,7 @@ LONG ami_mbuf_adj(struct mbuf *mp, LONG req_len)
         if ((mp->m_flags & M_PKTHDR) != 0)
             mp->m_pkthdr.len = keep;
 
-        /* Walk forward handing out `keep` bytes; everything past it is zeroed. */
+        /* Walk forward and give out `keep` bytes. Later mbufs get m_len 0. */
         for (m = mp; m != NULL; m = m->m_next)
         {
             if (m->m_len >= keep)
@@ -187,9 +187,9 @@ LONG ami_mbuf_cat(struct mbuf *m, struct mbuf *n)
     while (n != NULL)
     {
         /*
-         * Compact n into m's trailing free space while it fits and m owns its
-         * storage internally. An M_EXT tail is never compacted into, the
-         * cluster may be shared.
+         * Compact n into the trailing free space of m while it fits and m owns
+         * its storage internally. An M_EXT tail is never compacted into,
+         * because the cluster can be shared.
          */
         if ((m->m_flags & M_EXT) != 0 ||
             (UBYTE *)m->m_data + m->m_len + n->m_len > AMI_MBUF_END(m))
@@ -233,8 +233,8 @@ LONG ami_mbuf_copydata(struct mbuf *m, LONG off, LONG len, APTR cp)
 
     /*
      * Pass one: prove the chain is long enough. Nothing is written to cp
-     * unless the whole copy will succeed, 4.4BSD panics here instead, which
-     * is not an option across an LVO.
+     * unless the whole copy succeeds. 4.4BSD panics here instead, which is
+     * not an option across an LVO.
      */
     p = m;
     o = off;
@@ -305,7 +305,7 @@ LONG ami_mbuf_copyback(struct mbuf *m0, LONG off, LONG len, APTR cp)
     if (len > 0 && cp == NULL)
         return -1;
 
-    /* Walk to the offset, extending with zero-filled mbufs across any gap. */
+    /* Walk to the offset. Any gap is filled with zeroed mbufs. */
     while (off > m->m_len)
     {
         off    -= m->m_len;
@@ -435,8 +435,8 @@ struct mbuf *ami_mbuf_copym(struct mbuf *m, LONG off, LONG len)
 
         if ((m->m_flags & M_EXT) != 0 && ami_mbuf_ext_is_ours(m))
         {
-            /* Share the cluster rather than copy it, the only reason our
-               clusters carry a reference count at all. */
+            /* Share the cluster rather than copy it. That is why our clusters
+               carry a reference count. */
             n->m_ext.ext_buf  = m->m_ext.ext_buf;
             n->m_ext.ext_free = m->m_ext.ext_free;
             n->m_ext.ext_size = m->m_ext.ext_size;
@@ -472,7 +472,7 @@ struct mbuf *ami_mbuf_copym(struct mbuf *m, LONG off, LONG len)
 
     if (head == NULL)
     {
-        /* Legal zero-length copy: hand back an empty chain, not NULL. */
+        /* Legal zero-length copy. Return an empty chain, not NULL. */
         head = want_hdr ? ami_mbuf_gethdr() : ami_mbuf_get();
         if (head == NULL)
             return NULL;
@@ -510,7 +510,7 @@ struct mbuf *ami_mbuf_prepend(struct mbuf *m, LONG len)
     if (len == 0)
         return m;
 
-    /* Cheap path: there is leading slack in storage we own outright. */
+    /* Cheap path. There is leading slack in storage we own outright. */
     if (ami_mbuf_span(m, &base, &end))
     {
         LONG lead = (LONG)((UBYTE *)m->m_data - base);
@@ -551,9 +551,9 @@ struct mbuf *ami_mbuf_prepend(struct mbuf *m, LONG len)
     }
 
     /*
-     * Sit the new data at the far end of the mbuf, longword aligned, so that
-     * a second prepend (another protocol header going on) also gets the cheap
-     * path. Same trick as 4.4BSD's MH_ALIGN.
+     * The new data goes at the far end of the mbuf, longword aligned, so that
+     * a second prepend (another protocol header) also gets the cheap path.
+     * Same as MH_ALIGN in 4.4BSD.
      */
     offset     = (room - len) & ~((LONG)sizeof(LONG) - 1);
     mn->m_data = (APTR)(AMI_MBUF_BASE(mn) + offset);
@@ -588,7 +588,7 @@ struct mbuf *ami_mbuf_pullup(struct mbuf *n, LONG len)
     if ((n->m_flags & M_EXT) == 0 && n->m_next != NULL &&
         (UBYTE *)n->m_data + len <= AMI_MBUF_END(n))
     {
-        /* The head already has room for the whole run; gather into it. */
+        /* The head already has room for the whole run. Gather into it. */
         m    = n;
         n    = n->m_next;
         len -= m->m_len;
@@ -687,7 +687,7 @@ struct mbuf *ami_mbuf_build(const void *src, ULONG len, BOOL want_pkthdr)
 
         if (remaining > (ULONG)room && remaining >= (ULONG)MINCLSIZE)
         {
-            /* Worth a cluster. If none is available, carry on in plain mbufs. */
+            /* Worth a cluster. If none is available, continue in plain mbufs. */
             if (ami_mbuf_clget(n) == 0)
                 room = AMI_MCLBYTES;
         }

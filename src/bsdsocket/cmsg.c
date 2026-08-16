@@ -1,7 +1,7 @@
 /*
  * bsdsocket.library, RFC 3542 ancillary data.
  *
- * The subset worth having, and no more: which interface and local address a
+ * The subset this library implements: which interface and local address a
  * datagram arrived on, what its hop limit was, and which source to answer
  * from.  The routing-header, path-MTU and options families of RFC 3542 are
  * not here and are not planned, docs/BACKLOG.md says which and why.
@@ -11,37 +11,34 @@
  * 4.4BSD shape with msg_control at offset 16 (pinned in transfer.c).  The ABI
  * that had to be settled is in include/aminetxduo/cmsg.h: CMSG_ALIGN is 4.
  *
- * WHERE THE ANSWERS COME FROM
- *
  * NX_PACKET carries both halves already.  nx_packet_ip_header points at the
- * arriving IP header for the life of the packet, the receive path advances
- * nx_packet_prepend_ptr past it rather than dropping it, so the destination
- * address, the TTL and the hop limit are read straight out of the wire bytes
- * rather than reconstructed.  nx_packet_address holds the arrival interface,
- * but NOT the same way in both families: nx_ipv4_packet_receive leaves an
- * NX_INTERFACE * there, while nx_ipv6_packet_receive overwrites it with the
- * NXD_IPV6_ADDRESS * the datagram matched (nx_ipv6_packet_receive.c:300), and
- * the interface is one dereference further on.  bsd_cmsg_ifindex() below is
- * the only place that difference is handled.
- *
- * ALIGNMENT
+ * arriving IP header for the life of the packet, because the receive path
+ * advances nx_packet_prepend_ptr past it rather than drops it.  The
+ * destination address, the TTL and the hop limit are therefore read straight
+ * out of the wire bytes, not reconstructed.  nx_packet_address holds the
+ * arrival interface, but not the same way in both families.
+ * nx_ipv4_packet_receive leaves an NX_INTERFACE * there, while
+ * nx_ipv6_packet_receive overwrites it with the NXD_IPV6_ADDRESS * the
+ * datagram matched (nx_ipv6_packet_receive.c:300), and the interface is one
+ * dereference further on.  bsd_cmsg_ifindex() below is the only place that
+ * difference is handled.
  *
  * cmsg_len is a socklen_t, which is a 32-bit load, and a 68000 takes an
  * address error on an odd one.  A caller's msg_control is whatever it handed
- * us, a `char buf[CMSG_SPACE(n)]` is only byte-aligned as far as the
- * language is concerned, so an odd buffer is reported as MSG_CTRUNC with
- * nothing written rather than faulted on.  cmsg.h's CMSG_BUFFER() is the
+ * us, and a `char buf[CMSG_SPACE(n)]` is only byte-aligned as far as the
+ * language is concerned.  An odd buffer is therefore reported as MSG_CTRUNC
+ * with nothing written, rather than faulted on.  cmsg.h's CMSG_BUFFER() is the
  * declaration that cannot be wrong.
  *
- * Odd, and not "not a multiple of 4".  The test used to be `& 3`, which is the
- * alignment struct cmsghdr would have on a machine that aligns a long to its
- * width.  m68k does not: __alignof__(long) is 2 there, so every m68k object
- * this could describe, a stack local, an AllocVec block, a CMSG_BUFFER,
- * is even, and half of them are 2 mod 4.  `& 3` refused those, which meant it
- * refused CMSG_BUFFER() itself about half the time it was used.  Two bytes
- * short of a longword boundary is a perfectly good place to read a longword
- * from on this machine; one byte is not.  The header now also asks for 4 so
- * the loads are single-cycle on an 020, but the gate is the hardware's.
+ * The test is for an odd address, not for a non-multiple of 4.  It used to be
+ * `& 3`, which is the alignment struct cmsghdr has on a machine that aligns a
+ * long to its width.  m68k does not: __alignof__(long) is 2 there.  Every m68k
+ * object this can describe, a stack local, an AllocVec block, a CMSG_BUFFER,
+ * is even, and half of them are 2 mod 4.  `& 3` refused those, so it refused
+ * CMSG_BUFFER() itself about half the time it was used.  Two bytes short of a
+ * longword boundary is a valid place to read a longword from on this machine.
+ * One byte is not.  The header now also asks for 4 so the loads are
+ * single-cycle on an 020, but the gate is the hardware's.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -59,7 +56,7 @@
 
 /* ---------------------------------------------------------------- the ABI,
  *
- * Every one of these is a number an application will have compiled into it.
+ * Every one of these is a number compiled into an application.
  * A toolchain whose <sys/socket.h> disagrees is a build failure here, the
  * same rule in6.c holds sockaddr_in6 to.
  */
@@ -83,8 +80,8 @@ _Static_assert(CMSG_SPACE(0) == 12 && CMSG_SPACE(1) == 16 &&
 _Static_assert(CMSG_ALIGN(sizeof(struct cmsghdr)) == sizeof(struct cmsghdr),
                "struct cmsghdr needs padding before its data");
 
-/* CMSG_BUFFER() has to deliver what its name promises; m68k will not do it
-   from the union alone.  See the attribute in cmsg.h. */
+/* CMSG_BUFFER() has to deliver the alignment its name states. m68k does not
+   do it from the union alone.  See the attribute in cmsg.h. */
 typedef CMSG_BUFFER(BsdCmsgProbe, 16);
 _Static_assert(__alignof__(BsdCmsgProbe) >= 4,
                "CMSG_BUFFER() is not longword aligned");
@@ -107,11 +104,11 @@ _Static_assert(sizeof(struct icmp6_filter) == 32, "icmp6_filter is not 256 bits"
 /*
  * The arriving IP header, or NULL when `need` bytes of it are not readable.
  *
- * Bounded against nx_packet_append_ptr, not nx_packet_prepend_ptr: on a raw
+ * Bounded against nx_packet_append_ptr, not nx_packet_prepend_ptr.  On a raw
  * IPv4 socket the two are the same address, because raw.c hands the datagram
- * over starting at its own header, and bounding on the prepend pointer would
- * report "no header" for exactly the case where it is most obviously there.
- * The header is always in the first fragment, so the first fragment's append
+ * over at its own header.  A bound on the prepend pointer therefore reports
+ * "no header" for the one case where the header is certainly there.  The
+ * header is always in the first fragment, so the first fragment's append
  * pointer is the right end of the run.
  */
 static const UBYTE *bsd_cmsg_iphdr(NX_PACKET *packet, ULONG need)
@@ -138,12 +135,12 @@ static const UBYTE *bsd_cmsg_iphdr(NX_PACKET *packet, ULONG need)
  *
  * Loopback is numbered here too, and is the whole of NX_MAX_IP_INTERFACES
  * rather than NX_MAX_PHYSICAL_INTERFACES below.  NetX Duo parks it at
- * nx_ip_interface[NX_LOOPBACK_INTERFACE], one past the physical slots, and the
+ * nx_ip_interface[NX_LOOPBACK_INTERFACE], one past the physical slots.  The
  * convention this library settled on is slot + 1, so loopback is
  * NX_LOOPBACK_INTERFACE + 1 and nothing else has to move.  if_indextoname()
- * names it and if_nametoindex() takes the name back, so the number a datagram
- * over ::1 reports is one a caller can resolve and one bsd_cmsg_source_index()
- * accepts on the way out.
+ * names it and if_nametoindex() takes the name back.  The number a datagram
+ * over ::1 reports is therefore one a caller can resolve, and one
+ * bsd_cmsg_source_index() accepts on the way out.
  */
 static ULONG bsd_cmsg_ifindex(NX_IP *ip, NX_PACKET *packet)
 {
@@ -405,8 +402,8 @@ static LONG bsd_cmsg_pktinfo6(struct AmiSocketBase *base, const UBYTE *data,
 /*
  * RFC 3542 6.3.  "The interpretation of the received hop limit ... -1: use
  * kernel default; 0 to 255: use this value; other: return EINVAL."  -1 puts
- * the socket's own IPV6_UNICAST_HOPS back for this datagram, which is what
- * cs_HaveHops being FALSE means.
+ * the socket's own IPV6_UNICAST_HOPS back for this datagram, which is what a
+ * FALSE cs_HaveHops means.
  */
 static LONG bsd_cmsg_hoplimit(struct AmiSocketBase *base, const UBYTE *data,
                               socklen_t len, BsdCmsgSource *out)
@@ -460,7 +457,7 @@ LONG bsd_cmsg_parse(struct AmiSocketBase *base, AmiSocket *sock,
 
     /*
      * The sticky IPV6_PKTINFO is the default a per-datagram one overrides.
-     * Copied whether or not ACW_STICKY6 is set, because clearing the option
+     * Copied whether or not ACW_STICKY6 is set, because a cleared option
      * zeroes the record: cs_Have is the authority, and send()/sendto(), which
      * never come through here, read the same field directly.
      *
@@ -498,18 +495,18 @@ LONG bsd_cmsg_parse(struct AmiSocketBase *base, AmiSocket *sock,
         step = CMSG_ALIGN(hdr->cmsg_len);
 
         /*
-         * TCP is the one socket that cannot carry any of this, and not for want
-         * of a call: a stream's source is fixed when the SYN goes out and every
-         * segment after it carries nx_tcp_socket_connect_interface, so there is
-         * nothing per-write to name.  Naming it at connect() is a different
+         * TCP is the one socket that cannot carry any of this.  A stream's
+         * source is fixed when the SYN goes out, and every segment after it
+         * carries nx_tcp_socket_connect_interface, so there is nothing
+         * per-write to name.  A source named at connect() is a different
          * question and a different file (socket.c, over the fork's
          * nxd_tcp_client_socket_source_connect()).  Per-write is refused here
          * whatever happens there.
          *
-         * Raw is allowed, and the checksum argument that used to refuse it does
-         * not survive: bsd_raw_send_v6() picks the source first and computes the
-         * ICMPv6 checksum over it afterwards, so a named source is the one the
-         * checksum covers.
+         * Raw is allowed, and the checksum argument that used to refuse it
+         * does not survive.  bsd_raw_send_v6() picks the source first and
+         * computes the ICMPv6 checksum over it afterwards, so a named source
+         * is the one the checksum covers.
          */
         if ((sock->as_Flags & ASF_TCP) != 0)
             return bsd_fail(base, AMI_EINVAL);
@@ -542,7 +539,8 @@ LONG bsd_cmsg_parse(struct AmiSocketBase *base, AmiSocket *sock,
         else
         {
             /* Refused rather than ignored, the rule the whole library is held
-               to: a caller asking for something it will not get is told so. */
+               to: a caller that asks for something it does not get is told
+               so. */
             return bsd_fail(base, AMI_EINVAL);
         }
 
@@ -559,17 +557,17 @@ LONG bsd_cmsg_parse(struct AmiSocketBase *base, AmiSocket *sock,
  * The address index nxd_udp_socket_source_send() and
  * nxd_ip_raw_packet_source_send() want.  It is not the same number in the two
  * families: for IPv4 it indexes nx_ip_interface[], for IPv6 nx_ipv6_address[].
- * -1 when the source cannot be resolved, which the caller turns into
- * EADDRNOTAVAIL rather than letting NetX pick, picking is what the option
- * was given to prevent.
+ * -1 when the source cannot be resolved.  The caller turns that into
+ * EADDRNOTAVAIL rather than let NetX pick, which is what the option was given
+ * to prevent.
  *
- * Not bsd_source_select() (socket.c), which produces the same kind of index
- * and is deliberately left alone: it answers "where does this SOCKET send
- * from", from the bound address and the RFC 4007 zone, both standing state.
- * This answers "where does this DATAGRAM send from", and takes a bare
- * interface index, which a bind cannot express, as well as an address.
+ * bsd_source_select() (socket.c) produces the same kind of index and is
+ * deliberately left alone.  It answers "where does this socket send from",
+ * from the bound address and the RFC 4007 zone, both standing state.  This
+ * one answers "where does this datagram send from", and takes a bare
+ * interface index as well as an address, which a bind cannot express.
  * The one thing they must agree on is the +NX_LOOPBACK_IPV6_ENABLED bound
- * below; both have it, and a comment at each.
+ * below.  Both have it, and a comment at each.
  */
 LONG bsd_cmsg_source_index(NX_IP *ip, const BsdCmsgSource *src, BOOL v6)
 {
@@ -594,8 +592,8 @@ LONG bsd_cmsg_source_index(NX_IP *ip, const BsdCmsgSource *src, BOOL v6)
         /*
          * The +NX_LOOPBACK_IPV6_ENABLED matters: nxd_ipv6_enable() parks ::1
          * in the slot past the configurable ones, the same place the loopback
-         * interface sits past the physical ones.  Without it, naming ::1 as a
-         * source is refused for an address the machine plainly has.
+         * interface sits past the physical ones.  Without it, ::1 named as a
+         * source is refused for an address the machine has.
          * nxde_udp_socket_source_send() bounds the index the same way.
          */
         for (i = 0;
@@ -641,8 +639,8 @@ LONG bsd_cmsg_source_index(NX_IP *ip, const BsdCmsgSource *src, BOOL v6)
         UINT i;
 
         /* 127/8 by identity, as bsd_source_select() does it: NetX gives the
-           loopback interface one address out of the block, so 127.0.0.2 would
-           miss on the address compare below. */
+           loopback interface one address out of the block, so 127.0.0.2
+           misses on the address compare below. */
         if ((src->cs_Source.nxd_ip_address.v4 >> 24) == 127UL)
             return (LONG)NX_LOOPBACK_INTERFACE;
 
@@ -664,8 +662,8 @@ LONG bsd_cmsg_source_index(NX_IP *ip, const BsdCmsgSource *src, BOOL v6)
 /*
  * Every option here is either "attach this to recvmsg()" or, for
  * IPV6_PKTINFO, "send from here".  Returns 1 for an optname this file does
- * not own so the caller can go on looking, 0 for done, -1 for done with errno
- * set.
+ * not own, so the caller can continue its search, 0 for done, -1 for done
+ * with errno set.
  */
 
 static LONG bsd_cmsg_flag(struct AmiSocketBase *base, AmiSocket *sock,
@@ -860,7 +858,7 @@ LONG bsd_cmsg_option(struct AmiSocketBase *base, AmiSocket *sock, LONG level,
 
         /*
          * RFC 3542 6.3: the hop limit of one datagram is ancillary data on
-         * sendmsg(), never a sticky option, IPV6_UNICAST_HOPS is the sticky
+         * sendmsg(), never a sticky option. IPV6_UNICAST_HOPS is the sticky
          * one, and in6.c answers it.
          */
         if (optname == IPV6_HOPLIMIT)

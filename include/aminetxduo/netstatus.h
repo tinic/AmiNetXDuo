@@ -5,20 +5,20 @@
  *   segment. A Shell command that links libnetxduo.a gets a second set of NetX
  *   Duo globals, a second NX_IP with no interfaces and a ThreadX kernel that
  *   was never entered, so every question it asks is answered by the wrong
- *   stack, and every NetX Duo call that suspends "the calling thread" reaches
- *   for a scheduler that is not running.
+ *   stack, and every NetX Duo call that suspends the calling thread reaches for
+ *   a scheduler that is not running.
  *
  *   src/tools/netstack_weak.c supplies weak netstack_get()/netstack_ip() stubs
  *   that return NULL, and no command links src/netstack, so in every shipped
- *   build `netstat`, `ping` and ShowNetStatus's live path read NULL and print
- *   "the network is up, but this command cannot read it", which reads like a
- *   pass. See docs/RESEARCH.md 19.6 and 21.
+ *   build `netstat`, `ping` and ShowNetStatus's live path read NULL and report
+ *   the network as up but unreadable, which reads like a pass. See
+ *   docs/RESEARCH.md 19.6 and 21.
  *
  *   src/tools/nettrace.c already solved this: it reaches the capture engine
  *   through the eight published bpf_* LVOs rather than by linking src/bpf/,
- *   "because a tool that linked the archive would get its OWN copy of the
- *   channel table and capture nothing at all". This header is the same answer
- *   for the rest of the stack.
+ *   because a tool that linked the archive would get its own copy of the
+ *   channel table and capture nothing. This header is the same answer for the
+ *   rest of the stack.
  *
  *   It returns a snapshot, not a pointer. AmigaOS has no memory protection, so
  *   a live NX_IP * into another task's structures stays dereferenceable long
@@ -26,16 +26,14 @@
  *   use-after-free of that kind (a teardown path that freed a reply port and
  *   the stack a thread was still running on). Walking NetX Duo's tables also
  *   takes the ThreadX baton, which a Shell command must not hold while it
- *   prints.
- *
- *   So the library copies. NetStackQuery() acquires the baton, fills the caller's
- *   buffer with plain scalars, and releases the baton before returning. Nothing
- *   the caller holds afterwards points into the stack.
+ *   prints. So the library copies. NetStackQuery() acquires the baton, fills
+ *   the caller's buffer with plain scalars, and releases the baton before
+ *   returning. Nothing the caller holds afterwards points into the stack.
  *
  *   These two slots sit past every offset any published bsdsocket ABI names,
  *   past AmiTCP V3, past AmiTCP V4, past Roadshow's extension set and past the
  *   six reserved-for-expansion slots that clib/bsdsocket_protos.h documents
- *   after getnameinfo(). The only way to reach them is on purpose. But if some
+ *   after getnameinfo(). The only way to reach them is on purpose. If some
  *   future vendor allocates the same offset for something else, a caller of
  *   that function arrives here with whatever it had in its registers, and this
  *   call must then do nothing. Wrong magic, wrong version or a buffer too small
@@ -81,7 +79,7 @@ extern "C" {
  * a caller that agrees on the version agrees on the record, so a matched caller
  * never meets it. It is there for the arrival that agreed on nothing.
  *
- * THE NUMBER AND THE SENTENCE ABOVE IT MOVE TOGETHER. Adding an operation
+ * This number and the paragraphs above it move together. Adding an operation
  * without moving this leaves two different header shapes both claiming the same
  * version, and the checks at src/bsdsocket/netstatus.c:1200 and :1448 are exact
  * equality in both directions, so they cannot tell them apart. That has already
@@ -109,10 +107,9 @@ extern "C" {
  * DNS label, a target host is a name, and a TXT record is a set of key=value
  * strings the module hands back semicolon-separated.
  *
- * NETSTATUS_SVC_TXT_LEN is shorter than a TXT record may legally be. A record
+ * NETSTATUS_SVC_TXT_LEN is shorter than a TXT record can legally be. A record
  * past it is truncated rather than dropped, and NETSTATUS_SVC_TXTCUT says so,
- * because a printer that publishes 400 bytes of options is still a printer and
- * the interesting keys are at the front.
+ * because the keys a reader wants are at the front.
  */
 #define NETSTATUS_SVC_NAME_LEN  64
 #define NETSTATUS_SVC_TYPE_LEN  24
@@ -131,26 +128,24 @@ extern "C" {
  * The identity check is not enough on its own. A caller that finds a
  * bsdsocket.library whose lib_IdString says AmiNetXDuo will jump to -0x366, and
  * in the published v0.2.0 library that offset is past the end of the vector
- * table, where MakeLibrary() put the (APTR)-1 terminator. That is a guru, which
- * is a worse answer than the message this interface exists to stop printing.
+ * table, where MakeLibrary() put the (APTR)-1 terminator. That is a guru.
  *
- * Bump this when a *caller of this interface* needs a newer library: when a
+ * Bump this when a caller of this interface needs a newer library: when a
  * netstatus vector is added, or when AMI_NETSTATUS_VERSION moves. Not merely
- * because BSD_LIB_REVISION did: a revision that adds vectors no netstatus
+ * because BSD_LIB_REVISION did. A revision that adds vectors no netstatus
  * caller touches still answers everything here, and refusing it would be a
  * wrong diagnosis.
  *
  * 6 because AMI_NETSTATUS_VERSION is 10 and revision 6 is the first library
  * that speaks it. A revision-5 library answers 9, which the exact-equality
- * check below refuses on every call; without this the refusal arrives as
+ * check below refuses on every call. Without this the refusal arrives as
  * EINVAL from whichever call happened to be first, and reads like the feature
  * being absent rather than like half an install.
  *
  * The version check inside the library catches a mismatched pair too, but only
- * after the call, where it is indistinguishable from the feature being absent
- * ShowNetServices read it as "this library has no mDNS" and told the reader
- * to stop looking. This check runs before any call and says the true thing:
- * finish the install.
+ * after the call, where it is indistinguishable from the feature being absent.
+ * ShowNetServices read it as the library having no mDNS and told the reader to
+ * stop looking. This check runs before any call and says to finish the install.
  */
 #define AMI_NETSTATUS_MIN_REVISION  6
 
@@ -172,15 +167,15 @@ extern "C" {
 #define NETSTATUS_SERVICES     12   /* NetStatusService[]                    */
 #define NETSTATUS_OPENERS      13   /* NetStatusOpener[]                     */
 /*
- * 14 arrived without moving AMI_NETSTATUS_VERSION, and that is the one kind of
- * addition where leaving it alone is right. The rule above is about record
- * shapes: a control block that grows, or a table whose entry grows, gives two
- * libraries the same version number and different bytes, and the exact-equality
- * check cannot tell them apart. A new selector returning a record no older
- * library ever wrote changes no shape. A version-10 library that predates it
- * answers EINVAL, which is a clean refusal a caller can act on -- and
- * src/tools/netstat.c does, by leaving the column out. Bumping instead would
- * have forced every command to ship with the library for a column.
+ * 14 arrived without moving AMI_NETSTATUS_VERSION, which is right for this kind
+ * of addition. The rule above is about record shapes: a control block that
+ * grows, or a table whose entry grows, gives two libraries the same version
+ * number and different bytes, and the exact-equality check cannot tell them
+ * apart. A new selector returning a record no older library ever wrote changes
+ * no shape. A version-10 library that predates it answers EINVAL, which is a
+ * clean refusal a caller can act on, and src/tools/netstat.c acts on it by
+ * leaving the column out. Bumping instead would have forced every command to
+ * ship with the library for a column.
  */
 #define NETSTATUS_TCPSTALL     14   /* NetStatusTcpStall[]                   */
 
@@ -190,8 +185,8 @@ extern "C" {
 #define NETSTATUS_DEST6        15   /* NetStatusDest6[]                      */
 
 /*
- * Every buffer starts with this. The caller fills nsh_Magic and nsh_Version;
- * the library fills the rest and writes as many entries after it as will fit,
+ * Every buffer starts with this. The caller fills nsh_Magic and nsh_Version.
+ * The library fills the rest and writes as many entries after it as will fit,
  * reporting in nsh_Available how many it had. Truncation is therefore
  * detectable rather than silent: nsh_Count < nsh_Available.
  */
@@ -200,7 +195,7 @@ typedef struct NetStatusHeader
     ULONG   nsh_Magic;          /* in:  AMI_NETSTATUS_MAGIC                  */
     UWORD   nsh_Version;        /* in:  the caller's AMI_NETSTATUS_VERSION   */
     UWORD   nsh_Type;           /* out: the selector this answers            */
-    UWORD   nsh_EntrySize;      /* out: sizeof one entry, as the LIBRARY sees it */
+    UWORD   nsh_EntrySize;      /* out: sizeof one entry, the library's own  */
     UWORD   nsh_Count;          /* out: entries written                      */
     UWORD   nsh_Available;      /* out: entries the library had              */
     UWORD   nsh_Reserved;
@@ -229,7 +224,7 @@ typedef struct NetStatusHeader
 /*
  * AMINETXDUO_MDNS, and nss_MdnsName is then the name this machine answers to on
  * the local network.  Clear means the build has no responder and the field is
- * empty; set with an empty field means the responder is there but has not
+ * empty.  Set with an empty field means the responder is there but has not
  * claimed a name yet.
  */
 #define NETSTATUS_SYS_MDNS      0x0010UL
@@ -253,15 +248,16 @@ typedef struct NetStatusSystem
     char    nss_MdnsName[NETSTATUS_NAME_LEN];
     /*
      * Which of the places that can name a machine named this one:
-     * AmiHostnameSource (aminetxduo/config.h). A name is not self-explaining
-     * a remnant ENV:HOSTNAME kept a renamed machine answering to its old
-     * name and nothing said so, and this is the only field that says.
+     * AmiHostnameSource (aminetxduo/config.h). A name is not
+     * self-explaining. A remnant ENV:HOSTNAME kept a renamed machine
+     * answering to its old name and nothing said so, and this is the only
+     * field that says.
      *
      * Zero is AMI_HOSTNAME_NONE and means either that nothing named the
      * machine or that the library predates the field, so a reader reports
-     * "not stated" rather than guessing. It is taken out of nss_Reserved,
-     * which every library has always zeroed, so no version and no minimum
-     * revision move for it.
+     * the source as not stated rather than guessing. It is taken out of
+     * nss_Reserved, which every library has always zeroed, so no version and
+     * no minimum revision move for it.
      */
     ULONG   nss_HostSource;
     /*
@@ -298,7 +294,7 @@ typedef struct NetStatusInterface
     char    nsi_Device[NETSTATUS_DEVICE_LEN];   /* "a2065.device"            */
     ULONG   nsi_Unit;
 
-    /* From the SANA-II shim; all zero unless NETSTATUS_IF_SANA2 is set. */
+    /* From the SANA-II shim, all zero unless NETSTATUS_IF_SANA2 is set. */
     ULONG   nsi_PacketsIn;
     ULONG   nsi_PacketsOut;
     ULONG   nsi_BadData;
@@ -323,7 +319,7 @@ typedef struct NetStatusInterface
 /*
  * The IPv6 addresses each interface holds, one entry per address, in the
  * order NetX Duo keeps them on the interface's own list.  An interface with
- * IPv6 running always has at least its fe80::/64 link-local address; a global
+ * IPv6 running always has at least its fe80::/64 link-local address.  A global
  * one arrives from CONFIGURE6, by advertisement or by hand.
  *
  * An IPv4-only build answers this selector with no entries rather than an
@@ -484,14 +480,14 @@ typedef struct NetStatusStats
 /*
  * Whether the machine was ever held and what the stack currently owns, rather
  * than how much traffic moved.  The tick and baton halves are the ThreadX tick
- * task's own accounting and the baton bracket's counters; neither touches NetX
+ * task's own accounting and the baton bracket's counters.  Neither touches NetX
  * Duo, so this selector answers with the stack up or down.  The memory half is
  * AmiMemStats (aminetxduo/compat.h), which the published health mark points at
  * as well, so `netstat -h` on a wedged machine and this call report the same
  * record.
  *
  * The memory half is what makes a suspected leak answerable.  AvailMem falls
- * for every program on the machine; nsl_AllocLive is ours alone, nsl_Sockets
+ * for every program on the machine.  nsl_AllocLive is ours alone, nsl_Sockets
  * counts the AmiSocket structures the library owns (docs/RESEARCH.md 37.5 was
  * 776 of them), and the nsl_Pool fields are the packet pool, which drains for
  * different reasons and wants a different fix.  Each has a high-water mark
@@ -519,9 +515,9 @@ typedef struct NetStatusStats
  * nsl_TickSkew is how far behind real time the timer wheel is, in ticks: what
  * it has yet to be given plus what nsl_TickLost took off it for good. The
  * ThreadX clock is not in it, that comes from the E-Clock and is true either
- * way, so this is a measure of how late timers are running and of nothing
- * else. nsl_TickSkewPeak is sampled before a backlog is worked off, so it moves
- * on a machine where nothing was ever lost.
+ * way, so this measures how late timers are running and nothing else.
+ * nsl_TickSkewPeak is sampled before a backlog is worked off, so it moves on a
+ * machine where nothing was ever lost.
  *
  * nsl_TickSkewPeak has a floor of one wakeup's worth of ticks: a wakeup is
  * sampled owing every tick period that elapsed since the last one, and the
@@ -595,10 +591,10 @@ typedef struct NetStatusArp
  * nx_ipv6_nd_cache[], NX_IPV6_NEIGHBOR_CACHE_SIZE entries
  * (port/netxduo-amiga/inc/nx_user.h).
  *
- * The state is the part worth reporting.  An ARP entry is resolved or it is
- * not; a neighbour entry says how the stack currently believes the address
- * behaves, and the five states separate "nobody has answered" from "it
- * answered once and we have not checked since" from "we are checking now".
+ * An ARP entry is resolved or it is not.  A neighbour entry says how the stack
+ * currently believes the address behaves, and the five states separate an
+ * address nothing has answered for, one that answered once and has not been
+ * checked since, and one being checked now.
  *
  * An IPv4-only build answers with no entries rather than an error.
  */
@@ -658,8 +654,8 @@ typedef struct NetStatusRoute
  *   2. the default routers, nx_ipv6_default_router_table, destination ::/0.
  *      Everything with nowhere better to go is handed to one of these.
  *
- * A stateless-autoconfigured address is deliberately NOT reported from its own
- * prefix: a router advertisement may set A without L, in which case the address
+ * A stateless-autoconfigured address is deliberately not reported from its own
+ * prefix: a router advertisement can set A without L, in which case the address
  * exists and the prefix is not on link.  The prefix-list entry the same
  * advertisement makes is reported instead, so this table says where packets go
  * rather than which addresses exist.
@@ -694,21 +690,21 @@ typedef struct NetStatusRoute6
 
 /*
  * The destination cache, nx_ipv6_destination_table[].  Where NETSTATUS_ROUTES6
- * reports the two lists a route is DERIVED from, this reports what the stack
- * actually decided, per destination, and it is the first thing
+ * reports the two lists a route is derived from, this reports what the stack
+ * decided, per destination, and it is the first thing
  * _nx_ipv6_packet_send() looks at.
  *
  * It is reported because a full one used to be silent.  A miss on a full table
  * released the packet and returned, out of a VOID function, so a machine that
- * had reached its capacity of distinct destinations simply stopped sending to
- * new ones with no error anywhere -- and two slots go before any user command,
- * to the link-local addresses of the routers this machine answered.  Entries
- * are given up least-recently-used now, but "which destinations are hot, and
- * is the table full" is still the question a reader has to be able to ask.
+ * had reached its capacity of distinct destinations stopped sending to new ones
+ * with no error anywhere.  Two slots go before any user command, to the
+ * link-local addresses of the routers this machine answered.  Entries are given
+ * up least-recently-used now, but a reader still has to be able to ask which
+ * destinations are in use and whether the table is full.
  *
  * nsd6_Age is that answer: uses of the table since this entry was last chosen,
  * so 0 is the entry just used and the largest is the next one to be evicted.
- * It counts uses, not seconds; the table has no clock but its own.
+ * It counts uses, not seconds.  The table has no clock but its own.
  *
  * nsd6_Capacity is the same number in every row, because a count of entries
  * does not say whether the table is full and nothing else here carries the
@@ -802,7 +798,8 @@ typedef struct NetStatusTcpStall
  * NETCTRL_MDNS_BROWSE starts the query, answers arrive on the responder's own
  * thread over the following seconds, and this selector says what has landed by
  * the time it is called. Calling it twice gives two different answers, and
- * neither is "everything on the network", mDNS has no end of results.
+ * neither is a complete list of the network, because mDNS has no end of
+ * results.
  *
  * One thing it does put on the wire: a service whose SRV record arrived without
  * an address record beside it has its target resolved here, because a row with
@@ -810,7 +807,7 @@ typedef struct NetStatusTcpStall
  * reason this selector can take a moment, and it is bounded at two seconds
  * however many such rows the cache holds.
  *
- * It answers with the WHOLE cache, of every type, and not with the type the
+ * It answers with the whole cache, of every type, and not with the type the
  * caller last browsed for: one cache, any number of readers, so a filter here
  * would depend on who else was running. Match on nsv_Type.
  *
@@ -819,7 +816,7 @@ typedef struct NetStatusTcpStall
 
 /* nsv_Flags */
 /*
- * Clear means this row is a service TYPE and nothing more: the answer came
+ * Clear means this row is a service type and nothing more: the answer came
  * from the _services._dns-sd._udp.local enumeration, so something on the
  * network offers that type but no instance of it has been asked for yet.
  * nsv_Name, nsv_Host, nsv_Address, nsv_Port and nsv_Text are then empty.
@@ -850,8 +847,8 @@ typedef struct NetStatusService
  * bsdsocket.library that has not been given back, which is the number the
  * stack goes down at when it reaches zero.
  *
- * It is here so a shutdown can say WHO did not let go. "1 program is still
- * using the network" is a sentence the user cannot act on; "httpd is" is.
+ * It is here so a shutdown can name the program that did not let go, rather
+ * than reporting a count the reader cannot act on.
  *
  * The reference NETCTRL_STACK_HOLD takes belongs to no program and is not a
  * row here. NETSTATUS_SYSTEM's nss_Openers is the row count and nss_OpenCnt
@@ -884,7 +881,7 @@ typedef struct NetStatusOpener
  * selector.
  *
  * Every operation takes the same argument block. Which fields matter is stated
- * per operation below; the rest must be zero, so that giving one a meaning
+ * per operation below. The rest must be zero, so that giving one a meaning
  * later cannot change what an older caller asked for.
  */
 #define NETCTRL_INTERFACE_UP    1   /* nsc_Index                             */
@@ -896,7 +893,7 @@ typedef struct NetStatusOpener
  * derives the interface from the next hop, which must be on an interface's own
  * subnet or the call fails with EINVAL. An entry with the same destination and
  * mask has its next hop replaced rather than being duplicated, and the table
- * holds NX_IP_ROUTING_TABLE_SIZE entries; ENOBUFS past that.
+ * holds NX_IP_ROUTING_TABLE_SIZE entries. ENOBUFS past that.
  */
 #define NETCTRL_ROUTE_ADD       5   /* nsc_Destination/NetMask/Gateway       */
 #define NETCTRL_ROUTE_DELETE    6   /* nsc_Destination/NetMask               */
@@ -916,9 +913,9 @@ typedef struct NetStatusOpener
  *                                             for IPv6 and cannot store one.
  *
  * nsc_Index names the interface. It is required for a link-local next hop,
- * fe80::/64 exists on every interface, so the address alone does not say which
- * and ignored for a prefix, which is a property of the machine's whole
- * prefix list rather than of one interface.
+ * because fe80::/64 exists on every interface and the address alone does not
+ * say which. It is ignored for a prefix, which is a property of the machine's
+ * whole prefix list rather than of one interface.
  *
  * Both invalidate the IPv6 destination cache, which is a per-destination
  * memory of where packets went last time and would otherwise keep sending
@@ -943,7 +940,7 @@ typedef struct NetStatusOpener
  *
  * BROWSE_STOP retires the query. A caller that forgets leaves the machine
  * asking the network the same question every few minutes for as long as the
- * stack is up, so it is not optional; the query also occupies the peer cache
+ * stack is up, so it is not optional. The query also occupies the peer cache
  * that the answers have to land in.
  *
  * ENOSYS on a build without AMINETXDUO_MDNS.
@@ -957,8 +954,8 @@ typedef struct NetStatusOpener
  * NETCTRL_INTERFACE_DOWN stops the traffic and keeps all of that.
  *
  * Refused with EBUSY while anything is still using the interface, counted as
- * TCP connections routed out of it; NETCTRL_F_FORCE overrides, and every such
- * connection is reset. An index is a handle a caller may hold, so removing one
+ * TCP connections routed out of it. NETCTRL_F_FORCE overrides, and every such
+ * connection is reset. An index is a handle a caller can hold, so removing one
  * interface does not renumber the others.
  */
 #define NETCTRL_INTERFACE_REMOVE 16 /* nsc_Index, nsc_Flags                  */
@@ -973,10 +970,10 @@ typedef struct NetStatusOpener
  * This reads a file, so it must be called from a Process. ENOENT when there is
  * no such file or it cannot be parsed, EEXIST when the stack already has an
  * interface of that name, ENOSPC when every interface slot is taken, ENXIO or
- * EIO when the SANA-II device would not open or would not answer.
+ * EIO when the SANA-II device did not open or did not answer.
  *
  * The address is not waited for. A lease takes seconds to arrive and the
- * caller is the one with a Process to wait in; read NETSTATUS_INTERFACES until
+ * caller is the one with a Process to wait in. Read NETSTATUS_INTERFACES until
  * nsi_Address is set, or give up, as AddNetInterface does with its TIMEOUT.
  */
 #define NETCTRL_INTERFACE_ADD   17  /* nsc_Name                              */
@@ -991,12 +988,12 @@ typedef struct NetStatusOpener
  * which kept the network up and left a base behind on every invocation.
  *
  * This says the same thing without the base: after it returns, the library
- * holds a reference of its own and the caller may CloseLibrary() normally. It
- * is idempotent and costs nothing on the second call, so a command may ask
+ * holds a reference of its own and the caller can CloseLibrary() normally. It
+ * is idempotent and costs nothing on the second call, so a command can ask
  * every time without accumulating anything.
  *
  * There is no matching release. The reference is permanent for the life of the
- * library, which is what a machine whose interfaces came up at boot wants; an
+ * library, which is what a machine whose interfaces came up at boot wants. An
  * expunge is declined while it is held, as it was while the old open was
  * leaked. ENETDOWN if there is no stack to hold.
  */
@@ -1009,8 +1006,8 @@ typedef struct NetStatusOpener
  * nsc_Index names the interface. nsc_Destination is the new address,
  * nsc_NetMask the new mask and nsc_Gateway the new default gateway, and each is
  * applied only when its NETCTRL_F_ bit is set in nsc_Flags: 0.0.0.0 is a thing
- * a caller may legitimately ask for, so it cannot double as "leave this one
- * alone".
+ * a caller can legitimately ask for, so it cannot double as a request to leave
+ * that field alone.
  *
  * The address and the mask are set together in one NetX Duo call even when only
  * one of them was given, because nx_ip_interface_address_set() takes both and
@@ -1027,7 +1024,7 @@ typedef struct NetStatusOpener
  *
  * EADDRNOTAVAIL for an address NetX Duo would not take, EINVAL for a gateway it
  * would not take, ENXIO for an interface index that is not attached. Nothing is
- * applied by a call that fails on the address; a call that sets the address and
+ * applied by a call that fails on the address. A call that sets the address and
  * then fails on the gateway reports the gateway and keeps the address, which is
  * the half that was asked for first and the half a caller can see.
  */
@@ -1038,12 +1035,12 @@ typedef struct NetStatusOpener
  * machine. Before these, the only way to make a lease happen again was
  * Offline/Online or NetShutdown, which restarts every interface there is.
  *
- * All three take nsc_Index; START also reads nsc_Destination.
+ * All three take nsc_Index. START also reads nsc_Destination.
  *
  *   START    ask for a lease on an interface that has none. This is what
  *            follows a RELEASE, and what a machine moved to another network
  *            needs. EBUSY while an allocation is already in progress on that
- *            interface; already bound is NOT busy and starts again.
+ *            interface. Already bound is not busy and starts again.
  *
  *            NETCTRL_F_ADDRESS makes nsc_Destination the address to ask the
  *            server for. It is a wish rather than a demand: DISCOVER is still
@@ -1077,28 +1074,27 @@ typedef struct NetStatusOpener
  * Offer nsc_HostName to the running stack as this machine's name, at the rank
  * of ENV:HOSTNAME.
  *
- * An OFFER and not an assignment, and that word is the whole design. The name
- * comes from four places, ranked (AmiHostnameSource in aminetxduo/config.h):
- * an interface file's ID=, then ENV:HOSTNAME, then DHCP option 12, then
- * DEVS:Internet/name_resolution. ami_config_hostname_offer() takes a name only
- * from a source at least as strong as the one that named the machine already,
- * and this goes through it, so a machine named by its DHCP server keeps that
- * name and this call is refused with EPERM. The caller then has something true
- * to say -- "DHCP named this machine, and it outranks ENV:HOSTNAME" -- rather
- * than a name that appears to have been set and is not the one gethostname()
- * answers.
+ * An offer and not an assignment. The name comes from four places, ranked
+ * (AmiHostnameSource in aminetxduo/config.h): an interface file's ID=, then
+ * ENV:HOSTNAME, then DHCP option 12, then DEVS:Internet/name_resolution.
+ * ami_config_hostname_offer() takes a name only from a source at least as
+ * strong as the one that named the machine already, and this goes through it,
+ * so a machine named by its DHCP server keeps that name and this call is
+ * refused with EPERM. The caller can then report which source holds the name,
+ * rather than a name that appears to have been set and is not the one
+ * gethostname() answers.
  *
  * The rank is fixed at ENV:HOSTNAME because that is the file the caller writes.
  * A caller that could pick its own rank could name the machine at
  * name_resolution rank without anything in DEVS:Internet saying so, and the
  * next boot would undo it with no record of what had happened.
  *
- * This changes the RUNNING stack only. Nothing here writes a file; the command
+ * This changes the running stack only. Nothing here writes a file. The command
  * that calls it writes ENV:HOSTNAME and ENVARC:HOSTNAME itself, and the two
  * halves are separate because one of them works with the stack down.
  *
  * EINVAL for an empty name, EPERM when a stronger source holds, ENETDOWN when
- * there is no stack. The name is NOT validated here beyond being non-empty:
+ * there is no stack. The name is not checked here beyond being non-empty:
  * ami_config_hostname_offer() checks only the sources that were never required
  * to be host names, and the caller is the one that can say which rule a name
  * broke.
@@ -1108,8 +1104,8 @@ typedef struct NetStatusOpener
 /*
  * Answer .local on one interface, or stop. nsc_Index names it and
  * NETCTRL_F_MDNS in nsc_Flags is the direction: set turns the responder on,
- * clear turns it off. A switch and not a field, so there is no third state to
- * mean "leave it".
+ * clear turns it off. A switch and not a field, so there is no third state
+ * that means leave it unchanged.
  *
  * This is what MDNS= in DEVS:NetInterfaces asked for at boot, asked for again
  * while the machine is running. Until this existed the flag NETSTATUS_IF_MDNS
@@ -1117,24 +1113,24 @@ typedef struct NetStatusOpener
  * interface joined no group, probed for no name and answered nothing while
  * saying it did.
  *
- * ON creates the responder if no interface had asked for one yet -- the module
- * is not created at boot when nothing wants it, which is where its saving is --
- * then joins 224.0.0.251 on that interface and probes for <HOSTNAME>.local
- * there (RFC 6762 8). The services in DEVS:Internet/service_discovery are
- * registered on the interface the first time it is enabled and not again, so
- * an off/on pair re-announces them rather than duplicating them.
+ * Turning it on creates the responder if no interface had asked for one yet --
+ * the module is not created at boot when nothing wants it, which is where its
+ * saving is -- then joins 224.0.0.251 on that interface and probes for
+ * <HOSTNAME>.local there (RFC 6762 8). The services in
+ * DEVS:Internet/service_discovery are registered on the interface the first
+ * time it is enabled and not again, so an off/on pair re-announces them rather
+ * than duplicating them.
  *
- * OFF sends the RFC 6762 10.1 goodbye, the records re-announced with a TTL of
- * zero so every cache on the link drops the name at once, then leaves the
- * group. The responder object stays: the goodbye is transmitted by its own
- * thread over the following 750 ms, and deleting it here would be the one way
- * to guarantee the goodbye never left.
+ * Turning it off sends the RFC 6762 10.1 goodbye, the records re-announced with
+ * a TTL of zero so every cache on the link drops the name at once, then leaves
+ * the group. The responder object stays: the goodbye is transmitted by its own
+ * thread over the following 750 ms, and deleting it here would guarantee the
+ * goodbye never left.
  *
  * Neither direction waits. Probing is three packets 250 ms apart, so a name is
- * claimed about a second after ON returns; NETSTATUS_INTERFACES' MDNS flag is
- * true from the moment the responder is enabled, which is what "answering
- * .local here" means, and NETSTATUS_SYSTEM's nss_MdnsName is what says the
- * probe finished.
+ * claimed about a second after the call returns. NETSTATUS_INTERFACES' MDNS
+ * flag is true from the moment the responder is enabled, and
+ * NETSTATUS_SYSTEM's nss_MdnsName is what says the probe finished.
  *
  * ENXIO for an interface index that is not attached, ENETDOWN with no stack,
  * EIO when the module refused, ENOMEM when the responder could not be created,
@@ -1157,11 +1153,11 @@ typedef struct NetStatusOpener
  * signals wakes up, which is what both already do when the user presses
  * Ctrl-C. nsc_Count comes back with how many were signalled.
  *
- * It does NOT close anybody's sockets, unblock the library, or touch a task
+ * It does not close anybody's sockets, unblock the library, or touch a task
  * beyond that one signal. A program that ignores it keeps its sockets and
- * keeps the library open, which is exactly what every program did before this
- * existed; the caller learns that from NETSTATUS_OPENERS afterwards and can
- * say which program it was.
+ * keeps the library open, which is what every program did before this existed.
+ * The caller learns that from NETSTATUS_OPENERS afterwards and can say which
+ * program it was.
  *
  * The caller's own base is skipped, and so is an opener whose task has since
  * exited (its base is on the list for good, and Signal() on a freed Task is a
@@ -1169,8 +1165,8 @@ typedef struct NetStatusOpener
  *
  * RELEASE gives back the reference NETCTRL_STACK_HOLD took, so the last
  * CloseLibrary() shuts the stack down instead of finding the library holding
- * itself up. Until this existed there was no way to give it back and
- * "NetShutdown, then a reboot" was the documented sequence. It is idempotent,
+ * itself up. Until this existed there was no way to give it back, and the
+ * documented sequence was NetShutdown followed by a reboot. It is idempotent,
  * a stack that is not held is not an error, and it refuses when the caller is
  * the only opener left: dropping it there would tear the stack down inside the
  * call rather than at the close, with the caller's own base still live.
@@ -1222,7 +1218,7 @@ typedef struct NetStatusControl
      * (RFC 1123 2.1, one label), so putting one in the other would cap a host
      * name at a width that has nothing to do with host names.
      *
-     * At the END of the block, and the block therefore grows. That is why
+     * At the end of the block, and the block therefore grows. That is why
      * AMI_NETSTATUS_VERSION moved: the library refuses any version but its own
      * and checks the caller's size against its own sizeof, so a caller built
      * against the shorter block cannot reach this and cannot be misread as

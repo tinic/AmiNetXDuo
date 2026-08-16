@@ -3,17 +3,16 @@
  *
  * Kept out of tool_diag.c, which is in TOOLS_COMMON_SOURCES and so linked by
  * every command: this material is 3.8 KB of prose plus a table of sixteen
- * driver names.  `whois` carried "a2065.device ... uaenet.device" and "the
- * router or switch at the other end is powered on" with no way to reach the
- * code that prints them.
+ * driver names.  `whois` carried the whole device-name table and the cable
+ * advice that goes with it, with no way to reach the code that prints them.
  *
- * --gc-sections does collect the dead functions; it cannot collect their
+ * --gc-sections does collect the dead functions. It cannot collect their
  * strings.  On m68k-amigaos there is no .rodata: string literals go into the
  * plain `.text`, pooled, while -ffunction-sections gives each function its own
  * `.text.<name>`.  One surviving string anchors the whole pool.  Measured, and
  * every flag that claims to fix it was tried:
  *
- *   -fdata-sections        acts on named data objects; there are none here.
+ *   -fdata-sections        acts on named data objects, and there are none here.
  *                          Also gives the `$VER:` tag a section of its own
  *                          that nothing references, so every command silently
  *                          loses its version string (cmake/check-version-tag
@@ -21,7 +20,7 @@
  *   -fno-merge-constants   unpools literals from mergeable .rodata.str1.1
  *                          sections, which this target never creates.  No
  *                          effect: all 18 device names still present.
- *   -flto                  would drop them before sections are assigned; this
+ *   -flto                  would drop them before sections are assigned. This
  *                          binutils has no LTO plugin ("plugin needed to
  *                          handle lto object").
  *
@@ -48,7 +47,7 @@
 
 #include "aminetxduo/compat.h"
 
-/* Same directory as tool_diag.c uses; duplicated rather than exported,
+/* Same directory as tool_diag.c uses, duplicated rather than exported,
    because one string is cheaper than a header for one constant. */
 #define DIAG_DIR_NETWORKS     "DEVS:Networks"
 
@@ -57,7 +56,7 @@ extern const char *const diag_device_dirs[];
 extern BOOL diag_is_resident(const char *device);
 
 /*
- * SANA-II drivers known by name, used only to look harder; a driver not on this
+ * SANA-II drivers known by name, used only to look harder. A driver not on this
  * list is still found by the DEVS:Networks scan. This catches a machine whose
  * driver is already in memory (loaded from a Zorro ROM, or by an earlier stack)
  * with nothing on disk.
@@ -209,11 +208,11 @@ VOID tool_explain_device(const char *device, ULONG unit, const char *card)
     LONG        probe;
 
     /*
-     * CARD= first, because every answer below it would be wrong.  A driver
-     * covering a family of boards opens on UNIT alone, so an unpinned probe
-     * succeeds on the wrong card and prints "opens perfectly well" at someone
-     * whose interface just refused to come up.  The pinned probe is the one
-     * the stack made, and this is the one line that names what was asked for.
+     * CARD= comes first, because every answer below it depends on it. A driver
+     * that covers a family of boards opens on UNIT alone, so an unpinned probe
+     * succeeds on the wrong card and reports that the unit opens, at someone
+     * whose interface just refused to come up. The pinned probe is the one the
+     * stack made, and this is the one line that names what was asked for.
      */
     if (card != NULL && *card != '\0' &&
         tool_device_probe(device, unit, card) != 0 &&
@@ -247,7 +246,7 @@ VOID tool_explain_device(const char *device, ULONG unit, const char *card)
      * unit is right and the card answered, so none of the advice below about
      * missing files or wrong unit numbers applies, wherever the file turned out
      * to be. This is the case AddNetInterface reaches when a PCMCIA card is in
-     * the slot and will not initialise, and it used to print "there is no
+     * the slot and will not initialise, and it used to print "There is no
      * <driver> on this machine" at someone whose driver had just run.
      */
     if (probe == TOOL_PROBE_REFUSED)
@@ -258,7 +257,7 @@ VOID tool_explain_device(const char *device, ULONG unit, const char *card)
 
     if (where == NULL && probe == 0)
     {
-        tool_printf("  %s unit %lu opens, and no driver file was found in the\n",
+        tool_printf("  %s unit %lu opens, and no driver file was found.\n",
                     (LONG)device, unit);
         return;
     }
@@ -283,21 +282,21 @@ VOID tool_explain_device(const char *device, ULONG unit, const char *card)
         return;
     }
 
-    /* Probed above, before the absence branch: what it answered distinguishes
-       "would not open" from "the card is on unit 0, not unit 1", which is the
+    /* Probed above, before the absence branch: what it answered separates
+       "did not open" from "the card is on unit 0, not unit 1", which is the
        usual mistake. */
     if (probe == 0)
     {
-        tool_printf("  %s unit %lu opens perfectly well on its own, so the\n",
+        tool_printf("  %s unit %lu opens on its own, so the card and the\n",
                     (LONG)device, unit);
-        tool_printf("  card and the driver are not the problem.  Something else\n");
-        tool_printf("  stopped the stack: check the interface file for a wrong\n");
-        tool_printf("  ADDRESS or CONFIGURE line, and the debug log for what\n");
-        tool_printf("  failed after the device opened.\n");
+        tool_printf("  driver are not the problem.  Something else stopped the\n");
+        tool_printf("  stack.  Check the interface file for a wrong ADDRESS or\n");
+        tool_printf("  CONFIGURE line.  Check the debug log for what failed\n");
+        tool_printf("  after the device opened.\n");
         return;
     }
 
-    tool_printf("  %s is installed (%s) but unit %lu would not open.\n",
+    tool_printf("  %s is installed (%s) but unit %lu did not open.\n",
                 (LONG)device, (LONG)where, unit);
 
     if (unit != 0 && tool_device_probe(device, 0, card) == 0)

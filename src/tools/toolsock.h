@@ -45,8 +45,8 @@ typedef struct ToolSockAddr
  * The AF_INET6 shape, as this NDK spells it: no sin6_len, so byte 0 is the
  * family. src/bsdsocket/in6.c pins every offset with _Static_assert and
  * bsd_sa_family() reads byte 0 plus the declared length, which is why the two
- * structs can share the union below without ambiguity, a sockaddr_in's byte
- * 0 is its length, 16, and never 23.
+ * structs can share the union below without ambiguity. A sockaddr_in's byte 0
+ * is its length, 16, and never 23.
  */
 typedef struct ToolSockAddr6
 {
@@ -107,10 +107,9 @@ typedef struct ToolAddrInfo
 #define TOOL_AI_NUMERICHOST 4
 
 /*
- * The two getaddrinfo() verdicts this file acts on, from netdb.h:189.  A
- * lookup that came back "no such name" is worth a second question; one that
- * came back "try again" was never answered and asking twice only doubles the
- * wait.
+ * The two getaddrinfo() verdicts this file acts on, from netdb.h:189.
+ * EAI_NONAME is worth a second question.  EAI_AGAIN means the lookup was never
+ * answered, and asking twice only doubles the wait.
  */
 #define TOOL_EAI_NONAME    -2
 #define TOOL_EAI_AGAIN     -3
@@ -161,7 +160,7 @@ typedef struct ToolAddrInfo
 /* IPv6, for the commands that build their own ICMPv6. */
 #define TOOL_IPPROTO_ICMPV6     58
 #define TOOL_IPPROTO_IPV6       41
-/* Both numberings are accepted by this library; see bsdsocket_internal.h. */
+/* Both numberings are accepted by this library.  See bsdsocket_internal.h. */
 #define TOOL_IPV6_UNICAST_HOPS   4
 #define TOOL_IPV6_TCLASS        61
 
@@ -188,12 +187,12 @@ BOOL tool_fd_isset(const ToolFdSet *set, LONG fd);
 /* ---------------------------------------------------------- the library --- */
 
 /*
- * Open bsdsocket.library, which starts the network, the library is
- * self-starting, and print an explanation when it will not.  NULL on
+ * Open bsdsocket.library, which starts the network because the library is
+ * self-starting, and print an explanation when it does not open.  NULL on
  * failure, nothing printed on success.
  *
  * Not tool_require_stack(): these commands exist to use the network, so they
- * may bring it up.
+ * bring it up.
  */
 struct Library *tool_socket_open(VOID);
 
@@ -221,9 +220,9 @@ LONG  tool_sock_close(struct Library *base, LONG s);
 LONG  tool_sock_errno(struct Library *base);
 
 /*
- * WaitSelect() with the full set of masks.  Any of the three sets may be
- * NULL, and so may the timeout, which then means "wait forever".  Returns the
- * number of ready descriptors, 0 on timeout, -1 on error.
+ * WaitSelect() with the full set of masks.  Any of the three sets can be
+ * NULL, and so can the timeout, which then means no ceiling at all.  Returns
+ * the number of ready descriptors, 0 on timeout, -1 on error.
  */
 LONG  tool_sock_select(struct Library *base, LONG nfds, ToolFdSet *readfds,
                        ToolFdSet *writefds, ToolTimeval *tv);
@@ -269,7 +268,7 @@ BOOL  tool_sock_have_ipv6(struct Library *base);
 
 /*
  * A resolved endpoint, either family. The v4 address is in host order because
- * that is what ami_config_format_ip() and the rest of the tools use; the v6
+ * that is what ami_config_format_ip() and the rest of the tools use.  The v6
  * address is the sixteen wire bytes, because nothing here interprets them.
  */
 typedef struct ToolAddr
@@ -303,7 +302,7 @@ BOOL  tool_sock_addr_get(const ToolSockAddrAny *sa, ToolAddr *out);
 UWORD tool_sock_addr_port(const ToolSockAddrAny *sa);
 BOOL  tool_sock_addr_same(const ToolSockAddrAny *a, const ToolSockAddrAny *b);
 
-/* Printable, both families.  Never fails; writes "?" if it cannot. */
+/* Printable, both families.  Never fails, and writes "?" if it cannot. */
 VOID tool_addr_text(struct Library *base, const ToolAddr *addr,
                     char *buf, ULONG buflen);
 VOID tool_sock_addr_text(struct Library *base, const ToolSockAddrAny *sa,
@@ -313,7 +312,7 @@ VOID tool_sock_addr_text(struct Library *base, const ToolSockAddrAny *sa,
  * A literal of either family as itself, anything else through the library's
  * own getaddrinfo() with AF_UNSPEC, so an IPv6 answer is preferred when the
  * machine has IPv6 and the name has an AAAA.  Prints the failure and returns
- * FALSE; on success nothing is printed.
+ * FALSE.  On success nothing is printed.
  *
  * `want` is TOOL_AF_UNSPEC, or one family to insist on.  Insisting says which
  * of the two failures happened: "has no IPv6 address" when the name resolves
@@ -355,9 +354,9 @@ BOOL tool_arg_family(LONG four, LONG six, LONG *want);
 
 /*
  * TRUE when `host` has no address of `want` but does have one of the other
- * family, so a caller that did its own getaddrinfo() can tell "no AAAA" from
- * "no such name".  Costs a lookup; ask only after one has already failed, and
- * only when it failed with a verdict rather than a timeout.
+ * family, so a caller that did its own getaddrinfo() can tell a missing AAAA
+ * from a missing name.  Costs a lookup, so ask only after one has already
+ * failed, and only when it failed with a verdict rather than a timeout.
  */
 BOOL tool_sock_family_absent(struct Library *base, const char *host, LONG want);
 
@@ -366,7 +365,7 @@ VOID tool_sock_say_no_family(const char *host, LONG want);
 
 /*
  * Strip one layer of brackets from an IPv6 literal written the URL way.
- * "[::1]" becomes "::1"; anything else is returned unchanged.  The result
+ * "[::1]" becomes "::1", and anything else is returned unchanged.  The result
  * points either into `host` or into `buf`.
  */
 const char *tool_host_unbracket(const char *host, char *buf, ULONG buflen);
@@ -398,12 +397,12 @@ VOID tool_sock_fail_why(struct Library *base, const char *what,
 /* ---------------------------------------------------------- connecting --- */
 
 /*
- * connect(), with a ceiling on how long it may take.
+ * connect(), with a ceiling on how long it can take.
  *
  * The plain call blocks for the stack's whole SYN schedule, 191 s on ours,
  * and a command with a timeout of its own cannot cut that short.  With
  * `timeout` the socket goes non-blocking, the connect returns EINPROGRESS,
- * and WaitSelect() watches the write set; SO_ERROR then says whether the
+ * and WaitSelect() watches the write set.  SO_ERROR then says whether the
  * handshake finished or failed.  0 means the ceiling is the stack's.
  *
  * 0 on success, -1 on failure with the errno in *why, TOOL_CONNECT_TIMEDOUT
@@ -436,7 +435,7 @@ typedef struct ToolConnect
  *
  * A name with an AAAA and an A gets both tried, so a machine on a network
  * whose IPv6 goes nowhere still reaches the service.  Every address but the
- * last is given a short trial first; the last keeps the caller's whole
+ * last is given a short trial first.  The last keeps the caller's whole
  * timeout, so a slow path is not abandoned for a fast failure.
  *
  * The socket on success, else one of the negative codes above, with *chosen
@@ -455,7 +454,7 @@ LONG tool_sock_connect_host(struct Library *base, const char *host,
  *
  *   * an interactive stream (a Shell window) is put in RAW mode and read one
  *     keystroke at a time behind WaitForChar(), the only way to get
- *     character-at-a-time out of the Amiga console;
+ *     character-at-a-time out of the Amiga console,
  *   * anything else, a file, NIL:, a redirection, is read in blocks, since
  *     a file read returns immediately.
  *

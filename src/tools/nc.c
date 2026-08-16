@@ -8,9 +8,9 @@
  *   nc HOST PORT      connect, and copy standard input to it and it to
  *                     standard output until one end stops.
  *   nc -l PORT        listen instead, and do the same with the first caller.
- *   nc -l -k PORT     the same, but come back for the next caller; Ctrl-C ends
+ *   nc -l -k PORT     the same, but come back for the next caller. Ctrl-C ends
  *                     it.
- *   nc -z HOST PORT   connect, say whether it worked, and stop.  PORT may be
+ *   nc -z HOST PORT   connect, say whether it worked, and stop.  PORT can be
  *                     a range, "20-25", which is a port scan.
  *   nc -4 / nc -6     pin the family a name resolves to.  Without either, the
  *                     library answers AF_UNSPEC and prefers IPv6 where the
@@ -91,7 +91,7 @@ typedef struct NcOptions
     BOOL    crlf;
     BOOL    keep;                   /* -k: serve again after each client    */
     LONG    family;                 /* -4/-6, else TOOL_AF_UNSPEC           */
-    ULONG   timeout;                /* seconds; 0 means "no limit"          */
+    ULONG   timeout;                /* seconds, 0 means no limit            */
     UWORD   localport;
 } NcOptions;
 
@@ -107,7 +107,7 @@ static BOOL parse_range(const char *text, UWORD *lo, UWORD *hi)
 
     if (text == NULL || text[0] < '0' || text[0] > '9')
     {
-        tool_error("a port range has to be numbers, not \"%s\"", (LONG)text);
+        tool_error("a port range must be numbers, not \"%s\"", (LONG)text);
         return FALSE;
     }
 
@@ -202,13 +202,13 @@ static LONG nc_shovel(struct Library *sb, LONG sock, const NcOptions *opt)
                 /*
                  * -N: end of input sends a FIN, so a far end waiting for the
                  * end of the request can answer it.  Off by default, as in
-                 * OpenBSD nc since 2015; HTTP/1.0 and other "send a file,
+                 * OpenBSD nc since 2015. HTTP/1.0 and other "send a file,
                  * then read the reply" protocols need it.
                  *
                  * This switch found the half-close defect in
                  * bsdsocket.library, where a same-machine shutdown(SHUT_WR)
                  * wedged the caller past Ctrl-C.  Fixed in the library, not
-                 * here; docs/RESEARCH.md has the bisect.
+                 * here. docs/RESEARCH.md has the bisect.
                  */
                 if (!opt->udp && !wrote_eof)
                 {
@@ -217,7 +217,7 @@ static LONG nc_shovel(struct Library *sb, LONG sock, const NcOptions *opt)
 
                     if (opt->verbose)
                     {
-                        tool_printf("end of input; the write half is "
+                        tool_printf("end of input, so the write half is "
                                     "closed\n");
                         (VOID)Flush(Output());
                     }
@@ -305,10 +305,10 @@ static LONG nc_shovel(struct Library *sb, LONG sock, const NcOptions *opt)
             }
 
             /*
-             * Ready, and then nothing there: select() may wake for a state
+             * Ready, and then nothing there: select() can wake for a state
              * change rather than for data.  A bare `continue` would spin at
-             * full CPU and never wait, so no timeout could end it; count this
-             * as an idle tick and pace it like one.
+             * full CPU and never wait, so no timeout could end it. This counts
+             * as an idle tick and is paced like one.
              */
             ready = 0;
             (VOID)tool_delay_ticks(2);      /* ~40 ms, near the poll period */
@@ -320,7 +320,7 @@ static LONG nc_shovel(struct Library *sb, LONG sock, const NcOptions *opt)
             if (idle_limit != 0 && idle >= idle_limit)
             {
                 if (opt->verbose)
-                    tool_error("nothing for %lu seconds; stopping",
+                    tool_error("nothing for %lu seconds, so stopping",
                                opt->timeout);
                 rc = RETURN_WARN;
                 break;
@@ -448,10 +448,10 @@ static LONG nc_listen(struct Library *sb, const NcOptions *opt,
         tool_printf("listening on port %ld\n", (LONG)port);
 
     /*
-     * accept() blocks, and a blocked accept() cannot see Ctrl-C, so it is
-     * armed through WaitSelect() first, a listening socket becomes readable
-     * exactly when there is a connection to take, which gives the break a
-     * place to be noticed and TIMEOUT somewhere to apply.
+     * accept() blocks, and a blocked accept() cannot see Ctrl-C, so
+     * WaitSelect() runs first. A listening socket becomes readable exactly
+     * when there is a connection to take, which gives the break a place to be
+     * noticed and TIMEOUT somewhere to apply.
      */
     waited = 0;
     for (;;)
@@ -638,7 +638,7 @@ int main(int argc, char **argv)
     opt.crlf      = (args[ARG_CRLF]    != 0) ? TRUE : FALSE;
     opt.keep      = (args[ARG_KEEP]    != 0) ? TRUE : FALSE;
 
-    /* -4 and -6 pin the family the name resolves to; without either, the
+    /* -4 and -6 pin the family the name resolves to. Without either, the
        library's getaddrinfo() answers AF_UNSPEC and prefers IPv6 where the
        machine has it and the name has an AAAA. */
     if (!tool_arg_family(args[ARG_IPV4], args[ARG_IPV6], &opt.family))
@@ -671,7 +671,7 @@ int main(int argc, char **argv)
     }
     else if (portspec == NULL)
     {
-        tool_error("which port?");
+        tool_error("no port was given");
         tool_usage("[-4|-6] <host> <port>  |  -l [-k] <port>  |  -z <host> <port>[-<port>]",
                    "Copies standard input to a socket and the socket to "
                    "standard output.");
@@ -681,14 +681,14 @@ int main(int argc, char **argv)
 
     if (!opt.listen && host == NULL)
     {
-        tool_error("which host?");
+        tool_error("no host was given");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
 
     if (opt.listen && opt.scan)
     {
-        tool_error("-l and -z do opposite things; pick one");
+        tool_error("-l and -z do opposite things. Use one of them");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
@@ -746,10 +746,10 @@ int main(int argc, char **argv)
         }
 
         /* -k serves one caller after another. Each pass rebinds rather than
-           holding the listener open across clients, which is what the plain
-           mode already does; the only difference is that it comes back.
-           Ctrl-C is how it ends, so nc_listen()'s SO_REUSEADDR matters here,
-           without it the rebind meets the previous socket's TIME_WAIT. */
+           holding the listener open across clients, exactly as the plain mode
+           does, and the only difference is that it comes back. Ctrl-C is how
+           it ends. nc_listen()'s SO_REUSEADDR matters here: without it the
+           rebind meets the previous socket's TIME_WAIT. */
         if (opt.keep)
             tool_break_arm();
 
@@ -772,7 +772,7 @@ int main(int argc, char **argv)
     {
         ToolConnect how;
 
-        /* -p pins the local port, which a firewall on the far side may be
+        /* -p pins the local port, which a firewall on the far side can be
            written against. */
         how.family    = opt.family;
         how.socktype  = opt.udp ? TOOL_SOCK_DGRAM : TOOL_SOCK_STREAM;

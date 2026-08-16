@@ -2,16 +2,16 @@
 | multiversioned.
 |
 | Each is two instructions: load the vector n68k_cpu.c filled in and jump.  The
-| callers -- our own C in this directory and in src/sana2, and every memcpy()
-| in the stack through n68k_memcpy_hook.c -- keep calling the same names they
+| callers -- the C in this directory and in src/sana2, and every memcpy() in
+| the stack through n68k_memcpy_hook.c -- keep calling the same names they
 | always did, and nothing in the vendored tree learns that the routine it
 | reaches was chosen from AttnFlags.
 |
-| a0 is the caller's to lose in this ABI and every variant reloads it from the
+| a0 is the caller's to lose in this ABI, and every variant reloads it from the
 | stack frame before touching anything, so the trampoline needs no register of
-| its own.  It costs a movea.l from absolute memory and a jmp, 20 cycles on a
-| 68000 and rather less anywhere the vector stays in a cache.  That is the
-| whole price of one binary; the A1200 loopback arm in
+| its own.  It costs a movea.l from absolute memory and a jmp: 20 cycles on a
+| 68000, and less anywhere the vector stays in a cache.  That is the whole
+| price of one binary.  The A1200 loopback arm in
 | cmake/toolchain-m68k-amigaos.cmake is the measurement it comes out of.
 |
 | SPDX-License-Identifier: MIT

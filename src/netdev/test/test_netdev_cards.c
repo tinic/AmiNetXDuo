@@ -1,13 +1,13 @@
 /*
- * The card table and the name list a config file is checked against.
+ * The card table and the name list a configuration file is checked against.
  *
  * Two copies of the same fact exist and have to: netdev_cards.c carries the
  * rows, and include/aminetxduo/anxnet.h carries the names alone, because
  * src/config/config_parse.c rejects CARD=nonsense without linking the driver.
- * Drift between them is silent in both directions -- a name added to the table
- * and not the list is a card no interface file can ask for, a name in the list
- * and not the table is a CARD= the parser accepts and the driver refuses -- so
- * it is asserted here.
+ * Drift between them is silent in both directions.  A name added to the table
+ * and not the list is a card no interface file can ask for.  A name in the
+ * list and not the table is a CARD= the parser accepts and the driver refuses.
+ * It is therefore asserted here.
  *
  * The order matters as much as the membership: anxnet.h documents the Nth name
  * as the card UNIT = (N + 1) * 100 pins.
@@ -23,7 +23,7 @@
 
 /* netdev_cards.c carries netdev_nic_ops_for(), which names the two chip cores.
    This test is about the card table, not the cores, so they are stood in for
-   rather than linked -- ed.c and ne2000.c reach the hardware. */
+   rather than linked, because ed.c and ne2000.c reach the hardware. */
 #include "netdev_nic.h"
 const struct NetdevNicOps netdev_nic_ne2000;
 const struct NetdevNicOps netdev_nic_ed;
@@ -120,7 +120,7 @@ int main(void)
            +$10000 and the even ones at $A20000, both at even addresses.  A
            PCMCIA row without odd_off puts the NE2000 reset register at
            $A2031F, an odd address in the even window, which is not a register
-           access on the hardware -- and Amiberry decodes it anyway, so no
+           access on the hardware.  Amiberry decodes it anyway, so no
            emulated run would catch the row that lost it. */
         if (netdev_cards[i].bus == NETDEV_BUS_PCMCIA)
         {
