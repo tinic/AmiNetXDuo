@@ -37,7 +37,7 @@ static rfb_u32 put_char(char *out, rfb_u32 cap, rfb_u32 at, char c)
     return at;
 }
 
-/* A hotspot can sit left of or above the sprite's own corner, so the one
+/* A hotspot can sit left of or above the corner of the sprite, so the one
    number in this vocabulary that can be negative needs its sign written. */
 static rfb_u32 put_signed(char *out, rfb_u32 cap, rfb_u32 at, rfb_s16 v)
 {
@@ -73,11 +73,11 @@ rfb_u32 rfb_word_geom(char *out, rfb_u32 cap, const rfb_geom *g)
     at = put_char(out, cap, at, ' ');
     at = put_num(out, cap, at, g->tile_h);
     /* And what a byte of the frames after it means.  Last, because it is the
-       number this vocabulary gained rather than the one it started with. */
+       number that this vocabulary gained, not one it started with. */
     at = put_char(out, cap, at, ' ');
     at = put_num(out, cap, at, g->format);
 
-    if (at >= cap)                  /* the terminator has to fit too */
+    if (at >= cap)                  /* the terminator must fit too */
         return 0;
 
     out[at] = '\0';
@@ -112,9 +112,9 @@ rfb_u32 rfb_word_pal(char *out, rfb_u32 cap, const rfb_u8 *rgb,
 
 
 /*
- * The pointer image.  Refused rather than truncated when the shape is past
- * what the vocabulary carries: a viewer handed half a sprite draws a wrong
- * pointer and has no way to know it, where one handed nothing keeps its own.
+ * The pointer image.  Refused, and not truncated, when the shape is past what
+ * the vocabulary carries: a viewer handed half a sprite draws a wrong pointer
+ * and cannot tell, where one handed nothing keeps its own.
  */
 rfb_u32 rfb_word_ptr(char *out, rfb_u32 cap, const rfb_pointer *p,
                      const rfb_u8 *rgb, const rfb_u8 *bits)
@@ -181,9 +181,9 @@ rfb_u32 rfb_word_ptr(char *out, rfb_u32 cap, const rfb_pointer *p,
 /*
  * A word is a keyword and then decimal numbers separated by runs of spaces.
  * The cursor is a pair of indices into the frame as it arrived, which is not
- * terminated: a text frame carries a length and nothing else, and copying it
- * into a buffer to be able to use string functions on it would be a copy per
- * mouse move.
+ * terminated: a text frame carries a length and nothing else, and a copy into
+ * a buffer, so that string functions can run on it, is one copy per mouse
+ * move.
  */
 typedef struct {
     const char *s;
@@ -220,8 +220,8 @@ static int take_keyword(cursor *c, const char *want)
 /*
  * One signed decimal.  Bounded at six digits: every number in this vocabulary
  * is a screen coordinate, a rawkey code, a qualifier mask or a wheel notch,
- * and none of them is bigger than that.  A longer one is a client that is not
- * sending what this reads, so the word is refused whole.
+ * and none of them is bigger than that.  A longer one comes from a client that
+ * does not send what this reads, so the word is refused whole.
  */
 static int take_int(cursor *c, rfb_s32 *out)
 {
@@ -252,7 +252,7 @@ static int take_int(cursor *c, rfb_s32 *out)
 }
 
 /* Nothing but spaces left.  A word with something after its numbers is not one
- * of ours; acting on the part that parsed would be guessing. */
+ * of these, and the part that parsed is not acted on. */
 static int at_end(cursor *c)
 {
     skip_spaces(c);

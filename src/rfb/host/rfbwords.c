@@ -64,8 +64,8 @@ static void word_geom(void)
     (void)rfb_word_geom(out, sizeof(out), &g);
     eq(out, "geom 644 256 2 82 16 16 0", "geom, a width with padding after it");
 
-    /* A chunky RTG screen.  The DEPTH is 8 because that is what sizes the
-       `pal` after it, and BYTESPERROW is a byte a pixel and not a bit. */
+    /* A chunky RTG screen.  The depth is 8 because that sizes the `pal` after
+       it, and bytes_per_row counts a byte a pixel and not a bit. */
     g.width = 640;
     g.height = 480;
     g.depth = 8;
@@ -75,7 +75,7 @@ static void word_geom(void)
     eq(out, "geom 640 480 8 640 16 16 1", "geom, a 640x480 8-bit RTG screen");
     g.format = RFB_FMT_PLANAR;
 
-    /* The biggest one there is still fits the buffer the header promises. */
+    /* The largest possible one still fits the buffer that the header promises. */
     g.width = 65535;
     g.height = 65535;
     g.depth = 8;
@@ -105,8 +105,8 @@ static void word_pal(void)
     yes(rfb_word_pal(out, 10, four, 4) == 0, "pal refuses a buffer it overruns");
 }
 
-/* The word's leading fields, which is what the numbers are checked through:
-   the tail is hex and is checked by length. */
+/* The leading fields of the word, which is how the numbers are checked.  The
+   tail is hex and is checked by length. */
 static int starts(const char *s, const char *want)
 {
     return strncmp(s, want, strlen(want)) == 0;
@@ -114,8 +114,8 @@ static int starts(const char *s, const char *want)
 
 static void words_pointer(void)
 {
-    /* The classic pointer: 16 wide, 16 rows, two planes, three colours, and
-       on a hires screen one sprite pixel covers two across and one down. */
+    /* The classic pointer: 16 wide, 16 rows, two planes, three colours.  On a
+       hires screen one sprite pixel covers two across and one down. */
     rfb_pointer p;
     rfb_u8 rgb[9];
     rfb_u8 bits[2 * 2 * 16];
@@ -145,8 +145,8 @@ static void words_pointer(void)
     yes(n > 0u && starts(out, "ptr 16 16 2 2 1 -3 7 "),
         "a negative hotspot keeps its sign");
 
-    /* Refusals: every one of these would have a viewer draw a wrong pointer
-       with no way to know it. */
+    /* Refusals: each of these makes a viewer draw a wrong pointer, with no way
+       to detect it. */
     p.hot_x = 0; p.hot_y = 0;
     p.width = 0;
     yes(rfb_word_ptr(out, sizeof(out), &p, rgb, bits) == 0u,
@@ -218,8 +218,8 @@ static void words_refused(void)
     yes(!rfb_word_parse("m 1234567 0 0", 13, &ev),
         "a number longer than any coordinate is refused whole");
 
-    /* Ignored and never an error is the compatibility rule, and the caller
-       reads that off a 0 return rather than off a kind it has to know. */
+    /* Ignored and never an error is the compatibility rule.  The caller reads
+       that from a 0 return, and not from a kind that it must know. */
     ev.kind = RFB_IN_POINTER;
     yes(!rfb_word_parse("hello", 5, &ev) && ev.kind == RFB_IN_NONE,
         "an unknown word leaves nothing behind");

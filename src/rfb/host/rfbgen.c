@@ -13,9 +13,9 @@
 static unsigned g_w, g_h, g_depth, g_bpr;
 static unsigned char *g_idx;   /* w*h colour indices */
 
-/* The frames go out as one eight-bit plane rather than g_depth one-bit ones:
-   a Picasso96 or CyberGraphX screen, and the flag the .pfs header carries in
-   its byte 9.  g_idx is already indices, so this only changes what emit()
+/* The frames go out as one eight-bit plane, and not as g_depth one-bit ones:
+   a Picasso96 or CyberGraphX screen, and the flag that the .pfs header carries
+   in its byte 9.  g_idx is already indices, so this only changes what emit()
    writes and how wide a row is. */
 static unsigned g_chunky;
 
@@ -89,7 +89,7 @@ static void text(unsigned x0, unsigned y0, unsigned seed, unsigned n,
 }
 
 /* Ordered 4x4 dither of a vertical gradient: byte-level entropy the way a
- * dithered Workbench backdrop has it, which is what makes PackBits lose. */
+ * dithered Workbench backdrop has it, which is where PackBits loses. */
 static void backdrop(void)
 {
     static const unsigned char bayer[16] = {
@@ -145,10 +145,10 @@ static void pack(void)
    write exactly that many timestamps after them. */
 static unsigned g_emitted;
 
-/* The cadence the synthetic captures claim.  They are generated, not
-   recorded, so there is no real timing to carry: 40 ms is the interval
-   wbgrab's DELAY 2 produces and is what makes a generated file play at the
-   speed the lab captures do. */
+/* The cadence that the synthetic captures claim.  They are generated, not
+   recorded, so there is no real timing to carry.  40 ms is the interval that
+   DELAY 2 in wbgrab produces, so a generated file plays at the speed of the
+   lab captures. */
 #define GEN_FRAME_MS    40u
 
 static FILE *open_pfs(const char *dir, const char *name, unsigned frames)
@@ -187,8 +187,8 @@ static void emit(FILE *f)
     if (g_chunky) {
         unsigned y;
         /* One byte a pixel, at the row stride, and the padding past the width
-           left as it was allocated -- which is what a card's framebuffer looks
-           like and what the encoder has to code every byte of. */
+           left as it was allocated.  That is the shape of a card framebuffer,
+           and the encoder codes every byte of it. */
         memset(g_planes, 0, (size_t)g_bpr * g_h);
         for (y = 0; y < g_h; y++)
             memcpy(g_planes + (size_t)y * g_bpr, g_idx + (size_t)y * g_w, g_w);
@@ -200,7 +200,7 @@ static void emit(FILE *f)
     g_emitted++;
 }
 
-/* The frame records go after the frames; see pfs.ts for why they are there
+/* The frame records go after the frames.  See pfs.ts for why they are there
    and not in front of them.  Twelve bytes each: when, where the pointer was,
    and which image it was.  A generated capture has no pointer, so the image
    is 0 and the position with it. */
@@ -232,11 +232,10 @@ static void setup(unsigned w, unsigned h, unsigned depth)
 
 /*
  * The same, as an 8-bit chunky screen.  The row is padded to a multiple of
- * eight bytes on purpose: a board rounds its stride, the encoder codes the
- * padding, and a generator that made bytes_per_row equal the width would
- * never exercise either the padding or the tile at the right edge that is
- * clipped -- 804 wide comes out 808, which is not a whole number of 16- or
- * 32-byte tiles.
+ * eight bytes on purpose: a board rounds its stride, and the encoder codes the
+ * padding.  A generator that made bytes_per_row equal to the width exercises
+ * neither the padding nor the clipped tile at the right edge.  804 wide comes
+ * out 808, which is not a whole number of 16- or 32-byte tiles.
  */
 static void setup_chunky(unsigned w, unsigned h)
 {
@@ -280,8 +279,8 @@ static void seq_type(const char *dir)
     close_pfs(f);
 }
 
-/* A Shell window scrolling text up by `step` pixels a frame: everything inside
- * the window moves, which is the case tile diffing cannot win. */
+/* A Shell window that scrolls text up by `step` pixels a frame: everything
+ * inside the window moves, which is the case a tile diff cannot win. */
 static void seq_scroll(const char *dir, const char *name, unsigned step,
                        unsigned frames)
 {
@@ -373,10 +372,10 @@ int main(int argc, char **argv)
     seq_idle(dir, "idle1024");
     seq_scroll(dir, "scroll1024", 8, 20);
 
-    /* And the RTG shape: 8-bit chunky, at the two sizes a graphics card is
-       actually put up at.  640x480 has a bytes_per_row that is a whole number
-       of 16-byte tiles and 804 wide does not, so the clipped tile at the right
-       edge is walked too. */
+    /* And the RTG shape: 8-bit chunky, at the two sizes a graphics card runs
+       at.  640x480 has a bytes_per_row that is a whole number of 16-byte tiles
+       and 804 wide does not, so the clipped tile at the right edge is walked
+       too. */
     setup_chunky(640, 480);
     seq_idle(dir, "idle_c8");
     seq_scroll(dir, "scroll_c8", 8, 40);
