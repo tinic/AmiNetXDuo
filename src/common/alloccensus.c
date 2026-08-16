@@ -1,20 +1,19 @@
 /*
  * AmiNetXDuo, the allocation census.
  *
- * A side table, not a header in front of the block.  Wrapping every
- * allocation in a header would move every pointer the product hands around,
- * change what fits in a cache line and what shares one, and give the census
- * build a different memory layout from the one being investigated.  An
- * instrument that changes the thing it measures answers a different question.
- * The cost is a hash probe per alloc and per free, which nothing here is
- * timed on.
+ * A side table, not a header in front of the block. A header on every
+ * allocation moves every pointer that the product hands around, changes what
+ * fits in a cache line and what shares one, and gives the census build a
+ * different memory layout from the one under investigation. The cost of the
+ * side table is a hash probe per alloc and per free, and nothing here is timed
+ * on that.
  *
- * The table is open-addressed on the pointer with linear probing and never
- * deletes by tombstone: a drop clears the slot and then re-inserts whatever
- * follows in the same probe run, so a full table degrades into a refusal to
- * record rather than into wrong answers.  A refusal is COUNTED, and the
- * harness fails the run on it, because a census that silently stopped
- * recording reads exactly like a clean sheet.
+ * The table is open-addressed on the pointer, with linear probing and no
+ * tombstones. A drop clears the slot and then re-inserts whatever follows in
+ * the same probe run, so a full table degrades into a refusal to record and
+ * not into wrong answers. A refusal is counted, and the harness fails the run
+ * on it, because a census that silently stopped recording reads like a clean
+ * sheet.
  *
  * Everything in this file is compiled only when AMINETXDUO_ALLOCCENSUS is
  * defined.  With the flag off the object is empty and the shipping binaries
@@ -33,16 +32,16 @@
 
 #include "aminetxduo/compat.h"
 
-/* compat.h has just pointed both names at this file's own wrappers. */
+/* compat.h points both names at the wrappers in this file. */
 #undef ami_alloc
 #undef ami_alloc_flags
 
 /*
- * Slots, a power of two so the probe start is a mask.  2048 x 16 bytes = 32 KB
+ * Slots, a power of two so the probe start is a mask. 2048 x 16 bytes = 32 KB
  * of BSS in every image that links src/common, which in a census build is the
- * library and every command.  AMINETXDUO_ALLOCCENSUS_SLOTS moves it; the live
+ * library and every command. AMINETXDUO_ALLOCCENSUS_SLOTS moves it. The live
  * count on a working stack is in the low hundreds, so this has three binary
- * orders of headroom, and `lost=` in the report says when it did not.
+ * orders of headroom, and `lost=` in the report says when that was not enough.
  */
 #ifndef AMINETXDUO_ALLOCCENSUS_SLOTS
 #  define AMINETXDUO_ALLOCCENSUS_SLOTS 2048
@@ -51,7 +50,7 @@
 #define CENSUS_SLOTS  AMINETXDUO_ALLOCCENSUS_SLOTS
 #define CENSUS_MASK   (CENSUS_SLOTS - 1)
 
-/* Sites printed, most bytes first, before the report gives up and says so. */
+/* Sites printed, most bytes first, before the report stops and says so. */
 #define CENSUS_REPORT_SITES 48
 
 typedef struct
@@ -72,9 +71,9 @@ static ULONG census_unknown;     /* frees of a pointer the table never had  */
 /* --------------------------------------------------------------- the table */
 
 /*
- * Pointer to slot.  AllocVec() returns 8-byte-aligned blocks, so the low three
- * bits are always zero and hashing them in would waste a quarter of the table;
- * shift them out first, then a Knuth multiply to spread the rest.
+ * Pointer to slot. AllocVec() returns 8-byte-aligned blocks, so the low three
+ * bits are always zero, and a hash over them wastes a quarter of the table.
+ * Shift them out first, then a Knuth multiply to spread the rest.
  */
 static ULONG census_hash(APTR ptr)
 {
@@ -146,8 +145,8 @@ VOID ami_census_drop(APTR ptr)
     i = census_find(ptr);
     if (i == (ULONG)CENSUS_SLOTS)
     {
-        /* Either the table was full when this was allocated, or the block was
-           never ours.  Both are worth a number; neither is worth a guess. */
+        /* Either the table was full at the allocation, or the block came from
+           elsewhere. Both are counted, and neither is guessed at. */
         census_unknown++;
         Permit();
         return;
@@ -160,13 +159,12 @@ VOID ami_census_drop(APTR ptr)
     census_slot[i].cs_Site = NULL;
 
     /*
-     * Close the hole.  Everything after it in this probe run has to be lifted
-     * back, or a lookup that walks to the first empty slot stops short of it.
+     * Close the hole. Everything after it in this probe run must move back, or
+     * a lookup that walks to the first empty slot stops short of it.
      *
-     * Bounded by the table size as well as by the first empty slot: on a table
-     * with no empty slot at all the walk would have nothing to stop it, and an
-     * instrument that can hang the machine it is instrumenting is worse than
-     * no instrument.
+     * Bounded by the table size as well as by the first empty slot. On a table
+     * with no empty slot at all, nothing else stops the walk, and the machine
+     * under measurement hangs.
      */
     j = (i + 1) & CENSUS_MASK;
     for (n = 0; n < (ULONG)CENSUS_SLOTS && census_slot[j].cs_Ptr != NULL; n++)
@@ -214,11 +212,11 @@ APTR ami_alloc_tagged(ULONG size, const char *site)
 /* ------------------------------------------------------------- the report */
 
 /*
- * RawPutChar is an exec LVO (-516) the NDK declares only in its assembler
- * headers; src/common/compat.c wires it up the same way.  The serial port is
- * the one sink a shared library can reach without opening anything, which is
- * what makes one report format work for bsdsocket.library and for a Shell
- * command alike, into one log the harness reads.
+ * RawPutChar is an exec LVO (-516) that the NDK declares only in its assembler
+ * headers. src/common/compat.c declares it the same way. The serial port is
+ * the one sink that a shared library reaches with no open call, so one report
+ * format serves bsdsocket.library and a Shell command alike, into one log that
+ * the harness reads.
  */
 #ifndef RawPutChar
 #  define RawPutChar(c) \
@@ -253,11 +251,11 @@ static VOID census_putu(ULONG v)
 }
 
 /*
- * __FILE__ arrives as whatever path the compiler was given, which is the build
- * directory's idea of it and differs between one checkout and the next.  The
- * known-set file has to survive that, so only the last component is printed.
- * Every basename under src/ is unique, which is what makes this lossless here
- * and would stop being true the day two directories share a file name.
+ * __FILE__ arrives as whatever path the compiler was given. That path comes
+ * from the build directory and differs between one checkout and the next. The
+ * known-set file must survive that, so only the last component is printed.
+ * Every basename under src/ is unique, so nothing is lost here. If two
+ * directories ever share a file name, that stops being true.
  */
 static const char *census_basename(const char *site)
 {
@@ -267,9 +265,9 @@ static const char *census_basename(const char *site)
     if (site == NULL)
         return "?";
 
-    /* '/' only.  The tag ends in ":123", so a rule that also broke at ':'
-       would keep the line number and throw the file name away, which is what
-       the first version of this did. */
+    /* '/' only. The tag ends in ":123", so a rule that also breaks at ':'
+       keeps the line number and loses the file name. The first version of
+       this did exactly that. */
     for (p = site; *p != '\0'; p++)
     {
         if (*p == '/')
@@ -295,10 +293,10 @@ static VOID census_line_site(const char *scope, const char *site,
 }
 
 /*
- * The aggregate, as a file-scope static rather than on the stack.  This runs
- * inside bsdsocket.library's expunge, which can be reached from a Shell
- * command's own 4 KB stack (src/bsdsocket/library.c says so about
- * netstack_shutdown for the same reason), and 48 entries is 576 bytes.
+ * The aggregate, as a file-scope static and not on the stack. This runs inside
+ * the expunge of bsdsocket.library, which is reachable from the 4 KB stack of
+ * a Shell command (src/bsdsocket/library.c says the same about
+ * netstack_shutdown), and 48 entries is 576 bytes.
  */
 typedef struct
 {

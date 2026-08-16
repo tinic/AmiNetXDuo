@@ -1,8 +1,8 @@
 /*
  * AmiNetXDuo, shared AmigaOS glue.
  *
- * Dependency-free beyond exec.library and timer.device: this code runs inside
- * a shared library, so it must not drag in newlib's stdio.
+ * No dependencies beyond exec.library and timer.device: this code runs inside
+ * a shared library, so it must not pull in the newlib stdio.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -28,12 +28,12 @@
 
 /* ------------------------------------------------------------------ memory */
 
-/* In a census build compat.h has pointed both names at the tagging wrappers
-   in alloccensus.c; these are the functions those wrappers call. */
+/* In a census build compat.h points both names at the tagging wrappers in
+   alloccensus.c. These are the functions that those wrappers call. */
 #undef ami_alloc
 #undef ami_alloc_flags
 
-/* The record the health mark points at; aminetxduo/compat.h. */
+/* The record that the health mark points at, in aminetxduo/compat.h. */
 static AmiMemStats ami_mem;
 
 APTR ami_alloc_flags(ULONG size, ULONG memf)
@@ -44,9 +44,9 @@ APTR ami_alloc_flags(ULONG size, ULONG memf)
         return NULL;
 
     /* Exec picks by MemHeader priority, which puts Fast ahead of Chip already.
-       Asking for MEMF_FAST first and falling back cannot change where anything
-       lands: when Fast has room exec was going to use it, and when it does not
-       the fallback ends up in Chip, which is where exec would have put it. */
+       A request for MEMF_FAST first, with a fallback, cannot change where
+       anything lands. When Fast has room, exec uses it. When Fast has no room,
+       the fallback goes to Chip, which is where exec puts it too. */
     p = AllocVec(size, memf);
 
     Forbid();
@@ -75,8 +75,8 @@ VOID ami_free(APTR ptr)
     if (ptr == NULL)
         return;
 
-    /* Before the block goes: the census keeps its size, and reading it off a
-       freed pointer is the one thing this instrument must never do. */
+    /* Before the block goes: the census keeps its size, and it must never read
+       that size from a freed pointer. */
     AMI_CENSUS_DROP(ptr);
 
     FreeVec(ptr);
@@ -126,8 +126,8 @@ VOID ami_mem_open_delta(LONG delta)
 
 /*
  * RawPutChar is an exec LVO (-516) that the NDK declares only in the assembler
- * headers, so wire it up here. Serial debug output is the one sink a shared
- * library can always reach.
+ * headers, so it is declared here. Serial debug output is the one sink that a
+ * shared library always reaches.
  */
 #ifndef RawPutChar
 #  define RawPutChar(c) \
@@ -192,34 +192,34 @@ struct Device             *TimerBase;
 static struct timerequest  ami_timer_req;
 static struct MsgPort      ami_timer_port;
 static ULONG               ami_eclock_hz;
-/* Running total and the reading it was last advanced from; ami_millis(). */
+/* Running total and the reading that last advanced it, in ami_millis(). */
 static struct EClockVal    ami_eclock_last;
 static ULONG               ami_eclock_ms;
 static ULONG               ami_eclock_rem;
 static ULONG               ami_eclock_carry;   /* thousandths of a tick */
 
 /*
- * One request, one port, opened lazily, so the open has to be serialised.
- * ami_millis() is called from SANA-II reader Tasks (bpf_amiga.c) as well as
- * from application tasks, and two of them racing the TimerBase test both
- * OpenDevice() the same static timerequest: the second overwrites io_Device
- * and timer.device is left one open up, with a request whose memory belongs to
- * a segment that can be unloaded.
+ * One request, one port, opened lazily, so the open must be serialised.
+ * ami_millis() runs on SANA-II reader Tasks (bpf_amiga.c) as well as on
+ * application tasks. Two of them that race the TimerBase test both
+ * OpenDevice() the same static timerequest. The second overwrites io_Device,
+ * timer.device is left one open too many, and the request memory belongs to a
+ * segment that can be unloaded.
  *
- * A semaphore, not Forbid(): OpenDevice() may Wait, which breaks a Forbid and
- * would make it a lock in name only. The semaphore's own one-time init is the
- * Forbid-and-flag shape netstack.c uses for the same problem.
+ * A semaphore, not Forbid(): OpenDevice() can Wait, which breaks a Forbid and
+ * leaves a lock in name only. The one-time init of the semaphore is the
+ * Forbid-and-flag shape that netstack.c uses for the same problem.
  */
 static struct SignalSemaphore  ami_timer_lock;
 static volatile BOOL           ami_timer_lock_ready;
 
 /*
  * The "it is safe to use" flag, and not TimerBase, because TimerBase cannot be
- * both. The NDK's ReadEClock() inline resolves the library base through it, so
- * it has to be set BEFORE the rate is read, which leaves a window where a
- * caller taking the fast path below sees a non-NULL TimerBase and an
- * ami_eclock_hz still at zero, and ami_millis() divides by it. This is set
- * after the last field and is what the fast path tests.
+ * both. The NDK ReadEClock() inline resolves the library base through
+ * TimerBase, so TimerBase must be set before the rate is read. That leaves a
+ * window in which a caller on the fast path below sees a non-NULL TimerBase
+ * and an ami_eclock_hz still at zero, and ami_millis() divides by it. This
+ * flag is set after the last field, and the fast path tests this flag.
  */
 static volatile BOOL           ami_timer_ready;
 
@@ -245,7 +245,7 @@ static BOOL ami_timer_init(VOID)
     ami_timer_lock_init();
     ObtainSemaphore(&ami_timer_lock);
 
-    /* Again inside the lock: whoever was ahead of us has finished by now. */
+    /* Again inside the lock: any caller that was ahead has finished. */
     if (ami_timer_ready)
     {
         ReleaseSemaphore(&ami_timer_lock);
@@ -255,12 +255,12 @@ static BOOL ami_timer_init(VOID)
     ami_timer_port.mp_Node.ln_Type = NT_MSGPORT;
     ami_timer_port.mp_Flags        = PA_IGNORE;
     /* NULL, not FindTask(NULL): exec never reads mp_SigTask on a PA_IGNORE
-       port, and whichever task happened to be first here exits long before the
-       library does. A stale pointer here is a Signal() into freed memory for
-       whoever next gives this port a reason to be signalled. */
+       port, and whichever task came first here exits long before the library
+       does. A stale pointer here is a Signal() into freed memory for the next
+       caller that gives this port a reason to signal. */
     ami_timer_port.mp_SigTask      = NULL;
 
-    /* NewList() lives in amiga.lib; a shared library open-codes it. */
+    /* NewList() lives in amiga.lib. A shared library open-codes it. */
     ami_timer_port.mp_MsgList.lh_Head     =
         (struct Node *)&ami_timer_port.mp_MsgList.lh_Tail;
     ami_timer_port.mp_MsgList.lh_Tail     = NULL;
@@ -282,9 +282,9 @@ static BOOL ami_timer_init(VOID)
     TimerBase = ami_timer_req.tr_node.io_Device;
 
     /*
-     * Scale to ticks-per-millisecond up front: a 64-bit divide would pull
-     * __udivdi3 out of libgcc, which a shared library should not need.
-     * ~709 ticks/ms PAL, ~716 NTSC, a ~0.1% rounding error.
+     * Scale to ticks-per-millisecond first: a 64-bit divide pulls __udivdi3
+     * out of libgcc, which a shared library must not need. ~709 ticks/ms PAL,
+     * ~716 NTSC, a ~0.1% rounding error.
      */
     rate = ReadEClock(&ev);
     ami_eclock_hz = (rate != 0UL) ? rate : 709379UL;
@@ -302,9 +302,10 @@ static BOOL ami_timer_init(VOID)
 
 /*
  * Give timer.device its open back. Called from bsd_lib_expunge() by way of
- * bsd_runtime_close(): the request and the port are file-scope statics, so
- * without this the segment is handed to UnLoadSeg() with the device still
- * open against memory inside it, and one more open every load/expunge cycle.
+ * bsd_runtime_close(): the request and the port are file-scope statics. Without
+ * this call the segment goes to UnLoadSeg() with the device still open against
+ * memory inside it, and one more open accumulates on every load and expunge
+ * cycle.
  */
 VOID ami_timer_close(VOID)
 {
@@ -316,8 +317,8 @@ VOID ami_timer_close(VOID)
 
     if (ami_timer_ready)
     {
-        /* Unpublish first: a caller on the fast path must not enter ami_millis()
-           between the CloseDevice() and the base going away. */
+        /* Unpublish first: a caller on the fast path must not enter
+           ami_millis() between the CloseDevice() and the clear of the base. */
         ami_timer_ready = FALSE;
         CloseDevice((struct IORequest *)&ami_timer_req);
         TimerBase       = NULL;
@@ -339,19 +340,19 @@ ULONG ami_millis(VOID)
         return 0;
 
     /*
-     * Accumulated, not measured from a fixed base.  ev_lo is 32 bits at
-     * ~710 kHz and wraps every ~100 minutes, so subtracting a base captured at
-     * init is right once and wrong afterwards, a machine up two hours would
-     * report a few minutes.  Each call adds the interval since the last one,
-     * which is correct across a wrap, and carries the remainder.
+     * Accumulated, not measured from a fixed base. ev_lo is 32 bits at
+     * ~710 kHz and wraps every ~100 minutes, so a subtraction from a base
+     * captured at init is right once and wrong afterwards. A machine up two
+     * hours reports a few minutes. Each call adds the interval since the last
+     * call, which is correct across a wrap, and carries the remainder.
      *
-     * Divided by the rate rather than by a ticks-per-millisecond, because
+     * Divided by the rate and not by a ticks-per-millisecond value, because
      * 709379/1000 truncates to 709 and runs the clock 0.05% fast, 46 seconds
-     * a day, which shows up as drift against anything honest.
+     * a day. That appears as drift against an accurate reference.
      *
-     * The one thing it cannot survive is two calls more than ~100 minutes
-     * apart, which loses a whole wrap.  Anything watching a clock calls more
-     * often than that.
+     * Two calls more than ~100 minutes apart lose a whole wrap, and the
+     * counter cannot survive that. Any caller that watches a clock calls more
+     * often.
      */
     Forbid();
 
@@ -359,8 +360,8 @@ ULONG ami_millis(VOID)
     delta           = ev.ev_lo - ami_eclock_last.ev_lo;
     ami_eclock_last = ev;
 
-    /* Whole seconds convert exactly and keep the fine step's operands small;
-       what is left is under one second, so rem * 1000 cannot overflow.  */
+    /* Whole seconds convert exactly and keep the operands of the fine step
+       small. What is left is under one second, so rem * 1000 cannot overflow. */
     ami_eclock_ms  += (delta / ami_eclock_hz) * 1000UL;
     ami_eclock_rem += delta % ami_eclock_hz;
     if (ami_eclock_rem >= ami_eclock_hz)
@@ -415,8 +416,8 @@ VOID ami_address_change_notify(VOID)
     VOID (*hook)(VOID) = ami_address_change_hook;
 
     /* Read once: the library can deregister from another task while the IP
-       thread is here, and a NULL test on the global followed by a call through
-       it would be two reads of something that changed between them. */
+       thread is here. A NULL test on the global, followed by a call through
+       it, is two reads of a value that changes between them. */
     if (hook != NULL)
         hook();
 }
@@ -441,7 +442,7 @@ VOID ami_second_notify(VOID)
         hook();
 }
 
-/* And again for the shutdown request; see compat.h.  This one runs on an
+/* And again for the shutdown request, in compat.h. This one runs on an
    ordinary task, so it carries neither of the other two contracts. */
 static VOID (*ami_shutdown_hook)(VOID);
 
@@ -463,8 +464,8 @@ static LONG ami_sana2_open_once(const char *name, ULONG unit,
 {
     LONG status;
 
-    /* An iComp driver samples the AMITCP port here and bypasses our copy
-       callbacks if it finds one, see ami_ns_port_suspend(). */
+    /* If an iComp driver finds the AMITCP port here, it bypasses the copy
+       callbacks. See ami_ns_port_suspend(). */
     if (ami_sana2_quiesce != NULL)
         ami_sana2_quiesce();
 
@@ -505,7 +506,7 @@ LONG ami_sana2_open_device(const char *name, ULONG unit, struct IORequest *req)
     path[i] = '\0';
 
     /* OpenDevice leaves io_Device set on a failed open of a device that does
-       exist; the retry must not be read as a success against the old one. */
+       exist. The retry must not be read as a success against the old one. */
     req->io_Device = NULL;
     req->io_Unit   = NULL;
 
