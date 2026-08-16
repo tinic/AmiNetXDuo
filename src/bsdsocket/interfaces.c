@@ -9,7 +9,7 @@
  * Behaviour follows the bsdsocket.library autodoc in NDK 3.2
  * (SANA+RoadshowTCP-IP/doc/bsdsocket.doc) read together with
  * libraries/bsdsocket.h from the same NDK. Both are freely distributable and
- * are used as an ABI reference only; no Roadshow, AmiTCP, AROSTCP or Miami
+ * are used as an ABI reference only. No Roadshow, AmiTCP, AROSTCP or Miami
  * code was consulted, and none of it is present. Where the behaviour is not
  * obvious from the name, the autodoc's own words are quoted below (see the
  * header of roadshow.c for why the ABI is read rather than inferred).
@@ -24,7 +24,7 @@
  *
  *   2. Every IFQ_* tag's ti_Data is a pointer to caller storage, never the
  *      value. The autodoc types each tag as "(LONG *)", "(ULONG *)",
- *      "(struct sockaddr *)", "(SBQUAD_T *)" and so on;
+ *      "(struct sockaddr *)", "(SBQUAD_T *)" and so on.
  *      libraries/bsdsocket.h alone does not say this.
  *
  *   3. "0 for success, -1 for failure; the failure code will be stored in the
@@ -38,7 +38,7 @@
  *      different vocabularies.
  *
  * On the query side, a tag this stack has no true value for is left alone:
- * the caller's storage is not written at all. An invented zero would be
+ * the caller's storage is not written at all. An invented zero is
  * indistinguishable from a measured zero. Each such tag is listed at its case
  * below with the reason.
  *
@@ -47,16 +47,15 @@
  * simplified, specialized front end to the underlying interface socket API",
  * and the autodoc documents no error for an unsupported tag at all:
  *
- *   Advisory, it tunes how the stack goes about its work and changes nothing
- *   a caller can observe through this API or on the wire. Accepted and
- *   ignored: refusing would fail the whole call over a tag whose only effect
- *   is one this stack was never going to have, and real callers pass these as
- *   a matter of course.
+ *   Advisory: it tunes how the stack works and changes nothing a caller can
+ *   observe through this API or on the wire. Accepted and ignored. A refusal
+ *   fails the whole call over a tag whose only effect is one this stack never
+ *   has, and real callers pass these routinely.
  *
- *   Behavioural, its whole purpose is to change what the interface does, so
- *   a caller that saw success would be misled. Refused with EOPNOTSUPP, and
- *   nothing in the list is applied. A value that names what this stack already
- *   does is not a change, and is accepted.
+ *   Behavioural: its whole purpose is to change what the interface does, so a
+ *   success misleads the caller. Refused with EOPNOTSUPP, and nothing in the
+ *   list is applied. A value that names what this stack already does is not a
+ *   change, and is accepted.
  *
  * Each tag is filed under one of the two at its case below.
  *
@@ -70,32 +69,31 @@
  * and nx_arp_info_get(), and those take the NX_IP protection mutex. Reading
  * NX_INTERFACE fields needs no such thing.
  *
- * What the baton would buy, if taken, is exclusion against the other ThreadX
- * threads. Every writer of nx_ip_interface[] while the stack is up is one:
- * nx_ip_interface_attach(), nx_ip_interface_detach(),
- * nx_ip_interface_address_set() from the DHCP client, and nx_interface_link_up
- * from the SANA-II reader. And there are no torn reads to protect against in
- * the first place, one CPU, and Exec switches tasks only between
+ * The baton buys exclusion against the other ThreadX threads. Every writer of
+ * nx_ip_interface[] while the stack is up is one: nx_ip_interface_attach(),
+ * nx_ip_interface_detach(), nx_ip_interface_address_set() from the DHCP
+ * client, and nx_interface_link_up from the SANA-II reader. There are also no
+ * torn reads to protect against: one CPU, and Exec switches tasks only between
  * instructions, so every aligned load here is atomic.
  *
- * What it would not buy is exclusion against interface add and removal, which
- * is the case that matters. netstack_interface_add() and
+ * What the baton does not buy is exclusion against interface add and removal,
+ * which is the case that matters. netstack_interface_add() and
  * netstack_interface_remove() do most of their work outside the baton on
- * purpose, because opening and closing a SANA-II device is Exec I/O:
+ * purpose, because a SANA-II device open and close is Exec I/O.
  * ami_sana2_close(), which frees the AmiSana2If, runs after the bracketed
  * detach, and ns_Iface[] and AmiIfConfig.configured are written outside it. A
- * bracket here would serialise against nothing that matters and cost ~270 us a
+ * bracket here serialises against nothing that matters and costs ~270 us a
  * call.
  *
- * So the reads stay unbracketed, and the two things that were genuinely wrong
- * are fixed where they are:
+ * So the reads stay unbracketed, and the two things that were wrong are fixed
+ * where they are:
  *
  *   - bsd_if_name_of() dereferenced nx_interface_name after testing
  *     nx_interface_valid. A removal between the two left it NULL.
  *   - ConfigureInterfaceTagList() read nx_interface_additional_link_info and
  *     the address/mask pair outside the bracket and used them inside it. The
- *     first is a use-after-free once the removal reaches ami_sana2_close(); the
- *     second reverts whichever half of the pair a DHCP bind had just changed.
+ *     first is a use-after-free once the removal reaches ami_sana2_close().
+ *     The second reverts whichever half of the pair a DHCP bind just changed.
  *     Both reads now happen inside the bracket that uses them.
  *
  * What remains is netstack.c's and is recorded in docs/BACKLOG.md: nothing
@@ -198,8 +196,8 @@ static const AmiIfConfig *bsd_if_config(UINT index)
  * Loopback is not listed. It lives past the physical slots
  * (NX_LOOPBACK_INTERFACE), has no SANA-II device to answer the IFQ_ tags
  * about, and its only name is NetX Duo's "Internal IP Loopback", twenty
- * characters, where the API caps a name at fifteen, so
- * QueryInterfaceTagList() would reject the name it was just handed.
+ * characters, where the API caps a name at fifteen. QueryInterfaceTagList()
+ * therefore rejects the name it was just handed.
  */
 /*
  * Loopback, in RFC 3493 terms.
@@ -211,7 +209,7 @@ static const AmiIfConfig *bsd_if_config(UINT index)
  *
  * The name is ours, not NetX Duo's: its own is "Internal IP Loopback", twenty
  * characters where IF_NAMESIZE allows fifteen.  "lo0" is what BSD calls it and
- * what a program that hardcodes a loopback name will try.
+ * what a program that hardcodes a loopback name tries.
  *
  * This is the RFC 3493 trio only.  ObtainInterfaceList(),
  * QueryInterfaceTagList() and SIOCGIFCONF are about SANA-II interfaces a
@@ -249,7 +247,7 @@ static BOOL bsd_if_name_of(NX_IP *ip, UINT index, char *out, ULONG outlen)
     /*
      * The fallback, and the one read in this file that a concurrent removal
      * can invalidate. nx_ip_interface_detach() memsets the whole NX_INTERFACE,
-     * so nx_interface_name goes NULL; nx_ip_interface_attach() sets
+     * so nx_interface_name goes NULL. nx_ip_interface_attach() sets
      * nx_interface_valid before it sets the name, so the reverse window exists
      * too. Neither is closed by the ThreadX bracket, see the file header,
      * so the pointer is loaded once and tested. What it points at when it is
@@ -362,7 +360,7 @@ struct List *bsd_ObtainInterfaceList(
      * fill it. If no interfaces have been added yet, you will receive an
      * empty list." NULL has exactly one documented meaning here, so a stack
      * that is not running gets the empty list rather than a second one: a
-     * caller that saw NULL could not tell "out of memory" from "nothing
+     * caller that sees NULL cannot tell "out of memory" from "nothing
      * running", and the doc gives it no errno to ask with either.
      *
      * The block is allocated up front, before anything is counted.
@@ -496,7 +494,7 @@ static VOID bsd_if_gather(NX_IP *ip, UINT index, BsdIfInfo *info)
     }
 
     /* ami_sana2_attach() stores the AmiSana2If in the interface's additional
-       link info; that is how the driver's own values are reached. */
+       link info. That is how the driver's own values are reached. */
     sana = (AmiSana2If *)nxif->nx_interface_additional_link_info;
     if (sana != NULL)
     {
@@ -750,7 +748,7 @@ LONG bsd_QueryInterfaceTagList(register STRPTR name __asm("a0"),
                  * "Try to obtain the address ... if known to this interface.
                  * If the address is not known, then the IP address filled in
                  * by this tag will be zero." These are the addresses a PPP
-                 * peer hands over through the SANA-IIR4 extensions; nothing
+                 * peer hands over through the SANA-IIR4 extensions. Nothing
                  * this stack drives supplies them per interface, so zero is
                  * the documented answer. The resolver's own name servers are
                  * not put here: they are stack-wide, not per interface.
@@ -762,17 +760,17 @@ LONG bsd_QueryInterfaceTagList(register STRPTR name __asm("a0"),
 
             case IFQ_State:
                 /*
-                 * "the values returned can be either 'SM_Down' or 'SM_Up'";
+                 * "the values returned can be either 'SM_Down' or 'SM_Up'".
                  * SM_Online/SM_Offline are IFC_State's, not this tag's.
                  *
                  * Administrative state, not link state. IFC_State defines the
                  * two: SM_Up is "the stack will attempt to transmit messages
                  * through this interface. However, the underlying SANA-II
                  * device driver may not be connected to the network yet", and
-                 * SM_Down is the same sentence negated. So a cable pulled out
-                 * from under a configured interface is still SM_Up, that
-                 * clears nx_interface_link_up (sana2_rx.c, on S2ERR_OUTOFSERVICE)
-                 * and nothing else, and it is IFF_RUNNING that reports it.
+                 * SM_Down is the same sentence negated. A cable pulled out of
+                 * a configured interface is therefore still SM_Up. It clears
+                 * nx_interface_link_up (sana2_rx.c, on S2ERR_OUTOFSERVICE) and
+                 * nothing else, and IFF_RUNNING is what reports it.
                  *
                  * An interface with no SANA-II shim has no recorded intent, so
                  * the link is the only answer available.
@@ -809,7 +807,7 @@ LONG bsd_QueryInterfaceTagList(register STRPTR name __asm("a0"),
              *                               was last brought online.
              *   IFQ_DestinationAddress      the point-to-point partner. There
              *                               are no point-to-point interfaces
-             *                               here; the SANA-II shim is
+             *                               here. The SANA-II shim is
              *                               Ethernet-shaped throughout.
              *   IFQ_AddressLeaseExpires     the DHCP client does not surface
              *                               the lease deadline, and all-zero
@@ -818,8 +816,8 @@ LONG bsd_QueryInterfaceTagList(register STRPTR name __asm("a0"),
              *                               leased address.
              *   IFQ_GetBytesIn/Out          no per-interface byte counters
              *                               exist. The IP-level totals are
-             *                               stack-wide, so they would differ
-             *                               on a machine with two cards.
+             *                               stack-wide, so they differ on a
+             *                               machine with two cards.
              *   IFQ_OutputDrops             transmit failures are counted as
              *                               errors, not split into dropped
              *                               and failed.
@@ -833,11 +831,10 @@ LONG bsd_QueryInterfaceTagList(register STRPTR name __asm("a0"),
              *                               "(LONG)" where every neighbour is
              *                               "(LONG *)". On a query with no
              *                               other way to return anything a
-             *                               bare LONG can only be a typo, but
-             *                               writing through a ti_Data the
-             *                               caller passed as a scalar would
-             *                               corrupt its memory, so these stay
-             *                               unanswered.
+             *                               bare LONG can only be a typo. A
+             *                               write through a ti_Data the caller
+             *                               passed as a scalar corrupts its
+             *                               memory, so these stay unanswered.
              * ---------------------------------------------------------------
              */
 
@@ -855,18 +852,18 @@ LONG bsd_QueryInterfaceTagList(register STRPTR name __asm("a0"),
 
 /*
  * The autodoc says nothing about what happens to a tag list whose fourth tag
- * is refused. Applying tags as they are read would leave the interface half
- * configured, new address, old mask, still down. So the whole list is parsed
- * and validated first and nothing is applied unless all of it can be; a
- * refused call leaves the interface exactly as it was.
+ * is refused. Tags applied as they are read leave the interface half
+ * configured: new address, old mask, still down. The whole list is therefore
+ * parsed and validated first, and nothing is applied unless all of it can be.
+ * A refused call leaves the interface exactly as it was.
  *
- * This is also needed for correctness: IFC_Address and IFC_NetMask arrive as
- * two tags and NetX Duo changes both in one call, so applying them separately
- * would put a mismatched pair on the interface until the next tag was read.
+ * This is also needed for correctness. IFC_Address and IFC_NetMask arrive as
+ * two tags and NetX Duo changes both in one call, so a separate application of
+ * each puts a mismatched pair on the interface until the next tag is read.
  *
- * Resolving a host name blocks, and nothing may be allocated inside the
- * ThreadX bracket, so pass one runs entirely outside it and pass two holds it
- * only for the address change.
+ * A host name lookup blocks, and nothing must be allocated inside the ThreadX
+ * bracket, so pass one runs entirely outside it and pass two holds it only for
+ * the address change.
  */
 typedef struct BsdIfConfigReq
 {
@@ -883,7 +880,7 @@ typedef struct BsdIfConfigReq
 /*
  * "a NUL-terminated string which can hold a host name to be resolved or an IP
  * address in dotted-decimal notation (per RFC1700)". Dotted-quad is tried
- * first: a machine being configured may have no working resolver yet, and a
+ * first: a machine under configuration can have no working resolver yet, and a
  * name that parses as an address must not be sent to a name server.
  */
 static BOOL bsd_if_parse_address(const char *text, ULONG *out)
@@ -902,9 +899,9 @@ static BOOL bsd_if_parse_address(const char *text, ULONG *out)
 
 /*
  * The mask for an address that arrived without one. The classful default is
- * not a good netmask in 2026, but it is the one an address alone implies;
- * refusing IFC_Address unless IFC_NetMask came with it would reject a tag
- * list the published API says is legal.
+ * coarse, but it is the one an address alone implies. A refusal of
+ * IFC_Address unless IFC_NetMask came with it rejects a tag list the
+ * published API says is legal.
  */
 static ULONG bsd_if_classful_mask(ULONG addr)
 {
@@ -920,15 +917,15 @@ static ULONG bsd_if_classful_mask(ULONG addr)
  * The address half of pass two, on its own so that NETCTRL_INTERFACE_CONFIGURE
  * and ConfigureNetInterface reach it as well.
  *
- * Both halves belong in one bracket: one of the pair given leaves the other as
- * it stands, so this is a read-modify-write, and a DHCP bind landing between
- * the read and the write would be reverted by the write.
+ * Both halves belong in one bracket. One of the pair given leaves the other as
+ * it stands, so this is a read-modify-write, and the write reverts a DHCP bind
+ * that arrives between the read and the write.
  *
  * The classful fallback is here rather than at either caller for the reason
- * tests/tools/run-ifreadd.sh exists: a mask guessed from the class of the
+ * tests/tools/run-ifreadd.sh exists. A mask taken from the class of the
  * address where the caller supplied one is a silently wrong /8 on a machine
- * that had a /24, and two copies of this rule would be two chances to make
- * that mistake again.
+ * that had a /24, and two copies of this rule are two chances to repeat that
+ * mistake.
  */
 LONG bsd_if_set_address(struct AmiSocketBase *SocketBase, LONG index,
                         BOOL have_address, ULONG address,
@@ -965,7 +962,7 @@ LONG bsd_if_set_address(struct AmiSocketBase *SocketBase, LONG index,
 }
 
 /*
- * Pass one. Returns 0, or -1 with errno set; nothing has been applied to the
+ * Pass one. Returns 0, or -1 with errno set. Nothing is applied to the
  * interface either way.
  */
 static LONG bsd_if_parse_config(struct AmiSocketBase *SocketBase,
@@ -989,7 +986,7 @@ static LONG bsd_if_parse_config(struct AmiSocketBase *SocketBase,
                 break;
 
             case IFC_NetMask:
-                /* "this must be a NUL-terminated string" and nothing else; a
+                /* "this must be a NUL-terminated string" and nothing else. A
                    mask is not a host name, so no resolver here. */
                 if (text == NULL ||
                     !ami_config_parse_ip(text, &req->bcr_NetMask))
@@ -1035,7 +1032,7 @@ static LONG bsd_if_parse_config(struct AmiSocketBase *SocketBase,
 
             /*
              * Behavioural, and BOOL. FALSE asks for nothing, which is what
-             * happens here, so it is accepted; TRUE asks for something this
+             * happens here, so it is accepted. TRUE asks for something this
              * stack does not do.
              *
              *   IFC_SetDebugMode        there is no per-interface debug mode.
@@ -1045,22 +1042,20 @@ static LONG bsd_if_parse_config(struct AmiSocketBase *SocketBase,
              *   IFC_GetDNS              SANA-IIR4 extensions the autodoc itself
              *                           warns few drivers have. The shim is
              *                           Ethernet-shaped throughout.
-             *   IFC_AssociatedRoute     these mark an interface so that going
-             *   IFC_AssociatedDNS       down tears something else down with it.
-             *                           A mark nothing reads is not the mark.
-             *   IFC_ReleaseAddress      STILL REFUSED, and the reason has
-             *                           changed. It used to be that the DHCP
-             *                           client had no release path at all, so
-             *                           accepting would have left the lease
-             *                           held. There is one now
+             *   IFC_AssociatedRoute     these mark an interface so that a down
+             *   IFC_AssociatedDNS       transition also removes something
+             *                           else. Nothing here reads the mark.
+             *   IFC_ReleaseAddress      still refused, and the reason changed.
+             *                           The DHCP client used to have no
+             *                           release path at all, so acceptance
+             *                           left the lease held. There is one now
              *                           (NETCTRL_DHCP_RELEASE, over
              *                           netstack_interface_dhcp_stop(index,
-             *                           TRUE)), and wiring this tag to it is a
-             *                           change to a published vector's
-             *                           behaviour that nothing yet asks for.
-             *                           Left as it was on purpose rather than
-             *                           by oversight; ConfigureNetInterface
-             *                           RELEASE is the way to reach it.
+             *                           TRUE)). A connection from this tag to
+             *                           it changes a published vector's
+             *                           behaviour, which nothing yet asks for.
+             *                           ConfigureNetInterface RELEASE is the
+             *                           way to reach it.
              */
             case IFC_SetDebugMode:
             case IFC_GetPeerAddress:
@@ -1077,9 +1072,9 @@ static LONG bsd_if_parse_config(struct AmiSocketBase *SocketBase,
                  * "The routing metric of this interface, as used by the routing
                  * protocol." Same rule, one tag along: zero is what IFQ_Metric
                  * reports and what every directly attached interface here
-                 * costs, so setting zero changes nothing and is accepted.
+                 * costs, so a set to zero changes nothing and is accepted.
                  * Anything else asks for a cost this stack has no routing
-                 * protocol to spend, and would read back as zero.
+                 * protocol to spend, and reads back as zero.
                  */
                 if ((LONG)item->ti_Data != 0)
                     return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
@@ -1094,9 +1089,9 @@ static LONG bsd_if_parse_config(struct AmiSocketBase *SocketBase,
              *   IFC_DestinationAddress  the far end of a point-to-point link,
              *                           which none of these interfaces is.
              *   IFC_BroadcastAddress    NetX Duo derives the broadcast address
-             *                           from the address and the mask; there
+             *                           from the address and the mask. There
              *                           is no separate one to set, and
-             *                           IFQ_BroadcastAddress would contradict
+             *                           IFQ_BroadcastAddress contradicts
              *                           whatever was accepted here.
              *   IFC_AddAliasAddress     one IPv4 address per interface.
              *   IFC_DeleteAliasAddress
@@ -1157,8 +1152,9 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
      * the other necessary configuration operations will take place. If it
      * fails, then this function will return with an error code set and no
      * further configuration will have been done", so the S2_ONLINE has to be
-     * tried before anything else is changed, or a device that refuses it
-     * leaves behind an MTU and an address the call reported as a failure.
+     * tried before anything else is changed. A device that refuses it
+     * otherwise leaves an MTU and an address behind, on a call that reported
+     * failure.
      */
     if (req.bcr_HaveState && req.bcr_State == SM_Online &&
         netstack_interface_up((UWORD)index) != AMI_NET_OK)
@@ -1169,15 +1165,15 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
         /*
          * "Before the maximum transmission unit size is limited, the hardware
          * MTU settings will be reread and taken into account." The driver's
-         * MTU is read at open time and does not change, so taking it into
-         * account means clamping to it: this tag can only make the MTU
-         * smaller, and a request for more than the hardware can carry becomes
-         * the hardware's own number rather than an error.
+         * MTU is read at open time and does not change, so the account taken
+         * of it is a clamp. This tag can only make the MTU smaller, and a
+         * request for more than the hardware can carry becomes the hardware's
+         * own number rather than an error.
          *
          * The AmiSana2If is fetched inside the bracket and used inside the same
-         * one. Read outside it, a removal that had got as far as
-         * ami_sana2_close() would have freed it; inside, the interface cannot
-         * be detached under us, and a detach that already happened leaves
+         * one. Read outside it, a removal that reached ami_sana2_close()
+         * already freed it. Inside, the interface cannot be detached under us,
+         * and a detach that already happened leaves
          * nx_interface_additional_link_info NULL, which is the no-clamp case.
          */
         AmiSana2If *sana;
@@ -1214,10 +1210,10 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
         LONG rc;
 
         /*
-         * Last, so that {IFC_Address, IFC_State SM_Up} does what it reads
-         * like. netstack_interface_*() take the ThreadX bracket themselves and
-         * stop the SANA-II readers as well as telling NetX Duo, so they are
-         * called outside ours, the same rule netstatus.c follows for
+         * Last, so that {IFC_Address, IFC_State SM_Up} behaves as written.
+         * netstack_interface_*() take the ThreadX bracket themselves and stop
+         * the SANA-II readers as well as tell NetX Duo, so they are called
+         * outside ours, the same rule netstatus.c follows for
          * NETCTRL_INTERFACE_UP.
          *
          * The four states are three transitions. SM_Up and SM_Online both
@@ -1256,11 +1252,11 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
  * The work is netstack_interface_add()'s: half of it is NetX Duo's (attach an
  * interface to a running NX_IP) and half is the netstack's (open the SANA-II
  * device, register it for capture, take a configuration slot). An interface
- * that got only the first half would be invisible to netstack_shutdown() and
- * its device would never be closed.
+ * that got only the first half is invisible to netstack_shutdown(), and its
+ * device is never closed.
  *
  * The tag policy is the file header's. Roadshow callers pass the tuning tags
- * as a matter of course, so refusing them refused the interface itself.
+ * routinely, so a refusal of them refused the interface itself.
  */
 static LONG bsd_if_parse_add(struct AmiSocketBase *SocketBase,
                              struct TagItem *tags, AmiIfConfig *cfg)
@@ -1283,13 +1279,13 @@ static LONG bsd_if_parse_add(struct AmiSocketBase *SocketBase,
             case IFA_DownGoesOffline:
                 /* "bringing the interface 'down' ... will cause the associated
                    SANA-II device driver to be switched offline. Default is
-                   FALSE." Honoured either way; see IFC_State's SM_Down. */
+                   FALSE." Honoured either way. See IFC_State's SM_Down. */
                 cfg->down_goes_offline = (item->ti_Data != 0) ? TRUE : FALSE;
                 break;
 
             case IFA_SetDebugMode:
-                /* Behavioural, BOOL: there is no debug mode, so turning it off
-                   is possible and turning it on is not. */
+                /* Behavioural, BOOL: there is no debug mode, so a request to
+                   switch it off succeeds and one to switch it on does not. */
                 if (item->ti_Data != 0)
                     return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
                 break;
@@ -1309,8 +1305,8 @@ static LONG bsd_if_parse_add(struct AmiSocketBase *SocketBase,
 
             /*
              * Three more that "override" a default this stack already has. The
-             * documented default is what happens here, so asking for it is a
-             * request that is met; anything else is not available.
+             * documented default is what happens here, so a request for it is
+             * met. Anything else is not available.
              */
             case IFA_IPType:            /* "Default is 2048." */
                 if ((ULONG)item->ti_Data != (ULONG)AMI_ETHERTYPE_IPV4)
@@ -1330,11 +1326,11 @@ static LONG bsd_if_parse_add(struct AmiSocketBase *SocketBase,
 
             case IFA_PacketFilterMode:
                 /*
-                 * Behavioural: the mode decides what a capture can see, and a
-                 * tcpdump told it was promiscuous while it sees local traffic
-                 * only reports a quiet wire. PFM_Local is both the documented
-                 * default and what src/bpf/ does, it taps what the stack
-                 * sees. The two promiscuous modes need the device opened
+                 * Behavioural: the mode decides what a capture can see. A
+                 * tcpdump told it is promiscuous, while it sees local traffic
+                 * only, reports a quiet wire. PFM_Local is both the documented
+                 * default and what src/bpf/ does, because it taps what the
+                 * stack sees. The two promiscuous modes need the device opened
                  * exclusively, which the shim never does, and PFM_Nothing asks
                  * for capture to be off on this interface, which there is no
                  * way to arrange.
@@ -1353,23 +1349,23 @@ static LONG bsd_if_parse_add(struct AmiSocketBase *SocketBase,
              * -----------------------------------------------------------
              * Advisory. Each of these tunes how the work is done and leaves
              * nothing for a caller to observe through this API or on the wire,
-             * so they are accepted and ignored. Roadshow tools pass them as a
-             * matter of course, and refusing meant no interface at all.
+             * so they are accepted and ignored. Roadshow tools pass them
+             * routinely, and a refusal meant no interface at all.
              *
              *   IFA_NumReadRequests         queue depths. The RX depth is sized
              *   IFA_NumWriteRequests        from the packet pool at open time
              *   IFA_NumARPRequests          (sana2_rx.c) and the TX ring is a
-             *                               compile-time array; a different
+             *                               compile-time array. A different
              *                               depth is throughput under burst,
              *                               not behaviour.
              *   IFA_CopyMode                CM_FastWordCopy is "the faster data
-             *                               copying code"; the bytes that come
+             *                               copying code". The bytes that come
              *                               out are the same either way.
              *   IFA_RequiresInitDelay       a settle delay for devices that
              *                               lose the first frame. Defaults to
-             *                               TRUE and has never been implemented
-             *                               here, so refusing TRUE would refuse
-             *                               the documented default.
+             *                               TRUE and is not implemented here,
+             *                               so a refusal of TRUE refuses the
+             *                               documented default.
              * -----------------------------------------------------------
              */
             case IFA_NumReadRequests:
@@ -1429,8 +1425,8 @@ LONG bsd_AddInterfaceTagList(register STRPTR name __asm("a0"),
 #ifdef AMINETXDUO_IPV6
     /* This tag list has no IPv6 tag, which is the same case as a
        DEVS:NetInterfaces file with no CONFIGURE6 line, so it gets the same
-       answer config_parse.c gives that case. A bzeroed AmiIfConfig would say
-       OFF, and the interface would come up with no link-local address at all. */
+       answer config_parse.c gives that case. A bzeroed AmiIfConfig says OFF,
+       and the interface comes up with no link-local address at all. */
     cfg.ip6type = AMI_IP6TYPE_AUTO;
     cfg.prefix6 = 64;
 #endif
@@ -1483,13 +1479,13 @@ LONG bsd_AddInterfaceTagList(register STRPTR name __asm("a0"),
  * apart in the same document.
  *
  * The two sources also disagree about the type. The autodoc's synopsis is
- * "BOOL RemoveInterface(STRPTR name,BOOL force)"; clib/bsdsocket_protos.h in
+ * "BOOL RemoveInterface(STRPTR name,BOOL force)". clib/bsdsocket_protos.h in
  * the same NDK says "LONG RemoveInterface(STRPTR interface_name, LONG force)".
- * The header decides the type, since that is what a caller compiles against;
- * the autodoc decides the values, since the header says nothing about them.
+ * The header decides the type, since that is what a caller compiles against.
+ * The autodoc decides the values, since the header says nothing about them.
  * LONG 1 for success and 0 for failure satisfies both readings. 0-for-success,
- * which every neighbouring call uses, satisfies neither and would report
- * failure as success to every BOOL test.
+ * which every neighbouring call uses, satisfies neither and reports failure as
+ * success to every BOOL test.
  */
 LONG bsd_RemoveInterface(register STRPTR name __asm("a0"),
                          register LONG force __asm("d0"),
@@ -1528,14 +1524,14 @@ LONG bsd_RemoveInterface(register STRPTR name __asm("a0"),
      * use. Use a 'force' parameter of TRUE to make it remove the interface
      * anyway." EBUSY is that refusal.
      *
-     * The other failure is a SANA-II device that would not give its read
+     * The other failure is a SANA-II device that does not give its read
      * requests back. The autodoc's wording for `force`, "memory may remain
      * allocated until you shut down the network", describes that state, and
-     * this stack will not enter it: the requests point into the interface, so
-     * freeing it would leave the device holding memory the system has taken
-     * back. The interface stays, down and registered, and the caller gets
-     * EBUSY here too, because the remedy is the one the autodoc names: shut
-     * the network down.
+     * this stack does not enter it. The requests point into the interface, so
+     * a free of it leaves the device holding memory the system took back. The
+     * interface stays, down and registered, and the caller gets EBUSY here
+     * too, because the remedy is the one the autodoc names: shut the network
+     * down.
      */
     (VOID)bsd_fail(SocketBase,
                    (rc == AMI_NET_ERR_BUSY || rc == AMI_NET_ERR_STATE)
@@ -1555,27 +1551,27 @@ LONG bsd_RemoveInterface(register STRPTR name __asm("a0"),
 /*
  * SIOCGIFCONF and the SIOCGIF* family exist here for libpcap's
  * pcap_findalldevs(), which is how `tcpdump -D` and a bare `tcpdump` with no
- * -i discover what they can capture on; it asks through these and nothing
- * else. Capture on a named interface already worked, only asking which
- * names exist returned ENOSYS, so tcpdump exited 20 with an empty file
+ * -i discover what they can capture on. It asks through these and nothing
+ * else. Capture on a named interface already worked. Only the question of
+ * which names exist returned ENOSYS, so tcpdump exited 20 with an empty file
  * (docs/RESEARCH.md 60).
  *
  * The encodings are the NDK's, not invented here. sys/sockio.h gives
  * SIOCGIFCONF as _IOWR('i',36,struct ifconf) and the rest as
- * _IOWR('i',n,struct ifreq); the static assertions below fail the build if
+ * _IOWR('i',n,struct ifreq). The static assertions below fail the build if
  * those sizes ever stop being 8 and 32, which is the only way the layout
  * below can silently go wrong.
  *
- * Watch sa_len. fad-gifc walks the SIOCGIFCONF result by striding
+ * sa_len matters here. fad-gifc walks the SIOCGIFCONF result with a stride of
  * sizeof(ifr_name) + ifr_addr.sa_len rather than sizeof(struct ifreq), so an
  * entry whose sockaddr says 0 makes the walk stride 16 and read the second
- * half of the entry it has already read as a name. Every sockaddr written
- * here therefore carries its length; since sockaddr_in and sockaddr are both
- * 16 bytes on this NDK, the stride comes out at 32 either way, so the bug is
- * easy to miss.
+ * half of the entry it already read as a name. Every sockaddr written here
+ * therefore carries its length. sockaddr_in and sockaddr are both 16 bytes on
+ * this NDK, so the stride comes out at 32 either way, and the bug is easy to
+ * miss.
  *
  * Only physical interfaces are listed. NetX Duo puts loopback past the
- * physical range and no BPF channel can bind to it, so listing it would offer
+ * physical range and no BPF channel can bind to it, so a listing of it offers
  * a name that cannot be captured on.
  */
 
@@ -1600,11 +1596,11 @@ static VOID bsd_if_put_addr(struct sockaddr *sa, ULONG addr)
 }
 
 /*
- * What an interface looks like to code that thinks in BSD flags. UP is
- * "configured and meant to be carrying traffic", RUNNING is "the link is
- * actually there"; libpcap prints the difference, so the two are kept
- * distinct. Same pair IFQ_State reports on and IFF_RUNNING does not, and from
- * the same two fields. Every interface here is a SANA-II Ethernet device, so
+ * What an interface looks like to code written for BSD flags. UP is
+ * "configured and meant to carry traffic", RUNNING is "the link is there".
+ * libpcap prints the difference, so the two are kept distinct. Same pair
+ * IFQ_State reports on and IFF_RUNNING does not, and from the same two
+ * fields. Every interface here is a SANA-II Ethernet device, so
  * BROADCAST and MULTICAST are unconditional.
  */
 static UWORD bsd_if_flags(const BsdIfInfo *info)
@@ -1643,8 +1639,8 @@ LONG bsd_if_ioctl(ULONG req, APTR argp,
 
         /*
          * A NULL buffer asks how much room is needed. fad-gifc does not do
-         * this, but other callers of this ioctl always could. Counting costs
-         * one pass and removes a way to crash.
+         * this, but other callers of this ioctl can. The count costs one pass
+         * and removes a way to crash.
          */
         if (out == NULL)
             room = 0;
@@ -1705,7 +1701,7 @@ LONG bsd_if_ioctl(ULONG req, APTR argp,
 
         bsd_nx_leave(SocketBase);
 
-        /* Out of the bracket before the caller's memory is touched; see
+        /* Out of the bracket before the caller's memory is touched. See
            bsd_QueryInterfaceTagList() at its own gather. */
         switch (req)
         {
@@ -1851,7 +1847,7 @@ struct if_nameindex *bsd_if_nameindex(register struct AmiSocketBase *SocketBase
 #endif
 
     /* "an if_index of 0 and an if_name of NULL". ami_alloc() zeroes, so this
-       is already true of every slot past `used`; written out because the
+       is already true of every slot past `used`. Written out because the
        terminator is contract, not a side effect of the allocator. */
     out->bin_Entry[used].if_index = 0UL;
     out->bin_Entry[used].if_name  = NULL;

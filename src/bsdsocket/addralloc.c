@@ -616,7 +616,7 @@ static VOID bsd_aam_worker(VOID)
      * Waited for in a loop rather than taken once. The slot in bsd_aam_jobs[]
      * is claimed before CreateNewProc(). A worker that gave up on a NULL
      * GetMsg() therefore left that slot claimed, with nothing to release it
-     * and no message to reply. It could do neither, because the job is the
+     * and no message to reply. It can do neither, because the job is the
      * only thing that names the index and the message. Every other path out of
      * here releases the slot and replies, and that path cannot, so it is gone.
      * The launcher PutMsg()s exactly once and unconditionally, so a message
@@ -884,7 +884,7 @@ VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *aam __as
     /*
      * "You must fill in this member or the message will be rejected." The
      * test is a range rather than an equality because of the header's
-     * AAM_VERSION_MINIMUM; see bsd_CreateAddrAllocMessageA().
+     * AAM_VERSION_MINIMUM. See bsd_CreateAddrAllocMessageA().
      */
     if (aam->aam_Version < AAM_VERSION_MINIMUM ||
         aam->aam_Version > AAM_VERSION)

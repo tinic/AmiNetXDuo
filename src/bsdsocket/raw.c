@@ -94,7 +94,7 @@
 /* Bytes of IPv4 header we are prepared to wind back over (5..15 words). */
 #define BSD_RAW_MAX_IPHDR       60
 
-/* The fixed IPv6 header; extension headers sit behind it and are not read. */
+/* The fixed IPv6 header. Extension headers sit behind it and are not read. */
 #define BSD_RAW_IPV6_HDR        40
 
 /*

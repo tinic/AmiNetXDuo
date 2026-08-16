@@ -6,9 +6,9 @@
  *   ReleaseDomainNameServerList()
  *   In_LocalAddr() / In_CanForward()
  *
- * Tier 3 (docs/RESEARCH.md S3.2) is ~35 vectors: interface config and query,
- * routing, GetNetworkStatistics(), the *RoadshowData set. Most now live
- * elsewhere, written against the NDK 3.2 autodoc (docs/RESEARCH.md S47):
+ * Tier 3 (docs/RESEARCH.md S3.2) is ~35 vectors: interface configuration and
+ * query, routing, GetNetworkStatistics(), the *RoadshowData set. Most now
+ * live elsewhere, written against the NDK 3.2 autodoc (docs/RESEARCH.md S47):
  *
  *   interfaces.c   ObtainInterfaceList(), ReleaseInterfaceList(),
  *                  QueryInterfaceTagList(), ConfigureInterfaceTagList(),
@@ -145,7 +145,7 @@ BOOL bsd_GetDefaultDomainName(register STRPTR buffer   __asm("a0"),
  * interface.
  *
  * Twice the slots and IPv6-wide strings. dnsn_Address is a STRPTR, and
- * Roadshow never had a server this call could not spell. This stack can be
+ * Roadshow never had a server this call cannot spell. This stack can be
  * handed one in a router advertisement, and the report must not list only half
  * the servers the resolver queries. A caller written for Roadshow passes the
  * text to inet_addr() and gets INADDR_NONE for an IPv6 entry. That is the same

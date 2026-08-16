@@ -21,7 +21,7 @@ struct AmiSocketBase;
  */
 VOID bsd_tcp_handler_start(struct AmiSocketBase *master);
 
-/* TRUE while the handler process exists; see bsd_lib_expunge(). */
+/* TRUE while the handler process exists. See bsd_lib_expunge(). */
 BOOL bsd_tcp_handler_alive(VOID);
 
 #endif /* AMINETXDUO_BSDSOCKET_TCP_HANDLER_H */

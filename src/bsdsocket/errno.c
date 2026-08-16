@@ -108,8 +108,8 @@ static const BsdStatusMap bsd_status_map[] =
      * NX_NO_PACKET means both "nothing to read" and "the packet pool is
      * empty". EWOULDBLOCK is only right for the first. It holds here because
      * no caller can reach the second on a socket that was willing to wait.
-     * Read bsd_wait_option() in select.c before you add a call site that does
-     * not go through it. New code must use bsd_wait_errno() below, which
+     * Read bsd_wait_option() in select.c before a new call site is added that
+     * does not go through it. New code must use bsd_wait_errno() below, which
      * checks the wait value rather than assumes this.
      */
     { NX_NO_PACKET,         AMI_EWOULDBLOCK      },
