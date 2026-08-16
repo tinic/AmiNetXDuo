@@ -99,6 +99,7 @@ static VOID list_modes(ULONG want_depth)
     while ((id = NextDisplayInfo(id)) != (ULONG)INVALID_ID)
     {
         struct DimensionInfo dim;
+        DisplayInfoHandle handle;
         ULONG depth;
 
         n++;
@@ -106,8 +107,22 @@ static VOID list_modes(ULONG want_depth)
             continue;
         rtg++;
 
-        if (GetDisplayInfoData(NULL, (UBYTE *)&dim, sizeof(dim), DTAG_DIMS,
-                               id) == 0)
+        /* THE HANDLE, NOT A NULL AND THE ID.  GetDisplayInfoData() accepts
+           either, but the NULL form puts a compile-time zero in a0 -- and the
+           NDK's LP5 already binds a0 to one of its own clobber operands, so
+           gcc satisfies the argument's "rf" constraint from a data register
+           instead and the library is entered with whatever a0 happened to
+           hold.  That is not a theory: -Os put the zero in d7 here, this call
+           returned 0 for every card mode, and moving an unrelated printf()
+           changed it from "no dimensions" to an illegal instruction that took
+           the machine down mid-boot.  FindDisplayInfo() hands over a real
+           pointer, which gcc does keep in a0. */
+        handle = FindDisplayInfo(id);
+        if (handle == NULL)
+            continue;
+
+        if (GetDisplayInfoData(handle, (UBYTE *)&dim, sizeof(dim), DTAG_DIMS,
+                               0) == 0)
             continue;
 
         depth = cgx_id_attr(CYBRIDATTR_DEPTH, id);
@@ -124,18 +139,54 @@ static VOID list_modes(ULONG want_depth)
     printf("modes_at_depth=%lu\n", (unsigned long)match);
 }
 
-int main(int argc, char **argv)
+/* NOT argv.  A program this harness starts from S:Startup-Sequence sees
+   argc == 1 whatever the line said -- this toolchain's crt0 does not build
+   argv -- so an argv reader takes its defaults in silence.  That is not a
+   theory either: `rtgscreen 0` read 8 from its own default, opened a screen
+   instead of listing, and never returned, which stopped the boot at that line
+   with the server three lines further down.  GetArgStr() is the line as
+   AmigaDOS passed it. */
+static ULONG arg_word(const char **p, ULONG fallback)
+{
+    const char *s = *p;
+    ULONG v = 0;
+    int digits = 0;
+
+    while (*s == ' ' || *s == '\t')
+        s++;
+    while (*s >= '0' && *s <= '9')
+    {
+        v = v * 10UL + (ULONG)(*s - '0');
+        s++;
+        digits++;
+    }
+    *p = s;
+    return digits ? v : fallback;
+}
+
+int main(VOID)
 {
     struct Screen *sc;
-    ULONG depth = (argc > 1) ? (ULONG)atoi(argv[1]) : 8UL;
-    ULONG width = (argc > 2) ? (ULONG)atoi(argv[2]) : 640UL;
-    ULONG height = (argc > 3) ? (ULONG)atoi(argv[3]) : 480UL;
+    const char *args = (const char *)GetArgStr();
+    ULONG depth, width, height;
     ULONG id = (ULONG)INVALID_ID;
+
+    if (args == NULL)
+        args = "";
+    depth  = arg_word(&args, 8UL);
+    width  = arg_word(&args, 640UL);
+    height = arg_word(&args, 480UL);
 
     /* Unbuffered, because the success path does not return: it opens the
        screen and waits, so anything still sitting in a stdio buffer is
        output nobody ever sees. */
     setvbuf(stdout, NULL, _IONBF, 0);
+
+    /* Printed, because the defaults and what the harness passes are the same
+       numbers: without this line a run that read nothing looks exactly like a
+       run that read its arguments. */
+    printf("args=%lu %lu %lu\n", (unsigned long)depth, (unsigned long)width,
+           (unsigned long)height);
 
     GfxBase = (struct GfxBase *)
         OpenLibrary((CONST_STRPTR)"graphics.library", 39);
@@ -151,6 +202,19 @@ int main(int argc, char **argv)
     printf("cybergraphics=%s\n", CyberGfxBase != NULL ? "yes" : "no");
 
     list_modes(depth);
+
+    /* DEPTH 0 LISTS AND STOPS, which is how the harness asks the question
+       from S:Startup-Sequence.  That call has to RETURN: the success path
+       below never does, so a listing run that fell into it hung the boot on
+       that line and everything the sequence starts after it -- the server
+       included -- was simply never reached. */
+    if (depth == 0)
+    {
+        printf("result=listed\n");
+        if (CyberGfxBase != NULL)
+            CloseLibrary(CyberGfxBase);
+        return RETURN_OK;
+    }
 
     /* ASKED FOR, NOT ASSUMED.  The harness wrote a mode ID into
        screenmode.prefs that it worked out from the emulator's source, which is
