@@ -87,7 +87,7 @@ ami_if_keywords[] =
 
     /*
      * IPv6. Roadshow has no IPv6 keywords and no Amiga stack has ever had
-     * IPv6, so these are ours, named by adding "6" to the IPv4 keyword they
+     * IPv6, so these are new here, named by adding "6" to the IPv4 keyword they
      * match. No real Roadshow keyword ends in a digit, so nothing collides,
      * and one interface file describes both families:
      *
@@ -919,7 +919,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 }
                 else if (!cfg_zone_ok(out, "ADDRESS6", zone, value))
                 {
-                    /* Warned about above; the address is not taken. */
+                    /* Warned about above. The address is not taken. */
                 }
                 else if (!have_configure6)
                 {

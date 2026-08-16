@@ -154,7 +154,7 @@ static BOOL ami_cfg_parse_ip6_inner(const char *text,
             gap = (LONG)count;
             s++;
 
-            /* "1::" ends here; anything else continues with a group. */
+            /* "1::" ends here. Anything else continues with a group. */
             if (*s == '\0' || *s == '/' || *s == '%' || *s == ' ' || *s == '\t')
                 break;
         }
@@ -334,7 +334,7 @@ VOID ami_config_format_ip6(const ULONG addr[AMI_CFG_IP6_WORDS],
         group[i * 2 + 1] = (UWORD)(addr[i] & 0xFFFFUL);
     }
 
-    /* Longest run of two or more zero groups; leftmost wins a tie
+    /* Longest run of two or more zero groups. Leftmost wins a tie
        (RFC 5952 4.2.3). */
     for (i = 0; i < 8; i++)
     {

@@ -86,7 +86,7 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
      * A gate of `& 3` therefore never passed in cooked mode: tools/profiler
      * over an A600 fitz transfer, 2026-08-06, put n68k_copy_bytes() at 12.9%
      * of the machine and n68k_copy_sum_longwords() at zero samples, with the
-     * frame walked again afterwards for a sum the copy could have produced.
+     * frame walked again afterwards for a sum the copy itself can produce.
      *
      * A 68000 raises an address error on an odd word or longword access, not
      * on a merely 4-misaligned one, and its bus is 16 bits wide, so a longword

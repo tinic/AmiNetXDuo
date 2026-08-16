@@ -227,7 +227,8 @@ static BOOL netdb_parse(NetdbTable *table, NetdbKind kind, char *buf)
             }
             else if (!ami_config_parse_ip(row[0], &addr))
             {
-                /* NAMESERVER/DOMAIN/SEARCH lines land here; not netdb data. */
+                /* NAMESERVER/DOMAIN/SEARCH lines land here, and are not netdb
+                   data. */
                 continue;
             }
 

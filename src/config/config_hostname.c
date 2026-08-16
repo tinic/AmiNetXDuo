@@ -11,7 +11,7 @@
 #include "config_internal.h"
 #include "aminetxduo/compat.h"
 
-/* RFC 1123 2.1 relaxes RFC 952 to allow a leading digit; the rest stands. */
+/* RFC 1123 2.1 relaxes RFC 952 to allow a leading digit. The rest stands. */
 #define AMI_CFG_LABEL_MAX   63
 
 static BOOL label_valid(const char *s, ULONG len)

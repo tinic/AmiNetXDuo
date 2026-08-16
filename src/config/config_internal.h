@@ -105,7 +105,7 @@ VOID ami_cfg_join3(char *dst, ULONG dstlen, const char *a, const char *b,
  */
 char *ami_cfg_next_line(char **cursor);
 
-/* Trim leading and trailing whitespace in place; returns the new start. */
+/* Trim leading and trailing whitespace in place. Returns the new start. */
 char *ami_cfg_trim(char *s);
 
 /*
@@ -117,7 +117,8 @@ VOID ami_cfg_strip_comment(char *s, const char *chars);
 
 /*
  * Remove one layer of "double quotes", applying the AmigaDOS ReadItem escapes
- * (** -> *, *" -> ", *n -> LF, *e -> ESC). In place; a no-op when unquoted.
+ * (** -> *, *" -> ", *n -> LF, *e -> ESC). In place, and a no-op when
+ * unquoted.
  */
 VOID ami_cfg_unquote(char *s);
 
@@ -192,7 +193,8 @@ VOID ami_cfg_hostname_from_files(AmiConfig *cfg, char *env_text);
 
 /*
  * Parse DEVS:Internet/default_gateway (DEVICE/UNIT/GATEWAY) or
- * DEVS:Internet/routes (DEFAULT=/DEFAULTGATEWAY=, plus DST/VIA lines we skip).
+ * DEVS:Internet/routes (DEFAULT=/DEFAULTGATEWAY=, plus DST/VIA lines that are
+ * skipped).
  * Sets *out only when a default gateway is found.
  */
 VOID ami_cfg_parse_gateway(char *buf, ULONG *out);

@@ -1424,7 +1424,7 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
                  * deadline, so this does not normally happen. If it does, the
                  * thread is running on `rx->stack` and the ThreadX control block
                  * is live, so neither can be freed: a 4 KB leak is recoverable,
-                 * a thread executing freed memory is not.
+                 * a thread that runs on freed memory is not.
                  */
                 AMI_ERROR("sana2: reader %ld did not stop; leaking its stack "
                           "rather than freeing memory it is running on", (long)i);

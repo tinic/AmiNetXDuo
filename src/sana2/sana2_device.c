@@ -381,7 +381,7 @@ LONG ami_sana2_online(AmiSana2If *iface)
 
     iface->online = TRUE;
 
-    /* S2_ONLINE resets the device's counters, so ours restart with them. */
+    /* S2_ONLINE resets the device's counters, so these restart with them. */
     iface->stats.bad_data        = 0;
     iface->stats.overruns        = 0;
     iface->stats.unknown_types   = 0;
