@@ -353,14 +353,14 @@ static void test_byte_order(void)
 
         nic_reset(swapped);
 
-        sprintf(what, "attach with swapped=%d", swapped);
+        snprintf(what, sizeof(what), "attach with swapped=%d", swapped);
         expect_u32(what, (unsigned long)el3_attach(&nic), 0);
 
-        sprintf(what, "measured el3_swap, bus swapped=%d", swapped);
+        snprintf(what, sizeof(what), "measured el3_swap, bus swapped=%d", swapped);
         expect_u32(what, (unsigned long)nic.el3_swap, (unsigned long)swapped);
 
         /* And the manufacturer ID really did come back as the constant. */
-        sprintf(what, "window 0 selected after attach, swapped=%d", swapped);
+        snprintf(what, sizeof(what), "window 0 selected after attach, swapped=%d", swapped);
         expect_u32(what, (unsigned long)mock_window, 0);
 
         /*
@@ -369,7 +369,7 @@ static void test_byte_order(void)
          * port is and not where this part's FIFO is; attach has to move it
          * or every frame goes to an address nothing here decodes, silently.
          */
-        sprintf(what, "fifo address, swapped=%d", swapped);
+        snprintf(what, sizeof(what), "fifo address, swapped=%d", swapped);
         expect_u32(what,
                    (unsigned long)((const volatile unsigned char *)nic.bus.asic -
                                    (const volatile unsigned char *)board),
@@ -566,19 +566,19 @@ static void check_tx(const char *what, UWORD len, UWORD want_fifo)
         frame[i] = (UBYTE)(i + 1);
 
     mock_txlen = 0;
-    sprintf(label, "%s: queued", what);
+    snprintf(label, sizeof(label), "%s: queued", what);
     expect_u32(label, (unsigned long)el3_tx(&nic, frame, len), 0);
 
-    sprintf(label, "%s: bytes in the fifo", what);
+    snprintf(label, sizeof(label), "%s: bytes in the fifo", what);
     expect_u32(label, (unsigned long)mock_txlen, (unsigned long)want_fifo);
 
-    sprintf(label, "%s: length word", what);
+    snprintf(label, sizeof(label), "%s: length word", what);
     expect_u32(label,
                (unsigned long)(mock_txfifo[0] |
                                ((unsigned long)mock_txfifo[1] << 8)),
                (unsigned long)len);
 
-    sprintf(label, "%s: second preamble word is zero", what);
+    snprintf(label, sizeof(label), "%s: second preamble word is zero", what);
     expect_u32(label,
                (unsigned long)(mock_txfifo[2] |
                                ((unsigned long)mock_txfifo[3] << 8)), 0);
@@ -591,7 +591,7 @@ static void check_tx(const char *what, UWORD len, UWORD want_fifo)
             if (mock_txfifo[4 + i] != (UBYTE)(i + 1))
                 bad++;
         }
-        sprintf(label, "%s: body bytes wrong", what);
+        snprintf(label, sizeof(label), "%s: body bytes wrong", what);
         expect_u32(label, (unsigned long)bad, 0);
     }
 }
