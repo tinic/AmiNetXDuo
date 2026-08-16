@@ -27,6 +27,17 @@
 # collide, and the A/B it exists to run would be meaningless anyway.
 if(CMAKE_CROSSCOMPILING AND AMINETXDUO_NET68K_CHECKSUM)
 
+# The RTG screen prober: what modes the display database really holds, and a
+# public 8-bit screen of the requested shape left in front for the console to
+# serve.  A TEST TOOL and nothing ships it; see the file for why the console
+# harness could not do without it.
+add_executable(rtgscreen rtgscreen.c)
+target_include_directories(rtgscreen PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(rtgscreen PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(rtgscreen PRIVATE -Wall -Wextra)
+
 add_executable(perf_test perf_test.c)
 
 # aminetxduo_net68k for the algorithm, and NOT its hook: perf_test.c defines

@@ -137,6 +137,12 @@ done
 [ ${#DEPTHS[@]} -gt 0 ] || DEPTHS=(2 4)
 if [ "$RTG" = 1 ]; then
     DEPTHS=(8)
+    [ -f "$RTGSCREEN" ] || {
+        say error "no $RTGSCREEN"
+        say hint "cmake --build $BUILD --parallel --target rtgscreen"
+        say RESULT INFRA
+        exit 2
+    }
     for f in Libs/Picasso96API.library Libs/Picasso96/rtg.library \
              Libs/Picasso96/uaegfx.card Devs/Monitors/Picasso96; do
         [ -f "$P96DIR/$f" ] || {
@@ -152,6 +158,7 @@ fi
 
 HTTPD="$BUILD/src/tools/httpd"
 BSD="$BUILD/src/bsdsocket/bsdsocket.library"
+RTGSCREEN="${AMINETXDUO_RTGSCREEN:-$BUILD/tests/perf/rtgscreen}"
 
 for f in "$HTTPD" "$BSD"; do
     [ -f "$f" ] || {
@@ -349,6 +356,13 @@ EOF
         cp "$P96DIR/Devs/Monitors/Picasso96" "$HD/Devs/Monitors/$RTG_BOARD"
         rtg_monitor_icon "$HD/Devs/Monitors/$RTG_BOARD.info" "$RTG_BOARD"
         wb31_screenmode_prefs_id "$HD" "$depth" "$RTG_MODE_ID" "$RTG_W" "$RTG_H"
+        # And the prober, which is what actually puts an RTG screen in front:
+        # screenmode.prefs moves WORKBENCH, and whether that lands depends on a
+        # mode ID this harness worked out from the emulator's source.  The
+        # prober asks the display database instead, prints every mode it holds,
+        # and opens a public screen on the one the machine picked.
+        [ -f "$RTGSCREEN" ] && { cp "$RTGSCREEN" "$HD/C/rtgscreen"; \
+                                 chmod 755 "$HD/C/rtgscreen"; }
     else
         wb31_screenmode_prefs "$HD" "$depth"
     fi
@@ -386,6 +400,8 @@ EOF
     # it actually found: whether rtg.library loaded, whether it saw a board,
     # and what Intuition ended up opening.
     [ "$RTG" = 1 ] && cat >> "$HD/S/Startup-Sequence" <<'EOF'
+Run >DH0:rtgscreen.txt <NIL: C:rtgscreen 8 640 480
+C:Wait 3
 C:Version >DH0:rtg-ver.txt LIBS:Picasso96/rtg.library FILE
 C:Version >>DH0:rtg-ver.txt LIBS:Picasso96API.library FILE
 C:Version >>DH0:rtg-ver.txt Picasso96API.library
