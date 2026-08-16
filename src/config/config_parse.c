@@ -348,8 +348,8 @@ static VOID report_inert_keyword(ULONG line, const char *key)
                           " is read and does nothing: ",
                           cfg_inert_keys[i].why);
             ami_cfg_problem(line, AMI_CFG_PROBLEM_WARN, text,
-                            "Roadshow acts on it; this stack does not.  The "
-                            "line is harmless and can stay.");
+                            "Roadshow acts on it.  This stack does not.  "
+                            "The line is harmless and can stay.");
             return;
         }
     }
@@ -458,8 +458,8 @@ static VOID report_bad_card(ULONG line, const char *value)
     "ADDRESS, NETMASK, GATEWAY and MTU.  The line was ignored."
 
 #define CFG_HINT_IPV4 \
-    "An address is four numbers from 0 to 255 with dots between them, like " \
-    "192.168.1.10."
+    "An address is four numbers from 0 to 255 with dots between them, for " \
+    "example 192.168.1.10."
 
 /* CONFIGURE=/IPTYPE= address-configuration modes. */
 static const struct IpTypeName
@@ -661,7 +661,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                     AMI_WARN("config: %s: empty DEVICE", out->name);
                     ami_cfg_problem(lineno, AMI_CFG_PROBLEM_ERROR,
                                     "DEVICE has no value",
-                                    "DEVICE names the driver for your network "
+                                    "DEVICE names the driver for the network "
                                     "card, for example DEVICE=a2065.device.  "
                                     "The driver itself belongs in "
                                     "DEVS:Networks/.");
@@ -726,7 +726,8 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                     report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "ADDRESS",
                                      value,
                                      CFG_HINT_IPV4 "  Write ADDRESS=DHCP to "
-                                     "have the address handed out for you.");
+                                     "have the address handed out "
+                                     "automatically.");
                 }
                 break;
 
@@ -740,7 +741,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                     AMI_WARN("config: %s: bad NETMASK '%s'", out->name, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "NETMASK",
                                      value,
-                                     "A netmask looks like an address; on a "
+                                     "A netmask looks like an address.  On a "
                                      "home network it is almost always "
                                      "255.255.255.0.");
                 }
@@ -752,7 +753,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                     AMI_WARN("config: %s: bad GATEWAY '%s'", out->name, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "GATEWAY",
                                      value,
-                                     "The gateway is the address of your router. "
+                                     "The gateway is the address of the router. "
                                      CFG_HINT_IPV4);
                 }
                 break;
@@ -990,9 +991,9 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
         ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR,
                         "there is no DEVICE line, so the file does not say "
                         "which network card to use",
-                        "Add a line like  DEVICE = a2065.device  naming the "
-                        "driver for your card, or let NetSetup write the file "
-                        "for you.");
+                        "Add a line such as  DEVICE = a2065.device  that "
+                        "names the driver for the card, or let NetSetup "
+                        "write the file.");
         return AMI_CFG_ERR_SYNTAX;
     }
 
@@ -1016,7 +1017,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                         "line and CONFIGURE does not say DHCP",
                         "Add  CONFIGURE = DHCP  to have an address handed out, "
                         "or  ADDRESS = 192.168.1.10  and  NETMASK = "
-                        "255.255.255.0  to set one yourself.");
+                        "255.255.255.0  to set one by hand.");
     }
 
 #ifdef AMINETXDUO_IPV6
@@ -1083,7 +1084,7 @@ VOID ami_cfg_parse_resolver(char *buf, AmiResolverConfig *out,
                 report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "NAMESERVER",
                                  value,
                                  "A name server is given by address, not by "
-                                 "name, on a home network it is usually the "
+                                 "name.  On a home network it is usually the "
                                  "router, for example 192.168.1.1.");
             }
             else if (out->nameserver_count >= AMI_CFG_MAX_NAMESERVERS)
@@ -1520,7 +1521,7 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
                     AMI_WARN("config: bad gateway address '%s'", value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "the gateway",
                                      value,
-                                     "This is the address of your router, and it "
+                                     "This is the address of the router, and it "
                                      "must be on the same network as this "
                                      "machine. " CFG_HINT_IPV4);
                 }
@@ -1811,7 +1812,7 @@ VOID ami_cfg_parse_dnssd(char *buf, AmiSdService *out, UWORD max, UWORD *count)
             report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "the port",
                              (port_text != NULL) ? port_text : "",
                              "A port is a number from 1 to 65535, and it is "
-                             "the port the server is really listening on.  "
+                             "the port the server listens on.  "
                              "The line was ignored.");
             continue;
         }
@@ -1896,7 +1897,7 @@ VOID ami_cfg_parse_dnssd(char *buf, AmiSdService *out, UWORD max, UWORD *count)
                 ami_cfg_problem(lineno, AMI_CFG_PROBLEM_WARN,
                                 "there are more services here than can be "
                                 "advertised",
-                                "At most eight are announced; the ones after "
+                                "At most eight are announced.  The ones after "
                                 "that were ignored.");
             }
             continue;
