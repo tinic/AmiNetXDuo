@@ -319,6 +319,20 @@ stage_host() {
         return 1
     fi
 
+    # Which toolchain a build picks, against a fake cache.  The emulator tier
+    # ran under GCC 15.2 for three releases because <cache>/current addressed a
+    # tree that was not the pin and both resolvers took it on "it runs" alone.
+    # It costs no toolchain and no network to check, and the failure it covers
+    # was invisible everywhere except one generated-header diff.
+    if tools/toolchain-resolve-selftest.sh > "$BUILD/tcresolve.log" 2>&1; then
+        note "toolchain resolve: $(sed -n 's/^toolchain_resolve_selftest=/&/p' \
+              "$BUILD/tcresolve.log")"
+    else
+        cat "$BUILD/tcresolve.log"
+        fail "the toolchain resolvers accept a cache that is not the pin"
+        return 1
+    fi
+
     # The same argument one level down, for the harnesses that grade a
     # transcript rather than a check count.  run-addifup.sh is the gate for
     # "AddNetInterface never came back" and runs on one self-hosted runner, so
@@ -665,7 +679,7 @@ stage_conformance() {
     # -b, or conf_launcher is silently left out. build.sh looks for the crash
     # guard in build/cm, which this script never produces; without the flag it
     # printed one line on stderr, exited 0, and the next
-    # tests/conformance/run-fsuae.sh stopped
+    # tests/conformance/run-conformance.sh stopped
     # with "missing conf_launcher" -- a build stage that reported success and
     # had not built the thing the run needs.
     tests/conformance/build.sh -b "$BUILD/default" \
@@ -674,7 +688,7 @@ stage_conformance() {
     if [ ! -f build/bsdsocktest/conf_launcher ]; then
         tail -5 "$BUILD/conformance.log"
         fail "conformance: conf_launcher was not built, so\
- tests/conformance/run-fsuae.sh cannot start the suite. It needs\
+ tests/conformance/run-conformance.sh cannot start the suite. It needs\
  $BUILD/default/src/common/libaminetxduo_common.a,\
  which the cross stage produces -- run that first."
         return 1
