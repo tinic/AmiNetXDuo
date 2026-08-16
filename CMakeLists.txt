@@ -485,6 +485,15 @@ if(AMINETXDUO_NET68K_CHECKSUM)
     list(FILTER NETXDUO_SOURCES EXCLUDE REGEX "/nx_ip_checksum_compute\\.c$")
 endif()
 
+# The same mechanism again, for the source address selection: src/ipv6 supplies
+# _nxd_ipv6_interface_find(), so the vendored object must not.  Unconditional
+# rather than behind AMINETXDUO_IPV6, because the vendored file is #ifdef
+# FEATURE_NX_IPV6 end to end and compiles to nothing in the floor build, where
+# src/ipv6 is not added either.  There is no option to turn this off: the
+# vendored routine is not a second implementation to compare against, it is
+# the first-match walk docs/CONFORMANCE.md had a row for.
+list(FILTER NETXDUO_SOURCES EXCLUDE REGEX "/nxd_ipv6_interface_find\\.c$")
+
 # Verify receive checksums in the driver glue and tell NetX Duo, through
 # NX_ENABLE_INTERFACE_CAPABILITY, not to walk them again.
 #
@@ -736,6 +745,14 @@ add_subdirectory(port/netxduo-amiga)
 add_subdirectory(src/net68k)
 if(AMINETXDUO_NET68K_CHECKSUM)
     target_link_libraries(netxduo PUBLIC aminetxduo_net68k)
+endif()
+
+# src/ipv6, on the same terms: it supplies _nxd_ipv6_interface_find(), which
+# the vendored core now leaves undefined, so netxduo carries it as a PUBLIC
+# dependency and every consumer picks it up without listing it.
+if(AMINETXDUO_IPV6)
+    add_subdirectory(src/ipv6)
+    target_link_libraries(netxduo PUBLIC aminetxduo_ipv6)
 endif()
 
 add_subdirectory(src/common)
