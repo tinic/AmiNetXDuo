@@ -15,6 +15,7 @@ option(AMINETXDUO_NETDEV_LINK
 set(NETDEV_SOURCES
     netdev_device.c     # keep first: romtag, entry guard, Open/BeginIO
     netdev_cmds.c       # the S2_* table
+    netdev_event.c      # S2_ONEVENT delivery and S2_PacketFilter, host-testable
     netdev_bus.c        # register stride and the data port
     netdev_cards.c      # the card table
     netdev_pcmcia.c     # the A600/A1200 slot, which has no autoconfig record
@@ -198,6 +199,31 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netdev_bus PRIVATE -Wall -Wextra)
 
     add_test(NAME netdev_bus COMMAND test_netdev_bus)
+
+    # S2_ONEVENT delivery and the S2_PacketFilter hook.  Every one of its
+    # callers is an interrupt, so what it does to another task's IORequest is
+    # the part no emulator run can show: a list walked without the mask, or a
+    # request replied while still linked, is a race and not a failure.  The
+    # test drives the list directly and counts the Disable() nesting.
+    #
+    # Three shim directories, in this order: this one for what only
+    # netdev_internal.h needs, tests/sana2's for exec/io.h and the IOSana2Req
+    # it is built on, and the config parser's for the rest of exec/.
+    add_executable(test_netdev_event
+        test/test_netdev_event.c
+        netdev_event.c)
+
+    target_include_directories(test_netdev_event PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/sana2"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_event PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_event COMMAND test_netdev_event)
 endif()
 
 # Raw-serial tracing through the custom chips, for bring-up on an emulator

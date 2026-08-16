@@ -422,8 +422,12 @@ static ULONG pc_on_removed(register struct CardHandle *h __asm("a1"))
     if (unit != NULL)
     {
         unit->nu_Nic.running = FALSE;
+        /* A card pulled out of the slot is the one unambiguous
+           S2EVENT_HARDWARE this driver has, and it is an error as well as a
+           state change: a caller waiting on any of the three learns of it. */
         if (unit->nu_Online)
-            netdev_offline(unit, S2EVENT_OFFLINE);
+            netdev_offline(unit,
+                           S2EVENT_OFFLINE | S2EVENT_ERROR | S2EVENT_HARDWARE);
     }
 
     return 0;

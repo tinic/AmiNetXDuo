@@ -98,6 +98,16 @@ typedef struct NetdevUnit
     UBYTE                       nu_Exclusive;   /* SANA2OPF_MINE is held */
     UBYTE                       nu_Pad2;
 
+    /*
+     * The OR of every queued S2_ONEVENT mask on this unit, so that an
+     * interrupt with an event to post can find out that nobody is listening in
+     * one word.  Written under Disable(), read without one, and a word rather
+     * than a long because a 68000 reads a long in two bus cycles and this is
+     * read from interrupt context.  netdev_event.c owns it.
+     */
+    UWORD                       nu_EventMask;
+    UWORD                       nu_Pad3;
+
     struct Sana2DeviceStats     nu_Stats;
 
     /* Frames are staged here on the way out; 4-aligned for the long window. */
@@ -133,12 +143,34 @@ typedef struct NetdevDevice
 #define NETDEV_OPENER(u) \
     ((NetdevOpener *)(void *)((UBYTE *)(u) - offsetof(NetdevOpener, op_Unit)))
 
+/*
+ * What one opener did with one received frame.  REJECTED is not a failure and
+ * not a delivery: the opener's S2_PacketFilter hook said no, its CMD_READ is
+ * still queued and untouched, and the frame goes on to whoever else wants it.
+ */
+typedef enum
+{
+    NETDEV_RX_TAKEN = 0,
+    NETDEV_RX_REJECTED,
+    NETDEV_RX_FAILED        /* the opener's CopyToBuff hook returned FALSE */
+} NetdevRxResult;
+
 /* netdev_device.c */
 VOID netdev_reply(struct IOSana2Req *io, LONG err, ULONG wire);
 BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len);
-VOID netdev_event(NetdevUnit *unit, ULONG mask);
+/* A standard utility.library Hook: a0 = hook, a2 = object, a1 = message. */
+BOOL netdev_hook_call(APTR hook, APTR object, APTR message);
 VOID netdev_rebuild_filter(NetdevUnit *unit);
 VOID netdev_tx_pump(NetdevUnit *unit);
+
+/* netdev_event.c */
+VOID netdev_event(NetdevUnit *unit, ULONG mask);
+VOID netdev_event_wait(NetdevUnit *unit, struct IOSana2Req *io);
+VOID netdev_event_rescan(NetdevUnit *unit);
+BOOL netdev_filter_ok(NetdevOpener *op, struct IOSana2Req *io,
+                      const UBYTE *data);
+const UBYTE *netdev_payload(const NetdevOpener *op, const struct IOSana2Req *io,
+                            const UBYTE *frame, UWORD len, ULONG *plen);
 
 /* netdev_pcmcia.c: the slot has no autoconfig record, so it is claimed
    rather than found.  NULL when there is no slot, nothing in it, or what is
