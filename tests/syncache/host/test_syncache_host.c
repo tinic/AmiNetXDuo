@@ -45,12 +45,68 @@ static int stub_rsts;
 static int stub_established;
 static NX_TCP_SOCKET *stub_last_socket;
 static ULONG stub_last_seq;
+static ULONG stub_synack_mss;
+static ULONG stub_synack_scale;
 
+/*
+ * The real sender decides two things the cookie does not carry -- the segment
+ * size and this end's window scale -- and writes both back onto the socket,
+ * which is where nx_tcp_syncache.c reads them from.  The stub reproduces that
+ * write-back from nx_tcp_packet_send_syn.c, because the property worth
+ * testing is that the cookie path's own arithmetic
+ * (_nx_tcp_syncache_local_terms) lands on the same two numbers.  A stub that
+ * wrote nothing back would leave both at zero on the cached path and the two
+ * would agree by accident.
+ */
 VOID _nx_tcp_packet_send_syn(NX_TCP_SOCKET *socket_ptr, ULONG tx_sequence)
 {
-    (void) socket_ptr;
+    ULONG mss;
+
     stub_last_seq = tx_sequence;
     stub_synacks++;
+
+    mss = (ULONG) (socket_ptr -> nx_tcp_socket_connect_interface
+                       -> nx_interface_ip_mtu_size
+                   - sizeof(NX_IPV4_HEADER) - sizeof(NX_TCP_HEADER));
+    mss &= 0x0000FFFFUL;
+
+    if (mss < socket_ptr -> nx_tcp_socket_peer_mss)
+    {
+        socket_ptr -> nx_tcp_socket_connect_mss = mss;
+    }
+    else
+    {
+        socket_ptr -> nx_tcp_socket_connect_mss = socket_ptr -> nx_tcp_socket_peer_mss;
+    }
+
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+    if (socket_ptr -> nx_tcp_snd_win_scale_value != 0xFF)
+    {
+        UINT scale;
+
+        for (scale = 0; scale < 15; scale++)
+        {
+            if ((socket_ptr -> nx_tcp_socket_rx_window_current >> scale) < 65536)
+            {
+                break;
+            }
+        }
+        if (scale == 15)
+        {
+            scale = 14;
+        }
+        socket_ptr -> nx_tcp_rcv_win_scale_value = scale;
+    }
+    else
+    {
+        socket_ptr -> nx_tcp_rcv_win_scale_value = 0;
+    }
+#endif
+
+    stub_synack_mss = socket_ptr -> nx_tcp_socket_connect_mss;
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+    stub_synack_scale = socket_ptr -> nx_tcp_rcv_win_scale_value;
+#endif
 }
 
 VOID _nx_tcp_packet_send_rst(NX_TCP_SOCKET *socket_ptr, NX_TCP_HEADER *header_ptr)
@@ -248,7 +304,7 @@ static UINT cookie_case(void)
         int exact = 0;
         ULONG mss;
 
-        for (mss = 128; mss <= 1600; mss++)
+        for (mss = 88; mss <= 1600; mss++)
         {
             ULONG got = _nx_tcp_syncache_mss_decode(_nx_tcp_syncache_mss_encode(mss));
 
@@ -270,8 +326,8 @@ static UINT cookie_case(void)
            _nx_tcp_syncache_mss_decode(_nx_tcp_syncache_mss_encode(1220)), 1220);
         eq("536 survives exactly",
            _nx_tcp_syncache_mss_decode(_nx_tcp_syncache_mss_encode(536)), 536);
-        eq("below the table floors rather than inflating",
-           _nx_tcp_syncache_mss_decode(_nx_tcp_syncache_mss_encode(100)), 128);
+        eq("the floor is below anything a legal link produces",
+           _nx_tcp_syncache_mss_decode(_nx_tcp_syncache_mss_encode(100)), 88);
     }
 
     /* The hash under all of it.  One input bit has to move about half the
@@ -365,6 +421,7 @@ static void rig_reset(void)
 
     rig_listen.nx_tcp_listen_port = 80;
     rig_listen.nx_tcp_listen_queue_maximum = 8;
+    rig_listen.nx_tcp_listen_rx_window = 8192;
     rig_listen.nx_tcp_listen_callback = rig_listen_callback;
     rig_listen.nx_tcp_listen_socket_ptr = NX_NULL;
 
@@ -531,6 +588,18 @@ static UINT cache_case(void)
     eq("and the MSS came back at the table value below what was asked",
        rig_socket.nx_tcp_socket_peer_mss, 1460);
 
+    /* The two terms the cookie does NOT carry.  The SYN-ACK announced them,
+       the ACK is reconstructed a round trip later without them, and the
+       reconstruction has to land on the same numbers -- otherwise a cookie
+       connection announces one segment size or window scale and then uses
+       another, with nothing on the wire to say so.  */
+    eq("the segment size the SYN-ACK announced is reproduced",
+       rig_socket.nx_tcp_socket_connect_mss, stub_synack_mss);
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+    eq("and so is the window scale it announced",
+       rig_socket.nx_tcp_rcv_win_scale_value, stub_synack_scale);
+#endif
+
     /* --- ageing gives the entries back, oldest first ------------------- */
 
     rig_reset();
@@ -625,6 +694,54 @@ static UINT cache_case(void)
     eq("unlisten empties the queue", cache -> nx_tcp_syncache_accept_count, 0);
     eq("and resets every peer waiting on it", (unsigned long) stub_rsts, 7);
 
+    /* --- the SYN-ACK's terms hold even with no socket on the port ------ */
+    /*
+     * The listen request's socket slot is empty for as long as a connection
+     * is being handed over.  A SYN arriving in that window used to be
+     * answered from a fallback window, and the ACK reconstructed against the
+     * real one -- a different window is a different SCALE, and the peer would
+     * shift by one this end does not use.  The window is recorded on the
+     * listen request now, so both ends of the round trip read the same
+     * number.
+     */
+
+    rig_reset();
+    rig_listen.nx_tcp_listen_socket_ptr = NX_NULL;
+    rig_listen.nx_tcp_listen_rx_window = 65536 * 4;      /* needs a scale */
+
+    for (i = 0; i < NX_TCP_SYNCACHE_SIZE; i++)
+    {
+        (void) rig_syn(6000 + i, 0xA000 + i);
+    }
+    iss_last = rig_syn(6999, 0xB000);                    /* past full: a cookie */
+    eq("the cookie SYN-ACK was sent with no socket on the port",
+       cache -> nx_tcp_syncache_cookies_sent, 1);
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+    ok("and it announced a window scale", stub_synack_scale > 0);
+#endif
+
+    rig_socket.nx_tcp_socket_state = NX_TCP_LISTEN_STATE;
+    rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
+    ok("the cookie completes", rig_ack(6999, 0xB000, iss_last) == NX_TRUE);
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+    eq("with the scale the SYN-ACK announced, not the parked socket's",
+       rig_socket.nx_tcp_rcv_win_scale_value, stub_synack_scale);
+#endif
+
+    /* --- a stray SYN does not end a connection already made ------------ */
+
+    rig_reset();
+    rig_listen.nx_tcp_listen_socket_ptr = NX_NULL;
+    {
+        ULONG iss = rig_syn(88, 0xC000);
+
+        (void) rig_ack(88, 0xC000, iss);
+    }
+    eq("one finished handshake is waiting", cache -> nx_tcp_syncache_accept_count, 1);
+    (void) rig_syn(88, 0xD000);
+    eq("a forged SYN on the same four-tuple does not throw it away",
+       cache -> nx_tcp_syncache_accept_count, 1);
+
     /* --- a RST cancels a half-open connection ------------------------- */
 
     rig_reset();
@@ -633,12 +750,28 @@ static UINT cache_case(void)
     (void) rig_syn(55, 0x8000);
     eq("one half-open connection", cache -> nx_tcp_syncache_count, 1);
     {
-        ULONG source_ip = 0x0a000000UL + 55;
+        ULONG         source_ip = 0x0a000000UL + 55;
+        NX_TCP_HEADER header;
 
-        _nx_tcp_syncache_reset_received(&rig_ip, &source_ip, NX_IP_VERSION_V4,
-                                        80, (UINT) (30000u + 55u));
+        /* Wrong sequence number first.  An off-path remote that can guess a
+           four-tuple but has not seen the SYN must not be able to end
+           somebody else's handshake -- RFC 5961 section 3.  */
+        memset(&header, 0, sizeof(header));
+        header.nx_tcp_header_word_3 = NX_TCP_RST_BIT;
+        header.nx_tcp_sequence_number = 0x8000 + 5000;
+        _nx_tcp_syncache_reset_received(&rig_ip, &header, &source_ip,
+                                        NX_IP_VERSION_V4, 80,
+                                        (UINT) (30000u + 55u));
+        eq("a RST on the wrong sequence number is refused",
+           cache -> nx_tcp_syncache_count, 1);
+        eq("and counted", cache -> nx_tcp_syncache_resets_refused, 1);
+
+        header.nx_tcp_sequence_number = 0x8001;
+        _nx_tcp_syncache_reset_received(&rig_ip, &header, &source_ip,
+                                        NX_IP_VERSION_V4, 80,
+                                        (UINT) (30000u + 55u));
     }
-    eq("a RST from that peer gives it back", cache -> nx_tcp_syncache_count, 0);
+    eq("a RST on the right one gives it back", cache -> nx_tcp_syncache_count, 0);
 
     /* --- the SYN-ACK retry ladder is bounded -------------------------- */
 

@@ -2,8 +2,8 @@
 #
 # A SYN FLOOD MUST NOT STOP THE MACHINE ANSWERING.
 #
-#   tests/tools/run-synflood.sh -P PEERHOST [-B IFACE] [-a ADDR] [-b BUILDDIR]
-#                               [-N BOARD] [-m MODEL] [-t SECONDS] [-p PORT]
+#   tests/tools/run-synflood.sh -P PEERHOST [-B IFACE] [-b BUILDDIR]
+#                               [-c BOARD[,BOARD...]] [-t SECONDS] [-p PORT]
 #                               [-T TAG] [-u]
 #
 # WHAT IT PROVES
@@ -44,6 +44,17 @@
 #   slower or less reliable handshake, which is the whole point of a cache over
 #   a drop.
 #
+# EVERY CARD, NOT ONE
+#
+#   The board list, the model each one needs and the address each one gets come
+#   from tests/tools/cards.sh, the same table run-cardsweep.sh and
+#   run-cardsweep6.sh read.  One card proving a defence proves it for one
+#   driver's receive path: a flood is delivered by the SANA-II driver, and the
+#   rate at which a card hands packets up is exactly what differs between them.
+#   -c takes a comma-separated subset for a quick run; the gate takes none and
+#   sweeps all of them.  The verdict is per card AND overall, so one card
+#   falling over cannot be lost in an aggregate.
+#
 # BRIDGED, AND NOT SLIRP; A STATIC ADDRESS
 #
 #   -B ens18 puts the guest on the host's LAN with its own MAC, the only way
@@ -53,13 +64,13 @@
 #
 # EXIT CODES
 #
-#   0  the defended guest kept answering under the flood (or, with -u, the
-#      unprotected guest stopped answering, as expected)
-#   1  the defended guest stopped answering (or, with -u, the unprotected one
-#      did not, so the flood was not strong enough to prove anything)
+#   0  EVERY card kept answering under the flood (or, with -u, every card
+#      stopped answering, as expected)
+#   1  a card stopped answering (or, with -u, one did not, so the flood was
+#      not strong enough there to prove anything)
 #   2  the rig could not run: no peer, no capability tooling, no flood
-#      delivered, or the quiet baseline never answered
-#   3  the guest reached no verdict at all -- it never came up
+#      delivered, or no card produced a verdict
+#   3  no card came up at all
 #
 # The a2065.device driver is not ours to ship: AMINETXDUO_A2065=<path>, or a
 # copy in build/a2065.device.  The peer needs a python with cap_net_raw; see
@@ -72,22 +83,20 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
-MODEL=A1200
 TIMEOUT=300
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
-BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 PEER_IF="${AMINETXDUO_PEER_IFACE:-ens18}"
 PEERHOST="${AMINETXDUO_FITZ_PEER:-}"
 UNPROTECTED=no
+CARDS_ONLY="${AMINETXDUO_SYNFLOOD_CARDS:-}"
 
-ADDRESS="${AMINETXDUO_SYNFLOOD_ADDRESS:-192.168.1.238}"
 GATEWAY="${AMINETXDUO_SYNFLOOD_GATEWAY:-192.168.1.1}"
 NETMASK=255.255.255.0
 PORT="${AMINETXDUO_SYNFLOOD_PORT:-8080}"
 
 # The flood: how hard, and from where.  2000 SYNs a second is far past the 512
 # entries the cache holds, so the cookie path is exercised, and well within
-# what a2065 bridged carries.  The source range must be dead; see the header.
+# what a bridged card carries.  The source range must be dead; see the header.
 FLOOD_PPS="${AMINETXDUO_SYNFLOOD_PPS:-2000}"
 FLOOD_NET="${AMINETXDUO_SYNFLOOD_NET:-10.99.0.0/16}"
 FLOOD_SECS="${AMINETXDUO_SYNFLOOD_SECS:-40}"
@@ -95,15 +104,17 @@ FLOOD_SECS="${AMINETXDUO_SYNFLOOD_SECS:-40}"
 # A python on the peer carrying cap_net_raw, the tc-cap / tcpdump-cap pattern.
 PYCAP="${AMINETXDUO_PEER_PYCAP:-\$HOME/python3-cap}"
 
-while getopts "P:B:a:g:b:N:m:t:p:T:uh" opt; do
+# The MAC head for this sweep, so a flood run and a cardsweep are never one
+# machine to the LAN.  The tail comes from the card table.
+MACHEAD="${AMINETXDUO_SYNFLOOD_MACHEAD:-02:41:4d:53}"
+
+while getopts "P:B:g:b:c:t:p:T:uh" opt; do
     case "$opt" in
         P) PEERHOST="$OPTARG" ;;
         B) PEER_IF="$OPTARG" ;;
-        a) ADDRESS="$OPTARG" ;;
         g) GATEWAY="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        N) BOARD="$OPTARG" ;;
-        m) MODEL="$OPTARG" ;;
+        c) CARDS_ONLY="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         p) PORT="$OPTARG" ;;
         T) AMINETXDUO_RUN_TAG="$OPTARG" ;;
@@ -125,8 +136,11 @@ BSD="$BUILD/src/bsdsocket/bsdsocket.library"
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-synflood}"
 TAG="$AMINETXDUO_RUN_TAG"
-HD="$ROOT/build/amiberry-testhd-$TAG"
 OUT="$ROOT/build/synflood-$TAG"
+
+# The card table, shared with run-cardsweep.sh.  CARDS and cards_rows() come
+# from there; one table, so "every card" means the same thing in both.
+. "$ROOT/tests/tools/cards.sh"
 
 # --------------------------------------------------------------- preflight ---
 
@@ -146,13 +160,6 @@ fi
 [ -n "$A2065" ] && [ -f "$A2065" ] || {
     echo "No a2065.device found.  Set AMINETXDUO_A2065=<path>." >&2; exit 2; }
 
-PEERNAME="${PEERHOST#*@}"
-PEERADDR=$(getent ahostsv4 "$PEERNAME" 2>/dev/null | awk 'NR==1{print $1}')
-[ -n "$PEERADDR" ] || case "$PEERNAME" in
-    *[!0-9.]*) echo "cannot resolve $PEERNAME" >&2; exit 2 ;;
-    *) PEERADDR="$PEERNAME" ;;
-esac
-
 peer_sh() { ssh -o ConnectTimeout=10 -n "$PEERHOST" "$@"; }
 
 peer_sh "command -v python3 >/dev/null" || {
@@ -163,41 +170,9 @@ peer_sh "test -x $PYCAP" || {
     echo "  sudo setcap cap_net_raw+ep ~/python3-cap" >&2
     exit 2; }
 
-# ----------------------------------------------------------------- staging ---
-
-STAGE="$ROOT/build/synflood-stage-$TAG"
-rm -rf "$STAGE" "$OUT"
-mkdir -p "$STAGE/libs" "$STAGE/Public" "$OUT"
-cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
-mkdir -p "$STAGE/devs/Networks"
-cp "$A2065" "$STAGE/devs/Networks/a2065.device"
-
-cat > "$STAGE/devs/NetInterfaces/eth0" <<IFEOF
-DEVICE=a2065.device
-UNIT=0
-CONFIGURE=STATIC
-ADDRESS=$ADDRESS
-NETMASK=$NETMASK
-GATEWAY=$GATEWAY
-IFEOF
-
-. "$ROOT/tools/sana2-stage.sh"
-if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
-    _want=$(sana2_driver_for "$BOARD")
-    _have=$(sana2_local_driver "$_want")
-    [ -n "$_have" ] && [ -f "$_have" ] &&
-        export AMINETXDUO_SANA2_DRIVER="$_have"
-fi
-sana2_stage "$BOARD" "$STAGE/devs"
-
-cp "$BSD" "$STAGE/libs/bsdsocket.library"
-echo "served by an Amiga under a SYN flood" > "$STAGE/Public/readme.txt"
-echo "<html><body>ok</body></html>" > "$STAGE/Public/index.html"
-
-# ---------------------------------------------------------------- peer prep ---
-
 RTMP="/tmp/synflood-$TAG"
 FLOOD_PID=""
+RUNNER=""
 
 flood_off() {
     peer_sh "pkill -f '[s]ynflood-$TAG' >/dev/null 2>&1; exit 0" || true
@@ -205,37 +180,39 @@ flood_off() {
 
 cleanup() {
     [ -n "$FLOOD_PID" ] && kill "$FLOOD_PID" 2>/dev/null || true
+    [ -n "$RUNNER" ] && kill "$RUNNER" 2>/dev/null || true
     flood_off
-    peer_sh "rm -f $RTMP-*; exit 0" || true
 }
 trap cleanup EXIT INT TERM HUP
 
+rm -rf "$OUT"; mkdir -p "$OUT"
 peer_sh "rm -f $RTMP-*; exit 0"
 scp -q "$ROOT/tests/tools/synflood.py" "$PEERHOST:$RTMP-synflood-$TAG.py" || {
     echo "cannot copy the flooder to $PEERHOST" >&2; exit 2; }
 
-# --------------------------------------------------------------------- boot ---
+# --------------------------------------------------------------- one card ---
+#
+# Sets CARD_STATUS, CARD_QUIET_MS, CARD_FLOOD_MS, CARD_FLOOD_OK,
+# CARD_FLOOD_TRIES and CARD_SENT.  Never exits: a card that cannot come up is
+# one card's verdict, not the sweep's.
 
-echo "==> booting $MODEL, $BOARD bridged on $PEER_IF, httpd static at $ADDRESS:$PORT"
-set +e
-"$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$PEER_IF" -m "$MODEL" \
-    -t "$TIMEOUT" -a "DH0:Public $PORT" \
-    "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" &
-RUNNER=$!
-set -e
-
-# --------------------------------------------------- wait for the quiet server ---
+CARD_STATUS=fail
+CARD_QUIET_MS=none
+CARD_FLOOD_MS=none
+CARD_FLOOD_OK=0
+CARD_FLOOD_TRIES=0
+CARD_SENT=0
 
 geturl() {
     curl -s -m 6 -o /dev/null -w '%{http_code}' \
-        "http://$ADDRESS:$PORT/readme.txt" 2>/dev/null || echo 000
+        "http://$1:$PORT/readme.txt" 2>/dev/null || echo 000
 }
 
-# A timed GET, in milliseconds, or `fail`.
+# A timed GET in milliseconds, or `fail`.
 timed_get() {
     local start end code
     start=$(date +%s%N)
-    code=$(geturl)
+    code=$(geturl "$1")
     end=$(date +%s%N)
     if [ "$code" = 200 ]; then
         echo $(( (end - start) / 1000000 ))
@@ -244,157 +221,242 @@ timed_get() {
     fi
 }
 
-BASE_MS=none
-ANSWERED=no
-for _ in $(seq 1 $((TIMEOUT / 2))); do
-    sleep 2
-    kill -0 "$RUNNER" 2>/dev/null || break
-    if [ "$(geturl)" = 200 ]; then
-        ANSWERED=yes
-        break
-    fi
-done
+run_one_card() {
+    local board="$1" model="$2" address="$3" mactail="$4"
+    local stage hd ms sum ok
 
-if [ "$ANSWERED" != yes ]; then
-    echo "the guest never answered a quiet GET.  Nothing was measured: this" >&2
-    echo "is a boot that did not come up, not a flood that took it down." >&2
+    CARD_STATUS=fail
+    CARD_QUIET_MS=none
+    CARD_FLOOD_MS=none
+    CARD_FLOOD_OK=0
+    CARD_FLOOD_TRIES=0
+    CARD_SENT=0
+
+    export AMINETXDUO_RUN_TAG="synflood-$board"
+    export AMINETXDUO_AMIBERRY_MAC="$MACHEAD:$mactail"
+    hd="$ROOT/build/amiberry-testhd-synflood-$board"
+
+    stage="$ROOT/build/synflood-stage-$board"
+    rm -rf "$stage"
+    mkdir -p "$stage/libs" "$stage/Public"
+    cp -R "$ROOT/tests/netstack/devs" "$stage/devs"
+    mkdir -p "$stage/devs/Networks"
+    cp "$A2065" "$stage/devs/Networks/a2065.device"
+
+    local ifdevice=a2065.device
+    if [ "$board" != a2065 ]; then
+        local want have
+        want=$(sana2_driver_for "$board")
+        have=$(sana2_local_driver "$want")
+        if [ -n "$have" ] && [ -f "$have" ]; then
+            export AMINETXDUO_SANA2_DRIVER="$have"
+        else
+            unset AMINETXDUO_SANA2_DRIVER
+        fi
+        ifdevice="$want"
+    else
+        unset AMINETXDUO_SANA2_DRIVER
+    fi
+
+    cat > "$stage/devs/NetInterfaces/eth0" <<IFEOF
+DEVICE=$ifdevice
+UNIT=0
+CONFIGURE=STATIC
+ADDRESS=$address
+NETMASK=$NETMASK
+GATEWAY=$GATEWAY
+IFEOF
+
+    sana2_stage "$board" "$stage/devs" || {
+        CARD_STATUS=skip_driver
+        return 0; }
+
+    cp "$BSD" "$stage/libs/bsdsocket.library"
+    echo "served by an Amiga under a SYN flood" > "$stage/Public/readme.txt"
+    echo "<html><body>ok</body></html>" > "$stage/Public/index.html"
+
+    echo "==> $board: booting $model, bridged on $PEER_IF, httpd at $address:$PORT"
+    set +e
+    "$ROOT/tools/amiberry-run.sh" -N "$board" -B "$PEER_IF" -m "$model" \
+        -t "$TIMEOUT" -a "DH0:Public $PORT" \
+        "$TOOLS/httpd" "$stage/devs" "$stage/libs" "$stage/Public" \
+        > "$OUT/$board-boot.log" 2>&1 &
+    RUNNER=$!
+    set -e
+
+    # Poll rather than sleeping a guessed amount: a boot is 30-90 s and the
+    # interface comes up under the server.
+    local answered=no
+    for _ in $(seq 1 $((TIMEOUT / 2))); do
+        sleep 2
+        kill -0 "$RUNNER" 2>/dev/null || break
+        if [ "$(geturl "$address")" = 200 ]; then
+            answered=yes
+            break
+        fi
+    done
+
+    if [ "$answered" != yes ]; then
+        kill "$RUNNER" 2>/dev/null || true
+        wait "$RUNNER" 2>/dev/null || true
+        RUNNER=""
+        CARD_STATUS=no_verdict
+        return 0
+    fi
+
+    # Three quiet handshakes, the baseline the flood is judged against.
+    ok=0; sum=0
+    for _ in 1 2 3; do
+        ms=$(timed_get "$address")
+        echo "    $board quiet GET: $ms"
+        if [ "$ms" != fail ]; then ok=$((ok + 1)); sum=$((sum + ms)); fi
+        sleep 1
+    done
+    if [ "$ok" -lt 2 ]; then
+        kill "$RUNNER" 2>/dev/null || true
+        wait "$RUNNER" 2>/dev/null || true
+        RUNNER=""
+        CARD_STATUS=skip_baseline
+        return 0
+    fi
+    CARD_QUIET_MS=$((sum / ok))
+
+    echo "==> $board: $PEERHOST flooding $address:$PORT at ${FLOOD_PPS} pps for ${FLOOD_SECS}s"
+    ssh -o ConnectTimeout=10 -n "$PEERHOST" \
+        "cp $RTMP-synflood-$TAG.py $RTMP-run-$board.py
+         timeout $((FLOOD_SECS + 20)) $PYCAP $RTMP-run-$board.py \
+            $address --port $PORT --seconds $FLOOD_SECS --pps $FLOOD_PPS \
+            --source-net $FLOOD_NET --report $RTMP-report-$board.txt \
+            > $RTMP-flood-$board.out 2> $RTMP-flood-$board.err; exit 0" &
+    FLOOD_PID=$!
+
+    # Let the flood get going, so the measurement is taken with the cache under
+    # pressure and not before it.
+    sleep 5
+
+    ok=0; sum=0
+    for _ in 1 2 3; do
+        ms=$(timed_get "$address")
+        echo "    $board flooded GET: $ms"
+        CARD_FLOOD_TRIES=$((CARD_FLOOD_TRIES + 1))
+        if [ "$ms" != fail ]; then ok=$((ok + 1)); sum=$((sum + ms)); fi
+        sleep 2
+    done
+    CARD_FLOOD_OK=$ok
+    [ "$ok" -gt 0 ] && CARD_FLOOD_MS=$((sum / ok))
+
+    wait "$FLOOD_PID" 2>/dev/null || true
+    FLOOD_PID=""
+
+    scp -q "$PEERHOST:$RTMP-report-$board.txt" "$OUT/$board-flood.txt" \
+        2>/dev/null || : > "$OUT/$board-flood.txt"
+    CARD_SENT=$(awk -F'sent=' '/sent=/{split($2,a," "); print a[1]; exit}' \
+                    "$OUT/$board-flood.txt" 2>/dev/null || echo 0)
+    CARD_SENT="${CARD_SENT:-0}"
+
     kill "$RUNNER" 2>/dev/null || true
     wait "$RUNNER" 2>/dev/null || true
-    printf 'synflood: status=no_verdict quiet_ms=none flood_ms=none flood_sent=0 board=%s log=%s\n' \
-           "$BOARD" "$OUT"
-    exit 3
-fi
+    RUNNER=""
+    [ -f "$hd/stdout.txt" ] && cp "$hd/stdout.txt" "$OUT/$board-guest.txt" 2>/dev/null || true
 
-# Three quiet handshakes, the baseline the flood is judged against.
-QUIET_OK=0
-QUIET_SUM=0
-for _ in 1 2 3; do
-    ms=$(timed_get)
-    echo "    quiet GET: $ms" | tee -a "$OUT/quiet.txt"
-    if [ "$ms" != fail ]; then
-        QUIET_OK=$((QUIET_OK + 1))
-        QUIET_SUM=$((QUIET_SUM + ms))
+    # The flood has to have actually delivered, or nothing was tested on this
+    # card.  A few thousand is a flood; a handful is a broken raw socket.
+    if [ "$CARD_SENT" -lt 1000 ]; then
+        CARD_STATUS=skip_flood
+    elif [ "$UNPROTECTED" = yes ]; then
+        if [ "$CARD_FLOOD_OK" -eq 0 ]; then
+            CARD_STATUS=unprotected_fell_over
+        else
+            CARD_STATUS=unprotected_survived
+        fi
+    else
+        # Every flooded GET has to return 200, and its time has to be within
+        # reach of the quiet one: a legitimate client must not see a slower
+        # handshake under attack.  Four times the quiet time plus a floor --
+        # generous, because the claim is "still works", but not so generous
+        # that a near-timeout passes.
+        local ceil=$(( CARD_QUIET_MS * 4 + 1000 ))
+        if [ "$CARD_FLOOD_OK" -eq "$CARD_FLOOD_TRIES" ] &&
+           [ "$CARD_FLOOD_MS" != none ] && [ "$CARD_FLOOD_MS" -le "$ceil" ]; then
+            CARD_STATUS=answered_under_flood
+        else
+            CARD_STATUS=stopped_answering
+        fi
     fi
-    sleep 1
-done
-[ "$QUIET_OK" -ge 2 ] || {
-    echo "the quiet baseline was not reliable ($QUIET_OK/3).  A flood result" >&2
-    echo "would mean nothing against it." >&2
-    kill "$RUNNER" 2>/dev/null || true
-    wait "$RUNNER" 2>/dev/null || true
-    printf 'synflood: status=skip_baseline quiet_ms=none flood_ms=none flood_sent=0 board=%s log=%s\n' \
-           "$BOARD" "$OUT"
-    exit 2; }
-BASE_MS=$((QUIET_SUM / QUIET_OK))
 
-# ------------------------------------------------------------------- flood ---
+    return 0
+}
 
-echo "==> $PEERHOST flooding $ADDRESS:$PORT at ${FLOOD_PPS} pps from $FLOOD_NET for ${FLOOD_SECS}s"
-ssh -o ConnectTimeout=10 -n "$PEERHOST" \
-    "cp $RTMP-synflood-$TAG.py $RTMP-synflood-$TAG-run.py
-     timeout $((FLOOD_SECS + 20)) $PYCAP $RTMP-synflood-$TAG-run.py \
-        $ADDRESS --port $PORT --seconds $FLOOD_SECS --pps $FLOOD_PPS \
-        --source-net $FLOOD_NET --report $RTMP-report.txt \
-        > $RTMP-flood.out 2> $RTMP-flood.err; exit 0" &
-FLOOD_PID=$!
+# ------------------------------------------------------------- the sweep ---
 
-# Let the flood get going before the client tries, so the measurement is taken
-# with the cache under pressure and not before it.
-sleep 5
+RESULTS="$OUT/results.txt"
+: > "$RESULTS"
 
-FLOOD_OK=0
-FLOOD_SUM=0
-FLOOD_TRIES=0
-for _ in 1 2 3; do
-    ms=$(timed_get)
-    echo "    flooded GET: $ms" | tee -a "$OUT/flood.txt"
-    FLOOD_TRIES=$((FLOOD_TRIES + 1))
-    if [ "$ms" != fail ]; then
-        FLOOD_OK=$((FLOOD_OK + 1))
-        FLOOD_SUM=$((FLOOD_SUM + ms))
-    fi
-    sleep 2
-done
+CARDS_RUN=0
+CARDS_PASS=0
+CARDS_FAIL=0
+CARDS_SKIP=0
 
-wait "$FLOOD_PID" 2>/dev/null || true
-FLOOD_PID=""
-scp -q "$PEERHOST:$RTMP-report.txt" "$OUT/flood-report.txt" 2>/dev/null || : > "$OUT/flood-report.txt"
-scp -q "$PEERHOST:$RTMP-flood.err"  "$OUT/flood.err"        2>/dev/null || true
+while read -r board model address mactail; do
+    [ -n "$board" ] || continue
 
-FLOOD_SENT=$(awk -F'sent=' '/sent=/{split($2,a," "); print a[1]; exit}' \
-                 "$OUT/flood-report.txt" 2>/dev/null || echo 0)
-FLOOD_SENT="${FLOOD_SENT:-0}"
+    run_one_card "$board" "$model" "$address" "$mactail"
 
-FLOOD_MS=none
-[ "$FLOOD_OK" -gt 0 ] && FLOOD_MS=$((FLOOD_SUM / FLOOD_OK))
+    case "$CARD_STATUS" in
+        answered_under_flood|unprotected_fell_over)
+            CARDS_PASS=$((CARDS_PASS + 1)); CARDS_RUN=$((CARDS_RUN + 1)) ;;
+        stopped_answering|unprotected_survived)
+            CARDS_FAIL=$((CARDS_FAIL + 1)); CARDS_RUN=$((CARDS_RUN + 1)) ;;
+        *)
+            CARDS_SKIP=$((CARDS_SKIP + 1)) ;;
+    esac
 
-kill "$RUNNER" 2>/dev/null || true
-wait "$RUNNER" 2>/dev/null || true
+    printf 'synflood_card: board=%s status=%s quiet_ms=%s flood_ms=%s flood_ok=%s/%s sent=%s\n' \
+           "$board" "$CARD_STATUS" "$CARD_QUIET_MS" "$CARD_FLOOD_MS" \
+           "$CARD_FLOOD_OK" "$CARD_FLOOD_TRIES" "$CARD_SENT" | tee -a "$RESULTS"
+done <<CARDLIST
+$(cards_rows "$CARDS_ONLY")
+CARDLIST
+
 cleanup
 trap - EXIT INT TERM HUP
 
-# ----------------------------------------------------------- what happened ---
-
 echo
-echo "===================== the guest under the flood ==================="
-if [ -f "$HD/stdout.txt" ]; then
-    tail -40 "$HD/stdout.txt"
-else
-    echo "(the guest wrote no stdout.txt)"
-fi
+echo "========================== per card ==============================="
+cat "$RESULTS"
 echo "==================================================================="
 echo
 
-# The flood has to have actually delivered, or nothing was tested.  A few
-# thousand is a flood; a handful is a broken raw socket on the peer.
-if [ "$FLOOD_SENT" -lt 1000 ]; then
-    STATUS=skip_flood
-    RC=2
-elif [ "$UNPROTECTED" = yes ]; then
-    # The inverted arm: the point is that the OLD tree stops answering.  A run
-    # that keeps answering means the flood was too weak to prove the defence
-    # is what changed the outcome.
-    if [ "$FLOOD_OK" -eq 0 ]; then
-        STATUS=unprotected_fell_over
-        RC=0
-    else
-        STATUS=unprotected_survived
-        RC=1
-    fi
+if [ "$CARDS_RUN" -eq 0 ]; then
+    STATUS=no_verdict
+    RC=3
+elif [ "$CARDS_FAIL" -gt 0 ]; then
+    STATUS=fail
+    RC=1
 else
-    # The defended arm: every flooded GET has to return 200, and its time has
-    # to be within reach of the quiet one -- a legitimate client must not see a
-    # slower handshake under attack.  A generous ceiling, because the point is
-    # "still works", not a throughput figure, but not so generous that a
-    # near-timeout passes: four times the quiet time plus a fixed floor.
-    CEIL=$(( BASE_MS * 4 + 1000 ))
-    if [ "$FLOOD_OK" -eq "$FLOOD_TRIES" ] && [ "$FLOOD_MS" != none ] &&
-       [ "$FLOOD_MS" -le "$CEIL" ]; then
-        STATUS=answered_under_flood
-        RC=0
-    else
-        STATUS=stopped_answering
-        RC=1
-    fi
+    STATUS=pass
+    RC=0
 fi
 
-printf 'synflood: status=%s protected=%s quiet_ms=%s flood_ms=%s flood_ok=%s/%s flood_sent=%s pps=%s board=%s log=%s\n' \
+printf 'synflood: status=%s protected=%s cards=%s pass=%s fail=%s skip=%s pps=%s log=%s\n' \
        "$STATUS" "$([ "$UNPROTECTED" = yes ] && echo no || echo yes)" \
-       "$BASE_MS" "$FLOOD_MS" "$FLOOD_OK" "$FLOOD_TRIES" \
-       "$FLOOD_SENT" "$FLOOD_PPS" "$BOARD" "$OUT"
+       "$CARDS_RUN" "$CARDS_PASS" "$CARDS_FAIL" "$CARDS_SKIP" "$FLOOD_PPS" "$OUT"
 
 case "$STATUS" in
-    skip_flood)
-        echo "the flood delivered only $FLOOD_SENT SYNs.  Nothing was tested;" >&2
-        echo "check that $PYCAP on $PEERHOST carries cap_net_raw." >&2 ;;
-    stopped_answering)
-        echo "the guest stopped answering under the flood: $FLOOD_OK of" >&2
-        echo "$FLOOD_TRIES GETs completed, at $FLOOD_MS ms against a quiet" >&2
-        echo "$BASE_MS ms.  This is the defect the SYN cache exists to fix." >&2 ;;
-    unprotected_survived)
-        echo "the unprotected tree kept answering ($FLOOD_OK/$FLOOD_TRIES)." >&2
-        echo "The flood was not strong enough to prove the defence is what" >&2
-        echo "changes the outcome.  Raise --pps or lengthen the run." >&2 ;;
+    no_verdict)
+        echo "no card produced a verdict.  Nothing was measured: check the" >&2
+        echo "boot logs under $OUT and that $PYCAP on $PEERHOST carries" >&2
+        echo "cap_net_raw." >&2 ;;
+    fail)
+        if [ "$UNPROTECTED" = yes ]; then
+            echo "a card kept answering on the unprotected tree, so the flood" >&2
+            echo "was not strong enough there to prove the defence is what" >&2
+            echo "changes the outcome.  Raise --pps or lengthen the run." >&2
+        else
+            echo "a card stopped answering under the flood.  This is the" >&2
+            echo "defect the SYN cache exists to fix; the per-card lines" >&2
+            echo "above name which one and how far it got." >&2
+        fi ;;
 esac
 
 exit "$RC"
