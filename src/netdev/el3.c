@@ -26,7 +26,7 @@
  * group, broadcast and promiscuous, and the part has no per-group filtering.
  * The hardware is told to accept every group address, and el3_rx_wanted() then
  * tests each multicast destination against nic->mar[].  That is the same
- * 64-bit hash netdev_mcaf.c builds for the other two cores, and the same
+ * 64-bit hash netdev_mcaf.c builds for the other three cores, and the same
  * netdev_ether_crc32_be() that fills it.  The seam above this file does not
  * change and cannot tell the difference.
  *
@@ -274,7 +274,9 @@ static BOOL el3_eeprom(NetdevNic *nic, UBYTE word, UWORD *out)
  * The group-bit repair happens before the verdict, not after it.  The part
  * cannot match its own unicast frames against an address with bit 0 of octet 0
  * set, and every frame sent with it carries a group source that switches
- * mislearn.  The other two cores clear it and count it, and so does this one.
+ * mislearn.  ne2000.c clears it and counts it and so does this one; ed.c
+ * refuses the address outright, and lance.c derives one from a serial number
+ * and cannot produce a set group bit at all.
  * A usability test first would send a repairable address to the fallback and
  * hide the repair.
  *

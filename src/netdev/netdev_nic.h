@@ -246,7 +246,7 @@ UWORD netdev_diag_card(const NetdevCard *card);
 VOID  netdev_diag_publish(AnxDiagMark *mark);
 VOID  netdev_diag_unpublish(AnxDiagMark *mark);
 
-/* The two cores. netdev_nic_ops_for() returns NULL for a chip with no core. */
+/* The four cores. netdev_nic_ops_for() returns NULL for a chip with no core. */
 extern const struct NetdevNicOps netdev_nic_ne2000;
 extern const struct NetdevNicOps netdev_nic_ed;
 extern const struct NetdevNicOps netdev_nic_lance;

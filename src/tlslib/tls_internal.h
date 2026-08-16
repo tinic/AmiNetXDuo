@@ -160,6 +160,9 @@ typedef struct TLSResumeEntry
 #define TLSR_RESUMED        (1UL << 2)  /* the server took it                */
 #define TLSR_TICKET_NEW     (1UL << 3)  /* a NewSessionTicket arrived        */
 #define TLSR_PERSIST        (1UL << 4)  /* mirror the cache to disk          */
+#define TLSR_SID_GEN        (1UL << 5)  /* the session ID is ours, not a
+                                           server's: it exists only as the
+                                           ticket's echo handle              */
 
 /* -------------------------------------------------------- trust store --- */
 
@@ -362,16 +365,6 @@ const AmiNetXDuoContext *tls_netx_ctx(VOID);
 LONG  tls_store_open(TLSStore *store, const char *path);
 VOID  tls_store_close(TLSStore *store);
 ULONG tls_store_count(const TLSStore *store);
-
-/*
- * Read the root whose subject Name hashes to `key`.  Returns the DER length,
- * or 0 if there is no such root.  This is the only path that touches the disk
- * during a handshake, and it happens at most twice.
- */
-
-/* FNV-1a over a certificate's issuer Name DER, walked out of the raw
-   certificate.  0 means not found, which no real key ever is because
-   tools/mkcertstore.py rejects that hash. */
 
 /*
  * Put the connection in the session->connection registry.  Every connection

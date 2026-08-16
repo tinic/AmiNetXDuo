@@ -477,7 +477,15 @@ int main(int argc, char **argv)
         if (p_check((BOOL)(rc == 0), "listener bind to 127.0.0.1",
                     p_errno(base)))
         {
-            rc = p_listen(base, listener, 1);
+            /*
+             * Three, not one.  Two arms below connect to this listener and
+             * neither accepts, so each keeps the slot it landed on until the
+             * listener is closed.  With a backlog of one the second connect
+             * has nowhere to land and spends the whole TCP connect timeout
+             * getting there, 191 s of a 300 s run, and reports ETIMEDOUT --
+             * which reads exactly like the defect it is testing for.
+             */
+            rc = p_listen(base, listener, 3);
             (VOID)p_check((BOOL)(rc == 0), "listen", p_errno(base));
 
             /* The bind and the route agree, so the connect goes ahead. */
@@ -499,6 +507,54 @@ int main(int argc, char **argv)
                     (VOID)p_getsockname(base, s, &name);
                     (VOID)p_check((BOOL)(name.sin_addr == P_LOOPBACK),
                                   "getsockname reports the bound 127.0.0.1",
+                                  (LONG)name.sin_addr);
+                }
+                (VOID)p_close(base, s);
+            }
+
+            /*
+             * INADDR_ANY, which the arm above cannot reach because it binds.
+             *
+             * A socket bound to nothing has no local address to report, so
+             * getsockname() has to name the interface the packets leave by.
+             * This one leaves by loopback, and it is the case a
+             * single-interface guest can settle: the answer used to be
+             * nx_ip_interface[0], the Ethernet address, whatever the peer was.
+             */
+            s = p_socket(base, P_AF_INET, P_SOCK_STREAM, 0);
+            if (s >= 0)
+            {
+                p_addr(&sa, P_LOOPBACK, PORT_TCP_LOOP);
+                rc = p_connect(base, s, &sa);
+                if (p_check((BOOL)(rc == 0),
+                            "an unbound connect to 127.0.0.1", p_errno(base)))
+                {
+                    name.sin_addr = 0;
+                    (VOID)p_getsockname(base, s, &name);
+                    (VOID)p_check((BOOL)(name.sin_addr == P_LOOPBACK),
+                                  "getsockname on an unbound socket reports "
+                                  "the source the route chose",
+                                  (LONG)name.sin_addr);
+                }
+                (VOID)p_close(base, s);
+            }
+
+            /* The same for a datagram, which has no connect interface
+               recorded on it and reaches the route lookup instead. */
+            s = p_socket(base, P_AF_INET, P_SOCK_DGRAM, 0);
+            if (s >= 0)
+            {
+                p_addr(&sa, P_LOOPBACK, PORT_UDP_LOOP);
+                rc = p_connect(base, s, &sa);
+                if (p_check((BOOL)(rc == 0),
+                            "an unbound datagram connect to 127.0.0.1",
+                            p_errno(base)))
+                {
+                    name.sin_addr = 0;
+                    (VOID)p_getsockname(base, s, &name);
+                    (VOID)p_check((BOOL)(name.sin_addr == P_LOOPBACK),
+                                  "getsockname on an unbound datagram reports "
+                                  "127.0.0.1",
                                   (LONG)name.sin_addr);
                 }
                 (VOID)p_close(base, s);
@@ -597,9 +653,17 @@ int main(int argc, char **argv)
             {
                 p_addr(&sa, self, PORT_TCP_LAN);
                 rc = p_connect(base, s, &sa);
-                (VOID)p_check((BOOL)(rc == 0),
-                              "an unbound connect still leaves by the route",
-                              p_errno(base));
+                if (p_check((BOOL)(rc == 0),
+                            "an unbound connect still leaves by the route",
+                            p_errno(base)))
+                {
+                    name.sin_addr = 0;
+                    (VOID)p_getsockname(base, s, &name);
+                    (VOID)p_check((BOOL)(name.sin_addr == self),
+                                  "getsockname on it reports the interface "
+                                  "the route chose",
+                                  (LONG)name.sin_addr);
+                }
                 (VOID)p_close(base, s);
             }
         }

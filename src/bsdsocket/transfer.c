@@ -911,8 +911,9 @@ static BOOL bsd_nx_need(struct AmiSocketBase *base, BOOL *held)
  * length in a packet's worth, and the call that would have hit it takes the
  * bracket for its receive anyway.
  *
- * Worth a predicate because netx_call.c prices the bracket at 214 us on a
- * 14 MHz 68020, more than copying and checksumming a whole MTU packet.
+ * Worth a predicate because netx_call.c prices the bracket at ~270 us on a
+ * 14 MHz 68020 with the TX_THREAD cached, ~790 us without, either of which is
+ * more than copying and checksumming a whole MTU packet.
  * tests/perf/bracket_test.c's lazy arm measures the ceiling over 256 KB:
  * 512-byte reads 598 -> 482 ms, 1460-byte reads 496 -> 460 ms.
  */
