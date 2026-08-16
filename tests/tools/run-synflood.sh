@@ -142,6 +142,10 @@ OUT="$ROOT/build/synflood-$TAG"
 # from there; one table, so "every card" means the same thing in both.
 . "$ROOT/tests/tools/cards.sh"
 
+# sana2_driver_for, sana2_local_driver and sana2_stage: the one place that
+# knows which driver a board needs and where in DEVS: it has to land.
+. "$ROOT/tools/sana2-stage.sh"
+
 # --------------------------------------------------------------- preflight ---
 
 for f in "$TOOLS/httpd" "$BSD"; do
@@ -202,6 +206,7 @@ CARD_FLOOD_MS=none
 CARD_FLOOD_OK=0
 CARD_FLOOD_TRIES=0
 CARD_SENT=0
+CARD_DRIVER=""
 
 geturl() {
     curl -s -m 6 -o /dev/null -w '%{http_code}' \
@@ -231,6 +236,7 @@ run_one_card() {
     CARD_FLOOD_OK=0
     CARD_FLOOD_TRIES=0
     CARD_SENT=0
+    CARD_DRIVER=""
 
     export AMINETXDUO_RUN_TAG="synflood-$board"
     export AMINETXDUO_AMIBERRY_MAC="$MACHEAD:$mactail"
@@ -243,23 +249,28 @@ run_one_card() {
     mkdir -p "$stage/devs/Networks"
     cp "$A2065" "$stage/devs/Networks/a2065.device"
 
-    local ifdevice=a2065.device
-    if [ "$board" != a2065 ]; then
-        local want have
-        want=$(sana2_driver_for "$board")
+    # Which driver this board needs, and whether the asset store has it.  A
+    # board with no driver is still booted: the card is in the machine with
+    # nothing able to open it, and that is a result, not a skip -- but it is
+    # not a flood result, so it is reported as one.
+    local want have
+    want=$(sana2_driver_for "$board")
+    if [ "$board" = a2065 ]; then
+        have="$A2065"
+    else
         have=$(sana2_local_driver "$want")
-        if [ -n "$have" ] && [ -f "$have" ]; then
-            export AMINETXDUO_SANA2_DRIVER="$have"
-        else
-            unset AMINETXDUO_SANA2_DRIVER
-        fi
-        ifdevice="$want"
+    fi
+    if [ -n "$have" ] && [ -f "$have" ]; then
+        export AMINETXDUO_SANA2_DRIVER="$have"
     else
         unset AMINETXDUO_SANA2_DRIVER
+        CARD_STATUS=skip_driver
+        CARD_DRIVER="$want"
+        return 0
     fi
 
     cat > "$stage/devs/NetInterfaces/eth0" <<IFEOF
-DEVICE=$ifdevice
+DEVICE=$want
 UNIT=0
 CONFIGURE=STATIC
 ADDRESS=$address
@@ -267,9 +278,9 @@ NETMASK=$NETMASK
 GATEWAY=$GATEWAY
 IFEOF
 
-    sana2_stage "$board" "$stage/devs" || {
-        CARD_STATUS=skip_driver
-        return 0; }
+    # Rewrites the DEVICE line and puts the driver where that board's driver
+    # has to live, which differs between the a2065 and everything else.
+    sana2_stage "$board" "$stage/devs"
 
     cp "$BSD" "$stage/libs/bsdsocket.library"
     echo "served by an Amiga under a SYN flood" > "$stage/Public/readme.txt"
@@ -411,9 +422,10 @@ while read -r board model address mactail; do
             CARDS_SKIP=$((CARDS_SKIP + 1)) ;;
     esac
 
-    printf 'synflood_card: board=%s status=%s quiet_ms=%s flood_ms=%s flood_ok=%s/%s sent=%s\n' \
+    printf 'synflood_card: board=%s status=%s quiet_ms=%s flood_ms=%s flood_ok=%s/%s sent=%s%s\n' \
            "$board" "$CARD_STATUS" "$CARD_QUIET_MS" "$CARD_FLOOD_MS" \
-           "$CARD_FLOOD_OK" "$CARD_FLOOD_TRIES" "$CARD_SENT" | tee -a "$RESULTS"
+           "$CARD_FLOOD_OK" "$CARD_FLOOD_TRIES" "$CARD_SENT" \
+           "${CARD_DRIVER:+ missing_driver=$CARD_DRIVER}" | tee -a "$RESULTS"
 done <<CARDLIST
 $(cards_rows "$CARDS_ONLY")
 CARDLIST
