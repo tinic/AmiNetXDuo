@@ -628,9 +628,9 @@ int main(int argc, char **argv)
 
     if ((get == NULL) == (put == NULL))
     {
-        tool_error((get == NULL) ? "GET which file, or PUT which file?"
-                                 : "GET and PUT are opposite directions; "
-                                   "pick one");
+        tool_error((get == NULL) ? "GET or PUT must name a file"
+                                 : "GET and PUT are opposite directions. "
+                                   "Use one of them");
         tool_usage("<host> GET <file>  |  <host> PUT <file>",
                    "Fetches a file from a TFTP server, or sends one to it.");
         FreeArgs(rda);

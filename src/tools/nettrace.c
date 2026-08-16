@@ -427,8 +427,8 @@ static BOOL nt_cap_start(NtCap *cap, struct Library *base, const char *iface,
     if (cap->channel < 0)
     {
         cap->channel = 0;
-        tool_error("bpf_open failed: is this bsdsocket.library ours, and "
-                   "was it built with BPF on?");
+        tool_error("bpf_open failed: either this bsdsocket.library is not "
+                   "ours, or it was built without BPF");
         return FALSE;
     }
     cap->open = TRUE;
@@ -528,10 +528,11 @@ static VOID nt_cap_stop(NtCap *cap)
                 (LONG)st.bs_recv, (LONG)st.bs_drop, (LONG)cap->short_reads);
 
     if (cap->out.failed)
-        tool_error("the trace file was truncated, disk full?");
+        tool_error("the trace file was truncated, perhaps because the disk "
+                   "is full");
 
     if (st.bs_drop != 0)
-        tool_error("%lu frames were seen and NOT written: the trace has holes",
+        tool_error("%lu frames were seen and not written: the trace has holes",
                    (LONG)st.bs_drop);
 
     if (left != 0UL)
@@ -613,7 +614,7 @@ static VOID nt_loopback(struct Library *base, NtCap *cap, ULONG want,
         tool_sock_listen(base, lst, 1) < 0 ||
         tool_sock_getsockname(base, lst, &sa) < 0)
     {
-        tool_error("cannot set up the loopback listener: %s",
+        tool_error("cannot create the loopback listener: %s",
                    (LONG)tool_sock_errstr(tool_sock_errno(base)));
         goto done;
     }

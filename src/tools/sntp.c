@@ -500,7 +500,7 @@ static const char *sntp_validate(const UBYTE *msg, LONG len,
     if (mode != 4)
         return "the reply was not a server message";
     if (version < 1 || version > 4)
-        return "the server speaks an NTP version this does not";
+        return "the server uses an NTP version this command does not support";
     if (li == 3)
         return "the server says its own clock is not synchronised";
 
@@ -517,7 +517,7 @@ static const char *sntp_validate(const UBYTE *msg, LONG len,
     out->transmit_frac = be32(&msg[44]);
 
     if (out->transmit_secs == 0)
-        return "the server has never been given the time itself";
+        return "the server does not have the time itself";
 
     return NULL;
 }
@@ -613,7 +613,7 @@ static BOOL sntp_exchange(struct Library *sbase, LONG sock, ULONG timeout,
 
                 if (got < 0)
                 {
-                    tool_error("the time server's reply could not be read");
+                    tool_error("the time server's reply cannot be read");
                     return FALSE;
                 }
 
@@ -693,7 +693,8 @@ int main(int argc, char **argv)
     {
         tool_fault(IoErr());
         tool_usage("[-4|-6] <time server>",
-                   "The name or address of an SNTP server, e.g. pool.ntp.org.");
+                   "The name or address of an SNTP server, for example "
+                   "pool.ntp.org.");
         return RETURN_ERROR;
     }
 
@@ -727,7 +728,7 @@ int main(int argc, char **argv)
 
     if (!clock_open())
     {
-        tool_error("timer.device would not open, so the clock cannot be read");
+        tool_error("timer.device did not open, so the clock cannot be read");
         CloseLibrary(sbase);
         FreeArgs(rda);
         return RETURN_FAIL;
@@ -760,7 +761,7 @@ int main(int argc, char **argv)
          */
         if (sock_connect(sbase, sock, &sa, salen) != 0)
         {
-            tool_error("could not reach %s (errno %ld)", (LONG)addrtext,
+            tool_error("cannot reach %s (errno %ld)", (LONG)addrtext,
                        (LONG)sock_errno(sbase));
             rc = RETURN_ERROR;
             goto done;
@@ -887,7 +888,7 @@ int main(int argc, char **argv)
     if (battclock_write(new_local))
     {
         if (!quiet)
-            tool_printf("The battery-backed clock was set too, so this "
+            tool_printf("The battery-backed clock was set too, so the time "
                         "survives a reboot.\n");
     }
     else if (!quiet)

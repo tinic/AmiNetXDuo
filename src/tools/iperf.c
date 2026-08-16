@@ -161,7 +161,7 @@ static VOID iperf_print_error(struct Library *sb, const IperfResult *res,
     switch (res->err)
     {
     case TOOL_ECONNREFUSED:
-        tool_error("nothing is listening on %s port %lu; start `iperf -s` "
+        tool_error("nothing is listening on %s port %lu. Start `iperf -s` "
                    "there first", (LONG)addr, (LONG)plan->port);
         break;
     case TOOL_ETIMEDOUT:
@@ -243,7 +243,8 @@ int main(int argc, char **argv)
 
     if (!server && host == NULL)
     {
-        tool_error("which host? give one to send to, or -s to receive");
+        tool_error("no host was given. Name one to send to, or use -s "
+                   "to receive");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
