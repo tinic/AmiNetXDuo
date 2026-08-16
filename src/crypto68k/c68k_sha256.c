@@ -3,13 +3,13 @@
  * buffering and padding layer both variants share, and the dispatch.
  *
  * Two things the C here does that the vendored implementation does not, both
- * worth having independently of any assembly:
+ * independent of any assembly:
  *
  *   1. The first sixteen message words are loaded, not assembled.  This is a
  *      big-endian machine, so W[t] for t < 16 is the longword at data + 4t.
- *      nx_crypto_sha2.c's W0(t) macro builds each one from four byte loads,
- *      three shifts and three ORs, 128 instructions a block that need not
- *      exist.  The byte path remains for pointers that are not longword
+ *      The W0(t) macro in nx_crypto_sha2.c builds each one from four byte
+ *      loads, three shifts and three ORs, 128 instructions a block that need
+ *      not exist.  The byte path remains for pointers that are not longword
  *      aligned on targets that fault on such a load.
  *
  *   2. The message schedule is computed up front rather than interleaved with
@@ -57,7 +57,7 @@ UINT c68k_sha256_variant_is_asm(UINT variant)
 
 /*
  * Shared with the assembly, which walks it with (An)+, so the order is the
- * round order and nothing may be inserted.
+ * round order and nothing must be inserted.
  */
 static const ULONG c68k_sha256_k[64] =
 {
@@ -102,18 +102,18 @@ static const ULONG c68k_sha256_k[64] =
  * A big-endian longword at an arbitrary address.
  *
  * On the 68020 this is one MOVE.L, written as inline assembly because C cannot
- * express an intentionally unaligned load: the part does misaligned data
- * accesses in hardware, and a TLS record's payload starts 21 bytes into the
- * packet buffer, so misaligned is the normal case here.
+ * express an intentionally unaligned load.  The part does misaligned data
+ * accesses in hardware, and the payload of a TLS record starts 21 bytes into
+ * the packet buffer, so misaligned is the normal case here.
  *
- * nx_crypto_sha2.c's W0() macro builds each of the sixteen message words from
- * four byte loads, three shifts and three ORs, 128 instructions a block that
- * need not exist on a big-endian machine, and most of why the C below is 1.29x
- * the vendored implementation before any assembly.
+ * The W0() macro in nx_crypto_sha2.c builds each of the sixteen message words
+ * from four byte loads, three shifts and three ORs, 128 instructions a block
+ * that need not exist on a big-endian machine.  That is most of why the C
+ * below is 1.29x the vendored implementation before any assembly.
  *
  * Everything else takes the portable form, which is also the only correct form
- * elsewhere: reading the longword directly is right on a big-endian machine
- * and wrong on the build host, and the host tier of the vectors catches that
+ * elsewhere.  A direct longword read is right on a big-endian machine and
+ * wrong on the build host, and the host tier of the vectors catches that
  * inversion.  It did.
  */
 static ULONG c68k_sha256_load_be(const UCHAR *p)
@@ -253,8 +253,8 @@ ULONG   before;
         return(NX_CRYPTO_SUCCESS);
     }
 
-    /* 64-bit bit count, kept as two longwords because this toolchain's
-       64-bit arithmetic reaches helpers in src/common/ami_udivdi3.c. */
+    /* 64-bit bit count, kept as two longwords because the 64-bit arithmetic
+       of this toolchain reaches helpers in src/common/ami_udivdi3.c. */
     before = ctx -> c68k_sha256_bits_lo;
     ctx -> c68k_sha256_bits_lo = before + (((ULONG)input_length) << 3);
     if (ctx -> c68k_sha256_bits_lo < before)

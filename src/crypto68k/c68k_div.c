@@ -8,30 +8,30 @@
  *   after Karatsuba, that setup was 98% of the remaining gap to OpenSSL on
  *   that operation.
  *
- *   The vendored divider is a correct implementation of the right algorithm
- *, traditional long division with a two-digit quotient estimate, done in
+ *   The vendored divider is a correct implementation of the right algorithm,
+ *   traditional long division with a two-digit quotient estimate, done in
  *   16-bit half-limbs.  Its own declarations say so ("In number of USHORT
- *   words") and it takes its estimate from `>> (HN_SHIFT >> 1)`.  Halving the
+ *   words") and it takes its estimate from `>> (HN_SHIFT >> 1)`.  A halved
  *   digit size doubles the number of quotient digits and doubles the length of
  *   the multiply-subtract pass under each one, so it is about four times the
  *   inner work of the same algorithm over 32-bit limbs.  OpenSSL gets its
  *   quotient digit from bn_div_words, which on this target is one DIVU.L out
- *   of Howard Chu's bn_m68k.s.  This file is the same algorithm at the
- *   machine's own word size, not a better one.
+ *   of the bn_m68k.s of Howard Chu.  This file is the same algorithm at the
+ *   word size of the machine, not a better one.
  *
- *   Rejected: caching R^2 against the modulus, which avoids the division
- *   rather than speeding it up.  It buys nothing for a TLS client, the three
- *   RSA public operations in a handshake verify the leaf with the
- *   intermediate's key, the intermediate with the root's, and the
- *   ServerKeyExchange with the leaf's, three different moduli, so a cache
- *   keyed on the modulus never hits inside a handshake.  Across handshakes to
- *   one host, session resumption (docs/RESEARCH.md 13) does no public-key work
- *   at all, so it would not be consulted there either.
+ *   Rejected: a cache of R^2 against the modulus, which avoids the division
+ *   rather than makes it faster.  It gains nothing for a TLS client.  The
+ *   three RSA public operations in a handshake check the leaf with the key of
+ *   the intermediate, the intermediate with the key of the root, and the
+ *   ServerKeyExchange with the key of the leaf, three different moduli, so a
+ *   cache keyed on the modulus never hits inside a handshake.  Across
+ *   handshakes to one host, session resumption (docs/RESEARCH.md 13) does no
+ *   public-key work, so the cache is not consulted there either.
  *
  *   Also rejected: R^2 mod m by repeated modular doubling from R mod m is 2048
  *   shift-and-subtract passes over 64 limbs, and by a Montgomery-squaring
- *   ladder is eleven Montgomery squares.  Priced at this module's measured
- *   figures those are ~42 ms and ~72 ms against the 36.6 ms being replaced.
+ *   ladder is eleven Montgomery squares.  Priced at the measured figures of
+ *   this module, those are ~42 ms and ~72 ms against the 36.6 ms in question.
  *   Division is the right primitive, in 32-bit digits.
  *
  *   The one place DIVU.L can trap: algorithm D's quotient estimate divides a
@@ -52,8 +52,8 @@ UINT c68k_fast_modulus = 1u;
 
 /* ------------------------------------------------------------- helpers --- */
 
-/* dst[0..n-1] = src[0..n-1] << s, returning the bits shifted out of the top.
-   s must be 0..31; s == 0 is a copy, because a 32-bit shift is undefined. */
+/* dst[0..n-1] = src[0..n-1] << s.  Returns the bits shifted out of the top.
+   s must be 0..31.  s == 0 is a copy, because a 32-bit shift is undefined. */
 static c68k_limb d_shl(c68k_limb *dst, const c68k_limb *src, UINT n, UINT s)
 {
 
@@ -169,8 +169,8 @@ HN_UBASE2   num;
     un = scratch;                       /* u_len + 1 */
     vn = un + u_len + 1u;               /* m_len     */
 
-    /* Normalise so the divisor's top bit is set, which is what bounds the
-       quotient estimate's error to at most 2. */
+    /* Normalise so the top bit of the divisor is set, which bounds the error
+       of the quotient estimate to at most 2. */
     s = d_clz(m[n - 1u]);
     (VOID) d_shl(vn, m, n, s);
     un[u_len] = d_shl(un, u, u_len, s);
@@ -181,8 +181,8 @@ HN_UBASE2   num;
 
         /*
          * The estimate.  top <= vn[n-1] always, because the running remainder
-         * stays below the divisor; equality is the one case whose quotient is
-         * B-1 and would overflow DIVU.L, so it never reaches the instruction.
+         * stays below the divisor.  Equality is the one case whose quotient is
+         * B-1, which overflows DIVU.L, so it never reaches the instruction.
          */
         if (top >= vn[n - 1u])
         {
