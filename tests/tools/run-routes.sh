@@ -13,21 +13,21 @@
 #   looks for the consequence on the wire.
 #
 #   The consequence is chosen so that it cannot be produced any other way.
-#   The route's next hop is 10.0.2.99, on the guest's own subnet, so NetX
-#   Duo will accept it, and answered by nothing, because SLIRP is 10.0.2.2 and
-#   10.0.2.3.  Sending to 192.168.77.5:
+#   The next hops are .249, .250 and .251 of the guest's own subnet, derived at
+#   run time because a fixed address is only on-subnet on the network it was
+#   written for, and NetX Duo refuses one that is not.  Sending to 192.168.77.5:
 #
 #     * with the route, _nx_ip_route_find() matches the table entry,
-#                             the next hop becomes 10.0.2.99, and the stack
-#                             emits  ARP who-has 10.0.2.99  and nothing else;
-#     * without the route , the default gateway 10.0.2.2 is used, whose ARP
-#                             entry the DHCP exchange already resolved, so the
-#                             frame goes straight out with no ARP at all.
+#                             the next hop becomes .249, and the stack
+#                             emits  ARP who-has <.249>  and nothing else;
+#     * without the route , the default gateway is used, whose ARP entry the
+#                             DHCP exchange already resolved, so the frame goes
+#                             straight out with no ARP at all.
 #
-#   "ARP who-has 10.0.2.99" therefore appears if and only if the routing table
-#   was consulted.  It is read out of the EMULATOR's own frame log, the
-#   a2065 writes every frame it handles as hex, unconditionally, below every
-#   line of our code, rather than out of a capture the stack took of itself.
+#   That ARP request therefore appears if and only if the routing table was
+#   consulted.  It is read off the host NIC, which needs a bridged run: -A -B
+#   <iface>.  Under SLIRP the frames touch no NIC and there is nothing to read,
+#   which is why the wire assertions skip there rather than pass.
 #
 # WHAT ELSE IT ASSERTS
 #
@@ -209,6 +209,7 @@ skip() { echo "  --: $*"; UNRUN=$((UNRUN + 1)); }
 # The two next hops RtProbe derived, .250 and .251 of whatever subnet the
 # machine is on.  Read here rather than beside the assertions that use them:
 # the wire check below needs them too and comes first.
+RP_HOP=$(sed -n 's/^route next hop: \([0-9.]*\)$/\1/p' "$REPORT" | head -1)
 HOP_A=$(sed -n 's/^next hops: \([0-9.]*\) then [0-9.]*$/\1/p' "$REPORT" | head -1)
 HOP_B=$(sed -n 's/^next hops: [0-9.]* then \([0-9.]*\)$/\1/p' "$REPORT" | head -1)
 
@@ -237,8 +238,8 @@ else
 fi
 
 # ---- the entry went in, and came back out --------------------------------
-if grep -q "^add 192.168.77.0/24 via 10.0.2.99: 0 " "$REPORT"; then
-    pass "NETCTRL_ROUTE_ADD accepted 192.168.77.0/24 via 10.0.2.99"
+if grep -Eq "^add 192\\.168\\.77\\.0/24 via [0-9.]+: 0 " "$REPORT"; then
+    pass "NETCTRL_ROUTE_ADD accepted 192.168.77.0/24 via $RP_HOP"
 else
     fail "NETCTRL_ROUTE_ADD did not accept the route"
 fi
@@ -253,8 +254,9 @@ else
     fail "the route appears $SHOWN times in the three listings, expected 1"
 fi
 
-if grep -Eq "^  192\.168\.77\.0 +10\.0\.2\.99 +255\.255\.255\.0 +U?G?S" "$REPORT"; then
-    pass "it is flagged S (added by hand) with 10.0.2.99 as its next hop"
+if [ -n "$RP_HOP" ] &&
+   grep -Eq "^  192\.168\.77\.0 +${RP_HOP//./\\.} +255\.255\.255\.0 +U?G?S" "$REPORT"; then
+    pass "it is flagged S (added by hand) with $RP_HOP as its next hop"
 else
     fail "the route is not reported with the S flag and the right next hop"
 fi
@@ -290,21 +292,28 @@ fi
 # The whole point.  The emulator's own frame log, converted, must contain an
 # ARP request for the route's next hop, an address nothing in this test ever
 # named to the stack except through AddNetRoute.
-if [ -s "$HD/host.pcap" ]; then
-    ARP=$(tcpdump -r "$HD/host.pcap" -n 2>/dev/null |
-          grep -c "who-has 10.0.2.99" || true)
+# $WIRE is the capture this script took on the host NIC, which exists on a
+# bridged run; $HD/host.pcap is a2065pcap.py's decode of FS-UAE's own frame
+# log, which exists on no runner that is left.  Either is the wire.
+PCAP=""
+[ -s "${WIRE:-}" ] && PCAP="$WIRE"
+[ -z "$PCAP" ] && [ -s "$HD/host.pcap" ] && PCAP="$HD/host.pcap"
+
+if [ -n "$PCAP" ] && [ -n "$RP_HOP" ]; then
+    ARP=$(tcpdump -r "$PCAP" -n 2>/dev/null |
+          grep -c "who-has $RP_HOP" || true)
     if [ "${ARP:-0}" -gt 0 ]; then
-        pass "the wire shows $ARP ARP request(s) for 10.0.2.99, the route was used"
+        pass "the wire shows $ARP ARP request(s) for $RP_HOP, the route was used"
     else
-        fail "no ARP for 10.0.2.99 on the wire: the route was not consulted"
-        tcpdump -r "$HD/host.pcap" -n 2>/dev/null | grep -i arp | head -20 >&2 || true
+        fail "no ARP for $RP_HOP on the wire: the route was not consulted"
+        tcpdump -r "$PCAP" -n 2>/dev/null | grep -i arp | head -20 >&2 || true
     fi
 
     # And nothing addressed to 192.168.77.5 may have gone to the DEFAULT
     # gateway's hardware address, which is what a build without the table
     # would have done.  Checked as "no IP packet for 192.168.77.5 left at
     # all", because the ARP never resolves, so the queued packet is dropped.
-    LEAKED=$(tcpdump -r "$HD/host.pcap" -n 2>/dev/null |
+    LEAKED=$(tcpdump -r "$PCAP" -n 2>/dev/null |
              grep -c "> 192.168.77.5" || true)
     if [ "${LEAKED:-0}" -eq 0 ]; then
         pass "nothing for 192.168.77.5 went out via the default gateway"
@@ -313,19 +322,17 @@ if [ -s "$HD/host.pcap" ]; then
     fi
 else
     # a2065pcap.py decoded the capture out of FS-UAE's own log, and FS-UAE is
-    # gone: Amiberry writes no equivalent, on either branch.  So the two wire
-    # assertions above have nothing to read and there is no flag that gets them
-    # back.  Skipped rather than passed -- they are the only checks here that
-    # see what actually left the machine, and this used to be reported only on
-    # the -A branch, so the default branch dropped them in silence.
+    # gone: Amiberry writes no equivalent, on either branch.  Bridged onto a
+    # host NIC there is a real capture instead, which is why this arm is now
+    # reached only on SLIRP, where the frames never touch a NIC at all.
     #
-    # And skipped is not zero.  "ARP who-has 10.0.2.99 appears if and only if
+    # And skipped is not zero.  "ARP for the next hop appears if and only if
     # the routing table was consulted" is the whole claim of this file; every
     # other assertion here reads what a command PRINTED, which a build with no
     # routing table at all can print correctly.  The verdict at the end exits
     # 77 for it.
-    skip "no host-side wire capture under Amiberry: the two assertions on what
-       left the card did not run"
+    skip "no wire to read: run with -A -B <iface> on a bridged host, where the
+       frames are on a real NIC and this script captures them"
 fi
 
 # ---- THE WIRE AGAIN, FOR THE CHANGE --------------------------------------
@@ -338,10 +345,10 @@ fi
 # addresses, in that order, and nothing else could have produced them.
 if [ -n "$WIRE" ] && [ -s "$WIRE" ] && [ -n "${HOP_A:-}" ] && [ -n "${HOP_B:-}" ]; then
     tcpdump -r "$WIRE" -n 2>/dev/null > "$STAGE/wire.txt" || true
-    A_LAST=$(grep -n "who-has $HOP_A" "$STAGE/wire.txt" | tail -1 | cut -d: -f1)
+    A_FIRST=$(grep -n "who-has $HOP_A" "$STAGE/wire.txt" | head -1 | cut -d: -f1)
     B_FIRST=$(grep -n "who-has $HOP_B" "$STAGE/wire.txt" | head -1 | cut -d: -f1)
 
-    if [ -n "$A_LAST" ]; then
+    if [ -n "$A_FIRST" ]; then
         pass "the wire shows ARP for $HOP_A, the route's first next hop"
     else
         fail "no ARP for $HOP_A: the route was not consulted before the change"
@@ -353,8 +360,14 @@ if [ -n "$WIRE" ] && [ -s "$WIRE" ] && [ -n "${HOP_A:-}" ] && [ -n "${HOP_B:-}" 
         fail "no ARP for $HOP_B: the packets did not follow the changed route"
     fi
 
-    if [ -n "$A_LAST" ] && [ -n "$B_FIRST" ] && [ "$B_FIRST" -gt "$A_LAST" ]; then
-        pass "with every request for $HOP_A before the first for $HOP_B"
+    # FIRST against FIRST, not last against first.  ARP is retried while a
+    # packet waits on it, so the datagram sent before the change goes on asking
+    # for $HOP_A for as long as it is queued, which is after the change and is
+    # correct: that packet was routed when the old next hop was the one.  What
+    # cannot happen unless the change took is a request for $HOP_B at all, and
+    # what orders the two is which poke produced the first of each.
+    if [ -n "$A_FIRST" ] && [ -n "$B_FIRST" ] && [ "$B_FIRST" -gt "$A_FIRST" ]; then
+        pass "in that order: $HOP_A first, $HOP_B only after the change"
     else
         fail "the two next hops were not ARPed in the order the changes happened"
         grep -E "who-has ($HOP_A|$HOP_B)" "$STAGE/wire.txt" | head -20 >&2 || true

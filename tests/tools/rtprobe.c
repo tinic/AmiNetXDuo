@@ -456,7 +456,16 @@ int main(void)
         return RETURN_FAIL;
     }
 
-    before = p_show_table(base, "before", AF_UNSPEC, 0);
+    (VOID)p_show_table(base, "before", AF_UNSPEC, 0);
+
+    /*
+     * The count that the undo at the end is measured against is the STATIC
+     * one, not the whole table.  The whole table carries the ARP cache, and on
+     * a bridged run any machine on the LAN can put an entry in it between two
+     * listings; a run that ended with one more neighbour than it started with
+     * then read as a route this test failed to remove.
+     */
+    before = p_show_table(base, "before-static", AF_INET, RTF_STATIC);
 
     /*
      * Two next hops on this machine's own subnet, whatever that subnet is.
@@ -506,7 +515,7 @@ int main(void)
     Printf((CONST_STRPTR)"add %s via %s: rc %ld (errno %ld)\n",
            (LONG)PROBE_HOST, (LONG)hop_a, rc, p_errno(base));
 
-    with = p_show_table(base, "with", AF_UNSPEC, 0);
+    (VOID)p_show_table(base, "with", AF_UNSPEC, 0);
 
     /* ---- the flags filter ------------------------------------------------
      *
@@ -514,7 +523,7 @@ int main(void)
      * so RTF_STATIC returns the two just added and nothing else; the count
      * is the assertion.
      */
-    (VOID)p_show_table(base, "static-only", AF_INET, RTF_STATIC);
+    with = p_show_table(base, "static-only", AF_INET, RTF_STATIC);
 
     /* ---- ChangeRouteTagList ----------------------------------------------
      *
@@ -760,7 +769,8 @@ int main(void)
     Printf((CONST_STRPTR)"delete %s: rc %ld (errno %ld)\n",
            (LONG)PROBE_HOST, rc, p_errno(base));
 
-    after = p_show_table(base, "after", AF_UNSPEC, 0);
+    (VOID)p_show_table(base, "after", AF_UNSPEC, 0);
+    after = p_show_table(base, "after-static", AF_INET, RTF_STATIC);
 
     Printf((CONST_STRPTR)"counts: before %ld, with %ld, after %ld%s\n",
            before, with, after,
