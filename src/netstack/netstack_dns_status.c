@@ -28,20 +28,21 @@ LONG ami_ns_dns_error(UINT status)
             return AMI_NET_ERR_TIMEOUT;
 
         /*
-         * Not a DNS status at all: every entry point in addons/dns takes the
-         * client's mutex with the caller's wait_option and hands this back when
-         * another task still holds it. Two programs resolving at once is the
-         * ordinary case, and the second of them was being told the name does
-         * not exist, the default below, rather than to try again.
+         * Not a DNS status at all. Every entry point in addons/dns takes the
+         * mutex of the client with the caller's wait_option, and hands this
+         * back when another task still holds it. Two programs resolving at
+         * once is the ordinary case. The second of them used to be told that
+         * the name does not exist, the default below, rather than to try
+         * again.
          */
         case TX_NOT_AVAILABLE:
             return AMI_NET_ERR_TIMEOUT;
 
         /*
-         * RCODE 3, and an answer rather than a failure: the server that gave
-         * it is authoritative for the zone, so no other server would say
-         * anything different.  NX_DNS_ERROR_MASK matched it the same way it
-         * matches RCODE 2, so both arrived as NX_DNS_SERVER_AUTH_ERROR and the
+         * RCODE 3 is an answer and not a failure. The server that gave it is
+         * authoritative for the zone, so no other server says anything
+         * different.  NX_DNS_ERROR_MASK matched it the same way it matches
+         * RCODE 2, so both arrived as NX_DNS_SERVER_AUTH_ERROR and the
          * resolver asked every remaining server, once per retry rung, for an
          * answer it already had.
          */
@@ -52,7 +53,7 @@ LONG ami_ns_dns_error(UINT status)
         case NX_DNS_MISMATCHED_RESPONSE:
         case NX_DNS_BAD_ID_ERROR:
         case NX_DNS_SERVER_AUTH_ERROR:
-            /* The servers were asked and none has the name; a mistyped name
+            /* The servers were asked and none has the name. A mistyped name
                is the likeliest cause. */
             return AMI_NET_ERR_NONAME;
 
