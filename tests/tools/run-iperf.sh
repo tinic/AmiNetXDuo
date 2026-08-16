@@ -710,7 +710,7 @@ says "SYS:iperf $PEERADDR -t 0" 1 "not a measurement" \
      "and says a run has to be bounded"
 
 want_rc "SYS:iperf" 1 10 "a client with no host is refused"
-says "SYS:iperf" 1 "which host" "and asks for one"
+says "SYS:iperf" 1 "no host was given" "and asks for one"
 
 want_rc "SYS:iperf -s $PEERADDR" 1 10 "-s with a host is refused"
 says "SYS:iperf -s $PEERADDR" 1 "takes no host" "and says why"

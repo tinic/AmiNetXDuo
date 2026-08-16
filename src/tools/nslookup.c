@@ -914,7 +914,7 @@ int main(int argc, char **argv)
     {
         if (nsl_type_from_name((const char *)args[ARG_TYPE], &type) != 0)
         {
-            tool_error("\"%s\" is not a record type I know",
+            tool_error("\"%s\" is not a record type this command knows",
                        (LONG)args[ARG_TYPE]);
             nsl_print_types();
             CloseLibrary(sb);
@@ -1041,7 +1041,7 @@ int main(int argc, char **argv)
 
     if (printed < 0)
     {
-        tool_error("%s sent an answer this cannot be read", (LONG)dotted);
+        tool_error("%s sent an answer that cannot be read", (LONG)dotted);
         FreeArgs(rda);
         return RETURN_ERROR;
     }

@@ -478,7 +478,7 @@ static LONG fetch_run(VOID)
 
         if (hop == (ULONG)FETCH_MAX_HOPS)
         {
-            tool_error("more than %ld redirects; giving up",
+            tool_error("more than %ld redirects, so giving up",
                        (LONG)FETCH_MAX_HOPS);
             rc = RETURN_ERROR;
             break;
@@ -511,7 +511,7 @@ static LONG fetch_run(VOID)
                  * there takes a minute or two and silence looks like a hang.
                  */
                 if ((SysBase->AttnFlags & AFF_68020) == 0)
-                    tool_printf("  Install it with the full stack; on a 68000 "
+                    tool_printf("  Install it with the full stack.  On a 68000 "
                                 "the first handshake takes a minute or two.\n");
 
                 rc = RETURN_FAIL;
@@ -686,14 +686,14 @@ static LONG fetch_run(VOID)
                 {
                     LONG err = io_tls_error(&io);
 
-                    tool_error("the request could not be sent: %s"
+                    tool_error("cannot send the request: %s"
                                " (%ld), %ld of %ld bytes",
                                (LONG)TLSErrorString(io.tbase, err),
                                (LONG)err, (LONG)n, (LONG)used);
                     rc = RETURN_ERROR;
                     goto hop_done;
                 }
-                tool_error("the request could not be sent");
+                tool_error("cannot send the request");
                 rc = RETURN_ERROR;
                 goto hop_done;
             }
@@ -883,8 +883,8 @@ static LONG fetch_run(VOID)
             if (hs_ms >= 10000UL)
             {
                 tool_error("%s closed the connection without answering.  The "
-                           "handshake took %lu.%lu s, and some servers allow "
-                           "about 15 s for one; this machine is slower than "
+                           "handshake took %lu.%lu s.  Some servers allow "
+                           "about 15 s for one.  This machine is slower than "
                            "that budget, and nothing here is misconfigured",
                            (LONG)u.host,
                            (LONG)(hs_ms / 1000UL),
@@ -937,8 +937,8 @@ static LONG fetch_run(VOID)
 
             if (was_secure && !next.secure)
             {
-                tool_error("%s redirects to an unencrypted URL; not following",
-                           (LONG)u.host);
+                tool_error("%s redirects to an unencrypted URL, which this "
+                           "command does not follow", (LONG)u.host);
                 rc = RETURN_ERROR;
                 break;
             }

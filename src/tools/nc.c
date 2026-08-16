@@ -107,7 +107,7 @@ static BOOL parse_range(const char *text, UWORD *lo, UWORD *hi)
 
     if (text == NULL || text[0] < '0' || text[0] > '9')
     {
-        tool_error("a port range has to be numbers, not \"%s\"", (LONG)text);
+        tool_error("a port range must be numbers, not \"%s\"", (LONG)text);
         return FALSE;
     }
 
@@ -217,7 +217,7 @@ static LONG nc_shovel(struct Library *sb, LONG sock, const NcOptions *opt)
 
                     if (opt->verbose)
                     {
-                        tool_printf("end of input; the write half is "
+                        tool_printf("end of input, so the write half is "
                                     "closed\n");
                         (VOID)Flush(Output());
                     }
@@ -320,7 +320,7 @@ static LONG nc_shovel(struct Library *sb, LONG sock, const NcOptions *opt)
             if (idle_limit != 0 && idle >= idle_limit)
             {
                 if (opt->verbose)
-                    tool_error("nothing for %lu seconds; stopping",
+                    tool_error("nothing for %lu seconds, so stopping",
                                opt->timeout);
                 rc = RETURN_WARN;
                 break;
@@ -671,7 +671,7 @@ int main(int argc, char **argv)
     }
     else if (portspec == NULL)
     {
-        tool_error("which port?");
+        tool_error("no port was given");
         tool_usage("[-4|-6] <host> <port>  |  -l [-k] <port>  |  -z <host> <port>[-<port>]",
                    "Copies standard input to a socket and the socket to "
                    "standard output.");
@@ -681,14 +681,14 @@ int main(int argc, char **argv)
 
     if (!opt.listen && host == NULL)
     {
-        tool_error("which host?");
+        tool_error("no host was given");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
 
     if (opt.listen && opt.scan)
     {
-        tool_error("-l and -z do opposite things; pick one");
+        tool_error("-l and -z do opposite things. Use one of them");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
