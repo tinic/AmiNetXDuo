@@ -417,18 +417,33 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
         switch (optname)
         {
             /*
-             * NetX Duo does not implement Nagle, so a segment is sent as soon
-             * as there is one to send and getsockopt answers 1 whatever was
-             * asked for. The arguments are still checked, and the socket type
-             * still has to be TCP. Accepting this on a UDP socket, which it
-             * did by returning before looking at anything, told a caller that
-             * a level it does not have was configured.
+             * NetX Duo has no Nagle -- nx_tcp_socket_send_internal.c sends a
+             * segment as soon as there is one to send, and the vendored tree
+             * has no small-segment hold anywhere in it (docs/CONFORMANCE.md,
+             * RFC 1122 MUST-38). So TCP_NODELAY is permanently 1 and the get
+             * side answering 1 is the truth, not a placeholder.
+             *
+             * Which makes 0 the one value that cannot be honoured, and taking
+             * it and returning 0 was the lie: a caller that asked for Nagle
+             * and got success had been told the stack would coalesce its
+             * small writes, and nothing does. It fails instead, so a ported
+             * client sees a refusal it can act on rather than a silent no-op.
+             * A caller asking for 1 is asking for what is already true and is
+             * told so.
+             *
+             * The arguments are still checked, and the socket type still has
+             * to be TCP. Accepting this on a UDP socket, which it did by
+             * returning before looking at anything, told a caller that a level
+             * it does not have was configured.
              */
             case TCP_NODELAY:
                 if ((sock->as_Flags & ASF_TCP) == 0)
                     return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
-                return (bsd_opt_set_long(SocketBase, optval, optlen,
-                                         &value) != 0) ? -1 : 0;
+                if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
+                    return -1;
+                if (value == 0)
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+                return 0;
 
             case TCP_MAXSEG:
             {
@@ -698,7 +713,11 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
         {
             /* Both refuse a socket that has no TCP under it, as the set side
                does. Answering 1 and 0 there described a level the socket does
-               not have. */
+               not have.
+
+               1 is not a stored value: there is no Nagle in the stack, so it
+               is the state of every TCP socket for its whole life, and the set
+               side refuses the only request that would contradict it. */
             case TCP_NODELAY:
                 if ((sock->as_Flags & ASF_TCP) == 0)
                     return bsd_fail(SocketBase, AMI_ENOPROTOOPT);

@@ -651,16 +651,20 @@ LONG value;
     if (!t_check((BOOL)(fd >= 0), "tcp socket", bsd_Errno()))
         return;
 
-    /* NetX Duo has no Nagle, so this is on and cannot be turned off. */
+    /* NetX Duo has no Nagle, so this is on and cannot be turned off.  Asking
+       for what is already true succeeds; asking for Nagle is refused, because
+       taking it and then reading back 1 tells the caller nothing. */
     (VOID)t_check((BOOL)(t_set_int(fd, IPPROTO_TCP, TCP_NODELAY, 1) == 0),
                   "setsockopt TCP_NODELAY=1", bsd_Errno());
     (VOID)t_get_int(fd, IPPROTO_TCP, TCP_NODELAY, &value);
     (VOID)t_check((BOOL)(value == 1), "TCP_NODELAY reads back 1", value);
 
-    (VOID)t_set_int(fd, IPPROTO_TCP, TCP_NODELAY, 0);
+    (VOID)t_check(t_set_fails(fd, IPPROTO_TCP, TCP_NODELAY, 0, T_EINVAL),
+                  "TCP_NODELAY=0 is EINVAL, there is no Nagle to turn on",
+                  bsd_Errno());
     (VOID)t_get_int(fd, IPPROTO_TCP, TCP_NODELAY, &value);
     (VOID)t_check((BOOL)(value == 1),
-                  "and still 1 after asking for Nagle, there is none",
+                  "and still 1 after the refusal",
                   value);
 
     (VOID)t_check((BOOL)(bsd_setsockopt(fd, IPPROTO_TCP, TCP_NODELAY,
