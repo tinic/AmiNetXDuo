@@ -553,7 +553,8 @@ int main(int argc, char **argv)
            time. */
         if (have_netmask && explicit_mask != netmask)
         {
-            tool_error("the prefix length in ADDRESS and NETMASK do not agree");
+            tool_error("the prefix lengths in ADDRESS and NETMASK do not "
+                       "agree");
             FreeArgs(rda);
             return RETURN_ERROR;
         }
@@ -565,7 +566,7 @@ int main(int argc, char **argv)
     if (have_netmask && !mask_is_contiguous(netmask))
     {
         ami_config_format_ip(netmask, text, sizeof(text));
-        tool_error("%s is not a netmask: the ones have to come first",
+        tool_error("%s is not a netmask: the ones must come first",
                    (LONG)text);
         FreeArgs(rda);
         return RETURN_ERROR;
@@ -583,7 +584,7 @@ int main(int argc, char **argv)
         }
         else if (!ami_config_parse_ip(g, &gateway))
         {
-            tool_error("\"%s\" is not an address; GATEWAY NONE clears it",
+            tool_error("\"%s\" is not an address. GATEWAY NONE clears it",
                        (LONG)g);
             FreeArgs(rda);
             return RETURN_ERROR;
@@ -625,7 +626,7 @@ int main(int argc, char **argv)
            one is told what this stack calls it rather than "bad argument". */
         if (tool_stricmp(c, "DHCP") != 0)
         {
-            tool_error("CONFIGURE takes DHCP and nothing else; a link-local "
+            tool_error("CONFIGURE takes DHCP and nothing else. A link-local "
                        "address is CONFIGURE=LINKLOCAL in "
                        "DEVS:NetInterfaces/%s", (LONG)name);
             FreeArgs(rda);
@@ -658,8 +659,8 @@ int main(int argc, char **argv)
         }
         if (timeout < (ULONG)CNI_DHCP_TIMEOUT_MIN)
         {
-            tool_error("a TIMEOUT under %ld seconds says more about the "
-                       "deadline than about the network",
+            tool_error("a TIMEOUT of less than %ld seconds is too short to "
+                       "tell anything about the network",
                        (LONG)CNI_DHCP_TIMEOUT_MIN);
             FreeArgs(rda);
             return RETURN_ERROR;
@@ -697,7 +698,7 @@ int main(int argc, char **argv)
     index = find_index(base, name);
     if (index == -2)
     {
-        tool_error("the network would not say which interfaces it has");
+        tool_error("the network did not say which interfaces it has");
         tool_explain_no_netstatus(base);
         tool_netstatus_close(base);
         FreeArgs(rda);
@@ -724,14 +725,14 @@ int main(int argc, char **argv)
             if (err == CNI_ENOTCONN)
                 tool_error("%s has no lease to release", (LONG)name);
             else
-                tool_error("%s would not release its lease", (LONG)name);
+                tool_error("%s did not release its lease", (LONG)name);
 
             tool_netstatus_close(base);
             FreeArgs(rda);
             return RETURN_FAIL;
         }
 
-        say("%s: the lease is released; the address stays until something "
+        say("%s: the lease is released. The address stays until something "
             "else changes it\n", (LONG)name);
     }
 
@@ -810,7 +811,7 @@ int main(int argc, char **argv)
             if (err == CNI_EADDRNOTAVAIL)
             {
                 ami_config_format_ip(address, text, sizeof(text));
-                tool_error("%s would not take %s", (LONG)name, (LONG)text);
+                tool_error("%s did not take %s", (LONG)name, (LONG)text);
             }
             else if (err == CNI_EINVAL && have_gateway && gateway != 0)
             {
@@ -820,7 +821,7 @@ int main(int argc, char **argv)
             }
             else
             {
-                tool_error("%s could not be reconfigured", (LONG)name);
+                tool_error("%s was not reconfigured", (LONG)name);
             }
 
             tool_netstatus_close(base);
@@ -870,7 +871,7 @@ int main(int argc, char **argv)
                 tool_error("this bsdsocket.library was built without mDNS, "
                            "so there is nothing to switch");
             else if (err == CNI_EIO)
-                tool_error("%s would not %s answering .local", (LONG)name,
+                tool_error("%s did not %s answering .local", (LONG)name,
                            (LONG)(mdns_on ? "start" : "stop"));
             else if (err == CNI_ENXIO)
                 tool_error("%s is no longer attached", (LONG)name);
@@ -887,11 +888,11 @@ int main(int argc, char **argv)
            so the line says what was started rather than what was claimed;
            ShowNetStatus is where the name appears once it is this machine's. */
         if (mdns_on)
-            say("%s: answering .local here, claiming the name now\n",
+            say("%s: answering .local here, and the name is claimed now\n",
                 (LONG)name);
         else
-            say("%s: no longer answering .local here, and the network has "
-                "been told to forget the name\n", (LONG)name);
+            say("%s: no longer answering .local here, and the network was "
+                "told to forget the name\n", (LONG)name);
     }
 
     /* Said last, so it is the line left on the screen. */

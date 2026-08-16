@@ -394,7 +394,7 @@ want_rc "SYS:ConfigureNetInterface eth0 ADDRESS 10.0.2.20/24 NETMASK 255.255.0.0
         "and returns ERROR"
 
 says "SYS:ConfigureNetInterface eth0 NETMASK 255.0.255.0" 1 \
-     "the ones have to come first" \
+     "the ones must come first" \
      "a netmask with a hole in it is refused"
 want_rc "SYS:ConfigureNetInterface eth0 NETMASK 255.0.255.0" 1 10 "and returns ERROR"
 

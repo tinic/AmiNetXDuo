@@ -93,7 +93,7 @@ static BOOL setup_aborted;
 static VOID abort_setup(const char *why)
 {
     setup_aborted = TRUE;
-    tool_printf("\n%s  Nothing has been changed.\n", (LONG)why);
+    tool_printf("\n%s  Nothing was changed.\n", (LONG)why);
 }
 
 /*
@@ -189,7 +189,7 @@ static BOOL ask_yes(const char *prompt, BOOL preset)
         if (answer[0] == 'n' || answer[0] == 'N')
             return FALSE;
 
-        tool_printf("  Please answer Y or N.\n");
+        tool_printf("  Answer Y or N.\n");
     }
 }
 
@@ -377,7 +377,7 @@ static BOOL write_file(const char *path, const Blob *blob, BOOL *kept_old)
 
         if (!Rename((CONST_STRPTR)path, (CONST_STRPTR)keep))
         {
-            tool_error("cannot move the old %s out of the way", (LONG)path);
+            tool_error("cannot rename the old %s", (LONG)path);
             tool_fault(IoErr());
             return FALSE;
         }
@@ -398,8 +398,8 @@ static BOOL write_file(const char *path, const Blob *blob, BOOL *kept_old)
 
     if (written != (LONG)blob->len)
     {
-        tool_error("could not write all of %s, the disk may be full",
-                   (LONG)path);
+        tool_error("only part of %s was written. A full disk is the usual "
+                   "cause", (LONG)path);
         (VOID)DeleteFile((CONST_STRPTR)path);
         return FALSE;
     }
@@ -434,7 +434,7 @@ static VOID build_interface_file(const Plan *plan, Blob *out)
     blob_reset(out);
 
     blob_add(out, "# Network interface, written by NetSetup.\n");
-    blob_add(out, "# One keyword per line; # starts a comment. Safe to edit.\n");
+    blob_add(out, "# One keyword per line. # starts a comment. Safe to edit.\n");
     blob_add(out, "\n");
 
     blob_add(out, "DEVICE    = ");
@@ -546,14 +546,14 @@ static BOOL ask_device(Plan *plan)
             tool_printf("   %lu  %-22s (%s)\n", i + 1UL, (LONG)dev->name,
                         (LONG)dev->where);
         }
-        tool_printf("   Or type the name of a driver, if yours is not listed.\n");
+        tool_printf("   If the card is not listed, type the name of its driver.\n");
     }
     else
     {
-        tool_printf("   No network card driver could be found on this machine.\n");
+        tool_printf("   No network card driver was found on this machine.\n");
         tool_printf("   Drivers belong in DEVS:Networks/ and come with the\n");
-        tool_printf("   card. Type the name of yours if you know it is\n");
-        tool_printf("   installed somewhere else.\n");
+        tool_printf("   card. If the driver is installed somewhere else,\n");
+        tool_printf("   type its name.\n");
     }
 
     for (;;)
@@ -597,7 +597,7 @@ static BOOL ask_device(Plan *plan)
                 tool_copy_string(plan->device, sizeof(plan->device), answer);
                 tool_copy_string(plan->device + len,
                                  sizeof(plan->device) - len, ".device");
-                tool_printf("  Using %s.\n", (LONG)plan->device);
+                tool_printf("  The driver is %s.\n", (LONG)plan->device);
             }
             else
             {
@@ -626,7 +626,7 @@ static BOOL check_device(Plan *plan, BOOL quiet)
     if (probe == 0)
     {
         if (!quiet)
-            tool_printf("  %s unit %lu answers. Good.\n",
+            tool_printf("  %s unit %lu answers.\n",
                         (LONG)plan->device, plan->unit);
         return TRUE;
     }
@@ -636,8 +636,8 @@ static BOOL check_device(Plan *plan, BOOL quiet)
 
     if (tool_device_where(plan->device) == NULL)
     {
-        tool_printf("  That driver is not installed: it is not in\n");
-        tool_printf("  DEVS:Networks/ or anywhere else I looked.\n");
+        tool_printf("  That driver is not installed. It is not in\n");
+        tool_printf("  DEVS:Networks/ or anywhere else this command looked.\n");
     }
     else if (plan->unit != 0 && tool_device_probe(plan->device, 0, NULL) == 0)
     {
@@ -654,8 +654,8 @@ static BOOL check_device(Plan *plan, BOOL quiet)
     }
     else
     {
-        tool_printf("  The driver is installed but the card is not answering:\n");
-        tool_printf("  it may not be installed, or not seated properly.\n");
+        tool_printf("  The driver is installed but the card does not answer:\n");
+        tool_printf("  the card is not installed, or not seated properly.\n");
     }
 
     if (setup_aborted)
@@ -706,7 +706,7 @@ static BOOL ask_name(Plan *plan)
     char answer[ANSWER_LEN];
 
     tool_printf("\nThe interface needs a name. It is only a label: it becomes\n");
-    tool_printf("the name of the file in %s, and what you type\n", (LONG)DIR_INTERFACES);
+    tool_printf("the name of the file in %s, and the name to type\n", (LONG)DIR_INTERFACES);
     tool_printf("after Online, Offline and ShowNetStatus.\n");
 
     for (;;)
@@ -729,10 +729,10 @@ static BOOL ask_addressing(Plan *plan)
 {
     char answer[ANSWER_LEN];
 
-    tool_printf("\nHow should this Amiga get its address?\n");
+    tool_printf("\nHow does this Amiga get its address?\n");
     tool_printf("   1  Automatically, from the network (DHCP)\n");
-    tool_printf("      Right for almost every home network, where the broadband\n");
-    tool_printf("      router hands one out.\n");
+    tool_printf("      Almost every home network works this way: the broadband\n");
+    tool_printf("      router hands out addresses.\n");
     tool_printf("   2  A fixed address, typed in here\n");
 
     for (;;)
@@ -759,10 +759,10 @@ static BOOL ask_static_details(Plan *plan)
 {
     char suggestion[16];
 
-    tool_printf("\nA fixed address has to be one that nothing else on the\n");
-    tool_printf("network is using, and it has to be on the same network as\n");
-    tool_printf("everything else. If your router is 192.168.1.1, then\n");
-    tool_printf("192.168.1.50 is the kind of address you want.\n");
+    tool_printf("\nA fixed address must be one that nothing else on the\n");
+    tool_printf("network uses, and it must be on the same network as\n");
+    tool_printf("everything else. If the router is 192.168.1.1, then\n");
+    tool_printf("192.168.1.50 is an address of the right kind.\n");
 
     if (!ask_address("Address for this Amiga", "", &plan->address, FALSE))
         return FALSE;
@@ -778,12 +778,12 @@ static BOOL ask_static_details(Plan *plan)
         if (netmask_is_sane(plan->netmask))
             break;
 
-        tool_printf("  That is not a usable netmask: it has to be a run of\n");
+        tool_printf("  That is not a usable netmask: it must be a run of\n");
         tool_printf("  255s followed by 0s, like 255.255.255.0.\n");
     }
 
     tool_printf("\nThe router (gateway) is what reaches everything outside\n");
-    tool_printf("this network. Leave it empty if there is none.\n");
+    tool_printf("this network. If there is no router, leave this empty.\n");
 
     plan->have_gateway = ask_address("Router address", "", &plan->gateway, TRUE);
     if (setup_aborted)
@@ -800,8 +800,8 @@ static BOOL ask_static_details(Plan *plan)
 
         tool_printf("\n  %s is not on the same network as %s, so this\n",
                     (LONG)g, (LONG)a);
-        tool_printf("  machine will not be able to reach it. That is usually a\n");
-        tool_printf("  typing mistake.\n");
+        tool_printf("  machine cannot reach it. That is usually a typing\n");
+        tool_printf("  mistake.\n");
 
         if (!ask_yes("  Keep it anyway", FALSE))
         {
@@ -873,7 +873,7 @@ static VOID bring_up(const Plan *plan)
 
     if (rc == -1)
     {
-        tool_error("could not run AddNetInterface");
+        tool_error("AddNetInterface did not run");
         tool_printf("      AddNetInterface %s\n", (LONG)plan->name);
         return;
     }
@@ -881,14 +881,14 @@ static VOID bring_up(const Plan *plan)
     if (rc == 0)
     {
         tool_printf("\nThe network is up.\n");
-        tool_printf("Add this line to S:User-Startup to have it happen at\n");
+        tool_printf("Add this line to S:User-Startup to start the network at\n");
         tool_printf("every boot:\n");
         tool_printf("      C:AddNetInterface %s QUIET\n", (LONG)plan->name);
     }
     else
     {
-        tool_printf("\nThe configuration has been written, but the network did\n");
-        tool_printf("not come up. AddNetInterface said why, above.\n");
+        tool_printf("\nThe configuration was written, but the network did not\n");
+        tool_printf("come up. AddNetInterface said why, above.\n");
     }
 }
 
@@ -924,7 +924,7 @@ int main(int argc, char **argv)
         tool_fault(IoErr());
         tool_usage("[name] [DEVICE=<driver>] [UNIT=<n>] [DHCP] "
                    "[ADDRESS=..] [NETMASK=..]",
-                   "Sets up a network interface. Run it with no arguments to "
+                   "Set up a network interface. Run it with no arguments to "
                    "be asked.");
         return RETURN_ERROR;
     }
@@ -1008,8 +1008,8 @@ int main(int argc, char **argv)
         if (interactive)
         {
             tool_printf("\nPress Return to accept the [suggested] answer.\n");
-            tool_printf("Type Q at any question to stop; nothing is written\n");
-            tool_printf("until every question has been answered.\n");
+            tool_printf("Type Q at any question to stop. Nothing is written\n");
+            tool_printf("until every question is answered.\n");
         }
     }
 
@@ -1030,7 +1030,7 @@ int main(int argc, char **argv)
     if (interactive && !check_device(&plan, quiet))
     {
         if (!setup_aborted)
-            tool_printf("\nStopped. Nothing has been changed.\n");
+            tool_printf("\nStopped. Nothing was changed.\n");
         FreeArgs(rda);
         return RETURN_WARN;
     }
@@ -1099,7 +1099,7 @@ int main(int argc, char **argv)
         if (!ask_yes("\nWrite it", TRUE))
         {
             if (!setup_aborted)
-                tool_printf("\nNothing has been changed.\n");
+                tool_printf("\nNothing was changed.\n");
             FreeArgs(rda);
             return RETURN_WARN;
         }

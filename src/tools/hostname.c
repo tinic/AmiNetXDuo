@@ -158,12 +158,12 @@ static VOID say_source(UWORD source, const char *name)
     if (from != NULL)
         tool_printf("  named by %s\n", (LONG)from);
     else if (tool_stricmp(name, "amiga") == 0)
-        tool_printf("  not named by anything, and no card would give a "
-                    "hardware address to name it after, so it shares this "
-                    "name with every other machine in the same state\n");
+        tool_printf("  not named by anything. No card would give a hardware "
+                    "address to name it after, so every other machine in the "
+                    "same state has this name\n");
     else
-        tool_printf("  not named by anything; taken from the card's hardware "
-                    "address\n");
+        tool_printf("  not named by anything. The name comes from the card's "
+                    "hardware address\n");
 }
 
 int main(int argc, char **argv)
@@ -242,7 +242,7 @@ int main(int argc, char **argv)
     if (!ami_config_hostname_valid(wanted))
     {
         tool_error("\"%s\" is not a host name: letters, digits and hyphens, "
-                   "no hyphen at either end of a label, and under %ld "
+                   "no hyphen at either end of a label, and less than %ld "
                    "characters", (LONG)wanted, (LONG)AMI_CFG_NAME_LEN);
         FreeArgs(rda);
         return RETURN_ERROR;
@@ -258,7 +258,7 @@ int main(int argc, char **argv)
                 LV_VAR | GVF_GLOBAL_ONLY | GVF_SAVE_VAR))
     {
         tool_fault(IoErr());
-        tool_error("ENV:HOSTNAME could not be written, so the name is "
+        tool_error("ENV:HOSTNAME was not written, so the name is "
                    "unchanged");
         FreeArgs(rda);
         return RETURN_FAIL;
@@ -298,7 +298,7 @@ int main(int argc, char **argv)
 
             if (err != HN_EPERM)
             {
-                tool_error("the network would not take the name");
+                tool_error("the network refused the name");
                 FreeArgs(rda);
                 return RETURN_FAIL;
             }
@@ -316,7 +316,7 @@ int main(int argc, char **argv)
             if (!hn_quiet)
                 tool_printf("  %s is in ENV:HOSTNAME and ENVARC:HOSTNAME, and "
                             "will name this machine when the stronger source "
-                            "stops supplying one\n", (LONG)wanted);
+                            "no longer supplies one\n", (LONG)wanted);
 
             FreeArgs(rda);
             return RETURN_WARN;
@@ -338,7 +338,7 @@ int main(int argc, char **argv)
 
     if (!hn_quiet)
     {
-        tool_printf("  written to ENV:HOSTNAME and ENVARC:HOSTNAME; DHCP "
+        tool_printf("  written to ENV:HOSTNAME and ENVARC:HOSTNAME. DHCP "
                     "option 12 and DEVS:Internet/name_resolution both outrank "
                     "it at the next boot\n");
 
@@ -350,8 +350,8 @@ int main(int argc, char **argv)
                 (sys.nss_Flags & NETSTATUS_SYS_MDNS) != 0 &&
                 sys.nss_MdnsName[0] != '\0')
             {
-                tool_printf("  .local is still %s until the network is "
-                            "restarted\n", (LONG)sys.nss_MdnsName);
+                tool_printf("  .local is still %s until the network "
+                            "restarts\n", (LONG)sys.nss_MdnsName);
             }
         }
     }

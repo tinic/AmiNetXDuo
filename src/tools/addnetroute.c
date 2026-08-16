@@ -976,7 +976,7 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
         if (tool_netstatus_control(base, NETCTRL_ROUTE6_DELETE, &ctl,
                                    &err) != 0)
         {
-            tool_error("the default route through %s would not go away",
+            tool_error("the default route through %s did not go away",
                        (LONG)gw_text);
             explain6(err, NULL);
             tool_netstatus_close(base);
@@ -1120,7 +1120,7 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
 
     if (bits == 0)
     {
-        tool_error("::/0 is not a prefix on this link, it is the default "
+        tool_error("::/0 is not a prefix on this link. It is the default "
                    "route");
         tool_netstatus_close(base);
         return RETURN_ERROR;
@@ -1394,7 +1394,7 @@ static int addnetroute_main(int argc, char **argv)
         if (tool_netstatus_control(base, NETCTRL_GATEWAY_CLEAR, &ctl,
                                    &err) != 0)
         {
-            tool_error("the default route would not go away");
+            tool_error("the default route did not go away");
             explain(err, 0);
             tool_netstatus_close(base);
             FreeArgs(rda);

@@ -320,7 +320,7 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
                                   : NETCTRL_INTERFACE_DOWN,
                                &ctl, &err) != 0)
     {
-        tool_error("%s would not go %s", (LONG)name,
+        tool_error("%s did not go %s", (LONG)name,
                    (LONG)(up ? "online" : "offline"));
 
         if (up && ifc != NULL)
@@ -333,7 +333,7 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
 
     if (!wait_for_live_state(base, name, up, timeout, &broken) && !broken)
     {
-        tool_error("%s was still %s %lu seconds after being asked to go %s",
+        tool_error("%s was still %s %lu seconds after the request to go %s",
                    (LONG)name, (LONG)(up ? "down" : "up"), timeout,
                    (LONG)(up ? "up" : "down"));
         rc = RETURN_WARN;
@@ -450,7 +450,7 @@ int main(int argc, char **argv)
     {
         tool_fault(IoErr());
         tool_usage("<interface or driver> [UNIT <n>] [TIMEOUT <secs>]",
-                   "eth0, or the driver it uses, e.g. a2065.device.");
+                   "eth0, or the driver it uses, for example a2065.device.");
         return RETURN_ERROR;
     }
 
@@ -494,9 +494,10 @@ int main(int argc, char **argv)
                                &other) &&
                 tool_stricmp(othername, name) != 0)
             {
-                tool_printf("%s: taken as the interface name; the interface "
-                            "that uses a driver\n", (LONG)name);
-                tool_printf("  of that name is %s.\n", (LONG)othername);
+                tool_printf("%s: taken as the interface name. The interface "
+                            "that uses a\n", (LONG)name);
+                tool_printf("  driver of that name is %s.\n",
+                            (LONG)othername);
             }
         }
     }
@@ -541,7 +542,7 @@ int main(int argc, char **argv)
 
             if (base == NULL)
             {
-                tool_error("%s would not come online", (LONG)name);
+                tool_error("%s did not come online", (LONG)name);
 
                 /* The card is only worth probing when the library that would
                    drive it is on the machine at all. */
@@ -642,7 +643,7 @@ int main(int argc, char **argv)
 
     if (!wait_for_state(index, FALSE, timeout, &broken) && !broken)
     {
-        tool_error("%s was still up %lu seconds after being asked to go down",
+        tool_error("%s was still up %lu seconds after the request to go down",
                    (LONG)name, timeout);
         FreeArgs(rda);
         return RETURN_WARN;
@@ -661,7 +662,7 @@ int main(int argc, char **argv)
     err = netstack_interface_up((UWORD)index);
     if (err != AMI_NET_OK)
     {
-        tool_error("%s would not come online: %s", (LONG)name,
+        tool_error("%s did not come online: %s", (LONG)name,
                    (LONG)tool_net_error(err));
         tool_explain_device(ifc.device, ifc.unit, ifc.card);
         FreeArgs(rda);
@@ -670,7 +671,7 @@ int main(int argc, char **argv)
 
     if (!wait_for_state(index, TRUE, timeout, &broken) && !broken)
     {
-        tool_error("%s was still down %lu seconds after being asked to come up",
+        tool_error("%s was still down %lu seconds after the request to come up",
                    (LONG)name, timeout);
         FreeArgs(rda);
         return RETURN_WARN;
