@@ -459,9 +459,12 @@ echo "====================================================================="
 echo
 
 FAILED=0
+# An assertion that did not run is counted, not just printed.  See the verdict
+# at the end: it is what stops this exiting 0 with half its subject untested.
+UNRUN=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
-skip() { echo "SKIP: $*"; }
+skip() { echo "SKIP: $*"; UNRUN=$((UNRUN + 1)); }
 
 block() {
     awk -v banner="$1" -v want="$2" '
@@ -756,6 +759,12 @@ if [ "$SERVER_ARMS" = yes ]; then
         fail "the guest counted $UR_BYTES bytes and told the peer $U_FAR"
     fi
 else
+    # SLIRP has no way in, so these two arms cannot run here -- and they are
+    # the ONLY coverage of accept() and of the guest generating a UDP
+    # end-of-test report rather than parsing one.  The nightly runs this
+    # harness with no -B and no -P, so that half has never been measured by
+    # anything, under a step that reported a tick.  Counted, and the verdict
+    # exits 77 for it.
     skip "the two directions with the guest as the server: a SLIRP guest" \
          "cannot be called in to.  Re-run with -B <iface> -P <third-machine>."
 fi
@@ -782,9 +791,21 @@ fi
 # ------------------------------------------------------------------ verdict --
 
 echo
-if [ "$FAILED" = 0 ]; then
-    echo "PASS: iperf measured what crossed the wire, and refused what it should"
-    exit 0
+# Failures first.  A run with both a failure and an unrun arm is a failure: the
+# skip is the less urgent of the two facts and reporting it first sends
+# somebody to look at the rig instead of at the defect.
+if [ "$FAILED" != 0 ]; then
+    echo "the transcript above is the whole run" >&2
+    exit 1
 fi
-echo "the transcript above is the whole run" >&2
-exit 1
+
+if [ "$UNRUN" != 0 ]; then
+    echo "SKIPPED: iperf measured what it could, and $UNRUN arm(s) did not run" >&2
+    echo "  Everything that DID run passed.  This is not a pass: an arm that" >&2
+    echo "  cannot be reached proves nothing about the code it would have" >&2
+    echo "  exercised.  The SKIP lines above say which and what to re-run with." >&2
+    exit 77
+fi
+
+echo "PASS: iperf measured what crossed the wire, and refused what it should"
+exit 0
