@@ -2,17 +2,16 @@
  * anxnet.device, layer 1 of 3: the SANA-II command table.
  *
  * The error codes here are the ones Individual Computers' x-surf.device and
- * x-surf-100.device return, so an application that was written against those
- * sees no difference -- with one deliberate exception, and it is the reason
- * this driver exists:
+ * x-surf-100.device return, so an application written against those sees no
+ * difference.  There is one deliberate exception:
  *
- *   S2_ADDMULTICASTADDRESS accepts an address whose GROUP bit, bit 0 of the
+ *   S2_ADDMULTICASTADDRESS accepts an address whose group bit, bit 0 of the
  *   first octet, is set.  Both IC drivers test bit 7 instead.  IPv4 multicast
  *   is 01:00:5e:.. and IPv6 is 33:33:.., and both have bit 7 clear in the
  *   first octet, so every legitimate join is answered S2ERR_BAD_ADDRESS, the
  *   hash filter stays empty, and the router's neighbour solicitation to
  *   33:33:ff:xx:xx:xx is dropped by the card.  On-link IPv6 still works,
- *   because a router advertisement comes back unicast; off-link does not,
+ *   because a router advertisement comes back unicast.  Off-link does not,
  *   because the return path never resolves.
  *
  * SPDX-License-Identifier: MIT
@@ -92,7 +91,7 @@ static BOOL cmd_dequeue(struct List *list, struct IOSana2Req *io)
 
 static ULONG cmd_addr48(const UBYTE *a)
 {
-    /* The low 32 bits; the top 16 are compared separately. */
+    /* The low 32 bits.  The top 16 are compared separately. */
     return ((ULONG)a[2] << 24) | ((ULONG)a[3] << 16) |
            ((ULONG)a[4] << 8)  | (ULONG)a[5];
 }
@@ -275,20 +274,19 @@ static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
     STAT(netdev_stat_coll,  unit->nu_Nic.collisions);
 
     /*
-     * Both of these were counted and read by nothing, which is the same
-     * as not counting them and worse, because the code that increments
-     * them reads as a reported number.  The watchdog one especially: a
-     * transmitter that wedges twice a minute and is quietly reset looks
-     * exactly like one that never wedges.
+     * Both of these were counted and read by nothing.  The increments then
+     * read as a reported number that nobody could see.  A transmitter that
+     * wedges twice a minute and is quietly reset looks the same as one that
+     * never wedges.
      */
     STAT(netdev_stat_wedge, unit->nu_TxWedges);
     STAT(netdev_stat_drop,  unit->nu_Dev->nd_UnitsDropped);
 
     /*
      * The three ways the address in PAR0..5 can differ from what the card's
-     * PROM said.  Each is 0 or 1.  They are here rather than only in the
-     * trace build because a machine that invented its own hardware address
-     * has to be able to say so to somebody who is not holding a serial cable.
+     * PROM said.  Each is 0 or 1.  They are here rather than only in the trace
+     * build, because a machine that invented its own hardware address must be
+     * able to report it without a serial cable.
      */
     STAT(netdev_stat_grp,   unit->nu_Nic.mac_group_fix);
     STAT(netdev_stat_cis,   unit->nu_Nic.mac_from_cis);
@@ -296,11 +294,10 @@ static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
 
     /*
      * And whether the probe put this card on cnet16's word-read path.  Same
-     * reason the transfer mode is record 0: it cannot be inferred from
-     * outside, it is the difference between a card that works and one that
-     * receives nothing, and the whole point of probing for it rather than
-     * shipping two binaries is that nobody has to guess which one they are
-     * running.
+     * reason as the transfer mode at record 0: it cannot be inferred from
+     * outside, and it is the difference between a card that works and one that
+     * receives nothing.  The probe replaces two binaries, so nobody has to
+     * work out which binary is running.
      */
     STAT(netdev_stat_godd,  unit->nu_Nic.bus.getodd);
 
@@ -513,8 +510,7 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
 
         /* And the writes, which are queued on the unit rather than the
            opener.  A caller flushes so that teardown is safe, and one of its
-           own requests still live in the driver is exactly what it flushed
-           to prevent. */
+           own requests still live in the driver is what the flush prevents. */
         netdev_drop_writes(unit, op);
 
         netdev_reply(io, 0, 0);
@@ -524,8 +520,8 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
     case S2_ADDMULTICASTADDRESS:
     case S2_DELMULTICASTADDRESS:
         /*
-         * THE FIX.  Bit 0 of the first octet is the Ethernet group bit; a
-         * unicast address is not a multicast group and is refused.
+         * Bit 0 of the first octet is the Ethernet group bit.  A unicast
+         * address is not a multicast group and is refused.
          */
         if ((io->ios2_SrcAddr[0] & 1) == 0)
         {
@@ -684,11 +680,10 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
         unit->nu_Stats.Overruns = unit->nu_Nic.overruns;
         unit->nu_Stats.BadData  = unit->nu_Nic.rx_errors;
         /*
-         * LastStart stays zero, and that is a gap rather than a value: it
-         * wants a timeval, timer.device is not open in this device, and a
-         * driver that opens one to fill in a statistic nobody has asked for
-         * is the wrong trade.  Declared here so it is not read as "the
-         * interface started at the epoch".
+         * LastStart stays zero, and that is a gap rather than a value.  It
+         * wants a timeval, and timer.device is not open in this device.  It is
+         * stated here so that the zero is not read as an interface that
+         * started at the epoch.
          */
         cmd_bytes((UBYTE *)io->ios2_StatData, (const UBYTE *)&unit->nu_Stats,
                   sizeof(struct Sana2DeviceStats));
@@ -705,15 +700,14 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
         ULONG now  = unit->nu_Online ? S2EVENT_ONLINE : S2EVENT_OFFLINE;
 
         /*
-         * S2EVENT_SOFTWARE IS REFUSED, and used to be accepted.  Accepting an
-         * event this driver has no condition to raise is the same defect as
-         * queueing one and never posting it, except that the caller cannot
-         * even see it: it waits forever with io_Error zero.  The spec's answer
-         * is the honest one -- "If this device driver does not understand the
+         * S2EVENT_SOFTWARE is refused, and used to be accepted.  This driver
+         * has no condition that raises it, so an accepted request waits
+         * forever with io_Error zero and the caller cannot see why.  The spec
+         * gives the answer: "If this device driver does not understand the
          * specified event condition(s) then the command returns immediately
          * with io_Error set to S2ERR_NOT_SUPPORTED and ios2_WireError
-         * S2WERR_BAD_EVENT" -- and cnet.device's accepted set is exactly the
-         * seven below, so no stack that works with it asks for the eighth.
+         * S2WERR_BAD_EVENT".  cnet.device's accepted set is the seven below,
+         * so no stack that works with it asks for the eighth.
          */
         if ((mask & ~(ULONG)(S2EVENT_ERROR | S2EVENT_TX | S2EVENT_RX |
                              S2EVENT_ONLINE | S2EVENT_OFFLINE |

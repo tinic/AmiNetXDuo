@@ -3,11 +3,11 @@
  *
  * Its own file for the same reason netdev_mcaf.c is: it needs no chip, no bus
  * and no register, so a host test can drive it.  What it decides cannot be
- * seen from an emulator -- an event posted from the wrong context corrupts a
+ * seen from an emulator.  An event posted from the wrong context corrupts a
  * list on a machine under load and nowhere else, and a filter hook that runs
  * on the wrong side of the copy-out drops traffic silently.
  *
- * WHAT THE SPECIFICATION SAYS, since none of it is inventable:
+ * What the specification says:
  *
  *   "All pending requests for a particular event will be returned when that
  *    event occurs."                       sana2device.spec, S2_ONEVENT NOTES
@@ -18,22 +18,22 @@
  *    S2EVENT_ERROR, S2EVENT_RX and S2EVENT_BUFF would be returned if
  *    pending."                            sana2device.spec, S2_ONEVENT NOTES
  *
- * So a queued request matches on ANY bit in common with what was posted, not
- * on equality, and S2EVENT_ERROR is a qualifier that rides along with the code
- * that says where the error was -- it is never posted by itself.  That is the
- * convention every posting site in this driver follows.
+ * A queued request therefore matches on any bit in common with what was
+ * posted, not on equality.  S2EVENT_ERROR is a qualifier that accompanies the
+ * code saying where the error was, and it is never posted by itself.  Every
+ * posting site in this driver follows that convention.
  *
  *   "ios2_WireError - Mask of events that occured."
  *                                         sana2device.spec, S2_ONEVENT RESULTS
  *
- * The completed request is given the WHOLE posted mask, not the part of it the
+ * The completed request is given the whole posted mask, not the part of it the
  * caller asked about.  Commodore's own slip.device does that (DoEvent, in the
- * SANA-II developer archive: `ios2->ios2_WireError = events`); cnet.device
- * hands back the intersection instead, which loses the "which of the three"
- * the sentence above exists to convey.
+ * SANA-II developer archive: `ios2->ios2_WireError = events`).  cnet.device
+ * hands back the intersection instead, which loses which of the three
+ * conditions occurred.
  *
- * THE FILTER.  S2_PacketFilter is a standard utility.library Hook, not a bare
- * function pointer:
+ * S2_PacketFilter is a standard utility.library Hook, not a bare function
+ * pointer:
  *
  *   "S2_PacketFilter [optional] - This is a pointer to a standard Hook to be
  *    called before S2_CopyToBuff is done."          SANA-II standard.txt
@@ -57,17 +57,16 @@
 /* ------------------------------------------------------------- the mask -- */
 
 /*
- * nu_EventMask is the OR of every queued request's mask on this unit, and it
- * exists so that a driver nobody is watching does no work at all: an interrupt
- * that would post an event tests one word and returns.  Without it every
- * dropped frame walked the opener list and every opener's event list to find
- * them empty.
+ * nu_EventMask is the OR of every queued request's mask on this unit, so a
+ * driver nobody is watching does no work: an interrupt that would post an
+ * event tests one word and returns.  Without it, every dropped frame walked
+ * the opener list and every opener's event list to find them empty.
  *
- * A WORD, not a long.  It is written under Disable() and read without one, and
- * a 68000 reads a longword as two bus cycles: an interrupt landing between
+ * A word, not a long.  It is written under Disable() and read without one, and
+ * a 68000 reads a longword as two bus cycles, so an interrupt landing between
  * them yields half of one value and half of another.  Every S2EVENT_* bit is
- * in 0..7, so one word holds the whole of it and every 68k reads a word in a
- * single cycle.
+ * in 0..7, so one word holds all of it and every 68k reads a word in a single
+ * cycle.
  */
 static UWORD netdev_event_scan(NetdevUnit *unit)
 {
@@ -114,21 +113,21 @@ VOID netdev_event_wait(NetdevUnit *unit, struct IOSana2Req *io)
 /* ------------------------------------------------------------ the post --- */
 
 /*
- * INTERRUPT CONTEXT.  Almost every caller is one: the card's INT2 server, the
- * vertical blank watchdog at INT3, and card.resource's removal callback.  What
- * that permits is the whole of what happens here -- Disable(), a list walk,
- * Remove(), and ReplyMsg(), which is a PutMsg() and a Signal() and is
- * documented callable from interrupts.  There is no allocation, no Forbid(),
- * no semaphore and nothing that can Wait().
+ * Almost every caller runs at interrupt level: the card's INT2 server, the
+ * vertical blank watchdog at INT3, and card.resource's removal callback.  That
+ * permits the whole of what happens here: Disable(), a list walk, Remove(),
+ * and ReplyMsg(), which is a PutMsg() and a Signal() and is documented
+ * callable from interrupts.  There is no allocation, no Forbid(), no semaphore
+ * and nothing that can Wait().
  *
- * Disable() rather than Forbid(): the lists are touched by the INT2 server, so
- * task-level exclusion is not exclusion.  It nests, so the callers that
- * already hold it (netdev_tick, netdev_tx_pump) are not a special case.
+ * Disable() rather than Forbid(), because the lists are touched by the INT2
+ * server and task-level exclusion is not exclusion.  It nests, so the callers
+ * that already hold it (netdev_tick, netdev_tx_pump) are not a special case.
  *
- * The requests belong to other tasks.  Each is removed from the list BEFORE it
- * is replied: once ReplyMsg() has run the owner may be running and the node is
- * its business again, so a Remove() after the reply is a walk through memory
- * somebody else now owns.
+ * The requests belong to other tasks.  Each is removed from the list before it
+ * is replied.  Once ReplyMsg() has run, the owner can be running and the node
+ * is its business again, so a Remove() after the reply walks memory somebody
+ * else now owns.
  */
 VOID netdev_event(NetdevUnit *unit, ULONG mask)
 {
@@ -159,7 +158,7 @@ VOID netdev_event(NetdevUnit *unit, ULONG mask)
         }
     }
 
-    /* Only when the set changed; the common post matches nothing. */
+    /* Only when the set changed.  The common post matches nothing. */
     if (removed)
         unit->nu_EventMask = netdev_event_scan(unit);
     Enable();
@@ -170,10 +169,10 @@ VOID netdev_event(NetdevUnit *unit, ULONG mask)
 /*
  * What the opener is shown, and what is copied to it: the frame from byte 0
  * for a RAW request, the payload past the 14-byte Ethernet header otherwise.
- * The autodoc is explicit that the filter sees the same thing CopyToBuff
- * would -- "The data should NOT include any hardware specific headers (unless
- * of course the CMD_READ request wanted RAW packets)" -- so there is one
- * answer here and both callers use it.
+ * The autodoc states that the filter sees the same data CopyToBuff would:
+ * "The data should NOT include any hardware specific headers (unless of course
+ * the CMD_READ request wanted RAW packets)".  There is one answer here and
+ * both callers use it.
  */
 const UBYTE *netdev_payload(const NetdevOpener *op, const struct IOSana2Req *io,
                             const UBYTE *frame, UWORD len, ULONG *plen)
@@ -189,13 +188,13 @@ const UBYTE *netdev_payload(const NetdevOpener *op, const struct IOSana2Req *io,
 }
 
 /*
- * TRUE when the packet may be handed over.  No hook installed is the answer
- * for every opener that has not asked to filter, and it costs one pointer test
- * on a receive path that is already holding the opener.
+ * TRUE when the packet can be handed over.  An opener that has not asked to
+ * filter has no hook, and the test costs one pointer compare on a receive path
+ * that already holds the opener.
  *
  * The hook itself runs at interrupt level, in the middle of the card's own
  * service, and the autodoc says so: "This function must be callable from
- * interupts."  Nothing here can make that true for a caller who ignored it.
+ * interupts."  Nothing here can make that true for a caller that ignored it.
  */
 BOOL netdev_filter_ok(NetdevOpener *op, struct IOSana2Req *io,
                       const UBYTE *data)
