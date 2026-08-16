@@ -3,7 +3,7 @@
  * httpterm.h for what this is, what it stopped being, why it needs a second
  * Process, and why anyone who can reach the port gets a shell.
  *
- * WHERE THE CONSOLE IS, IN THIS FILE
+ * The console parts of this file:
  *
  *   the mode           RAW and COOKED, and which side echoes
  *   the write, scanned the window bounds request, which is not a packet
@@ -25,13 +25,13 @@
  * The Shell's output is the bigger of the two because a command's answer
  * arrives faster than a LAN takes it away -- `list` of a full drawer is
  * kilobytes in one go -- and a ring smaller than one Write() turns it into
- * several packet round trips.  Typing is the other way round: a person
- * produces bytes far slower than anything drains them, and a whole pasted
- * line is still under a kilobyte.
+ * several packet round trips.  Typing is the other way round.  A person
+ * produces bytes far slower than anything drains them, and a whole pasted line
+ * is still under a kilobyte.
  *
- * Neither is a limit on what can pass, only on what may be in flight.  A full
- * ring parks the Shell's ACTION_WRITE rather than dropping it, which is the
- * back pressure that stops a runaway command from costing memory: `type
+ * Neither is a limit on what can pass, only on what can be in flight.  A full
+ * ring holds the Shell's ACTION_WRITE rather than dropping it, which is the
+ * back pressure that stops a runaway command from costing memory.  `type
  * S:Startup-Sequence` on a link that is not draining stops the command, not
  * the server.
  */
@@ -42,15 +42,15 @@
  * 64 KB for the runner, and see httpterm.h for why that is a floor and not a
  * measurement of what it does today.
  *
- * There is no number here for the SHELL, and that is Execute()'s doing: it
+ * There is no number here for the Shell, and that is Execute()'s doing.  It
  * creates the Shell process itself and takes no tags, so the stack its
  * commands get is the system default and `stack 65536` typed into the session
- * is what changes it -- the same as in any other Shell on the machine.
+ * is what changes it, the same as in any other Shell on the machine.
  */
 #define TERM_RUNNER_STACK   (64UL * 1024UL)
 
 /*
- * And the stack the SHELL gives the commands a person types, which is a
+ * And the stack the Shell gives the commands a person types, which is a
  * different number for a different reason.  See term_runner_main(), where it
  * is set and where the arithmetic and the cost are written down.
  */
@@ -60,15 +60,14 @@
  * What the Shell is told before it starts reading.
  *
  * `%S` is the current directory and `%N` is the process number.  The Shell's
- * own default is `%N> ` alone, which tells a person in a browser nothing they
- * can use: the thing they cannot otherwise discover is where they are.
+ * own default is `%N> ` alone, which leaves out the current directory, and
+ * that is what a person in a browser cannot otherwise discover.
  *
- * The number is KEPT rather than dropped, though there is only ever one
- * session.  It increments per Shell, so it is how a person sees that a
- * reconnect actually got them a new one rather than reattaching to the old --
- * which matters here more than in an ordinary Shell, because a session can be
- * taken over or abandoned underneath them and the number is the only visible
- * difference.
+ * The number is kept rather than dropped, though there is only ever one
+ * session.  It increments per Shell, so it shows whether a reconnect got a new
+ * Shell or reattached to the old one.  That matters here more than in an
+ * ordinary Shell, because a session can be taken over or abandoned underneath
+ * the person and the number is the only visible difference.
  *
  * Sent as Execute()'s command string rather than set on the CLI, because
  * cli_Prompt is a BSTR in a buffer of a size this file does not own, while
@@ -80,43 +79,42 @@
  */
 #define TERM_SHELL_SETUP    "prompt \"%N.%S> \""
 
-/* How long http_term_shutdown() will wait for a Shell to notice end of file.
-   Ten seconds is far longer than the exit path takes and short enough that a
+/* How long http_term_shutdown() waits for a Shell to notice end of file.  Ten
+   seconds is far longer than the exit path takes and short enough that a
    Ctrl-C on the server does not look like a hang.  See where it is used for
-   what happens when it runs out, which is deliberately not "free it anyway". */
+   what happens when it runs out, which is deliberately not a free anyway. */
 #define TERM_STOP_TICKS     500     /* of 1/50 s                            */
 
 /*
  * How many passes of the server's loop a Shell gets to notice its end of file
  * before it is sent another Ctrl-C.
  *
- * Passes and not seconds because that is what this file can count: the loop
+ * Passes and not seconds because that is what this file can count.  The loop
  * ticks at least four times a second and oftener when anything is happening,
- * so twenty is a few seconds of a Shell that has not looked up.  It repeats
- * rather than firing once: a command polling for a break can be between polls
- * when the first one arrives.
+ * so twenty is a few seconds of a Shell that has not answered.  It repeats
+ * rather than firing once, because a command polling for a break can be
+ * between polls when the first one arrives.
  */
 #define TERM_STOP_PASSES    20
 
 /*
- * AND HOW LONG THE PERSON WAITING WAITS.  FIVE SECONDS.
+ * How long the person waiting waits, which is five seconds.
  *
  * A Shell that cannot be made to exit must not cost the machine its terminal.
- * That is not hypothetical: a session ended while `ssh` was at a password
- * prompt left a Shell inside a command that answered neither its end of file
- * nor two Ctrl-Cs, and the terminal was then refused to everybody, for ever,
- * until the machine was restarted.
+ * A session ended while `ssh` was at a password prompt left a Shell inside a
+ * command that answered neither its end of file nor two Ctrl-Cs, and the
+ * terminal was then refused to everybody until the machine was restarted.
  *
- * So after this long the old session is ABANDONED rather than waited for: its
+ * So after this long the old session is abandoned rather than waited for.  Its
  * generation stops being routed (see term_gen), every packet it sends is
  * refused, and the next visitor gets a Shell.  What is left behind is one
- * Process, its stack, and the twenty-four bytes of its runner record -- and
- * it is left behind holding two file handles that fail everything, which is
- * the state most commands do eventually exit from.
+ * Process, its stack, and the twenty-four bytes of its runner record, holding
+ * two file handles that fail everything, which is the state most commands do
+ * eventually exit from.
  *
  * Five seconds because it is the wait a person sees.  A Shell doing nothing
- * exits in well under one; anything still there after five is not going to be
- * talked round by waiting for ten.
+ * exits in well under one, and a Shell still there after five does not exit
+ * after ten either.
  */
 #define TERM_ABANDON_TICKS  250     /* of 1/50 s                            */
 
@@ -152,30 +150,27 @@ static ULONG ring_free(const TermPipe *p) { return p->size - p->count; }
  * ACTION_SCREEN_MODE is what SetMode() sends, and a console is the only kind
  * of handler that answers it: "For CON:, use 1 to go to RAW: mode, 0 for CON:
  * mode" (dos.library/SetMode).  In RAW a console stops echoing and hands over
- * each keystroke as it is typed; in COOKED it echoes, edits the line, and
+ * each keystroke as it is typed.  In COOKED it echoes, edits the line, and
  * gives it up at the Return.
  *
- * WHICH SIDE ECHOES, AND WHY IT IS STILL THE BROWSER
+ * The browser echoes, not the handler.  A console handler echoes because the
+ * person and the handler are on the same machine.  Here they are not, and
+ * every echoed byte would cross a LAN twice before the letter appeared.  So
+ * the echo and the line editing stay in the page, where they already were, and
+ * the mode is sent to the page rather than chosen by a query parameter, so the
+ * page stops echoing at the instant the handler is told to.  That is the
+ * password fix: ssh's getpass() calls SetMode(Input(), 1), this records it,
+ * the page is told `mode raw`, and nothing draws what is typed next.
  *
- *   A console handler echoes because the person and the handler are on the
- *   same machine.  Here they are not: every echoed byte would cross a LAN
- *   twice before the letter appeared, which is what makes a remote shell feel
- *   broken.  So the echo and the line editing stay in the page, exactly where
- *   they already were -- and the mode is now SENT to it rather than chosen by
- *   a query parameter, so the page stops echoing at the instant the handler
- *   is told to.  That is the whole of the password fix: ssh's getpass() calls
- *   SetMode(Input(), 1), this records it, the page is told "mode raw", and
- *   nothing draws what is typed next.
- *
- *   What the handler owns is the DELIVERY rule, which cannot be delegated:
- *   COOKED holds an ACTION_READ until there is a line to answer it with, RAW
- *   answers it with the first byte.  A page that has not caught up with the
- *   mode therefore cannot turn one keystroke into one command line.
+ * What the handler owns is the delivery rule, which cannot be delegated.
+ * COOKED holds an ACTION_READ until there is a line to answer it with, and RAW
+ * answers it with the first byte.  A page that has not caught up with the mode
+ * therefore cannot turn one keystroke into one command line.
  *
  * SetMode() carries no file handle -- dos.library's support.asm sends
  * sendpkt1(port, ACTION_SCREEN_MODE, mode) and nothing else -- so the mode is
  * the session's and not one handle's.  With one Shell and one page that is
- * exactly right; it is the same reason ACTION_WAIT_CHAR below can be answered
+ * right, and it is the same reason ACTION_WAIT_CHAR below can be answered
  * about the input ring without being told which handle is being asked about.
  */
 static UBYTE term_raw;              /* the handler is in RAW mode           */
@@ -193,30 +188,29 @@ static UWORD term_rows = 25;
 /*
  * A read that must be answered whatever the mode says.
  *
- * Set when the handler itself puts bytes in the input ring -- a window bounds
- * report is the only case -- because those bytes are an answer to a program
- * that is waiting for them and no Return is ever coming to release a COOKED
- * read.  Cleared when the ring empties.
+ * Set when the handler itself puts bytes in the input ring, which happens only
+ * for a window bounds report.  Those bytes answer a program that is waiting
+ * for them and no Return is coming to release a COOKED read.  Cleared when the
+ * ring empties.
  */
 static UBYTE term_in_urgent;
 
 /* ------------------------------------------------------------- counting --- */
 
 /*
- * WHAT THE OUTSIDE CANNOT SEE, COUNTED HERE.
+ * What the outside cannot see, counted here.
  *
  * A drill on the far end of the socket can count frames, their sizes and the
- * bytes on the wire perfectly well.  What it cannot see is how many
- * ACTION_WRITE packets the program on this side sent to produce them, and
- * that ratio is the whole question when something is slow: one frame per
- * write means every `position the cursor, emit three characters` costs a
- * packet, a wake, a frame and a round trip, and coalescing is worth doing.
- * Frames far fewer than writes means the coalescing already happens and the
- * time is going somewhere else.
+ * bytes on the wire.  What it cannot see is how many ACTION_WRITE packets the
+ * program on this side sent to produce them, and that ratio is the question
+ * when something is slow.  One frame per write means each cursor move and each
+ * few characters printed costs a packet, a wake, a frame and a round trip, so
+ * coalescing is worth doing.  Frames far fewer than writes means the
+ * coalescing already happens and the time is going somewhere else.
  *
  * Free when nobody asks: four counters incremented on paths that were already
- * running, and a word to read them back.  No printing -- a tool_printf() per
- * packet is what the TRACE does and it changes the thing it measures.
+ * running, and a word to read them back.  No printing, because a tool_printf()
+ * per packet is what the TRACE does and it changes the thing it measures.
  */
 static ULONG term_st_writes;        /* ACTION_WRITE packets answered        */
 static ULONG term_st_wbytes;        /* bytes taken from them                */
@@ -275,11 +269,6 @@ static ULONG ring_get(TermPipe *p, UBYTE *dst, ULONG n)
  * as the handshake, because the child starts running the moment
  * CreateNewProc() returns and a plain global would race it.  The child waits
  * before it looks.
- *
- * Static rather than allocated: nothing is ever freed while the runner might
- * still be reading it, and a record that cannot be freed is one that should
- * not have been taken from the heap.  The archived branch allocated one per
- * command and missing the free cost 576 bytes a command.
  */
 typedef struct
 {
@@ -295,16 +284,16 @@ typedef struct
  * One per session, from the heap, and freed only when its runner has
  * finished with it.
  *
- * It was a single static, on the reasoning that a record which cannot be
- * freed should not be taken from the heap.  That reasoning held while a
- * session could only end by its Shell exiting.  It no longer can: a session
- * whose Shell will not exit is ABANDONED (see TERM_ABANDON_TICKS), and the
- * abandoned runner goes on owning its record -- it writes rn_Done into it
- * whenever it finally returns.  One static shared with the next session would
- * mean the old runner's last act reaps the new session.
+ * It was a single static, because a record that is never freed does not need
+ * the heap.  That held while the only end to a session was its Shell exiting.
+ * A session whose Shell does not exit is now abandoned instead (see
+ * TERM_ABANDON_TICKS), and the abandoned runner goes on owning its record,
+ * writing rn_Done into it whenever it finally returns.  One static shared with
+ * the next session would mean the old runner's last act reaps the new session.
  *
- * Twenty-four bytes, lost only when a Shell never exits at all.  That is the
- * cost of the terminal being recoverable, and it is the right way round.
+ * Twenty-four bytes, lost only when a Shell never exits at all, which is what
+ * a recoverable terminal costs.  The archived branch allocated one per command
+ * and missing the free cost 576 bytes a command.
  */
 static TermRunner *term_runner;
 static UBYTE      term_active;      /* a Shell has been started             */
@@ -325,47 +314,47 @@ static UBYTE      term_abandoned;
 static ULONG      term_stop_at;     /* fiftieths, when stopping began       */
 
 /*
- * IoErr() from the last Shell that would not start, kept HERE and not read
- * back out of the runner record.  The record belongs to the runner and may
- * have been abandoned with it; this is the one field anybody outside wants
- * after the session has ended.
+ * IoErr() from the last Shell that did not start, kept here and not read back
+ * out of the runner record.  The record belongs to the runner and can have
+ * been abandoned with it.  This is the one field anybody outside wants after
+ * the session has ended.
  */
 static LONG       term_err;
 
 /*
- * Whoever is reading or writing our pipes, so http_term_break() has something
- * to signal.  Learned from the packets rather than from a name: a DosPacket
- * arrives with dp_Port naming the SENDER's reply port, and a Process's port
- * has that Process in mp_SigTask, so this is exact where FindTask() on a name
- * dos.library chose would be a guess.
+ * Whoever is reading or writing these pipes, so http_term_break() has
+ * something to signal.  Learned from the packets rather than from a name.  A
+ * DosPacket arrives with dp_Port naming the sender's reply port, and a
+ * Process's port has that Process in mp_SigTask, so this is exact where
+ * FindTask() on a name dos.library chose would be a guess.
  *
- * It is also the RIGHT target rather than merely a findable one.  A Shell runs
- * each command in its own process, so the task that is inside Read() at any
- * moment is the one a person pressing Ctrl-C means.
+ * It is also the right target.  A Shell runs each command in its own process,
+ * so the task that is inside Read() at any moment is the one a person pressing
+ * Ctrl-C means.
  */
 static struct Task *term_shell_task;
 
 /*
- * And the port dos.library NAMED, when it named one.  ACTION_CHANGE_SIGNAL
- * carries it, and it is preferred over the inference above because it is
- * still right while a command is running: dos.library re-sends it around
- * every Execute().
+ * And the port dos.library named, when it named one.  ACTION_CHANGE_SIGNAL
+ * carries it, and it is preferred over the inference above because it is still
+ * right while a command is running.  dos.library re-sends it around every
+ * Execute().
  */
 static struct MsgPort *term_break_port;
 
 /*
- * What Info() calls a console.  The con-handler's own two constants; they are
- * private to it and are in no NDK header, so they are written out here with
- * the bytes they are made of.
+ * What Info() calls a console.  These are the con-handler's own two constants.
+ * They are private to it and are in no NDK header, so they are written out
+ * here with the bytes they are made of.
  */
 #define TERM_DISK_CON     0x434F4E00L     /* 'CON\0' */
 #define TERM_DISK_RAWCON  0x52415700L     /* 'RAW\0' */
 
 /*
- * The IORequest ACTION_DISK_INFO hands out.  Zero throughout, which is the
- * point: io_Unit is NULL and that is the answer.  See the packet for why it
- * has to exist and why it has to stay empty.  Static because it is read by
- * other processes and is never freed.
+ * The IORequest ACTION_DISK_INFO hands out.  Zero throughout, so io_Unit is
+ * NULL and that is the answer.  See the packet for why it has to exist and why
+ * it has to stay empty.  Static because it is read by other processes and is
+ * never freed.
  */
 static struct IOStdReq term_ioreq;
 
@@ -388,30 +377,30 @@ static struct MsgPort *term_port;
  * ...and a third, which is what `*` means.
  *
  * The Shell's two handles are one-way each, because that is how Execute() was
- * given them.  A CONSOLE is not: a program that opens `*` gets ONE handle and
- * both reads and writes it, and programs do -- Ed's default window is a RAW:
- * of its own, and `Ed WINDOW=* file` is how you tell it to use the console it
- * was started from instead.
+ * given them.  A console is not.  A program that opens `*` gets one handle and
+ * both reads and writes it, and programs do: Ed's default window is a RAW: of
+ * its own, and `Ed WINDOW=* file` asks it to use the console it was started
+ * from instead.
  *
- * So a FIND packet gets a handle with this id, and the routing below sends
- * its reads to the input ring and its writes to the output one.  It is the
- * same session; there is nothing else it could be.
+ * So a FIND packet gets a handle with this id, and the routing below sends its
+ * reads to the input ring and its writes to the output one.  It is the same
+ * session, and there is nothing else it can be.
  */
 #define TERM_ID_CON     3
 
 /*
- * ...AND WHICH SESSION IT BELONGS TO.
+ * ...and which session it belongs to.
  *
  * fh_Arg1 carries a generation above the id.  A session that was abandoned
  * rather than reaped -- see TERM_ABANDON_TICKS -- leaves a Shell alive with
- * two handles still naming this port, and those handles must never again
- * reach a ring the NEXT session is using.  The generation is what stops them:
+ * two handles still naming this port, and those handles must never again reach
+ * a ring the next session is using.  The generation is what stops them.
  * term_pipe_of() answers NULL for anything that is not the current session,
  * every packet from the old Shell is refused, and the rings belong to the
  * person now typing.
  *
- * Sixteen bits of it, which wraps after 65536 sessions and is harmless when
- * it does: a handle would have to survive that many to collide.
+ * Sixteen bits of it, which wraps after 65536 sessions and is harmless when it
+ * does, because a handle would have to survive that many to collide.
  */
 static UWORD term_gen = 1;
 
@@ -439,8 +428,8 @@ static TermPipe *term_pipe_of(LONG arg, LONG type)
 }
 
 /*
- * Reply a packet.  Not ReplyPkt(): dp_Port has to name the port the packet
- * comes back to us on, which is ours, and ReplyPkt() stamps it with the
+ * Reply a packet.  Not ReplyPkt(), because dp_Port has to name the port the
+ * packet comes back on, which is this one, and ReplyPkt() stamps it with the
  * current process's pr_MsgPort.  The same reason tcp_handler.c has its own.
  */
 static VOID term_reply(struct DosPacket *pkt, LONG res1, LONG res2)
@@ -456,42 +445,39 @@ static VOID term_reply(struct DosPacket *pkt, LONG res1, LONG res2)
 /* ------------------------------------------------- the write, scanned --- */
 
 /*
- * WHAT A PROGRAM WRITES THAT IS NOT OUTPUT.
+ * What a program writes that is not output.
  *
  *   " q  0   aWSR  WINDOW STATUS REQUEST (private Amiga sequence)
  *     r  4   aWBR  WINDOW BOUNDS REPORT  (private Amiga Read sequence)"
  *                                          -- console.device autodoc
  *
  * That is how an AmigaOS program asks how big its window is, and there is no
- * DOS packet for it: the question goes out through ACTION_WRITE and the answer
- * comes back through ACTION_READ.  Ed sends `CSI SP q` before it draws
- * anything and then sits in `while (rdch() != 0x9B)` -- so an unanswered
- * request is not a wrong size, it is Ed never starting.
+ * DOS packet for it.  The question goes out through ACTION_WRITE and the
+ * answer comes back through ACTION_READ.  Ed sends `CSI SP q` before it draws
+ * anything and then sits in `while (rdch() != 0x9B)`, so an unanswered request
+ * is not a wrong size, it is Ed never starting.
  *
  * So the write stream is scanned.  A CSI sequence is held while it is being
  * assembled and then either swallowed, if it turns out to be one of the three
  * a console consumes, or passed through byte for byte if it is anything else.
  *
- * THE THREE THAT ARE SWALLOWED, AND WHY NOTHING ELSE IS
+ * The three that are swallowed:
  *
- *   q   the window status request; answered into the input ring.
+ *   q   the window status request, answered into the input ring.
  *   {   SET RAW EVENTS.  Ed asks for class 12, IECLASS_SIZEWINDOW, which is
  *       how it hears about a resize while it is running.
  *   }   RESET RAW EVENTS, the other half of the pair.
  *
- *   All three are instructions to a console and mean nothing to a browser.
- *   Everything else -- colours, cursor moves, clears -- is display and goes
- *   straight out, which is the whole reason the page rewrites 0x9B into ESC [
- *   rather than this doing anything about it.
+ * All three are instructions to a console and mean nothing to a browser.
+ * Everything else -- colours, cursor moves, clears -- is display and goes
+ * straight out, which is why the page rewrites 0x9B into ESC [ rather than
+ * this doing anything about it.
  *
- * WHAT IT COSTS THE COMMON CASE
- *
- *   Nothing measurable and, more to the point, nothing VISIBLE.  A byte is
- *   held only while it is inside a sequence, and a sequence ends at its final
- *   byte, so the only way for output to be stranded is for a program to stop
- *   writing in the middle of one.  A newline, a letter, anything below 0x20 --
- *   all of them end the sequence and flush it.  `Echo "*e"` prints ESC and
- *   then LF, and both arrive.
+ * The common case costs nothing measurable and nothing visible.  A byte is
+ * held only while it is inside a sequence, and a sequence ends at its final
+ * byte, so output is stranded only when a program stops writing in the middle
+ * of one.  A newline, a letter and anything below 0x20 all end the sequence
+ * and flush it.  `Echo "*e"` prints ESC and then LF, and both arrive.
  */
 #define TERM_SEQ_MAX    24      /* a runaway parameter list is not a sequence */
 
@@ -522,15 +508,15 @@ static BOOL term_has_line(const TermPipe *p)
 }
 
 /*
- * Whether an ACTION_READ on this pipe can be answered NOW, which is where RAW
- * and COOKED differ.
+ * Whether an ACTION_READ on this pipe can be answered at once, which is where
+ * RAW and COOKED differ.
  *
- * COOKED waits for a Return because that is what a line-mode console does and
- * because it is the guard on the mode changing under a page that has not
- * caught up: a keystroke that arrived while the page still thought it was in
- * RAW is held here rather than handed to the Shell as a command of its own.
- * A full ring releases anyway -- a paste bigger than the ring with no newline
- * in it must not deadlock -- and so does a report the handler wrote itself.
+ * COOKED waits for a Return because that is what a line-mode console does, and
+ * because it guards against the mode changing under a page that has not caught
+ * up.  A keystroke that arrived while the page still thought it was in RAW is
+ * held here rather than handed to the Shell as a command of its own.  A full
+ * ring releases anyway, so that a paste bigger than the ring with no newline
+ * in it cannot deadlock, and so does a report the handler wrote itself.
  */
 static BOOL term_readable(const TermPipe *p)
 {
@@ -575,17 +561,17 @@ static ULONG term_num(UBYTE *dst, ULONG v)
 }
 
 /*
- * Put something of the handler's own into the INPUT ring.
+ * Put something of the handler's own into the input ring.
  *
  * A console's answers to a program come back the way a keystroke does, out of
  * Read(), which is why this goes in beside what was typed rather than out
- * beside what was printed.  term_in_urgent releases it whatever the mode says:
- * no Return is coming for a report, and a COOKED read waiting for one would
+ * beside what was printed.  term_in_urgent releases it whatever the mode says.
+ * No Return is coming for a report, and a COOKED read waiting for one would
  * hold the answer to a question the program is blocked on.
  *
  * Dropped when there is no room.  The ring is a kilobyte and a report is
- * twenty bytes, so "no room" is a ring already full of unread typing, and the
- * program will ask again.
+ * twenty bytes, so no room means a ring already full of unread typing, and the
+ * program asks again.
  */
 static VOID term_inject(const UBYTE *b, ULONG n)
 {
@@ -621,9 +607,9 @@ static VOID term_bounds_report(VOID)
 /*
  * CSI 12;...| -- aIER, an input event report, class 12 IECLASS_SIZEWINDOW.
  *
- * Eight parameters because that is what the sequence has; Ed reads the first
- * and ignores the rest, and a program that reads all eight gets zeroes for
- * the ones that describe a mouse.
+ * Eight parameters because that is what the sequence has.  Ed reads the first
+ * and ignores the rest, and a program that reads all eight gets zeroes for the
+ * ones that describe a mouse.
  */
 static VOID term_resize_event(VOID)
 {
@@ -639,8 +625,8 @@ static VOID term_resize_event(VOID)
     term_inject(b, n);
 }
 
-/* Give up on the held sequence: it is ordinary output after all.  `extra` is
-   the byte that ended it, or NULL.  The caller has made room for both. */
+/* Give up on the held sequence, which is ordinary output after all.  `extra`
+   is the byte that ended it, or NULL.  The caller has made room for both. */
 static VOID term_seq_flush(const UBYTE *extra)
 {
     if (term_seq_n > 0)
@@ -686,8 +672,8 @@ static BOOL term_seq_has(ULONG want)
 
 /*
  * The Shell's output, scanned on its way into the ring.  Returns how many of
- * the caller's bytes were TAKEN, which is not the same as how many reached the
- * ring: a swallowed sequence is taken and never appears.
+ * the caller's bytes were taken, which is not the same as how many reached the
+ * ring, because a swallowed sequence is taken and never appears.
  *
  * See the section header above for what is swallowed and why nothing else is.
  */
@@ -699,9 +685,9 @@ static ULONG term_out_put(const UBYTE *src, ULONG len)
     {
         UBYTE b = src[done];
 
-        /* Room for everything held PLUS this byte, checked before the byte is
+        /* Room for everything held plus this byte, checked before the byte is
            taken.  That is the invariant that lets term_seq_flush() write
-           without checking: a sequence can never end up half in the ring. */
+           without checking, so a sequence can never end up half in the ring. */
         if (ring_free(&term_out) < (ULONG)term_seq_n + 1UL)
             break;
 
@@ -807,15 +793,15 @@ static VOID term_retry(TermPipe *p)
     }
     else                            /* ACTION_WRITE                         */
     {
-        /* Closed FIRST, and not "closed once the ring is full".  This side
+        /* Closed is checked first, and not once the ring is full.  This side
            gives up on a session by closing both pipes, and a Shell that then
-           went on writing successfully into 4 KB nobody will read takes that
-           much longer to notice it should stop. */
+           went on writing successfully into 4 KB nobody reads takes that much
+           longer to stop. */
         if (p->closed)
         {
-            /* Nobody will ever read it.  -1 with a real error, so a command
-               writing into a channel that has gone fails rather than looping
-               on a short write for ever. */
+            /* Nobody reads it now.  -1 with a real error, so a command writing
+               into a channel that has gone fails rather than looping on a
+               short write for ever. */
             p->held = NULL;
             term_reply(pkt, -1, ERROR_INVALID_LOCK);
             return;
@@ -824,8 +810,8 @@ static VOID term_retry(TermPipe *p)
          * Room for a whole held sequence plus a byte, rather than for a byte.
          * term_out_put() holds a control sequence while it assembles it and
          * must be able to give the whole thing back if it turns out to be
-         * ordinary output, so it needs headroom to make progress at all -- and
-         * a write answered with zero bytes taken is a caller that loops.
+         * ordinary output, so it needs that headroom to make progress.  A
+         * write answered with zero bytes taken makes the caller loop.
          */
         else if (ring_free(p) > (ULONG)TERM_SEQ_MAX)
         {
@@ -857,18 +843,18 @@ static VOID term_retry(TermPipe *p)
 /* -------------------------------------------------- ACTION_WAIT_CHAR --- */
 
 /*
- * WaitForChar(), which a console MUST answer honestly.
+ * WaitForChar(), which a console has to answer truthfully.
  *
  *   "If a character is available to be read from 'file' within the time (in
  *   microseconds) indicated by 'timeout', WaitForChar() returns -1 (TRUE)."
  *   -- dos.library/WaitForChar
  *
- * A pipe answered DOSFALSE to every one of these, and got away with it only
- * because nothing that reads a pipe asks.  A console client does: ssh's
- * console reader is `while (!quit) { if (!WaitForChar(h, 100000)) continue;
- * Read(h, &c, 1); }`, and an instant DOSFALSE turns that loop into a spin
- * that eats the machine.  So the packet is PARKED until either a character
- * arrives or the timeout it was given has actually passed.
+ * A pipe answered DOSFALSE to every one of these, which passed only because
+ * nothing that reads a pipe asks.  A console client does.  ssh's console
+ * reader is `while (!quit) { if (!WaitForChar(h, 100000)) continue; Read(h,
+ * &c, 1); }`, and an instant DOSFALSE turns that loop into a spin that eats
+ * the machine.  So the packet is held until either a character arrives or the
+ * timeout it was given has passed.
  *
  * The packet carries no file handle -- dos.library sends sendpkt1(port,
  * ACTION_WAIT_CHAR, timeout) -- so it cannot say which of the two handles it
@@ -882,12 +868,12 @@ static ULONG             term_wait_until;
  * A clock in fiftieths of a second, for the timeout above and nothing else.
  *
  * DateStamp()'s minute-and-tick pair, which counts 0..4319999 and starts again
- * at midnight.  The wrap is handled by remembering where the wait began: a
- * clock reading BEFORE that is midnight having happened, and the wait is
- * answered "no character" one tick early, once a day, on a call whose whole
+ * at midnight.  The wrap is handled by remembering where the wait began.  A
+ * clock reading earlier than that means midnight has happened, and the wait is
+ * answered with no character one tick early, once a day, on a call whose whole
  * contract is a poll.  The alternative is a timer.device request per
- * WaitForChar(), which is a unit and an IORequest for a number that is
- * allowed to be approximate.
+ * WaitForChar(), which is a unit and an IORequest for a number that is allowed
+ * to be approximate.
  */
 static ULONG term_ticks(VOID)
 {
@@ -898,10 +884,10 @@ static ULONG term_ticks(VOID)
     return (ULONG)ds.ds_Minute * 3000UL + (ULONG)ds.ds_Tick;
 }
 
-/* A Read() would return at once: either there is input or there is an end of
+/* A Read() would return at once, because there is either input or an end of
    file, and WaitForChar() reports on both.  The archived pipe answered
-   DOSFALSE at end of file, which is a caller told to wait for a character
-   that is never coming. */
+   DOSFALSE at end of file, which left the caller waiting for a character that
+   was never coming. */
 static BOOL term_char_ready(VOID)
 {
     return (term_readable(&term_in) || term_in.closed || term_in.dosend)
@@ -933,7 +919,7 @@ static VOID term_wait_service(VOID)
     }
 }
 
-/* Input moved or ended: whoever was waiting for it may now go. */
+/* Input moved or ended, so whoever was waiting for it can now go. */
 static VOID term_kick(VOID)
 {
     term_retry(&term_in);
@@ -946,8 +932,8 @@ VOID http_term_trace(BOOL on)
 }
 
 /* What a packet is called, for the trace.  Only the ones a Shell on a pipe
-   actually sends; anything else is printed as its number, which is the thing
-   a person would then look up. */
+   sends.  Anything else is printed as its number, which is what a person then
+   looks up. */
 static const char *term_action(LONG type)
 {
     switch (type)
@@ -975,11 +961,10 @@ VOID http_term_service(VOID)
         return;
 
     /*
-     * What Execute() said, printed from HERE and not from the runner: the
+     * What Execute() said, printed from here and not from the runner.  The
      * runner is another Process and its Output() is the NIL: CreateNewProc
-     * gave it, so anything it printed would go nowhere.  That is the same
-     * mistake pr_CES made one round trip earlier and it is worth only making
-     * once.
+     * gave it, so anything it printed would go nowhere.  pr_CES had the same
+     * fault one round trip earlier.
      */
     if (term_trace && term_active && !term_said_rc &&
         term_runner != NULL && term_runner->rn_Done != 0)
@@ -991,23 +976,23 @@ VOID http_term_service(VOID)
     }
 
     /*
-     * Notice a Shell that has gone, before the packets are looked at.
+     * Notice a Shell that has gone, before the packets are looked at.  Gone is
+     * not the runner returning.
      *
-     * WHAT "GONE" IS, AND WHY IT IS NOT THE RUNNER RETURNING
+     * Execute() can create the Shell and return at once -- the autodoc says it
+     * makes "a new interactive Shell process just like those created with the
+     * NewShell command" -- so the runner publishing rn_Done says nothing about
+     * whether the Shell is still there.  What does say it is the Shell closing
+     * the two handles, which arrives here as ACTION_END on each, and that
+     * answer is the same whichever way Execute() behaved.
      *
-     *   Execute() may create the Shell and return at once -- the autodoc says
-     *   it makes "a new interactive Shell process just like those created with
-     *   the NewShell command" -- so the runner publishing rn_Done says nothing
-     *   about whether the Shell is still there.  What does say it is the Shell
-     *   CLOSING the two handles, which arrives here as ACTION_END on each, and
-     *   that answer is the same whichever way Execute() behaved.
-     *
-     *   The one case rn_Done decides is failure: Execute() returns a BOOLEAN,
-     *   and a false one means no Shell was started at all.  Then nothing will
-     *   ever send an ACTION_END and the session has to end on the flag.
+     * The one case rn_Done decides is failure.  Execute() returns a BOOLEAN,
+     * and a false one means no Shell was started at all.  Then nothing sends
+     * an ACTION_END and the session has to end on the flag.
      */
-    /* While it is going: keep the output ring empty and keep answering, so a
-       Shell that is mid-command can reach the end of file waiting for it. */
+    /* While it is going, keep the output ring empty and keep answering, so a
+       Shell in the middle of a command can reach the end of file waiting for
+       it. */
     if (term_stopping && !term_reaped)
     {
         term_stop_passes++;
@@ -1025,7 +1010,7 @@ VOID http_term_service(VOID)
         /*
          * More Ctrl-Cs, at intervals, rather than one more.  A command polls
          * for a break between other things and can be somewhere else when one
-         * arrives; repeating costs a Signal() every few seconds and catches
+         * arrives.  Repeating costs a Signal() every few seconds and catches
          * the ones a single shot misses.
          */
         if (term_stop_passes % TERM_STOP_PASSES == 0)
@@ -1033,9 +1018,9 @@ VOID http_term_service(VOID)
 
         /*
          * And the deadline.  A Shell that answers neither its end of file nor
-         * any number of Ctrl-Cs is a Shell this program cannot reason about,
-         * and it used to keep the session until it did -- which is to say for
-         * ever, on the machine that hit it.  See TERM_ABANDON_TICKS.
+         * any number of Ctrl-Cs used to keep the session until it answered,
+         * which on the machine that hit it was for ever.  See
+         * TERM_ABANDON_TICKS.
          */
         if (!term_abandoned)
         {
@@ -1058,12 +1043,12 @@ VOID http_term_service(VOID)
                           ? TRUE : FALSE;
         BOOL failed = (done && term_runner->rn_Rc == 0) ? TRUE : FALSE;
         /*
-         * The runner publishes rn_Done only after Execute() has returned AND
+         * The runner publishes rn_Done only after Execute() has returned and
          * both handles have been closed, and Execute() returns only when the
-         * Shell has exited.  So one flag says the whole thing; dosend is kept
-         * beside it because it is the same news arriving by the other road and
-         * a session that ended without the runner noticing would otherwise be
-         * a session nobody reaps.
+         * Shell has exited.  So one flag says the whole thing.  dosend is kept
+         * beside it because it is the same news by another route, and a
+         * session that ended without the runner noticing would otherwise be a
+         * session nobody reaps.
          */
         BOOL ended  = (done ||
                        (term_in.dosend && term_out.dosend)) ? TRUE : FALSE;
@@ -1072,12 +1057,12 @@ VOID http_term_service(VOID)
         {
             /*
              * tool_printf() and not tool_error(), which is the tree's
-             * convention everywhere else and is wrong HERE.  tool_error()
+             * convention everywhere else and is wrong here.  tool_error()
              * writes to pr_CES, and a server started from a Startup-Sequence
              * with `>DH0:stdout.txt` has a pr_CES that is the boot console and
-             * not the redirected stream -- so this line, the one that says why
-             * the terminal did not work, was the one line missing from the
-             * transcript that was supposed to explain it.  Cost a guest run.
+             * not the redirected stream.  So this line, the one that says why
+             * the terminal did not work, was missing from the transcript that
+             * was supposed to explain it.  Cost a guest run.
              */
             term_err = term_runner->rn_Err;
             tool_printf("httpd: no Shell started for the terminal "
@@ -1092,7 +1077,7 @@ VOID http_term_service(VOID)
             term_reaped = 1;
         }
 
-        /* Not `term_active = 0` yet: output the Shell wrote before it exited
+        /* Not `term_active = 0` yet.  Output the Shell wrote before it exited
            is still in the ring and is the answer to the last command.
            http_term_running() is what tells the two apart. */
     }
@@ -1113,10 +1098,9 @@ VOID http_term_service(VOID)
          * live session is a packet per keystroke and per line printed, and an
          * unbounded trace of that is a log nobody reads.
          *
-         * It exists because "the Shell started and then did nothing" and "the
-         * Shell never started" look identical from the far end of a socket,
-         * and the difference between them is exactly which packets arrive
-         * here.
+         * A Shell that started and then did nothing and a Shell that never
+         * started look identical from the far end of a socket, and the
+         * difference between them is which packets arrive here.
          */
         if (term_trace && term_traced < 200)
         {
@@ -1140,10 +1124,10 @@ VOID http_term_service(VOID)
                 break;
 
             /*
-             * A pipe is not a filesystem.  Answered, and never asked: this is
+             * A pipe is not a filesystem.  Answered, and never asked.  This is
              * how 1.3 decided whether a stream was interactive, and V37 and
-             * later read fh_Port instead -- see term_handle(), which is where
-             * the prompt actually comes from.
+             * later read fh_Port instead.  See term_handle(), which is where
+             * the prompt comes from.
              */
             case ACTION_IS_FILESYSTEM:
                 term_reply(pkt, DOSFALSE, 0);
@@ -1155,7 +1139,7 @@ VOID http_term_service(VOID)
 
             /*
              * RAW on, RAW off.  The one packet that makes this a console and
-             * not a pipe: see the mode section at the top for what each half
+             * not a pipe.  See the mode section at the top for what each half
              * of the pair owns, and http_term_mode_word() for how the page is
              * told.
              */
@@ -1169,8 +1153,8 @@ VOID http_term_service(VOID)
                     term_mode_pending = 1;
 
                     /* The rule for answering a parked read has just changed
-                       under it, and there may be a keystroke already waiting
-                       that the old rule was holding. */
+                       under it, and a keystroke the old rule was holding can
+                       already be waiting. */
                     term_kick();
                 }
 
@@ -1183,10 +1167,10 @@ VOID http_term_service(VOID)
              *
              * dos.library sends this when it gives a Shell an interactive
              * input handle (cli_init.c) and again around each Execute()
-             * (execute.c), with dp_Arg2 the MsgPort of the process that should
-             * now receive breaks.  A PORT and not a Task: the target is
+             * (execute.c), with dp_Arg2 the MsgPort of the process that now
+             * receives breaks.  A port and not a Task, so the target is
              * mp_SigTask.  term_shell_task below infers the same thing from
-             * whoever last sent a packet, which is right almost always; this
+             * whoever last sent a packet, which is right almost always.  This
              * is the answer instead of the inference, and it is right while a
              * command is running as well.
              */
@@ -1201,41 +1185,41 @@ VOID http_term_service(VOID)
 
             /*
              * Info(), and a console answers it with two fields that are not
-             * about a disk at all.  What the caller is really asking is "what
-             * window am I in", and CON: answers by OVERLOADING the struct:
-             * id_VolumeNode is a struct Window * (not a BPTR), and id_InUse is
-             * its console.device IORequest, whose io_Unit is the ConUnit a
-             * caller then reads cu_XMax/cu_YMax out of.
+             * about a disk at all.  The caller is asking which window it is
+             * in, and CON: answers by overloading the struct.  id_VolumeNode
+             * is a struct Window * (not a BPTR), and id_InUse is its
+             * console.device IORequest, whose io_Unit is the ConUnit a caller
+             * then reads cu_XMax/cu_YMax out of.
              *
-             * SO EVERY FIELD HERE IS CHOSEN AGAINST WHAT More ACTUALLY DOES
+             * Every field here is chosen against what More does.
              *
              *   DOSTRUE, always.  findWindow() (workbench/utilities/more) ends
              *   with `cleanexit(MSG_MO_NOPACKET)` when this packet answers
-             *   false, having tried twice: DOSFALSE is not a fallback, it is
+             *   false, having tried twice.  DOSFALSE is not a fallback, it is
              *   More refusing to run at all.
              *
-             *   id_InUse is a REAL IORequest of ours and never zero, because
-             *   the same function does
+             *   id_InUse is a real IORequest of this file's and never zero,
+             *   because the same function does
              *
              *       mo->conUnit = ((struct IOStdReq *)id->id_InUse)->io_Unit;
              *
              *   with nothing between it and the dereference.  Zero there is a
              *   read of low memory and then a ConUnit pointer made of whatever
-             *   was in it, which More later WRITES a cursor row through.
+             *   was in it, which More later writes a cursor row through.
              *
              *   io_Unit inside it is NULL, and that is the load-bearing one.
-             *   More reads a NULL conUnit as "not a real console", falls back
-             *   to its own 80x24 dummy, and then TRACKS THE CURSOR ROW ITSELF
-             *   -- `if (!RealConUnit) conUnit->cu_YCP += 1` -- which is what
-             *   makes it paginate here.  Hand it a fabricated ConUnit instead
-             *   and it believes console.device is keeping cu_YCP for it,
-             *   nothing does, and More prints the whole file without a pause.
-             *   The AUX: path is the right path for a console with no
-             *   Intuition window under it, and this is how you ask for it.
+             *   More reads a NULL conUnit as no real console, falls back to
+             *   its own 80x24 dummy, and then tracks the cursor row itself --
+             *   `if (!RealConUnit) conUnit->cu_YCP += 1` -- which is what makes
+             *   it paginate here.  A fabricated ConUnit instead makes More
+             *   believe console.device is keeping cu_YCP for it, nothing does,
+             *   and More prints the whole file without a pause.  The AUX: path
+             *   is the right path for a console with no Intuition window under
+             *   it, and this is how it is asked for.
              *
              *   id_VolumeNode is zero, by More's own description of the case:
              *   "mo->conWindow == 0 if AUX".  Every use of it in More is
-             *   guarded, and every use of it in Ed is guarded EXCEPT one:
+             *   guarded, and every use of it in Ed is guarded except one:
              *
              *       window = (struct Window *)infodata->id_VolumeNode;
              *       if (window->Flags & SIMPLE_REFRESH) fatal(...);
@@ -1246,13 +1230,12 @@ VOID http_term_service(VOID)
              *   given one, and 40.68 does not have bit 6 set in it, so Ed
              *   runs.  Measured, not assumed.
              *
-             *   The obvious alternative -- hand out a zeroed struct Window of
-             *   our own so the read is deterministic -- is WORSE, and that is
-             *   worth writing down because it looks better.  A non-null window
-             *   turns on Ed's mouse handling, which dereferences
-             *   window->RPort->Font on an input event report of class 2; that
-             *   report is bytes, and bytes come from the browser.  Null is the
-             *   value that makes Ed's own guards do their job.
+             *   Handing out a zeroed struct Window instead, so the read is
+             *   deterministic, is worse.  A non-null window turns on Ed's
+             *   mouse handling, which dereferences window->RPort->Font on an
+             *   input event report of class 2.  That report is bytes, and
+             *   bytes come from the browser.  Null is the value that makes
+             *   Ed's own guards work.
              *
              * The size a program gets this way is therefore 80x24 and not the
              * page's.  term_write_scan() is the route that answers with the
@@ -1281,11 +1264,11 @@ VOID http_term_service(VOID)
             }
 
             /*
-             * WaitForChar().  Parked rather than refused; see term_ticks()
+             * WaitForChar().  Held rather than refused.  See term_ticks()
              * above for why an instant DOSFALSE is a spin and not an answer.
              *
-             * A second one while the first is parked is refused, not queued:
-             * the caller is one process and is inside one WaitForChar() at a
+             * A second one while the first is held is refused, not queued.
+             * The caller is one process and is inside one WaitForChar() at a
              * time, the same invariant the held READ relies on.
              */
             case ACTION_WAIT_CHAR:
@@ -1316,15 +1299,16 @@ VOID http_term_service(VOID)
              * dos.library sends the FIND packet to pr_ConsoleTask, and
              * pr_ConsoleTask is this port -- cli_init.c sets it to fh_Type of
              * the Shell's interactive input.  So this is the only way one of
-             * these can arrive here: we are mounted as nothing and named as
-             * nothing, and there is no other path to the port.  The name in
-             * dp_Arg3 is therefore not examined.
+             * these can arrive here.  This handler is mounted as nothing and
+             * named as nothing, and there is no other path to the port.  The
+             * name in dp_Arg3 is therefore not examined.
              *
-             * dp_Arg1 is a FileHandle DOS has already allocated and will free;
-             * filling it in is the whole of the answer.  fh_Type is already
-             * ours.  fh_Port is the interactive flag, and it has to be set for
-             * the same reason it is set on the Shell's own handles -- Ed reads
-             * IsInteractive() before it decides the stream is a console at all.
+             * dp_Arg1 is a FileHandle DOS has already allocated and frees
+             * again, and filling it in is the whole of the answer.  fh_Type is
+             * already this port.  fh_Port is the interactive flag, and it has
+             * to be set for the same reason it is set on the Shell's own
+             * handles.  Ed reads IsInteractive() before it decides the stream
+             * is a console at all.
              */
             case ACTION_FINDINPUT:
             case ACTION_FINDOUTPUT:
@@ -1359,8 +1343,8 @@ VOID http_term_service(VOID)
 
         /*
          * Closing a `*` handle is not the end of the session.  The Shell's own
-         * two handles ARE the session and their ACTION_END is how it ends; a
-         * handle a command opened and gave back is just a handle.
+         * two handles are the session and their ACTION_END is how it ends.  A
+         * handle a command opened and gave back is only a handle.
          */
         if (pkt->dp_Type == ACTION_END &&
             (pkt->dp_Arg1 & 0xFF) == TERM_ID_CON)
@@ -1374,12 +1358,11 @@ VOID http_term_service(VOID)
         {
             /*
              * A handle from a session that has been let go of, and the answer
-             * is chosen to make its Shell STOP rather than merely to be an
-             * error.  End of file on a read is what a Shell exits on; a real
-             * failure on a write is what a command printing into nothing
-             * gives up on; and a close is allowed to succeed, because a Shell
-             * that cannot close its handles is a Shell that cannot finish
-             * exiting.
+             * is chosen to make its Shell stop rather than only to be an
+             * error.  End of file on a read is what a Shell exits on.  A real
+             * failure on a write is what a command printing into nothing gives
+             * up on.  A close is allowed to succeed, because a Shell that
+             * cannot close its handles cannot finish exiting.
              */
             if (pkt->dp_Type == ACTION_READ)
                 term_reply(pkt, 0, 0);
@@ -1390,7 +1373,7 @@ VOID http_term_service(VOID)
             continue;
         }
 
-        /* Read BEFORE term_reply() overwrites dp_Port with ours. */
+        /* Read before term_reply() overwrites dp_Port with this port. */
         if (pkt->dp_Port != NULL)
             term_shell_task = pkt->dp_Port->mp_SigTask;
 
@@ -1400,9 +1383,9 @@ VOID http_term_service(VOID)
             case ACTION_WRITE:
                 /* Nothing asked for is nothing to wait for.  A filesystem
                    answers a zero-length read or write with zero at once, and
-                   parking one instead blocks the caller for ever: term_retry()
-                   below has no way to make progress on it, because "took no
-                   bytes" is how it recognises a full ring.  Dropbear's
+                   holding one instead blocks the caller for ever.  term_retry()
+                   below has no way to make progress on it, because taking no
+                   bytes is how it recognises a full ring.  Dropbear's
                    writechannel_fallback() does exactly this write on every
                    pass where the channel buffer is empty, which is what hung
                    an interactive ssh session the instant the far end spoke. */
@@ -1412,7 +1395,7 @@ VOID http_term_service(VOID)
                     break;
                 }
 
-                /* One held packet per pipe is enough: the Shell is one
+                /* One held packet per pipe is enough, because the Shell is one
                    process and is inside one Read() at a time.  A second is a
                    protocol error on its side and is refused rather than
                    overwriting the first. */
@@ -1443,7 +1426,7 @@ VOID http_term_service(VOID)
         }
     }
 
-    /* Last, because the packets above may be what makes it answerable, and
+    /* Last, because the packets above can be what makes it answerable, and
        because a timeout that has run out has to be noticed on a pass where
        nothing else happened. */
     term_wait_service();
@@ -1477,19 +1460,19 @@ static BPTR term_handle(TermPipe *p, LONG id, BOOL shell_reads)
     fh->fh_Arg1 = term_handle_arg(id);
 
     /*
-     * fh_Port is dos.library's "interactive" flag, and setting it is what
-     * makes the Shell on the far end print a prompt.
+     * fh_Port is dos.library's interactive flag, and setting it is what makes
+     * the Shell on the far end print a prompt.
      *
-     * IsInteractive() in V37 and later reads THIS FIELD.  It does not send
-     * ACTION_IS_FILESYSTEM -- that is the 1.3 way, and the case for it below
-     * is answered but never asked.  Measured: with fh_Port left at zero the
-     * Shell started, decided its input was a script, and read four times
-     * without ever writing a byte.  Four READs and no WRITE in the packet
-     * trace is exactly what "no prompt" looks like from this side.
+     * IsInteractive() in V37 and later reads this field.  It does not send
+     * ACTION_IS_FILESYSTEM, which is the 1.3 way, and the case for it below is
+     * answered but never asked.  Measured: with fh_Port left at zero the Shell
+     * started, decided its input was a script, and read four times without
+     * ever writing a byte.  Four READs and no WRITE in the packet trace is
+     * what a missing prompt looks like from this side.
      *
-     * src/bsdsocket/tcp_handler.c sets it on a TCP: handle for the same
-     * reason and says the same thing: a stream with no length and no seek is
-     * what interactive means to DOS.
+     * src/bsdsocket/tcp_handler.c sets it on a TCP: handle for the same reason
+     * and says the same thing.  A stream with no length and no seek is what
+     * interactive means to DOS.
      */
     fh->fh_Port = term_port;
 
@@ -1509,7 +1492,7 @@ static VOID term_runner_main(VOID)
     TermRunner     *r;
     struct Task    *parent;
 
-    /* The parent is filling tc_UserData; it signals when it is done. */
+    /* The parent is filling tc_UserData and signals when it is done. */
     (VOID)Wait(SIGF_SINGLE);
 
     r = (TermRunner *)me->pr_Task.tc_UserData;
@@ -1517,42 +1500,41 @@ static VOID term_runner_main(VOID)
         return;
 
     /*
-     * THE STACK THE SHELL WILL GIVE ITS COMMANDS, AND THE PROMPT IT WILL PRINT.
+     * The stack the Shell gives its commands, and the prompt it prints.
      *
-     * Both are set on THIS process's CLI and inherited, because that is how a
+     * Both are set on this process's CLI and inherited, because that is how a
      * Shell gets them.  cli_init.c, building the new CLI:
      *
      *     prompt = (char *) BADDR(oclip->cli_Prompt);
      *     if (defstk == 0) defstk = oclip->cli_DefaultStack;
      *
-     * where oclip is the CLI of whoever asked for the Shell -- this process,
-     * which is exactly what NP_Cli below buys.  There is no packet for either
-     * and no tag on Execute(); the caller's CLI is the channel.
+     * where oclip is the CLI of whoever asked for the Shell, which is this
+     * process, and that is what NP_Cli below buys.  There is no packet for
+     * either and no tag on Execute().  The caller's CLI is the channel.
      *
-     * SIXTEEN KILOBYTES, AND WHAT IT COSTS
+     * Sixteen kilobytes, and what it costs:
      *
      *   CLI_INITIAL_STACK is 4096 bytes and that is what a Shell hands a
      *   command by default.  It is not enough for anything that reaches the
-     *   network: a bsdsocket LVO runs NetX Duo on the CALLER's stack --
-     *   ami_netstack_enter() takes the baton and descends from there -- so a
-     *   command that opens a socket carries the whole TCP/IP call depth on
-     *   whatever the Shell gave it.  A person should not have to know that,
-     *   and typing `stack` before every command is knowing it.
+     *   network.  A bsdsocket LVO runs NetX Duo on the caller's stack, since
+     *   ami_netstack_enter() descends from there, so a command that opens a
+     *   socket carries the whole TCP/IP call depth on whatever the Shell gave
+     *   it.  Typing `stack` before every command is the alternative.
      *
-     *   The field is in LONGWORDS, not bytes.  cli_init.h says so:
-     *   `#define CLI_INITIAL_STACK (4096 >> 2)`.  Writing 16384 here would
-     *   ask for 64 KB.
+     *   The field is in longwords, not bytes.  cli_init.h says so:
+     *   `#define CLI_INITIAL_STACK (4096 >> 2)`.  Writing 16384 here would ask
+     *   for 64 KB.
      *
-     *   The cost is per COMMAND and not per session: the Shell allocates this
+     *   The cost is per command and not per session.  The Shell allocates this
      *   when it runs one and gives it back afterwards, and it runs one at a
-     *   time.  So on the 1 MB machine this project cares about it is 16 KB --
-     *   1.6% -- held only while a command is actually running, against 4 KB
-     *   before.  A session sitting at a prompt costs nothing extra at all.
+     *   time.  So on the 1 MB machine this project cares about it is 16 KB, or
+     *   1.6%, held only while a command is running, against 4 KB before.  A
+     *   session sitting at a prompt costs nothing extra.
      *
      *   It is a floor and not a guarantee.  TCP_SESSION_STACK is 16 KB and
      *   BSD_STARTUP_STACK is 64 KB for the same reason, and a command that
-     *   needs more can still say `stack`.  Notably it does NOT size ssh:
-     *   dbclient swaps onto a stack of its own at __wrap_main
+     *   needs more can still say `stack`.  It does not size ssh: dbclient
+     *   swaps onto a stack of its own at __wrap_main
      *   (clients/compat/amiga_argv.c) and leaves this one behind.
      */
     {
@@ -1563,14 +1545,13 @@ static VOID term_runner_main(VOID)
     }
 
     /*
-     * Execute() and NOT SystemTagList(), and that is the whole of this file's
-     * one real discovery.  dos.library's own autodoc for SystemTagList says
-     * it in a single line -- "Similar to Execute(), but does not read commands
-     * from the input filehandle" -- so System() with an empty command line has
-     * nothing to do and returns 0 at once.  Measured exactly that way: the
-     * upgrade completed, the runner published rc 0 within milliseconds, and
-     * the browser saw a session that opened and closed with not one byte in
-     * it.
+     * Execute() and not SystemTagList().  dos.library's own autodoc for
+     * SystemTagList says it in a single line -- "Similar to Execute(), but
+     * does not read commands from the input filehandle" -- so System() with an
+     * empty command line has nothing to do and returns 0 at once.  Measured
+     * that way: the upgrade completed, the runner published rc 0 within
+     * milliseconds, and the browser saw a session that opened and closed with
+     * not one byte in it.
      *
      * Execute()'s contract is the one this needs: "If the input file handle is
      * nonzero then after the (possibly empty) commandString is performed
@@ -1579,19 +1560,18 @@ static VOID term_runner_main(VOID)
      * put a Shell on a serial port, and this is the same thing with a handler
      * where the port would be.
      *
-     * The string is no longer empty -- it is TERM_SHELL_SETUP, which sets the
-     * prompt -- and the same sentence is what says that is safe: the command
-     * is performed FIRST and the handle is read afterwards, so the Shell is
-     * still the interactive one and the person still gets every line they
-     * type.  "(possibly empty)" is the parenthesis that makes it a choice.
+     * The string is no longer empty.  It is TERM_SHELL_SETUP, which sets the
+     * prompt, and the same sentence is what says that is safe.  The command is
+     * performed first and the handle is read afterwards, so the Shell is still
+     * the interactive one and every line typed still arrives.  "(possibly
+     * empty)" is the parenthesis that makes it a choice.
      *
-     * What it costs is the tags: Execute() creates the Shell process itself,
+     * What it costs is the tags.  Execute() creates the Shell process itself,
      * so there is no NP_StackSize to give it and no NP_Name to find it by.
-     * The stack the Shell gives its commands is the system default and a
-     * person who needs more types `stack 65536`, exactly as they would in any
-     * other Shell.  The name is not needed either -- see term_shell_task,
-     * which learns the Shell's Task from the packets it sends rather than by
-     * guessing what dos.library called it.
+     * The stack the Shell gives its commands is the system default, and
+     * `stack 65536` changes it as in any other Shell.  The name is not needed
+     * either.  See term_shell_task, which learns the Shell's Task from the
+     * packets it sends rather than by guessing what dos.library called it.
      */
     r->rn_Rc = (LONG)Execute((CONST_STRPTR)TERM_SHELL_SETUP,
                              r->rn_In, r->rn_Out);
@@ -1600,23 +1580,23 @@ static VOID term_runner_main(VOID)
         r->rn_Err = IoErr();
 
     /*
-     * BOTH handles, always, and this is where the archived branch was right
-     * and a rewrite of it was wrong.
+     * Both handles, always, which is what the archived branch did and a
+     * rewrite of it did not.
      *
      * The autodoc leaves it open -- Execute() "may also be used to create a
      * new interactive Shell process just like those created with the NewShell
      * command", which would return at once and leave the handles to the
      * Shell -- so the first version of this waited for the Shell to close them
      * and never closed them here.  Measured, on the guest, with the packet
-     * trace: Execute() returns only when the Shell has EXITED, and that Shell
+     * trace: Execute() returns only when the Shell has exited, and that Shell
      * does not close the handles it was given.  No ACTION_END ever arrived,
      * the session was never reaped, and every upgrade after the first was
-     * answered 503 -- 196 of them in one run.
+     * answered 503, 196 of them in one run.
      *
      * These two closes are the session's end of file in both directions, and
-     * they are answered by the SERVER's process: Close() on a handle whose
-     * fh_Type is our port sends ACTION_END there and waits, the event loop
-     * services it, and this Process wakes.  That is the shape the archived
+     * the server's process answers them.  Close() on a handle whose fh_Type is
+     * this port sends ACTION_END there and waits, the event loop services it,
+     * and this Process wakes.  That is the shape the archived
      * amiga_dropbear.c had and the reason it had it.
      */
     Close(r->rn_In);
@@ -1681,7 +1661,7 @@ VOID http_term_announce(const char *root, const char *dotted, UWORD port,
         n++;
     }
 
-    /* "DH0:" already ends in its separator; "DH0:Work" does not, and the
+    /* "DH0:" already ends in its separator and "DH0:Work" does not.  The
        caller has taken any trailing slash off already. */
     if (n > 0UL && probe[n - 1] != ':' && n + 1UL < sizeof(probe))
         probe[n++] = '/';
@@ -1710,10 +1690,9 @@ BOOL http_term_available(VOID)
     if (term_port == NULL)
         return FALSE;
 
-    /* Abandoned counts as available.  The old Shell is still alive somewhere,
-       but it is no longer this terminal's: its handles route nowhere, and the
-       person asking is entitled to a Shell rather than to somebody else's
-       accident.  See TERM_ABANDON_TICKS. */
+    /* Abandoned counts as available.  The old Shell is still alive somewhere
+       and is no longer this terminal's, because its handles route nowhere.
+       See TERM_ABANDON_TICKS. */
     return (!term_active || term_abandoned) ? TRUE : FALSE;
 }
 
@@ -1724,7 +1703,7 @@ BOOL http_term_running(VOID)
 
     /* Still running, or finished with output nobody has read yet.  A session
        that ends with the last line of `list` still in the ring must not be
-       reported as over: that line is the answer. */
+       reported as over, because that line is the answer. */
     if (!term_reaped)
         return TRUE;
 
@@ -1745,9 +1724,9 @@ BOOL http_term_start(VOID)
      * Cut the last session loose, if it is still there.
      *
      * The generation moves first, so nothing the old Shell sends from here on
-     * finds a ring.  Then anything it had PARKED is answered, because a packet
-     * held on a pipe that no longer belongs to it is a process asleep for
-     * ever: a read gets end of file and a write gets an error, which between
+     * finds a ring.  Then anything it had held is answered, because a packet
+     * held on a pipe that no longer belongs to it leaves a process asleep for
+     * ever.  A read gets end of file and a write gets an error, which between
      * them are what makes most commands give up.
      */
     if (term_active)
@@ -1805,10 +1784,10 @@ BOOL http_term_start(VOID)
     }
 
     /*
-     * The last session's record.  Freed when its runner has finished with it;
-     * DISOWNED when it has not, because an abandoned runner goes on writing
-     * rn_Done into it whenever it eventually returns.  Freeing that one would
-     * be a write into whatever is allocated next.
+     * The last session's record.  Freed when its runner has finished with it,
+     * and disowned when it has not, because an abandoned runner goes on
+     * writing rn_Done into it whenever it returns.  Freeing that one would be
+     * a write into whatever is allocated next.
      */
     if (term_runner != NULL)
     {
@@ -1834,16 +1813,16 @@ BOOL http_term_start(VOID)
     term_runner->rn_Done   = 0;
 
     /*
-     * NP_Cli, and it is not decoration.  Execute() asks the calling process
-     * for its CLI -- that is where the Shell it creates inherits its command
-     * paths and its idea of what a command is from -- and CreateNewProc()
-     * makes a process with pr_CLI NULL unless told otherwise.  Without it
-     * Execute() returned FALSE with nothing else wrong, which reads from
-     * outside as a session that opens and closes.
+     * NP_Cli is required.  Execute() asks the calling process for its CLI,
+     * which is where the Shell it creates inherits its command paths and its
+     * idea of what a command is, and CreateNewProc() makes a process with
+     * pr_CLI NULL unless told otherwise.  Without it, Execute() returned FALSE
+     * with nothing else wrong, which reads from outside as a session that
+     * opens and closes.
      *
      * SystemTagList() did not need it because it builds the CLI itself, which
-     * is exactly why the first version of this file appeared to get further
-     * than it did.
+     * is why the first version of this file appeared to get further than it
+     * did.
      */
     tags[0].ti_Tag = NP_Entry;     tags[0].ti_Data = (ULONG)term_runner_main;
     tags[1].ti_Tag = NP_Name;      tags[1].ti_Data = (ULONG)"httpd terminal runner";
@@ -1861,7 +1840,7 @@ BOOL http_term_start(VOID)
         return FALSE;
     }
 
-    /* The runner is parked in Wait(SIGF_SINGLE) until this pair happens. */
+    /* The runner is in Wait(SIGF_SINGLE) until this pair happens. */
     proc->pr_Task.tc_UserData = (APTR)term_runner;
     Signal((struct Task *)proc, SIGF_SINGLE);
 
@@ -1877,9 +1856,9 @@ BOOL http_term_start(VOID)
 
     /*
      * A session begins COOKED, which is what a Shell wants, and the page is
-     * told so rather than left to assume it: a page that reconnects into a
-     * session it did not open has no other way to know, and the assumption is
-     * the one that leaks a password.
+     * told so rather than left to assume it.  A page that reconnects into a
+     * session it did not open has no other way to know, and a wrong assumption
+     * leaks a password.
      */
     term_raw          = 0;
     term_mode_pending = 1;
@@ -1891,12 +1870,11 @@ BOOL http_term_start(VOID)
     term_seq_esc      = 0;
     term_want_resize  = 0;
 
-    /* NOT term_wait_pkt.  It must already be NULL -- ending a session closes
-       the input, which makes every parked WaitForChar() answerable -- and
-       clearing the pointer would strand the process waiting on one rather
-       than fix anything.  Left alone, a stray one is answered on its own
-       timeout, which is the right answer to a question about a session that
-       has gone. */
+    /* Not term_wait_pkt.  It is already NULL, because ending a session closes
+       the input and that makes every held WaitForChar() answerable, and
+       clearing the pointer would strand the process waiting on one.  Left
+       alone, a stray one is answered on its own timeout, which is the right
+       answer to a question about a session that has gone. */
 
     return TRUE;
 }
@@ -1909,9 +1887,9 @@ BOOL http_term_raw(VOID)
 /*
  * The mode, for the page, when the page has not been told it yet.
  *
- * A peek and not a take: the caller has to be able to ask whether there is
- * anything to send BEFORE it has a buffer to put it in -- the same reason
- * http_term_pending() exists -- and http_term_mode_sent() is the take.
+ * A peek and not a take.  The caller has to be able to ask whether there is
+ * anything to send before it has a buffer to put it in, the same reason
+ * http_term_pending() exists.  http_term_mode_sent() is the take.
  */
 const char *http_term_mode_word(VOID)
 {
@@ -1929,9 +1907,9 @@ VOID http_term_mode_sent(VOID)
 /*
  * The counters, as a word, when somebody has asked for them.
  *
- * Same peek-then-take shape as the mode word and for the same reason: the
- * caller decides whether to want the socket writable before it has anywhere
- * to put the frame.
+ * Same peek-then-take shape as the mode word and for the same reason.  The
+ * caller decides whether to want the socket writable before it has anywhere to
+ * put the frame.
  */
 static char term_st_buf[96];
 
@@ -1966,14 +1944,14 @@ VOID http_term_stats_sent(VOID)
 }
 
 /*
- * The page's window, as the page measures it.  Kept rather than acted on:
- * nothing on this side has a window, and the only thing that ever reads these
- * is a program that asks -- see term_write_scan().
+ * The page's window, as the page measures it.  Kept rather than acted on.
+ * Nothing on this side has a window, and the only thing that reads these is a
+ * program that asks.  See term_write_scan().
  */
 VOID http_term_resize(UWORD cols, UWORD rows)
 {
-    /* A terminal component mid-layout reports zero, and a program told it has
-       no columns divides by it.  Nonsense is dropped rather than stored. */
+    /* A terminal component still laying out reports zero, and a program told
+       it has no columns divides by it.  Dropped rather than stored. */
     if (cols == 0 || rows == 0)
         return;
 
@@ -1984,11 +1962,10 @@ VOID http_term_resize(UWORD cols, UWORD rows)
     term_rows = rows;
 
     /*
-     * And tell the program, if it asked to be told.  A console does not push
-     * this at anybody: a resize is delivered as an input event ONLY to a
-     * program that turned that event class on with `CSI 12 {`, and Ed is the
-     * program that does.  Sending it unasked would put bytes in front of a
-     * Shell that would read them as a command.
+     * And tell the program, if it asked to be told.  A console sends a resize
+     * as an input event only to a program that turned that event class on with
+     * `CSI 12 {`, and Ed is the program that does.  Sending it unasked would
+     * put bytes in front of a Shell that would read them as a command.
      */
     if (term_active && term_want_resize)
         term_resize_event();
@@ -2001,8 +1978,8 @@ LONG http_term_write(const UBYTE *data, LONG len)
     if (!term_active || len <= 0 || term_in.closed)
         return 0;
 
-    /* The Shell has closed its stdin: it is on its way out and nothing more
-       will be read.  Report the bytes taken rather than stalling; a session
+    /* The Shell has closed its stdin, so it is on its way out and nothing more
+       is read.  Report the bytes taken rather than stalling, because a session
        with data pending for ever never closes. */
     if (term_in.dosend)
         return len;
@@ -2045,7 +2022,7 @@ VOID http_term_eof(VOID)
 
     /* A Shell asleep on this pipe has to be woken, or it waits for a reply
        that is never coming and the runner never returns.  So does one asleep
-       in WaitForChar(): end of file is a character's worth of news. */
+       in WaitForChar(), because end of file is what it reports on too. */
     term_kick();
 }
 
@@ -2056,7 +2033,7 @@ VOID http_term_break(VOID)
     if (!term_active)
         return;
 
-    /* What dos.library named, if it named one: ACTION_CHANGE_SIGNAL is the
+    /* What dos.library named, if it named one.  ACTION_CHANGE_SIGNAL is the
        answer where the packet sender is the inference. */
     if (term_break_port != NULL && term_break_port->mp_SigTask != NULL)
         target = term_break_port->mp_SigTask;
@@ -2080,23 +2057,18 @@ LONG http_term_err(VOID)
 /*
  * End the session.
  *
- * END OF FILE, WHICH IS WHAT THE AUTODOC SAYS
+ * Execute()'s contract names the ending as well as the beginning.  With a
+ * non-zero input handle, "subsequent input is read from the specified input
+ * file handle until end of that file is reached".  So closing this side of the
+ * input pipe is the documented way for the Shell to finish, and a pipe can
+ * report end of file where the console the same autodoc talks about never can.
  *
- *   Execute()'s contract names the ending as well as the beginning: with a
- *   non-zero input handle, "subsequent input is read from the specified input
- *   file handle UNTIL END OF THAT FILE IS REACHED".  So closing this side of
- *   the input pipe is the documented way for the Shell to finish, and a pipe
- *   can report end of file where the console the same autodoc talks about
- *   never can.
+ * Ctrl-C first, because end of file is only seen by a Shell that is asking for
+ * a line, and a Shell inside a command is not.  The task to signal is whoever
+ * last sent a packet, which is the process a person pressing Ctrl-C means.
  *
- *   Ctrl-C first, because end of file is only seen by a Shell that is asking
- *   for a line, and a Shell inside a command is not.  The task to signal is
- *   whoever last sent us a packet, which is exactly the process a person
- *   pressing Ctrl-C means.
- *
- *   `endcli` was tried here and is worse for a reason worth recording: it is a
- *   COMMAND, so it needs C:EndCLI to exist on the machine.  A mechanism that
- *   depends on what is installed is not a mechanism.
+ * `endcli` was tried here and is worse.  It is a command, so it needs C:EndCLI
+ * to exist on the machine, and this must not depend on what is installed.
  */
 VOID http_term_stop(VOID)
 {
@@ -2115,7 +2087,7 @@ VOID http_term_stop(VOID)
 
     /*
      * Whatever the Shell had left to say has nobody to say it to.  Discarding
-     * it rather than holding it also unblocks a Shell parked in Write(), which
+     * it rather than holding it also unblocks a Shell asleep in Write(), which
      * is a Shell that cannot get as far as reading its end of file.
      */
     term_out.count = 0;
@@ -2143,9 +2115,10 @@ VOID http_term_shutdown(VOID)
 
         /*
          * The runner still holds two FileHandles that name this process's
-         * port, and the Shell may still be inside a command.  Keep answering
-         * packets until it has gone, and keep draining the output ring: a
-         * Shell blocked in Write() cannot notice that its input has ended.
+         * port, and the Shell can still be inside a command.  Keep answering
+         * packets until it has gone, and keep draining the output ring,
+         * because a Shell blocked in Write() cannot notice that its input has
+         * ended.
          */
         while (!term_reaped && waited < TERM_STOP_TICKS)
         {
@@ -2191,12 +2164,12 @@ VOID http_term_shutdown(VOID)
  *                                                     no longer HTTP
  *
  * See httpterm.h for why this is here and not in httpd.c.  Everything in this
- * section is about ONE upgraded socket; the Shell above it is the module's
+ * section is about one upgraded socket.  The Shell above it is the module's
  * own and is shared, because there is one of it.
  */
 
 /*
- * Queue one control frame.  There is room for exactly one: a pong and a close
+ * Queue one control frame.  There is room for exactly one.  A pong and a close
  * never both need to be in flight, and a client that pings faster than the LAN
  * drains is answered on the ping it sent last, which is the only one it is
  * still waiting for.
@@ -2255,8 +2228,8 @@ static const char *sock_after(const char *s, const char *word)
     return s;
 }
 
-/* One unsigned number, and where it ended.  No sign, no overflow: the caller
-   is a window dimension and anything four digits long is already nonsense. */
+/* One unsigned number, and where it ended.  No sign and no overflow, because
+   the caller is a window dimension and five digits is already out of range. */
 static const char *sock_number(const char *s, UWORD *out)
 {
     ULONG v = 0;
@@ -2280,8 +2253,8 @@ static const char *sock_number(const char *s, UWORD *out)
 /*
  * One text frame from the page.  See httpterm.h for the vocabulary.
  *
- * Anything unrecognised is IGNORED and not an error, which is what makes the
- * channel extensible in both directions: the word a newer page sends is a
+ * Anything unrecognised is ignored and not an error, which is what makes the
+ * channel extensible in both directions.  The word a newer page sends is a
  * word an older server can afford not to know.
  */
 static VOID sock_word(const char *w)
@@ -2304,7 +2277,7 @@ static VOID sock_word(const char *w)
      * `stats` and `stats reset`.  Instrumentation, and it stays because the
      * question it answers -- how many ACTION_WRITEs became how many frames --
      * cannot be answered from the far end of the socket, and is the first
-     * question to ask whenever this feels slow.
+     * question to ask when this is slow.
      */
     if (sock_after(w, "stats") != NULL)
     {
@@ -2341,11 +2314,10 @@ static VOID sock_word(const char *w)
 }
 
 /*
- * What arrived.  Keystrokes are HELD rather than written straight to the
- * Shell, because the Shell may not be reading and a decoder's sink has nowhere
- * to refuse bytes to.  The socket is not read again until the hold is empty,
- * which is what turns "the Shell is busy" into TCP back pressure instead of
- * lost input.
+ * What arrived.  Keystrokes are held rather than written straight to the
+ * Shell, because the Shell can be not reading and a decoder's sink has no way
+ * to refuse bytes.  The socket is not read again until the hold is empty,
+ * which turns a busy Shell into TCP back pressure instead of lost input.
  */
 static VOID sock_sink(void *ctx, HttpWsEvent ev, const UBYTE *data,
                       long len, int final)
@@ -2364,19 +2336,19 @@ static VOID sock_sink(void *ctx, HttpWsEvent ev, const UBYTE *data,
             break;
 
         /*
-         * Text is the OTHER channel: a word, and what it asks for is something
-         * that is not a keystroke.
+         * Text is the other channel.  It carries a word, and what the word
+         * asks for is not a keystroke.
          *
          * Ctrl-C on an Amiga is a signal and not a byte -- a console handler
          * turns the key into SIGBREAKF_CTRL_C and the command polls for it --
          * so there is no in-band way to send one down a pipe.  Stealing 0x03
          * out of the input stream would have worked and would have made that
-         * byte untypeable for ever; a second opcode costs nothing and takes
+         * byte untypeable for ever.  A second opcode costs nothing and takes
          * nothing away.  The page sends keystrokes as binary and never as
          * text, so the two cannot be confused.
          *
          * See httpterm.h for the whole vocabulary, both directions.  It grows
-         * by adding words: a client that only knows `break` and `eof` still
+         * by adding words.  A client that only knows `break` and `eof` still
          * works, and a server that does not know `size` ignores it.
          */
         case HTTP_WS_EV_TEXT:
@@ -2404,8 +2376,8 @@ static VOID sock_sink(void *ctx, HttpWsEvent ev, const UBYTE *data,
             break;
 
         case HTTP_WS_EV_CLOSE:
-            /* RFC 6455 5.5.1: answer with a close of our own and then stop.
-               The code is echoed, which is what a client that sent 1000
+            /* RFC 6455 5.5.1: answer with a close of this side's own and then
+               stop.  The code is echoed, which is what a client that sent 1000
                expects to see before it lets go of the socket. */
             if (!t->closing)
             {
@@ -2423,8 +2395,8 @@ static VOID sock_sink(void *ctx, HttpWsEvent ev, const UBYTE *data,
     }
 }
 
-/* Move what was typed into the Shell.  Short writes are normal: the Shell's
-   ring is small and a paste is bigger than one command line. */
+/* Move what was typed into the Shell.  Short writes are normal, because the
+   Shell's ring is small and a paste is bigger than one command line. */
 static VOID sock_feed_shell(HttpTermSock *t)
 {
     while (t->pend_at < t->pend_n)
@@ -2491,8 +2463,8 @@ BOOL http_term_sock_read(HttpTermSock *t, ULONG now)
     sock_feed_shell(t);
 
     /* Not read at all while the Shell has not taken what came last.  This is
-       the whole of the flow control in this direction and it is deliberate:
-       the alternative is a buffer that grows with whatever a browser pastes. */
+       the whole of the flow control in this direction, and the alternative is
+       a buffer that grows with whatever a browser pastes. */
     if (t->pend_at < t->pend_n)
         return TRUE;
 
@@ -2516,7 +2488,8 @@ BOOL http_term_sock_read(HttpTermSock *t, ULONG now)
     if (t->in.failed != 0)
     {
         /* The framing is lost and cannot be resynchronised.  Say why in a
-           close frame and stop reading; anything after it is not a frame. */
+           close frame and stop reading, because anything after it is not a
+           frame. */
         sock_close(t, (UWORD)t->in.failed);
         t->pend_n  = 0;
         t->pend_at = 0;
@@ -2577,14 +2550,13 @@ BOOL http_term_sock_write(HttpTermSock *t, ULONG now)
             return FALSE;
 
         /*
-         * The mode, AHEAD of the Shell's output and not behind it.
+         * The mode, ahead of the Shell's output and not behind it.
          *
-         * Both orders are defensible and only one of them is safe.  RAW goes
-         * on because a program is about to ask for a secret, and the page must
-         * have stopped echoing before the person can answer -- so the word
+         * RAW goes on because a program is about to ask for a secret, and the
+         * page has to stop echoing before the person can answer, so the word
          * overtakes whatever prompt is still in the ring rather than queueing
-         * behind it.  The cost is that the prompt may arrive a frame after the
-         * page went quiet, which nobody can see; the cost of the other order
+         * behind it.  The cost is that the prompt can arrive a frame after the
+         * page went quiet, which nobody can see.  The cost of the other order
          * is the password.
          */
         {
@@ -2627,10 +2599,10 @@ BOOL http_term_sock_write(HttpTermSock *t, ULONG now)
         }
 
         /*
-         * The Shell's output, framed IN PLACE.  Read into the buffer past the
-         * longest header there is and then write the header BACKWARDS from
-         * there, so the frame is contiguous and nothing is copied twice: the
-         * send cursor simply starts wherever the header turned out to begin.
+         * The Shell's output, framed in place.  Read into the buffer past the
+         * longest header there is, then write the header backwards from there,
+         * so the frame is contiguous and nothing is copied twice.  The send
+         * cursor starts wherever the header turned out to begin.
          */
         {
             LONG n = http_term_read(&t->out[10], (LONG)(t->out_size - 10UL));
@@ -2657,7 +2629,7 @@ BOOL http_term_sock_write(HttpTermSock *t, ULONG now)
 
         /*
          * Nothing left to send.  If the Shell has gone too, so has the
-         * session: the close is sent here rather than when it exited, so the
+         * session.  The close is sent here rather than when it exited, so the
          * last line it printed is on the wire ahead of it.
          */
         if (!http_term_running())
@@ -2673,8 +2645,9 @@ BOOL http_term_sock_write(HttpTermSock *t, ULONG now)
 BOOL http_term_sock_stale(const HttpTermSock *t, ULONG now, ULONG timeout)
 {
     /* A ping has been out unanswered for its half of the budget.  Anything at
-       all from the peer clears t->pinged, so this is not "quiet" -- it is
-       "asked, and did not answer".  See http_ws_live_stale(). */
+       all from the peer clears t->pinged, so this reports a peer that was
+       asked and did not answer, not a peer that is quiet.  See
+       http_ws_live_stale(). */
     return (BOOL)(http_ws_live_stale(t->progress, (int)t->pinged, now, timeout)
                       ? TRUE : FALSE);
 }

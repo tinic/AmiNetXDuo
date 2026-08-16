@@ -7,15 +7,15 @@
  *             library answers AF_UNSPEC and the selection rules pick, so on a
  *             dual stack there is otherwise no way to ask for the other one.
  *
- * Most of the stream is data; 0xFF (IAC) introduces two- and three-byte
+ * Most of the stream is data. 0xFF (IAC) introduces two- and three-byte
  * commands that must be stripped and answered before the user sees them.
  *
  * An option is only in effect once both ends agree, and a refusal is a valid
  * answer.  This client accepts two options and refuses the rest:
  *
- *   ECHO (1)                 the server may echo for us; local echo then
+ *   ECHO (1)                 the server can echo for us, and local echo then
  *                            goes off
- *   SUPPRESS-GO-AHEAD (3)    both directions; puts a Unix server into
+ *   SUPPRESS-GO-AHEAD (3)    both directions, and puts a Unix server into
  *                            character-at-a-time mode
  *
  * TERMINAL-TYPE, NAWS, LINEMODE, environment passing and the rest get
@@ -103,7 +103,7 @@ static UBYTE tn_staged[TN_CHUNK * 2];   /* IAC and CR both double a byte */
 static UBYTE tn_clean[TN_CHUNK + 1];
 
 /*
- * The negotiated state, both halves.  "him" is what the far end may do, "us"
+ * The negotiated state, both halves.  "him" is what the far end can do, "us"
  * is what we have promised to do.  TRUE means the option is on.
  */
 static UBYTE tn_him[256];
@@ -201,14 +201,14 @@ static VOID tn_reply(TnState *st, UBYTE verb, UBYTE opt)
  * for it": RFC 854's loop-prevention rule ("do not reply if the reply would
  * not change the state") taken literally means a client that refuses an
  * option never answers at all, and a server waiting for that answer hangs.
- * So the first request always gets a reply; a repeat of one already answered
+ * So the first request always gets a reply. A repeat of one already answered
  * does not.
  */
 static UBYTE tn_him_told[256];
 static UBYTE tn_us_told[256];
 
 /* The far end says it WILL do <opt>.  ECHO and SUPPRESS-GO-AHEAD cost us
-   nothing and are accepted; the rest are refused. */
+   nothing and are accepted. The rest are refused. */
 static VOID tn_recv_will(TnState *st, UBYTE opt)
 {
     BOOL accept = (BOOL)(opt == TNOPT_ECHO || opt == TNOPT_SGA);
@@ -406,7 +406,7 @@ static LONG tn_demux(TnState *st, const UBYTE *buf, LONG len)
             case TN_SAW_SB:
                 /*
                  * A subnegotiation, for an option we cannot have agreed to.
-                 * Swallow it to IAC SE rather than guess at its length; a
+                 * Swallow it to IAC SE rather than guess at its length. A
                  * wrong byte count would put option bytes on the screen.
                  */
                 if (c == TN_IAC)
@@ -657,14 +657,14 @@ int main(int argc, char **argv)
             }
 
             /*
-             * End of input is not the end of the session.  Half-closing here
-             * shutdown(SHUT_WR), right for nc, breaks telnet, because
+             * End of input is not the end of the session.  A shutdown(SHUT_WR)
+             * here, right for nc, breaks telnet, because
              * negotiation is still going on: the server's WILL ECHO can
              * arrive after the last line of a script, and the DO ECHO that
              * answers it then fails with EPIPE on a write half already given
              * away.  Measured: every option reply after the first was lost.
              *
-             * So a script that has run out simply stops typing.  The session
+             * So a script that has run out stops typing.  The session
              * ends when the server closes it, at Ctrl-], or at Ctrl-C.
              */
         }

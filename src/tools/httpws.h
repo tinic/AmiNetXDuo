@@ -6,37 +6,31 @@
  * splitting it is what lets a host test compile it.  httpd.c reaches
  * proto/dos.h and tx_api.h and neither builds on a host.
  *
- * WHY A DECODER AND NOT A PARSER
+ * A decoder rather than a parser, because a frame boundary falls wherever TCP
+ * put it.  The server reads 512 bytes at a time into a buffer it shares with
+ * eleven other methods, so a two-byte frame header can arrive as two reads a
+ * second apart and a paste of a kilobyte arrives as three frames in one read.
+ * Everything the decoder is in the middle of therefore lives in HttpWsIn, and
+ * http_ws_feed() takes whatever there is and says how much of it belonged to
+ * the stream.
  *
- *   A frame boundary falls wherever TCP put it.  The server reads 512 bytes
- *   at a time into a buffer it shares with eleven other methods, so a two-byte
- *   frame header can arrive as two reads a second apart and a paste of a
- *   kilobyte arrives as three frames in one read.  Everything the decoder is
- *   in the middle of therefore lives in HttpWsIn, and http_ws_feed() takes
- *   whatever there is and says how much of it belonged to the stream.
+ * Masking is not optional.  RFC 6455 5.1: every frame from a client is masked,
+ * and a server that receives one that is not MUST fail the connection.  The
+ * mask stops a hostile page from making a browser emit bytes that a
+ * transparent proxy would read as a second HTTP request, which is the same
+ * cache-poisoning shape httpframe.c exists to prevent on the other side.  So
+ * an unmasked frame here is 1002 and the connection ends, never decoded.
  *
- * MASKING IS NOT OPTIONAL
+ * No extensions: RSV1..3 must be zero, so there is no permessage-deflate and
+ * nothing to negotiate.  On a 68020 the compressor would cost more than the
+ * LAN it saves, and an extension that is not implemented must be refused
+ * rather than ignored, because ignoring one produces frames whose payload is
+ * not what it says it is.
  *
- *   RFC 6455 5.1: every frame from a client is masked, and a server that
- *   receives one that is not MUST fail the connection.  This is not a
- *   politeness -- the mask is what stops a hostile page from making a browser
- *   emit bytes that a transparent proxy would read as a second HTTP request,
- *   which is the same cache-poisoning shape httpframe.c exists to prevent on
- *   the other side.  So an unmasked frame here is 1002 and the connection
- *   ends; it is never decoded "anyway".
- *
- * WHAT IT DOES NOT DO
- *
- *   No extensions: RSV1..3 must be zero, so there is no permessage-deflate
- *   and nothing to negotiate.  On a 68020 the compressor would cost more than
- *   the LAN it saves, and an extension that is not implemented must be refused
- *   rather than ignored, because ignoring one produces frames whose payload is
- *   not what it says it is.
- *
- *   No UTF-8 validation of text payloads.  The terminal behind this carries
- *   AmigaDOS output, which is Latin-1 and not UTF-8, so the browser is sent
- *   BINARY frames and the question does not arise.  A server that sent
- *   Latin-1 in a text frame would be lying about it.
+ * No UTF-8 validation of text payloads.  The terminal behind this carries
+ * AmigaDOS output, which is Latin-1 and not UTF-8, so the browser is sent
+ * binary frames and the question does not arise.  Latin-1 in a text frame
+ * would not be the UTF-8 that a text frame promises.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -49,12 +43,11 @@
 /*
  * The accept value for a Sec-WebSocket-Key, RFC 6455 4.2.2 step 5.
  *
- * `key` is the header value exactly as it arrived; leading and trailing
- * spaces are ignored and nothing else is.  It must be 24 characters of
- * base64 decoding to exactly 16 bytes, which is the one thing about the key
- * a server may check: it is a nonce, not a credential, and it proves only
- * that whatever answered understood this protocol rather than echoing a
- * cached 200.
+ * `key` is the header value exactly as it arrived.  Leading and trailing
+ * spaces are ignored and nothing else is.  It must be 24 characters of base64
+ * decoding to exactly 16 bytes, which is the one thing about the key a server
+ * can check.  The key is a nonce, not a credential, and it proves only that
+ * whatever answered understood this protocol rather than echoing a cached 200.
  *
  * `out` receives 28 characters and a terminator, so it needs 29 bytes.
  * Returns 0 when the key is not one, having written nothing.
@@ -83,8 +76,8 @@ typedef enum HttpWsEvent
 } HttpWsEvent;
 
 /*
- * The close codes this decoder produces.  RFC 6455 7.4.1; only the three a
- * server generates on its own are here, the rest are the client's to send.
+ * The close codes this decoder produces, from RFC 6455 7.4.1.  Only the ones a
+ * server generates on its own are here.  The rest are the client's to send.
  */
 #define HTTP_WS_CLOSE_NORMAL    1000
 #define HTTP_WS_CLOSE_GOING     1001
@@ -97,14 +90,15 @@ typedef enum HttpWsEvent
 #define HTTP_WS_CTL_MAX         125
 
 /*
- * A piece of one message.  `ev` says what the MESSAGE is, not what the frame
- * was: a continuation frame reports the opcode of the fragment that started
- * it, because that is the only thing a reader can act on.  `final` is true on
- * the last piece, which for a fragmented message is the last piece of the last
+ * A piece of one message.  `ev` describes the message rather than the frame: a
+ * continuation frame reports the opcode of the fragment that started it,
+ * because that is the only thing a reader can act on.  `final` is true on the
+ * last piece, which for a fragmented message is the last piece of the last
  * frame and not the end of each one.
  *
- * A control message is delivered in exactly one call with `final` true; they
- * are never fragmented and never longer than HTTP_WS_CTL_MAX.
+ * A control message is delivered in exactly one call with `final` true.
+ * Control messages are never fragmented and never longer than
+ * HTTP_WS_CTL_MAX.
  */
 typedef void (*HttpWsSink)(void *ctx, HttpWsEvent ev, const unsigned char *data,
                            long len, int final);
@@ -126,24 +120,24 @@ typedef struct HttpWsIn
     unsigned char   ctl_n;
     unsigned char   ctl[HTTP_WS_CTL_MAX];
 
-    /* Non-zero once the stream has failed; the value is the close code to
+    /* Non-zero once the stream has failed.  The value is the close code to
        send.  Nothing after it is decoded: a stream whose framing is lost
        cannot be resynchronised, exactly as httpframe.c says of a chunked
        body. */
     unsigned short  failed;
 } HttpWsIn;
 
-/* A ceiling on ONE message this server will assemble.  It does not bound a
-   frame -- frames are streamed to the sink as they arrive -- it bounds a
-   client that opens a fragmented message and never finishes it. */
+/* A ceiling on one assembled message.  It does not bound a frame, since frames
+   are streamed to the sink as they arrive.  It bounds a client that opens a
+   fragmented message and never finishes it. */
 #define HTTP_WS_MSG_MAX     65536UL
 
 void http_ws_reset(HttpWsIn *in);
 
 /*
  * Feed bytes.  Returns how many were consumed, which is `len` unless the
- * stream failed inside them, in which case the caller must stop reading and
- * close: `in->failed` is the code to say why.
+ * stream failed inside them.  When it failed, the caller must stop reading and
+ * close, and `in->failed` is the code that says why.
  */
 long http_ws_feed(HttpWsIn *in, const unsigned char *data, long len,
                   HttpWsSink sink, void *ctx);
@@ -164,7 +158,7 @@ unsigned long http_ws_head(unsigned char *out, unsigned long outlen,
                            HttpWsEvent ev, unsigned long len, int final);
 
 /*
- * A whole close frame, header and payload, into `out`.  `reason` may be NULL.
+ * A whole close frame, header and payload, into `out`.  `reason` can be NULL.
  * Returns the total length, or 0 when it does not fit.
  */
 unsigned long http_ws_close_frame(unsigned char *out, unsigned long outlen,
@@ -173,24 +167,22 @@ unsigned long http_ws_close_frame(unsigned char *out, unsigned long outlen,
 /* --------------------------------------------------------- peer liveness --- */
 
 /*
- * IS THE FAR END STILL THERE, AND HOW LONG BEFORE WE STOP BELIEVING IT
+ * When a quiet peer counts as gone.  Both endpoints that hold a single-instance
+ * resource, the Shell and the console screen, have to decide that, and they
+ * had the same rule written out twice.  It is here once instead, as two pure
+ * functions over the two fields a caller keeps: when it last heard from the
+ * peer, and whether a ping is already outstanding.
  *
- * Both endpoints that hold a single-instance resource -- the Shell and the
- * console screen -- have to decide when a quiet peer has actually gone, and
- * they had the same rule written out twice.  It is here once instead, as two
- * pure functions over the two fields a caller keeps: when it last heard from
- * the peer, and whether a ping is already outstanding.
+ * Hearing from the peer means anything the peer sent, and nothing this end
+ * wrote.  A send that the local stack accepted says the socket buffer had
+ * room.  It says nothing about whether anybody is on the other end.  The
+ * console refreshed its progress on every successful send and so could
+ * conclude nothing: a viewer that vanished without a close held the screen for
+ * ever, measured at over 110 seconds and still counting.
  *
- * WHAT COUNTS AS HEARING FROM THE PEER IS ANYTHING THE PEER SENT, AND NOTHING
- * THIS END WROTE.  A send that the local stack accepted says the socket
- * buffer had room; it says nothing about whether anybody is on the other end.
- * The console refreshed its progress on every successful send and so was
- * never able to conclude anything: a viewer that vanished without a close
- * held the screen for ever, measured at over 110 seconds and still counting.
- *
- * The budget is split in half: the ping goes out at half the timeout and the
- * answer is due by the end of it, so the WHOLE thing is bounded by `timeout`
- * rather than the two-timeouts-in-series it used to be.
+ * The budget is split in half.  The ping goes out at half the timeout and the
+ * answer is due by the end of it, so the whole exchange is bounded by
+ * `timeout` rather than the two timeouts in series it used to be.
  */
 
 /* TRUE when a ping has gone unanswered for its half of the budget. */
@@ -203,8 +195,8 @@ int http_ws_live_ping_due(unsigned long progress, int pinged,
 
 /*
  * SHA-1, which the accept is built on.  Declared here and implemented in
- * httpsha1.c over NetX Duo's own SHA-1: this file must build on a host with
- * nothing but a C compiler, and that one reaches the crypto library.
+ * httpsha1.c over NetX Duo's own SHA-1.  This file must build on a host with
+ * nothing but a C compiler, and httpsha1.c reaches the crypto library.
  */
 void http_ws_sha1(const unsigned char *data, unsigned long len,
                   unsigned char out[20]);

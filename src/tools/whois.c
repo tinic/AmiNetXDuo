@@ -9,8 +9,7 @@
  *   -4 / -6  pin the family the SERVER resolves to, and with FOLLOW every
  *            server in the chain, not only the first. The query itself is a
  *            string the registry parses and is untouched by this: `whois -6
- *            192.0.2.1` asks over IPv6 about an IPv4 address, which is a
- *            reasonable thing to want.
+ *            192.0.2.1` asks over IPv6 about an IPv4 address.
  *
  * The protocol is one line long: connect, send the query, read until the other
  * end hangs up, print what came back. RFC 3912 specifies no request format, no
@@ -21,7 +20,7 @@
  * whois.internic.net has known only .com and .net for twenty years. IANA's
  * knows which registry to ask, so it answers for any TLD, any IP range and any
  * AS number, naming the server that has the detail. FOLLOW chases that
- * referral; without it the line to type next is printed instead.
+ * referral. Without it the line to type next is printed instead.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -169,7 +168,7 @@ static BOOL whois_referral_from(const char *line, char *out, ULONG outlen)
 
 /*
  * One server, one query. Everything that arrives goes straight to standard
- * output; the reply is also scanned a line at a time for a referral, which is
+ * output. The reply is also scanned a line at a time for a referral, which is
  * left in whois_referral. RETURN_OK, or a code after printing why not.
  */
 static LONG whois_ask(struct Library *sb, const char *server, UWORD port,
@@ -363,7 +362,7 @@ int main(int argc, char **argv)
         if (rc != RETURN_OK || !referred)
             break;
 
-        /* A server that refers you to itself is a loop, not a referral. */
+        /* A server that refers to itself is a loop, not a referral. */
         if (tool_stricmp(whois_referral, server) == 0)
             break;
 

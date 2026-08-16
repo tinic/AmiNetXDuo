@@ -10,16 +10,16 @@
  * In order:
  *
  *   1. lists the network drivers installed on this machine as a numbered
- *      choice;
+ *      choice
  *   2. opens the chosen driver to check the card answers, before writing
  *      anything, so a wrong unit number is caught at the question rather than
- *      three commands later;
- *   3. asks whether the address is handed out (DHCP) or set here, validating
- *      every value as it is typed;
- *   4. shows what it is about to write and asks;
+ *      three commands later
+ *   3. asks whether the address is handed out (DHCP) or set here, and checks
+ *      every value as it is typed
+ *   4. shows what it is about to write and asks
  *   5. writes DEVS:NetInterfaces/<name>, and DEVS:Internet/routes and
- *      name_resolution when a fixed address needs them;
- *   6. offers to start the network there and then.
+ *      name_resolution when a fixed address needs them
+ *   6. offers to start the network there and then
  *
  * Nothing is written until the last question is answered: every file is
  * composed in memory first, and an existing file is renamed to .old rather
@@ -65,7 +65,7 @@ enum
 #define FILE_LEN        512
 #define PATH_LEN        (TOOL_NAME_LEN * 2)
 
-/* What the user has told us. */
+/* What the answers so far add up to. */
 typedef struct Plan
 {
     char  device[TOOL_NAME_LEN];
@@ -83,10 +83,10 @@ typedef struct Plan
 /* ------------------------------------------------------------------ input, */
 
 /*
- * Abort is a state rather than a return code because every question can hit
- * it: Ctrl-C, "Q", or end of input, which is what NetSetup driven from a
- * script that ran out of answers looks like, and it stops having written
- * nothing.
+ * Abort is a state rather than a return code, because every question can hit
+ * it: Ctrl-C, "Q", or end of input. End of input is what NetSetup driven from
+ * a script that ran out of answers looks like. Nothing has been written when
+ * it stops.
  */
 static BOOL setup_aborted;
 
@@ -98,7 +98,7 @@ static VOID abort_setup(const char *why)
 
 /*
  * One line from the user, with the prompt flushed first. Returns NULL once the
- * setup has been aborted; callers test setup_aborted rather than threading an
+ * setup has been aborted. Callers test setup_aborted rather than threading an
  * error code through every question.
  */
 static char *ask(const char *prompt, const char *suggestion, char *buf)
@@ -128,7 +128,7 @@ static char *ask(const char *prompt, const char *suggestion, char *buf)
         return NULL;
     }
 
-    /* FGets keeps the newline; trim that and any surrounding blanks. */
+    /* FGets keeps the newline, so trim that and any surrounding blanks. */
     for (len = 0; buf[len] != '\0'; len++)
         ;
     while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r' ||
@@ -155,7 +155,7 @@ static char *ask(const char *prompt, const char *suggestion, char *buf)
     }
 
     /*
-     * A console echoes what was typed; a file does not, so a scripted run
+     * A console echoes what was typed and a file does not, so a scripted run
      * would print its questions run together with no sign of the answers. Echo
      * before acting on the answer, so a transcript shows the Q that stopped it.
      */
@@ -227,7 +227,7 @@ static BOOL ask_address(const char *prompt, const char *suggestion,
 
 /* ------------------------------------------------------------ validation, */
 
-/* A netmask has to be a run of ones then a run of zeroes; 255.255.0.255 is not. */
+/* A netmask is a run of ones then a run of zeroes, so 255.255.0.255 is not one. */
 static BOOL netmask_is_sane(ULONG mask)
 {
     ULONG inverted = ~mask;
@@ -351,7 +351,7 @@ static BOOL ensure_dir(const char *path)
 
 /*
  * Write one file, keeping any existing one as <path>.old. Returns FALSE
- * having said why; the caller then puts back whatever it renamed.
+ * having said why. The caller then puts back whatever it renamed.
  */
 static BOOL write_file(const char *path, const Blob *blob, BOOL *kept_old)
 {
@@ -610,9 +610,9 @@ static BOOL ask_device(Plan *plan)
 }
 
 /*
- * Ask the card whether it is really there, before anything is written: a wrong
- * unit, or a driver for a card that is not installed, is otherwise found out much
- * later by a command that can only say "would not open".
+ * Ask the card whether it is really there, before anything is written. A wrong
+ * unit, or a driver for a card that is not installed, is otherwise found out
+ * much later by a command that can only say "did not open".
  */
 static BOOL check_device(Plan *plan, BOOL quiet)
 {
@@ -853,9 +853,9 @@ static VOID bring_up(const Plan *plan)
     if (rc == -1)
     {
         /*
-         * Not on the command path: the commands may not have been copied to C:
-         * yet, as just after an installer unpacked them elsewhere. Try
-         * alongside ourselves before giving up.
+         * Not on the command path: the commands need not have been copied to
+         * C: yet, as just after an installer unpacked them elsewhere. Look
+         * next to this binary before giving up.
          */
         char alt[PATH_LEN + 40];
 
@@ -931,7 +931,7 @@ int main(int argc, char **argv)
 
     quiet = (args[ARG_QUIET] != 0) ? TRUE : FALSE;
 
-    /* ---- what we were told, before asking for the rest ------------------ */
+    /* ---- what the arguments gave, before asking for the rest ------------ */
 
     plan.device[0]   = '\0';
     plan.name[0]     = '\0';
@@ -996,8 +996,7 @@ int main(int argc, char **argv)
 
     /*
      * A driver plus a way of getting an address is a full specification, so
-     * nothing needs to be asked; that is what makes NetSetup usable from an
-     * installer script as well as from a Shell.
+     * nothing needs to be asked. An installer script drives NetSetup this way.
      */
     interactive = (BOOL)!(plan.device[0] != '\0' &&
                           (plan.dhcp || plan.address != 0));
@@ -1189,9 +1188,9 @@ int main(int argc, char **argv)
         }
     }
 
-    /* All the files are in place, so the interface's .old rollback backup has
-       done its job, delete it.  Left in DEVS:NetInterfaces it would be loaded
-       as a second, phantom interface, because the drawer is read whole
+    /* All the files are in place, so the interface's .old rollback backup is
+       no longer needed and is deleted.  Left in DEVS:NetInterfaces it would be
+       loaded as a second interface, because the drawer is read whole
        (src/config/config_file.c). */
     if (kept_if)
     {

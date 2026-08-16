@@ -207,8 +207,8 @@ int http_if_eval(const char *header, HttpIfLookup lookup, void *ctx)
             }
             else
             {
-                /* Not a condition this grammar has.  A list nobody can read
-                   is not the one that makes the header true. */
+                /* Not a condition this grammar has.  A list holding one that
+                   cannot be read cannot make the header true. */
                 list = 0;
                 p++;
                 continue;
@@ -223,8 +223,8 @@ int http_if_eval(const char *header, HttpIfLookup lookup, void *ctx)
                 list = 0;
         }
 
-        /* A list that was never closed is a header cut off in the middle of
-           one, not a list that holds. */
+        /* A list that was never closed means the header was cut off inside
+           it, so the list does not hold. */
         if (*p == ')')
             p++;
         else

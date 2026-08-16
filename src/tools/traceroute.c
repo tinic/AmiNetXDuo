@@ -6,7 +6,7 @@
  *                IPV4=-4/S,IPV6=-6/S
  *
  *   MAXTTL      how far to go before giving up. Default 30.
- *   NUMERIC     addresses only; skip the reverse lookup for each hop.
+ *   NUMERIC     addresses only, with no reverse lookup for each hop.
  *   QUERIES     probes per hop. Default 3.
  *   TOS         the type-of-service byte to send with.
  *   WAIT        seconds to wait for each probe. Default 5.
@@ -17,13 +17,13 @@
  *               a dual stack there is otherwise no way to ask for the other.
  *
  * Names and short forms are Roadshow's. Three of Roadshow's options are
- * absent; they are listed with reasons above the argument template below.
+ * absent, and they are listed with reasons above the argument template below.
  *
  * Probes are ICMP echo rather than the classic Unix UDP datagrams. That began
- * as a limitation, a UDP probe left with the TTL nx_udp_socket_create() was
- * given, NX_IP_TIME_TO_LIVE, whatever setsockopt(IPPROTO_IP, IP_TTL) said, so
- * every hop reported as the destination (measured on the wire;
- * docs/RESEARCH.md 20.1 has the capture). It is not one any more: IP_TTL,
+ * as a limitation. A UDP probe left with the TTL nx_udp_socket_create() gave
+ * it, NX_IP_TIME_TO_LIVE, whatever setsockopt(IPPROTO_IP, IP_TTL) said, so
+ * every hop reported as the destination (measured on the wire, and
+ * docs/RESEARCH.md 20.1 has the capture). That limitation is gone: IP_TTL,
  * IPV6_UNICAST_HOPS and an RFC 3542 IPV6_HOPLIMIT all reach a UDP send now.
  * The probe stays ICMP because a raw socket sees the TIME_EXCEEDED for its own
  * probes without a second socket and without the port-unreachable convention.
@@ -62,8 +62,8 @@ static const char version_tag[] __attribute__((used)) =
  *                 NetX Duo has no equivalent to implement it with.
  *   -s SOURCE     the address to send from. bind() on a raw socket records an
  *                 address and nothing more, NetX Duo binds sockets to ports,
- *                 and the route chooses the source address of a raw datagram
- *, so the option would change nothing.
+ *                 and the route chooses the source address of a raw datagram,
+ *                 so the option would change nothing.
  *
  * Each would parse and then do nothing, so accepting them would misreport
  * which interface the probe left by.
@@ -128,12 +128,12 @@ static UBYTE tr_reply[2048];
  * Tenths of a millisecond since the first call.
  *
  * ami_millis() counts whole milliseconds, which is too coarse for the first
- * hop on a local link, every probe would read "0 ms". The EClock is read
- * directly instead, through the timer.device ami_millis() has already opened
- * (that is what TimerBase is), which is why the first call here is to
+ * hop on a local link, where every probe would round to zero. The EClock is
+ * read directly instead, through the timer.device ami_millis() has already
+ * opened (that is what TimerBase is), which is why the first call here is to
  * ami_millis() with its result discarded.
  */
-extern struct Device *TimerBase;        /* compat.c; the ReadEClock() inline */
+extern struct Device *TimerBase;        /* compat.c, for ReadEClock()        */
 
 static ULONG            tr_ticks_per_tenth_ms;
 static struct EClockVal tr_epoch;
@@ -203,7 +203,7 @@ static UWORD tr_get16(const UBYTE *p)
 }
 
 /*
- * An ICMP echo request ready for the raw socket. IPv4 is checksummed here;
+ * An ICMP echo request ready for the raw socket. IPv4 is checksummed here.
  * ICMPv6's checksum covers the IPv6 pseudo-header, so only the stack can
  * compute it and src/bsdsocket/raw.c does.
  */
@@ -231,8 +231,8 @@ static ULONG tr_build_echo(BOOL v6, UWORD ident, UWORD seq, ULONG payload)
 
 /*
  * What one received datagram means for the probe we are waiting on. TR_OTHER
- * covers both somebody else's ICMP and a reply to a probe already given up on;
- * the caller goes back to waiting with the time it has left.
+ * covers both somebody else's ICMP and a reply to a probe already given up on.
+ * The caller goes back to waiting with the time it has left.
  */
 enum
 {
@@ -290,7 +290,7 @@ static LONG tr_classify(BOOL v6, const UBYTE *buf, ULONG len, UWORD ident,
     {
         /*
          * RFC 792 quotes the offending datagram's IP header and the first 64
-         * bits after it; RFC 4443 quotes as much of it as fits an unfragmented
+         * bits after it. RFC 4443 quotes as much of it as fits an unfragmented
          * 1280-byte reply. Either way our probe's echo header, identifier and
          * sequence included, is in there. Anything quoting less than that
          * cannot be attributed.

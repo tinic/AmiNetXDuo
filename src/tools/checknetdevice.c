@@ -4,19 +4,17 @@
  *     CheckNetDevice DEVICE/K,NOLOAD/S,RAW/S
  *
  * A card that does not attach produces no unit, so there is nothing to
- * OpenDevice() and nothing to ask.  Until this existed the only way to find
- * out why was to rebuild the driver with NETDEV_TRACE and attach a serial
- * cable, which is not something a user can be asked to do -- so every report
- * of "my card does not work" stopped at the same place.
+ * OpenDevice() and nothing to ask.  Before this command existed the only way
+ * to find out why was to rebuild the driver with NETDEV_TRACE and attach a
+ * serial cable, so a report that a card does not work could go no further.
  *
  * The driver records every step of its probe into a small structure and
  * publishes it under a public semaphore, whatever the outcome.  This reads it
  * and prints it.  Nothing on that path needs a unit, an open device, a
- * running stack or a filesystem, which is the whole point: the machine being
- * diagnosed is the one where none of those came up.
+ * running stack or a filesystem, because the machine being diagnosed is the
+ * one where none of those came up.
  *
- * The report goes to standard output, so a user who wants a file to attach to
- * a bug report gets one from the Shell:
+ * The report goes to standard output, so the Shell can put it in a file:
  *
  *     CheckNetDevice > T:netdevice.txt
  *
@@ -52,17 +50,17 @@ enum
 
 /* ------------------------------------------------------------ the record --
  *
- * READ UNDER Forbid(), COPIED WHOLE, PRINTED AFTERWARDS.
+ * The record is read under Forbid(), copied whole, and printed afterwards.
  *
  * The record lives inside the device base, so it goes when the device is
  * expunged.  The driver removes the semaphore under Forbid() before that
  * memory can be freed, so a reader that holds Forbid() across the find and
  * the copy cannot be reading a freed one.  Printing takes far too long to do
- * under Forbid(), which is exactly why the copy is a copy -- and why the
- * record holds card NAMES rather than pointers to them.
+ * under Forbid(), so the reader takes a copy, and the record holds card names
+ * rather than pointers to them.
  *
- * The semaphore is never obtained.  Blocking on a driver that may be the
- * thing that is broken is the one move a diagnostic must not make.
+ * The semaphore is never obtained.  A diagnostic must not block on the driver
+ * that can be the broken thing.
  */
 static AnxDiagMark cnd_mark;
 
@@ -91,7 +89,7 @@ static UWORD cnd_read(VOID)
         else
         {
             /* Keep the two fields the message needs and nothing else: the
-               shapes disagree, so no other field may be believed. */
+               shapes disagree, so no other field can be believed. */
             cnd_mark.ad_Version = mark->ad_Version;
             cnd_mark.ad_Size    = mark->ad_Size;
             status = CND_BAD_VERSION;
@@ -220,11 +218,11 @@ static VOID say(const char *fmt, ...)
 }
 
 /*
- * One step, as a sentence.  EVERY code has one: a step printed as a number is
- * a step whose meaning the user has to come and ask about, which is the thing
- * this command exists to stop.  A code this command has never heard of -- an
- * older CheckNetDevice against a newer driver -- is printed as itself rather
- * than dropped, so the report is still true.
+ * One step, as a sentence.  Every code has one, because a step printed as a
+ * bare number is a step whose meaning has to be asked about.  A code this
+ * command has never heard of -- an older CheckNetDevice against a newer
+ * driver -- is printed as itself rather than dropped, so the report is still
+ * true.
  */
 /* The chip of the card being printed, so ANXDIAG_ATTACH_OK does not claim a
    transfer mode for a part that has no data port.  Set by ANXDIAG_CHIP, which
@@ -613,10 +611,10 @@ static VOID cnd_mac(UWORD at)
 }
 
 /*
- * Grouped by card rather than printed in order.  The order is what happened,
- * but the question is "what about MY card", and a PCMCIA claim interleaved
- * with a Zorro walk answers it badly.  Machine-wide steps come first, then
- * one block per card the probe touched, in the order it touched them.
+ * Grouped by card rather than printed in order.  The recorded order is what
+ * happened, but a PCMCIA claim interleaved with a Zorro walk is hard to read
+ * one card at a time.  Machine-wide steps come first, then one block per card
+ * the probe touched, in the order it touched them.
  */
 static VOID cnd_report(BOOL raw)
 {
@@ -655,7 +653,7 @@ static VOID cnd_report(BOOL raw)
         if (c == (UWORD)ANXDIAG_NOCARD)
             continue;
 
-        /* One block per card, printed at its FIRST step; the walk below
+        /* One block per card, printed at its first step.  The walk below
            gathers the rest of that card's steps, so a card already seen is
            skipped here rather than printed twice. */
         for (j = 0; j < nseen; j++)
@@ -728,13 +726,12 @@ int main(int argc, char **argv)
     status = cnd_read();
 
     /*
-     * NOT LOADED IS NOT AN ANSWER, so unless the user asked otherwise the
-     * driver is loaded and the record read again.
+     * A driver that never ran is not an answer, so without NOLOAD the driver
+     * is loaded and the record read again.
      *
-     * THIS IS NOT "OPENDEVICE THE FAILED UNIT".  The open is expected to
-     * fail on the machine this command is for, and its result is thrown
-     * away: what it is for is making Exec LoadSeg the driver and run its
-     * romtag init, which is where the probe -- and the record -- happen.
+     * The open is expected to fail on the machine this command is for, and its
+     * result is thrown away.  It is there to make Exec LoadSeg the driver and
+     * run its romtag init, which is where the probe and the record happen.
      * Everything printed below came from that probe and not from this open.
      */
     if (status == CND_ABSENT && args[ARG_NOLOAD] == 0)

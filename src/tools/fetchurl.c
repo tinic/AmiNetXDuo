@@ -60,7 +60,7 @@ static int fu_match(const char *a, unsigned long n, const char *want)
 
 /*
  * RFC 3986 section 3, as far as this command needs it: the five components
- * with the fragment already gone.  Nothing is copied; the pointers are into
+ * with the fragment already gone.  Nothing is copied.  The pointers are into
  * the caller's string.
  */
 typedef struct FuRef
@@ -272,7 +272,7 @@ static void fu_pop_segment(const char *out, unsigned long *o)
 
 /*
  * RFC 3986 section 5.2.4, the two-buffer method, letter for letter.  Returns
- * the length written, or 0 with nothing written when it would not fit, a
+ * the length written, or 0 with nothing written when it would not fit.  A
  * path this long has already been refused by the caller's buffer, so 0 is not
  * ambiguous with the empty result the "." reference produces.
  */
@@ -365,8 +365,7 @@ static unsigned long fu_remove_dot_segments(const char *in, unsigned long inlen,
 
 /*
  * RFC 3986 section 5.2.3.  `base` always has an authority here, so the
- * empty-path arm is the one that cannot happen, it is written anyway,
- * because the arm that cannot happen is the one that does.
+ * empty-path arm cannot be reached.  It is written anyway.
  */
 static unsigned long fu_merge(const char *base, unsigned long baselen,
                               const char *ref, unsigned long reflen,
@@ -472,8 +471,8 @@ FetchUrlResult fetch_url_parse(const char *url, FetchUrl *out)
      * "scheme://" is the only spelling that names a scheme here, and not the
      * strict scheme rule fu_split() uses.  A user typing "host:8080/x" at the
      * Shell means a port, not a scheme called "host", and a bare "host/path"
-     * means http, neither is a URI reference arriving from a server, which
-     * is what fetch_url_resolve() is for.
+     * means http.  Neither is a URI reference arriving from a server, which
+     * is what fetch_url_resolve() handles.
      */
     for (q = url; q < end; q++)
     {
@@ -536,7 +535,7 @@ FetchUrlResult fetch_url_resolve(const FetchUrl *base, const char *ref,
 
     fu_split(ref, &r);
 
-    /* T.scheme and T.authority default to the base's; every arm below that
+    /* T.scheme and T.authority default to the base's.  Every arm below that
        does not overwrite them wants exactly that. */
     *out = *base;
 

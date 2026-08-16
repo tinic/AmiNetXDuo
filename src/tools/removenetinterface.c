@@ -3,20 +3,18 @@
  *
  *     RemoveNetInterface INTERFACE/M/A,FORCE/S,QUIET/S
  *
- * The counterpart of AddNetInterface, and a narrower thing than NetShutdown:
- * that one stops every interface there is and leaves them all configured,
- * while this one takes a single interface out altogether. Its SANA-II device
- * is closed, so the hardware is free for something else to open, and its
- * configuration slot is released, so the same name can be added again with a
- * different file behind it.
+ * The counterpart of AddNetInterface. NetShutdown stops every interface and
+ * leaves them all configured. This command takes a single interface out
+ * altogether: its SANA-II device is closed, so the hardware is free for
+ * something else to open, and its configuration slot is released, so the same
+ * name can be added again with a different file behind it.
  *
- * Interfaces are not renumbered by a removal. An index is a handle a caller
- * may already be holding, so removing the first of three leaves the other two
- * where they were.
+ * A removal does not renumber the interfaces. An index is a handle a caller can
+ * already be holding, so removing the first of three leaves the other two where
+ * they were.
  *
  * An interface still carrying TCP connections is refused rather than removed,
- * because detaching it resets every one of them, which is visible at the far
- * end of the wire. FORCE says to do it anyway.
+ * because detaching it resets every one of them. FORCE removes it anyway.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -78,9 +76,9 @@ static BOOL same_name(const char *a, const char *b)
 }
 
 /*
- * The running stack's own idea of which interfaces exist, which is the only
- * one that counts here: tool_find_interface() reads a netstack linked into the
- * calling binary, and this command has none.
+ * The interface list of the running stack, the only one that counts here.
+ * tool_find_interface() reads a netstack linked into the calling binary, and
+ * this command has none.
  *
  * Re-read for every name rather than once, because each removal changes it.
  */
@@ -143,8 +141,8 @@ int main(int argc, char **argv)
     force     = (args[ARG_FORCE] != 0) ? TRUE : FALSE;
     names     = (STRPTR *)args[ARG_INTERFACE];
 
-    /* Opening the library would start the stack, and starting a network in
-       order to take an interface out of it is not what was asked for. */
+    /* Opening the library would start the stack. Starting a network to take an
+       interface out of it is not what was asked for. */
     if (!tool_stack_library_running())
     {
         say("The network is not running, so there is nothing to remove.\n");

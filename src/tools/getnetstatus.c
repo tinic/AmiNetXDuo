@@ -16,7 +16,7 @@
  *                        is not a condition, or a bsdsocket.library that is
  *                        not this stack's
  *
- * Nothing here starts the network; doing so would make the answer true.
+ * Nothing here starts the network. Starting it would make the answer true.
  *
  * With no CHECK it lists every condition, says which are satisfied, and returns
  * the answer to INTERFACES alone, an interface that is up and has an address.
@@ -25,7 +25,7 @@
  * other. Two mean something specific here:
  *
  *   PTPINTERFACES is never satisfied. A point-to-point interface is SLIP or
- *   PPP; every interface this stack attaches is a SANA-II Ethernet device with
+ *   PPP. Every interface this stack attaches is a SANA-II Ethernet device with
  *   a hardware address.
  *
  *   ROUTES asks the routing table first and falls back to the routes that
@@ -260,11 +260,11 @@ int main(int argc, char **argv)
     check     = (const char *)args[ARG_CHECK];
 
     /*
-     * VERSION reports the LIBRARY's version, not this command's, C: and
-     * LIBS: are updated separately and the copy in memory is the one a script
-     * wants to know about. `Version C:GetNetStatus` answers the other
-     * question. Asked for by a user with no way to tell installed versions
-     * apart.
+     * VERSION reports the version of the library, not the version of this
+     * command. C: and LIBS: are updated separately, and the copy in memory is
+     * the one a script wants to know about. `Version C:GetNetStatus` answers
+     * the other question. A user with no way to tell installed versions apart
+     * asked for this.
      *
      * It does not open the library: a script asking what is running must not
      * start the network by asking.
@@ -307,9 +307,9 @@ int main(int argc, char **argv)
     running = tool_stack_library_running();
 
     /*
-     * A running stack that is somebody else's cannot be asked. Answering "not
-     * ready" would send the reader to fix a network that is fine, so this is a
-     * failure to find out and returns RETURN_ERROR.
+     * A running stack that is somebody else's cannot be asked. Reporting the
+     * network as not ready would send the reader to fix a network that is
+     * fine, so this is a failure to find out and returns RETURN_ERROR.
      */
     if (running)
     {

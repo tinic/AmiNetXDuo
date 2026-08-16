@@ -15,11 +15,11 @@
  * iperf 3 is a different protocol on a different port and the two do not
  * interoperate: pointing this at an `iperf3 -s` gets a connection that goes
  * nowhere, not a slow number.  Debian and Ubuntu package 2.x as `iperf` and
- * 3.x as `iperf3`; Homebrew calls them `iperf` and `iperf3` too.
+ * 3.x as `iperf3`.  Homebrew calls them `iperf` and `iperf3` too.
  *
- * Why this exists.  When somebody says this stack is slower than another one
- * there was no way for them to produce a figure on their own machine and
- * their own card, which is exactly where the differences we cannot test live.
+ * It exists so that a report of this stack being slower than another one can
+ * carry a figure from the reporter's own machine and card, which is where the
+ * differences we cannot test live.
  * It goes through bsdsocket.library rather than linking any part of the stack,
  * so the same binary runs on Roadshow and AmiTCP and the comparison is one
  * tool against one peer.
@@ -407,9 +407,8 @@ int main(int argc, char **argv)
             break;
         }
 
-        /* One line a second while it runs.  A user diagnosing "slower than
-           the others" wants to see whether it starts slow or falls off, which
-           a single average hides. */
+        /* One line a second while it runs.  A single average hides whether the
+           transfer starts slow or falls off part way. */
         if (!quiet && iperf_run.res.ms == 0)
         {
             ULONG now = ami_millis();

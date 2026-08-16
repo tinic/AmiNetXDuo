@@ -21,27 +21,27 @@
  *
  * The full layout, including the pointer image table this does not write, is
  * in src/tools/web/client/console/pfs.ts.  This is the capture half of a
- * remote framebuffer and does not read the sprite: it writes the position it
- * can see and image 0, which is "no pointer image in this file".
+ * remote framebuffer and does not read the sprite.  It writes the position it
+ * can see and image 0, which means no pointer image in this file.
  *
- * bytesPerRow is the bitmap's, not width/8: a 640-wide screen has 80 and a
+ * bytesPerRow is the bitmap's, not width/8.  A 640-wide screen has 80 and a
  * 644-wide one has 82, and the pixels past the width are real bytes in the
  * frame either way.
  *
- * THE TIMESTAMPS ARE MEASURED, NOT DERIVED FROM DELAY.  A grab of a 640x256x4
- * screen costs real milliseconds and a machine under load costs more of them,
- * so the interval between two frames is DELAY plus however long the grab took;
- * a reader handed DELAY would be told a schedule rather than what happened.
- * Each frame's time is read off DateStamp() as it is taken.
+ * The timestamps are measured rather than derived from DELAY.  A grab of a
+ * 640x256x4 screen costs real milliseconds and a machine under load costs more
+ * of them, so the interval between two frames is DELAY plus however long the
+ * grab took.  A reader handed DELAY would be told a schedule rather than what
+ * happened.  Each frame's time is read off DateStamp() as it is taken.
  *
- * The table goes at the END, after the last frame, which is what makes an
- * early exit -- a Ctrl-C, a screen that changed shape -- come out right: the
+ * The table goes at the end, after the last frame, which is what makes an
+ * early exit -- a Ctrl-C, a screen that changed shape -- come out right.  The
  * frames written are the frames counted and the table appended is exactly as
  * long.  Reserving it up front would mean compacting the file afterwards.
  *
- * The screen is locked per frame, not for the session: this is the grab half
- * of a remote-framebuffer server, which runs for hours between grabs, and a
- * held LockLayers stops every other task drawing.
+ * The screen is locked per frame and not for the session.  This is the grab
+ * half of a remote-framebuffer server, which runs for hours between grabs, and
+ * a held LockLayers stops every other task drawing.
  *
  * Only the Workbench screen, and only a standard planar BitMap.  An RTG
  * screen's BitMap has no Planes[] to read and GetBitMapAttr(BMA_FLAGS) is
@@ -49,9 +49,9 @@
  * happen to hold.
  *
  * Kickstart 3.0 (V39) or later.  GetBitMapAttr() is the check that keeps the
- * plane reads honest and it does not exist before V39, so there is no version
- * of this that runs on 2.x and is still safe; GetRGB32() comes from the same
- * release, which is why there is no GetRGB4() path either.
+ * plane reads in bounds and it does not exist before V39, so there is no
+ * version of this that runs on 2.x and is still safe.  GetRGB32() comes from
+ * the same release, which is why there is no GetRGB4() path either.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -135,7 +135,7 @@ static VOID put_be32(UBYTE *p, ULONG v)
 
 /*
  * Milliseconds since midnight, from the system clock.  DateStamp() counts
- * minutes and ticks-in-the-minute, and a tick is a fiftieth; the caller takes
+ * minutes and ticks-in-the-minute, and a tick is a fiftieth.  The caller takes
  * differences, and a run that spans midnight has one frame's interval wrong on
  * a file whose other thousand are right.
  */
@@ -185,7 +185,7 @@ static VOID close_libraries(VOID)
 
 /*
  * FALSE having said why.  Every refusal here is a bitmap this cannot read
- * correctly, so none of them may fall through to a grab of something else.
+ * correctly, so none of them can fall through to a grab of something else.
  */
 static BOOL geometry_of(struct BitMap *bm, Geometry *g)
 {
@@ -231,7 +231,7 @@ static BOOL geometry_of(struct BitMap *bm, Geometry *g)
 
     stride = (ULONG)(UWORD)bm->BytesPerRow;
 
-    /* An interleaved bitmap's BytesPerRow spans every plane; the stride from
+    /* An interleaved bitmap's BytesPerRow spans every plane.  The stride from
        one row to the next in a plane is that, and a plane's row is a depth of
        it.  A non-interleaved one has the two equal. */
     if ((flags & BMF_INTERLEAVED) != 0)
@@ -287,7 +287,7 @@ static BOOL geometry_same(const Geometry *a, const Geometry *b)
 /* ---------------------------------------------------------------- palette */
 
 /*
- * 3 * (1 << depth) bytes whatever the ColorMap holds: a screen whose map is
+ * 3 * (1 << depth) bytes whatever the ColorMap holds.  A screen whose map is
  * shorter than its depth leaves the tail black rather than shortening the
  * file, so the header arithmetic is the only thing a reader needs.
  */
@@ -349,8 +349,8 @@ static VOID copy_frame(struct BitMap *bm, const Geometry *g, UBYTE *dst)
 
 /*
  * One frame into buf.  The screen is locked, read and unlocked here and
- * nowhere else, so the caller may take as long as it likes over the file.
- * FALSE having said why; *changed is TRUE when the refusal is that the screen
+ * nowhere else, so the caller can take as long as it needs over the file.
+ * FALSE having said why.  *changed is TRUE when the refusal is that the screen
  * is no longer the one the header describes.
  */
 static BOOL grab_frame(const Geometry *want, UBYTE *buf, BOOL *changed)

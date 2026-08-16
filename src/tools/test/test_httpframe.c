@@ -2,20 +2,17 @@
  * The tests for src/tools/httpframe.c, how long a request body is, and where
  * it ends.
  *
- * WHY THIS IS A TEST AND NOT A REVIEW
+ * Every failure here is silent on the wire.  A Content-Length that overflowed
+ * leaves the tail of a body in the socket, and the server reads it as the next
+ * request, so a PUT whose body happens to contain a "DELETE /x HTTP/1.1" line
+ * has that DELETE run, and the transcript shows two requests where the client
+ * sent one.  A chunk size that wrapped to zero does the same thing and reads as
+ * a well-formed end of body.  Neither produces an error, a log line, or a wrong
+ * answer to the request that carried it.
  *
- *   Every failure here is silent on the wire.  A Content-Length that
- *   overflowed leaves the tail of a body in the socket, and the server reads
- *   it as the next request, so a PUT whose body happens to contain a
- *   "DELETE /x HTTP/1.1" line has that DELETE executed, and the transcript
- *   shows two requests where the client sent one.  A chunk size that wrapped
- *   to zero does the same thing and reads as a well-formed end of body.
- *   Neither produces an error, a log line, or a wrong answer to the request
- *   that carried it.
- *
- *   So the cases are written down: what each parser accepts, what it refuses,
- *   and, for the decoder, how much of the buffer it says belonged to the
- *   body, because that number is where the next request starts.
+ * So the cases are written down: what each parser accepts, what it refuses,
+ * and, for the decoder, how much of the buffer it says belonged to the body,
+ * because that number is where the next request starts.
  *
  *   cc -std=c11 -Wall -Wextra -Isrc/tools \
  *      src/tools/test/test_httpframe.c src/tools/httpframe.c -o test_httpframe
@@ -74,7 +71,7 @@ static void test_length(void)
     CHECK(http_frame_length(" ", &n) == HTTP_FRAME_EMPTY);
     CHECK(http_frame_length("0x10", &n) == HTTP_FRAME_JUNK);
 
-    /* Trailing whitespace is what a header value may carry after it. */
+    /* Trailing whitespace is what a header value can carry after it. */
     CHECK(http_frame_length("42 ", &n) == HTTP_FRAME_OK && n == 42UL);
     CHECK(http_frame_length("42\t", &n) == HTTP_FRAME_OK && n == 42UL);
 
@@ -101,9 +98,9 @@ static void test_coding(void)
     CHECK(http_frame_coding("identity") == HTTP_TE_IDENTITY);
 
     /* The two halves of the seven-character prefix test.  "chunkedX" used to
-       match and "gzip, chunked" used to be missed entirely, so a body that
-       WAS chunked was read as a Content-Length one, and one that was not was
-       read as chunked. */
+       match and "gzip, chunked" used to be missed entirely, so a chunked body
+       was read as a Content-Length one, and one that was not chunked was read
+       as chunked. */
     CHECK(http_frame_coding("chunkedX") == HTTP_TE_UNSUPPORTED);
     CHECK(http_frame_coding("chunked-ish") == HTTP_TE_UNSUPPORTED);
     CHECK(http_frame_coding("gzip, chunked") == HTTP_TE_UNSUPPORTED);
@@ -151,8 +148,8 @@ static long feed(HttpChunk *ch, const char *text)
                            (long)strlen(text), collect, NULL);
 }
 
-/* The same, one byte per call: a chunk boundary falls where the network put
-   it, so every state has to survive being entered with nothing in hand. */
+/* The same, one byte per call.  A chunk boundary falls where the network put
+   it, so every state has to survive being entered with no bytes yet. */
 static long feed_dribbled(HttpChunk *ch, const char *text)
 {
     long len = (long)strlen(text);
@@ -220,7 +217,7 @@ static void test_chunks(void)
 
     /*
      * The one from the backlog.  Nine hex digits used to shift the first one
-     * out: 0x100000000 became 0, which reads as the terminating chunk, and
+     * out, so 0x100000000 became 0, which reads as the terminating chunk, and
      * everything after it was parsed as a pipelined request.
      */
     (void)feed(&ch, "100000000\r\n");
@@ -238,8 +235,8 @@ static void test_chunks(void)
     (void)feed(&ch, "5X\r\nhello\r\n0\r\n\r\n");
     CHECK(ch.state == HTTP_CHUNK_ERROR);
 
-    /* A line where a size should have been.  This used to read as zero and
-       end the body. */
+    /* A line where a size belongs.  This used to read as zero and end the
+       body. */
     (void)feed(&ch, "\r\n");
     CHECK(ch.state == HTTP_CHUNK_ERROR);
 
@@ -266,7 +263,7 @@ static void test_chunks(void)
 
     printf("a body that has not finished\n");
 
-    /* An incomplete body is not an error: more of it is coming. */
+    /* An incomplete body is not an error, because more of it is coming. */
     (void)feed(&ch, "5\r\nhel");
     CHECK(ch.state == HTTP_CHUNK_DATA);
     CHECK(ch.left == 2UL);
