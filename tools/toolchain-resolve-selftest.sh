@@ -108,8 +108,13 @@ say pin_beats_stale_current "$( [ "$out" = "$PIN" ] && echo pass || echo FAIL )"
 # It owns `current`, it took the already-here exit without looking at it, and
 # that is how the two trees came to disagree in the first place.
 
-AMINETXDUO_TOOLCHAIN_CACHE="$CACHE" "$ROOT/tools/fetch-toolchain.sh" \
-    >/dev/null 2>&1
+# AMINETXDUO_TOOLCHAIN_URL is a tripwire, not a fixture: case 2 put a root at
+# the pin, so this must take the already-here exit and never reach the network.
+# Without it, a fake root that failed to appear would quietly download 200 MB
+# in the host CI stage instead of failing the case.
+AMINETXDUO_TOOLCHAIN_CACHE="$CACHE" \
+AMINETXDUO_TOOLCHAIN_URL="file:///nonexistent-this-must-not-be-fetched" \
+    "$ROOT/tools/fetch-toolchain.sh" >/dev/null 2>&1
 have=$(cd "$CACHE/current" 2>/dev/null && pwd -P || echo none)
 want=$(cd "$PIN" && pwd -P)
 [ "$have" = "$want" ] || fail "fetch-toolchain.sh left current at $have, want $want"
