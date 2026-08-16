@@ -258,7 +258,7 @@ int main(int argc, char **argv)
     {
         LONG err = 0;
 
-        say("%ld program(s) are using the network:\n", holding);
+        say("%ld program(s) use the network:\n", holding);
         name_them(listed, holding);
 
         for (w = 0; w < (ULONG)(sizeof(ctl) / sizeof(ULONG)); w++)
@@ -276,7 +276,8 @@ int main(int argc, char **argv)
         }
         else
         {
-            say("Asked them to stop, waiting up to %lu second(s).\n", timeout);
+            say("Asked them to stop, and will wait up to %lu second(s).\n",
+                timeout);
 
             while ((holding = others_holding(base, &listed)) > 0)
             {
@@ -302,7 +303,7 @@ int main(int argc, char **argv)
                              sizeof(nsd_ifaces), sizeof(NetStatusInterface));
     if (n < 0)
     {
-        tool_error("the network would not say which interfaces it has");
+        tool_error("the network did not say which interfaces it has");
         tool_explain_no_netstatus(base);
         tool_netstatus_close(base);
         FreeArgs(rda);
@@ -329,7 +330,7 @@ int main(int argc, char **argv)
         if (tool_netstatus_control(base, NETCTRL_INTERFACE_DOWN, &ctl,
                                    &err) != 0)
         {
-            tool_error("%s would not go down", (LONG)name);
+            tool_error("%s did not go down", (LONG)name);
             failed++;
             continue;
         }
@@ -353,7 +354,7 @@ int main(int argc, char **argv)
         if (waited >= timeout)
         {
             tool_error("%ld interface(s) were still up %lu seconds after "
-                       "being told to stop", still_up, timeout);
+                       "the request to stop", still_up, timeout);
             failed++;
             break;
         }
@@ -392,8 +393,8 @@ int main(int argc, char **argv)
 
     if (stopped_waiting)
     {
-        say("\nStopped waiting. The network is stopped either way, and it\n"
-            "will finish shutting down when the programs below let go.\n");
+        say("\nThe wait is over. The network is stopped either way, and it\n"
+            "will finish its shutdown when the programs below let go.\n");
     }
 
     if (holding > 0)
@@ -417,8 +418,8 @@ int main(int argc, char **argv)
     if (stopped == 0)
         say("Every interface was already down.\n");
 
-    say("\nThe network is stopped and nothing is left using it, so\n"
-        "bsdsocket.library and the stack inside it have gone with the last\n"
+    say("\nThe network is stopped and nothing uses it now, so\n"
+        "bsdsocket.library and the stack inside it went with the last\n"
         "program that closed it. Online <interface> or AddNetInterface\n"
         "starts the network again.\n");
 

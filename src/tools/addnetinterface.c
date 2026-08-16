@@ -77,7 +77,7 @@ enum
  */
 static VOID advise_out_of_memory(ULONG freemem)
 {
-    tool_printf("  %lu bytes are free; the stack needs about 450K.\n", freemem);
+    tool_printf("  %lu bytes are free. The stack needs about 450K.\n", freemem);
 }
 
 /*
@@ -329,7 +329,7 @@ static VOID explain_add_failure(LONG err, const char *name,
 
         case ENOSPC:
             tool_printf("  this stack holds %ld interfaces and they are all "
-                        "in use; RemoveNetInterface frees one.\n",
+                        "in use. RemoveNetInterface frees one.\n",
                         (LONG)NX_MAX_PHYSICAL_INTERFACES);
             break;
 
@@ -446,7 +446,8 @@ int main(int argc, char **argv)
     {
         tool_fault(IoErr());
         tool_usage("<interface name> [<interface name>...]",
-                   "The name of a file in DEVS:NetInterfaces, e.g. eth0.");
+                   "The name of a file in DEVS:NetInterfaces, for example "
+                   "eth0.");
         return RETURN_ERROR;
     }
 
@@ -466,9 +467,10 @@ int main(int argc, char **argv)
 
     if (count == 0)
     {
-        tool_error("which interface?");
+        tool_error("no interface was named");
         tool_usage("<interface name> [<interface name>...]",
-                   "The name of a file in DEVS:NetInterfaces, e.g. eth0.");
+                   "The name of a file in DEVS:NetInterfaces, for example "
+                   "eth0.");
 
         FreeArgs(rda);
         return RETURN_ERROR;
@@ -612,7 +614,7 @@ int main(int argc, char **argv)
 
             if (where == -2)
             {
-                tool_error("the network would not say which interfaces it "
+                tool_error("the network did not say which interfaces it "
                            "has");
                 tool_explain_no_netstatus(base);
                 tool_stack_release(base);
@@ -626,7 +628,7 @@ int main(int argc, char **argv)
 
                 if (add_err != 0)
                 {
-                    tool_error("%s could not be added to the running network",
+                    tool_error("%s was not added to the running network",
                                (LONG)name);
                     explain_add_failure(add_err, name, &ifc);
                     rc = RETURN_FAIL;
@@ -730,7 +732,7 @@ int main(int argc, char **argv)
             err = netstack_interface_start(&ifc, &slot);
             if (err != AMI_NET_OK)
             {
-                tool_error("%s could not be added to the running network: %s",
+                tool_error("%s was not added to the running network: %s",
                            (LONG)name, (LONG)tool_net_error(err));
                 explain_startup_failure(err, &ifc);
                 FreeArgs(rda);
@@ -745,7 +747,7 @@ int main(int argc, char **argv)
             err = netstack_interface_up((UWORD)index);
             if (err != AMI_NET_OK)
             {
-                tool_error("%s would not come online: %s", (LONG)name,
+                tool_error("%s did not come online: %s", (LONG)name,
                            (LONG)tool_net_error(err));
                 tool_explain_device(ifc.device, ifc.unit, ifc.card);
                 FreeArgs(rda);

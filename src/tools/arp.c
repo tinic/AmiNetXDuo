@@ -417,8 +417,8 @@ static VOID explain_absence6(const ULONG addr[4], BOOL have_routes)
         router = default_router6(have_routes);
         if (router != NULL)
         {
-            tool_printf("  The router is %s, and THAT is the entry worth "
-                        "checking:\n", (LONG)router);
+            tool_printf("  The router is %s, and its entry is the one to "
+                        "check:\n", (LONG)router);
             tool_printf("      arp %s\n", (LONG)router);
         }
         return;
@@ -467,8 +467,8 @@ static VOID explain_absence(ULONG addr, BOOL have_snapshot)
         if (arp_snap.have_gateway && arp_snap.gateway != 0)
         {
             ami_config_format_ip(arp_snap.gateway, gw, sizeof(gw));
-            tool_printf("  The router is %s, and THAT is the entry worth "
-                        "checking:\n", (LONG)gw);
+            tool_printf("  The router is %s, and its entry is the one to "
+                        "check:\n", (LONG)gw);
             tool_printf("      arp %s\n", (LONG)gw);
         }
         return;
@@ -609,7 +609,7 @@ int main(int argc, char **argv)
     }
     else if (args[ARG_DELETE] != 0 || args[ARG_SET] != 0)
     {
-        tool_error("which address? DELETE and SET each need one");
+        tool_error("DELETE and SET each need an address");
         FreeArgs(rda);
         return RETURN_ERROR;
     }

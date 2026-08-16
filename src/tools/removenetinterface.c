@@ -173,7 +173,7 @@ int main(int argc, char **argv)
         index = find_index(base, name);
         if (index == -2)
         {
-            tool_error("the network would not say which interfaces it has");
+            tool_error("the network did not say which interfaces it has");
             tool_explain_no_netstatus(base);
             tool_netstatus_close(base);
             FreeArgs(rda);
@@ -199,12 +199,12 @@ int main(int argc, char **argv)
         {
             if (err == EBUSY)
             {
-                tool_error("%s still has connections open; FORCE removes it "
+                tool_error("%s still has connections open. FORCE removes it "
                            "anyway and resets them", (LONG)name);
             }
             else
             {
-                tool_error("%s could not be removed", (LONG)name);
+                tool_error("%s was not removed", (LONG)name);
             }
 
             failed++;

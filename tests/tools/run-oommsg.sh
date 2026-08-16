@@ -175,7 +175,7 @@ reject() {
 expect "the INTERFACE argument reached the guest" "eth0: a2065.device unit 0"
 
 expect "it reports the start as failed"    "the network would not start"
-expect "and names memory as the reason"    "bytes are free; the stack needs about"
+expect "and names memory as the reason"    "bytes are free. The stack needs about"
 
 # The figure has to come from AvailMem() on this machine, not from a constant.
 # Under ADDNETIF_MIN_FREE, which is what the branch tested, and not zero.

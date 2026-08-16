@@ -374,7 +374,7 @@ says "SYS:ShowNetStatus" 2 "Host name: +fixedname(\.[^ ]*)? \(from name_resoluti
      "and gethostname() was never given the refused name"
 
 # The other half of the refusal: the file really was written, so the name takes
-# effect if the stronger source stops supplying one.
+# effect if the stronger source no longer supplies one.
 wrote env    beast "ENV:HOSTNAME holds the refused name"
 wrote envarc beast "and so does ENVARC:HOSTNAME"
 
