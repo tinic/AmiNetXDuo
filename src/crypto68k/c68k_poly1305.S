@@ -31,7 +31,7 @@
 |
 |   The other two thirds are the 130-bit accumulate, where the compiler is at a
 |   structural disadvantage rather than a scheduling one.  A 32x32 -> 64
-|   product lands in a register pair and a 64-bit add is ADD.L plus ADDX.L; C
+|   product lands in a register pair and a 64-bit add is ADD.L plus ADDX.L.  C
 |   can only reach either through `unsigned long long`, and at -Os GCC gives
 |   every one of the twenty-five products a round trip through the frame, two
 |   stores and two loads, ~28 cycles, 690 a block, on top of no inline of the

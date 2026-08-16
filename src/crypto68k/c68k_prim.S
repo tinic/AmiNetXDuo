@@ -61,14 +61,14 @@
 |   MULU.L <ea>,Dh:Dl is 41 best / 43 cached / 44 worst on 68020, and 44 max on
 |   68030.  It is 20 on a 68040.  On a 68060 the 64-bit form is unimplemented.
 |   It traps to vector 61 and is emulated in software, so this file is a
-|   pessimisation there and must not be enabled for a 68060 build.  Confirmed
-|   elsewhere: AmiSSL shipped the same finding in 4.4 ("disabled m68k asm
+|   pessimisation there and must not be enabled for a 68060 build.  Seen
+|   elsewhere too: AmiSSL shipped the same finding in 4.4 ("disabled m68k asm
 |   replacement as it's slower"), and Roberto Ragusa's 1998 PGP 68060 patch got
 |   2x by removing MULU.L.  This project's floor is 68020 (docs/RESEARCH.md 9).
 |
 | Register rules (m68k-amigaos, stack calling convention)
 |
-|   Arguments on the stack from 4(sp) upward; return value in d0; d0/d1/a0/a1
+|   Arguments on the stack from 4(sp) upward.  Return value in d0.  d0/d1/a0/a1
 |   are scratch and d2-d7/a2-a6 must be preserved.
 |
 | SPDX-License-Identifier: MIT

@@ -44,7 +44,7 @@
 |
 | Register rules (m68k-amigaos, stack calling convention)
 |
-|   Arguments on the stack from 4(sp) upward; return value in d0; d0/d1/a0/a1
+|   Arguments on the stack from 4(sp) upward.  Return value in d0.  d0/d1/a0/a1
 |   are scratch and d2-d7/a2-a6 must be preserved.
 |
 | The 68060 rule applies to the module, not to this file

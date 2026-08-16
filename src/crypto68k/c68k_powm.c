@@ -10,7 +10,7 @@
  *      squarings and 2 multiplies where 16 squarings and 1 multiply suffice.
  *      An RSA public operation, the certificate signature check a TLS
  *      client does three times per handshake, therefore costs about twice
- *      what it should.  The largest gain in the module, and not an assembly
+ *      what it needs to.  The largest gain in the module, and not an assembly
  *      change.
  *
  *   2. For a full-length private exponent it does one multiply per set bit,
@@ -298,7 +298,7 @@ UINT        started;
     c68k_copy(table, xm, m_len);
     if (table_size > 1u)
     {
-        /* acc doubles as the running xm^2 here; it is reset before the scan. */
+        /* acc doubles as the running xm^2 here.  It is reset before the scan. */
         c68k_mont_sqr(acc, xm, m, m_len, n0inv, work);
         for (i = 1; i < table_size; i++)
         {

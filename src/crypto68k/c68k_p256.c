@@ -983,7 +983,7 @@ INT             d;
             fe_copy(zt, inv);
         }
 
-        /* zt = z_i^-1; convert in place, the z field is dead afterwards. */
+        /* zt = z_i^-1.  Convert in place, the z field is dead afterwards. */
         c68k_p256_fe_sqr(work -> tab[i - 1u].z, zt);
         c68k_p256_fe_mul(work -> tab[i - 1u].x, work -> tab[i - 1u].x,
                          work -> tab[i - 1u].z);

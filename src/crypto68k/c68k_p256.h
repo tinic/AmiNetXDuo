@@ -94,8 +94,8 @@
  *     ECDSA P-256 verify                 7.028 s  ->  1.961 s      3.6x
  *
  * The three vendored absolutes reproduce the 1.52 / 5.18 / 6.97 s measured
- * independently in docs/RESEARCH.md 9 to within 1%, which confirms that this
- * benchmark times the same computation the gate did.
+ * independently in docs/RESEARCH.md 9 to within 1%, so this benchmark times
+ * the same computation the gate did.
  *
  * The ratios are meaningful, the absolute times are not, and only the 68020
  * rows count.  The FS-UAE 68020 is not a 14 MHz A1200.  Its 68030 model
@@ -269,7 +269,7 @@ VOID c68k_p256_mul_g(c68k_p256_aff *r, const c68k_limb k[C68K_P256_LIMBS]);
 
 /*
  * r = k * q for an arbitrary affine q, width-5 wNAF with a batch-inverted
- * affine table.  q must be on the curve; q at infinity gives infinity.
+ * affine table.  q must be on the curve.  q at infinity gives infinity.
  * work is scratch, see c68k_p256_work above.  It must not alias anything.
  */
 VOID c68k_p256_mul_point(c68k_p256_aff *r, const c68k_p256_aff *q,

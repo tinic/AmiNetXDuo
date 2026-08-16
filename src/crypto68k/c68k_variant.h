@@ -30,7 +30,7 @@
  *
  * A file is assembled for its own needs, not for the machine.  An object can
  * hold an instruction this CPU lacks while nothing calls the routine that uses
- * it: legality is per instruction executed.  That is what lets c68k_prim.S be
+ * it: legality is per instruction run.  That is what lets c68k_prim.S be
  * assembled -m68020 in a binary that runs on a 68000.  Four of its six
  * routines -- add, sub, cmp, add_carry -- are called there anyway, because
  * their own code is original 68000 and only addmul_1 and div_2by1 are not.

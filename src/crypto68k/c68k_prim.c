@@ -17,7 +17,7 @@
 #include "crypto68k.h"
 #include "c68k_variant.h"
 
-/* Declared in crypto68k.h; see the note there. */
+/* Declared in crypto68k.h, see the note there. */
 VOID (*c68k_yield_hook)(VOID);
 
 /*
@@ -99,7 +99,7 @@ HN_UBASE2   product;
 
 
     /*
-     * product holds the running 64-bit sum; its high half is the carry into
+     * product holds the running 64-bit sum.  Its high half is the carry into
      * the next limb.  No separate carry bit is needed because
      *
      *     (2^32-1) * (2^32-1) + (2^32-1) + (2^32-1) == 2^64 - 1

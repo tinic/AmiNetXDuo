@@ -73,7 +73,7 @@
 |   once a double round.  A word resident in G1 and G3, or G2 and G4, is
 |   exchanged twice.  The
 |   stack word must be one of the once-only kind, and there are two to place:
-|   x15, in G2 and G3, sits on the stack across G4 and G1; x9, in G4 and G1,
+|   x15, in G2 and G3, sits on the stack across G4 and G1.  x9, in G4 and G1,
 |   sits there across G2 and G3.  They change over in d6, the one data register
 |   that touches memory inside the loop.
 |
@@ -103,7 +103,7 @@
 | Registers
 |
 |   d0-d7    eight of the sixteen state words, two quarter-rounds' worth
-|   a0-a6    seven more; a0 is the input pointer during the prologue only
+|   a0-a6    seven more, and a0 is the input pointer during the prologue only
 |   0(sp)    x9 across G2 and G3, then the parking space of x11 in the epilogue
 |   4(sp)    x15 across G4 and G1
 |   8(sp)    the parking space of x14 in the epilogue
@@ -290,11 +290,11 @@ _c68k_chacha20_core_asm:
 |
 | Here because it measured a sixth of the cipher.  The C beside it is already
 | the right seven instructions a word, load, the three-instruction byte
-| reversal, load, EOR, store, and at -O3 that is what it compiled to; at -Os
+| reversal, load, EOR, store, and at -O3 that is what it compiled to.  At -Os
 | GCC gave every word two LEAs, a reloaded `moveq #64` and the 68020's
 | full-extension double-indexed addressing for both the load and the store,
 | about 64 cycles a word where 37 buys the same four bytes.  Post-increment
-| addressing is the whole fix; there is nothing to schedule.
+| addressing is the whole fix.  There is nothing to schedule.
 |
 | Unrolled four words, so the DBRA is amortised and the body is 60 bytes.
 | `in` and `out` need no alignment: the 68020 does misaligned longwords in

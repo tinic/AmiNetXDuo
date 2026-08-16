@@ -378,7 +378,7 @@ void c68k_25519_fe_sqr_ref(uint32_t r[8], const uint32_t a[8])
     fe_sqr_c(r, a);
 }
 
-/* r = a * k for a small k; used for a24 = 121666 in the ladder. */
+/* r = a * k for a small k.  Used for a24 = 121666 in the ladder. */
 static void fe_mul_small(fe r, const fe a, uint32_t k)
 {
     uint64_t v = 0;
