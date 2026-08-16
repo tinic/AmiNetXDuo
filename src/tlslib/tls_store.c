@@ -2,11 +2,11 @@
  * tls.library, the trust store, and the lazy loader that reads it.
  *
  *   The Mozilla root set is about 120 certificates and 125 KB of DER.  This
- *   machine has four megabytes.  Parsing all of them at startup is not viable
- *   and neither is holding them: an NX_SECURE_X509_CERT is 252 bytes, so the
- *   parsed set alone is 30 KB before the DER it points into, and the parse
- *   itself is 120 ASN.1 walks on a 14 MHz 68020 in front of a user waiting for
- *   a web page.
+ *   machine has four megabytes.  A parse of all of them at startup is not
+ *   viable, and neither is a resident copy.  An NX_SECURE_X509_CERT is 252
+ *   bytes, so the parsed set alone is 30 KB before the DER it points into, and
+ *   the parse itself is 120 ASN.1 walks on a 14 MHz 68020 in front of a user
+ *   who waits for a web page.
  *
  *   A chain needs exactly one of them.  So the file is indexed, the index is
  *   the only part read up front, and the one root a chain needs is read and
@@ -38,16 +38,15 @@
  *   nx_secure's own store lookup compares distinguished names by common name
  *   only unless NX_SECURE_X509_STRICT_NAME_COMPARE is defined, and in the
  *   current Mozilla set four roots share the common name "GlobalSign" and four
- *   more have no common name at all.  Handing nx_secure a store with all four
- *   GlobalSign roots in it would let it pick the first and fail the signature
- *   check.  Matching on the full Name adds exactly the one root the chain
- *   asked for, so the name nx_secure then looks up is unambiguous by
- *   construction.
+ *   more have no common name at all.  A store handed to nx_secure with all
+ *   four GlobalSign roots in it lets it pick the first and fail the signature
+ *   check.  A match on the full Name adds exactly the one root the chain asked
+ *   for, so the name nx_secure then looks up is unambiguous by construction.
  *
  *   Roots expire, get distrusted, and get added.  There is no package manager
- *   on this machine and there is not going to be one, so the update story is:
- *   replace the file.  Either copy a fresh `certificates` from a release, or
- *   run tools/mkcertstore.py over a current cacert.pem.  The index is read
+ *   on this machine and there is not going to be one, so the update mechanism
+ *   is a file replacement.  Either copy a fresh `certificates` from a release,
+ *   or run tools/mkcertstore.py over a current cacert.pem.  The index is read
  *   fresh at every TLSOpen() and belongs to that connection, so a replacement
  *   takes effect on the next connection, no reboot, no `avail flush`, no
  *   cache to invalidate.  See the note on TLSStore in tls_internal.h for the
@@ -90,8 +89,8 @@ static ULONG tls_fnv1a(const UCHAR *data, ULONG length)
 
     /*
      * Zero means "no key" everywhere in this file, so it must not be a real
-     * one.  tools/mkcertstore.py applies the same fold, and would refuse to
-     * emit an entry that produced one.
+     * one.  tools/mkcertstore.py applies the same fold, and refuses to emit an
+     * entry that produces one.
      */
     if (hash == 0)
         hash = TLS_FNV_PRIME;
@@ -104,9 +103,9 @@ static ULONG tls_fnv1a(const UCHAR *data, ULONG length)
 /*
  * The issuer Name, as bytes.  nx_secure parses the issuer into fields and
  * keeps pointers to the field values, which is not enough to recover the
- * enclosing Name, so this walks the TBSCertificate again, four fields deep,
- * using the vendored TLV parser so there is no second ASN.1 implementation in
- * the tree.
+ * enclosing Name.  So this walks the TBSCertificate again, four fields deep,
+ * with the vendored TLV parser, and there is no second ASN.1 implementation
+ * in the tree.
  *
  *   TBSCertificate ::= SEQUENCE {
  *       version         [0] EXPLICIT Version DEFAULT v1,
@@ -238,7 +237,7 @@ VOID tls_store_close(TLSStore *store)
 /*
  * Read the index.  Called once per connection, from TLSOpen() and therefore
  * outside the ThreadX bracket, which is what lets it do blocking dos.library
- * I/O without handing the baton back the way tls_store_fetch() has to.
+ * I/O without returning the baton, the way tls_store_fetch() must.
  */
 LONG tls_store_open(TLSStore *store, const char *path)
 {
@@ -320,9 +319,9 @@ LONG tls_store_open(TLSStore *store, const char *path)
     /*
      * The fingerprint of this root set, computed here because this is the one
      * moment the whole index is in memory.  src/tlslib/tls_resume.c keys a
-     * cached session on it, so a session verified against one trust store
-     * cannot be resumed by a caller presenting a different one, a resumed
-     * handshake verifies nothing, so the trust decision has to travel with the
+     * cached session on it, so a session checked against one trust store
+     * cannot be resumed by a caller that presents a different one.  A resumed
+     * handshake checks nothing, so the trust decision must be carried by the
      * session.
      *
      * Over the decoded values rather than the raw bytes, so the fingerprint
@@ -392,15 +391,15 @@ static ULONG tls_store_fetch(TLSStore *store, ULONG key, UCHAR *buffer, ULONG si
         return 0;
 
     /*
-     * The one disk access that happens inside the handshake, the issuer is
-     * not known until the server has sent its chain, and therefore inside
-     * the ThreadX bracket, holding the baton.  dos.library blocks in Exec, so
-     * without this the IP thread and both SANA-II readers would stop for the
-     * length of a disk access; on a floppy that is long enough to drop
-     * packets.  Handing the baton back is what the SANA-II readers do around
-     * their own Wait().  Both calls are no-ops for a caller that does not hold
-     * it, so this stays correct if a future path reaches here outside a
-     * bracket.
+     * The one disk access that happens inside the handshake, because the
+     * issuer is not known until the server has sent its chain.  It therefore
+     * runs inside the ThreadX bracket, with the baton held.  dos.library
+     * blocks in Exec, so without this the IP thread and both SANA-II readers
+     * stop for the length of a disk access, which on a floppy is long enough
+     * to drop packets.  The SANA-II readers return the baton the same way
+     * around their own Wait().  Both calls are no-ops for a caller that does
+     * not hold it, so this stays correct if a future path reaches here
+     * outside a bracket.
      */
     ctx = tls_netx_ctx();
     if (ctx != NULL)
@@ -431,11 +430,11 @@ static ULONG tls_store_fetch(TLSStore *store, ULONG key, UCHAR *buffer, ULONG si
 /* ------------------------------------------------- the lazy verifier ---- */
 
 /*
- * nx_secure's verify hook takes the certificate store, not the session, so the
- * connection has to be recovered from it.  A small registry rather than
- * pointer arithmetic through two vendored structs: eight entries, an O(8) scan
- * once per handshake, and no way to be wrong that only shows up as a wild
- * pointer on a machine with no memory protection.
+ * nx_secure's certificate-check hook takes the certificate store, not the
+ * session, so the connection must be recovered from it.  A small registry
+ * rather than pointer arithmetic through two vendored structs: eight entries,
+ * an O(8) scan once per handshake, and no way to be wrong that appears only as
+ * a wild pointer on a machine with no memory protection.
  */
 #define TLS_REGISTRY_SLOTS      8
 
@@ -448,10 +447,11 @@ typedef struct TLSRegistrySlot
 static TLSRegistrySlot tls_registry[TLS_REGISTRY_SLOTS];
 
 /*
- * The scans take the same Forbid() as the claim and the release. One registry
+ * The scans take the same Forbid() as the claim and the release.  One registry
  * for every opener, so a TLSClose() on another task can clear a slot and free
- * the TLSConnection between the load of rs_Conn and the dereference below,
- * which tls_conn_for_session() does, reading tc_Session through it.
+ * the TLSConnection between the load of rs_Conn and the dereference below.
+ * tls_conn_for_session() does that dereference, and reads tc_Session through
+ * it.
  */
 static TLSConnection *tls_conn_for_store(NX_SECURE_X509_CERTIFICATE_STORE *store)
 {
@@ -511,11 +511,11 @@ static VOID tls_registry_remove(TLSConnection *conn)
 /*
  * Give the store whatever roots this chain needs, and no others.
  *
- * Every certificate the server sent is asked "who issued you?"; the answer is
- * looked up in the file; a hit is parsed and put in the trusted store.  For an
- * ordinary two-deep chain that is one index hit and one disk read: the leaf's
- * issuer is the intermediate, which is not a root and misses in RAM, and the
- * intermediate's issuer is the root, which hits.
+ * Every certificate the server sent is asked "who issued you?".  The answer is
+ * looked up in the file, and a hit is parsed and put in the trusted store.
+ * For an ordinary two-deep chain that is one index hit and one disk read.  The
+ * leaf's issuer is the intermediate, which is not a root and misses in RAM,
+ * and the intermediate's issuer is the root, which hits.
  */
 static VOID tls_store_supply(TLSConnection *conn,
                              NX_SECURE_X509_CERTIFICATE_STORE *store)
@@ -564,7 +564,7 @@ static VOID tls_store_supply(TLSConnection *conn,
          * raw_data_buffer is NULL: the DER stays where it was read, memory
          * this connection owns until TLSClose(), which is the lifetime
          * nx_secure needs (the parsed certificate is all pointers into it).
-         * Copying it again would double the cost for nothing.
+         * A second copy doubles the cost for nothing.
          */
         status = _nx_secure_x509_certificate_initialize(
                      &conn->tc_Root[i],
@@ -599,11 +599,11 @@ static UINT tls_store_verify(NX_SECURE_X509_CERTIFICATE_STORE *store,
 }
 
 /*
- * The registry is not only the trust store's: src/tlslib/tls_resume.c reaches
+ * The registry is not only the trust store's.  src/tlslib/tls_resume.c reaches
  * a connection from an NX_SECURE_TLS_SESSION through it too, and resumption
- * runs whether or not the chain is being verified.  So registration is its own
- * call, made for every connection, and tls_store_attach() only swaps the
- * verifier.
+ * runs whether or not the chain is checked.  So registration is its own call,
+ * made for every connection, and tls_store_attach() only swaps the certificate
+ * check.
  */
 VOID tls_registry_add(TLSConnection *conn)
 {
@@ -639,10 +639,9 @@ VOID tls_store_attach(TLSConnection *conn)
     if (tls_conn_for_session(&conn->tc_Session) != conn)
     {
         /* The registry is full.  More than eight simultaneous handshakes on a
-           68020 does not warrant its own code path, but silently verifying
-           against an empty trusted store would be a security hole, so leave
-           the vendored verifier in place: it fails closed with
-           ISSUER_CERTIFICATE_NOT_FOUND. */
+           68020 does not warrant its own code path.  A silent check against an
+           empty trusted store is a security hole, so the vendored check stays
+           in place.  It fails closed with ISSUER_CERTIFICATE_NOT_FOUND. */
         return;
     }
 
