@@ -188,9 +188,13 @@ rfb_u32 rfb_worst_case_frame(const rfb_geom *g)
     tb = (rfb_u32)g->tile_w * g->tile_h;
 
     /* Header, one copy op, every tile carrying every plane at the PackBits
-     * expansion bound, and the terminator. */
+     * expansion bound, and the terminator.
+     *
+     * FOUR bytes before a tile's first plane and not three: RFB_OP_TILE is an
+     * op byte, a 16-bit index and the plane mask.  This counted three, so the
+     * bound was a byte per tile short of what the encoder can emit. */
     return 4u + 11u
-         + tiles * (3u + (rfb_u32)g->depth * (3u + RFB_PB_BOUND(tb)))
+         + tiles * (4u + (rfb_u32)g->depth * (3u + RFB_PB_BOUND(tb)))
          + 1u;
 }
 
