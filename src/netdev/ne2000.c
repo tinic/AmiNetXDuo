@@ -51,12 +51,12 @@
  *   delay()       -> a bus-read spin; there is no timer at device-init time
  *   printf        -> counters
  *
- * ADDED, and not from NetBSD: netdev_ne2000_probe_wide().  The X-Surf 100 has
- * a second, 32-bit image of the same data port, and a driver that assumes it
- * is there silently transfers garbage on a board that does not have one, while
- * a driver that assumes it is not there silently gives up half the throughput.
- * So it is written and read back before it is used, and the answer is
- * reportable, not guessed.
+ * Added, and not from NetBSD: netdev_ne2000_probe_wide().  The X-Surf 100 has
+ * a second, 32-bit image of the same data port.  A driver that assumes it is
+ * there silently transfers garbage on a board that does not have one, and a
+ * driver that assumes it is not there gives up half the throughput.  It is
+ * therefore written and read back before it is used, and the answer is
+ * reported rather than guessed.
  *
  * ne2000reg.h beside this file is NetBSD's, verbatim.
  *
@@ -91,11 +91,11 @@ extern ULONG netdev_time_rdc;  /* netdev_device.c reports it */
 #define ASIC_PUT(nic, reg, val) netdev_bus_wa8(&(nic)->bus, (reg), (UBYTE)(val))
 
 /*
- * There is no timer open when a unit is probed, and a device may not call
+ * There is no timer open when a unit is probed, and a device cannot call
  * Delay().  A read of a register the chip always answers is a real Zorro bus
- * cycle -- 280 ns at the fastest a Zorro II board can be, and slower on
- * everything else -- so a count is a lower bound on the microseconds.  Only
- * the reset path waits, and the chip is ready long before the wait ends.
+ * cycle, 280 ns at the fastest a Zorro II board can be and slower on
+ * everything else, so a count is a lower bound on the microseconds.  Only the
+ * reset path waits, and the chip is ready long before the wait ends.
  */
 static VOID ne_delay(NetdevNic *nic, ULONG us)
 {
@@ -144,7 +144,7 @@ static VOID ne_note_mismatch(NetdevNic *nic, const UBYTE *want,
 
 /*
  * Program a remote read of `amount` bytes from `src`, and remember where that
- * leaves the pointer.  `over` is how much MORE the burst is allowed to cover
+ * leaves the pointer.  `over` is how much more the burst is allowed to cover
  * beyond `amount`, so a caller that knows the next read is contiguous can pay
  * for one setup instead of two.
  */
@@ -217,10 +217,10 @@ static VOID ne2000_read_hdr(NetdevNic *nic, LONG src, NetdevRing *hdr)
 
     /*
      * Overshoot the header deliberately.  The body follows it in the ring, so
-     * one setup covering both is one setup fewer per frame; the burst is
-     * bounded by what is left before the ring wraps, so it can never read
-     * past the end of the buffer.  A frame that does wrap simply finds the
-     * position stale and programs its own.
+     * one setup covering both is one setup fewer per frame.  The burst is
+     * bounded by what is left before the ring wraps, so it can never read past
+     * the end of the buffer.  A frame that does wrap finds the position stale
+     * and programs its own.
      */
     {
         LONG  room = nic->mem_end - (src + 4);
@@ -277,33 +277,33 @@ static UWORD ne2000_write_buf(NetdevNic *nic, const UBYTE *frame, UWORD len,
     NIC_PUT(nic, ED_P0_ISR, ED_ISR_RDC);
 
     /*
-     * RBCR IS THE FRAME LENGTH, ODD OR NOT, AND THE PUSH BELOW IS ROUNDED UP.
+     * RBCR is the frame length, odd or not, and the push below is rounded up.
      * That looks like a mismatch against ne2000_readmem(), which rounds before
-     * it programs RBCR, and it is not the same question:
+     * it programs RBCR, but it is not the same question:
      *
-     *   readmem rounds because the DESTINATION is host memory and the port
-     *   hands out whole words -- the rounding protects the caller's buffer.
+     *   readmem rounds because the destination is host memory and the port
+     *   hands out whole words, so the rounding protects the caller's buffer.
      *   Here RBCR only bounds the DMA into buffer RAM.  What goes on the wire
      *   is TBCR, which dp8390_xmit() sets from txb_len, which is the unrounded
      *   length.  A rounded-up odd frame therefore parks one extra byte in the
      *   transmit slot (1515 bytes worst case in a 1536-byte slot) and never
      *   transmits it.
      *
-     *   The one hazard is ISR.RDC: a part that terminates the DMA on
-     *   count-EQUALS-zero rather than count-exhausted would never assert it
-     *   for an odd RBCR, the wait below would time out, and the chip would be
-     *   reset once per odd frame.  Measured on the emulated X-Surf 100
-     *   (tests/tools/oddtx.c, transfer_mode=2): eight odd frames from 61 to
-     *   1513 bytes, all error=0, resets_delta=0, even-length control frames
-     *   likewise.  This is also NetBSD's arrangement unchanged, which has run
-     *   on real NE2000 hardware for decades.
+     *   The one hazard is ISR.RDC.  A part that terminates the DMA on a count
+     *   that equals zero, rather than on a count exhausted, never asserts it
+     *   for an odd RBCR.  The wait below would then time out, and the chip
+     *   would be reset once per odd frame.  Measured on the emulated X-Surf
+     *   100 (tests/tools/oddtx.c, transfer_mode=2): eight odd frames from 61
+     *   to 1513 bytes, all error=0, resets_delta=0, and even-length control
+     *   frames likewise.  This is also NetBSD's arrangement unchanged, which
+     *   has run on real NE2000 hardware for decades.
      *
-     *   WHAT THAT DOES NOT SETTLE: Amiberry terminates on count-exhausted
-     *   ("if (s->rcnt <= len) s->rcnt = 0"), so the rig cannot tell the two
-     *   implementations apart.  A real part that hangs here would show up as
-     *   "Chip resets" climbing in S2_GETSPECIALSTATS, one per odd frame, with
-     *   CMD_WRITE answering S2ERR_TX_FAILURE.  If that is ever seen, rounding
-     *   RBCR up here is the fix and costs nothing.
+     *   Amiberry terminates on a count exhausted ("if (s->rcnt <= len)
+     *   s->rcnt = 0"), so the rig cannot tell the two implementations apart.
+     *   A real part that hangs here shows up as "Chip resets" climbing in
+     *   S2_GETSPECIALSTATS, one per odd frame, with CMD_WRITE answering
+     *   S2ERR_TX_FAILURE.  A rounded-up RBCR here is then the fix, and it
+     *   costs nothing.
      */
     NIC_PUT(nic, ED_P0_RBCR0, len);
     NIC_PUT(nic, ED_P0_RBCR1, len >> 8);
@@ -339,10 +339,10 @@ static UWORD ne2000_write_buf(NetdevNic *nic, const UBYTE *frame, UWORD len,
 static const UBYTE ne_test_pattern[32] = "THIS is A memory TEST pattern";
 
 /*
- * Could this bus need cnet16's word reads at all?  Mirrors what
- * netdev_bus_set_getodd() refuses, and is asked FIRST so that no card whose
- * registers are plain adjacent bytes has its detection sequence changed by
- * any of this.  Only the PCMCIA row is a split stride-1 file.
+ * Can this bus need cnet16's word reads?  Mirrors what
+ * netdev_bus_set_getodd() refuses, and is asked first so that no card whose
+ * registers are plain adjacent bytes has its detection sequence changed by any
+ * of this.  Only the PCMCIA row is a split stride-1 file.
  */
 static BOOL ne2000_odd_window(const NetdevNic *nic)
 {
@@ -353,25 +353,25 @@ static BOOL ne2000_odd_window(const NetdevNic *nic)
 /*
  * Do odd-numbered registers read correctly the way they are being read now?
  *
- * TWO TESTS, because neither one alone is enough.
+ * Two tests, because neither one alone is enough.
  *
  *   ISR after a reset has ED_ISR_RST set.  That is the value NetBSD checks,
- *   and it is why this is the right point in the sequence -- but a mis-decoded
- *   read very often returns 0xff, which has that bit set, so on its own it
- *   passes on exactly the card this is looking for.
+ *   and it is why this is the right point in the sequence.  A mis-decoded read
+ *   often returns 0xff, which has that bit set, so on its own it passes on the
+ *   card this is looking for.
  *
  *   BNRY is register 3, odd, and read/write, and the ring is not programmed
- *   until dp8390_config(), so its value here is nobody's.  Two patterns, one
- *   the complement of the other, so neither a stuck-high nor a stuck-low bus
- *   can round-trip both.
+ *   until dp8390_config(), so its value here belongs to nobody.  Two patterns,
+ *   one the complement of the other, so neither a stuck-high nor a stuck-low
+ *   bus can round-trip both.
  *
  * The chip is in page 0 and stopped, which is where the caller left it.
  *
- * All three reads happen every time and the three bytes come back rather than
- * a verdict, because one verdict covers three different cards: $ff $ff $ff is
- * a floating bus, a wrong ISR with the round-trips intact is a chip that has
- * not finished resetting, and a good ISR with the round-trips dead is the
- * 16-bit-only card the word path exists for.  Writing BNRY costs nothing --
+ * All three reads happen every time, and the three bytes come back rather than
+ * a verdict, because one verdict covers three different cards.  $ff $ff $ff is
+ * a floating bus.  A wrong ISR with the round-trips intact is a chip that has
+ * not finished resetting.  A good ISR with the round-trips dead is the
+ * 16-bit-only card the word path exists for.  A write to BNRY costs nothing:
  * it is read/write, the chip is stopped, and dp8390_config() programs it
  * afterwards.
  */
@@ -424,17 +424,17 @@ static BOOL ne2000_detect(NetdevNic *nic)
     ne_delay(nic, 5000);
 
     /*
-     * ED_CR_STA IS NOT IN THE MASK, and NetBSD's is the only version of this
-     * comparison that has it there.  Some NE2000 clones come out of reset
-     * with CR bit 1 stuck set and read back 0x23 where the datasheet says
-     * 0x21; cnet.device masks DSCM_START out of its own copy of this test
+     * ED_CR_STA is not in the mask, and NetBSD's is the only version of this
+     * comparison that has it there.  Some NE2000 clones come out of reset with
+     * CR bit 1 stuck set and read back 0x23 where the datasheet says 0x21.
+     * cnet.device masks DSCM_START out of its own copy of this test
      * (cnetdevice.asm:3611-3615) for "buggy chips" and names the Netgear
-     * FA411.  With the bit demanded clear those cards fail detection and the
+     * FA411.  With the bit demanded clear, those cards fail detection and the
      * driver reports an empty slot.
      *
-     * The case this must keep rejecting is a window with nothing behind it,
-     * and it does: a floating bus reads 0xff, which has TXP set and fails the
-     * comparison whether STA is masked or not.
+     * This must keep rejecting a window with nothing behind it, and it does.
+     * A floating bus reads 0xff, which has TXP set and fails the comparison
+     * whether STA is masked or not.
      */
     tmp = NIC_GET(nic, ED_P0_CR);
     netdev_diag_note(ANXDIAG_CR_READ, netdev_diag_card(nic->card), (ULONG)tmp);
@@ -446,29 +446,27 @@ static BOOL ne2000_detect(NetdevNic *nic)
     }
 
     /*
-     * THE CNET16 PROBE, AND IT IS A PROBE RATHER THAN A SECOND BINARY.
+     * The cnet16 probe, which is a probe rather than a second binary.
      *
      * A Fast-Ethernet NE2000 clone that asserts -IOIS16 unconditionally
-     * decodes 16-bit I/O cycles and nothing else, so a BYTE read of an ODD
+     * decodes 16-bit I/O cycles and nothing else, so a byte read of an odd
      * register returns bus noise.  Every ISR poll, CR readback and CURR/BNRY
      * ring pointer this driver makes is an odd register, so the symptom is a
      * card that attaches and receives nothing.  cnet answers this with a
-     * separate cnet16.device (cnetdevice.asm:551-556, naming the Netgear
-     * FA411 and the CNet SinglePoint 10/100) and leaves the user to work out
-     * which of the two their card needs.
+     * separate cnet16.device (cnetdevice.asm:551-556, naming the Netgear FA411
+     * and the CNet SinglePoint 10/100) and leaves the user to work out which
+     * of the two the card needs.
      *
-     * CR, read just above, is register 0 and EVEN: it answers on such a card
-     * and cannot tell one apart.  The first odd register touched is where the
-     * question has to be asked, and if it fails the word path is turned on
-     * and it is asked again.  Both answers are load-bearing: on a card that
-     * does not need this the first call succeeds and nothing changes, and on
-     * a window with no chip behind it both calls fail and the card is
-     * rejected as before.
+     * CR, read just above, is register 0 and even, so it answers on such a
+     * card and cannot tell one apart.  The first odd register touched is where
+     * the question must be asked, and if it fails the word path is turned on
+     * and it is asked again.  On a card that does not need this the first call
+     * succeeds and nothing changes.  On a window with no chip behind it both
+     * calls fail and the card is rejected as before.
      *
-     * EVERY OTHER CARD KEEPS NETBSD'S TEST, unchanged, byte for byte.  A
-     * Zorro board's registers are adjacent bytes at a stride and cannot need
-     * any of this, and giving them a new way to fail detection to buy nothing
-     * is not a trade worth making.
+     * Every other card keeps NetBSD's test, unchanged, byte for byte.  A Zorro
+     * board's registers are adjacent bytes at a stride and cannot need any of
+     * this, so a new way for them to fail detection buys nothing.
      */
     if (!ne2000_odd_window(nic))
     {
@@ -571,21 +569,21 @@ static BOOL ne2000_detect(NetdevNic *nic)
 
 /*
  * Decide whether the 32-bit window is really the data port.  A card that does
- * not have one answers this with a mismatch and stays on the 16-bit path; the
- * result is what S2_GETSPECIALSTATS reports as the transfer mode, so a user
- * who is on the slow path can see that they are.
+ * not have one answers with a mismatch and stays on the 16-bit path.  The
+ * result is what S2_GETSPECIALSTATS reports as the transfer mode, so the slow
+ * path is visible rather than inferred.
  */
 static VOID ne2000_probe_wide(NetdevNic *nic)
 {
     /*
-     * BOTH BUFFERS ARE ULONG ARRAYS AND THAT IS LOAD-BEARING.  netdev_bus.c
-     * refuses the 32-bit path for a buffer that is not 4-aligned and silently
-     * falls back to 16-bit moves -- correct for a data path, fatal for a probe,
-     * because the readback then matches without the wide window ever having
-     * been touched and the mode is promoted on no evidence.  That is exactly
-     * what happened when the second leg read from `ne_test_pattern + 16`: the
-     * pattern sits at .text+0x8da, so +16 is 2 mod 4, and the leg whose own
-     * comment claimed to test the transmit direction tested the 16-bit port.
+     * Both buffers are ULONG arrays, and that matters.  netdev_bus.c refuses
+     * the 32-bit path for a buffer that is not 4-aligned and silently falls
+     * back to 16-bit moves.  That is correct for a data path and wrong for a
+     * probe: the readback then matches without the wide window ever having
+     * been touched, and the mode is promoted on no evidence.  That happened
+     * when the second leg read from `ne_test_pattern + 16`.  The pattern sits
+     * at .text+0x8da, so +16 is 2 mod 4, and the leg meant to test the
+     * transmit direction tested the 16-bit port.
      */
     ULONG  outbuf[NETDEV_BUS_PROBE_LEN / 4];
     ULONG  inbuf[NETDEV_BUS_PROBE_LEN / 4];
@@ -632,10 +630,10 @@ static VOID ne2000_probe_wide(NetdevNic *nic)
 
 /*
  * NetBSD zeroes and reads back the whole buffer before it trusts the card
- * (dp8390_test_mem / ne2000_test_mem).  Dropping it accepts a board with bad
- * buffer RAM and, worse, leaves the receive ring holding whatever was there --
- * which is the feedstock for the corrupt-header path in dp8390_rint().
- * A page at a time, so the staging buffer stays small.
+ * (dp8390_test_mem / ne2000_test_mem).  Without it, a board with bad buffer
+ * RAM is accepted, and the receive ring is left holding whatever was there,
+ * which feeds the corrupt-header path in dp8390_rint().  A page at a time, so
+ * the staging buffer stays small.
  */
 static BOOL ne2000_test_mem(NetdevNic *nic)
 {
@@ -678,22 +676,20 @@ static LONG ne2000_attach(NetdevNic *nic)
     nic->cr_proto  = ED_CR_RD2;
 
     /*
-     * rcr_proto is zero for every part in the table.  WHAT A NEW ROW MAY NEED,
-     * because none of it is here and its absence should not read as a decision
-     * that it is unnecessary (NetBSD ne2000.c, ne2000_attach):
+     * rcr_proto is zero for every part in the table.  What a new row can need,
+     * none of which is implemented here (NetBSD ne2000.c, ne2000_attach):
      *
      *   AX88190 / AX88790   rcr_proto = ED_RCR_INTT, and the ISR acknowledge
-     *                       has to be retried -- writing ISR once does not
+     *                       must be retried, because one ISR write does not
      *                       always clear it on those parts.
-     *   a part with no ISR.RDC   the two waits in this file have to be skipped
-     *                       rather than allowed to time out; a timeout here
+     *   a part with no ISR.RDC   the two waits in this file must be skipped
+     *                       rather than allowed to time out.  A timeout here
      *                       resets the chip.
      *   NE1000 / 8-bit      byte-wide remote DMA, 8 KB of buffer, and the
      *                       station address at romdata[i] rather than [i * 2].
      *
      * Flags for all three used to sit in NetdevNic assigned once and never
-     * set, so the code read as though the quirks were handled.  They are not;
-     * this comment is what is handled.
+     * set, so the code read as though the quirks were handled.  They are not.
      */
     nic->rcr_proto = 0;
     nic->dcr_reg   = ED_DCR_FT1 | ED_DCR_LS | ED_DCR_WTS;
@@ -707,13 +703,13 @@ static LONG ne2000_attach(NetdevNic *nic)
 
     /*
      * Where the station address is depends on the part, not on the card, and
-     * an X-Surf 100 is both: the AX88796 keeps it at AX88190_NODEID_OFFSET,
-     * but a board wired as a plain NE2000 -- which is what the emulated one
-     * is, and what a re-badged clone may be -- images a serial ROM into the
-     * first 32 bytes of the buffer with 0x57 0x57 at the end of it.  Read the
-     * ROM image, believe it if the signature is there, and only then go
-     * looking in the AX88796's own space.  Guessing from the Zorro product ID
-     * gets one of the two wrong.
+     * an X-Surf 100 is both.  The AX88796 keeps it at AX88190_NODEID_OFFSET.
+     * A board wired as a plain NE2000, which is what the emulated one is and
+     * what a re-badged clone can be, images a serial ROM into the first 32
+     * bytes of the buffer with 0x57 0x57 at the end of it.  Read the ROM
+     * image, believe it if the signature is there, and only then look in the
+     * AX88796's own space.  A guess from the Zorro product ID gets one of the
+     * two wrong.
      */
     ne2000_readmem(nic, 0, romdata, sizeof(romdata));
     if (romdata[28] == 0x57 && romdata[30] == 0x57)
@@ -735,15 +731,15 @@ static LONG ne2000_attach(NetdevNic *nic)
     }
 
     /*
-     * CLEAR THE GROUP BIT IN THE ROM ADDRESS.
+     * Clear the group bit in the ROM address.
      *
      * The D-Link DFE-670TXD's PROM reads 01:D4:FF:03:00:20.  Programmed into
-     * PAR0..5 as it stands, the DP8390 does not match its own unicast address
-     * -- the comparator treats bit 0 of octet 0 as the group bit -- and every
-     * frame the card transmits carries a multicast source address, which some
-     * switches drop and every receiver mis-learns.  cnet.device clears the bit
-     * unconditionally and warns (cnetdevice.asm:3666-3672); this is the same
-     * fix and it is a no-op on every card whose PROM is right.
+     * PAR0..5 as it stands, the DP8390 does not match its own unicast address,
+     * because the comparator treats bit 0 of octet 0 as the group bit.  Every
+     * frame the card transmits then carries a multicast source address, which
+     * some switches drop and every receiver mis-learns.  cnet.device clears the
+     * bit unconditionally and warns (cnetdevice.asm:3666-3672).  This is the
+     * same fix, and it is a no-op on every card whose PROM is right.
      */
     nic->mac_source = (UBYTE)ANXDIAG_MAC_PROM;
 
@@ -756,20 +752,20 @@ static LONG ne2000_attach(NetdevNic *nic)
     }
 
     /*
-     * AND IF THERE IS NO ADDRESS IN THE PROM AT ALL.
+     * And if there is no address in the PROM at all.
      *
-     * All-zero and all-ones are both "the PROM is not answering" -- ed.c has
-     * rejected them since it was written (ed.c:406) and this path never
+     * All-zero and all-ones both mean the PROM is not answering.  ed.c has
+     * rejected them since it was written (ed.c:406), and this path never
      * tested for them, so such a card enumerated a unit that came online and
-     * was never delivered a frame.  Rejecting it is one answer; it is not the
-     * useful one, because a PCMCIA clone with a blank PROM is a card that
-     * works perfectly once it has an address.
+     * was never delivered a frame.  A rejection is one answer, but not a
+     * useful one, because a PCMCIA clone with a blank PROM works once it has
+     * an address.
      *
-     * So: the card's CIS first, which is where the PC Card standard puts a
-     * LAN address and where a card built for a CIS-reading PC driver keeps
-     * it, and a derived locally-administered address after that.  NOT
+     * The card's CIS comes first, which is where the PC Card standard puts a
+     * LAN address and where a card built for a CIS-reading PC driver keeps it.
+     * A derived locally-administered address comes after that.  Not
      * cnet.device's hardcoded 00:00:12:34:56:78 (cnetdevice.asm:5445-5447),
-     * whose own comment is "replace this with your card's address!": two
+     * whose own comment is "replace this with your card's address!".  Two
      * Amigas running it on one segment answer each other's ARP.
      */
     if (!netdev_mac_usable(nic->factory))
