@@ -130,14 +130,22 @@ CROSS_CONFIGS=(
     # leak nobody wrote a test for, and an instrument that stops building is
     # the one nobody notices.
     "census:-DAMINETXDUO_ALLOCCENSUS=ON"
-    # NO PER-CPU ARMS.  There used to be three -- m68000, m68040, m68060 -- and
-    # they were here because the archive shipped a library per CPU and each had
-    # to compile.  It does not any more: one build serves every 68k and chooses
-    # its inner loops from AttnFlags at init, so the default configuration IS
-    # the shipping one and these arms were three full cross builds proving
-    # something nothing ships.  A specific CPU is still buildable and is how
-    # every figure in cmake/toolchain-m68k-amigaos.cmake was measured; it is
-    # not CI's job.
+    # ONE PER-CPU ARM, and only one.  There used to be three -- m68000, m68040
+    # and m68060 -- because the archive shipped a library per CPU and each had
+    # to compile; that is over, one build serves every 68k and chooses its
+    # inner loops from AttnFlags at init, so `default` IS the shipping arm.
+    #
+    # 68060 came back because it is not a tuning choice.  -DAMINETXDUO_CPU is a
+    # cache variable with a STRINGS list, so it is a configuration a user can
+    # select, and of the five values it is the only one whose flag names a
+    # different TARGET: 68000 and `any` are -m68000, which `default` compiles,
+    # 68020 and 68040 are -m68020 whose extra instructions the default arm
+    # already assembles in src/net68k and src/crypto68k, and -mcpu=68060 is a
+    # part with instructions REMOVED.  Nothing built it, so nothing noticed
+    # that src/common/ami_udivdi3.c left the assembler in 68000 mode for the
+    # rest of the file and the whole tree stopped building for it.  One arm,
+    # ~18 s of the cross stage on a 24-core host, one in fourteen.
+    "cpu68060:-DAMINETXDUO_CPU=68060"
     # The second drawer in the archive, and the only arm here that turns more
     # than one thing off at once.  Every option above is a separate arm because
     # each has its own compile-time surface; this one exists because the
