@@ -93,7 +93,7 @@ LONG bsd_fail(struct AmiSocketBase *base, LONG code)
 
 /*
  * NetX Duo status -> BSD errno. Only the codes our call sites can produce are
- * listed; anything else falls through to EIO.
+ * listed. Anything else falls through to EIO.
  */
 typedef struct
 {
@@ -106,11 +106,11 @@ static const BsdStatusMap bsd_status_map[] =
     { NX_SUCCESS,           0                    },
     /*
      * NX_NO_PACKET means both "nothing to read" and "the packet pool is
-     * empty"; EWOULDBLOCK is only right for the first. It holds here because
-     * no caller can reach the second on a socket that was willing to wait,
-     * see bsd_wait_option() in select.c before adding a call site that does
-     * not go through it. New code should use bsd_wait_errno() below, which
-     * checks the wait value instead of assuming this.
+     * empty". EWOULDBLOCK is only right for the first. It holds here because
+     * no caller can reach the second on a socket that was willing to wait.
+     * Read bsd_wait_option() in select.c before a new call site is added that
+     * does not go through it. New code must use bsd_wait_errno() below, which
+     * checks the wait value rather than assumes this.
      */
     { NX_NO_PACKET,         AMI_EWOULDBLOCK      },
     { NX_UNDERFLOW,         AMI_EINVAL           },
@@ -197,25 +197,26 @@ LONG bsd_errno_from_nx(UINT status)
  * reports against AmiTCP and Roadshow (docs/RESEARCH.md 37). ENOBUFS is what
  * that socket gets instead.
  *
- * THAT ARM CANNOT BE ENTERED, and the reason is structural rather than a
- * question of how hard the pool is pushed. The three statuses are what NetX
- * Duo returns when it MAY NOT WAIT: with a non-zero wait option it suspends
+ * That arm cannot be entered, and the reason is structural, not a question of
+ * how hard the pool is pushed. The three statuses are what NetX Duo returns
+ * when it is not allowed to wait. With a non-zero wait option it suspends
  * (nx_packet_allocate.c's `if (wait_option)`, nx_tcp_socket_send_internal.c's
- * suspension arm), and the cleanup routines that resume a suspended thread
- * with one of the three -- _nx_packet_pool_cleanup, _nx_tcp_transmit_cleanup
- * -- run on the TIMEOUT, which NX_WAIT_FOREVER has not got. So a caller
- * holding NX_WAIT_FOREVER never sees any of the three, and `impatient` is true
- * at every entry that reaches the case below. bsd_wait_sliced() (select.c)
- * closes it from the other side as well: those are the exact three statuses it
- * retries on, so a blocking call with no timeout does not even return from
- * there with one. tests/tcpdrill/scripts/blocking.drill b07 asserts the
- * reachable half, on a booted guest, and says the same thing about this half.
+ * suspension arm). The cleanup routines that resume a suspended thread with
+ * one of the three, _nx_packet_pool_cleanup and _nx_tcp_transmit_cleanup, run
+ * on the timeout, which NX_WAIT_FOREVER does not have. A caller that holds
+ * NX_WAIT_FOREVER therefore never sees any of the three, and `impatient` is
+ * true at every entry that reaches the case below. bsd_wait_sliced()
+ * (select.c) closes it from the other side as well: those are the exact three
+ * statuses it retries on, so a blocking call with no timeout does not even
+ * return from there with one. tests/tcpdrill/scripts/blocking.drill b07
+ * asserts the reachable half, on a booted guest, and says the same thing about
+ * this half.
  *
- * The arm stays rather than becoming an assertion: `wait` is a parameter, the
+ * The arm stays rather than becomes an assertion: `wait` is a parameter, the
  * statuses come from a third party, and an errno is cheaper than a mistake.
  *
  * NX_WAIT_ABORTED and NX_POOL_DELETED are handled here because the table alone
- * would turn a signalled thread and a stack shutting down into "try again".
+ * turns a signalled thread and a stack shutdown into "try again".
  *
  * `wait` is the value the call was given, straight from bsd_wait_option(), not
  * the socket: NX_NO_WAIT and an expired SO_RCVTIMEO/SO_SNDTIMEO both mean the
@@ -352,8 +353,8 @@ VOID bsd_SetErrnoPtr(register APTR errno_ptr __asm("a0"),
 
 LONG bsd_enosys(register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    /* Reached through any vector we have not implemented. Returning -1 with
-       ENOSYS is survivable; a NULL vector is not. */
+    /* Reached through any vector we have not implemented. -1 with ENOSYS is
+       survivable. A NULL vector is not. */
     return bsd_fail(SocketBase, AMI_ENOSYS);
 }
 
@@ -363,7 +364,7 @@ APTR bsd_enosys_ptr(register struct AmiSocketBase *SocketBase __asm("a6"))
      * The same, for the vectors that return a pointer. -1 in d0 is not a
      * failure there: getservbyname(), getprotobyname(), ObtainInterfaceList(),
      * mbuf_get() and the rest are documented to return NULL and callers test
-     * for NULL. 0xFFFFFFFF would crash the caller on the first dereference.
+     * for NULL. 0xFFFFFFFF crashes the caller on the first dereference.
      */
     (VOID)bsd_fail(SocketBase, AMI_ENOSYS);
 
@@ -373,9 +374,9 @@ APTR bsd_enosys_ptr(register struct AmiSocketBase *SocketBase __asm("a6"))
 BOOL bsd_enosys_bool(register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     /*
-     * And again for the vectors that return BOOL, where -1 is all-bits-set, so
-     * `if (ChangeRoadshowData(...))` would read it as TRUE and conclude the
-     * operation succeeded.
+     * And again for the vectors that return BOOL, where -1 is all-bits-set.
+     * `if (ChangeRoadshowData(...))` reads that as TRUE, and the caller
+     * concludes the operation succeeded.
      */
     (VOID)bsd_fail(SocketBase, AMI_ENOSYS);
 
@@ -408,24 +409,25 @@ static const BsdSimpleTag bsd_simple_tags[] =
     { SBTC_LOGFACILITY,  SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_LogFacility)  },
     { SBTC_LOGMASK,      SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_LogMask)      },
     /*
-     * Stored and read back; never called. The NDK deprecates it in place,
+     * Stored and read back, never called. The NDK deprecates it in place,
      * "Link library fd allocation callback; don't use this in new code!", and
-     * the same again over FDCB_FREE/ALLOC/CHECK, and it is the AmiTCP 3
-     * mechanism by which a link library kept its own descriptor table in step
-     * with the socket library's. Calling it would mean bsd_fd_alloc() and
-     * bsd_fd_free() reaching out into caller code while they hold library
-     * state, for a facility whose own header says not to use it. There is no
-     * SBTC_HAVE_ tag covering it and refusing the SET is worse than useless
-     * here (see the note below on what an unserviced tag discards), so the
-     * decision is recorded rather than signalled.
+     * the same again over FDCB_FREE/ALLOC/CHECK. It is the AmiTCP 3 mechanism
+     * by which a link library kept its own descriptor table in step with the
+     * socket library's. A call to it means bsd_fd_alloc() and bsd_fd_free()
+     * reach into caller code while they hold library state, for a facility
+     * whose own header says not to use it. There is no SBTC_HAVE_ tag that
+     * covers it, and a refused SET here costs more than it gains (see the note
+     * below on what an unserviced tag discards). The decision is therefore
+     * recorded here rather than signalled to the caller.
      */
     { SBTC_FDCALLBACK,   SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_FDCallback)   },
     { SBTC_ERROR_HOOK,   SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_ErrorHook)    },
     /*
-     * Both of these are per-opener state a caller may set and read back. They
-     * are here rather than among the constants because refusing a documented
-     * SET returns the tag's index and discards every tag after it in the same
-     * call, which is how an errno link in the next slot goes missing.
+     * Both of these are per-opener state a caller can set and read back. They
+     * are here rather than among the constants because a refused SET on a
+     * documented tag returns the tag's index and discards every tag after it
+     * in the same call. That is how an errno link in the next slot goes
+     * missing.
      */
     { SBTC_SIG_ADDRESS_CHANGE_MASK, SBT_RW,
       (UWORD)offsetof(struct AmiSocketBase, sb_SigAddressChangeMask) },
@@ -438,13 +440,13 @@ static const BsdSimpleTag bsd_simple_tags[] =
  *
  * `settable` marks the ones the autodoc describes as "for querying and
  * changing". A SET on those is accepted when the value asked for is the value
- * already in force and refused when it is a real change: configuration code
- * routinely reads a tunable and writes it straight back, and refusing that
+ * already in force, and refused when it is a real change. Configuration code
+ * routinely reads a tunable and writes it straight back. A refusal there
  * returns the tag's index and discards every tag after it in the same call,
- * which is how an SBTC_ERRNOPTR in the next slot goes missing. A caller
- * genuinely trying to turn IP forwarding on still gets told.
+ * which is how an SBTC_ERRNOPTR in the next slot goes missing. A caller that
+ * asks to turn IP forwarding on is still told.
  *
- * The capability tags are query-only in the document and stay so: nothing can
+ * The capability tags are query-only in the document and stay so. Nothing can
  * be set about whether an API exists.
  */
 typedef struct
@@ -474,13 +476,13 @@ static const BsdConstTag bsd_const_tags[] =
 
     /*
      * The tunables. SocketBaseTagList() is documented to return the index of
-     * the first tag it could not service and stop there, so one unserviced
-     * code in a caller's list discards every tag after it. A client that
-     * probes a group of tunables in a single call then gets nothing, and the
-     * failure looks like the library not working rather than one tag being
-     * unknown (docs/RESEARCH.md 55).
+     * the first tag it cannot service and stop there, so one unserviced code
+     * in a caller's list discards every tag after it. A client that probes a
+     * group of tunables in a single call then gets nothing, and the failure
+     * looks like a broken library rather than one unknown tag
+     * (docs/RESEARCH.md 55).
      *
-     * Every value below is what this stack does; where the answer is "no", it
+     * Every value below is what this stack does. Where the answer is "no", it
      * says no.
      */
     { SBTC_UDP_CHECKSUM,        SBT_RW, TRUE               }, /* always computed */
@@ -492,7 +494,7 @@ static const BsdConstTag bsd_const_tags[] =
        Timestamp is not implemented by NetX Duo, so it is ignored. */
     { SBTC_ICMP_PROCESS_ECHO,   SBT_RW, 0 },
     { SBTC_ICMP_PROCESS_TSTAMP, SBT_RW, 1 },
-    /* IDNCS_ASCII. No IDN support here; host names go on the wire as ASCII. */
+    /* IDNCS_ASCII. No IDN support here. Host names go on the wire as ASCII. */
     { SBTC_IDN_DEFAULT_CHARACTER_SET, SBT_RW, 0 },
     /*
      * TRUE since routing.c: AddRouteTagList(), DeleteRouteTagList(),
@@ -507,30 +509,30 @@ static const BsdConstTag bsd_const_tags[] =
      * QueryInterfaceTagList(), ConfigureInterfaceTagList(),
      * AddInterfaceTagList() and RemoveInterface() are. Individual tags this
      * stack cannot honour are refused there, which a caller reads out of
-     * errno; FALSE here would stop it asking at all.
+     * errno. FALSE here stops it from asking at all.
      */
     { SBTC_HAVE_INTERFACE_API,          SBT_RO, TRUE  },
     /*
      * TRUE since netmonitor.c: AddNetMonitorHookTagList() and
      * RemoveNetMonitorHook() are what this tag names, and they work for
      * MHT_Connect, MHT_Bind and MHT_Send. The four in-stack types answer the
-     * documented EINVAL, which the caller reads out of errno; FALSE here would
-     * stop it asking for the three that install.
+     * documented EINVAL, which the caller reads out of errno. FALSE here stops
+     * it from asking for the three that install.
      */
     { SBTC_HAVE_MONITORING_API,         SBT_RO, TRUE  },
     /*
      * TRUE since netstats.c: GetNetworkStatistics() is all this tag gates.
      * Four of its ten types are refused with EOPNOTSUPP, which the caller
-     * reads out of errno; FALSE here would stop it asking about the six that
+     * reads out of errno. FALSE here stops it from asking about the six that
      * answer.
      */
     { SBTC_HAVE_STATUS_API,             SBT_RO, TRUE  },
     /*
      * TRUE since roadshow.c gained AddDomainNameServer(),
-     * RemoveDomainNameServer() and SetDefaultDomainName(); the list and its
+     * RemoveDomainNameServer() and SetDefaultDomainName(). The list and its
      * release were already there, so the DNS management API is complete.
      *
-     * This tag gates more than its name suggests: every form of Roadshow's
+     * This tag gates more than its name says. Every form of Roadshow's
      * ShowNetStatus, interfaces, routes, DNS, IP, ICMP, TCP, UDP, sockets,
      * all ten, refuses outright when it reads FALSE (docs/RESEARCH.md 55).
      */
@@ -539,9 +541,9 @@ static const BsdConstTag bsd_const_tags[] =
     /*
      * TRUE since netdb.c: the tag names setnetent() and getprotoent(), and all
      * nine of set/get/end {net,proto,serv}ent are there over the DEVS:Internet
-     * store. This answered FALSE while they worked, which is the mirror image
-     * of the SBTC_HAVE_DNS_API bug in docs/RESEARCH.md 55, there we claimed
-     * an API we did not have, here we denied one we do.
+     * store. This answered FALSE while they worked, the reverse of the
+     * SBTC_HAVE_DNS_API bug in docs/RESEARCH.md 55. There we claimed an API we
+     * did not have. Here we denied one we do.
      */
     { SBTC_HAVE_LOCAL_DATABASE_API,     SBT_RO, TRUE  },
     { SBTC_HAVE_ADDRESS_CONVERSION_API, SBT_RO, TRUE  },
@@ -662,12 +664,12 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
 
         /*
          * Total bytes in and out, as an SBQUAD_T the caller supplies.
-         * Roadshow's SampleNetSpeed measures throughput from these; without
+         * Roadshow's SampleNetSpeed measures throughput from these. Without
          * them it prints "Could not query data throughput statistics" and
          * exits (docs/RESEARCH.md 55).
          *
          * NetX Duo counts in ULONG, so the high word is always zero and the
-         * count wraps after 4 GB. That is NetX Duo's counter; a wrap shows up
+         * count wraps after 4 GB. That is NetX Duo's counter. A wrap shows up
          * as a sudden drop rather than as garbage.
          *
          * By reference only: a quad does not fit in ti_Data, so a request
@@ -705,8 +707,8 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
          *
          * Everything here is read from the configuration the stack is running,
          * so the answer changes as interfaces come up and go down. PTP is
-         * never set: a point-to-point interface would mean SLIP or PPP, and
-         * this stack does neither.
+         * never set: a point-to-point interface means SLIP or PPP, and this
+         * stack does neither.
          */
         case SBTC_SYSTEM_STATUS:
         {
@@ -726,8 +728,8 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
 
                     /*
                      * Every SANA-II interface we can drive is Ethernet, so it
-                     * carries broadcast. Keyed on the interface being up
-                     * rather than merely configured: a down interface cannot
+                     * carries broadcast. Keyed on an interface that is up
+                     * rather than only configured: a down interface cannot
                      * carry a broadcast.
                      */
                     if (netstack_interface_is_up(i))
@@ -746,10 +748,11 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
                 /*
                  * The running gateway, not the configured one. A DHCP machine
                  * has default_gateway 0 in AmiConfig and a good default route
-                 * that arrived in the lease, so reading the config made
-                 * GetNetStatus say "the default route is not configured" on a
-                 * machine where ShowNetStatus printed "Default gateway address
-                 * = 10.0.2.2". routing.c and netstatus.c ask NetX Duo too.
+                 * that arrived in the lease. A read of the configuration
+                 * therefore made GetNetStatus say "the default route is not
+                 * configured" on a machine where ShowNetStatus printed
+                 * "Default gateway address = 10.0.2.2". routing.c and
+                 * netstatus.c ask NetX Duo too.
                  */
                 {
                     NX_IP *ip = netstack_ip();
@@ -798,7 +801,7 @@ static BOOL bsd_tag_set(struct AmiSocketBase *base, struct TagItem *item,
     }
 
     /* A SET of a fixed tunable to the value it already holds. See BsdConstTag:
-       the caller has changed nothing, so there is nothing to refuse. */
+       the caller changed nothing, so there is nothing to refuse. */
     for (i = 0; i < sizeof(bsd_const_tags) / sizeof(bsd_const_tags[0]); i++)
     {
         if (bsd_const_tags[i].code != code)
@@ -813,7 +816,7 @@ static BOOL bsd_tag_set(struct AmiSocketBase *base, struct TagItem *item,
         case SBTC_DTABLESIZE:
             return (bsd_table_resize(base, (LONG)value) == 0);
 
-        /* errno mirroring. The caller picks the width; that is why there are
+        /* errno mirroring. The caller picks the width, which is why there are
            three tags rather than one. */
         case SBTC_ERRNOBYTEPTR:
             base->sb_ErrnoPtr  = (APTR)value;

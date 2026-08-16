@@ -12,20 +12,20 @@
  * (third_party/bsdsocktest/src/known_failures.c):
  *
  *   1. The returned struct is per opener, not a file static. Two tasks each
- *      have their own SocketBase (docs/RESEARCH.md S3.1), and a shared static
- *      would mean task A's getservbyname() overwrites the servent task B is
- *      still holding, Amiberry's "getservbyname() returns stale pointer"
- *      bug, test 93.
+ *      have their own SocketBase (docs/RESEARCH.md S3.1). With a shared
+ *      static, task A's getservbyname() overwrites the servent that task B
+ *      still holds. That is Amiberry's "getservbyname() returns stale
+ *      pointer" bug, test 93.
  *
  *   2. s_port is in network byte order, as BSD specifies, callers do
  *      ntohs(s->s_port). That is identity on m68k, so it is spelled out with
- *      BSD_HTONS() rather than left implicit; the port number a caller passes
+ *      BSD_HTONS() rather than left implicit. The port number a caller passes
  *      to getservbyport() comes back the same way. (Amiberry's test 94
  *      failure is this conversion applied in the wrong direction.)
  *
- * The name/alias/protocol strings point straight into the parsed file buffer,
- * which is allocated once at startup and never freed while the library is
- * open, so nothing here copies strings.
+ * The name/alias/protocol strings point straight into the parsed file buffer.
+ * That buffer is allocated once at startup and never freed while the library
+ * is open, so nothing here copies strings.
  *
  * ami_netdb_load() is not re-entrant, so it runs exactly once, from
  * bsd_lib_open() under the master base's semaphore (and, before that, from
@@ -85,7 +85,7 @@ struct servent *bsd_getservbyport(register LONG port    __asm("d0"),
                                   register STRPTR proto __asm("a0"),
                                   register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    /* The caller passes the port in network order (htons(21)); the store
+    /* The caller passes the port in network order (htons(21)). The store
        holds it in host order. Identity on m68k, spelled out anyway. */
     LONG host_port = (LONG)BSD_NTOHS((UWORD)port);
 
@@ -99,7 +99,7 @@ VOID bsd_setservent(register LONG stay_open __asm("d0"),
 {
     /* stay_open asks the database file to be kept open between calls. The
        store is parsed into memory once and never closed, so there is nothing
-       to keep open; rewinding is all that is observable. */
+       to keep open. Only the rewind is observable. */
     (VOID)stay_open;
 
     SocketBase->sb_ServCursor = 0;
