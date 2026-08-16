@@ -13,7 +13,7 @@
 
 /*
  * 4294967295 is the largest a ULONG holds on the target.  The check is made
- * BEFORE the multiply rather than after it, because after it there is nothing
+ * before the multiply rather than after it, because after it there is nothing
  * left to see: 4294967306 had already become 10.
  */
 #define HF_ULONG_MAX    4294967295UL
@@ -49,8 +49,8 @@ HttpFrameResult http_frame_length(const char *value, unsigned long *out)
         return HTTP_FRAME_EMPTY;
 
     /* Trailing whitespace is allowed and anything else is not.  A value of
-       "5abc" is not a length with junk after it, it is a header this server
-       does not understand, and a body it therefore cannot place. */
+       "5abc" is a header this server does not understand, and a body it
+       therefore cannot place. */
     while (*value == ' ' || *value == '\t')
         value++;
 
@@ -125,7 +125,7 @@ HttpFrameCoding http_frame_coding(const char *value)
         while (end > start && (end[-1] == ' ' || end[-1] == '\t'))
             end--;
 
-        /* A coding may carry parameters after a ';'; none of the ones this
+        /* A coding can carry parameters after a ';'.  None of the ones this
            server takes has any, so a token with one is not one of them. */
         if (hf_token_is(start, end, "chunked"))
             last = HTTP_TE_CHUNKED;
@@ -170,10 +170,10 @@ void http_chunk_off(HttpChunk *ch)
  * The size line that has just been collected, as a count.
  *
  * Hex, at most eight digits of it, then either the end of the line or the ';'
- * that starts a chunk extension.  Eight is not a taste: it is the whole of a
- * 32-bit count, and a ninth used to shift the first one out, which is how
- * "100000000" became 0, was read as the terminator, and left the body to be
- * parsed as the next request.
+ * that starts a chunk extension.  Eight digits are the whole of a 32-bit
+ * count, and a ninth used to shift the first one out, which is how "100000000"
+ * became 0, was read as the terminator, and left the body to be parsed as the
+ * next request.
  */
 static int hf_chunk_size(const char *p, unsigned long *out)
 {
@@ -204,11 +204,11 @@ static int hf_chunk_size(const char *p, unsigned long *out)
     }
 
     if (digits == 0)
-        return 0;                   /* a line where a size should have been */
+        return 0;                   /* a line with no size in it            */
 
     /* Either the end of the line, or the ';' that starts a chunk extension.
-       "5X" is not five with junk after it; it is a size this server cannot
-       read, and a body it therefore cannot place. */
+       "5X" is a size this server cannot read, and a body it therefore cannot
+       place. */
     if (*p != '\0' && *p != ';')
         return 0;
 
@@ -302,7 +302,7 @@ long http_chunk_feed(HttpChunk *ch, const unsigned char *data, long len,
                 int c = data[i++];
 
                 /* Trailer lines, then a blank one.  Nothing here reads a
-                   trailer; they are counted so the blank line is found. */
+                   trailer.  They are counted so the blank line is found. */
                 if (c == '\n')
                 {
                     if (ch->n == 0U)

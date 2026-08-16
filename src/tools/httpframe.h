@@ -6,14 +6,13 @@
  * a host test and a fuzzer compile it.  httpd.c reaches proto/dos.h and
  * tx_api.h, and neither builds on a host.
  *
- * Getting the length wrong is not a parse error, it is a framing error, and a
- * framing error puts bytes the client meant as a body where the parser looks
- * for the next request line.  That is request smuggling, and on this server it
- * needs no attacker: a Content-Length that overflowed, or a chunk size that
- * did, leaves the rest of an upload sitting in the buffer to be read as
- * methods.  So everything here refuses rather than guesses, and the caller
- * closes the connection when it does, there is no way to resynchronise a
- * stream whose framing is already lost.
+ * A wrong length is a framing error.  It puts bytes the client meant as a body
+ * where the parser looks for the next request line.  That is request
+ * smuggling, and on this server it needs no attacker: a Content-Length that
+ * overflowed, or a chunk size that did, leaves the rest of an upload sitting
+ * in the buffer to be read as methods.  So everything here refuses rather than
+ * guesses, and the caller closes the connection when it does.  A stream whose
+ * framing is already lost cannot be resynchronised.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -60,8 +59,7 @@ typedef enum HttpFrameCoding
  * is a body it cannot read and is refused rather than handed on half-decoded.
  *
  * The match is on the whole token.  A seven-character prefix test called
- * "chunkedX" chunked and missed "gzip, chunked" entirely, which are the two
- * halves of the same mistake.
+ * "chunkedX" chunked and missed "gzip, chunked" entirely.
  */
 HttpFrameCoding http_frame_coding(const char *value);
 
@@ -75,7 +73,7 @@ enum
     HTTP_CHUNK_CRLF,
     HTTP_CHUNK_TRAILER,
     HTTP_CHUNK_DONE,
-    HTTP_CHUNK_ERROR            /* the framing is lost; close              */
+    HTTP_CHUNK_ERROR            /* the framing is lost, close              */
 };
 
 /*
@@ -95,10 +93,10 @@ typedef struct HttpChunk
     char          line[HTTP_CHUNK_LINE];
 } HttpChunk;
 
-/* Everything a sink is handed, with whatever the caller wants to know. */
+/* The decoded body bytes, with the caller's own context. */
 typedef void (*HttpChunkSink)(void *ctx, const unsigned char *data, long len);
 
-/* Ready to read a body.  `off` leaves it saying "this body is not chunked". */
+/* Ready to read a body.  http_chunk_off() leaves it not chunked. */
 void http_chunk_start(HttpChunk *ch);
 void http_chunk_off(HttpChunk *ch);
 
@@ -108,7 +106,7 @@ void http_chunk_off(HttpChunk *ch);
  * middle of is in the HttpChunk.
  *
  * Returns how much of `data` was consumed.  Anything after that is the next
- * request, or, when the state is HTTP_CHUNK_ERROR, nothing the caller may
+ * request, or, when the state is HTTP_CHUNK_ERROR, nothing the caller can
  * use.
  */
 long http_chunk_feed(HttpChunk *ch, const unsigned char *data, long len,

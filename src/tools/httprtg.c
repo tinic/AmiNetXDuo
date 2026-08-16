@@ -2,36 +2,32 @@
  * Reading a graphics card's framebuffer back.  See httprtg.h for what this is
  * and what it deliberately is not.
  *
- * THE LIBRARY CALLS ARE HAND-DECLARED, AND THAT IS ON PURPOSE
+ * The library calls are hand-declared.  Picasso96 and CyberGraphX are
+ * third-party libraries and their headers are not in the NDK the toolchain
+ * ships, so a build machine either has them or does not and the answer differs
+ * between the Mac tree and the pinned Linux one.  What is needed is nine
+ * functions and a dozen constants, so they are declared here against
+ * inline/macros.h, the NDK's own LPn call macros, present in every toolchain
+ * this builds with.  The library offsets and register assignments are taken
+ * from Picasso96API_lib.fd and cybergraphics.fd, and each offset is beside its
+ * call.
  *
- *   Picasso96 and CyberGraphX are third-party libraries and their headers are
- *   not in the NDK the toolchain ships, so a build machine either has them or
- *   does not and the answer differs between the Mac tree and the pinned Linux
- *   one.  What is needed is nine functions and a dozen constants, so they are
- *   declared here against inline/macros.h -- the NDK's own LPn call macros,
- *   present in every toolchain this builds with -- with the library offsets
- *   and register assignments taken from Picasso96API_lib.fd and
- *   cybergraphics.fd.  Nothing here is guessed; the offsets are beside each
- *   call.
+ * Neither library is required to be present.  Each is opened if it is there,
+ * and a machine with neither cannot have an RTG screen in front of it in the
+ * first place.
  *
- *   Neither library is required to be present.  Each is opened if it is there,
- *   and a machine with neither cannot have an RTG screen in front of it in the
- *   first place.
+ * The read is whole rows rather than tiles.  The encoder's tile pass compares
+ * against its shadow and reads nothing where nothing changed, which on the
+ * chipset is right.  It cannot be done here, because the compare would be the
+ * readback.  So the whole frame is fetched into a staging buffer in Fast RAM
+ * and the encoder is pointed at that buffer, which puts every one of its
+ * comparisons on ordinary memory and leaves exactly one readback a frame.
  *
- * WHY THE READ IS WHOLE ROWS AND NOT TILES
- *
- *   The encoder's tile pass wants to compare against its shadow and read
- *   nothing where nothing changed, and on the chipset that is exactly right.
- *   It cannot be done here: the compare would be the readback.  So the whole
- *   frame is fetched into a staging buffer in Fast RAM and the encoder is
- *   pointed at THAT, which puts every one of its comparisons on ordinary
- *   memory and leaves exactly one readback a frame.
- *
- *   And that readback is contiguous full rows.  x11vnc measures adjacent
- *   rectangles read together as up to twice the rate of the same bytes read
- *   separately, and a card can be down at single-figure MB/s on reads, so the
- *   shape of the fetch is most of its cost.  A loop of tile-sized rectangles
- *   is the wrong shape by an order of magnitude and is not offered here.
+ * That readback is contiguous full rows.  x11vnc measures adjacent rectangles
+ * read together as up to twice the rate of the same bytes read separately, and
+ * a card can be down at single-figure MB/s on reads, so the shape of the fetch
+ * is most of its cost.  A loop of tile-sized rectangles is the wrong shape by
+ * an order of magnitude and is not offered here.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -77,7 +73,7 @@ struct RtgRenderInfo
 #define P96BMA_ISP96         8UL
 #define P96BMA_ISONBOARD     9UL
 
-#define RGBFB_NONE           0UL    /* planar; the name is P96's, historical */
+#define RGBFB_NONE           0UL    /* planar, under P96's historical name   */
 #define RGBFB_CLUT           1UL    /* palette indexed, one byte a pixel     */
 
 /* p96AllocBitMap: never displayed, never moves, needs no lock. */
@@ -213,7 +209,7 @@ static ULONG           rtg_kbs[RTG_N_ROUTE];   /* 0 = the route was not there */
 static struct BitMap  *rtg_off;
 static UBYTE           rtg_off_is_p96;
 
-/* How tall one fetch is.  The read is whole rows either way; this bounds how
+/* How tall one fetch is.  The read is whole rows either way.  This bounds how
    long a single library call holds the bitmap locked, which on P96 stops
    screen switching for as long as it lasts.  128 rows of a 1280-wide screen
    is 160 KB, which at the worst read rate a card has been reported at is
@@ -264,14 +260,13 @@ BOOL http_rtg_present(VOID)
 /* ------------------------------------------------------------ describing -- */
 
 /*
- * ASKED BEFORE BMF_STANDARD, WHICH IS THE WHOLE POINT OF IT
- *
- * The planar path's first question is whether the bitmap carries BMF_STANDARD,
- * and on a chipset machine that is the right question.  A card's bitmap may
- * carry it too -- it is what makes the OS treat the thing normally -- and its
- * Planes[] are not eight bitplanes.  So the owner is asked first: both of
- * these answer for any bitmap, including one that belongs to neither of them,
- * which is what makes the question safe to put first.
+ * Asked before BMF_STANDARD.  The planar path's first question is whether the
+ * bitmap carries BMF_STANDARD, and on a chipset machine that is the right
+ * question.  A card's bitmap can carry it too, since that flag is what makes
+ * the OS treat the bitmap normally, and its Planes[] are not eight bitplanes.
+ * So the owner is asked first.  Both libraries answer for any bitmap,
+ * including one that belongs to neither of them, which is what makes the
+ * question safe to put first.
  */
 BOOL http_rtg_owns(struct BitMap *bm)
 {
@@ -330,11 +325,10 @@ BOOL http_rtg_describe(struct BitMap *bm, HttpRtgScreen *s, const char **why)
     }
 
     /*
-     * THE REFUSAL THAT MATTERS.  A 15, 16, 24 or 32-bit screen has no palette
-     * and the encoder has no truecolour code, so what would come out of the
-     * chunky path is the low byte of every pixel indexed into a colour map
-     * that is not there -- a picture, and a wrong one.  Named by depth,
-     * because "not supported" sends somebody to read this file.
+     * A 15, 16, 24 or 32-bit screen has no palette and the encoder has no
+     * truecolour code, so the chunky path would show the low byte of every
+     * pixel indexed into a colour map that is not there.  The refusal names
+     * the depth, so that the reason does not have to be looked up here.
      */
     if (!clut8 || depth != 8UL)
     {
@@ -473,13 +467,13 @@ static BOOL rtg_read_cgx_lock(struct BitMap *bm, UBYTE *dst,
 /*
  * BltBitMap to an offscreen bitmap and read the copy.
  *
- * It does NOT reduce how many bytes cross the bus.  What it buys is that the
- * slow read comes off a buffer nothing is drawing into: the console reads the
- * screen with the layer lock only ATTEMPTED, never waited for, so a frame read
- * straight out of VRAM can carry half of somebody else's redraw.  The blit is
- * the card's own, and one call, so what it snapshots is one moment.
+ * This does not reduce how many bytes cross the bus.  What it gains is that
+ * the slow read comes off a buffer nothing is drawing into.  The console reads
+ * the screen with the layer lock only attempted, never waited for, so a frame
+ * read straight out of VRAM can carry half of somebody else's redraw.  The
+ * blit is the card's own, and one call, so what it snapshots is one moment.
  *
- * ScreenRecorder does exactly this and for the same reason.
+ * ScreenRecorder does the same thing for the same reason.
  */
 static BOOL rtg_read_blit(struct BitMap *bm, UBYTE *dst, UWORD y0, UWORD rows)
 {
@@ -532,11 +526,11 @@ static BOOL rtg_off_take(UWORD w, UWORD rows)
     rtg_off_free();
 
     /*
-     * BMF_USERPRIVATE is Picasso96's "never displayed, never moved": exactly
-     * a snapshot buffer, and the one kind of P96 bitmap the documentation says
-     * does not have to be locked before it is touched.  It is still locked
-     * below, because a matched lock costs two library calls a frame and being
-     * the odd caller that does not is not worth saving them.
+     * BMF_USERPRIVATE is Picasso96's "never displayed, never moved", which is
+     * what a snapshot buffer is, and the one kind of P96 bitmap the
+     * documentation says does not have to be locked before it is touched.  It
+     * is still locked below, because the matched lock costs two library calls
+     * a frame and keeps this caller on the ordinary path.
      */
     if (RtgP96Base != NULL)
     {
@@ -569,14 +563,12 @@ static BOOL rtg_off_take(UWORD w, UWORD rows)
 /* ----------------------------------------------------------- the measure -- */
 
 /*
- * THE NUMBER NOBODY HAS PUBLISHED.
- *
  * Every route the machine offers reads the same band, three times, and the
- * FASTEST pass is kept: a slow pass can be the scheduler and a fast one cannot
- * be anything but the hardware.  The rate is recorded for every route and not
- * just the winner, because the interesting fact is the SPREAD -- which route
- * a particular board and driver make cheap is what nobody knows, and one
- * user's report of five numbers answers it for that board.
+ * fastest pass is kept.  A slow pass can be the scheduler and a fast one can
+ * only be the hardware.  The rate is recorded for every route rather than for
+ * the winner alone, because the spread is the unknown: which route a
+ * particular board and driver make cheap is what nobody has published, and one
+ * report of five numbers answers it for that board.
  *
  * The EClock is ~709 kHz, so a band that takes eight milliseconds is measured
  * to about a part in five thousand.  DateStamp() ticks are fiftieths and would
@@ -599,10 +591,10 @@ static VOID rtg_probe(struct BitMap *bm, UBYTE *dst)
     (VOID)ami_millis();                 /* opens timer.device, sets TimerBase */
     if (TimerBase == NULL)
     {
-        /* No clock to measure with.  Every route still works; the order below
-           is the one to prefer when nothing can be timed -- a mapping and a
-           memcpy beats a driver call on every board this has been reasoned
-           about, and the snapshot beats both when there is one. */
+        /* No clock to measure with.  Every route still works, and the order
+           below is the one to prefer when nothing can be timed.  A mapping and
+           a memcpy beats a driver call on every board considered here, and the
+           snapshot beats both when there is one. */
         static const int fallback[RTG_N_ROUTE] =
             { RTG_R_BLIT, RTG_R_P96_LOCK, RTG_R_CGX_LOCK,
               RTG_R_P96_RPA, RTG_R_CGX_RPA };
@@ -682,16 +674,16 @@ BOOL http_rtg_attach(struct BitMap *bm, struct RastPort *rp,
     rtg_stride = stride;
 
     /*
-     * IS IT ACTUALLY IN CARD MEMORY.  This is the first branch and not an
-     * afterthought: Picasso96 keeps a bitmap in system RAM whenever it decides
-     * to, and when it has, the read is ordinary Fast RAM at Fast RAM speed and
-     * none of the rest of this matters.  It is also what decides whether the
-     * snapshot buffer is worth its memory -- blitting Fast RAM to Fast RAM to
-     * read it back is a copy for nothing.
+     * Whether the bitmap is really in card memory is the first branch.
+     * Picasso96 keeps a bitmap in system RAM whenever it decides to, and when
+     * it has, the read is ordinary Fast RAM at Fast RAM speed and none of the
+     * rest of this matters.  It also decides whether the snapshot buffer is
+     * worth its memory, since blitting Fast RAM to Fast RAM to read it back is
+     * a copy for nothing.
      *
-     * P96 will only answer while the bitmap is locked, which is why it is
-     * asked here and not in http_rtg_describe(): that one runs under
-     * LockIBase() and this one does not.
+     * P96 only answers while the bitmap is locked, which is why it is asked
+     * here and not in http_rtg_describe().  That one runs under LockIBase()
+     * and this one does not.
      */
     rtg_on_board = 0;
     rtg_on_board_known = 0;
@@ -712,14 +704,15 @@ BOOL http_rtg_attach(struct BitMap *bm, struct RastPort *rp,
     }
     else if (RtgCgxBase != NULL)
     {
-        /* CyberGraphX has no "is it on the board"; ISLINEARMEM is the nearest
-           thing it answers, and a bitmap that is linearly addressable is the
+        /* CyberGraphX answers no on-the-board attribute.  ISLINEARMEM is the
+           nearest one it has, and a bitmap that is linearly addressable is the
            one whose lock route can be a memcpy. */
         rtg_on_board = (UBYTE)(rtg_cgx_attr(bm, CYBRMATTR_ISLINEARMEM) != 0UL);
         rtg_on_board_known = 1;
     }
 
-    /* One strip's worth, not a whole screen: the snapshot is per fetch. */
+    /* One strip's worth rather than a whole screen, because the snapshot is
+       per fetch. */
     if (rtg_on_board)
     {
         UWORD rows = (UWORD)((rtg_h < RTG_STRIP_ROWS) ? rtg_h : RTG_STRIP_ROWS);
@@ -752,8 +745,8 @@ BOOL http_rtg_read(struct BitMap *bm, struct RastPort *rp, UBYTE *dst)
     if (rtg_route < 0 || bm == NULL || rp == NULL || dst == NULL)
         return FALSE;
 
-    /* The screen may have been re-resolved since attach; the geometry is the
-       caller's to check and these two are simply whatever it just locked. */
+    /* The screen can have been re-resolved since attach.  The geometry is the
+       caller's to check, and the RastPort here is whatever it just locked. */
     rtg_rp = rp;
 
     for (y = 0; y < rtg_h; )
@@ -829,8 +822,8 @@ ULONG http_rtg_word(char *out, ULONG cap)
     at = rtg_put(out, cap, at,
                  (rtg_route >= 0) ? rtg_route_name[rtg_route] : "none");
 
-    /* KB/s per route, and only the ones that answered.  This is the figure
-       the whole probe exists to produce; see httprtg.h. */
+    /* KB/s per route, and only the ones that answered.  This is the figure the
+       probe exists to produce.  See httprtg.h. */
     for (r = 0; r < RTG_N_ROUTE; r++)
     {
         if (rtg_kbs[r] == 0UL)

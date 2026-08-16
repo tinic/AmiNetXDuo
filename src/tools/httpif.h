@@ -2,7 +2,7 @@
  * httpif, the If: request header, evaluated.
  *
  * Separate from httpd.c, and including nothing, for the reason httppath.c is
- * separate: what this decides is whether a write goes ahead against a lock or
+ * separate.  What this decides is whether a write goes ahead against a lock or
  * an entity tag somebody else holds, the grammar has three shapes that all
  * look alike, and an evaluator that always says yes reads exactly like one
  * that works.  So it is compiled for the host and driven by

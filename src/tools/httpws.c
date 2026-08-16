@@ -115,8 +115,8 @@ long http_ws_b64_decode(const char *text, unsigned char *out,
 
 /* ------------------------------------------------------------ the accept --- */
 
-/* RFC 6455 1.3.  It is a constant and not a secret: it is there so that a
-   cache or a proxy cannot produce the accept by echoing the key. */
+/* RFC 6455 1.3.  A public constant, present so that a cache or a proxy cannot
+   produce the accept by echoing the key. */
 static const char ws_guid[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 int http_ws_accept(const char *key, char *out, unsigned long outlen)
@@ -140,7 +140,7 @@ int http_ws_accept(const char *key, char *out, unsigned long outlen)
         n++;
     }
 
-    /* Trailing space is all that may follow. */
+    /* Trailing space is all that can follow. */
     for (i = n; key[i] != '\0'; i++)
     {
         if (key[i] != ' ' && key[i] != '\t')
@@ -180,7 +180,7 @@ enum
     WS_HEAD = 0,        /* collecting the frame header                     */
     WS_PAYLOAD,         /* the payload of a data frame, streamed out       */
     WS_CONTROL,         /* the payload of a control frame, held whole      */
-    WS_DEAD             /* the framing failed; nothing more is read        */
+    WS_DEAD             /* the framing failed, nothing more is read        */
 };
 
 void http_ws_reset(HttpWsIn *in)
@@ -251,8 +251,8 @@ static void ws_header_done(HttpWsIn *in)
         return;
     }
 
-    /* RFC 6455 5.1.  A client frame that is not masked ends the connection;
-       see the header for why this one is not negotiable. */
+    /* RFC 6455 5.1.  A client frame that is not masked ends the connection.
+       See the header for why this one is not negotiable. */
     if ((b1 & 0x80) == 0)
     {
         ws_fail(in, HTTP_WS_CLOSE_PROTOCOL);
@@ -269,8 +269,8 @@ static void ws_header_done(HttpWsIn *in)
         extra = 8;
 
         /* The top bit of a 64-bit length must be zero, and the top four bytes
-           are a length this machine cannot address at all.  Either is 1009
-           and not 1002: the frame is well formed and simply too big. */
+           are a length this machine cannot address at all.  Both are 1009
+           rather than 1002, because the frame is well formed and too big. */
         if (in->hdr[2] != 0 || in->hdr[3] != 0 ||
             in->hdr[4] != 0 || in->hdr[5] != 0)
         {
@@ -318,8 +318,8 @@ static void ws_header_done(HttpWsIn *in)
     }
     else
     {
-        /* A new data message while one is still open.  Interleaving data
-           frames is exactly what fragmentation may not do. */
+        /* A new data message while one is still open.  Fragmentation must not
+           interleave data frames. */
         if (in->msg != HTTP_WS_EV_NONE)
         {
             ws_fail(in, HTTP_WS_CLOSE_PROTOCOL);
@@ -340,9 +340,9 @@ static void ws_header_done(HttpWsIn *in)
 
 /*
  * A frame whose payload is empty is complete the moment its header is, and
- * nothing after it is needed to say so.  Delivering it from inside the
- * payload loop meant an empty close or ping at the end of a read was held
- * until the client sent something else -- which, for a close, is never.
+ * nothing after it is needed to say so.  Delivering it from inside the payload
+ * loop held an empty close or ping at the end of a read until the client sent
+ * something else, and after a close the client sends nothing.
  */
 static void ws_finish_empty(HttpWsIn *in, HttpWsSink sink, void *ctx)
 {
