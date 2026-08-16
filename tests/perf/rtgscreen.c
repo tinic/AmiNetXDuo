@@ -34,6 +34,8 @@
 #include <graphics/modeid.h>
 #include <intuition/intuition.h>
 #include <intuition/screens.h>
+#include <intuition/intuitionbase.h>
+#include <graphics/gfxbase.h>
 #include <utility/tagitem.h>
 
 #include <proto/dos.h>
@@ -58,6 +60,14 @@
 #define CYBRIDATTR_WIDTH        0x80000002UL
 #define CYBRIDATTR_HEIGHT       0x80000003UL
 #define CYBRIDATTR_DEPTH        0x80000004UL
+
+/* OPENED HERE, and that is not a formality.  These bases are globals the
+   proto/ inlines jump through, and nothing in this executable's startup opens
+   them: a first call to NextDisplayInfo() with a NULL GfxBase is a jump
+   through zero, which is a guest that writes not one line of the output this
+   tool exists to produce. */
+struct GfxBase       *GfxBase;
+struct IntuitionBase *IntuitionBase;
 
 static struct Library *CyberGfxBase;
 
@@ -121,6 +131,21 @@ int main(int argc, char **argv)
     ULONG width = (argc > 2) ? (ULONG)atoi(argv[2]) : 640UL;
     ULONG height = (argc > 3) ? (ULONG)atoi(argv[3]) : 480UL;
     ULONG id = (ULONG)INVALID_ID;
+
+    /* Unbuffered, because the success path does not return: it opens the
+       screen and waits, so anything still sitting in a stdio buffer is
+       output nobody ever sees. */
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    GfxBase = (struct GfxBase *)
+        OpenLibrary((CONST_STRPTR)"graphics.library", 39);
+    IntuitionBase = (struct IntuitionBase *)
+        OpenLibrary((CONST_STRPTR)"intuition.library", 39);
+    if (GfxBase == NULL || IntuitionBase == NULL)
+    {
+        printf("result=no graphics.library or intuition.library at V39\n");
+        return RETURN_FAIL;
+    }
 
     CyberGfxBase = OpenLibrary((CONST_STRPTR)"cybergraphics.library", 40);
     printf("cybergraphics=%s\n", CyberGfxBase != NULL ? "yes" : "no");
