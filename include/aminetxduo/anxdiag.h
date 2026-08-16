@@ -122,6 +122,8 @@ extern "C" {
 #define ANXDIAG_ODD_WORD       27   /* the same three through the word path   */
 #define ANXDIAG_ODDWIN         28   /* the odd-register window, or 0 when the
                                        register file is contiguous            */
+#define ANXDIAG_BUF_SEEN       29   /* a packet-buffer readback mismatch:
+                                       offset << 16 | wrote << 8 | read       */
 
 /* --- the PCMCIA slot --------------------------------------------------- */
 #define ANXDIAG_PC_RESOURCE    30   /* card.resource base, 0 = no slot       */
@@ -161,6 +163,8 @@ extern "C" {
 #define ANXDIAG_PC_CORVAL      53   /* the byte written to the COR            */
 #define ANXDIAG_PC_SETTLE      54   /* 2 ms rounds waited after the COR write
                                        before a chip answered; 0 = at once    */
+#define ANXDIAG_PC_NOROW       55   /* the CIS named a card no row drives, and
+                                       there is no fallback row either        */
 
 /* A tuple or a value that was not there at all, rather than one that was
    there and zero.  Chosen so it cannot be a real MANFID or subtuple. */
@@ -180,6 +184,9 @@ extern "C" {
 #define ANXDIAG_WHY_ODD_BNRY    9   /* the odd registers answered the ISR read
                                        and would not round-trip a write, in
                                        either mode                             */
+#define ANXDIAG_WHY_MEM        10   /* the 32-byte probe of the buffer passed
+                                       and a full 16 KB pass did not, which is
+                                       buffer RAM rather than the data port   */
 
 /* ANXDIAG_MAC_SOURCE values. */
 #define ANXDIAG_MAC_PROM        0   /* the card's address PROM               */

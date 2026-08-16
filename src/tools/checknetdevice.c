@@ -135,8 +135,12 @@ static const char *cnd_why(ULONG why)
                "a value written to them, as bytes or as words.  Half the "
                "register file is decoding and half is not";
     case ANXDIAG_WHY_BUFFER:
-        return "the chip's 16 KB packet buffer did not read back what was "
-               "written to it, so the data port or the buffer RAM is wrong";
+        return "a 32-byte pattern written through the data port did not read "
+               "back, so the data port itself is wrong";
+    case ANXDIAG_WHY_MEM:
+        return "the data port works -- a 32-byte pattern went through it and "
+               "came back -- and a full pass over the 16 KB packet buffer did "
+               "not, so the buffer RAM behind it is bad";
     case ANXDIAG_WHY_ADDRESS:
         return "the card offered no usable station address";
     case ANXDIAG_WHY_REGS:
@@ -295,6 +299,11 @@ static VOID cnd_step(const AnxDiagStep *st)
             (LONG)((st->ds_Code == (UWORD)ANXDIAG_ODD_PLAIN)
                        ? "bytes" : "words"),
             (v >> 16) & 0xffUL, (v >> 8) & 0xffUL, v & 0xffUL);
+        return;
+    case ANXDIAG_BUF_SEEN:
+        say("  The first byte that came back wrong was at buffer offset\n"
+            "  $%04lx: $%02lx was written there and $%02lx read back.\n",
+            (v >> 16) & 0xffffUL, (v >> 8) & 0xffUL, v & 0xffUL);
         return;
     case ANXDIAG_ODDWIN:
         if (v == 0)
@@ -510,6 +519,12 @@ static VOID cnd_step(const AnxDiagStep *st)
             "  configuration entry other than the first, or the socket never\n"
             "  came out of memory mode -- the card.resource answer above\n"
             "  says which of those it is.\n", v);
+        return;
+    case ANXDIAG_PC_NOROW:
+        say("  The card in the slot says manufacturer $%04lx product $%04lx,\n"
+            "  and this driver has no PCMCIA card row for it and no fallback\n"
+            "  row either.  The slot was given back.\n",
+            (v >> 16) & 0xffffUL, v & 0xffffUL);
         return;
     case ANXDIAG_PC_IRQMODE:
         say("  The card's interrupt was enabled through card.resource V%lu.\n",

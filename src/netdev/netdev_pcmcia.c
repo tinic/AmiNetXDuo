@@ -331,20 +331,37 @@ static VOID pc_cis_keep(const UBYTE *buf, UWORD len)
         pc_cis[pc_cis_len++] = buf[i];
 }
 
-/* Read one tuple, keep it for the fingerprint, and hand it back. */
-static BOOL pc_cis_read(struct CardHandle *h, UBYTE code, UBYTE *buf, UWORD len)
+/*
+ * How many BODY bytes CopyTuple() is asked for, and how big the buffer holding
+ * them has to be.
+ *
+ * CopyTuple() writes the two header bytes and then min(size, TPL_LINK) body
+ * bytes after them, so the buffer must be size + 2; the autodoc asks for
+ * size + 8 and that margin is what is used here.  This used to pass the whole
+ * buffer as the size, which overruns the frame by two bytes on any tuple whose
+ * body reaches the buffer's length -- a real card's CISTPL_VERS_1 carries
+ * manufacturer and product strings and often does.  Amiberry's emulated card
+ * has a handful of short tuples and never gets near it.
+ */
+#define PC_TUPLE_BODY   56
+#define PC_TUPLE_BUF    (PC_TUPLE_BODY + 8)
+
+/* Read one tuple, keep it for the fingerprint, and hand it back.  buf is
+   PC_TUPLE_BUF bytes; at most PC_TUPLE_BODY + 2 of them are written. */
+static BOOL pc_cis_read(struct CardHandle *h, UBYTE code, UBYTE *buf)
 {
     UWORD keep;
 
-    if (!pc_copy_tuple(h, buf, (ULONG)code, (ULONG)len))
+    if (!pc_copy_tuple(h, buf, (ULONG)code, (ULONG)PC_TUPLE_BODY))
         return FALSE;
 
     /* buf[1] is TPL_LINK, the body length; the two header bytes are not
        fingerprint material -- the code is a constant and the length follows
-       from the body. */
+       from the body.  Clamped to what was ASKED for, not to the buffer: the
+       link can say more than CopyTuple() copied. */
     keep = (UWORD)buf[1];
-    if (keep > (UWORD)(len - 2u))
-        keep = (UWORD)(len - 2u);
+    if (keep > (UWORD)PC_TUPLE_BODY)
+        keep = (UWORD)PC_TUPLE_BODY;
     pc_cis_keep(buf + 2, keep);
 
     return TRUE;
@@ -470,7 +487,7 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
        check used to rely on: every pc_tuple() below has its return value
        checked, so nothing here mistakes a zero this line wrote for a byte the
        card supplied. */
-    UBYTE            buf[64] = { 0 };
+    UBYTE            buf[PC_TUPLE_BUF] = { 0 };
     volatile UBYTE  *attr;
     ULONG            cfg_base;
     UBYTE            index;
@@ -567,7 +584,7 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
      * CISTPL_CFTABLE_ENTRY the value, and neither can be guessed.  Their
      * absence stays a rejection.
      */
-    if (!pc_cis_read(handle, CISTPL_FUNCID, buf, sizeof(buf)))
+    if (!pc_cis_read(handle, CISTPL_FUNCID, buf))
     {
         pc_trace("pc: no funcid, assume lan ", 0);
         netdev_diag_note(ANXDIAG_PC_FUNCID, ci, ANXDIAG_ABSENT);
@@ -590,7 +607,7 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
      * not carry them is a card whose address comes from its PROM, which is
      * every card that works today.
      */
-    if (pc_cis_read(handle, CISTPL_MANFID, buf, sizeof(buf)))
+    if (pc_cis_read(handle, CISTPL_MANFID, buf))
     {
         /* Little-endian words, which is how every tuple carries a number. */
         manf = (UWORD)(((UWORD)buf[3] << 8) | (UWORD)buf[2]);
@@ -603,9 +620,9 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
     {
         netdev_diag_note(ANXDIAG_PC_MANFID, ci, ANXDIAG_ABSENT);
     }
-    (VOID)pc_cis_read(handle, CISTPL_VERS_1, buf, sizeof(buf));
+    (VOID)pc_cis_read(handle, CISTPL_VERS_1, buf);
 
-    if (pc_cis_read(handle, CISTPL_FUNCE, buf, sizeof(buf)))
+    if (pc_cis_read(handle, CISTPL_FUNCE, buf))
     {
         pc_trace("pc: funce ", (ULONG)buf[2]);
         netdev_diag_note(ANXDIAG_PC_FUNCE, ci, (ULONG)buf[2]);
@@ -633,7 +650,7 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
     /* CISTPL_CONFIG carries the configuration register base, in the card's
        own attribute address space.  TPCC_SZ says how many bytes of base
        follow it; the low two bits are that count minus one. */
-    if (!pc_cis_read(handle, CISTPL_CONFIG, buf, sizeof(buf)))
+    if (!pc_cis_read(handle, CISTPL_CONFIG, buf))
     {
         pc_trace("pc: no config tuple ", 0);
         netdev_diag_note(ANXDIAG_PC_NOCONFIG, ci, 0);
@@ -662,7 +679,7 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
        entry is its I/O configuration. */
     pc_trace("pc: cfgbase ", cfg_base);
     netdev_diag_note(ANXDIAG_PC_CFGBASE, ci, cfg_base);
-    if (!pc_cis_read(handle, CISTPL_CFTABLE, buf, sizeof(buf)))
+    if (!pc_cis_read(handle, CISTPL_CFTABLE, buf))
     {
         pc_trace("pc: no cftable ", 0);
         netdev_diag_note(ANXDIAG_PC_NOCFTABLE, ci, 0);
@@ -696,6 +713,10 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
     card = netdev_card_by_cis(manf, prod);
     if (card == NULL)
     {
+        /* Recorded, because a silent return here reads in the report exactly
+           like a claim that never ran. */
+        netdev_diag_note(ANXDIAG_PC_NOROW, ci,
+                         ((ULONG)manf << 16) | (ULONG)prod);
         pc_give_up(handle);
         return NULL;            /* no PCMCIA row at all: nothing to drive it */
     }

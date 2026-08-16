@@ -116,6 +116,30 @@ static int ne_memcmp(const UBYTE *a, const UBYTE *b, UWORD n)
     return 0;
 }
 
+/*
+ * The first byte of a buffer readback that did not match, put in the probe
+ * record.  "The buffer did not read back" is true of a dead data port, of one
+ * byte lane stuck, and of a card whose port swaps the halves of every word,
+ * and the wrote/read pair separates them: $5a/$00 is a lane that is not there,
+ * $5a/$a5 at an even offset is a swap.
+ */
+static VOID ne_note_mismatch(NetdevNic *nic, const UBYTE *want,
+                             const UBYTE *got, UWORD n, LONG base)
+{
+    UWORD i;
+
+    for (i = 0; i < n; i++)
+    {
+        if (want[i] != got[i])
+        {
+            netdev_diag_note(ANXDIAG_BUF_SEEN, netdev_diag_card(nic->card),
+                             ((ULONG)((base + (LONG)i) & 0xffffL) << 16) |
+                             ((ULONG)want[i] << 8) | (ULONG)got[i]);
+            return;
+        }
+    }
+}
+
 /* --------------------------------------------------------- remote DMA ----- */
 
 /*
@@ -502,6 +526,11 @@ static BOOL ne2000_detect(NetdevNic *nic)
             }
             NE_TRACE("ne: odd registers read as words ", 1);
         }
+
+        /* Which mode this card ended up in, recorded here rather than only
+           after a successful attach: a card that gets past this and fails the
+           buffer test still has to say how its registers were being read. */
+        netdev_diag_note(ANXDIAG_GETODD, ci, (ULONG)nic->bus.getodd);
     }
 
     NIC_PUT(nic, ED_P0_CR, ED_CR_RD2 | ED_CR_PAGE_0 | ED_CR_STA);
@@ -531,6 +560,8 @@ static BOOL ne2000_detect(NetdevNic *nic)
     if (ne_memcmp(ne_test_pattern, test_buffer,
                   sizeof(ne_test_pattern)) != 0)
     {
+        ne_note_mismatch(nic, ne_test_pattern, test_buffer,
+                         (UWORD)sizeof(ne_test_pattern), 0);
         nic->diag_why = (UBYTE)ANXDIAG_WHY_BUFFER;
         return FALSE;
     }
@@ -623,7 +654,11 @@ static BOOL ne2000_test_mem(NetdevNic *nic)
         ne2000_readmem(nic, nic->mem_start + off, (UBYTE *)back, ED_PAGE_SIZE);
         if (ne_memcmp((const UBYTE *)zero, (const UBYTE *)back,
                       ED_PAGE_SIZE) != 0)
+        {
+            ne_note_mismatch(nic, (const UBYTE *)zero, (const UBYTE *)back,
+                             (UWORD)ED_PAGE_SIZE, nic->mem_start + off);
             return FALSE;
+        }
     }
 
     return TRUE;
@@ -778,7 +813,9 @@ static LONG ne2000_attach(NetdevNic *nic)
 
     if (!ne2000_test_mem(nic))
     {
-        nic->diag_why = (UBYTE)ANXDIAG_WHY_BUFFER;
+        /* Not WHY_BUFFER: the 32-byte probe in ne2000_detect() already passed,
+           so the data port works and this is the RAM behind it. */
+        nic->diag_why = (UBYTE)ANXDIAG_WHY_MEM;
         return -1;
     }
 
