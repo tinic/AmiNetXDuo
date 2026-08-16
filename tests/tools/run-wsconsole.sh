@@ -393,16 +393,25 @@ FORWARD=failed
 STARTED=$(date +%s)
 
 EMULOG="$ROOT/build/amiberry-$AMINETXDUO_RUN_TAG.log"
-EMULOG_MAX=${AMINETXDUO_WSCONSOLE_LOGMAX:-33554432}
 
-trim_emulog() {
-    [ -f "$EMULOG" ] || return 0
-    local size
-    size=$(wc -c < "$EMULOG" 2>/dev/null || echo 0)
-    [ "$size" -gt "$EMULOG_MAX" ] || return 0
-    tail -c 4194304 "$EMULOG" > "$EMULOG.tail" 2>/dev/null || return 0
-    mv "$EMULOG.tail" "$EMULOG"
-}
+# THE TRIM THAT USED TO BE HERE IS GONE, and it was worse than useless.
+#
+#   tail -c 4194304 "$EMULOG" > "$EMULOG.tail" && mv "$EMULOG.tail" "$EMULOG"
+#
+# `mv` puts a NEW INODE at that name.  The emulator still holds an open
+# descriptor on the old one, which is now unlinked, so everything it writes
+# after the first trim goes to a file with no name and the log on disk stops
+# growing at the moment it was trimmed.  Measured with a writer producing
+# 200,000 lines and one trim 0.3 s in: 25 lines survived, and the file never
+# grew again while the writer ran to completion.  A run that tripped this lost
+# its whole emulator log and looked like it had a very quiet one.
+#
+# Nothing has to replace it.  tools/logcap.sh caps the log at the source now
+# (tools/amiberry-run.sh), so it cannot reach the 32 MB this fired at: the
+# same runs that produced 313 MB here produce a few tens of KB.  The end-of-
+# run `tail -400` went with it -- it ran after the emulator was stopped, so it
+# was safe, but it existed for the same unbounded log and threw away the
+# artifact somebody would read.
 
 # Where to talk to it.  Behind NAT that is the forwarded port on this machine;
 # bridged it is a lease, and the lease is READ OFF THE WIRE rather than
@@ -482,8 +491,7 @@ if [ "$KEEP" = yes ] && [ "$BACKEND" != slirp ]; then
 else
     for _ in $(seq 1 "$BOOT_MAX"); do
         sleep 1
-        trim_emulog
-        kill -0 "$RUNNER" 2>/dev/null || break
+            kill -0 "$RUNNER" 2>/dev/null || break
         code=$(curl -s -m 3 -o /dev/null -w '%{http_code}' \
                "http://${TARGET_ADDR}:${TARGET_PORT}/" 2>/dev/null || true)
         if [ "$code" = "200" ]; then
@@ -550,8 +558,7 @@ if [ "$KEEP" = yes ]; then
     echo "==> holding the guest; Ctrl-C to stop it"
     while kill -0 "$RUNNER" 2>/dev/null; do
         sleep 5
-        trim_emulog
-    done
+        done
     exit 0
 fi
 
@@ -606,7 +613,6 @@ python3 -u "$ROOT/tests/tools/wsterm-console.py" "$TARGET_ADDR" "$TARGET_PORT" \
 DRILL=$!
 while kill -0 "$DRILL" 2>/dev/null; do
     sleep 5
-    trim_emulog
 done
 wait "$DRILL"
 DRILL_RC=$?
@@ -639,10 +645,6 @@ echo
 
 cleanup
 trap - EXIT
-
-if [ -f "$EMULOG" ]; then
-    tail -400 "$EMULOG" > "$EMULOG.tail" && mv "$EMULOG.tail" "$EMULOG"
-fi
 
 echo "drill_seconds=$DRILL_SECS"
 echo "arms=${ARMS:-0}"
