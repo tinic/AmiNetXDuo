@@ -253,11 +253,26 @@ sed -e '/^EndCLI/d' "$WB/S/Startup-Sequence" > "$HD/S/Startup-Sequence"
 # after a probe can afford that; a demo that is left up cannot.  DEVS:Monitors
 # is already run by the stock sequence above, so the board is up either way,
 # and C:rtgscreen is on the drive for anyone who wants to ask it by hand.
+#
+# AND THE BOOT SHELL GOES, because the screen this serves is the one somebody
+# looks at.  The stock EndCLI is stripped above only so this tail can replace
+# it, and it is put back here as the last line.
+#
+# `Run >NIL:`, not `Run >DH0:httpd.txt`.  Run hands the started process the
+# output stream it was given, so a file redirect leaves httpd holding the boot
+# shell's console: the file caught Run's own "[CLI 3]" and the server's banner
+# went to the SCREEN, which is the handle that keeps the window alive after the
+# shell that opened it has ended.  EndCLI then ends the shell and the window
+# stays -- a Shell window on the Workbench screen that nothing can close,
+# because the process still owning it is the web server.  NIL: on both sides is
+# what makes EndCLI take the window with it.
 cat >> "$HD/S/Startup-Sequence" <<EOF
 
 FailAt 9999
 C:Wait 6
-Run >DH0:httpd.txt <NIL: C:httpd DH0:Public $PORT -T PAGE=DH0:shell.html -C CONSOLEPAGE=DH0:Console/console.html
+Run >NIL: <NIL: C:httpd DH0:Public $PORT -T PAGE=DH0:shell.html -C CONSOLEPAGE=DH0:Console/console.html
+C:Wait 3
+EndCLI >NIL:
 EOF
 chmod 755 "$HD/S/Startup-Sequence"
 
