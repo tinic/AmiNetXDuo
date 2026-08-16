@@ -96,6 +96,7 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
 #define PNP_IO_BASE_HI      0x60
 #define PNP_IO_BASE_LO      0x61
 
+#define PNP_CC_RESET_CSN    0x04
 #define PNP_CC_WAIT_FOR_KEY 0x02
 
 /* The CSN handed out.  Any number from 1: there is one card on this bus. */
@@ -403,6 +404,27 @@ BOOL netdev_isapnp_configure(const NetdevCard *card, APTR board)
 
     for (i = 0; i < 32; i++)
         pnp_write_address(card, b, pnp_init_key[i]);
+
+    /*
+     * PUT THE CARD SELECT NUMBER BACK TO ZERO, AND THIS IS ABOUT THE SECOND
+     * TIME THIS RUNS.
+     *
+     * Wake[0] moves a card to Isolation only while its CSN is still zero, and
+     * a CSN survives the Wait for Key this file ends on.  So on a machine
+     * where anxnet.device is expunged and loaded again, without this the card
+     * would sit in Sleep through the isolation reads, the identifier would
+     * come back as whatever the bus felt like, and the configuration below
+     * would be written without ever having confirmed a card was there.  It
+     * would still work -- Wake[CSN] finds it -- but the one step that says
+     * WHAT is behind the bridge would have stopped saying anything.
+     *
+     * Bus-wide by definition, and that is exactly one soldered chip here.  No
+     * delay after it: this is the Reset CSN command and not the Reset command,
+     * and both the specification and the RTL8019AS datasheet say it causes no
+     * state transition -- the 2 msec they do name belongs to RESET_DRV and to
+     * Config Control bit 0, neither of which is written here.
+     */
+    pnp_write_reg(card, b, PNP_CONFIG_CONTROL, PNP_CC_RESET_CSN);
 
     /*
      * Wake the cards that have no CSN into isolation, then tell them where to
