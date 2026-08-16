@@ -102,6 +102,10 @@ import {
 
 export const PFS_HEADER = 16;
 
+/* The one flag the header's flags byte carries: the frames are chunky, one
+   eight-bit palette index a pixel, and not depth separate bitplanes. */
+export const PFS_F_CHUNKY = 0x01;
+
 /* One frame record: when, where the pointer was, and which image it was. */
 export const PFS_FRAMEREC = 12;
 
@@ -230,7 +234,7 @@ export function buildPfs(screen: Screen, rgb: Uint8Array,
   v.setUint16(4, screen.width);
   v.setUint16(6, screen.height);
   out[8] = screen.depth;
-  out[9] = 0;
+  out[9] = screen.chunky ? PFS_F_CHUNKY : 0;
   v.setUint16(10, screen.bytesPerRow);
   v.setUint16(12, frames.length);
   v.setUint16(14, pointers.length);
@@ -311,13 +315,17 @@ export function parsePfs(buf: ArrayBuffer): Capture {
   }
 
   const v = new DataView(buf);
+  const flags = b[9];
   const screen: Screen = {
     width: v.getUint16(4),
     height: v.getUint16(6),
     depth: b[8],
     bytesPerRow: v.getUint16(10),
+    /* Bit 0: one eight-bit plane rather than depth one-bit ones, which is
+       what an RTG capture is.  The byte was reserved and zero, so every file
+       written before it existed reads as the planar capture it is. */
+    chunky: (flags & PFS_F_CHUNKY) !== 0,
   };
-  const flags = b[9];
   const frameCount = v.getUint16(12);
   const pointerCount = v.getUint16(14);
 

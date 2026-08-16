@@ -154,6 +154,15 @@ export function wordAligned(w) {
   return ((w + 15) >> 4) * 2;
 }
 
+/* The same pixels laid out the way an RTG card holds them: one byte a pixel,
+   rows bytesPerRow apart, and nothing to unpack.  drawFrame() already speaks
+   in indices, so this is the padding and the stride and no more. */
+export function toChunky(px, w, h, bytesPerRow) {
+  const out = new Uint8Array(bytesPerRow * h);
+  for (let y = 0; y < h; y++) out.set(px.subarray(y * w, y * w + w), y * bytesPerRow);
+  return out;
+}
+
 export function synth(w, h, depth, frames, bytesPerRow) {
   const bpr = bytesPerRow ?? wordAligned(w);
   const stride = bpr * h * depth;
@@ -166,6 +175,33 @@ export function synth(w, h, depth, frames, bytesPerRow) {
   return {
     screen: { width: w, height: h, depth, bytesPerRow: bpr },
     rgb: palette(depth),
+    frames: out,
+    frameCount: frames,
+    stride,
+  };
+}
+
+/*
+ * The 8-bit chunky sibling of synth(), which is what an RTG screen is.
+ *
+ * The same drawing, the same palette and the same frame count, so a chunky
+ * arm and a planar arm of any test are showing the same picture in two
+ * layouts -- which is what makes "the chunky decode is right" a comparison
+ * and not an assertion about a picture nobody has seen.  Depth is 8 because
+ * that is what sizes the palette; there is one plane.
+ */
+export function synthChunky(w, h, frames, bytesPerRow) {
+  const bpr = bytesPerRow ?? w;
+  const stride = bpr * h;
+  const out = new Uint8Array(stride * frames);
+
+  for (let t = 0; t < frames; t++) {
+    out.set(toChunky(drawFrame(w, h, 8, t), w, h, bpr), t * stride);
+  }
+
+  return {
+    screen: { width: w, height: h, depth: 8, bytesPerRow: bpr, chunky: true },
+    rgb: palette(8),
     frames: out,
     frameCount: frames,
     stride,
@@ -185,7 +221,10 @@ export function writePfs(cap) {
   head.writeUInt16BE(cap.screen.width, 4);
   head.writeUInt16BE(cap.screen.height, 6);
   head.writeUInt8(cap.screen.depth, 8);
-  head.writeUInt8(0, 9);
+  /* Bit 0 of the flags byte: one eight-bit plane rather than depth one-bit
+     ones.  It was reserved and zero, so every file written before this reads
+     as the planar capture it is. */
+  head.writeUInt8(cap.screen.chunky ? 1 : 0, 9);
   head.writeUInt16BE(cap.screen.bytesPerRow, 10);
   head.writeUInt16BE(cap.frameCount, 12);
   head.writeUInt16BE(0, 14);          /* no pointer images */
@@ -254,6 +293,7 @@ export function makeGeometry(screen, tileW, tileH) {
 const OP_END = 0x00;
 const OP_COPY = 0x01;
 const OP_TILE = 0x02;
+const OP_TILE8 = 0x03;
 
 const CODE_RAW = 0;
 const CODE_PB_RAW = 1;
@@ -278,7 +318,10 @@ const CODE_PB_XOR = 2;
 export function encodeFrame(g, shadow, next, seq, copy) {
   const bpr = g.screen.bytesPerRow;
   const h = g.screen.height;
-  const depth = g.screen.depth;
+  /* Planes, not depth: a chunky screen is eight bits deep and one plane
+     wide, and every loop here wants the second number. */
+  const chunky = g.screen.chunky === true;
+  const depth = chunky ? 1 : g.screen.depth;
   const plane = bpr * h;
 
   const head = Buffer.alloc(4);
@@ -372,10 +415,12 @@ export function encodeFrame(g, shadow, next, seq, copy) {
 
       if (mask === 0) continue;
 
-      const th3 = Buffer.alloc(4);
-      th3.writeUInt8(OP_TILE, 0);
+      /* One plane means one possible mask, so the chunky op does not carry
+         one.  Same index, same codes, same payloads. */
+      const th3 = Buffer.alloc(chunky ? 3 : 4);
+      th3.writeUInt8(chunky ? OP_TILE8 : OP_TILE, 0);
       th3.writeUInt16BE(ty * g.across + tx, 1);
-      th3.writeUInt8(mask, 3);
+      if (!chunky) th3.writeUInt8(mask, 3);
       parts.push(th3, ...bodies);
       tiles++;
     }

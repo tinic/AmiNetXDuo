@@ -54,15 +54,26 @@ static void word_geom(void)
     g.tile_w = 16;
     g.tile_h = 16;
 
-    yes(rfb_word_geom(out, sizeof(out), &g) == 23, "geom length");
-    eq(out, "geom 640 256 2 80 16 16", "geom, the 640x256x2 Workbench");
+    yes(rfb_word_geom(out, sizeof(out), &g) == 25, "geom length");
+    eq(out, "geom 640 256 2 80 16 16 0", "geom, the 640x256x2 Workbench");
 
     /* A screen whose width is not a whole number of bytes: the grid is over
        bytes_per_row and not over the width, and the word carries both. */
     g.width = 644;
     g.bytes_per_row = 82;
     (void)rfb_word_geom(out, sizeof(out), &g);
-    eq(out, "geom 644 256 2 82 16 16", "geom, a width with padding after it");
+    eq(out, "geom 644 256 2 82 16 16 0", "geom, a width with padding after it");
+
+    /* A chunky RTG screen.  The DEPTH is 8 because that is what sizes the
+       `pal` after it, and BYTESPERROW is a byte a pixel and not a bit. */
+    g.width = 640;
+    g.height = 480;
+    g.depth = 8;
+    g.bytes_per_row = 640;
+    g.format = RFB_FMT_CLUT8;
+    (void)rfb_word_geom(out, sizeof(out), &g);
+    eq(out, "geom 640 480 8 640 16 16 1", "geom, a 640x480 8-bit RTG screen");
+    g.format = RFB_FMT_PLANAR;
 
     /* The biggest one there is still fits the buffer the header promises. */
     g.width = 65535;

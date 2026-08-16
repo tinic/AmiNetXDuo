@@ -82,10 +82,13 @@ int main(int argc, char **argv)
     if (memcmp(buf,"PFS2",4)) return 2;
 
     w=rd16(buf+4); h=rd16(buf+6); depth=buf[8]; bpr=rd16(buf+10);
-    frames=rd16(buf+12); pal=3u*(1u<<depth); stride=bpr*h*depth;
+    frames=rd16(buf+12); pal=3u*(1u<<depth);
 
     g.width=(rfb_u16)w; g.height=(rfb_u16)h; g.bytes_per_row=(rfb_u16)bpr;
     g.depth=(rfb_u8)depth; g.tile_w=(rfb_u8)tw; g.tile_h=(rfb_u8)th;
+    /* Byte 9 bit 0 of the .pfs: one eight-bit plane and not depth of them. */
+    g.format=(rfb_u8)((buf[9]&1u)?RFB_FMT_CLUT8:RFB_FMT_PLANAR);
+    stride=bpr*h*rfb_planes(&g);
     rfb_scroll_defaults(&cfg);
     shadow = calloc(1, rfb_shadow_size(&g));
     scratch = calloc(1, rfb_scratch_size(&g,(rfb_u32)flags,&cfg));

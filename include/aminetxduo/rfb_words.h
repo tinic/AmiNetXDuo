@@ -10,12 +10,19 @@
  *
  * Server to client:
  *
- *   geom W H DEPTH BYTESPERROW TILEWBYTES TILEH
- *                     six decimal numbers, one space between each.  Sent when
- *                     the session opens and again whenever the screen changes
- *                     under it.  TILEWBYTES is BYTES and not pixels, and the
- *                     tile grid is over BYTESPERROW rather than W: every byte
- *                     of a row is encoded, padding included.
+ *   geom W H DEPTH BYTESPERROW TILEWBYTES TILEH FORMAT
+ *                     seven decimal numbers, one space between each.  Sent
+ *                     when the session opens and again whenever the screen
+ *                     changes under it.  TILEWBYTES is BYTES and not pixels,
+ *                     and the tile grid is over BYTESPERROW rather than W:
+ *                     every byte of a row is encoded, padding included.
+ *                     FORMAT is rfb_geom.format: 0 planar, DEPTH one-bit
+ *                     planes; 1 chunky, ONE eight-bit plane whose bytes are
+ *                     palette indices and whose DEPTH is 8 because that is
+ *                     what sizes the `pal` that follows.  It decides which
+ *                     tile op the binary frames carry and how a byte column
+ *                     turns into a pixel column, so a viewer that ignored it
+ *                     would draw a chunky screen eight times too wide.
  *                     It is also the stream's only barrier: both ends zero
  *                     their shadow on it, and the next frame is a full one.
  *                     Frames still in flight when it arrives belong to the
@@ -86,10 +93,10 @@
 extern "C" {
 #endif
 
-/* The longest `geom` there is: six numbers of five digits, five spaces and the
- * keyword.  A `pal` is 4 + 6 * (1 << depth) and the caller sizes that one from
- * the depth it has. */
-#define RFB_WORD_GEOM_MAX   44
+/* The longest `geom` there is: seven numbers of five digits, seven spaces and
+ * the keyword.  A `pal` is 4 + 6 * (1 << depth) and the caller sizes that one
+ * from the depth it has. */
+#define RFB_WORD_GEOM_MAX   51
 #define RFB_WORD_PAL_MAX    (5u + 6u * (1u << RFB_MAX_DEPTH))
 
 /*

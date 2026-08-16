@@ -38,6 +38,21 @@ export interface Screen {
   readonly height: number;
   readonly depth: number;
   readonly bytesPerRow: number;
+  /*
+   * ONE EIGHT-BIT PLANE INSTEAD OF EIGHT ONE-BIT ONES, which is what an RTG
+   * screen hands over: a byte IS the palette index and there is nothing to
+   * unpack.  depth stays 8 because it is what sizes the palette, so a reader
+   * that wants a plane count must ask planeCount() and not the depth.
+   *
+   * Optional and absent means planar, so every capture and every session that
+   * predates this reads exactly as it did.
+   */
+  readonly chunky?: boolean;
+}
+
+/* Planes in the source, which is NOT the depth on a chunky screen. */
+export function planeCount(s: Screen): number {
+  return s.chunky ? 1 : s.depth;
 }
 
 export function planeBytes(s: Screen): number {
@@ -45,7 +60,14 @@ export function planeBytes(s: Screen): number {
 }
 
 export function frameBytes(s: Screen): number {
-  return s.bytesPerRow * s.height * s.depth;
+  return s.bytesPerRow * s.height * planeCount(s);
+}
+
+/* Pixels one byte of a row covers: eight planar, one chunky.  The tile grid
+   is over bytesPerRow either way, so this is what turns a byte column into a
+   pixel column. */
+export function pixelsPerByte(s: Screen): number {
+  return s.chunky ? 1 : 8;
 }
 
 /* Reasons a Screen cannot be one, as a sentence or null.  Every entry point
@@ -57,8 +79,13 @@ export function screenFault(s: Screen): string | null {
   if (!Number.isInteger(s.depth) || s.depth < 1 || s.depth > 8) {
     return "depth " + s.depth + ", which is not 1..8";
   }
-  if (!Number.isInteger(s.bytesPerRow) || s.bytesPerRow * 8 < s.width) {
-    return "bytesPerRow " + s.bytesPerRow + " holds " + s.bytesPerRow * 8 +
+  if (s.chunky && s.depth !== 8) {
+    return "a chunky screen " + s.depth + " deep; a byte is the index, so it " +
+           "is 8 or it is not this format";
+  }
+  const per = pixelsPerByte(s);
+  if (!Number.isInteger(s.bytesPerRow) || s.bytesPerRow * per < s.width) {
+    return "bytesPerRow " + s.bytesPerRow + " holds " + s.bytesPerRow * per +
            " pixels and the screen is " + s.width + " wide";
   }
   return null;
@@ -123,6 +150,27 @@ export function decodeRectInto(
   const d = s.depth;
   const bpr = s.bytesPerRow;
   const plane = bpr * s.height;
+
+  /*
+   * Chunky first, and it is the whole of the RTG viewer: a byte is already
+   * the index the palette is looked up with, so there is no bit shuffling to
+   * do and the rectangle is in pixels rather than in byte columns.  The
+   * padding past the width is skipped here the same way the planar loop skips
+   * it below -- it is encoded, and it is not on the display.
+   */
+  if (s.chunky) {
+    const cx0 = Math.max(0, x0);
+    const cx1 = Math.min(w, x1);
+    const cy0 = Math.max(0, y0);
+    const cy1 = Math.min(s.height, y1);
+
+    for (let y = cy0; y < cy1; y++) {
+      const row = off + y * bpr;
+      let o = y * w + cx0;
+      for (let x = cx0; x < cx1; x++) out[o++] = pal[planes[row + x]];
+    }
+    return;
+  }
 
   const bx0 = Math.max(0, x0) >> 3;
   const bx1 = Math.min((w + 7) >> 3, (Math.min(x1, w) + 7) >> 3);
@@ -196,7 +244,13 @@ export function decodeInto(
  *
  * 800x600 and anything else larger comes out 1:1, which is right for the RTG
  * and Super72-ish modes where it is the only sensible answer.
+ *
+ * A CHUNKY SCREEN IS 1:1 AND IS NOT INFERRED AT ALL.  Those rules are about
+ * the chipset's display modulo; a graphics card has square pixels at every
+ * size it can put up, so a 320x240 RTG screen guessed at by the rule above
+ * would be drawn four times the area it is.
  */
 export function pixelAspect(s: Screen): { x: number; y: number } {
+  if (s.chunky) return { x: 1, y: 1 };
   return { x: s.width < 640 ? 2 : 1, y: s.height < 400 ? 2 : 1 };
 }
