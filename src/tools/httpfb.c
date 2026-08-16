@@ -575,7 +575,7 @@ static struct Screen *fb_lock_front(BOOL *pub)
  * FALSE having said why.  Every refusal here is a bitmap this cannot read
  * correctly, so none of them may fall through to a grab of something else.
  */
-static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g)
+static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
 {
     ULONG flags;
     ULONG depth;
@@ -602,7 +602,24 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g)
      * card's, and on a machine with neither library open it does not run at
      * all, so the chipset path reaches BMF_STANDARD exactly as it did.
      */
-    if (http_rtg_owns(bm))
+    /*
+     * AND `may_ask_rtg` IS WHY THE QUESTION IS NOT ALWAYS ASKED.
+     *
+     * The two library calls behind it are documented as ownership queries that
+     * need no lock, and every program that touches a card makes them freely --
+     * but they are still calls into Picasso96, and this file has ONE caller
+     * that runs under LockIBase(): the pass that resolves a screen nothing can
+     * lock.  Whether p96GetBitMapAttr() can take a semaphore is not something
+     * the autodoc settles and not something a global scan of the binary can
+     * settle either, so it is not relied on.
+     *
+     * Nothing is lost by not asking there.  A card's screen is read only while
+     * a real screen lock is held -- see fb_grab_frame() -- so the answer for a
+     * screen that offers none is discarded anyway, and what is left is the
+     * behaviour the planar path has always had for a bitmap it cannot
+     * identify.
+     */
+    if (may_ask_rtg && http_rtg_owns(bm))
     {
         HttpRtgScreen rs;
         const char   *why = NULL;
@@ -1419,11 +1436,11 @@ enum
  */
 static int fb_examine(struct Screen *sc, const FbGeometry *want,
                       FbGeometry *now, const UBYTE **planes,
-                      BOOL *palette_moved)
+                      BOOL *palette_moved, BOOL locked)
 {
     UWORD plane;
 
-    if (!fb_geometry_of(sc->RastPort.BitMap, now))
+    if (!fb_geometry_of(sc->RastPort.BitMap, now, locked))
         return FB_GRAB_REFUSED;
 
     if (!fb_geometry_same(want, now))
@@ -1535,7 +1552,7 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
 
     if (pub || fb_listed(sc))
     {
-        rc = fb_examine(sc, want, now, planes, palette_moved);
+        rc = fb_examine(sc, want, now, planes, palette_moved, pub);
 
         /* Only on a screen that is held, and see above for why.  Attempted and
            never waited for: the lock is held for as long as a mouse button is
@@ -2186,7 +2203,7 @@ BOOL http_fb_open(VOID)
 
     ok = (BOOL)(pub || fb_listed(sc));
     if (ok)
-        ok = fb_geometry_of(sc->RastPort.BitMap, &fb_open_geom);
+        ok = fb_geometry_of(sc->RastPort.BitMap, &fb_open_geom, pub);
     else
         fb_say("the front screen closed while it was being looked at");
 
@@ -2282,7 +2299,7 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
 
     ok = (BOOL)(pub || fb_listed(sc));
     if (ok)
-        ok = fb_geometry_of(sc->RastPort.BitMap, &g);
+        ok = fb_geometry_of(sc->RastPort.BitMap, &g, pub);
     else
         fb_say("the front screen closed while it was being looked at");
 
@@ -2319,7 +2336,7 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
             ilock = LockIBase(0);
 
         if ((pub || fb_listed(sc)) &&
-            fb_examine(sc, &g, &again, planes, &moved) == FB_GRAB_OK)
+            fb_examine(sc, &g, &again, planes, &moved, pub) == FB_GRAB_OK)
             fb_want_pal = 1;
 
         if (!pub)
