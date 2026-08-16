@@ -414,9 +414,48 @@ EOF
 # Amiberry links SDL2 with no driver of its own, so without this it asks for a
 # video device, finds a stale DISPLAY from a failed X11 forward, and aborts in
 # about a second -- which reads as a guest that never booted.
-export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-dummy}"
 export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
-[ "${SDL_VIDEODRIVER}" = "dummy" ] && unset DISPLAY WAYLAND_DISPLAY || true
+
+#
+# AN RTG BOARD PUBLISHES THE HOST'S DISPLAY MODES, SO A HEADLESS HOST HAS NONE.
+#
+# Amiberry's addresolutions() builds the whole Picasso96 resolution list out of
+# the modes SDL enumerates for the host, and BOTH headless SDL drivers report
+# none: `dummy` and `offscreen` each log "0 display modes.", the board then
+# calls InitCard with an empty list -- "P96 RESINFO: 00000000-00000000 (0,0)"
+# -- and the Amiga side has a graphics card with no resolutions on it.  Every
+# library loads, the board is mapped, and Workbench comes up on the chipset.
+#
+# So the RTG arm gets a real X server with a real mode on it.  One host mode is
+# enough: the FAKE-mode substitution in the same loop fills in every standard
+# resolution smaller than it, which is where 640x480 comes from.  Xvfb is not
+# a workaround for a missing display here, it is the source of the data the
+# board reports.
+XVFB_PID=""
+if [ "$RTG" = 1 ] && [ -z "${AMINETXDUO_CONSOLE_NO_XVFB:-}" ]; then
+    command -v Xvfb >/dev/null 2>&1 || {
+        say error "no Xvfb, and an RTG board has no modes without one"
+        say hint "apt install xvfb, or set AMINETXDUO_CONSOLE_NO_XVFB=1 and \
+supply a DISPLAY that enumerates modes"
+        say RESULT INFRA
+        exit 2
+    }
+    XDISP=""
+    for n in $(seq 90 99); do
+        [ -e "/tmp/.X11-unix/X$n" ] || { XDISP=":$n"; break; }
+    done
+    [ -n "$XDISP" ] || { say error "no free X display in :90..:99"; \
+                         say RESULT INFRA; exit 2; }
+    Xvfb "$XDISP" -screen 0 1280x1024x24 >/dev/null 2>&1 &
+    XVFB_PID=$!
+    sleep 2
+    export DISPLAY="$XDISP"
+    export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-x11}"
+    say xvfb "$XDISP 1280x1024x24 pid $XVFB_PID"
+else
+    export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-dummy}"
+    [ "${SDL_VIDEODRIVER}" = "dummy" ] && unset DISPLAY WAYLAND_DISPLAY || true
+fi
 
 # Fresh per run: a reused MAC lets the router's cache answer for a guest that
 # never came up, and the defect then looks like a pass.
@@ -440,7 +479,15 @@ cleanup() {
     EMU_PID=""
     return 0
 }
-trap cleanup EXIT INT TERM HUP
+
+reap_xvfb() {
+    [ -n "$XVFB_PID" ] || return 0
+    kill -TERM "$XVFB_PID" 2>/dev/null || true
+    wait "$XVFB_PID" 2>/dev/null || true
+    XVFB_PID=""
+    return 0
+}
+trap 'cleanup; reap_xvfb' EXIT INT TERM HUP
 
 EMULOG=""
 
