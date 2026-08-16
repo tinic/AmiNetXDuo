@@ -347,35 +347,28 @@ EOF
         # of LIBS:Picasso96/ and emulation.library is what answers
         # cybergraphics.library, so both of the console's readback families
         # are on the machine.
+        #
+        # THE ARCHIVE'S OWN uaegfx.card IS THE RIGHT ONE, and no other copy is
+        # needed from anywhere.  This used to delete it and demand a "modern
+        # stub from WinUAE" in its place, on the reading that Picasso96 2.0's
+        # 1998 card drives the obsolete uaelib trap.  It does not: with the
+        # archive's card staged unchanged, the emulator logs
+        #
+        #   uaegfx.card 3.4 init @0020E2DC
+        #   P96 RESINFO: 0020E380-0020EB60 (42,2016)
+        #   uaegfx.card magic code: 00F04800-00F0494A BI=00263BC4
+        #   SetSwitch() - Picasso96 640x480x8 - immediate
+        #
+        # -- the card finds the library uaegfx_card_install() builds in the
+        # boot ROM through the magic-code handshake, and never touches the
+        # trap.  Not one run has printed the obsolete-hook line.
+        #
+        # `Picasso96: Could not create graphics board context for 'uaegfx'` is
+        # NOT the symptom it was read as.  DEVS:Monitors/<board> is already run
+        # by the stock Startup-Sequence, so the harness's own second run of it
+        # is a duplicate init, and that message is what a duplicate init says
+        # on a board that came up perfectly.  It is in every green run here.
         cp -R "$P96DIR/Libs/." "$HD/Libs/"
-        #
-        # THE CARD DRIVER HAS TO BE THE EMULATOR'S, NOT THE ARCHIVE'S.
-        #
-        # Picasso96 2.0 ships a uaegfx.card from January 1999 that reaches the
-        # emulator through the uaelib trap.  Amiberry answers that trap with
-        # "obsolete Picasso96 uaelib hook called, call ignored", sets
-        # uaegfx_old, and picasso96_alloc() then returns before building any
-        # resolution list at all -- so the board is mapped, every library
-        # loads, and the display database holds no card mode whatsoever.
-        #
-        # The modern card is the small stub WinUAE distributes, which finds the
-        # library uaegfx_card_install() builds in the UAE boot ROM at reset.
-        # Amiberry does not carry a copy (UAEGFX_INTERNAL is defined in
-        # sysconfig.h and used nowhere), so it has to be supplied.
-        #
-        # Both failures say exactly the same thing and nothing else:
-        #   Picasso96: Could not create graphics board context for 'uaegfx'
-        # which is why it is named here rather than left to be rediscovered.
-        rm -f "$HD/Libs/Picasso96/uaegfx.card"
-        if [ -f "$P96DIR/uaegfx.card" ]; then
-            cp "$P96DIR/uaegfx.card" "$HD/Libs/Picasso96/uaegfx.card"
-        else
-            say error "no $P96DIR/uaegfx.card"
-            say hint "the archive's 1999 card drives the obsolete uaelib hook \
-and publishes no modes; drop WinUAE's uaegfx.card in $P96DIR"
-            say RESULT INFRA
-            exit 2
-        fi
         mkdir -p "$HD/Devs/Monitors"
         # THE MONITOR IS NAMED AFTER THE BOARD, and that is not cosmetic.
         # InstallPicasso96's P_InstallCard copies devs/monitors/Picasso96 with
