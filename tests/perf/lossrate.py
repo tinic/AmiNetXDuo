@@ -151,8 +151,34 @@ BULK_DEFAULT = 512
 # --------------------------------------------------------------- the capture --
 
 
+# The link layers this reads, as (name, header length, where the EtherType is).
+#
+# THREE OF THEM, NOT ONE.  tests/perf/peercap.sh captures on `any` by default,
+# which libpcap 1.10 records as LINUX_SLL2 (276) and older ones as LINUX_SLL
+# (113); this only knew EN10MB and raised SystemExit on anything else.  So
+# run-fitzbench.sh -w collected a capture, -l and -L asked this to gate on it,
+# and the gate died on its first line -- read as "no loss data" rather than as
+# a broken rig.
+#
+# TEACHING THE PARSER rather than pinning AMINETXDUO_PEER_IFACE=ens18: `any`
+# is what makes the capture work without knowing the peer's interface names,
+# a pinned name is wrong on the next peer and silently captures nothing when
+# the traffic takes another interface, and captures already on disk stay
+# readable this way.
+LINKS = {
+    1:   ("EN10MB", 14, 12),        # Ethernet: type at 12, payload at 14
+    113: ("LINUX_SLL", 16, 14),     # cooked v1: type at 14, payload at 16
+    276: ("LINUX_SLL2", 20, 0),     # cooked v2: type at 0, payload at 20
+}
+
+
 def packets(path):
-    """(timestamp, link-layer bytes) for a classic or nanosecond pcap."""
+    """(timestamp, IPv4 header onward) for a classic or nanosecond pcap.
+
+    The link-layer header is stripped here, so everything below sees one
+    shape whatever the capture was taken on.  Frames that are not IPv4 --
+    ARP, IPv6, anything else on a shared interface -- are dropped.
+    """
     with open(path, "rb") as fh:
         head = fh.read(24)
         if len(head) < 24:
@@ -167,8 +193,12 @@ def packets(path):
         if order is None:
             raise SystemExit("%s: not a pcap (magic %08x)" % (path, magic))
         link = struct.unpack(order + "I", head[20:24])[0]
-        if link != 1:
-            raise SystemExit("%s: link type %d, expected Ethernet" % (path, link))
+        if link not in LINKS:
+            raise SystemExit(
+                "%s: link type %d; this reads %s"
+                % (path, link, ", ".join(
+                    "%s (%d)" % (n, k) for k, (n, _, _) in sorted(LINKS.items()))))
+        _name, llen, tpos = LINKS[link]
         while True:
             hdr = fh.read(16)
             if len(hdr) < 16:
@@ -177,7 +207,18 @@ def packets(path):
             data = fh.read(incl)
             if len(data) < incl:
                 return
-            yield sec + frac / div, data
+            if len(data) < llen + 20:
+                continue
+            proto = struct.unpack(">H", data[tpos:tpos + 2])[0]
+            off = llen
+            if proto == 0x8100:                               # 802.1Q
+                if len(data) < off + 4 + 20:
+                    continue
+                proto = struct.unpack(">H", data[off + 2:off + 4])[0]
+                off += 4
+            if proto != 0x0800:
+                continue
+            yield sec + frac / div, data[off:]
 
 
 Seg = collections.namedtuple("Seg", "t src dst sport dport seq ack plen flags win")
@@ -186,22 +227,19 @@ FIN, SYN, RST, PSH, ACK, URG = 1, 2, 4, 8, 16, 32
 
 
 def tcp(data):
-    """The one TCP segment in a frame, or None.
+    """The one TCP segment in an IPv4 packet, or None.
+
+    `data` starts at the IP header: packets() has already stripped whichever
+    link layer the capture was taken on.
 
     The payload length comes from the IP header's total length, not from the
     captured bytes: these captures are taken with a short snaplen, so the
     frame on disk is truncated and len(data) is not the segment's size.  A
-    header is never truncated, 14 + 20 + 40 is 74 bytes at the very most.
+    header is never truncated, 20 + 40 is 60 bytes at the very most.
     """
-    if len(data) < 34:
+    if len(data) < 20:
         return None
-    proto = struct.unpack(">H", data[12:14])[0]
-    off = 14
-    if proto == 0x8100:                                   # 802.1Q
-        proto = struct.unpack(">H", data[16:18])[0]
-        off = 18
-    if proto != 0x0800:
-        return None
+    off = 0
     if (data[off] >> 4) != 4 or data[off + 9] != 6:
         return None
     ihl = (data[off] & 0xF) * 4
