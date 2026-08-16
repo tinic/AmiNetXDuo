@@ -39,6 +39,10 @@
 #include "nx_tcp.h"
 #include "nx_packet.h"
 
+/* The library's own verdict on a dead connect, so this tests it and not a
+   copy of it.  src/bsdsocket/select.c is its other caller. */
+#include "connfail.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -89,6 +93,8 @@ typedef struct
     UINT    reset;                      /* _nx_tcp_socket_connection_reset   */
     UINT    disconnected;               /* the create-time callback          */
     UINT    disconnect_complete;        /* the extended-notify callback      */
+    UINT    ladder_spent;               /* what select.c asked, at the time  */
+    ULONG   retries_at_reset;
 } h_run;
 
 static h_run h_r;
@@ -377,10 +383,17 @@ static VOID h_disconnect_callback(NX_TCP_SOCKET *socket_ptr)
  */
 static VOID h_disconnect_complete(NX_TCP_SOCKET *socket_ptr)
 {
-    (void)socket_ptr;
     h_r.disconnect_complete++;
     h_r.reset_at = H_SECONDS(h_now);
     h_r.reset++;
+
+    /*
+     * The question select.c asks here, asked with the same code and at the
+     * same moment: a connect that died with its budget spent is ETIMEDOUT and
+     * one that died with the budget still in hand is a refusal.
+     */
+    h_r.ladder_spent     = bsd_connect_ladder_spent(socket_ptr);
+    h_r.retries_at_reset = socket_ptr -> nx_tcp_socket_timeout_retries;
 }
 
 static void h_fixture(void)
@@ -750,6 +763,50 @@ int main(void)
         h_check(widest <= (1UL << NX_TCP_SYN_RETRY_SHIFT_MAX),
                 "a SYN retransmission interval ran past the shift cap");
     }
+
+    /* ---- 8a. and what the application is told it was ------------------- */
+    /*
+     * The reset above is the whole of what a pending connect() ever hears, so
+     * the reason src/bsdsocket/select.c files for SO_ERROR is decided from the
+     * socket as it stands here.  `whois -6' called this refused, after 191
+     * seconds in which nothing answered.
+     */
+    printf("  at the reset        retries=%lu spent=%u\n",
+           (unsigned long)h_r.retries_at_reset, h_r.ladder_spent);
+
+    h_check(h_r.ladder_spent == 1,
+            "a SYN ladder that ran out does not read as a timeout");
+
+    /* ---- 8b. an answer, and the same door ------------------------------ */
+    /*
+     * A peer that refuses reaches the same reset through
+     * nx_tcp_socket_packet_process.c:406, with the budget still in hand: two
+     * SYNs went out, the RST came back on the third interval.  This is the
+     * case that must still read as a refusal, or the fix above turns every
+     * refusal into a timeout instead.
+     */
+    h_fixture();
+
+    h_sock.nx_tcp_socket_state = NX_TCP_SYN_SENT;
+    h_sock.nx_tcp_socket_transmit_sent_head  = NX_NULL;
+    h_sock.nx_tcp_socket_transmit_sent_tail  = NX_NULL;
+    h_sock.nx_tcp_socket_transmit_sent_count = 0;
+    h_sock.nx_tcp_socket_tx_outstanding_bytes = 0;
+
+    h_run_timer(5, 0);
+
+    printf("  RST after %lu SYNs   retries=%lu spent=%u\n",
+           (unsigned long)h_r.sent,
+           (unsigned long)h_sock.nx_tcp_socket_timeout_retries,
+           bsd_connect_ladder_spent(&h_sock));
+
+    h_check(h_r.reset == 0, "the SYN ladder gave up inside five seconds");
+
+    _nx_tcp_socket_connection_reset(&h_sock);
+
+    h_check(h_r.reset == 1, "an RST in SYN_SENT did not reset the connection");
+    h_check(h_r.ladder_spent == 0,
+            "a refusal that arrived early reads as a timeout");
 
     /* ---- 9. the stall clock, while the stall is running ---------------- */
     /*
