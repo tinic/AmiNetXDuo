@@ -1168,7 +1168,7 @@ VOID tool_explain_no_netstatus(struct Library *base)
      * lib_Revision and reports that itself before any call is made. Reaching
      * this point means a new enough library answered no.
      */
-    tool_printf("%s: the stack would not report on itself\n", (LONG)tool_name);
+    tool_printf("%s: the stack did not report on itself\n", (LONG)tool_name);
 }
 
 struct Library *tool_netstatus_open(BOOL quiet)
@@ -1195,7 +1195,7 @@ struct Library *tool_netstatus_open(BOOL quiet)
     if (base == NULL)
     {
         if (!quiet)
-            tool_error("bsdsocket.library would not open");
+            tool_error("bsdsocket.library did not open");
         return NULL;
     }
 

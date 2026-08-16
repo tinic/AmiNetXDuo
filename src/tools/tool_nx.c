@@ -59,7 +59,7 @@ static VOID nx_query_failed(struct Library *base)
     if (nx_quiet)
         return;
 
-    tool_error("the network is up, but it would not report on itself");
+    tool_error("the network is up, but it did not report on itself");
     tool_explain_no_netstatus(base);
 }
 

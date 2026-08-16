@@ -268,7 +268,7 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
 
     if (cfg->ip6type == AMI_IP6TYPE_OFF)
     {
-        AMI_INFO("netstack: %s: IPv6 disabled by CONFIGURE6", cfg->name);
+        AMI_INFO("netstack: %s: IPv6 switched off by CONFIGURE6", cfg->name);
         return;
     }
 
@@ -373,7 +373,7 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
         status = nxd_ipv6_stateless_address_autoconfig_disable(&ns->ns_Ip,
                                                                (UINT)i);
         if (status != NX_SUCCESS)
-            AMI_WARN("netstack: %s: could not switch stateless "
+            AMI_WARN("netstack: %s: cannot switch stateless "
                      "autoconfiguration off (%ld)", cfg->name, (long)status);
     }
 

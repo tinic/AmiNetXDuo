@@ -1934,7 +1934,7 @@ static VOID httpd_walk_answer(HttpConn *c, ULONG plain)
 
     if (!ok)
     {
-        httpd_error(c, 500, "that answer would not fit");
+        httpd_error(c, 500, "that answer did not fit");
         return;
     }
 
@@ -2039,7 +2039,7 @@ static VOID httpd_walk_end(HttpConn *c)
             if (c->fails != 0 || c->walk_status != 0)
             {
                 httpd_error(c, (c->walk_status != 0) ? c->walk_status : 409,
-                            "what was there already would not go");
+                            "what was there already will not go");
                 break;
             }
             httpd_walk_copy_stage(c);
@@ -4171,7 +4171,7 @@ static VOID httpd_do_terminal(HttpConn *c)
 
     if (!http_term_start())
     {
-        httpd_error(c, 503, "the terminal's Shell would not start");
+        httpd_error(c, 503, "the terminal's Shell did not start");
         return;
     }
 
@@ -5070,7 +5070,7 @@ static VOID httpd_do_proppatch(HttpConn *c)
 
     if (!ok)
     {
-        httpd_error(c, 500, "that answer would not fit");
+        httpd_error(c, 500, "that answer did not fit");
         return;
     }
 
@@ -5198,7 +5198,7 @@ static VOID httpd_do_lock(HttpConn *c)
 
     if (!ok)
     {
-        httpd_error(c, 500, "that answer would not fit");
+        httpd_error(c, 500, "that answer did not fit");
         return;
     }
 
@@ -6496,7 +6496,7 @@ static BOOL httpd_iperf_hook(HttpConn *c)
         IperfResult res;
 
         iperf_end(&httpd_iperf, &res);
-        httpd_error(c, 503, (res.stage != NULL) ? res.stage : "it would not start");
+        httpd_error(c, 503, (res.stage != NULL) ? res.stage : "it did not start");
         return TRUE;
     }
 
@@ -7158,7 +7158,7 @@ static BOOL httpd_writable(HttpConn *c)
             if (!http_fb_start(httpd_sb, c->sock, c->in, first, httpd_now()))
             {
                 if (httpd_verbose || httpd_trace)
-                    httpd_log(c, "console would not start: %s",
+                    httpd_log(c, "console did not start: %s",
                               (LONG)http_fb_fault(), 0);
                 return FALSE;
             }

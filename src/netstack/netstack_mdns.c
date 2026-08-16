@@ -164,7 +164,7 @@ static VOID ami_ns_mdns_probing(NX_MDNS *mdns_ptr, UCHAR *name, UINT state)
                                                 ns->ns_MdnsLabel))
         {
             AMI_WARN("netstack: the name '%s' is already taken on this "
-                     "network, so this machine claimed '%s' instead, set "
+                     "network, so this machine claimed '%s' instead. Set "
                      "HOSTNAME to give it a name of its own",
                      ns->ns_MdnsLabel, (const char *)name);
         }
@@ -467,7 +467,7 @@ LONG ami_netstack_mdns_iface_set(AmiNetStack *ns, UWORD index, BOOL enable)
             AMI_INFO("netstack: mDNS off on interface %ld, goodbye sent",
                      (long)index);
         else if (err != AMI_NET_OK)
-            AMI_WARN("netstack: mDNS would not stop on interface %ld (%ld)",
+            AMI_WARN("netstack: mDNS did not stop on interface %ld (%ld)",
                      (long)index, (long)status);
     }
 

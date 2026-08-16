@@ -1020,7 +1020,7 @@ static BOOL bsd_socket_destroy(AmiSocket *sock)
          * 830 of these and could not say which.
          */
         AMI_WARN("bsdsocket: %s_socket_delete refused (%ld) state %ld "
-                 "flags 0x%lx port %ld; leaking %ld bytes rather than "
+                 "flags 0x%lx port %ld. It leaks %ld bytes rather than "
                  "corrupting the created list",
                  ((sock->as_Flags & ASF_TCP) != 0) ? "nx_tcp" : "nx_udp",
                  (long)status,
@@ -1143,8 +1143,8 @@ VOID bsd_close_all(struct AmiSocketBase *base)
        table goes at once and adopting per socket would be pure overhead. */
     if (bsd_nx_enter(base) != 0)
     {
-        AMI_WARN("bsdsocket: CloseLibrary with the kernel down; "
-                 "sockets left to the stack teardown");
+        AMI_WARN("bsdsocket: CloseLibrary with the kernel down. "
+                 "Sockets are left to the stack teardown");
         return;
     }
 
@@ -1900,8 +1900,8 @@ static BOOL bsd_listen_park_one(struct AmiSocketBase *base, AmiSocket *sock)
 
         if (status != NX_SUCCESS && status != NX_CONNECTION_PENDING)
         {
-            AMI_WARN("bsdsocket: port %ld has no listen request left (%ld); "
-                     "the next accept() will try again",
+            AMI_WARN("bsdsocket: port %ld has no listen request left (%ld). "
+                     "The next accept() will try again",
                      (long)sock->as_ListenPort, (long)status);
 
             if (bsd_socket_destroy(spare))
@@ -3138,8 +3138,8 @@ LONG bsd_CloseSocket(register LONG sock_fd __asm("d0"),
     }
     else
     {
-        AMI_WARN("bsdsocket: CloseSocket(%ld) with the kernel down; leaking",
-                 (long)sock_fd);
+        AMI_WARN("bsdsocket: CloseSocket(%ld) with the kernel down. "
+                 "The socket leaks", (long)sock_fd);
     }
 
     return 0;

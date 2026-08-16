@@ -158,7 +158,7 @@ static VOID say_source(UWORD source, const char *name)
     if (from != NULL)
         tool_printf("  named by %s\n", (LONG)from);
     else if (tool_stricmp(name, "amiga") == 0)
-        tool_printf("  not named by anything. No card would give a hardware "
+        tool_printf("  not named by anything. No card gave a hardware "
                     "address to name it after, so every other machine in the "
                     "same state has this name\n");
     else

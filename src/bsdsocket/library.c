@@ -409,8 +409,8 @@ static VOID bsd_task_sweep(VOID)
            it repeating, and a program that does this does it for the rest of
            the session. */
         bsd_latched_tasks++;
-        AMI_WARN("bsdsocket: task %lx exited without closing the library; "
-                 "its base will no longer be signalled (%lu so far)",
+        AMI_WARN("bsdsocket: task %lx exited without closing the library. "
+                 "Its base will no longer be signalled (%lu so far)",
                  (unsigned long)child->sb_Task,
                  (unsigned long)bsd_latched_tasks);
 
@@ -574,8 +574,8 @@ static LONG bsd_dead_base_call(VOID)
     if (bsd_dead_calls == 0UL)
     {
         AMI_WARN("bsdsocket: a call arrived through a base that was already "
-                 "closed; answering it with 0. The caller closed the library "
-                 "and kept its pointer.");
+                 "closed. It is answered with 0. The caller closed the "
+                 "library and kept its pointer.");
     }
 
     bsd_dead_calls++;

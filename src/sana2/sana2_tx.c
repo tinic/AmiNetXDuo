@@ -218,7 +218,7 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
                 !iface->raw_tx_refused)
             {
                 iface->raw_tx_refused = TRUE;
-                AMI_WARN("sana2: %s refuses raw writes; EtherType %lx goes "
+                AMI_WARN("sana2: %s refuses raw writes. EtherType %lx goes "
                          "back to cooked framing",
                          iface->device,
                          (LONG)slot->req.ios2_PacketType);
@@ -313,8 +313,9 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
 
     if (busy != 0)
     {
-        AMI_ERROR("sana2: %ld write(s) still owned by the device; leaking the "
-                  "interface rather than freeing memory it writes into",
+        AMI_ERROR("sana2: %ld write(s) still owned by the device. The "
+                  "interface leaks. A free here corrupts memory the "
+                  "device writes into",
                   (long)busy);
     }
 }

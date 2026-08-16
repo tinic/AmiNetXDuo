@@ -297,7 +297,7 @@ VOID tool_explain_device(const char *device, ULONG unit, const char *card)
         return;
     }
 
-    tool_printf("  %s is installed (%s) but unit %lu would not open.\n",
+    tool_printf("  %s is installed (%s) but unit %lu did not open.\n",
                 (LONG)device, (LONG)where, unit);
 
     if (unit != 0 && tool_device_probe(device, 0, card) == 0)

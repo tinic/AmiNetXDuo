@@ -385,7 +385,7 @@ if [ -z "${SERIAL:-}" ] || [ ! -f "$SERIAL" ]; then
     echo " , orphaned SANA-II reader stacks: NOT CHECKED (no serial log; use -A)"
     ORPHANS=-1
 else
-    ORPHANS=$(grep -c "did not stop; leaking its stack" "$SERIAL" || true)
+    ORPHANS=$(grep -c "did not stop. Its stack leaks" "$SERIAL" || true)
     echo " , orphaned SANA-II reader stacks logged: $ORPHANS"
 fi
 if [ "$ORPHANS" -gt 0 ]; then

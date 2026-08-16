@@ -163,7 +163,7 @@ VOID ami_netstack_capture_start(AmiNetStack *ns)
 
     if (ami_bpf_init() != 0)
     {
-        AMI_WARN("netstack: bpf init failed; no capture available");
+        AMI_WARN("netstack: bpf init failed. No capture is available");
         return;
     }
 
@@ -175,7 +175,7 @@ VOID ami_netstack_capture_start(AmiNetStack *ns)
                                      ami_sana2_get_mtu(ns->ns_Iface[i]),
                                      ami_ns_capture_inject) != 0)
         {
-            AMI_WARN("netstack: bpf could not register '%s'", cfg->name);
+            AMI_WARN("netstack: bpf cannot register '%s'", cfg->name);
         }
     }
 
@@ -183,7 +183,7 @@ VOID ami_netstack_capture_start(AmiNetStack *ns)
                                  DLT_EN10MB, AMI_NS_LO_MTU,
                                  ami_ns_capture_inject) != 0)
     {
-        AMI_WARN("netstack: bpf could not register " AMI_NS_LO_NAME);
+        AMI_WARN("netstack: bpf cannot register " AMI_NS_LO_NAME);
     }
 
     ami_bpf_set_address_hook(ami_ns_capture_address);
@@ -217,7 +217,7 @@ VOID ami_netstack_capture_attach_one(AmiNetStack *ns, UWORD index)
                                  ami_sana2_get_mtu(ns->ns_Iface[index]),
                                  ami_ns_capture_inject) != 0)
     {
-        AMI_WARN("netstack: bpf could not register '%s'", cfg->name);
+        AMI_WARN("netstack: bpf cannot register '%s'", cfg->name);
     }
 }
 

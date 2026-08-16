@@ -226,7 +226,7 @@ static VOID load_interfaces(AmiConfig *cfg)
 
                 ami_cfg_problem_file(AMI_CFG_DIR_NETINTERFACES);
                 ami_cfg_join3(text, sizeof(text), "the file '", entry_name,
-                              "' could not be used, so that interface does "
+                              "' cannot be used, so that interface does "
                               "not exist");
                 ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR, text,
                                 "The problems listed above it say why.  "

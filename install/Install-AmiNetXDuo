@@ -159,8 +159,7 @@
   (cat "The netmask says which part of the address is the network and which "
        "part is this machine.\n\n"
        "255.255.255.0 is correct for almost every home and small office "
-       "network.  Change it only when the network requires another "
-       "value."))
+       "network.  If the network requires another value, change it."))
 
 (set H_GW
   (cat "The gateway, or router, forwards traffic to the other networks.  "
@@ -573,10 +572,11 @@
   (askchoice
     (prompt "Select the stack to install.\n\n")
     (help "Both stacks run on every Amiga from a 68000 up.  One binary picks "
-          "the code for this processor when the library opens, so nothing "
-          "has to match the machine, and nothing changes if the disk moves "
-          "to another machine.\n\n"
-          "Install the full stack unless memory is tight.\n\n"
+          "the code for this processor when the library opens.  Nothing has "
+          "to match the machine.  If the disk moves to another machine, "
+          "nothing changes.\n\n"
+          "If memory is tight, install the minimal stack.  If not, "
+          "install the full stack.\n\n"
           "The minimal stack leaves out IPv6, .local name lookups, the packet "
           "filter, encrypted (https:) connections, IPv4 multicast, the ARexx "
           "host and the TCP: handler. It is 98 KB smaller. On a 1 MB machine "
@@ -1216,7 +1216,7 @@
       (append "; DEVS:Internet/name_resolution -- written by the AmiNetXDuo\n")
       (append "; installer.\n")
       (append ";\n")
-      (append "; nameserver <address>   ask this server; repeat for more.\n")
+      (append "; nameserver <address>   ask this server.  Repeat for more.\n")
       (append "; domain     <name>      added to names with no dots in them.\n")
       (append "; search     <a> <b> ..  several domains to try, in order.\n")
       (append "; hostname   <name>      what this machine calls itself.\n")
