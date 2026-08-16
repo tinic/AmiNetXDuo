@@ -148,35 +148,33 @@ CROSS_CONFIGS=(
     "minimal:-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF"
 )
 
-# Host-side test executables.  ctest fails loudly ("Unable to find executable")
-# if one is registered but not built, so a test added without touching this
-# list turns CI red rather than silently disappearing, which is what used to
-# happen when `ctest` reported "No tests were found" and nobody noticed.
+# WHAT THE HOST STAGES BUILD IS NOT WRITTEN DOWN HERE ANY MORE.
 #
-# NOT ALL OF THEM ARE THE TEST.  rfbgen and rfbbench are named because
-# rfb_roundtrip RUNS them -- src/rfb/roundtrip.cmake generates the captures
-# with one and round-trips every frame of them through the other -- and a
-# target this list does not name does not exist when ctest starts.  It passed
-# in a working tree, where both were already built, and failed on every clean
-# configure; a test whose ingredients are built by something other than itself
-# belongs here with them.
-HOST_TEST_TARGETS=(test_config test_usergroup test_mbuf test_bpf test_httppath test_httpif test_httplock test_argtemplates test_fetchurl test_crypto68k test_crypto68k_25519 test_net68k_checksum test_net68k_rxverify
-                   test_tcp_retries test_bcast_loopback test_tcp_source_connect test_tcp_rtt test_tcp_earlyretx test_tcp_rxflood test_tick_conv
-                   test_dns_retry test_dns_status
-                   test_sockopt_numbers test_tls_expiry test_tls_resume test_sana2_copy test_sana2_tx test_sana2_rx test_sana2_driver test_ipv6_ra test_ipv6_ptb
-                   test_httpframe test_httpws test_tls_x509 test_ipv6_frag test_iperfwire test_netdev_mcaf test_netdev_ed test_netdev_cards test_netdev_macgen test_netdev_bus
-                   rfbwords rfbgen rfbbench
-                   fuzz_config fuzz_bpf fuzz_dns fuzz_usergroup
-                   fuzz_dhcp dhcp_lease_regression fuzz_tls_record fuzz_tls_x509 fuzz_httpframe)
+# It used to be a hand-kept array, and three times a test was registered whose
+# binary the array did not name.  Each time it passed in a working tree, where
+# the binary was already lying about from an earlier build, and each time CI
+# reported "Not Run" on a clean configure: the netdev host tests, then rfbgen
+# and rfbbench under rfb_roundtrip, then test_netdev_el3.  A list with no
+# mechanical relationship to what it mirrors drifts, and this one did.
+#
+# cmake/HostTests.cmake wraps add_test() and computes the targets from the
+# registrations, writing them to host-test-targets.txt in the build directory.
+# host_test_targets() below reads that file.  Adding a test now needs no edit
+# here at all, and a registration naming a target that does not exist is a
+# FATAL_ERROR at configure rather than a "Not Run" after the build.
+#
+# Read per build directory, not once: the sanitize configure can select a
+# different set from the plain one, and used to be given the plain one's.
+host_test_targets() { # builddir
+    local f="$1/host-test-targets.txt"
 
-# test_inet exists only where tests/bsdsocket/CMakeLists.txt defines it, which
-# is x86_64: ThreadX's linux tx_port.h types LONG as int there and as long
-# everywhere else, and the shim cannot agree with both.  Asked for
-# unconditionally, make answers "No rule to make target" on the arm64 runner
-# and the whole host stage fails.
-case "$(uname -m)" in
-    x86_64|amd64) HOST_TEST_TARGETS+=(test_inet) ;;
-esac
+    if [ ! -s "$f" ]; then
+        fail "no $f: the configure did not write the host test target list," \
+             "so cmake/HostTests.cmake did not run"
+        return 1
+    fi
+    tr '\n' ' ' < "$f"
+}
 
 # How many ctest cases those targets register between them.  It is not the
 # number of targets: test_crypto68k and friends register several each.
@@ -190,7 +188,7 @@ esac
 #
 # Adding a test therefore turns CI red until this is raised.  That is the
 # maintenance the gate is made of, and it is one line.
-HOST_TESTS_EXPECTED=66
+HOST_TESTS_EXPECTED=67
 case "$(uname -m)" in
     x86_64|amd64) ;;
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 1)) ;;   # no test_inet
@@ -349,8 +347,11 @@ stage_host() {
 
     # Not `--target all`: most of the tree is AmigaOS code that has no meaning
     # on the host, so only the test executables are asked for.
+    local targets
+    targets=$(host_test_targets "$BUILD/host") || return 1
+    # shellcheck disable=SC2086
     cmake --build "$BUILD/host" --parallel "$JOBS" \
-        --target "${HOST_TEST_TARGETS[@]}" || { fail "host build"; return 1; }
+        --target $targets || { fail "host build"; return 1; }
 
     ( cd "$BUILD/host" && ctest --output-on-failure ) || { fail "ctest"; return 1; }
 
@@ -467,8 +468,11 @@ stage_sanitize() {
             tail -30 "$BUILD/san-configure.log"; fail "sanitize configure"; return 1; }
     note "$(grep -o 'sanitize: .*' "$BUILD/san-configure.log" | head -1)"
 
+    local targets
+    targets=$(host_test_targets "$BUILD/san") || return 1
+    # shellcheck disable=SC2086
     cmake --build "$BUILD/san" --parallel "$JOBS" \
-        --target "${HOST_TEST_TARGETS[@]}" || { fail "sanitize build"; return 1; }
+        --target $targets || { fail "sanitize build"; return 1; }
 
     ( cd "$BUILD/san" && ctest --output-on-failure ) || { fail "sanitize ctest"; return 1; }
 
