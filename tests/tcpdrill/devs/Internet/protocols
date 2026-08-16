@@ -1,6 +1,6 @@
 #
 # DEVS:Internet/protocols -- standard /etc format, staged onto the test drive
-# by tests/conformance/run-fsuae.sh and tools/amiberry-run.sh.
+# by tests/conformance/run-conformance.sh and tools/amiberry-run.sh.
 #
 #   <name>  <number>  [alias...]
 #

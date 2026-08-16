@@ -258,12 +258,13 @@ jobs:
             tools/build-toolchain.sh \
             tools/package-toolchain-mirror.sh \
             tools/amiga-toolchain.sh \
+            tools/toolchain-resolve-selftest.sh \
             tools/amiberry-run.sh \
             tools/logcap.sh \
             tools/enforcer-run.sh \
             tools/ci-arm.sh \
             tests/conformance/build.sh \
-            tests/conformance/run-fsuae.sh \
+            tests/conformance/run-conformance.sh \
             tests/tools/run-iperf.sh \
             tests/tools/run-arpretry.sh \
             tests/tools/run-cardsweep.sh \

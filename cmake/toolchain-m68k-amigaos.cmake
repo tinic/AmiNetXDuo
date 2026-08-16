@@ -13,7 +13,7 @@ set(CMAKE_SYSTEM_PROCESSOR m68k)
 # that a shell script and a CMake configure never pick different compilers:
 #
 #   1. -DAMIGA_TOOLCHAIN_ROOT / $AMIGA_TOOLCHAIN_ROOT  , explicit
-#   2. the tools/fetch-toolchain.sh cache              , what CI uses
+#   2. the PINNED tree in the fetch cache              , what CI uses
 #   3. m68k-amigaos-gcc on $PATH                       , container, module
 #   4. /opt/m68k-amigaos                               , crosstools layout
 #   5. $HOME/amigaos/tools/m68k-amigaos-gcc            , local default
@@ -38,7 +38,73 @@ if(NOT AMIGA_TOOLCHAIN_ROOT)
             set(_amiga_cache "$ENV{HOME}/.cache/aminetxduo/toolchain")
         endif()
 
-        set(_amiga_candidates "${_amiga_cache}/current")
+        # THE CACHE CANDIDATE IS THE PIN, NOT <cache>/current.  tools/
+        # amiga-toolchain.sh carries the long version; the short one is that
+        # `current` is a symlink tools/fetch-toolchain.sh writes when it
+        # INSTALLS, so a cache that already holds the pinned tree leaves it
+        # addressing whatever was current last and nothing ever compared the
+        # two.  The self-hosted emulator runner held both eabb6789378f (the
+        # pin, GCC 16.2.0b) and c63033fd4473 (GCC 15.2) with `current` on the
+        # older one, and every cross build there ran under GCC 15.2.
+        #
+        # --print-root prints <cache>/<sha12> for this platform and touches no
+        # network.  It exits non-zero on a host with no published asset, where
+        # there is no pin to compare anything to.
+        set(_amiga_pin "")
+        execute_process(
+            COMMAND "${CMAKE_CURRENT_LIST_DIR}/../tools/fetch-toolchain.sh"
+                    --print-root
+            OUTPUT_VARIABLE _amiga_pin
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+            RESULT_VARIABLE _amiga_pin_rc)
+        if(NOT _amiga_pin_rc EQUAL 0)
+            set(_amiga_pin "")
+        endif()
+
+        set(_amiga_candidates "")
+        if(_amiga_pin)
+            list(APPEND _amiga_candidates "${_amiga_pin}")
+        endif()
+
+        # A `current` that runs HERE and is not the pin is an error rather than
+        # a lower-ranked candidate.  Ranking around it is what let a build use
+        # a toolchain nobody asked for and report success: the only symptom was
+        # tools/gen-developer.sh --check calling the committed headers stale.
+        if(_amiga_pin AND EXISTS "${_amiga_cache}/current/bin/m68k-amigaos-gcc")
+            execute_process(
+                COMMAND "${_amiga_cache}/current/bin/m68k-amigaos-gcc" -dumpversion
+                RESULT_VARIABLE _amiga_cur_rc
+                OUTPUT_VARIABLE _amiga_cur_ver
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET)
+            get_filename_component(_amiga_cur_real
+                                   "${_amiga_cache}/current" REALPATH)
+            get_filename_component(_amiga_pin_real "${_amiga_pin}" REALPATH)
+            # "Runs here", not "exists", on both sides -- the same test the
+            # candidate loop below uses, so the two cannot disagree about
+            # whether the pin was available.
+            set(_amiga_pin_rc 1)
+            if(EXISTS "${_amiga_pin}/bin/m68k-amigaos-gcc")
+                execute_process(
+                    COMMAND "${_amiga_pin}/bin/m68k-amigaos-gcc" -dumpversion
+                    RESULT_VARIABLE _amiga_pin_rc
+                    OUTPUT_QUIET ERROR_QUIET)
+            endif()
+            if(_amiga_cur_rc EQUAL 0 AND NOT _amiga_cur_real STREQUAL _amiga_pin_real)
+                if(NOT _amiga_pin_rc EQUAL 0)
+                    message(FATAL_ERROR
+                        "${_amiga_cache}/current is not the toolchain this "
+                        "tree pins.\n"
+                        "  want ${_amiga_pin}\n"
+                        "  got  ${_amiga_cur_real}  (GCC ${_amiga_cur_ver})\n"
+                        "Refusing to build with it: the headers, the codegen "
+                        "and the library ABI all move.\n"
+                        "Run tools/fetch-toolchain.sh, or pass "
+                        "-DAMIGA_TOOLCHAIN_ROOT=<path> to say so on purpose.")
+                endif()
+            endif()
+        endif()
 
         find_program(_amiga_gcc_on_path m68k-amigaos-gcc)
         if(_amiga_gcc_on_path)

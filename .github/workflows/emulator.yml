@@ -12,6 +12,14 @@
 #               the only tier that can run the SANA-II network tests and the
 #               bsdsocktest conformance suite, because those need a driver.
 #
+# AMIBERRY, AND ONLY AMIBERRY.  Every arm below reaches tools/amiberry-run.sh,
+# which is the one place that decides how a guest is booted, capped
+# (tools/logcap.sh) and reaped.  This job was titled "FS-UAE on Kickstart 3.1"
+# until 2026-08-16 and two of its harnesses were called run-fsuae.sh, but
+# nothing here has started fs-uae since it left the tree on 2026-08-04: it
+# needs an X server, and Xvfb is not the fix.  A name is what the next person
+# reads as the decision, so the names now say what runs.
+#
 # SPDX-License-Identifier: MIT
 
 name: Emulator
@@ -46,7 +54,7 @@ jobs:
 
   # ------------------------------------------------------------------------
   kickstart:
-    name: FS-UAE on Kickstart 3.1 (self-hosted)
+    name: Amiberry on Kickstart 3.1 (self-hosted)
     if: >
       vars.AMINETXDUO_KICKSTART_RUNNER != '' &&
       (github.event_name != 'workflow_dispatch' || inputs.run_kickstart)
@@ -103,6 +111,24 @@ jobs:
         with:
           submodules: recursive
 
+      # THE PINNED TOOLCHAIN, WHICH THIS JOB NEVER ASKED FOR.
+      #
+      # ci.yml and release.yml both run this before they build; this job did
+      # not, so it built with whatever the runner's cache happened to hold.
+      # From 2026-08-14 that was GCC 15.2 under a `current` symlink left behind
+      # by a broken swap in tools/fetch-toolchain.sh, while the pinned GCC
+      # 16.2.0b tree sat unused in the same directory.  The only thing that
+      # noticed was tools/gen-developer.sh --check, which called the committed
+      # Developer headers stale because a different sfdc wrote them; the job
+      # was red on that through v0.22.0, v0.22.1 and v0.23.0.
+      #
+      # The resolvers now select the pin by name and refuse a cache that is not
+      # it, so a missing toolchain is an error rather than a wrong answer.  This
+      # step is what stops that error being the outcome: it costs nothing when
+      # the pin is already there and provisions the runner when it is not.
+      - name: Toolchain
+        run: tools/fetch-toolchain.sh
+
       - name: Check the ROM is really there
         run: |
           if [ ! -f "$AMINETXDUO_KICKSTART" ]; then
@@ -135,9 +161,9 @@ jobs:
           tools/ci-arm.sh -n "bsdsocktest conformance suite"
           -r AMINETXDUO_A2065 -- sh -c
           'tests/conformance/build.sh -b build/ci/default &&
-          tests/conformance/run-fsuae.sh -b build/ci/default -a "LOOPBACK NOPAGE"'
+          tests/conformance/run-conformance.sh -b build/ci/default -a "LOOPBACK NOPAGE"'
 
-      # 129 checks over the whole RFC 3542 surface -- IPV6_RECVPKTINFO and
+      # The whole RFC 3542 surface -- IPV6_RECVPKTINFO and
       # IP_PKTINFO arriving together on one datagram, both hop-limit paths read
       # off the wire, the arrival index through if_indextoname() and back. It
       # ran green by hand from the day it was written and nothing re-ran it,
@@ -148,14 +174,15 @@ jobs:
       # opens the library, so it needs no driver anyone has to supply. A ROM is
       # the whole requirement.
       #
-      # -A because this runner is headless and FS-UAE dies in GLAD before the
-      # guest boots. The results are on the SERIAL log, not the guest's
-      # stdout.txt -- the harness prints the verdict either way.
+      # The harness grades on the guest's own counters, from stdout.txt or the
+      # serial log, whichever arrived; 134 checks against a floor of 120.  It
+      # used to carry -A here, which picked between two branches that both ran
+      # Amiberry; the branch is gone and the invocation is the same run.
       - name: IPv6 socket surface
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: >-
           tools/ci-arm.sh -n "IPv6 socket surface (RFC 3542)" --
-          tests/ipv6/run-socket-fsuae.sh -A -b build/ci/default
+          tests/ipv6/run-socket.sh -b build/ci/default
 
       # One binary for every 68k means the compiler runtime picks its MULU.L
       # and DIVU.L paths from AttnFlags at run time, and a green run on one

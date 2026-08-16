@@ -53,7 +53,7 @@ endif()
 # AF_INET6 through the bsdsocket.library ABI, linked against none of our
 # code, exactly like tests/libraries/library_test.
 #
-#   AMINETXDUO_RUN_TAG=v6sock ./tests/ipv6/run-socket-fsuae.sh -b build/v6
+#   AMINETXDUO_RUN_TAG=v6sock ./tests/ipv6/run-socket.sh -b build/v6
 
 # tapdev.c gives this test its own interface, so it needs no a2065.device and
 # runs anywhere tier 2 runs.  It links nothing from src/; it includes
