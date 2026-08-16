@@ -6,7 +6,8 @@
 #                                  [-s SCRIPT|all] [-A]
 #
 # -s all runs every script under scripts/, one boot each, and prints one line
-# per file plus tcpdrill_all=PASS|FAIL.
+# per file plus tcpdrill_all=PASS|FAIL|PARTIAL.  PARTIAL is exit 77: nothing
+# failed and a script did not run.
 #
 # -A PICKS AMIBERRY.  FS-UAE needs an X server and dies in GLAD without one,
 # so on a headless box, which the Amiga lab machine is, the run ends with
@@ -60,6 +61,10 @@ DRILL="$ROOT/$BUILD/tests/tcpdrill/TcpDrill"
 # each arm gets its own stage directory and its own guest files.
 if [ "$SCRIPT" = all ]; then
     rc=0
+    # Scripts that were not run.  `continue` alone printed a line and left the
+    # suite reporting tcpdrill_all=PASS with keepalive untested -- one boot
+    # short of the coverage the name claims, and no exit code that said so.
+    nskip=0
     ARM_A=()
     [ "$RUNNER" = amiberry ] && ARM_A=(-A)
 
@@ -75,6 +80,7 @@ if [ "$SCRIPT" = all ]; then
            ! grep -q '^AMINETXDUO_TCP_KEEPALIVE_INITIAL:STRING=[0-9]' \
                  "$ROOT/$BUILD/CMakeCache.txt" 2>/dev/null; then
             echo "$name: SKIP, needs -DAMINETXDUO_TCP_KEEPALIVE_INITIAL=5"
+            nskip=$((nskip + 1))
             continue
         fi
 
@@ -87,8 +93,20 @@ if [ "$SCRIPT" = all ]; then
         [ "$arm" -eq 0 ] || rc=1
     done
 
-    [ "$rc" -eq 0 ] && echo "tcpdrill_all=PASS" || echo "tcpdrill_all=FAIL"
-    exit "$rc"
+    # Failures first: a suite with both a failed script and a skipped one is a
+    # failed suite, and saying PARTIAL there would send somebody to look at the
+    # build configuration instead of at the defect.
+    if [ "$rc" -ne 0 ]; then
+        echo "tcpdrill_all=FAIL skipped=$nskip"
+        exit "$rc"
+    fi
+    if [ "$nskip" -ne 0 ]; then
+        echo "tcpdrill_all=PARTIAL skipped=$nskip"
+        echo "  $nskip script(s) did not run; the SKIP lines above say why." >&2
+        exit 77
+    fi
+    echo "tcpdrill_all=PASS skipped=0"
+    exit 0
 fi
 
 for f in "$BSD" "$DRILL" "$SCRIPT"; do

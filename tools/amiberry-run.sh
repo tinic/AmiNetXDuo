@@ -393,6 +393,8 @@ echo "==> $EXE_NAME under $MODEL (timeout ${TIMEOUT}s)"
 
 AMIBERRY_PID=""
 NC_PID=""
+LOGCAP_PID=""
+LOGPIPE=""
 cleanup() {
     [ -n "$NC_PID" ] && kill -TERM "$NC_PID" 2>/dev/null || true
     NC_PID=""
@@ -439,7 +441,40 @@ fi
 # one line about an IPC socket, so the backend assertion below has nothing to
 # read and a bridged run that silently came up on SLIRP cannot be told from one
 # that did not.
-( trap '' PIPE; exec "$AMIBERRY" --log -f "$CFG" ) >"$UAELOG" 2>&1 &
+#
+# AND IT IS UNBOUNDED, so it goes through tools/logcap.sh.  Measured at 87 MB
+# per 30 s on an RTG guest, 3.3 GB an hour; it has filled playhouse3 three
+# times, 30 GB across five stale logs on the last sweep with 27.6 GB of that in
+# one file.  What it writes is a run of identical `Denise queue without lock!`
+# lines, and the disk is the smaller cost: an arm whose serial log is 0 bytes
+# while that runs reads exactly like a driver hang in the code under test.
+# Collapsed it is one line and a count, which is a sentence somebody can act
+# on.  The cap keeps the head, where every line anything greps for is printed
+# -- the board and MAC lines, UAENET's, the first illegal instruction -- and a
+# ring of the last lines for the `tail -20` below.
+#
+# THROUGH A FIFO rather than a pipeline, because $! after `a | b` is b, and
+# AMIBERRY_PID has to be amiberry: cleanup kills it and the loop below watches
+# it for an early exit.
+#
+# And it degrades to the plain redirect if the capper is not there: opening a
+# FIFO for writing blocks until something opens it for reading, so a missing
+# reader would hang the run rather than lose a log.
+LOGPIPE="$ROOT/build/amiberry-$TAG.logpipe"
+rm -f "$LOGPIPE"
+if [ -x "$ROOT/tools/logcap.sh" ] && mkfifo "$LOGPIPE" 2>/dev/null; then
+    "$ROOT/tools/logcap.sh" < "$LOGPIPE" > "$UAELOG" &
+    LOGCAP_PID=$!
+else
+    echo "!! no tools/logcap.sh; $UAELOG is UNCAPPED for this run" >&2
+    rm -f "$LOGPIPE"
+    LOGPIPE=""
+fi
+if [ -n "$LOGPIPE" ]; then
+    ( trap '' PIPE; exec "$AMIBERRY" --log -f "$CFG" ) >"$LOGPIPE" 2>&1 &
+else
+    ( trap '' PIPE; exec "$AMIBERRY" --log -f "$CFG" ) >"$UAELOG" 2>&1 &
+fi
 AMIBERRY_PID=$!
 
 # serial_port=.../wait blocks the emulator until this connects, so retry until
@@ -483,6 +518,15 @@ done
 EMU_PID=$AMIBERRY_PID
 cleanup
 wait "$EMU_PID" 2>/dev/null || true
+
+# The capper still has the tail of the run in its ring, so nothing may read
+# $UAELOG until it has reached EOF and printed it.  Every assertion below reads
+# that file.
+if [ -n "$LOGCAP_PID" ]; then
+    wait "$LOGCAP_PID" 2>/dev/null || true
+    LOGCAP_PID=""
+fi
+[ -z "$LOGPIPE" ] || rm -f "$LOGPIPE"
 
 # ------------------------------------------- illegal instruction assertion --
 #

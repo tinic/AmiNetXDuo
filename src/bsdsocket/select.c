@@ -23,6 +23,7 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "connfail.h"
 
 #include <proto/exec.h>
 #include <proto/timer.h>
@@ -149,13 +150,17 @@ static VOID bsd_tcp_disconnect_complete_notify(NX_TCP_SOCKET *socket_ptr)
     {
         /* The connect attempt failed. The reason is left for SO_ERROR, which
            is how a non-blocking caller finds out what went wrong. An ICMP
-           message that named the SYN says more than "refused", because a
-           router's host unreachable is not the peer's RST, so it takes
-           precedence. */
+           message that named the SYN says more than "refused". A router's host
+           unreachable is not the peer's RST, so it takes precedence. A spent
+           retransmission budget is ETIMEDOUT, not a refusal: `whois -6'
+           reported "connection refused" after 191 seconds with no answer,
+           which sent the reader looking for a server. */
         sock->as_Flags &= ~ASF_CONNECTING;
         sock->as_SoError =
             (sock->as_Nx.tcp.nx_tcp_socket_icmp_error != NX_SUCCESS)
                 ? bsd_errno_from_nx(sock->as_Nx.tcp.nx_tcp_socket_icmp_error)
+          : bsd_connect_ladder_spent(&sock->as_Nx.tcp)
+                ? AMI_ETIMEDOUT
                 : AMI_ECONNREFUSED;
         bsd_event_post(sock, FD_CONNECT | FD_ERROR | FD_WRITE);
         return;

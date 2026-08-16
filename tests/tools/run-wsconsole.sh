@@ -102,9 +102,15 @@
 #     boot_seconds=NN
 #     forward=ok|failed
 #     sshd=ok|skipped
+#     arms=NN
+#     arms_ran=NN
+#     arms_skipped=NN
 #     checks=NN
 #     failures=NN
-#     result=pass|fail|infra
+#     result=pass|fail|skipped|infra
+#
+#   result=skipped is exit 77: everything that ran passed and an arm did not
+#   run.  It is not a pass, and it used to be one.
 #
 # SPDX-License-Identifier: MIT
 
@@ -387,16 +393,25 @@ FORWARD=failed
 STARTED=$(date +%s)
 
 EMULOG="$ROOT/build/amiberry-$AMINETXDUO_RUN_TAG.log"
-EMULOG_MAX=${AMINETXDUO_WSCONSOLE_LOGMAX:-33554432}
 
-trim_emulog() {
-    [ -f "$EMULOG" ] || return 0
-    local size
-    size=$(wc -c < "$EMULOG" 2>/dev/null || echo 0)
-    [ "$size" -gt "$EMULOG_MAX" ] || return 0
-    tail -c 4194304 "$EMULOG" > "$EMULOG.tail" 2>/dev/null || return 0
-    mv "$EMULOG.tail" "$EMULOG"
-}
+# THE TRIM THAT USED TO BE HERE IS GONE, and it was worse than useless.
+#
+#   tail -c 4194304 "$EMULOG" > "$EMULOG.tail" && mv "$EMULOG.tail" "$EMULOG"
+#
+# `mv` puts a NEW INODE at that name.  The emulator still holds an open
+# descriptor on the old one, which is now unlinked, so everything it writes
+# after the first trim goes to a file with no name and the log on disk stops
+# growing at the moment it was trimmed.  Measured with a writer producing
+# 200,000 lines and one trim 0.3 s in: 25 lines survived, and the file never
+# grew again while the writer ran to completion.  A run that tripped this lost
+# its whole emulator log and looked like it had a very quiet one.
+#
+# Nothing has to replace it.  tools/logcap.sh caps the log at the source now
+# (tools/amiberry-run.sh), so it cannot reach the 32 MB this fired at: the
+# same runs that produced 313 MB here produce a few tens of KB.  The end-of-
+# run `tail -400` went with it -- it ran after the emulator was stopped, so it
+# was safe, but it existed for the same unbounded log and threw away the
+# artifact somebody would read.
 
 # Where to talk to it.  Behind NAT that is the forwarded port on this machine;
 # bridged it is a lease, and the lease is READ OFF THE WIRE rather than
@@ -447,6 +462,9 @@ else
     if [ -z "$TARGET_ADDR" ] && [ "$KEEP" != yes ]; then
         echo "forward=failed"
         echo "boot_seconds=0"
+        echo "arms=0"
+        echo "arms_ran=0"
+        echo "arms_skipped=0"
         echo "checks=0"
         echo "failures=0"
         echo "result=infra"
@@ -473,8 +491,7 @@ if [ "$KEEP" = yes ] && [ "$BACKEND" != slirp ]; then
 else
     for _ in $(seq 1 "$BOOT_MAX"); do
         sleep 1
-        trim_emulog
-        kill -0 "$RUNNER" 2>/dev/null || break
+            kill -0 "$RUNNER" 2>/dev/null || break
         code=$(curl -s -m 3 -o /dev/null -w '%{http_code}' \
                "http://${TARGET_ADDR}:${TARGET_PORT}/" 2>/dev/null || true)
         if [ "$code" = "200" ]; then
@@ -489,6 +506,9 @@ echo "forward=$FORWARD"
 echo "boot_seconds=$BOOT_AT"
 
 if [ "$FORWARD" != ok ] && [ "$FORWARD" != unpolled ]; then
+    echo "arms=0"
+    echo "arms_ran=0"
+    echo "arms_skipped=0"
     echo "checks=0"
     echo "failures=0"
     echo "result=infra"
@@ -538,8 +558,7 @@ if [ "$KEEP" = yes ]; then
     echo "==> holding the guest; Ctrl-C to stop it"
     while kill -0 "$RUNNER" 2>/dev/null; do
         sleep 5
-        trim_emulog
-    done
+        done
     exit 0
 fi
 
@@ -594,7 +613,6 @@ python3 -u "$ROOT/tests/tools/wsterm-console.py" "$TARGET_ADDR" "$TARGET_PORT" \
 DRILL=$!
 while kill -0 "$DRILL" 2>/dev/null; do
     sleep 5
-    trim_emulog
 done
 wait "$DRILL"
 DRILL_RC=$?
@@ -605,6 +623,15 @@ cat "$ROOT/build/wsconsole-drill.txt"
 
 CHECKS=$(sed -n 's/^\([0-9]\{1,\}\) checks.*/\1/p' "$ROOT/build/wsconsole-drill.txt" | tail -1)
 FAILS=$(sed -n 's/^[0-9]\{1,\} checks, \([0-9]\{1,\}\) failure.*/\1/p' "$ROOT/build/wsconsole-drill.txt" | tail -1)
+# The arm tally the drill now prints: `10 arms, 4 ran, 6 skipped`.  Six of its
+# ten need an ssh client, an sshd the guest can reach, an identity in
+# Dropbear's format, Ed, More or vim, and each of those used to print one line
+# and leave the totals alone -- so a run with no ssh in it at all reached
+# `result=pass` and exit 0.  This file's header says such an arm is "never
+# quietly passed"; it was, for as long as the arms have existed.
+ARMS=$(sed -n 's/^\([0-9]\{1,\}\) arms,.*/\1/p' "$ROOT/build/wsconsole-drill.txt" | tail -1)
+ARMS_RAN=$(sed -n 's/^[0-9]\{1,\} arms, \([0-9]\{1,\}\) ran.*/\1/p' "$ROOT/build/wsconsole-drill.txt" | tail -1)
+ARMS_SKIPPED=$(sed -n 's/^[0-9]\{1,\} arms, [0-9]\{1,\} ran, \([0-9]\{1,\}\) skipped.*/\1/p' "$ROOT/build/wsconsole-drill.txt" | tail -1)
 
 echo
 echo "===================== the guest's own log ======================="
@@ -619,23 +646,45 @@ echo
 cleanup
 trap - EXIT
 
-if [ -f "$EMULOG" ]; then
-    tail -400 "$EMULOG" > "$EMULOG.tail" && mv "$EMULOG.tail" "$EMULOG"
-fi
-
 echo "drill_seconds=$DRILL_SECS"
+echo "arms=${ARMS:-0}"
+echo "arms_ran=${ARMS_RAN:-0}"
+echo "arms_skipped=${ARMS_SKIPPED:-0}"
 echo "checks=${CHECKS:-0}"
 echo "failures=${FAILS:-0}"
 
-if [ -z "${CHECKS:-}" ]; then
+if [ -z "${CHECKS:-}" ] || [ -z "${ARMS:-}" ]; then
     echo "result=infra"
     echo "!! the drill printed no tally; it did not reach the end" >&2
     exit 2
 fi
 
+# THE FLOOR.  Every arm the drill did not skip has to have asserted something:
+# the drill itself fails an arm that returned without a check and without
+# saying it skipped, so this is the arithmetic that has to hold around it.  A
+# drill that quietly stops calling its own cases comes out here as arms that
+# are neither run nor skipped, which no total on its own would show.
+if [ "$((ARMS_RAN + ARMS_SKIPPED))" -ne "$ARMS" ]; then
+    echo "result=fail"
+    echo "!! $ARMS arms, $ARMS_RAN ran and $ARMS_SKIPPED skipped: the drill" >&2
+    echo "!! did not account for all of them, so it stopped calling its own" >&2
+    echo "!! cases somewhere and the check count says nothing." >&2
+    exit 1
+fi
+
+# Failures first.  A run with both a failure and a skipped arm is a failure,
+# and reporting the skip there sends somebody to look at what is staged
+# instead of at the defect.
 if [ "$DRILL_RC" -ne 0 ] || [ "${FAILS:-1}" -ne 0 ]; then
     echo "result=fail"
     exit 1
+fi
+
+if [ "${ARMS_SKIPPED:-0}" -ne 0 ]; then
+    echo "result=skipped"
+    echo "!! $ARMS_SKIPPED of $ARMS arms did not run; everything that DID run" >&2
+    echo "!! passed.  The SKIPPED lines above say what each one needed." >&2
+    exit 77
 fi
 
 echo "result=pass"

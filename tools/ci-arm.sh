@@ -23,11 +23,21 @@
 # is what stops that.  Whether a whole tier going missing should be a failure is
 # a different question and it is answered in the workflow's `gate` job.
 #
+# THREE STATES, NOT TWO.  An arm either ran and passed, or did not run, or
+# failed, and the first two are not the same fact.  A missing variable was
+# already the second; an exit code was not.  `-x CODE` used to name a code that
+# "counts as a pass", so a harness whose whole point was to say I COULD NOT
+# OBSERVE THIS got a green row that read as a measurement -- and `tools/ci.sh
+# cards` with no peer, which measures nothing at all, exited 0 and was reported
+# as nine cards proved.  `-s CODE` replaces it: the same exit code, and the row
+# says the arm did not run.  Both still exit 0 from here.
+#
 # OUTPUT is key=value plus an exit code, and nothing about the verdict is left
 # in prose:
 #
 #   arm="TLS 1.3 handshake, 68020" status=pass rc=0 wall_s=41
 #   arm="Mount an SMB share" status=skipped reason="AMINETXDUO_PEER is not set"
+#   arm="Every network card" status=skipped rc=77 wall_s=3 reason="it tested nothing"
 #
 # SPDX-License-Identifier: MIT
 
@@ -35,18 +45,18 @@ set -uo pipefail
 
 NAME=""
 declare -a REQUIRED=()
-declare -a OKCODES=(0)
+declare -a SKIPCODES=()
 NOTE=""
 
 usage() {
     cat >&2 <<'EOF'
-usage: tools/ci-arm.sh -n NAME [-r VAR]... [-x CODE]... [-m NOTE] -- CMD [ARG]...
+usage: tools/ci-arm.sh -n NAME [-r VAR]... [-s CODE]... [-m NOTE] -- CMD [ARG]...
 
   -n NAME   what this arm is called, in the run summary
   -r VAR    an environment variable that must be non-empty for it to run;
             repeatable, and the FIRST empty one is the reason it skipped
-  -x CODE   an additional exit code that counts as a pass, for a harness that
-            reports "I could not observe this" separately from "it failed"
+  -s CODE   an exit code that means the command DID NOT TEST what this arm
+            names.  The row says SKIPPED and this exits 0; it is not a pass
   -m NOTE   extra text for the summary row
 EOF
     exit 2
@@ -56,7 +66,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         -n) NAME="$2"; shift 2 ;;
         -r) REQUIRED+=("$2"); shift 2 ;;
-        -x) OKCODES+=("$2"); shift 2 ;;
+        -s) SKIPCODES+=("$2"); shift 2 ;;
         -m) NOTE="$2"; shift 2 ;;
         --) shift; break ;;
         *)  usage ;;
@@ -114,13 +124,30 @@ start=$SECONDS
 rc=$?
 wall=$((SECONDS - start))
 
-for ok in "${OKCODES[@]}"; do
-    if [ "$rc" = "$ok" ]; then
-        printf 'arm="%s" status=pass rc=%s wall_s=%s\n' "$NAME" "$rc" "$wall"
-        row 'pass' "${NOTE:+$(cell "$NOTE"), }rc=$rc, ${wall}s"
-        exit 0
-    fi
+# 77 is a skip code here whether or not the arm asked for one.  It is what the
+# rest of the tree already means by "I reached my own verdict and there was
+# nothing in it": tools/test-verdict.sh returns it for a guest that skipped its
+# own work, tools/ci.sh returns it for a run where every stage skipped, and the
+# four harnesses that skip their off-box assertion return it too.  A DEFAULT
+# rather than a flag, because the failure this replaces was an arm that nobody
+# remembered to annotate.
+for skipcode in 77 "${SKIPCODES[@]+"${SKIPCODES[@]}"}"; do
+    [ "$rc" = "$skipcode" ] || continue
+    printf 'arm="%s" status=skipped rc=%s wall_s=%s reason="it tested nothing"\n' \
+           "$NAME" "$rc" "$wall"
+    printf '::warning::%s did NOT run: it exited %s, which this arm declares' \
+           "$NAME" "$rc"
+    printf ' as "did not test", so that part of tier 2 is unverified for this'
+    printf ' commit.\n'
+    row 'SKIPPED' "${NOTE:+$(cell "$NOTE"), }it tested nothing, rc=$rc, ${wall}s"
+    exit 0
 done
+
+if [ "$rc" = 0 ]; then
+    printf 'arm="%s" status=pass rc=%s wall_s=%s\n' "$NAME" "$rc" "$wall"
+    row 'pass' "${NOTE:+$(cell "$NOTE"), }rc=$rc, ${wall}s"
+    exit 0
+fi
 
 printf 'arm="%s" status=fail rc=%s wall_s=%s\n' "$NAME" "$rc" "$wall"
 row '**FAIL**' "${NOTE:+$(cell "$NOTE"), }rc=$rc, ${wall}s"

@@ -9,6 +9,9 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A connection that nothing answered is reported as timed out, not refused. Every tool said `connection refused` when it had simply run out of retries, because the stack filed the same error for silence as for a reset. `whois` on an address with no server took 191 seconds to say the wrong thing
+- The 68060 build works. One file wrapped its 68020 instructions in a `.chip` directive that names 68000 again afterwards rather than restoring, so every instruction the compiler emitted after it was assembled for the wrong processor. A 68060 arm is now built in CI so it cannot break unnoticed again
+- `iperf -u` says what rate it is sending at, and `-b 0` says `flat out`. It defaults to 1000 kbit/s, which read as a fault when a measurement came back at exactly that
 - `httpd -C` serves a graphics card. An 8-bit RTG screen under Picasso96 or CyberGraphX appears in the browser like a chipset one, and a mode change is carried through. Deeper screens are refused by name rather than drawn wrongly: 15, 16, 24 and 32-bit are not served yet
 - The console measures its own readback at the start of an RTG session and reports what each route managed, because a graphics card is far slower to read than to write and how much slower has never been published for any Amiga board
 - `anxnet.device` posts the SANA-II events it accepts. `S2EVENT_ERROR`, `_TX`, `_RX`, `_BUFF` and `_HARDWARE` were taken in the mask and never sent, so a program waiting on one waited forever. `S2EVENT_SOFTWARE` is now refused rather than accepted and never sent

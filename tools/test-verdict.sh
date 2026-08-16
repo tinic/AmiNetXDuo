@@ -115,26 +115,18 @@ verdict_guest() {
     checks=${summary%% *}
     failures=${summary##* }
 
-    # A guest that decided it could not run is a SKIP, and a skip is not a
-    # pass: 77 is the status the automake convention gives it, so a caller and
-    # CI can record it as one rather than tick it off as work done.
-    if grep -q "SKIPPED" "$found"; then
-        echo "SKIP: $name: the guest skipped its own work" >&2
-        grep -n "SKIPPED" "$found" | head -3 | sed 's/^/       /' >&2
-        echo "$name: SKIPPED after $checks checks" >&2
-        return 77
-    fi
-
+    # ORDER MATTERS, AND IT USED TO BE WRONG.  The SKIPPED grep ran FIRST, so a
+    # transcript carrying "3 failures" and one SKIPPED line reported SKIPPED
+    # and named neither of the three -- red either way, and red pointing at the
+    # rig instead of at the assertions that had gone off.  A guest with
+    # failures in it is a guest with failures in it, whatever else it skipped.
+    #
+    # Same for the emulator's own exit status: a run that TIMED OUT is not a
+    # skip, it is a partial run whatever the transcript says.
     local bad=0
     if [ "$failures" -ne 0 ]; then
         echo "FAIL: $name: $failures of $checks checks failed" >&2
         grep -n "FAIL" "$found" | head -20 | sed 's/^/       /' >&2
-        bad=1
-    fi
-    if [ "$checks" -lt "$min" ]; then
-        echo "FAIL: $name: only $checks checks ran, at least $min were expected." >&2
-        echo "      A run that stops calling its own cases still reports zero" >&2
-        echo "      failures; the count is what notices." >&2
         bad=1
     fi
     if [ "$run_rc" != "0" ]; then
@@ -149,6 +141,28 @@ verdict_guest() {
     fi
 
     if [ "$bad" -ne 0 ]; then
+        echo "$name: FAILED" >&2
+        return 1
+    fi
+
+    # A guest that decided it could not run is a SKIP, and a skip is not a
+    # pass: 77 is the status the automake convention gives it, so a caller and
+    # CI can record it as one rather than tick it off as work done.
+    #
+    # Before the check floor, not after: a guest that skipped its own work runs
+    # fewer cases BY DEFINITION, and "only 2 checks ran, at least 40 were
+    # expected" is the same wrong signpost pointed the other way.
+    if grep -q "SKIPPED" "$found"; then
+        echo "SKIP: $name: the guest skipped its own work" >&2
+        grep -n "SKIPPED" "$found" | head -3 | sed 's/^/       /' >&2
+        echo "$name: SKIPPED after $checks checks, 0 failures" >&2
+        return 77
+    fi
+
+    if [ "$checks" -lt "$min" ]; then
+        echo "FAIL: $name: only $checks checks ran, at least $min were expected." >&2
+        echo "      A run that stops calling its own cases still reports zero" >&2
+        echo "      failures; the count is what notices." >&2
         echo "$name: FAILED" >&2
         return 1
     fi

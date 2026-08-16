@@ -64,6 +64,18 @@
 #                          build, e.g. "default" (default: all of them)
 #   AMINETXDUO_KICKSTART   emulator stage: boot ROM.  Required.
 #
+# EXIT CODES
+#
+#   0   the stages ran and nothing failed
+#   1   something failed; the list at the end names it
+#   2   a stage name that does not exist
+#   77  IT TESTED NOTHING.  Every stage asked for skipped outright -- no peer,
+#       no bridge, no -m32 -- so there is no result here at all, in either
+#       direction.  This used to be 0, and `tools/ci.sh cards` on a runner with
+#       AMINETXDUO_CARDSWEEP_PEER unset reported nine network cards proved when
+#       it had booted none of them.  tools/ci-arm.sh renders 77 as SKIPPED.
+#       A run where ANY stage produced a verdict is 0 or 1 as before.
+#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -130,14 +142,22 @@ CROSS_CONFIGS=(
     # leak nobody wrote a test for, and an instrument that stops building is
     # the one nobody notices.
     "census:-DAMINETXDUO_ALLOCCENSUS=ON"
-    # NO PER-CPU ARMS.  There used to be three -- m68000, m68040, m68060 -- and
-    # they were here because the archive shipped a library per CPU and each had
-    # to compile.  It does not any more: one build serves every 68k and chooses
-    # its inner loops from AttnFlags at init, so the default configuration IS
-    # the shipping one and these arms were three full cross builds proving
-    # something nothing ships.  A specific CPU is still buildable and is how
-    # every figure in cmake/toolchain-m68k-amigaos.cmake was measured; it is
-    # not CI's job.
+    # ONE PER-CPU ARM, and only one.  There used to be three -- m68000, m68040
+    # and m68060 -- because the archive shipped a library per CPU and each had
+    # to compile; that is over, one build serves every 68k and chooses its
+    # inner loops from AttnFlags at init, so `default` IS the shipping arm.
+    #
+    # 68060 came back because it is not a tuning choice.  -DAMINETXDUO_CPU is a
+    # cache variable with a STRINGS list, so it is a configuration a user can
+    # select, and of the five values it is the only one whose flag names a
+    # different TARGET: 68000 and `any` are -m68000, which `default` compiles,
+    # 68020 and 68040 are -m68020 whose extra instructions the default arm
+    # already assembles in src/net68k and src/crypto68k, and -mcpu=68060 is a
+    # part with instructions REMOVED.  Nothing built it, so nothing noticed
+    # that src/common/ami_udivdi3.c left the assembler in 68000 mode for the
+    # rest of the file and the whole tree stopped building for it.  One arm,
+    # ~18 s of the cross stage on a 24-core host, one in fourteen.
+    "cpu68060:-DAMINETXDUO_CPU=68060"
     # The second drawer in the archive, and the only arm here that turns more
     # than one thing off at once.  Every option above is a separate arm because
     # each has its own compile-time surface; this one exists because the
@@ -225,6 +245,11 @@ STAGES_RUN=()
 # reported the same result as one that ran everything.  These are collected and
 # listed under their own heading at the end.
 SKIPPED=()
+
+# What a stage returns when it tested NOTHING: it reached its own gate, the
+# gate said no, and no assertion in it ran.  Distinct from 0, which every such
+# stage used to return, and from a failure.  See EXIT CODES at the top.
+NOTHING=77
 
 hr()   { printf '\n\033[1m======== %s\033[0m\n' "$*"; }
 note() { printf '  %s\n' "$*"; }
@@ -398,7 +423,7 @@ stage_host32() {
           "${CC:-cc}" -m32 "$BUILD/m32probe.c" -o "$BUILD/m32probe") 2>/dev/null; then
         skip "host32: no -m32 on this host (needs gcc-multilib on Debian/Ubuntu),\
  the mDNS and TLS-crypto fuzz drivers did not run"
-        return 0
+        return "$NOTHING"
     fi
 
     cmake -S . -B "$BUILD/host32" \
@@ -436,7 +461,7 @@ stage_sanitize() {
     if [ "${AMINETXDUO_SANITIZE:-0}" != "1" ]; then
         hr "sanitizers (host)"
         skip "sanitize: off by default, AMINETXDUO_SANITIZE=1 runs it (CI does)"
-        return 0
+        return "$NOTHING"
     fi
 
     hr "sanitizers (host, 64-bit)"
@@ -635,7 +660,7 @@ stage_conformance() {
     if [ ! -e third_party/bsdsocktest/.git ]; then
         skip "conformance: third_party/bsdsocktest is not checked out, the suite\
  was not built"
-        return 0
+        return "$NOTHING"
     fi
     # -b, or conf_launcher is silently left out. build.sh looks for the crash
     # guard in build/cm, which this script never produces; without the flag it
@@ -683,7 +708,7 @@ stage_web() {
     if ! command -v node > /dev/null; then
         skip "web: node is not installed, shell.html and console.html were not\
  checked against their sources (node tools/web/build.mjs --check)"
-        return 0
+        return "$NOTHING"
     fi
 
     if [ ! -d tools/web/node_modules/esbuild ]; then
@@ -692,7 +717,7 @@ stage_web() {
             tail -5 "$BUILD/web-npm.log"
             skip "web: npm could not install the bundler, the pages were not\
  checked (cd tools/web && npm ci)"
-            return 0
+            return "$NOTHING"
         fi
     fi
 
@@ -977,7 +1002,7 @@ stage_cards() {
         skip "card sweep: AMINETXDUO_CARDSWEEP_PEER is not set, so there is no" \
              "machine off this box to count the bytes.  Every card is unproven" \
              "on this runner."
-        return 0
+        return "$NOTHING"
     fi
 
     "$ROOT/tests/tools/run-cardsweep.sh" -b "$BUILD/default" || rc=$?
@@ -1157,7 +1182,7 @@ stage_lossgate() {
         skip "lossgate: AMINETXDUO_FITZ_PEER and AMINETXDUO_FITZ_PEER_ADDR" \
              "are not both set, so there is no machine to induce loss from." \
              "A change to acking or retransmission is unpriced on this runner."
-        return 0
+        return "$NOTHING"
     fi
 
     local rc=0
@@ -1195,7 +1220,7 @@ stage_smb() {
         skip "smb: AMINETXDUO_PEER is not set, so there is nowhere to serve a" \
              "share from that the guest can reach.  SMB is unproven on this" \
              "runner, which is the state issues #3 and #4 were reported in."
-        return 0
+        return "$NOTHING"
     fi
 
     local arm rc bad=0 flag
@@ -1250,28 +1275,37 @@ for s in "${WANT[@]}"; do
     esac
 done
 
+# How many stages produced a verdict, in either direction.  A stage that
+# returns $NOTHING did not: it reached its own gate and stopped.  Counted
+# rather than inferred from SKIPPED, which also collects the HALVES a stage
+# skipped while running the rest, and those are a partial run and not this.
+STAGES_TESTED=0
+
 for s in "${WANT[@]}"; do
+    srrc=0
     case "$s" in
         toolchain)   [ -n "${AMIGA_TOOLCHAIN_ROOT:-}" ] || stage_toolchain ;;
-        host)        stage_host || true ;;
-        host32)      stage_host32 || true ;;
-        sanitize)    stage_sanitize || true ;;
-        # `|| true` on every stage, cross included: bash suppresses `set -e`
+        host)        stage_host || srrc=$? ;;
+        host32)      stage_host32 || srrc=$? ;;
+        sanitize)    stage_sanitize || srrc=$? ;;
+        # `|| srrc=$?` on every stage, cross included: bash suppresses `set -e`
         # inside a function called that way, which is what keeps one unguarded
-        # command in a stage from taking the summary down with it.
-        cross)       stage_cross || true ;;
-        web)         stage_web || true ;;
-        analyze)     stage_analyze || true ;;
-        conformance) stage_conformance || true ;;
-        emulator)    stage_emulator || true ;;
-        cards)       stage_cards || true ;;
-        cards6)      stage_cards6 || true ;;
-        bridged)     stage_bridged || true ;;
-        lossgate)    stage_lossgate || true ;;
-        smb)         stage_smb || true ;;
-        e2e)         stage_e2e || true ;;
+        # command in a stage from taking the summary down with it.  It used to
+        # be `|| true`, which threw the one thing the caller needed away.
+        cross)       stage_cross || srrc=$? ;;
+        web)         stage_web || srrc=$? ;;
+        analyze)     stage_analyze || srrc=$? ;;
+        conformance) stage_conformance || srrc=$? ;;
+        emulator)    stage_emulator || srrc=$? ;;
+        cards)       stage_cards || srrc=$? ;;
+        cards6)      stage_cards6 || srrc=$? ;;
+        bridged)     stage_bridged || srrc=$? ;;
+        lossgate)    stage_lossgate || srrc=$? ;;
+        smb)         stage_smb || srrc=$? ;;
+        e2e)         stage_e2e || srrc=$? ;;
         *) echo "unknown stage: $s" >&2; exit 2 ;;
     esac
+    [ "$srrc" = "$NOTHING" ] || STAGES_TESTED=$((STAGES_TESTED + 1))
     STAGES_RUN+=("$s")
 done
 
@@ -1309,6 +1343,16 @@ if [ ${#SKIPPED[@]} -ne 0 ]; then
 fi
 
 if [ ${#FAILED[@]} -eq 0 ]; then
+    # Nothing failed AND nothing ran.  Green is the wrong word for it: this is
+    # the state a runner is in when it has none of the ingredients, and it read
+    # identically to a runner that had them all.  Failures are checked first,
+    # so a stage that skipped beside one that failed is still a failure.
+    if [ "$STAGES_TESTED" -eq 0 ] && [ ${#STAGES_RUN[@]} -gt 0 ]; then
+        printf '\033[33mNOTHING WAS TESTED\033[0m: every stage (%s) skipped;\n' \
+               "${STAGES_RUN[*]}"
+        printf 'there is no result here, in either direction.\n'
+        exit "$NOTHING"
+    fi
     if [ ${#SKIPPED[@]} -eq 0 ]; then
         printf '\033[32mall green\033[0m\n'
     else

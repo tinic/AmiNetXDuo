@@ -18,11 +18,15 @@
 #
 # WHAT IS COLLECTED
 #
-#   - a pcap of the fitz port.  -s 96 is deliberate: every IPv4 TCP header
-#     fits in 74 bytes, the payload is not read, and a full-length capture of
-#     a 4 MB transfer is 40 MB of disk for nothing.  Payload LENGTHS come from
-#     the IP header, which is not truncated, a short snaplen has previously
-#     been misread as short segments and sent an investigation the wrong way.
+#   - a pcap of the fitz port.  -s 128 is deliberate: the payload is not read,
+#     and a full-length capture of a 4 MB transfer is 40 MB of disk for
+#     nothing.  Payload LENGTHS come from the IP header, which is not
+#     truncated, a short snaplen has previously been misread as short segments
+#     and sent an investigation the wrong way.  128 rather than the 96 this
+#     used to be: a cooked capture (`-i any`, the default here) carries a
+#     20-byte LINUX_SLL2 header before the IP one, so 20 + 60 + 60 is the
+#     worst case, and a segment whose TCP header is truncated is DROPPED by
+#     lossrate.py rather than counted -- which biases the rate silently.
 #   - an `ss -tim` poll of the same socket, because rwnd_limited,
 #     sndbuf_limited and app_limited cannot be inferred from a capture at all.
 #
@@ -153,7 +157,7 @@ peercap_start() {
     # enough that the read phases contain samples at all.
     ssh "$peer" "
         rm -f $PEERCAP_TMP/peercap-$tag.pcap $PEERCAP_TMP/peercap-$tag.ss
-        nohup timeout $PEERCAP_MAX $PEERCAP_TCPDUMP -i $PEERCAP_IFACE -s 96 -w \
+        nohup timeout $PEERCAP_MAX $PEERCAP_TCPDUMP -i $PEERCAP_IFACE -s 128 -w \
             $PEERCAP_TMP/peercap-$tag.pcap 'tcp port $port' \
             > $PEERCAP_TMP/peercap-$tag.tcpdump.log 2>&1 &
         echo \$! > $PEERCAP_TMP/peercap-$tag.tcpdump.pid
