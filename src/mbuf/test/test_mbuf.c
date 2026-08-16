@@ -1,21 +1,21 @@
 /*
  * AmiNetXDuo, host-side test for the mbuf emulation.
  *
- * Builds and runs on the development host, not on the Amiga: mbuf_alloc.c and
+ * Builds and runs on the development host, not on the Amiga. mbuf_alloc.c and
  * mbuf_ops.c contain no AmigaOS calls, so all they need is the <exec/types.h>
  * shim in src/config/test/shim, the four stubs below, and the replica struct
  * layout that -DAMI_MBUF_REPLICA selects in include/aminetxduo/mbuf.h.
  *
- * What this canNOT cover, and what covers it instead:
+ * What this cannot cover, and what covers it instead:
  *   - the exact 68k struct offsets: asserted at compile time against the real
- *     NDK <sys/mbuf.h> by src/mbuf/mbuf_abi_check.c;
- *   - MSIZE being 128 and MLEN/MHLEN being 108/100: the replica scales those
- *     with the pointer width, so on a 64-bit host they are 256/224/208. Every
- *     invariant the code relies on still holds and every boundary case below
- *     is still a boundary case, it just sits at a different number. The
- *     on-Amiga test in tests/mbuf_bpf/ runs the same battery at the real ones;
+ *     NDK <sys/mbuf.h> by src/mbuf/mbuf_abi_check.c.
+ *   - MSIZE 128 and MLEN/MHLEN 108/100: the replica scales those with the
+ *     pointer width, so on a 64-bit host they are 256/224/208. Every invariant
+ *     the code relies on still holds, and every boundary case below is still a
+ *     boundary case at a different number. The on-Amiga test in
+ *     tests/mbuf_bpf/ runs the same battery at the real ones.
  *   - Forbid()/Permit(), and the 128-byte alignment AllocVec() does not
- *     promise: also tests/mbuf_bpf/;
+ *     promise: also tests/mbuf_bpf/.
  *   - the NX_PACKET bridge: needs a running packet pool, so tests/mbuf_bpf/.
  *
  *   cc -std=c11 -Wall -Wextra -DAMI_MBUF_REPLICA -I../../../include \
@@ -86,7 +86,7 @@ VOID ami_log(int level, const char *fmt, ...)
     va_end(args);
 }
 
-/* No preemption on the host; the real ones are Forbid()/Permit(). */
+/* No preemption on the host. The real ones are Forbid()/Permit(). */
 VOID ami_mbuf_lock(VOID)   { }
 VOID ami_mbuf_unlock(VOID) { }
 
@@ -183,7 +183,7 @@ static void test_layout(void)
     if (m == NULL)
         return;
 
-    /* MSIZE alignment is what makes dtom() work at all. */
+    /* MSIZE alignment is what makes dtom() work. */
     CHECK(((unsigned long)m & (MSIZE - 1)) == 0);
     CHECK(dtom((UBYTE *)m->m_data + 3) == m);
     CHECK(m->m_data == (APTR)m->m_dat);
@@ -425,7 +425,7 @@ static void test_copydata(void)
     CHECK(ami_mbuf_copydata(m, 9, 12, out) == 0);
     CHECK(ramp_ok(out, 12, 9));
 
-    /* Past the end: rejected, and nothing is written, 4.4BSD panics here. */
+    /* Past the end: rejected, and nothing is written. 4.4BSD panics here. */
     memset(out, 0xAA, sizeof(out));
     CHECK(ami_mbuf_copydata(m, 0, 31, out) == -1);
     CHECK(out[0] == 0xAA);
@@ -547,7 +547,7 @@ static void test_copym(void)
 
     ami_mbuf_freem(m);
 
-    /* An M_PKTHDR source copied from offset 0 gets a header; from an offset
+    /* An M_PKTHDR source copied from offset 0 gets a header. From an offset
        it does not. */
     m = ami_mbuf_gethdr();
     ramp((UBYTE *)m->m_data, 20, 0);
@@ -681,7 +681,7 @@ static void test_prepend(void)
     printf("mbuf: prepend takes the in-place path when there is leading room\n");
 
     /* gethdr puts m_data at the start of m_pktdat, so there is no leading
-       room and a new head mbuf must be pushed on. */
+       room and a new head mbuf is needed. */
     m = ami_mbuf_gethdr();
     ramp((UBYTE *)m->m_data, 20, 20);
     m->m_len        = 20;
@@ -698,7 +698,7 @@ static void test_prepend(void)
     CHECK(ami_mbuf_copydata(m, 0, 26, out) == 0);
     CHECK(ramp_ok(out, 26, 14));
 
-    /* Now there IS leading room in the new head (MH_ALIGN put the data at the
+    /* Now there is leading room in the new head (MH_ALIGN put the data at the
        far end), so a second prepend must not allocate. */
     {
         ULONG before = ami_mbuf_outstanding();

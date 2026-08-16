@@ -5,11 +5,11 @@
  *
  *     #define dtom(x) ((struct mbuf *)((__ULONG)(x) & ~(MSIZE-1)))
  *
- * A caller holding a pointer into an mbuf's internal data area may use that to
- * recover the mbuf. It only works if every mbuf sits on an MSIZE boundary, and
- * AllocVec() promises 8-byte alignment, not 128. So mbufs are carved out of
- * over-allocated slabs whose first mbuf is rounded up to MSIZE, and the slab
- * keeps the raw pointer for ami_free().
+ * A caller with a pointer into the internal data area of an mbuf can recover
+ * the mbuf that way. That works only if every mbuf starts on an MSIZE
+ * boundary, and AllocVec() promises 8-byte alignment, not 128. So mbufs are
+ * carved out of over-allocated slabs whose first mbuf is rounded up to MSIZE,
+ * and the slab keeps the raw pointer for ami_free().
  *
  * No AmigaOS calls here, see mbuf_internal.h for the three hooks.
  *
@@ -100,7 +100,7 @@ VOID ami_mbuf_cleanup(VOID)
 
     ami_mbuf_unlock();
 
-    /* Outside the lock: ami_free() is not something to call under Forbid(). */
+    /* Outside the lock. ami_free() must not be called under Forbid(). */
     while (slab != NULL)
     {
         AmiMbufSlab *next = slab->next;
@@ -161,8 +161,8 @@ ULONG ami_mbuf_clusters_outstanding(VOID)
 
 /*
  * Carve AMI_MBUF_SLAB_COUNT MSIZE-aligned mbufs and push them onto the free
- * list. Called with the lock held; it drops the lock across ami_alloc(),
- * which is why it re-checks the ceiling afterwards.
+ * list. Called with the lock held. It drops the lock across ami_alloc(), so it
+ * re-checks the ceiling afterwards.
  */
 static BOOL ami_mbuf_grow(VOID)
 {
@@ -195,7 +195,7 @@ static BOOL ami_mbuf_grow(VOID)
         return FALSE;
     }
 
-    /* Another task may have grown the pool while the lock was down. */
+    /* Another task can grow the pool while the lock is down. */
     if (ami_mbuf_pool.mbufs_total + want > ami_mbuf_pool.max_mbufs)
     {
         want = ami_mbuf_pool.max_mbufs - ami_mbuf_pool.mbufs_total;
@@ -233,7 +233,7 @@ static BOOL ami_mbuf_grow(VOID)
     return TRUE;
 }
 
-/* Pop one raw mbuf off the free list, growing the pool if it is empty. */
+/* Pops one raw mbuf off the free list. If the list is empty, the pool grows. */
 static struct mbuf *ami_mbuf_raw_get(VOID)
 {
     struct mbuf *m;
@@ -338,9 +338,9 @@ static AmiCluster *ami_mbuf_cluster_get(VOID)
 
 /*
  * Drop one reference. Freed clusters go back on the cache up to
- * AMI_MBUF_CLUSTER_CACHE; beyond that they stay on the `all` list but are
- * still counted as free, so the memory is only released by ami_mbuf_cleanup().
- * That keeps ami_mbuf_cluster_of() correct: a cluster's address never becomes
+ * AMI_MBUF_CLUSTER_CACHE. Beyond that they stay on the `all` list and are
+ * still counted as free, so only ami_mbuf_cleanup() releases the memory. That
+ * keeps ami_mbuf_cluster_of() correct. The address of a cluster never becomes
  * reusable for something else while the pool is up.
  */
 static VOID ami_mbuf_cluster_put(AmiCluster *cl)
@@ -403,9 +403,9 @@ struct mbuf *ami_mbuf_getcl(VOID)
 }
 
 /*
- * Take a second reference to whatever m's M_EXT storage is, for
- * ami_mbuf_copym(). Only meaningful for clusters we own; callers must have
- * checked that with ami_mbuf_cluster_of() first.
+ * Take a second reference to the M_EXT storage of m, for ami_mbuf_copym().
+ * Only meaningful for clusters we own. The caller must check that with
+ * ami_mbuf_cluster_of() first.
  */
 VOID ami_mbuf_ext_ref(struct mbuf *m)
 {
@@ -445,8 +445,8 @@ static VOID ami_mbuf_ext_unref(struct mbuf *m)
 
     if (cl != NULL)
     {
-        /* Ours. ext_free on one of our clusters would be a caller error; the
-           reference count is the authority and we ignore the hook. */
+        /* Ours. ext_free on one of our clusters is a caller error. The
+           reference count is the authority, so the hook is ignored. */
         ami_mbuf_cluster_put(cl);
         return;
     }
@@ -454,9 +454,9 @@ static VOID ami_mbuf_ext_unref(struct mbuf *m)
     if (freefn != NULL)
     {
         /*
-         * Foreign storage with a release hook. 4.4BSD's signature is
-         * void (*)(caddr_t, u_int), stack arguments, which is what
-         * __stdargs gives us here. INFERRED from 4.4BSD; no Amiga header
+         * Foreign storage with a release hook. The 4.4BSD signature is
+         * void (*)(caddr_t, u_int) with stack arguments, which is what
+         * __stdargs gives here. Inferred from 4.4BSD. No Amiga header
          * documents the calling convention for ext_free.
          */
         void (*fn)(APTR, ULONG) = (void (*)(APTR, ULONG))freefn;
