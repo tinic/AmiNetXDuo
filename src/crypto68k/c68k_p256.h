@@ -8,9 +8,9 @@
  *
  *   Already present in the vendored code, and not redone here:
  *
- *     - NAF point multiplication (_nx_crypto_ec_naf_compute);
- *     - Solinas fast reduction for P-256, not Barrett or Montgomery;
- *     - a fixed-base comb table for G, verified reached on the paths that
+ *     - NAF point multiplication (_nx_crypto_ec_naf_compute).
+ *     - Solinas fast reduction for P-256, not Barrett or Montgomery.
+ *     - a fixed-base comb table for G, checked as reached on the paths that
  *       matter.  _nx_crypto_ec_fp_projective_multiple dispatches to
  *       _nx_crypto_ec_fp_fixed_multiple when the point argument is
  *       pointer-identical to curve -> nx_crypto_ec_g, and both
@@ -22,7 +22,7 @@
  *     - _nx_crypto_huge_number_square is a real Yang squaring, not a multiply.
  *     - Jacobian projective coordinates with one inversion at the end.
  *
- *   So no textbook algorithmic win was missing; the slow layer is underneath
+ *   So no textbook algorithmic gain was missing.  The slow layer is underneath
  *   them.
  *
  *   Every field operation in nx_crypto_ec.c runs through NX_CRYPTO_HUGE_NUMBER:
@@ -43,7 +43,7 @@
  *   The reduction is one pass over eight limb positions with a signed
  *   accumulator and no byte ever touched.  Multiplication reuses
  *   c68k_addmul_1() from crypto68k.h, so the 68020 assembly limb loop that
- *   RSA got carries straight over.
+ *   RSA got carries over.
  *
  *   The point layer changes only in the small ways that follow from having a
  *   cheap squaring: dbl-2001-b (3M + 5S) instead of the vendored 4M + 4S
@@ -54,18 +54,18 @@
  *   One routine is hand-written assembly, and only after the C version was
  *   measured.  c68k_p256.S carries the carry chains, the eight-limb add and
  *   subtract, and the Solinas reduction's sixty-three-term pass, because C
- *   has no carry flag and GCC therefore cannot emit ADD.L / ADDX.L; it spends
+ *   has no carry flag and GCC therefore cannot emit ADD.L / ADDX.L.  It spends
  *   five instructions and a branch where the machine needs two.  The multiply
- *   is left to the compiler: it is already within a whisker of the 68020's
- *   MULU.L floor, as the sibling RSA work found, and no instruction selection
- *   will move it.
+ *   is left to the compiler.  It is already very close to the MULU.L floor of
+ *   the 68020, as the sibling RSA work found, and no instruction selection
+ *   moves it.
  *
- *   Shamir's trick for ECDSA verify, rejected.  The usual argument, verify
- *   computes u1*G + u2*Q as two separate scalar multiplications, interleaving
- *   them halves the doublings, does not apply, because u1*G is not a generic
- *   scalar multiplication.  It is a comb, and a comb needs 26 doublings, not
- *   256.  Interleaving would force the G half up to 256 shared doublings to
- *   save the 26 it already needs.  Counting field operations:
+ *   Shamir's trick for ECDSA verify, rejected.  The usual argument is that
+ *   verify computes u1*G + u2*Q as two separate scalar multiplications, and
+ *   that an interleave halves the doublings.  It does not apply, because u1*G
+ *   is not a generic scalar multiplication.  It is a comb, and a comb needs 26
+ *   doublings, not 256.  An interleave forces the G half up to 256 shared
+ *   doublings to save the 26 it already needs.  Field operations:
  *
  *       separate  comb(G) + wNAF(Q) : 284 doublings + 100 additions
  *       Shamir, both as wNAF        : 258 doublings +  93 additions
@@ -73,8 +73,8 @@
  *   Priced at the point-operation costs this module measures on the emulated
  *   68020, 3.88 ms a doubling, 5.19 ms a mixed addition, that is 1.62 s
  *   against 1.48 s, about 8% of a 2.0 s verify, and it needs a second scalar
- *   multiplication routine and a second static table to collect.  Not taken.
- *   It is where the next 8% would come from, and the last cheap one.
+ *   multiplication routine and a second static table.  Not taken.  The next
+ *   8% comes from here, and it is the last cheap one.
  *
  * Measured, emulated 68020, tests/crypto68k/crypto68k_ec_bench.  Every pair is
  * the unmodified vendored routine and this module run back to back in one
@@ -93,21 +93,21 @@
  *     ECDHE P-256 shared secret          5.245 s  ->  1.368 s      3.8x
  *     ECDSA P-256 verify                 7.028 s  ->  1.961 s      3.6x
  *
- * The three vendored absolutes reproduce docs/RESEARCH.md 9's independently
- * measured 1.52 / 5.18 / 6.97 s to within 1%, confirming this benchmark times
- * the same computation the gate did.
+ * The three vendored absolutes reproduce the 1.52 / 5.18 / 6.97 s measured
+ * independently in docs/RESEARCH.md 9 to within 1%, which confirms that this
+ * benchmark times the same computation the gate did.
  *
- * Trust the ratios, not the absolutes, and only the 68020 ones.  FS-UAE's
- * 68020 is not a 14 MHz A1200; its 68030 model reports 4.5x to 5.0x for the
- * same binary, and an ECDSA verify of 196 ms against the 68020 model's
- * 7028 ms, 36x, not a clock ratio.  The 68030 model does not charge for
- * MULU.L, so it flatters exactly the work this module moves out of the
- * multiply and into carry chains.
+ * The ratios are meaningful, the absolute times are not, and only the 68020
+ * rows count.  The FS-UAE 68020 is not a 14 MHz A1200.  Its 68030 model
+ * reports 4.5x to 5.0x for the same binary, and an ECDSA verify of 196 ms
+ * against 7028 ms on the 68020 model, 36x, which is not a clock ratio.  The
+ * 68030 model does not charge for MULU.L, so it favours exactly the work this
+ * module moves out of the multiply and into carry chains.
  *
  * Not constant time.  wNAF digits and comb digits select table entries by
  * value, and every conditional field correction is a branch.  The vendored
  * code is not constant time either.  For the threat model in docs/RESEARCH.md
- * (a vintage machine on a LAN) that is acceptable; it is not a defence
+ * (a vintage machine on a LAN) that is acceptable.  It is not a defence
  * against a remote timing attacker.
  *
  * SPDX-License-Identifier: MIT
@@ -156,8 +156,8 @@ typedef struct
  * static because nx_crypto is otherwise reentrant.
  *
  *   naf   width-5 wNAF digits, at most 257 of them
- *   tab   q, 3q, 5q, ... 15q, Jacobian while being built, then converted in
- *         place to affine, at which point the z field is dead
+ *   tab   q, 3q, 5q, ... 15q, Jacobian during the build, then converted in
+ *         place to affine, after which the z field is dead
  *   acc   the running products a batch inversion needs
  */
 #define C68K_P256_WNAF_W        5u
@@ -184,7 +184,7 @@ typedef struct
 #define C68K_P256_COMB_HALF     ((1u << C68K_P256_COMB_W) - 1u)     /* 31 */
 #define C68K_P256_COMB_POINTS   (2u * C68K_P256_COMB_HALF)          /* 62 */
 
-/* [0 .. 30] are T1[digit-1]; [31 .. 61] are T2[digit-1] = 2^e * T1[digit-1].
+/* [0 .. 30] are T1[digit-1].  [31 .. 61] are T2[digit-1] = 2^e * T1[digit-1].
    Each row is x limbs 0..7 then y limbs 0..7.  Generated by
    src/crypto68k/gen_p256_table.py. */
 extern const c68k_limb c68k_p256_comb[C68K_P256_COMB_POINTS][16];
@@ -201,7 +201,7 @@ extern const c68k_limb c68k_p256_comb[C68K_P256_COMB_POINTS][16];
  * GCC cannot generate the ADD.L / ADDX.L pair these need, C has no carry
  * flag, and the disassembly of both plausible C spellings is in the header
  * comment of c68k_p256.S.  The only place in the module where hand-written
- * assembly wins; the multiply is already at the MULU.L floor and is left to
+ * assembly wins.  The multiply is already at the MULU.L floor and is left to
  * the compiler.
  */
 
@@ -226,13 +226,13 @@ INT c68k_p256_reduce_core(c68k_limb *r, const c68k_limb *t);
  * three thousand operations later.
  */
 
-/* r = a * b mod p.  r may alias a or b. */
+/* r = a * b mod p.  r can alias a or b. */
 VOID c68k_p256_fe_mul(c68k_p256_fe r, const c68k_p256_fe a, const c68k_p256_fe b);
 
-/* r = a * a mod p.  r may alias a. */
+/* r = a * a mod p.  r can alias a. */
 VOID c68k_p256_fe_sqr(c68k_p256_fe r, const c68k_p256_fe a);
 
-/* r = a + b mod p, r = a - b mod p.  r may alias either operand. */
+/* r = a + b mod p, r = a - b mod p.  r can alias either operand. */
 
 /*
  * r = t mod p, where t is a 16-limb product.  The Solinas reduction, and the
@@ -246,11 +246,11 @@ VOID c68k_p256_fe_inv(c68k_p256_fe r, const c68k_p256_fe a);
 
 /* ------------------------------------------------------------- points ---- */
 
-/* r = 2 * p1.  r may alias p1.  Infinity in, infinity out. */
+/* r = 2 * p1.  r can alias p1.  Infinity in, infinity out. */
 VOID c68k_p256_jac_double(c68k_p256_jac *r, const c68k_p256_jac *p1);
 
 /*
- * r = p1 + q, q affine.  r may alias p1.  Handles every degenerate case:
+ * r = p1 + q, q affine.  r can alias p1.  Handles every degenerate case:
  * p1 infinite, q infinite, p1 == q (doubles), and p1 == -q (infinity).
  */
 VOID c68k_p256_jac_add_affine(c68k_p256_jac *r, const c68k_p256_jac *p1,
@@ -270,7 +270,7 @@ VOID c68k_p256_mul_g(c68k_p256_aff *r, const c68k_limb k[C68K_P256_LIMBS]);
 /*
  * r = k * q for an arbitrary affine q, width-5 wNAF with a batch-inverted
  * affine table.  q must be on the curve; q at infinity gives infinity.
- * work is scratch, see c68k_p256_work above; it may not alias anything.
+ * work is scratch, see c68k_p256_work above.  It must not alias anything.
  */
 VOID c68k_p256_mul_point(c68k_p256_aff *r, const c68k_p256_aff *q,
                          const c68k_limb k[C68K_P256_LIMBS],
@@ -280,17 +280,17 @@ VOID c68k_p256_mul_point(c68k_p256_aff *r, const c68k_p256_aff *q,
 /* --------------------------------------------------------- integration --- */
 
 /*
- * Signature-compatible drop-in for NX_CRYPTO_EC's nx_crypto_ec_multiple.
- * Wiring it in is one line:
+ * Signature-compatible drop-in for the nx_crypto_ec_multiple of NX_CRYPTO_EC.
+ * One line wires it in:
  *
  *     curve -> nx_crypto_ec_multiple = c68k_p256_ec_multiple;
  *
  * on the secp256r1 curve only, which makes ECDH key generation, ECDH shared
  * secret and both halves of ECDSA verify take this path with no other change
- * anywhere.  Anything it cannot handle, a curve that is not secp256r1, a
- * scalar wider than 256 bits, which _nx_crypto_ec_precomputation() does use,
- * falls through to _nx_crypto_ec_fp_projective_multiple(), so substituting it
- * is safe.
+ * anywhere.  Anything it cannot handle falls through to
+ * _nx_crypto_ec_fp_projective_multiple(), so the substitution is safe.  That
+ * is a curve that is not secp256r1, or a scalar wider than 256 bits, which
+ * _nx_crypto_ec_precomputation() does use.
  */
 VOID c68k_p256_ec_multiple(NX_CRYPTO_EC *curve,
                            NX_CRYPTO_EC_POINT *g,
@@ -301,8 +301,8 @@ VOID c68k_p256_ec_multiple(NX_CRYPTO_EC *curve,
 /*
  * Recompute two comb table entries from G with the generic routine and compare.
  * Returns NX_CRYPTO_SUCCESS, or NX_CRYPTO_NOT_SUCCESSFUL if the generated table
- * does not belong to this curve.  Two generic scalar multiplications; call it
- * once at startup if you want the check.
+ * does not belong to this curve.  Two generic scalar multiplications.  Call it
+ * once at startup for the check.
  */
 UINT c68k_p256_self_check(VOID);
 

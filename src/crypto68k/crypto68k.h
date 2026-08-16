@@ -1,35 +1,35 @@
 /*
  * AmiNetXDuo, crypto68k: 68020 multi-precision arithmetic for nx_crypto.
  *
- *   docs/RESEARCH.md 9 makes TLS conditional on a 68020 benchmark, and that
- *   benchmark is dominated by one loop: the multiply-accumulate at the heart
- *   of Montgomery multiplication.  A TLS 1.2 client doing TLS_ECDHE_RSA or
- *   TLS_RSA spends most of its handshake there.
+ *   docs/RESEARCH.md 9 makes TLS conditional on a 68020 benchmark, and one
+ *   loop dominates that benchmark: the multiply-accumulate inside Montgomery
+ *   multiplication.  A TLS 1.2 client with TLS_ECDHE_RSA or TLS_RSA spends
+ *   most of its handshake there.
  *
  *   This module is a drop-in replacement for the exponentiation half of
  *   third_party/netxduo/crypto_libraries/src/nx_crypto_huge_number.c.  The
- *   vendored file is not touched; it stays the reference implementation that
- *   tests/crypto68k/rsa_test cross-checks every result against.
+ *   vendored file is not touched.  It stays the reference implementation that
+ *   tests/crypto68k/rsa_test checks every result against.
  *
  *   1. Exponent leading-zero bits are skipped.  The vendored
  *      _nx_crypto_huge_number_mont_power_modulus walks all 32 bits of the top
  *      exponent word, so e = 65537 (0x00010001) costs 32 squarings where 16
- *      are needed.  That alone is ~1.9x on every RSA *public* operation,
- *      certificate signature verification, which a TLS client does three times
- *      per handshake.
+ *      are needed.  That is ~1.9x on every RSA public operation.  Certificate
+ *      signature verification is a public operation, and a TLS client does it
+ *      three times per handshake.
  *
  *   2. Sliding-window exponentiation replaces bit-at-a-time square-and-
  *      multiply for long exponents (the RSA private operation).
  *
  *   3. Montgomery squaring is a separate routine.  Squaring the multiplicand
  *      half costs s(s+1)/2 limb products instead of s^2, so a Montgomery
- *      square is ~3/4 of a Montgomery multiply; in an exponentiation almost
+ *      square is ~3/4 of a Montgomery multiply.  In an exponentiation almost
  *      every operation is a squaring.
  *
  *   4. The limb multiply-accumulate loop is hand-written 68020 assembly.  GCC
- *      does emit MULU.L for the portable C (verified, see the header comment
- *      in c68k_prim.S), so this is the smallest of the four levers: worth
- *      1.4x, and MULU.L's 44 cycles are the floor.
+ *      does emit MULU.L for the portable C (checked, see the header comment
+ *      in c68k_prim.S), so this is the smallest of the four changes: worth
+ *      1.4x, and the 44 cycles of MULU.L are the floor.
  *
  * Measured, emulated 68020, tests/crypto68k/crypto68k_bench, every timed
  * result checked against the vendored code in the same run:
@@ -41,10 +41,10 @@
  *     RSA-2048 private, CRT              44.75 s   -> 20.05 s      2.2x
  *     RSA-2048 private, plain           160.83 s   -> 66.40 s      2.4x
  *
- * Trust the ratios, not the absolutes: FS-UAE's 68020 is not a 14 MHz A1200
- * and its 68030 model is not a timing model at all (the same binary on the
- * same input produced 597 ms and 337 ms for the same CRT measurement on
- * consecutive runs).
+ * The ratios are meaningful, the absolute times are not.  The FS-UAE 68020 is
+ * not a 14 MHz A1200, and its 68030 model is not a timing model (the same
+ * binary on the same input produced 597 ms and 337 ms for the same CRT
+ * measurement on consecutive runs).
  *
  * Not constant time.  See the note above c68k_mont_power_modulus().
  *
@@ -79,9 +79,9 @@ typedef HN_UBASE    c68k_limb;
  * r[0..n-1] += a * b[0..n-1], carry propagating.  Returns the carry out of
  * the top limb (a full limb, not a single bit).
  *
- * The multiply-accumulate every multi-precision algorithm is built from,
- * OpenSSL calls it bn_mul_add_words, GMP calls it addmul_1, and on this
- * machine it is where essentially all the time goes.
+ * The multiply-accumulate that every multi-precision algorithm is built from.
+ * OpenSSL calls it bn_mul_add_words, GMP calls it addmul_1.  On this machine
+ * it is where nearly all the time goes.
  *
  * The 64-bit intermediate cannot overflow: the largest possible value is
  * (2^32-1)^2 + 2*(2^32-1) = 2^64-1 exactly.
@@ -91,14 +91,14 @@ c68k_limb c68k_addmul_1(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a);
 /*
  * The portable C version, always present under its own name whichever build
  * option is in force.  The benchmark times the two against each other in one
- * run; a ratio measured back to back is the only figure an inexact emulator
+ * run.  A ratio measured back to back is the only figure an inexact emulator
  * does not distort.
  */
 c68k_limb c68k_addmul_1_c(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a);
 
 /*
  * dst[j] = src[j] + carry, for j in 0..n-1.  Returns the final carry (0 or 1
- * after the first limb).  dst may alias src.
+ * after the first limb).  dst can alias src.
  */
 c68k_limb c68k_add_carry(c68k_limb *dst, const c68k_limb *src, UINT n,
                          c68k_limb carry);
@@ -121,33 +121,33 @@ c68k_limb c68k_sub(c68k_limb *r, const c68k_limb *b, UINT n);
  * r[0..n-1] -= a * b[0..n-1].  Returns the borrow out (a full limb).
  *
  * The mirror of c68k_addmul_1 and the inner loop of long division, its only
- * use here.  Left to the compiler: GCC emits MULU.L for it, the same finding
- * that kept c68k_addmul_1_c within 1.4x of hand-written assembly, and the
- * division's cost sits in the quotient estimate rather than here.
+ * use here.  Left to the compiler.  GCC emits MULU.L for it, the same finding
+ * that kept c68k_addmul_1_c within 1.4x of hand-written assembly, and the cost
+ * of the division sits in the quotient estimate rather than here.
  */
 c68k_limb c68k_submul_1(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a);
 
 /*
  * (hi:lo) / d, returning the quotient and storing the remainder.
  *
- * Caller must ensure hi < d.  On a 68020 the assembly form is a single
- * DIVU.L, which traps when the quotient will not fit in 32 bits.  Knuth's
- * algorithm D produces exactly one case where it would, the partial
- * remainder's top limb equal to the divisor's, and c68k_mod() below tests
- * for it and substitutes B-1 rather than dividing.
+ * The caller must check that hi < d.  On a 68020 the assembly form is a
+ * single DIVU.L, which traps when the quotient does not fit in 32 bits.
+ * Knuth's algorithm D produces exactly one such case, the top limb of the
+ * partial remainder equal to the divisor, and c68k_mod() below tests for it
+ * and substitutes B-1 rather than dividing.
  *
  * DIVU.L is in the same class as MULU.L 32x32->64: real on a 68020, 68030 and
  * 68040, unimplemented on a 68060, where it traps to the emulator.  So it
  * lives in c68k_prim.S under the same AMINETXDUO_CRYPTO68K_ASM guard, with
- * the portable C fallback below it, and the same rule applies, that option
- * must never be enabled for a 68060 build.
+ * the portable C fallback below it.  The same rule applies: that option must
+ * never be enabled for a 68060 build.
  */
 c68k_limb c68k_div_2by1(c68k_limb hi, c68k_limb lo, c68k_limb d,
                         c68k_limb *rem);
 
 /*
  * rem[0..m_len-1] = u[0..u_len-1] mod m[0..m_len-1], by Knuth's algorithm D
- * over 32-bit limbs.  m[m_len-1] must be non-zero; u_len >= m_len.
+ * over 32-bit limbs.  m[m_len-1] must be non-zero.  u_len >= m_len.
  *
  * scratch needs C68K_MOD_SCRATCH_LIMBS(u_len, m_len) and must not alias.
  *
@@ -155,7 +155,7 @@ c68k_limb c68k_div_2by1(c68k_limb hi, c68k_limb lo, c68k_limb d,
  * half-limbs, its own comments say "In number of USHORT words" and it
  * estimates each quotient digit from HN_SHIFT >> 1, so it runs twice the
  * outer iterations over twice as many inner limbs.  On an RSA-2048 public
- * operation that one routine was 22% of the whole thing.
+ * operation that one routine was 22% of the whole operation.
  */
 #define C68K_MOD_SCRATCH_LIMBS(u_len, m_len) \
     ((UINT)(u_len) + (UINT)(m_len) + 2u)
@@ -167,17 +167,17 @@ VOID c68k_mod(c68k_limb *rem, const c68k_limb *u, UINT u_len,
  * Whether c68k_setup_rr() reduces with c68k_mod() (the default) or with the
  * vendored 16-bit divider.  A variable for the same reason
  * c68k_karatsuba_limbs is one: so the benchmark can time both in a single
- * process, on the same operands, and so the test can use one as the other's
- * oracle.
+ * process, on the same operands, and so the test can use one as an oracle for
+ * the other.
  */
 extern UINT c68k_fast_modulus;
 
 /*
  * rr = R^2 mod m, where R = 2^(32*m_len).  setup needs 7*m_len + 8 limbs.
  *
- * Public so it can be timed on its own, it was 22% of an RSA-2048 public
+ * Public so it can be timed on its own.  It was 22% of an RSA-2048 public
  * operation before c68k_mod() replaced the reduction inside it, large enough
- * to want measuring directly rather than by subtraction.
+ * to measure directly rather than by subtraction.
  */
 VOID c68k_mont_setup_rr(c68k_limb *rr, const c68k_limb *m, UINT m_len,
                         c68k_limb *setup);
@@ -205,12 +205,12 @@ UINT c68k_using_assembly(VOID);
 /* ------------------------------------------------------ the CPU, at run time */
 /*
  * An AMINETXDUO_CPU=any build carries every form of these primitives and picks
- * from SysBase->AttnFlags once, at tls.library's init (c68k_cpu.c).  Every
+ * from SysBase->AttnFlags once, at the init of tls.library (c68k_cpu.c).  Every
  * other build picks at compile time and these are an empty function and a
  * constant, so a caller need not know which build it is in.
  *
- * Call it before the first handshake.  Skipping it leaves the portable C in
- * place: slower, never wrong, and never an illegal instruction.
+ * Call it before the first handshake.  Without the call the portable C stays
+ * in place: slower, never wrong, and never an illegal instruction.
  */
 VOID c68k_cpu_select(ULONG attnflags);
 
@@ -257,12 +257,12 @@ c68k_limb c68k_mont_n0inv(c68k_limb m0);
  *
  * A variable and not a #define, for two reasons that outweigh the one memory
  * load it costs against a 64-limb multiply.  The crossover is a property of
- * this machine and is measured by sweeping it at run time rather than by
- * rebuilding once per candidate.  And it lets the test diff the split against
- * schoolbook inside this module, a better oracle than the vendored Montgomery
- * that one is wrong for operands within a whisker of the modulus (see the
- * comment in tests/crypto68k/host/test_c68k_host.c), so it cannot check the
- * operands Karatsuba's carry paths most need checking on.
+ * this machine, and a run-time sweep measures it without a rebuild per
+ * candidate.  It also lets the test diff the split against schoolbook inside
+ * this module.  That is a better oracle than the vendored Montgomery, which is
+ * wrong for operands very close to the modulus (see the comment in
+ * tests/crypto68k/host/test_c68k_host.c) and so cannot check the operands the
+ * Karatsuba carry paths most need.
  *
  * Default C68K_KARATSUBA_DEFAULT.  Setting it to 0 or 1 disables the split.
  */
@@ -273,15 +273,15 @@ extern UINT c68k_karatsuba_limbs;
 /*
  * r = x * y * R^-1 mod m, where R = 2^(32*m_len).
  *
- * y must be < m; x need only be m_len limbs.  r is m_len limbs and may alias
+ * y must be < m.  x need only be m_len limbs.  r is m_len limbs and can alias
  * x or y (both are fully consumed before r is written).  work is scratch of
  * C68K_MONT_WORK_LIMBS(m_len) limbs, below, and must not alias anything.
  *
- * Separated form (SOS in Koc/Acar/Kaliski's taxonomy) rather than the usually
- * recommended CIOS, see the header comment in c68k_mont.c for why the 68020
+ * Separated form (SOS in the Koc/Acar/Kaliski taxonomy) rather than the usually
+ * recommended CIOS.  See the header comment in c68k_mont.c for why the 68020
  * inverts that advice.  The product is Karatsuba above a threshold and
- * schoolbook below it; the reduction is a chain of scalar-by-vector products
- * and is always schoolbook, since Karatsuba cannot apply to it.
+ * schoolbook below it.  The reduction is a chain of scalar-by-vector products
+ * and is always schoolbook, because Karatsuba cannot apply to it.
  */
 
 /*
@@ -291,9 +291,9 @@ extern UINT c68k_karatsuba_limbs;
  *   the 2*m_len+1 limb product                       2*m_len + 1
  *   Karatsuba recombination, T(n) = 2.5n+1 + T(n/2)  <= 6*m_len
  *
- * It grew from 2*m_len+2 when Karatsuba arrived.  Undersizing it makes the
- * recombination write past the end, so every caller uses this macro rather
- * than open-coding the arithmetic.
+ * It grew from 2*m_len+2 when Karatsuba arrived.  A value that is too small
+ * makes the recombination write past the end, so every caller uses this macro
+ * rather than the arithmetic in line.
  */
 #define C68K_MONT_WORK_LIMBS(m_len)     ((8u * (UINT)(m_len)) + 2u)
 
@@ -303,8 +303,9 @@ VOID c68k_mont_mul(c68k_limb *r,
                    c68k_limb *work);
 
 /*
- * r = x * x * R^-1 mod m.  Same interface as c68k_mont_mul; ~76% of its cost,
- * because the off-diagonal products of a square are computed once and doubled.
+ * r = x * x * R^-1 mod m.  Same interface as c68k_mont_mul, and ~76% of its
+ * cost, because the off-diagonal products of a square are computed once and
+ * doubled.
  */
 VOID c68k_mont_sqr(c68k_limb *r,
                    const c68k_limb *x,
@@ -327,9 +328,9 @@ VOID c68k_mont_sqr(c68k_limb *r,
     ((((20u + (1u << ((w) - 1u))) * (UINT)(m_len))) + 16u)
 
 /*
- * The largest window the implementation will use.  OpenSSL's threshold table
- * wants 6 for the 1024-bit exponents an RSA-2048 CRT half actually runs; 6
- * costs 32 * m_len limbs of table.  c68k_mont_power_modulus() picks the
+ * The largest window the implementation uses.  The OpenSSL threshold table
+ * wants 6 for the 1024-bit exponents an RSA-2048 CRT half runs.  A window of
+ * 6 costs 32 * m_len limbs of table.  c68k_mont_power_modulus() picks the
  * largest window that fits the scratch it is given, so this is only a cap.
  */
 #define C68K_POWM_MAX_WINDOW    6u
@@ -337,24 +338,24 @@ VOID c68k_mont_sqr(c68k_limb *r,
 /*
  * result = x^e mod m, with m odd and x < m.
  *
- * Sizes are in limbs; result must have room for m_len.  scratch_limbs says how
- * much room `scratch` has: the window size is chosen to fit, down to w = 1
+ * Sizes are in limbs.  result must have room for m_len.  scratch_limbs says
+ * how much room `scratch` has: the window size is chosen to fit, down to w = 1
  * (plain square-and-multiply) which needs C68K_POWM_SCRATCH_LIMBS(m_len, 1).
- * Returns NX_CRYPTO_SUCCESS, or NX_CRYPTO_SIZE_ERROR if even that will not fit.
+ * Returns NX_CRYPTO_SUCCESS, or NX_CRYPTO_SIZE_ERROR if even that does not fit.
  *
  * Side channels: not constant time.
  *
  *   - the window value multiplied in depends on exponent bits, and the address
- *     of the table entry read depends on them too;
- *   - the final conditional subtraction of each Montgomery step is a branch;
+ *     of the table entry read depends on them too.
+ *   - the final conditional subtraction of each Montgomery step is a branch.
  *   - leading zero bits of the exponent are skipped, which leaks its bit length.
  *
- * The vendored implementation is not constant time either, it branches per
+ * The vendored implementation is not constant time either.  It branches per
  * exponent bit between one Montgomery step and two, the textbook square-and-
  * multiply leak, a stronger signal than anything here.  So this is not a
- * regression, but it is not a defence.  For the threat model in
- * docs/RESEARCH.md (a vintage machine on a LAN) that is acceptable; it would
- * not be for a server exposed to remote timing.
+ * regression, and it is not a defence.  For the threat model in
+ * docs/RESEARCH.md (a vintage machine on a LAN) that is acceptable.  It is not
+ * acceptable for a server exposed to remote timing.
  */
 UINT c68k_mont_power_modulus(c68k_limb *result,
                              const c68k_limb *x, UINT x_len,
@@ -365,14 +366,15 @@ UINT c68k_mont_power_modulus(c68k_limb *result,
 /*
  * Signature-compatible drop-in for _nx_crypto_huge_number_mont_power_modulus.
  *
- * Same signature, same scratch pointer, same computed value, so wiring it in
- * is a one-line change at each call site.  It uses the vendored routine's
- * setup (radix^2 mod m by long division) so that the two are comparable, then
- * runs the fast exponentiation.
+ * Same signature, same scratch pointer, same computed value, so each call site
+ * needs a one-line change.  It uses the setup of the vendored routine
+ * (radix^2 mod m by long division) so that the two are comparable, then runs
+ * the fast exponentiation.
  *
- * The scratch requirement is larger than the vendored routine's: see
- * C68K_POWM_SCRATCH_LIMBS.  If the caller's buffer is too small this falls
- * back to a smaller window rather than failing, so it stays safe to substitute.
+ * The scratch requirement is larger than the vendored one, see
+ * C68K_POWM_SCRATCH_LIMBS.  If the buffer of the caller is too small, this
+ * falls back to a smaller window rather than failing, so it stays safe to
+ * substitute.
  */
 VOID c68k_huge_number_mont_power_modulus(NX_CRYPTO_HUGE_NUMBER *x,
                                          NX_CRYPTO_HUGE_NUMBER *e,
@@ -382,11 +384,11 @@ VOID c68k_huge_number_mont_power_modulus(NX_CRYPTO_HUGE_NUMBER *x,
                                          UINT scratch_limbs);
 
 /*
- * RSA private operation via the Chinese Remainder Theorem: the vendored
+ * RSA private operation with the Chinese Remainder Theorem: the vendored
  * _nx_crypto_huge_number_crt_power_modulus() with the two exponentiations
  * replaced.  `scratch` is the huge-number bump area the vendored routine
- * wants; powm_scratch is this module's, kept separate so the two allocators
- * cannot overlap.
+ * wants.  powm_scratch belongs to this module, kept separate so the two
+ * allocators cannot overlap.
  *
  * CRT is worth ~3.6x on its own, measured, and multiplies with everything
  * else here.  See the header comment in c68k_crt.c for where nx_secure does
@@ -404,15 +406,15 @@ VOID c68k_crt_power_modulus(NX_CRYPTO_HUGE_NUMBER *x,
 /*
  * One public-key operation runs for seconds on this hardware, and the AmigaOS
  * ThreadX port does not preempt a thread that makes no ThreadX call
- * (port/threadx-amiga/src/tx_thread_context_restore.c), so nothing else runs
- * while one is in progress -- the IP thread included.  Measured on a 13 MHz
+ * (port/threadx-amiga/src/tx_thread_context_restore.c).  So nothing else runs
+ * while one is in progress, the IP thread included.  Measured on a 13 MHz
  * 68000: 32 s of dead stack for the ClientHello key share and 12 s for the
- * chain, long enough that the peer gives up retransmitting into the silence
- * and resets the connection.
+ * chain.  That is long enough that the peer stops its retransmissions and
+ * resets the connection.
  *
- * A caller inside NetX Duo sets this to a routine that hands the machine
- * back; the scalar multiplications and the modular exponentiation call it
- * between iterations.  NULL, the default, is one test per iteration.
+ * A caller inside NetX Duo sets this to a routine that gives the machine back
+ * to the system.  The scalar multiplications and the modular exponentiation
+ * call it between iterations.  NULL, the default, is one test per iteration.
  */
 extern VOID (*c68k_yield_hook)(VOID);
 

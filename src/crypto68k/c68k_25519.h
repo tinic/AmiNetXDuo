@@ -7,25 +7,24 @@
  *   curve25519, ed25519, chacha20-poly1305, used none of it.  32 measured
  *   where the 84 seconds went and the answer was entirely here.
  *
- *   Dropbear's 25519 is TweetNaCl, the smallest correct implementation in
- *   existence and never meant to be the fastest.  Its field element is sixteen
- *   16-bit limbs stored in an `i64[16]`, so one field multiply is 256 software
- *   64x64 multiplies on a part that has a 32x32->64 in hardware.  This file is
- *   the same mathematics over eight 32-bit limbs, the layout
- *   src/crypto68k/c68k_p256.c already uses for P-256.
+ *   The 25519 of Dropbear is TweetNaCl, which is written for size and not for
+ *   speed.  Its field element is sixteen 16-bit limbs stored in an `i64[16]`,
+ *   so one field multiply is 256 software 64x64 multiplies on a part that has
+ *   a 32x32->64 in hardware.  This file is the same mathematics over eight
+ *   32-bit limbs, the layout src/crypto68k/c68k_p256.c already uses for P-256.
  *
- *   Not a wrapper around a reference implementation.  §18 established that
- *   this toolchain's GCC leaves nothing on the table for SHA-256 on this part,
- *   and the win here is the representation before it is the instruction
+ *   Not a wrapper around a reference implementation.  §18 established that the
+ *   GCC in this toolchain loses nothing against assembly for SHA-256 on this
+ *   part, and the gain here is the representation before it is the instruction
  *   selection.  Assembly was the separate question and it was measured:
  *   c68k_25519.S carries fe_mul, fe_sqr, fe_add and fe_sub, and the C above
  *   defers to them under C68K_ASM.
  *
  *   Ed25519 is defined over SHA-512 and this file does not contain one.  Every
- *   program that wants Ed25519 here already has one, Dropbear has
- *   libtomcrypt's, a TLS build has nx_crypto's, and a second copy would be a
+ *   program that wants Ed25519 here already has one, Dropbear the one from
+ *   libtomcrypt, a TLS build the one from nx_crypto, and a second copy is a
  *   second thing to keep right.  The callback takes up to three chunks because
- *   that is what RFC 8032 hashes (prefix||M, and R||A||M); a NULL chunk with
+ *   that is what RFC 8032 hashes (prefix||M, and R||A||M).  A NULL chunk with
  *   length 0 is skipped.
  *
  *   The scalar multiplications are ladder/always-add shaped and the
@@ -47,14 +46,14 @@ extern "C" {
 
 /*
  * RFC 7748 X25519: q = n * p, every value 32 bytes little-endian.  `n` is
- * clamped internally, so a caller may pass a raw random 32 bytes.  Returns
+ * clamped internally, so a caller can pass a raw random 32 bytes.  Returns
  * 0 on success and -1 if the result is the all-zero point, which RFC 7748
  * section 6.1 says a key exchange must treat as a failure.
  */
 int c68k_x25519(unsigned char q[32], const unsigned char n[32],
                 const unsigned char p[32]);
 
-/* q = n * basepoint, i.e. the public half of an X25519 key pair. */
+/* q = n * basepoint, that is the public half of an X25519 key pair. */
 int c68k_x25519_base(unsigned char q[32], const unsigned char n[32]);
 
 /*
