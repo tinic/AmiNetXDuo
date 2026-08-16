@@ -143,11 +143,6 @@ static LONG bsd_gai_service(const char *servname, LONG flags, LONG socktype,
     return 0;
 }
 
-/*
- * Build one node. `canon` is copied into it when non-NULL. Otherwise the node
- * carries no name and ai_canonname is set to `inherit`, which points into an
- * earlier node's block, see the memory note at the top.
- */
 #ifdef AMINETXDUO_IPV6
 /*
  * RFC 4007 §11's <zone_id>, as an interface index. "SHOULD support at least
@@ -190,6 +185,11 @@ static ULONG bsd_gai_zone_index(const char *zone)
 }
 #endif
 
+/*
+ * Build one node. `canon` is copied into it when non-NULL. Otherwise the node
+ * carries no name and ai_canonname is set to `inherit`, which points into an
+ * earlier node's block, see the memory note at the top.
+ */
 static BsdAddrInfoNode *bsd_gai_node(LONG family, LONG socktype, LONG protocol,
                                      const NXD_ADDRESS *addr, UINT port,
                                      const char *canon, char *inherit)

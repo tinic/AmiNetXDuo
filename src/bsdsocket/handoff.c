@@ -63,7 +63,6 @@ static struct AmiSocketBase *bsd_master_of(struct AmiSocketBase *base)
     return (base->sb_Master != NULL) ? base->sb_Master : base;
 }
 
-/* Caller holds the master's semaphore. */
 /*
  * The id range carries meaning. ReleaseSocket's autodoc: "If the Id value is
  * between 0 and 65535 (inclusively), then the id is considered non-unique and
@@ -87,6 +86,8 @@ static BOOL bsd_handoff_id_is_unique(LONG id)
  * number", so a non-unique id is only half the key. The rest is what the
  * caller asks for. A match on id alone hands back whichever socket is first
  * in the list.
+ *
+ * Caller holds the master's semaphore.
  */
 static BsdHandoff *bsd_handoff_match(struct AmiSocketBase *master, LONG id,
                                      LONG domain, LONG type, LONG protocol)
