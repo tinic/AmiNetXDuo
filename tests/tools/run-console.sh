@@ -349,19 +349,33 @@ EOF
         # are on the machine.
         cp -R "$P96DIR/Libs/." "$HD/Libs/"
         #
-        # AND THE ARCHIVE'S uaegfx.card IS THE WRONG ONE, DELIBERATELY REMOVED.
+        # THE CARD DRIVER HAS TO BE THE EMULATOR'S, NOT THE ARCHIVE'S.
         #
         # Picasso96 2.0 ships a uaegfx.card from January 1999 that reaches the
         # emulator through the uaelib trap.  Amiberry answers that trap with
         # "obsolete Picasso96 uaelib hook called, call ignored", sets
         # uaegfx_old, and picasso96_alloc() then returns before building any
-        # resolution list at all.  The modern path is the emulator's own card,
-        # which uaegfx_card_install() puts in the UAE boot ROM at reset -- and
-        # a file of that name in LIBS:Picasso96/ shadows it.
+        # resolution list at all -- so the board is mapped, every library
+        # loads, and the display database holds no card mode whatsoever.
         #
-        # The symptom is one line from the monitor and nothing else:
-        # "Picasso96: Could not create graphics board context for 'uaegfx'".
+        # The modern card is the small stub WinUAE distributes, which finds the
+        # library uaegfx_card_install() builds in the UAE boot ROM at reset.
+        # Amiberry does not carry a copy (UAEGFX_INTERNAL is defined in
+        # sysconfig.h and used nowhere), so it has to be supplied.
+        #
+        # Both failures say exactly the same thing and nothing else:
+        #   Picasso96: Could not create graphics board context for 'uaegfx'
+        # which is why it is named here rather than left to be rediscovered.
         rm -f "$HD/Libs/Picasso96/uaegfx.card"
+        if [ -f "$P96DIR/uaegfx.card" ]; then
+            cp "$P96DIR/uaegfx.card" "$HD/Libs/Picasso96/uaegfx.card"
+        else
+            say error "no $P96DIR/uaegfx.card"
+            say hint "the archive's 1999 card drives the obsolete uaelib hook \
+and publishes no modes; drop WinUAE's uaegfx.card in $P96DIR"
+            say RESULT INFRA
+            exit 2
+        fi
         mkdir -p "$HD/Devs/Monitors"
         # THE MONITOR IS NAMED AFTER THE BOARD, and that is not cosmetic.
         # InstallPicasso96's P_InstallCard copies devs/monitors/Picasso96 with
