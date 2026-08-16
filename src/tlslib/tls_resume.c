@@ -503,11 +503,11 @@ static TLSResumeEntry *tls_resume_slot(TLSResumeEntry *table, const char *host,
 /* ------------------------------------------------------ the disk mirror, */
 
 /*
- * 'ATS1', big-endian, fixed 484-byte records so a truncated or corrupt file
+ * 'ATS3', big-endian, fixed 424-byte records so a truncated or corrupt file
  * cannot be mis-parsed into a wild pointer.  It is either a whole number of
  * records or it is rejected:
  *
- *    0   'A' 'T' 'S' '1'
+ *    0   'A' 'T' 'S' '3'
  *    4   ULONG count
  *    8   ULONG reserved (0)
  *   12   ULONG reserved (0)
@@ -517,17 +517,19 @@ static TLSResumeEntry *tls_resume_slot(TLSResumeEntry *table, const char *host,
  *         66  UWORD ciphersuite
  *         68  UWORD protocol version
  *         70  UBYTE session id length
- *         71  UBYTE flags (bit 0: the chain and host name were checked)
+ *         71  UBYTE flags (TLSRE_VERIFIED, TLSRE_DATED)
  *         72  session id[32]
  *        104  ULONG stamp, UNIX seconds (0 when the clock was unset)
  *        108  ULONG server lifetime hint, seconds
- *        112  master secret[48]
- *        160  UWORD ticket length
- *        162  UWORD reserved
- *        164  ticket[320]
+ *        112  ULONG trust key
+ *        116  UBYTE chain depth the verification walked
+ *        117  UBYTE reserved (0)
+ *        118  UWORD ticket length
+ *        120  master secret[48]
+ *        168  ticket[256]
  *        }
  *
- * Eight entries is 3,888 bytes on disk.  No index and no lazy load.  Unlike
+ * Eight entries is 3,408 bytes on disk.  No index and no lazy load.  Unlike
  * the trust store this is small, written as a whole, and read once per library
  * lifetime.
  */
