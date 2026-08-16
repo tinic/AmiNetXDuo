@@ -8,16 +8,16 @@
 #
 # '#' starts a comment.  Columns are separated by any run of spaces or tabs.
 #
-# AmiTCP's habit of putting the word HOST in front of the address is
-# accepted too, so an AmiTCP netdb-myhost can be dropped in here unchanged.
+# The word HOST in front of the address, as AmiTCP writes it, is accepted
+# too, so an AmiTCP netdb-myhost works here unchanged.
 #
-# If this file is missing entirely, the stack falls back to a built-in table
-# with just localhost in it, so the machine is never completely nameless.
+# If this file is absent, the stack uses a built-in table that holds only
+# localhost, so the machine is never completely nameless.
 #
 
 127.0.0.1	localhost loopback
 
-# Your own machines, so they work without a name server:
+# Local machines, so they work without a name server:
 #
 #192.168.1.1	router gateway
 #192.168.1.10	amiga

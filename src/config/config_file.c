@@ -194,8 +194,8 @@ static VOID load_interfaces(AmiConfig *cfg)
         ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR,
                         "there is no DEVS:NetInterfaces drawer, so nothing "
                         "describes a network card",
-                        "Run NetSetup: it asks which card you have and writes "
-                        "the drawer and the file for you.");
+                        "Run NetSetup: it asks which card this machine has, "
+                        "then writes the drawer and the file.");
         ami_cfg_problem_file(NULL);
         return;
     }
@@ -251,9 +251,9 @@ static VOID load_interfaces(AmiConfig *cfg)
         ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR,
                         "the DEVS:NetInterfaces drawer holds no usable "
                         "interface file",
-                        "One file per network card goes in there, named "
-                        "however you want to refer to the card, eth0 is the "
-                        "usual choice.  NetSetup writes one for you.");
+                        "One file per network card goes in there.  The name "
+                        "of the file is the name of the card, and eth0 is "
+                        "the usual choice.  NetSetup writes one.");
         ami_cfg_problem_file(NULL);
     }
 }

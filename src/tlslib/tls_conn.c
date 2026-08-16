@@ -248,7 +248,7 @@ CONST_STRPTR tls_TLSErrorString(register LONG               code    __asm("d0"),
     case TLS_ERR_CLOSED:    return (CONST_STRPTR)"the connection is closed";
     case TLS_ERR_IO:        return (CONST_STRPTR)"the network connection failed";
     case TLS_ERR_NOHOSTNAME:return (CONST_STRPTR)"no host name was given to check the certificate against";
-    case TLS_ERR_ALERT:     return (CONST_STRPTR)"the server broke off the connection; the data is incomplete";
+    case TLS_ERR_ALERT:     return (CONST_STRPTR)"the server broke off the connection, so the data is incomplete";
     default:                return (CONST_STRPTR)"internal error";
     }
 }

@@ -2,12 +2,12 @@
 ; DEVS:NetInterfaces/eth0 -- a fixed address, worked through
 ;
 ; Use this shape when nothing on the network hands out addresses, or when
-; somebody has given you an address to use and told you not to change it.
+; the address is assigned by whoever runs the network and must not change.
 ;
 ; Copy this into DEVS:NetInterfaces as "eth0", change the four numbers, and
-; look at "routes" and "name_resolution" in the Internet drawer next door --
-; with a fixed address you have to supply the router and the name server
-; yourself, because there is no DHCP lease to carry them.
+; read "routes" and "name_resolution" in the Internet drawer next door.
+; With a fixed address the router and the name server must be given by
+; hand, because there is no DHCP lease to carry them.
 ;
 
 DEVICE=a2065.device
@@ -21,18 +21,18 @@ CONFIGURE=STATIC
 ;
 ;     10.x.x.x            192.168.x.x            172.16.x.x - 172.31.x.x
 ;
-; If your router is 192.168.1.1 then 192.168.1.<something> is the answer, and
-; something between 2 and 254 that no other machine already has.
+; With a router at 192.168.1.1, the address is 192.168.1.<n>, where <n> is
+; between 2 and 254 and no other machine already has it.
 ;
 ADDRESS=192.168.1.10
 
 ; NETMASK -- which part of the address is the network.  255.255.255.0 says
 ; "the first three numbers are the network, the last one is the machine",
-; which is right for essentially every home network.
+; which is correct for almost every home network.
 ;
 NETMASK=255.255.255.0
 
-; The router does NOT go here.  It goes in DEVS:Internet/routes, as
+; The router does not go here.  It goes in DEVS:Internet/routes, as
 ;
 ;     DEFAULT=192.168.1.1
 ;
@@ -40,5 +40,5 @@ NETMASK=255.255.255.0
 ;
 ;     nameserver 192.168.1.1
 ;
-; A GATEWAY= line here is accepted as a fallback, but the routes file is
-; where the default route belongs.
+; A GATEWAY= line here is accepted as an alternative, but the default route
+; belongs in the routes file.
