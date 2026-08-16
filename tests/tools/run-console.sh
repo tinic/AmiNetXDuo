@@ -393,7 +393,16 @@ EOF
     # those is the only format the console serves.  A mask without bit 1 is a
     # board that offers no palette mode and a Workbench that quietly stays on
     # the chipset.
+    #
+    # cpu_24bit_addressing=no IS NOT OPTIONAL AND IT FAILS SILENTLY WITHOUT IT.
+    # uaegfx is a Zorro III board and a quickstart model comes up with a 24-bit
+    # address space; the emulator then says "Z3 RTG and 24bit address space are
+    # not compatible" into a log nothing reads, drops the board, and Workbench
+    # comes up on the chipset.  Every assertion in this harness still passes on
+    # that -- it is a screen, it has colours, it changes -- and the only thing
+    # that says the card was never there is the depth in the geom word.
     [ "$RTG" = 1 ] && cat >> "$cfg" <<EOF
+cpu_24bit_addressing=no
 gfxcard_size=8
 rtg_modes=0x112
 EOF
