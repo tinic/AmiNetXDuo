@@ -102,9 +102,15 @@
 #     boot_seconds=NN
 #     forward=ok|failed
 #     sshd=ok|skipped
+#     arms=NN
+#     arms_ran=NN
+#     arms_skipped=NN
 #     checks=NN
 #     failures=NN
-#     result=pass|fail|infra
+#     result=pass|fail|skipped|infra
+#
+#   result=skipped is exit 77: everything that ran passed and an arm did not
+#   run.  It is not a pass, and it used to be one.
 #
 # SPDX-License-Identifier: MIT
 
@@ -447,6 +453,9 @@ else
     if [ -z "$TARGET_ADDR" ] && [ "$KEEP" != yes ]; then
         echo "forward=failed"
         echo "boot_seconds=0"
+        echo "arms=0"
+        echo "arms_ran=0"
+        echo "arms_skipped=0"
         echo "checks=0"
         echo "failures=0"
         echo "result=infra"
@@ -489,6 +498,9 @@ echo "forward=$FORWARD"
 echo "boot_seconds=$BOOT_AT"
 
 if [ "$FORWARD" != ok ] && [ "$FORWARD" != unpolled ]; then
+    echo "arms=0"
+    echo "arms_ran=0"
+    echo "arms_skipped=0"
     echo "checks=0"
     echo "failures=0"
     echo "result=infra"
@@ -605,6 +617,15 @@ cat "$ROOT/build/wsconsole-drill.txt"
 
 CHECKS=$(sed -n 's/^\([0-9]\{1,\}\) checks.*/\1/p' "$ROOT/build/wsconsole-drill.txt" | tail -1)
 FAILS=$(sed -n 's/^[0-9]\{1,\} checks, \([0-9]\{1,\}\) failure.*/\1/p' "$ROOT/build/wsconsole-drill.txt" | tail -1)
+# The arm tally the drill now prints: `10 arms, 4 ran, 6 skipped`.  Six of its
+# ten need an ssh client, an sshd the guest can reach, an identity in
+# Dropbear's format, Ed, More or vim, and each of those used to print one line
+# and leave the totals alone -- so a run with no ssh in it at all reached
+# `result=pass` and exit 0.  This file's header says such an arm is "never
+# quietly passed"; it was, for as long as the arms have existed.
+ARMS=$(sed -n 's/^\([0-9]\{1,\}\) arms,.*/\1/p' "$ROOT/build/wsconsole-drill.txt" | tail -1)
+ARMS_RAN=$(sed -n 's/^[0-9]\{1,\} arms, \([0-9]\{1,\}\) ran.*/\1/p' "$ROOT/build/wsconsole-drill.txt" | tail -1)
+ARMS_SKIPPED=$(sed -n 's/^[0-9]\{1,\} arms, [0-9]\{1,\} ran, \([0-9]\{1,\}\) skipped.*/\1/p' "$ROOT/build/wsconsole-drill.txt" | tail -1)
 
 echo
 echo "===================== the guest's own log ======================="
@@ -624,18 +645,44 @@ if [ -f "$EMULOG" ]; then
 fi
 
 echo "drill_seconds=$DRILL_SECS"
+echo "arms=${ARMS:-0}"
+echo "arms_ran=${ARMS_RAN:-0}"
+echo "arms_skipped=${ARMS_SKIPPED:-0}"
 echo "checks=${CHECKS:-0}"
 echo "failures=${FAILS:-0}"
 
-if [ -z "${CHECKS:-}" ]; then
+if [ -z "${CHECKS:-}" ] || [ -z "${ARMS:-}" ]; then
     echo "result=infra"
     echo "!! the drill printed no tally; it did not reach the end" >&2
     exit 2
 fi
 
+# THE FLOOR.  Every arm the drill did not skip has to have asserted something:
+# the drill itself fails an arm that returned without a check and without
+# saying it skipped, so this is the arithmetic that has to hold around it.  A
+# drill that quietly stops calling its own cases comes out here as arms that
+# are neither run nor skipped, which no total on its own would show.
+if [ "$((ARMS_RAN + ARMS_SKIPPED))" -ne "$ARMS" ]; then
+    echo "result=fail"
+    echo "!! $ARMS arms, $ARMS_RAN ran and $ARMS_SKIPPED skipped: the drill" >&2
+    echo "!! did not account for all of them, so it stopped calling its own" >&2
+    echo "!! cases somewhere and the check count says nothing." >&2
+    exit 1
+fi
+
+# Failures first.  A run with both a failure and a skipped arm is a failure,
+# and reporting the skip there sends somebody to look at what is staged
+# instead of at the defect.
 if [ "$DRILL_RC" -ne 0 ] || [ "${FAILS:-1}" -ne 0 ]; then
     echo "result=fail"
     exit 1
+fi
+
+if [ "${ARMS_SKIPPED:-0}" -ne 0 ]; then
+    echo "result=skipped"
+    echo "!! $ARMS_SKIPPED of $ARMS arms did not run; everything that DID run" >&2
+    echo "!! passed.  The SKIPPED lines above say what each one needed." >&2
+    exit 77
 fi
 
 echo "result=pass"
