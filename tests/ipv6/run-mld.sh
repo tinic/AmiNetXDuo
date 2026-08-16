@@ -19,10 +19,9 @@
 # it.
 #
 #   join      a report goes out when a group is joined, before any query has
-#             been asked, for the solicited-node group and for the one the
-#             mDNS responder joins
-#   leave     a Done, or a version 2 state change, when the responder is
-#             switched off again
+#             been asked: for the solicited-node group at bring-up, and for
+#             ff02::c when McastProbe asks for it
+#   leave     a Done when McastProbe gives ff02::c back
 #   query     a report after a query, in the version the querier used
 #   suppress  a second host answering first, and our report not going out
 #   exempt    ff02::1 never reported at all (RFC 9777 section 6)
@@ -88,12 +87,20 @@ fail_setup() { echo "reason=$1"; echo "RESULT=refused"; exit 2; }
 
 BSD="$BUILD/src/bsdsocket/bsdsocket.library"
 ADDIF="$BUILD/src/tools/AddNetInterface"
-CFGIF="$BUILD/src/tools/ConfigureNetInterface"
 SHOW="$BUILD/src/tools/ShowNetStatus"
 SMOKE="$BUILD/src/tools/ToolsSmoke"
-for f in "$BSD" "$ADDIF" "$CFGIF" "$SHOW" "$SMOKE"; do
+for f in "$BSD" "$ADDIF" "$SHOW" "$SMOKE"; do
     [ -f "$f" ] || fail_setup "build_missing:$f"
 done
+
+# tests/tools/mcastprobe.c is the application join and leave, and it has no
+# CMake entry on purpose (it is a probe, not a command), so it is compiled
+# here.  It is what an SSDP receiver does: join ff02::c, read, leave.
+. "$ROOT/tools/amiga-toolchain.sh" > /dev/null 2>&1 || true
+[ -n "${AMIGA_GCC:-}" ] || fail_setup "no_amiga_gcc"
+PROBE="$ROOT/build/McastProbe"
+"$AMIGA_GCC" -O2 -m68020 ${AMIGA_NDK:+-I"$AMIGA_NDK"} -o "$PROBE" \
+    "$ROOT/tests/tools/mcastprobe.c" || fail_setup "mcastprobe_build_failed"
 
 [ -n "${AMINETXDUO_KICKSTART:-}" ] || fail_setup "no_kickstart"
 
@@ -116,8 +123,11 @@ command -v tcpdump > /dev/null || fail_setup "no_tcpdump"
 # is derivable without the guest having booted.
 TAIL=$(printf '%s' "$MAC" | tr 'A-Z' 'a-z' | cut -d: -f4-6)
 GUEST_MAC="00:80:10:$TAIL"
-SOLICITED="ff02::1:ff$(printf '%s' "$TAIL" | cut -d: -f1)$(printf '%s' "$TAIL" | cut -d: -f2-3 | tr -d ':')"
-MDNS_GROUP="ff02::fb"
+O4=$(printf '%s' "$TAIL" | cut -d: -f1)
+O5=$(printf '%s' "$TAIL" | cut -d: -f2)
+O6=$(printf '%s' "$TAIL" | cut -d: -f3)
+SOLICITED="ff02::1:ff$O4:$O5$O6"
+PROBE_GROUP="ff02::c"
 
 echo "guest_mac=$GUEST_MAC solicited=$SOLICITED backend=$BACKEND peer=${PEER:-none}"
 
@@ -151,8 +161,8 @@ mkdir -p "$STAGE/libs" "$STAGE/devs/NetInterfaces"
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 cp "$A2065" "$STAGE/devs/a2065.device"
 cp "$ADDIF" "$STAGE/AddNetInterface"
-cp "$CFGIF" "$STAGE/ConfigureNetInterface"
 cp "$SHOW"  "$STAGE/ShowNetStatus"
+cp "$PROBE" "$STAGE/McastProbe"
 
 cat > "$STAGE/devs/NetInterfaces/eth0" <<'EOF'
 DEVICE=a2065.device
@@ -161,18 +171,21 @@ CONFIGURE=DHCP
 CONFIGURE6=AUTO
 EOF
 
-# The responder is the join and leave this test can drive from a shipped
-# command: nxd_mdns joins ff02::fb through nxd_ipv6_multicast_interface_join(),
-# which is the application half of the same table the solicited-node groups
-# are in.  MDNS= is absent from the interface file on purpose, so the only
-# joins of that group in the capture are the ones these two lines cause.
+# McastProbe is the application half of the table the solicited-node groups
+# are in: IPV6_JOIN_GROUP and IPV6_LEAVE_GROUP through
+# nxd_ipv6_multicast_interface_join()/_leave().  It runs late on purpose --
+# the peer's queries have to have arrived first, so that the guest is in
+# MLDv1 compatibility mode and the leave is a Done rather than a version 2
+# state change.
+#
+# The mDNS responder would have been the obvious driver and is not usable
+# here: NX_MDNS_ENABLE_IPV6 is off in this tree (CMakeLists.txt), so the
+# responder joins no IPv6 group at all.
 cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
-wait 30
-SYS:ConfigureNetInterface eth0 MDNS=YES
-wait 70
-SYS:ConfigureNetInterface eth0 MDNS=NO
-wait 35
+wait 55
+SYS:McastProbe
+wait 25
 SYS:ShowNetStatus
 EOF
 
@@ -249,28 +262,33 @@ fi
 
 if [ "$peer_ok" = 1 ] && [ "$anchor" = 1 ]; then
 
-    # The responder joins at guest+30, so give it room and then ask in
-    # version 2, which is the version a host starts in.
-    sleep 45
+    # Version 2 first, because that is the version a host starts in.
+    sleep 10
     peer_send query-v2 --mrd 4000
     echo "peer=query-v2"
 
-    # Version 1, which is what puts the guest into compatibility mode: the
-    # Done on leave and the suppression below only exist there.
-    sleep 12
-    peer_send query-v1 --mrd 4000
-    echo "peer=query-v1"
-
-    # And the pair the suppression assertion is made of.  The report follows
-    # the query immediately, well inside the delay the guest will have picked
-    # for its own, and names only the solicited-node group -- so the guest
-    # answering for ff02::fb in the same window is what says it heard the
-    # query at all.
+    # Version 1, which puts the guest into compatibility mode: the Done on
+    # leave and the suppression below only exist there.  This one is also the
+    # control half of the suppression pair -- a query nobody else answers,
+    # which the guest must answer.
     sleep 14
+    peer_send query-v1 --mrd 4000
+    echo "peer=query-v1-control"
+
+    # The same query again, with this host answering it first.  The two
+    # windows differ in one thing, so the second one being silent is
+    # suppression and not a guest that has stopped talking.
+    sleep 16
     peer_send query-v1 --mrd 8000
     sleep 1
     peer_send report-v1 --group "$SOLICITED"
-    echo "peer=suppression-pair"
+    echo "peer=query-v1-suppressed"
+
+    # Nothing after this.  McastProbe joins and leaves ff02::c at about
+    # guest+55, and another host answering a query for that group inside
+    # those few seconds would clear this host's last-reporter flag and there
+    # would legitimately be no Done to find.  So no query is asked while it
+    # runs.
 fi
 
 wait "$RUNPID"
@@ -285,7 +303,7 @@ echo "run_rc=$run_rc"
 # ------------------------------------------------------------------ verdict --
 
 python3 "$ROOT/tests/ipv6/mldcheck.py" --pcap "$PCAP" \
-    --guest-mac "$GUEST_MAC" --solicited "$SOLICITED" --mdns "$MDNS_GROUP"
+    --guest-mac "$GUEST_MAC" --solicited "$SOLICITED" --group "$PROBE_GROUP"
 rc=$?
 
 if [ "$peer_ok" != 1 ]; then

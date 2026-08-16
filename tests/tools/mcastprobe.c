@@ -30,9 +30,10 @@
  * with -a2065log2 and a2065pcap.py --winuae.  What to look for either way is
  * an IGMP v2 report for 239.255.255.250.
  *
- * There is no MLD report to look for.  The v6 join reaches the
- * driver as S2_ADDMULTICASTADDRESS and puts nothing on the wire; the stack
- * has no MLD.
+ * On the v6 side the thing to look for is a Multicast Listener Report for
+ * ff02::c, and a Done or a CHANGE_TO_INCLUDE_MODE record when the leave
+ * happens.  tests/ipv6/run-mld.sh drives this program for exactly that and
+ * reads the answer out of a capture on the segment.
  *
  * A one-off probe rather than a command or a test, so it has no CMake entry.
  * Compile it by hand and stage it like any other executable:

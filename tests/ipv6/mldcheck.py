@@ -3,7 +3,7 @@
 # WHAT THE GUEST PUT ON THE WIRE, read out of tests/ipv6/run-mld.sh's capture.
 #
 #   mldcheck.py --pcap FILE --guest-mac 00:80:10:49:6d:1d
-#               --solicited ff02::1:ff49:6d1d [--mdns ff02::fb]
+#               --solicited ff02::1:ff49:6d1d [--group ff02::c]
 #
 # Output is key=value, one per line, and the exit code is the verdict: 0 every
 # assertion held, 1 one did not, 2 the capture is unreadable or holds nothing
@@ -169,13 +169,13 @@ def main():
     ap.add_argument("--guest-mac", required=True)
     ap.add_argument("--solicited", required=True,
                     help="the guest's solicited-node group")
-    ap.add_argument("--mdns", default="ff02::fb",
-                    help="the group the responder joins and leaves")
+    ap.add_argument("--group", default="ff02::c",
+                    help="the group the guest joins and leaves by hand")
     args = ap.parse_args()
 
     guest_mac = args.guest_mac.lower()
     solicited = ipaddress.IPv6Address(args.solicited)
-    mdns = ipaddress.IPv6Address(args.mdns)
+    probe = ipaddress.IPv6Address(args.group)
 
     messages = []
     for t, frame in read_pcap(args.pcap):
@@ -231,20 +231,20 @@ def main():
     if leaked:
         failures.append("all_nodes_exemption")
 
-    # ---- the responder's group: a report on join, a leave on leave --------
-    mdns_join = [m for m in ours
-                 if (m.type == MLD_V2_REPORT and m.has(mdns, CHANGE_TO_EXCLUDE_MODE))
-                 or (m.type == MLD_V1_REPORT and m.has(mdns))]
-    mdns_leave = [m for m in ours
-                  if (m.type == MLD_DONE and m.has(mdns))
-                  or (m.type == MLD_V2_REPORT and m.has(mdns, CHANGE_TO_INCLUDE_MODE))]
-    print("mdns_join_report=%d mdns_leave=%d mdns_done_v1=%d"
-          % (len(mdns_join), len(mdns_leave),
-             len([m for m in mdns_leave if m.type == MLD_DONE])))
-    if not mdns_join:
-        failures.append("mdns_join_report")
-    if not mdns_leave:
-        failures.append("mdns_leave")
+    # ---- the group joined and left through the socket API -----------------
+    probe_join = [m for m in ours
+                  if (m.type == MLD_V2_REPORT and m.has(probe, CHANGE_TO_EXCLUDE_MODE))
+                  or (m.type == MLD_V1_REPORT and m.has(probe))]
+    probe_done = [m for m in ours if m.type == MLD_DONE and m.has(probe)]
+    probe_leave = probe_done + [m for m in ours
+                                if m.type == MLD_V2_REPORT
+                                and m.has(probe, CHANGE_TO_INCLUDE_MODE)]
+    print("probe_join_report=%d probe_leave=%d probe_done_v1=%d"
+          % (len(probe_join), len(probe_leave), len(probe_done)))
+    if not probe_join:
+        failures.append("probe_join_report")
+    if not probe_leave:
+        failures.append("probe_leave")
 
     # ---- a query is answered ---------------------------------------------
     #
@@ -252,52 +252,62 @@ def main():
     # it that are not themselves a repeat of something already in flight.  Ten
     # because the default Query Response Interval is 10 000 ms and the timer
     # that serves it ticks in seconds.
-    def answers(query, window=12.0):
-        return [m for m in ours if query.t < m.t <= query.t + window]
+    # ---- a query is answered, and a second host's answer suppresses ours --
+    #
+    # One loop for both, because they are the same measurement twice with one
+    # thing changed.  A query window is the twelve seconds after a peer query:
+    # the default Query Response Interval is 10 000 ms and the timer serving it
+    # ticks in seconds.
+    #
+    # CONTROL: a query nobody else answers.  The guest must report.
+    # SUPPRESSED: the same query, with the peer reporting the group first.
+    # The guest must not.  Neither window alone says anything -- a guest that
+    # had simply stopped talking would pass the second one on its own.
+    v2_answered = 0
+    control_windows = control_answered = 0
+    suppressed_windows = suppressed = 0
 
-    v1_answered = v2_answered = 0
     for q in theirs:
         if q.type != MLD_QUERY:
             continue
-        # A version 2 query is 28 octets or more; parse_mld does not keep the
-        # length, so the peer's own record shape stands in: only a version 1
-        # query is followed by version 1 answers here.
-        for m in answers(q):
-            if m.type == MLD_V1_REPORT:
-                v1_answered += 1
-            elif m.type == MLD_V2_REPORT and m.has(solicited, MODE_IS_EXCLUDE):
-                v2_answered += 1
 
-    print("query_answers_v1=%d query_answers_v2=%d" % (v1_answered, v2_answered))
-    if v1_answered == 0:
-        failures.append("query_answer_v1")
+        window = [m for m in ours if q.t < m.t <= q.t + 12.0]
+        peer_first = [m for m in theirs
+                      if q.t < m.t <= q.t + 3.0
+                      and m.type == MLD_V1_REPORT and m.has(solicited)]
+
+        v2_here = [m for m in window
+                   if m.type == MLD_V2_REPORT and m.has(solicited, MODE_IS_EXCLUDE)]
+        v1_here = [m for m in window if m.type == MLD_V1_REPORT and m.has(solicited)]
+
+        v2_answered += len(v2_here)
+
+        if peer_first:
+            suppressed_windows += 1
+            if not v1_here:
+                suppressed += 1
+        elif v1_here:
+            control_windows += 1
+            control_answered += 1
+        elif v2_here:
+            # A version 2 query, answered in version 2.  Not a control for the
+            # version 1 suppression pair.
+            pass
+        else:
+            control_windows += 1
+
+    print("query_answers_v2=%d control_windows=%d control_answered=%d"
+          % (v2_answered, control_windows, control_answered))
+    print("suppression_windows=%d suppressed=%d"
+          % (suppressed_windows, suppressed))
+
     if v2_answered == 0:
         failures.append("query_answer_v2")
-
-    # ---- another host's report suppresses ours ----------------------------
-    #
-    # The peer answers a query for the solicited-node group before the guest's
-    # delay runs out.  What must follow is silence about THAT group and not
-    # silence in general, so the same window has to carry a report for the
-    # other one -- otherwise a guest that had stopped talking would pass.
-    suppression_windows = 0
-    suppressed = 0
-    for p in theirs:
-        if p.type != MLD_V1_REPORT or not p.has(solicited):
-            continue
-        window = [m for m in ours if p.t < m.t <= p.t + 12.0]
-        if not any(m.has(mdns) for m in window):
-            # The guest was not answering that query at all; this window
-            # proves nothing either way.
-            continue
-        suppression_windows += 1
-        if not any(m.has(solicited) for m in window):
-            suppressed += 1
-
-    print("suppression_windows=%d suppressed=%d" % (suppression_windows, suppressed))
-    if suppression_windows == 0:
+    if control_answered == 0:
+        failures.append("query_answer_v1")
+    if suppressed_windows == 0:
         failures.append("suppression_untested")
-    elif suppressed != suppression_windows:
+    elif suppressed != suppressed_windows:
         failures.append("suppression")
 
     if failures:
