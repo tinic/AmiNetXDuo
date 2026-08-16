@@ -13,8 +13,8 @@
  *   interfaces.c   ObtainInterfaceList(), ReleaseInterfaceList(),
  *                  QueryInterfaceTagList(), ConfigureInterfaceTagList(),
  *                  AddInterfaceTagList(), RemoveInterface()
- *   routing.c      AddRouteTagList(), DeleteRouteTagList(), GetRouteInfo(),
- *                  FreeRouteInfo()
+ *   routing.c      AddRouteTagList(), DeleteRouteTagList(),
+ *                  ChangeRouteTagList(), GetRouteInfo(), FreeRouteInfo()
  *   netstats.c     GetNetworkStatistics()
  *   addralloc.c    CreateAddrAllocMessageA(), DeleteAddrAllocMessage(),
  *                  BeginInterfaceConfig(), AbortInterfaceConfig(), the
@@ -61,9 +61,6 @@
  *                              called from ami_ns_destroy(). See
  *                              aminetxduo/mbuf.h. Without both, every slab is
  *                              resident until reboot.
- *   ChangeRouteTagList()       the NDK assigns it an offset and neither the
- *                              autodoc nor clib/bsdsocket_protos.h says what
- *                              it takes.
  *   the ipf_* set              Roadshow's packet filter, out of scope per
  *                              RESEARCH 9. Nothing outside Roadshow's own
  *                              tools calls it, and NetTrace covers the
@@ -79,7 +76,9 @@
  * builds against. 10,436 lines, 121 functions, including 35 of the vectors
  * that used to answer ENOSYS here.
  *
- * Not in that autodoc: the seven ipf_* vectors and ChangeRouteTagList.
+ * Not in that autodoc: the seven ipf_* vectors and ChangeRouteTagList. The
+ * latter is implemented anyway; what stands in for the missing page, and what
+ * it does not cover, is set out in routing.c's header.
  *
  * A guessed ABI cost this project time twice (ndk-include/pwd.h,
  * bpf_set_notify_mask's register order). Anything written here is written

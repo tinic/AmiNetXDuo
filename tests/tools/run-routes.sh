@@ -40,6 +40,11 @@
 #     anything was checked.
 #   * netstat -r prints the same table, through the same renderer
 #     ShowNetStatus uses, so the two commands cannot disagree about it.
+#   * ChangeRouteTagList moves a route's next hop, and the next packet for that
+#     destination goes to the NEW one.  Same shape of evidence as above and for
+#     the same reason: "the table reads back differently" is what a vector that
+#     wrote to the wrong table would also produce.  This half needs a host NIC
+#     to capture on, so it runs under -A -B <iface> and skips otherwise.
 #
 # The route is added through NETCTRL_ROUTE_ADD by tests/tools/routeprobe.c
 # rather than by AddNetRoute: what is under test is the stack, and a test that
@@ -132,6 +137,31 @@ EOF
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-routes}"
 
+# ---- the wire, when there is one to watch --------------------------------
+#
+# Amiberry writes no frame log, so the a2065pcap.py route the FS-UAE-era
+# assertions below took does not exist here.  Bridged onto a host NIC there is
+# something better: the frames really are on that NIC, so tcpdump on the host
+# sees exactly what left the card.  Captured for the whole run and read after
+# it; ARP only, which is all the assertions look at and keeps the file small.
+WIRE=""
+WIRE_PID=""
+if [ "$RUNNER" = "amiberry" ] && [ "$IFACE" != "slirp" ] &&
+   command -v tcpdump >/dev/null 2>&1; then
+    WIRE="$STAGE/wire.pcap"
+    tcpdump -i "$IFACE" -n -s0 -U -w "$WIRE" arp >/dev/null 2>&1 &
+    WIRE_PID=$!
+    # tcpdump opens its socket asynchronously; without this the guest's first
+    # frames are missed and the capture reads like a stack that sent nothing.
+    sleep 2
+    if ! kill -0 "$WIRE_PID" 2>/dev/null; then
+        echo "==> tcpdump could not capture on $IFACE, the wire check will skip" >&2
+        WIRE=""; WIRE_PID=""
+    else
+        echo "==> capturing ARP on $IFACE into $WIRE (pid $WIRE_PID)"
+    fi
+fi
+
 set +e
 if [ "$RUNNER" = "amiberry" ]; then
     HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
@@ -152,6 +182,12 @@ fi
 RUN_RC=$?
 set -e
 
+# By pid, never by name: other runs on this host have tcpdumps of their own.
+if [ -n "$WIRE_PID" ]; then
+    kill "$WIRE_PID" 2>/dev/null || true
+    wait "$WIRE_PID" 2>/dev/null || true
+fi
+
 SERIAL="$ROOT/build/serial-$AMINETXDUO_RUN_TAG.log"
 REPORT="$HD/tools.txt"
 [ -f "$REPORT" ] || { echo "FAIL: the guest wrote no $REPORT (run rc=$RUN_RC)" >&2; exit 1; }
@@ -169,6 +205,12 @@ UNRUN=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
 skip() { echo "  --: $*"; UNRUN=$((UNRUN + 1)); }
+
+# The two next hops RtProbe derived, .250 and .251 of whatever subnet the
+# machine is on.  Read here rather than beside the assertions that use them:
+# the wire check below needs them too and comes first.
+HOP_A=$(sed -n 's/^next hops: \([0-9.]*\) then [0-9.]*$/\1/p' "$REPORT" | head -1)
+HOP_B=$(sed -n 's/^next hops: [0-9.]* then \([0-9.]*\)$/\1/p' "$REPORT" | head -1)
 
 # ---- one boot, as ever (docs/RESEARCH.md 25) ------------------------------
 #
@@ -286,6 +328,45 @@ else
        left the card did not run"
 fi
 
+# ---- THE WIRE AGAIN, FOR THE CHANGE --------------------------------------
+#
+# The claim ChangeRouteTagList has to earn: not that the table reads back
+# differently, but that the PACKETS go somewhere else afterwards.  RtProbe
+# sends to 192.168.66.5 once before the change and once after, and 192.168.66.5
+# can only leave this machine by the route it just added, so the stack ARPs for
+# whichever next hop that route names.  Two requests, for two different
+# addresses, in that order, and nothing else could have produced them.
+if [ -n "$WIRE" ] && [ -s "$WIRE" ] && [ -n "${HOP_A:-}" ] && [ -n "${HOP_B:-}" ]; then
+    tcpdump -r "$WIRE" -n 2>/dev/null > "$STAGE/wire.txt" || true
+    A_LAST=$(grep -n "who-has $HOP_A" "$STAGE/wire.txt" | tail -1 | cut -d: -f1)
+    B_FIRST=$(grep -n "who-has $HOP_B" "$STAGE/wire.txt" | head -1 | cut -d: -f1)
+
+    if [ -n "$A_LAST" ]; then
+        pass "the wire shows ARP for $HOP_A, the route's first next hop"
+    else
+        fail "no ARP for $HOP_A: the route was not consulted before the change"
+    fi
+
+    if [ -n "$B_FIRST" ]; then
+        pass "and ARP for $HOP_B, the next hop the change installed"
+    else
+        fail "no ARP for $HOP_B: the packets did not follow the changed route"
+    fi
+
+    if [ -n "$A_LAST" ] && [ -n "$B_FIRST" ] && [ "$B_FIRST" -gt "$A_LAST" ]; then
+        pass "with every request for $HOP_A before the first for $HOP_B"
+    else
+        fail "the two next hops were not ARPed in the order the changes happened"
+        grep -E "who-has ($HOP_A|$HOP_B)" "$STAGE/wire.txt" | head -20 >&2 || true
+    fi
+elif [ -n "$WIRE" ]; then
+    skip "the capture on $IFACE is empty, so nothing was read off the wire"
+else
+    skip "no host NIC to capture on (SLIRP is not one): the change was checked
+       against the table only, not against what left the card.  Run with
+       -A -B <iface> on a bridged host for the wire half"
+fi
+
 # ---- THE PUBLISHED ROUTING API -------------------------------------------
 #
 # Everything above drives the private NETCTRL_ROUTE_ADD vector.  RtProbe
@@ -293,23 +374,26 @@ fi
 # instead, the Roadshow ABI a third-party tool uses, and walks the
 # returned table by rtm_msglen, which is the shape no build can check.
 
-if grep -q "^add 192.168.66.0 via 10.0.2.98: rc 0 " "$REPORT"; then
+# The next hop is not named here: RtProbe derives it from the machine's own
+# subnet, because NetX Duo refuses one that is on no interface and this file
+# should not decide what network the emulator is bridged onto.
+if grep -Eq "^add 192\.168\.66\.0 via [0-9.]+: rc 0 " "$REPORT"; then
     pass "AddRouteTagList added a route with no netmask tag in the grammar"
 else
-    fail "AddRouteTagList refused 192.168.66.0 via 10.0.2.98"
+    fail "AddRouteTagList refused 192.168.66.0"
 fi
 
 # The mask is IMPLIED: 192.168.66.0 has a zero host part under its classful
 # mask, so "the route is assumed to be a to a network" and 255.255.255.0 comes
 # from nothing but the address.  192.168.67.7 does not, so it is a host route
 # with a /32 and the H flag.
-if grep -Eq "^  with +192\.168\.66\.0 +10\.0\.2\.98 +255\.255\.255\.0 +UGS" "$REPORT"; then
+if grep -Eq "^  with +192\.168\.66\.0 +[0-9.]+ +255\.255\.255\.0 +UGS" "$REPORT"; then
     pass "and the classful mask was derived from the address alone"
 else
     fail "192.168.66.0 did not come back as a /24 gateway route"
 fi
 
-if grep -Eq "^  with +192\.168\.67\.7 +10\.0\.2\.98 +255\.255\.255\.255 +UGHS" "$REPORT"; then
+if grep -Eq "^  with +192\.168\.67\.7 +[0-9.]+ +255\.255\.255\.255 +UGHS" "$REPORT"; then
     pass "a destination with a host part became a host route, flagged H"
 else
     fail "192.168.67.7 did not come back as a /32 host route"
@@ -333,6 +417,66 @@ if grep -q "^routes static-only: 2 entries" "$REPORT"; then
     pass "the flags filter returned exactly the two RTF_STATIC entries"
 else
     fail "GetRouteInfo(AF_INET, RTF_STATIC) did not return exactly two entries"
+fi
+
+# ---- ChangeRouteTagList ---------------------------------------------------
+#
+# The vector with no autodoc page (src/bsdsocket/routing.c).  Three claims:
+# the change reaches the table, the entry keeps its mask and its count, and a
+# change of a route that is not there is refused rather than installing one.
+if grep -Eq "^change 192\.168\.66\.0 to via [0-9.]+: rc 0 " "$REPORT"; then
+    pass "ChangeRouteTagList changed the route's next hop"
+else
+    fail "ChangeRouteTagList did not change 192.168.66.0"
+fi
+
+# The "changed" listing must carry the second next hop and not the first: a
+# read-back is the only thing that separates a vector that returned 0 from one
+# that did something.
+if [ -n "$HOP_B" ] && grep -Eq "^  changed +192\.168\.66\.0 +${HOP_B//./\\.} +255\.255\.255\.0 +UGS" "$REPORT"; then
+    pass "the table reads back 192.168.66.0 via $HOP_B, the new next hop"
+else
+    fail "the table does not report 192.168.66.0 via the new next hop"
+fi
+
+if [ -n "$HOP_A" ] && grep -Eq "^  changed +192\.168\.66\.0 +${HOP_A//./\\.} " "$REPORT"; then
+    fail "the old next hop $HOP_A is still in the table after the change"
+else
+    pass "and the old next hop is gone from it"
+fi
+
+if [ "$(grep -c '^  changed ' "$REPORT")" -eq 2 ]; then
+    pass "the change left two static entries, not one and not three"
+else
+    fail "the static table has $(grep -c '^  changed ' "$REPORT") entries after the change, expected 2"
+fi
+
+for case in "a route never added" "with no gateway" "dest+default together" \
+            "to an unreachable next hop"; do
+    if grep -q "^change $case: .*, refused, correctly" "$REPORT"; then
+        pass "ChangeRouteTagList refused: $case"
+    else
+        fail "ChangeRouteTagList accepted: $case"
+    fi
+done
+
+# The refused change must not have taken the route with it.
+if [ -n "$HOP_B" ] && grep -Eq "^  survived +192\.168\.66\.0 +${HOP_B//./\\.} " "$REPORT"; then
+    pass "and a refused change left the route exactly as it was"
+else
+    fail "a refused change disturbed the route"
+fi
+
+if grep -Eq "^change the default gateway to [0-9.]+: rc 0 " "$REPORT"; then
+    pass "the default gateway can be changed"
+else
+    fail "ChangeRouteTagList refused the default gateway"
+fi
+
+if grep -q "^default gateway after the change: .*, unmoved, correctly" "$REPORT"; then
+    pass "and naming the installed one left it where it was"
+else
+    fail "the default gateway moved when it was changed to its own address"
 fi
 
 for case in "dest+default together" "dest with no gateway" \

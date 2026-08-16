@@ -208,10 +208,13 @@ host_test_targets() { # builddir
 #
 # Adding a test therefore turns CI red until this is raised.  That is the
 # maintenance the gate is made of, and it is one line.
-HOST_TESTS_EXPECTED=68
+HOST_TESTS_EXPECTED=69
 case "$(uname -m)" in
     x86_64|amd64) ;;
-    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 1)) ;;   # no test_inet
+    # test_inet and test_route, both x86_64-only for the reason in
+    # tests/bsdsocket/CMakeLists.txt: elsewhere the host's LONG is eight bytes
+    # and no structure in them has the target's shape.
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 2)) ;;
 esac
 
 # The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against

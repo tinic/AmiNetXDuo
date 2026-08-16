@@ -14,4 +14,10 @@ struct sockaddr_dl {
     char  sdl_data[12];
 };
 #define LLADDR(s) ((char *)((s)->sdl_data + (s)->sdl_nlen))
+/* sdl_family's value.  The NDK puts it in <sys/socket.h>; the host's has
+   AF_PACKET at a different number and no AF_LINK at all, so it belongs with
+   the structure that is the only thing here using it. */
+#ifndef AF_LINK
+#define AF_LINK   18
+#endif
 #endif

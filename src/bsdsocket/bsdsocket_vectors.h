@@ -343,6 +343,10 @@ LONG bsd_AddRouteTagList(register struct TagItem *tags __asm("a0"),
 LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
                             register struct AmiSocketBase *SocketBase __asm("a6"));
 
+/* LVO -0x1aa */
+LONG bsd_ChangeRouteTagList(register struct TagItem *tags __asm("a0"),
+                            register struct AmiSocketBase *SocketBase __asm("a6"));
+
 /* LVO -0x1b0 */
 VOID bsd_FreeRouteInfo(register struct rt_msghdr *buf __asm("a0"),
                        register struct AmiSocketBase *SocketBase __asm("a6"));

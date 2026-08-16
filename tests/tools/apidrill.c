@@ -1502,6 +1502,36 @@ static VOID po_addroute(LONG v, ULONG res)
         (VOID)do_delroute();
 }
 
+/* ChangeRouteTagList needs the entry to be there first: on an absent one it is
+   ESRCH by design, and this table asserts nothing about the return, so an
+   ESRCH every iteration would drill a path that is one comparison long. */
+static LONG pr_chgroute(LONG v, Regs *r)
+{
+    if (v == 0)
+    {
+        (VOID)do_addroute();
+        tags[4].ti_Tag  = RTA_Destination;
+        tags[4].ti_Data = (ULONG)"192.0.2.0";
+        tags[5].ti_Tag  = RTA_Gateway;
+        tags[5].ti_Data = (ULONG)"10.0.2.3";
+        tags[6].ti_Tag  = TAG_DONE;
+        tags[6].ti_Data = 0;
+        r->a0 = (APTR)&tags[4];
+    }
+    else
+    {
+        r->a0 = NULL;
+    }
+    return PREP_OK;
+}
+
+static VOID po_chgroute(LONG v, ULONG res)
+{
+    (VOID)res;
+    if (v == 0)
+        (VOID)do_delroute();
+}
+
 static LONG pr_delroute(LONG v, Regs *r)
 {
     if (v == 0)
@@ -2271,7 +2301,7 @@ static const VecRow vectors[] =
 
     V_("AddRouteTagList",    414, t_414, VC_IMPL, 2, FEW_ITERS, pr_addroute,    po_addroute),
     V_("DeleteRouteTagList", 420, t_420, VC_IMPL, 2, FEW_ITERS, pr_delroute,    NULL),
-    E_("ChangeRouteTagList", 426, t_426, VC_STUB_L),
+    V_("ChangeRouteTagList", 426, t_426, VC_IMPL, 2, FEW_ITERS, pr_chgroute,    po_chgroute),
     V_("FreeRouteInfo",      432, t_432, VC_IMPL, 2, FEW_ITERS, pr_freerouteinfo, NULL),
     V_("GetRouteInfo",       438, t_438, VC_IMPL, 2, FEW_ITERS, pr_getrouteinfo, po_getrouteinfo),
     V_("AddInterfaceTagList",444, t_444, VC_IMPL, 2, FEW_ITERS, pr_addiface,    NULL),
