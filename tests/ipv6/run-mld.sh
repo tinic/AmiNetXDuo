@@ -98,8 +98,16 @@ done
 # here.  It is what an SSDP receiver does: join ff02::c, read, leave.
 . "$ROOT/tools/amiga-toolchain.sh" > /dev/null 2>&1 || true
 [ -n "${AMIGA_GCC:-}" ] || fail_setup "no_amiga_gcc"
-PROBE="$ROOT/build/McastProbe"
-"$AMIGA_GCC" -O2 -m68020 ${AMIGA_NDK:+-I"$AMIGA_NDK"} -o "$PROBE" \
+#
+# Built for the machine -m asked for and not for the newest one: a 68020
+# object stops an A600 with an illegal instruction before anything under test
+# runs, and the failure looks like a guest that never booted.
+case "$MODEL" in
+    *68000*|*A500*|*A600*|*A2000*) PROBE_ARCH="-m68000" ;;
+    *)                             PROBE_ARCH="-m68020" ;;
+esac
+PROBE="$ROOT/build/$TAG-McastProbe"
+"$AMIGA_GCC" -O2 "$PROBE_ARCH" ${AMIGA_NDK:+-I"$AMIGA_NDK"} -o "$PROBE" \
     "$ROOT/tests/tools/mcastprobe.c" || fail_setup "mcastprobe_build_failed"
 
 [ -n "${AMINETXDUO_KICKSTART:-}" ] || fail_setup "no_kickstart"
