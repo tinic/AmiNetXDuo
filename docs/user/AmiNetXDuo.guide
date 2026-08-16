@@ -1489,6 +1489,13 @@
   run on the hardware they are written for; if one of them works, or
   does not, that is worth reporting.
 
+  xsurf carries its chip behind an ISA Plug and Play bridge, and the
+  driver configures it at boot. That sequence has been run against an
+  emulator and not against a board, so a report from a real X-Surf is
+  worth sending whether it works or not: the lines CheckNetDevice
+  prints about the identifier, the port and the settling time are the
+  ones that settle it.
+
   Run it when a card does not work. It prints every card the driver
   looked at, the step each one reached, and the reason any of them was
   refused. It reads what the driver recorded while it was probing, so
@@ -1511,7 +1518,7 @@
 
   A card that was found and refused is reported with the reason:
 
-      CARD "xsurf"
+      CARD "ariadne2"
         Found by autoconfig, board memory at $00E90000.
         Detection read the command register as $00.
         REFUSED, and this is why:

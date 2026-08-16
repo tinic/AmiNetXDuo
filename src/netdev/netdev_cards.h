@@ -41,6 +41,32 @@
 #define NETDEV_BUS_PCMCIA   1
 #define NETDEV_BUS_FIXED    2   /* a fixed address, no autoconfig, no claim */
 
+/*
+ * A CARD WHOSE CHIP IS BEHIND AN ISA PLUG AND PLAY BRIDGE.
+ *
+ * The X-Surf is a Zorro II board carrying an RTL8019AS on a private ISA bus,
+ * and that chip decodes nothing at all until ISA PnP has assigned it an I/O
+ * base and activated it.  Until then the board's window reads as a floating
+ * bus and the card looks absent.  netdev_isapnp.c runs the sequence; this is
+ * the four numbers it needs, and NULL on every row that has no bridge.
+ *
+ * io_win + port * stride is where an ISA port lands in the board window, and
+ * the window is not wide enough for the whole 12-bit port space: the X-Surf's
+ * is 4 KB at stride 2, so it carries ports 0..0x7ff and the twelfth address
+ * line comes out of a latch on the board.  hi_reg/hi_bit is that latch, and
+ * it is why the PnP ADDRESS port (0x279) and WRITE_DATA port (0xa79) are the
+ * same board address with one bit of state between them.
+ */
+typedef struct NetdevIsaPnp
+{
+    ULONG   io_win;             /* board offset of ISA port 0                */
+    ULONG   hi_reg;             /* board offset of the latch holding A11     */
+    UBYTE   hi_bit;             /* which bit of that latch A11 is            */
+    UBYTE   ldn;                /* logical device to configure, 0 on one-
+                                   function cards                            */
+    UWORD   ports;              /* how many ports the device decodes         */
+} NetdevIsaPnp;
+
 typedef struct NetdevCard
 {
     const char *name;           /* what the user pins with, and what we print */
@@ -78,6 +104,14 @@ typedef struct NetdevCard
                                    prefix plus the autoconfig serial number,
                                    which is where Commodore put it -- there is
                                    no address PROM in the board window        */
+    /*
+     * The ISA Plug and Play bridge in front of the chip, or NULL when the
+     * register file decodes as soon as the board is mapped -- which is every
+     * row but the X-Surf.  The port the chip is told to decode at is derived
+     * from reg_off, so this adds no second place for the register base to be
+     * written down.
+     */
+    const NetdevIsaPnp *pnp;
 } NetdevCard;
 
 extern const NetdevCard netdev_cards[];
@@ -85,6 +119,14 @@ extern const UWORD      netdev_card_count;
 
 /* NULL when the name matches no row. */
 const NetdevCard *netdev_card_by_name(const char *name);
+
+/*
+ * netdev_isapnp.c: bring the chip out from behind an ISA PnP bridge, so that
+ * it decodes at board + card->reg_off.  TRUE when there is no bridge on this
+ * row -- the common case -- and TRUE when the sequence left a DP8390
+ * answering there.  Every step is recorded in the probe record either way.
+ */
+BOOL netdev_isapnp_configure(const NetdevCard *card, APTR board);
 
 /*
  * Which PCMCIA row drives the card whose CIS says (manf, prod).

@@ -553,6 +553,68 @@ static VOID cnd_step(const AnxDiagStep *st)
             (v >> 24) & 0xff, (v >> 16) & 0xff, (v >> 8) & 0xff, v & 0xff);
         return;
 
+    /* ---- the ISA Plug and Play bridge ---- */
+    case ANXDIAG_PNP_VENDOR:
+        say("  The card behind the ISA Plug and Play bridge identified itself\n"
+            "  as vendor and device $%08lx.  $4a8c8019 is a Realtek RTL8019,\n"
+            "  which is what an X-Surf carries; $00000000 means the isolation\n"
+            "  reads found nothing driving the bus.\n", v);
+        return;
+    case ANXDIAG_PNP_SERIAL:
+        say("  Its serial number is $%08lx.\n", v);
+        return;
+    case ANXDIAG_PNP_CSUM:
+        if (((v >> 8) & 0xffUL) == (v & 0xffUL))
+        {
+            say("  The identifier's checksum is $%02lx and that is what it\n"
+                "  computes to, so the isolation read a real card.\n",
+                v & 0xffUL);
+            return;
+        }
+        say("  The identifier's checksum came back $%02lx and computes to\n"
+            "  $%02lx.  The bytes above are not a card's serial identifier,\n"
+            "  so the configuration below was written blind -- report this\n"
+            "  line with the two above it.\n",
+            (v >> 8) & 0xffUL, v & 0xffUL);
+        return;
+    case ANXDIAG_PNP_IO:
+        say("  The chip was told to decode 32 ports at ISA $%04lx, which is\n"
+            "  where this card's row says its registers are.\n", v);
+        return;
+    case ANXDIAG_PNP_SETTLE:
+        if (v == 0)
+        {
+            say("  The chip answered immediately after it was activated.\n");
+            return;
+        }
+        say("  The chip was given %lu round(s) of 2 ms after it was activated\n"
+            "  before it answered, or before the wait ran out.  Nothing\n"
+            "  documents a settling time for this, so a non-zero number here\n"
+            "  is worth reporting.\n", v);
+        return;
+    case ANXDIAG_PNP_CR:
+        if ((v & ~0x02UL) == 0x21UL)
+        {
+            say("  The command register read back $%02lx: the chip is there.\n",
+                v);
+            return;
+        }
+        say("  The command register read back $%02lx, which is not what a\n"
+            "  stopped DP8390 answers ($21, or $23 on a clone with a stuck\n"
+            "  START bit).  $ff is a floating bus.\n", v);
+        return;
+    case ANXDIAG_PNP_SILENT:
+        say("  Nothing answered at $%08lx after the Plug and Play sequence,\n"
+            "  with 250 ms allowed for it, so the board was not made a unit.\n"
+            "  The identifier above says whether the bridge answered at all:\n"
+            "  a good checksum with no chip means the sequence ran and the\n"
+            "  chip was left somewhere else.\n", v);
+        return;
+    case ANXDIAG_PNP_OK:
+        say("  The Plug and Play sequence finished and the chip is decoding\n"
+            "  at $%08lx.\n", v);
+        return;
+
     /* ---- the EtherLink III ---- */
     case ANXDIAG_EL3_MFG:
         say("  The manufacturer ID read back as $%04lx.  It is $6d50 on every\n"
