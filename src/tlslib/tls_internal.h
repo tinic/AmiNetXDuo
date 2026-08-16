@@ -1,17 +1,17 @@
 /*
  * tls.library, internals.
  *
- * The public contract is include/aminetxduo/tlslib.h; nothing here is visible
- * to a caller.
+ * The public contract is include/aminetxduo/tlslib.h.  Nothing here is
+ * visible to a caller.
  *
- *   One master base, one semaphore, and everything else hanging off a
+ *   One master base, one semaphore, and everything else held by a
  *   TLSConnection.  Unlike bsdsocket.library there is no per-opener state to
- *   keep apart, no errno, no descriptor table, so OpenLibrary() hands back
- *   the same base every time and the connection is the only object with
+ *   keep apart, no errno and no descriptor table.  So OpenLibrary() hands
+ *   back the same base every time, and the connection is the only object with
  *   identity.
  *
  *   A TLSConnection owns a whole handshake's worth of memory (about 40 KB),
- *   allocated at TLSOpen() rather than reserved up front, so a machine that
+ *   allocated at TLSOpen() rather than reserved in advance, so a machine that
  *   never makes a TLS connection pays for none of it.
  *
  * SPDX-License-Identifier: MIT
@@ -45,8 +45,8 @@
 /* ------------------------------------------------------------- sizing --- */
 
 /*
- * How many roots one chain may pull out of the store.  One is the answer in
- * every ordinary case: the lazy loader matches the issuer of each received
+ * How many roots one chain can pull out of the store.  One is the answer in
+ * every ordinary case.  The lazy loader matches the issuer of each received
  * certificate against the store by exact DER name, so a two-deep chain
  * produces one hit.  Two covers a cross-signed chain where an intermediate is
  * also present as a root.
@@ -54,9 +54,9 @@
 #define TLS_MAX_ROOTS               2
 
 /*
- * Largest root DER we will read out of the store.  The Mozilla set's biggest
- * is 2007 bytes; tools/mkcertstore.py refuses to emit anything larger than
- * this, so the two numbers cannot drift apart silently.
+ * Largest root DER read out of the store.  The Mozilla set's biggest is 2007
+ * bytes.  tools/mkcertstore.py refuses to emit anything larger than this, so
+ * the two numbers cannot drift apart silently.
  */
 #define TLS_ROOT_DER_MAX            2560
 
@@ -70,8 +70,8 @@
 #define TLS_DEFAULT_TIMEOUT_MS      120000UL
 
 /* One TLSWrite() turns into records of at most this many plaintext bytes.
-   The protocol allows 16 KB; a 1 MB machine allocating 16 KB of packets for
-   an HTTP GET does not want it. */
+   The protocol allows 16 KB.  A 1 MB machine does not want 16 KB of packets
+   allocated for an HTTP GET. */
 #define TLS_WRITE_CHUNK             2048
 
 #define TLS_STORE_PATH_MAX          160
@@ -83,8 +83,8 @@
 /*
  * A resumed TLS 1.2 handshake performs no public-key arithmetic, which on this
  * machine is the difference between 6.8 s / 23.3 s and a fraction of a second.
- * See src/tlslib/tls_resume.c for the mechanism and the evidence behind
- * choosing RFC 5077 tickets over session IDs.
+ * See src/tlslib/tls_resume.c for the mechanism and the evidence for RFC 5077
+ * tickets over session IDs.
  */
 
 #define TLS_MASTER_SECRET_SIZE      48
@@ -93,15 +93,15 @@
 #define TLS_RESUME_SLOTS            8
 
 /*
- * Largest session ticket we will keep.  Measured on the hosts this was
- * developed against: Cloudflare and nginx both issue 192 bytes, Google 240.
+ * Largest session ticket kept.  Measured on the hosts this was developed
+ * against: Cloudflare and nginx both issue 192 bytes, Google 240.
  *
  * The ceiling comes from the ClientHello budget below.  A ClientHello from
  * this library runs to about 135 bytes plus the host name, so 256 bytes of
  * ticket plus 32 of session ID leaves roughly seventy bytes of slack against
- * the 500-byte cache even for a sixty-character host name.  A ticket that does
- * not fit is not offered, which silently costs a full handshake and nothing
- * worse, so the cap is set where nothing measured comes close to it.
+ * the 500-byte cache, even for a sixty-character host name.  A ticket that
+ * does not fit is not offered, which silently costs a full handshake and
+ * nothing worse.  The cap is set where nothing measured comes close to it.
  */
 #define TLS_RESUME_TICKET_MAX       256
 
@@ -110,7 +110,7 @@
  * and _nx_secure_tls_send_handshake_record() memcpy()s the whole ClientHello
  * into it with no bounds check.  Everything this library appends to a
  * ClientHello is therefore checked against this and dropped rather than
- * written; otherwise it is a silent overwrite of the session struct on a
+ * written.  Otherwise it is a silent overwrite of the session struct, on a
  * machine with no memory protection.
  */
 #define TLS_CLIENTHELLO_CACHE_MAX   500
@@ -141,15 +141,15 @@ typedef struct TLSResumeEntry
  * In re_Flags, and folded into re_TrustKey along with everything else that
  * decides what a connection is worth.
  *
- * TLSRE_VERIFIED: a session established without chain and host-name
- * verification must never be resumed by a connection that asked for
- * verification, that would let a program which used TLSA_NoVerify to reach a
- * printer poison the cache for every program after it.
+ * TLSRE_VERIFIED: a session established without a chain and host-name check
+ * must never be resumed by a connection that asked for that check.  Otherwise
+ * a program that used TLSA_NoVerify to reach a printer poisons the cache for
+ * every program after it.
  *
  * TLSRE_DATED: whether the certificate validity dates were checked.  On a
- * machine with no clock they are skipped (tls_time.c), and a session
- * established that way must not be resumed once the clock has been set, or
- * setting the clock silently fails to start checking expiry.
+ * machine with no clock they are skipped (tls_time.c).  A session established
+ * that way must not be resumed after the clock is set, or the new clock
+ * silently fails to start the expiry check.
  */
 #define TLSRE_VERIFIED      (1U << 0)
 #define TLSRE_DATED         (1U << 1)
@@ -178,17 +178,18 @@ typedef struct TLSStoreEntry
  * The index lives in the connection, not in the library base, and is read
  * fresh at every TLSOpen().
  *
- * Caching it in the base fails twice over.  It needs reload detection, because
- * replacing the file is the whole update story and a resident library would
- * otherwise keep serving the old roots.  And it puts a pointer that one task
- * can free, a second TLSOpen() with a different TLSA_TrustStore, or after
- * the file changed, under a pointer another task is reading from inside a
+ * A cache in the base fails twice over.  It needs reload detection, because
+ * replacing the file is the whole update mechanism, and a resident library
+ * otherwise keeps serving the old roots.  It also puts a pointer that one
+ * task can free, on a second TLSOpen() with a different TLSA_TrustStore or
+ * after the file changed, under a pointer another task reads from inside a
  * handshake, on a machine with no memory protection.
  *
  * A per-connection index costs 1,428 bytes for the Mozilla set, against the
- * ~40 KB the connection already needs, and one 1.4 KB read against a handshake
- * that spends seconds on arithmetic.  In exchange the reload question does not
- * exist (every connection reads the current file) and neither does the sharing.
+ * ~40 KB the connection already needs, and one 1.4 KB read against a
+ * handshake that spends seconds on arithmetic.  In exchange the reload
+ * question does not exist, because every connection reads the current file,
+ * and neither does the sharing.
  */
 typedef struct TLSStore
 {
@@ -200,11 +201,11 @@ typedef struct TLSStore
      * A fingerprint of which roots this store holds, FNV-1a over the count
      * and every index record.  Computed once when the index is read, the only
      * moment the whole of it is in memory, so it costs one pass over 1,428
-     * bytes that were just read off the disk.
+     * bytes just read off the disk.
      *
-     * A resumed handshake verifies nothing, so the cached session has to be
-     * keyed by the trust decision that established it and not merely by the
-     * fact that one happened.  See tls_resume.c.
+     * A resumed handshake checks nothing, so the cached session must be keyed
+     * by the trust decision that established it, and not merely by the fact
+     * that one happened.  See tls_resume.c.
      */
     ULONG           ts_Fingerprint;
 } TLSStore;
@@ -219,11 +220,11 @@ struct TLSLibBase
 
     /*
      * Five longwords that let tools/profiler find this library's seglist, so
-     * a profile of a program using tls.library names functions inside it
-     * rather than showing the whole library as one bar.  Exec publishes
-     * struct Library and nothing after it, so the seglist sits at an offset
-     * only this source knows; the profiler scans the base's positive half for
-     * the magic and checks tb_ProfLibBase against where it found the record.
+     * a profile of a program that uses tls.library names the functions inside
+     * it.  Without them the whole library is one bar.  Exec publishes struct
+     * Library and nothing after it, so the seglist sits at an offset only this
+     * source knows.  The profiler scans the base's positive half for the
+     * magic, and checks tb_ProfLibBase against where it found the record.
      * See tools/profiler/prof.h, "HOW A LIBRARY LETS ITS SEGLIST BE FOUND".
      */
     ULONG                   tb_ProfMagic;
@@ -242,10 +243,10 @@ struct TLSLibBase
     BOOL                    tb_CryptoReady;   /* ami_tls_crypto_initialize() */
 
     /*
-     * The resumption cache lives here rather than in a connection: a curl
+     * The resumption cache lives here rather than in a connection.  A curl
      * invocation is a process, and the second invocation is a different
-     * process, so a cache with a connection's lifetime would resume nothing.
-     * A shared library base outlives every program that opens it, so this is
+     * process, so a cache with a connection's lifetime resumes nothing.  A
+     * shared library base outlives every program that opens it, so this is
      * the state that makes a second fetch fast.  Allocated on first use, so a
      * machine that never completes a handshake never pays for it.
      */
@@ -253,9 +254,9 @@ struct TLSLibBase
     ULONG                   tb_SessionSerial;
 
     /*
-     * Which file the resident cache came from, so a connection asking for a
+     * Which file the resident cache came from, so a connection that asks for a
      * different TLSA_SessionFile gets that file's sessions instead of the
-     * previous one's.  Without this the tag would be honoured on the write and
+     * previous one's.  Without this the tag is honoured on the write and
      * ignored on the read.  Empty with tb_SessionsLoaded set means RAM only,
      * nothing to reload.
      */
@@ -320,13 +321,13 @@ struct TLSConnection
     UWORD                       tc_Port;
 
     /* What went into the ClientHello, kept so the ServerHello's echo can be
-       compared against it, that echo is the acceptance signal. */
+       compared against it.  That echo is the acceptance signal. */
     UBYTE                       tc_OfferSid[TLS_RESUME_SID_MAX];
     UBYTE                       tc_OfferSidLength;
 
     /* The cached master secret, restored into the session when the server
        accepts.  A copy rather than a pointer into the cache: the cache is
-       shared, this connection may run for seconds, and there is no memory
+       shared, this connection can run for seconds, and there is no memory
        protection to catch a use-after-free. */
     UBYTE                       tc_Master[TLS_MASTER_SECRET_SIZE];
 
@@ -350,7 +351,7 @@ typedef struct TLSConnection TLSConnection;
 
 /*
  * The stack, borrowed from bsdsocket.library.  tls_netx_bind() is called once
- * per library open with the caller's SocketBase; it is idempotent, and after
+ * per library open with the caller's SocketBase.  It is idempotent, and after
  * the first success tls_netx_ctx() is non-NULL for the life of the library.
  */
 LONG                     tls_netx_bind(APTR socket_base);
@@ -374,13 +375,13 @@ ULONG tls_store_count(const TLSStore *store);
 
 /*
  * Put the connection in the session->connection registry.  Every connection
- * needs this, verified or not: it is how the vendored-override layer in
+ * needs this, checked or not.  It is how the vendored-override layer in
  * tls_resume.c gets back from an NX_SECURE_TLS_SESSION to the connection.
  */
 VOID  tls_registry_add(TLSConnection *conn);
 
-/* Install the lazy-loading verifier on a session.  Must be called after
-   _nx_secure_tls_session_create() and after tls_registry_add();
+/* Install the lazy-loading certificate check on a session.  Must be called
+   after _nx_secure_tls_session_create() and after tls_registry_add().  Call
    tls_store_detach() before the session is deleted. */
 VOID  tls_store_attach(TLSConnection *conn);
 VOID  tls_store_detach(TLSConnection *conn);
@@ -428,7 +429,7 @@ extern struct DosLibrary *DOSBase;
 
 /*
  * Serial-port tracing, compiled in only by -DTLS_RESUME_TRACE.  It lives in
- * tls_resume.c, where most of it is used; a shipping build neither calls nor
+ * tls_resume.c, where most of it is used.  A shipping build neither calls nor
  * contains it.
  */
 #ifdef TLS_RESUME_TRACE

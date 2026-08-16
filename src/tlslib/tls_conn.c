@@ -1,5 +1,5 @@
 /*
- * tls.library, the eight calls a program actually makes.
+ * tls.library, the calls a program makes.
  *
  * The interface, the reasoning about WaitSelect() and the example program are
  * all in include/aminetxduo/tlslib.h.  Here are the implementation and the
@@ -11,13 +11,13 @@
  *                          rather than guessed, measured at 16,272 bytes for
  *                          the ECC ciphersuite table (docs/RESEARCH.md 9)
  *     record buffer        TLSA_RecordBuffer, default 10 KB.  A certificate
- *                          flight arrives as one record and has to fit
+ *                          flight arrives as one record and must fit
  *     remote certificates  TLSA_MaxChain x (NX_SECURE_X509_CERT + 2.5 KB DER)
  *     roots                TLS_MAX_ROOTS x (NX_SECURE_X509_CERT + 2.5 KB DER)
  *
  *   About 40 KB for the defaults, freed at TLSClose() and not held while no
- *   connection is open, the reason this is a separate library and not a
- *   corner of bsdsocket.library.
+ *   connection is open, the reason this is a separate library and not part
+ *   of bsdsocket.library.
  *
  *   NetX Duo rejects a caller that is not a ThreadX thread, so every entry
  *   point that reaches the stack brackets itself with the enter/leave the
@@ -37,9 +37,9 @@
 #include <proto/exec.h>
 
 /*
- * TEMPORARY, for the TLS 1.3 client bring-up.  tls.library links no ami_log on
+ * Temporary, for the TLS 1.3 client bring-up.  tls.library links no ami_log on
  * purpose, so this goes straight out the serial port.  Remove with the
- * investigation; it is compiled out unless TLS13_PROBE_ON is defined.
+ * investigation.  It is compiled out unless TLS13_PROBE_ON is defined.
  */
 #ifdef TLS13_PROBE_ON
 #  include <inline/macros.h>
@@ -92,7 +92,7 @@ VOID tls13_probe(const char *tag, ULONG v)
 #  define TLS13_PROBE(tag, v)  do { } while (0)
 #endif
 
-/* fd_set, open-coded.  <sys/socket.h> would do, and would also drag
+/* fd_set, open-coded.  <sys/socket.h> serves, and also brings
    devices/timer.h and the whole netinclude set into a library that needs eight
    lines of it.  The layout is the one src/bsdsocket/select.c implements. */
 #define TLS_FD_BITS         32
@@ -101,8 +101,8 @@ VOID tls13_probe(const char *tag, ULONG v)
 #define TLS_FD_MAX          256
 
 /* TLS_INFO_SIZE_V1 is what keeps callers compiled against the header before
-   resumption existed working.  If a field is ever inserted above ti_Resumed
-   this stops the build rather than silently writing the new fields into an old
+   resumption existed working.  If a field is ever inserted above ti_Resumed,
+   this stops the build.  Without it the new fields go silently into an old
    caller's stack. */
 _Static_assert(__builtin_offsetof(struct TLSInfo, ti_Resumed) == TLS_INFO_SIZE_V1,
                "TLS_INFO_SIZE_V1 must be the offset of the first added field");
@@ -111,8 +111,7 @@ _Static_assert(__builtin_offsetof(struct TLSInfo, ti_Resumed) == TLS_INFO_SIZE_V
 
 /*
  * A TagItem walk, rather than utility.library's GetTagData().  Four tags are
- * the only thing this library would open utility.library for, and TAG_MORE is
- * eleven lines.
+ * the only reason to open utility.library here, and TAG_MORE is eleven lines.
  */
 static ULONG tls_tag_data(const struct TagItem *tags, Tag want, ULONG def)
 {
@@ -256,7 +255,7 @@ CONST_STRPTR tls_TLSErrorString(register LONG               code    __asm("d0"),
 /* ---------------------------------------------------- the name check ----- */
 
 /*
- * nx_secure verifies the chain; it does not check who the certificate is for
+ * nx_secure checks the chain.  It does not check who the certificate is for
  * unless the application asks.  Without this, any host with any valid
  * certificate can answer for any other, so the check is on by default and
  * TLSA_NoVerify is the only way past it.
@@ -320,7 +319,7 @@ static VOID tls_conn_free(TLSConnection *conn)
      * metadata block holds the expanded cipher and MAC keys, and the
      * connection itself carries nx_secure_tls_key_material, the master
      * secret and both directions' keys and IVs.  AllocVec() hands memory
-     * straight back out, and there is no MMU here to fault a read of it: the
+     * straight back out, and there is no MMU here to fault a read of it.  The
      * next task to ask for 40 KB gets the last connection's keys as its
      * uninitialised contents.
      */
@@ -470,7 +469,7 @@ struct TLSConnection *tls_TLSOpenA(
      * On by default: a caller that does nothing gets a resumed handshake
      * whenever the far end will give it one, which on this hardware is the
      * difference between seconds and tens of seconds.  TLSA_NoResume turns it
-     * off; TLSA_SessionFile with an empty string keeps the cache in the
+     * off.  TLSA_SessionFile with an empty string keeps the cache in the
      * library and off the disk.
      */
     if (tls_tag_data(tags, TLSA_NoResume, 0) == 0)
@@ -503,7 +502,7 @@ struct TLSConnection *tls_TLSOpenA(
     }
 
     /* The cache is keyed by host and port, so the same name on 443 and on
-       8443 are two sessions.  The port is the socket's, not the caller's,
+       8443 are two sessions.  The port is the socket's, not the caller's.
        TLSOpen() is never told one. */
     conn->tc_Port = (UWORD)conn->tc_Socket->nx_tcp_socket_connect_port;
 
@@ -563,9 +562,9 @@ struct TLSConnection *tls_TLSOpenA(
      * Two lists out of one call.  _nx_secure_tls_ecc_initialize() writes both
      * the session's TLS list and the process-wide X.509 list, so it is called
      * with the complete set for the sake of certificate chains, and the
-     * session's own list is then narrowed to what the ClientHello should
-     * offer.  Offering P-384 and P-521 costs a key generation each before the
-     * ClientHello is sent and buys nothing: P-256 is what these servers pick.
+     * session's own list is then narrowed to what the ClientHello offers.  An
+     * offer of P-384 and P-521 costs a key generation each before the
+     * ClientHello is sent and buys nothing.  P-256 is what these servers pick.
      */
     (VOID)_nx_secure_tls_ecc_initialize(&conn->tc_Session,
                                          ami_crypto_ecc_supported_groups,
@@ -608,7 +607,7 @@ struct TLSConnection *tls_TLSOpenA(
     conn->tc_UnixTime      = tls_time_now();
 
     /*
-     * Every connection goes in the registry, verified or not: the
+     * Every connection goes in the registry, checked or not.  The
      * session-resumption overrides in tls_resume.c get from an
      * NX_SECURE_TLS_SESSION back to this structure through it, and resumption
      * does not care whether the chain is being checked.
@@ -626,7 +625,7 @@ struct TLSConnection *tls_TLSOpenA(
     else
     {
         /*
-         * No trust store, and nothing to verify against: nx_secure would fail
+         * No trust store, and nothing to check against.  nx_secure fails
          * the chain outright, so the check is replaced rather than left to
          * fail.  It cannot be set to NX_NULL, nx_secure_tls_remote_
          * certificate_verify.c calls the pointer unconditionally.  This is
@@ -638,11 +637,11 @@ struct TLSConnection *tls_TLSOpenA(
     /* ---- the handshake -------------------------------------------------- */
 
     /*
-     * Look for a cached session before the bracket: this reads a file, and a
-     * disk access inside the ThreadX bracket would hold the baton away from
-     * the IP thread.  The trust store's fetch has to do it the hard way
-     * because the issuer is not known until the server has spoken; this one is
-     * known from the host name.
+     * Look for a cached session before the bracket.  This reads a file, and a
+     * disk access inside the ThreadX bracket holds the baton away from the IP
+     * thread.  The trust store's fetch must read inside the bracket, because
+     * the issuer is not known until the server has spoken.  This one is known
+     * from the host name.
      */
     tls_resume_prepare(conn);
 
@@ -669,11 +668,10 @@ struct TLSConnection *tls_TLSOpenA(
     if (status != NX_SUCCESS)
     {
         /*
-         * A handshake that offered a cached session and then failed has to
-         * drop that session, or the machine retries the same broken
-         * resumption forever.  Being wrong here costs one full handshake;
-         * skipping it costs a host that never works again until the entry ages
-         * out.
+         * A handshake that offered a cached session and then failed must drop
+         * that session, or the machine retries the same broken resumption
+         * forever.  A wrong answer here costs one full handshake.  An omission
+         * costs a host that never works again until the entry ages out.
          */
         if ((conn->tc_ResumeFlags & TLSR_OFFERED) != 0)
             tls_resume_evict(conn);
@@ -744,7 +742,7 @@ VOID tls_TLSClose(register struct TLSConnection *conn    __asm("a0"),
     /*
      * The delete sits outside the bracket test.  A session that was created is
      * on nx_secure's process-wide created list, and the memory it occupies is
-     * about to be freed, so leaving it linked would put a dangling pointer in
+     * about to be freed, so a session left linked puts a dangling pointer in
      * a global on a machine with no memory protection, worse than a delete
      * that fails.  The bracket can only fail when the ThreadX kernel is
      * already down, where there is nothing left for the delete to disturb.
@@ -753,8 +751,8 @@ VOID tls_TLSClose(register struct TLSConnection *conn    __asm("a0"),
 
     /*
      * The descriptor is not closed.  It was the caller's before TLSOpen() and
-     * is the caller's again, which is what allows speaking plain HTTP to a
-     * proxy and then upgrading.
+     * is the caller's again, which is what allows plain HTTP to a proxy and
+     * then an upgrade.
      */
     tls_conn_free(conn);
 }
@@ -806,13 +804,13 @@ LONG tls_TLSRead(register struct TLSConnection *conn    __asm("a0"),
         if (status == NX_SECURE_TLS_ALERT_RECEIVED)
         {
             /*
-             * Every alert arrives as this one status; the alert itself is left
-             * on the session.  A close_notify is a warning and means the peer
-             * finished, so it is end of stream.  Anything fatal means the peer
-             * tore the connection down mid-transfer, a decrypt_error, a
-             * bad_record_mac, an internal_error, and reporting that as end
-             * of stream hands the caller a truncated file it has no way to
-             * tell from a complete one.
+             * Every alert arrives as this one status.  The alert itself is
+             * left on the session.  A close_notify is a warning and means the
+             * peer finished, so it is end of stream.  Anything fatal means the
+             * peer tore the connection down mid-transfer, a decrypt_error, a
+             * bad_record_mac, an internal_error.  A report of that as end of
+             * stream hands the caller a truncated file it cannot tell from a
+             * complete one.
              *
              * NX_SECURE_TLS_CLOSE_NOTIFY_RECEIVED is not tested for: only the
              * DTLS half of nx_secure ever returns it, and DTLS is not built.
@@ -835,10 +833,10 @@ LONG tls_TLSRead(register struct TLSConnection *conn    __asm("a0"),
         {
             /*
              * A bare FIN with no close_notify.  RFC 5246 7.2.1 calls that a
-             * truncation and says to treat it as an error, and this does not:
-             * plenty of servers still close the socket the moment they have
-             * finished writing, and turning those into failures would break
-             * downloads that work today.
+             * truncation and says to treat it as an error, and this does not.
+             * Many servers still close the socket the moment they finish
+             * writing, and a failure for those breaks downloads that work
+             * today.
              */
             conn->tc_Flags |= TLSF_EOF;
             return 0;
@@ -992,7 +990,7 @@ LONG tls_TLSInfo(register struct TLSConnection *conn    __asm("a0"),
     /*
      * ti_Size is a version.  A caller compiled against the header before
      * resumption existed passes the smaller size and gets every field it knows
-     * about; the resumption fields are written only when the caller's
+     * about.  The resumption fields are written only when the caller's
      * structure is big enough to hold them.  Anything smaller than the
      * original structure is not a TLSInfo.
      */
@@ -1037,11 +1035,11 @@ LONG tls_TLSInfo(register struct TLSConnection *conn    __asm("a0"),
  * A caller that treats an unreadable socket as "nothing to do" waits for data
  * it already has.
  *
- * Non-zero here means calling TLSRead() can make progress without the socket
- * producing another byte.  Kept out of TLSPending() because the two answers
- * mean different things: plaintext is ready to copy, buffered bytes may still
- * be half a record.  A caller polling non-blocking should test both and read
- * when either is set; the read can still block if what is buffered is an
+ * Non-zero here means a TLSRead() can make progress without another byte from
+ * the socket.  Kept out of TLSPending() because the two answers mean different
+ * things: plaintext is ready to copy, and buffered bytes can still be half a
+ * record.  A caller that polls without blocking must test both, and read when
+ * either is set.  The read can still block if what is buffered is an
  * incomplete record, which is the same bound TLSA_Timeout already covers.
  */
 LONG tls_TLSBuffered(register struct TLSConnection *conn    __asm("a0"),
@@ -1065,19 +1063,19 @@ LONG tls_TLSBuffered(register struct TLSConnection *conn    __asm("a0"),
 
 /*
  * The machine's entropy pool, which this library already borrows from
- * bsdsocket.library (see tls_netx.c) and which nothing outside could reach.
+ * bsdsocket.library (see tls_netx.c) and which nothing outside can reach.
  *
  * A ported client asks its TLS backend for random bytes, curl routes every
  * Curl_rand() through the backend when it is built with TLS, and otherwise
  * falls back to a time-seeded LCG in the client.  The pool behind this is a
- * SHA-256 hash DRBG; docs/RESEARCH.md 9 records how little entropy the seed
+ * SHA-256 hash DRBG.  docs/RESEARCH.md 9 records how little entropy the seed
  * carries on an unattended Amiga, and this call inherits that.  It is an
- * improvement on an LCG and it is the same generator the TLS session keys come
- * from, so a caller cannot end up with two different qualities of randomness
- * by accident.
+ * improvement on an LCG, and it is the same generator the TLS session keys
+ * come from, so a caller cannot get two different qualities of randomness by
+ * accident.
  *
- * Returns the number of bytes written, or -1.  Never partially fills: the
- * generator cannot fail.
+ * Returns the number of bytes written, or -1.  Never partially fills, because
+ * the generator cannot fail.
  */
 LONG tls_TLSRandom(register APTR               buffer  __asm("a0"),
                    register LONG               length  __asm("d0"),
@@ -1101,11 +1099,11 @@ LONG tls_TLSRandom(register APTR               buffer  __asm("a0"),
 
     /*
      * Bytes, not rand() draws.  nxc_random_rand() owes rand()'s caller a value
-     * in 0..0x7FFFFFFF and clears bit 31 to provide it, so packing all four
-     * bytes of one draw left bit 7 clear in every fourth byte, 31 bits per
-     * 32, at a fixed position the caller cannot see and would not think to
-     * look for.  nxc_random_bytes() is the same generator without the
-     * obligation, and one call covers the whole buffer.
+     * in 0..0x7FFFFFFF and clears bit 31 to provide it.  All four bytes of one
+     * draw packed together therefore left bit 7 clear in every fourth byte, 31
+     * bits per 32, at a fixed position the caller cannot see and does not look
+     * for.  nxc_random_bytes() is the same generator without the obligation,
+     * and one call covers the whole buffer.
      */
     ctx->nxc_random_bytes(buffer, (ULONG)length);
 
@@ -1162,9 +1160,9 @@ LONG tls_TLSWaitSelect(register struct TLSSelect   *sel     __asm("a0"),
             /*
              * Report only the connections that already have plaintext, and do
              * not wait.  Descriptors that were also ready are dropped from the
-             * answer; every select() caller already tolerates that, and the
-             * next pass reports them.  The opposite mistake, claiming a TLS
-             * socket is not readable, is a hang, and is what this call
+             * answer.  Every select() caller already tolerates that, and the
+             * next pass reports them.  The opposite mistake, a claim that a
+             * TLS socket is not readable, is a hang, and is what this call
              * exists to remove.
              */
             for (i = 0; i < (ULONG)(TLS_FD_MAX / TLS_FD_BITS); i++)

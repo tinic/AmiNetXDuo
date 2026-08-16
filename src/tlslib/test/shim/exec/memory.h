@@ -1,6 +1,6 @@
 /*
  * <exec/memory.h> for the tls.library host tests.  src/tlslib/tls_runtime.c
- * asks AllocVec() for MEMF_PUBLIC | MEMF_CLEAR; the values are the real ones
+ * asks AllocVec() for MEMF_PUBLIC | MEMF_CLEAR.  The values are the real ones,
  * so the argument the test sees is the argument the Amiga sees.
  *
  * SPDX-License-Identifier: MIT
