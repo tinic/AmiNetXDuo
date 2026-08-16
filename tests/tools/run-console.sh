@@ -348,6 +348,20 @@ EOF
         # cybergraphics.library, so both of the console's readback families
         # are on the machine.
         cp -R "$P96DIR/Libs/." "$HD/Libs/"
+        #
+        # AND THE ARCHIVE'S uaegfx.card IS THE WRONG ONE, DELIBERATELY REMOVED.
+        #
+        # Picasso96 2.0 ships a uaegfx.card from January 1999 that reaches the
+        # emulator through the uaelib trap.  Amiberry answers that trap with
+        # "obsolete Picasso96 uaelib hook called, call ignored", sets
+        # uaegfx_old, and picasso96_alloc() then returns before building any
+        # resolution list at all.  The modern path is the emulator's own card,
+        # which uaegfx_card_install() puts in the UAE boot ROM at reset -- and
+        # a file of that name in LIBS:Picasso96/ shadows it.
+        #
+        # The symptom is one line from the monitor and nothing else:
+        # "Picasso96: Could not create graphics board context for 'uaegfx'".
+        rm -f "$HD/Libs/Picasso96/uaegfx.card"
         mkdir -p "$HD/Devs/Monitors"
         # THE MONITOR IS NAMED AFTER THE BOARD, and that is not cosmetic.
         # InstallPicasso96's P_InstallCard copies devs/monitors/Picasso96 with
