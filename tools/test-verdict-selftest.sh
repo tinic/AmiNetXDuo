@@ -26,6 +26,10 @@ printf 'the guest booted and said nothing useful\n'       > "$T/nosummary"
 printf '  FAIL nope\n40 checks, 3 failures, FAIL\n'       > "$T/failures"
 printf '4 checks, 0 failures, PASS\n'                     > "$T/short"
 printf '2 checks, 0 failures, SKIPPED (no network)\n'     > "$T/skipped"
+# Both facts in one transcript.  This is the ordering case: the SKIPPED grep
+# used to run before the failure count, so this reported SKIPPED and named
+# none of the three assertions that had gone off.
+printf '  FAIL nope\n9 checks, 3 failures, SKIPPED (no network)\n' > "$T/skipfail"
 
 n=0; bad=0
 case_() { # description expected-rc args...
@@ -52,6 +56,9 @@ case_ "fewer checks than the floor" 1 selftest 30 0 "$T/short"
 case_ "a good run that TIMED OUT" 1 selftest 30 124 "$T/good"
 case_ "a wrong-CPU guest (rc 4)"  1 selftest 30 4 "$T/does-not-exist"
 case_ "the guest SKIPPED itself" 77 selftest 1 0 "$T/skipped"
+case_ "SKIPPED *and* 3 failures"  1 selftest 1 0 "$T/skipfail"
+case_ "SKIPPED and a TIMEOUT"     1 selftest 1 124 "$T/skipped"
+case_ "SKIPPED under the floor"  77 selftest 40 0 "$T/skipped"
 
 echo
 echo "verdict-selftest: $n cases, $bad wrong"
