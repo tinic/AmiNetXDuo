@@ -12,11 +12,11 @@
  * second is GPL-2.0+.  This tree is MIT.  Same rule as lancereg.h, which was
  * written from the Am7990 data sheet for the same reason.
  *
- * THE SHAPE OF THE PART.  Sixteen bytes of I/O space.  The last word of it,
- * offset 0x0e, is the Command register when written and the Status register
- * when read, in every window; the other fourteen bytes are overlaid by one of
- * eight register windows.  There is NO window register: the window is chosen
- * by a Command opcode and read back in the top three bits of Status.
+ * The part is sixteen bytes of I/O space.  The last word of it, offset 0x0e,
+ * is the Command register when written and the Status register when read, in
+ * every window.  The other fourteen bytes are overlaid by one of eight
+ * register windows.  There is no window register: the window is chosen by a
+ * Command opcode and read back in the top three bits of Status.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -29,7 +29,7 @@
 #define EL3_STATUS          0x0e
 
 /* Sixteen bytes, and the card decodes I/O modulo 16 once its Address Config
-   I/O base field is zero -- which is what epinit() has to do on PCMCIA. */
+   I/O base field is zero, which is what epinit() must do on PCMCIA. */
 #define EL3_IOSIZE          16
 
 /* ------------------------------------------------------------ commands --- */
@@ -72,12 +72,12 @@
  * The low byte of Status is the interrupt cause set, and the argument to
  * Acknowledge Interrupt and Set Interrupt Mask has the same bit assignments.
  *
- * WHAT AN ACKNOWLEDGE ACTUALLY CLEARS is not uniform and the manual is
- * explicit about it: TX_COMPLETE clears only when the transmit status stack
- * is popped, RX_COMPLETE only when the packet is read out and discarded, and
- * ADAPTER_FAIL only when the FIFO diagnostic bit behind it is cleared.
- * Acknowledging those three does nothing at all.  INT_LATCH is the interrupt
- * itself and is acknowledged last, after every cause has been dealt with.
+ * What an acknowledge clears is not uniform, and the manual is explicit about
+ * it.  TX_COMPLETE clears only when the transmit status stack is popped,
+ * RX_COMPLETE only when the packet is read out and discarded, and
+ * ADAPTER_FAIL only when the FIFO diagnostic bit behind it is cleared.  An
+ * acknowledge of those three does nothing.  INT_LATCH is the interrupt itself
+ * and is acknowledged last, after every cause has been dealt with.
  */
 #define EL3_S_INT_LATCH         0x0001
 #define EL3_S_ADAPTER_FAIL      0x0002
@@ -100,14 +100,14 @@
 /* ------------------------------------------------------- receive filter -- */
 
 /*
- * FOUR BITS, AND THERE IS NO FIFTH.  The part has no multicast hash filter of
- * any kind -- the manual says so in as many words -- so "group" is every
- * multicast address or none.  Reproducing the DP8390's per-group filter means
- * accepting them all here and testing each frame's destination against
- * nic->mar[] in software, which is what el3.c does.
+ * Four bits, and there is no fifth.  The manual states that the part has no
+ * multicast hash filter of any kind, so "group" is every multicast address or
+ * none.  The DP8390's per-group filter is reproduced by accepting them all
+ * here and testing each frame's destination against nic->mar[] in software,
+ * which is what el3.c does.
  *
- * Enabling group implies broadcast on this part; broadcast is set anyway
- * rather than relying on that.
+ * Group implies broadcast on this part.  Broadcast is set anyway rather than
+ * relying on that.
  */
 #define EL3_FIL_INDIVIDUAL      0x01
 #define EL3_FIL_GROUP           0x02
@@ -147,10 +147,10 @@
  * Address configuration.  Bits 15..14 select the transceiver, 13..12 the boot
  * ROM size, 11..8 its base, and 4..0 the I/O base.
  *
- * ON PCMCIA THE ROM AND I/O BASE FIELDS MUST ALL BE ZERO.  The manual is
- * unambiguous: a non-zero I/O base and the card does not answer I/O at all.
- * With it zero the card decodes on the bottom four address lines only, which
- * is why 0x300 works and so would any other sixteen-byte block Gayle maps.
+ * On PCMCIA the ROM and I/O base fields must all be zero.  The manual is
+ * unambiguous: with a non-zero I/O base the card does not answer I/O.  With it
+ * zero the card decodes on the bottom four address lines only, which is why
+ * 0x300 works, as would any other sixteen-byte block Gayle maps.
  */
 #define EL3_AC_XCVR_MASK        0xc000
 #define EL3_AC_XCVR_SHIFT       14
@@ -163,10 +163,10 @@
  * Resource configuration.  Bits 15..12 are the interrupt number and 11..8 are
  * reserved and must read back as all ones.
  *
- * 0x3f00 IS NOT A CONSTANT THE MANUAL PRINTS.  It is what its two statements
- * about this register on a PCMCIA card come to: the interrupt field must be
- * 3, which is 0x3000, and the reserved field must be 0xf, which is 0x0f00.
- * The card's interrupt reaches the Amiga through Gayle regardless of the
+ * 0x3f00 is not a constant the manual prints.  It follows from the manual's
+ * two statements about this register on a PCMCIA card: the interrupt field
+ * must be 3, which is 0x3000, and the reserved field must be 0xf, which is
+ * 0x0f00.  The card's interrupt reaches the Amiga through Gayle whatever the
  * number, so the 3 is a value the part demands rather than one that means
  * anything here.
  */
@@ -175,7 +175,7 @@
 #define EL3_RC_PCMCIA           ((3u << EL3_RC_IRQ_SHIFT) | EL3_RC_RESERVED)
 
 /*
- * The EEPROM, which on this part is NOT bit-banged: one word write says read
+ * The EEPROM, which on this part is not bit-banged: one word write says read
  * word N, and the answer appears in the data register when the busy bit
  * clears.  A read is quoted at 162 us.
  */
@@ -200,7 +200,7 @@
 #define EL3_W1_FIFO             0x00
 #define EL3_W1_RX_STATUS        0x08
 #define EL3_W1_TIMER            0x0a    /* byte, read-only                   */
-#define EL3_W1_TX_STATUS        0x0b    /* byte; write ANY value to pop      */
+#define EL3_W1_TX_STATUS        0x0b    /* byte, write any value to pop      */
 #define EL3_W1_TX_FREE          0x0c
 
 /*
@@ -222,12 +222,12 @@
 #define EL3_RXE_OVERSIZE        1
 
 /*
- * Transmit status, a byte at an ODD offset, and the one register in this file
+ * Transmit status, a byte at an odd offset, and the one register in this file
  * that is not a word.
  *
- * It is a 31-deep stack: read the byte, write it back to pop, and repeat
- * until the read is zero.  Any error bit disables the transmitter, so TX
- * Enable has to follow; jabber and underrun need a TX Reset before that.
+ * It is a 31-deep stack: read the byte, write it back to pop, and repeat until
+ * the read is zero.  Any error bit disables the transmitter, so TX Enable must
+ * follow.  Jabber and underrun need a TX Reset before that.
  */
 #define EL3_TXS_COMPLETE        0x80
 #define EL3_TXS_INT_REQ         0x40
@@ -249,7 +249,7 @@
 #define EL3_W4_NET_DIAG         0x06
 #define EL3_W4_MEDIA            0x0a
 
-/* Media type and status.  The three enables are what a driver writes; the
+/* Media type and status.  The three enables are what a driver writes, and the
    rest is what the transceiver reports. */
 #define EL3_MEDIA_TP_ENABLED    0x8000
 #define EL3_MEDIA_COAX_ENABLED  0x4000
@@ -270,20 +270,20 @@
 /*
  * A transmit is two preamble words and then the body.
  *
- * Word one is the length in bytes in its low eleven bits; word two is a
- * don't-care that the manual asks be written as zero.  The body is then
- * padded to a four-byte boundary -- the pad bytes are in the FIFO but are not
- * in the length.  Frames under the Ethernet minimum are padded by the card
- * and must NOT be padded here.
+ * Word one is the length in bytes in its low eleven bits.  Word two is a
+ * don't-care that the manual asks be written as zero.  The body is then padded
+ * to a four-byte boundary, and the pad bytes are in the FIFO but not in the
+ * length.  Frames under the Ethernet minimum are padded by the card and must
+ * not be padded here.
  */
 #define EL3_TX_LEN_MASK         0x07ff
 #define EL3_TX_INT_ON_DONE      0x8000
 
 /*
  * Every command that does not finish inside its own I/O cycle, and the global
- * reset, which is worse than that: on the 3C589 the busy bit is not even
- * visible while a global reset runs and the only thing to do is wait out the
- * millisecond the manual asks for.
+ * reset, which is worse.  On the 3C589 the busy bit is not visible while a
+ * global reset runs, so the only option is to wait out the millisecond the
+ * manual asks for.
  */
 #define EL3_RESET_US            1000
 

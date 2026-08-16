@@ -1,7 +1,7 @@
 /*
  * anxnet.device: the Am7990/Am79C960 LANCE, for the A2065 and the Ariadne.
  *
- * This is a second CHIP CORE beside dp8390.c, not a variant of it.  The two
+ * This is a second chip core beside dp8390.c, not a variant of it.  The two
  * families share the SANA-II shell above them and nothing else:
  *
  *                          DP8390 family              LANCE
@@ -12,15 +12,15 @@
  *   bring-up               a register sequence        an initialisation block
  *   interrupt              read ISR, write it back    read CSR0, write 1s back
  *
- * WHAT THE BOARD LOOKS LIKE.  Both cards put the chip's two registers and a
- * 32 KB SRAM in the Zorro window.  The LANCE DMAs into that SRAM and the CPU
- * sees the same bytes, so the rings, the buffers and the init block all live
- * there and every address the chip is given is an offset within it.
+ * Both cards put the chip's two registers and a 32 KB SRAM in the Zorro
+ * window.  The LANCE DMAs into that SRAM and the CPU sees the same bytes, so
+ * the rings, the buffers and the init block all live there, and every address
+ * the chip is given is an offset within it.
  *
- * THE ARIADNE SWAPS THE BYTE LANES.  Its SRAM port is wired crossed, so a word
+ * The Ariadne swaps the byte lanes.  Its SRAM port is wired crossed, so a word
  * the CPU writes is a word with its halves exchanged from the chip's side.
- * Frame data is unaffected -- the crossing cancels between the write and the
- * read -- but every descriptor and init-block word has to be pre-swapped.
+ * Frame data is unaffected, because the crossing cancels between the write and
+ * the read, but every descriptor and init-block word must be pre-swapped.
  * card->lance_swap says so, and it is the only difference between the two
  * boards apart from where the registers are.
  *
@@ -67,21 +67,20 @@ static volatile UBYTE *le_ram(NetdevNic *nic)
 }
 
 /*
- * The board's crossing applies to EVERY 16-bit access through the window, not
- * only to the SRAM: on the Ariadne a word written to a chip register arrives
- * with its halves exchanged exactly as a descriptor word does.  Missing that
- * is why the first version read a command register full of nonsense and
- * refused the card.
+ * The board's crossing applies to every 16-bit access through the window, not
+ * only to the SRAM.  On the Ariadne a word written to a chip register arrives
+ * with its halves exchanged, as a descriptor word does.  The first version
+ * missed that, read a command register full of nonsense, and refused the card.
  *
- * Frame data needs no swap at any width -- the crossing cancels between the
- * CPU's access and the chip's, whichever way round it is.
+ * Frame data needs no swap at any width, because the crossing cancels between
+ * the CPU's access and the chip's, whichever way round it is.
  */
 static UWORD le_swap(NetdevNic *nic, UWORD v)
 {
     return nic->card->lance_swap ? (UWORD)((v >> 8) | (v << 8)) : v;
 }
 
-/* A descriptor or init-block word, in the order the CHIP reads it. */
+/* A descriptor or init-block word, in the order the chip reads it. */
 static VOID le_put16(NetdevNic *nic, ULONG off, UWORD v)
 {
     volatile UWORD *p = (volatile UWORD *)(volatile void *)(le_ram(nic) + off);
@@ -139,9 +138,9 @@ VOID lance_halt(NetdevNic *nic)
 }
 
 /*
- * STOP and re-INIT, which is the only recovery this chip has: the rings live
- * in the board's SRAM and lance_init() is what rebuilds them and zeroes
- * txb_inuse.  No poll loop -- lance_init() already bounds its own IDON wait.
+ * STOP and re-INIT, which is the only recovery this chip has.  The rings live
+ * in the board's SRAM, and lance_init() rebuilds them and zeroes txb_inuse.
+ * No poll loop here, because lance_init() bounds its own IDON wait.
  */
 VOID lance_reset(NetdevNic *nic)
 {
@@ -153,9 +152,9 @@ VOID lance_reset(NetdevNic *nic)
 /* -------------------------------------------------------------- filter --- */
 
 /*
- * The logical address filter lives in the init block, so a multicast change
- * is a re-initialisation.  That is the chip's design and not a shortcut: there
- * is no register holding the filter while the chip runs.
+ * The logical address filter lives in the init block, so a multicast change is
+ * a re-initialisation.  That is the chip's design: no register holds the
+ * filter while the chip runs.
  */
 static VOID le_write_init(NetdevNic *nic)
 {
@@ -252,7 +251,7 @@ LONG lance_init(NetdevNic *nic)
 
     /*
      * IDON says the chip has read the init block.  It is a DMA of 24 bytes
-     * from RAM the CPU just wrote, so the wait is short; the bound exists
+     * from RAM the CPU just wrote, so the wait is short.  The bound exists
      * because a card that never answers must not hang the machine.
      */
     do
@@ -298,10 +297,10 @@ static VOID le_rint(NetdevNic *nic)
         else
         {
             /*
-             * The buffer is in shared RAM the CPU can address, so the frame
-             * is handed up where it lies and the opener's CopyToBuff reads it
-             * once -- the same one-pass path the mapped-buffer DP8390 cards
-             * take, and here it needs no wrap case at all because a LANCE
+             * The buffer is in shared RAM the CPU can address, so the frame is
+             * handed up where it lies and the opener's CopyToBuff reads it
+             * once.  That is the same one-pass path the mapped-buffer DP8390
+             * cards take, and here it needs no wrap case, because a LANCE
              * buffer holds one whole frame.
              */
             const UBYTE *fp = (const UBYTE *)(le_ram(nic) +
@@ -370,10 +369,10 @@ LONG lance_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
     buf = le_ram(nic) + LE_TXB_OFF + (ULONG)nic->tx_next * LE_BUFSZ;
 
     /*
-     * Frame bytes are NOT swapped: the board's crossed lanes cancel between
-     * the CPU write and the chip's read.  Only descriptors need it.
+     * Frame bytes are not swapped, because the board's crossed lanes cancel
+     * between the CPU write and the chip's read.  Only descriptors need it.
      *
-     * Longwords, not the byte loop this started as -- that cost 25% of the
+     * Longwords, not the byte loop this started as, which cost 25% of the
      * write figure against a2065.device.  Both ends are longword-aligned:
      * nu_TxBuf is ULONG[] and the buffers sit at 0x100 + n * 1536.
      */
@@ -434,7 +433,7 @@ BOOL lance_intr(NetdevNic *nic)
 
         if ((csr0 & LE_C0_MERR) != 0)
         {
-            /* A memory error means the chip lost the bus; nothing short of
+            /* A memory error means the chip lost the bus.  Nothing short of
                a restart puts the rings back in a known state. */
             nic->rx_errors++;
             lance_reset(nic);
@@ -472,11 +471,11 @@ LONG lance_attach(NetdevNic *nic)
     }
 
     /*
-     * THE STATION ADDRESS IS IN THE AUTOCONFIG SERIAL NUMBER, not in the
-     * board window: there is no address PROM on either card, and a read below
-     * the SRAM returns zero.  Commodore put the low four bytes in the serial
-     * field and left the OUI to the driver, which is why the card row carries
-     * it -- 00:80:10 for the A2065, 00:60:30 for the Ariadne.
+     * The station address is in the autoconfig serial number, not in the board
+     * window.  There is no address PROM on either card, and a read below the
+     * SRAM returns zero.  Commodore put the low four bytes in the serial field
+     * and left the OUI to the driver, which is why the card row carries it:
+     * 00:80:10 for the A2065, 00:60:30 for the Ariadne.
      */
     nic->mac_source = (UBYTE)ANXDIAG_MAC_SERIAL;
 
