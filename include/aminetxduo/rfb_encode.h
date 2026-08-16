@@ -11,6 +11,24 @@
  * encoded, padding included, so a decoded frame is byte-identical to the one
  * that went in.
  *
+ * OR ONE CHUNKY PLANE, which is what an RTG screen is.  rfb_geom.format
+ * selects between them and it is the only field that changes what the source
+ * looks like:
+ *
+ *   RFB_FMT_PLANAR  depth planes of one bit, the Amiga BitMap above.
+ *   RFB_FMT_CLUT8   ONE plane of eight bits: a palette index a byte, rows
+ *                   bytes_per_row apart.  depth stays 8 because it is what
+ *                   sizes the palette, but the encoder walks one plane and
+ *                   not eight.
+ *
+ * Everything else is deliberately shared.  A tile is a rectangle of BYTES
+ * either way, the tile grid is over bytes_per_row either way, PackBits is a
+ * byte RLE that earns its keep on a palette index exactly as it does on a
+ * bitplane, and XOR against the shadow and RFB_OP_COPY do not know the
+ * difference.  What changes on the wire is one op code and the loss of the
+ * per-plane changed mask, which a format with one plane has nothing to say
+ * with.
+ *
  * Wire format, big-endian throughout, one message per frame:
  *
  *   u8  version        RFB_VERSION
@@ -41,6 +59,15 @@
  *                                  bytes XORed with the previous frame's
  *                    Tile origin is (tx*tile_w, ty*tile_h) in bytes and rows;
  *                    tw and th are clipped at the right and bottom edges.
+ *
+ *   RFB_OP_TILE8 0x03  u16 index  ty * tiles_x + tx
+ *                      u8  code   the same three codes, same payloads
+ *                    RFB_OP_TILE with the plane mask taken out, and the only
+ *                    op RFB_FMT_CLUT8 emits.  There is one plane and it is
+ *                    always the one that changed, so a mask byte would carry
+ *                    the value 1 on every tile of every frame.  A decoder
+ *                    that meets this op is being told the source is chunky;
+ *                    it is never mixed with RFB_OP_TILE in one stream.
  *
  * PackBits is the IFF ILBM byte RLE: n in 0..127 copies n+1 literal bytes,
  * n in 129..255 repeats the next byte 257-n times, 128 is a no-op and is never
@@ -80,10 +107,17 @@ typedef signed int     rfb_s32;
 #define RFB_OP_END       0x00
 #define RFB_OP_COPY      0x01
 #define RFB_OP_TILE      0x02
+#define RFB_OP_TILE8     0x03   /* RFB_FMT_CLUT8: no plane mask */
 
 #define RFB_CODE_RAW     0
 #define RFB_CODE_PB_RAW  1
 #define RFB_CODE_PB_XOR  2
+
+/* What one byte of the source means.  Zero is planar so that a caller which
+ * predates this field, or clears its rfb_geom, gets the Amiga BitMap it
+ * always got. */
+#define RFB_FMT_PLANAR   0
+#define RFB_FMT_CLUT8    1
 
 #define RFB_MAX_DEPTH    8
 #define RFB_MAX_TILE_W   64   /* bytes */
@@ -115,10 +149,11 @@ typedef signed int     rfb_s32;
 typedef struct {
     rfb_u16 width;          /* pixels, for the receiver; not used to index */
     rfb_u16 height;         /* rows */
-    rfb_u16 bytes_per_row;  /* from the BitMap */
-    rfb_u8  depth;          /* 1..8 */
+    rfb_u16 bytes_per_row;  /* from the BitMap; one plane's row either way */
+    rfb_u8  depth;          /* 1..8 planar; exactly 8 for RFB_FMT_CLUT8      */
     rfb_u8  tile_w;         /* tile width in BYTES, 1..RFB_MAX_TILE_W */
     rfb_u8  tile_h;         /* tile height in rows, 1..RFB_MAX_TILE_H */
+    rfb_u8  format;         /* RFB_FMT_PLANAR or RFB_FMT_CLUT8 */
 } rfb_geom;
 
 /* Counters.  src_bytes and probe_bytes are the two that matter on the Amiga:
@@ -153,6 +188,7 @@ typedef struct {
 typedef struct {
     rfb_geom g;
     rfb_u32  flags;
+    rfb_u8   nplanes;       /* g.depth planar, 1 chunky.  What the walk uses */
     rfb_u16  tiles_x;
     rfb_u16  tiles_y;
     rfb_u32  plane_bytes;   /* bytes_per_row * height */
@@ -188,6 +224,10 @@ typedef struct {
 
     rfb_stats st;
 } rfb_encoder;
+
+/* How many planes the source actually has: g->depth, or 1 for RFB_FMT_CLUT8.
+ * A caller sizing its own buffers wants this and not the depth. */
+rfb_u8  rfb_planes(const rfb_geom *g);
 
 rfb_u32 rfb_shadow_size(const rfb_geom *g);
 rfb_u32 rfb_scratch_size(const rfb_geom *g, rfb_u32 flags,

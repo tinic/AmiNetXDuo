@@ -3,6 +3,7 @@
  *
  *   node tools/web/console-mock.mjs [PORT] [CAPTURE.pfs]
  *   node tools/web/console-mock.mjs [PORT] [W H DEPTH]      synthesised
+ *   node tools/web/console-mock.mjs [PORT] [W H] --chunky   an RTG screen
  *
  * Default port 8098; then open http://127.0.0.1:8098/console.
  *
@@ -37,6 +38,7 @@ import {
   encodeFrame,
   makeGeometry,
   synth,
+  synthChunky,
   writePfs,
 } from "./console-host.mjs";
 
@@ -45,14 +47,20 @@ const ROOT = join(HERE, "..", "..");
 const PAGE = process.env.AMINETXDUO_CONSOLE_PAGE ||
   join(ROOT, "src", "tools", "web", "console.html");
 
-const PORT = Number(process.argv[2] || 8098);
-const CAPTURE = (process.argv[3] || "").endsWith(".pfs") ? process.argv[3] : null;
+/* `--chunky` synthesises the RTG shape instead of the planar one: ONE
+   eight-bit plane, which is what a Picasso96 or CyberGraphX screen hands
+   over.  A chunky .pfs says so in its own header and needs no flag. */
+const CHUNKY = process.argv.includes("--chunky");
+const argv = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+
+const PORT = Number(argv[0] || 8098);
+const CAPTURE = (argv[1] || "").endsWith(".pfs") ? argv[1] : null;
 
 /* 640x256 and two planes deep, because that is what stock Workbench 3.1
-   comes up as on any machine. */
-const W = Number(CAPTURE ? 0 : process.argv[3] || 640);
-const H = Number(CAPTURE ? 0 : process.argv[4] || 256);
-const DEPTH = Number(CAPTURE ? 0 : process.argv[5] || 2);
+   comes up as on any machine; 640x480 when it is a card. */
+const W = Number(CAPTURE ? 0 : argv[1] || (CHUNKY ? 640 : 640));
+const H = Number(CAPTURE ? 0 : argv[2] || (CHUNKY ? 480 : 256));
+const DEPTH = Number(CAPTURE ? 0 : argv[3] || 2);
 /* Bytes and rows, matching rfb_geom.  16x8 is the middle of rfbbench's
    sweep. */
 const TILE_W = 16;
@@ -61,7 +69,8 @@ const FPS = 12;
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 const cap = CAPTURE !== null ? readCapture(CAPTURE)
-                             : synth(W, H, DEPTH, 60);
+                             : CHUNKY ? synthChunky(W, H, 60)
+                                      : synth(W, H, DEPTH, 60);
 const screen = cap.screen;
 const geom = makeGeometry(screen, TILE_W, TILE_H);
 const rgb = cap.rgb;
@@ -78,10 +87,12 @@ function readCapture(path) {
     height: b.readUInt16BE(6),
     depth: b[8],
     bytesPerRow: b.readUInt16BE(10),
+    /* Byte 9 bit 0: one eight-bit plane, an RTG capture. */
+    chunky: (b[9] & 1) !== 0,
   };
   const frameCount = b.readUInt16BE(12);
   const palBytes = 3 * (1 << s.depth);
-  const st = s.bytesPerRow * s.height * s.depth;
+  const st = s.bytesPerRow * s.height * (s.chunky ? 1 : s.depth);
   return {
     screen: s,
     rgb: b.subarray(16, 16 + palBytes),
@@ -120,7 +131,8 @@ function makeSession(sock) {
   const binary = (b) => sock.write(frame(0x2, b));
 
   word("geom " + screen.width + " " + screen.height + " " + screen.depth +
-       " " + screen.bytesPerRow + " " + TILE_W + " " + TILE_H);
+       " " + screen.bytesPerRow + " " + TILE_W + " " + TILE_H +
+       " " + (screen.chunky ? 1 : 0));
   word("pal " + Buffer.from(rgb).toString("hex"));
 
   const timer = setInterval(() => {

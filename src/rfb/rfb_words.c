@@ -72,6 +72,10 @@ rfb_u32 rfb_word_geom(char *out, rfb_u32 cap, const rfb_geom *g)
     at = put_num(out, cap, at, g->tile_w);
     at = put_char(out, cap, at, ' ');
     at = put_num(out, cap, at, g->tile_h);
+    /* And what a byte of the frames after it means.  Last, because it is the
+       number this vocabulary gained rather than the one it started with. */
+    at = put_char(out, cap, at, ' ');
+    at = put_num(out, cap, at, g->format);
 
     if (at >= cap)                  /* the terminator has to fit too */
         return 0;

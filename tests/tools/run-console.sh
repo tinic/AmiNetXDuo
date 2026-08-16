@@ -100,10 +100,21 @@ CLIENT="${AMINETXDUO_CONSOLE_CLIENT:-}"
 ACTIVITY=idle
 TYPE=""
 DEPTHS=()
+# -R serves a GRAPHICS CARD instead of the chipset: Amiberry's uaegfx board,
+# Picasso96 staged onto the drive, and Workbench put on an 8-bit RTG screen.
+# The console's RTG path is 8-bit palette only, so the depth is not a choice.
+RTG=0
+P96DIR="${AMINETXDUO_P96_DIR:-$HOME/amiga-assets/p96}"
+# What Amiberry's uaegfx calls 640x480; see AssignModeID() in its picasso96.
+RTG_BOARD=uaegfx
+RTGSCREEN=""
+RTG_MODE_ID=0x50031000
+RTG_W=640
+RTG_H=480
 
 say() { printf '%s=%s\n' "$1" "$2"; }
 
-while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:T:" opt; do
+while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:T:R" opt; do
     case "$opt" in
         a) ADDRESS="$OPTARG" ;;
         p) PORT="$OPTARG" ;;
@@ -119,11 +130,31 @@ while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:T:" opt; do
         g) GATEWAY="$OPTARG" ;;
         A) ACTIVITY="$OPTARG" ;;
         T) TYPE="$OPTARG" ;;
+        R) RTG=1 ;;
         *) sed -n '3,8p' "$0" >&2; exit 2 ;;
     esac
 done
 
 [ ${#DEPTHS[@]} -gt 0 ] || DEPTHS=(2 4)
+if [ "$RTG" = 1 ]; then
+    DEPTHS=(8)
+    RTGSCREEN="${AMINETXDUO_RTGSCREEN:-$BUILD/tests/perf/rtgscreen}"
+    [ -f "$RTGSCREEN" ] || {
+        say error "no $RTGSCREEN"
+        say hint "cmake --build $BUILD --parallel --target rtgscreen"
+        say RESULT INFRA
+        exit 2
+    }
+    for f in Libs/Picasso96API.library Libs/Picasso96/rtg.library \
+             Libs/Picasso96/uaegfx.card Devs/Monitors/Picasso96; do
+        [ -f "$P96DIR/$f" ] || {
+            say error "no $P96DIR/$f"
+            say hint "AMINETXDUO_P96_DIR must hold a Picasso96 install tree"
+            say RESULT INFRA
+            exit 2
+        }
+    done
+fi
 
 # --------------------------------------------------------------- the parts --
 
@@ -197,6 +228,79 @@ fi
 wb31_assemble "$ROOT/build/wb31-sys" || { say RESULT INFRA; exit 2; }
 WB="$WB31_SYS"
 
+# ------------------------------------------------------- the monitor icon ----
+#
+# WHAT THE MONITOR READS BEFORE IT LOADS ANYTHING, and it is not in the file.
+#
+# devs/monitors/Picasso96 is one executable that drives every card Picasso96
+# supports; which .card it opens comes from the TOOLTYPES of the icon beside
+# it, which InstallPicasso96 writes in P_InstallCard.  Without an icon it
+# loads no board driver, publishes no resolutions, and Workbench comes up on
+# the chipset -- silently, because nothing on an Amiga complains about a
+# missing .info.
+#
+# So the icon is generated rather than hand-copied: the archive ships
+# Picasso96.info, which carries a PicassoIV's tooltypes and would be wrong
+# here in exactly the way that is hardest to notice.  A minimal WBTOOL icon
+# with a 8x8 one-plane image and the three tooltypes the installer sets that
+# are not disabled -- the parenthesised ones it writes are off by convention.
+rtg_monitor_icon() {
+    local out="$1" board="$2"
+
+    AMINETXDUO_ICON_BOARD="$board" python3 - "$out" <<'EOF'
+import os, struct, sys
+
+board = os.environ["AMINETXDUO_ICON_BOARD"]
+# NO SettingsFile.  The one the archive ships is configured for a PicassoIV --
+# its own installer says so and tells you to re-attach it with Picasso96Mode --
+# and a settings file naming another board is worse than none: uaegfx reports
+# its own resolutions and wants no timing list at all.
+tools = ["IgnoreMask=Yes",
+         "BoardType=" + board]
+
+W, H, D = 8, 8, 1
+rowbytes = ((W + 15) // 16) * 2
+
+# struct Gadget, 44 bytes, inside the DiskObject at offset 4.  GadgetRender is
+# non-NULL so the Image below it is read; SelectRender and GadgetText are not.
+gadget = struct.pack(">LhhhhHHHLLLLLHL",
+                     0,            # NextGadget
+                     0, 0, W, H,   # LeftEdge, TopEdge, Width, Height
+                     0x0004,       # Flags: GADGIMAGE
+                     0, 1,         # Activation, GadgetType (BOOLGADGET)
+                     1,            # GadgetRender, any non-zero
+                     0, 0, 0, 0,   # SelectRender, GadgetText, Mutual, Special
+                     0, 0)         # GadgetID, UserData
+assert len(gadget) == 44, len(gadget)
+
+# struct DiskObject: magic, version, the gadget, then the pointers that say
+# which of the sections after it are present.
+obj = struct.pack(">HH", 0xE310, 1) + gadget + struct.pack(
+    ">BBLLLLLLL",
+    3, 0,       # do_Type = WBTOOL, pad
+    0,          # DefaultTool: none
+    1,          # ToolTypes: present
+    0x80000000, 0x80000000,   # CurrentX, CurrentY = NO_ICON_POSITION
+    0,          # DrawerData
+    0,          # ToolWindow
+    4096)       # StackSize
+assert len(obj) == 78, len(obj)
+
+image = struct.pack(">hhhhhLBBL", 0, 0, W, H, D, 1, 0x1, 0x0, 0)
+bits = bytes([0xFF] + [0x81] * (H - 2) + [0xFF]) if rowbytes == 1 else \
+       b"".join(struct.pack(">H", v) for v in
+                [0xFF00] + [0x8100] * (H - 2) + [0xFF00])
+
+tt = struct.pack(">L", (len(tools) + 1) * 4)
+for t in tools:
+    b = t.encode("latin-1") + b"\0"
+    tt += struct.pack(">L", len(b)) + b
+
+with open(sys.argv[1], "wb") as fh:
+    fh.write(obj + image + bits + tt)
+EOF
+}
+
 # ------------------------------------------------------------- the drive ----
 
 HD="$ROOT/build/console-dh0"
@@ -237,7 +341,55 @@ Skip loop BACK
 EOF
     chmod 644 "$HD/S/scroller"
 
-    wb31_screenmode_prefs "$HD" "$depth"
+    if [ "$RTG" = 1 ]; then
+        # Picasso96 as its Installer would leave it, minus everything a
+        # headless uaegfx does not touch.  rtg.library loads uaegfx.card out
+        # of LIBS:Picasso96/ and emulation.library is what answers
+        # cybergraphics.library, so both of the console's readback families
+        # are on the machine.
+        #
+        # THE ARCHIVE'S OWN uaegfx.card IS THE RIGHT ONE, and no other copy is
+        # needed from anywhere.  This used to delete it and demand a "modern
+        # stub from WinUAE" in its place, on the reading that Picasso96 2.0's
+        # 1998 card drives the obsolete uaelib trap.  It does not: with the
+        # archive's card staged unchanged, the emulator logs
+        #
+        #   uaegfx.card 3.4 init @0020E2DC
+        #   P96 RESINFO: 0020E380-0020EB60 (42,2016)
+        #   uaegfx.card magic code: 00F04800-00F0494A BI=00263BC4
+        #   SetSwitch() - Picasso96 640x480x8 - immediate
+        #
+        # -- the card finds the library uaegfx_card_install() builds in the
+        # boot ROM through the magic-code handshake, and never touches the
+        # trap.  Not one run has printed the obsolete-hook line.
+        #
+        # `Picasso96: Could not create graphics board context for 'uaegfx'` is
+        # NOT the symptom it was read as.  DEVS:Monitors/<board> is already run
+        # by the stock Startup-Sequence, so the harness's own second run of it
+        # is a duplicate init, and that message is what a duplicate init says
+        # on a board that came up perfectly.  It is in every green run here.
+        cp -R "$P96DIR/Libs/." "$HD/Libs/"
+        mkdir -p "$HD/Devs/Monitors"
+        # THE MONITOR IS NAMED AFTER THE BOARD, and that is not cosmetic.
+        # InstallPicasso96's P_InstallCard copies devs/monitors/Picasso96 with
+        # (newname #_boardname) and writes BoardType=<boardname> into the icon
+        # it drops beside it; the one file drives every card P96 supports and
+        # the name is how it knows which .card to load.  Staged as `Picasso96`
+        # it loads nothing, publishes no resolutions, and Workbench comes up on
+        # the chipset with every check here still passing.
+        cp "$P96DIR/Devs/Monitors/Picasso96" "$HD/Devs/Monitors/$RTG_BOARD"
+        rtg_monitor_icon "$HD/Devs/Monitors/$RTG_BOARD.info" "$RTG_BOARD"
+        wb31_screenmode_prefs_id "$HD" "$depth" "$RTG_MODE_ID" "$RTG_W" "$RTG_H"
+        # And the prober, which is what actually puts an RTG screen in front:
+        # screenmode.prefs moves WORKBENCH, and whether that lands depends on a
+        # mode ID this harness worked out from the emulator's source.  The
+        # prober asks the display database instead, prints every mode it holds,
+        # and opens a public screen on the one the machine picked.
+        [ -f "$RTGSCREEN" ] && { cp "$RTGSCREEN" "$HD/C/rtgscreen"; \
+                                 chmod 755 "$HD/C/rtgscreen"; }
+    else
+        wb31_screenmode_prefs "$HD" "$depth"
+    fi
 }
 
 # The stock 3.1 Startup-Sequence with the tail replaced.  LoadWB stays, since
@@ -267,6 +419,32 @@ $AMINETXDUO_CONSOLE_PROBE_CMD
 EOF
     fi
 
+    # DH0 is a host directory, so anything the guest writes there is readable
+    # from the outside at once.  This is the only way to ask an RTG boot what
+    # it actually found: whether rtg.library loaded, whether it saw a board,
+    # and what Intuition ended up opening.
+    #
+    # AND NO SCREEN OF ITS OWN.  This ran `rtgscreen 8 640 480` as well, which
+    # put a PUBLIC, QUIET, EMPTY screen in front of Workbench -- and the front
+    # screen is the one the console serves, so the session read a card screen
+    # correctly and streamed 640x480 of colour zero.  Every RTG assertion
+    # passed on it: format 1, a palette, a decoded frame, one pixel value.
+    # screenmode.prefs puts WORKBENCH on the card and the geom word's format
+    # says so per run, so there is nothing for a second screen to insure
+    # against -- an -R run that comes up planar is meant to fail, not to be
+    # rescued by a blank screen that hides what Workbench did.
+    [ "$RTG" = 1 ] && cat >> "$HD/S/Startup-Sequence" <<'EOF'
+DEVS:Monitors/uaegfx >DH0:rtgmon.txt
+C:rtgscreen 0 >DH0:rtglist.txt
+C:Version >DH0:rtg-ver.txt LIBS:Picasso96/rtg.library FILE
+C:Version >>DH0:rtg-ver.txt LIBS:Picasso96API.library FILE
+C:Version >>DH0:rtg-ver.txt Picasso96API.library
+C:Version >>DH0:rtg-ver.txt cybergraphics.library
+C:List >DH0:rtg-libs.txt LIBS:Picasso96
+C:List >>DH0:rtg-libs.txt DEVS:Monitors
+C:Avail >DH0:rtg-avail.txt
+EOF
+
     cat >> "$HD/S/Startup-Sequence" <<EOF
 Run >DH0:httpd.txt <NIL: C:httpd DH0:Public $PORT -C CONSOLEPAGE DH0:Console/console.html -v
 EOF
@@ -286,9 +464,48 @@ EOF
 # Amiberry links SDL2 with no driver of its own, so without this it asks for a
 # video device, finds a stale DISPLAY from a failed X11 forward, and aborts in
 # about a second -- which reads as a guest that never booted.
-export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-dummy}"
 export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
-[ "${SDL_VIDEODRIVER}" = "dummy" ] && unset DISPLAY WAYLAND_DISPLAY || true
+
+#
+# AN RTG BOARD PUBLISHES THE HOST'S DISPLAY MODES, SO A HEADLESS HOST HAS NONE.
+#
+# Amiberry's addresolutions() builds the whole Picasso96 resolution list out of
+# the modes SDL enumerates for the host, and BOTH headless SDL drivers report
+# none: `dummy` and `offscreen` each log "0 display modes.", the board then
+# calls InitCard with an empty list -- "P96 RESINFO: 00000000-00000000 (0,0)"
+# -- and the Amiga side has a graphics card with no resolutions on it.  Every
+# library loads, the board is mapped, and Workbench comes up on the chipset.
+#
+# So the RTG arm gets a real X server with a real mode on it.  One host mode is
+# enough: the FAKE-mode substitution in the same loop fills in every standard
+# resolution smaller than it, which is where 640x480 comes from.  Xvfb is not
+# a workaround for a missing display here, it is the source of the data the
+# board reports.
+XVFB_PID=""
+if [ "$RTG" = 1 ] && [ -z "${AMINETXDUO_CONSOLE_NO_XVFB:-}" ]; then
+    command -v Xvfb >/dev/null 2>&1 || {
+        say error "no Xvfb, and an RTG board has no modes without one"
+        say hint "apt install xvfb, or set AMINETXDUO_CONSOLE_NO_XVFB=1 and \
+supply a DISPLAY that enumerates modes"
+        say RESULT INFRA
+        exit 2
+    }
+    XDISP=""
+    for n in $(seq 90 99); do
+        [ -e "/tmp/.X11-unix/X$n" ] || { XDISP=":$n"; break; }
+    done
+    [ -n "$XDISP" ] || { say error "no free X display in :90..:99"; \
+                         say RESULT INFRA; exit 2; }
+    Xvfb "$XDISP" -screen 0 1280x1024x24 >/dev/null 2>&1 &
+    XVFB_PID=$!
+    sleep 2
+    export DISPLAY="$XDISP"
+    export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-x11}"
+    say xvfb "$XDISP 1280x1024x24 pid $XVFB_PID"
+else
+    export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-dummy}"
+    [ "${SDL_VIDEODRIVER}" = "dummy" ] && unset DISPLAY WAYLAND_DISPLAY || true
+fi
 
 # Fresh per run: a reused MAC lets the router's cache answer for a guest that
 # never came up, and the defect then looks like a pass.
@@ -312,7 +529,15 @@ cleanup() {
     EMU_PID=""
     return 0
 }
-trap cleanup EXIT INT TERM HUP
+
+reap_xvfb() {
+    [ -n "$XVFB_PID" ] || return 0
+    kill -TERM "$XVFB_PID" 2>/dev/null || true
+    wait "$XVFB_PID" 2>/dev/null || true
+    XVFB_PID=""
+    return 0
+}
+trap 'cleanup; reap_xvfb' EXIT INT TERM HUP
 
 EMULOG=""
 
@@ -334,6 +559,29 @@ nr_floppies=0
 uaehf0=dir,rw,DH0:DH0:$HD,0
 a2065_rom_file=:ENABLED
 a2065_rom_options=mac=$MAC,$BACKEND
+EOF
+
+    # The graphics card: uaegfx, which is board type 0 and therefore what a
+    # gfxcard_size on its own asks for.  8 MB is a good deal more than a
+    # 640x480x8 screen needs and leaves Picasso96 room for its own buffers.
+    # rtg_modes is the emulator's RGBFF_ mask and it is written out because a
+    # minimal config does not go through the path that fills in the default:
+    # 0x112 is RGBFF_CLUT | RGBFF_R5G6B5PC | RGBFF_R8G8B8A8, and the first of
+    # those is the only format the console serves.  A mask without bit 1 is a
+    # board that offers no palette mode and a Workbench that quietly stays on
+    # the chipset.
+    #
+    # cpu_24bit_addressing=no IS NOT OPTIONAL AND IT FAILS SILENTLY WITHOUT IT.
+    # uaegfx is a Zorro III board and a quickstart model comes up with a 24-bit
+    # address space; the emulator then says "Z3 RTG and 24bit address space are
+    # not compatible" into a log nothing reads, drops the board, and Workbench
+    # comes up on the chipset.  Every assertion in this harness still passes on
+    # that -- it is a screen, it has colours, it changes -- and the only thing
+    # that says the card was never there is the depth in the geom word.
+    [ "$RTG" = 1 ] && cat >> "$cfg" <<EOF
+cpu_24bit_addressing=no
+gfxcard_size=8
+rtg_modes=0x112
 EOF
 
     # NOT --log.  It writes about a megabyte a second, playhouse3 is shared,
@@ -358,26 +606,48 @@ probe() {
         "python3 - $*" < "$ROOT/tests/tools/console-probe.py" > "$out" 2>&1
 }
 
-fetch_page() {
+# ONE HTTP CLIENT, AND IT IS THE ONE THE CLIENT MACHINE ALREADY HAS TO HAVE.
+#
+# These fetches used curl, and the probe travels as python3 -- so a client with
+# python3 and no curl (playhouse4 carries wget instead) answered every probe and
+# no fetch.  What that looks like from here is not "curl is missing": alive()
+# returns the empty string on every attempt, the boot loop runs to BOOT_MAX, and
+# the run reports d8_up=no on a guest that was serving the whole time.  Two
+# 240-second RTG runs were spent on it.  python3 is already a hard requirement
+# for the client, so the fetches use it too and the dependency list is one line
+# shorter.
+HTTP_GET_PY='
+import sys, urllib.request, urllib.error
+url, t = sys.argv[1], float(sys.argv[2])
+try:
+    with urllib.request.urlopen(url, timeout=t) as r:
+        print(r.status, len(r.read()))
+except urllib.error.HTTPError as e:
+    print(e.code, 0)
+except Exception:
+    print(0, 0)
+'
+
+# url seconds -> "<status> <bytes>", "0 0" when nothing answered.
+http_get() {
+    local out
     if [ -z "$CLIENT" ]; then
-        curl -s -m 8 -o /dev/null -w '%{http_code} %{size_download}' \
-             "http://$ADDRESS:$PORT/console" 2>/dev/null || true
+        out=$(python3 -c "$HTTP_GET_PY" "$1" "$2" 2>/dev/null || true)
     else
-        ssh -o BatchMode=yes -o ConnectTimeout=10 "$CLIENT" \
-            "curl -s -m 8 -o /dev/null -w '%{http_code} %{size_download}' \
-             'http://$ADDRESS:$PORT/console'" 2>/dev/null || true
+        out=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$CLIENT" \
+              "python3 - '$1' '$2'" <<<"$HTTP_GET_PY" 2>/dev/null || true)
     fi
+    printf '%s' "${out:-0 0}"
+}
+
+fetch_page() {
+    http_get "http://$ADDRESS:$PORT/console" 8
 }
 
 alive() {
-    if [ -z "$CLIENT" ]; then
-        curl -s -m 4 -o /dev/null -w '%{http_code}' \
-             "http://$ADDRESS:$PORT/" 2>/dev/null || true
-    else
-        ssh -o BatchMode=yes -o ConnectTimeout=8 "$CLIENT" \
-            "curl -s -m 4 -o /dev/null -w '%{http_code}' \
-             'http://$ADDRESS:$PORT/'" 2>/dev/null || true
-    fi
+    local s
+    s=$(http_get "http://$ADDRESS:$PORT/" 4)
+    printf '%s' "${s%% *}"
 }
 
 # ------------------------------------------------------------------- run ----
@@ -463,6 +733,38 @@ for depth in "${DEPTHS[@]}"; do
         [ -n "$k" ] || continue
         say "${tag}_$k" "$v"
     done < <(grep '=' "$OUTDIR/$tag-probe.txt" || true)
+
+    #
+    # -R MUST FAIL IF THE SESSION DID NOT COME UP ON A CARD.
+    #
+    # Every other check in this file passes on the chipset screen Workbench
+    # falls back to when the board is missing: it is a screen, it has more
+    # than one colour, its palette is not black, and it changes.  A run that
+    # tested the planar path while reporting on the RTG one is worse than a
+    # run that fails, and it happened three times here -- once on a 24-bit
+    # address space, once on an RGBFF mask without CLUT, once on a monitor
+    # file staged under the wrong name.  The seventh number of the geom word
+    # is rfb_geom.format, and 1 is the only value that says a card.
+    #
+    # EVERY geom, not the geom.  A session gets a fresh geometry whenever the
+    # screen it serves changes, and this read all of them into one variable:
+    # the first run in which the front screen changed resolution mid-session
+    # put two lines in `fmt`, and the assertion then failed a perfectly good
+    # card session with "says format 1<newline>1, not 1".  sort -u collapses a
+    # session that stayed on the card to the one value, and a session that
+    # dropped to the chipset half way through still fails -- which is the case
+    # this check exists for and the one a last-line-wins fix would have lost.
+    if [ "$RTG" = 1 ]; then
+        fmt=$(awk '/^geom=/ { print $NF }' "$OUTDIR/$tag-probe.txt" 2>/dev/null \
+              | sort -u | tr '\n' ' ' || true)
+        fmt=${fmt% }
+        say "${tag}_rtg_format" "${fmt:-none}"
+        if [ "${fmt:-0}" != "1" ]; then
+            say "${tag}_error" "the session came up planar: -R asked for a card\
+ and the geom word says format ${fmt:-none}, not 1"
+            VERDICT=fail
+        fi
+    fi
 
     case "$rc" in
         0) ;;

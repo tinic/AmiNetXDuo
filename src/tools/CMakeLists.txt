@@ -350,9 +350,14 @@ endif()
 # frame encoder: that is src/rfb, portable C99 with no Amiga header in it, and
 # it is linked here rather than restated so that the bytes this server puts on
 # the wire are the bytes the host bench round-trips.
+# httprtg.c is the same console on a graphics card: everything Picasso96 and
+# CyberGraphX, kept out of httpfb.c so that the chipset path has no library
+# call and no card-shaped branch in it.  It is where the readback routes are
+# timed, which is the measurement the whole RTG design turns on.
 aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httppath.c httpif.c
                                           httpframe.c httplock.c httpws.c
                                           httpsha1.c httpterm.c httpfb.c
+                                          httprtg.c
                                           toolsock.c
                                           iperfcore.c iperfwire.c
                                           "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha1.c")

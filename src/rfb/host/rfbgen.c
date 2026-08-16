@@ -13,6 +13,12 @@
 static unsigned g_w, g_h, g_depth, g_bpr;
 static unsigned char *g_idx;   /* w*h colour indices */
 
+/* The frames go out as one eight-bit plane rather than g_depth one-bit ones:
+   a Picasso96 or CyberGraphX screen, and the flag the .pfs header carries in
+   its byte 9.  g_idx is already indices, so this only changes what emit()
+   writes and how wide a row is. */
+static unsigned g_chunky;
+
 static unsigned hash32(unsigned x)
 {
     x ^= x >> 16; x *= 0x7feb352du;
@@ -161,7 +167,8 @@ static FILE *open_pfs(const char *dir, const char *name, unsigned frames)
     memcpy(hdr, "PFS2", 4);
     hdr[4] = (unsigned char)(g_w >> 8);   hdr[5] = (unsigned char)g_w;
     hdr[6] = (unsigned char)(g_h >> 8);   hdr[7] = (unsigned char)g_h;
-    hdr[8] = (unsigned char)g_depth;      hdr[9] = 0;
+    hdr[8] = (unsigned char)g_depth;
+    hdr[9] = (unsigned char)(g_chunky ? 1u : 0u);
     hdr[10] = (unsigned char)(g_bpr >> 8); hdr[11] = (unsigned char)g_bpr;
     hdr[12] = (unsigned char)(frames >> 8); hdr[13] = (unsigned char)frames;
     hdr[14] = 0; hdr[15] = 0;
@@ -177,8 +184,19 @@ static FILE *open_pfs(const char *dir, const char *name, unsigned frames)
 
 static void emit(FILE *f)
 {
-    pack();
-    fwrite(g_planes, 1, (size_t)g_depth * g_bpr * g_h, f);
+    if (g_chunky) {
+        unsigned y;
+        /* One byte a pixel, at the row stride, and the padding past the width
+           left as it was allocated -- which is what a card's framebuffer looks
+           like and what the encoder has to code every byte of. */
+        memset(g_planes, 0, (size_t)g_bpr * g_h);
+        for (y = 0; y < g_h; y++)
+            memcpy(g_planes + (size_t)y * g_bpr, g_idx + (size_t)y * g_w, g_w);
+        fwrite(g_planes, 1, (size_t)g_bpr * g_h, f);
+    } else {
+        pack();
+        fwrite(g_planes, 1, (size_t)g_depth * g_bpr * g_h, f);
+    }
     g_emitted++;
 }
 
@@ -204,11 +222,29 @@ static void close_pfs(FILE *f)
 
 static void setup(unsigned w, unsigned h, unsigned depth)
 {
-    g_w = w; g_h = h; g_depth = depth;
+    g_w = w; g_h = h; g_depth = depth; g_chunky = 0;
     g_bpr = ((w + 15u) / 16u) * 2u;
     free(g_idx); free(g_planes);
     g_idx = malloc((size_t)w * h);
     g_planes = malloc((size_t)depth * g_bpr * h);
+    if (!g_idx || !g_planes) { fprintf(stderr, "oom\n"); exit(1); }
+}
+
+/*
+ * The same, as an 8-bit chunky screen.  The row is padded to a multiple of
+ * eight bytes on purpose: a board rounds its stride, the encoder codes the
+ * padding, and a generator that made bytes_per_row equal the width would
+ * never exercise either the padding or the tile at the right edge that is
+ * clipped -- 804 wide comes out 808, which is not a whole number of 16- or
+ * 32-byte tiles.
+ */
+static void setup_chunky(unsigned w, unsigned h)
+{
+    g_w = w; g_h = h; g_depth = 8; g_chunky = 1;
+    g_bpr = ((w + 7u) / 8u) * 8u;
+    free(g_idx); free(g_planes);
+    g_idx = malloc((size_t)w * h);
+    g_planes = malloc((size_t)g_bpr * h);
     if (!g_idx || !g_planes) { fprintf(stderr, "oom\n"); exit(1); }
 }
 
@@ -279,9 +315,9 @@ static void seq_drag(const char *dir)
     close_pfs(f);
 }
 
-static void seq_menu(const char *dir)
+static void seq_menu(const char *dir, const char *name)
 {
-    FILE *f = open_pfs(dir, "menu", 40);
+    FILE *f = open_pfs(dir, name, 40);
     unsigned i, k;
     for (i = 0; i < 40; i++) {
         desktop();
@@ -297,9 +333,9 @@ static void seq_menu(const char *dir)
     close_pfs(f);
 }
 
-static void seq_full(const char *dir)
+static void seq_full(const char *dir, const char *name)
 {
-    FILE *f = open_pfs(dir, "full", 20);
+    FILE *f = open_pfs(dir, name, 20);
     unsigned i, x, y;
     for (i = 0; i < 20; i++) {
         for (y = 0; y < g_h; y++)
@@ -323,8 +359,8 @@ int main(int argc, char **argv)
     seq_scroll(dir, "scroll16", 16, 40);
     seq_scroll(dir, "scroll_slow", 2, 40);
     seq_drag(dir);
-    seq_menu(dir);
-    seq_full(dir);
+    seq_menu(dir, "menu");
+    seq_full(dir, "full");
 
     setup(800, 600, 8);
     seq_idle(dir, "idle8");
@@ -336,6 +372,18 @@ int main(int argc, char **argv)
     setup(1024, 768, 4);
     seq_idle(dir, "idle1024");
     seq_scroll(dir, "scroll1024", 8, 20);
+
+    /* And the RTG shape: 8-bit chunky, at the two sizes a graphics card is
+       actually put up at.  640x480 has a bytes_per_row that is a whole number
+       of 16-byte tiles and 804 wide does not, so the clipped tile at the right
+       edge is walked too. */
+    setup_chunky(640, 480);
+    seq_idle(dir, "idle_c8");
+    seq_scroll(dir, "scroll_c8", 8, 40);
+    seq_menu(dir, "menu_c8");
+    setup_chunky(804, 300);
+    seq_idle(dir, "idle_c8pad");
+    seq_full(dir, "full_c8pad");
 
     free(g_idx); free(g_planes);
     return 0;

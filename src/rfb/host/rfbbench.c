@@ -69,7 +69,7 @@ static int dec_frame(rfb_dec *d, const unsigned char *in, unsigned n)
                 fprintf(stderr, "copy x0=%u w=%u y0=%u h=%u dy=%d\n",
                         x0, w, y0, h, dy);
             if (x0 + w > bpr || y0 + h > d->g.height) return -4;
-            for (p = 0; p < d->g.depth; p++) {
+            for (p = 0; p < rfb_planes(&d->g); p++) {
                 unsigned char *pl = d->fb + (size_t)p * d->plane_stride;
                 if (dy > 0) {
                     for (r = 0; r < h; r++)
@@ -86,20 +86,27 @@ static int dec_frame(rfb_dec *d, const unsigned char *in, unsigned n)
             continue;
         }
 
-        if (op != RFB_OP_TILE)
+        /* One op or the other, and which one is the geometry's answer: a
+         * chunky frame carries no plane mask because there is one plane. */
+        if (op != RFB_OP_TILE && op != RFB_OP_TILE8)
             return -5;
+        if ((op == RFB_OP_TILE8) != (d->g.format == RFB_FMT_CLUT8))
+            return -13;
 
         {
             unsigned idx, mask, tx, ty, x0, y0, tw, th, p, r;
-            if (i + 3 > n) return -6;
-            idx = rd16(in + i); mask = in[i + 2]; i += 3;
+            unsigned chunky = (op == RFB_OP_TILE8) ? 1u : 0u;
+            if (i + (chunky ? 2u : 3u) > n) return -6;
+            idx = rd16(in + i);
+            mask = chunky ? 1u : in[i + 2];
+            i += chunky ? 2u : 3u;
             if (idx >= d->tiles_x * d->tiles_y) return -7;
             tx = idx % d->tiles_x; ty = idx / d->tiles_x;
             x0 = tx * d->g.tile_w; y0 = ty * d->g.tile_h;
             tw = bpr - x0;   if (tw > d->g.tile_w) tw = d->g.tile_w;
             th = d->g.height - y0; if (th > d->g.tile_h) th = d->g.tile_h;
 
-            for (p = 0; p < d->g.depth; p++) {
+            for (p = 0; p < rfb_planes(&d->g); p++) {
                 unsigned code, len;
                 unsigned char *pl;
                 if (!((mask >> p) & 1u))
@@ -161,15 +168,22 @@ static int pfs_load(const char *path, pfs *s)
     s->g.width = (rfb_u16)rd16(hdr + 4);
     s->g.height = (rfb_u16)rd16(hdr + 6);
     s->g.depth = hdr[8];
+    /* Byte 9 bit 0: one eight-bit plane rather than depth one-bit ones. */
+    s->g.format = (rfb_u8)((hdr[9] & 1u) ? RFB_FMT_CLUT8 : RFB_FMT_PLANAR);
     s->g.bytes_per_row = (rfb_u16)rd16(hdr + 10);
     s->frames = rd16(hdr + 12);
     if (s->g.depth < 1 || s->g.depth > RFB_MAX_DEPTH || s->g.bytes_per_row == 0) {
         fprintf(stderr, "%s: bad geometry\n", path); fclose(f); return -1;
     }
+    if (s->g.format == RFB_FMT_CLUT8 && s->g.depth != 8) {
+        fprintf(stderr, "%s: chunky and %u deep\n", path, s->g.depth);
+        fclose(f); return -1;
+    }
     palette = (size_t)3u << s->g.depth;
     if (fseek(f, (long)(16 + palette), SEEK_SET) != 0) { fclose(f); return -1; }
 
-    s->frame_bytes = (unsigned)s->g.bytes_per_row * s->g.height * s->g.depth;
+    s->frame_bytes = (unsigned)s->g.bytes_per_row * s->g.height *
+                     rfb_planes(&s->g);
     want = (size_t)s->frame_bytes * s->frames;
     s->data = malloc(want ? want : 1);
     if (!s->data) { fclose(f); return -1; }
@@ -515,11 +529,15 @@ int main(int argc, char **argv)
         pfs s;
         int ti, si;
         if (pfs_load(argv[a], &s) != 0) { rc = 1; continue; }
+        /* BMF_INTERLEAVED is a statement about eight planes and a chunky
+           source has one, so the sweep's interleaved pass skips those files
+           rather than pretending. */
+        if (g_interleaved && s.g.format == RFB_FMT_CLUT8) { free(s.data); continue; }
         if (g_interleaved && pfs_interleave(&s) != 0) { rc = 1; continue; }
-        printf("seq=%s file=%s w=%u h=%u depth=%u bpr=%u frames=%u "
+        printf("seq=%s file=%s w=%u h=%u depth=%u bpr=%u fmt=%u frames=%u "
                "frame_bytes=%u\n",
                s.name, argv[a], s.g.width, s.g.height, s.g.depth,
-               s.g.bytes_per_row, s.frames, s.frame_bytes);
+               s.g.bytes_per_row, s.g.format, s.frames, s.frame_bytes);
         for (ti = 0; ti < ntiles; ti++) {
             for (si = 0; si < NSTRAT; si++) {
                 if (!selected(strat_filter, STRATS[si].name))

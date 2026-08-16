@@ -23,12 +23,20 @@
  *                          1 PB_RAW  u16 len, PackBits of the same
  *                          2 PB_XOR  u16 len, PackBits of it XORed with what
  *                                    is already there
+ *   OP_TILE8 0x03 u16 index, then ONE plane's u8 code and payload, exactly as
+ *                 above.  The chunky sibling of OP_TILE: an eight-bit source
+ *                 has one plane, so the mask would say 1 on every tile of
+ *                 every frame and is not sent.  Which of the two arrives is
+ *                 decided by FORMAT in the `geom` word and not by the op, so
+ *                 an op that disagrees with the geometry is an error here
+ *                 rather than a picture drawn eight times too wide.
  *
  * tile_w is in BYTES and not pixels, and the tile grid is over bytesPerRow
  * rather than the width: every byte of a row is encoded, padding included, so
  * a decoded frame is byte-identical to the BitMap that went in.  Getting that
  * wrong is a picture that is right until the screen is not a whole number of
- * tiles wide.
+ * tiles wide.  A byte is eight pixels planar and one chunky, which is the
+ * only other place the two formats part company.
  *
  * This is the only file that reads a byte off the socket.  It was written
  * against a placeholder framing for as long as the encoder did not exist, and
@@ -37,13 +45,24 @@
  * SPDX-License-Identifier: MIT
  */
 
-import { planeBytes, screenFault, type Screen } from "./planar";
+import {
+  planeBytes,
+  planeCount,
+  pixelsPerByte,
+  screenFault,
+  type Screen,
+} from "./planar";
 
 export const RFB_VERSION = 1;
 
 const OP_END = 0x00;
 const OP_COPY = 0x01;
 const OP_TILE = 0x02;
+const OP_TILE8 = 0x03;
+
+/* rfb_geom.format, as the `geom` word carries it. */
+export const FMT_PLANAR = 0;
+export const FMT_CLUT8 = 1;
 
 const CODE_RAW = 0;
 const CODE_PB_RAW = 1;
@@ -93,22 +112,31 @@ export function makeGeometry(
 }
 
 /*
- * `geom W H DEPTH BYTESPERROW TILEWBYTES TILEH`, the control word that opens
- * a session.  Text rather than a binary header because it is control, and the
- * split between the two channels is the whole convention: binary frames are
- * the data stream and text frames are words.
+ * `geom W H DEPTH BYTESPERROW TILEWBYTES TILEH FORMAT`, the control word that
+ * opens a session.  Text rather than a binary header because it is control,
+ * and the split between the two channels is the whole convention: binary
+ * frames are the data stream and text frames are words.
  */
 export function geometryFromWord(w: string): Geometry {
   const f = w.trim().split(/\s+/);
-  if (f[0] !== "geom" || f.length !== 7) {
-    throw new Error("geom takes six numbers, got: " + w);
+  if (f[0] !== "geom" || f.length !== 8) {
+    throw new Error("geom takes seven numbers, got: " + w);
   }
   const n = f.slice(1).map(Number);
   if (n.some((x) => !Number.isInteger(x))) {
     throw new Error("geom has something that is not a whole number: " + w);
   }
+  if (n[6] !== FMT_PLANAR && n[6] !== FMT_CLUT8) {
+    throw new Error("geom format " + n[6] + " is not one this viewer draws");
+  }
   return makeGeometry(
-    { width: n[0], height: n[1], depth: n[2], bytesPerRow: n[3] },
+    {
+      width: n[0],
+      height: n[1],
+      depth: n[2],
+      bytesPerRow: n[3],
+      chunky: n[6] === FMT_CLUT8,
+    },
     n[4], n[5],
   );
 }
@@ -213,7 +241,11 @@ export function applyUpdate(
   const h = g.screen.height;
   const bpr = g.screen.bytesPerRow;
   const plane = planeBytes(g.screen);
-  const depth = g.screen.depth;
+  /* PLANES, not the depth.  A chunky screen is eight bits deep and one plane
+     wide, and every loop below wants the second number. */
+  const depth = planeCount(g.screen);
+  const chunky = g.screen.chunky === true;
+  const perByte = pixelsPerByte(g.screen);
 
   const d: Damage = {
     x0: w, y0: h, x1: 0, y1: 0,
@@ -223,8 +255,8 @@ export function applyUpdate(
   /* Byte columns to pixels, clipped to the screen: the padding at the end of
      a row is encoded and is not on the display. */
   const hit = (bx0: number, bw: number, y0: number, rows: number) => {
-    const px0 = bx0 << 3;
-    const px1 = Math.min((bx0 + bw) << 3, w);
+    const px0 = bx0 * perByte;
+    const px1 = Math.min((bx0 + bw) * perByte, w);
     if (px1 <= px0 || rows <= 0) return;
     if (px0 < d.x0) d.x0 = px0;
     if (px1 > d.x1) d.x1 = px1;
@@ -281,12 +313,26 @@ export function applyUpdate(
       continue;
     }
 
-    if (op !== OP_TILE) throw new Error("op " + op + " is not one of ours");
+    if (op !== OP_TILE && op !== OP_TILE8) {
+      throw new Error("op " + op + " is not one of ours");
+    }
+    /* The geometry decides which of the two a stream carries, so meeting the
+       other one means the `geom` and the frames disagree about what a byte
+       is.  That draws a picture rather than failing, which is why it is
+       checked. */
+    if ((op === OP_TILE8) !== chunky) {
+      throw new Error("op " + op + " on a " + (chunky ? "chunky" : "planar") +
+                      " screen");
+    }
 
-    if (i + 3 > b.length) throw new Error("a tile op is cut short");
+    /* No plane mask on a chunky tile: there is one plane and it is the one
+       that changed.  Two bytes of index either way. */
+    if (i + (chunky ? 2 : 3) > b.length) {
+      throw new Error("a tile op is cut short");
+    }
     const idx = (b[i] << 8) | b[i + 1];
-    const mask = b[i + 2];
-    i += 3;
+    const mask = chunky ? 1 : b[i + 2];
+    i += chunky ? 2 : 3;
 
     if (idx >= g.across * g.down) {
       throw new Error("tile index " + idx + " is off the grid");

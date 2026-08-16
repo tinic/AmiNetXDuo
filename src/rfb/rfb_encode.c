@@ -131,14 +131,30 @@ static int rfb_geom_ok(const rfb_geom *g)
         return 0;
     if (g->tile_h < 1 || g->tile_h > RFB_MAX_TILE_H)
         return 0;
+    if (g->format != RFB_FMT_PLANAR && g->format != RFB_FMT_CLUT8)
+        return 0;
+    /* A chunky byte IS the palette index, so the depth is the palette's and
+     * not a plane count -- and eight bits is the only width of it this
+     * format has.  Refusing here rather than deriving a depth means a caller
+     * that gets it wrong is told so at init instead of sending a picture
+     * against a palette of the wrong length. */
+    if (g->format == RFB_FMT_CLUT8 && g->depth != 8)
+        return 0;
     return 1;
+}
+
+rfb_u8 rfb_planes(const rfb_geom *g)
+{
+    if (!g)
+        return 0;
+    return (rfb_u8)((g->format == RFB_FMT_CLUT8) ? 1u : (rfb_u32)g->depth);
 }
 
 rfb_u32 rfb_shadow_size(const rfb_geom *g)
 {
     if (!rfb_geom_ok(g))
         return 0;
-    return (rfb_u32)g->bytes_per_row * g->height * g->depth;
+    return (rfb_u32)g->bytes_per_row * g->height * rfb_planes(g);
 }
 
 static rfb_u32 rfb_probe_step(const rfb_geom *g, const rfb_scroll_cfg *cfg)
@@ -162,8 +178,8 @@ rfb_u32 rfb_scratch_size(const rfb_geom *g, rfb_u32 flags,
         cfg = &def;
     }
     tb = (rfb_u32)g->tile_w * g->tile_h;
-    need = tb * g->depth               /* xorbuf, one tile per plane */
-         + tb * g->depth               /* rawbuf, likewise */
+    need = tb * rfb_planes(g)          /* xorbuf, one tile per plane */
+         + tb * rfb_planes(g)          /* rawbuf, likewise */
          + 2u * RFB_PB_BOUND(tb)       /* two candidate PackBits outputs */
          + 4u * 4u;                    /* alignment slack */
 
@@ -178,7 +194,7 @@ rfb_u32 rfb_scratch_size(const rfb_geom *g, rfb_u32 flags,
 
 rfb_u32 rfb_worst_case_frame(const rfb_geom *g)
 {
-    rfb_u32 tx, ty, tiles, tb;
+    rfb_u32 tx, ty, tiles, tb, head;
 
     if (!rfb_geom_ok(g))
         return 0;
@@ -187,10 +203,14 @@ rfb_u32 rfb_worst_case_frame(const rfb_geom *g)
     tiles = tx * ty;
     tb = (rfb_u32)g->tile_w * g->tile_h;
 
+    /* What a tile op costs before its first plane: op and index either way,
+     * and the plane mask on top of that when there are planes to mask. */
+    head = (g->format == RFB_FMT_CLUT8) ? 3u : 4u;
+
     /* Header, one copy op, every tile carrying every plane at the PackBits
      * expansion bound, and the terminator. */
     return 4u + 11u
-         + tiles * (3u + (rfb_u32)g->depth * (3u + RFB_PB_BOUND(tb)))
+         + tiles * (head + (rfb_u32)rfb_planes(g) * (3u + RFB_PB_BOUND(tb)))
          + 1u;
 }
 
@@ -232,9 +252,16 @@ long rfb_encoder_init(rfb_encoder *e, const rfb_geom *g, rfb_u32 flags,
     if (!e || !rfb_geom_ok(g) || !shadow || !scratch)
         return RFB_E_GEOM;
 
+    /* A chunky source has one plane, and BMF_INTERLEAVED is a statement about
+     * how eight of them are laid out.  Taking it would compute a row stride of
+     * bytes_per_row * 8 and read one row in eight. */
+    if (g->format == RFB_FMT_CLUT8 && (flags & RFB_F_INTERLEAVED))
+        return RFB_E_GEOM;
+
     memset(e, 0, sizeof(*e));
     e->g = *g;
     e->flags = flags;
+    e->nplanes = rfb_planes(g);
     if (cfg)
         e->scroll = *cfg;
     else
@@ -250,7 +277,7 @@ long rfb_encoder_init(rfb_encoder *e, const rfb_geom *g, rfb_u32 flags,
     e->tiles_x = (rfb_u16)(((rfb_u32)g->bytes_per_row + g->tile_w - 1u) / g->tile_w);
     e->tiles_y = (rfb_u16)(((rfb_u32)g->height + g->tile_h - 1u) / g->tile_h);
     e->plane_bytes = (rfb_u32)g->bytes_per_row * g->height;
-    e->frame_bytes = e->plane_bytes * g->depth;
+    e->frame_bytes = e->plane_bytes * e->nplanes;
     if (flags & RFB_F_INTERLEAVED) {
         e->row_stride = (rfb_u32)g->bytes_per_row * g->depth;
         e->plane_stride = g->bytes_per_row;
@@ -268,8 +295,8 @@ long rfb_encoder_init(rfb_encoder *e, const rfb_geom *g, rfb_u32 flags,
 
     tb = (rfb_u32)g->tile_w * g->tile_h;
     p = rfb_align4(scratch);
-    e->xorbuf = p; p = rfb_align4(p + tb * g->depth);
-    e->rawbuf = p; p = rfb_align4(p + tb * g->depth);
+    e->xorbuf = p; p = rfb_align4(p + tb * e->nplanes);
+    e->rawbuf = p; p = rfb_align4(p + tb * e->nplanes);
     e->pb_a   = p; p = rfb_align4(p + RFB_PB_BOUND(tb));
     e->pb_b   = p; p = rfb_align4(p + RFB_PB_BOUND(tb));
 
@@ -493,7 +520,7 @@ static int rfb_words_ok(const rfb_encoder *e, const rfb_u8 *const *planes)
                        | (unsigned long)e->rawbuf;
     rfb_u32 p;
 
-    for (p = 0; p < e->g.depth; p++)
+    for (p = 0; p < e->nplanes; p++)
         bits |= (unsigned long)planes[p];
 
     return ((bits & 3ul) == 0ul);
@@ -789,7 +816,7 @@ static void rfb_apply_copy(rfb_encoder *e, const rfb_copy *cp)
     const rfb_u32 stride = e->row_stride;
     rfb_u32 p, r;
 
-    for (p = 0; p < e->g.depth; p++) {
+    for (p = 0; p < e->nplanes; p++) {
         rfb_u8 *plane = e->shadow + p * e->plane_stride;
         if (cp->dy > 0) {
             for (r = 0; r < cp->h; r++) {
@@ -807,7 +834,7 @@ static void rfb_apply_copy(rfb_encoder *e, const rfb_copy *cp)
             }
         }
     }
-    e->st.shadow_move += (rfb_u32)cp->h * cp->w * e->g.depth;
+    e->st.shadow_move += (rfb_u32)cp->h * cp->w * e->nplanes;
 }
 
 /* --------------------------------------------------------------- frame --- */
@@ -820,10 +847,10 @@ long rfb_encode_frame(rfb_encoder *e, const rfb_u8 *src,
 
     if (!e || !src)
         return RFB_E_GEOM;
-    if (e->g.depth > RFB_MAX_DEPTH)
+    if (e->nplanes == 0 || e->nplanes > RFB_MAX_DEPTH)
         return RFB_E_GEOM;
 
-    for (p = 0; p < e->g.depth; p++)
+    for (p = 0; p < e->nplanes; p++)
         planes[p] = src + p * e->plane_stride;
 
     return rfb_encode_frame_planes(e, planes, out, out_cap);
@@ -833,7 +860,7 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
                              rfb_u8 *out, rfb_u32 out_cap)
 {
     rfb_u32 bpr, depth, tb, tile_row;
-    int keep_xor, min_run, word;
+    int keep_xor, min_run, word, chunky;
     rfb_out o;
     rfb_u32 ty, tx, p, y0, top = 0, tile_index;
     rfb_u32 dirty_tiles = 0;
@@ -847,7 +874,10 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
         return RFB_E_GEOM;
 
     bpr = e->g.bytes_per_row;
-    depth = e->g.depth;
+    /* PLANES, not the depth: a chunky source is one eight-bit plane and its
+     * depth is what sizes the palette at the far end, nothing here. */
+    depth = e->nplanes;
+    chunky = (e->g.format == RFB_FMT_CLUT8) ? 1 : 0;
     tb = (rfb_u32)e->g.tile_w * e->g.tile_h;
     keep_xor = (e->flags & RFB_F_XOR) ? 1 : 0;
     min_run = (e->flags & RFB_F_RLE2) ? 2 : 3;
@@ -989,9 +1019,17 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
                                    e->row_stride, tw, th, keep_xor);
             }
 
-            rfb_put8(&o, RFB_OP_TILE);
-            rfb_put16(&o, tile_index);
-            rfb_put8(&o, (rfb_u8)mask);
+            /* One plane means the mask has one value, so it is not sent.
+             * That is the whole of the chunky wire format: same tile grid,
+             * same codes, same payloads, one byte fewer per tile. */
+            if (chunky) {
+                rfb_put8(&o, RFB_OP_TILE8);
+                rfb_put16(&o, tile_index);
+            } else {
+                rfb_put8(&o, RFB_OP_TILE);
+                rfb_put16(&o, tile_index);
+                rfb_put8(&o, (rfb_u8)mask);
+            }
 
             for (p = 0; p < depth; p++) {
                 rfb_u32 best_len, la, lb;

@@ -35,6 +35,7 @@ import {
   palette,
   readPng,
   synth,
+  synthChunky,
   writePfs,
   writePng,
 } from "./console-host.mjs";
@@ -144,19 +145,27 @@ function pfsTimes(cap) {
  * and that is the single most likely bug in this file.
  */
 const SHAPES = [
-  ["640x256x3 hires PAL", 640, 256, 3, undefined],
-  ["320x200x5 lores NTSC", 320, 200, 5, undefined],
-  ["634x242x4 padded bpr", 634, 242, 4, 80],
-  ["800x600x8 big", 800, 600, 8, undefined],
-  ["640x480x3", 640, 480, 3, undefined],
+  ["640x256x3 hires PAL", 640, 256, 3, undefined, false],
+  ["320x200x5 lores NTSC", 320, 200, 5, undefined, false],
+  ["634x242x4 padded bpr", 634, 242, 4, 80, false],
+  ["800x600x8 big", 800, 600, 8, undefined, false],
+  ["640x480x3", 640, 480, 3, undefined, false],
+  /* The RTG shapes.  The reference is built from drawFrame's indices straight
+     through the palette and knows nothing about either layout, so a chunky
+     decode that read the bytes as bitplanes fails here on frame 0 -- which is
+     the check the planar path has had and the one a new format needs most. */
+  ["640x480 chunky", 640, 480, 8, undefined, true],
+  ["804x300 chunky padded bpr", 804, 300, 8, 808, true],
 ];
 
-for (const [name, w, h, depth, bpr] of SHAPES) {
-  const cap = M.parsePfs(bufferToArrayBuffer(writePfs(synth(w, h, depth, 3, bpr))));
+for (const [name, w, h, depth, bpr, chunky] of SHAPES) {
+  const cap = M.parsePfs(bufferToArrayBuffer(writePfs(
+    chunky ? synthChunky(w, h, 3, bpr) : synth(w, h, depth, 3, bpr))));
 
   ok(name + ": header survives the round trip",
      cap.screen.width === w && cap.screen.height === h &&
-     cap.screen.depth === depth && cap.frameCount === 3,
+     cap.screen.depth === depth && cap.frameCount === 3 &&
+     (cap.screen.chunky === true) === chunky,
      JSON.stringify(cap.screen));
 
   let same = true;
@@ -179,8 +188,9 @@ for (const [name, w, h, depth, bpr] of SHAPES) {
   }
 }
 
-for (const [name, w, h, depth, bpr] of SHAPES) {
-  const src = writePfs(synth(w, h, depth, 3, bpr));
+for (const [name, w, h, depth, bpr, chunky] of SHAPES) {
+  const src = writePfs(chunky ? synthChunky(w, h, 3, bpr)
+                              : synth(w, h, depth, 3, bpr));
   const cap = M.parsePfs(bufferToArrayBuffer(src));
   const built = M.buildPfs(cap.screen, cap.rgb, pfsFrames(cap),
                            pfsTimes(cap), cap.pointerAt, cap.pointers);
@@ -350,12 +360,17 @@ ok("a file with the old magic is refused rather than read as this one",
  * Tile widths are BYTES.  The sizes are rfbbench's own sweep, and the ragged
  * grid is there because bytesPerRow is not always a whole number of tiles.
  */
-for (const [name, w, h, depth, tw, th] of [
-  ["640x480x3 16x8 tiles", 640, 480, 3, 16, 8],
-  ["800x600x8 32x16 tiles", 800, 600, 8, 32, 16],
-  ["634x242x4 ragged grid", 634, 242, 4, 12, 10],
+for (const [name, w, h, depth, tw, th, chunky] of [
+  ["640x480x3 16x8 tiles", 640, 480, 3, 16, 8, false],
+  ["800x600x8 32x16 tiles", 800, 600, 8, 32, 16, false],
+  ["634x242x4 ragged grid", 634, 242, 4, 12, 10, false],
+  /* And the RTG shapes: one eight-bit plane, a tile grid over a stride that
+     is a byte a pixel, and 804 wide padded to 808 so the tile at the right
+     edge is clipped. */
+  ["640x480 chunky 16x8 tiles", 640, 480, 8, 16, 8, true],
+  ["804x300 chunky ragged grid", 804, 300, 8, 32, 16, true],
 ]) {
-  const cap = synth(w, h, depth, 20);
+  const cap = chunky ? synthChunky(w, h, 20) : synth(w, h, depth, 20);
   const g = makeGeometry(cap.screen, tw, th);
   const cg = M.makeGeometry(cap.screen, tw, th);
   const fb = new Uint8Array(cap.stride);
@@ -392,11 +407,13 @@ for (const [name, w, h, depth, tw, th] of [
               ((bytes * 100) / (cap.stride * cap.frameCount)).toFixed(2) +
               "% of raw");
 
-  const word = "geom " + w + " " + h + " " + depth + " " +
-               cap.screen.bytesPerRow + " " + tw + " " + th;
+  const word = "geom " + w + " " + h + " " + cap.screen.depth + " " +
+               cap.screen.bytesPerRow + " " + tw + " " + th + " " +
+               (chunky ? 1 : 0);
   const parsed = M.geometryFromWord(word);
   ok(name + ": the geom word parses to the same grid",
-     parsed.across === cg.across && parsed.down === cg.down);
+     parsed.across === cg.across && parsed.down === cg.down &&
+     (parsed.screen.chunky === true) === chunky);
 }
 
 {
