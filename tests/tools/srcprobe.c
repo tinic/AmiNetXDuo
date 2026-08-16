@@ -477,7 +477,15 @@ int main(int argc, char **argv)
         if (p_check((BOOL)(rc == 0), "listener bind to 127.0.0.1",
                     p_errno(base)))
         {
-            rc = p_listen(base, listener, 1);
+            /*
+             * Three, not one.  Two arms below connect to this listener and
+             * neither accepts, so each keeps the slot it landed on until the
+             * listener is closed.  With a backlog of one the second connect
+             * has nowhere to land and spends the whole TCP connect timeout
+             * getting there, 191 s of a 300 s run, and reports ETIMEDOUT --
+             * which reads exactly like the defect it is testing for.
+             */
+            rc = p_listen(base, listener, 3);
             (VOID)p_check((BOOL)(rc == 0), "listen", p_errno(base));
 
             /* The bind and the route agree, so the connect goes ahead. */
