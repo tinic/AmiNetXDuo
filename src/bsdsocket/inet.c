@@ -2,7 +2,7 @@
  * bsdsocket.library, the inet_* address conversions.
  *
  * Self-contained: no libc, no NetX Duo. m68k is big-endian, so the network
- * byte order these functions traffic in is also the host byte order, and the
+ * byte order these functions use is also the host byte order. The
  * BSD_HTONL/BSD_NTOHL macros are documentation rather than code.
  *
  * SPDX-License-Identifier: MIT
@@ -14,11 +14,11 @@
 /*
  * The IPv6 text conversions are src/config/config_text.c's, the same
  * routines the DEVS:NetInterfaces parser uses for ADDRESS6. One parser means
- * the config file and inet_pton()/inet_ntop() cannot disagree about what an
- * address is.
+ * the configuration file and inet_pton()/inet_ntop() cannot disagree about
+ * what an address is.
  *
- * The dialect difference, the config file takes a "/prefixlen" suffix and
- * inet_pton() must not, is expressed by passing NULL for the prefix output.
+ * The two dialects differ: the configuration file takes a "/prefixlen" suffix
+ * and inet_pton() must not. A NULL prefix output expresses that difference.
  */
 #include "aminetxduo/config.h"
 #endif
@@ -107,7 +107,8 @@ static BOOL bsd_inet_parse(const char *cp, ULONG *result, LONG *nparts,
     if (*cp != '\0')
         return FALSE;
 
-    /* Trailing part absorbs the remaining bytes; the leading ones are bytes. */
+    /* The trailing part absorbs the remaining bytes. The leading parts are
+       one byte each. */
     switch (n)
     {
         case 1:
@@ -155,14 +156,14 @@ static BOOL bsd_inet_parse(const char *cp, ULONG *result, LONG *nparts,
  * to "the 'a.b.c.d' form, with 'a', 'b', 'c' and 'd', being numbers in the
  * range 0..255": four parts, decimal only, no short forms.
  *
- * Sharing bsd_inet_parse() made inet_pton(AF_INET,"0177.0.0.1") succeed as
- * 127.0.0.1 and "0x1.2.3.4" parse, which is the classic allow-list bypass,
- * a caller that uses inet_pton() to decide whether a string is a literal
- * address sees one string and the next resolver sees another. Leading zeros
- * are refused rather than read as decimal for the same reason: "0177" must not
- * be an address at all here.
+ * A shared bsd_inet_parse() made inet_pton(AF_INET,"0177.0.0.1") succeed as
+ * 127.0.0.1, and made "0x1.2.3.4" parse. That is the classic allow-list
+ * bypass: a caller that uses inet_pton() to decide whether a string is a
+ * literal address sees one string, and the next resolver sees another.
+ * Leading zeros are refused rather than read as decimal for the same reason.
+ * "0177" must not be an address at all here.
  *
- * inet_addr() keeps the 4.3BSD radixes and short forms; that is its documented
+ * inet_addr() keeps the 4.3BSD radixes and short forms. That is its documented
  * behaviour and other code depends on it.
  */
 static BOOL bsd_inet_pton4(const char *cp, ULONG *result)
@@ -196,7 +197,7 @@ static BOOL bsd_inet_pton4(const char *cp, ULONG *result)
         if (digits == 0 || value > 255)
             return FALSE;
 
-        /* "0" is a number; "01" and "007" are not decimal notation. */
+        /* "0" is a number. "01" and "007" are not decimal notation. */
         if (digits > 1 && cp[-digits] == '0')
             return FALSE;
 
@@ -294,7 +295,7 @@ in_addr_t bsd_inet_network(register STRPTR cp __asm("a0"),
 
     /*
      * 4.3BSD: each part is one byte of the network number, packed left to
-     * right and right-aligned in the result, "192.168.1" is 0x00C0A801, not
+     * right and right-aligned in the result. "192.168.1" is 0x00C0A801, not
      * an address with a zero host part. Same rule as
      * ami_cfg_parse_net_number(), which reads DEVS:Internet/networks.
      */
@@ -442,7 +443,7 @@ LONG bsd_inet_pton(register LONG af    __asm("d0"),
         }
 
         /* NULL prefix output == strict mode: "fe80::1/64" is not an address.
-           Per POSIX, a malformed address returns 0; -1 is reserved for an
+           Per POSIX, a malformed address returns 0. -1 is reserved for an
            unknown family. */
         if (!ami_config_parse_ip6((const char *)src, words, NULL))
             return 0;
