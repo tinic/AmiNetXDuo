@@ -505,6 +505,54 @@ int main(int argc, char **argv)
             }
 
             /*
+             * INADDR_ANY, which the arm above cannot reach because it binds.
+             *
+             * A socket bound to nothing has no local address to report, so
+             * getsockname() has to name the interface the packets leave by.
+             * This one leaves by loopback, and it is the case a
+             * single-interface guest can settle: the answer used to be
+             * nx_ip_interface[0], the Ethernet address, whatever the peer was.
+             */
+            s = p_socket(base, P_AF_INET, P_SOCK_STREAM, 0);
+            if (s >= 0)
+            {
+                p_addr(&sa, P_LOOPBACK, PORT_TCP_LOOP);
+                rc = p_connect(base, s, &sa);
+                if (p_check((BOOL)(rc == 0),
+                            "an unbound connect to 127.0.0.1", p_errno(base)))
+                {
+                    name.sin_addr = 0;
+                    (VOID)p_getsockname(base, s, &name);
+                    (VOID)p_check((BOOL)(name.sin_addr == P_LOOPBACK),
+                                  "getsockname on an unbound socket reports "
+                                  "the source the route chose",
+                                  (LONG)name.sin_addr);
+                }
+                (VOID)p_close(base, s);
+            }
+
+            /* The same for a datagram, which has no connect interface
+               recorded on it and reaches the route lookup instead. */
+            s = p_socket(base, P_AF_INET, P_SOCK_DGRAM, 0);
+            if (s >= 0)
+            {
+                p_addr(&sa, P_LOOPBACK, PORT_UDP_LOOP);
+                rc = p_connect(base, s, &sa);
+                if (p_check((BOOL)(rc == 0),
+                            "an unbound datagram connect to 127.0.0.1",
+                            p_errno(base)))
+                {
+                    name.sin_addr = 0;
+                    (VOID)p_getsockname(base, s, &name);
+                    (VOID)p_check((BOOL)(name.sin_addr == P_LOOPBACK),
+                                  "getsockname on an unbound datagram reports "
+                                  "127.0.0.1",
+                                  (LONG)name.sin_addr);
+                }
+                (VOID)p_close(base, s);
+            }
+
+            /*
              * No route from the bound address: 127.0.0.1 leaves by loopback
              * and the bind names the interface address, so the source cannot
              * be honoured and the connect is refused before the SYN.
@@ -597,9 +645,17 @@ int main(int argc, char **argv)
             {
                 p_addr(&sa, self, PORT_TCP_LAN);
                 rc = p_connect(base, s, &sa);
-                (VOID)p_check((BOOL)(rc == 0),
-                              "an unbound connect still leaves by the route",
-                              p_errno(base));
+                if (p_check((BOOL)(rc == 0),
+                            "an unbound connect still leaves by the route",
+                            p_errno(base)))
+                {
+                    name.sin_addr = 0;
+                    (VOID)p_getsockname(base, s, &name);
+                    (VOID)p_check((BOOL)(name.sin_addr == self),
+                                  "getsockname on it reports the interface "
+                                  "the route chose",
+                                  (LONG)name.sin_addr);
+                }
                 (VOID)p_close(base, s);
             }
         }

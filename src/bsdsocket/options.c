@@ -22,6 +22,10 @@
 /* NX_TCP_MAXIMUM_RX_QUEUE, SO_RCVBUF's ceiling in a low-watermark build. */
 #include "nx_tcp.h"
 
+/* For _nx_ip_route_find(): getsockname() on a socket bound to INADDR_ANY has
+   to know which interface the packets leave by. */
+#include "nx_ip.h"
+
 /*
  * SO_RCVBUF and SO_SNDBUF arrive in bytes and NetX Duo counts both queues in
  * packets, so one has to be turned into the other. A full-MTU segment is what
@@ -920,6 +924,65 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
 
 /* ------------------------------------------------------------------ names, */
 
+/*
+ * The IPv4 address a socket bound to INADDR_ANY should report: the address of
+ * the interface its packets leave by, so getsockname() names what the peer
+ * sees.
+ *
+ * There is no RFC 6724 for IPv4 and nothing in NetX Duo picks a v4 source on
+ * its own.  _nx_ip_packet_send() stamps the packet with the address of
+ * whichever interface the route matched, so the route is the whole question.
+ *
+ * A connected TCP socket has had it answered already: the connect, or the
+ * accept, wrote the interface it settled on into
+ * nx_tcp_socket_connect_interface.  Everything else asks the route table,
+ * with a null interface hint so the call chooses rather than checks (socket.c
+ * has the other form).
+ *
+ * 127.0.0.0/8 is answered before either, because _nx_ip_route_find() cannot:
+ * it walks NX_MAX_PHYSICAL_INTERFACES and NetX Duo keeps the loopback
+ * interface past the end of that, so a loopback destination falls through to
+ * the default gateway and would name the Ethernet address.
+ */
+static BOOL bsd_v4_source_for(AmiSocket *sock, ULONG *addr_out)
+{
+    NX_IP        *ip       = netstack_ip();
+    NX_INTERFACE *nxif     = NX_NULL;
+    ULONG         next_hop = 0;
+    ULONG         peer;
+
+    if (ip == NULL)
+        return FALSE;
+
+    if (sock->as_PeerAddr.nxd_ip_version != NX_IP_VERSION_V4)
+        return FALSE;
+
+    peer = sock->as_PeerAddr.nxd_ip_address.v4;
+
+    if ((peer >> 24) == 127UL)
+        nxif = &ip->nx_ip_interface[NX_LOOPBACK_INTERFACE];
+    else if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) == ASF_TCP)
+        nxif = sock->as_Nx.tcp.nx_tcp_socket_connect_interface;
+
+    if (nxif == NX_NULL)
+    {
+        if (peer == 0)
+            return FALSE;
+
+        tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
+        (VOID)_nx_ip_route_find(ip, peer, &nxif, &next_hop);
+        tx_mutex_put(&ip->nx_ip_protection);
+    }
+
+    if (nxif == NX_NULL || nxif->nx_interface_valid == 0 ||
+        nxif->nx_interface_ip_address == 0)
+        return FALSE;
+
+    *addr_out = nxif->nx_interface_ip_address;
+
+    return TRUE;
+}
+
 LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
                      register struct sockaddr *name __asm("a0"),
                      register socklen_t *namelen    __asm("a1"),
@@ -965,12 +1028,22 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
     if (addr.nxd_ip_version == NX_IP_VERSION_V4 &&
         addr.nxd_ip_address.v4 == 0)
     {
-        NX_IP *ip = netstack_ip();
+        ULONG chosen = 0;
 
-        /* A socket at INADDR_ANY reports the interface address. */
-        if (ip != NULL && (sock->as_Flags & ASF_CONNECTED) != 0)
-            bsd_addr_from_v4(&addr,
-                             ip->nx_ip_interface[0].nx_interface_ip_address);
+        /*
+         * Bound to INADDR_ANY.  This reports the source address a packet to
+         * this socket's peer would carry, see bsd_v4_source_for() above.  It
+         * used to name nx_ip_interface[0] whatever the peer was, which is the
+         * wrong address on a machine with a second interface and the wrong
+         * address for a loopback connection on every machine.
+         *
+         * Nothing is written when the route cannot be resolved: 0.0.0.0 is
+         * what the socket is bound to, and it is a better answer than an
+         * address the packets do not use.
+         */
+        if ((sock->as_Flags & ASF_CONNECTED) != 0 &&
+            bsd_v4_source_for(sock, &chosen))
+            bsd_addr_from_v4(&addr, chosen);
     }
 
     bsd_sockaddr_put(sock, name, namelen, &addr, sock->as_LocalPort);
