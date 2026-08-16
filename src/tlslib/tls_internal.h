@@ -367,16 +367,6 @@ VOID  tls_store_close(TLSStore *store);
 ULONG tls_store_count(const TLSStore *store);
 
 /*
- * Read the root whose subject Name hashes to `key`.  Returns the DER length,
- * or 0 if there is no such root.  This is the only path that touches the disk
- * during a handshake, and it happens at most twice.
- */
-
-/* FNV-1a over a certificate's issuer Name DER, walked out of the raw
-   certificate.  0 means not found, which no real key ever is because
-   tools/mkcertstore.py rejects that hash. */
-
-/*
  * Put the connection in the session->connection registry.  Every connection
  * needs this, checked or not.  It is how the vendored-override layer in
  * tls_resume.c gets back from an NX_SECURE_TLS_SESSION to the connection.
