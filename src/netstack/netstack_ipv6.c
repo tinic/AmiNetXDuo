@@ -732,8 +732,9 @@ BOOL netstack_ipv6_source_for(const ULONG dest[4], ULONG addr_out[4])
 
     /*
      * _nxd_ipv6_interface_find() is the same RFC 6724 selection routine the
-     * IPv6 send path uses to fill in the source of an outgoing packet, so
-     * getsockname() reports the address the packets carry.
+     * IPv6 send path uses to fill in the source of an outgoing packet
+     * (src/ipv6/ipv6_srcsel.c), so getsockname() reports the address the
+     * packets carry.
      */
     scratch[0] = dest[0];
     scratch[1] = dest[1];
