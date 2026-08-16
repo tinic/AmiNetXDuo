@@ -9,8 +9,8 @@
 ; The file name is the interface name.  There is no NAME= keyword.
 ; See the file "eth0" in this drawer for every keyword there is.
 ;
-; Only useful under an emulator.  a2065.device with FS-UAE's SLIRP
-; networking is the better tested path -- see the "a2065" example.
+; Only useful under an emulator.  a2065.device on a bridged network is
+; the better tested path; see the "a2065" example.
 ;
 
 DEVICE=uaenet.device
