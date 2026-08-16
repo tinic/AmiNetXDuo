@@ -530,6 +530,16 @@ ULONG dest[4];
     h_check(h_select(dest, NX_NULL) == H_SLOT0,
             "a link-local destination takes an address from one link only");
 
+    /* And the outgoing interface for it is the first one that HOLDS an
+       address, not merely the first that is up: eth0 here is up with nothing
+       on it, and answering eth0 would leave the machine with no source. */
+    h_reset();
+    h_addr(H_SLOT1, H_ETH1, 0xFE800000UL, 0, 0, 2, 64,
+           NX_IPV6_ADDR_STATE_VALID);
+
+    h_check(h_select(dest, NX_NULL) == H_SLOT1,
+            "an interface that is up with no address is not the outgoing one");
+
 #ifndef NX_DISABLE_LOOPBACK_INTERFACE
     /* ::1 is the source for ::1 and for nothing else, and nothing else is the
        source for ::1.  §4 puts the loopback interface on a link of its own. */

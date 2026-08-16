@@ -353,7 +353,7 @@ UINT state;
  *                                                 interface that is up
  *   4. link-local                              -- on-link everywhere, so the
  *                                                 first interface that is up
- *      and carries an address
+ *                                                 and holds an address
  *   5. on-link                                 -- the interface holding an
  *                                                 address whose prefix covers
  *                                                 the destination
@@ -394,14 +394,32 @@ NX_INTERFACE     *first_up = NX_NULL;
     }
 #endif /* NX_DISABLE_LOOPBACK_INTERFACE */
 
-    for (i = 0; i < NX_MAX_PHYSICAL_INTERFACES; i++)
+    /*
+     * The first physical interface that is up AND HOLDS AN ADDRESS.  Up is not
+     * enough: an interface with no usable IPv6 address on it contributes no
+     * candidate, so naming it as the outgoing interface for a link-local or
+     * an unjoined multicast destination turns a machine that has a link-local
+     * on its second card into one with no source at all.
+     */
+    for (i = 0; (i < (NX_MAX_IPV6_ADDRESSES + NX_LOOPBACK_IPV6_ENABLED)) &&
+                (first_up == NX_NULL); i++)
     {
-        if (ip_ptr -> nx_ip_interface[i].nx_interface_valid &&
-            (ip_ptr -> nx_ip_interface[i].nx_interface_link_up != NX_FALSE) &&
-            (first_up == NX_NULL))
+        addr = &ip_ptr -> nx_ipv6_address[i];
+
+        if (!anx6_usable(addr))
         {
-            first_up = &ip_ptr -> nx_ip_interface[i];
+            continue;
         }
+
+#ifndef NX_DISABLE_LOOPBACK_INTERFACE
+        if (addr -> nxd_ipv6_address_attached ==
+            &ip_ptr -> nx_ip_interface[NX_LOOPBACK_INTERFACE])
+        {
+            continue;
+        }
+#endif /* NX_DISABLE_LOOPBACK_INTERFACE */
+
+        first_up = addr -> nxd_ipv6_address_attached;
     }
 
 #ifdef NX_ENABLE_IPV6_MULTICAST
@@ -425,7 +443,7 @@ NX_INTERFACE     *first_up = NX_NULL;
 #endif /* NX_ENABLE_IPV6_MULTICAST */
 
     /* 3b/4. multicast this node did not join, and link-local, are on-link on
-       every interface, so the first one that is up carries them. */
+       every interface, so the first one with an address carries them. */
     if (((dest[0] & 0xFF000000UL) == 0xFF000000UL) || (scope <= ANX6_SCOPE_LINK))
     {
         return first_up;
