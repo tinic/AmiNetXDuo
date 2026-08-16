@@ -342,19 +342,42 @@ static BOOL ne2000_odd_window(const NetdevNic *nic)
  *   can round-trip both.
  *
  * The chip is in page 0 and stopped, which is where the caller left it.
+ *
+ * All three reads happen every time and the three bytes come back rather than
+ * a verdict, because one verdict covers three different cards: $ff $ff $ff is
+ * a floating bus, a wrong ISR with the round-trips intact is a chip that has
+ * not finished resetting, and a good ISR with the round-trips dead is the
+ * 16-bit-only card the word path exists for.  Writing BNRY costs nothing --
+ * it is read/write, the chip is stopped, and dp8390_config() programs it
+ * afterwards.
  */
-static BOOL ne2000_odd_reads(NetdevNic *nic)
+static ULONG ne2000_odd_seen(NetdevNic *nic)
 {
-    if ((NIC_GET(nic, ED_P0_ISR) & ED_ISR_RST) != ED_ISR_RST)
-        return FALSE;
+    UBYTE isr;
+    UBYTE lo;
+    UBYTE hi;
+
+    isr = NIC_GET(nic, ED_P0_ISR);
 
     NIC_PUT(nic, ED_P0_BNRY, 0x5a);
-    if (NIC_GET(nic, ED_P0_BNRY) != 0x5a)
-        return FALSE;
+    lo = NIC_GET(nic, ED_P0_BNRY);
 
     NIC_PUT(nic, ED_P0_BNRY, 0xa5);
+    hi = NIC_GET(nic, ED_P0_BNRY);
 
-    return (BOOL)(NIC_GET(nic, ED_P0_BNRY) == 0xa5);
+    return ((ULONG)isr << 16) | ((ULONG)lo << 8) | (ULONG)hi;
+}
+
+static BOOL ne2000_odd_isr_ok(ULONG seen)
+{
+    return (BOOL)((((seen >> 16) & 0xffu) & ED_ISR_RST) == ED_ISR_RST);
+}
+
+static BOOL ne2000_odd_reads_ok(ULONG seen)
+{
+    return (BOOL)(ne2000_odd_isr_ok(seen) &&
+                  ((seen >> 8) & 0xffu) == 0x5au &&
+                  (seen & 0xffu) == 0xa5u);
 }
 
 /*
@@ -432,24 +455,53 @@ static BOOL ne2000_detect(NetdevNic *nic)
             return FALSE;
         }
     }
-    else if (!ne2000_odd_reads(nic))
+    else
     {
-        netdev_diag_note(ANXDIAG_ODD_RETRY, netdev_diag_card(nic->card), 1);
+        UWORD ci    = netdev_diag_card(nic->card);
+        ULONG plain = ne2000_odd_seen(nic);
 
-        if (!netdev_bus_set_getodd(&nic->bus))
-        {
-            nic->diag_why = (UBYTE)ANXDIAG_WHY_ODD;
-            return FALSE;
-        }
+        /* The odd window, recorded whatever happens next.  A PCMCIA row that
+           reached here with none would be reading the ASIC reset at an odd
+           address in the even window, and nothing else in the report says
+           so. */
+        netdev_diag_note(ANXDIAG_ODDWIN, ci, (ULONG)(APTR)nic->bus.odd);
+        netdev_diag_note(ANXDIAG_ODD_PLAIN, ci, plain);
 
-        NE_TRACE("ne: trying cnet16 odd reads ", 0);
-        if (!ne2000_odd_reads(nic))
+        if (!ne2000_odd_reads_ok(plain))
         {
-            nic->bus.getodd = 0;
-            nic->diag_why   = (UBYTE)ANXDIAG_WHY_ODD;
-            return FALSE;
+            ULONG word;
+
+            netdev_diag_note(ANXDIAG_ODD_RETRY, ci, 1);
+
+            if (!netdev_bus_set_getodd(&nic->bus))
+            {
+                nic->diag_why = (UBYTE)ANXDIAG_WHY_ODD;
+                return FALSE;
+            }
+
+            NE_TRACE("ne: trying cnet16 odd reads ", 0);
+            word = ne2000_odd_seen(nic);
+            netdev_diag_note(ANXDIAG_ODD_WORD, ci, word);
+
+            if (!ne2000_odd_reads_ok(word))
+            {
+                /* Back to plain bytes.  Word reads are kept only where they
+                   demonstrably beat bytes, never as the state a failure is
+                   left in, so nothing downstream and no second probe inherits
+                   a mode this one did not earn. */
+                nic->bus.getodd = 0;
+
+                /* Which of the two questions failed.  Both modes answering the
+                   ISR read and neither round-tripping a write is a different
+                   card from one where nothing answered at all. */
+                nic->diag_why =
+                    (UBYTE)((ne2000_odd_isr_ok(plain) ||
+                             ne2000_odd_isr_ok(word))
+                                ? ANXDIAG_WHY_ODD_BNRY : ANXDIAG_WHY_ODD);
+                return FALSE;
+            }
+            NE_TRACE("ne: odd registers read as words ", 1);
         }
-        NE_TRACE("ne: odd registers read as words ", 1);
     }
 
     NIC_PUT(nic, ED_P0_CR, ED_CR_RD2 | ED_CR_PAGE_0 | ED_CR_STA);

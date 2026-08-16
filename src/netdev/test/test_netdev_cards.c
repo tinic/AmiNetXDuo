@@ -115,6 +115,24 @@ int main(void)
 
         snprintf(label, sizeof(label), "row %d has a name", i);
         expect_int(label, netdev_cards[i].name[0] != '\0', 1);
+
+        /* Gayle carries the odd 8-bit PCMCIA registers in a second window at
+           +$10000 and the even ones at $A20000, both at even addresses.  A
+           PCMCIA row without odd_off puts the NE2000 reset register at
+           $A2031F, an odd address in the even window, which is not a register
+           access on the hardware -- and Amiberry decodes it anyway, so no
+           emulated run would catch the row that lost it. */
+        if (netdev_cards[i].bus == NETDEV_BUS_PCMCIA)
+        {
+            snprintf(label, sizeof(label),
+                     "row %d (%s) has an odd-register window", i,
+                     netdev_cards[i].name);
+            expect_int(label, netdev_cards[i].odd_off != 0, 1);
+
+            snprintf(label, sizeof(label),
+                     "row %d (%s) is stride 1", i, netdev_cards[i].name);
+            expect_int(label, netdev_cards[i].stride == 1, 1);
+        }
     }
 
     if (failures != 0)

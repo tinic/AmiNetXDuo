@@ -253,6 +253,51 @@ static BOOL pc_chip_answers(const NetdevCard *card)
 }
 
 /*
+ * A card may be busy for a while after its COR is written: the write is what
+ * configures it.  Linux waits 40 ms before touching the card's I/O space; this
+ * used to read the command register on the next instruction, so a card that
+ * took any time to come up read as an empty slot.  Amiberry applies the COR
+ * inside the store, so the wait costs nothing there and is invisible.
+ *
+ * There is no timer at romtag-init time and a device may not Delay(), so the
+ * wait is a spin on attribute-memory reads.  Each is a real Gayle cycle at the
+ * socket's default speed, 250 ns at the fastest, so the count is a lower bound
+ * on the microseconds.  Attribute memory is the CIS and is safe to read
+ * whatever is in the slot.
+ */
+static VOID pc_settle(ULONG us)
+{
+    volatile UBYTE *attr = (volatile UBYTE *)0x00a00000UL;
+    ULONG           n    = us * 4u;
+
+    while (n-- != 0)
+        (VOID)*attr;
+}
+
+/* 20 rounds of 2 ms, which is Linux's 40 ms for the same wait. */
+#define PC_SETTLE_ROUNDS    20
+#define PC_SETTLE_US        2000
+
+static BOOL pc_chip_settles(const NetdevCard *card, UWORD *rounds)
+{
+    UWORD i;
+
+    for (i = 0; i < PC_SETTLE_ROUNDS; i++)
+    {
+        if (pc_chip_answers(card))
+        {
+            *rounds = i;
+            return TRUE;
+        }
+        pc_settle(PC_SETTLE_US);
+    }
+
+    *rounds = i;
+
+    return FALSE;
+}
+
+/*
  * THE CIS, KEPT FOR TWO THINGS NEITHER OF WHICH IS PROBING.
  *
  * A PCMCIA NE2000 clone whose address PROM is blank often still knows its own
@@ -484,11 +529,19 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
         netdev_diag_note(ANXDIAG_PC_OWN, ci, (ULONG)owner);
         if (owner != NULL)
         {
-            /* Somebody else has it, or nothing is in it.  Release anyway:
-               CARDF_IFAVAILABLE means the handle should not have been
-               enqueued, and a give-up path that leaves the resource holding a
-               pointer into our BSS is the whole of the defect above. */
-            pc_give_up(handle);
+            /*
+             * No ReleaseCard() here.  With CARDF_IFAVAILABLE a refused
+             * OwnCard() enqueues nothing -- card.resource jumps the Enqueue
+             * and returns the owner -- while ReleaseCard(CARDF_REMOVEHANDLE)
+             * calls exec Remove() on the handle whether or not it is in a
+             * list.  That unlinked a Node still zero from BSS and wrote
+             * through its NULL ln_Pred, over address 0 and address 4.  The
+             * machine that gets here is one whose slot another driver already
+             * owns, which is where a probing driver most has to be harmless.
+             * Clearing ln_Name is all that is owed: the resource is holding
+             * nothing of ours.
+             */
+            handle->cah_CardNode.ln_Name = NULL;
             return NULL;
         }
     }
@@ -594,6 +647,14 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
         cfg_base = 0;
         for (i = 0; i < nbytes && i < 4; i++)
             cfg_base |= ((ULONG)buf[4 + i]) << (8 * i);
+
+        /* Attribute memory is 128 KB here and TPCC_SZ may claim four address
+           bytes, so an unusual or damaged CIS can put the COR write past the
+           window and into the card's own I/O space at 0xA20000.  cnet.device
+           masks with $0001FFFF (cnetdevice.asm:4694); this is that mask, and
+           the value recorded below is the clamped one because it is the one
+           written. */
+        cfg_base &= 0x0001ffffUL;
     }
 
     /* CISTPL_CFTABLE_ENTRY's first byte holds the configuration index in its
@@ -668,10 +729,19 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
      * V39 interrupt bits, AFTER the COR write -- too late to help it, and on
      * a V37 or V38 card.resource the bits mean nothing at all.
      */
-    (VOID)pc_misc_control(handle, CARD_DISABLEF_WP | CARD_ENABLEF_DIGAUDIO);
-    pc_trace("pc: iomode ", (ULONG)(CARD_DISABLEF_WP | CARD_ENABLEF_DIGAUDIO));
-    netdev_diag_note(ANXDIAG_PC_IOMODE, ci,
-                     (ULONG)(CARD_DISABLEF_WP | CARD_ENABLEF_DIGAUDIO));
+    {
+        UBYTE got = pc_misc_control(handle,
+                                    CARD_DISABLEF_WP | CARD_ENABLEF_DIGAUDIO);
+
+        pc_trace("pc: iomode ", (ULONG)got);
+        netdev_diag_note(ANXDIAG_PC_IOMODE, ci,
+                         (ULONG)(CARD_DISABLEF_WP | CARD_ENABLEF_DIGAUDIO));
+        /* The autodoc: a bit cleared in the return is a bit this machine does
+           not support.  A socket that answers without CARD_DISABLEF_WP will
+           swallow the COR write with no error anywhere, and there is no other
+           way to find that out. */
+        netdev_diag_note(ANXDIAG_PC_MISC, ci, (ULONG)got);
+    }
 
     /*
      * Write the COR, and check the card answered.
@@ -696,65 +766,77 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
      * floats the bus and reads 0xff; a DP8390 in any state has bits clear in
      * CR, which is what pc_chip_answers() is deciding.
      */
-    attr = (volatile UBYTE *)(ULONG)(0x00a00000UL + cfg_base + PC_COR_OFF);
-    *attr = (UBYTE)(index | PC_COR_LEVEL_IRQ);
-    pc_trace("pc: cor ", (ULONG)(APTR)attr);
-    netdev_diag_note(ANXDIAG_PC_COR, ci, (ULONG)(APTR)attr);
-
-    if (!pc_chip_answers(card))
     {
-        netdev_diag_note(ANXDIAG_PC_CR, ci, (ULONG)pc_last_cr);
+        UBYTE cor    = (UBYTE)(index | PC_COR_LEVEL_IRQ);
+        UWORD rounds = 0;
 
-        attr = (volatile UBYTE *)(ULONG)(0x00a00000UL +
-                                         (cfg_base + PC_COR_OFF) *
-                                         PC_ATTR_STRIDE);
-        *attr = (UBYTE)(index | PC_COR_LEVEL_IRQ);
-        pc_trace("pc: cor doubled ", (ULONG)(APTR)attr);
-        netdev_diag_note(ANXDIAG_PC_COR2, ci, (ULONG)(APTR)attr);
+        attr = (volatile UBYTE *)(ULONG)(0x00a00000UL + cfg_base + PC_COR_OFF);
+        *attr = cor;
+        pc_trace("pc: cor ", (ULONG)(APTR)attr);
+        netdev_diag_note(ANXDIAG_PC_COR, ci, (ULONG)(APTR)attr);
+        netdev_diag_note(ANXDIAG_PC_CORVAL, ci, (ULONG)cor);
 
-        if (!pc_chip_answers(card))
+        if (!pc_chip_settles(card, &rounds))
         {
-            pc_trace("pc: chip silent ", 0);
+            netdev_diag_note(ANXDIAG_PC_CR, ci, (ULONG)pc_last_cr);
+            netdev_diag_note(ANXDIAG_PC_SETTLE, ci, (ULONG)rounds);
+
+            attr = (volatile UBYTE *)(ULONG)
+                       (0x00a00000UL +
+                        (((cfg_base + PC_COR_OFF) * PC_ATTR_STRIDE) &
+                         0x0001ffffUL));
+            *attr = cor;
+            pc_trace("pc: cor doubled ", (ULONG)(APTR)attr);
+            netdev_diag_note(ANXDIAG_PC_COR2, ci, (ULONG)(APTR)attr);
+
+            if (!pc_chip_settles(card, &rounds))
+            {
+                pc_trace("pc: chip silent ", 0);
+                netdev_diag_note(ANXDIAG_PC_CR2, ci, (ULONG)pc_last_cr);
+                netdev_diag_note(ANXDIAG_PC_SETTLE, ci, (ULONG)rounds);
+                netdev_diag_note(ANXDIAG_PC_SILENT, ci,
+                                 (ULONG)(card->base + card->reg_off));
+                pc_give_up(handle);
+                return NULL;
+            }
             netdev_diag_note(ANXDIAG_PC_CR2, ci, (ULONG)pc_last_cr);
-            netdev_diag_note(ANXDIAG_PC_SILENT, ci,
-                             (ULONG)(card->base + card->reg_off));
-            pc_give_up(handle);
-            return NULL;
+            netdev_diag_note(ANXDIAG_PC_SETTLE, ci, (ULONG)rounds);
         }
-        netdev_diag_note(ANXDIAG_PC_CR2, ci, (ULONG)pc_last_cr);
-    }
-    else
-    {
-        netdev_diag_note(ANXDIAG_PC_CR, ci, (ULONG)pc_last_cr);
+        else
+        {
+            netdev_diag_note(ANXDIAG_PC_CR, ci, (ULONG)pc_last_cr);
+            netdev_diag_note(ANXDIAG_PC_SETTLE, ci, (ULONG)rounds);
+        }
     }
 
     /*
-     * The card's interrupt reaches INT2 through Gayle, and Gayle will not
-     * pass it until the status change is enabled.  card.resource owns that
-     * register, so this goes through CardMiscControl() rather than a poke.
+     * The card's interrupt is left at card.resource's default, and there is no
+     * second CardMiscControl() call.
      *
-     * THE CARD_INTF_* BITS ARE V39 AND LATER ONLY.  resources/card.h says so
-     * in capitals: "Only set these bits for V39 card.resource or greater
-     * (check resource base VERSION)".  A V37 or V38 resource -- which is what
-     * an unpatched A600 and most A1200s have, Kickstart 3.0 never shipped V39
-     * card.resource -- has no meaning for bit 7 or bit 2 of this argument and
-     * is entitled to do anything at all with them.  The defaults there
-     * already have BSY/IRQ enabled, so the call is not needed on those
-     * machines; it is skipped rather than guessed at.
+     * There used to be one on V39 and later, carrying
+     * CARD_INTF_SETCLR|CARD_INTF_IRQ to enable the BSY/IRQ status change.
+     * CardMiscControl() masks its argument with WR|DIGAUDIO ($0a) and then
+     * writes the result to the Gayle status register outright -- it is not a
+     * set/clear for those two bits, and the autodoc says so: "Finally to
+     * reenable write protect, call this function with a mask value of 0."
+     * CARD_INTF_SETCLR|CARD_INTF_IRQ is $84, and $84 & $0a is 0, so the call
+     * wrote zero over the I/O-mode call above it.  The socket left I/O mode
+     * and write protection came back on with the card configured and
+     * answering, one step before the chip core read its first register.
+     *
+     * It also bought nothing.  OwnCard() calls ResetGayleRegs(), which ORs
+     * GAYLEF_INT_BVD1|GAYLEF_INT_WR|GAYLEF_INT_BSYIRQ into gayleint, so
+     * BSY/IRQ is already on when the slot arrives, on V37 and V39 alike.
+     * cnet.device calls CardMiscControl() once, with the I/O-mode bits, and
+     * never again (cnetdevice.asm:4713-4715).
+     *
+     * Amiberry runs the same Kickstart code and its PCMCIA decode does not
+     * consult the write-protect or digital-audio bits, so none of this shows
+     * there.
      */
-    if (CardResource->lib_Version >= 39)
-    {
-        (VOID)pc_misc_control(handle, CARD_INTF_SETCLR | CARD_INTF_IRQ);
-        pc_trace("pc: irqmode ", (ULONG)CardResource->lib_Version);
-        netdev_diag_note(ANXDIAG_PC_IRQMODE, ci,
-                         (ULONG)CardResource->lib_Version);
-    }
-    else
-    {
-        pc_trace("pc: irqmode skipped v ", (ULONG)CardResource->lib_Version);
-        netdev_diag_note(ANXDIAG_PC_IRQSKIP, ci,
-                         (ULONG)CardResource->lib_Version);
-    }
+    pc_trace("pc: irq at resource default v ", (ULONG)CardResource->lib_Version);
+    netdev_diag_note(ANXDIAG_PC_IRQSKIP, ci,
+                     (ULONG)CardResource->lib_Version);
 
     pc_trace("pc: claimed ", (ULONG)card->base);
     netdev_diag_note(ANXDIAG_PC_CLAIMED, ci,
@@ -771,10 +853,13 @@ VOID netdev_pcmcia_release(VOID)
 
     pc_unit = NULL;
 
+    /* No CardMiscControl() on the way out either: ReleaseCard() calls
+       ResetGayleRegs() itself once the slot is free, which puts the status,
+       change, control and interrupt registers back to their defaults.  The
+       call that was here passed CARD_INTF_IRQ alone, which the resource masks
+       to zero and writes to the status register -- the same clobber as the
+       one on the claim path, one instruction before the release that would
+       have done it properly. */
     if (CardResource != NULL && handle->cah_CardNode.ln_Name != NULL)
-    {
-        if (CardResource->lib_Version >= 39)
-            (VOID)pc_misc_control(handle, CARD_INTF_IRQ);   /* SETCLR clear */
         pc_give_up(handle);
-    }
 }

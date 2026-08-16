@@ -130,6 +130,10 @@ static const char *cnd_why(ULONG why)
         return "the odd-numbered registers could not be read, as bytes or as "
                "words.  A chip is answering at the even addresses and not at "
                "the odd ones";
+    case ANXDIAG_WHY_ODD_BNRY:
+        return "the odd-numbered registers answered a read but would not hold "
+               "a value written to them, as bytes or as words.  Half the "
+               "register file is decoding and half is not";
     case ANXDIAG_WHY_BUFFER:
         return "the chip's 16 KB packet buffer did not read back what was "
                "written to it, so the data port or the buffer RAM is wrong";
@@ -283,6 +287,25 @@ static VOID cnd_step(const AnxDiagStep *st)
         say("  Odd-numbered registers would not read as bytes, so the\n"
             "  word-read path some Fast-Ethernet clones need was tried.\n");
         return;
+    case ANXDIAG_ODD_PLAIN:
+    case ANXDIAG_ODD_WORD:
+        say("  Odd registers read as %s: ISR $%02lx, and $5a/$a5 written to\n"
+            "  BNRY came back $%02lx/$%02lx.  ISR should have bit 7 set after\n"
+            "  a reset and BNRY should return what was written.\n",
+            (LONG)((st->ds_Code == (UWORD)ANXDIAG_ODD_PLAIN)
+                       ? "bytes" : "words"),
+            (v >> 16) & 0xffUL, (v >> 8) & 0xffUL, v & 0xffUL);
+        return;
+    case ANXDIAG_ODDWIN:
+        if (v == 0)
+        {
+            say("  This card's registers are one contiguous block; it has no\n"
+                "  separate window for the odd-numbered ones.\n");
+            return;
+        }
+        say("  Odd-numbered registers are reached through a second window at\n"
+            "  $%08lx, which is how Gayle splits PCMCIA I/O.\n", v);
+        return;
     case ANXDIAG_CHIP:
         cnd_chip_seen = (UWORD)v;
         say("  The chip is %s.\n", (LONG)cnd_chip(v));
@@ -338,9 +361,13 @@ static VOID cnd_step(const AnxDiagStep *st)
             say("  OwnCard() gave us the slot.\n");
             return;
         }
-        say("  OwnCard() refused: the slot is empty, or another driver\n"
-            "  already owns it (owner $%08lx).  Nothing further was tried.\n",
-            v);
+        if (v == 0xffffffffUL)
+        {
+            say("  OwnCard() answered -1: there is nothing in the slot.\n");
+            return;
+        }
+        say("  OwnCard() refused: another driver already owns the slot, and\n"
+            "  its CardHandle is at $%08lx.  Nothing further was tried.\n", v);
         return;
     case ANXDIAG_PC_FUNCID:
         if (v == ANXDIAG_ABSENT)
@@ -416,8 +443,34 @@ static VOID cnd_step(const AnxDiagStep *st)
         say("  The socket was put into I/O mode (CardMiscControl $%02lx).\n",
             v);
         return;
+    case ANXDIAG_PC_MISC:
+        if ((v & 0x0aUL) == 0x0aUL)
+        {
+            say("  card.resource answered $%02lx: the socket took both bits,\n"
+                "  so it is in I/O mode with hardware write protect off.\n", v);
+            return;
+        }
+        say("  card.resource answered $%02lx, and a bit missing from that is\n"
+            "  a bit this machine does not support.  Without $08 the socket\n"
+            "  is still write-protected and it will swallow the write below\n"
+            "  with no error; without $02 it is still a memory socket.\n", v);
+        return;
     case ANXDIAG_PC_COR:
         say("  The configuration option register was written at $%08lx.\n", v);
+        return;
+    case ANXDIAG_PC_CORVAL:
+        say("  The byte written there was $%02lx: configuration index %lu\n"
+            "  with the level-mode interrupt bit ($40) set.\n",
+            v, v & 0x3fUL);
+        return;
+    case ANXDIAG_PC_SETTLE:
+        if (v == 0)
+        {
+            say("  The chip answered immediately after that write.\n");
+            return;
+        }
+        say("  The card was given %lu round(s) of 2 ms after that write\n"
+            "  before it answered, or before the wait ran out.\n", v);
         return;
     case ANXDIAG_PC_CR:
         if (v == 0xffUL)
@@ -451,18 +504,23 @@ static VOID cnd_step(const AnxDiagStep *st)
             v);
         return;
     case ANXDIAG_PC_SILENT:
-        say("  NO CHIP ANSWERED at $%08lx after either write, so the slot\n"
-            "  was given back.  Either the card is not an NE2000 clone, or\n"
-            "  it wants a configuration entry other than the first one.\n", v);
+        say("  No chip answered at $%08lx after either write, with 40 ms of\n"
+            "  settling time allowed for each, so the slot was given back.\n"
+            "  Either the card is not an NE2000 clone, or it wants a\n"
+            "  configuration entry other than the first, or the socket never\n"
+            "  came out of memory mode -- the card.resource answer above\n"
+            "  says which of those it is.\n", v);
         return;
     case ANXDIAG_PC_IRQMODE:
         say("  The card's interrupt was enabled through card.resource V%lu.\n",
             v);
         return;
     case ANXDIAG_PC_IRQSKIP:
-        say("  card.resource is V%lu, older than V39, so the interrupt-mode\n"
-            "  bits mean nothing there and were not written.  Its defaults\n"
-            "  already pass the card's interrupt.\n", v);
+        say("  card.resource is V%lu.  The card's interrupt is left at the\n"
+            "  resource's own default, which already passes it: OwnCard()\n"
+            "  enables BSY/IRQ on every version.  Asking for it again would\n"
+            "  rewrite the socket's mode register and turn the socket off.\n",
+            v);
         return;
     case ANXDIAG_PC_CLAIMED:
         say("  The slot is claimed.  The chip's registers are at $%08lx.\n", v);
