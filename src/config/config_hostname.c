@@ -1,9 +1,9 @@
 /*
  * AmiNetXDuo, picking this machine's name out of the places that offer one.
  *
- * Four sources, ranked by AmiHostnameSource (aminetxduo/config.h). Everything
- * here is pure: the callers read the files and hand the text over, so the host
- * test drives the same chain the Amiga does.
+ * Four sources, ranked by AmiHostnameSource (aminetxduo/config.h). Nothing
+ * here does file access: the callers read the files and hand the text over, so
+ * the host test drives the same chain the Amiga does.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -50,7 +50,7 @@ BOOL ami_config_hostname_valid(const char *name)
     if (name == NULL || name[0] == '\0')
         return FALSE;
 
-    /* A name that does not fit is not a name we could store. */
+    /* A name that does not fit cannot be stored. */
     if (ami_cfg_strlen(name) >= (ULONG)AMI_CFG_NAME_LEN)
         return FALSE;
 
@@ -72,25 +72,23 @@ BOOL ami_config_hostname_valid(const char *name)
 }
 
 /*
- * The name a machine nobody named answers to.
+ * The default name of a machine that has none.
  *
- * "amiga" alone was it, so every unconfigured machine on a segment claimed
- * amiga.local and the loser of the probe took the winner's name off the air.
- * The last three octets of the hardware address are the part a card maker
- * varies, so "amiga-490007" for 00:80:10:49:00:07: it is a valid RFC 1123
- * label, it is the same on every boot of the same card, and it stays short
- * enough to type. Lower case because mDNS compares without case (RFC 6762 16)
- * and a name that reads back differently from how it was claimed invites the
- * question of which one is real.
+ * "amiga" alone was the old default, so every unconfigured machine on a
+ * segment claimed amiga.local and the loser of the probe lost its name. The
+ * last three octets of the hardware address are the part a card maker varies,
+ * so 00:80:10:49:00:07 gives "amiga-490007": a valid RFC 1123 label, the same
+ * on every boot of the same card, and short enough to type. Lower case because
+ * mDNS compares without case (RFC 6762 16).
  *
  * Three octets, not six: the first three are the OUI, identical across every
- * card of one make, so they cost nine characters and separate nothing on the
- * lab bench where this collides. Two cards of different makes can still share
- * a tail; RFC 6762 9 probing is what settles that, here and before.
+ * card of one make, so they cost nine characters and separate nothing. Two
+ * cards of different makes can still share a tail, which RFC 6762 9 probing
+ * settles.
  *
  * FALSE when there is no address to derive from, which leaves the caller its
- * old fallback rather than inventing a suffix; a name that moves between
- * boots is worse than one that collides.
+ * old fallback. A name that moves between boots is worse than one that
+ * collides.
  */
 BOOL ami_config_hostname_from_hwaddr(const UBYTE *hw, ULONG hwlen,
                                      char *out, ULONG size)
@@ -188,10 +186,9 @@ VOID ami_cfg_hostname_from_files(AmiConfig *cfg, char *env_text)
         return;
 
     /*
-     * Weakest first, so the offer's rank check does the deciding. Interfaces
-     * are in name order, so the first usable ID= is the same one on every
-     * boot; an ID that is not a host name is refused and the next source
-     * answers instead.
+     * Weakest first, so the rank check in the offer decides. Interfaces are in
+     * name order, so the first usable ID= is the same one on every boot. An ID
+     * that is not a host name is refused, and the next source answers instead.
      */
     for (i = 0; i < cfg->interface_count; i++)
     {

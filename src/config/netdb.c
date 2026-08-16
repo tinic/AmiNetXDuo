@@ -15,7 +15,7 @@
  * line always starts with a dotted-quad address and "HOST" is not one. Where
  * the two formats disagree the standard /etc shape wins. AmiTCP's
  * NAMESERVER/DOMAIN lines in the same file are not netdb entries and are
- * skipped here; ami_config_load() feeds them to the resolver instead.
+ * skipped here. ami_config_load() feeds them to the resolver instead.
  *
  * Each file is read once into one buffer and tokenised in place, so an entry's
  * strings point straight into that buffer, three allocations per table, not
@@ -94,17 +94,17 @@ static const char ami_netdb_builtin_services[] =
  * saves parsing the file twice.
  *
  * It is only an estimate, so netdb_parse() below bounds every write against
- * what was actually allocated. This counts a run of non-space characters as
- * one token where ami_cfg_tokenize() does not: scan_item() in config_text.c
- * returns an empty, non-NULL token for every `""` pair, so the single
- * 64-character run `""""..""` is one token here and thirty-two there. The line
+ * what was allocated. This counts a run of non-space characters as one token
+ * where ami_cfg_tokenize() does not. scan_item() in config_text.c returns an
+ * empty, non-NULL token for every `""` pair, so the 64-character run
+ * `""""..""` is one token here and thirty-two there. The line
  *
  *     1.2.3.4 host """"""""""""""""""""""""""""""""
  *
- * in DEVS:Internet/hosts therefore wrote twenty-nine pointers past the end of
- * alias_pool, and repeating it scattered the file's whole size in stray
- * pointers over the heap, silently, on a machine with no MMU. Found by the
- * host sanitizer fuzz driver.
+ * in DEVS:Internet/hosts wrote twenty-nine pointers past the end of
+ * alias_pool. Repeating it scattered the file's whole size in stray pointers
+ * over the heap, silently, on a machine with no MMU. Found by the host
+ * sanitizer fuzz driver.
  */
 static VOID netdb_measure(const char *buf, ULONG *lines, ULONG *tokens)
 {
@@ -194,9 +194,9 @@ static BOOL netdb_parse(NetdbTable *table, NetdbKind kind, char *buf)
         ULONG          first_alias;
         AmiNetdbEntry *entry;
 
-        /* '#' may start a comment anywhere on the line; ';' is not a comment
-         * character in /etc-format files (it can legitimately appear in a
-         * name), so it is left alone. */
+        /* '#' can start a comment anywhere on the line. ';' is not a comment
+         * character in /etc-format files (it can appear in a name), so it is
+         * left alone. */
         ami_cfg_strip_comment(line, "#");
         line = ami_cfg_trim(line);
         if (*line == '\0')
@@ -362,9 +362,9 @@ VOID ami_netdb_free(VOID)
 }
 
 /*
- * Lookups load on demand. bsdsocket.library should still call
- * ami_netdb_load() from its init path: the load is not re-entrant, and doing
- * it once up front keeps every later lookup read-only and lock-free.
+ * Lookups load on demand. bsdsocket.library must still call ami_netdb_load()
+ * from its init path. The load is not re-entrant, and one load up front keeps
+ * every later lookup read-only and lock-free.
  */
 static const NetdbTable *netdb_table(NetdbKind kind)
 {

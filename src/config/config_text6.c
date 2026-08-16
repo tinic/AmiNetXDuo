@@ -1,20 +1,18 @@
 /*
  * AmiNetXDuo, IPv6 addresses to and from text.
  *
- * Compiled whether the tree has AMINETXDUO_IPV6 or not, and in its own file
- * rather than config_text.c.  Both halves are deliberate.
+ * Compiled whether the tree has AMINETXDUO_IPV6 or not. The Shell commands are
+ * one binary for a library built either way, so a command handed "::1" on an
+ * IPv4-only machine still has to tell a valid address from a typo. It used to
+ * ask the library's inet_pton(), which answers EAFNOSUPPORT there. `arp ::1`
+ * then called a good address "not an address", and `nslookup ::1` asked the
+ * DNS for a name spelt like one.
  *
- * Unconditional: the Shell commands are one binary for a library built either
- * way, so a command handed "::1" on an IPv4-only machine still has to tell a
- * valid address from a typo.  It used to ask the library's inet_pton(), which
- * answers EAFNOSUPPORT there, `arp ::1` called a good address "not an
- * address" and `nslookup ::1` asked the DNS for a name spelt like one.
- *
- * Its own file: a pulled archive member is kept whole and the library link
- * does not collect sections, so in config_text.c these two came in with
- * ami_cfg_trim() and cost a floor build 3.4 KB (netstack_test .text 162,936
- * -> 166,316).  Here nothing in an IPv4-only library refers to them and the
- * member is never pulled.
+ * In its own file rather than config_text.c: a pulled archive member is kept
+ * whole and the library link does not collect sections, so in config_text.c
+ * these two came in with ami_cfg_trim() and cost a floor build 3.4 KB
+ * (netstack_test .text 162,936 -> 166,316). Here nothing in an IPv4-only
+ * library refers to them and the member is never pulled.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -27,13 +25,13 @@
  * a BSD inet_pton(), because the two callers want slightly different dialects
  * (see include/aminetxduo/config.h) and this file uses no libc.
  *
- * The awkward parts of the format:
+ * Three parts of the format need care:
  *
- *   - "::" stands for one or more groups of zeroes and may appear at most
+ *   - "::" stands for one or more groups of zeroes and can appear at most
  *     once.  Groups are collected into a flat array as they are read, the
  *     position of "::" is remembered, and the array is shifted right at the
- *     end.  This is smaller than placing them as they arrive and makes "::" at
- *     either end fall out for free.
+ *     end.  This is smaller than placing them as they arrive, and "::" at
+ *     either end then needs no special case.
  *   - a trailing dotted quad ("::ffff:192.168.1.1") occupies the last two
  *     groups.  Legal only in the last position, and only with four octets.
  *   - a group is one to four hex digits.  Five is an error, not a truncation.
@@ -168,9 +166,9 @@ static BOOL ami_cfg_parse_ip6_inner(const char *text,
 
     /*
      * RFC 4007 11: "<address>%<zone_id>", before any prefix. A caller that
-     * cannot carry a zone refuses one rather than dropping it, a link-local
-     * address whose zone was silently discarded names a different destination,
-     * and would be sent on whichever interface the stack guessed.
+     * cannot carry a zone refuses one rather than dropping it. A link-local
+     * address whose zone was discarded names a different destination, and goes
+     * out on whichever interface the stack picks.
      *
      * The zone is handed back as text, not resolved: this file is the
      * standalone text layer and has no library base to call if_nametoindex()
@@ -188,7 +186,7 @@ static BOOL ami_cfg_parse_ip6_inner(const char *text,
         while (*s != '\0' && *s != '/' && *s != ' ' && *s != '\t')
         {
             if (n + 1 >= zone_len)
-                return FALSE;       /* truncation would name another zone */
+                return FALSE;       /* a truncated zone names another one */
             zone_out[n++] = *s++;
         }
 
@@ -366,11 +364,11 @@ VOID ami_config_format_ip6(const ULONG addr[AMI_CFG_IP6_WORDS],
         best_at = -1;
 
     /*
-     * The colon bookkeeping follows the BSD/glibc inet_ntop6 shape: one colon
-     * is emitted where the elided run starts, the separator in front of the
-     * group that follows the run supplies the second, and a run that reaches
-     * the end of the address gets its second colon added afterwards. That
-     * handles "::", "::1", "1::" and "fe80::1" with no special cases.
+     * The colon bookkeeping follows the BSD/glibc inet_ntop6 shape. One colon
+     * is emitted where the elided run starts. The separator in front of the
+     * next group supplies the second. A run that reaches the end of the
+     * address gets its second colon afterwards. That handles "::", "::1",
+     * "1::" and "fe80::1" with no special cases.
      */
     for (i = 0; i < 8; i++)
     {
@@ -423,7 +421,7 @@ VOID ami_config_format_ip6(const ULONG addr[AMI_CFG_IP6_WORDS],
         }
     }
 
-    /* A run that ran to the end of the address still owes its second colon. */
+    /* A run that reached the end of the address still needs its second colon. */
     if (best_at >= 0 && (ULONG)best_at + best_len == 8)
         tmp[pos++] = ':';
 

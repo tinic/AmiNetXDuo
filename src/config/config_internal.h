@@ -1,11 +1,10 @@
 /*
  * AmiNetXDuo, internal helpers for the configuration/netdb parsers.
  *
- * Split so that the text handling (config_text.c), the file-format parsers
- * (config_parse.c) and the netdb store (netdb.c) make no dos.library calls:
- * every byte they see arrives through the ami_cfg_read_file() hook implemented
- * in config_file.c. The host test (test/test_config.c) exercises the same code
- * with a stdio-backed hook.
+ * The text handling (config_text.c), the file-format parsers (config_parse.c)
+ * and the netdb store (netdb.c) make no dos.library calls. Every byte they see
+ * arrives through the ami_cfg_read_file() hook in config_file.c. The host test
+ * (test/test_config.c) drives the same code with a stdio-backed hook.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -33,42 +32,39 @@ extern "C" {
 #define AMI_CFG_FILE_SERVICES       AMI_CFG_DIR_INTERNET "/services"
 
 /*
- * The TCP: device's own switch. Its own file for the same reason
- * default_gateway has one: this layer keeps a global setting in a file named
- * after it, and the alternative was a keyword in name_resolution, which is
- * about DNS and would hide it.
+ * The TCP: device's own switch. A global setting gets a file named after it,
+ * as default_gateway does. A keyword in name_resolution hides it, because that
+ * file is about DNS.
  */
 #define AMI_CFG_FILE_TCPHANDLER     AMI_CFG_DIR_INTERNET "/tcp_handler"
 
 /*
- * DNS-SD advertisements, and NOT "/services": that name is the netdb file
- * above, the /etc/services equivalent that maps a name to a port number for
- * getservbyname(). The two would be confused by every reader and by anyone
- * migrating a real /etc tree, so this one is named after what it does,
- * service discovery, in the same two-word-underscore style as
- * name_resolution and default_gateway.
+ * DNS-SD advertisements. Not "/services": that name is the netdb file above,
+ * the /etc/services equivalent that maps a name to a port number for
+ * getservbyname(). This file is named after what it does, in the same
+ * two-word-underscore style as name_resolution and default_gateway.
  */
 #define AMI_CFG_FILE_DNSSD          AMI_CFG_DIR_INTERNET "/service_discovery"
 
 /*
- * Roadshow truncates the interface name (the config file's name) to 15
- * characters and ShowNetStatus displays that truncated form, so match it
- * rather than the 63 characters AMI_CFG_NAME_LEN would allow.
+ * Roadshow truncates the interface name (the configuration file name) to 15
+ * characters and ShowNetStatus shows that form. Match it, not the 63
+ * characters of AMI_CFG_NAME_LEN.
  */
 #define AMI_CFG_IFNAME_MAX          15
 
-/* A config file larger than this is assumed to be garbage. */
+/* A configuration file larger than this is taken as garbage. */
 #define AMI_CFG_FILE_MAX            (256UL * 1024UL)
 
 /* ------------------------------------------------------------- file access */
 
 /*
  * Read a whole file into an ami_alloc()ed, NUL-terminated buffer. Returns NULL
- * if the file does not exist (which is never an error here) or on failure;
+ * if the file does not exist (which is never an error here) or on failure.
  * *size_out, when non-NULL, receives the byte count excluding the NUL.
  * The caller frees with ami_free().
  *
- * config_file.c has the dos.library implementation; the host test replaces it.
+ * config_file.c has the dos.library implementation. The host test replaces it.
  */
 APTR ami_cfg_read_file(const char *path, ULONG *size_out);
 
@@ -76,16 +72,16 @@ APTR ami_cfg_read_file(const char *path, ULONG *size_out);
 
 /*
  * Name the file that subsequent ami_cfg_problem() calls are about. The
- * configuration is loaded one file at a time on one task, so a single current
- * file is enough and the parsers' signatures stay unchanged. Passing NULL
- * restores "the configuration".
+ * configuration is loaded one file at a time on one task, so one current file
+ * is enough and the parser signatures stay unchanged. NULL restores
+ * "the configuration".
  */
 VOID ami_cfg_problem_file(const char *path);
 
 /*
  * Hand one problem to whatever reporter is installed (usually none). `text`
- * says what is wrong, `hint`, which may be NULL, says what to do about it.
- * Both are copied nowhere: they may point at the caller's stack.
+ * says what is wrong, `hint`, which can be NULL, says what to do about it.
+ * Neither is copied: both can point at the caller's stack.
  */
 VOID ami_cfg_problem(ULONG line, UWORD severity, const char *text,
                      const char *hint);
@@ -94,7 +90,7 @@ VOID ami_cfg_problem(ULONG line, UWORD severity, const char *text,
 BOOL ami_cfg_problems_wanted(VOID);
 
 /*
- * Build "<a><b><c>" (any of which may be NULL) into dst, for the one-off
+ * Build "<a><b><c>" (any of which can be NULL) into dst, for the one-off
  * message strings the parsers assemble. There is no sprintf() here.
  */
 VOID ami_cfg_join3(char *dst, ULONG dstlen, const char *a, const char *b,
@@ -105,7 +101,7 @@ VOID ami_cfg_join3(char *dst, ULONG dstlen, const char *a, const char *b,
 /*
  * Pull the next line out of *cursor, NUL-terminating it in place. Handles LF,
  * CRLF and bare CR. Returns NULL once the buffer is exhausted. Blank lines are
- * returned as empty strings, callers skip them.
+ * returned as empty strings, which callers skip.
  */
 char *ami_cfg_next_line(char **cursor);
 
@@ -114,7 +110,8 @@ char *ami_cfg_trim(char *s);
 
 /*
  * Truncate at the first unquoted comment character. `chars` lists the comment
- * introducers, e.g. "#;" or "#". Characters inside "double quotes" are exempt.
+ * introducers, for example "#;" or "#". Characters inside "double quotes" are
+ * exempt.
  */
 VOID ami_cfg_strip_comment(char *s, const char *chars);
 
@@ -133,7 +130,7 @@ ULONG ami_cfg_tokenize(char *line, char **tokens, ULONG max);
 /*
  * Pull the next `KEY=value` or `KEY value` pair off *cursor (which points into
  * a mutable line). Returns FALSE when the line is exhausted. Both outputs are
- * NUL-terminated in place; *value points at "" for a valueless keyword.
+ * NUL-terminated in place. *value points at "" for a valueless keyword.
  */
 BOOL ami_cfg_next_pair(char **cursor, char **key, char **value);
 
@@ -179,16 +176,16 @@ VOID ami_cfg_parse_resolver(char *buf, AmiResolverConfig *out,
  * *count. `buf` is modified in place, but every accepted field is copied into
  * the caller's array, so the buffer can be freed straight after.
  *
- * There is no allocation and no sizing pass: one bounded array, and *count is
- * checked against max before every write.
+ * There is no allocation and no sizing pass. *count is checked against max
+ * before every write.
  */
 VOID ami_cfg_parse_dnssd(char *buf, AmiSdService *out, UWORD max, UWORD *count);
 
 /*
  * The part of the host-name chain that runs on files already read: an
- * interface file's ID=, then the first line of ENV:HOSTNAME (which may be
+ * interface file's ID=, then the first line of ENV:HOSTNAME (which can be
  * NULL, and is modified in place). DEVS:Internet/name_resolution has already
- * had its turn and DHCP option 12 gets one later; both go through
+ * had its turn and DHCP option 12 gets one later. Both go through
  * ami_config_hostname_offer(), which enforces the ranking.
  */
 VOID ami_cfg_hostname_from_files(AmiConfig *cfg, char *env_text);
@@ -202,7 +199,7 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out);
 
 /*
  * Parse DEVS:Internet/tcp_handler. TCPHANDLER=ON/OFF, or the bare word on a
- * line of its own. *out is written only when the file says something; an empty
+ * line of its own. *out is written only when the file says something. An empty
  * or unreadable file leaves the caller's default alone.
  */
 VOID ami_cfg_parse_tcp_handler(char *buf, BOOL *out);
